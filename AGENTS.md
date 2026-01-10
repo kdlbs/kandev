@@ -1,725 +1,519 @@
-# Kandev Agents Guide
+# Kandev Agent Protocol
 
-> ⚠️ **IMPORTANT**: API documentation must be updated whenever the API changes.
-> When modifying any endpoint, request/response types, or ACP messages, update:
-> - This document (AGENTS.md)
-> - The OpenAPI spec (docs/openapi.yaml)
-
-📖 **Full API Reference**: See [docs/openapi.yaml](docs/openapi.yaml) for the complete OpenAPI 3.0 specification.
-You can view it with Swagger UI, Redoc, or import it into Postman.
+> **For Agent Developers**: This document explains how to build agents that integrate with Kandev using the Agent Communication Protocol (ACP).
+>
+> **For System Architecture**: See [ARCHITECTURE.md](ARCHITECTURE.md)
+> **For REST API**: See [docs/openapi.yaml](docs/openapi.yaml)
 
 ## Overview
 
-Kandev uses Docker containers to run AI agents that execute tasks from the Kanban board. Agents communicate with the backend using the **Agent Communication Protocol (ACP)**, a JSON-based streaming protocol.
-
-## Architecture
+Kandev agents run in Docker containers and communicate via **ACP (Agent Communication Protocol)** - a JSON-RPC 2.0 protocol over stdin/stdout. This enables bidirectional communication for task execution with real-time progress updates.
 
 ```
-┌─────────────────┐     ┌──────────────────┐     ┌─────────────────────────────────┐
-│   HTTP Client   │────▶│  Kandev Backend  │────▶│      Docker Container           │
-│  (Frontend/CLI) │     │   (Port 8080)    │     │  ┌─────────────────────────┐    │
-└─────────────────┘     └────────┬─────────┘     │  │  auggie --acp           │    │
-                                 │               │  │  (ACP Mode)             │    │
-                                 │◀─────────────▶│  └─────────────────────────┘    │
-                                 │   JSON-RPC    │                                 │
-                                 │  stdin/stdout └─────────────────────────────────┘
-                                 │
-                        ┌──────────────────┐
-                        │   Event Bus      │
-                        │ (In-Memory)      │
-                        └──────────────────┘
+Backend                          Agent Container
+  │                                    │
+  │  initialize                        │
+  ├──────────────────────────────────► │
+  │◄──────────────────────────────────┤
+  │  session/prompt                    │
+  ├──────────────────────────────────► │
+  │  session/update (progress)         │
+  │◄──────────────────────────────────┤
+  │  session/update (complete)         │
+  │◄──────────────────────────────────┤
 ```
-
-**Bidirectional Communication:**
-- Backend → Agent: `session/prompt`, `session/cancel`
-- Agent → Backend: `session/update` notifications
-
-## Available Agent Types
-
-### Augment Agent (`augment-agent`)
-
-The primary AI coding agent powered by Auggie CLI.
-
-| Property | Value |
-|----------|-------|
-| Image | `kandev/augment-agent:latest` |
-| Working Directory | `/workspace` |
-| Memory Limit | 4096 MB |
-| CPU Cores | 2.0 |
-| Timeout | 1 hour |
-| Capabilities | code_generation, code_review, refactoring, testing, shell_execution |
-
-**Required Environment Variables:**
-- `AUGMENT_SESSION_AUTH` - Augment CLI session authentication (from `~/.augment/session.json`)
-- `TASK_DESCRIPTION` - The task for the agent to execute
-
-**Optional Environment Variables:**
-- `AUGGIE_SESSION_ID` - Resume a previous session (for follow-up tasks)
-
-**Mounted Volumes:**
-- `{workspace}` → `/workspace` - The project directory
-- `{augment_sessions}` → `/root/.augment/sessions` - Session persistence
 
 ---
 
 ## Agent Communication Protocol (ACP)
 
-Kandev uses **ACP (Agent Client Protocol)** for bidirectional communication with agents. ACP is based on JSON-RPC 2.0 over stdin/stdout.
+### Protocol Basics
 
-### ACP Mode
+- **Transport**: JSON-RPC 2.0 over stdin/stdout
+- **Format**: Newline-delimited JSON
+- **Direction**: Bidirectional (request/response + notifications)
 
-Agents run in ACP mode using `auggie --acp`. This enables:
-- **Bidirectional communication**: Send prompts and receive updates
-- **Session management**: Create, load, and resume sessions
-- **Cancellation**: Cancel operations in progress
+### Message Types
 
-### JSON-RPC 2.0 Protocol
+**Backend → Agent (Requests):**
+- `initialize` - Establish connection and capabilities
+- `session/new` - Create new session
+- `session/load` - Resume existing session
+- `session/prompt` - Send task/prompt to execute
+- `session/cancel` - Cancel current operation
 
-#### Client → Agent (Requests)
+**Agent → Backend (Notifications):**
+- `session/update` - Progress updates, content, tool calls, completion
 
-**Initialize Connection:**
-```json
-{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
-  "protocolVersion": "1.0",
-  "clientInfo": {"name": "kandev", "version": "0.1.0"},
-  "capabilities": {"streaming": true}
-}}
-```
+---
 
-**Create New Session:**
-```json
-{"jsonrpc": "2.0", "id": 2, "method": "session/new", "params": {}}
-```
+## Message Specifications
 
-**Resume Existing Session:**
-```json
-{"jsonrpc": "2.0", "id": 3, "method": "session/load", "params": {"sessionId": "abc123"}}
-```
+### 1. Initialize Connection
 
-**Send Prompt:**
-```json
-{"jsonrpc": "2.0", "id": 4, "method": "session/prompt", "params": {"message": "Fix the bug in main.go"}}
-```
-
-**Cancel Operation (notification, no response):**
-```json
-{"jsonrpc": "2.0", "method": "session/cancel", "params": {"reason": "user requested"}}
-```
-
-#### Agent → Client (Notifications)
-
-**Session Update (progress, content, tool calls):**
-```json
-{"jsonrpc": "2.0", "method": "session/update", "params": {
-  "type": "content",
-  "data": {"text": "I'm analyzing the code..."}
-}}
-```
-
-```json
-{"jsonrpc": "2.0", "method": "session/update", "params": {
-  "type": "toolCall",
-  "data": {"toolName": "file_edit", "status": "running"}
-}}
-```
-
-```json
-{"jsonrpc": "2.0", "method": "session/update", "params": {
-  "type": "complete",
-  "data": {"sessionId": "abc123", "success": true}
-}}
-```
-
-### Legacy Message Format (for reference)
-
+**Backend → Agent:**
 ```json
 {
-  "type": "progress",
-  "agent_id": "uuid",
-  "task_id": "uuid",
-  "timestamp": "2026-01-10T12:00:00Z",
-  "data": { ... }
-}
-```
-
-### Legacy Message Types
-
-#### `progress` - Progress Updates
-```json
-{
-  "type": "progress",
-  "data": {
-    "progress": 50,
-    "message": "Analyzing codebase...",
-    "current_file": "src/main.go",
-    "files_processed": 10,
-    "total_files": 20
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "initialize",
+  "params": {
+    "protocolVersion": "1.0",
+    "clientInfo": {
+      "name": "kandev",
+      "version": "0.1.0"
+    },
+    "capabilities": {
+      "streaming": true
+    }
   }
 }
 ```
 
-#### `log` - Log Messages
+**Agent → Backend:**
 ```json
 {
-  "type": "log",
-  "data": {
-    "level": "info",
-    "message": "Starting code review",
-    "metadata": { "file": "main.go" }
-  }
-}
-```
-Levels: `debug`, `info`, `warn`, `error`
-
-#### `result` - Task Completion
-```json
-{
-  "type": "result",
-  "data": {
-    "status": "completed",
-    "summary": "Task completed successfully",
-    "artifacts": [
-      { "type": "report", "path": "/workspace/report.md" }
-    ]
-  }
-}
-```
-Status: `completed`, `failed`, `cancelled`
-
-#### `error` - Error Messages
-```json
-{
-  "type": "error",
-  "data": {
-    "error": "Failed to parse file",
-    "file": "broken.go",
-    "details": "syntax error on line 42"
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "protocolVersion": "1.0",
+    "serverInfo": {
+      "name": "augment-agent",
+      "version": "1.0.0"
+    },
+    "capabilities": {
+      "streaming": true,
+      "sessionResumption": true
+    }
   }
 }
 ```
 
-#### `status` - Agent Status Changes
+### 2. Create New Session
+
+**Backend → Agent:**
 ```json
 {
-  "type": "status",
-  "data": {
-    "status": "running",
-    "message": "Agent initialized"
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "session/new",
+  "params": {}
+}
+```
+
+**Agent → Backend:**
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "result": {
+    "sessionId": "abc123def456"
   }
 }
 ```
-Status: `started`, `running`, `paused`, `stopped`
 
-#### `heartbeat` - Keep-Alive
+### 3. Resume Existing Session
+
+**Backend → Agent:**
 ```json
 {
-  "type": "heartbeat",
-  "data": {}
+  "jsonrpc": "2.0",
+  "id": 3,
+  "method": "session/load",
+  "params": {
+    "sessionId": "abc123def456"
+  }
+}
+```
+
+**Agent → Backend:**
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 3,
+  "result": {
+    "sessionId": "abc123def456",
+    "loaded": true
+  }
+}
+```
+
+### 4. Send Prompt
+
+**Backend → Agent:**
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 4,
+  "method": "session/prompt",
+  "params": {
+    "message": "Fix the null pointer bug in the login function"
+  }
+}
+```
+
+**Agent → Backend (immediate response):**
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 4,
+  "result": {
+    "accepted": true
+  }
+}
+```
+
+### 5. Progress Updates (Notifications)
+
+**Content Update:**
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "session/update",
+  "params": {
+    "type": "content",
+    "data": {
+      "text": "I'm analyzing the code in auth/login.go..."
+    }
+  }
+}
+```
+
+**Tool Call:**
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "session/update",
+  "params": {
+    "type": "toolCall",
+    "data": {
+      "toolName": "file_edit",
+      "status": "running",
+      "args": {
+        "file": "auth/login.go",
+        "line": 42
+      }
+    }
+  }
+}
+```
+
+**Completion:**
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "session/update",
+  "params": {
+    "type": "complete",
+    "data": {
+      "sessionId": "abc123def456",
+      "success": true,
+      "summary": "Fixed null pointer by adding nil check"
+    }
+  }
+}
+```
+
+**Error:**
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "session/update",
+  "params": {
+    "type": "error",
+    "data": {
+      "message": "Failed to compile after changes",
+      "details": "syntax error on line 45"
+    }
+  }
+}
+```
+
+### 6. Cancel Operation
+
+**Backend → Agent (notification, no response expected):**
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "session/cancel",
+  "params": {
+    "reason": "User requested cancellation"
+  }
 }
 ```
 
 ---
 
-## REST API Reference
+## Available Agent Types
 
-Base URL: `http://localhost:8080/api/v1`
+### Augment Agent (`augment-agent`)
 
-### Health Check
+Primary AI coding agent powered by Auggie CLI.
 
+**Docker Image**: `kandev/augment-agent:latest`
+
+**Specification:**
+- **Working Directory**: `/workspace`
+- **Memory**: 4096 MB
+- **CPU**: 2.0 cores
+- **Timeout**: 1 hour
+- **Capabilities**: code_generation, code_review, refactoring, testing, shell_execution
+
+**Required Environment Variables:**
+```bash
+AUGMENT_SESSION_AUTH  # From ~/.augment/session.json
+TASK_DESCRIPTION      # The task to execute
 ```
-GET /health
+
+**Optional Environment Variables:**
+```bash
+AUGGIE_SESSION_ID     # Resume previous session
 ```
 
-Response:
-```json
+**Mounted Volumes:**
+- `{workspace}` → `/workspace` - Project directory
+- `{augment_sessions}` → `/root/.augment/sessions` - Session persistence
+
+**Dockerfile**: `backend/dockerfiles/augment-agent/Dockerfile`
+
+---
+
+## Creating Custom Agents
+
+### Step 1: Create Dockerfile
+
+Create `backend/dockerfiles/your-agent/Dockerfile`:
+
+```dockerfile
+FROM ubuntu:22.04
+
+# Install dependencies
+RUN apt-get update && apt-get install -y \
+    curl jq git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy agent script
+COPY agent.sh /usr/local/bin/agent
+RUN chmod +x /usr/local/bin/agent
+
+WORKDIR /workspace
+
+ENTRYPOINT ["/usr/local/bin/agent"]
+```
+
+### Step 2: Implement ACP Protocol
+
+Create `backend/dockerfiles/your-agent/agent.sh`:
+
+```bash
+#!/bin/bash
+set -e
+
+# ACP mode - JSON-RPC 2.0
+if [ "$1" = "--acp" ]; then
+    # Initialize response
+    echo '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"1.0","serverInfo":{"name":"your-agent","version":"1.0.0"},"capabilities":{"streaming":true}}}'
+
+    # Read requests from stdin
+    while IFS= read -r line; do
+        METHOD=$(echo "$line" | jq -r '.method')
+        ID=$(echo "$line" | jq -r '.id')
+
+        case "$METHOD" in
+            "session/new")
+                SESSION_ID=$(uuidgen)
+                echo '{"jsonrpc":"2.0","id":'$ID',"result":{"sessionId":"'$SESSION_ID'"}}'
+                ;;
+
+            "session/prompt")
+                MESSAGE=$(echo "$line" | jq -r '.params.message')
+
+                # Accept prompt
+                echo '{"jsonrpc":"2.0","id":'$ID',"result":{"accepted":true}}'
+
+                # Send progress
+                echo '{"jsonrpc":"2.0","method":"session/update","params":{"type":"content","data":{"text":"Processing: '$MESSAGE'"}}}'
+
+                # Do work here
+                sleep 2
+
+                # Send completion
+                echo '{"jsonrpc":"2.0","method":"session/update","params":{"type":"complete","data":{"sessionId":"'$SESSION_ID'","success":true}}}'
+                ;;
+
+            "session/cancel")
+                # Handle cancellation
+                exit 0
+                ;;
+        esac
+    done
+fi
+```
+
+### Step 3: Register Agent Type
+
+Add to `backend/internal/agent/registry/defaults.go`:
+
+```go
 {
-  "status": "ok"
+    ID:          "your-agent",
+    Name:        "Your Custom Agent",
+    Description: "Description of what your agent does",
+    Image:       "kandev/your-agent:latest",
+    WorkingDir:  "/workspace",
+    MemoryMB:    2048,
+    CPUCores:    1.0,
+    Timeout:     30 * time.Minute,
+    Capabilities: []string{"custom_capability"},
+    Enabled:     true,
 }
+```
+
+### Step 4: Build and Test
+
+```bash
+# Build image
+cd backend/dockerfiles/your-agent
+docker build -t kandev/your-agent:latest .
+
+# Test locally
+docker run -it --rm \
+  -v $(pwd):/workspace \
+  -e TASK_DESCRIPTION="Test task" \
+  kandev/your-agent:latest --acp
+```
+
+Test by sending JSON-RPC messages via stdin:
+
+```bash
+echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"1.0"}}' | \
+  docker run -i --rm kandev/your-agent:latest --acp
 ```
 
 ---
 
-## Boards API
-
-### Create Board
-```
-POST /boards
-```
-
-Request:
-```json
-{
-  "name": "My Project",
-  "description": "Project tasks"
-}
-```
-
-Response: `201 Created`
-```json
-{
-  "id": "uuid",
-  "name": "My Project",
-  "description": "Project tasks",
-  "created_at": "2026-01-10T12:00:00Z",
-  "updated_at": "2026-01-10T12:00:00Z"
-}
-```
-
-### List Boards
-```
-GET /boards
-```
-
-Response:
-```json
-{
-  "boards": [...],
-  "total": 5
-}
-```
-
-### Get Board
-```
-GET /boards/:boardId
-```
-
-### Update Board
-```
-PUT /boards/:boardId
-```
-
-Request:
-```json
-{
-  "name": "Updated Name",
-  "description": "Updated description"
-}
-```
-
-### Delete Board
-```
-DELETE /boards/:boardId
-```
-
----
-
-## Columns API
-
-### Create Column
-```
-POST /boards/:boardId/columns
-```
-
-Request:
-```json
-{
-  "name": "To Do",
-  "position": 0,
-  "state": "TODO"
-}
-```
-
-Response: `201 Created`
-```json
-{
-  "id": "uuid",
-  "board_id": "uuid",
-  "name": "To Do",
-  "position": 0,
-  "state": "TODO",
-  "created_at": "2026-01-10T12:00:00Z"
-}
-```
-
-### List Columns
-```
-GET /boards/:boardId/columns
-```
-
-### Get Column
-```
-GET /columns/:columnId
-```
-
----
-
-## Tasks API
-
-### Create Task
-```
-POST /tasks
-```
-
-Request:
-```json
-{
-  "board_id": "uuid",
-  "column_id": "uuid",
-  "title": "Fix login bug",
-  "description": "Users cannot login with email",
-  "priority": 1,
-  "agent_type": "augment-agent",
-  "metadata": {}
-}
-```
-
-Response: `201 Created`
-```json
-{
-  "id": "uuid",
-  "board_id": "uuid",
-  "column_id": "uuid",
-  "title": "Fix login bug",
-  "description": "Users cannot login with email",
-  "state": "TODO",
-  "priority": 1,
-  "agent_type": "augment-agent",
-  "position": 0,
-  "created_at": "2026-01-10T12:00:00Z",
-  "updated_at": "2026-01-10T12:00:00Z",
-  "metadata": {}
-}
-```
-
-### Get Task
-```
-GET /tasks/:taskId
-```
-
-### Update Task
-```
-PUT /tasks/:taskId
-```
-
-Request (all fields optional):
-```json
-{
-  "title": "Updated title",
-  "description": "Updated description",
-  "priority": 2,
-  "metadata": { "key": "value" }
-}
-```
-
-### Delete Task
-```
-DELETE /tasks/:taskId
-```
-
-### Update Task State
-```
-PUT /tasks/:taskId/state
-```
-
-Request:
-```json
-{
-  "state": "IN_PROGRESS"
-}
-```
-
-States: `TODO`, `IN_PROGRESS`, `BLOCKED`, `COMPLETED`, `FAILED`, `CANCELLED`
-
-### Move Task
-```
-PUT /tasks/:taskId/move
-```
-
-Request:
-```json
-{
-  "column_id": "uuid",
-  "position": 0
-}
-```
-
-### List Tasks in Board
-```
-GET /boards/:boardId/tasks
-```
-
----
-
-## Agents API
+## REST API Integration
 
 ### Launch Agent
-```
-POST /agents/launch
+
+```bash
+POST /api/v1/agents/launch
 ```
 
-Request:
+**Request:**
 ```json
 {
   "task_id": "uuid",
   "agent_type": "augment-agent",
-  "workspace_path": "/path/to/project",
+  "workspace_path": "/absolute/path/to/project",
   "env": {
-    "AUGMENT_SESSION_AUTH": "...",
-    "TASK_DESCRIPTION": "Analyze this codebase"
+    "AUGMENT_SESSION_AUTH": "{...}",
+    "TASK_DESCRIPTION": "Fix the bug in auth/login.go"
   },
   "priority": 1,
   "metadata": {}
 }
 ```
 
-Response: `201 Created`
+**Response:**
 ```json
 {
-  "id": "uuid",
+  "id": "instance-uuid",
   "task_id": "uuid",
   "agent_type": "augment-agent",
-  "container_id": "docker-container-id",
+  "container_id": "docker-id",
   "status": "starting",
-  "progress": 0,
   "started_at": "2026-01-10T12:00:00Z"
 }
 ```
 
-### List Agents
-```
-GET /agents
+### Send Prompt (Mid-Execution)
+
+```bash
+POST /api/v1/agents/:instanceId/prompt
 ```
 
-Response:
+**Request:**
 ```json
 {
-  "agents": [...],
-  "total": 3
+  "message": "Please also add unit tests"
 }
 ```
 
-### Get Agent Status
-```
-GET /agents/:instanceId/status
+### Cancel Agent
+
+```bash
+POST /api/v1/agents/:instanceId/cancel
 ```
 
-Response:
-```json
-{
-  "id": "uuid",
-  "task_id": "uuid",
-  "agent_type": "augment-agent",
-  "container_id": "docker-container-id",
-  "status": "running",
-  "progress": 50,
-  "started_at": "2026-01-10T12:00:00Z",
-  "finished_at": null,
-  "exit_code": null,
-  "error_message": ""
-}
-```
-
-Agent statuses: `starting`, `running`, `completed`, `failed`, `stopped`
-
-### Get Agent Logs
-```
-GET /agents/:instanceId/logs?tail=100
-```
-
-Response:
-```json
-{
-  "logs": [
-    {
-      "timestamp": "2026-01-10T12:00:00Z",
-      "message": "Starting agent...",
-      "stream": "stdout"
-    }
-  ],
-  "total": 50
-}
-```
-
-### Stop Agent
-```
-DELETE /agents/:instanceId
-```
-
-Request (optional body):
-```json
-{
-  "force": false,
-  "reason": "User requested stop"
-}
-```
-
-### List Agent Types
-```
-GET /agents/types
-```
-
-Response:
-```json
-{
-  "types": [
-    {
-      "id": "augment-agent",
-      "name": "Augment Coding Agent",
-      "description": "Auggie CLI-powered autonomous coding agent",
-      "image": "kandev/augment-agent",
-      "capabilities": ["code_generation", "code_review", "refactoring", "testing", "shell_execution"],
-      "enabled": true
-    }
-  ],
-  "total": 1
-}
-```
-
-### Get Agent Type
-```
-GET /agents/types/:typeId
-```
-
-### Send Prompt to Agent (ACP)
-```
-POST /agents/:instanceId/prompt
-```
-
-Request:
-```json
-{
-  "message": "Fix the bug in main.go"
-}
-```
-
-Response: `200 OK`
-```json
-{
-  "success": true,
-  "message": "Prompt sent successfully"
-}
-```
-
-### Cancel Agent Operation (ACP)
-```
-POST /agents/:instanceId/cancel
-```
-
-Request:
+**Request:**
 ```json
 {
   "reason": "User requested cancellation"
 }
 ```
 
-Response: `200 OK`
-```json
-{
-  "success": true,
-  "message": "Cancel request sent"
-}
+### Get Agent Status
+
+```bash
+GET /api/v1/agents/:instanceId/status
 ```
 
-### Get Agent Session (ACP)
-```
-GET /agents/:instanceId/session
-```
-
-Response: `200 OK`
+**Response:**
 ```json
 {
-  "instance_id": "uuid",
-  "task_id": "uuid",
-  "session_id": "abc123",
+  "id": "instance-uuid",
   "status": "running",
-  "created_at": "2026-01-10T12:00:00Z"
+  "progress": 50,
+  "started_at": "2026-01-10T12:00:00Z",
+  "finished_at": null
 }
 ```
 
----
+Statuses: `starting`, `running`, `completed`, `failed`, `stopped`
 
-## Orchestrator API
+### Get Agent Logs
 
-Base: `/api/v1/orchestrator`
-
-### Get Orchestrator Status
-```
-GET /orchestrator/status
+```bash
+GET /api/v1/agents/:instanceId/logs?tail=100
 ```
 
-### Get Task Queue
-```
-GET /orchestrator/queue
+### Get Session Info
+
+```bash
+GET /api/v1/agents/:instanceId/session
 ```
 
-Response:
+**Response:**
 ```json
 {
-  "tasks": [
-    {
-      "task_id": "uuid",
-      "priority": 1,
-      "queued_at": "2026-01-10T12:00:00Z"
-    }
-  ],
-  "total": 5
+  "instance_id": "instance-uuid",
+  "task_id": "task-uuid",
+  "session_id": "abc123",
+  "status": "running"
 }
-```
-
-### Trigger Task Execution
-```
-POST /orchestrator/trigger
-```
-
-Request:
-```json
-{
-  "task_id": "uuid",
-  "force": false
-}
-```
-
-### Start Task
-```
-POST /orchestrator/tasks/:taskId/start
-```
-
-### Stop Task
-```
-POST /orchestrator/tasks/:taskId/stop
-```
-
-### Pause Task
-```
-POST /orchestrator/tasks/:taskId/pause
-```
-
-### Resume Task
-```
-POST /orchestrator/tasks/:taskId/resume
-```
-
-### Get Task Execution Status
-```
-GET /orchestrator/tasks/:taskId/status
-```
-
-### Get Task Logs
-```
-GET /orchestrator/tasks/:taskId/logs
-```
-
-### Get Task Artifacts
-```
-GET /orchestrator/tasks/:taskId/artifacts
 ```
 
 ---
 
 ## Session Resumption
 
-Agents can resume previous sessions for follow-up tasks:
+Agents can resume previous sessions for follow-up conversations.
 
-1. **First task** - Launch agent normally, session ID stored in task metadata
-2. **Get session ID** from task: `GET /tasks/:taskId` → `metadata.auggie_session_id`
-3. **Follow-up task** - Launch with `AUGGIE_SESSION_ID` env var
+### How It Works
 
-Example:
+1. First task completes, session ID stored in task metadata
+2. Retrieve session ID from task: `GET /tasks/:taskId` → `metadata.auggie_session_id`
+3. Launch new task with `AUGGIE_SESSION_ID` environment variable
+
+### Example
+
 ```bash
 # Get session ID from completed task
-SESSION_ID=$(curl -s http://localhost:8080/api/v1/tasks/$TASK_ID | jq -r '.metadata.auggie_session_id')
+SESSION_ID=$(curl -s http://localhost:8080/api/v1/tasks/$TASK_ID | \
+  jq -r '.metadata.auggie_session_id')
 
-# Launch follow-up with session resumption
+# Launch with resumption
 curl -X POST http://localhost:8080/api/v1/agents/launch \
   -H "Content-Type: application/json" \
   -d '{
@@ -727,78 +521,148 @@ curl -X POST http://localhost:8080/api/v1/agents/launch \
     "agent_type": "augment-agent",
     "workspace_path": "/path/to/project",
     "env": {
-      "AUGMENT_SESSION_AUTH": "...",
+      "AUGMENT_SESSION_AUTH": "'"$(cat ~/.augment/session.json | jq -c)"'",
       "AUGGIE_SESSION_ID": "'$SESSION_ID'",
-      "TASK_DESCRIPTION": "What was my previous question?"
+      "TASK_DESCRIPTION": "What changes did you make in the previous task?"
     }
   }'
 ```
 
+The agent will load the previous context and continue the conversation.
+
 ---
 
-## Error Responses
+## Legacy Message Format
 
-All error responses follow this format:
+Prior versions used a simpler JSON format (not JSON-RPC). For compatibility reference:
+
+```json
+{
+  "type": "progress|log|result|error|status|heartbeat",
+  "agent_id": "uuid",
+  "task_id": "uuid",
+  "timestamp": "2026-01-10T12:00:00Z",
+  "data": { ... }
+}
+```
+
+**Types:**
+- `progress` - Progress percentage, current file
+- `log` - Log messages (debug, info, warn, error)
+- `result` - Task completion (completed, failed, cancelled)
+- `error` - Error messages
+- `status` - Status changes (started, running, paused, stopped)
+- `heartbeat` - Keep-alive
+
+**Current agents should use JSON-RPC 2.0 (ACP)**, but the backend may support legacy format for backward compatibility.
+
+---
+
+## Error Handling
+
+### JSON-RPC Errors
+
+**Error Response:**
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 4,
+  "error": {
+    "code": -32600,
+    "message": "Invalid request",
+    "data": "Missing required parameter: message"
+  }
+}
+```
+
+**Standard Error Codes:**
+- `-32700` - Parse error
+- `-32600` - Invalid request
+- `-32601` - Method not found
+- `-32602` - Invalid params
+- `-32603` - Internal error
+
+### HTTP API Errors
 
 ```json
 {
   "error": "error_code",
   "message": "Human readable message",
-  "details": "Additional details",
+  "details": "Additional context",
   "http_status": 400
 }
 ```
 
-Common error codes:
-- `bad_request` (400) - Invalid request body or parameters
-- `not_found` (404) - Resource not found
-- `validation_error` (400) - Validation failed
-- `internal_error` (500) - Server error
+**Common Codes:**
+- `bad_request` (400)
+- `not_found` (404)
+- `validation_error` (400)
+- `internal_error` (500)
 
 ---
 
-## Creating Custom Agents
+## Best Practices
 
-To create a new agent type:
+### For Agent Developers
 
-1. **Create Dockerfile** in `backend/dockerfiles/your-agent/`
-2. **Implement ACP** - Write JSON messages to stdout
-3. **Register agent** in `backend/internal/agent/registry/defaults.go`
-4. **Build image**: `docker build -t kandev/your-agent:latest .`
+1. **Respond quickly to initialize** - Send capabilities within 1 second
+2. **Stream progress frequently** - Update every 1-5 seconds during work
+3. **Handle cancellation gracefully** - Clean up and exit when receiving `session/cancel`
+4. **Use proper session IDs** - Generate unique, persistent IDs for resumption
+5. **Log to stderr** - Use stdout exclusively for ACP messages
+6. **Validate messages** - Check for required fields before processing
+7. **Set exit codes** - 0 for success, non-zero for errors
 
-Example agent script:
+### Message Flow
+
+```
+1. Backend starts container
+2. Backend sends initialize
+3. Agent responds with capabilities
+4. Backend sends session/new
+5. Agent responds with sessionId
+6. Backend sends session/prompt
+7. Agent responds immediately (accepted: true)
+8. Agent sends multiple session/update notifications
+9. Agent sends final session/update (type: complete)
+10. Container exits
+```
+
+### Testing Your Agent
+
 ```bash
-#!/bin/bash
-echo '{"type":"status","agent_id":"'$AGENT_ID'","task_id":"'$TASK_ID'","timestamp":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'","data":{"status":"started"}}'
-echo '{"type":"progress","agent_id":"'$AGENT_ID'","task_id":"'$TASK_ID'","timestamp":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'","data":{"progress":50,"message":"Working..."}}'
-# Do work here
-echo '{"type":"result","agent_id":"'$AGENT_ID'","task_id":"'$TASK_ID'","timestamp":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'","data":{"status":"completed","summary":"Done!"}}'
+# Test initialize
+echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"1.0"}}' | \
+  docker run -i kandev/your-agent:latest --acp
+
+# Test full flow
+(
+  echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"1.0"}}'
+  echo '{"jsonrpc":"2.0","id":2,"method":"session/new","params":{}}'
+  echo '{"jsonrpc":"2.0","id":3,"method":"session/prompt","params":{"message":"test"}}'
+) | docker run -i kandev/your-agent:latest --acp
 ```
 
 ---
 
-## Development Notes
+## Reference Implementation
 
-### Running Locally
-```bash
-cd backend
-make build
-./bin/kandev
-```
+See `backend/dockerfiles/augment-agent/` for a complete working example:
 
-### Running Tests
-```bash
-cd backend
-go test ./...
-```
+- **Dockerfile** - Container setup
+- **agent.sh** - Entry point and ACP handler
+- **README.md** - Usage instructions
 
-### Environment Variables
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `KANDEV_DB_PATH` | `./kandev.db` | SQLite database path |
-| `PORT` | `8080` | HTTP server port |
+---
+
+## Additional Resources
+
+- **System Architecture**: [ARCHITECTURE.md](ARCHITECTURE.md)
+- **REST API Specification**: [docs/openapi.yaml](docs/openapi.yaml)
+- **Agent Registry**: `backend/internal/agent/registry/defaults.go`
+- **ACP Implementation**: `backend/internal/agent/acp/`
+- **JSON-RPC 2.0 Spec**: https://www.jsonrpc.org/specification
 
 ---
 
 **Last Updated**: 2026-01-10
-
