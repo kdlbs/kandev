@@ -9,6 +9,7 @@ export interface Task {
   id: string;
   title: string;
   status: string;
+  description?: string;
 }
 
 interface KanbanCardProps {
@@ -30,13 +31,16 @@ export function KanbanCard({ task }: KanbanCardProps) {
       style={style}
       className={cn(
         'cursor-grab active:cursor-grabbing mb-2 transition-opacity',
-        isDragging && 'opacity-50'
+        isDragging && 'opacity-50 z-50'
       )}
       {...listeners}
       {...attributes}
     >
       <CardContent className="p-3">
-        <p className="text-sm">{task.title}</p>
+        <p className="text-sm font-medium">{task.title}</p>
+        {task.description && (
+          <p className="text-xs text-muted-foreground mt-1">{task.description}</p>
+        )}
       </CardContent>
     </Card>
   );

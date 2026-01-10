@@ -10,6 +10,7 @@ import {
 } from '@dnd-kit/core';
 import { KanbanColumn, Column } from './kanban-column';
 import { Task } from './kanban-card';
+import { ThemeToggle } from './theme-toggle';
 
 type ColumnId = 'todo' | 'in-progress' | 'in-review' | 'done';
 
@@ -52,11 +53,12 @@ export function KanbanBoard() {
     );
   };
 
-  const handleAddTask = (columnId: string, title: string) => {
+  const handleAddTask = (columnId: string, title: string, description?: string) => {
     const newTask: Task = {
       id: crypto.randomUUID(),
       title,
       status: columnId,
+      description,
     };
     setTasks((tasks) => [...tasks, newTask]);
   };
@@ -66,19 +68,25 @@ export function KanbanBoard() {
   };
 
   return (
-    <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
-      <div className="h-screen w-full overflow-x-auto bg-background p-6">
-        <div className="inline-grid grid-flow-col auto-cols-[minmax(280px,360px)] gap-4">
-          {COLUMNS.map((column) => (
-            <KanbanColumn
-              key={column.id}
-              column={column}
-              tasks={getTasksForColumn(column.id)}
-              onAddTask={handleAddTask}
-            />
-          ))}
+    <div className="h-screen w-full flex flex-col bg-background">
+      <header className="flex items-center justify-between p-6 pb-4">
+        <h1 className="text-2xl font-bold">Kanban Board</h1>
+        <ThemeToggle />
+      </header>
+      <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
+        <div className="flex-1 overflow-x-auto px-6 pb-6">
+          <div className="inline-grid grid-flow-col auto-cols-[minmax(280px,360px)] gap-4">
+            {COLUMNS.map((column) => (
+              <KanbanColumn
+                key={column.id}
+                column={column}
+                tasks={getTasksForColumn(column.id)}
+                onAddTask={handleAddTask}
+              />
+            ))}
+          </div>
         </div>
-      </div>
-    </DndContext>
+      </DndContext>
+    </div>
   );
 }
