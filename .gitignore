@@ -1,0 +1,68 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+/backend/bin/
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+coverage.html
+
+# Go workspace file
+go.work
+
+# Dependency directories
+vendor/
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# SQLite database files
+*.db
+*.db-shm
+*.db-wal
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Log files
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+/workspaces/
+
+# Agent session files (local development)
+.augment/
+
+# Build artifacts
+dist/
+build/
+
+# Debug files
+debug
+*.pprof
+
+# Air live reload (if used)
+.air.toml
+tmp/
+
+# Kubernetes secrets (if any)
+*-secret.yaml
+*-secrets.yaml
+
