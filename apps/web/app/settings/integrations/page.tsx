@@ -116,9 +116,12 @@ export default function IntegrationsPage() {
                     <div className="flex items-center justify-between gap-3">
                       <div className="flex items-center gap-3 flex-1">
                         <div className="p-2 bg-muted rounded-lg">
-                          {React.cloneElement(integration.icon as React.ReactElement, {
-                            className: 'h-5 w-5',
-                          })}
+                          {React.isValidElement(integration.icon)
+                            ? React.cloneElement(
+                                integration.icon as React.ReactElement<{ className?: string }>,
+                                { className: 'h-5 w-5' }
+                              )
+                            : integration.icon}
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2">

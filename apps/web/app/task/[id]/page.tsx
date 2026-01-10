@@ -1,6 +1,7 @@
 'use client';
 
-import { FormEvent, useMemo, useState } from 'react';
+import type { CSSProperties } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { DiffModeEnum, DiffView } from '@git-diff-view/react';
 import '@git-diff-view/react/styles/diff-view.css';
@@ -324,15 +325,13 @@ function buildDiffData(filePath: string) {
 }
 
 export default function TaskPage() {
-  const defaultHorizontalLayout = getLocalStorage<[number, number]>(
-    'task-layout-horizontal',
-    [75, 25]
-  );
-  const defaultRightLayout = getLocalStorage<[number, number]>('task-layout-right', [55, 45]);
-  const defaultDiffMode = getLocalStorage<'unified' | 'split'>(
-    'task-diff-view-mode',
-    'unified'
-  );
+  const defaultHorizontalLayout: [number, number] = [75, 25];
+  const defaultRightLayout: [number, number] = [55, 45];
+  const defaultDiffMode: 'unified' | 'split' = 'unified';
+  const [horizontalLayout, setHorizontalLayout] = useState(defaultHorizontalLayout);
+  const [rightLayout, setRightLayout] = useState(defaultRightLayout);
+  const [horizontalSeed, setHorizontalSeed] = useState(0);
+  const [rightSeed, setRightSeed] = useState(0);
   const [selectedAgent, setSelectedAgent] = useState(AGENTS[0].id);
   const [chats, setChats] = useState<ChatSession[]>(INITIAL_CHATS);
   const [leftTab, setLeftTab] = useState('chat');
@@ -361,6 +360,29 @@ export default function TaskPage() {
   const selectedDiffContent = selectedDiffPath
     ? DIFF_SAMPLES[selectedDiffPath]?.newContent ?? ''
     : '';
+
+  useEffect(() => {
+    const storedHorizontal = getLocalStorage('task-layout-horizontal', defaultHorizontalLayout);
+    const storedRight = getLocalStorage('task-layout-right', defaultRightLayout);
+    const storedDiffMode = getLocalStorage('task-diff-view-mode', defaultDiffMode);
+
+    if (
+      storedHorizontal[0] !== defaultHorizontalLayout[0] ||
+      storedHorizontal[1] !== defaultHorizontalLayout[1]
+    ) {
+      setHorizontalLayout(storedHorizontal);
+      setHorizontalSeed((value) => value + 1);
+    }
+
+    if (storedRight[0] !== defaultRightLayout[0] || storedRight[1] !== defaultRightLayout[1]) {
+      setRightLayout(storedRight);
+      setRightSeed((value) => value + 1);
+    }
+
+    if (storedDiffMode !== defaultDiffMode) {
+      setDiffViewMode(storedDiffMode);
+    }
+  }, []);
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
@@ -480,7 +502,10 @@ export default function TaskPage() {
         </TabsContent>
         <TabsContent value="files" className="mt-3 flex-1 min-h-0">
           <div className="flex-1 min-h-0 overflow-y-auto rounded-lg bg-background h-full">
-            <SidebarProvider className="h-full w-full" style={{ "--sidebar-width": "100%" }}>
+            <SidebarProvider
+              className="h-full w-full"
+              style={{ "--sidebar-width": "100%" } as CSSProperties}
+            >
               <Sidebar collapsible="none" className="h-full w-full">
                 <SidebarContent>
                   <SidebarGroup>
@@ -675,11 +700,15 @@ export default function TaskPage() {
 
       <div className="flex-1 min-h-0 px-4 pb-4">
         <ResizablePanelGroup
+          key={horizontalSeed}
           direction="horizontal"
           className="h-full"
-          onLayout={(sizes) => setLocalStorage('task-layout-horizontal', sizes)}
+          onLayout={(sizes) => {
+            setHorizontalLayout(sizes as [number, number]);
+            setLocalStorage('task-layout-horizontal', sizes);
+          }}
         >
-          <ResizablePanel defaultSize={defaultHorizontalLayout[0]} minSize={55}>
+          <ResizablePanel defaultSize={horizontalLayout[0]} minSize={55}>
             <div className="h-full min-h-0 bg-card p-4 flex flex-col rounded-lg border border-border/70 border-r-0 mr-[5px]">
               <Tabs
                 value={leftTab}
@@ -953,7 +982,7 @@ export default function TaskPage() {
             </div>
           </ResizablePanel>
           <ResizableHandle className="w-px" />
-          <ResizablePanel defaultSize={defaultHorizontalLayout[1]} minSize={20}>
+          <ResizablePanel defaultSize={horizontalLayout[1]} minSize={20}>
             {isBottomCollapsed ? (
               <div className="h-full min-h-0 flex flex-col gap-1">
                 <div className="flex-1 min-h-0">{topFilesPanel}</div>
@@ -997,15 +1026,19 @@ export default function TaskPage() {
               </div>
             ) : (
               <ResizablePanelGroup
+                key={rightSeed}
                 direction="vertical"
                 className="h-full"
-                onLayout={(sizes) => setLocalStorage('task-layout-right', sizes)}
+                onLayout={(sizes) => {
+                  setRightLayout(sizes as [number, number]);
+                  setLocalStorage('task-layout-right', sizes);
+                }}
               >
-                <ResizablePanel defaultSize={defaultRightLayout[0]} minSize={30}>
+                <ResizablePanel defaultSize={rightLayout[0]} minSize={30}>
                   {topFilesPanel}
                 </ResizablePanel>
                 <ResizableHandle className="h-px" />
-                <ResizablePanel defaultSize={defaultRightLayout[1]} minSize={20}>
+                <ResizablePanel defaultSize={rightLayout[1]} minSize={20}>
                   <div className="h-full min-h-0 bg-card p-4 flex flex-col rounded-lg border border-border/70 border-l-0 mt-[5px]">
                     <Tabs
                       value={terminalTabValue}

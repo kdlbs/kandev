@@ -19,7 +19,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { SETTINGS_DATA } from '@/lib/settings/dummy-data';
-import type { Environment, EnvironmentType, BaseDocker } from '@/lib/settings/types';
+import type { Environment, EnvironmentType, BaseDocker, AgentType } from '@/lib/settings/types';
 
 export default function EnvironmentEditPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -91,7 +91,7 @@ export default function EnvironmentEditPage({ params }: { params: Promise<{ id: 
     });
   };
 
-  const handleToggleAgent = (agentId: string) => {
+  const handleToggleAgent = (agentId: AgentType) => {
     const installed = environment.installedAgents || [];
     if (installed.includes(agentId)) {
       setEnvironment({
@@ -287,8 +287,8 @@ export default function EnvironmentEditPage({ params }: { params: Promise<{ id: 
               >
                 <input
                   type="checkbox"
-                  checked={(environment.installedAgents || []).includes(agent.id)}
-                  onChange={() => handleToggleAgent(agent.id)}
+                  checked={(environment.installedAgents || []).includes(agent.agent)}
+                  onChange={() => handleToggleAgent(agent.agent)}
                   className="h-4 w-4"
                 />
                 <div className="flex-1">
