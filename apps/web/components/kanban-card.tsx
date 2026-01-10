@@ -14,22 +14,23 @@ export interface Task {
 
 interface KanbanCardProps {
   task: Task;
+  onClick?: (task: Task) => void;
 }
 
 function KanbanCardLayout({ task, className }: KanbanCardProps & { className?: string }) {
   return (
     <Card size="sm" className={cn('w-full py-0', className)}>
-      <CardContent className="px-3 py-2">
-        <p className="text-sm font-medium">{task.title}</p>
+      <CardContent className="px-2 py-1">
+        <p className="text-sm font-medium leading-tight">{task.title}</p>
         {task.description && (
-          <p className="text-xs text-muted-foreground mt-1">{task.description}</p>
+          <p className="text-xs text-muted-foreground mt-1 leading-tight">{task.description}</p>
         )}
       </CardContent>
     </Card>
   );
 }
 
-export function KanbanCard({ task }: KanbanCardProps) {
+export function KanbanCard({ task, onClick }: KanbanCardProps) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: task.id,
   });
@@ -49,13 +50,14 @@ export function KanbanCard({ task }: KanbanCardProps) {
         'cursor-grab active:cursor-grabbing mb-2 w-full py-0',
         isDragging && 'opacity-50 z-50'
       )}
+      onClick={() => onClick?.(task)}
       {...listeners}
       {...attributes}
     >
-      <CardContent className="px-3 py-2">
-        <p className="text-sm font-medium">{task.title}</p>
+      <CardContent className="px-2 py-1">
+        <p className="text-sm font-medium leading-tight">{task.title}</p>
         {task.description && (
-          <p className="text-xs text-muted-foreground mt-1">{task.description}</p>
+          <p className="text-xs text-muted-foreground mt-1 leading-tight">{task.description}</p>
         )}
       </CardContent>
     </Card>

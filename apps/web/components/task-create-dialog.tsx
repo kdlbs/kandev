@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, FormEvent } from 'react';
+import { useEffect, useState, FormEvent } from 'react';
 import {
   AlertDialog,
   AlertDialogContent,
@@ -18,15 +18,28 @@ interface TaskCreateDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSubmit: (title: string, description: string) => void;
+  initialValues?: {
+    title: string;
+    description?: string;
+  };
+  submitLabel?: string;
 }
 
 export function TaskCreateDialog({
   open,
   onOpenChange,
   onSubmit,
+  initialValues,
+  submitLabel = 'Create',
 }: TaskCreateDialogProps) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+
+  useEffect(() => {
+    if (!open) return;
+    setTitle(initialValues?.title ?? '');
+    setDescription(initialValues?.description ?? '');
+  }, [open, initialValues]);
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
@@ -46,9 +59,14 @@ export function TaskCreateDialog({
 
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent size="default">
+      <AlertDialogContent
+        size="default"
+        overlayProps={{
+          onClick: () => onOpenChange(false),
+        }}
+      >
         <AlertDialogHeader>
-          <AlertDialogTitle>Create Task</AlertDialogTitle>
+          <AlertDialogTitle>{submitLabel === 'Create' ? 'Create Task' : 'Edit Task'}</AlertDialogTitle>
         </AlertDialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <Field>
@@ -74,7 +92,7 @@ export function TaskCreateDialog({
             <AlertDialogCancel type="button" onClick={handleCancel}>
               Cancel
             </AlertDialogCancel>
-            <Button type="submit">Create</Button>
+            <Button type="submit">{submitLabel}</Button>
           </AlertDialogFooter>
         </form>
       </AlertDialogContent>
