@@ -52,51 +52,30 @@ Track all agent executions:
 
 ## API Reference
 
-### Task Management
-```
-POST   /api/v1/boards                    - Create board
-GET    /api/v1/boards                    - List boards
-POST   /api/v1/boards/:id/columns        - Create column
-POST   /api/v1/tasks                     - Create task (requires board_id, column_id, title)
-GET    /api/v1/tasks/:id                 - Get task (includes metadata.auggie_session_id)
-```
+All communication happens over WebSocket at `ws://localhost:8080/ws`.
+See `docs/WEBSOCKET_API.md` for complete API documentation.
 
-### Agent Management
-```
-POST   /api/v1/agents/launch             - Launch agent
-GET    /api/v1/agents/:id/status         - Get agent status
-GET    /api/v1/agents/:id/logs           - Get agent logs
-DELETE /api/v1/agents/:id                - Stop agent
-```
+### Key Actions
 
-### Launch Agent Request
-```json
-{
-  "task_id": "uuid",
-  "agent_type": "augment-agent",
-  "workspace_path": "/path/to/project",
-  "env": {
-    "AUGMENT_SESSION_AUTH": "{...session json...}",
-    "TASK_DESCRIPTION": "Your task here",
-    "AUGGIE_SESSION_ID": "optional-for-resumption"
-  }
-}
-```
+| Action | Description |
+|--------|-------------|
+| `board.create` | Create a new board |
+| `task.create` | Create a task |
+| `task.subscribe` | Subscribe to ACP streaming for a task |
+| `orchestrator.start` | Start executing a task with an agent |
+| `agent.prompt` | Send follow-up prompt to running agent |
 
 ## Development Commands
 
 ```bash
 # Build
-cd backend && make build
+cd apps/backend && go build -o kandev ./cmd/kandev
 
 # Run server
-./bin/kandev
+./kandev
 
 # Build Docker image
-cd dockerfiles/augment-agent && docker build -t kandev/augment-agent:latest .
-
-# Get Augment session auth
-cat ~/.augment/session.json
+cd apps/backend/dockerfiles/augment-agent && docker build -t kandev/augment-agent:latest .
 ```
 
 ## Key Files
