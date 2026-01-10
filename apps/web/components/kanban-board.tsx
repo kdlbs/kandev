@@ -23,6 +23,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { useRouter } from 'next/navigation';
 
 const VIEWS: Record<
   string,
@@ -74,7 +75,7 @@ export function KanbanBoard() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [activeViewId, setActiveViewId] = useState('team');
-  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
+  const router = useRouter();
 
   const isMounted = useSyncExternalStore(
     () => () => {},
@@ -93,10 +94,6 @@ export function KanbanBoard() {
   const activeTask = useMemo(
     () => tasks.find((task) => task.id === activeTaskId) ?? null,
     [tasks, activeTaskId]
-  );
-  const editingTask = useMemo(
-    () => tasks.find((task) => task.id === editingTaskId) ?? null,
-    [tasks, editingTaskId]
   );
   const activeView = VIEWS[activeViewId] ?? VIEWS.team;
   const activeColumns = activeView.columns;
@@ -126,16 +123,6 @@ export function KanbanBoard() {
   };
 
   const handleDialogSubmit = (title: string, description?: string) => {
-    if (editingTaskId) {
-      setTasks((tasks) =>
-        tasks.map((task) =>
-          task.id === editingTaskId ? { ...task, title, description } : task
-        )
-      );
-      setEditingTaskId(null);
-      return;
-    }
-
     const columnId = activeColumns[0]?.id ?? 'todo';
     const newTask: Task = {
       id: crypto.randomUUID(),
@@ -146,9 +133,8 @@ export function KanbanBoard() {
     setTasks((tasks) => [...tasks, newTask]);
   };
 
-  const handleEditTask = (task: Task) => {
-    setEditingTaskId(task.id);
-    setIsDialogOpen(true);
+  const handleOpenTask = (task: Task) => {
+    router.push(`/task/${task.id}`);
   };
 
   const getTasksForColumn = (columnId: string) => {
@@ -161,7 +147,7 @@ export function KanbanBoard() {
 
   return (
     <div className="h-screen w-full flex flex-col bg-background">
-      <header className="flex items-center justify-between p-6 pb-4">
+      <header className="flex items-center justify-between p-4 pb-3">
         <h1 className="text-2xl font-bold">KanDev.ai</h1>
         <div className="flex items-center gap-3">
           <Select value={activeViewId} onValueChange={setActiveViewId}>
@@ -176,12 +162,7 @@ export function KanbanBoard() {
               ))}
             </SelectContent>
           </Select>
-          <Button
-            onClick={() => {
-              setEditingTaskId(null);
-              setIsDialogOpen(true);
-            }}
-          >
+          <Button onClick={() => setIsDialogOpen(true)}>
             <IconPlus className="h-4 w-4" />
             Add task
           </Button>
@@ -189,21 +170,12 @@ export function KanbanBoard() {
         </div>
       </header>
       <TaskCreateDialog
-        key={`${editingTaskId ?? 'new'}-${isDialogOpen ? 'open' : 'closed'}`}
+        key={isDialogOpen ? 'open' : 'closed'}
         open={isDialogOpen}
         onOpenChange={(open) => {
           setIsDialogOpen(open);
-          if (!open) {
-            setEditingTaskId(null);
-          }
         }}
         onSubmit={(title, description) => handleDialogSubmit(title, description)}
-        initialValues={
-          editingTask
-            ? { title: editingTask.title, description: editingTask.description }
-            : undefined
-        }
-        submitLabel={editingTask ? 'Save' : 'Create'}
       />
       <DndContext
         sensors={sensors}
@@ -211,7 +183,7 @@ export function KanbanBoard() {
         onDragEnd={handleDragEnd}
         onDragCancel={handleDragCancel}
       >
-        <div className="flex-1 min-h-0 px-6 pb-6">
+        <div className="flex-1 min-h-0 px-4 pb-4">
           <div
             className="grid gap-px bg-border rounded-lg overflow-hidden h-full"
             style={{ gridTemplateColumns: `repeat(${activeColumns.length}, minmax(0, 1fr))` }}
@@ -221,7 +193,7 @@ export function KanbanBoard() {
                 key={column.id}
                 column={column}
                 tasks={getTasksForColumn(column.id)}
-                onEditTask={handleEditTask}
+                onOpenTask={handleOpenTask}
               />
             ))}
           </div>

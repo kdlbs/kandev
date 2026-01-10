@@ -46,10 +46,7 @@ export function KanbanCard({ task, onClick }: KanbanCardProps) {
       size="sm"
       ref={setNodeRef}
       style={style}
-      className={cn(
-        'cursor-grab active:cursor-grabbing mb-2 w-full py-0',
-        isDragging && 'opacity-50 z-50'
-      )}
+      className={cn('cursor-pointer mb-2 w-full py-0', isDragging && 'opacity-50 z-50')}
       onClick={() => onClick?.(task)}
       {...listeners}
       {...attributes}
