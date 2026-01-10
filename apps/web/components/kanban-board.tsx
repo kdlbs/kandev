@@ -163,12 +163,12 @@ export function KanbanBoard() {
               ))}
             </SelectContent>
           </Select>
-          <Button onClick={() => setIsDialogOpen(true)}>
+          <Button onClick={() => setIsDialogOpen(true)} className="cursor-pointer">
             <IconPlus className="h-4 w-4" />
             Add task
           </Button>
           <Link href="/settings" className="cursor-pointer">
-            <Button variant="outline">
+            <Button variant="outline" className="cursor-pointer">
               <IconSettings className="h-4 w-4 mr-2" />
               Settings
             </Button>
