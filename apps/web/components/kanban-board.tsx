@@ -1,16 +1,21 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   DndContext,
   DragEndEvent,
+  DragOverlay,
+  DragStartEvent,
   PointerSensor,
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
 import { KanbanColumn, Column } from './kanban-column';
-import { Task } from './kanban-card';
+import { KanbanCardPreview, Task } from './kanban-card';
 import { ThemeToggle } from './theme-toggle';
+import { Button } from '@/components/ui/button';
+import { IconPlus } from '@tabler/icons-react';
+import { TaskCreateDialog } from './task-create-dialog';
 
 type ColumnId = 'todo' | 'in-progress' | 'in-review' | 'done';
 
@@ -29,6 +34,13 @@ const initialTasks: Task[] = [
 
 export function KanbanBoard() {
   const [tasks, setTasks] = useState<Task[]>(initialTasks);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
+  const [isMounted, setIsMounted] = useState(false);
+
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -38,9 +50,19 @@ export function KanbanBoard() {
     })
   );
 
+  const activeTask = useMemo(
+    () => tasks.find((task) => task.id === activeTaskId) ?? null,
+    [tasks, activeTaskId]
+  );
+
+  const handleDragStart = (event: DragStartEvent) => {
+    setActiveTaskId(event.active.id as string);
+  };
+
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
 
+    setActiveTaskId(null);
     if (!over) return;
 
     const taskId = active.id as string;
@@ -51,6 +73,10 @@ export function KanbanBoard() {
         task.id === taskId ? { ...task, status: newStatus } : task
       )
     );
+  };
+
+  const handleDragCancel = () => {
+    setActiveTaskId(null);
   };
 
   const handleAddTask = (columnId: string, title: string, description?: string) => {
@@ -67,13 +93,33 @@ export function KanbanBoard() {
     return tasks.filter((task) => task.status === columnId);
   };
 
+  if (!isMounted) {
+    return <div className="h-screen w-full bg-background" />;
+  }
+
   return (
     <div className="h-screen w-full flex flex-col bg-background">
       <header className="flex items-center justify-between p-6 pb-4">
         <h1 className="text-2xl font-bold">Kanban Board</h1>
-        <ThemeToggle />
+        <div className="flex items-center gap-2">
+          <Button onClick={() => setIsDialogOpen(true)}>
+            <IconPlus className="h-4 w-4" />
+            Add task
+          </Button>
+          <ThemeToggle />
+        </div>
       </header>
-      <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
+      <TaskCreateDialog
+        open={isDialogOpen}
+        onOpenChange={setIsDialogOpen}
+        onSubmit={(title, description) => handleAddTask('todo', title, description)}
+      />
+      <DndContext
+        sensors={sensors}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+        onDragCancel={handleDragCancel}
+      >
         <div className="flex-1 overflow-x-auto px-6 pb-6">
           <div className="inline-grid grid-flow-col auto-cols-[minmax(280px,360px)] gap-4">
             {COLUMNS.map((column) => (
@@ -81,11 +127,13 @@ export function KanbanBoard() {
                 key={column.id}
                 column={column}
                 tasks={getTasksForColumn(column.id)}
-                onAddTask={handleAddTask}
               />
             ))}
           </div>
         </div>
+        <DragOverlay dropAnimation={null}>
+          {activeTask ? <KanbanCardPreview task={activeTask} /> : null}
+        </DragOverlay>
       </DndContext>
     </div>
   );
