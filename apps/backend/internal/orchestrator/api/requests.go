@@ -21,6 +21,22 @@ type StopTaskRequest struct {
 	Force  bool   `json:"force"`
 }
 
+// PromptTaskRequest for sending a follow-up prompt to a running agent
+type PromptTaskRequest struct {
+	Prompt string `json:"prompt" binding:"required"`
+}
+
+// PromptTaskResponse for prompt endpoint
+type PromptTaskResponse struct {
+	Success bool   `json:"success"`
+	Error   string `json:"error,omitempty"`
+}
+
+// CompleteTaskRequest for explicitly completing a task
+type CompleteTaskRequest struct {
+	Message string `json:"message,omitempty"`
+}
+
 // TaskStatusResponse for task execution status
 type TaskStatusResponse struct {
 	TaskID              string     `json:"task_id"`

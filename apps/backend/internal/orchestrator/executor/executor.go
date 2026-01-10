@@ -34,6 +34,9 @@ type AgentManagerClient interface {
 
 	// ListAgentTypes returns available agent types
 	ListAgentTypes(ctx context.Context) ([]*v1.AgentType, error)
+
+	// PromptAgent sends a prompt to a running agent
+	PromptAgent(ctx context.Context, agentInstanceID string, prompt string) error
 }
 
 // LaunchAgentRequest contains parameters for launching an agent
@@ -198,6 +201,25 @@ func (e *Executor) Stop(ctx context.Context, taskID string, reason string, force
 	return nil
 }
 
+// Prompt sends a follow-up prompt to a running agent for a task
+func (e *Executor) Prompt(ctx context.Context, taskID string, prompt string) error {
+	e.mu.RLock()
+	execution, exists := e.executions[taskID]
+	if !exists {
+		e.mu.RUnlock()
+		return ErrExecutionNotFound
+	}
+	agentInstanceID := execution.AgentInstanceID
+	e.mu.RUnlock()
+
+	e.logger.Info("sending prompt to agent",
+		zap.String("task_id", taskID),
+		zap.String("agent_instance_id", agentInstanceID),
+		zap.Int("prompt_length", len(prompt)))
+
+	return e.agentManager.PromptAgent(ctx, agentInstanceID, prompt)
+}
+
 // GetExecution returns the current execution state for a task
 func (e *Executor) GetExecution(taskID string) (*TaskExecution, bool) {
 	e.mu.RLock()
@@ -343,4 +365,12 @@ func (m *MockAgentManagerClient) ListAgentTypes(ctx context.Context) ([]*v1.Agen
 			Enabled:     true,
 		},
 	}, nil
+}
+
+// PromptAgent mocks sending a prompt to an agent
+func (m *MockAgentManagerClient) PromptAgent(ctx context.Context, agentInstanceID string, prompt string) error {
+	m.logger.Info("mock: prompting agent",
+		zap.String("agent_instance_id", agentInstanceID),
+		zap.Int("prompt_length", len(prompt)))
+	return nil
 }

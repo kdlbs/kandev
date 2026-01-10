@@ -4,6 +4,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -111,6 +112,7 @@ func NewService(
 	// Create the watcher with event handlers that wire everything together
 	handlers := watcher.EventHandlers{
 		OnTaskStateChanged: s.handleTaskStateChanged,
+		OnAgentReady:       s.handleAgentReady,
 		OnAgentCompleted:   s.handleAgentCompleted,
 		OnAgentFailed:      s.handleAgentFailed,
 		OnACPMessage:       s.handleACPMessage,
@@ -263,6 +265,37 @@ func (s *Service) StopTask(ctx context.Context, taskID string, reason string, fo
 	return s.executor.Stop(ctx, taskID, reason, force)
 }
 
+// PromptTask sends a follow-up prompt to a running agent for a task
+func (s *Service) PromptTask(ctx context.Context, taskID string, prompt string) error {
+	s.logger.Info("sending prompt to task agent",
+		zap.String("task_id", taskID),
+		zap.Int("prompt_length", len(prompt)))
+	return s.executor.Prompt(ctx, taskID, prompt)
+}
+
+// CompleteTask explicitly completes a task and stops its agent
+func (s *Service) CompleteTask(ctx context.Context, taskID string) error {
+	s.logger.Info("completing task",
+		zap.String("task_id", taskID))
+
+	// Stop the agent (which will trigger AgentCompleted event and update task state)
+	if err := s.executor.Stop(ctx, taskID, "task completed by user", false); err != nil {
+		// If agent is already stopped, just update the task state directly
+		s.logger.Warn("failed to stop agent, updating task state directly",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+	}
+
+	// Update task state to COMPLETED
+	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateCompleted); err != nil {
+		return fmt.Errorf("failed to update task state: %w", err)
+	}
+
+	s.logger.Info("task marked as COMPLETED",
+		zap.String("task_id", taskID))
+	return nil
+}
+
 // GetTaskExecution returns the current execution state for a task
 func (s *Service) GetTaskExecution(taskID string) (*executor.TaskExecution, bool) {
 	return s.executor.GetExecution(taskID)
@@ -329,6 +362,17 @@ func (s *Service) handleTaskStateChanged(ctx context.Context, data watcher.TaskE
 			}
 		}
 	}
+}
+
+// handleAgentReady handles agent ready events (prompt completed, ready for follow-up)
+func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventData) {
+	s.logger.Info("handling agent ready",
+		zap.String("task_id", data.TaskID),
+		zap.String("agent_instance_id", data.AgentInstanceID))
+
+	// Agent completed initial prompt but is still running
+	// Task stays in IN_PROGRESS state - user can send follow-up prompts
+	// or explicitly complete/stop the task
 }
 
 // handleAgentCompleted handles agent completion events

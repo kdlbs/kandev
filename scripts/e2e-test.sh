@@ -269,20 +269,22 @@ else
     log_info "Waiting for agent initialization..."
 fi
 
-log_step "Step 7: Wait for Agent to Process"
-log_info "Waiting up to ${WAIT_FOR_AGENT_SECONDS} seconds for agent to complete..."
-AGENT_STATUS="RUNNING"
+log_step "Step 7: Wait for Agent to Complete First Prompt"
+log_info "Waiting up to ${WAIT_FOR_AGENT_SECONDS} seconds for agent to become READY..."
+AGENT_OUTPUT_FILE="${TEST_WORKSPACE}/agent-result.txt"
+AGENT_READY=false
 for i in $(seq 1 $WAIT_FOR_AGENT_SECONDS); do
+    # Check agent status - READY means prompt completed
     AGENT_INFO=$(curl -s "${BASE_URL}/api/v1/agents/${AGENT_ID}/status" 2>/dev/null || echo '{}')
     AGENT_STATUS=$(echo "$AGENT_INFO" | jq -r '.status // "UNKNOWN"')
 
-    if [ "$AGENT_STATUS" == "COMPLETED" ]; then
-        log_success "Agent completed successfully"
+    if [ "$AGENT_STATUS" == "READY" ]; then
+        log_success "Agent is READY after $i seconds (prompt completed)"
+        AGENT_READY=true
         break
     elif [ "$AGENT_STATUS" == "FAILED" ]; then
         log_error "Agent failed"
         echo "$AGENT_INFO" | jq .
-        # Show container logs for debugging
         if [ -n "$CONTAINER_ID" ]; then
             log_info "Container logs:"
             docker logs "$CONTAINER_ID" 2>&1 | tail -30
@@ -293,22 +295,20 @@ for i in $(seq 1 $WAIT_FOR_AGENT_SECONDS); do
     # Check if container is still running
     CONTAINER_RUNNING=$(docker ps --filter "id=${CONTAINER_ID}" -q | wc -l)
     if [ "$CONTAINER_RUNNING" -eq 0 ]; then
-        log_info "Container stopped, checking for completion..."
+        log_info "Container stopped unexpectedly"
         break
     fi
 
-    # Periodically check agentctl status if IP is available
-    if [ -n "$CONTAINER_IP" ] && [ $((i % 15)) -eq 0 ]; then
-        AGENTCTL_STATUS=$(curl -s "http://${CONTAINER_IP}:${AGENTCTL_PORT}/api/v1/status" 2>/dev/null || echo '{}')
-        AGENT_PROCESS_STATE=$(echo "$AGENTCTL_STATUS" | jq -r '.agent_status // "unknown"')
-        log_info "Agent state via agentctl: $AGENT_PROCESS_STATE"
-    fi
-
     if [ $((i % 10)) -eq 0 ]; then
-        log_info "Still waiting... ($i seconds)"
+        log_info "Still waiting... ($i seconds, status: $AGENT_STATUS)"
     fi
     sleep 1
 done
+
+if [ "$AGENT_READY" != "true" ]; then
+    log_error "Agent did not become READY within timeout (last status: $AGENT_STATUS)"
+    exit 1
+fi
 
 log_step "Step 8: Verify Agent Response"
 # Get container logs to verify agent processed the request
@@ -345,25 +345,79 @@ FINAL_TASK=$(curl -s "${BASE_URL}/api/v1/tasks/${TASK_ID}")
 TASK_STATE=$(echo "$FINAL_TASK" | jq -r '.state')
 log_info "Task state: $TASK_STATE"
 
-log_step "Step 10: Verify Agent Output"
-AGENT_OUTPUT_FILE="${TEST_WORKSPACE}/agent-result.txt"
+log_step "Step 10: Verify First Prompt Output"
 if [ -f "$AGENT_OUTPUT_FILE" ]; then
     AGENT_OUTPUT=$(cat "$AGENT_OUTPUT_FILE")
     log_success "Agent created file: $AGENT_OUTPUT_FILE"
     log_info "File content: $AGENT_OUTPUT"
     if echo "$AGENT_OUTPUT" | grep -qi "hello"; then
-        log_success "Agent output contains expected content"
-    else
-        log_info "Note: Output doesn't contain 'Hello' but file was created"
+        log_success "First prompt output contains expected content"
     fi
 else
-    log_info "Agent did not create expected file (agent-result.txt)"
-    log_info "Checking workspace for any created files..."
-    ls -la "$TEST_WORKSPACE" 2>/dev/null || true
+    log_error "Agent did not create expected file"
+    exit 1
+fi
+
+log_step "Step 11: Test Multi-Turn - Send Follow-up Prompt"
+SECOND_OUTPUT_FILE="${TEST_WORKSPACE}/second-result.txt"
+log_info "Sending follow-up prompt..."
+PROMPT_RESULT=$(curl -s -X POST "${BASE_URL}/api/v1/orchestrator/tasks/${TASK_ID}/prompt" \
+    -H "Content-Type: application/json" \
+    -d "{\"prompt\": \"Create another file named 'second-result.txt' with the content 'Follow-up successful'. Do nothing else.\"}")
+PROMPT_SUCCESS=$(echo "$PROMPT_RESULT" | jq -r '.success // false')
+if [ "$PROMPT_SUCCESS" == "true" ]; then
+    log_success "Follow-up prompt accepted"
+else
+    log_error "Follow-up prompt failed: $(echo "$PROMPT_RESULT" | jq -r '.error // "unknown"')"
+    exit 1
+fi
+
+# Wait for agent to become READY again (prompt completed)
+log_info "Waiting for agent to become READY again..."
+for i in $(seq 1 120); do
+    AGENT_INFO=$(curl -s "${BASE_URL}/api/v1/agents/${AGENT_ID}/status" 2>/dev/null || echo '{}')
+    AGENT_STATUS=$(echo "$AGENT_INFO" | jq -r '.status // "UNKNOWN"')
+    if [ "$AGENT_STATUS" == "READY" ]; then
+        log_success "Agent is READY after follow-up prompt ($i seconds)"
+        break
+    fi
+    if [ $((i % 10)) -eq 0 ]; then
+        log_info "Still waiting... ($i seconds, status: $AGENT_STATUS)"
+    fi
+    sleep 1
+done
+
+# Verify second file was created
+if [ -f "$SECOND_OUTPUT_FILE" ]; then
+    SECOND_OUTPUT=$(cat "$SECOND_OUTPUT_FILE")
+    log_success "Second file created: $SECOND_OUTPUT_FILE"
+    log_info "Second file content: $SECOND_OUTPUT"
+else
+    log_error "Agent did not create second file"
+    exit 1
+fi
+
+log_step "Step 12: Complete Task"
+COMPLETE_RESULT=$(curl -s -X POST "${BASE_URL}/api/v1/orchestrator/tasks/${TASK_ID}/complete" \
+    -H "Content-Type: application/json")
+COMPLETE_SUCCESS=$(echo "$COMPLETE_RESULT" | jq -r '.success // false')
+if [ "$COMPLETE_SUCCESS" == "true" ]; then
+    log_success "Task completed successfully"
+else
+    log_error "Failed to complete task: $(echo "$COMPLETE_RESULT" | jq -r '.error // "unknown"')"
+fi
+
+# Verify task state is COMPLETED
+FINAL_TASK=$(curl -s "${BASE_URL}/api/v1/tasks/${TASK_ID}")
+TASK_STATE=$(echo "$FINAL_TASK" | jq -r '.state')
+if [ "$TASK_STATE" == "COMPLETED" ]; then
+    log_success "Task state is COMPLETED"
+else
+    log_error "Expected task state COMPLETED, got: $TASK_STATE"
 fi
 
 # Clean up test workspace
-#rm -rf "$TEST_WORKSPACE" 2>/dev/null || true
+rm -rf "$TEST_WORKSPACE" 2>/dev/null || true
 
 # Show backend logs summary
 log_step "Backend Log Summary"
@@ -382,7 +436,9 @@ echo -e "${GREEN}║ Column created:    ✓                   ║${NC}"
 echo -e "${GREEN}║ Task created:      ✓                   ║${NC}"
 echo -e "${GREEN}║ Agent launched:    ✓                   ║${NC}"
 echo -e "${GREEN}║ agentctl running:  ✓                   ║${NC}"
-echo -e "${GREEN}║ Agent processed:   ✓                   ║${NC}"
+echo -e "${GREEN}║ First prompt:      ✓                   ║${NC}"
+echo -e "${GREEN}║ Multi-turn:        ✓                   ║${NC}"
+echo -e "${GREEN}║ Task completed:    ✓                   ║${NC}"
 echo -e "${GREEN}╚════════════════════════════════════════╝${NC}"
 
 exit 0

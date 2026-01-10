@@ -13,6 +13,7 @@ const (
 const (
 	AgentStarted   = "agent.started"
 	AgentRunning   = "agent.running"
+	AgentReady     = "agent.ready" // Agent finished prompt, ready for follow-up
 	AgentCompleted = "agent.completed"
 	AgentFailed    = "agent.failed"
 	AgentStopped   = "agent.stopped"

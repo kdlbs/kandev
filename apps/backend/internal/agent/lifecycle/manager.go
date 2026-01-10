@@ -328,17 +328,22 @@ func (m *Manager) initializeACPSession(ctx context.Context, instance *AgentInsta
 			return fmt.Errorf("prompt failed: %w", err)
 		}
 
-		// Prompt completed successfully - mark agent as completed
-		m.logger.Info("ACP prompt completed successfully",
+		// Prompt completed - mark agent as READY for follow-up prompts
+		m.logger.Info("ACP prompt completed, agent ready for follow-up prompts",
 			zap.String("instance_id", instance.ID))
-		if err := m.MarkCompleted(instance.ID, 0, ""); err != nil {
-			m.logger.Error("failed to mark instance as completed",
+		if err := m.MarkReady(instance.ID); err != nil {
+			m.logger.Error("failed to mark instance as ready",
 				zap.String("instance_id", instance.ID),
 				zap.Error(err))
 		}
 	} else {
-		m.logger.Warn("no task description provided, skipping prompt",
+		m.logger.Warn("no task description provided, marking as ready",
 			zap.String("instance_id", instance.ID))
+		if err := m.MarkReady(instance.ID); err != nil {
+			m.logger.Error("failed to mark instance as ready",
+				zap.String("instance_id", instance.ID),
+				zap.Error(err))
+		}
 	}
 
 	return nil
@@ -559,6 +564,49 @@ func (m *Manager) expandMountTemplate(source, workspacePath, taskID string) stri
 	return result
 }
 
+// PromptAgent sends a follow-up prompt to a running agent
+func (m *Manager) PromptAgent(ctx context.Context, instanceID string, prompt string) error {
+	m.mu.Lock()
+	instance, exists := m.instances[instanceID]
+	if !exists {
+		m.mu.Unlock()
+		return fmt.Errorf("instance %q not found", instanceID)
+	}
+
+	if instance.agentctl == nil {
+		m.mu.Unlock()
+		return fmt.Errorf("instance %q has no agentctl client", instanceID)
+	}
+
+	// Accept both RUNNING (initial) and READY (after first prompt) states
+	if instance.Status != v1.AgentStatusRunning && instance.Status != v1.AgentStatusReady {
+		m.mu.Unlock()
+		return fmt.Errorf("instance %q is not ready for prompts (status: %s)", instanceID, instance.Status)
+	}
+
+	// Set status to RUNNING while processing
+	instance.Status = v1.AgentStatusRunning
+	m.mu.Unlock()
+
+	m.logger.Info("sending prompt to agent",
+		zap.String("instance_id", instanceID),
+		zap.Int("prompt_length", len(prompt)))
+
+	// Prompt is synchronous - blocks until agent completes
+	if err := instance.agentctl.Prompt(ctx, prompt); err != nil {
+		return err
+	}
+
+	// Prompt completed - mark as READY for next prompt
+	if err := m.MarkReady(instanceID); err != nil {
+		m.logger.Error("failed to mark instance as ready after prompt",
+			zap.String("instance_id", instanceID),
+			zap.Error(err))
+	}
+
+	return nil
+}
+
 // StopAgent stops an agent instance
 func (m *Manager) StopAgent(ctx context.Context, instanceID string, force bool) error {
 	m.mu.RLock()
@@ -702,6 +750,27 @@ func (m *Manager) UpdateProgress(instanceID string, progress int) error {
 	m.logger.Debug("updated instance progress",
 		zap.String("instance_id", instanceID),
 		zap.Int("progress", progress))
+
+	return nil
+}
+
+// MarkReady marks an instance as ready for follow-up prompts
+func (m *Manager) MarkReady(instanceID string) error {
+	m.mu.Lock()
+	instance, exists := m.instances[instanceID]
+	if !exists {
+		m.mu.Unlock()
+		return fmt.Errorf("instance %q not found", instanceID)
+	}
+
+	instance.Status = v1.AgentStatusReady
+	m.mu.Unlock()
+
+	m.logger.Info("instance ready for follow-up prompts",
+		zap.String("instance_id", instanceID))
+
+	// Publish ready event
+	m.publishEvent(context.Background(), events.AgentReady, instance)
 
 	return nil
 }

@@ -422,3 +422,8 @@ func (a *lifecycleAdapter) ListAgentTypes(ctx context.Context) ([]*v1.AgentType,
 	}
 	return result, nil
 }
+
+// PromptAgent sends a follow-up prompt to a running agent
+func (a *lifecycleAdapter) PromptAgent(ctx context.Context, agentInstanceID string, prompt string) error {
+	return a.mgr.PromptAgent(ctx, agentInstanceID, prompt)
+}

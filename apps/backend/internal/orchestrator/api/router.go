@@ -20,6 +20,8 @@ func SetupRoutes(router *gin.RouterGroup, service *orchestrator.Service, log *lo
 	{
 		tasks.POST("/start", handler.StartTask)
 		tasks.POST("/stop", handler.StopTask)
+		tasks.POST("/prompt", handler.PromptTask)
+		tasks.POST("/complete", handler.CompleteTask)
 		tasks.POST("/pause", handler.PauseTask)
 		tasks.POST("/resume", handler.ResumeTask)
 		tasks.GET("/status", handler.GetTaskStatus)

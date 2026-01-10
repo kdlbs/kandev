@@ -8,7 +8,8 @@ type AgentStatus string
 const (
 	AgentStatusPending   AgentStatus = "PENDING"
 	AgentStatusStarting  AgentStatus = "STARTING"
-	AgentStatusRunning   AgentStatus = "RUNNING"
+	AgentStatusRunning   AgentStatus = "RUNNING"   // Agent is processing a prompt
+	AgentStatusReady     AgentStatus = "READY"     // Agent finished prompt, waiting for next
 	AgentStatusCompleted AgentStatus = "COMPLETED"
 	AgentStatusFailed    AgentStatus = "FAILED"
 	AgentStatusStopped   AgentStatus = "STOPPED"

@@ -43,6 +43,7 @@ type EventHandlers struct {
 
 	// Agent events
 	OnAgentStarted   func(ctx context.Context, data AgentEventData)
+	OnAgentReady     func(ctx context.Context, data AgentEventData)
 	OnAgentCompleted func(ctx context.Context, data AgentEventData)
 	OnAgentFailed    func(ctx context.Context, data AgentEventData)
 	OnAgentStopped   func(ctx context.Context, data AgentEventData)
@@ -177,6 +178,7 @@ func (w *Watcher) subscribeToAgentEvents() error {
 		handler func(ctx context.Context, data AgentEventData)
 	}{
 		{events.AgentStarted, w.handlers.OnAgentStarted},
+		{events.AgentReady, w.handlers.OnAgentReady},
 		{events.AgentCompleted, w.handlers.OnAgentCompleted},
 		{events.AgentFailed, w.handlers.OnAgentFailed},
 		{events.AgentStopped, w.handlers.OnAgentStopped},

@@ -145,6 +145,57 @@ func (h *Handler) StopTask(c *gin.Context) {
 	})
 }
 
+// PromptTask sends a follow-up prompt to a running agent
+// POST /api/v1/orchestrator/tasks/:taskId/prompt
+func (h *Handler) PromptTask(c *gin.Context) {
+	taskID := c.Param("taskId")
+	if taskID == "" {
+		appErr := errors.BadRequest("taskId is required")
+		c.JSON(appErr.HTTPStatus, appErr)
+		return
+	}
+
+	var req PromptTaskRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		appErr := errors.ValidationError("request", err.Error())
+		c.JSON(appErr.HTTPStatus, appErr)
+		return
+	}
+
+	if err := h.service.PromptTask(c.Request.Context(), taskID, req.Prompt); err != nil {
+		h.logger.Error("failed to prompt task", zap.String("task_id", taskID), zap.Error(err))
+		c.JSON(http.StatusInternalServerError, PromptTaskResponse{
+			Success: false,
+			Error:   err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, PromptTaskResponse{Success: true})
+}
+
+// CompleteTask explicitly completes a running agent and marks the task as completed
+// POST /api/v1/orchestrator/tasks/:taskId/complete
+func (h *Handler) CompleteTask(c *gin.Context) {
+	taskID := c.Param("taskId")
+	if taskID == "" {
+		appErr := errors.BadRequest("taskId is required")
+		c.JSON(appErr.HTTPStatus, appErr)
+		return
+	}
+
+	if err := h.service.CompleteTask(c.Request.Context(), taskID); err != nil {
+		h.logger.Error("failed to complete task", zap.String("task_id", taskID), zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "task completed"})
+}
+
 // PauseTask pauses agent execution (if supported)
 // POST /api/v1/orchestrator/tasks/:taskId/pause
 func (h *Handler) PauseTask(c *gin.Context) {
