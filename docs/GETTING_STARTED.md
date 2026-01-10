@@ -44,7 +44,7 @@
 ### Step 1: Build the Backend
 
 ```bash
-cd backend
+cd apps/backend
 
 # Build the binary
 make build
@@ -142,7 +142,7 @@ The project includes a comprehensive E2E test script:
 
 ```bash
 # Build the agent Docker image first
-cd backend/dockerfiles/augment-agent
+cd apps/backend/dockerfiles/augment-agent
 docker build -t kandev/augment-agent:latest .
 
 # Run the E2E test
@@ -175,14 +175,14 @@ The E2E test:
 ### Build
 
 ```bash
-cd backend
+cd apps/backend
 make build
 ```
 
 ### Run Tests
 
 ```bash
-cd backend
+cd apps/backend
 make test
 
 # Or with verbose output
@@ -200,7 +200,7 @@ go vet ./...
 
 ```bash
 # SQLite CLI
-sqlite3 backend/kandev.db
+sqlite3 apps/backend/kandev.db
 
 # List tables
 .tables
@@ -217,35 +217,38 @@ SELECT * FROM tasks;
 ## Project Structure
 
 ```
-backend/
-├── cmd/kandev/           # Main entry point
-│   └── main.go
-├── internal/
-│   ├── agent/            # Agent management
-│   │   ├── acp/          # ACP session management
-│   │   ├── api/          # Agent HTTP handlers
-│   │   ├── credentials/  # Credential providers
-│   │   ├── docker/       # Docker client
-│   │   ├── lifecycle/    # Container lifecycle
-│   │   └── registry/     # Agent type registry
-│   ├── task/             # Task management
-│   │   ├── api/          # Task HTTP handlers
-│   │   ├── models/       # Data models
-│   │   ├── repository/   # SQLite/Memory storage
-│   │   └── service/      # Business logic
-│   ├── orchestrator/     # Orchestration logic
-│   ├── events/           # In-memory event bus
-│   └── common/           # Shared utilities
-│       └── logger/       # Zap logger
-├── pkg/acp/              # ACP protocol types
-│   └── jsonrpc/          # JSON-RPC 2.0 client
-├── dockerfiles/          # Agent Dockerfiles
-│   └── augment-agent/
-├── bin/                  # Built binaries (gitignored)
-├── Makefile
-└── NEXT_STEPS.md         # Development roadmap
-scripts/
-└── e2e-test.sh           # End-to-end test script
+kandev/
+├── apps/
+│   ├── backend/              # Go backend services
+│   │   ├── cmd/kandev/       # Main entry point
+│   │   │   └── main.go
+│   │   ├── internal/
+│   │   │   ├── agent/        # Agent management
+│   │   │   │   ├── acp/      # ACP session management
+│   │   │   │   ├── api/      # Agent HTTP handlers
+│   │   │   │   ├── credentials/  # Credential providers
+│   │   │   │   ├── docker/   # Docker client
+│   │   │   │   ├── lifecycle/# Container lifecycle
+│   │   │   │   └── registry/ # Agent type registry
+│   │   │   ├── task/         # Task management
+│   │   │   │   ├── api/      # Task HTTP handlers
+│   │   │   │   ├── models/   # Data models
+│   │   │   │   ├── repository/  # SQLite/Memory storage
+│   │   │   │   └── service/  # Business logic
+│   │   │   ├── orchestrator/ # Orchestration logic
+│   │   │   ├── events/       # In-memory event bus
+│   │   │   └── common/       # Shared utilities
+│   │   │       └── logger/   # Zap logger
+│   │   ├── pkg/acp/          # ACP protocol types
+│   │   │   └── jsonrpc/      # JSON-RPC 2.0 client
+│   │   ├── dockerfiles/      # Agent Dockerfiles
+│   │   │   └── augment-agent/
+│   │   ├── bin/              # Built binaries (gitignored)
+│   │   └── Makefile
+│   └── web/                  # Frontend application
+├── scripts/
+│   └── e2e-test.sh           # End-to-end test script
+└── docs/                     # Documentation
 ```
 
 ---
@@ -274,7 +277,7 @@ kill -9 <PID>
 
 ```bash
 # Delete and recreate database
-rm backend/kandev.db
+rm apps/backend/kandev.db
 ./bin/kandev  # Will create fresh database
 ```
 
@@ -295,4 +298,4 @@ docker rm $(docker ps -a -q --filter "label=kandev.managed=true")
 
 ## Next Steps
 
-See [NEXT_STEPS.md](../backend/NEXT_STEPS.md) for the development roadmap and immediate next steps.
+See [NEXT_STEPS.md](../apps/backend/NEXT_STEPS.md) for the development roadmap and immediate next steps.

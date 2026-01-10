@@ -370,12 +370,12 @@ Kandev uses the **Agent Communication Protocol (ACP)** - an open protocol for co
 
 The backend implements full ACP support with:
 
-1. **Session Management** (`backend/internal/agent/acp/session.go`)
+1. **Session Management** (`apps/backend/internal/agent/acp/session.go`)
    - Create sessions with `session/new`
    - Send prompts with `session/prompt`
    - Resume sessions with stored session IDs
 
-2. **JSON-RPC Client** (`backend/pkg/acp/jsonrpc/client.go`)
+2. **JSON-RPC Client** (`apps/backend/pkg/acp/jsonrpc/client.go`)
    - Handles responses to client requests
    - Handles notifications from agent (`session/update`)
    - Handles requests from agent (`session/request_permission`)

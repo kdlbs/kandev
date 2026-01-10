@@ -2,7 +2,7 @@
 # Orchestrates both backend (Go) and web app (Next.js)
 
 # Directories
-BACKEND_DIR := backend
+BACKEND_DIR := apps/backend
 WEB_DIR := apps/web
 
 # Tools

@@ -66,7 +66,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture docum
 ### Build and Run
 
 ```bash
-cd backend
+cd apps/backend
 
 # Build the binary
 make build
@@ -113,27 +113,29 @@ curl -X POST http://localhost:8080/api/v1/agents/launch \
 curl http://localhost:8080/api/v1/agents/{agent_id}/status
 ```
 
-See [backend/NEXT_STEPS.md](backend/NEXT_STEPS.md) for detailed API reference and next steps.
+See [apps/backend/NEXT_STEPS.md](apps/backend/NEXT_STEPS.md) for detailed API reference and next steps.
 
 ## Project Structure
 
 ```
 kandev/
-├── backend/
-│   ├── cmd/kandev/           # Unified binary entry point
-│   ├── internal/
-│   │   ├── agent/            # Agent manager (docker, lifecycle, registry, api)
-│   │   ├── task/             # Task service (models, repository, service, api)
-│   │   ├── orchestrator/     # Orchestrator service
-│   │   ├── events/           # In-memory event bus
-│   │   └── common/           # Shared utilities (logger, config)
-│   ├── dockerfiles/          # Agent container Dockerfiles
-│   ├── Makefile
-│   └── NEXT_STEPS.md         # Development roadmap
+├── apps/
+│   ├── backend/              # Go backend services
+│   │   ├── cmd/kandev/       # Unified binary entry point
+│   │   ├── internal/
+│   │   │   ├── agent/        # Agent manager (docker, lifecycle, registry, api)
+│   │   │   ├── task/         # Task service (models, repository, service, api)
+│   │   │   ├── orchestrator/ # Orchestrator service
+│   │   │   ├── events/       # In-memory event bus
+│   │   │   └── common/       # Shared utilities (logger, config)
+│   │   ├── pkg/acp/          # ACP protocol types
+│   │   ├── dockerfiles/      # Agent container Dockerfiles
+│   │   └── Makefile
+│   └── web/                  # Frontend application
 ├── docs/                     # Architecture and planning docs
 ├── migrations/               # Database migrations (future)
 ├── deployments/              # Deployment configs
-└── scripts/                  # Utility scripts
+└── scripts/                  # Utility scripts (including e2e-test.sh)
 ```
 
 ## Configuration
@@ -146,7 +148,7 @@ kandev/
 ## Development
 
 ```bash
-cd backend
+cd apps/backend
 
 # Build
 make build
@@ -177,7 +179,7 @@ go vet ./...
 - [ ] Authentication and authorization
 - [ ] Frontend UI
 
-See [backend/NEXT_STEPS.md](backend/NEXT_STEPS.md) for the complete roadmap.
+See [apps/backend/NEXT_STEPS.md](apps/backend/NEXT_STEPS.md) for the complete roadmap.
 
 ## License
 

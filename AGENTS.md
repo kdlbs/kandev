@@ -7,21 +7,65 @@
 
 ## Overview
 
-Kandev agents run in Docker containers and communicate via **ACP (Agent Communication Protocol)** - a JSON-RPC 2.0 protocol over stdin/stdout. This enables bidirectional communication for task execution with real-time progress updates.
+Kandev agents run in Docker containers with **agentctl** - a sidecar process that manages the AI agent and provides HTTP-based control. The agent communicates via **ACP (Agent Communication Protocol)** - a JSON-RPC 2.0 protocol over stdin/stdout.
 
 ```
-Backend                          Agent Container
-  │                                    │
-  │  initialize                        │
-  ├──────────────────────────────────► │
-  │◄──────────────────────────────────┤
-  │  session/prompt                    │
-  ├──────────────────────────────────► │
-  │  session/update (progress)         │
-  │◄──────────────────────────────────┤
-  │  session/update (complete)         │
-  │◄──────────────────────────────────┤
+Backend                    agentctl (HTTP)              Agent Process
+  │                             │                            │
+  │  POST /api/v1/start         │                            │
+  ├────────────────────────────►│  spawn auggie --acp        │
+  │                             ├───────────────────────────►│
+  │  POST /api/v1/acp/call      │  initialize                │
+  ├────────────────────────────►├───────────────────────────►│
+  │                             │◄───────────────────────────┤
+  │◄────────────────────────────┤                            │
+  │  WS /api/v1/acp/stream      │  session/update            │
+  │◄────────────────────────────┤◄───────────────────────────┤
+  │                             │                            │
 ```
+
+## Architecture
+
+### agentctl
+
+`agentctl` is an HTTP server that runs inside each agent container as a sidecar process. It:
+
+1. **Manages the agent subprocess** (e.g., `auggie --acp`)
+2. **Provides HTTP API** for control operations (start, stop, status)
+3. **Relays ACP messages** between HTTP clients and the agent's stdin/stdout
+4. **Streams output** via WebSocket for real-time monitoring
+
+### Communication Flow
+
+1. Backend creates container with agentctl as entrypoint
+2. agentctl starts HTTP server on port 9999
+3. Backend waits for agentctl to be ready (`GET /health`)
+4. Backend starts agent process (`POST /api/v1/start`)
+5. Backend sends ACP messages via HTTP (`POST /api/v1/acp/call`)
+6. Backend receives ACP updates via WebSocket (`GET /api/v1/acp/stream`)
+
+### agentctl HTTP API
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/health` | GET | Health check |
+| `/api/v1/status` | GET | Get agent status |
+| `/api/v1/start` | POST | Start agent process |
+| `/api/v1/stop` | POST | Stop agent process |
+| `/api/v1/acp/send` | POST | Send ACP message (fire and forget) |
+| `/api/v1/acp/call` | POST | Send ACP request, wait for response |
+| `/api/v1/acp/stream` | GET | WebSocket for ACP message streaming |
+| `/api/v1/output` | GET | Get buffered output |
+| `/api/v1/output/stream` | GET | WebSocket for real-time output |
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AGENTCTL_PORT` | 9999 | HTTP server port |
+| `AGENTCTL_AGENT_COMMAND` | `auggie --acp` | Command to run agent |
+| `AGENTCTL_AUTO_START` | false | Auto-start agent on startup |
+| `AGENTCTL_LOG_LEVEL` | info | Logging level |
 
 ---
 
@@ -248,15 +292,24 @@ Backend                          Agent Container
 
 ### Augment Agent (`augment-agent`)
 
-Primary AI coding agent powered by Auggie CLI.
+Primary AI coding agent powered by Auggie CLI with agentctl sidecar.
 
 **Docker Image**: `kandev/augment-agent:latest`
+
+**Architecture:**
+```
+Container
+├── agentctl (HTTP server on port 9999)
+│   └── manages → auggie --acp (subprocess)
+└── /workspace (mounted project directory)
+```
 
 **Specification:**
 - **Working Directory**: `/workspace`
 - **Memory**: 4096 MB
 - **CPU**: 2.0 cores
 - **Timeout**: 1 hour
+- **Exposed Port**: 9999 (agentctl HTTP API)
 - **Capabilities**: code_generation, code_review, refactoring, testing, shell_execution
 
 **Required Environment Variables:**
@@ -268,42 +321,80 @@ TASK_DESCRIPTION      # The task to execute
 **Optional Environment Variables:**
 ```bash
 AUGGIE_SESSION_ID     # Resume previous session
+AGENTCTL_AUTO_START   # Auto-start agent on container start
 ```
 
 **Mounted Volumes:**
 - `{workspace}` → `/workspace` - Project directory
 - `{augment_sessions}` → `/root/.augment/sessions` - Session persistence
 
-**Dockerfile**: `backend/dockerfiles/augment-agent/Dockerfile`
+**Dockerfile**: `apps/backend/dockerfiles/augment-agent/Dockerfile`
+
+**Building the Image:**
+```bash
+cd apps/backend
+docker build -t kandev/augment-agent:latest -f dockerfiles/augment-agent/Dockerfile .
+```
 
 ---
 
 ## Creating Custom Agents
 
-### Step 1: Create Dockerfile
+Custom agents can be created in two ways:
 
-Create `backend/dockerfiles/your-agent/Dockerfile`:
+### Option A: With agentctl (Recommended)
+
+Use the multi-stage Dockerfile pattern to include agentctl:
 
 ```dockerfile
+# Stage 1: Build agentctl
+FROM golang:1.23-alpine AS builder
+WORKDIR /build
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -o agentctl ./cmd/agentctl
+
+# Stage 2: Final image
 FROM ubuntu:22.04
 
-# Install dependencies
-RUN apt-get update && apt-get install -y \
-    curl jq git \
-    && rm -rf /var/lib/apt/lists/*
+# Install your agent dependencies
+RUN apt-get update && apt-get install -y curl jq git && rm -rf /var/lib/apt/lists/*
 
-# Copy agent script
+# Copy agentctl from builder
+COPY --from=builder /build/agentctl /usr/local/bin/agentctl
+
+# Copy your agent script
 COPY agent.sh /usr/local/bin/agent
 RUN chmod +x /usr/local/bin/agent
 
 WORKDIR /workspace
+EXPOSE 9999
 
-ENTRYPOINT ["/usr/local/bin/agent"]
+# Set agentctl as entrypoint
+ENV AGENTCTL_AGENT_COMMAND="/usr/local/bin/agent --acp"
+ENTRYPOINT ["/usr/local/bin/agentctl"]
 ```
 
-### Step 2: Implement ACP Protocol
+### Option B: Standalone ACP Agent
 
-Create `backend/dockerfiles/your-agent/agent.sh`:
+For simpler agents that don't need HTTP control:
+
+```dockerfile
+FROM ubuntu:22.04
+
+RUN apt-get update && apt-get install -y curl jq git && rm -rf /var/lib/apt/lists/*
+
+COPY agent.sh /usr/local/bin/agent
+RUN chmod +x /usr/local/bin/agent
+
+WORKDIR /workspace
+ENTRYPOINT ["/usr/local/bin/agent", "--acp"]
+```
+
+### Implementing ACP Protocol
+
+Create `agent.sh` that implements JSON-RPC 2.0:
 
 ```bash
 #!/bin/bash
@@ -311,15 +402,16 @@ set -e
 
 # ACP mode - JSON-RPC 2.0
 if [ "$1" = "--acp" ]; then
-    # Initialize response
-    echo '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"1.0","serverInfo":{"name":"your-agent","version":"1.0.0"},"capabilities":{"streaming":true}}}'
-
     # Read requests from stdin
     while IFS= read -r line; do
         METHOD=$(echo "$line" | jq -r '.method')
         ID=$(echo "$line" | jq -r '.id')
 
         case "$METHOD" in
+            "initialize")
+                echo '{"jsonrpc":"2.0","id":'$ID',"result":{"protocolVersion":"1.0","serverInfo":{"name":"your-agent","version":"1.0.0"},"capabilities":{"streaming":true}}}'
+                ;;
+
             "session/new")
                 SESSION_ID=$(uuidgen)
                 echo '{"jsonrpc":"2.0","id":'$ID',"result":{"sessionId":"'$SESSION_ID'"}}'
@@ -342,7 +434,6 @@ if [ "$1" = "--acp" ]; then
                 ;;
 
             "session/cancel")
-                # Handle cancellation
                 exit 0
                 ;;
         esac
@@ -350,9 +441,9 @@ if [ "$1" = "--acp" ]; then
 fi
 ```
 
-### Step 3: Register Agent Type
+### Register Agent Type
 
-Add to `backend/internal/agent/registry/defaults.go`:
+Add to `apps/backend/internal/agent/registry/defaults.go`:
 
 ```go
 {
@@ -373,7 +464,7 @@ Add to `backend/internal/agent/registry/defaults.go`:
 
 ```bash
 # Build image
-cd backend/dockerfiles/your-agent
+cd apps/backend/dockerfiles/your-agent
 docker build -t kandev/your-agent:latest .
 
 # Test locally
@@ -613,45 +704,75 @@ Prior versions used a simpler JSON format (not JSON-RPC). For compatibility refe
 6. **Validate messages** - Check for required fields before processing
 7. **Set exit codes** - 0 for success, non-zero for errors
 
-### Message Flow
+### Message Flow (with agentctl)
 
 ```
-1. Backend starts container
-2. Backend sends initialize
-3. Agent responds with capabilities
-4. Backend sends session/new
-5. Agent responds with sessionId
-6. Backend sends session/prompt
-7. Agent responds immediately (accepted: true)
-8. Agent sends multiple session/update notifications
-9. Agent sends final session/update (type: complete)
-10. Container exits
+1. Backend creates container with agentctl
+2. agentctl starts HTTP server on port 9999
+3. Backend waits for agentctl health check
+4. Backend calls POST /api/v1/start
+5. agentctl spawns agent subprocess
+6. Backend calls POST /api/v1/acp/call with initialize
+7. Agent responds with capabilities
+8. Backend calls POST /api/v1/acp/call with session/new
+9. Agent responds with sessionId
+10. Backend connects to WS /api/v1/acp/stream
+11. Backend calls POST /api/v1/acp/call with session/prompt
+12. Agent sends session/update notifications (streamed via WebSocket)
+13. Agent sends final session/update (type: complete)
+14. Backend calls POST /api/v1/stop or container exits
 ```
 
 ### Testing Your Agent
 
+**With agentctl:**
+```bash
+# Build and run container
+docker run -d -p 9999:9999 kandev/your-agent:latest
+
+# Check health
+curl http://localhost:9999/health
+
+# Start agent
+curl -X POST http://localhost:9999/api/v1/start
+
+# Send ACP message
+curl -X POST http://localhost:9999/api/v1/acp/call \
+  -H "Content-Type: application/json" \
+  -d '{"method":"initialize","params":{"protocolVersion":"1.0"}}'
+```
+
+**Direct ACP testing:**
 ```bash
 # Test initialize
 echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"1.0"}}' | \
-  docker run -i kandev/your-agent:latest --acp
+  docker run -i kandev/your-agent:latest /usr/local/bin/agent --acp
 
 # Test full flow
 (
   echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"1.0"}}'
   echo '{"jsonrpc":"2.0","id":2,"method":"session/new","params":{}}'
   echo '{"jsonrpc":"2.0","id":3,"method":"session/prompt","params":{"message":"test"}}'
-) | docker run -i kandev/your-agent:latest --acp
+) | docker run -i kandev/your-agent:latest /usr/local/bin/agent --acp
 ```
 
 ---
 
 ## Reference Implementation
 
-See `backend/dockerfiles/augment-agent/` for a complete working example:
+See `apps/backend/` for complete working examples:
 
-- **Dockerfile** - Container setup
-- **agent.sh** - Entry point and ACP handler
-- **README.md** - Usage instructions
+**agentctl:**
+- `cmd/agentctl/main.go` - Entry point
+- `internal/agentctl/` - HTTP server, process manager, ACP relay
+
+**Augment Agent:**
+- `dockerfiles/augment-agent/Dockerfile` - Multi-stage build with agentctl
+- `dockerfiles/augment-agent/entrypoint.sh` - Container entrypoint
+
+**Backend Integration:**
+- `internal/agent/agentctl/client.go` - HTTP client for agentctl
+- `internal/agent/lifecycle/manager.go` - Container lifecycle management
 
 ---
 
@@ -659,8 +780,9 @@ See `backend/dockerfiles/augment-agent/` for a complete working example:
 
 - **System Architecture**: [ARCHITECTURE.md](ARCHITECTURE.md)
 - **REST API Specification**: [docs/openapi.yaml](docs/openapi.yaml)
-- **Agent Registry**: `backend/internal/agent/registry/defaults.go`
-- **ACP Implementation**: `backend/internal/agent/acp/`
+- **Agent Registry**: `apps/backend/internal/agent/registry/defaults.go`
+- **agentctl Implementation**: `apps/backend/internal/agentctl/`
+- **ACP Protocol Types**: `apps/backend/pkg/acp/jsonrpc/`
 - **JSON-RPC 2.0 Spec**: https://www.jsonrpc.org/specification
 
 ---

@@ -53,7 +53,7 @@ make test
 - **Language**: TypeScript
 - **Port**: 3000
 
-### Backend (`backend/`)
+### Backend (`apps/backend/`)
 - **Language**: Go 1.21+
 - **Framework**: Gin (HTTP), Gorilla WebSocket
 - **Database**: SQLite (WAL mode)
@@ -74,16 +74,16 @@ make test
 ├── ARCHITECTURE.md        # This file
 ├── AGENTS.md             # Agent protocol details
 ├── apps/
-│   └── web/              # Next.js web application
-│       ├── app/          # Pages (App Router)
-│       ├── components/   # React components
-│       └── lib/          # Utilities
-├── backend/
-│   ├── cmd/kandev/       # Main entry point
-│   ├── internal/
-│   │   ├── agent/        # Agent manager (Docker, ACP, lifecycle)
-│   │   ├── task/         # Task service (CRUD, SQLite)
-│   │   ├── orchestrator/ # Task execution coordinator
+│   ├── web/              # Next.js web application
+│   │   ├── app/          # Pages (App Router)
+│   │   ├── components/   # React components
+│   │   └── lib/          # Utilities
+│   └── backend/          # Go backend services
+│       ├── cmd/kandev/   # Main entry point
+│       ├── internal/
+│       │   ├── agent/    # Agent manager (Docker, ACP, lifecycle)
+│       │   ├── task/     # Task service (CRUD, SQLite)
+│       │   ├── orchestrator/  # Task execution coordinator
 │   │   ├── events/       # Event bus (in-memory/NATS)
 │   │   ├── gateway/      # WebSocket gateway
 │   │   └── common/       # Shared utilities (config, logger, db)
@@ -251,7 +251,7 @@ curl -X POST http://localhost:8080/api/v1/agents/launch \
 
 **Location**: `./kandev.db` (SQLite with WAL mode)
 
-**Schema** (`backend/internal/task/repository/sqlite.go`):
+**Schema** (`apps/backend/internal/task/repository/sqlite.go`):
 - `boards` - Board records
 - `columns` - Column definitions with state mapping
 - `tasks` - Task records with JSON metadata
@@ -307,9 +307,9 @@ make test-web
 | `ARCHITECTURE.md` | This file |
 | `AGENTS.md` | Agent protocol details |
 | `docs/openapi.yaml` | REST API spec |
-| `backend/cmd/kandev/main.go` | Entry point |
-| `backend/internal/agent/registry/defaults.go` | Agent type registry |
-| `backend/internal/task/repository/sqlite.go` | Database schema |
+| `apps/backend/cmd/kandev/main.go` | Entry point |
+| `apps/backend/internal/agent/registry/defaults.go` | Agent type registry |
+| `apps/backend/internal/task/repository/sqlite.go` | Database schema |
 | `apps/web/app/page.tsx` | Web app home |
 
 ## Contributing
