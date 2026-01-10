@@ -101,31 +101,63 @@ curl -X POST http://localhost:8080/api/v1/boards/{board_id}/columns/{column_id}/
   -d '{"title": "Fix login bug", "description": "Users cannot login"}'
 ```
 
-### Launch an Agent
+### Create a Task with Agent
 
 ```bash
-# Get your Augment session auth
-SESSION_AUTH=$(cat ~/.augment/session.json)
-
-# Launch an agent
-curl -X POST http://localhost:8080/api/v1/agents/launch \
+# Create a task that will be executed by an AI agent
+curl -X POST http://localhost:8080/api/v1/tasks \
   -H "Content-Type: application/json" \
   -d '{
-    "task_id": "{task_id}",
+    "title": "Analyze codebase",
+    "description": "Provide an overview of the project structure",
+    "board_id": "{board_id}",
+    "column_id": "{column_id}",
     "agent_type": "augment-agent",
-    "workspace_path": "/path/to/your/project",
-    "env": {
-      "AUGMENT_SESSION_AUTH": "'$SESSION_AUTH'",
-      "TASK_DESCRIPTION": "Analyze this codebase"
-    }
+    "repository_url": "/path/to/your/project"
   }'
+```
+
+### Start Task via Orchestrator
+
+```bash
+# Start the task - this launches the agent container
+curl -X POST http://localhost:8080/api/v1/orchestrator/tasks/{task_id}/start \
+  -H "Content-Type: application/json"
 ```
 
 ### Check Agent Status
 
 ```bash
 curl http://localhost:8080/api/v1/agents/{agent_id}/status
+
+# List all agents
+curl http://localhost:8080/api/v1/agents
 ```
+
+---
+
+## Running the End-to-End Test
+
+The project includes a comprehensive E2E test script:
+
+```bash
+# Build the agent Docker image first
+cd backend/dockerfiles/augment-agent
+docker build -t kandev/augment-agent:latest .
+
+# Run the E2E test
+cd /path/to/kandev
+./scripts/e2e-test.sh
+```
+
+The E2E test:
+1. Starts the server with a fresh database
+2. Creates a board, column, and task
+3. Starts the task via the orchestrator
+4. Verifies the agent container starts
+5. Checks that ACP session is created
+6. Verifies permission requests are handled
+7. Waits for agent to complete
 
 ---
 
@@ -190,7 +222,9 @@ backend/
 │   └── main.go
 ├── internal/
 │   ├── agent/            # Agent management
+│   │   ├── acp/          # ACP session management
 │   │   ├── api/          # Agent HTTP handlers
+│   │   ├── credentials/  # Credential providers
 │   │   ├── docker/       # Docker client
 │   │   ├── lifecycle/    # Container lifecycle
 │   │   └── registry/     # Agent type registry
@@ -203,11 +237,15 @@ backend/
 │   ├── events/           # In-memory event bus
 │   └── common/           # Shared utilities
 │       └── logger/       # Zap logger
+├── pkg/acp/              # ACP protocol types
+│   └── jsonrpc/          # JSON-RPC 2.0 client
 ├── dockerfiles/          # Agent Dockerfiles
 │   └── augment-agent/
 ├── bin/                  # Built binaries (gitignored)
 ├── Makefile
 └── NEXT_STEPS.md         # Development roadmap
+scripts/
+└── e2e-test.sh           # End-to-end test script
 ```
 
 ---

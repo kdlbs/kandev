@@ -3,6 +3,7 @@ package docker
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"net"
@@ -482,13 +483,63 @@ func (c *Client) AttachContainer(ctx context.Context, containerID string) (*Atta
 		io.Copy(resp.Conn, stdinReader)
 	}()
 
+	// Create a pipe for demultiplexed stdout
+	// Docker sends multiplexed streams when Tty=false with 8-byte headers
+	stdoutReader, stdoutWriter := io.Pipe()
+
+	// Start goroutine to demultiplex stdout/stderr
+	go func() {
+		defer stdoutWriter.Close()
+		c.demultiplexStream(resp.Reader, stdoutWriter)
+	}()
+
 	c.logger.Info("Attached to container", zap.String("container_id", containerID))
 
 	return &AttachResult{
 		Stdin:  stdinWriter,
-		Stdout: resp.Reader, // This is a multiplexed stream (stdout + stderr)
+		Stdout: stdoutReader, // Demultiplexed stdout stream
 		Conn:   resp.Conn,
 	}, nil
+}
+
+// demultiplexStream reads Docker's multiplexed stream format and writes only stdout to the writer.
+// Docker stream format when Tty=false:
+// - Byte 0: Stream type (0=stdin, 1=stdout, 2=stderr)
+// - Bytes 1-3: Reserved
+// - Bytes 4-7: Frame size (big endian uint32)
+// - Bytes 8+: Frame data
+func (c *Client) demultiplexStream(reader io.Reader, writer io.Writer) {
+	header := make([]byte, 8)
+	for {
+		// Read the 8-byte header
+		_, err := io.ReadFull(reader, header)
+		if err != nil {
+			if err != io.EOF {
+				c.logger.Debug("demultiplex stream ended", zap.Error(err))
+			}
+			return
+		}
+
+		// Parse header
+		streamType := header[0]
+		size := binary.BigEndian.Uint32(header[4:8])
+
+		// Read the frame data
+		if size > 0 {
+			data := make([]byte, size)
+			_, err := io.ReadFull(reader, data)
+			if err != nil {
+				c.logger.Debug("failed to read frame data", zap.Error(err))
+				return
+			}
+
+			// Write stdout (type 1) and stderr (type 2) to writer
+			// We want both for ACP since errors should be visible
+			if streamType == 1 || streamType == 2 {
+				writer.Write(data)
+			}
+		}
+	}
 }
 
 // Close closes the attach result

@@ -38,12 +38,13 @@ type AgentManagerClient interface {
 
 // LaunchAgentRequest contains parameters for launching an agent
 type LaunchAgentRequest struct {
-	TaskID        string
-	AgentType     string
-	RepositoryURL string
-	Branch        string
-	Priority      int
-	Metadata      map[string]interface{}
+	TaskID          string
+	AgentType       string
+	RepositoryURL   string
+	Branch          string
+	TaskDescription string // Task description to send via ACP prompt
+	Priority        int
+	Metadata        map[string]interface{}
 }
 
 // LaunchAgentResponse contains the result of launching an agent
@@ -112,10 +113,11 @@ func (e *Executor) Execute(ctx context.Context, task *v1.Task) (*TaskExecution, 
 
 	// Create a LaunchAgentRequest from the task
 	req := &LaunchAgentRequest{
-		TaskID:    task.ID,
-		AgentType: *task.AgentType,
-		Priority:  task.Priority,
-		Metadata:  task.Metadata,
+		TaskID:          task.ID,
+		AgentType:       *task.AgentType,
+		TaskDescription: task.Description,
+		Priority:        task.Priority,
+		Metadata:        task.Metadata,
 	}
 	if task.RepositoryURL != nil {
 		req.RepositoryURL = *task.RepositoryURL

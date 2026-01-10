@@ -54,11 +54,14 @@ const (
 
 	// Agent -> Client notifications
 	NotificationSessionUpdate = "session/update"
+
+	// Agent -> Client requests (require response)
+	MethodRequestPermission = "session/request_permission"
 )
 
 // InitializeParams for initialize method
 type InitializeParams struct {
-	ProtocolVersion string              `json:"protocolVersion"`
+	ProtocolVersion int                 `json:"protocolVersion"`
 	ClientInfo      ClientInfo          `json:"clientInfo"`
 	Capabilities    ClientCapabilities  `json:"capabilities,omitempty"`
 }
@@ -76,7 +79,7 @@ type ClientCapabilities struct {
 
 // InitializeResult from initialize method
 type InitializeResult struct {
-	ProtocolVersion string             `json:"protocolVersion"`
+	ProtocolVersion int                `json:"protocolVersion"`
 	ServerInfo      ServerInfo         `json:"serverInfo"`
 	Capabilities    ServerCapabilities `json:"capabilities,omitempty"`
 }
@@ -94,7 +97,15 @@ type ServerCapabilities struct {
 
 // SessionNewParams for session/new method
 type SessionNewParams struct {
-	// Empty for now, may include workspace config later
+	Cwd        string      `json:"cwd"`        // Working directory for the session
+	McpServers []McpServer `json:"mcpServers"` // MCP servers (required, can be empty array)
+}
+
+// McpServer configuration for MCP servers
+type McpServer struct {
+	Name    string `json:"name"`
+	Command string `json:"command"`
+	Args    []string `json:"args,omitempty"`
 }
 
 // SessionNewResult from session/new method
@@ -102,9 +113,19 @@ type SessionNewResult struct {
 	SessionID string `json:"sessionId"`
 }
 
+// ContentBlock represents a content block in ACP protocol
+// The prompt field in session/prompt is an array of ContentBlock
+type ContentBlock struct {
+	Type string `json:"type"` // "text", "resource", "image", etc.
+	Text string `json:"text,omitempty"` // For type="text"
+	// Resource *ResourceContent `json:"resource,omitempty"` // For type="resource" (not implemented yet)
+}
+
 // SessionPromptParams for session/prompt method
+// According to ACP protocol, prompt is an array of ContentBlock, not a string
 type SessionPromptParams struct {
-	Message string `json:"message"`
+	SessionID string         `json:"sessionId"` // Session ID from session/new
+	Prompt    []ContentBlock `json:"prompt"`    // Array of content blocks
 }
 
 // SessionPromptResult from session/prompt method
@@ -153,3 +174,33 @@ type SessionUpdateComplete struct {
 	Success   bool   `json:"success"`
 }
 
+// RequestPermissionParams for session/request_permission request from agent
+type RequestPermissionParams struct {
+	SessionID string                  `json:"sessionId"`
+	ToolCall  ToolCallUpdate          `json:"toolCall"`
+	Options   []PermissionOption      `json:"options"`
+}
+
+// ToolCallUpdate contains tool call information in permission requests
+type ToolCallUpdate struct {
+	ToolCallID string `json:"toolCallId"`
+	Title      string `json:"title,omitempty"`
+}
+
+// PermissionOption represents a permission choice
+type PermissionOption struct {
+	OptionID string `json:"optionId"`
+	Name     string `json:"name"`
+	Kind     string `json:"kind"` // allow_once, allow_always, reject_once, reject_always
+}
+
+// RequestPermissionResult is the response to session/request_permission
+type RequestPermissionResult struct {
+	Outcome PermissionOutcome `json:"outcome"`
+}
+
+// PermissionOutcome represents the user's decision
+type PermissionOutcome struct {
+	Outcome  string `json:"outcome"`  // "selected" or "cancelled"
+	OptionID string `json:"optionId,omitempty"` // Only present when outcome="selected"
+}

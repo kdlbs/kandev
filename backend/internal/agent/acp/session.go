@@ -80,6 +80,11 @@ func (m *SessionManager) CreateSession(ctx context.Context, instanceID, taskID s
 		m.handleNotification(session, method, params)
 	})
 
+	// Set request handler for agent-to-client requests (like session/request_permission)
+	client.SetRequestHandler(func(id interface{}, method string, params json.RawMessage) {
+		m.handleRequest(session, id, method, params)
+	})
+
 	// Start the client read loop
 	client.Start(ctx)
 
@@ -101,7 +106,7 @@ func (m *SessionManager) Initialize(ctx context.Context, instanceID string) erro
 	m.logger.Info("Initializing ACP session", zap.String("instance_id", instanceID))
 
 	params := jsonrpc.InitializeParams{
-		ProtocolVersion: "1.0",
+		ProtocolVersion: 1,
 		ClientInfo: jsonrpc.ClientInfo{
 			Name:    "kandev",
 			Version: "0.1.0",
@@ -129,15 +134,22 @@ func (m *SessionManager) Initialize(ctx context.Context, instanceID string) erro
 }
 
 // NewSession creates a new ACP session (session/new)
-func (m *SessionManager) NewSession(ctx context.Context, instanceID string) (string, error) {
+func (m *SessionManager) NewSession(ctx context.Context, instanceID, cwd string) (string, error) {
 	session, err := m.getSession(instanceID)
 	if err != nil {
 		return "", err
 	}
 
-	m.logger.Info("Creating new ACP session", zap.String("instance_id", instanceID))
+	m.logger.Info("Creating new ACP session",
+		zap.String("instance_id", instanceID),
+		zap.String("cwd", cwd))
 
-	resp, err := session.Client.Call(ctx, jsonrpc.MethodSessionNew, jsonrpc.SessionNewParams{})
+	params := jsonrpc.SessionNewParams{
+		Cwd:        cwd,
+		McpServers: []jsonrpc.McpServer{}, // Empty array, no MCP servers for now
+	}
+
+	resp, err := session.Client.Call(ctx, jsonrpc.MethodSessionNew, params)
 	if err != nil {
 		return "", fmt.Errorf("session/new failed: %w", err)
 	}
@@ -201,16 +213,32 @@ func (m *SessionManager) Prompt(ctx context.Context, instanceID, message string)
 		return err
 	}
 
+	session.mu.RLock()
+	sessionID := session.SessionID
+	session.mu.RUnlock()
+
+	if sessionID == "" {
+		return fmt.Errorf("no session ID available, call NewSession first")
+	}
+
 	m.logger.Info("Sending prompt to agent",
 		zap.String("instance_id", instanceID),
-		zap.String("message_length", fmt.Sprintf("%d", len(message))))
+		zap.String("session_id", sessionID),
+		zap.Int("message_length", len(message)))
 
 	session.mu.Lock()
 	session.Status = "prompting"
 	session.mu.Unlock()
 
+	// ACP protocol requires prompt to be an array of ContentBlock
 	params := jsonrpc.SessionPromptParams{
-		Message: message,
+		SessionID: sessionID,
+		Prompt: []jsonrpc.ContentBlock{
+			{
+				Type: "text",
+				Text: message,
+			},
+		},
 	}
 
 	resp, err := session.Client.Call(ctx, jsonrpc.MethodSessionPrompt, params)
@@ -328,3 +356,79 @@ func (m *SessionManager) GetSessionID(instanceID string) (string, bool) {
 	return session.SessionID, session.SessionID != ""
 }
 
+// handleRequest handles incoming requests from the agent (e.g., session/request_permission)
+func (m *SessionManager) handleRequest(session *Session, id interface{}, method string, params json.RawMessage) {
+	m.logger.Info("Received request from agent",
+		zap.String("instance_id", session.InstanceID),
+		zap.String("method", method),
+		zap.Any("id", id))
+
+	switch method {
+	case jsonrpc.MethodRequestPermission:
+		m.handleRequestPermission(session, id, params)
+	default:
+		m.logger.Warn("Unknown request method from agent", zap.String("method", method))
+		// Send error response for unknown methods
+		session.Client.SendResponse(id, nil, &jsonrpc.Error{
+			Code:    jsonrpc.MethodNotFound,
+			Message: fmt.Sprintf("Unknown method: %s", method),
+		})
+	}
+}
+
+// handleRequestPermission handles session/request_permission requests from the agent
+func (m *SessionManager) handleRequestPermission(session *Session, id interface{}, params json.RawMessage) {
+	var reqParams jsonrpc.RequestPermissionParams
+	if err := json.Unmarshal(params, &reqParams); err != nil {
+		m.logger.Error("Failed to parse request_permission params", zap.Error(err))
+		session.Client.SendResponse(id, nil, &jsonrpc.Error{
+			Code:    jsonrpc.InvalidParams,
+			Message: "Invalid params",
+		})
+		return
+	}
+
+	m.logger.Info("Agent requesting permission",
+		zap.String("instance_id", session.InstanceID),
+		zap.String("session_id", reqParams.SessionID),
+		zap.String("tool_call_id", reqParams.ToolCall.ToolCallID),
+		zap.String("title", reqParams.ToolCall.Title),
+		zap.Int("num_options", len(reqParams.Options)))
+
+	// Auto-approve: find the first "allow" option and select it
+	// In a real implementation, this would prompt the user or check policies
+	var selectedOptionID string
+	for _, opt := range reqParams.Options {
+		if opt.Kind == "allow_once" || opt.Kind == "allow_always" {
+			selectedOptionID = opt.OptionID
+			m.logger.Info("Auto-approving permission request",
+				zap.String("option_id", selectedOptionID),
+				zap.String("option_name", opt.Name),
+				zap.String("kind", opt.Kind))
+			break
+		}
+	}
+
+	// If no allow option found, use the first option
+	if selectedOptionID == "" && len(reqParams.Options) > 0 {
+		selectedOptionID = reqParams.Options[0].OptionID
+		m.logger.Info("No allow option found, using first option",
+			zap.String("option_id", selectedOptionID))
+	}
+
+	// Send response
+	result := jsonrpc.RequestPermissionResult{
+		Outcome: jsonrpc.PermissionOutcome{
+			Outcome:  "selected",
+			OptionID: selectedOptionID,
+		},
+	}
+
+	if err := session.Client.SendResponse(id, result, nil); err != nil {
+		m.logger.Error("Failed to send permission response", zap.Error(err))
+	} else {
+		m.logger.Info("Sent permission response",
+			zap.String("instance_id", session.InstanceID),
+			zap.String("selected_option", selectedOptionID))
+	}
+}

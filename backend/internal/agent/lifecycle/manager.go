@@ -42,23 +42,29 @@ type AgentInstance struct {
 
 // LaunchRequest contains parameters for launching an agent
 type LaunchRequest struct {
-	TaskID        string
-	AgentType     string
-	WorkspacePath string                 // Host path to workspace
-	Env           map[string]string      // Additional env vars
-	Metadata      map[string]interface{}
+	TaskID          string
+	AgentType       string
+	WorkspacePath   string                 // Host path to workspace
+	TaskDescription string                 // Task description to send via ACP prompt
+	Env             map[string]string      // Additional env vars
+	Metadata        map[string]interface{}
 }
 
 // ACPManager interface for ACP session management
 type ACPManager interface {
 	CreateSession(ctx context.Context, instanceID, taskID string, stdin io.WriteCloser, stdout io.Reader) error
 	Initialize(ctx context.Context, instanceID string) error
-	NewSession(ctx context.Context, instanceID string) (string, error)
+	NewSession(ctx context.Context, instanceID, cwd string) (string, error)
 	LoadSession(ctx context.Context, instanceID, sessionID string) error
 	Prompt(ctx context.Context, instanceID, message string) error
 	Cancel(ctx context.Context, instanceID, reason string) error
 	CloseSession(instanceID string) error
 	GetSessionID(instanceID string) (string, bool)
+}
+
+// CredentialsManager interface for credential retrieval
+type CredentialsManager interface {
+	GetCredentialValue(ctx context.Context, key string) (value string, err error)
 }
 
 // Manager manages agent instance lifecycles
@@ -67,6 +73,7 @@ type Manager struct {
 	registry *registry.Registry
 	eventBus bus.EventBus
 	acpMgr   ACPManager
+	credsMgr CredentialsManager
 	logger   *logger.Logger
 
 	// Track active instances
@@ -104,6 +111,11 @@ func NewManager(
 // SetACPManager sets the ACP session manager
 func (m *Manager) SetACPManager(acpMgr ACPManager) {
 	m.acpMgr = acpMgr
+}
+
+// SetCredentialsManager sets the credentials manager for injecting secrets
+func (m *Manager) SetCredentialsManager(credsMgr CredentialsManager) {
+	m.credsMgr = credsMgr
 }
 
 // Start starts the lifecycle manager background tasks
@@ -213,6 +225,8 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentInstanc
 						zap.Error(err))
 				} else {
 					// Create or load session based on metadata
+					// The workspace is mounted at /workspace inside the container
+					containerCwd := "/workspace"
 					var sessionID string
 					if req.Metadata != nil {
 						if existingSessionID, ok := req.Metadata["auggie_session_id"].(string); ok && existingSessionID != "" {
@@ -222,15 +236,15 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentInstanc
 									zap.String("instance_id", instanceID),
 									zap.String("existing_session_id", existingSessionID),
 									zap.Error(err))
-								sessionID, _ = m.acpMgr.NewSession(context.Background(), instanceID)
+								sessionID, _ = m.acpMgr.NewSession(context.Background(), instanceID, containerCwd)
 							} else {
 								sessionID = existingSessionID
 							}
 						} else {
-							sessionID, _ = m.acpMgr.NewSession(context.Background(), instanceID)
+							sessionID, _ = m.acpMgr.NewSession(context.Background(), instanceID, containerCwd)
 						}
 					} else {
-						sessionID, _ = m.acpMgr.NewSession(context.Background(), instanceID)
+						sessionID, _ = m.acpMgr.NewSession(context.Background(), instanceID, containerCwd)
 					}
 
 					m.logger.Info("ACP session ready",
@@ -238,11 +252,15 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentInstanc
 						zap.String("session_id", sessionID))
 
 					// Send the initial prompt with the task description
-					if taskDesc, ok := req.Env["TASK_DESCRIPTION"]; ok && taskDesc != "" {
-						if err := m.acpMgr.Prompt(context.Background(), instanceID, taskDesc); err != nil {
+					if req.TaskDescription != "" {
+						if err := m.acpMgr.Prompt(context.Background(), instanceID, req.TaskDescription); err != nil {
 							m.logger.Warn("failed to send initial prompt",
 								zap.String("instance_id", instanceID),
 								zap.Error(err))
+						} else {
+							m.logger.Info("sent initial prompt to agent",
+								zap.String("instance_id", instanceID),
+								zap.String("task_description", req.TaskDescription))
 						}
 					}
 				}
@@ -297,6 +315,20 @@ func (m *Manager) buildContainerConfig(instanceID string, req *LaunchRequest, ag
 	if req.Metadata != nil {
 		if sessionID, ok := req.Metadata["auggie_session_id"].(string); ok && sessionID != "" {
 			env = append(env, fmt.Sprintf("AUGGIE_SESSION_ID=%s", sessionID))
+		}
+	}
+
+	// Inject required credentials from credentials manager
+	if m.credsMgr != nil && len(agentConfig.RequiredEnv) > 0 {
+		for _, key := range agentConfig.RequiredEnv {
+			value, err := m.credsMgr.GetCredentialValue(context.Background(), key)
+			if err != nil {
+				m.logger.Warn("required credential not found",
+					zap.String("key", key),
+					zap.Error(err))
+				continue
+			}
+			env = append(env, fmt.Sprintf("%s=%s", key, value))
 		}
 	}
 

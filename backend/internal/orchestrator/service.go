@@ -232,11 +232,23 @@ func (s *Service) StartTask(ctx context.Context, taskID string, agentType string
 		zap.String("agent_type", agentType),
 		zap.Int("priority", priority))
 
-	task := &v1.Task{
-		ID:        taskID,
-		AgentType: &agentType,
-		Priority:  priority,
+	// Fetch the task from the repository to get complete task info
+	task, err := s.scheduler.GetTask(ctx, taskID)
+	if err != nil {
+		s.logger.Error("failed to fetch task for manual start",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return nil, err
 	}
+
+	// Override agent_type and priority if provided in the request
+	if agentType != "" {
+		task.AgentType = &agentType
+	}
+	if priority > 0 {
+		task.Priority = priority
+	}
+
 	return s.executor.Execute(ctx, task)
 }
 

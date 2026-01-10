@@ -35,15 +35,17 @@ func NewService(repo repository.Repository, eventBus bus.EventBus, log *logger.L
 
 // CreateTaskRequest contains the data for creating a new task
 type CreateTaskRequest struct {
-	BoardID     string                 `json:"board_id"`
-	ColumnID    string                 `json:"column_id"`
-	Title       string                 `json:"title"`
-	Description string                 `json:"description"`
-	Priority    int                    `json:"priority"`
-	AgentType   string                 `json:"agent_type,omitempty"`
-	AssignedTo  string                 `json:"assigned_to,omitempty"`
-	Position    int                    `json:"position"`
-	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+	BoardID       string                 `json:"board_id"`
+	ColumnID      string                 `json:"column_id"`
+	Title         string                 `json:"title"`
+	Description   string                 `json:"description"`
+	Priority      int                    `json:"priority"`
+	AgentType     string                 `json:"agent_type,omitempty"`
+	RepositoryURL string                 `json:"repository_url,omitempty"`
+	Branch        string                 `json:"branch,omitempty"`
+	AssignedTo    string                 `json:"assigned_to,omitempty"`
+	Position      int                    `json:"position"`
+	Metadata      map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // UpdateTaskRequest contains the data for updating a task
@@ -83,17 +85,19 @@ type CreateColumnRequest struct {
 // CreateTask creates a new task and publishes a task.created event
 func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*models.Task, error) {
 	task := &models.Task{
-		ID:          uuid.New().String(),
-		BoardID:     req.BoardID,
-		ColumnID:    req.ColumnID,
-		Title:       req.Title,
-		Description: req.Description,
-		State:       v1.TaskStateTODO,
-		Priority:    req.Priority,
-		AgentType:   req.AgentType,
-		AssignedTo:  req.AssignedTo,
-		Position:    req.Position,
-		Metadata:    req.Metadata,
+		ID:            uuid.New().String(),
+		BoardID:       req.BoardID,
+		ColumnID:      req.ColumnID,
+		Title:         req.Title,
+		Description:   req.Description,
+		State:         v1.TaskStateTODO,
+		Priority:      req.Priority,
+		AgentType:     req.AgentType,
+		RepositoryURL: req.RepositoryURL,
+		Branch:        req.Branch,
+		AssignedTo:    req.AssignedTo,
+		Position:      req.Position,
+		Metadata:      req.Metadata,
 	}
 
 	if err := s.repo.CreateTask(ctx, task); err != nil {

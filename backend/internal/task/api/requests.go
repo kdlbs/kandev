@@ -5,13 +5,15 @@ import "time"
 
 // CreateTaskRequest for creating a task
 type CreateTaskRequest struct {
-	BoardID     string                 `json:"board_id" binding:"required"`
-	ColumnID    string                 `json:"column_id" binding:"required"`
-	Title       string                 `json:"title" binding:"required"`
-	Description string                 `json:"description"`
-	Priority    int                    `json:"priority"`
-	AgentType   string                 `json:"agent_type,omitempty"`
-	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+	BoardID       string                 `json:"board_id" binding:"required"`
+	ColumnID      string                 `json:"column_id" binding:"required"`
+	Title         string                 `json:"title" binding:"required"`
+	Description   string                 `json:"description"`
+	Priority      int                    `json:"priority"`
+	AgentType     string                 `json:"agent_type,omitempty"`
+	RepositoryURL string                 `json:"repository_url,omitempty"`
+	Branch        string                 `json:"branch,omitempty"`
+	Metadata      map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // UpdateTaskRequest for updating a task
@@ -57,18 +59,20 @@ type CreateColumnRequest struct {
 
 // TaskResponse represents a task in API responses
 type TaskResponse struct {
-	ID          string                 `json:"id"`
-	BoardID     string                 `json:"board_id"`
-	ColumnID    string                 `json:"column_id"`
-	Title       string                 `json:"title"`
-	Description string                 `json:"description"`
-	State       string                 `json:"state"`
-	Priority    int                    `json:"priority"`
-	AgentType   string                 `json:"agent_type,omitempty"`
-	Position    int                    `json:"position"`
-	CreatedAt   time.Time              `json:"created_at"`
-	UpdatedAt   time.Time              `json:"updated_at"`
-	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+	ID            string                 `json:"id"`
+	BoardID       string                 `json:"board_id"`
+	ColumnID      string                 `json:"column_id"`
+	Title         string                 `json:"title"`
+	Description   string                 `json:"description"`
+	State         string                 `json:"state"`
+	Priority      int                    `json:"priority"`
+	AgentType     string                 `json:"agent_type,omitempty"`
+	RepositoryURL string                 `json:"repository_url,omitempty"`
+	Branch        string                 `json:"branch,omitempty"`
+	Position      int                    `json:"position"`
+	CreatedAt     time.Time              `json:"created_at"`
+	UpdatedAt     time.Time              `json:"updated_at"`
+	Metadata      map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // BoardResponse represents a board in API responses

@@ -56,6 +56,15 @@ func (m *Manager) AddProvider(provider CredentialProvider) {
 	m.logger.Info("added credential provider", zap.String("provider", provider.Name()))
 }
 
+// GetCredentialValue retrieves just the value of a credential (implements lifecycle.CredentialsManager)
+func (m *Manager) GetCredentialValue(ctx context.Context, key string) (string, error) {
+	cred, err := m.GetCredential(ctx, key)
+	if err != nil {
+		return "", err
+	}
+	return cred.Value, nil
+}
+
 // GetCredential retrieves a credential from providers
 func (m *Manager) GetCredential(ctx context.Context, key string) (*Credential, error) {
 	// Check cache first

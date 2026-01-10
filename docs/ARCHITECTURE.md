@@ -11,6 +11,8 @@ The current implementation uses a **unified binary architecture** instead of sep
 - ✅ **SQLite database** for persistence (instead of PostgreSQL)
 - ✅ **In-memory event bus** (instead of NATS)
 - ✅ **Docker-based agent execution** with ACP streaming
+- ✅ **Native ACP (Agent Communication Protocol)** - JSON-RPC 2.0 over stdin/stdout
+- ✅ **Permission request handling** - Auto-approval of workspace indexing and tool permissions
 - ✅ **Session resumption** for multi-turn agent conversations
 - 📋 WebSocket support for real-time frontend streaming
 - 📋 JWT authentication
@@ -354,149 +356,169 @@ Workspace Mount (Read-Write):
 
 ### Protocol Overview
 
-ACP is a JSON-based streaming protocol for real-time bidirectional communication between AI agents and the backend system.
+Kandev uses the **Agent Communication Protocol (ACP)** - an open protocol for communication between AI agents and client applications. The implementation follows the official ACP specification using **JSON-RPC 2.0 over stdin/stdout**.
+
+**Reference:** https://agentclientprotocol.com
 
 **Key Characteristics:**
-- **Streaming**: Continuous message flow during agent execution
-- **Structured**: JSON format for consistency and parsing
-- **Real-time**: Low-latency delivery to frontend
-- **Bidirectional**: Agents send updates, backend can send control commands
+- **JSON-RPC 2.0**: Standard request/response/notification format
+- **Bidirectional**: Client sends requests, agent sends responses/notifications/requests
+- **Session-based**: All communication happens within a session context
+- **Permission model**: Agent requests permissions before tool execution
 
-### ACP Message Format
+### Current Implementation ✅
+
+The backend implements full ACP support with:
+
+1. **Session Management** (`backend/internal/agent/acp/session.go`)
+   - Create sessions with `session/new`
+   - Send prompts with `session/prompt`
+   - Resume sessions with stored session IDs
+
+2. **JSON-RPC Client** (`backend/pkg/acp/jsonrpc/client.go`)
+   - Handles responses to client requests
+   - Handles notifications from agent (`session/update`)
+   - Handles requests from agent (`session/request_permission`)
+
+3. **Permission Handling**
+   - Auto-approves workspace indexing permissions
+   - Auto-approves tool execution permissions (selects first "allow" option)
+
+### ACP Message Types
+
+**1. Client → Agent Requests**
 
 ```json
+// session/new - Create a new session
 {
-  "type": "progress|log|result|error|status|heartbeat",
-  "timestamp": "2026-01-09T10:30:00Z",
-  "agent_id": "uuid",
-  "task_id": "uuid",
-  "data": {
-    // Type-specific data
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "session/new",
+  "params": {
+    "cwd": "/workspace",
+    "mcpServers": []
+  }
+}
+
+// session/prompt - Send a prompt to the agent
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "session/prompt",
+  "params": {
+    "sessionId": "uuid",
+    "content": [{"type": "text", "text": "Analyze this code"}]
   }
 }
 ```
 
-### Message Types
+**2. Agent → Client Responses**
 
-**1. Progress Messages**
 ```json
 {
-  "type": "progress",
-  "timestamp": "2026-01-09T10:30:15Z",
-  "agent_id": "agent-123",
-  "task_id": "task-456",
-  "data": {
-    "progress": 45,
-    "message": "Analyzing file: src/main.go",
-    "current_file": "src/main.go",
-    "files_processed": 23,
-    "total_files": 51
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "sessionId": "uuid",
+    "status": "ok"
   }
 }
 ```
 
-**2. Log Messages**
+**3. Agent → Client Notifications**
+
 ```json
+// session/update - Progress updates
 {
-  "type": "log",
-  "timestamp": "2026-01-09T10:30:16Z",
-  "agent_id": "agent-123",
-  "task_id": "task-456",
-  "data": {
-    "level": "info",
-    "message": "Found 3 potential issues in authentication module",
-    "metadata": {
-      "module": "auth",
-      "issues": 3
+  "jsonrpc": "2.0",
+  "method": "session/update",
+  "params": {
+    "sessionId": "uuid",
+    "content": [{"type": "text", "text": "Analyzing..."}],
+    "stopReason": null
+  }
+}
+
+// session/update - Completion
+{
+  "jsonrpc": "2.0",
+  "method": "session/update",
+  "params": {
+    "sessionId": "uuid",
+    "content": [{"type": "text", "text": "Done!"}],
+    "stopReason": "end_turn"
+  }
+}
+```
+
+**4. Agent → Client Requests (Permissions)**
+
+```json
+// session/request_permission - Agent requests permission
+{
+  "jsonrpc": "2.0",
+  "id": 5,
+  "method": "session/request_permission",
+  "params": {
+    "sessionId": "uuid",
+    "toolCall": {
+      "toolCallId": "workspace-indexing-permission",
+      "title": "Workspace Indexing Permission"
+    },
+    "options": [
+      {"optionId": "enable", "name": "Enable indexing", "kind": "allow_always"},
+      {"optionId": "disable", "name": "Disable indexing", "kind": "reject_always"}
+    ]
+  }
+}
+
+// Client responds with selected option
+{
+  "jsonrpc": "2.0",
+  "id": 5,
+  "result": {
+    "outcome": {
+      "outcome": "selected",
+      "optionId": "enable"
     }
   }
 }
 ```
 
-**3. Result Messages**
-```json
-{
-  "type": "result",
-  "timestamp": "2026-01-09T10:35:00Z",
-  "agent_id": "agent-123",
-  "task_id": "task-456",
-  "data": {
-    "status": "completed",
-    "summary": "Analysis complete. Found 12 issues, suggested 8 improvements.",
-    "artifacts": [
-      {
-        "type": "report",
-        "path": "/workspace/analysis_report.md"
-      }
-    ]
-  }
-}
-```
-
-**4. Error Messages**
-```json
-{
-  "type": "error",
-  "timestamp": "2026-01-09T10:32:00Z",
-  "agent_id": "agent-123",
-  "task_id": "task-456",
-  "data": {
-    "error": "Failed to parse file",
-    "file": "src/broken.go",
-    "details": "syntax error at line 45"
-  }
-}
-```
-
-### ACP Flow Through System
+### ACP Flow Through System (Current Implementation)
 
 ```
-┌─────────────────┐
-│  AI Agent       │
-│  Container      │
-│                 │
-│  Writes to      │
-│  stdout:        │
-│  {"type":...}   │
-└────────┬────────┘
-         │ Docker logs API
-         ▼
-┌─────────────────┐
-│ Agent Manager   │
-│                 │
-│ - Captures      │
-│ - Parses JSON   │
-│ - Validates     │
-└────────┬────────┘
-         │ NATS publish
-         │ Subject: acp.message.{task_id}
-         ▼
-┌─────────────────┐
-│ NATS Event Bus  │
-└────────┬────────┘
-         │ NATS subscribe
-         ▼
-┌─────────────────┐
-│ Orchestrator    │
-│                 │
-│ - Aggregates    │
-│ - Stores in DB  │
-│ - Broadcasts    │
-└────────┬────────┘
-         │ WebSocket
-         ▼
-┌─────────────────┐
-│ API Gateway     │
-│ (WS Proxy)      │
-└────────┬────────┘
-         │ WebSocket
-         ▼
-┌─────────────────┐
-│ Frontend UI     │
-│                 │
-│ - Displays      │
-│ - Updates UI    │
-└─────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                     Kandev Backend                               │
+│                                                                  │
+│  ┌──────────────┐    ┌──────────────┐    ┌─────────────────┐   │
+│  │ Orchestrator │───▶│ ACP Session  │───▶│ JSON-RPC Client │   │
+│  │              │    │ Manager      │    │                 │   │
+│  │ Execute(task)│    │              │    │ - Send requests │   │
+│  └──────────────┘    │ - Create     │    │ - Handle resp   │   │
+│                      │ - Prompt     │    │ - Handle notif  │   │
+│                      │ - Permission │    │ - Handle req    │   │
+│                      └──────────────┘    └────────┬────────┘   │
+│                                                   │             │
+└───────────────────────────────────────────────────┼─────────────┘
+                                                    │
+                                          Docker attach (stdin/stdout)
+                                                    │
+┌───────────────────────────────────────────────────┼─────────────┐
+│                     Agent Container               ▼             │
+│                                                                  │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │                    Auggie CLI (--acp)                     │   │
+│  │                                                           │   │
+│  │  stdin ◀────── JSON-RPC requests from client              │   │
+│  │  stdout ─────▶ JSON-RPC responses/notifications/requests  │   │
+│  │                                                           │   │
+│  │  Notifications: session/update (progress, results)        │   │
+│  │  Requests: session/request_permission                     │   │
+│  └──────────────────────────────────────────────────────────┘   │
+│                                                                  │
+│  /workspace ◀──── Mounted from host (repository_url)            │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
 ### Initial Agent Types

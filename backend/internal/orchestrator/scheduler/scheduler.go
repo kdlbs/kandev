@@ -168,6 +168,11 @@ func (s *Scheduler) GetQueueStatus() *QueueStatus {
 	}
 }
 
+// GetTask retrieves a task from the repository
+func (s *Scheduler) GetTask(ctx context.Context, taskID string) (*v1.Task, error) {
+	return s.taskRepo.GetTask(ctx, taskID)
+}
+
 // HandleTaskCompleted handles agent completion
 func (s *Scheduler) HandleTaskCompleted(taskID string, success bool) {
 	s.logger.Info("handling task completion",

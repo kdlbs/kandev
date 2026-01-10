@@ -40,13 +40,15 @@ func (h *Handler) CreateTask(c *gin.Context) {
 	}
 
 	svcReq := &service.CreateTaskRequest{
-		BoardID:     req.BoardID,
-		ColumnID:    req.ColumnID,
-		Title:       req.Title,
-		Description: req.Description,
-		Priority:    req.Priority,
-		AgentType:   req.AgentType,
-		Metadata:    req.Metadata,
+		BoardID:       req.BoardID,
+		ColumnID:      req.ColumnID,
+		Title:         req.Title,
+		Description:   req.Description,
+		Priority:      req.Priority,
+		AgentType:     req.AgentType,
+		RepositoryURL: req.RepositoryURL,
+		Branch:        req.Branch,
+		Metadata:      req.Metadata,
 	}
 
 	task, err := h.service.CreateTask(c.Request.Context(), svcReq)
@@ -436,18 +438,20 @@ func (h *Handler) GetColumn(c *gin.Context) {
 
 func taskToResponse(t *models.Task) *TaskResponse {
 	return &TaskResponse{
-		ID:          t.ID,
-		BoardID:     t.BoardID,
-		ColumnID:    t.ColumnID,
-		Title:       t.Title,
-		Description: t.Description,
-		State:       string(t.State),
-		Priority:    t.Priority,
-		AgentType:   t.AgentType,
-		Position:    t.Position,
-		CreatedAt:   t.CreatedAt,
-		UpdatedAt:   t.UpdatedAt,
-		Metadata:    t.Metadata,
+		ID:            t.ID,
+		BoardID:       t.BoardID,
+		ColumnID:      t.ColumnID,
+		Title:         t.Title,
+		Description:   t.Description,
+		State:         string(t.State),
+		Priority:      t.Priority,
+		AgentType:     t.AgentType,
+		RepositoryURL: t.RepositoryURL,
+		Branch:        t.Branch,
+		Position:      t.Position,
+		CreatedAt:     t.CreatedAt,
+		UpdatedAt:     t.UpdatedAt,
+		Metadata:      t.Metadata,
 	}
 }
 

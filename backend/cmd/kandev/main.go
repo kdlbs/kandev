@@ -144,11 +144,10 @@ func main() {
 		// Credentials Manager
 		credsMgr := credentials.NewManager(log)
 		credsMgr.AddProvider(credentials.NewEnvProvider("KANDEV_"))
+		credsMgr.AddProvider(credentials.NewAugmentSessionProvider()) // Read ~/.augment/session.json
 		if credsFile := os.Getenv("KANDEV_CREDENTIALS_FILE"); credsFile != "" {
 			credsMgr.AddProvider(credentials.NewFileProvider(credsFile))
 		}
-		// Note: credsMgr available for future use when integrating with lifecycle manager
-		_ = credsMgr
 
 		// ACP Session Manager for bidirectional communication
 		acpSessionMgr = agentacp.NewSessionManager(eventBus, log)
@@ -156,6 +155,7 @@ func main() {
 		// Lifecycle Manager
 		lifecycleMgr = lifecycle.NewManager(dockerClient, agentRegistry, eventBus, log)
 		lifecycleMgr.SetACPManager(acpSessionMgr)
+		lifecycleMgr.SetCredentialsManager(credsMgr)
 
 		if err := lifecycleMgr.Start(ctx); err != nil {
 			log.Fatal("Failed to start lifecycle manager", zap.Error(err))
@@ -363,9 +363,11 @@ func newLifecycleAdapter(mgr *lifecycle.Manager, reg *registry.Registry, log *lo
 // LaunchAgent starts a new agent container for a task
 func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
 	launchReq := &lifecycle.LaunchRequest{
-		TaskID:    req.TaskID,
-		AgentType: req.AgentType,
-		Metadata:  req.Metadata,
+		TaskID:          req.TaskID,
+		AgentType:       req.AgentType,
+		WorkspacePath:   req.RepositoryURL, // Use repository URL as workspace path
+		TaskDescription: req.TaskDescription,
+		Metadata:        req.Metadata,
 	}
 
 	instance, err := a.mgr.Launch(ctx, launchReq)
