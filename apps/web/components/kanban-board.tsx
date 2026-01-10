@@ -14,8 +14,9 @@ import { KanbanColumn, Column } from './kanban-column';
 import { KanbanCardPreview, Task } from './kanban-card';
 import { ThemeToggle } from './theme-toggle';
 import { Button } from '@/components/ui/button';
-import { IconPlus } from '@tabler/icons-react';
+import { IconPlus, IconSettings } from '@tabler/icons-react';
 import { TaskCreateDialog } from './task-create-dialog';
+import Link from 'next/link';
 import {
   Select,
   SelectContent,
@@ -166,7 +167,12 @@ export function KanbanBoard() {
             <IconPlus className="h-4 w-4" />
             Add task
           </Button>
-          <ThemeToggle />
+          <Link href="/settings" className="cursor-pointer">
+            <Button variant="outline">
+              <IconSettings className="h-4 w-4 mr-2" />
+              Settings
+            </Button>
+          </Link>
         </div>
       </header>
       <TaskCreateDialog
