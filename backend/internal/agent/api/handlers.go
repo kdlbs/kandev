@@ -22,11 +22,19 @@ type DockerClient interface {
 	GetContainerLogs(ctx context.Context, containerID string, follow bool, tail string) (io.ReadCloser, error)
 }
 
+// ACPManager interface for sending commands to agents
+type ACPManager interface {
+	Prompt(ctx context.Context, instanceID, message string) error
+	Cancel(ctx context.Context, instanceID, reason string) error
+	GetSessionID(instanceID string) (string, bool)
+}
+
 // Handler contains HTTP handlers for the agent manager API
 type Handler struct {
 	lifecycle *lifecycle.Manager
 	registry  *registry.Registry
 	docker    DockerClient
+	acp       ACPManager
 	logger    *logger.Logger
 }
 
@@ -35,12 +43,14 @@ func NewHandler(
 	lm *lifecycle.Manager,
 	reg *registry.Registry,
 	docker DockerClient,
+	acp ACPManager,
 	log *logger.Logger,
 ) *Handler {
 	return &Handler{
 		lifecycle: lm,
 		registry:  reg,
 		docker:    docker,
+		acp:       acp,
 		logger:    log.WithFields(zap.String("component", "agent-api")),
 	}
 }
@@ -273,6 +283,126 @@ func (h *Handler) HealthCheck(c *gin.Context) {
 	c.JSON(http.StatusOK, HealthResponse{
 		Status:    "healthy",
 		Timestamp: time.Now(),
+	})
+}
+
+// SendPrompt sends a prompt to an agent
+// POST /api/v1/agents/:instanceId/prompt
+func (h *Handler) SendPrompt(c *gin.Context) {
+	instanceID := c.Param("instanceId")
+	if instanceID == "" {
+		appErr := errors.BadRequest("instanceId is required")
+		c.JSON(appErr.HTTPStatus, appErr)
+		return
+	}
+
+	// Check if agent exists
+	_, found := h.lifecycle.GetInstance(instanceID)
+	if !found {
+		appErr := errors.NotFound("agent instance", instanceID)
+		c.JSON(appErr.HTTPStatus, appErr)
+		return
+	}
+
+	var req SendPromptRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		appErr := errors.BadRequest("invalid request body: " + err.Error())
+		c.JSON(appErr.HTTPStatus, appErr)
+		return
+	}
+
+	if h.acp == nil {
+		appErr := errors.InternalError("ACP manager not available", nil)
+		c.JSON(appErr.HTTPStatus, appErr)
+		return
+	}
+
+	if err := h.acp.Prompt(c.Request.Context(), instanceID, req.Message); err != nil {
+		h.logger.Error("failed to send prompt to agent",
+			zap.String("instance_id", instanceID),
+			zap.Error(err))
+		appErr := errors.InternalError("failed to send prompt", err)
+		c.JSON(appErr.HTTPStatus, appErr)
+		return
+	}
+
+	sessionID, _ := h.acp.GetSessionID(instanceID)
+	c.JSON(http.StatusOK, SendPromptResponse{
+		Success:   true,
+		SessionID: sessionID,
+		Message:   "prompt sent successfully",
+	})
+}
+
+// CancelAgent cancels an agent's current operation
+// POST /api/v1/agents/:instanceId/cancel
+func (h *Handler) CancelAgent(c *gin.Context) {
+	instanceID := c.Param("instanceId")
+	if instanceID == "" {
+		appErr := errors.BadRequest("instanceId is required")
+		c.JSON(appErr.HTTPStatus, appErr)
+		return
+	}
+
+	// Check if agent exists
+	_, found := h.lifecycle.GetInstance(instanceID)
+	if !found {
+		appErr := errors.NotFound("agent instance", instanceID)
+		c.JSON(appErr.HTTPStatus, appErr)
+		return
+	}
+
+	var req CancelAgentRequest
+	_ = c.ShouldBindJSON(&req) // Optional body
+
+	if h.acp == nil {
+		appErr := errors.InternalError("ACP manager not available", nil)
+		c.JSON(appErr.HTTPStatus, appErr)
+		return
+	}
+
+	if err := h.acp.Cancel(c.Request.Context(), instanceID, req.Reason); err != nil {
+		h.logger.Error("failed to cancel agent operation",
+			zap.String("instance_id", instanceID),
+			zap.Error(err))
+		appErr := errors.InternalError("failed to cancel operation", err)
+		c.JSON(appErr.HTTPStatus, appErr)
+		return
+	}
+
+	c.JSON(http.StatusOK, CancelAgentResponse{
+		Success: true,
+		Message: "cancel request sent",
+	})
+}
+
+// GetSession returns the ACP session info for an agent
+// GET /api/v1/agents/:instanceId/session
+func (h *Handler) GetSession(c *gin.Context) {
+	instanceID := c.Param("instanceId")
+	if instanceID == "" {
+		appErr := errors.BadRequest("instanceId is required")
+		c.JSON(appErr.HTTPStatus, appErr)
+		return
+	}
+
+	// Check if agent exists
+	instance, found := h.lifecycle.GetInstance(instanceID)
+	if !found {
+		appErr := errors.NotFound("agent instance", instanceID)
+		c.JSON(appErr.HTTPStatus, appErr)
+		return
+	}
+
+	sessionID := ""
+	if h.acp != nil {
+		sessionID, _ = h.acp.GetSessionID(instanceID)
+	}
+
+	c.JSON(http.StatusOK, GetSessionResponse{
+		InstanceID: instanceID,
+		SessionID:  sessionID,
+		Status:     string(instance.Status),
 	})
 }
 

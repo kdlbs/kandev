@@ -15,6 +15,8 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	// ACP session management is used via the ACPManager interface
+	_ "github.com/kandev/kandev/internal/agent/acp"
 	"github.com/kandev/kandev/internal/agent/docker"
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -47,19 +49,25 @@ type LaunchRequest struct {
 	Metadata      map[string]interface{}
 }
 
-// StreamingManager interface for ACP message streaming
-type StreamingManager interface {
-	StartStreaming(ctx context.Context, instanceID, taskID string, reader io.ReadCloser) error
-	StopStreaming(instanceID string) error
+// ACPManager interface for ACP session management
+type ACPManager interface {
+	CreateSession(ctx context.Context, instanceID, taskID string, stdin io.WriteCloser, stdout io.Reader) error
+	Initialize(ctx context.Context, instanceID string) error
+	NewSession(ctx context.Context, instanceID string) (string, error)
+	LoadSession(ctx context.Context, instanceID, sessionID string) error
+	Prompt(ctx context.Context, instanceID, message string) error
+	Cancel(ctx context.Context, instanceID, reason string) error
+	CloseSession(instanceID string) error
+	GetSessionID(instanceID string) (string, bool)
 }
 
 // Manager manages agent instance lifecycles
 type Manager struct {
-	docker    *docker.Client
-	registry  *registry.Registry
-	eventBus  bus.EventBus
-	streamMgr StreamingManager
-	logger    *logger.Logger
+	docker   *docker.Client
+	registry *registry.Registry
+	eventBus bus.EventBus
+	acpMgr   ACPManager
+	logger   *logger.Logger
 
 	// Track active instances
 	instances   map[string]*AgentInstance // by instance ID
@@ -93,9 +101,9 @@ func NewManager(
 	}
 }
 
-// SetStreamingManager sets the streaming manager for ACP message capture
-func (m *Manager) SetStreamingManager(streamMgr StreamingManager) {
-	m.streamMgr = streamMgr
+// SetACPManager sets the ACP session manager
+func (m *Manager) SetACPManager(acpMgr ACPManager) {
+	m.acpMgr = acpMgr
 }
 
 // Start starts the lifecycle manager background tasks
@@ -149,8 +157,8 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentInstanc
 	// 4. Build container config from registry config
 	containerConfig := m.buildContainerConfig(instanceID, req, agentConfig)
 
-	// 5. Create and start the container
-	containerID, err := m.docker.CreateContainer(ctx, containerConfig)
+	// 5. Create and start the container WITH stdin attached for ACP
+	containerID, err := m.docker.CreateContainerInteractive(ctx, containerConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create container: %w", err)
 	}
@@ -183,25 +191,61 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentInstanc
 	// 7. Publish agent.started event
 	m.publishEvent(ctx, events.AgentStarted, instance)
 
-	// 8. Start streaming ACP messages from the container
-	// Use a background context for streaming since the request context will be cancelled
-	// when the HTTP request completes, but we need streaming to continue
-	if m.streamMgr != nil {
-		streamCtx := context.Background()
-		logsReader, err := m.docker.GetContainerLogs(streamCtx, containerID, true, "all")
+	// 8. Setup ACP session for bidirectional communication
+	if m.acpMgr != nil {
+		// Attach to container stdin/stdout
+		attachResult, err := m.docker.AttachContainer(context.Background(), containerID)
 		if err != nil {
-			m.logger.Warn("failed to get container logs for streaming",
+			m.logger.Warn("failed to attach to container for ACP",
 				zap.String("container_id", containerID),
 				zap.Error(err))
 		} else {
-			if err := m.streamMgr.StartStreaming(streamCtx, instanceID, req.TaskID, logsReader); err != nil {
-				m.logger.Warn("failed to start streaming",
+			// Create ACP session
+			if err := m.acpMgr.CreateSession(context.Background(), instanceID, req.TaskID, attachResult.Stdin, attachResult.Stdout); err != nil {
+				m.logger.Warn("failed to create ACP session",
 					zap.String("instance_id", instanceID),
 					zap.Error(err))
 			} else {
-				m.logger.Info("started ACP streaming for agent",
-					zap.String("instance_id", instanceID),
-					zap.String("task_id", req.TaskID))
+				// Initialize the ACP session
+				if err := m.acpMgr.Initialize(context.Background(), instanceID); err != nil {
+					m.logger.Warn("failed to initialize ACP session",
+						zap.String("instance_id", instanceID),
+						zap.Error(err))
+				} else {
+					// Create or load session based on metadata
+					var sessionID string
+					if req.Metadata != nil {
+						if existingSessionID, ok := req.Metadata["auggie_session_id"].(string); ok && existingSessionID != "" {
+							// Resume existing session
+							if err := m.acpMgr.LoadSession(context.Background(), instanceID, existingSessionID); err != nil {
+								m.logger.Warn("failed to load existing ACP session, creating new one",
+									zap.String("instance_id", instanceID),
+									zap.String("existing_session_id", existingSessionID),
+									zap.Error(err))
+								sessionID, _ = m.acpMgr.NewSession(context.Background(), instanceID)
+							} else {
+								sessionID = existingSessionID
+							}
+						} else {
+							sessionID, _ = m.acpMgr.NewSession(context.Background(), instanceID)
+						}
+					} else {
+						sessionID, _ = m.acpMgr.NewSession(context.Background(), instanceID)
+					}
+
+					m.logger.Info("ACP session ready",
+						zap.String("instance_id", instanceID),
+						zap.String("session_id", sessionID))
+
+					// Send the initial prompt with the task description
+					if taskDesc, ok := req.Env["TASK_DESCRIPTION"]; ok && taskDesc != "" {
+						if err := m.acpMgr.Prompt(context.Background(), instanceID, taskDesc); err != nil {
+							m.logger.Warn("failed to send initial prompt",
+								zap.String("instance_id", instanceID),
+								zap.Error(err))
+						}
+					}
+				}
 			}
 		}
 	}
@@ -326,6 +370,11 @@ func (m *Manager) StopAgent(ctx context.Context, instanceID string, force bool) 
 
 	if err != nil {
 		return fmt.Errorf("failed to stop container: %w", err)
+	}
+
+	// Close ACP session if exists
+	if m.acpMgr != nil {
+		_ = m.acpMgr.CloseSession(instanceID)
 	}
 
 	// Update instance status

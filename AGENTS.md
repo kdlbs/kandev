@@ -15,19 +15,24 @@ Kandev uses Docker containers to run AI agents that execute tasks from the Kanba
 ## Architecture
 
 ```
-┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│   HTTP Client   │────▶│  Kandev Backend  │────▶│ Docker Container│
-│  (Frontend/CLI) │     │   (Port 8080)    │     │   (AI Agent)    │
-└─────────────────┘     └────────┬─────────┘     └────────┬────────┘
-                                 │                        │
-                                 │◀───────────────────────┘
-                                 │    ACP Messages (stdout)
-                                 ▼
+┌─────────────────┐     ┌──────────────────┐     ┌─────────────────────────────────┐
+│   HTTP Client   │────▶│  Kandev Backend  │────▶│      Docker Container           │
+│  (Frontend/CLI) │     │   (Port 8080)    │     │  ┌─────────────────────────┐    │
+└─────────────────┘     └────────┬─────────┘     │  │  auggie --acp           │    │
+                                 │               │  │  (ACP Mode)             │    │
+                                 │◀─────────────▶│  └─────────────────────────┘    │
+                                 │   JSON-RPC    │                                 │
+                                 │  stdin/stdout └─────────────────────────────────┘
+                                 │
                         ┌──────────────────┐
                         │   Event Bus      │
                         │ (In-Memory)      │
                         └──────────────────┘
 ```
+
+**Bidirectional Communication:**
+- Backend → Agent: `session/prompt`, `session/cancel`
+- Agent → Backend: `session/update` notifications
 
 ## Available Agent Types
 
@@ -59,9 +64,73 @@ The primary AI coding agent powered by Auggie CLI.
 
 ## Agent Communication Protocol (ACP)
 
-Agents communicate by writing JSON messages to stdout. Each line must be a complete JSON object.
+Kandev uses **ACP (Agent Client Protocol)** for bidirectional communication with agents. ACP is based on JSON-RPC 2.0 over stdin/stdout.
 
-### Message Format
+### ACP Mode
+
+Agents run in ACP mode using `auggie --acp`. This enables:
+- **Bidirectional communication**: Send prompts and receive updates
+- **Session management**: Create, load, and resume sessions
+- **Cancellation**: Cancel operations in progress
+
+### JSON-RPC 2.0 Protocol
+
+#### Client → Agent (Requests)
+
+**Initialize Connection:**
+```json
+{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+  "protocolVersion": "1.0",
+  "clientInfo": {"name": "kandev", "version": "0.1.0"},
+  "capabilities": {"streaming": true}
+}}
+```
+
+**Create New Session:**
+```json
+{"jsonrpc": "2.0", "id": 2, "method": "session/new", "params": {}}
+```
+
+**Resume Existing Session:**
+```json
+{"jsonrpc": "2.0", "id": 3, "method": "session/load", "params": {"sessionId": "abc123"}}
+```
+
+**Send Prompt:**
+```json
+{"jsonrpc": "2.0", "id": 4, "method": "session/prompt", "params": {"message": "Fix the bug in main.go"}}
+```
+
+**Cancel Operation (notification, no response):**
+```json
+{"jsonrpc": "2.0", "method": "session/cancel", "params": {"reason": "user requested"}}
+```
+
+#### Agent → Client (Notifications)
+
+**Session Update (progress, content, tool calls):**
+```json
+{"jsonrpc": "2.0", "method": "session/update", "params": {
+  "type": "content",
+  "data": {"text": "I'm analyzing the code..."}
+}}
+```
+
+```json
+{"jsonrpc": "2.0", "method": "session/update", "params": {
+  "type": "toolCall",
+  "data": {"toolName": "file_edit", "status": "running"}
+}}
+```
+
+```json
+{"jsonrpc": "2.0", "method": "session/update", "params": {
+  "type": "complete",
+  "data": {"sessionId": "abc123", "success": true}
+}}
+```
+
+### Legacy Message Format (for reference)
 
 ```json
 {
@@ -73,7 +142,7 @@ Agents communicate by writing JSON messages to stdout. Each line must be a compl
 }
 ```
 
-### Message Types
+### Legacy Message Types
 
 #### `progress` - Progress Updates
 ```json
@@ -499,6 +568,62 @@ Response:
 ### Get Agent Type
 ```
 GET /agents/types/:typeId
+```
+
+### Send Prompt to Agent (ACP)
+```
+POST /agents/:instanceId/prompt
+```
+
+Request:
+```json
+{
+  "message": "Fix the bug in main.go"
+}
+```
+
+Response: `200 OK`
+```json
+{
+  "success": true,
+  "message": "Prompt sent successfully"
+}
+```
+
+### Cancel Agent Operation (ACP)
+```
+POST /agents/:instanceId/cancel
+```
+
+Request:
+```json
+{
+  "reason": "User requested cancellation"
+}
+```
+
+Response: `200 OK`
+```json
+{
+  "success": true,
+  "message": "Cancel request sent"
+}
+```
+
+### Get Agent Session (ACP)
+```
+GET /agents/:instanceId/session
+```
+
+Response: `200 OK`
+```json
+{
+  "instance_id": "uuid",
+  "task_id": "uuid",
+  "session_id": "abc123",
+  "status": "running",
+  "created_at": "2026-01-10T12:00:00Z"
+}
 ```
 
 ---

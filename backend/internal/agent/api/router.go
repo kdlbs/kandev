@@ -15,9 +15,10 @@ func SetupRoutes(
 	lm *lifecycle.Manager,
 	reg *registry.Registry,
 	docker DockerClient,
+	acp ACPManager,
 	log *logger.Logger,
 ) {
-	handler := NewHandler(lm, reg, docker, log)
+	handler := NewHandler(lm, reg, docker, acp, log)
 
 	// Agent instance endpoints under /api/v1/agents
 	agents := router.Group("/agents")
@@ -36,6 +37,11 @@ func SetupRoutes(
 		agents.GET("/:instanceId/status", handler.GetAgentStatus)
 		agents.GET("/:instanceId/logs", handler.GetAgentLogs)
 		agents.DELETE("/:instanceId", handler.StopAgent)
+
+		// ACP communication endpoints
+		agents.POST("/:instanceId/prompt", handler.SendPrompt)
+		agents.POST("/:instanceId/cancel", handler.CancelAgent)
+		agents.GET("/:instanceId/session", handler.GetSession)
 	}
 }
 

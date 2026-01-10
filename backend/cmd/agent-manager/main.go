@@ -106,10 +106,10 @@ func main() {
 
 	// 11. Register API routes
 	v1 := router.Group("/api/v1/agents")
-	api.SetupRoutes(v1, lifecycleMgr, reg, dockerClient, log)
+	api.SetupRoutes(v1, lifecycleMgr, reg, dockerClient, nil, log)
 
 	// Health check endpoint at root level
-	handler := api.NewHandler(lifecycleMgr, reg, dockerClient, log)
+	handler := api.NewHandler(lifecycleMgr, reg, dockerClient, nil, log)
 	router.GET("/health", handler.HealthCheck)
 
 	// 12. Create HTTP server

@@ -75,3 +75,33 @@ type HealthResponse struct {
 	Timestamp time.Time `json:"timestamp"`
 }
 
+// SendPromptRequest for sending a prompt to an agent
+type SendPromptRequest struct {
+	Message string `json:"message" binding:"required"`
+}
+
+// SendPromptResponse for prompt acknowledgment
+type SendPromptResponse struct {
+	Success   bool   `json:"success"`
+	SessionID string `json:"session_id,omitempty"`
+	Message   string `json:"message,omitempty"`
+}
+
+// CancelAgentRequest for cancelling agent operation
+type CancelAgentRequest struct {
+	Reason string `json:"reason,omitempty"`
+}
+
+// CancelAgentResponse for cancel acknowledgment
+type CancelAgentResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message,omitempty"`
+}
+
+// GetSessionResponse for getting session info
+type GetSessionResponse struct {
+	InstanceID string `json:"instance_id"`
+	SessionID  string `json:"session_id"`
+	Status     string `json:"status"`
+}
+

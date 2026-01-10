@@ -9,13 +9,19 @@ import (
 type MessageType string
 
 const (
-	MessageTypeProgress  MessageType = "progress"
-	MessageTypeLog       MessageType = "log"
-	MessageTypeResult    MessageType = "result"
-	MessageTypeError     MessageType = "error"
-	MessageTypeStatus    MessageType = "status"
-	MessageTypeHeartbeat MessageType = "heartbeat"
-	MessageTypeControl   MessageType = "control" // For commands sent to agents
+	// Agent → Backend message types
+	MessageTypeProgress      MessageType = "progress"
+	MessageTypeLog           MessageType = "log"
+	MessageTypeResult        MessageType = "result"
+	MessageTypeError         MessageType = "error"
+	MessageTypeStatus        MessageType = "status"
+	MessageTypeHeartbeat     MessageType = "heartbeat"
+	MessageTypeInputRequired MessageType = "input_required" // Agent requests input from user
+	MessageTypeSessionInfo   MessageType = "session_info"   // Agent reports session information
+
+	// Backend → Agent message types
+	MessageTypeControl       MessageType = "control"        // Control commands (pause, resume, stop)
+	MessageTypeInputResponse MessageType = "input_response" // Response to input_required
 )
 
 // Message represents an ACP protocol message

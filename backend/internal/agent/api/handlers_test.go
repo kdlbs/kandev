@@ -116,6 +116,7 @@ func setupTestRouter(
 	handler := &Handler{
 		registry: reg,
 		docker:   mockDocker,
+		acp:      nil,
 		logger:   log,
 	}
 

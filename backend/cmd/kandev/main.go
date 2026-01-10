@@ -28,8 +28,8 @@ import (
 	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/agent/registry"
 
-	// Agent streaming
-	agentstreaming "github.com/kandev/kandev/internal/agent/streaming"
+	// Agent ACP
+	agentacp "github.com/kandev/kandev/internal/agent/acp"
 
 	// Orchestrator packages
 	"github.com/kandev/kandev/internal/orchestrator"
@@ -132,6 +132,7 @@ func main() {
 	// ============================================
 	var lifecycleMgr *lifecycle.Manager
 	var agentRegistry *registry.Registry
+	var acpSessionMgr *agentacp.SessionManager
 
 	if dockerClient != nil {
 		log.Info("Initializing Agent Manager...")
@@ -149,12 +150,12 @@ func main() {
 		// Note: credsMgr available for future use when integrating with lifecycle manager
 		_ = credsMgr
 
-		// Streaming Manager for ACP message capture
-		streamMgr := agentstreaming.NewManager(eventBus, log)
+		// ACP Session Manager for bidirectional communication
+		acpSessionMgr = agentacp.NewSessionManager(eventBus, log)
 
 		// Lifecycle Manager
 		lifecycleMgr = lifecycle.NewManager(dockerClient, agentRegistry, eventBus, log)
-		lifecycleMgr.SetStreamingManager(streamMgr)
+		lifecycleMgr.SetACPManager(acpSessionMgr)
 
 		if err := lifecycleMgr.Start(ctx); err != nil {
 			log.Fatal("Failed to start lifecycle manager", zap.Error(err))
@@ -252,7 +253,7 @@ func main() {
 
 	// Agent Manager routes (if available)
 	if lifecycleMgr != nil && agentRegistry != nil && dockerClient != nil {
-		agentapi.SetupRoutes(v1Group, lifecycleMgr, agentRegistry, dockerClient, log)
+		agentapi.SetupRoutes(v1Group, lifecycleMgr, agentRegistry, dockerClient, acpSessionMgr, log)
 	}
 
 	// Health check

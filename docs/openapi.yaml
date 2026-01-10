@@ -445,6 +445,75 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /agents/{instanceId}/prompt:
+    parameters:
+      - $ref: '#/components/parameters/instanceId'
+    post:
+      tags: [Agents]
+      summary: Send prompt to agent (ACP)
+      description: Send a message/prompt to a running agent via ACP protocol
+      operationId: sendAgentPrompt
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendPromptRequest'
+      responses:
+        '200':
+          description: Prompt sent successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SendPromptResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /agents/{instanceId}/cancel:
+    parameters:
+      - $ref: '#/components/parameters/instanceId'
+    post:
+      tags: [Agents]
+      summary: Cancel agent operation (ACP)
+      description: Send a cancellation request to a running agent via ACP protocol
+      operationId: cancelAgent
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelAgentRequest'
+      responses:
+        '200':
+          description: Cancel request sent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CancelAgentResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /agents/{instanceId}/session:
+    parameters:
+      - $ref: '#/components/parameters/instanceId'
+    get:
+      tags: [Agents]
+      summary: Get agent ACP session
+      description: Get the current ACP session information for an agent
+      operationId: getAgentSession
+      responses:
+        '200':
+          description: Session information
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetSessionResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   # ============ ORCHESTRATOR ============
   /orchestrator/status:
     get:
@@ -964,6 +1033,56 @@ components:
           default: false
         reason:
           type: string
+
+    SendPromptRequest:
+      type: object
+      properties:
+        message:
+          type: string
+          description: The prompt message to send to the agent
+      required: [message]
+
+    SendPromptResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+      required: [success]
+
+    CancelAgentRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+          description: Reason for cancellation
+
+    CancelAgentResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+      required: [success]
+
+    GetSessionResponse:
+      type: object
+      properties:
+        instance_id:
+          type: string
+        task_id:
+          type: string
+        session_id:
+          type: string
+        status:
+          type: string
+          enum: [initializing, ready, running, completed, failed]
+        created_at:
+          type: string
+          format: date-time
+      required: [instance_id, status, created_at]
 
     AgentsListResponse:
       type: object

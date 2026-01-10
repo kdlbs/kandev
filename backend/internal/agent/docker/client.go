@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"time"
 
 	"github.com/docker/docker/api/types/container"
@@ -391,3 +392,112 @@ func (c *Client) Ping(ctx context.Context) error {
 	return nil
 }
 
+// AttachResult contains the streams for container I/O
+type AttachResult struct {
+	Stdin  io.WriteCloser
+	Stdout io.Reader
+	Stderr io.Reader
+	Conn   net.Conn
+}
+
+// CreateContainerInteractive creates a container with stdin attached for interactive use
+func (c *Client) CreateContainerInteractive(ctx context.Context, cfg ContainerConfig) (string, error) {
+	c.logger.Info("Creating interactive container",
+		zap.String("name", cfg.Name),
+		zap.String("image", cfg.Image),
+	)
+
+	// Build mounts
+	mounts := make([]mount.Mount, 0, len(cfg.Mounts))
+	for _, m := range cfg.Mounts {
+		mounts = append(mounts, mount.Mount{
+			Type:     mount.TypeBind,
+			Source:   m.Source,
+			Target:   m.Target,
+			ReadOnly: m.ReadOnly,
+		})
+	}
+
+	// Container configuration with stdin attached
+	containerCfg := &container.Config{
+		Image:        cfg.Image,
+		Cmd:          cfg.Cmd,
+		Env:          cfg.Env,
+		WorkingDir:   cfg.WorkingDir,
+		Labels:       cfg.Labels,
+		OpenStdin:    true,
+		StdinOnce:    false,
+		AttachStdin:  true,
+		AttachStdout: true,
+		AttachStderr: true,
+		Tty:          false, // Important: no TTY for JSON-RPC
+	}
+
+	// Host configuration
+	hostCfg := &container.HostConfig{
+		Mounts:      mounts,
+		NetworkMode: container.NetworkMode(cfg.NetworkMode),
+		AutoRemove:  cfg.AutoRemove,
+		Resources: container.Resources{
+			Memory:   cfg.Memory,
+			CPUQuota: cfg.CPUQuota,
+		},
+	}
+
+	resp, err := c.cli.ContainerCreate(ctx, containerCfg, hostCfg, nil, nil, cfg.Name)
+	if err != nil {
+		c.logger.Error("Failed to create interactive container",
+			zap.String("name", cfg.Name),
+			zap.Error(err),
+		)
+		return "", fmt.Errorf("failed to create interactive container %s: %w", cfg.Name, err)
+	}
+
+	c.logger.Info("Interactive container created", zap.String("id", resp.ID), zap.String("name", cfg.Name))
+	return resp.ID, nil
+}
+
+// AttachContainer attaches to a container's stdin, stdout, and stderr
+func (c *Client) AttachContainer(ctx context.Context, containerID string) (*AttachResult, error) {
+	c.logger.Info("Attaching to container", zap.String("container_id", containerID))
+
+	opts := container.AttachOptions{
+		Stream: true,
+		Stdin:  true,
+		Stdout: true,
+		Stderr: true,
+	}
+
+	resp, err := c.cli.ContainerAttach(ctx, containerID, opts)
+	if err != nil {
+		c.logger.Error("Failed to attach to container", zap.String("container_id", containerID), zap.Error(err))
+		return nil, fmt.Errorf("failed to attach to container %s: %w", containerID, err)
+	}
+
+	// Create a pipe for stdin
+	stdinReader, stdinWriter := io.Pipe()
+
+	// Start goroutine to copy from pipe to container
+	go func() {
+		io.Copy(resp.Conn, stdinReader)
+	}()
+
+	c.logger.Info("Attached to container", zap.String("container_id", containerID))
+
+	return &AttachResult{
+		Stdin:  stdinWriter,
+		Stdout: resp.Reader, // This is a multiplexed stream (stdout + stderr)
+		Conn:   resp.Conn,
+	}, nil
+}
+
+// Close closes the attach result
+func (a *AttachResult) Close() error {
+	if a.Stdin != nil {
+		a.Stdin.Close()
+	}
+	if a.Conn != nil {
+		a.Conn.Close()
+	}
+	return nil
+}
