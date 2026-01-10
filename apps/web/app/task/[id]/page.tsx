@@ -164,6 +164,61 @@ export default function TaskPage() {
   };
 
   const terminalTabValue = activeTerminalId === 0 ? 'commands' : `terminal-${activeTerminalId}`;
+  const topFilesPanel = (
+    <div className="h-full min-h-0 bg-card p-4 flex flex-col rounded-lg border border-border/70 border-l-0">
+      <Tabs
+        value={topTab}
+        onValueChange={(value) => setTopTab(value as typeof topTab)}
+        className="flex-1 min-h-0"
+      >
+        <TabsList>
+          <TabsTrigger value="diff">Diff files</TabsTrigger>
+          <TabsTrigger value="files">All files</TabsTrigger>
+        </TabsList>
+        <TabsContent value="diff" className="mt-3 flex-1 min-h-0">
+          <div className="flex-1 min-h-0 overflow-y-auto rounded-lg bg-background p-3 h-full">
+            <ul className="space-y-2">
+              {CHANGED_FILES.map((file) => {
+                const { folder, file: name } = splitPath(file.path);
+                return (
+                  <li
+                    key={file.path}
+                    className="flex items-center justify-between gap-3 text-sm"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-foreground">
+                        <span className="text-foreground/60">{folder}/</span>
+                        <span className="font-medium text-foreground">{name}</span>
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <LineStat added={file.plus} removed={file.minus} />
+                      <Badge className={badgeClass(file.status)}>{file.status}</Badge>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        </TabsContent>
+        <TabsContent value="files" className="mt-3 flex-1 min-h-0">
+          <div className="flex-1 min-h-0 overflow-y-auto rounded-lg bg-background p-3 h-full">
+            <ul className="space-y-2 text-sm">
+              {ALL_FILES.map((file) => {
+                const { folder, file: name } = splitPath(file);
+                return (
+                  <li key={file} className="truncate text-foreground">
+                    <span className="text-foreground/60">{folder}/</span>
+                    <span className="font-medium text-foreground">{name}</span>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
 
   return (
     <div className="h-screen w-full flex flex-col bg-background">
@@ -283,7 +338,7 @@ export default function TaskPage() {
       <div className="flex-1 min-h-0 px-4 pb-4">
         <ResizablePanelGroup direction="horizontal" className="h-full">
           <ResizablePanel defaultSize={75} minSize={55}>
-            <div className="h-full min-h-0 bg-card p-4 flex flex-col rounded-lg border border-border/70 border-r-0">
+            <div className="h-full min-h-0 bg-card p-4 flex flex-col rounded-lg border border-border/70 border-r-0 mr-[5px]">
               <Tabs
                 value={leftTab}
                 onValueChange={(value) => setLeftTab(value as typeof leftTab)}
@@ -367,62 +422,8 @@ index 1234567..89abcde 100644
           <ResizablePanel defaultSize={25} minSize={20}>
             {isBottomCollapsed ? (
               <div className="h-full min-h-0 flex flex-col gap-1">
-                <div className="flex-1 min-h-0">
-                  <div className="h-full min-h-0 bg-card p-4 flex flex-col rounded-lg border border-border/70 border-l-0">
-                    <Tabs
-                      value={topTab}
-                      onValueChange={(value) => setTopTab(value as typeof topTab)}
-                      className="flex-1 min-h-0"
-                    >
-                      <TabsList>
-                        <TabsTrigger value="diff">Diff files</TabsTrigger>
-                        <TabsTrigger value="files">All files</TabsTrigger>
-                      </TabsList>
-                      <TabsContent value="diff" className="mt-3 flex-1 min-h-0">
-                        <div className="flex-1 min-h-0 overflow-y-auto rounded-lg bg-background p-3 h-full">
-                          <ul className="space-y-2">
-                            {CHANGED_FILES.map((file) => {
-                              const { folder, file: name } = splitPath(file.path);
-                              return (
-                                <li
-                                  key={file.path}
-                                  className="flex items-center justify-between gap-3 text-sm"
-                                >
-                                  <div className="min-w-0">
-                                    <p className="truncate text-foreground">
-                                      <span className="text-foreground/60">{folder}/</span>
-                                      <span className="font-medium text-foreground">{name}</span>
-                                    </p>
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                    <LineStat added={file.plus} removed={file.minus} />
-                                    <Badge className={badgeClass(file.status)}>{file.status}</Badge>
-                                  </div>
-                                </li>
-                              );
-                            })}
-                          </ul>
-                        </div>
-                      </TabsContent>
-                      <TabsContent value="files" className="mt-3 flex-1 min-h-0">
-                        <div className="flex-1 min-h-0 overflow-y-auto rounded-lg bg-background p-3 h-full">
-                          <ul className="space-y-2 text-sm">
-                            {ALL_FILES.map((file) => {
-                              const { folder, file: name } = splitPath(file);
-                              return (
-                                <li key={file} className="truncate text-foreground">
-                                  <span className="text-foreground/60">{folder}/</span>
-                                  <span className="font-medium text-foreground">{name}</span>
-                                </li>
-                              );
-                            })}
-                          </ul>
-                        </div>
-                      </TabsContent>
-                    </Tabs>
-                  </div>
-                </div>
-                <div className="h-12 border border-border/70 rounded-lg bg-card flex items-center justify-between px-3 border-l-0">
+                <div className="flex-1 min-h-0">{topFilesPanel}</div>
+                <div className="h-12 border border-border/70 rounded-lg bg-card flex items-center justify-between px-3 border-l-0 mt-[2px]">
                   <Tabs
                     value={terminalTabValue}
                     onValueChange={(value) => {
@@ -461,63 +462,11 @@ index 1234567..89abcde 100644
             ) : (
               <ResizablePanelGroup direction="vertical" className="h-full">
                 <ResizablePanel defaultSize={55} minSize={30}>
-                  <div className="h-full min-h-0 bg-card p-4 flex flex-col rounded-lg border border-border/70 border-l-0">
-                    <Tabs
-                      value={topTab}
-                      onValueChange={(value) => setTopTab(value as typeof topTab)}
-                      className="flex-1 min-h-0"
-                    >
-                      <TabsList>
-                        <TabsTrigger value="diff">Diff files</TabsTrigger>
-                        <TabsTrigger value="files">All files</TabsTrigger>
-                      </TabsList>
-                      <TabsContent value="diff" className="mt-3 flex-1 min-h-0">
-                        <div className="flex-1 min-h-0 overflow-y-auto rounded-lg bg-background p-3 h-full">
-                          <ul className="space-y-2">
-                            {CHANGED_FILES.map((file) => {
-                              const { folder, file: name } = splitPath(file.path);
-                              return (
-                                <li
-                                  key={file.path}
-                                  className="flex items-center justify-between gap-3 text-sm"
-                                >
-                                  <div className="min-w-0">
-                                    <p className="truncate text-foreground">
-                                      <span className="text-foreground/60">{folder}/</span>
-                                      <span className="font-medium text-foreground">{name}</span>
-                                    </p>
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                    <LineStat added={file.plus} removed={file.minus} />
-                                    <Badge className={badgeClass(file.status)}>{file.status}</Badge>
-                                  </div>
-                                </li>
-                              );
-                            })}
-                          </ul>
-                        </div>
-                      </TabsContent>
-                      <TabsContent value="files" className="mt-3 flex-1 min-h-0">
-                        <div className="flex-1 min-h-0 overflow-y-auto rounded-lg bg-background p-3 h-full">
-                          <ul className="space-y-2 text-sm">
-                            {ALL_FILES.map((file) => {
-                              const { folder, file: name } = splitPath(file);
-                              return (
-                                <li key={file} className="truncate text-foreground">
-                                  <span className="text-foreground/60">{folder}/</span>
-                                  <span className="font-medium text-foreground">{name}</span>
-                                </li>
-                              );
-                            })}
-                          </ul>
-                        </div>
-                      </TabsContent>
-                    </Tabs>
-                  </div>
+                  {topFilesPanel}
                 </ResizablePanel>
                 <ResizableHandle className="h-px" />
                 <ResizablePanel defaultSize={45} minSize={20}>
-                  <div className="h-full min-h-0 bg-card p-4 flex flex-col rounded-lg border border-border/70 border-l-0">
+                  <div className="h-full min-h-0 bg-card p-4 flex flex-col rounded-lg border border-border/70 border-l-0 mt-[5px]">
                     <Tabs
                       value={terminalTabValue}
                       onValueChange={(value) => {

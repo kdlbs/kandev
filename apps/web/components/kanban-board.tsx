@@ -78,7 +78,7 @@ export function KanbanBoard() {
   const router = useRouter();
 
   const isMounted = useSyncExternalStore(
-    () => () => {},
+    () => () => { },
     () => true,
     () => false
   );
@@ -185,7 +185,7 @@ export function KanbanBoard() {
       >
         <div className="flex-1 min-h-0 px-4 pb-4">
           <div
-            className="grid gap-px bg-border rounded-lg overflow-hidden h-full"
+            className="grid gap-[3px] rounded-lg overflow-hidden h-full p-[2px]"
             style={{ gridTemplateColumns: `repeat(${activeColumns.length}, minmax(0, 1fr))` }}
           >
             {activeColumns.map((column) => (

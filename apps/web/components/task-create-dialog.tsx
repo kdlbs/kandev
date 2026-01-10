@@ -2,14 +2,14 @@
 
 import { useState, FormEvent } from 'react';
 import {
-  AlertDialog,
-  AlertDialogContent,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogFooter,
-  AlertDialogCancel,
-} from '@/components/ui/alert-dialog';
-import { Field, FieldLabel } from '@/components/ui/field';
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogClose,
+} from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
@@ -52,19 +52,14 @@ export function TaskCreateDialog({
   };
 
   return (
-    <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent
-        size="default"
-        overlayProps={{
-          onClick: () => onOpenChange(false),
-        }}
-      >
-        <AlertDialogHeader>
-          <AlertDialogTitle>{submitLabel === 'Create' ? 'Create Task' : 'Edit Task'}</AlertDialogTitle>
-        </AlertDialogHeader>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{submitLabel === 'Create' ? 'Create Task' : 'Edit Task'}</DialogTitle>
+        </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
-          <Field>
-            <FieldLabel>Title</FieldLabel>
+          <div className="space-y-2">
+            <Label>Title</Label>
             <Input
               autoFocus
               required
@@ -72,24 +67,26 @@ export function TaskCreateDialog({
               value={title}
               onChange={(e) => setTitle(e.target.value)}
             />
-          </Field>
-          <Field>
-            <FieldLabel>Description</FieldLabel>
+          </div>
+          <div className="space-y-2">
+            <Label>Description</Label>
             <Textarea
               placeholder="Enter task description (optional)..."
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               rows={3}
             />
-          </Field>
-          <AlertDialogFooter>
-            <AlertDialogCancel type="button" onClick={handleCancel}>
-              Cancel
-            </AlertDialogCancel>
+          </div>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button type="button" variant="outline" onClick={handleCancel}>
+                Cancel
+              </Button>
+            </DialogClose>
             <Button type="submit">{submitLabel}</Button>
-          </AlertDialogFooter>
+          </DialogFooter>
         </form>
-      </AlertDialogContent>
-    </AlertDialog>
+      </DialogContent>
+    </Dialog>
   );
 }

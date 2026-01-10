@@ -27,7 +27,14 @@ const lineTone = {
 
 export function CommitStatBadge({ label, tone, className }: CommitStatBadgeProps) {
   return (
-    <Badge variant="stat" className={cn('text-xs font-semibold', commitTone[tone], className)}>
+    <Badge
+      variant="secondary"
+      className={cn(
+        'bg-transparent border-transparent px-1 text-xs font-semibold',
+        commitTone[tone],
+        className
+      )}
+    >
       {label}
     </Badge>
   );
