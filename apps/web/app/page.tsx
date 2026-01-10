@@ -1,5 +1,5 @@
-import { ComponentExample } from "@/components/component-example";
+import { KanbanBoard } from '@/components/kanban-board';
 
 export default function Page() {
-return <ComponentExample />;
+  return <KanbanBoard />;
 }
