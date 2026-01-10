@@ -2,6 +2,7 @@
 
 > **Note:** This is the original planning document for the microservices architecture.
 > The current implementation uses a simplified unified binary approach with SQLite.
+> The current implementation uses a WebSocket-only API (no REST endpoints).
 > See [GETTING_STARTED.md](GETTING_STARTED.md) for the current implementation details.
 > This document is preserved for reference and future scaling considerations.
 
@@ -12,25 +13,26 @@
 ### High-Level Architecture
 ```
 ┌─────────────────┐
-│   Frontend UI   │ (Out of scope - connects via WebSocket/REST)
+│   Frontend UI   │ (Out of scope - connects via WebSocket)
 └────────┬────────┘
-         │ REST API + WebSocket (ACP Streaming)
+         │ Single WebSocket Connection
+         │ ws://localhost:8080/ws
          ▼
 ┌─────────────────────────────────────────┐
 │         API Gateway Service             │
-│  - Authentication & Authorization       │
-│  - Request routing                      │
 │  - WebSocket connection management      │
+│  - Message routing & dispatching        │
+│  - Authentication & Authorization       │
 │  - Rate limiting                        │
 └────────┬────────────────────────────────┘
-         │
+         │ WebSocket Messages
     ┌────┴────┬──────────────┬─────────────┐
     ▼         ▼              ▼             ▼
 ┌────────┐ ┌──────────┐ ┌─────────┐ ┌──────────┐
 │ Task   │ │Orchestr- │ │ Agent   │ │ Event    │
 │Service │ │ator      │ │ Manager │ │ Bus      │
 │        │ │ Service  │ │ Service │ │ (NATS)   │
-│        │ │+ ACP API │ │+ ACP     │ │          │
+│        │ │+ ACP     │ │+ ACP    │ │          │
 └───┬────┘ └────┬─────┘ └────┬────┘ └────┬─────┘
     │           │            │           │
     └───────────┴────────────┴───────────┘
@@ -94,27 +96,25 @@
 **Package:** `cmd/api-gateway`
 
 **Responsibilities:**
-- HTTP request handling and routing
-- WebSocket connection management for ACP streaming
-- JWT-based authentication
-- Request validation
-- CORS handling
-- API versioning
-- Metrics collection
-- Real-time ACP stream proxying to frontend
+- WebSocket connection management and message routing
+- WebSocket message dispatching to appropriate services
+- JWT-based authentication via connection handshake
+- Message validation and rate limiting
+- Real-time notification broadcasting
+- ACP stream proxying to connected clients
 
 **Key Components:**
-- `internal/gateway/router` - HTTP routing
+- `internal/gateway/websocket` - WebSocket connection and message handling
+- `internal/gateway/dispatcher` - Message routing to services
 - `internal/gateway/middleware` - Auth, logging, rate limiting
-- `internal/gateway/handlers` - HTTP handlers
-- `internal/gateway/websocket` - WebSocket connection management
+- `internal/gateway/broadcast` - Notification broadcasting to clients
 - `internal/gateway/streaming` - ACP stream multiplexing
 
 ### 2.2 Task Service
 **Package:** `cmd/task-service`
 
 **Responsibilities:**
-- CRUD operations for tasks
+- CRUD operations for tasks via WebSocket messages
 - Task state management (TODO, IN_PROGRESS, BLOCKED, COMPLETED, FAILED)
 - Task assignment to agents
 - Task priority and scheduling
@@ -123,6 +123,7 @@
 **Key Components:**
 - `internal/task/repository` - Database operations
 - `internal/task/service` - Business logic
+- `internal/task/handlers` - WebSocket message handlers
 - `internal/task/models` - Data structures
 
 ### 2.3 Orchestrator Service
@@ -137,7 +138,7 @@
 - Health monitoring of running agents
 - **ACP stream aggregation and distribution**
 - **Real-time agent status tracking**
-- **WebSocket endpoint for frontend streaming**
+- **WebSocket notification publishing**
 
 **Key Components:**
 - `internal/orchestrator/watcher` - Event monitoring
@@ -145,7 +146,7 @@
 - `internal/orchestrator/executor` - Agent execution coordination
 - `internal/orchestrator/acp` - ACP protocol handler
 - `internal/orchestrator/streaming` - Real-time stream management
-- `internal/orchestrator/api` - REST API for orchestrator control
+- `internal/orchestrator/handlers` - WebSocket message handlers
 
 ### 2.4 Agent Manager Service
 **Package:** `cmd/agent-manager`
@@ -167,7 +168,7 @@
 - `internal/agent/monitor` - Health and metrics
 - `internal/agent/acp` - ACP protocol implementation
 - `internal/agent/credentials` - Host credential management
-- `internal/agent/streaming` - Real-time stream handling
+- `internal/agent/handlers` - WebSocket message handlers
 
 ## 3. Database Schema
 
@@ -450,300 +451,293 @@ docker build -t kandev/gemini-agent:latest .
 - **Development**: Local Docker registry or Docker Hub
 - **Production**: Private container registry (AWS ECR, Google GCR, or Azure ACR)
 
-## 5. API Endpoints
+## 5. WebSocket API
 
-### 4.1 Task Management API
+The backend exposes a single WebSocket endpoint for all client communication. All operations use a unified message envelope format.
 
-#### Tasks
-- `POST /api/v1/boards/{boardId}/tasks` - Create a new task
-- `GET /api/v1/boards/{boardId}/tasks` - List tasks (with filtering)
-- `GET /api/v1/tasks/{taskId}` - Get task details
-- `PUT /api/v1/tasks/{taskId}` - Update task
-- `DELETE /api/v1/tasks/{taskId}` - Delete task
-- `PATCH /api/v1/tasks/{taskId}/state` - Update task state
-- `GET /api/v1/tasks/{taskId}/events` - Get task history
+### 5.1 Connection
 
-#### Boards
-- `POST /api/v1/boards` - Create a new board
-- `GET /api/v1/boards` - List user's boards
-- `GET /api/v1/boards/{boardId}` - Get board details
-- `PUT /api/v1/boards/{boardId}` - Update board
-- `DELETE /api/v1/boards/{boardId}` - Delete board
+**Endpoint:** `ws://localhost:8080/ws`
 
-### 4.2 Agent Management API
+**Authentication:** JWT token passed in the initial connection handshake via query parameter or header.
 
-#### Agent Instances
-- `GET /api/v1/agents` - List all agent instances
-- `GET /api/v1/agents/{agentId}` - Get agent instance details
-- `GET /api/v1/agents/{agentId}/logs` - Get agent logs
-- `POST /api/v1/agents/{agentId}/stop` - Stop a running agent
-- `GET /api/v1/tasks/{taskId}/agents` - Get agents for a task
-
-#### Agent Types
-- `GET /api/v1/agent-types` - List available agent types
-- `GET /api/v1/agent-types/{typeId}` - Get agent type details
-- `POST /api/v1/agent-types` - Register new agent type (admin)
-- `PUT /api/v1/agent-types/{typeId}` - Update agent type (admin)
-
-### 4.3 Orchestrator API (Real-time & Control)
-
-The Orchestrator service exposes both REST and WebSocket endpoints for real-time agent monitoring and control.
-
-#### Orchestration Control (REST)
-
-**`POST /api/v1/orchestrator/trigger`**
-- Manually trigger orchestration for a specific task
-- **Request Body:**
-  ```json
-  {
-    "task_id": "uuid",
-    "force": false
-  }
-  ```
-- **Response:** `202 Accepted`
-- **Auth:** Required (JWT)
-
-**`GET /api/v1/orchestrator/status`**
-- Get overall orchestrator status and metrics
-- **Response:**
-  ```json
-  {
-    "status": "running",
-    "active_agents": 5,
-    "queued_tasks": 12,
-    "uptime_seconds": 86400,
-    "last_heartbeat": "2026-01-09T10:30:00Z"
-  }
-  ```
-- **Auth:** Required (JWT)
-
-**`GET /api/v1/orchestrator/queue`**
-- View current task queue with priorities
-- **Query Params:** `?limit=50&offset=0`
-- **Response:**
-  ```json
-  {
-    "tasks": [
-      {
-        "task_id": "uuid",
-        "priority": 5,
-        "queued_at": "2026-01-09T10:25:00Z",
-        "estimated_start": "2026-01-09T10:35:00Z"
-      }
-    ],
-    "total": 12
-  }
-  ```
-- **Auth:** Required (JWT)
-
-#### Agent Execution Control (REST)
-
-**`POST /api/v1/orchestrator/tasks/{taskId}/start`**
-- Start agent execution for a task
-- **Request Body:**
-  ```json
-  {
-    "agent_type": "auggie-cli",
-    "priority": 5
-  }
-  ```
-- **Response:** `202 Accepted` with agent instance ID
-- **Auth:** Required (JWT)
-
-**`POST /api/v1/orchestrator/tasks/{taskId}/stop`**
-- Stop running agent for a task
-- **Request Body:**
-  ```json
-  {
-    "reason": "User requested stop",
-    "force": false
-  }
-  ```
-- **Response:** `200 OK`
-- **Auth:** Required (JWT)
-
-**`POST /api/v1/orchestrator/tasks/{taskId}/pause`**
-- Pause agent execution (if supported by agent)
-- **Response:** `200 OK` or `501 Not Implemented`
-- **Auth:** Required (JWT)
-
-**`POST /api/v1/orchestrator/tasks/{taskId}/resume`**
-- Resume paused agent execution
-- **Response:** `200 OK`
-- **Auth:** Required (JWT)
-
-**`GET /api/v1/orchestrator/tasks/{taskId}/status`**
-- Get detailed execution status for a task
-- **Response:**
-  ```json
-  {
-    "task_id": "uuid",
-    "state": "IN_PROGRESS",
-    "agent_instance_id": "uuid",
-    "agent_type": "auggie-cli",
-    "started_at": "2026-01-09T10:30:00Z",
-    "progress": 45,
-    "current_operation": "Analyzing code structure...",
-    "estimated_completion": "2026-01-09T10:45:00Z"
-  }
-  ```
-- **Auth:** Required (JWT)
-
-#### Real-time ACP Streaming (WebSocket)
-
-**`WS /api/v1/orchestrator/tasks/{taskId}/stream`**
-- WebSocket endpoint for real-time ACP message streaming
-- **Connection:** Upgrade from HTTP to WebSocket
-- **Auth:** JWT token in query param or header
-- **Protocol:** ACP over WebSocket
-
-**Connection Flow:**
 ```javascript
-// Client connects
-const ws = new WebSocket('ws://localhost:8082/api/v1/orchestrator/tasks/{taskId}/stream?token=JWT_TOKEN');
-
-// Receive ACP messages
-ws.onmessage = (event) => {
-  const acpMessage = JSON.parse(event.data);
-  // Handle: progress, log, result, error, status
-};
-
-// Send control messages (optional)
-ws.send(JSON.stringify({
-  type: 'control',
-  action: 'pause'
-}));
+const ws = new WebSocket('ws://localhost:8080/ws?token=JWT_TOKEN');
 ```
 
-**ACP Message Types Streamed:**
-- `progress` - Agent progress updates (0-100%)
-- `log` - Real-time log messages from agent
-- `result` - Intermediate or final results
-- `error` - Error messages and stack traces
-- `status` - Agent status changes
-- `heartbeat` - Keep-alive messages
+### 5.2 Message Envelope
 
-**Example ACP Messages:**
+All messages follow a standard envelope format:
 
-*Progress Update:*
 ```json
 {
-  "type": "progress",
-  "timestamp": "2026-01-09T10:30:15Z",
-  "agent_id": "uuid",
-  "task_id": "uuid",
-  "data": {
+  "id": "correlation-uuid",
+  "type": "request|response|notification|error",
+  "action": "action.name",
+  "payload": {},
+  "timestamp": "2026-01-10T10:30:00Z"
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `id` | Correlation UUID to match requests with responses |
+| `type` | Message type: `request`, `response`, `notification`, or `error` |
+| `action` | The action being performed (see action tables below) |
+| `payload` | Action-specific data |
+| `timestamp` | ISO 8601 timestamp |
+
+### 5.3 Request/Response Actions (Client → Server → Client)
+
+#### Health Check
+| Action | Description |
+|--------|-------------|
+| `health.check` | Health check |
+
+#### Board Management
+| Action | Description |
+|--------|-------------|
+| `board.list` | List boards |
+| `board.create` | Create board |
+| `board.get` | Get board by ID |
+| `board.update` | Update board |
+| `board.delete` | Delete board |
+| `column.list` | List columns for a board |
+| `column.create` | Create column |
+
+#### Task Management
+| Action | Description |
+|--------|-------------|
+| `task.list` | List tasks (with filtering) |
+| `task.create` | Create task |
+| `task.get` | Get task details |
+| `task.update` | Update task |
+| `task.delete` | Delete task |
+| `task.move` | Move task to different column/position |
+| `task.state` | Update task state |
+
+#### Agent Management
+| Action | Description |
+|--------|-------------|
+| `agent.list` | List all agent instances |
+| `agent.launch` | Launch agent for a task |
+| `agent.status` | Get agent status |
+| `agent.logs` | Get agent logs |
+| `agent.stop` | Stop a running agent |
+| `agent.prompt` | Send prompt to agent |
+| `agent.cancel` | Cancel agent execution |
+| `agent.session` | Get agent session info |
+| `agent.types` | List available agent types |
+
+#### Orchestrator Control
+| Action | Description |
+|--------|-------------|
+| `orchestrator.status` | Get orchestrator status and metrics |
+| `orchestrator.queue` | View current task queue |
+| `orchestrator.trigger` | Manually trigger orchestration for a task |
+| `orchestrator.start` | Start agent execution for a task |
+| `orchestrator.stop` | Stop agent execution for a task |
+| `orchestrator.prompt` | Send prompt to orchestrator |
+| `orchestrator.complete` | Mark task as complete |
+
+### 5.4 Notification Types (Server → Client)
+
+Notifications are pushed from the server without a prior request. They use `type: "notification"`.
+
+| Action | Description |
+|--------|-------------|
+| `acp.progress` | Agent progress update (0-100%) |
+| `acp.log` | Agent log message |
+| `acp.result` | Agent result (intermediate or final) |
+| `acp.error` | Agent error |
+| `acp.status` | Agent status change |
+| `acp.heartbeat` | Keep-alive heartbeat |
+| `task.updated` | Task was updated |
+| `agent.updated` | Agent status changed |
+
+### 5.5 Example Messages
+
+**Request: Create Task**
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "type": "request",
+  "action": "task.create",
+  "payload": {
+    "board_id": "board-uuid",
+    "title": "Implement user authentication",
+    "description": "Add JWT-based authentication",
+    "priority": 5,
+    "agent_type": "auggie-cli"
+  },
+  "timestamp": "2026-01-10T10:30:00Z"
+}
+```
+
+**Response: Task Created**
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "type": "response",
+  "action": "task.create",
+  "payload": {
+    "task": {
+      "id": "task-uuid",
+      "board_id": "board-uuid",
+      "title": "Implement user authentication",
+      "description": "Add JWT-based authentication",
+      "state": "TODO",
+      "priority": 5,
+      "agent_type": "auggie-cli",
+      "created_at": "2026-01-10T10:30:00Z"
+    }
+  },
+  "timestamp": "2026-01-10T10:30:01Z"
+}
+```
+
+**Request: Launch Agent**
+```json
+{
+  "id": "660e8400-e29b-41d4-a716-446655440001",
+  "type": "request",
+  "action": "agent.launch",
+  "payload": {
+    "task_id": "task-uuid",
+    "agent_type": "auggie-cli"
+  },
+  "timestamp": "2026-01-10T10:31:00Z"
+}
+```
+
+**Notification: ACP Progress**
+```json
+{
+  "id": "770e8400-e29b-41d4-a716-446655440002",
+  "type": "notification",
+  "action": "acp.progress",
+  "payload": {
+    "agent_id": "agent-uuid",
+    "task_id": "task-uuid",
     "progress": 45,
     "message": "Analyzing file: src/main.go",
     "current_file": "src/main.go",
     "files_processed": 23,
     "total_files": 51
-  }
+  },
+  "timestamp": "2026-01-10T10:32:15Z"
 }
 ```
 
-*Log Message:*
+**Notification: ACP Log**
 ```json
 {
-  "type": "log",
-  "timestamp": "2026-01-09T10:30:16Z",
-  "agent_id": "uuid",
-  "task_id": "uuid",
-  "data": {
+  "id": "880e8400-e29b-41d4-a716-446655440003",
+  "type": "notification",
+  "action": "acp.log",
+  "payload": {
+    "agent_id": "agent-uuid",
+    "task_id": "task-uuid",
     "level": "info",
     "message": "Found 3 potential issues in authentication module",
     "metadata": {
       "module": "auth",
       "issues": 3
     }
-  }
+  },
+  "timestamp": "2026-01-10T10:32:16Z"
 }
 ```
 
-*Result Message:*
+**Notification: ACP Result**
 ```json
 {
-  "type": "result",
-  "timestamp": "2026-01-09T10:35:00Z",
-  "agent_id": "uuid",
-  "task_id": "uuid",
-  "data": {
+  "id": "990e8400-e29b-41d4-a716-446655440004",
+  "type": "notification",
+  "action": "acp.result",
+  "payload": {
+    "agent_id": "agent-uuid",
+    "task_id": "task-uuid",
     "status": "completed",
     "summary": "Analysis complete. Found 12 issues, suggested 8 improvements.",
     "artifacts": [
       {
         "type": "report",
-        "path": "/workspace/analysis_report.md",
-        "url": "/api/v1/tasks/{taskId}/artifacts/report.md"
+        "path": "/workspace/analysis_report.md"
       }
     ]
-  }
+  },
+  "timestamp": "2026-01-10T10:35:00Z"
 }
 ```
 
-**`WS /api/v1/orchestrator/stream`**
-- Global WebSocket endpoint for all task updates
-- Streams ACP messages from all tasks user has access to
-- **Auth:** Required (JWT)
-- **Filtering:** Client can subscribe to specific tasks
-
-**Subscription Message:**
+**Error Response**
 ```json
 {
-  "action": "subscribe",
-  "task_ids": ["uuid1", "uuid2"]
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "type": "error",
+  "action": "task.create",
+  "payload": {
+    "code": "VALIDATION_ERROR",
+    "message": "Title is required",
+    "details": {
+      "field": "title"
+    }
+  },
+  "timestamp": "2026-01-10T10:30:01Z"
 }
 ```
 
-#### Agent Execution Logs (REST)
+### 5.6 Connection Flow
 
-**`GET /api/v1/orchestrator/tasks/{taskId}/logs`**
-- Get historical logs for a task's agent execution
-- **Query Params:**
-  - `?level=info,warn,error` - Filter by log level
-  - `?since=2026-01-09T10:00:00Z` - Logs since timestamp
-  - `?limit=100&offset=0` - Pagination
-- **Response:**
-  ```json
-  {
-    "logs": [
-      {
-        "timestamp": "2026-01-09T10:30:00Z",
-        "level": "info",
-        "message": "Starting code analysis...",
-        "metadata": {}
-      }
-    ],
-    "total": 245
+```javascript
+// 1. Connect to WebSocket
+const ws = new WebSocket('ws://localhost:8080/ws?token=JWT_TOKEN');
+
+// 2. Handle connection open
+ws.onopen = () => {
+  console.log('Connected to Kandev WebSocket');
+};
+
+// 3. Send requests
+function sendRequest(action, payload) {
+  const id = crypto.randomUUID();
+  ws.send(JSON.stringify({
+    id,
+    type: 'request',
+    action,
+    payload,
+    timestamp: new Date().toISOString()
+  }));
+  return id;
+}
+
+// 4. Handle incoming messages
+ws.onmessage = (event) => {
+  const message = JSON.parse(event.data);
+
+  switch (message.type) {
+    case 'response':
+      handleResponse(message);
+      break;
+    case 'notification':
+      handleNotification(message);
+      break;
+    case 'error':
+      handleError(message);
+      break;
   }
-  ```
-- **Auth:** Required (JWT)
+};
 
-**`GET /api/v1/orchestrator/tasks/{taskId}/artifacts`**
-- List artifacts generated by agent
-- **Response:**
-  ```json
-  {
-    "artifacts": [
-      {
-        "id": "uuid",
-        "name": "analysis_report.md",
-        "type": "report",
-        "size": 12458,
-        "created_at": "2026-01-09T10:35:00Z",
-        "download_url": "/api/v1/tasks/{taskId}/artifacts/{artifactId}/download"
-      }
-    ]
-  }
-  ```
-- **Auth:** Required (JWT)
+// 5. Example: List boards
+sendRequest('board.list', {});
 
-**`GET /api/v1/orchestrator/tasks/{taskId}/artifacts/{artifactId}/download`**
-- Download artifact file
-- **Response:** File download
-- **Auth:** Required (JWT)
+// 6. Example: Launch agent and receive streaming updates
+sendRequest('agent.launch', { task_id: 'task-uuid', agent_type: 'auggie-cli' });
+// Notifications (acp.progress, acp.log, acp.result) will stream automatically
+```
 
-## 5. Go Package Structure
+## 6. Go Package Structure
 
 ```
 kandev/
@@ -765,15 +759,16 @@ kandev/
 │   │   ├── errors/          # Error types and handling
 │   │   └── acp/             # ACP protocol implementation
 │   ├── gateway/
-│   │   ├── router/
-│   │   ├── middleware/
-│   │   ├── handlers/
-│   │   ├── websocket/       # WebSocket connection management
+│   │   ├── websocket/       # WebSocket connection & message handling
+│   │   ├── dispatcher/      # Message routing to services
+│   │   ├── middleware/      # Auth, logging, rate limiting
+│   │   ├── broadcast/       # Notification broadcasting
 │   │   └── streaming/       # ACP stream multiplexing
 │   ├── task/
 │   │   ├── models/
 │   │   ├── repository/
 │   │   ├── service/
+│   │   ├── handlers/        # WebSocket message handlers
 │   │   └── events/
 │   ├── orchestrator/
 │   │   ├── watcher/
@@ -782,7 +777,7 @@ kandev/
 │   │   ├── queue/
 │   │   ├── acp/             # ACP protocol handler
 │   │   ├── streaming/       # Real-time stream management
-│   │   └── api/             # REST API handlers
+│   │   └── handlers/        # WebSocket message handlers
 │   ├── agent/
 │   │   ├── models/
 │   │   ├── docker/
@@ -791,7 +786,7 @@ kandev/
 │   │   ├── monitor/
 │   │   ├── acp/             # ACP stream handling
 │   │   ├── credentials/     # Host credential management
-│   │   └── streaming/       # Container stream handling
+│   │   └── handlers/        # WebSocket message handlers
 │   └── events/
 │       ├── bus/             # Event bus abstraction
 │       ├── publisher/
@@ -799,6 +794,10 @@ kandev/
 ├── pkg/
 │   ├── api/
 │   │   └── v1/              # API models (shared)
+│   ├── websocket/
+│   │   ├── message/         # WebSocket message envelope types
+│   │   ├── handler/         # Handler interface definitions
+│   │   └── router/          # Action routing utilities
 │   └── acp/
 │       ├── protocol/        # ACP protocol definitions
 │       ├── client/          # ACP client library
@@ -816,7 +815,7 @@ kandev/
 └── go.sum
 ```
 
-## 6. Core Data Structures
+## 7. Core Data Structures
 
 ### 6.1 Task Models
 
@@ -947,7 +946,7 @@ type AgentLog struct {
 }
 ```
 
-## 7. Docker Integration Strategy
+## 8. Docker Integration Strategy
 
 ### 7.1 Docker SDK Usage
 
@@ -1206,7 +1205,7 @@ func CheckoutRepository(taskID, repoURL, branch string) (string, error) {
 6. **No Credential Storage**: Never store credentials in database
 7. **Container Network Isolation**: Limit network access from containers
 
-## 8. Inter-Service Communication
+## 9. Inter-Service Communication
 
 ### 8.1 Event Bus (NATS)
 
@@ -1234,16 +1233,53 @@ type Event struct {
 }
 ```
 
-### 8.2 Agent Communication Protocol (ACP) Flow
+### 8.2 WebSocket Message Flow
 
-**ACP Message Flow Through System:**
+**Client Request Flow:**
+
+```
+┌──────────────┐
+│ Frontend UI  │
+└──────┬───────┘
+       │ WebSocket Message (request)
+       │ ws://localhost:8080/ws
+       ▼
+┌──────────────┐
+│ API Gateway  │ ← Maintains WebSocket connections
+│ (Dispatcher) │   Routes messages by action prefix
+└──────┬───────┘
+       │ Internal routing
+       ├──────────────┬──────────────┐
+       ▼              ▼              ▼
+┌──────────┐  ┌────────────┐  ┌────────────┐
+│ Task     │  │Orchestrator│  │Agent       │
+│ Handlers │  │ Handlers   │  │Handlers    │
+└──────────┘  └────────────┘  └────────────┘
+       │              │              │
+       └──────────────┴──────────────┘
+                      │
+                      ▼
+              ┌──────────────┐
+              │ API Gateway  │ ← Sends response back
+              │ (WebSocket)  │
+              └──────┬───────┘
+                     │ WebSocket Message (response)
+                     ▼
+              ┌──────────────┐
+              │ Frontend UI  │
+              └──────────────┘
+```
+
+### 8.3 ACP Notification Flow (Agent → Client)
+
+**Real-time Agent Updates:**
 
 ```
 ┌──────────────┐
 │ AI Agent     │
 │ Container    │
 └──────┬───────┘
-       │ ACP Messages (stdout/HTTP)
+       │ ACP Messages (stdout)
        ▼
 ┌──────────────┐
 │ Agent        │
@@ -1260,12 +1296,13 @@ type Event struct {
 ┌──────────────┐
 │ Orchestrator │ ← Aggregates ACP messages
 └──────┬───────┘
-       │ WebSocket broadcast
+       │ Publishes notification event
        ▼
 ┌──────────────┐
-│ API Gateway  │ ← Proxies WebSocket to frontend
+│ API Gateway  │ ← Broadcasts to connected WebSocket clients
+│ (Broadcast)  │
 └──────┬───────┘
-       │ WebSocket
+       │ WebSocket Notification (acp.progress, acp.log, etc.)
        ▼
 ┌──────────────┐
 │ Frontend UI  │ ← Displays real-time updates
@@ -1282,21 +1319,32 @@ func PublishACPMessage(nc *nats.Conn, taskID string, msg ACPMessage) error {
 }
 ```
 
-**ACP Message Subscription:**
+**WebSocket Notification Broadcasting:**
 ```go
-// internal/orchestrator/acp/subscriber.go
-func SubscribeToTaskACP(nc *nats.Conn, taskID string, handler func(ACPMessage)) error {
-    subject := fmt.Sprintf("acp.message.%s", taskID)
-    _, err := nc.Subscribe(subject, func(m *nats.Msg) {
-        var msg ACPMessage
-        json.Unmarshal(m.Data, &msg)
-        handler(msg)
-    })
-    return err
+// internal/gateway/broadcast/broadcaster.go
+func BroadcastNotification(action string, payload interface{}) {
+    msg := WebSocketMessage{
+        ID:        uuid.New().String(),
+        Type:      "notification",
+        Action:    action,
+        Payload:   payload,
+        Timestamp: time.Now().UTC(),
+    }
+    // Send to all connected clients subscribed to this task
+    hub.BroadcastToSubscribers(msg)
 }
 ```
 
-### 8.3 Communication Patterns
+### 8.4 Communication Patterns
+
+**Frontend → API Gateway (WebSocket):**
+- Single persistent WebSocket connection per client
+- Request/response pattern with correlation IDs
+- Real-time notifications pushed to client
+
+**API Gateway → Services:**
+- Routes messages based on action prefix (`task.*`, `agent.*`, `orchestrator.*`)
+- Maintains connection state and authentication context
 
 **Task Service → Event Bus:**
 - Publishes task lifecycle events
@@ -1316,13 +1364,12 @@ func SubscribeToTaskACP(nc *nats.Conn, taskID string, handler func(ACPMessage)) 
 - Direct gRPC calls for agent operations
 - Request agent launch/stop/status
 
-**Orchestrator → Frontend (via API Gateway):**
-- WebSocket connections for real-time ACP streaming
-- REST API for status queries and control
+**Orchestrator → API Gateway:**
+- Publishes notification events for WebSocket broadcast
+- Uses NATS for inter-service notification delivery
 
 **Agent Container → Agent Manager:**
 - ACP messages via stdout (captured by Docker logs API)
-- Alternative: HTTP endpoint for structured ACP messages
 
 ### 8.4 ACP Protocol Implementation
 
@@ -1393,7 +1440,7 @@ func CaptureContainerACP(ctx context.Context, containerID string, taskID string)
 }
 ```
 
-## 9. Key Go Dependencies
+## 10. Key Go Dependencies
 
 ```go
 // go.mod
@@ -1432,7 +1479,7 @@ require (
 )
 ```
 
-## 10. Implementation Phases
+## 11. Implementation Phases
 
 ### Phase 1: Foundation (Week 1-2)
 **Goal:** Set up project structure and core infrastructure
@@ -1461,7 +1508,7 @@ require (
 1. Implement task repository layer
 2. Implement task service layer with business logic
 3. Create task event publishers
-4. Build REST API handlers for tasks
+4. Build WebSocket handlers for tasks
 5. Add validation and error handling
 6. Write unit tests for task service
 
@@ -1504,7 +1551,7 @@ require (
 3. Create executor that coordinates with Agent Manager
 4. **Implement ACP message aggregation from NATS**
 5. **Build WebSocket endpoint for real-time streaming**
-6. **Create comprehensive Orchestrator REST API**
+6. **Create comprehensive Orchestrator WebSocket API**
 7. Implement retry logic
 8. Add workload balancing
 9. Write end-to-end tests
@@ -1514,7 +1561,7 @@ require (
 - Task queue management
 - **Real-time ACP streaming to clients**
 - **WebSocket API for frontend integration**
-- **Complete Orchestrator REST API**
+- **Complete Orchestrator WebSocket API**
 - Retry and error handling
 - Orchestration monitoring
 
@@ -1522,7 +1569,7 @@ require (
 **Goal:** Unified API entry point with WebSocket support
 
 **Tasks:**
-1. Implement HTTP router and middleware
+1. Implement WebSocket router and middleware
 2. Add JWT authentication
 3. **Implement WebSocket connection management**
 4. **Create ACP stream proxying to frontend**
@@ -1557,7 +1604,7 @@ require (
 - Deployment documentation
 - Monitoring dashboards
 
-## 11. Configuration Management
+## 12. Configuration Management
 
 ### 11.1 Configuration Structure
 
@@ -1655,7 +1702,7 @@ LOG_FORMAT=json
 LOG_OUTPUT_PATH=stdout
 ```
 
-## 12. Security Considerations
+## 13. Security Considerations
 
 ### 12.1 Authentication & Authorization
 - JWT-based authentication for API requests
@@ -1680,7 +1727,7 @@ LOG_OUTPUT_PATH=stdout
 - SQL injection prevention (parameterized queries)
 - Rate limiting on API endpoints
 
-## 13. Monitoring & Observability
+## 14. Monitoring & Observability
 
 ### 13.1 Metrics (Prometheus)
 - Task creation/completion rates
@@ -1705,7 +1752,7 @@ LOG_OUTPUT_PATH=stdout
 - Request flow visualization
 - Performance bottleneck identification
 
-## 14. Next Steps
+## 15. Next Steps
 
 ### Immediate Actions:
 1. **Review and approve this implementation plan**
@@ -1728,7 +1775,7 @@ LOG_OUTPUT_PATH=stdout
    - **ACP protocol library**
    - **Initial agent Docker images**
 
-## 15. Deployment Architecture
+## 16. Deployment Architecture
 
 ### 15.1 Primary Deployment Target: Client Machines
 
@@ -1905,14 +1952,14 @@ echo "Access the API at http://localhost:8080"
 ### Questions Answered:
 
 1. **Agent Types:** ✅ **Auggie CLI and Gemini agents** (documented in Section 3.2 and 4)
-2. **Repository Access:** ✅ **Host credential mounting** (documented in Section 7.4)
+2. **Repository Access:** ✅ **Host credential mounting** (documented in Section 8.4)
 3. **Scaling:** ✅ **Single-user local deployment initially, cloud scaling in roadmap**
-4. **Deployment:** ✅ **Client machines (local workstations)** (documented in Section 15)
-5. **Frontend Integration:** ✅ **JWT authentication + WebSocket for real-time streaming** (documented in Section 4.3)
+4. **Deployment:** ✅ **Client machines (local workstations)** (documented in Section 16)
+5. **Frontend Integration:** ✅ **JWT authentication + WebSocket API for real-time streaming** (documented in Section 5)
 
 ---
 
-**Document Version:** 1.0
-**Last Updated:** 2026-01-09
+**Document Version:** 1.1
+**Last Updated:** 2026-01-10
 **Author:** Kandev Backend Team
 

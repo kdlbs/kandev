@@ -25,7 +25,7 @@ The system runs as a **unified Go binary** that includes:
 - **Task Service**: Manages tasks, boards, and columns with SQLite persistence
 - **Agent Manager**: Manages Docker container lifecycle and ACP message streaming
 - **Orchestrator**: Coordinates agent launches and monitors execution
-- **HTTP API**: RESTful endpoints for all operations (Port 8080)
+- **WebSocket API**: Real-time bidirectional communication for all operations (Port 8080)
 
 ### Agent Communication Protocol (ACP)
 
@@ -78,39 +78,84 @@ make build
 KANDEV_DB_PATH=/path/to/kandev.db ./bin/kandev
 ```
 
-### API Usage
+### WebSocket API Usage
 
-```bash
-# Create a board
-curl -X POST http://localhost:8080/api/v1/boards \
-  -H "Content-Type: application/json" \
-  -d '{"name": "My Project", "description": "Project tasks"}'
+**Connection**: `ws://localhost:8080/ws`
 
-# Create a column
-curl -X POST http://localhost:8080/api/v1/boards/{board_id}/columns \
-  -H "Content-Type: application/json" \
-  -d '{"name": "To Do"}'
+#### Message Envelope
 
-# Create a task
-curl -X POST http://localhost:8080/api/v1/boards/{board_id}/columns/{column_id}/tasks \
-  -H "Content-Type: application/json" \
-  -d '{"title": "Fix login bug", "description": "Users cannot login"}'
+```json
+{
+  "id": "correlation-uuid",
+  "type": "request|response|notification|error",
+  "action": "action.name",
+  "payload": {},
+  "timestamp": "2026-01-10T10:30:00Z"
+}
+```
 
-# Launch an agent for a task
-curl -X POST http://localhost:8080/api/v1/agents/launch \
-  -H "Content-Type: application/json" \
-  -d '{
-    "task_id": "{task_id}",
-    "agent_type": "augment-agent",
-    "workspace_path": "/path/to/project",
-    "env": {
-      "AUGMENT_SESSION_AUTH": "...",
-      "TASK_DESCRIPTION": "What is 2+2?"
+#### Key Message Actions
+
+- `board.create` - Create board
+- `board.list` - List boards
+- `column.create` - Create column
+- `task.create` - Create task
+- `agent.launch` - Launch agent
+- `agent.status` - Get agent status
+- `orchestrator.start` - Start task execution
+
+#### Example Usage (JavaScript)
+
+```javascript
+const ws = new WebSocket('ws://localhost:8080/ws');
+
+// Create a board
+ws.send(JSON.stringify({
+  id: crypto.randomUUID(),
+  type: 'request',
+  action: 'board.create',
+  payload: { name: 'My Project', description: 'Project tasks' }
+}));
+
+// Create a task
+ws.send(JSON.stringify({
+  id: crypto.randomUUID(),
+  type: 'request',
+  action: 'task.create',
+  payload: {
+    board_id: '{board_id}',
+    column_id: '{column_id}',
+    title: 'Fix login bug',
+    description: 'Users cannot login'
+  }
+}));
+
+// Launch an agent
+ws.send(JSON.stringify({
+  id: crypto.randomUUID(),
+  type: 'request',
+  action: 'agent.launch',
+  payload: {
+    task_id: '{task_id}',
+    agent_type: 'augment-agent',
+    workspace_path: '/path/to/project',
+    env: {
+      AUGMENT_SESSION_AUTH: '...',
+      TASK_DESCRIPTION: 'What is 2+2?'
     }
-  }'
+  }
+}));
 
-# Check agent status
-curl http://localhost:8080/api/v1/agents/{agent_id}/status
+// Handle responses and notifications
+ws.onmessage = (event) => {
+  const msg = JSON.parse(event.data);
+  if (msg.type === 'response') {
+    console.log('Response:', msg.payload);
+  } else if (msg.type === 'notification') {
+    // Real-time updates: acp.progress, acp.log, task.updated, etc.
+    console.log('Notification:', msg.action, msg.payload);
+  }
+};
 ```
 
 See [apps/backend/NEXT_STEPS.md](apps/backend/NEXT_STEPS.md) for detailed API reference and next steps.
@@ -171,11 +216,11 @@ go vet ./...
 - [x] Agent lifecycle management with Docker
 - [x] ACP message streaming from containers
 - [x] Session resumption for multi-turn agent conversations
-- [x] RESTful API for all operations
+- [x] WebSocket-first API for all operations
+- [x] Real-time bidirectional communication
 
 🚧 **In Progress**
 
-- [ ] WebSocket support for real-time streaming to frontend
 - [ ] Authentication and authorization
 - [ ] Frontend UI
 

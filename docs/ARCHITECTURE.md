@@ -14,7 +14,7 @@ The current implementation uses a **unified binary architecture** instead of sep
 - ✅ **Native ACP (Agent Communication Protocol)** - JSON-RPC 2.0 over stdin/stdout
 - ✅ **Permission request handling** - Auto-approval of workspace indexing and tool permissions
 - ✅ **Session resumption** for multi-turn agent conversations
-- 📋 WebSocket support for real-time frontend streaming
+- ✅ WebSocket-first API for all operations (replacing REST)
 - 📋 JWT authentication
 - 📋 NATS event bus for distributed deployment
 
@@ -60,23 +60,23 @@ Kandev uses an event-driven architecture with **Agent Communication Protocol (AC
 
 ## Planned Architecture (Microservices) 📋
 
-### 1. API Gateway
+### 1. API Gateway (WebSocket-First)
 **Port:** 8080
-**Purpose:** Single entry point for all client requests with WebSocket support
+**Purpose:** Single entry point for all client requests via WebSocket
 
 **Responsibilities:**
-- Route requests to appropriate services
+- Route WebSocket messages to appropriate services
 - JWT authentication and authorization
-- **WebSocket connection management for real-time ACP streaming**
-- **Proxy ACP streams from Orchestrator to frontend**
+- **WebSocket connection management for all API operations**
+- **WebSocket message routing for real-time ACP streaming**
 - Rate limiting and request validation
-- CORS handling
-- API versioning
+- CORS handling for WebSocket upgrade requests
+- API versioning via message schema
 
 **Dependencies:**
 - Task Service (internal)
 - Agent Manager (internal)
-- Orchestrator (internal - WebSocket proxy)
+- Orchestrator (internal - WebSocket message routing)
 - PostgreSQL (for user auth)
 
 ---
@@ -129,11 +129,12 @@ Kandev uses an event-driven architecture with **Agent Communication Protocol (AC
 - `agent.failed`
 - **`acp.message.*` - All ACP messages from agents**
 
-**Key Endpoints:**
-- `WS /api/v1/orchestrator/tasks/{taskId}/stream` - Real-time ACP streaming
-- `POST /api/v1/orchestrator/tasks/{taskId}/start` - Start agent execution
-- `POST /api/v1/orchestrator/tasks/{taskId}/stop` - Stop agent execution
-- `GET /api/v1/orchestrator/tasks/{taskId}/status` - Get execution status
+**WebSocket Actions:**
+- `orchestrator.subscribe` - Subscribe to real-time ACP streaming for a task
+- `orchestrator.unsubscribe` - Unsubscribe from ACP streaming
+- `orchestrator.start` - Start agent execution for a task
+- `orchestrator.stop` - Stop agent execution for a task
+- `orchestrator.status` - Get execution status for a task
 
 **Orchestration Logic:**
 ```
@@ -241,13 +242,17 @@ Workspace Mount (Read-Write):
 ### Example 1: User Creates a Task with AI Agent (with Real-time ACP Streaming)
 
 ```
-1. User → API Gateway: POST /api/v1/boards/{id}/tasks
+1. User → API Gateway: WebSocket message: task.create
    {
-     "title": "Fix login bug",
-     "description": "Users can't login with email",
-     "agent_type": "auggie-cli",
-     "repository_url": "https://github.com/user/repo",
-     "branch": "main"
+     "action": "task.create",
+     "payload": {
+       "boardId": "{id}",
+       "title": "Fix login bug",
+       "description": "Users can't login with email",
+       "agent_type": "auggie-cli",
+       "repository_url": "https://github.com/user/repo",
+       "branch": "main"
+     }
    }
 
 2. API Gateway → Task Service: Forward request
@@ -333,8 +338,14 @@ Workspace Mount (Read-Write):
 ### Example 2: Manual Task State Change
 
 ```
-1. User → API Gateway: PATCH /api/v1/tasks/{id}/state
-   { "state": "IN_PROGRESS" }
+1. User → API Gateway: WebSocket message: task.state
+   {
+     "action": "task.state",
+     "payload": {
+       "taskId": "{id}",
+       "state": "IN_PROGRESS"
+     }
+   }
 
 2. API Gateway → Task Service: Forward request
 

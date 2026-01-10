@@ -3,7 +3,7 @@
 > **For Agent Developers**: This document explains how to build agents that integrate with Kandev using the Agent Communication Protocol (ACP).
 >
 > **For System Architecture**: See [ARCHITECTURE.md](ARCHITECTURE.md)
-> **For REST API**: See [docs/openapi.yaml](docs/openapi.yaml)
+> **For WebSocket API**: See [docs/asyncapi.yaml](docs/asyncapi.yaml)
 
 ## Overview
 
@@ -483,81 +483,147 @@ echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":
 
 ---
 
-## REST API Integration
+## WebSocket API Integration
+
+All agent control operations use WebSocket messages with the following structure:
+
+```json
+{
+  "id": "uuid",
+  "type": "request|response",
+  "action": "action.name",
+  "payload": { ... }
+}
+```
 
 ### Launch Agent
 
-```bash
-POST /api/v1/agents/launch
-```
+**Action**: `agent.launch`
 
 **Request:**
 ```json
 {
-  "task_id": "uuid",
-  "agent_type": "augment-agent",
-  "workspace_path": "/absolute/path/to/project",
-  "env": {
-    "AUGMENT_SESSION_AUTH": "{...}",
-    "TASK_DESCRIPTION": "Fix the bug in auth/login.go"
-  },
-  "priority": 1,
-  "metadata": {}
+  "id": "uuid",
+  "type": "request",
+  "action": "agent.launch",
+  "payload": {
+    "task_id": "uuid",
+    "agent_type": "augment-agent",
+    "workspace_path": "/absolute/path/to/project",
+    "env": {
+      "AUGMENT_SESSION_AUTH": "{...}",
+      "TASK_DESCRIPTION": "Fix the bug in auth/login.go"
+    },
+    "priority": 1,
+    "metadata": {}
+  }
 }
 ```
 
 **Response:**
 ```json
 {
-  "id": "instance-uuid",
-  "task_id": "uuid",
-  "agent_type": "augment-agent",
-  "container_id": "docker-id",
-  "status": "starting",
-  "started_at": "2026-01-10T12:00:00Z"
+  "id": "uuid",
+  "type": "response",
+  "action": "agent.launch",
+  "payload": {
+    "id": "instance-uuid",
+    "task_id": "uuid",
+    "agent_type": "augment-agent",
+    "container_id": "docker-id",
+    "status": "starting",
+    "started_at": "2026-01-10T12:00:00Z"
+  }
 }
 ```
 
 ### Send Prompt (Mid-Execution)
 
-```bash
-POST /api/v1/agents/:instanceId/prompt
-```
+**Action**: `agent.prompt`
 
 **Request:**
 ```json
 {
-  "message": "Please also add unit tests"
+  "id": "uuid",
+  "type": "request",
+  "action": "agent.prompt",
+  "payload": {
+    "instance_id": "instance-uuid",
+    "message": "Please also add unit tests"
+  }
 }
-```
-
-### Cancel Agent
-
-```bash
-POST /api/v1/agents/:instanceId/cancel
-```
-
-**Request:**
-```json
-{
-  "reason": "User requested cancellation"
-}
-```
-
-### Get Agent Status
-
-```bash
-GET /api/v1/agents/:instanceId/status
 ```
 
 **Response:**
 ```json
 {
-  "id": "instance-uuid",
-  "status": "running",
-  "progress": 50,
-  "started_at": "2026-01-10T12:00:00Z",
-  "finished_at": null
+  "id": "uuid",
+  "type": "response",
+  "action": "agent.prompt",
+  "payload": {
+    "status": "accepted"
+  }
+}
+```
+
+### Cancel Agent
+
+**Action**: `agent.cancel`
+
+**Request:**
+```json
+{
+  "id": "uuid",
+  "type": "request",
+  "action": "agent.cancel",
+  "payload": {
+    "instance_id": "instance-uuid",
+    "reason": "User requested cancellation"
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "id": "uuid",
+  "type": "response",
+  "action": "agent.cancel",
+  "payload": {
+    "status": "cancelled"
+  }
+}
+```
+
+### Get Agent Status
+
+**Action**: `agent.status`
+
+**Request:**
+```json
+{
+  "id": "uuid",
+  "type": "request",
+  "action": "agent.status",
+  "payload": {
+    "instance_id": "instance-uuid"
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "id": "uuid",
+  "type": "response",
+  "action": "agent.status",
+  "payload": {
+    "id": "instance-uuid",
+    "status": "running",
+    "progress": 50,
+    "started_at": "2026-01-10T12:00:00Z",
+    "finished_at": null
+  }
 }
 ```
 
@@ -565,23 +631,61 @@ Statuses: `starting`, `running`, `completed`, `failed`, `stopped`
 
 ### Get Agent Logs
 
-```bash
-GET /api/v1/agents/:instanceId/logs?tail=100
-```
+**Action**: `agent.logs`
 
-### Get Session Info
-
-```bash
-GET /api/v1/agents/:instanceId/session
+**Request:**
+```json
+{
+  "id": "uuid",
+  "type": "request",
+  "action": "agent.logs",
+  "payload": {
+    "instance_id": "instance-uuid",
+    "tail": 100
+  }
+}
 ```
 
 **Response:**
 ```json
 {
-  "instance_id": "instance-uuid",
-  "task_id": "task-uuid",
-  "session_id": "abc123",
-  "status": "running"
+  "id": "uuid",
+  "type": "response",
+  "action": "agent.logs",
+  "payload": {
+    "logs": ["line1", "line2", "..."]
+  }
+}
+```
+
+### Get Session Info
+
+**Action**: `agent.session`
+
+**Request:**
+```json
+{
+  "id": "uuid",
+  "type": "request",
+  "action": "agent.session",
+  "payload": {
+    "instance_id": "instance-uuid"
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "id": "uuid",
+  "type": "response",
+  "action": "agent.session",
+  "payload": {
+    "instance_id": "instance-uuid",
+    "task_id": "task-uuid",
+    "session_id": "abc123",
+    "status": "running"
+  }
 }
 ```
 
@@ -594,29 +698,48 @@ Agents can resume previous sessions for follow-up conversations.
 ### How It Works
 
 1. First task completes, session ID stored in task metadata
-2. Retrieve session ID from task: `GET /tasks/:taskId` → `metadata.auggie_session_id`
+2. Retrieve session ID via WebSocket `task.get` action → `metadata.auggie_session_id`
 3. Launch new task with `AUGGIE_SESSION_ID` environment variable
 
 ### Example
 
-```bash
-# Get session ID from completed task
-SESSION_ID=$(curl -s http://localhost:8080/api/v1/tasks/$TASK_ID | \
-  jq -r '.metadata.auggie_session_id')
+```javascript
+// WebSocket connection
+const ws = new WebSocket('ws://localhost:8080/api/v1/ws');
 
-# Launch with resumption
-curl -X POST http://localhost:8080/api/v1/agents/launch \
-  -H "Content-Type: application/json" \
-  -d '{
-    "task_id": "'$NEW_TASK_ID'",
-    "agent_type": "augment-agent",
-    "workspace_path": "/path/to/project",
-    "env": {
-      "AUGMENT_SESSION_AUTH": "'"$(cat ~/.augment/session.json | jq -c)"'",
-      "AUGGIE_SESSION_ID": "'$SESSION_ID'",
-      "TASK_DESCRIPTION": "What changes did you make in the previous task?"
-    }
-  }'
+// Get session ID from completed task
+ws.send(JSON.stringify({
+  id: crypto.randomUUID(),
+  type: 'request',
+  action: 'task.get',
+  payload: { task_id: previousTaskId }
+}));
+
+// Handle response and launch with resumption
+ws.onmessage = (event) => {
+  const response = JSON.parse(event.data);
+
+  if (response.action === 'task.get') {
+    const sessionId = response.payload.metadata.auggie_session_id;
+
+    // Launch agent with session resumption
+    ws.send(JSON.stringify({
+      id: crypto.randomUUID(),
+      type: 'request',
+      action: 'agent.launch',
+      payload: {
+        task_id: newTaskId,
+        agent_type: 'augment-agent',
+        workspace_path: '/path/to/project',
+        env: {
+          AUGMENT_SESSION_AUTH: JSON.stringify(sessionAuth),
+          AUGGIE_SESSION_ID: sessionId,
+          TASK_DESCRIPTION: 'What changes did you make in the previous task?'
+        }
+      }
+    }));
+  }
+};
 ```
 
 The agent will load the previous context and continue the conversation.
@@ -779,7 +902,7 @@ See `apps/backend/` for complete working examples:
 ## Additional Resources
 
 - **System Architecture**: [ARCHITECTURE.md](ARCHITECTURE.md)
-- **REST API Specification**: [docs/openapi.yaml](docs/openapi.yaml)
+- **WebSocket API Specification**: [docs/asyncapi.yaml](docs/asyncapi.yaml)
 - **Agent Registry**: `apps/backend/internal/agent/registry/defaults.go`
 - **agentctl Implementation**: `apps/backend/internal/agentctl/`
 - **ACP Protocol Types**: `apps/backend/pkg/acp/jsonrpc/`

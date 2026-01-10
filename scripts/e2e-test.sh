@@ -2,11 +2,13 @@
 #
 # End-to-End Test for Kandev
 # This script tests the complete flow from task creation to agent execution
+# using WebSocket-based communication with the backend.
 #
 # Prerequisites:
 # - Docker running with kandev/augment-agent:latest image built
 # - Augment session credentials in ~/.augment/session.json
 # - Port 8080 available
+# - websocat installed (cargo install websocat or brew install websocat)
 #
 # Usage: ./scripts/e2e-test.sh [--build]
 #   --build   Build the Docker image before running tests
@@ -26,7 +28,7 @@ NC='\033[0m' # No Color
 
 # Configuration
 SERVER_PORT=8080
-BASE_URL="http://localhost:${SERVER_PORT}"
+WS_URL="ws://localhost:${SERVER_PORT}/ws"
 AGENTCTL_PORT=9999
 WAIT_FOR_AGENT_SECONDS=120
 SERVER_PID=""
@@ -78,10 +80,26 @@ log_info() {
     echo -e "${YELLOW}→ $1${NC}"
 }
 
+# WebSocket helper function
+# Sends a request via WebSocket and returns the response
+ws_request() {
+    local action=$1
+    local payload=$2
+    local id=$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "req-$$-$RANDOM")
+
+    # Compact the payload to single line (remove newlines and extra spaces)
+    local compact_payload=$(echo "$payload" | jq -c '.')
+    local message="{\"id\":\"${id}\",\"type\":\"request\",\"action\":\"${action}\",\"payload\":${compact_payload}}"
+
+    # Send request and get response (with timeout)
+    echo "$message" | timeout 10 websocat -n1 "${WS_URL}" 2>/dev/null
+}
+
 wait_for_server() {
     log_info "Waiting for server to be ready..."
     for i in {1..30}; do
-        if curl -s "${BASE_URL}/health" > /dev/null 2>&1; then
+        HEALTH=$(ws_request "health.check" '{}' 2>/dev/null)
+        if echo "$HEALTH" | jq -e '.payload.status == "ok"' > /dev/null 2>&1; then
             log_success "Server is ready"
             return 0
         fi
@@ -107,6 +125,14 @@ wait_for_agentctl() {
 
 # Check prerequisites
 log_step "Checking Prerequisites"
+
+if ! command -v websocat &> /dev/null; then
+    log_error "websocat is not installed"
+    log_info "Install with: cargo install websocat"
+    log_info "Or on macOS: brew install websocat"
+    exit 1
+fi
+log_success "websocat is available"
 
 if ! command -v docker &> /dev/null; then
     log_error "Docker is not installed"
@@ -168,25 +194,21 @@ wait_for_server
 
 # Run the E2E test
 log_step "Step 1: Create Board"
-BOARD=$(curl -s -X POST "${BASE_URL}/api/v1/boards" \
-    -H "Content-Type: application/json" \
-    -d '{"name": "E2E Test Board", "description": "Automated end-to-end test"}')
-BOARD_ID=$(echo "$BOARD" | jq -r '.id')
+BOARD_RESPONSE=$(ws_request "board.create" '{"name": "E2E Test Board", "description": "Automated end-to-end test"}')
+BOARD_ID=$(echo "$BOARD_RESPONSE" | jq -r '.payload.id')
 if [ "$BOARD_ID" == "null" ] || [ -z "$BOARD_ID" ]; then
     log_error "Failed to create board"
-    echo "$BOARD"
+    echo "$BOARD_RESPONSE"
     exit 1
 fi
 log_success "Created board: $BOARD_ID"
 
 log_step "Step 2: Create Column"
-COLUMN=$(curl -s -X POST "${BASE_URL}/api/v1/boards/${BOARD_ID}/columns" \
-    -H "Content-Type: application/json" \
-    -d '{"name": "To Do", "position": 0}')
-COLUMN_ID=$(echo "$COLUMN" | jq -r '.id')
+COLUMN_RESPONSE=$(ws_request "column.create" "{\"board_id\": \"${BOARD_ID}\", \"name\": \"To Do\", \"position\": 0}")
+COLUMN_ID=$(echo "$COLUMN_RESPONSE" | jq -r '.payload.id')
 if [ "$COLUMN_ID" == "null" ] || [ -z "$COLUMN_ID" ]; then
     log_error "Failed to create column"
-    echo "$COLUMN"
+    echo "$COLUMN_RESPONSE"
     exit 1
 fi
 log_success "Created column: $COLUMN_ID"
@@ -197,31 +219,32 @@ TEST_WORKSPACE=$(mktemp -d)
 log_info "Test workspace: $TEST_WORKSPACE"
 
 # Create a simple task that creates a file
-TASK=$(curl -s -X POST "${BASE_URL}/api/v1/tasks" \
-    -H "Content-Type: application/json" \
-    -d "{
-        \"title\": \"E2E Test Task\",
-        \"description\": \"Create a file named 'agent-result.txt' in the workspace root with the content 'Hello from Agent'. Do nothing else.\",
-        \"board_id\": \"${BOARD_ID}\",
-        \"column_id\": \"${COLUMN_ID}\",
-        \"repository_url\": \"${TEST_WORKSPACE}\",
-        \"agent_type\": \"augment-agent\"
-    }")
-TASK_ID=$(echo "$TASK" | jq -r '.id')
+TASK_PAYLOAD=$(cat <<EOF
+{
+    "title": "E2E Test Task",
+    "description": "Create a file named 'agent-result.txt' in the workspace root with the content 'Hello from Agent'. Do nothing else.",
+    "board_id": "${BOARD_ID}",
+    "column_id": "${COLUMN_ID}",
+    "repository_url": "${TEST_WORKSPACE}",
+    "agent_type": "augment-agent"
+}
+EOF
+)
+TASK_RESPONSE=$(ws_request "task.create" "$TASK_PAYLOAD")
+TASK_ID=$(echo "$TASK_RESPONSE" | jq -r '.payload.id')
 if [ "$TASK_ID" == "null" ] || [ -z "$TASK_ID" ]; then
     log_error "Failed to create task"
-    echo "$TASK"
+    echo "$TASK_RESPONSE"
     exit 1
 fi
 log_success "Created task: $TASK_ID"
 
 log_step "Step 4: Start Task via Orchestrator"
-START_RESULT=$(curl -s -X POST "${BASE_URL}/api/v1/orchestrator/tasks/${TASK_ID}/start" \
-    -H "Content-Type: application/json")
-AGENT_ID=$(echo "$START_RESULT" | jq -r '.agent_instance_id')
+START_RESPONSE=$(ws_request "orchestrator.start" "{\"task_id\": \"${TASK_ID}\"}")
+AGENT_ID=$(echo "$START_RESPONSE" | jq -r '.payload.agent_instance_id')
 if [ "$AGENT_ID" == "null" ] || [ -z "$AGENT_ID" ]; then
     log_error "Failed to start task"
-    echo "$START_RESULT"
+    echo "$START_RESPONSE"
     exit 1
 fi
 log_success "Task started, agent ID: $AGENT_ID"
@@ -275,8 +298,8 @@ AGENT_OUTPUT_FILE="${TEST_WORKSPACE}/agent-result.txt"
 AGENT_READY=false
 for i in $(seq 1 $WAIT_FOR_AGENT_SECONDS); do
     # Check agent status - READY means prompt completed
-    AGENT_INFO=$(curl -s "${BASE_URL}/api/v1/agents/${AGENT_ID}/status" 2>/dev/null || echo '{}')
-    AGENT_STATUS=$(echo "$AGENT_INFO" | jq -r '.status // "UNKNOWN"')
+    AGENT_STATUS_RESPONSE=$(ws_request "agent.status" "{\"agent_id\": \"${AGENT_ID}\"}" 2>/dev/null || echo '{}')
+    AGENT_STATUS=$(echo "$AGENT_STATUS_RESPONSE" | jq -r '.payload.status // "UNKNOWN"')
 
     if [ "$AGENT_STATUS" == "READY" ]; then
         log_success "Agent is READY after $i seconds (prompt completed)"
@@ -284,7 +307,7 @@ for i in $(seq 1 $WAIT_FOR_AGENT_SECONDS); do
         break
     elif [ "$AGENT_STATUS" == "FAILED" ]; then
         log_error "Agent failed"
-        echo "$AGENT_INFO" | jq .
+        echo "$AGENT_STATUS_RESPONSE" | jq .
         if [ -n "$CONTAINER_ID" ]; then
             log_info "Container logs:"
             docker logs "$CONTAINER_ID" 2>&1 | tail -30
@@ -338,11 +361,12 @@ else
 fi
 
 log_step "Step 9: Check Final State"
-FINAL_AGENTS=$(curl -s "${BASE_URL}/api/v1/agents" | jq '.total')
+AGENTS_RESPONSE=$(ws_request "agent.list" '{}')
+FINAL_AGENTS=$(echo "$AGENTS_RESPONSE" | jq '.payload.total')
 log_info "Total agents: $FINAL_AGENTS"
 
-FINAL_TASK=$(curl -s "${BASE_URL}/api/v1/tasks/${TASK_ID}")
-TASK_STATE=$(echo "$FINAL_TASK" | jq -r '.state')
+TASK_RESPONSE=$(ws_request "task.get" "{\"id\": \"${TASK_ID}\"}")
+TASK_STATE=$(echo "$TASK_RESPONSE" | jq -r '.payload.state')
 log_info "Task state: $TASK_STATE"
 
 log_step "Step 10: Verify First Prompt Output"
@@ -361,22 +385,27 @@ fi
 log_step "Step 11: Test Multi-Turn - Send Follow-up Prompt"
 SECOND_OUTPUT_FILE="${TEST_WORKSPACE}/second-result.txt"
 log_info "Sending follow-up prompt..."
-PROMPT_RESULT=$(curl -s -X POST "${BASE_URL}/api/v1/orchestrator/tasks/${TASK_ID}/prompt" \
-    -H "Content-Type: application/json" \
-    -d "{\"prompt\": \"Create another file named 'second-result.txt' with the content 'Follow-up successful'. Do nothing else.\"}")
-PROMPT_SUCCESS=$(echo "$PROMPT_RESULT" | jq -r '.success // false')
+PROMPT_PAYLOAD=$(cat <<EOF
+{
+    "task_id": "${TASK_ID}",
+    "prompt": "Create another file named 'second-result.txt' with the content 'Follow-up successful'. Do nothing else."
+}
+EOF
+)
+PROMPT_RESPONSE=$(ws_request "orchestrator.prompt" "$PROMPT_PAYLOAD")
+PROMPT_SUCCESS=$(echo "$PROMPT_RESPONSE" | jq -r '.payload.success // false')
 if [ "$PROMPT_SUCCESS" == "true" ]; then
     log_success "Follow-up prompt accepted"
 else
-    log_error "Follow-up prompt failed: $(echo "$PROMPT_RESULT" | jq -r '.error // "unknown"')"
+    log_error "Follow-up prompt failed: $(echo "$PROMPT_RESPONSE" | jq -r '.payload.error // "unknown"')"
     exit 1
 fi
 
 # Wait for agent to become READY again (prompt completed)
 log_info "Waiting for agent to become READY again..."
 for i in $(seq 1 120); do
-    AGENT_INFO=$(curl -s "${BASE_URL}/api/v1/agents/${AGENT_ID}/status" 2>/dev/null || echo '{}')
-    AGENT_STATUS=$(echo "$AGENT_INFO" | jq -r '.status // "UNKNOWN"')
+    AGENT_STATUS_RESPONSE=$(ws_request "agent.status" "{\"agent_id\": \"${AGENT_ID}\"}" 2>/dev/null || echo '{}')
+    AGENT_STATUS=$(echo "$AGENT_STATUS_RESPONSE" | jq -r '.payload.status // "UNKNOWN"')
     if [ "$AGENT_STATUS" == "READY" ]; then
         log_success "Agent is READY after follow-up prompt ($i seconds)"
         break
@@ -398,18 +427,17 @@ else
 fi
 
 log_step "Step 12: Complete Task"
-COMPLETE_RESULT=$(curl -s -X POST "${BASE_URL}/api/v1/orchestrator/tasks/${TASK_ID}/complete" \
-    -H "Content-Type: application/json")
-COMPLETE_SUCCESS=$(echo "$COMPLETE_RESULT" | jq -r '.success // false')
+COMPLETE_RESPONSE=$(ws_request "orchestrator.complete" "{\"task_id\": \"${TASK_ID}\"}")
+COMPLETE_SUCCESS=$(echo "$COMPLETE_RESPONSE" | jq -r '.payload.success // false')
 if [ "$COMPLETE_SUCCESS" == "true" ]; then
     log_success "Task completed successfully"
 else
-    log_error "Failed to complete task: $(echo "$COMPLETE_RESULT" | jq -r '.error // "unknown"')"
+    log_error "Failed to complete task: $(echo "$COMPLETE_RESPONSE" | jq -r '.payload.error // "unknown"')"
 fi
 
 # Verify task state is COMPLETED
-FINAL_TASK=$(curl -s "${BASE_URL}/api/v1/tasks/${TASK_ID}")
-TASK_STATE=$(echo "$FINAL_TASK" | jq -r '.state')
+FINAL_TASK_RESPONSE=$(ws_request "task.get" "{\"id\": \"${TASK_ID}\"}")
+TASK_STATE=$(echo "$FINAL_TASK_RESPONSE" | jq -r '.payload.state')
 if [ "$TASK_STATE" == "COMPLETED" ]; then
     log_success "Task state is COMPLETED"
 else

@@ -1,0 +1,408 @@
+asyncapi: 2.6.0
+info:
+  title: Kandev WebSocket API
+  description: |
+    Kandev is a Kanban board system with AI agent orchestration capabilities.
+    
+    ## Overview
+    - **Task Service**: Manages tasks, boards, and columns
+    - **Agent Manager**: Manages Docker container lifecycle for AI agents
+    - **Orchestrator**: Coordinates agent execution
+    
+    ## WebSocket Protocol
+    All communication happens over a single WebSocket connection.
+    Messages use a JSON envelope format with request/response correlation.
+    
+    ## Agent Communication Protocol (ACP)
+    Agents communicate via JSON messages on stdout. Real-time updates are
+    pushed to clients via WebSocket notifications.
+    
+    ⚠️ **This documentation must be updated when API changes.**
+  version: 2.0.0
+  contact:
+    name: Kandev Team
+  license:
+    name: MIT
+
+servers:
+  development:
+    url: ws://localhost:8080/ws
+    protocol: ws
+    description: Local development WebSocket server
+
+defaultContentType: application/json
+
+channels:
+  /:
+    publish:
+      summary: Send messages to the server
+      operationId: sendMessage
+      message:
+        oneOf:
+          - $ref: '#/components/messages/Request'
+    subscribe:
+      summary: Receive messages from the server
+      operationId: receiveMessage
+      message:
+        oneOf:
+          - $ref: '#/components/messages/Response'
+          - $ref: '#/components/messages/Notification'
+          - $ref: '#/components/messages/Error'
+
+components:
+  messages:
+    Request:
+      name: Request
+      title: Client Request
+      summary: Request message from client to server
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/RequestEnvelope'
+    
+    Response:
+      name: Response
+      title: Server Response
+      summary: Response message from server to client
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/ResponseEnvelope'
+    
+    Notification:
+      name: Notification
+      title: Server Notification
+      summary: Push notification from server to client
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/NotificationEnvelope'
+    
+    Error:
+      name: Error
+      title: Error Response
+      summary: Error response from server
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/ErrorEnvelope'
+
+  schemas:
+    # Message Envelopes
+    RequestEnvelope:
+      type: object
+      required: [id, type, action, payload]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Correlation ID for request/response matching
+        type:
+          type: string
+          enum: [request]
+        action:
+          type: string
+          description: Action to perform
+          enum:
+            - health.check
+            - board.list
+            - board.create
+            - board.get
+            - board.update
+            - board.delete
+            - column.list
+            - column.create
+            - column.get
+            - task.list
+            - task.create
+            - task.get
+            - task.update
+            - task.delete
+            - task.move
+            - task.state
+            - task.subscribe
+            - task.unsubscribe
+            - agent.list
+            - agent.launch
+            - agent.status
+            - agent.logs
+            - agent.stop
+            - agent.prompt
+            - agent.cancel
+            - agent.session
+            - agent.types
+            - orchestrator.status
+            - orchestrator.queue
+            - orchestrator.trigger
+            - orchestrator.start
+            - orchestrator.stop
+            - orchestrator.prompt
+            - orchestrator.complete
+        payload:
+          type: object
+          description: Action-specific payload
+        timestamp:
+          type: string
+          format: date-time
+    
+    ResponseEnvelope:
+      type: object
+      required: [id, type, action, payload]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Correlation ID matching the request
+        type:
+          type: string
+          enum: [response]
+        action:
+          type: string
+          description: Action that was performed
+        payload:
+          type: object
+          description: Response data
+        timestamp:
+          type: string
+          format: date-time
+    
+    NotificationEnvelope:
+      type: object
+      required: [type, action, payload]
+      properties:
+        type:
+          type: string
+          enum: [notification]
+        action:
+          type: string
+          description: Notification type
+          enum:
+            - acp.progress
+            - acp.log
+            - acp.result
+            - acp.error
+            - acp.status
+            - acp.heartbeat
+            - task.updated
+            - agent.updated
+        payload:
+          type: object
+          description: Notification data
+        timestamp:
+          type: string
+          format: date-time
+
+    ErrorEnvelope:
+      type: object
+      required: [id, type, action, payload]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Correlation ID matching the request
+        type:
+          type: string
+          enum: [error]
+        action:
+          type: string
+          description: Action that failed
+        payload:
+          $ref: '#/components/schemas/ErrorPayload'
+        timestamp:
+          type: string
+          format: date-time
+
+    ErrorPayload:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: Error code
+        message:
+          type: string
+          description: Human readable message
+        details:
+          type: object
+          description: Additional error details
+
+    # Domain Models (keep from openapi.yaml)
+    Board:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required: [id, name, created_at, updated_at]
+
+    Column:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        board_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        position:
+          type: integer
+        state:
+          type: string
+          enum: [TODO, IN_PROGRESS, DONE]
+        created_at:
+          type: string
+          format: date-time
+      required: [id, board_id, name, position, created_at]
+
+    Task:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        board_id:
+          type: string
+          format: uuid
+        column_id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        description:
+          type: string
+        state:
+          type: string
+          enum: [TODO, IN_PROGRESS, BLOCKED, COMPLETED, FAILED, CANCELLED]
+        priority:
+          type: integer
+        agent_type:
+          type: string
+        position:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        metadata:
+          type: object
+          additionalProperties: true
+      required: [id, board_id, column_id, title, state, created_at, updated_at]
+
+    AgentInstance:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        task_id:
+          type: string
+          format: uuid
+        agent_type:
+          type: string
+        container_id:
+          type: string
+        status:
+          type: string
+          enum: [starting, running, completed, failed, stopped, READY]
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+        started_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+        exit_code:
+          type: integer
+        error_message:
+          type: string
+        metadata:
+          type: object
+          additionalProperties: true
+      required: [id, task_id, agent_type, status, progress, started_at]
+
+    AgentType:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        image:
+          type: string
+        capabilities:
+          type: array
+          items:
+            type: string
+        enabled:
+          type: boolean
+      required: [id, name, image, enabled]
+
+    # ACP Notification Payloads
+    ACPProgress:
+      type: object
+      properties:
+        agent_id:
+          type: string
+        task_id:
+          type: string
+        progress:
+          type: integer
+        message:
+          type: string
+        current_file:
+          type: string
+        files_processed:
+          type: integer
+        total_files:
+          type: integer
+
+    ACPLog:
+      type: object
+      properties:
+        agent_id:
+          type: string
+        task_id:
+          type: string
+        level:
+          type: string
+          enum: [debug, info, warn, error]
+        message:
+          type: string
+        metadata:
+          type: object
+
+    ACPResult:
+      type: object
+      properties:
+        agent_id:
+          type: string
+        task_id:
+          type: string
+        status:
+          type: string
+        summary:
+          type: string
+        artifacts:
+          type: array
+          items:
+            type: object
+            properties:
+              type:
+                type: string
+              path:
+                type: string

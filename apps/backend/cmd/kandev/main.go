@@ -1,5 +1,6 @@
 // Package main is the unified entry point for Kandev.
 // This single binary runs all services together with shared infrastructure.
+// All communication happens over WebSocket - no REST API.
 package main
 
 import (
@@ -21,27 +22,30 @@ import (
 	// Event bus
 	"github.com/kandev/kandev/internal/events/bus"
 
+	// WebSocket gateway
+	gateways "github.com/kandev/kandev/internal/gateway/websocket"
+
 	// Agent Manager packages
-	agentapi "github.com/kandev/kandev/internal/agent/api"
 	"github.com/kandev/kandev/internal/agent/credentials"
 	"github.com/kandev/kandev/internal/agent/docker"
 	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/agent/registry"
+	agentwshandlers "github.com/kandev/kandev/internal/agent/wshandlers"
 
 	// Orchestrator packages
 	"github.com/kandev/kandev/internal/orchestrator"
-	orchestratorapi "github.com/kandev/kandev/internal/orchestrator/api"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
-	orchestratorstreaming "github.com/kandev/kandev/internal/orchestrator/streaming"
+	orchestratorwshandlers "github.com/kandev/kandev/internal/orchestrator/wshandlers"
 
 	// Task Service packages
-	taskapi "github.com/kandev/kandev/internal/task/api"
 	"github.com/kandev/kandev/internal/task/repository"
 	taskservice "github.com/kandev/kandev/internal/task/service"
+	taskwshandlers "github.com/kandev/kandev/internal/task/wshandlers"
 
 	// ACP
 	"github.com/kandev/kandev/pkg/acp/protocol"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
 func main() {
@@ -177,13 +181,43 @@ func main() {
 	serviceCfg := orchestrator.DefaultServiceConfig()
 	orchestratorSvc := orchestrator.NewService(serviceCfg, eventBus, nil, agentManagerClient, taskRepoAdapter, log)
 
-	// WebSocket hub for ACP streaming
-	wsHub := orchestratorstreaming.NewHub(log)
-	go wsHub.Run(ctx)
+	// ============================================
+	// WEBSOCKET GATEWAY (All communication via WebSocket)
+	// ============================================
+	log.Info("Initializing WebSocket Gateway...")
 
-	// Wire ACP handler to broadcast to WebSocket clients
+	// Create the unified WebSocket gateway
+	gateway := gateways.NewGateway(log)
+
+	// Register WebSocket message handlers for each service
+	taskWSHandlers := taskwshandlers.NewHandlers(taskSvc, log)
+	taskWSHandlers.RegisterHandlers(gateway.Dispatcher)
+	log.Info("Registered Task Service WebSocket handlers")
+
+	orchestratorWSHandlers := orchestratorwshandlers.NewHandlers(orchestratorSvc, log)
+	orchestratorWSHandlers.RegisterHandlers(gateway.Dispatcher)
+	log.Info("Registered Orchestrator WebSocket handlers")
+
+	if lifecycleMgr != nil && agentRegistry != nil {
+		agentWSHandlers := agentwshandlers.NewHandlers(lifecycleMgr, agentRegistry, log)
+		agentWSHandlers.RegisterHandlers(gateway.Dispatcher)
+		log.Info("Registered Agent Manager WebSocket handlers")
+	}
+
+	// Start the WebSocket hub
+	go gateway.Hub.Run(ctx)
+
+	// Wire ACP handler to broadcast to WebSocket clients as notifications
 	orchestratorSvc.RegisterACPHandler(func(taskID string, msg *protocol.Message) {
-		wsHub.Broadcast(taskID, msg)
+		// Convert ACP message to WebSocket notification
+		action := "acp." + string(msg.Type)
+		notification, _ := ws.NewNotification(action, map[string]interface{}{
+			"task_id":   taskID,
+			"type":      msg.Type,
+			"data":      msg.Data,
+			"timestamp": msg.Timestamp,
+		})
+		gateway.Hub.BroadcastToTask(taskID, notification)
 	})
 
 	// Wire ACP handler to extract session_id from session_info messages and store in task metadata
@@ -219,42 +253,24 @@ func main() {
 	log.Info("Orchestrator initialized")
 
 	// ============================================
-	// HTTP SERVER
+	// HTTP SERVER (WebSocket endpoint only)
 	// ============================================
 	if cfg.Logging.Level != "debug" {
 		gin.SetMode(gin.ReleaseMode)
 	}
 	router := gin.New()
 	router.Use(gin.Recovery())
-	router.Use(orchestratorapi.RequestLogger(log))
-	router.Use(orchestratorapi.CORS())
+	router.Use(corsMiddleware())
 
-	// API v1 routes
-	v1Group := router.Group("/api/v1")
+	// WebSocket endpoint - the only way to communicate with the backend
+	gateway.SetupRoutes(router)
 
-	// Task Service routes
-	taskapi.SetupRoutes(v1Group, taskSvc, log)
-
-	// Orchestrator routes
-	orchGroup := v1Group.Group("/orchestrator")
-	orchestratorapi.SetupRoutes(orchGroup, orchestratorSvc, log)
-
-	// WebSocket routes for orchestrator
-	wsHandler := orchestratorstreaming.NewWSHandler(wsHub, orchestratorSvc, log)
-	orchestratorstreaming.SetupWebSocketRoutes(orchGroup, wsHandler)
-
-	// Agent Manager routes (if available)
-	if lifecycleMgr != nil && agentRegistry != nil && dockerClient != nil {
-		// Note: ACP is now handled via agentctl inside containers, so we pass nil for the ACP manager
-		agentapi.SetupRoutes(v1Group, lifecycleMgr, agentRegistry, dockerClient, nil, log)
-	}
-
-	// Health check
+	// Health check (simple HTTP for load balancers/monitoring)
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"status":  "ok",
 			"service": "kandev",
-			"mode":    "unified",
+			"mode":    "websocket-only",
 		})
 	})
 
@@ -272,17 +288,15 @@ func main() {
 
 	// Start server
 	go func() {
-		log.Info("HTTP server listening", zap.Int("port", port))
+		log.Info("WebSocket server listening", zap.Int("port", port))
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatal("Failed to start HTTP server", zap.Error(err))
+			log.Fatal("Failed to start server", zap.Error(err))
 		}
 	}()
 
 	// Print routes summary
-	log.Info("Routes configured",
-		zap.String("tasks", "/api/v1/tasks, /api/v1/boards"),
-		zap.String("orchestrator", "/api/v1/orchestrator"),
-		zap.String("agents", "/api/v1/agents"),
+	log.Info("WebSocket-only API configured",
+		zap.String("websocket", "/ws"),
 		zap.String("health", "/health"),
 	)
 
@@ -426,4 +440,21 @@ func (a *lifecycleAdapter) ListAgentTypes(ctx context.Context) ([]*v1.AgentType,
 // PromptAgent sends a follow-up prompt to a running agent
 func (a *lifecycleAdapter) PromptAgent(ctx context.Context, agentInstanceID string, prompt string) error {
 	return a.mgr.PromptAgent(ctx, agentInstanceID, prompt)
+}
+
+// corsMiddleware returns a CORS middleware for WebSocket connections
+func corsMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Header("Access-Control-Allow-Origin", "*")
+		c.Header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Authorization, Upgrade, Connection, Sec-WebSocket-Key, Sec-WebSocket-Version, Sec-WebSocket-Protocol")
+		c.Header("Access-Control-Allow-Credentials", "true")
+
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(http.StatusNoContent)
+			return
+		}
+
+		c.Next()
+	}
 }

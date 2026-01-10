@@ -66,12 +66,69 @@ The server starts on port 8080 by default.
 
 ### Step 3: Verify It's Running
 
-```bash
-# Health check
-curl http://localhost:8080/health
+The backend uses a WebSocket-first architecture. Connect to `ws://localhost:8080/ws` to interact with the API.
 
-# Should return: {"status":"ok"}
+#### Using websocat (Command Line)
+
+```bash
+# Install websocat
+# macOS: brew install websocat
+# Linux: cargo install websocat
+
+# Health check
+echo '{"id":"1","type":"request","action":"health.check","payload":{}}' | websocat ws://localhost:8080/ws
+
+# Should return a response with status "ok"
 ```
+
+#### Using JavaScript
+
+```javascript
+const ws = new WebSocket('ws://localhost:8080/ws');
+
+ws.onopen = () => {
+  ws.send(JSON.stringify({
+    id: '1',
+    type: 'request',
+    action: 'health.check',
+    payload: {}
+  }));
+};
+
+ws.onmessage = (event) => {
+  const msg = JSON.parse(event.data);
+  console.log('Health:', msg); // { id: '1', type: 'response', action: 'health.check', payload: { status: 'ok' }, ... }
+};
+```
+
+---
+
+## WebSocket Message Protocol
+
+### Connection
+
+Connect to: `ws://localhost:8080/ws`
+
+### Message Envelope
+
+All messages use this envelope format:
+
+```json
+{
+  "id": "correlation-uuid",
+  "type": "request|response|notification|error",
+  "action": "action.name",
+  "payload": {},
+  "timestamp": "2026-01-10T10:30:00Z"
+}
+```
+
+### Message Types
+
+- `request` - Client request to the server
+- `response` - Server response to a request
+- `notification` - Server push notification (e.g., agent status updates)
+- `error` - Error response
 
 ---
 
@@ -79,59 +136,155 @@ curl http://localhost:8080/health
 
 ### Create a Board
 
+#### websocat
+
 ```bash
-curl -X POST http://localhost:8080/api/v1/boards \
-  -H "Content-Type: application/json" \
-  -d '{"name": "My Project", "description": "Project tasks"}'
+echo '{"id":"1","type":"request","action":"board.create","payload":{"name":"My Project","description":"Project tasks"}}' | websocat ws://localhost:8080/ws
+```
+
+#### JavaScript
+
+```javascript
+ws.send(JSON.stringify({
+  id: '1',
+  type: 'request',
+  action: 'board.create',
+  payload: { name: 'My Project', description: 'Project tasks' }
+}));
+```
+
+### List Boards
+
+#### websocat
+
+```bash
+echo '{"id":"2","type":"request","action":"board.list","payload":{}}' | websocat ws://localhost:8080/ws
+```
+
+#### JavaScript
+
+```javascript
+ws.send(JSON.stringify({
+  id: '2',
+  type: 'request',
+  action: 'board.list',
+  payload: {}
+}));
 ```
 
 ### Create a Column
 
+#### websocat
+
 ```bash
-curl -X POST http://localhost:8080/api/v1/boards/{board_id}/columns \
-  -H "Content-Type: application/json" \
-  -d '{"name": "To Do"}'
+echo '{"id":"3","type":"request","action":"column.create","payload":{"board_id":"<board_id>","name":"To Do"}}' | websocat ws://localhost:8080/ws
+```
+
+#### JavaScript
+
+```javascript
+ws.send(JSON.stringify({
+  id: '3',
+  type: 'request',
+  action: 'column.create',
+  payload: { board_id: '<board_id>', name: 'To Do' }
+}));
 ```
 
 ### Create a Task
 
+#### websocat
+
 ```bash
-curl -X POST http://localhost:8080/api/v1/boards/{board_id}/columns/{column_id}/tasks \
-  -H "Content-Type: application/json" \
-  -d '{"title": "Fix login bug", "description": "Users cannot login"}'
+echo '{"id":"4","type":"request","action":"task.create","payload":{"board_id":"<board_id>","column_id":"<column_id>","title":"Fix login bug","description":"Users cannot login"}}' | websocat ws://localhost:8080/ws
 ```
 
-### Create a Task with Agent
+#### JavaScript
+
+```javascript
+ws.send(JSON.stringify({
+  id: '4',
+  type: 'request',
+  action: 'task.create',
+  payload: {
+    board_id: '<board_id>',
+    column_id: '<column_id>',
+    title: 'Fix login bug',
+    description: 'Users cannot login'
+  }
+}));
+```
+
+### Launch an Agent for a Task
+
+#### websocat
 
 ```bash
-# Create a task that will be executed by an AI agent
-curl -X POST http://localhost:8080/api/v1/tasks \
-  -H "Content-Type: application/json" \
-  -d '{
-    "title": "Analyze codebase",
-    "description": "Provide an overview of the project structure",
-    "board_id": "{board_id}",
-    "column_id": "{column_id}",
-    "agent_type": "augment-agent",
-    "repository_url": "/path/to/your/project"
-  }'
+echo '{"id":"5","type":"request","action":"agent.launch","payload":{"task_id":"<task_id>","agent_type":"augment-agent","repository_url":"/path/to/your/project"}}' | websocat ws://localhost:8080/ws
+```
+
+#### JavaScript
+
+```javascript
+ws.send(JSON.stringify({
+  id: '5',
+  type: 'request',
+  action: 'agent.launch',
+  payload: {
+    task_id: '<task_id>',
+    agent_type: 'augment-agent',
+    repository_url: '/path/to/your/project'
+  }
+}));
 ```
 
 ### Start Task via Orchestrator
 
+#### websocat
+
 ```bash
-# Start the task - this launches the agent container
-curl -X POST http://localhost:8080/api/v1/orchestrator/tasks/{task_id}/start \
-  -H "Content-Type: application/json"
+echo '{"id":"6","type":"request","action":"orchestrator.start","payload":{"task_id":"<task_id>"}}' | websocat ws://localhost:8080/ws
+```
+
+#### JavaScript
+
+```javascript
+ws.send(JSON.stringify({
+  id: '6',
+  type: 'request',
+  action: 'orchestrator.start',
+  payload: { task_id: '<task_id>' }
+}));
 ```
 
 ### Check Agent Status
 
-```bash
-curl http://localhost:8080/api/v1/agents/{agent_id}/status
+#### websocat
 
-# List all agents
-curl http://localhost:8080/api/v1/agents
+```bash
+echo '{"id":"7","type":"request","action":"agent.status","payload":{"agent_id":"<agent_id>"}}' | websocat ws://localhost:8080/ws
+```
+
+#### JavaScript
+
+```javascript
+ws.send(JSON.stringify({
+  id: '7',
+  type: 'request',
+  action: 'agent.status',
+  payload: { agent_id: '<agent_id>' }
+}));
+```
+
+### Interactive Mode
+
+For interactive testing, connect in interactive mode:
+
+```bash
+websocat ws://localhost:8080/ws
+# Then type messages manually, one per line:
+{"id":"1","type":"request","action":"health.check","payload":{}}
+{"id":"2","type":"request","action":"board.list","payload":{}}
 ```
 
 ---
@@ -150,14 +303,15 @@ cd /path/to/kandev
 ./scripts/e2e-test.sh
 ```
 
-The E2E test:
-1. Starts the server with a fresh database
-2. Creates a board, column, and task
-3. Starts the task via the orchestrator
-4. Verifies the agent container starts
-5. Checks that ACP session is created
-6. Verifies permission requests are handled
-7. Waits for agent to complete
+The E2E test uses WebSocket connections to:
+1. Start the server with a fresh database
+2. Connect via WebSocket to `ws://localhost:8080/ws`
+3. Create a board, column, and task using WebSocket messages
+4. Start the task via the orchestrator (`orchestrator.start`)
+5. Verify the agent container starts
+6. Check that ACP session is created
+7. Receive real-time agent status notifications
+8. Wait for agent to complete
 
 ---
 

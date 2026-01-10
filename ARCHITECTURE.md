@@ -11,10 +11,10 @@ Kandev is a kanban board with AI agent orchestration. Three main components:
 │  Web UI (Next.js 16 + React 19)                         │
 │  http://localhost:3000                                   │
 └───────────────────────┬──────────────────────────────────┘
-                        │ HTTP/WebSocket
+                        │ WebSocket (ws://localhost:8080/ws)
 ┌───────────────────────▼──────────────────────────────────┐
 │  Backend (Go + Gin + SQLite)                             │
-│  http://localhost:8080                                   │
+│  ws://localhost:8080/ws                                  │
 │                                                           │
 │  [Task Service] [Agent Manager] [Orchestrator]          │
 │  [Event Bus: In-Memory/NATS]                            │
@@ -55,7 +55,8 @@ make test
 
 ### Backend (`apps/backend/`)
 - **Language**: Go 1.21+
-- **Framework**: Gin (HTTP), Gorilla WebSocket
+- **Framework**: Gin, Gorilla WebSocket
+- **Protocol**: WebSocket (message-based API)
 - **Database**: SQLite (WAL mode)
 - **Container**: Docker client
 - **Logging**: Zap
@@ -91,18 +92,18 @@ make test
 │       ├── acp/          # ACP protocol types
 │       └── api/v1/       # API models
 └── docs/
-    └── openapi.yaml      # REST API specification
+    └── asyncapi.yaml     # WebSocket API specification
 ```
 
 ## Data Flow
 
 1. User creates task in web UI
-2. POST `/api/v1/tasks` → SQLite
+2. WebSocket `task.create` message → SQLite
 3. User launches agent for task
-4. Backend spawns Docker container
+4. WebSocket `agent.launch` message → Backend spawns Docker container
 5. Agent streams progress via ACP
 6. Events published to event bus
-7. WebSocket pushes updates to UI
+7. WebSocket notifications pushed to UI (`task.updated`, `agent.updated`)
 
 ## Backend Services
 
@@ -123,24 +124,93 @@ make test
 - **Responsibility**: Queue tasks, coordinate execution
 - **Features**: Task queue, agent launch, monitoring
 
-## API Endpoints
+## WebSocket Message Types
 
-**Base**: `http://localhost:8080/api/v1`
+**Connection**: `ws://localhost:8080/ws`
 
-| Endpoint | Purpose |
-|----------|---------|
-| `GET /health` | Health check |
-| `/boards` | Board CRUD |
-| `/columns` | Column CRUD |
-| `/tasks` | Task CRUD, move, state changes |
-| `/agents/launch` | Launch agent for task |
-| `/agents/:id/status` | Agent status |
-| `/agents/:id/logs` | Agent logs |
-| `/agents/:id/prompt` | Send prompt (ACP) |
-| `/agents/types` | List agent types |
-| `/orchestrator/*` | Queue, trigger, status |
+### Message Envelope
+```json
+{
+  "id": "correlation-uuid",
+  "type": "request|response|notification|error",
+  "action": "action.name",
+  "payload": {},
+  "timestamp": "2026-01-10T10:30:00Z"
+}
+```
 
-**Full API**: See `docs/openapi.yaml`
+### Request/Response Pattern
+- Requests include `id` for correlation
+- Responses include matching `id`
+- Notifications have no `id` (one-way)
+
+### Message Actions
+
+| Action | Description |
+|--------|-------------|
+| `health.check` | Health check |
+| `board.list` | List boards |
+| `board.create` | Create board |
+| `board.get` | Get board |
+| `board.update` | Update board |
+| `board.delete` | Delete board |
+| `column.list` | List columns |
+| `column.create` | Create column |
+| `task.list` | List tasks |
+| `task.create` | Create task |
+| `task.get` | Get task |
+| `task.update` | Update task |
+| `task.delete` | Delete task |
+| `task.move` | Move task |
+| `task.state` | Update state |
+| `task.subscribe` | Subscribe to task updates |
+| `task.unsubscribe` | Unsubscribe from task updates |
+| `agent.list` | List agents |
+| `agent.launch` | Launch agent |
+| `agent.status` | Get status |
+| `agent.logs` | Get logs |
+| `agent.stop` | Stop agent |
+| `agent.prompt` | Send prompt |
+| `agent.cancel` | Cancel agent |
+| `agent.session` | Get session |
+| `agent.types` | List types |
+| `orchestrator.status` | Get status |
+| `orchestrator.queue` | Get queue |
+| `orchestrator.trigger` | Trigger task |
+| `orchestrator.start` | Start task |
+| `orchestrator.stop` | Stop task |
+| `orchestrator.prompt` | Send prompt |
+| `orchestrator.complete` | Complete task |
+
+### Notification Types (Server → Client)
+
+| Action | Description |
+|--------|-------------|
+| `acp.progress` | Agent progress update |
+| `acp.log` | Agent log message |
+| `acp.result` | Agent result |
+| `acp.error` | Agent error |
+| `acp.status` | Agent status change |
+| `acp.heartbeat` | Keep-alive |
+| `task.updated` | Task was updated |
+| `agent.updated` | Agent status changed |
+
+### Error Response Format
+```json
+{
+  "id": "correlation-uuid",
+  "type": "error",
+  "action": "original.action",
+  "payload": {
+    "code": "ERROR_CODE",
+    "message": "Human readable message",
+    "details": {}
+  },
+  "timestamp": "2026-01-10T10:30:00Z"
+}
+```
+
+**Full API**: See `docs/asyncapi.yaml`
 
 ## Agent Communication Protocol (ACP)
 
@@ -198,53 +268,93 @@ Agents use JSON-RPC 2.0 over stdout for bidirectional communication.
 
 ## Development Workflow
 
+### WebSocket Usage Example (JavaScript)
+
+```javascript
+const ws = new WebSocket('ws://localhost:8080/ws');
+
+// Send request
+ws.send(JSON.stringify({
+  id: crypto.randomUUID(),
+  type: 'request',
+  action: 'board.create',
+  payload: { name: 'My Project' }
+}));
+
+// Handle messages
+ws.onmessage = (event) => {
+  const msg = JSON.parse(event.data);
+  if (msg.type === 'response') {
+    console.log('Response:', msg.payload);
+  } else if (msg.type === 'notification') {
+    console.log('Notification:', msg.action, msg.payload);
+  }
+};
+```
+
 ### Create and Launch Agent
 
-```bash
-# Create board
-BOARD_ID=$(curl -s -X POST http://localhost:8080/api/v1/boards \
-  -H "Content-Type: application/json" \
-  -d '{"name":"My Project"}' | jq -r '.id')
+```javascript
+// Create board
+ws.send(JSON.stringify({
+  id: crypto.randomUUID(),
+  type: 'request',
+  action: 'board.create',
+  payload: { name: 'My Project' }
+}));
 
-# Create task
-TASK_ID=$(curl -s -X POST http://localhost:8080/api/v1/tasks \
-  -H "Content-Type: application/json" \
-  -d '{"board_id":"'$BOARD_ID'","title":"Fix bug"}' | jq -r '.id')
+// Create task (after receiving board.create response)
+ws.send(JSON.stringify({
+  id: crypto.randomUUID(),
+  type: 'request',
+  action: 'task.create',
+  payload: { board_id: BOARD_ID, title: 'Fix bug' }
+}));
 
-# Launch agent
-curl -X POST http://localhost:8080/api/v1/agents/launch \
-  -H "Content-Type: application/json" \
-  -d '{
-    "task_id":"'$TASK_ID'",
-    "agent_type":"augment-agent",
-    "workspace_path":"/path/to/project",
-    "env":{
-      "AUGMENT_SESSION_AUTH":"'"$(cat ~/.augment/session.json | jq -c)"'",
-      "TASK_DESCRIPTION":"Fix the bug"
+// Launch agent (after receiving task.create response)
+ws.send(JSON.stringify({
+  id: crypto.randomUUID(),
+  type: 'request',
+  action: 'agent.launch',
+  payload: {
+    task_id: TASK_ID,
+    agent_type: 'augment-agent',
+    workspace_path: '/path/to/project',
+    env: {
+      AUGMENT_SESSION_AUTH: sessionAuth,
+      TASK_DESCRIPTION: 'Fix the bug'
     }
-  }'
+  }
+}));
 ```
 
 ### Session Resumption
 
-```bash
-# Get session ID from completed task
-SESSION_ID=$(curl -s http://localhost:8080/api/v1/tasks/$TASK_ID | \
-  jq -r '.metadata.auggie_session_id')
+```javascript
+// Get session ID from completed task
+ws.send(JSON.stringify({
+  id: crypto.randomUUID(),
+  type: 'request',
+  action: 'agent.session',
+  payload: { task_id: TASK_ID }
+}));
 
-# Launch with resumption
-curl -X POST http://localhost:8080/api/v1/agents/launch \
-  -H "Content-Type: application/json" \
-  -d '{
-    "task_id":"'$NEW_TASK_ID'",
-    "agent_type":"augment-agent",
-    "workspace_path":"/path/to/project",
-    "env":{
-      "AUGMENT_SESSION_AUTH":"'"$(cat ~/.augment/session.json | jq -c)"'",
-      "AUGGIE_SESSION_ID":"'$SESSION_ID'",
-      "TASK_DESCRIPTION":"Follow-up question"
+// Launch with resumption (after receiving session response)
+ws.send(JSON.stringify({
+  id: crypto.randomUUID(),
+  type: 'request',
+  action: 'agent.launch',
+  payload: {
+    task_id: NEW_TASK_ID,
+    agent_type: 'augment-agent',
+    workspace_path: '/path/to/project',
+    env: {
+      AUGMENT_SESSION_AUTH: sessionAuth,
+      AUGGIE_SESSION_ID: SESSION_ID,
+      TASK_DESCRIPTION: 'Follow-up question'
     }
-  }'
+  }
+}));
 ```
 
 ## Database
@@ -306,7 +416,7 @@ make test-web
 | `Makefile` | Build orchestration |
 | `ARCHITECTURE.md` | This file |
 | `AGENTS.md` | Agent protocol details |
-| `docs/openapi.yaml` | REST API spec |
+| `docs/asyncapi.yaml` | WebSocket API spec |
 | `apps/backend/cmd/kandev/main.go` | Entry point |
 | `apps/backend/internal/agent/registry/defaults.go` | Agent type registry |
 | `apps/backend/internal/task/repository/sqlite.go` | Database schema |
@@ -314,7 +424,7 @@ make test-web
 
 ## Contributing
 
-1. Update docs when changing API (AGENTS.md + openapi.yaml)
+1. Update docs when changing API (AGENTS.md + asyncapi.yaml)
 2. Run tests: `make test`
 3. Format code: `make fmt`
 4. Test full stack: `make dev-backend` + `make dev-web`
@@ -322,5 +432,5 @@ make test-web
 ---
 
 **For Agent Protocol Details**: See `AGENTS.md`
-**For API Reference**: See `docs/openapi.yaml`
+**For API Reference**: See `docs/asyncapi.yaml`
 **Last Updated**: 2026-01-10
