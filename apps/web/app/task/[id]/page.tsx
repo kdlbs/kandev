@@ -1,9 +1,12 @@
 'use client';
 
-import { FormEvent, useState } from 'react';
+import { FormEvent, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { DiffModeEnum, DiffView } from '@git-diff-view/react';
+import '@git-diff-view/react/styles/diff-view.css';
 import {
   IconArrowDown,
+  IconArrowBackUp,
   IconArrowLeft,
   IconBrandVscode,
   IconChevronDown,
@@ -15,12 +18,44 @@ import {
   IconGitFork,
   IconGitMerge,
   IconGitPullRequest,
+  IconBrain,
+  IconLayoutColumns,
+  IconLayoutRows,
   IconPencil,
+  IconFile,
+  IconFolder,
+  IconListCheck,
+  IconPaperclip,
+  IconExternalLink,
   IconX,
 } from '@tabler/icons-react';
+import { useTheme } from 'next-themes';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible';
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarProvider,
+  SidebarRail,
+} from '@/components/ui/sidebar';
 import {
   Select,
   SelectContent,
@@ -30,8 +65,15 @@ import {
 } from '@/components/ui/select';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { CommitStatBadge, LineStat } from '@/components/diff-stat';
+import { getLocalStorage, setLocalStorage } from '@/lib/local-storage';
 
 type ChatMessage = {
   id: string;
@@ -76,20 +118,129 @@ const CHANGED_FILES = [
   { path: 'apps/web/components/kanban-column.tsx', status: 'D', plus: 0, minus: 18 },
 ];
 
-const ALL_FILES = [
-  'apps/web/app/page.tsx',
-  'apps/web/app/task/[id]/page.tsx',
-  'apps/web/components/kanban-board.tsx',
-  'apps/web/components/kanban-card.tsx',
-  'apps/web/components/kanban-column.tsx',
-  'apps/web/components/task-create-dialog.tsx',
-];
+const DIFF_SAMPLES: Record<string, { diff: string; newContent: string }> = {
+  'apps/web/components/kanban-board.tsx': {
+    diff: [
+      'diff --git a/apps/web/components/kanban-board.tsx b/apps/web/components/kanban-board.tsx',
+      'index 7b45ad2..9c0f2ee 100644',
+      '--- a/apps/web/components/kanban-board.tsx',
+      '+++ b/apps/web/components/kanban-board.tsx',
+      '@@ -14,6 +14,7 @@ export function KanbanBoard() {',
+      '   const columns = useMemo(() => getColumns(view), [view]);',
+      '   const tasks = useMemo(() => getTasks(), []);',
+      '+  const hasAlerts = tasks.some((task) => task.priority === "high");',
+      '   return (',
+      '     <div className="kanban-board">',
+      '       <BoardHeader />',
+    ].join('\n'),
+    newContent: [
+      'export function KanbanBoard() {',
+      '  const columns = useMemo(() => getColumns(view), [view]);',
+      '  const tasks = useMemo(() => getTasks(), []);',
+      '  const hasAlerts = tasks.some((task) => task.priority === "high");',
+      '  return (',
+      '    <div className="kanban-board">',
+      '      <BoardHeader />',
+      '    </div>',
+      '  );',
+      '}',
+    ].join('\n'),
+  },
+  'apps/web/components/kanban-card.tsx': {
+    diff: [
+      'diff --git a/apps/web/components/kanban-card.tsx b/apps/web/components/kanban-card.tsx',
+      'index a14d022..a0cc12f 100644',
+      '--- a/apps/web/components/kanban-card.tsx',
+      '+++ b/apps/web/components/kanban-card.tsx',
+      '@@ -8,7 +8,8 @@ export function KanbanCard({ task }: KanbanCardProps) {',
+      '   return (',
+      '     <Card className="kanban-card">',
+      '-      <h4 className="title">{task.title}</h4>',
+      '+      <h4 className="title">{task.title}</h4>',
+      '+      <span className="tag">{task.assignee}</span>',
+      '       <p className="summary">{task.summary}</p>',
+      '     </Card>',
+      '   );',
+    ].join('\n'),
+    newContent: [
+      'export function KanbanCard({ task }: KanbanCardProps) {',
+      '  return (',
+      '    <Card className="kanban-card">',
+      '      <h4 className="title">{task.title}</h4>',
+      '      <span className="tag">{task.assignee}</span>',
+      '      <p className="summary">{task.summary}</p>',
+      '    </Card>',
+      '  );',
+      '}',
+    ].join('\n'),
+  },
+  'apps/web/components/task-create-dialog.tsx': {
+    diff: [
+      'diff --git a/apps/web/components/task-create-dialog.tsx b/apps/web/components/task-create-dialog.tsx',
+      'new file mode 100644',
+      'index 0000000..6c1a1f0',
+      '--- /dev/null',
+      '+++ b/apps/web/components/task-create-dialog.tsx',
+      '@@ -0,0 +1,6 @@',
+      '+export function TaskCreateDialog() {',
+      '+  return (',
+      '+    <Dialog>',
+      '+      <DialogContent>Create task</DialogContent>',
+      '+    </Dialog>',
+      '+  );',
+      '+}',
+    ].join('\n'),
+    newContent: [
+      'export function TaskCreateDialog() {',
+      '  return (',
+      '    <Dialog>',
+      '      <DialogContent>Create task</DialogContent>',
+      '    </Dialog>',
+      '  );',
+      '}',
+    ].join('\n'),
+  },
+  'apps/web/components/kanban-column.tsx': {
+    diff: [
+      'diff --git a/apps/web/components/kanban-column.tsx b/apps/web/components/kanban-column.tsx',
+      'deleted file mode 100644',
+      'index 9a9b7aa..0000000',
+      '--- a/apps/web/components/kanban-column.tsx',
+      '+++ /dev/null',
+      '@@ -1,5 +0,0 @@',
+      '-export function KanbanColumn() {',
+      '-  return (',
+      '-    <section className="kanban-column">Column</section>',
+      '-  );',
+      '-}',
+    ].join('\n'),
+    newContent: '',
+  },
+};
 
 const COMMANDS = [
   { id: 'dev', label: 'npm run dev' },
   { id: 'lint', label: 'npm run lint' },
   { id: 'test', label: 'npm run test' },
 ];
+
+const FILE_TREE = [
+  [
+    'app',
+    ['api', ['hello', ['route.ts']], 'page.tsx', 'layout.tsx', ['blog', ['page.tsx']]],
+  ],
+  ['components', ['ui', 'button.tsx', 'card.tsx'], 'header.tsx', 'footer.tsx'],
+  ['lib', ['util.ts']],
+  ['public', 'favicon.ico', 'vercel.svg'],
+  '.eslintrc.json',
+  '.gitignore',
+  'next.config.js',
+  'tailwind.config.js',
+  'package.json',
+  'README.md',
+];
+
+type TreeItem = string | TreeItem[];
 
 const badgeClass = (status: string) =>
   cn(
@@ -108,10 +259,84 @@ const splitPath = (path: string) => {
   };
 };
 
+function Tree({ item }: { item: TreeItem }) {
+  const [name, ...items] = Array.isArray(item) ? item : [item];
+
+  if (!items.length) {
+    return (
+      <SidebarMenuButton className="data-[active=true]:bg-transparent">
+        <IconFile className="h-4 w-4" />
+        {name}
+      </SidebarMenuButton>
+    );
+  }
+
+  return (
+    <SidebarMenuItem>
+      <Collapsible
+        className="group/collapsible [&[data-state=open]>button>svg:first-child]:rotate-90"
+        defaultOpen={name === 'components' || name === 'ui'}
+      >
+        <CollapsibleTrigger asChild>
+          <SidebarMenuButton>
+            <IconChevronRight className="h-4 w-4 transition-transform" />
+            <IconFolder className="h-4 w-4" />
+            {name}
+          </SidebarMenuButton>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <SidebarMenuSub>
+            {items.map((subItem, index) => (
+              <Tree key={index} item={subItem} />
+            ))}
+          </SidebarMenuSub>
+        </CollapsibleContent>
+      </Collapsible>
+    </SidebarMenuItem>
+  );
+}
+
+function buildDiffData(filePath: string) {
+  const sample = DIFF_SAMPLES[filePath];
+  if (!sample) {
+    return {
+      hunks: [
+        [
+          `diff --git a/${filePath} b/${filePath}`,
+          'index 0000000..0000000 100644',
+          `--- a/${filePath}`,
+          `+++ b/${filePath}`,
+          '@@ -1,1 +1,1 @@',
+          '-',
+          '+',
+        ].join('\n'),
+      ],
+      oldFile: { fileName: filePath, fileLang: 'ts' },
+      newFile: { fileName: filePath, fileLang: 'ts' },
+    };
+  }
+
+  return {
+    hunks: [sample.diff],
+    oldFile: { fileName: filePath, fileLang: 'ts' },
+    newFile: { fileName: filePath, fileLang: 'ts' },
+  };
+}
+
 export default function TaskPage() {
+  const defaultHorizontalLayout = getLocalStorage<[number, number]>(
+    'task-layout-horizontal',
+    [75, 25]
+  );
+  const defaultRightLayout = getLocalStorage<[number, number]>('task-layout-right', [55, 45]);
+  const defaultDiffMode = getLocalStorage<'unified' | 'split'>(
+    'task-diff-view-mode',
+    'unified'
+  );
   const [selectedAgent, setSelectedAgent] = useState(AGENTS[0].id);
   const [chats, setChats] = useState<ChatSession[]>(INITIAL_CHATS);
-  const [leftTab, setLeftTab] = useState<'notes' | 'changes' | 'chat'>('chat');
+  const [leftTab, setLeftTab] = useState('chat');
+  const [selectedDiffPath, setSelectedDiffPath] = useState<string | null>(null);
   const [messageInput, setMessageInput] = useState('');
   const [topTab, setTopTab] = useState<'diff' | 'files'>('diff');
   const [activeTerminalId, setActiveTerminalId] = useState(1);
@@ -120,8 +345,22 @@ export default function TaskPage() {
   const [isBottomCollapsed, setIsBottomCollapsed] = useState(false);
   const [branchName, setBranchName] = useState('feature/agent-ui');
   const [isEditingBranch, setIsEditingBranch] = useState(false);
+  const [diffViewMode, setDiffViewMode] = useState<'unified' | 'split'>(defaultDiffMode);
+  const [planModeEnabled, setPlanModeEnabled] = useState(false);
+  const { resolvedTheme } = useTheme();
 
   const activeChat = chats[0];
+  const selectedDiffLabel = selectedDiffPath ?? 'All files';
+  const diffTargets = useMemo(
+    () => (selectedDiffPath ? [selectedDiffPath] : CHANGED_FILES.map((file) => file.path)),
+    [selectedDiffPath]
+  );
+  const diffModeEnum = diffViewMode === 'split' ? DiffModeEnum.Split : DiffModeEnum.Unified;
+  const diffTheme = resolvedTheme === 'dark' ? 'dark' : 'light';
+  const isSingleDiffSelected = Boolean(selectedDiffPath && DIFF_SAMPLES[selectedDiffPath]);
+  const selectedDiffContent = selectedDiffPath
+    ? DIFF_SAMPLES[selectedDiffPath]?.newContent ?? ''
+    : '';
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
@@ -171,10 +410,14 @@ export default function TaskPage() {
         onValueChange={(value) => setTopTab(value as typeof topTab)}
         className="flex-1 min-h-0"
       >
-        <TabsList>
-          <TabsTrigger value="diff">Diff files</TabsTrigger>
-          <TabsTrigger value="files">All files</TabsTrigger>
-        </TabsList>
+                <TabsList>
+                  <TabsTrigger value="diff" className="cursor-pointer">
+                    Diff files
+                  </TabsTrigger>
+                  <TabsTrigger value="files" className="cursor-pointer">
+                    All files
+                  </TabsTrigger>
+                </TabsList>
         <TabsContent value="diff" className="mt-3 flex-1 min-h-0">
           <div className="flex-1 min-h-0 overflow-y-auto rounded-lg bg-background p-3 h-full">
             <ul className="space-y-2">
@@ -183,15 +426,49 @@ export default function TaskPage() {
                 return (
                   <li
                     key={file.path}
-                    className="flex items-center justify-between gap-3 text-sm"
+                    className="group flex items-center justify-between gap-3 text-sm rounded-md px-1 py-0.5 -mx-1 hover:bg-muted/60 cursor-pointer"
+                    onClick={() => {
+                      setSelectedDiffPath(file.path);
+                      setLeftTab('changes');
+                    }}
                   >
-                    <div className="min-w-0">
+                    <button type="button" className="min-w-0 text-left cursor-pointer">
                       <p className="truncate text-foreground">
                         <span className="text-foreground/60">{folder}/</span>
                         <span className="font-medium text-foreground">{name}</span>
                       </p>
-                    </div>
+                    </button>
                     <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              className="text-muted-foreground hover:text-foreground"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                              }}
+                            >
+                              <IconArrowBackUp className="h-3.5 w-3.5" />
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent>Discard changes</TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              className="text-muted-foreground hover:text-foreground"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                              }}
+                            >
+                              <IconExternalLink className="h-3.5 w-3.5" />
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent>Open in editor</TooltipContent>
+                        </Tooltip>
+                      </div>
                       <LineStat added={file.plus} removed={file.minus} />
                       <Badge className={badgeClass(file.status)}>{file.status}</Badge>
                     </div>
@@ -202,18 +479,23 @@ export default function TaskPage() {
           </div>
         </TabsContent>
         <TabsContent value="files" className="mt-3 flex-1 min-h-0">
-          <div className="flex-1 min-h-0 overflow-y-auto rounded-lg bg-background p-3 h-full">
-            <ul className="space-y-2 text-sm">
-              {ALL_FILES.map((file) => {
-                const { folder, file: name } = splitPath(file);
-                return (
-                  <li key={file} className="truncate text-foreground">
-                    <span className="text-foreground/60">{folder}/</span>
-                    <span className="font-medium text-foreground">{name}</span>
-                  </li>
-                );
-              })}
-            </ul>
+          <div className="flex-1 min-h-0 overflow-y-auto rounded-lg bg-background h-full">
+            <SidebarProvider className="h-full w-full" style={{ "--sidebar-width": "100%" }}>
+              <Sidebar collapsible="none" className="h-full w-full">
+                <SidebarContent>
+                  <SidebarGroup>
+                    <SidebarGroupContent>
+                      <SidebarMenu>
+                        {FILE_TREE.map((item, index) => (
+                          <Tree key={index} item={item} />
+                        ))}
+                      </SidebarMenu>
+                    </SidebarGroupContent>
+                  </SidebarGroup>
+                </SidebarContent>
+                <SidebarRail />
+              </Sidebar>
+            </SidebarProvider>
           </div>
         </TabsContent>
       </Tabs>
@@ -221,7 +503,8 @@ export default function TaskPage() {
   );
 
   return (
-    <div className="h-screen w-full flex flex-col bg-background">
+    <TooltipProvider>
+      <div className="h-screen w-full flex flex-col bg-background">
       <header className="flex items-center justify-between p-3">
         <div className="flex items-center gap-3">
           <Button variant="ghost" size="sm" asChild>
@@ -251,32 +534,44 @@ export default function TaskPage() {
                 <>
                   <span className="text-sm font-medium">{branchName}</span>
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
-                    <button
-                      type="button"
-                      className="text-muted-foreground hover:text-foreground cursor-pointer"
-                      onClick={() => setIsEditingBranch(true)}
-                    >
-                      <IconPencil className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      className="text-muted-foreground hover:text-foreground cursor-pointer"
-                      onClick={() => navigator.clipboard?.writeText(branchName)}
-                    >
-                      <IconCopy className="h-3.5 w-3.5" />
-                    </button>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          className="text-muted-foreground hover:text-foreground cursor-pointer"
+                          onClick={() => setIsEditingBranch(true)}
+                        >
+                          <IconPencil className="h-3.5 w-3.5" />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent>Edit branch name</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          className="text-muted-foreground hover:text-foreground cursor-pointer"
+                          onClick={() => navigator.clipboard?.writeText(branchName)}
+                        >
+                          <IconCopy className="h-3.5 w-3.5" />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent>Copy branch name</TooltipContent>
+                    </Tooltip>
                   </div>
                 </>
               )}
             </div>
             <IconChevronRight className="h-4 w-4 text-muted-foreground" />
             <Select defaultValue="origin/main">
-              <SelectTrigger className="w-[190px] h-8 cursor-pointer border border-transparent bg-transparent hover:bg-muted/40 data-[state=open]:bg-background data-[state=open]:border-border/70">
-                <div className="flex items-center gap-2">
-                  <IconGitBranch className="h-4 w-4 text-muted-foreground" />
-                  <SelectValue placeholder="Base branch" />
-                </div>
-              </SelectTrigger>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <SelectTrigger className="w-[190px] h-8 cursor-pointer border border-transparent bg-transparent hover:bg-muted/40 data-[state=open]:bg-background data-[state=open]:border-border/70">
+                    <SelectValue placeholder="Base branch" />
+                  </SelectTrigger>
+                </TooltipTrigger>
+                <TooltipContent>Change base branch</TooltipContent>
+              </Tooltip>
               <SelectContent>
                 <SelectItem value="origin/main">origin/main</SelectItem>
                 <SelectItem value="origin/develop">origin/develop</SelectItem>
@@ -284,70 +579,123 @@ export default function TaskPage() {
               </SelectContent>
             </Select>
           </div>
-          <CommitStatBadge label="2 ahead" tone="ahead" />
-          <CommitStatBadge label="4 behind" tone="behind" />
-          <LineStat added={855} removed={8} />
+          <div className="flex items-center gap-1">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="cursor-default">
+                  <CommitStatBadge label="2 ahead" tone="ahead" />
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>Commits ahead of base</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="cursor-default">
+                  <CommitStatBadge label="4 behind" tone="behind" />
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>Commits behind base</TooltipContent>
+            </Tooltip>
+          </div>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="cursor-default">
+                <LineStat added={855} removed={8} />
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>Lines changed</TooltipContent>
+          </Tooltip>
         </div>
         <div className="flex items-center gap-2">
-          <Button size="sm" variant="outline" className="cursor-pointer">
-            <IconBrandVscode className="h-4 w-4" />
-            Editor
-          </Button>
-          <Button size="sm" variant="outline" className="cursor-pointer">
-            <IconArrowDown className="h-4 w-4" />
-            Pull
-          </Button>
-          <Button size="sm" variant="outline" className="cursor-pointer">
-            <IconEye className="h-4 w-4" />
-            Review
-          </Button>
-          <Select defaultValue="create-pr">
-            <SelectTrigger className="w-[190px] h-8 cursor-pointer">
-              <SelectValue placeholder="Create PR" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="create-pr">
-                <span className="flex items-center gap-2">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button size="sm" variant="outline" className="cursor-pointer">
+                <IconBrandVscode className="h-4 w-4" />
+                Editor
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Open in editor</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button size="sm" variant="outline" className="cursor-pointer">
+                <IconArrowDown className="h-4 w-4" />
+                Pull
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Pull from remote</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button size="sm" variant="outline" className="cursor-pointer">
+                <IconEye className="h-4 w-4" />
+                Review
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Open review</TooltipContent>
+          </Tooltip>
+          <div className="inline-flex rounded-md border border-border overflow-hidden">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button size="sm" variant="outline" className="rounded-none border-0 cursor-pointer">
                   <IconGitPullRequest className="h-4 w-4" />
                   Create PR
-                </span>
-              </SelectItem>
-              <SelectItem value="create-pr-manual">
-                <span className="flex items-center gap-2">
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Create PR</TooltipContent>
+            </Tooltip>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="rounded-none border-0 px-2 cursor-pointer"
+                >
+                  <IconChevronDown className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem>
                   <IconPencil className="h-4 w-4" />
                   Create PR manually
-                </span>
-              </SelectItem>
-              <SelectItem value="merge">
-                <span className="flex items-center gap-2">
+                </DropdownMenuItem>
+                <DropdownMenuItem>
                   <IconGitMerge className="h-4 w-4" />
                   Merge
-                </span>
-              </SelectItem>
-              <SelectItem value="rebase">
-                <span className="flex items-center gap-2">
+                </DropdownMenuItem>
+                <DropdownMenuItem>
                   <IconGitBranch className="h-4 w-4" />
                   Rebase
-                </span>
-              </SelectItem>
-            </SelectContent>
-          </Select>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </div>
       </header>
 
       <div className="flex-1 min-h-0 px-4 pb-4">
-        <ResizablePanelGroup direction="horizontal" className="h-full">
-          <ResizablePanel defaultSize={75} minSize={55}>
+        <ResizablePanelGroup
+          direction="horizontal"
+          className="h-full"
+          onLayout={(sizes) => setLocalStorage('task-layout-horizontal', sizes)}
+        >
+          <ResizablePanel defaultSize={defaultHorizontalLayout[0]} minSize={55}>
             <div className="h-full min-h-0 bg-card p-4 flex flex-col rounded-lg border border-border/70 border-r-0 mr-[5px]">
               <Tabs
                 value={leftTab}
-                onValueChange={(value) => setLeftTab(value as typeof leftTab)}
+                onValueChange={(value) => setLeftTab(value)}
                 className="flex-1 min-h-0"
               >
                 <TabsList>
-                  <TabsTrigger value="notes">Notes</TabsTrigger>
-                  <TabsTrigger value="changes">All changes</TabsTrigger>
-                  <TabsTrigger value="chat">Chat {activeChat ? `• ${activeChat.title}` : ''}</TabsTrigger>
+                  <TabsTrigger value="notes" className="cursor-pointer">
+                    Notes
+                  </TabsTrigger>
+                  <TabsTrigger value="changes" className="cursor-pointer">
+                    All changes
+                  </TabsTrigger>
+                  <TabsTrigger value="chat" className="cursor-pointer">
+                    Chat {activeChat ? `• ${activeChat.title}` : ''}
+                  </TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="notes" className="mt-3 flex-1 min-h-0">
@@ -360,15 +708,132 @@ export default function TaskPage() {
                 </TabsContent>
 
                 <TabsContent value="changes" className="mt-3 flex-1 min-h-0">
-                  <div className="flex-1 min-h-0 overflow-y-auto rounded-lg bg-background p-3 h-full">
-                    <pre className="text-xs leading-relaxed whitespace-pre-wrap text-foreground">{`diff --git a/apps/web/components/kanban-board.tsx b/apps/web/components/kanban-board.tsx
-index 1234567..89abcde 100644
---- a/apps/web/components/kanban-board.tsx
-+++ b/apps/web/components/kanban-board.tsx
-@@ -1,5 +1,5 @@
--export function KanbanBoard() {
-+export function KanbanBoard() {
- // ...`}</pre>
+                  <div className="flex flex-col gap-2 h-full">
+                    <div className="flex items-center justify-between gap-3">
+                      <Badge variant="secondary" className="rounded-full text-xs">
+                        {selectedDiffLabel}
+                      </Badge>
+                      <div className="flex items-center gap-1.5">
+                        {selectedDiffPath && (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 px-2 text-xs cursor-pointer"
+                                onClick={() => setSelectedDiffPath(null)}
+                              >
+                                All changes
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Show all changes</TooltipContent>
+                          </Tooltip>
+                        )}
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 px-2 text-xs cursor-pointer"
+                                disabled={!isSingleDiffSelected}
+                                onClick={async () => {
+                                  if (!isSingleDiffSelected) return;
+                                  await navigator.clipboard.writeText(selectedDiffContent);
+                                }}
+                              >
+                                <IconCopy className="h-3.5 w-3.5" />
+                              </Button>
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent>Copy file contents</TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 px-2 text-xs cursor-pointer"
+                                disabled={!isSingleDiffSelected}
+                              >
+                                <IconArrowBackUp className="h-3.5 w-3.5" />
+                              </Button>
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent>Discard changes</TooltipContent>
+                        </Tooltip>
+                        <div className="inline-flex rounded-md border border-border overflow-hidden">
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  className={cn(
+                                    'h-7 px-2 text-xs rounded-none cursor-pointer',
+                                    diffViewMode === 'unified' && 'bg-muted'
+                                  )}
+                                  onClick={() => {
+                                    setDiffViewMode('unified');
+                                    setLocalStorage('task-diff-view-mode', 'unified');
+                                  }}
+                                >
+                                  <IconLayoutRows className="h-3.5 w-3.5" />
+                                </Button>
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent>Unified view</TooltipContent>
+                          </Tooltip>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  className={cn(
+                                    'h-7 px-2 text-xs rounded-none cursor-pointer',
+                                    diffViewMode === 'split' && 'bg-muted'
+                                  )}
+                                  onClick={() => {
+                                    setDiffViewMode('split');
+                                    setLocalStorage('task-diff-view-mode', 'split');
+                                  }}
+                                >
+                                  <IconLayoutColumns className="h-3.5 w-3.5" />
+                                </Button>
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent>Split view</TooltipContent>
+                          </Tooltip>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex-1 min-h-0 overflow-y-auto rounded-lg bg-background p-3 h-full">
+                      <div className="space-y-4">
+                        {diffTargets.map((path) => (
+                          <div key={path} className="space-y-2">
+                            {!selectedDiffPath && (
+                              <div className="flex items-center justify-between">
+                                <Badge variant="secondary" className="rounded-full text-xs">
+                                  {path}
+                                </Badge>
+                              </div>
+                            )}
+                            <DiffView
+                              data={buildDiffData(path)}
+                              diffViewMode={diffModeEnum}
+                              diffViewTheme={diffTheme}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   </div>
                 </TabsContent>
 
@@ -396,22 +861,91 @@ index 1234567..89abcde 100644
                       value={messageInput}
                       onChange={(event) => setMessageInput(event.target.value)}
                       placeholder="Write to submit work to the agent..."
-                      className="min-h-[90px] resize-none"
+                      className={cn(
+                        'min-h-[90px] resize-none',
+                        planModeEnabled &&
+                          'border-dashed border-primary/60 !bg-primary/20 dark:!bg-primary/20 shadow-[inset_0_0_0_1px_rgba(59,130,246,0.35)]'
+                      )}
                     />
                     <div className="flex items-center justify-between gap-2">
-                      <Select value={selectedAgent} onValueChange={setSelectedAgent}>
-                        <SelectTrigger className="w-[160px]">
-                          <SelectValue placeholder="Select agent" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {AGENTS.map((agent) => (
-                            <SelectItem key={agent.id} value={agent.id}>
-                              {agent.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <Button type="submit">Submit</Button>
+                      <div className="flex items-center gap-2">
+                        <Select value={selectedAgent} onValueChange={setSelectedAgent}>
+                          <SelectTrigger className="w-[160px] cursor-pointer">
+                            <SelectValue placeholder="Select agent" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {AGENTS.map((agent) => (
+                              <SelectItem key={agent.id} value={agent.id}>
+                                {agent.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <DropdownMenu>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="icon"
+                                  className="h-9 w-9 cursor-pointer"
+                                >
+                                  <IconBrain className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                            </TooltipTrigger>
+                            <TooltipContent>Thinking level</TooltipContent>
+                          </Tooltip>
+                          <DropdownMenuContent align="start" side="top">
+                            <DropdownMenuItem>High</DropdownMenuItem>
+                            <DropdownMenuItem>Medium</DropdownMenuItem>
+                            <DropdownMenuItem>Low</DropdownMenuItem>
+                            <DropdownMenuItem>Off</DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <div className="flex items-center gap-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="icon"
+                                className={cn(
+                                  'h-9 w-9 cursor-pointer',
+                                  planModeEnabled &&
+                                    'bg-primary/15 text-primary border-primary/40 shadow-[0_0_0_1px_rgba(59,130,246,0.35)]'
+                                )}
+                                onClick={() => setPlanModeEnabled((value) => !value)}
+                              >
+                                <IconListCheck className="h-4 w-4" />
+                              </Button>
+                              {planModeEnabled && (
+                                <span className="text-xs font-medium text-primary">
+                                  Plan mode active
+                                </span>
+                              )}
+                            </div>
+                          </TooltipTrigger>
+                          <TooltipContent>Toggle plan mode</TooltipContent>
+                        </Tooltip>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="icon"
+                              className="h-9 w-9 cursor-pointer"
+                            >
+                              <IconPaperclip className="h-4 w-4" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>Add attachments</TooltipContent>
+                        </Tooltip>
+                        <Button type="submit">Submit</Button>
+                      </div>
                     </div>
                   </form>
                 </TabsContent>
@@ -419,7 +953,7 @@ index 1234567..89abcde 100644
             </div>
           </ResizablePanel>
           <ResizableHandle className="w-px" />
-          <ResizablePanel defaultSize={25} minSize={20}>
+          <ResizablePanel defaultSize={defaultHorizontalLayout[1]} minSize={20}>
             {isBottomCollapsed ? (
               <div className="h-full min-h-0 flex flex-col gap-1">
                 <div className="flex-1 min-h-0">{topFilesPanel}</div>
@@ -439,13 +973,15 @@ index 1234567..89abcde 100644
                     className="flex-1 min-h-0"
                   >
                     <TabsList>
-                      <TabsTrigger value="commands">Commands</TabsTrigger>
+                      <TabsTrigger value="commands" className="cursor-pointer">
+                        Commands
+                      </TabsTrigger>
                       {terminalIds.map((id) => (
-                        <TabsTrigger key={id} value={`terminal-${id}`}>
+                        <TabsTrigger key={id} value={`terminal-${id}`} className="cursor-pointer">
                           {id === 1 ? 'Terminal' : `Terminal ${id}`}
                         </TabsTrigger>
                       ))}
-                      <TabsTrigger value="add" onClick={addTerminal}>
+                      <TabsTrigger value="add" onClick={addTerminal} className="cursor-pointer">
                         +
                       </TabsTrigger>
                     </TabsList>
@@ -460,12 +996,16 @@ index 1234567..89abcde 100644
                 </div>
               </div>
             ) : (
-              <ResizablePanelGroup direction="vertical" className="h-full">
-                <ResizablePanel defaultSize={55} minSize={30}>
+              <ResizablePanelGroup
+                direction="vertical"
+                className="h-full"
+                onLayout={(sizes) => setLocalStorage('task-layout-right', sizes)}
+              >
+                <ResizablePanel defaultSize={defaultRightLayout[0]} minSize={30}>
                   {topFilesPanel}
                 </ResizablePanel>
                 <ResizableHandle className="h-px" />
-                <ResizablePanel defaultSize={45} minSize={20}>
+                <ResizablePanel defaultSize={defaultRightLayout[1]} minSize={20}>
                   <div className="h-full min-h-0 bg-card p-4 flex flex-col rounded-lg border border-border/70 border-l-0 mt-[5px]">
                     <Tabs
                       value={terminalTabValue}
@@ -483,22 +1023,33 @@ index 1234567..89abcde 100644
                     >
                       <div className="flex items-center justify-between mb-3">
                         <TabsList>
-                          <TabsTrigger value="commands">Commands</TabsTrigger>
+                          <TabsTrigger value="commands" className="cursor-pointer">
+                            Commands
+                          </TabsTrigger>
                           {terminalIds.map((id) => (
-                            <div key={id} className="group flex items-center gap-1">
-                              <TabsTrigger value={`terminal-${id}`}>
-                                {id === 1 ? 'Terminal' : `Terminal ${id}`}
-                              </TabsTrigger>
-                              <button
-                                type="button"
-                                className="text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground"
-                                onClick={() => removeTerminal(id)}
-                              >
-                                <IconX className="h-3.5 w-3.5" />
-                              </button>
-                            </div>
+                            <TabsTrigger
+                              key={id}
+                              value={`terminal-${id}`}
+                              className="group flex items-center gap-1 pr-1 cursor-pointer"
+                            >
+                              {id === 1 ? 'Terminal' : `Terminal ${id}`}
+                              {terminalIds.length > 1 && (
+                                <span
+                                  role="button"
+                                  tabIndex={-1}
+                                  className="text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground"
+                                  onClick={(event) => {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    removeTerminal(id);
+                                  }}
+                                >
+                                  <IconX className="h-3.5 w-3.5" />
+                                </span>
+                              )}
+                            </TabsTrigger>
                           ))}
-                          <TabsTrigger value="add" onClick={addTerminal}>
+                          <TabsTrigger value="add" onClick={addTerminal} className="cursor-pointer">
                             +
                           </TabsTrigger>
                         </TabsList>
@@ -544,6 +1095,7 @@ index 1234567..89abcde 100644
           </ResizablePanel>
         </ResizablePanelGroup>
       </div>
-    </div>
+      </div>
+    </TooltipProvider>
   );
 }
