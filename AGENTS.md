@@ -1,7 +1,12 @@
 # Kandev Agents Guide
 
-> ⚠️ **IMPORTANT**: API documentation in this file must be updated whenever the API changes.
-> When modifying any endpoint, request/response types, or ACP messages, update this document accordingly.
+> ⚠️ **IMPORTANT**: API documentation must be updated whenever the API changes.
+> When modifying any endpoint, request/response types, or ACP messages, update:
+> - This document (AGENTS.md)
+> - The OpenAPI spec (docs/openapi.yaml)
+
+📖 **Full API Reference**: See [docs/openapi.yaml](docs/openapi.yaml) for the complete OpenAPI 3.0 specification.
+You can view it with Swagger UI, Redoc, or import it into Postman.
 
 ## Overview
 
