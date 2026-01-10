@@ -414,6 +414,36 @@ func (m *Manager) handleSessionNotification(instance *AgentInstance, notificatio
 			zap.String("instance_id", instance.ID),
 			zap.Int("num_entries", len(update.Plan.Entries)))
 	}
+
+	// Publish session notification to event bus for WebSocket streaming
+	m.publishSessionNotification(instance, notification)
+}
+
+// publishSessionNotification publishes a session notification to the event bus
+func (m *Manager) publishSessionNotification(instance *AgentInstance, notification agentctl.SessionNotification) {
+	if m.eventBus == nil {
+		return
+	}
+
+	// Build ACP message data from the session notification
+	data := map[string]interface{}{
+		"type":        "session/update",
+		"timestamp":   time.Now(),
+		"agent_id":    instance.ID,
+		"task_id":     instance.TaskID,
+		"session_id":  string(notification.SessionId),
+		"data":        notification.Update,
+	}
+
+	event := bus.NewEvent(events.ACPMessage, "agent-manager", data)
+	subject := events.BuildACPSubject(instance.TaskID)
+
+	if err := m.eventBus.Publish(context.Background(), subject, event); err != nil {
+		m.logger.Error("failed to publish session notification",
+			zap.String("instance_id", instance.ID),
+			zap.String("task_id", instance.TaskID),
+			zap.Error(err))
+	}
 }
 
 // updateInstanceProgress updates an instance's progress
