@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, FormEvent } from 'react';
+import { useState, FormEvent } from 'react';
 import {
   AlertDialog,
   AlertDialogContent,
@@ -32,14 +32,8 @@ export function TaskCreateDialog({
   initialValues,
   submitLabel = 'Create',
 }: TaskCreateDialogProps) {
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-
-  useEffect(() => {
-    if (!open) return;
-    setTitle(initialValues?.title ?? '');
-    setDescription(initialValues?.description ?? '');
-  }, [open, initialValues]);
+  const [title, setTitle] = useState(initialValues?.title ?? '');
+  const [description, setDescription] = useState(initialValues?.description ?? '');
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();

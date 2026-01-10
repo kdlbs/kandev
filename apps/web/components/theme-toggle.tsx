@@ -3,15 +3,15 @@
 import { useTheme } from 'next-themes';
 import { IconMoon, IconSun } from '@tabler/icons-react';
 import { Button } from '@/components/ui/button';
-import { useEffect, useState } from 'react';
+import { useSyncExternalStore } from 'react';
 
 export function ThemeToggle() {
   const { theme, setTheme } = useTheme();
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  const mounted = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false
+  );
 
   if (!mounted) {
     return null;

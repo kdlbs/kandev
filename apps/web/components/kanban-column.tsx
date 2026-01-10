@@ -42,7 +42,7 @@ export function KanbanColumn({ column, tasks, onEditTask }: KanbanColumnProps) {
       </div>
 
       {/* Tasks */}
-      <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden space-y-2 px-2 pt-2">
+      <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden space-y-2 px-2 pt-3">
         {tasks.length === 0 ? (
           <p className="text-sm text-muted-foreground text-center mt-8">No tasks yet</p>
         ) : (

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState, useSyncExternalStore } from 'react';
 import {
   DndContext,
   DragEndEvent,
@@ -73,13 +73,14 @@ export function KanbanBoard() {
   const [tasks, setTasks] = useState<Task[]>(initialTasks);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
-  const [isMounted, setIsMounted] = useState(false);
   const [activeViewId, setActiveViewId] = useState('team');
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
 
-  useEffect(() => {
-    setIsMounted(true);
-  }, []);
+  const isMounted = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false
+  );
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -188,6 +189,7 @@ export function KanbanBoard() {
         </div>
       </header>
       <TaskCreateDialog
+        key={`${editingTaskId ?? 'new'}-${isDialogOpen ? 'open' : 'closed'}`}
         open={isDialogOpen}
         onOpenChange={(open) => {
           setIsDialogOpen(open);
