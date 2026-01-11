@@ -20,6 +20,12 @@ var (
 	ErrExecutionNotFound    = errors.New("execution not found")
 )
 
+// PromptResult contains the result of a prompt operation
+type PromptResult struct {
+	StopReason string // The reason the agent stopped (e.g., "end_turn", "needs_input")
+	NeedsInput bool   // True if the agent is requesting user input
+}
+
 // AgentManagerClient is an interface for the Agent Manager service
 // This will be implemented via gRPC or HTTP client
 type AgentManagerClient interface {
@@ -36,7 +42,8 @@ type AgentManagerClient interface {
 	ListAgentTypes(ctx context.Context) ([]*v1.AgentType, error)
 
 	// PromptAgent sends a prompt to a running agent
-	PromptAgent(ctx context.Context, agentInstanceID string, prompt string) error
+	// Returns PromptResult indicating if the agent needs input
+	PromptAgent(ctx context.Context, agentInstanceID string, prompt string) (*PromptResult, error)
 }
 
 // LaunchAgentRequest contains parameters for launching an agent
@@ -202,12 +209,13 @@ func (e *Executor) Stop(ctx context.Context, taskID string, reason string, force
 }
 
 // Prompt sends a follow-up prompt to a running agent for a task
-func (e *Executor) Prompt(ctx context.Context, taskID string, prompt string) error {
+// Returns PromptResult indicating if the agent needs input
+func (e *Executor) Prompt(ctx context.Context, taskID string, prompt string) (*PromptResult, error) {
 	e.mu.RLock()
 	execution, exists := e.executions[taskID]
 	if !exists {
 		e.mu.RUnlock()
-		return ErrExecutionNotFound
+		return nil, ErrExecutionNotFound
 	}
 	agentInstanceID := execution.AgentInstanceID
 	e.mu.RUnlock()
@@ -368,9 +376,9 @@ func (m *MockAgentManagerClient) ListAgentTypes(ctx context.Context) ([]*v1.Agen
 }
 
 // PromptAgent mocks sending a prompt to an agent
-func (m *MockAgentManagerClient) PromptAgent(ctx context.Context, agentInstanceID string, prompt string) error {
+func (m *MockAgentManagerClient) PromptAgent(ctx context.Context, agentInstanceID string, prompt string) (*PromptResult, error) {
 	m.logger.Info("mock: prompting agent",
 		zap.String("agent_instance_id", agentInstanceID),
 		zap.Int("prompt_length", len(prompt)))
-	return nil
+	return &PromptResult{StopReason: "end_turn", NeedsInput: false}, nil
 }

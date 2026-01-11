@@ -20,6 +20,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 
 	// Event bus
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 
 	// WebSocket gateway
@@ -297,10 +298,76 @@ func main() {
 		}
 	})
 
+	// Wire input request handler to create agent comments when input is requested
+	orchestratorSvc.SetInputRequestHandler(func(ctx context.Context, taskID, agentID, message string) error {
+		log.Info("agent requesting user input, creating comment",
+			zap.String("task_id", taskID),
+			zap.String("agent_id", agentID))
+
+		// Create a comment from the agent
+		comment, err := taskSvc.CreateComment(ctx, &taskservice.CreateCommentRequest{
+			TaskID:        taskID,
+			Content:       message,
+			AuthorType:    "agent",
+			AuthorID:      agentID,
+			RequestsInput: true,
+		})
+		if err != nil {
+			log.Error("failed to create agent comment",
+				zap.String("task_id", taskID),
+				zap.Error(err))
+			return err
+		}
+
+		// Broadcast comment.added notification to task subscribers
+		notification, _ := ws.NewNotification(ws.ActionCommentAdded, map[string]interface{}{
+			"task_id":         taskID,
+			"comment":         comment.ToAPI(),
+			"requests_input":  true,
+		})
+		gateway.Hub.BroadcastToTask(taskID, notification)
+
+		// Also broadcast input.requested notification
+		inputNotification, _ := ws.NewNotification(ws.ActionInputRequested, map[string]interface{}{
+			"task_id":    taskID,
+			"comment_id": comment.ID,
+			"message":    message,
+		})
+		gateway.Hub.BroadcastToTask(taskID, inputNotification)
+
+		return nil
+	})
+
 	if err := orchestratorSvc.Start(ctx); err != nil {
 		log.Fatal("Failed to start orchestrator", zap.Error(err))
 	}
 	log.Info("Orchestrator initialized")
+
+	// Subscribe to comment.added events and broadcast to WebSocket subscribers
+	_, err = eventBus.Subscribe(events.CommentAdded, func(ctx context.Context, event *bus.Event) error {
+		data := event.Data
+		taskID, _ := data["task_id"].(string)
+		if taskID == "" {
+			return nil
+		}
+
+		notification, _ := ws.NewNotification(ws.ActionCommentAdded, map[string]interface{}{
+			"task_id":        taskID,
+			"comment_id":     data["comment_id"],
+			"author_type":    data["author_type"],
+			"author_id":      data["author_id"],
+			"content":        data["content"],
+			"requests_input": data["requests_input"],
+			"created_at":     data["created_at"],
+		})
+		gateway.Hub.BroadcastToTask(taskID, notification)
+		return nil
+	})
+	if err != nil {
+		log.Error("Failed to subscribe to comment.added events", zap.Error(err))
+	} else {
+		log.Info("Subscribed to comment.added events for WebSocket broadcasting")
+	}
 
 	// ============================================
 	// HTTP SERVER (WebSocket + HTTP endpoints)
@@ -495,8 +562,15 @@ func (a *lifecycleAdapter) ListAgentTypes(ctx context.Context) ([]*v1.AgentType,
 }
 
 // PromptAgent sends a follow-up prompt to a running agent
-func (a *lifecycleAdapter) PromptAgent(ctx context.Context, agentInstanceID string, prompt string) error {
-	return a.mgr.PromptAgent(ctx, agentInstanceID, prompt)
+func (a *lifecycleAdapter) PromptAgent(ctx context.Context, agentInstanceID string, prompt string) (*executor.PromptResult, error) {
+	result, err := a.mgr.PromptAgent(ctx, agentInstanceID, prompt)
+	if err != nil {
+		return nil, err
+	}
+	return &executor.PromptResult{
+		StopReason: result.StopReason,
+		NeedsInput: result.NeedsInput,
+	}, nil
 }
 
 // corsMiddleware returns a CORS middleware for WebSocket connections

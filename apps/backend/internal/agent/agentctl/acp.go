@@ -97,15 +97,23 @@ func (c *Client) NewSession(ctx context.Context, cwd string) (string, error) {
 	return result.SessionID, nil
 }
 
-// Prompt sends a prompt to the agent (non-blocking - returns immediately, use StreamUpdates for responses)
-func (c *Client) Prompt(ctx context.Context, text string) error {
+// PromptResponse contains the response from a prompt call
+type PromptResponse struct {
+	Success    bool           `json:"success"`
+	StopReason acp.StopReason `json:"stop_reason,omitempty"`
+	Error      string         `json:"error,omitempty"`
+}
+
+// Prompt sends a prompt to the agent and returns when the agent completes
+// The StopReason indicates why the agent stopped (e.g., "end_turn", "needs_input")
+func (c *Client) Prompt(ctx context.Context, text string) (*PromptResponse, error) {
 	reqBody := struct {
 		Text string `json:"text"`
 	}{Text: text}
 
 	body, err := json.Marshal(reqBody)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Use a longer timeout for prompt - agent may take time
@@ -115,27 +123,24 @@ func (c *Client) Prompt(ctx context.Context, text string) error {
 
 	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/v1/acp/prompt", bytes.NewReader(body))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer resp.Body.Close()
 
-	var result struct {
-		Success bool   `json:"success"`
-		Error   string `json:"error,omitempty"`
-	}
+	var result PromptResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return err
+		return nil, err
 	}
 	if !result.Success {
-		return fmt.Errorf("prompt failed: %s", result.Error)
+		return nil, fmt.Errorf("prompt failed: %s", result.Error)
 	}
-	return nil
+	return &result, nil
 }
 
 // SessionNotification represents a session update from the agent

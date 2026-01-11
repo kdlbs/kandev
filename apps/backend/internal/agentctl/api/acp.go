@@ -137,8 +137,9 @@ type PromptRequest struct {
 
 // PromptResponse is the response to a prompt call
 type PromptResponse struct {
-	Success bool   `json:"success"`
-	Error   string `json:"error,omitempty"`
+	Success    bool           `json:"success"`
+	StopReason acp.StopReason `json:"stop_reason,omitempty"`
+	Error      string         `json:"error,omitempty"`
 }
 
 func (s *Server) handleACPPrompt(c *gin.Context) {
@@ -174,7 +175,7 @@ func (s *Server) handleACPPrompt(c *gin.Context) {
 	defer cancel()
 
 	// Build prompt content - simple text block
-	_, err := conn.Prompt(ctx, acp.PromptRequest{
+	resp, err := conn.Prompt(ctx, acp.PromptRequest{
 		SessionId: sessionID,
 		Prompt:    []acp.ContentBlock{acp.TextBlock(req.Text)},
 	})
@@ -187,7 +188,13 @@ func (s *Server) handleACPPrompt(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, PromptResponse{Success: true})
+	s.logger.Info("prompt completed",
+		zap.String("stop_reason", string(resp.StopReason)))
+
+	c.JSON(http.StatusOK, PromptResponse{
+		Success:    true,
+		StopReason: resp.StopReason,
+	})
 }
 
 // handleACPStreamWS streams ACP session notifications via WebSocket

@@ -6,13 +6,14 @@ import "time"
 type TaskState string
 
 const (
-	TaskStateTODO       TaskState = "TODO"
-	TaskStateInProgress TaskState = "IN_PROGRESS"
-	TaskStateReview     TaskState = "REVIEW"
-	TaskStateBlocked    TaskState = "BLOCKED"
-	TaskStateCompleted  TaskState = "COMPLETED"
-	TaskStateFailed     TaskState = "FAILED"
-	TaskStateCancelled  TaskState = "CANCELLED"
+	TaskStateTODO            TaskState = "TODO"
+	TaskStateInProgress      TaskState = "IN_PROGRESS"
+	TaskStateReview          TaskState = "REVIEW"
+	TaskStateBlocked         TaskState = "BLOCKED"
+	TaskStateWaitingForInput TaskState = "WAITING_FOR_INPUT"
+	TaskStateCompleted       TaskState = "COMPLETED"
+	TaskStateFailed          TaskState = "FAILED"
+	TaskStateCancelled       TaskState = "CANCELLED"
 )
 
 // Task represents a Kanban task
@@ -73,4 +74,23 @@ type TaskEvent struct {
 	Metadata  map[string]interface{} `json:"metadata,omitempty"`
 	CreatedBy *string                `json:"created_by,omitempty"`
 	CreatedAt time.Time              `json:"created_at"`
+}
+
+// Comment represents a comment on a task (user or agent)
+type Comment struct {
+	ID            string    `json:"id"`
+	TaskID        string    `json:"task_id"`
+	AuthorType    string    `json:"author_type"` // "user" or "agent"
+	AuthorID      string    `json:"author_id,omitempty"`
+	Content       string    `json:"content"`
+	RequestsInput bool      `json:"requests_input"` // True if agent is requesting user input
+	CreatedAt     time.Time `json:"created_at"`
+}
+
+// CreateCommentRequest for adding a comment to a task
+type CreateCommentRequest struct {
+	TaskID        string `json:"task_id" binding:"required"`
+	Content       string `json:"content" binding:"required"`
+	AuthorType    string `json:"author_type,omitempty"` // Defaults to "user" if not specified
+	RequestsInput bool   `json:"requests_input,omitempty"`
 }

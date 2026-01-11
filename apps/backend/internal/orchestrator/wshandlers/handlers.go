@@ -195,12 +195,17 @@ func (h *Handlers) PromptTask(ctx context.Context, msg *ws.Message) (*ws.Message
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "prompt is required", nil)
 	}
 
-	if err := h.service.PromptTask(ctx, req.TaskID, req.Prompt); err != nil {
+	result, err := h.service.PromptTask(ctx, req.TaskID, req.Prompt)
+	if err != nil {
 		h.logger.Error("failed to send prompt", zap.String("task_id", req.TaskID), zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to send prompt: "+err.Error(), nil)
 	}
 
-	return ws.NewResponse(msg.ID, msg.Action, map[string]bool{"success": true})
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		"success":     true,
+		"needs_input": result.NeedsInput,
+		"stop_reason": result.StopReason,
+	})
 }
 
 // CompleteTask handles orchestrator.complete action

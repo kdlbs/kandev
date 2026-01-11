@@ -17,6 +17,7 @@ type MemoryRepository struct {
 	tasks          map[string]*models.Task
 	boards         map[string]*models.Board
 	columns        map[string]*models.Column
+	comments       map[string]*models.Comment
 	taskBoards     map[string]map[string]struct{}
 	taskPlacements map[string]map[string]*taskPlacement
 	mu             sync.RWMutex
@@ -32,6 +33,7 @@ func NewMemoryRepository() *MemoryRepository {
 		tasks:          make(map[string]*models.Task),
 		boards:         make(map[string]*models.Board),
 		columns:        make(map[string]*models.Column),
+		comments:       make(map[string]*models.Comment),
 		taskBoards:     make(map[string]map[string]struct{}),
 		taskPlacements: make(map[string]map[string]*taskPlacement),
 	}
@@ -428,4 +430,71 @@ func (r *MemoryRepository) getTaskPlacement(taskID, boardID string) (*taskPlacem
 	}
 	placement, ok := placements[boardID]
 	return placement, ok
+}
+
+// Comment operations
+
+// CreateComment creates a new comment
+func (r *MemoryRepository) CreateComment(ctx context.Context, comment *models.Comment) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if comment.ID == "" {
+		comment.ID = uuid.New().String()
+	}
+	if comment.CreatedAt.IsZero() {
+		comment.CreatedAt = time.Now().UTC()
+	}
+	if comment.AuthorType == "" {
+		comment.AuthorType = models.CommentAuthorUser
+	}
+
+	r.comments[comment.ID] = comment
+	return nil
+}
+
+// GetComment retrieves a comment by ID
+func (r *MemoryRepository) GetComment(ctx context.Context, id string) (*models.Comment, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	comment, ok := r.comments[id]
+	if !ok {
+		return nil, fmt.Errorf("comment not found: %s", id)
+	}
+	return comment, nil
+}
+
+// ListComments returns all comments for a task ordered by creation time
+func (r *MemoryRepository) ListComments(ctx context.Context, taskID string) ([]*models.Comment, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var result []*models.Comment
+	for _, comment := range r.comments {
+		if comment.TaskID == taskID {
+			result = append(result, comment)
+		}
+	}
+	// Sort by CreatedAt
+	for i := 0; i < len(result); i++ {
+		for j := i + 1; j < len(result); j++ {
+			if result[i].CreatedAt.After(result[j].CreatedAt) {
+				result[i], result[j] = result[j], result[i]
+			}
+		}
+	}
+	return result, nil
+}
+
+// DeleteComment deletes a comment by ID
+func (r *MemoryRepository) DeleteComment(ctx context.Context, id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, ok := r.comments[id]; !ok {
+		return fmt.Errorf("comment not found: %s", id)
+	}
+	delete(r.comments, id)
+	return nil
 }

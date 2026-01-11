@@ -323,7 +323,7 @@ func (m *Manager) initializeACPSession(ctx context.Context, instance *AgentInsta
 		promptCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
 
-		err := instance.agentctl.Prompt(promptCtx, taskDescription)
+		resp, err := instance.agentctl.Prompt(promptCtx, taskDescription)
 		if err != nil {
 			m.logger.Error("ACP prompt failed",
 				zap.String("instance_id", instance.ID),
@@ -331,13 +331,29 @@ func (m *Manager) initializeACPSession(ctx context.Context, instance *AgentInsta
 			return fmt.Errorf("prompt failed: %w", err)
 		}
 
-		// Prompt completed - mark agent as READY for follow-up prompts
-		m.logger.Info("ACP prompt completed, agent ready for follow-up prompts",
-			zap.String("instance_id", instance.ID))
-		if err := m.MarkReady(instance.ID); err != nil {
-			m.logger.Error("failed to mark instance as ready",
+		// Check if agent needs input - if so, publish input_required event
+		stopReason := ""
+		if resp != nil {
+			stopReason = string(resp.StopReason)
+		}
+		m.logger.Info("ACP prompt completed",
+			zap.String("instance_id", instance.ID),
+			zap.String("stop_reason", stopReason))
+
+		if resp != nil && resp.StopReason == "needs_input" {
+			m.logger.Info("agent requesting user input on initial prompt",
 				zap.String("instance_id", instance.ID),
-				zap.Error(err))
+				zap.String("task_id", instance.TaskID))
+			m.publishInputRequiredFromPrompt(instance, "The agent needs more information to proceed.")
+		} else {
+			// Prompt completed - mark agent as READY for follow-up prompts
+			m.logger.Info("agent ready for follow-up prompts",
+				zap.String("instance_id", instance.ID))
+			if err := m.MarkReady(instance.ID); err != nil {
+				m.logger.Error("failed to mark instance as ready",
+					zap.String("instance_id", instance.ID),
+					zap.Error(err))
+			}
 		}
 	} else {
 		m.logger.Warn("no task description provided, marking as ready",
@@ -446,6 +462,39 @@ func (m *Manager) publishSessionNotification(instance *AgentInstance, notificati
 			zap.String("instance_id", instance.ID),
 			zap.String("task_id", instance.TaskID),
 			zap.Error(err))
+	}
+}
+
+// publishInputRequiredFromPrompt publishes an input_required event when the agent needs user input
+// This is called after a prompt completes with stopReason="needs_input"
+func (m *Manager) publishInputRequiredFromPrompt(instance *AgentInstance, message string) {
+	if m.eventBus == nil {
+		return
+	}
+
+	// Structure must match protocol.Message with type "input_required"
+	data := map[string]interface{}{
+		"type":      "input_required",
+		"timestamp": time.Now().UTC().Format(time.RFC3339Nano),
+		"agent_id":  instance.ID,
+		"task_id":   instance.TaskID,
+		"data": map[string]interface{}{
+			"message": message,
+		},
+	}
+
+	event := bus.NewEvent(events.ACPMessage, "agent-manager", data)
+	subject := events.BuildACPSubject(instance.TaskID)
+
+	if err := m.eventBus.Publish(context.Background(), subject, event); err != nil {
+		m.logger.Error("failed to publish input_required event",
+			zap.String("instance_id", instance.ID),
+			zap.String("task_id", instance.TaskID),
+			zap.Error(err))
+	} else {
+		m.logger.Info("published input_required event",
+			zap.String("task_id", instance.TaskID),
+			zap.String("message", message))
 	}
 }
 
@@ -633,23 +682,30 @@ func (m *Manager) expandMountTemplate(source, workspacePath, taskID string) stri
 }
 
 // PromptAgent sends a follow-up prompt to a running agent
-func (m *Manager) PromptAgent(ctx context.Context, instanceID string, prompt string) error {
+// PromptResult contains the result of a prompt operation
+type PromptResult struct {
+	StopReason    string // The reason the agent stopped (e.g., "end_turn", "needs_input")
+	NeedsInput    bool   // True if the agent is requesting user input
+}
+
+// PromptAgent sends a follow-up prompt to a running agent
+func (m *Manager) PromptAgent(ctx context.Context, instanceID string, prompt string) (*PromptResult, error) {
 	m.mu.Lock()
 	instance, exists := m.instances[instanceID]
 	if !exists {
 		m.mu.Unlock()
-		return fmt.Errorf("instance %q not found", instanceID)
+		return nil, fmt.Errorf("instance %q not found", instanceID)
 	}
 
 	if instance.agentctl == nil {
 		m.mu.Unlock()
-		return fmt.Errorf("instance %q has no agentctl client", instanceID)
+		return nil, fmt.Errorf("instance %q has no agentctl client", instanceID)
 	}
 
 	// Accept both RUNNING (initial) and READY (after first prompt) states
 	if instance.Status != v1.AgentStatusRunning && instance.Status != v1.AgentStatusReady {
 		m.mu.Unlock()
-		return fmt.Errorf("instance %q is not ready for prompts (status: %s)", instanceID, instance.Status)
+		return nil, fmt.Errorf("instance %q is not ready for prompts (status: %s)", instanceID, instance.Status)
 	}
 
 	// Set status to RUNNING while processing
@@ -661,18 +717,32 @@ func (m *Manager) PromptAgent(ctx context.Context, instanceID string, prompt str
 		zap.Int("prompt_length", len(prompt)))
 
 	// Prompt is synchronous - blocks until agent completes
-	if err := instance.agentctl.Prompt(ctx, prompt); err != nil {
-		return err
+	resp, err := instance.agentctl.Prompt(ctx, prompt)
+	if err != nil {
+		return nil, err
 	}
 
-	// Prompt completed - mark as READY for next prompt
-	if err := m.MarkReady(instanceID); err != nil {
-		m.logger.Error("failed to mark instance as ready after prompt",
+	result := &PromptResult{
+		StopReason: string(resp.StopReason),
+		NeedsInput: resp.StopReason == "needs_input",
+	}
+
+	// Check if agent needs input - if so, publish input_required event
+	if result.NeedsInput {
+		m.logger.Info("agent requesting user input",
 			zap.String("instance_id", instanceID),
-			zap.Error(err))
+			zap.String("task_id", instance.TaskID))
+		m.publishInputRequiredFromPrompt(instance, "The agent needs more information to proceed.")
+	} else {
+		// Prompt completed normally - mark as READY for next prompt
+		if err := m.MarkReady(instanceID); err != nil {
+			m.logger.Error("failed to mark instance as ready after prompt",
+				zap.String("instance_id", instanceID),
+				zap.Error(err))
+		}
 	}
 
-	return nil
+	return result, nil
 }
 
 // StopAgent stops an agent instance

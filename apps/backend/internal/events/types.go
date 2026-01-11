@@ -30,6 +30,11 @@ const (
 	ColumnDeleted = "column.deleted"
 )
 
+// Event types for comments
+const (
+	CommentAdded = "comment.added"
+)
+
 // Event types for agents
 const (
 	AgentStarted   = "agent.started"

@@ -58,6 +58,41 @@ type Column struct {
 	UpdatedAt time.Time    `json:"updated_at"`
 }
 
+// CommentAuthorType represents who authored a comment
+type CommentAuthorType string
+
+const (
+	// CommentAuthorUser indicates a comment from a human user
+	CommentAuthorUser CommentAuthorType = "user"
+	// CommentAuthorAgent indicates a comment from an AI agent
+	CommentAuthorAgent CommentAuthorType = "agent"
+)
+
+// Comment represents a comment on a task
+type Comment struct {
+	ID              string            `json:"id"`
+	TaskID          string            `json:"task_id"`
+	AuthorType      CommentAuthorType `json:"author_type"`
+	AuthorID        string            `json:"author_id,omitempty"` // User ID or Agent Instance ID
+	Content         string            `json:"content"`
+	RequestsInput   bool              `json:"requests_input"`   // True if agent is requesting user input
+	ACPSessionID    string            `json:"acp_session_id,omitempty"`
+	CreatedAt       time.Time         `json:"created_at"`
+}
+
+// ToAPI converts internal Comment to API type
+func (c *Comment) ToAPI() *v1.Comment {
+	return &v1.Comment{
+		ID:            c.ID,
+		TaskID:        c.TaskID,
+		AuthorType:    string(c.AuthorType),
+		AuthorID:      c.AuthorID,
+		Content:       c.Content,
+		RequestsInput: c.RequestsInput,
+		CreatedAt:     c.CreatedAt,
+	}
+}
+
 // ToAPI converts internal Task to API type
 func (t *Task) ToAPI() *v1.Task {
 	var agentType *string

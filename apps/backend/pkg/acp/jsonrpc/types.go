@@ -174,6 +174,13 @@ type SessionUpdateComplete struct {
 	Success   bool   `json:"success"`
 }
 
+// SessionUpdateInputRequested for type="input_requested"
+// Sent by agent when it needs user input to continue
+type SessionUpdateInputRequested struct {
+	SessionID string `json:"sessionId"`
+	Message   string `json:"message"` // The question or prompt for the user
+}
+
 // RequestPermissionParams for session/request_permission request from agent
 type RequestPermissionParams struct {
 	SessionID string                  `json:"sessionId"`

@@ -176,6 +176,22 @@ func (r *SQLiteRepository) initSchema() error {
 	CREATE INDEX IF NOT EXISTS idx_execution_logs_task_id ON task_agent_execution_logs(task_id);
 	CREATE INDEX IF NOT EXISTS idx_execution_logs_timestamp ON task_agent_execution_logs(timestamp);
 	CREATE INDEX IF NOT EXISTS idx_execution_logs_task_timestamp ON task_agent_execution_logs(task_id, timestamp);
+
+	CREATE TABLE IF NOT EXISTS task_comments (
+		id TEXT PRIMARY KEY,
+		task_id TEXT NOT NULL,
+		author_type TEXT NOT NULL DEFAULT 'user',
+		author_id TEXT DEFAULT '',
+		content TEXT NOT NULL,
+		requests_input INTEGER DEFAULT 0,
+		acp_session_id TEXT DEFAULT '',
+		created_at DATETIME NOT NULL,
+		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_comments_task_id ON task_comments(task_id);
+	CREATE INDEX IF NOT EXISTS idx_comments_created_at ON task_comments(created_at);
+	CREATE INDEX IF NOT EXISTS idx_comments_task_created ON task_comments(task_id, created_at);
 	`
 
 	if _, err := r.db.Exec(schema); err != nil {
@@ -882,4 +898,85 @@ func (r *SQLiteRepository) ListColumns(ctx context.Context, boardID string) ([]*
 		result = append(result, column)
 	}
 	return result, rows.Err()
+}
+
+// Comment operations
+
+// CreateComment creates a new comment
+func (r *SQLiteRepository) CreateComment(ctx context.Context, comment *models.Comment) error {
+	if comment.ID == "" {
+		comment.ID = uuid.New().String()
+	}
+	if comment.CreatedAt.IsZero() {
+		comment.CreatedAt = time.Now().UTC()
+	}
+	if comment.AuthorType == "" {
+		comment.AuthorType = models.CommentAuthorUser
+	}
+
+	requestsInput := 0
+	if comment.RequestsInput {
+		requestsInput = 1
+	}
+
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO task_comments (id, task_id, author_type, author_id, content, requests_input, acp_session_id, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`, comment.ID, comment.TaskID, comment.AuthorType, comment.AuthorID, comment.Content, requestsInput, comment.ACPSessionID, comment.CreatedAt)
+
+	return err
+}
+
+// GetComment retrieves a comment by ID
+func (r *SQLiteRepository) GetComment(ctx context.Context, id string) (*models.Comment, error) {
+	comment := &models.Comment{}
+	var requestsInput int
+	err := r.db.QueryRowContext(ctx, `
+		SELECT id, task_id, author_type, author_id, content, requests_input, acp_session_id, created_at
+		FROM task_comments WHERE id = ?
+	`, id).Scan(&comment.ID, &comment.TaskID, &comment.AuthorType, &comment.AuthorID, &comment.Content, &requestsInput, &comment.ACPSessionID, &comment.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	comment.RequestsInput = requestsInput == 1
+	return comment, nil
+}
+
+// ListComments returns all comments for a task ordered by creation time
+func (r *SQLiteRepository) ListComments(ctx context.Context, taskID string) ([]*models.Comment, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, task_id, author_type, author_id, content, requests_input, acp_session_id, created_at
+		FROM task_comments WHERE task_id = ? ORDER BY created_at ASC
+	`, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []*models.Comment
+	for rows.Next() {
+		comment := &models.Comment{}
+		var requestsInput int
+		err := rows.Scan(&comment.ID, &comment.TaskID, &comment.AuthorType, &comment.AuthorID, &comment.Content, &requestsInput, &comment.ACPSessionID, &comment.CreatedAt)
+		if err != nil {
+			return nil, err
+		}
+		comment.RequestsInput = requestsInput == 1
+		result = append(result, comment)
+	}
+	return result, rows.Err()
+}
+
+// DeleteComment deletes a comment by ID
+func (r *SQLiteRepository) DeleteComment(ctx context.Context, id string) error {
+	result, err := r.db.ExecContext(ctx, `DELETE FROM task_comments WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("comment not found: %s", id)
+	}
+	return nil
 }
