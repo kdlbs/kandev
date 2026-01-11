@@ -109,8 +109,8 @@ func TestService_CreateTask(t *testing.T) {
 	if task.Title != "Test Task" {
 		t.Errorf("expected title 'Test Task', got %s", task.Title)
 	}
-	if task.State != v1.TaskStateTODO {
-		t.Errorf("expected state TODO, got %s", task.State)
+	if task.State != v1.TaskStateCreated {
+		t.Errorf("expected state CREATED, got %s", task.State)
 	}
 
 	// Check event was published

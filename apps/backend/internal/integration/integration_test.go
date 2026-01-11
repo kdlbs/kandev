@@ -459,7 +459,7 @@ func TestTaskCRUD(t *testing.T) {
 		taskID = payload["id"].(string)
 		assert.NotEmpty(t, taskID)
 		assert.Equal(t, "Test Task", payload["title"])
-		assert.Equal(t, "TODO", payload["state"])
+		assert.Equal(t, "CREATED", payload["state"])
 	})
 
 	// Get task
