@@ -82,13 +82,14 @@ export default function TaskPage({ task }: TaskPageClientProps) {
   const [leftTab, setLeftTab] = useState('chat');
   const [selectedDiffPath, setSelectedDiffPath] = useState<string | null>(null);
   const [notes, setNotes] = useState('');
-  const branchesRequest = useRequest(async (workspaceId: string, repoPath: string) => {
+  const fetchBranches = useCallback(async (workspaceId: string, repoPath: string) => {
     const response = await listRepositories(getBackendConfig().apiBaseUrl, workspaceId);
     const repo = response.repositories.find((item) => item.local_path === repoPath);
     if (!repo) return [];
     const branchResponse = await listRepositoryBranches(getBackendConfig().apiBaseUrl, repo.id);
     return branchResponse.branches;
-  });
+  }, []);
+  const branchesRequest = useRequest(fetchBranches);
 
   const activeChat = chats[0];
 
@@ -116,7 +117,7 @@ export default function TaskPage({ task }: TaskPageClientProps) {
   useEffect(() => {
     if (!task?.workspace_id || !task.repository_url) return;
     branchesRequest.run(task.workspace_id, task.repository_url).catch(() => {});
-  }, [branchesRequest, task?.repository_url, task?.workspace_id]);
+  }, [branchesRequest.run, task?.repository_url, task?.workspace_id]);
 
   return (
     <TooltipProvider>
