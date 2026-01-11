@@ -573,6 +573,11 @@ func (a *lifecycleAdapter) PromptAgent(ctx context.Context, agentInstanceID stri
 	}, nil
 }
 
+// RespondToPermissionByTaskID sends a response to a permission request for a task
+func (a *lifecycleAdapter) RespondToPermissionByTaskID(ctx context.Context, taskID, pendingID, optionID string, cancelled bool) error {
+	return a.mgr.RespondToPermissionByTaskID(taskID, pendingID, optionID, cancelled)
+}
+
 // corsMiddleware returns a CORS middleware for WebSocket connections
 func corsMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {

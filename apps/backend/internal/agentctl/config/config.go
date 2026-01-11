@@ -27,6 +27,9 @@ type Config struct {
 	// Auto-start the agent on agentctl startup
 	AutoStart bool
 
+	// Auto-approve permission requests (for testing/CI)
+	AutoApprovePermissions bool
+
 	// Logging configuration
 	LogLevel  string
 	LogFormat string
@@ -44,14 +47,15 @@ func Load() *Config {
 	defaultCmd := "auggie --acp --workspace-root " + workDir
 
 	cfg := &Config{
-		Port:                getEnvInt("AGENTCTL_PORT", 9999),
-		AgentCommand:        getEnv("AGENTCTL_AGENT_COMMAND", defaultCmd),
-		WorkDir:             workDir,
-		AutoStart:           getEnvBool("AGENTCTL_AUTO_START", false),
-		LogLevel:            getEnv("AGENTCTL_LOG_LEVEL", "info"),
-		LogFormat:           getEnv("AGENTCTL_LOG_FORMAT", "json"),
-		OutputBufferSize:    getEnvInt("AGENTCTL_OUTPUT_BUFFER_SIZE", 1000),
-		HealthCheckInterval: getEnvInt("AGENTCTL_HEALTH_CHECK_INTERVAL", 5),
+		Port:                   getEnvInt("AGENTCTL_PORT", 9999),
+		AgentCommand:           getEnv("AGENTCTL_AGENT_COMMAND", defaultCmd),
+		WorkDir:                workDir,
+		AutoStart:              getEnvBool("AGENTCTL_AUTO_START", false),
+		AutoApprovePermissions: getEnvBool("AGENTCTL_AUTO_APPROVE_PERMISSIONS", false),
+		LogLevel:               getEnv("AGENTCTL_LOG_LEVEL", "info"),
+		LogFormat:              getEnv("AGENTCTL_LOG_FORMAT", "json"),
+		OutputBufferSize:       getEnvInt("AGENTCTL_OUTPUT_BUFFER_SIZE", 1000),
+		HealthCheckInterval:    getEnvInt("AGENTCTL_HEALTH_CHECK_INTERVAL", 5),
 	}
 
 	// Parse agent command into args

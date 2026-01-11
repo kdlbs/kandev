@@ -233,3 +233,123 @@ func (s *Server) handleACPStreamWS(c *gin.Context) {
 	}
 }
 
+// PermissionRespondRequest is a request to respond to a permission request
+type PermissionRespondRequest struct {
+	PendingID string `json:"pending_id" binding:"required"`
+	OptionID  string `json:"option_id,omitempty"`
+	Cancelled bool   `json:"cancelled,omitempty"`
+}
+
+// PermissionRespondResponse is the response to a permission respond call
+type PermissionRespondResponse struct {
+	Success bool   `json:"success"`
+	Error   string `json:"error,omitempty"`
+}
+
+func (s *Server) handlePermissionRespond(c *gin.Context) {
+	var req PermissionRespondRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, PermissionRespondResponse{
+			Success: false,
+			Error:   "invalid request: " + err.Error(),
+		})
+		return
+	}
+
+	s.logger.Info("received permission response",
+		zap.String("pending_id", req.PendingID),
+		zap.String("option_id", req.OptionID),
+		zap.Bool("cancelled", req.Cancelled))
+
+	if err := s.procMgr.RespondToPermission(req.PendingID, req.OptionID, req.Cancelled); err != nil {
+		s.logger.Error("failed to respond to permission", zap.Error(err))
+		c.JSON(http.StatusNotFound, PermissionRespondResponse{
+			Success: false,
+			Error:   err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, PermissionRespondResponse{
+		Success: true,
+	})
+}
+
+// PendingPermissionResponse represents a pending permission for the API
+type PendingPermissionResponse struct {
+	PendingID  string                 `json:"pending_id"`
+	SessionID  string                 `json:"session_id"`
+	ToolCallID string                 `json:"tool_call_id"`
+	Title      string                 `json:"title"`
+	Options    []PermissionOptionJSON `json:"options"`
+	CreatedAt  string                 `json:"created_at"`
+}
+
+// PermissionOptionJSON is the JSON representation of a permission option
+type PermissionOptionJSON struct {
+	OptionID string `json:"option_id"`
+	Name     string `json:"name"`
+	Kind     string `json:"kind"`
+}
+
+func (s *Server) handleGetPendingPermissions(c *gin.Context) {
+	pending := s.procMgr.GetPendingPermissions()
+
+	result := make([]PendingPermissionResponse, 0, len(pending))
+	for _, p := range pending {
+		options := make([]PermissionOptionJSON, len(p.Request.Options))
+		for i, opt := range p.Request.Options {
+			options[i] = PermissionOptionJSON{
+				OptionID: opt.OptionID,
+				Name:     opt.Name,
+				Kind:     opt.Kind,
+			}
+		}
+		result = append(result, PendingPermissionResponse{
+			PendingID:  p.ID,
+			SessionID:  p.Request.SessionID,
+			ToolCallID: p.Request.ToolCallID,
+			Title:      p.Request.Title,
+			Options:    options,
+			CreatedAt:  p.CreatedAt.Format(time.RFC3339),
+		})
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+// handlePermissionStreamWS streams permission request notifications via WebSocket
+func (s *Server) handlePermissionStreamWS(c *gin.Context) {
+	conn, err := s.upgrader.Upgrade(c.Writer, c.Request, nil)
+	if err != nil {
+		s.logger.Error("WebSocket upgrade failed", zap.Error(err))
+		return
+	}
+	defer conn.Close()
+
+	s.logger.Info("Permission stream WebSocket connected")
+
+	// Get the permission requests channel
+	permissionCh := s.procMgr.GetPermissionRequests()
+
+	// Stream permission notifications to WebSocket
+	for {
+		select {
+		case notification, ok := <-permissionCh:
+			if !ok {
+				return
+			}
+
+			data, err := json.Marshal(notification)
+			if err != nil {
+				s.logger.Error("failed to marshal permission notification", zap.Error(err))
+				continue
+			}
+
+			if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+				s.logger.Debug("WebSocket write error", zap.Error(err))
+				return
+			}
+		}
+	}
+}

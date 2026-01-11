@@ -16,13 +16,39 @@ import (
 // UpdateHandler is called when session updates are received from the agent
 type UpdateHandler func(notification acp.SessionNotification)
 
+// PermissionRequestHandler is called when the agent requests permission
+// Returns the selected option ID, or empty string with cancelled=true to cancel
+type PermissionRequestHandler func(ctx context.Context, req *PermissionRequest) (*PermissionResponse, error)
+
+// PermissionRequest represents a permission request from the agent
+type PermissionRequest struct {
+	SessionID   string              `json:"session_id"`
+	ToolCallID  string              `json:"tool_call_id"`
+	Title       string              `json:"title"`
+	Options     []PermissionOption  `json:"options"`
+}
+
+// PermissionOption represents a permission choice
+type PermissionOption struct {
+	OptionID string `json:"option_id"`
+	Name     string `json:"name"`
+	Kind     string `json:"kind"` // allow_once, allow_always, reject_once, reject_always
+}
+
+// PermissionResponse is the user's response to a permission request
+type PermissionResponse struct {
+	OptionID  string `json:"option_id,omitempty"`
+	Cancelled bool   `json:"cancelled,omitempty"`
+}
+
 // Client implements acp.Client interface and handles all agent requests
 type Client struct {
 	logger        *zap.Logger
 	workspaceRoot string
 
-	mu            sync.RWMutex
-	updateHandler UpdateHandler
+	mu                sync.RWMutex
+	updateHandler     UpdateHandler
+	permissionHandler PermissionRequestHandler
 }
 
 // ClientOption configures a Client
@@ -49,6 +75,13 @@ func WithUpdateHandler(h UpdateHandler) ClientOption {
 	}
 }
 
+// WithPermissionHandler sets the handler for permission requests
+func WithPermissionHandler(h PermissionRequestHandler) ClientOption {
+	return func(c *Client) {
+		c.permissionHandler = h
+	}
+}
+
 // NewClient creates a new ACP client implementation
 func NewClient(opts ...ClientOption) *Client {
 	c := &Client{
@@ -68,8 +101,16 @@ func (c *Client) SetUpdateHandler(h UpdateHandler) {
 	c.updateHandler = h
 }
 
+// SetPermissionHandler sets the permission request handler (thread-safe)
+func (c *Client) SetPermissionHandler(h PermissionRequestHandler) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.permissionHandler = h
+}
+
 // RequestPermission handles permission requests from the agent
-// Auto-approves by selecting the first "allow" option
+// If a permission handler is set, it forwards the request to the handler.
+// Otherwise, auto-approves by selecting the first "allow" option.
 func (c *Client) RequestPermission(ctx context.Context, p acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error) {
 	title := ""
 	if p.ToolCall.Title != nil {
@@ -91,6 +132,81 @@ func (c *Client) RequestPermission(ctx context.Context, p acp.RequestPermissionR
 		}, nil
 	}
 
+	// Check if we have a permission handler
+	c.mu.RLock()
+	handler := c.permissionHandler
+	c.mu.RUnlock()
+
+	if handler != nil {
+		// Forward to external handler (e.g., backend/user)
+		return c.forwardPermissionRequest(ctx, handler, p)
+	}
+
+	// Fall back to auto-approve
+	return c.autoApprovePermission(p)
+}
+
+// forwardPermissionRequest forwards the permission request to an external handler
+func (c *Client) forwardPermissionRequest(ctx context.Context, handler PermissionRequestHandler, p acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error) {
+	// Convert ACP types to our types
+	options := make([]PermissionOption, len(p.Options))
+	for i, opt := range p.Options {
+		options[i] = PermissionOption{
+			OptionID: string(opt.OptionId),
+			Name:     opt.Name,
+			Kind:     string(opt.Kind),
+		}
+	}
+
+	title := ""
+	if p.ToolCall.Title != nil {
+		title = *p.ToolCall.Title
+	}
+
+	req := &PermissionRequest{
+		SessionID:  string(p.SessionId),
+		ToolCallID: string(p.ToolCall.ToolCallId),
+		Title:      title,
+		Options:    options,
+	}
+
+	c.logger.Info("forwarding permission request to handler",
+		zap.String("session_id", req.SessionID),
+		zap.String("tool_call_id", req.ToolCallID))
+
+	resp, err := handler(ctx, req)
+	if err != nil {
+		c.logger.Error("permission handler failed", zap.Error(err))
+		// On error, cancel the permission request
+		return acp.RequestPermissionResponse{
+			Outcome: acp.RequestPermissionOutcome{
+				Cancelled: &acp.RequestPermissionOutcomeCancelled{},
+			},
+		}, nil
+	}
+
+	if resp.Cancelled {
+		c.logger.Info("permission request cancelled by user")
+		return acp.RequestPermissionResponse{
+			Outcome: acp.RequestPermissionOutcome{
+				Cancelled: &acp.RequestPermissionOutcomeCancelled{},
+			},
+		}, nil
+	}
+
+	c.logger.Info("permission request approved by user",
+		zap.String("option_id", resp.OptionID))
+	return acp.RequestPermissionResponse{
+		Outcome: acp.RequestPermissionOutcome{
+			Selected: &acp.RequestPermissionOutcomeSelected{
+				OptionId: acp.PermissionOptionId(resp.OptionID),
+			},
+		},
+	}, nil
+}
+
+// autoApprovePermission auto-approves by selecting the first "allow" option
+func (c *Client) autoApprovePermission(p acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error) {
 	// Find the first "allow" option
 	var selectedOption *acp.PermissionOption
 	for i := range p.Options {

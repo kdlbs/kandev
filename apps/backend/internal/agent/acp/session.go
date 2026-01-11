@@ -28,6 +28,29 @@ type Session struct {
 	mu          sync.RWMutex
 }
 
+// PendingPermission represents a permission request waiting for user response
+type PendingPermission struct {
+	ID          string                      // Unique ID for this pending request
+	RPCID       interface{}                 // JSON-RPC request ID from agent
+	InstanceID  string                      // Agent instance
+	TaskID      string                      // Task being worked on
+	SessionID   string                      // ACP session ID
+	ToolCallID  string                      // Tool call requesting permission
+	Title       string                      // Human-readable title
+	Options     []jsonrpc.PermissionOption  // Available choices
+	ResponseCh  chan *PermissionResponseMsg // Channel to receive user response
+	CreatedAt   time.Time
+}
+
+// PermissionResponseMsg is the message sent by the user in response to a permission request
+type PermissionResponseMsg struct {
+	OptionID  string
+	Cancelled bool
+}
+
+// PermissionRequestHandler is called when an agent requests permission from the user
+type PermissionRequestHandler func(req *PendingPermission)
+
 // UpdateHandler is called when the agent sends session updates
 type UpdateHandler func(instanceID, taskID string, updateType string, data json.RawMessage)
 
@@ -37,23 +60,36 @@ type SessionManager struct {
 	mu       sync.RWMutex
 	eventBus bus.EventBus
 	logger   *logger.Logger
-	
+
 	// Handler for session updates
 	updateHandler UpdateHandler
+
+	// Handler for permission requests
+	permissionHandler PermissionRequestHandler
+
+	// Pending permission requests waiting for user response
+	pendingPermissions map[string]*PendingPermission
+	permissionMu       sync.RWMutex
 }
 
 // NewSessionManager creates a new session manager
 func NewSessionManager(eventBus bus.EventBus, log *logger.Logger) *SessionManager {
 	return &SessionManager{
-		sessions: make(map[string]*Session),
-		eventBus: eventBus,
-		logger:   log.WithFields(zap.String("component", "acp-session-manager")),
+		sessions:           make(map[string]*Session),
+		pendingPermissions: make(map[string]*PendingPermission),
+		eventBus:           eventBus,
+		logger:             log.WithFields(zap.String("component", "acp-session-manager")),
 	}
 }
 
 // SetUpdateHandler sets the handler for session updates
 func (m *SessionManager) SetUpdateHandler(handler UpdateHandler) {
 	m.updateHandler = handler
+}
+
+// SetPermissionHandler sets the handler for permission requests from agents
+func (m *SessionManager) SetPermissionHandler(handler PermissionRequestHandler) {
+	m.permissionHandler = handler
 }
 
 // CreateSession creates a new ACP session for an agent instance
@@ -395,8 +431,91 @@ func (m *SessionManager) handleRequestPermission(session *Session, id interface{
 		zap.String("title", reqParams.ToolCall.Title),
 		zap.Int("num_options", len(reqParams.Options)))
 
-	// Auto-approve: find the first "allow" option and select it
-	// In a real implementation, this would prompt the user or check policies
+	// If no permission handler is set, fall back to auto-approve
+	if m.permissionHandler == nil {
+		m.autoApprovePermission(session, id, &reqParams)
+		return
+	}
+
+	// Create a pending permission request
+	pendingID := fmt.Sprintf("%s-%d", session.InstanceID, time.Now().UnixNano())
+	pending := &PendingPermission{
+		ID:         pendingID,
+		RPCID:      id,
+		InstanceID: session.InstanceID,
+		TaskID:     session.TaskID,
+		SessionID:  reqParams.SessionID,
+		ToolCallID: reqParams.ToolCall.ToolCallID,
+		Title:      reqParams.ToolCall.Title,
+		Options:    reqParams.Options,
+		ResponseCh: make(chan *PermissionResponseMsg, 1),
+		CreatedAt:  time.Now(),
+	}
+
+	// Store the pending request
+	m.permissionMu.Lock()
+	m.pendingPermissions[pendingID] = pending
+	m.permissionMu.Unlock()
+
+	// Notify the permission handler (which will send WebSocket notification to user)
+	m.permissionHandler(pending)
+
+	// Wait for user response in a goroutine to not block the read loop
+	go m.waitForPermissionResponse(session, pending)
+}
+
+// waitForPermissionResponse waits for user response and sends it to the agent
+func (m *SessionManager) waitForPermissionResponse(session *Session, pending *PendingPermission) {
+	// Wait for response with a 5-minute timeout
+	timeout := time.After(5 * time.Minute)
+
+	select {
+	case resp := <-pending.ResponseCh:
+		m.logger.Info("Received permission response from user",
+			zap.String("pending_id", pending.ID),
+			zap.String("option_id", resp.OptionID),
+			zap.Bool("cancelled", resp.Cancelled))
+
+		var result jsonrpc.RequestPermissionResult
+		if resp.Cancelled {
+			result = jsonrpc.RequestPermissionResult{
+				Outcome: jsonrpc.PermissionOutcome{
+					Outcome: "cancelled",
+				},
+			}
+		} else {
+			result = jsonrpc.RequestPermissionResult{
+				Outcome: jsonrpc.PermissionOutcome{
+					Outcome:  "selected",
+					OptionID: resp.OptionID,
+				},
+			}
+		}
+
+		if err := session.Client.SendResponse(pending.RPCID, result, nil); err != nil {
+			m.logger.Error("Failed to send permission response to agent", zap.Error(err))
+		}
+
+	case <-timeout:
+		m.logger.Warn("Permission request timed out, cancelling",
+			zap.String("pending_id", pending.ID))
+
+		result := jsonrpc.RequestPermissionResult{
+			Outcome: jsonrpc.PermissionOutcome{
+				Outcome: "cancelled",
+			},
+		}
+		session.Client.SendResponse(pending.RPCID, result, nil)
+	}
+
+	// Clean up
+	m.permissionMu.Lock()
+	delete(m.pendingPermissions, pending.ID)
+	m.permissionMu.Unlock()
+}
+
+// autoApprovePermission auto-approves a permission request (fallback behavior)
+func (m *SessionManager) autoApprovePermission(session *Session, id interface{}, reqParams *jsonrpc.RequestPermissionParams) {
 	var selectedOptionID string
 	for _, opt := range reqParams.Options {
 		if opt.Kind == "allow_once" || opt.Kind == "allow_always" {
@@ -416,7 +535,6 @@ func (m *SessionManager) handleRequestPermission(session *Session, id interface{
 			zap.String("option_id", selectedOptionID))
 	}
 
-	// Send response
 	result := jsonrpc.RequestPermissionResult{
 		Outcome: jsonrpc.PermissionOutcome{
 			Outcome:  "selected",
@@ -427,8 +545,55 @@ func (m *SessionManager) handleRequestPermission(session *Session, id interface{
 	if err := session.Client.SendResponse(id, result, nil); err != nil {
 		m.logger.Error("Failed to send permission response", zap.Error(err))
 	} else {
-		m.logger.Info("Sent permission response",
+		m.logger.Info("Sent auto-approved permission response",
 			zap.String("instance_id", session.InstanceID),
 			zap.String("selected_option", selectedOptionID))
 	}
+}
+
+// RespondToPermission sends a user's response to a pending permission request
+func (m *SessionManager) RespondToPermission(pendingID string, optionID string, cancelled bool) error {
+	m.permissionMu.RLock()
+	pending, exists := m.pendingPermissions[pendingID]
+	m.permissionMu.RUnlock()
+
+	if !exists {
+		return fmt.Errorf("pending permission request not found: %s", pendingID)
+	}
+
+	// Send response through channel (non-blocking)
+	select {
+	case pending.ResponseCh <- &PermissionResponseMsg{
+		OptionID:  optionID,
+		Cancelled: cancelled,
+	}:
+		m.logger.Info("Sent permission response to waiting goroutine",
+			zap.String("pending_id", pendingID),
+			zap.String("option_id", optionID))
+		return nil
+	default:
+		return fmt.Errorf("permission request already responded to or timed out")
+	}
+}
+
+// GetPendingPermission returns a pending permission request by ID
+func (m *SessionManager) GetPendingPermission(pendingID string) (*PendingPermission, bool) {
+	m.permissionMu.RLock()
+	defer m.permissionMu.RUnlock()
+	pending, exists := m.pendingPermissions[pendingID]
+	return pending, exists
+}
+
+// GetPendingPermissionsForTask returns all pending permissions for a task
+func (m *SessionManager) GetPendingPermissionsForTask(taskID string) []*PendingPermission {
+	m.permissionMu.RLock()
+	defer m.permissionMu.RUnlock()
+
+	var result []*PendingPermission
+	for _, pending := range m.pendingPermissions {
+		if pending.TaskID == taskID {
+			result = append(result, pending)
+		}
+	}
+	return result
 }

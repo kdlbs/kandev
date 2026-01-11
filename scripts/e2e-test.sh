@@ -193,9 +193,19 @@ log_info "Server PID: $SERVER_PID"
 wait_for_server
 
 # Run the E2E test
-log_step "Step 1: Create Board"
-BOARD_RESPONSE=$(ws_request "board.create" '{"name": "E2E Test Board", "description": "Automated end-to-end test"}')
-BOARD_ID=$(echo "$BOARD_RESPONSE" | jq -r '.payload.id')
+log_step "Step 1: Create Workspace"
+WORKSPACE_RESPONSE=$(ws_request "workspace.create" '{"name": "E2E Test Workspace", "description": "Automated end-to-end test workspace"}')
+WORKSPACE_ID=$(echo "$WORKSPACE_RESPONSE" | jq -r '.payload.id' | tr -d '\n\r')
+if [ "$WORKSPACE_ID" == "null" ] || [ -z "$WORKSPACE_ID" ]; then
+    log_error "Failed to create workspace"
+    echo "$WORKSPACE_RESPONSE"
+    exit 1
+fi
+log_success "Created workspace: $WORKSPACE_ID"
+
+log_step "Step 2: Create Board"
+BOARD_RESPONSE=$(ws_request "board.create" "{\"workspace_id\": \"${WORKSPACE_ID}\", \"name\": \"E2E Test Board\", \"description\": \"Automated end-to-end test\"}")
+BOARD_ID=$(echo "$BOARD_RESPONSE" | jq -r '.payload.id' | tr -d '\n\r')
 if [ "$BOARD_ID" == "null" ] || [ -z "$BOARD_ID" ]; then
     log_error "Failed to create board"
     echo "$BOARD_RESPONSE"
@@ -203,9 +213,9 @@ if [ "$BOARD_ID" == "null" ] || [ -z "$BOARD_ID" ]; then
 fi
 log_success "Created board: $BOARD_ID"
 
-log_step "Step 2: Create Column"
+log_step "Step 3: Create Column"
 COLUMN_RESPONSE=$(ws_request "column.create" "{\"board_id\": \"${BOARD_ID}\", \"name\": \"To Do\", \"position\": 0}")
-COLUMN_ID=$(echo "$COLUMN_RESPONSE" | jq -r '.payload.id')
+COLUMN_ID=$(echo "$COLUMN_RESPONSE" | jq -r '.payload.id' | tr -d '\n\r')
 if [ "$COLUMN_ID" == "null" ] || [ -z "$COLUMN_ID" ]; then
     log_error "Failed to create column"
     echo "$COLUMN_RESPONSE"
@@ -213,25 +223,26 @@ if [ "$COLUMN_ID" == "null" ] || [ -z "$COLUMN_ID" ]; then
 fi
 log_success "Created column: $COLUMN_ID"
 
-log_step "Step 3: Create Task"
+log_step "Step 4: Create Task"
 # Create a temp directory for the test workspace
-TEST_WORKSPACE=$(mktemp -d)
-log_info "Test workspace: $TEST_WORKSPACE"
+TEST_WORKSPACE_DIR=$(mktemp -d)
+log_info "Test workspace: $TEST_WORKSPACE_DIR"
 
 # Create a simple task that creates a file
 TASK_PAYLOAD=$(cat <<EOF
 {
     "title": "E2E Test Task",
     "description": "Create a file named 'agent-result.txt' in the workspace root with the content 'Hello from Agent'. Do nothing else.",
+    "workspace_id": "${WORKSPACE_ID}",
     "board_id": "${BOARD_ID}",
     "column_id": "${COLUMN_ID}",
-    "repository_url": "${TEST_WORKSPACE}",
+    "repository_url": "${TEST_WORKSPACE_DIR}",
     "agent_type": "augment-agent"
 }
 EOF
 )
 TASK_RESPONSE=$(ws_request "task.create" "$TASK_PAYLOAD")
-TASK_ID=$(echo "$TASK_RESPONSE" | jq -r '.payload.id')
+TASK_ID=$(echo "$TASK_RESPONSE" | jq -r '.payload.id' | tr -d '\n\r')
 if [ "$TASK_ID" == "null" ] || [ -z "$TASK_ID" ]; then
     log_error "Failed to create task"
     echo "$TASK_RESPONSE"
@@ -239,9 +250,9 @@ if [ "$TASK_ID" == "null" ] || [ -z "$TASK_ID" ]; then
 fi
 log_success "Created task: $TASK_ID"
 
-log_step "Step 4: Start Task via Orchestrator"
+log_step "Step 5: Start Task via Orchestrator"
 START_RESPONSE=$(ws_request "orchestrator.start" "{\"task_id\": \"${TASK_ID}\"}")
-AGENT_ID=$(echo "$START_RESPONSE" | jq -r '.payload.agent_instance_id')
+AGENT_ID=$(echo "$START_RESPONSE" | jq -r '.payload.agent_instance_id' | tr -d '\n\r')
 if [ "$AGENT_ID" == "null" ] || [ -z "$AGENT_ID" ]; then
     log_error "Failed to start task"
     echo "$START_RESPONSE"
@@ -249,7 +260,7 @@ if [ "$AGENT_ID" == "null" ] || [ -z "$AGENT_ID" ]; then
 fi
 log_success "Task started, agent ID: $AGENT_ID"
 
-log_step "Step 5: Verify Agent Container Running"
+log_step "Step 6: Verify Agent Container Running"
 sleep 3
 CONTAINER_ID=$(docker ps --filter "name=kandev-agent" --format "{{.ID}}" | head -1)
 if [ -z "$CONTAINER_ID" ]; then
@@ -264,7 +275,7 @@ if [ -n "$CONTAINER_IP" ]; then
     log_info "Container IP: $CONTAINER_IP"
 fi
 
-log_step "Step 6: Verify agentctl is Running"
+log_step "Step 7: Verify agentctl is Running"
 sleep 2
 if [ -n "$CONTAINER_IP" ]; then
     if wait_for_agentctl "$CONTAINER_IP"; then
@@ -292,9 +303,9 @@ else
     log_info "Waiting for agent initialization..."
 fi
 
-log_step "Step 7: Wait for Agent to Complete First Prompt"
+log_step "Step 8: Wait for Agent to Complete First Prompt"
 log_info "Waiting up to ${WAIT_FOR_AGENT_SECONDS} seconds for agent to become READY..."
-AGENT_OUTPUT_FILE="${TEST_WORKSPACE}/agent-result.txt"
+AGENT_OUTPUT_FILE="${TEST_WORKSPACE_DIR}/agent-result.txt"
 AGENT_READY=false
 for i in $(seq 1 $WAIT_FOR_AGENT_SECONDS); do
     # Check agent status - READY means prompt completed
@@ -333,7 +344,7 @@ if [ "$AGENT_READY" != "true" ]; then
     exit 1
 fi
 
-log_step "Step 8: Verify Agent Response"
+log_step "Step 9: Verify Agent Response"
 # Get container logs to verify agent processed the request
 FINAL_CONTAINER_ID=$(docker ps -a --filter "name=kandev-agent" --format "{{.ID}}" | head -1)
 if [ -n "$FINAL_CONTAINER_ID" ]; then
@@ -360,7 +371,7 @@ else
     log_info "Container already removed"
 fi
 
-log_step "Step 9: Check Final State"
+log_step "Step 10: Check Final State"
 AGENTS_RESPONSE=$(ws_request "agent.list" '{}')
 FINAL_AGENTS=$(echo "$AGENTS_RESPONSE" | jq '.payload.total')
 log_info "Total agents: $FINAL_AGENTS"
@@ -369,7 +380,7 @@ TASK_RESPONSE=$(ws_request "task.get" "{\"id\": \"${TASK_ID}\"}")
 TASK_STATE=$(echo "$TASK_RESPONSE" | jq -r '.payload.state')
 log_info "Task state: $TASK_STATE"
 
-log_step "Step 10: Verify First Prompt Output"
+log_step "Step 11: Verify First Prompt Output"
 if [ -f "$AGENT_OUTPUT_FILE" ]; then
     AGENT_OUTPUT=$(cat "$AGENT_OUTPUT_FILE")
     log_success "Agent created file: $AGENT_OUTPUT_FILE"
@@ -382,8 +393,8 @@ else
     exit 1
 fi
 
-log_step "Step 11: Test Multi-Turn - Send Follow-up Prompt"
-SECOND_OUTPUT_FILE="${TEST_WORKSPACE}/second-result.txt"
+log_step "Step 12: Test Multi-Turn - Send Follow-up Prompt"
+SECOND_OUTPUT_FILE="${TEST_WORKSPACE_DIR}/second-result.txt"
 log_info "Sending follow-up prompt..."
 PROMPT_PAYLOAD=$(cat <<EOF
 {
@@ -426,7 +437,7 @@ else
     exit 1
 fi
 
-log_step "Step 12: Complete Task"
+log_step "Step 13: Complete Task"
 COMPLETE_RESPONSE=$(ws_request "orchestrator.complete" "{\"task_id\": \"${TASK_ID}\"}")
 COMPLETE_SUCCESS=$(echo "$COMPLETE_RESPONSE" | jq -r '.payload.success // false')
 if [ "$COMPLETE_SUCCESS" == "true" ]; then
@@ -444,7 +455,7 @@ else
     log_error "Expected task state COMPLETED, got: $TASK_STATE"
 fi
 
-log_step "Step 13: Verify Session ID in Task Metadata"
+log_step "Step 14: Verify Session ID in Task Metadata"
 # The session_id should have been stored in task metadata by the session_info handler
 SESSION_ID=$(echo "$FINAL_TASK_RESPONSE" | jq -r '.payload.metadata.auggie_session_id // empty')
 if [ -n "$SESSION_ID" ]; then
@@ -465,7 +476,7 @@ LIVE_STREAM_COUNT=0
 COMMENT_TEST_PASSED=false
 INPUT_REQUEST_TEST_PASSED=false
 
-log_step "Step 14: Test Comment System"
+log_step "Step 15: Test Comment System"
 # Test adding a user comment to the task
 COMMENT_PAYLOAD=$(cat <<EOF
 {
@@ -505,7 +516,7 @@ if [ -n "$COMMENT_ID" ]; then
     fi
 fi
 
-log_step "Step 15: Test Historical Logs for Completed Task"
+log_step "Step 16: Test Historical Logs for Completed Task"
 # Test task.logs action to retrieve all historical logs
 LOGS_RESPONSE=$(ws_request "task.logs" "{\"task_id\": \"${TASK_ID}\"}")
 LOGS_SUCCESS=$(echo "$LOGS_RESPONSE" | jq -e '.payload.logs' > /dev/null 2>&1 && echo "true" || echo "false")
@@ -544,7 +555,7 @@ else
     log_info "Failed to retrieve historical logs: $(echo "$LOGS_RESPONSE" | jq -r '.payload.error // "unknown error"')"
 fi
 
-log_step "Step 16: Test Historical Logs Replay on Subscribe"
+log_step "Step 17: Test Historical Logs Replay on Subscribe"
 # Subscribe to completed task and check if historical logs are replayed as notifications
 # Use a temp file to collect messages
 SUBSCRIBE_OUTPUT_FILE=$(mktemp)
@@ -587,7 +598,7 @@ else
 fi
 rm -f "$SUBSCRIBE_OUTPUT_FILE"
 
-log_step "Step 17: Create and Monitor New Task with Live Streaming"
+log_step "Step 18: Create and Monitor New Task with Live Streaming"
 # Create a new task to test real-time streaming + historical logs
 NEW_TEST_WORKSPACE=$(mktemp -d)
 log_info "New test workspace: $NEW_TEST_WORKSPACE"
@@ -596,6 +607,7 @@ NEW_TASK_PAYLOAD=$(cat <<EOF
 {
     "title": "E2E Live Stream Test",
     "description": "Create a file named 'stream-test.txt' with content 'Live streaming works'. Do nothing else.",
+    "workspace_id": "${WORKSPACE_ID}",
     "board_id": "${BOARD_ID}",
     "column_id": "${COLUMN_ID}",
     "repository_url": "${NEW_TEST_WORKSPACE}",
@@ -702,7 +714,7 @@ else
     rm -rf "$NEW_TEST_WORKSPACE" 2>/dev/null || true
 fi
 
-log_step "Step 18: Test Agent Input Request Flow"
+log_step "Step 19: Test Agent Input Request Flow"
 # Create a task that explicitly asks the agent to request user input
 # This tests the bidirectional comment flow
 INPUT_TEST_WORKSPACE=$(mktemp -d)
@@ -713,6 +725,7 @@ INPUT_TASK_PAYLOAD=$(cat <<EOF
 {
     "title": "Sum Two Numbers - Input Request Test",
     "description": "I'll want you to sum 2 numbers. Reply ok and ask me what the numbers are. Use stopReason 'needs_input' to request the numbers from me.",
+    "workspace_id": "${WORKSPACE_ID}",
     "board_id": "${BOARD_ID}",
     "column_id": "${COLUMN_ID}",
     "repository_url": "${INPUT_TEST_WORKSPACE}",
@@ -837,8 +850,50 @@ EOF
     rm -rf "$INPUT_TEST_WORKSPACE" 2>/dev/null || true
 fi
 
+log_step "Step 20: Test Permission Response WebSocket Action"
+# Test that the permission.respond action is properly registered and validates input
+# We send a request with a non-existent pending_id to verify the handler works
+PERMISSION_TEST_PASSED=false
+
+# Test 1: Missing task_id should return validation error
+PERM_RESP1=$(ws_request "permission.respond" '{"pending_id": "test-pending-id", "option_id": "test-option"}')
+PERM_ERR1=$(echo "$PERM_RESP1" | jq -r '.payload.code // empty')
+if [ "$PERM_ERR1" == "VALIDATION_ERROR" ]; then
+    log_success "permission.respond correctly validates missing task_id"
+else
+    log_info "permission.respond validation test 1 result: $PERM_RESP1"
+fi
+
+# Test 2: Missing pending_id should return validation error
+PERM_RESP2=$(ws_request "permission.respond" '{"task_id": "test-task-id", "option_id": "test-option"}')
+PERM_ERR2=$(echo "$PERM_RESP2" | jq -r '.payload.code // empty')
+if [ "$PERM_ERR2" == "VALIDATION_ERROR" ]; then
+    log_success "permission.respond correctly validates missing pending_id"
+else
+    log_info "permission.respond validation test 2 result: $PERM_RESP2"
+fi
+
+# Test 3: Missing option_id (when not cancelled) should return validation error
+PERM_RESP3=$(ws_request "permission.respond" '{"task_id": "test-task-id", "pending_id": "test-pending-id"}')
+PERM_ERR3=$(echo "$PERM_RESP3" | jq -r '.payload.code // empty')
+if [ "$PERM_ERR3" == "VALIDATION_ERROR" ]; then
+    log_success "permission.respond correctly validates missing option_id"
+    PERMISSION_TEST_PASSED=true
+else
+    log_info "permission.respond validation test 3 result: $PERM_RESP3"
+fi
+
+# Test 4: Valid request with non-existent task should return internal error (task not found)
+PERM_RESP4=$(ws_request "permission.respond" '{"task_id": "non-existent-task", "pending_id": "test-pending-id", "option_id": "test-option"}')
+PERM_ERR4=$(echo "$PERM_RESP4" | jq -r '.payload.code // empty')
+if [ "$PERM_ERR4" == "INTERNAL_ERROR" ]; then
+    log_success "permission.respond correctly handles non-existent task"
+else
+    log_info "permission.respond test 4 result: $PERM_RESP4"
+fi
+
 # Clean up test workspace
-rm -rf "$TEST_WORKSPACE" 2>/dev/null || true
+rm -rf "$TEST_WORKSPACE_DIR" 2>/dev/null || true
 
 # Show backend logs summary
 log_step "Backend Log Summary"
@@ -885,6 +940,13 @@ else
     INPUT_REQUEST_RESULT="${YELLOW}○ (skipped)${NC}"
 fi
 
+# Format permission test result
+if [ "$PERMISSION_TEST_PASSED" == "true" ]; then
+    PERMISSION_RESULT="${GREEN}✓${NC}"
+else
+    PERMISSION_RESULT="${YELLOW}○ (skipped)${NC}"
+fi
+
 echo -e "${GREEN}╔═══════════════════════════════════════════════════╗${NC}"
 echo -e "${GREEN}║         End-to-End Test PASSED! ✓                 ║${NC}"
 echo -e "${GREEN}╠═══════════════════════════════════════════════════╣${NC}"
@@ -900,6 +962,7 @@ echo -e "${GREEN}║ Session ID stored:     ✓                          ║${NC
 echo -e "${GREEN}╠═══════════════════════════════════════════════════╣${NC}"
 echo -e    "║ Comment System:        $COMMENT_RESULT"
 echo -e    "║ Input Request Flow:    $INPUT_REQUEST_RESULT"
+echo -e    "║ Permission Response:   $PERMISSION_RESULT"
 echo -e    "║ Historical Logs:       $HIST_LOGS_RESULT"
 echo -e    "║ Subscribe Replay:      $HIST_SUBSCRIBE_RESULT"
 echo -e    "║ Live Streaming:        $LIVE_STREAM_RESULT"

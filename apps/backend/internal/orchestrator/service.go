@@ -293,6 +293,16 @@ func (s *Service) PromptTask(ctx context.Context, taskID string, prompt string) 
 	}, nil
 }
 
+// RespondToPermission sends a response to a permission request for a task
+func (s *Service) RespondToPermission(ctx context.Context, taskID, pendingID, optionID string, cancelled bool) error {
+	s.logger.Info("responding to permission request",
+		zap.String("task_id", taskID),
+		zap.String("pending_id", pendingID),
+		zap.String("option_id", optionID),
+		zap.Bool("cancelled", cancelled))
+	return s.executor.RespondToPermission(ctx, taskID, pendingID, optionID, cancelled)
+}
+
 // CompleteTask explicitly completes a task and stops its agent
 func (s *Service) CompleteTask(ctx context.Context, taskID string) error {
 	s.logger.Info("completing task",

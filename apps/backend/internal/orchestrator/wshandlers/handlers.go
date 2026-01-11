@@ -41,6 +41,7 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionOrchestratorPrompt, h.PromptTask)
 	d.RegisterFunc(ws.ActionOrchestratorComplete, h.CompleteTask)
 	d.RegisterFunc(ws.ActionTaskLogs, h.GetTaskLogs)
+	d.RegisterFunc(ws.ActionPermissionRespond, h.RespondToPermission)
 }
 
 // GetStatus handles orchestrator.status action
@@ -292,5 +293,48 @@ func (h *Handlers) GetTaskLogs(ctx context.Context, msg *ws.Message) (*ws.Messag
 		TaskID: req.TaskID,
 		Logs:   logs,
 		Total:  len(logs),
+	})
+}
+
+// PermissionRespondRequest is the payload for permission.respond
+type PermissionRespondRequest struct {
+	TaskID    string `json:"task_id"`
+	PendingID string `json:"pending_id"`
+	OptionID  string `json:"option_id,omitempty"`
+	Cancelled bool   `json:"cancelled,omitempty"`
+}
+
+// RespondToPermission handles permission.respond action
+func (h *Handlers) RespondToPermission(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req PermissionRespondRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+
+	if req.TaskID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+	}
+	if req.PendingID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "pending_id is required", nil)
+	}
+	if !req.Cancelled && req.OptionID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "option_id is required when not cancelled", nil)
+	}
+
+	h.logger.Info("responding to permission request",
+		zap.String("task_id", req.TaskID),
+		zap.String("pending_id", req.PendingID),
+		zap.String("option_id", req.OptionID),
+		zap.Bool("cancelled", req.Cancelled))
+
+	if err := h.service.RespondToPermission(ctx, req.TaskID, req.PendingID, req.OptionID, req.Cancelled); err != nil {
+		h.logger.Error("failed to respond to permission", zap.String("task_id", req.TaskID), zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to respond to permission: "+err.Error(), nil)
+	}
+
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		"success":    true,
+		"task_id":    req.TaskID,
+		"pending_id": req.PendingID,
 	})
 }

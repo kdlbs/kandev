@@ -87,6 +87,10 @@ const (
 	ActionColumnDeleted    = "column.deleted"
 	ActionCommentAdded     = "comment.added"
 	ActionInputRequested   = "input.requested"
+
+	// Permission request actions (agent -> user -> agent)
+	ActionPermissionRequested = "permission.requested" // Agent requesting permission
+	ActionPermissionRespond   = "permission.respond"   // User responding to permission request
 )
 
 // Error codes

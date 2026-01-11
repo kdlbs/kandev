@@ -311,7 +311,10 @@ func (m *Manager) initializeACPSession(ctx context.Context, instance *AgentInsta
 	// 3. Set up updates stream to receive session notifications
 	go m.handleUpdatesStream(instance)
 
-	// 4. Send the task prompt if provided
+	// 4. Set up permission stream to receive permission requests
+	go m.handlePermissionStream(instance)
+
+	// 5. Send the task prompt if provided
 	if taskDescription != "" {
 		m.logger.Info("sending ACP prompt",
 			zap.String("instance_id", instance.ID),
@@ -379,6 +382,74 @@ func (m *Manager) handleUpdatesStream(instance *AgentInstance) {
 		m.logger.Error("failed to connect to updates stream",
 			zap.String("instance_id", instance.ID),
 			zap.Error(err))
+	}
+}
+
+// handlePermissionStream handles streaming permission requests from the agent
+func (m *Manager) handlePermissionStream(instance *AgentInstance) {
+	ctx := context.Background()
+
+	err := instance.agentctl.StreamPermissions(ctx, func(notification *agentctl.PermissionNotification) {
+		m.handlePermissionNotification(instance, notification)
+	})
+	if err != nil {
+		m.logger.Error("failed to connect to permission stream",
+			zap.String("instance_id", instance.ID),
+			zap.Error(err))
+	}
+}
+
+// handlePermissionNotification processes incoming permission requests from the agent
+func (m *Manager) handlePermissionNotification(instance *AgentInstance, notification *agentctl.PermissionNotification) {
+	m.logger.Info("received permission request",
+		zap.String("instance_id", instance.ID),
+		zap.String("task_id", instance.TaskID),
+		zap.String("pending_id", notification.PendingID),
+		zap.String("title", notification.Title),
+		zap.Int("num_options", len(notification.Options)))
+
+	// Publish permission request event to the event bus
+	m.publishPermissionRequest(instance, notification)
+}
+
+// publishPermissionRequest publishes a permission request event
+func (m *Manager) publishPermissionRequest(instance *AgentInstance, notification *agentctl.PermissionNotification) {
+	// Convert options to a serializable format
+	options := make([]map[string]interface{}, len(notification.Options))
+	for i, opt := range notification.Options {
+		options[i] = map[string]interface{}{
+			"option_id": opt.OptionID,
+			"name":      opt.Name,
+			"kind":      opt.Kind,
+		}
+	}
+
+	data := map[string]interface{}{
+		"type":             "permission_request",
+		"task_id":          instance.TaskID,
+		"agent_instance_id": instance.ID,
+		"pending_id":       notification.PendingID,
+		"session_id":       notification.SessionID,
+		"tool_call_id":     notification.ToolCallID,
+		"title":            notification.Title,
+		"options":          options,
+		"created_at":       notification.CreatedAt,
+		"timestamp":        time.Now().UTC().Format(time.RFC3339),
+	}
+
+	event := bus.NewEvent(events.ACPMessage, "agent-manager", data)
+	subject := events.BuildACPSubject(instance.TaskID)
+
+	if err := m.eventBus.Publish(context.Background(), subject, event); err != nil {
+		m.logger.Error("failed to publish permission_request event",
+			zap.String("instance_id", instance.ID),
+			zap.String("task_id", instance.TaskID),
+			zap.Error(err))
+	} else {
+		m.logger.Info("published permission_request event",
+			zap.String("task_id", instance.TaskID),
+			zap.String("pending_id", notification.PendingID),
+			zap.String("title", notification.Title))
 	}
 }
 
@@ -1076,4 +1147,50 @@ func (m *Manager) performCleanup(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// RespondToPermission sends a response to a permission request for an agent instance
+func (m *Manager) RespondToPermission(instanceID, pendingID, optionID string, cancelled bool) error {
+	m.mu.RLock()
+	instance, exists := m.instances[instanceID]
+	m.mu.RUnlock()
+
+	if !exists {
+		return fmt.Errorf("agent instance not found: %s", instanceID)
+	}
+
+	if instance.agentctl == nil {
+		return fmt.Errorf("agent instance has no agentctl client: %s", instanceID)
+	}
+
+	m.logger.Info("responding to permission request",
+		zap.String("instance_id", instanceID),
+		zap.String("pending_id", pendingID),
+		zap.String("option_id", optionID),
+		zap.Bool("cancelled", cancelled))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	return instance.agentctl.RespondToPermission(ctx, pendingID, optionID, cancelled)
+}
+
+// RespondToPermissionByTaskID sends a response to a permission request for a task
+func (m *Manager) RespondToPermissionByTaskID(taskID, pendingID, optionID string, cancelled bool) error {
+	// Find the instance by task ID
+	m.mu.RLock()
+	var instance *AgentInstance
+	for _, inst := range m.instances {
+		if inst.TaskID == taskID {
+			instance = inst
+			break
+		}
+	}
+	m.mu.RUnlock()
+
+	if instance == nil {
+		return fmt.Errorf("no agent instance found for task: %s", taskID)
+	}
+
+	return m.RespondToPermission(instance.ID, pendingID, optionID, cancelled)
 }
