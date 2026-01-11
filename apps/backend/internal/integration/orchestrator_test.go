@@ -478,6 +478,19 @@ func NewOrchestratorTestServer(t *testing.T) *OrchestratorTestServer {
 		gateway.Hub.BroadcastToTask(taskID, notification)
 	})
 
+	// Wire ACP handler to extract session_id from session_info messages and store in task metadata
+	// This mirrors the handler in main.go
+	orchestratorSvc.RegisterACPHandler(func(taskID string, msg *protocol.Message) {
+		if msg.Type == protocol.MessageTypeSessionInfo && msg.Data != nil {
+			if sessionID, ok := msg.Data["session_id"].(string); ok && sessionID != "" {
+				metadata := map[string]interface{}{
+					"auggie_session_id": sessionID,
+				}
+				taskSvc.UpdateTaskMetadata(context.Background(), taskID, metadata)
+			}
+		}
+	})
+
 	// Start orchestrator
 	require.NoError(t, orchestratorSvc.Start(ctx))
 
@@ -1325,6 +1338,9 @@ func TestOrchestratorSessionInfo(t *testing.T) {
 	ts := NewOrchestratorTestServer(t)
 	defer ts.Close()
 
+	// Use a known session ID for verification
+	expectedSessionID := "test-session-abc12345"
+
 	// Configure agent to send session_info message
 	ts.AgentManager.SetACPMessageFn(func(taskID, instanceID string) []protocol.Message {
 		return []protocol.Message{
@@ -1333,7 +1349,7 @@ func TestOrchestratorSessionInfo(t *testing.T) {
 				TaskID:    taskID,
 				Timestamp: time.Now(),
 				Data: map[string]interface{}{
-					"session_id": "test-session-" + instanceID[:8],
+					"session_id": expectedSessionID,
 				},
 			},
 			{
@@ -1359,14 +1375,17 @@ func TestOrchestratorSessionInfo(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Wait for execution
+	// Wait for execution and event processing
 	time.Sleep(500 * time.Millisecond)
 
-	// The session_id should have been stored in task metadata
-	// (This would require the ACP handler that extracts session_id, which is wired in main.go)
-	// For now, just verify the task exists
+	// Verify the session_id was stored in task metadata
 	task, err := ts.TaskRepo.GetTask(context.Background(), taskID)
 	require.NoError(t, err)
-	assert.NotNil(t, task)
+	require.NotNil(t, task)
+	require.NotNil(t, task.Metadata, "task metadata should not be nil")
+
+	storedSessionID, ok := task.Metadata["auggie_session_id"]
+	require.True(t, ok, "auggie_session_id should be present in task metadata")
+	assert.Equal(t, expectedSessionID, storedSessionID, "session ID should match what the agent sent")
 }
 
