@@ -72,6 +72,22 @@ func (s *MemoryMessageStore) GetMessages(ctx context.Context, taskID string, lim
 	return result, nil
 }
 
+// GetAllMessages retrieves all messages for a task (for historical replay)
+func (s *MemoryMessageStore) GetAllMessages(ctx context.Context, taskID string) ([]*protocol.Message, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	messages := s.messages[taskID]
+	if messages == nil {
+		return []*protocol.Message{}, nil
+	}
+
+	// Return a copy
+	result := make([]*protocol.Message, len(messages))
+	copy(result, messages)
+	return result, nil
+}
+
 // GetLatestProgress retrieves the most recent progress for a task
 func (s *MemoryMessageStore) GetLatestProgress(ctx context.Context, taskID string) (*protocol.ProgressData, error) {
 	s.mu.RLock()

@@ -6,14 +6,16 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator"
+	"github.com/kandev/kandev/internal/orchestrator/acp"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
 
 // Handlers contains WebSocket handlers for the orchestrator API
 type Handlers struct {
-	service *orchestrator.Service
-	logger  *logger.Logger
+	service    *orchestrator.Service
+	acpHandler *acp.Handler
+	logger     *logger.Logger
 }
 
 // NewHandlers creates a new WebSocket handlers instance
@@ -22,6 +24,11 @@ func NewHandlers(svc *orchestrator.Service, log *logger.Logger) *Handlers {
 		service: svc,
 		logger:  log.WithFields(zap.String("component", "orchestrator-ws-handlers")),
 	}
+}
+
+// SetACPHandler sets the ACP handler for log retrieval
+func (h *Handlers) SetACPHandler(handler *acp.Handler) {
+	h.acpHandler = handler
 }
 
 // RegisterHandlers registers all orchestrator handlers with the dispatcher
@@ -33,6 +40,7 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionOrchestratorStop, h.StopTask)
 	d.RegisterFunc(ws.ActionOrchestratorPrompt, h.PromptTask)
 	d.RegisterFunc(ws.ActionOrchestratorComplete, h.CompleteTask)
+	d.RegisterFunc(ws.ActionTaskLogs, h.GetTaskLogs)
 }
 
 // GetStatus handles orchestrator.status action
@@ -214,5 +222,70 @@ func (h *Handlers) CompleteTask(ctx context.Context, msg *ws.Message) (*ws.Messa
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 		"success": true,
 		"message": "task completed",
+	})
+}
+
+// GetTaskLogsRequest is the payload for task.logs
+type GetTaskLogsRequest struct {
+	TaskID string `json:"task_id"`
+	Limit  int    `json:"limit,omitempty"`
+}
+
+// LogEntry represents a single log entry in the response
+type LogEntry struct {
+	Type      string                 `json:"type"`
+	Timestamp string                 `json:"timestamp"`
+	AgentID   string                 `json:"agent_id,omitempty"`
+	Data      map[string]interface{} `json:"data,omitempty"`
+}
+
+// GetTaskLogsResponse is the response for task.logs
+type GetTaskLogsResponse struct {
+	TaskID string     `json:"task_id"`
+	Logs   []LogEntry `json:"logs"`
+	Total  int        `json:"total"`
+}
+
+// GetTaskLogs handles task.logs action - retrieves historical execution logs for a task
+func (h *Handlers) GetTaskLogs(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req GetTaskLogsRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+
+	if req.TaskID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+	}
+
+	if h.acpHandler == nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "ACP handler not configured", nil)
+	}
+
+	// Get all historical messages from the database
+	messages, err := h.acpHandler.GetAllMessages(ctx, req.TaskID)
+	if err != nil {
+		h.logger.Error("failed to get task logs", zap.String("task_id", req.TaskID), zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to retrieve logs: "+err.Error(), nil)
+	}
+
+	// Apply limit if specified
+	if req.Limit > 0 && len(messages) > req.Limit {
+		messages = messages[len(messages)-req.Limit:]
+	}
+
+	logs := make([]LogEntry, 0, len(messages))
+	for _, m := range messages {
+		logs = append(logs, LogEntry{
+			Type:      string(m.Type),
+			Timestamp: m.Timestamp.Format("2006-01-02T15:04:05Z"),
+			AgentID:   m.AgentID,
+			Data:      m.Data,
+		})
+	}
+
+	return ws.NewResponse(msg.ID, msg.Action, GetTaskLogsResponse{
+		TaskID: req.TaskID,
+		Logs:   logs,
+		Total:  len(logs),
 	})
 }

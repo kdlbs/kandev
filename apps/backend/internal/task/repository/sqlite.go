@@ -90,6 +90,22 @@ func (r *SQLiteRepository) initSchema() error {
 	CREATE INDEX IF NOT EXISTS idx_tasks_board_id ON tasks(board_id);
 	CREATE INDEX IF NOT EXISTS idx_tasks_column_id ON tasks(column_id);
 	CREATE INDEX IF NOT EXISTS idx_columns_board_id ON columns(board_id);
+
+	CREATE TABLE IF NOT EXISTS task_agent_execution_logs (
+		id TEXT PRIMARY KEY,
+		task_id TEXT NOT NULL,
+		agent_instance_id TEXT NOT NULL DEFAULT '',
+		log_level TEXT NOT NULL DEFAULT 'info',
+		message_type TEXT NOT NULL,
+		message TEXT NOT NULL DEFAULT '',
+		metadata TEXT DEFAULT '{}',
+		timestamp DATETIME NOT NULL,
+		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_execution_logs_task_id ON task_agent_execution_logs(task_id);
+	CREATE INDEX IF NOT EXISTS idx_execution_logs_timestamp ON task_agent_execution_logs(timestamp);
+	CREATE INDEX IF NOT EXISTS idx_execution_logs_task_timestamp ON task_agent_execution_logs(task_id, timestamp);
 	`
 
 	_, err := r.db.Exec(schema)
@@ -99,6 +115,11 @@ func (r *SQLiteRepository) initSchema() error {
 // Close closes the database connection
 func (r *SQLiteRepository) Close() error {
 	return r.db.Close()
+}
+
+// DB returns the underlying sql.DB instance for shared access
+func (r *SQLiteRepository) DB() *sql.DB {
+	return r.db
 }
 
 // Task operations

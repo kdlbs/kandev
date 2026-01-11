@@ -43,6 +43,7 @@ import (
 	taskwshandlers "github.com/kandev/kandev/internal/task/wshandlers"
 
 	// ACP
+	"github.com/kandev/kandev/internal/orchestrator/acp"
 	"github.com/kandev/kandev/pkg/acp/protocol"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -128,6 +129,16 @@ func main() {
 	taskSvc := taskservice.NewService(taskRepo, eventBus, log)
 	log.Info("Task Service initialized")
 
+	// Create SQLite message store for ACP log persistence
+	// Get the underlying *sql.DB from the SQLite repository
+	sqliteRepo, ok := taskRepo.(*repository.SQLiteRepository)
+	if !ok {
+		log.Fatal("Expected SQLiteRepository for ACP message store")
+	}
+	acpMessageStore := acp.NewSQLiteMessageStore(sqliteRepo.DB())
+	acpHandler := acp.NewHandler(acpMessageStore, log)
+	log.Info("ACP message store initialized for persistent log storage")
+
 	// ============================================
 	// AGENT MANAGER
 	// ============================================
@@ -195,6 +206,7 @@ func main() {
 	log.Info("Registered Task Service WebSocket handlers")
 
 	orchestratorWSHandlers := orchestratorwshandlers.NewHandlers(orchestratorSvc, log)
+	orchestratorWSHandlers.SetACPHandler(acpHandler)
 	orchestratorWSHandlers.RegisterHandlers(gateway.Dispatcher)
 	log.Info("Registered Orchestrator WebSocket handlers")
 
@@ -206,6 +218,42 @@ func main() {
 
 	// Start the WebSocket hub
 	go gateway.Hub.Run(ctx)
+
+	// Set up historical logs provider for task subscriptions
+	gateway.Hub.SetHistoricalLogsProvider(func(ctx context.Context, taskID string) ([]*ws.Message, error) {
+		messages, err := acpHandler.GetAllMessages(ctx, taskID)
+		if err != nil {
+			return nil, err
+		}
+
+		// Convert protocol.Message to ws.Message notifications
+		result := make([]*ws.Message, 0, len(messages))
+		for _, msg := range messages {
+			action := "acp." + string(msg.Type)
+			notification, err := ws.NewNotification(action, map[string]interface{}{
+				"task_id":   taskID,
+				"type":      msg.Type,
+				"data":      msg.Data,
+				"timestamp": msg.Timestamp,
+			})
+			if err != nil {
+				continue
+			}
+			result = append(result, notification)
+		}
+		return result, nil
+	})
+	log.Info("Historical logs provider configured for task subscriptions")
+
+	// Wire ACP handler to persist messages to SQLite database
+	orchestratorSvc.RegisterACPHandler(func(taskID string, msg *protocol.Message) {
+		if err := acpHandler.ProcessMessage(context.Background(), msg); err != nil {
+			log.Error("failed to persist ACP message",
+				zap.String("task_id", taskID),
+				zap.String("message_type", string(msg.Type)),
+				zap.Error(err))
+		}
+	})
 
 	// Wire ACP handler to broadcast to WebSocket clients as notifications
 	orchestratorSvc.RegisterACPHandler(func(taskID string, msg *protocol.Message) {

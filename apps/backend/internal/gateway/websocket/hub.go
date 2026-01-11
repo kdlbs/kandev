@@ -11,6 +11,9 @@ import (
 	"go.uber.org/zap"
 )
 
+// HistoricalLogsProvider is a function that retrieves historical logs for a task
+type HistoricalLogsProvider func(ctx context.Context, taskID string) ([]*ws.Message, error)
+
 // Hub manages all WebSocket client connections
 type Hub struct {
 	// All registered clients
@@ -28,6 +31,9 @@ type Hub struct {
 
 	// Message dispatcher
 	dispatcher *ws.Dispatcher
+
+	// Optional provider for historical logs on subscription
+	historicalLogsProvider HistoricalLogsProvider
 
 	mu     sync.RWMutex
 	logger *logger.Logger
@@ -204,4 +210,17 @@ func (h *Hub) GetClientCount() int {
 // GetDispatcher returns the message dispatcher
 func (h *Hub) GetDispatcher() *ws.Dispatcher {
 	return h.dispatcher
+}
+
+// SetHistoricalLogsProvider sets the provider for historical logs on subscription
+func (h *Hub) SetHistoricalLogsProvider(provider HistoricalLogsProvider) {
+	h.historicalLogsProvider = provider
+}
+
+// GetHistoricalLogs retrieves historical logs for a task if a provider is set
+func (h *Hub) GetHistoricalLogs(ctx context.Context, taskID string) ([]*ws.Message, error) {
+	if h.historicalLogsProvider == nil {
+		return nil, nil
+	}
+	return h.historicalLogsProvider(ctx, taskID)
 }

@@ -136,11 +136,40 @@ func (c *Client) handleSubscribe(msg *ws.Message) {
 
 	c.hub.SubscribeToTask(c, req.TaskID)
 
+	// Send success response first
 	resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 		"success": true,
 		"task_id": req.TaskID,
 	})
 	c.sendMessage(resp)
+
+	// Send historical logs if available
+	c.sendHistoricalLogs(req.TaskID)
+}
+
+// sendHistoricalLogs sends historical execution logs to the client
+func (c *Client) sendHistoricalLogs(taskID string) {
+	ctx := context.Background()
+	logs, err := c.hub.GetHistoricalLogs(ctx, taskID)
+	if err != nil {
+		c.logger.Error("Failed to get historical logs",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return
+	}
+
+	if len(logs) == 0 {
+		return
+	}
+
+	c.logger.Debug("Sending historical logs",
+		zap.String("task_id", taskID),
+		zap.Int("count", len(logs)))
+
+	// Send each historical log as a notification
+	for _, log := range logs {
+		c.sendMessage(log)
+	}
 }
 
 // handleUnsubscribe handles task.unsubscribe action

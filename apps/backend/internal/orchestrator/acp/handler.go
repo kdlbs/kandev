@@ -19,6 +19,9 @@ type MessageStore interface {
 	// GetMessages retrieves messages for a task
 	GetMessages(ctx context.Context, taskID string, limit int, since time.Time) ([]*protocol.Message, error)
 
+	// GetAllMessages retrieves all messages for a task (for historical replay)
+	GetAllMessages(ctx context.Context, taskID string) ([]*protocol.Message, error)
+
 	// GetLatestProgress retrieves the most recent progress for a task
 	GetLatestProgress(ctx context.Context, taskID string) (*protocol.ProgressData, error)
 }
@@ -149,6 +152,11 @@ func (h *Handler) GetRecentMessages(taskID string, limit int) []*protocol.Messag
 // GetTaskProgress returns the latest progress for a task
 func (h *Handler) GetTaskProgress(taskID string) (*protocol.ProgressData, error) {
 	return h.store.GetLatestProgress(context.Background(), taskID)
+}
+
+// GetAllMessages retrieves all historical messages for a task from the database
+func (h *Handler) GetAllMessages(ctx context.Context, taskID string) ([]*protocol.Message, error) {
+	return h.store.GetAllMessages(ctx, taskID)
 }
 
 // CleanupTask removes all data for a completed task
