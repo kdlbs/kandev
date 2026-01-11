@@ -27,9 +27,10 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	orchestratorwshandlers "github.com/kandev/kandev/internal/orchestrator/wshandlers"
+	taskcontroller "github.com/kandev/kandev/internal/task/controller"
+	taskhandlers "github.com/kandev/kandev/internal/task/handlers"
 	"github.com/kandev/kandev/internal/task/repository"
 	taskservice "github.com/kandev/kandev/internal/task/service"
-	taskwshandlers "github.com/kandev/kandev/internal/task/wshandlers"
 	"github.com/kandev/kandev/pkg/acp/protocol"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -42,17 +43,17 @@ import (
 // SimulatedAgentManagerClient simulates agent container behavior for testing.
 // It publishes realistic agent events (started, ACP messages, completion) to the event bus.
 type SimulatedAgentManagerClient struct {
-	eventBus       bus.EventBus
-	logger         *logger.Logger
-	mu             sync.Mutex
-	instances      map[string]*simulatedInstance
-	launchDelay    time.Duration
-	executionTime  time.Duration
-	shouldFail     bool
-	failAfter      int           // Fail after N successful launches
-	launchCount    int32
-	acpMessageFn   func(taskID, instanceID string) []protocol.Message // Custom ACP messages
-	stopCh         chan struct{}
+	eventBus      bus.EventBus
+	logger        *logger.Logger
+	mu            sync.Mutex
+	instances     map[string]*simulatedInstance
+	launchDelay   time.Duration
+	executionTime time.Duration
+	shouldFail    bool
+	failAfter     int // Fail after N successful launches
+	launchCount   int32
+	acpMessageFn  func(taskID, instanceID string) []protocol.Message // Custom ACP messages
+	stopCh        chan struct{}
 }
 
 // simulatedInstance tracks a simulated agent instance
@@ -201,9 +202,9 @@ func (s *SimulatedAgentManagerClient) publishACPMessages(instance *simulatedInst
 				TaskID:    instance.taskID,
 				Timestamp: time.Now(),
 				Data: map[string]interface{}{
-					"progress":   25,
-					"stage":      "starting",
-					"message":    "Agent started processing task",
+					"progress": 25,
+					"stage":    "starting",
+					"message":  "Agent started processing task",
 				},
 			},
 			{
@@ -220,9 +221,9 @@ func (s *SimulatedAgentManagerClient) publishACPMessages(instance *simulatedInst
 				TaskID:    instance.taskID,
 				Timestamp: time.Now(),
 				Data: map[string]interface{}{
-					"progress":   75,
-					"stage":      "executing",
-					"message":    "Task execution in progress",
+					"progress": 75,
+					"stage":    "executing",
+					"message":  "Task execution in progress",
 				},
 			},
 		}
@@ -455,10 +456,6 @@ func NewOrchestratorTestServer(t *testing.T) *OrchestratorTestServer {
 	// Create WebSocket gateway
 	gateway := gateways.NewGateway(log)
 
-	// Register task handlers
-	taskWSHandlers := taskwshandlers.NewHandlers(taskSvc, log)
-	taskWSHandlers.RegisterHandlers(gateway.Dispatcher)
-
 	// Register orchestrator handlers
 	orchestratorWSHandlers := orchestratorwshandlers.NewHandlers(orchestratorSvc, log)
 	orchestratorWSHandlers.RegisterHandlers(gateway.Dispatcher)
@@ -498,6 +495,12 @@ func NewOrchestratorTestServer(t *testing.T) *OrchestratorTestServer {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	gateway.SetupRoutes(router)
+
+	// Register handlers (HTTP + WS)
+	boardController := taskcontroller.NewBoardController(taskSvc)
+	taskController := taskcontroller.NewTaskController(taskSvc)
+	taskhandlers.RegisterBoardRoutes(router, gateway.Dispatcher, boardController, log)
+	taskhandlers.RegisterTaskRoutes(router, gateway.Dispatcher, taskController, log)
 
 	// Create test server
 	server := httptest.NewServer(router)
@@ -1388,4 +1391,3 @@ func TestOrchestratorSessionInfo(t *testing.T) {
 	require.True(t, ok, "auggie_session_id should be present in task metadata")
 	assert.Equal(t, expectedSessionID, storedSessionID, "session ID should match what the agent sent")
 }
-

@@ -1,6 +1,6 @@
 // Package main is the unified entry point for Kandev.
 // This single binary runs all services together with shared infrastructure.
-// All communication happens over WebSocket - no REST API.
+// The server exposes WebSocket and HTTP endpoints.
 package main
 
 import (
@@ -38,9 +38,10 @@ import (
 	orchestratorwshandlers "github.com/kandev/kandev/internal/orchestrator/wshandlers"
 
 	// Task Service packages
+	taskcontroller "github.com/kandev/kandev/internal/task/controller"
+	taskhandlers "github.com/kandev/kandev/internal/task/handlers"
 	"github.com/kandev/kandev/internal/task/repository"
 	taskservice "github.com/kandev/kandev/internal/task/service"
-	taskwshandlers "github.com/kandev/kandev/internal/task/wshandlers"
 
 	// ACP
 	"github.com/kandev/kandev/internal/orchestrator/acp"
@@ -200,10 +201,9 @@ func main() {
 	// Create the unified WebSocket gateway
 	gateway := gateways.NewGateway(log)
 
-	// Register WebSocket message handlers for each service
-	taskWSHandlers := taskwshandlers.NewHandlers(taskSvc, log)
-	taskWSHandlers.RegisterHandlers(gateway.Dispatcher)
-	log.Info("Registered Task Service WebSocket handlers")
+	// Prepare Task Service controllers for HTTP + WebSocket handlers
+	boardController := taskcontroller.NewBoardController(taskSvc)
+	taskController := taskcontroller.NewTaskController(taskSvc)
 
 	orchestratorWSHandlers := orchestratorwshandlers.NewHandlers(orchestratorSvc, log)
 	orchestratorWSHandlers.SetACPHandler(acpHandler)
@@ -301,7 +301,7 @@ func main() {
 	log.Info("Orchestrator initialized")
 
 	// ============================================
-	// HTTP SERVER (WebSocket endpoint only)
+	// HTTP SERVER (WebSocket + HTTP endpoints)
 	// ============================================
 	if cfg.Logging.Level != "debug" {
 		gin.SetMode(gin.ReleaseMode)
@@ -310,15 +310,20 @@ func main() {
 	router.Use(gin.Recovery())
 	router.Use(corsMiddleware())
 
-	// WebSocket endpoint - the only way to communicate with the backend
+	// WebSocket endpoint - primary realtime transport
 	gateway.SetupRoutes(router)
+
+	// Task Service handlers (HTTP + WebSocket)
+	taskhandlers.RegisterBoardRoutes(router, gateway.Dispatcher, boardController, log)
+	taskhandlers.RegisterTaskRoutes(router, gateway.Dispatcher, taskController, log)
+	log.Info("Registered Task Service handlers (HTTP + WebSocket)")
 
 	// Health check (simple HTTP for load balancers/monitoring)
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"status":  "ok",
 			"service": "kandev",
-			"mode":    "websocket-only",
+			"mode":    "websocket+http",
 		})
 	})
 
@@ -343,9 +348,10 @@ func main() {
 	}()
 
 	// Print routes summary
-	log.Info("WebSocket-only API configured",
+	log.Info("API configured",
 		zap.String("websocket", "/ws"),
 		zap.String("health", "/health"),
+		zap.String("http", "/api/v1"),
 	)
 
 	// ============================================

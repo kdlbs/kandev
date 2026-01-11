@@ -21,9 +21,10 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
 	"github.com/kandev/kandev/internal/orchestrator/acp"
+	taskcontroller "github.com/kandev/kandev/internal/task/controller"
+	taskhandlers "github.com/kandev/kandev/internal/task/handlers"
 	"github.com/kandev/kandev/internal/task/repository"
 	taskservice "github.com/kandev/kandev/internal/task/service"
-	taskwshandlers "github.com/kandev/kandev/internal/task/wshandlers"
 	"github.com/kandev/kandev/pkg/acp/protocol"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -65,10 +66,6 @@ func NewTestServer(t *testing.T) *TestServer {
 	// Create WebSocket gateway
 	gateway := gateways.NewGateway(log)
 
-	// Register handlers
-	taskWSHandlers := taskwshandlers.NewHandlers(taskSvc, log)
-	taskWSHandlers.RegisterHandlers(gateway.Dispatcher)
-
 	// Start hub
 	go gateway.Hub.Run(ctx)
 
@@ -76,6 +73,12 @@ func NewTestServer(t *testing.T) *TestServer {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	gateway.SetupRoutes(router)
+
+	// Register handlers (HTTP + WS)
+	boardController := taskcontroller.NewBoardController(taskSvc)
+	taskController := taskcontroller.NewTaskController(taskSvc)
+	taskhandlers.RegisterBoardRoutes(router, gateway.Dispatcher, boardController, log)
+	taskhandlers.RegisterTaskRoutes(router, gateway.Dispatcher, taskController, log)
 
 	// Create test server
 	server := httptest.NewServer(router)
@@ -291,7 +294,6 @@ func TestBoardCRUD(t *testing.T) {
 	})
 }
 
-
 // ============================================
 // COLUMN TESTS
 // ============================================
@@ -505,7 +507,6 @@ func TestTaskCRUD(t *testing.T) {
 		assert.Len(t, tasks, 0)
 	})
 }
-
 
 // ============================================
 // TASK STATE TESTS
@@ -747,7 +748,6 @@ func TestMultipleClients(t *testing.T) {
 	assert.Len(t, tasks, 1)
 }
 
-
 // ============================================
 // ERROR HANDLING TESTS
 // ============================================
@@ -920,10 +920,6 @@ func NewTestServerWithACP(t *testing.T) *TestServerWithACP {
 	// Create WebSocket gateway
 	gateway := gateways.NewGateway(log)
 
-	// Register handlers
-	taskWSHandlers := taskwshandlers.NewHandlers(taskSvc, log)
-	taskWSHandlers.RegisterHandlers(gateway.Dispatcher)
-
 	// Register a mock handler for task.logs that uses the ACP handler
 	gateway.Dispatcher.RegisterFunc(ws.ActionTaskLogs, func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 		var req struct {
@@ -1005,6 +1001,12 @@ func NewTestServerWithACP(t *testing.T) *TestServerWithACP {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	gateway.SetupRoutes(router)
+
+	// Register handlers (HTTP + WS)
+	boardController := taskcontroller.NewBoardController(taskSvc)
+	taskController := taskcontroller.NewTaskController(taskSvc)
+	taskhandlers.RegisterBoardRoutes(router, gateway.Dispatcher, boardController, log)
+	taskhandlers.RegisterTaskRoutes(router, gateway.Dispatcher, taskController, log)
 
 	// Create test server
 	server := httptest.NewServer(router)
