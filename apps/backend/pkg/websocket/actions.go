@@ -26,6 +26,20 @@ const (
 	ActionColumnUpdate = "column.update"
 	ActionColumnDelete = "column.delete"
 
+	// Repository actions
+	ActionRepositoryList   = "repository.list"
+	ActionRepositoryCreate = "repository.create"
+	ActionRepositoryGet    = "repository.get"
+	ActionRepositoryUpdate = "repository.update"
+	ActionRepositoryDelete = "repository.delete"
+
+	// Repository Script actions
+	ActionRepositoryScriptList   = "repository.script.list"
+	ActionRepositoryScriptCreate = "repository.script.create"
+	ActionRepositoryScriptGet    = "repository.script.get"
+	ActionRepositoryScriptUpdate = "repository.script.update"
+	ActionRepositoryScriptDelete = "repository.script.delete"
+
 	// Task actions
 	ActionTaskList   = "task.list"
 	ActionTaskCreate = "task.create"

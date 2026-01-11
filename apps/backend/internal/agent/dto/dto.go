@@ -1,0 +1,149 @@
+// Package dto provides Data Transfer Objects for the agent module.
+package dto
+
+import "time"
+
+// ListAgentsRequest is the request for agent.list
+type ListAgentsRequest struct{}
+
+// AgentDTO represents an agent instance
+type AgentDTO struct {
+	ID          string            `json:"id"`
+	TaskID      string            `json:"task_id"`
+	AgentType   string            `json:"agent_type"`
+	ContainerID string            `json:"container_id,omitempty"`
+	Status      string            `json:"status"`
+	Progress    int               `json:"progress"`
+	StartedAt   string            `json:"started_at"`
+	FinishedAt  string            `json:"finished_at,omitempty"`
+	ExitCode    *int              `json:"exit_code,omitempty"`
+	Error       string            `json:"error,omitempty"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
+}
+
+// ListAgentsResponse is the response for agent.list
+type ListAgentsResponse struct {
+	Agents []AgentDTO `json:"agents"`
+	Total  int        `json:"total"`
+}
+
+// LaunchAgentRequest is the payload for agent.launch
+type LaunchAgentRequest struct {
+	TaskID        string            `json:"task_id"`
+	AgentType     string            `json:"agent_type"`
+	WorkspacePath string            `json:"workspace_path"`
+	Env           map[string]string `json:"env,omitempty"`
+}
+
+// LaunchAgentResponse is the response for agent.launch
+type LaunchAgentResponse struct {
+	Success bool   `json:"success"`
+	AgentID string `json:"agent_id"`
+	TaskID  string `json:"task_id"`
+}
+
+// GetAgentStatusRequest is the payload for agent.status
+type GetAgentStatusRequest struct {
+	AgentID string `json:"agent_id"`
+}
+
+// GetAgentLogsRequest is the payload for agent.logs
+type GetAgentLogsRequest struct {
+	AgentID string `json:"agent_id"`
+}
+
+// GetAgentLogsResponse is the response for agent.logs
+type GetAgentLogsResponse struct {
+	AgentID string   `json:"agent_id"`
+	Logs    []string `json:"logs"`
+	Message string   `json:"message,omitempty"`
+}
+
+// StopAgentRequest is the payload for agent.stop
+type StopAgentRequest struct {
+	AgentID string `json:"agent_id"`
+}
+
+// SuccessResponse is a generic success response
+type SuccessResponse struct {
+	Success bool `json:"success"`
+}
+
+// ListAgentTypesRequest is the request for agent.types
+type ListAgentTypesRequest struct{}
+
+// AgentTypeDTO represents an agent type
+type AgentTypeDTO struct {
+	ID           string   `json:"id"`
+	Name         string   `json:"name"`
+	Description  string   `json:"description,omitempty"`
+	Image        string   `json:"image"`
+	Capabilities []string `json:"capabilities,omitempty"`
+	Enabled      bool     `json:"enabled"`
+}
+
+// ListAgentTypesResponse is the response for agent.types
+type ListAgentTypesResponse struct {
+	Types []AgentTypeDTO `json:"types"`
+	Total int            `json:"total"`
+}
+
+// FromAgentInstance converts a lifecycle.AgentInstance to AgentDTO
+func FromAgentInstance(a *AgentInstanceData) AgentDTO {
+	agent := AgentDTO{
+		ID:          a.ID,
+		TaskID:      a.TaskID,
+		AgentType:   a.AgentType,
+		ContainerID: a.ContainerID,
+		Status:      a.Status,
+		Progress:    a.Progress,
+		StartedAt:   a.StartedAt.Format("2006-01-02T15:04:05Z"),
+	}
+	if a.FinishedAt != nil && !a.FinishedAt.IsZero() {
+		agent.FinishedAt = a.FinishedAt.Format("2006-01-02T15:04:05Z")
+	}
+	if a.ExitCode != nil {
+		agent.ExitCode = a.ExitCode
+	}
+	if a.ErrorMessage != "" {
+		agent.Error = a.ErrorMessage
+	}
+	return agent
+}
+
+// AgentInstanceData is the input data for FromAgentInstance (avoids circular import)
+type AgentInstanceData struct {
+	ID           string
+	TaskID       string
+	AgentType    string
+	ContainerID  string
+	Status       string
+	Progress     int
+	StartedAt    time.Time
+	FinishedAt   *time.Time
+	ExitCode     *int
+	ErrorMessage string
+}
+
+// FromAgentType converts a registry.AgentType to AgentTypeDTO
+func FromAgentType(t *AgentTypeData) AgentTypeDTO {
+	return AgentTypeDTO{
+		ID:           t.ID,
+		Name:         t.Name,
+		Description:  t.Description,
+		Image:        t.Image,
+		Capabilities: t.Capabilities,
+		Enabled:      t.Enabled,
+	}
+}
+
+// AgentTypeData is the input data for FromAgentType (avoids circular import)
+type AgentTypeData struct {
+	ID           string
+	Name         string
+	Description  string
+	Image        string
+	Capabilities []string
+	Enabled      bool
+}
+
