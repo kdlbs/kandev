@@ -17,17 +17,19 @@ import (
 
 // Service provides task business logic
 type Service struct {
-	repo     repository.Repository
-	eventBus bus.EventBus
-	logger   *logger.Logger
+	repo            repository.Repository
+	eventBus        bus.EventBus
+	logger          *logger.Logger
+	discoveryConfig RepositoryDiscoveryConfig
 }
 
 // NewService creates a new task service
-func NewService(repo repository.Repository, eventBus bus.EventBus, log *logger.Logger) *Service {
+func NewService(repo repository.Repository, eventBus bus.EventBus, log *logger.Logger, discoveryConfig RepositoryDiscoveryConfig) *Service {
 	return &Service{
-		repo:     repo,
-		eventBus: eventBus,
-		logger:   log,
+		repo:            repo,
+		eventBus:        eventBus,
+		logger:          log,
+		discoveryConfig: discoveryConfig,
 	}
 }
 
@@ -101,6 +103,50 @@ type UpdateColumnRequest struct {
 	Position *int          `json:"position,omitempty"`
 	State    *v1.TaskState `json:"state,omitempty"`
 	Color    *string       `json:"color,omitempty"`
+}
+
+// CreateRepositoryRequest contains the data for creating a new repository
+type CreateRepositoryRequest struct {
+	WorkspaceID    string `json:"workspace_id"`
+	Name           string `json:"name"`
+	SourceType     string `json:"source_type"`
+	LocalPath      string `json:"local_path"`
+	Provider       string `json:"provider"`
+	ProviderRepoID string `json:"provider_repo_id"`
+	ProviderOwner  string `json:"provider_owner"`
+	ProviderName   string `json:"provider_name"`
+	DefaultBranch  string `json:"default_branch"`
+	SetupScript    string `json:"setup_script"`
+	CleanupScript  string `json:"cleanup_script"`
+}
+
+// UpdateRepositoryRequest contains the data for updating a repository
+type UpdateRepositoryRequest struct {
+	Name           *string `json:"name,omitempty"`
+	SourceType     *string `json:"source_type,omitempty"`
+	LocalPath      *string `json:"local_path,omitempty"`
+	Provider       *string `json:"provider,omitempty"`
+	ProviderRepoID *string `json:"provider_repo_id,omitempty"`
+	ProviderOwner  *string `json:"provider_owner,omitempty"`
+	ProviderName   *string `json:"provider_name,omitempty"`
+	DefaultBranch  *string `json:"default_branch,omitempty"`
+	SetupScript    *string `json:"setup_script,omitempty"`
+	CleanupScript  *string `json:"cleanup_script,omitempty"`
+}
+
+// CreateRepositoryScriptRequest contains the data for creating a repository script
+type CreateRepositoryScriptRequest struct {
+	RepositoryID string `json:"repository_id"`
+	Name         string `json:"name"`
+	Command      string `json:"command"`
+	Position     int    `json:"position"`
+}
+
+// UpdateRepositoryScriptRequest contains the data for updating a repository script
+type UpdateRepositoryScriptRequest struct {
+	Name     *string `json:"name,omitempty"`
+	Command  *string `json:"command,omitempty"`
+	Position *int    `json:"position,omitempty"`
 }
 
 // Task operations
@@ -531,6 +577,173 @@ func (s *Service) DeleteColumn(ctx context.Context, id string) error {
 	return nil
 }
 
+// Repository operations
+
+func (s *Service) CreateRepository(ctx context.Context, req *CreateRepositoryRequest) (*models.Repository, error) {
+	sourceType := req.SourceType
+	if sourceType == "" {
+		sourceType = "local"
+	}
+	repository := &models.Repository{
+		ID:             uuid.New().String(),
+		WorkspaceID:    req.WorkspaceID,
+		Name:           req.Name,
+		SourceType:     sourceType,
+		LocalPath:      req.LocalPath,
+		Provider:       req.Provider,
+		ProviderRepoID: req.ProviderRepoID,
+		ProviderOwner:  req.ProviderOwner,
+		ProviderName:   req.ProviderName,
+		DefaultBranch:  req.DefaultBranch,
+		SetupScript:    req.SetupScript,
+		CleanupScript:  req.CleanupScript,
+	}
+
+	if err := s.repo.CreateRepository(ctx, repository); err != nil {
+		s.logger.Error("failed to create repository", zap.Error(err))
+		return nil, err
+	}
+
+	s.publishRepositoryEvent(ctx, events.RepositoryCreated, repository)
+	s.logger.Info("repository created", zap.String("repository_id", repository.ID))
+	return repository, nil
+}
+
+func (s *Service) GetRepository(ctx context.Context, id string) (*models.Repository, error) {
+	return s.repo.GetRepository(ctx, id)
+}
+
+func (s *Service) UpdateRepository(ctx context.Context, id string, req *UpdateRepositoryRequest) (*models.Repository, error) {
+	repository, err := s.repo.GetRepository(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if req.Name != nil {
+		repository.Name = *req.Name
+	}
+	if req.SourceType != nil {
+		repository.SourceType = *req.SourceType
+	}
+	if req.LocalPath != nil {
+		repository.LocalPath = *req.LocalPath
+	}
+	if req.Provider != nil {
+		repository.Provider = *req.Provider
+	}
+	if req.ProviderRepoID != nil {
+		repository.ProviderRepoID = *req.ProviderRepoID
+	}
+	if req.ProviderOwner != nil {
+		repository.ProviderOwner = *req.ProviderOwner
+	}
+	if req.ProviderName != nil {
+		repository.ProviderName = *req.ProviderName
+	}
+	if req.DefaultBranch != nil {
+		repository.DefaultBranch = *req.DefaultBranch
+	}
+	if req.SetupScript != nil {
+		repository.SetupScript = *req.SetupScript
+	}
+	if req.CleanupScript != nil {
+		repository.CleanupScript = *req.CleanupScript
+	}
+	repository.UpdatedAt = time.Now().UTC()
+
+	if err := s.repo.UpdateRepository(ctx, repository); err != nil {
+		s.logger.Error("failed to update repository", zap.String("repository_id", id), zap.Error(err))
+		return nil, err
+	}
+
+	s.publishRepositoryEvent(ctx, events.RepositoryUpdated, repository)
+	s.logger.Info("repository updated", zap.String("repository_id", repository.ID))
+	return repository, nil
+}
+
+func (s *Service) DeleteRepository(ctx context.Context, id string) error {
+	repository, err := s.repo.GetRepository(ctx, id)
+	if err != nil {
+		return err
+	}
+	if err := s.repo.DeleteRepository(ctx, id); err != nil {
+		s.logger.Error("failed to delete repository", zap.String("repository_id", id), zap.Error(err))
+		return err
+	}
+	s.publishRepositoryEvent(ctx, events.RepositoryDeleted, repository)
+	s.logger.Info("repository deleted", zap.String("repository_id", id))
+	return nil
+}
+
+func (s *Service) ListRepositories(ctx context.Context, workspaceID string) ([]*models.Repository, error) {
+	return s.repo.ListRepositories(ctx, workspaceID)
+}
+
+// Repository script operations
+
+func (s *Service) CreateRepositoryScript(ctx context.Context, req *CreateRepositoryScriptRequest) (*models.RepositoryScript, error) {
+	script := &models.RepositoryScript{
+		ID:           uuid.New().String(),
+		RepositoryID: req.RepositoryID,
+		Name:         req.Name,
+		Command:      req.Command,
+		Position:     req.Position,
+	}
+	if err := s.repo.CreateRepositoryScript(ctx, script); err != nil {
+		s.logger.Error("failed to create repository script", zap.Error(err))
+		return nil, err
+	}
+	s.publishRepositoryScriptEvent(ctx, events.RepositoryScriptCreated, script)
+	s.logger.Info("repository script created", zap.String("script_id", script.ID))
+	return script, nil
+}
+
+func (s *Service) GetRepositoryScript(ctx context.Context, id string) (*models.RepositoryScript, error) {
+	return s.repo.GetRepositoryScript(ctx, id)
+}
+
+func (s *Service) UpdateRepositoryScript(ctx context.Context, id string, req *UpdateRepositoryScriptRequest) (*models.RepositoryScript, error) {
+	script, err := s.repo.GetRepositoryScript(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if req.Name != nil {
+		script.Name = *req.Name
+	}
+	if req.Command != nil {
+		script.Command = *req.Command
+	}
+	if req.Position != nil {
+		script.Position = *req.Position
+	}
+	script.UpdatedAt = time.Now().UTC()
+
+	if err := s.repo.UpdateRepositoryScript(ctx, script); err != nil {
+		s.logger.Error("failed to update repository script", zap.String("script_id", id), zap.Error(err))
+		return nil, err
+	}
+	s.publishRepositoryScriptEvent(ctx, events.RepositoryScriptUpdated, script)
+	s.logger.Info("repository script updated", zap.String("script_id", script.ID))
+	return script, nil
+}
+
+func (s *Service) DeleteRepositoryScript(ctx context.Context, id string) error {
+	script, err := s.repo.GetRepositoryScript(ctx, id)
+	if err != nil {
+		return err
+	}
+	if err := s.repo.DeleteRepositoryScript(ctx, id); err != nil {
+		s.logger.Error("failed to delete repository script", zap.String("script_id", id), zap.Error(err))
+		return err
+	}
+	s.publishRepositoryScriptEvent(ctx, events.RepositoryScriptDeleted, script)
+	s.logger.Info("repository script deleted", zap.String("script_id", id))
+	return nil
+}
+
+func (s *Service) ListRepositoryScripts(ctx context.Context, repositoryID string) ([]*models.RepositoryScript, error) {
+	return s.repo.ListRepositoryScripts(ctx, repositoryID)
+}
+
 // publishTaskEvent publishes task events to the event bus
 func (s *Service) publishTaskEvent(ctx context.Context, eventType string, task *models.Task, oldState *v1.TaskState) {
 	if s.eventBus == nil {
@@ -745,6 +958,57 @@ func (s *Service) publishCommentEvent(ctx context.Context, eventType string, com
 		s.logger.Error("failed to publish comment event",
 			zap.String("event_type", eventType),
 			zap.String("comment_id", comment.ID),
+			zap.Error(err))
+	}
+}
+
+func (s *Service) publishRepositoryEvent(ctx context.Context, eventType string, repository *models.Repository) {
+	if s.eventBus == nil || repository == nil {
+		return
+	}
+	data := map[string]interface{}{
+		"id":               repository.ID,
+		"workspace_id":     repository.WorkspaceID,
+		"name":             repository.Name,
+		"source_type":      repository.SourceType,
+		"local_path":       repository.LocalPath,
+		"provider":         repository.Provider,
+		"provider_repo_id": repository.ProviderRepoID,
+		"provider_owner":   repository.ProviderOwner,
+		"provider_name":    repository.ProviderName,
+		"default_branch":   repository.DefaultBranch,
+		"setup_script":     repository.SetupScript,
+		"cleanup_script":   repository.CleanupScript,
+		"created_at":       repository.CreatedAt.Format(time.RFC3339),
+		"updated_at":       repository.UpdatedAt.Format(time.RFC3339),
+	}
+	event := bus.NewEvent(eventType, "task-service", data)
+	if err := s.eventBus.Publish(ctx, eventType, event); err != nil {
+		s.logger.Error("failed to publish repository event",
+			zap.String("event_type", eventType),
+			zap.String("repository_id", repository.ID),
+			zap.Error(err))
+	}
+}
+
+func (s *Service) publishRepositoryScriptEvent(ctx context.Context, eventType string, script *models.RepositoryScript) {
+	if s.eventBus == nil || script == nil {
+		return
+	}
+	data := map[string]interface{}{
+		"id":            script.ID,
+		"repository_id": script.RepositoryID,
+		"name":          script.Name,
+		"command":       script.Command,
+		"position":      script.Position,
+		"created_at":    script.CreatedAt.Format(time.RFC3339),
+		"updated_at":    script.UpdatedAt.Format(time.RFC3339),
+	}
+	event := bus.NewEvent(eventType, "task-service", data)
+	if err := s.eventBus.Publish(ctx, eventType, event); err != nil {
+		s.logger.Error("failed to publish repository script event",
+			zap.String("event_type", eventType),
+			zap.String("script_id", script.ID),
 			zap.Error(err))
 	}
 }

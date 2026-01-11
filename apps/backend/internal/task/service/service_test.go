@@ -72,7 +72,7 @@ func createTestService(t *testing.T) (*Service, *MockEventBus, *repository.Memor
 	repo := repository.NewMemoryRepository()
 	eventBus := NewMockEventBus()
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
-	svc := NewService(repo, eventBus, log)
+	svc := NewService(repo, eventBus, log, RepositoryDiscoveryConfig{})
 	return svc, eventBus, repo
 }
 

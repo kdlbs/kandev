@@ -70,14 +70,14 @@ const (
 
 // Comment represents a comment on a task
 type Comment struct {
-	ID              string            `json:"id"`
-	TaskID          string            `json:"task_id"`
-	AuthorType      CommentAuthorType `json:"author_type"`
-	AuthorID        string            `json:"author_id,omitempty"` // User ID or Agent Instance ID
-	Content         string            `json:"content"`
-	RequestsInput   bool              `json:"requests_input"`   // True if agent is requesting user input
-	ACPSessionID    string            `json:"acp_session_id,omitempty"`
-	CreatedAt       time.Time         `json:"created_at"`
+	ID            string            `json:"id"`
+	TaskID        string            `json:"task_id"`
+	AuthorType    CommentAuthorType `json:"author_type"`
+	AuthorID      string            `json:"author_id,omitempty"` // User ID or Agent Instance ID
+	Content       string            `json:"content"`
+	RequestsInput bool              `json:"requests_input"` // True if agent is requesting user input
+	ACPSessionID  string            `json:"acp_session_id,omitempty"`
+	CreatedAt     time.Time         `json:"created_at"`
 }
 
 // ToAPI converts internal Comment to API type
@@ -91,6 +91,38 @@ func (c *Comment) ToAPI() *v1.Comment {
 		RequestsInput: c.RequestsInput,
 		CreatedAt:     c.CreatedAt,
 	}
+}
+
+// Repository represents a workspace repository
+type Repository struct {
+	ID          string `json:"id"`
+	WorkspaceID string `json:"workspace_id"`
+	Name        string `json:"name"`
+	SourceType  string `json:"source_type"`
+	// LocalPath is the path to a local checkout; for provider-backed repos, this is
+	// populated after the repo is cloned/synced on the agent host.
+	LocalPath string `json:"local_path"`
+	// Provider fields describe the upstream source (e.g. github/gitlab) for future syncing.
+	Provider       string    `json:"provider"`
+	ProviderRepoID string    `json:"provider_repo_id"`
+	ProviderOwner  string    `json:"provider_owner"`
+	ProviderName   string    `json:"provider_name"`
+	DefaultBranch  string    `json:"default_branch"`
+	SetupScript    string    `json:"setup_script"`
+	CleanupScript  string    `json:"cleanup_script"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+// RepositoryScript represents a custom script for a repository
+type RepositoryScript struct {
+	ID           string    `json:"id"`
+	RepositoryID string    `json:"repository_id"`
+	Name         string    `json:"name"`
+	Command      string    `json:"command"`
+	Position     int       `json:"position"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 // ToAPI converts internal Task to API type

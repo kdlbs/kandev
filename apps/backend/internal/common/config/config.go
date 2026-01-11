@@ -12,12 +12,13 @@ import (
 
 // Config holds all configuration sections for Kandev.
 type Config struct {
-	Server   ServerConfig   `mapstructure:"server"`
-	Database DatabaseConfig `mapstructure:"database"`
-	NATS     NATSConfig     `mapstructure:"nats"`
-	Docker   DockerConfig   `mapstructure:"docker"`
-	Auth     AuthConfig     `mapstructure:"auth"`
-	Logging  LoggingConfig  `mapstructure:"logging"`
+	Server              ServerConfig              `mapstructure:"server"`
+	Database            DatabaseConfig            `mapstructure:"database"`
+	NATS                NATSConfig                `mapstructure:"nats"`
+	Docker              DockerConfig              `mapstructure:"docker"`
+	Auth                AuthConfig                `mapstructure:"auth"`
+	Logging             LoggingConfig             `mapstructure:"logging"`
+	RepositoryDiscovery RepositoryDiscoveryConfig `mapstructure:"repositoryDiscovery"`
 }
 
 // ServerConfig holds HTTP server configuration.
@@ -68,6 +69,12 @@ type LoggingConfig struct {
 	Level      string `mapstructure:"level"`
 	Format     string `mapstructure:"format"`
 	OutputPath string `mapstructure:"outputPath"`
+}
+
+// RepositoryDiscoveryConfig holds configuration for local repository scanning.
+type RepositoryDiscoveryConfig struct {
+	Roots    []string `mapstructure:"roots"`
+	MaxDepth int      `mapstructure:"maxDepth"`
 }
 
 // ReadTimeoutDuration returns the read timeout as a time.Duration.
@@ -124,6 +131,10 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("logging.level", "info")
 	v.SetDefault("logging.format", "json")
 	v.SetDefault("logging.outputPath", "stdout")
+
+	// Repository discovery defaults
+	v.SetDefault("repositoryDiscovery.roots", []string{})
+	v.SetDefault("repositoryDiscovery.maxDepth", 5)
 }
 
 // Load reads configuration from environment variables, config file, and defaults.
@@ -219,6 +230,10 @@ func validate(cfg *Config) error {
 	validFormats := map[string]bool{"json": true, "text": true}
 	if !validFormats[strings.ToLower(cfg.Logging.Format)] {
 		errs = append(errs, "logging.format must be one of: json, text")
+	}
+
+	if cfg.RepositoryDiscovery.MaxDepth <= 0 {
+		errs = append(errs, "repositoryDiscovery.maxDepth must be positive")
 	}
 
 	if len(errs) > 0 {

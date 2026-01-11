@@ -47,6 +47,20 @@ type Repository interface {
 	ListComments(ctx context.Context, taskID string) ([]*models.Comment, error)
 	DeleteComment(ctx context.Context, id string) error
 
+	// Repository operations
+	CreateRepository(ctx context.Context, repository *models.Repository) error
+	GetRepository(ctx context.Context, id string) (*models.Repository, error)
+	UpdateRepository(ctx context.Context, repository *models.Repository) error
+	DeleteRepository(ctx context.Context, id string) error
+	ListRepositories(ctx context.Context, workspaceID string) ([]*models.Repository, error)
+
+	// Repository script operations
+	CreateRepositoryScript(ctx context.Context, script *models.RepositoryScript) error
+	GetRepositoryScript(ctx context.Context, id string) (*models.RepositoryScript, error)
+	UpdateRepositoryScript(ctx context.Context, script *models.RepositoryScript) error
+	DeleteRepositoryScript(ctx context.Context, id string) error
+	ListRepositoryScripts(ctx context.Context, repositoryID string) ([]*models.RepositoryScript, error)
+
 	// Close closes the repository (for database connections)
 	Close() error
 }

@@ -36,6 +36,33 @@ export type Column = {
   updated_at: string;
 };
 
+export type Repository = {
+  id: string;
+  workspace_id: string;
+  name: string;
+  source_type: string;
+  local_path: string;
+  provider: string;
+  provider_repo_id: string;
+  provider_owner: string;
+  provider_name: string;
+  default_branch: string;
+  setup_script: string;
+  cleanup_script: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type RepositoryScript = {
+  id: string;
+  repository_id: string;
+  name: string;
+  command: string;
+  position: number;
+  created_at: string;
+  updated_at: string;
+};
+
 export type Task = {
   id: string;
   workspace_id: string;
@@ -69,6 +96,37 @@ export type ListBoardsResponse = {
 export type ListColumnsResponse = {
   columns: Column[];
   total: number;
+};
+
+export type ListRepositoriesResponse = {
+  repositories: Repository[];
+  total: number;
+};
+
+export type ListRepositoryScriptsResponse = {
+  scripts: RepositoryScript[];
+  total: number;
+};
+
+export type LocalRepository = {
+  path: string;
+  name: string;
+  default_branch?: string;
+};
+
+export type RepositoryDiscoveryResponse = {
+  roots: string[];
+  repositories: LocalRepository[];
+  total: number;
+};
+
+export type RepositoryPathValidationResponse = {
+  path: string;
+  exists: boolean;
+  is_git: boolean;
+  allowed: boolean;
+  default_branch?: string;
+  message?: string;
 };
 
 export type ListWorkspacesResponse = {

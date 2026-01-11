@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { IconGitBranch, IconPlus, IconTrash } from '@tabler/icons-react';
+import { IconGitBranch, IconLoader2, IconPlus, IconTrash } from '@tabler/icons-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -22,27 +22,44 @@ import { BoardCard } from '@/components/settings/board-card';
 import {
   createBoardAction,
   createColumnAction,
+  discoverRepositoriesAction,
+  createRepositoryAction,
+  createRepositoryScriptAction,
   deleteBoardAction,
   deleteColumnAction,
+  deleteRepositoryAction,
+  deleteRepositoryScriptAction,
   deleteWorkspaceAction,
   updateBoardAction,
   updateColumnAction,
+  validateRepositoryPathAction,
+  updateRepositoryAction,
+  updateRepositoryScriptAction,
   updateWorkspaceAction,
 } from '@/app/actions/workspaces';
-import type { Board, Column, Workspace } from '@/lib/types/http';
-import type { Repository } from '@/lib/settings/types';
+import type {
+  Board,
+  Column,
+  LocalRepository,
+  Repository,
+  RepositoryScript,
+  Workspace,
+} from '@/lib/types/http';
 import { useRequest } from '@/lib/http/use-request';
 import { useToast } from '@/components/toast-provider';
+import { useAppStore } from '@/components/state-provider';
 import { UnsavedChangesBadge, UnsavedSaveButton } from '@/components/settings/unsaved-indicator';
 
 type BoardWithColumns = Board & { columns: Column[] };
+type RepositoryWithScripts = Repository & { scripts: RepositoryScript[] };
 
 type WorkspaceEditClientProps = {
   workspace: Workspace | null;
   boards: BoardWithColumns[];
+  repositories: RepositoryWithScripts[];
 };
 
-export function WorkspaceEditClient({ workspace, boards }: WorkspaceEditClientProps) {
+export function WorkspaceEditClient({ workspace, boards, repositories }: WorkspaceEditClientProps) {
   const router = useRouter();
   const { toast } = useToast();
   const [currentWorkspace, setCurrentWorkspace] = useState<Workspace | null>(workspace);
@@ -50,11 +67,28 @@ export function WorkspaceEditClient({ workspace, boards }: WorkspaceEditClientPr
   const [boardItems, setBoardItems] = useState<BoardWithColumns[]>(boards);
   const [savedWorkspaceName, setSavedWorkspaceName] = useState(workspace?.name ?? '');
   const [savedBoardItems, setSavedBoardItems] = useState<BoardWithColumns[]>(boards);
-  const [repositories, setRepositories] = useState<Repository[]>([]);
+  const [repositoryItems, setRepositoryItems] = useState<RepositoryWithScripts[]>(repositories);
+  const [savedRepositoryItems, setSavedRepositoryItems] = useState<RepositoryWithScripts[]>(repositories);
+  const [discoveredRepositories, setDiscoveredRepositories] = useState<LocalRepository[]>([]);
+  const [localRepoDialogOpen, setLocalRepoDialogOpen] = useState(false);
+  const [remoteRepoDialogOpen, setRemoteRepoDialogOpen] = useState(false);
+  const [repoSearch, setRepoSearch] = useState('');
+  const [selectedRepoPath, setSelectedRepoPath] = useState<string | null>(null);
+  const [manualRepoPath, setManualRepoPath] = useState('');
+  const [manualValidation, setManualValidation] = useState<{
+    status: 'idle' | 'loading' | 'success' | 'error';
+    message?: string;
+    isValid?: boolean;
+    path?: string;
+  }>({ status: 'idle' });
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const saveWorkspaceRequest = useRequest(updateWorkspaceAction);
   const deleteWorkspaceRequest = useRequest(deleteWorkspaceAction);
+  const discoverRepositoriesRequest = useRequest(discoverRepositoriesAction);
+  const validateRepositoryPathRequest = useRequest(validateRepositoryPathAction);
+  const workspaces = useAppStore((state) => state.workspaces.items);
+  const setWorkspaces = useAppStore((state) => state.setWorkspaces);
 
   const handleSaveWorkspaceName = async () => {
     if (!currentWorkspace) return;
@@ -64,6 +98,11 @@ export function WorkspaceEditClient({ workspace, boards }: WorkspaceEditClientPr
       const updated = await saveWorkspaceRequest.run(currentWorkspace.id, { name: trimmed });
       setCurrentWorkspace((prev) => (prev ? { ...prev, ...updated } : prev));
       setSavedWorkspaceName(updated.name);
+      setWorkspaces(
+        workspaces.map((workspace) =>
+          workspace.id === updated.id ? { ...workspace, name: updated.name } : workspace
+        )
+      );
     } catch (error) {
       toast({
         title: 'Failed to save workspace',
@@ -113,26 +152,281 @@ export function WorkspaceEditClient({ workspace, boards }: WorkspaceEditClientPr
 
   const isWorkspaceDirty = workspaceNameDraft.trim() !== savedWorkspaceName;
 
-  const handleAddRepository = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    const formData = new FormData(e.currentTarget);
-    const newRepo: Repository = {
-      id: crypto.randomUUID(),
-      name: formData.get('name') as string,
-      path: formData.get('path') as string,
-      setupScript: formData.get('setupScript') as string,
-      cleanupScript: formData.get('cleanupScript') as string,
-      customScripts: [],
+  const cloneRepository = (repo: RepositoryWithScripts): RepositoryWithScripts => ({
+    ...repo,
+    scripts: repo.scripts.map((script) => ({ ...script })),
+  });
+
+  const savedRepositoriesById = useMemo(() => {
+    return new Map(savedRepositoryItems.map((repo) => [repo.id, repo]));
+  }, [savedRepositoryItems]);
+
+  const filteredRepositories = useMemo(() => {
+    const query = repoSearch.trim().toLowerCase();
+    if (!query) return discoveredRepositories;
+    return discoveredRepositories.filter(
+      (repo) => repo.name.toLowerCase().includes(query) || repo.path.toLowerCase().includes(query)
+    );
+  }, [discoveredRepositories, repoSearch]);
+
+  const canSaveLocalRepo =
+    Boolean(selectedRepoPath) || (manualValidation.status === 'success' && manualValidation.isValid);
+
+  const isRepositoryDirty = (repo: RepositoryWithScripts) => {
+    const saved = savedRepositoriesById.get(repo.id);
+    if (!saved) return true;
+    return (
+      repo.name !== saved.name ||
+      repo.source_type !== saved.source_type ||
+      repo.local_path !== saved.local_path ||
+      repo.provider !== saved.provider ||
+      repo.provider_repo_id !== saved.provider_repo_id ||
+      repo.provider_owner !== saved.provider_owner ||
+      repo.provider_name !== saved.provider_name ||
+      repo.default_branch !== saved.default_branch ||
+      repo.setup_script !== saved.setup_script ||
+      repo.cleanup_script !== saved.cleanup_script
+    );
+  };
+
+  const areRepositoryScriptsDirty = (repo: RepositoryWithScripts) => {
+    const saved = savedRepositoriesById.get(repo.id);
+    if (!saved) return repo.scripts.length > 0;
+    if (repo.scripts.length !== saved.scripts.length) return true;
+    const savedScripts = new Map(saved.scripts.map((script) => [script.id, script]));
+    for (const script of repo.scripts) {
+      const savedScript = savedScripts.get(script.id);
+      if (!savedScript) return true;
+      if (
+        script.name !== savedScript.name ||
+        script.command !== savedScript.command ||
+        script.position !== savedScript.position
+      ) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  const handleUpdateRepository = (repoId: string, updates: Partial<Repository>) => {
+    setRepositoryItems((prev) =>
+      prev.map((repo) => (repo.id === repoId ? { ...repo, ...updates } : repo))
+    );
+  };
+
+  const handleDiscoverRepositories = async () => {
+    if (!currentWorkspace) return;
+    try {
+      const result = await discoverRepositoriesRequest.run(currentWorkspace.id);
+      setDiscoveredRepositories(result.repositories);
+    } catch (error) {
+      toast({
+        title: 'Failed to discover repositories',
+        description: error instanceof Error ? error.message : 'Request failed',
+        variant: 'error',
+      });
+    }
+  };
+
+  const openLocalRepositoryDialog = async () => {
+    setLocalRepoDialogOpen(true);
+    setRepoSearch('');
+    setSelectedRepoPath(null);
+    setManualRepoPath('');
+    setManualValidation({ status: 'idle' });
+    await handleDiscoverRepositories();
+  };
+
+  const handleValidateManualPath = async () => {
+    if (!currentWorkspace || !manualRepoPath.trim()) return;
+    setManualValidation({ status: 'loading' });
+    try {
+      const result = await validateRepositoryPathRequest.run(currentWorkspace.id, manualRepoPath.trim());
+      if (result.allowed && result.exists && result.is_git) {
+        setManualValidation({
+          status: 'success',
+          isValid: true,
+          message: 'Valid git repository',
+          path: result.path,
+        });
+      } else {
+        setManualValidation({
+          status: 'error',
+          isValid: false,
+          message: result.message || 'Invalid repository path',
+          path: result.path,
+        });
+      }
+    } catch (error) {
+      setManualValidation({
+        status: 'error',
+        isValid: false,
+        message: error instanceof Error ? error.message : 'Request failed',
+      });
+    }
+  };
+
+  const handleConfirmLocalRepository = () => {
+    if (!currentWorkspace) return;
+    const selectedRepo = discoveredRepositories.find((repo) => repo.path === selectedRepoPath);
+    const path = selectedRepo?.path || manualValidation.path || manualRepoPath.trim();
+    if (!path) return;
+    const name = selectedRepo?.name || path.split('/').filter(Boolean).slice(-1)[0] || 'New Repository';
+    const draftId = `temp-repo-${crypto.randomUUID()}`;
+    const draftRepo: RepositoryWithScripts = {
+      id: draftId,
+      workspace_id: currentWorkspace.id,
+      name,
+      source_type: 'local',
+      local_path: path,
+      provider: '',
+      provider_repo_id: '',
+      provider_owner: '',
+      provider_name: '',
+      default_branch: selectedRepo?.default_branch || '',
+      setup_script: '',
+      cleanup_script: '',
+      created_at: '',
+      updated_at: '',
+      scripts: [],
     };
-    setRepositories((prev) => [...prev, newRepo]);
+    setRepositoryItems((prev) => [draftRepo, ...prev]);
+    setLocalRepoDialogOpen(false);
   };
 
-  const handleUpdateRepository = (repo: Repository) => {
-    setRepositories((prev) => prev.map((item) => (item.id === repo.id ? repo : item)));
+  const handleAddRepositoryScript = (repoId: string) => {
+    const script: RepositoryScript = {
+      id: `temp-script-${crypto.randomUUID()}`,
+      repository_id: repoId,
+      name: '',
+      command: '',
+      position: repositoryItems.find((repo) => repo.id === repoId)?.scripts.length ?? 0,
+      created_at: '',
+      updated_at: '',
+    };
+    setRepositoryItems((prev) =>
+      prev.map((repo) =>
+        repo.id === repoId ? { ...repo, scripts: [...repo.scripts, script] } : repo
+      )
+    );
   };
 
-  const handleDeleteRepository = (id: string) => {
-    setRepositories((prev) => prev.filter((repo) => repo.id !== id));
+  const handleUpdateRepositoryScript = (repoId: string, scriptId: string, updates: Partial<RepositoryScript>) => {
+    setRepositoryItems((prev) =>
+      prev.map((repo) =>
+        repo.id === repoId
+          ? {
+              ...repo,
+              scripts: repo.scripts.map((script) =>
+                script.id === scriptId ? { ...script, ...updates } : script
+              ),
+            }
+          : repo
+      )
+    );
+  };
+
+  const handleDeleteRepositoryScript = (repoId: string, scriptId: string) => {
+    setRepositoryItems((prev) =>
+      prev.map((repo) =>
+        repo.id === repoId
+          ? { ...repo, scripts: repo.scripts.filter((script) => script.id !== scriptId) }
+          : repo
+      )
+    );
+  };
+
+  const handleSaveRepository = async (repoId: string) => {
+    const repo = repositoryItems.find((item) => item.id === repoId);
+    if (!repo) return;
+    if (repoId.startsWith('temp-repo-')) {
+      const created = await createRepositoryAction({
+        workspace_id: currentWorkspace?.id ?? repo.workspace_id,
+        name: repo.name.trim() || 'New Repository',
+        source_type: repo.source_type || 'local',
+        local_path: repo.local_path,
+        provider: repo.provider,
+        provider_repo_id: repo.provider_repo_id,
+        provider_owner: repo.provider_owner,
+        provider_name: repo.provider_name,
+        default_branch: repo.default_branch,
+        setup_script: repo.setup_script,
+        cleanup_script: repo.cleanup_script,
+      });
+      const scripts = await Promise.all(
+        repo.scripts.map((script, index) =>
+          createRepositoryScriptAction({
+            repository_id: created.id,
+            name: script.name.trim() || 'New Script',
+            command: script.command.trim() || 'echo ""',
+            position: script.position ?? index,
+          })
+        )
+      );
+      const nextRepo: RepositoryWithScripts = { ...created, scripts };
+      setRepositoryItems((prev) => prev.map((item) => (item.id === repoId ? nextRepo : item)));
+      setSavedRepositoryItems((prev) => [cloneRepository(nextRepo), ...prev]);
+      return;
+    }
+
+    const updated = await updateRepositoryAction(repoId, {
+      name: repo.name,
+      source_type: repo.source_type,
+      local_path: repo.local_path,
+      provider: repo.provider,
+      provider_repo_id: repo.provider_repo_id,
+      provider_owner: repo.provider_owner,
+      provider_name: repo.provider_name,
+      default_branch: repo.default_branch,
+      setup_script: repo.setup_script,
+      cleanup_script: repo.cleanup_script,
+    });
+
+    const saved = savedRepositoriesById.get(repoId);
+    const savedScripts = saved ? saved.scripts : [];
+    const currentScriptIds = new Set(repo.scripts.map((script) => script.id));
+
+    await Promise.all(
+      savedScripts
+        .filter((script) => !currentScriptIds.has(script.id))
+        .map((script) => deleteRepositoryScriptAction(script.id))
+    );
+
+    const nextScripts = await Promise.all(
+      repo.scripts.map((script, index) => {
+        if (script.id.startsWith('temp-script-')) {
+          return createRepositoryScriptAction({
+            repository_id: repoId,
+            name: script.name.trim() || 'New Script',
+            command: script.command.trim() || 'echo ""',
+            position: script.position ?? index,
+          });
+        }
+        return updateRepositoryScriptAction(script.id, {
+          name: script.name,
+          command: script.command,
+          position: script.position ?? index,
+        });
+      })
+    );
+
+    const nextRepo: RepositoryWithScripts = { ...updated, scripts: nextScripts };
+    setRepositoryItems((prev) => prev.map((item) => (item.id === repoId ? nextRepo : item)));
+    setSavedRepositoryItems((prev) =>
+      prev.some((item) => item.id === repoId)
+        ? prev.map((item) => (item.id === repoId ? cloneRepository(nextRepo) : item))
+        : [...prev, cloneRepository(nextRepo)]
+    );
+  };
+
+  const handleDeleteRepository = async (repoId: string) => {
+    if (repoId.startsWith('temp-repo-')) {
+      setRepositoryItems((prev) => prev.filter((repo) => repo.id !== repoId));
+      return;
+    }
+    await deleteRepositoryAction(repoId);
+    setRepositoryItems((prev) => prev.filter((repo) => repo.id !== repoId));
+    setSavedRepositoryItems((prev) => prev.filter((repo) => repo.id !== repoId));
   };
 
   const handleAddBoard = () => {
@@ -336,6 +630,7 @@ export function WorkspaceEditClient({ workspace, boards }: WorkspaceEditClientPr
     if (deleteConfirmText !== 'delete') return;
     try {
       await deleteWorkspaceRequest.run(currentWorkspace.id);
+      setWorkspaces(workspaces.filter((workspace) => workspace.id !== currentWorkspace.id));
       router.push('/settings/workspace');
     } catch (error) {
       toast({
@@ -403,46 +698,147 @@ export function WorkspaceEditClient({ workspace, boards }: WorkspaceEditClientPr
         icon={<IconGitBranch className="h-5 w-5" />}
         title="Repositories"
         description="Repositories in this workspace"
+        action={
+          <div className="flex items-center gap-2">
+            <Button size="sm" onClick={openLocalRepositoryDialog}>
+              Local Repository
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setRemoteRepoDialogOpen(true)}>
+              Remote Repository
+            </Button>
+          </div>
+        }
       >
         <div className="grid gap-3">
-          <Card>
-            <CardContent className="pt-6">
-              <form onSubmit={handleAddRepository} className="space-y-4">
-                <div className="space-y-2">
-                  <Label>Repository Name</Label>
-                  <Input name="name" placeholder="my-project" required />
-                </div>
-                <div className="space-y-2">
-                  <Label>Directory Path</Label>
-                  <Input name="path" placeholder="/path/to/repository" required />
-                </div>
-                <div className="space-y-2">
-                  <Label>Setup Script</Label>
-                  <Input name="setupScript" placeholder="npm install" />
-                </div>
-                <div className="space-y-2">
-                  <Label>Cleanup Script</Label>
-                  <Input name="cleanupScript" placeholder="npm run cleanup" />
-                </div>
-                <div className="flex justify-end">
-                  <Button type="submit">Add Repository</Button>
-                </div>
-              </form>
-            </CardContent>
-          </Card>
-
-          {repositories.map((repo) => (
+          {repositoryItems.map((repo) => (
             <RepositoryCard
               key={repo.id}
               repository={repo}
+              isRepositoryDirty={isRepositoryDirty(repo)}
+              areScriptsDirty={areRepositoryScriptsDirty(repo)}
               onUpdate={handleUpdateRepository}
-              onDelete={() => handleDeleteRepository(repo.id)}
+              onAddScript={handleAddRepositoryScript}
+              onUpdateScript={handleUpdateRepositoryScript}
+              onDeleteScript={handleDeleteRepositoryScript}
+              onSave={handleSaveRepository}
+              onDelete={handleDeleteRepository}
             />
           ))}
         </div>
       </SettingsSection>
 
       <Separator />
+
+      <Dialog open={localRepoDialogOpen} onOpenChange={setLocalRepoDialogOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Add Local Repository</DialogTitle>
+            <DialogDescription>
+              Select a discovered repository or provide an absolute path to validate.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Discovered repositories</Label>
+              <Input
+                placeholder="Filter repositories..."
+                value={repoSearch}
+                onChange={(e) => setRepoSearch(e.target.value)}
+              />
+              <div className="max-h-56 overflow-auto rounded-md border border-border">
+                {discoverRepositoriesRequest.isLoading ? (
+                  <div className="flex items-center gap-2 p-3 text-sm text-muted-foreground">
+                    <IconLoader2 className="h-4 w-4 animate-spin" />
+                    Scanning repositories...
+                  </div>
+                ) : filteredRepositories.length === 0 ? (
+                  <div className="p-3 text-sm text-muted-foreground">No repositories found.</div>
+                ) : (
+                  filteredRepositories.map((repo) => (
+                    <button
+                      key={repo.path}
+                      type="button"
+                      className={`flex w-full flex-col px-3 py-2 text-left text-sm hover:bg-muted ${
+                        selectedRepoPath === repo.path ? 'bg-muted' : ''
+                      }`}
+                      onClick={() => {
+                        setSelectedRepoPath(repo.path);
+                        setManualRepoPath('');
+                        setManualValidation({ status: 'idle' });
+                      }}
+                    >
+                      <span className="font-medium">{repo.name}</span>
+                      <span className="text-xs text-muted-foreground">{repo.path}</span>
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Manual path</Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  placeholder="/absolute/path/to/repository"
+                  value={manualRepoPath}
+                  onChange={(e) => {
+                    setManualRepoPath(e.target.value);
+                    setSelectedRepoPath(null);
+                    setManualValidation({ status: 'idle' });
+                  }}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleValidateManualPath}
+                  disabled={!manualRepoPath.trim() || validateRepositoryPathRequest.isLoading}
+                >
+                  {validateRepositoryPathRequest.isLoading ? 'Checking...' : 'Validate'}
+                </Button>
+              </div>
+              {manualValidation.status === 'error' && (
+                <p className="text-xs text-destructive">{manualValidation.message}</p>
+              )}
+              {manualValidation.status === 'success' && (
+                <p className="text-xs text-emerald-500">{manualValidation.message}</p>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setLocalRepoDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={handleConfirmLocalRepository} disabled={!canSaveLocalRepo}>
+              Use Repository
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={remoteRepoDialogOpen} onOpenChange={setRemoteRepoDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add Remote Repository</DialogTitle>
+            <DialogDescription>Remote providers are coming soon.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Button type="button" variant="outline" className="w-full justify-start" disabled>
+              GitHub (coming soon)
+            </Button>
+            <Button type="button" variant="outline" className="w-full justify-start" disabled>
+              GitLab (coming soon)
+            </Button>
+            <Button type="button" variant="outline" className="w-full justify-start" disabled>
+              Bitbucket (coming soon)
+            </Button>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setRemoteRepoDialogOpen(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <SettingsSection
         icon={<IconGitBranch className="h-5 w-5" />}

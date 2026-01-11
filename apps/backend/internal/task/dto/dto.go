@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -34,6 +35,33 @@ type ColumnDTO struct {
 	Color     string       `json:"color"`
 	CreatedAt time.Time    `json:"created_at"`
 	UpdatedAt time.Time    `json:"updated_at"`
+}
+
+type RepositoryDTO struct {
+	ID             string    `json:"id"`
+	WorkspaceID    string    `json:"workspace_id"`
+	Name           string    `json:"name"`
+	SourceType     string    `json:"source_type"`
+	LocalPath      string    `json:"local_path,omitempty"`
+	Provider       string    `json:"provider,omitempty"`
+	ProviderRepoID string    `json:"provider_repo_id,omitempty"`
+	ProviderOwner  string    `json:"provider_owner,omitempty"`
+	ProviderName   string    `json:"provider_name,omitempty"`
+	DefaultBranch  string    `json:"default_branch,omitempty"`
+	SetupScript    string    `json:"setup_script,omitempty"`
+	CleanupScript  string    `json:"cleanup_script,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+type RepositoryScriptDTO struct {
+	ID           string    `json:"id"`
+	RepositoryID string    `json:"repository_id"`
+	Name         string    `json:"name"`
+	Command      string    `json:"command"`
+	Position     int       `json:"position"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 type TaskDTO struct {
@@ -74,6 +102,37 @@ type ListWorkspacesResponse struct {
 type ListColumnsResponse struct {
 	Columns []ColumnDTO `json:"columns"`
 	Total   int         `json:"total"`
+}
+
+type ListRepositoriesResponse struct {
+	Repositories []RepositoryDTO `json:"repositories"`
+	Total        int             `json:"total"`
+}
+
+type ListRepositoryScriptsResponse struct {
+	Scripts []RepositoryScriptDTO `json:"scripts"`
+	Total   int                   `json:"total"`
+}
+
+type LocalRepositoryDTO struct {
+	Path          string `json:"path"`
+	Name          string `json:"name"`
+	DefaultBranch string `json:"default_branch,omitempty"`
+}
+
+type RepositoryDiscoveryResponse struct {
+	Roots        []string             `json:"roots"`
+	Repositories []LocalRepositoryDTO `json:"repositories"`
+	Total        int                  `json:"total"`
+}
+
+type RepositoryPathValidationResponse struct {
+	Path          string `json:"path"`
+	Exists        bool   `json:"exists"`
+	IsGitRepo     bool   `json:"is_git"`
+	Allowed       bool   `json:"allowed"`
+	DefaultBranch string `json:"default_branch,omitempty"`
+	Message       string `json:"message,omitempty"`
 }
 
 type ListTasksResponse struct {
@@ -127,6 +186,45 @@ func FromColumn(column *models.Column) ColumnDTO {
 		Color:     column.Color,
 		CreatedAt: column.CreatedAt,
 		UpdatedAt: column.UpdatedAt,
+	}
+}
+
+func FromRepository(repository *models.Repository) RepositoryDTO {
+	return RepositoryDTO{
+		ID:             repository.ID,
+		WorkspaceID:    repository.WorkspaceID,
+		Name:           repository.Name,
+		SourceType:     repository.SourceType,
+		LocalPath:      repository.LocalPath,
+		Provider:       repository.Provider,
+		ProviderRepoID: repository.ProviderRepoID,
+		ProviderOwner:  repository.ProviderOwner,
+		ProviderName:   repository.ProviderName,
+		DefaultBranch:  repository.DefaultBranch,
+		SetupScript:    repository.SetupScript,
+		CleanupScript:  repository.CleanupScript,
+		CreatedAt:      repository.CreatedAt,
+		UpdatedAt:      repository.UpdatedAt,
+	}
+}
+
+func FromRepositoryScript(script *models.RepositoryScript) RepositoryScriptDTO {
+	return RepositoryScriptDTO{
+		ID:           script.ID,
+		RepositoryID: script.RepositoryID,
+		Name:         script.Name,
+		Command:      script.Command,
+		Position:     script.Position,
+		CreatedAt:    script.CreatedAt,
+		UpdatedAt:    script.UpdatedAt,
+	}
+}
+
+func FromLocalRepository(repo service.LocalRepository) LocalRepositoryDTO {
+	return LocalRepositoryDTO{
+		Path:          repo.Path,
+		Name:          repo.Name,
+		DefaultBranch: repo.DefaultBranch,
 	}
 }
 

@@ -128,7 +128,15 @@ func main() {
 	defer taskRepo.Close()
 	log.Info("SQLite database initialized", zap.String("db_path", dbPath))
 
-	taskSvc := taskservice.NewService(taskRepo, eventBus, log)
+	taskSvc := taskservice.NewService(
+		taskRepo,
+		eventBus,
+		log,
+		taskservice.RepositoryDiscoveryConfig{
+			Roots:    cfg.RepositoryDiscovery.Roots,
+			MaxDepth: cfg.RepositoryDiscovery.MaxDepth,
+		},
+	)
 	log.Info("Task Service initialized")
 
 	// Create SQLite message store for ACP log persistence
@@ -209,6 +217,7 @@ func main() {
 	workspaceController := taskcontroller.NewWorkspaceController(taskSvc)
 	boardController := taskcontroller.NewBoardController(taskSvc)
 	taskController := taskcontroller.NewTaskController(taskSvc)
+	repositoryController := taskcontroller.NewRepositoryController(taskSvc)
 
 	orchestratorWSHandlers := orchestratorwshandlers.NewHandlers(orchestratorSvc, log)
 	orchestratorWSHandlers.SetACPHandler(acpHandler)
@@ -389,6 +398,7 @@ func main() {
 	taskhandlers.RegisterWorkspaceRoutes(router, gateway.Dispatcher, workspaceController, log)
 	taskhandlers.RegisterBoardRoutes(router, gateway.Dispatcher, boardController, log)
 	taskhandlers.RegisterTaskRoutes(router, gateway.Dispatcher, taskController, log)
+	taskhandlers.RegisterRepositoryRoutes(router, gateway.Dispatcher, repositoryController, log)
 	taskhandlers.RegisterCommentRoutes(router, gateway.Dispatcher, taskSvc, &orchestratorAdapter{svc: orchestratorSvc}, log)
 	log.Info("Registered Task Service handlers (HTTP + WebSocket)")
 
