@@ -52,6 +52,7 @@ help:
 	@echo "  clean            Remove all build artifacts"
 	@echo "  clean-backend    Remove backend build artifacts"
 	@echo "  clean-web        Remove web build artifacts"
+	@echo "  clean-db         Remove local SQLite database"
 
 #
 # Development
@@ -193,3 +194,8 @@ clean-backend:
 clean-web:
 	@echo "Cleaning web artifacts..."
 	@rm -rf $(WEB_DIR)/.next $(WEB_DIR)/node_modules
+
+.PHONY: clean-db
+clean-db:
+	@echo "Removing local SQLite database..."
+	@rm -f kandev.db $(BACKEND_DIR)/kandev.db
