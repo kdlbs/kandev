@@ -1,4 +1,4 @@
-import { KanbanBoard } from '@/components/kanban-board';
+import { PageClient } from '@/app/page-client';
 import { StateHydrator } from '@/components/state-hydrator';
 import { fetchBoardSnapshot, fetchBoards } from '@/lib/ssr/http';
 import { snapshotToState } from '@/lib/ssr/mapper';
@@ -8,17 +8,17 @@ export default async function Page() {
     const boards = await fetchBoards();
     const boardId = boards[0]?.id;
     if (!boardId) {
-      return <KanbanBoard />;
+      return <PageClient />;
     }
     const snapshot = await fetchBoardSnapshot(boardId);
     const initialState = snapshotToState(snapshot);
     return (
       <>
         <StateHydrator initialState={initialState} />
-        <KanbanBoard />
+        <PageClient />
       </>
     );
   } catch {
-    return <KanbanBoard />;
+    return <PageClient />;
   }
 }

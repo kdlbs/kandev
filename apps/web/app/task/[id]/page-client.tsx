@@ -12,8 +12,6 @@ import { TaskTopBar } from '@/components/task/task-top-bar';
 import { TaskFilesPanel } from '@/components/task/task-files-panel';
 import { TaskChangesPanel } from '@/components/task/task-changes-panel';
 import { TaskRightPanel } from '@/components/task/task-right-panel';
-import { useAppStoreApi } from '@/components/state-provider';
-import { useWebSocket } from '@/lib/ws/use-websocket';
 
 type ChatMessage = {
   id: string;
@@ -53,8 +51,6 @@ const INITIAL_CHATS: ChatSession[] = [
 
 
 export default function TaskPage() {
-  const store = useAppStoreApi();
-  useWebSocket(store, 'ws://localhost:8080/ws');
   const defaultHorizontalLayout: [number, number] = [75, 25];
   const [horizontalLayout, setHorizontalLayout] = useState(defaultHorizontalLayout);
   const [horizontalSeed, setHorizontalSeed] = useState(0);

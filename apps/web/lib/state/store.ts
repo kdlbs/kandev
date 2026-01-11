@@ -24,14 +24,21 @@ export type DiffState = {
   files: Array<{ path: string; status: 'A' | 'M' | 'D'; plus: number; minus: number }>;
 };
 
+export type ConnectionState = {
+  status: 'disconnected' | 'connecting' | 'connected' | 'error';
+  error: string | null;
+};
+
 export type AppState = {
   kanban: KanbanState;
   tasks: TaskState;
   agents: AgentState;
   terminal: TerminalState;
   diffs: DiffState;
+  connection: ConnectionState;
   hydrate: (state: Partial<AppState>) => void;
   setTerminalOutput: (terminalId: string, data: string) => void;
+  setConnectionStatus: (status: ConnectionState['status'], error?: string | null) => void;
 };
 
 export type AppStore = ReturnType<typeof createAppStore>;
@@ -42,8 +49,10 @@ const defaultState: AppState = {
   agents: { agents: [] },
   terminal: { terminals: [] },
   diffs: { files: [] },
+  connection: { status: 'disconnected', error: null },
   hydrate: () => undefined,
   setTerminalOutput: () => undefined,
+  setConnectionStatus: () => undefined,
 };
 
 export function createAppStore(initialState?: Partial<AppState>) {
@@ -63,6 +72,11 @@ export function createAppStore(initialState?: Partial<AppState>) {
           } else {
             draft.terminal.terminals.push({ id: terminalId, output: [data] });
           }
+        }),
+      setConnectionStatus: (status, error = null) =>
+        set((draft) => {
+          draft.connection.status = status;
+          draft.connection.error = error;
         }),
     }))
   );

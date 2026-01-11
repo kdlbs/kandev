@@ -10,7 +10,10 @@ export class WebSocketClient {
   private handlers = new Map<BackendMessageType, Set<MessageHandler<BackendMessageType>>>();
   private pendingQueue: string[] = [];
 
-  constructor(private url: string) {}
+  constructor(
+    private url: string,
+    private onStatusChange?: (status: WebSocketStatus) => void
+  ) {}
 
   getStatus() {
     return this.status;
@@ -18,11 +21,11 @@ export class WebSocketClient {
 
   connect() {
     if (this.socket) return;
-    this.status = 'connecting';
+    this.setStatus('connecting');
     this.socket = new WebSocket(this.url);
 
     this.socket.onopen = () => {
-      this.status = 'open';
+      this.setStatus('open');
       this.flushQueue();
     };
 
@@ -38,11 +41,11 @@ export class WebSocketClient {
     };
 
     this.socket.onerror = () => {
-      this.status = 'error';
+      this.setStatus('error');
     };
 
     this.socket.onclose = () => {
-      this.status = 'closed';
+      this.setStatus('closed');
       this.socket = null;
     };
   }
@@ -51,7 +54,7 @@ export class WebSocketClient {
     if (!this.socket) return;
     this.socket.close();
     this.socket = null;
-    this.status = 'closed';
+    this.setStatus('closed');
   }
 
   send(payload: unknown) {
@@ -83,5 +86,10 @@ export class WebSocketClient {
     if (!this.socket || this.status !== 'open') return;
     this.pendingQueue.forEach((data) => this.socket?.send(data));
     this.pendingQueue = [];
+  }
+
+  private setStatus(status: WebSocketStatus) {
+    this.status = status;
+    this.onStatusChange?.(status);
   }
 }

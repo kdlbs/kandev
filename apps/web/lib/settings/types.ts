@@ -12,6 +12,7 @@ export type GeneralSettings = {
   editor: Editor;
   customEditorCommand?: string;
   notifications: Notifications;
+  backendUrl?: string;
 };
 
 export type CustomScript = {
