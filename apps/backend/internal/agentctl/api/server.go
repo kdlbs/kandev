@@ -69,6 +69,11 @@ func (s *Server) setupRoutes() {
 		api.POST("/acp/prompt", s.handleACPPrompt)
 		api.GET("/acp/stream", s.handleACPStreamWS)
 
+		// Permission request handling
+		api.GET("/acp/permissions", s.handleGetPendingPermissions)
+		api.GET("/acp/permissions/stream", s.handlePermissionStreamWS)
+		api.POST("/acp/permissions/respond", s.handlePermissionRespond)
+
 		// Output streaming
 		api.GET("/output", s.handleGetOutput)
 		api.GET("/output/stream", s.handleOutputStreamWS)

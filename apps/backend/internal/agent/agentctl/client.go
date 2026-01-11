@@ -21,9 +21,10 @@ type Client struct {
 	logger     *logger.Logger
 
 	// WebSocket connections for streaming
-	outputConn *websocket.Conn
-	acpConn    *websocket.Conn
-	mu         sync.RWMutex
+	outputConn     *websocket.Conn
+	acpConn        *websocket.Conn
+	permissionConn *websocket.Conn
+	mu             sync.RWMutex
 }
 
 // StatusResponse from agentctl

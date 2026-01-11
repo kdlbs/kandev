@@ -33,6 +33,13 @@ type AgentEventData struct {
 	ErrorMessage    string `json:"error_message,omitempty"`
 }
 
+// PromptCompleteData contains data from prompt_complete events
+type PromptCompleteData struct {
+	TaskID       string `json:"task_id"`
+	AgentID      string `json:"agent_id"`
+	AgentMessage string `json:"agent_message"`
+}
+
 // EventHandlers contains callbacks for different event types
 type EventHandlers struct {
 	// Task events
@@ -50,6 +57,9 @@ type EventHandlers struct {
 
 	// ACP messages
 	OnACPMessage func(ctx context.Context, taskID string, msg *protocol.Message)
+
+	// Prompt events
+	OnPromptComplete func(ctx context.Context, data PromptCompleteData)
 }
 
 // Watcher subscribes to events and dispatches to handlers
@@ -100,6 +110,12 @@ func (w *Watcher) Start(ctx context.Context) error {
 
 	// Subscribe to ACP messages
 	if err := w.subscribeToACPMessages(); err != nil {
+		w.unsubscribeAll()
+		return err
+	}
+
+	// Subscribe to prompt complete events
+	if err := w.subscribeToPromptCompleteEvents(); err != nil {
 		w.unsubscribeAll()
 		return err
 	}
@@ -298,6 +314,48 @@ func (w *Watcher) createACPMessageHandler() bus.EventHandler {
 			zap.String("message_type", string(msg.Type)))
 
 		w.handlers.OnACPMessage(ctx, taskID, &msg)
+		return nil
+	}
+}
+
+// subscribeToPromptCompleteEvents subscribes to prompt complete events
+func (w *Watcher) subscribeToPromptCompleteEvents() error {
+	if w.handlers.OnPromptComplete == nil {
+		return nil
+	}
+
+	// Use wildcard to subscribe to all prompt complete events (prompt.complete.*)
+	subject := events.PromptComplete + ".*"
+
+	// Use regular subscription (each instance needs all messages for comment creation)
+	sub, err := w.eventBus.Subscribe(subject, w.createPromptCompleteHandler())
+	if err != nil {
+		w.logger.Error("Failed to subscribe to prompt complete events",
+			zap.String("subject", subject),
+			zap.Error(err))
+		return err
+	}
+	w.subscriptions = append(w.subscriptions, sub)
+	return nil
+}
+
+// createPromptCompleteHandler creates a bus.EventHandler for prompt complete events
+func (w *Watcher) createPromptCompleteHandler() bus.EventHandler {
+	return func(ctx context.Context, event *bus.Event) error {
+		var data PromptCompleteData
+		if err := w.parseEventData(event.Data, &data); err != nil {
+			w.logger.Error("Failed to parse prompt complete event data",
+				zap.String("event_type", event.Type),
+				zap.String("event_id", event.ID),
+				zap.Error(err))
+			return nil // Don't return error to continue processing other events
+		}
+
+		w.logger.Debug("Handling prompt complete event",
+			zap.String("task_id", data.TaskID),
+			zap.Int("message_length", len(data.AgentMessage)))
+
+		w.handlers.OnPromptComplete(ctx, data)
 		return nil
 	}
 }

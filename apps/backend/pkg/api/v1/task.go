@@ -94,3 +94,30 @@ type CreateCommentRequest struct {
 	AuthorType    string `json:"author_type,omitempty"` // Defaults to "user" if not specified
 	RequestsInput bool   `json:"requests_input,omitempty"`
 }
+
+// PermissionOption represents a permission choice presented to the user
+type PermissionOption struct {
+	OptionID string `json:"option_id"`
+	Name     string `json:"name"`
+	Kind     string `json:"kind"` // allow_once, allow_always, reject_once, reject_always
+}
+
+// PermissionRequest represents an agent's request for user permission
+type PermissionRequest struct {
+	RequestID   string             `json:"request_id"`   // Unique ID for this request (JSON-RPC ID)
+	TaskID      string             `json:"task_id"`      // Task the agent is working on
+	InstanceID  string             `json:"instance_id"`  // Agent instance ID
+	SessionID   string             `json:"session_id"`   // ACP session ID
+	ToolCallID  string             `json:"tool_call_id"` // Tool call requesting permission
+	Title       string             `json:"title"`        // Human-readable title
+	Description string             `json:"description,omitempty"` // Additional context
+	Options     []PermissionOption `json:"options"`      // Available choices
+	CreatedAt   time.Time          `json:"created_at"`
+}
+
+// PermissionResponse represents the user's response to a permission request
+type PermissionResponse struct {
+	RequestID  string `json:"request_id" binding:"required"` // The request being responded to
+	OptionID   string `json:"option_id,omitempty"`           // Selected option (if not cancelled)
+	Cancelled  bool   `json:"cancelled,omitempty"`           // True if user cancelled
+}

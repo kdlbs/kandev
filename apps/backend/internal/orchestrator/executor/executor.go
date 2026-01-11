@@ -22,8 +22,8 @@ var (
 
 // PromptResult contains the result of a prompt operation
 type PromptResult struct {
-	StopReason string // The reason the agent stopped (e.g., "end_turn", "needs_input")
-	NeedsInput bool   // True if the agent is requesting user input
+	StopReason   string // The reason the agent stopped (e.g., "end_turn")
+	AgentMessage string // The agent's accumulated response message
 }
 
 // AgentManagerClient is an interface for the Agent Manager service
@@ -44,6 +44,9 @@ type AgentManagerClient interface {
 	// PromptAgent sends a prompt to a running agent
 	// Returns PromptResult indicating if the agent needs input
 	PromptAgent(ctx context.Context, agentInstanceID string, prompt string) (*PromptResult, error)
+
+	// RespondToPermission sends a response to a permission request
+	RespondToPermissionByTaskID(ctx context.Context, taskID, pendingID, optionID string, cancelled bool) error
 }
 
 // LaunchAgentRequest contains parameters for launching an agent
@@ -228,6 +231,17 @@ func (e *Executor) Prompt(ctx context.Context, taskID string, prompt string) (*P
 	return e.agentManager.PromptAgent(ctx, agentInstanceID, prompt)
 }
 
+// RespondToPermission sends a response to a permission request for a task
+func (e *Executor) RespondToPermission(ctx context.Context, taskID, pendingID, optionID string, cancelled bool) error {
+	e.logger.Info("responding to permission request",
+		zap.String("task_id", taskID),
+		zap.String("pending_id", pendingID),
+		zap.String("option_id", optionID),
+		zap.Bool("cancelled", cancelled))
+
+	return e.agentManager.RespondToPermissionByTaskID(ctx, taskID, pendingID, optionID, cancelled)
+}
+
 // GetExecution returns the current execution state for a task
 func (e *Executor) GetExecution(taskID string) (*TaskExecution, bool) {
 	e.mu.RLock()
@@ -380,5 +394,15 @@ func (m *MockAgentManagerClient) PromptAgent(ctx context.Context, agentInstanceI
 	m.logger.Info("mock: prompting agent",
 		zap.String("agent_instance_id", agentInstanceID),
 		zap.Int("prompt_length", len(prompt)))
-	return &PromptResult{StopReason: "end_turn", NeedsInput: false}, nil
+	return &PromptResult{StopReason: "end_turn"}, nil
+}
+
+// RespondToPermissionByTaskID mocks responding to a permission request
+func (m *MockAgentManagerClient) RespondToPermissionByTaskID(ctx context.Context, taskID, pendingID, optionID string, cancelled bool) error {
+	m.logger.Info("mock: responding to permission",
+		zap.String("task_id", taskID),
+		zap.String("pending_id", pendingID),
+		zap.String("option_id", optionID),
+		zap.Bool("cancelled", cancelled))
+	return nil
 }

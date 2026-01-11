@@ -68,3 +68,6 @@ tmp/
 
 apps/backend/bin/
 
+# Go binaries (built locally)
+apps/backend/kandev
+apps/backend/agentctl

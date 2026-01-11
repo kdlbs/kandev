@@ -56,7 +56,11 @@ func (m *mockAgentManager) ListAgentTypes(ctx context.Context) ([]*v1.AgentType,
 }
 
 func (m *mockAgentManager) PromptAgent(ctx context.Context, agentInstanceID string, prompt string) (*executor.PromptResult, error) {
-	return &executor.PromptResult{StopReason: "end_turn", NeedsInput: false}, nil
+	return &executor.PromptResult{StopReason: "end_turn"}, nil
+}
+
+func (m *mockAgentManager) RespondToPermissionByTaskID(ctx context.Context, taskID, pendingID, optionID string, cancelled bool) error {
+	return nil
 }
 
 // testTaskRepository is an in-memory task repository for testing

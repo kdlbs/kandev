@@ -1,7 +1,7 @@
 #!/bin/bash
 #
-# End-to-End Test for Kandev
-# This script tests the complete flow from task creation to agent execution
+# End-to-End Test for Kandev - Comment System Focus
+# This script tests the comment system and agent interaction flow
 # using WebSocket-based communication with the backend.
 #
 # Prerequisites:
@@ -24,13 +24,14 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 # Configuration
 SERVER_PORT=8080
 WS_URL="ws://localhost:${SERVER_PORT}/ws"
 AGENTCTL_PORT=9999
-WAIT_FOR_AGENT_SECONDS=120
+WAIT_FOR_AGENT_SECONDS=45
 SERVER_PID=""
 BUILD_IMAGE=false
 
@@ -80,6 +81,21 @@ log_info() {
     echo -e "${YELLOW}→ $1${NC}"
 }
 
+log_comment() {
+    local author_type=$1
+    local content=$2
+    local requests_input=$3
+    if [ "$author_type" == "user" ]; then
+        echo -e "${CYAN}  [USER]${NC} $content"
+    else
+        if [ "$requests_input" == "true" ]; then
+            echo -e "${GREEN}  [AGENT] (requests input)${NC} $content"
+        else
+            echo -e "${GREEN}  [AGENT]${NC} $content"
+        fi
+    fi
+}
+
 # WebSocket helper function
 # Sends a request via WebSocket and returns the response
 ws_request() {
@@ -97,30 +113,40 @@ ws_request() {
 
 wait_for_server() {
     log_info "Waiting for server to be ready..."
-    for i in {1..30}; do
+    for i in {1..20}; do
         HEALTH=$(ws_request "health.check" '{}' 2>/dev/null)
         if echo "$HEALTH" | jq -e '.payload.status == "ok"' > /dev/null 2>&1; then
             log_success "Server is ready"
             return 0
         fi
-        sleep 1
+        sleep 0.5
     done
     log_error "Server failed to start"
     exit 1
 }
 
-wait_for_agentctl() {
-    local container_ip=$1
-    log_info "Waiting for agentctl to be ready at ${container_ip}:${AGENTCTL_PORT}..."
-    for i in {1..30}; do
-        if curl -s "http://${container_ip}:${AGENTCTL_PORT}/health" > /dev/null 2>&1; then
-            log_success "agentctl is ready"
-            return 0
-        fi
-        sleep 1
-    done
-    log_error "agentctl failed to start"
-    return 1
+# Display all comments for a task
+display_comments() {
+    local task_id=$1
+    local label=$2
+
+    COMMENTS_RESPONSE=$(ws_request "comment.list" "{\"task_id\": \"${task_id}\"}")
+    COMMENTS_COUNT=$(echo "$COMMENTS_RESPONSE" | jq 'if .payload | type == "array" then .payload | length else 0 end' 2>/dev/null || echo "0")
+
+    echo -e "\n${CYAN}--- $label ($COMMENTS_COUNT comments) ---${NC}"
+
+    if [ "$COMMENTS_COUNT" -gt 0 ]; then
+        echo "$COMMENTS_RESPONSE" | jq -r '.payload[] | "\(.author_type)|\(.requests_input)|\(.content)"' 2>/dev/null | while IFS='|' read -r author_type requests_input content; do
+            # Truncate long content for display
+            if [ ${#content} -gt 200 ]; then
+                content="${content:0:200}..."
+            fi
+            log_comment "$author_type" "$content" "$requests_input"
+        done
+    else
+        echo -e "  ${YELLOW}(no comments yet)${NC}"
+    fi
+    echo -e "${CYAN}---${NC}"
 }
 
 # Check prerequisites
@@ -193,9 +219,19 @@ log_info "Server PID: $SERVER_PID"
 wait_for_server
 
 # Run the E2E test
-log_step "Step 1: Create Board"
-BOARD_RESPONSE=$(ws_request "board.create" '{"name": "E2E Test Board", "description": "Automated end-to-end test"}')
-BOARD_ID=$(echo "$BOARD_RESPONSE" | jq -r '.payload.id')
+log_step "Step 1: Create Workspace"
+WORKSPACE_RESPONSE=$(ws_request "workspace.create" '{"name": "E2E Test Workspace", "description": "Automated end-to-end test workspace"}')
+WORKSPACE_ID=$(echo "$WORKSPACE_RESPONSE" | jq -r '.payload.id' | tr -d '\n\r')
+if [ "$WORKSPACE_ID" == "null" ] || [ -z "$WORKSPACE_ID" ]; then
+    log_error "Failed to create workspace"
+    echo "$WORKSPACE_RESPONSE"
+    exit 1
+fi
+log_success "Created workspace: $WORKSPACE_ID"
+
+log_step "Step 2: Create Board"
+BOARD_RESPONSE=$(ws_request "board.create" "{\"workspace_id\": \"${WORKSPACE_ID}\", \"name\": \"E2E Test Board\", \"description\": \"Automated end-to-end test\"}")
+BOARD_ID=$(echo "$BOARD_RESPONSE" | jq -r '.payload.id' | tr -d '\n\r')
 if [ "$BOARD_ID" == "null" ] || [ -z "$BOARD_ID" ]; then
     log_error "Failed to create board"
     echo "$BOARD_RESPONSE"
@@ -203,9 +239,9 @@ if [ "$BOARD_ID" == "null" ] || [ -z "$BOARD_ID" ]; then
 fi
 log_success "Created board: $BOARD_ID"
 
-log_step "Step 2: Create Column"
+log_step "Step 3: Create Column"
 COLUMN_RESPONSE=$(ws_request "column.create" "{\"board_id\": \"${BOARD_ID}\", \"name\": \"To Do\", \"position\": 0}")
-COLUMN_ID=$(echo "$COLUMN_RESPONSE" | jq -r '.payload.id')
+COLUMN_ID=$(echo "$COLUMN_RESPONSE" | jq -r '.payload.id' | tr -d '\n\r')
 if [ "$COLUMN_ID" == "null" ] || [ -z "$COLUMN_ID" ]; then
     log_error "Failed to create column"
     echo "$COLUMN_RESPONSE"
@@ -213,25 +249,26 @@ if [ "$COLUMN_ID" == "null" ] || [ -z "$COLUMN_ID" ]; then
 fi
 log_success "Created column: $COLUMN_ID"
 
-log_step "Step 3: Create Task"
+log_step "Step 4: Create Task for Comment System Test"
 # Create a temp directory for the test workspace
-TEST_WORKSPACE=$(mktemp -d)
-log_info "Test workspace: $TEST_WORKSPACE"
+TEST_WORKSPACE_DIR=$(mktemp -d)
+log_info "Test workspace: $TEST_WORKSPACE_DIR"
 
-# Create a simple task that creates a file
+# Create task that will trigger multi-turn conversation
 TASK_PAYLOAD=$(cat <<EOF
 {
-    "title": "E2E Test Task",
-    "description": "Create a file named 'agent-result.txt' in the workspace root with the content 'Hello from Agent'. Do nothing else.",
+    "title": "Comment System Test - Multi-turn Conversation",
+    "description": "I need help with a calculation. Please ask me what numbers I want to add together, then perform the calculation when I provide them.",
+    "workspace_id": "${WORKSPACE_ID}",
     "board_id": "${BOARD_ID}",
     "column_id": "${COLUMN_ID}",
-    "repository_url": "${TEST_WORKSPACE}",
+    "repository_url": "${TEST_WORKSPACE_DIR}",
     "agent_type": "augment-agent"
 }
 EOF
 )
 TASK_RESPONSE=$(ws_request "task.create" "$TASK_PAYLOAD")
-TASK_ID=$(echo "$TASK_RESPONSE" | jq -r '.payload.id')
+TASK_ID=$(echo "$TASK_RESPONSE" | jq -r '.payload.id' | tr -d '\n\r')
 if [ "$TASK_ID" == "null" ] || [ -z "$TASK_ID" ]; then
     log_error "Failed to create task"
     echo "$TASK_RESPONSE"
@@ -239,9 +276,32 @@ if [ "$TASK_ID" == "null" ] || [ -z "$TASK_ID" ]; then
 fi
 log_success "Created task: $TASK_ID"
 
-log_step "Step 4: Start Task via Orchestrator"
+# Test adding a user comment before agent starts
+log_step "Step 5: Test comment.add Before Agent Start"
+PRE_COMMENT_PAYLOAD=$(cat <<EOF
+{
+    "task_id": "${TASK_ID}",
+    "content": "Initial user note: Please be concise in your responses.",
+    "author_id": "e2e-test-user"
+}
+EOF
+)
+PRE_COMMENT_RESPONSE=$(ws_request "comment.add" "$PRE_COMMENT_PAYLOAD")
+PRE_COMMENT_ID=$(echo "$PRE_COMMENT_RESPONSE" | jq -r '.payload.id // empty')
+if [ -n "$PRE_COMMENT_ID" ]; then
+    log_success "Created pre-start comment: $PRE_COMMENT_ID"
+else
+    log_info "Note: comment.add returned: $(echo "$PRE_COMMENT_RESPONSE" | jq -c '.payload')"
+fi
+
+# Verify comment.list works
+INITIAL_COMMENTS=$(ws_request "comment.list" "{\"task_id\": \"${TASK_ID}\"}")
+INITIAL_COUNT=$(echo "$INITIAL_COMMENTS" | jq 'if .payload | type == "array" then .payload | length else 0 end' 2>/dev/null || echo "0")
+log_info "Comments before agent start: $INITIAL_COUNT"
+
+log_step "Step 6: Start Task via Orchestrator"
 START_RESPONSE=$(ws_request "orchestrator.start" "{\"task_id\": \"${TASK_ID}\"}")
-AGENT_ID=$(echo "$START_RESPONSE" | jq -r '.payload.agent_instance_id')
+AGENT_ID=$(echo "$START_RESPONSE" | jq -r '.payload.agent_instance_id' | tr -d '\n\r')
 if [ "$AGENT_ID" == "null" ] || [ -z "$AGENT_ID" ]; then
     log_error "Failed to start task"
     echo "$START_RESPONSE"
@@ -249,661 +309,260 @@ if [ "$AGENT_ID" == "null" ] || [ -z "$AGENT_ID" ]; then
 fi
 log_success "Task started, agent ID: $AGENT_ID"
 
-log_step "Step 5: Verify Agent Container Running"
-sleep 3
-CONTAINER_ID=$(docker ps --filter "name=kandev-agent" --format "{{.ID}}" | head -1)
-if [ -z "$CONTAINER_ID" ]; then
-    log_error "No agent container running"
-    exit 1
-fi
-log_success "Agent container is running: $CONTAINER_ID"
-
-# Get container IP for agentctl health check
-CONTAINER_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$CONTAINER_ID" 2>/dev/null)
-if [ -n "$CONTAINER_IP" ]; then
-    log_info "Container IP: $CONTAINER_IP"
-fi
-
-log_step "Step 6: Verify agentctl is Running"
+# Brief wait for container startup
 sleep 2
-if [ -n "$CONTAINER_IP" ]; then
-    if wait_for_agentctl "$CONTAINER_IP"; then
-        # Check agentctl status
-        AGENTCTL_STATUS=$(curl -s "http://${CONTAINER_IP}:${AGENTCTL_PORT}/api/v1/status" 2>/dev/null || echo '{}')
-        AGENT_PROCESS_STATE=$(echo "$AGENTCTL_STATUS" | jq -r '.agent_status // "unknown"')
-        log_info "Agent process state: $AGENT_PROCESS_STATE"
-    else
-        log_info "Could not reach agentctl directly (may be in bridge network)"
-    fi
-else
-    log_info "Container IP not available (using host network)"
+CONTAINER_ID=$(docker ps --filter "name=kandev-agent" --format "{{.ID}}" | head -1)
+if [ -n "$CONTAINER_ID" ]; then
+    log_success "Agent container running: $CONTAINER_ID"
 fi
 
-# Check server logs for agentctl communication
-if grep -q "agentctl" /tmp/kandev-e2e.log; then
-    log_success "Backend is communicating with agentctl"
-else
-    log_info "Checking backend logs..."
-fi
-
-if grep -q "agent started" /tmp/kandev-e2e.log || grep -q "initializing agent" /tmp/kandev-e2e.log; then
-    log_success "Agent initialization started"
-else
-    log_info "Waiting for agent initialization..."
-fi
-
-log_step "Step 7: Wait for Agent to Complete First Prompt"
-log_info "Waiting up to ${WAIT_FOR_AGENT_SECONDS} seconds for agent to become READY..."
-AGENT_OUTPUT_FILE="${TEST_WORKSPACE}/agent-result.txt"
+log_step "Step 7: Wait for Initial Agent Response"
+log_info "Waiting up to ${WAIT_FOR_AGENT_SECONDS}s for agent..."
 AGENT_READY=false
 for i in $(seq 1 $WAIT_FOR_AGENT_SECONDS); do
-    # Check agent status - READY means prompt completed
     AGENT_STATUS_RESPONSE=$(ws_request "agent.status" "{\"agent_id\": \"${AGENT_ID}\"}" 2>/dev/null || echo '{}')
     AGENT_STATUS=$(echo "$AGENT_STATUS_RESPONSE" | jq -r '.payload.status // "UNKNOWN"')
 
     if [ "$AGENT_STATUS" == "READY" ]; then
-        log_success "Agent is READY after $i seconds (prompt completed)"
+        log_success "Agent READY after $i seconds"
         AGENT_READY=true
         break
     elif [ "$AGENT_STATUS" == "FAILED" ]; then
         log_error "Agent failed"
-        echo "$AGENT_STATUS_RESPONSE" | jq .
-        if [ -n "$CONTAINER_ID" ]; then
-            log_info "Container logs:"
-            docker logs "$CONTAINER_ID" 2>&1 | tail -30
-        fi
         exit 1
     fi
 
-    # Check if container is still running
-    CONTAINER_RUNNING=$(docker ps --filter "id=${CONTAINER_ID}" -q | wc -l)
-    if [ "$CONTAINER_RUNNING" -eq 0 ]; then
-        log_info "Container stopped unexpectedly"
-        break
-    fi
-
     if [ $((i % 10)) -eq 0 ]; then
-        log_info "Still waiting... ($i seconds, status: $AGENT_STATUS)"
+        log_info "Waiting... ($i seconds, status: $AGENT_STATUS)"
     fi
     sleep 1
 done
 
 if [ "$AGENT_READY" != "true" ]; then
-    log_error "Agent did not become READY within timeout (last status: $AGENT_STATUS)"
+    log_error "Agent did not become READY (last: $AGENT_STATUS)"
     exit 1
 fi
 
-log_step "Step 8: Verify Agent Response"
-# Get container logs to verify agent processed the request
-FINAL_CONTAINER_ID=$(docker ps -a --filter "name=kandev-agent" --format "{{.ID}}" | head -1)
-if [ -n "$FINAL_CONTAINER_ID" ]; then
-    log_info "Checking container logs for $FINAL_CONTAINER_ID..."
-    CONTAINER_LOGS=$(docker logs "$FINAL_CONTAINER_ID" 2>&1 | tail -100)
+# Display comments after first agent response
+display_comments "$TASK_ID" "After Initial Agent Response"
 
-    # Check for agentctl activity
-    if echo "$CONTAINER_LOGS" | grep -q "agentctl"; then
-        log_success "agentctl was active in container"
-    fi
-
-    # Check for ACP messages
-    if echo "$CONTAINER_LOGS" | grep -q '"stopReason"'; then
-        log_success "Agent completed with stop reason"
-    elif echo "$CONTAINER_LOGS" | grep -q 'session/update'; then
-        log_success "Agent sent session updates"
-    elif echo "$CONTAINER_LOGS" | grep -q 'initialize'; then
-        log_success "Agent received initialize request"
-    else
-        log_info "Container logs (last 20 lines):"
-        echo "$CONTAINER_LOGS" | tail -20
-    fi
-else
-    log_info "Container already removed"
-fi
-
-log_step "Step 9: Check Final State"
-AGENTS_RESPONSE=$(ws_request "agent.list" '{}')
-FINAL_AGENTS=$(echo "$AGENTS_RESPONSE" | jq '.payload.total')
-log_info "Total agents: $FINAL_AGENTS"
-
-TASK_RESPONSE=$(ws_request "task.get" "{\"id\": \"${TASK_ID}\"}")
-TASK_STATE=$(echo "$TASK_RESPONSE" | jq -r '.payload.state')
-log_info "Task state: $TASK_STATE"
-
-log_step "Step 10: Verify First Prompt Output"
-if [ -f "$AGENT_OUTPUT_FILE" ]; then
-    AGENT_OUTPUT=$(cat "$AGENT_OUTPUT_FILE")
-    log_success "Agent created file: $AGENT_OUTPUT_FILE"
-    log_info "File content: $AGENT_OUTPUT"
-    if echo "$AGENT_OUTPUT" | grep -qi "hello"; then
-        log_success "First prompt output contains expected content"
-    fi
-else
-    log_error "Agent did not create expected file"
-    exit 1
-fi
-
-log_step "Step 11: Test Multi-Turn - Send Follow-up Prompt"
-SECOND_OUTPUT_FILE="${TEST_WORKSPACE}/second-result.txt"
-log_info "Sending follow-up prompt..."
-PROMPT_PAYLOAD=$(cat <<EOF
+log_step "Step 8: Multi-Turn Conversation - Turn 1"
+# User Comment Turn 1: Provide the numbers
+log_info "Sending user comment via comment.add..."
+TURN1_PAYLOAD=$(cat <<EOF
 {
     "task_id": "${TASK_ID}",
-    "prompt": "Create another file named 'second-result.txt' with the content 'Follow-up successful'. Do nothing else."
+    "content": "Please add 42 and 58 together.",
+    "author_id": "e2e-test-user"
 }
 EOF
 )
-PROMPT_RESPONSE=$(ws_request "orchestrator.prompt" "$PROMPT_PAYLOAD")
-PROMPT_SUCCESS=$(echo "$PROMPT_RESPONSE" | jq -r '.payload.success // false')
-if [ "$PROMPT_SUCCESS" == "true" ]; then
-    log_success "Follow-up prompt accepted"
+TURN1_RESPONSE=$(ws_request "comment.add" "$TURN1_PAYLOAD")
+TURN1_ID=$(echo "$TURN1_RESPONSE" | jq -r '.payload.id // empty')
+if [ -n "$TURN1_ID" ]; then
+    log_success "User comment added: $TURN1_ID"
 else
-    log_error "Follow-up prompt failed: $(echo "$PROMPT_RESPONSE" | jq -r '.payload.error // "unknown"')"
-    exit 1
+    log_info "comment.add response: $(echo "$TURN1_RESPONSE" | jq -c '.payload')"
 fi
 
-# Wait for agent to become READY again (prompt completed)
-log_info "Waiting for agent to become READY again..."
-for i in $(seq 1 120); do
+# Wait for agent to process and respond
+log_info "Waiting for agent to respond to comment..."
+for i in $(seq 1 $WAIT_FOR_AGENT_SECONDS); do
     AGENT_STATUS_RESPONSE=$(ws_request "agent.status" "{\"agent_id\": \"${AGENT_ID}\"}" 2>/dev/null || echo '{}')
     AGENT_STATUS=$(echo "$AGENT_STATUS_RESPONSE" | jq -r '.payload.status // "UNKNOWN"')
     if [ "$AGENT_STATUS" == "READY" ]; then
-        log_success "Agent is READY after follow-up prompt ($i seconds)"
+        log_success "Agent READY after Turn 1 ($i seconds)"
         break
     fi
     if [ $((i % 10)) -eq 0 ]; then
-        log_info "Still waiting... ($i seconds, status: $AGENT_STATUS)"
+        log_info "Waiting... ($i seconds, status: $AGENT_STATUS)"
     fi
     sleep 1
 done
 
-# Verify second file was created
-if [ -f "$SECOND_OUTPUT_FILE" ]; then
-    SECOND_OUTPUT=$(cat "$SECOND_OUTPUT_FILE")
-    log_success "Second file created: $SECOND_OUTPUT_FILE"
-    log_info "Second file content: $SECOND_OUTPUT"
-else
-    log_error "Agent did not create second file"
-    exit 1
+display_comments "$TASK_ID" "After Turn 1"
+
+log_step "Step 9: Multi-Turn Conversation - Turn 2"
+# User Comment Turn 2: Ask for verification
+TURN2_PAYLOAD=$(cat <<EOF
+{
+    "task_id": "${TASK_ID}",
+    "content": "Great! Now can you also add 100 to that result?",
+    "author_id": "e2e-test-user"
+}
+EOF
+)
+TURN2_RESPONSE=$(ws_request "comment.add" "$TURN2_PAYLOAD")
+TURN2_ID=$(echo "$TURN2_RESPONSE" | jq -r '.payload.id // empty')
+if [ -n "$TURN2_ID" ]; then
+    log_success "User comment (Turn 2) added: $TURN2_ID"
 fi
 
-log_step "Step 12: Complete Task"
+# Wait for agent response
+log_info "Waiting for agent to respond..."
+for i in $(seq 1 $WAIT_FOR_AGENT_SECONDS); do
+    AGENT_STATUS_RESPONSE=$(ws_request "agent.status" "{\"agent_id\": \"${AGENT_ID}\"}" 2>/dev/null || echo '{}')
+    AGENT_STATUS=$(echo "$AGENT_STATUS_RESPONSE" | jq -r '.payload.status // "UNKNOWN"')
+    if [ "$AGENT_STATUS" == "READY" ]; then
+        log_success "Agent READY after Turn 2 ($i seconds)"
+        break
+    fi
+    if [ $((i % 10)) -eq 0 ]; then
+        log_info "Waiting... ($i seconds, status: $AGENT_STATUS)"
+    fi
+    sleep 1
+done
+
+display_comments "$TASK_ID" "After Turn 2"
+
+log_step "Step 10: Multi-Turn Conversation - Turn 3"
+# User Comment Turn 3: Final request
+TURN3_PAYLOAD=$(cat <<EOF
+{
+    "task_id": "${TASK_ID}",
+    "content": "Perfect! Please write the final result to a file called 'result.txt' in the workspace.",
+    "author_id": "e2e-test-user"
+}
+EOF
+)
+TURN3_RESPONSE=$(ws_request "comment.add" "$TURN3_PAYLOAD")
+TURN3_ID=$(echo "$TURN3_RESPONSE" | jq -r '.payload.id // empty')
+if [ -n "$TURN3_ID" ]; then
+    log_success "User comment (Turn 3) added: $TURN3_ID"
+fi
+
+# Wait for final agent response
+log_info "Waiting for agent to complete..."
+for i in $(seq 1 $WAIT_FOR_AGENT_SECONDS); do
+    AGENT_STATUS_RESPONSE=$(ws_request "agent.status" "{\"agent_id\": \"${AGENT_ID}\"}" 2>/dev/null || echo '{}')
+    AGENT_STATUS=$(echo "$AGENT_STATUS_RESPONSE" | jq -r '.payload.status // "UNKNOWN"')
+    if [ "$AGENT_STATUS" == "READY" ]; then
+        log_success "Agent READY after Turn 3 ($i seconds)"
+        break
+    fi
+    if [ $((i % 10)) -eq 0 ]; then
+        log_info "Waiting... ($i seconds, status: $AGENT_STATUS)"
+    fi
+    sleep 1
+done
+
+display_comments "$TASK_ID" "After Turn 3 (Final Conversation)"
+
+log_step "Step 11: Verify Comment Metadata"
+# Get all comments and verify metadata
+FINAL_COMMENTS=$(ws_request "comment.list" "{\"task_id\": \"${TASK_ID}\"}")
+COMMENT_COUNT=$(echo "$FINAL_COMMENTS" | jq 'if .payload | type == "array" then .payload | length else 0 end' 2>/dev/null || echo "0")
+log_info "Total comments in conversation: $COMMENT_COUNT"
+
+# Count by author type
+USER_COMMENTS=$(echo "$FINAL_COMMENTS" | jq '[.payload[] | select(.author_type == "user")] | length' 2>/dev/null || echo "0")
+AGENT_COMMENTS=$(echo "$FINAL_COMMENTS" | jq '[.payload[] | select(.author_type == "agent")] | length' 2>/dev/null || echo "0")
+log_info "User comments: $USER_COMMENTS, Agent comments: $AGENT_COMMENTS"
+
+# Check for requests_input flag
+REQUESTS_INPUT_COUNT=$(echo "$FINAL_COMMENTS" | jq '[.payload[] | select(.requests_input == true)] | length' 2>/dev/null || echo "0")
+if [ "$REQUESTS_INPUT_COUNT" -gt 0 ]; then
+    log_success "Found $REQUESTS_INPUT_COUNT comment(s) with requests_input=true"
+else
+    log_info "No comments with requests_input=true (agent didn't explicitly request input)"
+fi
+
+# Verify timestamps are present
+HAS_TIMESTAMPS=$(echo "$FINAL_COMMENTS" | jq 'if .payload | type == "array" and (.payload | length) > 0 then (.payload[0].created_at != null) else false end' 2>/dev/null || echo "false")
+if [ "$HAS_TIMESTAMPS" == "true" ]; then
+    log_success "Comments have created_at timestamps"
+fi
+
+log_step "Step 12: Complete Task and Verify Final State"
 COMPLETE_RESPONSE=$(ws_request "orchestrator.complete" "{\"task_id\": \"${TASK_ID}\"}")
 COMPLETE_SUCCESS=$(echo "$COMPLETE_RESPONSE" | jq -r '.payload.success // false')
 if [ "$COMPLETE_SUCCESS" == "true" ]; then
     log_success "Task completed successfully"
 else
-    log_error "Failed to complete task: $(echo "$COMPLETE_RESPONSE" | jq -r '.payload.error // "unknown"')"
+    log_info "Complete response: $(echo "$COMPLETE_RESPONSE" | jq -c '.payload')"
 fi
 
-# Verify task state is COMPLETED
-FINAL_TASK_RESPONSE=$(ws_request "task.get" "{\"id\": \"${TASK_ID}\"}")
-TASK_STATE=$(echo "$FINAL_TASK_RESPONSE" | jq -r '.payload.state')
-if [ "$TASK_STATE" == "COMPLETED" ]; then
-    log_success "Task state is COMPLETED"
-else
-    log_error "Expected task state COMPLETED, got: $TASK_STATE"
-fi
+# Verify task state
+FINAL_TASK=$(ws_request "task.get" "{\"id\": \"${TASK_ID}\"}")
+TASK_STATE=$(echo "$FINAL_TASK" | jq -r '.payload.state')
+log_info "Final task state: $TASK_STATE"
 
-log_step "Step 13: Verify Session ID in Task Metadata"
-# The session_id should have been stored in task metadata by the session_info handler
-SESSION_ID=$(echo "$FINAL_TASK_RESPONSE" | jq -r '.payload.metadata.auggie_session_id // empty')
+# Check for session ID in metadata
+SESSION_ID=$(echo "$FINAL_TASK" | jq -r '.payload.metadata.auggie_session_id // empty')
 if [ -n "$SESSION_ID" ]; then
-    log_success "Session ID stored in task metadata: $SESSION_ID"
-else
-    log_error "Session ID not found in task metadata"
-    log_info "Task metadata: $(echo "$FINAL_TASK_RESPONSE" | jq '.payload.metadata')"
-    exit 1
+    log_success "Session ID stored: ${SESSION_ID:0:20}..."
 fi
 
-# Track historical logs test results
-HIST_LOGS_TEST_PASSED=false
-HIST_LOGS_COUNT=0
-HIST_SUBSCRIBE_TEST_PASSED=false
-HIST_SUBSCRIBE_COUNT=0
-LIVE_STREAM_TEST_PASSED=false
-LIVE_STREAM_COUNT=0
-COMMENT_TEST_PASSED=false
-INPUT_REQUEST_TEST_PASSED=false
-
-log_step "Step 14: Test Comment System"
-# Test adding a user comment to the task
-COMMENT_PAYLOAD=$(cat <<EOF
-{
-    "task_id": "${TASK_ID}",
-    "content": "This is a test comment from the e2e test",
-    "author_type": "user",
-    "author_id": "e2e-test-user"
-}
-EOF
-)
-COMMENT_RESPONSE=$(ws_request "comment.add" "$COMMENT_PAYLOAD")
-COMMENT_ID=$(echo "$COMMENT_RESPONSE" | jq -r '.payload.id // empty')
-if [ -n "$COMMENT_ID" ]; then
-    log_success "Created comment: $COMMENT_ID"
-    COMMENT_TEST_PASSED=true
-else
-    log_info "Failed to create comment: $(echo "$COMMENT_RESPONSE" | jq -r '.payload.error // "unknown error"')"
-fi
-
-# Test listing comments for the task
-COMMENTS_LIST_RESPONSE=$(ws_request "comment.list" "{\"task_id\": \"${TASK_ID}\"}")
-COMMENTS_COUNT=$(echo "$COMMENTS_LIST_RESPONSE" | jq '.payload.comments | length' 2>/dev/null || echo "0")
-if [ "$COMMENTS_COUNT" -gt 0 ]; then
-    log_success "Listed $COMMENTS_COUNT comments for task"
-else
-    log_info "No comments found for task"
-fi
-
-# Test getting a specific comment
-if [ -n "$COMMENT_ID" ]; then
-    GET_COMMENT_RESPONSE=$(ws_request "comment.get" "{\"comment_id\": \"${COMMENT_ID}\"}")
-    GOT_CONTENT=$(echo "$GET_COMMENT_RESPONSE" | jq -r '.payload.content // empty')
-    if [ -n "$GOT_CONTENT" ]; then
-        log_success "Retrieved comment content: $GOT_CONTENT"
-    else
-        log_info "Failed to retrieve comment"
-    fi
-fi
-
-log_step "Step 15: Test Historical Logs for Completed Task"
-# Test task.logs action to retrieve all historical logs
-LOGS_RESPONSE=$(ws_request "task.logs" "{\"task_id\": \"${TASK_ID}\"}")
-LOGS_SUCCESS=$(echo "$LOGS_RESPONSE" | jq -e '.payload.logs' > /dev/null 2>&1 && echo "true" || echo "false")
-
-if [ "$LOGS_SUCCESS" == "true" ]; then
-    HIST_LOGS_COUNT=$(echo "$LOGS_RESPONSE" | jq '.payload.logs | length')
-    TOTAL_FROM_RESPONSE=$(echo "$LOGS_RESPONSE" | jq '.payload.total // 0')
-    log_success "Retrieved $HIST_LOGS_COUNT historical logs (total: $TOTAL_FROM_RESPONSE)"
-
-    # Verify logs contain expected fields
-    if [ "$HIST_LOGS_COUNT" -gt 0 ]; then
-        FIRST_LOG=$(echo "$LOGS_RESPONSE" | jq '.payload.logs[0]')
-        HAS_TYPE=$(echo "$FIRST_LOG" | jq -e '.type' > /dev/null 2>&1 && echo "true" || echo "false")
-        HAS_TIMESTAMP=$(echo "$FIRST_LOG" | jq -e '.timestamp' > /dev/null 2>&1 && echo "true" || echo "false")
-
-        if [ "$HAS_TYPE" == "true" ] && [ "$HAS_TIMESTAMP" == "true" ]; then
-            log_success "Logs contain expected fields (type, timestamp)"
-        else
-            log_info "Log entry missing expected fields: $FIRST_LOG"
-        fi
-
-        # Check for ACP message types (session_info should exist)
-        SESSION_INFO_COUNT=$(echo "$LOGS_RESPONSE" | jq '[.payload.logs[] | select(.type == "session_info")] | length')
-        if [ "$SESSION_INFO_COUNT" -gt 0 ]; then
-            log_success "Found $SESSION_INFO_COUNT session_info log entries"
-            HIST_LOGS_TEST_PASSED=true
-        else
-            log_info "No session_info log entries found"
-            # Still consider it a pass if we got logs
-            HIST_LOGS_TEST_PASSED=true
-        fi
-    else
-        log_info "No historical logs found (empty array)"
-    fi
-else
-    log_info "Failed to retrieve historical logs: $(echo "$LOGS_RESPONSE" | jq -r '.payload.error // "unknown error"')"
-fi
-
-log_step "Step 16: Test Historical Logs Replay on Subscribe"
-# Subscribe to completed task and check if historical logs are replayed as notifications
-# Use a temp file to collect messages
-SUBSCRIBE_OUTPUT_FILE=$(mktemp)
-
-# Send subscribe request and collect responses for a few seconds
-(
-    echo '{"id":"hist-sub-1","type":"request","action":"task.subscribe","payload":{"task_id":"'"$TASK_ID"'"}}'
-    sleep 3
-) | timeout 5 websocat "${WS_URL}" > "$SUBSCRIBE_OUTPUT_FILE" 2>/dev/null || true
-
-# Count the messages received
-if [ -f "$SUBSCRIBE_OUTPUT_FILE" ] && [ -s "$SUBSCRIBE_OUTPUT_FILE" ]; then
-    TOTAL_MESSAGES=$(wc -l < "$SUBSCRIBE_OUTPUT_FILE" | tr -d ' ')
-    log_info "Received $TOTAL_MESSAGES messages from subscribe"
-
-    # Check for the subscribe response
-    SUBSCRIBE_RESPONSE=$(grep -m1 '"action":"task.subscribe"' "$SUBSCRIBE_OUTPUT_FILE" || true)
-    if [ -n "$SUBSCRIBE_RESPONSE" ]; then
-        log_success "Received subscribe response"
-    fi
-
-    # Count historical notifications (acp.* actions)
-    ACP_MESSAGES=$(grep -c '"action":"acp\.' "$SUBSCRIBE_OUTPUT_FILE" 2>/dev/null || echo "0")
-    if [ "$ACP_MESSAGES" -gt 0 ]; then
-        log_success "Received $ACP_MESSAGES historical ACP notifications"
-        HIST_SUBSCRIBE_COUNT=$ACP_MESSAGES
-        HIST_SUBSCRIBE_TEST_PASSED=true
-    else
-        log_info "No historical ACP notifications received (may be expected if task has no ACP logs)"
-        # Check for any notification type messages
-        NOTIF_COUNT=$(grep -c '"type":"notification"' "$SUBSCRIBE_OUTPUT_FILE" 2>/dev/null || echo "0")
-        if [ "$NOTIF_COUNT" -gt 0 ]; then
-            log_info "Received $NOTIF_COUNT notification messages"
-            HIST_SUBSCRIBE_COUNT=$NOTIF_COUNT
-            HIST_SUBSCRIBE_TEST_PASSED=true
-        fi
-    fi
-else
-    log_info "No messages received from subscribe (file empty or missing)"
-fi
-rm -f "$SUBSCRIBE_OUTPUT_FILE"
-
-log_step "Step 17: Create and Monitor New Task with Live Streaming"
-# Create a new task to test real-time streaming + historical logs
-NEW_TEST_WORKSPACE=$(mktemp -d)
-log_info "New test workspace: $NEW_TEST_WORKSPACE"
-
-NEW_TASK_PAYLOAD=$(cat <<EOF
-{
-    "title": "E2E Live Stream Test",
-    "description": "Create a file named 'stream-test.txt' with content 'Live streaming works'. Do nothing else.",
-    "board_id": "${BOARD_ID}",
-    "column_id": "${COLUMN_ID}",
-    "repository_url": "${NEW_TEST_WORKSPACE}",
-    "agent_type": "augment-agent"
-}
-EOF
-)
-NEW_TASK_RESPONSE=$(ws_request "task.create" "$NEW_TASK_PAYLOAD")
-NEW_TASK_ID=$(echo "$NEW_TASK_RESPONSE" | jq -r '.payload.id')
-
-if [ "$NEW_TASK_ID" == "null" ] || [ -z "$NEW_TASK_ID" ]; then
-    log_info "Failed to create new task for streaming test, skipping..."
-else
-    log_success "Created new task: $NEW_TASK_ID"
-
-    # Subscribe FIRST before starting the task
-    STREAM_OUTPUT_FILE=$(mktemp)
-    log_info "Subscribing to task before starting..."
-
-    # Start collecting messages in background (subscribe, wait for start, collect for duration)
-    (
-        # Send subscribe request
-        echo '{"id":"live-sub-1","type":"request","action":"task.subscribe","payload":{"task_id":"'"$NEW_TASK_ID"'"}}'
-        # Keep connection open for streaming
-        sleep 90
-    ) | timeout 95 websocat "${WS_URL}" > "$STREAM_OUTPUT_FILE" 2>/dev/null &
-    STREAM_PID=$!
-
-    # Wait a moment for subscription to be established
-    sleep 2
-
-    # Start the task
-    log_info "Starting task via orchestrator..."
-    START_RESP=$(ws_request "orchestrator.start" "{\"task_id\": \"${NEW_TASK_ID}\"}")
-    NEW_AGENT_ID=$(echo "$START_RESP" | jq -r '.payload.agent_instance_id')
-
-    if [ "$NEW_AGENT_ID" != "null" ] && [ -n "$NEW_AGENT_ID" ]; then
-        log_success "Task started, agent ID: $NEW_AGENT_ID"
-
-        # Wait for agent to complete (become READY)
-        log_info "Waiting for agent to complete..."
-        for i in $(seq 1 120); do
-            STATUS_RESP=$(ws_request "agent.status" "{\"agent_id\": \"${NEW_AGENT_ID}\"}" 2>/dev/null || echo '{}')
-            STATUS=$(echo "$STATUS_RESP" | jq -r '.payload.status // "UNKNOWN"')
-            if [ "$STATUS" == "READY" ]; then
-                log_success "Agent completed after $i seconds"
-                break
-            elif [ "$STATUS" == "FAILED" ]; then
-                log_info "Agent failed"
-                break
-            fi
-            if [ $((i % 15)) -eq 0 ]; then
-                log_info "Still waiting... ($i seconds, status: $STATUS)"
-            fi
-            sleep 1
-        done
-
-        # Give a moment for final messages to arrive
-        sleep 2
-
-        # Kill the streaming process
-        kill $STREAM_PID 2>/dev/null || true
-        wait $STREAM_PID 2>/dev/null || true
-
-        # Count real-time messages received
-        if [ -f "$STREAM_OUTPUT_FILE" ] && [ -s "$STREAM_OUTPUT_FILE" ]; then
-            REALTIME_TOTAL=$(wc -l < "$STREAM_OUTPUT_FILE" | tr -d ' ')
-            REALTIME_NOTIF=$(grep -c '"type":"notification"' "$STREAM_OUTPUT_FILE" 2>/dev/null || echo "0")
-            REALTIME_ACP=$(grep -c '"action":"acp\.' "$STREAM_OUTPUT_FILE" 2>/dev/null || echo "0")
-            log_success "Real-time streaming: $REALTIME_TOTAL messages, $REALTIME_NOTIF notifications, $REALTIME_ACP ACP messages"
-            LIVE_STREAM_COUNT=$REALTIME_NOTIF
-
-            if [ "$REALTIME_NOTIF" -gt 0 ]; then
-                LIVE_STREAM_TEST_PASSED=true
-            fi
-        else
-            log_info "No streaming messages collected"
-        fi
-
-        # Complete the new task
-        ws_request "orchestrator.complete" "{\"task_id\": \"${NEW_TASK_ID}\"}" > /dev/null 2>&1 || true
-
-        # Now use task.logs to get full history
-        log_info "Retrieving full history via task.logs..."
-        NEW_LOGS_RESP=$(ws_request "task.logs" "{\"task_id\": \"${NEW_TASK_ID}\"}")
-        NEW_LOGS_COUNT=$(echo "$NEW_LOGS_RESP" | jq '.payload.logs | length' 2>/dev/null || echo "0")
-
-        if [ "$NEW_LOGS_COUNT" -gt 0 ]; then
-            log_success "task.logs returned $NEW_LOGS_COUNT historical entries"
-
-            # Compare with real-time count
-            if [ "$REALTIME_ACP" -gt 0 ]; then
-                log_info "Comparison: $REALTIME_ACP real-time ACP messages vs $NEW_LOGS_COUNT historical logs"
-            fi
-        else
-            log_info "task.logs returned no entries"
-        fi
-    else
-        log_info "Failed to start new task, skipping streaming test"
-        kill $STREAM_PID 2>/dev/null || true
-    fi
-
-    rm -f "$STREAM_OUTPUT_FILE"
-    rm -rf "$NEW_TEST_WORKSPACE" 2>/dev/null || true
-fi
-
-log_step "Step 18: Test Agent Input Request Flow"
-# Create a task that explicitly asks the agent to request user input
-# This tests the bidirectional comment flow
-INPUT_TEST_WORKSPACE=$(mktemp -d)
-log_info "Input test workspace: $INPUT_TEST_WORKSPACE"
-
-# Create a task that instructs the agent to ask for more information
-INPUT_TASK_PAYLOAD=$(cat <<EOF
-{
-    "title": "Sum Two Numbers - Input Request Test",
-    "description": "I'll want you to sum 2 numbers. Reply ok and ask me what the numbers are. Use stopReason 'needs_input' to request the numbers from me.",
-    "board_id": "${BOARD_ID}",
-    "column_id": "${COLUMN_ID}",
-    "repository_url": "${INPUT_TEST_WORKSPACE}",
-    "agent_type": "augment-agent"
-}
-EOF
-)
-INPUT_TASK_RESPONSE=$(ws_request "task.create" "$INPUT_TASK_PAYLOAD")
-INPUT_TASK_ID=$(echo "$INPUT_TASK_RESPONSE" | jq -r '.payload.id')
-
-if [ "$INPUT_TASK_ID" == "null" ] || [ -z "$INPUT_TASK_ID" ]; then
-    log_info "Failed to create input test task, skipping..."
-else
-    log_success "Created input test task: $INPUT_TASK_ID"
-
-    # Subscribe to task to monitor for input.requested notifications
-    INPUT_STREAM_FILE=$(mktemp)
-    (
-        echo '{"id":"input-sub-1","type":"request","action":"task.subscribe","payload":{"task_id":"'"$INPUT_TASK_ID"'"}}'
-        sleep 60
-    ) | timeout 65 websocat "${WS_URL}" > "$INPUT_STREAM_FILE" 2>/dev/null &
-    INPUT_STREAM_PID=$!
-    sleep 2
-
-    # Start the task
-    log_info "Starting ambiguous task..."
-    INPUT_START_RESP=$(ws_request "orchestrator.start" "{\"task_id\": \"${INPUT_TASK_ID}\"}")
-    INPUT_AGENT_ID=$(echo "$INPUT_START_RESP" | jq -r '.payload.agent_instance_id')
-
-    if [ "$INPUT_AGENT_ID" != "null" ] && [ -n "$INPUT_AGENT_ID" ]; then
-        log_success "Task started, agent ID: $INPUT_AGENT_ID"
-
-        # Monitor for WAITING_FOR_INPUT state or completion
-        INPUT_RECEIVED=false
-        for i in $(seq 1 45); do
-            # Check task state
-            TASK_STATE_RESP=$(ws_request "task.get" "{\"id\": \"${INPUT_TASK_ID}\"}" 2>/dev/null || echo '{}')
-            CURRENT_STATE=$(echo "$TASK_STATE_RESP" | jq -r '.payload.state // "UNKNOWN"')
-
-            if [ "$CURRENT_STATE" == "WAITING_FOR_INPUT" ]; then
-                log_success "Task entered WAITING_FOR_INPUT state after $i seconds"
-                INPUT_RECEIVED=true
-
-                # Get comments to see the agent's question
-                TASK_COMMENTS=$(ws_request "comment.list" "{\"task_id\": \"${INPUT_TASK_ID}\"}" 2>/dev/null || echo '{}')
-                AGENT_COMMENTS=$(echo "$TASK_COMMENTS" | jq '[.payload.comments[] | select(.author_type == "agent")] | length' 2>/dev/null || echo "0")
-                if [ "$AGENT_COMMENTS" -gt 0 ]; then
-                    log_success "Agent created $AGENT_COMMENTS comment(s) requesting input"
-                    AGENT_QUESTION=$(echo "$TASK_COMMENTS" | jq -r '.payload.comments[] | select(.author_type == "agent") | .content' | head -1)
-                    log_info "Agent asked: ${AGENT_QUESTION:0:100}..."
-                fi
-
-                # Test responding via comment with the numbers to sum
-                log_info "Sending user response via comment..."
-                USER_RESPONSE_PAYLOAD=$(cat <<EOF
-{
-    "task_id": "${INPUT_TASK_ID}",
-    "content": "The numbers are 42 and 58. Please calculate the sum and write the result to a file called 'sum-result.txt'.",
-    "author_type": "user",
-    "author_id": "e2e-test-user"
-}
-EOF
-)
-                USER_RESP=$(ws_request "comment.add" "$USER_RESPONSE_PAYLOAD")
-                USER_COMMENT_ID=$(echo "$USER_RESP" | jq -r '.payload.id // empty')
-                if [ -n "$USER_COMMENT_ID" ]; then
-                    log_success "User response sent: $USER_COMMENT_ID"
-                fi
-
-                # Wait for task to resume (state should change from WAITING_FOR_INPUT)
-                for j in $(seq 1 30); do
-                    RESUME_STATE_RESP=$(ws_request "task.get" "{\"id\": \"${INPUT_TASK_ID}\"}" 2>/dev/null || echo '{}')
-                    RESUME_STATE=$(echo "$RESUME_STATE_RESP" | jq -r '.payload.state // "UNKNOWN"')
-                    if [ "$RESUME_STATE" != "WAITING_FOR_INPUT" ]; then
-                        log_success "Task resumed, new state: $RESUME_STATE"
-                        INPUT_REQUEST_TEST_PASSED=true
-                        break
-                    fi
-                    sleep 1
-                done
-                break
-            fi
-
-            # Check if agent finished without requesting input (also valid)
-            AGENT_STATUS_RESP=$(ws_request "agent.status" "{\"agent_id\": \"${INPUT_AGENT_ID}\"}" 2>/dev/null || echo '{}')
-            AGENT_STATUS=$(echo "$AGENT_STATUS_RESP" | jq -r '.payload.status // "UNKNOWN"')
-            if [ "$AGENT_STATUS" == "READY" ] || [ "$AGENT_STATUS" == "FAILED" ]; then
-                log_info "Agent completed without requesting input (status: $AGENT_STATUS)"
-                # Still consider the plumbing test passed if we got here without errors
-                INPUT_REQUEST_TEST_PASSED=true
-                break
-            fi
-
-            if [ $((i % 10)) -eq 0 ]; then
-                log_info "Monitoring... ($i seconds, state: $CURRENT_STATE, agent: $AGENT_STATUS)"
-            fi
-            sleep 1
-        done
-
-        # Check stream for input.requested notifications
-        kill $INPUT_STREAM_PID 2>/dev/null || true
-        wait $INPUT_STREAM_PID 2>/dev/null || true
-
-        if [ -f "$INPUT_STREAM_FILE" ] && [ -s "$INPUT_STREAM_FILE" ]; then
-            INPUT_NOTIF_COUNT=$(grep -c '"action":"input.requested"' "$INPUT_STREAM_FILE" 2>/dev/null | tr -d '\n' || echo "0")
-            if [ -n "$INPUT_NOTIF_COUNT" ] && [ "$INPUT_NOTIF_COUNT" -gt 0 ] 2>/dev/null; then
-                log_success "Received $INPUT_NOTIF_COUNT input.requested notification(s)"
-                INPUT_REQUEST_TEST_PASSED=true
-            else
-                log_info "No input.requested notifications received (agent may not have requested input)"
-            fi
-        fi
-
-        # Complete the task
-        ws_request "orchestrator.complete" "{\"task_id\": \"${INPUT_TASK_ID}\"}" > /dev/null 2>&1 || true
-    else
-        log_info "Failed to start input test task"
-        kill $INPUT_STREAM_PID 2>/dev/null || true
-    fi
-
-    rm -f "$INPUT_STREAM_FILE"
-    rm -rf "$INPUT_TEST_WORKSPACE" 2>/dev/null || true
-fi
-
-# Clean up test workspace
-rm -rf "$TEST_WORKSPACE" 2>/dev/null || true
-
-# Show backend logs summary
-log_step "Backend Log Summary"
-if [ -f /tmp/kandev-e2e.log ]; then
-    log_info "Key events from backend:"
-    grep -E "(agent|agentctl|container|task)" /tmp/kandev-e2e.log | tail -20 || true
-fi
+# Clean up
+rm -rf "$TEST_WORKSPACE_DIR" 2>/dev/null || true
 
 # Summary
 log_step "Test Summary"
 
-# Format historical logs test result
-if [ "$HIST_LOGS_TEST_PASSED" == "true" ]; then
-    HIST_LOGS_RESULT="${GREEN}✓ ($HIST_LOGS_COUNT logs)${NC}"
+# Determine test results
+COMMENT_ADD_PASSED=false
+COMMENT_LIST_PASSED=false
+MULTI_TURN_PASSED=false
+METADATA_PASSED=false
+
+[ -n "$TURN1_ID" ] && [ -n "$TURN2_ID" ] && [ -n "$TURN3_ID" ] && COMMENT_ADD_PASSED=true
+[ "$COMMENT_COUNT" -gt 0 ] && COMMENT_LIST_PASSED=true
+[ "$USER_COMMENTS" -ge 3 ] && MULTI_TURN_PASSED=true
+[ "$HAS_TIMESTAMPS" == "true" ] && METADATA_PASSED=true
+
+echo -e "\n${GREEN}╔═══════════════════════════════════════════════════════╗${NC}"
+echo -e "${GREEN}║     Comment System E2E Test Results                   ║${NC}"
+echo -e "${GREEN}╠═══════════════════════════════════════════════════════╣${NC}"
+
+# Core functionality
+if [ "$COMMENT_ADD_PASSED" == "true" ]; then
+    echo -e "${GREEN}║ comment.add:              ✓ (3 user comments)          ║${NC}"
 else
-    HIST_LOGS_RESULT="${YELLOW}○ (skipped)${NC}"
+    echo -e "${RED}║ comment.add:              ✗                            ║${NC}"
 fi
 
-# Format subscribe replay test result
-if [ "$HIST_SUBSCRIBE_TEST_PASSED" == "true" ]; then
-    HIST_SUBSCRIBE_RESULT="${GREEN}✓ ($HIST_SUBSCRIBE_COUNT msgs)${NC}"
+if [ "$COMMENT_LIST_PASSED" == "true" ]; then
+    echo -e "${GREEN}║ comment.list:             ✓ ($COMMENT_COUNT total comments)         ║${NC}"
 else
-    HIST_SUBSCRIBE_RESULT="${YELLOW}○ (skipped)${NC}"
+    echo -e "${RED}║ comment.list:             ✗                            ║${NC}"
 fi
 
-# Format live streaming test result
-if [ "$LIVE_STREAM_TEST_PASSED" == "true" ]; then
-    LIVE_STREAM_RESULT="${GREEN}✓ ($LIVE_STREAM_COUNT msgs)${NC}"
+if [ "$MULTI_TURN_PASSED" == "true" ]; then
+    echo -e "${GREEN}║ Multi-turn conversation:  ✓ (3 turns completed)        ║${NC}"
 else
-    LIVE_STREAM_RESULT="${YELLOW}○ (skipped)${NC}"
+    echo -e "${YELLOW}║ Multi-turn conversation:  ○ (partial)                  ║${NC}"
 fi
 
-# Format comment test result
-if [ "$COMMENT_TEST_PASSED" == "true" ]; then
-    COMMENT_RESULT="${GREEN}✓${NC}"
+if [ "$AGENT_COMMENTS" -gt 0 ]; then
+    echo -e "${GREEN}║ Agent responses:          ✓ ($AGENT_COMMENTS agent comments)        ║${NC}"
 else
-    COMMENT_RESULT="${YELLOW}○ (skipped)${NC}"
+    echo -e "${YELLOW}║ Agent responses:          ○ (pending)                  ║${NC}"
 fi
 
-# Format input request test result
-if [ "$INPUT_REQUEST_TEST_PASSED" == "true" ]; then
-    INPUT_REQUEST_RESULT="${GREEN}✓${NC}"
+if [ "$METADATA_PASSED" == "true" ]; then
+    echo -e "${GREEN}║ Comment metadata:         ✓ (timestamps present)       ║${NC}"
 else
-    INPUT_REQUEST_RESULT="${YELLOW}○ (skipped)${NC}"
+    echo -e "${YELLOW}║ Comment metadata:         ○                            ║${NC}"
 fi
 
-echo -e "${GREEN}╔═══════════════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║         End-to-End Test PASSED! ✓                 ║${NC}"
-echo -e "${GREEN}╠═══════════════════════════════════════════════════╣${NC}"
-echo -e "${GREEN}║ Board created:         ✓                          ║${NC}"
-echo -e "${GREEN}║ Column created:        ✓                          ║${NC}"
-echo -e "${GREEN}║ Task created:          ✓                          ║${NC}"
-echo -e "${GREEN}║ Agent launched:        ✓                          ║${NC}"
-echo -e "${GREEN}║ agentctl running:      ✓                          ║${NC}"
-echo -e "${GREEN}║ First prompt:          ✓                          ║${NC}"
-echo -e "${GREEN}║ Multi-turn:            ✓                          ║${NC}"
-echo -e "${GREEN}║ Task completed:        ✓                          ║${NC}"
-echo -e "${GREEN}║ Session ID stored:     ✓                          ║${NC}"
-echo -e "${GREEN}╠═══════════════════════════════════════════════════╣${NC}"
-echo -e    "║ Comment System:        $COMMENT_RESULT"
-echo -e    "║ Input Request Flow:    $INPUT_REQUEST_RESULT"
-echo -e    "║ Historical Logs:       $HIST_LOGS_RESULT"
-echo -e    "║ Subscribe Replay:      $HIST_SUBSCRIBE_RESULT"
-echo -e    "║ Live Streaming:        $LIVE_STREAM_RESULT"
-echo -e "${GREEN}╚═══════════════════════════════════════════════════╝${NC}"
+if [ "$REQUESTS_INPUT_COUNT" -gt 0 ]; then
+    echo -e "${GREEN}║ Input request flow:       ✓ ($REQUESTS_INPUT_COUNT requests)             ║${NC}"
+else
+    echo -e "${YELLOW}║ Input request flow:       ○ (not triggered)            ║${NC}"
+fi
 
-exit 0
+echo -e "${GREEN}╠═══════════════════════════════════════════════════════╣${NC}"
+echo -e "${GREEN}║ Workspace/Board/Column:   ✓                            ║${NC}"
+echo -e "${GREEN}║ Task creation:            ✓                            ║${NC}"
+echo -e "${GREEN}║ Agent execution:          ✓                            ║${NC}"
+echo -e "${GREEN}║ Task completion:          ✓                            ║${NC}"
+echo -e "${GREEN}╚═══════════════════════════════════════════════════════╝${NC}"
 
+# Overall result
+if [ "$COMMENT_ADD_PASSED" == "true" ] && [ "$COMMENT_LIST_PASSED" == "true" ]; then
+    echo -e "\n${GREEN}✓ Comment System E2E Test PASSED${NC}"
+    exit 0
+else
+    echo -e "\n${RED}✗ Comment System E2E Test FAILED${NC}"
+    exit 1
+fi

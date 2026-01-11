@@ -93,6 +93,10 @@ const (
 	ActionRepositoryScriptCreated = "repository.script.created"
 	ActionRepositoryScriptUpdated = "repository.script.updated"
 	ActionRepositoryScriptDeleted = "repository.script.deleted"
+
+	// Permission request actions (agent -> user -> agent)
+	ActionPermissionRequested = "permission.requested" // Agent requesting permission
+	ActionPermissionRespond   = "permission.respond"   // User responding to permission request
 )
 
 // Error codes

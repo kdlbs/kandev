@@ -19,6 +19,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
@@ -343,8 +344,17 @@ func (s *SimulatedAgentManagerClient) PromptAgent(ctx context.Context, agentInst
 
 	return &executor.PromptResult{
 		StopReason: "end_turn",
-		NeedsInput: false,
 	}, nil
+}
+
+// RespondToPermissionByTaskID responds to a permission request for a task
+func (s *SimulatedAgentManagerClient) RespondToPermissionByTaskID(ctx context.Context, taskID, pendingID, optionID string, cancelled bool) error {
+	s.logger.Info("simulated: responding to permission",
+		zap.String("task_id", taskID),
+		zap.String("pending_id", pendingID),
+		zap.String("option_id", optionID),
+		zap.Bool("cancelled", cancelled))
+	return nil
 }
 
 // CompleteAgent marks an agent as completed

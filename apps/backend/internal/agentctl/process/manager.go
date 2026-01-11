@@ -39,6 +39,24 @@ type errorWrapper struct {
 	err error
 }
 
+// PendingPermission represents a permission request waiting for user response
+type PendingPermission struct {
+	ID         string
+	Request    *acpclient.PermissionRequest
+	ResponseCh chan *acpclient.PermissionResponse
+	CreatedAt  time.Time
+}
+
+// PermissionNotification is sent when the agent requests permission
+type PermissionNotification struct {
+	PendingID  string                       `json:"pending_id"`
+	SessionID  string                       `json:"session_id"`
+	ToolCallID string                       `json:"tool_call_id"`
+	Title      string                       `json:"title"`
+	Options    []acpclient.PermissionOption `json:"options"`
+	CreatedAt  time.Time                    `json:"created_at"`
+}
+
 // Manager manages the agent subprocess
 type Manager struct {
 	cfg    *config.Config
@@ -64,6 +82,13 @@ type Manager struct {
 	// Session update notifications
 	updatesCh chan acp.SessionNotification
 
+	// Permission request notifications (sent to backend)
+	permissionCh chan *PermissionNotification
+
+	// Pending permission requests waiting for user response
+	pendingPermissions map[string]*PendingPermission
+	permissionMu       sync.RWMutex
+
 	// Synchronization
 	mu       sync.RWMutex
 	wg       sync.WaitGroup
@@ -75,10 +100,12 @@ type Manager struct {
 // NewManager creates a new process manager
 func NewManager(cfg *config.Config, log *logger.Logger) *Manager {
 	m := &Manager{
-		cfg:          cfg,
-		logger:       log.WithFields(zap.String("component", "process-manager")),
-		outputBuffer: NewOutputBuffer(cfg.OutputBufferSize),
-		updatesCh:    make(chan acp.SessionNotification, 100),
+		cfg:                cfg,
+		logger:             log.WithFields(zap.String("component", "process-manager")),
+		outputBuffer:       NewOutputBuffer(cfg.OutputBufferSize),
+		updatesCh:          make(chan acp.SessionNotification, 100),
+		permissionCh:       make(chan *PermissionNotification, 10),
+		pendingPermissions: make(map[string]*PendingPermission),
 	}
 	m.status.Store(StatusStopped)
 	m.exitCode.Store(-1)
@@ -179,6 +206,7 @@ func (m *Manager) Start(ctx context.Context) error {
 				m.logger.Warn("updates channel full, dropping notification")
 			}
 		}),
+		acpclient.WithPermissionHandler(m.handlePermissionRequest),
 	)
 
 	// Create ACP SDK connection - it handles JSON-RPC communication
@@ -329,3 +357,172 @@ func (m *Manager) GetProcessInfo() map[string]interface{} {
 	return info
 }
 
+// handlePermissionRequest handles permission requests from the agent
+// It stores the pending request and waits for a response from the backend
+func (m *Manager) handlePermissionRequest(ctx context.Context, req *acpclient.PermissionRequest) (*acpclient.PermissionResponse, error) {
+	// Generate a unique ID for this permission request
+	pendingID := fmt.Sprintf("%s-%s-%d", req.SessionID, req.ToolCallID, time.Now().UnixNano())
+
+	m.logger.Info("handling permission request",
+		zap.String("pending_id", pendingID),
+		zap.String("session_id", req.SessionID),
+		zap.String("tool_call_id", req.ToolCallID),
+		zap.String("title", req.Title),
+		zap.Bool("auto_approve", m.cfg.AutoApprovePermissions))
+
+	// If auto-approve is enabled, immediately approve with the first "allow" option
+	if m.cfg.AutoApprovePermissions {
+		return m.autoApprovePermission(req)
+	}
+
+	// Create pending permission with response channel
+	pending := &PendingPermission{
+		ID:         pendingID,
+		Request:    req,
+		ResponseCh: make(chan *acpclient.PermissionResponse, 1),
+		CreatedAt:  time.Now(),
+	}
+
+	// Store pending permission
+	m.permissionMu.Lock()
+	m.pendingPermissions[pendingID] = pending
+	m.permissionMu.Unlock()
+
+	// Clean up when done
+	defer func() {
+		m.permissionMu.Lock()
+		delete(m.pendingPermissions, pendingID)
+		m.permissionMu.Unlock()
+	}()
+
+	// Send notification to backend via updates channel
+	// We use a custom notification type that the backend will recognize
+	m.sendPermissionNotification(pending)
+
+	// Wait for response with timeout
+	select {
+	case resp := <-pending.ResponseCh:
+		m.logger.Info("received permission response",
+			zap.String("pending_id", pendingID),
+			zap.String("option_id", resp.OptionID),
+			zap.Bool("cancelled", resp.Cancelled))
+		return resp, nil
+	case <-ctx.Done():
+		m.logger.Warn("permission request context cancelled",
+			zap.String("pending_id", pendingID))
+		return &acpclient.PermissionResponse{Cancelled: true}, nil
+	case <-time.After(5 * time.Minute):
+		m.logger.Warn("permission request timed out",
+			zap.String("pending_id", pendingID))
+		return &acpclient.PermissionResponse{Cancelled: true}, nil
+	}
+}
+
+// autoApprovePermission automatically approves a permission request
+// by selecting the first "allow" option, or the first option if no allow option exists
+func (m *Manager) autoApprovePermission(req *acpclient.PermissionRequest) (*acpclient.PermissionResponse, error) {
+	if len(req.Options) == 0 {
+		m.logger.Warn("no options available for auto-approve, cancelling")
+		return &acpclient.PermissionResponse{Cancelled: true}, nil
+	}
+
+	// Find the first "allow" option
+	var selectedOption *acpclient.PermissionOption
+	for i := range req.Options {
+		opt := &req.Options[i]
+		if opt.Kind == "allow_once" || opt.Kind == "allow_always" {
+			selectedOption = opt
+			break
+		}
+	}
+
+	// If no allow option, use the first option
+	if selectedOption == nil {
+		selectedOption = &req.Options[0]
+	}
+
+	m.logger.Info("auto-approving permission request",
+		zap.String("option_id", selectedOption.OptionID),
+		zap.String("option_name", selectedOption.Name),
+		zap.String("kind", selectedOption.Kind))
+
+	return &acpclient.PermissionResponse{
+		OptionID: selectedOption.OptionID,
+	}, nil
+}
+
+// sendPermissionNotification sends a permission request notification to the backend
+func (m *Manager) sendPermissionNotification(pending *PendingPermission) {
+	notification := &PermissionNotification{
+		PendingID:  pending.ID,
+		SessionID:  pending.Request.SessionID,
+		ToolCallID: pending.Request.ToolCallID,
+		Title:      pending.Request.Title,
+		Options:    pending.Request.Options,
+		CreatedAt:  pending.CreatedAt,
+	}
+
+	m.logger.Info("sending permission notification to backend",
+		zap.String("pending_id", pending.ID),
+		zap.String("title", pending.Request.Title))
+
+	select {
+	case m.permissionCh <- notification:
+		// Sent successfully
+	default:
+		m.logger.Warn("permission channel full, dropping notification",
+			zap.String("pending_id", pending.ID))
+	}
+}
+
+// GetPermissionRequests returns the channel for permission request notifications
+func (m *Manager) GetPermissionRequests() <-chan *PermissionNotification {
+	return m.permissionCh
+}
+
+// RespondToPermission responds to a pending permission request
+func (m *Manager) RespondToPermission(pendingID string, optionID string, cancelled bool) error {
+	m.permissionMu.RLock()
+	pending, ok := m.pendingPermissions[pendingID]
+	m.permissionMu.RUnlock()
+
+	if !ok {
+		return fmt.Errorf("pending permission not found: %s", pendingID)
+	}
+
+	m.logger.Info("responding to permission request",
+		zap.String("pending_id", pendingID),
+		zap.String("option_id", optionID),
+		zap.Bool("cancelled", cancelled))
+
+	// Send response (non-blocking since channel is buffered)
+	select {
+	case pending.ResponseCh <- &acpclient.PermissionResponse{
+		OptionID:  optionID,
+		Cancelled: cancelled,
+	}:
+		return nil
+	default:
+		return fmt.Errorf("response channel full for pending permission: %s", pendingID)
+	}
+}
+
+// GetPendingPermissions returns all pending permission requests
+func (m *Manager) GetPendingPermissions() []*PendingPermission {
+	m.permissionMu.RLock()
+	defer m.permissionMu.RUnlock()
+
+	result := make([]*PendingPermission, 0, len(m.pendingPermissions))
+	for _, p := range m.pendingPermissions {
+		result = append(result, p)
+	}
+	return result
+}
+
+// GetPendingPermission returns a specific pending permission request
+func (m *Manager) GetPendingPermission(pendingID string) (*PendingPermission, bool) {
+	m.permissionMu.RLock()
+	defer m.permissionMu.RUnlock()
+	p, ok := m.pendingPermissions[pendingID]
+	return p, ok
+}

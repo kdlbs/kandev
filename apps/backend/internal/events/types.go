@@ -64,6 +64,11 @@ const (
 	ACPMessage = "acp.message" // Base subject for ACP messages
 )
 
+// Event types for agent prompts
+const (
+	PromptComplete = "prompt.complete" // Agent finished responding to a prompt
+)
+
 // BuildACPSubject creates an ACP subject for a specific task
 func BuildACPSubject(taskID string) string {
 	return ACPMessage + "." + taskID
