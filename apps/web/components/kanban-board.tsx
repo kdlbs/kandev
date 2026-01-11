@@ -28,17 +28,16 @@ import { useRouter } from 'next/navigation';
 import { useAppStore, useAppStoreApi } from '@/components/state-provider';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import type { ListBoardsResponse } from '@/lib/types/http';
-
-const initialTasks: Task[] = [
-  { id: '1', title: 'Design database schema', status: 'todo' },
-  { id: '2', title: 'Setup agent container environment', status: 'in-progress' },
-  { id: '3', title: 'Implement WebSocket connection', status: 'todo' },
-];
+import { getBackendConfig } from '@/lib/config';
+import { deleteTask, fetchBoardSnapshot, moveTask } from '@/lib/http/client';
+import { snapshotToState } from '@/lib/ssr/mapper';
+import type { Task as BackendTask } from '@/lib/types/http';
 
 export function KanbanBoard() {
-  const [tasks, setTasks] = useState<Task[]>(initialTasks);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
+  const [isMovingTask, setIsMovingTask] = useState(false);
+  const [editingTask, setEditingTask] = useState<Task | null>(null);
   const router = useRouter();
   const kanban = useAppStore((state) => state.kanban);
   const workspaceState = useAppStore((state) => state.workspaces);
@@ -78,12 +77,15 @@ export function KanbanBoard() {
       kanban.tasks.map((task) => ({
         id: task.id,
         title: task.title,
-        status: task.columnId,
+        columnId: task.columnId,
+        state: task.state,
+        description: task.description,
+        position: task.position,
       })),
     [kanban.tasks]
   );
   const activeColumns = kanban.boardId ? backendColumns : [];
-  const visibleTasks = kanban.boardId ? backendTasks : tasks;
+  const visibleTasks = backendTasks;
   const activeTask = useMemo(
     () => visibleTasks.find((task) => task.id === activeTaskId) ?? null,
     [visibleTasks, activeTaskId]
@@ -93,7 +95,7 @@ export function KanbanBoard() {
     setActiveTaskId(event.active.id as string);
   };
 
-  const handleDragEnd = (event: DragEndEvent) => {
+  const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over } = event;
 
     setActiveTaskId(null);
@@ -102,46 +104,114 @@ export function KanbanBoard() {
     const taskId = active.id as string;
     const newStatus = over.id as string;
 
-    if (kanban.boardId) {
-      store.getState().hydrate({
-        kanban: {
-          ...kanban,
-          tasks: kanban.tasks.map((task) =>
-            task.id === taskId ? { ...task, columnId: newStatus } : task
-          ),
-        },
-      });
+    if (!kanban.boardId || isMovingTask) {
       return;
     }
 
-    setTasks((tasks) =>
-      tasks.map((task) =>
-        task.id === taskId ? { ...task, status: newStatus } : task
-      )
-    );
+    const targetTasks = kanban.tasks
+      .filter((task) => task.columnId === newStatus && task.id !== taskId)
+      .sort((a, b) => a.position - b.position);
+    const nextPosition = targetTasks.length;
+    store.getState().hydrate({
+      kanban: {
+        ...kanban,
+        tasks: kanban.tasks.map((task) =>
+          task.id === taskId
+            ? { ...task, columnId: newStatus, position: nextPosition }
+            : task
+        ),
+      },
+    });
+
+    try {
+      setIsMovingTask(true);
+      await moveTask(getBackendConfig().apiBaseUrl, taskId, {
+        board_id: kanban.boardId,
+        column_id: newStatus,
+        position: nextPosition,
+      });
+    } catch {
+      // Ignore move errors for now; WS updates or next snapshot will correct.
+    } finally {
+      setIsMovingTask(false);
+    }
   };
 
   const handleDragCancel = () => {
     setActiveTaskId(null);
   };
 
-  const handleDialogSubmit = (title: string, description?: string) => {
-    const columnId = activeColumns[0]?.id ?? 'todo';
-    const newTask: Task = {
-      id: crypto.randomUUID(),
-      title,
-      status: columnId,
-      description,
-    };
-    setTasks((tasks) => [...tasks, newTask]);
+  const handleDialogSuccess = (task: BackendTask, mode: 'create' | 'edit') => {
+    if (mode === 'create') {
+      store.getState().hydrate({
+        kanban: {
+          ...kanban,
+          tasks: [
+            ...kanban.tasks,
+            {
+              id: task.id,
+              columnId: task.column_id,
+              title: task.title,
+              description: task.description ?? undefined,
+              position: task.position ?? 0,
+              state: task.state,
+            },
+          ],
+        },
+      });
+      return;
+    }
+    store.getState().hydrate({
+      kanban: {
+        ...kanban,
+        tasks: kanban.tasks.map((item) =>
+          item.id === task.id
+            ? {
+                ...item,
+                title: task.title,
+                description: task.description ?? undefined,
+                columnId: task.column_id ?? item.columnId,
+                position: task.position ?? item.position,
+                state: task.state ?? item.state,
+              }
+            : item
+        ),
+      },
+    });
   };
 
   const handleOpenTask = (task: Task) => {
     router.push(`/task/${task.id}`);
   };
 
+  const handleEditTask = (task: Task) => {
+    setEditingTask(task);
+    setIsDialogOpen(true);
+  };
+
+  const handleDeleteTask = async (task: Task) => {
+    if (!kanban.boardId) return;
+    store.getState().hydrate({
+      kanban: {
+        ...kanban,
+        tasks: kanban.tasks.filter((item) => item.id !== task.id),
+      },
+    });
+    try {
+      await deleteTask(getBackendConfig().apiBaseUrl, task.id);
+    } catch {
+      // Ignore delete errors for now.
+    }
+  };
+
   const getTasksForColumn = (columnId: string) => {
-    return visibleTasks.filter((task) => task.status === columnId);
+    return visibleTasks
+      .filter((task) => task.columnId === columnId)
+      .map((task) => {
+        const position = kanban.tasks.find((item) => item.id === task.id)?.position ?? 0;
+        return { ...task, position };
+      })
+      .sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
   };
 
   useEffect(() => {
@@ -170,6 +240,19 @@ export function KanbanBoard() {
         // Ignore board list errors for now.
       });
   }, [setActiveBoard, setBoards, store, workspaceState.activeId]);
+
+  useEffect(() => {
+    if (!boardsState.activeId) return;
+    const boardId = boardsState.activeId;
+    fetchBoardSnapshot(getBackendConfig().apiBaseUrl, boardId)
+      .then((snapshot) => {
+        store.getState().hydrate(snapshotToState(snapshot));
+      })
+      .catch(() => {
+        // Ignore snapshot errors for now.
+      });
+  }, [boardsState.activeId, store]);
+
 
   if (!isMounted) {
     return <div className="h-screen w-full bg-background" />;
@@ -227,7 +310,13 @@ export function KanbanBoard() {
               ))}
             </SelectContent>
           </Select>
-          <Button onClick={() => setIsDialogOpen(true)} className="cursor-pointer">
+          <Button
+            onClick={() => {
+              setEditingTask(null);
+              setIsDialogOpen(true);
+            }}
+            className="cursor-pointer"
+          >
             <IconPlus className="h-4 w-4" />
             Add task
           </Button>
@@ -244,8 +333,36 @@ export function KanbanBoard() {
         open={isDialogOpen}
         onOpenChange={(open) => {
           setIsDialogOpen(open);
+          if (!open) {
+            setEditingTask(null);
+          }
         }}
-        onSubmit={(title, description) => handleDialogSubmit(title, description)}
+        workspaceId={workspaceState.activeId}
+        boardId={kanban.boardId}
+        defaultColumnId={activeColumns[0]?.id ?? null}
+        columns={activeColumns.map((column) => ({ id: column.id, title: column.title }))}
+        editingTask={
+          editingTask
+            ? {
+                id: editingTask.id,
+                title: editingTask.title,
+                description: editingTask.description,
+                columnId: editingTask.columnId,
+                state: editingTask.state as BackendTask['state'],
+              }
+            : null
+        }
+        onSuccess={handleDialogSuccess}
+        initialValues={
+          editingTask
+            ? {
+                title: editingTask.title,
+                description: editingTask.description,
+                state: editingTask.state as BackendTask['state'],
+              }
+            : undefined
+        }
+        submitLabel={editingTask ? 'Update' : 'Create'}
       />
       <DndContext
         sensors={sensors}
@@ -269,6 +386,8 @@ export function KanbanBoard() {
                   column={column}
                   tasks={getTasksForColumn(column.id)}
                   onOpenTask={handleOpenTask}
+                  onEditTask={handleEditTask}
+                  onDeleteTask={handleDeleteTask}
                 />
               ))}
             </div>

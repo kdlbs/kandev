@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -114,6 +115,31 @@ func (s *Service) ValidateLocalRepositoryPath(ctx context.Context, path string) 
 		DefaultBranch: defaultBranch,
 		Message:       message,
 	}, nil
+}
+
+func (s *Service) ListRepositoryBranches(ctx context.Context, repoID string) ([]string, error) {
+	repo, err := s.repo.GetRepository(ctx, repoID)
+	if err != nil {
+		return nil, err
+	}
+	if repo.LocalPath == "" {
+		return nil, fmt.Errorf("repository local path is empty")
+	}
+	absPath, err := filepath.Abs(repo.LocalPath)
+	if err != nil {
+		return nil, fmt.Errorf("invalid repository path: %w", err)
+	}
+	if !isPathAllowed(absPath, s.discoveryRoots()) {
+		return nil, ErrPathNotAllowed
+	}
+	info, err := os.Stat(absPath)
+	if err != nil {
+		return nil, err
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("repository path is not a directory")
+	}
+	return listGitBranches(absPath)
 }
 
 func (s *Service) discoveryRoots() []string {
@@ -310,4 +336,60 @@ func resolveGitDir(repoPath string) (string, error) {
 		return gitDir, nil
 	}
 	return filepath.Clean(filepath.Join(repoPath, gitDir)), nil
+}
+
+func listGitBranches(repoPath string) ([]string, error) {
+	gitDir, err := resolveGitDir(repoPath)
+	if err != nil {
+		return nil, err
+	}
+	branches := make(map[string]struct{})
+
+	refsRoot := filepath.Join(gitDir, "refs", "heads")
+	_ = filepath.WalkDir(refsRoot, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(refsRoot, path)
+		if err != nil {
+			return nil
+		}
+		if rel == "" || rel == "." {
+			return nil
+		}
+		branches[filepath.ToSlash(rel)] = struct{}{}
+		return nil
+	})
+
+	packedRefs := filepath.Join(gitDir, "packed-refs")
+	if content, err := os.ReadFile(packedRefs); err == nil {
+		lines := strings.Split(string(content), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "^") {
+				continue
+			}
+			parts := strings.Split(line, " ")
+			if len(parts) < 2 {
+				continue
+			}
+			ref := parts[1]
+			if strings.HasPrefix(ref, "refs/heads/") {
+				branches[strings.TrimPrefix(ref, "refs/heads/")] = struct{}{}
+			}
+		}
+	}
+
+	if len(branches) == 0 {
+		return nil, fmt.Errorf("no branches found")
+	}
+	result := make([]string, 0, len(branches))
+	for name := range branches {
+		result = append(result, name)
+	}
+	sort.Strings(result)
+	return result, nil
 }

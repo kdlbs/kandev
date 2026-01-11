@@ -1,6 +1,9 @@
 export type BackendMessageType =
   | 'kanban.update'
+  | 'task.created'
   | 'task.updated'
+  | 'task.deleted'
+  | 'task.state_changed'
   | 'agent.updated'
   | 'terminal.output'
   | 'diff.update'
@@ -26,14 +29,25 @@ export type BackendMessage<T extends BackendMessageType, P> = {
 export type KanbanUpdatePayload = {
   boardId: string;
   columns: Array<{ id: string; title: string; color?: string; position?: number }>;
-  tasks: Array<{ id: string; columnId: string; title: string }>;
+  tasks: Array<{
+    id: string;
+    columnId: string;
+    title: string;
+    position?: number;
+    description?: string;
+    state?: string;
+  }>;
 };
 
-export type TaskUpdatePayload = {
-  taskId: string;
-  status: string;
-  title?: string;
+export type TaskEventPayload = {
+  task_id: string;
+  board_id: string;
+  column_id: string;
+  title: string;
   description?: string;
+  state?: string;
+  priority?: number;
+  position?: number;
 };
 
 export type AgentUpdatePayload = {
@@ -94,7 +108,10 @@ export type ColumnPayload = {
 
 export type BackendMessageMap = {
   'kanban.update': BackendMessage<'kanban.update', KanbanUpdatePayload>;
-  'task.updated': BackendMessage<'task.updated', TaskUpdatePayload>;
+  'task.created': BackendMessage<'task.created', TaskEventPayload>;
+  'task.updated': BackendMessage<'task.updated', TaskEventPayload>;
+  'task.deleted': BackendMessage<'task.deleted', TaskEventPayload>;
+  'task.state_changed': BackendMessage<'task.state_changed', TaskEventPayload>;
   'agent.updated': BackendMessage<'agent.updated', AgentUpdatePayload>;
   'terminal.output': BackendMessage<'terminal.output', TerminalOutputPayload>;
   'diff.update': BackendMessage<'diff.update', DiffUpdatePayload>;

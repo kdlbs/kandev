@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import '@git-diff-view/react/styles/diff-view.css';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -9,9 +9,13 @@ import { Textarea } from '@/components/ui/textarea';
 import { getLocalStorage, setLocalStorage } from '@/lib/local-storage';
 import { TaskChatPanel } from '@/components/task/task-chat-panel';
 import { TaskTopBar } from '@/components/task/task-top-bar';
+import type { Task } from '@/lib/types/http';
 import { TaskFilesPanel } from '@/components/task/task-files-panel';
 import { TaskChangesPanel } from '@/components/task/task-changes-panel';
 import { TaskRightPanel } from '@/components/task/task-right-panel';
+import { getBackendConfig } from '@/lib/config';
+import { listRepositories, listRepositoryBranches } from '@/lib/http/client';
+import { useRequest } from '@/lib/http/use-request';
 
 type ChatMessage = {
   id: string;
@@ -40,25 +44,51 @@ const INITIAL_CHATS: ChatSession[] = [
         role: 'agent',
         content: 'I can help with this task. What should I tackle first?',
       },
-      {
-        id: 'm2',
-        role: 'user',
-        content: 'Please review the changes and summarize the key diffs.',
-      },
     ],
   },
 ];
 
+type TaskPageClientProps = {
+  task: Task | null;
+};
 
-export default function TaskPage() {
+function buildInitialChats(taskPrompt?: string): ChatSession[] {
+  if (!taskPrompt) {
+    return INITIAL_CHATS;
+  }
+  return [
+    {
+      ...INITIAL_CHATS[0],
+      messages: [
+        {
+          id: 'prompt',
+          role: 'user',
+          content: taskPrompt,
+        },
+        ...INITIAL_CHATS[0].messages,
+      ],
+    },
+  ];
+}
+
+export default function TaskPage({ task }: TaskPageClientProps) {
   const defaultHorizontalLayout: [number, number] = [75, 25];
   const [horizontalLayout, setHorizontalLayout] = useState<[number, number]>(() =>
     getLocalStorage('task-layout-horizontal', defaultHorizontalLayout)
   );
-  const [chats, setChats] = useState<ChatSession[]>(INITIAL_CHATS);
+  const [chats, setChats] = useState<ChatSession[]>(() =>
+    buildInitialChats(task?.description ?? '')
+  );
   const [leftTab, setLeftTab] = useState('chat');
   const [selectedDiffPath, setSelectedDiffPath] = useState<string | null>(null);
   const [notes, setNotes] = useState('');
+  const branchesRequest = useRequest(async (workspaceId: string, repoPath: string) => {
+    const response = await listRepositories(getBackendConfig().apiBaseUrl, workspaceId);
+    const repo = response.repositories.find((item) => item.local_path === repoPath);
+    if (!repo) return [];
+    const branchResponse = await listRepositoryBranches(getBackendConfig().apiBaseUrl, repo.id);
+    return branchResponse.branches;
+  });
 
   const activeChat = chats[0];
 
@@ -83,10 +113,20 @@ export default function TaskPage() {
 
   const topFilesPanel = <TaskFilesPanel onSelectDiffPath={handleSelectDiffPath} />;
 
+  useEffect(() => {
+    if (!task?.workspace_id || !task.repository_url) return;
+    branchesRequest.run(task.workspace_id, task.repository_url).catch(() => {});
+  }, [branchesRequest, task?.repository_url, task?.workspace_id]);
+
   return (
     <TooltipProvider>
       <div className="h-screen w-full flex flex-col bg-background">
-      <TaskTopBar />
+      <TaskTopBar
+        taskTitle={task?.title}
+        baseBranch={task?.branch ?? undefined}
+        branches={task?.repository_url ? branchesRequest.data ?? [] : []}
+        branchesLoading={branchesRequest.isLoading}
+      />
 
       <div className="flex-1 min-h-0 px-4 pb-4">
         <ResizablePanelGroup

@@ -1,8 +1,11 @@
 export type TaskState =
+  | 'CREATED'
+  | 'SCHEDULING'
   | 'TODO'
   | 'IN_PROGRESS'
   | 'REVIEW'
   | 'BLOCKED'
+  | 'WAITING_FOR_INPUT'
   | 'COMPLETED'
   | 'FAILED'
   | 'CANCELLED';
@@ -127,6 +130,11 @@ export type RepositoryPathValidationResponse = {
   allowed: boolean;
   default_branch?: string;
   message?: string;
+};
+
+export type RepositoryBranchesResponse = {
+  branches: string[];
+  total: number;
 };
 
 export type ListWorkspacesResponse = {

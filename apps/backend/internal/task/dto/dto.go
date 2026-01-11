@@ -114,6 +114,11 @@ type ListRepositoryScriptsResponse struct {
 	Total   int                   `json:"total"`
 }
 
+type RepositoryBranchesResponse struct {
+	Branches []string `json:"branches"`
+	Total    int      `json:"total"`
+}
+
 type LocalRepositoryDTO struct {
 	Path          string `json:"path"`
 	Name          string `json:"name"`

@@ -1,11 +1,19 @@
 import type { ReactNode } from 'react';
+import type { TaskState as TaskStatus } from '@/lib/types/http';
 import { createStore } from 'zustand/vanilla';
 import { immer } from 'zustand/middleware/immer';
 
 export type KanbanState = {
   boardId: string | null;
   columns: Array<{ id: string; title: string; color: string; position: number }>;
-  tasks: Array<{ id: string; columnId: string; title: string }>;
+  tasks: Array<{
+    id: string;
+    columnId: string;
+    title: string;
+    description?: string;
+    position: number;
+    state?: TaskStatus;
+  }>;
 };
 
 export type WorkspaceState = {

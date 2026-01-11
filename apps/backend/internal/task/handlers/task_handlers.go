@@ -38,6 +38,7 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api.GET("/tasks/:id", h.httpGetTask)
 	api.POST("/tasks", h.httpCreateTask)
 	api.PATCH("/tasks/:id", h.httpUpdateTask)
+	api.POST("/tasks/:id/move", h.httpMoveTask)
 	api.DELETE("/tasks/:id", h.httpDeleteTask)
 }
 
@@ -78,6 +79,7 @@ type httpCreateTaskRequest struct {
 	Title         string                 `json:"title"`
 	Description   string                 `json:"description,omitempty"`
 	Priority      int                    `json:"priority,omitempty"`
+	State         *v1.TaskState          `json:"state,omitempty"`
 	AgentType     string                 `json:"agent_type,omitempty"`
 	RepositoryURL string                 `json:"repository_url,omitempty"`
 	Branch        string                 `json:"branch,omitempty"`
@@ -103,6 +105,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		Title:         body.Title,
 		Description:   body.Description,
 		Priority:      body.Priority,
+		State:         body.State,
 		AgentType:     body.AgentType,
 		RepositoryURL: body.RepositoryURL,
 		Branch:        body.Branch,
@@ -121,6 +124,7 @@ type httpUpdateTaskRequest struct {
 	Title       *string                `json:"title,omitempty"`
 	Description *string                `json:"description,omitempty"`
 	Priority    *int                   `json:"priority,omitempty"`
+	State       *v1.TaskState          `json:"state,omitempty"`
 	AgentType   *string                `json:"agent_type,omitempty"`
 	AssignedTo  *string                `json:"assigned_to,omitempty"`
 	Position    *int                   `json:"position,omitempty"`
@@ -138,6 +142,7 @@ func (h *TaskHandlers) httpUpdateTask(c *gin.Context) {
 		Title:       body.Title,
 		Description: body.Description,
 		Priority:    body.Priority,
+		State:       body.State,
 		AgentType:   body.AgentType,
 		AssignedTo:  body.AssignedTo,
 		Position:    body.Position,
@@ -145,6 +150,35 @@ func (h *TaskHandlers) httpUpdateTask(c *gin.Context) {
 	})
 	if err != nil {
 		handleNotFound(c, h.logger, err, "task not updated")
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+type httpMoveTaskRequest struct {
+	BoardID  string `json:"board_id"`
+	ColumnID string `json:"column_id"`
+	Position int    `json:"position"`
+}
+
+func (h *TaskHandlers) httpMoveTask(c *gin.Context) {
+	var body httpMoveTaskRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	if body.BoardID == "" || body.ColumnID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "board_id and column_id are required"})
+		return
+	}
+	resp, err := h.controller.MoveTask(c.Request.Context(), dto.MoveTaskRequest{
+		ID:       c.Param("id"),
+		BoardID:  body.BoardID,
+		ColumnID: body.ColumnID,
+		Position: body.Position,
+	})
+	if err != nil {
+		handleNotFound(c, h.logger, err, "task not moved")
 		return
 	}
 	c.JSON(http.StatusOK, resp)
@@ -189,6 +223,7 @@ type wsCreateTaskRequest struct {
 	Title         string                 `json:"title"`
 	Description   string                 `json:"description,omitempty"`
 	Priority      int                    `json:"priority,omitempty"`
+	State         *v1.TaskState          `json:"state,omitempty"`
 	AgentType     string                 `json:"agent_type,omitempty"`
 	RepositoryURL string                 `json:"repository_url,omitempty"`
 	Branch        string                 `json:"branch,omitempty"`
@@ -222,6 +257,7 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		Title:         req.Title,
 		Description:   req.Description,
 		Priority:      req.Priority,
+		State:         req.State,
 		AgentType:     req.AgentType,
 		RepositoryURL: req.RepositoryURL,
 		Branch:        req.Branch,
@@ -261,6 +297,7 @@ type wsUpdateTaskRequest struct {
 	Title       *string                `json:"title,omitempty"`
 	Description *string                `json:"description,omitempty"`
 	Priority    *int                   `json:"priority,omitempty"`
+	State       *v1.TaskState          `json:"state,omitempty"`
 	AgentType   *string                `json:"agent_type,omitempty"`
 	AssignedTo  *string                `json:"assigned_to,omitempty"`
 	Position    *int                   `json:"position,omitempty"`
@@ -281,6 +318,7 @@ func (h *TaskHandlers) wsUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		Title:       req.Title,
 		Description: req.Description,
 		Priority:    req.Priority,
+		State:       req.State,
 		AgentType:   req.AgentType,
 		AssignedTo:  req.AssignedTo,
 		Position:    req.Position,

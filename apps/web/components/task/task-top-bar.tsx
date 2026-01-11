@@ -22,9 +22,22 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
-const TaskTopBar = memo(function TaskTopBar() {
+type TaskTopBarProps = {
+  taskTitle?: string;
+  baseBranch?: string;
+  branches?: string[];
+  branchesLoading?: boolean;
+};
+
+const TaskTopBar = memo(function TaskTopBar({
+  taskTitle,
+  baseBranch,
+  branches = [],
+  branchesLoading = false,
+}: TaskTopBarProps) {
   const [branchName, setBranchName] = useState('feature/agent-ui');
   const [isEditingBranch, setIsEditingBranch] = useState(false);
+  const [selectedBaseBranch, setSelectedBaseBranch] = useState(baseBranch ?? 'origin/main');
 
   return (
     <header className="flex items-center justify-between p-3">
@@ -35,7 +48,7 @@ const TaskTopBar = memo(function TaskTopBar() {
             Back
           </Link>
         </Button>
-        <span className="text-xs text-muted-foreground">Task details</span>
+        <span className="text-xs text-muted-foreground">{taskTitle ?? 'Task details'}</span>
         <div className="flex items-center gap-2">
           <div className="group flex items-center gap-2 rounded-md px-2 h-8 hover:bg-muted/40 cursor-default">
             <IconGitFork className="h-4 w-4 text-muted-foreground" />
@@ -85,19 +98,33 @@ const TaskTopBar = memo(function TaskTopBar() {
             )}
           </div>
           <IconChevronRight className="h-4 w-4 text-muted-foreground" />
-          <Select defaultValue="origin/main">
+          <Select
+            value={selectedBaseBranch}
+            onValueChange={setSelectedBaseBranch}
+            disabled={branches.length === 0 && !branchesLoading}
+          >
             <Tooltip>
               <TooltipTrigger asChild>
                 <SelectTrigger className="w-[190px] h-8 cursor-pointer border border-transparent bg-transparent hover:bg-muted/40 data-[state=open]:bg-background data-[state=open]:border-border/70">
-                  <SelectValue placeholder="Base branch" />
+                  <SelectValue
+                    placeholder={branchesLoading ? 'Loading branches...' : 'Base branch'}
+                  />
                 </SelectTrigger>
               </TooltipTrigger>
               <TooltipContent>Change base branch</TooltipContent>
             </Tooltip>
             <SelectContent>
-              <SelectItem value="origin/main">origin/main</SelectItem>
-              <SelectItem value="origin/develop">origin/develop</SelectItem>
-              <SelectItem value="origin/release">origin/release</SelectItem>
+              {branches.length === 0 ? (
+                <SelectItem value={selectedBaseBranch} disabled>
+                  {selectedBaseBranch}
+                </SelectItem>
+              ) : (
+                branches.map((branch) => (
+                  <SelectItem key={branch} value={branch}>
+                    {branch}
+                  </SelectItem>
+                ))
+              )}
             </SelectContent>
           </Select>
         </div>

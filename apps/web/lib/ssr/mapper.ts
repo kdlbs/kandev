@@ -6,9 +6,27 @@ export function snapshotToState(snapshot: BoardSnapshot): Partial<AppState> {
     .map((task) => {
       const columnId = task.column_id;
       if (!columnId) return null;
-      return { id: task.id, columnId, title: task.title };
+      return {
+        id: task.id,
+        columnId,
+        title: task.title,
+        description: task.description ?? undefined,
+        position: task.position ?? 0,
+        state: task.state,
+      };
     })
-    .filter((task): task is { id: string; columnId: string; title: string } => Boolean(task));
+    .filter(
+      (
+        task
+      ): task is {
+        id: string;
+        columnId: string;
+        title: string;
+        description?: string;
+        position: number;
+        state?: Task['state'];
+      } => Boolean(task)
+    );
 
   return {
     kanban: {

@@ -15,18 +15,98 @@ export function registerWsHandlers(store: StoreApi<AppState>) {
             color: column.color ?? 'bg-neutral-400',
             position: column.position ?? index,
           })),
-          tasks: message.payload.tasks,
+          tasks: message.payload.tasks.map((task) => ({
+            id: task.id,
+            columnId: task.columnId,
+            title: task.title,
+            description: task.description,
+            position: task.position ?? 0,
+            state: task.state,
+          })),
         },
       }));
     },
+    'task.created': (message: BackendMessageMap['task.created']) => {
+      store.setState((state) => {
+        if (state.kanban.boardId !== message.payload.board_id) {
+          return state;
+        }
+        const exists = state.kanban.tasks.some((task) => task.id === message.payload.task_id);
+        const nextTask = {
+          id: message.payload.task_id,
+          columnId: message.payload.column_id,
+          title: message.payload.title,
+          description: message.payload.description,
+          position: message.payload.position ?? 0,
+          state: message.payload.state,
+        };
+        return {
+          ...state,
+          kanban: {
+            ...state.kanban,
+            tasks: exists
+              ? state.kanban.tasks.map((task) => (task.id === nextTask.id ? nextTask : task))
+              : [...state.kanban.tasks, nextTask],
+          },
+        };
+      });
+    },
     'task.updated': (message: BackendMessageMap['task.updated']) => {
+      store.setState((state) => {
+        if (state.kanban.boardId !== message.payload.board_id) {
+          return state;
+        }
+        const nextTask = {
+          id: message.payload.task_id,
+          columnId: message.payload.column_id,
+          title: message.payload.title,
+          description: message.payload.description,
+          position: message.payload.position ?? 0,
+          state: message.payload.state,
+        };
+        return {
+          ...state,
+          kanban: {
+            ...state.kanban,
+            tasks: state.kanban.tasks.some((task) => task.id === nextTask.id)
+              ? state.kanban.tasks.map((task) => (task.id === nextTask.id ? nextTask : task))
+              : [...state.kanban.tasks, nextTask],
+          },
+        };
+      });
+    },
+    'task.deleted': (message: BackendMessageMap['task.deleted']) => {
       store.setState((state) => ({
         ...state,
-        tasks: {
-          ...state.tasks,
-          activeTaskId: message.payload.taskId,
+        kanban: {
+          ...state.kanban,
+          tasks: state.kanban.tasks.filter((task) => task.id !== message.payload.task_id),
         },
       }));
+    },
+    'task.state_changed': (message: BackendMessageMap['task.state_changed']) => {
+      store.setState((state) => {
+        if (state.kanban.boardId !== message.payload.board_id) {
+          return state;
+        }
+        const nextTask = {
+          id: message.payload.task_id,
+          columnId: message.payload.column_id,
+          title: message.payload.title,
+          description: message.payload.description,
+          position: message.payload.position ?? 0,
+          state: message.payload.state,
+        };
+        return {
+          ...state,
+          kanban: {
+            ...state.kanban,
+            tasks: state.kanban.tasks.some((task) => task.id === nextTask.id)
+              ? state.kanban.tasks.map((task) => (task.id === nextTask.id ? nextTask : task))
+              : [...state.kanban.tasks, nextTask],
+          },
+        };
+      });
     },
     'agent.updated': (message: BackendMessageMap['agent.updated']) => {
       store.setState((state) => ({

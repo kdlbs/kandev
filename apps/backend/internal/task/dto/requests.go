@@ -138,6 +138,10 @@ type DeleteRepositoryScriptRequest struct {
 	ID string
 }
 
+type ListRepositoryBranchesRequest struct {
+	ID string
+}
+
 type DiscoverRepositoriesRequest struct {
 	WorkspaceID string
 	Root        string
@@ -167,6 +171,7 @@ type CreateTaskRequest struct {
 	Title         string
 	Description   string
 	Priority      int
+	State         *v1.TaskState
 	AgentType     string
 	RepositoryURL string
 	Branch        string
@@ -180,6 +185,7 @@ type UpdateTaskRequest struct {
 	Title       *string
 	Description *string
 	Priority    *int
+	State       *v1.TaskState
 	AgentType   *string
 	AssignedTo  *string
 	Position    *int

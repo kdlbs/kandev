@@ -15,9 +15,11 @@ interface KanbanColumnProps {
   column: Column;
   tasks: Task[];
   onOpenTask: (task: Task) => void;
+  onEditTask: (task: Task) => void;
+  onDeleteTask: (task: Task) => void;
 }
 
-export function KanbanColumn({ column, tasks, onOpenTask }: KanbanColumnProps) {
+export function KanbanColumn({ column, tasks, onOpenTask, onEditTask, onDeleteTask }: KanbanColumnProps) {
   const { setNodeRef, isOver } = useDroppable({
     id: column.id,
   });
@@ -47,7 +49,13 @@ export function KanbanColumn({ column, tasks, onOpenTask }: KanbanColumnProps) {
           <p className="text-sm text-muted-foreground text-center mt-8">No tasks yet</p>
         ) : (
           tasks.map((task) => (
-            <KanbanCard key={task.id} task={task} onClick={onOpenTask} />
+            <KanbanCard
+              key={task.id}
+              task={task}
+              onClick={onOpenTask}
+              onEdit={onEditTask}
+              onDelete={onDeleteTask}
+            />
           ))
         )}
       </div>

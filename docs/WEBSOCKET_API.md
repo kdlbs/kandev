@@ -1086,7 +1086,7 @@ Tasks are work items that can be executed by AI agents.
 | Payload Field | Type | Required | Description |
 |--------------|------|----------|-------------|
 | `id` | string | ✅ | Task ID |
-| `state` | string | ✅ | New state: `TODO`, `IN_PROGRESS`, `BLOCKED`, `COMPLETED`, `FAILED`, `CANCELLED` |
+| `state` | string | ✅ | New state: `CREATED`, `SCHEDULING`, `TODO`, `IN_PROGRESS`, `REVIEW`, `BLOCKED`, `WAITING_FOR_INPUT`, `COMPLETED`, `FAILED`, `CANCELLED` |
 
 **Response:** Updated task object
 
@@ -1137,7 +1137,10 @@ Subscriptions enable real-time streaming of agent output (ACP) to specific clien
 - `acp.log` - Agent log messages
 - `acp.result` - Agent results
 - `acp.error` - Agent errors
-- `task.updated` - Task state changes
+- `task.created` - Task created
+- `task.updated` - Task properties changed
+- `task.deleted` - Task deleted
+- `task.state_changed` - Task state changed
 
 ### `task.unsubscribe`
 
@@ -2075,11 +2078,186 @@ These are push notifications from the server to subscribed clients. They have `t
   "type": "notification",
   "action": "task.updated",
   "payload": {
-    "id": "task-uuid",
+    "task_id": "task-uuid",
+    "board_id": "board-uuid",
+    "column_id": "column-uuid",
+    "title": "Implement user authentication",
+    "description": "Add JWT validation and refresh tokens",
     "state": "IN_PROGRESS",
-    "previous_state": "TODO"
+    "priority": 2,
+    "position": 1,
+    "created_at": "2026-01-10T12:00:00Z",
+    "updated_at": "2026-01-10T12:05:00Z"
   },
   "timestamp": "2026-01-10T12:00:05Z"
+}
+```
+
+### `task.created`
+
+**Purpose:** Task created.
+
+```json
+{
+  "type": "notification",
+  "action": "task.created",
+  "payload": {
+    "task_id": "task-uuid",
+    "board_id": "board-uuid",
+    "column_id": "column-uuid",
+    "title": "Implement user authentication",
+    "description": "Add JWT validation and refresh tokens",
+    "state": "CREATED",
+    "priority": 2,
+    "position": 0,
+    "created_at": "2026-01-10T12:00:00Z",
+    "updated_at": "2026-01-10T12:00:00Z"
+  },
+  "timestamp": "2026-01-10T12:00:00Z"
+}
+```
+
+### `task.deleted`
+
+**Purpose:** Task deleted.
+
+```json
+{
+  "type": "notification",
+  "action": "task.deleted",
+  "payload": {
+    "task_id": "task-uuid",
+    "board_id": "board-uuid",
+    "column_id": "column-uuid",
+    "title": "Implement user authentication"
+  },
+  "timestamp": "2026-01-10T12:30:00Z"
+}
+```
+
+### `task.state_changed`
+
+**Purpose:** Task state changed.
+
+```json
+{
+  "type": "notification",
+  "action": "task.state_changed",
+  "payload": {
+    "task_id": "task-uuid",
+    "board_id": "board-uuid",
+    "column_id": "column-uuid",
+    "title": "Implement user authentication",
+    "state": "IN_PROGRESS",
+    "old_state": "TODO",
+    "new_state": "IN_PROGRESS",
+    "updated_at": "2026-01-10T12:10:00Z"
+  },
+  "timestamp": "2026-01-10T12:10:00Z"
+}
+```
+
+### `workspace.created` / `workspace.updated` / `workspace.deleted`
+
+**Purpose:** Workspace lifecycle notifications.
+
+```json
+{
+  "type": "notification",
+  "action": "workspace.updated",
+  "payload": {
+    "id": "workspace-uuid",
+    "name": "Kandev",
+    "description": "Primary workspace",
+    "owner_id": "user-uuid",
+    "created_at": "2026-01-10T12:00:00Z",
+    "updated_at": "2026-01-10T12:20:00Z"
+  },
+  "timestamp": "2026-01-10T12:20:00Z"
+}
+```
+
+### `board.created` / `board.updated` / `board.deleted`
+
+**Purpose:** Board lifecycle notifications.
+
+```json
+{
+  "type": "notification",
+  "action": "board.updated",
+  "payload": {
+    "id": "board-uuid",
+    "workspace_id": "workspace-uuid",
+    "name": "Dev",
+    "description": "Default board",
+    "created_at": "2026-01-10T12:00:00Z",
+    "updated_at": "2026-01-10T12:25:00Z"
+  },
+  "timestamp": "2026-01-10T12:25:00Z"
+}
+```
+
+### `column.created` / `column.updated` / `column.deleted`
+
+**Purpose:** Column lifecycle notifications.
+
+```json
+{
+  "type": "notification",
+  "action": "column.updated",
+  "payload": {
+    "id": "column-uuid",
+    "board_id": "board-uuid",
+    "name": "In Progress",
+    "position": 1,
+    "state": "IN_PROGRESS",
+    "color": "bg-blue-500",
+    "created_at": "2026-01-10T12:00:00Z",
+    "updated_at": "2026-01-10T12:30:00Z"
+  },
+  "timestamp": "2026-01-10T12:30:00Z"
+}
+```
+
+### `repository.created` / `repository.updated` / `repository.deleted`
+
+**Purpose:** Repository lifecycle notifications.
+
+```json
+{
+  "type": "notification",
+  "action": "repository.updated",
+  "payload": {
+    "id": "repo-uuid",
+    "workspace_id": "workspace-uuid",
+    "name": "kandev",
+    "source_type": "local",
+    "local_path": "/Users/cfl/Projects/kandev",
+    "provider": "",
+    "default_branch": "main",
+    "updated_at": "2026-01-10T12:40:00Z"
+  },
+  "timestamp": "2026-01-10T12:40:00Z"
+}
+```
+
+### `repository.script.created` / `repository.script.updated` / `repository.script.deleted`
+
+**Purpose:** Repository script lifecycle notifications.
+
+```json
+{
+  "type": "notification",
+  "action": "repository.script.updated",
+  "payload": {
+    "id": "script-uuid",
+    "repository_id": "repo-uuid",
+    "name": "Setup",
+    "command": "npm install",
+    "position": 0,
+    "updated_at": "2026-01-10T12:45:00Z"
+  },
+  "timestamp": "2026-01-10T12:45:00Z"
 }
 ```
 
@@ -2272,4 +2450,3 @@ async function runTask() {
 | `column.created` | Column was created |
 | `column.updated` | Column was updated |
 | `column.deleted` | Column was deleted |
-

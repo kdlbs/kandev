@@ -139,6 +139,17 @@ func (c *RepositoryController) DeleteRepositoryScript(ctx context.Context, req d
 	return dto.SuccessResponse{Success: true}, nil
 }
 
+func (c *RepositoryController) ListRepositoryBranches(ctx context.Context, req dto.ListRepositoryBranchesRequest) (dto.RepositoryBranchesResponse, error) {
+	branches, err := c.service.ListRepositoryBranches(ctx, req.ID)
+	if err != nil {
+		return dto.RepositoryBranchesResponse{}, err
+	}
+	return dto.RepositoryBranchesResponse{
+		Branches: branches,
+		Total:    len(branches),
+	}, nil
+}
+
 func (c *RepositoryController) DiscoverRepositories(ctx context.Context, req dto.DiscoverRepositoriesRequest) (dto.RepositoryDiscoveryResponse, error) {
 	result, err := c.service.DiscoverLocalRepositories(ctx, req.Root)
 	if err != nil {

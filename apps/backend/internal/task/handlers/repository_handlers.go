@@ -40,6 +40,7 @@ func (h *RepositoryHandlers) registerHTTP(router *gin.Engine) {
 	api.GET("/workspaces/:id/repositories/discover", h.httpDiscoverRepositories)
 	api.GET("/workspaces/:id/repositories/validate", h.httpValidateRepositoryPath)
 	api.GET("/repositories/:id", h.httpGetRepository)
+	api.GET("/repositories/:id/branches", h.httpListRepositoryBranches)
 	api.PATCH("/repositories/:id", h.httpUpdateRepository)
 	api.DELETE("/repositories/:id", h.httpDeleteRepository)
 	api.GET("/repositories/:id/scripts", h.httpListRepositoryScripts)
@@ -158,6 +159,20 @@ func (h *RepositoryHandlers) httpGetRepository(c *gin.Context) {
 	resp, err := h.controller.GetRepository(c.Request.Context(), dto.GetRepositoryRequest{ID: c.Param("id")})
 	if err != nil {
 		handleNotFound(c, h.logger, err, "repository not found")
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+func (h *RepositoryHandlers) httpListRepositoryBranches(c *gin.Context) {
+	resp, err := h.controller.ListRepositoryBranches(c.Request.Context(), dto.ListRepositoryBranchesRequest{ID: c.Param("id")})
+	if err != nil {
+		if errors.Is(err, service.ErrPathNotAllowed) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "repository path is not allowed"})
+			return
+		}
+		h.logger.Error("failed to list repository branches", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list repository branches"})
 		return
 	}
 	c.JSON(http.StatusOK, resp)

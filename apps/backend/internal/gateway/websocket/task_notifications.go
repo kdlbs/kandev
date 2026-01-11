@@ -11,9 +11,9 @@ import (
 )
 
 type TaskEventBroadcaster struct {
-	hub          *Hub
+	hub           *Hub
 	subscriptions []bus.Subscription
-	logger       *logger.Logger
+	logger        *logger.Logger
 }
 
 func RegisterTaskNotifications(ctx context.Context, eventBus bus.EventBus, hub *Hub, log *logger.Logger) *TaskEventBroadcaster {
@@ -34,6 +34,10 @@ func RegisterTaskNotifications(ctx context.Context, eventBus bus.EventBus, hub *
 	b.subscribe(eventBus, events.ColumnCreated, ws.ActionColumnCreated)
 	b.subscribe(eventBus, events.ColumnUpdated, ws.ActionColumnUpdated)
 	b.subscribe(eventBus, events.ColumnDeleted, ws.ActionColumnDeleted)
+	b.subscribe(eventBus, events.TaskCreated, ws.ActionTaskCreated)
+	b.subscribe(eventBus, events.TaskUpdated, ws.ActionTaskUpdated)
+	b.subscribe(eventBus, events.TaskDeleted, ws.ActionTaskDeleted)
+	b.subscribe(eventBus, events.TaskStateChanged, ws.ActionTaskStateChanged)
 	b.subscribe(eventBus, events.RepositoryCreated, ws.ActionRepositoryCreated)
 	b.subscribe(eventBus, events.RepositoryUpdated, ws.ActionRepositoryUpdated)
 	b.subscribe(eventBus, events.RepositoryDeleted, ws.ActionRepositoryDeleted)

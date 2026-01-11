@@ -43,6 +43,7 @@ type CreateTaskRequest struct {
 	Title         string                 `json:"title"`
 	Description   string                 `json:"description"`
 	Priority      int                    `json:"priority"`
+	State         *v1.TaskState          `json:"state,omitempty"`
 	AgentType     string                 `json:"agent_type,omitempty"`
 	RepositoryURL string                 `json:"repository_url,omitempty"`
 	Branch        string                 `json:"branch,omitempty"`
@@ -56,6 +57,7 @@ type UpdateTaskRequest struct {
 	Title       *string                `json:"title,omitempty"`
 	Description *string                `json:"description,omitempty"`
 	Priority    *int                   `json:"priority,omitempty"`
+	State       *v1.TaskState          `json:"state,omitempty"`
 	AgentType   *string                `json:"agent_type,omitempty"`
 	AssignedTo  *string                `json:"assigned_to,omitempty"`
 	Position    *int                   `json:"position,omitempty"`
@@ -153,6 +155,10 @@ type UpdateRepositoryScriptRequest struct {
 
 // CreateTask creates a new task and publishes a task.created event
 func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*models.Task, error) {
+	state := v1.TaskStateCreated
+	if req.State != nil {
+		state = *req.State
+	}
 	task := &models.Task{
 		ID:            uuid.New().String(),
 		WorkspaceID:   req.WorkspaceID,
@@ -160,7 +166,7 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*mode
 		ColumnID:      req.ColumnID,
 		Title:         req.Title,
 		Description:   req.Description,
-		State:         v1.TaskStateTODO,
+		State:         state,
 		Priority:      req.Priority,
 		AgentType:     req.AgentType,
 		RepositoryURL: req.RepositoryURL,
@@ -192,6 +198,8 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 	if err != nil {
 		return nil, err
 	}
+	var oldState *v1.TaskState
+	stateChanged := false
 
 	if req.Title != nil {
 		task.Title = *req.Title
@@ -201,6 +209,12 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 	}
 	if req.Priority != nil {
 		task.Priority = *req.Priority
+	}
+	if req.State != nil && task.State != *req.State {
+		current := task.State
+		oldState = &current
+		task.State = *req.State
+		stateChanged = true
 	}
 	if req.AgentType != nil {
 		task.AgentType = *req.AgentType
@@ -221,6 +235,9 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 		return nil, err
 	}
 
+	if stateChanged && oldState != nil {
+		s.publishTaskEvent(ctx, events.TaskStateChanged, task, oldState)
+	}
 	s.publishTaskEvent(ctx, events.TaskUpdated, task, nil)
 	s.logger.Info("task updated", zap.String("task_id", task.ID))
 

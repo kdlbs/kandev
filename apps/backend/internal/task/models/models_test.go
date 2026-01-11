@@ -13,10 +13,13 @@ func TestTaskStateConstants(t *testing.T) {
 		state    v1.TaskState
 		expected string
 	}{
+		{"CREATED state", v1.TaskStateCreated, "CREATED"},
+		{"SCHEDULING state", v1.TaskStateScheduling, "SCHEDULING"},
 		{"TODO state", v1.TaskStateTODO, "TODO"},
 		{"IN_PROGRESS state", v1.TaskStateInProgress, "IN_PROGRESS"},
 		{"REVIEW state", v1.TaskStateReview, "REVIEW"},
 		{"BLOCKED state", v1.TaskStateBlocked, "BLOCKED"},
+		{"WAITING_FOR_INPUT state", v1.TaskStateWaitingForInput, "WAITING_FOR_INPUT"},
 		{"COMPLETED state", v1.TaskStateCompleted, "COMPLETED"},
 		{"FAILED state", v1.TaskStateFailed, "FAILED"},
 		{"CANCELLED state", v1.TaskStateCancelled, "CANCELLED"},
