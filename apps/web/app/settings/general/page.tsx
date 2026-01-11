@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useTheme } from 'next-themes';
-import { IconPalette, IconCode, IconBell } from '@tabler/icons-react';
+import { IconPalette, IconCode, IconBell, IconServer } from '@tabler/icons-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
@@ -10,6 +10,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Separator } from '@/components/ui/separator';
 import { SettingsSection } from '@/components/settings/settings-section';
 import { SETTINGS_DATA } from '@/lib/settings/dummy-data';
+import { getLocalStorage, setLocalStorage } from '@/lib/local-storage';
+import { STORAGE_KEYS, DEFAULT_BACKEND_URL } from '@/lib/settings/constants';
+import { isValidBackendUrl } from '@/lib/websocket/utils';
 import type { Theme, Editor, Notifications } from '@/lib/settings/types';
 
 export default function GeneralSettingsPage() {
@@ -21,14 +24,31 @@ export default function GeneralSettingsPage() {
   const [notifications, setNotifications] = useState<Notifications>(
     SETTINGS_DATA.general.notifications
   );
+  const [backendUrl, setBackendUrl] = useState<string>('');
+  const [backendUrlError, setBackendUrlError] = useState<string>('');
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     setMounted(true);
+    const savedBackendUrl = getLocalStorage(STORAGE_KEYS.BACKEND_URL, DEFAULT_BACKEND_URL);
+    setBackendUrl(savedBackendUrl);
   }, []);
 
   const handleNotificationToggle = (key: keyof Notifications) => {
     setNotifications((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  const handleBackendUrlChange = (value: string) => {
+    setBackendUrl(value);
+    setBackendUrlError('');
+
+    if (value && !isValidBackendUrl(value)) {
+      setBackendUrlError('Invalid URL format. Must start with http:// or https://');
+      return;
+    }
+
+    setLocalStorage(STORAGE_KEYS.BACKEND_URL, value);
+    // WebSocket reconnection will be handled by Zustand store later
   };
 
   if (!mounted) {
@@ -213,6 +233,39 @@ export default function GeneralSettingsPage() {
                   />
                 </button>
               </div>
+            </div>
+          </CardContent>
+        </Card>
+      </SettingsSection>
+
+      <Separator />
+
+      <SettingsSection
+        icon={<IconServer className="h-5 w-5" />}
+        title="Backend Connection"
+        description="Configure the backend server URL"
+      >
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Backend Server URL</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              <Label htmlFor="backend-url">Server URL</Label>
+              <Input
+                id="backend-url"
+                type="url"
+                value={backendUrl}
+                onChange={(e) => handleBackendUrlChange(e.target.value)}
+                placeholder="http://localhost:8080"
+                className={backendUrlError ? 'border-red-500' : ''}
+              />
+              {backendUrlError && (
+                <p className="text-xs text-red-500">{backendUrlError}</p>
+              )}
+              <p className="text-xs text-muted-foreground">
+                The URL of the Kandev backend server. WebSocket connection will be implemented with Zustand.
+              </p>
             </div>
           </CardContent>
         </Card>

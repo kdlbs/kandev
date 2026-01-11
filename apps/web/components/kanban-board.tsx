@@ -13,6 +13,7 @@ import {
 import { KanbanColumn, Column } from './kanban-column';
 import { KanbanCardPreview, Task } from './kanban-card';
 import { ThemeToggle } from './theme-toggle';
+import { ConnectionStatus } from './connection-status';
 import { Button } from '@/components/ui/button';
 import { IconPlus, IconSettings } from '@tabler/icons-react';
 import { TaskCreateDialog } from './task-create-dialog';
@@ -149,7 +150,10 @@ export function KanbanBoard() {
   return (
     <div className="h-screen w-full flex flex-col bg-background">
       <header className="flex items-center justify-between p-4 pb-3">
-        <h1 className="text-2xl font-bold">KanDev.ai</h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-bold">KanDev.ai</h1>
+          <ConnectionStatus />
+        </div>
         <div className="flex items-center gap-3">
           <Select value={activeViewId} onValueChange={setActiveViewId}>
             <SelectTrigger className="w-[180px]">
