@@ -48,6 +48,58 @@ func TestSQLiteRepository_Close(t *testing.T) {
 	}
 }
 
+func TestSQLiteRepository_SeedsDefaultWorkspace(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	workspaces, err := repo.ListWorkspaces(ctx)
+	if err != nil {
+		t.Fatalf("failed to list workspaces: %v", err)
+	}
+	if len(workspaces) != 1 {
+		t.Fatalf("expected 1 workspace, got %d", len(workspaces))
+	}
+	if workspaces[0].Name != "Default Workspace" {
+		t.Errorf("expected Default Workspace, got %s", workspaces[0].Name)
+	}
+
+	boards, err := repo.ListBoards(ctx, workspaces[0].ID)
+	if err != nil {
+		t.Fatalf("failed to list boards: %v", err)
+	}
+	if len(boards) != 1 {
+		t.Fatalf("expected 1 board, got %d", len(boards))
+	}
+	if boards[0].Name != "Dev" {
+		t.Errorf("expected Dev board, got %s", boards[0].Name)
+	}
+
+	columns, err := repo.ListColumns(ctx, boards[0].ID)
+	if err != nil {
+		t.Fatalf("failed to list columns: %v", err)
+	}
+	if len(columns) != 4 {
+		t.Fatalf("expected 4 columns, got %d", len(columns))
+	}
+	expected := map[string]v1.TaskState{
+		"Todo":        v1.TaskStateTODO,
+		"In Progress": v1.TaskStateInProgress,
+		"Review":      v1.TaskStateReview,
+		"Done":        v1.TaskStateCompleted,
+	}
+	for _, column := range columns {
+		expectedState, ok := expected[column.Name]
+		if !ok {
+			t.Errorf("unexpected column name %s", column.Name)
+			continue
+		}
+		if column.State != expectedState {
+			t.Errorf("expected %s state %s, got %s", column.Name, expectedState, column.State)
+		}
+	}
+}
+
 // Board CRUD tests
 
 func TestSQLiteRepository_BoardCRUD(t *testing.T) {

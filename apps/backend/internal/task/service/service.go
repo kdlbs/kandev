@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -12,7 +13,6 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
-	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // Service provides task business logic

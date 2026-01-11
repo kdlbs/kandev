@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 
 import { KanbanBoard } from '@/components/kanban-board';
 import { OnboardingDialog } from '@/components/onboarding-dialog';
@@ -8,24 +8,23 @@ import { getLocalStorage, setLocalStorage } from '@/lib/local-storage';
 import { STORAGE_KEYS } from '@/lib/settings/constants';
 
 export function PageClient() {
-  const [showOnboarding, setShowOnboarding] = useState(false);
-
-  useEffect(() => {
+  const [showOnboarding, setShowOnboarding] = useState(() => {
+    if (typeof window === 'undefined') return false;
     const completed = getLocalStorage(STORAGE_KEYS.ONBOARDING_COMPLETED, false);
-    if (!completed) {
-      setShowOnboarding(true);
-    }
-  }, []);
+    return !completed;
+  });
+  const [boardKey, setBoardKey] = useState(0);
 
   const handleOnboardingComplete = () => {
     setLocalStorage(STORAGE_KEYS.ONBOARDING_COMPLETED, true);
     setShowOnboarding(false);
+    setBoardKey((prev) => prev + 1);
   };
 
   return (
     <>
       <OnboardingDialog open={showOnboarding} onComplete={handleOnboardingComplete} />
-      <KanbanBoard />
+      <KanbanBoard key={boardKey} />
     </>
   );
 }

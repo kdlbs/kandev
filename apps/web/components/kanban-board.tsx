@@ -12,7 +12,6 @@ import {
 } from '@dnd-kit/core';
 import { KanbanColumn, Column } from './kanban-column';
 import { KanbanCardPreview, Task } from './kanban-card';
-import { ThemeToggle } from './theme-toggle';
 import { ConnectionStatus } from './connection-status';
 import { Button } from '@/components/ui/button';
 import { IconPlus, IconSettings } from '@tabler/icons-react';
@@ -26,6 +25,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useRouter } from 'next/navigation';
+import { useAppStore, useAppStoreApi } from '@/components/state-provider';
 
 const VIEWS: Record<
   string,
@@ -78,6 +78,10 @@ export function KanbanBoard() {
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [activeViewId, setActiveViewId] = useState('team');
   const router = useRouter();
+  const kanban = useAppStore((state) => state.kanban);
+  const workspaceState = useAppStore((state) => state.workspaces);
+  const setActiveWorkspace = useAppStore((state) => state.setActiveWorkspace);
+  const store = useAppStoreApi();
 
   const isMounted = useSyncExternalStore(
     () => () => { },
@@ -93,12 +97,31 @@ export function KanbanBoard() {
     })
   );
 
-  const activeTask = useMemo(
-    () => tasks.find((task) => task.id === activeTaskId) ?? null,
-    [tasks, activeTaskId]
-  );
   const activeView = VIEWS[activeViewId] ?? VIEWS.team;
-  const activeColumns = activeView.columns;
+  const backendColumns = useMemo<Column[]>(
+    () =>
+      kanban.columns.map((column) => ({
+        id: column.id,
+        title: column.title,
+        color: 'bg-neutral-400',
+      })),
+    [kanban.columns]
+  );
+  const backendTasks = useMemo<Task[]>(
+    () =>
+      kanban.tasks.map((task) => ({
+        id: task.id,
+        title: task.title,
+        status: task.columnId,
+      })),
+    [kanban.tasks]
+  );
+  const activeColumns = kanban.boardId ? backendColumns : activeView.columns;
+  const visibleTasks = kanban.boardId ? backendTasks : tasks;
+  const activeTask = useMemo(
+    () => visibleTasks.find((task) => task.id === activeTaskId) ?? null,
+    [visibleTasks, activeTaskId]
+  );
 
   const handleDragStart = (event: DragStartEvent) => {
     setActiveTaskId(event.active.id as string);
@@ -112,6 +135,18 @@ export function KanbanBoard() {
 
     const taskId = active.id as string;
     const newStatus = over.id as string;
+
+    if (kanban.boardId) {
+      store.getState().hydrate({
+        kanban: {
+          ...kanban,
+          tasks: kanban.tasks.map((task) =>
+            task.id === taskId ? { ...task, columnId: newStatus } : task
+          ),
+        },
+      });
+      return;
+    }
 
     setTasks((tasks) =>
       tasks.map((task) =>
@@ -140,7 +175,7 @@ export function KanbanBoard() {
   };
 
   const getTasksForColumn = (columnId: string) => {
-    return tasks.filter((task) => task.status === columnId);
+    return visibleTasks.filter((task) => task.status === columnId);
   };
 
   if (!isMounted) {
@@ -153,6 +188,21 @@ export function KanbanBoard() {
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-bold">KanDev.ai</h1>
           <ConnectionStatus />
+          <Select
+            value={workspaceState.activeId ?? ''}
+            onValueChange={(value) => setActiveWorkspace(value || null)}
+          >
+            <SelectTrigger className="w-[200px]">
+              <SelectValue placeholder="Select workspace" />
+            </SelectTrigger>
+            <SelectContent>
+              {workspaceState.items.map((workspace) => (
+                <SelectItem key={workspace.id} value={workspace.id}>
+                  {workspace.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
         <div className="flex items-center gap-3">
           <Select value={activeViewId} onValueChange={setActiveViewId}>

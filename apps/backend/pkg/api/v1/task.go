@@ -8,6 +8,7 @@ type TaskState string
 const (
 	TaskStateTODO       TaskState = "TODO"
 	TaskStateInProgress TaskState = "IN_PROGRESS"
+	TaskStateReview     TaskState = "REVIEW"
 	TaskStateBlocked    TaskState = "BLOCKED"
 	TaskStateCompleted  TaskState = "COMPLETED"
 	TaskStateFailed     TaskState = "FAILED"

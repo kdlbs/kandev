@@ -35,10 +35,6 @@ export default function EnvironmentsSettingsPage() {
     installedAgents: [],
   });
 
-  const handleDelete = (id: string) => {
-    setEnvironments(environments.filter((e) => e.id !== id));
-  };
-
   const handleAdd = (e: React.FormEvent) => {
     e.preventDefault();
     const environment: Environment = {

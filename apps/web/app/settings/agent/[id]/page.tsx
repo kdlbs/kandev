@@ -6,7 +6,6 @@ import { IconTrash } from '@tabler/icons-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
@@ -22,12 +21,6 @@ import {
 import { SETTINGS_DATA } from '@/lib/settings/dummy-data';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import type { AgentProfile, AgentType } from '@/lib/settings/types';
-
-const AGENT_LABELS: Record<AgentType, string> = {
-  'claude-code': 'Claude Code',
-  'codex': 'Codex',
-  'auggie': 'Auggie',
-};
 
 const MODEL_OPTIONS: Record<AgentType, { value: string; label: string }[]> = {
   'claude-code': [

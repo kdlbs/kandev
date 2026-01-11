@@ -1,7 +1,7 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import { memo, useEffect, useState } from 'react';
+import { memo, useState } from 'react';
 import { IconChevronDown, IconChevronUp, IconX } from '@tabler/icons-react';
 import { Badge } from '@/components/ui/badge';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
@@ -15,19 +15,12 @@ type TaskRightPanelProps = {
 
 const TaskRightPanel = memo(function TaskRightPanel({ topPanel }: TaskRightPanelProps) {
   const defaultRightLayout: [number, number] = [55, 45];
-  const [rightLayout, setRightLayout] = useState(defaultRightLayout);
-  const [rightSeed, setRightSeed] = useState(0);
+  const [rightLayout, setRightLayout] = useState<[number, number]>(() =>
+    getLocalStorage('task-layout-right', defaultRightLayout)
+  );
   const [activeTerminalId, setActiveTerminalId] = useState(1);
   const [terminalIds, setTerminalIds] = useState([1]);
   const [isBottomCollapsed, setIsBottomCollapsed] = useState(false);
-
-  useEffect(() => {
-    const storedRight = getLocalStorage('task-layout-right', defaultRightLayout);
-    if (storedRight[0] !== defaultRightLayout[0] || storedRight[1] !== defaultRightLayout[1]) {
-      setRightLayout(storedRight);
-      setRightSeed((value) => value + 1);
-    }
-  }, []);
 
   const addTerminal = () => {
     setTerminalIds((ids) => {
@@ -96,8 +89,7 @@ const TaskRightPanel = memo(function TaskRightPanel({ topPanel }: TaskRightPanel
   }
 
   return (
-    <ResizablePanelGroup
-      key={rightSeed}
+        <ResizablePanelGroup
       direction="vertical"
       className="h-full"
       onLayout={(sizes) => {

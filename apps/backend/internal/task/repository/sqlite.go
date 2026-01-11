@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/google/uuid"
@@ -24,7 +26,15 @@ var _ Repository = (*SQLiteRepository)(nil)
 
 // NewSQLiteRepository creates a new SQLite repository
 func NewSQLiteRepository(dbPath string) (*SQLiteRepository, error) {
-	db, err := sql.Open("sqlite3", dbPath+"?_foreign_keys=on&_journal_mode=WAL")
+	normalizedPath := normalizeSQLitePath(dbPath)
+	if err := ensureSQLiteDir(normalizedPath); err != nil {
+		return nil, fmt.Errorf("failed to prepare database path: %w", err)
+	}
+	if err := ensureSQLiteFile(normalizedPath); err != nil {
+		return nil, fmt.Errorf("failed to create database file: %w", err)
+	}
+	dsn := fmt.Sprintf("file:%s?_foreign_keys=on&_mode=rwc", normalizedPath)
+	db, err := sql.Open("sqlite3", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
@@ -42,6 +52,33 @@ func NewSQLiteRepository(dbPath string) (*SQLiteRepository, error) {
 	}
 
 	return repo, nil
+}
+
+func ensureSQLiteDir(dbPath string) error {
+	dir := filepath.Dir(dbPath)
+	if dir == "." || dir == "" {
+		return nil
+	}
+	return os.MkdirAll(dir, 0o755)
+}
+
+func ensureSQLiteFile(dbPath string) error {
+	file, err := os.OpenFile(dbPath, os.O_RDWR|os.O_CREATE, 0o644)
+	if err != nil {
+		return err
+	}
+	return file.Close()
+}
+
+func normalizeSQLitePath(dbPath string) string {
+	if dbPath == "" {
+		return dbPath
+	}
+	abs, err := filepath.Abs(dbPath)
+	if err != nil {
+		return dbPath
+	}
+	return abs
 }
 
 // initSchema creates the database tables if they don't exist
@@ -210,13 +247,57 @@ func (r *SQLiteRepository) ensureDefaultWorkspace() error {
 	}
 
 	if count == 0 {
+		var boardCount int
+		if err := r.db.QueryRowContext(ctx, "SELECT COUNT(1) FROM boards").Scan(&boardCount); err != nil {
+			return err
+		}
+		var taskCount int
+		if err := r.db.QueryRowContext(ctx, "SELECT COUNT(1) FROM tasks").Scan(&taskCount); err != nil {
+			return err
+		}
 		defaultID := uuid.New().String()
 		now := time.Now().UTC()
+		workspaceName := "Default Workspace"
+		workspaceDescription := "Default workspace"
+		if boardCount > 0 || taskCount > 0 {
+			workspaceName = "Migrated Workspace"
+			workspaceDescription = ""
+		}
 		if _, err := r.db.ExecContext(ctx, `
 			INSERT INTO workspaces (id, name, description, owner_id, created_at, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?)
-		`, defaultID, "Default Workspace", "", "", now, now); err != nil {
+		`, defaultID, workspaceName, workspaceDescription, "", now, now); err != nil {
 			return err
+		}
+
+		if boardCount == 0 && taskCount == 0 {
+			boardID := uuid.New().String()
+			if _, err := r.db.ExecContext(ctx, `
+				INSERT INTO boards (id, workspace_id, name, description, created_at, updated_at)
+				VALUES (?, ?, ?, ?, ?, ?)
+			`, boardID, defaultID, "Dev", "Default development board", now, now); err != nil {
+				return err
+			}
+
+			type columnSeed struct {
+				name     string
+				position int
+				state    string
+			}
+			columns := []columnSeed{
+				{name: "Todo", position: 0, state: string(v1.TaskStateTODO)},
+				{name: "In Progress", position: 1, state: string(v1.TaskStateInProgress)},
+				{name: "Review", position: 2, state: string(v1.TaskStateReview)},
+				{name: "Done", position: 3, state: string(v1.TaskStateCompleted)},
+			}
+			for _, column := range columns {
+				if _, err := r.db.ExecContext(ctx, `
+					INSERT INTO columns (id, board_id, name, position, state, created_at, updated_at)
+					VALUES (?, ?, ?, ?, ?, ?, ?)
+				`, uuid.New().String(), boardID, column.name, column.position, column.state, now, now); err != nil {
+					return err
+				}
+			}
 		}
 	}
 

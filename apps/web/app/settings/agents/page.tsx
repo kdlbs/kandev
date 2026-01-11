@@ -51,14 +51,6 @@ export default function AgentsSettingsPage() {
     temperature: 0.7,
   });
 
-  const handleUpdate = (agent: AgentProfile) => {
-    setAgents(agents.map((a) => (a.id === agent.id ? agent : a)));
-  };
-
-  const handleDelete = (id: string) => {
-    setAgents(agents.filter((a) => a.id !== id));
-  };
-
   const handleAdd = (e: React.FormEvent) => {
     e.preventDefault();
     const profile: AgentProfile = {

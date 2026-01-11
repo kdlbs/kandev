@@ -2,10 +2,9 @@ import type { AppState } from '@/lib/state/store';
 import type { BoardSnapshot, Task } from '@/lib/types/http';
 
 export function snapshotToState(snapshot: BoardSnapshot): Partial<AppState> {
-  const columnByState = new Map(snapshot.columns.map((column) => [column.state, column.id]));
   const tasks = snapshot.tasks
     .map((task) => {
-      const columnId = columnByState.get(task.state);
+      const columnId = task.column_id;
       if (!columnId) return null;
       return { id: task.id, columnId, title: task.title };
     })

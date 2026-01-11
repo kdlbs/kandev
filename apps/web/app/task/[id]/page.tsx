@@ -4,17 +4,20 @@ import { taskToState } from '@/lib/ssr/mapper';
 import TaskPageClient from './page-client';
 
 export default async function TaskPage({ params }: { params: Promise<{ id: string }> }) {
+  let initialState: ReturnType<typeof taskToState> | null = null;
+
   try {
     const { id } = await params;
     const task = await fetchTask(id);
-    const initialState = taskToState(task);
-    return (
-      <>
-        <StateHydrator initialState={initialState} />
-        <TaskPageClient />
-      </>
-    );
+    initialState = taskToState(task);
   } catch {
-    return <TaskPageClient />;
+    initialState = null;
   }
+
+  return (
+    <>
+      {initialState ? <StateHydrator initialState={initialState} /> : null}
+      <TaskPageClient />
+    </>
+  );
 }

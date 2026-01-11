@@ -15,6 +15,7 @@ func TestTaskStateConstants(t *testing.T) {
 	}{
 		{"TODO state", v1.TaskStateTODO, "TODO"},
 		{"IN_PROGRESS state", v1.TaskStateInProgress, "IN_PROGRESS"},
+		{"REVIEW state", v1.TaskStateReview, "REVIEW"},
 		{"BLOCKED state", v1.TaskStateBlocked, "BLOCKED"},
 		{"COMPLETED state", v1.TaskStateCompleted, "COMPLETED"},
 		{"FAILED state", v1.TaskStateFailed, "FAILED"},

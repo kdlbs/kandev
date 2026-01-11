@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
-import type { Repository, CustomScript } from '@/lib/settings/types';
+import type { Repository } from '@/lib/settings/types';
 
 type RepositoryCardProps = {
   repository: Repository;
@@ -35,8 +35,9 @@ export function RepositoryCard({ repository, onUpdate, onDelete }: RepositoryCar
     const input = document.createElement('input');
     input.type = 'file';
     input.webkitdirectory = true;
-    input.onchange = (e: any) => {
-      const files = e.target.files;
+    input.onchange = (event: Event) => {
+      const target = event.target as HTMLInputElement | null;
+      const files = target?.files;
       if (files && files[0]) {
         const path = files[0].webkitRelativePath.split('/')[0];
         setEditedRepo({ ...editedRepo, path: `/${path}` });

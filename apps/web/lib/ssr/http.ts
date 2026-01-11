@@ -1,6 +1,7 @@
-import type { Board, BoardSnapshot, Task } from '@/lib/types/http';
+import type { BoardSnapshot, ListBoardsResponse, ListWorkspacesResponse, Task } from '@/lib/types/http';
+import { getBackendConfig } from '@/lib/config';
 
-const API_BASE_URL = process.env.KANDEV_API_BASE_URL ?? 'http://localhost:8080';
+const { apiBaseUrl: API_BASE_URL } = getBackendConfig();
 
 async function fetchJson<T>(url: string): Promise<T> {
   const response = await fetch(url, { cache: 'no-store' });
@@ -10,8 +11,16 @@ async function fetchJson<T>(url: string): Promise<T> {
   return (await response.json()) as T;
 }
 
-export async function fetchBoards(): Promise<Board[]> {
-  return fetchJson<Board[]>(`${API_BASE_URL}/api/v1/boards`);
+export async function fetchWorkspaces(): Promise<ListWorkspacesResponse> {
+  return fetchJson<ListWorkspacesResponse>(`${API_BASE_URL}/api/v1/workspaces`);
+}
+
+export async function fetchBoards(workspaceId?: string): Promise<ListBoardsResponse> {
+  const url = new URL(`${API_BASE_URL}/api/v1/boards`);
+  if (workspaceId) {
+    url.searchParams.set('workspace_id', workspaceId);
+  }
+  return fetchJson<ListBoardsResponse>(url.toString());
 }
 
 export async function fetchBoardSnapshot(boardId: string): Promise<BoardSnapshot> {

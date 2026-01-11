@@ -535,8 +535,14 @@ func (ts *OrchestratorTestServer) Close() {
 func (ts *OrchestratorTestServer) CreateTestTask(t *testing.T, agentType string, priority int) string {
 	t.Helper()
 
+	workspace, err := ts.TaskSvc.CreateWorkspace(context.Background(), &taskservice.CreateWorkspaceRequest{
+		Name: "Test Workspace",
+	})
+	require.NoError(t, err)
+
 	// Create board first
 	board, err := ts.TaskSvc.CreateBoard(context.Background(), &taskservice.CreateBoardRequest{
+		WorkspaceID: workspace.ID,
 		Name:        "Test Board",
 		Description: "Test board for orchestrator",
 	})
@@ -553,6 +559,7 @@ func (ts *OrchestratorTestServer) CreateTestTask(t *testing.T, agentType string,
 
 	// Create task with agent type
 	task, err := ts.TaskSvc.CreateTask(context.Background(), &taskservice.CreateTaskRequest{
+		WorkspaceID: workspace.ID,
 		BoardID:     board.ID,
 		ColumnID:    col.ID,
 		Title:       "Test Task",

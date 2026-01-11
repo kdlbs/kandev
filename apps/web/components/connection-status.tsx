@@ -3,13 +3,10 @@
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { IconCircleFilled } from '@tabler/icons-react';
-import { getLocalStorage } from '@/lib/local-storage';
-import { STORAGE_KEYS, DEFAULT_BACKEND_URL } from '@/lib/settings/constants';
 import { useAppStore } from '@/components/state-provider';
 
 export function ConnectionStatus() {
   const { status, error } = useAppStore((store) => store.connection);
-  const backendUrl = getLocalStorage(STORAGE_KEYS.BACKEND_URL, DEFAULT_BACKEND_URL);
 
   const getStatusConfig = () => {
     switch (status) {
@@ -29,7 +26,7 @@ export function ConnectionStatus() {
 
   const getTooltipContent = () => {
     const errorLine = error ? `\nError: ${error}` : '';
-    return `Status: ${config.text}\nBackend URL: ${backendUrl}${errorLine}`;
+    return `Status: ${config.text}${errorLine}`;
   };
 
   return (

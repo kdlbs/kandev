@@ -122,8 +122,9 @@ export default function WorkspaceEditPage({ params }: { params: Promise<{ id: st
     const input = document.createElement('input');
     input.type = 'file';
     input.webkitdirectory = true;
-    input.onchange = (e: any) => {
-      const files = e.target.files;
+    input.onchange = (event: Event) => {
+      const target = event.target as HTMLInputElement | null;
+      const files = target?.files;
       if (files && files[0]) {
         const fullPath = files[0].webkitRelativePath;
         const folderName = fullPath.split('/')[0];

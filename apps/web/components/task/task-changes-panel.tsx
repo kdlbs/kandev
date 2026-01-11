@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useEffect, useMemo, useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import { DiffModeEnum, DiffView } from '@git-diff-view/react';
 import { IconArrowBackUp, IconCopy, IconLayoutColumns, IconLayoutRows } from '@tabler/icons-react';
 import { useTheme } from 'next-themes';
@@ -21,15 +21,10 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
   onClearSelected,
 }: TaskChangesPanelProps) {
   const defaultDiffMode: 'unified' | 'split' = 'unified';
-  const [diffViewMode, setDiffViewMode] = useState<'unified' | 'split'>(defaultDiffMode);
+  const [diffViewMode, setDiffViewMode] = useState<'unified' | 'split'>(() =>
+    getLocalStorage('task-diff-view-mode', defaultDiffMode)
+  );
   const { resolvedTheme } = useTheme();
-
-  useEffect(() => {
-    const storedDiffMode = getLocalStorage('task-diff-view-mode', defaultDiffMode);
-    if (storedDiffMode !== defaultDiffMode) {
-      setDiffViewMode(storedDiffMode);
-    }
-  }, []);
 
   const diffTargets = useMemo(
     () => (selectedDiffPath ? [selectedDiffPath] : CHANGED_FILES.map((file) => file.path)),

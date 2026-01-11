@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import '@git-diff-view/react/styles/diff-view.css';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -52,26 +52,15 @@ const INITIAL_CHATS: ChatSession[] = [
 
 export default function TaskPage() {
   const defaultHorizontalLayout: [number, number] = [75, 25];
-  const [horizontalLayout, setHorizontalLayout] = useState(defaultHorizontalLayout);
-  const [horizontalSeed, setHorizontalSeed] = useState(0);
+  const [horizontalLayout, setHorizontalLayout] = useState<[number, number]>(() =>
+    getLocalStorage('task-layout-horizontal', defaultHorizontalLayout)
+  );
   const [chats, setChats] = useState<ChatSession[]>(INITIAL_CHATS);
   const [leftTab, setLeftTab] = useState('chat');
   const [selectedDiffPath, setSelectedDiffPath] = useState<string | null>(null);
   const [notes, setNotes] = useState('');
 
   const activeChat = chats[0];
-
-  useEffect(() => {
-    const storedHorizontal = getLocalStorage('task-layout-horizontal', defaultHorizontalLayout);
-
-    if (
-      storedHorizontal[0] !== defaultHorizontalLayout[0] ||
-      storedHorizontal[1] !== defaultHorizontalLayout[1]
-    ) {
-      setHorizontalLayout(storedHorizontal);
-      setHorizontalSeed((value) => value + 1);
-    }
-  }, []);
 
   const handleSendMessage = useCallback((content: string) => {
     setChats((currentChats) => {
@@ -101,7 +90,6 @@ export default function TaskPage() {
 
       <div className="flex-1 min-h-0 px-4 pb-4">
         <ResizablePanelGroup
-          key={horizontalSeed}
           direction="horizontal"
           className="h-full"
           onLayout={(sizes) => {

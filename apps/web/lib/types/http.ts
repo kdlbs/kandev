@@ -1,6 +1,22 @@
-export type TaskState = 'TODO' | 'IN_PROGRESS' | 'BLOCKED' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
+export type TaskState =
+  | 'TODO'
+  | 'IN_PROGRESS'
+  | 'REVIEW'
+  | 'BLOCKED'
+  | 'COMPLETED'
+  | 'FAILED'
+  | 'CANCELLED';
 
 export type Board = {
+  id: string;
+  workspace_id: string;
+  name: string;
+  description?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type Workspace = {
   id: string;
   name: string;
   description?: string | null;
@@ -21,7 +37,10 @@ export type Column = {
 
 export type Task = {
   id: string;
+  workspace_id: string;
   board_id: string;
+  column_id: string;
+  position: number;
   title: string;
   description: string;
   state: TaskState;
@@ -39,4 +58,14 @@ export type BoardSnapshot = {
   board: Board;
   columns: Column[];
   tasks: Task[];
+};
+
+export type ListBoardsResponse = {
+  boards: Board[];
+  total: number;
+};
+
+export type ListWorkspacesResponse = {
+  workspaces: Workspace[];
+  total: number;
 };
