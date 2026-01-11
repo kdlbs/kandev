@@ -51,16 +51,16 @@ func (h *RepositoryHandlers) registerHTTP(router *gin.Engine) {
 }
 
 func (h *RepositoryHandlers) registerWS(dispatcher *ws.Dispatcher) {
-	dispatcher.RegisterFunc("repository.list", h.wsListRepositories)
-	dispatcher.RegisterFunc("repository.create", h.wsCreateRepository)
-	dispatcher.RegisterFunc("repository.get", h.wsGetRepository)
-	dispatcher.RegisterFunc("repository.update", h.wsUpdateRepository)
-	dispatcher.RegisterFunc("repository.delete", h.wsDeleteRepository)
-	dispatcher.RegisterFunc("repository.script.list", h.wsListRepositoryScripts)
-	dispatcher.RegisterFunc("repository.script.create", h.wsCreateRepositoryScript)
-	dispatcher.RegisterFunc("repository.script.get", h.wsGetRepositoryScript)
-	dispatcher.RegisterFunc("repository.script.update", h.wsUpdateRepositoryScript)
-	dispatcher.RegisterFunc("repository.script.delete", h.wsDeleteRepositoryScript)
+	dispatcher.RegisterFunc(ws.ActionRepositoryList, h.wsListRepositories)
+	dispatcher.RegisterFunc(ws.ActionRepositoryCreate, h.wsCreateRepository)
+	dispatcher.RegisterFunc(ws.ActionRepositoryGet, h.wsGetRepository)
+	dispatcher.RegisterFunc(ws.ActionRepositoryUpdate, h.wsUpdateRepository)
+	dispatcher.RegisterFunc(ws.ActionRepositoryDelete, h.wsDeleteRepository)
+	dispatcher.RegisterFunc(ws.ActionRepositoryScriptList, h.wsListRepositoryScripts)
+	dispatcher.RegisterFunc(ws.ActionRepositoryScriptCreate, h.wsCreateRepositoryScript)
+	dispatcher.RegisterFunc(ws.ActionRepositoryScriptGet, h.wsGetRepositoryScript)
+	dispatcher.RegisterFunc(ws.ActionRepositoryScriptUpdate, h.wsUpdateRepositoryScript)
+	dispatcher.RegisterFunc(ws.ActionRepositoryScriptDelete, h.wsDeleteRepositoryScript)
 }
 
 // HTTP handlers

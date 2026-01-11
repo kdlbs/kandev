@@ -27,16 +27,18 @@ import (
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
 
 	// Agent Manager packages
+	agentcontroller "github.com/kandev/kandev/internal/agent/controller"
 	"github.com/kandev/kandev/internal/agent/credentials"
 	"github.com/kandev/kandev/internal/agent/docker"
+	agenthandlers "github.com/kandev/kandev/internal/agent/handlers"
 	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/agent/registry"
-	agentwshandlers "github.com/kandev/kandev/internal/agent/wshandlers"
 
 	// Orchestrator packages
 	"github.com/kandev/kandev/internal/orchestrator"
+	orchestratorcontroller "github.com/kandev/kandev/internal/orchestrator/controller"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
-	orchestratorwshandlers "github.com/kandev/kandev/internal/orchestrator/wshandlers"
+	orchestratorhandlers "github.com/kandev/kandev/internal/orchestrator/handlers"
 
 	// Task Service packages
 	taskcontroller "github.com/kandev/kandev/internal/task/controller"
@@ -219,14 +221,18 @@ func main() {
 	taskController := taskcontroller.NewTaskController(taskSvc)
 	repositoryController := taskcontroller.NewRepositoryController(taskSvc)
 
-	orchestratorWSHandlers := orchestratorwshandlers.NewHandlers(orchestratorSvc, log)
-	orchestratorWSHandlers.SetACPHandler(acpHandler)
-	orchestratorWSHandlers.RegisterHandlers(gateway.Dispatcher)
+	// Create orchestrator controller and handlers (Pattern A)
+	orchestratorCtrl := orchestratorcontroller.NewController(orchestratorSvc)
+	orchestratorCtrl.SetACPHandler(acpHandler)
+	orchestratorHandlers := orchestratorhandlers.NewHandlers(orchestratorCtrl, log)
+	orchestratorHandlers.RegisterHandlers(gateway.Dispatcher)
 	log.Info("Registered Orchestrator WebSocket handlers")
 
+	// Create agent controller and handlers (Pattern A)
 	if lifecycleMgr != nil && agentRegistry != nil {
-		agentWSHandlers := agentwshandlers.NewHandlers(lifecycleMgr, agentRegistry, log)
-		agentWSHandlers.RegisterHandlers(gateway.Dispatcher)
+		agentCtrl := agentcontroller.NewController(lifecycleMgr, agentRegistry)
+		agentHandlers := agenthandlers.NewHandlers(agentCtrl, log)
+		agentHandlers.RegisterHandlers(gateway.Dispatcher)
 		log.Info("Registered Agent Manager WebSocket handlers")
 	}
 
