@@ -66,3 +66,5 @@ tmp/
 *-secret.yaml
 *-secrets.yaml
 
+apps/backend/bin/
+

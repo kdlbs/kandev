@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
+import { StateProvider } from "@/components/state-provider";
 
 export const metadata: Metadata = {
   title: "Kandev - AI Kanban",
@@ -15,7 +16,9 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className="antialiased font-sans">
-        <ThemeProvider>{children}</ThemeProvider>
+        <StateProvider>
+          <ThemeProvider>{children}</ThemeProvider>
+        </StateProvider>
       </body>
     </html>
   );
