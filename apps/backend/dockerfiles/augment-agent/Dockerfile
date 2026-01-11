@@ -39,10 +39,6 @@ RUN chmod +x /usr/local/bin/agentctl
 # Create agent directory
 WORKDIR /agent
 
-# Copy agent script (legacy, for backward compatibility)
-COPY dockerfiles/augment-agent/agent.sh /agent/agent.sh
-RUN chmod +x /agent/agent.sh
-
 # Copy entrypoint script
 COPY dockerfiles/augment-agent/entrypoint.sh /agent/entrypoint.sh
 RUN chmod +x /agent/entrypoint.sh
