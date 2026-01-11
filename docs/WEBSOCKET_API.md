@@ -127,9 +127,148 @@ All messages follow this JSON envelope format:
 
 ---
 
+## Workspace Actions
+
+Workspaces are the top-level organizational unit that contain boards and repositories.
+
+### `workspace.list`
+
+**Purpose:** List all workspaces.
+
+**Request:**
+```json
+{
+  "id": "uuid",
+  "type": "request",
+  "action": "workspace.list",
+  "payload": {}
+}
+```
+
+**Response:**
+```json
+{
+  "id": "uuid",
+  "type": "response",
+  "action": "workspace.list",
+  "payload": {
+    "workspaces": [
+      {
+        "id": "workspace-uuid",
+        "name": "My Project",
+        "description": "Main development workspace",
+        "owner_id": "user-uuid",
+        "created_at": "2026-01-10T12:00:00Z",
+        "updated_at": "2026-01-10T12:00:00Z"
+      }
+    ]
+  }
+}
+```
+
+### `workspace.create`
+
+**Purpose:** Create a new workspace.
+
+**Request:**
+```json
+{
+  "id": "uuid",
+  "type": "request",
+  "action": "workspace.create",
+  "payload": {
+    "name": "My Project",
+    "description": "Main development workspace",
+    "owner_id": "user-uuid"
+  }
+}
+```
+
+| Payload Field | Type | Required | Description |
+|--------------|------|----------|-------------|
+| `name` | string | ✅ | Workspace name (max 255 chars) |
+| `description` | string | ❌ | Workspace description |
+| `owner_id` | string | ❌ | Owner user ID |
+
+**Response:** Created workspace object
+
+### `workspace.get`
+
+**Purpose:** Get a workspace by ID.
+
+**Request:**
+```json
+{
+  "id": "uuid",
+  "type": "request",
+  "action": "workspace.get",
+  "payload": {
+    "id": "workspace-uuid"
+  }
+}
+```
+
+**Response:** Workspace object
+
+### `workspace.update`
+
+**Purpose:** Update a workspace.
+
+**Request:**
+```json
+{
+  "id": "uuid",
+  "type": "request",
+  "action": "workspace.update",
+  "payload": {
+    "id": "workspace-uuid",
+    "name": "Updated Name",
+    "description": "Updated description"
+  }
+}
+```
+
+| Payload Field | Type | Required | Description |
+|--------------|------|----------|-------------|
+| `id` | string | ✅ | Workspace ID |
+| `name` | string | ❌ | New name |
+| `description` | string | ❌ | New description |
+
+**Response:** Updated workspace object
+
+### `workspace.delete`
+
+**Purpose:** Delete a workspace.
+
+**Request:**
+```json
+{
+  "id": "uuid",
+  "type": "request",
+  "action": "workspace.delete",
+  "payload": {
+    "id": "workspace-uuid"
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "id": "uuid",
+  "type": "response",
+  "action": "workspace.delete",
+  "payload": {
+    "deleted": true
+  }
+}
+```
+
+---
+
 ## Board Actions
 
-Boards are the top-level containers that organize columns and tasks.
+Boards are containers within workspaces that organize columns and tasks.
 
 ### `board.create`
 
@@ -424,6 +563,286 @@ Columns organize tasks within a board and represent workflow states.
 | `id` | string | ✅ | Column ID |
 
 **Response:** Same structure as items in `column.list`
+
+---
+
+## Repository Actions
+
+Repositories represent Git repositories linked to a workspace.
+
+### `repository.list`
+
+**Purpose:** List all repositories in a workspace.
+
+**Request:**
+```json
+{
+  "id": "uuid",
+  "type": "request",
+  "action": "repository.list",
+  "payload": {
+    "workspace_id": "workspace-uuid"
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "id": "uuid",
+  "type": "response",
+  "action": "repository.list",
+  "payload": {
+    "repositories": [
+      {
+        "id": "repo-uuid",
+        "workspace_id": "workspace-uuid",
+        "name": "my-project",
+        "source_type": "local",
+        "local_path": "/home/user/projects/my-project",
+        "provider": "",
+        "default_branch": "main",
+        "created_at": "2026-01-10T12:00:00Z",
+        "updated_at": "2026-01-10T12:00:00Z"
+      }
+    ]
+  }
+}
+```
+
+### `repository.create`
+
+**Purpose:** Create a new repository link.
+
+**Request:**
+```json
+{
+  "id": "uuid",
+  "type": "request",
+  "action": "repository.create",
+  "payload": {
+    "workspace_id": "workspace-uuid",
+    "name": "my-project",
+    "source_type": "local",
+    "local_path": "/home/user/projects/my-project",
+    "default_branch": "main",
+    "setup_script": "npm install",
+    "cleanup_script": "npm run clean"
+  }
+}
+```
+
+| Payload Field | Type | Required | Description |
+|--------------|------|----------|-------------|
+| `workspace_id` | string | ✅ | Workspace ID |
+| `name` | string | ✅ | Repository name |
+| `source_type` | string | ❌ | `local` or `remote` |
+| `local_path` | string | ❌ | Local filesystem path |
+| `provider` | string | ❌ | Git provider (github, gitlab, etc.) |
+| `provider_repo_id` | string | ❌ | Provider's repository ID |
+| `provider_owner` | string | ❌ | Repository owner on provider |
+| `provider_name` | string | ❌ | Repository name on provider |
+| `default_branch` | string | ❌ | Default branch name |
+| `setup_script` | string | ❌ | Script to run on setup |
+| `cleanup_script` | string | ❌ | Script to run on cleanup |
+
+**Response:** Created repository object
+
+### `repository.get`
+
+**Purpose:** Get a repository by ID.
+
+**Request:**
+```json
+{
+  "id": "uuid",
+  "type": "request",
+  "action": "repository.get",
+  "payload": {
+    "id": "repo-uuid"
+  }
+}
+```
+
+**Response:** Repository object
+
+### `repository.update`
+
+**Purpose:** Update a repository.
+
+**Request:**
+```json
+{
+  "id": "uuid",
+  "type": "request",
+  "action": "repository.update",
+  "payload": {
+    "id": "repo-uuid",
+    "name": "updated-name",
+    "default_branch": "develop"
+  }
+}
+```
+
+**Response:** Updated repository object
+
+### `repository.delete`
+
+**Purpose:** Delete a repository link.
+
+**Request:**
+```json
+{
+  "id": "uuid",
+  "type": "request",
+  "action": "repository.delete",
+  "payload": {
+    "id": "repo-uuid"
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "id": "uuid",
+  "type": "response",
+  "action": "repository.delete",
+  "payload": {
+    "deleted": true
+  }
+}
+```
+
+### `repository.script.list`
+
+**Purpose:** List scripts for a repository.
+
+**Request:**
+```json
+{
+  "id": "uuid",
+  "type": "request",
+  "action": "repository.script.list",
+  "payload": {
+    "repository_id": "repo-uuid"
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "id": "uuid",
+  "type": "response",
+  "action": "repository.script.list",
+  "payload": {
+    "scripts": [
+      {
+        "id": "script-uuid",
+        "repository_id": "repo-uuid",
+        "name": "build",
+        "command": "npm run build",
+        "position": 0
+      }
+    ]
+  }
+}
+```
+
+### `repository.script.create`
+
+**Purpose:** Create a repository script.
+
+**Request:**
+```json
+{
+  "id": "uuid",
+  "type": "request",
+  "action": "repository.script.create",
+  "payload": {
+    "repository_id": "repo-uuid",
+    "name": "test",
+    "command": "npm test",
+    "position": 1
+  }
+}
+```
+
+| Payload Field | Type | Required | Description |
+|--------------|------|----------|-------------|
+| `repository_id` | string | ✅ | Repository ID |
+| `name` | string | ✅ | Script name |
+| `command` | string | ✅ | Command to execute |
+| `position` | int | ❌ | Order position |
+
+**Response:** Created script object
+
+### `repository.script.get`
+
+**Purpose:** Get a script by ID.
+
+**Request:**
+```json
+{
+  "id": "uuid",
+  "type": "request",
+  "action": "repository.script.get",
+  "payload": {
+    "id": "script-uuid"
+  }
+}
+```
+
+**Response:** Script object
+
+### `repository.script.update`
+
+**Purpose:** Update a script.
+
+**Request:**
+```json
+{
+  "id": "uuid",
+  "type": "request",
+  "action": "repository.script.update",
+  "payload": {
+    "id": "script-uuid",
+    "name": "updated-name",
+    "command": "npm run updated-command"
+  }
+}
+```
+
+**Response:** Updated script object
+
+### `repository.script.delete`
+
+**Purpose:** Delete a script.
+
+**Request:**
+```json
+{
+  "id": "uuid",
+  "type": "request",
+  "action": "repository.script.delete",
+  "payload": {
+    "id": "script-uuid"
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "id": "uuid",
+  "type": "response",
+  "action": "repository.script.delete",
+  "payload": {
+    "deleted": true
+  }
+}
+```
 
 ---
 
@@ -754,6 +1173,106 @@ Subscriptions enable real-time streaming of agent output (ACP) to specific clien
   }
 }
 ```
+
+---
+
+## Comment Actions
+
+Comments enable conversation between users and agents on tasks.
+
+### `comment.add`
+
+**Purpose:** Add a comment to a task. If an agent is running on the task, the comment is automatically forwarded as a prompt.
+
+**Request:**
+```json
+{
+  "id": "uuid",
+  "type": "request",
+  "action": "comment.add",
+  "payload": {
+    "task_id": "task-uuid",
+    "content": "Please also add unit tests for the new function",
+    "author_id": "user-uuid"
+  }
+}
+```
+
+| Payload Field | Type | Required | Description |
+|--------------|------|----------|-------------|
+| `task_id` | string | ✅ | Task ID |
+| `content` | string | ✅ | Comment text |
+| `author_id` | string | ❌ | Author user ID |
+
+**Response:**
+```json
+{
+  "id": "uuid",
+  "type": "response",
+  "action": "comment.add",
+  "payload": {
+    "id": "comment-uuid",
+    "task_id": "task-uuid",
+    "author_type": "user",
+    "author_id": "user-uuid",
+    "content": "Please also add unit tests for the new function",
+    "requests_input": false,
+    "created_at": "2026-01-10T12:00:00Z"
+  }
+}
+```
+
+### `comment.list`
+
+**Purpose:** List all comments for a task.
+
+**Request:**
+```json
+{
+  "id": "uuid",
+  "type": "request",
+  "action": "comment.list",
+  "payload": {
+    "task_id": "task-uuid"
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "id": "uuid",
+  "type": "response",
+  "action": "comment.list",
+  "payload": {
+    "comments": [
+      {
+        "id": "comment-uuid-1",
+        "task_id": "task-uuid",
+        "author_type": "user",
+        "author_id": "user-uuid",
+        "content": "Please implement the login feature",
+        "requests_input": false,
+        "created_at": "2026-01-10T12:00:00Z"
+      },
+      {
+        "id": "comment-uuid-2",
+        "task_id": "task-uuid",
+        "author_type": "agent",
+        "author_id": "agent-instance-uuid",
+        "content": "I've implemented the login feature. Should I also add password reset?",
+        "requests_input": true,
+        "created_at": "2026-01-10T12:05:00Z"
+      }
+    ]
+  }
+}
+```
+
+| Response Field | Type | Description |
+|---------------|------|-------------|
+| `author_type` | string | `user` or `agent` |
+| `requests_input` | boolean | True if agent is asking for user input |
 
 ---
 
@@ -1262,6 +1781,120 @@ The orchestrator coordinates task execution, managing the workflow between tasks
 
 ---
 
+## Permission Actions
+
+Agents may request user permission for certain operations. The permission flow uses notifications and responses.
+
+### `permission.requested` (Notification)
+
+**Purpose:** Server notifies client that an agent is requesting permission.
+
+**When:** Agent calls a tool that requires user approval.
+
+```json
+{
+  "type": "notification",
+  "action": "permission.requested",
+  "payload": {
+    "task_id": "task-uuid",
+    "pending_id": "pending-request-uuid",
+    "instance_id": "agent-instance-uuid",
+    "session_id": "acp-session-uuid",
+    "tool_call_id": "tool-call-uuid",
+    "title": "Execute shell command",
+    "description": "Agent wants to run: npm install express",
+    "options": [
+      {
+        "option_id": "allow-once",
+        "name": "Allow Once",
+        "kind": "allow_once"
+      },
+      {
+        "option_id": "allow-always",
+        "name": "Always Allow",
+        "kind": "allow_always"
+      },
+      {
+        "option_id": "reject-once",
+        "name": "Deny",
+        "kind": "reject_once"
+      }
+    ],
+    "created_at": "2026-01-10T12:00:00Z"
+  },
+  "timestamp": "2026-01-10T12:00:00Z"
+}
+```
+
+| Payload Field | Type | Description |
+|--------------|------|-------------|
+| `task_id` | string | Task the agent is working on |
+| `pending_id` | string | Unique ID for this pending request |
+| `instance_id` | string | Agent instance ID |
+| `session_id` | string | ACP session ID |
+| `tool_call_id` | string | Tool call requesting permission |
+| `title` | string | Human-readable title |
+| `description` | string | Additional context |
+| `options` | array | Available permission choices |
+
+**Option Kinds:**
+- `allow_once` - Allow this specific action
+- `allow_always` - Allow this type of action permanently
+- `reject_once` - Deny this specific action
+- `reject_always` - Deny this type of action permanently
+
+### `permission.respond`
+
+**Purpose:** User responds to a permission request.
+
+**Request:**
+```json
+{
+  "id": "uuid",
+  "type": "request",
+  "action": "permission.respond",
+  "payload": {
+    "task_id": "task-uuid",
+    "pending_id": "pending-request-uuid",
+    "option_id": "allow-once"
+  }
+}
+```
+
+| Payload Field | Type | Required | Description |
+|--------------|------|----------|-------------|
+| `task_id` | string | ✅ | Task ID |
+| `pending_id` | string | ✅ | Pending request ID from notification |
+| `option_id` | string | ❌ | Selected option ID (required if not cancelled) |
+| `cancelled` | boolean | ❌ | True to cancel the request |
+
+**Response:**
+```json
+{
+  "id": "uuid",
+  "type": "response",
+  "action": "permission.respond",
+  "payload": {
+    "success": true
+  }
+}
+```
+
+**Error Response (no pending request):**
+```json
+{
+  "id": "uuid",
+  "type": "error",
+  "action": "permission.respond",
+  "payload": {
+    "code": "NOT_FOUND",
+    "message": "No pending permission request for this task"
+  }
+}
+```
+
+---
+
 ## Server Notifications (ACP Streaming)
 
 These are push notifications from the server to subscribed clients. They have `type: "notification"` and no `id` field.
@@ -1403,6 +2036,34 @@ These are push notifications from the server to subscribed clients. They have `t
 }
 ```
 
+### `comment.added`
+
+**Purpose:** New comment added to a task.
+
+**When:** User or agent adds a comment.
+
+```json
+{
+  "type": "notification",
+  "action": "comment.added",
+  "payload": {
+    "task_id": "task-uuid",
+    "comment_id": "comment-uuid",
+    "author_type": "agent",
+    "author_id": "agent-instance-uuid",
+    "content": "I've completed the implementation. Would you like me to add tests?",
+    "requests_input": true,
+    "created_at": "2026-01-10T12:05:00Z"
+  },
+  "timestamp": "2026-01-10T12:05:00Z"
+}
+```
+
+| Payload Field | Type | Description |
+|--------------|------|-------------|
+| `author_type` | string | `user` or `agent` |
+| `requests_input` | boolean | True if agent is asking for user input |
+
 ### `task.updated`
 
 **Purpose:** Task properties changed.
@@ -1522,17 +2183,41 @@ async function runTask() {
 
 ## Quick Reference
 
+### Request Actions
+
 | Action | Purpose |
 |--------|---------|
 | `health.check` | Server health status |
+| **Workspace** | |
+| `workspace.list` | List all workspaces |
+| `workspace.create` | Create workspace |
+| `workspace.get` | Get workspace by ID |
+| `workspace.update` | Update workspace |
+| `workspace.delete` | Delete workspace |
+| **Board** | |
 | `board.create` | Create board |
 | `board.list` | List all boards |
 | `board.get` | Get board by ID |
 | `board.update` | Update board |
 | `board.delete` | Delete board |
+| **Column** | |
 | `column.create` | Create column |
 | `column.list` | List columns in board |
 | `column.get` | Get column by ID |
+| `column.update` | Update column |
+| `column.delete` | Delete column |
+| **Repository** | |
+| `repository.list` | List repositories in workspace |
+| `repository.create` | Create repository link |
+| `repository.get` | Get repository by ID |
+| `repository.update` | Update repository |
+| `repository.delete` | Delete repository |
+| `repository.script.list` | List repository scripts |
+| `repository.script.create` | Create script |
+| `repository.script.get` | Get script by ID |
+| `repository.script.update` | Update script |
+| `repository.script.delete` | Delete script |
+| **Task** | |
 | `task.create` | Create task |
 | `task.list` | List tasks in board |
 | `task.get` | Get task by ID |
@@ -1542,12 +2227,17 @@ async function runTask() {
 | `task.state` | Change task state |
 | `task.subscribe` | Subscribe to task notifications |
 | `task.unsubscribe` | Unsubscribe from task |
+| **Comment** | |
+| `comment.add` | Add comment to task |
+| `comment.list` | List comments for task |
+| **Agent** | |
 | `agent.list` | List agent instances |
 | `agent.launch` | Launch agent (low-level) |
 | `agent.status` | Get agent status |
 | `agent.logs` | Get agent logs |
 | `agent.stop` | Stop agent |
 | `agent.types` | List available agent types |
+| **Orchestrator** | |
 | `orchestrator.status` | Get orchestrator status |
 | `orchestrator.queue` | Get task queue |
 | `orchestrator.trigger` | Queue task for execution |
@@ -1555,4 +2245,31 @@ async function runTask() {
 | `orchestrator.stop` | Stop task execution |
 | `orchestrator.prompt` | Send follow-up prompt |
 | `orchestrator.complete` | Complete task |
+| **Permission** | |
+| `permission.respond` | Respond to permission request |
+
+### Notification Actions (Server → Client)
+
+| Action | Purpose |
+|--------|---------|
+| `acp.progress` | Agent progress update |
+| `acp.log` | Agent log message |
+| `acp.result` | Agent result artifact |
+| `acp.error` | Agent error |
+| `acp.status` | Agent status change |
+| `acp.heartbeat` | Keep-alive heartbeat |
+| `permission.requested` | Agent requesting permission |
+| `comment.added` | New comment on task |
+| `task.updated` | Task was updated |
+| `task.created` | Task was created |
+| `task.deleted` | Task was deleted |
+| `workspace.created` | Workspace was created |
+| `workspace.updated` | Workspace was updated |
+| `workspace.deleted` | Workspace was deleted |
+| `board.created` | Board was created |
+| `board.updated` | Board was updated |
+| `board.deleted` | Board was deleted |
+| `column.created` | Column was created |
+| `column.updated` | Column was updated |
+| `column.deleted` | Column was deleted |
 
