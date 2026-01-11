@@ -204,7 +204,6 @@ func (h *Handlers) PromptTask(ctx context.Context, msg *ws.Message) (*ws.Message
 
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 		"success":     true,
-		"needs_input": result.NeedsInput,
 		"stop_reason": result.StopReason,
 	})
 }

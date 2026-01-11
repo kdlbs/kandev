@@ -344,7 +344,6 @@ func (s *SimulatedAgentManagerClient) PromptAgent(ctx context.Context, agentInst
 
 	return &executor.PromptResult{
 		StopReason: "end_turn",
-		NeedsInput: false,
 	}, nil
 }
 

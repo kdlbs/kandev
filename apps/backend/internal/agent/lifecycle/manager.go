@@ -43,6 +43,10 @@ type AgentInstance struct {
 
 	// agentctl client for this instance
 	agentctl *agentctl.Client
+
+	// Message buffer for accumulating agent response during a prompt
+	messageBuffer strings.Builder
+	messageMu     sync.Mutex
 }
 
 // LaunchRequest contains parameters for launching an agent
@@ -321,6 +325,11 @@ func (m *Manager) initializeACPSession(ctx context.Context, instance *AgentInsta
 			zap.String("session_id", sessionID),
 			zap.String("task_description", taskDescription))
 
+		// Clear message buffer before starting prompt
+		instance.messageMu.Lock()
+		instance.messageBuffer.Reset()
+		instance.messageMu.Unlock()
+
 		// Prompt is SYNCHRONOUS - it blocks until the agent completes the task
 		// Use a long timeout context for this
 		promptCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
@@ -334,7 +343,12 @@ func (m *Manager) initializeACPSession(ctx context.Context, instance *AgentInsta
 			return fmt.Errorf("prompt failed: %w", err)
 		}
 
-		// Check if agent needs input - if so, publish input_required event
+		// Extract accumulated message from buffer
+		instance.messageMu.Lock()
+		agentMessage := instance.messageBuffer.String()
+		instance.messageBuffer.Reset()
+		instance.messageMu.Unlock()
+
 		stopReason := ""
 		if resp != nil {
 			stopReason = string(resp.StopReason)
@@ -343,20 +357,16 @@ func (m *Manager) initializeACPSession(ctx context.Context, instance *AgentInsta
 			zap.String("instance_id", instance.ID),
 			zap.String("stop_reason", stopReason))
 
-		if resp != nil && resp.StopReason == "needs_input" {
-			m.logger.Info("agent requesting user input on initial prompt",
+		// Publish prompt_complete event with the agent's response (for saving as comment)
+		m.publishPromptComplete(instance, agentMessage)
+
+		// Prompt completed - mark agent as READY for follow-up prompts
+		m.logger.Info("agent ready for follow-up prompts",
+			zap.String("instance_id", instance.ID))
+		if err := m.MarkReady(instance.ID); err != nil {
+			m.logger.Error("failed to mark instance as ready",
 				zap.String("instance_id", instance.ID),
-				zap.String("task_id", instance.TaskID))
-			m.publishInputRequiredFromPrompt(instance, "The agent needs more information to proceed.")
-		} else {
-			// Prompt completed - mark agent as READY for follow-up prompts
-			m.logger.Info("agent ready for follow-up prompts",
-				zap.String("instance_id", instance.ID))
-			if err := m.MarkReady(instance.ID); err != nil {
-				m.logger.Error("failed to mark instance as ready",
-					zap.String("instance_id", instance.ID),
-					zap.Error(err))
-			}
+				zap.Error(err))
 		}
 	} else {
 		m.logger.Warn("no task description provided, marking as ready",
@@ -466,6 +476,13 @@ func (m *Manager) handleSessionNotification(instance *AgentInstance, notificatio
 		m.logger.Debug("agent message chunk",
 			zap.String("instance_id", instance.ID))
 		m.updateInstanceProgress(instance.ID, 50)
+
+		// Accumulate message content for saving as comment when prompt completes
+		if update.AgentMessageChunk.Content.Text != nil {
+			instance.messageMu.Lock()
+			instance.messageBuffer.WriteString(update.AgentMessageChunk.Content.Text.Text)
+			instance.messageMu.Unlock()
+		}
 	}
 
 	if update.AgentThoughtChunk != nil {
@@ -536,39 +553,6 @@ func (m *Manager) publishSessionNotification(instance *AgentInstance, notificati
 	}
 }
 
-// publishInputRequiredFromPrompt publishes an input_required event when the agent needs user input
-// This is called after a prompt completes with stopReason="needs_input"
-func (m *Manager) publishInputRequiredFromPrompt(instance *AgentInstance, message string) {
-	if m.eventBus == nil {
-		return
-	}
-
-	// Structure must match protocol.Message with type "input_required"
-	data := map[string]interface{}{
-		"type":      "input_required",
-		"timestamp": time.Now().UTC().Format(time.RFC3339Nano),
-		"agent_id":  instance.ID,
-		"task_id":   instance.TaskID,
-		"data": map[string]interface{}{
-			"message": message,
-		},
-	}
-
-	event := bus.NewEvent(events.ACPMessage, "agent-manager", data)
-	subject := events.BuildACPSubject(instance.TaskID)
-
-	if err := m.eventBus.Publish(context.Background(), subject, event); err != nil {
-		m.logger.Error("failed to publish input_required event",
-			zap.String("instance_id", instance.ID),
-			zap.String("task_id", instance.TaskID),
-			zap.Error(err))
-	} else {
-		m.logger.Info("published input_required event",
-			zap.String("task_id", instance.TaskID),
-			zap.String("message", message))
-	}
-}
-
 // publishSessionInfo publishes a session_info event with the session ID
 // This allows the orchestrator to store the session ID in task metadata for resumption
 func (m *Manager) publishSessionInfo(instance *AgentInstance, sessionID string) {
@@ -601,6 +585,42 @@ func (m *Manager) publishSessionInfo(instance *AgentInstance, sessionID string) 
 		m.logger.Info("published session_info event",
 			zap.String("task_id", instance.TaskID),
 			zap.String("session_id", sessionID))
+	}
+}
+
+// publishPromptComplete publishes a prompt_complete event when an agent finishes responding
+// This is used to save the agent's response as a comment on the task
+func (m *Manager) publishPromptComplete(instance *AgentInstance, agentMessage string) {
+	if m.eventBus == nil {
+		return
+	}
+
+	// Only publish if there's actual content
+	if agentMessage == "" {
+		return
+	}
+
+	data := map[string]interface{}{
+		"type":          "prompt_complete",
+		"timestamp":     time.Now().UTC().Format(time.RFC3339Nano),
+		"agent_id":      instance.ID,
+		"task_id":       instance.TaskID,
+		"agent_message": agentMessage,
+	}
+
+	event := bus.NewEvent(events.PromptComplete, "agent-manager", data)
+	// Publish on task-specific subject so orchestrator can subscribe
+	subject := events.PromptComplete + "." + instance.TaskID
+
+	if err := m.eventBus.Publish(context.Background(), subject, event); err != nil {
+		m.logger.Error("failed to publish prompt_complete event",
+			zap.String("instance_id", instance.ID),
+			zap.String("task_id", instance.TaskID),
+			zap.Error(err))
+	} else {
+		m.logger.Info("published prompt_complete event",
+			zap.String("task_id", instance.TaskID),
+			zap.Int("message_length", len(agentMessage)))
 	}
 }
 
@@ -755,8 +775,8 @@ func (m *Manager) expandMountTemplate(source, workspacePath, taskID string) stri
 // PromptAgent sends a follow-up prompt to a running agent
 // PromptResult contains the result of a prompt operation
 type PromptResult struct {
-	StopReason    string // The reason the agent stopped (e.g., "end_turn", "needs_input")
-	NeedsInput    bool   // True if the agent is requesting user input
+	StopReason   string // The reason the agent stopped (e.g., "end_turn")
+	AgentMessage string // The agent's accumulated response message
 }
 
 // PromptAgent sends a follow-up prompt to a running agent
@@ -781,6 +801,12 @@ func (m *Manager) PromptAgent(ctx context.Context, instanceID string, prompt str
 
 	// Set status to RUNNING while processing
 	instance.Status = v1.AgentStatusRunning
+
+	// Clear message buffer before starting new prompt
+	instance.messageMu.Lock()
+	instance.messageBuffer.Reset()
+	instance.messageMu.Unlock()
+
 	m.mu.Unlock()
 
 	m.logger.Info("sending prompt to agent",
@@ -793,24 +819,25 @@ func (m *Manager) PromptAgent(ctx context.Context, instanceID string, prompt str
 		return nil, err
 	}
 
+	// Extract accumulated message from buffer
+	instance.messageMu.Lock()
+	agentMessage := instance.messageBuffer.String()
+	instance.messageBuffer.Reset()
+	instance.messageMu.Unlock()
+
 	result := &PromptResult{
-		StopReason: string(resp.StopReason),
-		NeedsInput: resp.StopReason == "needs_input",
+		StopReason:   string(resp.StopReason),
+		AgentMessage: agentMessage,
 	}
 
-	// Check if agent needs input - if so, publish input_required event
-	if result.NeedsInput {
-		m.logger.Info("agent requesting user input",
+	// Publish prompt_complete event with the agent's response (for saving as comment)
+	m.publishPromptComplete(instance, agentMessage)
+
+	// Prompt completed - mark as READY for next prompt
+	if err := m.MarkReady(instanceID); err != nil {
+		m.logger.Error("failed to mark instance as ready after prompt",
 			zap.String("instance_id", instanceID),
-			zap.String("task_id", instance.TaskID))
-		m.publishInputRequiredFromPrompt(instance, "The agent needs more information to proceed.")
-	} else {
-		// Prompt completed normally - mark as READY for next prompt
-		if err := m.MarkReady(instanceID); err != nil {
-			m.logger.Error("failed to mark instance as ready after prompt",
-				zap.String("instance_id", instanceID),
-				zap.Error(err))
-		}
+			zap.Error(err))
 	}
 
 	return result, nil

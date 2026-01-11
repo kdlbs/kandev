@@ -44,6 +44,11 @@ func DefaultServiceConfig() ServiceConfig {
 // InputRequestHandler is called when an agent requests user input
 type InputRequestHandler func(ctx context.Context, taskID, agentID, message string) error
 
+// CommentCreator is an interface for creating comments on tasks
+type CommentCreator interface {
+	CreateAgentComment(ctx context.Context, taskID, content string) error
+}
+
 // Service is the main orchestrator service
 type Service struct {
 	config   ServiceConfig
@@ -64,6 +69,9 @@ type Service struct {
 
 	// Input request handler (for agent-user conversation)
 	inputRequestHandler InputRequestHandler
+
+	// Comment creator for saving agent responses
+	commentCreator CommentCreator
 
 	// Service state
 	mu        sync.RWMutex
@@ -122,10 +130,16 @@ func NewService(
 		OnAgentCompleted:   s.handleAgentCompleted,
 		OnAgentFailed:      s.handleAgentFailed,
 		OnACPMessage:       s.handleACPMessage,
+		OnPromptComplete:   s.handlePromptComplete,
 	}
 	s.watcher = watcher.NewWatcher(eventBus, handlers, log)
 
 	return s
+}
+
+// SetCommentCreator sets the comment creator for saving agent responses
+func (s *Service) SetCommentCreator(cc CommentCreator) {
+	s.commentCreator = cc
 }
 
 // Start starts all orchestrator components
@@ -273,12 +287,11 @@ func (s *Service) StopTask(ctx context.Context, taskID string, reason string, fo
 
 // PromptResult contains the result of a prompt operation
 type PromptResult struct {
-	StopReason string // The reason the agent stopped (e.g., "end_turn", "needs_input")
-	NeedsInput bool   // True if the agent is requesting user input
+	StopReason   string // The reason the agent stopped (e.g., "end_turn")
+	AgentMessage string // The agent's accumulated response message
 }
 
 // PromptTask sends a follow-up prompt to a running agent for a task
-// Returns PromptResult indicating if the agent needs input
 func (s *Service) PromptTask(ctx context.Context, taskID string, prompt string) (*PromptResult, error) {
 	s.logger.Info("sending prompt to task agent",
 		zap.String("task_id", taskID),
@@ -288,8 +301,8 @@ func (s *Service) PromptTask(ctx context.Context, taskID string, prompt string) 
 		return nil, err
 	}
 	return &PromptResult{
-		StopReason: result.StopReason,
-		NeedsInput: result.NeedsInput,
+		StopReason:   result.StopReason,
+		AgentMessage: result.AgentMessage,
 	}, nil
 }
 
@@ -496,6 +509,26 @@ func (s *Service) handleInputRequired(ctx context.Context, taskID string, msg *p
 			s.logger.Error("input request handler failed",
 				zap.String("task_id", taskID),
 				zap.Error(err))
+		}
+	}
+}
+
+// handlePromptComplete handles prompt complete events and saves agent response as comment
+func (s *Service) handlePromptComplete(ctx context.Context, data watcher.PromptCompleteData) {
+	s.logger.Info("handling prompt complete",
+		zap.String("task_id", data.TaskID),
+		zap.Int("message_length", len(data.AgentMessage)))
+
+	// Save agent response as a comment if we have a comment creator
+	if s.commentCreator != nil && data.AgentMessage != "" {
+		if err := s.commentCreator.CreateAgentComment(ctx, data.TaskID, data.AgentMessage); err != nil {
+			s.logger.Error("failed to create agent comment",
+				zap.String("task_id", data.TaskID),
+				zap.Error(err))
+		} else {
+			s.logger.Info("created agent comment",
+				zap.String("task_id", data.TaskID),
+				zap.Int("message_length", len(data.AgentMessage)))
 		}
 	}
 }

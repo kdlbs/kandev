@@ -22,8 +22,8 @@ var (
 
 // PromptResult contains the result of a prompt operation
 type PromptResult struct {
-	StopReason string // The reason the agent stopped (e.g., "end_turn", "needs_input")
-	NeedsInput bool   // True if the agent is requesting user input
+	StopReason   string // The reason the agent stopped (e.g., "end_turn")
+	AgentMessage string // The agent's accumulated response message
 }
 
 // AgentManagerClient is an interface for the Agent Manager service
@@ -394,7 +394,7 @@ func (m *MockAgentManagerClient) PromptAgent(ctx context.Context, agentInstanceI
 	m.logger.Info("mock: prompting agent",
 		zap.String("agent_instance_id", agentInstanceID),
 		zap.Int("prompt_length", len(prompt)))
-	return &PromptResult{StopReason: "end_turn", NeedsInput: false}, nil
+	return &PromptResult{StopReason: "end_turn"}, nil
 }
 
 // RespondToPermissionByTaskID mocks responding to a permission request

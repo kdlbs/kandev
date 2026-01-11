@@ -194,6 +194,9 @@ func main() {
 	serviceCfg := orchestrator.DefaultServiceConfig()
 	orchestratorSvc := orchestrator.NewService(serviceCfg, eventBus, nil, agentManagerClient, taskRepoAdapter, log)
 
+	// Set up comment creator for saving agent responses as comments
+	orchestratorSvc.SetCommentCreator(&commentCreatorAdapter{svc: taskSvc})
+
 	// ============================================
 	// WEBSOCKET GATEWAY (All communication via WebSocket)
 	// ============================================
@@ -386,6 +389,7 @@ func main() {
 	taskhandlers.RegisterWorkspaceRoutes(router, gateway.Dispatcher, workspaceController, log)
 	taskhandlers.RegisterBoardRoutes(router, gateway.Dispatcher, boardController, log)
 	taskhandlers.RegisterTaskRoutes(router, gateway.Dispatcher, taskController, log)
+	taskhandlers.RegisterCommentRoutes(router, gateway.Dispatcher, taskSvc, &orchestratorAdapter{svc: orchestratorSvc}, log)
 	log.Info("Registered Task Service handlers (HTTP + WebSocket)")
 
 	// Health check (simple HTTP for load balancers/monitoring)
@@ -568,8 +572,8 @@ func (a *lifecycleAdapter) PromptAgent(ctx context.Context, agentInstanceID stri
 		return nil, err
 	}
 	return &executor.PromptResult{
-		StopReason: result.StopReason,
-		NeedsInput: result.NeedsInput,
+		StopReason:   result.StopReason,
+		AgentMessage: result.AgentMessage,
 	}, nil
 }
 
@@ -593,4 +597,36 @@ func corsMiddleware() gin.HandlerFunc {
 
 		c.Next()
 	}
+}
+
+// orchestratorAdapter adapts the orchestrator.Service to the taskhandlers.OrchestratorService interface
+type orchestratorAdapter struct {
+	svc *orchestrator.Service
+}
+
+// PromptTask forwards to the orchestrator service and converts the result type
+func (a *orchestratorAdapter) PromptTask(ctx context.Context, taskID string, prompt string) (*taskhandlers.PromptResult, error) {
+	result, err := a.svc.PromptTask(ctx, taskID, prompt)
+	if err != nil {
+		return nil, err
+	}
+	return &taskhandlers.PromptResult{
+		StopReason:   result.StopReason,
+		AgentMessage: result.AgentMessage,
+	}, nil
+}
+
+// commentCreatorAdapter adapts the task service to the orchestrator.CommentCreator interface
+type commentCreatorAdapter struct {
+	svc *taskservice.Service
+}
+
+// CreateAgentComment creates a comment with author_type="agent"
+func (a *commentCreatorAdapter) CreateAgentComment(ctx context.Context, taskID, content string) error {
+	_, err := a.svc.CreateComment(ctx, &taskservice.CreateCommentRequest{
+		TaskID:     taskID,
+		Content:    content,
+		AuthorType: "agent",
+	})
+	return err
 }
