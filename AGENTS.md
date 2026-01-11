@@ -7,24 +7,33 @@
 
 ## Overview
 
-Kandev agents run in Docker containers with **agentctl** - a sidecar process that manages the AI agent and provides HTTP-based control. The agent communicates via **ACP (Agent Communication Protocol)** - a JSON-RPC 2.0 protocol over stdin/stdout.
+Kandev uses a **WebSocket-only architecture** for all client-backend communication. Agents run in Docker containers with **agentctl** as a sidecar process. The agent communicates via **ACP (Agent Communication Protocol)** - a JSON-RPC 2.0 protocol over stdin/stdout. ACP messages are streamed to clients via WebSocket notifications.
 
 ```
-Backend                    agentctl (HTTP)              Agent Process
-  │                             │                            │
-  │  POST /api/v1/start         │                            │
-  ├────────────────────────────►│  spawn auggie --acp        │
-  │                             ├───────────────────────────►│
-  │  POST /api/v1/acp/call      │  initialize                │
-  ├────────────────────────────►├───────────────────────────►│
-  │                             │◄───────────────────────────┤
-  │◄────────────────────────────┤                            │
-  │  WS /api/v1/acp/stream      │  session/update            │
-  │◄────────────────────────────┤◄───────────────────────────┤
-  │                             │                            │
+Client (WS)              Backend (kandev)              agentctl (HTTP)           Agent Process
+    │                         │                             │                          │
+    │  orchestrator.start     │                             │                          │
+    ├────────────────────────►│  POST /api/v1/start         │                          │
+    │                         ├────────────────────────────►│  spawn auggie --acp      │
+    │                         │                             ├─────────────────────────►│
+    │                         │  POST /api/v1/acp/call      │  initialize              │
+    │                         ├────────────────────────────►├─────────────────────────►│
+    │                         │◄────────────────────────────┤◄─────────────────────────┤
+    │  acp.progress           │  WS /api/v1/acp/stream      │  session/update          │
+    │◄────────────────────────┤◄────────────────────────────┤◄─────────────────────────┤
+    │                         │                             │                          │
 ```
 
 ## Architecture
+
+### WebSocket Gateway
+
+All client communication uses a single WebSocket endpoint at `ws://localhost:8080/ws`. The backend:
+
+1. **Receives orchestrator requests** (`orchestrator.start`, `orchestrator.stop`, `orchestrator.prompt`)
+2. **Manages agent containers** via Docker and agentctl HTTP API
+3. **Streams ACP messages** to subscribed clients as WebSocket notifications
+4. **Publishes events** via internal event bus for real-time updates
 
 ### agentctl
 
@@ -32,19 +41,23 @@ Backend                    agentctl (HTTP)              Agent Process
 
 1. **Manages the agent subprocess** (e.g., `auggie --acp`)
 2. **Provides HTTP API** for control operations (start, stop, status)
-3. **Relays ACP messages** between HTTP clients and the agent's stdin/stdout
+3. **Relays ACP messages** between the backend and agent's stdin/stdout
 4. **Streams output** via WebSocket for real-time monitoring
 
 ### Communication Flow
 
-1. Backend creates container with agentctl as entrypoint
-2. agentctl starts HTTP server on port 9999
-3. Backend waits for agentctl to be ready (`GET /health`)
-4. Backend starts agent process (`POST /api/v1/start`)
-5. Backend sends ACP messages via HTTP (`POST /api/v1/acp/call`)
-6. Backend receives ACP updates via WebSocket (`GET /api/v1/acp/stream`)
+1. Client sends `orchestrator.start` via WebSocket
+2. Backend creates container with agentctl as entrypoint
+3. agentctl starts HTTP server on port 9999
+4. Backend waits for agentctl to be ready (`GET /health`)
+5. Backend starts agent process (`POST /api/v1/start`)
+6. Backend connects to agentctl WebSocket (`GET /api/v1/acp/stream`)
+7. Backend sends ACP messages via HTTP (`POST /api/v1/acp/call`)
+8. ACP updates are streamed to subscribed clients as `acp.*` notifications
 
-### agentctl HTTP API
+### agentctl HTTP API (Internal)
+
+These endpoints are used by the backend to communicate with agent containers:
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -485,206 +498,235 @@ echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":
 
 ## WebSocket API Integration
 
-All agent control operations use WebSocket messages with the following structure:
+All client communication uses a single WebSocket endpoint: `ws://localhost:8080/ws`
+
+### Message Format
 
 ```json
 {
   "id": "uuid",
-  "type": "request|response",
+  "type": "request|response|notification|error",
   "action": "action.name",
-  "payload": { ... }
+  "payload": { ... },
+  "timestamp": "2026-01-10T12:00:00Z"
 }
 ```
 
-### Launch Agent
+### Orchestrator Actions
 
-**Action**: `agent.launch`
+| Action | Description |
+|--------|-------------|
+| `orchestrator.status` | Get orchestrator status |
+| `orchestrator.queue` | Get queued tasks |
+| `orchestrator.start` | Start task execution |
+| `orchestrator.stop` | Stop running task |
+| `orchestrator.prompt` | Send follow-up prompt |
+| `orchestrator.complete` | Mark task complete |
+| `orchestrator.trigger` | Queue task for execution |
+
+### Start Task Execution
+
+**Action**: `orchestrator.start`
 
 **Request:**
 ```json
 {
   "id": "uuid",
   "type": "request",
-  "action": "agent.launch",
+  "action": "orchestrator.start",
   "payload": {
     "task_id": "uuid",
     "agent_type": "augment-agent",
-    "workspace_path": "/absolute/path/to/project",
-    "env": {
-      "AUGMENT_SESSION_AUTH": "{...}",
-      "TASK_DESCRIPTION": "Fix the bug in auth/login.go"
+    "priority": 2
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "id": "uuid",
+  "type": "response",
+  "action": "orchestrator.start",
+  "payload": {
+    "success": true,
+    "task_id": "uuid",
+    "agent_instance_id": "instance-uuid"
+  }
+}
+```
+
+### Send Follow-up Prompt
+
+**Action**: `orchestrator.prompt`
+
+**Request:**
+```json
+{
+  "id": "uuid",
+  "type": "request",
+  "action": "orchestrator.prompt",
+  "payload": {
+    "task_id": "uuid",
+    "prompt": "Please also add unit tests"
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "id": "uuid",
+  "type": "response",
+  "action": "orchestrator.prompt",
+  "payload": {
+    "success": true,
+    "task_id": "uuid"
+  }
+}
+```
+
+### Stop Task Execution
+
+**Action**: `orchestrator.stop`
+
+**Request:**
+```json
+{
+  "id": "uuid",
+  "type": "request",
+  "action": "orchestrator.stop",
+  "payload": {
+    "task_id": "uuid",
+    "reason": "User requested cancellation",
+    "force": false
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "id": "uuid",
+  "type": "response",
+  "action": "orchestrator.stop",
+  "payload": {
+    "success": true,
+    "task_id": "uuid"
+  }
+}
+```
+
+### Complete Task
+
+**Action**: `orchestrator.complete`
+
+**Request:**
+```json
+{
+  "id": "uuid",
+  "type": "request",
+  "action": "orchestrator.complete",
+  "payload": {
+    "task_id": "uuid"
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "id": "uuid",
+  "type": "response",
+  "action": "orchestrator.complete",
+  "payload": {
+    "success": true,
+    "task_id": "uuid"
+  }
+}
+```
+
+### Get Orchestrator Status
+
+**Action**: `orchestrator.status`
+
+**Request:**
+```json
+{
+  "id": "uuid",
+  "type": "request",
+  "action": "orchestrator.status",
+  "payload": {}
+}
+```
+
+**Response:**
+```json
+{
+  "id": "uuid",
+  "type": "response",
+  "action": "orchestrator.status",
+  "payload": {
+    "running": true,
+    "active_agents": 2,
+    "queued_tasks": 5,
+    "max_concurrent": 3
+  }
+}
+```
+
+### ACP Notifications
+
+When subscribed to a task via `task.subscribe`, clients receive real-time ACP notifications:
+
+**Progress Notification:**
+```json
+{
+  "id": "uuid",
+  "type": "notification",
+  "action": "acp.progress",
+  "payload": {
+    "task_id": "uuid",
+    "type": "progress",
+    "data": {
+      "progress": 50,
+      "stage": "executing",
+      "message": "Processing files..."
     },
-    "priority": 1,
-    "metadata": {}
+    "timestamp": "2026-01-10T12:00:00Z"
   }
 }
 ```
 
-**Response:**
+**Log Notification:**
 ```json
 {
   "id": "uuid",
-  "type": "response",
-  "action": "agent.launch",
+  "type": "notification",
+  "action": "acp.log",
   "payload": {
-    "id": "instance-uuid",
     "task_id": "uuid",
-    "agent_type": "augment-agent",
-    "container_id": "docker-id",
-    "status": "starting",
-    "started_at": "2026-01-10T12:00:00Z"
+    "type": "log",
+    "data": {
+      "level": "info",
+      "message": "Found 5 files to modify"
+    },
+    "timestamp": "2026-01-10T12:00:00Z"
   }
 }
 ```
 
-### Send Prompt (Mid-Execution)
+**Task Subscription:**
 
-**Action**: `agent.prompt`
+**Action**: `task.subscribe`
 
-**Request:**
 ```json
 {
   "id": "uuid",
   "type": "request",
-  "action": "agent.prompt",
+  "action": "task.subscribe",
   "payload": {
-    "instance_id": "instance-uuid",
-    "message": "Please also add unit tests"
-  }
-}
-```
-
-**Response:**
-```json
-{
-  "id": "uuid",
-  "type": "response",
-  "action": "agent.prompt",
-  "payload": {
-    "status": "accepted"
-  }
-}
-```
-
-### Cancel Agent
-
-**Action**: `agent.cancel`
-
-**Request:**
-```json
-{
-  "id": "uuid",
-  "type": "request",
-  "action": "agent.cancel",
-  "payload": {
-    "instance_id": "instance-uuid",
-    "reason": "User requested cancellation"
-  }
-}
-```
-
-**Response:**
-```json
-{
-  "id": "uuid",
-  "type": "response",
-  "action": "agent.cancel",
-  "payload": {
-    "status": "cancelled"
-  }
-}
-```
-
-### Get Agent Status
-
-**Action**: `agent.status`
-
-**Request:**
-```json
-{
-  "id": "uuid",
-  "type": "request",
-  "action": "agent.status",
-  "payload": {
-    "instance_id": "instance-uuid"
-  }
-}
-```
-
-**Response:**
-```json
-{
-  "id": "uuid",
-  "type": "response",
-  "action": "agent.status",
-  "payload": {
-    "id": "instance-uuid",
-    "status": "running",
-    "progress": 50,
-    "started_at": "2026-01-10T12:00:00Z",
-    "finished_at": null
-  }
-}
-```
-
-Statuses: `starting`, `running`, `completed`, `failed`, `stopped`
-
-### Get Agent Logs
-
-**Action**: `agent.logs`
-
-**Request:**
-```json
-{
-  "id": "uuid",
-  "type": "request",
-  "action": "agent.logs",
-  "payload": {
-    "instance_id": "instance-uuid",
-    "tail": 100
-  }
-}
-```
-
-**Response:**
-```json
-{
-  "id": "uuid",
-  "type": "response",
-  "action": "agent.logs",
-  "payload": {
-    "logs": ["line1", "line2", "..."]
-  }
-}
-```
-
-### Get Session Info
-
-**Action**: `agent.session`
-
-**Request:**
-```json
-{
-  "id": "uuid",
-  "type": "request",
-  "action": "agent.session",
-  "payload": {
-    "instance_id": "instance-uuid"
-  }
-}
-```
-
-**Response:**
-```json
-{
-  "id": "uuid",
-  "type": "response",
-  "action": "agent.session",
-  "payload": {
-    "instance_id": "instance-uuid",
-    "task_id": "task-uuid",
-    "session_id": "abc123",
-    "status": "running"
+    "task_id": "uuid"
   }
 }
 ```
@@ -705,36 +747,36 @@ Agents can resume previous sessions for follow-up conversations.
 
 ```javascript
 // WebSocket connection
-const ws = new WebSocket('ws://localhost:8080/api/v1/ws');
+const ws = new WebSocket('ws://localhost:8080/ws');
 
 // Get session ID from completed task
 ws.send(JSON.stringify({
   id: crypto.randomUUID(),
   type: 'request',
   action: 'task.get',
-  payload: { task_id: previousTaskId }
+  payload: { id: previousTaskId }
 }));
 
-// Handle response and launch with resumption
+// Handle response and start with session resumption
 ws.onmessage = (event) => {
   const response = JSON.parse(event.data);
 
   if (response.action === 'task.get') {
     const sessionId = response.payload.metadata.auggie_session_id;
 
-    // Launch agent with session resumption
+    // Create new task with session ID in metadata
     ws.send(JSON.stringify({
       id: crypto.randomUUID(),
       type: 'request',
-      action: 'agent.launch',
+      action: 'task.create',
       payload: {
-        task_id: newTaskId,
+        board_id: boardId,
+        column_id: columnId,
+        title: 'Follow-up task',
+        description: 'What changes did you make in the previous task?',
         agent_type: 'augment-agent',
-        workspace_path: '/path/to/project',
-        env: {
-          AUGMENT_SESSION_AUTH: JSON.stringify(sessionAuth),
-          AUGGIE_SESSION_ID: sessionId,
-          TASK_DESCRIPTION: 'What changes did you make in the previous task?'
+        metadata: {
+          auggie_session_id: sessionId
         }
       }
     }));
@@ -827,23 +869,24 @@ Prior versions used a simpler JSON format (not JSON-RPC). For compatibility refe
 6. **Validate messages** - Check for required fields before processing
 7. **Set exit codes** - 0 for success, non-zero for errors
 
-### Message Flow (with agentctl)
+### Message Flow
 
 ```
-1. Backend creates container with agentctl
-2. agentctl starts HTTP server on port 9999
-3. Backend waits for agentctl health check
-4. Backend calls POST /api/v1/start
-5. agentctl spawns agent subprocess
-6. Backend calls POST /api/v1/acp/call with initialize
-7. Agent responds with capabilities
-8. Backend calls POST /api/v1/acp/call with session/new
-9. Agent responds with sessionId
-10. Backend connects to WS /api/v1/acp/stream
-11. Backend calls POST /api/v1/acp/call with session/prompt
-12. Agent sends session/update notifications (streamed via WebSocket)
-13. Agent sends final session/update (type: complete)
-14. Backend calls POST /api/v1/stop or container exits
+1. Client sends orchestrator.start via WebSocket
+2. Backend creates container with agentctl
+3. agentctl starts HTTP server on port 9999
+4. Backend waits for agentctl health check (GET /health)
+5. Backend calls POST /api/v1/start
+6. agentctl spawns agent subprocess
+7. Backend calls POST /api/v1/acp/call with initialize
+8. Agent responds with capabilities
+9. Backend calls POST /api/v1/acp/call with session/new
+10. Agent responds with sessionId
+11. Backend connects to agentctl WS /api/v1/acp/stream
+12. Backend calls POST /api/v1/acp/call with session/prompt
+13. Agent sends session/update notifications (streamed to client via WebSocket)
+14. Agent sends final session/update (type: complete)
+15. Client sends orchestrator.complete or backend calls POST /api/v1/stop
 ```
 
 ### Testing Your Agent
@@ -910,4 +953,4 @@ See `apps/backend/` for complete working examples:
 
 ---
 
-**Last Updated**: 2026-01-10
+**Last Updated**: 2026-01-11
