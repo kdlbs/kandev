@@ -305,6 +305,9 @@ func (m *Manager) initializeACPSession(ctx context.Context, instance *AgentInsta
 	}
 	m.mu.Unlock()
 
+	// Publish session_info event so the orchestrator can store it in task metadata
+	m.publishSessionInfo(instance, sessionID)
+
 	// 3. Set up updates stream to receive session notifications
 	go m.handleUpdatesStream(instance)
 
@@ -443,6 +446,37 @@ func (m *Manager) publishSessionNotification(instance *AgentInstance, notificati
 			zap.String("instance_id", instance.ID),
 			zap.String("task_id", instance.TaskID),
 			zap.Error(err))
+	}
+}
+
+// publishSessionInfo publishes a session_info event with the session ID
+// This allows the orchestrator to store the session ID in task metadata for resumption
+func (m *Manager) publishSessionInfo(instance *AgentInstance, sessionID string) {
+	if m.eventBus == nil {
+		return
+	}
+
+	data := map[string]interface{}{
+		"type":       "session_info",
+		"timestamp":  time.Now(),
+		"agent_id":   instance.ID,
+		"task_id":    instance.TaskID,
+		"session_id": sessionID,
+	}
+
+	event := bus.NewEvent(events.ACPMessage, "agent-manager", data)
+	subject := events.BuildACPSubject(instance.TaskID)
+
+	if err := m.eventBus.Publish(context.Background(), subject, event); err != nil {
+		m.logger.Error("failed to publish session_info event",
+			zap.String("instance_id", instance.ID),
+			zap.String("task_id", instance.TaskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	} else {
+		m.logger.Info("published session_info event",
+			zap.String("task_id", instance.TaskID),
+			zap.String("session_id", sessionID))
 	}
 }
 
