@@ -118,9 +118,7 @@ func (r *SQLiteRepository) initSchema() error {
 
 	CREATE INDEX IF NOT EXISTS idx_tasks_board_id ON tasks(board_id);
 	CREATE INDEX IF NOT EXISTS idx_tasks_column_id ON tasks(column_id);
-	CREATE INDEX IF NOT EXISTS idx_tasks_workspace_id ON tasks(workspace_id);
 	CREATE INDEX IF NOT EXISTS idx_columns_board_id ON columns(board_id);
-	CREATE INDEX IF NOT EXISTS idx_boards_workspace_id ON boards(workspace_id);
 	CREATE INDEX IF NOT EXISTS idx_task_boards_board_id ON task_boards(board_id);
 	CREATE INDEX IF NOT EXISTS idx_task_columns_board_id ON task_columns(board_id);
 	CREATE INDEX IF NOT EXISTS idx_task_columns_column_id ON task_columns(column_id);
@@ -158,6 +156,10 @@ func (r *SQLiteRepository) initSchema() error {
 	}
 
 	if err := r.backfillTaskMappings(); err != nil {
+		return err
+	}
+
+	if err := r.ensureWorkspaceIndexes(); err != nil {
 		return err
 	}
 
@@ -239,6 +241,16 @@ func (r *SQLiteRepository) ensureDefaultWorkspace() error {
 		return err
 	}
 
+	return nil
+}
+
+func (r *SQLiteRepository) ensureWorkspaceIndexes() error {
+	if _, err := r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_tasks_workspace_id ON tasks(workspace_id)`); err != nil {
+		return err
+	}
+	if _, err := r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_boards_workspace_id ON boards(workspace_id)`); err != nil {
+		return err
+	}
 	return nil
 }
 
