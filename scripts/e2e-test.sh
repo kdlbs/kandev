@@ -180,7 +180,7 @@ fi
 log_step "Building and Starting Server"
 
 cd "$BACKEND_DIR"
-rm -f kandev.db kandev.db-shm kandev.db-wal
+#rm -f kandev.db kandev.db-shm kandev.db-wal
 
 log_info "Building kandev..."
 go build -o kandev ./cmd/kandev
@@ -444,6 +444,17 @@ else
     log_error "Expected task state COMPLETED, got: $TASK_STATE"
 fi
 
+log_step "Step 13: Verify Session ID in Task Metadata"
+# The session_id should have been stored in task metadata by the session_info handler
+SESSION_ID=$(echo "$FINAL_TASK_RESPONSE" | jq -r '.payload.metadata.auggie_session_id // empty')
+if [ -n "$SESSION_ID" ]; then
+    log_success "Session ID stored in task metadata: $SESSION_ID"
+else
+    log_error "Session ID not found in task metadata"
+    log_info "Task metadata: $(echo "$FINAL_TASK_RESPONSE" | jq '.payload.metadata')"
+    exit 1
+fi
+
 # Clean up test workspace
 rm -rf "$TEST_WORKSPACE" 2>/dev/null || true
 
@@ -467,6 +478,7 @@ echo -e "${GREEN}║ agentctl running:  ✓                   ║${NC}"
 echo -e "${GREEN}║ First prompt:      ✓                   ║${NC}"
 echo -e "${GREEN}║ Multi-turn:        ✓                   ║${NC}"
 echo -e "${GREEN}║ Task completed:    ✓                   ║${NC}"
+echo -e "${GREEN}║ Session ID stored: ✓                   ║${NC}"
 echo -e "${GREEN}╚════════════════════════════════════════╝${NC}"
 
 exit 0
