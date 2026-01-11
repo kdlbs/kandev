@@ -346,3 +346,120 @@ func TestMemoryRepository_ListTasksByColumn(t *testing.T) {
 		t.Errorf("expected 2 tasks for col-1, got %d", len(tasks))
 	}
 }
+
+// Comment CRUD tests
+
+func TestMemoryRepository_CommentCRUD(t *testing.T) {
+	repo := NewMemoryRepository()
+	ctx := context.Background()
+
+	// Create a task first
+	task := &models.Task{ID: "task-123", BoardID: "board-123", ColumnID: "col-123", Title: "Test Task"}
+	_ = repo.CreateTask(ctx, task)
+
+	// Create comment
+	comment := &models.Comment{
+		TaskID:        "task-123",
+		AuthorType:    models.CommentAuthorUser,
+		AuthorID:      "user-123",
+		Content:       "This is a test comment",
+		RequestsInput: false,
+	}
+	if err := repo.CreateComment(ctx, comment); err != nil {
+		t.Fatalf("failed to create comment: %v", err)
+	}
+	if comment.ID == "" {
+		t.Error("expected comment ID to be set")
+	}
+	if comment.CreatedAt.IsZero() {
+		t.Error("expected CreatedAt to be set")
+	}
+
+	// Get comment
+	retrieved, err := repo.GetComment(ctx, comment.ID)
+	if err != nil {
+		t.Fatalf("failed to get comment: %v", err)
+	}
+	if retrieved.Content != "This is a test comment" {
+		t.Errorf("expected content 'This is a test comment', got %s", retrieved.Content)
+	}
+	if retrieved.AuthorType != models.CommentAuthorUser {
+		t.Errorf("expected author type 'user', got %s", retrieved.AuthorType)
+	}
+
+	// Delete comment
+	if err := repo.DeleteComment(ctx, comment.ID); err != nil {
+		t.Fatalf("failed to delete comment: %v", err)
+	}
+	_, err = repo.GetComment(ctx, comment.ID)
+	if err == nil {
+		t.Error("expected comment to be deleted")
+	}
+}
+
+func TestMemoryRepository_CommentNotFound(t *testing.T) {
+	repo := NewMemoryRepository()
+	ctx := context.Background()
+
+	_, err := repo.GetComment(ctx, "nonexistent")
+	if err == nil {
+		t.Error("expected error for nonexistent comment")
+	}
+
+	err = repo.DeleteComment(ctx, "nonexistent")
+	if err == nil {
+		t.Error("expected error for deleting nonexistent comment")
+	}
+}
+
+func TestMemoryRepository_ListComments(t *testing.T) {
+	repo := NewMemoryRepository()
+	ctx := context.Background()
+
+	// Create a task
+	task := &models.Task{ID: "task-123", BoardID: "board-123", ColumnID: "col-123", Title: "Test Task"}
+	_ = repo.CreateTask(ctx, task)
+
+	// Create multiple comments
+	_ = repo.CreateComment(ctx, &models.Comment{ID: "comment-1", TaskID: "task-123", AuthorType: models.CommentAuthorUser, Content: "Comment 1"})
+	_ = repo.CreateComment(ctx, &models.Comment{ID: "comment-2", TaskID: "task-123", AuthorType: models.CommentAuthorAgent, Content: "Comment 2"})
+	_ = repo.CreateComment(ctx, &models.Comment{ID: "comment-3", TaskID: "task-456", AuthorType: models.CommentAuthorUser, Content: "Comment 3"})
+
+	comments, err := repo.ListComments(ctx, "task-123")
+	if err != nil {
+		t.Fatalf("failed to list comments: %v", err)
+	}
+	if len(comments) != 2 {
+		t.Errorf("expected 2 comments for task-123, got %d", len(comments))
+	}
+}
+
+func TestMemoryRepository_CommentWithRequestsInput(t *testing.T) {
+	repo := NewMemoryRepository()
+	ctx := context.Background()
+
+	// Create a task
+	task := &models.Task{ID: "task-123", BoardID: "board-123", ColumnID: "col-123", Title: "Test Task"}
+	_ = repo.CreateTask(ctx, task)
+
+	// Create agent comment requesting input
+	comment := &models.Comment{
+		TaskID:        "task-123",
+		AuthorType:    models.CommentAuthorAgent,
+		AuthorID:      "agent-123",
+		Content:       "What should I do next?",
+		RequestsInput: true,
+		ACPSessionID:  "session-abc",
+	}
+	if err := repo.CreateComment(ctx, comment); err != nil {
+		t.Fatalf("failed to create comment: %v", err)
+	}
+
+	retrieved, _ := repo.GetComment(ctx, comment.ID)
+	if !retrieved.RequestsInput {
+		t.Error("expected RequestsInput to be true")
+	}
+	if retrieved.ACPSessionID != "session-abc" {
+		t.Errorf("expected ACPSessionID 'session-abc', got %s", retrieved.ACPSessionID)
+	}
+}

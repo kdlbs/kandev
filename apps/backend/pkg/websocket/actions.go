@@ -62,15 +62,20 @@ const (
 	ActionTaskSubscribe   = "task.subscribe"
 	ActionTaskUnsubscribe = "task.unsubscribe"
 
+	// Comment actions
+	ActionCommentAdd  = "comment.add"
+	ActionCommentGet  = "comment.get"
+	ActionCommentList = "comment.list"
+
 	// Notification actions (server -> client)
-	ActionACPProgress  = "acp.progress"
-	ActionACPLog       = "acp.log"
-	ActionACPResult    = "acp.result"
-	ActionACPError     = "acp.error"
-	ActionACPStatus    = "acp.status"
-	ActionACPHeartbeat = "acp.heartbeat"
-	ActionTaskUpdated  = "task.updated"
-	ActionAgentUpdated = "agent.updated"
+	ActionACPProgress      = "acp.progress"
+	ActionACPLog           = "acp.log"
+	ActionACPResult        = "acp.result"
+	ActionACPError         = "acp.error"
+	ActionACPStatus        = "acp.status"
+	ActionACPHeartbeat     = "acp.heartbeat"
+	ActionTaskUpdated      = "task.updated"
+	ActionAgentUpdated     = "agent.updated"
 	ActionWorkspaceCreated = "workspace.created"
 	ActionWorkspaceUpdated = "workspace.updated"
 	ActionWorkspaceDeleted = "workspace.deleted"
@@ -80,6 +85,8 @@ const (
 	ActionColumnCreated    = "column.created"
 	ActionColumnUpdated    = "column.updated"
 	ActionColumnDeleted    = "column.deleted"
+	ActionCommentAdded     = "comment.added"
+	ActionInputRequested   = "input.requested"
 )
 
 // Error codes

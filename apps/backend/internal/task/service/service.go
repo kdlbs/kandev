@@ -645,3 +645,106 @@ func (s *Service) publishColumnEvent(ctx context.Context, eventType string, colu
 			zap.Error(err))
 	}
 }
+
+// Comment operations
+
+// CreateCommentRequest contains the data for creating a new comment
+type CreateCommentRequest struct {
+	TaskID        string `json:"task_id"`
+	Content       string `json:"content"`
+	AuthorType    string `json:"author_type,omitempty"` // "user" or "agent", defaults to "user"
+	AuthorID      string `json:"author_id,omitempty"`
+	RequestsInput bool   `json:"requests_input,omitempty"`
+	ACPSessionID  string `json:"acp_session_id,omitempty"`
+}
+
+// CreateComment creates a new comment on a task
+func (s *Service) CreateComment(ctx context.Context, req *CreateCommentRequest) (*models.Comment, error) {
+	// Verify task exists
+	_, err := s.repo.GetTask(ctx, req.TaskID)
+	if err != nil {
+		return nil, err
+	}
+
+	authorType := models.CommentAuthorUser
+	if req.AuthorType == "agent" {
+		authorType = models.CommentAuthorAgent
+	}
+
+	comment := &models.Comment{
+		ID:            uuid.New().String(),
+		TaskID:        req.TaskID,
+		AuthorType:    authorType,
+		AuthorID:      req.AuthorID,
+		Content:       req.Content,
+		RequestsInput: req.RequestsInput,
+		ACPSessionID:  req.ACPSessionID,
+		CreatedAt:     time.Now().UTC(),
+	}
+
+	if err := s.repo.CreateComment(ctx, comment); err != nil {
+		s.logger.Error("failed to create comment", zap.Error(err))
+		return nil, err
+	}
+
+	// Publish comment.added event
+	s.publishCommentEvent(ctx, events.CommentAdded, comment)
+
+	s.logger.Info("comment created",
+		zap.String("comment_id", comment.ID),
+		zap.String("task_id", comment.TaskID),
+		zap.String("author_type", string(comment.AuthorType)))
+
+	return comment, nil
+}
+
+// GetComment retrieves a comment by ID
+func (s *Service) GetComment(ctx context.Context, id string) (*models.Comment, error) {
+	return s.repo.GetComment(ctx, id)
+}
+
+// ListComments returns all comments for a task
+func (s *Service) ListComments(ctx context.Context, taskID string) ([]*models.Comment, error) {
+	return s.repo.ListComments(ctx, taskID)
+}
+
+// DeleteComment deletes a comment
+func (s *Service) DeleteComment(ctx context.Context, id string) error {
+	if err := s.repo.DeleteComment(ctx, id); err != nil {
+		s.logger.Error("failed to delete comment", zap.String("comment_id", id), zap.Error(err))
+		return err
+	}
+
+	s.logger.Info("comment deleted", zap.String("comment_id", id))
+	return nil
+}
+
+// publishCommentEvent publishes comment events to the event bus
+func (s *Service) publishCommentEvent(ctx context.Context, eventType string, comment *models.Comment) {
+	if s.eventBus == nil {
+		return
+	}
+
+	data := map[string]interface{}{
+		"comment_id":     comment.ID,
+		"task_id":        comment.TaskID,
+		"author_type":    string(comment.AuthorType),
+		"author_id":      comment.AuthorID,
+		"content":        comment.Content,
+		"requests_input": comment.RequestsInput,
+		"created_at":     comment.CreatedAt.Format(time.RFC3339),
+	}
+
+	if comment.ACPSessionID != "" {
+		data["acp_session_id"] = comment.ACPSessionID
+	}
+
+	event := bus.NewEvent(eventType, "task-service", data)
+
+	if err := s.eventBus.Publish(ctx, eventType, event); err != nil {
+		s.logger.Error("failed to publish comment event",
+			zap.String("event_type", eventType),
+			zap.String("comment_id", comment.ID),
+			zap.Error(err))
+	}
+}

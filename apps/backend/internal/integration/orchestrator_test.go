@@ -306,13 +306,13 @@ func (s *SimulatedAgentManagerClient) ListAgentTypes(ctx context.Context) ([]*v1
 }
 
 // PromptAgent sends a follow-up prompt to a running agent
-func (s *SimulatedAgentManagerClient) PromptAgent(ctx context.Context, agentInstanceID string, prompt string) error {
+func (s *SimulatedAgentManagerClient) PromptAgent(ctx context.Context, agentInstanceID string, prompt string) (*executor.PromptResult, error) {
 	s.mu.Lock()
 	instance, exists := s.instances[agentInstanceID]
 	s.mu.Unlock()
 
 	if !exists {
-		return fmt.Errorf("agent instance %q not found", agentInstanceID)
+		return nil, fmt.Errorf("agent instance %q not found", agentInstanceID)
 	}
 
 	// Simulate receiving prompt and generating response
@@ -341,7 +341,10 @@ func (s *SimulatedAgentManagerClient) PromptAgent(ctx context.Context, agentInst
 		s.eventBus.Publish(context.Background(), subject, event)
 	}()
 
-	return nil
+	return &executor.PromptResult{
+		StopReason: "end_turn",
+		NeedsInput: false,
+	}, nil
 }
 
 // CompleteAgent marks an agent as completed

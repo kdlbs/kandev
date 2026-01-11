@@ -41,6 +41,9 @@ func DefaultServiceConfig() ServiceConfig {
 	}
 }
 
+// InputRequestHandler is called when an agent requests user input
+type InputRequestHandler func(ctx context.Context, taskID, agentID, message string) error
+
 // Service is the main orchestrator service
 type Service struct {
 	config   ServiceConfig
@@ -58,6 +61,9 @@ type Service struct {
 	// ACP message handlers (for WebSocket streaming)
 	acpHandlers []func(taskID string, msg *protocol.Message)
 	acpMu       sync.RWMutex
+
+	// Input request handler (for agent-user conversation)
+	inputRequestHandler InputRequestHandler
 
 	// Service state
 	mu        sync.RWMutex
@@ -265,12 +271,26 @@ func (s *Service) StopTask(ctx context.Context, taskID string, reason string, fo
 	return s.executor.Stop(ctx, taskID, reason, force)
 }
 
+// PromptResult contains the result of a prompt operation
+type PromptResult struct {
+	StopReason string // The reason the agent stopped (e.g., "end_turn", "needs_input")
+	NeedsInput bool   // True if the agent is requesting user input
+}
+
 // PromptTask sends a follow-up prompt to a running agent for a task
-func (s *Service) PromptTask(ctx context.Context, taskID string, prompt string) error {
+// Returns PromptResult indicating if the agent needs input
+func (s *Service) PromptTask(ctx context.Context, taskID string, prompt string) (*PromptResult, error) {
 	s.logger.Info("sending prompt to task agent",
 		zap.String("task_id", taskID),
 		zap.Int("prompt_length", len(prompt)))
-	return s.executor.Prompt(ctx, taskID, prompt)
+	result, err := s.executor.Prompt(ctx, taskID, prompt)
+	if err != nil {
+		return nil, err
+	}
+	return &PromptResult{
+		StopReason: result.StopReason,
+		NeedsInput: result.NeedsInput,
+	}, nil
 }
 
 // CompleteTask explicitly completes a task and stops its agent
@@ -339,6 +359,12 @@ func (s *Service) broadcastACP(taskID string, msg *protocol.Message) {
 	for _, handler := range handlers {
 		handler(taskID, msg)
 	}
+}
+
+// SetInputRequestHandler sets the handler for agent input requests
+func (s *Service) SetInputRequestHandler(handler InputRequestHandler) {
+	s.inputRequestHandler = handler
+	s.logger.Debug("input request handler set")
 }
 
 // Event handlers
@@ -424,7 +450,43 @@ func (s *Service) handleACPMessage(ctx context.Context, taskID string, msg *prot
 		zap.String("task_id", taskID),
 		zap.String("message_type", string(msg.Type)))
 
+	// Handle input_required messages specially
+	if msg.Type == protocol.MessageTypeInputRequired {
+		s.handleInputRequired(ctx, taskID, msg)
+	}
+
 	// Broadcast to all registered handlers (WebSocket streaming)
 	s.broadcastACP(taskID, msg)
+}
+
+// handleInputRequired handles agent input request messages
+func (s *Service) handleInputRequired(ctx context.Context, taskID string, msg *protocol.Message) {
+	s.logger.Info("agent requesting user input",
+		zap.String("task_id", taskID),
+		zap.String("agent_id", msg.AgentID))
+
+	// Extract message from data
+	message := ""
+	if msg.Data != nil {
+		if m, ok := msg.Data["message"].(string); ok {
+			message = m
+		}
+	}
+
+	// Update task state to WAITING_FOR_INPUT
+	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateWaitingForInput); err != nil {
+		s.logger.Error("failed to update task state to WAITING_FOR_INPUT",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+	}
+
+	// Call the input request handler if set
+	if s.inputRequestHandler != nil {
+		if err := s.inputRequestHandler(ctx, taskID, msg.AgentID, message); err != nil {
+			s.logger.Error("input request handler failed",
+				zap.String("task_id", taskID),
+				zap.Error(err))
+		}
+	}
 }
 
