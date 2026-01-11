@@ -1,0 +1,88 @@
+name: Backend Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Run Backend Tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/backend
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache-dependency-path: apps/backend/go.sum
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Verify dependencies
+        run: go mod verify
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Run tests with coverage
+        run: |
+          go test -v -race -coverprofile=coverage.out -covermode=atomic -json ./... > test-results.json 2>&1 || true
+          go test -v -race -coverprofile=coverage.out -covermode=atomic ./... 2>&1 | tee test-output.txt
+
+      - name: Generate test report
+        uses: robherley/go-test-action@v0
+        if: always()
+        with:
+          moduleDirectory: apps/backend
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        if: always()
+        with:
+          files: apps/backend/coverage.out
+          flags: backend
+          name: backend-coverage
+          fail_ci_if_error: false
+
+      - name: Upload test artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: |
+            apps/backend/coverage.out
+            apps/backend/test-output.txt
+          retention-days: 30
+
+  build:
+    name: Build Backend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/backend
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache-dependency-path: apps/backend/go.sum
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Build
+        run: go build -v ./cmd/kandev
+
