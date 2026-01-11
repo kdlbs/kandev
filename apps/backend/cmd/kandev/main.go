@@ -219,6 +219,7 @@ func main() {
 
 	// Start the WebSocket hub
 	go gateway.Hub.Run(ctx)
+	gateways.RegisterTaskNotifications(ctx, eventBus, gateway.Hub, log)
 
 	// Set up historical logs provider for task subscriptions
 	gateway.Hub.SetHistoricalLogsProvider(func(ctx context.Context, taskID string) ([]*ws.Message, error) {

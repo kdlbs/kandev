@@ -108,6 +108,7 @@ func (r *SQLiteRepository) initSchema() error {
 		name TEXT NOT NULL,
 		position INTEGER DEFAULT 0,
 		state TEXT DEFAULT 'TODO',
+		color TEXT NOT NULL DEFAULT '',
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL,
 		FOREIGN KEY (board_id) REFERENCES boards(id) ON DELETE CASCADE
@@ -185,6 +186,9 @@ func (r *SQLiteRepository) initSchema() error {
 		return err
 	}
 	if err := r.ensureColumn("tasks", "workspace_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := r.ensureColumn("columns", "color", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
 
@@ -283,18 +287,19 @@ func (r *SQLiteRepository) ensureDefaultWorkspace() error {
 				name     string
 				position int
 				state    string
+				color    string
 			}
 			columns := []columnSeed{
-				{name: "Todo", position: 0, state: string(v1.TaskStateTODO)},
-				{name: "In Progress", position: 1, state: string(v1.TaskStateInProgress)},
-				{name: "Review", position: 2, state: string(v1.TaskStateReview)},
-				{name: "Done", position: 3, state: string(v1.TaskStateCompleted)},
+				{name: "Todo", position: 0, state: string(v1.TaskStateTODO), color: "bg-neutral-400"},
+				{name: "In Progress", position: 1, state: string(v1.TaskStateInProgress), color: "bg-blue-500"},
+				{name: "Review", position: 2, state: string(v1.TaskStateReview), color: "bg-yellow-500"},
+				{name: "Done", position: 3, state: string(v1.TaskStateCompleted), color: "bg-green-500"},
 			}
 			for _, column := range columns {
 				if _, err := r.db.ExecContext(ctx, `
-					INSERT INTO columns (id, board_id, name, position, state, created_at, updated_at)
-					VALUES (?, ?, ?, ?, ?, ?, ?)
-				`, uuid.New().String(), boardID, column.name, column.position, column.state, now, now); err != nil {
+					INSERT INTO columns (id, board_id, name, position, state, color, created_at, updated_at)
+					VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+				`, uuid.New().String(), boardID, column.name, column.position, column.state, column.color, now, now); err != nil {
 					return err
 				}
 			}
@@ -802,9 +807,9 @@ func (r *SQLiteRepository) CreateColumn(ctx context.Context, column *models.Colu
 	column.UpdatedAt = now
 
 	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO columns (id, board_id, name, position, state, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, column.ID, column.BoardID, column.Name, column.Position, column.State, column.CreatedAt, column.UpdatedAt)
+		INSERT INTO columns (id, board_id, name, position, state, color, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`, column.ID, column.BoardID, column.Name, column.Position, column.State, column.Color, column.CreatedAt, column.UpdatedAt)
 
 	return err
 }
@@ -814,9 +819,9 @@ func (r *SQLiteRepository) GetColumn(ctx context.Context, id string) (*models.Co
 	column := &models.Column{}
 
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, board_id, name, position, state, created_at, updated_at
+		SELECT id, board_id, name, position, state, color, created_at, updated_at
 		FROM columns WHERE id = ?
-	`, id).Scan(&column.ID, &column.BoardID, &column.Name, &column.Position, &column.State, &column.CreatedAt, &column.UpdatedAt)
+	`, id).Scan(&column.ID, &column.BoardID, &column.Name, &column.Position, &column.State, &column.Color, &column.CreatedAt, &column.UpdatedAt)
 
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("column not found: %s", id)
@@ -829,8 +834,8 @@ func (r *SQLiteRepository) UpdateColumn(ctx context.Context, column *models.Colu
 	column.UpdatedAt = time.Now().UTC()
 
 	result, err := r.db.ExecContext(ctx, `
-		UPDATE columns SET name = ?, position = ?, state = ?, updated_at = ? WHERE id = ?
-	`, column.Name, column.Position, column.State, column.UpdatedAt, column.ID)
+		UPDATE columns SET name = ?, position = ?, state = ?, color = ?, updated_at = ? WHERE id = ?
+	`, column.Name, column.Position, column.State, column.Color, column.UpdatedAt, column.ID)
 	if err != nil {
 		return err
 	}
@@ -859,7 +864,7 @@ func (r *SQLiteRepository) DeleteColumn(ctx context.Context, id string) error {
 // ListColumns returns all columns for a board
 func (r *SQLiteRepository) ListColumns(ctx context.Context, boardID string) ([]*models.Column, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, board_id, name, position, state, created_at, updated_at
+		SELECT id, board_id, name, position, state, color, created_at, updated_at
 		FROM columns WHERE board_id = ? ORDER BY position
 	`, boardID)
 	if err != nil {
@@ -870,7 +875,7 @@ func (r *SQLiteRepository) ListColumns(ctx context.Context, boardID string) ([]*
 	var result []*models.Column
 	for rows.Next() {
 		column := &models.Column{}
-		err := rows.Scan(&column.ID, &column.BoardID, &column.Name, &column.Position, &column.State, &column.CreatedAt, &column.UpdatedAt)
+		err := rows.Scan(&column.ID, &column.BoardID, &column.Name, &column.Position, &column.State, &column.Color, &column.CreatedAt, &column.UpdatedAt)
 		if err != nil {
 			return nil, err
 		}

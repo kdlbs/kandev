@@ -9,6 +9,27 @@ const (
 	TaskDeleted      = "task.deleted"
 )
 
+// Event types for workspaces
+const (
+	WorkspaceCreated = "workspace.created"
+	WorkspaceUpdated = "workspace.updated"
+	WorkspaceDeleted = "workspace.deleted"
+)
+
+// Event types for boards
+const (
+	BoardCreated = "board.created"
+	BoardUpdated = "board.updated"
+	BoardDeleted = "board.deleted"
+)
+
+// Event types for columns
+const (
+	ColumnCreated = "column.created"
+	ColumnUpdated = "column.updated"
+	ColumnDeleted = "column.deleted"
+)
+
 // Event types for agents
 const (
 	AgentStarted   = "agent.started"
@@ -33,4 +54,3 @@ func BuildACPSubject(taskID string) string {
 func BuildACPWildcardSubject() string {
 	return ACPMessage + ".*"
 }
-

@@ -1,0 +1,147 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import { IconFolder, IconPlus, IconChevronRight } from '@tabler/icons-react';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { Separator } from '@/components/ui/separator';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { createWorkspaceAction } from '@/app/actions/workspaces';
+import type { Workspace } from '@/lib/types/http';
+import { useRequest } from '@/lib/http/use-request';
+import { useToast } from '@/components/toast-provider';
+import { RequestIndicator } from '@/components/request-indicator';
+import { useAppStore } from '@/components/state-provider';
+
+type WorkspacesPageClientProps = {
+  workspaces: Workspace[];
+};
+
+export function WorkspacesPageClient({ workspaces }: WorkspacesPageClientProps) {
+  const items = useAppStore((state) => state.workspaces.items);
+  const setWorkspaces = useAppStore((state) => state.setWorkspaces);
+  const [isAdding, setIsAdding] = useState(false);
+  const [newWorkspaceName, setNewWorkspaceName] = useState('');
+  const createRequest = useRequest(createWorkspaceAction);
+  const { toast } = useToast();
+
+  useEffect(() => {
+    if (!items.length && workspaces.length) {
+      setWorkspaces(
+        workspaces.map((workspace) => ({
+          id: workspace.id,
+          name: workspace.name,
+        }))
+      );
+    }
+  }, [items.length, setWorkspaces, workspaces]);
+
+  const handleAddWorkspace = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newWorkspaceName.trim()) return;
+    try {
+      const created = await createRequest.run({ name: newWorkspaceName.trim() });
+      setWorkspaces([
+        { id: created.id, name: created.name },
+        ...items.map((workspace) => ({ id: workspace.id, name: workspace.name })),
+      ]);
+      setNewWorkspaceName('');
+      setIsAdding(false);
+    } catch (error) {
+      toast({
+        title: 'Failed to create workspace',
+        description: error instanceof Error ? error.message : 'Request failed',
+        variant: 'error',
+      });
+    }
+  };
+
+  return (
+    <div className="space-y-8">
+      <div className="flex items-start justify-between">
+        <div>
+          <h2 className="text-2xl font-bold">Workspaces</h2>
+          <p className="text-sm text-muted-foreground mt-1">
+            Manage your workspaces and boards
+          </p>
+        </div>
+        <Button size="sm" onClick={() => setIsAdding(true)}>
+          <IconPlus className="h-4 w-4 mr-2" />
+          Add Workspace
+        </Button>
+      </div>
+
+      <Separator />
+
+      <div className="space-y-4">
+        <div className="grid gap-3">
+          {isAdding && (
+            <Card>
+              <CardContent className="pt-6">
+                <form onSubmit={handleAddWorkspace} className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="workspace-name">Workspace Name</Label>
+                    <Input
+                      id="workspace-name"
+                      value={newWorkspaceName}
+                      onChange={(e) => setNewWorkspaceName(e.target.value)}
+                      placeholder="My Workspace"
+                      required
+                      autoFocus
+                    />
+                  </div>
+                  <div className="flex gap-2 justify-end">
+                    <Button type="button" variant="outline" onClick={() => setIsAdding(false)}>
+                      Cancel
+                    </Button>
+                    <div className="flex items-center gap-2">
+                      <RequestIndicator status={createRequest.status} />
+                      <Button type="submit" disabled={createRequest.isLoading}>
+                        Add Workspace
+                      </Button>
+                    </div>
+                  </div>
+                </form>
+              </CardContent>
+            </Card>
+          )}
+
+          {items.map((workspace) => (
+            <Link key={workspace.id} href={`/settings/workspace/${workspace.id}`}>
+              <Card className="hover:bg-accent transition-colors cursor-pointer">
+                <CardContent className="py-4">
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-start gap-3 flex-1">
+                      <div className="p-2 bg-muted rounded-md">
+                        <IconFolder className="h-4 w-4" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <h4 className="font-medium">{workspace.name}</h4>
+                        <div className="flex items-center gap-3 text-xs text-muted-foreground mt-1">
+                          <span>Boards managed in this workspace</span>
+                        </div>
+                      </div>
+                    </div>
+                    <IconChevronRight className="h-5 w-5 text-muted-foreground" />
+                  </div>
+                </CardContent>
+              </Card>
+            </Link>
+          ))}
+
+          {items.length === 0 && (
+            <Card>
+              <CardContent className="py-8 text-center">
+                <p className="text-sm text-muted-foreground">
+                  No workspaces configured. Add your first workspace to get started.
+                </p>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

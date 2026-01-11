@@ -13,7 +13,12 @@ export function snapshotToState(snapshot: BoardSnapshot): Partial<AppState> {
   return {
     kanban: {
       boardId: snapshot.board.id,
-      columns: snapshot.columns.map((column) => ({ id: column.id, title: column.name })),
+      columns: snapshot.columns.map((column) => ({
+        id: column.id,
+        title: column.name,
+        color: column.color ?? 'bg-neutral-400',
+        position: column.position,
+      })),
       tasks,
     },
   };

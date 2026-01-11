@@ -4,10 +4,23 @@ import { fetchBoardSnapshot, fetchBoards, fetchWorkspaces } from '@/lib/ssr/http
 import { snapshotToState } from '@/lib/ssr/mapper';
 
 // Server Component: runs on the server for SSR and data hydration.
-export default async function Page() {
+type PageProps = {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+};
+
+export default async function Page({ searchParams }: PageProps) {
   try {
+    const resolvedParams = searchParams ? await searchParams : {};
+    const workspaceParam = resolvedParams.workspaceId;
+    const boardParam = resolvedParams.boardId;
+    const workspaceId = Array.isArray(workspaceParam) ? workspaceParam[0] : workspaceParam;
+    const boardIdParam = Array.isArray(boardParam) ? boardParam[0] : boardParam;
+
     const workspaces = await fetchWorkspaces();
-    const activeWorkspaceId = workspaces.workspaces[0]?.id ?? null;
+    const activeWorkspaceId =
+      workspaces.workspaces.find((workspace) => workspace.id === workspaceId)?.id ??
+      workspaces.workspaces[0]?.id ??
+      null;
     let initialState = {
       workspaces: {
         items: workspaces.workspaces.map((workspace) => ({
@@ -28,7 +41,20 @@ export default async function Page() {
     }
 
     const boardList = await fetchBoards(activeWorkspaceId);
-    const boardId = boardList.boards[0]?.id;
+    const boardId =
+      boardList.boards.find((board) => board.id === boardIdParam)?.id ?? boardList.boards[0]?.id;
+    initialState = {
+      ...initialState,
+      boards: {
+        items: boardList.boards.map((board) => ({
+          id: board.id,
+          workspaceId: board.workspace_id,
+          name: board.name,
+        })),
+        activeId: boardId ?? null,
+      },
+    };
+
     if (!boardId) {
       return (
         <>

@@ -4,12 +4,17 @@ import { immer } from 'zustand/middleware/immer';
 
 export type KanbanState = {
   boardId: string | null;
-  columns: Array<{ id: string; title: string }>;
+  columns: Array<{ id: string; title: string; color: string; position: number }>;
   tasks: Array<{ id: string; columnId: string; title: string }>;
 };
 
 export type WorkspaceState = {
   items: Array<{ id: string; name: string }>;
+  activeId: string | null;
+};
+
+export type BoardState = {
+  items: Array<{ id: string; workspaceId: string; name: string }>;
   activeId: string | null;
 };
 
@@ -37,6 +42,7 @@ export type ConnectionState = {
 export type AppState = {
   kanban: KanbanState;
   workspaces: WorkspaceState;
+  boards: BoardState;
   tasks: TaskState;
   agents: AgentState;
   terminal: TerminalState;
@@ -45,6 +51,8 @@ export type AppState = {
   hydrate: (state: Partial<AppState>) => void;
   setActiveWorkspace: (workspaceId: string | null) => void;
   setWorkspaces: (workspaces: WorkspaceState['items']) => void;
+  setActiveBoard: (boardId: string | null) => void;
+  setBoards: (boards: BoardState['items']) => void;
   setTerminalOutput: (terminalId: string, data: string) => void;
   setConnectionStatus: (status: ConnectionState['status'], error?: string | null) => void;
 };
@@ -54,6 +62,7 @@ export type AppStore = ReturnType<typeof createAppStore>;
 const defaultState: AppState = {
   kanban: { boardId: null, columns: [], tasks: [] },
   workspaces: { items: [], activeId: null },
+  boards: { items: [], activeId: null },
   tasks: { activeTaskId: null },
   agents: { agents: [] },
   terminal: { terminals: [] },
@@ -62,6 +71,8 @@ const defaultState: AppState = {
   hydrate: () => undefined,
   setActiveWorkspace: () => undefined,
   setWorkspaces: () => undefined,
+  setActiveBoard: () => undefined,
+  setBoards: () => undefined,
   setTerminalOutput: () => undefined,
   setConnectionStatus: () => undefined,
 };
@@ -85,6 +96,17 @@ export function createAppStore(initialState?: Partial<AppState>) {
           if (!draft.workspaces.activeId && workspaces.length) {
             draft.workspaces.activeId = workspaces[0].id;
           }
+        }),
+      setBoards: (boards) =>
+        set((draft) => {
+          draft.boards.items = boards;
+          if (!draft.boards.activeId && boards.length) {
+            draft.boards.activeId = boards[0].id;
+          }
+        }),
+      setActiveBoard: (boardId) =>
+        set((draft) => {
+          draft.boards.activeId = boardId;
         }),
       setTerminalOutput: (terminalId, data) =>
         set((draft) => {

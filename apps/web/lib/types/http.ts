@@ -31,6 +31,7 @@ export type Column = {
   name: string;
   position: number;
   state: TaskState;
+  color: string;
   created_at: string;
   updated_at: string;
 };
@@ -62,6 +63,11 @@ export type BoardSnapshot = {
 
 export type ListBoardsResponse = {
   boards: Board[];
+  total: number;
+};
+
+export type ListColumnsResponse = {
+  columns: Column[];
   total: number;
 };
 

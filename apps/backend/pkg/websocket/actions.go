@@ -23,6 +23,8 @@ const (
 	ActionColumnList   = "column.list"
 	ActionColumnCreate = "column.create"
 	ActionColumnGet    = "column.get"
+	ActionColumnUpdate = "column.update"
+	ActionColumnDelete = "column.delete"
 
 	// Task actions
 	ActionTaskList   = "task.list"
@@ -69,6 +71,15 @@ const (
 	ActionACPHeartbeat = "acp.heartbeat"
 	ActionTaskUpdated  = "task.updated"
 	ActionAgentUpdated = "agent.updated"
+	ActionWorkspaceCreated = "workspace.created"
+	ActionWorkspaceUpdated = "workspace.updated"
+	ActionWorkspaceDeleted = "workspace.deleted"
+	ActionBoardCreated     = "board.created"
+	ActionBoardUpdated     = "board.updated"
+	ActionBoardDeleted     = "board.deleted"
+	ActionColumnCreated    = "column.created"
+	ActionColumnUpdated    = "column.updated"
+	ActionColumnDeleted    = "column.deleted"
 )
 
 // Error codes

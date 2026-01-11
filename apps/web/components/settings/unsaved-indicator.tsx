@@ -1,0 +1,37 @@
+'use client';
+
+import { IconAlertCircle } from '@tabler/icons-react';
+import { Button } from '@/components/ui/button';
+import { RequestIndicator } from '@/components/request-indicator';
+
+type UnsavedSaveButtonProps = {
+  isDirty: boolean;
+  isLoading: boolean;
+  status: 'idle' | 'loading' | 'success' | 'error';
+  onClick: () => void;
+};
+
+const warningButtonClass = 'border-yellow-500/60 text-yellow-500 hover:bg-yellow-500/10';
+
+export function UnsavedChangesBadge() {
+  return <span className="text-xs text-yellow-500">Unsaved changes</span>;
+}
+
+export function UnsavedSaveButton({ isDirty, isLoading, status, onClick }: UnsavedSaveButtonProps) {
+  return (
+    <Button
+      type="button"
+      size="sm"
+      variant={isDirty ? 'secondary' : 'outline'}
+      onClick={onClick}
+      disabled={isLoading}
+      className={isDirty ? warningButtonClass : undefined}
+    >
+      {isDirty && <IconAlertCircle className="h-4 w-4 mr-2" />}
+      Save
+      <span className="ml-2">
+        <RequestIndicator status={status} />
+      </span>
+    </Button>
+  );
+}

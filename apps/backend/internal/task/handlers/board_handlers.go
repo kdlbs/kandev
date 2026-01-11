@@ -39,6 +39,12 @@ func (h *BoardHandlers) registerHTTP(router *gin.Engine) {
 	api.GET("/boards/:id", h.httpGetBoard)
 	api.GET("/boards/:id/columns", h.httpListColumns)
 	api.GET("/boards/:id/snapshot", h.httpGetBoardSnapshot)
+	api.POST("/boards", h.httpCreateBoard)
+	api.PATCH("/boards/:id", h.httpUpdateBoard)
+	api.DELETE("/boards/:id", h.httpDeleteBoard)
+	api.POST("/boards/:id/columns", h.httpCreateColumn)
+	api.PUT("/columns/:id", h.httpUpdateColumn)
+	api.DELETE("/columns/:id", h.httpDeleteColumn)
 }
 
 func (h *BoardHandlers) registerWS(dispatcher *ws.Dispatcher) {
@@ -50,6 +56,8 @@ func (h *BoardHandlers) registerWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionColumnList, h.wsListColumns)
 	dispatcher.RegisterFunc(ws.ActionColumnCreate, h.wsCreateColumn)
 	dispatcher.RegisterFunc(ws.ActionColumnGet, h.wsGetColumn)
+	dispatcher.RegisterFunc(ws.ActionColumnUpdate, h.wsUpdateColumn)
+	dispatcher.RegisterFunc(ws.ActionColumnDelete, h.wsDeleteColumn)
 }
 
 // HTTP handlers
@@ -87,6 +95,67 @@ func (h *BoardHandlers) httpGetBoard(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
+type httpCreateBoardRequest struct {
+	WorkspaceID string `json:"workspace_id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+}
+
+func (h *BoardHandlers) httpCreateBoard(c *gin.Context) {
+	var body httpCreateBoardRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+	if body.Name == "" || body.WorkspaceID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id and name are required"})
+		return
+	}
+	resp, err := h.controller.CreateBoard(c.Request.Context(), dto.CreateBoardRequest{
+		WorkspaceID: body.WorkspaceID,
+		Name:        body.Name,
+		Description: body.Description,
+	})
+	if err != nil {
+		h.logger.Error("failed to create board", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create board"})
+		return
+	}
+	c.JSON(http.StatusCreated, resp)
+}
+
+type httpUpdateBoardRequest struct {
+	Name        *string `json:"name"`
+	Description *string `json:"description"`
+}
+
+func (h *BoardHandlers) httpUpdateBoard(c *gin.Context) {
+	var body httpUpdateBoardRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+	resp, err := h.controller.UpdateBoard(c.Request.Context(), dto.UpdateBoardRequest{
+		ID:          c.Param("id"),
+		Name:        body.Name,
+		Description: body.Description,
+	})
+	if err != nil {
+		handleNotFound(c, h.logger, err, "board not found")
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+func (h *BoardHandlers) httpDeleteBoard(c *gin.Context) {
+	resp, err := h.controller.DeleteBoard(c.Request.Context(), dto.DeleteBoardRequest{ID: c.Param("id")})
+	if err != nil {
+		handleNotFound(c, h.logger, err, "board not found")
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
 func (h *BoardHandlers) httpListColumns(c *gin.Context) {
 	resp, err := h.controller.ListColumns(c.Request.Context(), dto.ListColumnsRequest{BoardID: c.Param("id")})
 	if err != nil {
@@ -94,6 +163,80 @@ func (h *BoardHandlers) httpListColumns(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, resp)
+}
+
+type httpCreateColumnRequest struct {
+	Name     string       `json:"name"`
+	Position int          `json:"position"`
+	State    v1.TaskState `json:"state"`
+	Color    string       `json:"color"`
+}
+
+func (h *BoardHandlers) httpCreateColumn(c *gin.Context) {
+	var body httpCreateColumnRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		h.logger.Error("failed to bind create column request", zap.Error(err), zap.String("board_id", c.Param("id")))
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+	if body.Name == "" {
+		h.logger.Error("create column missing name", zap.String("board_id", c.Param("id")))
+		c.JSON(http.StatusBadRequest, gin.H{"error": "name is required"})
+		return
+	}
+	state := body.State
+	if state == "" {
+		state = v1.TaskStateTODO
+	}
+	resp, err := h.controller.CreateColumn(c.Request.Context(), dto.CreateColumnRequest{
+		BoardID:  c.Param("id"),
+		Name:     body.Name,
+		Position: body.Position,
+		State:    state,
+		Color:    body.Color,
+	})
+	if err != nil {
+		h.logger.Error("failed to create column", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create column"})
+		return
+	}
+	c.JSON(http.StatusCreated, resp)
+}
+
+type httpUpdateColumnRequest struct {
+	Name     *string       `json:"name"`
+	Position *int          `json:"position"`
+	State    *v1.TaskState `json:"state"`
+	Color    *string       `json:"color"`
+}
+
+func (h *BoardHandlers) httpUpdateColumn(c *gin.Context) {
+	var body httpUpdateColumnRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+	resp, err := h.controller.UpdateColumn(c.Request.Context(), dto.UpdateColumnRequest{
+		ID:       c.Param("id"),
+		Name:     body.Name,
+		Position: body.Position,
+		State:    body.State,
+		Color:    body.Color,
+	})
+	if err != nil {
+		handleNotFound(c, h.logger, err, "column not found")
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+func (h *BoardHandlers) httpDeleteColumn(c *gin.Context) {
+	if err := h.controller.DeleteColumn(c.Request.Context(), dto.GetColumnRequest{ID: c.Param("id")}); err != nil {
+		h.logger.Error("failed to delete column", zap.Error(err), zap.String("column_id", c.Param("id")))
+		handleNotFound(c, h.logger, err, "column not found")
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 func (h *BoardHandlers) httpGetBoardSnapshot(c *gin.Context) {
@@ -248,6 +391,7 @@ type wsCreateColumnRequest struct {
 	Name     string `json:"name"`
 	Position int    `json:"position"`
 	State    string `json:"state,omitempty"`
+	Color    string `json:"color,omitempty"`
 }
 
 func (h *BoardHandlers) wsCreateColumn(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -272,6 +416,7 @@ func (h *BoardHandlers) wsCreateColumn(ctx context.Context, msg *ws.Message) (*w
 		Name:     req.Name,
 		Position: req.Position,
 		State:    state,
+		Color:    req.Color,
 	})
 	if err != nil {
 		h.logger.Error("failed to create column", zap.Error(err))
@@ -298,4 +443,53 @@ func (h *BoardHandlers) wsGetColumn(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Column not found", nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, resp)
+}
+
+type wsUpdateColumnRequest struct {
+	ID       string       `json:"id"`
+	Name     *string      `json:"name,omitempty"`
+	Position *int         `json:"position,omitempty"`
+	State    *v1.TaskState `json:"state,omitempty"`
+	Color    *string      `json:"color,omitempty"`
+}
+
+func (h *BoardHandlers) wsUpdateColumn(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req wsUpdateColumnRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.ID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "id is required", nil)
+	}
+
+	resp, err := h.controller.UpdateColumn(ctx, dto.UpdateColumnRequest{
+		ID:       req.ID,
+		Name:     req.Name,
+		Position: req.Position,
+		State:    req.State,
+		Color:    req.Color,
+	})
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Column not found", nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, resp)
+}
+
+type wsDeleteColumnRequest struct {
+	ID string `json:"id"`
+}
+
+func (h *BoardHandlers) wsDeleteColumn(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req wsDeleteColumnRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.ID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "id is required", nil)
+	}
+	if err := h.controller.DeleteColumn(ctx, dto.GetColumnRequest{ID: req.ID}); err != nil {
+		h.logger.Error("failed to delete column (ws)", zap.Error(err), zap.String("column_id", req.ID))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Column not found", nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, gin.H{"deleted": true})
 }

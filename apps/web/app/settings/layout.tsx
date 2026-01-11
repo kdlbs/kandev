@@ -1,13 +1,6 @@
-'use client';
-import { IconArrowLeft } from '@tabler/icons-react';
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbList,
-} from '@/components/ui/breadcrumb';
-import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar';
-import { SettingsAppSidebar } from '@/components/settings/settings-app-sidebar';
+import { SettingsLayoutClient } from '@/components/settings/settings-layout-client';
+import { StateHydrator } from '@/components/state-hydrator';
+import { fetchWorkspaces } from '@/lib/ssr/http';
 
 export default function SettingsLayout({
   children,
@@ -15,27 +8,31 @@ export default function SettingsLayout({
   children: React.ReactNode;
 }) {
   return (
-    <SidebarProvider>
-      <SettingsAppSidebar />
-      <SidebarInset>
-        <header className="flex h-16 shrink-0 items-center gap-2">
-          <div className="flex items-center gap-2 px-4">
-            <Breadcrumb>
-              <BreadcrumbList>
-                <BreadcrumbItem>
-                  <BreadcrumbLink href="/" className="flex items-center gap-2">
-                    <IconArrowLeft className="h-4 w-4" />
-                    Home
-                  </BreadcrumbLink>
-                </BreadcrumbItem>
-              </BreadcrumbList>
-            </Breadcrumb>
-          </div>
-        </header>
-        <div className="flex flex-1 flex-col gap-4 p-4 pt-0">
-          {children}
-        </div>
-      </SidebarInset>
-    </SidebarProvider>
+    <SettingsLayoutServer>{children}</SettingsLayoutServer>
+  );
+}
+
+async function SettingsLayoutServer({ children }: { children: React.ReactNode }) {
+  let initialState = {};
+  try {
+    const workspaces = await fetchWorkspaces();
+    initialState = {
+      workspaces: {
+        items: workspaces.workspaces.map((workspace) => ({
+          id: workspace.id,
+          name: workspace.name,
+        })),
+        activeId: workspaces.workspaces[0]?.id ?? null,
+      },
+    };
+  } catch {
+    initialState = {};
+  }
+
+  return (
+    <>
+      <StateHydrator initialState={initialState} />
+      <SettingsLayoutClient>{children}</SettingsLayoutClient>
+    </>
   );
 }

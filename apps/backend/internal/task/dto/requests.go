@@ -61,6 +61,15 @@ type CreateColumnRequest struct {
 	Name     string
 	Position int
 	State    v1.TaskState
+	Color    string
+}
+
+type UpdateColumnRequest struct {
+	ID       string
+	Name     *string
+	Position *int
+	State    *v1.TaskState
+	Color    *string
 }
 
 type GetBoardSnapshotRequest struct {

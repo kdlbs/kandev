@@ -31,6 +31,7 @@ type ColumnDTO struct {
 	Name      string       `json:"name"`
 	Position  int          `json:"position"`
 	State     v1.TaskState `json:"state"`
+	Color     string       `json:"color"`
 	CreatedAt time.Time    `json:"created_at"`
 	UpdatedAt time.Time    `json:"updated_at"`
 }
@@ -123,6 +124,7 @@ func FromColumn(column *models.Column) ColumnDTO {
 		Name:      column.Name,
 		Position:  column.Position,
 		State:     column.State,
+		Color:     column.Color,
 		CreatedAt: column.CreatedAt,
 		UpdatedAt: column.UpdatedAt,
 	}

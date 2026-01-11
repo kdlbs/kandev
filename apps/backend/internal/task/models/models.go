@@ -53,6 +53,7 @@ type Column struct {
 	Name      string       `json:"name"`
 	Position  int          `json:"position"`
 	State     v1.TaskState `json:"state"` // Maps column to task state
+	Color     string       `json:"color"`
 	CreatedAt time.Time    `json:"created_at"`
 	UpdatedAt time.Time    `json:"updated_at"`
 }

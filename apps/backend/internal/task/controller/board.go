@@ -97,11 +97,29 @@ func (c *BoardController) CreateColumn(ctx context.Context, req dto.CreateColumn
 		Name:     req.Name,
 		Position: req.Position,
 		State:    req.State,
+		Color:    req.Color,
 	})
 	if err != nil {
 		return dto.ColumnDTO{}, err
 	}
 	return dto.FromColumn(column), nil
+}
+
+func (c *BoardController) UpdateColumn(ctx context.Context, req dto.UpdateColumnRequest) (dto.ColumnDTO, error) {
+	column, err := c.service.UpdateColumn(ctx, req.ID, &service.UpdateColumnRequest{
+		Name:     req.Name,
+		Position: req.Position,
+		State:    req.State,
+		Color:    req.Color,
+	})
+	if err != nil {
+		return dto.ColumnDTO{}, err
+	}
+	return dto.FromColumn(column), nil
+}
+
+func (c *BoardController) DeleteColumn(ctx context.Context, req dto.GetColumnRequest) error {
+	return c.service.DeleteColumn(ctx, req.ID)
 }
 
 func (c *BoardController) GetSnapshot(ctx context.Context, req dto.GetBoardSnapshotRequest) (dto.BoardSnapshotDTO, error) {

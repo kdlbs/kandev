@@ -5,6 +5,7 @@ import type { StoreApi } from 'zustand';
 import { WebSocketClient } from '@/lib/ws/client';
 import { registerWsHandlers } from '@/lib/ws/router';
 import type { AppState } from '@/lib/state/store';
+import { setWebSocketClient } from '@/lib/ws/connection';
 
 export function useWebSocket(store: StoreApi<AppState>, url: string) {
   const clientRef = useRef<WebSocketClient | null>(null);
@@ -31,6 +32,7 @@ export function useWebSocket(store: StoreApi<AppState>, url: string) {
     });
     clientRef.current = client;
     client.connect();
+    setWebSocketClient(client);
 
     const handlers = registerWsHandlers(store);
     const unsubscribers = Object.entries(handlers).map(([type, handler]) =>
@@ -40,6 +42,7 @@ export function useWebSocket(store: StoreApi<AppState>, url: string) {
     return () => {
       unsubscribers.forEach((unsubscribe) => unsubscribe());
       client.disconnect();
+      setWebSocketClient(null);
     };
   }, [store, url]);
 

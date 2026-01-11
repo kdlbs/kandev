@@ -29,10 +29,11 @@ import {
 } from '@/components/ui/sidebar';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { SETTINGS_DATA } from '@/lib/settings/dummy-data';
+import { useAppStore } from '@/components/state-provider';
 
 export function SettingsAppSidebar() {
   const pathname = usePathname();
-  const [workspaces] = React.useState(SETTINGS_DATA.workspaces);
+  const workspaces = useAppStore((state) => state.workspaces.items);
   const [environments] = React.useState(SETTINGS_DATA.environments);
   const [agents] = React.useState(SETTINGS_DATA.agents);
 

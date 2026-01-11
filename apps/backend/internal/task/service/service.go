@@ -92,6 +92,15 @@ type CreateColumnRequest struct {
 	Name     string       `json:"name"`
 	Position int          `json:"position"`
 	State    v1.TaskState `json:"state"`
+	Color    string       `json:"color"`
+}
+
+// UpdateColumnRequest contains the data for updating a column
+type UpdateColumnRequest struct {
+	Name     *string       `json:"name,omitempty"`
+	Position *int          `json:"position,omitempty"`
+	State    *v1.TaskState `json:"state,omitempty"`
+	Color    *string       `json:"color,omitempty"`
 }
 
 // Task operations
@@ -306,6 +315,7 @@ func (s *Service) CreateWorkspace(ctx context.Context, req *CreateWorkspaceReque
 		return nil, err
 	}
 
+	s.publishWorkspaceEvent(ctx, events.WorkspaceCreated, workspace)
 	s.logger.Info("workspace created", zap.String("workspace_id", workspace.ID), zap.String("name", workspace.Name))
 	return workspace, nil
 }
@@ -335,16 +345,22 @@ func (s *Service) UpdateWorkspace(ctx context.Context, id string, req *UpdateWor
 		return nil, err
 	}
 
+	s.publishWorkspaceEvent(ctx, events.WorkspaceUpdated, workspace)
 	s.logger.Info("workspace updated", zap.String("workspace_id", workspace.ID))
 	return workspace, nil
 }
 
 // DeleteWorkspace deletes a workspace
 func (s *Service) DeleteWorkspace(ctx context.Context, id string) error {
+	workspace, err := s.repo.GetWorkspace(ctx, id)
+	if err != nil {
+		return err
+	}
 	if err := s.repo.DeleteWorkspace(ctx, id); err != nil {
 		s.logger.Error("failed to delete workspace", zap.String("workspace_id", id), zap.Error(err))
 		return err
 	}
+	s.publishWorkspaceEvent(ctx, events.WorkspaceDeleted, workspace)
 	s.logger.Info("workspace deleted", zap.String("workspace_id", id))
 	return nil
 }
@@ -370,6 +386,7 @@ func (s *Service) CreateBoard(ctx context.Context, req *CreateBoardRequest) (*mo
 		return nil, err
 	}
 
+	s.publishBoardEvent(ctx, events.BoardCreated, board)
 	s.logger.Info("board created", zap.String("board_id", board.ID), zap.String("name", board.Name))
 	return board, nil
 }
@@ -399,17 +416,23 @@ func (s *Service) UpdateBoard(ctx context.Context, id string, req *UpdateBoardRe
 		return nil, err
 	}
 
+	s.publishBoardEvent(ctx, events.BoardUpdated, board)
 	s.logger.Info("board updated", zap.String("board_id", board.ID))
 	return board, nil
 }
 
 // DeleteBoard deletes a board
 func (s *Service) DeleteBoard(ctx context.Context, id string) error {
+	board, err := s.repo.GetBoard(ctx, id)
+	if err != nil {
+		return err
+	}
 	if err := s.repo.DeleteBoard(ctx, id); err != nil {
 		s.logger.Error("failed to delete board", zap.String("board_id", id), zap.Error(err))
 		return err
 	}
 
+	s.publishBoardEvent(ctx, events.BoardDeleted, board)
 	s.logger.Info("board deleted", zap.String("board_id", id))
 	return nil
 }
@@ -423,12 +446,17 @@ func (s *Service) ListBoards(ctx context.Context, workspaceID string) ([]*models
 
 // CreateColumn creates a new column
 func (s *Service) CreateColumn(ctx context.Context, req *CreateColumnRequest) (*models.Column, error) {
+	color := req.Color
+	if color == "" {
+		color = "bg-neutral-400"
+	}
 	column := &models.Column{
 		ID:       uuid.New().String(),
 		BoardID:  req.BoardID,
 		Name:     req.Name,
 		Position: req.Position,
 		State:    req.State,
+		Color:    color,
 	}
 
 	if err := s.repo.CreateColumn(ctx, column); err != nil {
@@ -436,6 +464,7 @@ func (s *Service) CreateColumn(ctx context.Context, req *CreateColumnRequest) (*
 		return nil, err
 	}
 
+	s.publishColumnEvent(ctx, events.ColumnCreated, column)
 	s.logger.Info("column created",
 		zap.String("column_id", column.ID),
 		zap.String("board_id", column.BoardID),
@@ -451,6 +480,55 @@ func (s *Service) GetColumn(ctx context.Context, id string) (*models.Column, err
 // ListColumns returns all columns for a board
 func (s *Service) ListColumns(ctx context.Context, boardID string) ([]*models.Column, error) {
 	return s.repo.ListColumns(ctx, boardID)
+}
+
+// UpdateColumn updates an existing column
+func (s *Service) UpdateColumn(ctx context.Context, id string, req *UpdateColumnRequest) (*models.Column, error) {
+	column, err := s.repo.GetColumn(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	if req.Name != nil {
+		column.Name = *req.Name
+	}
+	if req.Position != nil {
+		column.Position = *req.Position
+	}
+	if req.State != nil {
+		column.State = *req.State
+	}
+	if req.Color != nil {
+		column.Color = *req.Color
+	}
+	column.UpdatedAt = time.Now().UTC()
+
+	if err := s.repo.UpdateColumn(ctx, column); err != nil {
+		s.logger.Error("failed to update column", zap.Error(err))
+		return nil, err
+	}
+
+	s.publishColumnEvent(ctx, events.ColumnUpdated, column)
+	s.logger.Info("column updated",
+		zap.String("column_id", column.ID),
+		zap.String("board_id", column.BoardID),
+		zap.String("name", column.Name))
+	return column, nil
+}
+
+// DeleteColumn deletes an existing column
+func (s *Service) DeleteColumn(ctx context.Context, id string) error {
+	column, err := s.repo.GetColumn(ctx, id)
+	if err != nil {
+		return err
+	}
+	if err := s.repo.DeleteColumn(ctx, id); err != nil {
+		s.logger.Error("failed to delete column", zap.Error(err))
+		return err
+	}
+	s.publishColumnEvent(ctx, events.ColumnDeleted, column)
+	s.logger.Info("column deleted", zap.String("column_id", id))
+	return nil
 }
 
 // publishTaskEvent publishes task events to the event bus
@@ -493,6 +571,77 @@ func (s *Service) publishTaskEvent(ctx context.Context, eventType string, task *
 		s.logger.Error("failed to publish task event",
 			zap.String("event_type", eventType),
 			zap.String("task_id", task.ID),
+			zap.Error(err))
+	}
+}
+
+func (s *Service) publishWorkspaceEvent(ctx context.Context, eventType string, workspace *models.Workspace) {
+	if s.eventBus == nil || workspace == nil {
+		return
+	}
+
+	data := map[string]interface{}{
+		"id":          workspace.ID,
+		"name":        workspace.Name,
+		"description": workspace.Description,
+		"owner_id":    workspace.OwnerID,
+		"created_at":  workspace.CreatedAt.Format(time.RFC3339),
+		"updated_at":  workspace.UpdatedAt.Format(time.RFC3339),
+	}
+
+	event := bus.NewEvent(eventType, "task-service", data)
+	if err := s.eventBus.Publish(ctx, eventType, event); err != nil {
+		s.logger.Error("failed to publish workspace event",
+			zap.String("event_type", eventType),
+			zap.String("workspace_id", workspace.ID),
+			zap.Error(err))
+	}
+}
+
+func (s *Service) publishBoardEvent(ctx context.Context, eventType string, board *models.Board) {
+	if s.eventBus == nil || board == nil {
+		return
+	}
+
+	data := map[string]interface{}{
+		"id":           board.ID,
+		"workspace_id": board.WorkspaceID,
+		"name":         board.Name,
+		"description":  board.Description,
+		"created_at":   board.CreatedAt.Format(time.RFC3339),
+		"updated_at":   board.UpdatedAt.Format(time.RFC3339),
+	}
+
+	event := bus.NewEvent(eventType, "task-service", data)
+	if err := s.eventBus.Publish(ctx, eventType, event); err != nil {
+		s.logger.Error("failed to publish board event",
+			zap.String("event_type", eventType),
+			zap.String("board_id", board.ID),
+			zap.Error(err))
+	}
+}
+
+func (s *Service) publishColumnEvent(ctx context.Context, eventType string, column *models.Column) {
+	if s.eventBus == nil || column == nil {
+		return
+	}
+
+	data := map[string]interface{}{
+		"id":         column.ID,
+		"board_id":   column.BoardID,
+		"name":       column.Name,
+		"position":   column.Position,
+		"state":      string(column.State),
+		"color":      column.Color,
+		"created_at": column.CreatedAt.Format(time.RFC3339),
+		"updated_at": column.UpdatedAt.Format(time.RFC3339),
+	}
+
+	event := bus.NewEvent(eventType, "task-service", data)
+	if err := s.eventBus.Publish(ctx, eventType, event); err != nil {
+		s.logger.Error("failed to publish column event",
+			zap.String("event_type", eventType),
+			zap.String("column_id", column.ID),
 			zap.Error(err))
 	}
 }
