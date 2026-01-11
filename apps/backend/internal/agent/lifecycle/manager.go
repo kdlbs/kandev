@@ -456,12 +456,16 @@ func (m *Manager) publishSessionInfo(instance *AgentInstance, sessionID string) 
 		return
 	}
 
+	// Structure must match protocol.Message so it can be parsed correctly
+	// The session_id goes in the "data" field, not at the top level
 	data := map[string]interface{}{
-		"type":       "session_info",
-		"timestamp":  time.Now(),
-		"agent_id":   instance.ID,
-		"task_id":    instance.TaskID,
-		"session_id": sessionID,
+		"type":      "session_info",
+		"timestamp": time.Now().UTC().Format(time.RFC3339Nano),
+		"agent_id":  instance.ID,
+		"task_id":   instance.TaskID,
+		"data": map[string]interface{}{
+			"session_id": sessionID,
+		},
 	}
 
 	event := bus.NewEvent(events.ACPMessage, "agent-manager", data)
