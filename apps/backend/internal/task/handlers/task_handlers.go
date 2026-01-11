@@ -72,6 +72,7 @@ func (h *TaskHandlers) httpGetTask(c *gin.Context) {
 }
 
 type httpCreateTaskRequest struct {
+	WorkspaceID   string                 `json:"workspace_id"`
 	BoardID       string                 `json:"board_id"`
 	ColumnID      string                 `json:"column_id"`
 	Title         string                 `json:"title"`
@@ -91,7 +92,12 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
 		return
 	}
+	if body.WorkspaceID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id is required"})
+		return
+	}
 	resp, err := h.controller.CreateTask(c.Request.Context(), dto.CreateTaskRequest{
+		WorkspaceID:   body.WorkspaceID,
 		BoardID:       body.BoardID,
 		ColumnID:      body.ColumnID,
 		Title:         body.Title,
@@ -177,6 +183,7 @@ func (h *TaskHandlers) wsListTasks(ctx context.Context, msg *ws.Message) (*ws.Me
 }
 
 type wsCreateTaskRequest struct {
+	WorkspaceID   string                 `json:"workspace_id"`
 	BoardID       string                 `json:"board_id"`
 	ColumnID      string                 `json:"column_id"`
 	Title         string                 `json:"title"`
@@ -195,6 +202,9 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	if err := msg.ParsePayload(&req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
+	if req.WorkspaceID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workspace_id is required", nil)
+	}
 	if req.BoardID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "board_id is required", nil)
 	}
@@ -206,6 +216,7 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	}
 
 	resp, err := h.controller.CreateTask(ctx, dto.CreateTaskRequest{
+		WorkspaceID:   req.WorkspaceID,
 		BoardID:       req.BoardID,
 		ColumnID:      req.ColumnID,
 		Title:         req.Title,
@@ -305,6 +316,7 @@ func (h *TaskHandlers) wsDeleteTask(ctx context.Context, msg *ws.Message) (*ws.M
 
 type wsMoveTaskRequest struct {
 	ID       string `json:"id"`
+	BoardID  string `json:"board_id"`
 	ColumnID string `json:"column_id"`
 	Position int    `json:"position"`
 }
@@ -317,12 +329,16 @@ func (h *TaskHandlers) wsMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 	if req.ID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "id is required", nil)
 	}
+	if req.BoardID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "board_id is required", nil)
+	}
 	if req.ColumnID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "column_id is required", nil)
 	}
 
 	resp, err := h.controller.MoveTask(ctx, dto.MoveTaskRequest{
 		ID:       req.ID,
+		BoardID:  req.BoardID,
 		ColumnID: req.ColumnID,
 		Position: req.Position,
 	})

@@ -35,6 +35,7 @@ func NewService(repo repository.Repository, eventBus bus.EventBus, log *logger.L
 
 // CreateTaskRequest contains the data for creating a new task
 type CreateTaskRequest struct {
+	WorkspaceID   string                 `json:"workspace_id"`
 	BoardID       string                 `json:"board_id"`
 	ColumnID      string                 `json:"column_id"`
 	Title         string                 `json:"title"`
@@ -61,13 +62,26 @@ type UpdateTaskRequest struct {
 
 // CreateBoardRequest contains the data for creating a new board
 type CreateBoardRequest struct {
+	WorkspaceID string `json:"workspace_id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+// UpdateBoardRequest contains the data for updating a board
+type UpdateBoardRequest struct {
+	Name        *string `json:"name,omitempty"`
+	Description *string `json:"description,omitempty"`
+}
+
+// CreateWorkspaceRequest contains the data for creating a new workspace
+type CreateWorkspaceRequest struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	OwnerID     string `json:"owner_id"`
 }
 
-// UpdateBoardRequest contains the data for updating a board
-type UpdateBoardRequest struct {
+// UpdateWorkspaceRequest contains the data for updating a workspace
+type UpdateWorkspaceRequest struct {
 	Name        *string `json:"name,omitempty"`
 	Description *string `json:"description,omitempty"`
 }
@@ -86,6 +100,7 @@ type CreateColumnRequest struct {
 func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*models.Task, error) {
 	task := &models.Task{
 		ID:            uuid.New().String(),
+		WorkspaceID:   req.WorkspaceID,
 		BoardID:       req.BoardID,
 		ColumnID:      req.ColumnID,
 		Title:         req.Title,
@@ -235,7 +250,7 @@ func (s *Service) UpdateTaskMetadata(ctx context.Context, id string, metadata ma
 }
 
 // MoveTask moves a task to a different column and position
-func (s *Service) MoveTask(ctx context.Context, id string, columnID string, position int) (*models.Task, error) {
+func (s *Service) MoveTask(ctx context.Context, id string, boardID string, columnID string, position int) (*models.Task, error) {
 	task, err := s.repo.GetTask(ctx, id)
 	if err != nil {
 		return nil, err
@@ -248,6 +263,7 @@ func (s *Service) MoveTask(ctx context.Context, id string, columnID string, posi
 	}
 
 	oldState := task.State
+	task.BoardID = boardID
 	task.ColumnID = columnID
 	task.Position = position
 	task.State = column.State
@@ -267,10 +283,75 @@ func (s *Service) MoveTask(ctx context.Context, id string, columnID string, posi
 
 	s.logger.Info("task moved",
 		zap.String("task_id", id),
+		zap.String("board_id", boardID),
 		zap.String("column_id", columnID),
 		zap.Int("position", position))
 
 	return task, nil
+}
+
+// Workspace operations
+
+// CreateWorkspace creates a new workspace
+func (s *Service) CreateWorkspace(ctx context.Context, req *CreateWorkspaceRequest) (*models.Workspace, error) {
+	workspace := &models.Workspace{
+		ID:          uuid.New().String(),
+		Name:        req.Name,
+		Description: req.Description,
+		OwnerID:     req.OwnerID,
+	}
+
+	if err := s.repo.CreateWorkspace(ctx, workspace); err != nil {
+		s.logger.Error("failed to create workspace", zap.Error(err))
+		return nil, err
+	}
+
+	s.logger.Info("workspace created", zap.String("workspace_id", workspace.ID), zap.String("name", workspace.Name))
+	return workspace, nil
+}
+
+// GetWorkspace retrieves a workspace by ID
+func (s *Service) GetWorkspace(ctx context.Context, id string) (*models.Workspace, error) {
+	return s.repo.GetWorkspace(ctx, id)
+}
+
+// UpdateWorkspace updates an existing workspace
+func (s *Service) UpdateWorkspace(ctx context.Context, id string, req *UpdateWorkspaceRequest) (*models.Workspace, error) {
+	workspace, err := s.repo.GetWorkspace(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	if req.Name != nil {
+		workspace.Name = *req.Name
+	}
+	if req.Description != nil {
+		workspace.Description = *req.Description
+	}
+	workspace.UpdatedAt = time.Now().UTC()
+
+	if err := s.repo.UpdateWorkspace(ctx, workspace); err != nil {
+		s.logger.Error("failed to update workspace", zap.String("workspace_id", id), zap.Error(err))
+		return nil, err
+	}
+
+	s.logger.Info("workspace updated", zap.String("workspace_id", workspace.ID))
+	return workspace, nil
+}
+
+// DeleteWorkspace deletes a workspace
+func (s *Service) DeleteWorkspace(ctx context.Context, id string) error {
+	if err := s.repo.DeleteWorkspace(ctx, id); err != nil {
+		s.logger.Error("failed to delete workspace", zap.String("workspace_id", id), zap.Error(err))
+		return err
+	}
+	s.logger.Info("workspace deleted", zap.String("workspace_id", id))
+	return nil
+}
+
+// ListWorkspaces returns all workspaces
+func (s *Service) ListWorkspaces(ctx context.Context) ([]*models.Workspace, error) {
+	return s.repo.ListWorkspaces(ctx)
 }
 
 // Board operations
@@ -279,9 +360,9 @@ func (s *Service) MoveTask(ctx context.Context, id string, columnID string, posi
 func (s *Service) CreateBoard(ctx context.Context, req *CreateBoardRequest) (*models.Board, error) {
 	board := &models.Board{
 		ID:          uuid.New().String(),
+		WorkspaceID: req.WorkspaceID,
 		Name:        req.Name,
 		Description: req.Description,
-		OwnerID:     req.OwnerID,
 	}
 
 	if err := s.repo.CreateBoard(ctx, board); err != nil {
@@ -333,9 +414,9 @@ func (s *Service) DeleteBoard(ctx context.Context, id string) error {
 	return nil
 }
 
-// ListBoards returns all boards
-func (s *Service) ListBoards(ctx context.Context) ([]*models.Board, error) {
-	return s.repo.ListBoards(ctx)
+// ListBoards returns all boards for a workspace (or all if empty)
+func (s *Service) ListBoards(ctx context.Context, workspaceID string) ([]*models.Board, error) {
+	return s.repo.ListBoards(ctx, workspaceID)
 }
 
 // Column operations
@@ -415,4 +496,3 @@ func (s *Service) publishTaskEvent(ctx context.Context, eventType string, task *
 			zap.Error(err))
 	}
 }
-

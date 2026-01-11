@@ -55,8 +55,13 @@ func TestSQLiteRepository_BoardCRUD(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 
+	workspace := &models.Workspace{ID: "ws-1", Name: "Workspace"}
+	if err := repo.CreateWorkspace(ctx, workspace); err != nil {
+		t.Fatalf("failed to create workspace: %v", err)
+	}
+
 	// Create
-	board := &models.Board{Name: "Test Board", Description: "A test board", OwnerID: "owner-123"}
+	board := &models.Board{WorkspaceID: workspace.ID, Name: "Test Board", Description: "A test board"}
 	if err := repo.CreateBoard(ctx, board); err != nil {
 		t.Fatalf("failed to create board: %v", err)
 	}
@@ -122,16 +127,19 @@ func TestSQLiteRepository_ListBoards(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 
-	_ = repo.CreateBoard(ctx, &models.Board{ID: "board-1", Name: "Board 1"})
-	_ = repo.CreateBoard(ctx, &models.Board{ID: "board-2", Name: "Board 2"})
-	_ = repo.CreateBoard(ctx, &models.Board{ID: "board-3", Name: "Board 3"})
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace 1"})
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-2", Name: "Workspace 2"})
 
-	boards, err := repo.ListBoards(ctx)
+	_ = repo.CreateBoard(ctx, &models.Board{ID: "board-1", WorkspaceID: "ws-1", Name: "Board 1"})
+	_ = repo.CreateBoard(ctx, &models.Board{ID: "board-2", WorkspaceID: "ws-1", Name: "Board 2"})
+	_ = repo.CreateBoard(ctx, &models.Board{ID: "board-3", WorkspaceID: "ws-2", Name: "Board 3"})
+
+	boards, err := repo.ListBoards(ctx, "ws-1")
 	if err != nil {
 		t.Fatalf("failed to list boards: %v", err)
 	}
-	if len(boards) != 3 {
-		t.Errorf("expected 3 boards, got %d", len(boards))
+	if len(boards) != 2 {
+		t.Errorf("expected 2 boards, got %d", len(boards))
 	}
 }
 
@@ -142,8 +150,9 @@ func TestSQLiteRepository_ColumnCRUD(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 
-	// First create a board for foreign key
-	board := &models.Board{ID: "board-123", Name: "Test Board"}
+	// First create a workspace and board for foreign key
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	board := &models.Board{ID: "board-123", WorkspaceID: "ws-1", Name: "Test Board"}
 	_ = repo.CreateBoard(ctx, board)
 
 	// Create column
@@ -211,7 +220,8 @@ func TestSQLiteRepository_ListColumns(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 
-	board := &models.Board{ID: "board-123", Name: "Test Board"}
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	board := &models.Board{ID: "board-123", WorkspaceID: "ws-1", Name: "Test Board"}
 	_ = repo.CreateBoard(ctx, board)
 
 	_ = repo.CreateColumn(ctx, &models.Column{ID: "col-1", BoardID: "board-123", Name: "To Do"})
@@ -233,14 +243,16 @@ func TestSQLiteRepository_TaskCRUD(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 
-	// Create board and column for foreign keys
-	board := &models.Board{ID: "board-123", Name: "Test Board"}
+	// Create workspace, board, and column for foreign keys
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	board := &models.Board{ID: "board-123", WorkspaceID: "ws-1", Name: "Test Board"}
 	_ = repo.CreateBoard(ctx, board)
 	column := &models.Column{ID: "col-123", BoardID: "board-123", Name: "To Do"}
 	_ = repo.CreateColumn(ctx, column)
 
 	// Create task
 	task := &models.Task{
+		WorkspaceID: "ws-1",
 		BoardID:     "board-123",
 		ColumnID:    "col-123",
 		Title:       "Test Task",
@@ -314,12 +326,13 @@ func TestSQLiteRepository_UpdateTaskState(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 
-	// Create board, column, and task
-	board := &models.Board{ID: "board-123", Name: "Test Board"}
+	// Create workspace, board, column, and task
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	board := &models.Board{ID: "board-123", WorkspaceID: "ws-1", Name: "Test Board"}
 	_ = repo.CreateBoard(ctx, board)
 	column := &models.Column{ID: "col-123", BoardID: "board-123", Name: "To Do"}
 	_ = repo.CreateColumn(ctx, column)
-	task := &models.Task{ID: "task-123", BoardID: "board-123", ColumnID: "col-123", Title: "Test", State: v1.TaskStateTODO}
+	task := &models.Task{ID: "task-123", WorkspaceID: "ws-1", BoardID: "board-123", ColumnID: "col-123", Title: "Test", State: v1.TaskStateTODO}
 	_ = repo.CreateTask(ctx, task)
 
 	err := repo.UpdateTaskState(ctx, "task-123", v1.TaskStateInProgress)
@@ -349,14 +362,15 @@ func TestSQLiteRepository_ListTasks(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 
-	// Create board and column
-	board := &models.Board{ID: "board-123", Name: "Test Board"}
+	// Create workspace, board, and column
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	board := &models.Board{ID: "board-123", WorkspaceID: "ws-1", Name: "Test Board"}
 	_ = repo.CreateBoard(ctx, board)
 	column := &models.Column{ID: "col-123", BoardID: "board-123", Name: "To Do"}
 	_ = repo.CreateColumn(ctx, column)
 
-	_ = repo.CreateTask(ctx, &models.Task{ID: "task-1", BoardID: "board-123", ColumnID: "col-123", Title: "Task 1"})
-	_ = repo.CreateTask(ctx, &models.Task{ID: "task-2", BoardID: "board-123", ColumnID: "col-123", Title: "Task 2"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-1", WorkspaceID: "ws-1", BoardID: "board-123", ColumnID: "col-123", Title: "Task 1"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-2", WorkspaceID: "ws-1", BoardID: "board-123", ColumnID: "col-123", Title: "Task 2"})
 
 	tasks, err := repo.ListTasks(ctx, "board-123")
 	if err != nil {
@@ -372,17 +386,18 @@ func TestSQLiteRepository_ListTasksByColumn(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 
-	// Create board and columns
-	board := &models.Board{ID: "board-123", Name: "Test Board"}
+	// Create workspace, board, and columns
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	board := &models.Board{ID: "board-123", WorkspaceID: "ws-1", Name: "Test Board"}
 	_ = repo.CreateBoard(ctx, board)
 	col1 := &models.Column{ID: "col-1", BoardID: "board-123", Name: "To Do"}
 	col2 := &models.Column{ID: "col-2", BoardID: "board-123", Name: "Done"}
 	_ = repo.CreateColumn(ctx, col1)
 	_ = repo.CreateColumn(ctx, col2)
 
-	_ = repo.CreateTask(ctx, &models.Task{ID: "task-1", BoardID: "board-123", ColumnID: "col-1", Title: "Task 1"})
-	_ = repo.CreateTask(ctx, &models.Task{ID: "task-2", BoardID: "board-123", ColumnID: "col-1", Title: "Task 2"})
-	_ = repo.CreateTask(ctx, &models.Task{ID: "task-3", BoardID: "board-123", ColumnID: "col-2", Title: "Task 3"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-1", WorkspaceID: "ws-1", BoardID: "board-123", ColumnID: "col-1", Title: "Task 1"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-2", WorkspaceID: "ws-1", BoardID: "board-123", ColumnID: "col-1", Title: "Task 2"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-3", WorkspaceID: "ws-1", BoardID: "board-123", ColumnID: "col-2", Title: "Task 3"})
 
 	tasks, err := repo.ListTasksByColumn(ctx, "col-1")
 	if err != nil {
@@ -404,7 +419,8 @@ func TestSQLiteRepository_Persistence(t *testing.T) {
 		t.Fatalf("failed to create first repository: %v", err)
 	}
 
-	board := &models.Board{ID: "persist-board", Name: "Persistent Board"}
+	_ = repo1.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	board := &models.Board{ID: "persist-board", WorkspaceID: "ws-1", Name: "Persistent Board"}
 	_ = repo1.CreateBoard(ctx, board)
 	repo1.Close()
 
@@ -423,4 +439,3 @@ func TestSQLiteRepository_Persistence(t *testing.T) {
 		t.Errorf("expected name 'Persistent Board', got %s", retrieved.Name)
 	}
 }
-

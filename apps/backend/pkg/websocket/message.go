@@ -128,4 +128,3 @@ func (m *Message) ParsePayload(v interface{}) error {
 	}
 	return json.Unmarshal(m.Payload, v)
 }
-

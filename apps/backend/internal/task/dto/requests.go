@@ -2,16 +2,40 @@ package dto
 
 import v1 "github.com/kandev/kandev/pkg/api/v1"
 
-type ListBoardsRequest struct{}
+type ListBoardsRequest struct {
+	WorkspaceID string
+}
+
+type ListWorkspacesRequest struct{}
+
+type GetWorkspaceRequest struct {
+	ID string
+}
+
+type CreateWorkspaceRequest struct {
+	Name        string
+	Description string
+	OwnerID     string
+}
+
+type UpdateWorkspaceRequest struct {
+	ID          string
+	Name        *string
+	Description *string
+}
+
+type DeleteWorkspaceRequest struct {
+	ID string
+}
 
 type GetBoardRequest struct {
 	ID string
 }
 
 type CreateBoardRequest struct {
+	WorkspaceID string
 	Name        string
 	Description string
-	OwnerID     string
 }
 
 type UpdateBoardRequest struct {
@@ -52,6 +76,7 @@ type GetTaskRequest struct {
 }
 
 type CreateTaskRequest struct {
+	WorkspaceID   string
 	BoardID       string
 	ColumnID      string
 	Title         string
@@ -82,6 +107,7 @@ type DeleteTaskRequest struct {
 
 type MoveTaskRequest struct {
 	ID       string
+	BoardID  string
 	ColumnID string
 	Position int
 }

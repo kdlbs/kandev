@@ -35,6 +35,7 @@ func RegisterBoardRoutes(router *gin.Engine, dispatcher *ws.Dispatcher, ctrl *co
 func (h *BoardHandlers) registerHTTP(router *gin.Engine) {
 	api := router.Group("/api/v1")
 	api.GET("/boards", h.httpListBoards)
+	api.GET("/workspaces/:id/boards", h.httpListBoardsByWorkspace)
 	api.GET("/boards/:id", h.httpGetBoard)
 	api.GET("/boards/:id/columns", h.httpListColumns)
 	api.GET("/boards/:id/snapshot", h.httpGetBoardSnapshot)
@@ -54,7 +55,21 @@ func (h *BoardHandlers) registerWS(dispatcher *ws.Dispatcher) {
 // HTTP handlers
 
 func (h *BoardHandlers) httpListBoards(c *gin.Context) {
-	resp, err := h.controller.ListBoards(c.Request.Context(), dto.ListBoardsRequest{})
+	resp, err := h.controller.ListBoards(c.Request.Context(), dto.ListBoardsRequest{
+		WorkspaceID: c.Query("workspace_id"),
+	})
+	if err != nil {
+		h.logger.Error("failed to list boards", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list boards"})
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+func (h *BoardHandlers) httpListBoardsByWorkspace(c *gin.Context) {
+	resp, err := h.controller.ListBoards(c.Request.Context(), dto.ListBoardsRequest{
+		WorkspaceID: c.Param("id"),
+	})
 	if err != nil {
 		h.logger.Error("failed to list boards", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list boards"})
@@ -93,7 +108,15 @@ func (h *BoardHandlers) httpGetBoardSnapshot(c *gin.Context) {
 // WS handlers
 
 func (h *BoardHandlers) wsListBoards(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	resp, err := h.controller.ListBoards(ctx, dto.ListBoardsRequest{})
+	var req struct {
+		WorkspaceID string `json:"workspace_id,omitempty"`
+	}
+	if msg.Payload != nil {
+		if err := msg.ParsePayload(&req); err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+		}
+	}
+	resp, err := h.controller.ListBoards(ctx, dto.ListBoardsRequest{WorkspaceID: req.WorkspaceID})
 	if err != nil {
 		h.logger.Error("failed to list boards", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list boards", nil)
@@ -102,6 +125,7 @@ func (h *BoardHandlers) wsListBoards(ctx context.Context, msg *ws.Message) (*ws.
 }
 
 type wsCreateBoardRequest struct {
+	WorkspaceID string `json:"workspace_id"`
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
 }
@@ -114,8 +138,12 @@ func (h *BoardHandlers) wsCreateBoard(ctx context.Context, msg *ws.Message) (*ws
 	if req.Name == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "name is required", nil)
 	}
+	if req.WorkspaceID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workspace_id is required", nil)
+	}
 
 	resp, err := h.controller.CreateBoard(ctx, dto.CreateBoardRequest{
+		WorkspaceID: req.WorkspaceID,
 		Name:        req.Name,
 		Description: req.Description,
 	})

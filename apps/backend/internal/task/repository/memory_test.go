@@ -16,6 +16,9 @@ func TestNewMemoryRepository(t *testing.T) {
 	if repo.tasks == nil {
 		t.Error("expected tasks map to be initialized")
 	}
+	if repo.workspaces == nil {
+		t.Error("expected workspaces map to be initialized")
+	}
 	if repo.boards == nil {
 		t.Error("expected boards map to be initialized")
 	}
@@ -38,8 +41,13 @@ func TestMemoryRepository_BoardCRUD(t *testing.T) {
 	repo := NewMemoryRepository()
 	ctx := context.Background()
 
+	workspace := &models.Workspace{ID: "ws-1", Name: "Workspace"}
+	if err := repo.CreateWorkspace(ctx, workspace); err != nil {
+		t.Fatalf("failed to create workspace: %v", err)
+	}
+
 	// Create
-	board := &models.Board{Name: "Test Board", Description: "A test board", OwnerID: "owner-123"}
+	board := &models.Board{WorkspaceID: workspace.ID, Name: "Test Board", Description: "A test board"}
 	if err := repo.CreateBoard(ctx, board); err != nil {
 		t.Fatalf("failed to create board: %v", err)
 	}
@@ -103,16 +111,19 @@ func TestMemoryRepository_ListBoards(t *testing.T) {
 	repo := NewMemoryRepository()
 	ctx := context.Background()
 
-	_ = repo.CreateBoard(ctx, &models.Board{ID: "board-1", Name: "Board 1"})
-	_ = repo.CreateBoard(ctx, &models.Board{ID: "board-2", Name: "Board 2"})
-	_ = repo.CreateBoard(ctx, &models.Board{ID: "board-3", Name: "Board 3"})
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace 1"})
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-2", Name: "Workspace 2"})
 
-	boards, err := repo.ListBoards(ctx)
+	_ = repo.CreateBoard(ctx, &models.Board{ID: "board-1", WorkspaceID: "ws-1", Name: "Board 1"})
+	_ = repo.CreateBoard(ctx, &models.Board{ID: "board-2", WorkspaceID: "ws-1", Name: "Board 2"})
+	_ = repo.CreateBoard(ctx, &models.Board{ID: "board-3", WorkspaceID: "ws-2", Name: "Board 3"})
+
+	boards, err := repo.ListBoards(ctx, "ws-1")
 	if err != nil {
 		t.Fatalf("failed to list boards: %v", err)
 	}
-	if len(boards) != 3 {
-		t.Errorf("expected 3 boards, got %d", len(boards))
+	if len(boards) != 2 {
+		t.Errorf("expected 2 boards, got %d", len(boards))
 	}
 }
 
@@ -206,6 +217,7 @@ func TestMemoryRepository_TaskCRUD(t *testing.T) {
 
 	// Create
 	task := &models.Task{
+		WorkspaceID: "ws-1",
 		BoardID:     "board-123",
 		ColumnID:    "col-123",
 		Title:       "Test Task",
@@ -277,7 +289,7 @@ func TestMemoryRepository_UpdateTaskState(t *testing.T) {
 	repo := NewMemoryRepository()
 	ctx := context.Background()
 
-	task := &models.Task{ID: "task-123", BoardID: "board-123", ColumnID: "col-123", Title: "Test", State: v1.TaskStateTODO}
+	task := &models.Task{ID: "task-123", WorkspaceID: "ws-1", BoardID: "board-123", ColumnID: "col-123", Title: "Test", State: v1.TaskStateTODO}
 	_ = repo.CreateTask(ctx, task)
 
 	err := repo.UpdateTaskState(ctx, "task-123", v1.TaskStateInProgress)
@@ -305,9 +317,9 @@ func TestMemoryRepository_ListTasks(t *testing.T) {
 	repo := NewMemoryRepository()
 	ctx := context.Background()
 
-	_ = repo.CreateTask(ctx, &models.Task{ID: "task-1", BoardID: "board-123", ColumnID: "col-1", Title: "Task 1"})
-	_ = repo.CreateTask(ctx, &models.Task{ID: "task-2", BoardID: "board-123", ColumnID: "col-1", Title: "Task 2"})
-	_ = repo.CreateTask(ctx, &models.Task{ID: "task-3", BoardID: "board-456", ColumnID: "col-2", Title: "Task 3"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-1", WorkspaceID: "ws-1", BoardID: "board-123", ColumnID: "col-1", Title: "Task 1"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-2", WorkspaceID: "ws-1", BoardID: "board-123", ColumnID: "col-1", Title: "Task 2"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-3", WorkspaceID: "ws-1", BoardID: "board-456", ColumnID: "col-2", Title: "Task 3"})
 
 	tasks, err := repo.ListTasks(ctx, "board-123")
 	if err != nil {
@@ -322,9 +334,9 @@ func TestMemoryRepository_ListTasksByColumn(t *testing.T) {
 	repo := NewMemoryRepository()
 	ctx := context.Background()
 
-	_ = repo.CreateTask(ctx, &models.Task{ID: "task-1", BoardID: "board-123", ColumnID: "col-1", Title: "Task 1"})
-	_ = repo.CreateTask(ctx, &models.Task{ID: "task-2", BoardID: "board-123", ColumnID: "col-1", Title: "Task 2"})
-	_ = repo.CreateTask(ctx, &models.Task{ID: "task-3", BoardID: "board-123", ColumnID: "col-2", Title: "Task 3"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-1", WorkspaceID: "ws-1", BoardID: "board-123", ColumnID: "col-1", Title: "Task 1"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-2", WorkspaceID: "ws-1", BoardID: "board-123", ColumnID: "col-1", Title: "Task 2"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-3", WorkspaceID: "ws-1", BoardID: "board-123", ColumnID: "col-2", Title: "Task 3"})
 
 	tasks, err := repo.ListTasksByColumn(ctx, "col-1")
 	if err != nil {
@@ -334,4 +346,3 @@ func TestMemoryRepository_ListTasksByColumn(t *testing.T) {
 		t.Errorf("expected 2 tasks for col-1, got %d", len(tasks))
 	}
 }
-

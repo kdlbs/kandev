@@ -34,6 +34,7 @@ func TestTaskStructInitialization(t *testing.T) {
 	now := time.Now().UTC()
 	task := Task{
 		ID:          "task-123",
+		WorkspaceID: "workspace-001",
 		BoardID:     "board-456",
 		ColumnID:    "column-789",
 		Title:       "Test Task",
@@ -50,6 +51,9 @@ func TestTaskStructInitialization(t *testing.T) {
 
 	if task.ID != "task-123" {
 		t.Errorf("expected ID task-123, got %s", task.ID)
+	}
+	if task.WorkspaceID != "workspace-001" {
+		t.Errorf("expected WorkspaceID workspace-001, got %s", task.WorkspaceID)
 	}
 	if task.BoardID != "board-456" {
 		t.Errorf("expected BoardID board-456, got %s", task.BoardID)
@@ -87,9 +91,9 @@ func TestBoardStructInitialization(t *testing.T) {
 	now := time.Now().UTC()
 	board := Board{
 		ID:          "board-123",
+		WorkspaceID: "workspace-001",
 		Name:        "Test Board",
 		Description: "A test board",
-		OwnerID:     "owner-456",
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
@@ -97,14 +101,14 @@ func TestBoardStructInitialization(t *testing.T) {
 	if board.ID != "board-123" {
 		t.Errorf("expected ID board-123, got %s", board.ID)
 	}
+	if board.WorkspaceID != "workspace-001" {
+		t.Errorf("expected WorkspaceID workspace-001, got %s", board.WorkspaceID)
+	}
 	if board.Name != "Test Board" {
 		t.Errorf("expected Name 'Test Board', got %s", board.Name)
 	}
 	if board.Description != "A test board" {
 		t.Errorf("expected Description 'A test board', got %s", board.Description)
-	}
-	if board.OwnerID != "owner-456" {
-		t.Errorf("expected OwnerID 'owner-456', got %s", board.OwnerID)
 	}
 }
 
@@ -141,6 +145,7 @@ func TestTaskToAPI(t *testing.T) {
 	now := time.Now().UTC()
 	task := &Task{
 		ID:          "task-123",
+		WorkspaceID: "workspace-001",
 		BoardID:     "board-456",
 		ColumnID:    "column-789",
 		Title:       "Test Task",
@@ -159,6 +164,9 @@ func TestTaskToAPI(t *testing.T) {
 
 	if apiTask.ID != task.ID {
 		t.Errorf("expected ID %s, got %s", task.ID, apiTask.ID)
+	}
+	if apiTask.WorkspaceID != task.WorkspaceID {
+		t.Errorf("expected WorkspaceID %s, got %s", task.WorkspaceID, apiTask.WorkspaceID)
 	}
 	if apiTask.BoardID != task.BoardID {
 		t.Errorf("expected BoardID %s, got %s", task.BoardID, apiTask.BoardID)
@@ -190,6 +198,7 @@ func TestTaskToAPIWithEmptyOptionalFields(t *testing.T) {
 	now := time.Now().UTC()
 	task := &Task{
 		ID:          "task-123",
+		WorkspaceID: "workspace-001",
 		BoardID:     "board-456",
 		ColumnID:    "column-789",
 		Title:       "Test Task",
@@ -213,4 +222,3 @@ func TestTaskToAPIWithEmptyOptionalFields(t *testing.T) {
 		t.Errorf("expected AssignedAgentID nil, got %v", apiTask.AssignedAgentID)
 	}
 }
-

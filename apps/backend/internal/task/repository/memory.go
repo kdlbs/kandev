@@ -13,10 +13,13 @@ import (
 
 // MemoryRepository provides in-memory task storage operations
 type MemoryRepository struct {
-	tasks   map[string]*models.Task
-	boards  map[string]*models.Board
-	columns map[string]*models.Column
-	mu      sync.RWMutex
+	workspaces     map[string]*models.Workspace
+	tasks          map[string]*models.Task
+	boards         map[string]*models.Board
+	columns        map[string]*models.Column
+	taskBoards     map[string]map[string]struct{}
+	taskPlacements map[string]map[string]*taskPlacement
+	mu             sync.RWMutex
 }
 
 // Ensure MemoryRepository implements Repository interface
@@ -25,15 +28,91 @@ var _ Repository = (*MemoryRepository)(nil)
 // NewMemoryRepository creates a new in-memory task repository
 func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{
-		tasks:   make(map[string]*models.Task),
-		boards:  make(map[string]*models.Board),
-		columns: make(map[string]*models.Column),
+		workspaces:     make(map[string]*models.Workspace),
+		tasks:          make(map[string]*models.Task),
+		boards:         make(map[string]*models.Board),
+		columns:        make(map[string]*models.Column),
+		taskBoards:     make(map[string]map[string]struct{}),
+		taskPlacements: make(map[string]map[string]*taskPlacement),
 	}
+}
+
+type taskPlacement struct {
+	boardID  string
+	columnID string
+	position int
 }
 
 // Close is a no-op for in-memory repository
 func (r *MemoryRepository) Close() error {
 	return nil
+}
+
+// Workspace operations
+
+// CreateWorkspace creates a new workspace
+func (r *MemoryRepository) CreateWorkspace(ctx context.Context, workspace *models.Workspace) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if workspace.ID == "" {
+		workspace.ID = uuid.New().String()
+	}
+	now := time.Now().UTC()
+	workspace.CreatedAt = now
+	workspace.UpdatedAt = now
+
+	r.workspaces[workspace.ID] = workspace
+	return nil
+}
+
+// GetWorkspace retrieves a workspace by ID
+func (r *MemoryRepository) GetWorkspace(ctx context.Context, id string) (*models.Workspace, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	workspace, ok := r.workspaces[id]
+	if !ok {
+		return nil, fmt.Errorf("workspace not found: %s", id)
+	}
+	return workspace, nil
+}
+
+// UpdateWorkspace updates an existing workspace
+func (r *MemoryRepository) UpdateWorkspace(ctx context.Context, workspace *models.Workspace) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, ok := r.workspaces[workspace.ID]; !ok {
+		return fmt.Errorf("workspace not found: %s", workspace.ID)
+	}
+	workspace.UpdatedAt = time.Now().UTC()
+	r.workspaces[workspace.ID] = workspace
+	return nil
+}
+
+// DeleteWorkspace deletes a workspace by ID
+func (r *MemoryRepository) DeleteWorkspace(ctx context.Context, id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, ok := r.workspaces[id]; !ok {
+		return fmt.Errorf("workspace not found: %s", id)
+	}
+	delete(r.workspaces, id)
+	return nil
+}
+
+// ListWorkspaces returns all workspaces
+func (r *MemoryRepository) ListWorkspaces(ctx context.Context) ([]*models.Workspace, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	result := make([]*models.Workspace, 0, len(r.workspaces))
+	for _, workspace := range r.workspaces {
+		result = append(result, workspace)
+	}
+	return result, nil
 }
 
 // Task operations
@@ -51,6 +130,9 @@ func (r *MemoryRepository) CreateTask(ctx context.Context, task *models.Task) er
 	task.UpdatedAt = now
 
 	r.tasks[task.ID] = task
+	if task.BoardID != "" {
+		r.addTaskPlacement(task.ID, task.BoardID, task.ColumnID, task.Position)
+	}
 	return nil
 }
 
@@ -76,6 +158,9 @@ func (r *MemoryRepository) UpdateTask(ctx context.Context, task *models.Task) er
 	}
 	task.UpdatedAt = time.Now().UTC()
 	r.tasks[task.ID] = task
+	if task.BoardID != "" {
+		r.addTaskPlacement(task.ID, task.BoardID, task.ColumnID, task.Position)
+	}
 	return nil
 }
 
@@ -88,6 +173,8 @@ func (r *MemoryRepository) DeleteTask(ctx context.Context, id string) error {
 		return fmt.Errorf("task not found: %s", id)
 	}
 	delete(r.tasks, id)
+	delete(r.taskBoards, id)
+	delete(r.taskPlacements, id)
 	return nil
 }
 
@@ -98,9 +185,15 @@ func (r *MemoryRepository) ListTasks(ctx context.Context, boardID string) ([]*mo
 
 	var result []*models.Task
 	for _, task := range r.tasks {
-		if task.BoardID == boardID {
-			result = append(result, task)
+		placement, ok := r.getTaskPlacement(task.ID, boardID)
+		if !ok {
+			continue
 		}
+		copy := *task
+		copy.BoardID = placement.boardID
+		copy.ColumnID = placement.columnID
+		copy.Position = placement.position
+		result = append(result, &copy)
 	}
 	return result, nil
 }
@@ -112,8 +205,19 @@ func (r *MemoryRepository) ListTasksByColumn(ctx context.Context, columnID strin
 
 	var result []*models.Task
 	for _, task := range r.tasks {
-		if task.ColumnID == columnID {
-			result = append(result, task)
+		placements, ok := r.taskPlacements[task.ID]
+		if !ok {
+			continue
+		}
+		for _, placement := range placements {
+			if placement.columnID != columnID {
+				continue
+			}
+			copy := *task
+			copy.BoardID = placement.boardID
+			copy.ColumnID = placement.columnID
+			copy.Position = placement.position
+			result = append(result, &copy)
 		}
 	}
 	return result, nil
@@ -130,6 +234,35 @@ func (r *MemoryRepository) UpdateTaskState(ctx context.Context, id string, state
 	}
 	task.State = state
 	task.UpdatedAt = time.Now().UTC()
+	return nil
+}
+
+// AddTaskToBoard adds a task to a board with placement
+func (r *MemoryRepository) AddTaskToBoard(ctx context.Context, taskID, boardID, columnID string, position int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, ok := r.tasks[taskID]; !ok {
+		return fmt.Errorf("task not found: %s", taskID)
+	}
+	r.addTaskPlacement(taskID, boardID, columnID, position)
+	return nil
+}
+
+// RemoveTaskFromBoard removes a task from a board
+func (r *MemoryRepository) RemoveTaskFromBoard(ctx context.Context, taskID, boardID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, ok := r.tasks[taskID]; !ok {
+		return fmt.Errorf("task not found: %s", taskID)
+	}
+	if placements, ok := r.taskPlacements[taskID]; ok {
+		delete(placements, boardID)
+	}
+	if boards, ok := r.taskBoards[taskID]; ok {
+		delete(boards, boardID)
+	}
 	return nil
 }
 
@@ -189,12 +322,15 @@ func (r *MemoryRepository) DeleteBoard(ctx context.Context, id string) error {
 }
 
 // ListBoards returns all boards
-func (r *MemoryRepository) ListBoards(ctx context.Context) ([]*models.Board, error) {
+func (r *MemoryRepository) ListBoards(ctx context.Context, workspaceID string) ([]*models.Board, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	result := make([]*models.Board, 0, len(r.boards))
 	for _, board := range r.boards {
+		if workspaceID != "" && board.WorkspaceID != workspaceID {
+			continue
+		}
 		result = append(result, board)
 	}
 	return result, nil
@@ -269,3 +405,27 @@ func (r *MemoryRepository) ListColumns(ctx context.Context, boardID string) ([]*
 	return result, nil
 }
 
+func (r *MemoryRepository) addTaskPlacement(taskID, boardID, columnID string, position int) {
+	if _, ok := r.taskBoards[taskID]; !ok {
+		r.taskBoards[taskID] = make(map[string]struct{})
+	}
+	r.taskBoards[taskID][boardID] = struct{}{}
+
+	if _, ok := r.taskPlacements[taskID]; !ok {
+		r.taskPlacements[taskID] = make(map[string]*taskPlacement)
+	}
+	r.taskPlacements[taskID][boardID] = &taskPlacement{
+		boardID:  boardID,
+		columnID: columnID,
+		position: position,
+	}
+}
+
+func (r *MemoryRepository) getTaskPlacement(taskID, boardID string) (*taskPlacement, bool) {
+	placements, ok := r.taskPlacements[taskID]
+	if !ok {
+		return nil, false
+	}
+	placement, ok := placements[boardID]
+	return placement, ok
+}

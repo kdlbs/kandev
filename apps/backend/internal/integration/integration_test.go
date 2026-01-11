@@ -75,8 +75,10 @@ func NewTestServer(t *testing.T) *TestServer {
 	gateway.SetupRoutes(router)
 
 	// Register handlers (HTTP + WS)
+	workspaceController := taskcontroller.NewWorkspaceController(taskSvc)
 	boardController := taskcontroller.NewBoardController(taskSvc)
 	taskController := taskcontroller.NewTaskController(taskSvc)
+	taskhandlers.RegisterWorkspaceRoutes(router, gateway.Dispatcher, workspaceController, log)
 	taskhandlers.RegisterBoardRoutes(router, gateway.Dispatcher, boardController, log)
 	taskhandlers.RegisterTaskRoutes(router, gateway.Dispatcher, taskController, log)
 
@@ -137,6 +139,21 @@ func NewWSClient(t *testing.T, serverURL string) *WSClient {
 	go client.readPump()
 
 	return client
+}
+
+func createWorkspace(t *testing.T, client *WSClient) string {
+	t.Helper()
+
+	resp, err := client.SendRequest("workspace-1", ws.ActionWorkspaceCreate, map[string]interface{}{
+		"name": "Test Workspace",
+	})
+	require.NoError(t, err)
+
+	var payload map[string]interface{}
+	err = resp.ParsePayload(&payload)
+	require.NoError(t, err)
+
+	return payload["id"].(string)
 }
 
 // readPump reads messages from the WebSocket connection
@@ -262,11 +279,14 @@ func TestBoardCRUD(t *testing.T) {
 	client := NewWSClient(t, ts.Server.URL)
 	defer client.Close()
 
+	workspaceID := createWorkspace(t, client)
+
 	// Create board
 	t.Run("CreateBoard", func(t *testing.T) {
 		resp, err := client.SendRequest("board-create-1", ws.ActionBoardCreate, map[string]interface{}{
-			"name":        "Test Board",
-			"description": "A test board for integration testing",
+			"workspace_id": workspaceID,
+			"name":         "Test Board",
+			"description":  "A test board for integration testing",
 		})
 		require.NoError(t, err)
 		assert.Equal(t, ws.MessageTypeResponse, resp.Type)
@@ -281,7 +301,9 @@ func TestBoardCRUD(t *testing.T) {
 
 	// List boards
 	t.Run("ListBoards", func(t *testing.T) {
-		resp, err := client.SendRequest("board-list-1", ws.ActionBoardList, map[string]interface{}{})
+		resp, err := client.SendRequest("board-list-1", ws.ActionBoardList, map[string]interface{}{
+			"workspace_id": workspaceID,
+		})
 		require.NoError(t, err)
 
 		var payload map[string]interface{}
@@ -305,9 +327,12 @@ func TestColumnCRUD(t *testing.T) {
 	client := NewWSClient(t, ts.Server.URL)
 	defer client.Close()
 
+	workspaceID := createWorkspace(t, client)
+
 	// First create a board
 	boardResp, err := client.SendRequest("board-1", ws.ActionBoardCreate, map[string]interface{}{
-		"name": "Column Test Board",
+		"workspace_id": workspaceID,
+		"name":         "Column Test Board",
 	})
 	require.NoError(t, err)
 
@@ -378,9 +403,12 @@ func TestTaskCRUD(t *testing.T) {
 	client := NewWSClient(t, ts.Server.URL)
 	defer client.Close()
 
+	workspaceID := createWorkspace(t, client)
+
 	// Create board and column first
 	boardResp, err := client.SendRequest("board-1", ws.ActionBoardCreate, map[string]interface{}{
-		"name": "Task Test Board",
+		"workspace_id": workspaceID,
+		"name":         "Task Test Board",
 	})
 	require.NoError(t, err)
 
@@ -406,11 +434,12 @@ func TestTaskCRUD(t *testing.T) {
 	// Create task
 	t.Run("CreateTask", func(t *testing.T) {
 		resp, err := client.SendRequest("task-create-1", ws.ActionTaskCreate, map[string]interface{}{
-			"board_id":    boardID,
-			"column_id":   columnID,
-			"title":       "Test Task",
-			"description": "A test task for integration testing",
-			"priority":    3, // HIGH priority (1=LOW, 2=MEDIUM, 3=HIGH)
+			"workspace_id": workspaceID,
+			"board_id":     boardID,
+			"column_id":    columnID,
+			"title":        "Test Task",
+			"description":  "A test task for integration testing",
+			"priority":     3, // HIGH priority (1=LOW, 2=MEDIUM, 3=HIGH)
 		})
 		require.NoError(t, err)
 
@@ -519,9 +548,12 @@ func TestTaskStateTransitions(t *testing.T) {
 	client := NewWSClient(t, ts.Server.URL)
 	defer client.Close()
 
+	workspaceID := createWorkspace(t, client)
+
 	// Create board, column, and task
 	boardResp, _ := client.SendRequest("board-1", ws.ActionBoardCreate, map[string]interface{}{
-		"name": "State Test Board",
+		"workspace_id": workspaceID,
+		"name":         "State Test Board",
 	})
 	var boardPayload map[string]interface{}
 	boardResp.ParsePayload(&boardPayload)
@@ -537,10 +569,11 @@ func TestTaskStateTransitions(t *testing.T) {
 	columnID := colPayload["id"].(string)
 
 	taskResp, _ := client.SendRequest("task-1", ws.ActionTaskCreate, map[string]interface{}{
-		"board_id":    boardID,
-		"column_id":   columnID,
-		"title":       "State Test Task",
-		"description": "Test state transitions",
+		"workspace_id": workspaceID,
+		"board_id":     boardID,
+		"column_id":    columnID,
+		"title":        "State Test Task",
+		"description":  "Test state transitions",
 	})
 	var taskPayload map[string]interface{}
 	taskResp.ParsePayload(&taskPayload)
@@ -590,9 +623,12 @@ func TestTaskMove(t *testing.T) {
 	client := NewWSClient(t, ts.Server.URL)
 	defer client.Close()
 
+	workspaceID := createWorkspace(t, client)
+
 	// Create board with two columns
 	boardResp, _ := client.SendRequest("board-1", ws.ActionBoardCreate, map[string]interface{}{
-		"name": "Move Test Board",
+		"workspace_id": workspaceID,
+		"name":         "Move Test Board",
 	})
 	var boardPayload map[string]interface{}
 	boardResp.ParsePayload(&boardPayload)
@@ -618,9 +654,10 @@ func TestTaskMove(t *testing.T) {
 
 	// Create task in first column
 	taskResp, _ := client.SendRequest("task-1", ws.ActionTaskCreate, map[string]interface{}{
-		"board_id":  boardID,
-		"column_id": col1ID,
-		"title":     "Movable Task",
+		"workspace_id": workspaceID,
+		"board_id":     boardID,
+		"column_id":    col1ID,
+		"title":        "Movable Task",
 	})
 	var taskPayload map[string]interface{}
 	taskResp.ParsePayload(&taskPayload)
@@ -630,6 +667,7 @@ func TestTaskMove(t *testing.T) {
 	t.Run("MoveToColumn2", func(t *testing.T) {
 		resp, err := client.SendRequest("move-1", ws.ActionTaskMove, map[string]interface{}{
 			"id":        taskID,
+			"board_id":  boardID,
 			"column_id": col2ID,
 			"position":  0,
 		})
@@ -671,9 +709,12 @@ func TestMultipleClients(t *testing.T) {
 	client2 := NewWSClient(t, ts.Server.URL)
 	defer client2.Close()
 
+	workspaceID := createWorkspace(t, client1)
+
 	// Client 1 creates a board
 	boardResp, err := client1.SendRequest("c1-board-1", ws.ActionBoardCreate, map[string]interface{}{
-		"name": "Shared Board",
+		"workspace_id": workspaceID,
+		"name":         "Shared Board",
 	})
 	require.NoError(t, err)
 
@@ -723,9 +764,10 @@ func TestMultipleClients(t *testing.T) {
 
 	// Client 1 creates a task in the column
 	taskResp, err := client1.SendRequest("c1-task-1", ws.ActionTaskCreate, map[string]interface{}{
-		"board_id":  boardID,
-		"column_id": columnID,
-		"title":     "Task by Client 1",
+		"workspace_id": workspaceID,
+		"board_id":     boardID,
+		"column_id":    columnID,
+		"title":        "Task by Client 1",
 	})
 	require.NoError(t, err)
 
@@ -821,9 +863,12 @@ func TestTaskSubscription(t *testing.T) {
 	client := NewWSClient(t, ts.Server.URL)
 	defer client.Close()
 
+	workspaceID := createWorkspace(t, client)
+
 	// Create a task first
 	boardResp, _ := client.SendRequest("board-1", ws.ActionBoardCreate, map[string]interface{}{
-		"name": "Sub Test Board",
+		"workspace_id": workspaceID,
+		"name":         "Sub Test Board",
 	})
 	var boardPayload map[string]interface{}
 	boardResp.ParsePayload(&boardPayload)
@@ -839,9 +884,10 @@ func TestTaskSubscription(t *testing.T) {
 	columnID := colPayload["id"].(string)
 
 	taskResp, _ := client.SendRequest("task-1", ws.ActionTaskCreate, map[string]interface{}{
-		"board_id":  boardID,
-		"column_id": columnID,
-		"title":     "Subscribable Task",
+		"workspace_id": workspaceID,
+		"board_id":     boardID,
+		"column_id":    columnID,
+		"title":        "Subscribable Task",
 	})
 	var taskPayload map[string]interface{}
 	taskResp.ParsePayload(&taskPayload)
@@ -1003,8 +1049,10 @@ func NewTestServerWithACP(t *testing.T) *TestServerWithACP {
 	gateway.SetupRoutes(router)
 
 	// Register handlers (HTTP + WS)
+	workspaceController := taskcontroller.NewWorkspaceController(taskSvc)
 	boardController := taskcontroller.NewBoardController(taskSvc)
 	taskController := taskcontroller.NewTaskController(taskSvc)
+	taskhandlers.RegisterWorkspaceRoutes(router, gateway.Dispatcher, workspaceController, log)
 	taskhandlers.RegisterBoardRoutes(router, gateway.Dispatcher, boardController, log)
 	taskhandlers.RegisterTaskRoutes(router, gateway.Dispatcher, taskController, log)
 
@@ -1033,9 +1081,12 @@ func TestTaskLogsAction(t *testing.T) {
 	client := NewWSClient(t, ts.Server.URL)
 	defer client.Close()
 
+	workspaceID := createWorkspace(t, client)
+
 	// Create a task first
 	boardResp, _ := client.SendRequest("board-1", ws.ActionBoardCreate, map[string]interface{}{
-		"name": "Logs Test Board",
+		"workspace_id": workspaceID,
+		"name":         "Logs Test Board",
 	})
 	var boardPayload map[string]interface{}
 	boardResp.ParsePayload(&boardPayload)
@@ -1051,9 +1102,10 @@ func TestTaskLogsAction(t *testing.T) {
 	columnID := colPayload["id"].(string)
 
 	taskResp, _ := client.SendRequest("task-1", ws.ActionTaskCreate, map[string]interface{}{
-		"board_id":  boardID,
-		"column_id": columnID,
-		"title":     "Task With Logs",
+		"workspace_id": workspaceID,
+		"board_id":     boardID,
+		"column_id":    columnID,
+		"title":        "Task With Logs",
 	})
 	var taskPayload map[string]interface{}
 	taskResp.ParsePayload(&taskPayload)
@@ -1184,9 +1236,12 @@ func TestHistoricalLogsOnSubscribe(t *testing.T) {
 	client := NewWSClient(t, ts.Server.URL)
 	defer client.Close()
 
+	workspaceID := createWorkspace(t, client)
+
 	// Create a task
 	boardResp, _ := client.SendRequest("board-1", ws.ActionBoardCreate, map[string]interface{}{
-		"name": "Subscribe Test Board",
+		"workspace_id": workspaceID,
+		"name":         "Subscribe Test Board",
 	})
 	var boardPayload map[string]interface{}
 	boardResp.ParsePayload(&boardPayload)
@@ -1202,9 +1257,10 @@ func TestHistoricalLogsOnSubscribe(t *testing.T) {
 	columnID := colPayload["id"].(string)
 
 	taskResp, _ := client.SendRequest("task-1", ws.ActionTaskCreate, map[string]interface{}{
-		"board_id":  boardID,
-		"column_id": columnID,
-		"title":     "Subscribable Task With History",
+		"workspace_id": workspaceID,
+		"board_id":     boardID,
+		"column_id":    columnID,
+		"title":        "Subscribable Task With History",
 	})
 	var taskPayload map[string]interface{}
 	taskResp.ParsePayload(&taskPayload)
@@ -1317,9 +1373,12 @@ func TestHistoricalLogsChronologicalOrder(t *testing.T) {
 	client := NewWSClient(t, ts.Server.URL)
 	defer client.Close()
 
+	workspaceID := createWorkspace(t, client)
+
 	// Create a task
 	boardResp, _ := client.SendRequest("board-1", ws.ActionBoardCreate, map[string]interface{}{
-		"name": "Chrono Test Board",
+		"workspace_id": workspaceID,
+		"name":         "Chrono Test Board",
 	})
 	var boardPayload map[string]interface{}
 	boardResp.ParsePayload(&boardPayload)
@@ -1335,9 +1394,10 @@ func TestHistoricalLogsChronologicalOrder(t *testing.T) {
 	columnID := colPayload["id"].(string)
 
 	taskResp, _ := client.SendRequest("task-1", ws.ActionTaskCreate, map[string]interface{}{
-		"board_id":  boardID,
-		"column_id": columnID,
-		"title":     "Chronological Order Test Task",
+		"workspace_id": workspaceID,
+		"board_id":     boardID,
+		"column_id":    columnID,
+		"title":        "Chronological Order Test Task",
 	})
 	var taskPayload map[string]interface{}
 	taskResp.ParsePayload(&taskPayload)
@@ -1435,9 +1495,12 @@ func TestConcurrentRequests(t *testing.T) {
 	client := NewWSClient(t, ts.Server.URL)
 	defer client.Close()
 
+	workspaceID := createWorkspace(t, client)
+
 	// Create board and column
 	boardResp, _ := client.SendRequest("board-1", ws.ActionBoardCreate, map[string]interface{}{
-		"name": "Concurrent Test Board",
+		"workspace_id": workspaceID,
+		"name":         "Concurrent Test Board",
 	})
 	var boardPayload map[string]interface{}
 	boardResp.ParsePayload(&boardPayload)
@@ -1470,9 +1533,10 @@ func TestConcurrentRequests(t *testing.T) {
 				"task-"+string(rune('0'+idx)),
 				ws.ActionTaskCreate,
 				map[string]interface{}{
-					"board_id":  boardID,
-					"column_id": columnID,
-					"title":     "Concurrent Task " + string(rune('0'+idx)),
+					"workspace_id": workspaceID,
+					"board_id":     boardID,
+					"column_id":    columnID,
+					"title":        "Concurrent Task " + string(rune('0'+idx)),
 				},
 			)
 			results <- err

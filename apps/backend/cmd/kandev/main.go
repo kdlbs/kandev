@@ -202,6 +202,7 @@ func main() {
 	gateway := gateways.NewGateway(log)
 
 	// Prepare Task Service controllers for HTTP + WebSocket handlers
+	workspaceController := taskcontroller.NewWorkspaceController(taskSvc)
 	boardController := taskcontroller.NewBoardController(taskSvc)
 	taskController := taskcontroller.NewTaskController(taskSvc)
 
@@ -314,6 +315,7 @@ func main() {
 	gateway.SetupRoutes(router)
 
 	// Task Service handlers (HTTP + WebSocket)
+	taskhandlers.RegisterWorkspaceRoutes(router, gateway.Dispatcher, workspaceController, log)
 	taskhandlers.RegisterBoardRoutes(router, gateway.Dispatcher, boardController, log)
 	taskhandlers.RegisterTaskRoutes(router, gateway.Dispatcher, taskController, log)
 	log.Info("Registered Task Service handlers (HTTP + WebSocket)")

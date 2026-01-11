@@ -12,6 +12,13 @@ const (
 	ActionBoardUpdate = "board.update"
 	ActionBoardDelete = "board.delete"
 
+	// Workspace actions
+	ActionWorkspaceList   = "workspace.list"
+	ActionWorkspaceCreate = "workspace.create"
+	ActionWorkspaceGet    = "workspace.get"
+	ActionWorkspaceUpdate = "workspace.update"
+	ActionWorkspaceDelete = "workspace.delete"
+
 	// Column actions
 	ActionColumnList   = "column.list"
 	ActionColumnCreate = "column.create"
@@ -54,14 +61,14 @@ const (
 	ActionTaskUnsubscribe = "task.unsubscribe"
 
 	// Notification actions (server -> client)
-	ActionACPProgress   = "acp.progress"
-	ActionACPLog        = "acp.log"
-	ActionACPResult     = "acp.result"
-	ActionACPError      = "acp.error"
-	ActionACPStatus     = "acp.status"
-	ActionACPHeartbeat  = "acp.heartbeat"
-	ActionTaskUpdated   = "task.updated"
-	ActionAgentUpdated  = "agent.updated"
+	ActionACPProgress  = "acp.progress"
+	ActionACPLog       = "acp.log"
+	ActionACPResult    = "acp.result"
+	ActionACPError     = "acp.error"
+	ActionACPStatus    = "acp.status"
+	ActionACPHeartbeat = "acp.heartbeat"
+	ActionTaskUpdated  = "task.updated"
+	ActionAgentUpdated = "agent.updated"
 )
 
 // Error codes
@@ -74,4 +81,3 @@ const (
 	ErrorCodeValidation    = "VALIDATION_ERROR"
 	ErrorCodeUnknownAction = "UNKNOWN_ACTION"
 )
-

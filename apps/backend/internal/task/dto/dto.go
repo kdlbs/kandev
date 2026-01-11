@@ -9,6 +9,15 @@ import (
 
 type BoardDTO struct {
 	ID          string    `json:"id"`
+	WorkspaceID string    `json:"workspace_id"`
+	Name        string    `json:"name"`
+	Description *string   `json:"description,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type WorkspaceDTO struct {
+	ID          string    `json:"id"`
 	Name        string    `json:"name"`
 	Description *string   `json:"description,omitempty"`
 	OwnerID     string    `json:"owner_id"`
@@ -28,6 +37,7 @@ type ColumnDTO struct {
 
 type TaskDTO struct {
 	ID              string                 `json:"id"`
+	WorkspaceID     string                 `json:"workspace_id"`
 	BoardID         string                 `json:"board_id"`
 	ColumnID        string                 `json:"column_id"`
 	Title           string                 `json:"title"`
@@ -55,6 +65,11 @@ type ListBoardsResponse struct {
 	Total  int        `json:"total"`
 }
 
+type ListWorkspacesResponse struct {
+	Workspaces []WorkspaceDTO `json:"workspaces"`
+	Total      int            `json:"total"`
+}
+
 type ListColumnsResponse struct {
 	Columns []ColumnDTO `json:"columns"`
 	Total   int         `json:"total"`
@@ -77,11 +92,27 @@ func FromBoard(board *models.Board) BoardDTO {
 
 	return BoardDTO{
 		ID:          board.ID,
+		WorkspaceID: board.WorkspaceID,
 		Name:        board.Name,
 		Description: description,
-		OwnerID:     board.OwnerID,
 		CreatedAt:   board.CreatedAt,
 		UpdatedAt:   board.UpdatedAt,
+	}
+}
+
+func FromWorkspace(workspace *models.Workspace) WorkspaceDTO {
+	var description *string
+	if workspace.Description != "" {
+		description = &workspace.Description
+	}
+
+	return WorkspaceDTO{
+		ID:          workspace.ID,
+		Name:        workspace.Name,
+		Description: description,
+		OwnerID:     workspace.OwnerID,
+		CreatedAt:   workspace.CreatedAt,
+		UpdatedAt:   workspace.UpdatedAt,
 	}
 }
 
@@ -117,6 +148,7 @@ func FromTask(task *models.Task) TaskDTO {
 
 	return TaskDTO{
 		ID:              task.ID,
+		WorkspaceID:     task.WorkspaceID,
 		BoardID:         task.BoardID,
 		ColumnID:        task.ColumnID,
 		Title:           task.Title,

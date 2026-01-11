@@ -139,7 +139,7 @@ test-backend:
 .PHONY: test-web
 test-web:
 	@echo "Running web app tests..."
-	@cd $(WEB_DIR) && $(NPM) test --passWithNoTests || true
+	@cd $(WEB_DIR) && $(NPM) test
 
 #
 # Code Quality

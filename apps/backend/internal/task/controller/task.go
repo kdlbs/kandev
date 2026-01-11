@@ -40,6 +40,7 @@ func (c *TaskController) GetTask(ctx context.Context, req dto.GetTaskRequest) (d
 
 func (c *TaskController) CreateTask(ctx context.Context, req dto.CreateTaskRequest) (dto.TaskDTO, error) {
 	task, err := c.service.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID:   req.WorkspaceID,
 		BoardID:       req.BoardID,
 		ColumnID:      req.ColumnID,
 		Title:         req.Title,
@@ -82,7 +83,7 @@ func (c *TaskController) DeleteTask(ctx context.Context, req dto.DeleteTaskReque
 }
 
 func (c *TaskController) MoveTask(ctx context.Context, req dto.MoveTaskRequest) (dto.TaskDTO, error) {
-	task, err := c.service.MoveTask(ctx, req.ID, req.ColumnID, req.Position)
+	task, err := c.service.MoveTask(ctx, req.ID, req.BoardID, req.ColumnID, req.Position)
 	if err != nil {
 		return dto.TaskDTO{}, err
 	}

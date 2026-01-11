@@ -53,4 +53,3 @@ func (d *Dispatcher) HasHandler(action string) bool {
 	_, ok := d.handlers[action]
 	return ok
 }
-

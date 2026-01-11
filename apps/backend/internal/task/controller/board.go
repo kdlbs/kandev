@@ -15,8 +15,8 @@ func NewBoardController(svc *service.Service) *BoardController {
 	return &BoardController{service: svc}
 }
 
-func (c *BoardController) ListBoards(ctx context.Context, _ dto.ListBoardsRequest) (dto.ListBoardsResponse, error) {
-	boards, err := c.service.ListBoards(ctx)
+func (c *BoardController) ListBoards(ctx context.Context, req dto.ListBoardsRequest) (dto.ListBoardsResponse, error) {
+	boards, err := c.service.ListBoards(ctx, req.WorkspaceID)
 	if err != nil {
 		return dto.ListBoardsResponse{}, err
 	}
@@ -40,9 +40,9 @@ func (c *BoardController) GetBoard(ctx context.Context, req dto.GetBoardRequest)
 
 func (c *BoardController) CreateBoard(ctx context.Context, req dto.CreateBoardRequest) (dto.BoardDTO, error) {
 	board, err := c.service.CreateBoard(ctx, &service.CreateBoardRequest{
+		WorkspaceID: req.WorkspaceID,
 		Name:        req.Name,
 		Description: req.Description,
-		OwnerID:     req.OwnerID,
 	})
 	if err != nil {
 		return dto.BoardDTO{}, err

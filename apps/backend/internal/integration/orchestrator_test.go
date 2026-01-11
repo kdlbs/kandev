@@ -497,8 +497,10 @@ func NewOrchestratorTestServer(t *testing.T) *OrchestratorTestServer {
 	gateway.SetupRoutes(router)
 
 	// Register handlers (HTTP + WS)
+	workspaceController := taskcontroller.NewWorkspaceController(taskSvc)
 	boardController := taskcontroller.NewBoardController(taskSvc)
 	taskController := taskcontroller.NewTaskController(taskSvc)
+	taskhandlers.RegisterWorkspaceRoutes(router, gateway.Dispatcher, workspaceController, log)
 	taskhandlers.RegisterBoardRoutes(router, gateway.Dispatcher, boardController, log)
 	taskhandlers.RegisterTaskRoutes(router, gateway.Dispatcher, taskController, log)
 
@@ -598,6 +600,21 @@ func NewOrchestratorWSClient(t *testing.T, serverURL string) *OrchestratorWSClie
 	go client.readPump()
 
 	return client
+}
+
+func createOrchestratorWorkspace(t *testing.T, client *OrchestratorWSClient) string {
+	t.Helper()
+
+	resp, err := client.SendRequest("workspace-1", ws.ActionWorkspaceCreate, map[string]interface{}{
+		"name": "Test Workspace",
+	})
+	require.NoError(t, err)
+
+	var payload map[string]interface{}
+	err = resp.ParsePayload(&payload)
+	require.NoError(t, err)
+
+	return payload["id"].(string)
 }
 
 // readPump reads messages from the WebSocket connection
@@ -1258,10 +1275,13 @@ func TestOrchestratorEndToEndWorkflow(t *testing.T) {
 	client := NewOrchestratorWSClient(t, ts.Server.URL)
 	defer client.Close()
 
+	workspaceID := createOrchestratorWorkspace(t, client)
+
 	// 1. Create board
 	boardResp, err := client.SendRequest("board-1", ws.ActionBoardCreate, map[string]interface{}{
-		"name":        "E2E Test Board",
-		"description": "End-to-end test board",
+		"workspace_id": workspaceID,
+		"name":         "E2E Test Board",
+		"description":  "End-to-end test board",
 	})
 	require.NoError(t, err)
 
@@ -1284,12 +1304,13 @@ func TestOrchestratorEndToEndWorkflow(t *testing.T) {
 
 	// 3. Create task with agent type
 	taskResp, err := client.SendRequest("task-1", ws.ActionTaskCreate, map[string]interface{}{
-		"board_id":    boardID,
-		"column_id":   colID,
-		"title":       "Implement feature X",
-		"description": "Create a new feature with tests",
-		"priority":    2,
-		"agent_type":  "augment-agent",
+		"workspace_id": workspaceID,
+		"board_id":     boardID,
+		"column_id":    colID,
+		"title":        "Implement feature X",
+		"description":  "Create a new feature with tests",
+		"priority":     2,
+		"agent_type":   "augment-agent",
 	})
 	require.NoError(t, err)
 

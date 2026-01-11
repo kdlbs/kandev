@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "NODE_ENV=production next build",
     "start": "NODE_ENV=production next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "echo \"No tests yet\" && exit 0"
   },
   "dependencies": {
     "@base-ui/react": "^1.0.0",

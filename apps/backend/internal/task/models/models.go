@@ -9,6 +9,7 @@ import (
 // Task represents a task in the database
 type Task struct {
 	ID            string                 `json:"id"`
+	WorkspaceID   string                 `json:"workspace_id"`
 	BoardID       string                 `json:"board_id"`
 	ColumnID      string                 `json:"column_id"`
 	Title         string                 `json:"title"`
@@ -27,6 +28,16 @@ type Task struct {
 
 // Board represents a Kanban board
 type Board struct {
+	ID          string    `json:"id"`
+	WorkspaceID string    `json:"workspace_id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// Workspace represents a workspace
+type Workspace struct {
 	ID          string    `json:"id"`
 	Name        string    `json:"name"`
 	Description string    `json:"description"`
@@ -70,6 +81,7 @@ func (t *Task) ToAPI() *v1.Task {
 
 	return &v1.Task{
 		ID:              t.ID,
+		WorkspaceID:     t.WorkspaceID,
 		BoardID:         t.BoardID,
 		Title:           t.Title,
 		Description:     t.Description,
@@ -84,4 +96,3 @@ func (t *Task) ToAPI() *v1.Task {
 		Metadata:        t.Metadata,
 	}
 }
-

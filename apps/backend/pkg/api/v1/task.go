@@ -17,6 +17,7 @@ const (
 // Task represents a Kanban task
 type Task struct {
 	ID              string                 `json:"id"`
+	WorkspaceID     string                 `json:"workspace_id"`
 	BoardID         string                 `json:"board_id"`
 	Title           string                 `json:"title"`
 	Description     string                 `json:"description"`
@@ -72,4 +73,3 @@ type TaskEvent struct {
 	CreatedBy *string                `json:"created_by,omitempty"`
 	CreatedAt time.Time              `json:"created_at"`
 }
-
