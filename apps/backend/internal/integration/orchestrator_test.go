@@ -443,7 +443,7 @@ func NewOrchestratorTestServer(t *testing.T) *OrchestratorTestServer {
 	taskRepo := repository.NewMemoryRepository()
 
 	// Initialize task service
-	taskSvc := taskservice.NewService(taskRepo, eventBus, log)
+	taskSvc := taskservice.NewService(taskRepo, eventBus, log, taskservice.RepositoryDiscoveryConfig{})
 
 	// Create simulated agent manager
 	agentManager := NewSimulatedAgentManager(eventBus, log)

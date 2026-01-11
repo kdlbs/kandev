@@ -61,7 +61,7 @@ func NewTestServer(t *testing.T) *TestServer {
 	taskRepo := repository.NewMemoryRepository()
 
 	// Initialize task service
-	taskSvc := taskservice.NewService(taskRepo, eventBus, log)
+	taskSvc := taskservice.NewService(taskRepo, eventBus, log, taskservice.RepositoryDiscoveryConfig{})
 
 	// Create WebSocket gateway
 	gateway := gateways.NewGateway(log)
@@ -957,7 +957,7 @@ func NewTestServerWithACP(t *testing.T) *TestServerWithACP {
 	taskRepo := repository.NewMemoryRepository()
 
 	// Initialize task service
-	taskSvc := taskservice.NewService(taskRepo, eventBus, log)
+	taskSvc := taskservice.NewService(taskRepo, eventBus, log, taskservice.RepositoryDiscoveryConfig{})
 
 	// Create ACP message store and handler
 	messageStore := acp.NewMemoryMessageStore(1000)

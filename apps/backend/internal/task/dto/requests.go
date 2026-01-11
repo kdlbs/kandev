@@ -72,6 +72,82 @@ type UpdateColumnRequest struct {
 	Color    *string
 }
 
+type ListRepositoriesRequest struct {
+	WorkspaceID string
+}
+
+type GetRepositoryRequest struct {
+	ID string
+}
+
+type CreateRepositoryRequest struct {
+	WorkspaceID    string
+	Name           string
+	SourceType     string
+	LocalPath      string
+	Provider       string
+	ProviderRepoID string
+	ProviderOwner  string
+	ProviderName   string
+	DefaultBranch  string
+	SetupScript    string
+	CleanupScript  string
+}
+
+type UpdateRepositoryRequest struct {
+	ID             string
+	Name           *string
+	SourceType     *string
+	LocalPath      *string
+	Provider       *string
+	ProviderRepoID *string
+	ProviderOwner  *string
+	ProviderName   *string
+	DefaultBranch  *string
+	SetupScript    *string
+	CleanupScript  *string
+}
+
+type DeleteRepositoryRequest struct {
+	ID string
+}
+
+type ListRepositoryScriptsRequest struct {
+	RepositoryID string
+}
+
+type GetRepositoryScriptRequest struct {
+	ID string
+}
+
+type CreateRepositoryScriptRequest struct {
+	RepositoryID string
+	Name         string
+	Command      string
+	Position     int
+}
+
+type UpdateRepositoryScriptRequest struct {
+	ID       string
+	Name     *string
+	Command  *string
+	Position *int
+}
+
+type DeleteRepositoryScriptRequest struct {
+	ID string
+}
+
+type DiscoverRepositoriesRequest struct {
+	WorkspaceID string
+	Root        string
+}
+
+type ValidateRepositoryPathRequest struct {
+	WorkspaceID string
+	Path        string
+}
+
 type GetBoardSnapshotRequest struct {
 	BoardID string
 }

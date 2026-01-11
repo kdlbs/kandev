@@ -35,6 +35,20 @@ const (
 	CommentAdded = "comment.added"
 )
 
+// Event types for repositories
+const (
+	RepositoryCreated = "repository.created"
+	RepositoryUpdated = "repository.updated"
+	RepositoryDeleted = "repository.deleted"
+)
+
+// Event types for repository scripts
+const (
+	RepositoryScriptCreated = "repository.script.created"
+	RepositoryScriptUpdated = "repository.script.updated"
+	RepositoryScriptDeleted = "repository.script.deleted"
+)
+
 // Event types for agents
 const (
 	AgentStarted   = "agent.started"

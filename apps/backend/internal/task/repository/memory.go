@@ -18,6 +18,8 @@ type MemoryRepository struct {
 	boards         map[string]*models.Board
 	columns        map[string]*models.Column
 	comments       map[string]*models.Comment
+	repositories   map[string]*models.Repository
+	repoScripts    map[string]*models.RepositoryScript
 	taskBoards     map[string]map[string]struct{}
 	taskPlacements map[string]map[string]*taskPlacement
 	mu             sync.RWMutex
@@ -34,6 +36,8 @@ func NewMemoryRepository() *MemoryRepository {
 		boards:         make(map[string]*models.Board),
 		columns:        make(map[string]*models.Column),
 		comments:       make(map[string]*models.Comment),
+		repositories:   make(map[string]*models.Repository),
+		repoScripts:    make(map[string]*models.RepositoryScript),
 		taskBoards:     make(map[string]map[string]struct{}),
 		taskPlacements: make(map[string]map[string]*taskPlacement),
 	}
@@ -402,6 +406,137 @@ func (r *MemoryRepository) ListColumns(ctx context.Context, boardID string) ([]*
 	for _, column := range r.columns {
 		if column.BoardID == boardID {
 			result = append(result, column)
+		}
+	}
+	return result, nil
+}
+
+// Repository operations
+
+func (r *MemoryRepository) CreateRepository(ctx context.Context, repository *models.Repository) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if repository.ID == "" {
+		repository.ID = uuid.New().String()
+	}
+	now := time.Now().UTC()
+	repository.CreatedAt = now
+	repository.UpdatedAt = now
+	r.repositories[repository.ID] = repository
+	return nil
+}
+
+func (r *MemoryRepository) GetRepository(ctx context.Context, id string) (*models.Repository, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	repository, ok := r.repositories[id]
+	if !ok {
+		return nil, fmt.Errorf("repository not found: %s", id)
+	}
+	return repository, nil
+}
+
+func (r *MemoryRepository) UpdateRepository(ctx context.Context, repository *models.Repository) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, ok := r.repositories[repository.ID]; !ok {
+		return fmt.Errorf("repository not found: %s", repository.ID)
+	}
+	repository.UpdatedAt = time.Now().UTC()
+	r.repositories[repository.ID] = repository
+	return nil
+}
+
+func (r *MemoryRepository) DeleteRepository(ctx context.Context, id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, ok := r.repositories[id]; !ok {
+		return fmt.Errorf("repository not found: %s", id)
+	}
+	delete(r.repositories, id)
+	for scriptID, script := range r.repoScripts {
+		if script.RepositoryID == id {
+			delete(r.repoScripts, scriptID)
+		}
+	}
+	return nil
+}
+
+func (r *MemoryRepository) ListRepositories(ctx context.Context, workspaceID string) ([]*models.Repository, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	result := make([]*models.Repository, 0)
+	for _, repository := range r.repositories {
+		if repository.WorkspaceID == workspaceID {
+			result = append(result, repository)
+		}
+	}
+	return result, nil
+}
+
+// Repository script operations
+
+func (r *MemoryRepository) CreateRepositoryScript(ctx context.Context, script *models.RepositoryScript) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if script.ID == "" {
+		script.ID = uuid.New().String()
+	}
+	now := time.Now().UTC()
+	script.CreatedAt = now
+	script.UpdatedAt = now
+	r.repoScripts[script.ID] = script
+	return nil
+}
+
+func (r *MemoryRepository) GetRepositoryScript(ctx context.Context, id string) (*models.RepositoryScript, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	script, ok := r.repoScripts[id]
+	if !ok {
+		return nil, fmt.Errorf("repository script not found: %s", id)
+	}
+	return script, nil
+}
+
+func (r *MemoryRepository) UpdateRepositoryScript(ctx context.Context, script *models.RepositoryScript) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, ok := r.repoScripts[script.ID]; !ok {
+		return fmt.Errorf("repository script not found: %s", script.ID)
+	}
+	script.UpdatedAt = time.Now().UTC()
+	r.repoScripts[script.ID] = script
+	return nil
+}
+
+func (r *MemoryRepository) DeleteRepositoryScript(ctx context.Context, id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, ok := r.repoScripts[id]; !ok {
+		return fmt.Errorf("repository script not found: %s", id)
+	}
+	delete(r.repoScripts, id)
+	return nil
+}
+
+func (r *MemoryRepository) ListRepositoryScripts(ctx context.Context, repositoryID string) ([]*models.RepositoryScript, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	result := make([]*models.RepositoryScript, 0)
+	for _, script := range r.repoScripts {
+		if script.RepositoryID == repositoryID {
+			result = append(result, script)
 		}
 	}
 	return result, nil
