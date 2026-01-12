@@ -205,6 +205,8 @@ export default function TaskPage({ task }: TaskPageClientProps) {
         onStopAgent={handleStopAgent}
         isAgentRunning={isAgentRunning}
         isAgentLoading={isAgentLoading}
+        worktreePath={task?.worktree_path}
+        worktreeBranch={task?.worktree_branch}
       />
 
       <div className="flex-1 min-h-0 px-4 pb-4">

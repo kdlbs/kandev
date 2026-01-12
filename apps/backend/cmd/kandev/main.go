@@ -33,6 +33,7 @@ import (
 	agenthandlers "github.com/kandev/kandev/internal/agent/handlers"
 	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/agent/registry"
+	"github.com/kandev/kandev/internal/agent/worktree"
 
 	// Orchestrator packages
 	"github.com/kandev/kandev/internal/orchestrator"
@@ -179,6 +180,37 @@ func main() {
 	}
 
 	// ============================================
+	// WORKTREE MANAGER
+	// ============================================
+	log.Info("Initializing Worktree Manager...")
+
+	// Create worktree store (uses same database as tasks)
+	// Type assert to get the *sql.DB from the SQLite repository
+	var worktreeMgr *worktree.Manager
+	if sqliteRepo, ok := taskRepo.(*repository.SQLiteRepository); ok {
+		worktreeStore, err := worktree.NewSQLiteStore(sqliteRepo.DB())
+		if err != nil {
+			log.Fatal("Failed to initialize worktree store", zap.Error(err))
+		}
+
+		// Create worktree manager with config from common config
+		worktreeMgr, err = worktree.NewManager(worktree.Config{
+			Enabled:      cfg.Worktree.Enabled,
+			BasePath:     cfg.Worktree.BasePath,
+			MaxPerRepo:   cfg.Worktree.MaxPerRepo,
+			BranchPrefix: "kandev/", // Default branch prefix
+		}, worktreeStore, log)
+		if err != nil {
+			log.Fatal("Failed to initialize worktree manager", zap.Error(err))
+		}
+		log.Info("Worktree Manager initialized",
+			zap.Bool("enabled", cfg.Worktree.Enabled),
+			zap.String("base_path", cfg.Worktree.BasePath))
+	} else {
+		log.Warn("Worktree Manager disabled (requires SQLite repository)")
+	}
+
+	// ============================================
 	// ORCHESTRATOR
 	// ============================================
 	log.Info("Initializing Orchestrator...")
@@ -212,6 +244,9 @@ func main() {
 	workspaceController := taskcontroller.NewWorkspaceController(taskSvc)
 	boardController := taskcontroller.NewBoardController(taskSvc)
 	taskController := taskcontroller.NewTaskController(taskSvc)
+	if worktreeMgr != nil {
+		taskController.SetWorktreeLookup(worktreeMgr) // Enable worktree info in task responses
+	}
 	repositoryController := taskcontroller.NewRepositoryController(taskSvc)
 
 	// Create orchestrator controller and handlers (Pattern A)

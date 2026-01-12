@@ -81,6 +81,9 @@ type TaskDTO struct {
 	CreatedAt       time.Time              `json:"created_at"`
 	UpdatedAt       time.Time              `json:"updated_at"`
 	Metadata        map[string]interface{} `json:"metadata,omitempty"`
+	// Worktree information (populated if worktree exists for this task)
+	WorktreePath   *string `json:"worktree_path,omitempty"`
+	WorktreeBranch *string `json:"worktree_branch,omitempty"`
 }
 
 type BoardSnapshotDTO struct {

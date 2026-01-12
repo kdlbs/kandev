@@ -10,6 +10,7 @@ import {
   IconChevronRight,
   IconCopy,
   IconEye,
+  IconFolder,
   IconGitBranch,
   IconGitFork,
   IconGitMerge,
@@ -34,6 +35,8 @@ type TaskTopBarProps = {
   onStopAgent?: () => void;
   isAgentRunning?: boolean;
   isAgentLoading?: boolean;
+  worktreePath?: string | null;
+  worktreeBranch?: string | null;
 };
 
 const TaskTopBar = memo(function TaskTopBar({
@@ -45,6 +48,8 @@ const TaskTopBar = memo(function TaskTopBar({
   onStopAgent,
   isAgentRunning = false,
   isAgentLoading = false,
+  worktreePath,
+  worktreeBranch,
 }: TaskTopBarProps) {
   const [branchName, setBranchName] = useState('feature/agent-ui');
   const [isEditingBranch, setIsEditingBranch] = useState(false);
@@ -165,6 +170,42 @@ const TaskTopBar = memo(function TaskTopBar({
           </TooltipTrigger>
           <TooltipContent>Lines changed</TooltipContent>
         </Tooltip>
+        {/* Worktree Info */}
+        {worktreePath && (
+          <div className="flex items-center gap-2 ml-2 pl-2 border-l border-border/50">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="group flex items-center gap-1.5 rounded-md px-2 h-7 bg-muted/40 hover:bg-muted/60 cursor-pointer">
+                  <IconFolder className="h-3.5 w-3.5 text-muted-foreground" />
+                  <span className="text-xs text-muted-foreground max-w-[200px] truncate">
+                    {worktreePath}
+                  </span>
+                  <button
+                    type="button"
+                    className="text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      navigator.clipboard?.writeText(worktreePath);
+                    }}
+                  >
+                    <IconCopy className="h-3 w-3" />
+                  </button>
+                </div>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-[400px]">
+                <div className="space-y-1">
+                  <div className="font-medium">Worktree Path</div>
+                  <div className="text-xs text-muted-foreground break-all">{worktreePath}</div>
+                  {worktreeBranch && (
+                    <div className="text-xs">
+                      Branch: <span className="font-mono">{worktreeBranch}</span>
+                    </div>
+                  )}
+                </div>
+              </TooltipContent>
+            </Tooltip>
+          </div>
+        )}
       </div>
       <div className="flex items-center gap-2">
         {/* Start/Stop Agent Button */}

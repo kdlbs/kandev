@@ -90,6 +90,17 @@ func (m *Manager) IsEnabled() bool {
 	return m.config.Enabled
 }
 
+// GetWorktreeInfo returns worktree path and branch for a task.
+// Returns nil values if no worktree exists for the task.
+// This method implements the WorktreeLookup interface for task enrichment.
+func (m *Manager) GetWorktreeInfo(ctx context.Context, taskID string) (path, branch *string) {
+	wt, err := m.GetByTaskID(ctx, taskID)
+	if err != nil || wt == nil {
+		return nil, nil
+	}
+	return &wt.Path, &wt.Branch
+}
+
 // Create creates a new worktree for a task.
 // If a worktree already exists for the task, it returns the existing one.
 func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, error) {
