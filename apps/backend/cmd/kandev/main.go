@@ -206,6 +206,12 @@ func main() {
 		log.Info("Worktree Manager initialized",
 			zap.Bool("enabled", cfg.Worktree.Enabled),
 			zap.String("base_path", cfg.Worktree.BasePath))
+
+		// Wire worktree manager to lifecycle manager for agent isolation
+		if lifecycleMgr != nil {
+			lifecycleMgr.SetWorktreeManager(worktreeMgr)
+			log.Info("Worktree Manager connected to Lifecycle Manager")
+		}
 	} else {
 		log.Warn("Worktree Manager disabled (requires SQLite repository)")
 	}
