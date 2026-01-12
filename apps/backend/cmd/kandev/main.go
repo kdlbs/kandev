@@ -279,15 +279,28 @@ func main() {
 
 	// Wire ACP handler to broadcast to WebSocket clients as notifications
 	orchestratorSvc.RegisterACPHandler(func(taskID string, msg *protocol.Message) {
-		// Convert ACP message to WebSocket notification
-		action := "acp." + string(msg.Type)
-		notification, _ := ws.NewNotification(action, map[string]interface{}{
-			"task_id":   taskID,
-			"type":      msg.Type,
-			"data":      msg.Data,
-			"timestamp": msg.Timestamp,
-		})
-		gateway.Hub.BroadcastToTask(taskID, notification)
+		// Only broadcast message types that the frontend handles
+		// Skip internal message types like session/update
+		switch msg.Type {
+		case protocol.MessageTypeProgress,
+			protocol.MessageTypeLog,
+			protocol.MessageTypeResult,
+			protocol.MessageTypeError,
+			protocol.MessageTypeStatus,
+			protocol.MessageTypeHeartbeat,
+			protocol.MessageTypeInputRequired:
+			// Convert ACP message to WebSocket notification
+			action := "acp." + string(msg.Type)
+			notification, _ := ws.NewNotification(action, map[string]interface{}{
+				"task_id":   taskID,
+				"type":      msg.Type,
+				"data":      msg.Data,
+				"timestamp": msg.Timestamp,
+			})
+			gateway.Hub.BroadcastToTask(taskID, notification)
+		default:
+			// Skip other message types (session/update, session_info, etc.)
+		}
 	})
 
 	// Wire ACP handler to extract session_id from session_info messages and store in task metadata
