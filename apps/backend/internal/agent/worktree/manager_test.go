@@ -52,6 +52,24 @@ func (s *mockStore) GetWorktreeByTaskID(ctx context.Context, taskID string) (*Wo
 	return nil, nil
 }
 
+func (s *mockStore) GetWorktreesByTaskID(ctx context.Context, taskID string) ([]*Worktree, error) {
+	var result []*Worktree
+	for _, wt := range s.worktrees {
+		if wt.TaskID == taskID {
+			result = append(result, wt)
+		}
+	}
+	return result, nil
+}
+
+func (s *mockStore) GetWorktreeByID(ctx context.Context, id string) (*Worktree, error) {
+	wt, ok := s.worktrees[id]
+	if !ok {
+		return nil, nil
+	}
+	return wt, nil
+}
+
 func (s *mockStore) GetWorktreesByRepositoryID(ctx context.Context, repoID string) ([]*Worktree, error) {
 	var result []*Worktree
 	for _, wt := range s.worktrees {
@@ -153,4 +171,3 @@ func TestManager_IsValid(t *testing.T) {
 		t.Error("expected true for valid worktree directory")
 	}
 }
-
