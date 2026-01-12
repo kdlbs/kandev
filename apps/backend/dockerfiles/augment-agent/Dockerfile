@@ -1,22 +1,9 @@
 # Augment Agent Dockerfile
 # A coding agent powered by Auggie CLI (Augment Code) with agentctl sidecar
-
-# Stage 1: Build agentctl from Go source
-FROM golang:1.24-alpine AS builder
-
-WORKDIR /build
-
-# Copy go mod files
-COPY go.mod go.sum ./
-RUN go mod download
-
-# Copy source code
-COPY . .
-
-# Build agentctl binary
-RUN CGO_ENABLED=0 GOOS=linux go build -o /agentctl ./cmd/agentctl
-
-# Stage 2: Final image with Node.js and agentctl
+#
+# Prerequisites: Build agentctl before building this image:
+#   make build-agentctl
+#
 FROM node:20-slim
 
 # Install dependencies
@@ -32,8 +19,8 @@ RUN apt-get update && apt-get install -y \
 # Install Auggie CLI from npm
 RUN npm install -g @augmentcode/auggie
 
-# Copy agentctl binary from builder
-COPY --from=builder /agentctl /usr/local/bin/agentctl
+# Copy pre-built agentctl binary (run `make build-agentctl` first)
+COPY bin/agentctl /usr/local/bin/agentctl
 RUN chmod +x /usr/local/bin/agentctl
 
 # Create agent directory
