@@ -1083,6 +1083,15 @@ func (m *Manager) buildContainerConfig(instanceID string, req *LaunchRequest, ag
 		fmt.Sprintf("KANDEV_INSTANCE_ID=%s", instanceID),
 	)
 
+	// Configure Git to trust the workspace directory
+	// This is needed because the container runs as root but files are owned by host user
+	// Uses Git's environment-based config (GIT_CONFIG_COUNT, GIT_CONFIG_KEY_n, GIT_CONFIG_VALUE_n)
+	env = append(env,
+		"GIT_CONFIG_COUNT=1",
+		"GIT_CONFIG_KEY_0=safe.directory",
+		"GIT_CONFIG_VALUE_0=*", // Trust all directories in the container
+	)
+
 	// Extract auggie_session_id from metadata for session resumption
 	if req.Metadata != nil {
 		if sessionID, ok := req.Metadata["auggie_session_id"].(string); ok && sessionID != "" {
