@@ -71,8 +71,8 @@ type Manager struct {
 	exitCode atomic.Int32
 	exitErr  atomic.Value // error
 
-	// Output buffer for streaming
-	outputBuffer *OutputBuffer
+	// Workspace tracker for git status and file changes
+	workspaceTracker *WorkspaceTracker
 
 	// ACP SDK connection
 	acpClient *acpclient.Client
@@ -102,7 +102,7 @@ func NewManager(cfg *config.Config, log *logger.Logger) *Manager {
 	m := &Manager{
 		cfg:                cfg,
 		logger:             log.WithFields(zap.String("component", "process-manager")),
-		outputBuffer:       NewOutputBuffer(cfg.OutputBufferSize),
+		workspaceTracker:   NewWorkspaceTracker(cfg.WorkDir, log),
 		updatesCh:          make(chan acp.SessionNotification, 100),
 		permissionCh:       make(chan *PermissionNotification, 10),
 		pendingPermissions: make(map[string]*PendingPermission),
@@ -132,9 +132,9 @@ func (m *Manager) ExitError() error {
 	return nil
 }
 
-// GetOutputBuffer returns the output buffer for streaming
-func (m *Manager) GetOutputBuffer() *OutputBuffer {
-	return m.outputBuffer
+// GetWorkspaceTracker returns the workspace tracker for git status and file monitoring
+func (m *Manager) GetWorkspaceTracker() *WorkspaceTracker {
+	return m.workspaceTracker
 }
 
 // Start starts the agent process
@@ -218,6 +218,9 @@ func (m *Manager) Start(ctx context.Context) error {
 	go m.readStderr()
 	go m.waitForExit()
 
+	// Start workspace tracker with background context (not tied to HTTP request)
+	m.workspaceTracker.Start(context.Background())
+
 	m.status.Store(StatusRunning)
 	m.logger.Info("agent process started", zap.Int("pid", m.cmd.Process.Pid))
 
@@ -263,6 +266,11 @@ func (m *Manager) Stop(ctx context.Context) error {
 	m.logger.Info("stopping agent process")
 	m.status.Store(StatusStopping)
 
+	// Stop workspace tracker
+	if m.workspaceTracker != nil {
+		m.workspaceTracker.Stop()
+	}
+
 	// Close stop channel to signal readers
 	if m.stopCh != nil {
 		close(m.stopCh)
@@ -297,18 +305,14 @@ func (m *Manager) Stop(ctx context.Context) error {
 
 
 
-// readStderr reads stderr from the agent
+// readStderr reads and logs stderr from the agent
 func (m *Manager) readStderr() {
 	defer m.wg.Done()
 
 	scanner := bufio.NewScanner(m.stderr)
 	for scanner.Scan() {
 		line := scanner.Text()
-		m.outputBuffer.Add(OutputLine{
-			Timestamp: time.Now(),
-			Stream:    "stderr",
-			Content:   line,
-		})
+		m.logger.Debug("agent stderr", zap.String("line", line))
 	}
 
 	if err := scanner.Err(); err != nil {

@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
   IconArrowDown,
@@ -25,6 +25,7 @@ import { CommitStatBadge, LineStat } from '@/components/diff-stat';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@kandev/ui/dropdown-menu';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@kandev/ui/select';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
+import { useAppStore } from '@/components/state-provider';
 
 type TaskTopBarProps = {
   taskTitle?: string;
@@ -54,6 +55,24 @@ const TaskTopBar = memo(function TaskTopBar({
   const [branchName, setBranchName] = useState('feature/agent-ui');
   const [isEditingBranch, setIsEditingBranch] = useState(false);
   const [selectedBaseBranch, setSelectedBaseBranch] = useState(baseBranch ?? 'origin/main');
+
+  // Get git status from store
+  const gitStatus = useAppStore((state) => state.gitStatus);
+
+  // Calculate total additions and deletions from all files
+  const { totalAdditions, totalDeletions } = useMemo(() => {
+    if (!gitStatus.files || Object.keys(gitStatus.files).length === 0) {
+      return { totalAdditions: 0, totalDeletions: 0 };
+    }
+
+    return Object.values(gitStatus.files).reduce(
+      (acc, file) => ({
+        totalAdditions: acc.totalAdditions + (file.additions || 0),
+        totalDeletions: acc.totalDeletions + (file.deletions || 0),
+      }),
+      { totalAdditions: 0, totalDeletions: 0 }
+    );
+  }, [gitStatus.files]);
 
   return (
     <header className="flex items-center justify-between p-3">
@@ -144,32 +163,46 @@ const TaskTopBar = memo(function TaskTopBar({
             </SelectContent>
           </Select>
         </div>
-        <div className="flex items-center gap-1">
+        {/* Git Status: Ahead/Behind */}
+        {(gitStatus.ahead > 0 || gitStatus.behind > 0) && (
+          <div className="flex items-center gap-1">
+            {gitStatus.ahead > 0 && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="cursor-default">
+                    <CommitStatBadge label={`${gitStatus.ahead} ahead`} tone="ahead" />
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {gitStatus.ahead} commit{gitStatus.ahead !== 1 ? 's' : ''} ahead of {gitStatus.remote_branch || 'remote'}
+                </TooltipContent>
+              </Tooltip>
+            )}
+            {gitStatus.behind > 0 && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="cursor-default">
+                    <CommitStatBadge label={`${gitStatus.behind} behind`} tone="behind" />
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {gitStatus.behind} commit{gitStatus.behind !== 1 ? 's' : ''} behind {gitStatus.remote_branch || 'remote'}
+                </TooltipContent>
+              </Tooltip>
+            )}
+          </div>
+        )}
+        {/* Git Status: Lines Changed */}
+        {(totalAdditions > 0 || totalDeletions > 0) && (
           <Tooltip>
             <TooltipTrigger asChild>
               <span className="cursor-default">
-                <CommitStatBadge label="2 ahead" tone="ahead" />
+                <LineStat added={totalAdditions} removed={totalDeletions} />
               </span>
             </TooltipTrigger>
-            <TooltipContent>Commits ahead of base</TooltipContent>
+            <TooltipContent>Lines changed</TooltipContent>
           </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span className="cursor-default">
-                <CommitStatBadge label="4 behind" tone="behind" />
-              </span>
-            </TooltipTrigger>
-            <TooltipContent>Commits behind base</TooltipContent>
-          </Tooltip>
-        </div>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span className="cursor-default">
-              <LineStat added={855} removed={8} />
-            </span>
-          </TooltipTrigger>
-          <TooltipContent>Lines changed</TooltipContent>
-        </Tooltip>
+        )}
         {/* Worktree Info */}
         {worktreePath && (
           <div className="flex items-center gap-2 ml-2 pl-2 border-l border-border/50">

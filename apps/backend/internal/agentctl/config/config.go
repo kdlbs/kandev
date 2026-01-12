@@ -34,9 +34,6 @@ type Config struct {
 	LogLevel  string
 	LogFormat string
 
-	// Buffer size for agent output (in lines)
-	OutputBufferSize int
-
 	// Health check interval
 	HealthCheckInterval int
 }
@@ -54,7 +51,6 @@ func Load() *Config {
 		AutoApprovePermissions: getEnvBool("AGENTCTL_AUTO_APPROVE_PERMISSIONS", false),
 		LogLevel:               getEnv("AGENTCTL_LOG_LEVEL", "info"),
 		LogFormat:              getEnv("AGENTCTL_LOG_FORMAT", "json"),
-		OutputBufferSize:       getEnvInt("AGENTCTL_OUTPUT_BUFFER_SIZE", 1000),
 		HealthCheckInterval:    getEnvInt("AGENTCTL_HEALTH_CHECK_INTERVAL", 5),
 	}
 

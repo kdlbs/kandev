@@ -757,6 +757,13 @@ func (r *SQLiteRepository) AddTaskToBoard(ctx context.Context, taskID, boardID, 
 		VALUES (?, ?, ?, ?)
 		ON CONFLICT(task_id, board_id) DO UPDATE SET column_id = excluded.column_id, position = excluded.position
 	`, taskID, boardID, columnID, position)
+	if err != nil {
+		return err
+	}
+	// Also update the column_id in the tasks table so GetTask returns the correct column
+	_, err = r.db.ExecContext(ctx, `
+		UPDATE tasks SET column_id = ?, position = ?, updated_at = ? WHERE id = ?
+	`, columnID, position, time.Now().UTC(), taskID)
 	return err
 }
 
@@ -776,11 +783,18 @@ func (r *SQLiteRepository) addTaskToBoardTx(ctx context.Context, tx *sql.Tx, tas
 		return err
 	}
 
-	_, err := tx.ExecContext(ctx, `
+	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO task_columns (task_id, board_id, column_id, position)
 		VALUES (?, ?, ?, ?)
 		ON CONFLICT(task_id, board_id) DO UPDATE SET column_id = excluded.column_id, position = excluded.position
-	`, taskID, boardID, columnID, position)
+	`, taskID, boardID, columnID, position); err != nil {
+		return err
+	}
+
+	// Also update the column_id in the tasks table so GetTask returns the correct column
+	_, err := tx.ExecContext(ctx, `
+		UPDATE tasks SET column_id = ?, position = ?, updated_at = ? WHERE id = ?
+	`, columnID, position, time.Now().UTC(), taskID)
 	return err
 }
 
@@ -910,6 +924,21 @@ func (r *SQLiteRepository) GetColumn(ctx context.Context, id string) (*models.Co
 
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("column not found: %s", id)
+	}
+	return column, err
+}
+
+// GetColumnByState retrieves a column by board ID and state
+func (r *SQLiteRepository) GetColumnByState(ctx context.Context, boardID string, state v1.TaskState) (*models.Column, error) {
+	column := &models.Column{}
+
+	err := r.db.QueryRowContext(ctx, `
+		SELECT id, board_id, name, position, state, color, created_at, updated_at
+		FROM columns WHERE board_id = ? AND state = ?
+	`, boardID, state).Scan(&column.ID, &column.BoardID, &column.Name, &column.Position, &column.State, &column.Color, &column.CreatedAt, &column.UpdatedAt)
+
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("column not found for board %s with state %s", boardID, state)
 	}
 	return column, err
 }

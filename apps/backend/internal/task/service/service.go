@@ -289,7 +289,8 @@ func (s *Service) ListTasks(ctx context.Context, boardID string) ([]*models.Task
 	return s.repo.ListTasks(ctx, boardID)
 }
 
-// UpdateTaskState updates the state of a task and publishes a task.state_changed event
+// UpdateTaskState updates the state of a task, moves it to the matching column,
+// and publishes a task.state_changed event
 func (s *Service) UpdateTaskState(ctx context.Context, id string, state v1.TaskState) (*models.Task, error) {
 	task, err := s.repo.GetTask(ctx, id)
 	if err != nil {
@@ -303,11 +304,42 @@ func (s *Service) UpdateTaskState(ctx context.Context, id string, state v1.TaskS
 		return nil, err
 	}
 
-	// Reload task to get updated state
+	// Find the column that maps to the new state and move the task there
+	// This ensures the Kanban board stays in sync with task state
+	if task.BoardID != "" {
+		column, err := s.repo.GetColumnByState(ctx, task.BoardID, state)
+		if err != nil {
+			s.logger.Warn("no column found for state, task will stay in current column",
+				zap.String("task_id", id),
+				zap.String("state", string(state)),
+				zap.Error(err))
+		} else if column.ID != task.ColumnID {
+			// Move task to the new column (keep it at position 0 - top of the column)
+			if err := s.repo.AddTaskToBoard(ctx, id, task.BoardID, column.ID, 0); err != nil {
+				s.logger.Error("failed to move task to new column",
+					zap.String("task_id", id),
+					zap.String("column_id", column.ID),
+					zap.Error(err))
+			} else {
+				s.logger.Info("task moved to column matching new state",
+					zap.String("task_id", id),
+					zap.String("column_id", column.ID),
+					zap.String("column_name", column.Name),
+					zap.String("state", string(state)))
+			}
+		}
+	}
+
+	// Reload task to get updated state and column
 	task, err = s.repo.GetTask(ctx, id)
 	if err != nil {
 		return nil, err
 	}
+
+	s.logger.Info("task reloaded after column move",
+		zap.String("task_id", id),
+		zap.String("column_id", task.ColumnID),
+		zap.String("state", string(task.State)))
 
 	s.publishTaskEvent(ctx, events.TaskStateChanged, task, &oldState)
 	s.logger.Info("task state changed",
@@ -818,6 +850,14 @@ func (s *Service) publishTaskEvent(ctx context.Context, eventType string, task *
 	}
 
 	event := bus.NewEvent(eventType, "task-service", data)
+
+	// Debug logging for state changes
+	s.logger.Info("publishing task event",
+		zap.String("event_type", eventType),
+		zap.String("task_id", task.ID),
+		zap.String("board_id", task.BoardID),
+		zap.String("column_id", task.ColumnID),
+		zap.String("state", string(task.State)))
 
 	if err := s.eventBus.Publish(ctx, eventType, event); err != nil {
 		s.logger.Error("failed to publish task event",

@@ -60,6 +60,7 @@ type Service struct {
 	eventBus     bus.EventBus
 	db           *database.DB
 	taskRepo     scheduler.TaskRepository
+	repo         repository.Repository // Full repository for agent sessions
 	agentManager executor.AgentManagerClient
 
 	// Components
@@ -127,6 +128,7 @@ func NewService(
 		eventBus:     eventBus,
 		db:           db,
 		taskRepo:     taskRepo,
+		repo:         repo,
 		agentManager: agentManager,
 		queue:        taskQueue,
 		executor:     exec,
@@ -143,6 +145,7 @@ func NewService(
 		OnACPMessage:       s.handleACPMessage,
 		OnPromptComplete:   s.handlePromptComplete,
 		OnToolCallStarted:  s.handleToolCallStarted,
+		OnGitStatusUpdated: s.handleGitStatusUpdated,
 	}
 	s.watcher = watcher.NewWatcher(eventBus, handlers, log)
 
@@ -439,14 +442,42 @@ func (s *Service) handleTaskStateChanged(ctx context.Context, data watcher.TaskE
 }
 
 // handleAgentReady handles agent ready events (prompt completed, ready for follow-up)
+// This is the definitive signal that the agent has finished processing a prompt.
+// AgentReady fires ONCE after each prompt completes (unlike PromptComplete which
+// fires for intermediate messages before tool calls).
 func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventData) {
 	s.logger.Info("handling agent ready",
 		zap.String("task_id", data.TaskID),
 		zap.String("agent_instance_id", data.AgentInstanceID))
 
-	// Agent completed initial prompt but is still running
-	// Task stays in IN_PROGRESS state - user can send follow-up prompts
-	// or explicitly complete/stop the task
+	// Get current task state to determine if we should transition to REVIEW
+	task, err := s.taskRepo.GetTask(ctx, data.TaskID)
+	if err != nil {
+		s.logger.Error("failed to get task for state check",
+			zap.String("task_id", data.TaskID),
+			zap.Error(err))
+		return
+	}
+
+	// Only transition to REVIEW if the task is currently IN_PROGRESS
+	// This implements the forward movement: IN_PROGRESS → (agent finishes) → REVIEW
+	// This works for both:
+	// 1. Initial task execution: Task starts IN_PROGRESS, agent finishes → REVIEW
+	// 2. Follow-up prompts: User message sets IN_PROGRESS, agent finishes → REVIEW
+	if task.State == v1.TaskStateInProgress {
+		if err := s.taskRepo.UpdateTaskState(ctx, data.TaskID, v1.TaskStateReview); err != nil {
+			s.logger.Error("failed to update task state to REVIEW",
+				zap.String("task_id", data.TaskID),
+				zap.Error(err))
+		} else {
+			s.logger.Info("task moved to REVIEW state",
+				zap.String("task_id", data.TaskID))
+		}
+	} else {
+		s.logger.Debug("task not in IN_PROGRESS state, skipping REVIEW transition",
+			zap.String("task_id", data.TaskID),
+			zap.String("current_state", string(task.State)))
+	}
 }
 
 // handleAgentCompleted handles agent completion events
@@ -459,13 +490,14 @@ func (s *Service) handleAgentCompleted(ctx context.Context, data watcher.AgentEv
 	s.scheduler.HandleTaskCompleted(data.TaskID, true)
 	s.scheduler.RemoveTask(data.TaskID)
 
-	// Update task state to COMPLETED
-	if err := s.taskRepo.UpdateTaskState(ctx, data.TaskID, v1.TaskStateCompleted); err != nil {
-		s.logger.Error("failed to update task state to COMPLETED",
+	// Move task to REVIEW state for user review
+	// The user can then send a follow-up (moves back to IN_PROGRESS) or mark as COMPLETED
+	if err := s.taskRepo.UpdateTaskState(ctx, data.TaskID, v1.TaskStateReview); err != nil {
+		s.logger.Error("failed to update task state to REVIEW",
 			zap.String("task_id", data.TaskID),
 			zap.Error(err))
 	} else {
-		s.logger.Info("task marked as COMPLETED",
+		s.logger.Info("task moved to REVIEW state after agent completion",
 			zap.String("task_id", data.TaskID))
 	}
 }
@@ -483,11 +515,15 @@ func (s *Service) handleAgentFailed(ctx context.Context, data watcher.AgentEvent
 		s.logger.Error("task failed and retry limit exceeded",
 			zap.String("task_id", data.TaskID))
 
-		// Update task state to FAILED
-		if err := s.taskRepo.UpdateTaskState(ctx, data.TaskID, v1.TaskStateFailed); err != nil {
-			s.logger.Error("failed to update task state to FAILED",
+		// Move task to REVIEW state even on failure - user can decide to retry or close
+		// This maintains the review cycle: user reviews the failure and decides next steps
+		if err := s.taskRepo.UpdateTaskState(ctx, data.TaskID, v1.TaskStateReview); err != nil {
+			s.logger.Error("failed to update task state to REVIEW after failure",
 				zap.String("task_id", data.TaskID),
 				zap.Error(err))
+		} else {
+			s.logger.Info("task moved to REVIEW state after failure (for user review)",
+				zap.String("task_id", data.TaskID))
 		}
 	}
 }
@@ -538,7 +574,58 @@ func (s *Service) handleInputRequired(ctx context.Context, taskID string, msg *p
 	}
 }
 
+// handleGitStatusUpdated handles git status updates and persists them to agent session metadata
+func (s *Service) handleGitStatusUpdated(ctx context.Context, data watcher.GitStatusData) {
+	s.logger.Debug("handling git status update",
+		zap.String("task_id", data.TaskID),
+		zap.String("branch", data.Branch))
+
+	// Get the active agent session for this task
+	session, err := s.repo.GetActiveAgentSessionByTaskID(ctx, data.TaskID)
+	if err != nil {
+		s.logger.Debug("no active agent session for git status update",
+			zap.String("task_id", data.TaskID),
+			zap.Error(err))
+		return
+	}
+
+	// Update session metadata with git status
+	if session.Metadata == nil {
+		session.Metadata = make(map[string]interface{})
+	}
+	session.Metadata["git_status"] = map[string]interface{}{
+		"branch":        data.Branch,
+		"remote_branch": data.RemoteBranch,
+		"modified":      data.Modified,
+		"added":         data.Added,
+		"deleted":       data.Deleted,
+		"untracked":     data.Untracked,
+		"renamed":       data.Renamed,
+		"ahead":         data.Ahead,
+		"behind":        data.Behind,
+		"files":         data.Files,
+		"timestamp":     data.Timestamp,
+	}
+
+	// Persist to database asynchronously
+	go func() {
+		if err := s.repo.UpdateAgentSession(context.Background(), session); err != nil {
+			s.logger.Error("failed to update agent session with git status",
+				zap.String("task_id", data.TaskID),
+				zap.String("session_id", session.ID),
+				zap.Error(err))
+		} else {
+			s.logger.Debug("persisted git status to agent session",
+				zap.String("task_id", data.TaskID),
+				zap.String("session_id", session.ID))
+		}
+	}()
+}
+
 // handlePromptComplete handles prompt complete events and saves agent response as comment
+// Note: This is called for EVERY agent message (including intermediate ones before tool calls),
+// so we should NOT transition task state here. State transitions happen in the comment handler
+// after the synchronous PromptTask call returns.
 func (s *Service) handlePromptComplete(ctx context.Context, data watcher.PromptCompleteData) {
 	s.logger.Info("handling prompt complete",
 		zap.String("task_id", data.TaskID),

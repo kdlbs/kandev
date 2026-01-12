@@ -8,6 +8,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/service"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -69,6 +70,29 @@ func (h *CommentHandlers) wsAddComment(ctx context.Context, msg *ws.Message) (*w
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "content is required", nil)
 	}
 
+	// Get the current task state to determine if we need to transition
+	task, err := h.svc.GetTask(ctx, req.TaskID)
+	if err != nil {
+		h.logger.Error("failed to get task", zap.String("task_id", req.TaskID), zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get task", nil)
+	}
+
+	// If task is in REVIEW state, transition back to IN_PROGRESS
+	// This implements the backward movement in the review cycle:
+	// REVIEW → (user sends follow-up) → IN_PROGRESS
+	// The transition back to REVIEW happens in handleAgentReady when the agent finishes
+	if task.State == v1.TaskStateReview {
+		if _, err := h.svc.UpdateTaskState(ctx, req.TaskID, v1.TaskStateInProgress); err != nil {
+			h.logger.Error("failed to transition task from REVIEW to IN_PROGRESS",
+				zap.String("task_id", req.TaskID),
+				zap.Error(err))
+			// Continue anyway - the comment should still be created
+		} else {
+			h.logger.Info("task transitioned from REVIEW to IN_PROGRESS",
+				zap.String("task_id", req.TaskID))
+		}
+	}
+
 	comment, err := h.svc.CreateComment(ctx, &service.CreateCommentRequest{
 		TaskID:     req.TaskID,
 		Content:    req.Content,
@@ -82,6 +106,7 @@ func (h *CommentHandlers) wsAddComment(ctx context.Context, msg *ws.Message) (*w
 
 	// Auto-forward comment as prompt to running agent if orchestrator is available
 	// The agent's response will be saved as a comment via the prompt_complete event
+	// Note: State transition to REVIEW happens via handleAgentReady when the agent finishes
 	if h.orchestrator != nil {
 		_, err := h.orchestrator.PromptTask(ctx, req.TaskID, req.Content)
 		if err != nil {

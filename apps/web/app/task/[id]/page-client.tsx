@@ -97,6 +97,9 @@ export default function TaskPage({ task: initialTask }: TaskPageClientProps) {
     // before the API call completes (fixes race condition on first agent start)
     store.getState().setCommentsTaskId(task.id);
 
+    // Clear git status when switching tasks to avoid showing stale data
+    store.getState().clearGitStatus();
+
     const fetchComments = async () => {
       const client = getWebSocketClient();
       if (!client) return;

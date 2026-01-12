@@ -71,6 +71,11 @@ const (
 	ToolCallComplete = "tool_call.complete" // Agent finished a tool call
 )
 
+// Event types for workspace/git status
+const (
+	GitStatusUpdated = "git.status.updated" // Git status changed in workspace
+)
+
 // BuildACPSubject creates an ACP subject for a specific task
 func BuildACPSubject(taskID string) string {
 	return ACPMessage + "." + taskID
@@ -79,4 +84,14 @@ func BuildACPSubject(taskID string) string {
 // BuildACPWildcardSubject creates a wildcard subscription for all ACP messages
 func BuildACPWildcardSubject() string {
 	return ACPMessage + ".*"
+}
+
+// BuildGitStatusSubject creates a git status subject for a specific task
+func BuildGitStatusSubject(taskID string) string {
+	return GitStatusUpdated + "." + taskID
+}
+
+// BuildGitStatusWildcardSubject creates a wildcard subscription for all git status updates
+func BuildGitStatusWildcardSubject() string {
+	return GitStatusUpdated + ".*"
 }

@@ -37,6 +37,7 @@ type Repository interface {
 	// Column operations
 	CreateColumn(ctx context.Context, column *models.Column) error
 	GetColumn(ctx context.Context, id string) (*models.Column, error)
+	GetColumnByState(ctx context.Context, boardID string, state v1.TaskState) (*models.Column, error)
 	UpdateColumn(ctx context.Context, column *models.Column) error
 	DeleteColumn(ctx context.Context, id string) error
 	ListColumns(ctx context.Context, boardID string) ([]*models.Column, error)
