@@ -234,6 +234,10 @@ func (m *Manager) reconcileWithDocker(ctx context.Context) ([]RecoveredInstance,
 			AgentType:   agentType,
 		})
 
+		// Reconnect to WebSocket streams for updates and permissions
+		// This runs in goroutines so we don't block reconciliation
+		go m.reconnectStreams(instance)
+
 		m.logger.Info("recovered running container",
 			zap.String("instance_id", instanceID),
 			zap.String("task_id", taskID),
@@ -638,6 +642,41 @@ func (m *Manager) handlePermissionStream(instance *AgentInstance) {
 			zap.String("instance_id", instance.ID),
 			zap.Error(err))
 	}
+}
+
+// reconnectStreams reconnects to agent WebSocket streams after backend restart
+// This is called for recovered instances that were running before the restart
+func (m *Manager) reconnectStreams(instance *AgentInstance) {
+	m.logger.Info("reconnecting to agent streams after recovery",
+		zap.String("instance_id", instance.ID),
+		zap.String("task_id", instance.TaskID))
+
+	// Wait a moment for any startup operations to settle
+	time.Sleep(500 * time.Millisecond)
+
+	// Check if agentctl is responsive
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := instance.agentctl.WaitForReady(ctx, 10*time.Second); err != nil {
+		m.logger.Warn("agentctl not ready for stream reconnection",
+			zap.String("instance_id", instance.ID),
+			zap.Error(err))
+		// Don't return - still try to connect to streams
+	}
+
+	// Reconnect to WebSocket streams
+	go m.handleUpdatesStream(instance)
+	go m.handlePermissionStream(instance)
+
+	// Mark the instance as READY so it can accept prompts
+	m.mu.Lock()
+	instance.Status = v1.AgentStatusReady
+	m.mu.Unlock()
+
+	m.logger.Info("agent streams reconnected, ready for prompts",
+		zap.String("instance_id", instance.ID),
+		zap.String("task_id", instance.TaskID))
 }
 
 // handlePermissionNotification processes incoming permission requests from the agent

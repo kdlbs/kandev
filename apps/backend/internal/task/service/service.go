@@ -263,18 +263,19 @@ func (s *Service) DeleteTask(ctx context.Context, id string) error {
 		return err
 	}
 
-	if err := s.repo.DeleteTask(ctx, id); err != nil {
-		s.logger.Error("failed to delete task", zap.String("task_id", id), zap.Error(err))
-		return err
-	}
-
-	// Clean up worktree if configured (best-effort, don't fail deletion)
+	// Clean up worktree BEFORE deleting task (CASCADE would delete worktree DB records)
+	// This must happen first so we can find the worktree paths to remove from disk
 	if s.worktreeCleanup != nil {
 		if err := s.worktreeCleanup.OnTaskDeleted(ctx, id); err != nil {
 			s.logger.Warn("failed to cleanup worktree on task deletion",
 				zap.String("task_id", id),
 				zap.Error(err))
 		}
+	}
+
+	if err := s.repo.DeleteTask(ctx, id); err != nil {
+		s.logger.Error("failed to delete task", zap.String("task_id", id), zap.Error(err))
+		return err
 	}
 
 	s.publishTaskEvent(ctx, events.TaskDeleted, task, nil)
