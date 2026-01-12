@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	acp "github.com/coder/acp-go-sdk"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
@@ -477,7 +478,7 @@ func (m *Manager) handleSessionNotification(instance *AgentInstance, notificatio
 			zap.String("instance_id", instance.ID))
 		m.updateInstanceProgress(instance.ID, 50)
 
-		// Accumulate message content for saving as comment when prompt completes
+		// Accumulate message content for saving as comment when a step completes
 		if update.AgentMessageChunk.Content.Text != nil {
 			instance.messageMu.Lock()
 			instance.messageBuffer.WriteString(update.AgentMessageChunk.Content.Text.Text)
@@ -491,27 +492,45 @@ func (m *Manager) handleSessionNotification(instance *AgentInstance, notificatio
 	}
 
 	if update.ToolCall != nil {
+		// Tool call starting marks a step boundary - flush the accumulated message as a comment
+		// This way, each agent response before a tool use becomes a separate comment
+		m.flushMessageBufferAsComment(instance)
+
+		toolCallID := string(update.ToolCall.ToolCallId)
+		toolTitle := update.ToolCall.Title
+		toolStatus := string(update.ToolCall.Status)
+
 		m.logger.Info("tool call started",
 			zap.String("instance_id", instance.ID),
-			zap.String("tool_call_id", string(update.ToolCall.ToolCallId)))
+			zap.String("tool_call_id", toolCallID),
+			zap.String("title", toolTitle))
 		m.updateInstanceProgress(instance.ID, 60)
+
+		// Publish tool call as a comment so it appears in the chat
+		m.publishToolCall(instance, toolCallID, toolTitle, toolStatus, nil)
 	}
 
 	if update.ToolCallUpdate != nil {
+		toolCallID := string(update.ToolCallUpdate.ToolCallId)
+
 		m.logger.Debug("tool call update",
 			zap.String("instance_id", instance.ID),
-			zap.String("tool_call_id", string(update.ToolCallUpdate.ToolCallId)))
+			zap.String("tool_call_id", toolCallID))
 
 		// Check if tool call completed
 		if update.ToolCallUpdate.Status != nil {
-			switch *update.ToolCallUpdate.Status {
+			status := string(*update.ToolCallUpdate.Status)
+			switch status {
 			case "complete":
 				m.logger.Info("tool call completed",
 					zap.String("instance_id", instance.ID))
 				m.updateInstanceProgress(instance.ID, 80)
+				// Publish tool call completion
+				m.publishToolCallComplete(instance, toolCallID, update.ToolCallUpdate)
 			case "error":
 				m.logger.Error("tool call error",
 					zap.String("instance_id", instance.ID))
+				m.publishToolCallComplete(instance, toolCallID, update.ToolCallUpdate)
 			}
 		}
 	}
@@ -621,6 +640,96 @@ func (m *Manager) publishPromptComplete(instance *AgentInstance, agentMessage st
 		m.logger.Info("published prompt_complete event",
 			zap.String("task_id", instance.TaskID),
 			zap.Int("message_length", len(agentMessage)))
+	}
+}
+
+// flushMessageBufferAsComment extracts any accumulated message from the buffer and
+// publishes it as a step complete event (which will be saved as a comment).
+// This is called when a tool use starts to save the agent's response before the tool call.
+func (m *Manager) flushMessageBufferAsComment(instance *AgentInstance) {
+	instance.messageMu.Lock()
+	agentMessage := instance.messageBuffer.String()
+	instance.messageBuffer.Reset()
+	instance.messageMu.Unlock()
+
+	// Only publish if there's actual content (ignore whitespace-only)
+	trimmed := strings.TrimSpace(agentMessage)
+	if trimmed == "" {
+		return
+	}
+
+	m.logger.Debug("flushing message buffer as step comment",
+		zap.String("instance_id", instance.ID),
+		zap.String("task_id", instance.TaskID),
+		zap.Int("message_length", len(agentMessage)))
+
+	// Reuse the prompt_complete event type - the orchestrator handles it the same way
+	m.publishPromptComplete(instance, agentMessage)
+}
+
+// publishToolCall publishes a tool call start event (to be saved as a comment)
+func (m *Manager) publishToolCall(instance *AgentInstance, toolCallID, title, status string, args map[string]interface{}) {
+	if m.eventBus == nil {
+		return
+	}
+
+	data := map[string]interface{}{
+		"type":         "tool_call",
+		"timestamp":    time.Now().UTC().Format(time.RFC3339Nano),
+		"agent_id":     instance.ID,
+		"task_id":      instance.TaskID,
+		"tool_call_id": toolCallID,
+		"title":        title,
+		"status":       status,
+	}
+	if args != nil {
+		data["args"] = args
+	}
+
+	event := bus.NewEvent(events.ToolCallStarted, "agent-manager", data)
+	subject := events.ToolCallStarted + "." + instance.TaskID
+
+	if err := m.eventBus.Publish(context.Background(), subject, event); err != nil {
+		m.logger.Error("failed to publish tool_call event",
+			zap.String("instance_id", instance.ID),
+			zap.String("task_id", instance.TaskID),
+			zap.Error(err))
+	} else {
+		m.logger.Debug("published tool_call event",
+			zap.String("task_id", instance.TaskID),
+			zap.String("tool_call_id", toolCallID),
+			zap.String("title", title))
+	}
+}
+
+// publishToolCallComplete publishes a tool call completion event
+func (m *Manager) publishToolCallComplete(instance *AgentInstance, toolCallID string, update *acp.SessionToolCallUpdate) {
+	if m.eventBus == nil {
+		return
+	}
+
+	status := ""
+	if update.Status != nil {
+		status = string(*update.Status)
+	}
+
+	data := map[string]interface{}{
+		"type":         "tool_call_complete",
+		"timestamp":    time.Now().UTC().Format(time.RFC3339Nano),
+		"agent_id":     instance.ID,
+		"task_id":      instance.TaskID,
+		"tool_call_id": toolCallID,
+		"status":       status,
+	}
+
+	event := bus.NewEvent(events.ToolCallComplete, "agent-manager", data)
+	subject := events.ToolCallComplete + "." + instance.TaskID
+
+	if err := m.eventBus.Publish(context.Background(), subject, event); err != nil {
+		m.logger.Error("failed to publish tool_call_complete event",
+			zap.String("instance_id", instance.ID),
+			zap.String("task_id", instance.TaskID),
+			zap.Error(err))
 	}
 }
 

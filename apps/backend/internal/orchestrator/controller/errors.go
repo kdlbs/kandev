@@ -1,9 +1,5 @@
 package controller
 
-import "errors"
-
-var (
-	// ErrACPHandlerNotConfigured is returned when ACP handler is not set
-	ErrACPHandlerNotConfigured = errors.New("ACP handler not configured")
-)
+// This file is reserved for controller-specific errors.
+// Currently no custom errors are defined.
 

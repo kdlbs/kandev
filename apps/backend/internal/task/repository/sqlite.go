@@ -192,22 +192,6 @@ func (r *SQLiteRepository) initSchema() error {
 	CREATE INDEX IF NOT EXISTS idx_repositories_workspace_id ON repositories(workspace_id);
 	CREATE INDEX IF NOT EXISTS idx_repository_scripts_repo_id ON repository_scripts(repository_id);
 
-	CREATE TABLE IF NOT EXISTS task_agent_execution_logs (
-		id TEXT PRIMARY KEY,
-		task_id TEXT NOT NULL,
-		agent_instance_id TEXT NOT NULL DEFAULT '',
-		log_level TEXT NOT NULL DEFAULT 'info',
-		message_type TEXT NOT NULL,
-		message TEXT NOT NULL DEFAULT '',
-		metadata TEXT DEFAULT '{}',
-		timestamp DATETIME NOT NULL,
-		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
-	);
-
-	CREATE INDEX IF NOT EXISTS idx_execution_logs_task_id ON task_agent_execution_logs(task_id);
-	CREATE INDEX IF NOT EXISTS idx_execution_logs_timestamp ON task_agent_execution_logs(timestamp);
-	CREATE INDEX IF NOT EXISTS idx_execution_logs_task_timestamp ON task_agent_execution_logs(task_id, timestamp);
-
 	CREATE TABLE IF NOT EXISTS task_comments (
 		id TEXT PRIMARY KEY,
 		task_id TEXT NOT NULL,
@@ -216,6 +200,8 @@ func (r *SQLiteRepository) initSchema() error {
 		content TEXT NOT NULL,
 		requests_input INTEGER DEFAULT 0,
 		acp_session_id TEXT DEFAULT '',
+		type TEXT NOT NULL DEFAULT 'message',
+		metadata TEXT DEFAULT '{}',
 		created_at DATETIME NOT NULL,
 		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 	);
@@ -223,6 +209,26 @@ func (r *SQLiteRepository) initSchema() error {
 	CREATE INDEX IF NOT EXISTS idx_comments_task_id ON task_comments(task_id);
 	CREATE INDEX IF NOT EXISTS idx_comments_created_at ON task_comments(created_at);
 	CREATE INDEX IF NOT EXISTS idx_comments_task_created ON task_comments(task_id, created_at);
+
+	CREATE TABLE IF NOT EXISTS agent_sessions (
+		id TEXT PRIMARY KEY,
+		task_id TEXT NOT NULL,
+		agent_instance_id TEXT NOT NULL DEFAULT '',
+		agent_type TEXT NOT NULL,
+		acp_session_id TEXT DEFAULT '',
+		status TEXT NOT NULL DEFAULT 'pending',
+		progress INTEGER DEFAULT 0,
+		error_message TEXT DEFAULT '',
+		metadata TEXT DEFAULT '{}',
+		started_at DATETIME NOT NULL,
+		completed_at DATETIME,
+		updated_at DATETIME NOT NULL,
+		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_agent_sessions_task_id ON agent_sessions(task_id);
+	CREATE INDEX IF NOT EXISTS idx_agent_sessions_status ON agent_sessions(status);
+	CREATE INDEX IF NOT EXISTS idx_agent_sessions_task_status ON agent_sessions(task_id, status);
 	`
 
 	if _, err := r.db.Exec(schema); err != nil {
@@ -236,6 +242,17 @@ func (r *SQLiteRepository) initSchema() error {
 		return err
 	}
 	if err := r.ensureColumn("columns", "color", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+
+	// Ensure new comment columns exist for existing databases
+	if err := r.ensureColumn("task_comments", "type", "TEXT NOT NULL DEFAULT 'message'"); err != nil {
+		return err
+	}
+	if err := r.ensureColumn("task_comments", "metadata", "TEXT DEFAULT '{}'"); err != nil {
+		return err
+	}
+	if err := r.ensureColumn("task_comments", "agent_session_id", "TEXT DEFAULT ''"); err != nil {
 		return err
 	}
 
@@ -548,11 +565,12 @@ func (r *SQLiteRepository) CreateTask(ctx context.Context, task *models.Task) er
 func (r *SQLiteRepository) GetTask(ctx context.Context, id string) (*models.Task, error) {
 	task := &models.Task{}
 	var metadata string
+	var agentType, repositoryURL, branch, assignedTo sql.NullString
 
 	err := r.db.QueryRowContext(ctx, `
 		SELECT id, workspace_id, board_id, column_id, title, description, state, priority, agent_type, repository_url, branch, assigned_to, position, metadata, created_at, updated_at
 		FROM tasks WHERE id = ?
-	`, id).Scan(&task.ID, &task.WorkspaceID, &task.BoardID, &task.ColumnID, &task.Title, &task.Description, &task.State, &task.Priority, &task.AgentType, &task.RepositoryURL, &task.Branch, &task.AssignedTo, &task.Position, &metadata, &task.CreatedAt, &task.UpdatedAt)
+	`, id).Scan(&task.ID, &task.WorkspaceID, &task.BoardID, &task.ColumnID, &task.Title, &task.Description, &task.State, &task.Priority, &agentType, &repositoryURL, &branch, &assignedTo, &task.Position, &metadata, &task.CreatedAt, &task.UpdatedAt)
 
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("task not found: %s", id)
@@ -561,6 +579,10 @@ func (r *SQLiteRepository) GetTask(ctx context.Context, id string) (*models.Task
 		return nil, err
 	}
 
+	task.AgentType = agentType.String
+	task.RepositoryURL = repositoryURL.String
+	task.Branch = branch.String
+	task.AssignedTo = assignedTo.String
 	_ = json.Unmarshal([]byte(metadata), &task.Metadata)
 	return task, nil
 }
@@ -650,10 +672,15 @@ func (r *SQLiteRepository) scanTasks(rows *sql.Rows) ([]*models.Task, error) {
 	for rows.Next() {
 		task := &models.Task{}
 		var metadata string
-		err := rows.Scan(&task.ID, &task.WorkspaceID, &task.BoardID, &task.ColumnID, &task.Title, &task.Description, &task.State, &task.Priority, &task.AgentType, &task.RepositoryURL, &task.Branch, &task.AssignedTo, &task.Position, &metadata, &task.CreatedAt, &task.UpdatedAt)
+		var agentType, repositoryURL, branch, assignedTo sql.NullString
+		err := rows.Scan(&task.ID, &task.WorkspaceID, &task.BoardID, &task.ColumnID, &task.Title, &task.Description, &task.State, &task.Priority, &agentType, &repositoryURL, &branch, &assignedTo, &task.Position, &metadata, &task.CreatedAt, &task.UpdatedAt)
 		if err != nil {
 			return nil, err
 		}
+		task.AgentType = agentType.String
+		task.RepositoryURL = repositoryURL.String
+		task.Branch = branch.String
+		task.AssignedTo = assignedTo.String
 		_ = json.Unmarshal([]byte(metadata), &task.Metadata)
 		result = append(result, task)
 	}
@@ -665,6 +692,7 @@ func (r *SQLiteRepository) scanTasksWithPlacement(rows *sql.Rows) ([]*models.Tas
 	for rows.Next() {
 		task := &models.Task{}
 		var metadata string
+		var agentType, repositoryURL, branch, assignedTo sql.NullString
 		err := rows.Scan(
 			&task.ID,
 			&task.WorkspaceID,
@@ -672,10 +700,10 @@ func (r *SQLiteRepository) scanTasksWithPlacement(rows *sql.Rows) ([]*models.Tas
 			&task.Description,
 			&task.State,
 			&task.Priority,
-			&task.AgentType,
-			&task.RepositoryURL,
-			&task.Branch,
-			&task.AssignedTo,
+			&agentType,
+			&repositoryURL,
+			&branch,
+			&assignedTo,
 			&metadata,
 			&task.CreatedAt,
 			&task.UpdatedAt,
@@ -686,6 +714,10 @@ func (r *SQLiteRepository) scanTasksWithPlacement(rows *sql.Rows) ([]*models.Tas
 		if err != nil {
 			return nil, err
 		}
+		task.AgentType = agentType.String
+		task.RepositoryURL = repositoryURL.String
+		task.Branch = branch.String
+		task.AssignedTo = assignedTo.String
 		_ = json.Unmarshal([]byte(metadata), &task.Metadata)
 		result = append(result, task)
 	}
@@ -950,10 +982,26 @@ func (r *SQLiteRepository) CreateComment(ctx context.Context, comment *models.Co
 		requestsInput = 1
 	}
 
+	// Default type to "message" if empty
+	commentType := string(comment.Type)
+	if commentType == "" {
+		commentType = string(models.CommentTypeMessage)
+	}
+
+	// Serialize metadata to JSON
+	metadataJSON := "{}"
+	if comment.Metadata != nil {
+		metadataBytes, err := json.Marshal(comment.Metadata)
+		if err != nil {
+			return fmt.Errorf("failed to serialize comment metadata: %w", err)
+		}
+		metadataJSON = string(metadataBytes)
+	}
+
 	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO task_comments (id, task_id, author_type, author_id, content, requests_input, acp_session_id, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`, comment.ID, comment.TaskID, comment.AuthorType, comment.AuthorID, comment.Content, requestsInput, comment.ACPSessionID, comment.CreatedAt)
+		INSERT INTO task_comments (id, task_id, author_type, author_id, content, requests_input, acp_session_id, type, metadata, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, comment.ID, comment.TaskID, comment.AuthorType, comment.AuthorID, comment.Content, requestsInput, comment.ACPSessionID, commentType, metadataJSON, comment.CreatedAt)
 
 	return err
 }
@@ -962,21 +1010,32 @@ func (r *SQLiteRepository) CreateComment(ctx context.Context, comment *models.Co
 func (r *SQLiteRepository) GetComment(ctx context.Context, id string) (*models.Comment, error) {
 	comment := &models.Comment{}
 	var requestsInput int
+	var commentType string
+	var metadataJSON string
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, task_id, author_type, author_id, content, requests_input, acp_session_id, created_at
+		SELECT id, task_id, author_type, author_id, content, requests_input, acp_session_id, type, metadata, created_at
 		FROM task_comments WHERE id = ?
-	`, id).Scan(&comment.ID, &comment.TaskID, &comment.AuthorType, &comment.AuthorID, &comment.Content, &requestsInput, &comment.ACPSessionID, &comment.CreatedAt)
+	`, id).Scan(&comment.ID, &comment.TaskID, &comment.AuthorType, &comment.AuthorID, &comment.Content, &requestsInput, &comment.ACPSessionID, &commentType, &metadataJSON, &comment.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
 	comment.RequestsInput = requestsInput == 1
+	comment.Type = models.CommentType(commentType)
+
+	// Deserialize metadata from JSON
+	if metadataJSON != "" && metadataJSON != "{}" {
+		if err := json.Unmarshal([]byte(metadataJSON), &comment.Metadata); err != nil {
+			return nil, fmt.Errorf("failed to deserialize comment metadata: %w", err)
+		}
+	}
+
 	return comment, nil
 }
 
 // ListComments returns all comments for a task ordered by creation time
 func (r *SQLiteRepository) ListComments(ctx context.Context, taskID string) ([]*models.Comment, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, task_id, author_type, author_id, content, requests_input, acp_session_id, created_at
+		SELECT id, task_id, author_type, author_id, content, requests_input, acp_session_id, type, metadata, created_at
 		FROM task_comments WHERE task_id = ? ORDER BY created_at ASC
 	`, taskID)
 	if err != nil {
@@ -988,11 +1047,22 @@ func (r *SQLiteRepository) ListComments(ctx context.Context, taskID string) ([]*
 	for rows.Next() {
 		comment := &models.Comment{}
 		var requestsInput int
-		err := rows.Scan(&comment.ID, &comment.TaskID, &comment.AuthorType, &comment.AuthorID, &comment.Content, &requestsInput, &comment.ACPSessionID, &comment.CreatedAt)
+		var commentType string
+		var metadataJSON string
+		err := rows.Scan(&comment.ID, &comment.TaskID, &comment.AuthorType, &comment.AuthorID, &comment.Content, &requestsInput, &comment.ACPSessionID, &commentType, &metadataJSON, &comment.CreatedAt)
 		if err != nil {
 			return nil, err
 		}
 		comment.RequestsInput = requestsInput == 1
+		comment.Type = models.CommentType(commentType)
+
+		// Deserialize metadata from JSON
+		if metadataJSON != "" && metadataJSON != "{}" {
+			if err := json.Unmarshal([]byte(metadataJSON), &comment.Metadata); err != nil {
+				return nil, fmt.Errorf("failed to deserialize comment metadata: %w", err)
+			}
+		}
+
 		result = append(result, comment)
 	}
 	return result, rows.Err()
@@ -1201,4 +1271,275 @@ func (r *SQLiteRepository) ListRepositoryScripts(ctx context.Context, repository
 		result = append(result, script)
 	}
 	return result, rows.Err()
+}
+
+
+// Agent Session operations
+
+// CreateAgentSession creates a new agent session
+func (r *SQLiteRepository) CreateAgentSession(ctx context.Context, session *models.AgentSession) error {
+	if session.ID == "" {
+		session.ID = uuid.New().String()
+	}
+	now := time.Now().UTC()
+	session.StartedAt = now
+	session.UpdatedAt = now
+
+	metadataJSON, err := json.Marshal(session.Metadata)
+	if err != nil {
+		return fmt.Errorf("failed to serialize agent session metadata: %w", err)
+	}
+
+	_, err = r.db.ExecContext(ctx, `
+		INSERT INTO agent_sessions (
+			id, task_id, agent_instance_id, agent_type, acp_session_id, status, progress,
+			error_message, metadata, started_at, completed_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, session.ID, session.TaskID, session.AgentInstanceID, session.AgentType, session.ACPSessionID,
+		string(session.Status), session.Progress, session.ErrorMessage, string(metadataJSON),
+		session.StartedAt, session.CompletedAt, session.UpdatedAt)
+
+	return err
+}
+
+// GetAgentSession retrieves an agent session by ID
+func (r *SQLiteRepository) GetAgentSession(ctx context.Context, id string) (*models.AgentSession, error) {
+	session := &models.AgentSession{}
+	var status string
+	var metadataJSON string
+	var completedAt sql.NullTime
+
+	err := r.db.QueryRowContext(ctx, `
+		SELECT id, task_id, agent_instance_id, agent_type, acp_session_id, status, progress,
+		       error_message, metadata, started_at, completed_at, updated_at
+		FROM agent_sessions WHERE id = ?
+	`, id).Scan(
+		&session.ID, &session.TaskID, &session.AgentInstanceID, &session.AgentType,
+		&session.ACPSessionID, &status, &session.Progress, &session.ErrorMessage,
+		&metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("agent session not found: %s", id)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	session.Status = models.AgentSessionStatus(status)
+	if completedAt.Valid {
+		session.CompletedAt = &completedAt.Time
+	}
+	if metadataJSON != "" && metadataJSON != "{}" {
+		if err := json.Unmarshal([]byte(metadataJSON), &session.Metadata); err != nil {
+			return nil, fmt.Errorf("failed to deserialize agent session metadata: %w", err)
+		}
+	}
+
+	return session, nil
+}
+
+// GetAgentSessionByTaskID retrieves the most recent agent session for a task
+func (r *SQLiteRepository) GetAgentSessionByTaskID(ctx context.Context, taskID string) (*models.AgentSession, error) {
+	session := &models.AgentSession{}
+	var status string
+	var metadataJSON string
+	var completedAt sql.NullTime
+
+	err := r.db.QueryRowContext(ctx, `
+		SELECT id, task_id, agent_instance_id, agent_type, acp_session_id, status, progress,
+		       error_message, metadata, started_at, completed_at, updated_at
+		FROM agent_sessions WHERE task_id = ? ORDER BY started_at DESC LIMIT 1
+	`, taskID).Scan(
+		&session.ID, &session.TaskID, &session.AgentInstanceID, &session.AgentType,
+		&session.ACPSessionID, &status, &session.Progress, &session.ErrorMessage,
+		&metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("agent session not found for task: %s", taskID)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	session.Status = models.AgentSessionStatus(status)
+	if completedAt.Valid {
+		session.CompletedAt = &completedAt.Time
+	}
+	if metadataJSON != "" && metadataJSON != "{}" {
+		if err := json.Unmarshal([]byte(metadataJSON), &session.Metadata); err != nil {
+			return nil, fmt.Errorf("failed to deserialize agent session metadata: %w", err)
+		}
+	}
+
+	return session, nil
+}
+
+// GetActiveAgentSessionByTaskID retrieves the active (running/waiting) agent session for a task
+func (r *SQLiteRepository) GetActiveAgentSessionByTaskID(ctx context.Context, taskID string) (*models.AgentSession, error) {
+	session := &models.AgentSession{}
+	var status string
+	var metadataJSON string
+	var completedAt sql.NullTime
+
+	err := r.db.QueryRowContext(ctx, `
+		SELECT id, task_id, agent_instance_id, agent_type, acp_session_id, status, progress,
+		       error_message, metadata, started_at, completed_at, updated_at
+		FROM agent_sessions
+		WHERE task_id = ? AND status IN ('pending', 'running', 'waiting')
+		ORDER BY started_at DESC LIMIT 1
+	`, taskID).Scan(
+		&session.ID, &session.TaskID, &session.AgentInstanceID, &session.AgentType,
+		&session.ACPSessionID, &status, &session.Progress, &session.ErrorMessage,
+		&metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("no active agent session for task: %s", taskID)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	session.Status = models.AgentSessionStatus(status)
+	if completedAt.Valid {
+		session.CompletedAt = &completedAt.Time
+	}
+	if metadataJSON != "" && metadataJSON != "{}" {
+		if err := json.Unmarshal([]byte(metadataJSON), &session.Metadata); err != nil {
+			return nil, fmt.Errorf("failed to deserialize agent session metadata: %w", err)
+		}
+	}
+
+	return session, nil
+}
+
+
+// UpdateAgentSession updates an existing agent session
+func (r *SQLiteRepository) UpdateAgentSession(ctx context.Context, session *models.AgentSession) error {
+	session.UpdatedAt = time.Now().UTC()
+
+	metadataJSON, err := json.Marshal(session.Metadata)
+	if err != nil {
+		return fmt.Errorf("failed to serialize agent session metadata: %w", err)
+	}
+
+	result, err := r.db.ExecContext(ctx, `
+		UPDATE agent_sessions SET
+			agent_instance_id = ?, agent_type = ?, acp_session_id = ?, status = ?, progress = ?,
+			error_message = ?, metadata = ?, completed_at = ?, updated_at = ?
+		WHERE id = ?
+	`, session.AgentInstanceID, session.AgentType, session.ACPSessionID, string(session.Status),
+		session.Progress, session.ErrorMessage, string(metadataJSON), session.CompletedAt,
+		session.UpdatedAt, session.ID)
+	if err != nil {
+		return err
+	}
+
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("agent session not found: %s", session.ID)
+	}
+	return nil
+}
+
+// UpdateAgentSessionStatus updates just the status and error message of an agent session
+func (r *SQLiteRepository) UpdateAgentSessionStatus(ctx context.Context, id string, status models.AgentSessionStatus, errorMessage string) error {
+	now := time.Now().UTC()
+
+	var completedAt *time.Time
+	if status == models.AgentSessionStatusCompleted || status == models.AgentSessionStatusFailed || status == models.AgentSessionStatusStopped {
+		completedAt = &now
+	}
+
+	result, err := r.db.ExecContext(ctx, `
+		UPDATE agent_sessions SET status = ?, error_message = ?, completed_at = ?, updated_at = ? WHERE id = ?
+	`, string(status), errorMessage, completedAt, now, id)
+	if err != nil {
+		return err
+	}
+
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("agent session not found: %s", id)
+	}
+	return nil
+}
+
+// ListAgentSessions returns all agent sessions for a task
+func (r *SQLiteRepository) ListAgentSessions(ctx context.Context, taskID string) ([]*models.AgentSession, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, task_id, agent_instance_id, agent_type, acp_session_id, status, progress,
+		       error_message, metadata, started_at, completed_at, updated_at
+		FROM agent_sessions WHERE task_id = ? ORDER BY started_at DESC
+	`, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return r.scanAgentSessions(rows)
+}
+
+// ListActiveAgentSessions returns all active agent sessions across all tasks
+func (r *SQLiteRepository) ListActiveAgentSessions(ctx context.Context) ([]*models.AgentSession, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, task_id, agent_instance_id, agent_type, acp_session_id, status, progress,
+		       error_message, metadata, started_at, completed_at, updated_at
+		FROM agent_sessions WHERE status IN ('pending', 'running', 'waiting') ORDER BY started_at DESC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return r.scanAgentSessions(rows)
+}
+
+// scanAgentSessions is a helper to scan multiple agent session rows
+func (r *SQLiteRepository) scanAgentSessions(rows *sql.Rows) ([]*models.AgentSession, error) {
+	var result []*models.AgentSession
+	for rows.Next() {
+		session := &models.AgentSession{}
+		var status string
+		var metadataJSON string
+		var completedAt sql.NullTime
+
+		err := rows.Scan(
+			&session.ID, &session.TaskID, &session.AgentInstanceID, &session.AgentType,
+			&session.ACPSessionID, &status, &session.Progress, &session.ErrorMessage,
+			&metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		session.Status = models.AgentSessionStatus(status)
+		if completedAt.Valid {
+			session.CompletedAt = &completedAt.Time
+		}
+		if metadataJSON != "" && metadataJSON != "{}" {
+			if err := json.Unmarshal([]byte(metadataJSON), &session.Metadata); err != nil {
+				return nil, fmt.Errorf("failed to deserialize agent session metadata: %w", err)
+			}
+		}
+
+		result = append(result, session)
+	}
+	return result, rows.Err()
+}
+
+// DeleteAgentSession deletes an agent session by ID
+func (r *SQLiteRepository) DeleteAgentSession(ctx context.Context, id string) error {
+	result, err := r.db.ExecContext(ctx, `DELETE FROM agent_sessions WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("agent session not found: %s", id)
+	}
+	return nil
 }

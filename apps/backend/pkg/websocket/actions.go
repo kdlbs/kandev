@@ -47,8 +47,7 @@ const (
 	ActionTaskUpdate = "task.update"
 	ActionTaskDelete = "task.delete"
 	ActionTaskMove   = "task.move"
-	ActionTaskState  = "task.state"
-	ActionTaskLogs   = "task.logs"
+	ActionTaskState = "task.state"
 
 	// Agent actions
 	ActionAgentList    = "agent.list"

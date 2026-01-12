@@ -34,7 +34,6 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionOrchestratorStop, h.wsStopTask)
 	d.RegisterFunc(ws.ActionOrchestratorPrompt, h.wsPromptTask)
 	d.RegisterFunc(ws.ActionOrchestratorComplete, h.wsCompleteTask)
-	d.RegisterFunc(ws.ActionTaskLogs, h.wsGetTaskLogs)
 	d.RegisterFunc(ws.ActionPermissionRespond, h.wsRespondToPermission)
 }
 
@@ -178,31 +177,6 @@ func (h *Handlers) wsCompleteTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 	if err != nil {
 		h.logger.Error("failed to complete task", zap.String("task_id", req.TaskID), zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to complete task: "+err.Error(), nil)
-	}
-	return ws.NewResponse(msg.ID, msg.Action, resp)
-}
-
-type wsGetTaskLogsRequest struct {
-	TaskID string `json:"task_id"`
-	Limit  int    `json:"limit,omitempty"`
-}
-
-func (h *Handlers) wsGetTaskLogs(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req wsGetTaskLogsRequest
-	if err := msg.ParsePayload(&req); err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
-	}
-	if req.TaskID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
-	}
-
-	resp, err := h.controller.GetTaskLogs(ctx, dto.GetTaskLogsRequest{
-		TaskID: req.TaskID,
-		Limit:  req.Limit,
-	})
-	if err != nil {
-		h.logger.Error("failed to get task logs", zap.String("task_id", req.TaskID), zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to retrieve logs: "+err.Error(), nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }
