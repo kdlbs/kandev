@@ -74,10 +74,6 @@ func (s *Server) setupRoutes() {
 		api.GET("/acp/permissions/stream", s.handlePermissionStreamWS)
 		api.POST("/acp/permissions/respond", s.handlePermissionRespond)
 
-		// Output streaming
-		api.GET("/output", s.handleGetOutput)
-		api.GET("/output/stream", s.handleOutputStreamWS)
-
 		// Workspace monitoring (git status, files)
 		api.GET("/workspace/git-status/stream", s.handleGitStatusStreamWS)
 		api.GET("/workspace/files/stream", s.handleFilesStreamWS)

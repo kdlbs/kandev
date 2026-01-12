@@ -71,9 +71,6 @@ type Manager struct {
 	exitCode atomic.Int32
 	exitErr  atomic.Value // error
 
-	// Output buffer for streaming
-	outputBuffer *OutputBuffer
-
 	// Workspace tracker for git status and file changes
 	workspaceTracker *WorkspaceTracker
 
@@ -105,7 +102,6 @@ func NewManager(cfg *config.Config, log *logger.Logger) *Manager {
 	m := &Manager{
 		cfg:                cfg,
 		logger:             log.WithFields(zap.String("component", "process-manager")),
-		outputBuffer:       NewOutputBuffer(cfg.OutputBufferSize),
 		workspaceTracker:   NewWorkspaceTracker(cfg.WorkDir, log),
 		updatesCh:          make(chan acp.SessionNotification, 100),
 		permissionCh:       make(chan *PermissionNotification, 10),
@@ -134,11 +130,6 @@ func (m *Manager) ExitError() error {
 		}
 	}
 	return nil
-}
-
-// GetOutputBuffer returns the output buffer for streaming
-func (m *Manager) GetOutputBuffer() *OutputBuffer {
-	return m.outputBuffer
 }
 
 // GetWorkspaceTracker returns the workspace tracker for git status and file monitoring
@@ -314,18 +305,14 @@ func (m *Manager) Stop(ctx context.Context) error {
 
 
 
-// readStderr reads stderr from the agent
+// readStderr reads and logs stderr from the agent
 func (m *Manager) readStderr() {
 	defer m.wg.Done()
 
 	scanner := bufio.NewScanner(m.stderr)
 	for scanner.Scan() {
 		line := scanner.Text()
-		m.outputBuffer.Add(OutputLine{
-			Timestamp: time.Now(),
-			Stream:    "stderr",
-			Content:   line,
-		})
+		m.logger.Debug("agent stderr", zap.String("line", line))
 	}
 
 	if err := scanner.Err(); err != nil {

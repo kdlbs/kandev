@@ -21,7 +21,6 @@ type Client struct {
 	logger     *logger.Logger
 
 	// WebSocket connections for streaming
-	outputConn     *websocket.Conn
 	acpConn        *websocket.Conn
 	permissionConn *websocket.Conn
 	gitStatusConn  *websocket.Conn
@@ -33,13 +32,6 @@ type Client struct {
 type StatusResponse struct {
 	AgentStatus string                 `json:"agent_status"`
 	ProcessInfo map[string]interface{} `json:"process_info"`
-}
-
-// OutputLine from agentctl
-type OutputLine struct {
-	Timestamp time.Time `json:"timestamp"`
-	Stream    string    `json:"stream"`
-	Content   string    `json:"content"`
 }
 
 // NewClient creates a new agentctl client

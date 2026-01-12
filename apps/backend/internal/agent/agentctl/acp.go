@@ -240,72 +240,9 @@ func (c *Client) CloseACPStream() {
 	}
 }
 
-// StreamOutput opens a WebSocket connection for streaming output
-func (c *Client) StreamOutput(ctx context.Context, includeHistory bool, handler func(*OutputLine)) error {
-	wsURL := "ws" + c.baseURL[4:] + "/api/v1/output/stream"
-	if includeHistory {
-		wsURL += "?history=true"
-	}
-
-	conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, nil)
-	if err != nil {
-		return fmt.Errorf("failed to connect to output stream: %w", err)
-	}
-
-	c.mu.Lock()
-	c.outputConn = conn
-	c.mu.Unlock()
-
-	c.logger.Info("connected to output stream", zap.String("url", wsURL))
-
-	// Read messages in a goroutine
-	go func() {
-		defer func() {
-			c.mu.Lock()
-			c.outputConn = nil
-			c.mu.Unlock()
-			conn.Close()
-		}()
-
-		for {
-			_, message, err := conn.ReadMessage()
-			if err != nil {
-				if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
-					c.logger.Info("output stream closed normally")
-				} else {
-					c.logger.Debug("output stream error", zap.Error(err))
-				}
-				return
-			}
-
-			var line OutputLine
-			if err := json.Unmarshal(message, &line); err != nil {
-				c.logger.Warn("failed to parse output line", zap.Error(err))
-				continue
-			}
-
-			handler(&line)
-		}
-	}()
-
-	return nil
-}
-
-// CloseOutputStream closes the output stream connection
-func (c *Client) CloseOutputStream() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if c.outputConn != nil {
-		c.outputConn.Close()
-		c.outputConn = nil
-	}
-}
-
 // Close closes all connections
 func (c *Client) Close() {
 	c.CloseACPStream()
-	c.CloseOutputStream()
 	c.ClosePermissionStream()
 	c.CloseGitStatusStream()
 	c.CloseFilesStream()
