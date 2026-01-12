@@ -14,6 +14,8 @@ export function ConnectionStatus() {
         return { color: 'text-emerald-500', text: 'Connected', variant: 'default' as const, pulse: false };
       case 'connecting':
         return { color: 'text-amber-500', text: 'Connecting', variant: 'secondary' as const, pulse: true };
+      case 'reconnecting':
+        return { color: 'text-orange-500', text: 'Reconnecting', variant: 'secondary' as const, pulse: true };
       case 'error':
         return { color: 'text-red-500', text: 'Error', variant: 'destructive' as const, pulse: false };
       case 'disconnected':

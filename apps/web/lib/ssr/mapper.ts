@@ -1,5 +1,7 @@
-import type { AppState } from '@/lib/state/store';
+import type { AppState, KanbanState } from '@/lib/state/store';
 import type { BoardSnapshot, Task } from '@/lib/types/http';
+
+type KanbanTask = KanbanState['tasks'][number];
 
 export function snapshotToState(snapshot: BoardSnapshot): Partial<AppState> {
   const tasks = snapshot.tasks
@@ -13,20 +15,9 @@ export function snapshotToState(snapshot: BoardSnapshot): Partial<AppState> {
         description: task.description ?? undefined,
         position: task.position ?? 0,
         state: task.state,
-      };
+      } as KanbanTask;
     })
-    .filter(
-      (
-        task
-      ): task is {
-        id: string;
-        columnId: string;
-        title: string;
-        description?: string;
-        position: number;
-        state?: Task['state'];
-      } => Boolean(task)
-    );
+    .filter((task): task is KanbanTask => task !== null);
 
   return {
     kanban: {

@@ -627,7 +627,7 @@ export function WorkspaceEditClient({ workspace, boards, repositories }: Workspa
   };
 
   const handleDeleteWorkspace = async () => {
-    if (deleteConfirmText !== 'delete') return;
+    if (deleteConfirmText !== 'delete' || !currentWorkspace) return;
     try {
       await deleteWorkspaceRequest.run(currentWorkspace.id);
       setWorkspaces(workspaces.filter((workspace) => workspace.id !== currentWorkspace.id));

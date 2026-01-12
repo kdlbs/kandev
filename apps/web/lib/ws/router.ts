@@ -310,5 +310,20 @@ export function registerWsHandlers(store: StoreApi<AppState>) {
     'system.error': () => {
       // TODO: surface as toast/notification once UI is ready.
     },
+    'comment.added': (message: BackendMessageMap['comment.added']) => {
+      const payload = message.payload;
+      console.log('[WS] comment.added payload:', JSON.stringify(payload, null, 2));
+      store.getState().addComment({
+        id: payload.comment_id,
+        task_id: payload.task_id,
+        author_type: payload.author_type,
+        author_id: payload.author_id,
+        content: payload.content,
+        type: (payload.type as 'message' | 'content' | 'tool_call' | 'progress' | 'error' | 'status') || 'message',
+        metadata: payload.metadata,
+        requests_input: payload.requests_input,
+        created_at: payload.created_at,
+      });
+    },
   };
 }

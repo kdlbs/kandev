@@ -16,7 +16,8 @@ export type BackendMessageType =
   | 'board.deleted'
   | 'column.created'
   | 'column.updated'
-  | 'column.deleted';
+  | 'column.deleted'
+  | 'comment.added';
 
 export type BackendMessage<T extends BackendMessageType, P> = {
   id?: string;
@@ -25,6 +26,8 @@ export type BackendMessage<T extends BackendMessageType, P> = {
   payload: P;
   timestamp?: string;
 };
+
+import type { TaskState } from '@/lib/types/http';
 
 export type KanbanUpdatePayload = {
   boardId: string;
@@ -35,7 +38,7 @@ export type KanbanUpdatePayload = {
     title: string;
     position?: number;
     description?: string;
-    state?: string;
+    state?: TaskState;
   }>;
 };
 
@@ -45,7 +48,7 @@ export type TaskEventPayload = {
   column_id: string;
   title: string;
   description?: string;
-  state?: string;
+  state?: TaskState;
   priority?: number;
   position?: number;
 };
@@ -106,6 +109,18 @@ export type ColumnPayload = {
   updated_at?: string;
 };
 
+export type CommentAddedPayload = {
+  task_id: string;
+  comment_id: string;
+  author_type: 'user' | 'agent';
+  author_id?: string;
+  content: string;
+  type?: string;
+  metadata?: Record<string, unknown>;
+  requests_input?: boolean;
+  created_at: string;
+};
+
 export type BackendMessageMap = {
   'kanban.update': BackendMessage<'kanban.update', KanbanUpdatePayload>;
   'task.created': BackendMessage<'task.created', TaskEventPayload>;
@@ -125,4 +140,5 @@ export type BackendMessageMap = {
   'column.created': BackendMessage<'column.created', ColumnPayload>;
   'column.updated': BackendMessage<'column.updated', ColumnPayload>;
   'column.deleted': BackendMessage<'column.deleted', ColumnPayload>;
+  'comment.added': BackendMessage<'comment.added', CommentAddedPayload>;
 };

@@ -11,25 +11,38 @@ export function useWebSocket(store: StoreApi<AppState>, url: string) {
   const clientRef = useRef<WebSocketClient | null>(null);
 
   useEffect(() => {
-    const client = new WebSocketClient(url, (status) => {
-      const setConnectionStatus = store.getState().setConnectionStatus;
-      switch (status) {
-        case 'connecting':
-          setConnectionStatus('connecting', null);
-          break;
-        case 'open':
-          setConnectionStatus('connected', null);
-          break;
-        case 'error':
-          setConnectionStatus('error', 'WebSocket error');
-          break;
-        case 'closed':
-        case 'idle':
-        default:
-          setConnectionStatus('disconnected', null);
-          break;
+    const client = new WebSocketClient(
+      url,
+      (status) => {
+        const setConnectionStatus = store.getState().setConnectionStatus;
+        switch (status) {
+          case 'connecting':
+            setConnectionStatus('connecting', null);
+            break;
+          case 'open':
+            setConnectionStatus('connected', null);
+            break;
+          case 'reconnecting':
+            setConnectionStatus('reconnecting', null);
+            break;
+          case 'error':
+            setConnectionStatus('error', 'WebSocket connection failed');
+            break;
+          case 'closed':
+          case 'idle':
+          default:
+            setConnectionStatus('disconnected', null);
+            break;
+        }
+      },
+      {
+        enabled: true,
+        maxAttempts: 10,
+        initialDelay: 1000,
+        maxDelay: 30000,
+        backoffMultiplier: 1.5,
       }
-    });
+    );
     clientRef.current = client;
     client.connect();
     setWebSocketClient(client);

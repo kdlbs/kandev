@@ -141,3 +141,18 @@ export type ListWorkspacesResponse = {
   workspaces: Workspace[];
   total: number;
 };
+
+export type CommentAuthorType = 'user' | 'agent';
+export type CommentType = 'message' | 'content' | 'tool_call' | 'progress' | 'error' | 'status';
+
+export type Comment = {
+  id: string;
+  task_id: string;
+  author_type: CommentAuthorType;
+  author_id?: string;
+  content: string;
+  type: CommentType;
+  metadata?: Record<string, unknown>;
+  requests_input?: boolean;
+  created_at: string;
+};

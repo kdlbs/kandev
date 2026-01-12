@@ -14,7 +14,10 @@ import {
   IconGitFork,
   IconGitMerge,
   IconGitPullRequest,
+  IconLoader2,
   IconPencil,
+  IconPlayerPlay,
+  IconPlayerStop,
 } from '@tabler/icons-react';
 import { Button } from '@/components/ui/button';
 import { CommitStatBadge, LineStat } from '@/components/diff-stat';
@@ -27,6 +30,10 @@ type TaskTopBarProps = {
   baseBranch?: string;
   branches?: string[];
   branchesLoading?: boolean;
+  onStartAgent?: () => void;
+  onStopAgent?: () => void;
+  isAgentRunning?: boolean;
+  isAgentLoading?: boolean;
 };
 
 const TaskTopBar = memo(function TaskTopBar({
@@ -34,6 +41,10 @@ const TaskTopBar = memo(function TaskTopBar({
   baseBranch,
   branches = [],
   branchesLoading = false,
+  onStartAgent,
+  onStopAgent,
+  isAgentRunning = false,
+  isAgentLoading = false,
 }: TaskTopBarProps) {
   const [branchName, setBranchName] = useState('feature/agent-ui');
   const [isEditingBranch, setIsEditingBranch] = useState(false);
@@ -156,6 +167,48 @@ const TaskTopBar = memo(function TaskTopBar({
         </Tooltip>
       </div>
       <div className="flex items-center gap-2">
+        {/* Start/Stop Agent Button */}
+        {isAgentRunning ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="sm"
+                variant="destructive"
+                className="cursor-pointer"
+                onClick={onStopAgent}
+                disabled={isAgentLoading}
+              >
+                {isAgentLoading ? (
+                  <IconLoader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <IconPlayerStop className="h-4 w-4" />
+                )}
+                Stop Agent
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Stop the agent</TooltipContent>
+          </Tooltip>
+        ) : (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="sm"
+                variant="default"
+                className="cursor-pointer"
+                onClick={onStartAgent}
+                disabled={isAgentLoading}
+              >
+                {isAgentLoading ? (
+                  <IconLoader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <IconPlayerPlay className="h-4 w-4" />
+                )}
+                Start Agent
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Start the agent on this task</TooltipContent>
+          </Tooltip>
+        )}
         <Tooltip>
           <TooltipTrigger asChild>
             <Button size="sm" variant="outline" className="cursor-pointer">

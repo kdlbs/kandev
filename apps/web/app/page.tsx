@@ -2,6 +2,7 @@ import { PageClient } from '@/app/page-client';
 import { StateHydrator } from '@/components/state-hydrator';
 import { fetchBoardSnapshot, fetchBoards, fetchWorkspaces } from '@/lib/ssr/http';
 import { snapshotToState } from '@/lib/ssr/mapper';
+import type { AppState } from '@/lib/state/store';
 
 // Server Component: runs on the server for SSR and data hydration.
 type PageProps = {
@@ -21,7 +22,7 @@ export default async function Page({ searchParams }: PageProps) {
       workspaces.workspaces.find((workspace) => workspace.id === workspaceId)?.id ??
       workspaces.workspaces[0]?.id ??
       null;
-    let initialState = {
+    let initialState: Partial<AppState> = {
       workspaces: {
         items: workspaces.workspaces.map((workspace) => ({
           id: workspace.id,

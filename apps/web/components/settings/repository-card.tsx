@@ -48,7 +48,7 @@ export function RepositoryCard({
   const { toast } = useToast();
   const [deleteOpen, setDeleteOpen] = useState(false);
   const saveRequest = useRequest(() => onSave(repository.id));
-  const deleteRequest = useRequest(() => onDelete(repository.id));
+  const deleteRequest = useRequest(async () => { await onDelete(repository.id); });
 
   const handleSave = async () => {
     try {

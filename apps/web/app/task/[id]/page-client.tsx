@@ -9,79 +9,51 @@ import { Textarea } from '@/components/ui/textarea';
 import { getLocalStorage, setLocalStorage } from '@/lib/local-storage';
 import { TaskChatPanel } from '@/components/task/task-chat-panel';
 import { TaskTopBar } from '@/components/task/task-top-bar';
-import type { Task } from '@/lib/types/http';
+import type { Task, Comment } from '@/lib/types/http';
 import { TaskFilesPanel } from '@/components/task/task-files-panel';
 import { TaskChangesPanel } from '@/components/task/task-changes-panel';
 import { TaskRightPanel } from '@/components/task/task-right-panel';
 import { getBackendConfig } from '@/lib/config';
 import { listRepositories, listRepositoryBranches } from '@/lib/http/client';
 import { useRequest } from '@/lib/http/use-request';
-
-type ChatMessage = {
-  id: string;
-  role: 'user' | 'agent';
-  content: string;
-};
-
-type ChatSession = {
-  id: string;
-  title: string;
-  messages: ChatMessage[];
-};
+import { getWebSocketClient } from '@/lib/ws/connection';
+import { useAppStoreApi } from '@/components/state-provider';
+import { useAppStore } from '@/components/state-provider';
 
 const AGENTS = [
   { id: 'codex', label: 'Codex' },
   { id: 'claude', label: 'Claude Code' },
 ];
 
-const INITIAL_CHATS: ChatSession[] = [
-  {
-    id: 'chat-1',
-    title: 'Build overview',
-    messages: [
-      {
-        id: 'm1',
-        role: 'agent',
-        content: 'I can help with this task. What should I tackle first?',
-      },
-    ],
-  },
-];
-
 type TaskPageClientProps = {
   task: Task | null;
 };
 
-function buildInitialChats(taskPrompt?: string): ChatSession[] {
-  if (!taskPrompt) {
-    return INITIAL_CHATS;
-  }
-  return [
-    {
-      ...INITIAL_CHATS[0],
-      messages: [
-        {
-          id: 'prompt',
-          role: 'user',
-          content: taskPrompt,
-        },
-        ...INITIAL_CHATS[0].messages,
-      ],
-    },
-  ];
-}
-
 export default function TaskPage({ task }: TaskPageClientProps) {
+  const store = useAppStoreApi();
   const defaultHorizontalLayout: [number, number] = [75, 25];
   const [horizontalLayout, setHorizontalLayout] = useState<[number, number]>(() =>
     getLocalStorage('task-layout-horizontal', defaultHorizontalLayout)
   );
-  const [chats, setChats] = useState<ChatSession[]>(() =>
-    buildInitialChats(task?.description ?? '')
-  );
   const [leftTab, setLeftTab] = useState('chat');
   const [selectedDiffPath, setSelectedDiffPath] = useState<string | null>(null);
   const [notes, setNotes] = useState('');
+  const [isLoadingComments, setIsLoadingComments] = useState(false);
+  const [isAgentRunning, setIsAgentRunning] = useState(false);
+  const [isAgentLoading, setIsAgentLoading] = useState(false);
+
+  // Track task state from store (kanban.tasks) to determine if agent is running
+  const taskFromStore = useAppStore((state) =>
+    state.kanban.tasks.find((t) => t.id === task?.id)
+  );
+
+  // Update isAgentRunning based on task state
+  useEffect(() => {
+    // Check if task state indicates agent is working
+    const taskState = task?.state;
+    setIsAgentRunning(taskState === 'IN_PROGRESS');
+  }, [task?.state]);
+
   const fetchBranches = useCallback(async (workspaceId: string, repoPath: string) => {
     const response = await listRepositories(getBackendConfig().apiBaseUrl, workspaceId);
     const repo = response.repositories.find((item) => item.local_path === repoPath);
@@ -91,26 +63,104 @@ export default function TaskPage({ task }: TaskPageClientProps) {
   }, []);
   const branchesRequest = useRequest(fetchBranches);
 
-  const activeChat = chats[0];
+  // Fetch comments on mount and when task changes
+  useEffect(() => {
+    if (!task?.id) return;
 
-  const handleSendMessage = useCallback((content: string) => {
-    setChats((currentChats) => {
-      const [first, ...rest] = currentChats;
-      if (!first) return currentChats;
-      return [
-        {
-          ...first,
-          messages: [...first.messages, { id: crypto.randomUUID(), role: 'user', content }],
-        },
-        ...rest,
-      ];
-    });
-  }, []);
+    const fetchComments = async () => {
+      const client = getWebSocketClient();
+      if (!client) return;
+
+      setIsLoadingComments(true);
+      store.getState().setCommentsLoading(true);
+
+      try {
+        const response = await client.request<Comment[]>('comment.list', { task_id: task.id }, 10000);
+        console.log('[API] comment.list response:', JSON.stringify(response, null, 2));
+        store.getState().setComments(task.id, response);
+      } catch (error) {
+        console.error('Failed to fetch comments:', error);
+        store.getState().setComments(task.id, []);
+      } finally {
+        setIsLoadingComments(false);
+      }
+    };
+
+    fetchComments();
+  }, [task?.id, store]);
+
+  // Subscribe to task for real-time updates
+  useEffect(() => {
+    if (!task?.id) return;
+
+    const client = getWebSocketClient();
+    if (!client) return;
+
+    // Subscribe to task updates
+    client.subscribe(task.id);
+
+    return () => {
+      // Unsubscribe when leaving
+      client.unsubscribe(task.id);
+    };
+  }, [task?.id]);
+
+  const handleSendMessage = useCallback(async (content: string) => {
+    if (!task?.id) return;
+
+    const client = getWebSocketClient();
+    if (!client) return;
+
+    try {
+      await client.request('comment.add', { task_id: task.id, content }, 10000);
+    } catch (error) {
+      console.error('Failed to send comment:', error);
+    }
+  }, [task?.id]);
 
   const handleSelectDiffPath = useCallback((path: string) => {
     setSelectedDiffPath(path);
     setLeftTab('changes');
   }, []);
+
+  const handleStartAgent = useCallback(async () => {
+    if (!task?.id) return;
+
+    const client = getWebSocketClient();
+    if (!client) return;
+
+    setIsAgentLoading(true);
+    try {
+      // Use task's agent_type if set, otherwise default to 'augment-agent'
+      const agentType = task.agent_type ?? 'augment-agent';
+      await client.request('orchestrator.start', {
+        task_id: task.id,
+        agent_type: agentType,
+      }, 15000);
+      setIsAgentRunning(true);
+    } catch (error) {
+      console.error('Failed to start agent:', error);
+    } finally {
+      setIsAgentLoading(false);
+    }
+  }, [task?.id, task?.agent_type]);
+
+  const handleStopAgent = useCallback(async () => {
+    if (!task?.id) return;
+
+    const client = getWebSocketClient();
+    if (!client) return;
+
+    setIsAgentLoading(true);
+    try {
+      await client.request('orchestrator.stop', { task_id: task.id }, 15000);
+      setIsAgentRunning(false);
+    } catch (error) {
+      console.error('Failed to stop agent:', error);
+    } finally {
+      setIsAgentLoading(false);
+    }
+  }, [task?.id]);
 
   const topFilesPanel = <TaskFilesPanel onSelectDiffPath={handleSelectDiffPath} />;
 
@@ -127,6 +177,10 @@ export default function TaskPage({ task }: TaskPageClientProps) {
         baseBranch={task?.branch ?? undefined}
         branches={task?.repository_url ? branchesRequest.data ?? [] : []}
         branchesLoading={branchesRequest.isLoading}
+        onStartAgent={handleStartAgent}
+        onStopAgent={handleStopAgent}
+        isAgentRunning={isAgentRunning}
+        isAgentLoading={isAgentLoading}
       />
 
       <div className="flex-1 min-h-0 px-4 pb-4">
@@ -153,7 +207,7 @@ export default function TaskPage({ task }: TaskPageClientProps) {
                     All changes
                   </TabsTrigger>
                   <TabsTrigger value="chat" className="cursor-pointer">
-                    Chat {activeChat ? `• ${activeChat.title}` : ''}
+                    Chat
                   </TabsTrigger>
                 </TabsList>
 
@@ -174,7 +228,18 @@ export default function TaskPage({ task }: TaskPageClientProps) {
                 </TabsContent>
 
                 <TabsContent value="chat" className="mt-3 flex flex-col min-h-0 flex-1">
-                  <TaskChatPanel activeChat={activeChat} agents={AGENTS} onSend={handleSendMessage} />
+                  {task?.id ? (
+                    <TaskChatPanel
+                      taskId={task.id}
+                      agents={AGENTS}
+                      onSend={handleSendMessage}
+                      isLoading={isLoadingComments}
+                    />
+                  ) : (
+                    <div className="flex items-center justify-center h-full text-muted-foreground">
+                      No task selected
+                    </div>
+                  )}
                 </TabsContent>
               </Tabs>
             </div>
