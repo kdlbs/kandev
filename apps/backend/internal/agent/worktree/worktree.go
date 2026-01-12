@@ -8,7 +8,7 @@ type Worktree struct {
 	ID string `json:"id"`
 
 	// TaskID is the ID of the task this worktree is associated with.
-	// This is a 1:1 relationship - each task can have at most one worktree.
+	// Multiple worktrees can exist for the same task (one per agent session).
 	TaskID string `json:"task_id"`
 
 	// RepositoryID is the ID of the repository this worktree belongs to.
@@ -59,9 +59,9 @@ type CreateRequest struct {
 	// Typically "main" or "master".
 	BaseBranch string
 
-	// BranchName is the name for the new branch (optional).
-	// If empty, defaults to "{prefix}{task_id}".
-	BranchName string
+	// WorktreeID is the ID of an existing worktree to reuse (optional).
+	// If provided and valid, the existing worktree is returned instead of creating a new one.
+	WorktreeID string
 }
 
 // Validate validates the create request.

@@ -303,6 +303,7 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentInstanc
 	// 3. Handle worktree creation/reuse if enabled
 	workspacePath := req.WorkspacePath
 	var mainRepoGitDir string // Path to main repo's .git directory for container mount
+	var worktreeID string     // Store worktree ID for session resumption
 	if req.UseWorktree && m.worktreeMgr != nil && req.RepositoryPath != "" {
 		wt, err := m.getOrCreateWorktree(ctx, req)
 		if err != nil {
@@ -312,6 +313,7 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentInstanc
 			// Fall back to direct mount if worktree creation fails
 		} else {
 			workspacePath = wt.Path
+			worktreeID = wt.ID
 			// Git worktrees reference the main repo's .git directory via a .git file
 			// The worktree metadata in .git/worktrees/{name} contains a 'commondir' file
 			// that points back to the main .git directory (usually '../..')
@@ -319,6 +321,7 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentInstanc
 			mainRepoGitDir = filepath.Join(req.RepositoryPath, ".git")
 			m.logger.Info("using worktree for agent",
 				zap.String("task_id", req.TaskID),
+				zap.String("worktree_id", worktreeID),
 				zap.String("worktree_path", workspacePath),
 				zap.String("main_repo_git_dir", mainRepoGitDir),
 				zap.String("branch", wt.Branch))
@@ -358,6 +361,14 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentInstanc
 
 	// 9. Track the instance
 	now := time.Now()
+	instanceMetadata := req.Metadata
+	if instanceMetadata == nil {
+		instanceMetadata = make(map[string]interface{})
+	}
+	// Store worktree_id in metadata for session resumption
+	if worktreeID != "" {
+		instanceMetadata["worktree_id"] = worktreeID
+	}
 	instance := &AgentInstance{
 		ID:          instanceID,
 		TaskID:      req.TaskID,
@@ -367,7 +378,7 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentInstanc
 		Status:      v1.AgentStatusRunning,
 		StartedAt:   now,
 		Progress:    0,
-		Metadata:    req.Metadata,
+		Metadata:    instanceMetadata,
 		agentctl:    agentctlClient,
 	}
 
@@ -392,36 +403,25 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentInstanc
 	return instance, nil
 }
 
-// getOrCreateWorktree creates a new worktree or reuses an existing one for the task.
-// This enables task resumption - the same worktree is used across multiple agent runs.
+// getOrCreateWorktree creates a new worktree or reuses an existing one for session resumption.
+// If worktree_id is in metadata, it tries to reuse that specific worktree.
+// Otherwise, creates a new worktree with a unique random suffix.
 func (m *Manager) getOrCreateWorktree(ctx context.Context, req *LaunchRequest) (*worktree.Worktree, error) {
-	// First, check if a worktree already exists for this task (session resumption)
-	existing, err := m.worktreeMgr.GetByTaskID(ctx, req.TaskID)
-	if err != nil && err != worktree.ErrWorktreeNotFound {
-		return nil, fmt.Errorf("failed to check existing worktree: %w", err)
-	}
-
-	if existing != nil {
-		// Validate the existing worktree is still valid
-		if m.worktreeMgr.IsValid(existing.Path) {
-			m.logger.Info("reusing existing worktree for task resumption",
-				zap.String("task_id", req.TaskID),
-				zap.String("worktree_path", existing.Path),
-				zap.String("branch", existing.Branch))
-			return existing, nil
+	// Check if we have a worktree_id in metadata for session resumption
+	var worktreeID string
+	if req.Metadata != nil {
+		if id, ok := req.Metadata["worktree_id"].(string); ok && id != "" {
+			worktreeID = id
 		}
-		// Worktree exists in DB but is invalid - will be recreated by Create()
-		m.logger.Warn("existing worktree is invalid, will recreate",
-			zap.String("task_id", req.TaskID),
-			zap.String("worktree_path", existing.Path))
 	}
 
-	// Create a new worktree
+	// Create request with optional WorktreeID for resumption
 	createReq := worktree.CreateRequest{
 		TaskID:         req.TaskID,
 		RepositoryID:   req.RepositoryID,
 		RepositoryPath: req.RepositoryPath,
 		BaseBranch:     req.BaseBranch,
+		WorktreeID:     worktreeID, // If set, will try to reuse this worktree
 	}
 
 	wt, err := m.worktreeMgr.Create(ctx, createReq)
@@ -429,10 +429,19 @@ func (m *Manager) getOrCreateWorktree(ctx context.Context, req *LaunchRequest) (
 		return nil, fmt.Errorf("failed to create worktree: %w", err)
 	}
 
-	m.logger.Info("created new worktree for task",
-		zap.String("task_id", req.TaskID),
-		zap.String("worktree_path", wt.Path),
-		zap.String("branch", wt.Branch))
+	if worktreeID != "" && wt.ID == worktreeID {
+		m.logger.Info("reusing existing worktree for session resumption",
+			zap.String("task_id", req.TaskID),
+			zap.String("worktree_id", wt.ID),
+			zap.String("worktree_path", wt.Path),
+			zap.String("branch", wt.Branch))
+	} else {
+		m.logger.Info("created new worktree for task",
+			zap.String("task_id", req.TaskID),
+			zap.String("worktree_id", wt.ID),
+			zap.String("worktree_path", wt.Path),
+			zap.String("branch", wt.Branch))
+	}
 
 	return wt, nil
 }

@@ -30,5 +30,8 @@ var (
 
 	// ErrGitCommandFailed is returned when a git command fails to execute.
 	ErrGitCommandFailed = errors.New("git command failed")
+
+	// ErrInvalidSession is returned when the session ID is invalid or empty.
+	ErrInvalidSession = errors.New("invalid or empty session ID")
 )
 

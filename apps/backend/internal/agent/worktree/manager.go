@@ -31,8 +31,12 @@ type Manager struct {
 type Store interface {
 	// CreateWorktree persists a new worktree record.
 	CreateWorktree(ctx context.Context, wt *Worktree) error
-	// GetWorktreeByTaskID retrieves a worktree by task ID.
+	// GetWorktreeByID retrieves a worktree by its unique ID.
+	GetWorktreeByID(ctx context.Context, id string) (*Worktree, error)
+	// GetWorktreeByTaskID retrieves the most recent worktree by task ID.
 	GetWorktreeByTaskID(ctx context.Context, taskID string) (*Worktree, error)
+	// GetWorktreesByTaskID retrieves all worktrees for a task.
+	GetWorktreesByTaskID(ctx context.Context, taskID string) ([]*Worktree, error)
 	// GetWorktreesByRepositoryID retrieves all worktrees for a repository.
 	GetWorktreesByRepositoryID(ctx context.Context, repoID string) ([]*Worktree, error)
 	// UpdateWorktree updates an existing worktree record.
@@ -101,26 +105,34 @@ func (m *Manager) GetWorktreeInfo(ctx context.Context, taskID string) (path, bra
 	return &wt.Path, &wt.Branch
 }
 
-// Create creates a new worktree for a task.
-// If a worktree already exists for the task, it returns the existing one.
+// Create creates a new worktree for a task, or returns an existing one if WorktreeID is provided.
+// Each call without WorktreeID creates a new worktree with a unique random suffix.
 func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, error) {
 	if err := req.Validate(); err != nil {
 		return nil, err
 	}
 
-	// Check if worktree already exists
-	existing, err := m.GetByTaskID(ctx, req.TaskID)
-	if err == nil && existing != nil {
-		if m.IsValid(existing.Path) {
-			m.logger.Info("reusing existing worktree",
-				zap.String("task_id", req.TaskID),
-				zap.String("path", existing.Path))
-			return existing, nil
+	// If WorktreeID is provided, try to reuse that specific worktree (session resumption)
+	if req.WorktreeID != "" {
+		existing, err := m.GetByID(ctx, req.WorktreeID)
+		if err == nil && existing != nil {
+			if m.IsValid(existing.Path) {
+				m.logger.Info("reusing existing worktree by ID",
+					zap.String("worktree_id", req.WorktreeID),
+					zap.String("task_id", req.TaskID),
+					zap.String("path", existing.Path))
+				return existing, nil
+			}
+			// Worktree record exists but directory is invalid - recreate
+			m.logger.Warn("worktree directory invalid, recreating",
+				zap.String("worktree_id", req.WorktreeID),
+				zap.String("task_id", req.TaskID))
+			return m.recreate(ctx, existing, req)
 		}
-		// Worktree record exists but directory is invalid - recreate
-		m.logger.Warn("worktree directory invalid, recreating",
+		// WorktreeID provided but not found - fall through to create new
+		m.logger.Warn("worktree ID not found, creating new worktree",
+			zap.String("worktree_id", req.WorktreeID),
 			zap.String("task_id", req.TaskID))
-		return m.recreate(ctx, existing, req)
 	}
 
 	// Check repository is a git repo
@@ -152,15 +164,19 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 
 // createWorktree performs the actual git worktree creation.
 func (m *Manager) createWorktree(ctx context.Context, req CreateRequest) (*Worktree, error) {
-	worktreePath, err := m.config.WorktreePath(req.TaskID)
+	// Generate a unique worktree ID and random suffix
+	worktreeID := uuid.New().String()
+	suffix := worktreeID[:8] // Use first 8 chars of UUID as suffix
+
+	// Worktree path uses the unique ID: ~/.kandev/worktrees/{task_id}_{suffix}
+	worktreeDirName := req.TaskID + "_" + suffix
+	worktreePath, err := m.config.WorktreePath(worktreeDirName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get worktree path: %w", err)
 	}
 
-	branchName := req.BranchName
-	if branchName == "" {
-		branchName = m.config.BranchName(req.TaskID)
-	}
+	// Branch name: kandev/{task_id}_{suffix}
+	branchName := m.config.BranchName(req.TaskID, suffix)
 
 	// Create worktree with new branch
 	// git worktree add -b <branch> <path> <base-branch>
@@ -172,31 +188,15 @@ func (m *Manager) createWorktree(ctx context.Context, req CreateRequest) (*Workt
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		// Check if branch already exists
-		if strings.Contains(string(output), "already exists") {
-			// Try without -b flag (use existing branch)
-			cmd = exec.CommandContext(ctx, "git", "worktree", "add",
-				worktreePath,
-				branchName)
-			cmd.Dir = req.RepositoryPath
-			output, err = cmd.CombinedOutput()
-			if err != nil {
-				m.logger.Error("git worktree add failed",
-					zap.String("output", string(output)),
-					zap.Error(err))
-				return nil, fmt.Errorf("%w: %s", ErrGitCommandFailed, string(output))
-			}
-		} else {
-			m.logger.Error("git worktree add failed",
-				zap.String("output", string(output)),
-				zap.Error(err))
-			return nil, fmt.Errorf("%w: %s", ErrGitCommandFailed, string(output))
-		}
+		m.logger.Error("git worktree add failed",
+			zap.String("output", string(output)),
+			zap.Error(err))
+		return nil, fmt.Errorf("%w: %s", ErrGitCommandFailed, string(output))
 	}
 
 	now := time.Now()
 	wt := &Worktree{
-		ID:             uuid.New().String(),
+		ID:             worktreeID,
 		TaskID:         req.TaskID,
 		RepositoryID:   req.RepositoryID,
 		RepositoryPath: req.RepositoryPath,
@@ -258,6 +258,30 @@ func (m *Manager) GetByTaskID(ctx context.Context, taskID string) (*Worktree, er
 	return nil, ErrWorktreeNotFound
 }
 
+// GetByID returns a worktree by its unique ID.
+func (m *Manager) GetByID(ctx context.Context, worktreeID string) (*Worktree, error) {
+	if m.store == nil {
+		return nil, ErrWorktreeNotFound
+	}
+
+	wt, err := m.store.GetWorktreeByID(ctx, worktreeID)
+	if err != nil {
+		return nil, err
+	}
+	if wt == nil {
+		return nil, ErrWorktreeNotFound
+	}
+	return wt, nil
+}
+
+// GetAllByTaskID returns all worktrees for a task.
+func (m *Manager) GetAllByTaskID(ctx context.Context, taskID string) ([]*Worktree, error) {
+	if m.store == nil {
+		return nil, nil
+	}
+	return m.store.GetWorktreesByTaskID(ctx, taskID)
+}
+
 // IsValid checks if a worktree directory is valid and usable.
 func (m *Manager) IsValid(path string) bool {
 	// Check directory exists
@@ -281,13 +305,27 @@ func (m *Manager) IsValid(path string) bool {
 	return true
 }
 
-// Remove removes a worktree and optionally its branch.
+// Remove removes a worktree by task ID and optionally its branch.
+// Deprecated: Use RemoveByID for specific worktree removal.
 func (m *Manager) Remove(ctx context.Context, taskID string, removeBranch bool) error {
 	wt, err := m.GetByTaskID(ctx, taskID)
 	if err != nil {
 		return err
 	}
+	return m.removeWorktree(ctx, wt, removeBranch)
+}
 
+// RemoveByID removes a specific worktree by its ID and optionally its branch.
+func (m *Manager) RemoveByID(ctx context.Context, worktreeID string, removeBranch bool) error {
+	wt, err := m.GetByID(ctx, worktreeID)
+	if err != nil {
+		return err
+	}
+	return m.removeWorktree(ctx, wt, removeBranch)
+}
+
+// removeWorktree performs the actual removal of a worktree.
+func (m *Manager) removeWorktree(ctx context.Context, wt *Worktree, removeBranch bool) error {
 	// Get repository lock
 	repoLock := m.getRepoLock(wt.RepositoryPath)
 	repoLock.Lock()
@@ -326,11 +364,12 @@ func (m *Manager) Remove(ctx context.Context, taskID string, removeBranch bool) 
 
 	// Update cache
 	m.mu.Lock()
-	delete(m.worktrees, taskID)
+	delete(m.worktrees, wt.TaskID)
 	m.mu.Unlock()
 
 	m.logger.Info("removed worktree",
-		zap.String("task_id", taskID),
+		zap.String("task_id", wt.TaskID),
+		zap.String("worktree_id", wt.ID),
 		zap.String("path", wt.Path),
 		zap.Bool("branch_removed", removeBranch))
 
@@ -339,14 +378,36 @@ func (m *Manager) Remove(ctx context.Context, taskID string, removeBranch bool) 
 
 
 
-// OnTaskDeleted cleans up the worktree when a task is deleted.
+// OnTaskDeleted cleans up all worktrees for a task when it is deleted.
 func (m *Manager) OnTaskDeleted(ctx context.Context, taskID string) error {
-	// Try to remove the worktree, ignore if not found
-	err := m.Remove(ctx, taskID, true)
-	if err == ErrWorktreeNotFound {
+	// Get all worktrees for this task
+	worktrees, err := m.GetAllByTaskID(ctx, taskID)
+	if err != nil {
+		return err
+	}
+
+	if len(worktrees) == 0 {
 		return nil
 	}
-	return err
+
+	// Remove each worktree and its branch
+	var lastErr error
+	for _, wt := range worktrees {
+		if err := m.removeWorktree(ctx, wt, true); err != nil {
+			m.logger.Warn("failed to remove worktree on task deletion",
+				zap.String("task_id", taskID),
+				zap.String("worktree_id", wt.ID),
+				zap.Error(err))
+			lastErr = err
+		}
+	}
+
+	// Clear from cache
+	m.mu.Lock()
+	delete(m.worktrees, taskID)
+	m.mu.Unlock()
+
+	return lastErr
 }
 
 // Reconcile syncs worktree state with active tasks on startup.

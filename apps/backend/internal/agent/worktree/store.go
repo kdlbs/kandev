@@ -29,7 +29,7 @@ func (s *SQLiteStore) initSchema() error {
 	schema := `
 	CREATE TABLE IF NOT EXISTS worktrees (
 		id TEXT PRIMARY KEY,
-		task_id TEXT NOT NULL UNIQUE,
+		task_id TEXT NOT NULL,
 		repository_id TEXT NOT NULL,
 		repository_path TEXT NOT NULL,
 		path TEXT NOT NULL,
@@ -76,7 +76,40 @@ func (s *SQLiteStore) CreateWorktree(ctx context.Context, wt *Worktree) error {
 	return err
 }
 
-// GetWorktreeByTaskID retrieves a worktree by task ID.
+// GetWorktreeByID retrieves a worktree by its unique ID.
+func (s *SQLiteStore) GetWorktreeByID(ctx context.Context, id string) (*Worktree, error) {
+	wt := &Worktree{}
+	var mergedAt, deletedAt sql.NullTime
+
+	err := s.db.QueryRowContext(ctx, `
+		SELECT id, task_id, repository_id, repository_path, path, branch, base_branch,
+		       status, created_at, updated_at, merged_at, deleted_at
+		FROM worktrees WHERE id = ?
+	`, id).Scan(
+		&wt.ID, &wt.TaskID, &wt.RepositoryID, &wt.RepositoryPath, &wt.Path,
+		&wt.Branch, &wt.BaseBranch, &wt.Status, &wt.CreatedAt, &wt.UpdatedAt,
+		&mergedAt, &deletedAt,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, nil // Not found, return nil without error
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	if mergedAt.Valid {
+		wt.MergedAt = &mergedAt.Time
+	}
+	if deletedAt.Valid {
+		wt.DeletedAt = &deletedAt.Time
+	}
+
+	return wt, nil
+}
+
+// GetWorktreeByTaskID retrieves the most recent worktree by task ID.
+// Since multiple worktrees can exist per task, this returns the most recently created one.
 func (s *SQLiteStore) GetWorktreeByTaskID(ctx context.Context, taskID string) (*Worktree, error) {
 	wt := &Worktree{}
 	var mergedAt, deletedAt sql.NullTime
@@ -84,7 +117,7 @@ func (s *SQLiteStore) GetWorktreeByTaskID(ctx context.Context, taskID string) (*
 	err := s.db.QueryRowContext(ctx, `
 		SELECT id, task_id, repository_id, repository_path, path, branch, base_branch,
 		       status, created_at, updated_at, merged_at, deleted_at
-		FROM worktrees WHERE task_id = ?
+		FROM worktrees WHERE task_id = ? ORDER BY created_at DESC LIMIT 1
 	`, taskID).Scan(
 		&wt.ID, &wt.TaskID, &wt.RepositoryID, &wt.RepositoryPath, &wt.Path,
 		&wt.Branch, &wt.BaseBranch, &wt.Status, &wt.CreatedAt, &wt.UpdatedAt,
@@ -106,6 +139,21 @@ func (s *SQLiteStore) GetWorktreeByTaskID(ctx context.Context, taskID string) (*
 	}
 
 	return wt, nil
+}
+
+// GetWorktreesByTaskID retrieves all worktrees for a task.
+func (s *SQLiteStore) GetWorktreesByTaskID(ctx context.Context, taskID string) ([]*Worktree, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, task_id, repository_id, repository_path, path, branch, base_branch,
+		       status, created_at, updated_at, merged_at, deleted_at
+		FROM worktrees WHERE task_id = ? ORDER BY created_at DESC
+	`, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return s.scanWorktrees(rows)
 }
 
 // GetWorktreesByRepositoryID retrieves all worktrees for a repository.

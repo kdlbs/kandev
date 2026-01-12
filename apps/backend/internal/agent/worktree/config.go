@@ -62,17 +62,18 @@ func (c *Config) ExpandedBasePath() (string, error) {
 	return path, nil
 }
 
-// WorktreePath returns the full path for a worktree given a task ID.
-func (c *Config) WorktreePath(taskID string) (string, error) {
+// WorktreePath returns the full path for a worktree given a unique worktree ID.
+func (c *Config) WorktreePath(worktreeID string) (string, error) {
 	basePath, err := c.ExpandedBasePath()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(basePath, taskID), nil
+	return filepath.Join(basePath, worktreeID), nil
 }
 
-// BranchName returns the branch name for a given task ID.
-func (c *Config) BranchName(taskID string) string {
-	return c.BranchPrefix + taskID
+// BranchName returns the branch name for a given task ID and suffix.
+// Format: {prefix}{taskID}_{suffix} e.g. kandev/abc123_xy7z
+func (c *Config) BranchName(taskID, suffix string) string {
+	return c.BranchPrefix + taskID + "_" + suffix
 }
 
