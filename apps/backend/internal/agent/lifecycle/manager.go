@@ -302,6 +302,7 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentInstanc
 
 	// 3. Handle worktree creation/reuse if enabled
 	workspacePath := req.WorkspacePath
+	var gitWorktreeMetadataPath string // Path to git worktree metadata for container mount
 	if req.UseWorktree && m.worktreeMgr != nil && req.RepositoryPath != "" {
 		wt, err := m.getOrCreateWorktree(ctx, req)
 		if err != nil {
@@ -311,9 +312,13 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentInstanc
 			// Fall back to direct mount if worktree creation fails
 		} else {
 			workspacePath = wt.Path
+			// Git worktrees store metadata in the main repo's .git/worktrees/{name} directory
+			// We need to mount this into the container at the same path for git commands to work
+			gitWorktreeMetadataPath = filepath.Join(req.RepositoryPath, ".git", "worktrees", req.TaskID)
 			m.logger.Info("using worktree for agent",
 				zap.String("task_id", req.TaskID),
 				zap.String("worktree_path", workspacePath),
+				zap.String("git_metadata_path", gitWorktreeMetadataPath),
 				zap.String("branch", wt.Branch))
 		}
 	}
@@ -324,7 +329,7 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentInstanc
 	// 5. Build container config from registry config (use worktree path if available)
 	reqWithWorktree := *req
 	reqWithWorktree.WorkspacePath = workspacePath
-	containerConfig := m.buildContainerConfig(instanceID, &reqWithWorktree, agentConfig)
+	containerConfig := m.buildContainerConfig(instanceID, &reqWithWorktree, agentConfig, gitWorktreeMetadataPath)
 
 	// 6. Create and start the container
 	containerID, err := m.docker.CreateContainer(ctx, containerConfig)
@@ -1020,7 +1025,9 @@ func (m *Manager) updateInstanceError(instanceID, errorMsg string) {
 }
 
 // buildContainerConfig builds a Docker container config from agent registry config
-func (m *Manager) buildContainerConfig(instanceID string, req *LaunchRequest, agentConfig *registry.AgentTypeConfig) docker.ContainerConfig {
+// gitWorktreeMetadataPath is the host path to the git worktree metadata (e.g., /path/to/repo/.git/worktrees/{task_id})
+// If non-empty, it will be mounted into the container at the same path so git commands work correctly
+func (m *Manager) buildContainerConfig(instanceID string, req *LaunchRequest, agentConfig *registry.AgentTypeConfig, gitWorktreeMetadataPath string) docker.ContainerConfig {
 	// Build image name with tag
 	imageName := agentConfig.Image
 	if agentConfig.Tag != "" {
@@ -1042,6 +1049,19 @@ func (m *Manager) buildContainerConfig(instanceID string, req *LaunchRequest, ag
 			Target:   mt.Target,
 			ReadOnly: mt.ReadOnly,
 		})
+	}
+
+	// Add git worktree metadata mount if using a worktree
+	// Git worktrees reference the parent repo's .git/worktrees/{name} directory via the .git file
+	// We need to mount this directory into the container at the same host path for git to work
+	if gitWorktreeMetadataPath != "" {
+		mounts = append(mounts, docker.MountConfig{
+			Source:   gitWorktreeMetadataPath,
+			Target:   gitWorktreeMetadataPath, // Same path inside container
+			ReadOnly: false,
+		})
+		m.logger.Debug("added git worktree metadata mount",
+			zap.String("path", gitWorktreeMetadataPath))
 	}
 
 	// Merge environment variables
