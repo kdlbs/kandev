@@ -29,7 +29,7 @@ type TaskPageClientProps = {
   task: Task | null;
 };
 
-export default function TaskPage({ task }: TaskPageClientProps) {
+export default function TaskPage({ task: initialTask }: TaskPageClientProps) {
   const store = useAppStoreApi();
   const defaultHorizontalLayout: [number, number] = [75, 25];
   const [horizontalLayout, setHorizontalLayout] = useState<[number, number]>(() =>
@@ -41,6 +41,11 @@ export default function TaskPage({ task }: TaskPageClientProps) {
   const [isLoadingComments, setIsLoadingComments] = useState(false);
   const [isAgentRunning, setIsAgentRunning] = useState(false);
   const [isAgentLoading, setIsAgentLoading] = useState(false);
+  // Track worktree info separately since it's populated after agent starts
+  const [worktreePath, setWorktreePath] = useState<string | null>(initialTask?.worktree_path ?? null);
+  const [worktreeBranch, setWorktreeBranch] = useState<string | null>(initialTask?.worktree_branch ?? null);
+  // Use task from props but allow updates
+  const task = initialTask;
 
   // Track task state from store (kanban.tasks) to determine if agent is running
   const taskFromStore = useAppStore((state) =>
@@ -162,6 +167,20 @@ export default function TaskPage({ task }: TaskPageClientProps) {
         agent_type: agentType,
       }, 15000);
       setIsAgentRunning(true);
+
+      // Fetch updated task info after agent starts (to get worktree path/branch)
+      // Wait a bit for the worktree to be created
+      setTimeout(async () => {
+        try {
+          const updatedTask = await client.request<Task>('task.get', { id: task.id }, 5000);
+          if (updatedTask?.worktree_path) {
+            setWorktreePath(updatedTask.worktree_path);
+            setWorktreeBranch(updatedTask.worktree_branch ?? null);
+          }
+        } catch (err) {
+          console.error('Failed to fetch updated task info:', err);
+        }
+      }, 1000);
     } catch (error) {
       console.error('Failed to start agent:', error);
     } finally {
@@ -205,8 +224,8 @@ export default function TaskPage({ task }: TaskPageClientProps) {
         onStopAgent={handleStopAgent}
         isAgentRunning={isAgentRunning}
         isAgentLoading={isAgentLoading}
-        worktreePath={task?.worktree_path}
-        worktreeBranch={task?.worktree_branch}
+        worktreePath={worktreePath}
+        worktreeBranch={worktreeBranch}
       />
 
       <div className="flex-1 min-h-0 px-4 pb-4">
