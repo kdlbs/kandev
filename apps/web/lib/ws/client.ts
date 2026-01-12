@@ -29,10 +29,6 @@ const DEFAULT_RECONNECT_OPTIONS: Required<ReconnectOptions> = {
   backoffMultiplier: 1.5,
 };
 
-// Heartbeat configuration
-const HEARTBEAT_INTERVAL = 30000; // 30 seconds
-const HEARTBEAT_TIMEOUT = 5000; // 5 seconds
-
 export class WebSocketClient {
   private socket: WebSocket | null = null;
   private status: WebSocketStatus = 'idle';

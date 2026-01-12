@@ -40,7 +40,6 @@ type AgentOption = {
 };
 
 type TaskChatPanelProps = {
-  taskId: string;
   agents: AgentOption[];
   onSend: (message: string) => void;
   isLoading?: boolean;
@@ -56,25 +55,25 @@ type ToolCallMetadata = {
   result?: string;
 };
 
-function getToolIcon(toolName?: string) {
+function getToolIconElement(toolName?: string, className?: string) {
   const name = toolName?.toLowerCase() ?? '';
   // Match ACP ToolKind values: read, edit, delete, move, search, execute
   if (name === 'edit' || name.includes('edit') || name.includes('replace') || name.includes('write') || name.includes('save')) {
-    return IconEdit;
+    return <IconEdit className={className} />;
   }
   if (name === 'read' || name.includes('view') || name.includes('read')) {
-    return IconEye;
+    return <IconEye className={className} />;
   }
   if (name === 'search' || name.includes('search') || name.includes('find') || name.includes('retrieval')) {
-    return IconSearch;
+    return <IconSearch className={className} />;
   }
   if (name === 'execute' || name.includes('terminal') || name.includes('exec') || name.includes('launch') || name.includes('process')) {
-    return IconTerminal2;
+    return <IconTerminal2 className={className} />;
   }
   if (name === 'delete' || name === 'move' || name.includes('file') || name.includes('create')) {
-    return IconFile;
+    return <IconFile className={className} />;
   }
-  return IconCode;
+  return <IconCode className={className} />;
 }
 
 function getStatusIcon(status?: string) {
@@ -100,7 +99,10 @@ function ToolCallCard({ comment }: { comment: Comment }) {
   const args = metadata?.args;
   const result = metadata?.result;
 
-  const ToolIcon = getToolIcon(toolName);
+  const toolIcon = getToolIconElement(
+    toolName,
+    'h-4 w-4 text-amber-600 dark:text-amber-400 flex-shrink-0'
+  );
   const hasDetails = args && Object.keys(args).length > 0;
 
   // Extract file path from various possible sources
@@ -128,7 +130,7 @@ function ToolCallCard({ comment }: { comment: Comment }) {
         )}
         disabled={!hasDetails}
       >
-        <ToolIcon className="h-4 w-4 text-amber-600 dark:text-amber-400 flex-shrink-0" />
+        {toolIcon}
         <span className="flex-1 font-mono text-xs text-muted-foreground truncate">
           {title}
         </span>
@@ -200,7 +202,7 @@ function TypingIndicator() {
   );
 }
 
-export function TaskChatPanel({ taskId, agents, onSend, isLoading, isAgentWorking }: TaskChatPanelProps) {
+export function TaskChatPanel({ agents, onSend, isLoading, isAgentWorking }: TaskChatPanelProps) {
   const [messageInput, setMessageInput] = useState('');
   const [selectedAgent, setSelectedAgent] = useState(agents[0]?.id ?? '');
   const [planModeEnabled, setPlanModeEnabled] = useState(false);

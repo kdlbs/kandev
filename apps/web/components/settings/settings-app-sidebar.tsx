@@ -90,18 +90,48 @@ export function SettingsAppSidebar() {
                       </CollapsibleTrigger>
                       <CollapsibleContent>
                         <SidebarMenuSub>
-                          {workspaces.map((workspace) => (
-                            <SidebarMenuSubItem key={workspace.id}>
-                              <SidebarMenuSubButton
-                                asChild
-                                isActive={pathname === `/settings/workspace/${workspace.id}`}
-                              >
-                                <Link href={`/settings/workspace/${workspace.id}`}>
-                                  <span>{workspace.name}</span>
-                                </Link>
-                              </SidebarMenuSubButton>
-                            </SidebarMenuSubItem>
-                          ))}
+                          {workspaces.map((workspace) => {
+                            const workspacePath = `/settings/workspace/${workspace.id}`;
+                            const boardsPath = `${workspacePath}/boards`;
+                            const repositoriesPath = `${workspacePath}/repositories`;
+
+                            return (
+                              <SidebarMenuSubItem key={workspace.id}>
+                                <SidebarMenuSubButton
+                                  asChild
+                                  isActive={pathname === workspacePath}
+                                >
+                                  <Link href={workspacePath}>
+                                    <span>{workspace.name}</span>
+                                  </Link>
+                                </SidebarMenuSubButton>
+                                <SidebarMenuSub className="ml-3">
+                                  <SidebarMenuSubItem>
+                                    <SidebarMenuSubButton
+                                      asChild
+                                      size="sm"
+                                      isActive={pathname === repositoriesPath}
+                                    >
+                                      <Link href={repositoriesPath}>
+                                        <span>Repositories</span>
+                                      </Link>
+                                    </SidebarMenuSubButton>
+                                  </SidebarMenuSubItem>
+                                  <SidebarMenuSubItem>
+                                    <SidebarMenuSubButton
+                                      asChild
+                                      size="sm"
+                                      isActive={pathname === boardsPath}
+                                    >
+                                      <Link href={boardsPath}>
+                                        <span>Boards</span>
+                                      </Link>
+                                    </SidebarMenuSubButton>
+                                  </SidebarMenuSubItem>
+                                </SidebarMenuSub>
+                              </SidebarMenuSubItem>
+                            );
+                          })}
                         </SidebarMenuSub>
                       </CollapsibleContent>
                     </>
