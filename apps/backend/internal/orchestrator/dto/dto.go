@@ -51,10 +51,12 @@ type StartTaskRequest struct {
 
 // StartTaskResponse is the response for orchestrator.start
 type StartTaskResponse struct {
-	Success         bool   `json:"success"`
-	TaskID          string `json:"task_id"`
-	AgentInstanceID string `json:"agent_instance_id"`
-	Status          string `json:"status"`
+	Success         bool    `json:"success"`
+	TaskID          string  `json:"task_id"`
+	AgentInstanceID string  `json:"agent_instance_id"`
+	Status          string  `json:"status"`
+	WorktreePath    *string `json:"worktree_path,omitempty"`
+	WorktreeBranch  *string `json:"worktree_branch,omitempty"`
 }
 
 // StopTaskRequest is the payload for orchestrator.stop

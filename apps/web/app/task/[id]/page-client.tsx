@@ -162,25 +162,25 @@ export default function TaskPage({ task: initialTask }: TaskPageClientProps) {
     try {
       // Use task's agent_type if set, otherwise default to 'augment-agent'
       const agentType = task.agent_type ?? 'augment-agent';
-      await client.request('orchestrator.start', {
+      interface StartResponse {
+        success: boolean;
+        task_id: string;
+        agent_instance_id: string;
+        status: string;
+        worktree_path?: string;
+        worktree_branch?: string;
+      }
+      const response = await client.request<StartResponse>('orchestrator.start', {
         task_id: task.id,
         agent_type: agentType,
       }, 15000);
       setIsAgentRunning(true);
 
-      // Fetch updated task info after agent starts (to get worktree path/branch)
-      // Wait a bit for the worktree to be created
-      setTimeout(async () => {
-        try {
-          const updatedTask = await client.request<Task>('task.get', { id: task.id }, 5000);
-          if (updatedTask?.worktree_path) {
-            setWorktreePath(updatedTask.worktree_path);
-            setWorktreeBranch(updatedTask.worktree_branch ?? null);
-          }
-        } catch (err) {
-          console.error('Failed to fetch updated task info:', err);
-        }
-      }, 1000);
+      // Update worktree info from response
+      if (response?.worktree_path) {
+        setWorktreePath(response.worktree_path);
+        setWorktreeBranch(response.worktree_branch ?? null);
+      }
     } catch (error) {
       console.error('Failed to start agent:', error);
     } finally {

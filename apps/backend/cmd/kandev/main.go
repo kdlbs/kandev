@@ -599,10 +599,23 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 
 	// Streaming is now handled by the lifecycle manager
 
+	// Extract worktree info from metadata if available
+	var worktreePath, worktreeBranch string
+	if instance.Metadata != nil {
+		if path, ok := instance.Metadata["worktree_path"].(string); ok {
+			worktreePath = path
+		}
+		if branch, ok := instance.Metadata["worktree_branch"].(string); ok {
+			worktreeBranch = branch
+		}
+	}
+
 	return &executor.LaunchAgentResponse{
 		AgentInstanceID: instance.ID,
 		ContainerID:     instance.ContainerID,
 		Status:          instance.Status,
+		WorktreePath:    worktreePath,
+		WorktreeBranch:  worktreeBranch,
 	}, nil
 }
 

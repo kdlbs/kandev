@@ -304,6 +304,7 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentInstanc
 	workspacePath := req.WorkspacePath
 	var mainRepoGitDir string // Path to main repo's .git directory for container mount
 	var worktreeID string     // Store worktree ID for session resumption
+	var worktreeBranch string // Store worktree branch for API responses
 	if req.UseWorktree && m.worktreeMgr != nil && req.RepositoryPath != "" {
 		wt, err := m.getOrCreateWorktree(ctx, req)
 		if err != nil {
@@ -314,6 +315,7 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentInstanc
 		} else {
 			workspacePath = wt.Path
 			worktreeID = wt.ID
+			worktreeBranch = wt.Branch
 			// Git worktrees reference the main repo's .git directory via a .git file
 			// The worktree metadata in .git/worktrees/{name} contains a 'commondir' file
 			// that points back to the main .git directory (usually '../..')
@@ -365,9 +367,11 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentInstanc
 	if instanceMetadata == nil {
 		instanceMetadata = make(map[string]interface{})
 	}
-	// Store worktree_id in metadata for session resumption
+	// Store worktree info in metadata for session resumption and API responses
 	if worktreeID != "" {
 		instanceMetadata["worktree_id"] = worktreeID
+		instanceMetadata["worktree_path"] = workspacePath
+		instanceMetadata["worktree_branch"] = worktreeBranch
 	}
 	instance := &AgentInstance{
 		ID:          instanceID,

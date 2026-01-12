@@ -67,12 +67,22 @@ func (c *Controller) StartTask(ctx context.Context, req dto.StartTaskRequest) (d
 		return dto.StartTaskResponse{}, err
 	}
 
-	return dto.StartTaskResponse{
+	resp := dto.StartTaskResponse{
 		Success:         true,
 		TaskID:          execution.TaskID,
 		AgentInstanceID: execution.AgentInstanceID,
 		Status:          string(execution.Status),
-	}, nil
+	}
+
+	// Include worktree info if available
+	if execution.WorktreePath != "" {
+		resp.WorktreePath = &execution.WorktreePath
+	}
+	if execution.WorktreeBranch != "" {
+		resp.WorktreeBranch = &execution.WorktreeBranch
+	}
+
+	return resp, nil
 }
 
 // StopTask stops task execution

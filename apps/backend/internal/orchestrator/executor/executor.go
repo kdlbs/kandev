@@ -77,6 +77,8 @@ type LaunchAgentResponse struct {
 	AgentInstanceID string
 	ContainerID     string
 	Status          v1.AgentStatus
+	WorktreePath    string
+	WorktreeBranch  string
 }
 
 // TaskExecution tracks an active task execution (kept for API compatibility)
@@ -90,6 +92,9 @@ type TaskExecution struct {
 	LastUpdate      time.Time
 	// SessionID is the database ID of the agent session
 	SessionID string
+	// Worktree info for the agent
+	WorktreePath   string
+	WorktreeBranch string
 }
 
 // FromAgentSession converts a models.AgentSession to TaskExecution
@@ -341,6 +346,8 @@ func (e *Executor) Execute(ctx context.Context, task *v1.Task) (*TaskExecution, 
 		Progress:        0,
 		LastUpdate:      now,
 		SessionID:       sessionID,
+		WorktreePath:    resp.WorktreePath,
+		WorktreeBranch:  resp.WorktreeBranch,
 	}
 
 	e.mu.Lock()
@@ -351,7 +358,9 @@ func (e *Executor) Execute(ctx context.Context, task *v1.Task) (*TaskExecution, 
 		zap.String("task_id", task.ID),
 		zap.String("session_id", sessionID),
 		zap.String("agent_instance_id", resp.AgentInstanceID),
-		zap.String("container_id", resp.ContainerID))
+		zap.String("container_id", resp.ContainerID),
+		zap.String("worktree_path", resp.WorktreePath),
+		zap.String("worktree_branch", resp.WorktreeBranch))
 
 	return execution, nil
 }
