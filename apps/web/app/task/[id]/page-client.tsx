@@ -18,7 +18,6 @@ import { listRepositories, listRepositoryBranches } from '@/lib/http/client';
 import { useRequest } from '@/lib/http/use-request';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import { useAppStoreApi } from '@/components/state-provider';
-import { useAppStore } from '@/components/state-provider';
 
 const AGENTS = [
   { id: 'codex', label: 'Codex' },
@@ -48,11 +47,6 @@ export default function TaskPage({ task: initialTask }: TaskPageClientProps) {
   const [worktreeBranch, setWorktreeBranch] = useState<string | null>(initialTask?.worktree_branch ?? null);
   // Use task from props but allow updates
   const task = initialTask;
-
-  // Track task state from store (kanban.tasks) to determine if agent is running
-  const taskFromStore = useAppStore((state) =>
-    state.kanban.tasks.find((t) => t.id === task?.id)
-  );
 
   useEffect(() => {
     setIsMounted(true);
@@ -92,7 +86,8 @@ export default function TaskPage({ task: initialTask }: TaskPageClientProps) {
     const branchResponse = await listRepositoryBranches(getBackendConfig().apiBaseUrl, repo.id);
     return branchResponse.branches;
   }, []);
-  const branchesRequest = useRequest(fetchBranches);
+  const { run: runBranches, data: branchesData, isLoading: branchesLoading } =
+    useRequest(fetchBranches);
 
   // Fetch comments on mount and when task changes
   useEffect(() => {
@@ -215,8 +210,8 @@ export default function TaskPage({ task: initialTask }: TaskPageClientProps) {
 
   useEffect(() => {
     if (!task?.workspace_id || !task.repository_url) return;
-    branchesRequest.run(task.workspace_id, task.repository_url).catch(() => {});
-  }, [branchesRequest.run, task?.repository_url, task?.workspace_id]);
+    runBranches(task.workspace_id, task.repository_url).catch(() => {});
+  }, [runBranches, task?.repository_url, task?.workspace_id]);
 
   if (!isMounted) {
     return <div className="h-screen w-full bg-background" />;
@@ -228,8 +223,8 @@ export default function TaskPage({ task: initialTask }: TaskPageClientProps) {
       <TaskTopBar
         taskTitle={task?.title}
         baseBranch={task?.branch ?? undefined}
-        branches={task?.repository_url ? branchesRequest.data ?? [] : []}
-        branchesLoading={branchesRequest.isLoading}
+        branches={task?.repository_url ? branchesData ?? [] : []}
+        branchesLoading={branchesLoading}
         onStartAgent={handleStartAgent}
         onStopAgent={handleStopAgent}
         isAgentRunning={isAgentRunning}
@@ -285,7 +280,6 @@ export default function TaskPage({ task: initialTask }: TaskPageClientProps) {
                 <TabsContent value="chat" className="mt-3 flex flex-col min-h-0 flex-1">
                   {task?.id ? (
                     <TaskChatPanel
-                      taskId={task.id}
                       agents={AGENTS}
                       onSend={handleSendMessage}
                       isLoading={isLoadingComments}
