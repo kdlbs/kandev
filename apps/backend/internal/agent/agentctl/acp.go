@@ -309,7 +309,6 @@ func (c *Client) Close() {
 	c.ClosePermissionStream()
 	c.CloseGitStatusStream()
 	c.CloseFilesStream()
-	c.CloseDiffStream()
 }
 
 // StreamPermissions opens a WebSocket connection for streaming permission requests

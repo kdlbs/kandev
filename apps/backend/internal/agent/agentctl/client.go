@@ -21,13 +21,12 @@ type Client struct {
 	logger     *logger.Logger
 
 	// WebSocket connections for streaming
-	outputConn      *websocket.Conn
-	acpConn         *websocket.Conn
-	permissionConn  *websocket.Conn
-	gitStatusConn   *websocket.Conn
-	filesConn       *websocket.Conn
-	diffConn        *websocket.Conn
-	mu              sync.RWMutex
+	outputConn     *websocket.Conn
+	acpConn        *websocket.Conn
+	permissionConn *websocket.Conn
+	gitStatusConn  *websocket.Conn
+	filesConn      *websocket.Conn
+	mu             sync.RWMutex
 }
 
 // StatusResponse from agentctl
@@ -211,12 +210,6 @@ type FileEntry struct {
 	Size  int64  `json:"size,omitempty"`
 }
 
-// DiffUpdate represents a diff update
-type DiffUpdate struct {
-	Timestamp time.Time         `json:"timestamp"`
-	Files     map[string]FileInfo `json:"files"`
-}
-
 // StreamGitStatus opens a WebSocket connection for streaming git status updates
 func (c *Client) StreamGitStatus(ctx context.Context, handler func(*GitStatusUpdate)) error {
 	wsURL := "ws" + c.baseURL[4:] + "/api/v1/workspace/git-status/stream"
@@ -313,54 +306,6 @@ func (c *Client) StreamFiles(ctx context.Context, handler func(*FileListUpdate))
 	return nil
 }
 
-// StreamDiff opens a WebSocket connection for streaming diff updates
-func (c *Client) StreamDiff(ctx context.Context, handler func(*DiffUpdate)) error {
-	wsURL := "ws" + c.baseURL[4:] + "/api/v1/workspace/diff/stream"
-
-	conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, nil)
-	if err != nil {
-		return fmt.Errorf("failed to connect to diff stream: %w", err)
-	}
-
-	c.mu.Lock()
-	c.diffConn = conn
-	c.mu.Unlock()
-
-	c.logger.Info("connected to diff stream", zap.String("url", wsURL))
-
-	// Read messages in a goroutine
-	go func() {
-		defer func() {
-			c.mu.Lock()
-			c.diffConn = nil
-			c.mu.Unlock()
-			conn.Close()
-		}()
-
-		for {
-			_, message, err := conn.ReadMessage()
-			if err != nil {
-				if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
-					c.logger.Info("diff stream closed normally")
-				} else {
-					c.logger.Debug("diff stream error", zap.Error(err))
-				}
-				return
-			}
-
-			var update DiffUpdate
-			if err := json.Unmarshal(message, &update); err != nil {
-				c.logger.Warn("failed to parse diff update", zap.Error(err))
-				continue
-			}
-
-			handler(&update)
-		}
-	}()
-
-	return nil
-}
-
 // CloseGitStatusStream closes the git status stream connection
 func (c *Client) CloseGitStatusStream() {
 	c.mu.Lock()
@@ -380,16 +325,5 @@ func (c *Client) CloseFilesStream() {
 	if c.filesConn != nil {
 		c.filesConn.Close()
 		c.filesConn = nil
-	}
-}
-
-// CloseDiffStream closes the diff stream connection
-func (c *Client) CloseDiffStream() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if c.diffConn != nil {
-		c.diffConn.Close()
-		c.diffConn = nil
 	}
 }
