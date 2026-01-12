@@ -302,7 +302,7 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentInstanc
 
 	// 3. Handle worktree creation/reuse if enabled
 	workspacePath := req.WorkspacePath
-	var gitWorktreeMetadataPath string // Path to git worktree metadata for container mount
+	var mainRepoGitDir string // Path to main repo's .git directory for container mount
 	if req.UseWorktree && m.worktreeMgr != nil && req.RepositoryPath != "" {
 		wt, err := m.getOrCreateWorktree(ctx, req)
 		if err != nil {
@@ -312,13 +312,15 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentInstanc
 			// Fall back to direct mount if worktree creation fails
 		} else {
 			workspacePath = wt.Path
-			// Git worktrees store metadata in the main repo's .git/worktrees/{name} directory
-			// We need to mount this into the container at the same path for git commands to work
-			gitWorktreeMetadataPath = filepath.Join(req.RepositoryPath, ".git", "worktrees", req.TaskID)
+			// Git worktrees reference the main repo's .git directory via a .git file
+			// The worktree metadata in .git/worktrees/{name} contains a 'commondir' file
+			// that points back to the main .git directory (usually '../..')
+			// We need to mount the entire .git directory for git commands to work
+			mainRepoGitDir = filepath.Join(req.RepositoryPath, ".git")
 			m.logger.Info("using worktree for agent",
 				zap.String("task_id", req.TaskID),
 				zap.String("worktree_path", workspacePath),
-				zap.String("git_metadata_path", gitWorktreeMetadataPath),
+				zap.String("main_repo_git_dir", mainRepoGitDir),
 				zap.String("branch", wt.Branch))
 		}
 	}
@@ -329,7 +331,7 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentInstanc
 	// 5. Build container config from registry config (use worktree path if available)
 	reqWithWorktree := *req
 	reqWithWorktree.WorkspacePath = workspacePath
-	containerConfig := m.buildContainerConfig(instanceID, &reqWithWorktree, agentConfig, gitWorktreeMetadataPath)
+	containerConfig := m.buildContainerConfig(instanceID, &reqWithWorktree, agentConfig, mainRepoGitDir)
 
 	// 6. Create and start the container
 	containerID, err := m.docker.CreateContainer(ctx, containerConfig)
@@ -1025,9 +1027,9 @@ func (m *Manager) updateInstanceError(instanceID, errorMsg string) {
 }
 
 // buildContainerConfig builds a Docker container config from agent registry config
-// gitWorktreeMetadataPath is the host path to the git worktree metadata (e.g., /path/to/repo/.git/worktrees/{task_id})
-// If non-empty, it will be mounted into the container at the same path so git commands work correctly
-func (m *Manager) buildContainerConfig(instanceID string, req *LaunchRequest, agentConfig *registry.AgentTypeConfig, gitWorktreeMetadataPath string) docker.ContainerConfig {
+// mainRepoGitDir is the host path to the main repository's .git directory (e.g., /path/to/repo/.git)
+// If non-empty, it will be mounted into the container at the same path so git worktree commands work correctly
+func (m *Manager) buildContainerConfig(instanceID string, req *LaunchRequest, agentConfig *registry.AgentTypeConfig, mainRepoGitDir string) docker.ContainerConfig {
 	// Build image name with tag
 	imageName := agentConfig.Image
 	if agentConfig.Tag != "" {
@@ -1051,17 +1053,18 @@ func (m *Manager) buildContainerConfig(instanceID string, req *LaunchRequest, ag
 		})
 	}
 
-	// Add git worktree metadata mount if using a worktree
-	// Git worktrees reference the parent repo's .git/worktrees/{name} directory via the .git file
-	// We need to mount this directory into the container at the same host path for git to work
-	if gitWorktreeMetadataPath != "" {
+	// Add main repository's .git directory mount if using a worktree
+	// Git worktrees have a .git file pointing to {repo}/.git/worktrees/{name}
+	// That metadata directory has a 'commondir' file pointing back to the main .git
+	// We need to mount the entire .git directory for git commands to work
+	if mainRepoGitDir != "" {
 		mounts = append(mounts, docker.MountConfig{
-			Source:   gitWorktreeMetadataPath,
-			Target:   gitWorktreeMetadataPath, // Same path inside container
+			Source:   mainRepoGitDir,
+			Target:   mainRepoGitDir, // Same path inside container
 			ReadOnly: false,
 		})
-		m.logger.Debug("added git worktree metadata mount",
-			zap.String("path", gitWorktreeMetadataPath))
+		m.logger.Debug("added main repo .git directory mount for worktree",
+			zap.String("path", mainRepoGitDir))
 	}
 
 	// Merge environment variables
