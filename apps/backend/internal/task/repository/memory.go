@@ -20,6 +20,7 @@ type MemoryRepository struct {
 	comments       map[string]*models.Comment
 	repositories   map[string]*models.Repository
 	repoScripts    map[string]*models.RepositoryScript
+	agentSessions  map[string]*models.AgentSession
 	taskBoards     map[string]map[string]struct{}
 	taskPlacements map[string]map[string]*taskPlacement
 	mu             sync.RWMutex
@@ -38,6 +39,7 @@ func NewMemoryRepository() *MemoryRepository {
 		comments:       make(map[string]*models.Comment),
 		repositories:   make(map[string]*models.Repository),
 		repoScripts:    make(map[string]*models.RepositoryScript),
+		agentSessions:  make(map[string]*models.AgentSession),
 		taskBoards:     make(map[string]map[string]struct{}),
 		taskPlacements: make(map[string]map[string]*taskPlacement),
 	}
@@ -583,6 +585,9 @@ func (r *MemoryRepository) CreateComment(ctx context.Context, comment *models.Co
 	if comment.AuthorType == "" {
 		comment.AuthorType = models.CommentAuthorUser
 	}
+	if comment.Type == "" {
+		comment.Type = models.CommentTypeMessage
+	}
 
 	r.comments[comment.ID] = comment
 	return nil
@@ -631,5 +636,142 @@ func (r *MemoryRepository) DeleteComment(ctx context.Context, id string) error {
 		return fmt.Errorf("comment not found: %s", id)
 	}
 	delete(r.comments, id)
+	return nil
+}
+
+
+// AgentSession operations
+
+// CreateAgentSession creates a new agent session
+func (r *MemoryRepository) CreateAgentSession(ctx context.Context, session *models.AgentSession) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if session.ID == "" {
+		session.ID = uuid.New().String()
+	}
+	now := time.Now().UTC()
+	if session.StartedAt.IsZero() {
+		session.StartedAt = now
+	}
+	session.UpdatedAt = now
+
+	r.agentSessions[session.ID] = session
+	return nil
+}
+
+// GetAgentSession retrieves an agent session by ID
+func (r *MemoryRepository) GetAgentSession(ctx context.Context, id string) (*models.AgentSession, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	session, ok := r.agentSessions[id]
+	if !ok {
+		return nil, fmt.Errorf("agent session not found: %s", id)
+	}
+	return session, nil
+}
+
+// GetAgentSessionByTaskID retrieves the most recent agent session for a task
+func (r *MemoryRepository) GetAgentSessionByTaskID(ctx context.Context, taskID string) (*models.AgentSession, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var latest *models.AgentSession
+	for _, session := range r.agentSessions {
+		if session.TaskID == taskID {
+			if latest == nil || session.StartedAt.After(latest.StartedAt) {
+				latest = session
+			}
+		}
+	}
+	if latest == nil {
+		return nil, fmt.Errorf("no agent session found for task: %s", taskID)
+	}
+	return latest, nil
+}
+
+// GetActiveAgentSessionByTaskID retrieves the active agent session for a task
+func (r *MemoryRepository) GetActiveAgentSessionByTaskID(ctx context.Context, taskID string) (*models.AgentSession, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	for _, session := range r.agentSessions {
+		if session.TaskID == taskID && (session.Status == models.AgentSessionStatusRunning || session.Status == models.AgentSessionStatusWaiting || session.Status == models.AgentSessionStatusPending) {
+			return session, nil
+		}
+	}
+	return nil, fmt.Errorf("no active agent session found for task: %s", taskID)
+}
+
+// UpdateAgentSession updates an existing agent session
+func (r *MemoryRepository) UpdateAgentSession(ctx context.Context, session *models.AgentSession) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, ok := r.agentSessions[session.ID]; !ok {
+		return fmt.Errorf("agent session not found: %s", session.ID)
+	}
+	session.UpdatedAt = time.Now().UTC()
+	r.agentSessions[session.ID] = session
+	return nil
+}
+
+// UpdateAgentSessionStatus updates the status of an agent session
+func (r *MemoryRepository) UpdateAgentSessionStatus(ctx context.Context, id string, status models.AgentSessionStatus, errorMessage string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	session, ok := r.agentSessions[id]
+	if !ok {
+		return fmt.Errorf("agent session not found: %s", id)
+	}
+	session.Status = status
+	session.ErrorMessage = errorMessage
+	session.UpdatedAt = time.Now().UTC()
+	if status == models.AgentSessionStatusCompleted || status == models.AgentSessionStatusFailed || status == models.AgentSessionStatusStopped {
+		now := time.Now().UTC()
+		session.CompletedAt = &now
+	}
+	return nil
+}
+
+// ListAgentSessions returns all agent sessions for a task
+func (r *MemoryRepository) ListAgentSessions(ctx context.Context, taskID string) ([]*models.AgentSession, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var result []*models.AgentSession
+	for _, session := range r.agentSessions {
+		if session.TaskID == taskID {
+			result = append(result, session)
+		}
+	}
+	return result, nil
+}
+
+// ListActiveAgentSessions returns all active agent sessions
+func (r *MemoryRepository) ListActiveAgentSessions(ctx context.Context) ([]*models.AgentSession, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var result []*models.AgentSession
+	for _, session := range r.agentSessions {
+		if session.Status == models.AgentSessionStatusRunning || session.Status == models.AgentSessionStatusWaiting || session.Status == models.AgentSessionStatusPending {
+			result = append(result, session)
+		}
+	}
+	return result, nil
+}
+
+// DeleteAgentSession deletes an agent session by ID
+func (r *MemoryRepository) DeleteAgentSession(ctx context.Context, id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, ok := r.agentSessions[id]; !ok {
+		return fmt.Errorf("agent session not found: %s", id)
+	}
+	delete(r.agentSessions, id)
 	return nil
 }

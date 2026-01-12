@@ -880,12 +880,15 @@ func (s *Service) publishColumnEvent(ctx context.Context, eventType string, colu
 
 // CreateCommentRequest contains the data for creating a new comment
 type CreateCommentRequest struct {
-	TaskID        string `json:"task_id"`
-	Content       string `json:"content"`
-	AuthorType    string `json:"author_type,omitempty"` // "user" or "agent", defaults to "user"
-	AuthorID      string `json:"author_id,omitempty"`
-	RequestsInput bool   `json:"requests_input,omitempty"`
-	ACPSessionID  string `json:"acp_session_id,omitempty"`
+	TaskID         string                 `json:"task_id"`
+	Content        string                 `json:"content"`
+	AuthorType     string                 `json:"author_type,omitempty"` // "user" or "agent", defaults to "user"
+	AuthorID       string                 `json:"author_id,omitempty"`
+	RequestsInput  bool                   `json:"requests_input,omitempty"`
+	ACPSessionID   string                 `json:"acp_session_id,omitempty"`
+	AgentSessionID string                 `json:"agent_session_id,omitempty"`
+	Type           string                 `json:"type,omitempty"`
+	Metadata       map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // CreateComment creates a new comment on a task
@@ -901,15 +904,23 @@ func (s *Service) CreateComment(ctx context.Context, req *CreateCommentRequest) 
 		authorType = models.CommentAuthorAgent
 	}
 
+	commentType := models.CommentType(req.Type)
+	if commentType == "" {
+		commentType = models.CommentTypeMessage
+	}
+
 	comment := &models.Comment{
-		ID:            uuid.New().String(),
-		TaskID:        req.TaskID,
-		AuthorType:    authorType,
-		AuthorID:      req.AuthorID,
-		Content:       req.Content,
-		RequestsInput: req.RequestsInput,
-		ACPSessionID:  req.ACPSessionID,
-		CreatedAt:     time.Now().UTC(),
+		ID:             uuid.New().String(),
+		TaskID:         req.TaskID,
+		AuthorType:     authorType,
+		AuthorID:       req.AuthorID,
+		Content:        req.Content,
+		Type:           commentType,
+		Metadata:       req.Metadata,
+		RequestsInput:  req.RequestsInput,
+		ACPSessionID:   req.ACPSessionID,
+		AgentSessionID: req.AgentSessionID,
+		CreatedAt:      time.Now().UTC(),
 	}
 
 	if err := s.repo.CreateComment(ctx, comment); err != nil {
@@ -955,18 +966,28 @@ func (s *Service) publishCommentEvent(ctx context.Context, eventType string, com
 		return
 	}
 
+	commentType := string(comment.Type)
+	if commentType == "" {
+		commentType = "message"
+	}
+
 	data := map[string]interface{}{
 		"comment_id":     comment.ID,
 		"task_id":        comment.TaskID,
 		"author_type":    string(comment.AuthorType),
 		"author_id":      comment.AuthorID,
 		"content":        comment.Content,
+		"type":           commentType,
 		"requests_input": comment.RequestsInput,
 		"created_at":     comment.CreatedAt.Format(time.RFC3339),
 	}
 
 	if comment.ACPSessionID != "" {
 		data["acp_session_id"] = comment.ACPSessionID
+	}
+
+	if comment.Metadata != nil {
+		data["metadata"] = comment.Metadata
 	}
 
 	event := bus.NewEvent(eventType, "task-service", data)

@@ -68,29 +68,121 @@ const (
 	CommentAuthorAgent CommentAuthorType = "agent"
 )
 
+// CommentType represents the type of comment content
+type CommentType string
+
+const (
+	// CommentTypeMessage is the default type for user/agent regular messages
+	CommentTypeMessage CommentType = "message"
+	// CommentTypeContent is for agent response content
+	CommentTypeContent CommentType = "content"
+	// CommentTypeToolCall is when agent uses a tool
+	CommentTypeToolCall CommentType = "tool_call"
+	// CommentTypeProgress is for progress updates
+	CommentTypeProgress CommentType = "progress"
+	// CommentTypeError is for error messages
+	CommentTypeError CommentType = "error"
+	// CommentTypeStatus is for status changes: started, completed, failed
+	CommentTypeStatus CommentType = "status"
+)
+
 // Comment represents a comment on a task
 type Comment struct {
-	ID            string            `json:"id"`
-	TaskID        string            `json:"task_id"`
-	AuthorType    CommentAuthorType `json:"author_type"`
-	AuthorID      string            `json:"author_id,omitempty"` // User ID or Agent Instance ID
-	Content       string            `json:"content"`
-	RequestsInput bool              `json:"requests_input"` // True if agent is requesting user input
-	ACPSessionID  string            `json:"acp_session_id,omitempty"`
-	CreatedAt     time.Time         `json:"created_at"`
+	ID             string                 `json:"id"`
+	TaskID         string                 `json:"task_id"`
+	AuthorType     CommentAuthorType      `json:"author_type"`
+	AuthorID       string                 `json:"author_id,omitempty"` // User ID or Agent Instance ID
+	Content        string                 `json:"content"`
+	Type           CommentType            `json:"type,omitempty"` // Defaults to "message" for backward compatibility
+	Metadata       map[string]interface{} `json:"metadata,omitempty"`
+	RequestsInput  bool                   `json:"requests_input"` // True if agent is requesting user input
+	ACPSessionID   string                 `json:"acp_session_id,omitempty"`
+	AgentSessionID string                 `json:"agent_session_id,omitempty"`
+	CreatedAt      time.Time              `json:"created_at"`
 }
 
 // ToAPI converts internal Comment to API type
 func (c *Comment) ToAPI() *v1.Comment {
-	return &v1.Comment{
+	commentType := string(c.Type)
+	if commentType == "" {
+		commentType = string(CommentTypeMessage)
+	}
+	result := &v1.Comment{
 		ID:            c.ID,
 		TaskID:        c.TaskID,
 		AuthorType:    string(c.AuthorType),
 		AuthorID:      c.AuthorID,
 		Content:       c.Content,
+		Type:          commentType,
+		Metadata:      c.Metadata,
 		RequestsInput: c.RequestsInput,
 		CreatedAt:     c.CreatedAt,
 	}
+	if c.AgentSessionID != "" {
+		result.AgentSessionID = c.AgentSessionID
+	}
+	return result
+}
+
+// AgentSessionStatus represents the status of an agent session
+type AgentSessionStatus string
+
+const (
+	// AgentSessionStatusPending - session created but agent not started
+	AgentSessionStatusPending AgentSessionStatus = "pending"
+	// AgentSessionStatusRunning - agent is actively running
+	AgentSessionStatusRunning AgentSessionStatus = "running"
+	// AgentSessionStatusWaiting - agent waiting for user input
+	AgentSessionStatusWaiting AgentSessionStatus = "waiting"
+	// AgentSessionStatusCompleted - agent finished successfully
+	AgentSessionStatusCompleted AgentSessionStatus = "completed"
+	// AgentSessionStatusFailed - agent failed with error
+	AgentSessionStatusFailed AgentSessionStatus = "failed"
+	// AgentSessionStatusStopped - agent was manually stopped
+	AgentSessionStatusStopped AgentSessionStatus = "stopped"
+)
+
+// AgentSession represents a persistent agent execution session for a task.
+// This replaces the in-memory TaskExecution tracking and survives backend restarts.
+type AgentSession struct {
+	ID              string                 `json:"id"`
+	TaskID          string                 `json:"task_id"`
+	AgentInstanceID string                 `json:"agent_instance_id"` // Docker container/agent instance
+	AgentType       string                 `json:"agent_type"`        // e.g., "augment-agent"
+	ACPSessionID    string                 `json:"acp_session_id"`    // ACP protocol session for resumption
+	Status          AgentSessionStatus     `json:"status"`
+	Progress        int                    `json:"progress"` // 0-100
+	ErrorMessage    string                 `json:"error_message,omitempty"`
+	Metadata        map[string]interface{} `json:"metadata,omitempty"`
+	StartedAt       time.Time              `json:"started_at"`
+	CompletedAt     *time.Time             `json:"completed_at,omitempty"`
+	UpdatedAt       time.Time              `json:"updated_at"`
+}
+
+// ToAPI converts internal AgentSession to API type
+// TODO: Add v1.AgentSession type to pkg/api/v1/
+func (s *AgentSession) ToAPI() map[string]interface{} {
+	result := map[string]interface{}{
+		"id":                s.ID,
+		"task_id":           s.TaskID,
+		"agent_instance_id": s.AgentInstanceID,
+		"agent_type":        s.AgentType,
+		"acp_session_id":    s.ACPSessionID,
+		"status":            string(s.Status),
+		"progress":          s.Progress,
+		"started_at":        s.StartedAt,
+		"updated_at":        s.UpdatedAt,
+	}
+	if s.ErrorMessage != "" {
+		result["error_message"] = s.ErrorMessage
+	}
+	if s.CompletedAt != nil {
+		result["completed_at"] = s.CompletedAt
+	}
+	if s.Metadata != nil {
+		result["metadata"] = s.Metadata
+	}
+	return result
 }
 
 // Repository represents a workspace repository

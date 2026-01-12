@@ -80,21 +80,26 @@ type TaskEvent struct {
 
 // Comment represents a comment on a task (user or agent)
 type Comment struct {
-	ID            string    `json:"id"`
-	TaskID        string    `json:"task_id"`
-	AuthorType    string    `json:"author_type"` // "user" or "agent"
-	AuthorID      string    `json:"author_id,omitempty"`
-	Content       string    `json:"content"`
-	RequestsInput bool      `json:"requests_input"` // True if agent is requesting user input
-	CreatedAt     time.Time `json:"created_at"`
+	ID             string                 `json:"id"`
+	TaskID         string                 `json:"task_id"`
+	AuthorType     string                 `json:"author_type"` // "user" or "agent"
+	Type           string                 `json:"type,omitempty"`
+	AuthorID       string                 `json:"author_id,omitempty"`
+	Content        string                 `json:"content"`
+	RequestsInput  bool                   `json:"requests_input"` // True if agent is requesting user input
+	Metadata       map[string]interface{} `json:"metadata,omitempty"`
+	AgentSessionID string                 `json:"agent_session_id,omitempty"`
+	CreatedAt      time.Time              `json:"created_at"`
 }
 
 // CreateCommentRequest for adding a comment to a task
 type CreateCommentRequest struct {
-	TaskID        string `json:"task_id" binding:"required"`
-	Content       string `json:"content" binding:"required"`
-	AuthorType    string `json:"author_type,omitempty"` // Defaults to "user" if not specified
-	RequestsInput bool   `json:"requests_input,omitempty"`
+	TaskID        string                 `json:"task_id" binding:"required"`
+	Content       string                 `json:"content" binding:"required"`
+	AuthorType    string                 `json:"author_type,omitempty"` // Defaults to "user" if not specified
+	Type          string                 `json:"type,omitempty"`
+	RequestsInput bool                   `json:"requests_input,omitempty"`
+	Metadata      map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // PermissionOption represents a permission choice presented to the user

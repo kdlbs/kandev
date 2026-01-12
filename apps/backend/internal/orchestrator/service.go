@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/queue"
 	"github.com/kandev/kandev/internal/orchestrator/scheduler"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
+	"github.com/kandev/kandev/internal/task/repository"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"github.com/kandev/kandev/pkg/acp/protocol"
 )
@@ -46,7 +47,8 @@ type InputRequestHandler func(ctx context.Context, taskID, agentID, message stri
 
 // CommentCreator is an interface for creating comments on tasks
 type CommentCreator interface {
-	CreateAgentComment(ctx context.Context, taskID, content string) error
+	CreateAgentComment(ctx context.Context, taskID, content, agentSessionID string) error
+	CreateToolCallComment(ctx context.Context, taskID, toolCallID, title, status, agentSessionID string) error
 }
 
 // Service is the main orchestrator service
@@ -97,6 +99,7 @@ func NewService(
 	db *database.DB,
 	agentManager executor.AgentManagerClient,
 	taskRepo scheduler.TaskRepository,
+	repo repository.Repository,
 	log *logger.Logger,
 ) *Service {
 	svcLogger := log.WithFields(zap.String("component", "orchestrator"))
@@ -104,8 +107,8 @@ func NewService(
 	// Create the task queue with configured size
 	taskQueue := queue.NewTaskQueue(cfg.QueueSize)
 
-	// Create the executor with the agent manager client
-	exec := executor.NewExecutor(agentManager, log, cfg.Scheduler.MaxConcurrent)
+	// Create the executor with the agent manager client and repository for persistent sessions
+	exec := executor.NewExecutor(agentManager, repo, log, cfg.Scheduler.MaxConcurrent)
 
 	// Create the scheduler with queue, executor, and task repository
 	sched := scheduler.NewScheduler(taskQueue, exec, taskRepo, log, cfg.Scheduler)
@@ -131,6 +134,7 @@ func NewService(
 		OnAgentFailed:      s.handleAgentFailed,
 		OnACPMessage:       s.handleACPMessage,
 		OnPromptComplete:   s.handlePromptComplete,
+		OnToolCallStarted:  s.handleToolCallStarted,
 	}
 	s.watcher = watcher.NewWatcher(eventBus, handlers, log)
 
@@ -154,6 +158,11 @@ func (s *Service) Start(ctx context.Context) error {
 	s.mu.Unlock()
 
 	s.logger.Info("starting orchestrator service")
+
+	// Load any active sessions from the database to restore state
+	if err := s.executor.LoadActiveSessionsFromDB(ctx); err != nil {
+		s.logger.Warn("failed to load active sessions from database (non-fatal)", zap.Error(err))
+	}
 
 	// Start the watcher first to begin receiving events
 	if err := s.watcher.Start(ctx); err != nil {
@@ -521,7 +530,10 @@ func (s *Service) handlePromptComplete(ctx context.Context, data watcher.PromptC
 
 	// Save agent response as a comment if we have a comment creator
 	if s.commentCreator != nil && data.AgentMessage != "" {
-		if err := s.commentCreator.CreateAgentComment(ctx, data.TaskID, data.AgentMessage); err != nil {
+		// Get the active session ID for this task
+		sessionID, _ := s.executor.GetActiveSessionID(ctx, data.TaskID)
+
+		if err := s.commentCreator.CreateAgentComment(ctx, data.TaskID, data.AgentMessage, sessionID); err != nil {
 			s.logger.Error("failed to create agent comment",
 				zap.String("task_id", data.TaskID),
 				zap.Error(err))
@@ -533,3 +545,27 @@ func (s *Service) handlePromptComplete(ctx context.Context, data watcher.PromptC
 	}
 }
 
+// handleToolCallStarted handles tool call started events and saves as comment
+func (s *Service) handleToolCallStarted(ctx context.Context, data watcher.ToolCallData) {
+	s.logger.Info("handling tool call started",
+		zap.String("task_id", data.TaskID),
+		zap.String("tool_call_id", data.ToolCallID),
+		zap.String("title", data.Title))
+
+	// Save tool call as a comment if we have a comment creator
+	if s.commentCreator != nil {
+		// Get the active session ID for this task
+		sessionID, _ := s.executor.GetActiveSessionID(ctx, data.TaskID)
+
+		if err := s.commentCreator.CreateToolCallComment(ctx, data.TaskID, data.ToolCallID, data.Title, data.Status, sessionID); err != nil {
+			s.logger.Error("failed to create tool call comment",
+				zap.String("task_id", data.TaskID),
+				zap.String("tool_call_id", data.ToolCallID),
+				zap.Error(err))
+		} else {
+			s.logger.Info("created tool call comment",
+				zap.String("task_id", data.TaskID),
+				zap.String("tool_call_id", data.ToolCallID))
+		}
+	}
+}

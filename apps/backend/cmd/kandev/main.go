@@ -46,8 +46,7 @@ import (
 	"github.com/kandev/kandev/internal/task/repository"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 
-	// ACP
-	"github.com/kandev/kandev/internal/orchestrator/acp"
+	// ACP protocol
 	"github.com/kandev/kandev/pkg/acp/protocol"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -141,15 +140,9 @@ func main() {
 	)
 	log.Info("Task Service initialized")
 
-	// Create SQLite message store for ACP log persistence
-	// Get the underlying *sql.DB from the SQLite repository
-	sqliteRepo, ok := taskRepo.(*repository.SQLiteRepository)
-	if !ok {
-		log.Fatal("Expected SQLiteRepository for ACP message store")
-	}
-	acpMessageStore := acp.NewSQLiteMessageStore(sqliteRepo.DB())
-	acpHandler := acp.NewHandler(acpMessageStore, log)
-	log.Info("ACP message store initialized for persistent log storage")
+	// ACP messages are now stored as comments in the task_comments table
+	// The comment system provides unified storage for all task-related communication
+	log.Info("ACP messages will be stored as comments")
 
 	// ============================================
 	// AGENT MANAGER
@@ -202,7 +195,7 @@ func main() {
 	}
 
 	serviceCfg := orchestrator.DefaultServiceConfig()
-	orchestratorSvc := orchestrator.NewService(serviceCfg, eventBus, nil, agentManagerClient, taskRepoAdapter, log)
+	orchestratorSvc := orchestrator.NewService(serviceCfg, eventBus, nil, agentManagerClient, taskRepoAdapter, taskRepo, log)
 
 	// Set up comment creator for saving agent responses as comments
 	orchestratorSvc.SetCommentCreator(&commentCreatorAdapter{svc: taskSvc})
@@ -223,7 +216,6 @@ func main() {
 
 	// Create orchestrator controller and handlers (Pattern A)
 	orchestratorCtrl := orchestratorcontroller.NewController(orchestratorSvc)
-	orchestratorCtrl.SetACPHandler(acpHandler)
 	orchestratorHandlers := orchestratorhandlers.NewHandlers(orchestratorCtrl, log)
 	orchestratorHandlers.RegisterHandlers(gateway.Dispatcher)
 	log.Info("Registered Orchestrator WebSocket handlers")
@@ -241,22 +233,35 @@ func main() {
 	gateways.RegisterTaskNotifications(ctx, eventBus, gateway.Hub, log)
 
 	// Set up historical logs provider for task subscriptions
+	// Uses comments instead of execution logs - all agent messages are now comments
 	gateway.Hub.SetHistoricalLogsProvider(func(ctx context.Context, taskID string) ([]*ws.Message, error) {
-		messages, err := acpHandler.GetAllMessages(ctx, taskID)
+		comments, err := taskSvc.ListComments(ctx, taskID)
 		if err != nil {
 			return nil, err
 		}
 
-		// Convert protocol.Message to ws.Message notifications
-		result := make([]*ws.Message, 0, len(messages))
-		for _, msg := range messages {
-			action := "acp." + string(msg.Type)
-			notification, err := ws.NewNotification(action, map[string]interface{}{
-				"task_id":   taskID,
-				"type":      msg.Type,
-				"data":      msg.Data,
-				"timestamp": msg.Timestamp,
-			})
+		// Convert comments to ws.Message notifications
+		result := make([]*ws.Message, 0, len(comments))
+		for _, comment := range comments {
+			// Determine the action based on comment type
+			action := ws.ActionCommentAdded
+			payload := map[string]interface{}{
+				"comment_id":     comment.ID,
+				"task_id":        comment.TaskID,
+				"author_type":    string(comment.AuthorType),
+				"author_id":      comment.AuthorID,
+				"content":        comment.Content,
+				"type":           string(comment.Type),
+				"requests_input": comment.RequestsInput,
+				"created_at":     comment.CreatedAt.Format(time.RFC3339),
+			}
+			if comment.ACPSessionID != "" {
+				payload["acp_session_id"] = comment.ACPSessionID
+			}
+			if comment.Metadata != nil {
+				payload["metadata"] = comment.Metadata
+			}
+			notification, err := ws.NewNotification(action, payload)
 			if err != nil {
 				continue
 			}
@@ -264,17 +269,13 @@ func main() {
 		}
 		return result, nil
 	})
-	log.Info("Historical logs provider configured for task subscriptions")
+	log.Info("Historical logs provider configured for task subscriptions (using comments)")
 
-	// Wire ACP handler to persist messages to SQLite database
-	orchestratorSvc.RegisterACPHandler(func(taskID string, msg *protocol.Message) {
-		if err := acpHandler.ProcessMessage(context.Background(), msg); err != nil {
-			log.Error("failed to persist ACP message",
-				zap.String("task_id", taskID),
-				zap.String("message_type", string(msg.Type)),
-				zap.Error(err))
-		}
-	})
+	// NOTE: We no longer create comments for each ACP message chunk.
+	// Instead, the lifecycle manager accumulates message chunks and:
+	// 1. Flushes the buffer as a comment when a tool use starts (step boundary)
+	// 2. Flushes the buffer as a comment when the prompt completes (final response)
+	// This is handled via the prompt.complete and step.complete events.
 
 	// Wire ACP handler to broadcast to WebSocket clients as notifications
 	orchestratorSvc.RegisterACPHandler(func(taskID string, msg *protocol.Message) {
@@ -369,15 +370,20 @@ func main() {
 			return nil
 		}
 
-		notification, _ := ws.NewNotification(ws.ActionCommentAdded, map[string]interface{}{
+		payload := map[string]interface{}{
 			"task_id":        taskID,
 			"comment_id":     data["comment_id"],
 			"author_type":    data["author_type"],
 			"author_id":      data["author_id"],
 			"content":        data["content"],
+			"type":           data["type"],
 			"requests_input": data["requests_input"],
 			"created_at":     data["created_at"],
-		})
+		}
+		if metadata, ok := data["metadata"]; ok && metadata != nil {
+			payload["metadata"] = metadata
+		}
+		notification, _ := ws.NewNotification(ws.ActionCommentAdded, payload)
 		gateway.Hub.BroadcastToTask(taskID, notification)
 		return nil
 	})
@@ -513,10 +519,17 @@ func newLifecycleAdapter(mgr *lifecycle.Manager, reg *registry.Registry, log *lo
 
 // LaunchAgent starts a new agent container for a task
 func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+	// The RepositoryURL field should contain a local filesystem path for the workspace
+	// If it's empty, we cannot mount the workspace into the container
+	workspacePath := req.RepositoryURL
+	if workspacePath == "" {
+		return nil, fmt.Errorf("task has no repository_url configured - please set a local repository path on the task")
+	}
+
 	launchReq := &lifecycle.LaunchRequest{
 		TaskID:          req.TaskID,
 		AgentType:       req.AgentType,
-		WorkspacePath:   req.RepositoryURL, // Use repository URL as workspace path
+		WorkspacePath:   workspacePath,
 		TaskDescription: req.TaskDescription,
 		Metadata:        req.Metadata,
 	}
@@ -638,11 +651,98 @@ type commentCreatorAdapter struct {
 }
 
 // CreateAgentComment creates a comment with author_type="agent"
-func (a *commentCreatorAdapter) CreateAgentComment(ctx context.Context, taskID, content string) error {
+func (a *commentCreatorAdapter) CreateAgentComment(ctx context.Context, taskID, content, agentSessionID string) error {
 	_, err := a.svc.CreateComment(ctx, &taskservice.CreateCommentRequest{
-		TaskID:     taskID,
-		Content:    content,
-		AuthorType: "agent",
+		TaskID:         taskID,
+		Content:        content,
+		AuthorType:     "agent",
+		AgentSessionID: agentSessionID,
 	})
 	return err
+}
+
+// CreateToolCallComment creates a comment for a tool call with type="tool_call"
+func (a *commentCreatorAdapter) CreateToolCallComment(ctx context.Context, taskID, toolCallID, title, status, agentSessionID string) error {
+	_, err := a.svc.CreateComment(ctx, &taskservice.CreateCommentRequest{
+		TaskID:         taskID,
+		Content:        title,
+		AuthorType:     "agent",
+		AgentSessionID: agentSessionID,
+		Type:           "tool_call",
+		Metadata: map[string]interface{}{
+			"tool_call_id": toolCallID,
+			"title":        title,
+			"status":       status,
+		},
+	})
+	return err
+}
+
+// mapACPTypeToCommentType maps ACP message types to comment types
+func mapACPTypeToCommentType(msgType protocol.MessageType) string {
+	switch msgType {
+	case protocol.MessageTypeProgress:
+		return "progress"
+	case protocol.MessageTypeLog:
+		return "content" // Log messages are treated as content
+	case protocol.MessageTypeResult:
+		return "status"
+	case protocol.MessageTypeError:
+		return "error"
+	case protocol.MessageTypeStatus:
+		return "status"
+	case protocol.MessageTypeInputRequired:
+		return "content"
+	case protocol.MessageTypeSessionInfo:
+		return "status"
+	default:
+		return "content"
+	}
+}
+
+// extractACPContent extracts a human-readable message from ACP data
+func extractACPContent(msg *protocol.Message) string {
+	if msg.Data == nil {
+		return ""
+	}
+
+	// Check for nested content.text structure (used by agent_message_chunk)
+	if content, ok := msg.Data["content"].(map[string]interface{}); ok {
+		if text, ok := content["text"].(string); ok && text != "" {
+			return text
+		}
+	}
+
+	// Try common message fields
+	if message, ok := msg.Data["message"].(string); ok && message != "" {
+		return message
+	}
+	if text, ok := msg.Data["text"].(string); ok && text != "" {
+		return text
+	}
+	if errMsg, ok := msg.Data["error"].(string); ok && errMsg != "" {
+		return errMsg
+	}
+	if summary, ok := msg.Data["summary"].(string); ok && summary != "" {
+		return summary
+	}
+	if prompt, ok := msg.Data["prompt"].(string); ok && prompt != "" {
+		return prompt
+	}
+
+	// For progress updates, generate a message
+	if msg.Type == protocol.MessageTypeProgress {
+		if progress, ok := msg.Data["progress"].(float64); ok {
+			return fmt.Sprintf("Progress: %d%%", int(progress))
+		}
+	}
+
+	// For status updates
+	if msg.Type == protocol.MessageTypeStatus {
+		if status, ok := msg.Data["status"].(string); ok && status != "" {
+			return fmt.Sprintf("Status: %s", status)
+		}
+	}
+
+	return ""
 }

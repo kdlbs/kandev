@@ -465,7 +465,7 @@ func NewOrchestratorTestServer(t *testing.T) *OrchestratorTestServer {
 	// Create orchestrator service
 	cfg := orchestrator.DefaultServiceConfig()
 	cfg.Scheduler.ProcessInterval = 50 * time.Millisecond // Faster for tests
-	orchestratorSvc := orchestrator.NewService(cfg, eventBus, nil, agentManager, taskRepoAdapter, log)
+	orchestratorSvc := orchestrator.NewService(cfg, eventBus, nil, agentManager, taskRepoAdapter, taskRepo, log)
 
 	// Create WebSocket gateway
 	gateway := gateways.NewGateway(log)
