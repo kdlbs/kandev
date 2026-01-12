@@ -47,6 +47,17 @@ type Repository interface {
 	ListComments(ctx context.Context, taskID string) ([]*models.Comment, error)
 	DeleteComment(ctx context.Context, id string) error
 
+	// Agent Session operations
+	CreateAgentSession(ctx context.Context, session *models.AgentSession) error
+	GetAgentSession(ctx context.Context, id string) (*models.AgentSession, error)
+	GetAgentSessionByTaskID(ctx context.Context, taskID string) (*models.AgentSession, error)
+	GetActiveAgentSessionByTaskID(ctx context.Context, taskID string) (*models.AgentSession, error)
+	UpdateAgentSession(ctx context.Context, session *models.AgentSession) error
+	UpdateAgentSessionStatus(ctx context.Context, id string, status models.AgentSessionStatus, errorMessage string) error
+	ListAgentSessions(ctx context.Context, taskID string) ([]*models.AgentSession, error)
+	ListActiveAgentSessions(ctx context.Context) ([]*models.AgentSession, error)
+	DeleteAgentSession(ctx context.Context, id string) error
+
 	// Repository operations
 	CreateRepository(ctx context.Context, repository *models.Repository) error
 	GetRepository(ctx context.Context, id string) (*models.Repository, error)

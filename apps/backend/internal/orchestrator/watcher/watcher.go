@@ -40,6 +40,15 @@ type PromptCompleteData struct {
 	AgentMessage string `json:"agent_message"`
 }
 
+// ToolCallData contains data from tool_call events
+type ToolCallData struct {
+	TaskID     string `json:"task_id"`
+	AgentID    string `json:"agent_id"`
+	ToolCallID string `json:"tool_call_id"`
+	Title      string `json:"title"`
+	Status     string `json:"status"`
+}
+
 // EventHandlers contains callbacks for different event types
 type EventHandlers struct {
 	// Task events
@@ -60,6 +69,9 @@ type EventHandlers struct {
 
 	// Prompt events
 	OnPromptComplete func(ctx context.Context, data PromptCompleteData)
+
+	// Tool call events
+	OnToolCallStarted func(ctx context.Context, data ToolCallData)
 }
 
 // Watcher subscribes to events and dispatches to handlers
@@ -116,6 +128,12 @@ func (w *Watcher) Start(ctx context.Context) error {
 
 	// Subscribe to prompt complete events
 	if err := w.subscribeToPromptCompleteEvents(); err != nil {
+		w.unsubscribeAll()
+		return err
+	}
+
+	// Subscribe to tool call events
+	if err := w.subscribeToToolCallEvents(); err != nil {
 		w.unsubscribeAll()
 		return err
 	}
@@ -360,6 +378,49 @@ func (w *Watcher) createPromptCompleteHandler() bus.EventHandler {
 	}
 }
 
+// subscribeToToolCallEvents subscribes to tool call events
+func (w *Watcher) subscribeToToolCallEvents() error {
+	if w.handlers.OnToolCallStarted == nil {
+		return nil
+	}
+
+	// Use wildcard to subscribe to all tool call events (tool_call.started.*)
+	subject := events.ToolCallStarted + ".*"
+
+	// Use regular subscription (each instance needs all messages for comment creation)
+	sub, err := w.eventBus.Subscribe(subject, w.createToolCallHandler())
+	if err != nil {
+		w.logger.Error("Failed to subscribe to tool call events",
+			zap.String("subject", subject),
+			zap.Error(err))
+		return err
+	}
+	w.subscriptions = append(w.subscriptions, sub)
+	return nil
+}
+
+// createToolCallHandler creates a bus.EventHandler for tool call events
+func (w *Watcher) createToolCallHandler() bus.EventHandler {
+	return func(ctx context.Context, event *bus.Event) error {
+		var data ToolCallData
+		if err := w.parseEventData(event.Data, &data); err != nil {
+			w.logger.Error("Failed to parse tool call event data",
+				zap.String("event_type", event.Type),
+				zap.String("event_id", event.ID),
+				zap.Error(err))
+			return nil // Don't return error to continue processing other events
+		}
+
+		w.logger.Debug("Handling tool call event",
+			zap.String("task_id", data.TaskID),
+			zap.String("tool_call_id", data.ToolCallID),
+			zap.String("title", data.Title))
+
+		w.handlers.OnToolCallStarted(ctx, data)
+		return nil
+	}
+}
+
 // parseEventData converts event data map to a typed struct
 func (w *Watcher) parseEventData(data map[string]interface{}, target interface{}) error {
 	// Marshal to JSON and unmarshal to target type
@@ -369,4 +430,3 @@ func (w *Watcher) parseEventData(data map[string]interface{}, target interface{}
 	}
 	return json.Unmarshal(jsonData, target)
 }
-

@@ -5,14 +5,12 @@ import (
 	"context"
 
 	"github.com/kandev/kandev/internal/orchestrator"
-	"github.com/kandev/kandev/internal/orchestrator/acp"
 	"github.com/kandev/kandev/internal/orchestrator/dto"
 )
 
 // Controller coordinates orchestrator business logic
 type Controller struct {
-	service    *orchestrator.Service
-	acpHandler *acp.Handler
+	service *orchestrator.Service
 }
 
 // NewController creates a new orchestrator controller
@@ -20,11 +18,6 @@ func NewController(svc *orchestrator.Service) *Controller {
 	return &Controller{
 		service: svc,
 	}
-}
-
-// SetACPHandler sets the ACP handler for log retrieval
-func (c *Controller) SetACPHandler(handler *acp.Handler) {
-	c.acpHandler = handler
 }
 
 // GetStatus returns the orchestrator status
@@ -118,39 +111,6 @@ func (c *Controller) CompleteTask(ctx context.Context, req dto.CompleteTaskReque
 	return dto.CompleteTaskResponse{
 		Success: true,
 		Message: "task completed",
-	}, nil
-}
-
-// GetTaskLogs retrieves historical logs for a task
-func (c *Controller) GetTaskLogs(ctx context.Context, req dto.GetTaskLogsRequest) (dto.GetTaskLogsResponse, error) {
-	if c.acpHandler == nil {
-		return dto.GetTaskLogsResponse{}, ErrACPHandlerNotConfigured
-	}
-
-	messages, err := c.acpHandler.GetAllMessages(ctx, req.TaskID)
-	if err != nil {
-		return dto.GetTaskLogsResponse{}, err
-	}
-
-	// Apply limit if specified
-	if req.Limit > 0 && len(messages) > req.Limit {
-		messages = messages[len(messages)-req.Limit:]
-	}
-
-	logs := make([]dto.LogEntryDTO, 0, len(messages))
-	for _, m := range messages {
-		logs = append(logs, dto.LogEntryDTO{
-			Type:      string(m.Type),
-			Timestamp: m.Timestamp.Format("2006-01-02T15:04:05Z"),
-			AgentID:   m.AgentID,
-			Data:      m.Data,
-		})
-	}
-
-	return dto.GetTaskLogsResponse{
-		TaskID: req.TaskID,
-		Logs:   logs,
-		Total:  len(logs),
 	}, nil
 }
 

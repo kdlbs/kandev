@@ -92,27 +92,6 @@ type CompleteTaskResponse struct {
 	Message string `json:"message"`
 }
 
-// GetTaskLogsRequest is the payload for task.logs
-type GetTaskLogsRequest struct {
-	TaskID string `json:"task_id"`
-	Limit  int    `json:"limit,omitempty"`
-}
-
-// LogEntryDTO represents a single log entry
-type LogEntryDTO struct {
-	Type      string                 `json:"type"`
-	Timestamp string                 `json:"timestamp"`
-	AgentID   string                 `json:"agent_id,omitempty"`
-	Data      map[string]interface{} `json:"data,omitempty"`
-}
-
-// GetTaskLogsResponse is the response for task.logs
-type GetTaskLogsResponse struct {
-	TaskID string        `json:"task_id"`
-	Logs   []LogEntryDTO `json:"logs"`
-	Total  int           `json:"total"`
-}
-
 // PermissionRespondRequest is the payload for permission.respond
 type PermissionRespondRequest struct {
 	TaskID    string `json:"task_id"`
