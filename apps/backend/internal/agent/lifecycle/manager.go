@@ -553,6 +553,9 @@ func (m *Manager) initializeACPSession(ctx context.Context, instance *AgentInsta
 	// 4. Set up permission stream to receive permission requests
 	go m.handlePermissionStream(instance)
 
+	// 5. Set up git status stream to track workspace changes
+	go m.handleGitStatusStream(instance)
+
 	// 5. Send the task prompt if provided
 	if taskDescription != "" {
 		m.logger.Info("sending ACP prompt",
@@ -644,6 +647,43 @@ func (m *Manager) handlePermissionStream(instance *AgentInstance) {
 	}
 }
 
+// handleGitStatusStream handles streaming git status updates from the agent workspace
+func (m *Manager) handleGitStatusStream(instance *AgentInstance) {
+	ctx := context.Background()
+
+	// Retry connection with exponential backoff
+	maxRetries := 5
+	backoff := 1 * time.Second
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		err := instance.agentctl.StreamGitStatus(ctx, func(update *agentctl.GitStatusUpdate) {
+			m.handleGitStatusUpdate(instance, update)
+		})
+
+		if err == nil {
+			// Connection closed normally
+			m.logger.Info("git status stream closed",
+				zap.String("instance_id", instance.ID))
+			return
+		}
+
+		m.logger.Warn("failed to connect to git status stream, retrying",
+			zap.String("instance_id", instance.ID),
+			zap.Int("attempt", attempt),
+			zap.Int("max_retries", maxRetries),
+			zap.Error(err))
+
+		if attempt < maxRetries {
+			time.Sleep(backoff)
+			backoff *= 2 // Exponential backoff
+		}
+	}
+
+	m.logger.Error("failed to connect to git status stream after retries",
+		zap.String("instance_id", instance.ID),
+		zap.Int("max_retries", maxRetries))
+}
+
 // reconnectStreams reconnects to agent WebSocket streams after backend restart
 // This is called for recovered instances that were running before the restart
 func (m *Manager) reconnectStreams(instance *AgentInstance) {
@@ -668,6 +708,7 @@ func (m *Manager) reconnectStreams(instance *AgentInstance) {
 	// Reconnect to WebSocket streams
 	go m.handleUpdatesStream(instance)
 	go m.handlePermissionStream(instance)
+	go m.handleGitStatusStream(instance)
 
 	// Mark the instance as READY so it can accept prompts
 	m.mu.Lock()
@@ -904,6 +945,77 @@ func (m *Manager) publishSessionInfo(instance *AgentInstance, sessionID string) 
 		m.logger.Info("published session_info event",
 			zap.String("task_id", instance.TaskID),
 			zap.String("session_id", sessionID))
+	}
+}
+
+// handleGitStatusUpdate processes git status updates from the workspace tracker
+func (m *Manager) handleGitStatusUpdate(instance *AgentInstance, update *agentctl.GitStatusUpdate) {
+	m.logger.Debug("received git status update",
+		zap.String("instance_id", instance.ID),
+		zap.String("task_id", instance.TaskID),
+		zap.String("branch", update.Branch),
+		zap.Int("modified", len(update.Modified)),
+		zap.Int("added", len(update.Added)),
+		zap.Int("deleted", len(update.Deleted)),
+		zap.Int("untracked", len(update.Untracked)),
+		zap.Int("ahead", update.Ahead),
+		zap.Int("behind", update.Behind))
+
+	// Store git status in instance metadata
+	m.mu.Lock()
+	if inst, exists := m.instances[instance.ID]; exists {
+		if inst.Metadata == nil {
+			inst.Metadata = make(map[string]interface{})
+		}
+		inst.Metadata["git_status"] = map[string]interface{}{
+			"branch":        update.Branch,
+			"remote_branch": update.RemoteBranch,
+			"modified":      update.Modified,
+			"added":         update.Added,
+			"deleted":       update.Deleted,
+			"untracked":     update.Untracked,
+			"renamed":       update.Renamed,
+			"ahead":         update.Ahead,
+			"behind":        update.Behind,
+			"timestamp":     update.Timestamp,
+		}
+	}
+	m.mu.Unlock()
+
+	// Publish git status update to event bus for WebSocket streaming
+	m.publishGitStatus(instance, update)
+}
+
+// publishGitStatus publishes a git status update to the event bus
+func (m *Manager) publishGitStatus(instance *AgentInstance, update *agentctl.GitStatusUpdate) {
+	if m.eventBus == nil {
+		return
+	}
+
+	data := map[string]interface{}{
+		"task_id":       instance.TaskID,
+		"agent_id":      instance.ID,
+		"branch":        update.Branch,
+		"remote_branch": update.RemoteBranch,
+		"modified":      update.Modified,
+		"added":         update.Added,
+		"deleted":       update.Deleted,
+		"untracked":     update.Untracked,
+		"renamed":       update.Renamed,
+		"ahead":         update.Ahead,
+		"behind":        update.Behind,
+		"files":         update.Files,
+		"timestamp":     update.Timestamp.Format(time.RFC3339Nano),
+	}
+
+	event := bus.NewEvent(events.GitStatusUpdated, "agent-manager", data)
+	subject := events.BuildGitStatusSubject(instance.TaskID)
+
+	if err := m.eventBus.Publish(context.Background(), subject, event); err != nil {
+		m.logger.Error("failed to publish git status event",
+			zap.String("instance_id", instance.ID),
+			zap.String("task_id", instance.TaskID),
+			zap.Error(err))
 	}
 }
 

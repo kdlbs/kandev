@@ -312,9 +312,28 @@ func main() {
 			}
 			result = append(result, notification)
 		}
+
+		// Also send current git status if available
+		session, err := taskRepo.GetActiveAgentSessionByTaskID(ctx, taskID)
+		if err == nil && session != nil && session.Metadata != nil {
+			if gitStatus, ok := session.Metadata["git_status"]; ok {
+				// Add task_id to the git status data
+				gitStatusData, ok := gitStatus.(map[string]interface{})
+				if !ok {
+					gitStatusData = map[string]interface{}{"data": gitStatus}
+				}
+				gitStatusData["task_id"] = taskID
+
+				gitStatusNotification, err := ws.NewNotification("git.status", gitStatusData)
+				if err == nil {
+					result = append(result, gitStatusNotification)
+				}
+			}
+		}
+
 		return result, nil
 	})
-	log.Info("Historical logs provider configured for task subscriptions (using comments)")
+	log.Info("Historical logs provider configured for task subscriptions (using comments and git status)")
 
 	// NOTE: We no longer create comments for each ACP message chunk.
 	// Instead, the lifecycle manager accumulates message chunks and:
@@ -449,6 +468,25 @@ func main() {
 		log.Error("Failed to subscribe to comment.added events", zap.Error(err))
 	} else {
 		log.Info("Subscribed to comment.added events for WebSocket broadcasting")
+	}
+
+	// Subscribe to git status events and broadcast to WebSocket subscribers
+	_, err = eventBus.Subscribe(events.BuildGitStatusWildcardSubject(), func(ctx context.Context, event *bus.Event) error {
+		data := event.Data
+		taskID, _ := data["task_id"].(string)
+		if taskID == "" {
+			return nil
+		}
+
+		// Broadcast git status update to task subscribers
+		notification, _ := ws.NewNotification("git.status", data)
+		gateway.Hub.BroadcastToTask(taskID, notification)
+		return nil
+	})
+	if err != nil {
+		log.Error("Failed to subscribe to git status events", zap.Error(err))
+	} else {
+		log.Info("Subscribed to git status events for WebSocket broadcasting")
 	}
 
 	// ============================================

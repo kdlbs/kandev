@@ -374,6 +374,19 @@ func (r *MemoryRepository) GetColumn(ctx context.Context, id string) (*models.Co
 	return column, nil
 }
 
+// GetColumnByState retrieves a column by board ID and state
+func (r *MemoryRepository) GetColumnByState(ctx context.Context, boardID string, state v1.TaskState) (*models.Column, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	for _, column := range r.columns {
+		if column.BoardID == boardID && column.State == state {
+			return column, nil
+		}
+	}
+	return nil, fmt.Errorf("column not found for board %s with state %s", boardID, state)
+}
+
 // UpdateColumn updates an existing column
 func (r *MemoryRepository) UpdateColumn(ctx context.Context, column *models.Column) error {
 	r.mu.Lock()

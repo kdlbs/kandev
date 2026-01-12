@@ -74,6 +74,9 @@ type Manager struct {
 	// Output buffer for streaming
 	outputBuffer *OutputBuffer
 
+	// Workspace tracker for git status and file changes
+	workspaceTracker *WorkspaceTracker
+
 	// ACP SDK connection
 	acpClient *acpclient.Client
 	acpConn   *acp.ClientSideConnection
@@ -103,6 +106,7 @@ func NewManager(cfg *config.Config, log *logger.Logger) *Manager {
 		cfg:                cfg,
 		logger:             log.WithFields(zap.String("component", "process-manager")),
 		outputBuffer:       NewOutputBuffer(cfg.OutputBufferSize),
+		workspaceTracker:   NewWorkspaceTracker(cfg.WorkDir, log),
 		updatesCh:          make(chan acp.SessionNotification, 100),
 		permissionCh:       make(chan *PermissionNotification, 10),
 		pendingPermissions: make(map[string]*PendingPermission),
@@ -135,6 +139,11 @@ func (m *Manager) ExitError() error {
 // GetOutputBuffer returns the output buffer for streaming
 func (m *Manager) GetOutputBuffer() *OutputBuffer {
 	return m.outputBuffer
+}
+
+// GetWorkspaceTracker returns the workspace tracker for git status and file monitoring
+func (m *Manager) GetWorkspaceTracker() *WorkspaceTracker {
+	return m.workspaceTracker
 }
 
 // Start starts the agent process
@@ -218,6 +227,9 @@ func (m *Manager) Start(ctx context.Context) error {
 	go m.readStderr()
 	go m.waitForExit()
 
+	// Start workspace tracker with background context (not tied to HTTP request)
+	m.workspaceTracker.Start(context.Background())
+
 	m.status.Store(StatusRunning)
 	m.logger.Info("agent process started", zap.Int("pid", m.cmd.Process.Pid))
 
@@ -262,6 +274,11 @@ func (m *Manager) Stop(ctx context.Context) error {
 
 	m.logger.Info("stopping agent process")
 	m.status.Store(StatusStopping)
+
+	// Stop workspace tracker
+	if m.workspaceTracker != nil {
+		m.workspaceTracker.Stop()
+	}
 
 	// Close stop channel to signal readers
 	if m.stopCh != nil {

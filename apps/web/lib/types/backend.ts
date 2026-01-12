@@ -7,6 +7,7 @@ export type BackendMessageType =
   | 'agent.updated'
   | 'terminal.output'
   | 'diff.update'
+  | 'git.status'
   | 'system.error'
   | 'workspace.created'
   | 'workspace.updated'
@@ -121,6 +122,30 @@ export type CommentAddedPayload = {
   created_at: string;
 };
 
+export type FileInfo = {
+  path: string;
+  status: 'modified' | 'added' | 'deleted' | 'untracked' | 'renamed';
+  additions?: number;
+  deletions?: number;
+  old_path?: string;
+  diff?: string;
+};
+
+export type GitStatusPayload = {
+  task_id: string;
+  branch: string;
+  remote_branch?: string;
+  modified: string[];
+  added: string[];
+  deleted: string[];
+  untracked: string[];
+  renamed: string[];
+  ahead: number;
+  behind: number;
+  files: Record<string, FileInfo>;
+  timestamp: string;
+};
+
 export type BackendMessageMap = {
   'kanban.update': BackendMessage<'kanban.update', KanbanUpdatePayload>;
   'task.created': BackendMessage<'task.created', TaskEventPayload>;
@@ -130,6 +155,7 @@ export type BackendMessageMap = {
   'agent.updated': BackendMessage<'agent.updated', AgentUpdatePayload>;
   'terminal.output': BackendMessage<'terminal.output', TerminalOutputPayload>;
   'diff.update': BackendMessage<'diff.update', DiffUpdatePayload>;
+  'git.status': BackendMessage<'git.status', GitStatusPayload>;
   'system.error': BackendMessage<'system.error', SystemErrorPayload>;
   'workspace.created': BackendMessage<'workspace.created', WorkspacePayload>;
   'workspace.updated': BackendMessage<'workspace.updated', WorkspacePayload>;

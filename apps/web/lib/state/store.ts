@@ -38,6 +38,30 @@ export type TerminalState = {
   terminals: Array<{ id: string; output: string[] }>;
 };
 
+export type FileInfo = {
+  path: string;
+  status: 'modified' | 'added' | 'deleted' | 'untracked' | 'renamed';
+  additions?: number;
+  deletions?: number;
+  old_path?: string;
+  diff?: string;
+};
+
+export type GitStatusState = {
+  taskId: string | null;
+  branch: string | null;
+  remote_branch: string | null;
+  modified: string[];
+  added: string[];
+  deleted: string[];
+  untracked: string[];
+  renamed: string[];
+  ahead: number;
+  behind: number;
+  files: Record<string, FileInfo>;
+  timestamp: string | null;
+};
+
 export type DiffState = {
   files: Array<{ path: string; status: 'A' | 'M' | 'D'; plus: number; minus: number }>;
 };
@@ -61,6 +85,7 @@ export type AppState = {
   agents: AgentState;
   terminal: TerminalState;
   diffs: DiffState;
+  gitStatus: GitStatusState;
   connection: ConnectionState;
   comments: CommentsState;
   hydrate: (state: Partial<AppState>) => void;
@@ -74,6 +99,8 @@ export type AppState = {
   setCommentsTaskId: (taskId: string | null) => void;
   addComment: (comment: Comment) => void;
   setCommentsLoading: (loading: boolean) => void;
+  setGitStatus: (taskId: string, gitStatus: Omit<GitStatusState, 'taskId'>) => void;
+  clearGitStatus: () => void;
 };
 
 export type AppStore = ReturnType<typeof createAppStore>;
@@ -86,6 +113,20 @@ const defaultState: AppState = {
   agents: { agents: [] },
   terminal: { terminals: [] },
   diffs: { files: [] },
+  gitStatus: {
+    taskId: null,
+    branch: null,
+    remote_branch: null,
+    modified: [],
+    added: [],
+    deleted: [],
+    untracked: [],
+    renamed: [],
+    ahead: 0,
+    behind: 0,
+    files: {},
+    timestamp: null,
+  },
   connection: { status: 'disconnected', error: null },
   comments: { taskId: null, items: [], isLoading: false },
   hydrate: () => undefined,
@@ -99,9 +140,11 @@ const defaultState: AppState = {
   setCommentsTaskId: () => undefined,
   addComment: () => undefined,
   setCommentsLoading: () => undefined,
+  setGitStatus: () => undefined,
+  clearGitStatus: () => undefined,
 };
 
-function mergeInitialState(initialState?: Partial<AppState>): Omit<AppState, 'hydrate' | 'setActiveWorkspace' | 'setWorkspaces' | 'setActiveBoard' | 'setBoards' | 'setTerminalOutput' | 'setConnectionStatus' | 'setComments' | 'setCommentsTaskId' | 'addComment' | 'setCommentsLoading'> {
+function mergeInitialState(initialState?: Partial<AppState>): Omit<AppState, 'hydrate' | 'setActiveWorkspace' | 'setWorkspaces' | 'setActiveBoard' | 'setBoards' | 'setTerminalOutput' | 'setConnectionStatus' | 'setComments' | 'setCommentsTaskId' | 'addComment' | 'setCommentsLoading' | 'setGitStatus' | 'clearGitStatus'> {
   if (!initialState) return defaultState;
   return {
     workspaces: { ...defaultState.workspaces, ...initialState.workspaces },
@@ -111,6 +154,7 @@ function mergeInitialState(initialState?: Partial<AppState>): Omit<AppState, 'hy
     agents: { ...defaultState.agents, ...initialState.agents },
     terminal: { ...defaultState.terminal, ...initialState.terminal },
     diffs: { ...defaultState.diffs, ...initialState.diffs },
+    gitStatus: { ...defaultState.gitStatus, ...initialState.gitStatus },
     connection: { ...defaultState.connection, ...initialState.connection },
     comments: { ...defaultState.comments, ...initialState.comments },
   };
@@ -203,6 +247,30 @@ export function createAppStore(initialState?: Partial<AppState>) {
       setCommentsLoading: (loading) =>
         set((draft) => {
           draft.comments.isLoading = loading;
+        }),
+      setGitStatus: (taskId, gitStatus) =>
+        set((draft) => {
+          draft.gitStatus = {
+            taskId,
+            ...gitStatus,
+          };
+        }),
+      clearGitStatus: () =>
+        set((draft) => {
+          draft.gitStatus = {
+            taskId: null,
+            branch: null,
+            remote_branch: null,
+            modified: [],
+            added: [],
+            deleted: [],
+            untracked: [],
+            renamed: [],
+            ahead: 0,
+            behind: 0,
+            files: {},
+            timestamp: null,
+          };
         }),
     }))
   );

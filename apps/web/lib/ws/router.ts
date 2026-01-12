@@ -85,10 +85,20 @@ export function registerWsHandlers(store: StoreApi<AppState>) {
       }));
     },
     'task.state_changed': (message: BackendMessageMap['task.state_changed']) => {
+      console.log('[WS Router] task.state_changed received:', {
+        task_id: message.payload.task_id,
+        board_id: message.payload.board_id,
+        column_id: message.payload.column_id,
+        state: message.payload.state,
+      });
       store.setState((state) => {
+        console.log('[WS Router] Current board_id:', state.kanban.boardId, 'Event board_id:', message.payload.board_id);
         if (state.kanban.boardId !== message.payload.board_id) {
+          console.log('[WS Router] Skipping - board_id mismatch');
           return state;
         }
+        const existingTask = state.kanban.tasks.find((t) => t.id === message.payload.task_id);
+        console.log('[WS Router] Existing task:', existingTask);
         const nextTask = {
           id: message.payload.task_id,
           columnId: message.payload.column_id,
@@ -97,6 +107,7 @@ export function registerWsHandlers(store: StoreApi<AppState>) {
           position: message.payload.position ?? 0,
           state: message.payload.state,
         };
+        console.log('[WS Router] Next task:', nextTask);
         return {
           ...state,
           kanban: {
@@ -330,6 +341,31 @@ export function registerWsHandlers(store: StoreApi<AppState>) {
         created_at: payload.created_at,
       });
       console.log('[WS] addComment called');
+    },
+    'git.status': (message: BackendMessageMap['git.status']) => {
+      const payload = message.payload;
+      console.log('[WS] git.status received:', {
+        task_id: payload.task_id,
+        branch: payload.branch,
+        modified: payload.modified.length,
+        added: payload.added.length,
+        deleted: payload.deleted.length,
+        untracked: payload.untracked.length,
+      });
+      const state = store.getState();
+      state.setGitStatus(payload.task_id, {
+        branch: payload.branch,
+        remote_branch: payload.remote_branch ?? null,
+        modified: payload.modified,
+        added: payload.added,
+        deleted: payload.deleted,
+        untracked: payload.untracked,
+        renamed: payload.renamed,
+        ahead: payload.ahead,
+        behind: payload.behind,
+        files: payload.files,
+        timestamp: payload.timestamp,
+      });
     },
   };
 }

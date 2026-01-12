@@ -50,6 +50,23 @@ type ToolCallData struct {
 	Args       map[string]interface{} `json:"args,omitempty"` // Tool call arguments (kind, path, locations, raw_input)
 }
 
+// GitStatusData contains data from git status events
+type GitStatusData struct {
+	TaskID       string                 `json:"task_id"`
+	AgentID      string                 `json:"agent_id"`
+	Branch       string                 `json:"branch"`
+	RemoteBranch string                 `json:"remote_branch"`
+	Modified     []string               `json:"modified"`
+	Added        []string               `json:"added"`
+	Deleted      []string               `json:"deleted"`
+	Untracked    []string               `json:"untracked"`
+	Renamed      []string               `json:"renamed"`
+	Ahead        int                    `json:"ahead"`
+	Behind       int                    `json:"behind"`
+	Files        map[string]interface{} `json:"files"`
+	Timestamp    string                 `json:"timestamp"`
+}
+
 // EventHandlers contains callbacks for different event types
 type EventHandlers struct {
 	// Task events
@@ -73,6 +90,9 @@ type EventHandlers struct {
 
 	// Tool call events
 	OnToolCallStarted func(ctx context.Context, data ToolCallData)
+
+	// Git status events
+	OnGitStatusUpdated func(ctx context.Context, data GitStatusData)
 }
 
 // Watcher subscribes to events and dispatches to handlers
@@ -135,6 +155,12 @@ func (w *Watcher) Start(ctx context.Context) error {
 
 	// Subscribe to tool call events
 	if err := w.subscribeToToolCallEvents(); err != nil {
+		w.unsubscribeAll()
+		return err
+	}
+
+	// Subscribe to git status events
+	if err := w.subscribeToGitStatusEvents(); err != nil {
 		w.unsubscribeAll()
 		return err
 	}
@@ -418,6 +444,49 @@ func (w *Watcher) createToolCallHandler() bus.EventHandler {
 			zap.String("title", data.Title))
 
 		w.handlers.OnToolCallStarted(ctx, data)
+		return nil
+	}
+}
+
+// subscribeToGitStatusEvents subscribes to git status events
+func (w *Watcher) subscribeToGitStatusEvents() error {
+	if w.handlers.OnGitStatusUpdated == nil {
+		return nil
+	}
+
+	// Use wildcard to subscribe to all git status events (git.status.updated.*)
+	subject := events.BuildGitStatusWildcardSubject()
+
+	// Use regular subscription (each instance needs all messages)
+	sub, err := w.eventBus.Subscribe(subject, w.createGitStatusHandler())
+	if err != nil {
+		w.logger.Error("Failed to subscribe to git status events",
+			zap.String("subject", subject),
+			zap.Error(err))
+		return err
+	}
+	w.subscriptions = append(w.subscriptions, sub)
+	return nil
+}
+
+// createGitStatusHandler creates a bus.EventHandler for git status events
+func (w *Watcher) createGitStatusHandler() bus.EventHandler {
+	return func(ctx context.Context, event *bus.Event) error {
+		var data GitStatusData
+		if err := w.parseEventData(event.Data, &data); err != nil {
+			w.logger.Error("Failed to parse git status event data",
+				zap.String("event_type", event.Type),
+				zap.String("event_id", event.ID),
+				zap.Error(err))
+			return nil // Don't return error to continue processing other events
+		}
+
+		w.logger.Debug("Handling git status event",
+			zap.String("task_id", data.TaskID),
+			zap.String("branch", data.Branch),
+			zap.Int("modified", len(data.Modified)))
+
+		w.handlers.OnGitStatusUpdated(ctx, data)
 		return nil
 	}
 }
