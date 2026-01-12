@@ -15,12 +15,19 @@ import (
 	"github.com/kandev/kandev/internal/task/repository"
 )
 
+// WorktreeCleanup provides worktree cleanup on task deletion.
+type WorktreeCleanup interface {
+	// OnTaskDeleted is called when a task is deleted to clean up its worktree.
+	OnTaskDeleted(ctx context.Context, taskID string) error
+}
+
 // Service provides task business logic
 type Service struct {
-	repo            repository.Repository
-	eventBus        bus.EventBus
-	logger          *logger.Logger
-	discoveryConfig RepositoryDiscoveryConfig
+	repo             repository.Repository
+	eventBus         bus.EventBus
+	logger           *logger.Logger
+	discoveryConfig  RepositoryDiscoveryConfig
+	worktreeCleanup  WorktreeCleanup
 }
 
 // NewService creates a new task service
@@ -31,6 +38,11 @@ func NewService(repo repository.Repository, eventBus bus.EventBus, log *logger.L
 		logger:          log,
 		discoveryConfig: discoveryConfig,
 	}
+}
+
+// SetWorktreeCleanup sets the worktree cleanup handler for task deletion.
+func (s *Service) SetWorktreeCleanup(cleanup WorktreeCleanup) {
+	s.worktreeCleanup = cleanup
 }
 
 // Request types
@@ -254,6 +266,15 @@ func (s *Service) DeleteTask(ctx context.Context, id string) error {
 	if err := s.repo.DeleteTask(ctx, id); err != nil {
 		s.logger.Error("failed to delete task", zap.String("task_id", id), zap.Error(err))
 		return err
+	}
+
+	// Clean up worktree if configured (best-effort, don't fail deletion)
+	if s.worktreeCleanup != nil {
+		if err := s.worktreeCleanup.OnTaskDeleted(ctx, id); err != nil {
+			s.logger.Warn("failed to cleanup worktree on task deletion",
+				zap.String("task_id", id),
+				zap.Error(err))
+		}
 	}
 
 	s.publishTaskEvent(ctx, events.TaskDeleted, task, nil)

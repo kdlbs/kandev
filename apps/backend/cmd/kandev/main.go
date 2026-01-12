@@ -212,6 +212,10 @@ func main() {
 			lifecycleMgr.SetWorktreeManager(worktreeMgr)
 			log.Info("Worktree Manager connected to Lifecycle Manager")
 		}
+
+		// Wire worktree manager to task service for cleanup on task deletion
+		taskSvc.SetWorktreeCleanup(worktreeMgr)
+		log.Info("Worktree Manager connected to Task Service for cleanup")
 	} else {
 		log.Warn("Worktree Manager disabled (requires SQLite repository)")
 	}
