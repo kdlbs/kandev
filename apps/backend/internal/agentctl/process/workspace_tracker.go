@@ -50,20 +50,11 @@ type FileEntry struct {
 	Size  int64  `json:"size,omitempty"`
 }
 
-// DiffUpdate represents a diff update
-type DiffUpdate struct {
-	Timestamp time.Time         `json:"timestamp"`
-	Files     map[string]FileInfo `json:"files"`
-}
-
 // GitStatusSubscriber is a channel that receives git status updates
 type GitStatusSubscriber chan GitStatusUpdate
 
 // FilesSubscriber is a channel that receives file listing updates
 type FilesSubscriber chan FileListUpdate
-
-// DiffSubscriber is a channel that receives diff updates
-type DiffSubscriber chan DiffUpdate
 
 // WorkspaceTracker monitors workspace changes and provides real-time updates
 type WorkspaceTracker struct {
@@ -73,13 +64,11 @@ type WorkspaceTracker struct {
 	// Current state
 	currentStatus GitStatusUpdate
 	currentFiles  FileListUpdate
-	currentDiff   DiffUpdate
 	mu            sync.RWMutex
 
 	// Subscribers
 	gitStatusSubscribers map[GitStatusSubscriber]struct{}
 	filesSubscribers     map[FilesSubscriber]struct{}
-	diffSubscribers      map[DiffSubscriber]struct{}
 	subMu                sync.RWMutex
 
 	// Control
@@ -94,7 +83,6 @@ func NewWorkspaceTracker(workDir string, log *logger.Logger) *WorkspaceTracker {
 		logger:               log.WithFields(zap.String("component", "workspace-tracker")),
 		gitStatusSubscribers: make(map[GitStatusSubscriber]struct{}),
 		filesSubscribers:     make(map[FilesSubscriber]struct{}),
-		diffSubscribers:      make(map[DiffSubscriber]struct{}),
 		stopCh:               make(chan struct{}),
 	}
 }
@@ -122,7 +110,6 @@ func (wt *WorkspaceTracker) monitorLoop(ctx context.Context) {
 	// Initial update
 	wt.updateGitStatus(ctx)
 	wt.updateFiles(ctx)
-	wt.updateDiff(ctx)
 
 	for {
 		select {
@@ -133,7 +120,6 @@ func (wt *WorkspaceTracker) monitorLoop(ctx context.Context) {
 		case <-ticker.C:
 			wt.updateGitStatus(ctx)
 			wt.updateFiles(ctx)
-			wt.updateDiff(ctx)
 		}
 	}
 }
@@ -439,123 +425,7 @@ func (wt *WorkspaceTracker) getFileList(ctx context.Context) (FileListUpdate, er
 	return update, nil
 }
 
-// updateDiff updates the diff information
-func (wt *WorkspaceTracker) updateDiff(ctx context.Context) {
-	diff, err := wt.getDiff(ctx)
-	if err != nil {
-		wt.logger.Debug("failed to get diff", zap.Error(err))
-		return
-	}
 
-	wt.mu.Lock()
-	wt.currentDiff = diff
-	wt.mu.Unlock()
-
-	// Notify subscribers
-	wt.notifyDiffSubscribers(diff)
-}
-
-// getDiff retrieves diff information for changed files
-func (wt *WorkspaceTracker) getDiff(ctx context.Context) (DiffUpdate, error) {
-	update := DiffUpdate{
-		Timestamp: time.Now(),
-		Files:     make(map[string]FileInfo),
-	}
-
-	// Get current branch info to determine base ref
-	status, err := wt.getGitStatus(ctx)
-	if err != nil {
-		return update, err
-	}
-
-	// Determine the base ref to compare against
-	baseRef := "HEAD"
-	if status.RemoteBranch != "" {
-		baseRef = status.RemoteBranch
-	}
-
-	// Get diff with numstat for additions/deletions (compare against base branch)
-	cmd := exec.CommandContext(ctx, "git", "diff", "--numstat", baseRef)
-	cmd.Dir = wt.workDir
-	out, err := cmd.Output()
-	if err != nil {
-		return update, err
-	}
-
-	// Parse numstat output
-	lines := strings.Split(string(out), "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-
-		parts := strings.Fields(line)
-		if len(parts) < 3 {
-			continue
-		}
-
-		additions, _ := strconv.Atoi(parts[0])
-		deletions, _ := strconv.Atoi(parts[1])
-		filePath := parts[2]
-
-		fileInfo := FileInfo{
-			Path:      filePath,
-			Status:    "modified",
-			Additions: additions,
-			Deletions: deletions,
-		}
-
-		// Get the actual diff for this file (compare against base branch)
-		diffCmd := exec.CommandContext(ctx, "git", "diff", baseRef, "--", filePath)
-		diffCmd.Dir = wt.workDir
-		if diffOut, err := diffCmd.Output(); err == nil {
-			fileInfo.Diff = string(diffOut)
-		}
-
-		update.Files[filePath] = fileInfo
-	}
-
-	// Also check for staged changes
-	stagedCmd := exec.CommandContext(ctx, "git", "diff", "--cached", "--numstat")
-	stagedCmd.Dir = wt.workDir
-	if stagedOut, err := stagedCmd.Output(); err == nil {
-		lines := strings.Split(string(stagedOut), "\n")
-		for _, line := range lines {
-			line = strings.TrimSpace(line)
-			if line == "" {
-				continue
-			}
-
-			parts := strings.Fields(line)
-			if len(parts) < 3 {
-				continue
-			}
-
-			additions, _ := strconv.Atoi(parts[0])
-			deletions, _ := strconv.Atoi(parts[1])
-			filePath := parts[2]
-
-			fileInfo := FileInfo{
-				Path:      filePath,
-				Status:    "staged",
-				Additions: additions,
-				Deletions: deletions,
-			}
-
-			// Get the actual diff for this file
-			diffCmd := exec.CommandContext(ctx, "git", "diff", "--cached", "--", filePath)
-			diffCmd.Dir = wt.workDir
-			if diffOut, err := diffCmd.Output(); err == nil {
-				fileInfo.Diff = string(diffOut)
-			}
-
-			update.Files[filePath] = fileInfo
-		}
-	}
-
-	return update, nil
-}
 
 // Subscriber management methods
 
@@ -625,39 +495,6 @@ func (wt *WorkspaceTracker) UnsubscribeFiles(sub FilesSubscriber) {
 	close(sub)
 }
 
-// SubscribeDiff creates a new diff subscriber
-func (wt *WorkspaceTracker) SubscribeDiff() DiffSubscriber {
-	sub := make(DiffSubscriber, 10)
-
-	wt.subMu.Lock()
-	wt.diffSubscribers[sub] = struct{}{}
-	wt.subMu.Unlock()
-
-	// Send current diff immediately
-	wt.mu.RLock()
-	current := wt.currentDiff
-	wt.mu.RUnlock()
-
-	if current.Timestamp.IsZero() {
-		current.Timestamp = time.Now()
-	}
-
-	select {
-	case sub <- current:
-	default:
-	}
-
-	return sub
-}
-
-// UnsubscribeDiff removes a diff subscriber
-func (wt *WorkspaceTracker) UnsubscribeDiff(sub DiffSubscriber) {
-	wt.subMu.Lock()
-	delete(wt.diffSubscribers, sub)
-	wt.subMu.Unlock()
-	close(sub)
-}
-
 // Notification methods
 
 // notifyGitStatusSubscribers notifies all git status subscribers
@@ -688,20 +525,6 @@ func (wt *WorkspaceTracker) notifyFilesSubscribers(update FileListUpdate) {
 	}
 }
 
-// notifyDiffSubscribers notifies all diff subscribers
-func (wt *WorkspaceTracker) notifyDiffSubscribers(update DiffUpdate) {
-	wt.subMu.RLock()
-	defer wt.subMu.RUnlock()
-
-	for sub := range wt.diffSubscribers {
-		select {
-		case sub <- update:
-		default:
-			// Subscriber is slow, skip
-		}
-	}
-}
-
 // GetCurrentGitStatus returns the current git status
 func (wt *WorkspaceTracker) GetCurrentGitStatus() GitStatusUpdate {
 	wt.mu.RLock()
@@ -714,13 +537,6 @@ func (wt *WorkspaceTracker) GetCurrentFiles() FileListUpdate {
 	wt.mu.RLock()
 	defer wt.mu.RUnlock()
 	return wt.currentFiles
-}
-
-// GetCurrentDiff returns the current diff
-func (wt *WorkspaceTracker) GetCurrentDiff() DiffUpdate {
-	wt.mu.RLock()
-	defer wt.mu.RUnlock()
-	return wt.currentDiff
 }
 
 

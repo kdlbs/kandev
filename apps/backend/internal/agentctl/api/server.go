@@ -78,10 +78,9 @@ func (s *Server) setupRoutes() {
 		api.GET("/output", s.handleGetOutput)
 		api.GET("/output/stream", s.handleOutputStreamWS)
 
-		// Workspace monitoring (git status, files, diff)
+		// Workspace monitoring (git status, files)
 		api.GET("/workspace/git-status/stream", s.handleGitStatusStreamWS)
 		api.GET("/workspace/files/stream", s.handleFilesStreamWS)
-		api.GET("/workspace/diff/stream", s.handleDiffStreamWS)
 	}
 }
 
