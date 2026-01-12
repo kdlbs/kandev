@@ -1,8 +1,19 @@
 #!/bin/bash
 #
-# End-to-End Test for Kandev - Comment System Focus
-# This script tests the comment system and agent interaction flow
-# using WebSocket-based communication with the backend.
+# End-to-End Test for Kandev - Comment System with Types
+#
+# This script tests the unified comment system that handles all task-related
+# communication including agent tool calls, content, progress, errors, and status.
+# It demonstrates the new comment type system:
+#   - message:   Regular user/agent messages
+#   - content:   Agent response content
+#   - tool_call: When agent uses a tool (file operations, commands)
+#   - progress:  Progress updates
+#   - error:     Error messages
+#   - status:    Status changes (started, completed, failed)
+#
+# The test creates a Python calculator task that forces the agent to use
+# tools (file creation, editing) so we can see different comment types in action.
 #
 # Prerequisites:
 # - Docker running with kandev/augment-agent:latest image built
@@ -81,18 +92,45 @@ log_info() {
     echo -e "${YELLOW}→ $1${NC}"
 }
 
+# Color codes for different comment types
+MAGENTA='\033[0;35m'
+WHITE='\033[1;37m'
+
 log_comment() {
     local author_type=$1
     local content=$2
     local requests_input=$3
+    local comment_type=$4
+    local has_metadata=$5
+
+    # Build type badge
+    local type_badge=""
+    case "$comment_type" in
+        "message")   type_badge="${WHITE}[msg]${NC}" ;;
+        "content")   type_badge="${CYAN}[content]${NC}" ;;
+        "tool_call") type_badge="${MAGENTA}[tool]${NC}" ;;
+        "progress")  type_badge="${YELLOW}[progress]${NC}" ;;
+        "error")     type_badge="${RED}[error]${NC}" ;;
+        "status")    type_badge="${BLUE}[status]${NC}" ;;
+        *)           type_badge="${WHITE}[${comment_type:-msg}]${NC}" ;;
+    esac
+
+    # Build metadata indicator
+    local meta_indicator=""
+    if [ "$has_metadata" == "true" ]; then
+        meta_indicator=" ${YELLOW}📎${NC}"
+    fi
+
+    # Build input indicator
+    local input_indicator=""
+    if [ "$requests_input" == "true" ]; then
+        input_indicator=" ${GREEN}⏳${NC}"
+    fi
+
     if [ "$author_type" == "user" ]; then
-        echo -e "${CYAN}  [USER]${NC} $content"
+        echo -e "  ${CYAN}👤 USER${NC} $type_badge$input_indicator$meta_indicator $content"
     else
-        if [ "$requests_input" == "true" ]; then
-            echo -e "${GREEN}  [AGENT] (requests input)${NC} $content"
-        else
-            echo -e "${GREEN}  [AGENT]${NC} $content"
-        fi
+        echo -e "  ${GREEN}🤖 AGENT${NC} $type_badge$input_indicator$meta_indicator $content"
     fi
 }
 
@@ -125,28 +163,93 @@ wait_for_server() {
     exit 1
 }
 
-# Display all comments for a task
+# Display all comments for a task with full details
 display_comments() {
     local task_id=$1
     local label=$2
 
-    COMMENTS_RESPONSE=$(ws_request "comment.list" "{\"task_id\": \"${task_id}\"}")
-    COMMENTS_COUNT=$(echo "$COMMENTS_RESPONSE" | jq 'if .payload | type == "array" then .payload | length else 0 end' 2>/dev/null || echo "0")
+    COMMENTS_RESPONSE=$(ws_request "comment.list" "{\"task_id\": \"${task_id}\"}" 2>/dev/null) || COMMENTS_RESPONSE='{}'
+    local first_response=$(echo "$COMMENTS_RESPONSE" | head -1)
+    COMMENTS_COUNT=$(echo "$first_response" | jq 'if .payload | type == "array" then .payload | length else 0 end' 2>/dev/null || echo "0")
+    # Ensure COMMENTS_COUNT is a valid number
+    if ! [[ "$COMMENTS_COUNT" =~ ^[0-9]+$ ]]; then
+        COMMENTS_COUNT=0
+    fi
 
-    echo -e "\n${CYAN}--- $label ($COMMENTS_COUNT comments) ---${NC}"
+    echo -e "\n${CYAN}╔══════════════════════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}║ $label ($COMMENTS_COUNT comments)${NC}"
+    echo -e "${CYAN}╠══════════════════════════════════════════════════════════════════════════════╣${NC}"
 
     if [ "$COMMENTS_COUNT" -gt 0 ]; then
-        echo "$COMMENTS_RESPONSE" | jq -r '.payload[] | "\(.author_type)|\(.requests_input)|\(.content)"' 2>/dev/null | while IFS='|' read -r author_type requests_input content; do
-            # Truncate long content for display
-            if [ ${#content} -gt 200 ]; then
-                content="${content:0:200}..."
-            fi
-            log_comment "$author_type" "$content" "$requests_input"
-        done
+        # Count by type (use first_response to ensure we have valid JSON)
+        local msg_count=$(echo "$first_response" | jq '[.payload[] | select(.type == "message" or .type == null or .type == "")] | length' 2>/dev/null || echo "0")
+        local content_count=$(echo "$first_response" | jq '[.payload[] | select(.type == "content")] | length' 2>/dev/null || echo "0")
+        local tool_count=$(echo "$first_response" | jq '[.payload[] | select(.type == "tool_call")] | length' 2>/dev/null || echo "0")
+        local progress_count=$(echo "$first_response" | jq '[.payload[] | select(.type == "progress")] | length' 2>/dev/null || echo "0")
+        local error_count=$(echo "$first_response" | jq '[.payload[] | select(.type == "error")] | length' 2>/dev/null || echo "0")
+        local status_count=$(echo "$first_response" | jq '[.payload[] | select(.type == "status")] | length' 2>/dev/null || echo "0")
+
+        echo -e "${CYAN}║${NC} Types: ${WHITE}msg:$msg_count${NC} ${CYAN}content:$content_count${NC} ${MAGENTA}tool:$tool_count${NC} ${YELLOW}progress:$progress_count${NC} ${RED}error:$error_count${NC} ${BLUE}status:$status_count${NC}"
+        echo -e "${CYAN}╟──────────────────────────────────────────────────────────────────────────────╢${NC}"
+
+        # Process each comment - use head -1 to ensure we only get the first response line
+        local first_response=$(echo "$COMMENTS_RESPONSE" | head -1)
+        local comment_count=$(echo "$first_response" | jq '.payload | length' 2>/dev/null || echo "0")
+        # Ensure comment_count is a valid number
+        if ! [[ "$comment_count" =~ ^[0-9]+$ ]]; then
+            comment_count=0
+        fi
+        if [ "$comment_count" -gt 0 ]; then
+            for i in $(seq 0 $((comment_count - 1))); do
+                local author_type=$(echo "$first_response" | jq -r ".payload[$i].author_type // \"user\"" 2>/dev/null) || author_type="user"
+                local requests_input=$(echo "$first_response" | jq -r ".payload[$i].requests_input // false" 2>/dev/null) || requests_input="false"
+                local comment_type=$(echo "$first_response" | jq -r ".payload[$i].type // \"message\"" 2>/dev/null) || comment_type="message"
+                local has_metadata=$(echo "$first_response" | jq -r "if .payload[$i].metadata then \"true\" else \"false\" end" 2>/dev/null) || has_metadata="false"
+                local content=$(echo "$first_response" | jq -r ".payload[$i].content // \"\"" 2>/dev/null) || content=""
+
+                # Remove newlines from content
+                content=$(echo "$content" | tr '\n' ' ' | tr '\r' ' ')
+                # Truncate long content for display
+                if [ ${#content} -gt 100 ]; then
+                    content="${content:0:100}..."
+                fi
+                # Show placeholder if content is empty
+                if [ -z "$content" ]; then
+                    content="(empty)"
+                fi
+                log_comment "$author_type" "$content" "$requests_input" "$comment_type" "$has_metadata"
+            done
+        fi
     else
         echo -e "  ${YELLOW}(no comments yet)${NC}"
     fi
-    echo -e "${CYAN}---${NC}"
+    echo -e "${CYAN}╚══════════════════════════════════════════════════════════════════════════════╝${NC}"
+}
+
+# Display detailed metadata for tool_call comments
+display_tool_calls() {
+    local task_id=$1
+
+    COMMENTS_RESPONSE=$(ws_request "comment.list" "{\"task_id\": \"${task_id}\"}" 2>/dev/null) || COMMENTS_RESPONSE='{}'
+    local first_response=$(echo "$COMMENTS_RESPONSE" | head -1)
+    TOOL_CALLS=$(echo "$first_response" | jq '[.payload[] | select(.type == "tool_call")]' 2>/dev/null) || TOOL_CALLS='[]'
+    TOOL_COUNT=$(echo "$TOOL_CALLS" | jq 'length' 2>/dev/null || echo "0")
+    # Ensure TOOL_COUNT is a valid number
+    if ! [[ "$TOOL_COUNT" =~ ^[0-9]+$ ]]; then
+        TOOL_COUNT=0
+    fi
+
+    if [ "$TOOL_COUNT" -gt 0 ]; then
+        echo -e "\n${MAGENTA}╔══════════════════════════════════════════════════════════════════════════════╗${NC}"
+        echo -e "${MAGENTA}║ Tool Calls Detail ($TOOL_COUNT tools used)${NC}"
+        echo -e "${MAGENTA}╠══════════════════════════════════════════════════════════════════════════════╣${NC}"
+
+        echo "$TOOL_CALLS" | jq -r '.[] | "TOOL: \(.metadata.tool_name // .metadata.name // "unknown") | \(.content[:80] // "no content")"' 2>/dev/null | while read -r line; do
+            echo -e "${MAGENTA}║${NC} $line"
+        done || true
+
+        echo -e "${MAGENTA}╚══════════════════════════════════════════════════════════════════════════════╝${NC}"
+    fi
 }
 
 # Check prerequisites
@@ -221,8 +324,8 @@ wait_for_server
 # Run the E2E test
 log_step "Step 1: Create Workspace"
 WORKSPACE_RESPONSE=$(ws_request "workspace.create" '{"name": "E2E Test Workspace", "description": "Automated end-to-end test workspace"}')
-WORKSPACE_ID=$(echo "$WORKSPACE_RESPONSE" | jq -r '.payload.id' | tr -d '\n\r')
-if [ "$WORKSPACE_ID" == "null" ] || [ -z "$WORKSPACE_ID" ]; then
+WORKSPACE_ID=$(echo "$WORKSPACE_RESPONSE" | head -1 | jq -r '.payload.id // empty' 2>/dev/null)
+if [ -z "$WORKSPACE_ID" ]; then
     log_error "Failed to create workspace"
     echo "$WORKSPACE_RESPONSE"
     exit 1
@@ -231,8 +334,8 @@ log_success "Created workspace: $WORKSPACE_ID"
 
 log_step "Step 2: Create Board"
 BOARD_RESPONSE=$(ws_request "board.create" "{\"workspace_id\": \"${WORKSPACE_ID}\", \"name\": \"E2E Test Board\", \"description\": \"Automated end-to-end test\"}")
-BOARD_ID=$(echo "$BOARD_RESPONSE" | jq -r '.payload.id' | tr -d '\n\r')
-if [ "$BOARD_ID" == "null" ] || [ -z "$BOARD_ID" ]; then
+BOARD_ID=$(echo "$BOARD_RESPONSE" | head -1 | jq -r '.payload.id // empty' 2>/dev/null)
+if [ -z "$BOARD_ID" ]; then
     log_error "Failed to create board"
     echo "$BOARD_RESPONSE"
     exit 1
@@ -241,8 +344,8 @@ log_success "Created board: $BOARD_ID"
 
 log_step "Step 3: Create Column"
 COLUMN_RESPONSE=$(ws_request "column.create" "{\"board_id\": \"${BOARD_ID}\", \"name\": \"To Do\", \"position\": 0}")
-COLUMN_ID=$(echo "$COLUMN_RESPONSE" | jq -r '.payload.id' | tr -d '\n\r')
-if [ "$COLUMN_ID" == "null" ] || [ -z "$COLUMN_ID" ]; then
+COLUMN_ID=$(echo "$COLUMN_RESPONSE" | head -1 | jq -r '.payload.id // empty' 2>/dev/null)
+if [ -z "$COLUMN_ID" ]; then
     log_error "Failed to create column"
     echo "$COLUMN_RESPONSE"
     exit 1
@@ -254,11 +357,19 @@ log_step "Step 4: Create Task for Comment System Test"
 TEST_WORKSPACE_DIR=$(mktemp -d)
 log_info "Test workspace: $TEST_WORKSPACE_DIR"
 
-# Create task that will trigger multi-turn conversation
+# Initialize a git repo in the temp directory so the agent can work with it
+cd "$TEST_WORKSPACE_DIR"
+git init -q
+echo "# E2E Test Workspace" > README.md
+git add README.md
+git commit -q -m "Initial commit"
+cd "$SCRIPT_DIR/.."
+
+# Create task that will force agent to use tools (file operations, code writing)
 TASK_PAYLOAD=$(cat <<EOF
 {
-    "title": "Comment System Test - Multi-turn Conversation",
-    "description": "I need help with a calculation. Please ask me what numbers I want to add together, then perform the calculation when I provide them.",
+    "title": "E2E Test: Create a Python Calculator Module",
+    "description": "Create a simple Python calculator module with the following requirements:\n\n1. Create a file called 'calculator.py' with functions: add, subtract, multiply, divide\n2. Each function should take two numbers and return the result\n3. The divide function should handle division by zero\n4. Create a 'test_calculator.py' file with basic tests for each function\n\nPlease start by creating the calculator.py file first, then wait for my feedback before creating the tests.",
     "workspace_id": "${WORKSPACE_ID}",
     "board_id": "${BOARD_ID}",
     "column_id": "${COLUMN_ID}",
@@ -268,8 +379,9 @@ TASK_PAYLOAD=$(cat <<EOF
 EOF
 )
 TASK_RESPONSE=$(ws_request "task.create" "$TASK_PAYLOAD")
-TASK_ID=$(echo "$TASK_RESPONSE" | jq -r '.payload.id' | tr -d '\n\r')
-if [ "$TASK_ID" == "null" ] || [ -z "$TASK_ID" ]; then
+# Extract only the first valid JSON line and parse the id
+TASK_ID=$(echo "$TASK_RESPONSE" | head -1 | jq -r '.payload.id // empty' 2>/dev/null)
+if [ -z "$TASK_ID" ]; then
     log_error "Failed to create task"
     echo "$TASK_RESPONSE"
     exit 1
@@ -281,7 +393,7 @@ log_step "Step 5: Test comment.add Before Agent Start"
 PRE_COMMENT_PAYLOAD=$(cat <<EOF
 {
     "task_id": "${TASK_ID}",
-    "content": "Initial user note: Please be concise in your responses.",
+    "content": "Note: Use simple, clear code. No external dependencies needed.",
     "author_id": "e2e-test-user"
 }
 EOF
@@ -301,8 +413,8 @@ log_info "Comments before agent start: $INITIAL_COUNT"
 
 log_step "Step 6: Start Task via Orchestrator"
 START_RESPONSE=$(ws_request "orchestrator.start" "{\"task_id\": \"${TASK_ID}\"}")
-AGENT_ID=$(echo "$START_RESPONSE" | jq -r '.payload.agent_instance_id' | tr -d '\n\r')
-if [ "$AGENT_ID" == "null" ] || [ -z "$AGENT_ID" ]; then
+AGENT_ID=$(echo "$START_RESPONSE" | head -1 | jq -r '.payload.agent_instance_id // empty' 2>/dev/null)
+if [ -z "$AGENT_ID" ]; then
     log_error "Failed to start task"
     echo "$START_RESPONSE"
     exit 1
@@ -343,33 +455,38 @@ if [ "$AGENT_READY" != "true" ]; then
     exit 1
 fi
 
-# Display comments after first agent response
-display_comments "$TASK_ID" "After Initial Agent Response"
+# Display comments after first agent response (should include tool_call for creating calculator.py)
+display_comments "$TASK_ID" "After Initial Agent Response (should have tool calls)"
+display_tool_calls "$TASK_ID"
 
-log_step "Step 8: Multi-Turn Conversation - Turn 1"
-# User Comment Turn 1: Provide the numbers
+# Check if calculator.py was created
+if [ -f "$TEST_WORKSPACE_DIR/calculator.py" ]; then
+    log_success "calculator.py was created!"
+    log_info "File contents:"
+    echo -e "${CYAN}---${NC}"
+    head -20 "$TEST_WORKSPACE_DIR/calculator.py"
+    echo -e "${CYAN}---${NC}"
+else
+    log_info "calculator.py not created yet (agent may still be working)"
+fi
+
+log_step "Step 8: Multi-Turn Conversation - Turn 1 (Request changes)"
+# User Comment Turn 1: Request a modification
 log_info "Sending user comment via comment.add..."
-TURN1_PAYLOAD=$(cat <<EOF
-{
-    "task_id": "${TASK_ID}",
-    "content": "Please add 42 and 58 together.",
-    "author_id": "e2e-test-user"
-}
-EOF
-)
-TURN1_RESPONSE=$(ws_request "comment.add" "$TURN1_PAYLOAD")
-TURN1_ID=$(echo "$TURN1_RESPONSE" | jq -r '.payload.id // empty')
+TURN1_PAYLOAD="{\"task_id\": \"${TASK_ID}\", \"content\": \"Great work on the calculator! Please also add a power function that calculates x raised to the power of y. Then show me the updated file.\", \"author_id\": \"e2e-test-user\"}"
+TURN1_RESPONSE=$(ws_request "comment.add" "$TURN1_PAYLOAD" 2>/dev/null) || TURN1_RESPONSE='{}'
+TURN1_ID=$(echo "$TURN1_RESPONSE" | head -1 | jq -r '.payload.id // empty' 2>/dev/null) || TURN1_ID=""
 if [ -n "$TURN1_ID" ]; then
     log_success "User comment added: $TURN1_ID"
 else
-    log_info "comment.add response: $(echo "$TURN1_RESPONSE" | jq -c '.payload')"
+    log_info "comment.add response: $(echo "$TURN1_RESPONSE" | head -1 | jq -c '.payload' 2>/dev/null || echo 'parse error')"
 fi
 
 # Wait for agent to process and respond
 log_info "Waiting for agent to respond to comment..."
 for i in $(seq 1 $WAIT_FOR_AGENT_SECONDS); do
-    AGENT_STATUS_RESPONSE=$(ws_request "agent.status" "{\"agent_id\": \"${AGENT_ID}\"}" 2>/dev/null || echo '{}')
-    AGENT_STATUS=$(echo "$AGENT_STATUS_RESPONSE" | jq -r '.payload.status // "UNKNOWN"')
+    AGENT_STATUS_RESPONSE=$(ws_request "agent.status" "{\"agent_id\": \"${AGENT_ID}\"}" 2>/dev/null) || AGENT_STATUS_RESPONSE='{}'
+    AGENT_STATUS=$(echo "$AGENT_STATUS_RESPONSE" | head -1 | jq -r '.payload.status // "UNKNOWN"' 2>/dev/null) || AGENT_STATUS="UNKNOWN"
     if [ "$AGENT_STATUS" == "READY" ]; then
         log_success "Agent READY after Turn 1 ($i seconds)"
         break
@@ -380,20 +497,14 @@ for i in $(seq 1 $WAIT_FOR_AGENT_SECONDS); do
     sleep 1
 done
 
-display_comments "$TASK_ID" "After Turn 1"
+display_comments "$TASK_ID" "After Turn 1 (power function request)"
+display_tool_calls "$TASK_ID"
 
-log_step "Step 9: Multi-Turn Conversation - Turn 2"
-# User Comment Turn 2: Ask for verification
-TURN2_PAYLOAD=$(cat <<EOF
-{
-    "task_id": "${TASK_ID}",
-    "content": "Great! Now can you also add 100 to that result?",
-    "author_id": "e2e-test-user"
-}
-EOF
-)
-TURN2_RESPONSE=$(ws_request "comment.add" "$TURN2_PAYLOAD")
-TURN2_ID=$(echo "$TURN2_RESPONSE" | jq -r '.payload.id // empty')
+log_step "Step 9: Multi-Turn Conversation - Turn 2 (Request tests)"
+# User Comment Turn 2: Request test file
+TURN2_PAYLOAD="{\"task_id\": \"${TASK_ID}\", \"content\": \"Now please create the test_calculator.py file with tests for all functions including the power function. Use Python unittest module.\", \"author_id\": \"e2e-test-user\"}"
+TURN2_RESPONSE=$(ws_request "comment.add" "$TURN2_PAYLOAD" 2>/dev/null) || TURN2_RESPONSE='{}'
+TURN2_ID=$(echo "$TURN2_RESPONSE" | head -1 | jq -r '.payload.id // empty' 2>/dev/null) || TURN2_ID=""
 if [ -n "$TURN2_ID" ]; then
     log_success "User comment (Turn 2) added: $TURN2_ID"
 fi
@@ -401,8 +512,8 @@ fi
 # Wait for agent response
 log_info "Waiting for agent to respond..."
 for i in $(seq 1 $WAIT_FOR_AGENT_SECONDS); do
-    AGENT_STATUS_RESPONSE=$(ws_request "agent.status" "{\"agent_id\": \"${AGENT_ID}\"}" 2>/dev/null || echo '{}')
-    AGENT_STATUS=$(echo "$AGENT_STATUS_RESPONSE" | jq -r '.payload.status // "UNKNOWN"')
+    AGENT_STATUS_RESPONSE=$(ws_request "agent.status" "{\"agent_id\": \"${AGENT_ID}\"}" 2>/dev/null) || AGENT_STATUS_RESPONSE='{}'
+    AGENT_STATUS=$(echo "$AGENT_STATUS_RESPONSE" | head -1 | jq -r '.payload.status // "UNKNOWN"' 2>/dev/null) || AGENT_STATUS="UNKNOWN"
     if [ "$AGENT_STATUS" == "READY" ]; then
         log_success "Agent READY after Turn 2 ($i seconds)"
         break
@@ -413,20 +524,21 @@ for i in $(seq 1 $WAIT_FOR_AGENT_SECONDS); do
     sleep 1
 done
 
-display_comments "$TASK_ID" "After Turn 2"
+display_comments "$TASK_ID" "After Turn 2 (test file request)"
+display_tool_calls "$TASK_ID"
 
-log_step "Step 10: Multi-Turn Conversation - Turn 3"
-# User Comment Turn 3: Final request
-TURN3_PAYLOAD=$(cat <<EOF
-{
-    "task_id": "${TASK_ID}",
-    "content": "Perfect! Please write the final result to a file called 'result.txt' in the workspace.",
-    "author_id": "e2e-test-user"
-}
-EOF
-)
-TURN3_RESPONSE=$(ws_request "comment.add" "$TURN3_PAYLOAD")
-TURN3_ID=$(echo "$TURN3_RESPONSE" | jq -r '.payload.id // empty')
+# Check if test file was created
+if [ -f "$TEST_WORKSPACE_DIR/test_calculator.py" ]; then
+    log_success "test_calculator.py was created!"
+else
+    log_info "test_calculator.py not created yet"
+fi
+
+log_step "Step 10: Multi-Turn Conversation - Turn 3 (Run tests)"
+# User Comment Turn 3: Run the tests
+TURN3_PAYLOAD="{\"task_id\": \"${TASK_ID}\", \"content\": \"Please run the tests using python -m pytest test_calculator.py -v or python -m unittest test_calculator -v and show me the results.\", \"author_id\": \"e2e-test-user\"}"
+TURN3_RESPONSE=$(ws_request "comment.add" "$TURN3_PAYLOAD" 2>/dev/null) || TURN3_RESPONSE='{}'
+TURN3_ID=$(echo "$TURN3_RESPONSE" | head -1 | jq -r '.payload.id // empty' 2>/dev/null) || TURN3_ID=""
 if [ -n "$TURN3_ID" ]; then
     log_success "User comment (Turn 3) added: $TURN3_ID"
 fi
@@ -434,8 +546,8 @@ fi
 # Wait for final agent response
 log_info "Waiting for agent to complete..."
 for i in $(seq 1 $WAIT_FOR_AGENT_SECONDS); do
-    AGENT_STATUS_RESPONSE=$(ws_request "agent.status" "{\"agent_id\": \"${AGENT_ID}\"}" 2>/dev/null || echo '{}')
-    AGENT_STATUS=$(echo "$AGENT_STATUS_RESPONSE" | jq -r '.payload.status // "UNKNOWN"')
+    AGENT_STATUS_RESPONSE=$(ws_request "agent.status" "{\"agent_id\": \"${AGENT_ID}\"}" 2>/dev/null) || AGENT_STATUS_RESPONSE='{}'
+    AGENT_STATUS=$(echo "$AGENT_STATUS_RESPONSE" | head -1 | jq -r '.payload.status // "UNKNOWN"' 2>/dev/null) || AGENT_STATUS="UNKNOWN"
     if [ "$AGENT_STATUS" == "READY" ]; then
         log_success "Agent READY after Turn 3 ($i seconds)"
         break
@@ -446,121 +558,214 @@ for i in $(seq 1 $WAIT_FOR_AGENT_SECONDS); do
     sleep 1
 done
 
-display_comments "$TASK_ID" "After Turn 3 (Final Conversation)"
+display_comments "$TASK_ID" "After Turn 3 (test execution)"
+display_tool_calls "$TASK_ID"
 
-log_step "Step 11: Verify Comment Metadata"
+log_step "Step 11: Verify Comment Types and Metadata"
 # Get all comments and verify metadata
-FINAL_COMMENTS=$(ws_request "comment.list" "{\"task_id\": \"${TASK_ID}\"}")
-COMMENT_COUNT=$(echo "$FINAL_COMMENTS" | jq 'if .payload | type == "array" then .payload | length else 0 end' 2>/dev/null || echo "0")
+log_info "Querying comments for task: $TASK_ID"
+FINAL_COMMENTS=$(ws_request "comment.list" "{\"task_id\": \"${TASK_ID}\"}" 2>/dev/null) || FINAL_COMMENTS='{}'
+FINAL_COMMENTS_LINE=$(echo "$FINAL_COMMENTS" | head -1)
+log_info "DEBUG: Raw response length: ${#FINAL_COMMENTS_LINE} chars"
+log_info "DEBUG: Response preview: ${FINAL_COMMENTS_LINE:0:200}"
+COMMENT_COUNT=$(echo "$FINAL_COMMENTS_LINE" | jq 'if .payload | type == "array" then .payload | length else 0 end' 2>/dev/null || echo "0")
 log_info "Total comments in conversation: $COMMENT_COUNT"
 
 # Count by author type
-USER_COMMENTS=$(echo "$FINAL_COMMENTS" | jq '[.payload[] | select(.author_type == "user")] | length' 2>/dev/null || echo "0")
-AGENT_COMMENTS=$(echo "$FINAL_COMMENTS" | jq '[.payload[] | select(.author_type == "agent")] | length' 2>/dev/null || echo "0")
+USER_COMMENTS=$(echo "$FINAL_COMMENTS_LINE" | jq '[.payload[] | select(.author_type == "user")] | length' 2>/dev/null || echo "0")
+AGENT_COMMENTS=$(echo "$FINAL_COMMENTS_LINE" | jq '[.payload[] | select(.author_type == "agent")] | length' 2>/dev/null || echo "0")
 log_info "User comments: $USER_COMMENTS, Agent comments: $AGENT_COMMENTS"
 
+# Count by comment type
+MSG_COUNT=$(echo "$FINAL_COMMENTS_LINE" | jq '[.payload[] | select(.type == "message" or .type == null or .type == "")] | length' 2>/dev/null || echo "0")
+CONTENT_COUNT=$(echo "$FINAL_COMMENTS_LINE" | jq '[.payload[] | select(.type == "content")] | length' 2>/dev/null || echo "0")
+TOOL_CALL_COUNT=$(echo "$FINAL_COMMENTS_LINE" | jq '[.payload[] | select(.type == "tool_call")] | length' 2>/dev/null || echo "0")
+PROGRESS_COUNT=$(echo "$FINAL_COMMENTS_LINE" | jq '[.payload[] | select(.type == "progress")] | length' 2>/dev/null || echo "0")
+ERROR_COUNT=$(echo "$FINAL_COMMENTS_LINE" | jq '[.payload[] | select(.type == "error")] | length' 2>/dev/null || echo "0")
+STATUS_COUNT=$(echo "$FINAL_COMMENTS_LINE" | jq '[.payload[] | select(.type == "status")] | length' 2>/dev/null || echo "0")
+
+log_info "Comment types breakdown:"
+log_info "  - message: $MSG_COUNT"
+log_info "  - content: $CONTENT_COUNT"
+log_info "  - tool_call: $TOOL_CALL_COUNT"
+log_info "  - progress: $PROGRESS_COUNT"
+log_info "  - error: $ERROR_COUNT"
+log_info "  - status: $STATUS_COUNT"
+
+# Count comments with metadata
+METADATA_COUNT=$(echo "$FINAL_COMMENTS_LINE" | jq '[.payload[] | select(.metadata != null)] | length' 2>/dev/null || echo "0")
+if [[ "$METADATA_COUNT" =~ ^[0-9]+$ ]] && [ "$METADATA_COUNT" -gt 0 ]; then
+    log_success "Found $METADATA_COUNT comment(s) with metadata"
+else
+    log_info "No comments have metadata attached"
+fi
+
 # Check for requests_input flag
-REQUESTS_INPUT_COUNT=$(echo "$FINAL_COMMENTS" | jq '[.payload[] | select(.requests_input == true)] | length' 2>/dev/null || echo "0")
-if [ "$REQUESTS_INPUT_COUNT" -gt 0 ]; then
+REQUESTS_INPUT_COUNT=$(echo "$FINAL_COMMENTS_LINE" | jq '[.payload[] | select(.requests_input == true)] | length' 2>/dev/null || echo "0")
+if [[ "$REQUESTS_INPUT_COUNT" =~ ^[0-9]+$ ]] && [ "$REQUESTS_INPUT_COUNT" -gt 0 ]; then
     log_success "Found $REQUESTS_INPUT_COUNT comment(s) with requests_input=true"
 else
     log_info "No comments with requests_input=true (agent didn't explicitly request input)"
 fi
 
 # Verify timestamps are present
-HAS_TIMESTAMPS=$(echo "$FINAL_COMMENTS" | jq 'if .payload | type == "array" and (.payload | length) > 0 then (.payload[0].created_at != null) else false end' 2>/dev/null || echo "false")
+HAS_TIMESTAMPS=$(echo "$FINAL_COMMENTS_LINE" | jq 'if .payload | type == "array" and (.payload | length) > 0 then (.payload[0].created_at != null) else false end' 2>/dev/null || echo "false")
 if [ "$HAS_TIMESTAMPS" == "true" ]; then
     log_success "Comments have created_at timestamps"
 fi
 
+# Check for files created
+log_step "Step 11b: Verify Files Created"
+if [ -f "$TEST_WORKSPACE_DIR/calculator.py" ]; then
+    log_success "calculator.py exists"
+    CALC_LINES=$(wc -l < "$TEST_WORKSPACE_DIR/calculator.py") || CALC_LINES=0
+    log_info "  Lines: $CALC_LINES"
+else
+    log_info "calculator.py not found"
+fi
+
+if [ -f "$TEST_WORKSPACE_DIR/test_calculator.py" ]; then
+    log_success "test_calculator.py exists"
+    TEST_LINES=$(wc -l < "$TEST_WORKSPACE_DIR/test_calculator.py") || TEST_LINES=0
+    log_info "  Lines: $TEST_LINES"
+else
+    log_info "test_calculator.py not found"
+fi
+
 log_step "Step 12: Complete Task and Verify Final State"
-COMPLETE_RESPONSE=$(ws_request "orchestrator.complete" "{\"task_id\": \"${TASK_ID}\"}")
-COMPLETE_SUCCESS=$(echo "$COMPLETE_RESPONSE" | jq -r '.payload.success // false')
+COMPLETE_RESPONSE=$(ws_request "orchestrator.complete" "{\"task_id\": \"${TASK_ID}\"}" 2>/dev/null) || COMPLETE_RESPONSE='{}'
+COMPLETE_SUCCESS=$(echo "$COMPLETE_RESPONSE" | head -1 | jq -r '.payload.success // false' 2>/dev/null) || COMPLETE_SUCCESS="false"
 if [ "$COMPLETE_SUCCESS" == "true" ]; then
     log_success "Task completed successfully"
 else
-    log_info "Complete response: $(echo "$COMPLETE_RESPONSE" | jq -c '.payload')"
+    log_info "Complete response: $(echo "$COMPLETE_RESPONSE" | head -1 | jq -c '.payload' 2>/dev/null || echo 'parse error')"
 fi
 
 # Verify task state
-FINAL_TASK=$(ws_request "task.get" "{\"id\": \"${TASK_ID}\"}")
-TASK_STATE=$(echo "$FINAL_TASK" | jq -r '.payload.state')
+FINAL_TASK=$(ws_request "task.get" "{\"id\": \"${TASK_ID}\"}" 2>/dev/null) || FINAL_TASK='{}'
+FINAL_TASK_LINE=$(echo "$FINAL_TASK" | head -1)
+TASK_STATE=$(echo "$FINAL_TASK_LINE" | jq -r '.payload.state' 2>/dev/null) || TASK_STATE="UNKNOWN"
 log_info "Final task state: $TASK_STATE"
 
 # Check for session ID in metadata
-SESSION_ID=$(echo "$FINAL_TASK" | jq -r '.payload.metadata.auggie_session_id // empty')
+SESSION_ID=$(echo "$FINAL_TASK_LINE" | jq -r '.payload.metadata.auggie_session_id // empty' 2>/dev/null) || SESSION_ID=""
 if [ -n "$SESSION_ID" ]; then
     log_success "Session ID stored: ${SESSION_ID:0:20}..."
 fi
 
-# Clean up
-rm -rf "$TEST_WORKSPACE_DIR" 2>/dev/null || true
-
 # Summary
 log_step "Test Summary"
+
+# Debug output for variables
+log_info "DEBUG: TASK_ID=$TASK_ID"
+log_info "DEBUG: TURN1_ID=$TURN1_ID, TURN2_ID=$TURN2_ID, TURN3_ID=$TURN3_ID"
+log_info "DEBUG: COMMENT_COUNT=$COMMENT_COUNT, USER_COMMENTS=$USER_COMMENTS"
+log_info "DEBUG: MSG_COUNT=$MSG_COUNT, CONTENT_COUNT=$CONTENT_COUNT, TOOL_CALL_COUNT=$TOOL_CALL_COUNT"
+log_info "DEBUG: TEST_WORKSPACE_DIR=$TEST_WORKSPACE_DIR"
+log_info "DEBUG: Files exist check: calculator.py=$([ -f "$TEST_WORKSPACE_DIR/calculator.py" ] && echo YES || echo NO)"
 
 # Determine test results
 COMMENT_ADD_PASSED=false
 COMMENT_LIST_PASSED=false
 MULTI_TURN_PASSED=false
 METADATA_PASSED=false
+TOOL_CALLS_PASSED=false
+FILES_CREATED_PASSED=false
 
-[ -n "$TURN1_ID" ] && [ -n "$TURN2_ID" ] && [ -n "$TURN3_ID" ] && COMMENT_ADD_PASSED=true
-[ "$COMMENT_COUNT" -gt 0 ] && COMMENT_LIST_PASSED=true
-[ "$USER_COMMENTS" -ge 3 ] && MULTI_TURN_PASSED=true
+# Check for files BEFORE cleanup
+[ -f "$TEST_WORKSPACE_DIR/calculator.py" ] && FILES_CREATED_PASSED=true
+
+# Safely check conditions with defaults for empty values
+[[ -n "$TURN1_ID" && -n "$TURN2_ID" && -n "$TURN3_ID" ]] && COMMENT_ADD_PASSED=true
+[[ "$COMMENT_COUNT" =~ ^[0-9]+$ ]] && [ "$COMMENT_COUNT" -gt 0 ] && COMMENT_LIST_PASSED=true
+[[ "$USER_COMMENTS" =~ ^[0-9]+$ ]] && [ "$USER_COMMENTS" -ge 3 ] && MULTI_TURN_PASSED=true
 [ "$HAS_TIMESTAMPS" == "true" ] && METADATA_PASSED=true
+[[ "$TOOL_CALL_COUNT" =~ ^[0-9]+$ ]] && [ "$TOOL_CALL_COUNT" -gt 0 ] && TOOL_CALLS_PASSED=true
 
-echo -e "\n${GREEN}╔═══════════════════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║     Comment System E2E Test Results                   ║${NC}"
-echo -e "${GREEN}╠═══════════════════════════════════════════════════════╣${NC}"
+echo -e "\n${GREEN}╔════════════════════════════════════════════════════════════════════╗${NC}"
+echo -e "${GREEN}║          Comment System E2E Test Results                           ║${NC}"
+echo -e "${GREEN}╠════════════════════════════════════════════════════════════════════╣${NC}"
+
+# Comment Types Section
+echo -e "${GREEN}║ ${WHITE}COMMENT TYPES${NC}                                                       ${GREEN}║${NC}"
+echo -e "${GREEN}╟────────────────────────────────────────────────────────────────────╢${NC}"
+printf "${GREEN}║${NC}   message:    %-5s  content:   %-5s  tool_call: %-5s          ${GREEN}║${NC}\n" "$MSG_COUNT" "$CONTENT_COUNT" "$TOOL_CALL_COUNT"
+printf "${GREEN}║${NC}   progress:   %-5s  error:     %-5s  status:    %-5s          ${GREEN}║${NC}\n" "$PROGRESS_COUNT" "$ERROR_COUNT" "$STATUS_COUNT"
+echo -e "${GREEN}╟────────────────────────────────────────────────────────────────────╢${NC}"
 
 # Core functionality
+echo -e "${GREEN}║ ${WHITE}CORE FUNCTIONALITY${NC}                                                  ${GREEN}║${NC}"
+echo -e "${GREEN}╟────────────────────────────────────────────────────────────────────╢${NC}"
+
 if [ "$COMMENT_ADD_PASSED" == "true" ]; then
-    echo -e "${GREEN}║ comment.add:              ✓ (3 user comments)          ║${NC}"
+    echo -e "${GREEN}║${NC}   comment.add:              ${GREEN}✓${NC} (3 user comments)                    ${GREEN}║${NC}"
 else
-    echo -e "${RED}║ comment.add:              ✗                            ║${NC}"
+    echo -e "${GREEN}║${NC}   comment.add:              ${RED}✗${NC}                                       ${GREEN}║${NC}"
 fi
 
 if [ "$COMMENT_LIST_PASSED" == "true" ]; then
-    echo -e "${GREEN}║ comment.list:             ✓ ($COMMENT_COUNT total comments)         ║${NC}"
+    printf "${GREEN}║${NC}   comment.list:             ${GREEN}✓${NC} (%-3s total comments)                 ${GREEN}║${NC}\n" "$COMMENT_COUNT"
 else
-    echo -e "${RED}║ comment.list:             ✗                            ║${NC}"
+    echo -e "${GREEN}║${NC}   comment.list:             ${RED}✗${NC}                                       ${GREEN}║${NC}"
+fi
+
+if [ "$TOOL_CALLS_PASSED" == "true" ]; then
+    printf "${GREEN}║${NC}   Tool calls:               ${GREEN}✓${NC} (%-3s tool_call comments)             ${GREEN}║${NC}\n" "$TOOL_CALL_COUNT"
+else
+    echo -e "${GREEN}║${NC}   Tool calls:               ${YELLOW}○${NC} (no tool_call comments)              ${GREEN}║${NC}"
 fi
 
 if [ "$MULTI_TURN_PASSED" == "true" ]; then
-    echo -e "${GREEN}║ Multi-turn conversation:  ✓ (3 turns completed)        ║${NC}"
+    echo -e "${GREEN}║${NC}   Multi-turn conversation:  ${GREEN}✓${NC} (3 turns completed)                  ${GREEN}║${NC}"
 else
-    echo -e "${YELLOW}║ Multi-turn conversation:  ○ (partial)                  ║${NC}"
+    echo -e "${GREEN}║${NC}   Multi-turn conversation:  ${YELLOW}○${NC} (partial)                            ${GREEN}║${NC}"
 fi
 
 if [ "$AGENT_COMMENTS" -gt 0 ]; then
-    echo -e "${GREEN}║ Agent responses:          ✓ ($AGENT_COMMENTS agent comments)        ║${NC}"
+    printf "${GREEN}║${NC}   Agent responses:          ${GREEN}✓${NC} (%-3s agent comments)                 ${GREEN}║${NC}\n" "$AGENT_COMMENTS"
 else
-    echo -e "${YELLOW}║ Agent responses:          ○ (pending)                  ║${NC}"
+    echo -e "${GREEN}║${NC}   Agent responses:          ${YELLOW}○${NC} (pending)                            ${GREEN}║${NC}"
 fi
 
-if [ "$METADATA_PASSED" == "true" ]; then
-    echo -e "${GREEN}║ Comment metadata:         ✓ (timestamps present)       ║${NC}"
+if [ "$METADATA_COUNT" -gt 0 ]; then
+    printf "${GREEN}║${NC}   Comments with metadata:   ${GREEN}✓${NC} (%-3s comments)                       ${GREEN}║${NC}\n" "$METADATA_COUNT"
 else
-    echo -e "${YELLOW}║ Comment metadata:         ○                            ║${NC}"
+    echo -e "${GREEN}║${NC}   Comments with metadata:   ${YELLOW}○${NC} (none)                               ${GREEN}║${NC}"
 fi
 
-if [ "$REQUESTS_INPUT_COUNT" -gt 0 ]; then
-    echo -e "${GREEN}║ Input request flow:       ✓ ($REQUESTS_INPUT_COUNT requests)             ║${NC}"
+echo -e "${GREEN}╟────────────────────────────────────────────────────────────────────╢${NC}"
+echo -e "${GREEN}║ ${WHITE}FILE OPERATIONS${NC}                                                     ${GREEN}║${NC}"
+echo -e "${GREEN}╟────────────────────────────────────────────────────────────────────╢${NC}"
+
+if [ "$FILES_CREATED_PASSED" == "true" ]; then
+    echo -e "${GREEN}║${NC}   calculator.py:            ${GREEN}✓${NC} (created by agent)                   ${GREEN}║${NC}"
 else
-    echo -e "${YELLOW}║ Input request flow:       ○ (not triggered)            ║${NC}"
+    echo -e "${GREEN}║${NC}   calculator.py:            ${YELLOW}○${NC} (not created)                        ${GREEN}║${NC}"
 fi
 
-echo -e "${GREEN}╠═══════════════════════════════════════════════════════╣${NC}"
-echo -e "${GREEN}║ Workspace/Board/Column:   ✓                            ║${NC}"
-echo -e "${GREEN}║ Task creation:            ✓                            ║${NC}"
-echo -e "${GREEN}║ Agent execution:          ✓                            ║${NC}"
-echo -e "${GREEN}║ Task completion:          ✓                            ║${NC}"
-echo -e "${GREEN}╚═══════════════════════════════════════════════════════╝${NC}"
+if [ -f "$TEST_WORKSPACE_DIR/test_calculator.py" ]; then
+    echo -e "${GREEN}║${NC}   test_calculator.py:       ${GREEN}✓${NC} (created by agent)                   ${GREEN}║${NC}"
+else
+    echo -e "${GREEN}║${NC}   test_calculator.py:       ${YELLOW}○${NC} (not created)                        ${GREEN}║${NC}"
+fi
+
+echo -e "${GREEN}╟────────────────────────────────────────────────────────────────────╢${NC}"
+echo -e "${GREEN}║ ${WHITE}INFRASTRUCTURE${NC}                                                      ${GREEN}║${NC}"
+echo -e "${GREEN}╟────────────────────────────────────────────────────────────────────╢${NC}"
+echo -e "${GREEN}║${NC}   Workspace/Board/Column:   ${GREEN}✓${NC}                                       ${GREEN}║${NC}"
+echo -e "${GREEN}║${NC}   Task creation:            ${GREEN}✓${NC}                                       ${GREEN}║${NC}"
+echo -e "${GREEN}║${NC}   Agent execution:          ${GREEN}✓${NC}                                       ${GREEN}║${NC}"
+echo -e "${GREEN}║${NC}   Task completion:          ${GREEN}✓${NC}                                       ${GREEN}║${NC}"
+echo -e "${GREEN}╚════════════════════════════════════════════════════════════════════╝${NC}"
+
+# Clean up workspace directory (after all checks)
+rm -rf "$TEST_WORKSPACE_DIR" 2>/dev/null || true
 
 # Overall result
 if [ "$COMMENT_ADD_PASSED" == "true" ] && [ "$COMMENT_LIST_PASSED" == "true" ]; then
     echo -e "\n${GREEN}✓ Comment System E2E Test PASSED${NC}"
+    echo -e "${GREEN}  Total comments: $COMMENT_COUNT (user: $USER_COMMENTS, agent: $AGENT_COMMENTS)${NC}"
+    echo -e "${GREEN}  Tool calls recorded: $TOOL_CALL_COUNT${NC}"
     exit 0
 else
     echo -e "\n${RED}✗ Comment System E2E Test FAILED${NC}"

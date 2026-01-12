@@ -67,6 +67,10 @@ export default function TaskPage({ task }: TaskPageClientProps) {
   useEffect(() => {
     if (!task?.id) return;
 
+    // Set taskId immediately so that incoming WebSocket notifications are processed
+    // before the API call completes (fixes race condition on first agent start)
+    store.getState().setCommentsTaskId(task.id);
+
     const fetchComments = async () => {
       const client = getWebSocketClient();
       if (!client) return;

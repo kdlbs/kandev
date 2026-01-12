@@ -12,6 +12,14 @@ export interface ReconnectOptions {
   backoffMultiplier?: number;
 }
 
+export interface ConnectionMetrics {
+  reconnectAttempts: number;
+  lastDisconnectTime: number | null;
+  lastDisconnectReason: string | null;
+  totalReconnects: number;
+  isHealthy: boolean;
+}
+
 const DEFAULT_RECONNECT_OPTIONS: Required<ReconnectOptions> = {
   enabled: true,
   maxAttempts: 10,
@@ -19,6 +27,10 @@ const DEFAULT_RECONNECT_OPTIONS: Required<ReconnectOptions> = {
   maxDelay: 30000,
   backoffMultiplier: 1.5,
 };
+
+// Heartbeat configuration
+const HEARTBEAT_INTERVAL = 30000; // 30 seconds
+const HEARTBEAT_TIMEOUT = 5000; // 5 seconds
 
 export class WebSocketClient {
   private socket: WebSocket | null = null;
@@ -34,6 +46,17 @@ export class WebSocketClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private intentionalClose = false;
   private subscriptions = new Set<string>();
+  private heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
+  private heartbeatTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastMessageTime: number = Date.now();
+  private metrics: ConnectionMetrics = {
+    reconnectAttempts: 0,
+    lastDisconnectTime: null,
+    lastDisconnectReason: null,
+    totalReconnects: 0,
+    isHealthy: true,
+  };
+  private onMetricsChange?: (metrics: ConnectionMetrics) => void;
 
   constructor(
     private url: string,
@@ -100,8 +123,13 @@ export class WebSocketClient {
           }
           const action = (message as { action?: string })?.action as BackendMessageType | undefined;
           if (!action) continue;
+          console.log('[WS] Received notification:', action);
           const handlers = this.handlers.get(action);
-          if (!handlers) continue;
+          if (!handlers) {
+            console.log('[WS] No handlers registered for:', action);
+            continue;
+          }
+          console.log('[WS] Calling', handlers.size, 'handler(s) for:', action);
           handlers.forEach((handler) => handler(message));
         } catch {
           // Ignore parse errors for individual messages

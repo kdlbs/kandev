@@ -159,13 +159,23 @@ func (h *Hub) BroadcastToTask(taskID string, msg *ws.Message) {
 
 	h.mu.RLock()
 	clients := h.taskSubscribers[taskID]
+	numClients := len(clients)
 	h.mu.RUnlock()
+
+	h.logger.Debug("BroadcastToTask",
+		zap.String("task_id", taskID),
+		zap.String("action", msg.Action),
+		zap.Int("subscriber_count", numClients))
 
 	for client := range clients {
 		select {
 		case client.send <- data:
+			h.logger.Debug("Sent message to client",
+				zap.String("client_id", client.ID),
+				zap.String("action", msg.Action))
 		default:
-			// Buffer full
+			h.logger.Warn("Client buffer full, dropping message",
+				zap.String("client_id", client.ID))
 		}
 	}
 }

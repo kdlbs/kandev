@@ -313,7 +313,12 @@ export function registerWsHandlers(store: StoreApi<AppState>) {
     'comment.added': (message: BackendMessageMap['comment.added']) => {
       const payload = message.payload;
       console.log('[WS] comment.added payload:', JSON.stringify(payload, null, 2));
-      store.getState().addComment({
+      const state = store.getState();
+      console.log('[WS] store state:', {
+        hasAddComment: typeof state.addComment,
+        commentsTaskId: state.comments?.taskId,
+      });
+      state.addComment({
         id: payload.comment_id,
         task_id: payload.task_id,
         author_type: payload.author_type,
@@ -324,6 +329,7 @@ export function registerWsHandlers(store: StoreApi<AppState>) {
         requests_input: payload.requests_input,
         created_at: payload.created_at,
       });
+      console.log('[WS] addComment called');
     },
   };
 }

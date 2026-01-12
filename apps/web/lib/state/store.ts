@@ -71,6 +71,7 @@ export type AppState = {
   setTerminalOutput: (terminalId: string, data: string) => void;
   setConnectionStatus: (status: ConnectionState['status'], error?: string | null) => void;
   setComments: (taskId: string, comments: Comment[]) => void;
+  setCommentsTaskId: (taskId: string | null) => void;
   addComment: (comment: Comment) => void;
   setCommentsLoading: (loading: boolean) => void;
 };
@@ -95,11 +96,12 @@ const defaultState: AppState = {
   setTerminalOutput: () => undefined,
   setConnectionStatus: () => undefined,
   setComments: () => undefined,
+  setCommentsTaskId: () => undefined,
   addComment: () => undefined,
   setCommentsLoading: () => undefined,
 };
 
-function mergeInitialState(initialState?: Partial<AppState>): Omit<AppState, 'hydrate' | 'setActiveWorkspace' | 'setWorkspaces' | 'setActiveBoard' | 'setBoards' | 'setTerminalOutput' | 'setConnectionStatus' | 'setComments' | 'addComment' | 'setCommentsLoading'> {
+function mergeInitialState(initialState?: Partial<AppState>): Omit<AppState, 'hydrate' | 'setActiveWorkspace' | 'setWorkspaces' | 'setActiveBoard' | 'setBoards' | 'setTerminalOutput' | 'setConnectionStatus' | 'setComments' | 'setCommentsTaskId' | 'addComment' | 'setCommentsLoading'> {
   if (!initialState) return defaultState;
   return {
     workspaces: { ...defaultState.workspaces, ...initialState.workspaces },
@@ -174,8 +176,21 @@ export function createAppStore(initialState?: Partial<AppState>) {
           draft.comments.items = comments;
           draft.comments.isLoading = false;
         }),
+      setCommentsTaskId: (taskId) =>
+        set((draft) => {
+          draft.comments.taskId = taskId;
+          // Initialize items array if null to allow addComment to work
+          // before setComments is called
+          if (draft.comments.items === null) {
+            draft.comments.items = [];
+          }
+        }),
       addComment: (comment) =>
         set((draft) => {
+          // Initialize items array if null
+          if (draft.comments.items === null) {
+            draft.comments.items = [];
+          }
           // Only add if this comment is for the current task
           if (draft.comments.taskId === comment.task_id) {
             // Check if comment already exists (avoid duplicates)
