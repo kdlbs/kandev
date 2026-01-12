@@ -101,8 +101,6 @@ func NewWorkspaceTracker(workDir string, log *logger.Logger) *WorkspaceTracker {
 
 // Start begins monitoring the workspace
 func (wt *WorkspaceTracker) Start(ctx context.Context) {
-	wt.logger.Info("starting workspace tracker", zap.String("workdir", wt.workDir))
-
 	wt.wg.Add(1)
 	go wt.monitorLoop(ctx)
 }
@@ -144,17 +142,8 @@ func (wt *WorkspaceTracker) monitorLoop(ctx context.Context) {
 func (wt *WorkspaceTracker) updateGitStatus(ctx context.Context) {
 	status, err := wt.getGitStatus(ctx)
 	if err != nil {
-		wt.logger.Info("failed to get git status", zap.Error(err))
 		return
 	}
-
-	wt.logger.Info("git status updated",
-		zap.String("branch", status.Branch),
-		zap.Int("modified", len(status.Modified)),
-		zap.Int("added", len(status.Added)),
-		zap.Int("deleted", len(status.Deleted)),
-		zap.Int("untracked", len(status.Untracked)),
-		zap.Int("files", len(status.Files)))
 
 	wt.mu.Lock()
 	wt.currentStatus = status

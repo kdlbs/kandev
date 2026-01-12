@@ -42,8 +42,6 @@ func (s *Server) handleGitStatusStreamWS(c *gin.Context) {
 	}
 	defer conn.Close()
 
-	s.logger.Info("Git status stream WebSocket connected")
-
 	// Subscribe to git status updates
 	sub := s.procMgr.GetWorkspaceTracker().SubscribeGitStatus()
 	defer s.procMgr.GetWorkspaceTracker().UnsubscribeGitStatus(sub)
@@ -67,21 +65,15 @@ func (s *Server) handleGitStatusStreamWS(c *gin.Context) {
 			if !ok {
 				return
 			}
-			s.logger.Info("sending git status update via WebSocket",
-				zap.String("branch", update.Branch),
-				zap.Int("modified", len(update.Modified)),
-				zap.Int("files", len(update.Files)))
 			data, err := json.Marshal(update)
 			if err != nil {
 				s.logger.Error("failed to marshal git status update", zap.Error(err))
 				continue
 			}
 			if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
-				s.logger.Debug("WebSocket write error", zap.Error(err))
 				return
 			}
 		case <-closeCh:
-			s.logger.Info("Git status stream WebSocket closed by client")
 			return
 		}
 	}
@@ -95,8 +87,6 @@ func (s *Server) handleFilesStreamWS(c *gin.Context) {
 		return
 	}
 	defer conn.Close()
-
-	s.logger.Info("Files stream WebSocket connected")
 
 	// Subscribe to file updates
 	sub := s.procMgr.GetWorkspaceTracker().SubscribeFiles()
@@ -127,11 +117,9 @@ func (s *Server) handleFilesStreamWS(c *gin.Context) {
 				continue
 			}
 			if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
-				s.logger.Debug("WebSocket write error", zap.Error(err))
 				return
 			}
 		case <-closeCh:
-			s.logger.Info("Files stream WebSocket closed by client")
 			return
 		}
 	}
@@ -145,8 +133,6 @@ func (s *Server) handleDiffStreamWS(c *gin.Context) {
 		return
 	}
 	defer conn.Close()
-
-	s.logger.Info("Diff stream WebSocket connected")
 
 	// Subscribe to diff updates
 	sub := s.procMgr.GetWorkspaceTracker().SubscribeDiff()
@@ -177,11 +163,9 @@ func (s *Server) handleDiffStreamWS(c *gin.Context) {
 				continue
 			}
 			if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
-				s.logger.Debug("WebSocket write error", zap.Error(err))
 				return
 			}
 		case <-closeCh:
-			s.logger.Info("Diff stream WebSocket closed by client")
 			return
 		}
 	}

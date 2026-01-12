@@ -662,16 +662,8 @@ func (m *Manager) handleGitStatusStream(instance *AgentInstance) {
 
 		if err == nil {
 			// Connection closed normally
-			m.logger.Info("git status stream closed",
-				zap.String("instance_id", instance.ID))
 			return
 		}
-
-		m.logger.Warn("failed to connect to git status stream, retrying",
-			zap.String("instance_id", instance.ID),
-			zap.Int("attempt", attempt),
-			zap.Int("max_retries", maxRetries),
-			zap.Error(err))
 
 		if attempt < maxRetries {
 			time.Sleep(backoff)
@@ -950,17 +942,6 @@ func (m *Manager) publishSessionInfo(instance *AgentInstance, sessionID string) 
 
 // handleGitStatusUpdate processes git status updates from the workspace tracker
 func (m *Manager) handleGitStatusUpdate(instance *AgentInstance, update *agentctl.GitStatusUpdate) {
-	m.logger.Debug("received git status update",
-		zap.String("instance_id", instance.ID),
-		zap.String("task_id", instance.TaskID),
-		zap.String("branch", update.Branch),
-		zap.Int("modified", len(update.Modified)),
-		zap.Int("added", len(update.Added)),
-		zap.Int("deleted", len(update.Deleted)),
-		zap.Int("untracked", len(update.Untracked)),
-		zap.Int("ahead", update.Ahead),
-		zap.Int("behind", update.Behind))
-
 	// Store git status in instance metadata
 	m.mu.Lock()
 	if inst, exists := m.instances[instance.ID]; exists {
