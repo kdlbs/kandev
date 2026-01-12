@@ -789,6 +789,12 @@ func (m *Manager) buildContainerConfig(instanceID string, req *LaunchRequest, ag
 	// Expand mount templates
 	mounts := make([]docker.MountConfig, 0, len(agentConfig.Mounts))
 	for _, mt := range agentConfig.Mounts {
+		// Skip workspace mounts if no workspace path is provided
+		if strings.Contains(mt.Source, "{workspace}") && req.WorkspacePath == "" {
+			m.logger.Debug("skipping workspace mount - no workspace path provided",
+				zap.String("target", mt.Target))
+			continue
+		}
 		source := m.expandMountTemplate(mt.Source, req.WorkspacePath, req.TaskID)
 		mounts = append(mounts, docker.MountConfig{
 			Source:   source,

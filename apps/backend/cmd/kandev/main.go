@@ -519,17 +519,12 @@ func newLifecycleAdapter(mgr *lifecycle.Manager, reg *registry.Registry, log *lo
 
 // LaunchAgent starts a new agent container for a task
 func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
-	// The RepositoryURL field should contain a local filesystem path for the workspace
-	// If it's empty, we cannot mount the workspace into the container
-	workspacePath := req.RepositoryURL
-	if workspacePath == "" {
-		return nil, fmt.Errorf("task has no repository_url configured - please set a local repository path on the task")
-	}
-
+	// The RepositoryURL field contains a local filesystem path for the workspace
+	// If empty, the agent will run without a mounted workspace
 	launchReq := &lifecycle.LaunchRequest{
 		TaskID:          req.TaskID,
 		AgentType:       req.AgentType,
-		WorkspacePath:   workspacePath,
+		WorkspacePath:   req.RepositoryURL, // May be empty - lifecycle manager handles this
 		TaskDescription: req.TaskDescription,
 		Metadata:        req.Metadata,
 	}
