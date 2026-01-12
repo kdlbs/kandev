@@ -19,6 +19,7 @@ type Config struct {
 	Auth                AuthConfig                `mapstructure:"auth"`
 	Logging             LoggingConfig             `mapstructure:"logging"`
 	RepositoryDiscovery RepositoryDiscoveryConfig `mapstructure:"repositoryDiscovery"`
+	Worktree            WorktreeConfig            `mapstructure:"worktree"`
 }
 
 // ServerConfig holds HTTP server configuration.
@@ -75,6 +76,15 @@ type LoggingConfig struct {
 type RepositoryDiscoveryConfig struct {
 	Roots    []string `mapstructure:"roots"`
 	MaxDepth int      `mapstructure:"maxDepth"`
+}
+
+// WorktreeConfig holds Git worktree configuration for concurrent agent execution.
+type WorktreeConfig struct {
+	Enabled         bool   `mapstructure:"enabled"`         // Enable worktree mode
+	BasePath        string `mapstructure:"basePath"`        // Base directory for worktrees (default: ~/.kandev/worktrees)
+	MaxPerRepo      int    `mapstructure:"maxPerRepo"`      // Max worktrees per repository (default: 10)
+	DefaultBranch   string `mapstructure:"defaultBranch"`   // Default base branch (default: main)
+	CleanupOnRemove bool   `mapstructure:"cleanupOnRemove"` // Remove worktree directory on task deletion
 }
 
 // ReadTimeoutDuration returns the read timeout as a time.Duration.
@@ -135,6 +145,13 @@ func setDefaults(v *viper.Viper) {
 	// Repository discovery defaults
 	v.SetDefault("repositoryDiscovery.roots", []string{})
 	v.SetDefault("repositoryDiscovery.maxDepth", 5)
+
+	// Worktree defaults
+	v.SetDefault("worktree.enabled", true)
+	v.SetDefault("worktree.basePath", "~/.kandev/worktrees")
+	v.SetDefault("worktree.maxPerRepo", 10)
+	v.SetDefault("worktree.defaultBranch", "main")
+	v.SetDefault("worktree.cleanupOnRemove", true)
 }
 
 // Load reads configuration from environment variables, config file, and defaults.

@@ -118,7 +118,11 @@ func createTestLogger() *logger.Logger {
 
 func createTestExecutor(agentMgr *mockAgentManager, log *logger.Logger, maxConcurrent int) *executor.Executor {
 	repo := repository.NewMemoryRepository()
-	return executor.NewExecutor(agentMgr, repo, log, maxConcurrent)
+	cfg := executor.ExecutorConfig{
+		MaxConcurrent:   maxConcurrent,
+		WorktreeEnabled: true,
+	}
+	return executor.NewExecutor(agentMgr, repo, log, cfg)
 }
 
 func createTestTask(id string, priority int) *v1.Task {

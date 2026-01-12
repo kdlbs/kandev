@@ -64,6 +64,12 @@ type LaunchAgentRequest struct {
 	TaskDescription string // Task description to send via ACP prompt
 	Priority        int
 	Metadata        map[string]interface{}
+
+	// Worktree configuration for concurrent agent execution
+	UseWorktree    bool   // Whether to use a Git worktree for isolation
+	RepositoryID   string // Repository ID for worktree tracking
+	RepositoryPath string // Path to the main repository (for worktree creation)
+	BaseBranch     string // Base branch for the worktree (e.g., "main")
 }
 
 // LaunchAgentResponse contains the result of launching an agent
@@ -149,25 +155,39 @@ type Executor struct {
 	mu         sync.RWMutex
 
 	// Configuration
-	maxConcurrent int
-	retryLimit    int
-	retryDelay    time.Duration
+	maxConcurrent   int
+	retryLimit      int
+	retryDelay      time.Duration
+	worktreeEnabled bool // Whether to use Git worktrees for agent isolation
+}
+
+// ExecutorConfig holds configuration for the Executor
+type ExecutorConfig struct {
+	MaxConcurrent   int  // Maximum concurrent agent executions
+	WorktreeEnabled bool // Whether to use Git worktrees for agent isolation
 }
 
 // NewExecutor creates a new executor
-func NewExecutor(agentManager AgentManagerClient, repo repository.Repository, log *logger.Logger, maxConcurrent int) *Executor {
+func NewExecutor(agentManager AgentManagerClient, repo repository.Repository, log *logger.Logger, cfg ExecutorConfig) *Executor {
+	maxConcurrent := cfg.MaxConcurrent
 	if maxConcurrent <= 0 {
 		maxConcurrent = 5 // default
 	}
 	return &Executor{
-		agentManager:  agentManager,
-		repo:          repo,
-		logger:        log.WithFields(zap.String("component", "executor")),
-		executions:    make(map[string]*TaskExecution),
-		maxConcurrent: maxConcurrent,
-		retryLimit:    3,
-		retryDelay:    5 * time.Second,
+		agentManager:    agentManager,
+		repo:            repo,
+		logger:          log.WithFields(zap.String("component", "executor")),
+		executions:      make(map[string]*TaskExecution),
+		maxConcurrent:   maxConcurrent,
+		retryLimit:      3,
+		retryDelay:      5 * time.Second,
+		worktreeEnabled: cfg.WorktreeEnabled,
 	}
+}
+
+// SetWorktreeEnabled enables or disables worktree mode
+func (e *Executor) SetWorktreeEnabled(enabled bool) {
+	e.worktreeEnabled = enabled
 }
 
 // LoadActiveSessionsFromDB loads active agent sessions from the database into memory
@@ -263,9 +283,22 @@ func (e *Executor) Execute(ctx context.Context, task *v1.Task) (*TaskExecution, 
 		req.Branch = *task.Branch
 	}
 
+	// Configure worktree if enabled and repository path is available
+	if e.worktreeEnabled && req.RepositoryURL != "" {
+		req.UseWorktree = true
+		req.RepositoryPath = req.RepositoryURL // RepositoryURL is actually a local path
+		req.RepositoryID = task.ID             // Use task ID as repository identifier for worktree tracking
+		if req.Branch != "" {
+			req.BaseBranch = req.Branch
+		} else {
+			req.BaseBranch = "main" // Default base branch
+		}
+	}
+
 	e.logger.Info("launching agent for task",
 		zap.String("task_id", task.ID),
-		zap.String("agent_type", *task.AgentType))
+		zap.String("agent_type", *task.AgentType),
+		zap.Bool("use_worktree", req.UseWorktree))
 
 	// Call the AgentManager to launch the container
 	resp, err := e.agentManager.LaunchAgent(ctx, req)

@@ -540,6 +540,11 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 		WorkspacePath:   req.RepositoryURL, // May be empty - lifecycle manager handles this
 		TaskDescription: req.TaskDescription,
 		Metadata:        req.Metadata,
+		// Worktree configuration for concurrent agent execution
+		UseWorktree:    req.UseWorktree,
+		RepositoryID:   req.RepositoryID,
+		RepositoryPath: req.RepositoryPath,
+		BaseBranch:     req.BaseBranch,
 	}
 
 	instance, err := a.mgr.Launch(ctx, launchReq)

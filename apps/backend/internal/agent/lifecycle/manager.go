@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/agentctl"
 	"github.com/kandev/kandev/internal/agent/docker"
 	"github.com/kandev/kandev/internal/agent/registry"
+	"github.com/kandev/kandev/internal/agent/worktree"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -54,10 +55,16 @@ type AgentInstance struct {
 type LaunchRequest struct {
 	TaskID          string
 	AgentType       string
-	WorkspacePath   string                 // Host path to workspace
+	WorkspacePath   string                 // Host path to workspace (original repository path)
 	TaskDescription string                 // Task description to send via ACP prompt
 	Env             map[string]string      // Additional env vars
 	Metadata        map[string]interface{}
+
+	// Worktree configuration
+	UseWorktree    bool   // Whether to use a Git worktree for isolation
+	RepositoryID   string // Repository ID for worktree tracking
+	RepositoryPath string // Path to the main repository (for worktree creation)
+	BaseBranch     string // Base branch for the worktree (e.g., "main")
 }
 
 // CredentialsManager interface for credential retrieval
@@ -67,11 +74,12 @@ type CredentialsManager interface {
 
 // Manager manages agent instance lifecycles
 type Manager struct {
-	docker   *docker.Client
-	registry *registry.Registry
-	eventBus bus.EventBus
-	credsMgr CredentialsManager
-	logger   *logger.Logger
+	docker      *docker.Client
+	registry    *registry.Registry
+	eventBus    bus.EventBus
+	credsMgr    CredentialsManager
+	worktreeMgr *worktree.Manager
+	logger      *logger.Logger
 
 	// Track active instances
 	instances   map[string]*AgentInstance // by instance ID
@@ -108,6 +116,11 @@ func NewManager(
 // SetCredentialsManager sets the credentials manager for injecting secrets
 func (m *Manager) SetCredentialsManager(credsMgr CredentialsManager) {
 	m.credsMgr = credsMgr
+}
+
+// SetWorktreeManager sets the worktree manager for Git worktree isolation
+func (m *Manager) SetWorktreeManager(worktreeMgr *worktree.Manager) {
+	m.worktreeMgr = worktreeMgr
 }
 
 // Start starts the lifecycle manager background tasks
@@ -266,7 +279,8 @@ func (m *Manager) Stop() error {
 func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentInstance, error) {
 	m.logger.Info("launching agent",
 		zap.String("task_id", req.TaskID),
-		zap.String("agent_type", req.AgentType))
+		zap.String("agent_type", req.AgentType),
+		zap.Bool("use_worktree", req.UseWorktree))
 
 	// 1. Validate the agent type exists in registry
 	agentConfig, err := m.registry.Get(req.AgentType)
@@ -286,13 +300,33 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentInstanc
 	}
 	m.mu.RUnlock()
 
-	// 3. Generate a new instance ID
+	// 3. Handle worktree creation/reuse if enabled
+	workspacePath := req.WorkspacePath
+	if req.UseWorktree && m.worktreeMgr != nil && req.RepositoryPath != "" {
+		wt, err := m.getOrCreateWorktree(ctx, req)
+		if err != nil {
+			m.logger.Warn("failed to create worktree, falling back to direct mount",
+				zap.String("task_id", req.TaskID),
+				zap.Error(err))
+			// Fall back to direct mount if worktree creation fails
+		} else {
+			workspacePath = wt.Path
+			m.logger.Info("using worktree for agent",
+				zap.String("task_id", req.TaskID),
+				zap.String("worktree_path", workspacePath),
+				zap.String("branch", wt.Branch))
+		}
+	}
+
+	// 4. Generate a new instance ID
 	instanceID := uuid.New().String()
 
-	// 4. Build container config from registry config
-	containerConfig := m.buildContainerConfig(instanceID, req, agentConfig)
+	// 5. Build container config from registry config (use worktree path if available)
+	reqWithWorktree := *req
+	reqWithWorktree.WorkspacePath = workspacePath
+	containerConfig := m.buildContainerConfig(instanceID, &reqWithWorktree, agentConfig)
 
-	// 5. Create and start the container
+	// 6. Create and start the container
 	containerID, err := m.docker.CreateContainer(ctx, containerConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create container: %w", err)
@@ -303,7 +337,7 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentInstanc
 		return nil, fmt.Errorf("failed to start container: %w", err)
 	}
 
-	// 6. Get container IP for agentctl communication
+	// 7. Get container IP for agentctl communication
 	containerIP, err := m.docker.GetContainerIP(ctx, containerID)
 	if err != nil {
 		m.logger.Warn("failed to get container IP, trying localhost",
@@ -312,10 +346,10 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentInstanc
 		containerIP = "127.0.0.1"
 	}
 
-	// 7. Create agentctl client
+	// 8. Create agentctl client
 	agentctlClient := agentctl.NewClient(containerIP, AgentCtlPort, m.logger)
 
-	// 8. Track the instance
+	// 9. Track the instance
 	now := time.Now()
 	instance := &AgentInstance{
 		ID:          instanceID,
@@ -336,10 +370,10 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentInstanc
 	m.byContainer[containerID] = instanceID
 	m.mu.Unlock()
 
-	// 9. Publish agent.started event
+	// 10. Publish agent.started event
 	m.publishEvent(ctx, events.AgentStarted, instance)
 
-	// 10. Wait for agentctl to be ready and start the agent process
+	// 11. Wait for agentctl to be ready and start the agent process
 	go m.initializeAgent(instance, req.TaskDescription)
 
 	m.logger.Info("agent launched successfully",
@@ -349,6 +383,51 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentInstanc
 		zap.String("task_id", req.TaskID))
 
 	return instance, nil
+}
+
+// getOrCreateWorktree creates a new worktree or reuses an existing one for the task.
+// This enables task resumption - the same worktree is used across multiple agent runs.
+func (m *Manager) getOrCreateWorktree(ctx context.Context, req *LaunchRequest) (*worktree.Worktree, error) {
+	// First, check if a worktree already exists for this task (session resumption)
+	existing, err := m.worktreeMgr.GetByTaskID(ctx, req.TaskID)
+	if err != nil && err != worktree.ErrWorktreeNotFound {
+		return nil, fmt.Errorf("failed to check existing worktree: %w", err)
+	}
+
+	if existing != nil {
+		// Validate the existing worktree is still valid
+		if m.worktreeMgr.IsValid(existing.Path) {
+			m.logger.Info("reusing existing worktree for task resumption",
+				zap.String("task_id", req.TaskID),
+				zap.String("worktree_path", existing.Path),
+				zap.String("branch", existing.Branch))
+			return existing, nil
+		}
+		// Worktree exists in DB but is invalid - will be recreated by Create()
+		m.logger.Warn("existing worktree is invalid, will recreate",
+			zap.String("task_id", req.TaskID),
+			zap.String("worktree_path", existing.Path))
+	}
+
+	// Create a new worktree
+	createReq := worktree.CreateRequest{
+		TaskID:         req.TaskID,
+		RepositoryID:   req.RepositoryID,
+		RepositoryPath: req.RepositoryPath,
+		BaseBranch:     req.BaseBranch,
+	}
+
+	wt, err := m.worktreeMgr.Create(ctx, createReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create worktree: %w", err)
+	}
+
+	m.logger.Info("created new worktree for task",
+		zap.String("task_id", req.TaskID),
+		zap.String("worktree_path", wt.Path),
+		zap.String("branch", wt.Branch))
+
+	return wt, nil
 }
 
 // initializeAgent waits for agentctl to be ready and initializes the agent
