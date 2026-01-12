@@ -14,7 +14,7 @@ BUILD_TIME := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 
 LDFLAGS += -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuildTime=$(BUILD_TIME)
 
-.PHONY: all build clean run dev dev-db dev-db-reset test lint fmt vet help
+.PHONY: all build build-all build-agentctl clean run dev dev-db dev-db-reset test lint fmt vet help
 
 ## Default target
 all: build
@@ -25,11 +25,17 @@ build:
 	@mkdir -p $(BUILD_DIR)
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/kandev
 
-## Build all binaries (unified + individual services)
-build-all: build
+## Build all binaries (unified + individual services + agentctl)
+build-all: build build-agentctl
 	@echo "Building individual services..."
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/orchestrator ./cmd/orchestrator
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agent-manager ./cmd/agent-manager
+
+## Build the agentctl sidecar binary
+build-agentctl:
+	@echo "Building agentctl..."
+	@mkdir -p $(BUILD_DIR)
+	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl ./cmd/agentctl
 
 ## Clean build artifacts
 clean:
@@ -115,7 +121,8 @@ help:
 	@echo ""
 	@echo "Targets:"
 	@echo "  build         Build the unified kandev binary (default)"
-	@echo "  build-all     Build all binaries (unified + individual services)"
+	@echo "  build-all     Build all binaries (unified + individual services + agentctl)"
+	@echo "  build-agentctl Build the agentctl sidecar binary"
 	@echo "  clean         Remove build artifacts"
 	@echo "  run           Build and run the application"
 	@echo "  dev           Run in development mode with pre-seeded database"
