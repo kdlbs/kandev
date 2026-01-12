@@ -251,8 +251,15 @@ func (wt *WorkspaceTracker) getGitStatus(ctx context.Context) (GitStatusUpdate, 
 
 // enrichWithDiffData adds diff information (additions, deletions, diff content) to file info
 func (wt *WorkspaceTracker) enrichWithDiffData(ctx context.Context, update *GitStatusUpdate) {
-	// Get numstat for additions/deletions count
-	numstatCmd := exec.CommandContext(ctx, "git", "diff", "--numstat", "HEAD")
+	// Determine the base ref to compare against
+	// Use remote branch if available, otherwise use HEAD
+	baseRef := "HEAD"
+	if update.RemoteBranch != "" {
+		baseRef = update.RemoteBranch
+	}
+
+	// Get numstat for additions/deletions count (compare against base branch)
+	numstatCmd := exec.CommandContext(ctx, "git", "diff", "--numstat", baseRef)
 	numstatCmd.Dir = wt.workDir
 	numstatOut, err := numstatCmd.Output()
 	if err != nil {
@@ -282,14 +289,33 @@ func (wt *WorkspaceTracker) enrichWithDiffData(ctx context.Context, update *GitS
 			fileInfo.Additions = additions
 			fileInfo.Deletions = deletions
 
-			// Get the actual diff content for this file
-			diffCmd := exec.CommandContext(ctx, "git", "diff", "HEAD", "--", filePath)
+			// Get the actual diff content for this file (compare against base branch)
+			diffCmd := exec.CommandContext(ctx, "git", "diff", baseRef, "--", filePath)
 			diffCmd.Dir = wt.workDir
 			if diffOut, err := diffCmd.Output(); err == nil {
 				fileInfo.Diff = string(diffOut)
 			}
 
 			update.Files[filePath] = fileInfo
+		} else {
+			// File might be committed but not in status (because it's committed)
+			// Add it to the Files map
+			fileInfo := FileInfo{
+				Path:      filePath,
+				Status:    "modified", // Assume modified if it has a diff
+				Additions: additions,
+				Deletions: deletions,
+			}
+
+			// Get the actual diff content for this file
+			diffCmd := exec.CommandContext(ctx, "git", "diff", baseRef, "--", filePath)
+			diffCmd.Dir = wt.workDir
+			if diffOut, err := diffCmd.Output(); err == nil {
+				fileInfo.Diff = string(diffOut)
+			}
+
+			update.Files[filePath] = fileInfo
+			update.Modified = append(update.Modified, filePath)
 		}
 	}
 
@@ -436,8 +462,20 @@ func (wt *WorkspaceTracker) getDiff(ctx context.Context) (DiffUpdate, error) {
 		Files:     make(map[string]FileInfo),
 	}
 
-	// Get diff with numstat for additions/deletions
-	cmd := exec.CommandContext(ctx, "git", "diff", "--numstat", "HEAD")
+	// Get current branch info to determine base ref
+	status, err := wt.getGitStatus(ctx)
+	if err != nil {
+		return update, err
+	}
+
+	// Determine the base ref to compare against
+	baseRef := "HEAD"
+	if status.RemoteBranch != "" {
+		baseRef = status.RemoteBranch
+	}
+
+	// Get diff with numstat for additions/deletions (compare against base branch)
+	cmd := exec.CommandContext(ctx, "git", "diff", "--numstat", baseRef)
 	cmd.Dir = wt.workDir
 	out, err := cmd.Output()
 	if err != nil {
@@ -468,8 +506,8 @@ func (wt *WorkspaceTracker) getDiff(ctx context.Context) (DiffUpdate, error) {
 			Deletions: deletions,
 		}
 
-		// Get the actual diff for this file
-		diffCmd := exec.CommandContext(ctx, "git", "diff", "HEAD", "--", filePath)
+		// Get the actual diff for this file (compare against base branch)
+		diffCmd := exec.CommandContext(ctx, "git", "diff", baseRef, "--", filePath)
 		diffCmd.Dir = wt.workDir
 		if diffOut, err := diffCmd.Output(); err == nil {
 			fileInfo.Diff = string(diffOut)
