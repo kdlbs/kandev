@@ -13,6 +13,7 @@ import { EnvironmentCard } from '@/components/settings/environment-card';
 import { KeyValueInput } from '@/components/settings/key-value-input';
 import { SETTINGS_DATA } from '@/lib/settings/dummy-data';
 import type { Environment, EnvironmentType, BaseDocker, KeyValue, AgentType } from '@/lib/settings/types';
+import { generateUUID } from '@/lib/utils';
 
 export default function EnvironmentsSettingsPage() {
   const [environments, setEnvironments] = useState<Environment[]>(SETTINGS_DATA.environments);
@@ -38,7 +39,7 @@ export default function EnvironmentsSettingsPage() {
   const handleAdd = (e: React.FormEvent) => {
     e.preventDefault();
     const environment: Environment = {
-      id: crypto.randomUUID(),
+      id: generateUUID(),
       ...newEnv,
     };
     setEnvironments([...environments, environment]);

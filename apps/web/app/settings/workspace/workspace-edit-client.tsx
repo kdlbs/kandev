@@ -19,6 +19,7 @@ import {
 import { SettingsSection } from '@/components/settings/settings-section';
 import { RepositoryCard } from '@/components/settings/repository-card';
 import { BoardCard } from '@/components/settings/board-card';
+import { generateUUID } from '@/lib/utils';
 import {
   createBoardAction,
   createColumnAction,
@@ -272,7 +273,7 @@ export function WorkspaceEditClient({ workspace, boards, repositories }: Workspa
     const path = selectedRepo?.path || manualValidation.path || manualRepoPath.trim();
     if (!path) return;
     const name = selectedRepo?.name || path.split('/').filter(Boolean).slice(-1)[0] || 'New Repository';
-    const draftId = `temp-repo-${crypto.randomUUID()}`;
+    const draftId = `temp-repo-${generateUUID()}`;
     const draftRepo: RepositoryWithScripts = {
       id: draftId,
       workspace_id: currentWorkspace.id,
@@ -296,7 +297,7 @@ export function WorkspaceEditClient({ workspace, boards, repositories }: Workspa
 
   const handleAddRepositoryScript = (repoId: string) => {
     const script: RepositoryScript = {
-      id: `temp-script-${crypto.randomUUID()}`,
+      id: `temp-script-${generateUUID()}`,
       repository_id: repoId,
       name: '',
       command: '',
@@ -431,7 +432,7 @@ export function WorkspaceEditClient({ workspace, boards, repositories }: Workspa
 
   const handleAddBoard = () => {
     if (!currentWorkspace) return;
-    const draftBoardId = `temp-${crypto.randomUUID()}`;
+    const draftBoardId = `temp-${generateUUID()}`;
     const draftBoard: BoardWithColumns = {
       id: draftBoardId,
       workspace_id: currentWorkspace.id,
@@ -441,7 +442,7 @@ export function WorkspaceEditClient({ workspace, boards, repositories }: Workspa
       updated_at: '',
       columns: [
         {
-          id: `temp-col-${crypto.randomUUID()}`,
+          id: `temp-col-${generateUUID()}`,
           board_id: draftBoardId,
           name: 'Todo',
           position: 0,
@@ -451,7 +452,7 @@ export function WorkspaceEditClient({ workspace, boards, repositories }: Workspa
           updated_at: '',
         },
         {
-          id: `temp-col-${crypto.randomUUID()}`,
+          id: `temp-col-${generateUUID()}`,
           board_id: draftBoardId,
           name: 'In Progress',
           position: 1,
@@ -461,7 +462,7 @@ export function WorkspaceEditClient({ workspace, boards, repositories }: Workspa
           updated_at: '',
         },
         {
-          id: `temp-col-${crypto.randomUUID()}`,
+          id: `temp-col-${generateUUID()}`,
           board_id: draftBoardId,
           name: 'To Review',
           position: 2,
@@ -471,7 +472,7 @@ export function WorkspaceEditClient({ workspace, boards, repositories }: Workspa
           updated_at: '',
         },
         {
-          id: `temp-col-${crypto.randomUUID()}`,
+          id: `temp-col-${generateUUID()}`,
           board_id: draftBoardId,
           name: 'Done',
           position: 3,
@@ -506,7 +507,7 @@ export function WorkspaceEditClient({ workspace, boards, repositories }: Workspa
     column: Omit<Column, 'id' | 'board_id' | 'created_at' | 'updated_at'>
   ) => {
     const draftColumn: Column = {
-      id: `temp-col-${crypto.randomUUID()}`,
+      id: `temp-col-${generateUUID()}`,
       board_id: boardId,
       name: column.name,
       position: column.position,

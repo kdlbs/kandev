@@ -630,15 +630,46 @@ func (m *Manager) handleSessionNotification(instance *AgentInstance, notificatio
 		toolCallID := string(update.ToolCall.ToolCallId)
 		toolTitle := update.ToolCall.Title
 		toolStatus := string(update.ToolCall.Status)
+		toolKind := string(update.ToolCall.Kind)
 
 		m.logger.Info("tool call started",
 			zap.String("instance_id", instance.ID),
 			zap.String("tool_call_id", toolCallID),
-			zap.String("title", toolTitle))
+			zap.String("title", toolTitle),
+			zap.String("kind", toolKind))
 		m.updateInstanceProgress(instance.ID, 60)
 
+		// Extract args from the tool call for display
+		args := map[string]interface{}{}
+
+		// Add tool kind
+		if toolKind != "" {
+			args["kind"] = toolKind
+		}
+
+		// Add locations (file paths)
+		if len(update.ToolCall.Locations) > 0 {
+			locations := make([]map[string]interface{}, len(update.ToolCall.Locations))
+			for i, loc := range update.ToolCall.Locations {
+				locMap := map[string]interface{}{"path": loc.Path}
+				if loc.Line != nil {
+					locMap["line"] = *loc.Line
+				}
+				locations[i] = locMap
+			}
+			args["locations"] = locations
+
+			// Also set primary path for convenience
+			args["path"] = update.ToolCall.Locations[0].Path
+		}
+
+		// Add raw input if available
+		if update.ToolCall.RawInput != nil {
+			args["raw_input"] = update.ToolCall.RawInput
+		}
+
 		// Publish tool call as a comment so it appears in the chat
-		m.publishToolCall(instance, toolCallID, toolTitle, toolStatus, nil)
+		m.publishToolCall(instance, toolCallID, toolTitle, toolStatus, args)
 	}
 
 	if update.ToolCallUpdate != nil {

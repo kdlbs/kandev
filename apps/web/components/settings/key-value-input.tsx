@@ -4,6 +4,7 @@ import { IconPlus, IconX } from '@tabler/icons-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { KeyValue } from '@/lib/settings/types';
+import { generateUUID } from '@/lib/utils';
 
 type KeyValueInputProps = {
   items: KeyValue[];
@@ -23,7 +24,7 @@ export function KeyValueInput({
   masked = false,
 }: KeyValueInputProps) {
   const handleAdd = () => {
-    onChange([...items, { id: crypto.randomUUID(), key: '', value: '' }]);
+    onChange([...items, { id: generateUUID(), key: '', value: '' }]);
   };
 
   const handleRemove = (id: string) => {

@@ -1,4 +1,5 @@
 import type { BackendMessageMap, BackendMessageType } from '@/lib/types/backend';
+import { generateUUID } from '@/lib/utils';
 
 type MessageHandler<T extends BackendMessageType> = (message: BackendMessageMap[T]) => void;
 
@@ -168,7 +169,7 @@ export class WebSocketClient {
   }
 
   request<T>(action: string, payload: unknown, timeoutMs = 5000): Promise<T> {
-    const id = crypto.randomUUID();
+    const id = generateUUID();
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.pendingRequests.delete(id);
@@ -183,7 +184,7 @@ export class WebSocketClient {
     this.subscriptions.add(taskId);
     if (this.status === 'open') {
       this.send({
-        id: crypto.randomUUID(),
+        id: generateUUID(),
         type: 'request',
         action: 'task.subscribe',
         payload: { task_id: taskId },
@@ -195,7 +196,7 @@ export class WebSocketClient {
     this.subscriptions.delete(taskId);
     if (this.status === 'open') {
       this.send({
-        id: crypto.randomUUID(),
+        id: generateUUID(),
         type: 'request',
         action: 'task.unsubscribe',
         payload: { task_id: taskId },
@@ -279,7 +280,7 @@ export class WebSocketClient {
     // Re-subscribe to all tasks after reconnection
     this.subscriptions.forEach((taskId) => {
       this.send({
-        id: crypto.randomUUID(),
+        id: generateUUID(),
         type: 'request',
         action: 'task.subscribe',
         payload: { task_id: taskId },

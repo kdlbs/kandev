@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useCallback, useContext, useMemo, useState } from 'react';
-import { cn } from '@/lib/utils';
+import { cn, generateUUID } from '@/lib/utils';
 
 type ToastVariant = 'default' | 'error';
 
@@ -29,7 +29,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
 
   const toast = useCallback(
     (input: ToastInput) => {
-      const id = crypto.randomUUID();
+      const id = generateUUID();
       const nextToast: Toast = {
         id,
         title: input.title,

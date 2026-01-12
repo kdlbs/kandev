@@ -42,11 +42,12 @@ type PromptCompleteData struct {
 
 // ToolCallData contains data from tool_call events
 type ToolCallData struct {
-	TaskID     string `json:"task_id"`
-	AgentID    string `json:"agent_id"`
-	ToolCallID string `json:"tool_call_id"`
-	Title      string `json:"title"`
-	Status     string `json:"status"`
+	TaskID     string                 `json:"task_id"`
+	AgentID    string                 `json:"agent_id"`
+	ToolCallID string                 `json:"tool_call_id"`
+	Title      string                 `json:"title"`
+	Status     string                 `json:"status"`
+	Args       map[string]interface{} `json:"args,omitempty"` // Tool call arguments (kind, path, locations, raw_input)
 }
 
 // EventHandlers contains callbacks for different event types

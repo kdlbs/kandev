@@ -48,7 +48,7 @@ type InputRequestHandler func(ctx context.Context, taskID, agentID, message stri
 // CommentCreator is an interface for creating comments on tasks
 type CommentCreator interface {
 	CreateAgentComment(ctx context.Context, taskID, content, agentSessionID string) error
-	CreateToolCallComment(ctx context.Context, taskID, toolCallID, title, status, agentSessionID string) error
+	CreateToolCallComment(ctx context.Context, taskID, toolCallID, title, status, agentSessionID string, args map[string]interface{}) error
 }
 
 // Service is the main orchestrator service
@@ -567,7 +567,7 @@ func (s *Service) handleToolCallStarted(ctx context.Context, data watcher.ToolCa
 		// Get the active session ID for this task
 		sessionID, _ := s.executor.GetActiveSessionID(ctx, data.TaskID)
 
-		if err := s.commentCreator.CreateToolCallComment(ctx, data.TaskID, data.ToolCallID, data.Title, data.Status, sessionID); err != nil {
+		if err := s.commentCreator.CreateToolCallComment(ctx, data.TaskID, data.ToolCallID, data.Title, data.Status, sessionID, data.Args); err != nil {
 			s.logger.Error("failed to create tool call comment",
 				zap.String("task_id", data.TaskID),
 				zap.String("tool_call_id", data.ToolCallID),

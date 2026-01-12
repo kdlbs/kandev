@@ -11,6 +11,7 @@ import { Separator } from '@/components/ui/separator';
 import { AgentCard } from '@/components/settings/agent-card';
 import { SETTINGS_DATA } from '@/lib/settings/dummy-data';
 import type { AgentProfile, AgentType } from '@/lib/settings/types';
+import { generateUUID } from '@/lib/utils';
 
 const AGENT_OPTIONS: { value: AgentType; label: string }[] = [
   { value: 'claude-code', label: 'Claude Code' },
@@ -54,7 +55,7 @@ export default function AgentsSettingsPage() {
   const handleAdd = (e: React.FormEvent) => {
     e.preventDefault();
     const profile: AgentProfile = {
-      id: crypto.randomUUID(),
+      id: generateUUID(),
       ...newAgent,
     };
     setAgents([...agents, profile]);

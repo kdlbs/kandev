@@ -18,6 +18,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { generateUUID } from '@/lib/utils';
 import { SETTINGS_DATA } from '@/lib/settings/dummy-data';
 import type { Environment, EnvironmentType, BaseDocker, AgentType } from '@/lib/settings/types';
 
@@ -55,7 +56,7 @@ export default function EnvironmentEditPage({ params }: { params: Promise<{ id: 
         ...environment,
         envVariables: [
           ...environment.envVariables,
-          { id: crypto.randomUUID(), key: newEnvKey, value: newEnvValue },
+          { id: generateUUID(), key: newEnvKey, value: newEnvValue },
         ],
       });
       setNewEnvKey('');
@@ -76,7 +77,7 @@ export default function EnvironmentEditPage({ params }: { params: Promise<{ id: 
         ...environment,
         secrets: [
           ...environment.secrets,
-          { id: crypto.randomUUID(), key: newSecretKey, value: newSecretValue },
+          { id: generateUUID(), key: newSecretKey, value: newSecretValue },
         ],
       });
       setNewSecretKey('');

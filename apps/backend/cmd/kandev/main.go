@@ -685,18 +685,30 @@ func (a *commentCreatorAdapter) CreateAgentComment(ctx context.Context, taskID, 
 }
 
 // CreateToolCallComment creates a comment for a tool call with type="tool_call"
-func (a *commentCreatorAdapter) CreateToolCallComment(ctx context.Context, taskID, toolCallID, title, status, agentSessionID string) error {
+func (a *commentCreatorAdapter) CreateToolCallComment(ctx context.Context, taskID, toolCallID, title, status, agentSessionID string, args map[string]interface{}) error {
+	metadata := map[string]interface{}{
+		"tool_call_id": toolCallID,
+		"title":        title,
+		"status":       status,
+	}
+
+	// Add args if provided (contains kind, path, locations, raw_input)
+	if args != nil && len(args) > 0 {
+		metadata["args"] = args
+
+		// Extract kind as tool_name for icon selection in the frontend
+		if kind, ok := args["kind"].(string); ok && kind != "" {
+			metadata["tool_name"] = kind
+		}
+	}
+
 	_, err := a.svc.CreateComment(ctx, &taskservice.CreateCommentRequest{
 		TaskID:         taskID,
 		Content:        title,
 		AuthorType:     "agent",
 		AgentSessionID: agentSessionID,
 		Type:           "tool_call",
-		Metadata: map[string]interface{}{
-			"tool_call_id": toolCallID,
-			"title":        title,
-			"status":       status,
-		},
+		Metadata:       metadata,
 	})
 	return err
 }
