@@ -114,11 +114,142 @@ func (m *Manager) SetCredentialsManager(credsMgr CredentialsManager) {
 func (m *Manager) Start(ctx context.Context) error {
 	m.logger.Info("starting lifecycle manager")
 
+	// Reconcile with Docker to find running containers from previous runs
+	if _, err := m.reconcileWithDocker(ctx); err != nil {
+		m.logger.Warn("failed to reconcile with Docker", zap.Error(err))
+		// Continue anyway - this is best-effort
+	}
+
 	// Start cleanup loop
 	m.wg.Add(1)
 	go m.cleanupLoop(ctx)
 
 	return nil
+}
+
+// RecoveredInstance contains info about an instance recovered from Docker
+type RecoveredInstance struct {
+	InstanceID  string
+	TaskID      string
+	ContainerID string
+	AgentType   string
+}
+
+// reconcileWithDocker finds running kandev containers and re-populates tracking maps
+// Returns a list of recovered instances so the caller can sync with the database
+func (m *Manager) reconcileWithDocker(ctx context.Context) ([]RecoveredInstance, error) {
+	// Skip reconciliation if docker client is not available (e.g., in tests)
+	if m.docker == nil {
+		m.logger.Debug("skipping Docker reconciliation - no docker client")
+		return nil, nil
+	}
+
+	m.logger.Info("reconciling with Docker - looking for running containers")
+
+	// List all containers with our label
+	containers, err := m.docker.ListContainers(ctx, map[string]string{
+		"kandev.managed": "true",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list containers: %w", err)
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var recovered []RecoveredInstance
+	for _, ctr := range containers {
+		// Only recover running containers
+		if ctr.State != "running" {
+			m.logger.Debug("skipping non-running container",
+				zap.String("container_id", ctr.ID),
+				zap.String("state", ctr.State))
+			continue
+		}
+
+		// Get container details to extract labels
+		labels, err := m.docker.GetContainerLabels(ctx, ctr.ID)
+		if err != nil {
+			m.logger.Warn("failed to get container labels",
+				zap.String("container_id", ctr.ID),
+				zap.Error(err))
+			continue
+		}
+
+		instanceID := labels["kandev.instance_id"]
+		taskID := labels["kandev.task_id"]
+		agentType := labels["kandev.agent_type"]
+
+		if instanceID == "" || taskID == "" {
+			m.logger.Warn("container missing required labels",
+				zap.String("container_id", ctr.ID))
+			continue
+		}
+
+		// Get container IP
+		containerIP, err := m.docker.GetContainerIP(ctx, ctr.ID)
+		if err != nil {
+			m.logger.Warn("failed to get container IP",
+				zap.String("container_id", ctr.ID),
+				zap.Error(err))
+			containerIP = "localhost"
+		}
+
+		// Create instance record
+		instance := &AgentInstance{
+			ID:          instanceID,
+			TaskID:      taskID,
+			AgentType:   agentType,
+			ContainerID: ctr.ID,
+			ContainerIP: containerIP,
+			Status:      v1.AgentStatusRunning,
+			StartedAt:   time.Now(), // We don't know exact start time
+		}
+
+		// Create agentctl client
+		instance.agentctl = agentctl.NewClient(containerIP, AgentCtlPort, m.logger)
+
+		// Add to tracking maps
+		m.instances[instanceID] = instance
+		m.byTask[taskID] = instanceID
+		m.byContainer[ctr.ID] = instanceID
+
+		recovered = append(recovered, RecoveredInstance{
+			InstanceID:  instanceID,
+			TaskID:      taskID,
+			ContainerID: ctr.ID,
+			AgentType:   agentType,
+		})
+
+		m.logger.Info("recovered running container",
+			zap.String("instance_id", instanceID),
+			zap.String("task_id", taskID),
+			zap.String("container_id", ctr.ID))
+	}
+
+	m.logger.Info("reconciliation complete",
+		zap.Int("containers_found", len(containers)),
+		zap.Int("recovered", len(recovered)))
+
+	return recovered, nil
+}
+
+// GetRecoveredInstances returns a snapshot of all currently tracked instances
+// This can be used by the orchestrator to sync with the database
+func (m *Manager) GetRecoveredInstances() []RecoveredInstance {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	result := make([]RecoveredInstance, 0, len(m.instances))
+	for _, inst := range m.instances {
+		result = append(result, RecoveredInstance{
+			InstanceID:  inst.ID,
+			TaskID:      inst.TaskID,
+			ContainerID: inst.ContainerID,
+			AgentType:   inst.AgentType,
+		})
+	}
+	return result
 }
 
 // Stop stops the lifecycle manager
@@ -994,12 +1125,19 @@ func (m *Manager) StopAgent(ctx context.Context, instanceID string, force bool) 
 		return fmt.Errorf("failed to stop container: %w", err)
 	}
 
-	// Update instance status
+	// Update instance status and remove from tracking maps
 	m.mu.Lock()
 	instance.Status = v1.AgentStatusStopped
 	now := time.Now()
 	instance.FinishedAt = &now
+	delete(m.instances, instanceID)
+	delete(m.byTask, instance.TaskID)
+	delete(m.byContainer, instance.ContainerID)
 	m.mu.Unlock()
+
+	m.logger.Info("agent stopped and removed from tracking",
+		zap.String("instance_id", instanceID),
+		zap.String("task_id", instance.TaskID))
 
 	// Publish stopped event
 	m.publishEvent(ctx, events.AgentStopped, instance)

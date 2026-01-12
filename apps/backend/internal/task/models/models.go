@@ -148,6 +148,7 @@ type AgentSession struct {
 	ID              string                 `json:"id"`
 	TaskID          string                 `json:"task_id"`
 	AgentInstanceID string                 `json:"agent_instance_id"` // Docker container/agent instance
+	ContainerID     string                 `json:"container_id"`      // Docker container ID for cleanup
 	AgentType       string                 `json:"agent_type"`        // e.g., "augment-agent"
 	ACPSessionID    string                 `json:"acp_session_id"`    // ACP protocol session for resumption
 	Status          AgentSessionStatus     `json:"status"`
@@ -166,6 +167,7 @@ func (s *AgentSession) ToAPI() map[string]interface{} {
 		"id":                s.ID,
 		"task_id":           s.TaskID,
 		"agent_instance_id": s.AgentInstanceID,
+		"container_id":      s.ContainerID,
 		"agent_type":        s.AgentType,
 		"acp_session_id":    s.ACPSessionID,
 		"status":            string(s.Status),

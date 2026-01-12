@@ -316,6 +316,23 @@ func (c *Client) GetContainerIP(ctx context.Context, containerID string) (string
 	return "", fmt.Errorf("no IP address found for container %s", containerID)
 }
 
+// GetContainerLabels returns the labels of a container
+func (c *Client) GetContainerLabels(ctx context.Context, containerID string) (map[string]string, error) {
+	c.logger.Debug("Getting container labels", zap.String("container_id", containerID))
+
+	inspect, err := c.cli.ContainerInspect(ctx, containerID)
+	if err != nil {
+		c.logger.Error("Failed to inspect container for labels", zap.String("container_id", containerID), zap.Error(err))
+		return nil, err
+	}
+
+	if inspect.Config != nil && inspect.Config.Labels != nil {
+		return inspect.Config.Labels, nil
+	}
+
+	return make(map[string]string), nil
+}
+
 // GetContainerLogs returns logs from a container.
 func (c *Client) GetContainerLogs(ctx context.Context, containerID string, follow bool, tail string) (io.ReadCloser, error) {
 	c.logger.Debug("Getting container logs",

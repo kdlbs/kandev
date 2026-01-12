@@ -214,6 +214,7 @@ func (r *SQLiteRepository) initSchema() error {
 		id TEXT PRIMARY KEY,
 		task_id TEXT NOT NULL,
 		agent_instance_id TEXT NOT NULL DEFAULT '',
+		container_id TEXT NOT NULL DEFAULT '',
 		agent_type TEXT NOT NULL,
 		acp_session_id TEXT DEFAULT '',
 		status TEXT NOT NULL DEFAULT 'pending',
@@ -253,6 +254,11 @@ func (r *SQLiteRepository) initSchema() error {
 		return err
 	}
 	if err := r.ensureColumn("task_comments", "agent_session_id", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
+
+	// Ensure container_id column exists for existing databases
+	if err := r.ensureColumn("agent_sessions", "container_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
 
@@ -1292,10 +1298,10 @@ func (r *SQLiteRepository) CreateAgentSession(ctx context.Context, session *mode
 
 	_, err = r.db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
-			id, task_id, agent_instance_id, agent_type, acp_session_id, status, progress,
+			id, task_id, agent_instance_id, container_id, agent_type, acp_session_id, status, progress,
 			error_message, metadata, started_at, completed_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, session.ID, session.TaskID, session.AgentInstanceID, session.AgentType, session.ACPSessionID,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, session.ID, session.TaskID, session.AgentInstanceID, session.ContainerID, session.AgentType, session.ACPSessionID,
 		string(session.Status), session.Progress, session.ErrorMessage, string(metadataJSON),
 		session.StartedAt, session.CompletedAt, session.UpdatedAt)
 
@@ -1310,11 +1316,11 @@ func (r *SQLiteRepository) GetAgentSession(ctx context.Context, id string) (*mod
 	var completedAt sql.NullTime
 
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, task_id, agent_instance_id, agent_type, acp_session_id, status, progress,
+		SELECT id, task_id, agent_instance_id, container_id, agent_type, acp_session_id, status, progress,
 		       error_message, metadata, started_at, completed_at, updated_at
 		FROM agent_sessions WHERE id = ?
 	`, id).Scan(
-		&session.ID, &session.TaskID, &session.AgentInstanceID, &session.AgentType,
+		&session.ID, &session.TaskID, &session.AgentInstanceID, &session.ContainerID, &session.AgentType,
 		&session.ACPSessionID, &status, &session.Progress, &session.ErrorMessage,
 		&metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
 	)
@@ -1347,11 +1353,11 @@ func (r *SQLiteRepository) GetAgentSessionByTaskID(ctx context.Context, taskID s
 	var completedAt sql.NullTime
 
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, task_id, agent_instance_id, agent_type, acp_session_id, status, progress,
+		SELECT id, task_id, agent_instance_id, container_id, agent_type, acp_session_id, status, progress,
 		       error_message, metadata, started_at, completed_at, updated_at
 		FROM agent_sessions WHERE task_id = ? ORDER BY started_at DESC LIMIT 1
 	`, taskID).Scan(
-		&session.ID, &session.TaskID, &session.AgentInstanceID, &session.AgentType,
+		&session.ID, &session.TaskID, &session.AgentInstanceID, &session.ContainerID, &session.AgentType,
 		&session.ACPSessionID, &status, &session.Progress, &session.ErrorMessage,
 		&metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
 	)
@@ -1384,13 +1390,13 @@ func (r *SQLiteRepository) GetActiveAgentSessionByTaskID(ctx context.Context, ta
 	var completedAt sql.NullTime
 
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, task_id, agent_instance_id, agent_type, acp_session_id, status, progress,
+		SELECT id, task_id, agent_instance_id, container_id, agent_type, acp_session_id, status, progress,
 		       error_message, metadata, started_at, completed_at, updated_at
 		FROM agent_sessions
 		WHERE task_id = ? AND status IN ('pending', 'running', 'waiting')
 		ORDER BY started_at DESC LIMIT 1
 	`, taskID).Scan(
-		&session.ID, &session.TaskID, &session.AgentInstanceID, &session.AgentType,
+		&session.ID, &session.TaskID, &session.AgentInstanceID, &session.ContainerID, &session.AgentType,
 		&session.ACPSessionID, &status, &session.Progress, &session.ErrorMessage,
 		&metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
 	)
@@ -1427,10 +1433,10 @@ func (r *SQLiteRepository) UpdateAgentSession(ctx context.Context, session *mode
 
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE agent_sessions SET
-			agent_instance_id = ?, agent_type = ?, acp_session_id = ?, status = ?, progress = ?,
+			agent_instance_id = ?, container_id = ?, agent_type = ?, acp_session_id = ?, status = ?, progress = ?,
 			error_message = ?, metadata = ?, completed_at = ?, updated_at = ?
 		WHERE id = ?
-	`, session.AgentInstanceID, session.AgentType, session.ACPSessionID, string(session.Status),
+	`, session.AgentInstanceID, session.ContainerID, session.AgentType, session.ACPSessionID, string(session.Status),
 		session.Progress, session.ErrorMessage, string(metadataJSON), session.CompletedAt,
 		session.UpdatedAt, session.ID)
 	if err != nil {
@@ -1470,7 +1476,7 @@ func (r *SQLiteRepository) UpdateAgentSessionStatus(ctx context.Context, id stri
 // ListAgentSessions returns all agent sessions for a task
 func (r *SQLiteRepository) ListAgentSessions(ctx context.Context, taskID string) ([]*models.AgentSession, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, task_id, agent_instance_id, agent_type, acp_session_id, status, progress,
+		SELECT id, task_id, agent_instance_id, container_id, agent_type, acp_session_id, status, progress,
 		       error_message, metadata, started_at, completed_at, updated_at
 		FROM agent_sessions WHERE task_id = ? ORDER BY started_at DESC
 	`, taskID)
@@ -1485,7 +1491,7 @@ func (r *SQLiteRepository) ListAgentSessions(ctx context.Context, taskID string)
 // ListActiveAgentSessions returns all active agent sessions across all tasks
 func (r *SQLiteRepository) ListActiveAgentSessions(ctx context.Context) ([]*models.AgentSession, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, task_id, agent_instance_id, agent_type, acp_session_id, status, progress,
+		SELECT id, task_id, agent_instance_id, container_id, agent_type, acp_session_id, status, progress,
 		       error_message, metadata, started_at, completed_at, updated_at
 		FROM agent_sessions WHERE status IN ('pending', 'running', 'waiting') ORDER BY started_at DESC
 	`)
@@ -1507,7 +1513,7 @@ func (r *SQLiteRepository) scanAgentSessions(rows *sql.Rows) ([]*models.AgentSes
 		var completedAt sql.NullTime
 
 		err := rows.Scan(
-			&session.ID, &session.TaskID, &session.AgentInstanceID, &session.AgentType,
+			&session.ID, &session.TaskID, &session.AgentInstanceID, &session.ContainerID, &session.AgentType,
 			&session.ACPSessionID, &status, &session.Progress, &session.ErrorMessage,
 			&metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
 		)

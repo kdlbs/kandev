@@ -116,3 +116,19 @@ func FromQueuedTask(qt interface{ GetTaskID() string; GetPriority() int; GetQueu
 	}
 }
 
+// GetTaskExecutionRequest is the payload for task.execution
+type GetTaskExecutionRequest struct {
+	TaskID string `json:"task_id"`
+}
+
+// TaskExecutionResponse is the response for task.execution
+type TaskExecutionResponse struct {
+	HasExecution    bool   `json:"has_execution"`
+	TaskID          string `json:"task_id"`
+	AgentInstanceID string `json:"agent_instance_id,omitempty"`
+	AgentType       string `json:"agent_type,omitempty"`
+	Status          string `json:"status,omitempty"`
+	Progress        int    `json:"progress,omitempty"`
+	StartedAt       string `json:"started_at,omitempty"`
+}
+

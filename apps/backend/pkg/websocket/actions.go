@@ -41,13 +41,14 @@ const (
 	ActionRepositoryScriptDelete = "repository.script.delete"
 
 	// Task actions
-	ActionTaskList   = "task.list"
-	ActionTaskCreate = "task.create"
-	ActionTaskGet    = "task.get"
-	ActionTaskUpdate = "task.update"
-	ActionTaskDelete = "task.delete"
-	ActionTaskMove   = "task.move"
-	ActionTaskState = "task.state"
+	ActionTaskList      = "task.list"
+	ActionTaskCreate    = "task.create"
+	ActionTaskGet       = "task.get"
+	ActionTaskUpdate    = "task.update"
+	ActionTaskDelete    = "task.delete"
+	ActionTaskMove      = "task.move"
+	ActionTaskState     = "task.state"
+	ActionTaskExecution = "task.execution"
 
 	// Agent actions
 	ActionAgentList    = "agent.list"

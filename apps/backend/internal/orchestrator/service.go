@@ -53,11 +53,12 @@ type CommentCreator interface {
 
 // Service is the main orchestrator service
 type Service struct {
-	config   ServiceConfig
-	logger   *logger.Logger
-	eventBus bus.EventBus
-	db       *database.DB
-	taskRepo scheduler.TaskRepository
+	config       ServiceConfig
+	logger       *logger.Logger
+	eventBus     bus.EventBus
+	db           *database.DB
+	taskRepo     scheduler.TaskRepository
+	agentManager executor.AgentManagerClient
 
 	// Components
 	queue     *queue.TaskQueue
@@ -115,15 +116,16 @@ func NewService(
 
 	// Create the service (watcher will be created after we have handlers)
 	s := &Service{
-		config:      cfg,
-		logger:      svcLogger,
-		eventBus:    eventBus,
-		db:          db,
-		taskRepo:    taskRepo,
-		queue:       taskQueue,
-		executor:    exec,
-		scheduler:   sched,
-		acpHandlers: make([]func(taskID string, msg *protocol.Message), 0),
+		config:       cfg,
+		logger:       svcLogger,
+		eventBus:     eventBus,
+		db:           db,
+		taskRepo:     taskRepo,
+		agentManager: agentManager,
+		queue:        taskQueue,
+		executor:     exec,
+		scheduler:    sched,
+		acpHandlers:  make([]func(taskID string, msg *protocol.Message), 0),
 	}
 
 	// Create the watcher with event handlers that wire everything together
@@ -162,6 +164,14 @@ func (s *Service) Start(ctx context.Context) error {
 	// Load any active sessions from the database to restore state
 	if err := s.executor.LoadActiveSessionsFromDB(ctx); err != nil {
 		s.logger.Warn("failed to load active sessions from database (non-fatal)", zap.Error(err))
+	}
+
+	// Sync with instances recovered from Docker by the lifecycle manager
+	// This ensures we track containers that are running but weren't in the DB as active
+	recovered := s.agentManager.GetRecoveredInstances()
+	if len(recovered) > 0 {
+		s.logger.Info("syncing with recovered Docker instances", zap.Int("count", len(recovered)))
+		s.executor.SyncWithRecoveredInstances(ctx, recovered)
 	}
 
 	// Start the watcher first to begin receiving events

@@ -47,12 +47,32 @@ export default function TaskPage({ task }: TaskPageClientProps) {
     state.kanban.tasks.find((t) => t.id === task?.id)
   );
 
-  // Update isAgentRunning based on task state
+  // Fetch task execution status from orchestrator on mount
   useEffect(() => {
-    // Check if task state indicates agent is working
-    const taskState = task?.state;
-    setIsAgentRunning(taskState === 'IN_PROGRESS');
-  }, [task?.state]);
+    if (!task?.id) return;
+
+    const checkExecution = async () => {
+      const client = getWebSocketClient();
+      if (!client) return;
+
+      try {
+        const response = await client.request<{
+          has_execution: boolean;
+          task_id: string;
+          status?: string;
+        }>('task.execution', { task_id: task.id });
+
+        console.log('[TaskPage] Task execution check:', response);
+        if (response.has_execution) {
+          setIsAgentRunning(true);
+        }
+      } catch (err) {
+        console.error('[TaskPage] Failed to check task execution:', err);
+      }
+    };
+
+    checkExecution();
+  }, [task?.id]);
 
   const fetchBranches = useCallback(async (workspaceId: string, repoPath: string) => {
     const response = await listRepositories(getBackendConfig().apiBaseUrl, workspaceId);

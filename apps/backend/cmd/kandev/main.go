@@ -619,6 +619,21 @@ func (a *lifecycleAdapter) RespondToPermissionByTaskID(ctx context.Context, task
 	return a.mgr.RespondToPermissionByTaskID(taskID, pendingID, optionID, cancelled)
 }
 
+// GetRecoveredInstances returns instances recovered from Docker during startup
+func (a *lifecycleAdapter) GetRecoveredInstances() []executor.RecoveredInstanceInfo {
+	recovered := a.mgr.GetRecoveredInstances()
+	result := make([]executor.RecoveredInstanceInfo, len(recovered))
+	for i, r := range recovered {
+		result[i] = executor.RecoveredInstanceInfo{
+			InstanceID:  r.InstanceID,
+			TaskID:      r.TaskID,
+			ContainerID: r.ContainerID,
+			AgentType:   r.AgentType,
+		}
+	}
+	return result
+}
+
 // corsMiddleware returns a CORS middleware for HTTP and WebSocket connections
 func corsMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {

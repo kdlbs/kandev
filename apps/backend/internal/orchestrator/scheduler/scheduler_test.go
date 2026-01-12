@@ -64,6 +64,10 @@ func (m *mockAgentManager) RespondToPermissionByTaskID(ctx context.Context, task
 	return nil
 }
 
+func (m *mockAgentManager) GetRecoveredInstances() []executor.RecoveredInstanceInfo {
+	return nil
+}
+
 // testTaskRepository is an in-memory task repository for testing
 type testTaskRepository struct {
 	tasks map[string]*v1.Task

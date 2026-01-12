@@ -396,6 +396,11 @@ func (s *SimulatedAgentManagerClient) Close() {
 	close(s.stopCh)
 }
 
+// GetRecoveredInstances returns recovered instances (none for simulated agent)
+func (s *SimulatedAgentManagerClient) GetRecoveredInstances() []executor.RecoveredInstanceInfo {
+	return nil
+}
+
 // ============================================
 // ORCHESTRATOR TEST SERVER
 // ============================================

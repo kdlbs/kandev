@@ -50,6 +50,9 @@ type AgentManagerClient interface {
 
 	// RespondToPermission sends a response to a permission request
 	RespondToPermissionByTaskID(ctx context.Context, taskID, pendingID, optionID string, cancelled bool) error
+
+	// GetRecoveredInstances returns instances recovered from Docker during startup
+	GetRecoveredInstances() []RecoveredInstanceInfo
 }
 
 // LaunchAgentRequest contains parameters for launching an agent
@@ -192,6 +195,43 @@ func (e *Executor) LoadActiveSessionsFromDB(ctx context.Context) error {
 	return nil
 }
 
+// RecoveredInstanceInfo contains info about an instance recovered from Docker
+type RecoveredInstanceInfo struct {
+	InstanceID  string
+	TaskID      string
+	ContainerID string
+	AgentType   string
+}
+
+// SyncWithRecoveredInstances ensures the executor's cache is in sync with
+// instances recovered from Docker by the lifecycle manager.
+// For each recovered instance, if not already in cache, add it.
+func (e *Executor) SyncWithRecoveredInstances(ctx context.Context, instances []RecoveredInstanceInfo) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	for _, inst := range instances {
+		if _, exists := e.executions[inst.TaskID]; exists {
+			continue // Already have this execution
+		}
+
+		// Add to cache - this instance is running in Docker but wasn't in DB as active
+		e.executions[inst.TaskID] = &TaskExecution{
+			TaskID:          inst.TaskID,
+			AgentInstanceID: inst.InstanceID,
+			AgentType:       inst.AgentType,
+			StartedAt:       time.Now(), // We don't know exact start time
+			Status:          v1.AgentStatusRunning,
+			Progress:        0,
+			LastUpdate:      time.Now(),
+		}
+
+		e.logger.Info("synced recovered instance to executor cache",
+			zap.String("task_id", inst.TaskID),
+			zap.String("instance_id", inst.InstanceID))
+	}
+}
+
 // Execute starts agent execution for a task
 func (e *Executor) Execute(ctx context.Context, task *v1.Task) (*TaskExecution, error) {
 	// Check if max concurrent limit is reached
@@ -243,6 +283,7 @@ func (e *Executor) Execute(ctx context.Context, task *v1.Task) (*TaskExecution, 
 		ID:              sessionID,
 		TaskID:          task.ID,
 		AgentInstanceID: resp.AgentInstanceID,
+		ContainerID:     resp.ContainerID,
 		AgentType:       *task.AgentType,
 		Status:          v1StatusToAgentSessionStatus(resp.Status),
 		Progress:        0,
@@ -297,27 +338,29 @@ func (e *Executor) Stop(ctx context.Context, taskID string, reason string, force
 
 	err = e.agentManager.StopAgent(ctx, execution.AgentInstanceID, force)
 	if err != nil {
-		e.logger.Error("failed to stop agent",
+		// Log the error but continue to clean up execution state
+		// The agent instance may already be gone (container stopped externally)
+		e.logger.Warn("failed to stop agent (may already be stopped)",
 			zap.String("task_id", taskID),
 			zap.Error(err))
-		return err
 	}
 
-	// Update execution status in memory and database
+	// Update execution status in memory and database regardless of agent stop result
 	e.mu.Lock()
 	if exec, ok := e.executions[taskID]; ok {
 		exec.Status = v1.AgentStatusStopped
 		exec.LastUpdate = time.Now()
 	}
+	delete(e.executions, taskID) // Remove from cache so GetExecution returns false
 	e.mu.Unlock()
 
 	// Update database
 	if execution.SessionID != "" {
-		if err := e.repo.UpdateAgentSessionStatus(ctx, execution.SessionID, models.AgentSessionStatusStopped, reason); err != nil {
+		if dbErr := e.repo.UpdateAgentSessionStatus(ctx, execution.SessionID, models.AgentSessionStatusStopped, reason); dbErr != nil {
 			e.logger.Error("failed to update agent session status in database",
 				zap.String("task_id", taskID),
 				zap.String("session_id", execution.SessionID),
-				zap.Error(err))
+				zap.Error(dbErr))
 		}
 	}
 
@@ -649,5 +692,10 @@ func (m *MockAgentManagerClient) RespondToPermissionByTaskID(ctx context.Context
 		zap.String("pending_id", pendingID),
 		zap.String("option_id", optionID),
 		zap.Bool("cancelled", cancelled))
+	return nil
+}
+
+// GetRecoveredInstances mocks getting recovered instances (returns empty for mock)
+func (m *MockAgentManagerClient) GetRecoveredInstances() []RecoveredInstanceInfo {
 	return nil
 }
