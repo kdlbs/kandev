@@ -20,11 +20,11 @@ import {
   IconPlayerPlay,
   IconPlayerStop,
 } from '@tabler/icons-react';
-import { Button } from '@/components/ui/button';
+import { Button } from '@kandev/ui/button';
 import { CommitStatBadge, LineStat } from '@/components/diff-stat';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@kandev/ui/dropdown-menu';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@kandev/ui/select';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
 
 type TaskTopBarProps = {
   taskTitle?: string;

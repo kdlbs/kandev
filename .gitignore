@@ -71,3 +71,13 @@ apps/backend/bin/
 # Go binaries (built locally)
 apps/backend/kandev
 apps/backend/agentctl
+
+# Next.js
+.next/
+out/
+node_modules/
+pnpm-lock.yaml
+
+# TypeScript
+*.tsbuildinfo
+apps/landing/next-env.d.ts

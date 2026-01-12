@@ -1,4 +1,5 @@
 {
+  "extends": "../tsconfig.json",
   "compilerOptions": {
     "target": "ES2017",
     "lib": ["dom", "dom.iterable", "esnext"],
@@ -19,7 +20,11 @@
       }
     ],
     "paths": {
-      "@/*": ["./*"]
+      "@/*": ["./*"],
+      "@kandev/ui": ["../packages/ui/src"],
+      "@kandev/ui/*": ["../packages/ui/src/*"],
+      "@kandev/theme": ["../packages/theme/src"],
+      "@kandev/types": ["../packages/types/src"]
     }
   },
   "include": [

@@ -1,0 +1,19 @@
+{
+  "name": "kandev-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm -r run dev",
+    "dev:web": "pnpm --filter @kandev/web dev",
+    "dev:landing": "pnpm --filter @kandev/landing dev",
+    "build": "pnpm -r run build",
+    "build:web": "pnpm --filter @kandev/web build",
+    "build:landing": "pnpm --filter @kandev/landing build",
+    "lint": "pnpm -r run lint",
+    "clean": "pnpm -r run clean && rm -rf node_modules"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "typescript": "^5"
+  }
+}

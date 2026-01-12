@@ -8,19 +8,19 @@ import {
   DialogTitle,
   DialogFooter,
   DialogClose,
-} from '@/components/ui/dialog';
-import { Label } from '@/components/ui/label';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
-import { Button } from '@/components/ui/button';
+} from '@kandev/ui/dialog';
+import { Label } from '@kandev/ui/label';
+import { Input } from '@kandev/ui/input';
+import { Textarea } from '@kandev/ui/textarea';
+import { Button } from '@kandev/ui/button';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+} from '@kandev/ui/select';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@kandev/ui/tooltip';
 import type { Repository, Task } from '@/lib/types/http';
 import { getBackendConfig } from '@/lib/config';
 import { createTask, listRepositories, listRepositoryBranches, updateTask } from '@/lib/http/client';

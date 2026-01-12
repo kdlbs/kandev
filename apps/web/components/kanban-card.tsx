@@ -3,13 +3,13 @@
 import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 import { IconAlertTriangle, IconCircleCheck, IconCircleX, IconDots, IconLoader2 } from '@tabler/icons-react';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card, CardContent } from '@kandev/ui/card';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+} from '@kandev/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 
 export interface Task {

@@ -13,7 +13,7 @@ import {
 import { KanbanColumn, Column } from './kanban-column';
 import { KanbanCardPreview, Task } from './kanban-card';
 import { ConnectionStatus } from './connection-status';
-import { Button } from '@/components/ui/button';
+import { Button } from '@kandev/ui/button';
 import { IconPlus, IconSettings } from '@tabler/icons-react';
 import { TaskCreateDialog } from './task-create-dialog';
 import Link from 'next/link';
@@ -23,7 +23,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select';
+} from '@kandev/ui/select';
 import { useRouter } from 'next/navigation';
 import { useAppStore, useAppStoreApi } from '@/components/state-provider';
 import { getWebSocketClient } from '@/lib/ws/connection';

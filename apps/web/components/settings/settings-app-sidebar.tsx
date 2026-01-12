@@ -26,8 +26,8 @@ import {
   SidebarMenuSubButton,
   SidebarMenuAction,
   SidebarHeader,
-} from '@/components/ui/sidebar';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+} from '@kandev/ui/sidebar';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@kandev/ui/collapsible';
 import { SETTINGS_DATA } from '@/lib/settings/dummy-data';
 import { useAppStore } from '@/components/state-provider';
 

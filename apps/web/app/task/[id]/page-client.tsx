@@ -2,10 +2,10 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import '@git-diff-view/react/styles/diff-view.css';
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { TooltipProvider } from '@/components/ui/tooltip';
-import { Textarea } from '@/components/ui/textarea';
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@kandev/ui/resizable';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@kandev/ui/tabs';
+import { TooltipProvider } from '@kandev/ui/tooltip';
+import { Textarea } from '@kandev/ui/textarea';
 import { getLocalStorage, setLocalStorage } from '@/lib/local-storage';
 import { TaskChatPanel } from '@/components/task/task-chat-panel';
 import { TaskTopBar } from '@/components/task/task-top-bar';
@@ -29,11 +29,13 @@ type TaskPageClientProps = {
   task: Task | null;
 };
 
+const DEFAULT_HORIZONTAL_LAYOUT: [number, number] = [75, 25];
+
 export default function TaskPage({ task: initialTask }: TaskPageClientProps) {
   const store = useAppStoreApi();
-  const defaultHorizontalLayout: [number, number] = [75, 25];
-  const [horizontalLayout, setHorizontalLayout] = useState<[number, number]>(() =>
-    getLocalStorage('task-layout-horizontal', defaultHorizontalLayout)
+  const [isMounted, setIsMounted] = useState(false);
+  const [horizontalLayout, setHorizontalLayout] = useState<[number, number]>(
+    getLocalStorage('task-layout-horizontal', DEFAULT_HORIZONTAL_LAYOUT)
   );
   const [leftTab, setLeftTab] = useState('chat');
   const [selectedDiffPath, setSelectedDiffPath] = useState<string | null>(null);
@@ -51,6 +53,10 @@ export default function TaskPage({ task: initialTask }: TaskPageClientProps) {
   const taskFromStore = useAppStore((state) =>
     state.kanban.tasks.find((t) => t.id === task?.id)
   );
+
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
   // Fetch task execution status from orchestrator on mount
   useEffect(() => {
@@ -211,6 +217,10 @@ export default function TaskPage({ task: initialTask }: TaskPageClientProps) {
     if (!task?.workspace_id || !task.repository_url) return;
     branchesRequest.run(task.workspace_id, task.repository_url).catch(() => {});
   }, [branchesRequest.run, task?.repository_url, task?.workspace_id]);
+
+  if (!isMounted) {
+    return <div className="h-screen w-full bg-background" />;
+  }
 
   return (
     <TooltipProvider>

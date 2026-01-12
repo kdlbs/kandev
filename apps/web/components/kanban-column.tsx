@@ -2,7 +2,7 @@
 
 import { useDroppable } from '@dnd-kit/core';
 import { KanbanCard, Task } from './kanban-card';
-import { Badge } from '@/components/ui/badge';
+import { Badge } from '@kandev/ui/badge';
 import { cn } from '@/lib/utils';
 
 export interface Column {

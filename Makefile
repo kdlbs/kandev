@@ -4,9 +4,11 @@
 # Directories
 BACKEND_DIR := apps/backend
 WEB_DIR := apps/web
+LANDING_DIR := apps/landing
+APPS_DIR := apps
 
 # Tools
-NPM := npm
+PNPM := pnpm
 MAKE := make
 
 # Default target
@@ -23,17 +25,19 @@ help:
 	@echo "Development Commands:"
 	@echo "  dev-backend      Run backend in development mode (port 8080)"
 	@echo "  dev-web          Run web app in development mode (port 3000)"
+	@echo "  dev-landing      Run landing page in development mode (port 3001)"
 	@echo "  dev              Note: Run dev-backend and dev-web in separate terminals"
 	@echo ""
 	@echo "Build Commands:"
-	@echo "  build            Build both backend and web app"
+	@echo "  build            Build backend, web app, and landing page"
 	@echo "  build-backend    Build backend binary"
 	@echo "  build-web        Build web app for production"
+	@echo "  build-landing    Build landing page for production"
 	@echo ""
 	@echo "Installation:"
-	@echo "  install          Install all dependencies (backend + web)"
+	@echo "  install          Install all dependencies (backend + web + landing)"
 	@echo "  install-backend  Install backend dependencies"
-	@echo "  install-web      Install web dependencies"
+	@echo "  install-web      Install web dependencies (uses pnpm workspace)"
 	@echo ""
 	@echo "Testing:"
 	@echo "  test             Run all tests (backend + web)"
@@ -71,7 +75,7 @@ dev:
 	@echo "Backend: http://localhost:8080"
 	@echo "Web app: http://localhost:3000"
 	@echo ""
-	@$(MAKE) -C $(BACKEND_DIR) run & cd $(WEB_DIR) && $(NPM) run dev
+	@$(MAKE) -C $(BACKEND_DIR) run & cd $(APPS_DIR) && $(PNPM) --filter @kandev/web dev
 
 .PHONY: dev-backend
 dev-backend:
@@ -81,18 +85,24 @@ dev-backend:
 .PHONY: dev-web
 dev-web:
 	@echo "Starting web app on http://localhost:3000"
-	@cd $(WEB_DIR) && $(NPM) run dev
+	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web dev
+
+.PHONY: dev-landing
+dev-landing:
+	@echo "Starting landing page on http://localhost:3001"
+	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/landing dev
 
 #
 # Build
 #
 
 .PHONY: build
-build: build-backend build-web
+build: build-backend build-web build-landing
 	@echo ""
 	@echo "✓ Build complete!"
 	@echo "  Backend binary: $(BACKEND_DIR)/bin/kandev"
 	@echo "  Web app: $(WEB_DIR)/.next"
+	@echo "  Landing page: $(LANDING_DIR)/.next"
 
 .PHONY: build-backend
 build-backend:
@@ -102,7 +112,12 @@ build-backend:
 .PHONY: build-web
 build-web:
 	@echo "Building web app..."
-	@cd $(WEB_DIR) && $(NPM) run build
+	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web build
+
+.PHONY: build-landing
+build-landing:
+	@echo "Building landing page..."
+	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/landing build
 
 #
 # Installation
@@ -120,8 +135,8 @@ install-backend:
 
 .PHONY: install-web
 install-web:
-	@echo "Installing web dependencies..."
-	@cd $(WEB_DIR) && $(NPM) install
+	@echo "Installing web and landing dependencies..."
+	@cd $(APPS_DIR) && $(PNPM) install
 
 #
 # Testing
@@ -140,7 +155,7 @@ test-backend:
 .PHONY: test-web
 test-web:
 	@echo "Running web app tests..."
-	@cd $(WEB_DIR) && $(NPM) test
+	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web test
 
 #
 # Code Quality
@@ -159,7 +174,7 @@ lint-backend:
 .PHONY: lint-web
 lint-web:
 	@echo "Linting web app..."
-	@cd $(WEB_DIR) && $(NPM) run lint
+	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web lint
 
 .PHONY: fmt
 fmt: fmt-backend fmt-web
@@ -174,7 +189,7 @@ fmt-backend:
 .PHONY: fmt-web
 fmt-web:
 	@echo "Formatting web code..."
-	@cd $(WEB_DIR) && $(NPM) run lint -- --fix || true
+	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web lint -- --fix || true
 
 #
 # Cleanup
@@ -192,8 +207,9 @@ clean-backend:
 
 .PHONY: clean-web
 clean-web:
-	@echo "Cleaning web artifacts..."
-	@rm -rf $(WEB_DIR)/.next $(WEB_DIR)/node_modules
+	@echo "Cleaning web and landing artifacts..."
+	@rm -rf $(WEB_DIR)/.next $(LANDING_DIR)/.next $(APPS_DIR)/node_modules
+	@rm -rf $(APPS_DIR)/packages/*/node_modules
 
 .PHONY: clean-db
 clean-db:

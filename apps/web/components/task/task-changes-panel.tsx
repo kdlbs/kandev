@@ -1,12 +1,12 @@
 'use client';
 
-import { memo, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import { DiffModeEnum, DiffView } from '@git-diff-view/react';
 import { IconArrowBackUp, IconCopy, IconLayoutColumns, IconLayoutRows } from '@tabler/icons-react';
 import { useTheme } from 'next-themes';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Badge } from '@kandev/ui/badge';
+import { Button } from '@kandev/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { getLocalStorage, setLocalStorage } from '@/lib/local-storage';
 import { buildDiffData, CHANGED_FILES, DIFF_SAMPLES } from '@/components/task/task-data';
@@ -16,15 +16,18 @@ type TaskChangesPanelProps = {
   onClearSelected: () => void;
 };
 
+const DEFAULT_DIFF_MODE: 'unified' | 'split' = 'unified';
+
 const TaskChangesPanel = memo(function TaskChangesPanel({
   selectedDiffPath,
   onClearSelected,
 }: TaskChangesPanelProps) {
-  const defaultDiffMode: 'unified' | 'split' = 'unified';
-  const [diffViewMode, setDiffViewMode] = useState<'unified' | 'split'>(() =>
-    getLocalStorage('task-diff-view-mode', defaultDiffMode)
-  );
+  const [diffViewMode, setDiffViewMode] = useState<'unified' | 'split'>(DEFAULT_DIFF_MODE);
   const { resolvedTheme } = useTheme();
+
+  useEffect(() => {
+    setDiffViewMode(getLocalStorage('task-diff-view-mode', DEFAULT_DIFF_MODE));
+  }, []);
 
   const diffTargets = useMemo(
     () => (selectedDiffPath ? [selectedDiffPath] : CHANGED_FILES.map((file) => file.path)),

@@ -9,12 +9,12 @@ import {
   IconFile,
   IconFolder,
 } from '@tabler/icons-react';
-import { Badge } from '@/components/ui/badge';
+import { Badge } from '@kandev/ui/badge';
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
-} from '@/components/ui/collapsible';
+} from '@kandev/ui/collapsible';
 import {
   Sidebar,
   SidebarContent,
@@ -26,9 +26,9 @@ import {
   SidebarMenuSub,
   SidebarProvider,
   SidebarRail,
-} from '@/components/ui/sidebar';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+} from '@kandev/ui/sidebar';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@kandev/ui/tabs';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
 import { LineStat } from '@/components/diff-stat';
 import { cn } from '@/lib/utils';
 import { CHANGED_FILES, FILE_TREE } from '@/components/task/task-data';

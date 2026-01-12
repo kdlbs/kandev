@@ -3,11 +3,11 @@
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { IconGitBranch, IconLoader2, IconPlus, IconTrash } from '@tabler/icons-react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Separator } from '@/components/ui/separator';
+import { Button } from '@kandev/ui/button';
+import { Input } from '@kandev/ui/input';
+import { Label } from '@kandev/ui/label';
+import { Card, CardContent, CardHeader, CardTitle } from '@kandev/ui/card';
+import { Separator } from '@kandev/ui/separator';
 import {
   Dialog,
   DialogContent,
@@ -15,7 +15,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
+} from '@kandev/ui/dialog';
 import { SettingsSection } from '@/components/settings/settings-section';
 import { RepositoryCard } from '@/components/settings/repository-card';
 import { BoardCard } from '@/components/settings/board-card';

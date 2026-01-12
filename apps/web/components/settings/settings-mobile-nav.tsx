@@ -1,6 +1,6 @@
 'use client';
 
-import { Sheet, SheetContent } from '@/components/ui/sheet';
+import { Sheet, SheetContent } from '@kandev/ui/sheet';
 import { SettingsSidebar } from './settings-sidebar';
 
 type SettingsMobileNavProps = {

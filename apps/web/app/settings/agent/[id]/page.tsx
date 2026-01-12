@@ -3,13 +3,13 @@
 import { use, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { IconTrash } from '@tabler/icons-react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Separator } from '@/components/ui/separator';
-import { Switch } from '@/components/ui/switch';
-import { Slider } from '@/components/ui/slider';
+import { Button } from '@kandev/ui/button';
+import { Input } from '@kandev/ui/input';
+import { Label } from '@kandev/ui/label';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@kandev/ui/card';
+import { Separator } from '@kandev/ui/separator';
+import { Switch } from '@kandev/ui/switch';
+import { Slider } from '@kandev/ui/slider';
 import {
   Dialog,
   DialogContent,
@@ -17,9 +17,9 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
+} from '@kandev/ui/dialog';
 import { SETTINGS_DATA } from '@/lib/settings/dummy-data';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@kandev/ui/select';
 import type { AgentProfile, AgentType } from '@/lib/settings/types';
 
 const MODEL_OPTIONS: Record<AgentType, { value: string; label: string }[]> = {

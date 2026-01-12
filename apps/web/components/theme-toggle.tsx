@@ -2,7 +2,7 @@
 
 import { useTheme } from 'next-themes';
 import { IconMoon, IconSun } from '@tabler/icons-react';
-import { Button } from '@/components/ui/button';
+import { Button } from '@kandev/ui/button';
 import { useSyncExternalStore } from 'react';
 
 export function ThemeToggle() {

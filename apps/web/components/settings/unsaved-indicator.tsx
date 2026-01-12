@@ -1,7 +1,7 @@
 'use client';
 
 import { IconAlertCircle } from '@tabler/icons-react';
-import { Button } from '@/components/ui/button';
+import { Button } from '@kandev/ui/button';
 import { RequestIndicator } from '@/components/request-indicator';
 
 type UnsavedSaveButtonProps = {

@@ -6,10 +6,10 @@ import {
   BreadcrumbItem,
   BreadcrumbLink,
   BreadcrumbList,
-} from '@/components/ui/breadcrumb';
-import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar';
+} from '@kandev/ui/breadcrumb';
+import { SidebarInset, SidebarProvider } from '@kandev/ui/sidebar';
 import { SettingsAppSidebar } from '@/components/settings/settings-app-sidebar';
-import { TooltipProvider } from '@/components/ui/tooltip';
+import { TooltipProvider } from '@kandev/ui/tooltip';
 
 export function SettingsLayoutClient({ children }: { children: React.ReactNode }) {
   return (

@@ -2,13 +2,13 @@
 
 import { useState } from 'react';
 import { IconPlus } from '@tabler/icons-react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
-import { Card, CardContent } from '@/components/ui/card';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Separator } from '@/components/ui/separator';
+import { Button } from '@kandev/ui/button';
+import { Input } from '@kandev/ui/input';
+import { Label } from '@kandev/ui/label';
+import { Textarea } from '@kandev/ui/textarea';
+import { Card, CardContent } from '@kandev/ui/card';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@kandev/ui/select';
+import { Separator } from '@kandev/ui/separator';
 import { EnvironmentCard } from '@/components/settings/environment-card';
 import { KeyValueInput } from '@/components/settings/key-value-input';
 import { SETTINGS_DATA } from '@/lib/settings/dummy-data';

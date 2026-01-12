@@ -8,8 +8,8 @@ import {
   DialogTitle,
   DialogFooter,
   DialogDescription,
-} from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
+} from '@kandev/ui/dialog';
+import { Button } from '@kandev/ui/button';
 import { IconCheck, IconRocket } from '@tabler/icons-react';
 interface OnboardingDialogProps {
   open: boolean;

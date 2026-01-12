@@ -3,9 +3,9 @@
 import type { ReactNode } from 'react';
 import { memo, useState } from 'react';
 import { IconChevronDown, IconChevronUp, IconX } from '@tabler/icons-react';
-import { Badge } from '@/components/ui/badge';
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Badge } from '@kandev/ui/badge';
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@kandev/ui/resizable';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@kandev/ui/tabs';
 import { getLocalStorage, setLocalStorage } from '@/lib/local-storage';
 import { COMMANDS } from '@/components/task/task-data';
 
@@ -13,10 +13,11 @@ type TaskRightPanelProps = {
   topPanel: ReactNode;
 };
 
+const DEFAULT_RIGHT_LAYOUT: [number, number] = [55, 45];
+
 const TaskRightPanel = memo(function TaskRightPanel({ topPanel }: TaskRightPanelProps) {
-  const defaultRightLayout: [number, number] = [55, 45];
   const [rightLayout, setRightLayout] = useState<[number, number]>(() =>
-    getLocalStorage('task-layout-right', defaultRightLayout)
+    getLocalStorage('task-layout-right', DEFAULT_RIGHT_LAYOUT)
   );
   const [activeTerminalId, setActiveTerminalId] = useState(1);
   const [terminalIds, setTerminalIds] = useState([1]);

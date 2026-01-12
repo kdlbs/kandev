@@ -3,13 +3,13 @@
 import { use, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { IconPlus, IconTrash } from '@tabler/icons-react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Separator } from '@/components/ui/separator';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Button } from '@kandev/ui/button';
+import { Input } from '@kandev/ui/input';
+import { Label } from '@kandev/ui/label';
+import { Textarea } from '@kandev/ui/textarea';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@kandev/ui/card';
+import { Separator } from '@kandev/ui/separator';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@kandev/ui/select';
 import {
   Dialog,
   DialogContent,
@@ -17,7 +17,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
+} from '@kandev/ui/dialog';
 import { generateUUID } from '@/lib/utils';
 import { SETTINGS_DATA } from '@/lib/settings/dummy-data';
 import type { Environment, EnvironmentType, BaseDocker, AgentType } from '@/lib/settings/types';

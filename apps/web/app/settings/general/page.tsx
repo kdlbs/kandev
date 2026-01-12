@@ -3,11 +3,11 @@
 import { useState, useSyncExternalStore } from 'react';
 import { useTheme } from 'next-themes';
 import { IconPalette, IconCode, IconBell, IconServer } from '@tabler/icons-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Label } from '@/components/ui/label';
-import { Input } from '@/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Separator } from '@/components/ui/separator';
+import { Card, CardContent, CardHeader, CardTitle } from '@kandev/ui/card';
+import { Label } from '@kandev/ui/label';
+import { Input } from '@kandev/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@kandev/ui/select';
+import { Separator } from '@kandev/ui/separator';
 import { SettingsSection } from '@/components/settings/settings-section';
 import { SETTINGS_DATA } from '@/lib/settings/dummy-data';
 import { getBackendConfig } from '@/lib/config';

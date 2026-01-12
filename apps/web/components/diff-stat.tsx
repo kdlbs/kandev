@@ -1,7 +1,7 @@
 'use client';
 
 import { cn } from '@/lib/utils';
-import { Badge } from '@/components/ui/badge';
+import { Badge } from '@kandev/ui/badge';
 
 type CommitStatBadgeProps = {
   label: string;

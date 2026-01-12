@@ -9,10 +9,10 @@ import {
   IconKey,
   IconShield,
 } from '@tabler/icons-react';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Separator } from '@/components/ui/separator';
-import { Badge } from '@/components/ui/badge';
+import { Button } from '@kandev/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@kandev/ui/card';
+import { Separator } from '@kandev/ui/separator';
+import { Badge } from '@kandev/ui/badge';
 
 type Plugin = {
   id: string;

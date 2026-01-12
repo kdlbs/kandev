@@ -2,11 +2,11 @@
 
 import { useState } from 'react';
 import { IconGitBranch, IconPlus, IconTrash, IconX } from '@tabler/icons-react';
-import { Card, CardContent } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
+import { Card, CardContent } from '@kandev/ui/card';
+import { Button } from '@kandev/ui/button';
+import { Input } from '@kandev/ui/input';
+import { Label } from '@kandev/ui/label';
+import { Textarea } from '@kandev/ui/textarea';
 import {
   Dialog,
   DialogContent,
@@ -14,7 +14,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
+} from '@kandev/ui/dialog';
 import { useRequest } from '@/lib/http/use-request';
 import { useToast } from '@/components/toast-provider';
 import { UnsavedChangesBadge, UnsavedSaveButton } from '@/components/settings/unsaved-indicator';

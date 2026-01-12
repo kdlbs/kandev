@@ -2,12 +2,12 @@
 
 import { useState } from 'react';
 import { IconPlus } from '@tabler/icons-react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Card, CardContent } from '@/components/ui/card';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Separator } from '@/components/ui/separator';
+import { Button } from '@kandev/ui/button';
+import { Input } from '@kandev/ui/input';
+import { Label } from '@kandev/ui/label';
+import { Card, CardContent } from '@kandev/ui/card';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@kandev/ui/select';
+import { Separator } from '@kandev/ui/separator';
 import { AgentCard } from '@/components/settings/agent-card';
 import { SETTINGS_DATA } from '@/lib/settings/dummy-data';
 import type { AgentProfile, AgentType } from '@/lib/settings/types';

@@ -17,10 +17,10 @@ import {
   IconTrash,
   IconPlus,
 } from '@tabler/icons-react';
-import { Card, CardContent } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { Card, CardContent } from '@kandev/ui/card';
+import { Button } from '@kandev/ui/button';
+import { Input } from '@kandev/ui/input';
+import { Label } from '@kandev/ui/label';
 import {
   Dialog,
   DialogContent,
@@ -28,7 +28,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
+} from '@kandev/ui/dialog';
 import type { Board, Column } from '@/lib/types/http';
 import { useRequest } from '@/lib/http/use-request';
 import { useToast } from '@/components/toast-provider';

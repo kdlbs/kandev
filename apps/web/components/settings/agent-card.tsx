@@ -2,8 +2,8 @@
 
 import Link from 'next/link';
 import { IconRobot, IconChevronRight } from '@tabler/icons-react';
-import { Card, CardContent } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
+import { Card, CardContent } from '@kandev/ui/card';
+import { Badge } from '@kandev/ui/badge';
 import type { AgentProfile, AgentType } from '@/lib/settings/types';
 
 type AgentCardProps = {
