@@ -208,6 +208,35 @@ go fmt ./...
 go vet ./...
 ```
 
+## Pre-commit Hooks
+
+We use `pre-commit` to run the backend tests, web tests, and web lint before commits.
+
+### Install
+
+```bash
+# Install pre-commit (https://pre-commit.com/#install)
+pipx install pre-commit
+
+# Install git hooks
+pre-commit install
+```
+
+### Run Manually
+
+```bash
+# Run all hooks once
+pre-commit run --all-files
+```
+
+### Hooks Config
+
+The hooks are defined in `.pre-commit-config.yaml` and run these Makefile targets:
+
+- `make test-backend`
+- `make test-web`
+- `make lint-web`
+
 ## Project Status
 
 ✅ **Core Features Working**
@@ -233,4 +262,3 @@ See [apps/backend/NEXT_STEPS.md](apps/backend/NEXT_STEPS.md) for the complete ro
 ## Acknowledgments
 
 Built with Go and inspired by modern DevOps practices and AI-assisted development workflows.
-
