@@ -18,12 +18,13 @@ type BoardDTO struct {
 }
 
 type WorkspaceDTO struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Description *string   `json:"description,omitempty"`
-	OwnerID     string    `json:"owner_id"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID                string    `json:"id"`
+	Name              string    `json:"name"`
+	Description       *string   `json:"description,omitempty"`
+	OwnerID           string    `json:"owner_id"`
+	DefaultExecutorID *string   `json:"default_executor_id,omitempty"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 type ColumnDTO struct {
@@ -62,6 +63,29 @@ type RepositoryScriptDTO struct {
 	Position     int       `json:"position"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+type ExecutorDTO struct {
+	ID        string                `json:"id"`
+	Name      string                `json:"name"`
+	Type      models.ExecutorType   `json:"type"`
+	Status    models.ExecutorStatus `json:"status"`
+	IsSystem  bool                  `json:"is_system"`
+	Config    map[string]string     `json:"config,omitempty"`
+	CreatedAt time.Time             `json:"created_at"`
+	UpdatedAt time.Time             `json:"updated_at"`
+}
+
+type EnvironmentDTO struct {
+	ID           string                 `json:"id"`
+	Name         string                 `json:"name"`
+	Kind         models.EnvironmentKind `json:"kind"`
+	WorktreeRoot string                 `json:"worktree_root,omitempty"`
+	ImageTag     string                 `json:"image_tag,omitempty"`
+	Dockerfile   string                 `json:"dockerfile,omitempty"`
+	BuildConfig  map[string]string      `json:"build_config,omitempty"`
+	CreatedAt    time.Time              `json:"created_at"`
+	UpdatedAt    time.Time              `json:"updated_at"`
 }
 
 type TaskDTO struct {
@@ -115,6 +139,16 @@ type ListRepositoriesResponse struct {
 type ListRepositoryScriptsResponse struct {
 	Scripts []RepositoryScriptDTO `json:"scripts"`
 	Total   int                   `json:"total"`
+}
+
+type ListExecutorsResponse struct {
+	Executors []ExecutorDTO `json:"executors"`
+	Total     int           `json:"total"`
+}
+
+type ListEnvironmentsResponse struct {
+	Environments []EnvironmentDTO `json:"environments"`
+	Total        int              `json:"total"`
 }
 
 type RepositoryBranchesResponse struct {
@@ -173,14 +207,19 @@ func FromWorkspace(workspace *models.Workspace) WorkspaceDTO {
 	if workspace.Description != "" {
 		description = &workspace.Description
 	}
+	var defaultExecutorID *string
+	if workspace.DefaultExecutorID != "" {
+		defaultExecutorID = &workspace.DefaultExecutorID
+	}
 
 	return WorkspaceDTO{
-		ID:          workspace.ID,
-		Name:        workspace.Name,
-		Description: description,
-		OwnerID:     workspace.OwnerID,
-		CreatedAt:   workspace.CreatedAt,
-		UpdatedAt:   workspace.UpdatedAt,
+		ID:                workspace.ID,
+		Name:              workspace.Name,
+		Description:       description,
+		OwnerID:           workspace.OwnerID,
+		DefaultExecutorID: defaultExecutorID,
+		CreatedAt:         workspace.CreatedAt,
+		UpdatedAt:         workspace.UpdatedAt,
 	}
 }
 
@@ -225,6 +264,33 @@ func FromRepositoryScript(script *models.RepositoryScript) RepositoryScriptDTO {
 		Position:     script.Position,
 		CreatedAt:    script.CreatedAt,
 		UpdatedAt:    script.UpdatedAt,
+	}
+}
+
+func FromExecutor(executor *models.Executor) ExecutorDTO {
+	return ExecutorDTO{
+		ID:        executor.ID,
+		Name:      executor.Name,
+		Type:      executor.Type,
+		Status:    executor.Status,
+		IsSystem:  executor.IsSystem,
+		Config:    executor.Config,
+		CreatedAt: executor.CreatedAt,
+		UpdatedAt: executor.UpdatedAt,
+	}
+}
+
+func FromEnvironment(environment *models.Environment) EnvironmentDTO {
+	return EnvironmentDTO{
+		ID:           environment.ID,
+		Name:         environment.Name,
+		Kind:         environment.Kind,
+		WorktreeRoot: environment.WorktreeRoot,
+		ImageTag:     environment.ImageTag,
+		Dockerfile:   environment.Dockerfile,
+		BuildConfig:  environment.BuildConfig,
+		CreatedAt:    environment.CreatedAt,
+		UpdatedAt:    environment.UpdatedAt,
 	}
 }
 

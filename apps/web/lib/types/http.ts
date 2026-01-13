@@ -24,6 +24,7 @@ export type Workspace = {
   name: string;
   description?: string | null;
   owner_id: string;
+  default_executor_id?: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -142,6 +143,39 @@ export type RepositoryBranchesResponse = {
 
 export type ListWorkspacesResponse = {
   workspaces: Workspace[];
+  total: number;
+};
+
+export type Executor = {
+  id: string;
+  name: string;
+  type: string;
+  status: string;
+  is_system: boolean;
+  config?: Record<string, string>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type Environment = {
+  id: string;
+  name: string;
+  kind: string;
+  worktree_root?: string | null;
+  image_tag?: string | null;
+  dockerfile?: string | null;
+  build_config?: Record<string, string> | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ListExecutorsResponse = {
+  executors: Executor[];
+  total: number;
+};
+
+export type ListEnvironmentsResponse = {
+  environments: Environment[];
   total: number;
 };
 

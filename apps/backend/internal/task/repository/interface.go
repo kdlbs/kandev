@@ -73,6 +73,20 @@ type Repository interface {
 	DeleteRepositoryScript(ctx context.Context, id string) error
 	ListRepositoryScripts(ctx context.Context, repositoryID string) ([]*models.RepositoryScript, error)
 
+	// Executor operations
+	CreateExecutor(ctx context.Context, executor *models.Executor) error
+	GetExecutor(ctx context.Context, id string) (*models.Executor, error)
+	UpdateExecutor(ctx context.Context, executor *models.Executor) error
+	DeleteExecutor(ctx context.Context, id string) error
+	ListExecutors(ctx context.Context) ([]*models.Executor, error)
+
+	// Environment operations
+	CreateEnvironment(ctx context.Context, environment *models.Environment) error
+	GetEnvironment(ctx context.Context, id string) (*models.Environment, error)
+	UpdateEnvironment(ctx context.Context, environment *models.Environment) error
+	DeleteEnvironment(ctx context.Context, id string) error
+	ListEnvironments(ctx context.Context) ([]*models.Environment, error)
+
 	// Close closes the repository (for database connections)
 	Close() error
 }

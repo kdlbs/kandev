@@ -75,34 +75,51 @@ export const SETTINGS_DATA: SettingsData = {
       ],
     },
   ],
-  environments: [
+  executors: [
     {
-      id: '1',
-      name: 'Development',
-      type: 'local-docker',
-      baseDocker: 'universal',
-      envVariables: [
-        { id: 'e1', key: 'NODE_ENV', value: 'development' },
-        { id: 'e2', key: 'PORT', value: '3000' },
-      ],
-      secrets: [
-        { id: 'se1', key: 'DATABASE_PASSWORD', value: '••••••••' },
-        { id: 'se2', key: 'API_SECRET', value: '••••••••' },
-      ],
-      setupScript: '#!/bin/bash\napt-get update\napt-get install -y git curl',
-      installedAgents: ['claude-code', 'codex'],
+      id: 'exec-local-pc',
+      name: 'Local PC',
+      type: 'local_pc',
+      status: 'active',
+      isSystem: true,
+      config: {},
     },
     {
-      id: '2',
-      name: 'Production',
-      type: 'remote-docker',
-      baseDocker: 'golang',
-      envVariables: [
-        { id: 'e3', key: 'NODE_ENV', value: 'production' },
-      ],
-      secrets: [],
-      setupScript: '',
-      installedAgents: ['auggie'],
+      id: 'exec-local-docker',
+      name: 'Local Docker',
+      type: 'local_docker',
+      status: 'active',
+      isSystem: false,
+      config: {
+        docker_host: 'unix:///var/run/docker.sock',
+      },
+    },
+    {
+      id: 'exec-remote-docker',
+      name: 'Remote Docker',
+      type: 'remote_docker',
+      status: 'disabled',
+      isSystem: false,
+      config: {},
+    },
+  ],
+  environments: [
+    {
+      id: 'env-local',
+      name: 'Local',
+      kind: 'local_pc',
+      worktreeRoot: '~/kandev',
+    },
+    {
+      id: 'env-custom',
+      name: 'Custom Image',
+      kind: 'docker_image',
+      imageTag: 'kandev/custom:dev',
+      dockerfile: '',
+      buildConfig: {
+        baseImage: 'universal',
+        installAgents: ['claude-code', 'codex'],
+      },
     },
   ],
   agents: [

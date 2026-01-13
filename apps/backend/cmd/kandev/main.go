@@ -258,6 +258,8 @@ func main() {
 		taskController.SetWorktreeLookup(worktreeMgr) // Enable worktree info in task responses
 	}
 	repositoryController := taskcontroller.NewRepositoryController(taskSvc)
+	executorController := taskcontroller.NewExecutorController(taskSvc)
+	environmentController := taskcontroller.NewEnvironmentController(taskSvc)
 
 	// Create orchestrator controller and handlers (Pattern A)
 	orchestratorCtrl := orchestratorcontroller.NewController(orchestratorSvc)
@@ -417,9 +419,9 @@ func main() {
 
 		// Broadcast comment.added notification to task subscribers
 		notification, _ := ws.NewNotification(ws.ActionCommentAdded, map[string]interface{}{
-			"task_id":         taskID,
-			"comment":         comment.ToAPI(),
-			"requests_input":  true,
+			"task_id":        taskID,
+			"comment":        comment.ToAPI(),
+			"requests_input": true,
 		})
 		gateway.Hub.BroadcastToTask(taskID, notification)
 
@@ -507,6 +509,8 @@ func main() {
 	taskhandlers.RegisterBoardRoutes(router, gateway.Dispatcher, boardController, log)
 	taskhandlers.RegisterTaskRoutes(router, gateway.Dispatcher, taskController, log)
 	taskhandlers.RegisterRepositoryRoutes(router, gateway.Dispatcher, repositoryController, log)
+	taskhandlers.RegisterExecutorRoutes(router, gateway.Dispatcher, executorController, log)
+	taskhandlers.RegisterEnvironmentRoutes(router, gateway.Dispatcher, environmentController, log)
 	taskhandlers.RegisterCommentRoutes(router, gateway.Dispatcher, taskSvc, &orchestratorAdapter{svc: orchestratorSvc}, log)
 	log.Info("Registered Task Service handlers (HTTP + WebSocket)")
 

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -23,11 +24,11 @@ type WorktreeCleanup interface {
 
 // Service provides task business logic
 type Service struct {
-	repo             repository.Repository
-	eventBus         bus.EventBus
-	logger           *logger.Logger
-	discoveryConfig  RepositoryDiscoveryConfig
-	worktreeCleanup  WorktreeCleanup
+	repo            repository.Repository
+	eventBus        bus.EventBus
+	logger          *logger.Logger
+	discoveryConfig RepositoryDiscoveryConfig
+	worktreeCleanup WorktreeCleanup
 }
 
 // NewService creates a new task service
@@ -91,15 +92,17 @@ type UpdateBoardRequest struct {
 
 // CreateWorkspaceRequest contains the data for creating a new workspace
 type CreateWorkspaceRequest struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	OwnerID     string `json:"owner_id"`
+	Name              string `json:"name"`
+	Description       string `json:"description"`
+	OwnerID           string `json:"owner_id"`
+	DefaultExecutorID string `json:"default_executor_id"`
 }
 
 // UpdateWorkspaceRequest contains the data for updating a workspace
 type UpdateWorkspaceRequest struct {
-	Name        *string `json:"name,omitempty"`
-	Description *string `json:"description,omitempty"`
+	Name              *string `json:"name,omitempty"`
+	Description       *string `json:"description,omitempty"`
+	DefaultExecutorID *string `json:"default_executor_id,omitempty"`
 }
 
 // CreateColumnRequest contains the data for creating a new column
@@ -146,6 +149,43 @@ type UpdateRepositoryRequest struct {
 	DefaultBranch  *string `json:"default_branch,omitempty"`
 	SetupScript    *string `json:"setup_script,omitempty"`
 	CleanupScript  *string `json:"cleanup_script,omitempty"`
+}
+
+// CreateExecutorRequest contains the data for creating an executor
+type CreateExecutorRequest struct {
+	Name     string                `json:"name"`
+	Type     models.ExecutorType   `json:"type"`
+	Status   models.ExecutorStatus `json:"status"`
+	IsSystem bool                  `json:"is_system"`
+	Config   map[string]string     `json:"config,omitempty"`
+}
+
+// UpdateExecutorRequest contains the data for updating an executor
+type UpdateExecutorRequest struct {
+	Name   *string                `json:"name,omitempty"`
+	Type   *models.ExecutorType   `json:"type,omitempty"`
+	Status *models.ExecutorStatus `json:"status,omitempty"`
+	Config map[string]string      `json:"config,omitempty"`
+}
+
+// CreateEnvironmentRequest contains the data for creating an environment
+type CreateEnvironmentRequest struct {
+	Name         string                 `json:"name"`
+	Kind         models.EnvironmentKind `json:"kind"`
+	WorktreeRoot string                 `json:"worktree_root,omitempty"`
+	ImageTag     string                 `json:"image_tag,omitempty"`
+	Dockerfile   string                 `json:"dockerfile,omitempty"`
+	BuildConfig  map[string]string      `json:"build_config,omitempty"`
+}
+
+// UpdateEnvironmentRequest contains the data for updating an environment
+type UpdateEnvironmentRequest struct {
+	Name         *string                 `json:"name,omitempty"`
+	Kind         *models.EnvironmentKind `json:"kind,omitempty"`
+	WorktreeRoot *string                 `json:"worktree_root,omitempty"`
+	ImageTag     *string                 `json:"image_tag,omitempty"`
+	Dockerfile   *string                 `json:"dockerfile,omitempty"`
+	BuildConfig  map[string]string       `json:"build_config,omitempty"`
 }
 
 // CreateRepositoryScriptRequest contains the data for creating a repository script
@@ -420,11 +460,16 @@ func (s *Service) MoveTask(ctx context.Context, id string, boardID string, colum
 
 // CreateWorkspace creates a new workspace
 func (s *Service) CreateWorkspace(ctx context.Context, req *CreateWorkspaceRequest) (*models.Workspace, error) {
+	defaultExecutorID := req.DefaultExecutorID
+	if defaultExecutorID == "" {
+		defaultExecutorID = models.ExecutorIDLocalPC
+	}
 	workspace := &models.Workspace{
-		ID:          uuid.New().String(),
-		Name:        req.Name,
-		Description: req.Description,
-		OwnerID:     req.OwnerID,
+		ID:                uuid.New().String(),
+		Name:              req.Name,
+		Description:       req.Description,
+		OwnerID:           req.OwnerID,
+		DefaultExecutorID: defaultExecutorID,
 	}
 
 	if err := s.repo.CreateWorkspace(ctx, workspace); err != nil {
@@ -454,6 +499,9 @@ func (s *Service) UpdateWorkspace(ctx context.Context, id string, req *UpdateWor
 	}
 	if req.Description != nil {
 		workspace.Description = *req.Description
+	}
+	if req.DefaultExecutorID != nil {
+		workspace.DefaultExecutorID = *req.DefaultExecutorID
 	}
 	workspace.UpdatedAt = time.Now().UTC()
 
@@ -815,6 +863,154 @@ func (s *Service) ListRepositoryScripts(ctx context.Context, repositoryID string
 	return s.repo.ListRepositoryScripts(ctx, repositoryID)
 }
 
+// Executor operations
+
+func (s *Service) CreateExecutor(ctx context.Context, req *CreateExecutorRequest) (*models.Executor, error) {
+	executor := &models.Executor{
+		ID:       uuid.New().String(),
+		Name:     req.Name,
+		Type:     req.Type,
+		Status:   req.Status,
+		IsSystem: req.IsSystem,
+		Config:   req.Config,
+	}
+
+	if err := s.repo.CreateExecutor(ctx, executor); err != nil {
+		return nil, err
+	}
+	s.publishExecutorEvent(ctx, events.ExecutorCreated, executor)
+	return executor, nil
+}
+
+func (s *Service) GetExecutor(ctx context.Context, id string) (*models.Executor, error) {
+	return s.repo.GetExecutor(ctx, id)
+}
+
+func (s *Service) UpdateExecutor(ctx context.Context, id string, req *UpdateExecutorRequest) (*models.Executor, error) {
+	executor, err := s.repo.GetExecutor(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if executor.IsSystem {
+		return nil, fmt.Errorf("system executors cannot be modified")
+	}
+	if req.Name != nil {
+		executor.Name = *req.Name
+	}
+	if req.Type != nil {
+		executor.Type = *req.Type
+	}
+	if req.Status != nil {
+		executor.Status = *req.Status
+	}
+	if req.Config != nil {
+		executor.Config = req.Config
+	}
+	executor.UpdatedAt = time.Now().UTC()
+	if err := s.repo.UpdateExecutor(ctx, executor); err != nil {
+		return nil, err
+	}
+	s.publishExecutorEvent(ctx, events.ExecutorUpdated, executor)
+	return executor, nil
+}
+
+func (s *Service) DeleteExecutor(ctx context.Context, id string) error {
+	executor, err := s.repo.GetExecutor(ctx, id)
+	if err != nil {
+		return err
+	}
+	if executor.IsSystem {
+		return fmt.Errorf("system executors cannot be deleted")
+	}
+	if err := s.repo.DeleteExecutor(ctx, id); err != nil {
+		return err
+	}
+	s.publishExecutorEvent(ctx, events.ExecutorDeleted, executor)
+	return nil
+}
+
+func (s *Service) ListExecutors(ctx context.Context) ([]*models.Executor, error) {
+	return s.repo.ListExecutors(ctx)
+}
+
+// Environment operations
+
+func (s *Service) CreateEnvironment(ctx context.Context, req *CreateEnvironmentRequest) (*models.Environment, error) {
+	environment := &models.Environment{
+		ID:           uuid.New().String(),
+		Name:         req.Name,
+		Kind:         req.Kind,
+		WorktreeRoot: req.WorktreeRoot,
+		ImageTag:     req.ImageTag,
+		Dockerfile:   req.Dockerfile,
+		BuildConfig:  req.BuildConfig,
+	}
+	if err := s.repo.CreateEnvironment(ctx, environment); err != nil {
+		return nil, err
+	}
+	s.publishEnvironmentEvent(ctx, events.EnvironmentCreated, environment)
+	return environment, nil
+}
+
+func (s *Service) GetEnvironment(ctx context.Context, id string) (*models.Environment, error) {
+	return s.repo.GetEnvironment(ctx, id)
+}
+
+func (s *Service) UpdateEnvironment(ctx context.Context, id string, req *UpdateEnvironmentRequest) (*models.Environment, error) {
+	environment, err := s.repo.GetEnvironment(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if environment.ID == models.EnvironmentIDLocal {
+		if req.Name != nil || req.Kind != nil || req.WorktreeRoot != nil {
+			return nil, fmt.Errorf("local environment cannot be modified")
+		}
+	}
+	if req.Name != nil {
+		environment.Name = *req.Name
+	}
+	if req.Kind != nil {
+		environment.Kind = *req.Kind
+	}
+	if req.WorktreeRoot != nil {
+		environment.WorktreeRoot = *req.WorktreeRoot
+	}
+	if req.ImageTag != nil {
+		environment.ImageTag = *req.ImageTag
+	}
+	if req.Dockerfile != nil {
+		environment.Dockerfile = *req.Dockerfile
+	}
+	if req.BuildConfig != nil {
+		environment.BuildConfig = req.BuildConfig
+	}
+	environment.UpdatedAt = time.Now().UTC()
+	if err := s.repo.UpdateEnvironment(ctx, environment); err != nil {
+		return nil, err
+	}
+	s.publishEnvironmentEvent(ctx, events.EnvironmentUpdated, environment)
+	return environment, nil
+}
+
+func (s *Service) DeleteEnvironment(ctx context.Context, id string) error {
+	if id == models.EnvironmentIDLocal {
+		return fmt.Errorf("local environment cannot be deleted")
+	}
+	environment, err := s.repo.GetEnvironment(ctx, id)
+	if err != nil {
+		return err
+	}
+	if err := s.repo.DeleteEnvironment(ctx, id); err != nil {
+		return err
+	}
+	s.publishEnvironmentEvent(ctx, events.EnvironmentDeleted, environment)
+	return nil
+}
+
+func (s *Service) ListEnvironments(ctx context.Context) ([]*models.Environment, error) {
+	return s.repo.ListEnvironments(ctx)
+}
+
 // publishTaskEvent publishes task events to the event bus
 func (s *Service) publishTaskEvent(ctx context.Context, eventType string, task *models.Task, oldState *v1.TaskState) {
 	if s.eventBus == nil {
@@ -934,6 +1130,57 @@ func (s *Service) publishColumnEvent(ctx context.Context, eventType string, colu
 		s.logger.Error("failed to publish column event",
 			zap.String("event_type", eventType),
 			zap.String("column_id", column.ID),
+			zap.Error(err))
+	}
+}
+
+func (s *Service) publishExecutorEvent(ctx context.Context, eventType string, executor *models.Executor) {
+	if s.eventBus == nil || executor == nil {
+		return
+	}
+
+	data := map[string]interface{}{
+		"id":         executor.ID,
+		"name":       executor.Name,
+		"type":       executor.Type,
+		"status":     executor.Status,
+		"is_system":  executor.IsSystem,
+		"config":     executor.Config,
+		"created_at": executor.CreatedAt.Format(time.RFC3339),
+		"updated_at": executor.UpdatedAt.Format(time.RFC3339),
+	}
+
+	event := bus.NewEvent(eventType, "task-service", data)
+	if err := s.eventBus.Publish(ctx, eventType, event); err != nil {
+		s.logger.Error("failed to publish executor event",
+			zap.String("event_type", eventType),
+			zap.String("executor_id", executor.ID),
+			zap.Error(err))
+	}
+}
+
+func (s *Service) publishEnvironmentEvent(ctx context.Context, eventType string, environment *models.Environment) {
+	if s.eventBus == nil || environment == nil {
+		return
+	}
+
+	data := map[string]interface{}{
+		"id":            environment.ID,
+		"name":          environment.Name,
+		"kind":          environment.Kind,
+		"worktree_root": environment.WorktreeRoot,
+		"image_tag":     environment.ImageTag,
+		"dockerfile":    environment.Dockerfile,
+		"build_config":  environment.BuildConfig,
+		"created_at":    environment.CreatedAt.Format(time.RFC3339),
+		"updated_at":    environment.UpdatedAt.Format(time.RFC3339),
+	}
+
+	event := bus.NewEvent(eventType, "task-service", data)
+	if err := s.eventBus.Publish(ctx, eventType, event); err != nil {
+		s.logger.Error("failed to publish environment event",
+			zap.String("event_type", eventType),
+			zap.String("environment_id", environment.ID),
 			zap.Error(err))
 	}
 }

@@ -55,18 +55,34 @@ export type KeyValue = {
   value: string;
 };
 
-export type EnvironmentType = 'local-docker' | 'remote-docker';
-export type BaseDocker = 'universal' | 'golang';
+export type ExecutorType = 'local_pc' | 'local_docker' | 'remote_docker' | 'remote_vps' | 'k8s';
+export type ExecutorStatus = 'active' | 'disabled';
+
+export type Executor = {
+  id: string;
+  name: string;
+  type: ExecutorType;
+  status: ExecutorStatus;
+  isSystem: boolean;
+  config: Record<string, string>;
+};
+
+export type EnvironmentKind = 'local_pc' | 'docker_image';
+export type BaseDocker = 'universal' | 'golang' | 'node' | 'python';
+
+export type EnvironmentBuildConfig = {
+  baseImage: BaseDocker;
+  installAgents: AgentType[];
+};
 
 export type Environment = {
   id: string;
   name: string;
-  type: EnvironmentType;
-  baseDocker: BaseDocker;
-  envVariables: KeyValue[];
-  secrets: KeyValue[];
-  setupScript: string;
-  installedAgents: AgentType[];
+  kind: EnvironmentKind;
+  worktreeRoot?: string;
+  imageTag?: string;
+  dockerfile?: string;
+  buildConfig?: EnvironmentBuildConfig;
 };
 
 export type AgentType = 'claude-code' | 'codex' | 'auggie';
@@ -84,5 +100,6 @@ export type SettingsData = {
   general: GeneralSettings;
   workspaces: Workspace[];
   environments: Environment[];
+  executors: Executor[];
   agents: AgentProfile[];
 };

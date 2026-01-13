@@ -18,7 +18,13 @@ export type BackendMessageType =
   | 'column.created'
   | 'column.updated'
   | 'column.deleted'
-  | 'comment.added';
+  | 'comment.added'
+  | 'executor.created'
+  | 'executor.updated'
+  | 'executor.deleted'
+  | 'environment.created'
+  | 'environment.updated'
+  | 'environment.deleted';
 
 export type BackendMessage<T extends BackendMessageType, P> = {
   id?: string;
@@ -146,6 +152,29 @@ export type GitStatusPayload = {
   timestamp: string;
 };
 
+export type ExecutorPayload = {
+  id: string;
+  name: string;
+  type: string;
+  status: string;
+  is_system: boolean;
+  config?: Record<string, string>;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type EnvironmentPayload = {
+  id: string;
+  name: string;
+  kind: string;
+  worktree_root?: string;
+  image_tag?: string;
+  dockerfile?: string;
+  build_config?: Record<string, string>;
+  created_at?: string;
+  updated_at?: string;
+};
+
 export type BackendMessageMap = {
   'kanban.update': BackendMessage<'kanban.update', KanbanUpdatePayload>;
   'task.created': BackendMessage<'task.created', TaskEventPayload>;
@@ -167,4 +196,10 @@ export type BackendMessageMap = {
   'column.updated': BackendMessage<'column.updated', ColumnPayload>;
   'column.deleted': BackendMessage<'column.deleted', ColumnPayload>;
   'comment.added': BackendMessage<'comment.added', CommentAddedPayload>;
+  'executor.created': BackendMessage<'executor.created', ExecutorPayload>;
+  'executor.updated': BackendMessage<'executor.updated', ExecutorPayload>;
+  'executor.deleted': BackendMessage<'executor.deleted', ExecutorPayload>;
+  'environment.created': BackendMessage<'environment.created', EnvironmentPayload>;
+  'environment.updated': BackendMessage<'environment.updated', EnvironmentPayload>;
+  'environment.deleted': BackendMessage<'environment.deleted', EnvironmentPayload>;
 };

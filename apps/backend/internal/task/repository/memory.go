@@ -21,6 +21,8 @@ type MemoryRepository struct {
 	repositories   map[string]*models.Repository
 	repoScripts    map[string]*models.RepositoryScript
 	agentSessions  map[string]*models.AgentSession
+	executors      map[string]*models.Executor
+	environments   map[string]*models.Environment
 	taskBoards     map[string]map[string]struct{}
 	taskPlacements map[string]map[string]*taskPlacement
 	mu             sync.RWMutex
@@ -31,7 +33,7 @@ var _ Repository = (*MemoryRepository)(nil)
 
 // NewMemoryRepository creates a new in-memory task repository
 func NewMemoryRepository() *MemoryRepository {
-	return &MemoryRepository{
+	repo := &MemoryRepository{
 		workspaces:     make(map[string]*models.Workspace),
 		tasks:          make(map[string]*models.Task),
 		boards:         make(map[string]*models.Board),
@@ -40,8 +42,54 @@ func NewMemoryRepository() *MemoryRepository {
 		repositories:   make(map[string]*models.Repository),
 		repoScripts:    make(map[string]*models.RepositoryScript),
 		agentSessions:  make(map[string]*models.AgentSession),
+		executors:      make(map[string]*models.Executor),
+		environments:   make(map[string]*models.Environment),
 		taskBoards:     make(map[string]map[string]struct{}),
 		taskPlacements: make(map[string]map[string]*taskPlacement),
+	}
+	repo.seedDefaults()
+	return repo
+}
+
+func (r *MemoryRepository) seedDefaults() {
+	now := time.Now().UTC()
+	r.executors[models.ExecutorIDLocalPC] = &models.Executor{
+		ID:        models.ExecutorIDLocalPC,
+		Name:      "Local PC",
+		Type:      models.ExecutorTypeLocalPC,
+		Status:    models.ExecutorStatusActive,
+		IsSystem:  true,
+		Config:    map[string]string{},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	r.executors[models.ExecutorIDLocalDocker] = &models.Executor{
+		ID:        models.ExecutorIDLocalDocker,
+		Name:      "Local Docker",
+		Type:      models.ExecutorTypeLocalDocker,
+		Status:    models.ExecutorStatusActive,
+		IsSystem:  false,
+		Config:    map[string]string{"docker_host": "unix:///var/run/docker.sock"},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	r.executors[models.ExecutorIDRemoteDocker] = &models.Executor{
+		ID:        models.ExecutorIDRemoteDocker,
+		Name:      "Remote Docker",
+		Type:      models.ExecutorTypeRemoteDocker,
+		Status:    models.ExecutorStatusDisabled,
+		IsSystem:  false,
+		Config:    map[string]string{},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	r.environments[models.EnvironmentIDLocal] = &models.Environment{
+		ID:           models.EnvironmentIDLocal,
+		Name:         "Local",
+		Kind:         models.EnvironmentKindLocalPC,
+		WorktreeRoot: "~/kandev",
+		CreatedAt:    now,
+		UpdatedAt:    now,
 	}
 }
 
@@ -65,6 +113,9 @@ func (r *MemoryRepository) CreateWorkspace(ctx context.Context, workspace *model
 
 	if workspace.ID == "" {
 		workspace.ID = uuid.New().String()
+	}
+	if workspace.DefaultExecutorID == "" {
+		workspace.DefaultExecutorID = models.ExecutorIDLocalPC
 	}
 	now := time.Now().UTC()
 	workspace.CreatedAt = now
@@ -652,7 +703,6 @@ func (r *MemoryRepository) DeleteComment(ctx context.Context, id string) error {
 	return nil
 }
 
-
 // AgentSession operations
 
 // CreateAgentSession creates a new agent session
@@ -787,4 +837,127 @@ func (r *MemoryRepository) DeleteAgentSession(ctx context.Context, id string) er
 	}
 	delete(r.agentSessions, id)
 	return nil
+}
+
+// Executor operations
+
+func (r *MemoryRepository) CreateExecutor(ctx context.Context, executor *models.Executor) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if executor.ID == "" {
+		executor.ID = uuid.New().String()
+	}
+	now := time.Now().UTC()
+	executor.CreatedAt = now
+	executor.UpdatedAt = now
+
+	r.executors[executor.ID] = executor
+	return nil
+}
+
+func (r *MemoryRepository) GetExecutor(ctx context.Context, id string) (*models.Executor, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	executor, ok := r.executors[id]
+	if !ok {
+		return nil, fmt.Errorf("executor not found: %s", id)
+	}
+	return executor, nil
+}
+
+func (r *MemoryRepository) UpdateExecutor(ctx context.Context, executor *models.Executor) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, ok := r.executors[executor.ID]; !ok {
+		return fmt.Errorf("executor not found: %s", executor.ID)
+	}
+	executor.UpdatedAt = time.Now().UTC()
+	r.executors[executor.ID] = executor
+	return nil
+}
+
+func (r *MemoryRepository) DeleteExecutor(ctx context.Context, id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, ok := r.executors[id]; !ok {
+		return fmt.Errorf("executor not found: %s", id)
+	}
+	delete(r.executors, id)
+	return nil
+}
+
+func (r *MemoryRepository) ListExecutors(ctx context.Context) ([]*models.Executor, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	result := make([]*models.Executor, 0, len(r.executors))
+	for _, executor := range r.executors {
+		result = append(result, executor)
+	}
+	return result, nil
+}
+
+// Environment operations
+
+func (r *MemoryRepository) CreateEnvironment(ctx context.Context, environment *models.Environment) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if environment.ID == "" {
+		environment.ID = uuid.New().String()
+	}
+	now := time.Now().UTC()
+	environment.CreatedAt = now
+	environment.UpdatedAt = now
+	r.environments[environment.ID] = environment
+	return nil
+}
+
+func (r *MemoryRepository) GetEnvironment(ctx context.Context, id string) (*models.Environment, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	environment, ok := r.environments[id]
+	if !ok {
+		return nil, fmt.Errorf("environment not found: %s", id)
+	}
+	return environment, nil
+}
+
+func (r *MemoryRepository) UpdateEnvironment(ctx context.Context, environment *models.Environment) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, ok := r.environments[environment.ID]; !ok {
+		return fmt.Errorf("environment not found: %s", environment.ID)
+	}
+	environment.UpdatedAt = time.Now().UTC()
+	r.environments[environment.ID] = environment
+	return nil
+}
+
+func (r *MemoryRepository) DeleteEnvironment(ctx context.Context, id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, ok := r.environments[id]; !ok {
+		return fmt.Errorf("environment not found: %s", id)
+	}
+	delete(r.environments, id)
+	return nil
+}
+
+func (r *MemoryRepository) ListEnvironments(ctx context.Context) ([]*models.Environment, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	result := make([]*models.Environment, 0, len(r.environments))
+	for _, environment := range r.environments {
+		result = append(result, environment)
+	}
+	return result, nil
 }

@@ -61,9 +61,10 @@ func (h *WorkspaceHandlers) httpListWorkspaces(c *gin.Context) {
 }
 
 type httpCreateWorkspaceRequest struct {
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-	OwnerID     string `json:"owner_id,omitempty"`
+	Name              string `json:"name"`
+	Description       string `json:"description,omitempty"`
+	OwnerID           string `json:"owner_id,omitempty"`
+	DefaultExecutorID string `json:"default_executor_id,omitempty"`
 }
 
 func (h *WorkspaceHandlers) httpCreateWorkspace(c *gin.Context) {
@@ -77,9 +78,10 @@ func (h *WorkspaceHandlers) httpCreateWorkspace(c *gin.Context) {
 		return
 	}
 	resp, err := h.controller.CreateWorkspace(c.Request.Context(), dto.CreateWorkspaceRequest{
-		Name:        body.Name,
-		Description: body.Description,
-		OwnerID:     body.OwnerID,
+		Name:              body.Name,
+		Description:       body.Description,
+		OwnerID:           body.OwnerID,
+		DefaultExecutorID: body.DefaultExecutorID,
 	})
 	if err != nil {
 		handleNotFound(c, h.logger, err, "workspace not created")
@@ -98,8 +100,9 @@ func (h *WorkspaceHandlers) httpGetWorkspace(c *gin.Context) {
 }
 
 type httpUpdateWorkspaceRequest struct {
-	Name        *string `json:"name,omitempty"`
-	Description *string `json:"description,omitempty"`
+	Name              *string `json:"name,omitempty"`
+	Description       *string `json:"description,omitempty"`
+	DefaultExecutorID *string `json:"default_executor_id,omitempty"`
 }
 
 func (h *WorkspaceHandlers) httpUpdateWorkspace(c *gin.Context) {
@@ -109,9 +112,10 @@ func (h *WorkspaceHandlers) httpUpdateWorkspace(c *gin.Context) {
 		return
 	}
 	resp, err := h.controller.UpdateWorkspace(c.Request.Context(), dto.UpdateWorkspaceRequest{
-		ID:          c.Param("id"),
-		Name:        body.Name,
-		Description: body.Description,
+		ID:                c.Param("id"),
+		Name:              body.Name,
+		Description:       body.Description,
+		DefaultExecutorID: body.DefaultExecutorID,
 	})
 	if err != nil {
 		handleNotFound(c, h.logger, err, "workspace not updated")
@@ -141,9 +145,10 @@ func (h *WorkspaceHandlers) wsListWorkspaces(ctx context.Context, msg *ws.Messag
 }
 
 type wsCreateWorkspaceRequest struct {
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-	OwnerID     string `json:"owner_id,omitempty"`
+	Name              string `json:"name"`
+	Description       string `json:"description,omitempty"`
+	OwnerID           string `json:"owner_id,omitempty"`
+	DefaultExecutorID string `json:"default_executor_id,omitempty"`
 }
 
 func (h *WorkspaceHandlers) wsCreateWorkspace(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -156,9 +161,10 @@ func (h *WorkspaceHandlers) wsCreateWorkspace(ctx context.Context, msg *ws.Messa
 	}
 
 	resp, err := h.controller.CreateWorkspace(ctx, dto.CreateWorkspaceRequest{
-		Name:        req.Name,
-		Description: req.Description,
-		OwnerID:     req.OwnerID,
+		Name:              req.Name,
+		Description:       req.Description,
+		OwnerID:           req.OwnerID,
+		DefaultExecutorID: req.DefaultExecutorID,
 	})
 	if err != nil {
 		h.logger.Error("failed to create workspace", zap.Error(err))
@@ -188,9 +194,10 @@ func (h *WorkspaceHandlers) wsGetWorkspace(ctx context.Context, msg *ws.Message)
 }
 
 type wsUpdateWorkspaceRequest struct {
-	ID          string  `json:"id"`
-	Name        *string `json:"name,omitempty"`
-	Description *string `json:"description,omitempty"`
+	ID                string  `json:"id"`
+	Name              *string `json:"name,omitempty"`
+	Description       *string `json:"description,omitempty"`
+	DefaultExecutorID *string `json:"default_executor_id,omitempty"`
 }
 
 func (h *WorkspaceHandlers) wsUpdateWorkspace(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -203,9 +210,10 @@ func (h *WorkspaceHandlers) wsUpdateWorkspace(ctx context.Context, msg *ws.Messa
 	}
 
 	resp, err := h.controller.UpdateWorkspace(ctx, dto.UpdateWorkspaceRequest{
-		ID:          req.ID,
-		Name:        req.Name,
-		Description: req.Description,
+		ID:                req.ID,
+		Name:              req.Name,
+		Description:       req.Description,
+		DefaultExecutorID: req.DefaultExecutorID,
 	})
 	if err != nil {
 		h.logger.Error("failed to update workspace", zap.Error(err))

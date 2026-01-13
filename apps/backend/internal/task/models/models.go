@@ -38,12 +38,13 @@ type Board struct {
 
 // Workspace represents a workspace
 type Workspace struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	OwnerID     string    `json:"owner_id"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID                string    `json:"id"`
+	Name              string    `json:"name"`
+	Description       string    `json:"description"`
+	OwnerID           string    `json:"owner_id"`
+	DefaultExecutorID string    `json:"default_executor_id"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 // Column represents a column in a board
@@ -151,6 +152,8 @@ type AgentSession struct {
 	ContainerID     string                 `json:"container_id"`      // Docker container ID for cleanup
 	AgentType       string                 `json:"agent_type"`        // e.g., "augment-agent"
 	ACPSessionID    string                 `json:"acp_session_id"`    // ACP protocol session for resumption
+	ExecutorID      string                 `json:"executor_id"`
+	EnvironmentID   string                 `json:"environment_id"`
 	Status          AgentSessionStatus     `json:"status"`
 	Progress        int                    `json:"progress"` // 0-100
 	ErrorMessage    string                 `json:"error_message,omitempty"`
@@ -170,6 +173,8 @@ func (s *AgentSession) ToAPI() map[string]interface{} {
 		"container_id":      s.ContainerID,
 		"agent_type":        s.AgentType,
 		"acp_session_id":    s.ACPSessionID,
+		"executor_id":       s.ExecutorID,
+		"environment_id":    s.EnvironmentID,
 		"status":            string(s.Status),
 		"progress":          s.Progress,
 		"started_at":        s.StartedAt,
@@ -217,6 +222,68 @@ type RepositoryScript struct {
 	Position     int       `json:"position"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+// ExecutorType represents the executor runtime type.
+type ExecutorType string
+
+const (
+	ExecutorTypeLocalPC      ExecutorType = "local_pc"
+	ExecutorTypeLocalDocker  ExecutorType = "local_docker"
+	ExecutorTypeRemoteDocker ExecutorType = "remote_docker"
+	ExecutorTypeRemoteVPS    ExecutorType = "remote_vps"
+	ExecutorTypeK8s          ExecutorType = "k8s"
+)
+
+const (
+	ExecutorIDLocalPC      = "exec-local-pc"
+	ExecutorIDLocalDocker  = "exec-local-docker"
+	ExecutorIDRemoteDocker = "exec-remote-docker"
+)
+
+// ExecutorStatus represents executor availability.
+type ExecutorStatus string
+
+const (
+	ExecutorStatusActive   ExecutorStatus = "active"
+	ExecutorStatusDisabled ExecutorStatus = "disabled"
+)
+
+// Executor represents an execution target.
+type Executor struct {
+	ID        string            `json:"id"`
+	Name      string            `json:"name"`
+	Type      ExecutorType      `json:"type"`
+	Status    ExecutorStatus    `json:"status"`
+	IsSystem  bool              `json:"is_system"`
+	Config    map[string]string `json:"config,omitempty"`
+	CreatedAt time.Time         `json:"created_at"`
+	UpdatedAt time.Time         `json:"updated_at"`
+}
+
+// EnvironmentKind represents the runtime type for environments.
+type EnvironmentKind string
+
+const (
+	EnvironmentKindLocalPC     EnvironmentKind = "local_pc"
+	EnvironmentKindDockerImage EnvironmentKind = "docker_image"
+)
+
+const (
+	EnvironmentIDLocal = "env-local"
+)
+
+// Environment represents a runtime environment configuration.
+type Environment struct {
+	ID           string            `json:"id"`
+	Name         string            `json:"name"`
+	Kind         EnvironmentKind   `json:"kind"`
+	WorktreeRoot string            `json:"worktree_root,omitempty"`
+	ImageTag     string            `json:"image_tag,omitempty"`
+	Dockerfile   string            `json:"dockerfile,omitempty"`
+	BuildConfig  map[string]string `json:"build_config,omitempty"`
+	CreatedAt    time.Time         `json:"created_at"`
+	UpdatedAt    time.Time         `json:"updated_at"`
 }
 
 // ToAPI converts internal Task to API type

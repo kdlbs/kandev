@@ -1,201 +1,73 @@
 'use client';
 
-import { useState } from 'react';
+import Link from 'next/link';
 import { IconPlus } from '@tabler/icons-react';
+import { useEffect, useState } from 'react';
 import { Button } from '@kandev/ui/button';
-import { Input } from '@kandev/ui/input';
-import { Label } from '@kandev/ui/label';
-import { Textarea } from '@kandev/ui/textarea';
-import { Card, CardContent } from '@kandev/ui/card';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@kandev/ui/select';
 import { Separator } from '@kandev/ui/separator';
 import { EnvironmentCard } from '@/components/settings/environment-card';
-import { KeyValueInput } from '@/components/settings/key-value-input';
 import { SETTINGS_DATA } from '@/lib/settings/dummy-data';
-import type { Environment, EnvironmentType, BaseDocker, KeyValue, AgentType } from '@/lib/settings/types';
-import { generateUUID } from '@/lib/utils';
+import { listEnvironmentsAction } from '@/app/actions/environments';
+import { getWebSocketClient } from '@/lib/ws/connection';
+import type { Environment } from '@/lib/types/http';
 
 export default function EnvironmentsSettingsPage() {
-  const [environments, setEnvironments] = useState<Environment[]>(SETTINGS_DATA.environments);
-  const [isAdding, setIsAdding] = useState(false);
-  const [newEnv, setNewEnv] = useState<{
-    name: string;
-    type: EnvironmentType;
-    baseDocker: BaseDocker;
-    envVariables: KeyValue[];
-    secrets: KeyValue[];
-    setupScript: string;
-    installedAgents: AgentType[];
-  }>({
-    name: '',
-    type: 'local-docker',
-    baseDocker: 'universal',
-    envVariables: [],
-    secrets: [],
-    setupScript: '',
-    installedAgents: [],
-  });
+  const [environments, setEnvironments] = useState<Environment[]>([]);
 
-  const handleAdd = (e: React.FormEvent) => {
-    e.preventDefault();
-    const environment: Environment = {
-      id: generateUUID(),
-      ...newEnv,
-    };
-    setEnvironments([...environments, environment]);
-    setIsAdding(false);
-    setNewEnv({
-      name: '',
-      type: 'local-docker',
-      baseDocker: 'universal',
-      envVariables: [],
-      secrets: [],
-      setupScript: '',
-      installedAgents: [],
-    });
-  };
+  useEffect(() => {
+    const client = getWebSocketClient();
+    const fallback = () =>
+      SETTINGS_DATA.environments.map((env) => ({
+        id: env.id,
+        name: env.name,
+        kind: env.kind,
+        worktree_root: env.worktreeRoot,
+        image_tag: env.imageTag,
+        dockerfile: env.dockerfile,
+        build_config: env.buildConfig
+          ? {
+              base_image: env.buildConfig.baseImage,
+              install_agents: env.buildConfig.installAgents.join(','),
+            }
+          : undefined,
+        created_at: '',
+        updated_at: '',
+      }));
+    if (client) {
+      client
+        .request<{ environments: Environment[] }>('environment.list', {})
+        .then((resp) => setEnvironments(resp.environments))
+        .catch(() => setEnvironments(fallback()));
+      return;
+    }
+    listEnvironmentsAction()
+      .then((resp) => setEnvironments(resp.environments))
+      .catch(() => setEnvironments(fallback()));
+  }, []);
 
   return (
     <div className="space-y-8">
-      <div className="flex items-start justify-between">
+      <div className="flex items-start justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold">Environments</h2>
           <p className="text-sm text-muted-foreground mt-1">
-            Configure execution environments for your agents
+            Configure runtime environments for agent sessions.
           </p>
         </div>
-        <Button size="sm" onClick={() => setIsAdding(true)}>
-          <IconPlus className="h-4 w-4 mr-2" />
-          Add Environment
+        <Button asChild size="sm">
+          <Link href="/settings/environment/new">
+            <IconPlus className="h-4 w-4 mr-2" />
+            Create Custom Environment
+          </Link>
         </Button>
       </div>
 
       <Separator />
 
-      <div className="space-y-4">
-        <div className="grid gap-3">
-          {isAdding && (
-            <Card>
-              <CardContent className="pt-6">
-                <form onSubmit={handleAdd} className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="env-name">Environment Name</Label>
-                    <Input
-                      id="env-name"
-                      value={newEnv.name}
-                      onChange={(e) => setNewEnv({ ...newEnv, name: e.target.value })}
-                      placeholder="Development"
-                      required
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="env-type">Environment Type</Label>
-                      <Select
-                        value={newEnv.type}
-                        onValueChange={(value) =>
-                          setNewEnv({ ...newEnv, type: value as EnvironmentType })
-                        }
-                      >
-                        <SelectTrigger id="env-type">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="local-docker">Local Docker</SelectItem>
-                          <SelectItem value="remote-docker">Remote Docker</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="base-docker">Base Docker Image</Label>
-                      <Select
-                        value={newEnv.baseDocker}
-                        onValueChange={(value) =>
-                          setNewEnv({ ...newEnv, baseDocker: value as BaseDocker })
-                        }
-                      >
-                        <SelectTrigger id="base-docker">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="universal">Universal</SelectItem>
-                          <SelectItem value="golang">Golang</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label>Environment Variables</Label>
-                    <KeyValueInput
-                      items={newEnv.envVariables}
-                      onChange={(items) => setNewEnv({ ...newEnv, envVariables: items })}
-                      keyPlaceholder="Variable name"
-                      valuePlaceholder="Value"
-                      addButtonLabel="Add Variable"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label>Secrets</Label>
-                    <KeyValueInput
-                      items={newEnv.secrets}
-                      onChange={(items) => setNewEnv({ ...newEnv, secrets: items })}
-                      keyPlaceholder="Secret name"
-                      valuePlaceholder="Secret value"
-                      addButtonLabel="Add Secret"
-                      masked
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="setup-script">Setup Script</Label>
-                    <Textarea
-                      id="setup-script"
-                      value={newEnv.setupScript}
-                      onChange={(e) =>
-                        setNewEnv({ ...newEnv, setupScript: e.target.value })
-                      }
-                      placeholder="#!/bin/bash&#10;apt-get update&#10;apt-get install -y git"
-                      rows={5}
-                      className="font-mono text-sm"
-                    />
-                  </div>
-
-                  <div className="flex gap-2 justify-end">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => setIsAdding(false)}
-                    >
-                      Cancel
-                    </Button>
-                    <Button type="submit">Add Environment</Button>
-                  </div>
-                </form>
-              </CardContent>
-            </Card>
-          )}
-
-          {environments.map((env) => (
-            <EnvironmentCard
-              key={env.id}
-              environment={env}
-            />
-          ))}
-
-          {environments.length === 0 && !isAdding && (
-            <Card>
-              <CardContent className="py-8 text-center">
-                <p className="text-sm text-muted-foreground">
-                  No environments configured. Add your first environment to get started.
-                </p>
-              </CardContent>
-            </Card>
-          )}
-        </div>
+      <div className="grid gap-3">
+        {environments.map((env) => (
+          <EnvironmentCard key={env.id} environment={env} />
+        ))}
       </div>
     </div>
   );

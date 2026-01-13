@@ -44,6 +44,12 @@ func RegisterTaskNotifications(ctx context.Context, eventBus bus.EventBus, hub *
 	b.subscribe(eventBus, events.RepositoryScriptCreated, ws.ActionRepositoryScriptCreated)
 	b.subscribe(eventBus, events.RepositoryScriptUpdated, ws.ActionRepositoryScriptUpdated)
 	b.subscribe(eventBus, events.RepositoryScriptDeleted, ws.ActionRepositoryScriptDeleted)
+	b.subscribe(eventBus, events.ExecutorCreated, ws.ActionExecutorCreated)
+	b.subscribe(eventBus, events.ExecutorUpdated, ws.ActionExecutorUpdated)
+	b.subscribe(eventBus, events.ExecutorDeleted, ws.ActionExecutorDeleted)
+	b.subscribe(eventBus, events.EnvironmentCreated, ws.ActionEnvironmentCreated)
+	b.subscribe(eventBus, events.EnvironmentUpdated, ws.ActionEnvironmentUpdated)
+	b.subscribe(eventBus, events.EnvironmentDeleted, ws.ActionEnvironmentDeleted)
 
 	go func() {
 		<-ctx.Done()

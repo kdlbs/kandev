@@ -4,15 +4,15 @@ import Link from 'next/link';
 import { IconServer, IconChevronRight } from '@tabler/icons-react';
 import { Card, CardContent } from '@kandev/ui/card';
 import { Badge } from '@kandev/ui/badge';
-import type { Environment } from '@/lib/settings/types';
+import type { Environment } from '@/lib/types/http';
 
 type EnvironmentCardProps = {
   environment: Environment;
 };
 
 export function EnvironmentCard({ environment }: EnvironmentCardProps) {
-  const typeLabel = environment.type === 'local-docker' ? 'Local Docker' : 'Remote Docker';
-  const baseDockerLabel = environment.baseDocker === 'universal' ? 'Universal' : 'Golang';
+  const typeLabel = environment.kind === 'local_pc' ? 'Local' : 'Custom Image';
+  const imageLabel = environment.image_tag || 'Unbuilt';
 
   return (
     <Link href={`/settings/environment/${environment.id}`}>
@@ -29,15 +29,17 @@ export function EnvironmentCard({ environment }: EnvironmentCardProps) {
                   <Badge variant="secondary" className="text-xs">
                     {typeLabel}
                   </Badge>
-                  <Badge variant="outline" className="text-xs">
-                    {baseDockerLabel}
-                  </Badge>
+                  {environment.kind === 'docker_image' && (
+                    <Badge variant="outline" className="text-xs">
+                      {imageLabel}
+                    </Badge>
+                  )}
                 </div>
-                <div className="flex items-center gap-3 text-xs text-muted-foreground mt-1">
-                  <span>{environment.envVariables.length} variables</span>
-                  <span>{environment.secrets.length} secrets</span>
-                  <span>{(environment.installedAgents || []).length} agents</span>
-                </div>
+                {environment.kind === 'local_pc' && environment.worktree_root && (
+                  <div className="text-xs text-muted-foreground mt-1">
+                    Worktree: {environment.worktree_root}
+                  </div>
+                )}
               </div>
             </div>
             <IconChevronRight className="h-5 w-5 text-muted-foreground" />

@@ -1,6 +1,9 @@
 package dto
 
-import v1 "github.com/kandev/kandev/pkg/api/v1"
+import (
+	"github.com/kandev/kandev/internal/task/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
+)
 
 type ListBoardsRequest struct {
 	WorkspaceID string
@@ -13,15 +16,17 @@ type GetWorkspaceRequest struct {
 }
 
 type CreateWorkspaceRequest struct {
-	Name        string
-	Description string
-	OwnerID     string
+	Name              string
+	Description       string
+	OwnerID           string
+	DefaultExecutorID string
 }
 
 type UpdateWorkspaceRequest struct {
-	ID          string
-	Name        *string
-	Description *string
+	ID                string
+	Name              *string
+	Description       *string
+	DefaultExecutorID *string
 }
 
 type DeleteWorkspaceRequest struct {
@@ -117,6 +122,61 @@ type ListRepositoryScriptsRequest struct {
 }
 
 type GetRepositoryScriptRequest struct {
+	ID string
+}
+
+type ListExecutorsRequest struct{}
+
+type GetExecutorRequest struct {
+	ID string
+}
+
+type CreateExecutorRequest struct {
+	Name     string
+	Type     models.ExecutorType
+	Status   models.ExecutorStatus
+	IsSystem bool
+	Config   map[string]string
+}
+
+type UpdateExecutorRequest struct {
+	ID     string
+	Name   *string
+	Type   *models.ExecutorType
+	Status *models.ExecutorStatus
+	Config map[string]string
+}
+
+type DeleteExecutorRequest struct {
+	ID string
+}
+
+type ListEnvironmentsRequest struct{}
+
+type GetEnvironmentRequest struct {
+	ID string
+}
+
+type CreateEnvironmentRequest struct {
+	Name         string
+	Kind         models.EnvironmentKind
+	WorktreeRoot string
+	ImageTag     string
+	Dockerfile   string
+	BuildConfig  map[string]string
+}
+
+type UpdateEnvironmentRequest struct {
+	ID           string
+	Name         *string
+	Kind         *models.EnvironmentKind
+	WorktreeRoot *string
+	ImageTag     *string
+	Dockerfile   *string
+	BuildConfig  map[string]string
+}
+
+type DeleteEnvironmentRequest struct {
 	ID string
 }
 

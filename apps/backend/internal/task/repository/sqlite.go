@@ -89,6 +89,30 @@ func (r *SQLiteRepository) initSchema() error {
 		name TEXT NOT NULL,
 		description TEXT DEFAULT '',
 		owner_id TEXT DEFAULT '',
+		default_executor_id TEXT DEFAULT '',
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS executors (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL,
+		type TEXT NOT NULL,
+		status TEXT NOT NULL DEFAULT 'active',
+		is_system INTEGER NOT NULL DEFAULT 0,
+		config TEXT DEFAULT '{}',
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS environments (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL,
+		kind TEXT NOT NULL,
+		worktree_root TEXT DEFAULT '',
+		image_tag TEXT DEFAULT '',
+		dockerfile TEXT DEFAULT '',
+		build_config TEXT DEFAULT '{}',
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL
 	);
@@ -217,6 +241,8 @@ func (r *SQLiteRepository) initSchema() error {
 		container_id TEXT NOT NULL DEFAULT '',
 		agent_type TEXT NOT NULL,
 		acp_session_id TEXT DEFAULT '',
+		executor_id TEXT DEFAULT '',
+		environment_id TEXT DEFAULT '',
 		status TEXT NOT NULL DEFAULT 'pending',
 		progress INTEGER DEFAULT 0,
 		error_message TEXT DEFAULT '',
@@ -242,6 +268,9 @@ func (r *SQLiteRepository) initSchema() error {
 	if err := r.ensureColumn("tasks", "workspace_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
+	if err := r.ensureColumn("workspaces", "default_executor_id", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
 	if err := r.ensureColumn("columns", "color", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
@@ -261,8 +290,18 @@ func (r *SQLiteRepository) initSchema() error {
 	if err := r.ensureColumn("agent_sessions", "container_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
+	if err := r.ensureColumn("agent_sessions", "executor_id", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := r.ensureColumn("agent_sessions", "environment_id", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
 
 	if err := r.ensureDefaultWorkspace(); err != nil {
+		return err
+	}
+
+	if err := r.ensureDefaultExecutorsAndEnvironments(); err != nil {
 		return err
 	}
 
@@ -338,9 +377,9 @@ func (r *SQLiteRepository) ensureDefaultWorkspace() error {
 			workspaceDescription = ""
 		}
 		if _, err := r.db.ExecContext(ctx, `
-			INSERT INTO workspaces (id, name, description, owner_id, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?)
-		`, defaultID, workspaceName, workspaceDescription, "", now, now); err != nil {
+			INSERT INTO workspaces (id, name, description, owner_id, default_executor_id, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?)
+		`, defaultID, workspaceName, workspaceDescription, "", models.ExecutorIDLocalPC, now, now); err != nil {
 			return err
 		}
 
@@ -400,6 +439,98 @@ func (r *SQLiteRepository) ensureDefaultWorkspace() error {
 	return nil
 }
 
+func (r *SQLiteRepository) ensureDefaultExecutorsAndEnvironments() error {
+	ctx := context.Background()
+
+	var executorCount int
+	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(1) FROM executors").Scan(&executorCount); err != nil {
+		return err
+	}
+
+	if executorCount == 0 {
+		now := time.Now().UTC()
+		executors := []struct {
+			id       string
+			name     string
+			execType models.ExecutorType
+			status   models.ExecutorStatus
+			isSystem bool
+			config   map[string]string
+		}{
+			{
+				id:       models.ExecutorIDLocalPC,
+				name:     "Local PC",
+				execType: models.ExecutorTypeLocalPC,
+				status:   models.ExecutorStatusActive,
+				isSystem: true,
+				config:   map[string]string{},
+			},
+			{
+				id:       models.ExecutorIDLocalDocker,
+				name:     "Local Docker",
+				execType: models.ExecutorTypeLocalDocker,
+				status:   models.ExecutorStatusActive,
+				isSystem: false,
+				config: map[string]string{
+					"docker_host": "unix:///var/run/docker.sock",
+				},
+			},
+			{
+				id:       models.ExecutorIDRemoteDocker,
+				name:     "Remote Docker",
+				execType: models.ExecutorTypeRemoteDocker,
+				status:   models.ExecutorStatusDisabled,
+				isSystem: false,
+				config:   map[string]string{},
+			},
+		}
+
+		for _, executor := range executors {
+			configJSON, err := json.Marshal(executor.config)
+			if err != nil {
+				return fmt.Errorf("failed to serialize executor config: %w", err)
+			}
+			if _, err := r.db.ExecContext(ctx, `
+				INSERT INTO executors (id, name, type, status, is_system, config, created_at, updated_at)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			`, executor.id, executor.name, executor.execType, executor.status, boolToInt(executor.isSystem), string(configJSON), now, now); err != nil {
+				return err
+			}
+		}
+	}
+
+	if _, err := r.db.ExecContext(ctx, `
+		UPDATE workspaces
+		SET default_executor_id = ?
+		WHERE default_executor_id = '' OR default_executor_id IS NULL
+	`, models.ExecutorIDLocalPC); err != nil {
+		return err
+	}
+
+	var envCount int
+	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(1) FROM environments").Scan(&envCount); err != nil {
+		return err
+	}
+	if envCount == 0 {
+		now := time.Now().UTC()
+		if _, err := r.db.ExecContext(ctx, `
+			INSERT INTO environments (id, name, kind, worktree_root, image_tag, dockerfile, build_config, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, models.EnvironmentIDLocal, "Local", models.EnvironmentKindLocalPC, "~/kandev", "", "", "{}", now, now); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func boolToInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
+}
+
 func (r *SQLiteRepository) ensureWorkspaceIndexes() error {
 	if _, err := r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_tasks_workspace_id ON tasks(workspace_id)`); err != nil {
 		return err
@@ -447,14 +578,17 @@ func (r *SQLiteRepository) CreateWorkspace(ctx context.Context, workspace *model
 	if workspace.ID == "" {
 		workspace.ID = uuid.New().String()
 	}
+	if workspace.DefaultExecutorID == "" {
+		workspace.DefaultExecutorID = models.ExecutorIDLocalPC
+	}
 	now := time.Now().UTC()
 	workspace.CreatedAt = now
 	workspace.UpdatedAt = now
 
 	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO workspaces (id, name, description, owner_id, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?)
-	`, workspace.ID, workspace.Name, workspace.Description, workspace.OwnerID, workspace.CreatedAt, workspace.UpdatedAt)
+		INSERT INTO workspaces (id, name, description, owner_id, default_executor_id, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+	`, workspace.ID, workspace.Name, workspace.Description, workspace.OwnerID, workspace.DefaultExecutorID, workspace.CreatedAt, workspace.UpdatedAt)
 
 	return err
 }
@@ -464,9 +598,9 @@ func (r *SQLiteRepository) GetWorkspace(ctx context.Context, id string) (*models
 	workspace := &models.Workspace{}
 
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, name, description, owner_id, created_at, updated_at
+		SELECT id, name, description, owner_id, default_executor_id, created_at, updated_at
 		FROM workspaces WHERE id = ?
-	`, id).Scan(&workspace.ID, &workspace.Name, &workspace.Description, &workspace.OwnerID, &workspace.CreatedAt, &workspace.UpdatedAt)
+	`, id).Scan(&workspace.ID, &workspace.Name, &workspace.Description, &workspace.OwnerID, &workspace.DefaultExecutorID, &workspace.CreatedAt, &workspace.UpdatedAt)
 
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("workspace not found: %s", id)
@@ -479,8 +613,8 @@ func (r *SQLiteRepository) UpdateWorkspace(ctx context.Context, workspace *model
 	workspace.UpdatedAt = time.Now().UTC()
 
 	result, err := r.db.ExecContext(ctx, `
-		UPDATE workspaces SET name = ?, description = ?, updated_at = ? WHERE id = ?
-	`, workspace.Name, workspace.Description, workspace.UpdatedAt, workspace.ID)
+		UPDATE workspaces SET name = ?, description = ?, default_executor_id = ?, updated_at = ? WHERE id = ?
+	`, workspace.Name, workspace.Description, workspace.DefaultExecutorID, workspace.UpdatedAt, workspace.ID)
 	if err != nil {
 		return err
 	}
@@ -509,7 +643,7 @@ func (r *SQLiteRepository) DeleteWorkspace(ctx context.Context, id string) error
 // ListWorkspaces returns all workspaces
 func (r *SQLiteRepository) ListWorkspaces(ctx context.Context) ([]*models.Workspace, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, name, description, owner_id, created_at, updated_at FROM workspaces ORDER BY created_at DESC
+		SELECT id, name, description, owner_id, default_executor_id, created_at, updated_at FROM workspaces ORDER BY created_at DESC
 	`)
 	if err != nil {
 		return nil, err
@@ -519,7 +653,7 @@ func (r *SQLiteRepository) ListWorkspaces(ctx context.Context) ([]*models.Worksp
 	var result []*models.Workspace
 	for rows.Next() {
 		workspace := &models.Workspace{}
-		if err := rows.Scan(&workspace.ID, &workspace.Name, &workspace.Description, &workspace.OwnerID, &workspace.CreatedAt, &workspace.UpdatedAt); err != nil {
+		if err := rows.Scan(&workspace.ID, &workspace.Name, &workspace.Description, &workspace.OwnerID, &workspace.DefaultExecutorID, &workspace.CreatedAt, &workspace.UpdatedAt); err != nil {
 			return nil, err
 		}
 		result = append(result, workspace)
@@ -1308,7 +1442,6 @@ func (r *SQLiteRepository) ListRepositoryScripts(ctx context.Context, repository
 	return result, rows.Err()
 }
 
-
 // Agent Session operations
 
 // CreateAgentSession creates a new agent session
@@ -1327,11 +1460,11 @@ func (r *SQLiteRepository) CreateAgentSession(ctx context.Context, session *mode
 
 	_, err = r.db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
-			id, task_id, agent_instance_id, container_id, agent_type, acp_session_id, status, progress,
-			error_message, metadata, started_at, completed_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			id, task_id, agent_instance_id, container_id, agent_type, acp_session_id, executor_id, environment_id,
+			status, progress, error_message, metadata, started_at, completed_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, session.ID, session.TaskID, session.AgentInstanceID, session.ContainerID, session.AgentType, session.ACPSessionID,
-		string(session.Status), session.Progress, session.ErrorMessage, string(metadataJSON),
+		session.ExecutorID, session.EnvironmentID, string(session.Status), session.Progress, session.ErrorMessage, string(metadataJSON),
 		session.StartedAt, session.CompletedAt, session.UpdatedAt)
 
 	return err
@@ -1345,12 +1478,12 @@ func (r *SQLiteRepository) GetAgentSession(ctx context.Context, id string) (*mod
 	var completedAt sql.NullTime
 
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, task_id, agent_instance_id, container_id, agent_type, acp_session_id, status, progress,
-		       error_message, metadata, started_at, completed_at, updated_at
+		SELECT id, task_id, agent_instance_id, container_id, agent_type, acp_session_id, executor_id, environment_id,
+		       status, progress, error_message, metadata, started_at, completed_at, updated_at
 		FROM agent_sessions WHERE id = ?
 	`, id).Scan(
 		&session.ID, &session.TaskID, &session.AgentInstanceID, &session.ContainerID, &session.AgentType,
-		&session.ACPSessionID, &status, &session.Progress, &session.ErrorMessage,
+		&session.ACPSessionID, &session.ExecutorID, &session.EnvironmentID, &status, &session.Progress, &session.ErrorMessage,
 		&metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
 	)
 
@@ -1382,12 +1515,12 @@ func (r *SQLiteRepository) GetAgentSessionByTaskID(ctx context.Context, taskID s
 	var completedAt sql.NullTime
 
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, task_id, agent_instance_id, container_id, agent_type, acp_session_id, status, progress,
-		       error_message, metadata, started_at, completed_at, updated_at
+		SELECT id, task_id, agent_instance_id, container_id, agent_type, acp_session_id, executor_id, environment_id,
+		       status, progress, error_message, metadata, started_at, completed_at, updated_at
 		FROM agent_sessions WHERE task_id = ? ORDER BY started_at DESC LIMIT 1
 	`, taskID).Scan(
 		&session.ID, &session.TaskID, &session.AgentInstanceID, &session.ContainerID, &session.AgentType,
-		&session.ACPSessionID, &status, &session.Progress, &session.ErrorMessage,
+		&session.ACPSessionID, &session.ExecutorID, &session.EnvironmentID, &status, &session.Progress, &session.ErrorMessage,
 		&metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
 	)
 
@@ -1419,14 +1552,14 @@ func (r *SQLiteRepository) GetActiveAgentSessionByTaskID(ctx context.Context, ta
 	var completedAt sql.NullTime
 
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, task_id, agent_instance_id, container_id, agent_type, acp_session_id, status, progress,
-		       error_message, metadata, started_at, completed_at, updated_at
+		SELECT id, task_id, agent_instance_id, container_id, agent_type, acp_session_id, executor_id, environment_id,
+		       status, progress, error_message, metadata, started_at, completed_at, updated_at
 		FROM agent_sessions
 		WHERE task_id = ? AND status IN ('pending', 'running', 'waiting')
 		ORDER BY started_at DESC LIMIT 1
 	`, taskID).Scan(
 		&session.ID, &session.TaskID, &session.AgentInstanceID, &session.ContainerID, &session.AgentType,
-		&session.ACPSessionID, &status, &session.Progress, &session.ErrorMessage,
+		&session.ACPSessionID, &session.ExecutorID, &session.EnvironmentID, &status, &session.Progress, &session.ErrorMessage,
 		&metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
 	)
 
@@ -1450,7 +1583,6 @@ func (r *SQLiteRepository) GetActiveAgentSessionByTaskID(ctx context.Context, ta
 	return session, nil
 }
 
-
 // UpdateAgentSession updates an existing agent session
 func (r *SQLiteRepository) UpdateAgentSession(ctx context.Context, session *models.AgentSession) error {
 	session.UpdatedAt = time.Now().UTC()
@@ -1462,11 +1594,11 @@ func (r *SQLiteRepository) UpdateAgentSession(ctx context.Context, session *mode
 
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE agent_sessions SET
-			agent_instance_id = ?, container_id = ?, agent_type = ?, acp_session_id = ?, status = ?, progress = ?,
-			error_message = ?, metadata = ?, completed_at = ?, updated_at = ?
+			agent_instance_id = ?, container_id = ?, agent_type = ?, acp_session_id = ?, executor_id = ?, environment_id = ?,
+			status = ?, progress = ?, error_message = ?, metadata = ?, completed_at = ?, updated_at = ?
 		WHERE id = ?
-	`, session.AgentInstanceID, session.ContainerID, session.AgentType, session.ACPSessionID, string(session.Status),
-		session.Progress, session.ErrorMessage, string(metadataJSON), session.CompletedAt,
+	`, session.AgentInstanceID, session.ContainerID, session.AgentType, session.ACPSessionID, session.ExecutorID, session.EnvironmentID,
+		string(session.Status), session.Progress, session.ErrorMessage, string(metadataJSON), session.CompletedAt,
 		session.UpdatedAt, session.ID)
 	if err != nil {
 		return err
@@ -1505,8 +1637,8 @@ func (r *SQLiteRepository) UpdateAgentSessionStatus(ctx context.Context, id stri
 // ListAgentSessions returns all agent sessions for a task
 func (r *SQLiteRepository) ListAgentSessions(ctx context.Context, taskID string) ([]*models.AgentSession, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, task_id, agent_instance_id, container_id, agent_type, acp_session_id, status, progress,
-		       error_message, metadata, started_at, completed_at, updated_at
+		SELECT id, task_id, agent_instance_id, container_id, agent_type, acp_session_id, executor_id, environment_id,
+		       status, progress, error_message, metadata, started_at, completed_at, updated_at
 		FROM agent_sessions WHERE task_id = ? ORDER BY started_at DESC
 	`, taskID)
 	if err != nil {
@@ -1520,8 +1652,8 @@ func (r *SQLiteRepository) ListAgentSessions(ctx context.Context, taskID string)
 // ListActiveAgentSessions returns all active agent sessions across all tasks
 func (r *SQLiteRepository) ListActiveAgentSessions(ctx context.Context) ([]*models.AgentSession, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, task_id, agent_instance_id, container_id, agent_type, acp_session_id, status, progress,
-		       error_message, metadata, started_at, completed_at, updated_at
+		SELECT id, task_id, agent_instance_id, container_id, agent_type, acp_session_id, executor_id, environment_id,
+		       status, progress, error_message, metadata, started_at, completed_at, updated_at
 		FROM agent_sessions WHERE status IN ('pending', 'running', 'waiting') ORDER BY started_at DESC
 	`)
 	if err != nil {
@@ -1543,7 +1675,7 @@ func (r *SQLiteRepository) scanAgentSessions(rows *sql.Rows) ([]*models.AgentSes
 
 		err := rows.Scan(
 			&session.ID, &session.TaskID, &session.AgentInstanceID, &session.ContainerID, &session.AgentType,
-			&session.ACPSessionID, &status, &session.Progress, &session.ErrorMessage,
+			&session.ACPSessionID, &session.ExecutorID, &session.EnvironmentID, &status, &session.Progress, &session.ErrorMessage,
 			&metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
 		)
 		if err != nil {
@@ -1577,4 +1709,233 @@ func (r *SQLiteRepository) DeleteAgentSession(ctx context.Context, id string) er
 		return fmt.Errorf("agent session not found: %s", id)
 	}
 	return nil
+}
+
+// Executor operations
+
+func (r *SQLiteRepository) CreateExecutor(ctx context.Context, executor *models.Executor) error {
+	if executor.ID == "" {
+		executor.ID = uuid.New().String()
+	}
+	now := time.Now().UTC()
+	executor.CreatedAt = now
+	executor.UpdatedAt = now
+
+	configJSON, err := json.Marshal(executor.Config)
+	if err != nil {
+		return fmt.Errorf("failed to serialize executor config: %w", err)
+	}
+
+	_, err = r.db.ExecContext(ctx, `
+		INSERT INTO executors (id, name, type, status, is_system, config, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`, executor.ID, executor.Name, executor.Type, executor.Status, boolToInt(executor.IsSystem), string(configJSON), executor.CreatedAt, executor.UpdatedAt)
+	return err
+}
+
+func (r *SQLiteRepository) GetExecutor(ctx context.Context, id string) (*models.Executor, error) {
+	executor := &models.Executor{}
+	var configJSON string
+	var isSystem int
+
+	err := r.db.QueryRowContext(ctx, `
+		SELECT id, name, type, status, is_system, config, created_at, updated_at
+		FROM executors WHERE id = ?
+	`, id).Scan(
+		&executor.ID, &executor.Name, &executor.Type, &executor.Status,
+		&isSystem, &configJSON, &executor.CreatedAt, &executor.UpdatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("executor not found: %s", id)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	executor.IsSystem = isSystem == 1
+	if configJSON != "" && configJSON != "{}" {
+		if err := json.Unmarshal([]byte(configJSON), &executor.Config); err != nil {
+			return nil, fmt.Errorf("failed to deserialize executor config: %w", err)
+		}
+	}
+	return executor, nil
+}
+
+func (r *SQLiteRepository) UpdateExecutor(ctx context.Context, executor *models.Executor) error {
+	executor.UpdatedAt = time.Now().UTC()
+
+	configJSON, err := json.Marshal(executor.Config)
+	if err != nil {
+		return fmt.Errorf("failed to serialize executor config: %w", err)
+	}
+
+	result, err := r.db.ExecContext(ctx, `
+		UPDATE executors SET name = ?, type = ?, status = ?, is_system = ?, config = ?, updated_at = ?
+		WHERE id = ?
+	`, executor.Name, executor.Type, executor.Status, boolToInt(executor.IsSystem), string(configJSON), executor.UpdatedAt, executor.ID)
+	if err != nil {
+		return err
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("executor not found: %s", executor.ID)
+	}
+	return nil
+}
+
+func (r *SQLiteRepository) DeleteExecutor(ctx context.Context, id string) error {
+	result, err := r.db.ExecContext(ctx, `DELETE FROM executors WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("executor not found: %s", id)
+	}
+	return nil
+}
+
+func (r *SQLiteRepository) ListExecutors(ctx context.Context) ([]*models.Executor, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, name, type, status, is_system, config, created_at, updated_at
+		FROM executors ORDER BY created_at ASC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []*models.Executor
+	for rows.Next() {
+		executor := &models.Executor{}
+		var configJSON string
+		var isSystem int
+		if err := rows.Scan(
+			&executor.ID, &executor.Name, &executor.Type, &executor.Status,
+			&isSystem, &configJSON, &executor.CreatedAt, &executor.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		executor.IsSystem = isSystem == 1
+		if configJSON != "" && configJSON != "{}" {
+			if err := json.Unmarshal([]byte(configJSON), &executor.Config); err != nil {
+				return nil, fmt.Errorf("failed to deserialize executor config: %w", err)
+			}
+		}
+		result = append(result, executor)
+	}
+	return result, rows.Err()
+}
+
+// Environment operations
+
+func (r *SQLiteRepository) CreateEnvironment(ctx context.Context, environment *models.Environment) error {
+	if environment.ID == "" {
+		environment.ID = uuid.New().String()
+	}
+	now := time.Now().UTC()
+	environment.CreatedAt = now
+	environment.UpdatedAt = now
+
+	buildConfigJSON, err := json.Marshal(environment.BuildConfig)
+	if err != nil {
+		return fmt.Errorf("failed to serialize environment build config: %w", err)
+	}
+
+	_, err = r.db.ExecContext(ctx, `
+		INSERT INTO environments (id, name, kind, worktree_root, image_tag, dockerfile, build_config, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, environment.ID, environment.Name, environment.Kind, environment.WorktreeRoot, environment.ImageTag, environment.Dockerfile, string(buildConfigJSON), environment.CreatedAt, environment.UpdatedAt)
+	return err
+}
+
+func (r *SQLiteRepository) GetEnvironment(ctx context.Context, id string) (*models.Environment, error) {
+	environment := &models.Environment{}
+	var buildConfigJSON string
+
+	err := r.db.QueryRowContext(ctx, `
+		SELECT id, name, kind, worktree_root, image_tag, dockerfile, build_config, created_at, updated_at
+		FROM environments WHERE id = ?
+	`, id).Scan(
+		&environment.ID, &environment.Name, &environment.Kind, &environment.WorktreeRoot,
+		&environment.ImageTag, &environment.Dockerfile, &buildConfigJSON,
+		&environment.CreatedAt, &environment.UpdatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("environment not found: %s", id)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if buildConfigJSON != "" && buildConfigJSON != "{}" {
+		if err := json.Unmarshal([]byte(buildConfigJSON), &environment.BuildConfig); err != nil {
+			return nil, fmt.Errorf("failed to deserialize environment build config: %w", err)
+		}
+	}
+	return environment, nil
+}
+
+func (r *SQLiteRepository) UpdateEnvironment(ctx context.Context, environment *models.Environment) error {
+	environment.UpdatedAt = time.Now().UTC()
+
+	buildConfigJSON, err := json.Marshal(environment.BuildConfig)
+	if err != nil {
+		return fmt.Errorf("failed to serialize environment build config: %w", err)
+	}
+
+	result, err := r.db.ExecContext(ctx, `
+		UPDATE environments SET name = ?, kind = ?, worktree_root = ?, image_tag = ?, dockerfile = ?, build_config = ?, updated_at = ?
+		WHERE id = ?
+	`, environment.Name, environment.Kind, environment.WorktreeRoot, environment.ImageTag, environment.Dockerfile, string(buildConfigJSON), environment.UpdatedAt, environment.ID)
+	if err != nil {
+		return err
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("environment not found: %s", environment.ID)
+	}
+	return nil
+}
+
+func (r *SQLiteRepository) DeleteEnvironment(ctx context.Context, id string) error {
+	result, err := r.db.ExecContext(ctx, `DELETE FROM environments WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("environment not found: %s", id)
+	}
+	return nil
+}
+
+func (r *SQLiteRepository) ListEnvironments(ctx context.Context) ([]*models.Environment, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, name, kind, worktree_root, image_tag, dockerfile, build_config, created_at, updated_at
+		FROM environments ORDER BY created_at ASC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []*models.Environment
+	for rows.Next() {
+		environment := &models.Environment{}
+		var buildConfigJSON string
+		if err := rows.Scan(
+			&environment.ID, &environment.Name, &environment.Kind, &environment.WorktreeRoot,
+			&environment.ImageTag, &environment.Dockerfile, &buildConfigJSON,
+			&environment.CreatedAt, &environment.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		if buildConfigJSON != "" && buildConfigJSON != "{}" {
+			if err := json.Unmarshal([]byte(buildConfigJSON), &environment.BuildConfig); err != nil {
+				return nil, fmt.Errorf("failed to deserialize environment build config: %w", err)
+			}
+		}
+		result = append(result, environment)
+	}
+	return result, rows.Err()
 }

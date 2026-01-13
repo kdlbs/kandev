@@ -48,14 +48,21 @@ export async function getWorkspaceAction(id: string): Promise<Workspace> {
   return fetchJson<Workspace>(`${apiBaseUrl}/api/v1/workspaces/${id}`);
 }
 
-export async function createWorkspaceAction(payload: { name: string; description?: string }) {
+export async function createWorkspaceAction(payload: {
+  name: string;
+  description?: string;
+  default_executor_id?: string;
+}) {
   return fetchJson<Workspace>(`${apiBaseUrl}/api/v1/workspaces`, {
     method: 'POST',
     body: JSON.stringify(payload),
   });
 }
 
-export async function updateWorkspaceAction(id: string, payload: { name?: string; description?: string }) {
+export async function updateWorkspaceAction(
+  id: string,
+  payload: { name?: string; description?: string; default_executor_id?: string }
+) {
   return fetchJson<Workspace>(`${apiBaseUrl}/api/v1/workspaces/${id}`, {
     method: 'PATCH',
     body: JSON.stringify(payload),

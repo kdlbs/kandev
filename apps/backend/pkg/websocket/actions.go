@@ -40,6 +40,20 @@ const (
 	ActionRepositoryScriptUpdate = "repository.script.update"
 	ActionRepositoryScriptDelete = "repository.script.delete"
 
+	// Executor actions
+	ActionExecutorList   = "executor.list"
+	ActionExecutorCreate = "executor.create"
+	ActionExecutorGet    = "executor.get"
+	ActionExecutorUpdate = "executor.update"
+	ActionExecutorDelete = "executor.delete"
+
+	// Environment actions
+	ActionEnvironmentList   = "environment.list"
+	ActionEnvironmentCreate = "environment.create"
+	ActionEnvironmentGet    = "environment.get"
+	ActionEnvironmentUpdate = "environment.update"
+	ActionEnvironmentDelete = "environment.delete"
+
 	// Task actions
 	ActionTaskList      = "task.list"
 	ActionTaskCreate    = "task.create"
@@ -110,6 +124,12 @@ const (
 	ActionRepositoryScriptCreated = "repository.script.created"
 	ActionRepositoryScriptUpdated = "repository.script.updated"
 	ActionRepositoryScriptDeleted = "repository.script.deleted"
+	ActionExecutorCreated         = "executor.created"
+	ActionExecutorUpdated         = "executor.updated"
+	ActionExecutorDeleted         = "executor.deleted"
+	ActionEnvironmentCreated      = "environment.created"
+	ActionEnvironmentUpdated      = "environment.updated"
+	ActionEnvironmentDeleted      = "environment.deleted"
 
 	// Permission request actions (agent -> user -> agent)
 	ActionPermissionRequested = "permission.requested" // Agent requesting permission

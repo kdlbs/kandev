@@ -49,6 +49,20 @@ const (
 	RepositoryScriptDeleted = "repository.script.deleted"
 )
 
+// Event types for executors
+const (
+	ExecutorCreated = "executor.created"
+	ExecutorUpdated = "executor.updated"
+	ExecutorDeleted = "executor.deleted"
+)
+
+// Event types for environments
+const (
+	EnvironmentCreated = "environment.created"
+	EnvironmentUpdated = "environment.updated"
+	EnvironmentDeleted = "environment.deleted"
+)
+
 // Event types for agents
 const (
 	AgentStarted   = "agent.started"

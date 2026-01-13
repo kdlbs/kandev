@@ -76,9 +76,13 @@ func NewTestServer(t *testing.T) *TestServer {
 	workspaceController := taskcontroller.NewWorkspaceController(taskSvc)
 	boardController := taskcontroller.NewBoardController(taskSvc)
 	taskController := taskcontroller.NewTaskController(taskSvc)
+	executorController := taskcontroller.NewExecutorController(taskSvc)
+	environmentController := taskcontroller.NewEnvironmentController(taskSvc)
 	taskhandlers.RegisterWorkspaceRoutes(router, gateway.Dispatcher, workspaceController, log)
 	taskhandlers.RegisterBoardRoutes(router, gateway.Dispatcher, boardController, log)
 	taskhandlers.RegisterTaskRoutes(router, gateway.Dispatcher, taskController, log)
+	taskhandlers.RegisterExecutorRoutes(router, gateway.Dispatcher, executorController, log)
+	taskhandlers.RegisterEnvironmentRoutes(router, gateway.Dispatcher, environmentController, log)
 
 	// Create test server
 	server := httptest.NewServer(router)
