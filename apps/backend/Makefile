@@ -20,7 +20,7 @@ LDFLAGS += -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuildTime
 all: build
 
 ## Build the unified kandev binary
-build:
+build: build-agentctl
 	@echo "Building $(BINARY_NAME)..."
 	@mkdir -p $(BUILD_DIR)
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/kandev
@@ -28,7 +28,6 @@ build:
 ## Build all binaries (unified + individual services + agentctl)
 build-all: build build-agentctl
 	@echo "Building individual services..."
-	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/orchestrator ./cmd/orchestrator
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agent-manager ./cmd/agent-manager
 
 ## Build the agentctl sidecar binary

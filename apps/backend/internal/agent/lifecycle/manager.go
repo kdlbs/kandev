@@ -19,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/docker"
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/worktree"
+	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -30,21 +31,26 @@ const AgentCtlPort = 9999
 
 // AgentInstance represents a running agent instance
 type AgentInstance struct {
-	ID           string
-	TaskID       string
-	AgentType    string
-	ContainerID  string
-	ContainerIP  string // IP address of the container for agentctl communication
-	Status       v1.AgentStatus
-	StartedAt    time.Time
-	FinishedAt   *time.Time
-	ExitCode     *int
-	ErrorMessage string
-	Progress     int
-	Metadata     map[string]interface{}
+	ID            string
+	TaskID        string
+	AgentType     string
+	ContainerID   string
+	ContainerIP   string // IP address of the container for agentctl communication
+	WorkspacePath string // Path to the workspace (worktree or repository path)
+	Status        v1.AgentStatus
+	StartedAt     time.Time
+	FinishedAt    *time.Time
+	ExitCode      *int
+	ErrorMessage  string
+	Progress      int
+	Metadata      map[string]interface{}
 
 	// agentctl client for this instance
 	agentctl *agentctl.Client
+
+	// Standalone mode info (when not using Docker)
+	standaloneInstanceID string // Instance ID in standalone agentctl
+	standalonePort       int    // Port of the standalone instance
 
 	// Message buffer for accumulating agent response during a prompt
 	messageBuffer strings.Builder
@@ -81,6 +87,10 @@ type Manager struct {
 	worktreeMgr *worktree.Manager
 	logger      *logger.Logger
 
+	// Agent runtime configuration
+	agentCfg      config.AgentConfig
+	standaloneCtl *agentctl.StandaloneCtl // Client for standalone agentctl control API
+
 	// Track active instances
 	instances   map[string]*AgentInstance // by instance ID
 	byTask      map[string]string         // taskID -> instanceID
@@ -98,12 +108,14 @@ func NewManager(
 	dockerClient *docker.Client,
 	reg *registry.Registry,
 	eventBus bus.EventBus,
+	agentCfg config.AgentConfig,
 	log *logger.Logger,
 ) *Manager {
-	return &Manager{
+	mgr := &Manager{
 		docker:          dockerClient,
 		registry:        reg,
 		eventBus:        eventBus,
+		agentCfg:        agentCfg,
 		logger:          log.WithFields(zap.String("component", "lifecycle-manager")),
 		instances:       make(map[string]*AgentInstance),
 		byTask:          make(map[string]string),
@@ -111,6 +123,25 @@ func NewManager(
 		cleanupInterval: 30 * time.Second,
 		stopCh:          make(chan struct{}),
 	}
+
+	// Initialize standalone agentctl client if in standalone mode
+	if agentCfg.Runtime == "standalone" {
+		mgr.standaloneCtl = agentctl.NewStandaloneCtl(
+			agentCfg.StandaloneHost,
+			agentCfg.StandalonePort,
+			log,
+		)
+		mgr.logger.Info("initialized for standalone mode",
+			zap.String("host", agentCfg.StandaloneHost),
+			zap.Int("port", agentCfg.StandalonePort))
+	}
+
+	return mgr
+}
+
+// IsStandaloneMode returns true if running in standalone mode
+func (m *Manager) IsStandaloneMode() bool {
+	return m.agentCfg.Runtime == "standalone"
 }
 
 // SetCredentialsManager sets the credentials manager for injecting secrets
@@ -125,12 +156,26 @@ func (m *Manager) SetWorktreeManager(worktreeMgr *worktree.Manager) {
 
 // Start starts the lifecycle manager background tasks
 func (m *Manager) Start(ctx context.Context) error {
-	m.logger.Info("starting lifecycle manager")
+	m.logger.Info("starting lifecycle manager",
+		zap.String("runtime", m.agentCfg.Runtime))
 
-	// Reconcile with Docker to find running containers from previous runs
-	if _, err := m.reconcileWithDocker(ctx); err != nil {
-		m.logger.Warn("failed to reconcile with Docker", zap.Error(err))
-		// Continue anyway - this is best-effort
+	if m.IsStandaloneMode() {
+		// Check if standalone agentctl is reachable
+		if err := m.standaloneCtl.Health(ctx); err != nil {
+			m.logger.Warn("standalone agentctl not reachable",
+				zap.String("host", m.agentCfg.StandaloneHost),
+				zap.Int("port", m.agentCfg.StandalonePort),
+				zap.Error(err))
+			// Continue anyway - it might come up later
+		} else {
+			m.logger.Info("standalone agentctl is reachable")
+		}
+	} else {
+		// Reconcile with Docker to find running containers from previous runs
+		if _, err := m.reconcileWithDocker(ctx); err != nil {
+			m.logger.Warn("failed to reconcile with Docker", zap.Error(err))
+			// Continue anyway - this is best-effort
+		}
 	}
 
 	// Start cleanup loop
@@ -316,6 +361,8 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentInstanc
 				zap.String("task_id", req.TaskID),
 				zap.Error(err))
 			// Fall back to direct mount if worktree creation fails
+			// Use RepositoryPath as the workspace
+			workspacePath = req.RepositoryPath
 		} else {
 			workspacePath = wt.Path
 			worktreeID = wt.ID
@@ -332,17 +379,61 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentInstanc
 				zap.String("main_repo_git_dir", mainRepoGitDir),
 				zap.String("branch", wt.Branch))
 		}
+	} else if req.RepositoryPath != "" && workspacePath == "" {
+		// No worktree, but we have a repository path - use it as workspace
+		workspacePath = req.RepositoryPath
+		m.logger.Info("using repository path as workspace (no worktree)",
+			zap.String("task_id", req.TaskID),
+			zap.String("workspace_path", workspacePath))
 	}
 
 	// 4. Generate a new instance ID
 	instanceID := uuid.New().String()
 
-	// 5. Build container config from registry config (use worktree path if available)
+	// 5. Prepare request with worktree path
 	reqWithWorktree := *req
 	reqWithWorktree.WorkspacePath = workspacePath
-	containerConfig := m.buildContainerConfig(instanceID, &reqWithWorktree, agentConfig, mainRepoGitDir)
 
-	// 6. Create and start the container
+	// 6. Launch via appropriate runtime (Docker or Standalone)
+	var instance *AgentInstance
+	if m.IsStandaloneMode() {
+		instance, err = m.launchStandalone(ctx, instanceID, &reqWithWorktree, agentConfig, worktreeID, worktreeBranch)
+	} else {
+		instance, err = m.launchDocker(ctx, instanceID, &reqWithWorktree, agentConfig, mainRepoGitDir, worktreeID, worktreeBranch)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	// 7. Track the instance
+	m.mu.Lock()
+	m.instances[instanceID] = instance
+	m.byTask[req.TaskID] = instanceID
+	if instance.ContainerID != "" {
+		m.byContainer[instance.ContainerID] = instanceID
+	}
+	m.mu.Unlock()
+
+	// 8. Publish agent.started event
+	m.publishEvent(ctx, events.AgentStarted, instance)
+
+	// 9. Wait for agentctl to be ready and start the agent process
+	go m.initializeAgent(instance, req.TaskDescription)
+
+	m.logger.Info("agent launched successfully",
+		zap.String("instance_id", instanceID),
+		zap.String("task_id", req.TaskID),
+		zap.String("runtime", m.agentCfg.Runtime))
+
+	return instance, nil
+}
+
+// launchDocker launches an agent in a Docker container
+func (m *Manager) launchDocker(ctx context.Context, instanceID string, req *LaunchRequest, agentConfig *registry.AgentTypeConfig, mainRepoGitDir, worktreeID, worktreeBranch string) (*AgentInstance, error) {
+	// Build container config from registry config
+	containerConfig := m.buildContainerConfig(instanceID, req, agentConfig, mainRepoGitDir)
+
+	// Create and start the container
 	containerID, err := m.docker.CreateContainer(ctx, containerConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create container: %w", err)
@@ -353,7 +444,7 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentInstanc
 		return nil, fmt.Errorf("failed to start container: %w", err)
 	}
 
-	// 7. Get container IP for agentctl communication
+	// Get container IP for agentctl communication
 	containerIP, err := m.docker.GetContainerIP(ctx, containerID)
 	if err != nil {
 		m.logger.Warn("failed to get container IP, trying localhost",
@@ -362,53 +453,143 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentInstanc
 		containerIP = "127.0.0.1"
 	}
 
-	// 8. Create agentctl client
+	// Create agentctl client pointing to the container
 	agentctlClient := agentctl.NewClient(containerIP, AgentCtlPort, m.logger)
 
-	// 9. Track the instance
-	now := time.Now()
+	// Build instance metadata
 	instanceMetadata := req.Metadata
 	if instanceMetadata == nil {
 		instanceMetadata = make(map[string]interface{})
 	}
-	// Store worktree info in metadata for session resumption and API responses
 	if worktreeID != "" {
 		instanceMetadata["worktree_id"] = worktreeID
-		instanceMetadata["worktree_path"] = workspacePath
+		instanceMetadata["worktree_path"] = req.WorkspacePath
 		instanceMetadata["worktree_branch"] = worktreeBranch
 	}
-	instance := &AgentInstance{
-		ID:          instanceID,
-		TaskID:      req.TaskID,
-		AgentType:   req.AgentType,
-		ContainerID: containerID,
-		ContainerIP: containerIP,
-		Status:      v1.AgentStatusRunning,
-		StartedAt:   now,
-		Progress:    0,
-		Metadata:    instanceMetadata,
-		agentctl:    agentctlClient,
-	}
 
-	m.mu.Lock()
-	m.instances[instanceID] = instance
-	m.byTask[req.TaskID] = instanceID
-	m.byContainer[containerID] = instanceID
-	m.mu.Unlock()
-
-	// 10. Publish agent.started event
-	m.publishEvent(ctx, events.AgentStarted, instance)
-
-	// 11. Wait for agentctl to be ready and start the agent process
-	go m.initializeAgent(instance, req.TaskDescription)
-
-	m.logger.Info("agent launched successfully",
+	m.logger.Info("docker agent created",
 		zap.String("instance_id", instanceID),
 		zap.String("container_id", containerID),
-		zap.String("container_ip", containerIP),
-		zap.String("task_id", req.TaskID))
+		zap.String("container_ip", containerIP))
 
-	return instance, nil
+	return &AgentInstance{
+		ID:            instanceID,
+		TaskID:        req.TaskID,
+		AgentType:     req.AgentType,
+		ContainerID:   containerID,
+		ContainerIP:   containerIP,
+		WorkspacePath: "/workspace", // Docker mounts workspace to /workspace
+		Status:        v1.AgentStatusRunning,
+		StartedAt:     time.Now(),
+		Progress:      0,
+		Metadata:      instanceMetadata,
+		agentctl:      agentctlClient,
+	}, nil
+}
+
+// launchStandalone launches an agent via standalone agentctl
+func (m *Manager) launchStandalone(ctx context.Context, instanceID string, req *LaunchRequest, agentConfig *registry.AgentTypeConfig, worktreeID, worktreeBranch string) (*AgentInstance, error) {
+	// Build environment variables for the agent
+	env := m.buildStandaloneEnv(instanceID, req, agentConfig)
+
+	// Build agent command from registry config
+	// If Cmd is specified, join it; otherwise use default auggie command
+	agentCommand := ""
+	if len(agentConfig.Cmd) > 0 {
+		agentCommand = strings.Join(agentConfig.Cmd, " ")
+	}
+	// If empty, agentctl will use its default (auggie --acp)
+
+	// Create instance via control API
+	createReq := &agentctl.CreateInstanceRequest{
+		ID:            instanceID,
+		WorkspacePath: req.WorkspacePath,
+		AgentCommand:  agentCommand,
+		Env:           env,
+		AutoStart:     false, // We'll start via ACP initialize flow
+	}
+
+	resp, err := m.standaloneCtl.CreateInstance(ctx, createReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create standalone instance: %w", err)
+	}
+
+	// Create agentctl client pointing to the instance port
+	agentctlClient := agentctl.NewClient(m.agentCfg.StandaloneHost, resp.Port, m.logger)
+
+	// Build instance metadata
+	instanceMetadata := req.Metadata
+	if instanceMetadata == nil {
+		instanceMetadata = make(map[string]interface{})
+	}
+	if worktreeID != "" {
+		instanceMetadata["worktree_id"] = worktreeID
+		instanceMetadata["worktree_path"] = req.WorkspacePath
+		instanceMetadata["worktree_branch"] = worktreeBranch
+	}
+	// Store standalone-specific info in metadata
+	instanceMetadata["standalone_port"] = resp.Port
+
+	m.logger.Info("standalone agent created",
+		zap.String("instance_id", instanceID),
+		zap.Int("port", resp.Port),
+		zap.String("workspace", req.WorkspacePath))
+
+	return &AgentInstance{
+		ID:                   instanceID,
+		TaskID:               req.TaskID,
+		AgentType:            req.AgentType,
+		WorkspacePath:        req.WorkspacePath,
+		Status:               v1.AgentStatusRunning,
+		StartedAt:            time.Now(),
+		Progress:             0,
+		Metadata:             instanceMetadata,
+		agentctl:             agentctlClient,
+		standaloneInstanceID: resp.ID,
+		standalonePort:       resp.Port,
+	}, nil
+}
+
+// buildStandaloneEnv builds environment variables for a standalone agent instance
+func (m *Manager) buildStandaloneEnv(instanceID string, req *LaunchRequest, agentConfig *registry.AgentTypeConfig) map[string]string {
+	env := make(map[string]string)
+
+	// Copy request environment
+	for k, v := range req.Env {
+		env[k] = v
+	}
+
+	// Add standard variables
+	env["KANDEV_INSTANCE_ID"] = instanceID
+	env["KANDEV_TASK_ID"] = req.TaskID
+	env["TASK_DESCRIPTION"] = req.TaskDescription
+
+	// Add credentials if available
+	if m.credsMgr != nil {
+		ctx := context.Background()
+		if sessionAuth, err := m.credsMgr.GetCredentialValue(ctx, "AUGMENT_SESSION_AUTH"); err == nil && sessionAuth != "" {
+			env["AUGMENT_SESSION_AUTH"] = sessionAuth
+		}
+	}
+
+	// Check for ACP session resumption
+	// Only pass session ID if the session file exists locally
+	// Docker sessions won't exist on standalone hosts and vice versa
+	if req.Metadata != nil {
+		if sessionID, ok := req.Metadata["auggie_session_id"].(string); ok && sessionID != "" {
+			// Check if session file exists
+			homeDir, _ := os.UserHomeDir()
+			sessionPath := filepath.Join(homeDir, ".augment", "sessions", sessionID+".json")
+			if _, err := os.Stat(sessionPath); err == nil {
+				env["AUGGIE_SESSION_ID"] = sessionID
+			} else {
+				// Session file doesn't exist - don't pass the ID
+				// This happens when switching between Docker and standalone modes
+			}
+		}
+	}
+
+	return env
 }
 
 // getOrCreateWorktree creates a new worktree or reuses an existing one for session resumption.
@@ -521,9 +702,10 @@ func (m *Manager) initializeACPSession(ctx context.Context, instance *AgentInsta
 
 	// 2. Create new session
 	m.logger.Info("sending ACP session/new request",
-		zap.String("instance_id", instance.ID))
+		zap.String("instance_id", instance.ID),
+		zap.String("workspace_path", instance.WorkspacePath))
 
-	sessionID, err := instance.agentctl.NewSession(ctx, "/workspace")
+	sessionID, err := instance.agentctl.NewSession(ctx, instance.WorkspacePath)
 	if err != nil {
 		m.logger.Error("ACP session/new failed",
 			zap.String("instance_id", instance.ID),
@@ -1388,19 +1570,59 @@ func (m *Manager) StopAgent(ctx context.Context, instanceID string, force bool) 
 
 	m.logger.Info("stopping agent",
 		zap.String("instance_id", instanceID),
-		zap.Bool("force", force))
+		zap.Bool("force", force),
+		zap.String("runtime", m.agentCfg.Runtime))
 
 	// Try to gracefully stop via agentctl first
 	if instance.agentctl != nil && !force {
 		if err := instance.agentctl.Stop(ctx); err != nil {
-			m.logger.Warn("failed to stop agent via agentctl, will stop container",
+			m.logger.Warn("failed to stop agent via agentctl",
 				zap.String("instance_id", instanceID),
 				zap.Error(err))
 		}
 		instance.agentctl.Close()
 	}
 
-	// Stop the container
+	// Stop the agent instance based on runtime mode
+	var err error
+	if m.IsStandaloneMode() {
+		err = m.stopStandaloneInstance(ctx, instance)
+	} else {
+		err = m.stopDockerContainer(ctx, instance, force)
+	}
+
+	if err != nil {
+		return err
+	}
+
+	// Update instance status and remove from tracking maps
+	m.mu.Lock()
+	instance.Status = v1.AgentStatusStopped
+	now := time.Now()
+	instance.FinishedAt = &now
+	delete(m.instances, instanceID)
+	delete(m.byTask, instance.TaskID)
+	if instance.ContainerID != "" {
+		delete(m.byContainer, instance.ContainerID)
+	}
+	m.mu.Unlock()
+
+	m.logger.Info("agent stopped and removed from tracking",
+		zap.String("instance_id", instanceID),
+		zap.String("task_id", instance.TaskID))
+
+	// Publish stopped event
+	m.publishEvent(ctx, events.AgentStopped, instance)
+
+	return nil
+}
+
+// stopDockerContainer stops a Docker container
+func (m *Manager) stopDockerContainer(ctx context.Context, instance *AgentInstance, force bool) error {
+	if instance.ContainerID == "" {
+		return nil // No container to stop
+	}
+
 	var err error
 	if force {
 		err = m.docker.KillContainer(ctx, instance.ContainerID, "SIGKILL")
@@ -1412,22 +1634,18 @@ func (m *Manager) StopAgent(ctx context.Context, instanceID string, force bool) 
 		return fmt.Errorf("failed to stop container: %w", err)
 	}
 
-	// Update instance status and remove from tracking maps
-	m.mu.Lock()
-	instance.Status = v1.AgentStatusStopped
-	now := time.Now()
-	instance.FinishedAt = &now
-	delete(m.instances, instanceID)
-	delete(m.byTask, instance.TaskID)
-	delete(m.byContainer, instance.ContainerID)
-	m.mu.Unlock()
+	return nil
+}
 
-	m.logger.Info("agent stopped and removed from tracking",
-		zap.String("instance_id", instanceID),
-		zap.String("task_id", instance.TaskID))
+// stopStandaloneInstance stops a standalone agentctl instance
+func (m *Manager) stopStandaloneInstance(ctx context.Context, instance *AgentInstance) error {
+	if instance.standaloneInstanceID == "" {
+		return nil // No standalone instance to stop
+	}
 
-	// Publish stopped event
-	m.publishEvent(ctx, events.AgentStopped, instance)
+	if err := m.standaloneCtl.DeleteInstance(ctx, instance.standaloneInstanceID); err != nil {
+		return fmt.Errorf("failed to stop standalone instance: %w", err)
+	}
 
 	return nil
 }

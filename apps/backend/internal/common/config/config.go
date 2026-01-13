@@ -16,6 +16,7 @@ type Config struct {
 	Database            DatabaseConfig            `mapstructure:"database"`
 	NATS                NATSConfig                `mapstructure:"nats"`
 	Docker              DockerConfig              `mapstructure:"docker"`
+	Agent               AgentConfig               `mapstructure:"agent"`
 	Auth                AuthConfig                `mapstructure:"auth"`
 	Logging             LoggingConfig             `mapstructure:"logging"`
 	RepositoryDiscovery RepositoryDiscoveryConfig `mapstructure:"repositoryDiscovery"`
@@ -87,6 +88,20 @@ type WorktreeConfig struct {
 	CleanupOnRemove bool   `mapstructure:"cleanupOnRemove"` // Remove worktree directory on task deletion
 }
 
+// AgentConfig holds agent runtime configuration.
+type AgentConfig struct {
+	// Runtime specifies the agent runtime mode: "docker" or "standalone"
+	// - "docker": Agents run in Docker containers (default)
+	// - "standalone": Agents run via standalone agentctl on the host machine
+	Runtime string `mapstructure:"runtime"`
+
+	// StandaloneHost is the host where standalone agentctl is running (default: localhost)
+	StandaloneHost string `mapstructure:"standaloneHost"`
+
+	// StandalonePort is the control port for standalone agentctl (default: 9999)
+	StandalonePort int `mapstructure:"standalonePort"`
+}
+
 // ReadTimeoutDuration returns the read timeout as a time.Duration.
 func (s *ServerConfig) ReadTimeoutDuration() time.Duration {
 	return time.Duration(s.ReadTimeout) * time.Second
@@ -132,6 +147,11 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("docker.tlsVerify", false)
 	v.SetDefault("docker.defaultNetwork", "kandev-network")
 	v.SetDefault("docker.volumeBasePath", "/var/lib/kandev/volumes")
+
+	// Agent defaults
+	v.SetDefault("agent.runtime", "docker")
+	v.SetDefault("agent.standaloneHost", "localhost")
+	v.SetDefault("agent.standalonePort", 9999)
 
 	// Auth defaults
 	v.SetDefault("auth.jwtSecret", "")
