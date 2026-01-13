@@ -105,11 +105,29 @@ func (m *Manager) GetWorktreeInfo(ctx context.Context, taskID string) (path, bra
 	return &wt.Path, &wt.Branch
 }
 
-// Create creates a new worktree for a task, or returns an existing one if WorktreeID is provided.
-// Each call without WorktreeID creates a new worktree with a unique random suffix.
+// Create creates a new worktree for a task, or returns an existing one.
+// First checks if a worktree already exists for the task ID, then by WorktreeID if provided.
+// Only creates a new worktree if none exists.
 func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, error) {
 	if err := req.Validate(); err != nil {
 		return nil, err
+	}
+
+	// First, check if a worktree already exists for this task
+	existing, err := m.GetByTaskID(ctx, req.TaskID)
+	if err == nil && existing != nil {
+		if m.IsValid(existing.Path) {
+			m.logger.Info("reusing existing worktree by task ID",
+				zap.String("worktree_id", existing.ID),
+				zap.String("task_id", req.TaskID),
+				zap.String("path", existing.Path))
+			return existing, nil
+		}
+		// Worktree record exists but directory is invalid - recreate
+		m.logger.Warn("worktree directory invalid, recreating",
+			zap.String("worktree_id", existing.ID),
+			zap.String("task_id", req.TaskID))
+		return m.recreate(ctx, existing, req)
 	}
 
 	// If WorktreeID is provided, try to reuse that specific worktree (session resumption)

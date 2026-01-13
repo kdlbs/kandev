@@ -183,7 +183,7 @@ func main() {
 		}
 
 		// Lifecycle Manager (uses agentctl for agent communication)
-		lifecycleMgr = lifecycle.NewManager(dockerClient, agentRegistry, eventBus, log)
+		lifecycleMgr = lifecycle.NewManager(dockerClient, agentRegistry, eventBus, cfg.Agent, log)
 		lifecycleMgr.SetCredentialsManager(credsMgr)
 
 		if err := lifecycleMgr.Start(ctx); err != nil {

@@ -9,10 +9,20 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/docker"
 	"github.com/kandev/kandev/internal/agent/registry"
+	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+// testAgentConfig returns a default AgentConfig for testing (docker mode)
+func testAgentConfig() config.AgentConfig {
+	return config.AgentConfig{
+		Runtime:        "docker",
+		StandaloneHost: "localhost",
+		StandalonePort: 9999,
+	}
+}
 
 // MockDockerClient implements a mock for the docker.Client for testing
 type MockDockerClient struct {
@@ -137,7 +147,7 @@ func newTestManager(mockDocker *MockDockerClient, eventBus bus.EventBus) *testMa
 	reg := newTestRegistry()
 
 	// Create a real manager first
-	mgr := NewManager(nil, reg, eventBus, log)
+	mgr := NewManager(nil, reg, eventBus, testAgentConfig(), log)
 
 	return &testManager{
 		Manager:    mgr,
@@ -150,7 +160,7 @@ func TestNewManager(t *testing.T) {
 	reg := newTestRegistry()
 	eventBus := &MockEventBus{}
 
-	mgr := NewManager(nil, reg, eventBus, log)
+	mgr := NewManager(nil, reg, eventBus, testAgentConfig(), log)
 
 	if mgr == nil {
 		t.Fatal("expected non-nil manager")
@@ -164,7 +174,7 @@ func TestManager_GetInstance(t *testing.T) {
 	log := newTestLogger()
 	reg := newTestRegistry()
 	eventBus := &MockEventBus{}
-	mgr := NewManager(nil, reg, eventBus, log)
+	mgr := NewManager(nil, reg, eventBus, testAgentConfig(), log)
 
 	// Manually add an instance for testing
 	instance := &AgentInstance{
@@ -202,7 +212,7 @@ func TestManager_GetInstanceByTaskID(t *testing.T) {
 	log := newTestLogger()
 	reg := newTestRegistry()
 	eventBus := &MockEventBus{}
-	mgr := NewManager(nil, reg, eventBus, log)
+	mgr := NewManager(nil, reg, eventBus, testAgentConfig(), log)
 
 	instance := &AgentInstance{
 		ID:          "test-instance-id",
@@ -238,7 +248,7 @@ func TestManager_GetInstanceByContainerID(t *testing.T) {
 	log := newTestLogger()
 	reg := newTestRegistry()
 	eventBus := &MockEventBus{}
-	mgr := NewManager(nil, reg, eventBus, log)
+	mgr := NewManager(nil, reg, eventBus, testAgentConfig(), log)
 
 	instance := &AgentInstance{
 		ID:          "test-instance-id",
@@ -274,7 +284,7 @@ func TestManager_ListInstances(t *testing.T) {
 	log := newTestLogger()
 	reg := newTestRegistry()
 	eventBus := &MockEventBus{}
-	mgr := NewManager(nil, reg, eventBus, log)
+	mgr := NewManager(nil, reg, eventBus, testAgentConfig(), log)
 
 	// Empty list
 	list := mgr.ListInstances()
@@ -298,7 +308,7 @@ func TestManager_UpdateStatus(t *testing.T) {
 	log := newTestLogger()
 	reg := newTestRegistry()
 	eventBus := &MockEventBus{}
-	mgr := NewManager(nil, reg, eventBus, log)
+	mgr := NewManager(nil, reg, eventBus, testAgentConfig(), log)
 
 	instance := &AgentInstance{
 		ID:     "test-instance-id",
@@ -332,7 +342,7 @@ func TestManager_UpdateProgress(t *testing.T) {
 	log := newTestLogger()
 	reg := newTestRegistry()
 	eventBus := &MockEventBus{}
-	mgr := NewManager(nil, reg, eventBus, log)
+	mgr := NewManager(nil, reg, eventBus, testAgentConfig(), log)
 
 	instance := &AgentInstance{
 		ID:       "test-instance-id",
@@ -367,7 +377,7 @@ func TestManager_MarkCompleted_Success(t *testing.T) {
 	log := newTestLogger()
 	reg := newTestRegistry()
 	eventBus := &MockEventBus{}
-	mgr := NewManager(nil, reg, eventBus, log)
+	mgr := NewManager(nil, reg, eventBus, testAgentConfig(), log)
 
 	instance := &AgentInstance{
 		ID:          "test-instance-id",
@@ -408,7 +418,7 @@ func TestManager_MarkCompleted_Failure(t *testing.T) {
 	log := newTestLogger()
 	reg := newTestRegistry()
 	eventBus := &MockEventBus{}
-	mgr := NewManager(nil, reg, eventBus, log)
+	mgr := NewManager(nil, reg, eventBus, testAgentConfig(), log)
 
 	instance := &AgentInstance{
 		ID:          "test-instance-id",
@@ -445,7 +455,7 @@ func TestManager_MarkCompleted_NotFound(t *testing.T) {
 	log := newTestLogger()
 	reg := newTestRegistry()
 	eventBus := &MockEventBus{}
-	mgr := NewManager(nil, reg, eventBus, log)
+	mgr := NewManager(nil, reg, eventBus, testAgentConfig(), log)
 
 	err := mgr.MarkCompleted("non-existent", 0, "")
 	if err == nil {
@@ -457,7 +467,7 @@ func TestManager_RemoveInstance(t *testing.T) {
 	log := newTestLogger()
 	reg := newTestRegistry()
 	eventBus := &MockEventBus{}
-	mgr := NewManager(nil, reg, eventBus, log)
+	mgr := NewManager(nil, reg, eventBus, testAgentConfig(), log)
 
 	instance := &AgentInstance{
 		ID:          "test-instance-id",
@@ -493,7 +503,7 @@ func TestManager_StartStop(t *testing.T) {
 	log := newTestLogger()
 	reg := newTestRegistry()
 	eventBus := &MockEventBus{}
-	mgr := NewManager(nil, reg, eventBus, log)
+	mgr := NewManager(nil, reg, eventBus, testAgentConfig(), log)
 
 	ctx := context.Background()
 
