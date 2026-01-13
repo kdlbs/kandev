@@ -55,7 +55,7 @@ type ToolCallMetadata = {
   result?: string;
 };
 
-function getToolIconElement(toolName?: string, className?: string) {
+function getToolIcon(toolName: string | undefined, className: string) {
   const name = toolName?.toLowerCase() ?? '';
   // Match ACP ToolKind values: read, edit, delete, move, search, execute
   if (name === 'edit' || name.includes('edit') || name.includes('replace') || name.includes('write') || name.includes('save')) {
@@ -99,10 +99,7 @@ function ToolCallCard({ comment }: { comment: Comment }) {
   const args = metadata?.args;
   const result = metadata?.result;
 
-  const toolIcon = getToolIconElement(
-    toolName,
-    'h-4 w-4 text-amber-600 dark:text-amber-400 flex-shrink-0'
-  );
+  const toolIcon = getToolIcon(toolName, 'h-4 w-4 text-amber-600 dark:text-amber-400 flex-shrink-0');
   const hasDetails = args && Object.keys(args).length > 0;
 
   // Extract file path from various possible sources

@@ -25,6 +25,21 @@ import type { Repository, Task } from '@/lib/types/http';
 import { getBackendConfig } from '@/lib/config';
 import { createTask, listRepositories, listRepositoryBranches, updateTask } from '@/lib/http/client';
 
+type AgentProfileOption = {
+  id: string;
+  label: string;
+};
+
+type EnvironmentOption = {
+  id: string;
+  name: string;
+};
+
+type ExecutorOption = {
+  id: string;
+  name: string;
+};
+
 interface TaskCreateDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -67,6 +82,15 @@ export function TaskCreateDialog({
   const [repositoriesLoading, setRepositoriesLoading] = useState(false);
   const [branchesByRepo, setBranchesByRepo] = useState<Record<string, string[]>>({});
   const [branchesLoading, setBranchesLoading] = useState(false);
+  const [agentProfileId, setAgentProfileId] = useState('');
+  const [agentProfiles, setAgentProfiles] = useState<AgentProfileOption[]>([]);
+  const [agentProfilesLoading, setAgentProfilesLoading] = useState(false);
+  const [environmentId, setEnvironmentId] = useState('');
+  const [environments, setEnvironments] = useState<EnvironmentOption[]>([]);
+  const [environmentsLoading, setEnvironmentsLoading] = useState(false);
+  const [executorId, setExecutorId] = useState('');
+  const [executors, setExecutors] = useState<ExecutorOption[]>([]);
+  const [executorsLoading, setExecutorsLoading] = useState(false);
   const descriptionRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
@@ -77,6 +101,9 @@ export function TaskCreateDialog({
     setBranch(initialValues?.branch ?? '');
     setTaskState(initialValues?.state ?? editingTask?.state ?? 'CREATED');
     setStartAgent(false);
+    setAgentProfileId('');
+    setEnvironmentId('');
+    setExecutorId('');
   }, [
     editingTask?.state,
     initialValues?.branch,
@@ -122,6 +149,70 @@ export function TaskCreateDialog({
   }, [branchesByRepo, repositoryId]);
 
   useEffect(() => {
+    if (!open) return;
+    setAgentProfilesLoading(true);
+    fetch(`${getBackendConfig().apiBaseUrl}/api/v1/agents`, { cache: 'no-store' })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => {
+        if (!data?.agents) {
+          setAgentProfiles([]);
+          return;
+        }
+        const options = data.agents.flatMap(
+          (agent: { name: string; profiles: Array<{ id: string; name: string }> }) =>
+            agent.profiles.map((profile) => ({
+              id: profile.id,
+              label: `${agent.name} • ${profile.name}`,
+            }))
+        );
+        setAgentProfiles(options);
+      })
+      .catch(() => {
+        setAgentProfiles([]);
+      })
+      .finally(() => {
+        setAgentProfilesLoading(false);
+      });
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const apiBaseUrl = getBackendConfig().apiBaseUrl;
+    setEnvironmentsLoading(true);
+    setExecutorsLoading(true);
+    Promise.all([
+      fetch(`${apiBaseUrl}/api/v1/environments`, { cache: 'no-store' })
+        .then((response) => (response.ok ? response.json() : null))
+        .then((data) => {
+          if (!data?.environments) return [];
+          return data.environments.map((env: { id: string; name: string }) => ({
+            id: env.id,
+            name: env.name,
+          }));
+        })
+        .catch(() => []),
+      fetch(`${apiBaseUrl}/api/v1/executors`, { cache: 'no-store' })
+        .then((response) => (response.ok ? response.json() : null))
+        .then((data) => {
+          if (!data?.executors) return [];
+          return data.executors.map((executor: { id: string; name: string }) => ({
+            id: executor.id,
+            name: executor.name,
+          }));
+        })
+        .catch(() => []),
+    ])
+      .then(([nextEnvironments, nextExecutors]) => {
+        setEnvironments(nextEnvironments);
+        setExecutors(nextExecutors);
+      })
+      .finally(() => {
+        setEnvironmentsLoading(false);
+        setExecutorsLoading(false);
+      });
+  }, [open]);
+
+  useEffect(() => {
     const textarea = descriptionRef.current;
     if (!textarea) return;
     textarea.style.height = 'auto';
@@ -147,6 +238,7 @@ export function TaskCreateDialog({
         setBranch('');
         setTaskState('CREATED');
         setStartAgent(false);
+        setAgentProfileId('');
         onOpenChange(false);
       }
       return;
@@ -174,6 +266,8 @@ export function TaskCreateDialog({
         repository_url: repository?.local_path ?? '',
         branch: branch || '',
         agent_type: startAgent ? 'default' : '',
+        environment_id: environmentId || undefined,
+        executor_id: executorId || undefined,
         state: targetState,
       });
       onSuccess?.(task, 'create');
@@ -184,6 +278,9 @@ export function TaskCreateDialog({
       setBranch('');
       setTaskState('CREATED');
       setStartAgent(false);
+      setAgentProfileId('');
+      setEnvironmentId('');
+      setExecutorId('');
       onOpenChange(false);
     }
   };
@@ -195,6 +292,9 @@ export function TaskCreateDialog({
     setBranch('');
     setTaskState('CREATED');
     setStartAgent(false);
+    setAgentProfileId('');
+    setEnvironmentId('');
+    setExecutorId('');
     onOpenChange(false);
   };
 
@@ -295,6 +395,77 @@ export function TaskCreateDialog({
                 <SelectItem value="CANCELLED">Cancelled</SelectItem>
               </SelectContent>
             </Select>
+          </div>
+          <div className="space-y-2">
+            <Label>Agent Profile</Label>
+            <Select value={agentProfileId} onValueChange={setAgentProfileId}>
+              <SelectTrigger className="w-full">
+                <SelectValue
+                  placeholder={
+                    agentProfilesLoading
+                      ? 'Loading agent profiles...'
+                      : agentProfiles.length === 0
+                        ? 'No profiles available'
+                        : 'Select agent profile'
+                  }
+                />
+              </SelectTrigger>
+              <SelectContent>
+                {agentProfiles.map((profile) => (
+                  <SelectItem key={profile.id} value={profile.id}>
+                    {profile.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label>Environment</Label>
+              <Select value={environmentId} onValueChange={setEnvironmentId} disabled={isEditMode}>
+                <SelectTrigger className="w-full">
+                  <SelectValue
+                    placeholder={
+                      environmentsLoading
+                        ? 'Loading environments...'
+                        : environments.length === 0
+                          ? 'No environments available'
+                          : 'Select environment'
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  {environments.map((environment) => (
+                    <SelectItem key={environment.id} value={environment.id}>
+                      {environment.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Executor</Label>
+              <Select value={executorId} onValueChange={setExecutorId} disabled={isEditMode}>
+                <SelectTrigger className="w-full">
+                  <SelectValue
+                    placeholder={
+                      executorsLoading
+                        ? 'Loading executors...'
+                        : executors.length === 0
+                          ? 'No executors available'
+                          : 'Select executor'
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  {executors.map((executor) => (
+                    <SelectItem key={executor.id} value={executor.id}>
+                      {executor.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
           <div className="flex items-center gap-2">
             <input

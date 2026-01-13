@@ -193,3 +193,45 @@ export type Comment = {
   requests_input?: boolean;
   created_at: string;
 };
+
+export type AgentProfile = {
+  id: string;
+  agent_id: string;
+  name: string;
+  model: string;
+  auto_approve: boolean;
+  dangerously_skip_permissions: boolean;
+  plan: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type Agent = {
+  id: string;
+  name: string;
+  workspace_id?: string | null;
+  supports_mcp: boolean;
+  mcp_config_path?: string | null;
+  profiles: AgentProfile[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type AgentDiscovery = {
+  name: string;
+  supports_mcp: boolean;
+  mcp_config_path?: string | null;
+  installation_paths: string[];
+  available: boolean;
+  matched_path?: string | null;
+};
+
+export type ListAgentsResponse = {
+  agents: Agent[];
+  total: number;
+};
+
+export type ListAgentDiscoveryResponse = {
+  agents: AgentDiscovery[];
+  total: number;
+};

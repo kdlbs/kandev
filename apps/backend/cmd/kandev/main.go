@@ -29,10 +29,14 @@ import (
 	// Agent Manager packages
 	agentcontroller "github.com/kandev/kandev/internal/agent/controller"
 	"github.com/kandev/kandev/internal/agent/credentials"
+	"github.com/kandev/kandev/internal/agent/discovery"
 	"github.com/kandev/kandev/internal/agent/docker"
 	agenthandlers "github.com/kandev/kandev/internal/agent/handlers"
 	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/agent/registry"
+	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
+	agentsettingshandlers "github.com/kandev/kandev/internal/agent/settings/handlers"
+	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/agent/worktree"
 
 	// Orchestrator packages
@@ -129,6 +133,18 @@ func main() {
 	}
 	defer taskRepo.Close()
 	log.Info("SQLite database initialized", zap.String("db_path", dbPath))
+
+	agentSettingsRepo, err := settingsstore.NewSQLiteRepository(dbPath)
+	if err != nil {
+		log.Fatal("Failed to initialize agent settings store", zap.Error(err), zap.String("db_path", dbPath))
+	}
+	defer agentSettingsRepo.Close()
+
+	discoveryRegistry, err := discovery.LoadRegistry()
+	if err != nil {
+		log.Fatal("Failed to load agent discovery config", zap.Error(err))
+	}
+	agentSettingsController := agentsettingscontroller.NewController(agentSettingsRepo, discoveryRegistry, log)
 
 	taskSvc := taskservice.NewService(
 		taskRepo,
@@ -513,6 +529,9 @@ func main() {
 	taskhandlers.RegisterEnvironmentRoutes(router, gateway.Dispatcher, environmentController, log)
 	taskhandlers.RegisterCommentRoutes(router, gateway.Dispatcher, taskSvc, &orchestratorAdapter{svc: orchestratorSvc}, log)
 	log.Info("Registered Task Service handlers (HTTP + WebSocket)")
+
+	agentsettingshandlers.RegisterRoutes(router, agentSettingsController, gateway.Hub, log)
+	log.Info("Registered Agent Settings handlers (HTTP)")
 
 	// Health check (simple HTTP for load balancers/monitoring)
 	router.GET("/health", func(c *gin.Context) {

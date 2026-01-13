@@ -1,0 +1,99 @@
+{
+  "agents": [
+    {
+      "name": "claude",
+      "supports_mcp": false,
+      "mcp_config_path": {
+        "linux": [],
+        "windows": [],
+        "macos": []
+      },
+      "installation_path": {
+        "linux": ["~/.claude.json"],
+        "windows": ["~/.claude.json"],
+        "macos": ["~/.claude.json"]
+      }
+    },
+    {
+      "name": "gemini",
+      "supports_mcp": false,
+      "mcp_config_path": {
+        "linux": [],
+        "windows": [],
+        "macos": []
+      },
+      "installation_path": {
+        "linux": ["~/.gemini/oauth_creds.json"],
+        "windows": ["~/.gemini/oauth_creds.json"],
+        "macos": ["~/.gemini/oauth_creds.json"]
+      }
+    },
+    {
+      "name": "codex",
+      "supports_mcp": false,
+      "mcp_config_path": {
+        "linux": [],
+        "windows": [],
+        "macos": []
+      },
+      "installation_path": {
+        "linux": ["~/.codex/auth.json"],
+        "windows": ["~/.codex/auth.json"],
+        "macos": ["~/.codex/auth.json"]
+      }
+    },
+    {
+      "name": "auggie",
+      "supports_mcp": false,
+      "mcp_config_path": {
+        "linux": [],
+        "windows": [],
+        "macos": []
+      },
+      "installation_path": {
+        "linux": ["~/.augment/.auggie.json"],
+        "windows": ["~/.augment/.auggie.json"],
+        "macos": ["~/.augment/.auggie.json"]
+      }
+    },
+    {
+      "name": "opencode",
+      "supports_mcp": false,
+      "mcp_config_path": {
+        "linux": [],
+        "windows": [],
+        "macos": []
+      },
+      "installation_path": {
+        "linux": [
+          "$XDG_CONFIG_HOME/opencode/opencode.json",
+          "~/.config/opencode/opencode.json",
+          "$XDG_CONFIG_HOME/opencode",
+          "~/.config/opencode"
+        ],
+        "windows": [
+          "~/AppData/Roaming/opencode/opencode.json",
+          "~/AppData/Roaming/opencode"
+        ],
+        "macos": [
+          "~/Library/Application Support/opencode/opencode.json",
+          "~/Library/Application Support/opencode"
+        ]
+      }
+    },
+    {
+      "name": "copilot",
+      "supports_mcp": true,
+      "mcp_config_path": {
+        "linux": ["~/.copilot/mcp-config.json"],
+        "windows": ["~/.copilot/mcp-config.json"],
+        "macos": ["~/.copilot/mcp-config.json"]
+      },
+      "installation_path": {
+        "linux": ["~/.copilot/mcp-config.json", "~/.copilot/config.json"],
+        "windows": ["~/.copilot/mcp-config.json", "~/.copilot/config.json"],
+        "macos": ["~/.copilot/mcp-config.json", "~/.copilot/config.json"]
+      }
+    }
+  ]
+}

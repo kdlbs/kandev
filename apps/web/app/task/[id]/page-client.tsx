@@ -17,7 +17,7 @@ import { getBackendConfig } from '@/lib/config';
 import { listRepositories, listRepositoryBranches } from '@/lib/http/client';
 import { useRequest } from '@/lib/http/use-request';
 import { getWebSocketClient } from '@/lib/ws/connection';
-import { useAppStoreApi } from '@/components/state-provider';
+import { useAppStore, useAppStoreApi } from '@/components/state-provider';
 
 const AGENTS = [
   { id: 'codex', label: 'Codex' },
@@ -48,6 +48,8 @@ export default function TaskPage({ task: initialTask }: TaskPageClientProps) {
   // Use task from props but allow updates
   const task = initialTask;
 
+  // Track task state from store (kanban.tasks) to determine if agent is running
+  useAppStore((state) => state.kanban.tasks.find((t) => t.id === task?.id));
   useEffect(() => {
     setIsMounted(true);
   }, []);

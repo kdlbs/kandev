@@ -34,11 +34,14 @@ import { listEnvironmentsAction } from '@/app/actions/environments';
 import { listExecutorsAction } from '@/app/actions/executors';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import type { Environment, Executor } from '@/lib/types/http';
+import { getBackendConfig } from '@/lib/config';
+import type { Agent } from '@/lib/types/http';
 import { useAppStore } from '@/components/state-provider';
 
 export function SettingsAppSidebar() {
   const pathname = usePathname();
   const workspaces = useAppStore((state) => state.workspaces.items);
+  const agentProfilesVersion = useAppStore((state) => state.agentProfiles.version);
   const fallbackEnvironments = React.useMemo<Environment[]>(
     () =>
       SETTINGS_DATA.environments.map((env) => ({
@@ -74,8 +77,8 @@ export function SettingsAppSidebar() {
     []
   );
   const [environments, setEnvironments] = React.useState<Environment[]>(fallbackEnvironments);
-  const [agents] = React.useState(SETTINGS_DATA.agents);
   const [executors, setExecutors] = React.useState<Executor[]>(fallbackExecutors);
+  const [agents, setAgents] = React.useState<Agent[]>([]);
 
   React.useEffect(() => {
     const client = getWebSocketClient();
@@ -194,6 +197,22 @@ export function SettingsAppSidebar() {
       unsubscribeExecutorDeleted();
     };
   }, []);
+  React.useEffect(() => {
+    const { apiBaseUrl } = getBackendConfig();
+    const controller = new AbortController();
+    fetch(`${apiBaseUrl}/api/v1/agents`, {
+      cache: 'no-store',
+      signal: controller.signal,
+    })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => {
+        if (data?.agents) {
+          setAgents(data.agents);
+        }
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [agentProfilesVersion, pathname]);
 
   return (
     <Sidebar variant="inset">
@@ -392,18 +411,24 @@ export function SettingsAppSidebar() {
                       </CollapsibleTrigger>
                       <CollapsibleContent>
                         <SidebarMenuSub>
-                          {agents.map((agent) => (
-                            <SidebarMenuSubItem key={agent.id}>
-                              <SidebarMenuSubButton
-                                asChild
-                                isActive={pathname === `/settings/agent/${agent.id}`}
-                              >
-                                <Link href={`/settings/agent/${agent.id}`}>
-                                  <span>{agent.name}</span>
-                                </Link>
-                              </SidebarMenuSubButton>
-                            </SidebarMenuSubItem>
-                          ))}
+                          {agents.flatMap((agent) =>
+                            agent.profiles.map((profile) => {
+                              const encodedAgent = encodeURIComponent(agent.name);
+                              const profilePath = `/settings/agents/${encodedAgent}/profiles/${profile.id}`;
+                              return (
+                              <SidebarMenuSubItem key={profile.id}>
+                                <SidebarMenuSubButton
+                                  asChild
+                                  isActive={pathname === profilePath}
+                                >
+                                  <Link href={profilePath}>
+                                    <span>{profile.name}</span>
+                                  </Link>
+                                </SidebarMenuSubButton>
+                              </SidebarMenuSubItem>
+                            );
+                            })
+                          )}
                         </SidebarMenuSub>
                       </CollapsibleContent>
                     </>

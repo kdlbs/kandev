@@ -869,6 +869,10 @@ Prior versions used a simpler JSON format (not JSON-RPC). For compatibility refe
 6. **Validate messages** - Check for required fields before processing
 7. **Set exit codes** - 0 for success, non-zero for errors
 
+## Local Agent Discovery
+
+Kandev checks a bundled discovery config to detect locally installed agents. Each agent entry lists OS-specific installation paths (Linux, Windows, macOS). At runtime, the backend selects the paths for the current OS, expands environment variables and `~`, and marks the agent as available if any configured file or directory exists.
+
 ### Message Flow
 
 ```

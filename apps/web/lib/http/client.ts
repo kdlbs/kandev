@@ -63,6 +63,8 @@ export async function createTask(
     repository_url?: string;
     branch?: string;
     agent_type?: string;
+    environment_id?: string;
+    executor_id?: string;
     state?: Task['state'];
   }
 ) {

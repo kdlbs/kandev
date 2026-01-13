@@ -34,6 +34,10 @@ export type AgentState = {
   agents: Array<{ id: string; status: 'idle' | 'running' | 'error' }>;
 };
 
+export type AgentProfilesState = {
+	version: number;
+};
+
 export type TerminalState = {
   terminals: Array<{ id: string; output: string[] }>;
 };
@@ -83,6 +87,7 @@ export type AppState = {
   boards: BoardState;
   tasks: TaskState;
   agents: AgentState;
+  agentProfiles: AgentProfilesState;
   terminal: TerminalState;
   diffs: DiffState;
   gitStatus: GitStatusState;
@@ -101,6 +106,7 @@ export type AppState = {
   setCommentsLoading: (loading: boolean) => void;
   setGitStatus: (taskId: string, gitStatus: Omit<GitStatusState, 'taskId'>) => void;
   clearGitStatus: () => void;
+  bumpAgentProfilesVersion: () => void;
 };
 
 export type AppStore = ReturnType<typeof createAppStore>;
@@ -111,6 +117,7 @@ const defaultState: AppState = {
   boards: { items: [], activeId: null },
   tasks: { activeTaskId: null },
   agents: { agents: [] },
+  agentProfiles: { version: 0 },
   terminal: { terminals: [] },
   diffs: { files: [] },
   gitStatus: {
@@ -142,9 +149,28 @@ const defaultState: AppState = {
   setCommentsLoading: () => undefined,
   setGitStatus: () => undefined,
   clearGitStatus: () => undefined,
+  bumpAgentProfilesVersion: () => undefined,
 };
 
-function mergeInitialState(initialState?: Partial<AppState>): Omit<AppState, 'hydrate' | 'setActiveWorkspace' | 'setWorkspaces' | 'setActiveBoard' | 'setBoards' | 'setTerminalOutput' | 'setConnectionStatus' | 'setComments' | 'setCommentsTaskId' | 'addComment' | 'setCommentsLoading' | 'setGitStatus' | 'clearGitStatus'> {
+function mergeInitialState(
+  initialState?: Partial<AppState>
+): Omit<
+  AppState,
+  | 'hydrate'
+  | 'setActiveWorkspace'
+  | 'setWorkspaces'
+  | 'setActiveBoard'
+  | 'setBoards'
+  | 'setTerminalOutput'
+  | 'setConnectionStatus'
+  | 'setComments'
+  | 'setCommentsTaskId'
+  | 'addComment'
+  | 'setCommentsLoading'
+  | 'setGitStatus'
+  | 'clearGitStatus'
+  | 'bumpAgentProfilesVersion'
+> {
   if (!initialState) return defaultState;
   return {
     workspaces: { ...defaultState.workspaces, ...initialState.workspaces },
@@ -152,6 +178,7 @@ function mergeInitialState(initialState?: Partial<AppState>): Omit<AppState, 'hy
     kanban: { ...defaultState.kanban, ...initialState.kanban },
     tasks: { ...defaultState.tasks, ...initialState.tasks },
     agents: { ...defaultState.agents, ...initialState.agents },
+    agentProfiles: { ...defaultState.agentProfiles, ...initialState.agentProfiles },
     terminal: { ...defaultState.terminal, ...initialState.terminal },
     diffs: { ...defaultState.diffs, ...initialState.diffs },
     gitStatus: { ...defaultState.gitStatus, ...initialState.gitStatus },
@@ -173,6 +200,7 @@ export function createAppStore(initialState?: Partial<AppState>) {
           if (state.kanban) Object.assign(draft.kanban, state.kanban);
           if (state.tasks) Object.assign(draft.tasks, state.tasks);
           if (state.agents) Object.assign(draft.agents, state.agents);
+          if (state.agentProfiles) Object.assign(draft.agentProfiles, state.agentProfiles);
           if (state.terminal) Object.assign(draft.terminal, state.terminal);
           if (state.diffs) Object.assign(draft.diffs, state.diffs);
           if (state.connection) Object.assign(draft.connection, state.connection);
@@ -271,6 +299,10 @@ export function createAppStore(initialState?: Partial<AppState>) {
             files: {},
             timestamp: null,
           };
+        }),
+      bumpAgentProfilesVersion: () =>
+        set((draft) => {
+          draft.agentProfiles.version += 1;
         }),
     }))
   );

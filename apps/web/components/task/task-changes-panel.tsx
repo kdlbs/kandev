@@ -35,7 +35,6 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
     }
     return Object.values(gitStatus.files);
   }, [gitStatus.files]);
-
   const diffTargets = useMemo(
     () => (selectedDiffPath ? [selectedDiffPath] : changedFiles.map((file) => file.path)),
     [selectedDiffPath, changedFiles]

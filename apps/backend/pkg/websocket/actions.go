@@ -131,6 +131,10 @@ const (
 	ActionEnvironmentUpdated      = "environment.updated"
 	ActionEnvironmentDeleted      = "environment.deleted"
 
+	ActionAgentProfileDeleted = "agent.profile.deleted"
+	ActionAgentProfileCreated = "agent.profile.created"
+	ActionAgentProfileUpdated = "agent.profile.updated"
+
 	// Permission request actions (agent -> user -> agent)
 	ActionPermissionRequested = "permission.requested" // Agent requesting permission
 	ActionPermissionRespond   = "permission.respond"   // User responding to permission request

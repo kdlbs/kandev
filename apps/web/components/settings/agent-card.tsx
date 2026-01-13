@@ -20,7 +20,7 @@ export function AgentCard({ agent }: AgentCardProps) {
   const agentLabel = AGENT_LABELS[agent.agent] || agent.agent;
 
   return (
-    <Link href={`/settings/agent/${agent.id}`}>
+    <Link href={`/settings/agents/${agent.id}`}>
       <Card className="hover:bg-accent transition-colors cursor-pointer">
         <CardContent className="py-4">
           <div className="flex items-start justify-between">

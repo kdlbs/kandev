@@ -75,7 +75,14 @@ dev:
 	@echo "Backend: http://localhost:8080"
 	@echo "Web app: http://localhost:3000"
 	@echo ""
-	@$(MAKE) -C $(BACKEND_DIR) run & cd $(APPS_DIR) && $(PNPM) --filter @kandev/web dev
+	@bash -c 'set -euo pipefail; \
+	$(MAKE) -C $(BACKEND_DIR) run & backend_pid=$$!; \
+	cd $(APPS_DIR); $(PNPM) --filter @kandev/web dev & web_pid=$$!; \
+	cleanup() { kill $$backend_pid $$web_pid 2>/dev/null || true; }; \
+	trap cleanup EXIT INT TERM; \
+	wait -n $$backend_pid $$web_pid; status=$$?; \
+	if [ $$status -eq 0 ]; then status=1; fi; \
+	exit $$status'
 
 .PHONY: dev-backend
 dev-backend:

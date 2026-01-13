@@ -1,6 +1,7 @@
 'use client';
 
 import { IconArrowLeft } from '@tabler/icons-react';
+import { usePathname } from 'next/navigation';
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -12,6 +13,11 @@ import { SettingsAppSidebar } from '@/components/settings/settings-app-sidebar';
 import { TooltipProvider } from '@kandev/ui/tooltip';
 
 export function SettingsLayoutClient({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  const isAgentDetail = pathname.startsWith('/settings/agents/') && pathname !== '/settings/agents';
+  const breadcrumbLabel = isAgentDetail ? 'Agents' : 'Home';
+  const breadcrumbHref = isAgentDetail ? '/settings/agents' : '/';
+
   return (
     <TooltipProvider>
       <SidebarProvider>
@@ -22,9 +28,9 @@ export function SettingsLayoutClient({ children }: { children: React.ReactNode }
               <Breadcrumb>
                 <BreadcrumbList>
                   <BreadcrumbItem>
-                    <BreadcrumbLink href="/" className="flex items-center gap-2">
+                    <BreadcrumbLink href={breadcrumbHref} className="flex items-center gap-2">
                       <IconArrowLeft className="h-4 w-4" />
-                      Home
+                      {breadcrumbLabel}
                     </BreadcrumbLink>
                   </BreadcrumbItem>
                 </BreadcrumbList>

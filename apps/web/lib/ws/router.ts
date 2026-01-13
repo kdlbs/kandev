@@ -378,5 +378,14 @@ export function registerWsHandlers(store: StoreApi<AppState>) {
         timestamp: payload.timestamp,
       });
     },
+    'agent.profile.deleted': () => {
+      store.getState().bumpAgentProfilesVersion();
+    },
+    'agent.profile.created': () => {
+      store.getState().bumpAgentProfilesVersion();
+    },
+    'agent.profile.updated': () => {
+      store.getState().bumpAgentProfilesVersion();
+    },
   };
 }
