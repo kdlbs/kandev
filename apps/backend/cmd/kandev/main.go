@@ -218,8 +218,9 @@ func main() {
 		log.Info("Starting agentctl for standalone mode...")
 
 		agentctlLauncher = launcher.New(launcher.Config{
-			Host: cfg.Agent.StandaloneHost,
-			Port: cfg.Agent.StandalonePort,
+			Host:                   cfg.Agent.StandaloneHost,
+			Port:                   cfg.Agent.StandalonePort,
+			AutoApprovePermissions: true, // Always auto-approve in standalone mode (reindex, etc.)
 		}, log)
 
 		if err := agentctlLauncher.Start(ctx); err != nil {
