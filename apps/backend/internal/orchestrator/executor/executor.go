@@ -58,6 +58,7 @@ type AgentManagerClient interface {
 // LaunchAgentRequest contains parameters for launching an agent
 type LaunchAgentRequest struct {
 	TaskID          string
+	TaskTitle       string // Human-readable task title for semantic worktree naming
 	AgentType       string
 	RepositoryURL   string
 	Branch          string
@@ -276,6 +277,7 @@ func (e *Executor) Execute(ctx context.Context, task *v1.Task) (*TaskExecution, 
 	// Create a LaunchAgentRequest from the task
 	req := &LaunchAgentRequest{
 		TaskID:          task.ID,
+		TaskTitle:       task.Title,
 		AgentType:       *task.AgentType,
 		TaskDescription: task.Description,
 		Priority:        task.Priority,

@@ -49,6 +49,11 @@ type CreateRequest struct {
 	// TaskID is the unique task identifier (required).
 	TaskID string
 
+	// TaskTitle is the human-readable task title (optional).
+	// If provided, it will be used to generate semantic worktree/branch names.
+	// The title is sanitized and truncated to 20 characters.
+	TaskTitle string
+
 	// RepositoryID is the repository identifier (required).
 	RepositoryID string
 

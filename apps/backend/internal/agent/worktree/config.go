@@ -3,7 +3,9 @@ package worktree
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"unicode"
 )
 
 // Config holds configuration for the worktree manager.
@@ -75,5 +77,68 @@ func (c *Config) WorktreePath(worktreeID string) (string, error) {
 // Format: {prefix}{taskID}_{suffix} e.g. kandev/abc123_xy7z
 func (c *Config) BranchName(taskID, suffix string) string {
 	return c.BranchPrefix + taskID + "_" + suffix
+}
+
+// SemanticBranchName returns a branch name using a semantic name derived from task title.
+// Format: {prefix}{semanticName}_{suffix} e.g. kandev/fix-login-bug_ab12cd34
+func (c *Config) SemanticBranchName(semanticName, suffix string) string {
+	return c.BranchPrefix + semanticName + "_" + suffix
+}
+
+// SanitizeForBranch converts a task title into a valid git branch name component.
+// It:
+// - Converts to lowercase
+// - Replaces spaces and special characters with hyphens
+// - Removes consecutive hyphens
+// - Truncates to maxLen characters
+// - Removes leading/trailing hyphens
+func SanitizeForBranch(title string, maxLen int) string {
+	if title == "" {
+		return ""
+	}
+
+	// Convert to lowercase
+	result := strings.ToLower(title)
+
+	// Replace any character that's not alphanumeric with a hyphen
+	// Git branch names allow: a-z, A-Z, 0-9, /, ., _, -
+	// We'll use only alphanumeric and hyphens for cleaner names
+	var sb strings.Builder
+	for _, r := range result {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			sb.WriteRune(r)
+		} else {
+			sb.WriteRune('-')
+		}
+	}
+	result = sb.String()
+
+	// Remove consecutive hyphens
+	re := regexp.MustCompile(`-+`)
+	result = re.ReplaceAllString(result, "-")
+
+	// Remove leading and trailing hyphens
+	result = strings.Trim(result, "-")
+
+	// Truncate to maxLen
+	if len(result) > maxLen {
+		result = result[:maxLen]
+		// Remove trailing hyphen after truncation
+		result = strings.TrimRight(result, "-")
+	}
+
+	return result
+}
+
+// SemanticWorktreeName generates a semantic worktree directory name from a task title.
+// Format: {sanitizedTitle}_{suffix} e.g. fix-login-bug_ab12cd34
+// The title is truncated to 20 characters before adding the suffix.
+func SemanticWorktreeName(taskTitle, suffix string) string {
+	semanticName := SanitizeForBranch(taskTitle, 20)
+	if semanticName == "" {
+		// Fallback to just suffix if title is empty or all special chars
+		return suffix
+	}
+	return semanticName + "_" + suffix
 }
 
