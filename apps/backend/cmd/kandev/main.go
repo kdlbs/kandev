@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"net/http"
 	"os"
@@ -28,6 +29,7 @@ import (
 
 	// Agent Manager packages
 	agentcontroller "github.com/kandev/kandev/internal/agent/controller"
+	"github.com/kandev/kandev/internal/agent/agentctl/launcher"
 	"github.com/kandev/kandev/internal/agent/credentials"
 	"github.com/kandev/kandev/internal/agent/discovery"
 	"github.com/kandev/kandev/internal/agent/docker"
@@ -57,12 +59,58 @@ import (
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
+// Command-line flags
+var (
+	flagAgentRuntime = flag.String("agent-runtime", "", "Agent runtime mode: 'docker' or 'standalone'")
+	flagPort         = flag.Int("port", 0, "HTTP server port (default: 8080)")
+	flagLogLevel     = flag.String("log-level", "", "Log level: debug, info, warn, error")
+	flagConfigPath   = flag.String("config", "", "Path to config file")
+	flagHelp         = flag.Bool("help", false, "Show help message")
+	flagVersion      = flag.Bool("version", false, "Show version information")
+)
+
+func init() {
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage: kandev [options]\n\n")
+		fmt.Fprintf(os.Stderr, "Kandev is an AI-powered development task orchestrator.\n\n")
+		fmt.Fprintf(os.Stderr, "Options:\n")
+		flag.PrintDefaults()
+		fmt.Fprintf(os.Stderr, "\nExamples:\n")
+		fmt.Fprintf(os.Stderr, "  kandev                              # Start with Docker runtime (default)\n")
+		fmt.Fprintf(os.Stderr, "  kandev -agent-runtime=standalone    # Start with standalone agentctl\n")
+		fmt.Fprintf(os.Stderr, "  kandev -port=9000 -log-level=debug  # Custom port and log level\n")
+	}
+}
+
 func main() {
+	flag.Parse()
+
+	if *flagHelp {
+		flag.Usage()
+		os.Exit(0)
+	}
+
+	if *flagVersion {
+		fmt.Println("kandev version 0.1.0")
+		os.Exit(0)
+	}
+
 	// 1. Load configuration
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to load configuration: %v\n", err)
 		os.Exit(1)
+	}
+
+	// Apply command-line flag overrides (flags take precedence over config/env)
+	if *flagAgentRuntime != "" {
+		cfg.Agent.Runtime = *flagAgentRuntime
+	}
+	if *flagPort > 0 {
+		cfg.Server.Port = *flagPort
+	}
+	if *flagLogLevel != "" {
+		cfg.Logging.Level = *flagLogLevel
 	}
 
 	// 2. Initialize logger
@@ -162,13 +210,54 @@ func main() {
 	log.Info("ACP messages will be stored as comments")
 
 	// ============================================
+	// AGENTCTL LAUNCHER (for standalone mode)
+	// ============================================
+	var agentctlLauncher *launcher.Launcher
+
+	if cfg.Agent.Runtime == "standalone" {
+		log.Info("Starting agentctl for standalone mode...")
+
+		agentctlLauncher = launcher.New(launcher.Config{
+			Host: cfg.Agent.StandaloneHost,
+			Port: cfg.Agent.StandalonePort,
+		}, log)
+
+		if err := agentctlLauncher.Start(ctx); err != nil {
+			log.Fatal("Failed to start agentctl subprocess", zap.Error(err))
+		}
+
+		log.Info("agentctl started successfully",
+			zap.Int("port", cfg.Agent.StandalonePort))
+
+		// Ensure agentctl is stopped on panic (in addition to Pdeathsig for crashes)
+		defer func() {
+			if r := recover(); r != nil {
+				log.Error("panic recovered, stopping agentctl", zap.Any("panic", r))
+				stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer stopCancel()
+				if err := agentctlLauncher.Stop(stopCtx); err != nil {
+					log.Error("failed to stop agentctl on panic", zap.Error(err))
+				}
+				panic(r) // Re-panic after cleanup
+			}
+		}()
+	}
+
+	// ============================================
 	// AGENT MANAGER
 	// ============================================
 	var lifecycleMgr *lifecycle.Manager
 	var agentRegistry *registry.Registry
 
-	if dockerClient != nil {
-		log.Info("Initializing Agent Manager...")
+	// Agent manager is enabled if:
+	// - Docker mode and Docker is available, OR
+	// - Standalone mode (agentctl was started above)
+	agentManagerEnabled := (cfg.Agent.Runtime == "docker" && dockerClient != nil) ||
+		cfg.Agent.Runtime == "standalone"
+
+	if agentManagerEnabled {
+		log.Info("Initializing Agent Manager...",
+			zap.String("runtime", cfg.Agent.Runtime))
 
 		// Agent Registry
 		agentRegistry = registry.NewRegistry(log)
@@ -190,9 +279,11 @@ func main() {
 			log.Fatal("Failed to start lifecycle manager", zap.Error(err))
 		}
 
-		log.Info("Agent Manager initialized", zap.Int("agent_types", len(agentRegistry.List())))
+		log.Info("Agent Manager initialized",
+			zap.String("runtime", cfg.Agent.Runtime),
+			zap.Int("agent_types", len(agentRegistry.List())))
 	} else {
-		log.Info("Agent Manager disabled (no Docker)")
+		log.Info("Agent Manager disabled (no Docker and not in standalone mode)")
 	}
 
 	// ============================================
@@ -573,8 +664,10 @@ func main() {
 	// GRACEFUL SHUTDOWN
 	// ============================================
 	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	sig := <-quit
+
+	log.Info("Received shutdown signal", zap.String("signal", sig.String()))
 
 	log.Info("Shutting down Kandev...")
 	cancel()
@@ -593,6 +686,14 @@ func main() {
 	if lifecycleMgr != nil {
 		if err := lifecycleMgr.Stop(); err != nil {
 			log.Error("Lifecycle manager stop error", zap.Error(err))
+		}
+	}
+
+	// Stop agentctl subprocess (must be after lifecycle manager to allow cleanup)
+	if agentctlLauncher != nil {
+		log.Info("Stopping agentctl subprocess...")
+		if err := agentctlLauncher.Stop(shutdownCtx); err != nil {
+			log.Error("agentctl stop error", zap.Error(err))
 		}
 	}
 
