@@ -144,9 +144,18 @@ func (c *RepositoryController) ListRepositoryBranches(ctx context.Context, req d
 	if err != nil {
 		return dto.RepositoryBranchesResponse{}, err
 	}
+	// Convert service.Branch to dto.BranchDTO
+	dtoBranches := make([]dto.BranchDTO, len(branches))
+	for i, branch := range branches {
+		dtoBranches[i] = dto.BranchDTO{
+			Name:   branch.Name,
+			Type:   branch.Type,
+			Remote: branch.Remote,
+		}
+	}
 	return dto.RepositoryBranchesResponse{
-		Branches: branches,
-		Total:    len(branches),
+		Branches: dtoBranches,
+		Total:    len(dtoBranches),
 	}, nil
 }
 

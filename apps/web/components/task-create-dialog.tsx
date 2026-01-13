@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useRef, useState, FormEvent } from 'react';
+import Link from 'next/link';
+import { IconSettings } from '@tabler/icons-react';
 import {
   Dialog,
   DialogContent,
@@ -16,13 +18,24 @@ import { Button } from '@kandev/ui/button';
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from '@kandev/ui/select';
+import { Combobox } from './combobox';
+import { Badge } from '@kandev/ui/badge';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@kandev/ui/tooltip';
-import type { Repository, Task } from '@/lib/types/http';
+import type { Repository, Task, Branch } from '@/lib/types/http';
 import { getBackendConfig } from '@/lib/config';
+import {
+  DEFAULT_LOCAL_ENVIRONMENT_KIND,
+  DEFAULT_LOCAL_EXECUTOR_TYPE,
+  formatUserHomePath,
+  selectPreferredBranch,
+  truncateRepoPath,
+} from '@/lib/utils';
 import { createTask, listRepositories, listRepositoryBranches, updateTask } from '@/lib/http/client';
 
 type AgentProfileOption = {
@@ -33,11 +46,13 @@ type AgentProfileOption = {
 type EnvironmentOption = {
   id: string;
   name: string;
+  kind: string;
 };
 
 type ExecutorOption = {
   id: string;
   name: string;
+  type: string;
 };
 
 interface TaskCreateDialogProps {
@@ -76,11 +91,10 @@ export function TaskCreateDialog({
   const [description, setDescription] = useState(initialValues?.description ?? '');
   const [repositoryId, setRepositoryId] = useState(initialValues?.repositoryId ?? '');
   const [branch, setBranch] = useState(initialValues?.branch ?? '');
-  const [taskState, setTaskState] = useState<Task['state']>(initialValues?.state ?? 'CREATED');
   const [startAgent, setStartAgent] = useState(false);
   const [repositories, setRepositories] = useState<Repository[]>([]);
   const [repositoriesLoading, setRepositoriesLoading] = useState(false);
-  const [branchesByRepo, setBranchesByRepo] = useState<Record<string, string[]>>({});
+  const [branchesByRepo, setBranchesByRepo] = useState<Record<string, Branch[]>>({});
   const [branchesLoading, setBranchesLoading] = useState(false);
   const [agentProfileId, setAgentProfileId] = useState('');
   const [agentProfiles, setAgentProfiles] = useState<AgentProfileOption[]>([]);
@@ -91,6 +105,7 @@ export function TaskCreateDialog({
   const [executorId, setExecutorId] = useState('');
   const [executors, setExecutors] = useState<ExecutorOption[]>([]);
   const [executorsLoading, setExecutorsLoading] = useState(false);
+  const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
   const descriptionRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
@@ -99,17 +114,14 @@ export function TaskCreateDialog({
     setDescription(initialValues?.description ?? '');
     setRepositoryId(initialValues?.repositoryId ?? '');
     setBranch(initialValues?.branch ?? '');
-    setTaskState(initialValues?.state ?? editingTask?.state ?? 'CREATED');
     setStartAgent(false);
     setAgentProfileId('');
     setEnvironmentId('');
     setExecutorId('');
   }, [
-    editingTask?.state,
     initialValues?.branch,
     initialValues?.description,
     initialValues?.repositoryId,
-    initialValues?.state,
     initialValues?.title,
     open,
   ]);
@@ -120,8 +132,9 @@ export function TaskCreateDialog({
     listRepositories(getBackendConfig().apiBaseUrl, workspaceId)
       .then((response) => {
         setRepositories(response.repositories);
-        if (editingTask?.description && !description) {
-          setDescription(editingTask.description);
+        // Auto-select if only one repository
+        if (response.repositories.length === 1) {
+          setRepositoryId(response.repositories[0].id);
         }
       })
       .catch(() => {
@@ -130,15 +143,32 @@ export function TaskCreateDialog({
       .finally(() => {
         setRepositoriesLoading(false);
       });
-  }, [description, editingTask?.description, open, workspaceId]);
+  }, [open, workspaceId]);
 
   useEffect(() => {
     if (!repositoryId) return;
-    if (branchesByRepo[repositoryId]) return;
+    if (branchesByRepo[repositoryId]) {
+      if (!branch) {
+        const preferredBranch = selectPreferredBranch(branchesByRepo[repositoryId]);
+        if (preferredBranch) {
+          setBranch(preferredBranch);
+          return;
+        }
+      }
+      return;
+    }
     setBranchesLoading(true);
     listRepositoryBranches(getBackendConfig().apiBaseUrl, repositoryId)
       .then((response) => {
         setBranchesByRepo((prev) => ({ ...prev, [repositoryId]: response.branches }));
+
+        if (!branch) {
+          const preferredBranch = selectPreferredBranch(response.branches);
+          if (preferredBranch) {
+            setBranch(preferredBranch);
+            return;
+          }
+        }
       })
       .catch(() => {
         setBranchesByRepo((prev) => ({ ...prev, [repositoryId]: [] }));
@@ -146,7 +176,7 @@ export function TaskCreateDialog({
       .finally(() => {
         setBranchesLoading(false);
       });
-  }, [branchesByRepo, repositoryId]);
+  }, [branchesByRepo, repositoryId, branch]);
 
   useEffect(() => {
     if (!open) return;
@@ -176,6 +206,12 @@ export function TaskCreateDialog({
   }, [open]);
 
   useEffect(() => {
+    if (!open || agentProfileId || agentProfiles.length === 0) return;
+    if (isEditMode && agentProfiles.length > 1) return;
+    setAgentProfileId(agentProfiles[0].id);
+  }, [open, isEditMode, agentProfileId, agentProfiles]);
+
+  useEffect(() => {
     if (!open) return;
     const apiBaseUrl = getBackendConfig().apiBaseUrl;
     setEnvironmentsLoading(true);
@@ -185,9 +221,10 @@ export function TaskCreateDialog({
         .then((response) => (response.ok ? response.json() : null))
         .then((data) => {
           if (!data?.environments) return [];
-          return data.environments.map((env: { id: string; name: string }) => ({
+          return data.environments.map((env: { id: string; name: string; kind: string }) => ({
             id: env.id,
             name: env.name,
+            kind: env.kind,
           }));
         })
         .catch(() => []),
@@ -195,9 +232,10 @@ export function TaskCreateDialog({
         .then((response) => (response.ok ? response.json() : null))
         .then((data) => {
           if (!data?.executors) return [];
-          return data.executors.map((executor: { id: string; name: string }) => ({
+          return data.executors.map((executor: { id: string; name: string; type: string }) => ({
             id: executor.id,
             name: executor.name,
+            type: executor.type,
           }));
         })
         .catch(() => []),
@@ -211,6 +249,22 @@ export function TaskCreateDialog({
         setExecutorsLoading(false);
       });
   }, [open]);
+
+  useEffect(() => {
+    if (!open || isEditMode || environmentId || environments.length === 0) return;
+    const localEnvironment = environments.find(
+      (environment) => environment.kind === DEFAULT_LOCAL_ENVIRONMENT_KIND
+    );
+    setEnvironmentId(localEnvironment?.id ?? environments[0].id);
+  }, [open, isEditMode, environmentId, environments]);
+
+  useEffect(() => {
+    if (!open || isEditMode || executorId || executors.length === 0) return;
+    const localExecutor = executors.find(
+      (executor) => executor.type === DEFAULT_LOCAL_EXECUTOR_TYPE
+    );
+    setExecutorId(localExecutor?.id ?? executors[0].id);
+  }, [open, isEditMode, executorId, executors]);
 
   useEffect(() => {
     const textarea = descriptionRef.current;
@@ -228,7 +282,6 @@ export function TaskCreateDialog({
         const updatedTask = await updateTask(getBackendConfig().apiBaseUrl, editingTask.id, {
           title: trimmedTitle,
           description: description.trim(),
-          state: taskState,
         });
         onSuccess?.(updatedTask, 'edit');
       } finally {
@@ -236,7 +289,6 @@ export function TaskCreateDialog({
         setDescription('');
         setRepositoryId('');
         setBranch('');
-        setTaskState('CREATED');
         setStartAgent(false);
         setAgentProfileId('');
         onOpenChange(false);
@@ -248,7 +300,7 @@ export function TaskCreateDialog({
     const columnId = editingTask?.columnId ?? defaultColumnId;
     if (!columnId) return;
     let targetColumnId = columnId;
-    let targetState: Task['state'] | undefined = taskState ?? 'CREATED';
+    let targetState: Task['state'] = 'CREATED';
     if (startAgent && !isEditMode) {
       const progressColumn = columns.find((column) =>
         column.title.toLowerCase().includes('progress')
@@ -277,7 +329,6 @@ export function TaskCreateDialog({
       setDescription('');
       setRepositoryId('');
       setBranch('');
-      setTaskState('CREATED');
       setStartAgent(false);
       setAgentProfileId('');
       setEnvironmentId('');
@@ -291,7 +342,6 @@ export function TaskCreateDialog({
     setDescription('');
     setRepositoryId('');
     setBranch('');
-    setTaskState('CREATED');
     setStartAgent(false);
     setAgentProfileId('');
     setEnvironmentId('');
@@ -301,194 +351,234 @@ export function TaskCreateDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-none w-[900px] sm:!max-w-none">
+      <DialogContent className="max-w-none w-[900px] sm:!max-w-none max-h-[85vh] flex flex-col">
         <DialogHeader>
           <DialogTitle>{submitLabel === 'Create' ? 'Create Task' : 'Edit Task'}</DialogTitle>
         </DialogHeader>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-2">
-            <Label>Title</Label>
-            <Input
-              autoFocus
-              required
-              placeholder="Enter task title..."
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label>Prompt</Label>
-            <Textarea
-              ref={descriptionRef}
-              placeholder="Write a prompt for the agent..."
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              rows={2}
-              className="min-h-[96px] resize-none"
-            />
-          </div>
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-2">
-              <Label>Repository</Label>
-              <Select
-                value={repositoryId}
-                onValueChange={(value) => {
-                  setRepositoryId(value);
-                  setBranch('');
-                }}
-                disabled={isEditMode}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder={repositoriesLoading ? 'Loading repositories...' : 'Select repository'} />
-                </SelectTrigger>
-                <SelectContent>
-                  {repositories.map((repo) => (
-                    <SelectItem key={repo.id} value={repo.id}>
-                      {repo.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+        <form onSubmit={handleSubmit} className="flex flex-col gap-4 overflow-hidden">
+          <div className="flex-1 space-y-4 overflow-y-auto pr-1">
+            <div>
+              <Input
+                autoFocus
+                required
+                placeholder="Enter task title..."
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+              />
             </div>
-            <div className="space-y-2">
-              <Label>Base Branch</Label>
-              <Select value={branch} onValueChange={setBranch} disabled={isEditMode || !repositoryId}>
-                <SelectTrigger className="w-full">
-                  <SelectValue
-                    placeholder={
-                      !repositoryId
-                        ? 'Select repository first'
-                        : branchesLoading
-                          ? 'Loading branches...'
-                          : 'Select branch'
-                    }
+            <div>
+              <Textarea
+                ref={descriptionRef}
+                placeholder="Write a prompt for the agent..."
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                rows={2}
+                className="min-h-[96px] max-h-[240px] resize-y overflow-auto"
+              />
+            </div>
+            <div className="grid gap-4 md:grid-cols-3">
+              <div>
+                {repositories.length === 0 && !repositoriesLoading ? (
+                  <div className="flex items-center justify-center h-10 px-3 py-2 text-sm border border-input rounded-md bg-background">
+                    <span className="text-muted-foreground mr-2">No repositories found.</span>
+                  <Link href="/settings/workspace" className="text-primary hover:underline">
+                    Add repository
+                  </Link>
+                  </div>
+                ) : (
+                  <Combobox
+                    options={repositories.map((repo) => ({
+                      value: repo.id,
+                      label: repo.name,
+                      renderLabel: () => (
+                        <span className="flex min-w-0 flex-1 items-center gap-2">
+                          <span className="shrink-0">{repo.name}</span>
+                          <Badge
+                            variant="secondary"
+                            className="text-xs text-muted-foreground max-w-[220px] min-w-0 truncate ml-auto"
+                            title={formatUserHomePath(repo.local_path)}
+                          >
+                            {truncateRepoPath(repo.local_path)}
+                          </Badge>
+                        </span>
+                      ),
+                    }))}
+                    value={repositoryId}
+                    onValueChange={(value) => {
+                      setRepositoryId(value);
+                      setBranch('');
+                    }}
+                    placeholder={repositoriesLoading ? 'Loading repositories...' : 'Select repository'}
+                    searchPlaceholder="Search repositories..."
+                    emptyMessage="No repository found."
+                    disabled={isEditMode || repositoriesLoading}
+                    dropdownLabel="Repository"
                   />
-                </SelectTrigger>
-                <SelectContent>
-                  {(branchesByRepo[repositoryId] ?? []).map((branchName) => (
-                    <SelectItem key={branchName} value={branchName}>
-                      {branchName}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">
-                A worktree will be created from this base branch.
-              </p>
-            </div>
-          </div>
-          <div className="space-y-2">
-            <Label>State</Label>
-            <Select value={taskState} onValueChange={(value) => setTaskState(value as Task['state'])}>
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Select state" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="CREATED">Created</SelectItem>
-                <SelectItem value="SCHEDULING">Scheduling</SelectItem>
-                <SelectItem value="TODO">Todo</SelectItem>
-                <SelectItem value="IN_PROGRESS">In Progress</SelectItem>
-                <SelectItem value="REVIEW">Review</SelectItem>
-                <SelectItem value="BLOCKED">Blocked</SelectItem>
-                <SelectItem value="WAITING_FOR_INPUT">Waiting for input</SelectItem>
-                <SelectItem value="COMPLETED">Completed</SelectItem>
-                <SelectItem value="FAILED">Failed</SelectItem>
-                <SelectItem value="CANCELLED">Cancelled</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-2">
-            <Label>Agent Profile</Label>
-            <Select value={agentProfileId} onValueChange={setAgentProfileId}>
-              <SelectTrigger className="w-full">
-                <SelectValue
+                )}
+              </div>
+              <div>
+                <Combobox
+                  options={(branchesByRepo[repositoryId] ?? []).map((branchObj) => {
+                    const displayName = branchObj.type === 'remote' && branchObj.remote
+                      ? `${branchObj.remote}/${branchObj.name}`
+                      : branchObj.name;
+                    // Use display name as unique value since it includes remote prefix
+                    return {
+                      value: displayName,
+                      label: displayName,
+                      renderLabel: () => (
+                        <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
+                          <span className="truncate">{displayName}</span>
+                          <Badge variant={branchObj.type === 'local' ? 'default' : 'secondary'} className="text-xs">
+                            {branchObj.type}
+                          </Badge>
+                        </span>
+                      ),
+                    };
+                  })}
+                  value={branch}
+                  onValueChange={(displayName) => {
+                    // Store the full display name (e.g., "origin/master" or "master")
+                    setBranch(displayName);
+                  }}
                   placeholder={
-                    agentProfilesLoading
-                      ? 'Loading agent profiles...'
-                      : agentProfiles.length === 0
-                        ? 'No profiles available'
-                        : 'Select agent profile'
+                    !repositoryId
+                      ? 'Select repository first'
+                      : branchesLoading
+                        ? 'Loading branches...'
+                        : 'Select branch'
                   }
+                  searchPlaceholder="Search branches..."
+                  emptyMessage="No branch found."
+                  disabled={isEditMode || !repositoryId || branchesLoading}
+                  dropdownLabel="Branch"
                 />
-              </SelectTrigger>
-              <SelectContent>
-                {agentProfiles.map((profile) => (
-                  <SelectItem key={profile.id} value={profile.id}>
-                    {profile.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-2">
-              <Label>Environment</Label>
-              <Select value={environmentId} onValueChange={setEnvironmentId} disabled={isEditMode}>
-                <SelectTrigger className="w-full">
-                  <SelectValue
+              </div>
+              <div>
+                {agentProfiles.length === 0 && !agentProfilesLoading ? (
+                  <div className="flex items-center justify-center h-10 px-3 py-2 text-sm border border-input rounded-md bg-background">
+                    <span className="text-muted-foreground mr-2">No agents found.</span>
+                  <Link href="/settings/agents" className="text-primary hover:underline">
+                    Add agent
+                  </Link>
+                  </div>
+                ) : (
+                  <Combobox
+                    options={agentProfiles.map((profile) => ({
+                      value: profile.id,
+                      label: profile.label,
+                    }))}
+                    value={agentProfileId}
+                    onValueChange={setAgentProfileId}
                     placeholder={
-                      environmentsLoading
-                        ? 'Loading environments...'
-                        : environments.length === 0
-                          ? 'No environments available'
-                          : 'Select environment'
+                      agentProfilesLoading
+                        ? 'Loading agents...'
+                        : agentProfiles.length === 0
+                          ? 'No agents available'
+                          : 'Select agent'
                     }
+                    searchPlaceholder="Search agents..."
+                    emptyMessage="No agent found."
+                    dropdownLabel="Agent profile"
                   />
-                </SelectTrigger>
-                <SelectContent>
-                  {environments.map((environment) => (
-                    <SelectItem key={environment.id} value={environment.id}>
-                      {environment.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                )}
+              </div>
             </div>
-            <div className="space-y-2">
-              <Label>Executor</Label>
-              <Select value={executorId} onValueChange={setExecutorId} disabled={isEditMode}>
-                <SelectTrigger className="w-full">
-                  <SelectValue
-                    placeholder={
-                      executorsLoading
-                        ? 'Loading executors...'
-                        : executors.length === 0
-                          ? 'No executors available'
-                          : 'Select executor'
-                    }
-                  />
-                </SelectTrigger>
-                <SelectContent>
-                  {executors.map((executor) => (
-                    <SelectItem key={executor.id} value={executor.id}>
-                      {executor.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <div className="flex items-center justify-end gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowAdvancedSettings(!showAdvancedSettings)}
+                className="text-muted-foreground"
+              >
+                <IconSettings className="h-4 w-4 mr-1" />
+                {showAdvancedSettings ? 'Hide' : 'More Options'}
+              </Button>
             </div>
+            {showAdvancedSettings && (
+              <div className="grid gap-4 md:grid-cols-2">
+                <div>
+                  <Select value={environmentId} onValueChange={setEnvironmentId} disabled={isEditMode}>
+                    <SelectTrigger className="w-full">
+                      <SelectValue
+                        placeholder={
+                          environmentsLoading
+                            ? 'Loading environments...'
+                            : environments.length === 0
+                              ? 'No environments available'
+                              : 'Select environment'
+                        }
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectGroup>
+                        <SelectLabel>Environment</SelectLabel>
+                        {environments.map((environment) => (
+                          <SelectItem key={environment.id} value={environment.id}>
+                            {environment.name}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Select value={executorId} onValueChange={setExecutorId} disabled={isEditMode}>
+                    <SelectTrigger className="w-full">
+                      <SelectValue
+                        placeholder={
+                          executorsLoading
+                            ? 'Loading executors...'
+                            : executors.length === 0
+                              ? 'No executors available'
+                              : 'Select executor'
+                        }
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectGroup>
+                        <SelectLabel>Executor</SelectLabel>
+                        {executors.map((executor) => (
+                          <SelectItem key={executor.id} value={executor.id}>
+                            {executor.name}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
           </div>
-          <div className="flex items-center gap-2">
-            <input
-              id="start-agent"
-              type="checkbox"
-              checked={startAgent}
-              onChange={(e) => setStartAgent(e.target.checked)}
-              disabled={isEditMode}
-              className="h-4 w-4 rounded border border-input text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            />
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Label htmlFor="start-agent" className="cursor-pointer">
-                    Start Agent
-                  </Label>
-                </TooltipTrigger>
-                <TooltipContent>Start the agent on task creation.</TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          </div>
-          <DialogFooter>
+          <DialogFooter className="border-t border-border pt-3">
+            <div className="flex flex-1 items-center gap-3 text-sm text-muted-foreground">
+              <div className="flex items-center gap-2">
+                <input
+                  id="start-agent"
+                  type="checkbox"
+                  checked={startAgent}
+                  onChange={(e) => setStartAgent(e.target.checked)}
+                  disabled={isEditMode}
+                  className="h-4 w-4 rounded border border-input text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                />
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Label htmlFor="start-agent" className="cursor-pointer">
+                        Start Agent
+                      </Label>
+                    </TooltipTrigger>
+                    <TooltipContent>Start the agent on task creation.</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </div>
+              {startAgent && (
+                <span className="text-xs text-muted-foreground">
+                  A worktree will be created from this base branch.
+                </span>
+              )}
+            </div>
             <DialogClose asChild>
               <Button type="button" variant="outline" onClick={handleCancel}>
                 Cancel

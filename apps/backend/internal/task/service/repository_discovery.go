@@ -22,6 +22,12 @@ type LocalRepository struct {
 	DefaultBranch string
 }
 
+type Branch struct {
+	Name   string
+	Type   string // "local" or "remote"
+	Remote string // remote name for remote branches
+}
+
 type RepositoryDiscoveryResult struct {
 	Roots        []string
 	Repositories []LocalRepository
@@ -117,7 +123,7 @@ func (s *Service) ValidateLocalRepositoryPath(ctx context.Context, path string) 
 	}, nil
 }
 
-func (s *Service) ListRepositoryBranches(ctx context.Context, repoID string) ([]string, error) {
+func (s *Service) ListRepositoryBranches(ctx context.Context, repoID string) ([]Branch, error) {
 	repo, err := s.repo.GetRepository(ctx, repoID)
 	if err != nil {
 		return nil, err
@@ -338,32 +344,74 @@ func resolveGitDir(repoPath string) (string, error) {
 	return filepath.Clean(filepath.Join(repoPath, gitDir)), nil
 }
 
-func listGitBranches(repoPath string) ([]string, error) {
+func listGitBranches(repoPath string) ([]Branch, error) {
 	gitDir, err := resolveGitDir(repoPath)
 	if err != nil {
 		return nil, err
 	}
-	branches := make(map[string]struct{})
+	branchMap := make(map[string]Branch)
 
-	refsRoot := filepath.Join(gitDir, "refs", "heads")
-	_ = filepath.WalkDir(refsRoot, func(path string, d fs.DirEntry, err error) error {
+	// List local branches from refs/heads
+	localRefsRoot := filepath.Join(gitDir, "refs", "heads")
+	_ = filepath.WalkDir(localRefsRoot, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
 		if d.IsDir() {
 			return nil
 		}
-		rel, err := filepath.Rel(refsRoot, path)
+		rel, err := filepath.Rel(localRefsRoot, path)
 		if err != nil {
 			return nil
 		}
 		if rel == "" || rel == "." {
 			return nil
 		}
-		branches[filepath.ToSlash(rel)] = struct{}{}
+		name := filepath.ToSlash(rel)
+		branchMap[name] = Branch{
+			Name: name,
+			Type: "local",
+		}
 		return nil
 	})
 
+	// List remote branches from refs/remotes
+	remoteRefsRoot := filepath.Join(gitDir, "refs", "remotes")
+	_ = filepath.WalkDir(remoteRefsRoot, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(remoteRefsRoot, path)
+		if err != nil {
+			return nil
+		}
+		if rel == "" || rel == "." {
+			return nil
+		}
+		fullPath := filepath.ToSlash(rel)
+		parts := strings.SplitN(fullPath, "/", 2)
+		if len(parts) < 2 {
+			return nil
+		}
+		remoteName := parts[0]
+		branchName := parts[1]
+		// Skip HEAD references
+		if branchName == "HEAD" {
+			return nil
+		}
+		key := "remotes/" + fullPath
+		branchMap[key] = Branch{
+			Name:   branchName,
+			Type:   "remote",
+			Remote: remoteName,
+		}
+		return nil
+	})
+
+	// Read packed-refs file for additional branches
 	packedRefs := filepath.Join(gitDir, "packed-refs")
 	if content, err := os.ReadFile(packedRefs); err == nil {
 		lines := strings.Split(string(content), "\n")
@@ -378,18 +426,55 @@ func listGitBranches(repoPath string) ([]string, error) {
 			}
 			ref := parts[1]
 			if strings.HasPrefix(ref, "refs/heads/") {
-				branches[strings.TrimPrefix(ref, "refs/heads/")] = struct{}{}
+				name := strings.TrimPrefix(ref, "refs/heads/")
+				if _, exists := branchMap[name]; !exists {
+					branchMap[name] = Branch{
+						Name: name,
+						Type: "local",
+					}
+				}
+			} else if strings.HasPrefix(ref, "refs/remotes/") {
+				fullPath := strings.TrimPrefix(ref, "refs/remotes/")
+				remoteParts := strings.SplitN(fullPath, "/", 2)
+				if len(remoteParts) < 2 {
+					continue
+				}
+				remoteName := remoteParts[0]
+				branchName := remoteParts[1]
+				if branchName == "HEAD" {
+					continue
+				}
+				key := "remotes/" + fullPath
+				if _, exists := branchMap[key]; !exists {
+					branchMap[key] = Branch{
+						Name:   branchName,
+						Type:   "remote",
+						Remote: remoteName,
+					}
+				}
 			}
 		}
 	}
 
-	if len(branches) == 0 {
+	if len(branchMap) == 0 {
 		return nil, fmt.Errorf("no branches found")
 	}
-	result := make([]string, 0, len(branches))
-	for name := range branches {
-		result = append(result, name)
+
+	result := make([]Branch, 0, len(branchMap))
+	for _, branch := range branchMap {
+		result = append(result, branch)
 	}
-	sort.Strings(result)
+
+	// Sort: local branches first, then remote branches, alphabetically within each group
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Type != result[j].Type {
+			return result[i].Type == "local"
+		}
+		if result[i].Type == "remote" && result[i].Remote != result[j].Remote {
+			return result[i].Remote < result[j].Remote
+		}
+		return result[i].Name < result[j].Name
+	})
+
 	return result, nil
 }

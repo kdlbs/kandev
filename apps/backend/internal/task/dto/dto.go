@@ -151,9 +151,15 @@ type ListEnvironmentsResponse struct {
 	Total        int              `json:"total"`
 }
 
+type BranchDTO struct {
+	Name   string `json:"name"`
+	Type   string `json:"type"`   // "local" or "remote"
+	Remote string `json:"remote"` // remote name (e.g., "origin") for remote branches
+}
+
 type RepositoryBranchesResponse struct {
-	Branches []string `json:"branches"`
-	Total    int      `json:"total"`
+	Branches []BranchDTO `json:"branches"`
+	Total    int         `json:"total"`
 }
 
 type LocalRepositoryDTO struct {

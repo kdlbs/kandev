@@ -26,11 +26,12 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@kandev/ui/select';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
 import { useAppStore } from '@/components/state-provider';
+import type { Branch } from '@/lib/types/http';
 
 type TaskTopBarProps = {
   taskTitle?: string;
   baseBranch?: string;
-  branches?: string[];
+  branches?: Branch[];
   branchesLoading?: boolean;
   onStartAgent?: () => void;
   onStopAgent?: () => void;
@@ -155,8 +156,8 @@ const TaskTopBar = memo(function TaskTopBar({
                 </SelectItem>
               ) : (
                 branches.map((branch) => (
-                  <SelectItem key={branch} value={branch}>
-                    {branch}
+                  <SelectItem key={`${branch.type}-${branch.remote || ''}-${branch.name}`} value={branch.name}>
+                    {branch.type === 'remote' && branch.remote ? `${branch.remote}/${branch.name}` : branch.name}
                   </SelectItem>
                 ))
               )}

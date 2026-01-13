@@ -160,8 +160,14 @@ export type RepositoryPathValidationResponse = {
   message?: string;
 };
 
+export type Branch = {
+  name: string;
+  type: 'local' | 'remote';
+  remote?: string; // remote name (e.g., "origin") for remote branches
+};
+
 export type RepositoryBranchesResponse = {
-  branches: string[];
+  branches: Branch[];
   total: number;
 };
 

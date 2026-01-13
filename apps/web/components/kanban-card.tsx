@@ -10,7 +10,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@kandev/ui/dropdown-menu';
-import { cn } from '@/lib/utils';
+import { cn, extractRepoName } from '@/lib/utils';
 
 export interface Task {
   id: string;
@@ -30,9 +30,14 @@ interface KanbanCardProps {
 }
 
 function KanbanCardLayout({ task, className }: KanbanCardProps & { className?: string }) {
+  const repoName = extractRepoName(task.repositoryUrl);
+
   return (
     <Card size="sm" className={cn('w-full py-0', className)}>
       <CardContent className="px-2 py-1">
+        {repoName && (
+          <p className="text-xs text-muted-foreground leading-tight mb-1 truncate">{repoName}</p>
+        )}
         <p className="text-sm font-medium leading-tight">{task.title}</p>
         {task.description && (
           <p className="text-xs text-muted-foreground mt-1 leading-tight">{task.description}</p>
@@ -46,6 +51,8 @@ export function KanbanCard({ task, onClick, onEdit, onDelete }: KanbanCardProps)
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: task.id,
   });
+
+  const repoName = extractRepoName(task.repositoryUrl);
 
   const statusIcon = (() => {
     switch (task.state) {
@@ -89,6 +96,9 @@ export function KanbanCard({ task, onClick, onEdit, onDelete }: KanbanCardProps)
       {...attributes}
     >
       <CardContent className="px-2 py-1">
+        {repoName && (
+          <p className="text-xs text-muted-foreground leading-tight mb-1 truncate">{repoName}</p>
+        )}
         <div className="flex items-start justify-between gap-2">
           <p className="text-sm font-medium leading-tight">{task.title}</p>
           <div className="flex items-center gap-2">

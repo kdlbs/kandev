@@ -7,7 +7,7 @@
     "build": "NODE_ENV=production next build",
     "start": "NODE_ENV=production next start",
     "lint": "eslint",
-    "test": "echo \"No tests yet\" && exit 0"
+    "test": "vitest run"
   },
   "dependencies": {
     "@kandev/theme": "workspace:*",
@@ -44,6 +44,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.1.1",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^1.6.0"
   }
 }
