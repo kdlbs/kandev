@@ -1,29 +1,10 @@
 'use client';
 
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
-import {
-  DndContext,
-  DragEndEvent,
-  DragOverlay,
-  DragStartEvent,
-  PointerSensor,
-  useSensor,
-  useSensors,
-} from '@dnd-kit/core';
-import { KanbanColumn, Column } from './kanban-column';
-import { KanbanCardPreview, Task } from './kanban-card';
-import { ConnectionStatus } from './connection-status';
-import { Button } from '@kandev/ui/button';
-import { IconPlus, IconSettings } from '@tabler/icons-react';
+import { DragEndEvent, DragStartEvent } from '@dnd-kit/core';
+import { Column } from './kanban-column';
+import { Task } from './kanban-card';
 import { TaskCreateDialog } from './task-create-dialog';
-import Link from 'next/link';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@kandev/ui/select';
 import { useRouter } from 'next/navigation';
 import { useAppStore, useAppStoreApi } from '@/components/state-provider';
 import { getWebSocketClient } from '@/lib/ws/connection';
@@ -32,6 +13,10 @@ import { getBackendConfig } from '@/lib/config';
 import { deleteTask, fetchBoardSnapshot, moveTask } from '@/lib/http/client';
 import { snapshotToState } from '@/lib/ssr/mapper';
 import type { Task as BackendTask } from '@/lib/types/http';
+import { filterTasksByRepositories } from '@/lib/kanban/filters';
+import { useUserDisplaySettings } from '@/hooks/use-user-display-settings';
+import { KanbanBoardHeader } from './kanban-board-header';
+import { KanbanBoardGrid } from './kanban-board-grid';
 
 export function KanbanBoard() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -46,19 +31,38 @@ export function KanbanBoard() {
   const setActiveBoard = useAppStore((state) => state.setActiveBoard);
   const setBoards = useAppStore((state) => state.setBoards);
   const store = useAppStoreApi();
+  const {
+    settings: userSettings,
+    commitSettings,
+    repositories,
+    repositoriesLoading,
+    allRepositoriesSelected,
+    selectedRepositoryPaths,
+  } = useUserDisplaySettings({
+    workspaceId: workspaceState.activeId,
+    boardId: boardsState.activeId,
+    onWorkspaceChange: (nextWorkspaceId) => {
+      setActiveWorkspace(nextWorkspaceId);
+      if (nextWorkspaceId) {
+        router.push(`/?workspaceId=${nextWorkspaceId}`);
+      } else {
+        router.push('/');
+      }
+    },
+    onBoardChange: (nextBoardId) => {
+      setActiveBoard(nextBoardId);
+      if (nextBoardId) {
+        const workspaceId = boardsState.items.find((board) => board.id === nextBoardId)?.workspaceId;
+        const workspaceParam = workspaceId ? `&workspaceId=${workspaceId}` : '';
+        router.push(`/?boardId=${nextBoardId}${workspaceParam}`);
+      }
+    },
+  });
 
   const isMounted = useSyncExternalStore(
     () => () => { },
     () => true,
     () => false
-  );
-
-  const sensors = useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: {
-        distance: 8,
-      },
-    })
   );
 
   const backendColumns = useMemo<Column[]>(
@@ -81,11 +85,15 @@ export function KanbanBoard() {
         state: task.state,
         description: task.description,
         position: task.position,
+        repositoryUrl: task.repositoryUrl,
       })),
     [kanban.tasks]
   );
   const activeColumns = kanban.boardId ? backendColumns : [];
-  const visibleTasks = backendTasks;
+  const visibleTasks = useMemo(
+    () => filterTasksByRepositories(backendTasks, selectedRepositoryPaths),
+    [backendTasks, selectedRepositoryPaths]
+  );
   const activeTask = useMemo(
     () => visibleTasks.find((task) => task.id === activeTaskId) ?? null,
     [visibleTasks, activeTaskId]
@@ -155,6 +163,7 @@ export function KanbanBoard() {
               description: task.description ?? undefined,
               position: task.position ?? 0,
               state: task.state,
+              repositoryUrl: task.repository_url ?? undefined,
             },
           ],
         },
@@ -173,6 +182,7 @@ export function KanbanBoard() {
                 columnId: task.column_id ?? item.columnId,
                 position: task.position ?? item.position,
                 state: task.state ?? item.state,
+                repositoryUrl: task.repository_url ?? item.repositoryUrl,
               }
             : item
         ),
@@ -204,15 +214,6 @@ export function KanbanBoard() {
     }
   };
 
-  const getTasksForColumn = (columnId: string) => {
-    return visibleTasks
-      .filter((task) => task.columnId === columnId)
-      .map((task) => {
-        const position = kanban.tasks.find((item) => item.id === task.id)?.position ?? 0;
-        return { ...task, position };
-      })
-      .sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
-  };
 
   useEffect(() => {
     const workspaceId = workspaceState.activeId;
@@ -228,9 +229,19 @@ export function KanbanBoard() {
           name: board.name,
         }));
         setBoards(boards);
-        const nextBoardId = boards[0]?.id ?? null;
-        setActiveBoard(nextBoardId);
-        if (!nextBoardId) {
+        const desiredBoardId =
+          (userSettings.boardId && boards.some((board) => board.id === userSettings.boardId)
+            ? userSettings.boardId
+            : boards[0]?.id) ?? null;
+        setActiveBoard(desiredBoardId);
+        if (userSettings.loaded && desiredBoardId !== userSettings.boardId) {
+          commitSettings({
+            workspaceId,
+            boardId: desiredBoardId,
+            repositoryIds: userSettings.repositoryIds,
+          });
+        }
+        if (!desiredBoardId) {
           store.getState().hydrate({
             kanban: { boardId: null, columns: [], tasks: [] },
           });
@@ -239,7 +250,16 @@ export function KanbanBoard() {
       .catch(() => {
         // Ignore board list errors for now.
       });
-  }, [setActiveBoard, setBoards, store, workspaceState.activeId]);
+  }, [
+    commitSettings,
+    setActiveBoard,
+    setBoards,
+    store,
+    userSettings.boardId,
+    userSettings.loaded,
+    userSettings.repositoryIds,
+    workspaceState.activeId,
+  ]);
 
   useEffect(() => {
     if (!boardsState.activeId) return;
@@ -254,80 +274,68 @@ export function KanbanBoard() {
   }, [boardsState.activeId, store]);
 
 
+
   if (!isMounted) {
     return <div className="h-screen w-full bg-background" />;
   }
 
   return (
     <div className="h-screen w-full flex flex-col bg-background">
-      <header className="flex items-center justify-between p-4 pb-3">
-        <div className="flex items-center gap-3">
-          <Link href="/" className="text-2xl font-bold hover:opacity-80">
-            KanDev.ai
-          </Link>
-          <ConnectionStatus />
-          <Select
-            value={workspaceState.activeId ?? ''}
-            onValueChange={(value) => {
-              setActiveWorkspace(value || null);
-              if (value) {
-                router.push(`/?workspaceId=${value}`);
-              }
-            }}
-          >
-            <SelectTrigger className="w-[200px]">
-              <SelectValue placeholder="Select workspace" />
-            </SelectTrigger>
-            <SelectContent>
-              {workspaceState.items.map((workspace) => (
-                <SelectItem key={workspace.id} value={workspace.id}>
-                  {workspace.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="flex items-center gap-3">
-          <Select
-            value={boardsState.activeId ?? ''}
-            onValueChange={(value) => {
-              setActiveBoard(value || null);
-              if (value) {
-                const workspaceId = boardsState.items.find((board) => board.id === value)?.workspaceId;
-                const workspaceParam = workspaceId ? `&workspaceId=${workspaceId}` : '';
-                router.push(`/?boardId=${value}${workspaceParam}`);
-              }
-            }}
-          >
-            <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder="Select board" />
-            </SelectTrigger>
-            <SelectContent>
-              {boardsState.items.map((board) => (
-                <SelectItem key={board.id} value={board.id}>
-                  {board.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Button
-            onClick={() => {
-              setEditingTask(null);
-              setIsDialogOpen(true);
-            }}
-            className="cursor-pointer"
-          >
-            <IconPlus className="h-4 w-4" />
-            Add task
-          </Button>
-          <Link href="/settings" className="cursor-pointer">
-            <Button variant="outline" className="cursor-pointer">
-              <IconSettings className="h-4 w-4 mr-2" />
-              Settings
-            </Button>
-          </Link>
-        </div>
-      </header>
+      <KanbanBoardHeader
+        workspaces={workspaceState.items}
+        boards={boardsState.items}
+        activeWorkspaceId={workspaceState.activeId}
+        activeBoardId={boardsState.activeId}
+        repositories={repositories}
+        repositoriesLoading={repositoriesLoading}
+        allRepositoriesSelected={allRepositoriesSelected}
+        selectedRepositoryId={userSettings.repositoryIds[0] ?? null}
+        onWorkspaceChange={(nextWorkspaceId) => {
+          setActiveWorkspace(nextWorkspaceId);
+          if (nextWorkspaceId) {
+            router.push(`/?workspaceId=${nextWorkspaceId}`);
+          } else {
+            router.push('/');
+          }
+          commitSettings({
+            workspaceId: nextWorkspaceId,
+            boardId: null,
+            repositoryIds: [],
+          });
+        }}
+        onBoardChange={(nextBoardId) => {
+          setActiveBoard(nextBoardId);
+          if (nextBoardId) {
+            const workspaceId = boardsState.items.find((board) => board.id === nextBoardId)?.workspaceId;
+            const workspaceParam = workspaceId ? `&workspaceId=${workspaceId}` : '';
+            router.push(`/?boardId=${nextBoardId}${workspaceParam}`);
+          }
+          commitSettings({
+            workspaceId: userSettings.workspaceId,
+            boardId: nextBoardId,
+            repositoryIds: userSettings.repositoryIds,
+          });
+        }}
+        onRepositoryChange={(value) => {
+          if (value === 'all') {
+            commitSettings({
+              workspaceId: userSettings.workspaceId,
+              boardId: userSettings.boardId,
+              repositoryIds: [],
+            });
+            return;
+          }
+          commitSettings({
+            workspaceId: userSettings.workspaceId,
+            boardId: userSettings.boardId,
+            repositoryIds: [value],
+          });
+        }}
+        onAddTask={() => {
+          setEditingTask(null);
+          setIsDialogOpen(true);
+        }}
+      />
       <TaskCreateDialog
         key={isDialogOpen ? 'open' : 'closed'}
         open={isDialogOpen}
@@ -364,39 +372,17 @@ export function KanbanBoard() {
         }
         submitLabel={editingTask ? 'Update' : 'Create'}
       />
-      <DndContext
-        sensors={sensors}
+      <KanbanBoardGrid
+        columns={activeColumns}
+        tasks={visibleTasks}
+        onOpenTask={handleOpenTask}
+        onEditTask={handleEditTask}
+        onDeleteTask={handleDeleteTask}
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
         onDragCancel={handleDragCancel}
-      >
-        <div className="flex-1 min-h-0 px-4 pb-4">
-          {activeColumns.length === 0 ? (
-            <div className="h-full rounded-lg border border-dashed border-border/60 flex items-center justify-center text-sm text-muted-foreground">
-              No boards available yet.
-            </div>
-          ) : (
-            <div
-              className="grid gap-[3px] rounded-lg overflow-hidden h-full p-[2px]"
-              style={{ gridTemplateColumns: `repeat(${activeColumns.length}, minmax(0, 1fr))` }}
-            >
-              {activeColumns.map((column) => (
-                <KanbanColumn
-                  key={column.id}
-                  column={column}
-                  tasks={getTasksForColumn(column.id)}
-                  onOpenTask={handleOpenTask}
-                  onEditTask={handleEditTask}
-                  onDeleteTask={handleDeleteTask}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-        <DragOverlay dropAnimation={null}>
-          {activeTask ? <KanbanCardPreview task={activeTask} /> : null}
-        </DragOverlay>
-      </DndContext>
+        activeTask={activeTask}
+      />
     </div>
   );
 }

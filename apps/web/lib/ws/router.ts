@@ -39,6 +39,7 @@ export function registerWsHandlers(store: StoreApi<AppState>) {
           description: message.payload.description,
           position: message.payload.position ?? 0,
           state: message.payload.state,
+          repositoryUrl: message.payload.repository_url,
         };
         return {
           ...state,
@@ -63,6 +64,7 @@ export function registerWsHandlers(store: StoreApi<AppState>) {
           description: message.payload.description,
           position: message.payload.position ?? 0,
           state: message.payload.state,
+          repositoryUrl: message.payload.repository_url,
         };
         return {
           ...state,
@@ -106,6 +108,7 @@ export function registerWsHandlers(store: StoreApi<AppState>) {
           description: message.payload.description,
           position: message.payload.position ?? 0,
           state: message.payload.state,
+          repositoryUrl: message.payload.repository_url,
         };
         console.log('[WS Router] Next task:', nextTask);
         return {
@@ -386,6 +389,18 @@ export function registerWsHandlers(store: StoreApi<AppState>) {
     },
     'agent.profile.updated': () => {
       store.getState().bumpAgentProfilesVersion();
+    },
+    'user.settings.updated': (message: BackendMessageMap['user.settings.updated']) => {
+      const repositoryIds = Array.from(new Set(message.payload.repository_ids ?? [])).sort();
+      store.setState((state) => ({
+        ...state,
+        userSettings: {
+          workspaceId: message.payload.workspace_id || null,
+          boardId: message.payload.board_id || null,
+          repositoryIds,
+          loaded: true,
+        },
+      }));
     },
   };
 }

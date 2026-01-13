@@ -1,4 +1,10 @@
-import type { BoardSnapshot, ListBoardsResponse, ListWorkspacesResponse, Task } from '@/lib/types/http';
+import type {
+  BoardSnapshot,
+  ListBoardsResponse,
+  ListWorkspacesResponse,
+  Task,
+  UserSettingsResponse,
+} from '@/lib/types/http';
 import { getBackendConfig } from '@/lib/config';
 
 const { apiBaseUrl: API_BASE_URL } = getBackendConfig();
@@ -29,4 +35,8 @@ export async function fetchBoardSnapshot(boardId: string): Promise<BoardSnapshot
 
 export async function fetchTask(taskId: string): Promise<Task> {
   return fetchJson<Task>(`${API_BASE_URL}/api/v1/tasks/${taskId}`);
+}
+
+export async function fetchUserSettings(): Promise<UserSettingsResponse> {
+  return fetchJson<UserSettingsResponse>(`${API_BASE_URL}/api/v1/user/settings`);
 }

@@ -21,6 +21,8 @@ type Hub struct {
 
 	// Clients subscribed to specific tasks (for ACP notifications)
 	taskSubscribers map[string]map[*Client]bool
+	// Clients subscribed to specific users (for user settings notifications)
+	userSubscribers map[string]map[*Client]bool
 
 	// Channels for client management
 	register   chan *Client
@@ -44,6 +46,7 @@ func NewHub(dispatcher *ws.Dispatcher, log *logger.Logger) *Hub {
 	return &Hub{
 		clients:         make(map[*Client]bool),
 		taskSubscribers: make(map[string]map[*Client]bool),
+		userSubscribers: make(map[string]map[*Client]bool),
 		register:        make(chan *Client),
 		unregister:      make(chan *Client),
 		broadcast:       make(chan *ws.Message, 256),
@@ -105,6 +108,14 @@ func (h *Hub) removeClient(client *Client) {
 				delete(clients, client)
 				if len(clients) == 0 {
 					delete(h.taskSubscribers, taskID)
+				}
+			}
+		}
+		for userID := range client.userSubscriptions {
+			if clients, ok := h.userSubscribers[userID]; ok {
+				delete(clients, client)
+				if len(clients) == 0 {
+					delete(h.userSubscribers, userID)
 				}
 			}
 		}
@@ -180,6 +191,37 @@ func (h *Hub) BroadcastToTask(taskID string, msg *ws.Message) {
 	}
 }
 
+// BroadcastToUser sends a notification to clients subscribed to a specific user
+func (h *Hub) BroadcastToUser(userID string, msg *ws.Message) {
+	data, err := json.Marshal(msg)
+	if err != nil {
+		h.logger.Error("Failed to marshal message", zap.Error(err))
+		return
+	}
+
+	h.mu.RLock()
+	clients := h.userSubscribers[userID]
+	numClients := len(clients)
+	h.mu.RUnlock()
+
+	h.logger.Debug("BroadcastToUser",
+		zap.String("user_id", userID),
+		zap.String("action", msg.Action),
+		zap.Int("subscriber_count", numClients))
+
+	for client := range clients {
+		select {
+		case client.send <- data:
+			h.logger.Debug("Sent message to client",
+				zap.String("client_id", client.ID),
+				zap.String("action", msg.Action))
+		default:
+			h.logger.Warn("Client buffer full, dropping message",
+				zap.String("client_id", client.ID))
+		}
+	}
+}
+
 // SubscribeToTask subscribes a client to task notifications
 func (h *Hub) SubscribeToTask(client *Client, taskID string) {
 	h.mu.Lock()
@@ -194,6 +236,36 @@ func (h *Hub) SubscribeToTask(client *Client, taskID string) {
 	h.logger.Debug("Client subscribed to task",
 		zap.String("client_id", client.ID),
 		zap.String("task_id", taskID))
+}
+
+// SubscribeToUser subscribes a client to user notifications
+func (h *Hub) SubscribeToUser(client *Client, userID string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	if _, ok := h.userSubscribers[userID]; !ok {
+		h.userSubscribers[userID] = make(map[*Client]bool)
+	}
+	h.userSubscribers[userID][client] = true
+	client.userSubscriptions[userID] = true
+
+	h.logger.Debug("Client subscribed to user",
+		zap.String("client_id", client.ID),
+		zap.String("user_id", userID))
+}
+
+// UnsubscribeFromUser unsubscribes a client from user notifications
+func (h *Hub) UnsubscribeFromUser(client *Client, userID string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	delete(client.userSubscriptions, userID)
+	if clients, ok := h.userSubscribers[userID]; ok {
+		delete(clients, client)
+		if len(clients) == 0 {
+			delete(h.userSubscribers, userID)
+		}
+	}
 }
 
 // UnsubscribeFromTask unsubscribes a client from task notifications

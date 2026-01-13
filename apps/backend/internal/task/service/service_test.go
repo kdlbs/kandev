@@ -96,6 +96,7 @@ func TestService_CreateTask(t *testing.T) {
 		Title:       "Test Task",
 		Description: "A test task",
 		Priority:    5,
+		RepositoryURL: "/tmp/repo",
 	}
 
 	task, err := svc.CreateTask(ctx, req)

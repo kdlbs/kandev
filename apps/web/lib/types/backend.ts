@@ -27,7 +27,8 @@ export type BackendMessageType =
   | 'environment.deleted'
   | 'agent.profile.deleted'
   | 'agent.profile.created'
-  | 'agent.profile.updated';
+  | 'agent.profile.updated'
+  | 'user.settings.updated';
 
 export type BackendMessage<T extends BackendMessageType, P> = {
   id?: string;
@@ -61,6 +62,7 @@ export type TaskEventPayload = {
   state?: TaskState;
   priority?: number;
   position?: number;
+  repository_url?: string;
 };
 
 export type AgentUpdatePayload = {
@@ -187,6 +189,14 @@ export type AgentProfileChangedPayload = {
   agent_id: string;
 };
 
+export type UserSettingsUpdatedPayload = {
+  user_id: string;
+  workspace_id: string;
+  board_id: string;
+  repository_ids: string[];
+  updated_at?: string;
+};
+
 export type BackendMessageMap = {
   'kanban.update': BackendMessage<'kanban.update', KanbanUpdatePayload>;
   'task.created': BackendMessage<'task.created', TaskEventPayload>;
@@ -217,4 +227,5 @@ export type BackendMessageMap = {
   'agent.profile.deleted': BackendMessage<'agent.profile.deleted', AgentProfileDeletedPayload>;
   'agent.profile.created': BackendMessage<'agent.profile.created', AgentProfileChangedPayload>;
   'agent.profile.updated': BackendMessage<'agent.profile.updated', AgentProfileChangedPayload>;
+  'user.settings.updated': BackendMessage<'user.settings.updated', UserSettingsUpdatedPayload>;
 };

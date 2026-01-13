@@ -89,6 +89,8 @@ const (
 	// Subscription actions
 	ActionTaskSubscribe   = "task.subscribe"
 	ActionTaskUnsubscribe = "task.unsubscribe"
+	ActionUserSubscribe   = "user.subscribe"
+	ActionUserUnsubscribe = "user.unsubscribe"
 
 	// Comment actions
 	ActionCommentAdd  = "comment.add"
@@ -138,6 +140,11 @@ const (
 	// Permission request actions (agent -> user -> agent)
 	ActionPermissionRequested = "permission.requested" // Agent requesting permission
 	ActionPermissionRespond   = "permission.respond"   // User responding to permission request
+
+	// User actions
+	ActionUserGet            = "user.get"
+	ActionUserSettingsUpdate = "user.settings.update"
+	ActionUserSettingsUpdated = "user.settings.updated"
 )
 
 // Error codes

@@ -5,6 +5,14 @@
 INSERT OR REPLACE INTO workspaces (id, name, description, owner_id, created_at, updated_at)
 VALUES ('default', 'Default Workspace', 'Your default workspace', '', datetime('now'), datetime('now'));
 
+-- Default user and settings
+INSERT OR REPLACE INTO users (id, email, settings, created_at, updated_at)
+VALUES ('default-user', 'default@kandev.local', '{"workspace_id":"default","board_id":"dev-board-1","repository_ids":[]}', datetime('now'), datetime('now'));
+
+-- Default repository (for task creation)
+INSERT OR REPLACE INTO repositories (id, workspace_id, name, source_type, local_path, provider, provider_repo_id, provider_owner, provider_name, default_branch, setup_script, cleanup_script, created_at, updated_at)
+VALUES ('default-repo', 'default', 'kandev', 'local', '$KANDEV_REPO_PATH', '', '', '', '', 'main', '', '', datetime('now'), datetime('now'));
+
 -- Sample board
 INSERT OR REPLACE INTO boards (id, workspace_id, name, description, created_at, updated_at)
 VALUES 
@@ -33,12 +41,12 @@ VALUES
 INSERT OR REPLACE INTO tasks (id, board_id, column_id, title, description, state, priority, position, agent_type, repository_url, branch, metadata, created_at, updated_at)
 VALUES
     -- Backlog tasks (no agent assigned)
-    ('task-001', 'dev-board-1', 'col-backlog', 'Add dark mode support', 'Implement a dark theme toggle for the UI', 'TODO', 3, 0, '', '', '', '{}', datetime('now'), datetime('now')),
-    ('task-002', 'dev-board-1', 'col-backlog', 'Implement search functionality', 'Add full-text search for tasks across all boards', 'TODO', 2, 1, '', '', '', '{}', datetime('now'), datetime('now')),
+    ('task-001', 'dev-board-1', 'col-backlog', 'Add dark mode support', 'Implement a dark theme toggle for the UI', 'TODO', 3, 0, '', '$KANDEV_REPO_PATH', '', '{}', datetime('now'), datetime('now')),
+    ('task-002', 'dev-board-1', 'col-backlog', 'Implement search functionality', 'Add full-text search for tasks across all boards', 'TODO', 2, 1, '', '$KANDEV_REPO_PATH', '', '{}', datetime('now'), datetime('now')),
 
     -- To Do tasks (agent assigned with repository)
     ('task-003', 'dev-board-1', 'col-todo', 'Fix WebSocket reconnection', 'Handle WebSocket disconnects gracefully and auto-reconnect', 'TODO', 5, 0, 'augment-agent', '$KANDEV_REPO_PATH', 'main', '{}', datetime('now'), datetime('now')),
-    ('task-004', 'dev-board-1', 'col-todo', 'Add task labels/tags', 'Allow users to add colored labels to tasks for categorization', 'TODO', 2, 1, '', '', '', '{}', datetime('now'), datetime('now')),
+    ('task-004', 'dev-board-1', 'col-todo', 'Add task labels/tags', 'Allow users to add colored labels to tasks for categorization', 'TODO', 2, 1, '', '$KANDEV_REPO_PATH', '', '{}', datetime('now'), datetime('now')),
 
     -- In Progress tasks (agent with repository)
     ('task-005', 'dev-board-1', 'col-inprogress', 'Agent session persistence', 'Persist agent sessions in database instead of memory', 'IN_PROGRESS', 8, 0, 'augment-agent', '$KANDEV_REPO_PATH', 'main', '{}', datetime('now'), datetime('now')),
@@ -47,15 +55,15 @@ VALUES
     ('task-006', 'dev-board-1', 'col-review', 'Comment system improvements', 'Enhanced comment display with markdown and tool calls', 'REVIEW', 6, 0, 'augment-agent', '$KANDEV_REPO_PATH', 'main', '{}', datetime('now'), datetime('now')),
 
     -- Done tasks
-    ('task-007', 'dev-board-1', 'col-done', 'Basic kanban board UI', 'Create the initial kanban board with drag-and-drop', 'COMPLETED', 10, 0, '', '', '', '{}', datetime('now', '-3 days'), datetime('now', '-1 day')),
-    ('task-008', 'dev-board-1', 'col-done', 'WebSocket API implementation', 'Implement real-time WebSocket communication', 'COMPLETED', 9, 1, '', '', '', '{}', datetime('now', '-5 days'), datetime('now', '-2 days'));
+    ('task-007', 'dev-board-1', 'col-done', 'Basic kanban board UI', 'Create the initial kanban board with drag-and-drop', 'COMPLETED', 10, 0, '', '$KANDEV_REPO_PATH', '', '{}', datetime('now', '-3 days'), datetime('now', '-1 day')),
+    ('task-008', 'dev-board-1', 'col-done', 'WebSocket API implementation', 'Implement real-time WebSocket communication', 'COMPLETED', 9, 1, '', '$KANDEV_REPO_PATH', '', '{}', datetime('now', '-5 days'), datetime('now', '-2 days'));
 
 -- Sample tasks for dev-board-2 (Feature Backlog)
 INSERT OR REPLACE INTO tasks (id, board_id, column_id, title, description, state, priority, position, agent_type, repository_url, branch, metadata, created_at, updated_at)
 VALUES
-    ('task-101', 'dev-board-2', 'col-ideas', 'Multi-user collaboration', 'Allow multiple users to work on the same board', 'TODO', 5, 0, '', '', '', '{}', datetime('now'), datetime('now')),
-    ('task-102', 'dev-board-2', 'col-ideas', 'Task dependencies', 'Add ability to link tasks as dependencies', 'TODO', 4, 1, '', '', '', '{}', datetime('now'), datetime('now')),
-    ('task-103', 'dev-board-2', 'col-planned', 'Agent type marketplace', 'Browse and install different agent types', 'TODO', 6, 0, '', '', '', '{}', datetime('now'), datetime('now'));
+    ('task-101', 'dev-board-2', 'col-ideas', 'Multi-user collaboration', 'Allow multiple users to work on the same board', 'TODO', 5, 0, '', '$KANDEV_REPO_PATH', '', '{}', datetime('now'), datetime('now')),
+    ('task-102', 'dev-board-2', 'col-ideas', 'Task dependencies', 'Add ability to link tasks as dependencies', 'TODO', 4, 1, '', '$KANDEV_REPO_PATH', '', '{}', datetime('now'), datetime('now')),
+    ('task-103', 'dev-board-2', 'col-planned', 'Agent type marketplace', 'Browse and install different agent types', 'TODO', 6, 0, '', '$KANDEV_REPO_PATH', '', '{}', datetime('now'), datetime('now'));
 
 -- Sample comments on tasks
 INSERT OR REPLACE INTO task_comments (id, task_id, author_type, author_id, content, type, metadata, requests_input, acp_session_id, agent_session_id, created_at)
@@ -73,4 +81,3 @@ VALUES
 INSERT OR REPLACE INTO agent_sessions (id, task_id, agent_instance_id, agent_type, acp_session_id, status, progress, error_message, metadata, started_at, completed_at, updated_at)
 VALUES
     ('session-001', 'task-005', 'agent-instance-123', 'augment-agent', 'acp-session-abc', 'running', 0.0, '', '{}', datetime('now', '-1 hour'), NULL, datetime('now'));
-

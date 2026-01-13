@@ -89,6 +89,30 @@ export type Task = {
   worktree_branch?: string | null;
 };
 
+export type User = {
+  id: string;
+  email: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type UserSettings = {
+  user_id: string;
+  workspace_id: string;
+  board_id: string;
+  repository_ids: string[];
+  updated_at: string;
+};
+
+export type UserSettingsResponse = {
+  settings: UserSettings;
+};
+
+export type UserResponse = {
+  user: User;
+  settings: UserSettings;
+};
+
 export type BoardSnapshot = {
   board: Board;
   columns: Column[];

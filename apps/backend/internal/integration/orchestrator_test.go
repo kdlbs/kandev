@@ -590,6 +590,7 @@ func (ts *OrchestratorTestServer) CreateTestTask(t *testing.T, agentType string,
 		Description: "This is a test task for the orchestrator",
 		Priority:    priority,
 		AgentType:   agentType,
+		RepositoryURL: "/tmp/repo",
 	})
 	require.NoError(t, err)
 
@@ -1342,6 +1343,7 @@ func TestOrchestratorEndToEndWorkflow(t *testing.T) {
 		"description":  "Create a new feature with tests",
 		"priority":     2,
 		"agent_type":   "augment-agent",
+		"repository_url": "/tmp/repo",
 	})
 	require.NoError(t, err)
 

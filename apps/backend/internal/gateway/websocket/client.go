@@ -8,6 +8,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/user/store"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
@@ -33,6 +34,7 @@ type Client struct {
 	hub           *Hub
 	send          chan []byte
 	subscriptions map[string]bool // Task IDs this client is subscribed to
+	userSubscriptions map[string]bool // User IDs this client is subscribed to
 	mu            sync.RWMutex
 	logger        *logger.Logger
 }
@@ -45,6 +47,7 @@ func NewClient(id string, conn *websocket.Conn, hub *Hub, log *logger.Logger) *C
 		hub:           hub,
 		send:          make(chan []byte, 256),
 		subscriptions: make(map[string]bool),
+		userSubscriptions: make(map[string]bool),
 		logger:        log.WithFields(zap.String("client_id", id)),
 	}
 }
@@ -99,6 +102,12 @@ func (c *Client) handleMessage(ctx context.Context, msg *ws.Message) {
 	case ws.ActionTaskUnsubscribe:
 		c.handleUnsubscribe(msg)
 		return
+	case ws.ActionUserSubscribe:
+		c.handleUserSubscribe(msg)
+		return
+	case ws.ActionUserUnsubscribe:
+		c.handleUserUnsubscribe(msg)
+		return
 	}
 
 	// Dispatch to handler
@@ -145,6 +154,56 @@ func (c *Client) handleSubscribe(msg *ws.Message) {
 
 	// Send historical logs if available
 	c.sendHistoricalLogs(req.TaskID)
+}
+
+type UserSubscribeRequest struct {
+	UserID string `json:"user_id,omitempty"`
+}
+
+func (c *Client) handleUserSubscribe(msg *ws.Message) {
+	var req UserSubscribeRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		c.sendError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+		return
+	}
+
+	userID := req.UserID
+	if userID == "" {
+		userID = store.DefaultUserID
+	}
+	if userID != store.DefaultUserID {
+		c.sendError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "cannot subscribe to another user", nil)
+		return
+	}
+
+	c.hub.SubscribeToUser(c, userID)
+	resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		"success": true,
+		"user_id": userID,
+	})
+	c.sendMessage(resp)
+}
+
+func (c *Client) handleUserUnsubscribe(msg *ws.Message) {
+	var req UserSubscribeRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		c.sendError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+		return
+	}
+	userID := req.UserID
+	if userID == "" {
+		userID = store.DefaultUserID
+	}
+	if userID != store.DefaultUserID {
+		c.sendError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "cannot unsubscribe from another user", nil)
+		return
+	}
+	c.hub.UnsubscribeFromUser(c, userID)
+	resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		"success": true,
+		"user_id": userID,
+	})
+	c.sendMessage(resp)
 }
 
 // sendHistoricalLogs sends historical execution logs to the client

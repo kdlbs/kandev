@@ -13,6 +13,7 @@ export type KanbanState = {
     description?: string;
     position: number;
     state?: TaskStatus;
+    repositoryUrl?: string;
   }>;
 };
 
@@ -36,6 +37,13 @@ export type AgentState = {
 
 export type AgentProfilesState = {
 	version: number;
+};
+
+export type UserSettingsState = {
+  workspaceId: string | null;
+  boardId: string | null;
+  repositoryIds: string[];
+  loaded: boolean;
 };
 
 export type TerminalState = {
@@ -88,6 +96,7 @@ export type AppState = {
   tasks: TaskState;
   agents: AgentState;
   agentProfiles: AgentProfilesState;
+  userSettings: UserSettingsState;
   terminal: TerminalState;
   diffs: DiffState;
   gitStatus: GitStatusState;
@@ -98,6 +107,7 @@ export type AppState = {
   setWorkspaces: (workspaces: WorkspaceState['items']) => void;
   setActiveBoard: (boardId: string | null) => void;
   setBoards: (boards: BoardState['items']) => void;
+  setUserSettings: (settings: UserSettingsState) => void;
   setTerminalOutput: (terminalId: string, data: string) => void;
   setConnectionStatus: (status: ConnectionState['status'], error?: string | null) => void;
   setComments: (taskId: string, comments: Comment[]) => void;
@@ -118,6 +128,7 @@ const defaultState: AppState = {
   tasks: { activeTaskId: null },
   agents: { agents: [] },
   agentProfiles: { version: 0 },
+  userSettings: { workspaceId: null, boardId: null, repositoryIds: [], loaded: false },
   terminal: { terminals: [] },
   diffs: { files: [] },
   gitStatus: {
@@ -141,6 +152,7 @@ const defaultState: AppState = {
   setWorkspaces: () => undefined,
   setActiveBoard: () => undefined,
   setBoards: () => undefined,
+  setUserSettings: () => undefined,
   setTerminalOutput: () => undefined,
   setConnectionStatus: () => undefined,
   setComments: () => undefined,
@@ -161,6 +173,7 @@ function mergeInitialState(
   | 'setWorkspaces'
   | 'setActiveBoard'
   | 'setBoards'
+  | 'setUserSettings'
   | 'setTerminalOutput'
   | 'setConnectionStatus'
   | 'setComments'
@@ -179,6 +192,7 @@ function mergeInitialState(
     tasks: { ...defaultState.tasks, ...initialState.tasks },
     agents: { ...defaultState.agents, ...initialState.agents },
     agentProfiles: { ...defaultState.agentProfiles, ...initialState.agentProfiles },
+    userSettings: { ...defaultState.userSettings, ...initialState.userSettings },
     terminal: { ...defaultState.terminal, ...initialState.terminal },
     diffs: { ...defaultState.diffs, ...initialState.diffs },
     gitStatus: { ...defaultState.gitStatus, ...initialState.gitStatus },
@@ -201,6 +215,7 @@ export function createAppStore(initialState?: Partial<AppState>) {
           if (state.tasks) Object.assign(draft.tasks, state.tasks);
           if (state.agents) Object.assign(draft.agents, state.agents);
           if (state.agentProfiles) Object.assign(draft.agentProfiles, state.agentProfiles);
+          if (state.userSettings) Object.assign(draft.userSettings, state.userSettings);
           if (state.terminal) Object.assign(draft.terminal, state.terminal);
           if (state.diffs) Object.assign(draft.diffs, state.diffs);
           if (state.connection) Object.assign(draft.connection, state.connection);
@@ -227,6 +242,10 @@ export function createAppStore(initialState?: Partial<AppState>) {
       setActiveBoard: (boardId) =>
         set((draft) => {
           draft.boards.activeId = boardId;
+        }),
+      setUserSettings: (settings) =>
+        set((draft) => {
+          draft.userSettings = settings;
         }),
       setTerminalOutput: (terminalId, data) =>
         set((draft) => {

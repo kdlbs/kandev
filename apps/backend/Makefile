@@ -69,7 +69,7 @@ dev-db-reset:
 ## Run tests
 test:
 	@echo "Running tests..."
-	$(GO) test -v ./...
+	$(GO) test ./...
 
 ## Run tests with coverage
 test-coverage:

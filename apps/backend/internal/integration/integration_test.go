@@ -442,6 +442,7 @@ func TestTaskCRUD(t *testing.T) {
 			"title":        "Test Task",
 			"description":  "A test task for integration testing",
 			"priority":     3, // HIGH priority (1=LOW, 2=MEDIUM, 3=HIGH)
+			"repository_url": "/tmp/repo",
 		})
 		require.NoError(t, err)
 
@@ -576,6 +577,7 @@ func TestTaskStateTransitions(t *testing.T) {
 		"column_id":    columnID,
 		"title":        "State Test Task",
 		"description":  "Test state transitions",
+		"repository_url": "/tmp/repo",
 	})
 	var taskPayload map[string]interface{}
 	taskResp.ParsePayload(&taskPayload)
@@ -660,6 +662,7 @@ func TestTaskMove(t *testing.T) {
 		"board_id":     boardID,
 		"column_id":    col1ID,
 		"title":        "Movable Task",
+		"repository_url": "/tmp/repo",
 	})
 	var taskPayload map[string]interface{}
 	taskResp.ParsePayload(&taskPayload)
@@ -770,6 +773,7 @@ func TestMultipleClients(t *testing.T) {
 		"board_id":     boardID,
 		"column_id":    columnID,
 		"title":        "Task by Client 1",
+		"repository_url": "/tmp/repo",
 	})
 	require.NoError(t, err)
 
@@ -890,6 +894,7 @@ func TestTaskSubscription(t *testing.T) {
 		"board_id":     boardID,
 		"column_id":    columnID,
 		"title":        "Subscribable Task",
+		"repository_url": "/tmp/repo",
 	})
 	var taskPayload map[string]interface{}
 	taskResp.ParsePayload(&taskPayload)
@@ -980,6 +985,7 @@ func TestConcurrentRequests(t *testing.T) {
 					"board_id":     boardID,
 					"column_id":    columnID,
 					"title":        "Concurrent Task " + string(rune('0'+idx)),
+					"repository_url": "/tmp/repo",
 				},
 			)
 			results <- err

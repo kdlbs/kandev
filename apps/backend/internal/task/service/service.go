@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -207,6 +208,9 @@ type UpdateRepositoryScriptRequest struct {
 
 // CreateTask creates a new task and publishes a task.created event
 func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*models.Task, error) {
+	if strings.TrimSpace(req.RepositoryURL) == "" {
+		return nil, fmt.Errorf("repository_url is required")
+	}
 	state := v1.TaskStateCreated
 	if req.State != nil {
 		state = *req.State
@@ -1035,6 +1039,9 @@ func (s *Service) publishTaskEvent(ctx context.Context, eventType string, task *
 	}
 	if task.AssignedTo != "" {
 		data["assigned_to"] = task.AssignedTo
+	}
+	if task.RepositoryURL != "" {
+		data["repository_url"] = task.RepositoryURL
 	}
 	if task.Metadata != nil {
 		data["metadata"] = task.Metadata

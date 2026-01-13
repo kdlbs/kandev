@@ -19,6 +19,7 @@ export interface Task {
   state?: string;
   description?: string;
   position?: number;
+  repositoryUrl?: string;
 }
 
 interface KanbanCardProps {

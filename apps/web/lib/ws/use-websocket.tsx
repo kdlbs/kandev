@@ -21,6 +21,7 @@ export function useWebSocket(store: StoreApi<AppState>, url: string) {
             break;
           case 'open':
             setConnectionStatus('connected', null);
+            client.subscribeUser();
             break;
           case 'reconnecting':
             setConnectionStatus('reconnecting', null);

@@ -50,6 +50,10 @@ import (
 	taskhandlers "github.com/kandev/kandev/internal/task/handlers"
 	"github.com/kandev/kandev/internal/task/repository"
 	taskservice "github.com/kandev/kandev/internal/task/service"
+	usercontroller "github.com/kandev/kandev/internal/user/controller"
+	userhandlers "github.com/kandev/kandev/internal/user/handlers"
+	userservice "github.com/kandev/kandev/internal/user/service"
+	userstore "github.com/kandev/kandev/internal/user/store"
 
 	// ACP protocol
 	"github.com/kandev/kandev/pkg/acp/protocol"
@@ -140,11 +144,20 @@ func main() {
 	}
 	defer agentSettingsRepo.Close()
 
+	userRepo, err := userstore.NewSQLiteRepository(dbPath)
+	if err != nil {
+		log.Fatal("Failed to initialize user store", zap.Error(err), zap.String("db_path", dbPath))
+	}
+	defer userRepo.Close()
+
 	discoveryRegistry, err := discovery.LoadRegistry()
 	if err != nil {
 		log.Fatal("Failed to load agent discovery config", zap.Error(err))
 	}
 	agentSettingsController := agentsettingscontroller.NewController(agentSettingsRepo, discoveryRegistry, log)
+
+	userSvc := userservice.NewService(userRepo, eventBus, log)
+	userCtrl := usercontroller.NewController(userSvc)
 
 	taskSvc := taskservice.NewService(
 		taskRepo,
@@ -294,6 +307,7 @@ func main() {
 	// Start the WebSocket hub
 	go gateway.Hub.Run(ctx)
 	gateways.RegisterTaskNotifications(ctx, eventBus, gateway.Hub, log)
+	gateways.RegisterUserNotifications(ctx, eventBus, gateway.Hub, log)
 
 	// Set up historical logs provider for task subscriptions
 	// Uses comments instead of execution logs - all agent messages are now comments
@@ -532,6 +546,9 @@ func main() {
 
 	agentsettingshandlers.RegisterRoutes(router, agentSettingsController, gateway.Hub, log)
 	log.Info("Registered Agent Settings handlers (HTTP)")
+
+	userhandlers.RegisterRoutes(router, gateway.Dispatcher, userCtrl, log)
+	log.Info("Registered User handlers (HTTP + WebSocket)")
 
 	// Health check (simple HTTP for load balancers/monitoring)
 	router.GET("/health", func(c *gin.Context) {

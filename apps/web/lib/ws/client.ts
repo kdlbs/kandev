@@ -43,6 +43,7 @@ export class WebSocketClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private intentionalClose = false;
   private subscriptions = new Set<string>();
+  private userSubscriptionActive = false;
   private heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
   private heartbeatTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
   private lastMessageTime: number = Date.now();
@@ -188,6 +189,18 @@ export class WebSocketClient {
     }
   }
 
+  subscribeUser() {
+    this.userSubscriptionActive = true;
+    if (this.status === 'open') {
+      this.send({
+        id: generateUUID(),
+        type: 'request',
+        action: 'user.subscribe',
+        payload: {},
+      });
+    }
+  }
+
   unsubscribe(taskId: string) {
     this.subscriptions.delete(taskId);
     if (this.status === 'open') {
@@ -196,6 +209,18 @@ export class WebSocketClient {
         type: 'request',
         action: 'task.unsubscribe',
         payload: { task_id: taskId },
+      });
+    }
+  }
+
+  unsubscribeUser() {
+    this.userSubscriptionActive = false;
+    if (this.status === 'open') {
+      this.send({
+        id: generateUUID(),
+        type: 'request',
+        action: 'user.unsubscribe',
+        payload: {},
       });
     }
   }
@@ -282,6 +307,14 @@ export class WebSocketClient {
         payload: { task_id: taskId },
       });
     });
+    if (this.userSubscriptionActive) {
+      this.send({
+        id: generateUUID(),
+        type: 'request',
+        action: 'user.subscribe',
+        payload: {},
+      });
+    }
   }
 
   private flushQueue() {

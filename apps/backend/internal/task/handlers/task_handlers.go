@@ -98,6 +98,10 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id is required"})
 		return
 	}
+	if body.RepositoryURL == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "repository_url is required"})
+		return
+	}
 	resp, err := h.controller.CreateTask(c.Request.Context(), dto.CreateTaskRequest{
 		WorkspaceID:   body.WorkspaceID,
 		BoardID:       body.BoardID,
@@ -248,6 +252,9 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	}
 	if req.Title == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "title is required", nil)
+	}
+	if req.RepositoryURL == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "repository_url is required", nil)
 	}
 
 	resp, err := h.controller.CreateTask(ctx, dto.CreateTaskRequest{

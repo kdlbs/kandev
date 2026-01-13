@@ -244,6 +244,7 @@ export function TaskCreateDialog({
       return;
     }
     if (!workspaceId || !boardId) return;
+    if (!repositoryId) return;
     const columnId = editingTask?.columnId ?? defaultColumnId;
     if (!columnId) return;
     let targetColumnId = columnId;
@@ -493,7 +494,9 @@ export function TaskCreateDialog({
                 Cancel
               </Button>
             </DialogClose>
-            <Button type="submit">{submitLabel}</Button>
+            <Button type="submit" disabled={!title.trim() || (!isEditMode && !repositoryId)}>
+              {submitLabel}
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>

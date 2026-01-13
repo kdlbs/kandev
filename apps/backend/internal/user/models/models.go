@@ -1,8 +1,7 @@
-package v1
+package models
 
 import "time"
 
-// User represents a user account
 type User struct {
 	ID        string    `json:"id"`
 	Email     string    `json:"email"`
@@ -11,9 +10,10 @@ type User struct {
 }
 
 type UserSettings struct {
-	UserID        string   `json:"user_id"`
-	WorkspaceID   string   `json:"workspace_id"`
-	BoardID       string   `json:"board_id"`
-	RepositoryIDs []string `json:"repository_ids"`
+	UserID        string    `json:"user_id"`
+	WorkspaceID   string    `json:"workspace_id"`
+	BoardID       string    `json:"board_id"`
+	RepositoryIDs []string  `json:"repository_ids"`
+	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
 }

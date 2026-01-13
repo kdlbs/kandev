@@ -1,6 +1,6 @@
 import { PageClient } from '@/app/page-client';
 import { StateHydrator } from '@/components/state-hydrator';
-import { fetchBoardSnapshot, fetchBoards, fetchWorkspaces } from '@/lib/ssr/http';
+import { fetchBoardSnapshot, fetchBoards, fetchUserSettings, fetchWorkspaces } from '@/lib/ssr/http';
 import { snapshotToState } from '@/lib/ssr/mapper';
 import type { AppState } from '@/lib/state/store';
 
@@ -17,9 +17,17 @@ export default async function Page({ searchParams }: PageProps) {
     const workspaceId = Array.isArray(workspaceParam) ? workspaceParam[0] : workspaceParam;
     const boardIdParam = Array.isArray(boardParam) ? boardParam[0] : boardParam;
 
-    const workspaces = await fetchWorkspaces();
+    const [workspaces, userSettingsResponse] = await Promise.all([
+      fetchWorkspaces(),
+      fetchUserSettings().catch(() => null),
+    ]);
+    const userSettings = userSettingsResponse?.settings;
+    const settingsWorkspaceId = userSettings?.workspace_id || null;
+    const settingsBoardId = userSettings?.board_id || null;
+    const settingsRepositoryIds = Array.from(new Set(userSettings?.repository_ids ?? [])).sort();
     const activeWorkspaceId =
       workspaces.workspaces.find((workspace) => workspace.id === workspaceId)?.id ??
+      workspaces.workspaces.find((workspace) => workspace.id === settingsWorkspaceId)?.id ??
       workspaces.workspaces[0]?.id ??
       null;
     let initialState: Partial<AppState> = {
@@ -29,6 +37,12 @@ export default async function Page({ searchParams }: PageProps) {
           name: workspace.name,
         })),
         activeId: activeWorkspaceId,
+      },
+      userSettings: {
+        workspaceId: settingsWorkspaceId,
+        boardId: settingsBoardId,
+        repositoryIds: settingsRepositoryIds,
+        loaded: Boolean(userSettings),
       },
     };
 
@@ -43,7 +57,9 @@ export default async function Page({ searchParams }: PageProps) {
 
     const boardList = await fetchBoards(activeWorkspaceId);
     const boardId =
-      boardList.boards.find((board) => board.id === boardIdParam)?.id ?? boardList.boards[0]?.id;
+      boardList.boards.find((board) => board.id === boardIdParam)?.id ??
+      boardList.boards.find((board) => board.id === settingsBoardId)?.id ??
+      boardList.boards[0]?.id;
     initialState = {
       ...initialState,
       boards: {

@@ -56,6 +56,11 @@ const (
 	ExecutorDeleted = "executor.deleted"
 )
 
+// Event types for users
+const (
+	UserSettingsUpdated = "user.settings.updated"
+)
+
 // Event types for environments
 const (
 	EnvironmentCreated = "environment.created"
