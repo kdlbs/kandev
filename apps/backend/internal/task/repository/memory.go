@@ -114,9 +114,6 @@ func (r *MemoryRepository) CreateWorkspace(ctx context.Context, workspace *model
 	if workspace.ID == "" {
 		workspace.ID = uuid.New().String()
 	}
-	if workspace.DefaultExecutorID == "" {
-		workspace.DefaultExecutorID = models.ExecutorIDLocalPC
-	}
 	now := time.Now().UTC()
 	workspace.CreatedAt = now
 	workspace.UpdatedAt = now

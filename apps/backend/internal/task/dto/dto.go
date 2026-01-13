@@ -18,13 +18,15 @@ type BoardDTO struct {
 }
 
 type WorkspaceDTO struct {
-	ID                string    `json:"id"`
-	Name              string    `json:"name"`
-	Description       *string   `json:"description,omitempty"`
-	OwnerID           string    `json:"owner_id"`
-	DefaultExecutorID *string   `json:"default_executor_id,omitempty"`
-	CreatedAt         time.Time `json:"created_at"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	ID                    string    `json:"id"`
+	Name                  string    `json:"name"`
+	Description           *string   `json:"description,omitempty"`
+	OwnerID               string    `json:"owner_id"`
+	DefaultExecutorID     *string   `json:"default_executor_id,omitempty"`
+	DefaultEnvironmentID  *string   `json:"default_environment_id,omitempty"`
+	DefaultAgentProfileID *string   `json:"default_agent_profile_id,omitempty"`
+	CreatedAt             time.Time `json:"created_at"`
+	UpdatedAt             time.Time `json:"updated_at"`
 }
 
 type ColumnDTO struct {
@@ -213,19 +215,17 @@ func FromWorkspace(workspace *models.Workspace) WorkspaceDTO {
 	if workspace.Description != "" {
 		description = &workspace.Description
 	}
-	var defaultExecutorID *string
-	if workspace.DefaultExecutorID != "" {
-		defaultExecutorID = &workspace.DefaultExecutorID
-	}
 
 	return WorkspaceDTO{
-		ID:                workspace.ID,
-		Name:              workspace.Name,
-		Description:       description,
-		OwnerID:           workspace.OwnerID,
-		DefaultExecutorID: defaultExecutorID,
-		CreatedAt:         workspace.CreatedAt,
-		UpdatedAt:         workspace.UpdatedAt,
+		ID:                    workspace.ID,
+		Name:                  workspace.Name,
+		Description:           description,
+		OwnerID:               workspace.OwnerID,
+		DefaultExecutorID:     workspace.DefaultExecutorID,
+		DefaultEnvironmentID:  workspace.DefaultEnvironmentID,
+		DefaultAgentProfileID: workspace.DefaultAgentProfileID,
+		CreatedAt:             workspace.CreatedAt,
+		UpdatedAt:             workspace.UpdatedAt,
 	}
 }
 

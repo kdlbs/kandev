@@ -40,10 +40,12 @@ func (c *WorkspaceController) GetWorkspace(ctx context.Context, req dto.GetWorks
 
 func (c *WorkspaceController) CreateWorkspace(ctx context.Context, req dto.CreateWorkspaceRequest) (dto.WorkspaceDTO, error) {
 	workspace, err := c.service.CreateWorkspace(ctx, &service.CreateWorkspaceRequest{
-		Name:              req.Name,
-		Description:       req.Description,
-		OwnerID:           req.OwnerID,
-		DefaultExecutorID: req.DefaultExecutorID,
+		Name:                  req.Name,
+		Description:           req.Description,
+		OwnerID:               req.OwnerID,
+		DefaultExecutorID:     req.DefaultExecutorID,
+		DefaultEnvironmentID:  req.DefaultEnvironmentID,
+		DefaultAgentProfileID: req.DefaultAgentProfileID,
 	})
 	if err != nil {
 		return dto.WorkspaceDTO{}, err
@@ -53,9 +55,11 @@ func (c *WorkspaceController) CreateWorkspace(ctx context.Context, req dto.Creat
 
 func (c *WorkspaceController) UpdateWorkspace(ctx context.Context, req dto.UpdateWorkspaceRequest) (dto.WorkspaceDTO, error) {
 	workspace, err := c.service.UpdateWorkspace(ctx, req.ID, &service.UpdateWorkspaceRequest{
-		Name:              req.Name,
-		Description:       req.Description,
-		DefaultExecutorID: req.DefaultExecutorID,
+		Name:                  req.Name,
+		Description:           req.Description,
+		DefaultExecutorID:     req.DefaultExecutorID,
+		DefaultEnvironmentID:  req.DefaultEnvironmentID,
+		DefaultAgentProfileID: req.DefaultAgentProfileID,
 	})
 	if err != nil {
 		return dto.WorkspaceDTO{}, err

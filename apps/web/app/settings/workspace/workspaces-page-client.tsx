@@ -33,6 +33,9 @@ export function WorkspacesPageClient({ workspaces }: WorkspacesPageClientProps) 
         workspaces.map((workspace) => ({
           id: workspace.id,
           name: workspace.name,
+          default_executor_id: workspace.default_executor_id ?? null,
+          default_environment_id: workspace.default_environment_id ?? null,
+          default_agent_profile_id: workspace.default_agent_profile_id ?? null,
         }))
       );
     }
@@ -44,8 +47,20 @@ export function WorkspacesPageClient({ workspaces }: WorkspacesPageClientProps) 
     try {
       const created = await createRequest.run({ name: newWorkspaceName.trim() });
       setWorkspaces([
-        { id: created.id, name: created.name },
-        ...items.map((workspace) => ({ id: workspace.id, name: workspace.name })),
+        {
+          id: created.id,
+          name: created.name,
+          default_executor_id: created.default_executor_id ?? null,
+          default_environment_id: created.default_environment_id ?? null,
+          default_agent_profile_id: created.default_agent_profile_id ?? null,
+        },
+        ...items.map((workspace) => ({
+          id: workspace.id,
+          name: workspace.name,
+          default_executor_id: workspace.default_executor_id ?? null,
+          default_environment_id: workspace.default_environment_id ?? null,
+          default_agent_profile_id: workspace.default_agent_profile_id ?? null,
+        })),
       ]);
       setNewWorkspaceName('');
       setIsAdding(false);

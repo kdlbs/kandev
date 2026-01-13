@@ -20,8 +20,10 @@ import {
 } from '@kandev/ui/dialog';
 import { updateWorkspaceAction, deleteWorkspaceAction } from '@/app/actions/workspaces';
 import { listExecutorsAction } from '@/app/actions/executors';
+import { listEnvironmentsAction } from '@/app/actions/environments';
+import { listAgentsAction } from '@/app/actions/agents';
 import { getWebSocketClient } from '@/lib/ws/connection';
-import type { Executor, Workspace } from '@/lib/types/http';
+import type { Agent, Environment, Executor, Workspace } from '@/lib/types/http';
 import { useRequest } from '@/lib/http/use-request';
 import { useToast } from '@/components/toast-provider';
 import { useAppStore } from '@/components/state-provider';
@@ -29,6 +31,11 @@ import { UnsavedChangesBadge, UnsavedSaveButton } from '@/components/settings/un
 
 type WorkspaceEditClientProps = {
   workspace: Workspace | null;
+};
+
+type AgentProfileOption = {
+  id: string;
+  label: string;
 };
 
 export function WorkspaceEditClient({ workspace }: WorkspaceEditClientProps) {
@@ -40,17 +47,36 @@ export function WorkspaceEditClient({ workspace }: WorkspaceEditClientProps) {
   const [savedDefaultExecutorId, setSavedDefaultExecutorId] = useState(
     workspace?.default_executor_id ?? ''
   );
+  const [savedDefaultEnvironmentId, setSavedDefaultEnvironmentId] = useState(
+    workspace?.default_environment_id ?? ''
+  );
+  const [savedDefaultAgentProfileId, setSavedDefaultAgentProfileId] = useState(
+    workspace?.default_agent_profile_id ?? ''
+  );
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [defaultExecutorId, setDefaultExecutorId] = useState(
     workspace?.default_executor_id ?? ''
   );
+  const [defaultEnvironmentId, setDefaultEnvironmentId] = useState(
+    workspace?.default_environment_id ?? ''
+  );
+  const [defaultAgentProfileId, setDefaultAgentProfileId] = useState(
+    workspace?.default_agent_profile_id ?? ''
+  );
   const [executors, setExecutors] = useState<Executor[]>([]);
+  const [environments, setEnvironments] = useState<Environment[]>([]);
+  const [agentProfiles, setAgentProfiles] = useState<AgentProfileOption[]>([]);
+  const [agentProfilesLoading, setAgentProfilesLoading] = useState(true);
+  const [environmentsLoading, setEnvironmentsLoading] = useState(true);
   const saveWorkspaceRequest = useRequest(updateWorkspaceAction);
   const deleteWorkspaceRequest = useRequest(deleteWorkspaceAction);
   const workspaces = useAppStore((state) => state.workspaces.items);
   const setWorkspaces = useAppStore((state) => state.setWorkspaces);
   const activeExecutors = executors.filter((executor) => executor.status === 'active');
+  const isDefaultExecutorDirty = defaultExecutorId !== savedDefaultExecutorId;
+  const isDefaultEnvironmentDirty = defaultEnvironmentId !== savedDefaultEnvironmentId;
+  const isDefaultAgentProfileDirty = defaultAgentProfileId !== savedDefaultAgentProfileId;
 
   useEffect(() => {
     const client = getWebSocketClient();
@@ -66,6 +92,36 @@ export function WorkspaceEditClient({ workspace }: WorkspaceEditClientProps) {
       .catch(() => setExecutors([]));
   }, []);
 
+  useEffect(() => {
+    const client = getWebSocketClient();
+    if (client) {
+      client
+        .request<{ environments: Environment[] }>('environment.list', {})
+        .then((resp) => setEnvironments(resp.environments))
+        .catch(() => setEnvironments([]))
+        .finally(() => setEnvironmentsLoading(false));
+      return;
+    }
+    listEnvironmentsAction()
+      .then((resp) => setEnvironments(resp.environments))
+      .catch(() => setEnvironments([]))
+      .finally(() => setEnvironmentsLoading(false));
+  }, []);
+
+  useEffect(() => {
+    listAgentsAction()
+      .then((resp) => {
+        const options = resp.agents.flatMap((agent: Agent) =>
+          agent.profiles.map((profile) => ({
+            id: profile.id,
+            label: `${agent.name} • ${profile.name}`,
+          }))
+        );
+        setAgentProfiles(options);
+      })
+      .catch(() => setAgentProfiles([]))
+      .finally(() => setAgentProfilesLoading(false));
+  }, []);
 
   const handleSaveWorkspaceName = async () => {
     if (!currentWorkspace) return;
@@ -77,7 +133,15 @@ export function WorkspaceEditClient({ workspace }: WorkspaceEditClientProps) {
       setSavedWorkspaceName(updated.name);
       setWorkspaces(
         workspaces.map((workspace) =>
-          workspace.id === updated.id ? { ...workspace, name: updated.name } : workspace
+          workspace.id === updated.id
+            ? {
+                ...workspace,
+                name: updated.name,
+                default_executor_id: updated.default_executor_id ?? null,
+                default_environment_id: updated.default_environment_id ?? null,
+                default_agent_profile_id: updated.default_agent_profile_id ?? null,
+              }
+            : workspace
         )
       );
     } catch (error) {
@@ -106,16 +170,88 @@ export function WorkspaceEditClient({ workspace }: WorkspaceEditClientProps) {
 
   const handleSaveDefaultExecutor = async () => {
     if (!currentWorkspace) return;
-    if (!defaultExecutorId || defaultExecutorId === savedDefaultExecutorId) return;
+    if (defaultExecutorId === savedDefaultExecutorId) return;
     try {
       const updated = await saveWorkspaceRequest.run(currentWorkspace.id, {
         default_executor_id: defaultExecutorId,
       });
       setCurrentWorkspace((prev) => (prev ? { ...prev, ...updated } : prev));
       setSavedDefaultExecutorId(updated.default_executor_id ?? '');
+      setWorkspaces(
+        workspaces.map((workspace) =>
+          workspace.id === updated.id
+            ? {
+                ...workspace,
+                default_executor_id: updated.default_executor_id ?? null,
+                default_environment_id: updated.default_environment_id ?? null,
+                default_agent_profile_id: updated.default_agent_profile_id ?? null,
+              }
+            : workspace
+        )
+      );
     } catch (error) {
       toast({
         title: 'Failed to save executor',
+        description: error instanceof Error ? error.message : 'Request failed',
+        variant: 'error',
+      });
+    }
+  };
+
+  const handleSaveDefaultEnvironment = async () => {
+    if (!currentWorkspace) return;
+    if (defaultEnvironmentId === savedDefaultEnvironmentId) return;
+    try {
+      const updated = await saveWorkspaceRequest.run(currentWorkspace.id, {
+        default_environment_id: defaultEnvironmentId,
+      });
+      setCurrentWorkspace((prev) => (prev ? { ...prev, ...updated } : prev));
+      setSavedDefaultEnvironmentId(updated.default_environment_id ?? '');
+      setWorkspaces(
+        workspaces.map((workspace) =>
+          workspace.id === updated.id
+            ? {
+                ...workspace,
+                default_executor_id: updated.default_executor_id ?? null,
+                default_environment_id: updated.default_environment_id ?? null,
+                default_agent_profile_id: updated.default_agent_profile_id ?? null,
+              }
+            : workspace
+        )
+      );
+    } catch (error) {
+      toast({
+        title: 'Failed to save environment',
+        description: error instanceof Error ? error.message : 'Request failed',
+        variant: 'error',
+      });
+    }
+  };
+
+  const handleSaveDefaultAgentProfile = async () => {
+    if (!currentWorkspace) return;
+    if (defaultAgentProfileId === savedDefaultAgentProfileId) return;
+    try {
+      const updated = await saveWorkspaceRequest.run(currentWorkspace.id, {
+        default_agent_profile_id: defaultAgentProfileId,
+      });
+      setCurrentWorkspace((prev) => (prev ? { ...prev, ...updated } : prev));
+      setSavedDefaultAgentProfileId(updated.default_agent_profile_id ?? '');
+      setWorkspaces(
+        workspaces.map((workspace) =>
+          workspace.id === updated.id
+            ? {
+                ...workspace,
+                default_executor_id: updated.default_executor_id ?? null,
+                default_environment_id: updated.default_environment_id ?? null,
+                default_agent_profile_id: updated.default_agent_profile_id ?? null,
+              }
+            : workspace
+        )
+      );
+    } catch (error) {
+      toast({
+        title: 'Failed to save agent profile',
         description: error instanceof Error ? error.message : 'Request failed',
         variant: 'error',
       });
@@ -177,15 +313,22 @@ export function WorkspaceEditClient({ workspace }: WorkspaceEditClientProps) {
 
       <Card>
         <CardHeader>
-          <CardTitle>Default Executor</CardTitle>
+          <CardTitle className="flex items-center gap-2">
+            <span>Default Executor</span>
+            {isDefaultExecutorDirty && <UnsavedChangesBadge />}
+          </CardTitle>
         </CardHeader>
         <CardContent className="space-y-2">
           <Label htmlFor="default-executor">Executor</Label>
-          <Select value={defaultExecutorId} onValueChange={setDefaultExecutorId}>
+          <Select
+            value={defaultExecutorId || 'none'}
+            onValueChange={(value) => setDefaultExecutorId(value === 'none' ? '' : value)}
+          >
             <SelectTrigger id="default-executor">
               <SelectValue placeholder="Select executor" />
             </SelectTrigger>
             <SelectContent>
+              <SelectItem value="none">No default</SelectItem>
               {activeExecutors.map((executor) => (
                 <SelectItem key={executor.id} value={executor.id}>
                   {executor.name}
@@ -195,13 +338,101 @@ export function WorkspaceEditClient({ workspace }: WorkspaceEditClientProps) {
           </Select>
           <div className="flex items-center gap-2">
             <UnsavedSaveButton
-              isDirty={defaultExecutorId !== savedDefaultExecutorId}
+              isDirty={isDefaultExecutorDirty}
               isLoading={saveWorkspaceRequest.isLoading}
               status={saveWorkspaceRequest.status}
               onClick={handleSaveDefaultExecutor}
             />
             <p className="text-xs text-muted-foreground">
               Select which executor new sessions should default to.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Separator />
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <span>Default Environment</span>
+            {isDefaultEnvironmentDirty && <UnsavedChangesBadge />}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          <Label htmlFor="default-environment">Environment</Label>
+          <Select
+            value={defaultEnvironmentId || 'none'}
+            onValueChange={(value) => setDefaultEnvironmentId(value === 'none' ? '' : value)}
+            disabled={environmentsLoading}
+          >
+            <SelectTrigger id="default-environment">
+              <SelectValue
+                placeholder={environmentsLoading ? 'Loading environments...' : 'Select environment'}
+              />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">No default</SelectItem>
+              {environments.map((environment) => (
+                <SelectItem key={environment.id} value={environment.id}>
+                  {environment.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <div className="flex items-center gap-2">
+            <UnsavedSaveButton
+              isDirty={isDefaultEnvironmentDirty}
+              isLoading={saveWorkspaceRequest.isLoading}
+              status={saveWorkspaceRequest.status}
+              onClick={handleSaveDefaultEnvironment}
+            />
+            <p className="text-xs text-muted-foreground">
+              Select which environment new tasks should default to.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Separator />
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <span>Default Agent Profile</span>
+            {isDefaultAgentProfileDirty && <UnsavedChangesBadge />}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          <Label htmlFor="default-agent-profile">Agent profile</Label>
+          <Select
+            value={defaultAgentProfileId || 'none'}
+            onValueChange={(value) => setDefaultAgentProfileId(value === 'none' ? '' : value)}
+            disabled={agentProfilesLoading}
+          >
+            <SelectTrigger id="default-agent-profile">
+              <SelectValue
+                placeholder={agentProfilesLoading ? 'Loading agent profiles...' : 'Select agent profile'}
+              />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">No default</SelectItem>
+              {agentProfiles.map((profile) => (
+                <SelectItem key={profile.id} value={profile.id}>
+                  {profile.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <div className="flex items-center gap-2">
+            <UnsavedSaveButton
+              isDirty={isDefaultAgentProfileDirty}
+              isLoading={saveWorkspaceRequest.isLoading}
+              status={saveWorkspaceRequest.status}
+              onClick={handleSaveDefaultAgentProfile}
+            />
+            <p className="text-xs text-muted-foreground">
+              Select which agent profile new tasks should default to.
             </p>
           </div>
         </CardContent>

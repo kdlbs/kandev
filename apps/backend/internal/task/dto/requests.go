@@ -16,17 +16,21 @@ type GetWorkspaceRequest struct {
 }
 
 type CreateWorkspaceRequest struct {
-	Name              string
-	Description       string
-	OwnerID           string
-	DefaultExecutorID string
+	Name                  string
+	Description           string
+	OwnerID               string
+	DefaultExecutorID     *string
+	DefaultEnvironmentID  *string
+	DefaultAgentProfileID *string
 }
 
 type UpdateWorkspaceRequest struct {
-	ID                string
-	Name              *string
-	Description       *string
-	DefaultExecutorID *string
+	ID                    string
+	Name                  *string
+	Description           *string
+	DefaultExecutorID     *string
+	DefaultEnvironmentID  *string
+	DefaultAgentProfileID *string
 }
 
 type DeleteWorkspaceRequest struct {

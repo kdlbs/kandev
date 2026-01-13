@@ -52,6 +52,8 @@ export async function createWorkspaceAction(payload: {
   name: string;
   description?: string;
   default_executor_id?: string;
+  default_environment_id?: string;
+  default_agent_profile_id?: string;
 }) {
   return fetchJson<Workspace>(`${apiBaseUrl}/api/v1/workspaces`, {
     method: 'POST',
@@ -61,7 +63,13 @@ export async function createWorkspaceAction(payload: {
 
 export async function updateWorkspaceAction(
   id: string,
-  payload: { name?: string; description?: string; default_executor_id?: string }
+  payload: {
+    name?: string;
+    description?: string;
+    default_executor_id?: string;
+    default_environment_id?: string;
+    default_agent_profile_id?: string;
+  }
 ) {
   return fetchJson<Workspace>(`${apiBaseUrl}/api/v1/workspaces/${id}`, {
     method: 'PATCH',

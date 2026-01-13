@@ -37,6 +37,7 @@ import {
   truncateRepoPath,
 } from '@/lib/utils';
 import { createTask, listRepositories, listRepositoryBranches, updateTask } from '@/lib/http/client';
+import { useAppStore } from '@/components/state-provider';
 
 type AgentProfileOption = {
   id: string;
@@ -54,6 +55,7 @@ type ExecutorOption = {
   name: string;
   type: string;
 };
+
 
 interface TaskCreateDialogProps {
   open: boolean;
@@ -106,6 +108,7 @@ export function TaskCreateDialog({
   const [executors, setExecutors] = useState<ExecutorOption[]>([]);
   const [executorsLoading, setExecutorsLoading] = useState(false);
   const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
+  const workspaces = useAppStore((state) => state.workspaces.items);
   const descriptionRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
@@ -125,6 +128,10 @@ export function TaskCreateDialog({
     initialValues?.title,
     open,
   ]);
+
+  const workspaceDefaults = workspaceId
+    ? workspaces.find((workspace) => workspace.id === workspaceId)
+    : null;
 
   useEffect(() => {
     if (!open || !workspaceId) return;
@@ -208,8 +215,13 @@ export function TaskCreateDialog({
   useEffect(() => {
     if (!open || agentProfileId || agentProfiles.length === 0) return;
     if (isEditMode && agentProfiles.length > 1) return;
+    const defaultProfileId = workspaceDefaults?.default_agent_profile_id ?? null;
+    if (defaultProfileId && agentProfiles.some((profile) => profile.id === defaultProfileId)) {
+      setAgentProfileId(defaultProfileId);
+      return;
+    }
     setAgentProfileId(agentProfiles[0].id);
-  }, [open, isEditMode, agentProfileId, agentProfiles]);
+  }, [open, isEditMode, agentProfileId, agentProfiles, workspaceDefaults]);
 
   useEffect(() => {
     if (!open) return;
@@ -252,19 +264,32 @@ export function TaskCreateDialog({
 
   useEffect(() => {
     if (!open || isEditMode || environmentId || environments.length === 0) return;
+    const defaultEnvironmentId = workspaceDefaults?.default_environment_id ?? null;
+    if (
+      defaultEnvironmentId &&
+      environments.some((environment) => environment.id === defaultEnvironmentId)
+    ) {
+      setEnvironmentId(defaultEnvironmentId);
+      return;
+    }
     const localEnvironment = environments.find(
       (environment) => environment.kind === DEFAULT_LOCAL_ENVIRONMENT_KIND
     );
     setEnvironmentId(localEnvironment?.id ?? environments[0].id);
-  }, [open, isEditMode, environmentId, environments]);
+  }, [open, isEditMode, environmentId, environments, workspaceDefaults]);
 
   useEffect(() => {
     if (!open || isEditMode || executorId || executors.length === 0) return;
+    const defaultExecutorId = workspaceDefaults?.default_executor_id ?? null;
+    if (defaultExecutorId && executors.some((executor) => executor.id === defaultExecutorId)) {
+      setExecutorId(defaultExecutorId);
+      return;
+    }
     const localExecutor = executors.find(
       (executor) => executor.type === DEFAULT_LOCAL_EXECUTOR_TYPE
     );
     setExecutorId(localExecutor?.id ?? executors[0].id);
-  }, [open, isEditMode, executorId, executors]);
+  }, [open, isEditMode, executorId, executors, workspaceDefaults]);
 
   useEffect(() => {
     const textarea = descriptionRef.current;

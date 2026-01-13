@@ -60,6 +60,10 @@ export function KanbanBoardHeader({
         <ConnectionStatus />
       </div>
       <div className="flex items-center gap-3">
+        <Button onClick={onAddTask} className="cursor-pointer">
+          <IconPlus className="h-4 w-4" />
+          Add task
+        </Button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="outline" className="cursor-pointer">
@@ -138,10 +142,6 @@ export function KanbanBoardHeader({
             </div>
           </DropdownMenuContent>
         </DropdownMenu>
-        <Button onClick={onAddTask} className="cursor-pointer">
-          <IconPlus className="h-4 w-4" />
-          Add task
-        </Button>
         <Link href="/settings" className="cursor-pointer">
           <Button variant="outline" className="cursor-pointer">
             <IconSettings className="h-4 w-4 mr-2" />

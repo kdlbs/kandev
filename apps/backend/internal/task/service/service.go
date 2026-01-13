@@ -93,17 +93,21 @@ type UpdateBoardRequest struct {
 
 // CreateWorkspaceRequest contains the data for creating a new workspace
 type CreateWorkspaceRequest struct {
-	Name              string `json:"name"`
-	Description       string `json:"description"`
-	OwnerID           string `json:"owner_id"`
-	DefaultExecutorID string `json:"default_executor_id"`
+	Name                  string  `json:"name"`
+	Description           string  `json:"description"`
+	OwnerID               string  `json:"owner_id"`
+	DefaultExecutorID     *string `json:"default_executor_id,omitempty"`
+	DefaultEnvironmentID  *string `json:"default_environment_id,omitempty"`
+	DefaultAgentProfileID *string `json:"default_agent_profile_id,omitempty"`
 }
 
 // UpdateWorkspaceRequest contains the data for updating a workspace
 type UpdateWorkspaceRequest struct {
-	Name              *string `json:"name,omitempty"`
-	Description       *string `json:"description,omitempty"`
-	DefaultExecutorID *string `json:"default_executor_id,omitempty"`
+	Name                  *string `json:"name,omitempty"`
+	Description           *string `json:"description,omitempty"`
+	DefaultExecutorID     *string `json:"default_executor_id,omitempty"`
+	DefaultEnvironmentID  *string `json:"default_environment_id,omitempty"`
+	DefaultAgentProfileID *string `json:"default_agent_profile_id,omitempty"`
 }
 
 // CreateColumnRequest contains the data for creating a new column
@@ -464,16 +468,14 @@ func (s *Service) MoveTask(ctx context.Context, id string, boardID string, colum
 
 // CreateWorkspace creates a new workspace
 func (s *Service) CreateWorkspace(ctx context.Context, req *CreateWorkspaceRequest) (*models.Workspace, error) {
-	defaultExecutorID := req.DefaultExecutorID
-	if defaultExecutorID == "" {
-		defaultExecutorID = models.ExecutorIDLocalPC
-	}
 	workspace := &models.Workspace{
-		ID:                uuid.New().String(),
-		Name:              req.Name,
-		Description:       req.Description,
-		OwnerID:           req.OwnerID,
-		DefaultExecutorID: defaultExecutorID,
+		ID:                    uuid.New().String(),
+		Name:                  req.Name,
+		Description:           req.Description,
+		OwnerID:               req.OwnerID,
+		DefaultExecutorID:     normalizeOptionalID(req.DefaultExecutorID),
+		DefaultEnvironmentID:  normalizeOptionalID(req.DefaultEnvironmentID),
+		DefaultAgentProfileID: normalizeOptionalID(req.DefaultAgentProfileID),
 	}
 
 	if err := s.repo.CreateWorkspace(ctx, workspace); err != nil {
@@ -505,7 +507,13 @@ func (s *Service) UpdateWorkspace(ctx context.Context, id string, req *UpdateWor
 		workspace.Description = *req.Description
 	}
 	if req.DefaultExecutorID != nil {
-		workspace.DefaultExecutorID = *req.DefaultExecutorID
+		workspace.DefaultExecutorID = normalizeOptionalID(req.DefaultExecutorID)
+	}
+	if req.DefaultEnvironmentID != nil {
+		workspace.DefaultEnvironmentID = normalizeOptionalID(req.DefaultEnvironmentID)
+	}
+	if req.DefaultAgentProfileID != nil {
+		workspace.DefaultAgentProfileID = normalizeOptionalID(req.DefaultAgentProfileID)
 	}
 	workspace.UpdatedAt = time.Now().UTC()
 
@@ -532,6 +540,17 @@ func (s *Service) DeleteWorkspace(ctx context.Context, id string) error {
 	s.publishWorkspaceEvent(ctx, events.WorkspaceDeleted, workspace)
 	s.logger.Info("workspace deleted", zap.String("workspace_id", id))
 	return nil
+}
+
+func normalizeOptionalID(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(*value)
+	if trimmed == "" {
+		return nil
+	}
+	return &trimmed
 }
 
 // ListWorkspaces returns all workspaces
@@ -1076,12 +1095,15 @@ func (s *Service) publishWorkspaceEvent(ctx context.Context, eventType string, w
 	}
 
 	data := map[string]interface{}{
-		"id":          workspace.ID,
-		"name":        workspace.Name,
-		"description": workspace.Description,
-		"owner_id":    workspace.OwnerID,
-		"created_at":  workspace.CreatedAt.Format(time.RFC3339),
-		"updated_at":  workspace.UpdatedAt.Format(time.RFC3339),
+		"id":                        workspace.ID,
+		"name":                      workspace.Name,
+		"description":               workspace.Description,
+		"owner_id":                  workspace.OwnerID,
+		"default_executor_id":       workspace.DefaultExecutorID,
+		"default_environment_id":    workspace.DefaultEnvironmentID,
+		"default_agent_profile_id": workspace.DefaultAgentProfileID,
+		"created_at":                workspace.CreatedAt.Format(time.RFC3339),
+		"updated_at":                workspace.UpdatedAt.Format(time.RFC3339),
 	}
 
 	event := bus.NewEvent(eventType, "task-service", data)

@@ -90,6 +90,8 @@ func (r *SQLiteRepository) initSchema() error {
 		description TEXT DEFAULT '',
 		owner_id TEXT DEFAULT '',
 		default_executor_id TEXT DEFAULT '',
+		default_environment_id TEXT DEFAULT '',
+		default_agent_profile_id TEXT DEFAULT '',
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL
 	);
@@ -271,6 +273,12 @@ func (r *SQLiteRepository) initSchema() error {
 	if err := r.ensureColumn("workspaces", "default_executor_id", "TEXT DEFAULT ''"); err != nil {
 		return err
 	}
+	if err := r.ensureColumn("workspaces", "default_environment_id", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := r.ensureColumn("workspaces", "default_agent_profile_id", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
 	if err := r.ensureColumn("columns", "color", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
@@ -377,9 +385,19 @@ func (r *SQLiteRepository) ensureDefaultWorkspace() error {
 			workspaceDescription = ""
 		}
 		if _, err := r.db.ExecContext(ctx, `
-			INSERT INTO workspaces (id, name, description, owner_id, default_executor_id, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?)
-		`, defaultID, workspaceName, workspaceDescription, "", models.ExecutorIDLocalPC, now, now); err != nil {
+			INSERT INTO workspaces (
+				id,
+				name,
+				description,
+				owner_id,
+				default_executor_id,
+				default_environment_id,
+				default_agent_profile_id,
+				created_at,
+				updated_at
+			)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, defaultID, workspaceName, workspaceDescription, "", nil, nil, nil, now, now); err != nil {
 			return err
 		}
 
@@ -499,14 +517,6 @@ func (r *SQLiteRepository) ensureDefaultExecutorsAndEnvironments() error {
 		}
 	}
 
-	if _, err := r.db.ExecContext(ctx, `
-		UPDATE workspaces
-		SET default_executor_id = ?
-		WHERE default_executor_id = '' OR default_executor_id IS NULL
-	`, models.ExecutorIDLocalPC); err != nil {
-		return err
-	}
-
 	var envCount int
 	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(1) FROM environments").Scan(&envCount); err != nil {
 		return err
@@ -578,17 +588,24 @@ func (r *SQLiteRepository) CreateWorkspace(ctx context.Context, workspace *model
 	if workspace.ID == "" {
 		workspace.ID = uuid.New().String()
 	}
-	if workspace.DefaultExecutorID == "" {
-		workspace.DefaultExecutorID = models.ExecutorIDLocalPC
-	}
 	now := time.Now().UTC()
 	workspace.CreatedAt = now
 	workspace.UpdatedAt = now
 
 	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO workspaces (id, name, description, owner_id, default_executor_id, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, workspace.ID, workspace.Name, workspace.Description, workspace.OwnerID, workspace.DefaultExecutorID, workspace.CreatedAt, workspace.UpdatedAt)
+		INSERT INTO workspaces (
+			id,
+			name,
+			description,
+			owner_id,
+			default_executor_id,
+			default_environment_id,
+			default_agent_profile_id,
+			created_at,
+			updated_at
+		)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, workspace.ID, workspace.Name, workspace.Description, workspace.OwnerID, workspace.DefaultExecutorID, workspace.DefaultEnvironmentID, workspace.DefaultAgentProfileID, workspace.CreatedAt, workspace.UpdatedAt)
 
 	return err
 }
@@ -596,11 +613,33 @@ func (r *SQLiteRepository) CreateWorkspace(ctx context.Context, workspace *model
 // GetWorkspace retrieves a workspace by ID
 func (r *SQLiteRepository) GetWorkspace(ctx context.Context, id string) (*models.Workspace, error) {
 	workspace := &models.Workspace{}
+	var defaultExecutorID sql.NullString
+	var defaultEnvironmentID sql.NullString
+	var defaultAgentProfileID sql.NullString
 
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, name, description, owner_id, default_executor_id, created_at, updated_at
+		SELECT id, name, description, owner_id, default_executor_id, default_environment_id, default_agent_profile_id, created_at, updated_at
 		FROM workspaces WHERE id = ?
-	`, id).Scan(&workspace.ID, &workspace.Name, &workspace.Description, &workspace.OwnerID, &workspace.DefaultExecutorID, &workspace.CreatedAt, &workspace.UpdatedAt)
+	`, id).Scan(
+		&workspace.ID,
+		&workspace.Name,
+		&workspace.Description,
+		&workspace.OwnerID,
+		&defaultExecutorID,
+		&defaultEnvironmentID,
+		&defaultAgentProfileID,
+		&workspace.CreatedAt,
+		&workspace.UpdatedAt,
+	)
+	if defaultExecutorID.Valid && defaultExecutorID.String != "" {
+		workspace.DefaultExecutorID = &defaultExecutorID.String
+	}
+	if defaultEnvironmentID.Valid && defaultEnvironmentID.String != "" {
+		workspace.DefaultEnvironmentID = &defaultEnvironmentID.String
+	}
+	if defaultAgentProfileID.Valid && defaultAgentProfileID.String != "" {
+		workspace.DefaultAgentProfileID = &defaultAgentProfileID.String
+	}
 
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("workspace not found: %s", id)
@@ -613,8 +652,15 @@ func (r *SQLiteRepository) UpdateWorkspace(ctx context.Context, workspace *model
 	workspace.UpdatedAt = time.Now().UTC()
 
 	result, err := r.db.ExecContext(ctx, `
-		UPDATE workspaces SET name = ?, description = ?, default_executor_id = ?, updated_at = ? WHERE id = ?
-	`, workspace.Name, workspace.Description, workspace.DefaultExecutorID, workspace.UpdatedAt, workspace.ID)
+		UPDATE workspaces
+		SET name = ?,
+			description = ?,
+			default_executor_id = ?,
+			default_environment_id = ?,
+			default_agent_profile_id = ?,
+			updated_at = ?
+		WHERE id = ?
+	`, workspace.Name, workspace.Description, workspace.DefaultExecutorID, workspace.DefaultEnvironmentID, workspace.DefaultAgentProfileID, workspace.UpdatedAt, workspace.ID)
 	if err != nil {
 		return err
 	}
@@ -643,7 +689,8 @@ func (r *SQLiteRepository) DeleteWorkspace(ctx context.Context, id string) error
 // ListWorkspaces returns all workspaces
 func (r *SQLiteRepository) ListWorkspaces(ctx context.Context) ([]*models.Workspace, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, name, description, owner_id, default_executor_id, created_at, updated_at FROM workspaces ORDER BY created_at DESC
+		SELECT id, name, description, owner_id, default_executor_id, default_environment_id, default_agent_profile_id, created_at, updated_at
+		FROM workspaces ORDER BY created_at DESC
 	`)
 	if err != nil {
 		return nil, err
@@ -653,8 +700,30 @@ func (r *SQLiteRepository) ListWorkspaces(ctx context.Context) ([]*models.Worksp
 	var result []*models.Workspace
 	for rows.Next() {
 		workspace := &models.Workspace{}
-		if err := rows.Scan(&workspace.ID, &workspace.Name, &workspace.Description, &workspace.OwnerID, &workspace.DefaultExecutorID, &workspace.CreatedAt, &workspace.UpdatedAt); err != nil {
+		var defaultExecutorID sql.NullString
+		var defaultEnvironmentID sql.NullString
+		var defaultAgentProfileID sql.NullString
+		if err := rows.Scan(
+			&workspace.ID,
+			&workspace.Name,
+			&workspace.Description,
+			&workspace.OwnerID,
+			&defaultExecutorID,
+			&defaultEnvironmentID,
+			&defaultAgentProfileID,
+			&workspace.CreatedAt,
+			&workspace.UpdatedAt,
+		); err != nil {
 			return nil, err
+		}
+		if defaultExecutorID.Valid && defaultExecutorID.String != "" {
+			workspace.DefaultExecutorID = &defaultExecutorID.String
+		}
+		if defaultEnvironmentID.Valid && defaultEnvironmentID.String != "" {
+			workspace.DefaultEnvironmentID = &defaultEnvironmentID.String
+		}
+		if defaultAgentProfileID.Valid && defaultAgentProfileID.String != "" {
+			workspace.DefaultAgentProfileID = &defaultAgentProfileID.String
 		}
 		result = append(result, workspace)
 	}

@@ -18,7 +18,13 @@ export type KanbanState = {
 };
 
 export type WorkspaceState = {
-  items: Array<{ id: string; name: string }>;
+  items: Array<{
+    id: string;
+    name: string;
+    default_executor_id?: string | null;
+    default_environment_id?: string | null;
+    default_agent_profile_id?: string | null;
+  }>;
   activeId: string | null;
 };
 

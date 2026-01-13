@@ -35,6 +35,9 @@ export default async function Page({ searchParams }: PageProps) {
         items: workspaces.workspaces.map((workspace) => ({
           id: workspace.id,
           name: workspace.name,
+          default_executor_id: workspace.default_executor_id ?? null,
+          default_environment_id: workspace.default_environment_id ?? null,
+          default_agent_profile_id: workspace.default_agent_profile_id ?? null,
         })),
         activeId: activeWorkspaceId,
       },
