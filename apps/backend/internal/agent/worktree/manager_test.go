@@ -171,3 +171,119 @@ func TestManager_IsValid(t *testing.T) {
 		t.Error("expected true for valid worktree directory")
 	}
 }
+
+func TestSanitizeForBranch(t *testing.T) {
+	tests := []struct {
+		name     string
+		title    string
+		maxLen   int
+		expected string
+	}{
+		{
+			name:     "simple title",
+			title:    "Fix login bug",
+			maxLen:   20,
+			expected: "fix-login-bug",
+		},
+		{
+			name:     "title with special chars",
+			title:    "Fix: bug #123 (urgent!)",
+			maxLen:   20,
+			expected: "fix-bug-123-urgent",
+		},
+		{
+			name:     "title exceeding max length",
+			title:    "This is a very long task title that needs truncation",
+			maxLen:   20,
+			expected: "this-is-a-very-long",
+		},
+		{
+			name:     "title with consecutive spaces",
+			title:    "Fix   multiple   spaces",
+			maxLen:   20,
+			expected: "fix-multiple-spaces",
+		},
+		{
+			name:     "empty title",
+			title:    "",
+			maxLen:   20,
+			expected: "",
+		},
+		{
+			name:     "title starting and ending with special chars",
+			title:    "---Fix bug---",
+			maxLen:   20,
+			expected: "fix-bug",
+		},
+		{
+			name:     "title with numbers",
+			title:    "Task 123 done",
+			maxLen:   20,
+			expected: "task-123-done",
+		},
+		{
+			name:     "truncation at boundary",
+			title:    "Fix the login page bug",
+			maxLen:   15,
+			expected: "fix-the-login-p",
+		},
+		{
+			name:     "truncation at hyphen position removes trailing hyphen",
+			title:    "Fix the login-page bug",
+			maxLen:   13,
+			expected: "fix-the-login",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := SanitizeForBranch(tt.title, tt.maxLen)
+			if result != tt.expected {
+				t.Errorf("SanitizeForBranch(%q, %d) = %q, want %q", tt.title, tt.maxLen, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestSemanticWorktreeName(t *testing.T) {
+	tests := []struct {
+		name      string
+		taskTitle string
+		suffix    string
+		expected  string
+	}{
+		{
+			name:      "normal title with suffix",
+			taskTitle: "Fix login bug",
+			suffix:    "ab12cd34",
+			expected:  "fix-login-bug_ab12cd34",
+		},
+		{
+			name:      "long title truncated",
+			taskTitle: "This is a very long task title that needs truncation",
+			suffix:    "ab12cd34",
+			expected:  "this-is-a-very-long_ab12cd34",
+		},
+		{
+			name:      "empty title falls back to suffix only",
+			taskTitle: "",
+			suffix:    "ab12cd34",
+			expected:  "ab12cd34",
+		},
+		{
+			name:      "title with only special chars",
+			taskTitle: "!@#$%^&*()",
+			suffix:    "ab12cd34",
+			expected:  "ab12cd34",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := SemanticWorktreeName(tt.taskTitle, tt.suffix)
+			if result != tt.expected {
+				t.Errorf("SemanticWorktreeName(%q, %q) = %q, want %q", tt.taskTitle, tt.suffix, result, tt.expected)
+			}
+		})
+	}
+}

@@ -642,6 +642,7 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 	// If empty, the agent will run without a mounted workspace
 	launchReq := &lifecycle.LaunchRequest{
 		TaskID:          req.TaskID,
+		TaskTitle:       req.TaskTitle,
 		AgentType:       req.AgentType,
 		WorkspacePath:   req.RepositoryURL, // May be empty - lifecycle manager handles this
 		TaskDescription: req.TaskDescription,

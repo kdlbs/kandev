@@ -186,15 +186,25 @@ func (m *Manager) createWorktree(ctx context.Context, req CreateRequest) (*Workt
 	worktreeID := uuid.New().String()
 	suffix := worktreeID[:8] // Use first 8 chars of UUID as suffix
 
-	// Worktree path uses the unique ID: ~/.kandev/worktrees/{task_id}_{suffix}
-	worktreeDirName := req.TaskID + "_" + suffix
+	// Generate semantic name from task title if available
+	var worktreeDirName, branchName string
+	if req.TaskTitle != "" {
+		// Use semantic naming: {sanitized-title}_{suffix}
+		semanticName := SemanticWorktreeName(req.TaskTitle, suffix)
+		worktreeDirName = semanticName
+		// For branch, use sanitized title (20 chars max) + suffix
+		sanitizedTitle := SanitizeForBranch(req.TaskTitle, 20)
+		branchName = m.config.SemanticBranchName(sanitizedTitle, suffix)
+	} else {
+		// Fallback to task ID based naming
+		worktreeDirName = req.TaskID + "_" + suffix
+		branchName = m.config.BranchName(req.TaskID, suffix)
+	}
+
 	worktreePath, err := m.config.WorktreePath(worktreeDirName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get worktree path: %w", err)
 	}
-
-	// Branch name: kandev/{task_id}_{suffix}
-	branchName := m.config.BranchName(req.TaskID, suffix)
 
 	// Create worktree with new branch
 	// git worktree add -b <branch> <path> <base-branch>
@@ -356,15 +366,24 @@ func (m *Manager) removeWorktree(ctx context.Context, wt *Worktree, removeBranch
 			zap.Error(err))
 	}
 
-	// Optionally remove the branch
+	// Optionally remove the branch from the main repository
 	if removeBranch {
+		m.logger.Info("deleting branch from main repository",
+			zap.String("branch", wt.Branch),
+			zap.String("repository_path", wt.RepositoryPath))
+
 		cmd := exec.CommandContext(ctx, "git", "branch", "-D", wt.Branch)
 		cmd.Dir = wt.RepositoryPath
 		if output, err := cmd.CombinedOutput(); err != nil {
-			m.logger.Warn("failed to delete branch",
+			m.logger.Warn("failed to delete branch from main repository",
 				zap.String("branch", wt.Branch),
+				zap.String("repository_path", wt.RepositoryPath),
 				zap.String("output", string(output)),
 				zap.Error(err))
+		} else {
+			m.logger.Info("successfully deleted branch from main repository",
+				zap.String("branch", wt.Branch),
+				zap.String("repository_path", wt.RepositoryPath))
 		}
 	}
 

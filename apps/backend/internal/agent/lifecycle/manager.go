@@ -60,6 +60,7 @@ type AgentInstance struct {
 // LaunchRequest contains parameters for launching an agent
 type LaunchRequest struct {
 	TaskID          string
+	TaskTitle       string                 // Human-readable task title for semantic worktree naming
 	AgentType       string
 	WorkspacePath   string                 // Host path to workspace (original repository path)
 	TaskDescription string                 // Task description to send via ACP prompt
@@ -607,6 +608,7 @@ func (m *Manager) getOrCreateWorktree(ctx context.Context, req *LaunchRequest) (
 	// Create request with optional WorktreeID for resumption
 	createReq := worktree.CreateRequest{
 		TaskID:         req.TaskID,
+		TaskTitle:      req.TaskTitle,
 		RepositoryID:   req.RepositoryID,
 		RepositoryPath: req.RepositoryPath,
 		BaseBranch:     req.BaseBranch,
