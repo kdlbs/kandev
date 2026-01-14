@@ -5,12 +5,17 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/kandev/kandev/pkg/agent"
 )
 
 // Config holds the agentctl configuration
 type Config struct {
 	// HTTP server port
 	Port int
+
+	// Protocol used to communicate with the agent
+	Protocol agent.Protocol
 
 	// Agent command to execute (e.g., "auggie --acp")
 	AgentCommand string
@@ -45,6 +50,7 @@ func Load() *Config {
 
 	cfg := &Config{
 		Port:                   getEnvInt("AGENTCTL_PORT", 9999),
+		Protocol:               agent.Protocol(getEnv("AGENTCTL_PROTOCOL", string(agent.ProtocolACP))),
 		AgentCommand:           getEnv("AGENTCTL_AGENT_COMMAND", defaultCmd),
 		WorkDir:                workDir,
 		AutoStart:              getEnvBool("AGENTCTL_AUTO_START", false),

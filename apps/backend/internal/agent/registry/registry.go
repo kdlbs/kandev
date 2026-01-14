@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/pkg/agent"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -31,6 +32,10 @@ type AgentTypeConfig struct {
 	Capabilities   []string          `json:"capabilities"`           // What the agent can do
 	Enabled        bool              `json:"enabled"`
 	ModelFlag      string            `json:"model_flag,omitempty"`   // CLI flag for model selection (e.g., "--model")
+
+	// Protocol configuration
+	Protocol       agent.Protocol    `json:"protocol,omitempty"`        // Communication protocol: "acp", "rest", "mcp"
+	ProtocolConfig map[string]string `json:"protocol_config,omitempty"` // Protocol-specific settings (e.g., base_url for REST)
 }
 
 // MountTemplate defines a mount with template support

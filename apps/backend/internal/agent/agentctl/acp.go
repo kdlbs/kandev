@@ -13,15 +13,21 @@ import (
 	"go.uber.org/zap"
 )
 
+// AgentInfo contains information about the connected agent.
+type AgentInfo struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+}
+
 // InitializeResponse from agentctl
 type InitializeResponse struct {
-	Success  bool                  `json:"success"`
-	Response *acp.InitializeResponse `json:"response,omitempty"`
-	Error    string                `json:"error,omitempty"`
+	Success   bool       `json:"success"`
+	AgentInfo *AgentInfo `json:"agent_info,omitempty"`
+	Error     string     `json:"error,omitempty"`
 }
 
 // Initialize sends the ACP initialize request
-func (c *Client) Initialize(ctx context.Context, clientName, clientVersion string) (*acp.InitializeResponse, error) {
+func (c *Client) Initialize(ctx context.Context, clientName, clientVersion string) (*AgentInfo, error) {
 	reqBody := struct {
 		ClientName    string `json:"client_name"`
 		ClientVersion string `json:"client_version"`
@@ -54,7 +60,7 @@ func (c *Client) Initialize(ctx context.Context, clientName, clientVersion strin
 	if !result.Success {
 		return nil, fmt.Errorf("initialize failed: %s", result.Error)
 	}
-	return result.Response, nil
+	return result.AgentInfo, nil
 }
 
 // NewSessionResponse from agentctl
@@ -143,8 +149,21 @@ func (c *Client) Prompt(ctx context.Context, text string) (*PromptResponse, erro
 	return &result, nil
 }
 
-// SessionNotification represents a session update from the agent
-type SessionNotification = acp.SessionNotification
+// SessionUpdate represents a session update from the agent.
+// This matches adapter.SessionUpdate that agentctl sends over WebSocket.
+type SessionUpdate struct {
+	Type       string                 `json:"type"`
+	SessionID  string                 `json:"session_id,omitempty"`
+	Text       string                 `json:"text,omitempty"`
+	ToolCallID string                 `json:"tool_call_id,omitempty"`
+	ToolName   string                 `json:"tool_name,omitempty"`
+	ToolTitle  string                 `json:"tool_title,omitempty"`
+	ToolStatus string                 `json:"tool_status,omitempty"`
+	ToolArgs   map[string]interface{} `json:"tool_args,omitempty"`
+	ToolResult interface{}            `json:"tool_result,omitempty"`
+	Error      string                 `json:"error,omitempty"`
+	Data       map[string]interface{} `json:"data,omitempty"`
+}
 
 // PermissionOption represents a permission choice
 type PermissionOption struct {
@@ -177,7 +196,7 @@ type PermissionRespondResponse struct {
 }
 
 // StreamUpdates opens a WebSocket connection for streaming session updates
-func (c *Client) StreamUpdates(ctx context.Context, handler func(acp.SessionNotification)) error {
+func (c *Client) StreamUpdates(ctx context.Context, handler func(SessionUpdate)) error {
 	wsURL := "ws" + c.baseURL[4:] + "/api/v1/acp/stream"
 
 	conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, nil)
@@ -211,13 +230,13 @@ func (c *Client) StreamUpdates(ctx context.Context, handler func(acp.SessionNoti
 				return
 			}
 
-			var notification acp.SessionNotification
-			if err := json.Unmarshal(message, &notification); err != nil {
-				c.logger.Warn("failed to parse session notification", zap.Error(err))
+			var update SessionUpdate
+			if err := json.Unmarshal(message, &update); err != nil {
+				c.logger.Warn("failed to parse session update", zap.Error(err))
 				continue
 			}
 
-			handler(notification)
+			handler(update)
 		}
 	}()
 

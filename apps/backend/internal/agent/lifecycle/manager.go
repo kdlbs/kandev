@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	acp "github.com/coder/acp-go-sdk"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
@@ -584,6 +583,7 @@ func (m *Manager) launchStandalone(ctx context.Context, instanceID string, req *
 		ID:            instanceID,
 		WorkspacePath: req.WorkspacePath,
 		AgentCommand:  agentCommand,
+		Protocol:      string(agentConfig.Protocol), // Pass protocol from registry
 		Env:           env,
 		AutoStart:     false, // We'll start via ACP initialize flow
 	}
@@ -768,17 +768,23 @@ func (m *Manager) initializeACPSession(ctx context.Context, instance *AgentInsta
 	m.logger.Info("sending ACP initialize request",
 		zap.String("instance_id", instance.ID))
 
-	initResp, err := instance.agentctl.Initialize(ctx, "kandev", "1.0.0")
+	agentInfo, err := instance.agentctl.Initialize(ctx, "kandev", "1.0.0")
 	if err != nil {
 		m.logger.Error("ACP initialize failed",
 			zap.String("instance_id", instance.ID),
 			zap.Error(err))
 		return fmt.Errorf("initialize failed: %w", err)
 	}
+	agentName := "unknown"
+	agentVersion := "unknown"
+	if agentInfo != nil {
+		agentName = agentInfo.Name
+		agentVersion = agentInfo.Version
+	}
 	m.logger.Info("ACP initialize response received",
 		zap.String("instance_id", instance.ID),
-		zap.String("agent_name", initResp.AgentInfo.Name),
-		zap.String("agent_version", initResp.AgentInfo.Version))
+		zap.String("agent_name", agentName),
+		zap.String("agent_version", agentVersion))
 
 	// 2. Create new session
 	m.logger.Info("sending ACP session/new request",
@@ -888,8 +894,8 @@ func (m *Manager) initializeACPSession(ctx context.Context, instance *AgentInsta
 func (m *Manager) handleUpdatesStream(instance *AgentInstance) {
 	ctx := context.Background()
 
-	err := instance.agentctl.StreamUpdates(ctx, func(notification agentctl.SessionNotification) {
-		m.handleSessionNotification(instance, notification)
+	err := instance.agentctl.StreamUpdates(ctx, func(update agentctl.SessionUpdate) {
+		m.handleSessionUpdate(instance, update)
 	})
 	if err != nil {
 		m.logger.Error("failed to connect to updates stream",
@@ -1032,139 +1038,131 @@ func (m *Manager) publishPermissionRequest(instance *AgentInstance, notification
 	}
 }
 
-// handleSessionNotification processes incoming session notifications from the agent
-func (m *Manager) handleSessionNotification(instance *AgentInstance, notification agentctl.SessionNotification) {
-	m.logger.Debug("received session notification",
+// handleSessionUpdate processes incoming session updates from the agent
+func (m *Manager) handleSessionUpdate(instance *AgentInstance, update agentctl.SessionUpdate) {
+	m.logger.Debug("received session update",
 		zap.String("instance_id", instance.ID),
-		zap.String("session_id", string(notification.SessionId)))
+		zap.String("session_id", update.SessionID),
+		zap.String("type", update.Type))
 
-	update := notification.Update
-
-	// Handle different update types
-	if update.AgentMessageChunk != nil {
+	// Handle different update types based on the Type field
+	switch update.Type {
+	case "message_chunk":
 		m.logger.Debug("agent message chunk",
 			zap.String("instance_id", instance.ID))
 		m.updateInstanceProgress(instance.ID, 50)
 
 		// Accumulate message content for saving as comment when a step completes
-		if update.AgentMessageChunk.Content.Text != nil {
+		if update.Text != "" {
 			instance.messageMu.Lock()
-			instance.messageBuffer.WriteString(update.AgentMessageChunk.Content.Text.Text)
+			instance.messageBuffer.WriteString(update.Text)
 			instance.messageMu.Unlock()
 		}
-	}
 
-	if update.AgentThoughtChunk != nil {
-		m.logger.Debug("agent thought chunk",
-			zap.String("instance_id", instance.ID))
-	}
-
-	if update.ToolCall != nil {
+	case "tool_call":
 		// Tool call starting marks a step boundary - flush the accumulated message as a comment
 		// This way, each agent response before a tool use becomes a separate comment
 		m.flushMessageBufferAsComment(instance)
 
-		toolCallID := string(update.ToolCall.ToolCallId)
-		toolTitle := update.ToolCall.Title
-		toolStatus := string(update.ToolCall.Status)
-		toolKind := string(update.ToolCall.Kind)
-
 		m.logger.Info("tool call started",
 			zap.String("instance_id", instance.ID),
-			zap.String("tool_call_id", toolCallID),
-			zap.String("title", toolTitle),
-			zap.String("kind", toolKind))
+			zap.String("tool_call_id", update.ToolCallID),
+			zap.String("title", update.ToolTitle),
+			zap.String("tool_name", update.ToolName))
 		m.updateInstanceProgress(instance.ID, 60)
 
-		// Extract args from the tool call for display
-		args := map[string]interface{}{}
-
-		// Add tool kind
-		if toolKind != "" {
-			args["kind"] = toolKind
-		}
-
-		// Add locations (file paths)
-		if len(update.ToolCall.Locations) > 0 {
-			locations := make([]map[string]interface{}, len(update.ToolCall.Locations))
-			for i, loc := range update.ToolCall.Locations {
-				locMap := map[string]interface{}{"path": loc.Path}
-				if loc.Line != nil {
-					locMap["line"] = *loc.Line
-				}
-				locations[i] = locMap
-			}
-			args["locations"] = locations
-
-			// Also set primary path for convenience
-			args["path"] = update.ToolCall.Locations[0].Path
-		}
-
-		// Add raw input if available
-		if update.ToolCall.RawInput != nil {
-			args["raw_input"] = update.ToolCall.RawInput
-		}
-
 		// Publish tool call as a comment so it appears in the chat
-		m.publishToolCall(instance, toolCallID, toolTitle, toolStatus, args)
-	}
+		m.publishToolCall(instance, update.ToolCallID, update.ToolTitle, update.ToolStatus, update.ToolArgs)
 
-	if update.ToolCallUpdate != nil {
-		toolCallID := string(update.ToolCallUpdate.ToolCallId)
-
+	case "tool_update":
 		m.logger.Debug("tool call update",
 			zap.String("instance_id", instance.ID),
-			zap.String("tool_call_id", toolCallID))
+			zap.String("tool_call_id", update.ToolCallID))
 
 		// Check if tool call completed
-		if update.ToolCallUpdate.Status != nil {
-			status := string(*update.ToolCallUpdate.Status)
-			switch status {
-			case "complete":
-				m.logger.Info("tool call completed",
-					zap.String("instance_id", instance.ID))
-				m.updateInstanceProgress(instance.ID, 80)
-				// Publish tool call completion
-				m.publishToolCallComplete(instance, toolCallID, update.ToolCallUpdate)
-			case "error":
-				m.logger.Error("tool call error",
-					zap.String("instance_id", instance.ID))
-				m.publishToolCallComplete(instance, toolCallID, update.ToolCallUpdate)
-			}
+		switch update.ToolStatus {
+		case "complete", "completed":
+			m.logger.Info("tool call completed",
+				zap.String("instance_id", instance.ID))
+			m.updateInstanceProgress(instance.ID, 80)
+			m.publishToolCallCompleteFromUpdate(instance, update)
+		case "error":
+			m.logger.Error("tool call error",
+				zap.String("instance_id", instance.ID))
+			m.publishToolCallCompleteFromUpdate(instance, update)
 		}
-	}
 
-	if update.Plan != nil {
+	case "plan":
 		m.logger.Info("agent plan update",
+			zap.String("instance_id", instance.ID))
+
+	case "error":
+		m.logger.Error("agent error",
 			zap.String("instance_id", instance.ID),
-			zap.Int("num_entries", len(update.Plan.Entries)))
+			zap.String("error", update.Error))
 	}
 
-	// Publish session notification to event bus for WebSocket streaming
-	m.publishSessionNotification(instance, notification)
+	// Publish session update to event bus for WebSocket streaming
+	m.publishSessionUpdate(instance, update)
 }
 
-// publishSessionNotification publishes a session notification to the event bus
-func (m *Manager) publishSessionNotification(instance *AgentInstance, notification agentctl.SessionNotification) {
+// publishSessionUpdate publishes a session update to the event bus
+func (m *Manager) publishSessionUpdate(instance *AgentInstance, update agentctl.SessionUpdate) {
 	if m.eventBus == nil {
 		return
 	}
 
-	// Build ACP message data from the session notification
+	// Build the update data - our SessionUpdate type marshals cleanly
+	updateData := map[string]interface{}{
+		"type": update.Type,
+	}
+
+	if update.SessionID != "" {
+		updateData["session_id"] = update.SessionID
+	}
+	if update.Text != "" {
+		updateData["text"] = update.Text
+	}
+	if update.ToolCallID != "" {
+		updateData["tool_call_id"] = update.ToolCallID
+	}
+	if update.ToolName != "" {
+		updateData["tool_name"] = update.ToolName
+	}
+	if update.ToolTitle != "" {
+		updateData["tool_title"] = update.ToolTitle
+	}
+	if update.ToolStatus != "" {
+		updateData["tool_status"] = update.ToolStatus
+	}
+	if update.ToolArgs != nil {
+		updateData["tool_args"] = update.ToolArgs
+	}
+	if update.ToolResult != nil {
+		updateData["tool_result"] = update.ToolResult
+	}
+	if update.Error != "" {
+		updateData["error"] = update.Error
+	}
+	if update.Data != nil {
+		updateData["data"] = update.Data
+	}
+
+	// Build ACP message data
 	data := map[string]interface{}{
-		"type":        "session/update",
-		"timestamp":   time.Now(),
-		"agent_id":    instance.ID,
-		"task_id":     instance.TaskID,
-		"session_id":  string(notification.SessionId),
-		"data":        notification.Update,
+		"type":       "session/update",
+		"timestamp":  time.Now().UTC().Format(time.RFC3339Nano),
+		"agent_id":   instance.ID,
+		"task_id":    instance.TaskID,
+		"session_id": update.SessionID,
+		"data":       updateData,
 	}
 
 	event := bus.NewEvent(events.ACPMessage, "agent-manager", data)
 	subject := events.BuildACPSubject(instance.TaskID)
 
 	if err := m.eventBus.Publish(context.Background(), subject, event); err != nil {
-		m.logger.Error("failed to publish session notification",
+		m.logger.Error("failed to publish session update",
 			zap.String("instance_id", instance.ID),
 			zap.String("task_id", instance.TaskID),
 			zap.Error(err))
@@ -1415,15 +1413,10 @@ func (m *Manager) publishToolCall(instance *AgentInstance, toolCallID, title, st
 	}
 }
 
-// publishToolCallComplete publishes a tool call completion event
-func (m *Manager) publishToolCallComplete(instance *AgentInstance, toolCallID string, update *acp.SessionToolCallUpdate) {
+// publishToolCallCompleteFromUpdate publishes a tool call completion event from a SessionUpdate
+func (m *Manager) publishToolCallCompleteFromUpdate(instance *AgentInstance, update agentctl.SessionUpdate) {
 	if m.eventBus == nil {
 		return
-	}
-
-	status := ""
-	if update.Status != nil {
-		status = string(*update.Status)
 	}
 
 	data := map[string]interface{}{
@@ -1431,8 +1424,8 @@ func (m *Manager) publishToolCallComplete(instance *AgentInstance, toolCallID st
 		"timestamp":    time.Now().UTC().Format(time.RFC3339Nano),
 		"agent_id":     instance.ID,
 		"task_id":      instance.TaskID,
-		"tool_call_id": toolCallID,
-		"status":       status,
+		"tool_call_id": update.ToolCallID,
+		"status":       update.ToolStatus,
 	}
 
 	event := bus.NewEvent(events.ToolCallComplete, "agent-manager", data)
@@ -1547,6 +1540,11 @@ func (m *Manager) buildContainerConfig(instanceID string, req *LaunchRequest, ag
 		fmt.Sprintf("KANDEV_TASK_ID=%s", req.TaskID),
 		fmt.Sprintf("KANDEV_INSTANCE_ID=%s", instanceID),
 	)
+
+	// Pass protocol to agentctl inside the container
+	if agentConfig.Protocol != "" {
+		env = append(env, fmt.Sprintf("AGENTCTL_PROTOCOL=%s", agentConfig.Protocol))
+	}
 
 	// Configure Git to trust the workspace directory
 	// This is needed because the container runs as root but files are owned by host user

@@ -123,8 +123,8 @@ func (l *Launcher) Start(ctx context.Context) error {
 	// shutdown ourselves via Stop(). CommandContext sends SIGKILL on context
 	// cancellation which prevents graceful shutdown.
 	l.cmd = exec.Command(l.binaryPath,
-		"--mode=standalone",
-		fmt.Sprintf("--control-port=%d", l.port),
+		"-mode=standalone",
+		fmt.Sprintf("-port=%d", l.port),
 	)
 
 	// Set environment variables (inherit from parent + add agentctl-specific ones)
