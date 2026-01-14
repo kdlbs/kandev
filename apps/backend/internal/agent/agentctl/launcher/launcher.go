@@ -133,13 +133,9 @@ func (l *Launcher) Start(ctx context.Context) error {
 	)
 
 	// Set process attributes:
-	// - Pdeathsig: kernel sends SIGTERM to child when parent dies (crash protection)
-	// - Setpgid: create new process group so Ctrl+C doesn't propagate directly
-	//   (we handle shutdown ourselves via Stop())
-	l.cmd.SysProcAttr = &syscall.SysProcAttr{
-		Pdeathsig: syscall.SIGTERM,
-		Setpgid:   true, // Don't inherit parent's process group
-	}
+	// - Pdeathsig on Linux: kernel sends SIGTERM to child when parent dies.
+	// - Setpgid: create new process group so Ctrl+C doesn't propagate directly.
+	l.cmd.SysProcAttr = buildSysProcAttr()
 
 	// Capture stdout and stderr
 	stdout, err := l.cmd.StdoutPipe()
@@ -332,4 +328,3 @@ func (l *Launcher) monitorExit() {
 
 	close(l.exited)
 }
-
