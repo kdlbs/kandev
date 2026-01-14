@@ -66,6 +66,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.1.1",
+    "happy-dom": "^20.1.0",
     "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "^1.6.0"

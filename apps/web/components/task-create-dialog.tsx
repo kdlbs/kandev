@@ -40,6 +40,9 @@ import { useAppStore } from '@/components/state-provider';
 import { useRepositories } from '@/hooks/use-repositories';
 import { useRepositoryBranches } from '@/hooks/use-repository-branches';
 import { useSettingsData } from '@/hooks/use-settings-data';
+import { SHORTCUTS } from '@/lib/keyboard/constants';
+import { useKeyboardShortcutHandler } from '@/hooks/use-keyboard-shortcut';
+import { KeyboardShortcutTooltip } from '@/components/keyboard-shortcut-tooltip';
 
 interface TaskCreateDialogProps {
   open: boolean;
@@ -184,6 +187,11 @@ export function TaskCreateDialog({
     textarea.style.height = `${textarea.scrollHeight}px`;
   }, [description]);
 
+  // Use keyboard shortcut hook for Cmd+Enter / Ctrl+Enter
+  const handleKeyDown = useKeyboardShortcutHandler(SHORTCUTS.SUBMIT, (event) => {
+    handleSubmit(event as unknown as FormEvent);
+  });
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     const trimmedTitle = title.trim();
@@ -283,6 +291,7 @@ export function TaskCreateDialog({
                 placeholder="Write a prompt for the agent..."
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
+                onKeyDown={handleKeyDown}
                 rows={2}
                 className="min-h-[96px] max-h-[240px] resize-y overflow-auto"
               />
@@ -498,9 +507,11 @@ export function TaskCreateDialog({
                 Cancel
               </Button>
             </DialogClose>
-            <Button type="submit" disabled={!title.trim() || (!isEditMode && !repositoryId)}>
-              {submitLabel}
-            </Button>
+            <KeyboardShortcutTooltip shortcut={SHORTCUTS.SUBMIT}>
+              <Button type="submit" disabled={!title.trim() || (!isEditMode && !repositoryId)}>
+                {submitLabel}
+              </Button>
+            </KeyboardShortcutTooltip>
           </DialogFooter>
         </form>
       </DialogContent>

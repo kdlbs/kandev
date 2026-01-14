@@ -33,6 +33,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/components/state-provider';
 import type { Comment } from '@/lib/types/http';
+import { SHORTCUTS } from '@/lib/keyboard/constants';
+import { useKeyboardShortcutHandler } from '@/hooks/use-keyboard-shortcut';
+import { KeyboardShortcutTooltip } from '@/components/keyboard-shortcut-tooltip';
 
 type AgentOption = {
   id: string;
@@ -266,6 +269,11 @@ export function TaskChatPanel({ agents, onSend, isLoading, isAgentWorking, taskD
     }
   };
 
+  // Use keyboard shortcut hook for Cmd+Enter / Ctrl+Enter
+  const handleKeyDown = useKeyboardShortcutHandler(SHORTCUTS.SUBMIT, (event) => {
+    handleSubmit(event as unknown as FormEvent);
+  });
+
   const formatContent = (comment: Comment) => {
     // For content type comments, the content might be streamed chunks
     // For message type, show as-is
@@ -344,6 +352,7 @@ export function TaskChatPanel({ agents, onSend, isLoading, isAgentWorking, taskD
         <Textarea
           value={messageInput}
           onChange={(event) => setMessageInput(event.target.value)}
+          onKeyDown={handleKeyDown}
           placeholder="Write to submit work to the agent..."
           className={cn(
             'min-h-[90px] resize-none',
@@ -416,7 +425,9 @@ export function TaskChatPanel({ agents, onSend, isLoading, isAgentWorking, taskD
               </TooltipTrigger>
               <TooltipContent>Add attachments</TooltipContent>
             </Tooltip>
-            <Button type="submit">Submit</Button>
+            <KeyboardShortcutTooltip shortcut={SHORTCUTS.SUBMIT}>
+              <Button type="submit">Submit</Button>
+            </KeyboardShortcutTooltip>
           </div>
         </div>
       </form>
