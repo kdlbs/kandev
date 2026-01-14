@@ -51,9 +51,11 @@ type AgentInstance struct {
 	standaloneInstanceID string // Instance ID in standalone agentctl
 	standalonePort       int    // Port of the standalone instance
 
-	// Message buffer for accumulating agent response during a prompt
-	messageBuffer strings.Builder
-	messageMu     sync.Mutex
+	// Buffers for accumulating agent response during a prompt
+	messageBuffer   strings.Builder
+	reasoningBuffer strings.Builder
+	summaryBuffer   strings.Builder
+	messageMu       sync.Mutex
 }
 
 // GetAgentCtlClient returns the agentctl client for this instance
@@ -845,9 +847,11 @@ func (m *Manager) initializeACPSession(ctx context.Context, instance *AgentInsta
 			zap.String("session_id", sessionID),
 			zap.String("task_description", taskDescription))
 
-		// Clear message buffer before starting prompt
+		// Clear buffers before starting prompt
 		instance.messageMu.Lock()
 		instance.messageBuffer.Reset()
+		instance.reasoningBuffer.Reset()
+		instance.summaryBuffer.Reset()
 		instance.messageMu.Unlock()
 
 		// Prompt is SYNCHRONOUS - it blocks until the agent completes the task
@@ -863,10 +867,12 @@ func (m *Manager) initializeACPSession(ctx context.Context, instance *AgentInsta
 			return fmt.Errorf("prompt failed: %w", err)
 		}
 
-		// Extract accumulated message from buffer
+		// Extract accumulated content from buffers
 		instance.messageMu.Lock()
 		agentMessage := instance.messageBuffer.String()
 		instance.messageBuffer.Reset()
+		instance.reasoningBuffer.Reset()
+		instance.summaryBuffer.Reset()
 		instance.messageMu.Unlock()
 
 		stopReason := ""
@@ -878,7 +884,7 @@ func (m *Manager) initializeACPSession(ctx context.Context, instance *AgentInsta
 			zap.String("stop_reason", stopReason))
 
 		// Publish prompt_complete event with the agent's response (for saving as comment)
-		m.publishPromptComplete(instance, agentMessage)
+		m.publishPromptComplete(instance, agentMessage, "", "")
 
 		// Prompt completed - mark agent as READY for follow-up prompts
 		m.logger.Info("agent ready for follow-up prompts",
@@ -1071,6 +1077,17 @@ func (m *Manager) handleSessionUpdate(instance *AgentInstance, update agentctl.S
 			instance.messageBuffer.WriteString(update.Text)
 			instance.messageMu.Unlock()
 		}
+
+	case "reasoning":
+		// Accumulate reasoning/thinking content
+		instance.messageMu.Lock()
+		if update.ReasoningText != "" {
+			instance.reasoningBuffer.WriteString(update.ReasoningText)
+		}
+		if update.ReasoningSummary != "" {
+			instance.summaryBuffer.WriteString(update.ReasoningSummary)
+		}
+		instance.messageMu.Unlock()
 
 	case "tool_call":
 		// Tool call starting marks a step boundary - flush the accumulated message as a comment
@@ -1342,7 +1359,7 @@ func (m *Manager) publishFileChange(instance *AgentInstance, notification *agent
 
 // publishPromptComplete publishes a prompt_complete event when an agent finishes responding
 // This is used to save the agent's response as a comment on the task
-func (m *Manager) publishPromptComplete(instance *AgentInstance, agentMessage string) {
+func (m *Manager) publishPromptComplete(instance *AgentInstance, agentMessage, reasoning, summary string) {
 	if m.eventBus == nil {
 		return
 	}
@@ -1359,6 +1376,12 @@ func (m *Manager) publishPromptComplete(instance *AgentInstance, agentMessage st
 		"task_id":       instance.TaskID,
 		"agent_message": agentMessage,
 	}
+	if reasoning != "" {
+		data["reasoning"] = reasoning
+	}
+	if summary != "" {
+		data["summary"] = summary
+	}
 
 	event := bus.NewEvent(events.PromptComplete, "agent-manager", data)
 	// Publish on task-specific subject so orchestrator can subscribe
@@ -1369,10 +1392,6 @@ func (m *Manager) publishPromptComplete(instance *AgentInstance, agentMessage st
 			zap.String("instance_id", instance.ID),
 			zap.String("task_id", instance.TaskID),
 			zap.Error(err))
-	} else {
-		m.logger.Info("published prompt_complete event",
-			zap.String("task_id", instance.TaskID),
-			zap.Int("message_length", len(agentMessage)))
 	}
 }
 
@@ -1382,7 +1401,11 @@ func (m *Manager) publishPromptComplete(instance *AgentInstance, agentMessage st
 func (m *Manager) flushMessageBufferAsComment(instance *AgentInstance) {
 	instance.messageMu.Lock()
 	agentMessage := instance.messageBuffer.String()
+	reasoning := instance.reasoningBuffer.String()
+	summary := instance.summaryBuffer.String()
 	instance.messageBuffer.Reset()
+	instance.reasoningBuffer.Reset()
+	instance.summaryBuffer.Reset()
 	instance.messageMu.Unlock()
 
 	// Only publish if there's actual content (ignore whitespace-only)
@@ -1391,13 +1414,8 @@ func (m *Manager) flushMessageBufferAsComment(instance *AgentInstance) {
 		return
 	}
 
-	m.logger.Debug("flushing message buffer as step comment",
-		zap.String("instance_id", instance.ID),
-		zap.String("task_id", instance.TaskID),
-		zap.Int("message_length", len(agentMessage)))
-
 	// Reuse the prompt_complete event type - the orchestrator handles it the same way
-	m.publishPromptComplete(instance, agentMessage)
+	m.publishPromptComplete(instance, agentMessage, reasoning, summary)
 }
 
 // publishToolCall publishes a tool call start event (to be saved as a comment)
@@ -1682,9 +1700,11 @@ func (m *Manager) PromptAgent(ctx context.Context, instanceID string, prompt str
 	// Set status to RUNNING while processing
 	instance.Status = v1.AgentStatusRunning
 
-	// Clear message buffer before starting new prompt
+	// Clear buffers before starting new prompt
 	instance.messageMu.Lock()
 	instance.messageBuffer.Reset()
+	instance.reasoningBuffer.Reset()
+	instance.summaryBuffer.Reset()
 	instance.messageMu.Unlock()
 
 	m.mu.Unlock()
@@ -1699,10 +1719,12 @@ func (m *Manager) PromptAgent(ctx context.Context, instanceID string, prompt str
 		return nil, err
 	}
 
-	// Extract accumulated message from buffer
+	// Extract accumulated content from buffers
 	instance.messageMu.Lock()
 	agentMessage := instance.messageBuffer.String()
 	instance.messageBuffer.Reset()
+	instance.reasoningBuffer.Reset()
+	instance.summaryBuffer.Reset()
 	instance.messageMu.Unlock()
 
 	result := &PromptResult{
@@ -1711,7 +1733,7 @@ func (m *Manager) PromptAgent(ctx context.Context, instanceID string, prompt str
 	}
 
 	// Publish prompt_complete event with the agent's response (for saving as comment)
-	m.publishPromptComplete(instance, agentMessage)
+	m.publishPromptComplete(instance, agentMessage, "", "")
 
 	// Prompt completed - mark as READY for next prompt
 	if err := m.MarkReady(instanceID); err != nil {
