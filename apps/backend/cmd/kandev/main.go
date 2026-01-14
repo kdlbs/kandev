@@ -618,6 +618,25 @@ func main() {
 		log.Info("Subscribed to git status events for WebSocket broadcasting")
 	}
 
+	// Subscribe to file change events and broadcast to WebSocket subscribers
+	_, err = eventBus.Subscribe(events.BuildFileChangeWildcardSubject(), func(ctx context.Context, event *bus.Event) error {
+		data := event.Data
+		taskID, _ := data["task_id"].(string)
+		if taskID == "" {
+			return nil
+		}
+
+		// Broadcast file change notification to task subscribers
+		notification, _ := ws.NewNotification("workspace.file.changes", data)
+		gateway.Hub.BroadcastToTask(taskID, notification)
+		return nil
+	})
+	if err != nil {
+		log.Error("Failed to subscribe to file change events", zap.Error(err))
+	} else {
+		log.Info("Subscribed to file change events for WebSocket broadcasting")
+	}
+
 	// ============================================
 	// HTTP SERVER (WebSocket + HTTP endpoints)
 	// ============================================

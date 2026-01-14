@@ -44,19 +44,26 @@ export function FileBrowser({ taskId, onOpenFile }: FileBrowserProps) {
     loadTree();
   }, [taskId]);
 
-  // Subscribe to file changes
+  // Subscribe to file changes and refresh tree
   useEffect(() => {
     const client = getWebSocketClient();
     if (!client) return;
 
-    const unsubscribe = client.on('workspace.file.changes', (message) => {
+    const unsubscribe = client.on('workspace.file.changes', async (message) => {
       const payload = message.payload as FileChangeNotificationPayload;
       console.log('File changed:', payload);
-      // TODO: Update tree based on file changes
+
+      // Refresh the root tree when any file changes
+      try {
+        const response = await requestFileTree(client, taskId, '', 1);
+        setTree(response.root);
+      } catch (error) {
+        console.error('Failed to refresh file tree:', error);
+      }
     });
 
     return unsubscribe;
-  }, []);
+  }, [taskId]);
 
   const toggleExpand = useCallback(async (node: FileTreeNode) => {
     if (!node.is_dir) return;
