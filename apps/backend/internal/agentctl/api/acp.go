@@ -17,10 +17,17 @@ type InitializeRequest struct {
 	ClientVersion string `json:"client_version"`
 }
 
+// AgentInfoResponse contains information about the connected agent.
+type AgentInfoResponse struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+}
+
 // InitializeResponse is the response to an initialize call
 type InitializeResponse struct {
-	Success bool   `json:"success"`
-	Error   string `json:"error,omitempty"`
+	Success   bool               `json:"success"`
+	AgentInfo *AgentInfoResponse `json:"agent_info,omitempty"`
+	Error     string             `json:"error,omitempty"`
 }
 
 func (s *Server) handleACPInitialize(c *gin.Context) {
@@ -55,8 +62,18 @@ func (s *Server) handleACPInitialize(c *gin.Context) {
 		return
 	}
 
+	// Get agent info after successful initialization
+	var agentInfoResp *AgentInfoResponse
+	if info := adapter.GetAgentInfo(); info != nil {
+		agentInfoResp = &AgentInfoResponse{
+			Name:    info.Name,
+			Version: info.Version,
+		}
+	}
+
 	c.JSON(http.StatusOK, InitializeResponse{
-		Success: true,
+		Success:   true,
+		AgentInfo: agentInfoResp,
 	})
 }
 
@@ -104,9 +121,7 @@ func (s *Server) handleACPNewSession(c *gin.Context) {
 		return
 	}
 
-	// Store session ID
-	s.procMgr.SetSessionID(sessionID)
-
+	// Session ID is stored in the adapter - no need to duplicate in Manager
 	c.JSON(http.StatusOK, NewSessionResponse{
 		Success:   true,
 		SessionID: sessionID,

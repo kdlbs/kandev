@@ -22,6 +22,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/instance"
 	"github.com/kandev/kandev/internal/agentctl/process"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/pkg/agent"
 	"go.uber.org/zap"
 )
 
@@ -42,7 +43,7 @@ func main() {
 
 	// Override with CLI flags if provided
 	if *protocolFlag != "" {
-		cfg.DefaultProtocol = config.Protocol(*protocolFlag)
+		cfg.DefaultProtocol = agent.Protocol(*protocolFlag)
 	}
 	if *agentCommandFlag != "" {
 		cfg.DefaultAgentCommand = *agentCommandFlag

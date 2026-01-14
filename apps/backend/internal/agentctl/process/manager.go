@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/adapter"
 	"github.com/kandev/kandev/internal/agentctl/config"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/pkg/agent"
 	"go.uber.org/zap"
 )
 
@@ -70,8 +71,7 @@ type Manager struct {
 	workspaceTracker *WorkspaceTracker
 
 	// Protocol adapter for agent communication
-	adapter   adapter.AgentAdapter
-	sessionID string
+	adapter adapter.AgentAdapter
 
 	// Session update notifications (protocol-agnostic)
 	updatesCh chan adapter.SessionUpdate
@@ -218,7 +218,7 @@ func (m *Manager) Start(ctx context.Context) error {
 func (m *Manager) createAdapter() error {
 	protocol := m.cfg.Protocol
 	if protocol == "" {
-		protocol = config.ProtocolACP // Default to ACP
+		protocol = agent.ProtocolACP // Default to ACP
 	}
 
 	adapterCfg := &adapter.Config{
@@ -227,14 +227,14 @@ func (m *Manager) createAdapter() error {
 	}
 
 	switch protocol {
-	case config.ProtocolACP:
+	case agent.ProtocolACP:
 		m.adapter = adapter.NewACPAdapter(m.stdin, m.stdout, adapterCfg, m.logger)
 	default:
 		return fmt.Errorf("unsupported protocol: %s", protocol)
 	}
 
 	// Set the permission handler
-	m.adapter.SetPermissionHandler(m.handleAdapterPermissionRequest)
+	m.adapter.SetPermissionHandler(m.handlePermissionRequest)
 
 	return nil
 }
@@ -261,11 +261,6 @@ func (m *Manager) forwardUpdates() {
 	}
 }
 
-// handleAdapterPermissionRequest handles permission requests from the adapter
-func (m *Manager) handleAdapterPermissionRequest(ctx context.Context, req *adapter.PermissionRequest) (*adapter.PermissionResponse, error) {
-	return m.handlePermissionRequest(ctx, req)
-}
-
 // GetUpdates returns the channel for session update notifications
 func (m *Manager) GetUpdates() <-chan adapter.SessionUpdate {
 	return m.updatesCh
@@ -278,18 +273,17 @@ func (m *Manager) GetAdapter() adapter.AgentAdapter {
 	return m.adapter
 }
 
-// GetSessionID returns the current session ID
+// GetSessionID returns the current session ID from the adapter.
+// The adapter is the single source of truth for session ID.
 func (m *Manager) GetSessionID() string {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.sessionID
-}
+	a := m.adapter
+	m.mu.RUnlock()
 
-// SetSessionID sets the current session ID
-func (m *Manager) SetSessionID(id string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.sessionID = id
+	if a != nil {
+		return a.GetSessionID()
+	}
+	return ""
 }
 
 // Stop stops the agent process
@@ -347,8 +341,6 @@ func (m *Manager) Stop(ctx context.Context) error {
 	return nil
 }
 
-
-
 // readStderr reads and logs stderr from the agent
 func (m *Manager) readStderr() {
 	defer m.wg.Done()
@@ -384,8 +376,6 @@ func (m *Manager) waitForExit() {
 
 	m.status.Store(StatusStopped)
 }
-
-
 
 // GetProcessInfo returns information about the process
 func (m *Manager) GetProcessInfo() map[string]interface{} {

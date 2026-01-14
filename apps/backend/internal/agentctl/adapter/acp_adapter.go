@@ -30,6 +30,9 @@ type ACPAdapter struct {
 	acpConn   *acp.ClientSideConnection
 	sessionID string
 
+	// Agent info (populated after Initialize)
+	agentInfo *AgentInfo
+
 	// Update channel
 	updatesCh chan SessionUpdate
 
@@ -71,9 +74,37 @@ func (a *ACPAdapter) Initialize(ctx context.Context) error {
 	a.acpConn = acp.NewClientSideConnection(a.acpClient, a.stdin, a.stdout)
 	a.acpConn.SetLogger(slog.Default().With("component", "acp-conn"))
 
-	a.logger.Info("ACP adapter initialized")
+	// Perform ACP handshake - this exchanges capabilities with the agent
+	resp, err := a.acpConn.Initialize(ctx, acp.InitializeRequest{
+		ProtocolVersion: acp.ProtocolVersionNumber,
+		ClientInfo: &acp.Implementation{
+			Name:    "kandev-agentctl",
+			Version: "1.0.0",
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("ACP initialize handshake failed: %w", err)
+	}
+
+	// Store agent info
+	a.agentInfo = &AgentInfo{
+		Name:    "unknown",
+		Version: "unknown",
+	}
+	if resp.AgentInfo != nil {
+		a.agentInfo.Name = resp.AgentInfo.Name
+		a.agentInfo.Version = resp.AgentInfo.Version
+	}
+	a.logger.Info("ACP adapter initialized",
+		zap.String("agent_name", a.agentInfo.Name),
+		zap.String("agent_version", a.agentInfo.Version))
 
 	return nil
+}
+
+// GetAgentInfo returns information about the connected agent.
+func (a *ACPAdapter) GetAgentInfo() *AgentInfo {
+	return a.agentInfo
 }
 
 // NewSession creates a new agent session.
@@ -233,12 +264,43 @@ func (a *ACPAdapter) convertNotification(n acp.SessionNotification) *SessionUpda
 		}
 
 	case u.ToolCall != nil:
+		// Extract rich tool call information
+		args := map[string]interface{}{}
+
+		// Add tool kind
+		if u.ToolCall.Kind != "" {
+			args["kind"] = string(u.ToolCall.Kind)
+		}
+
+		// Add locations (file paths with line numbers)
+		if len(u.ToolCall.Locations) > 0 {
+			locations := make([]map[string]interface{}, len(u.ToolCall.Locations))
+			for i, loc := range u.ToolCall.Locations {
+				locMap := map[string]interface{}{"path": loc.Path}
+				if loc.Line != nil {
+					locMap["line"] = *loc.Line
+				}
+				locations[i] = locMap
+			}
+			args["locations"] = locations
+
+			// Also set primary path for convenience
+			args["path"] = u.ToolCall.Locations[0].Path
+		}
+
+		// Add raw input if available
+		if u.ToolCall.RawInput != nil {
+			args["raw_input"] = u.ToolCall.RawInput
+		}
+
 		return &SessionUpdate{
 			Type:       "tool_call",
 			SessionID:  string(n.SessionId),
 			ToolCallID: string(u.ToolCall.ToolCallId),
+			ToolName:   string(u.ToolCall.Kind), // Kind is effectively the tool name
 			ToolTitle:  u.ToolCall.Title,
 			ToolStatus: string(u.ToolCall.Status),
+			ToolArgs:   args,
 		}
 
 	case u.ToolCallUpdate != nil:
@@ -272,8 +334,10 @@ func (a *ACPAdapter) convertNotification(n acp.SessionNotification) *SessionUpda
 	return nil
 }
 
-// handlePermissionRequest converts permission request to adapter format.
-func (a *ACPAdapter) handlePermissionRequest(ctx context.Context, req *acpclient.PermissionRequest) (*acpclient.PermissionResponse, error) {
+// handlePermissionRequest handles permission requests from the agent.
+// Since both acpclient and adapter now use the shared types package,
+// no conversion is needed - we just forward to the handler.
+func (a *ACPAdapter) handlePermissionRequest(ctx context.Context, req *PermissionRequest) (*PermissionResponse, error) {
 	a.mu.RLock()
 	handler := a.permissionHandler
 	a.mu.RUnlock()
@@ -281,39 +345,14 @@ func (a *ACPAdapter) handlePermissionRequest(ctx context.Context, req *acpclient
 	if handler == nil {
 		// Auto-approve if no handler
 		if len(req.Options) > 0 {
-			return &acpclient.PermissionResponse{OptionID: req.Options[0].OptionID}, nil
+			return &PermissionResponse{OptionID: req.Options[0].OptionID}, nil
 		}
-		return &acpclient.PermissionResponse{Cancelled: true}, nil
+		return &PermissionResponse{Cancelled: true}, nil
 	}
 
-	// Convert to adapter types
-	options := make([]PermissionOption, len(req.Options))
-	for i, opt := range req.Options {
-		options[i] = PermissionOption{
-			OptionID: opt.OptionID,
-			Name:     opt.Name,
-			Kind:     opt.Kind,
-		}
-	}
-
-	adapterReq := &PermissionRequest{
-		SessionID:  req.SessionID,
-		ToolCallID: req.ToolCallID,
-		Title:      req.Title,
-		Options:    options,
-	}
-
-	resp, err := handler(ctx, adapterReq)
-	if err != nil {
-		return nil, err
-	}
-
-	return &acpclient.PermissionResponse{
-		OptionID:  resp.OptionID,
-		Cancelled: resp.Cancelled,
-	}, nil
+	// Forward directly to handler - types are already compatible
+	return handler(ctx, req)
 }
 
 // Verify interface implementation
 var _ AgentAdapter = (*ACPAdapter)(nil)
-

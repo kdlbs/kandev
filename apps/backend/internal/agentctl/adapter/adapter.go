@@ -4,6 +4,18 @@ package adapter
 
 import (
 	"context"
+
+	"github.com/kandev/kandev/internal/agentctl/types"
+)
+
+// Re-export permission types from the shared types package for convenience.
+// This allows users of the adapter package to access these types without
+// importing the types package directly.
+type (
+	PermissionRequest  = types.PermissionRequest
+	PermissionResponse = types.PermissionResponse
+	PermissionOption   = types.PermissionOption
+	PermissionHandler  = types.PermissionHandler
 )
 
 // SessionUpdate is a protocol-agnostic update from the agent.
@@ -43,29 +55,11 @@ type PlanEntry struct {
 	Priority    string `json:"priority,omitempty"`    // Relative importance
 }
 
-// PermissionRequest represents a permission request from the agent
-type PermissionRequest struct {
-	SessionID  string             `json:"session_id"`
-	ToolCallID string             `json:"tool_call_id"`
-	Title      string             `json:"title"`
-	Options    []PermissionOption `json:"options"`
+// AgentInfo contains information about the connected agent.
+type AgentInfo struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
 }
-
-// PermissionOption represents a permission option
-type PermissionOption struct {
-	OptionID string `json:"option_id"`
-	Name     string `json:"name"`
-	Kind     string `json:"kind"` // "allow_once", "allow_always", "deny", etc.
-}
-
-// PermissionResponse is the response to a permission request
-type PermissionResponse struct {
-	OptionID  string `json:"option_id"`
-	Cancelled bool   `json:"cancelled"`
-}
-
-// PermissionHandler is called when the agent requests permission for an action
-type PermissionHandler func(ctx context.Context, req *PermissionRequest) (*PermissionResponse, error)
 
 // AgentAdapter defines the interface for protocol adapters.
 // Each adapter translates a specific protocol (ACP, REST, MCP, etc.) into the
@@ -75,6 +69,10 @@ type AgentAdapter interface {
 	// For subprocess-based agents (ACP), this sends the initialize request.
 	// For HTTP-based agents (REST), this might do a health check.
 	Initialize(ctx context.Context) error
+
+	// GetAgentInfo returns information about the connected agent.
+	// Returns nil if Initialize has not been called yet.
+	GetAgentInfo() *AgentInfo
 
 	// NewSession creates a new agent session and returns the session ID.
 	NewSession(ctx context.Context) (string, error)
@@ -110,9 +108,6 @@ type Config struct {
 
 	// AutoApprove automatically approves permission requests
 	AutoApprove bool
-
-	// For subprocess-based adapters (ACP)
-	Command []string // Command to run the agent
 
 	// For HTTP-based adapters (REST)
 	BaseURL    string            // Base URL of the agent's HTTP API

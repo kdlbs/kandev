@@ -11,19 +11,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/pkg/agent"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
-)
-
-// AgentProtocol defines the communication protocol used by an agent
-type AgentProtocol string
-
-const (
-	// ProtocolACP is the Agent Communication Protocol (JSON-RPC over stdin/stdout)
-	ProtocolACP AgentProtocol = "acp"
-	// ProtocolREST is for agents with REST APIs
-	ProtocolREST AgentProtocol = "rest"
-	// ProtocolMCP is the Model Context Protocol
-	ProtocolMCP AgentProtocol = "mcp"
 )
 
 // AgentTypeConfig holds configuration for an agent type
@@ -45,7 +34,7 @@ type AgentTypeConfig struct {
 	ModelFlag      string            `json:"model_flag,omitempty"`   // CLI flag for model selection (e.g., "--model")
 
 	// Protocol configuration
-	Protocol       AgentProtocol     `json:"protocol,omitempty"`        // Communication protocol: "acp", "rest", "mcp"
+	Protocol       agent.Protocol    `json:"protocol,omitempty"`        // Communication protocol: "acp", "rest", "mcp"
 	ProtocolConfig map[string]string `json:"protocol_config,omitempty"` // Protocol-specific settings (e.g., base_url for REST)
 }
 

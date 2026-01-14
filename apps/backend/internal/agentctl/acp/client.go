@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/coder/acp-go-sdk"
+	"github.com/kandev/kandev/internal/agentctl/types"
 	"go.uber.org/zap"
 )
 
@@ -18,28 +19,7 @@ type UpdateHandler func(notification acp.SessionNotification)
 
 // PermissionRequestHandler is called when the agent requests permission
 // Returns the selected option ID, or empty string with cancelled=true to cancel
-type PermissionRequestHandler func(ctx context.Context, req *PermissionRequest) (*PermissionResponse, error)
-
-// PermissionRequest represents a permission request from the agent
-type PermissionRequest struct {
-	SessionID   string              `json:"session_id"`
-	ToolCallID  string              `json:"tool_call_id"`
-	Title       string              `json:"title"`
-	Options     []PermissionOption  `json:"options"`
-}
-
-// PermissionOption represents a permission choice
-type PermissionOption struct {
-	OptionID string `json:"option_id"`
-	Name     string `json:"name"`
-	Kind     string `json:"kind"` // allow_once, allow_always, reject_once, reject_always
-}
-
-// PermissionResponse is the user's response to a permission request
-type PermissionResponse struct {
-	OptionID  string `json:"option_id,omitempty"`
-	Cancelled bool   `json:"cancelled,omitempty"`
-}
+type PermissionRequestHandler func(ctx context.Context, req *types.PermissionRequest) (*types.PermissionResponse, error)
 
 // Client implements acp.Client interface and handles all agent requests
 type Client struct {
@@ -148,10 +128,10 @@ func (c *Client) RequestPermission(ctx context.Context, p acp.RequestPermissionR
 
 // forwardPermissionRequest forwards the permission request to an external handler
 func (c *Client) forwardPermissionRequest(ctx context.Context, handler PermissionRequestHandler, p acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error) {
-	// Convert ACP types to our types
-	options := make([]PermissionOption, len(p.Options))
+	// Convert ACP types to shared types
+	options := make([]types.PermissionOption, len(p.Options))
 	for i, opt := range p.Options {
-		options[i] = PermissionOption{
+		options[i] = types.PermissionOption{
 			OptionID: string(opt.OptionId),
 			Name:     opt.Name,
 			Kind:     string(opt.Kind),
@@ -163,7 +143,7 @@ func (c *Client) forwardPermissionRequest(ctx context.Context, handler Permissio
 		title = *p.ToolCall.Title
 	}
 
-	req := &PermissionRequest{
+	req := &types.PermissionRequest{
 		SessionID:  string(p.SessionId),
 		ToolCallID: string(p.ToolCall.ToolCallId),
 		Title:      title,

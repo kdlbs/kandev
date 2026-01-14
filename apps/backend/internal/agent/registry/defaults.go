@@ -1,5 +1,7 @@
 package registry
 
+import "github.com/kandev/kandev/pkg/agent"
+
 // DefaultAgents returns the default agent configurations
 func DefaultAgents() []*AgentTypeConfig {
 	return []*AgentTypeConfig{
@@ -27,7 +29,7 @@ func DefaultAgents() []*AgentTypeConfig {
 			Capabilities: []string{"code_generation", "code_review", "refactoring", "testing", "shell_execution"},
 			Enabled:      true,
 			ModelFlag:    "--model",
-			Protocol:     ProtocolACP,
+			Protocol:     agent.ProtocolACP,
 		},
 		{
 			ID:          "claude-agent",
@@ -50,7 +52,7 @@ func DefaultAgents() []*AgentTypeConfig {
 			Capabilities: []string{"code_generation", "code_review", "refactoring", "testing", "shell_execution"},
 			Enabled:      true,
 			ModelFlag:    "--model",
-			Protocol:     ProtocolACP,
+			Protocol:     agent.ProtocolACP,
 		},
 		{
 			ID:          "codex-agent",
@@ -73,7 +75,7 @@ func DefaultAgents() []*AgentTypeConfig {
 			Capabilities: []string{"code_generation", "code_review", "refactoring", "testing", "shell_execution"},
 			Enabled:      true,
 			ModelFlag:    "--model",
-			Protocol:     ProtocolACP,
+			Protocol:     agent.ProtocolACP,
 		},
 		{
 			ID:          "gemini-agent",
@@ -96,7 +98,7 @@ func DefaultAgents() []*AgentTypeConfig {
 			Capabilities: []string{"code_generation", "code_review", "refactoring", "testing", "shell_execution"},
 			Enabled:      true,
 			ModelFlag:    "--model",
-			Protocol:     ProtocolACP,
+			Protocol:     agent.ProtocolACP,
 		},
 		{
 			ID:          "opencode-agent",
@@ -119,7 +121,7 @@ func DefaultAgents() []*AgentTypeConfig {
 			Capabilities: []string{"code_generation", "code_review", "refactoring", "testing", "shell_execution"},
 			Enabled:      true,
 			ModelFlag:    "--model",
-			Protocol:     ProtocolACP,
+			Protocol:     agent.ProtocolACP,
 		},
 		{
 			ID:          "copilot-agent",
@@ -142,7 +144,7 @@ func DefaultAgents() []*AgentTypeConfig {
 			Capabilities: []string{"code_generation", "code_review", "refactoring", "testing", "shell_execution"},
 			Enabled:      true,
 			ModelFlag:    "--model",
-			Protocol:     ProtocolACP,
+			Protocol:     agent.ProtocolACP,
 		},
 	}
 }
