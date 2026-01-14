@@ -1,6 +1,6 @@
 import { PageClient } from '@/app/page-client';
 import { StateHydrator } from '@/components/state-hydrator';
-import { fetchBoardSnapshot, fetchBoards, fetchUserSettings, fetchWorkspaces } from '@/lib/ssr/http';
+import { fetchBoardSnapshot, fetchUserSettings, listBoards, listRepositories, listWorkspaces } from '@/lib/http';
 import { snapshotToState } from '@/lib/ssr/mapper';
 import type { AppState } from '@/lib/state/store';
 
@@ -18,8 +18,8 @@ export default async function Page({ searchParams }: PageProps) {
     const boardIdParam = Array.isArray(boardParam) ? boardParam[0] : boardParam;
 
     const [workspaces, userSettingsResponse] = await Promise.all([
-      fetchWorkspaces(),
-      fetchUserSettings().catch(() => null),
+      listWorkspaces({ cache: 'no-store' }),
+      fetchUserSettings({ cache: 'no-store' }).catch(() => null),
     ]);
     const userSettings = userSettingsResponse?.settings;
     const settingsWorkspaceId = userSettings?.workspace_id || null;
@@ -58,7 +58,10 @@ export default async function Page({ searchParams }: PageProps) {
       );
     }
 
-    const boardList = await fetchBoards(activeWorkspaceId);
+    const [boardList, repositoriesResponse] = await Promise.all([
+      listBoards(activeWorkspaceId, { cache: 'no-store' }),
+      listRepositories(activeWorkspaceId, { cache: 'no-store' }).catch(() => ({ repositories: [] })),
+    ]);
     const boardId =
       boardList.boards.find((board) => board.id === boardIdParam)?.id ??
       boardList.boards.find((board) => board.id === settingsBoardId)?.id ??
@@ -73,6 +76,11 @@ export default async function Page({ searchParams }: PageProps) {
         })),
         activeId: boardId ?? null,
       },
+      repositories: {
+        itemsByWorkspaceId: { [activeWorkspaceId]: repositoriesResponse.repositories },
+        loadingByWorkspaceId: { [activeWorkspaceId]: false },
+        loadedByWorkspaceId: { [activeWorkspaceId]: true },
+      },
     };
 
     if (!boardId) {
@@ -84,7 +92,7 @@ export default async function Page({ searchParams }: PageProps) {
       );
     }
 
-    const snapshot = await fetchBoardSnapshot(boardId);
+    const snapshot = await fetchBoardSnapshot(boardId, { cache: 'no-store' });
     initialState = { ...initialState, ...snapshotToState(snapshot) };
     return (
       <>

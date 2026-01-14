@@ -1,6 +1,6 @@
 'use client';
 
-import { use, useEffect, useMemo, useState } from 'react';
+import { use, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { IconCpu, IconServer, IconTrash } from '@tabler/icons-react';
 import { Button } from '@kandev/ui/button';
@@ -16,59 +16,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@kandev/ui/dialog';
-import { getExecutorAction, updateExecutorAction, deleteExecutorAction } from '@/app/actions/executors';
+import { updateExecutorAction, deleteExecutorAction } from '@/app/actions/executors';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import type { Executor } from '@/lib/types/http';
+import { useAppStore } from '@/components/state-provider';
 
 export default function ExecutorEditPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
-  const [executor, setExecutor] = useState<Executor | null>(null);
-  const [savedExecutor, setSavedExecutor] = useState<Executor | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [deleteConfirmText, setDeleteConfirmText] = useState('');
-  const [isSaving, setIsSaving] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
-
-  useEffect(() => {
-    getExecutorAction(id)
-      .then((data) => {
-        setExecutor(data);
-        setSavedExecutor(data);
-      })
-      .catch(() => setExecutor(null))
-      .finally(() => setIsLoading(false));
-  }, [id]);
-
-  const isSystem = executor?.is_system ?? false;
-  const isLocalDocker = executor?.type === 'local_docker';
-
-  const ExecutorIcon = useMemo(() => {
-    return executor?.type === 'local_pc' ? IconCpu : IconServer;
-  }, [executor?.type]);
-
-  const isDirty = useMemo(() => {
-    if (!executor || !savedExecutor) return false;
-    return (
-      executor.name !== savedExecutor.name ||
-      executor.type !== savedExecutor.type ||
-      executor.status !== savedExecutor.status ||
-      JSON.stringify(executor.config ?? {}) !== JSON.stringify(savedExecutor.config ?? {})
-    );
-  }, [executor, savedExecutor]);
-
-  if (isLoading) {
-    return (
-      <div>
-        <Card>
-          <CardContent className="py-12 text-center">
-            <p className="text-muted-foreground">Loading executor...</p>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
+  const executor = useAppStore((state) => state.executors.items.find((item) => item.id === id) ?? null);
 
   if (!executor) {
     return (
@@ -85,21 +41,53 @@ export default function ExecutorEditPage({ params }: { params: Promise<{ id: str
     );
   }
 
+  return <ExecutorEditForm key={executor.id} executor={executor} />;
+}
+
+type ExecutorEditFormProps = {
+  executor: Executor;
+};
+
+function ExecutorEditForm({ executor }: ExecutorEditFormProps) {
+  const router = useRouter();
+  const [draft, setDraft] = useState<Executor>({ ...executor });
+  const [savedExecutor, setSavedExecutor] = useState<Executor>({ ...executor });
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const isSystem = draft.is_system ?? false;
+  const isLocalDocker = draft.type === 'local_docker';
+
+  const ExecutorIcon = useMemo(() => {
+    return draft.type === 'local_pc' ? IconCpu : IconServer;
+  }, [draft.type]);
+
+  const isDirty = useMemo(() => {
+    return (
+      draft.name !== savedExecutor.name ||
+      draft.type !== savedExecutor.type ||
+      draft.status !== savedExecutor.status ||
+      JSON.stringify(draft.config ?? {}) !== JSON.stringify(savedExecutor.config ?? {})
+    );
+  }, [draft, savedExecutor]);
+
   const handleSaveExecutor = async () => {
-    if (!executor) return;
+    if (!draft) return;
     setIsSaving(true);
     try {
       const payload = {
-        name: executor.name,
-        type: executor.type,
-        status: executor.status,
-        config: executor.config ?? {},
+        name: draft.name,
+        type: draft.type,
+        status: draft.status,
+        config: draft.config ?? {},
       };
       const client = getWebSocketClient();
       const updated = client
-        ? await client.request<Executor>('executor.update', { id: executor.id, ...payload })
-        : await updateExecutorAction(executor.id, payload);
-      setExecutor(updated);
+        ? await client.request<Executor>('executor.update', { id: draft.id, ...payload })
+        : await updateExecutorAction(draft.id, payload);
+      setDraft(updated);
       setSavedExecutor(updated);
       router.push('/settings/executors');
     } finally {
@@ -113,9 +101,9 @@ export default function ExecutorEditPage({ params }: { params: Promise<{ id: str
     try {
       const client = getWebSocketClient();
       if (client) {
-        await client.request('executor.delete', { id: executor.id });
+        await client.request('executor.delete', { id: draft.id });
       } else {
-        await deleteExecutorAction(executor.id);
+        await deleteExecutorAction(draft.id);
       }
       router.push('/settings/executors');
     } finally {
@@ -128,11 +116,11 @@ export default function ExecutorEditPage({ params }: { params: Promise<{ id: str
     <div className="space-y-8">
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
-          <h2 className="text-2xl font-bold">{executor.name}</h2>
+          <h2 className="text-2xl font-bold">{draft.name}</h2>
           <p className="text-sm text-muted-foreground mt-1">
-            {executor.type === 'local_pc'
+            {draft.type === 'local_pc'
               ? 'Uses locally installed agents on this machine.'
-              : executor.type === 'local_docker'
+              : draft.type === 'local_docker'
               ? 'Runs Docker containers on this machine.'
               : 'Remote Docker support is coming soon.'}
           </p>
@@ -151,14 +139,14 @@ export default function ExecutorEditPage({ params }: { params: Promise<{ id: str
         <CardContent className="space-y-4">
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <ExecutorIcon className="h-4 w-4" />
-            <span>{executor.type}</span>
+            <span>{draft.type}</span>
           </div>
           <div className="space-y-2">
             <Label htmlFor="executor-name">Executor name</Label>
             <Input
               id="executor-name"
-              value={executor.name}
-              onChange={(event) => setExecutor({ ...executor, name: event.target.value })}
+              value={draft.name}
+              onChange={(event) => setDraft({ ...draft, name: event.target.value })}
               disabled={isSystem}
             />
             {isSystem && (
@@ -178,11 +166,11 @@ export default function ExecutorEditPage({ params }: { params: Promise<{ id: str
             <Label htmlFor="docker-host">Docker host env value</Label>
             <Input
               id="docker-host"
-              value={executor.config?.docker_host ?? ''}
+              value={draft.config?.docker_host ?? ''}
               onChange={(event) =>
-                setExecutor({
-                  ...executor,
-                  config: { ...(executor.config ?? {}), docker_host: event.target.value },
+                setDraft({
+                  ...draft,
+                  config: { ...(draft.config ?? {}), docker_host: event.target.value },
                 })
               }
               placeholder="unix:///var/run/docker.sock"
@@ -194,7 +182,7 @@ export default function ExecutorEditPage({ params }: { params: Promise<{ id: str
         </Card>
       )}
 
-      {executor.type === 'remote_docker' && (
+      {draft.type === 'remote_docker' && (
         <Card>
           <CardHeader>
             <CardTitle>Remote Docker</CardTitle>
@@ -223,22 +211,17 @@ export default function ExecutorEditPage({ params }: { params: Promise<{ id: str
         <>
           <Card className="border-destructive">
             <CardHeader>
-              <CardTitle className="text-destructive">Danger Zone</CardTitle>
-              <CardDescription>Irreversible actions that permanently delete this executor.</CardDescription>
+              <CardTitle className="text-destructive">Delete Executor</CardTitle>
             </CardHeader>
-            <CardContent>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-medium">Delete this executor</p>
-                  <p className="text-sm text-muted-foreground">
-                    Once deleted, environments using this executor will need to be updated.
-                  </p>
-                </div>
-                <Button variant="destructive" onClick={() => setDeleteDialogOpen(true)}>
-                  <IconTrash className="h-4 w-4 mr-2" />
-                  Delete Executor
-                </Button>
+            <CardContent className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium">Remove this executor</p>
+                <p className="text-xs text-muted-foreground">This action cannot be undone.</p>
               </div>
+              <Button variant="destructive" onClick={() => setDeleteDialogOpen(true)}>
+                <IconTrash className="h-4 w-4 mr-2" />
+                Delete
+              </Button>
             </CardContent>
           </Card>
 
@@ -247,17 +230,15 @@ export default function ExecutorEditPage({ params }: { params: Promise<{ id: str
               <DialogHeader>
                 <DialogTitle>Delete Executor</DialogTitle>
                 <DialogDescription>
-                  This action cannot be undone. This will permanently delete the executor &quot;
-                  {executor.name}&quot;.
+                Type &quot;delete&quot; to confirm deletion. This action cannot be undone.
                 </DialogDescription>
               </DialogHeader>
-              <div className="space-y-4 py-4">
-                <p className="text-sm">
-                  Please type <span className="font-mono font-bold">delete</span> to confirm:
-                </p>
+              <div className="space-y-2">
+                <Label htmlFor="confirm-delete">Confirm Delete</Label>
                 <Input
+                  id="confirm-delete"
                   value={deleteConfirmText}
-                  onChange={(e) => setDeleteConfirmText(e.target.value)}
+                  onChange={(event) => setDeleteConfirmText(event.target.value)}
                   placeholder="delete"
                 />
               </div>
@@ -268,9 +249,9 @@ export default function ExecutorEditPage({ params }: { params: Promise<{ id: str
                 <Button
                   variant="destructive"
                   onClick={handleDeleteExecutor}
-                  disabled={deleteConfirmText !== 'delete'}
+                  disabled={deleteConfirmText !== 'delete' || isDeleting}
                 >
-                  {isDeleting ? 'Deleting...' : 'Delete Executor'}
+                  {isDeleting ? 'Deleting...' : 'Delete'}
                 </Button>
               </DialogFooter>
             </DialogContent>

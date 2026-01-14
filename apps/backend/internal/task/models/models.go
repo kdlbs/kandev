@@ -280,6 +280,7 @@ type Environment struct {
 	ID           string            `json:"id"`
 	Name         string            `json:"name"`
 	Kind         EnvironmentKind   `json:"kind"`
+	IsSystem     bool              `json:"is_system"`
 	WorktreeRoot string            `json:"worktree_root,omitempty"`
 	ImageTag     string            `json:"image_tag,omitempty"`
 	Dockerfile   string            `json:"dockerfile,omitempty"`

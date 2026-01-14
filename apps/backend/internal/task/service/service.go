@@ -963,6 +963,7 @@ func (s *Service) CreateEnvironment(ctx context.Context, req *CreateEnvironmentR
 		ID:           uuid.New().String(),
 		Name:         req.Name,
 		Kind:         req.Kind,
+		IsSystem:     false,
 		WorktreeRoot: req.WorktreeRoot,
 		ImageTag:     req.ImageTag,
 		Dockerfile:   req.Dockerfile,
@@ -984,9 +985,9 @@ func (s *Service) UpdateEnvironment(ctx context.Context, id string, req *UpdateE
 	if err != nil {
 		return nil, err
 	}
-	if environment.ID == models.EnvironmentIDLocal {
-		if req.Name != nil || req.Kind != nil || req.WorktreeRoot != nil {
-			return nil, fmt.Errorf("local environment cannot be modified")
+	if environment.IsSystem {
+		if req.Name != nil || req.Kind != nil || req.ImageTag != nil || req.Dockerfile != nil || req.BuildConfig != nil {
+			return nil, fmt.Errorf("system environments can only update the worktree root")
 		}
 	}
 	if req.Name != nil {
@@ -1016,12 +1017,12 @@ func (s *Service) UpdateEnvironment(ctx context.Context, id string, req *UpdateE
 }
 
 func (s *Service) DeleteEnvironment(ctx context.Context, id string) error {
-	if id == models.EnvironmentIDLocal {
-		return fmt.Errorf("local environment cannot be deleted")
-	}
 	environment, err := s.repo.GetEnvironment(ctx, id)
 	if err != nil {
 		return err
+	}
+	if environment.IsSystem {
+		return fmt.Errorf("system environments cannot be deleted")
 	}
 	if err := s.repo.DeleteEnvironment(ctx, id); err != nil {
 		return err
@@ -1197,6 +1198,7 @@ func (s *Service) publishEnvironmentEvent(ctx context.Context, eventType string,
 		"id":            environment.ID,
 		"name":          environment.Name,
 		"kind":          environment.Kind,
+		"is_system":     environment.IsSystem,
 		"worktree_root": environment.WorktreeRoot,
 		"image_tag":     environment.ImageTag,
 		"dockerfile":    environment.Dockerfile,

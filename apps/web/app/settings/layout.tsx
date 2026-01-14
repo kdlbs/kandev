@@ -1,6 +1,12 @@
 import { SettingsLayoutClient } from '@/components/settings/settings-layout-client';
 import { StateHydrator } from '@/components/state-hydrator';
-import { fetchWorkspaces } from '@/lib/ssr/http';
+import {
+  listAgentDiscovery,
+  listAgents,
+  listEnvironments,
+  listExecutors,
+  listWorkspaces,
+} from '@/lib/http';
 
 export default function SettingsLayout({
   children,
@@ -15,7 +21,13 @@ export default function SettingsLayout({
 async function SettingsLayoutServer({ children }: { children: React.ReactNode }) {
   let initialState = {};
   try {
-    const workspaces = await fetchWorkspaces();
+    const [workspaces, executors, environments, agents, discovery] = await Promise.all([
+      listWorkspaces({ cache: 'no-store' }),
+      listExecutors({ cache: 'no-store' }),
+      listEnvironments({ cache: 'no-store' }),
+      listAgents({ cache: 'no-store' }),
+      listAgentDiscovery({ cache: 'no-store' }),
+    ]);
     initialState = {
       workspaces: {
         items: workspaces.workspaces.map((workspace) => ({
@@ -26,6 +38,32 @@ async function SettingsLayoutServer({ children }: { children: React.ReactNode })
           default_agent_profile_id: workspace.default_agent_profile_id ?? null,
         })),
         activeId: workspaces.workspaces[0]?.id ?? null,
+      },
+      executors: {
+        items: executors.executors,
+      },
+      environments: {
+        items: environments.environments,
+      },
+      agentProfiles: {
+        items: agents.agents.flatMap((agent) =>
+          agent.profiles.map((profile) => ({
+            id: profile.id,
+            label: `${agent.name} • ${profile.name}`,
+            agent_id: agent.id,
+          }))
+        ),
+      },
+      settingsAgents: {
+        items: agents.agents,
+      },
+      agentDiscovery: {
+        items: discovery.agents,
+      },
+      settingsData: {
+        executorsLoaded: true,
+        environmentsLoaded: true,
+        agentsLoaded: true,
       },
     };
   } catch {

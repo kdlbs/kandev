@@ -111,6 +111,7 @@ func (r *SQLiteRepository) initSchema() error {
 		id TEXT PRIMARY KEY,
 		name TEXT NOT NULL,
 		kind TEXT NOT NULL,
+		is_system INTEGER NOT NULL DEFAULT 0,
 		worktree_root TEXT DEFAULT '',
 		image_tag TEXT DEFAULT '',
 		dockerfile TEXT DEFAULT '',
@@ -280,6 +281,9 @@ func (r *SQLiteRepository) initSchema() error {
 		return err
 	}
 	if err := r.ensureColumn("columns", "color", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := r.ensureColumn("environments", "is_system", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
 
@@ -515,6 +519,12 @@ func (r *SQLiteRepository) ensureDefaultExecutorsAndEnvironments() error {
 				return err
 			}
 		}
+	} else {
+		if _, err := r.db.ExecContext(ctx, `
+			UPDATE executors SET is_system = 1 WHERE id = ?
+		`, models.ExecutorIDLocalPC); err != nil {
+			return err
+		}
 	}
 
 	var envCount int
@@ -524,9 +534,40 @@ func (r *SQLiteRepository) ensureDefaultExecutorsAndEnvironments() error {
 	if envCount == 0 {
 		now := time.Now().UTC()
 		if _, err := r.db.ExecContext(ctx, `
-			INSERT INTO environments (id, name, kind, worktree_root, image_tag, dockerfile, build_config, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, models.EnvironmentIDLocal, "Local", models.EnvironmentKindLocalPC, "~/kandev", "", "", "{}", now, now); err != nil {
+			INSERT INTO environments (id, name, kind, is_system, worktree_root, image_tag, dockerfile, build_config, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, models.EnvironmentIDLocal, "Local", models.EnvironmentKindLocalPC, boolToInt(true), "~/kandev", "", "", "{}", now, now); err != nil {
+			return err
+		}
+	} else {
+		var localCount int
+		if err := r.db.QueryRowContext(ctx, "SELECT COUNT(1) FROM environments WHERE id = ?", models.EnvironmentIDLocal).Scan(&localCount); err != nil {
+			return err
+		}
+		if localCount == 0 {
+			now := time.Now().UTC()
+			if _, err := r.db.ExecContext(ctx, `
+				INSERT INTO environments (id, name, kind, is_system, worktree_root, image_tag, dockerfile, build_config, created_at, updated_at)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			`, models.EnvironmentIDLocal, "Local", models.EnvironmentKindLocalPC, boolToInt(true), "~/kandev", "", "", "{}", now, now); err != nil {
+				return err
+			}
+		}
+		if _, err := r.db.ExecContext(ctx, `
+			UPDATE environments
+			SET is_system = 1,
+				image_tag = '',
+				dockerfile = '',
+				build_config = '{}'
+			WHERE id = ?
+		`, models.EnvironmentIDLocal); err != nil {
+			return err
+		}
+		if _, err := r.db.ExecContext(ctx, `
+			UPDATE environments
+			SET worktree_root = ?
+			WHERE id = ? AND (worktree_root IS NULL OR worktree_root = '')
+		`, "~/kandev", models.EnvironmentIDLocal); err != nil {
 			return err
 		}
 	}
@@ -1912,21 +1953,22 @@ func (r *SQLiteRepository) CreateEnvironment(ctx context.Context, environment *m
 	}
 
 	_, err = r.db.ExecContext(ctx, `
-		INSERT INTO environments (id, name, kind, worktree_root, image_tag, dockerfile, build_config, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, environment.ID, environment.Name, environment.Kind, environment.WorktreeRoot, environment.ImageTag, environment.Dockerfile, string(buildConfigJSON), environment.CreatedAt, environment.UpdatedAt)
+		INSERT INTO environments (id, name, kind, is_system, worktree_root, image_tag, dockerfile, build_config, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, environment.ID, environment.Name, environment.Kind, boolToInt(environment.IsSystem), environment.WorktreeRoot, environment.ImageTag, environment.Dockerfile, string(buildConfigJSON), environment.CreatedAt, environment.UpdatedAt)
 	return err
 }
 
 func (r *SQLiteRepository) GetEnvironment(ctx context.Context, id string) (*models.Environment, error) {
 	environment := &models.Environment{}
 	var buildConfigJSON string
+	var isSystem int
 
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, name, kind, worktree_root, image_tag, dockerfile, build_config, created_at, updated_at
+		SELECT id, name, kind, is_system, worktree_root, image_tag, dockerfile, build_config, created_at, updated_at
 		FROM environments WHERE id = ?
 	`, id).Scan(
-		&environment.ID, &environment.Name, &environment.Kind, &environment.WorktreeRoot,
+		&environment.ID, &environment.Name, &environment.Kind, &isSystem, &environment.WorktreeRoot,
 		&environment.ImageTag, &environment.Dockerfile, &buildConfigJSON,
 		&environment.CreatedAt, &environment.UpdatedAt,
 	)
@@ -1936,6 +1978,7 @@ func (r *SQLiteRepository) GetEnvironment(ctx context.Context, id string) (*mode
 	if err != nil {
 		return nil, err
 	}
+	environment.IsSystem = isSystem == 1
 	if buildConfigJSON != "" && buildConfigJSON != "{}" {
 		if err := json.Unmarshal([]byte(buildConfigJSON), &environment.BuildConfig); err != nil {
 			return nil, fmt.Errorf("failed to deserialize environment build config: %w", err)
@@ -1953,9 +1996,9 @@ func (r *SQLiteRepository) UpdateEnvironment(ctx context.Context, environment *m
 	}
 
 	result, err := r.db.ExecContext(ctx, `
-		UPDATE environments SET name = ?, kind = ?, worktree_root = ?, image_tag = ?, dockerfile = ?, build_config = ?, updated_at = ?
+		UPDATE environments SET name = ?, kind = ?, is_system = ?, worktree_root = ?, image_tag = ?, dockerfile = ?, build_config = ?, updated_at = ?
 		WHERE id = ?
-	`, environment.Name, environment.Kind, environment.WorktreeRoot, environment.ImageTag, environment.Dockerfile, string(buildConfigJSON), environment.UpdatedAt, environment.ID)
+	`, environment.Name, environment.Kind, boolToInt(environment.IsSystem), environment.WorktreeRoot, environment.ImageTag, environment.Dockerfile, string(buildConfigJSON), environment.UpdatedAt, environment.ID)
 	if err != nil {
 		return err
 	}
@@ -1980,7 +2023,7 @@ func (r *SQLiteRepository) DeleteEnvironment(ctx context.Context, id string) err
 
 func (r *SQLiteRepository) ListEnvironments(ctx context.Context) ([]*models.Environment, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, name, kind, worktree_root, image_tag, dockerfile, build_config, created_at, updated_at
+		SELECT id, name, kind, is_system, worktree_root, image_tag, dockerfile, build_config, created_at, updated_at
 		FROM environments ORDER BY created_at ASC
 	`)
 	if err != nil {
@@ -1992,13 +2035,15 @@ func (r *SQLiteRepository) ListEnvironments(ctx context.Context) ([]*models.Envi
 	for rows.Next() {
 		environment := &models.Environment{}
 		var buildConfigJSON string
+		var isSystem int
 		if err := rows.Scan(
-			&environment.ID, &environment.Name, &environment.Kind, &environment.WorktreeRoot,
+			&environment.ID, &environment.Name, &environment.Kind, &isSystem, &environment.WorktreeRoot,
 			&environment.ImageTag, &environment.Dockerfile, &buildConfigJSON,
 			&environment.CreatedAt, &environment.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
+		environment.IsSystem = isSystem == 1
 		if buildConfigJSON != "" && buildConfigJSON != "{}" {
 			if err := json.Unmarshal([]byte(buildConfigJSON), &environment.BuildConfig); err != nil {
 				return nil, fmt.Errorf("failed to deserialize environment build config: %w", err)

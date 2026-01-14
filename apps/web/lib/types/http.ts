@@ -193,6 +193,7 @@ export type Environment = {
   id: string;
   name: string;
   kind: string;
+  is_system: boolean;
   worktree_root?: string | null;
   image_tag?: string | null;
   dockerfile?: string | null;

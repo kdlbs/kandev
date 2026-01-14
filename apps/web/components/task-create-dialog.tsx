@@ -27,8 +27,7 @@ import {
 import { Combobox } from './combobox';
 import { Badge } from '@kandev/ui/badge';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@kandev/ui/tooltip';
-import type { Repository, Task, Branch } from '@/lib/types/http';
-import { getBackendConfig } from '@/lib/config';
+import type { Task } from '@/lib/types/http';
 import {
   DEFAULT_LOCAL_ENVIRONMENT_KIND,
   DEFAULT_LOCAL_EXECUTOR_TYPE,
@@ -36,26 +35,11 @@ import {
   selectPreferredBranch,
   truncateRepoPath,
 } from '@/lib/utils';
-import { createTask, listRepositories, listRepositoryBranches, updateTask } from '@/lib/http/client';
+import { createTask, updateTask } from '@/lib/http';
 import { useAppStore } from '@/components/state-provider';
-
-type AgentProfileOption = {
-  id: string;
-  label: string;
-};
-
-type EnvironmentOption = {
-  id: string;
-  name: string;
-  kind: string;
-};
-
-type ExecutorOption = {
-  id: string;
-  name: string;
-  type: string;
-};
-
+import { useRepositories } from '@/hooks/use-repositories';
+import { useRepositoryBranches } from '@/hooks/use-repository-branches';
+import { useSettingsData } from '@/hooks/use-settings-data';
 
 interface TaskCreateDialogProps {
   open: boolean;
@@ -94,22 +78,25 @@ export function TaskCreateDialog({
   const [repositoryId, setRepositoryId] = useState(initialValues?.repositoryId ?? '');
   const [branch, setBranch] = useState(initialValues?.branch ?? '');
   const [startAgent, setStartAgent] = useState(false);
-  const [repositories, setRepositories] = useState<Repository[]>([]);
-  const [repositoriesLoading, setRepositoriesLoading] = useState(false);
-  const [branchesByRepo, setBranchesByRepo] = useState<Record<string, Branch[]>>({});
-  const [branchesLoading, setBranchesLoading] = useState(false);
   const [agentProfileId, setAgentProfileId] = useState('');
-  const [agentProfiles, setAgentProfiles] = useState<AgentProfileOption[]>([]);
-  const [agentProfilesLoading, setAgentProfilesLoading] = useState(false);
   const [environmentId, setEnvironmentId] = useState('');
-  const [environments, setEnvironments] = useState<EnvironmentOption[]>([]);
-  const [environmentsLoading, setEnvironmentsLoading] = useState(false);
   const [executorId, setExecutorId] = useState('');
-  const [executors, setExecutors] = useState<ExecutorOption[]>([]);
-  const [executorsLoading, setExecutorsLoading] = useState(false);
   const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
   const workspaces = useAppStore((state) => state.workspaces.items);
+  const agentProfiles = useAppStore((state) => state.agentProfiles.items);
+  const executors = useAppStore((state) => state.executors.items);
+  const environments = useAppStore((state) => state.environments.items);
+  const settingsData = useAppStore((state) => state.settingsData);
   const descriptionRef = useRef<HTMLTextAreaElement | null>(null);
+  useSettingsData(open);
+  const { repositories, isLoading: repositoriesLoading } = useRepositories(workspaceId, open);
+  const { branches, isLoading: branchesLoading } = useRepositoryBranches(
+    repositoryId || null,
+    Boolean(open && repositoryId)
+  );
+  const agentProfilesLoading = open && !settingsData.agentsLoaded;
+  const environmentsLoading = open && !settingsData.environmentsLoaded;
+  const executorsLoading = open && !settingsData.executorsLoaded;
 
   useEffect(() => {
     if (!open) return;
@@ -135,82 +122,20 @@ export function TaskCreateDialog({
 
   useEffect(() => {
     if (!open || !workspaceId) return;
-    setRepositoriesLoading(true);
-    listRepositories(getBackendConfig().apiBaseUrl, workspaceId)
-      .then((response) => {
-        setRepositories(response.repositories);
-        // Auto-select if only one repository
-        if (response.repositories.length === 1) {
-          setRepositoryId(response.repositories[0].id);
-        }
-      })
-      .catch(() => {
-        setRepositories([]);
-      })
-      .finally(() => {
-        setRepositoriesLoading(false);
-      });
-  }, [open, workspaceId]);
+    if (!repositoryId && repositories.length === 1) {
+      setRepositoryId(repositories[0].id);
+    }
+  }, [open, repositories, repositoryId, workspaceId]);
 
   useEffect(() => {
     if (!repositoryId) return;
-    if (branchesByRepo[repositoryId]) {
-      if (!branch) {
-        const preferredBranch = selectPreferredBranch(branchesByRepo[repositoryId]);
-        if (preferredBranch) {
-          setBranch(preferredBranch);
-          return;
-        }
+    if (!branch) {
+      const preferredBranch = selectPreferredBranch(branches);
+      if (preferredBranch) {
+        setBranch(preferredBranch);
       }
-      return;
     }
-    setBranchesLoading(true);
-    listRepositoryBranches(getBackendConfig().apiBaseUrl, repositoryId)
-      .then((response) => {
-        setBranchesByRepo((prev) => ({ ...prev, [repositoryId]: response.branches }));
-
-        if (!branch) {
-          const preferredBranch = selectPreferredBranch(response.branches);
-          if (preferredBranch) {
-            setBranch(preferredBranch);
-            return;
-          }
-        }
-      })
-      .catch(() => {
-        setBranchesByRepo((prev) => ({ ...prev, [repositoryId]: [] }));
-      })
-      .finally(() => {
-        setBranchesLoading(false);
-      });
-  }, [branchesByRepo, repositoryId, branch]);
-
-  useEffect(() => {
-    if (!open) return;
-    setAgentProfilesLoading(true);
-    fetch(`${getBackendConfig().apiBaseUrl}/api/v1/agents`, { cache: 'no-store' })
-      .then((response) => (response.ok ? response.json() : null))
-      .then((data) => {
-        if (!data?.agents) {
-          setAgentProfiles([]);
-          return;
-        }
-        const options = data.agents.flatMap(
-          (agent: { name: string; profiles: Array<{ id: string; name: string }> }) =>
-            agent.profiles.map((profile) => ({
-              id: profile.id,
-              label: `${agent.name} • ${profile.name}`,
-            }))
-        );
-        setAgentProfiles(options);
-      })
-      .catch(() => {
-        setAgentProfiles([]);
-      })
-      .finally(() => {
-        setAgentProfilesLoading(false);
-      });
-  }, [open]);
+  }, [branch, branches, repositoryId]);
 
   useEffect(() => {
     if (!open || agentProfileId || agentProfiles.length === 0) return;
@@ -222,45 +147,6 @@ export function TaskCreateDialog({
     }
     setAgentProfileId(agentProfiles[0].id);
   }, [open, isEditMode, agentProfileId, agentProfiles, workspaceDefaults]);
-
-  useEffect(() => {
-    if (!open) return;
-    const apiBaseUrl = getBackendConfig().apiBaseUrl;
-    setEnvironmentsLoading(true);
-    setExecutorsLoading(true);
-    Promise.all([
-      fetch(`${apiBaseUrl}/api/v1/environments`, { cache: 'no-store' })
-        .then((response) => (response.ok ? response.json() : null))
-        .then((data) => {
-          if (!data?.environments) return [];
-          return data.environments.map((env: { id: string; name: string; kind: string }) => ({
-            id: env.id,
-            name: env.name,
-            kind: env.kind,
-          }));
-        })
-        .catch(() => []),
-      fetch(`${apiBaseUrl}/api/v1/executors`, { cache: 'no-store' })
-        .then((response) => (response.ok ? response.json() : null))
-        .then((data) => {
-          if (!data?.executors) return [];
-          return data.executors.map((executor: { id: string; name: string; type: string }) => ({
-            id: executor.id,
-            name: executor.name,
-            type: executor.type,
-          }));
-        })
-        .catch(() => []),
-    ])
-      .then(([nextEnvironments, nextExecutors]) => {
-        setEnvironments(nextEnvironments);
-        setExecutors(nextExecutors);
-      })
-      .finally(() => {
-        setEnvironmentsLoading(false);
-        setExecutorsLoading(false);
-      });
-  }, [open]);
 
   useEffect(() => {
     if (!open || isEditMode || environmentId || environments.length === 0) return;
@@ -304,7 +190,7 @@ export function TaskCreateDialog({
     if (!trimmedTitle) return;
     if (isEditMode && editingTask) {
       try {
-        const updatedTask = await updateTask(getBackendConfig().apiBaseUrl, editingTask.id, {
+        const updatedTask = await updateTask(editingTask.id, {
           title: trimmedTitle,
           description: description.trim(),
         });
@@ -335,7 +221,7 @@ export function TaskCreateDialog({
     }
     const repository = repositories.find((repo) => repo.id === repositoryId);
     try {
-      const task = await createTask(getBackendConfig().apiBaseUrl, {
+      const task = await createTask({
         workspace_id: workspaceId,
         board_id: boardId,
         column_id: targetColumnId,
@@ -442,8 +328,8 @@ export function TaskCreateDialog({
                 )}
               </div>
               <div>
-                <Combobox
-                  options={(branchesByRepo[repositoryId] ?? []).map((branchObj) => {
+                  <Combobox
+                    options={branches.map((branchObj) => {
                     const displayName = branchObj.type === 'remote' && branchObj.remote
                       ? `${branchObj.remote}/${branchObj.name}`
                       : branchObj.name;

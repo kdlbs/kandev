@@ -1,6 +1,5 @@
 'use client';
 
-import * as React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
@@ -29,190 +28,14 @@ import {
   SidebarHeader,
 } from '@kandev/ui/sidebar';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@kandev/ui/collapsible';
-import { SETTINGS_DATA } from '@/lib/settings/dummy-data';
-import { listEnvironmentsAction } from '@/app/actions/environments';
-import { listExecutorsAction } from '@/app/actions/executors';
-import { getWebSocketClient } from '@/lib/ws/connection';
-import type { Environment, Executor } from '@/lib/types/http';
-import { getBackendConfig } from '@/lib/config';
-import type { Agent } from '@/lib/types/http';
 import { useAppStore } from '@/components/state-provider';
 
 export function SettingsAppSidebar() {
   const pathname = usePathname();
   const workspaces = useAppStore((state) => state.workspaces.items);
-  const agentProfilesVersion = useAppStore((state) => state.agentProfiles.version);
-  const fallbackEnvironments = React.useMemo<Environment[]>(
-    () =>
-      SETTINGS_DATA.environments.map((env) => ({
-        id: env.id,
-        name: env.name,
-        kind: env.kind,
-        worktree_root: env.worktreeRoot,
-        image_tag: env.imageTag,
-        dockerfile: env.dockerfile,
-        build_config: env.buildConfig
-          ? {
-              base_image: env.buildConfig.baseImage,
-              install_agents: env.buildConfig.installAgents.join(','),
-            }
-          : undefined,
-        created_at: '',
-        updated_at: '',
-      })),
-    []
-  );
-  const fallbackExecutors = React.useMemo<Executor[]>(
-    () =>
-      SETTINGS_DATA.executors.map((executor) => ({
-        id: executor.id,
-        name: executor.name,
-        type: executor.type,
-        status: executor.status,
-        is_system: executor.isSystem,
-        config: executor.config,
-        created_at: '',
-        updated_at: '',
-      })),
-    []
-  );
-  const [environments, setEnvironments] = React.useState<Environment[]>(fallbackEnvironments);
-  const [executors, setExecutors] = React.useState<Executor[]>(fallbackExecutors);
-  const [agents, setAgents] = React.useState<Agent[]>([]);
-
-  React.useEffect(() => {
-    const client = getWebSocketClient();
-    const envFallback = () => fallbackEnvironments;
-    const execFallback = () => fallbackExecutors;
-
-    if (client) {
-      client
-        .request<{ environments: Environment[] }>('environment.list', {})
-        .then((resp) => setEnvironments(resp.environments))
-        .catch(() => setEnvironments(envFallback()));
-      client
-        .request<{ executors: Executor[] }>('executor.list', {})
-        .then((resp) => setExecutors(resp.executors))
-        .catch(() => setExecutors(execFallback()));
-      return;
-    }
-
-    listEnvironmentsAction()
-      .then((resp) => setEnvironments(resp.environments))
-      .catch(() => setEnvironments(envFallback()));
-    listExecutorsAction()
-      .then((resp) => setExecutors(resp.executors))
-      .catch(() => setExecutors(execFallback()));
-  }, [fallbackEnvironments, fallbackExecutors]);
-
-  React.useEffect(() => {
-    const client = getWebSocketClient();
-    if (!client) {
-      return;
-    }
-
-    const unsubscribeEnvironmentCreated = client.on('environment.created', (message) => {
-      setEnvironments((prev) => {
-        const exists = prev.some((env) => env.id === message.payload.id);
-        const next = {
-          id: message.payload.id,
-          name: message.payload.name,
-          kind: message.payload.kind,
-          worktree_root: message.payload.worktree_root,
-          image_tag: message.payload.image_tag,
-          dockerfile: message.payload.dockerfile,
-          build_config: message.payload.build_config,
-          created_at: message.payload.created_at ?? '',
-          updated_at: message.payload.updated_at ?? '',
-        };
-        return exists ? prev.map((env) => (env.id === next.id ? next : env)) : [next, ...prev];
-      });
-    });
-    const unsubscribeEnvironmentUpdated = client.on('environment.updated', (message) => {
-      setEnvironments((prev) =>
-        prev.map((env) =>
-          env.id === message.payload.id
-            ? {
-                ...env,
-                name: message.payload.name,
-                kind: message.payload.kind,
-                worktree_root: message.payload.worktree_root,
-                image_tag: message.payload.image_tag,
-                dockerfile: message.payload.dockerfile,
-                build_config: message.payload.build_config,
-                updated_at: message.payload.updated_at ?? env.updated_at,
-              }
-            : env
-        )
-      );
-    });
-    const unsubscribeEnvironmentDeleted = client.on('environment.deleted', (message) => {
-      setEnvironments((prev) => prev.filter((env) => env.id !== message.payload.id));
-    });
-
-    const unsubscribeExecutorCreated = client.on('executor.created', (message) => {
-      setExecutors((prev) => {
-        const exists = prev.some((executor) => executor.id === message.payload.id);
-        const next = {
-          id: message.payload.id,
-          name: message.payload.name,
-          type: message.payload.type,
-          status: message.payload.status,
-          is_system: message.payload.is_system,
-          config: message.payload.config,
-          created_at: message.payload.created_at ?? '',
-          updated_at: message.payload.updated_at ?? '',
-        };
-        return exists
-          ? prev.map((executor) => (executor.id === next.id ? next : executor))
-          : [next, ...prev];
-      });
-    });
-    const unsubscribeExecutorUpdated = client.on('executor.updated', (message) => {
-      setExecutors((prev) =>
-        prev.map((executor) =>
-          executor.id === message.payload.id
-            ? {
-                ...executor,
-                name: message.payload.name,
-                type: message.payload.type,
-                status: message.payload.status,
-                config: message.payload.config,
-                updated_at: message.payload.updated_at ?? executor.updated_at,
-              }
-            : executor
-        )
-      );
-    });
-    const unsubscribeExecutorDeleted = client.on('executor.deleted', (message) => {
-      setExecutors((prev) => prev.filter((executor) => executor.id !== message.payload.id));
-    });
-
-    return () => {
-      unsubscribeEnvironmentCreated();
-      unsubscribeEnvironmentUpdated();
-      unsubscribeEnvironmentDeleted();
-      unsubscribeExecutorCreated();
-      unsubscribeExecutorUpdated();
-      unsubscribeExecutorDeleted();
-    };
-  }, []);
-  React.useEffect(() => {
-    const { apiBaseUrl } = getBackendConfig();
-    const controller = new AbortController();
-    fetch(`${apiBaseUrl}/api/v1/agents`, {
-      cache: 'no-store',
-      signal: controller.signal,
-    })
-      .then((response) => (response.ok ? response.json() : null))
-      .then((data) => {
-        if (data?.agents) {
-          setAgents(data.agents);
-        }
-      })
-      .catch(() => undefined);
-    return () => controller.abort();
-  }, [agentProfilesVersion, pathname]);
+  const environments = useAppStore((state) => state.environments.items);
+  const executors = useAppStore((state) => state.executors.items);
+  const agents = useAppStore((state) => state.settingsAgents.items);
 
   return (
     <Sidebar variant="inset">

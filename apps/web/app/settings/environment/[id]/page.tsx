@@ -1,8 +1,8 @@
 'use client';
 
-import { use, useEffect, useMemo, useState } from 'react';
+import { use, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { IconCube, IconTrash } from '@tabler/icons-react';
+import { IconTrash } from '@tabler/icons-react';
 import { Button } from '@kandev/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@kandev/ui/card';
 import { Input } from '@kandev/ui/input';
@@ -18,10 +18,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@kandev/ui/dialog';
-import { getEnvironmentAction, updateEnvironmentAction, deleteEnvironmentAction } from '@/app/actions/environments';
+import { updateEnvironmentAction, deleteEnvironmentAction } from '@/app/actions/environments';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import type { Environment } from '@/lib/types/http';
 import type { BaseDocker } from '@/lib/settings/types';
+import { useAppStore } from '@/components/state-provider';
 
 const BASE_IMAGE_LABELS: Record<BaseDocker, string> = {
   universal: 'Universal (Ubuntu)',
@@ -33,47 +34,9 @@ const BASE_IMAGE_LABELS: Record<BaseDocker, string> = {
 export default function EnvironmentEditPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
-  const [environment, setEnvironment] = useState<Environment | null>(null);
-  const [savedEnvironment, setSavedEnvironment] = useState<Environment | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [deleteConfirmText, setDeleteConfirmText] = useState('');
-  const [isSaving, setIsSaving] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
-
-  useEffect(() => {
-    getEnvironmentAction(id)
-      .then((data) => {
-        setEnvironment(data);
-        setSavedEnvironment(data);
-      })
-      .catch(() => setEnvironment(null))
-      .finally(() => setIsLoading(false));
-  }, [id]);
-
-  const isDirty = useMemo(() => {
-    if (!environment || !savedEnvironment) return false;
-    return (
-      environment.name !== savedEnvironment.name ||
-      environment.kind !== savedEnvironment.kind ||
-      environment.worktree_root !== savedEnvironment.worktree_root ||
-      environment.image_tag !== savedEnvironment.image_tag ||
-      environment.dockerfile !== savedEnvironment.dockerfile ||
-      JSON.stringify(environment.build_config ?? {}) !== JSON.stringify(savedEnvironment.build_config ?? {})
-    );
-  }, [environment, savedEnvironment]);
-
-  if (isLoading) {
-    return (
-      <div>
-        <Card>
-          <CardContent className="py-12 text-center">
-            <p className="text-muted-foreground">Loading environment...</p>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
+  const environment = useAppStore((state) =>
+    state.environments.items.find((item) => item.id === id) ?? null
+  );
 
   if (!environment) {
     return (
@@ -90,15 +53,46 @@ export default function EnvironmentEditPage({ params }: { params: Promise<{ id: 
     );
   }
 
+  return <EnvironmentEditForm key={environment.id} environment={environment} />;
+}
+
+type EnvironmentEditFormProps = {
+  environment: Environment;
+};
+
+function EnvironmentEditForm({ environment }: EnvironmentEditFormProps) {
+  const router = useRouter();
+  const [draft, setDraft] = useState<Environment>({ ...environment });
+  const [savedEnvironment, setSavedEnvironment] = useState<Environment>({ ...environment });
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const isSystem = draft.is_system ?? false;
+
+  const isDirty = useMemo(() => {
+    if (isSystem) {
+      return draft.worktree_root !== savedEnvironment.worktree_root;
+    }
+    return (
+      draft.name !== savedEnvironment.name ||
+      draft.kind !== savedEnvironment.kind ||
+      draft.worktree_root !== savedEnvironment.worktree_root ||
+      draft.image_tag !== savedEnvironment.image_tag ||
+      draft.dockerfile !== savedEnvironment.dockerfile ||
+      JSON.stringify(draft.build_config ?? {}) !== JSON.stringify(savedEnvironment.build_config ?? {})
+    );
+  }, [draft, savedEnvironment, isSystem]);
+
   const handleDeleteEnvironment = async () => {
     if (deleteConfirmText !== 'delete') return;
     setIsDeleting(true);
     try {
       const client = getWebSocketClient();
       if (client) {
-        await client.request('environment.delete', { id: environment.id });
+        await client.request('environment.delete', { id: draft.id });
       } else {
-        await deleteEnvironmentAction(environment.id);
+        await deleteEnvironmentAction(draft.id);
       }
       router.push('/settings/environments');
     } finally {
@@ -108,22 +102,23 @@ export default function EnvironmentEditPage({ params }: { params: Promise<{ id: 
   };
 
   const handleSaveEnvironment = async () => {
-    if (!environment) return;
     setIsSaving(true);
     try {
-      const payload = {
-        name: environment.name,
-        kind: environment.kind,
-        worktree_root: environment.worktree_root ?? undefined,
-        image_tag: environment.image_tag ?? undefined,
-        dockerfile: environment.dockerfile ?? undefined,
-        build_config: environment.build_config ?? undefined,
+      const payload: Record<string, unknown> = {
+        worktree_root: draft.worktree_root ?? undefined,
       };
+      if (!isSystem) {
+        payload.name = draft.name;
+        payload.kind = draft.kind;
+        payload.image_tag = draft.image_tag ?? undefined;
+        payload.dockerfile = draft.dockerfile ?? undefined;
+        payload.build_config = draft.build_config ?? undefined;
+      }
       const client = getWebSocketClient();
       const updated = client
-        ? await client.request<Environment>('environment.update', { id: environment.id, ...payload })
-        : await updateEnvironmentAction(environment.id, payload);
-      setEnvironment(updated);
+        ? await client.request<Environment>('environment.update', { id: draft.id, ...payload })
+        : await updateEnvironmentAction(draft.id, payload);
+      setDraft(updated);
       setSavedEnvironment(updated);
       router.push('/settings/environments');
     } finally {
@@ -135,12 +130,8 @@ export default function EnvironmentEditPage({ params }: { params: Promise<{ id: 
     <div className="space-y-8">
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
-          <h2 className="text-2xl font-bold">{environment.name}</h2>
-          <p className="text-sm text-muted-foreground mt-1">
-            {environment.kind === 'local_pc'
-              ? 'Uses your local machine and installed agents.'
-              : 'Runs inside a Docker image on the selected executor.'}
-          </p>
+          <h2 className="text-2xl font-bold">{draft.name}</h2>
+          <p className="text-sm text-muted-foreground mt-1">Configure runtime environment settings.</p>
         </div>
         <Button variant="outline" size="sm" onClick={() => router.push('/settings/environments')}>
           Back to Environments
@@ -151,92 +142,72 @@ export default function EnvironmentEditPage({ params }: { params: Promise<{ id: 
 
       <Card>
         <CardHeader>
-          <CardTitle>Environment Name</CardTitle>
+          <CardTitle>Environment Details</CardTitle>
+          <CardDescription>
+            {isSystem ? 'System environments only allow worktree configuration.' : 'Customize the base image and worktree settings.'}
+          </CardDescription>
         </CardHeader>
-        <CardContent>
-          <Input
-            value={environment.name}
-            onChange={(e) => setEnvironment({ ...environment, name: e.target.value })}
-            disabled={environment.kind === 'local_pc'}
-          />
-          {environment.kind === 'local_pc' && (
-            <p className="text-xs text-muted-foreground mt-2">
-              The local environment name is fixed for now.
-            </p>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="environment-name">Environment name</Label>
+            <Input
+              id="environment-name"
+              value={draft.name}
+              onChange={(event) => setDraft({ ...draft, name: event.target.value })}
+              disabled={isSystem}
+            />
+            {isSystem && (
+              <p className="text-xs text-muted-foreground">System environment names cannot be edited.</p>
+            )}
+          </div>
+          {!isSystem && (
+            <div className="space-y-2">
+              <Label htmlFor="environment-kind">Base image</Label>
+              <Select
+                value={draft.kind}
+                onValueChange={(value) => setDraft({ ...draft, kind: value as BaseDocker })}
+              >
+                <SelectTrigger id="environment-kind">
+                  <SelectValue placeholder="Select base image" />
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.entries(BASE_IMAGE_LABELS).map(([value, label]) => (
+                    <SelectItem key={value} value={value}>
+                      {label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           )}
+          <div className="space-y-2">
+            <Label htmlFor="worktree-root">Worktree root</Label>
+            <Input
+              id="worktree-root"
+              value={draft.worktree_root ?? ''}
+              onChange={(event) =>
+                setDraft({ ...draft, worktree_root: event.target.value || null })
+              }
+              placeholder="/workspace"
+            />
+          </div>
         </CardContent>
       </Card>
 
-      {environment.kind === 'local_pc' ? (
+      {!isSystem && (
         <Card>
           <CardHeader>
-            <CardTitle>Local Runtime</CardTitle>
-            <CardDescription>Worktrees are created under your local root.</CardDescription>
+            <CardTitle>Custom Dockerfile</CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              <Label>Worktree root</Label>
-              <Input value={environment.worktree_root ?? '~/kandev'} disabled className="cursor-default" />
-            </div>
-          </CardContent>
-        </Card>
-      ) : (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <IconCube className="h-4 w-4" />
-              Docker Image
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label>Base image</Label>
-                <Select
-                  value={environment.build_config?.base_image ?? 'universal'}
-                  onValueChange={(value) =>
-                    setEnvironment({
-                      ...environment,
-                      build_config: {
-                        base_image: value,
-                        install_agents: environment.build_config?.install_agents ?? '',
-                      },
-                    })
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Object.entries(BASE_IMAGE_LABELS).map(([key, label]) => (
-                      <SelectItem key={key} value={key}>
-                        {label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Image tag</Label>
-                <Input
-                  value={environment.image_tag ?? ''}
-                  onChange={(event) =>
-                    setEnvironment({ ...environment, image_tag: event.target.value })
-                  }
-                />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label>Dockerfile</Label>
-              <Textarea
-                value={environment.dockerfile ?? ''}
-                onChange={(event) =>
-                  setEnvironment({ ...environment, dockerfile: event.target.value })
-                }
-                rows={10}
-                className="font-mono text-sm"
-              />
-            </div>
+          <CardContent className="space-y-3">
+            <Label htmlFor="dockerfile">Dockerfile override</Label>
+            <Textarea
+              id="dockerfile"
+              value={draft.dockerfile ?? ''}
+              onChange={(event) => setDraft({ ...draft, dockerfile: event.target.value })}
+              placeholder="# Optional custom Dockerfile"
+              rows={6}
+            />
           </CardContent>
         </Card>
       )}
@@ -244,40 +215,29 @@ export default function EnvironmentEditPage({ params }: { params: Promise<{ id: 
       <Separator />
 
       <div className="flex items-center justify-end gap-2">
-        <Button
-          variant="outline"
-          onClick={() => router.push('/settings/environments')}
-        >
+        <Button variant="outline" onClick={() => router.push('/settings/environments')}>
           Cancel
         </Button>
-        <Button
-          onClick={handleSaveEnvironment}
-          disabled={!isDirty || isSaving || environment.kind === 'local_pc'}
-        >
+        <Button onClick={handleSaveEnvironment} disabled={!isDirty || isSaving}>
           {isSaving ? 'Saving...' : 'Save Changes'}
         </Button>
       </div>
 
-      {environment.kind !== 'local_pc' && (
+      {!isSystem && (
         <>
           <Card className="border-destructive">
             <CardHeader>
-              <CardTitle className="text-destructive">Danger Zone</CardTitle>
-              <CardDescription>Irreversible actions that permanently delete this environment.</CardDescription>
+              <CardTitle className="text-destructive">Delete Environment</CardTitle>
             </CardHeader>
-            <CardContent>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-medium">Delete this environment</p>
-                  <p className="text-sm text-muted-foreground">
-                    Once deleted, all configuration will be permanently removed.
-                  </p>
-                </div>
-                <Button variant="destructive" onClick={() => setDeleteDialogOpen(true)}>
-                  <IconTrash className="h-4 w-4 mr-2" />
-                  Delete Environment
-                </Button>
+            <CardContent className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium">Remove this environment</p>
+                <p className="text-xs text-muted-foreground">This action cannot be undone.</p>
               </div>
+              <Button variant="destructive" onClick={() => setDeleteDialogOpen(true)}>
+                <IconTrash className="h-4 w-4 mr-2" />
+                Delete
+              </Button>
             </CardContent>
           </Card>
 
@@ -286,17 +246,15 @@ export default function EnvironmentEditPage({ params }: { params: Promise<{ id: 
               <DialogHeader>
                 <DialogTitle>Delete Environment</DialogTitle>
                 <DialogDescription>
-                  This action cannot be undone. This will permanently delete the environment &quot;
-                  {environment.name}&quot; and all its data.
+                  Type &quot;delete&quot; to confirm deletion. This action cannot be undone.
                 </DialogDescription>
               </DialogHeader>
-              <div className="space-y-4 py-4">
-                <p className="text-sm">
-                  Please type <span className="font-mono font-bold">delete</span> to confirm:
-                </p>
+              <div className="space-y-2">
+                <Label htmlFor="confirm-delete">Confirm Delete</Label>
                 <Input
+                  id="confirm-delete"
                   value={deleteConfirmText}
-                  onChange={(e) => setDeleteConfirmText(e.target.value)}
+                  onChange={(event) => setDeleteConfirmText(event.target.value)}
                   placeholder="delete"
                 />
               </div>
@@ -307,9 +265,9 @@ export default function EnvironmentEditPage({ params }: { params: Promise<{ id: 
                 <Button
                   variant="destructive"
                   onClick={handleDeleteEnvironment}
-                  disabled={deleteConfirmText !== 'delete'}
+                  disabled={deleteConfirmText !== 'delete' || isDeleting}
                 >
-                  {isDeleting ? 'Deleting...' : 'Delete Environment'}
+                  {isDeleting ? 'Deleting...' : 'Delete'}
                 </Button>
               </DialogFooter>
             </DialogContent>

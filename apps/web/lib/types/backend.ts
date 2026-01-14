@@ -176,6 +176,7 @@ export type EnvironmentPayload = {
   id: string;
   name: string;
   kind: string;
+  is_system: boolean;
   worktree_root?: string;
   image_tag?: string;
   dockerfile?: string;
@@ -184,13 +185,24 @@ export type EnvironmentPayload = {
   updated_at?: string;
 };
 
+export type AgentProfilePayload = {
+  id: string;
+  agent_id: string;
+  name: string;
+  model: string;
+  auto_approve: boolean;
+  dangerously_skip_permissions: boolean;
+  plan: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
 export type AgentProfileDeletedPayload = {
-  profile_id: string;
+  profile: AgentProfilePayload;
 };
 
 export type AgentProfileChangedPayload = {
-  profile_id: string;
-  agent_id: string;
+  profile: AgentProfilePayload;
 };
 
 export type UserSettingsUpdatedPayload = {

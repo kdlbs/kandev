@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { IconTrash } from '@tabler/icons-react';
@@ -14,13 +14,9 @@ import { Switch } from '@kandev/ui/switch';
 import { Textarea } from '@kandev/ui/textarea';
 import { useToast } from '@/components/toast-provider';
 import { UnsavedChangesBadge, UnsavedSaveButton } from '@/components/settings/unsaved-indicator';
-import {
-  deleteAgentProfileAction,
-  listAgentsAction,
-  updateAgentProfileAction,
-} from '@/app/actions/agents';
+import { deleteAgentProfileAction, updateAgentProfileAction } from '@/app/actions/agents';
 import type { Agent, AgentProfile } from '@/lib/types/http';
-import { useRequest } from '@/lib/http/use-request';
+import { useAppStore } from '@/components/state-provider';
 
 const AGENT_LABELS: Record<string, string> = {
   claude: 'Claude',
@@ -33,14 +29,28 @@ const AGENT_LABELS: Record<string, string> = {
 type ProfileEditorProps = {
   agent: Agent;
   profile: AgentProfile;
-  onRefresh: () => Promise<unknown>;
 };
 
-function ProfileEditor({ agent, profile, onRefresh }: ProfileEditorProps) {
+function ProfileEditor({ agent, profile }: ProfileEditorProps) {
   const { toast } = useToast();
+  const settingsAgents = useAppStore((state) => state.settingsAgents.items);
+  const setSettingsAgents = useAppStore((state) => state.setSettingsAgents);
+  const setAgentProfiles = useAppStore((state) => state.setAgentProfiles);
   const [draft, setDraft] = useState<AgentProfile>({ ...profile });
   const [savedProfile, setSavedProfile] = useState<AgentProfile>(profile);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const syncAgentsToStore = (nextAgents: Agent[]) => {
+    setSettingsAgents(nextAgents);
+    setAgentProfiles(
+      nextAgents.flatMap((agentItem) =>
+        agentItem.profiles.map((agentProfile) => ({
+          id: agentProfile.id,
+          label: `${agentItem.name} • ${agentProfile.name}`,
+          agent_id: agentItem.id,
+        }))
+      )
+    );
+  };
 
   const isDirty = useMemo(() => {
     return (
@@ -64,7 +74,17 @@ function ProfileEditor({ agent, profile, onRefresh }: ProfileEditorProps) {
       });
       setSavedProfile(updated);
       setDraft(updated);
-      await onRefresh();
+      const nextAgents = settingsAgents.map((agentItem) =>
+        agentItem.id === agent.id
+          ? {
+              ...agentItem,
+              profiles: agentItem.profiles.map((profileItem) =>
+                profileItem.id === updated.id ? updated : profileItem
+              ),
+            }
+          : agentItem
+      );
+      syncAgentsToStore(nextAgents);
       setSaveStatus('success');
     } catch (error) {
       setSaveStatus('error');
@@ -79,6 +99,15 @@ function ProfileEditor({ agent, profile, onRefresh }: ProfileEditorProps) {
   const handleDeleteProfile = async () => {
     try {
       await deleteAgentProfileAction(draft.id);
+      const nextAgents = settingsAgents.map((agentItem) =>
+        agentItem.id === agent.id
+          ? {
+              ...agentItem,
+              profiles: agentItem.profiles.filter((profileItem) => profileItem.id !== draft.id),
+            }
+          : agentItem
+      );
+      syncAgentsToStore(nextAgents);
       window.location.assign('/settings/agents');
     } catch (error) {
       toast({
@@ -198,37 +227,22 @@ function ProfileEditor({ agent, profile, onRefresh }: ProfileEditorProps) {
 }
 
 export default function AgentProfilePage() {
-  const { toast } = useToast();
   const params = useParams();
   const agentParam = Array.isArray(params.agentId) ? params.agentId[0] : params.agentId;
   const profileParam = Array.isArray(params.profileId) ? params.profileId[0] : params.profileId;
   const agentKey = decodeURIComponent(agentParam ?? '');
   const profileId = profileParam ?? '';
-  const { run: runListAgents, data, isLoading } = useRequest(listAgentsAction);
-
-  useEffect(() => {
-    runListAgents().catch((error) => {
-      toast({
-        title: 'Failed to load profile',
-        description: error instanceof Error ? error.message : 'Request failed',
-        variant: 'error',
-      });
-    });
-  }, [runListAgents, toast]);
+  const settingsAgents = useAppStore((state) => state.settingsAgents.items);
 
   const agent = useMemo(() => {
-    const agents = data?.agents ?? [];
-    return agents.find((item) => item.name === agentKey) ?? null;
-  }, [agentKey, data?.agents]);
+    return settingsAgents.find((item) => item.name === agentKey) ?? null;
+  }, [agentKey, settingsAgents]);
 
   const profile = useMemo(() => {
     return agent?.profiles.find((item) => item.id === profileId) ?? null;
   }, [agent?.profiles, profileId]);
 
   if (!agent || !profile) {
-    if (isLoading) {
-      return null;
-    }
     return (
       <Card>
         <CardContent className="py-12 text-center">
@@ -246,7 +260,6 @@ export default function AgentProfilePage() {
       key={profile.id}
       agent={agent}
       profile={profile}
-      onRefresh={runListAgents}
     />
   );
 }

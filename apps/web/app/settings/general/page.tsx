@@ -2,7 +2,7 @@
 
 import { useState, useSyncExternalStore } from 'react';
 import { useTheme } from 'next-themes';
-import { IconPalette, IconCode, IconBell, IconServer, IconTerminal2 } from '@tabler/icons-react';
+import { IconPalette, IconCode, IconBell, IconServer } from '@tabler/icons-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@kandev/ui/card';
 import { Label } from '@kandev/ui/label';
 import { Input } from '@kandev/ui/input';
@@ -247,35 +247,6 @@ export default function GeneralSettingsPage() {
               />
               <p className="text-xs text-muted-foreground">
                 Backend URL is provided at runtime for SSR and WebSocket connections.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      </SettingsSection>
-
-      <Separator />
-
-      <SettingsSection
-        icon={<IconTerminal2 className="h-5 w-5" />}
-        title="Worktree Root"
-        description="Configure where local worktrees are created"
-      >
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Local Worktree Path</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              <Label htmlFor="worktree-root">Worktree Root</Label>
-              <Input
-                id="worktree-root"
-                value="~/kandev"
-                readOnly
-                disabled
-                className="cursor-default"
-              />
-              <p className="text-xs text-muted-foreground">
-                Custom paths will be available in a future update.
               </p>
             </div>
           </CardContent>

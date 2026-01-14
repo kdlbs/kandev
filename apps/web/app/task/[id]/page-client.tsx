@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import '@git-diff-view/react/styles/diff-view.css';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@kandev/ui/resizable';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@kandev/ui/tabs';
@@ -17,11 +17,10 @@ import { TaskFilesPanel } from '@/components/task/task-files-panel';
 import { TaskChangesPanel } from '@/components/task/task-changes-panel';
 import { TaskRightPanel } from '@/components/task/task-right-panel';
 import { FileViewerContent } from '@/components/task/file-viewer-content';
-import { getBackendConfig } from '@/lib/config';
-import { listRepositories, listRepositoryBranches } from '@/lib/http/client';
-import { useRequest } from '@/lib/http/use-request';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import { useAppStore, useAppStoreApi } from '@/components/state-provider';
+import { useRepositories } from '@/hooks/use-repositories';
+import { useRepositoryBranches } from '@/hooks/use-repository-branches';
 
 const AGENTS = [
   { id: 'codex', label: 'Codex' },
@@ -87,15 +86,15 @@ export default function TaskPage({ task: initialTask }: TaskPageClientProps) {
     checkExecution();
   }, [task?.id]);
 
-  const fetchBranches = useCallback(async (workspaceId: string, repoPath: string) => {
-    const response = await listRepositories(getBackendConfig().apiBaseUrl, workspaceId);
-    const repo = response.repositories.find((item) => item.local_path === repoPath);
-    if (!repo) return [];
-    const branchResponse = await listRepositoryBranches(getBackendConfig().apiBaseUrl, repo.id);
-    return branchResponse.branches;
-  }, []);
-  const { run: runBranches, data: branchesData, isLoading: branchesLoading } =
-    useRequest(fetchBranches);
+  const { repositories } = useRepositories(task?.workspace_id ?? null, Boolean(task?.workspace_id));
+  const repository = useMemo(
+    () => repositories.find((item) => item.local_path === task?.repository_url) ?? null,
+    [repositories, task?.repository_url]
+  );
+  const { branches, isLoading: branchesLoading } = useRepositoryBranches(
+    repository?.id ?? null,
+    Boolean(repository?.id)
+  );
 
   // Fetch comments on mount and when task changes
   useEffect(() => {
@@ -241,11 +240,6 @@ export default function TaskPage({ task: initialTask }: TaskPageClientProps) {
 
   const topFilesPanel = <TaskFilesPanel taskId={task?.id ?? null} onSelectDiffPath={handleSelectDiffPath} onOpenFile={handleOpenFile} />;
 
-  useEffect(() => {
-    if (!task?.workspace_id || !task.repository_url) return;
-    runBranches(task.workspace_id, task.repository_url).catch(() => {});
-  }, [runBranches, task?.repository_url, task?.workspace_id]);
-
   if (!isMounted) {
     return <div className="h-screen w-full bg-background" />;
   }
@@ -256,7 +250,7 @@ export default function TaskPage({ task: initialTask }: TaskPageClientProps) {
       <TaskTopBar
         taskTitle={task?.title}
         baseBranch={task?.branch ?? undefined}
-        branches={task?.repository_url ? branchesData ?? [] : []}
+        branches={task?.repository_url ? branches : []}
         branchesLoading={branchesLoading}
         onStartAgent={handleStartAgent}
         onStopAgent={handleStopAgent}

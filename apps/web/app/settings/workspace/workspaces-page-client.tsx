@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import { IconFolder, IconPlus, IconChevronRight } from '@tabler/icons-react';
 import { Button } from '@kandev/ui/button';
@@ -9,37 +9,18 @@ import { Separator } from '@kandev/ui/separator';
 import { Input } from '@kandev/ui/input';
 import { Label } from '@kandev/ui/label';
 import { createWorkspaceAction } from '@/app/actions/workspaces';
-import type { Workspace } from '@/lib/types/http';
 import { useRequest } from '@/lib/http/use-request';
 import { useToast } from '@/components/toast-provider';
 import { RequestIndicator } from '@/components/request-indicator';
 import { useAppStore } from '@/components/state-provider';
 
-type WorkspacesPageClientProps = {
-  workspaces: Workspace[];
-};
-
-export function WorkspacesPageClient({ workspaces }: WorkspacesPageClientProps) {
+export function WorkspacesPageClient() {
   const items = useAppStore((state) => state.workspaces.items);
   const setWorkspaces = useAppStore((state) => state.setWorkspaces);
   const [isAdding, setIsAdding] = useState(false);
   const [newWorkspaceName, setNewWorkspaceName] = useState('');
   const createRequest = useRequest(createWorkspaceAction);
   const { toast } = useToast();
-
-  useEffect(() => {
-    if (!items.length && workspaces.length) {
-      setWorkspaces(
-        workspaces.map((workspace) => ({
-          id: workspace.id,
-          name: workspace.name,
-          default_executor_id: workspace.default_executor_id ?? null,
-          default_environment_id: workspace.default_environment_id ?? null,
-          default_agent_profile_id: workspace.default_agent_profile_id ?? null,
-        }))
-      );
-    }
-  }, [items.length, setWorkspaces, workspaces]);
 
   const handleAddWorkspace = async (e: React.FormEvent) => {
     e.preventDefault();

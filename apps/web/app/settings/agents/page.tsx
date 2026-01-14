@@ -1,16 +1,13 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import Link from 'next/link';
 import { IconAlertTriangle, IconSettings } from '@tabler/icons-react';
 import { Badge } from '@kandev/ui/badge';
 import { Button } from '@kandev/ui/button';
 import { Card, CardContent } from '@kandev/ui/card';
 import { Separator } from '@kandev/ui/separator';
-import { useToast } from '@/components/toast-provider';
-import { useRequest } from '@/lib/http/use-request';
-import { listAgentDiscoveryAction, listAgentsAction } from '@/app/actions/agents';
-import type { Agent, AgentDiscovery } from '@/lib/types/http';
+import { useAppStore } from '@/components/state-provider';
 
 const AGENT_LABELS: Record<string, string> = {
   claude: 'Claude',
@@ -21,26 +18,8 @@ const AGENT_LABELS: Record<string, string> = {
 };
 
 export default function AgentsSettingsPage() {
-  const { toast } = useToast();
-  const [discoveryAgents, setDiscoveryAgents] = useState<AgentDiscovery[]>([]);
-  const [savedAgents, setSavedAgents] = useState<Agent[]>([]);
-  const { run: runListDiscovery } = useRequest(listAgentDiscoveryAction);
-  const { run: runListAgents } = useRequest(listAgentsAction);
-
-  useEffect(() => {
-    Promise.all([runListDiscovery(), runListAgents()])
-      .then(([discovery, agents]) => {
-        setDiscoveryAgents(discovery.agents);
-        setSavedAgents(agents.agents);
-      })
-      .catch((error) => {
-      toast({
-        title: 'Failed to load agent settings',
-        description: error instanceof Error ? error.message : 'Request failed',
-        variant: 'error',
-      });
-    });
-  }, [runListAgents, runListDiscovery, toast]);
+  const discoveryAgents = useAppStore((state) => state.agentDiscovery.items);
+  const savedAgents = useAppStore((state) => state.settingsAgents.items);
 
   const installedAgents = useMemo(
     () => discoveryAgents.filter((agent) => agent.available),

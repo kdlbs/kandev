@@ -200,8 +200,7 @@ func (h *Handlers) httpCreateProfile(c *gin.Context) {
 	}
 	if h.hub != nil {
 		notification, _ := ws.NewNotification(ws.ActionAgentProfileCreated, gin.H{
-			"profile_id": resp.ID,
-			"agent_id":   resp.AgentID,
+			"profile": resp,
 		})
 		h.hub.Broadcast(notification)
 	}
@@ -241,8 +240,7 @@ func (h *Handlers) httpUpdateProfile(c *gin.Context) {
 	}
 	if h.hub != nil {
 		notification, _ := ws.NewNotification(ws.ActionAgentProfileUpdated, gin.H{
-			"profile_id": resp.ID,
-			"agent_id":   resp.AgentID,
+			"profile": resp,
 		})
 		h.hub.Broadcast(notification)
 	}
@@ -250,7 +248,8 @@ func (h *Handlers) httpUpdateProfile(c *gin.Context) {
 }
 
 func (h *Handlers) httpDeleteProfile(c *gin.Context) {
-	if err := h.controller.DeleteProfile(c.Request.Context(), c.Param("id")); err != nil {
+	profile, err := h.controller.DeleteProfile(c.Request.Context(), c.Param("id"))
+	if err != nil {
 		if err == controller.ErrAgentProfileNotFound {
 			c.JSON(http.StatusNotFound, gin.H{"error": "agent profile not found"})
 			return
@@ -261,7 +260,7 @@ func (h *Handlers) httpDeleteProfile(c *gin.Context) {
 	}
 	if h.hub != nil {
 		notification, _ := ws.NewNotification(ws.ActionAgentProfileDeleted, gin.H{
-			"profile_id": c.Param("id"),
+			"profile": profile,
 		})
 		h.hub.Broadcast(notification)
 	}

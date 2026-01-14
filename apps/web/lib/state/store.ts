@@ -1,5 +1,14 @@
 import type { ReactNode } from 'react';
-import type { TaskState as TaskStatus, Comment } from '@/lib/types/http';
+import type {
+  Agent,
+  AgentDiscovery,
+  Branch,
+  Comment,
+  Environment,
+  Executor,
+  Repository,
+  TaskState as TaskStatus,
+} from '@/lib/types/http';
 import { createStore } from 'zustand/vanilla';
 import { immer } from 'zustand/middleware/immer';
 
@@ -28,6 +37,28 @@ export type WorkspaceState = {
   activeId: string | null;
 };
 
+export type AgentProfileOption = {
+  id: string;
+  label: string;
+  agent_id: string;
+};
+
+export type ExecutorsState = {
+  items: Executor[];
+};
+
+export type EnvironmentsState = {
+  items: Environment[];
+};
+
+export type SettingsAgentsState = {
+  items: Agent[];
+};
+
+export type AgentDiscoveryState = {
+  items: AgentDiscovery[];
+};
+
 export type BoardState = {
   items: Array<{ id: string; workspaceId: string; name: string }>;
   activeId: string | null;
@@ -42,7 +73,26 @@ export type AgentState = {
 };
 
 export type AgentProfilesState = {
-	version: number;
+  items: AgentProfileOption[];
+  version: number;
+};
+
+export type RepositoriesState = {
+  itemsByWorkspaceId: Record<string, Repository[]>;
+  loadingByWorkspaceId: Record<string, boolean>;
+  loadedByWorkspaceId: Record<string, boolean>;
+};
+
+export type RepositoryBranchesState = {
+  itemsByRepositoryId: Record<string, Branch[]>;
+  loadingByRepositoryId: Record<string, boolean>;
+  loadedByRepositoryId: Record<string, boolean>;
+};
+
+export type SettingsDataState = {
+  executorsLoaded: boolean;
+  environmentsLoaded: boolean;
+  agentsLoaded: boolean;
 };
 
 export type UserSettingsState = {
@@ -99,6 +149,13 @@ export type AppState = {
   kanban: KanbanState;
   workspaces: WorkspaceState;
   boards: BoardState;
+  executors: ExecutorsState;
+  environments: EnvironmentsState;
+  settingsAgents: SettingsAgentsState;
+  agentDiscovery: AgentDiscoveryState;
+  repositories: RepositoriesState;
+  repositoryBranches: RepositoryBranchesState;
+  settingsData: SettingsDataState;
   tasks: TaskState;
   agents: AgentState;
   agentProfiles: AgentProfilesState;
@@ -113,6 +170,16 @@ export type AppState = {
   setWorkspaces: (workspaces: WorkspaceState['items']) => void;
   setActiveBoard: (boardId: string | null) => void;
   setBoards: (boards: BoardState['items']) => void;
+  setExecutors: (executors: ExecutorsState['items']) => void;
+  setEnvironments: (environments: EnvironmentsState['items']) => void;
+  setSettingsAgents: (agents: SettingsAgentsState['items']) => void;
+  setAgentDiscovery: (agents: AgentDiscoveryState['items']) => void;
+  setAgentProfiles: (profiles: AgentProfilesState['items']) => void;
+  setRepositories: (workspaceId: string, repositories: Repository[]) => void;
+  setRepositoriesLoading: (workspaceId: string, loading: boolean) => void;
+  setRepositoryBranches: (repositoryId: string, branches: Branch[]) => void;
+  setRepositoryBranchesLoading: (repositoryId: string, loading: boolean) => void;
+  setSettingsData: (next: Partial<SettingsDataState>) => void;
   setUserSettings: (settings: UserSettingsState) => void;
   setTerminalOutput: (terminalId: string, data: string) => void;
   setConnectionStatus: (status: ConnectionState['status'], error?: string | null) => void;
@@ -131,9 +198,16 @@ const defaultState: AppState = {
   kanban: { boardId: null, columns: [], tasks: [] },
   workspaces: { items: [], activeId: null },
   boards: { items: [], activeId: null },
+  executors: { items: [] },
+  environments: { items: [] },
+  settingsAgents: { items: [] },
+  agentDiscovery: { items: [] },
+  repositories: { itemsByWorkspaceId: {}, loadingByWorkspaceId: {}, loadedByWorkspaceId: {} },
+  repositoryBranches: { itemsByRepositoryId: {}, loadingByRepositoryId: {}, loadedByRepositoryId: {} },
+  settingsData: { executorsLoaded: false, environmentsLoaded: false, agentsLoaded: false },
   tasks: { activeTaskId: null },
   agents: { agents: [] },
-  agentProfiles: { version: 0 },
+  agentProfiles: { items: [], version: 0 },
   userSettings: { workspaceId: null, boardId: null, repositoryIds: [], loaded: false },
   terminal: { terminals: [] },
   diffs: { files: [] },
@@ -158,6 +232,16 @@ const defaultState: AppState = {
   setWorkspaces: () => undefined,
   setActiveBoard: () => undefined,
   setBoards: () => undefined,
+  setExecutors: () => undefined,
+  setEnvironments: () => undefined,
+  setSettingsAgents: () => undefined,
+  setAgentDiscovery: () => undefined,
+  setAgentProfiles: () => undefined,
+  setRepositories: () => undefined,
+  setRepositoriesLoading: () => undefined,
+  setRepositoryBranches: () => undefined,
+  setRepositoryBranchesLoading: () => undefined,
+  setSettingsData: () => undefined,
   setUserSettings: () => undefined,
   setTerminalOutput: () => undefined,
   setConnectionStatus: () => undefined,
@@ -179,6 +263,16 @@ function mergeInitialState(
   | 'setWorkspaces'
   | 'setActiveBoard'
   | 'setBoards'
+  | 'setExecutors'
+  | 'setEnvironments'
+  | 'setSettingsAgents'
+  | 'setAgentDiscovery'
+  | 'setAgentProfiles'
+  | 'setRepositories'
+  | 'setRepositoriesLoading'
+  | 'setRepositoryBranches'
+  | 'setRepositoryBranchesLoading'
+  | 'setSettingsData'
   | 'setUserSettings'
   | 'setTerminalOutput'
   | 'setConnectionStatus'
@@ -194,6 +288,13 @@ function mergeInitialState(
   return {
     workspaces: { ...defaultState.workspaces, ...initialState.workspaces },
     boards: { ...defaultState.boards, ...initialState.boards },
+    executors: { ...defaultState.executors, ...initialState.executors },
+    environments: { ...defaultState.environments, ...initialState.environments },
+    settingsAgents: { ...defaultState.settingsAgents, ...initialState.settingsAgents },
+    agentDiscovery: { ...defaultState.agentDiscovery, ...initialState.agentDiscovery },
+    repositories: { ...defaultState.repositories, ...initialState.repositories },
+    repositoryBranches: { ...defaultState.repositoryBranches, ...initialState.repositoryBranches },
+    settingsData: { ...defaultState.settingsData, ...initialState.settingsData },
     kanban: { ...defaultState.kanban, ...initialState.kanban },
     tasks: { ...defaultState.tasks, ...initialState.tasks },
     agents: { ...defaultState.agents, ...initialState.agents },
@@ -217,6 +318,13 @@ export function createAppStore(initialState?: Partial<AppState>) {
           // Deep merge to avoid overwriting nested objects with undefined
           if (state.workspaces) Object.assign(draft.workspaces, state.workspaces);
           if (state.boards) Object.assign(draft.boards, state.boards);
+          if (state.executors) Object.assign(draft.executors, state.executors);
+          if (state.environments) Object.assign(draft.environments, state.environments);
+          if (state.settingsAgents) Object.assign(draft.settingsAgents, state.settingsAgents);
+          if (state.agentDiscovery) Object.assign(draft.agentDiscovery, state.agentDiscovery);
+          if (state.repositories) Object.assign(draft.repositories, state.repositories);
+          if (state.repositoryBranches) Object.assign(draft.repositoryBranches, state.repositoryBranches);
+          if (state.settingsData) Object.assign(draft.settingsData, state.settingsData);
           if (state.kanban) Object.assign(draft.kanban, state.kanban);
           if (state.tasks) Object.assign(draft.tasks, state.tasks);
           if (state.agents) Object.assign(draft.agents, state.agents);
@@ -248,6 +356,56 @@ export function createAppStore(initialState?: Partial<AppState>) {
       setActiveBoard: (boardId) =>
         set((draft) => {
           draft.boards.activeId = boardId;
+        }),
+      setExecutors: (executors) =>
+        set((draft) => {
+          draft.executors.items = executors;
+        }),
+      setEnvironments: (environments) =>
+        set((draft) => {
+          draft.environments.items = environments;
+        }),
+      setSettingsAgents: (agents) =>
+        set((draft) => {
+          draft.settingsAgents.items = agents;
+        }),
+      setAgentDiscovery: (agents) =>
+        set((draft) => {
+          draft.agentDiscovery.items = agents;
+        }),
+      setAgentProfiles: (profiles) =>
+        set((draft) => {
+          draft.agentProfiles.items = profiles;
+        }),
+      setRepositories: (workspaceId, repositories) =>
+        set((draft) => {
+          draft.repositories.itemsByWorkspaceId[workspaceId] = repositories;
+          draft.repositories.loadingByWorkspaceId[workspaceId] = false;
+          draft.repositories.loadedByWorkspaceId[workspaceId] = true;
+        }),
+      setRepositoriesLoading: (workspaceId, loading) =>
+        set((draft) => {
+          draft.repositories.loadingByWorkspaceId[workspaceId] = loading;
+          if (!loading && !draft.repositories.loadedByWorkspaceId[workspaceId]) {
+            draft.repositories.loadedByWorkspaceId[workspaceId] = false;
+          }
+        }),
+      setRepositoryBranches: (repositoryId, branches) =>
+        set((draft) => {
+          draft.repositoryBranches.itemsByRepositoryId[repositoryId] = branches;
+          draft.repositoryBranches.loadingByRepositoryId[repositoryId] = false;
+          draft.repositoryBranches.loadedByRepositoryId[repositoryId] = true;
+        }),
+      setRepositoryBranchesLoading: (repositoryId, loading) =>
+        set((draft) => {
+          draft.repositoryBranches.loadingByRepositoryId[repositoryId] = loading;
+          if (!loading && !draft.repositoryBranches.loadedByRepositoryId[repositoryId]) {
+            draft.repositoryBranches.loadedByRepositoryId[repositoryId] = false;
+          }
+        }),
+      setSettingsData: (next) =>
+        set((draft) => {
+          draft.settingsData = { ...draft.settingsData, ...next };
         }),
       setUserSettings: (settings) =>
         set((draft) => {

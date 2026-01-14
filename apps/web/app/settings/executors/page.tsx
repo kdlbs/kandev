@@ -1,18 +1,14 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
 import { IconChevronRight, IconCloud, IconCpu, IconServer } from '@tabler/icons-react';
 import { Badge } from '@kandev/ui/badge';
 import { Card, CardContent } from '@kandev/ui/card';
 import { Separator } from '@kandev/ui/separator';
-import { listExecutorsAction } from '@/app/actions/executors';
-import { SETTINGS_DATA } from '@/lib/settings/dummy-data';
-import type { Executor } from '@/lib/types/http';
-import { getWebSocketClient } from '@/lib/ws/connection';
+import { useAppStore } from '@/components/state-provider';
 
 export default function ExecutorsSettingsPage() {
-  const [executors, setExecutors] = useState<Executor[]>([]);
+  const executors = useAppStore((state) => state.executors.items);
   const creationOptions = [
     {
       id: 'local_docker',
@@ -47,31 +43,6 @@ export default function ExecutorsSettingsPage() {
       enabled: false,
     },
   ];
-
-  useEffect(() => {
-    const client = getWebSocketClient();
-    const fallback = () =>
-      SETTINGS_DATA.executors.map((executor) => ({
-        id: executor.id,
-        name: executor.name,
-        type: executor.type,
-        status: executor.status,
-        is_system: executor.isSystem,
-        config: executor.config,
-        created_at: '',
-        updated_at: '',
-      }));
-    if (client) {
-      client
-        .request<{ executors: Executor[] }>('executor.list', {})
-        .then((resp) => setExecutors(resp.executors))
-        .catch(() => setExecutors(fallback()));
-      return;
-    }
-    listExecutorsAction()
-      .then((resp) => setExecutors(resp.executors))
-      .catch(() => setExecutors(fallback()));
-  }, []);
 
   return (
     <div className="space-y-8">
@@ -162,6 +133,11 @@ export default function ExecutorsSettingsPage() {
                         {executor.type === 'local_docker' && executor.config?.docker_host && (
                           <div className="text-xs text-muted-foreground mt-1">
                             {executor.config.docker_host}
+                          </div>
+                        )}
+                        {executor.type === 'local_pc' && (
+                          <div className="text-xs text-muted-foreground mt-1">
+                            Launches agents as local processes in the worktree folder set on the Local environment.
                           </div>
                         )}
                       </div>

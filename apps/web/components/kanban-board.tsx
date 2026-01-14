@@ -7,14 +7,12 @@ import { Task } from './kanban-card';
 import { TaskCreateDialog } from './task-create-dialog';
 import { useRouter } from 'next/navigation';
 import { useAppStore, useAppStoreApi } from '@/components/state-provider';
-import { getWebSocketClient } from '@/lib/ws/connection';
-import type { ListBoardsResponse } from '@/lib/types/http';
-import { getBackendConfig } from '@/lib/config';
-import { deleteTask, fetchBoardSnapshot, moveTask } from '@/lib/http/client';
-import { snapshotToState } from '@/lib/ssr/mapper';
 import type { Task as BackendTask } from '@/lib/types/http';
 import { filterTasksByRepositories } from '@/lib/kanban/filters';
 import { useUserDisplaySettings } from '@/hooks/use-user-display-settings';
+import { useBoards } from '@/hooks/use-boards';
+import { useBoardSnapshot } from '@/hooks/use-board-snapshot';
+import { useTaskActions } from '@/hooks/use-task-actions';
 import { KanbanBoardHeader } from './kanban-board-header';
 import { KanbanBoardGrid } from './kanban-board-grid';
 
@@ -31,6 +29,9 @@ export function KanbanBoard() {
   const setActiveBoard = useAppStore((state) => state.setActiveBoard);
   const setBoards = useAppStore((state) => state.setBoards);
   const store = useAppStoreApi();
+  const { moveTaskById, deleteTaskById } = useTaskActions();
+  useBoards(workspaceState.activeId, true);
+  useBoardSnapshot(boardsState.activeId);
   const {
     settings: userSettings,
     commitSettings,
@@ -133,7 +134,7 @@ export function KanbanBoard() {
 
     try {
       setIsMovingTask(true);
-      await moveTask(getBackendConfig().apiBaseUrl, taskId, {
+      await moveTaskById(taskId, {
         board_id: kanban.boardId,
         column_id: newStatus,
         position: nextPosition,
@@ -208,7 +209,7 @@ export function KanbanBoard() {
       },
     });
     try {
-      await deleteTask(getBackendConfig().apiBaseUrl, task.id);
+      await deleteTaskById(task.id);
     } catch {
       // Ignore delete errors for now.
     }
@@ -217,40 +218,31 @@ export function KanbanBoard() {
 
   useEffect(() => {
     const workspaceId = workspaceState.activeId;
-    if (!workspaceId) return;
-    const client = getWebSocketClient();
-    if (!client) return;
-    client
-      .request<ListBoardsResponse>('board.list', { workspace_id: workspaceId })
-      .then((response) => {
-        const boards = response.boards.map((board) => ({
-          id: board.id,
-          workspaceId: board.workspace_id,
-          name: board.name,
-        }));
-        setBoards(boards);
-        const desiredBoardId =
-          (userSettings.boardId && boards.some((board) => board.id === userSettings.boardId)
-            ? userSettings.boardId
-            : boards[0]?.id) ?? null;
-        setActiveBoard(desiredBoardId);
-        if (userSettings.loaded && desiredBoardId !== userSettings.boardId) {
-          commitSettings({
-            workspaceId,
-            boardId: desiredBoardId,
-            repositoryIds: userSettings.repositoryIds,
-          });
-        }
-        if (!desiredBoardId) {
-          store.getState().hydrate({
-            kanban: { boardId: null, columns: [], tasks: [] },
-          });
-        }
-      })
-      .catch(() => {
-        // Ignore board list errors for now.
+    if (!workspaceId) {
+      setBoards([]);
+      setActiveBoard(null);
+      return;
+    }
+    const workspaceBoards = boardsState.items.filter((board) => board.workspaceId === workspaceId);
+    const desiredBoardId =
+      (userSettings.boardId && workspaceBoards.some((board) => board.id === userSettings.boardId)
+        ? userSettings.boardId
+        : workspaceBoards[0]?.id) ?? null;
+    setActiveBoard(desiredBoardId);
+    if (userSettings.loaded && desiredBoardId !== userSettings.boardId) {
+      commitSettings({
+        workspaceId,
+        boardId: desiredBoardId,
+        repositoryIds: userSettings.repositoryIds,
       });
+    }
+    if (!desiredBoardId) {
+      store.getState().hydrate({
+        kanban: { boardId: null, columns: [], tasks: [] },
+      });
+    }
   }, [
+    boardsState.items,
     commitSettings,
     setActiveBoard,
     setBoards,
@@ -260,18 +252,6 @@ export function KanbanBoard() {
     userSettings.repositoryIds,
     workspaceState.activeId,
   ]);
-
-  useEffect(() => {
-    if (!boardsState.activeId) return;
-    const boardId = boardsState.activeId;
-    fetchBoardSnapshot(getBackendConfig().apiBaseUrl, boardId)
-      .then((snapshot) => {
-        store.getState().hydrate(snapshotToState(snapshot));
-      })
-      .catch(() => {
-        // Ignore snapshot errors for now.
-      });
-  }, [boardsState.activeId, store]);
 
 
 

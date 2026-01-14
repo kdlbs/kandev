@@ -869,6 +869,23 @@ Prior versions used a simpler JSON format (not JSON-RPC). For compatibility refe
 6. **Validate messages** - Check for required fields before processing
 7. **Set exit codes** - 0 for success, non-zero for errors
 
+### Frontend Data Loading (SSR + WS)
+
+For settings + dashboard data, use a consistent pattern:
+
+1. **SSR fetch in layout/page** → hydrate the store via `StateHydrator`.
+2. **Components read from store only** (no local fetches in UI components).
+3. **WebSocket events update the store** for real-time sync.
+
+Guidelines:
+- Fetch once in the server component (e.g. `apps/web/app/settings/layout.tsx`) and hydrate.
+- Map API responses into store-friendly shapes (e.g. agent profiles → `{ id, label, agent_id }`).
+- Use WS handlers to patch lists; avoid making HTTP requests inside WS handlers.
+- Prefer WS events to include full entity payloads so clients do not need follow-up HTTP fetches.
+- Only re-fetch when the server cannot emit the full data and document why.
+- Avoid request/response WS calls inside UI components.
+- UI components should read from the store only; perform HTTP fetches in hooks or store actions.
+
 ## Local Agent Discovery
 
 Kandev checks a bundled discovery config to detect locally installed agents. Each agent entry lists OS-specific installation paths (Linux, Windows, macOS). At runtime, the backend selects the paths for the current OS, expands environment variables and `~`, and marks the agent as available if any configured file or directory exists.

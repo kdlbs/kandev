@@ -258,14 +258,22 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 	return &result, nil
 }
 
-func (c *Controller) DeleteProfile(ctx context.Context, id string) error {
+func (c *Controller) DeleteProfile(ctx context.Context, id string) (*dto.AgentProfileDTO, error) {
+	profile, err := c.repo.GetAgentProfile(ctx, id)
+	if err != nil {
+		if strings.Contains(err.Error(), "agent profile not found") {
+			return nil, ErrAgentProfileNotFound
+		}
+		return nil, err
+	}
 	if err := c.repo.DeleteAgentProfile(ctx, id); err != nil {
 		if strings.Contains(err.Error(), "agent profile not found") {
-			return ErrAgentProfileNotFound
+			return nil, ErrAgentProfileNotFound
 		}
-		return err
+		return nil, err
 	}
-	return nil
+	result := toProfileDTO(profile)
+	return &result, nil
 }
 
 func toAgentDTO(agent *models.Agent, profiles []*models.AgentProfile) dto.AgentDTO {

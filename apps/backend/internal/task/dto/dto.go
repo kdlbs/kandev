@@ -82,6 +82,7 @@ type EnvironmentDTO struct {
 	ID           string                 `json:"id"`
 	Name         string                 `json:"name"`
 	Kind         models.EnvironmentKind `json:"kind"`
+	IsSystem     bool                   `json:"is_system"`
 	WorktreeRoot string                 `json:"worktree_root,omitempty"`
 	ImageTag     string                 `json:"image_tag,omitempty"`
 	Dockerfile   string                 `json:"dockerfile,omitempty"`
@@ -291,6 +292,7 @@ func FromEnvironment(environment *models.Environment) EnvironmentDTO {
 		ID:           environment.ID,
 		Name:         environment.Name,
 		Kind:         environment.Kind,
+		IsSystem:     environment.IsSystem,
 		WorktreeRoot: environment.WorktreeRoot,
 		ImageTag:     environment.ImageTag,
 		Dockerfile:   environment.Dockerfile,

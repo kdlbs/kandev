@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { IconPlus } from '@tabler/icons-react';
@@ -17,14 +17,12 @@ import {
   createAgentAction,
   createAgentProfileAction,
   deleteAgentProfileAction,
-  listAgentDiscoveryAction,
-  listAgentsAction,
   updateAgentAction,
   updateAgentProfileAction,
 } from '@/app/actions/agents';
 import type { Agent, AgentDiscovery, AgentProfile } from '@/lib/types/http';
 import { generateUUID } from '@/lib/utils';
-import { useRequest } from '@/lib/http/use-request';
+import { useAppStore } from '@/components/state-provider';
 
 type DraftAgent = Agent & { isNew?: boolean };
 type DraftProfile = AgentProfile & { isNew?: boolean };
@@ -33,7 +31,6 @@ type AgentSetupFormProps = {
   initialAgent: DraftAgent;
   savedAgent: Agent | null;
   discoveryAgent: AgentDiscovery | undefined;
-  refreshAgents: () => Promise<unknown>;
   onToastError: (error: unknown) => void;
 };
 
@@ -79,10 +76,12 @@ function AgentSetupForm({
   initialAgent,
   savedAgent,
   discoveryAgent,
-  refreshAgents,
   onToastError,
 }: AgentSetupFormProps) {
   const router = useRouter();
+  const settingsAgents = useAppStore((state) => state.settingsAgents.items);
+  const setSettingsAgents = useAppStore((state) => state.setSettingsAgents);
+  const setAgentProfiles = useAppStore((state) => state.setAgentProfiles);
   const [draftAgent, setDraftAgent] = useState<DraftAgent>(initialAgent);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
 
@@ -110,6 +109,27 @@ function AgentSetupForm({
     }
     return false;
   }, [draftAgent, savedAgent]);
+
+  const syncAgentsToStore = (nextAgents: Agent[]) => {
+    setSettingsAgents(nextAgents);
+    setAgentProfiles(
+      nextAgents.flatMap((agent) =>
+        agent.profiles.map((profile) => ({
+          id: profile.id,
+          label: `${agent.name} • ${profile.name}`,
+          agent_id: agent.id,
+        }))
+      )
+    );
+  };
+
+  const upsertAgent = (agent: Agent) => {
+    const exists = settingsAgents.some((item) => item.id === agent.id);
+    const nextAgents = exists
+      ? settingsAgents.map((item) => (item.id === agent.id ? agent : item))
+      : [...settingsAgents, agent];
+    syncAgentsToStore(nextAgents);
+  };
 
   const handleAddProfile = () => {
     setDraftAgent((current) => ({
@@ -145,7 +165,7 @@ function AgentSetupForm({
     setSaveStatus('loading');
     try {
       if (!savedAgent) {
-        const created = await createAgentAction({
+        let created = await createAgentAction({
           name: draftAgent.name,
           workspace_id: draftAgent.workspace_id,
           profiles: draftAgent.profiles.map((profile) => ({
@@ -157,9 +177,12 @@ function AgentSetupForm({
           })),
         });
         if ((draftAgent.mcp_config_path ?? '') !== (created.mcp_config_path ?? '')) {
-          await updateAgentAction(created.id, { mcp_config_path: draftAgent.mcp_config_path ?? '' });
+          created = await updateAgentAction(created.id, {
+            mcp_config_path: draftAgent.mcp_config_path ?? '',
+          });
         }
-        await refreshAgents();
+        upsertAgent(created);
+        setDraftAgent(ensureProfiles(cloneAgent(created)));
         router.replace(`/settings/agents/${encodeURIComponent(created.name)}`);
       } else {
         const agentPatch: { workspace_id?: string | null; mcp_config_path?: string | null } = {};
@@ -174,27 +197,32 @@ function AgentSetupForm({
         }
 
         const savedProfilesById = new Map(savedAgent.profiles.map((profile) => [profile.id, profile]));
+        const nextProfiles: AgentProfile[] = [];
         for (const profile of draftAgent.profiles) {
           const savedProfile = savedProfilesById.get(profile.id);
           if (!savedProfile) {
-            await createAgentProfileAction(savedAgent.id, {
+            const createdProfile = await createAgentProfileAction(savedAgent.id, {
               name: profile.name,
               model: profile.model,
               auto_approve: profile.auto_approve,
               dangerously_skip_permissions: profile.dangerously_skip_permissions,
               plan: profile.plan,
             });
+            nextProfiles.push(createdProfile);
             continue;
           }
           if (isProfileDirty(profile, savedProfile)) {
-            await updateAgentProfileAction(profile.id, {
+            const updatedProfile = await updateAgentProfileAction(profile.id, {
               name: profile.name,
               model: profile.model,
               auto_approve: profile.auto_approve,
               dangerously_skip_permissions: profile.dangerously_skip_permissions,
               plan: profile.plan,
             });
+            nextProfiles.push(updatedProfile);
+            continue;
           }
+          nextProfiles.push(savedProfile);
         }
         for (const savedProfile of savedAgent.profiles) {
           const stillExists = draftAgent.profiles.some((profile) => profile.id === savedProfile.id);
@@ -203,7 +231,14 @@ function AgentSetupForm({
           }
         }
 
-        await refreshAgents();
+        const nextAgent = {
+          ...savedAgent,
+          workspace_id: draftAgent.workspace_id ?? null,
+          mcp_config_path: draftAgent.mcp_config_path ?? '',
+          profiles: nextProfiles,
+        };
+        upsertAgent(nextAgent);
+        setDraftAgent(ensureProfiles(cloneAgent(nextAgent)));
       }
       setSaveStatus('success');
     } catch (error) {
@@ -349,28 +384,16 @@ export default function AgentSetupPage() {
   const params = useParams();
   const agentKey = Array.isArray(params.agentId) ? params.agentId[0] : params.agentId;
   const decodedKey = decodeURIComponent(agentKey ?? '');
-  const { run: runListDiscovery, data: discoveryData } = useRequest(listAgentDiscoveryAction);
-  const { run: runListAgents, data: agentsData } = useRequest(listAgentsAction);
-
-  useEffect(() => {
-    Promise.all([runListDiscovery(), runListAgents()]).catch((error) => {
-      toast({
-        title: 'Failed to load agent settings',
-        description: error instanceof Error ? error.message : 'Request failed',
-        variant: 'error',
-      });
-    });
-  }, [runListAgents, runListDiscovery, toast]);
+  const discoveryAgents = useAppStore((state) => state.agentDiscovery.items);
+  const savedAgents = useAppStore((state) => state.settingsAgents.items);
 
   const discoveryAgent = useMemo(() => {
-    const agents = discoveryData?.agents ?? [];
-    return agents.find((agent) => agent.name === decodedKey);
-  }, [decodedKey, discoveryData?.agents]);
+    return discoveryAgents.find((agent) => agent.name === decodedKey);
+  }, [decodedKey, discoveryAgents]);
 
   const savedAgent = useMemo(() => {
-    const agents = agentsData?.agents ?? [];
-    return agents.find((agent) => agent.id === decodedKey || agent.name === decodedKey) ?? null;
-  }, [decodedKey, agentsData?.agents]);
+    return savedAgents.find((agent) => agent.id === decodedKey || agent.name === decodedKey) ?? null;
+  }, [decodedKey, savedAgents]);
 
   const initialAgent = useMemo(() => {
     if (!decodedKey) return null;
@@ -394,7 +417,7 @@ export default function AgentSetupPage() {
     return null;
   }, [decodedKey, discoveryAgent, savedAgent]);
 
-  if (!initialAgent && (discoveryData?.agents?.length ?? 0) > 0) {
+  if (!initialAgent && discoveryAgents.length > 0) {
     return (
       <Card>
         <CardContent className="py-12 text-center">
@@ -425,7 +448,6 @@ export default function AgentSetupPage() {
       initialAgent={initialAgent}
       savedAgent={savedAgent}
       discoveryAgent={discoveryAgent}
-      refreshAgents={runListAgents}
       onToastError={handleToastError}
     />
   );
