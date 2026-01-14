@@ -478,18 +478,33 @@ func (e *Executor) RespondToPermission(ctx context.Context, taskID, pendingID, o
 
 // GetExecution returns the current execution state for a task
 func (e *Executor) GetExecution(taskID string) (*TaskExecution, bool) {
+	ctx := context.Background()
+
 	e.mu.RLock()
 	execution, exists := e.executions[taskID]
 	e.mu.RUnlock()
 
 	if exists {
+		// Verify the agent is actually running by probing agentctl
+		if !e.agentManager.IsAgentRunningForTask(ctx, taskID) {
+			// Agent stopped - clean up in-memory state
+			e.mu.Lock()
+			delete(e.executions, taskID)
+			e.mu.Unlock()
+
+			// Also update DB if we have a session
+			if execution.SessionID != "" {
+				_ = e.repo.UpdateAgentSessionStatus(ctx, execution.SessionID, models.AgentSessionStatusStopped, "agent process stopped")
+			}
+			return nil, false
+		}
+
 		// Return a copy to avoid data races
 		execCopy := *execution
 		return &execCopy, true
 	}
 
 	// Try to load from database
-	ctx := context.Background()
 	session, err := e.repo.GetActiveAgentSessionByTaskID(ctx, taskID)
 	if err != nil {
 		return nil, false
@@ -523,6 +538,20 @@ func (e *Executor) GetExecutionWithContext(ctx context.Context, taskID string) (
 	e.mu.RUnlock()
 
 	if exists {
+		// Verify the agent is actually running by probing agentctl
+		if !e.agentManager.IsAgentRunningForTask(ctx, taskID) {
+			// Agent stopped - clean up in-memory state
+			e.mu.Lock()
+			delete(e.executions, taskID)
+			e.mu.Unlock()
+
+			// Also update DB if we have a session
+			if execution.SessionID != "" {
+				_ = e.repo.UpdateAgentSessionStatus(ctx, execution.SessionID, models.AgentSessionStatusStopped, "agent process stopped")
+			}
+			return nil, false
+		}
+
 		execCopy := *execution
 		return &execCopy, true
 	}
