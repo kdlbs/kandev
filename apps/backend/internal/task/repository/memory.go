@@ -700,6 +700,33 @@ func (r *MemoryRepository) DeleteComment(ctx context.Context, id string) error {
 	return nil
 }
 
+// GetCommentByToolCallID retrieves a comment by task ID and tool_call_id in metadata
+func (r *MemoryRepository) GetCommentByToolCallID(ctx context.Context, taskID, toolCallID string) (*models.Comment, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	for _, comment := range r.comments {
+		if comment.TaskID == taskID && comment.Metadata != nil {
+			if tcID, ok := comment.Metadata["tool_call_id"].(string); ok && tcID == toolCallID {
+				return comment, nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("comment not found for tool_call_id: %s", toolCallID)
+}
+
+// UpdateComment updates an existing comment
+func (r *MemoryRepository) UpdateComment(ctx context.Context, comment *models.Comment) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, ok := r.comments[comment.ID]; !ok {
+		return fmt.Errorf("comment not found: %s", comment.ID)
+	}
+	r.comments[comment.ID] = comment
+	return nil
+}
+
 // AgentSession operations
 
 // CreateAgentSession creates a new agent session

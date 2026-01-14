@@ -119,6 +119,7 @@ const (
 	ActionColumnUpdated           = "column.updated"
 	ActionColumnDeleted           = "column.deleted"
 	ActionCommentAdded            = "comment.added"
+	ActionCommentUpdated          = "comment.updated"
 	ActionInputRequested          = "input.requested"
 	ActionRepositoryCreated       = "repository.created"
 	ActionRepositoryUpdated       = "repository.updated"

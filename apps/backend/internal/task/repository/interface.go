@@ -45,6 +45,8 @@ type Repository interface {
 	// Comment operations
 	CreateComment(ctx context.Context, comment *models.Comment) error
 	GetComment(ctx context.Context, id string) (*models.Comment, error)
+	GetCommentByToolCallID(ctx context.Context, taskID, toolCallID string) (*models.Comment, error)
+	UpdateComment(ctx context.Context, comment *models.Comment) error
 	ListComments(ctx context.Context, taskID string) ([]*models.Comment, error)
 	DeleteComment(ctx context.Context, id string) error
 

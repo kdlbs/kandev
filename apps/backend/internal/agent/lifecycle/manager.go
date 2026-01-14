@@ -20,6 +20,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/worktree"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/stringutil"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -816,7 +817,9 @@ func (m *Manager) initializeACPSession(ctx context.Context, instance *AgentInsta
 	m.publishSessionInfo(instance, sessionID)
 
 	// 3. Set up updates stream to receive session notifications
-	go m.handleUpdatesStream(instance)
+	// Use a ready channel to signal when the stream is connected
+	updatesReady := make(chan struct{})
+	go m.handleUpdatesStream(instance, updatesReady)
 
 	// 4. Set up permission stream to receive permission requests
 	go m.handlePermissionStream(instance)
@@ -826,6 +829,15 @@ func (m *Manager) initializeACPSession(ctx context.Context, instance *AgentInsta
 
 	// 6. Set up file changes stream to track filesystem changes
 	go m.handleFileChangesStream(instance)
+
+	// Wait for the updates stream to connect before sending prompt
+	// This prevents race conditions where notifications are sent before streams are ready
+	select {
+	case <-updatesReady:
+		m.logger.Debug("updates stream ready")
+	case <-time.After(5 * time.Second):
+		m.logger.Warn("timeout waiting for updates stream to connect, proceeding anyway")
+	}
 
 	// 7. Send the task prompt if provided
 	if taskDescription != "" {
@@ -890,13 +902,22 @@ func (m *Manager) initializeACPSession(ctx context.Context, instance *AgentInsta
 	return nil
 }
 
-// handleUpdatesStream handles streaming session notifications from the agent
-func (m *Manager) handleUpdatesStream(instance *AgentInstance) {
+// handleUpdatesStream handles streaming session notifications from the agent.
+// If ready is non-nil, it will be closed when the stream connection is established (or fails).
+func (m *Manager) handleUpdatesStream(instance *AgentInstance, ready chan<- struct{}) {
 	ctx := context.Background()
 
 	err := instance.agentctl.StreamUpdates(ctx, func(update agentctl.SessionUpdate) {
 		m.handleSessionUpdate(instance, update)
 	})
+
+	// Signal that the stream connection attempt is complete (success or failure)
+	// StreamUpdates returns immediately after establishing the WebSocket connection
+	// and starting the read goroutine, so this signals that we're ready to receive updates
+	if ready != nil {
+		close(ready)
+	}
+
 	if err != nil {
 		m.logger.Error("failed to connect to updates stream",
 			zap.String("instance_id", instance.ID),
@@ -969,7 +990,7 @@ func (m *Manager) reconnectStreams(instance *AgentInstance) {
 	}
 
 	// Reconnect to WebSocket streams
-	go m.handleUpdatesStream(instance)
+	go m.handleUpdatesStream(instance, nil)
 	go m.handlePermissionStream(instance)
 	go m.handleGitStatusStream(instance)
 	go m.handleFileChangesStream(instance)
@@ -1040,10 +1061,11 @@ func (m *Manager) publishPermissionRequest(instance *AgentInstance, notification
 
 // handleSessionUpdate processes incoming session updates from the agent
 func (m *Manager) handleSessionUpdate(instance *AgentInstance, update agentctl.SessionUpdate) {
-	m.logger.Debug("received session update",
+	m.logger.Debug("handleSessionUpdate called",
 		zap.String("instance_id", instance.ID),
 		zap.String("session_id", update.SessionID),
-		zap.String("type", update.Type))
+		zap.String("type", update.Type),
+		zap.String("text", stringutil.TruncateString(update.Text, 50)))
 
 	// Handle different update types based on the Type field
 	switch update.Type {
@@ -1075,18 +1097,19 @@ func (m *Manager) handleSessionUpdate(instance *AgentInstance, update agentctl.S
 		m.publishToolCall(instance, update.ToolCallID, update.ToolTitle, update.ToolStatus, update.ToolArgs)
 
 	case "tool_update":
-		m.logger.Debug("tool call update",
+		m.logger.Debug("tool call update received",
 			zap.String("instance_id", instance.ID),
-			zap.String("tool_call_id", update.ToolCallID))
+			zap.String("tool_call_id", update.ToolCallID),
+			zap.String("tool_status", update.ToolStatus))
 
 		// Check if tool call completed
 		switch update.ToolStatus {
 		case "complete", "completed":
-			m.logger.Info("tool call completed",
+			m.logger.Debug("tool call completed",
 				zap.String("instance_id", instance.ID))
 			m.updateInstanceProgress(instance.ID, 80)
 			m.publishToolCallCompleteFromUpdate(instance, update)
-		case "error":
+		case "error", "failed":
 			m.logger.Error("tool call error",
 				zap.String("instance_id", instance.ID))
 			m.publishToolCallCompleteFromUpdate(instance, update)
@@ -1100,6 +1123,21 @@ func (m *Manager) handleSessionUpdate(instance *AgentInstance, update agentctl.S
 		m.logger.Error("agent error",
 			zap.String("instance_id", instance.ID),
 			zap.String("error", update.Error))
+
+	case "complete":
+		m.logger.Info("agent turn complete",
+			zap.String("instance_id", instance.ID),
+			zap.String("session_id", update.SessionID))
+
+		// Flush accumulated message buffer as a comment
+		m.flushMessageBufferAsComment(instance)
+
+		// Mark agent as READY for follow-up prompts
+		if err := m.MarkReady(instance.ID); err != nil {
+			m.logger.Error("failed to mark instance as ready after complete",
+				zap.String("instance_id", instance.ID),
+				zap.Error(err))
+		}
 	}
 
 	// Publish session update to event bus for WebSocket streaming
@@ -1109,8 +1147,12 @@ func (m *Manager) handleSessionUpdate(instance *AgentInstance, update agentctl.S
 // publishSessionUpdate publishes a session update to the event bus
 func (m *Manager) publishSessionUpdate(instance *AgentInstance, update agentctl.SessionUpdate) {
 	if m.eventBus == nil {
+		m.logger.Warn("publishSessionUpdate: eventBus is nil, skipping publish")
 		return
 	}
+	m.logger.Debug("publishSessionUpdate: publishing event",
+		zap.String("task_id", instance.TaskID),
+		zap.String("type", update.Type))
 
 	// Build the update data - our SessionUpdate type marshals cleanly
 	updateData := map[string]interface{}{

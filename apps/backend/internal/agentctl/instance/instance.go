@@ -52,6 +52,9 @@ type CreateRequest struct {
 	// AgentCommand is an optional command to start the agent. If empty, a default is used.
 	AgentCommand string `json:"agent_command,omitempty"`
 
+	// Protocol is the protocol adapter to use (acp, codex). If empty, default is used.
+	Protocol string `json:"protocol,omitempty"`
+
 	// Env contains optional environment variables to pass to the agent process.
 	Env map[string]string `json:"env,omitempty"`
 

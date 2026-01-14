@@ -10,6 +10,7 @@ import (
 
 	"github.com/coder/acp-go-sdk"
 	"github.com/gorilla/websocket"
+	"github.com/kandev/kandev/internal/common/stringutil"
 	"go.uber.org/zap"
 )
 
@@ -152,17 +153,31 @@ func (c *Client) Prompt(ctx context.Context, text string) (*PromptResponse, erro
 // SessionUpdate represents a session update from the agent.
 // This matches adapter.SessionUpdate that agentctl sends over WebSocket.
 type SessionUpdate struct {
-	Type       string                 `json:"type"`
-	SessionID  string                 `json:"session_id,omitempty"`
-	Text       string                 `json:"text,omitempty"`
+	Type        string `json:"type"`
+	SessionID   string `json:"session_id,omitempty"`
+	OperationID string `json:"operation_id,omitempty"` // Turn/operation ID for cancellation
+
+	// Message fields
+	Text string `json:"text,omitempty"`
+
+	// Reasoning fields (for "reasoning" type)
+	ReasoningText    string `json:"reasoning_text,omitempty"`
+	ReasoningSummary string `json:"reasoning_summary,omitempty"`
+
+	// Tool call fields
 	ToolCallID string                 `json:"tool_call_id,omitempty"`
 	ToolName   string                 `json:"tool_name,omitempty"`
 	ToolTitle  string                 `json:"tool_title,omitempty"`
 	ToolStatus string                 `json:"tool_status,omitempty"`
 	ToolArgs   map[string]interface{} `json:"tool_args,omitempty"`
 	ToolResult interface{}            `json:"tool_result,omitempty"`
-	Error      string                 `json:"error,omitempty"`
-	Data       map[string]interface{} `json:"data,omitempty"`
+
+	// Diff for file changes
+	Diff string `json:"diff,omitempty"`
+
+	// Error and raw data
+	Error string                 `json:"error,omitempty"`
+	Data  map[string]interface{} `json:"data,omitempty"`
 }
 
 // PermissionOption represents a permission choice
@@ -235,6 +250,10 @@ func (c *Client) StreamUpdates(ctx context.Context, handler func(SessionUpdate))
 				c.logger.Warn("failed to parse session update", zap.Error(err))
 				continue
 			}
+
+			c.logger.Debug("StreamUpdates: received from WebSocket",
+				zap.String("type", update.Type),
+				zap.String("text", stringutil.TruncateString(update.Text, 50)))
 
 			handler(update)
 		}

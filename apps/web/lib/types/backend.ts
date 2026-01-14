@@ -19,6 +19,7 @@ export type BackendMessageType =
   | 'column.updated'
   | 'column.deleted'
   | 'comment.added'
+  | 'comment.updated'
   | 'executor.created'
   | 'executor.updated'
   | 'executor.deleted'
@@ -234,6 +235,7 @@ export type BackendMessageMap = {
   'column.updated': BackendMessage<'column.updated', ColumnPayload>;
   'column.deleted': BackendMessage<'column.deleted', ColumnPayload>;
   'comment.added': BackendMessage<'comment.added', CommentAddedPayload>;
+  'comment.updated': BackendMessage<'comment.updated', CommentAddedPayload>;
   'executor.created': BackendMessage<'executor.created', ExecutorPayload>;
   'executor.updated': BackendMessage<'executor.updated', ExecutorPayload>;
   'executor.deleted': BackendMessage<'executor.deleted', ExecutorPayload>;

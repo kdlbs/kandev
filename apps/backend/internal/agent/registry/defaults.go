@@ -57,10 +57,10 @@ func DefaultAgents() []*AgentTypeConfig {
 		{
 			ID:          "codex-agent",
 			Name:        "OpenAI Codex Agent",
-			Description: "OpenAI Codex CLI-powered autonomous coding agent.",
+			Description: "OpenAI Codex CLI-powered autonomous coding agent using the Codex app-server protocol.",
 			Image:       "kandev/codex-agent",
 			Tag:         "latest",
-			Cmd:         []string{"codex", "--acp"},
+			Cmd:         []string{"codex", "app-server"},
 			WorkingDir:  "/workspace",
 			RequiredEnv: []string{},
 			Env:         map[string]string{},
@@ -75,7 +75,7 @@ func DefaultAgents() []*AgentTypeConfig {
 			Capabilities: []string{"code_generation", "code_review", "refactoring", "testing", "shell_execution"},
 			Enabled:      true,
 			ModelFlag:    "--model",
-			Protocol:     agent.ProtocolACP,
+			Protocol:     agent.ProtocolCodex,
 		},
 		{
 			ID:          "gemini-agent",

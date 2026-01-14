@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/adapter"
 	"github.com/kandev/kandev/internal/agentctl/config"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/stringutil"
 	"github.com/kandev/kandev/pkg/agent"
 	"go.uber.org/zap"
 )
@@ -182,6 +183,10 @@ func (m *Manager) Start(ctx context.Context) error {
 	}
 
 	// Start the process
+	m.logger.Info("starting agent process",
+		zap.Strings("args", m.cfg.AgentArgs),
+		zap.String("workdir", m.cfg.WorkDir),
+		zap.Int("env_count", len(m.cfg.AgentEnv)))
 	if err := m.cmd.Start(); err != nil {
 		m.status.Store(StatusError)
 		return fmt.Errorf("failed to start agent: %w", err)
@@ -229,6 +234,8 @@ func (m *Manager) createAdapter() error {
 	switch protocol {
 	case agent.ProtocolACP:
 		m.adapter = adapter.NewACPAdapter(m.stdin, m.stdout, adapterCfg, m.logger)
+	case agent.ProtocolCodex:
+		m.adapter = adapter.NewCodexAdapter(m.stdin, m.stdout, adapterCfg, m.logger)
 	default:
 		return fmt.Errorf("unsupported protocol: %s", protocol)
 	}
@@ -243,19 +250,26 @@ func (m *Manager) createAdapter() error {
 func (m *Manager) forwardUpdates() {
 	defer m.wg.Done()
 
+	m.logger.Debug("forwardUpdates: started")
 	updatesCh := m.adapter.Updates()
 	for {
 		select {
 		case update, ok := <-updatesCh:
 			if !ok {
+				m.logger.Debug("forwardUpdates: adapter channel closed")
 				return
 			}
+			m.logger.Debug("forwardUpdates: received from adapter",
+				zap.String("type", update.Type),
+				zap.String("text", stringutil.TruncateString(update.Text, 50)))
 			select {
 			case m.updatesCh <- update:
+				m.logger.Debug("forwardUpdates: sent to manager channel")
 			default:
 				m.logger.Warn("updates channel full, dropping notification")
 			}
 		case <-m.stopCh:
+			m.logger.Debug("forwardUpdates: stop signal received")
 			return
 		}
 	}

@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	"github.com/kandev/kandev/internal/common/stringutil"
 	"go.uber.org/zap"
 )
 
@@ -208,8 +209,13 @@ func (s *Server) handleACPStreamWS(c *gin.Context) {
 		select {
 		case notification, ok := <-updatesCh:
 			if !ok {
+				s.logger.Info("ACP stream: updates channel closed")
 				return
 			}
+
+			s.logger.Debug("ACP stream: received update from channel",
+				zap.String("type", notification.Type),
+				zap.String("text_preview", stringutil.TruncateString(notification.Text, 50)))
 
 			data, err := json.Marshal(notification)
 			if err != nil {
@@ -221,9 +227,12 @@ func (s *Server) handleACPStreamWS(c *gin.Context) {
 				s.logger.Debug("WebSocket write error", zap.Error(err))
 				return
 			}
+			s.logger.Debug("ACP stream: sent update to WebSocket")
 		}
 	}
 }
+
+
 
 // PermissionRespondRequest is a request to respond to a permission request
 type PermissionRespondRequest struct {

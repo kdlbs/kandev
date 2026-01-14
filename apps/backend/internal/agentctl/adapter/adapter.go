@@ -18,17 +18,38 @@ type (
 	PermissionHandler  = types.PermissionHandler
 )
 
+// SessionUpdate type constants
+const (
+	UpdateTypeMessageChunk = "message_chunk" // Agent text streaming
+	UpdateTypeReasoning    = "reasoning"     // Chain-of-thought/thinking
+	UpdateTypeToolCall     = "tool_call"     // Tool invocation started
+	UpdateTypeToolUpdate   = "tool_update"   // Tool status update
+	UpdateTypePlan         = "plan"          // Agent plan updates
+	UpdateTypeComplete     = "complete"      // Turn/session complete
+	UpdateTypeError        = "error"         // Error occurred
+)
+
 // SessionUpdate is a protocol-agnostic update from the agent.
 // All protocol adapters normalize their updates to this format.
 type SessionUpdate struct {
-	// Type identifies the update type: "message_chunk", "tool_call", "tool_update", "plan", "complete", "error"
+	// Type identifies the update type. Use UpdateType* constants.
 	Type string `json:"type"`
 
 	// SessionID is the current session identifier
 	SessionID string `json:"session_id,omitempty"`
 
+	// OperationID identifies the current in-flight operation (turn, prompt, etc.)
+	// Used to target specific operations for cancellation or status updates.
+	// For Codex this is the turn ID, for other protocols it may be empty.
+	OperationID string `json:"operation_id,omitempty"`
+
 	// Message fields (for "message_chunk" type)
 	Text string `json:"text,omitempty"`
+
+	// Reasoning fields (for "reasoning" type)
+	// Used for chain-of-thought, thinking traces, etc.
+	ReasoningText    string `json:"reasoning_text,omitempty"`    // Full reasoning content
+	ReasoningSummary string `json:"reasoning_summary,omitempty"` // Summarized version (if available)
 
 	// Tool call fields (for "tool_call" and "tool_update" types)
 	ToolCallID string                 `json:"tool_call_id,omitempty"`
@@ -37,6 +58,10 @@ type SessionUpdate struct {
 	ToolStatus string                 `json:"tool_status,omitempty"` // "started", "running", "completed", "error"
 	ToolArgs   map[string]interface{} `json:"tool_args,omitempty"`
 	ToolResult interface{}            `json:"tool_result,omitempty"`
+
+	// Diff contains unified diff content for file changes.
+	// Populated when tools modify files, providing the aggregated diff.
+	Diff string `json:"diff,omitempty"`
 
 	// Plan fields (for "plan" type)
 	PlanEntries []PlanEntry `json:"plan_entries,omitempty"`
@@ -93,6 +118,11 @@ type AgentAdapter interface {
 
 	// GetSessionID returns the current session ID.
 	GetSessionID() string
+
+	// GetOperationID returns the current operation/turn ID.
+	// Returns empty string if no operation is in progress or not supported by the protocol.
+	// For Codex this is the turn ID, for ACP this may be empty.
+	GetOperationID() string
 
 	// SetPermissionHandler sets the handler for permission requests.
 	SetPermissionHandler(handler PermissionHandler)

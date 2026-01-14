@@ -590,7 +590,11 @@ func main() {
 		if metadata, ok := data["metadata"]; ok && metadata != nil {
 			payload["metadata"] = metadata
 		}
-		notification, _ := ws.NewNotification(ws.ActionCommentAdded, payload)
+		notification, err := ws.NewNotification(ws.ActionCommentAdded, payload)
+		if err != nil {
+			log.Error("Failed to create comment.added notification", zap.Error(err))
+			return nil
+		}
 		gateway.Hub.BroadcastToTask(taskID, notification)
 		return nil
 	})
@@ -598,6 +602,41 @@ func main() {
 		log.Error("Failed to subscribe to comment.added events", zap.Error(err))
 	} else {
 		log.Info("Subscribed to comment.added events for WebSocket broadcasting")
+	}
+
+	// Subscribe to comment.updated events and broadcast to WebSocket subscribers
+	_, err = eventBus.Subscribe(events.CommentUpdated, func(ctx context.Context, event *bus.Event) error {
+		data := event.Data
+		taskID, _ := data["task_id"].(string)
+		if taskID == "" {
+			log.Warn("comment.updated event has no task_id, skipping")
+			return nil
+		}
+		payload := map[string]interface{}{
+			"comment_id":     data["comment_id"],
+			"task_id":        taskID,
+			"author_type":    data["author_type"],
+			"author_id":      data["author_id"],
+			"content":        data["content"],
+			"type":           data["type"],
+			"requests_input": data["requests_input"],
+			"created_at":     data["created_at"],
+		}
+		if metadata, ok := data["metadata"]; ok && metadata != nil {
+			payload["metadata"] = metadata
+		}
+		notification, err := ws.NewNotification(ws.ActionCommentUpdated, payload)
+		if err != nil {
+			log.Error("Failed to create comment.updated notification", zap.Error(err))
+			return nil
+		}
+		gateway.Hub.BroadcastToTask(taskID, notification)
+		return nil
+	})
+	if err != nil {
+		log.Error("Failed to subscribe to comment.updated events", zap.Error(err))
+	} else {
+		log.Info("Subscribed to comment.updated events for WebSocket broadcasting")
 	}
 
 	// Subscribe to git status events and broadcast to WebSocket subscribers
@@ -986,6 +1025,11 @@ func (a *commentCreatorAdapter) CreateToolCallComment(ctx context.Context, taskI
 		Metadata:       metadata,
 	})
 	return err
+}
+
+// UpdateToolCallComment updates a tool call comment's status
+func (a *commentCreatorAdapter) UpdateToolCallComment(ctx context.Context, taskID, toolCallID, status, result string) error {
+	return a.svc.UpdateToolCallComment(ctx, taskID, toolCallID, status, result)
 }
 
 // mapACPTypeToCommentType maps ACP message types to comment types
