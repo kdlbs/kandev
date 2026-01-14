@@ -150,7 +150,7 @@ func (r *SQLiteRepository) initSchema() error {
 		description TEXT DEFAULT '',
 		state TEXT DEFAULT 'TODO',
 		priority INTEGER DEFAULT 0,
-		agent_type TEXT DEFAULT '',
+		agent_profile_id TEXT DEFAULT '',
 		repository_url TEXT DEFAULT '',
 		branch TEXT DEFAULT '',
 		assigned_to TEXT DEFAULT '',
@@ -793,9 +793,9 @@ func (r *SQLiteRepository) CreateTask(ctx context.Context, task *models.Task) er
 	}
 
 	_, err = tx.ExecContext(ctx, `
-		INSERT INTO tasks (id, workspace_id, board_id, column_id, title, description, state, priority, agent_type, repository_url, branch, assigned_to, position, metadata, created_at, updated_at)
+		INSERT INTO tasks (id, workspace_id, board_id, column_id, title, description, state, priority, agent_profile_id, repository_url, branch, assigned_to, position, metadata, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, task.ID, task.WorkspaceID, task.BoardID, task.ColumnID, task.Title, task.Description, task.State, task.Priority, task.AgentType, task.RepositoryURL, task.Branch, task.AssignedTo, task.Position, string(metadata), task.CreatedAt, task.UpdatedAt)
+	`, task.ID, task.WorkspaceID, task.BoardID, task.ColumnID, task.Title, task.Description, task.State, task.Priority, task.AgentProfileID, task.RepositoryURL, task.Branch, task.AssignedTo, task.Position, string(metadata), task.CreatedAt, task.UpdatedAt)
 	if err != nil {
 		tx.Rollback()
 		return err
@@ -815,12 +815,12 @@ func (r *SQLiteRepository) CreateTask(ctx context.Context, task *models.Task) er
 func (r *SQLiteRepository) GetTask(ctx context.Context, id string) (*models.Task, error) {
 	task := &models.Task{}
 	var metadata string
-	var agentType, repositoryURL, branch, assignedTo sql.NullString
+	var agentProfileID, repositoryURL, branch, assignedTo sql.NullString
 
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, workspace_id, board_id, column_id, title, description, state, priority, agent_type, repository_url, branch, assigned_to, position, metadata, created_at, updated_at
+		SELECT id, workspace_id, board_id, column_id, title, description, state, priority, agent_profile_id, repository_url, branch, assigned_to, position, metadata, created_at, updated_at
 		FROM tasks WHERE id = ?
-	`, id).Scan(&task.ID, &task.WorkspaceID, &task.BoardID, &task.ColumnID, &task.Title, &task.Description, &task.State, &task.Priority, &agentType, &repositoryURL, &branch, &assignedTo, &task.Position, &metadata, &task.CreatedAt, &task.UpdatedAt)
+	`, id).Scan(&task.ID, &task.WorkspaceID, &task.BoardID, &task.ColumnID, &task.Title, &task.Description, &task.State, &task.Priority, &agentProfileID, &repositoryURL, &branch, &assignedTo, &task.Position, &metadata, &task.CreatedAt, &task.UpdatedAt)
 
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("task not found: %s", id)
@@ -829,7 +829,7 @@ func (r *SQLiteRepository) GetTask(ctx context.Context, id string) (*models.Task
 		return nil, err
 	}
 
-	task.AgentType = agentType.String
+	task.AgentProfileID = agentProfileID.String
 	task.RepositoryURL = repositoryURL.String
 	task.Branch = branch.String
 	task.AssignedTo = assignedTo.String
@@ -847,9 +847,9 @@ func (r *SQLiteRepository) UpdateTask(ctx context.Context, task *models.Task) er
 	}
 
 	result, err := r.db.ExecContext(ctx, `
-		UPDATE tasks SET workspace_id = ?, board_id = ?, column_id = ?, title = ?, description = ?, state = ?, priority = ?, agent_type = ?, repository_url = ?, branch = ?, assigned_to = ?, position = ?, metadata = ?, updated_at = ?
+		UPDATE tasks SET workspace_id = ?, board_id = ?, column_id = ?, title = ?, description = ?, state = ?, priority = ?, agent_profile_id = ?, repository_url = ?, branch = ?, assigned_to = ?, position = ?, metadata = ?, updated_at = ?
 		WHERE id = ?
-	`, task.WorkspaceID, task.BoardID, task.ColumnID, task.Title, task.Description, task.State, task.Priority, task.AgentType, task.RepositoryURL, task.Branch, task.AssignedTo, task.Position, string(metadata), task.UpdatedAt, task.ID)
+	`, task.WorkspaceID, task.BoardID, task.ColumnID, task.Title, task.Description, task.State, task.Priority, task.AgentProfileID, task.RepositoryURL, task.Branch, task.AssignedTo, task.Position, string(metadata), task.UpdatedAt, task.ID)
 	if err != nil {
 		return err
 	}
@@ -884,7 +884,7 @@ func (r *SQLiteRepository) DeleteTask(ctx context.Context, id string) error {
 // ListTasks returns all tasks for a board
 func (r *SQLiteRepository) ListTasks(ctx context.Context, boardID string) ([]*models.Task, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT t.id, t.workspace_id, t.title, t.description, t.state, t.priority, t.agent_type, t.repository_url, t.branch, t.assigned_to, t.metadata, t.created_at, t.updated_at,
+		SELECT t.id, t.workspace_id, t.title, t.description, t.state, t.priority, t.agent_profile_id, t.repository_url, t.branch, t.assigned_to, t.metadata, t.created_at, t.updated_at,
 		       tc.board_id, tc.column_id, tc.position
 		FROM tasks t
 		INNER JOIN task_columns tc ON tc.task_id = t.id
@@ -902,7 +902,7 @@ func (r *SQLiteRepository) ListTasks(ctx context.Context, boardID string) ([]*mo
 // ListTasksByColumn returns all tasks in a column
 func (r *SQLiteRepository) ListTasksByColumn(ctx context.Context, columnID string) ([]*models.Task, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT t.id, t.workspace_id, t.title, t.description, t.state, t.priority, t.agent_type, t.repository_url, t.branch, t.assigned_to, t.metadata, t.created_at, t.updated_at,
+		SELECT t.id, t.workspace_id, t.title, t.description, t.state, t.priority, t.agent_profile_id, t.repository_url, t.branch, t.assigned_to, t.metadata, t.created_at, t.updated_at,
 		       tc.board_id, tc.column_id, tc.position
 		FROM tasks t
 		INNER JOIN task_columns tc ON tc.task_id = t.id
@@ -922,12 +922,12 @@ func (r *SQLiteRepository) scanTasks(rows *sql.Rows) ([]*models.Task, error) {
 	for rows.Next() {
 		task := &models.Task{}
 		var metadata string
-		var agentType, repositoryURL, branch, assignedTo sql.NullString
-		err := rows.Scan(&task.ID, &task.WorkspaceID, &task.BoardID, &task.ColumnID, &task.Title, &task.Description, &task.State, &task.Priority, &agentType, &repositoryURL, &branch, &assignedTo, &task.Position, &metadata, &task.CreatedAt, &task.UpdatedAt)
+		var agentProfileID, repositoryURL, branch, assignedTo sql.NullString
+		err := rows.Scan(&task.ID, &task.WorkspaceID, &task.BoardID, &task.ColumnID, &task.Title, &task.Description, &task.State, &task.Priority, &agentProfileID, &repositoryURL, &branch, &assignedTo, &task.Position, &metadata, &task.CreatedAt, &task.UpdatedAt)
 		if err != nil {
 			return nil, err
 		}
-		task.AgentType = agentType.String
+		task.AgentProfileID = agentProfileID.String
 		task.RepositoryURL = repositoryURL.String
 		task.Branch = branch.String
 		task.AssignedTo = assignedTo.String
@@ -942,7 +942,7 @@ func (r *SQLiteRepository) scanTasksWithPlacement(rows *sql.Rows) ([]*models.Tas
 	for rows.Next() {
 		task := &models.Task{}
 		var metadata string
-		var agentType, repositoryURL, branch, assignedTo sql.NullString
+		var agentProfileID, repositoryURL, branch, assignedTo sql.NullString
 		err := rows.Scan(
 			&task.ID,
 			&task.WorkspaceID,
@@ -950,7 +950,7 @@ func (r *SQLiteRepository) scanTasksWithPlacement(rows *sql.Rows) ([]*models.Tas
 			&task.Description,
 			&task.State,
 			&task.Priority,
-			&agentType,
+			&agentProfileID,
 			&repositoryURL,
 			&branch,
 			&assignedTo,
@@ -964,7 +964,7 @@ func (r *SQLiteRepository) scanTasksWithPlacement(rows *sql.Rows) ([]*models.Tas
 		if err != nil {
 			return nil, err
 		}
-		task.AgentType = agentType.String
+		task.AgentProfileID = agentProfileID.String
 		task.RepositoryURL = repositoryURL.String
 		task.Branch = branch.String
 		task.AssignedTo = assignedTo.String

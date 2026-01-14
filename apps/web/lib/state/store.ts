@@ -30,9 +30,13 @@ export type WorkspaceState = {
   items: Array<{
     id: string;
     name: string;
+    description?: string | null;
+    owner_id: string;
     default_executor_id?: string | null;
     default_environment_id?: string | null;
     default_agent_profile_id?: string | null;
+    created_at: string;
+    updated_at: string;
   }>;
   activeId: string | null;
 };

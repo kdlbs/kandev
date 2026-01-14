@@ -80,9 +80,9 @@ func (h *Handlers) wsTriggerTask(ctx context.Context, msg *ws.Message) (*ws.Mess
 }
 
 type wsStartTaskRequest struct {
-	TaskID    string `json:"task_id"`
-	AgentType string `json:"agent_type,omitempty"`
-	Priority  int    `json:"priority,omitempty"`
+	TaskID         string `json:"task_id"`
+	AgentProfileID string `json:"agent_profile_id,omitempty"`
+	Priority       int    `json:"priority,omitempty"`
 }
 
 func (h *Handlers) wsStartTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -95,9 +95,9 @@ func (h *Handlers) wsStartTask(ctx context.Context, msg *ws.Message) (*ws.Messag
 	}
 
 	resp, err := h.controller.StartTask(ctx, dto.StartTaskRequest{
-		TaskID:    req.TaskID,
-		AgentType: req.AgentType,
-		Priority:  req.Priority,
+		TaskID:         req.TaskID,
+		AgentProfileID: req.AgentProfileID,
+		Priority:       req.Priority,
 	})
 	if err != nil {
 		h.logger.Error("failed to start task", zap.String("task_id", req.TaskID), zap.Error(err))

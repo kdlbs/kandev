@@ -3,6 +3,12 @@ import type { KanbanState } from '@/lib/state/store';
 
 export type KanbanTask = KanbanState['tasks'][number];
 
+// Minimal task type for filtering - only needs id and repositoryUrl
+export type FilterableTask = {
+  id: string;
+  repositoryUrl?: string;
+};
+
 export function mapSelectedRepositoryPaths(
   repositories: Repository[],
   selectedIds: string[]
@@ -21,10 +27,10 @@ export function mapSelectedRepositoryPaths(
   return paths;
 }
 
-export function filterTasksByRepositories(
-  tasks: KanbanTask[],
+export function filterTasksByRepositories<T extends FilterableTask>(
+  tasks: T[],
   selectedRepositoryPaths: Set<string>
-): KanbanTask[] {
+): T[] {
   if (selectedRepositoryPaths.size === 0) {
     return tasks;
   }

@@ -27,7 +27,7 @@ type Task struct {
 	Description     string                 `json:"description"`
 	State           TaskState              `json:"state"`
 	Priority        int                    `json:"priority"`
-	AgentType       *string                `json:"agent_type,omitempty"`
+	AgentProfileID  *string                `json:"agent_profile_id,omitempty"`
 	RepositoryURL   *string                `json:"repository_url,omitempty"`
 	Branch          *string                `json:"branch,omitempty"`
 	AssignedAgentID *string                `json:"assigned_agent_id,omitempty"`
@@ -43,8 +43,8 @@ type Task struct {
 type CreateTaskRequest struct {
 	Title         string                 `json:"title" binding:"required,max=500"`
 	Description   string                 `json:"description" binding:"required"`
-	Priority      int                    `json:"priority" binding:"min=0,max=10"`
-	AgentType     *string                `json:"agent_type,omitempty"`
+	Priority       int                    `json:"priority" binding:"min=0,max=10"`
+	AgentProfileID *string                `json:"agent_profile_id,omitempty"`
 	RepositoryURL *string                `json:"repository_url,omitempty"`
 	Branch        *string                `json:"branch,omitempty"`
 	Metadata      map[string]interface{} `json:"metadata,omitempty"`

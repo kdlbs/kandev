@@ -4,16 +4,15 @@ package registry
 func DefaultAgents() []*AgentTypeConfig {
 	return []*AgentTypeConfig{
 		{
-			ID:          "augment-agent",
+			ID:          "auggie-agent",
 			Name:        "Augment Coding Agent",
 			Description: "Auggie CLI-powered autonomous coding agent. Requires AUGMENT_SESSION_AUTH for authentication.",
 			Image:       "kandev/augment-agent",
 			Tag:         "latest",
+			Cmd:         []string{"auggie", "--acp"},
 			WorkingDir:  "/workspace",
 			RequiredEnv: []string{"AUGMENT_SESSION_AUTH"},
 			Env: map[string]string{
-				// Auto-approve permissions for now (until full permission flow is implemented)
-				// This allows the agent to proceed without waiting for user approval
 				"AGENTCTL_AUTO_APPROVE_PERMISSIONS": "true",
 			},
 			Mounts: []MountTemplate{
@@ -23,11 +22,115 @@ func DefaultAgents() []*AgentTypeConfig {
 			ResourceLimits: ResourceLimits{
 				MemoryMB:       4096,
 				CPUCores:       2.0,
-				TimeoutSeconds: 3600, // 1 hour
+				TimeoutSeconds: 3600,
+			},
+			Capabilities: []string{"code_generation", "code_review", "refactoring", "testing", "shell_execution"},
+			Enabled:      true,
+		},
+		{
+			ID:          "claude-agent",
+			Name:        "Claude Code Agent",
+			Description: "Claude Code CLI-powered autonomous coding agent.",
+			Image:       "kandev/claude-agent",
+			Tag:         "latest",
+			Cmd:         []string{"claude", "--acp"},
+			WorkingDir:  "/workspace",
+			RequiredEnv: []string{},
+			Env:         map[string]string{},
+			Mounts: []MountTemplate{
+				{Source: "{workspace}", Target: "/workspace", ReadOnly: false},
+			},
+			ResourceLimits: ResourceLimits{
+				MemoryMB:       4096,
+				CPUCores:       2.0,
+				TimeoutSeconds: 3600,
+			},
+			Capabilities: []string{"code_generation", "code_review", "refactoring", "testing", "shell_execution"},
+			Enabled:      true,
+		},
+		{
+			ID:          "codex-agent",
+			Name:        "OpenAI Codex Agent",
+			Description: "OpenAI Codex CLI-powered autonomous coding agent.",
+			Image:       "kandev/codex-agent",
+			Tag:         "latest",
+			Cmd:         []string{"codex", "--acp"},
+			WorkingDir:  "/workspace",
+			RequiredEnv: []string{},
+			Env:         map[string]string{},
+			Mounts: []MountTemplate{
+				{Source: "{workspace}", Target: "/workspace", ReadOnly: false},
+			},
+			ResourceLimits: ResourceLimits{
+				MemoryMB:       4096,
+				CPUCores:       2.0,
+				TimeoutSeconds: 3600,
+			},
+			Capabilities: []string{"code_generation", "code_review", "refactoring", "testing", "shell_execution"},
+			Enabled:      true,
+		},
+		{
+			ID:          "gemini-agent",
+			Name:        "Gemini CLI Agent",
+			Description: "Google Gemini CLI-powered autonomous coding agent.",
+			Image:       "kandev/gemini-agent",
+			Tag:         "latest",
+			Cmd:         []string{"gemini", "--acp"},
+			WorkingDir:  "/workspace",
+			RequiredEnv: []string{},
+			Env:         map[string]string{},
+			Mounts: []MountTemplate{
+				{Source: "{workspace}", Target: "/workspace", ReadOnly: false},
+			},
+			ResourceLimits: ResourceLimits{
+				MemoryMB:       4096,
+				CPUCores:       2.0,
+				TimeoutSeconds: 3600,
+			},
+			Capabilities: []string{"code_generation", "code_review", "refactoring", "testing", "shell_execution"},
+			Enabled:      true,
+		},
+		{
+			ID:          "opencode-agent",
+			Name:        "OpenCode Agent",
+			Description: "OpenCode CLI-powered autonomous coding agent.",
+			Image:       "kandev/opencode-agent",
+			Tag:         "latest",
+			Cmd:         []string{"opencode", "--acp"},
+			WorkingDir:  "/workspace",
+			RequiredEnv: []string{},
+			Env:         map[string]string{},
+			Mounts: []MountTemplate{
+				{Source: "{workspace}", Target: "/workspace", ReadOnly: false},
+			},
+			ResourceLimits: ResourceLimits{
+				MemoryMB:       4096,
+				CPUCores:       2.0,
+				TimeoutSeconds: 3600,
+			},
+			Capabilities: []string{"code_generation", "code_review", "refactoring", "testing", "shell_execution"},
+			Enabled:      true,
+		},
+		{
+			ID:          "copilot-agent",
+			Name:        "GitHub Copilot Agent",
+			Description: "GitHub Copilot CLI-powered autonomous coding agent.",
+			Image:       "kandev/copilot-agent",
+			Tag:         "latest",
+			Cmd:         []string{"copilot", "--acp"},
+			WorkingDir:  "/workspace",
+			RequiredEnv: []string{},
+			Env:         map[string]string{},
+			Mounts: []MountTemplate{
+				{Source: "{workspace}", Target: "/workspace", ReadOnly: false},
+			},
+			ResourceLimits: ResourceLimits{
+				MemoryMB:       4096,
+				CPUCores:       2.0,
+				TimeoutSeconds: 3600,
 			},
 			Capabilities: []string{"code_generation", "code_review", "refactoring", "testing", "shell_execution"},
 			Enabled:      true,
 		},
 	}
 }
-

@@ -47,10 +47,10 @@ func (h *Handlers) wsListAgents(ctx context.Context, msg *ws.Message) (*ws.Messa
 }
 
 type wsLaunchAgentRequest struct {
-	TaskID        string            `json:"task_id"`
-	AgentType     string            `json:"agent_type"`
-	WorkspacePath string            `json:"workspace_path"`
-	Env           map[string]string `json:"env,omitempty"`
+	TaskID         string            `json:"task_id"`
+	AgentProfileID string            `json:"agent_profile_id"`
+	WorkspacePath  string            `json:"workspace_path"`
+	Env            map[string]string `json:"env,omitempty"`
 }
 
 func (h *Handlers) wsLaunchAgent(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -61,23 +61,23 @@ func (h *Handlers) wsLaunchAgent(ctx context.Context, msg *ws.Message) (*ws.Mess
 	if req.TaskID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 	}
-	if req.AgentType == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "agent_type is required", nil)
+	if req.AgentProfileID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "agent_profile_id is required", nil)
 	}
 	if req.WorkspacePath == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workspace_path is required", nil)
 	}
 
 	resp, err := h.controller.LaunchAgent(ctx, dto.LaunchAgentRequest{
-		TaskID:        req.TaskID,
-		AgentType:     req.AgentType,
-		WorkspacePath: req.WorkspacePath,
-		Env:           req.Env,
+		TaskID:         req.TaskID,
+		AgentProfileID: req.AgentProfileID,
+		WorkspacePath:  req.WorkspacePath,
+		Env:            req.Env,
 	})
 	if err != nil {
 		h.logger.Error("failed to launch agent",
 			zap.String("task_id", req.TaskID),
-			zap.String("agent_type", req.AgentType),
+			zap.String("agent_profile_id", req.AgentProfileID),
 			zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to launch agent: "+err.Error(), nil)
 	}

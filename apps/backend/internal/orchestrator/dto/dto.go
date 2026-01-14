@@ -44,9 +44,9 @@ type TriggerTaskResponse struct {
 
 // StartTaskRequest is the payload for orchestrator.start
 type StartTaskRequest struct {
-	TaskID    string `json:"task_id"`
-	AgentType string `json:"agent_type,omitempty"`
-	Priority  int    `json:"priority,omitempty"`
+	TaskID         string `json:"task_id"`
+	AgentProfileID string `json:"agent_profile_id,omitempty"`
+	Priority       int    `json:"priority,omitempty"`
 }
 
 // StartTaskResponse is the response for orchestrator.start
@@ -128,7 +128,7 @@ type TaskExecutionResponse struct {
 	HasExecution    bool   `json:"has_execution"`
 	TaskID          string `json:"task_id"`
 	AgentInstanceID string `json:"agent_instance_id,omitempty"`
-	AgentType       string `json:"agent_type,omitempty"`
+	AgentProfileID  string `json:"agent_profile_id,omitempty"`
 	Status          string `json:"status,omitempty"`
 	Progress        int    `json:"progress,omitempty"`
 	StartedAt       string `json:"started_at,omitempty"`

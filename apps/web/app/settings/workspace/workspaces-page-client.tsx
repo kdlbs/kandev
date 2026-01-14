@@ -31,16 +31,24 @@ export function WorkspacesPageClient() {
         {
           id: created.id,
           name: created.name,
+          description: created.description ?? null,
+          owner_id: created.owner_id,
           default_executor_id: created.default_executor_id ?? null,
           default_environment_id: created.default_environment_id ?? null,
           default_agent_profile_id: created.default_agent_profile_id ?? null,
+          created_at: created.created_at,
+          updated_at: created.updated_at,
         },
         ...items.map((workspace) => ({
           id: workspace.id,
           name: workspace.name,
+          description: workspace.description ?? null,
+          owner_id: workspace.owner_id,
           default_executor_id: workspace.default_executor_id ?? null,
           default_environment_id: workspace.default_environment_id ?? null,
           default_agent_profile_id: workspace.default_agent_profile_id ?? null,
+          created_at: workspace.created_at,
+          updated_at: workspace.updated_at,
         })),
       ]);
       setNewWorkspaceName('');

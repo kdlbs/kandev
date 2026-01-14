@@ -8,16 +8,16 @@ import (
 )
 
 // createTestTask creates a task for testing with the given parameters
-func createTestTask(id string, priority int, agentType string) *v1.Task {
+func createTestTask(id string, priority int, agentProfileID string) *v1.Task {
 	return &v1.Task{
-		ID:        id,
-		BoardID:   "test-board",
-		Title:     "Test Task " + id,
-		Priority:  priority,
-		AgentType: &agentType,
-		State:     v1.TaskStateTODO,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		ID:             id,
+		BoardID:        "test-board",
+		Title:          "Test Task " + id,
+		Priority:       priority,
+		AgentProfileID: &agentProfileID,
+		State:          v1.TaskStateTODO,
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
 	}
 }
 

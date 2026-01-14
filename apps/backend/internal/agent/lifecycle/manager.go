@@ -31,10 +31,10 @@ const AgentCtlPort = 9999
 
 // AgentInstance represents a running agent instance
 type AgentInstance struct {
-	ID            string
-	TaskID        string
-	AgentType     string
-	ContainerID   string
+	ID             string
+	TaskID         string
+	AgentProfileID string
+	ContainerID    string
 	ContainerIP   string // IP address of the container for agentctl communication
 	WorkspacePath string // Path to the workspace (worktree or repository path)
 	Status        v1.AgentStatus
@@ -66,7 +66,7 @@ func (ai *AgentInstance) GetAgentCtlClient() *agentctl.Client {
 type LaunchRequest struct {
 	TaskID          string
 	TaskTitle       string                 // Human-readable task title for semantic worktree naming
-	AgentType       string
+	AgentProfileID  string
 	WorkspacePath   string                 // Host path to workspace (original repository path)
 	TaskDescription string                 // Task description to send via ACP prompt
 	Env             map[string]string      // Additional env vars
@@ -84,14 +84,32 @@ type CredentialsManager interface {
 	GetCredentialValue(ctx context.Context, key string) (value string, err error)
 }
 
+// AgentProfileInfo contains resolved profile information
+type AgentProfileInfo struct {
+	ProfileID                  string
+	ProfileName                string
+	AgentID                    string
+	AgentName                  string // e.g., "auggie", "claude", "codex"
+	Model                      string
+	AutoApprove                bool
+	DangerouslySkipPermissions bool
+	Plan                       string
+}
+
+// ProfileResolver resolves agent profile IDs to profile information
+type ProfileResolver interface {
+	ResolveProfile(ctx context.Context, profileID string) (*AgentProfileInfo, error)
+}
+
 // Manager manages agent instance lifecycles
 type Manager struct {
-	docker      *docker.Client
-	registry    *registry.Registry
-	eventBus    bus.EventBus
-	credsMgr    CredentialsManager
-	worktreeMgr *worktree.Manager
-	logger      *logger.Logger
+	docker          *docker.Client
+	registry        *registry.Registry
+	eventBus        bus.EventBus
+	credsMgr        CredentialsManager
+	profileResolver ProfileResolver
+	worktreeMgr     *worktree.Manager
+	logger          *logger.Logger
 
 	// Agent runtime configuration
 	agentCfg      config.AgentConfig
@@ -155,6 +173,11 @@ func (m *Manager) SetCredentialsManager(credsMgr CredentialsManager) {
 	m.credsMgr = credsMgr
 }
 
+// SetProfileResolver sets the profile resolver for looking up agent profiles
+func (m *Manager) SetProfileResolver(resolver ProfileResolver) {
+	m.profileResolver = resolver
+}
+
 // SetWorktreeManager sets the worktree manager for Git worktree isolation
 func (m *Manager) SetWorktreeManager(worktreeMgr *worktree.Manager) {
 	m.worktreeMgr = worktreeMgr
@@ -193,10 +216,10 @@ func (m *Manager) Start(ctx context.Context) error {
 
 // RecoveredInstance contains info about an instance recovered from Docker
 type RecoveredInstance struct {
-	InstanceID  string
-	TaskID      string
-	ContainerID string
-	AgentType   string
+	InstanceID     string
+	TaskID         string
+	ContainerID    string
+	AgentProfileID string
 }
 
 // reconcileWithDocker finds running kandev containers and re-populates tracking maps
@@ -242,7 +265,7 @@ func (m *Manager) reconcileWithDocker(ctx context.Context) ([]RecoveredInstance,
 
 		instanceID := labels["kandev.instance_id"]
 		taskID := labels["kandev.task_id"]
-		agentType := labels["kandev.agent_type"]
+		agentProfileID := labels["kandev.agent_profile_id"]
 
 		if instanceID == "" || taskID == "" {
 			m.logger.Warn("container missing required labels",
@@ -261,10 +284,10 @@ func (m *Manager) reconcileWithDocker(ctx context.Context) ([]RecoveredInstance,
 
 		// Create instance record
 		instance := &AgentInstance{
-			ID:          instanceID,
-			TaskID:      taskID,
-			AgentType:   agentType,
-			ContainerID: ctr.ID,
+			ID:             instanceID,
+			TaskID:         taskID,
+			AgentProfileID: agentProfileID,
+			ContainerID:    ctr.ID,
 			ContainerIP: containerIP,
 			Status:      v1.AgentStatusRunning,
 			StartedAt:   time.Now(), // We don't know exact start time
@@ -279,10 +302,10 @@ func (m *Manager) reconcileWithDocker(ctx context.Context) ([]RecoveredInstance,
 		m.byContainer[ctr.ID] = instanceID
 
 		recovered = append(recovered, RecoveredInstance{
-			InstanceID:  instanceID,
-			TaskID:      taskID,
-			ContainerID: ctr.ID,
-			AgentType:   agentType,
+			InstanceID:     instanceID,
+			TaskID:         taskID,
+			ContainerID:    ctr.ID,
+			AgentProfileID: agentProfileID,
 		})
 
 		// Reconnect to WebSocket streams for updates and permissions
@@ -311,10 +334,10 @@ func (m *Manager) GetRecoveredInstances() []RecoveredInstance {
 	result := make([]RecoveredInstance, 0, len(m.instances))
 	for _, inst := range m.instances {
 		result = append(result, RecoveredInstance{
-			InstanceID:  inst.ID,
-			TaskID:      inst.TaskID,
-			ContainerID: inst.ContainerID,
-			AgentType:   inst.AgentType,
+			InstanceID:     inst.ID,
+			TaskID:         inst.TaskID,
+			ContainerID:    inst.ContainerID,
+			AgentProfileID: inst.AgentProfileID,
 		})
 	}
 	return result
@@ -334,20 +357,42 @@ func (m *Manager) Stop() error {
 func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentInstance, error) {
 	m.logger.Info("launching agent",
 		zap.String("task_id", req.TaskID),
-		zap.String("agent_type", req.AgentType),
+		zap.String("agent_profile_id", req.AgentProfileID),
 		zap.Bool("use_worktree", req.UseWorktree))
 
-	// 1. Validate the agent type exists in registry
-	agentConfig, err := m.registry.Get(req.AgentType)
+	// 1. Resolve the agent profile to get agent type info
+	var agentTypeName string
+	var profileInfo *AgentProfileInfo
+	var err error
+	if m.profileResolver != nil {
+		profileInfo, err = m.profileResolver.ResolveProfile(ctx, req.AgentProfileID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve agent profile: %w", err)
+		}
+		// Map agent name to registry ID (e.g., "auggie" -> "auggie-agent")
+		agentTypeName = profileInfo.AgentName + "-agent"
+		m.logger.Info("resolved agent profile",
+			zap.String("profile_id", req.AgentProfileID),
+			zap.String("agent_name", profileInfo.AgentName),
+			zap.String("agent_type", agentTypeName))
+	} else {
+		// Fallback: treat AgentProfileID as agent type directly (for backward compat)
+		agentTypeName = req.AgentProfileID
+		m.logger.Warn("no profile resolver configured, using profile ID as agent type",
+			zap.String("agent_type", agentTypeName))
+	}
+
+	// 2. Get agent config from registry
+	agentConfig, err := m.registry.Get(agentTypeName)
 	if err != nil {
-		return nil, fmt.Errorf("agent type not found: %w", err)
+		return nil, fmt.Errorf("agent type %q not found in registry: %w", agentTypeName, err)
 	}
 
 	if !agentConfig.Enabled {
-		return nil, fmt.Errorf("agent type %q is disabled", req.AgentType)
+		return nil, fmt.Errorf("agent type %q is disabled", agentTypeName)
 	}
 
-	// 2. Check if task already has an agent running
+	// 3. Check if task already has an agent running
 	m.mu.RLock()
 	if existingID, exists := m.byTask[req.TaskID]; exists {
 		m.mu.RUnlock()
@@ -355,7 +400,7 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentInstanc
 	}
 	m.mu.RUnlock()
 
-	// 3. Handle worktree creation/reuse if enabled
+	// 4. Handle worktree creation/reuse if enabled
 	workspacePath := req.WorkspacePath
 	var mainRepoGitDir string // Path to main repo's .git directory for container mount
 	var worktreeID string     // Store worktree ID for session resumption
@@ -393,14 +438,33 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentInstanc
 			zap.String("workspace_path", workspacePath))
 	}
 
-	// 4. Generate a new instance ID
+	// 5. Generate a new instance ID
 	instanceID := uuid.New().String()
 
-	// 5. Prepare request with worktree path
+	// 6. Prepare request with worktree path
 	reqWithWorktree := *req
 	reqWithWorktree.WorkspacePath = workspacePath
 
-	// 6. Launch via appropriate runtime (Docker or Standalone)
+	// 6b. Add profile settings to environment
+	if profileInfo != nil {
+		if reqWithWorktree.Env == nil {
+			reqWithWorktree.Env = make(map[string]string)
+		}
+		if profileInfo.Model != "" {
+			reqWithWorktree.Env["AGENT_MODEL"] = profileInfo.Model
+		}
+		if profileInfo.AutoApprove {
+			reqWithWorktree.Env["AGENT_AUTO_APPROVE"] = "true"
+		}
+		if profileInfo.DangerouslySkipPermissions {
+			reqWithWorktree.Env["AGENT_DANGEROUSLY_SKIP_PERMISSIONS"] = "true"
+		}
+		if profileInfo.Plan != "" {
+			reqWithWorktree.Env["AGENT_PLAN"] = profileInfo.Plan
+		}
+	}
+
+	// 7. Launch via appropriate runtime (Docker or Standalone)
 	var instance *AgentInstance
 	if m.IsStandaloneMode() {
 		instance, err = m.launchStandalone(ctx, instanceID, &reqWithWorktree, agentConfig, worktreeID, worktreeBranch)
@@ -411,7 +475,7 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentInstanc
 		return nil, err
 	}
 
-	// 7. Track the instance
+	// 8. Track the instance
 	m.mu.Lock()
 	m.instances[instanceID] = instance
 	m.byTask[req.TaskID] = instanceID
@@ -420,10 +484,10 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentInstanc
 	}
 	m.mu.Unlock()
 
-	// 8. Publish agent.started event
+	// 9. Publish agent.started event
 	m.publishEvent(ctx, events.AgentStarted, instance)
 
-	// 9. Wait for agentctl to be ready and start the agent process
+	// 10. Wait for agentctl to be ready and start the agent process
 	go m.initializeAgent(instance, req.TaskDescription)
 
 	m.logger.Info("agent launched successfully",
@@ -479,17 +543,17 @@ func (m *Manager) launchDocker(ctx context.Context, instanceID string, req *Laun
 		zap.String("container_ip", containerIP))
 
 	return &AgentInstance{
-		ID:            instanceID,
-		TaskID:        req.TaskID,
-		AgentType:     req.AgentType,
-		ContainerID:   containerID,
-		ContainerIP:   containerIP,
-		WorkspacePath: "/workspace", // Docker mounts workspace to /workspace
-		Status:        v1.AgentStatusRunning,
-		StartedAt:     time.Now(),
-		Progress:      0,
-		Metadata:      instanceMetadata,
-		agentctl:      agentctlClient,
+		ID:             instanceID,
+		TaskID:         req.TaskID,
+		AgentProfileID: req.AgentProfileID,
+		ContainerID:    containerID,
+		ContainerIP:    containerIP,
+		WorkspacePath:  "/workspace", // Docker mounts workspace to /workspace
+		Status:         v1.AgentStatusRunning,
+		StartedAt:      time.Now(),
+		Progress:       0,
+		Metadata:       instanceMetadata,
+		agentctl:       agentctlClient,
 	}, nil
 }
 
@@ -544,7 +608,7 @@ func (m *Manager) launchStandalone(ctx context.Context, instanceID string, req *
 	return &AgentInstance{
 		ID:                   instanceID,
 		TaskID:               req.TaskID,
-		AgentType:            req.AgentType,
+		AgentProfileID:       req.AgentProfileID,
 		WorkspacePath:        req.WorkspacePath,
 		Status:               v1.AgentStatusRunning,
 		StartedAt:            time.Now(),
@@ -1521,10 +1585,10 @@ func (m *Manager) buildContainerConfig(instanceID string, req *LaunchRequest, ag
 		Memory:     memoryBytes,
 		CPUQuota:   cpuQuota,
 		Labels: map[string]string{
-			"kandev.managed":     "true",
-			"kandev.instance_id": instanceID,
-			"kandev.task_id":     req.TaskID,
-			"kandev.agent_type":  req.AgentType,
+			"kandev.managed":          "true",
+			"kandev.instance_id":      instanceID,
+			"kandev.task_id":          req.TaskID,
+			"kandev.agent_profile_id": req.AgentProfileID,
 		},
 		AutoRemove: false, // We manage cleanup ourselves
 	}
@@ -1921,14 +1985,14 @@ func (m *Manager) publishEvent(ctx context.Context, eventType string, instance *
 	}
 
 	data := map[string]interface{}{
-		"instance_id":   instance.ID,
-		"task_id":       instance.TaskID,
-		"agent_type":    instance.AgentType,
-		"container_id":  instance.ContainerID,
-		"status":        string(instance.Status),
-		"started_at":    instance.StartedAt,
-		"progress":      instance.Progress,
-		"error_message": instance.ErrorMessage,
+		"instance_id":      instance.ID,
+		"task_id":          instance.TaskID,
+		"agent_profile_id": instance.AgentProfileID,
+		"container_id":     instance.ContainerID,
+		"status":           string(instance.Status),
+		"started_at":       instance.StartedAt,
+		"progress":         instance.Progress,
+		"error_message":    instance.ErrorMessage,
 	}
 
 	if instance.FinishedAt != nil {

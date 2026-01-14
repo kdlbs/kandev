@@ -130,16 +130,16 @@ func createTestExecutor(agentMgr *mockAgentManager, log *logger.Logger, maxConcu
 }
 
 func createTestTask(id string, priority int) *v1.Task {
-	agentType := "test-agent"
+	agentProfileID := "test-agent"
 	return &v1.Task{
-		ID:        id,
-		BoardID:   "test-board",
-		Title:     "Test Task " + id,
-		Priority:  priority,
-		AgentType: &agentType,
-		State:     v1.TaskStateTODO,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		ID:             id,
+		BoardID:        "test-board",
+		Title:          "Test Task " + id,
+		Priority:       priority,
+		AgentProfileID: &agentProfileID,
+		State:          v1.TaskStateTODO,
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
 	}
 }
 

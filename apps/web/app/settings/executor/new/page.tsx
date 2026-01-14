@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { IconCloud, IconServer } from '@tabler/icons-react';
 import { Button } from '@kandev/ui/button';
@@ -16,6 +16,14 @@ const EXECUTOR_TYPES = ['local_docker', 'remote_docker'] as const;
 type ExecutorType = (typeof EXECUTOR_TYPES)[number];
 
 export default function ExecutorCreatePage() {
+  return (
+    <Suspense fallback={<div className="p-4">Loading...</div>}>
+      <ExecutorCreatePageContent />
+    </Suspense>
+  );
+}
+
+function ExecutorCreatePageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const initialType = searchParams.get('type');

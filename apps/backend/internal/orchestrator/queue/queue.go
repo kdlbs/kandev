@@ -18,12 +18,12 @@ var (
 
 // QueuedTask represents a task in the priority queue
 type QueuedTask struct {
-	TaskID    string
-	Priority  int       // Higher priority = processed first
-	AgentType string
-	QueuedAt  time.Time
-	Task      *v1.Task // Full task data
-	index     int      // Index in the heap (used by container/heap)
+	TaskID         string
+	Priority       int       // Higher priority = processed first
+	AgentProfileID string
+	QueuedAt       time.Time
+	Task           *v1.Task // Full task data
+	index          int      // Index in the heap (used by container/heap)
 }
 
 // taskHeap implements heap.Interface for priority queue
@@ -95,17 +95,17 @@ func (q *TaskQueue) Enqueue(task *v1.Task) error {
 		return ErrQueueFull
 	}
 
-	agentType := ""
-	if task.AgentType != nil {
-		agentType = *task.AgentType
+	agentProfileID := ""
+	if task.AgentProfileID != nil {
+		agentProfileID = *task.AgentProfileID
 	}
 
 	qt := &QueuedTask{
-		TaskID:    task.ID,
-		Priority:  task.Priority,
-		AgentType: agentType,
-		QueuedAt:  time.Now(),
-		Task:      task,
+		TaskID:         task.ID,
+		Priority:       task.Priority,
+		AgentProfileID: agentProfileID,
+		QueuedAt:       time.Now(),
+		Task:           task,
 	}
 
 	heap.Push(&q.heap, qt)

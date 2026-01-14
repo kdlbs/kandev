@@ -26,7 +26,7 @@ type ResourceLimits struct {
 type AgentInstance struct {
 	ID             string         `json:"id"`
 	TaskID         string         `json:"task_id"`
-	AgentType      string         `json:"agent_type"`
+	AgentProfileID string         `json:"agent_profile_id"`
 	ContainerID    *string        `json:"container_id,omitempty"`
 	ContainerName  *string        `json:"container_name,omitempty"`
 	Status         AgentStatus    `json:"status"`

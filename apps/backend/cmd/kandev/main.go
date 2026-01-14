@@ -288,6 +288,7 @@ func main() {
 		// Lifecycle Manager (uses agentctl for agent communication)
 		lifecycleMgr = lifecycle.NewManager(dockerClient, agentRegistry, eventBus, cfg.Agent, log)
 		lifecycleMgr.SetCredentialsManager(credsMgr)
+		lifecycleMgr.SetProfileResolver(lifecycle.NewStoreProfileResolver(agentSettingsRepo))
 
 		if err := lifecycleMgr.Start(ctx); err != nil {
 			log.Fatal("Failed to start lifecycle manager", zap.Error(err))
@@ -786,7 +787,7 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 	launchReq := &lifecycle.LaunchRequest{
 		TaskID:          req.TaskID,
 		TaskTitle:       req.TaskTitle,
-		AgentType:       req.AgentType,
+		AgentProfileID:  req.AgentProfileID,
 		WorkspacePath:   req.RepositoryURL, // May be empty - lifecycle manager handles this
 		TaskDescription: req.TaskDescription,
 		Metadata:        req.Metadata,
@@ -839,15 +840,15 @@ func (a *lifecycleAdapter) GetAgentStatus(ctx context.Context, agentInstanceID s
 	containerID := instance.ContainerID
 	now := time.Now()
 	result := &v1.AgentInstance{
-		ID:          instance.ID,
-		TaskID:      instance.TaskID,
-		AgentType:   instance.AgentType,
-		ContainerID: &containerID,
-		Status:      instance.Status,
-		StartedAt:   &instance.StartedAt,
-		StoppedAt:   instance.FinishedAt,
-		CreatedAt:   instance.StartedAt,
-		UpdatedAt:   now,
+		ID:             instance.ID,
+		TaskID:         instance.TaskID,
+		AgentProfileID: instance.AgentProfileID,
+		ContainerID:    &containerID,
+		Status:         instance.Status,
+		StartedAt:      &instance.StartedAt,
+		StoppedAt:      instance.FinishedAt,
+		CreatedAt:      instance.StartedAt,
+		UpdatedAt:      now,
 	}
 
 	if instance.ExitCode != nil {
@@ -893,10 +894,10 @@ func (a *lifecycleAdapter) GetRecoveredInstances() []executor.RecoveredInstanceI
 	result := make([]executor.RecoveredInstanceInfo, len(recovered))
 	for i, r := range recovered {
 		result[i] = executor.RecoveredInstanceInfo{
-			InstanceID:  r.InstanceID,
-			TaskID:      r.TaskID,
-			ContainerID: r.ContainerID,
-			AgentType:   r.AgentType,
+			InstanceID:     r.InstanceID,
+			TaskID:         r.TaskID,
+			ContainerID:    r.ContainerID,
+			AgentProfileID: r.AgentProfileID,
 		}
 	}
 	return result

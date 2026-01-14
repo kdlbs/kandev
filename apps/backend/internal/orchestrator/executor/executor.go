@@ -18,9 +18,9 @@ import (
 
 // Common errors
 var (
-	ErrMaxConcurrentReached = errors.New("maximum concurrent executions reached")
-	ErrNoAgentType          = errors.New("task has no agent_type configured")
-	ErrExecutionNotFound    = errors.New("execution not found")
+	ErrMaxConcurrentReached  = errors.New("maximum concurrent executions reached")
+	ErrNoAgentProfileID      = errors.New("task has no agent_profile_id configured")
+	ErrExecutionNotFound     = errors.New("execution not found")
 )
 
 // PromptResult contains the result of a prompt operation
@@ -63,7 +63,7 @@ type AgentManagerClient interface {
 type LaunchAgentRequest struct {
 	TaskID          string
 	TaskTitle       string // Human-readable task title for semantic worktree naming
-	AgentType       string
+	AgentProfileID  string
 	RepositoryURL   string
 	Branch          string
 	TaskDescription string // Task description to send via ACP prompt
@@ -90,7 +90,7 @@ type LaunchAgentResponse struct {
 type TaskExecution struct {
 	TaskID          string
 	AgentInstanceID string
-	AgentType       string
+	AgentProfileID  string
 	StartedAt       time.Time
 	Status          v1.AgentStatus
 	Progress        int
@@ -107,7 +107,7 @@ func FromAgentSession(s *models.AgentSession) *TaskExecution {
 	return &TaskExecution{
 		TaskID:          s.TaskID,
 		AgentInstanceID: s.AgentInstanceID,
-		AgentType:       s.AgentType,
+		AgentProfileID:  s.AgentType, // AgentSession still uses AgentType field in DB
 		StartedAt:       s.StartedAt,
 		Status:          agentSessionStatusToV1(s.Status),
 		Progress:        s.Progress,
@@ -227,10 +227,10 @@ func (e *Executor) LoadActiveSessionsFromDB(ctx context.Context) error {
 
 // RecoveredInstanceInfo contains info about an instance recovered from Docker
 type RecoveredInstanceInfo struct {
-	InstanceID  string
-	TaskID      string
-	ContainerID string
-	AgentType   string
+	InstanceID     string
+	TaskID         string
+	ContainerID    string
+	AgentProfileID string
 }
 
 // SyncWithRecoveredInstances ensures the executor's cache is in sync with
@@ -249,7 +249,7 @@ func (e *Executor) SyncWithRecoveredInstances(ctx context.Context, instances []R
 		e.executions[inst.TaskID] = &TaskExecution{
 			TaskID:          inst.TaskID,
 			AgentInstanceID: inst.InstanceID,
-			AgentType:       inst.AgentType,
+			AgentProfileID:  inst.AgentProfileID,
 			StartedAt:       time.Now(), // We don't know exact start time
 			Status:          v1.AgentStatusRunning,
 			Progress:        0,
@@ -272,17 +272,17 @@ func (e *Executor) Execute(ctx context.Context, task *v1.Task) (*TaskExecution, 
 		return nil, ErrMaxConcurrentReached
 	}
 
-	// Verify task has an agent_type configured
-	if task.AgentType == nil || *task.AgentType == "" {
-		e.logger.Error("task has no agent_type configured", zap.String("task_id", task.ID))
-		return nil, ErrNoAgentType
+	// Verify task has an agent_profile_id configured
+	if task.AgentProfileID == nil || *task.AgentProfileID == "" {
+		e.logger.Error("task has no agent_profile_id configured", zap.String("task_id", task.ID))
+		return nil, ErrNoAgentProfileID
 	}
 
 	// Create a LaunchAgentRequest from the task
 	req := &LaunchAgentRequest{
 		TaskID:          task.ID,
 		TaskTitle:       task.Title,
-		AgentType:       *task.AgentType,
+		AgentProfileID:  *task.AgentProfileID,
 		TaskDescription: task.Description,
 		Priority:        task.Priority,
 		Metadata:        task.Metadata,
@@ -308,7 +308,7 @@ func (e *Executor) Execute(ctx context.Context, task *v1.Task) (*TaskExecution, 
 
 	e.logger.Info("launching agent for task",
 		zap.String("task_id", task.ID),
-		zap.String("agent_type", *task.AgentType),
+		zap.String("agent_profile_id", *task.AgentProfileID),
 		zap.Bool("use_worktree", req.UseWorktree))
 
 	// Call the AgentManager to launch the container
@@ -328,7 +328,7 @@ func (e *Executor) Execute(ctx context.Context, task *v1.Task) (*TaskExecution, 
 		TaskID:          task.ID,
 		AgentInstanceID: resp.AgentInstanceID,
 		ContainerID:     resp.ContainerID,
-		AgentType:       *task.AgentType,
+		AgentType:       *task.AgentProfileID, // AgentSession still uses AgentType field in DB
 		Status:          v1StatusToAgentSessionStatus(resp.Status),
 		Progress:        0,
 		StartedAt:       now,
@@ -346,7 +346,7 @@ func (e *Executor) Execute(ctx context.Context, task *v1.Task) (*TaskExecution, 
 	execution := &TaskExecution{
 		TaskID:          task.ID,
 		AgentInstanceID: resp.AgentInstanceID,
-		AgentType:       *task.AgentType,
+		AgentProfileID:  *task.AgentProfileID,
 		StartedAt:       now,
 		Status:          resp.Status,
 		Progress:        0,
@@ -727,7 +727,7 @@ func NewMockAgentManagerClient(log *logger.Logger) *MockAgentManagerClient {
 func (m *MockAgentManagerClient) LaunchAgent(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
 	m.logger.Info("mock: launching agent",
 		zap.String("task_id", req.TaskID),
-		zap.String("agent_type", req.AgentType),
+		zap.String("agent_profile_id", req.AgentProfileID),
 		zap.String("repository_url", req.RepositoryURL),
 		zap.String("branch", req.Branch))
 
@@ -752,9 +752,9 @@ func (m *MockAgentManagerClient) GetAgentStatus(ctx context.Context, agentInstan
 		zap.String("agent_instance_id", agentInstanceID))
 
 	return &v1.AgentInstance{
-		ID:        agentInstanceID,
-		Status:    v1.AgentStatusRunning,
-		AgentType: "mock-agent",
+		ID:             agentInstanceID,
+		Status:         v1.AgentStatusRunning,
+		AgentProfileID: "mock-agent",
 	}, nil
 }
 

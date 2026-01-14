@@ -60,11 +60,11 @@ type SimulatedAgentManagerClient struct {
 
 // simulatedInstance tracks a simulated agent instance
 type simulatedInstance struct {
-	id        string
-	taskID    string
-	agentType string
-	status    v1.AgentStatus
-	stopCh    chan struct{}
+	id             string
+	taskID         string
+	agentProfileID string
+	status         v1.AgentStatus
+	stopCh         chan struct{}
 }
 
 // NewSimulatedAgentManager creates a new simulated agent manager
@@ -121,11 +121,11 @@ func (s *SimulatedAgentManagerClient) LaunchAgent(ctx context.Context, req *exec
 
 	s.mu.Lock()
 	instance := &simulatedInstance{
-		id:        instanceID,
-		taskID:    req.TaskID,
-		agentType: req.AgentType,
-		status:    v1.AgentStatusStarting,
-		stopCh:    make(chan struct{}),
+		id:             instanceID,
+		taskID:         req.TaskID,
+		agentProfileID: req.AgentProfileID,
+		status:         v1.AgentStatusStarting,
+		stopCh:         make(chan struct{}),
 	}
 	s.instances[instanceID] = instance
 	s.mu.Unlock()
@@ -175,13 +175,13 @@ func (s *SimulatedAgentManagerClient) runAgentSimulation(instance *simulatedInst
 // publishAgentEvent publishes an agent lifecycle event
 func (s *SimulatedAgentManagerClient) publishAgentEvent(eventType string, instance *simulatedInstance) {
 	data := map[string]interface{}{
-		"instance_id":  instance.id,
-		"task_id":      instance.taskID,
-		"agent_type":   instance.agentType,
-		"container_id": "sim-container-" + instance.id[:8],
-		"status":       string(instance.status),
-		"started_at":   time.Now(),
-		"progress":     50,
+		"instance_id":      instance.id,
+		"task_id":          instance.taskID,
+		"agent_profile_id": instance.agentProfileID,
+		"container_id":     "sim-container-" + instance.id[:8],
+		"status":           string(instance.status),
+		"started_at":       time.Now(),
+		"progress":         50,
 	}
 
 	event := bus.NewEvent(eventType, "simulated-agent-manager", data)
@@ -278,10 +278,10 @@ func (s *SimulatedAgentManagerClient) GetAgentStatus(ctx context.Context, agentI
 	}
 
 	return &v1.AgentInstance{
-		ID:        instance.id,
-		TaskID:    instance.taskID,
-		AgentType: instance.agentType,
-		Status:    instance.status,
+		ID:             instance.id,
+		TaskID:         instance.taskID,
+		AgentProfileID: instance.agentProfileID,
+		Status:         instance.status,
 	}, nil
 }
 
@@ -568,8 +568,8 @@ func (ts *OrchestratorTestServer) Close() {
 	ts.EventBus.Close()
 }
 
-// CreateTestTask creates a task with agent_type set for testing
-func (ts *OrchestratorTestServer) CreateTestTask(t *testing.T, agentType string, priority int) string {
+// CreateTestTask creates a task with agent_profile_id set for testing
+func (ts *OrchestratorTestServer) CreateTestTask(t *testing.T, agentProfileID string, priority int) string {
 	t.Helper()
 
 	workspace, err := ts.TaskSvc.CreateWorkspace(context.Background(), &taskservice.CreateWorkspaceRequest{
@@ -594,16 +594,16 @@ func (ts *OrchestratorTestServer) CreateTestTask(t *testing.T, agentType string,
 	})
 	require.NoError(t, err)
 
-	// Create task with agent type
+	// Create task with agent profile ID
 	task, err := ts.TaskSvc.CreateTask(context.Background(), &taskservice.CreateTaskRequest{
-		WorkspaceID: workspace.ID,
-		BoardID:     board.ID,
-		ColumnID:    col.ID,
-		Title:       "Test Task",
-		Description: "This is a test task for the orchestrator",
-		Priority:    priority,
-		AgentType:   agentType,
-		RepositoryURL: "/tmp/repo",
+		WorkspaceID:    workspace.ID,
+		BoardID:        board.ID,
+		ColumnID:       col.ID,
+		Title:          "Test Task",
+		Description:    "This is a test task for the orchestrator",
+		Priority:       priority,
+		AgentProfileID: agentProfileID,
+		RepositoryURL:  "/tmp/repo",
 	})
 	require.NoError(t, err)
 
@@ -805,8 +805,8 @@ func TestOrchestratorStartTask(t *testing.T) {
 	ts := NewOrchestratorTestServer(t)
 	defer ts.Close()
 
-	// Create a task with agent_type
-	taskID := ts.CreateTestTask(t, "augment-agent", 2)
+	// Create a task with agent_profile_id
+	taskID := ts.CreateTestTask(t, "test-profile-id", 2)
 
 	client := NewOrchestratorWSClient(t, ts.Server.URL)
 	defer client.Close()
@@ -856,11 +856,11 @@ func TestOrchestratorStartTaskWithAgentTypeOverride(t *testing.T) {
 	client := NewOrchestratorWSClient(t, ts.Server.URL)
 	defer client.Close()
 
-	// Start with different agent type
+	// Start with different agent profile
 	resp, err := client.SendRequest("start-1", ws.ActionOrchestratorStart, map[string]interface{}{
-		"task_id":    taskID,
-		"agent_type": "auggie-cli",
-		"priority":   3,
+		"task_id":          taskID,
+		"agent_profile_id": "override-profile-id",
+		"priority":         3,
 	})
 	require.NoError(t, err)
 
@@ -1347,16 +1347,16 @@ func TestOrchestratorEndToEndWorkflow(t *testing.T) {
 	require.NoError(t, colResp.ParsePayload(&colPayload))
 	colID := colPayload["id"].(string)
 
-	// 3. Create task with agent type
+	// 3. Create task with agent_profile_id
 	taskResp, err := client.SendRequest("task-1", ws.ActionTaskCreate, map[string]interface{}{
-		"workspace_id": workspaceID,
-		"board_id":     boardID,
-		"column_id":    colID,
-		"title":        "Implement feature X",
-		"description":  "Create a new feature with tests",
-		"priority":     2,
-		"agent_type":   "augment-agent",
-		"repository_url": "/tmp/repo",
+		"workspace_id":     workspaceID,
+		"board_id":         boardID,
+		"column_id":        colID,
+		"title":            "Implement feature X",
+		"description":      "Create a new feature with tests",
+		"priority":         2,
+		"agent_profile_id": "test-profile-id",
+		"repository_url":   "/tmp/repo",
 	})
 	require.NoError(t, err)
 
