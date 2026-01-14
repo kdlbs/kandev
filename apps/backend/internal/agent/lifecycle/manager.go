@@ -1111,8 +1111,6 @@ func (m *Manager) handleSessionUpdate(instance *AgentInstance, update agentctl.S
 			m.updateInstanceProgress(instance.ID, 80)
 			m.publishToolCallCompleteFromUpdate(instance, update)
 		case "error", "failed":
-			m.logger.Error("tool call error",
-				zap.String("instance_id", instance.ID))
 			m.publishToolCallCompleteFromUpdate(instance, update)
 		}
 
