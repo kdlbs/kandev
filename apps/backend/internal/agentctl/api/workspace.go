@@ -9,31 +9,6 @@ import (
 	"go.uber.org/zap"
 )
 
-// GitStatusUpdate represents a git status update
-type GitStatusUpdate struct {
-	Timestamp   string              `json:"timestamp"`
-	Modified    []string            `json:"modified"`
-	Added       []string            `json:"added"`
-	Deleted     []string            `json:"deleted"`
-	Untracked   []string            `json:"untracked"`
-	Renamed     []string            `json:"renamed"`
-	Ahead       int                 `json:"ahead"`
-	Behind      int                 `json:"behind"`
-	Branch      string              `json:"branch"`
-	RemoteBranch string             `json:"remote_branch,omitempty"`
-	Files       map[string]FileInfo `json:"files,omitempty"`
-}
-
-// FileInfo represents information about a file
-type FileInfo struct {
-	Path         string `json:"path"`
-	Status       string `json:"status"` // modified, added, deleted, untracked, renamed
-	Additions    int    `json:"additions,omitempty"`
-	Deletions    int    `json:"deletions,omitempty"`
-	OldPath      string `json:"old_path,omitempty"` // For renamed files
-	Diff         string `json:"diff,omitempty"`
-}
-
 // handleGitStatusStreamWS streams git status updates via WebSocket
 func (s *Server) handleGitStatusStreamWS(c *gin.Context) {
 	conn, err := s.upgrader.Upgrade(c.Writer, c.Request, nil)
