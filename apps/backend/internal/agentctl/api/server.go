@@ -77,6 +77,11 @@ func (s *Server) setupRoutes() {
 		// Workspace monitoring (git status, files)
 		api.GET("/workspace/git-status/stream", s.handleGitStatusStreamWS)
 		api.GET("/workspace/files/stream", s.handleFilesStreamWS)
+		api.GET("/workspace/file-changes/stream", s.handleFileChangesStreamWS)
+
+		// Workspace file operations (request/response)
+		api.GET("/workspace/tree", s.handleFileTreeWS)
+		api.GET("/workspace/file/content", s.handleFileContentWS)
 	}
 }
 

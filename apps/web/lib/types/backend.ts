@@ -28,7 +28,8 @@ export type BackendMessageType =
   | 'agent.profile.deleted'
   | 'agent.profile.created'
   | 'agent.profile.updated'
-  | 'user.settings.updated';
+  | 'user.settings.updated'
+  | 'workspace.file.changes';
 
 export type BackendMessage<T extends BackendMessageType, P> = {
   id?: string;
@@ -231,4 +232,34 @@ export type BackendMessageMap = {
   'agent.profile.created': BackendMessage<'agent.profile.created', AgentProfileChangedPayload>;
   'agent.profile.updated': BackendMessage<'agent.profile.updated', AgentProfileChangedPayload>;
   'user.settings.updated': BackendMessage<'user.settings.updated', UserSettingsUpdatedPayload>;
+  'workspace.file.changes': BackendMessage<'workspace.file.changes', FileChangeNotificationPayload>;
+};
+
+// Workspace file types
+export type FileTreeNode = {
+  name: string;
+  path: string;
+  is_dir: boolean;
+  size?: number;
+  children?: FileTreeNode[];
+};
+
+export type FileTreeResponse = {
+  request_id?: string;
+  root: FileTreeNode;
+  error?: string;
+};
+
+export type FileContentResponse = {
+  request_id?: string;
+  path: string;
+  content: string;
+  size: number;
+  error?: string;
+};
+
+export type FileChangeNotificationPayload = {
+  timestamp: string;
+  path: string;
+  operation: 'create' | 'write' | 'remove' | 'rename' | 'chmod';
 };

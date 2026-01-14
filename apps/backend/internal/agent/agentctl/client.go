@@ -21,11 +21,14 @@ type Client struct {
 	logger     *logger.Logger
 
 	// WebSocket connections for streaming
-	acpConn        *websocket.Conn
-	permissionConn *websocket.Conn
-	gitStatusConn  *websocket.Conn
-	filesConn      *websocket.Conn
-	mu             sync.RWMutex
+	acpConn         *websocket.Conn
+	permissionConn  *websocket.Conn
+	gitStatusConn   *websocket.Conn
+	filesConn       *websocket.Conn
+	fileChangesConn *websocket.Conn
+	fileTreeConn    *websocket.Conn
+	fileContentConn *websocket.Conn
+	mu              sync.RWMutex
 }
 
 // StatusResponse from agentctl
@@ -202,6 +205,49 @@ type FileEntry struct {
 	Size  int64  `json:"size,omitempty"`
 }
 
+// FileTreeNode represents a node in the file tree
+type FileTreeNode struct {
+	Name     string          `json:"name"`
+	Path     string          `json:"path"`
+	IsDir    bool            `json:"is_dir"`
+	Size     int64           `json:"size,omitempty"`
+	Children []*FileTreeNode `json:"children,omitempty"`
+}
+
+// FileTreeRequest represents a request for file tree
+type FileTreeRequest struct {
+	Path  string `json:"path"`
+	Depth int    `json:"depth"`
+}
+
+// FileTreeResponse represents a response with file tree
+type FileTreeResponse struct {
+	RequestID string        `json:"request_id"`
+	Root      *FileTreeNode `json:"root"`
+	Error     string        `json:"error,omitempty"`
+}
+
+// FileContentRequest represents a request for file content
+type FileContentRequest struct {
+	Path string `json:"path"`
+}
+
+// FileContentResponse represents a response with file content
+type FileContentResponse struct {
+	RequestID string `json:"request_id"`
+	Path      string `json:"path"`
+	Content   string `json:"content"`
+	Size      int64  `json:"size"`
+	Error     string `json:"error,omitempty"`
+}
+
+// FileChangeNotification represents a filesystem change notification
+type FileChangeNotification struct {
+	Timestamp time.Time `json:"timestamp"`
+	Path      string    `json:"path"`
+	Operation string    `json:"operation"`
+}
+
 // StreamGitStatus opens a WebSocket connection for streaming git status updates
 func (c *Client) StreamGitStatus(ctx context.Context, handler func(*GitStatusUpdate)) error {
 	wsURL := "ws" + c.baseURL[4:] + "/api/v1/workspace/git-status/stream"
@@ -317,5 +363,149 @@ func (c *Client) CloseFilesStream() {
 	if c.filesConn != nil {
 		c.filesConn.Close()
 		c.filesConn = nil
+	}
+}
+
+// StreamFileChanges opens a WebSocket connection for streaming file change notifications
+func (c *Client) StreamFileChanges(ctx context.Context, handler func(*FileChangeNotification)) error {
+	wsURL := "ws" + c.baseURL[4:] + "/api/v1/workspace/file-changes/stream"
+
+	conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, nil)
+	if err != nil {
+		return fmt.Errorf("failed to connect to file changes stream: %w", err)
+	}
+
+	c.mu.Lock()
+	c.fileChangesConn = conn
+	c.mu.Unlock()
+
+	c.logger.Info("connected to file changes stream", zap.String("url", wsURL))
+
+	// Read messages in a goroutine
+	go func() {
+		defer func() {
+			c.mu.Lock()
+			c.fileChangesConn = nil
+			c.mu.Unlock()
+			conn.Close()
+		}()
+
+		for {
+			_, message, err := conn.ReadMessage()
+			if err != nil {
+				if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+					c.logger.Info("file changes stream closed normally")
+				} else {
+					c.logger.Debug("file changes stream error", zap.Error(err))
+				}
+				return
+			}
+
+			var notification FileChangeNotification
+			if err := json.Unmarshal(message, &notification); err != nil {
+				c.logger.Warn("failed to parse file change notification", zap.Error(err))
+				continue
+			}
+
+			handler(&notification)
+		}
+	}()
+
+	return nil
+}
+
+// RequestFileTree requests a file tree via WebSocket (request/response pattern)
+func (c *Client) RequestFileTree(ctx context.Context, path string, depth int) (*FileTreeResponse, error) {
+	wsURL := "ws" + c.baseURL[4:] + "/api/v1/workspace/tree"
+
+	conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to file tree endpoint: %w", err)
+	}
+	defer conn.Close()
+
+	// Send request
+	req := FileTreeRequest{
+		Path:  path,
+		Depth: depth,
+	}
+
+	reqData, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	if err := conn.WriteMessage(websocket.TextMessage, reqData); err != nil {
+		return nil, fmt.Errorf("failed to send request: %w", err)
+	}
+
+	// Read response
+	_, message, err := conn.ReadMessage()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	var response FileTreeResponse
+	if err := json.Unmarshal(message, &response); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	if response.Error != "" {
+		return nil, fmt.Errorf("file tree error: %s", response.Error)
+	}
+
+	return &response, nil
+}
+
+// RequestFileContent requests file content via WebSocket (request/response pattern)
+func (c *Client) RequestFileContent(ctx context.Context, path string) (*FileContentResponse, error) {
+	wsURL := "ws" + c.baseURL[4:] + "/api/v1/workspace/file/content"
+
+	conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to file content endpoint: %w", err)
+	}
+	defer conn.Close()
+
+	// Send request
+	req := FileContentRequest{
+		Path: path,
+	}
+
+	reqData, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	if err := conn.WriteMessage(websocket.TextMessage, reqData); err != nil {
+		return nil, fmt.Errorf("failed to send request: %w", err)
+	}
+
+	// Read response
+	_, message, err := conn.ReadMessage()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	var response FileContentResponse
+	if err := json.Unmarshal(message, &response); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	if response.Error != "" {
+		return nil, fmt.Errorf("file content error: %s", response.Error)
+	}
+
+	return &response, nil
+}
+
+// CloseFileChangesStream closes the file changes stream connection
+func (c *Client) CloseFileChangesStream() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.fileChangesConn != nil {
+		c.fileChangesConn.Close()
+		c.fileChangesConn = nil
 	}
 }

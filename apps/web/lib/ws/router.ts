@@ -427,5 +427,10 @@ export function registerWsHandlers(store: StoreApi<AppState>) {
         },
       }));
     },
+    'workspace.file.changes': (message: BackendMessageMap['workspace.file.changes']) => {
+      // File change notifications will be handled by the file browser component
+      // This handler is here for completeness but the component will subscribe directly
+      console.log('File change notification:', message.payload);
+    },
   };
 }

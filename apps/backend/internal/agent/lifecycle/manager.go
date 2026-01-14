@@ -57,6 +57,11 @@ type AgentInstance struct {
 	messageMu     sync.Mutex
 }
 
+// GetAgentCtlClient returns the agentctl client for this instance
+func (ai *AgentInstance) GetAgentCtlClient() *agentctl.Client {
+	return ai.agentctl
+}
+
 // LaunchRequest contains parameters for launching an agent
 type LaunchRequest struct {
 	TaskID          string

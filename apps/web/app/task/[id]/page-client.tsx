@@ -6,6 +6,7 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@kandev/ui
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@kandev/ui/tabs';
 import { TooltipProvider } from '@kandev/ui/tooltip';
 import { Textarea } from '@kandev/ui/textarea';
+import { IconX } from '@tabler/icons-react';
 import { getLocalStorage, setLocalStorage } from '@/lib/local-storage';
 import { TaskChatPanel } from '@/components/task/task-chat-panel';
 import { TaskTopBar } from '@/components/task/task-top-bar';
@@ -13,11 +14,18 @@ import type { Task, Comment } from '@/lib/types/http';
 import { TaskFilesPanel } from '@/components/task/task-files-panel';
 import { TaskChangesPanel } from '@/components/task/task-changes-panel';
 import { TaskRightPanel } from '@/components/task/task-right-panel';
+import { FileViewerContent } from '@/components/task/file-viewer-content';
 import { getBackendConfig } from '@/lib/config';
 import { listRepositories, listRepositoryBranches } from '@/lib/http/client';
 import { useRequest } from '@/lib/http/use-request';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import { useAppStore, useAppStoreApi } from '@/components/state-provider';
+
+type OpenFileTab = {
+  path: string;
+  name: string;
+  content: string;
+};
 
 const AGENTS = [
   { id: 'codex', label: 'Codex' },
@@ -42,6 +50,8 @@ export default function TaskPage({ task: initialTask }: TaskPageClientProps) {
   const [isLoadingComments, setIsLoadingComments] = useState(false);
   const [isAgentRunning, setIsAgentRunning] = useState(false);
   const [isAgentLoading, setIsAgentLoading] = useState(false);
+  // File viewer tabs
+  const [openFileTabs, setOpenFileTabs] = useState<OpenFileTab[]>([]);
   // Track worktree info separately since it's populated after agent starts
   const [worktreePath, setWorktreePath] = useState<string | null>(initialTask?.worktree_path ?? null);
   const [worktreeBranch, setWorktreeBranch] = useState<string | null>(initialTask?.worktree_branch ?? null);
@@ -158,6 +168,28 @@ export default function TaskPage({ task: initialTask }: TaskPageClientProps) {
     setLeftTab('changes');
   }, []);
 
+  const handleOpenFile = useCallback((file: OpenFileTab) => {
+    setOpenFileTabs((prev) => {
+      // If file is already open, just switch to it
+      if (prev.some((t) => t.path === file.path)) {
+        return prev;
+      }
+      // Add new tab (LRU eviction at max 4)
+      const maxTabs = 4;
+      const newTabs = prev.length >= maxTabs ? [...prev.slice(1), file] : [...prev, file];
+      return newTabs;
+    });
+    setLeftTab(`file:${file.path}`);
+  }, []);
+
+  const handleCloseFileTab = useCallback((path: string) => {
+    setOpenFileTabs((prev) => prev.filter((t) => t.path !== path));
+    // If closing the active tab, switch to chat
+    if (leftTab === `file:${path}`) {
+      setLeftTab('chat');
+    }
+  }, [leftTab]);
+
   const handleStartAgent = useCallback(async () => {
     if (!task?.id) return;
 
@@ -211,7 +243,7 @@ export default function TaskPage({ task: initialTask }: TaskPageClientProps) {
     }
   }, [task?.id]);
 
-  const topFilesPanel = <TaskFilesPanel onSelectDiffPath={handleSelectDiffPath} />;
+  const topFilesPanel = <TaskFilesPanel taskId={task?.id ?? null} onSelectDiffPath={handleSelectDiffPath} onOpenFile={handleOpenFile} />;
 
   useEffect(() => {
     if (!task?.workspace_id || !task.repository_url) return;
@@ -252,19 +284,64 @@ export default function TaskPage({ task: initialTask }: TaskPageClientProps) {
               <Tabs
                 value={leftTab}
                 onValueChange={(value) => setLeftTab(value)}
-                className="flex-1 min-h-0"
+                className="flex-1 min-h-0 flex flex-col"
               >
-                <TabsList>
-                  <TabsTrigger value="notes" className="cursor-pointer">
-                    Notes
-                  </TabsTrigger>
-                  <TabsTrigger value="changes" className="cursor-pointer">
-                    All changes
-                  </TabsTrigger>
-                  <TabsTrigger value="chat" className="cursor-pointer">
-                    Chat
-                  </TabsTrigger>
-                </TabsList>
+                <div className="flex items-center gap-1">
+                  <TabsList>
+                    <TabsTrigger value="notes" className="cursor-pointer">
+                      Notes
+                    </TabsTrigger>
+                    <TabsTrigger value="changes" className="cursor-pointer">
+                      All changes
+                    </TabsTrigger>
+                    <TabsTrigger value="chat" className="cursor-pointer">
+                      Chat
+                    </TabsTrigger>
+                  </TabsList>
+                  {openFileTabs.length > 0 && (
+                    <>
+                      <div className="h-4 w-px bg-border mx-1" />
+                      <TabsList className="bg-transparent">
+                        {openFileTabs.map((tab) => {
+                          const ext = tab.name.split('.').pop()?.toLowerCase() || '';
+                          const dotColor = {
+                            ts: 'bg-blue-500',
+                            tsx: 'bg-blue-400',
+                            js: 'bg-yellow-500',
+                            jsx: 'bg-yellow-400',
+                            go: 'bg-cyan-500',
+                            py: 'bg-green-500',
+                            rs: 'bg-orange-500',
+                            json: 'bg-amber-400',
+                            css: 'bg-purple-500',
+                            html: 'bg-red-500',
+                            md: 'bg-gray-400',
+                          }[ext] || 'bg-muted-foreground';
+                          return (
+                            <TabsTrigger
+                              key={tab.path}
+                              value={`file:${tab.path}`}
+                              className="cursor-pointer relative group gap-1.5 data-[state=active]:bg-muted"
+                            >
+                              <span className={`h-2 w-2 rounded-full ${dotColor}`} />
+                              <span className="truncate max-w-[100px]">{tab.name}</span>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleCloseFileTab(tab.path);
+                                }}
+                                className="ml-0.5 opacity-0 group-hover:opacity-100 transition-opacity hover:text-foreground"
+                              >
+                                <IconX className="h-3 w-3" />
+                              </button>
+                            </TabsTrigger>
+                          );
+                        })}
+                      </TabsList>
+                    </>
+                  )}
+                </div>
 
                 <TabsContent value="notes" className="mt-3 flex-1 min-h-0">
                   <Textarea
@@ -296,6 +373,12 @@ export default function TaskPage({ task: initialTask }: TaskPageClientProps) {
                     </div>
                   )}
                 </TabsContent>
+
+                {openFileTabs.map((tab) => (
+                  <TabsContent key={tab.path} value={`file:${tab.path}`} className="mt-3 flex-1 min-h-0">
+                    <FileViewerContent path={tab.path} content={tab.content} />
+                  </TabsContent>
+                ))}
               </Tabs>
             </div>
           </ResizablePanel>

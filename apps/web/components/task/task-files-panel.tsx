@@ -1,45 +1,30 @@
 'use client';
 
-import type { CSSProperties } from 'react';
 import { memo, useMemo, useState } from 'react';
 import {
   IconArrowBackUp,
-  IconChevronRight,
   IconExternalLink,
-  IconFile,
-  IconFolder,
 } from '@tabler/icons-react';
 import { Badge } from '@kandev/ui/badge';
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@kandev/ui/collapsible';
-import {
-  Sidebar,
-  SidebarContent,
-  SidebarGroup,
-  SidebarGroupContent,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  SidebarMenuSub,
-  SidebarProvider,
-  SidebarRail,
-} from '@kandev/ui/sidebar';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@kandev/ui/tabs';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
 import { LineStat } from '@/components/diff-stat';
 import { cn } from '@/lib/utils';
-import { FILE_TREE } from '@/components/task/task-data';
 import { useAppStore } from '@/components/state-provider';
 import type { FileInfo } from '@/lib/state/store';
+import { FileBrowser } from '@/components/task/file-browser';
 
-type TaskFilesPanelProps = {
-  onSelectDiffPath: (path: string) => void;
+type OpenFileTab = {
+  path: string;
+  name: string;
+  content: string;
 };
 
-type TreeItem = string | TreeItem[];
+type TaskFilesPanelProps = {
+  taskId: string | null;
+  onSelectDiffPath: (path: string) => void;
+  onOpenFile: (file: OpenFileTab) => void;
+};
 
 const badgeClass = (status: string) =>
   cn(
@@ -71,44 +56,7 @@ const splitPath = (path: string) => {
   };
 };
 
-function Tree({ item }: { item: TreeItem }) {
-  const [name, ...items] = Array.isArray(item) ? item : [item];
-
-  if (!items.length) {
-    return (
-      <SidebarMenuButton className="data-[active=true]:bg-transparent">
-        <IconFile className="h-4 w-4" />
-        {name}
-      </SidebarMenuButton>
-    );
-  }
-
-  return (
-    <SidebarMenuItem>
-      <Collapsible
-        className="group/collapsible [&[data-state=open]>button>svg:first-child]:rotate-90"
-        defaultOpen={name === 'components' || name === 'ui'}
-      >
-        <CollapsibleTrigger asChild>
-          <SidebarMenuButton>
-            <IconChevronRight className="h-4 w-4 transition-transform" />
-            <IconFolder className="h-4 w-4" />
-            {name}
-          </SidebarMenuButton>
-        </CollapsibleTrigger>
-        <CollapsibleContent>
-          <SidebarMenuSub>
-            {items.map((subItem, index) => (
-              <Tree key={index} item={subItem} />
-            ))}
-          </SidebarMenuSub>
-        </CollapsibleContent>
-      </Collapsible>
-    </SidebarMenuItem>
-  );
-}
-
-const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiffPath }: TaskFilesPanelProps) {
+const TaskFilesPanel = memo(function TaskFilesPanel({ taskId, onSelectDiffPath, onOpenFile }: TaskFilesPanelProps) {
   const [topTab, setTopTab] = useState<'diff' | 'files'>('diff');
   const gitStatus = useAppStore((state) => state.gitStatus);
 
@@ -207,25 +155,13 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiffPath }: TaskFi
         </TabsContent>
         <TabsContent value="files" className="mt-3 flex-1 min-h-0">
           <div className="flex-1 min-h-0 overflow-y-auto rounded-lg bg-background h-full">
-            <SidebarProvider
-              className="h-full w-full"
-              style={{ "--sidebar-width": "100%" } as CSSProperties}
-            >
-              <Sidebar collapsible="none" className="h-full w-full">
-                <SidebarContent>
-                  <SidebarGroup>
-                    <SidebarGroupContent>
-                      <SidebarMenu>
-                        {FILE_TREE.map((item, index) => (
-                          <Tree key={index} item={item} />
-                        ))}
-                      </SidebarMenu>
-                    </SidebarGroupContent>
-                  </SidebarGroup>
-                </SidebarContent>
-                <SidebarRail />
-              </Sidebar>
-            </SidebarProvider>
+            {taskId ? (
+              <FileBrowser taskId={taskId} onOpenFile={onOpenFile} />
+            ) : (
+              <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+                No task selected
+              </div>
+            )}
           </div>
         </TabsContent>
       </Tabs>
