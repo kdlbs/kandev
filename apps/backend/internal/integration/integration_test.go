@@ -733,8 +733,10 @@ func TestMultipleClients(t *testing.T) {
 	require.NoError(t, err)
 	boardID := boardPayload["id"].(string)
 
-	// Client 2 can see the board
-	listResp, err := client2.SendRequest("c2-list-1", ws.ActionBoardList, map[string]interface{}{})
+	// Client 2 can see the board (filter by workspace to avoid default board)
+	listResp, err := client2.SendRequest("c2-list-1", ws.ActionBoardList, map[string]interface{}{
+		"workspace_id": workspaceID,
+	})
 	require.NoError(t, err)
 
 	var listPayload map[string]interface{}
