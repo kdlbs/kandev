@@ -83,8 +83,10 @@ func (c *Client) ReadPump(ctx context.Context) {
 			continue
 		}
 
-		// Process the message
-		c.handleMessage(ctx, &msg)
+		// Process the message in a goroutine to avoid blocking the read pump
+		// This allows concurrent message handling so long-running handlers
+		// (like orchestrator.prompt) don't block other requests (like workspace.tree.get)
+		go c.handleMessage(ctx, &msg)
 	}
 }
 
