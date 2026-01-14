@@ -72,7 +72,7 @@ export function useUserDisplaySettings({
     fetchUserSettings({ cache: 'no-store' })
       .then((data) => {
         if (!data?.settings) return;
-        const repositoryIds = Array.from(new Set(data.settings.repository_ids ?? [])).sort();
+        const repositoryIds = Array.from(new Set<string>(data.settings.repository_ids ?? [])).sort();
         setUserSettings({
           workspaceId: data.settings.workspace_id || null,
           boardId: data.settings.board_id || null,

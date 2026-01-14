@@ -8,17 +8,17 @@ type ListAgentsRequest struct{}
 
 // AgentDTO represents an agent instance
 type AgentDTO struct {
-	ID          string            `json:"id"`
-	TaskID      string            `json:"task_id"`
-	AgentType   string            `json:"agent_type"`
-	ContainerID string            `json:"container_id,omitempty"`
-	Status      string            `json:"status"`
-	Progress    int               `json:"progress"`
-	StartedAt   string            `json:"started_at"`
-	FinishedAt  string            `json:"finished_at,omitempty"`
-	ExitCode    *int              `json:"exit_code,omitempty"`
-	Error       string            `json:"error,omitempty"`
-	Metadata    map[string]string `json:"metadata,omitempty"`
+	ID             string            `json:"id"`
+	TaskID         string            `json:"task_id"`
+	AgentProfileID string            `json:"agent_profile_id"`
+	ContainerID    string            `json:"container_id,omitempty"`
+	Status         string            `json:"status"`
+	Progress       int               `json:"progress"`
+	StartedAt      string            `json:"started_at"`
+	FinishedAt     string            `json:"finished_at,omitempty"`
+	ExitCode       *int              `json:"exit_code,omitempty"`
+	Error          string            `json:"error,omitempty"`
+	Metadata       map[string]string `json:"metadata,omitempty"`
 }
 
 // ListAgentsResponse is the response for agent.list
@@ -29,10 +29,10 @@ type ListAgentsResponse struct {
 
 // LaunchAgentRequest is the payload for agent.launch
 type LaunchAgentRequest struct {
-	TaskID        string            `json:"task_id"`
-	AgentType     string            `json:"agent_type"`
-	WorkspacePath string            `json:"workspace_path"`
-	Env           map[string]string `json:"env,omitempty"`
+	TaskID         string            `json:"task_id"`
+	AgentProfileID string            `json:"agent_profile_id"`
+	WorkspacePath  string            `json:"workspace_path"`
+	Env            map[string]string `json:"env,omitempty"`
 }
 
 // LaunchAgentResponse is the response for agent.launch
@@ -91,13 +91,13 @@ type ListAgentTypesResponse struct {
 // FromAgentInstance converts a lifecycle.AgentInstance to AgentDTO
 func FromAgentInstance(a *AgentInstanceData) AgentDTO {
 	agent := AgentDTO{
-		ID:          a.ID,
-		TaskID:      a.TaskID,
-		AgentType:   a.AgentType,
-		ContainerID: a.ContainerID,
-		Status:      a.Status,
-		Progress:    a.Progress,
-		StartedAt:   a.StartedAt.Format("2006-01-02T15:04:05Z"),
+		ID:             a.ID,
+		TaskID:         a.TaskID,
+		AgentProfileID: a.AgentProfileID,
+		ContainerID:    a.ContainerID,
+		Status:         a.Status,
+		Progress:       a.Progress,
+		StartedAt:      a.StartedAt.Format("2006-01-02T15:04:05Z"),
 	}
 	if a.FinishedAt != nil && !a.FinishedAt.IsZero() {
 		agent.FinishedAt = a.FinishedAt.Format("2006-01-02T15:04:05Z")
@@ -113,16 +113,16 @@ func FromAgentInstance(a *AgentInstanceData) AgentDTO {
 
 // AgentInstanceData is the input data for FromAgentInstance (avoids circular import)
 type AgentInstanceData struct {
-	ID           string
-	TaskID       string
-	AgentType    string
-	ContainerID  string
-	Status       string
-	Progress     int
-	StartedAt    time.Time
-	FinishedAt   *time.Time
-	ExitCode     *int
-	ErrorMessage string
+	ID             string
+	TaskID         string
+	AgentProfileID string
+	ContainerID    string
+	Status         string
+	Progress       int
+	StartedAt      time.Time
+	FinishedAt     *time.Time
+	ExitCode       *int
+	ErrorMessage   string
 }
 
 // FromAgentType converts a registry.AgentType to AgentTypeDTO

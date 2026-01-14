@@ -100,7 +100,7 @@ type TaskDTO struct {
 	Description     string                 `json:"description"`
 	State           v1.TaskState           `json:"state"`
 	Priority        int                    `json:"priority"`
-	AgentType       *string                `json:"agent_type,omitempty"`
+	AgentProfileID  *string                `json:"agent_profile_id,omitempty"`
 	RepositoryURL   *string                `json:"repository_url,omitempty"`
 	Branch          *string                `json:"branch,omitempty"`
 	AssignedAgentID *string                `json:"assigned_agent_id,omitempty"`
@@ -311,9 +311,9 @@ func FromLocalRepository(repo service.LocalRepository) LocalRepositoryDTO {
 }
 
 func FromTask(task *models.Task) TaskDTO {
-	var agentType *string
-	if task.AgentType != "" {
-		agentType = &task.AgentType
+	var agentProfileID *string
+	if task.AgentProfileID != "" {
+		agentProfileID = &task.AgentProfileID
 	}
 	var repositoryURL *string
 	if task.RepositoryURL != "" {
@@ -337,7 +337,7 @@ func FromTask(task *models.Task) TaskDTO {
 		Description:     task.Description,
 		State:           task.State,
 		Priority:        task.Priority,
-		AgentType:       agentType,
+		AgentProfileID:  agentProfileID,
 		RepositoryURL:   repositoryURL,
 		Branch:          branch,
 		AssignedAgentID: assignedAgentID,

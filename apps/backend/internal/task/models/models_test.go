@@ -40,17 +40,17 @@ func TestTaskStructInitialization(t *testing.T) {
 		ID:          "task-123",
 		WorkspaceID: "workspace-001",
 		BoardID:     "board-456",
-		ColumnID:    "column-789",
-		Title:       "Test Task",
-		Description: "A test task description",
-		State:       v1.TaskStateTODO,
-		Priority:    5,
-		AgentType:   "coding",
-		AssignedTo:  "agent-001",
-		Position:    1,
-		Metadata:    map[string]interface{}{"key": "value"},
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		ColumnID:       "column-789",
+		Title:          "Test Task",
+		Description:    "A test task description",
+		State:          v1.TaskStateTODO,
+		Priority:       5,
+		AgentProfileID: "coding",
+		AssignedTo:     "agent-001",
+		Position:       1,
+		Metadata:       map[string]interface{}{"key": "value"},
+		CreatedAt:      now,
+		UpdatedAt:      now,
 	}
 
 	if task.ID != "task-123" {
@@ -77,8 +77,8 @@ func TestTaskStructInitialization(t *testing.T) {
 	if task.Priority != 5 {
 		t.Errorf("expected Priority 5, got %d", task.Priority)
 	}
-	if task.AgentType != "coding" {
-		t.Errorf("expected AgentType 'coding', got %s", task.AgentType)
+	if task.AgentProfileID != "coding" {
+		t.Errorf("expected AgentProfileID 'coding', got %s", task.AgentProfileID)
 	}
 	if task.AssignedTo != "agent-001" {
 		t.Errorf("expected AssignedTo 'agent-001', got %s", task.AssignedTo)
@@ -151,17 +151,17 @@ func TestTaskToAPI(t *testing.T) {
 		ID:          "task-123",
 		WorkspaceID: "workspace-001",
 		BoardID:     "board-456",
-		ColumnID:    "column-789",
-		Title:       "Test Task",
-		Description: "A test task description",
-		State:       v1.TaskStateInProgress,
-		Priority:    3,
-		AgentType:   "coding",
-		AssignedTo:  "agent-001",
-		Position:    2,
-		Metadata:    map[string]interface{}{"key": "value"},
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		ColumnID:       "column-789",
+		Title:          "Test Task",
+		Description:    "A test task description",
+		State:          v1.TaskStateInProgress,
+		Priority:       3,
+		AgentProfileID: "coding",
+		AssignedTo:     "agent-001",
+		Position:       2,
+		Metadata:       map[string]interface{}{"key": "value"},
+		CreatedAt:      now,
+		UpdatedAt:      now,
 	}
 
 	apiTask := task.ToAPI()
@@ -187,8 +187,8 @@ func TestTaskToAPI(t *testing.T) {
 	if apiTask.Priority != task.Priority {
 		t.Errorf("expected Priority %d, got %d", task.Priority, apiTask.Priority)
 	}
-	if apiTask.AgentType == nil || *apiTask.AgentType != task.AgentType {
-		t.Errorf("expected AgentType %s, got %v", task.AgentType, apiTask.AgentType)
+	if apiTask.AgentProfileID == nil || *apiTask.AgentProfileID != task.AgentProfileID {
+		t.Errorf("expected AgentProfileID %s, got %v", task.AgentProfileID, apiTask.AgentProfileID)
 	}
 	if apiTask.AssignedAgentID == nil || *apiTask.AssignedAgentID != task.AssignedTo {
 		t.Errorf("expected AssignedAgentID %s, got %v", task.AssignedTo, apiTask.AssignedAgentID)
@@ -202,25 +202,25 @@ func TestTaskToAPIWithEmptyOptionalFields(t *testing.T) {
 	now := time.Now().UTC()
 	task := &Task{
 		ID:          "task-123",
-		WorkspaceID: "workspace-001",
-		BoardID:     "board-456",
-		ColumnID:    "column-789",
-		Title:       "Test Task",
-		Description: "A test task description",
-		State:       v1.TaskStateTODO,
-		Priority:    0,
-		AgentType:   "",
-		AssignedTo:  "",
-		Position:    0,
-		Metadata:    nil,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		WorkspaceID:    "workspace-001",
+		BoardID:        "board-456",
+		ColumnID:       "column-789",
+		Title:          "Test Task",
+		Description:    "A test task description",
+		State:          v1.TaskStateTODO,
+		Priority:       0,
+		AgentProfileID: "",
+		AssignedTo:     "",
+		Position:       0,
+		Metadata:       nil,
+		CreatedAt:      now,
+		UpdatedAt:      now,
 	}
 
 	apiTask := task.ToAPI()
 
-	if apiTask.AgentType != nil {
-		t.Errorf("expected AgentType nil, got %v", apiTask.AgentType)
+	if apiTask.AgentProfileID != nil {
+		t.Errorf("expected AgentProfileID nil, got %v", apiTask.AgentProfileID)
 	}
 	if apiTask.AssignedAgentID != nil {
 		t.Errorf("expected AssignedAgentID nil, got %v", apiTask.AssignedAgentID)

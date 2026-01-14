@@ -91,8 +91,8 @@ type WorktreeConfig struct {
 // AgentConfig holds agent runtime configuration.
 type AgentConfig struct {
 	// Runtime specifies the agent runtime mode: "docker" or "standalone"
-	// - "docker": Agents run in Docker containers (default)
-	// - "standalone": Agents run via standalone agentctl on the host machine
+	// - "standalone": Agents run via standalone agentctl on the host machine (default)
+	// - "docker": Agents run in Docker containers
 	Runtime string `mapstructure:"runtime"`
 
 	// StandaloneHost is the host where standalone agentctl is running (default: localhost)
@@ -149,7 +149,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("docker.volumeBasePath", "/var/lib/kandev/volumes")
 
 	// Agent defaults
-	v.SetDefault("agent.runtime", "docker")
+	v.SetDefault("agent.runtime", "standalone")
 	v.SetDefault("agent.standaloneHost", "localhost")
 	v.SetDefault("agent.standalonePort", 9999)
 

@@ -236,7 +236,7 @@ type CreateTaskRequest struct {
 	Description   string
 	Priority      int
 	State         *v1.TaskState
-	AgentType     string
+	AgentProfileID string
 	RepositoryURL string
 	Branch        string
 	AssignedTo    string
@@ -250,7 +250,7 @@ type UpdateTaskRequest struct {
 	Description *string
 	Priority    *int
 	State       *v1.TaskState
-	AgentType   *string
+	AgentProfileID *string
 	AssignedTo  *string
 	Position    *int
 	Metadata    map[string]interface{}

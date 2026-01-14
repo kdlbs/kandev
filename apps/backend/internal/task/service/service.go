@@ -58,7 +58,7 @@ type CreateTaskRequest struct {
 	Description   string                 `json:"description"`
 	Priority      int                    `json:"priority"`
 	State         *v1.TaskState          `json:"state,omitempty"`
-	AgentType     string                 `json:"agent_type,omitempty"`
+	AgentProfileID string                 `json:"agent_profile_id,omitempty"`
 	RepositoryURL string                 `json:"repository_url,omitempty"`
 	Branch        string                 `json:"branch,omitempty"`
 	AssignedTo    string                 `json:"assigned_to,omitempty"`
@@ -72,7 +72,7 @@ type UpdateTaskRequest struct {
 	Description *string                `json:"description,omitempty"`
 	Priority    *int                   `json:"priority,omitempty"`
 	State       *v1.TaskState          `json:"state,omitempty"`
-	AgentType   *string                `json:"agent_type,omitempty"`
+	AgentProfileID *string                `json:"agent_profile_id,omitempty"`
 	AssignedTo  *string                `json:"assigned_to,omitempty"`
 	Position    *int                   `json:"position,omitempty"`
 	Metadata    map[string]interface{} `json:"metadata,omitempty"`
@@ -228,7 +228,7 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*mode
 		Description:   req.Description,
 		State:         state,
 		Priority:      req.Priority,
-		AgentType:     req.AgentType,
+		AgentProfileID: req.AgentProfileID,
 		RepositoryURL: req.RepositoryURL,
 		Branch:        req.Branch,
 		AssignedTo:    req.AssignedTo,
@@ -276,8 +276,8 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 		task.State = *req.State
 		stateChanged = true
 	}
-	if req.AgentType != nil {
-		task.AgentType = *req.AgentType
+	if req.AgentProfileID != nil {
+		task.AgentProfileID = *req.AgentProfileID
 	}
 	if req.AssignedTo != nil {
 		task.AssignedTo = *req.AssignedTo
@@ -1054,8 +1054,8 @@ func (s *Service) publishTaskEvent(ctx context.Context, eventType string, task *
 		"updated_at":  task.UpdatedAt.Format(time.RFC3339),
 	}
 
-	if task.AgentType != "" {
-		data["agent_type"] = task.AgentType
+	if task.AgentProfileID != "" {
+		data["agent_profile_id"] = task.AgentProfileID
 	}
 	if task.AssignedTo != "" {
 		data["assigned_to"] = task.AssignedTo

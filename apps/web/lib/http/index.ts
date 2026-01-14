@@ -93,7 +93,7 @@ export async function createTask(
     position?: number;
     repository_url?: string;
     branch?: string;
-    agent_type?: string;
+    agent_profile_id?: string;
     environment_id?: string;
     executor_id?: string;
     state?: Task['state'];
@@ -112,7 +112,7 @@ export async function updateTask(
     title?: string;
     description?: string;
     position?: number;
-    agent_type?: string;
+    agent_profile_id?: string;
     assigned_to?: string;
     state?: Task['state'];
   },

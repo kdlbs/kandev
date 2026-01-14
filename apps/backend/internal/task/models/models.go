@@ -16,7 +16,7 @@ type Task struct {
 	Description   string                 `json:"description"`
 	State         v1.TaskState           `json:"state"`
 	Priority      int                    `json:"priority"`
-	AgentType     string                 `json:"agent_type,omitempty"`
+	AgentProfileID string                 `json:"agent_profile_id,omitempty"`
 	RepositoryURL string                 `json:"repository_url,omitempty"`
 	Branch        string                 `json:"branch,omitempty"`
 	AssignedTo    string                 `json:"assigned_to,omitempty"`
@@ -291,9 +291,9 @@ type Environment struct {
 
 // ToAPI converts internal Task to API type
 func (t *Task) ToAPI() *v1.Task {
-	var agentType *string
-	if t.AgentType != "" {
-		agentType = &t.AgentType
+	var agentProfileID *string
+	if t.AgentProfileID != "" {
+		agentProfileID = &t.AgentProfileID
 	}
 
 	var repositoryURL *string
@@ -319,7 +319,7 @@ func (t *Task) ToAPI() *v1.Task {
 		Description:     t.Description,
 		State:           t.State,
 		Priority:        t.Priority,
-		AgentType:       agentType,
+		AgentProfileID:  agentProfileID,
 		RepositoryURL:   repositoryURL,
 		Branch:          branch,
 		AssignedAgentID: assignedAgentID,

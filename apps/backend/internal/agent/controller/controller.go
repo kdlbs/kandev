@@ -37,16 +37,16 @@ func (c *Controller) ListAgents(ctx context.Context, req dto.ListAgentsRequest) 
 
 	for _, a := range agents {
 		agent := dto.FromAgentInstance(&dto.AgentInstanceData{
-			ID:           a.ID,
-			TaskID:       a.TaskID,
-			AgentType:    a.AgentType,
-			ContainerID:  a.ContainerID,
-			Status:       string(a.Status),
-			Progress:     a.Progress,
-			StartedAt:    a.StartedAt,
-			FinishedAt:   a.FinishedAt,
-			ExitCode:     a.ExitCode,
-			ErrorMessage: a.ErrorMessage,
+			ID:             a.ID,
+			TaskID:         a.TaskID,
+			AgentProfileID: a.AgentProfileID,
+			ContainerID:    a.ContainerID,
+			Status:         string(a.Status),
+			Progress:       a.Progress,
+			StartedAt:      a.StartedAt,
+			FinishedAt:     a.FinishedAt,
+			ExitCode:       a.ExitCode,
+			ErrorMessage:   a.ErrorMessage,
 		})
 		resp.Agents = append(resp.Agents, agent)
 	}
@@ -61,10 +61,10 @@ func (c *Controller) LaunchAgent(ctx context.Context, req dto.LaunchAgentRequest
 	}
 
 	launchReq := &lifecycle.LaunchRequest{
-		TaskID:        req.TaskID,
-		AgentType:     req.AgentType,
-		WorkspacePath: req.WorkspacePath,
-		Env:           req.Env,
+		TaskID:         req.TaskID,
+		AgentProfileID: req.AgentProfileID,
+		WorkspacePath:  req.WorkspacePath,
+		Env:            req.Env,
 	}
 
 	instance, err := c.lifecycle.Launch(ctx, launchReq)
@@ -91,16 +91,16 @@ func (c *Controller) GetAgentStatus(ctx context.Context, req dto.GetAgentStatusR
 	}
 
 	return dto.FromAgentInstance(&dto.AgentInstanceData{
-		ID:           agent.ID,
-		TaskID:       agent.TaskID,
-		AgentType:    agent.AgentType,
-		ContainerID:  agent.ContainerID,
-		Status:       string(agent.Status),
-		Progress:     agent.Progress,
-		StartedAt:    agent.StartedAt,
-		FinishedAt:   agent.FinishedAt,
-		ExitCode:     agent.ExitCode,
-		ErrorMessage: agent.ErrorMessage,
+		ID:             agent.ID,
+		TaskID:         agent.TaskID,
+		AgentProfileID: agent.AgentProfileID,
+		ContainerID:    agent.ContainerID,
+		Status:         string(agent.Status),
+		Progress:       agent.Progress,
+		StartedAt:      agent.StartedAt,
+		FinishedAt:     agent.FinishedAt,
+		ExitCode:       agent.ExitCode,
+		ErrorMessage:   agent.ErrorMessage,
 	}), nil
 }
 

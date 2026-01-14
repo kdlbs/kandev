@@ -28,7 +28,7 @@ type TaskEventData struct {
 type AgentEventData struct {
 	TaskID          string `json:"task_id"`
 	AgentInstanceID string `json:"agent_instance_id"`
-	AgentType       string `json:"agent_type"`
+	AgentProfileID  string `json:"agent_profile_id"`
 	ExitCode        *int   `json:"exit_code,omitempty"`
 	ErrorMessage    string `json:"error_message,omitempty"`
 }

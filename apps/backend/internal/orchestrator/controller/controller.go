@@ -62,7 +62,7 @@ func (c *Controller) TriggerTask(ctx context.Context, req dto.TriggerTaskRequest
 
 // StartTask starts task execution
 func (c *Controller) StartTask(ctx context.Context, req dto.StartTaskRequest) (dto.StartTaskResponse, error) {
-	execution, err := c.service.StartTask(ctx, req.TaskID, req.AgentType, req.Priority)
+	execution, err := c.service.StartTask(ctx, req.TaskID, req.AgentProfileID, req.Priority)
 	if err != nil {
 		return dto.StartTaskResponse{}, err
 	}
@@ -151,7 +151,7 @@ func (c *Controller) GetTaskExecution(ctx context.Context, req dto.GetTaskExecut
 		HasExecution:    true,
 		TaskID:          execution.TaskID,
 		AgentInstanceID: execution.AgentInstanceID,
-		AgentType:       execution.AgentType,
+		AgentProfileID:  execution.AgentProfileID,
 		Status:          string(execution.Status),
 		Progress:        execution.Progress,
 		StartedAt:       execution.StartedAt.Format("2006-01-02T15:04:05Z"),

@@ -229,7 +229,7 @@ export function TaskCreateDialog({
         description: description.trim(),
         repository_url: repository?.local_path ?? '',
         branch: branch || '',
-        agent_type: startAgent ? 'default' : '',
+        agent_profile_id: agentProfileId || undefined,
         environment_id: environmentId || undefined,
         executor_id: executorId || undefined,
         state: targetState,

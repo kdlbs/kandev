@@ -79,7 +79,7 @@ export type Task = {
   description: string;
   state: TaskState;
   priority: number;
-  agent_type?: string | null;
+  agent_profile_id?: string | null;
   repository_url?: string | null;
   branch?: string | null;
   assigned_agent_id?: string | null;

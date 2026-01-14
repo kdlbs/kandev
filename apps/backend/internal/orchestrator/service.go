@@ -278,10 +278,10 @@ func (s *Service) EnqueueTask(ctx context.Context, task *v1.Task) error {
 }
 
 // StartTask manually starts agent execution for a task
-func (s *Service) StartTask(ctx context.Context, taskID string, agentType string, priority int) (*executor.TaskExecution, error) {
+func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID string, priority int) (*executor.TaskExecution, error) {
 	s.logger.Info("manually starting task",
 		zap.String("task_id", taskID),
-		zap.String("agent_type", agentType),
+		zap.String("agent_profile_id", agentProfileID),
 		zap.Int("priority", priority))
 
 	// Fetch the task from the repository to get complete task info
@@ -293,9 +293,9 @@ func (s *Service) StartTask(ctx context.Context, taskID string, agentType string
 		return nil, err
 	}
 
-	// Override agent_type and priority if provided in the request
-	if agentType != "" {
-		task.AgentType = &agentType
+	// Override agent_profile_id and priority if provided in the request
+	if agentProfileID != "" {
+		task.AgentProfileID = &agentProfileID
 	}
 	if priority > 0 {
 		task.Priority = priority
@@ -425,9 +425,9 @@ func (s *Service) handleTaskStateChanged(ctx context.Context, data watcher.TaskE
 	s.logger.Debug("handling task state changed",
 		zap.String("task_id", data.TaskID))
 
-	// Add task to queue if state is TODO and agent_type is set
+	// Add task to queue if state is TODO and agent_profile_id is set
 	if data.NewState != nil && *data.NewState == v1.TaskStateTODO {
-		if data.Task != nil && data.Task.AgentType != nil && *data.Task.AgentType != "" {
+		if data.Task != nil && data.Task.AgentProfileID != nil && *data.Task.AgentProfileID != "" {
 			if err := s.scheduler.EnqueueTask(data.Task); err != nil {
 				s.logger.Error("failed to enqueue task on state change",
 					zap.String("task_id", data.TaskID),
@@ -435,7 +435,7 @@ func (s *Service) handleTaskStateChanged(ctx context.Context, data watcher.TaskE
 			} else {
 				s.logger.Info("task enqueued on state change to TODO",
 					zap.String("task_id", data.TaskID),
-					zap.String("agent_type", *data.Task.AgentType))
+					zap.String("agent_profile_id", *data.Task.AgentProfileID))
 			}
 		}
 	}

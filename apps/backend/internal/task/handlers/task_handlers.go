@@ -80,7 +80,7 @@ type httpCreateTaskRequest struct {
 	Description   string                 `json:"description,omitempty"`
 	Priority      int                    `json:"priority,omitempty"`
 	State         *v1.TaskState          `json:"state,omitempty"`
-	AgentType     string                 `json:"agent_type,omitempty"`
+	AgentProfileID string                 `json:"agent_profile_id,omitempty"`
 	RepositoryURL string                 `json:"repository_url,omitempty"`
 	Branch        string                 `json:"branch,omitempty"`
 	AssignedTo    string                 `json:"assigned_to,omitempty"`
@@ -110,7 +110,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		Description:   body.Description,
 		Priority:      body.Priority,
 		State:         body.State,
-		AgentType:     body.AgentType,
+		AgentProfileID: body.AgentProfileID,
 		RepositoryURL: body.RepositoryURL,
 		Branch:        body.Branch,
 		AssignedTo:    body.AssignedTo,
@@ -129,7 +129,7 @@ type httpUpdateTaskRequest struct {
 	Description *string                `json:"description,omitempty"`
 	Priority    *int                   `json:"priority,omitempty"`
 	State       *v1.TaskState          `json:"state,omitempty"`
-	AgentType   *string                `json:"agent_type,omitempty"`
+	AgentProfileID *string                `json:"agent_profile_id,omitempty"`
 	AssignedTo  *string                `json:"assigned_to,omitempty"`
 	Position    *int                   `json:"position,omitempty"`
 	Metadata    map[string]interface{} `json:"metadata,omitempty"`
@@ -147,7 +147,7 @@ func (h *TaskHandlers) httpUpdateTask(c *gin.Context) {
 		Description: body.Description,
 		Priority:    body.Priority,
 		State:       body.State,
-		AgentType:   body.AgentType,
+		AgentProfileID: body.AgentProfileID,
 		AssignedTo:  body.AssignedTo,
 		Position:    body.Position,
 		Metadata:    body.Metadata,
@@ -228,7 +228,7 @@ type wsCreateTaskRequest struct {
 	Description   string                 `json:"description,omitempty"`
 	Priority      int                    `json:"priority,omitempty"`
 	State         *v1.TaskState          `json:"state,omitempty"`
-	AgentType     string                 `json:"agent_type,omitempty"`
+	AgentProfileID string                 `json:"agent_profile_id,omitempty"`
 	RepositoryURL string                 `json:"repository_url,omitempty"`
 	Branch        string                 `json:"branch,omitempty"`
 	AssignedTo    string                 `json:"assigned_to,omitempty"`
@@ -265,7 +265,7 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		Description:   req.Description,
 		Priority:      req.Priority,
 		State:         req.State,
-		AgentType:     req.AgentType,
+		AgentProfileID: req.AgentProfileID,
 		RepositoryURL: req.RepositoryURL,
 		Branch:        req.Branch,
 		AssignedTo:    req.AssignedTo,
@@ -305,7 +305,7 @@ type wsUpdateTaskRequest struct {
 	Description *string                `json:"description,omitempty"`
 	Priority    *int                   `json:"priority,omitempty"`
 	State       *v1.TaskState          `json:"state,omitempty"`
-	AgentType   *string                `json:"agent_type,omitempty"`
+	AgentProfileID *string                `json:"agent_profile_id,omitempty"`
 	AssignedTo  *string                `json:"assigned_to,omitempty"`
 	Position    *int                   `json:"position,omitempty"`
 	Metadata    map[string]interface{} `json:"metadata,omitempty"`
@@ -326,7 +326,7 @@ func (h *TaskHandlers) wsUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		Description: req.Description,
 		Priority:    req.Priority,
 		State:       req.State,
-		AgentType:   req.AgentType,
+		AgentProfileID: req.AgentProfileID,
 		AssignedTo:  req.AssignedTo,
 		Position:    req.Position,
 		Metadata:    req.Metadata,

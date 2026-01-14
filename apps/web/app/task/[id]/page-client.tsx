@@ -6,6 +6,10 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@kandev/ui
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@kandev/ui/tabs';
 import { TooltipProvider } from '@kandev/ui/tooltip';
 import { Textarea } from '@kandev/ui/textarea';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@kandev/ui/dialog';
+import { Button } from '@kandev/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@kandev/ui/select';
+import { Label } from '@kandev/ui/label';
 import { IconX } from '@tabler/icons-react';
 import { getLocalStorage, setLocalStorage } from '@/lib/local-storage';
 import { TaskChatPanel } from '@/components/task/task-chat-panel';
@@ -21,6 +25,13 @@ import { getWebSocketClient } from '@/lib/ws/connection';
 import { useAppStore, useAppStoreApi } from '@/components/state-provider';
 import { useRepositories } from '@/hooks/use-repositories';
 import { useRepositoryBranches } from '@/hooks/use-repository-branches';
+
+type AgentProfile = {
+  id: string;
+  name: string;
+  agent_id: string;
+  agent_name: string;
+};
 
 const AGENTS = [
   { id: 'codex', label: 'Codex' },
@@ -191,10 +202,14 @@ export default function TaskPage({ task: initialTask }: TaskPageClientProps) {
     const client = getWebSocketClient();
     if (!client) return;
 
+    // Require agent_profile_id to be set on the task
+    if (!task.agent_profile_id) {
+      console.error('No agent profile configured for this task. Please edit the task to select an agent profile.');
+      return;
+    }
+
     setIsAgentLoading(true);
     try {
-      // Use task's agent_type if set, otherwise default to 'augment-agent'
-      const agentType = task.agent_type ?? 'augment-agent';
       interface StartResponse {
         success: boolean;
         task_id: string;
@@ -205,7 +220,7 @@ export default function TaskPage({ task: initialTask }: TaskPageClientProps) {
       }
       const response = await client.request<StartResponse>('orchestrator.start', {
         task_id: task.id,
-        agent_type: agentType,
+        agent_profile_id: task.agent_profile_id,
       }, 15000);
       setIsAgentRunning(true);
 
@@ -219,7 +234,7 @@ export default function TaskPage({ task: initialTask }: TaskPageClientProps) {
     } finally {
       setIsAgentLoading(false);
     }
-  }, [task?.id, task?.agent_type]);
+  }, [task?.id, task?.agent_profile_id]);
 
   const handleStopAgent = useCallback(async () => {
     if (!task?.id) return;
@@ -344,6 +359,7 @@ export default function TaskPage({ task: initialTask }: TaskPageClientProps) {
                       onSend={handleSendMessage}
                       isLoading={isLoadingComments}
                       isAgentWorking={isAgentRunning}
+                      taskDescription={task.description}
                     />
                   ) : (
                     <div className="flex items-center justify-center h-full text-muted-foreground">

@@ -178,12 +178,12 @@ func TestManager_GetInstance(t *testing.T) {
 
 	// Manually add an instance for testing
 	instance := &AgentInstance{
-		ID:          "test-instance-id",
-		TaskID:      "test-task-id",
-		AgentType:   "test-agent",
-		ContainerID: "container-123",
-		Status:      v1.AgentStatusRunning,
-		StartedAt:   time.Now(),
+		ID:             "test-instance-id",
+		TaskID:         "test-task-id",
+		AgentProfileID: "test-agent",
+		ContainerID:    "container-123",
+		Status:         v1.AgentStatusRunning,
+		StartedAt:      time.Now(),
 	}
 
 	mgr.mu.Lock()
@@ -215,12 +215,12 @@ func TestManager_GetInstanceByTaskID(t *testing.T) {
 	mgr := NewManager(nil, reg, eventBus, testAgentConfig(), log)
 
 	instance := &AgentInstance{
-		ID:          "test-instance-id",
-		TaskID:      "test-task-id",
-		AgentType:   "test-agent",
-		ContainerID: "container-123",
-		Status:      v1.AgentStatusRunning,
-		StartedAt:   time.Now(),
+		ID:             "test-instance-id",
+		TaskID:         "test-task-id",
+		AgentProfileID: "test-agent",
+		ContainerID:    "container-123",
+		Status:         v1.AgentStatusRunning,
+		StartedAt:      time.Now(),
 	}
 
 	mgr.mu.Lock()
@@ -251,12 +251,12 @@ func TestManager_GetInstanceByContainerID(t *testing.T) {
 	mgr := NewManager(nil, reg, eventBus, testAgentConfig(), log)
 
 	instance := &AgentInstance{
-		ID:          "test-instance-id",
-		TaskID:      "test-task-id",
-		AgentType:   "test-agent",
-		ContainerID: "container-123",
-		Status:      v1.AgentStatusRunning,
-		StartedAt:   time.Now(),
+		ID:             "test-instance-id",
+		TaskID:         "test-task-id",
+		AgentProfileID: "test-agent",
+		ContainerID:    "container-123",
+		Status:         v1.AgentStatusRunning,
+		StartedAt:      time.Now(),
 	}
 
 	mgr.mu.Lock()
@@ -380,13 +380,13 @@ func TestManager_MarkCompleted_Success(t *testing.T) {
 	mgr := NewManager(nil, reg, eventBus, testAgentConfig(), log)
 
 	instance := &AgentInstance{
-		ID:          "test-instance-id",
-		TaskID:      "test-task-id",
-		AgentType:   "test-agent",
-		ContainerID: "container-123",
-		Status:      v1.AgentStatusRunning,
-		StartedAt:   time.Now(),
-		Progress:    50,
+		ID:             "test-instance-id",
+		TaskID:         "test-task-id",
+		AgentProfileID: "test-agent",
+		ContainerID:    "container-123",
+		Status:         v1.AgentStatusRunning,
+		StartedAt:      time.Now(),
+		Progress:       50,
 	}
 
 	mgr.mu.Lock()
@@ -421,12 +421,12 @@ func TestManager_MarkCompleted_Failure(t *testing.T) {
 	mgr := NewManager(nil, reg, eventBus, testAgentConfig(), log)
 
 	instance := &AgentInstance{
-		ID:          "test-instance-id",
-		TaskID:      "test-task-id",
-		AgentType:   "test-agent",
-		ContainerID: "container-123",
-		Status:      v1.AgentStatusRunning,
-		StartedAt:   time.Now(),
+		ID:             "test-instance-id",
+		TaskID:         "test-task-id",
+		AgentProfileID: "test-agent",
+		ContainerID:    "container-123",
+		Status:         v1.AgentStatusRunning,
+		StartedAt:      time.Now(),
 	}
 
 	mgr.mu.Lock()
