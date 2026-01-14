@@ -62,7 +62,7 @@ export function Combobox({
           variant="outline"
           role="combobox"
           aria-expanded={open}
-          className={cn("w-full justify-between", triggerClassName)}
+          className={cn("w-full justify-between", !disabled && "cursor-pointer", triggerClassName)}
           disabled={disabled}
         >
           <div className="flex min-w-0 flex-1 items-center">

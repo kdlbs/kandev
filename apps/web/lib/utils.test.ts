@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { formatUserHomePath, selectPreferredBranch, truncateRepoPath } from './utils';
+import {
+  extractRepoName,
+  formatUserHomePath,
+  getRepositoryDisplayName,
+  selectPreferredBranch,
+  truncateRepoPath,
+} from './utils';
 
 describe('formatUserHomePath', () => {
   it('replaces mac home path with tilde', () => {
@@ -60,5 +66,29 @@ describe('selectPreferredBranch', () => {
   it('returns null when no preferred branches exist', () => {
     const branches = [{ name: 'develop', type: 'local' }];
     expect(selectPreferredBranch(branches)).toBeNull();
+  });
+});
+
+describe('extractRepoName', () => {
+  it('extracts org/name from ssh urls', () => {
+    expect(extractRepoName('git@gitlab.com:org/repo.git')).toBe('org/repo');
+  });
+
+  it('extracts org/name from https urls', () => {
+    expect(extractRepoName('https://bitbucket.org/org/repo')).toBe('org/repo');
+  });
+
+  it('returns null for local paths', () => {
+    expect(extractRepoName('/Users/alex/Projects/App')).toBeNull();
+  });
+});
+
+describe('getRepositoryDisplayName', () => {
+  it('returns a tilde path for local repositories', () => {
+    expect(getRepositoryDisplayName('/Users/alex/Projects/App')).toBe('~/Projects/App');
+  });
+
+  it('returns org/name for remote repositories', () => {
+    expect(getRepositoryDisplayName('https://github.com/org/repo.git')).toBe('org/repo');
   });
 });

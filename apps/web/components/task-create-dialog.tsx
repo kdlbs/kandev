@@ -262,7 +262,7 @@ export function TaskCreateDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-none w-[900px] sm:!max-w-none max-h-[85vh] flex flex-col">
+      <DialogContent className="max-w-none w-[900px] sm:!max-w-none max-h-[85vh] flex flex-col bg-card">
         <DialogHeader>
           <DialogTitle>{submitLabel === 'Create' ? 'Create Task' : 'Edit Task'}</DialogTitle>
         </DialogHeader>
@@ -292,9 +292,9 @@ export function TaskCreateDialog({
                 {repositories.length === 0 && !repositoriesLoading ? (
                   <div className="flex items-center justify-center h-10 px-3 py-2 text-sm border border-input rounded-md bg-background">
                     <span className="text-muted-foreground mr-2">No repositories found.</span>
-                  <Link href="/settings/workspace" className="text-primary hover:underline">
-                    Add repository
-                  </Link>
+                    <Link href="/settings/workspace" className="text-primary hover:underline">
+                      Add repository
+                    </Link>
                   </div>
                 ) : (
                   <Combobox
@@ -324,12 +324,13 @@ export function TaskCreateDialog({
                     emptyMessage="No repository found."
                     disabled={isEditMode || repositoriesLoading}
                     dropdownLabel="Repository"
+                    className={isEditMode || repositoriesLoading ? undefined : 'cursor-pointer'}
                   />
                 )}
               </div>
               <div>
-                  <Combobox
-                    options={branches.map((branchObj) => {
+                <Combobox
+                  options={branches.map((branchObj) => {
                     const displayName = branchObj.type === 'remote' && branchObj.remote
                       ? `${branchObj.remote}/${branchObj.name}`
                       : branchObj.name;
@@ -362,12 +363,13 @@ export function TaskCreateDialog({
                   searchPlaceholder="Search branches..."
                   emptyMessage="No branch found."
                   disabled={isEditMode || !repositoryId || branchesLoading}
-                  dropdownLabel="Branch"
+                  dropdownLabel="Base Branch"
+                  className={isEditMode || !repositoryId || branchesLoading ? undefined : 'cursor-pointer'}
                 />
               </div>
               <div>
                 {agentProfiles.length === 0 && !agentProfilesLoading ? (
-                  <div className="flex h-7 items-center justify-center gap-2 rounded-md border border-input bg-background px-3 text-sm text-muted-foreground">
+                  <div className="flex h-7 items-center justify-center gap-2 rounded-sm border border-input px-3 text-xs text-muted-foreground">
                     <span>No agents found.</span>
                     <Link href="/settings/agents" className="text-primary hover:underline">
                       Add agent
@@ -391,6 +393,7 @@ export function TaskCreateDialog({
                     searchPlaceholder="Search agents..."
                     emptyMessage="No agent found."
                     dropdownLabel="Agent profile"
+                    className={agentProfilesLoading ? undefined : 'cursor-pointer'}
                   />
                 )}
               </div>
@@ -401,7 +404,7 @@ export function TaskCreateDialog({
                 variant="ghost"
                 size="sm"
                 onClick={() => setShowAdvancedSettings(!showAdvancedSettings)}
-                className="text-muted-foreground"
+                className="text-muted-foreground cursor-pointer"
               >
                 <IconSettings className="h-4 w-4 mr-1" />
                 {showAdvancedSettings ? 'Hide' : 'More Options'}
@@ -486,7 +489,7 @@ export function TaskCreateDialog({
               </div>
               {startAgent && (
                 <span className="text-xs text-muted-foreground">
-                  A worktree will be created from this base branch.
+                  A git worktree will be created from the above branch.
                 </span>
               )}
             </div>
