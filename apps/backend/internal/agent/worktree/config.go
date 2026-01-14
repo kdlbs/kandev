@@ -27,15 +27,7 @@ type Config struct {
 	BranchPrefix string `mapstructure:"branch_prefix"`
 }
 
-// DefaultConfig returns the default worktree configuration.
-func DefaultConfig() Config {
-	return Config{
-		Enabled:      true,
-		BasePath:     "~/.kandev/worktrees",
-		MaxPerRepo:   10,
-		BranchPrefix: "kandev/",
-	}
-}
+
 
 // Validate validates the configuration and returns an error if invalid.
 func (c *Config) Validate() error {

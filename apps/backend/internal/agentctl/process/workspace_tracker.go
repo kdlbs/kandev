@@ -558,19 +558,7 @@ func (wt *WorkspaceTracker) notifyFilesSubscribers(update FileListUpdate) {
 	}
 }
 
-// GetCurrentGitStatus returns the current git status
-func (wt *WorkspaceTracker) GetCurrentGitStatus() GitStatusUpdate {
-	wt.mu.RLock()
-	defer wt.mu.RUnlock()
-	return wt.currentStatus
-}
 
-// GetCurrentFiles returns the current file list
-func (wt *WorkspaceTracker) GetCurrentFiles() FileListUpdate {
-	wt.mu.RLock()
-	defer wt.mu.RUnlock()
-	return wt.currentFiles
-}
 
 // SubscribeFileChanges creates a new file change subscriber
 func (wt *WorkspaceTracker) SubscribeFileChanges() FileChangeSubscriber {

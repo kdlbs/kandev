@@ -55,8 +55,13 @@ func NewTestServer(t *testing.T) *TestServer {
 	// Initialize event bus
 	eventBus := bus.NewMemoryEventBus(log)
 
-	// Initialize task repository (in-memory for tests)
-	taskRepo := repository.NewMemoryRepository()
+	// Initialize task repository (SQLite for tests)
+	tmpDir := t.TempDir()
+	taskRepo, err := repository.NewSQLiteRepository(tmpDir + "/test.db")
+	if err != nil {
+		t.Fatalf("failed to create test repository: %v", err)
+	}
+	t.Cleanup(func() { taskRepo.Close() })
 
 	// Initialize task service
 	taskSvc := taskservice.NewService(taskRepo, eventBus, log, taskservice.RepositoryDiscoveryConfig{})

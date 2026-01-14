@@ -468,8 +468,13 @@ func NewOrchestratorTestServer(t *testing.T) *OrchestratorTestServer {
 	// Initialize event bus
 	eventBus := bus.NewMemoryEventBus(log)
 
-	// Initialize task repository (in-memory for tests)
-	taskRepo := repository.NewMemoryRepository()
+	// Initialize task repository (SQLite for tests)
+	tmpDir := t.TempDir()
+	taskRepo, err := repository.NewSQLiteRepository(tmpDir + "/test.db")
+	if err != nil {
+		t.Fatalf("failed to create test repository: %v", err)
+	}
+	t.Cleanup(func() { taskRepo.Close() })
 
 	// Initialize task service
 	taskSvc := taskservice.NewService(taskRepo, eventBus, log, taskservice.RepositoryDiscoveryConfig{})
@@ -483,7 +488,7 @@ func NewOrchestratorTestServer(t *testing.T) *OrchestratorTestServer {
 	// Create orchestrator service
 	cfg := orchestrator.DefaultServiceConfig()
 	cfg.Scheduler.ProcessInterval = 50 * time.Millisecond // Faster for tests
-	orchestratorSvc := orchestrator.NewService(cfg, eventBus, nil, agentManager, taskRepoAdapter, taskRepo, log)
+	orchestratorSvc := orchestrator.NewService(cfg, eventBus, agentManager, taskRepoAdapter, taskRepo, log)
 
 	// Create WebSocket gateway
 	gateway := gateways.NewGateway(log)

@@ -563,10 +563,4 @@ func (m *Manager) GetPendingPermissions() []*PendingPermission {
 	return result
 }
 
-// GetPendingPermission returns a specific pending permission request
-func (m *Manager) GetPendingPermission(pendingID string) (*PendingPermission, bool) {
-	m.permissionMu.RLock()
-	defer m.permissionMu.RUnlock()
-	p, ok := m.pendingPermissions[pendingID]
-	return p, ok
-}
+

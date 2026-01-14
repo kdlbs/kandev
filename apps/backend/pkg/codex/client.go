@@ -232,18 +232,3 @@ func (c *Client) handleRequest(id interface{}, method string, params json.RawMes
 	}
 }
 
-// extractMethod extracts the method field from a JSON message for logging
-func extractMethod(data []byte) string {
-	var msg struct {
-		Method string `json:"method"`
-		ID     int    `json:"id"`
-	}
-	if err := json.Unmarshal(data, &msg); err != nil {
-		return "parse-error"
-	}
-	if msg.Method != "" {
-		return msg.Method
-	}
-	return "response"
-}
-

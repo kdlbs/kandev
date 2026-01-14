@@ -272,7 +272,12 @@ func writeRef(t *testing.T, path string) {
 
 func newDiscoveryService(t *testing.T, root string) *Service {
 	t.Helper()
-	repo := repository.NewMemoryRepository()
+	tmpDir := t.TempDir()
+	repo, err := repository.NewSQLiteRepository(tmpDir + "/test.db")
+	if err != nil {
+		t.Fatalf("failed to create test repository: %v", err)
+	}
+	t.Cleanup(func() { repo.Close() })
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
 	eventBus := bus.NewMemoryEventBus(log)
 	return NewService(repo, eventBus, log, RepositoryDiscoveryConfig{

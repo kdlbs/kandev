@@ -120,8 +120,13 @@ func createTestLogger() *logger.Logger {
 	return log
 }
 
-func createTestExecutor(agentMgr *mockAgentManager, log *logger.Logger, maxConcurrent int) *executor.Executor {
-	repo := repository.NewMemoryRepository()
+func createTestExecutor(t *testing.T, agentMgr *mockAgentManager, log *logger.Logger, maxConcurrent int) *executor.Executor {
+	tmpDir := t.TempDir()
+	repo, err := repository.NewSQLiteRepository(tmpDir + "/test.db")
+	if err != nil {
+		t.Fatalf("failed to create test repository: %v", err)
+	}
+	t.Cleanup(func() { repo.Close() })
 	cfg := executor.ExecutorConfig{
 		MaxConcurrent:   maxConcurrent,
 		WorktreeEnabled: true,
@@ -147,7 +152,7 @@ func TestNewScheduler(t *testing.T) {
 	q := queue.NewTaskQueue(100)
 	agentMgr := newMockAgentManager()
 	log := createTestLogger()
-	exec := createTestExecutor(agentMgr, log, 5)
+	exec := createTestExecutor(t, agentMgr, log, 5)
 	taskRepo := newTestTaskRepository()
 
 	s := NewScheduler(q, exec, taskRepo, log, DefaultSchedulerConfig())
@@ -180,7 +185,7 @@ func TestStartStop(t *testing.T) {
 	q := queue.NewTaskQueue(100)
 	agentMgr := newMockAgentManager()
 	log := createTestLogger()
-	exec := createTestExecutor(agentMgr, log, 5)
+	exec := createTestExecutor(t, agentMgr, log, 5)
 	taskRepo := newTestTaskRepository()
 
 	s := NewScheduler(q, exec, taskRepo, log, DefaultSchedulerConfig())
@@ -206,7 +211,7 @@ func TestStartAlreadyRunning(t *testing.T) {
 	q := queue.NewTaskQueue(100)
 	agentMgr := newMockAgentManager()
 	log := createTestLogger()
-	exec := createTestExecutor(agentMgr, log, 5)
+	exec := createTestExecutor(t, agentMgr, log, 5)
 	taskRepo := newTestTaskRepository()
 
 	s := NewScheduler(q, exec, taskRepo, log, DefaultSchedulerConfig())
@@ -224,7 +229,7 @@ func TestStopNotRunning(t *testing.T) {
 	q := queue.NewTaskQueue(100)
 	agentMgr := newMockAgentManager()
 	log := createTestLogger()
-	exec := createTestExecutor(agentMgr, log, 5)
+	exec := createTestExecutor(t, agentMgr, log, 5)
 	taskRepo := newTestTaskRepository()
 
 	s := NewScheduler(q, exec, taskRepo, log, DefaultSchedulerConfig())
@@ -239,7 +244,7 @@ func TestEnqueueTask(t *testing.T) {
 	q := queue.NewTaskQueue(100)
 	agentMgr := newMockAgentManager()
 	log := createTestLogger()
-	exec := createTestExecutor(agentMgr, log, 5)
+	exec := createTestExecutor(t, agentMgr, log, 5)
 	taskRepo := newTestTaskRepository()
 
 	s := NewScheduler(q, exec, taskRepo, log, DefaultSchedulerConfig())
@@ -259,7 +264,7 @@ func TestRemoveTask(t *testing.T) {
 	q := queue.NewTaskQueue(100)
 	agentMgr := newMockAgentManager()
 	log := createTestLogger()
-	exec := createTestExecutor(agentMgr, log, 5)
+	exec := createTestExecutor(t, agentMgr, log, 5)
 	taskRepo := newTestTaskRepository()
 
 	s := NewScheduler(q, exec, taskRepo, log, DefaultSchedulerConfig())
@@ -281,7 +286,7 @@ func TestRemoveNonExistentTask(t *testing.T) {
 	q := queue.NewTaskQueue(100)
 	agentMgr := newMockAgentManager()
 	log := createTestLogger()
-	exec := createTestExecutor(agentMgr, log, 5)
+	exec := createTestExecutor(t, agentMgr, log, 5)
 	taskRepo := newTestTaskRepository()
 
 	s := NewScheduler(q, exec, taskRepo, log, DefaultSchedulerConfig())
@@ -296,7 +301,7 @@ func TestGetQueueStatus(t *testing.T) {
 	q := queue.NewTaskQueue(100)
 	agentMgr := newMockAgentManager()
 	log := createTestLogger()
-	exec := createTestExecutor(agentMgr, log, 5)
+	exec := createTestExecutor(t, agentMgr, log, 5)
 	taskRepo := newTestTaskRepository()
 
 	cfg := DefaultSchedulerConfig()
@@ -322,7 +327,7 @@ func TestHandleTaskCompleted(t *testing.T) {
 	q := queue.NewTaskQueue(100)
 	agentMgr := newMockAgentManager()
 	log := createTestLogger()
-	exec := createTestExecutor(agentMgr, log, 5)
+	exec := createTestExecutor(t, agentMgr, log, 5)
 	taskRepo := newTestTaskRepository()
 
 	s := NewScheduler(q, exec, taskRepo, log, DefaultSchedulerConfig())
@@ -351,7 +356,7 @@ func TestPriorityOrdering(t *testing.T) {
 	q := queue.NewTaskQueue(100)
 	agentMgr := newMockAgentManager()
 	log := createTestLogger()
-	exec := createTestExecutor(agentMgr, log, 5)
+	exec := createTestExecutor(t, agentMgr, log, 5)
 	taskRepo := newTestTaskRepository()
 
 	s := NewScheduler(q, exec, taskRepo, log, DefaultSchedulerConfig())
@@ -372,7 +377,7 @@ func TestIsRunning(t *testing.T) {
 	q := queue.NewTaskQueue(100)
 	agentMgr := newMockAgentManager()
 	log := createTestLogger()
-	exec := createTestExecutor(agentMgr, log, 5)
+	exec := createTestExecutor(t, agentMgr, log, 5)
 	taskRepo := newTestTaskRepository()
 
 	s := NewScheduler(q, exec, taskRepo, log, DefaultSchedulerConfig())
@@ -396,7 +401,7 @@ func TestSchedulerWithContextCancellation(t *testing.T) {
 	q := queue.NewTaskQueue(100)
 	agentMgr := newMockAgentManager()
 	log := createTestLogger()
-	exec := createTestExecutor(agentMgr, log, 5)
+	exec := createTestExecutor(t, agentMgr, log, 5)
 	taskRepo := newTestTaskRepository()
 
 	cfg := DefaultSchedulerConfig()
@@ -425,7 +430,7 @@ func TestEnqueueDuplicateTask(t *testing.T) {
 	q := queue.NewTaskQueue(100)
 	agentMgr := newMockAgentManager()
 	log := createTestLogger()
-	exec := createTestExecutor(agentMgr, log, 5)
+	exec := createTestExecutor(t, agentMgr, log, 5)
 	taskRepo := newTestTaskRepository()
 
 	s := NewScheduler(q, exec, taskRepo, log, DefaultSchedulerConfig())
@@ -443,7 +448,7 @@ func TestRetryTaskExceedsLimit(t *testing.T) {
 	q := queue.NewTaskQueue(100)
 	agentMgr := newMockAgentManager()
 	log := createTestLogger()
-	exec := createTestExecutor(agentMgr, log, 5)
+	exec := createTestExecutor(t, agentMgr, log, 5)
 	taskRepo := newTestTaskRepository()
 
 	cfg := DefaultSchedulerConfig()
@@ -477,7 +482,7 @@ func TestRetryTaskNotFound(t *testing.T) {
 	q := queue.NewTaskQueue(100)
 	agentMgr := newMockAgentManager()
 	log := createTestLogger()
-	exec := createTestExecutor(agentMgr, log, 5)
+	exec := createTestExecutor(t, agentMgr, log, 5)
 	taskRepo := newTestTaskRepository()
 
 	cfg := DefaultSchedulerConfig()

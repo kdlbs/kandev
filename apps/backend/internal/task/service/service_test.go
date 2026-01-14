@@ -67,9 +67,14 @@ func (m *MockEventBus) ClearEvents() {
 	m.publishedEvents = make([]*bus.Event, 0)
 }
 
-func createTestService(t *testing.T) (*Service, *MockEventBus, *repository.MemoryRepository) {
+func createTestService(t *testing.T) (*Service, *MockEventBus, repository.Repository) {
 	t.Helper()
-	repo := repository.NewMemoryRepository()
+	tmpDir := t.TempDir()
+	repo, err := repository.NewSQLiteRepository(tmpDir + "/test.db")
+	if err != nil {
+		t.Fatalf("failed to create test repository: %v", err)
+	}
+	t.Cleanup(func() { repo.Close() })
 	eventBus := NewMockEventBus()
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
 	svc := NewService(repo, eventBus, log, RepositoryDiscoveryConfig{})

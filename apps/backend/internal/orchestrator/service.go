@@ -10,7 +10,6 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/kandev/kandev/internal/common/database"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
@@ -59,7 +58,6 @@ type Service struct {
 	config       ServiceConfig
 	logger       *logger.Logger
 	eventBus     bus.EventBus
-	db           *database.DB
 	taskRepo     scheduler.TaskRepository
 	repo         repository.Repository // Full repository for agent sessions
 	agentManager executor.AgentManagerClient
@@ -101,7 +99,6 @@ type Status struct {
 func NewService(
 	cfg ServiceConfig,
 	eventBus bus.EventBus,
-	db *database.DB,
 	agentManager executor.AgentManagerClient,
 	taskRepo scheduler.TaskRepository,
 	repo repository.Repository,
@@ -127,7 +124,6 @@ func NewService(
 		config:       cfg,
 		logger:       svcLogger,
 		eventBus:     eventBus,
-		db:           db,
 		taskRepo:     taskRepo,
 		repo:         repo,
 		agentManager: agentManager,

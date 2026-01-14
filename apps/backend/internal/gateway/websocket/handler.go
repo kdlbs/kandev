@@ -72,13 +72,7 @@ func (h *Handler) HandleConnection(c *gin.Context) {
 	client.ReadPump(c.Request.Context())
 }
 
-// SetupRoutes adds the WebSocket route to the router
-func SetupRoutes(router *gin.Engine, hub *Hub, log *logger.Logger) {
-	handler := NewHandler(hub, log)
 
-	// Main WebSocket endpoint
-	router.GET("/ws", handler.HandleConnection)
-}
 
 // RegisterHealthHandler registers the health check handler
 func RegisterHealthHandler(d *ws.Dispatcher) {

@@ -916,26 +916,7 @@ func (r *SQLiteRepository) ListTasksByColumn(ctx context.Context, columnID strin
 	return r.scanTasksWithPlacement(rows)
 }
 
-// scanTasks scans multiple task rows
-func (r *SQLiteRepository) scanTasks(rows *sql.Rows) ([]*models.Task, error) {
-	var result []*models.Task
-	for rows.Next() {
-		task := &models.Task{}
-		var metadata string
-		var agentProfileID, repositoryURL, branch, assignedTo sql.NullString
-		err := rows.Scan(&task.ID, &task.WorkspaceID, &task.BoardID, &task.ColumnID, &task.Title, &task.Description, &task.State, &task.Priority, &agentProfileID, &repositoryURL, &branch, &assignedTo, &task.Position, &metadata, &task.CreatedAt, &task.UpdatedAt)
-		if err != nil {
-			return nil, err
-		}
-		task.AgentProfileID = agentProfileID.String
-		task.RepositoryURL = repositoryURL.String
-		task.Branch = branch.String
-		task.AssignedTo = assignedTo.String
-		_ = json.Unmarshal([]byte(metadata), &task.Metadata)
-		result = append(result, task)
-	}
-	return result, rows.Err()
-}
+
 
 func (r *SQLiteRepository) scanTasksWithPlacement(rows *sql.Rows) ([]*models.Task, error) {
 	var result []*models.Task
