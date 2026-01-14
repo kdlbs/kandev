@@ -260,6 +260,22 @@ type DeleteTaskRequest struct {
 	ID string
 }
 
+type ListCommentsRequest struct {
+	TaskID string
+}
+
+type CreateCommentRequest struct {
+	TaskID        string
+	Content       string
+	AuthorType    string
+	AuthorID      string
+	Type          string
+	RequestsInput bool
+	Metadata      map[string]interface{}
+	ACPSessionID  string
+	AgentSessionID string
+}
+
 type MoveTaskRequest struct {
 	ID       string
 	BoardID  string

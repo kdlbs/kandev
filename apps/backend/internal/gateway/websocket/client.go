@@ -36,6 +36,7 @@ type Client struct {
 	subscriptions map[string]bool // Task IDs this client is subscribed to
 	userSubscriptions map[string]bool // User IDs this client is subscribed to
 	mu            sync.RWMutex
+	closed        bool
 	logger        *logger.Logger
 }
 
@@ -262,11 +263,22 @@ func (c *Client) sendMessage(msg *ws.Message) {
 		c.logger.Error("Failed to marshal message", zap.Error(err))
 		return
 	}
+	c.sendBytes(data)
+}
+
+func (c *Client) sendBytes(data []byte) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return false
+	}
 
 	select {
 	case c.send <- data:
+		return true
 	default:
 		c.logger.Warn("Client send buffer full")
+		return false
 	}
 }
 
@@ -278,6 +290,16 @@ func (c *Client) sendError(id, action, code, message string, details map[string]
 		return
 	}
 	c.sendMessage(msg)
+}
+
+func (c *Client) closeSend() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return
+	}
+	c.closed = true
+	close(c.send)
 }
 
 // WritePump pumps messages from the hub to the WebSocket connection

@@ -8,6 +8,8 @@ import type {
   ListExecutorsResponse,
   ListRepositoriesResponse,
   ListWorkspacesResponse,
+  Comment,
+  ListCommentsResponse,
   RepositoryBranchesResponse,
   Task,
   UserSettingsResponse,
@@ -158,6 +160,10 @@ export async function updateUserSettings(
 
 export async function fetchTask(taskId: string, options?: ApiRequestOptions) {
   return fetchJson<Task>(`/api/v1/tasks/${taskId}`, options);
+}
+
+export async function listTaskComments(taskId: string, options?: ApiRequestOptions) {
+  return fetchJson<ListCommentsResponse>(`/api/v1/tasks/${taskId}/comments`, options);
 }
 
 export async function listExecutors(options?: ApiRequestOptions): Promise<ListExecutorsResponse> {

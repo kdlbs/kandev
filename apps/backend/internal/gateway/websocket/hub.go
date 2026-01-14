@@ -87,7 +87,7 @@ func (h *Hub) closeAllClients() {
 	defer h.mu.Unlock()
 
 	for client := range h.clients {
-		close(client.send)
+		client.closeSend()
 		delete(h.clients, client)
 	}
 	h.taskSubscribers = make(map[string]map[*Client]bool)
@@ -100,7 +100,7 @@ func (h *Hub) removeClient(client *Client) {
 
 	if _, ok := h.clients[client]; ok {
 		delete(h.clients, client)
-		close(client.send)
+		client.closeSend()
 
 		// Remove from all task subscriptions
 		for taskID := range client.subscriptions {
@@ -137,11 +137,7 @@ func (h *Hub) broadcastMessage(msg *ws.Message) {
 	// For now, broadcast to all clients
 	// TODO: Add topic-based routing for task-specific notifications
 	for client := range h.clients {
-		select {
-		case client.send <- data:
-		default:
-			// Client buffer full, will be cleaned up by write pump
-		}
+		client.sendBytes(data)
 	}
 }
 
@@ -179,14 +175,14 @@ func (h *Hub) BroadcastToTask(taskID string, msg *ws.Message) {
 		zap.Int("subscriber_count", numClients))
 
 	for client := range clients {
-		select {
-		case client.send <- data:
+		if client.sendBytes(data) {
 			h.logger.Debug("Sent message to client",
 				zap.String("client_id", client.ID),
 				zap.String("action", msg.Action))
-		default:
-			h.logger.Warn("Client buffer full, dropping message",
-				zap.String("client_id", client.ID))
+		} else {
+			h.logger.Warn("Client send buffer full, dropping message",
+				zap.String("client_id", client.ID),
+				zap.String("action", msg.Action))
 		}
 	}
 }
@@ -210,14 +206,14 @@ func (h *Hub) BroadcastToUser(userID string, msg *ws.Message) {
 		zap.Int("subscriber_count", numClients))
 
 	for client := range clients {
-		select {
-		case client.send <- data:
+		if client.sendBytes(data) {
 			h.logger.Debug("Sent message to client",
 				zap.String("client_id", client.ID),
 				zap.String("action", msg.Action))
-		default:
-			h.logger.Warn("Client buffer full, dropping message",
-				zap.String("client_id", client.ID))
+		} else {
+			h.logger.Warn("Client send buffer full, dropping message",
+				zap.String("client_id", client.ID),
+				zap.String("action", msg.Action))
 		}
 	}
 }

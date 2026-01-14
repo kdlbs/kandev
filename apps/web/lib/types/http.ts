@@ -212,6 +212,11 @@ export type ListEnvironmentsResponse = {
   total: number;
 };
 
+export type ListCommentsResponse = {
+  comments: Comment[];
+  total: number;
+};
+
 export type CommentAuthorType = 'user' | 'agent';
 export type CommentType = 'message' | 'content' | 'tool_call' | 'progress' | 'error' | 'status';
 

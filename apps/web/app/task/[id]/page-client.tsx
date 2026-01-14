@@ -46,6 +46,7 @@ const DEFAULT_HORIZONTAL_LAYOUT: [number, number] = [75, 25];
 
 export default function TaskPage({ task: initialTask }: TaskPageClientProps) {
   const store = useAppStoreApi();
+  const commentsState = useAppStore((state) => state.comments);
   const [isMounted, setIsMounted] = useState(false);
   const [horizontalLayout, setHorizontalLayout] = useState<[number, number]>(
     getLocalStorage('task-layout-horizontal', DEFAULT_HORIZONTAL_LAYOUT)
@@ -118,6 +119,10 @@ export default function TaskPage({ task: initialTask }: TaskPageClientProps) {
     // Clear git status when switching tasks to avoid showing stale data
     store.getState().clearGitStatus();
 
+    if (commentsState.taskId === task.id) {
+      return;
+    }
+
     const fetchComments = async () => {
       const client = getWebSocketClient();
       if (!client) return;
@@ -126,9 +131,9 @@ export default function TaskPage({ task: initialTask }: TaskPageClientProps) {
       store.getState().setCommentsLoading(true);
 
       try {
-        const response = await client.request<Comment[]>('comment.list', { task_id: task.id }, 10000);
+        const response = await client.request<{ comments: Comment[] }>('comment.list', { task_id: task.id }, 10000);
         console.log('[API] comment.list response:', JSON.stringify(response, null, 2));
-        store.getState().setComments(task.id, response);
+        store.getState().setComments(task.id, response.comments ?? []);
       } catch (error) {
         console.error('Failed to fetch comments:', error);
         store.getState().setComments(task.id, []);
@@ -138,7 +143,7 @@ export default function TaskPage({ task: initialTask }: TaskPageClientProps) {
     };
 
     fetchComments();
-  }, [task?.id, store]);
+  }, [commentsState.taskId, task?.id, store]);
 
   // Subscribe to task for real-time updates
   useEffect(() => {

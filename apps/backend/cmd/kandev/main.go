@@ -379,6 +379,7 @@ func main() {
 	if worktreeMgr != nil {
 		taskController.SetWorktreeLookup(worktreeMgr) // Enable worktree info in task responses
 	}
+	commentController := taskcontroller.NewCommentController(taskSvc)
 	repositoryController := taskcontroller.NewRepositoryController(taskSvc)
 	executorController := taskcontroller.NewExecutorController(taskSvc)
 	environmentController := taskcontroller.NewEnvironmentController(taskSvc)
@@ -658,7 +659,14 @@ func main() {
 	taskhandlers.RegisterRepositoryRoutes(router, gateway.Dispatcher, repositoryController, log)
 	taskhandlers.RegisterExecutorRoutes(router, gateway.Dispatcher, executorController, log)
 	taskhandlers.RegisterEnvironmentRoutes(router, gateway.Dispatcher, environmentController, log)
-	taskhandlers.RegisterCommentRoutes(router, gateway.Dispatcher, taskSvc, &orchestratorAdapter{svc: orchestratorSvc}, log)
+	taskhandlers.RegisterCommentRoutes(
+		router,
+		gateway.Dispatcher,
+		commentController,
+		taskController,
+		&orchestratorAdapter{svc: orchestratorSvc},
+		log,
+	)
 	log.Info("Registered Task Service handlers (HTTP + WebSocket)")
 
 	agentsettingshandlers.RegisterRoutes(router, agentSettingsController, gateway.Hub, log)

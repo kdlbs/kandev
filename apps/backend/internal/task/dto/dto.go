@@ -119,6 +119,11 @@ type BoardSnapshotDTO struct {
 	Tasks   []TaskDTO   `json:"tasks"`
 }
 
+type ListCommentsResponse struct {
+	Comments []*v1.Comment `json:"comments"`
+	Total    int           `json:"total"`
+}
+
 type ListBoardsResponse struct {
 	Boards []BoardDTO `json:"boards"`
 	Total  int        `json:"total"`

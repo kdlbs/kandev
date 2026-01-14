@@ -1,5 +1,5 @@
 import type { AppState, KanbanState } from '@/lib/state/store';
-import type { BoardSnapshot, Task } from '@/lib/types/http';
+import type { BoardSnapshot, Comment, Task } from '@/lib/types/http';
 
 type KanbanTask = KanbanState['tasks'][number];
 
@@ -34,10 +34,17 @@ export function snapshotToState(snapshot: BoardSnapshot): Partial<AppState> {
   };
 }
 
-export function taskToState(task: Task): Partial<AppState> {
+export function taskToState(task: Task, comments?: Comment[]): Partial<AppState> {
   return {
     tasks: {
       activeTaskId: task.id,
     },
+    comments: comments
+      ? {
+          taskId: task.id,
+          items: comments,
+          isLoading: false,
+        }
+      : undefined,
   };
 }

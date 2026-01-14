@@ -2,12 +2,14 @@ package handlers
 
 import (
 	"context"
+	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
-	"github.com/kandev/kandev/internal/task/service"
+	"github.com/kandev/kandev/internal/task/controller"
+	"github.com/kandev/kandev/internal/task/dto"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -25,29 +27,52 @@ type OrchestratorService interface {
 
 // CommentHandlers handles WebSocket requests for comments
 type CommentHandlers struct {
-	svc          *service.Service
+	commentController *controller.CommentController
+	taskController    *controller.TaskController
 	orchestrator OrchestratorService
 	logger       *logger.Logger
 }
 
 // NewCommentHandlers creates a new CommentHandlers instance
-func NewCommentHandlers(svc *service.Service, orchestrator OrchestratorService, log *logger.Logger) *CommentHandlers {
+func NewCommentHandlers(commentCtrl *controller.CommentController, taskCtrl *controller.TaskController, orchestrator OrchestratorService, log *logger.Logger) *CommentHandlers {
 	return &CommentHandlers{
-		svc:          svc,
+		commentController: commentCtrl,
+		taskController:    taskCtrl,
 		orchestrator: orchestrator,
 		logger:       log.WithFields(zap.String("component", "task-comment-handlers")),
 	}
 }
 
 // RegisterCommentRoutes registers comment WebSocket handlers
-func RegisterCommentRoutes(router *gin.Engine, dispatcher *ws.Dispatcher, svc *service.Service, orchestrator OrchestratorService, log *logger.Logger) {
-	handlers := NewCommentHandlers(svc, orchestrator, log)
+func RegisterCommentRoutes(router *gin.Engine, dispatcher *ws.Dispatcher, commentCtrl *controller.CommentController, taskCtrl *controller.TaskController, orchestrator OrchestratorService, log *logger.Logger) {
+	handlers := NewCommentHandlers(commentCtrl, taskCtrl, orchestrator, log)
+	handlers.registerHTTP(router)
 	handlers.registerWS(dispatcher)
+}
+
+func (h *CommentHandlers) registerHTTP(router *gin.Engine) {
+	api := router.Group("/api/v1")
+	api.GET("/tasks/:id/comments", h.httpListComments)
 }
 
 func (h *CommentHandlers) registerWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionCommentAdd, h.wsAddComment)
 	dispatcher.RegisterFunc(ws.ActionCommentList, h.wsListComments)
+}
+
+func (h *CommentHandlers) httpListComments(c *gin.Context) {
+	taskID := c.Param("id")
+	if taskID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "task id is required"})
+		return
+	}
+	resp, err := h.commentController.ListComments(c.Request.Context(), dto.ListCommentsRequest{TaskID: taskID})
+	if err != nil {
+		h.logger.Error("failed to list comments", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list comments"})
+		return
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
 // WS handlers
@@ -71,7 +96,7 @@ func (h *CommentHandlers) wsAddComment(ctx context.Context, msg *ws.Message) (*w
 	}
 
 	// Get the current task state to determine if we need to transition
-	task, err := h.svc.GetTask(ctx, req.TaskID)
+	task, err := h.taskController.GetTask(ctx, dto.GetTaskRequest{ID: req.TaskID})
 	if err != nil {
 		h.logger.Error("failed to get task", zap.String("task_id", req.TaskID), zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get task", nil)
@@ -82,7 +107,8 @@ func (h *CommentHandlers) wsAddComment(ctx context.Context, msg *ws.Message) (*w
 	// REVIEW → (user sends follow-up) → IN_PROGRESS
 	// The transition back to REVIEW happens in handleAgentReady when the agent finishes
 	if task.State == v1.TaskStateReview {
-		if _, err := h.svc.UpdateTaskState(ctx, req.TaskID, v1.TaskStateInProgress); err != nil {
+		nextState := v1.TaskStateInProgress
+		if _, err := h.taskController.UpdateTask(ctx, dto.UpdateTaskRequest{ID: req.TaskID, State: &nextState}); err != nil {
 			h.logger.Error("failed to transition task from REVIEW to IN_PROGRESS",
 				zap.String("task_id", req.TaskID),
 				zap.Error(err))
@@ -93,7 +119,7 @@ func (h *CommentHandlers) wsAddComment(ctx context.Context, msg *ws.Message) (*w
 		}
 	}
 
-	comment, err := h.svc.CreateComment(ctx, &service.CreateCommentRequest{
+	comment, err := h.commentController.CreateComment(ctx, dto.CreateCommentRequest{
 		TaskID:     req.TaskID,
 		Content:    req.Content,
 		AuthorType: "user",
@@ -132,12 +158,11 @@ func (h *CommentHandlers) wsListComments(ctx context.Context, msg *ws.Message) (
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 	}
 
-	comments, err := h.svc.ListComments(ctx, req.TaskID)
+	resp, err := h.commentController.ListComments(ctx, dto.ListCommentsRequest{TaskID: req.TaskID})
 	if err != nil {
 		h.logger.Error("failed to list comments", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list comments", nil)
 	}
 
-	return ws.NewResponse(msg.ID, msg.Action, comments)
+	return ws.NewResponse(msg.ID, msg.Action, resp)
 }
-
