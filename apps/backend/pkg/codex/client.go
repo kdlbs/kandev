@@ -162,8 +162,6 @@ func (c *Client) readLoop(ctx context.Context) {
 			continue
 		}
 
-		c.logger.Debug("codex: received message", zap.String("method", extractMethod(line)))
-
 		var msg struct {
 			ID     interface{}     `json:"id"`
 			Method string          `json:"method"`
@@ -184,12 +182,9 @@ func (c *Client) readLoop(ctx context.Context) {
 		if hasID && !hasMethod && (hasResult || hasError) {
 			c.handleResponse(&Response{ID: msg.ID, Result: msg.Result, Error: msg.Error})
 		} else if hasID && hasMethod {
-			c.logger.Debug("routing to handleRequest", zap.String("method", msg.Method))
 			c.handleRequest(msg.ID, msg.Method, msg.Params)
 		} else if hasMethod && !hasID {
 			c.handleNotification(msg.Method, msg.Params)
-		} else {
-			c.logger.Warn("received unknown message format")
 		}
 	}
 

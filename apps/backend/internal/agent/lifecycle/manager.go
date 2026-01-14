@@ -20,7 +20,6 @@ import (
 	"github.com/kandev/kandev/internal/agent/worktree"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
-	"github.com/kandev/kandev/internal/common/stringutil"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -1061,17 +1060,9 @@ func (m *Manager) publishPermissionRequest(instance *AgentInstance, notification
 
 // handleSessionUpdate processes incoming session updates from the agent
 func (m *Manager) handleSessionUpdate(instance *AgentInstance, update agentctl.SessionUpdate) {
-	m.logger.Debug("handleSessionUpdate called",
-		zap.String("instance_id", instance.ID),
-		zap.String("session_id", update.SessionID),
-		zap.String("type", update.Type),
-		zap.String("text", stringutil.TruncateString(update.Text, 50)))
-
 	// Handle different update types based on the Type field
 	switch update.Type {
 	case "message_chunk":
-		m.logger.Debug("agent message chunk",
-			zap.String("instance_id", instance.ID))
 		m.updateInstanceProgress(instance.ID, 50)
 
 		// Accumulate message content for saving as comment when a step completes
@@ -1097,16 +1088,9 @@ func (m *Manager) handleSessionUpdate(instance *AgentInstance, update agentctl.S
 		m.publishToolCall(instance, update.ToolCallID, update.ToolTitle, update.ToolStatus, update.ToolArgs)
 
 	case "tool_update":
-		m.logger.Debug("tool call update received",
-			zap.String("instance_id", instance.ID),
-			zap.String("tool_call_id", update.ToolCallID),
-			zap.String("tool_status", update.ToolStatus))
-
 		// Check if tool call completed
 		switch update.ToolStatus {
 		case "complete", "completed":
-			m.logger.Debug("tool call completed",
-				zap.String("instance_id", instance.ID))
 			m.updateInstanceProgress(instance.ID, 80)
 			m.publishToolCallCompleteFromUpdate(instance, update)
 		case "error", "failed":
@@ -1147,12 +1131,8 @@ func (m *Manager) handleSessionUpdate(instance *AgentInstance, update agentctl.S
 // publishSessionUpdate publishes a session update to the event bus
 func (m *Manager) publishSessionUpdate(instance *AgentInstance, update agentctl.SessionUpdate) {
 	if m.eventBus == nil {
-		m.logger.Warn("publishSessionUpdate: eventBus is nil, skipping publish")
 		return
 	}
-	m.logger.Debug("publishSessionUpdate: publishing event",
-		zap.String("task_id", instance.TaskID),
-		zap.String("type", update.Type))
 
 	// Build the update data - our SessionUpdate type marshals cleanly
 	updateData := map[string]interface{}{

@@ -10,7 +10,6 @@ import (
 
 	"github.com/coder/acp-go-sdk"
 	"github.com/gorilla/websocket"
-	"github.com/kandev/kandev/internal/common/stringutil"
 	"go.uber.org/zap"
 )
 
@@ -250,10 +249,6 @@ func (c *Client) StreamUpdates(ctx context.Context, handler func(SessionUpdate))
 				c.logger.Warn("failed to parse session update", zap.Error(err))
 				continue
 			}
-
-			c.logger.Debug("StreamUpdates: received from WebSocket",
-				zap.String("type", update.Type),
-				zap.String("text", stringutil.TruncateString(update.Text, 50)))
 
 			handler(update)
 		}
