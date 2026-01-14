@@ -200,16 +200,21 @@ func (m *Manager) Start(ctx context.Context) error {
 			m.logger.Info("standalone agentctl is reachable")
 		}
 	} else {
-		// Reconcile with Docker to find running containers from previous runs
+		// Docker mode - reconcile with Docker to find running containers from previous runs
 		if _, err := m.reconcileWithDocker(ctx); err != nil {
 			m.logger.Warn("failed to reconcile with Docker", zap.Error(err))
 			// Continue anyway - this is best-effort
 		}
-	}
 
-	// Start cleanup loop
-	m.wg.Add(1)
-	go m.cleanupLoop(ctx)
+		// Start cleanup loop only if docker client is available
+		if m.docker != nil {
+			m.wg.Add(1)
+			go m.cleanupLoop(ctx)
+			m.logger.Info("cleanup loop started")
+		} else {
+			m.logger.Warn("cleanup loop not started - no docker client available")
+		}
+	}
 
 	return nil
 }
@@ -2048,9 +2053,15 @@ func (m *Manager) cleanupLoop(ctx context.Context) {
 	}
 }
 
-// performCleanup checks for and cleans up stale containers
+// performCleanup checks for and cleans up stale containers (Docker mode only)
 func (m *Manager) performCleanup(ctx context.Context) {
 	m.logger.Debug("running cleanup check")
+
+	// Skip cleanup if docker client is not available (e.g., in tests)
+	if m.docker == nil {
+		m.logger.Debug("skipping cleanup - no docker client")
+		return
+	}
 
 	// List all kandev-managed containers
 	containers, err := m.docker.ListContainers(ctx, map[string]string{
