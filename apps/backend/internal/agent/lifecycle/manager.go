@@ -467,9 +467,9 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentInstanc
 	// 7. Launch via appropriate runtime (Docker or Standalone)
 	var instance *AgentInstance
 	if m.IsStandaloneMode() {
-		instance, err = m.launchStandalone(ctx, instanceID, &reqWithWorktree, agentConfig, worktreeID, worktreeBranch)
+		instance, err = m.launchStandalone(ctx, instanceID, &reqWithWorktree, agentConfig, profileInfo, worktreeID, worktreeBranch)
 	} else {
-		instance, err = m.launchDocker(ctx, instanceID, &reqWithWorktree, agentConfig, mainRepoGitDir, worktreeID, worktreeBranch)
+		instance, err = m.launchDocker(ctx, instanceID, &reqWithWorktree, agentConfig, profileInfo, mainRepoGitDir, worktreeID, worktreeBranch)
 	}
 	if err != nil {
 		return nil, err
@@ -499,9 +499,9 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentInstanc
 }
 
 // launchDocker launches an agent in a Docker container
-func (m *Manager) launchDocker(ctx context.Context, instanceID string, req *LaunchRequest, agentConfig *registry.AgentTypeConfig, mainRepoGitDir, worktreeID, worktreeBranch string) (*AgentInstance, error) {
+func (m *Manager) launchDocker(ctx context.Context, instanceID string, req *LaunchRequest, agentConfig *registry.AgentTypeConfig, profileInfo *AgentProfileInfo, mainRepoGitDir, worktreeID, worktreeBranch string) (*AgentInstance, error) {
 	// Build container config from registry config
-	containerConfig := m.buildContainerConfig(instanceID, req, agentConfig, mainRepoGitDir)
+	containerConfig := m.buildContainerConfig(instanceID, req, agentConfig, profileInfo, mainRepoGitDir)
 
 	// Create and start the container
 	containerID, err := m.docker.CreateContainer(ctx, containerConfig)
@@ -558,7 +558,7 @@ func (m *Manager) launchDocker(ctx context.Context, instanceID string, req *Laun
 }
 
 // launchStandalone launches an agent via standalone agentctl
-func (m *Manager) launchStandalone(ctx context.Context, instanceID string, req *LaunchRequest, agentConfig *registry.AgentTypeConfig, worktreeID, worktreeBranch string) (*AgentInstance, error) {
+func (m *Manager) launchStandalone(ctx context.Context, instanceID string, req *LaunchRequest, agentConfig *registry.AgentTypeConfig, profileInfo *AgentProfileInfo, worktreeID, worktreeBranch string) (*AgentInstance, error) {
 	// Build environment variables for the agent
 	env := m.buildStandaloneEnv(instanceID, req, agentConfig)
 
@@ -567,6 +567,10 @@ func (m *Manager) launchStandalone(ctx context.Context, instanceID string, req *
 	agentCommand := ""
 	if len(agentConfig.Cmd) > 0 {
 		agentCommand = strings.Join(agentConfig.Cmd, " ")
+	}
+	// Append model flag if agent supports it and profile has a model configured
+	if agentConfig.ModelFlag != "" && profileInfo != nil && profileInfo.Model != "" {
+		agentCommand = agentCommand + " " + agentConfig.ModelFlag + " " + profileInfo.Model
 	}
 	// If empty, agentctl will use its default (auggie --acp)
 
@@ -1485,7 +1489,7 @@ func (m *Manager) updateInstanceError(instanceID, errorMsg string) {
 // buildContainerConfig builds a Docker container config from agent registry config
 // mainRepoGitDir is the host path to the main repository's .git directory (e.g., /path/to/repo/.git)
 // If non-empty, it will be mounted into the container at the same path so git worktree commands work correctly
-func (m *Manager) buildContainerConfig(instanceID string, req *LaunchRequest, agentConfig *registry.AgentTypeConfig, mainRepoGitDir string) docker.ContainerConfig {
+func (m *Manager) buildContainerConfig(instanceID string, req *LaunchRequest, agentConfig *registry.AgentTypeConfig, profileInfo *AgentProfileInfo, mainRepoGitDir string) docker.ContainerConfig {
 	// Build image name with tag
 	imageName := agentConfig.Image
 	if agentConfig.Tag != "" {
@@ -1575,10 +1579,17 @@ func (m *Manager) buildContainerConfig(instanceID string, req *LaunchRequest, ag
 
 	containerName := fmt.Sprintf("kandev-agent-%s", instanceID[:8])
 
+	// Build command, appending model flag if agent supports it and profile has a model
+	cmd := make([]string, len(agentConfig.Cmd))
+	copy(cmd, agentConfig.Cmd)
+	if agentConfig.ModelFlag != "" && profileInfo != nil && profileInfo.Model != "" {
+		cmd = append(cmd, agentConfig.ModelFlag, profileInfo.Model)
+	}
+
 	return docker.ContainerConfig{
 		Name:       containerName,
 		Image:      imageName,
-		Cmd:        agentConfig.Cmd,
+		Cmd:        cmd,
 		Env:        env,
 		WorkingDir: agentConfig.WorkingDir,
 		Mounts:     mounts,

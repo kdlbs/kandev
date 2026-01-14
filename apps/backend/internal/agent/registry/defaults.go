@@ -26,6 +26,7 @@ func DefaultAgents() []*AgentTypeConfig {
 			},
 			Capabilities: []string{"code_generation", "code_review", "refactoring", "testing", "shell_execution"},
 			Enabled:      true,
+			ModelFlag:    "--model",
 		},
 		{
 			ID:          "claude-agent",
@@ -47,6 +48,7 @@ func DefaultAgents() []*AgentTypeConfig {
 			},
 			Capabilities: []string{"code_generation", "code_review", "refactoring", "testing", "shell_execution"},
 			Enabled:      true,
+			ModelFlag:    "--model",
 		},
 		{
 			ID:          "codex-agent",
@@ -68,6 +70,7 @@ func DefaultAgents() []*AgentTypeConfig {
 			},
 			Capabilities: []string{"code_generation", "code_review", "refactoring", "testing", "shell_execution"},
 			Enabled:      true,
+			ModelFlag:    "--model",
 		},
 		{
 			ID:          "gemini-agent",
@@ -89,6 +92,7 @@ func DefaultAgents() []*AgentTypeConfig {
 			},
 			Capabilities: []string{"code_generation", "code_review", "refactoring", "testing", "shell_execution"},
 			Enabled:      true,
+			ModelFlag:    "--model",
 		},
 		{
 			ID:          "opencode-agent",
@@ -110,6 +114,7 @@ func DefaultAgents() []*AgentTypeConfig {
 			},
 			Capabilities: []string{"code_generation", "code_review", "refactoring", "testing", "shell_execution"},
 			Enabled:      true,
+			ModelFlag:    "--model",
 		},
 		{
 			ID:          "copilot-agent",
@@ -131,6 +136,7 @@ func DefaultAgents() []*AgentTypeConfig {
 			},
 			Capabilities: []string{"code_generation", "code_review", "refactoring", "testing", "shell_execution"},
 			Enabled:      true,
+			ModelFlag:    "--model",
 		},
 	}
 }

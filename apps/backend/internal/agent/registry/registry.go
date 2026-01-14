@@ -30,6 +30,7 @@ type AgentTypeConfig struct {
 	ResourceLimits ResourceLimits    `json:"resource_limits"`
 	Capabilities   []string          `json:"capabilities"`           // What the agent can do
 	Enabled        bool              `json:"enabled"`
+	ModelFlag      string            `json:"model_flag,omitempty"`   // CLI flag for model selection (e.g., "--model")
 }
 
 // MountTemplate defines a mount with template support
