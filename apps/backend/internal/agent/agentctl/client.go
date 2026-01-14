@@ -35,6 +35,11 @@ type StatusResponse struct {
 	ProcessInfo map[string]interface{} `json:"process_info"`
 }
 
+// IsAgentRunning returns true if the agent process is running
+func (s *StatusResponse) IsAgentRunning() bool {
+	return s.AgentStatus == "running"
+}
+
 // NewClient creates a new agentctl client
 func NewClient(host string, port int, log *logger.Logger) *Client {
 	return &Client{
