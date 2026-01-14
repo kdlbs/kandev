@@ -44,6 +44,7 @@ type TaskChatPanelProps = {
   onSend: (message: string) => void;
   isLoading?: boolean;
   isAgentWorking?: boolean;
+  taskDescription?: string;
 };
 
 type ToolCallMetadata = {
@@ -199,7 +200,7 @@ function TypingIndicator() {
   );
 }
 
-export function TaskChatPanel({ agents, onSend, isLoading, isAgentWorking }: TaskChatPanelProps) {
+export function TaskChatPanel({ agents, onSend, isLoading, isAgentWorking, taskDescription }: TaskChatPanelProps) {
   const [messageInput, setMessageInput] = useState('');
   const [selectedAgent, setSelectedAgent] = useState(agents[0]?.id ?? '');
   const [planModeEnabled, setPlanModeEnabled] = useState(false);
@@ -216,6 +217,21 @@ export function TaskChatPanel({ agents, onSend, isLoading, isAgentWorking }: Tas
   const visibleComments = comments.filter(
     (c) => c.type === 'message' || c.type === 'content' || c.type === 'tool_call' || !c.type
   );
+
+  // Create a synthetic "user" message for the task description
+  const taskDescriptionMessage: Comment | null = taskDescription ? {
+    id: 'task-description',
+    task_id: commentsState?.taskId ?? '',
+    author_type: 'user',
+    content: taskDescription,
+    type: 'message',
+    created_at: '',
+  } : null;
+
+  // Combine task description with visible comments
+  const allMessages = taskDescriptionMessage
+    ? [taskDescriptionMessage, ...visibleComments]
+    : visibleComments;
 
   // Count agent messages to detect new responses
   const agentMessageCount = visibleComments.filter((c) => c.author_type !== 'user').length;
@@ -265,12 +281,12 @@ export function TaskChatPanel({ agents, onSend, isLoading, isAgentWorking }: Tas
             <span>Loading comments...</span>
           </div>
         )}
-        {!isLoading && !commentsLoading && visibleComments.length === 0 && (
+        {!isLoading && !commentsLoading && allMessages.length === 0 && (
           <div className="flex items-center justify-center py-8 text-muted-foreground">
             <span>No messages yet. Start the conversation!</span>
           </div>
         )}
-        {visibleComments.map((comment) => {
+        {allMessages.map((comment) => {
           // Tool call comments have a special rendering
           if (comment.type === 'tool_call') {
             return <ToolCallCard key={comment.id} comment={comment} />;
@@ -278,18 +294,36 @@ export function TaskChatPanel({ agents, onSend, isLoading, isAgentWorking }: Tas
 
           // Regular message or agent response - render as markdown
           const isUser = comment.author_type === 'user';
+          const isTaskDescription = comment.id === 'task-description';
+
+          // Determine label and styling
+          let label: string;
+          let containerClass: string;
+
+          if (isTaskDescription) {
+            label = 'Task';
+            containerClass = 'ml-auto bg-primary/20 text-foreground border border-primary/40';
+          } else if (isUser) {
+            label = 'You';
+            containerClass = 'ml-auto bg-primary text-primary-foreground';
+          } else {
+            label = 'Agent';
+            containerClass = 'bg-muted text-foreground';
+          }
+
           return (
             <div
               key={comment.id}
               className={cn(
                 'max-w-[85%] rounded-lg px-4 py-3 text-sm',
-                isUser
-                  ? 'ml-auto bg-primary text-primary-foreground'
-                  : 'bg-muted text-foreground'
+                containerClass
               )}
             >
-              <p className="text-[11px] uppercase tracking-wide mb-2 opacity-70">
-                {isUser ? 'You' : 'Agent'}
+              <p className={cn(
+                "text-[11px] uppercase tracking-wide mb-2",
+                isTaskDescription ? "text-primary font-medium" : "opacity-70"
+              )}>
+                {label}
               </p>
               {isUser ? (
                 <p className="whitespace-pre-wrap">{formatContent(comment)}</p>

@@ -359,6 +359,7 @@ export default function TaskPage({ task: initialTask }: TaskPageClientProps) {
                       onSend={handleSendMessage}
                       isLoading={isLoadingComments}
                       isAgentWorking={isAgentRunning}
+                      taskDescription={task.description}
                     />
                   ) : (
                     <div className="flex items-center justify-center h-full text-muted-foreground">
