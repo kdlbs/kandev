@@ -107,7 +107,7 @@ func FromAgentSession(s *models.AgentSession) *TaskExecution {
 	return &TaskExecution{
 		TaskID:          s.TaskID,
 		AgentInstanceID: s.AgentInstanceID,
-		AgentProfileID:  s.AgentType, // AgentSession still uses AgentType field in DB
+		AgentProfileID:  s.AgentProfileID,
 		StartedAt:       s.StartedAt,
 		Status:          agentSessionStatusToV1(s.Status),
 		Progress:        s.Progress,
@@ -328,7 +328,7 @@ func (e *Executor) Execute(ctx context.Context, task *v1.Task) (*TaskExecution, 
 		TaskID:          task.ID,
 		AgentInstanceID: resp.AgentInstanceID,
 		ContainerID:     resp.ContainerID,
-		AgentType:       *task.AgentProfileID, // AgentSession still uses AgentType field in DB
+		AgentProfileID:  *task.AgentProfileID,
 		Status:          v1StatusToAgentSessionStatus(resp.Status),
 		Progress:        0,
 		StartedAt:       now,
