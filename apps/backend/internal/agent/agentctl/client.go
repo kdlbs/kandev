@@ -24,10 +24,7 @@ type Client struct {
 	acpConn         *websocket.Conn
 	permissionConn  *websocket.Conn
 	gitStatusConn   *websocket.Conn
-	filesConn       *websocket.Conn
 	fileChangesConn *websocket.Conn
-	fileTreeConn    *websocket.Conn
-	fileContentConn *websocket.Conn
 	mu              sync.RWMutex
 }
 
@@ -296,54 +293,6 @@ func (c *Client) StreamGitStatus(ctx context.Context, handler func(*GitStatusUpd
 	return nil
 }
 
-// StreamFiles opens a WebSocket connection for streaming file listing updates
-func (c *Client) StreamFiles(ctx context.Context, handler func(*FileListUpdate)) error {
-	wsURL := "ws" + c.baseURL[4:] + "/api/v1/workspace/files/stream"
-
-	conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, nil)
-	if err != nil {
-		return fmt.Errorf("failed to connect to files stream: %w", err)
-	}
-
-	c.mu.Lock()
-	c.filesConn = conn
-	c.mu.Unlock()
-
-	c.logger.Info("connected to files stream", zap.String("url", wsURL))
-
-	// Read messages in a goroutine
-	go func() {
-		defer func() {
-			c.mu.Lock()
-			c.filesConn = nil
-			c.mu.Unlock()
-			conn.Close()
-		}()
-
-		for {
-			_, message, err := conn.ReadMessage()
-			if err != nil {
-				if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
-					c.logger.Info("files stream closed normally")
-				} else {
-					c.logger.Debug("files stream error", zap.Error(err))
-				}
-				return
-			}
-
-			var update FileListUpdate
-			if err := json.Unmarshal(message, &update); err != nil {
-				c.logger.Warn("failed to parse file list update", zap.Error(err))
-				continue
-			}
-
-			handler(&update)
-		}
-	}()
-
-	return nil
-}
-
 // CloseGitStatusStream closes the git status stream connection
 func (c *Client) CloseGitStatusStream() {
 	c.mu.Lock()
@@ -352,17 +301,6 @@ func (c *Client) CloseGitStatusStream() {
 	if c.gitStatusConn != nil {
 		c.gitStatusConn.Close()
 		c.gitStatusConn = nil
-	}
-}
-
-// CloseFilesStream closes the files stream connection
-func (c *Client) CloseFilesStream() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if c.filesConn != nil {
-		c.filesConn.Close()
-		c.filesConn = nil
 	}
 }
 
@@ -414,39 +352,23 @@ func (c *Client) StreamFileChanges(ctx context.Context, handler func(*FileChange
 	return nil
 }
 
-// RequestFileTree requests a file tree via WebSocket (request/response pattern)
+// RequestFileTree requests a file tree via HTTP GET
 func (c *Client) RequestFileTree(ctx context.Context, path string, depth int) (*FileTreeResponse, error) {
-	wsURL := "ws" + c.baseURL[4:] + "/api/v1/workspace/tree"
+	url := fmt.Sprintf("%s/api/v1/workspace/tree?path=%s&depth=%d", c.baseURL, path, depth)
 
-	conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to file tree endpoint: %w", err)
-	}
-	defer conn.Close()
-
-	// Send request
-	req := FileTreeRequest{
-		Path:  path,
-		Depth: depth,
+		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	reqData, err := json.Marshal(req)
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
+		return nil, fmt.Errorf("failed to request file tree: %w", err)
 	}
-
-	if err := conn.WriteMessage(websocket.TextMessage, reqData); err != nil {
-		return nil, fmt.Errorf("failed to send request: %w", err)
-	}
-
-	// Read response
-	_, message, err := conn.ReadMessage()
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
+	defer resp.Body.Close()
 
 	var response FileTreeResponse
-	if err := json.Unmarshal(message, &response); err != nil {
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 
@@ -457,38 +379,23 @@ func (c *Client) RequestFileTree(ctx context.Context, path string, depth int) (*
 	return &response, nil
 }
 
-// RequestFileContent requests file content via WebSocket (request/response pattern)
+// RequestFileContent requests file content via HTTP GET
 func (c *Client) RequestFileContent(ctx context.Context, path string) (*FileContentResponse, error) {
-	wsURL := "ws" + c.baseURL[4:] + "/api/v1/workspace/file/content"
+	url := fmt.Sprintf("%s/api/v1/workspace/file/content?path=%s", c.baseURL, path)
 
-	conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to file content endpoint: %w", err)
-	}
-	defer conn.Close()
-
-	// Send request
-	req := FileContentRequest{
-		Path: path,
+		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	reqData, err := json.Marshal(req)
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
+		return nil, fmt.Errorf("failed to request file content: %w", err)
 	}
-
-	if err := conn.WriteMessage(websocket.TextMessage, reqData); err != nil {
-		return nil, fmt.Errorf("failed to send request: %w", err)
-	}
-
-	// Read response
-	_, message, err := conn.ReadMessage()
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
+	defer resp.Body.Close()
 
 	var response FileContentResponse
-	if err := json.Unmarshal(message, &response); err != nil {
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 
