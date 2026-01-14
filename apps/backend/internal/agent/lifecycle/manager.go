@@ -585,7 +585,8 @@ func (m *Manager) launchStandalone(ctx context.Context, instanceID string, req *
 		ID:            instanceID,
 		WorkspacePath: req.WorkspacePath,
 		AgentCommand:  agentCommand,
-		Protocol:      string(agentConfig.Protocol), // Pass protocol from registry
+		Protocol:      string(agentConfig.Protocol),  // Pass protocol from registry
+		WorkspaceFlag: agentConfig.WorkspaceFlag,     // CLI flag for workspace path
 		Env:           env,
 		AutoStart:     false, // We'll start via ACP initialize flow
 	}

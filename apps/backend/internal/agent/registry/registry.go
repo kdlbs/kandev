@@ -32,6 +32,7 @@ type AgentTypeConfig struct {
 	Capabilities   []string          `json:"capabilities"`           // What the agent can do
 	Enabled        bool              `json:"enabled"`
 	ModelFlag      string            `json:"model_flag,omitempty"`   // CLI flag for model selection (e.g., "--model")
+	WorkspaceFlag  string            `json:"workspace_flag,omitempty"` // CLI flag for workspace path (e.g., "--workspace-root"), empty means use cwd only
 
 	// Protocol configuration
 	Protocol       agent.Protocol    `json:"protocol,omitempty"`        // Communication protocol: "acp", "rest", "mcp"

@@ -88,20 +88,12 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 		protocol = m.config.DefaultProtocol
 	}
 
-	// Add workspace path flag based on protocol
-	// Each agent/protocol has different flags for workspace path
+	// Add workspace path flag if configured
 	// Note: We also set cmd.Dir to the workspace path, so this is mainly for
 	// agents that need an explicit flag rather than relying on cwd
-	if req.WorkspacePath != "" {
-		switch protocol {
-		case agent.ProtocolACP:
-			// Auggie uses --workspace-root
-			if !strings.Contains(agentCmd, "--workspace-root") {
-				agentCmd = agentCmd + " --workspace-root " + req.WorkspacePath
-			}
-		case agent.ProtocolCodex:
-			// Codex app-server uses the current working directory (cmd.Dir)
-			// No additional flags needed
+	if req.WorkspacePath != "" && req.WorkspaceFlag != "" {
+		if !strings.Contains(agentCmd, req.WorkspaceFlag) {
+			agentCmd = agentCmd + " " + req.WorkspaceFlag + " " + req.WorkspacePath
 		}
 	}
 

@@ -6,14 +6,14 @@ import "github.com/kandev/kandev/pkg/agent"
 func DefaultAgents() []*AgentTypeConfig {
 	return []*AgentTypeConfig{
 		{
-			ID:          "auggie-agent",
-			Name:        "Augment Coding Agent",
-			Description: "Auggie CLI-powered autonomous coding agent. Requires AUGMENT_SESSION_AUTH for authentication.",
-			Image:       "kandev/augment-agent",
-			Tag:         "latest",
-			Cmd:         []string{"auggie", "--acp"},
-			WorkingDir:  "/workspace",
-			RequiredEnv: []string{"AUGMENT_SESSION_AUTH"},
+			ID:            "auggie-agent",
+			Name:          "Augment Coding Agent",
+			Description:   "Auggie CLI-powered autonomous coding agent. Requires AUGMENT_SESSION_AUTH for authentication.",
+			Image:         "kandev/augment-agent",
+			Tag:           "latest",
+			Cmd:           []string{"auggie", "--acp"},
+			WorkingDir:    "/workspace",
+			RequiredEnv:   []string{"AUGMENT_SESSION_AUTH"},
 			Env: map[string]string{
 				"AGENTCTL_AUTO_APPROVE_PERMISSIONS": "true",
 			},
@@ -26,10 +26,11 @@ func DefaultAgents() []*AgentTypeConfig {
 				CPUCores:       2.0,
 				TimeoutSeconds: 3600,
 			},
-			Capabilities: []string{"code_generation", "code_review", "refactoring", "testing", "shell_execution"},
-			Enabled:      true,
-			ModelFlag:    "--model",
-			Protocol:     agent.ProtocolACP,
+			Capabilities:  []string{"code_generation", "code_review", "refactoring", "testing", "shell_execution"},
+			Enabled:       true,
+			ModelFlag:     "--model",
+			WorkspaceFlag: "--workspace-root",
+			Protocol:      agent.ProtocolACP,
 		},
 		{
 			ID:          "claude-agent",
