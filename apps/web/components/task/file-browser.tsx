@@ -6,13 +6,7 @@ import { cn } from '@/lib/utils';
 import { ScrollArea } from '@kandev/ui/scroll-area';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import { requestFileTree, requestFileContent } from '@/lib/ws/workspace-files';
-import type { FileTreeNode, FileContentResponse, FileChangeNotificationPayload } from '@/lib/types/backend';
-
-type OpenFileTab = {
-  path: string;
-  name: string;
-  content: string;
-};
+import type { FileTreeNode, FileContentResponse, OpenFileTab } from '@/lib/types/backend';
 
 type FileBrowserProps = {
   taskId: string;
@@ -49,10 +43,7 @@ export function FileBrowser({ taskId, onOpenFile }: FileBrowserProps) {
     const client = getWebSocketClient();
     if (!client) return;
 
-    const unsubscribe = client.on('workspace.file.changes', async (message) => {
-      const payload = message.payload as FileChangeNotificationPayload;
-      console.log('File changed:', payload);
-
+    const unsubscribe = client.on('workspace.file.changes', async () => {
       // Refresh the root tree when any file changes
       try {
         const response = await requestFileTree(client, taskId, '', 1);

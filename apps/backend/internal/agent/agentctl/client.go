@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/kandev/kandev/internal/agentctl/process"
 	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/zap"
 )
@@ -189,61 +190,17 @@ type FileInfo struct {
 	Diff      string `json:"diff,omitempty"`
 }
 
-// FileListUpdate represents a file listing update
-type FileListUpdate struct {
-	Timestamp time.Time   `json:"timestamp"`
-	Files     []FileEntry `json:"files"`
-}
-
-// FileEntry represents a file in the workspace
-type FileEntry struct {
-	Path  string `json:"path"`
-	IsDir bool   `json:"is_dir"`
-	Size  int64  `json:"size,omitempty"`
-}
-
-// FileTreeNode represents a node in the file tree
-type FileTreeNode struct {
-	Name     string          `json:"name"`
-	Path     string          `json:"path"`
-	IsDir    bool            `json:"is_dir"`
-	Size     int64           `json:"size,omitempty"`
-	Children []*FileTreeNode `json:"children,omitempty"`
-}
-
-// FileTreeRequest represents a request for file tree
-type FileTreeRequest struct {
-	Path  string `json:"path"`
-	Depth int    `json:"depth"`
-}
-
-// FileTreeResponse represents a response with file tree
-type FileTreeResponse struct {
-	RequestID string        `json:"request_id"`
-	Root      *FileTreeNode `json:"root"`
-	Error     string        `json:"error,omitempty"`
-}
-
-// FileContentRequest represents a request for file content
-type FileContentRequest struct {
-	Path string `json:"path"`
-}
-
-// FileContentResponse represents a response with file content
-type FileContentResponse struct {
-	RequestID string `json:"request_id"`
-	Path      string `json:"path"`
-	Content   string `json:"content"`
-	Size      int64  `json:"size"`
-	Error     string `json:"error,omitempty"`
-}
-
-// FileChangeNotification represents a filesystem change notification
-type FileChangeNotification struct {
-	Timestamp time.Time `json:"timestamp"`
-	Path      string    `json:"path"`
-	Operation string    `json:"operation"`
-}
+// Re-export types from process package for convenience
+type (
+	FileListUpdate         = process.FileListUpdate
+	FileEntry              = process.FileEntry
+	FileTreeNode           = process.FileTreeNode
+	FileTreeRequest        = process.FileTreeRequest
+	FileTreeResponse       = process.FileTreeResponse
+	FileContentRequest     = process.FileContentRequest
+	FileContentResponse    = process.FileContentResponse
+	FileChangeNotification = process.FileChangeNotification
+)
 
 // StreamGitStatus opens a WebSocket connection for streaming git status updates
 func (c *Client) StreamGitStatus(ctx context.Context, handler func(*GitStatusUpdate)) error {

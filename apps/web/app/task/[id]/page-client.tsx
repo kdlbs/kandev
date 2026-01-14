@@ -11,6 +11,8 @@ import { getLocalStorage, setLocalStorage } from '@/lib/local-storage';
 import { TaskChatPanel } from '@/components/task/task-chat-panel';
 import { TaskTopBar } from '@/components/task/task-top-bar';
 import type { Task, Comment } from '@/lib/types/http';
+import type { OpenFileTab } from '@/lib/types/backend';
+import { FILE_EXTENSION_COLORS } from '@/lib/types/backend';
 import { TaskFilesPanel } from '@/components/task/task-files-panel';
 import { TaskChangesPanel } from '@/components/task/task-changes-panel';
 import { TaskRightPanel } from '@/components/task/task-right-panel';
@@ -20,12 +22,6 @@ import { listRepositories, listRepositoryBranches } from '@/lib/http/client';
 import { useRequest } from '@/lib/http/use-request';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import { useAppStore, useAppStoreApi } from '@/components/state-provider';
-
-type OpenFileTab = {
-  path: string;
-  name: string;
-  content: string;
-};
 
 const AGENTS = [
   { id: 'codex', label: 'Codex' },
@@ -304,19 +300,7 @@ export default function TaskPage({ task: initialTask }: TaskPageClientProps) {
                       <TabsList className="bg-transparent">
                         {openFileTabs.map((tab) => {
                           const ext = tab.name.split('.').pop()?.toLowerCase() || '';
-                          const dotColor = {
-                            ts: 'bg-blue-500',
-                            tsx: 'bg-blue-400',
-                            js: 'bg-yellow-500',
-                            jsx: 'bg-yellow-400',
-                            go: 'bg-cyan-500',
-                            py: 'bg-green-500',
-                            rs: 'bg-orange-500',
-                            json: 'bg-amber-400',
-                            css: 'bg-purple-500',
-                            html: 'bg-red-500',
-                            md: 'bg-gray-400',
-                          }[ext] || 'bg-muted-foreground';
+                          const dotColor = FILE_EXTENSION_COLORS[ext] || 'bg-muted-foreground';
                           return (
                             <TabsTrigger
                               key={tab.path}

@@ -261,5 +261,27 @@ export type FileContentResponse = {
 export type FileChangeNotificationPayload = {
   timestamp: string;
   path: string;
-  operation: 'create' | 'write' | 'remove' | 'rename' | 'chmod';
+  operation: 'create' | 'write' | 'remove' | 'rename' | 'chmod' | 'refresh';
+};
+
+// Open file tab for file viewer
+export type OpenFileTab = {
+  path: string;
+  name: string;
+  content: string;
+};
+
+// File extension to color mapping for file type indicators
+export const FILE_EXTENSION_COLORS: Record<string, string> = {
+  ts: 'bg-blue-500',
+  tsx: 'bg-blue-400',
+  js: 'bg-yellow-500',
+  jsx: 'bg-yellow-400',
+  go: 'bg-cyan-500',
+  py: 'bg-green-500',
+  rs: 'bg-orange-500',
+  json: 'bg-amber-400',
+  css: 'bg-purple-500',
+  html: 'bg-red-500',
+  md: 'bg-gray-400',
 };
