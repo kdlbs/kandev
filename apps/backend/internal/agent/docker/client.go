@@ -284,6 +284,15 @@ func (c *Client) GetContainerInfo(ctx context.Context, containerID string) (*Con
 	return info, nil
 }
 
+// IsContainerRunning returns true if the container exists and is in "running" state
+func (c *Client) IsContainerRunning(ctx context.Context, containerID string) (bool, error) {
+	info, err := c.GetContainerInfo(ctx, containerID)
+	if err != nil {
+		return false, err
+	}
+	return info.State == "running", nil
+}
+
 // GetContainerIP returns the IP address of a container
 func (c *Client) GetContainerIP(ctx context.Context, containerID string) (string, error) {
 	c.logger.Debug("Getting container IP", zap.String("container_id", containerID))

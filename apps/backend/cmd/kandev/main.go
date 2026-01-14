@@ -902,6 +902,12 @@ func (a *lifecycleAdapter) GetRecoveredInstances() []executor.RecoveredInstanceI
 	return result
 }
 
+// IsAgentRunningForTask checks if an agent is actually running for a task
+// This probes the actual agent (Docker container or standalone process)
+func (a *lifecycleAdapter) IsAgentRunningForTask(ctx context.Context, taskID string) bool {
+	return a.mgr.IsAgentRunningForTask(ctx, taskID)
+}
+
 // corsMiddleware returns a CORS middleware for HTTP and WebSocket connections
 func corsMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {

@@ -1777,6 +1777,34 @@ func (m *Manager) ListInstances() []*AgentInstance {
 	return result
 }
 
+// IsAgentRunningForTask checks if an agent is actually running for a task
+// This probes the actual agent (Docker container or standalone process) rather than relying on cached state
+func (m *Manager) IsAgentRunningForTask(ctx context.Context, taskID string) bool {
+	// First check if we have an instance tracked for this task
+	instance, exists := m.GetInstanceByTaskID(taskID)
+	if !exists {
+		return false
+	}
+
+	// Verify the agent is actually running by probing it
+	if instance.agentctl != nil {
+		// Try a health check on the agentctl
+		if err := instance.agentctl.Health(ctx); err == nil {
+			return true
+		}
+	}
+
+	// For Docker mode, also check if the container is running
+	if !m.IsStandaloneMode() && instance.ContainerID != "" && m.docker != nil {
+		running, err := m.docker.IsContainerRunning(ctx, instance.ContainerID)
+		if err == nil && running {
+			return true
+		}
+	}
+
+	return false
+}
+
 // UpdateStatus updates the status of an instance
 func (m *Manager) UpdateStatus(instanceID string, status v1.AgentStatus) error {
 	m.mu.Lock()
