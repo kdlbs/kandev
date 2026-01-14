@@ -68,6 +68,10 @@ func (m *mockAgentManager) GetRecoveredInstances() []executor.RecoveredInstanceI
 	return nil
 }
 
+func (m *mockAgentManager) IsAgentRunningForTask(ctx context.Context, taskID string) bool {
+	return false
+}
+
 // testTaskRepository is an in-memory task repository for testing
 type testTaskRepository struct {
 	tasks map[string]*v1.Task
