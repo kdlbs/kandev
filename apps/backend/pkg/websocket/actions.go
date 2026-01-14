@@ -141,6 +141,11 @@ const (
 	ActionPermissionRequested = "permission.requested" // Agent requesting permission
 	ActionPermissionRespond   = "permission.respond"   // User responding to permission request
 
+	// Workspace file operations
+	ActionWorkspaceFileTreeGet    = "workspace.tree.get"
+	ActionWorkspaceFileContentGet = "workspace.file.get"
+	ActionWorkspaceFileChanges    = "workspace.file.changes" // Notification
+
 	// User actions
 	ActionUserGet            = "user.get"
 	ActionUserSettingsUpdate = "user.settings.update"

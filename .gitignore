@@ -81,3 +81,4 @@ pnpm-lock.yaml
 # TypeScript
 *.tsbuildinfo
 apps/landing/next-env.d.ts
+package-lock.json

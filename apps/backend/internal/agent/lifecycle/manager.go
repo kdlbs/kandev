@@ -57,6 +57,11 @@ type AgentInstance struct {
 	messageMu     sync.Mutex
 }
 
+// GetAgentCtlClient returns the agentctl client for this instance
+func (ai *AgentInstance) GetAgentCtlClient() *agentctl.Client {
+	return ai.agentctl
+}
+
 // LaunchRequest contains parameters for launching an agent
 type LaunchRequest struct {
 	TaskID          string
@@ -740,7 +745,10 @@ func (m *Manager) initializeACPSession(ctx context.Context, instance *AgentInsta
 	// 5. Set up git status stream to track workspace changes
 	go m.handleGitStatusStream(instance)
 
-	// 5. Send the task prompt if provided
+	// 6. Set up file changes stream to track filesystem changes
+	go m.handleFileChangesStream(instance)
+
+	// 7. Send the task prompt if provided
 	if taskDescription != "" {
 		m.logger.Info("sending ACP prompt",
 			zap.String("instance_id", instance.ID),
@@ -885,6 +893,7 @@ func (m *Manager) reconnectStreams(instance *AgentInstance) {
 	go m.handleUpdatesStream(instance)
 	go m.handlePermissionStream(instance)
 	go m.handleGitStatusStream(instance)
+	go m.handleFileChangesStream(instance)
 
 	// Mark the instance as READY so it can accept prompts
 	m.mu.Lock()
@@ -1178,6 +1187,60 @@ func (m *Manager) publishGitStatus(instance *AgentInstance, update *agentctl.Git
 
 	if err := m.eventBus.Publish(context.Background(), subject, event); err != nil {
 		m.logger.Error("failed to publish git status event",
+			zap.String("instance_id", instance.ID),
+			zap.String("task_id", instance.TaskID),
+			zap.Error(err))
+	}
+}
+
+// handleFileChangesStream handles streaming file change notifications from the agent workspace
+func (m *Manager) handleFileChangesStream(instance *AgentInstance) {
+	ctx := context.Background()
+
+	// Retry connection with exponential backoff
+	maxRetries := 5
+	backoff := 1 * time.Second
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		err := instance.agentctl.StreamFileChanges(ctx, func(notification *agentctl.FileChangeNotification) {
+			m.publishFileChange(instance, notification)
+		})
+
+		if err == nil {
+			// Connection closed normally
+			return
+		}
+
+		if attempt < maxRetries {
+			time.Sleep(backoff)
+			backoff *= 2 // Exponential backoff
+		}
+	}
+
+	m.logger.Error("failed to connect to file changes stream after retries",
+		zap.String("instance_id", instance.ID),
+		zap.Int("max_retries", maxRetries))
+}
+
+// publishFileChange publishes a file change notification to the event bus
+func (m *Manager) publishFileChange(instance *AgentInstance, notification *agentctl.FileChangeNotification) {
+	if m.eventBus == nil {
+		return
+	}
+
+	data := map[string]interface{}{
+		"task_id":   instance.TaskID,
+		"agent_id":  instance.ID,
+		"path":      notification.Path,
+		"operation": notification.Operation,
+		"timestamp": notification.Timestamp.Format(time.RFC3339Nano),
+	}
+
+	event := bus.NewEvent(events.FileChangeNotified, "agent-manager", data)
+	subject := events.BuildFileChangeSubject(instance.TaskID)
+
+	if err := m.eventBus.Publish(context.Background(), subject, event); err != nil {
+		m.logger.Error("failed to publish file change event",
 			zap.String("instance_id", instance.ID),
 			zap.String("task_id", instance.TaskID),
 			zap.Error(err))
@@ -1712,6 +1775,31 @@ func (m *Manager) ListInstances() []*AgentInstance {
 		result = append(result, instance)
 	}
 	return result
+}
+
+// IsAgentRunningForTask checks if an agent is actually running for a task
+// This probes agentctl's status endpoint to verify the agent process is running
+func (m *Manager) IsAgentRunningForTask(ctx context.Context, taskID string) bool {
+	// First check if we have an instance tracked for this task
+	instance, exists := m.GetInstanceByTaskID(taskID)
+	if !exists {
+		return false
+	}
+
+	// Probe agentctl status to verify the agent process is running
+	if instance.agentctl == nil {
+		return false
+	}
+
+	status, err := instance.agentctl.GetStatus(ctx)
+	if err != nil {
+		m.logger.Debug("failed to get agentctl status",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return false
+	}
+
+	return status.IsAgentRunning()
 }
 
 // UpdateStatus updates the status of an instance

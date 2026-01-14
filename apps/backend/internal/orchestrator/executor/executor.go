@@ -53,6 +53,10 @@ type AgentManagerClient interface {
 
 	// GetRecoveredInstances returns instances recovered from Docker during startup
 	GetRecoveredInstances() []RecoveredInstanceInfo
+
+	// IsAgentRunningForTask checks if an agent is actually running for a task
+	// This probes the actual agent (Docker container or standalone process) rather than relying on cached state
+	IsAgentRunningForTask(ctx context.Context, taskID string) bool
 }
 
 // LaunchAgentRequest contains parameters for launching an agent
@@ -474,20 +478,46 @@ func (e *Executor) RespondToPermission(ctx context.Context, taskID, pendingID, o
 
 // GetExecution returns the current execution state for a task
 func (e *Executor) GetExecution(taskID string) (*TaskExecution, bool) {
+	ctx := context.Background()
+
 	e.mu.RLock()
 	execution, exists := e.executions[taskID]
 	e.mu.RUnlock()
 
 	if exists {
+		// Verify the agent is actually running by probing agentctl
+		if !e.agentManager.IsAgentRunningForTask(ctx, taskID) {
+			// Agent stopped - clean up in-memory state
+			e.mu.Lock()
+			delete(e.executions, taskID)
+			e.mu.Unlock()
+
+			// Also update DB if we have a session
+			if execution.SessionID != "" {
+				_ = e.repo.UpdateAgentSessionStatus(ctx, execution.SessionID, models.AgentSessionStatusStopped, "agent process stopped")
+			}
+			return nil, false
+		}
+
 		// Return a copy to avoid data races
 		execCopy := *execution
 		return &execCopy, true
 	}
 
 	// Try to load from database
-	ctx := context.Background()
 	session, err := e.repo.GetActiveAgentSessionByTaskID(ctx, taskID)
 	if err != nil {
+		return nil, false
+	}
+
+	// Verify the agent is actually running by probing the lifecycle manager
+	// This handles the case where backend was restarted and DB has stale "running" sessions
+	if !e.agentManager.IsAgentRunningForTask(ctx, taskID) {
+		// Agent is not running - mark the session as stopped in DB and return false
+		e.logger.Info("stale agent session detected - agent not running",
+			zap.String("task_id", taskID),
+			zap.String("session_id", session.ID))
+		_ = e.repo.UpdateAgentSessionStatus(ctx, session.ID, models.AgentSessionStatusStopped, "agent not running after backend restart")
 		return nil, false
 	}
 
@@ -508,6 +538,20 @@ func (e *Executor) GetExecutionWithContext(ctx context.Context, taskID string) (
 	e.mu.RUnlock()
 
 	if exists {
+		// Verify the agent is actually running by probing agentctl
+		if !e.agentManager.IsAgentRunningForTask(ctx, taskID) {
+			// Agent stopped - clean up in-memory state
+			e.mu.Lock()
+			delete(e.executions, taskID)
+			e.mu.Unlock()
+
+			// Also update DB if we have a session
+			if execution.SessionID != "" {
+				_ = e.repo.UpdateAgentSessionStatus(ctx, execution.SessionID, models.AgentSessionStatusStopped, "agent process stopped")
+			}
+			return nil, false
+		}
+
 		execCopy := *execution
 		return &execCopy, true
 	}
@@ -515,6 +559,15 @@ func (e *Executor) GetExecutionWithContext(ctx context.Context, taskID string) (
 	// Try to load from database
 	session, err := e.repo.GetActiveAgentSessionByTaskID(ctx, taskID)
 	if err != nil {
+		return nil, false
+	}
+
+	// Verify the agent is actually running by probing the lifecycle manager
+	if !e.agentManager.IsAgentRunningForTask(ctx, taskID) {
+		e.logger.Info("stale agent session detected - agent not running",
+			zap.String("task_id", taskID),
+			zap.String("session_id", session.ID))
+		_ = e.repo.UpdateAgentSessionStatus(ctx, session.ID, models.AgentSessionStatusStopped, "agent not running after backend restart")
 		return nil, false
 	}
 
@@ -742,4 +795,9 @@ func (m *MockAgentManagerClient) RespondToPermissionByTaskID(ctx context.Context
 // GetRecoveredInstances mocks getting recovered instances (returns empty for mock)
 func (m *MockAgentManagerClient) GetRecoveredInstances() []RecoveredInstanceInfo {
 	return nil
+}
+
+// IsAgentRunningForTask mocks checking if an agent is running (always returns false for mock)
+func (m *MockAgentManagerClient) IsAgentRunningForTask(ctx context.Context, taskID string) bool {
+	return false
 }

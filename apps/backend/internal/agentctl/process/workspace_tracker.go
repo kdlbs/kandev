@@ -2,59 +2,21 @@ package process
 
 import (
 	"context"
+	"fmt"
+	"io"
+	"io/fs"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/zap"
 )
-
-// GitStatusUpdate represents a git status update
-type GitStatusUpdate struct {
-	Timestamp    time.Time         `json:"timestamp"`
-	Modified     []string          `json:"modified"`
-	Added        []string          `json:"added"`
-	Deleted      []string          `json:"deleted"`
-	Untracked    []string          `json:"untracked"`
-	Renamed      []string          `json:"renamed"`
-	Ahead        int               `json:"ahead"`
-	Behind       int               `json:"behind"`
-	Branch       string            `json:"branch"`
-	RemoteBranch string            `json:"remote_branch,omitempty"`
-	Files        map[string]FileInfo `json:"files,omitempty"`
-}
-
-// FileInfo represents information about a file
-type FileInfo struct {
-	Path      string `json:"path"`
-	Status    string `json:"status"` // modified, added, deleted, untracked, renamed
-	Additions int    `json:"additions,omitempty"`
-	Deletions int    `json:"deletions,omitempty"`
-	OldPath   string `json:"old_path,omitempty"` // For renamed files
-	Diff      string `json:"diff,omitempty"`
-}
-
-// FileListUpdate represents a file listing update
-type FileListUpdate struct {
-	Timestamp time.Time  `json:"timestamp"`
-	Files     []FileEntry `json:"files"`
-}
-
-// FileEntry represents a file in the workspace
-type FileEntry struct {
-	Path  string `json:"path"`
-	IsDir bool   `json:"is_dir"`
-	Size  int64  `json:"size,omitempty"`
-}
-
-// GitStatusSubscriber is a channel that receives git status updates
-type GitStatusSubscriber chan GitStatusUpdate
-
-// FilesSubscriber is a channel that receives file listing updates
-type FilesSubscriber chan FileListUpdate
 
 // WorkspaceTracker monitors workspace changes and provides real-time updates
 type WorkspaceTracker struct {
@@ -67,9 +29,16 @@ type WorkspaceTracker struct {
 	mu            sync.RWMutex
 
 	// Subscribers
-	gitStatusSubscribers map[GitStatusSubscriber]struct{}
-	filesSubscribers     map[FilesSubscriber]struct{}
-	subMu                sync.RWMutex
+	gitStatusSubscribers   map[GitStatusSubscriber]struct{}
+	filesSubscribers       map[FilesSubscriber]struct{}
+	fileChangeSubscribers  map[FileChangeSubscriber]struct{}
+	subMu                  sync.RWMutex
+
+	// Filesystem watcher
+	watcher *fsnotify.Watcher
+
+	// Debounce channel for filesystem change events
+	fsChangeTrigger chan struct{}
 
 	// Control
 	stopCh chan struct{}
@@ -78,12 +47,21 @@ type WorkspaceTracker struct {
 
 // NewWorkspaceTracker creates a new workspace tracker
 func NewWorkspaceTracker(workDir string, log *logger.Logger) *WorkspaceTracker {
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		log.Error("failed to create filesystem watcher", zap.Error(err))
+		watcher = nil
+	}
+
 	return &WorkspaceTracker{
-		workDir:              workDir,
-		logger:               log.WithFields(zap.String("component", "workspace-tracker")),
-		gitStatusSubscribers: make(map[GitStatusSubscriber]struct{}),
-		filesSubscribers:     make(map[FilesSubscriber]struct{}),
-		stopCh:               make(chan struct{}),
+		workDir:               workDir,
+		logger:                log.WithFields(zap.String("component", "workspace-tracker")),
+		gitStatusSubscribers:  make(map[GitStatusSubscriber]struct{}),
+		filesSubscribers:      make(map[FilesSubscriber]struct{}),
+		fileChangeSubscribers: make(map[FileChangeSubscriber]struct{}),
+		watcher:               watcher,
+		fsChangeTrigger:       make(chan struct{}, 1), // Buffered to avoid blocking
+		stopCh:                make(chan struct{}),
 	}
 }
 
@@ -91,21 +69,39 @@ func NewWorkspaceTracker(workDir string, log *logger.Logger) *WorkspaceTracker {
 func (wt *WorkspaceTracker) Start(ctx context.Context) {
 	wt.wg.Add(1)
 	go wt.monitorLoop(ctx)
+
+	// Start filesystem watcher if available
+	if wt.watcher != nil {
+		wt.wg.Add(1)
+		go wt.watchFilesystem(ctx)
+
+		// Add workspace root to watcher
+		if err := wt.addDirectoryRecursive(wt.workDir); err != nil {
+			wt.logger.Error("failed to watch workspace directory", zap.Error(err))
+		}
+	}
 }
 
 // Stop stops the workspace tracker
 func (wt *WorkspaceTracker) Stop() {
 	close(wt.stopCh)
+	if wt.watcher != nil {
+		wt.watcher.Close()
+	}
 	wt.wg.Wait()
 	wt.logger.Info("workspace tracker stopped")
 }
 
-// monitorLoop periodically checks for workspace changes
+// monitorLoop handles debounced filesystem change events
+// When files change, we wait for activity to settle, then update everything at once
 func (wt *WorkspaceTracker) monitorLoop(ctx context.Context) {
 	defer wt.wg.Done()
 
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
+	// Debounce duration - wait this long after last file change before updating
+	const debounceDuration = 300 * time.Millisecond
+
+	var debounceTimer *time.Timer
+	var pendingUpdate bool
 
 	// Initial update
 	wt.updateGitStatus(ctx)
@@ -114,12 +110,49 @@ func (wt *WorkspaceTracker) monitorLoop(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			if debounceTimer != nil {
+				debounceTimer.Stop()
+			}
 			return
 		case <-wt.stopCh:
+			if debounceTimer != nil {
+				debounceTimer.Stop()
+			}
 			return
-		case <-ticker.C:
-			wt.updateGitStatus(ctx)
-			wt.updateFiles(ctx)
+		case <-wt.fsChangeTrigger:
+			// File change detected - start or reset debounce timer
+			if debounceTimer == nil {
+				debounceTimer = time.NewTimer(debounceDuration)
+			} else {
+				// Reset the timer if already running
+				if !debounceTimer.Stop() {
+					select {
+					case <-debounceTimer.C:
+					default:
+					}
+				}
+				debounceTimer.Reset(debounceDuration)
+			}
+			pendingUpdate = true
+		case <-func() <-chan time.Time {
+			if debounceTimer != nil {
+				return debounceTimer.C
+			}
+			return nil
+		}():
+			// Debounce timer fired - update everything
+			if pendingUpdate {
+				wt.updateGitStatus(ctx)
+				wt.updateFiles(ctx)
+				// Notify file change subscribers that workspace changed
+				wt.notifyFileChangeSubscribers(FileChangeNotification{
+					Timestamp: time.Now(),
+					Path:      "",
+					Operation: "refresh",
+				})
+				pendingUpdate = false
+			}
+			debounceTimer = nil
 		}
 	}
 }
@@ -539,6 +572,207 @@ func (wt *WorkspaceTracker) GetCurrentFiles() FileListUpdate {
 	return wt.currentFiles
 }
 
+// SubscribeFileChanges creates a new file change subscriber
+func (wt *WorkspaceTracker) SubscribeFileChanges() FileChangeSubscriber {
+	sub := make(FileChangeSubscriber, 100)
+
+	wt.subMu.Lock()
+	wt.fileChangeSubscribers[sub] = struct{}{}
+	wt.subMu.Unlock()
+
+	return sub
+}
+
+// UnsubscribeFileChanges removes a file change subscriber
+func (wt *WorkspaceTracker) UnsubscribeFileChanges(sub FileChangeSubscriber) {
+	wt.subMu.Lock()
+	delete(wt.fileChangeSubscribers, sub)
+	wt.subMu.Unlock()
+	close(sub)
+}
+
+// notifyFileChangeSubscribers notifies all file change subscribers
+func (wt *WorkspaceTracker) notifyFileChangeSubscribers(notification FileChangeNotification) {
+	wt.subMu.RLock()
+	defer wt.subMu.RUnlock()
+
+	for sub := range wt.fileChangeSubscribers {
+		select {
+		case sub <- notification:
+		default:
+			// Subscriber is slow, skip
+		}
+	}
+}
+
+// watchFilesystem watches for filesystem changes and triggers debounced updates
+func (wt *WorkspaceTracker) watchFilesystem(ctx context.Context) {
+	defer wt.wg.Done()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-wt.stopCh:
+			return
+		case event, ok := <-wt.watcher.Events:
+			if !ok {
+				return
+			}
+
+			// If a directory was created, watch it
+			if event.Op&fsnotify.Create == fsnotify.Create {
+				if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
+					wt.addDirectoryRecursive(event.Name)
+				}
+			}
+
+			// Trigger debounced update (non-blocking)
+			select {
+			case wt.fsChangeTrigger <- struct{}{}:
+			default:
+				// Channel full, update already pending
+			}
+
+		case err, ok := <-wt.watcher.Errors:
+			if !ok {
+				return
+			}
+			wt.logger.Debug("filesystem watcher error", zap.Error(err))
+		}
+	}
+}
+
+// addDirectoryRecursive adds a directory and all its subdirectories to the watcher
+func (wt *WorkspaceTracker) addDirectoryRecursive(dir string) error {
+	return filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Skip hidden directories and common ignore patterns
+		if d.IsDir() {
+			name := d.Name()
+			if name == ".git" || name == "node_modules" || name == ".next" || name == "dist" || name == "build" {
+				return filepath.SkipDir
+			}
+
+			// Add directory to watcher
+			if err := wt.watcher.Add(path); err != nil {
+				wt.logger.Debug("failed to watch directory", zap.String("path", path), zap.Error(err))
+			}
+		}
+
+		return nil
+	})
+}
+
+// GetFileTree returns the file tree for a given path and depth
+func (wt *WorkspaceTracker) GetFileTree(reqPath string, depth int) (*FileTreeNode, error) {
+	// Resolve the full path
+	fullPath := filepath.Join(wt.workDir, reqPath)
+
+	// Check if path exists
+	info, err := os.Stat(fullPath)
+	if err != nil {
+		return nil, fmt.Errorf("path not found: %w", err)
+	}
+
+	// Build the tree
+	node, err := wt.buildFileTreeNode(fullPath, reqPath, info, depth, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	return node, nil
+}
+
+// buildFileTreeNode recursively builds a file tree node
+func (wt *WorkspaceTracker) buildFileTreeNode(fullPath, relPath string, info os.FileInfo, maxDepth, currentDepth int) (*FileTreeNode, error) {
+	node := &FileTreeNode{
+		Name:  info.Name(),
+		Path:  relPath,
+		IsDir: info.IsDir(),
+		Size:  info.Size(),
+	}
+
+	// If it's a file or we've reached max depth, return
+	if !info.IsDir() || (maxDepth > 0 && currentDepth >= maxDepth) {
+		return node, nil
+	}
+
+	// Read directory contents
+	entries, err := os.ReadDir(fullPath)
+	if err != nil {
+		return node, nil // Return node without children on error
+	}
+
+	// Build children
+	node.Children = make([]*FileTreeNode, 0, len(entries))
+	for _, entry := range entries {
+		// Skip hidden files and common ignore patterns
+		name := entry.Name()
+		if strings.HasPrefix(name, ".") && name != "." && name != ".." {
+			continue
+		}
+		if name == "node_modules" || name == ".next" || name == "dist" || name == "build" {
+			continue
+		}
+
+		childFullPath := filepath.Join(fullPath, name)
+		childRelPath := filepath.Join(relPath, name)
+
+		childInfo, err := entry.Info()
+		if err != nil {
+			continue
+		}
+
+		childNode, err := wt.buildFileTreeNode(childFullPath, childRelPath, childInfo, maxDepth, currentDepth+1)
+		if err != nil {
+			continue
+		}
+
+		node.Children = append(node.Children, childNode)
+	}
+
+	return node, nil
+}
+
+// GetFileContent returns the content of a file
+func (wt *WorkspaceTracker) GetFileContent(reqPath string) (string, int64, error) {
+	// Resolve the full path
+	fullPath := filepath.Join(wt.workDir, reqPath)
+
+	// Check if file exists and is a regular file
+	info, err := os.Stat(fullPath)
+	if err != nil {
+		return "", 0, fmt.Errorf("file not found: %w", err)
+	}
+
+	if info.IsDir() {
+		return "", 0, fmt.Errorf("path is a directory, not a file")
+	}
+
+	// Check file size (limit to 10MB)
+	const maxFileSize = 10 * 1024 * 1024
+	if info.Size() > maxFileSize {
+		return "", info.Size(), fmt.Errorf("file too large (max 10MB)")
+	}
+
+	// Read file content
+	file, err := os.Open(fullPath)
+	if err != nil {
+		return "", 0, fmt.Errorf("failed to open file: %w", err)
+	}
+	defer file.Close()
+
+	content, err := io.ReadAll(file)
+	if err != nil {
+		return "", 0, fmt.Errorf("failed to read file: %w", err)
+	}
+
+	return string(content), info.Size(), nil
+}
 
 
 

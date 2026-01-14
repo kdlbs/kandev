@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/kandev/kandev/internal/agentctl/process"
 	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/zap"
 )
@@ -21,17 +22,22 @@ type Client struct {
 	logger     *logger.Logger
 
 	// WebSocket connections for streaming
-	acpConn        *websocket.Conn
-	permissionConn *websocket.Conn
-	gitStatusConn  *websocket.Conn
-	filesConn      *websocket.Conn
-	mu             sync.RWMutex
+	acpConn         *websocket.Conn
+	permissionConn  *websocket.Conn
+	gitStatusConn   *websocket.Conn
+	fileChangesConn *websocket.Conn
+	mu              sync.RWMutex
 }
 
 // StatusResponse from agentctl
 type StatusResponse struct {
 	AgentStatus string                 `json:"agent_status"`
 	ProcessInfo map[string]interface{} `json:"process_info"`
+}
+
+// IsAgentRunning returns true if the agent process is running
+func (s *StatusResponse) IsAgentRunning() bool {
+	return s.AgentStatus == "running"
 }
 
 // NewClient creates a new agentctl client
@@ -164,43 +170,19 @@ func (c *Client) BaseURL() string {
 	return c.baseURL
 }
 
-// GitStatusUpdate represents a git status update
-type GitStatusUpdate struct {
-	Timestamp    time.Time         `json:"timestamp"`
-	Modified     []string          `json:"modified"`
-	Added        []string          `json:"added"`
-	Deleted      []string          `json:"deleted"`
-	Untracked    []string          `json:"untracked"`
-	Renamed      []string          `json:"renamed"`
-	Ahead        int               `json:"ahead"`
-	Behind       int               `json:"behind"`
-	Branch       string            `json:"branch"`
-	RemoteBranch string            `json:"remote_branch,omitempty"`
-	Files        map[string]FileInfo `json:"files,omitempty"`
-}
-
-// FileInfo represents information about a file
-type FileInfo struct {
-	Path      string `json:"path"`
-	Status    string `json:"status"`
-	Additions int    `json:"additions,omitempty"`
-	Deletions int    `json:"deletions,omitempty"`
-	OldPath   string `json:"old_path,omitempty"`
-	Diff      string `json:"diff,omitempty"`
-}
-
-// FileListUpdate represents a file listing update
-type FileListUpdate struct {
-	Timestamp time.Time   `json:"timestamp"`
-	Files     []FileEntry `json:"files"`
-}
-
-// FileEntry represents a file in the workspace
-type FileEntry struct {
-	Path  string `json:"path"`
-	IsDir bool   `json:"is_dir"`
-	Size  int64  `json:"size,omitempty"`
-}
+// Re-export types from process package for convenience
+type (
+	GitStatusUpdate        = process.GitStatusUpdate
+	FileInfo               = process.FileInfo
+	FileListUpdate         = process.FileListUpdate
+	FileEntry              = process.FileEntry
+	FileTreeNode           = process.FileTreeNode
+	FileTreeRequest        = process.FileTreeRequest
+	FileTreeResponse       = process.FileTreeResponse
+	FileContentRequest     = process.FileContentRequest
+	FileContentResponse    = process.FileContentResponse
+	FileChangeNotification = process.FileChangeNotification
+)
 
 // StreamGitStatus opens a WebSocket connection for streaming git status updates
 func (c *Client) StreamGitStatus(ctx context.Context, handler func(*GitStatusUpdate)) error {
@@ -250,54 +232,6 @@ func (c *Client) StreamGitStatus(ctx context.Context, handler func(*GitStatusUpd
 	return nil
 }
 
-// StreamFiles opens a WebSocket connection for streaming file listing updates
-func (c *Client) StreamFiles(ctx context.Context, handler func(*FileListUpdate)) error {
-	wsURL := "ws" + c.baseURL[4:] + "/api/v1/workspace/files/stream"
-
-	conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, nil)
-	if err != nil {
-		return fmt.Errorf("failed to connect to files stream: %w", err)
-	}
-
-	c.mu.Lock()
-	c.filesConn = conn
-	c.mu.Unlock()
-
-	c.logger.Info("connected to files stream", zap.String("url", wsURL))
-
-	// Read messages in a goroutine
-	go func() {
-		defer func() {
-			c.mu.Lock()
-			c.filesConn = nil
-			c.mu.Unlock()
-			conn.Close()
-		}()
-
-		for {
-			_, message, err := conn.ReadMessage()
-			if err != nil {
-				if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
-					c.logger.Info("files stream closed normally")
-				} else {
-					c.logger.Debug("files stream error", zap.Error(err))
-				}
-				return
-			}
-
-			var update FileListUpdate
-			if err := json.Unmarshal(message, &update); err != nil {
-				c.logger.Warn("failed to parse file list update", zap.Error(err))
-				continue
-			}
-
-			handler(&update)
-		}
-	}()
-
-	return nil
-}
-
 // CloseGitStatusStream closes the git status stream connection
 func (c *Client) CloseGitStatusStream() {
 	c.mu.Lock()
@@ -309,13 +243,123 @@ func (c *Client) CloseGitStatusStream() {
 	}
 }
 
-// CloseFilesStream closes the files stream connection
-func (c *Client) CloseFilesStream() {
+// StreamFileChanges opens a WebSocket connection for streaming file change notifications
+func (c *Client) StreamFileChanges(ctx context.Context, handler func(*FileChangeNotification)) error {
+	wsURL := "ws" + c.baseURL[4:] + "/api/v1/workspace/file-changes/stream"
+
+	conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, nil)
+	if err != nil {
+		return fmt.Errorf("failed to connect to file changes stream: %w", err)
+	}
+
+	c.mu.Lock()
+	c.fileChangesConn = conn
+	c.mu.Unlock()
+
+	c.logger.Info("connected to file changes stream", zap.String("url", wsURL))
+
+	// Read messages in a goroutine
+	go func() {
+		defer func() {
+			c.mu.Lock()
+			c.fileChangesConn = nil
+			c.mu.Unlock()
+			conn.Close()
+		}()
+
+		for {
+			_, message, err := conn.ReadMessage()
+			if err != nil {
+				if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+					c.logger.Info("file changes stream closed normally")
+				} else {
+					c.logger.Debug("file changes stream error", zap.Error(err))
+				}
+				return
+			}
+
+			var notification FileChangeNotification
+			if err := json.Unmarshal(message, &notification); err != nil {
+				c.logger.Warn("failed to parse file change notification", zap.Error(err))
+				continue
+			}
+
+			handler(&notification)
+		}
+	}()
+
+	return nil
+}
+
+// RequestFileTree requests a file tree via HTTP GET
+func (c *Client) RequestFileTree(ctx context.Context, path string, depth int) (*FileTreeResponse, error) {
+	url := fmt.Sprintf("%s/api/v1/workspace/tree?path=%s&depth=%d", c.baseURL, path, depth)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to request file tree: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var response FileTreeResponse
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	if response.Error != "" {
+		return nil, fmt.Errorf("file tree error: %s", response.Error)
+	}
+
+	return &response, nil
+}
+
+// RequestFileContent requests file content via HTTP GET
+func (c *Client) RequestFileContent(ctx context.Context, path string) (*FileContentResponse, error) {
+	url := fmt.Sprintf("%s/api/v1/workspace/file/content?path=%s", c.baseURL, path)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to request file content: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var response FileContentResponse
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	if response.Error != "" {
+		return nil, fmt.Errorf("file content error: %s", response.Error)
+	}
+
+	return &response, nil
+}
+
+// CloseFileChangesStream closes the file changes stream connection
+func (c *Client) CloseFileChangesStream() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if c.filesConn != nil {
-		c.filesConn.Close()
-		c.filesConn = nil
+	if c.fileChangesConn != nil {
+		c.fileChangesConn.Close()
+		c.fileChangesConn = nil
 	}
+}
+
+// Close closes all connections (ACP, permissions, git status, file changes)
+func (c *Client) Close() {
+	c.CloseACPStream()
+	c.ClosePermissionStream()
+	c.CloseGitStatusStream()
+	c.CloseFileChangesStream()
 }

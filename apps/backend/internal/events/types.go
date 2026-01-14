@@ -92,7 +92,8 @@ const (
 
 // Event types for workspace/git status
 const (
-	GitStatusUpdated = "git.status.updated" // Git status changed in workspace
+	GitStatusUpdated   = "git.status.updated"   // Git status changed in workspace
+	FileChangeNotified = "file.change.notified" // File changed in workspace
 )
 
 // BuildACPSubject creates an ACP subject for a specific task
@@ -113,4 +114,14 @@ func BuildGitStatusSubject(taskID string) string {
 // BuildGitStatusWildcardSubject creates a wildcard subscription for all git status updates
 func BuildGitStatusWildcardSubject() string {
 	return GitStatusUpdated + ".*"
+}
+
+// BuildFileChangeSubject creates a file change subject for a specific task
+func BuildFileChangeSubject(taskID string) string {
+	return FileChangeNotified + "." + taskID
+}
+
+// BuildFileChangeWildcardSubject creates a wildcard subscription for all file change notifications
+func BuildFileChangeWildcardSubject() string {
+	return FileChangeNotified + ".*"
 }

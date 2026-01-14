@@ -240,14 +240,6 @@ func (c *Client) CloseACPStream() {
 	}
 }
 
-// Close closes all connections
-func (c *Client) Close() {
-	c.CloseACPStream()
-	c.ClosePermissionStream()
-	c.CloseGitStatusStream()
-	c.CloseFilesStream()
-}
-
 // StreamPermissions opens a WebSocket connection for streaming permission requests
 func (c *Client) StreamPermissions(ctx context.Context, handler func(*PermissionNotification)) error {
 	wsURL := "ws" + c.baseURL[4:] + "/api/v1/acp/permissions/stream"

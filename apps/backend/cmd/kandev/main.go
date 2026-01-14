@@ -394,6 +394,11 @@ func main() {
 		agentHandlers := agenthandlers.NewHandlers(agentCtrl, log)
 		agentHandlers.RegisterHandlers(gateway.Dispatcher)
 		log.Info("Registered Agent Manager WebSocket handlers")
+
+		// Register workspace file handlers
+		workspaceFileHandlers := agenthandlers.NewWorkspaceFileHandlers(lifecycleMgr, log)
+		workspaceFileHandlers.RegisterHandlers(gateway.Dispatcher)
+		log.Info("Registered Workspace File WebSocket handlers")
 	}
 
 	// Start the WebSocket hub
@@ -611,6 +616,25 @@ func main() {
 		log.Error("Failed to subscribe to git status events", zap.Error(err))
 	} else {
 		log.Info("Subscribed to git status events for WebSocket broadcasting")
+	}
+
+	// Subscribe to file change events and broadcast to WebSocket subscribers
+	_, err = eventBus.Subscribe(events.BuildFileChangeWildcardSubject(), func(ctx context.Context, event *bus.Event) error {
+		data := event.Data
+		taskID, _ := data["task_id"].(string)
+		if taskID == "" {
+			return nil
+		}
+
+		// Broadcast file change notification to task subscribers
+		notification, _ := ws.NewNotification("workspace.file.changes", data)
+		gateway.Hub.BroadcastToTask(taskID, notification)
+		return nil
+	})
+	if err != nil {
+		log.Error("Failed to subscribe to file change events", zap.Error(err))
+	} else {
+		log.Info("Subscribed to file change events for WebSocket broadcasting")
 	}
 
 	// ============================================
@@ -876,6 +900,12 @@ func (a *lifecycleAdapter) GetRecoveredInstances() []executor.RecoveredInstanceI
 		}
 	}
 	return result
+}
+
+// IsAgentRunningForTask checks if an agent is actually running for a task
+// This probes the actual agent (Docker container or standalone process)
+func (a *lifecycleAdapter) IsAgentRunningForTask(ctx context.Context, taskID string) bool {
+	return a.mgr.IsAgentRunningForTask(ctx, taskID)
 }
 
 // corsMiddleware returns a CORS middleware for HTTP and WebSocket connections

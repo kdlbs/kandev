@@ -401,6 +401,19 @@ func (s *SimulatedAgentManagerClient) GetRecoveredInstances() []executor.Recover
 	return nil
 }
 
+// IsAgentRunningForTask checks if a simulated agent is running for a task
+func (s *SimulatedAgentManagerClient) IsAgentRunningForTask(ctx context.Context, taskID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, inst := range s.instances {
+		if inst.taskID == taskID && inst.status == v1.AgentStatusRunning {
+			return true
+		}
+	}
+	return false
+}
+
 // ============================================
 // ORCHESTRATOR TEST SERVER
 // ============================================
