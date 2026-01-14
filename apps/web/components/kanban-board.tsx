@@ -244,6 +244,7 @@ export function KanbanBoard() {
       });
     }
   }, [
+    boardsState.activeId,
     boardsState.items,
     commitSettings,
     setActiveBoard,

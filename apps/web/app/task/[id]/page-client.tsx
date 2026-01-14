@@ -6,10 +6,6 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@kandev/ui
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@kandev/ui/tabs';
 import { TooltipProvider } from '@kandev/ui/tooltip';
 import { Textarea } from '@kandev/ui/textarea';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@kandev/ui/dialog';
-import { Button } from '@kandev/ui/button';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@kandev/ui/select';
-import { Label } from '@kandev/ui/label';
 import { IconX } from '@tabler/icons-react';
 import { getLocalStorage, setLocalStorage } from '@/lib/local-storage';
 import { TaskChatPanel } from '@/components/task/task-chat-panel';
@@ -25,13 +21,6 @@ import { getWebSocketClient } from '@/lib/ws/connection';
 import { useAppStore, useAppStoreApi } from '@/components/state-provider';
 import { useRepositories } from '@/hooks/use-repositories';
 import { useRepositoryBranches } from '@/hooks/use-repository-branches';
-
-type AgentProfile = {
-  id: string;
-  name: string;
-  agent_id: string;
-  agent_name: string;
-};
 
 const AGENTS = [
   { id: 'codex', label: 'Codex' },

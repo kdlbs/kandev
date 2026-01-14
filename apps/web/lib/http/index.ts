@@ -8,7 +8,6 @@ import type {
   ListExecutorsResponse,
   ListRepositoriesResponse,
   ListWorkspacesResponse,
-  Comment,
   ListCommentsResponse,
   RepositoryBranchesResponse,
   Task,

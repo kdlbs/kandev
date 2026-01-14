@@ -1,6 +1,7 @@
 'use client';
 
 import { FormEvent, useEffect, useRef, useState } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import {
   IconBrain,
   IconCheck,
@@ -209,7 +210,7 @@ export function TaskChatPanel({ agents, onSend, isLoading, isAgentWorking, taskD
   const [planModeEnabled, setPlanModeEnabled] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [isAwaitingResponse, setIsAwaitingResponse] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const lastAgentMessageCountRef = useRef(0);
 
   const commentsState = useAppStore((state) => state.comments);
@@ -250,10 +251,20 @@ export function TaskChatPanel({ agents, onSend, isLoading, isAgentWorking, taskD
   // Show typing indicator when awaiting response AND agent session is active
   const showTypingIndicator = isAwaitingResponse && isAgentWorking;
 
+  const itemCount = allMessages.length + (showTypingIndicator ? 1 : 0);
+
+  const virtualizer = useVirtualizer({
+    count: itemCount,
+    getScrollElement: () => messagesContainerRef.current,
+    estimateSize: () => 96,
+    overscan: 6,
+  });
+
   // Scroll to bottom when new comments arrive or when typing indicator appears
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [visibleComments.length, showTypingIndicator]);
+    if (itemCount === 0) return;
+    virtualizer.scrollToIndex(itemCount - 1, { align: 'end', behavior: 'smooth' });
+  }, [itemCount, virtualizer]);
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -280,9 +291,57 @@ export function TaskChatPanel({ agents, onSend, isLoading, isAgentWorking, taskD
     return comment.content || '(empty)';
   };
 
+  const renderMessage = (comment: Comment) => {
+    if (comment.type === 'tool_call') {
+      return <ToolCallCard comment={comment} />;
+    }
+
+    const isUser = comment.author_type === 'user';
+    const isTaskDescription = comment.id === 'task-description';
+
+    let label: string;
+    let containerClass: string;
+
+    if (isTaskDescription) {
+      label = 'Task';
+      containerClass = 'ml-auto bg-primary/20 text-foreground border border-primary/40';
+    } else if (isUser) {
+      label = 'You';
+      containerClass = 'ml-auto bg-primary text-primary-foreground';
+    } else {
+      label = 'Agent';
+      containerClass = 'bg-muted text-foreground';
+    }
+
+    return (
+      <div className={cn('max-w-[85%] rounded-lg px-4 py-3 text-sm', containerClass)}>
+        <p
+          className={cn(
+            'text-[11px] uppercase tracking-wide mb-2',
+            isTaskDescription ? 'text-primary font-medium' : 'opacity-70'
+          )}
+        >
+          {label}
+        </p>
+        {isUser ? (
+          <p className="whitespace-pre-wrap">{formatContent(comment)}</p>
+        ) : (
+          <div className="prose prose-sm dark:prose-invert max-w-none prose-p:my-2 prose-p:leading-relaxed prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-pre:my-3 prose-code:px-1.5 prose-code:py-0.5 prose-code:bg-background/50 prose-code:rounded prose-code:text-xs prose-code:before:content-none prose-code:after:content-none prose-pre:bg-background/80 prose-pre:text-xs prose-strong:text-foreground prose-headings:text-foreground">
+            <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>
+              {formatContent(comment)}
+            </ReactMarkdown>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <>
-      <div className="flex-1 min-h-0 overflow-y-auto rounded-lg bg-background p-3 space-y-3">
+      <div
+        ref={messagesContainerRef}
+        className="flex-1 min-h-0 overflow-y-auto rounded-lg bg-background p-3"
+      >
         {(isLoading || commentsLoading) && (
           <div className="flex items-center justify-center py-8 text-muted-foreground">
             <IconLoader2 className="h-5 w-5 animate-spin mr-2" />
@@ -294,59 +353,27 @@ export function TaskChatPanel({ agents, onSend, isLoading, isAgentWorking, taskD
             <span>No messages yet. Start the conversation!</span>
           </div>
         )}
-        {allMessages.map((comment) => {
-          // Tool call comments have a special rendering
-          if (comment.type === 'tool_call') {
-            return <ToolCallCard key={comment.id} comment={comment} />;
-          }
-
-          // Regular message or agent response - render as markdown
-          const isUser = comment.author_type === 'user';
-          const isTaskDescription = comment.id === 'task-description';
-
-          // Determine label and styling
-          let label: string;
-          let containerClass: string;
-
-          if (isTaskDescription) {
-            label = 'Task';
-            containerClass = 'ml-auto bg-primary/20 text-foreground border border-primary/40';
-          } else if (isUser) {
-            label = 'You';
-            containerClass = 'ml-auto bg-primary text-primary-foreground';
-          } else {
-            label = 'Agent';
-            containerClass = 'bg-muted text-foreground';
-          }
-
-          return (
-            <div
-              key={comment.id}
-              className={cn(
-                'max-w-[85%] rounded-lg px-4 py-3 text-sm',
-                containerClass
-              )}
-            >
-              <p className={cn(
-                "text-[11px] uppercase tracking-wide mb-2",
-                isTaskDescription ? "text-primary font-medium" : "opacity-70"
-              )}>
-                {label}
-              </p>
-              {isUser ? (
-                <p className="whitespace-pre-wrap">{formatContent(comment)}</p>
-              ) : (
-                <div className="prose prose-sm dark:prose-invert max-w-none prose-p:my-2 prose-p:leading-relaxed prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-pre:my-3 prose-code:px-1.5 prose-code:py-0.5 prose-code:bg-background/50 prose-code:rounded prose-code:text-xs prose-code:before:content-none prose-code:after:content-none prose-pre:bg-background/80 prose-pre:text-xs prose-strong:text-foreground prose-headings:text-foreground">
-                  <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>
-                    {formatContent(comment)}
-                  </ReactMarkdown>
+        {!isLoading && !commentsLoading && itemCount > 0 && (
+          <div className="relative w-full" style={{ height: `${virtualizer.getTotalSize()}px` }}>
+            {virtualizer.getVirtualItems().map((virtualRow) => {
+              const isTypingRow = showTypingIndicator && virtualRow.index === allMessages.length;
+              const message = allMessages[virtualRow.index];
+              return (
+                <div
+                  key={virtualRow.key}
+                  ref={virtualizer.measureElement}
+                  data-index={virtualRow.index}
+                  className="absolute left-0 top-0 w-full"
+                  style={{ transform: `translateY(${virtualRow.start}px)` }}
+                >
+                  <div className="pb-3">
+                    {isTypingRow ? <TypingIndicator /> : renderMessage(message)}
+                  </div>
                 </div>
-              )}
-            </div>
-          );
-        })}
-        {showTypingIndicator && <TypingIndicator />}
-        <div ref={messagesEndRef} />
+              );
+            })}
+          </div>
+        )}
       </div>
       <form onSubmit={handleSubmit} className="mt-3 flex flex-col gap-2">
         <Textarea
