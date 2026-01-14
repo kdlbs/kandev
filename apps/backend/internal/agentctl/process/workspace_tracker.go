@@ -127,6 +127,9 @@ type WorkspaceTracker struct {
 	// Filesystem watcher
 	watcher *fsnotify.Watcher
 
+	// Debounce channel for git status updates triggered by fsnotify
+	gitStatusTrigger chan struct{}
+
 	// Control
 	stopCh chan struct{}
 	wg     sync.WaitGroup
@@ -147,6 +150,7 @@ func NewWorkspaceTracker(workDir string, log *logger.Logger) *WorkspaceTracker {
 		filesSubscribers:      make(map[FilesSubscriber]struct{}),
 		fileChangeSubscribers: make(map[FileChangeSubscriber]struct{}),
 		watcher:               watcher,
+		gitStatusTrigger:      make(chan struct{}, 1), // Buffered to avoid blocking
 		stopCh:                make(chan struct{}),
 	}
 }
@@ -178,12 +182,15 @@ func (wt *WorkspaceTracker) Stop() {
 	wt.logger.Info("workspace tracker stopped")
 }
 
-// monitorLoop periodically checks for workspace changes
+// monitorLoop handles git status updates triggered by fsnotify with debouncing
 func (wt *WorkspaceTracker) monitorLoop(ctx context.Context) {
 	defer wt.wg.Done()
 
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
+	// Debounce duration - wait this long after last file change before updating
+	const debounceDuration = 300 * time.Millisecond
+
+	var debounceTimer *time.Timer
+	var pendingUpdate bool
 
 	// Initial update
 	wt.updateGitStatus(ctx)
@@ -192,12 +199,44 @@ func (wt *WorkspaceTracker) monitorLoop(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			if debounceTimer != nil {
+				debounceTimer.Stop()
+			}
 			return
 		case <-wt.stopCh:
+			if debounceTimer != nil {
+				debounceTimer.Stop()
+			}
 			return
-		case <-ticker.C:
-			wt.updateGitStatus(ctx)
-			wt.updateFiles(ctx)
+		case <-wt.gitStatusTrigger:
+			// File change detected - start or reset debounce timer
+			if debounceTimer == nil {
+				debounceTimer = time.NewTimer(debounceDuration)
+			} else {
+				// Reset the timer if already running
+				if !debounceTimer.Stop() {
+					// Timer already fired, drain the channel if needed
+					select {
+					case <-debounceTimer.C:
+					default:
+					}
+				}
+				debounceTimer.Reset(debounceDuration)
+			}
+			pendingUpdate = true
+		case <-func() <-chan time.Time {
+			if debounceTimer != nil {
+				return debounceTimer.C
+			}
+			return nil
+		}():
+			// Debounce timer fired - perform the update
+			if pendingUpdate {
+				wt.updateGitStatus(ctx)
+				wt.updateFiles(ctx)
+				pendingUpdate = false
+			}
+			debounceTimer = nil
 		}
 	}
 }
@@ -698,6 +737,13 @@ func (wt *WorkspaceTracker) watchFilesystem(ctx context.Context) {
 			}
 
 			wt.notifyFileChangeSubscribers(notification)
+
+			// Trigger git status update (non-blocking)
+			select {
+			case wt.gitStatusTrigger <- struct{}{}:
+			default:
+				// Channel full, update already pending
+			}
 
 		case err, ok := <-wt.watcher.Errors:
 			if !ok {
