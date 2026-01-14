@@ -2,7 +2,6 @@
 
 import React, { useEffect, useState, useCallback } from 'react';
 import { IconChevronRight, IconChevronDown, IconFile, IconFolder, IconFolderOpen } from '@tabler/icons-react';
-import { cn } from '@/lib/utils';
 import { ScrollArea } from '@kandev/ui/scroll-area';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import { requestFileTree, requestFileContent } from '@/lib/ws/workspace-files';
