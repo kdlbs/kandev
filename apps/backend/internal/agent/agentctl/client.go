@@ -373,3 +373,11 @@ func (c *Client) CloseFileChangesStream() {
 		c.fileChangesConn = nil
 	}
 }
+
+// Close closes all connections (ACP, permissions, git status, file changes)
+func (c *Client) Close() {
+	c.CloseACPStream()
+	c.ClosePermissionStream()
+	c.CloseGitStatusStream()
+	c.CloseFileChangesStream()
+}
