@@ -128,7 +128,8 @@ func containsHelper(s, substr string) bool {
 	return false
 }
 
-// runDockerMode runs agentctl in Docker mode (single instance, same as legacy behavior)
+// runDockerMode runs agentctl in Docker mode (single instance)
+// Uses the unified ControlServer with embedded process manager
 func runDockerMode(cfg *config.MultiConfig, log *logger.Logger) {
 	// Load full config from environment (including AutoApprovePermissions)
 	singleCfg := config.Load()
@@ -158,14 +159,14 @@ func runDockerMode(cfg *config.MultiConfig, log *logger.Logger) {
 	// Create process manager
 	procMgr := process.NewManager(singleCfg, log)
 
-	// Create HTTP API server
-	server := api.NewServer(singleCfg, procMgr, log)
+	// Create unified ControlServer with embedded single-instance support
+	controlServer := api.NewSingleInstanceServer(cfg, singleCfg, procMgr, log)
 
 	// Start HTTP server
 	addr := fmt.Sprintf(":%d", singleCfg.Port)
 	httpServer := &http.Server{
 		Addr:    addr,
-		Handler: server.Router(),
+		Handler: controlServer.Router(),
 	}
 
 	go func() {
