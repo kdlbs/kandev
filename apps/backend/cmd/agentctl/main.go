@@ -9,6 +9,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"net/http"
 	"os"
@@ -24,9 +25,37 @@ import (
 	"go.uber.org/zap"
 )
 
+// Command-line flags
+var (
+	protocolFlag     = flag.String("protocol", "", "Protocol for agent communication (acp, rest, mcp). Default: acp")
+	agentCommandFlag = flag.String("agent-command", "", "Command to run the agent")
+	workDirFlag      = flag.String("workdir", "", "Working directory for the agent")
+	portFlag         = flag.Int("port", 0, "HTTP server port")
+	modeFlag         = flag.String("mode", "", "Operating mode (docker, standalone, auto)")
+)
+
 func main() {
-	// Load multi-instance configuration
+	flag.Parse()
+
+	// Load multi-instance configuration (env vars as defaults, flags override)
 	cfg := config.LoadMulti()
+
+	// Override with CLI flags if provided
+	if *protocolFlag != "" {
+		cfg.DefaultProtocol = config.Protocol(*protocolFlag)
+	}
+	if *agentCommandFlag != "" {
+		cfg.DefaultAgentCommand = *agentCommandFlag
+	}
+	if *workDirFlag != "" {
+		cfg.DefaultWorkDir = *workDirFlag
+	}
+	if *portFlag != 0 {
+		cfg.ControlPort = *portFlag
+	}
+	if *modeFlag != "" {
+		cfg.Mode = *modeFlag
+	}
 
 	// Initialize logger
 	log, err := logger.NewLogger(logger.LoggingConfig{
@@ -104,6 +133,9 @@ func runDockerMode(cfg *config.MultiConfig, log *logger.Logger) {
 	singleCfg := config.Load()
 	// Override with multi-config values if they differ from defaults
 	singleCfg.Port = cfg.ControlPort
+	if cfg.DefaultProtocol != "" {
+		singleCfg.Protocol = cfg.DefaultProtocol
+	}
 	if cfg.DefaultAgentCommand != "" {
 		singleCfg.AgentCommand = cfg.DefaultAgentCommand
 		singleCfg.AgentArgs = parseCommand(cfg.DefaultAgentCommand)
@@ -117,6 +149,7 @@ func runDockerMode(cfg *config.MultiConfig, log *logger.Logger) {
 
 	log.Info("running in Docker mode (single instance)",
 		zap.Int("port", singleCfg.Port),
+		zap.String("protocol", string(singleCfg.Protocol)),
 		zap.String("agent_command", singleCfg.AgentCommand),
 		zap.String("workdir", singleCfg.WorkDir),
 		zap.Bool("auto_approve_permissions", singleCfg.AutoApprovePermissions))

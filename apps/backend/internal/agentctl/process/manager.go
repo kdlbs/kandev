@@ -6,21 +6,16 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log/slog"
 	"os/exec"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/coder/acp-go-sdk"
-	acpclient "github.com/kandev/kandev/internal/agentctl/acp"
+	"github.com/kandev/kandev/internal/agentctl/adapter"
 	"github.com/kandev/kandev/internal/agentctl/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/zap"
 )
-
-// Compile-time check that we export our client
-var _ acp.Client = (*acpclient.Client)(nil)
 
 // Status represents the agent process status
 type Status string
@@ -42,19 +37,19 @@ type errorWrapper struct {
 // PendingPermission represents a permission request waiting for user response
 type PendingPermission struct {
 	ID         string
-	Request    *acpclient.PermissionRequest
-	ResponseCh chan *acpclient.PermissionResponse
+	Request    *adapter.PermissionRequest
+	ResponseCh chan *adapter.PermissionResponse
 	CreatedAt  time.Time
 }
 
 // PermissionNotification is sent when the agent requests permission
 type PermissionNotification struct {
-	PendingID  string                       `json:"pending_id"`
-	SessionID  string                       `json:"session_id"`
-	ToolCallID string                       `json:"tool_call_id"`
-	Title      string                       `json:"title"`
-	Options    []acpclient.PermissionOption `json:"options"`
-	CreatedAt  time.Time                    `json:"created_at"`
+	PendingID  string                   `json:"pending_id"`
+	SessionID  string                   `json:"session_id"`
+	ToolCallID string                   `json:"tool_call_id"`
+	Title      string                   `json:"title"`
+	Options    []adapter.PermissionOption `json:"options"`
+	CreatedAt  time.Time                `json:"created_at"`
 }
 
 // Manager manages the agent subprocess
@@ -74,13 +69,12 @@ type Manager struct {
 	// Workspace tracker for git status and file changes
 	workspaceTracker *WorkspaceTracker
 
-	// ACP SDK connection
-	acpClient *acpclient.Client
-	acpConn   *acp.ClientSideConnection
-	sessionID acp.SessionId
+	// Protocol adapter for agent communication
+	adapter   adapter.AgentAdapter
+	sessionID string
 
-	// Session update notifications
-	updatesCh chan acp.SessionNotification
+	// Session update notifications (protocol-agnostic)
+	updatesCh chan adapter.SessionUpdate
 
 	// Permission request notifications (sent to backend)
 	permissionCh chan *PermissionNotification
@@ -103,7 +97,7 @@ func NewManager(cfg *config.Config, log *logger.Logger) *Manager {
 		cfg:                cfg,
 		logger:             log.WithFields(zap.String("component", "process-manager")),
 		workspaceTracker:   NewWorkspaceTracker(cfg.WorkDir, log),
-		updatesCh:          make(chan acp.SessionNotification, 100),
+		updatesCh:          make(chan adapter.SessionUpdate, 100),
 		permissionCh:       make(chan *PermissionNotification, 10),
 		pendingPermissions: make(map[string]*PendingPermission),
 	}
@@ -147,6 +141,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	}
 
 	m.logger.Info("starting agent process",
+		zap.String("protocol", string(m.cfg.Protocol)),
 		zap.Strings("args", m.cfg.AgentArgs),
 		zap.String("workdir", m.cfg.WorkDir))
 
@@ -195,28 +190,20 @@ func (m *Manager) Start(ctx context.Context) error {
 	m.stopCh = make(chan struct{})
 	m.doneCh = make(chan struct{})
 
-	// Create ACP client that will handle agent requests
-	m.acpClient = acpclient.NewClient(
-		acpclient.WithLogger(m.logger.Zap()),
-		acpclient.WithWorkspaceRoot(m.cfg.WorkDir),
-		acpclient.WithUpdateHandler(func(n acp.SessionNotification) {
-			select {
-			case m.updatesCh <- n:
-			default:
-				m.logger.Warn("updates channel full, dropping notification")
-			}
-		}),
-		acpclient.WithPermissionHandler(m.handlePermissionRequest),
-	)
-
-	// Create ACP SDK connection - it handles JSON-RPC communication
-	m.acpConn = acp.NewClientSideConnection(m.acpClient, m.stdin, m.stdout)
-	m.acpConn.SetLogger(slog.Default().With("component", "acp-conn"))
+	// Create protocol adapter based on configuration
+	if err := m.createAdapter(); err != nil {
+		m.status.Store(StatusError)
+		return fmt.Errorf("failed to create adapter: %w", err)
+	}
 
 	// Start stderr reader and exit waiter
 	m.wg.Add(2)
 	go m.readStderr()
 	go m.waitForExit()
+
+	// Forward adapter updates to our channel
+	m.wg.Add(1)
+	go m.forwardUpdates()
 
 	// Start workspace tracker with background context (not tied to HTTP request)
 	m.workspaceTracker.Start(context.Background())
@@ -227,27 +214,79 @@ func (m *Manager) Start(ctx context.Context) error {
 	return nil
 }
 
+// createAdapter creates the appropriate protocol adapter based on configuration
+func (m *Manager) createAdapter() error {
+	protocol := m.cfg.Protocol
+	if protocol == "" {
+		protocol = config.ProtocolACP // Default to ACP
+	}
+
+	adapterCfg := &adapter.Config{
+		WorkDir:     m.cfg.WorkDir,
+		AutoApprove: m.cfg.AutoApprovePermissions,
+	}
+
+	switch protocol {
+	case config.ProtocolACP:
+		m.adapter = adapter.NewACPAdapter(m.stdin, m.stdout, adapterCfg, m.logger)
+	default:
+		return fmt.Errorf("unsupported protocol: %s", protocol)
+	}
+
+	// Set the permission handler
+	m.adapter.SetPermissionHandler(m.handleAdapterPermissionRequest)
+
+	return nil
+}
+
+// forwardUpdates forwards updates from the adapter to the manager's channel
+func (m *Manager) forwardUpdates() {
+	defer m.wg.Done()
+
+	updatesCh := m.adapter.Updates()
+	for {
+		select {
+		case update, ok := <-updatesCh:
+			if !ok {
+				return
+			}
+			select {
+			case m.updatesCh <- update:
+			default:
+				m.logger.Warn("updates channel full, dropping notification")
+			}
+		case <-m.stopCh:
+			return
+		}
+	}
+}
+
+// handleAdapterPermissionRequest handles permission requests from the adapter
+func (m *Manager) handleAdapterPermissionRequest(ctx context.Context, req *adapter.PermissionRequest) (*adapter.PermissionResponse, error) {
+	return m.handlePermissionRequest(ctx, req)
+}
+
 // GetUpdates returns the channel for session update notifications
-func (m *Manager) GetUpdates() <-chan acp.SessionNotification {
+func (m *Manager) GetUpdates() <-chan adapter.SessionUpdate {
 	return m.updatesCh
 }
 
-// GetConnection returns the ACP connection (for advanced usage)
-func (m *Manager) GetConnection() *acp.ClientSideConnection {
+// GetAdapter returns the protocol adapter
+func (m *Manager) GetAdapter() adapter.AgentAdapter {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.acpConn
+	return m.adapter
 }
 
 // GetSessionID returns the current session ID
-func (m *Manager) GetSessionID() acp.SessionId {
+func (m *Manager) GetSessionID() string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.sessionID
 }
 
 // SetSessionID sets the current session ID
-func (m *Manager) SetSessionID(id acp.SessionId) {
+func (m *Manager) SetSessionID(id string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.sessionID = id
@@ -269,6 +308,11 @@ func (m *Manager) Stop(ctx context.Context) error {
 	// Stop workspace tracker
 	if m.workspaceTracker != nil {
 		m.workspaceTracker.Stop()
+	}
+
+	// Close the adapter
+	if m.adapter != nil {
+		m.adapter.Close()
 	}
 
 	// Close stop channel to signal readers
@@ -363,7 +407,7 @@ func (m *Manager) GetProcessInfo() map[string]interface{} {
 
 // handlePermissionRequest handles permission requests from the agent
 // It stores the pending request and waits for a response from the backend
-func (m *Manager) handlePermissionRequest(ctx context.Context, req *acpclient.PermissionRequest) (*acpclient.PermissionResponse, error) {
+func (m *Manager) handlePermissionRequest(ctx context.Context, req *adapter.PermissionRequest) (*adapter.PermissionResponse, error) {
 	// Generate a unique ID for this permission request
 	pendingID := fmt.Sprintf("%s-%s-%d", req.SessionID, req.ToolCallID, time.Now().UnixNano())
 
@@ -383,7 +427,7 @@ func (m *Manager) handlePermissionRequest(ctx context.Context, req *acpclient.Pe
 	pending := &PendingPermission{
 		ID:         pendingID,
 		Request:    req,
-		ResponseCh: make(chan *acpclient.PermissionResponse, 1),
+		ResponseCh: make(chan *adapter.PermissionResponse, 1),
 		CreatedAt:  time.Now(),
 	}
 
@@ -414,24 +458,24 @@ func (m *Manager) handlePermissionRequest(ctx context.Context, req *acpclient.Pe
 	case <-ctx.Done():
 		m.logger.Warn("permission request context cancelled",
 			zap.String("pending_id", pendingID))
-		return &acpclient.PermissionResponse{Cancelled: true}, nil
+		return &adapter.PermissionResponse{Cancelled: true}, nil
 	case <-time.After(5 * time.Minute):
 		m.logger.Warn("permission request timed out",
 			zap.String("pending_id", pendingID))
-		return &acpclient.PermissionResponse{Cancelled: true}, nil
+		return &adapter.PermissionResponse{Cancelled: true}, nil
 	}
 }
 
 // autoApprovePermission automatically approves a permission request
 // by selecting the first "allow" option, or the first option if no allow option exists
-func (m *Manager) autoApprovePermission(req *acpclient.PermissionRequest) (*acpclient.PermissionResponse, error) {
+func (m *Manager) autoApprovePermission(req *adapter.PermissionRequest) (*adapter.PermissionResponse, error) {
 	if len(req.Options) == 0 {
 		m.logger.Warn("no options available for auto-approve, cancelling")
-		return &acpclient.PermissionResponse{Cancelled: true}, nil
+		return &adapter.PermissionResponse{Cancelled: true}, nil
 	}
 
 	// Find the first "allow" option
-	var selectedOption *acpclient.PermissionOption
+	var selectedOption *adapter.PermissionOption
 	for i := range req.Options {
 		opt := &req.Options[i]
 		if opt.Kind == "allow_once" || opt.Kind == "allow_always" {
@@ -450,7 +494,7 @@ func (m *Manager) autoApprovePermission(req *acpclient.PermissionRequest) (*acpc
 		zap.String("option_name", selectedOption.Name),
 		zap.String("kind", selectedOption.Kind))
 
-	return &acpclient.PermissionResponse{
+	return &adapter.PermissionResponse{
 		OptionID: selectedOption.OptionID,
 	}, nil
 }
@@ -501,7 +545,7 @@ func (m *Manager) RespondToPermission(pendingID string, optionID string, cancell
 
 	// Send response (non-blocking since channel is buffered)
 	select {
-	case pending.ResponseCh <- &acpclient.PermissionResponse{
+	case pending.ResponseCh <- &adapter.PermissionResponse{
 		OptionID:  optionID,
 		Cancelled: cancelled,
 	}:

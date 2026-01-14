@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/coder/acp-go-sdk"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"go.uber.org/zap"
@@ -20,9 +19,8 @@ type InitializeRequest struct {
 
 // InitializeResponse is the response to an initialize call
 type InitializeResponse struct {
-	Success  bool                    `json:"success"`
-	Response *acp.InitializeResponse `json:"response,omitempty"`
-	Error    string                  `json:"error,omitempty"`
+	Success bool   `json:"success"`
+	Error   string `json:"error,omitempty"`
 }
 
 func (s *Server) handleACPInitialize(c *gin.Context) {
@@ -38,8 +36,8 @@ func (s *Server) handleACPInitialize(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
 	defer cancel()
 
-	conn := s.procMgr.GetConnection()
-	if conn == nil {
+	adapter := s.procMgr.GetAdapter()
+	if adapter == nil {
 		c.JSON(http.StatusServiceUnavailable, InitializeResponse{
 			Success: false,
 			Error:   "agent not running",
@@ -47,13 +45,7 @@ func (s *Server) handleACPInitialize(c *gin.Context) {
 		return
 	}
 
-	resp, err := conn.Initialize(ctx, acp.InitializeRequest{
-		ProtocolVersion: acp.ProtocolVersionNumber,
-		ClientInfo: &acp.Implementation{
-			Name:    req.ClientName,
-			Version: req.ClientVersion,
-		},
-	})
+	err := adapter.Initialize(ctx)
 	if err != nil {
 		s.logger.Error("initialize failed", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, InitializeResponse{
@@ -64,8 +56,7 @@ func (s *Server) handleACPInitialize(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, InitializeResponse{
-		Success:  true,
-		Response: &resp,
+		Success: true,
 	})
 }
 
@@ -94,8 +85,8 @@ func (s *Server) handleACPNewSession(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
 	defer cancel()
 
-	conn := s.procMgr.GetConnection()
-	if conn == nil {
+	adapter := s.procMgr.GetAdapter()
+	if adapter == nil {
 		c.JSON(http.StatusServiceUnavailable, NewSessionResponse{
 			Success: false,
 			Error:   "agent not running",
@@ -103,15 +94,7 @@ func (s *Server) handleACPNewSession(c *gin.Context) {
 		return
 	}
 
-	cwd := req.Cwd
-	if cwd == "" {
-		cwd = "/workspace"
-	}
-
-	resp, err := conn.NewSession(ctx, acp.NewSessionRequest{
-		Cwd:        cwd,
-		McpServers: []acp.McpServer{}, // Required: must be an empty array, not nil
-	})
+	sessionID, err := adapter.NewSession(ctx)
 	if err != nil {
 		s.logger.Error("new session failed", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, NewSessionResponse{
@@ -122,11 +105,11 @@ func (s *Server) handleACPNewSession(c *gin.Context) {
 	}
 
 	// Store session ID
-	s.procMgr.SetSessionID(resp.SessionId)
+	s.procMgr.SetSessionID(sessionID)
 
 	c.JSON(http.StatusOK, NewSessionResponse{
 		Success:   true,
-		SessionID: string(resp.SessionId),
+		SessionID: sessionID,
 	})
 }
 
@@ -137,9 +120,9 @@ type PromptRequest struct {
 
 // PromptResponse is the response to a prompt call
 type PromptResponse struct {
-	Success    bool           `json:"success"`
-	StopReason acp.StopReason `json:"stop_reason,omitempty"`
-	Error      string         `json:"error,omitempty"`
+	Success    bool   `json:"success"`
+	StopReason string `json:"stop_reason,omitempty"`
+	Error      string `json:"error,omitempty"`
 }
 
 func (s *Server) handleACPPrompt(c *gin.Context) {
@@ -152,8 +135,8 @@ func (s *Server) handleACPPrompt(c *gin.Context) {
 		return
 	}
 
-	conn := s.procMgr.GetConnection()
-	if conn == nil {
+	adapter := s.procMgr.GetAdapter()
+	if adapter == nil {
 		c.JSON(http.StatusServiceUnavailable, PromptResponse{
 			Success: false,
 			Error:   "agent not running",
@@ -174,11 +157,7 @@ func (s *Server) handleACPPrompt(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Minute)
 	defer cancel()
 
-	// Build prompt content - simple text block
-	resp, err := conn.Prompt(ctx, acp.PromptRequest{
-		SessionId: sessionID,
-		Prompt:    []acp.ContentBlock{acp.TextBlock(req.Text)},
-	})
+	err := adapter.Prompt(ctx, req.Text)
 	if err != nil {
 		s.logger.Error("prompt failed", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, PromptResponse{
@@ -188,12 +167,10 @@ func (s *Server) handleACPPrompt(c *gin.Context) {
 		return
 	}
 
-	s.logger.Info("prompt completed",
-		zap.String("stop_reason", string(resp.StopReason)))
+	s.logger.Info("prompt completed")
 
 	c.JSON(http.StatusOK, PromptResponse{
-		Success:    true,
-		StopReason: resp.StopReason,
+		Success: true,
 	})
 }
 

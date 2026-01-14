@@ -7,10 +7,25 @@ import (
 	"strings"
 )
 
+// Protocol represents the communication protocol used by the agent
+type Protocol string
+
+const (
+	// ProtocolACP is the Agent Communication Protocol (JSON-RPC over stdin/stdout)
+	ProtocolACP Protocol = "acp"
+	// ProtocolREST is a REST API protocol (HTTP calls)
+	ProtocolREST Protocol = "rest"
+	// ProtocolMCP is the Model Context Protocol
+	ProtocolMCP Protocol = "mcp"
+)
+
 // Config holds the agentctl configuration
 type Config struct {
 	// HTTP server port
 	Port int
+
+	// Protocol used to communicate with the agent
+	Protocol Protocol
 
 	// Agent command to execute (e.g., "auggie --acp")
 	AgentCommand string
@@ -45,6 +60,7 @@ func Load() *Config {
 
 	cfg := &Config{
 		Port:                   getEnvInt("AGENTCTL_PORT", 9999),
+		Protocol:               Protocol(getEnv("AGENTCTL_PROTOCOL", string(ProtocolACP))),
 		AgentCommand:           getEnv("AGENTCTL_AGENT_COMMAND", defaultCmd),
 		WorkDir:                workDir,
 		AutoStart:              getEnvBool("AGENTCTL_AUTO_START", false),

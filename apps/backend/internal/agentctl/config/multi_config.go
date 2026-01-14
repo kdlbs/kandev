@@ -17,6 +17,9 @@ type MultiConfig struct {
 	// MaxInstances is the maximum number of concurrent instances
 	MaxInstances int
 
+	// DefaultProtocol is the default protocol for agents
+	DefaultProtocol Protocol
+
 	// DefaultAgentCommand is the default command for agents
 	DefaultAgentCommand string
 
@@ -44,6 +47,7 @@ func LoadMulti() *MultiConfig {
 		InstancePortBase:       getEnvInt("AGENTCTL_INSTANCE_PORT_BASE", 10001),
 		InstancePortMax:        getEnvInt("AGENTCTL_INSTANCE_PORT_MAX", 10100),
 		MaxInstances:           getEnvInt("AGENTCTL_MAX_INSTANCES", 10),
+		DefaultProtocol:        Protocol(getEnv("AGENTCTL_PROTOCOL", string(ProtocolACP))),
 		DefaultAgentCommand:    getEnv("AGENTCTL_AGENT_COMMAND", "auggie --acp"),
 		DefaultWorkDir:         getEnv("AGENTCTL_WORKDIR", "/workspace"),
 		AutoApprovePermissions: getEnvBool("AGENTCTL_AUTO_APPROVE_PERMISSIONS", false),

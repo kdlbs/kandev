@@ -579,6 +579,7 @@ func (m *Manager) launchStandalone(ctx context.Context, instanceID string, req *
 		ID:            instanceID,
 		WorkspacePath: req.WorkspacePath,
 		AgentCommand:  agentCommand,
+		Protocol:      string(agentConfig.Protocol), // Pass protocol from registry
 		Env:           env,
 		AutoStart:     false, // We'll start via ACP initialize flow
 	}
@@ -1542,6 +1543,11 @@ func (m *Manager) buildContainerConfig(instanceID string, req *LaunchRequest, ag
 		fmt.Sprintf("KANDEV_TASK_ID=%s", req.TaskID),
 		fmt.Sprintf("KANDEV_INSTANCE_ID=%s", instanceID),
 	)
+
+	// Pass protocol to agentctl inside the container
+	if agentConfig.Protocol != "" {
+		env = append(env, fmt.Sprintf("AGENTCTL_PROTOCOL=%s", agentConfig.Protocol))
+	}
 
 	// Configure Git to trust the workspace directory
 	// This is needed because the container runs as root but files are owned by host user
