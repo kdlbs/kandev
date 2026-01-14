@@ -219,8 +219,10 @@ export function KanbanBoard() {
   useEffect(() => {
     const workspaceId = workspaceState.activeId;
     if (!workspaceId) {
-      setBoards([]);
-      setActiveBoard(null);
+      if (boardsState.items.length || boardsState.activeId) {
+        setBoards([]);
+        setActiveBoard(null);
+      }
       return;
     }
     const workspaceBoards = boardsState.items.filter((board) => board.workspaceId === workspaceId);

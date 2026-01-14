@@ -2,7 +2,7 @@ export type AppConfig = {
   apiBaseUrl: string;
 };
 
-const DEFAULT_API_BASE_URL = 'http://nova:8080';
+const DEFAULT_API_BASE_URL = 'http://localhost:8080';
 
 export function getBackendConfig(): AppConfig {
   if (typeof window === 'undefined') {

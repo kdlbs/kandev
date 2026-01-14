@@ -1,7 +1,6 @@
 'use client';
 
 import { Badge } from '@kandev/ui/badge';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
 import { IconCircleFilled } from '@tabler/icons-react';
 import { useAppStore } from '@/components/state-provider';
 
@@ -33,21 +32,15 @@ export function ConnectionStatus() {
   };
 
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Badge
-          variant={config.variant}
-          className={`flex items-center gap-1.5 px-2 py-1 text-xs cursor-default ${
-            config.pulse ? 'animate-pulse' : ''
-          }`}
-        >
-          <IconCircleFilled className={`h-2 w-2 ${config.color}`} />
-          <span>{config.text}</span>
-        </Badge>
-      </TooltipTrigger>
-      <TooltipContent>
-        <p className="whitespace-pre-line text-xs">{getTooltipContent()}</p>
-      </TooltipContent>
-    </Tooltip>
+    <Badge
+      variant={config.variant}
+      title={getTooltipContent()}
+      className={`flex items-center gap-1.5 px-2 py-1 text-xs cursor-default ${
+        config.pulse ? 'animate-pulse' : ''
+      }`}
+    >
+      <IconCircleFilled className={`h-2 w-2 ${config.color}`} />
+      <span>{config.text}</span>
+    </Badge>
   );
 }

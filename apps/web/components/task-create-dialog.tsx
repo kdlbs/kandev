@@ -367,11 +367,11 @@ export function TaskCreateDialog({
               </div>
               <div>
                 {agentProfiles.length === 0 && !agentProfilesLoading ? (
-                  <div className="flex items-center justify-center h-10 px-3 py-2 text-sm border border-input rounded-md bg-background">
-                    <span className="text-muted-foreground mr-2">No agents found.</span>
-                  <Link href="/settings/agents" className="text-primary hover:underline">
-                    Add agent
-                  </Link>
+                  <div className="flex h-7 items-center justify-center gap-2 rounded-md border border-input bg-background px-3 text-sm text-muted-foreground">
+                    <span>No agents found.</span>
+                    <Link href="/settings/agents" className="text-primary hover:underline">
+                      Add agent
+                    </Link>
                   </div>
                 ) : (
                   <Combobox

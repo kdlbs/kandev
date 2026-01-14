@@ -4,6 +4,7 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { StateProvider } from "@/components/state-provider";
 import { WebSocketConnector } from "@/components/ws-connector";
 import { ToastProvider } from "@/components/toast-provider";
+import { TooltipProvider } from "@kandev/ui/tooltip";
 
 export const metadata: Metadata = {
   title: "Kandev - AI Kanban",
@@ -20,10 +21,12 @@ export default function RootLayout({
       <body className="antialiased font-sans">
         <StateProvider>
           <ThemeProvider>
-            <ToastProvider>
-              <WebSocketConnector />
-              {children}
-            </ToastProvider>
+            <TooltipProvider>
+              <ToastProvider>
+                <WebSocketConnector />
+                {children}
+              </ToastProvider>
+            </TooltipProvider>
           </ThemeProvider>
         </StateProvider>
       </body>
