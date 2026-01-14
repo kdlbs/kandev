@@ -190,6 +190,7 @@ export type AppState = {
   setComments: (taskId: string, comments: Comment[]) => void;
   setCommentsTaskId: (taskId: string | null) => void;
   addComment: (comment: Comment) => void;
+  updateComment: (comment: Comment) => void;
   setCommentsLoading: (loading: boolean) => void;
   setGitStatus: (taskId: string, gitStatus: Omit<GitStatusState, 'taskId'>) => void;
   clearGitStatus: () => void;
@@ -252,6 +253,7 @@ const defaultState: AppState = {
   setComments: () => undefined,
   setCommentsTaskId: () => undefined,
   addComment: () => undefined,
+  updateComment: () => undefined,
   setCommentsLoading: () => undefined,
   setGitStatus: () => undefined,
   clearGitStatus: () => undefined,
@@ -283,6 +285,7 @@ function mergeInitialState(
   | 'setComments'
   | 'setCommentsTaskId'
   | 'addComment'
+  | 'updateComment'
   | 'setCommentsLoading'
   | 'setGitStatus'
   | 'clearGitStatus'
@@ -456,6 +459,16 @@ export function createAppStore(initialState?: Partial<AppState>) {
             const exists = draft.comments.items.some((c) => c.id === comment.id);
             if (!exists) {
               draft.comments.items.push(comment);
+            }
+          }
+        }),
+      updateComment: (comment) =>
+        set((draft) => {
+          // Only update if this comment is for the current task
+          if (draft.comments.taskId === comment.task_id && draft.comments.items) {
+            const index = draft.comments.items.findIndex((c) => c.id === comment.id);
+            if (index !== -1) {
+              draft.comments.items[index] = comment;
             }
           }
         }),

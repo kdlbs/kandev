@@ -218,12 +218,13 @@ func (s *Server) handleACPStreamWS(c *gin.Context) {
 			}
 
 			if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
-				s.logger.Debug("WebSocket write error", zap.Error(err))
 				return
 			}
 		}
 	}
 }
+
+
 
 // PermissionRespondRequest is a request to respond to a permission request
 type PermissionRespondRequest struct {

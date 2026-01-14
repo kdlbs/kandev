@@ -51,9 +51,11 @@ type AgentInstance struct {
 	standaloneInstanceID string // Instance ID in standalone agentctl
 	standalonePort       int    // Port of the standalone instance
 
-	// Message buffer for accumulating agent response during a prompt
-	messageBuffer strings.Builder
-	messageMu     sync.Mutex
+	// Buffers for accumulating agent response during a prompt
+	messageBuffer   strings.Builder
+	reasoningBuffer strings.Builder
+	summaryBuffer   strings.Builder
+	messageMu       sync.Mutex
 }
 
 // GetAgentCtlClient returns the agentctl client for this instance
@@ -583,7 +585,8 @@ func (m *Manager) launchStandalone(ctx context.Context, instanceID string, req *
 		ID:            instanceID,
 		WorkspacePath: req.WorkspacePath,
 		AgentCommand:  agentCommand,
-		Protocol:      string(agentConfig.Protocol), // Pass protocol from registry
+		Protocol:      string(agentConfig.Protocol),  // Pass protocol from registry
+		WorkspaceFlag: agentConfig.WorkspaceFlag,     // CLI flag for workspace path
 		Env:           env,
 		AutoStart:     false, // We'll start via ACP initialize flow
 	}
@@ -816,7 +819,9 @@ func (m *Manager) initializeACPSession(ctx context.Context, instance *AgentInsta
 	m.publishSessionInfo(instance, sessionID)
 
 	// 3. Set up updates stream to receive session notifications
-	go m.handleUpdatesStream(instance)
+	// Use a ready channel to signal when the stream is connected
+	updatesReady := make(chan struct{})
+	go m.handleUpdatesStream(instance, updatesReady)
 
 	// 4. Set up permission stream to receive permission requests
 	go m.handlePermissionStream(instance)
@@ -827,6 +832,15 @@ func (m *Manager) initializeACPSession(ctx context.Context, instance *AgentInsta
 	// 6. Set up file changes stream to track filesystem changes
 	go m.handleFileChangesStream(instance)
 
+	// Wait for the updates stream to connect before sending prompt
+	// This prevents race conditions where notifications are sent before streams are ready
+	select {
+	case <-updatesReady:
+		m.logger.Debug("updates stream ready")
+	case <-time.After(5 * time.Second):
+		m.logger.Warn("timeout waiting for updates stream to connect, proceeding anyway")
+	}
+
 	// 7. Send the task prompt if provided
 	if taskDescription != "" {
 		m.logger.Info("sending ACP prompt",
@@ -834,9 +848,11 @@ func (m *Manager) initializeACPSession(ctx context.Context, instance *AgentInsta
 			zap.String("session_id", sessionID),
 			zap.String("task_description", taskDescription))
 
-		// Clear message buffer before starting prompt
+		// Clear buffers before starting prompt
 		instance.messageMu.Lock()
 		instance.messageBuffer.Reset()
+		instance.reasoningBuffer.Reset()
+		instance.summaryBuffer.Reset()
 		instance.messageMu.Unlock()
 
 		// Prompt is SYNCHRONOUS - it blocks until the agent completes the task
@@ -852,10 +868,12 @@ func (m *Manager) initializeACPSession(ctx context.Context, instance *AgentInsta
 			return fmt.Errorf("prompt failed: %w", err)
 		}
 
-		// Extract accumulated message from buffer
+		// Extract accumulated content from buffers
 		instance.messageMu.Lock()
 		agentMessage := instance.messageBuffer.String()
 		instance.messageBuffer.Reset()
+		instance.reasoningBuffer.Reset()
+		instance.summaryBuffer.Reset()
 		instance.messageMu.Unlock()
 
 		stopReason := ""
@@ -867,7 +885,7 @@ func (m *Manager) initializeACPSession(ctx context.Context, instance *AgentInsta
 			zap.String("stop_reason", stopReason))
 
 		// Publish prompt_complete event with the agent's response (for saving as comment)
-		m.publishPromptComplete(instance, agentMessage)
+		m.publishPromptComplete(instance, agentMessage, "", "")
 
 		// Prompt completed - mark agent as READY for follow-up prompts
 		m.logger.Info("agent ready for follow-up prompts",
@@ -890,13 +908,22 @@ func (m *Manager) initializeACPSession(ctx context.Context, instance *AgentInsta
 	return nil
 }
 
-// handleUpdatesStream handles streaming session notifications from the agent
-func (m *Manager) handleUpdatesStream(instance *AgentInstance) {
+// handleUpdatesStream handles streaming session notifications from the agent.
+// If ready is non-nil, it will be closed when the stream connection is established (or fails).
+func (m *Manager) handleUpdatesStream(instance *AgentInstance, ready chan<- struct{}) {
 	ctx := context.Background()
 
 	err := instance.agentctl.StreamUpdates(ctx, func(update agentctl.SessionUpdate) {
 		m.handleSessionUpdate(instance, update)
 	})
+
+	// Signal that the stream connection attempt is complete (success or failure)
+	// StreamUpdates returns immediately after establishing the WebSocket connection
+	// and starting the read goroutine, so this signals that we're ready to receive updates
+	if ready != nil {
+		close(ready)
+	}
+
 	if err != nil {
 		m.logger.Error("failed to connect to updates stream",
 			zap.String("instance_id", instance.ID),
@@ -969,7 +996,7 @@ func (m *Manager) reconnectStreams(instance *AgentInstance) {
 	}
 
 	// Reconnect to WebSocket streams
-	go m.handleUpdatesStream(instance)
+	go m.handleUpdatesStream(instance, nil)
 	go m.handlePermissionStream(instance)
 	go m.handleGitStatusStream(instance)
 	go m.handleFileChangesStream(instance)
@@ -1040,16 +1067,9 @@ func (m *Manager) publishPermissionRequest(instance *AgentInstance, notification
 
 // handleSessionUpdate processes incoming session updates from the agent
 func (m *Manager) handleSessionUpdate(instance *AgentInstance, update agentctl.SessionUpdate) {
-	m.logger.Debug("received session update",
-		zap.String("instance_id", instance.ID),
-		zap.String("session_id", update.SessionID),
-		zap.String("type", update.Type))
-
 	// Handle different update types based on the Type field
 	switch update.Type {
 	case "message_chunk":
-		m.logger.Debug("agent message chunk",
-			zap.String("instance_id", instance.ID))
 		m.updateInstanceProgress(instance.ID, 50)
 
 		// Accumulate message content for saving as comment when a step completes
@@ -1058,6 +1078,17 @@ func (m *Manager) handleSessionUpdate(instance *AgentInstance, update agentctl.S
 			instance.messageBuffer.WriteString(update.Text)
 			instance.messageMu.Unlock()
 		}
+
+	case "reasoning":
+		// Accumulate reasoning/thinking content
+		instance.messageMu.Lock()
+		if update.ReasoningText != "" {
+			instance.reasoningBuffer.WriteString(update.ReasoningText)
+		}
+		if update.ReasoningSummary != "" {
+			instance.summaryBuffer.WriteString(update.ReasoningSummary)
+		}
+		instance.messageMu.Unlock()
 
 	case "tool_call":
 		// Tool call starting marks a step boundary - flush the accumulated message as a comment
@@ -1075,20 +1106,12 @@ func (m *Manager) handleSessionUpdate(instance *AgentInstance, update agentctl.S
 		m.publishToolCall(instance, update.ToolCallID, update.ToolTitle, update.ToolStatus, update.ToolArgs)
 
 	case "tool_update":
-		m.logger.Debug("tool call update",
-			zap.String("instance_id", instance.ID),
-			zap.String("tool_call_id", update.ToolCallID))
-
 		// Check if tool call completed
 		switch update.ToolStatus {
 		case "complete", "completed":
-			m.logger.Info("tool call completed",
-				zap.String("instance_id", instance.ID))
 			m.updateInstanceProgress(instance.ID, 80)
 			m.publishToolCallCompleteFromUpdate(instance, update)
-		case "error":
-			m.logger.Error("tool call error",
-				zap.String("instance_id", instance.ID))
+		case "error", "failed":
 			m.publishToolCallCompleteFromUpdate(instance, update)
 		}
 
@@ -1100,6 +1123,21 @@ func (m *Manager) handleSessionUpdate(instance *AgentInstance, update agentctl.S
 		m.logger.Error("agent error",
 			zap.String("instance_id", instance.ID),
 			zap.String("error", update.Error))
+
+	case "complete":
+		m.logger.Info("agent turn complete",
+			zap.String("instance_id", instance.ID),
+			zap.String("session_id", update.SessionID))
+
+		// Flush accumulated message buffer as a comment
+		m.flushMessageBufferAsComment(instance)
+
+		// Mark agent as READY for follow-up prompts
+		if err := m.MarkReady(instance.ID); err != nil {
+			m.logger.Error("failed to mark instance as ready after complete",
+				zap.String("instance_id", instance.ID),
+				zap.Error(err))
+		}
 	}
 
 	// Publish session update to event bus for WebSocket streaming
@@ -1320,7 +1358,7 @@ func (m *Manager) publishFileChange(instance *AgentInstance, notification *agent
 
 // publishPromptComplete publishes a prompt_complete event when an agent finishes responding
 // This is used to save the agent's response as a comment on the task
-func (m *Manager) publishPromptComplete(instance *AgentInstance, agentMessage string) {
+func (m *Manager) publishPromptComplete(instance *AgentInstance, agentMessage, reasoning, summary string) {
 	if m.eventBus == nil {
 		return
 	}
@@ -1337,6 +1375,12 @@ func (m *Manager) publishPromptComplete(instance *AgentInstance, agentMessage st
 		"task_id":       instance.TaskID,
 		"agent_message": agentMessage,
 	}
+	if reasoning != "" {
+		data["reasoning"] = reasoning
+	}
+	if summary != "" {
+		data["summary"] = summary
+	}
 
 	event := bus.NewEvent(events.PromptComplete, "agent-manager", data)
 	// Publish on task-specific subject so orchestrator can subscribe
@@ -1347,10 +1391,6 @@ func (m *Manager) publishPromptComplete(instance *AgentInstance, agentMessage st
 			zap.String("instance_id", instance.ID),
 			zap.String("task_id", instance.TaskID),
 			zap.Error(err))
-	} else {
-		m.logger.Info("published prompt_complete event",
-			zap.String("task_id", instance.TaskID),
-			zap.Int("message_length", len(agentMessage)))
 	}
 }
 
@@ -1360,7 +1400,11 @@ func (m *Manager) publishPromptComplete(instance *AgentInstance, agentMessage st
 func (m *Manager) flushMessageBufferAsComment(instance *AgentInstance) {
 	instance.messageMu.Lock()
 	agentMessage := instance.messageBuffer.String()
+	reasoning := instance.reasoningBuffer.String()
+	summary := instance.summaryBuffer.String()
 	instance.messageBuffer.Reset()
+	instance.reasoningBuffer.Reset()
+	instance.summaryBuffer.Reset()
 	instance.messageMu.Unlock()
 
 	// Only publish if there's actual content (ignore whitespace-only)
@@ -1369,13 +1413,8 @@ func (m *Manager) flushMessageBufferAsComment(instance *AgentInstance) {
 		return
 	}
 
-	m.logger.Debug("flushing message buffer as step comment",
-		zap.String("instance_id", instance.ID),
-		zap.String("task_id", instance.TaskID),
-		zap.Int("message_length", len(agentMessage)))
-
 	// Reuse the prompt_complete event type - the orchestrator handles it the same way
-	m.publishPromptComplete(instance, agentMessage)
+	m.publishPromptComplete(instance, agentMessage, reasoning, summary)
 }
 
 // publishToolCall publishes a tool call start event (to be saved as a comment)
@@ -1660,9 +1699,11 @@ func (m *Manager) PromptAgent(ctx context.Context, instanceID string, prompt str
 	// Set status to RUNNING while processing
 	instance.Status = v1.AgentStatusRunning
 
-	// Clear message buffer before starting new prompt
+	// Clear buffers before starting new prompt
 	instance.messageMu.Lock()
 	instance.messageBuffer.Reset()
+	instance.reasoningBuffer.Reset()
+	instance.summaryBuffer.Reset()
 	instance.messageMu.Unlock()
 
 	m.mu.Unlock()
@@ -1677,10 +1718,12 @@ func (m *Manager) PromptAgent(ctx context.Context, instanceID string, prompt str
 		return nil, err
 	}
 
-	// Extract accumulated message from buffer
+	// Extract accumulated content from buffers
 	instance.messageMu.Lock()
 	agentMessage := instance.messageBuffer.String()
 	instance.messageBuffer.Reset()
+	instance.reasoningBuffer.Reset()
+	instance.summaryBuffer.Reset()
 	instance.messageMu.Unlock()
 
 	result := &PromptResult{
@@ -1689,7 +1732,7 @@ func (m *Manager) PromptAgent(ctx context.Context, instanceID string, prompt str
 	}
 
 	// Publish prompt_complete event with the agent's response (for saving as comment)
-	m.publishPromptComplete(instance, agentMessage)
+	m.publishPromptComplete(instance, agentMessage, "", "")
 
 	// Prompt completed - mark as READY for next prompt
 	if err := m.MarkReady(instanceID); err != nil {

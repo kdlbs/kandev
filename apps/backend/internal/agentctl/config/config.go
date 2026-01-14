@@ -46,12 +46,11 @@ type Config struct {
 // Load loads configuration from environment variables
 func Load() *Config {
 	workDir := getEnv("AGENTCTL_WORKDIR", "/workspace")
-	defaultCmd := "auggie --acp --workspace-root " + workDir
 
 	cfg := &Config{
 		Port:                   getEnvInt("AGENTCTL_PORT", 9999),
 		Protocol:               agent.Protocol(getEnv("AGENTCTL_PROTOCOL", string(agent.ProtocolACP))),
-		AgentCommand:           getEnv("AGENTCTL_AGENT_COMMAND", defaultCmd),
+		AgentCommand:           getEnv("AGENTCTL_AGENT_COMMAND", "auggie --acp"),
 		WorkDir:                workDir,
 		AutoStart:              getEnvBool("AGENTCTL_AUTO_START", false),
 		AutoApprovePermissions: getEnvBool("AGENTCTL_AUTO_APPROVE_PERMISSIONS", false),

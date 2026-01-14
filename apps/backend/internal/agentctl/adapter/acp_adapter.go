@@ -202,6 +202,13 @@ func (a *ACPAdapter) GetSessionID() string {
 	return a.sessionID
 }
 
+// GetOperationID returns the current operation/turn ID.
+// ACP protocol doesn't have explicit turn/operation IDs, so this returns empty string.
+func (a *ACPAdapter) GetOperationID() string {
+	// ACP doesn't have explicit operation/turn IDs
+	return ""
+}
+
 // SetPermissionHandler sets the handler for permission requests.
 func (a *ACPAdapter) SetPermissionHandler(handler PermissionHandler) {
 	a.mu.Lock()
@@ -253,13 +260,31 @@ func (a *ACPAdapter) handleACPUpdate(n acp.SessionNotification) {
 func (a *ACPAdapter) convertNotification(n acp.SessionNotification) *SessionUpdate {
 	u := n.Update
 
+	// Log what update types we're receiving
+	a.logger.Debug("ACP notification received",
+		zap.Bool("has_tool_call", u.ToolCall != nil),
+		zap.Bool("has_tool_call_update", u.ToolCallUpdate != nil),
+		zap.Bool("has_message_chunk", u.AgentMessageChunk != nil),
+		zap.Bool("has_thought_chunk", u.AgentThoughtChunk != nil),
+		zap.Bool("has_plan", u.Plan != nil))
+
 	switch {
 	case u.AgentMessageChunk != nil:
 		if u.AgentMessageChunk.Content.Text != nil {
 			return &SessionUpdate{
-				Type:      "message_chunk",
+				Type:      UpdateTypeMessageChunk,
 				SessionID: string(n.SessionId),
 				Text:      u.AgentMessageChunk.Content.Text.Text,
+			}
+		}
+
+	case u.AgentThoughtChunk != nil:
+		// Agent thinking/reasoning - map to the new reasoning type
+		if u.AgentThoughtChunk.Content.Text != nil {
+			return &SessionUpdate{
+				Type:          UpdateTypeReasoning,
+				SessionID:     string(n.SessionId),
+				ReasoningText: u.AgentThoughtChunk.Content.Text.Text,
 			}
 		}
 
@@ -293,13 +318,19 @@ func (a *ACPAdapter) convertNotification(n acp.SessionNotification) *SessionUpda
 			args["raw_input"] = u.ToolCall.RawInput
 		}
 
+		// Normalize status - if empty, default to "running" for tool_call start
+		status := string(u.ToolCall.Status)
+		if status == "" {
+			status = "running"
+		}
+
 		return &SessionUpdate{
-			Type:       "tool_call",
+			Type:       UpdateTypeToolCall,
 			SessionID:  string(n.SessionId),
 			ToolCallID: string(u.ToolCall.ToolCallId),
 			ToolName:   string(u.ToolCall.Kind), // Kind is effectively the tool name
 			ToolTitle:  u.ToolCall.Title,
-			ToolStatus: string(u.ToolCall.Status),
+			ToolStatus: status,
 			ToolArgs:   args,
 		}
 
@@ -308,8 +339,12 @@ func (a *ACPAdapter) convertNotification(n acp.SessionNotification) *SessionUpda
 		if u.ToolCallUpdate.Status != nil {
 			status = string(*u.ToolCallUpdate.Status)
 		}
+		// Normalize status - "completed" → "complete" for frontend consistency
+		if status == "completed" {
+			status = "complete"
+		}
 		return &SessionUpdate{
-			Type:       "tool_update",
+			Type:       UpdateTypeToolUpdate,
 			SessionID:  string(n.SessionId),
 			ToolCallID: string(u.ToolCallUpdate.ToolCallId),
 			ToolStatus: status,
@@ -325,7 +360,7 @@ func (a *ACPAdapter) convertNotification(n acp.SessionNotification) *SessionUpda
 			}
 		}
 		return &SessionUpdate{
-			Type:        "plan",
+			Type:        UpdateTypePlan,
 			SessionID:   string(n.SessionId),
 			PlanEntries: entries,
 		}

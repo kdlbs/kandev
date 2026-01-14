@@ -32,7 +32,8 @@ const (
 
 // Event types for comments
 const (
-	CommentAdded = "comment.added"
+	CommentAdded   = "comment.added"
+	CommentUpdated = "comment.updated"
 )
 
 // Event types for repositories

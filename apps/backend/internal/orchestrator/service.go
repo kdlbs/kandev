@@ -51,6 +51,7 @@ type InputRequestHandler func(ctx context.Context, taskID, agentID, message stri
 type CommentCreator interface {
 	CreateAgentComment(ctx context.Context, taskID, content, agentSessionID string) error
 	CreateToolCallComment(ctx context.Context, taskID, toolCallID, title, status, agentSessionID string, args map[string]interface{}) error
+	UpdateToolCallComment(ctx context.Context, taskID, toolCallID, status, result string) error
 }
 
 // Service is the main orchestrator service
@@ -145,6 +146,7 @@ func NewService(
 		OnACPMessage:       s.handleACPMessage,
 		OnPromptComplete:   s.handlePromptComplete,
 		OnToolCallStarted:  s.handleToolCallStarted,
+		OnToolCallComplete: s.handleToolCallComplete,
 		OnGitStatusUpdated: s.handleGitStatusUpdated,
 	}
 	s.watcher = watcher.NewWatcher(eventBus, handlers, log)
@@ -669,6 +671,19 @@ func (s *Service) handleToolCallStarted(ctx context.Context, data watcher.ToolCa
 			s.logger.Info("created tool call comment",
 				zap.String("task_id", data.TaskID),
 				zap.String("tool_call_id", data.ToolCallID))
+		}
+	}
+}
+
+// handleToolCallComplete handles tool call complete events and updates the comment
+func (s *Service) handleToolCallComplete(ctx context.Context, data watcher.ToolCallCompleteData) {
+	// Update tool call comment status if we have a comment creator
+	if s.commentCreator != nil {
+		if err := s.commentCreator.UpdateToolCallComment(ctx, data.TaskID, data.ToolCallID, data.Status, data.Result); err != nil {
+			s.logger.Error("failed to update tool call comment",
+				zap.String("task_id", data.TaskID),
+				zap.String("tool_call_id", data.ToolCallID),
+				zap.Error(err))
 		}
 	}
 }

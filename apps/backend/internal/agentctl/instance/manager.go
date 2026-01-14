@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/config"
 	"github.com/kandev/kandev/internal/agentctl/process"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/pkg/agent"
 	"go.uber.org/zap"
 )
 
@@ -81,15 +82,25 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 		agentCmd = m.config.DefaultAgentCommand
 	}
 
-	// Ensure auggie has the correct workspace-root for standalone mode
-	// The workspace path is the actual worktree path on the host, not /workspace
-	if req.WorkspacePath != "" && !strings.Contains(agentCmd, "--workspace-root") {
-		agentCmd = agentCmd + " --workspace-root " + req.WorkspacePath
+	// Determine protocol
+	protocol := agent.Protocol(req.Protocol)
+	if protocol == "" {
+		protocol = m.config.DefaultProtocol
+	}
+
+	// Add workspace path flag if configured
+	// Note: We also set cmd.Dir to the workspace path, so this is mainly for
+	// agents that need an explicit flag rather than relying on cwd
+	if req.WorkspacePath != "" && req.WorkspaceFlag != "" {
+		if !strings.Contains(agentCmd, req.WorkspaceFlag) {
+			agentCmd = agentCmd + " " + req.WorkspaceFlag + " " + req.WorkspacePath
+		}
 	}
 
 	// Create config for the process manager
 	instanceCfg := &config.Config{
 		Port:                   port,
+		Protocol:               protocol,
 		AgentCommand:           agentCmd,
 		WorkDir:                req.WorkspacePath,
 		AutoStart:              req.AutoStart,

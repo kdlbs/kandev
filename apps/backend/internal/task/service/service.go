@@ -1300,9 +1300,51 @@ func (s *Service) DeleteComment(ctx context.Context, id string) error {
 	return nil
 }
 
+// UpdateToolCallComment updates a tool call comment's status
+func (s *Service) UpdateToolCallComment(ctx context.Context, taskID, toolCallID, status, result string) error {
+	// Find the comment by tool_call_id
+	comment, err := s.repo.GetCommentByToolCallID(ctx, taskID, toolCallID)
+	if err != nil {
+		s.logger.Warn("tool call comment not found for update",
+			zap.String("task_id", taskID),
+			zap.String("tool_call_id", toolCallID),
+			zap.Error(err))
+		return err
+	}
+
+	// Update the metadata status
+	if comment.Metadata == nil {
+		comment.Metadata = make(map[string]interface{})
+	}
+	comment.Metadata["status"] = status
+	if result != "" {
+		comment.Metadata["result"] = result
+	}
+
+	// Save the updated comment
+	if err := s.repo.UpdateComment(ctx, comment); err != nil {
+		s.logger.Error("failed to update tool call comment",
+			zap.String("comment_id", comment.ID),
+			zap.String("tool_call_id", toolCallID),
+			zap.Error(err))
+		return err
+	}
+
+	// Publish comment.updated event
+	s.publishCommentEvent(ctx, events.CommentUpdated, comment)
+
+	s.logger.Info("tool call comment updated",
+		zap.String("comment_id", comment.ID),
+		zap.String("tool_call_id", toolCallID),
+		zap.String("status", status))
+
+	return nil
+}
+
 // publishCommentEvent publishes comment events to the event bus
 func (s *Service) publishCommentEvent(ctx context.Context, eventType string, comment *models.Comment) {
 	if s.eventBus == nil {
+		s.logger.Warn("publishCommentEvent: eventBus is nil, skipping")
 		return
 	}
 

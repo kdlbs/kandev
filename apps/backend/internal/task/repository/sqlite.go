@@ -1361,6 +1361,55 @@ func (r *SQLiteRepository) DeleteComment(ctx context.Context, id string) error {
 	return nil
 }
 
+// GetCommentByToolCallID retrieves a comment by task ID and tool_call_id in metadata
+func (r *SQLiteRepository) GetCommentByToolCallID(ctx context.Context, taskID, toolCallID string) (*models.Comment, error) {
+	comment := &models.Comment{}
+	var requestsInput int
+	var commentType string
+	var metadataJSON string
+	err := r.db.QueryRowContext(ctx, `
+		SELECT id, task_id, author_type, author_id, content, requests_input, acp_session_id, type, metadata, created_at
+		FROM task_comments WHERE task_id = ? AND json_extract(metadata, '$.tool_call_id') = ?
+	`, taskID, toolCallID).Scan(&comment.ID, &comment.TaskID, &comment.AuthorType, &comment.AuthorID,
+		&comment.Content, &requestsInput, &comment.ACPSessionID, &commentType, &metadataJSON, &comment.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	comment.RequestsInput = requestsInput == 1
+	comment.Type = models.CommentType(commentType)
+	if metadataJSON != "" {
+		_ = json.Unmarshal([]byte(metadataJSON), &comment.Metadata)
+	}
+	return comment, nil
+}
+
+// UpdateComment updates an existing comment
+func (r *SQLiteRepository) UpdateComment(ctx context.Context, comment *models.Comment) error {
+	metadataJSON, err := json.Marshal(comment.Metadata)
+	if err != nil {
+		return fmt.Errorf("failed to marshal metadata: %w", err)
+	}
+
+	requestsInput := 0
+	if comment.RequestsInput {
+		requestsInput = 1
+	}
+
+	result, err := r.db.ExecContext(ctx, `
+		UPDATE task_comments SET content = ?, requests_input = ?, type = ?, metadata = ?
+		WHERE id = ?
+	`, comment.Content, requestsInput, string(comment.Type), string(metadataJSON), comment.ID)
+	if err != nil {
+		return err
+	}
+
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("comment not found: %s", comment.ID)
+	}
+	return nil
+}
+
 // Repository operations
 
 // CreateRepository creates a new repository

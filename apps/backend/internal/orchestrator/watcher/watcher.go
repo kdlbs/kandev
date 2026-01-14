@@ -50,6 +50,15 @@ type ToolCallData struct {
 	Args       map[string]interface{} `json:"args,omitempty"` // Tool call arguments (kind, path, locations, raw_input)
 }
 
+// ToolCallCompleteData contains data from tool_call_complete events
+type ToolCallCompleteData struct {
+	TaskID     string `json:"task_id"`
+	AgentID    string `json:"agent_id"`
+	ToolCallID string `json:"tool_call_id"`
+	Status     string `json:"status"` // "complete" or "error"
+	Result     string `json:"result,omitempty"`
+}
+
 // GitStatusData contains data from git status events
 type GitStatusData struct {
 	TaskID       string                 `json:"task_id"`
@@ -89,7 +98,8 @@ type EventHandlers struct {
 	OnPromptComplete func(ctx context.Context, data PromptCompleteData)
 
 	// Tool call events
-	OnToolCallStarted func(ctx context.Context, data ToolCallData)
+	OnToolCallStarted  func(ctx context.Context, data ToolCallData)
+	OnToolCallComplete func(ctx context.Context, data ToolCallCompleteData)
 
 	// Git status events
 	OnGitStatusUpdated func(ctx context.Context, data GitStatusData)
@@ -407,27 +417,37 @@ func (w *Watcher) createPromptCompleteHandler() bus.EventHandler {
 
 // subscribeToToolCallEvents subscribes to tool call events
 func (w *Watcher) subscribeToToolCallEvents() error {
-	if w.handlers.OnToolCallStarted == nil {
-		return nil
+	// Subscribe to tool call started events
+	if w.handlers.OnToolCallStarted != nil {
+		subject := events.ToolCallStarted + ".*"
+		sub, err := w.eventBus.Subscribe(subject, w.createToolCallStartedHandler())
+		if err != nil {
+			w.logger.Error("Failed to subscribe to tool call started events",
+				zap.String("subject", subject),
+				zap.Error(err))
+			return err
+		}
+		w.subscriptions = append(w.subscriptions, sub)
 	}
 
-	// Use wildcard to subscribe to all tool call events (tool_call.started.*)
-	subject := events.ToolCallStarted + ".*"
-
-	// Use regular subscription (each instance needs all messages for comment creation)
-	sub, err := w.eventBus.Subscribe(subject, w.createToolCallHandler())
-	if err != nil {
-		w.logger.Error("Failed to subscribe to tool call events",
-			zap.String("subject", subject),
-			zap.Error(err))
-		return err
+	// Subscribe to tool call complete events
+	if w.handlers.OnToolCallComplete != nil {
+		subject := events.ToolCallComplete + ".*"
+		sub, err := w.eventBus.Subscribe(subject, w.createToolCallCompleteHandler())
+		if err != nil {
+			w.logger.Error("Failed to subscribe to tool call complete events",
+				zap.String("subject", subject),
+				zap.Error(err))
+			return err
+		}
+		w.subscriptions = append(w.subscriptions, sub)
 	}
-	w.subscriptions = append(w.subscriptions, sub)
+
 	return nil
 }
 
-// createToolCallHandler creates a bus.EventHandler for tool call events
-func (w *Watcher) createToolCallHandler() bus.EventHandler {
+// createToolCallStartedHandler creates a bus.EventHandler for tool call started events
+func (w *Watcher) createToolCallStartedHandler() bus.EventHandler {
 	return func(ctx context.Context, event *bus.Event) error {
 		var data ToolCallData
 		if err := w.parseEventData(event.Data, &data); err != nil {
@@ -438,12 +458,34 @@ func (w *Watcher) createToolCallHandler() bus.EventHandler {
 			return nil // Don't return error to continue processing other events
 		}
 
-		w.logger.Debug("Handling tool call event",
+		w.logger.Debug("Handling tool call started event",
 			zap.String("task_id", data.TaskID),
 			zap.String("tool_call_id", data.ToolCallID),
 			zap.String("title", data.Title))
 
 		w.handlers.OnToolCallStarted(ctx, data)
+		return nil
+	}
+}
+
+// createToolCallCompleteHandler creates a bus.EventHandler for tool call complete events
+func (w *Watcher) createToolCallCompleteHandler() bus.EventHandler {
+	return func(ctx context.Context, event *bus.Event) error {
+		var data ToolCallCompleteData
+		if err := w.parseEventData(event.Data, &data); err != nil {
+			w.logger.Error("Failed to parse tool call complete event data",
+				zap.String("event_type", event.Type),
+				zap.String("event_id", event.ID),
+				zap.Error(err))
+			return nil
+		}
+
+		w.logger.Debug("Handling tool call complete event",
+			zap.String("task_id", data.TaskID),
+			zap.String("tool_call_id", data.ToolCallID),
+			zap.String("status", data.Status))
+
+		w.handlers.OnToolCallComplete(ctx, data)
 		return nil
 	}
 }

@@ -182,6 +182,10 @@ func (m *Manager) Start(ctx context.Context) error {
 	}
 
 	// Start the process
+	m.logger.Info("starting agent process",
+		zap.Strings("args", m.cfg.AgentArgs),
+		zap.String("workdir", m.cfg.WorkDir),
+		zap.Int("env_count", len(m.cfg.AgentEnv)))
 	if err := m.cmd.Start(); err != nil {
 		m.status.Store(StatusError)
 		return fmt.Errorf("failed to start agent: %w", err)
@@ -229,6 +233,8 @@ func (m *Manager) createAdapter() error {
 	switch protocol {
 	case agent.ProtocolACP:
 		m.adapter = adapter.NewACPAdapter(m.stdin, m.stdout, adapterCfg, m.logger)
+	case agent.ProtocolCodex:
+		m.adapter = adapter.NewCodexAdapter(m.stdin, m.stdout, adapterCfg, m.logger)
 	default:
 		return fmt.Errorf("unsupported protocol: %s", protocol)
 	}
