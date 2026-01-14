@@ -127,8 +127,8 @@ type WorkspaceTracker struct {
 	// Filesystem watcher
 	watcher *fsnotify.Watcher
 
-	// Debounce channel for git status updates triggered by fsnotify
-	gitStatusTrigger chan struct{}
+	// Debounce channel for filesystem change events
+	fsChangeTrigger chan struct{}
 
 	// Control
 	stopCh chan struct{}
@@ -150,7 +150,7 @@ func NewWorkspaceTracker(workDir string, log *logger.Logger) *WorkspaceTracker {
 		filesSubscribers:      make(map[FilesSubscriber]struct{}),
 		fileChangeSubscribers: make(map[FileChangeSubscriber]struct{}),
 		watcher:               watcher,
-		gitStatusTrigger:      make(chan struct{}, 1), // Buffered to avoid blocking
+		fsChangeTrigger:       make(chan struct{}, 1), // Buffered to avoid blocking
 		stopCh:                make(chan struct{}),
 	}
 }
@@ -182,7 +182,8 @@ func (wt *WorkspaceTracker) Stop() {
 	wt.logger.Info("workspace tracker stopped")
 }
 
-// monitorLoop handles git status updates triggered by fsnotify with debouncing
+// monitorLoop handles debounced filesystem change events
+// When files change, we wait for activity to settle, then update everything at once
 func (wt *WorkspaceTracker) monitorLoop(ctx context.Context) {
 	defer wt.wg.Done()
 
@@ -208,14 +209,13 @@ func (wt *WorkspaceTracker) monitorLoop(ctx context.Context) {
 				debounceTimer.Stop()
 			}
 			return
-		case <-wt.gitStatusTrigger:
+		case <-wt.fsChangeTrigger:
 			// File change detected - start or reset debounce timer
 			if debounceTimer == nil {
 				debounceTimer = time.NewTimer(debounceDuration)
 			} else {
 				// Reset the timer if already running
 				if !debounceTimer.Stop() {
-					// Timer already fired, drain the channel if needed
 					select {
 					case <-debounceTimer.C:
 					default:
@@ -230,10 +230,16 @@ func (wt *WorkspaceTracker) monitorLoop(ctx context.Context) {
 			}
 			return nil
 		}():
-			// Debounce timer fired - perform the update
+			// Debounce timer fired - update everything
 			if pendingUpdate {
 				wt.updateGitStatus(ctx)
 				wt.updateFiles(ctx)
+				// Notify file change subscribers that workspace changed
+				wt.notifyFileChangeSubscribers(FileChangeNotification{
+					Timestamp: time.Now(),
+					Path:      "",
+					Operation: "refresh",
+				})
 				pendingUpdate = false
 			}
 			debounceTimer = nil
@@ -689,7 +695,7 @@ func (wt *WorkspaceTracker) notifyFileChangeSubscribers(notification FileChangeN
 	}
 }
 
-// watchFilesystem watches for filesystem changes
+// watchFilesystem watches for filesystem changes and triggers debounced updates
 func (wt *WorkspaceTracker) watchFilesystem(ctx context.Context) {
 	defer wt.wg.Done()
 
@@ -704,43 +710,16 @@ func (wt *WorkspaceTracker) watchFilesystem(ctx context.Context) {
 				return
 			}
 
-			// Convert absolute path to relative path
-			relPath, err := filepath.Rel(wt.workDir, event.Name)
-			if err != nil {
-				relPath = event.Name
-			}
-
-			var operation string
-			switch {
-			case event.Op&fsnotify.Create == fsnotify.Create:
-				operation = "create"
-				// If a directory was created, watch it
+			// If a directory was created, watch it
+			if event.Op&fsnotify.Create == fsnotify.Create {
 				if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
 					wt.addDirectoryRecursive(event.Name)
 				}
-			case event.Op&fsnotify.Write == fsnotify.Write:
-				operation = "write"
-			case event.Op&fsnotify.Remove == fsnotify.Remove:
-				operation = "remove"
-			case event.Op&fsnotify.Rename == fsnotify.Rename:
-				operation = "rename"
-			case event.Op&fsnotify.Chmod == fsnotify.Chmod:
-				operation = "chmod"
-			default:
-				continue
 			}
 
-			notification := FileChangeNotification{
-				Timestamp: time.Now(),
-				Path:      relPath,
-				Operation: operation,
-			}
-
-			wt.notifyFileChangeSubscribers(notification)
-
-			// Trigger git status update (non-blocking)
+			// Trigger debounced update (non-blocking)
 			select {
-			case wt.gitStatusTrigger <- struct{}{}:
+			case wt.fsChangeTrigger <- struct{}{}:
 			default:
 				// Channel full, update already pending
 			}
