@@ -118,12 +118,11 @@ func (l *Launcher) Start(ctx context.Context) error {
 		zap.Int("port", l.port),
 		zap.Bool("auto_approve_permissions", l.autoApprovePermissions))
 
-	// Build command with standalone mode flags
+	// Build command with flags
 	// Note: We use exec.Command (not CommandContext) because we want to control
 	// shutdown ourselves via Stop(). CommandContext sends SIGKILL on context
 	// cancellation which prevents graceful shutdown.
 	l.cmd = exec.Command(l.binaryPath,
-		"-mode=standalone",
 		fmt.Sprintf("-port=%d", l.port),
 	)
 
