@@ -55,7 +55,7 @@ type PermissionNotification struct {
 
 // Manager manages the agent subprocess
 type Manager struct {
-	cfg    *config.Config
+	cfg    *config.InstanceConfig
 	logger *logger.Logger
 
 	// Process state
@@ -92,7 +92,7 @@ type Manager struct {
 }
 
 // NewManager creates a new process manager
-func NewManager(cfg *config.Config, log *logger.Logger) *Manager {
+func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 	m := &Manager{
 		cfg:                cfg,
 		logger:             log.WithFields(zap.String("component", "process-manager")),
