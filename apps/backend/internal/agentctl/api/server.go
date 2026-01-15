@@ -13,9 +13,9 @@ import (
 	"go.uber.org/zap"
 )
 
-// Server is the HTTP API server
+// Server is the HTTP API server for a single agent instance.
 type Server struct {
-	cfg     *config.Config
+	cfg     *config.InstanceConfig
 	procMgr *process.Manager
 	logger  *logger.Logger
 	router  *gin.Engine
@@ -23,8 +23,8 @@ type Server struct {
 	upgrader websocket.Upgrader
 }
 
-// NewServer creates a new API server
-func NewServer(cfg *config.Config, procMgr *process.Manager, log *logger.Logger) *Server {
+// NewServer creates a new API server for an agent instance.
+func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, log *logger.Logger) *Server {
 	gin.SetMode(gin.ReleaseMode)
 
 	s := &Server{
