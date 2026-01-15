@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MODIFIER_KEYS, KEYS, SHORTCUTS } from './constants';
+import { MODIFIER_KEYS, KEYS, SHORTCUTS, KeyboardShortcut } from './constants';
 
 describe('MODIFIER_KEYS', () => {
   it('defines all modifier keys', () => {
@@ -69,8 +69,9 @@ describe('SHORTCUTS', () => {
 
   describe('CANCEL', () => {
     it('uses Escape key without modifiers', () => {
-      expect(SHORTCUTS.CANCEL.key).toBe('Escape');
-      expect(SHORTCUTS.CANCEL.modifiers).toBeUndefined();
+      const cancel = SHORTCUTS.CANCEL as KeyboardShortcut;
+      expect(cancel.key).toBe('Escape');
+      expect(cancel.modifiers).toBeUndefined();
     });
   });
 
@@ -110,9 +111,10 @@ describe('SHORTCUTS', () => {
 
   it('all shortcuts with modifiers have valid modifier properties', () => {
     Object.values(SHORTCUTS).forEach((shortcut) => {
-      if (shortcut.modifiers) {
+      const typedShortcut = shortcut as KeyboardShortcut;
+      if (typedShortcut.modifiers) {
         const validModifiers = ['ctrl', 'cmd', 'alt', 'shift', 'ctrlOrCmd'];
-        Object.keys(shortcut.modifiers).forEach((modifier) => {
+        Object.keys(typedShortcut.modifiers).forEach((modifier) => {
           expect(validModifiers).toContain(modifier);
         });
       }
@@ -141,4 +143,3 @@ describe('Type definitions', () => {
     expect(shortcut3.modifiers?.ctrl).toBe(true);
   });
 });
-

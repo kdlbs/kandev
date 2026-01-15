@@ -198,6 +198,16 @@ fmt-web:
 	@echo "Formatting web code..."
 	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web lint -- --fix || true
 
+.PHONY: typecheck-web
+typecheck-web:
+	@echo "Type-checking web app..."
+	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web exec tsc -p tsconfig.json --noEmit
+
+.PHONY: typecheck
+typecheck:
+	@echo "Type-checking all apps..."
+	@cd $(APPS_DIR) && $(PNPM) -r exec tsc -p tsconfig.json --noEmit
+
 #
 # Cleanup
 #

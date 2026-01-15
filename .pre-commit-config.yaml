@@ -24,3 +24,15 @@ repos:
         entry: make lint-web
         language: system
         pass_filenames: false
+
+      - id: web-typecheck
+        name: Web typecheck
+        entry: make typecheck-web
+        language: system
+        pass_filenames: false
+
+      - id: typecheck
+        name: Typecheck all apps
+        entry: make typecheck
+        language: system
+        pass_filenames: false

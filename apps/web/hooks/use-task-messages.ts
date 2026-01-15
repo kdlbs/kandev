@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import { useAppStore, useAppStoreApi } from '@/components/state-provider';
-import type { Message } from '@/lib/types/http';
-import type { AgentSessionState } from '@/lib/types/http';
+import type { AgentSessionState, Message } from '@/lib/types/http';
 
 interface UseTaskMessagesReturn {
   isLoading: boolean;
@@ -130,8 +129,8 @@ export function useTaskMessages(
     if (!agentSessionId || !agentSessionState || !taskId) return;
     if (hasAgentMessage) return;
 
-    const terminalStates: AgentSessionState[] = ['WAITING_FOR_INPUT', 'COMPLETED', 'FAILED'];
-    if (!terminalStates.includes(agentSessionState)) {
+    const terminalStates = new Set<AgentSessionState>(['WAITING_FOR_INPUT', 'COMPLETED', 'FAILED']);
+    if (!terminalStates.has(agentSessionState)) {
       return;
     }
 

@@ -12,7 +12,7 @@ export function useKanbanPreview(options: UseKanbanPreviewOptions = {}) {
   // Always start with default values to avoid hydration mismatch
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [isOpen, setIsOpen] = useState(false);
-  const [previewWidthPx, setPreviewWidthPx] = useState(PREVIEW_PANEL.DEFAULT_WIDTH_PX);
+  const [previewWidthPx, setPreviewWidthPx] = useState<number>(PREVIEW_PANEL.DEFAULT_WIDTH_PX);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   // Load persisted state from localStorage AFTER hydration

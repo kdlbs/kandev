@@ -45,7 +45,7 @@ export function KanbanWithPreview() {
       state: task.state,
       description: task.description,
       position: task.position,
-      repositoryUrl: task.repositoryUrl,
+      repositoryId: task.repositoryId,
     };
   }, [selectedTaskId, kanbanTasks]);
 

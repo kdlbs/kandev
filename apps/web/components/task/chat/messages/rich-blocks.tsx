@@ -13,13 +13,13 @@ function resolveDiffPayload(diff: unknown): DiffPayload | null {
     return null;
   }
   if (Array.isArray(diff)) {
-    return { hunks: diff };
+    return { hunks: diff.map((hunk) => String(hunk)) };
   }
   if (typeof diff === 'object' && diff !== null) {
     const candidate = diff as Partial<DiffPayload>;
     if (Array.isArray(candidate.hunks)) {
       return {
-        hunks: candidate.hunks,
+        hunks: candidate.hunks.map((hunk) => String(hunk)),
         oldFile: candidate.oldFile,
         newFile: candidate.newFile,
       };

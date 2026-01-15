@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import type {
   Agent,
   AgentDiscovery,
+  AgentSessionState,
   Branch,
   Environment,
   Executor,
@@ -171,7 +172,7 @@ export type AppState = {
   gitStatus: GitStatusState;
   connection: ConnectionState;
   messages: MessagesState;
-  agentSessionStatesByTaskId: Record<string, string>;
+  agentSessionStatesByTaskId: Record<string, AgentSessionState>;
   hydrate: (state: Partial<AppState>) => void;
   setActiveWorkspace: (workspaceId: string | null) => void;
   setWorkspaces: (workspaces: WorkspaceState['items']) => void;
@@ -201,7 +202,7 @@ export type AppState = {
   prependMessages: (messages: Message[], meta?: { hasMore?: boolean; oldestCursor?: string | null }) => void;
   setMessagesMetadata: (meta: { hasMore?: boolean; isLoading?: boolean; oldestCursor?: string | null }) => void;
   setMessagesLoading: (loading: boolean) => void;
-  setAgentSessionState: (taskId: string, state: string) => void;
+  setAgentSessionState: (taskId: string, state: AgentSessionState) => void;
   setGitStatus: (taskId: string, gitStatus: Omit<GitStatusState, 'taskId'>) => void;
   clearGitStatus: () => void;
   bumpAgentProfilesVersion: () => void;

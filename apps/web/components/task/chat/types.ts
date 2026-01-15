@@ -27,7 +27,7 @@ export type RichMetadata = {
 };
 
 export type DiffPayload = {
-  hunks: unknown[];
+  hunks: string[];
   oldFile?: { fileName?: string; fileLang?: string };
   newFile?: { fileName?: string; fileLang?: string };
 };

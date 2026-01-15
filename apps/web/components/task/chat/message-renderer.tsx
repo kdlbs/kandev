@@ -1,5 +1,6 @@
 'use client';
 
+import type { ReactElement } from 'react';
 import type { Message } from '@/lib/types/http';
 import { ChatMessage } from '@/components/task/chat/messages/chat-message';
 import { StatusMessage } from '@/components/task/chat/messages/status-message';
@@ -13,7 +14,7 @@ type AdapterContext = {
 
 type MessageAdapter = {
   matches: (comment: Message, ctx: AdapterContext) => boolean;
-  render: (comment: Message, ctx: AdapterContext) => JSX.Element;
+  render: (comment: Message, ctx: AdapterContext) => ReactElement;
 };
 
 const adapters: MessageAdapter[] = [

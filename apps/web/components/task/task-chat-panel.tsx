@@ -177,7 +177,6 @@ export function TaskChatPanel({
     const trimmed = messageInput.trim();
     if (!trimmed || isSending) return;
     setIsSending(true);
-    setIsAwaitingResponse(true);
     flushSync(() => {
       setMessageInput('');
     });

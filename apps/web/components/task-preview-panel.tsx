@@ -4,6 +4,8 @@ import { IconX, IconCircleCheck, IconCircleX, IconLoader2, IconAlertTriangle, Ic
 import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
 import { getRepositoryDisplayName } from "@/lib/utils";
+import { useAppStore } from "@/components/state-provider";
+import { useMemo } from "react";
 import type { Task } from "./kanban-card";
 
 interface TaskPreviewPanelProps {
@@ -66,6 +68,15 @@ function getStateDisplay(state?: string) {
 }
 
 export function TaskPreviewPanel({ task, onClose, onMaximize }: TaskPreviewPanelProps) {
+  const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
+  const repository = useMemo(() => {
+    if (!task?.repositoryId) return null;
+    return Object.values(repositoriesByWorkspace)
+      .flat()
+      .find((repo) => repo.id === task.repositoryId) ?? null;
+  }, [repositoriesByWorkspace, task]);
+  const repoName = getRepositoryDisplayName(repository?.local_path);
+
   if (!task) {
     return (
       <div className="flex h-full w-full flex-col border-l bg-background">
@@ -83,7 +94,6 @@ export function TaskPreviewPanel({ task, onClose, onMaximize }: TaskPreviewPanel
     );
   }
 
-  const repoName = getRepositoryDisplayName(task.repositoryUrl);
   const stateDisplay = getStateDisplay(task.state);
 
   return (

@@ -159,13 +159,14 @@ func main() {
 		log.Warn("Failed to initialize Docker client - agent features will be disabled", zap.Error(err))
 		dockerClient = nil
 	} else {
-		defer func() {
-			_ = dockerClient.Close()
-		}()
 		if err := dockerClient.Ping(ctx); err != nil {
 			log.Warn("Docker daemon not available - agent features will be disabled", zap.Error(err))
+			_ = dockerClient.Close()
 			dockerClient = nil
 		} else {
+			defer func() {
+				_ = dockerClient.Close()
+			}()
 			log.Info("Connected to Docker daemon")
 		}
 	}
