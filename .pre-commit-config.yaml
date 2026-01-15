@@ -1,38 +1,65 @@
 repos:
+  # Backend (Go) hooks
   - repo: local
     hooks:
       - id: go-tests
         name: Go tests (backend)
-        entry: make test-backend
-        language: system
+        entry: bash -c 'cd apps/backend && go test ./...'
+        language: golang
+        files: \.go$
         pass_filenames: false
+        additional_dependencies: []
 
       - id: go-lint
         name: Go Lint (backend)
-        entry: make lint-backend
-        language: system
+        entry: bash -c 'cd apps/backend && golangci-lint run'
+        language: golang
+        files: \.go$
         pass_filenames: false
+        additional_dependencies: []
+
+  # Web app (TypeScript/React) hooks
+  - repo: local
+    hooks:
+      - id: web-lint
+        name: Web lint
+        entry: bash -c 'cd apps && pnpm --filter @kandev/web lint'
+        language: node
+        files: ^apps/web/.*\.(ts|tsx|js|jsx)$
+        pass_filenames: true
+        additional_dependencies: []
 
       - id: web-tests
         name: Web tests
-        entry: make test-web
-        language: system
+        entry: bash -c 'cd apps && pnpm --filter @kandev/web test'
+        language: node
+        files: ^apps/web/.*\.(ts|tsx|js|jsx)$
         pass_filenames: false
-
-      - id: web-lint
-        name: Web lint
-        entry: make lint-web
-        language: system
-        pass_filenames: false
+        additional_dependencies: []
 
       - id: web-typecheck
-        name: Web typecheck
-        entry: make typecheck-web
-        language: system
+        name: Typecheck web app
+        entry: bash -c 'cd apps && pnpm --filter @kandev/web exec tsc -p tsconfig.json --noEmit'
+        language: node
+        files: ^apps/web/.*\.(ts|tsx)$
         pass_filenames: false
+        additional_dependencies: []
 
-      - id: typecheck
-        name: Typecheck all apps
-        entry: make typecheck
-        language: system
+  # Landing page hooks
+  - repo: local
+    hooks:
+      # - id: landing-lint
+      #   name: Landing lint
+      #   entry: bash -c 'cd apps && pnpm --filter @kandev/landing lint'
+      #   language: node
+      #   files: ^apps/landing/.*\.(ts|tsx|js|jsx)$
+      #   pass_filenames: true
+      #   additional_dependencies: []
+
+      - id: landing-typecheck
+        name: Typecheck landing page
+        entry: bash -c 'cd apps && pnpm --filter @kandev/landing exec tsc -p tsconfig.json --noEmit'
+        language: node
+        files: ^apps/landing/.*\.(ts|tsx)$
         pass_filenames: false
+        additional_dependencies: []
