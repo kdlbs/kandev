@@ -351,13 +351,13 @@ func TestMemoryRepository_ListTasksByColumn(t *testing.T) {
 // Message CRUD tests
 
 func setupMemoryTestSession(ctx context.Context, repo *MemoryRepository, taskID string) string {
-	session := &models.AgentSession{
+	session := &models.TaskSession{
 		ID:             "session-123",
 		TaskID:         taskID,
 		AgentProfileID: "profile-123",
-		State:          models.AgentSessionStateStarting,
+		State:          models.TaskSessionStateStarting,
 	}
-	_ = repo.CreateAgentSession(ctx, session)
+	_ = repo.CreateTaskSession(ctx, session)
 	return session.ID
 }
 
@@ -372,7 +372,7 @@ func TestMemoryRepository_MessageCRUD(t *testing.T) {
 
 	// Create comment
 	comment := &models.Message{
-		AgentSessionID: sessionID,
+		TaskSessionID: sessionID,
 		TaskID:         "task-123",
 		AuthorType:     models.MessageAuthorUser,
 		AuthorID:       "user-123",
@@ -436,9 +436,9 @@ func TestMemoryRepository_ListMessages(t *testing.T) {
 	sessionID := setupMemoryTestSession(ctx, repo, task.ID)
 
 	// Create multiple comments
-	_ = repo.CreateMessage(ctx, &models.Message{ID: "comment-1", AgentSessionID: sessionID, TaskID: "task-123", AuthorType: models.MessageAuthorUser, Content: "Comment 1"})
-	_ = repo.CreateMessage(ctx, &models.Message{ID: "comment-2", AgentSessionID: sessionID, TaskID: "task-123", AuthorType: models.MessageAuthorAgent, Content: "Comment 2"})
-	_ = repo.CreateMessage(ctx, &models.Message{ID: "comment-3", AgentSessionID: "session-456", TaskID: "task-456", AuthorType: models.MessageAuthorUser, Content: "Comment 3"})
+	_ = repo.CreateMessage(ctx, &models.Message{ID: "comment-1", TaskSessionID: sessionID, TaskID: "task-123", AuthorType: models.MessageAuthorUser, Content: "Comment 1"})
+	_ = repo.CreateMessage(ctx, &models.Message{ID: "comment-2", TaskSessionID: sessionID, TaskID: "task-123", AuthorType: models.MessageAuthorAgent, Content: "Comment 2"})
+	_ = repo.CreateMessage(ctx, &models.Message{ID: "comment-3", TaskSessionID: "session-456", TaskID: "task-456", AuthorType: models.MessageAuthorUser, Content: "Comment 3"})
 
 	comments, err := repo.ListMessages(ctx, sessionID)
 	if err != nil {
@@ -460,7 +460,7 @@ func TestMemoryRepository_ListMessagesPagination(t *testing.T) {
 	baseTime := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 	_ = repo.CreateMessage(ctx, &models.Message{
 		ID:             "comment-1",
-		AgentSessionID: sessionID,
+		TaskSessionID: sessionID,
 		TaskID:         "task-123",
 		AuthorType:     models.MessageAuthorUser,
 		Content:        "Comment 1",
@@ -468,7 +468,7 @@ func TestMemoryRepository_ListMessagesPagination(t *testing.T) {
 	})
 	_ = repo.CreateMessage(ctx, &models.Message{
 		ID:             "comment-2",
-		AgentSessionID: sessionID,
+		TaskSessionID: sessionID,
 		TaskID:         "task-123",
 		AuthorType:     models.MessageAuthorUser,
 		Content:        "Comment 2",
@@ -476,7 +476,7 @@ func TestMemoryRepository_ListMessagesPagination(t *testing.T) {
 	})
 	_ = repo.CreateMessage(ctx, &models.Message{
 		ID:             "comment-3",
-		AgentSessionID: sessionID,
+		TaskSessionID: sessionID,
 		TaskID:         "task-123",
 		AuthorType:     models.MessageAuthorUser,
 		Content:        "Comment 3",
@@ -512,7 +512,7 @@ func TestMemoryRepository_MessageWithRequestsInput(t *testing.T) {
 
 	// Create agent comment requesting input
 	comment := &models.Message{
-		AgentSessionID: sessionID,
+		TaskSessionID: sessionID,
 		TaskID:         "task-123",
 		AuthorType:     models.MessageAuthorAgent,
 		AuthorID:       "agent-123",

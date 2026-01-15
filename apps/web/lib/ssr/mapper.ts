@@ -44,7 +44,7 @@ export function taskToState(
     },
     messages: messages
       ? {
-          sessionId: messages.items[0]?.agent_session_id ?? null,
+          sessionId: messages.items[0]?.task_session_id ?? null,
           items: messages.items,
           isLoading: false,
           hasMore: messages.hasMore ?? false,

@@ -71,7 +71,7 @@ func (c *Controller) StartTask(ctx context.Context, req dto.StartTaskRequest) (d
 		Success:         true,
 		TaskID:          execution.TaskID,
 		AgentInstanceID: execution.AgentInstanceID,
-		AgentSessionID:  execution.SessionID,
+		TaskSessionID:  execution.SessionID,
 		State:           string(execution.SessionState),
 	}
 
@@ -153,7 +153,7 @@ func (c *Controller) GetTaskExecution(ctx context.Context, req dto.GetTaskExecut
 		TaskID:          execution.TaskID,
 		AgentInstanceID: execution.AgentInstanceID,
 		AgentProfileID:  execution.AgentProfileID,
-		AgentSessionID:  execution.SessionID,
+		TaskSessionID:  execution.SessionID,
 		State:           string(execution.SessionState),
 		Progress:        execution.Progress,
 		StartedAt:       execution.StartedAt.Format("2006-01-02T15:04:05Z"),

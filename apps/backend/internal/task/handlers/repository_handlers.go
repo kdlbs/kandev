@@ -219,7 +219,7 @@ func (h *RepositoryHandlers) httpUpdateRepository(c *gin.Context) {
 
 func (h *RepositoryHandlers) httpDeleteRepository(c *gin.Context) {
 	if _, err := h.controller.DeleteRepository(c.Request.Context(), dto.DeleteRepositoryRequest{ID: c.Param("id")}); err != nil {
-		if errors.Is(err, controller.ErrActiveAgentSessions) {
+		if errors.Is(err, controller.ErrActiveTaskSessions) {
 			c.JSON(http.StatusConflict, gin.H{"error": "repository is used by an active agent session"})
 			return
 		}
@@ -445,7 +445,7 @@ func (h *RepositoryHandlers) wsDeleteRepository(ctx context.Context, msg *ws.Mes
 	}
 	if _, err := h.controller.DeleteRepository(ctx, dto.DeleteRepositoryRequest{ID: req.ID}); err != nil {
 		h.logger.Error("failed to delete repository", zap.Error(err))
-		if errors.Is(err, controller.ErrActiveAgentSessions) {
+		if errors.Is(err, controller.ErrActiveTaskSessions) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "repository is used by an active agent session", nil)
 		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Repository not found", nil)

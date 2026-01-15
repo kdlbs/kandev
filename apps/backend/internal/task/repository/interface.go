@@ -58,20 +58,20 @@ type Repository interface {
 	ListMessagesPaginated(ctx context.Context, sessionID string, opts ListMessagesOptions) ([]*models.Message, bool, error)
 	DeleteMessage(ctx context.Context, id string) error
 
-	// Agent Session operations
-	CreateAgentSession(ctx context.Context, session *models.AgentSession) error
-	GetAgentSession(ctx context.Context, id string) (*models.AgentSession, error)
-	GetAgentSessionByTaskID(ctx context.Context, taskID string) (*models.AgentSession, error)
-	GetActiveAgentSessionByTaskID(ctx context.Context, taskID string) (*models.AgentSession, error)
-	UpdateAgentSession(ctx context.Context, session *models.AgentSession) error
-	UpdateAgentSessionState(ctx context.Context, id string, state models.AgentSessionState, errorMessage string) error
-	ListAgentSessions(ctx context.Context, taskID string) ([]*models.AgentSession, error)
-	ListActiveAgentSessions(ctx context.Context) ([]*models.AgentSession, error)
-	HasActiveAgentSessionsByAgentProfile(ctx context.Context, agentProfileID string) (bool, error)
-	HasActiveAgentSessionsByExecutor(ctx context.Context, executorID string) (bool, error)
-	HasActiveAgentSessionsByEnvironment(ctx context.Context, environmentID string) (bool, error)
-	HasActiveAgentSessionsByRepository(ctx context.Context, repositoryID string) (bool, error)
-	DeleteAgentSession(ctx context.Context, id string) error
+	// Task Session operations
+	CreateTaskSession(ctx context.Context, session *models.TaskSession) error
+	GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error)
+	GetTaskSessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error)
+	GetActiveTaskSessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error)
+	UpdateTaskSession(ctx context.Context, session *models.TaskSession) error
+	UpdateTaskSessionState(ctx context.Context, id string, state models.TaskSessionState, errorMessage string) error
+	ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error)
+	ListActiveTaskSessions(ctx context.Context) ([]*models.TaskSession, error)
+	HasActiveTaskSessionsByAgentProfile(ctx context.Context, agentProfileID string) (bool, error)
+	HasActiveTaskSessionsByExecutor(ctx context.Context, executorID string) (bool, error)
+	HasActiveTaskSessionsByEnvironment(ctx context.Context, environmentID string) (bool, error)
+	HasActiveTaskSessionsByRepository(ctx context.Context, repositoryID string) (bool, error)
+	DeleteTaskSession(ctx context.Context, id string) error
 
 	// Repository operations
 	CreateRepository(ctx context.Context, repository *models.Repository) error

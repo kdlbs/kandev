@@ -71,8 +71,8 @@ func (c *EnvironmentController) UpdateEnvironment(ctx context.Context, req dto.U
 
 func (c *EnvironmentController) DeleteEnvironment(ctx context.Context, req dto.DeleteEnvironmentRequest) (dto.SuccessResponse, error) {
 	if err := c.service.DeleteEnvironment(ctx, req.ID); err != nil {
-		if errors.Is(err, service.ErrActiveAgentSessions) {
-			return dto.SuccessResponse{}, ErrActiveAgentSessions
+		if errors.Is(err, service.ErrActiveTaskSessions) {
+			return dto.SuccessResponse{}, ErrActiveTaskSessions
 		}
 		return dto.SuccessResponse{}, err
 	}

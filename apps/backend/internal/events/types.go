@@ -36,9 +36,9 @@ const (
 	MessageUpdated = "message.updated"
 )
 
-// Event types for agent sessions
+// Event types for task sessions
 const (
-	AgentSessionStateChanged = "agent_session.state_changed"
+	TaskSessionStateChanged = "task_session.state_changed"
 )
 
 // Event types for repositories

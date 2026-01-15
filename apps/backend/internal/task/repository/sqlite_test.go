@@ -506,13 +506,13 @@ func TestSQLiteRepository_Persistence(t *testing.T) {
 // Message CRUD tests
 
 func setupSQLiteTestSession(ctx context.Context, repo *SQLiteRepository, taskID, sessionID string) string {
-	session := &models.AgentSession{
+	session := &models.TaskSession{
 		ID:             sessionID,
 		TaskID:         taskID,
 		AgentProfileID: "profile-123",
-		State:          models.AgentSessionStateStarting,
+		State:          models.TaskSessionStateStarting,
 	}
-	_ = repo.CreateAgentSession(ctx, session)
+	_ = repo.CreateTaskSession(ctx, session)
 	return session.ID
 }
 
@@ -534,7 +534,7 @@ func TestSQLiteRepository_MessageCRUD(t *testing.T) {
 
 	// Create comment
 	comment := &models.Message{
-		AgentSessionID: sessionID,
+		TaskSessionID: sessionID,
 		TaskID:         "task-123",
 		AuthorType:     models.MessageAuthorUser,
 		AuthorID:       "user-123",
@@ -609,9 +609,9 @@ func TestSQLiteRepository_ListMessages(t *testing.T) {
 	_ = setupSQLiteTestSession(ctx, repo, task2.ID, "session-456")
 
 	// Create multiple comments
-	_ = repo.CreateMessage(ctx, &models.Message{ID: "comment-1", AgentSessionID: sessionID, TaskID: "task-123", AuthorType: models.MessageAuthorUser, Content: "Comment 1"})
-	_ = repo.CreateMessage(ctx, &models.Message{ID: "comment-2", AgentSessionID: sessionID, TaskID: "task-123", AuthorType: models.MessageAuthorAgent, Content: "Comment 2"})
-	_ = repo.CreateMessage(ctx, &models.Message{ID: "comment-3", AgentSessionID: "session-456", TaskID: "task-456", AuthorType: models.MessageAuthorUser, Content: "Comment 3"})
+	_ = repo.CreateMessage(ctx, &models.Message{ID: "comment-1", TaskSessionID: sessionID, TaskID: "task-123", AuthorType: models.MessageAuthorUser, Content: "Comment 1"})
+	_ = repo.CreateMessage(ctx, &models.Message{ID: "comment-2", TaskSessionID: sessionID, TaskID: "task-123", AuthorType: models.MessageAuthorAgent, Content: "Comment 2"})
+	_ = repo.CreateMessage(ctx, &models.Message{ID: "comment-3", TaskSessionID: "session-456", TaskID: "task-456", AuthorType: models.MessageAuthorUser, Content: "Comment 3"})
 
 	comments, err := repo.ListMessages(ctx, sessionID)
 	if err != nil {
@@ -638,7 +638,7 @@ func TestSQLiteRepository_ListMessagesPagination(t *testing.T) {
 	baseTime := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 	_ = repo.CreateMessage(ctx, &models.Message{
 		ID:             "comment-1",
-		AgentSessionID: sessionID,
+		TaskSessionID: sessionID,
 		TaskID:         "task-123",
 		AuthorType:     models.MessageAuthorUser,
 		Content:        "Comment 1",
@@ -646,7 +646,7 @@ func TestSQLiteRepository_ListMessagesPagination(t *testing.T) {
 	})
 	_ = repo.CreateMessage(ctx, &models.Message{
 		ID:             "comment-2",
-		AgentSessionID: sessionID,
+		TaskSessionID: sessionID,
 		TaskID:         "task-123",
 		AuthorType:     models.MessageAuthorUser,
 		Content:        "Comment 2",
@@ -654,7 +654,7 @@ func TestSQLiteRepository_ListMessagesPagination(t *testing.T) {
 	})
 	_ = repo.CreateMessage(ctx, &models.Message{
 		ID:             "comment-3",
-		AgentSessionID: sessionID,
+		TaskSessionID: sessionID,
 		TaskID:         "task-123",
 		AuthorType:     models.MessageAuthorUser,
 		Content:        "Comment 3",
@@ -697,7 +697,7 @@ func TestSQLiteRepository_MessageWithRequestsInput(t *testing.T) {
 
 	// Create agent comment requesting input
 	comment := &models.Message{
-		AgentSessionID: sessionID,
+		TaskSessionID: sessionID,
 		TaskID:         "task-123",
 		AuthorType:     models.MessageAuthorAgent,
 		AuthorID:       "agent-123",
@@ -714,9 +714,9 @@ func TestSQLiteRepository_MessageWithRequestsInput(t *testing.T) {
 	}
 }
 
-// AgentSession CRUD tests
+// TaskSession CRUD tests
 
-func TestSQLiteRepository_AgentSessionCRUD(t *testing.T) {
+func TestSQLiteRepository_TaskSessionCRUD(t *testing.T) {
 	repo, cleanup := createTestSQLiteRepo(t)
 	defer cleanup()
 	ctx := context.Background()
@@ -730,18 +730,18 @@ func TestSQLiteRepository_AgentSessionCRUD(t *testing.T) {
 	_ = repo.CreateTask(ctx, task)
 
 	// Create agent session
-	session := &models.AgentSession{
+	session := &models.TaskSession{
 		TaskID:          "task-123",
 		AgentInstanceID: "instance-abc",
 		ContainerID:     "container-xyz",
 		AgentProfileID:  "profile-123",
 		ExecutorID:      "executor-1",
 		EnvironmentID:   "env-1",
-		State:           models.AgentSessionStateStarting,
+		State:           models.TaskSessionStateStarting,
 		Progress:        0,
 		Metadata:        map[string]interface{}{"key": "value"},
 	}
-	if err := repo.CreateAgentSession(ctx, session); err != nil {
+	if err := repo.CreateTaskSession(ctx, session); err != nil {
 		t.Fatalf("failed to create agent session: %v", err)
 	}
 	if session.ID == "" {
@@ -755,7 +755,7 @@ func TestSQLiteRepository_AgentSessionCRUD(t *testing.T) {
 	}
 
 	// Get agent session
-	retrieved, err := repo.GetAgentSession(ctx, session.ID)
+	retrieved, err := repo.GetTaskSession(ctx, session.ID)
 	if err != nil {
 		t.Fatalf("failed to get agent session: %v", err)
 	}
@@ -765,7 +765,7 @@ func TestSQLiteRepository_AgentSessionCRUD(t *testing.T) {
 	if retrieved.AgentProfileID != "profile-123" {
 		t.Errorf("expected AgentProfileID 'profile-123', got %s", retrieved.AgentProfileID)
 	}
-	if retrieved.State != models.AgentSessionStateStarting {
+	if retrieved.State != models.TaskSessionStateStarting {
 		t.Errorf("expected state 'starting', got %s", retrieved.State)
 	}
 	if retrieved.Metadata["key"] != "value" {
@@ -773,13 +773,13 @@ func TestSQLiteRepository_AgentSessionCRUD(t *testing.T) {
 	}
 
 	// Update agent session
-	session.State = models.AgentSessionStateRunning
+	session.State = models.TaskSessionStateRunning
 	session.Progress = 50
-	if err := repo.UpdateAgentSession(ctx, session); err != nil {
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
 		t.Fatalf("failed to update agent session: %v", err)
 	}
-	retrieved, _ = repo.GetAgentSession(ctx, session.ID)
-	if retrieved.State != models.AgentSessionStateRunning {
+	retrieved, _ = repo.GetTaskSession(ctx, session.ID)
+	if retrieved.State != models.TaskSessionStateRunning {
 		t.Errorf("expected state 'running', got %s", retrieved.State)
 	}
 	if retrieved.Progress != 50 {
@@ -787,37 +787,37 @@ func TestSQLiteRepository_AgentSessionCRUD(t *testing.T) {
 	}
 
 	// Delete agent session
-	if err := repo.DeleteAgentSession(ctx, session.ID); err != nil {
+	if err := repo.DeleteTaskSession(ctx, session.ID); err != nil {
 		t.Fatalf("failed to delete agent session: %v", err)
 	}
-	_, err = repo.GetAgentSession(ctx, session.ID)
+	_, err = repo.GetTaskSession(ctx, session.ID)
 	if err == nil {
 		t.Error("expected agent session to be deleted")
 	}
 }
 
-func TestSQLiteRepository_AgentSessionNotFound(t *testing.T) {
+func TestSQLiteRepository_TaskSessionNotFound(t *testing.T) {
 	repo, cleanup := createTestSQLiteRepo(t)
 	defer cleanup()
 	ctx := context.Background()
 
-	_, err := repo.GetAgentSession(ctx, "nonexistent")
+	_, err := repo.GetTaskSession(ctx, "nonexistent")
 	if err == nil {
 		t.Error("expected error for nonexistent agent session")
 	}
 
-	err = repo.UpdateAgentSession(ctx, &models.AgentSession{ID: "nonexistent", TaskID: "task-123"})
+	err = repo.UpdateTaskSession(ctx, &models.TaskSession{ID: "nonexistent", TaskID: "task-123"})
 	if err == nil {
 		t.Error("expected error for updating nonexistent agent session")
 	}
 
-	err = repo.DeleteAgentSession(ctx, "nonexistent")
+	err = repo.DeleteTaskSession(ctx, "nonexistent")
 	if err == nil {
 		t.Error("expected error for deleting nonexistent agent session")
 	}
 }
 
-func TestSQLiteRepository_AgentSessionByTaskID(t *testing.T) {
+func TestSQLiteRepository_TaskSessionByTaskID(t *testing.T) {
 	repo, cleanup := createTestSQLiteRepo(t)
 	defer cleanup()
 	ctx := context.Background()
@@ -831,24 +831,24 @@ func TestSQLiteRepository_AgentSessionByTaskID(t *testing.T) {
 	_ = repo.CreateTask(ctx, task)
 
 	// Create multiple sessions for the same task (simulating session history)
-	session1 := &models.AgentSession{
+	session1 := &models.TaskSession{
 		ID:             "session-1",
 		TaskID:         "task-123",
 		AgentProfileID: "profile-1",
-		State:          models.AgentSessionStateCompleted,
+		State:          models.TaskSessionStateCompleted,
 	}
-	_ = repo.CreateAgentSession(ctx, session1)
+	_ = repo.CreateTaskSession(ctx, session1)
 
-	session2 := &models.AgentSession{
+	session2 := &models.TaskSession{
 		ID:             "session-2",
 		TaskID:         "task-123",
 		AgentProfileID: "profile-2",
-		State:          models.AgentSessionStateRunning,
+		State:          models.TaskSessionStateRunning,
 	}
-	_ = repo.CreateAgentSession(ctx, session2)
+	_ = repo.CreateTaskSession(ctx, session2)
 
-	// GetAgentSessionByTaskID should return the most recent session
-	retrieved, err := repo.GetAgentSessionByTaskID(ctx, "task-123")
+	// GetTaskSessionByTaskID should return the most recent session
+	retrieved, err := repo.GetTaskSessionByTaskID(ctx, "task-123")
 	if err != nil {
 		t.Fatalf("failed to get agent session by task ID: %v", err)
 	}
@@ -856,35 +856,35 @@ func TestSQLiteRepository_AgentSessionByTaskID(t *testing.T) {
 		t.Errorf("expected session-2 (most recent), got %s", retrieved.ID)
 	}
 
-	// GetActiveAgentSessionByTaskID should return the active session
-	active, err := repo.GetActiveAgentSessionByTaskID(ctx, "task-123")
+	// GetActiveTaskSessionByTaskID should return the active session
+	active, err := repo.GetActiveTaskSessionByTaskID(ctx, "task-123")
 	if err != nil {
 		t.Fatalf("failed to get active agent session by task ID: %v", err)
 	}
 	if active.ID != "session-2" {
 		t.Errorf("expected session-2 (active), got %s", active.ID)
 	}
-	if active.State != models.AgentSessionStateRunning {
+	if active.State != models.TaskSessionStateRunning {
 		t.Errorf("expected state 'running', got %s", active.State)
 	}
 
 	// Test when no active session exists
-	session2.State = models.AgentSessionStateCompleted
-	_ = repo.UpdateAgentSession(ctx, session2)
+	session2.State = models.TaskSessionStateCompleted
+	_ = repo.UpdateTaskSession(ctx, session2)
 
-	_, err = repo.GetActiveAgentSessionByTaskID(ctx, "task-123")
+	_, err = repo.GetActiveTaskSessionByTaskID(ctx, "task-123")
 	if err == nil {
 		t.Error("expected error when no active session exists")
 	}
 
 	// Test for nonexistent task
-	_, err = repo.GetAgentSessionByTaskID(ctx, "nonexistent-task")
+	_, err = repo.GetTaskSessionByTaskID(ctx, "nonexistent-task")
 	if err == nil {
 		t.Error("expected error for nonexistent task")
 	}
 }
 
-func TestSQLiteRepository_ListAgentSessions(t *testing.T) {
+func TestSQLiteRepository_ListTaskSessions(t *testing.T) {
 	repo, cleanup := createTestSQLiteRepo(t)
 	defer cleanup()
 	ctx := context.Background()
@@ -900,12 +900,12 @@ func TestSQLiteRepository_ListAgentSessions(t *testing.T) {
 	_ = repo.CreateTask(ctx, task2)
 
 	// Create sessions for different tasks
-	_ = repo.CreateAgentSession(ctx, &models.AgentSession{ID: "session-1", TaskID: "task-1", AgentProfileID: "profile-1", State: models.AgentSessionStateCompleted})
-	_ = repo.CreateAgentSession(ctx, &models.AgentSession{ID: "session-2", TaskID: "task-1", AgentProfileID: "profile-1", State: models.AgentSessionStateRunning})
-	_ = repo.CreateAgentSession(ctx, &models.AgentSession{ID: "session-3", TaskID: "task-2", AgentProfileID: "profile-2", State: models.AgentSessionStateStarting})
+	_ = repo.CreateTaskSession(ctx, &models.TaskSession{ID: "session-1", TaskID: "task-1", AgentProfileID: "profile-1", State: models.TaskSessionStateCompleted})
+	_ = repo.CreateTaskSession(ctx, &models.TaskSession{ID: "session-2", TaskID: "task-1", AgentProfileID: "profile-1", State: models.TaskSessionStateRunning})
+	_ = repo.CreateTaskSession(ctx, &models.TaskSession{ID: "session-3", TaskID: "task-2", AgentProfileID: "profile-2", State: models.TaskSessionStateStarting})
 
 	// List sessions for task-1
-	sessions, err := repo.ListAgentSessions(ctx, "task-1")
+	sessions, err := repo.ListTaskSessions(ctx, "task-1")
 	if err != nil {
 		t.Fatalf("failed to list agent sessions: %v", err)
 	}
@@ -914,7 +914,7 @@ func TestSQLiteRepository_ListAgentSessions(t *testing.T) {
 	}
 
 	// List all active sessions
-	activeSessions, err := repo.ListActiveAgentSessions(ctx)
+	activeSessions, err := repo.ListActiveTaskSessions(ctx)
 	if err != nil {
 		t.Fatalf("failed to list active agent sessions: %v", err)
 	}
@@ -924,13 +924,13 @@ func TestSQLiteRepository_ListAgentSessions(t *testing.T) {
 
 	// Verify only active statuses are returned
 	for _, s := range activeSessions {
-		if s.State != models.AgentSessionStateStarting && s.State != models.AgentSessionStateRunning && s.State != models.AgentSessionStateWaitingForInput {
+		if s.State != models.TaskSessionStateStarting && s.State != models.TaskSessionStateRunning && s.State != models.TaskSessionStateWaitingForInput {
 			t.Errorf("expected active state, got %s", s.State)
 		}
 	}
 }
 
-func TestSQLiteRepository_UpdateAgentSessionState(t *testing.T) {
+func TestSQLiteRepository_UpdateTaskSessionState(t *testing.T) {
 	repo, cleanup := createTestSQLiteRepo(t)
 	defer cleanup()
 	ctx := context.Background()
@@ -944,21 +944,21 @@ func TestSQLiteRepository_UpdateAgentSessionState(t *testing.T) {
 	_ = repo.CreateTask(ctx, task)
 
 	// Create an agent session
-	session := &models.AgentSession{
+	session := &models.TaskSession{
 		ID:             "session-123",
 		TaskID:         "task-123",
 		AgentProfileID: "profile-1",
-		State:          models.AgentSessionStateStarting,
+		State:          models.TaskSessionStateStarting,
 	}
-	_ = repo.CreateAgentSession(ctx, session)
+	_ = repo.CreateTaskSession(ctx, session)
 
 	// Update to running status
-	err := repo.UpdateAgentSessionState(ctx, "session-123", models.AgentSessionStateRunning, "")
+	err := repo.UpdateTaskSessionState(ctx, "session-123", models.TaskSessionStateRunning, "")
 	if err != nil {
 		t.Fatalf("failed to update agent session status: %v", err)
 	}
-	retrieved, _ := repo.GetAgentSession(ctx, "session-123")
-	if retrieved.State != models.AgentSessionStateRunning {
+	retrieved, _ := repo.GetTaskSession(ctx, "session-123")
+	if retrieved.State != models.TaskSessionStateRunning {
 		t.Errorf("expected state 'running', got %s", retrieved.State)
 	}
 	if retrieved.CompletedAt != nil {
@@ -966,12 +966,12 @@ func TestSQLiteRepository_UpdateAgentSessionState(t *testing.T) {
 	}
 
 	// Update to completed status (should set CompletedAt)
-	err = repo.UpdateAgentSessionState(ctx, "session-123", models.AgentSessionStateCompleted, "")
+	err = repo.UpdateTaskSessionState(ctx, "session-123", models.TaskSessionStateCompleted, "")
 	if err != nil {
 		t.Fatalf("failed to update agent session status to completed: %v", err)
 	}
-	retrieved, _ = repo.GetAgentSession(ctx, "session-123")
-	if retrieved.State != models.AgentSessionStateCompleted {
+	retrieved, _ = repo.GetTaskSession(ctx, "session-123")
+	if retrieved.State != models.TaskSessionStateCompleted {
 		t.Errorf("expected state 'completed', got %s", retrieved.State)
 	}
 	if retrieved.CompletedAt == nil {
@@ -979,20 +979,20 @@ func TestSQLiteRepository_UpdateAgentSessionState(t *testing.T) {
 	}
 
 	// Test failed status with error message
-	session2 := &models.AgentSession{
+	session2 := &models.TaskSession{
 		ID:             "session-456",
 		TaskID:         "task-123",
 		AgentProfileID: "profile-1",
-		State:          models.AgentSessionStateRunning,
+		State:          models.TaskSessionStateRunning,
 	}
-	_ = repo.CreateAgentSession(ctx, session2)
+	_ = repo.CreateTaskSession(ctx, session2)
 
-	err = repo.UpdateAgentSessionState(ctx, "session-456", models.AgentSessionStateFailed, "connection timeout")
+	err = repo.UpdateTaskSessionState(ctx, "session-456", models.TaskSessionStateFailed, "connection timeout")
 	if err != nil {
 		t.Fatalf("failed to update agent session status to failed: %v", err)
 	}
-	retrieved, _ = repo.GetAgentSession(ctx, "session-456")
-	if retrieved.State != models.AgentSessionStateFailed {
+	retrieved, _ = repo.GetTaskSession(ctx, "session-456")
+	if retrieved.State != models.TaskSessionStateFailed {
 		t.Errorf("expected state 'failed', got %s", retrieved.State)
 	}
 	if retrieved.ErrorMessage != "connection timeout" {
@@ -1003,20 +1003,20 @@ func TestSQLiteRepository_UpdateAgentSessionState(t *testing.T) {
 	}
 
 	// Test stopped status
-	session3 := &models.AgentSession{
+	session3 := &models.TaskSession{
 		ID:             "session-789",
 		TaskID:         "task-123",
 		AgentProfileID: "profile-1",
-		State:          models.AgentSessionStateRunning,
+		State:          models.TaskSessionStateRunning,
 	}
-	_ = repo.CreateAgentSession(ctx, session3)
+	_ = repo.CreateTaskSession(ctx, session3)
 
-	err = repo.UpdateAgentSessionState(ctx, "session-789", models.AgentSessionStateCancelled, "")
+	err = repo.UpdateTaskSessionState(ctx, "session-789", models.TaskSessionStateCancelled, "")
 	if err != nil {
 		t.Fatalf("failed to update agent session status to stopped: %v", err)
 	}
-	retrieved, _ = repo.GetAgentSession(ctx, "session-789")
-	if retrieved.State != models.AgentSessionStateCancelled {
+	retrieved, _ = repo.GetTaskSession(ctx, "session-789")
+	if retrieved.State != models.TaskSessionStateCancelled {
 		t.Errorf("expected state 'cancelled', got %s", retrieved.State)
 	}
 	if retrieved.CompletedAt == nil {
@@ -1024,7 +1024,7 @@ func TestSQLiteRepository_UpdateAgentSessionState(t *testing.T) {
 	}
 
 	// Test nonexistent session
-	err = repo.UpdateAgentSessionState(ctx, "nonexistent", models.AgentSessionStateRunning, "")
+	err = repo.UpdateTaskSessionState(ctx, "nonexistent", models.TaskSessionStateRunning, "")
 	if err == nil {
 		t.Error("expected error for updating nonexistent session status")
 	}

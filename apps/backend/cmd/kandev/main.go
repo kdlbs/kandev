@@ -423,10 +423,10 @@ func main() {
 	// Set up historical logs provider for task subscriptions
 	// Uses messages instead of execution logs - all agent messages are now messages
 	gateway.Hub.SetHistoricalLogsProvider(func(ctx context.Context, taskID string) ([]*ws.Message, error) {
-		var session *models.AgentSession
-		session, err = taskRepo.GetActiveAgentSessionByTaskID(ctx, taskID)
+		var session *models.TaskSession
+		session, err = taskRepo.GetActiveTaskSessionByTaskID(ctx, taskID)
 		if err != nil {
-			session, err = taskRepo.GetAgentSessionByTaskID(ctx, taskID)
+			session, err = taskRepo.GetTaskSessionByTaskID(ctx, taskID)
 			if err != nil {
 				return nil, nil
 			}
@@ -442,7 +442,7 @@ func main() {
 			action := ws.ActionMessageAdded
 			payload := map[string]interface{}{
 				"message_id":       message.ID,
-				"agent_session_id": message.AgentSessionID,
+				"task_session_id": message.TaskSessionID,
 				"task_id":          message.TaskID,
 				"author_type":      string(message.AuthorType),
 				"author_id":        message.AuthorID,
@@ -462,7 +462,7 @@ func main() {
 		}
 
 		// Also send current git status if available
-		session, err = taskRepo.GetActiveAgentSessionByTaskID(ctx, taskID)
+		session, err = taskRepo.GetActiveTaskSessionByTaskID(ctx, taskID)
 		if err == nil && session != nil && session.Metadata != nil {
 			if gitStatus, ok := session.Metadata["git_status"]; ok {
 				// Add task_id to the git status data
@@ -521,7 +521,7 @@ func main() {
 			zap.String("task_id", taskID),
 			zap.String("agent_id", agentID))
 
-		session, err := taskRepo.GetActiveAgentSessionByTaskID(ctx, taskID)
+		session, err := taskRepo.GetActiveTaskSessionByTaskID(ctx, taskID)
 		if err != nil {
 			log.Error("failed to resolve active agent session for input request",
 				zap.String("task_id", taskID),
@@ -531,7 +531,7 @@ func main() {
 
 		// Create a message from the agent
 		messageRecord, err := taskSvc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
-			AgentSessionID: session.ID,
+			TaskSessionID: session.ID,
 			TaskID:         taskID,
 			Content:        message,
 			AuthorType:     "agent",
@@ -548,7 +548,7 @@ func main() {
 		// Broadcast message.added notification to task subscribers
 		notification, _ := ws.NewNotification(ws.ActionMessageAdded, map[string]interface{}{
 			"task_id":          taskID,
-			"agent_session_id": session.ID,
+			"task_session_id": session.ID,
 			"message":          messageRecord.ToAPI(),
 			"requests_input":   true,
 		})
@@ -581,7 +581,7 @@ func main() {
 
 		payload := map[string]interface{}{
 			"task_id":          taskID,
-			"agent_session_id": agentSessionID,
+			"task_session_id": agentSessionID,
 			"message_id":       data["message_id"],
 			"author_type":      data["author_type"],
 			"author_id":        data["author_id"],
@@ -618,7 +618,7 @@ func main() {
 		}
 		payload := map[string]interface{}{
 			"message_id":       data["message_id"],
-			"agent_session_id": agentSessionID,
+			"task_session_id": agentSessionID,
 			"task_id":          taskID,
 			"author_type":      data["author_type"],
 			"author_id":        data["author_id"],
@@ -645,13 +645,13 @@ func main() {
 	}
 
 	// Subscribe to agent_session.state_changed events and broadcast to task subscribers
-	_, err = eventBus.Subscribe(events.AgentSessionStateChanged, func(ctx context.Context, event *bus.Event) error {
+	_, err = eventBus.Subscribe(events.TaskSessionStateChanged, func(ctx context.Context, event *bus.Event) error {
 		data := event.Data
 		taskID, _ := data["task_id"].(string)
 		if taskID == "" {
 			return nil
 		}
-		notification, err := ws.NewNotification(ws.ActionAgentSessionStateChanged, data)
+		notification, err := ws.NewNotification(ws.ActionTaskSessionStateChanged, data)
 		if err != nil {
 			log.Error("Failed to create agent_session.state_changed notification", zap.Error(err))
 			return nil
@@ -1023,7 +1023,7 @@ type messageCreatorAdapter struct {
 // CreateAgentMessage creates a message with author_type="agent"
 func (a *messageCreatorAdapter) CreateAgentMessage(ctx context.Context, taskID, content, agentSessionID string) error {
 	_, err := a.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
-		AgentSessionID: agentSessionID,
+		TaskSessionID: agentSessionID,
 		TaskID:         taskID,
 		Content:        content,
 		AuthorType:     "agent",
@@ -1034,7 +1034,7 @@ func (a *messageCreatorAdapter) CreateAgentMessage(ctx context.Context, taskID, 
 // CreateUserMessage creates a message with author_type="user"
 func (a *messageCreatorAdapter) CreateUserMessage(ctx context.Context, taskID, content, agentSessionID string) error {
 	_, err := a.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
-		AgentSessionID: agentSessionID,
+		TaskSessionID: agentSessionID,
 		TaskID:         taskID,
 		Content:        content,
 		AuthorType:     "user",
@@ -1061,7 +1061,7 @@ func (a *messageCreatorAdapter) CreateToolCallMessage(ctx context.Context, taskI
 	}
 
 	_, err := a.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
-		AgentSessionID: agentSessionID,
+		TaskSessionID: agentSessionID,
 		TaskID:         taskID,
 		Content:        title,
 		AuthorType:     "agent",
@@ -1079,7 +1079,7 @@ func (a *messageCreatorAdapter) UpdateToolCallMessage(ctx context.Context, taskI
 // CreateSessionMessage creates a message for non-chat session updates (status/progress/error/etc).
 func (a *messageCreatorAdapter) CreateSessionMessage(ctx context.Context, taskID, content, agentSessionID, messageType string, metadata map[string]interface{}, requestsInput bool) error {
 	_, err := a.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
-		AgentSessionID: agentSessionID,
+		TaskSessionID: agentSessionID,
 		TaskID:         taskID,
 		Content:        content,
 		AuthorType:     "agent",

@@ -20,7 +20,7 @@ export type BackendMessageType =
   | 'column.deleted'
   | 'message.added'
   | 'message.updated'
-  | 'agent_session.state_changed'
+  | 'task_session.state_changed'
   | 'executor.created'
   | 'executor.updated'
   | 'executor.deleted'
@@ -130,7 +130,7 @@ export type ColumnPayload = {
 export type MessageAddedPayload = {
   task_id: string;
   message_id: string;
-  agent_session_id: string;
+  task_session_id: string;
   author_type: 'user' | 'agent';
   author_id?: string;
   content: string;
@@ -140,9 +140,9 @@ export type MessageAddedPayload = {
   created_at: string;
 };
 
-export type AgentSessionStateChangedPayload = {
+export type TaskSessionStateChangedPayload = {
   task_id: string;
-  agent_session_id: string;
+  task_session_id: string;
   old_state?: string;
   new_state: string;
 };
@@ -245,7 +245,7 @@ export type BackendMessageMap = {
   'column.deleted': BackendMessage<'column.deleted', ColumnPayload>;
   'message.added': BackendMessage<'message.added', MessageAddedPayload>;
   'message.updated': BackendMessage<'message.updated', MessageAddedPayload>;
-  'agent_session.state_changed': BackendMessage<'agent_session.state_changed', AgentSessionStateChangedPayload>;
+  'task_session.state_changed': BackendMessage<'task_session.state_changed', TaskSessionStateChangedPayload>;
   'executor.created': BackendMessage<'executor.created', ExecutorPayload>;
   'executor.updated': BackendMessage<'executor.updated', ExecutorPayload>;
   'executor.deleted': BackendMessage<'executor.deleted', ExecutorPayload>;

@@ -80,8 +80,8 @@ func (c *RepositoryController) UpdateRepository(ctx context.Context, req dto.Upd
 
 func (c *RepositoryController) DeleteRepository(ctx context.Context, req dto.DeleteRepositoryRequest) (dto.SuccessResponse, error) {
 	if err := c.service.DeleteRepository(ctx, req.ID); err != nil {
-		if errors.Is(err, service.ErrActiveAgentSessions) {
-			return dto.SuccessResponse{}, ErrActiveAgentSessions
+		if errors.Is(err, service.ErrActiveTaskSessions) {
+			return dto.SuccessResponse{}, ErrActiveTaskSessions
 		}
 		return dto.SuccessResponse{}, err
 	}

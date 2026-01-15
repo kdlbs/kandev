@@ -145,7 +145,7 @@ func (h *ExecutorHandlers) httpUpdateExecutor(c *gin.Context) {
 func (h *ExecutorHandlers) httpDeleteExecutor(c *gin.Context) {
 	resp, err := h.controller.DeleteExecutor(c.Request.Context(), dto.DeleteExecutorRequest{ID: c.Param("id")})
 	if err != nil {
-		if errors.Is(err, controller.ErrActiveAgentSessions) {
+		if errors.Is(err, controller.ErrActiveTaskSessions) {
 			c.JSON(http.StatusConflict, gin.H{"error": "executor is used by an active agent session"})
 			return
 		}
@@ -273,7 +273,7 @@ func (h *ExecutorHandlers) wsDeleteExecutor(ctx context.Context, msg *ws.Message
 	resp, err := h.controller.DeleteExecutor(ctx, dto.DeleteExecutorRequest{ID: req.ID})
 	if err != nil {
 		h.logger.Error("failed to delete executor", zap.Error(err))
-		if errors.Is(err, controller.ErrActiveAgentSessions) {
+		if errors.Is(err, controller.ErrActiveTaskSessions) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "executor is used by an active agent session", nil)
 		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to delete executor", nil)

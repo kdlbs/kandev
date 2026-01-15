@@ -14,7 +14,7 @@ export function registerMessagesHandlers(store: StoreApi<AppState>): WsHandlers 
       });
       state.addMessage({
         id: payload.message_id,
-        agent_session_id: payload.agent_session_id,
+        task_session_id: payload.task_session_id,
         task_id: payload.task_id,
         author_type: payload.author_type,
         author_id: payload.author_id,
@@ -32,7 +32,7 @@ export function registerMessagesHandlers(store: StoreApi<AppState>): WsHandlers 
       const state = store.getState();
       state.updateMessage({
         id: payload.message_id,
-        agent_session_id: payload.agent_session_id,
+        task_session_id: payload.task_session_id,
         task_id: payload.task_id,
         author_type: payload.author_type,
         author_id: payload.author_id,

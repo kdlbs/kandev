@@ -29,7 +29,7 @@ type TaskExecutionStopper interface {
 	StopTask(ctx context.Context, taskID, reason string, force bool) error
 }
 
-var ErrActiveAgentSessions = errors.New("active agent sessions exist")
+var ErrActiveTaskSessions = errors.New("active agent sessions exist")
 
 // Service provides task business logic
 type Service struct {
@@ -208,7 +208,7 @@ type UpdateEnvironmentRequest struct {
 }
 
 type ListMessagesRequest struct {
-	AgentSessionID string
+	TaskSessionID string
 	Limit          int
 	Before         string
 	After          string
@@ -839,13 +839,13 @@ func (s *Service) DeleteRepository(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	active, err := s.repo.HasActiveAgentSessionsByRepository(ctx, id)
+	active, err := s.repo.HasActiveTaskSessionsByRepository(ctx, id)
 	if err != nil {
 		s.logger.Error("failed to check active agent sessions for repository", zap.String("repository_id", id), zap.Error(err))
 		return err
 	}
 	if active {
-		return ErrActiveAgentSessions
+		return ErrActiveTaskSessions
 	}
 	if err := s.repo.DeleteRepository(ctx, id); err != nil {
 		s.logger.Error("failed to delete repository", zap.String("repository_id", id), zap.Error(err))
@@ -985,13 +985,13 @@ func (s *Service) DeleteExecutor(ctx context.Context, id string) error {
 	if executor.IsSystem {
 		return fmt.Errorf("system executors cannot be deleted")
 	}
-	active, err := s.repo.HasActiveAgentSessionsByExecutor(ctx, id)
+	active, err := s.repo.HasActiveTaskSessionsByExecutor(ctx, id)
 	if err != nil {
 		s.logger.Error("failed to check active agent sessions for executor", zap.String("executor_id", id), zap.Error(err))
 		return err
 	}
 	if active {
-		return ErrActiveAgentSessions
+		return ErrActiveTaskSessions
 	}
 	if err := s.repo.DeleteExecutor(ctx, id); err != nil {
 		return err
@@ -1072,13 +1072,13 @@ func (s *Service) DeleteEnvironment(ctx context.Context, id string) error {
 	if environment.IsSystem {
 		return fmt.Errorf("system environments cannot be deleted")
 	}
-	active, err := s.repo.HasActiveAgentSessionsByEnvironment(ctx, id)
+	active, err := s.repo.HasActiveTaskSessionsByEnvironment(ctx, id)
 	if err != nil {
 		s.logger.Error("failed to check active agent sessions for environment", zap.String("environment_id", id), zap.Error(err))
 		return err
 	}
 	if active {
-		return ErrActiveAgentSessions
+		return ErrActiveTaskSessions
 	}
 	if err := s.repo.DeleteEnvironment(ctx, id); err != nil {
 		return err
@@ -1276,7 +1276,7 @@ func (s *Service) publishEnvironmentEvent(ctx context.Context, eventType string,
 
 // CreateMessageRequest contains the data for creating a new message
 type CreateMessageRequest struct {
-	AgentSessionID string                 `json:"agent_session_id"`
+	TaskSessionID string                 `json:"agent_session_id"`
 	TaskID         string                 `json:"task_id,omitempty"`
 	Content        string                 `json:"content"`
 	AuthorType     string                 `json:"author_type,omitempty"` // "user" or "agent", defaults to "user"
@@ -1288,7 +1288,7 @@ type CreateMessageRequest struct {
 
 // CreateMessage creates a new message on an agent session
 func (s *Service) CreateMessage(ctx context.Context, req *CreateMessageRequest) (*models.Message, error) {
-	session, err := s.repo.GetAgentSession(ctx, req.AgentSessionID)
+	session, err := s.repo.GetTaskSession(ctx, req.TaskSessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -1310,7 +1310,7 @@ func (s *Service) CreateMessage(ctx context.Context, req *CreateMessageRequest) 
 
 	message := &models.Message{
 		ID:             uuid.New().String(),
-		AgentSessionID: req.AgentSessionID,
+		TaskSessionID: req.TaskSessionID,
 		TaskID:         taskID,
 		AuthorType:     authorType,
 		AuthorID:       req.AuthorID,
@@ -1331,7 +1331,7 @@ func (s *Service) CreateMessage(ctx context.Context, req *CreateMessageRequest) 
 
 	s.logger.Info("message created",
 		zap.String("message_id", message.ID),
-		zap.String("agent_session_id", message.AgentSessionID),
+		zap.String("agent_session_id", message.TaskSessionID),
 		zap.String("author_type", string(message.AuthorType)))
 
 	return message, nil
@@ -1356,7 +1356,7 @@ func (s *Service) ListMessagesPaginated(ctx context.Context, req ListMessagesReq
 	if limit > MaxMessagesPageSize {
 		limit = MaxMessagesPageSize
 	}
-	return s.repo.ListMessagesPaginated(ctx, req.AgentSessionID, repository.ListMessagesOptions{
+	return s.repo.ListMessagesPaginated(ctx, req.TaskSessionID, repository.ListMessagesOptions{
 		Limit:  limit,
 		Before: req.Before,
 		After:  req.After,
@@ -1427,7 +1427,7 @@ func (s *Service) publishMessageEvent(ctx context.Context, eventType string, mes
 
 	data := map[string]interface{}{
 		"message_id":       message.ID,
-		"agent_session_id": message.AgentSessionID,
+		"agent_session_id": message.TaskSessionID,
 		"task_id":          message.TaskID,
 		"author_type":      string(message.AuthorType),
 		"author_id":        message.AuthorID,

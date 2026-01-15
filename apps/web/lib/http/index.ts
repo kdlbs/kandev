@@ -159,8 +159,8 @@ export async function fetchTask(taskId: string, options?: ApiRequestOptions) {
   return fetchJson<Task>(`/api/v1/tasks/${taskId}`, options);
 }
 
-export async function listAgentSessionMessages(
-  agentSessionId: string,
+export async function listTaskSessionMessages(
+  taskSessionId: string,
   params?: { limit?: number; before?: string; after?: string; sort?: 'asc' | 'desc' },
   options?: ApiRequestOptions
 ) {
@@ -170,7 +170,7 @@ export async function listAgentSessionMessages(
   if (params?.after) query.set('after', params.after);
   if (params?.sort) query.set('sort', params.sort);
   const suffix = query.toString();
-  const url = `/api/v1/agent-sessions/${agentSessionId}/messages${suffix ? `?${suffix}` : ''}`;
+  const url = `/api/v1/task-sessions/${taskSessionId}/messages${suffix ? `?${suffix}` : ''}`;
   return fetchJson<ListMessagesResponse>(url, options);
 }
 

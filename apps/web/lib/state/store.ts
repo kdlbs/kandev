@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import type {
   Agent,
   AgentDiscovery,
-  AgentSessionState,
+  TaskSessionState,
   Branch,
   Environment,
   Executor,
@@ -172,7 +172,7 @@ export type AppState = {
   gitStatus: GitStatusState;
   connection: ConnectionState;
   messages: MessagesState;
-  agentSessionStatesByTaskId: Record<string, AgentSessionState>;
+  taskSessionStatesByTaskId: Record<string, TaskSessionState>;
   hydrate: (state: Partial<AppState>) => void;
   setActiveWorkspace: (workspaceId: string | null) => void;
   setWorkspaces: (workspaces: WorkspaceState['items']) => void;
@@ -202,7 +202,7 @@ export type AppState = {
   prependMessages: (messages: Message[], meta?: { hasMore?: boolean; oldestCursor?: string | null }) => void;
   setMessagesMetadata: (meta: { hasMore?: boolean; isLoading?: boolean; oldestCursor?: string | null }) => void;
   setMessagesLoading: (loading: boolean) => void;
-  setAgentSessionState: (taskId: string, state: AgentSessionState) => void;
+  setTaskSessionState: (taskId: string, state: TaskSessionState) => void;
   setGitStatus: (taskId: string, gitStatus: Omit<GitStatusState, 'taskId'>) => void;
   clearGitStatus: () => void;
   bumpAgentProfilesVersion: () => void;
@@ -243,7 +243,7 @@ const defaultState: AppState = {
   },
   connection: { status: 'disconnected', error: null },
   messages: { sessionId: null, items: [], isLoading: false, hasMore: false, oldestCursor: null },
-  agentSessionStatesByTaskId: {},
+  taskSessionStatesByTaskId: {},
   hydrate: () => undefined,
   setActiveWorkspace: () => undefined,
   setWorkspaces: () => undefined,
@@ -269,7 +269,7 @@ const defaultState: AppState = {
   prependMessages: () => undefined,
   setMessagesMetadata: () => undefined,
   setMessagesLoading: () => undefined,
-  setAgentSessionState: () => undefined,
+  setTaskSessionState: () => undefined,
   setGitStatus: () => undefined,
   clearGitStatus: () => undefined,
   bumpAgentProfilesVersion: () => undefined,
@@ -304,7 +304,7 @@ function mergeInitialState(
   | 'prependMessages'
   | 'setMessagesMetadata'
   | 'setMessagesLoading'
-  | 'setAgentSessionState'
+  | 'setTaskSessionState'
   | 'setGitStatus'
   | 'clearGitStatus'
   | 'bumpAgentProfilesVersion'
@@ -330,9 +330,9 @@ function mergeInitialState(
     gitStatus: { ...defaultState.gitStatus, ...initialState.gitStatus },
     connection: { ...defaultState.connection, ...initialState.connection },
     messages: { ...defaultState.messages, ...initialState.messages },
-    agentSessionStatesByTaskId: {
-      ...defaultState.agentSessionStatesByTaskId,
-      ...initialState.agentSessionStatesByTaskId,
+    taskSessionStatesByTaskId: {
+      ...defaultState.taskSessionStatesByTaskId,
+      ...initialState.taskSessionStatesByTaskId,
     },
   };
 }
@@ -363,8 +363,8 @@ export function createAppStore(initialState?: Partial<AppState>) {
           if (state.diffs) Object.assign(draft.diffs, state.diffs);
           if (state.connection) Object.assign(draft.connection, state.connection);
           if (state.messages) Object.assign(draft.messages, state.messages);
-          if (state.agentSessionStatesByTaskId) {
-            Object.assign(draft.agentSessionStatesByTaskId, state.agentSessionStatesByTaskId);
+          if (state.taskSessionStatesByTaskId) {
+            Object.assign(draft.taskSessionStatesByTaskId, state.taskSessionStatesByTaskId);
           }
         }),
       setActiveWorkspace: (workspaceId) =>
@@ -487,10 +487,10 @@ export function createAppStore(initialState?: Partial<AppState>) {
             draft.messages.items = [];
           }
           if (!draft.messages.sessionId) {
-            draft.messages.sessionId = message.agent_session_id;
+            draft.messages.sessionId = message.task_session_id;
           }
           // Only add if this message is for the current session
-          if (draft.messages.sessionId === message.agent_session_id) {
+          if (draft.messages.sessionId === message.task_session_id) {
             // Check if message already exists (avoid duplicates)
             const exists = draft.messages.items.some((item) => item.id === message.id);
             if (!exists) {
@@ -504,10 +504,10 @@ export function createAppStore(initialState?: Partial<AppState>) {
       updateMessage: (message) =>
         set((draft) => {
           if (!draft.messages.sessionId) {
-            draft.messages.sessionId = message.agent_session_id;
+            draft.messages.sessionId = message.task_session_id;
           }
           // Only update if this message is for the current session
-          if (draft.messages.sessionId === message.agent_session_id && draft.messages.items) {
+          if (draft.messages.sessionId === message.task_session_id && draft.messages.items) {
             const index = draft.messages.items.findIndex((item) => item.id === message.id);
             if (index !== -1) {
               draft.messages.items[index] = message;
@@ -552,9 +552,9 @@ export function createAppStore(initialState?: Partial<AppState>) {
         set((draft) => {
           draft.messages.isLoading = loading;
         }),
-      setAgentSessionState: (taskId, state) =>
+      setTaskSessionState: (taskId, state) =>
         set((draft) => {
-          draft.agentSessionStatesByTaskId[taskId] = state;
+          draft.taskSessionStatesByTaskId[taskId] = state;
         }),
       setGitStatus: (taskId, gitStatus) =>
         set((draft) => {

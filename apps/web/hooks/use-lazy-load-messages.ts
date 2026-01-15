@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { listAgentSessionMessages } from '@/lib/http';
+import { listTaskSessionMessages } from '@/lib/http';
 import { useAppStore } from '@/components/state-provider';
 
 export function useLazyLoadMessages(sessionId: string | null) {
@@ -14,7 +14,7 @@ export function useLazyLoadMessages(sessionId: string | null) {
 
     setMessagesMetadata({ isLoading: true });
     try {
-      const response = await listAgentSessionMessages(sessionId, {
+      const response = await listTaskSessionMessages(sessionId, {
         limit: 20,
         before: oldestCursor,
         sort: 'desc',

@@ -82,7 +82,7 @@ export function TaskChatPanel({
       ? {
           id: 'task-description',
           task_id: taskId ?? '',
-          agent_session_id: messagesState?.sessionId ?? '',
+          task_session_id: messagesState?.sessionId ?? '',
           author_type: 'user',
           content: taskDescription,
           type: 'message',

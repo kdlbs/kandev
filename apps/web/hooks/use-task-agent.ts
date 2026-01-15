@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import { useAppStore } from '@/components/state-provider';
-import type { AgentSessionState, Task } from '@/lib/types/http';
+import type { TaskSessionState, Task } from '@/lib/types/http';
 
 interface UseTaskAgentReturn {
   isAgentRunning: boolean;
   isAgentLoading: boolean;
-  agentSessionId: string | null;
-  agentSessionState: AgentSessionState | null;
+  taskSessionId: string | null;
+  taskSessionState: TaskSessionState | null;
   worktreePath: string | null;
   worktreeBranch: string | null;
   handleStartAgent: (agentProfileId: string) => Promise<void>;
@@ -17,27 +17,27 @@ interface UseTaskAgentReturn {
 export function useTaskAgent(task: Task | null): UseTaskAgentReturn {
   const [isAgentRunning, setIsAgentRunning] = useState(false);
   const [isAgentLoading, setIsAgentLoading] = useState(false);
-  const [agentSessionId, setAgentSessionId] = useState<string | null>(null);
-  const [agentSessionState, setAgentSessionState] = useState<AgentSessionState | null>(null);
+  const [taskSessionId, setAgentSessionId] = useState<string | null>(null);
+  const [taskSessionState, setTaskSessionState] = useState<TaskSessionState | null>(null);
   const [worktreePath, setWorktreePath] = useState<string | null>(task?.worktree_path ?? null);
   const [worktreeBranch, setWorktreeBranch] = useState<string | null>(task?.worktree_branch ?? null);
   const connectionStatus = useAppStore((state) => state.connection.status);
-  const wsAgentSessionState = useAppStore((state) =>
-    task?.id ? state.agentSessionStatesByTaskId[task.id] : undefined
+  const wsTaskSessionState = useAppStore((state) =>
+    task?.id ? state.taskSessionStatesByTaskId[task.id] : undefined
   );
 
   useEffect(() => {
     setIsAgentRunning(false);
     setAgentSessionId(null);
-    setAgentSessionState(null);
+    setTaskSessionState(null);
     setWorktreePath(task?.worktree_path ?? null);
     setWorktreeBranch(task?.worktree_branch ?? null);
   }, [task?.id, task?.worktree_path, task?.worktree_branch]);
 
   useEffect(() => {
-    if (!wsAgentSessionState) return;
-    setAgentSessionState(wsAgentSessionState as AgentSessionState);
-  }, [wsAgentSessionState]);
+    if (!wsTaskSessionState) return;
+    setTaskSessionState(wsTaskSessionState as TaskSessionState);
+  }, [wsTaskSessionState]);
 
   // Fetch task execution status from orchestrator on mount
   useEffect(() => {
@@ -53,22 +53,22 @@ export function useTaskAgent(task: Task | null): UseTaskAgentReturn {
           has_execution: boolean;
           task_id: string;
           state?: string;
-          agent_session_id?: string;
+          task_session_id?: string;
         }>('task.execution', { task_id: task.id });
 
         console.log('[useTaskAgent] Task execution check:', response);
         if (response.has_execution) {
           setIsAgentRunning(true);
           if (response.state) {
-            setAgentSessionState(response.state as AgentSessionState);
+            setTaskSessionState(response.state as TaskSessionState);
           }
-          if (response.agent_session_id) {
-            setAgentSessionId(response.agent_session_id);
+          if (response.task_session_id) {
+            setAgentSessionId(response.task_session_id);
           }
         } else {
           setIsAgentRunning(false);
           setAgentSessionId(null);
-          setAgentSessionState(null);
+          setTaskSessionState(null);
         }
       } catch (err) {
         console.error('[useTaskAgent] Failed to check task execution:', err);
@@ -98,7 +98,7 @@ export function useTaskAgent(task: Task | null): UseTaskAgentReturn {
         success: boolean;
         task_id: string;
         agent_instance_id: string;
-        agent_session_id?: string;
+        task_session_id?: string;
         state: string;
         worktree_path?: string;
         worktree_branch?: string;
@@ -113,9 +113,9 @@ export function useTaskAgent(task: Task | null): UseTaskAgentReturn {
       }, 15000);
       console.log('[useTaskAgent] orchestrator.start response', response);
       setIsAgentRunning(true);
-      setAgentSessionState(response.state as AgentSessionState);
-      if (response?.agent_session_id) {
-        setAgentSessionId(response.agent_session_id);
+      setTaskSessionState(response.state as TaskSessionState);
+      if (response?.task_session_id) {
+        setAgentSessionId(response.task_session_id);
       }
 
       // Update worktree info from response
@@ -141,7 +141,7 @@ export function useTaskAgent(task: Task | null): UseTaskAgentReturn {
       await client.request('orchestrator.stop', { task_id: task.id }, 15000);
       setIsAgentRunning(false);
       setAgentSessionId(null);
-      setAgentSessionState(null);
+      setTaskSessionState(null);
     } catch (error) {
       console.error('Failed to stop agent:', error);
     } finally {
@@ -152,8 +152,8 @@ export function useTaskAgent(task: Task | null): UseTaskAgentReturn {
   return {
     isAgentRunning,
     isAgentLoading,
-    agentSessionId,
-    agentSessionState,
+    taskSessionId,
+    taskSessionState,
     worktreePath,
     worktreeBranch,
     handleStartAgent,

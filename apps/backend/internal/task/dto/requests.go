@@ -266,7 +266,7 @@ type DeleteTaskRequest struct {
 }
 
 type ListMessagesRequest struct {
-	AgentSessionID string
+	TaskSessionID string
 	Limit  int
 	Before string
 	After  string
@@ -274,7 +274,7 @@ type ListMessagesRequest struct {
 }
 
 type CreateMessageRequest struct {
-	AgentSessionID string
+	TaskSessionID string
 	Content       string
 	AuthorType    string
 	AuthorID      string

@@ -204,7 +204,7 @@ func (r *SQLiteRepository) initSchema() error {
 
 	CREATE TABLE IF NOT EXISTS task_messages (
 		id TEXT PRIMARY KEY,
-		agent_session_id TEXT NOT NULL,
+		task_session_id TEXT NOT NULL,
 		task_id TEXT DEFAULT '',
 		author_type TEXT NOT NULL DEFAULT 'user',
 		author_id TEXT DEFAULT '',
@@ -213,14 +213,14 @@ func (r *SQLiteRepository) initSchema() error {
 		type TEXT NOT NULL DEFAULT 'message',
 		metadata TEXT DEFAULT '{}',
 		created_at DATETIME NOT NULL,
-		FOREIGN KEY (agent_session_id) REFERENCES agent_sessions(id) ON DELETE CASCADE
+		FOREIGN KEY (task_session_id) REFERENCES task_sessions(id) ON DELETE CASCADE
 	);
 
-	CREATE INDEX IF NOT EXISTS idx_messages_session_id ON task_messages(agent_session_id);
+	CREATE INDEX IF NOT EXISTS idx_messages_session_id ON task_messages(task_session_id);
 	CREATE INDEX IF NOT EXISTS idx_messages_created_at ON task_messages(created_at);
-	CREATE INDEX IF NOT EXISTS idx_messages_session_created ON task_messages(agent_session_id, created_at);
+	CREATE INDEX IF NOT EXISTS idx_messages_session_created ON task_messages(task_session_id, created_at);
 
-	CREATE TABLE IF NOT EXISTS agent_sessions (
+	CREATE TABLE IF NOT EXISTS task_sessions (
 		id TEXT PRIMARY KEY,
 		task_id TEXT NOT NULL,
 		agent_instance_id TEXT NOT NULL DEFAULT '',
@@ -247,9 +247,9 @@ func (r *SQLiteRepository) initSchema() error {
 		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 	);
 
-	CREATE INDEX IF NOT EXISTS idx_agent_sessions_task_id ON agent_sessions(task_id);
-	CREATE INDEX IF NOT EXISTS idx_agent_sessions_state ON agent_sessions(state);
-	CREATE INDEX IF NOT EXISTS idx_agent_sessions_task_state ON agent_sessions(task_id, state);
+	CREATE INDEX IF NOT EXISTS idx_task_sessions_task_id ON task_sessions(task_id);
+	CREATE INDEX IF NOT EXISTS idx_task_sessions_state ON task_sessions(state);
+	CREATE INDEX IF NOT EXISTS idx_task_sessions_task_state ON task_sessions(task_id, state);
 	`
 
 	if _, err := r.db.Exec(schema); err != nil {
@@ -294,21 +294,21 @@ func (r *SQLiteRepository) initSchema() error {
 	if err := r.ensureColumn("task_messages", "metadata", "TEXT DEFAULT '{}'"); err != nil {
 		return err
 	}
-	if err := r.ensureColumn("task_messages", "agent_session_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+	if err := r.ensureColumn("task_messages", "task_session_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
 
 	// Ensure container_id column exists for existing databases
-	if err := r.ensureColumn("agent_sessions", "container_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+	if err := r.ensureColumn("task_sessions", "container_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
-	if err := r.ensureColumn("agent_sessions", "executor_id", "TEXT DEFAULT ''"); err != nil {
+	if err := r.ensureColumn("task_sessions", "executor_id", "TEXT DEFAULT ''"); err != nil {
 		return err
 	}
-	if err := r.ensureColumn("agent_sessions", "environment_id", "TEXT DEFAULT ''"); err != nil {
+	if err := r.ensureColumn("task_sessions", "environment_id", "TEXT DEFAULT ''"); err != nil {
 		return err
 	}
-	if err := r.ensureColumn("agent_sessions", "state", "TEXT NOT NULL DEFAULT 'CREATED'"); err != nil {
+	if err := r.ensureColumn("task_sessions", "state", "TEXT NOT NULL DEFAULT 'CREATED'"); err != nil {
 		return err
 	}
 
@@ -1178,9 +1178,9 @@ func (r *SQLiteRepository) CreateMessage(ctx context.Context, message *models.Me
 	}
 
 	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO task_messages (id, agent_session_id, task_id, author_type, author_id, content, requests_input, type, metadata, created_at)
+		INSERT INTO task_messages (id, task_session_id, task_id, author_type, author_id, content, requests_input, type, metadata, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, message.ID, message.AgentSessionID, message.TaskID, message.AuthorType, message.AuthorID, message.Content, requestsInput, messageType, metadataJSON, message.CreatedAt)
+	`, message.ID, message.TaskSessionID, message.TaskID, message.AuthorType, message.AuthorID, message.Content, requestsInput, messageType, metadataJSON, message.CreatedAt)
 
 	return err
 }
@@ -1192,9 +1192,9 @@ func (r *SQLiteRepository) GetMessage(ctx context.Context, id string) (*models.M
 	var messageType string
 	var metadataJSON string
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, agent_session_id, task_id, author_type, author_id, content, requests_input, type, metadata, created_at
+		SELECT id, task_session_id, task_id, author_type, author_id, content, requests_input, type, metadata, created_at
 		FROM task_messages WHERE id = ?
-	`, id).Scan(&message.ID, &message.AgentSessionID, &message.TaskID, &message.AuthorType, &message.AuthorID, &message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt)
+	`, id).Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.AuthorType, &message.AuthorID, &message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -1213,8 +1213,8 @@ func (r *SQLiteRepository) GetMessage(ctx context.Context, id string) (*models.M
 // ListMessages returns all messages for a session ordered by creation time.
 func (r *SQLiteRepository) ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, agent_session_id, task_id, author_type, author_id, content, requests_input, type, metadata, created_at
-		FROM task_messages WHERE agent_session_id = ? ORDER BY created_at ASC
+		SELECT id, task_session_id, task_id, author_type, author_id, content, requests_input, type, metadata, created_at
+		FROM task_messages WHERE task_session_id = ? ORDER BY created_at ASC
 	`, sessionID)
 	if err != nil {
 		return nil, err
@@ -1227,7 +1227,7 @@ func (r *SQLiteRepository) ListMessages(ctx context.Context, sessionID string) (
 		var requestsInput int
 		var messageType string
 		var metadataJSON string
-		err := rows.Scan(&message.ID, &message.AgentSessionID, &message.TaskID, &message.AuthorType, &message.AuthorID, &message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt)
+		err := rows.Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.AuthorType, &message.AuthorID, &message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt)
 		if err != nil {
 			return nil, err
 		}
@@ -1267,7 +1267,7 @@ func (r *SQLiteRepository) ListMessagesPaginated(ctx context.Context, sessionID 
 		if err != nil {
 			return nil, false, err
 		}
-		if cursor.AgentSessionID != sessionID {
+		if cursor.TaskSessionID != sessionID {
 			return nil, false, fmt.Errorf("message cursor not found: %s", opts.Before)
 		}
 	}
@@ -1277,14 +1277,14 @@ func (r *SQLiteRepository) ListMessagesPaginated(ctx context.Context, sessionID 
 		if err != nil {
 			return nil, false, err
 		}
-		if cursor.AgentSessionID != sessionID {
+		if cursor.TaskSessionID != sessionID {
 			return nil, false, fmt.Errorf("message cursor not found: %s", opts.After)
 		}
 	}
 
 	query := `
-		SELECT id, agent_session_id, task_id, author_type, author_id, content, requests_input, type, metadata, created_at
-		FROM task_messages WHERE agent_session_id = ?`
+		SELECT id, task_session_id, task_id, author_type, author_id, content, requests_input, type, metadata, created_at
+		FROM task_messages WHERE task_session_id = ?`
 	args := []interface{}{sessionID}
 	if cursor != nil {
 		if opts.Before != "" {
@@ -1312,7 +1312,7 @@ func (r *SQLiteRepository) ListMessagesPaginated(ctx context.Context, sessionID 
 		var requestsInput int
 		var messageType string
 		var metadataJSON string
-		err := rows.Scan(&message.ID, &message.AgentSessionID, &message.TaskID, &message.AuthorType, &message.AuthorID, &message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt)
+		err := rows.Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.AuthorType, &message.AuthorID, &message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt)
 		if err != nil {
 			return nil, false, err
 		}
@@ -1359,9 +1359,9 @@ func (r *SQLiteRepository) GetMessageByToolCallID(ctx context.Context, sessionID
 	var messageType string
 	var metadataJSON string
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, agent_session_id, task_id, author_type, author_id, content, requests_input, type, metadata, created_at
-		FROM task_messages WHERE agent_session_id = ? AND json_extract(metadata, '$.tool_call_id') = ?
-	`, sessionID, toolCallID).Scan(&message.ID, &message.AgentSessionID, &message.TaskID, &message.AuthorType, &message.AuthorID,
+		SELECT id, task_session_id, task_id, author_type, author_id, content, requests_input, type, metadata, created_at
+		FROM task_messages WHERE task_session_id = ? AND json_extract(metadata, '$.tool_call_id') = ?
+	`, sessionID, toolCallID).Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.AuthorType, &message.AuthorID,
 		&message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt)
 	if err != nil {
 		return nil, err
@@ -1598,7 +1598,7 @@ func (r *SQLiteRepository) ListRepositoryScripts(ctx context.Context, repository
 // Agent Session operations
 
 // CreateAgentSession creates a new agent session
-func (r *SQLiteRepository) CreateAgentSession(ctx context.Context, session *models.AgentSession) error {
+func (r *SQLiteRepository) CreateTaskSession(ctx context.Context, session *models.TaskSession) error {
 	if session.ID == "" {
 		session.ID = uuid.New().String()
 	}
@@ -1606,7 +1606,7 @@ func (r *SQLiteRepository) CreateAgentSession(ctx context.Context, session *mode
 	session.StartedAt = now
 	session.UpdatedAt = now
 	if session.State == "" {
-		session.State = models.AgentSessionStateCreated
+		session.State = models.TaskSessionStateCreated
 	}
 
 	metadataJSON, err := json.Marshal(session.Metadata)
@@ -1631,7 +1631,7 @@ func (r *SQLiteRepository) CreateAgentSession(ctx context.Context, session *mode
 	}
 
 	_, err = r.db.ExecContext(ctx, `
-		INSERT INTO agent_sessions (
+		INSERT INTO task_sessions (
 			id, task_id, agent_instance_id, container_id, agent_profile_id, executor_id, environment_id,
 			repository_id, base_branch, worktree_id, worktree_path, worktree_branch,
 			agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
@@ -1647,8 +1647,8 @@ func (r *SQLiteRepository) CreateAgentSession(ctx context.Context, session *mode
 }
 
 // GetAgentSession retrieves an agent session by ID
-func (r *SQLiteRepository) GetAgentSession(ctx context.Context, id string) (*models.AgentSession, error) {
-	session := &models.AgentSession{}
+func (r *SQLiteRepository) GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error) {
+	session := &models.TaskSession{}
 	var state string
 	var metadataJSON string
 	var agentProfileSnapshotJSON string
@@ -1662,7 +1662,7 @@ func (r *SQLiteRepository) GetAgentSession(ctx context.Context, id string) (*mod
 		       repository_id, base_branch, worktree_id, worktree_path, worktree_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 		       state, progress, error_message, metadata, started_at, completed_at, updated_at
-		FROM agent_sessions WHERE id = ?
+		FROM task_sessions WHERE id = ?
 	`, id).Scan(
 		&session.ID, &session.TaskID, &session.AgentInstanceID, &session.ContainerID, &session.AgentProfileID,
 		&session.ExecutorID, &session.EnvironmentID,
@@ -1678,7 +1678,7 @@ func (r *SQLiteRepository) GetAgentSession(ctx context.Context, id string) (*mod
 		return nil, err
 	}
 
-	session.State = models.AgentSessionState(state)
+	session.State = models.TaskSessionState(state)
 	if completedAt.Valid {
 		session.CompletedAt = &completedAt.Time
 	}
@@ -1712,8 +1712,8 @@ func (r *SQLiteRepository) GetAgentSession(ctx context.Context, id string) (*mod
 }
 
 // GetAgentSessionByTaskID retrieves the most recent agent session for a task
-func (r *SQLiteRepository) GetAgentSessionByTaskID(ctx context.Context, taskID string) (*models.AgentSession, error) {
-	session := &models.AgentSession{}
+func (r *SQLiteRepository) GetTaskSessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error) {
+	session := &models.TaskSession{}
 	var state string
 	var metadataJSON string
 	var agentProfileSnapshotJSON string
@@ -1727,7 +1727,7 @@ func (r *SQLiteRepository) GetAgentSessionByTaskID(ctx context.Context, taskID s
 		       repository_id, base_branch, worktree_id, worktree_path, worktree_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 		       state, progress, error_message, metadata, started_at, completed_at, updated_at
-		FROM agent_sessions WHERE task_id = ? ORDER BY started_at DESC LIMIT 1
+		FROM task_sessions WHERE task_id = ? ORDER BY started_at DESC LIMIT 1
 	`, taskID).Scan(
 		&session.ID, &session.TaskID, &session.AgentInstanceID, &session.ContainerID, &session.AgentProfileID,
 		&session.ExecutorID, &session.EnvironmentID,
@@ -1743,7 +1743,7 @@ func (r *SQLiteRepository) GetAgentSessionByTaskID(ctx context.Context, taskID s
 		return nil, err
 	}
 
-	session.State = models.AgentSessionState(state)
+	session.State = models.TaskSessionState(state)
 	if completedAt.Valid {
 		session.CompletedAt = &completedAt.Time
 	}
@@ -1777,8 +1777,8 @@ func (r *SQLiteRepository) GetAgentSessionByTaskID(ctx context.Context, taskID s
 }
 
 // GetActiveAgentSessionByTaskID retrieves the active (running/waiting) agent session for a task
-func (r *SQLiteRepository) GetActiveAgentSessionByTaskID(ctx context.Context, taskID string) (*models.AgentSession, error) {
-	session := &models.AgentSession{}
+func (r *SQLiteRepository) GetActiveTaskSessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error) {
+	session := &models.TaskSession{}
 	var state string
 	var metadataJSON string
 	var agentProfileSnapshotJSON string
@@ -1792,7 +1792,7 @@ func (r *SQLiteRepository) GetActiveAgentSessionByTaskID(ctx context.Context, ta
 		       repository_id, base_branch, worktree_id, worktree_path, worktree_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 		       state, progress, error_message, metadata, started_at, completed_at, updated_at
-		FROM agent_sessions
+		FROM task_sessions
 		WHERE task_id = ? AND state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
 		ORDER BY started_at DESC LIMIT 1
 	`, taskID).Scan(
@@ -1810,7 +1810,7 @@ func (r *SQLiteRepository) GetActiveAgentSessionByTaskID(ctx context.Context, ta
 		return nil, err
 	}
 
-	session.State = models.AgentSessionState(state)
+	session.State = models.TaskSessionState(state)
 	if completedAt.Valid {
 		session.CompletedAt = &completedAt.Time
 	}
@@ -1844,7 +1844,7 @@ func (r *SQLiteRepository) GetActiveAgentSessionByTaskID(ctx context.Context, ta
 }
 
 // UpdateAgentSession updates an existing agent session
-func (r *SQLiteRepository) UpdateAgentSession(ctx context.Context, session *models.AgentSession) error {
+func (r *SQLiteRepository) UpdateTaskSession(ctx context.Context, session *models.TaskSession) error {
 	session.UpdatedAt = time.Now().UTC()
 
 	metadataJSON, err := json.Marshal(session.Metadata)
@@ -1869,7 +1869,7 @@ func (r *SQLiteRepository) UpdateAgentSession(ctx context.Context, session *mode
 	}
 
 	result, err := r.db.ExecContext(ctx, `
-		UPDATE agent_sessions SET
+		UPDATE task_sessions SET
 			agent_instance_id = ?, container_id = ?, agent_profile_id = ?, executor_id = ?, environment_id = ?,
 			repository_id = ?, base_branch = ?, worktree_id = ?, worktree_path = ?, worktree_branch = ?,
 			agent_profile_snapshot = ?, executor_snapshot = ?, environment_snapshot = ?, repository_snapshot = ?,
@@ -1892,16 +1892,16 @@ func (r *SQLiteRepository) UpdateAgentSession(ctx context.Context, session *mode
 }
 
 // UpdateAgentSessionState updates just the state and error message of an agent session
-func (r *SQLiteRepository) UpdateAgentSessionState(ctx context.Context, id string, status models.AgentSessionState, errorMessage string) error {
+func (r *SQLiteRepository) UpdateTaskSessionState(ctx context.Context, id string, status models.TaskSessionState, errorMessage string) error {
 	now := time.Now().UTC()
 
 	var completedAt *time.Time
-	if status == models.AgentSessionStateCompleted || status == models.AgentSessionStateFailed || status == models.AgentSessionStateCancelled {
+	if status == models.TaskSessionStateCompleted || status == models.TaskSessionStateFailed || status == models.TaskSessionStateCancelled {
 		completedAt = &now
 	}
 
 	result, err := r.db.ExecContext(ctx, `
-		UPDATE agent_sessions SET state = ?, error_message = ?, completed_at = ?, updated_at = ? WHERE id = ?
+		UPDATE task_sessions SET state = ?, error_message = ?, completed_at = ?, updated_at = ? WHERE id = ?
 	`, string(status), errorMessage, completedAt, now, id)
 	if err != nil {
 		return err
@@ -1915,43 +1915,43 @@ func (r *SQLiteRepository) UpdateAgentSessionState(ctx context.Context, id strin
 }
 
 // ListAgentSessions returns all agent sessions for a task
-func (r *SQLiteRepository) ListAgentSessions(ctx context.Context, taskID string) ([]*models.AgentSession, error) {
+func (r *SQLiteRepository) ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, task_id, agent_instance_id, container_id, agent_profile_id, executor_id, environment_id,
 		       repository_id, base_branch, worktree_id, worktree_path, worktree_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 		       state, progress, error_message, metadata, started_at, completed_at, updated_at
-		FROM agent_sessions WHERE task_id = ? ORDER BY started_at DESC
+		FROM task_sessions WHERE task_id = ? ORDER BY started_at DESC
 	`, taskID)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
 
-	return r.scanAgentSessions(rows)
+	return r.scanTaskSessions(rows)
 }
 
 // ListActiveAgentSessions returns all active agent sessions across all tasks
-func (r *SQLiteRepository) ListActiveAgentSessions(ctx context.Context) ([]*models.AgentSession, error) {
+func (r *SQLiteRepository) ListActiveTaskSessions(ctx context.Context) ([]*models.TaskSession, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, task_id, agent_instance_id, container_id, agent_profile_id, executor_id, environment_id,
 		       repository_id, base_branch, worktree_id, worktree_path, worktree_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 		       state, progress, error_message, metadata, started_at, completed_at, updated_at
-		FROM agent_sessions WHERE state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT') ORDER BY started_at DESC
+		FROM task_sessions WHERE state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT') ORDER BY started_at DESC
 	`)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
 
-	return r.scanAgentSessions(rows)
+	return r.scanTaskSessions(rows)
 }
 
-func (r *SQLiteRepository) HasActiveAgentSessionsByAgentProfile(ctx context.Context, agentProfileID string) (bool, error) {
+func (r *SQLiteRepository) HasActiveTaskSessionsByAgentProfile(ctx context.Context, agentProfileID string) (bool, error) {
 	var exists int
 	err := r.db.QueryRowContext(ctx, `
-		SELECT 1 FROM agent_sessions
+		SELECT 1 FROM task_sessions
 		WHERE agent_profile_id = ? AND state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
 		LIMIT 1
 	`, agentProfileID).Scan(&exists)
@@ -1961,10 +1961,10 @@ func (r *SQLiteRepository) HasActiveAgentSessionsByAgentProfile(ctx context.Cont
 	return err == nil, err
 }
 
-func (r *SQLiteRepository) HasActiveAgentSessionsByExecutor(ctx context.Context, executorID string) (bool, error) {
+func (r *SQLiteRepository) HasActiveTaskSessionsByExecutor(ctx context.Context, executorID string) (bool, error) {
 	var exists int
 	err := r.db.QueryRowContext(ctx, `
-		SELECT 1 FROM agent_sessions
+		SELECT 1 FROM task_sessions
 		WHERE executor_id = ? AND state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
 		LIMIT 1
 	`, executorID).Scan(&exists)
@@ -1974,10 +1974,10 @@ func (r *SQLiteRepository) HasActiveAgentSessionsByExecutor(ctx context.Context,
 	return err == nil, err
 }
 
-func (r *SQLiteRepository) HasActiveAgentSessionsByEnvironment(ctx context.Context, environmentID string) (bool, error) {
+func (r *SQLiteRepository) HasActiveTaskSessionsByEnvironment(ctx context.Context, environmentID string) (bool, error) {
 	var exists int
 	err := r.db.QueryRowContext(ctx, `
-		SELECT 1 FROM agent_sessions
+		SELECT 1 FROM task_sessions
 		WHERE environment_id = ? AND state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
 		LIMIT 1
 	`, environmentID).Scan(&exists)
@@ -1987,11 +1987,11 @@ func (r *SQLiteRepository) HasActiveAgentSessionsByEnvironment(ctx context.Conte
 	return err == nil, err
 }
 
-func (r *SQLiteRepository) HasActiveAgentSessionsByRepository(ctx context.Context, repositoryID string) (bool, error) {
+func (r *SQLiteRepository) HasActiveTaskSessionsByRepository(ctx context.Context, repositoryID string) (bool, error) {
 	var exists int
 	err := r.db.QueryRowContext(ctx, `
 		SELECT 1
-		FROM agent_sessions s
+		FROM task_sessions s
 		INNER JOIN tasks t ON t.id = s.task_id
 		WHERE s.state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
 			AND t.repository_id = ?
@@ -2004,10 +2004,10 @@ func (r *SQLiteRepository) HasActiveAgentSessionsByRepository(ctx context.Contex
 }
 
 // scanAgentSessions is a helper to scan multiple agent session rows
-func (r *SQLiteRepository) scanAgentSessions(rows *sql.Rows) ([]*models.AgentSession, error) {
-	var result []*models.AgentSession
+func (r *SQLiteRepository) scanTaskSessions(rows *sql.Rows) ([]*models.TaskSession, error) {
+	var result []*models.TaskSession
 	for rows.Next() {
-		session := &models.AgentSession{}
+		session := &models.TaskSession{}
 		var state string
 		var metadataJSON string
 		var agentProfileSnapshotJSON string
@@ -2027,7 +2027,7 @@ func (r *SQLiteRepository) scanAgentSessions(rows *sql.Rows) ([]*models.AgentSes
 			return nil, err
 		}
 
-		session.State = models.AgentSessionState(state)
+		session.State = models.TaskSessionState(state)
 		if completedAt.Valid {
 			session.CompletedAt = &completedAt.Time
 		}
@@ -2063,8 +2063,8 @@ func (r *SQLiteRepository) scanAgentSessions(rows *sql.Rows) ([]*models.AgentSes
 }
 
 // DeleteAgentSession deletes an agent session by ID
-func (r *SQLiteRepository) DeleteAgentSession(ctx context.Context, id string) error {
-	result, err := r.db.ExecContext(ctx, `DELETE FROM agent_sessions WHERE id = ?`, id)
+func (r *SQLiteRepository) DeleteTaskSession(ctx context.Context, id string) error {
+	result, err := r.db.ExecContext(ctx, `DELETE FROM task_sessions WHERE id = ?`, id)
 	if err != nil {
 		return err
 	}

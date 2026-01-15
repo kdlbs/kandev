@@ -142,7 +142,7 @@ func (h *EnvironmentHandlers) httpUpdateEnvironment(c *gin.Context) {
 func (h *EnvironmentHandlers) httpDeleteEnvironment(c *gin.Context) {
 	resp, err := h.controller.DeleteEnvironment(c.Request.Context(), dto.DeleteEnvironmentRequest{ID: c.Param("id")})
 	if err != nil {
-		if errors.Is(err, controller.ErrActiveAgentSessions) {
+		if errors.Is(err, controller.ErrActiveTaskSessions) {
 			c.JSON(http.StatusConflict, gin.H{"error": "environment is used by an active agent session"})
 			return
 		}
@@ -267,7 +267,7 @@ func (h *EnvironmentHandlers) wsDeleteEnvironment(ctx context.Context, msg *ws.M
 	resp, err := h.controller.DeleteEnvironment(ctx, dto.DeleteEnvironmentRequest{ID: req.ID})
 	if err != nil {
 		h.logger.Error("failed to delete environment", zap.Error(err))
-		if errors.Is(err, controller.ErrActiveAgentSessions) {
+		if errors.Is(err, controller.ErrActiveTaskSessions) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "environment is used by an active agent session", nil)
 		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to delete environment", nil)

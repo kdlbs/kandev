@@ -18,7 +18,7 @@ func NewMessageController(svc *service.Service) *MessageController {
 
 func (c *MessageController) ListMessages(ctx context.Context, req dto.ListMessagesRequest) (dto.ListMessagesResponse, error) {
 	messages, hasMore, err := c.service.ListMessagesPaginated(ctx, service.ListMessagesRequest{
-		AgentSessionID: req.AgentSessionID,
+		TaskSessionID: req.TaskSessionID,
 		Limit:          req.Limit,
 		Before:         req.Before,
 		After:          req.After,
@@ -62,7 +62,7 @@ func (c *MessageController) ListAllMessages(ctx context.Context, sessionID strin
 
 func (c *MessageController) CreateMessage(ctx context.Context, req dto.CreateMessageRequest) (*v1.Message, error) {
 	message, err := c.service.CreateMessage(ctx, &service.CreateMessageRequest{
-		AgentSessionID: req.AgentSessionID,
+		TaskSessionID: req.TaskSessionID,
 		TaskID:         req.TaskID,
 		Content:        req.Content,
 		AuthorType:     req.AuthorType,

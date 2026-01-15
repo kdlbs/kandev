@@ -77,7 +77,7 @@ VALUES
     ('comment-004', 'task-006', 'user', 'dev-user', 'Need to add support for tool call rendering in the chat panel', 'message', '{}', 0, '', datetime('now', '-1 day')),
     ('comment-005', 'task-006', 'agent', 'augment-agent', 'I''ve implemented the tool call comment type with proper rendering. The changes include:\n\n1. Added `type` field to comments\n2. Added `metadata` for tool call details\n3. Updated the frontend to render tool calls differently', 'message', '{}', 0, '', datetime('now', '-20 hours'));
 
--- Sample agent session
-INSERT OR REPLACE INTO agent_sessions (id, task_id, agent_instance_id, agent_type, state, progress, error_message, metadata, started_at, completed_at, updated_at)
+-- Sample task session
+INSERT OR REPLACE INTO task_sessions (id, task_id, agent_instance_id, agent_type, state, progress, error_message, metadata, started_at, completed_at, updated_at)
 VALUES
     ('session-001', 'task-005', 'agent-instance-123', 'augment-agent', 'RUNNING', 0.0, '', '{}', datetime('now', '-1 hour'), NULL, datetime('now'));

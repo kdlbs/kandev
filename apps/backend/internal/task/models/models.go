@@ -88,10 +88,10 @@ const (
 	MessageTypeStatus MessageType = "status"
 )
 
-// Message represents a message in an agent session
+// Message represents a message in a task session
 type Message struct {
 	ID             string                 `json:"id"`
-	AgentSessionID string                 `json:"agent_session_id"`
+	TaskSessionID string                 `json:"task_session_id"`
 	TaskID         string                 `json:"task_id,omitempty"`
 	AuthorType     MessageAuthorType      `json:"author_type"`
 	AuthorID       string                 `json:"author_id,omitempty"` // User ID or Agent Instance ID
@@ -110,7 +110,7 @@ func (m *Message) ToAPI() *v1.Message {
 	}
 	result := &v1.Message{
 		ID:             m.ID,
-		AgentSessionID: m.AgentSessionID,
+		TaskSessionID: m.TaskSessionID,
 		TaskID:         m.TaskID,
 		AuthorType:     string(m.AuthorType),
 		AuthorID:       m.AuthorID,
@@ -123,29 +123,29 @@ func (m *Message) ToAPI() *v1.Message {
 	return result
 }
 
-// AgentSessionState represents the state of an agent session
-type AgentSessionState string
+// TaskSessionState represents the state of an agent session
+type TaskSessionState string
 
 const (
-	// AgentSessionStateCreated - session created but agent not started
-	AgentSessionStateCreated AgentSessionState = "CREATED"
-	// AgentSessionStateStarting - agent is starting up
-	AgentSessionStateStarting AgentSessionState = "STARTING"
-	// AgentSessionStateRunning - agent is actively running
-	AgentSessionStateRunning AgentSessionState = "RUNNING"
-	// AgentSessionStateWaitingForInput - agent waiting for user input
-	AgentSessionStateWaitingForInput AgentSessionState = "WAITING_FOR_INPUT"
-	// AgentSessionStateCompleted - agent finished successfully
-	AgentSessionStateCompleted AgentSessionState = "COMPLETED"
-	// AgentSessionStateFailed - agent failed with error
-	AgentSessionStateFailed AgentSessionState = "FAILED"
-	// AgentSessionStateCancelled - agent was manually stopped
-	AgentSessionStateCancelled AgentSessionState = "CANCELLED"
+	// TaskSessionStateCreated - session created but agent not started
+	TaskSessionStateCreated TaskSessionState = "CREATED"
+	// TaskSessionStateStarting - agent is starting up
+	TaskSessionStateStarting TaskSessionState = "STARTING"
+	// TaskSessionStateRunning - agent is actively running
+	TaskSessionStateRunning TaskSessionState = "RUNNING"
+	// TaskSessionStateWaitingForInput - agent waiting for user input
+	TaskSessionStateWaitingForInput TaskSessionState = "WAITING_FOR_INPUT"
+	// TaskSessionStateCompleted - agent finished successfully
+	TaskSessionStateCompleted TaskSessionState = "COMPLETED"
+	// TaskSessionStateFailed - agent failed with error
+	TaskSessionStateFailed TaskSessionState = "FAILED"
+	// TaskSessionStateCancelled - agent was manually stopped
+	TaskSessionStateCancelled TaskSessionState = "CANCELLED"
 )
 
-// AgentSession represents a persistent agent execution session for a task.
+// TaskSession represents a persistent agent execution session for a task.
 // This replaces the in-memory TaskExecution tracking and survives backend restarts.
-type AgentSession struct {
+type TaskSession struct {
 	ID                   string                 `json:"id"`
 	TaskID               string                 `json:"task_id"`
 	AgentInstanceID      string                 `json:"agent_instance_id"` // Docker container/agent instance
@@ -162,7 +162,7 @@ type AgentSession struct {
 	ExecutorSnapshot     map[string]interface{} `json:"executor_snapshot,omitempty"`
 	EnvironmentSnapshot  map[string]interface{} `json:"environment_snapshot,omitempty"`
 	RepositorySnapshot   map[string]interface{} `json:"repository_snapshot,omitempty"`
-	State                AgentSessionState      `json:"state"`
+	State                TaskSessionState      `json:"state"`
 	Progress             int                    `json:"progress"` // 0-100
 	ErrorMessage         string                 `json:"error_message,omitempty"`
 	Metadata             map[string]interface{} `json:"metadata,omitempty"`
@@ -171,9 +171,9 @@ type AgentSession struct {
 	UpdatedAt            time.Time              `json:"updated_at"`
 }
 
-// ToAPI converts internal AgentSession to API type
-// TODO: Add v1.AgentSession type to pkg/api/v1/
-func (s *AgentSession) ToAPI() map[string]interface{} {
+// ToAPI converts internal TaskSession to API type
+// TODO: Add v1.TaskSession type to pkg/api/v1/
+func (s *TaskSession) ToAPI() map[string]interface{} {
 	result := map[string]interface{}{
 		"id":                s.ID,
 		"task_id":           s.TaskID,

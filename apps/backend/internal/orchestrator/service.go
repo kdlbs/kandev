@@ -323,7 +323,7 @@ func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID s
 	}
 
 	if execution.SessionID != "" {
-		s.updateAgentSessionState(ctx, taskID, execution.SessionID, models.AgentSessionStateRunning, "", true)
+		s.updateTaskSessionState(ctx, taskID, execution.SessionID, models.TaskSessionStateRunning, "", true)
 		if s.messageCreator != nil && task.Description != "" {
 			if err := s.messageCreator.CreateUserMessage(ctx, taskID, task.Description, execution.SessionID); err != nil {
 				s.logger.Error("failed to create initial user message",
@@ -363,7 +363,7 @@ func (s *Service) PromptTask(ctx context.Context, taskID string, prompt string) 
 		zap.String("task_id", taskID),
 		zap.Int("prompt_length", len(prompt)))
 	if sessionID, err := s.executor.GetActiveSessionID(ctx, taskID); err == nil && sessionID != "" {
-		s.updateAgentSessionState(ctx, taskID, sessionID, models.AgentSessionStateRunning, "", true)
+		s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateRunning, "", true)
 	}
 	result, err := s.executor.Prompt(ctx, taskID, prompt)
 	if err != nil {
@@ -563,7 +563,7 @@ func (s *Service) handleACPMessage(ctx context.Context, taskID string, msg *prot
 			}
 
 			if normalized.bumpToRunning {
-				s.updateAgentSessionState(ctx, taskID, sessionID, models.AgentSessionStateRunning, "", false)
+				s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateRunning, "", false)
 			}
 		}
 	}
@@ -648,23 +648,23 @@ func buildACPMetadata(msg *protocol.Message) map[string]interface{} {
 	return metadata
 }
 
-func (s *Service) updateAgentSessionState(ctx context.Context, taskID, sessionID string, nextState models.AgentSessionState, errorMessage string, allowWakeFromWaiting bool) {
-	session, err := s.repo.GetAgentSession(ctx, sessionID)
+func (s *Service) updateTaskSessionState(ctx context.Context, taskID, sessionID string, nextState models.TaskSessionState, errorMessage string, allowWakeFromWaiting bool) {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return
 	}
-	if session.State == models.AgentSessionStateWaitingForInput && nextState == models.AgentSessionStateRunning && !allowWakeFromWaiting {
+	if session.State == models.TaskSessionStateWaitingForInput && nextState == models.TaskSessionStateRunning && !allowWakeFromWaiting {
 		return
 	}
 	oldState := session.State
 	switch session.State {
-	case models.AgentSessionStateCompleted, models.AgentSessionStateFailed, models.AgentSessionStateCancelled:
+	case models.TaskSessionStateCompleted, models.TaskSessionStateFailed, models.TaskSessionStateCancelled:
 		return
 	}
 	if session.State == nextState {
 		return
 	}
-	if err := s.repo.UpdateAgentSessionState(ctx, sessionID, nextState, errorMessage); err != nil {
+	if err := s.repo.UpdateTaskSessionState(ctx, sessionID, nextState, errorMessage); err != nil {
 		s.logger.Error("failed to update agent session state",
 			zap.String("session_id", sessionID),
 			zap.String("state", string(nextState)),
@@ -676,7 +676,7 @@ func (s *Service) updateAgentSessionState(ctx context.Context, taskID, sessionID
 		zap.String("old_state", string(oldState)),
 		zap.String("new_state", string(nextState)))
 	if s.eventBus != nil {
-		_ = s.eventBus.Publish(ctx, events.AgentSessionStateChanged, bus.NewEvent(events.AgentSessionStateChanged, "agent-session", map[string]interface{}{
+		_ = s.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(events.TaskSessionStateChanged, "agent-session", map[string]interface{}{
 			"task_id":          taskID,
 			"agent_session_id": sessionID,
 			"old_state":        string(oldState),
@@ -684,7 +684,7 @@ func (s *Service) updateAgentSessionState(ctx context.Context, taskID, sessionID
 		}))
 	}
 	if taskID != "" {
-		s.executor.UpdateExecutionState(taskID, v1.AgentSessionState(nextState))
+		s.executor.UpdateExecutionState(taskID, v1.TaskSessionState(nextState))
 	}
 }
 
@@ -733,7 +733,7 @@ func (s *Service) finalizeAgentReady(taskID, sessionID string) {
 	}
 
 	if sessionID != "" {
-		s.updateAgentSessionState(ctx, taskID, sessionID, models.AgentSessionStateWaitingForInput, "", false)
+		s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateWaitingForInput, "", false)
 	}
 
 	task, err := s.taskRepo.GetTask(ctx, taskID)
@@ -783,7 +783,7 @@ func (s *Service) handleInputRequired(ctx context.Context, taskID string, msg *p
 
 	// Update session state to WAITING_FOR_INPUT
 	if sessionID, err := s.executor.GetActiveSessionID(ctx, taskID); err == nil && sessionID != "" {
-		s.updateAgentSessionState(ctx, taskID, sessionID, models.AgentSessionStateWaitingForInput, "", false)
+		s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateWaitingForInput, "", false)
 	}
 
 	// Call the input request handler if set
@@ -803,7 +803,7 @@ func (s *Service) handleGitStatusUpdated(ctx context.Context, data watcher.GitSt
 		zap.String("branch", data.Branch))
 
 	// Get the active agent session for this task
-	session, err := s.repo.GetActiveAgentSessionByTaskID(ctx, data.TaskID)
+	session, err := s.repo.GetActiveTaskSessionByTaskID(ctx, data.TaskID)
 	if err != nil {
 		s.logger.Debug("no active agent session for git status update",
 			zap.String("task_id", data.TaskID),
@@ -831,7 +831,7 @@ func (s *Service) handleGitStatusUpdated(ctx context.Context, data watcher.GitSt
 
 	// Persist to database asynchronously
 	go func() {
-		if err := s.repo.UpdateAgentSession(context.Background(), session); err != nil {
+		if err := s.repo.UpdateTaskSession(context.Background(), session); err != nil {
 			s.logger.Error("failed to update agent session with git status",
 				zap.String("task_id", data.TaskID),
 				zap.String("session_id", session.ID),
@@ -898,7 +898,7 @@ func (s *Service) handleToolCallStarted(ctx context.Context, data watcher.ToolCa
 		}
 
 		if sessionID != "" {
-			s.updateAgentSessionState(ctx, data.TaskID, sessionID, models.AgentSessionStateRunning, "", false)
+			s.updateTaskSessionState(ctx, data.TaskID, sessionID, models.TaskSessionStateRunning, "", false)
 		}
 	}
 }
@@ -916,7 +916,7 @@ func (s *Service) handleToolCallComplete(ctx context.Context, data watcher.ToolC
 		}
 
 		if sessionID != "" {
-			s.updateAgentSessionState(ctx, data.TaskID, sessionID, models.AgentSessionStateRunning, "", false)
+			s.updateTaskSessionState(ctx, data.TaskID, sessionID, models.TaskSessionStateRunning, "", false)
 		}
 	}
 }

@@ -29,7 +29,7 @@ type Controller struct {
 }
 
 type SessionChecker interface {
-	HasActiveAgentSessionsByAgentProfile(ctx context.Context, agentProfileID string) (bool, error)
+	HasActiveTaskSessionsByAgentProfile(ctx context.Context, agentProfileID string) (bool, error)
 }
 
 func NewController(repo store.Repository, discoveryRegistry *discovery.Registry, sessionChecker SessionChecker, log *logger.Logger) *Controller {
@@ -274,7 +274,7 @@ func (c *Controller) DeleteProfile(ctx context.Context, id string) (*dto.AgentPr
 		return nil, err
 	}
 	if c.sessionChecker != nil {
-		active, err := c.sessionChecker.HasActiveAgentSessionsByAgentProfile(ctx, id)
+		active, err := c.sessionChecker.HasActiveTaskSessionsByAgentProfile(ctx, id)
 		if err != nil {
 			return nil, err
 		}

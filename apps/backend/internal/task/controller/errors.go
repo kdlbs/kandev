@@ -2,4 +2,4 @@ package controller
 
 import "errors"
 
-var ErrActiveAgentSessions = errors.New("active agent sessions exist")
+var ErrActiveTaskSessions = errors.New("active task sessions exist")

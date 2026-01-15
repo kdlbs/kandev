@@ -52,7 +52,7 @@ type StartTaskResponse struct {
 	Success         bool    `json:"success"`
 	TaskID          string  `json:"task_id"`
 	AgentInstanceID string  `json:"agent_instance_id"`
-	AgentSessionID  string  `json:"agent_session_id,omitempty"`
+	TaskSessionID  string  `json:"agent_session_id,omitempty"`
 	State           string  `json:"state"`
 	WorktreePath    *string `json:"worktree_path,omitempty"`
 	WorktreeBranch  *string `json:"worktree_branch,omitempty"`
@@ -119,7 +119,7 @@ type TaskExecutionResponse struct {
 	TaskID          string `json:"task_id"`
 	AgentInstanceID string `json:"agent_instance_id,omitempty"`
 	AgentProfileID  string `json:"agent_profile_id,omitempty"`
-	AgentSessionID  string `json:"agent_session_id,omitempty"`
+	TaskSessionID  string `json:"agent_session_id,omitempty"`
 	State           string `json:"state,omitempty"`
 	Progress        int    `json:"progress,omitempty"`
 	StartedAt       string `json:"started_at,omitempty"`

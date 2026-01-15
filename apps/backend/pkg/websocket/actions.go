@@ -72,7 +72,7 @@ const (
 	ActionAgentStop    = "agent.stop"
 	ActionAgentPrompt  = "agent.prompt"
 	ActionAgentCancel  = "agent.cancel"
-	ActionAgentSession = "agent.session"
+	ActionTaskSession = "task.session"
 	ActionAgentTypes   = "agent.types"
 
 	// Orchestrator actions
@@ -120,7 +120,7 @@ const (
 	ActionColumnDeleted            = "column.deleted"
 	ActionMessageAdded             = "message.added"
 	ActionMessageUpdated           = "message.updated"
-	ActionAgentSessionStateChanged = "agent_session.state_changed"
+	ActionTaskSessionStateChanged = "task_session.state_changed"
 	ActionInputRequested           = "input.requested"
 	ActionRepositoryCreated        = "repository.created"
 	ActionRepositoryUpdated        = "repository.updated"

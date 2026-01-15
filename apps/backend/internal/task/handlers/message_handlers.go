@@ -94,7 +94,7 @@ func (h *MessageHandlers) httpListMessages(c *gin.Context) {
 	)
 	if paginated {
 		resp, err = h.messageController.ListMessages(c.Request.Context(), dto.ListMessagesRequest{
-			AgentSessionID: sessionID,
+			TaskSessionID: sessionID,
 			Limit:          limit,
 			Before:         before,
 			After:          after,
@@ -115,7 +115,7 @@ func (h *MessageHandlers) httpListMessages(c *gin.Context) {
 
 type wsAddMessageRequest struct {
 	TaskID         string `json:"task_id"`
-	AgentSessionID string `json:"agent_session_id"`
+	TaskSessionID string `json:"agent_session_id"`
 	Content        string `json:"content"`
 	AuthorID       string `json:"author_id,omitempty"`
 }
@@ -125,7 +125,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	if err := msg.ParsePayload(&req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
-	if req.AgentSessionID == "" {
+	if req.TaskSessionID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "agent_session_id is required", nil)
 	}
 	if req.TaskID == "" {
@@ -156,7 +156,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	}
 
 	message, err := h.messageController.CreateMessage(ctx, dto.CreateMessageRequest{
-		AgentSessionID: req.AgentSessionID,
+		TaskSessionID: req.TaskSessionID,
 		TaskID:         req.TaskID,
 		Content:        req.Content,
 		AuthorType:     "user",
@@ -181,7 +181,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 }
 
 type wsListMessagesRequest struct {
-	AgentSessionID string `json:"agent_session_id"`
+	TaskSessionID string `json:"agent_session_id"`
 	Limit          int    `json:"limit"`
 	Before         string `json:"before"`
 	After          string `json:"after"`
@@ -193,7 +193,7 @@ func (h *MessageHandlers) wsListMessages(ctx context.Context, msg *ws.Message) (
 	if err := msg.ParsePayload(&req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
-	if req.AgentSessionID == "" {
+	if req.TaskSessionID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "agent_session_id is required", nil)
 	}
 	if req.Before != "" && req.After != "" {
@@ -204,7 +204,7 @@ func (h *MessageHandlers) wsListMessages(ctx context.Context, msg *ws.Message) (
 	}
 
 	resp, err := h.messageController.ListMessages(ctx, dto.ListMessagesRequest{
-		AgentSessionID: req.AgentSessionID,
+		TaskSessionID: req.TaskSessionID,
 		Limit:          req.Limit,
 		Before:         req.Before,
 		After:          req.After,

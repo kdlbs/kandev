@@ -68,8 +68,8 @@ func (c *ExecutorController) UpdateExecutor(ctx context.Context, req dto.UpdateE
 
 func (c *ExecutorController) DeleteExecutor(ctx context.Context, req dto.DeleteExecutorRequest) (dto.SuccessResponse, error) {
 	if err := c.service.DeleteExecutor(ctx, req.ID); err != nil {
-		if errors.Is(err, service.ErrActiveAgentSessions) {
-			return dto.SuccessResponse{}, ErrActiveAgentSessions
+		if errors.Is(err, service.ErrActiveTaskSessions) {
+			return dto.SuccessResponse{}, ErrActiveTaskSessions
 		}
 		return dto.SuccessResponse{}, err
 	}

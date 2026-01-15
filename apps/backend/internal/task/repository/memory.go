@@ -22,7 +22,7 @@ type MemoryRepository struct {
 	messages       map[string]*models.Message
 	repositories   map[string]*models.Repository
 	repoScripts    map[string]*models.RepositoryScript
-	agentSessions  map[string]*models.AgentSession
+	taskSessions  map[string]*models.TaskSession
 	executors      map[string]*models.Executor
 	environments   map[string]*models.Environment
 	taskBoards     map[string]map[string]struct{}
@@ -43,7 +43,7 @@ func NewMemoryRepository() *MemoryRepository {
 		messages:       make(map[string]*models.Message),
 		repositories:   make(map[string]*models.Repository),
 		repoScripts:    make(map[string]*models.RepositoryScript),
-		agentSessions:  make(map[string]*models.AgentSession),
+		taskSessions:  make(map[string]*models.TaskSession),
 		executors:      make(map[string]*models.Executor),
 		environments:   make(map[string]*models.Environment),
 		taskBoards:     make(map[string]map[string]struct{}),
@@ -619,11 +619,11 @@ func (r *MemoryRepository) addTaskPlacement(taskID, boardID, columnID string, po
 	}
 }
 
-func isSessionActive(status models.AgentSessionState) bool {
-	return status == models.AgentSessionStateCreated ||
-		status == models.AgentSessionStateRunning ||
-		status == models.AgentSessionStateWaitingForInput ||
-		status == models.AgentSessionStateStarting
+func isSessionActive(status models.TaskSessionState) bool {
+	return status == models.TaskSessionStateCreated ||
+		status == models.TaskSessionStateRunning ||
+		status == models.TaskSessionStateWaitingForInput ||
+		status == models.TaskSessionStateStarting
 }
 
 // Message operations
@@ -668,7 +668,7 @@ func (r *MemoryRepository) GetMessageByToolCallID(ctx context.Context, sessionID
 	defer r.mu.RUnlock()
 
 	for _, message := range r.messages {
-		if message.AgentSessionID != sessionID || message.Metadata == nil {
+		if message.TaskSessionID != sessionID || message.Metadata == nil {
 			continue
 		}
 		if value, ok := message.Metadata["tool_call_id"]; ok {
@@ -701,7 +701,7 @@ func (r *MemoryRepository) ListMessages(ctx context.Context, sessionID string) (
 
 	var result []*models.Message
 	for _, message := range r.messages {
-		if message.AgentSessionID == sessionID {
+		if message.TaskSessionID == sessionID {
 			result = append(result, message)
 		}
 	}
@@ -730,7 +730,7 @@ func (r *MemoryRepository) ListMessagesPaginated(ctx context.Context, sessionID 
 		if !ok {
 			return nil, false, fmt.Errorf("message not found: %s", opts.Before)
 		}
-		if message.AgentSessionID != sessionID {
+		if message.TaskSessionID != sessionID {
 			return nil, false, fmt.Errorf("message cursor not found: %s", opts.Before)
 		}
 		cursor = message
@@ -740,7 +740,7 @@ func (r *MemoryRepository) ListMessagesPaginated(ctx context.Context, sessionID 
 		if !ok {
 			return nil, false, fmt.Errorf("message not found: %s", opts.After)
 		}
-		if message.AgentSessionID != sessionID {
+		if message.TaskSessionID != sessionID {
 			return nil, false, fmt.Errorf("message cursor not found: %s", opts.After)
 		}
 		cursor = message
@@ -748,7 +748,7 @@ func (r *MemoryRepository) ListMessagesPaginated(ctx context.Context, sessionID 
 
 	var result []*models.Message
 	for _, message := range r.messages {
-		if message.AgentSessionID == sessionID {
+		if message.TaskSessionID == sessionID {
 			result = append(result, message)
 		}
 	}
@@ -801,10 +801,10 @@ func (r *MemoryRepository) DeleteMessage(ctx context.Context, id string) error {
 	return nil
 }
 
-// AgentSession operations
+// TaskSession operations
 
-// CreateAgentSession creates a new agent session
-func (r *MemoryRepository) CreateAgentSession(ctx context.Context, session *models.AgentSession) error {
+// CreateTaskSession creates a new agent session
+func (r *MemoryRepository) CreateTaskSession(ctx context.Context, session *models.TaskSession) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -816,33 +816,33 @@ func (r *MemoryRepository) CreateAgentSession(ctx context.Context, session *mode
 		session.StartedAt = now
 	}
 	if session.State == "" {
-		session.State = models.AgentSessionStateCreated
+		session.State = models.TaskSessionStateCreated
 	}
 	session.UpdatedAt = now
 
-	r.agentSessions[session.ID] = session
+	r.taskSessions[session.ID] = session
 	return nil
 }
 
-// GetAgentSession retrieves an agent session by ID
-func (r *MemoryRepository) GetAgentSession(ctx context.Context, id string) (*models.AgentSession, error) {
+// GetTaskSession retrieves an agent session by ID
+func (r *MemoryRepository) GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	session, ok := r.agentSessions[id]
+	session, ok := r.taskSessions[id]
 	if !ok {
 		return nil, fmt.Errorf("agent session not found: %s", id)
 	}
 	return session, nil
 }
 
-// GetAgentSessionByTaskID retrieves the most recent agent session for a task
-func (r *MemoryRepository) GetAgentSessionByTaskID(ctx context.Context, taskID string) (*models.AgentSession, error) {
+// GetTaskSessionByTaskID retrieves the most recent agent session for a task
+func (r *MemoryRepository) GetTaskSessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	var latest *models.AgentSession
-	for _, session := range r.agentSessions {
+	var latest *models.TaskSession
+	for _, session := range r.taskSessions {
 		if session.TaskID == taskID {
 			if latest == nil || session.StartedAt.After(latest.StartedAt) {
 				latest = session
@@ -855,58 +855,58 @@ func (r *MemoryRepository) GetAgentSessionByTaskID(ctx context.Context, taskID s
 	return latest, nil
 }
 
-// GetActiveAgentSessionByTaskID retrieves the active agent session for a task
-func (r *MemoryRepository) GetActiveAgentSessionByTaskID(ctx context.Context, taskID string) (*models.AgentSession, error) {
+// GetActiveTaskSessionByTaskID retrieves the active agent session for a task
+func (r *MemoryRepository) GetActiveTaskSessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	for _, session := range r.agentSessions {
-		if session.TaskID == taskID && (session.State == models.AgentSessionStateCreated || session.State == models.AgentSessionStateStarting || session.State == models.AgentSessionStateRunning || session.State == models.AgentSessionStateWaitingForInput) {
+	for _, session := range r.taskSessions {
+		if session.TaskID == taskID && (session.State == models.TaskSessionStateCreated || session.State == models.TaskSessionStateStarting || session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateWaitingForInput) {
 			return session, nil
 		}
 	}
 	return nil, fmt.Errorf("no active agent session found for task: %s", taskID)
 }
 
-// UpdateAgentSession updates an existing agent session
-func (r *MemoryRepository) UpdateAgentSession(ctx context.Context, session *models.AgentSession) error {
+// UpdateTaskSession updates an existing agent session
+func (r *MemoryRepository) UpdateTaskSession(ctx context.Context, session *models.TaskSession) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if _, ok := r.agentSessions[session.ID]; !ok {
+	if _, ok := r.taskSessions[session.ID]; !ok {
 		return fmt.Errorf("agent session not found: %s", session.ID)
 	}
 	session.UpdatedAt = time.Now().UTC()
-	r.agentSessions[session.ID] = session
+	r.taskSessions[session.ID] = session
 	return nil
 }
 
-// UpdateAgentSessionState updates the status of an agent session
-func (r *MemoryRepository) UpdateAgentSessionState(ctx context.Context, id string, status models.AgentSessionState, errorMessage string) error {
+// UpdateTaskSessionState updates the status of an agent session
+func (r *MemoryRepository) UpdateTaskSessionState(ctx context.Context, id string, status models.TaskSessionState, errorMessage string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	session, ok := r.agentSessions[id]
+	session, ok := r.taskSessions[id]
 	if !ok {
 		return fmt.Errorf("agent session not found: %s", id)
 	}
 	session.State = status
 	session.ErrorMessage = errorMessage
 	session.UpdatedAt = time.Now().UTC()
-	if status == models.AgentSessionStateCompleted || status == models.AgentSessionStateFailed || status == models.AgentSessionStateCancelled {
+	if status == models.TaskSessionStateCompleted || status == models.TaskSessionStateFailed || status == models.TaskSessionStateCancelled {
 		now := time.Now().UTC()
 		session.CompletedAt = &now
 	}
 	return nil
 }
 
-// ListAgentSessions returns all agent sessions for a task
-func (r *MemoryRepository) ListAgentSessions(ctx context.Context, taskID string) ([]*models.AgentSession, error) {
+// ListTaskSessions returns all agent sessions for a task
+func (r *MemoryRepository) ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	var result []*models.AgentSession
-	for _, session := range r.agentSessions {
+	var result []*models.TaskSession
+	for _, session := range r.taskSessions {
 		if session.TaskID == taskID {
 			result = append(result, session)
 		}
@@ -914,25 +914,25 @@ func (r *MemoryRepository) ListAgentSessions(ctx context.Context, taskID string)
 	return result, nil
 }
 
-// ListActiveAgentSessions returns all active agent sessions
-func (r *MemoryRepository) ListActiveAgentSessions(ctx context.Context) ([]*models.AgentSession, error) {
+// ListActiveTaskSessions returns all active agent sessions
+func (r *MemoryRepository) ListActiveTaskSessions(ctx context.Context) ([]*models.TaskSession, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	var result []*models.AgentSession
-	for _, session := range r.agentSessions {
-		if session.State == models.AgentSessionStateCreated || session.State == models.AgentSessionStateStarting || session.State == models.AgentSessionStateRunning || session.State == models.AgentSessionStateWaitingForInput {
+	var result []*models.TaskSession
+	for _, session := range r.taskSessions {
+		if session.State == models.TaskSessionStateCreated || session.State == models.TaskSessionStateStarting || session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateWaitingForInput {
 			result = append(result, session)
 		}
 	}
 	return result, nil
 }
 
-func (r *MemoryRepository) HasActiveAgentSessionsByAgentProfile(ctx context.Context, agentProfileID string) (bool, error) {
+func (r *MemoryRepository) HasActiveTaskSessionsByAgentProfile(ctx context.Context, agentProfileID string) (bool, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	for _, session := range r.agentSessions {
+	for _, session := range r.taskSessions {
 		if session.AgentProfileID == agentProfileID && isSessionActive(session.State) {
 			return true, nil
 		}
@@ -940,11 +940,11 @@ func (r *MemoryRepository) HasActiveAgentSessionsByAgentProfile(ctx context.Cont
 	return false, nil
 }
 
-func (r *MemoryRepository) HasActiveAgentSessionsByExecutor(ctx context.Context, executorID string) (bool, error) {
+func (r *MemoryRepository) HasActiveTaskSessionsByExecutor(ctx context.Context, executorID string) (bool, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	for _, session := range r.agentSessions {
+	for _, session := range r.taskSessions {
 		if session.ExecutorID == executorID && isSessionActive(session.State) {
 			return true, nil
 		}
@@ -952,11 +952,11 @@ func (r *MemoryRepository) HasActiveAgentSessionsByExecutor(ctx context.Context,
 	return false, nil
 }
 
-func (r *MemoryRepository) HasActiveAgentSessionsByEnvironment(ctx context.Context, environmentID string) (bool, error) {
+func (r *MemoryRepository) HasActiveTaskSessionsByEnvironment(ctx context.Context, environmentID string) (bool, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	for _, session := range r.agentSessions {
+	for _, session := range r.taskSessions {
 		if session.EnvironmentID == environmentID && isSessionActive(session.State) {
 			return true, nil
 		}
@@ -964,11 +964,11 @@ func (r *MemoryRepository) HasActiveAgentSessionsByEnvironment(ctx context.Conte
 	return false, nil
 }
 
-func (r *MemoryRepository) HasActiveAgentSessionsByRepository(ctx context.Context, repositoryID string) (bool, error) {
+func (r *MemoryRepository) HasActiveTaskSessionsByRepository(ctx context.Context, repositoryID string) (bool, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	for _, session := range r.agentSessions {
+	for _, session := range r.taskSessions {
 		if !isSessionActive(session.State) {
 			continue
 		}
@@ -983,15 +983,15 @@ func (r *MemoryRepository) HasActiveAgentSessionsByRepository(ctx context.Contex
 	return false, nil
 }
 
-// DeleteAgentSession deletes an agent session by ID
-func (r *MemoryRepository) DeleteAgentSession(ctx context.Context, id string) error {
+// DeleteTaskSession deletes an agent session by ID
+func (r *MemoryRepository) DeleteTaskSession(ctx context.Context, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if _, ok := r.agentSessions[id]; !ok {
+	if _, ok := r.taskSessions[id]; !ok {
 		return fmt.Errorf("agent session not found: %s", id)
 	}
-	delete(r.agentSessions, id)
+	delete(r.taskSessions, id)
 	return nil
 }
 

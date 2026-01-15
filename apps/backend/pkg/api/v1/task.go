@@ -18,17 +18,17 @@ const (
 	TaskStateCancelled       TaskState = "CANCELLED"
 )
 
-// AgentSessionState represents the state of an agent session.
-type AgentSessionState string
+// TaskSessionState represents the state of an agent session.
+type TaskSessionState string
 
 const (
-	AgentSessionStateCreated         AgentSessionState = "CREATED"
-	AgentSessionStateStarting        AgentSessionState = "STARTING"
-	AgentSessionStateRunning         AgentSessionState = "RUNNING"
-	AgentSessionStateWaitingForInput AgentSessionState = "WAITING_FOR_INPUT"
-	AgentSessionStateCompleted       AgentSessionState = "COMPLETED"
-	AgentSessionStateFailed          AgentSessionState = "FAILED"
-	AgentSessionStateCancelled       AgentSessionState = "CANCELLED"
+	TaskSessionStateCreated         TaskSessionState = "CREATED"
+	TaskSessionStateStarting        TaskSessionState = "STARTING"
+	TaskSessionStateRunning         TaskSessionState = "RUNNING"
+	TaskSessionStateWaitingForInput TaskSessionState = "WAITING_FOR_INPUT"
+	TaskSessionStateCompleted       TaskSessionState = "COMPLETED"
+	TaskSessionStateFailed          TaskSessionState = "FAILED"
+	TaskSessionStateCancelled       TaskSessionState = "CANCELLED"
 )
 
 // MessageType represents a normalized session message type.
@@ -105,7 +105,7 @@ type TaskEvent struct {
 // Message represents a message in an agent session (user or agent)
 type Message struct {
 	ID             string                 `json:"id"`
-	AgentSessionID string                 `json:"agent_session_id"`
+	TaskSessionID string                 `json:"agent_session_id"`
 	TaskID         string                 `json:"task_id,omitempty"`
 	AuthorType     string                 `json:"author_type"` // "user" or "agent"
 	Type           string                 `json:"type,omitempty"`
@@ -118,7 +118,7 @@ type Message struct {
 
 // CreateMessageRequest for adding a message to an agent session
 type CreateMessageRequest struct {
-	AgentSessionID string                 `json:"agent_session_id" binding:"required"`
+	TaskSessionID string                 `json:"agent_session_id" binding:"required"`
 	Content        string                 `json:"content" binding:"required"`
 	AuthorType     string                 `json:"author_type,omitempty"` // Defaults to "user" if not specified
 	Type           string                 `json:"type,omitempty"`

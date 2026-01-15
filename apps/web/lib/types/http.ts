@@ -10,7 +10,7 @@ export type TaskState =
   | 'FAILED'
   | 'CANCELLED';
 
-export type AgentSessionState =
+export type TaskSessionState =
   | 'CREATED'
   | 'STARTING'
   | 'RUNNING'
@@ -240,7 +240,7 @@ export type MessageType =
 
 export type Message = {
   id: string;
-  agent_session_id: string;
+  task_session_id: string;
   task_id: string;
   author_type: MessageAuthorType;
   author_id?: string;

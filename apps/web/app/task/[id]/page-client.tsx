@@ -44,16 +44,16 @@ export default function TaskPage({ task: initialTask }: TaskPageClientProps) {
     isAgentLoading,
     worktreePath,
     worktreeBranch,
-    agentSessionId,
-    agentSessionState,
+    taskSessionId,
+    taskSessionState,
     handleStartAgent,
     handleStopAgent,
   } = useTaskAgent(task);
   const isAgentWorking =
-    agentSessionState !== null
-      ? agentSessionState === 'STARTING' || agentSessionState === 'RUNNING'
+    taskSessionState !== null
+      ? taskSessionState === 'STARTING' || taskSessionState === 'RUNNING'
       : isAgentRunning && (task?.state === 'IN_PROGRESS' || task?.state === 'SCHEDULING');
-  const { isLoading: isLoadingMessages } = useTaskMessages(task?.id ?? null, agentSessionId);
+  const { isLoading: isLoadingMessages } = useTaskMessages(task?.id ?? null, taskSessionId);
 
   useEffect(() => {
     queueMicrotask(() => setIsMounted(true));
@@ -71,7 +71,7 @@ export default function TaskPage({ task: initialTask }: TaskPageClientProps) {
     const client = getWebSocketClient();
     if (!client) return;
 
-    if (!agentSessionId) {
+    if (!taskSessionId) {
       console.error('No active agent session. Start an agent before sending a message.');
       return;
     }
@@ -79,13 +79,13 @@ export default function TaskPage({ task: initialTask }: TaskPageClientProps) {
     try {
       await client.request(
         'message.add',
-        { task_id: task.id, agent_session_id: agentSessionId, content },
+        { task_id: task.id, task_session_id: taskSessionId, content },
         10000
       );
     } catch (error) {
       console.error('Failed to send message:', error);
     }
-  }, [agentSessionId, task]);
+  }, [taskSessionId, task]);
 
   if (!isMounted) {
     return <div className="h-screen w-full bg-background" />;
@@ -100,9 +100,9 @@ export default function TaskPage({ task: initialTask }: TaskPageClientProps) {
             entries={{
               ws_status: connectionStatus,
               task_id: task?.id ?? null,
-              agent_session_id: agentSessionId ?? null,
+              task_session_id: taskSessionId ?? null,
               task_state: task?.state ?? null,
-              agent_session_state: agentSessionState ?? null,
+              agent_session_state: taskSessionState ?? null,
               is_agent_working: isAgentWorking,
             }}
           />

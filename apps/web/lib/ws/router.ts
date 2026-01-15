@@ -1,7 +1,7 @@
 import type { StoreApi } from 'zustand';
 import type { AppState } from '@/lib/state/store';
 import { registerAgentsHandlers } from '@/lib/ws/handlers/agents';
-import { registerAgentSessionHandlers } from '@/lib/ws/handlers/agent-session';
+import { registerTaskSessionHandlers } from '@/lib/ws/handlers/agent-session';
 import { registerBoardsHandlers } from '@/lib/ws/handlers/boards';
 import { registerColumnsHandlers } from '@/lib/ws/handlers/columns';
 import { registerMessagesHandlers } from '@/lib/ws/handlers/messages';
@@ -26,7 +26,7 @@ export function registerWsHandlers(store: StoreApi<AppState>) {
     ...registerExecutorsHandlers(store),
     ...registerEnvironmentsHandlers(store),
     ...registerAgentsHandlers(store),
-    ...registerAgentSessionHandlers(store),
+    ...registerTaskSessionHandlers(store),
     ...registerUsersHandlers(store),
     ...registerTerminalsHandlers(store),
     ...registerDiffsHandlers(store),
