@@ -3,8 +3,18 @@ name: Frontend Tests
 on:
   push:
     branches: [main]
+    paths:
+      - "apps/web/**"
+      - "apps/packages/**"
+      - "apps/pnpm-lock.yaml"
+      - ".github/workflows/frontend-tests.yml"
   pull_request:
     branches: [main]
+    paths:
+      - "apps/web/**"
+      - "apps/packages/**"
+      - "apps/pnpm-lock.yaml"
+      - ".github/workflows/frontend-tests.yml"
 
 jobs:
   frontend:
@@ -33,11 +43,8 @@ jobs:
           echo "=== Repository root ==="
           ls -la
           echo ""
-          echo "=== apps directory ==="
-          ls -la apps/
-          echo ""
           echo "=== Looking for lockfiles ==="
-          find . -name "pnpm-lock.yaml"
+          find . -name "pnpm-lock.yaml" | true
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
