@@ -28,6 +28,17 @@ jobs:
         with:
           node-version: "24"
 
+      - name: Debug structure
+        run: |
+          echo "=== Repository root ==="
+          ls -la
+          echo ""
+          echo "=== apps directory ==="
+          ls -la apps/
+          echo ""
+          echo "=== Looking for lockfiles ==="
+          find . -name "pnpm-lock.yaml"
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
