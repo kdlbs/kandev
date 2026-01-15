@@ -67,9 +67,14 @@ func (m *MockEventBus) ClearEvents() {
 	m.publishedEvents = make([]*bus.Event, 0)
 }
 
-func createTestService(t *testing.T) (*Service, *MockEventBus, *repository.MemoryRepository) {
+func createTestService(t *testing.T) (*Service, *MockEventBus, repository.Repository) {
 	t.Helper()
-	repo := repository.NewMemoryRepository()
+	tmpDir := t.TempDir()
+	repo, err := repository.NewSQLiteRepository(tmpDir + "/test.db")
+	if err != nil {
+		t.Fatalf("failed to create test repository: %v", err)
+	}
+	t.Cleanup(func() { repo.Close() })
 	eventBus := NewMockEventBus()
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
 	svc := NewService(repo, eventBus, log, RepositoryDiscoveryConfig{})
@@ -128,9 +133,8 @@ func TestService_GetTask(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
 
-	// Create a task directly in repo
-	task := &models.Task{ID: "task-123", WorkspaceID: "ws-1", BoardID: "board-123", ColumnID: "col-123", Title: "Test Task"}
-	_ = repo.CreateTask(ctx, task)
+	// Create required entities
+	setupTestTask(t, repo)
 
 	retrieved, err := svc.GetTask(ctx, "task-123")
 	if err != nil {
@@ -155,8 +159,10 @@ func TestService_UpdateTask(t *testing.T) {
 	svc, eventBus, repo := createTestService(t)
 	ctx := context.Background()
 
-	task := &models.Task{ID: "task-123", WorkspaceID: "ws-1", BoardID: "board-123", ColumnID: "col-123", Title: "Original"}
-	_ = repo.CreateTask(ctx, task)
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	_ = repo.CreateBoard(ctx, &models.Board{ID: "board-123", WorkspaceID: "ws-1", Name: "Board"})
+	_ = repo.CreateColumn(ctx, &models.Column{ID: "col-123", BoardID: "board-123", Name: "Column", State: v1.TaskStateTODO})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-123", WorkspaceID: "ws-1", BoardID: "board-123", ColumnID: "col-123", Title: "Original"})
 	eventBus.ClearEvents()
 
 	newTitle := "Updated Title"
@@ -184,8 +190,10 @@ func TestService_DeleteTask(t *testing.T) {
 	svc, eventBus, repo := createTestService(t)
 	ctx := context.Background()
 
-	task := &models.Task{ID: "task-123", WorkspaceID: "ws-1", BoardID: "board-123", ColumnID: "col-123", Title: "Test"}
-	_ = repo.CreateTask(ctx, task)
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	_ = repo.CreateBoard(ctx, &models.Board{ID: "board-123", WorkspaceID: "ws-1", Name: "Board"})
+	_ = repo.CreateColumn(ctx, &models.Column{ID: "col-123", BoardID: "board-123", Name: "Column", State: v1.TaskStateTODO})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-123", WorkspaceID: "ws-1", BoardID: "board-123", ColumnID: "col-123", Title: "Test"})
 	eventBus.ClearEvents()
 
 	err := svc.DeleteTask(ctx, "task-123")
@@ -210,6 +218,9 @@ func TestService_ListTasks(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
 
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	_ = repo.CreateBoard(ctx, &models.Board{ID: "board-123", WorkspaceID: "ws-1", Name: "Board"})
+	_ = repo.CreateColumn(ctx, &models.Column{ID: "col-123", BoardID: "board-123", Name: "Column", State: v1.TaskStateTODO})
 	_ = repo.CreateTask(ctx, &models.Task{ID: "task-1", WorkspaceID: "ws-1", BoardID: "board-123", ColumnID: "col-123", Title: "Task 1"})
 	_ = repo.CreateTask(ctx, &models.Task{ID: "task-2", WorkspaceID: "ws-1", BoardID: "board-123", ColumnID: "col-123", Title: "Task 2"})
 
@@ -227,6 +238,8 @@ func TestService_UpdateTaskState(t *testing.T) {
 	ctx := context.Background()
 
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	_ = repo.CreateBoard(ctx, &models.Board{ID: "board-123", WorkspaceID: "ws-1", Name: "Board"})
+	_ = repo.CreateColumn(ctx, &models.Column{ID: "col-123", BoardID: "board-123", Name: "Column", State: v1.TaskStateTODO})
 	task := &models.Task{ID: "task-123", WorkspaceID: "ws-1", BoardID: "board-123", ColumnID: "col-123", Title: "Test", State: v1.TaskStateTODO}
 	_ = repo.CreateTask(ctx, task)
 	eventBus.ClearEvents()
@@ -256,9 +269,10 @@ func TestService_MoveTask(t *testing.T) {
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
 	_ = repo.CreateBoard(ctx, &models.Board{ID: "board-123", WorkspaceID: "ws-1", Name: "Board"})
 
-	// Create column with different state
-	column := &models.Column{ID: "col-done", BoardID: "board-123", Name: "Done", State: v1.TaskStateCompleted}
-	_ = repo.CreateColumn(ctx, column)
+	// Create source column
+	_ = repo.CreateColumn(ctx, &models.Column{ID: "col-123", BoardID: "board-123", Name: "Todo", State: v1.TaskStateTODO})
+	// Create destination column with different state
+	_ = repo.CreateColumn(ctx, &models.Column{ID: "col-done", BoardID: "board-123", Name: "Done", State: v1.TaskStateCompleted})
 
 	task := &models.Task{ID: "task-123", WorkspaceID: "ws-1", BoardID: "board-123", ColumnID: "col-123", Title: "Test", State: v1.TaskStateTODO}
 	_ = repo.CreateTask(ctx, task)
@@ -440,13 +454,21 @@ func TestService_ListColumns(t *testing.T) {
 
 // Comment tests
 
+func setupTestTask(t *testing.T, repo repository.Repository) {
+	t.Helper()
+	ctx := context.Background()
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	_ = repo.CreateBoard(ctx, &models.Board{ID: "board-123", WorkspaceID: "ws-1", Name: "Board"})
+	_ = repo.CreateColumn(ctx, &models.Column{ID: "col-123", BoardID: "board-123", Name: "Column", State: v1.TaskStateTODO})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-123", WorkspaceID: "ws-1", BoardID: "board-123", ColumnID: "col-123", Title: "Test Task"})
+}
+
 func TestService_CreateComment(t *testing.T) {
 	svc, eventBus, repo := createTestService(t)
 	ctx := context.Background()
 
 	// Create a task first
-	task := &models.Task{ID: "task-123", BoardID: "board-123", ColumnID: "col-123", Title: "Test Task"}
-	_ = repo.CreateTask(ctx, task)
+	setupTestTask(t, repo)
 	eventBus.ClearEvents()
 
 	req := &CreateCommentRequest{
@@ -485,8 +507,7 @@ func TestService_CreateAgentComment(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
 
-	task := &models.Task{ID: "task-123", BoardID: "board-123", ColumnID: "col-123", Title: "Test Task"}
-	_ = repo.CreateTask(ctx, task)
+	setupTestTask(t, repo)
 
 	req := &CreateCommentRequest{
 		TaskID:        "task-123",
@@ -532,8 +553,7 @@ func TestService_GetComment(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
 
-	task := &models.Task{ID: "task-123", BoardID: "board-123", ColumnID: "col-123", Title: "Test Task"}
-	_ = repo.CreateTask(ctx, task)
+	setupTestTask(t, repo)
 
 	comment := &models.Comment{ID: "comment-123", TaskID: "task-123", AuthorType: models.CommentAuthorUser, Content: "Test"}
 	_ = repo.CreateComment(ctx, comment)
@@ -551,8 +571,7 @@ func TestService_ListComments(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
 
-	task := &models.Task{ID: "task-123", BoardID: "board-123", ColumnID: "col-123", Title: "Test Task"}
-	_ = repo.CreateTask(ctx, task)
+	setupTestTask(t, repo)
 
 	_ = repo.CreateComment(ctx, &models.Comment{ID: "comment-1", TaskID: "task-123", AuthorType: models.CommentAuthorUser, Content: "Comment 1"})
 	_ = repo.CreateComment(ctx, &models.Comment{ID: "comment-2", TaskID: "task-123", AuthorType: models.CommentAuthorAgent, Content: "Comment 2"})
@@ -570,8 +589,7 @@ func TestService_DeleteComment(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
 
-	task := &models.Task{ID: "task-123", BoardID: "board-123", ColumnID: "col-123", Title: "Test Task"}
-	_ = repo.CreateTask(ctx, task)
+	setupTestTask(t, repo)
 
 	comment := &models.Comment{ID: "comment-123", TaskID: "task-123", AuthorType: models.CommentAuthorUser, Content: "Test"}
 	_ = repo.CreateComment(ctx, comment)

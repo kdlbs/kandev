@@ -359,7 +359,7 @@ func main() {
 	}
 
 	serviceCfg := orchestrator.DefaultServiceConfig()
-	orchestratorSvc := orchestrator.NewService(serviceCfg, eventBus, nil, agentManagerClient, taskRepoAdapter, taskRepo, log)
+	orchestratorSvc := orchestrator.NewService(serviceCfg, eventBus, agentManagerClient, taskRepoAdapter, taskRepo, log)
 
 	// Set up comment creator for saving agent responses as comments
 	orchestratorSvc.SetCommentCreator(&commentCreatorAdapter{svc: taskSvc})
@@ -1040,71 +1040,4 @@ func (a *commentCreatorAdapter) UpdateToolCallComment(ctx context.Context, taskI
 	return a.svc.UpdateToolCallComment(ctx, taskID, toolCallID, status, result)
 }
 
-// mapACPTypeToCommentType maps ACP message types to comment types
-func mapACPTypeToCommentType(msgType protocol.MessageType) string {
-	switch msgType {
-	case protocol.MessageTypeProgress:
-		return "progress"
-	case protocol.MessageTypeLog:
-		return "content" // Log messages are treated as content
-	case protocol.MessageTypeResult:
-		return "status"
-	case protocol.MessageTypeError:
-		return "error"
-	case protocol.MessageTypeStatus:
-		return "status"
-	case protocol.MessageTypeInputRequired:
-		return "content"
-	case protocol.MessageTypeSessionInfo:
-		return "status"
-	default:
-		return "content"
-	}
-}
 
-// extractACPContent extracts a human-readable message from ACP data
-func extractACPContent(msg *protocol.Message) string {
-	if msg.Data == nil {
-		return ""
-	}
-
-	// Check for nested content.text structure (used by agent_message_chunk)
-	if content, ok := msg.Data["content"].(map[string]interface{}); ok {
-		if text, ok := content["text"].(string); ok && text != "" {
-			return text
-		}
-	}
-
-	// Try common message fields
-	if message, ok := msg.Data["message"].(string); ok && message != "" {
-		return message
-	}
-	if text, ok := msg.Data["text"].(string); ok && text != "" {
-		return text
-	}
-	if errMsg, ok := msg.Data["error"].(string); ok && errMsg != "" {
-		return errMsg
-	}
-	if summary, ok := msg.Data["summary"].(string); ok && summary != "" {
-		return summary
-	}
-	if prompt, ok := msg.Data["prompt"].(string); ok && prompt != "" {
-		return prompt
-	}
-
-	// For progress updates, generate a message
-	if msg.Type == protocol.MessageTypeProgress {
-		if progress, ok := msg.Data["progress"].(float64); ok {
-			return fmt.Sprintf("Progress: %d%%", int(progress))
-		}
-	}
-
-	// For status updates
-	if msg.Type == protocol.MessageTypeStatus {
-		if status, ok := msg.Data["status"].(string); ok && status != "" {
-			return fmt.Sprintf("Status: %s", status)
-		}
-	}
-
-	return ""
-}

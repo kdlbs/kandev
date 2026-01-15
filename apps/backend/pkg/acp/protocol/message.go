@@ -33,17 +33,6 @@ type Message struct {
 	Data      map[string]interface{} `json:"data"`
 }
 
-// NewMessage creates a new ACP message with the current timestamp
-func NewMessage(msgType MessageType, agentID, taskID string, data map[string]interface{}) *Message {
-	return &Message{
-		Type:      msgType,
-		Timestamp: time.Now().UTC(),
-		AgentID:   agentID,
-		TaskID:    taskID,
-		Data:      data,
-	}
-}
-
 // MarshalJSON implements custom JSON marshaling
 func (m *Message) MarshalJSON() ([]byte, error) {
 	type Alias Message
@@ -54,15 +43,6 @@ func (m *Message) MarshalJSON() ([]byte, error) {
 		Alias:     (*Alias)(m),
 		Timestamp: m.Timestamp.Format(time.RFC3339Nano),
 	})
-}
-
-// Parse parses a JSON string into an ACP message
-func Parse(data []byte) (*Message, error) {
-	var msg Message
-	if err := json.Unmarshal(data, &msg); err != nil {
-		return nil, err
-	}
-	return &msg, nil
 }
 
 // IsValid checks if the message has required fields

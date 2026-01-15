@@ -1,8 +1,6 @@
 // Package dto provides Data Transfer Objects for the orchestrator module.
 package dto
 
-import "time"
-
 // GetStatusRequest is the request for orchestrator.status
 type GetStatusRequest struct{}
 
@@ -109,14 +107,7 @@ type PermissionRespondResponse struct {
 	PendingID string `json:"pending_id"`
 }
 
-// FromQueuedTask converts a queue.QueuedTask to QueuedTaskDTO
-func FromQueuedTask(qt interface{ GetTaskID() string; GetPriority() int; GetQueuedAt() time.Time }) QueuedTaskDTO {
-	return QueuedTaskDTO{
-		TaskID:   qt.GetTaskID(),
-		Priority: qt.GetPriority(),
-		QueuedAt: qt.GetQueuedAt().Format("2006-01-02T15:04:05Z"),
-	}
-}
+
 
 // GetTaskExecutionRequest is the payload for task.execution
 type GetTaskExecutionRequest struct {

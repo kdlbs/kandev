@@ -53,12 +53,3 @@ func (p *PortAllocator) Release(port int) {
 	delete(p.allocated, port)
 }
 
-// IsAvailable checks if a specific port is available for allocation.
-func (p *PortAllocator) IsAvailable(port int) bool {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	_, exists := p.allocated[port]
-	return !exists
-}
-

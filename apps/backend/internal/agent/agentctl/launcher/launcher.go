@@ -221,32 +221,7 @@ func (l *Launcher) Stop(ctx context.Context) error {
 	}
 }
 
-// Wait blocks until the agentctl process exits.
-// Returns the exit error if any.
-func (l *Launcher) Wait() error {
-	<-l.exited
-	if l.cmd != nil && l.cmd.ProcessState != nil {
-		if !l.cmd.ProcessState.Success() {
-			return fmt.Errorf("agentctl exited with code %d", l.cmd.ProcessState.ExitCode())
-		}
-	}
-	return nil
-}
 
-// Running returns true if agentctl is currently running.
-func (l *Launcher) Running() bool {
-	select {
-	case <-l.exited:
-		return false
-	default:
-		return l.cmd != nil && l.cmd.Process != nil
-	}
-}
-
-// Port returns the control port agentctl is listening on.
-func (l *Launcher) Port() int {
-	return l.port
-}
 
 // checkPortAvailable verifies the port is not in use.
 func (l *Launcher) checkPortAvailable() error {

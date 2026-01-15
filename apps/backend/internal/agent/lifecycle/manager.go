@@ -1491,21 +1491,7 @@ func (m *Manager) updateInstanceProgress(instanceID string, progress int) {
 	instance.Progress = progress
 }
 
-// updateInstanceComplete marks an instance as completed
-func (m *Manager) updateInstanceComplete(instanceID string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
 
-	instance, exists := m.instances[instanceID]
-	if !exists {
-		return
-	}
-
-	instance.Status = v1.AgentStatusCompleted
-	instance.Progress = 100
-	now := time.Now()
-	instance.FinishedAt = &now
-}
 
 // updateInstanceError updates an instance with an error
 func (m *Manager) updateInstanceError(instanceID, errorMsg string) {
