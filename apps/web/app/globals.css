@@ -138,6 +138,15 @@
   .kanban-task-pulse {
     animation: kanban-task-pulse 5s ease-in-out infinite;
   }
+
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 @keyframes kanban-task-pulse {
@@ -256,21 +265,22 @@
 }
 
 .task-chat-editor .cm-editor {
-  background: transparent;
-  box-shadow: none;
-  outline: none;
+  background: transparent !important;
+  box-shadow: none !important;
+  outline: none !important;
 }
 
 .task-chat-editor .cm-editor.cm-focused {
-  outline: none;
+  outline: none !important;
 }
 
 .task-chat-editor .cm-scroller,
 .task-chat-editor .cm-content,
 .task-chat-editor .cm-line,
 .task-chat-editor .cm-line span {
-  background: transparent;
-  color: var(--foreground);
+  background: transparent !important;
+  background-color: transparent !important;
+  color: var(--foreground) !important;
 }
 
 .task-chat-editor .cm-cursor {

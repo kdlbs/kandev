@@ -4,12 +4,14 @@ import { memo, useMemo, useState } from 'react';
 import {
   IconArrowBackUp,
   IconExternalLink,
+  IconPlus,
+  IconCircleFilled,
+  IconMinus,
 } from '@tabler/icons-react';
-import { Badge } from '@kandev/ui/badge';
+
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@kandev/ui/tabs';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
 import { LineStat } from '@/components/diff-stat';
-import { cn } from '@/lib/utils';
 import { useAppStore } from '@/components/state-provider';
 import type { FileInfo } from '@/lib/state/store';
 import { FileBrowser } from '@/components/task/file-browser';
@@ -26,24 +28,41 @@ type TaskFilesPanelProps = {
   onOpenFile: (file: OpenFileTab) => void;
 };
 
-const badgeClass = (status: string) =>
-  cn(
-    'text-[10px] font-semibold',
-    (status === 'M' || status === 'modified') && 'bg-yellow-500/15 text-yellow-700',
-    (status === 'A' || status === 'added') && 'bg-emerald-500/15 text-emerald-700',
-    (status === 'D' || status === 'deleted') && 'bg-rose-500/15 text-rose-700',
-    status === 'untracked' && 'bg-blue-500/15 text-blue-700',
-    status === 'renamed' && 'bg-purple-500/15 text-purple-700'
-  );
 
-const statusLabel = (status: FileInfo['status']): string => {
+
+const StatusIcon = ({ status }: { status: FileInfo['status'] }) => {
   switch (status) {
-    case 'modified': return 'M';
-    case 'added': return 'A';
-    case 'deleted': return 'D';
-    case 'untracked': return 'U';
-    case 'renamed': return 'R';
-    default: return '?';
+    case 'added':
+    case 'untracked':
+      return (
+        <div className="flex items-center justify-center h-3 w-3 rounded border border-emerald-600">
+          <IconPlus className="h-2 w-2 text-emerald-600" />
+        </div>
+      );
+    case 'modified':
+      return (
+        <div className="flex items-center justify-center h-3 w-3 rounded border border-yellow-600">
+          <IconCircleFilled className="h-1 w-1 text-yellow-600" />
+        </div>
+      );
+    case 'deleted':
+      return (
+        <div className="flex items-center justify-center h-3 w-3 rounded border border-rose-600">
+          <IconMinus className="h-2 w-2 text-rose-600" />
+        </div>
+      );
+    case 'renamed':
+      return (
+        <div className="flex items-center justify-center h-3 w-3 rounded border border-purple-600">
+          <IconCircleFilled className="h-1 w-1 text-purple-600" />
+        </div>
+      );
+    default:
+      return (
+        <div className="flex items-center justify-center h-3 w-3 rounded border border-muted-foreground">
+          <IconCircleFilled className="h-1 w-1 text-muted-foreground" />
+        </div>
+      );
   }
 };
 
@@ -144,7 +163,7 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ taskId, onSelectDiffPath, 
                           </Tooltip>
                         </div>
                         <LineStat added={file.plus} removed={file.minus} />
-                        <Badge className={badgeClass(file.status)}>{statusLabel(file.status)}</Badge>
+                        <StatusIcon status={file.status} />
                       </div>
                     </li>
                   );

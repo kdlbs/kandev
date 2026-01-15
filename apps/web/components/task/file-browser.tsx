@@ -146,12 +146,12 @@ export function FileBrowser({ taskId, onOpenFile }: FileBrowserProps) {
           )}
           {node.is_dir ? (
             isExpanded ? (
-              <IconFolderOpen className="h-4 w-4 flex-shrink-0 text-blue-500" />
+              <IconFolderOpen className="h-3 w-3 flex-shrink-0 text-blue-500" />
             ) : (
-              <IconFolder className="h-4 w-4 flex-shrink-0 text-blue-500" />
+              <IconFolder className="h-3 w-3 flex-shrink-0 text-blue-500" />
             )
           ) : (
-            <IconFile className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+            <IconFile className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
           )}
           <span className="truncate">{node.name}</span>
           {!node.is_dir && node.size && (
@@ -178,7 +178,6 @@ export function FileBrowser({ taskId, onOpenFile }: FileBrowserProps) {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="text-sm font-medium mb-2 px-2">Files</div>
       <ScrollArea className="flex-1">
         {isLoadingTree ? (
           <div className="p-4 text-sm text-muted-foreground">Loading files...</div>

@@ -158,9 +158,9 @@ export function TaskChatInput({
   return (
     <div
       className={cn(
-        'task-chat-editor rounded-md border border-input bg-input/20 dark:bg-input/30 focus-within:border-ring focus-within:ring-[2px] focus-within:ring-ring/30 overflow-hidden',
+        'task-chat-editor rounded-md border border-input bg-muted/40 focus-within:border-ring focus-within:ring-[2px] focus-within:ring-ring/30 overflow-hidden',
         planModeEnabled &&
-          'border-dashed border-primary/60 !bg-primary/20 dark:!bg-primary/20 shadow-[inset_0_0_0_1px_rgba(59,130,246,0.35)]',
+          'border-dashed border-primary/60 !bg-primary/10 shadow-[inset_0_0_0_1px_rgba(59,130,246,0.35)]',
         className
       )}
     >

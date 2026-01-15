@@ -47,12 +47,19 @@ import { KeyboardShortcutTooltip } from '@/components/keyboard-shortcut-tooltip'
 interface TaskCreateDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  mode?: 'task' | 'session';
   workspaceId: string | null;
   boardId: string | null;
   defaultColumnId: string | null;
   columns: Array<{ id: string; title: string }>;
   editingTask?: { id: string; title: string; description?: string; columnId: string; state?: Task['state'] } | null;
   onSuccess?: (task: Task, mode: 'create' | 'edit') => void;
+  onCreateSession?: (data: {
+    prompt: string;
+    agentProfileId: string;
+    executorId: string;
+    environmentId: string;
+  }) => void;
   initialValues?: {
     title: string;
     description?: string;
@@ -66,15 +73,18 @@ interface TaskCreateDialogProps {
 export function TaskCreateDialog({
   open,
   onOpenChange,
+  mode = 'task',
   workspaceId,
   boardId,
   defaultColumnId,
   columns,
   editingTask,
   onSuccess,
+  onCreateSession,
   initialValues,
   submitLabel = 'Create',
 }: TaskCreateDialogProps) {
+  const isSessionMode = mode === 'session';
   const isEditMode = submitLabel !== 'Create';
   const [title, setTitle] = useState(initialValues?.title ?? '');
   const [description, setDescription] = useState(initialValues?.description ?? '');
@@ -194,6 +204,30 @@ export function TaskCreateDialog({
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
+
+    // Session mode - create a new session
+    if (isSessionMode) {
+      const trimmedDescription = description.trim();
+      if (!trimmedDescription || !agentProfileId) return;
+
+      onCreateSession?.({
+        prompt: trimmedDescription,
+        agentProfileId,
+        executorId,
+        environmentId,
+      });
+
+      // Reset form
+      setDescription('');
+      setAgentProfileId('');
+      setExecutorId('');
+      setEnvironmentId('');
+      setShowAdvancedSettings(false);
+      onOpenChange(false);
+      return;
+    }
+
+    // Task mode - create or edit task
     const trimmedTitle = title.trim();
     if (!trimmedTitle) return;
     if (isEditMode && editingTask) {
@@ -272,32 +306,53 @@ export function TaskCreateDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-none w-[900px] sm:!max-w-none max-h-[85vh] flex flex-col bg-card">
         <DialogHeader>
-          <DialogTitle>{submitLabel === 'Create' ? 'Create Task' : 'Edit Task'}</DialogTitle>
+          <DialogTitle>
+            {isSessionMode ? 'Create New Session' : submitLabel === 'Create' ? 'Create Task' : 'Edit Task'}
+          </DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="flex flex-col gap-4 overflow-hidden">
           <div className="flex-1 space-y-4 overflow-y-auto pr-1">
+            {!isSessionMode && (
+              <div>
+                <Input
+                  autoFocus
+                  required
+                  placeholder="Enter task title..."
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  disabled={isSessionMode}
+                />
+              </div>
+            )}
+            {isSessionMode && (
+              <div>
+                <Label htmlFor="task-title">Task</Label>
+                <Input
+                  id="task-title"
+                  value={title}
+                  disabled
+                  placeholder="Task"
+                  className="bg-muted cursor-not-allowed mt-1.5"
+                />
+              </div>
+            )}
             <div>
-              <Input
-                autoFocus
-                required
-                placeholder="Enter task title..."
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-              />
-            </div>
-            <div>
+              {isSessionMode && <Label htmlFor="prompt">Prompt</Label>}
               <Textarea
+                id={isSessionMode ? 'prompt' : undefined}
                 ref={descriptionRef}
-                placeholder="Write a prompt for the agent..."
+                placeholder={isSessionMode ? 'Describe what you want the agent to do...' : 'Write a prompt for the agent...'}
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 onKeyDown={handleKeyDown}
                 rows={2}
-                className="min-h-[96px] max-h-[240px] resize-y overflow-auto"
+                className={isSessionMode ? 'min-h-[120px] resize-none mt-1.5' : 'min-h-[96px] max-h-[240px] resize-y overflow-auto'}
+                required={isSessionMode}
               />
             </div>
-            <div className="grid gap-4 md:grid-cols-3">
-              <div>
+            {!isSessionMode && (
+              <div className="grid gap-4 md:grid-cols-3">
+                <div>
                 {repositories.length === 0 && !repositoriesLoading ? (
                   <div className="flex items-center justify-center h-10 px-3 py-2 text-sm border border-input rounded-md bg-background">
                     <span className="text-muted-foreground mr-2">No repositories found.</span>
@@ -407,19 +462,100 @@ export function TaskCreateDialog({
                 )}
               </div>
             </div>
-            <div className="flex items-center justify-end gap-2">
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => setShowAdvancedSettings(!showAdvancedSettings)}
-                className="text-muted-foreground cursor-pointer"
-              >
-                <IconSettings className="h-4 w-4 mr-1" />
-                {showAdvancedSettings ? 'Hide' : 'More Options'}
-              </Button>
-            </div>
-            {showAdvancedSettings && (
+            )}
+
+            {/* Agent Profile - shown in session mode */}
+            {isSessionMode && (
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <Label htmlFor="agent-profile" className="text-sm whitespace-nowrap">
+                    Agent Profile
+                  </Label>
+                  <Select value={agentProfileId} onValueChange={setAgentProfileId} required>
+                    <SelectTrigger id="agent-profile" className="w-[280px]">
+                      <SelectValue placeholder={agentProfilesLoading ? 'Loading agent profiles...' : 'Select agent profile'} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {agentProfiles.map((profile) => (
+                        <SelectItem key={profile.id} value={profile.id}>
+                          {profile.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* More Options Toggle */}
+                <button
+                  type="button"
+                  onClick={() => setShowAdvancedSettings(!showAdvancedSettings)}
+                  className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  <IconSettings className="h-4 w-4" />
+                  More options
+                </button>
+              </div>
+            )}
+
+            {!isSessionMode && (
+              <div className="flex items-center justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowAdvancedSettings(!showAdvancedSettings)}
+                  className="text-muted-foreground cursor-pointer"
+                >
+                  <IconSettings className="h-4 w-4 mr-1" />
+                  {showAdvancedSettings ? 'Hide' : 'More Options'}
+                </Button>
+              </div>
+            )}
+            {showAdvancedSettings && isSessionMode && (
+              <div className="pt-2 border-t">
+                {/* Executor and Environment in same row */}
+                <div className="flex items-center gap-6">
+                  {/* Executor */}
+                  <div className="flex items-center gap-3">
+                    <Label htmlFor="executor" className="text-sm whitespace-nowrap">
+                      Executor
+                    </Label>
+                    <Select value={executorId} onValueChange={setExecutorId}>
+                      <SelectTrigger id="executor" className="w-[200px]">
+                        <SelectValue placeholder={executorsLoading ? 'Loading executors...' : 'Select executor'} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {executors.map((executor) => (
+                          <SelectItem key={executor.id} value={executor.id}>
+                            {executor.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Environment */}
+                  <div className="flex items-center gap-3">
+                    <Label htmlFor="environment" className="text-sm whitespace-nowrap">
+                      Environment
+                    </Label>
+                    <Select value={environmentId} onValueChange={setEnvironmentId}>
+                      <SelectTrigger id="environment" className="w-[200px]">
+                        <SelectValue placeholder={environmentsLoading ? 'Loading environments...' : 'Select environment'} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {environments.map((env) => (
+                          <SelectItem key={env.id} value={env.id}>
+                            {env.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </div>
+            )}
+            {showAdvancedSettings && !isSessionMode && (
               <div className="grid gap-4 md:grid-cols-2">
                 <div>
                   <Select value={environmentId} onValueChange={setEnvironmentId} disabled={isEditMode}>
@@ -475,41 +611,50 @@ export function TaskCreateDialog({
             )}
           </div>
           <DialogFooter className="border-t border-border pt-3">
-            <div className="flex flex-1 items-center gap-3 text-sm text-muted-foreground">
-              <div className="flex items-center gap-2">
-                <input
-                  id="start-agent"
-                  type="checkbox"
-                  checked={startAgent}
-                  onChange={(e) => setStartAgent(e.target.checked)}
-                  disabled={isEditMode}
-                  className="h-4 w-4 rounded border border-input text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                />
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Label htmlFor="start-agent" className="cursor-pointer">
-                        Start Agent
-                      </Label>
-                    </TooltipTrigger>
-                    <TooltipContent>Start the agent on task creation.</TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
+            {!isSessionMode && (
+              <div className="flex flex-1 items-center gap-3 text-sm text-muted-foreground">
+                <div className="flex items-center gap-2">
+                  <input
+                    id="start-agent"
+                    type="checkbox"
+                    checked={startAgent}
+                    onChange={(e) => setStartAgent(e.target.checked)}
+                    disabled={isEditMode}
+                    className="h-4 w-4 rounded border border-input text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  />
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Label htmlFor="start-agent" className="cursor-pointer">
+                          Start Agent
+                        </Label>
+                      </TooltipTrigger>
+                      <TooltipContent>Start the agent on task creation.</TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                </div>
+                {startAgent && (
+                  <span className="text-xs text-muted-foreground">
+                    A git worktree will be created from the above branch.
+                  </span>
+                )}
               </div>
-              {startAgent && (
-                <span className="text-xs text-muted-foreground">
-                  A git worktree will be created from the above branch.
-                </span>
-              )}
-            </div>
+            )}
             <DialogClose asChild>
               <Button type="button" variant="outline" onClick={handleCancel}>
                 Cancel
               </Button>
             </DialogClose>
             <KeyboardShortcutTooltip shortcut={SHORTCUTS.SUBMIT}>
-              <Button type="submit" disabled={!title.trim() || (!isEditMode && !repositoryId)}>
-                {submitLabel}
+              <Button
+                type="submit"
+                disabled={
+                  isSessionMode
+                    ? !description.trim() || !agentProfileId
+                    : !title.trim() || (!isEditMode && !repositoryId)
+                }
+              >
+                {isSessionMode ? 'Create Session' : submitLabel}
               </Button>
             </KeyboardShortcutTooltip>
           </DialogFooter>

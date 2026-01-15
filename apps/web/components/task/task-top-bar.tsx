@@ -3,62 +3,74 @@
 import { memo, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
-  IconArrowDown,
   IconArrowLeft,
+  IconArrowUp,
   IconBrandVscode,
   IconChevronDown,
-  IconChevronRight,
   IconCopy,
-  IconEye,
-  IconFolder,
+  IconDots,
+  IconFolderOpen,
   IconGitBranch,
-  IconGitFork,
   IconGitMerge,
   IconGitPullRequest,
   IconLoader2,
-  IconPencil,
   IconPlayerPlay,
   IconPlayerStop,
+  IconCheck,
 } from '@tabler/icons-react';
 import { Button } from '@kandev/ui/button';
-import { CommitStatBadge, LineStat } from '@/components/diff-stat';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@kandev/ui/dropdown-menu';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@kandev/ui/select';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@kandev/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
+import { Popover, PopoverContent, PopoverTrigger } from '@kandev/ui/popover';
+import { SessionsDropdown } from './sessions-dropdown';
+import { CommitStatBadge, LineStat } from '@/components/diff-stat';
 import { useAppStore } from '@/components/state-provider';
-import type { Branch } from '@/lib/types/http';
+import { formatUserHomePath } from '@/lib/utils';
 
 type TaskTopBarProps = {
   taskTitle?: string;
+  taskDescription?: string;
   baseBranch?: string;
-  branches?: Branch[];
-  branchesLoading?: boolean;
   onStartAgent?: () => void;
   onStopAgent?: () => void;
   isAgentRunning?: boolean;
   isAgentLoading?: boolean;
   worktreePath?: string | null;
   worktreeBranch?: string | null;
+  repositoryPath?: string | null;
+  repositoryName?: string | null;
 };
 
 const TaskTopBar = memo(function TaskTopBar({
   taskTitle,
+  taskDescription,
   baseBranch,
-  branches = [],
-  branchesLoading = false,
   onStartAgent,
   onStopAgent,
   isAgentRunning = false,
   isAgentLoading = false,
   worktreePath,
   worktreeBranch,
+  repositoryPath,
+  repositoryName,
 }: TaskTopBarProps) {
-  const [branchName, setBranchName] = useState('feature/agent-ui');
-  const [isEditingBranch, setIsEditingBranch] = useState(false);
-  const [selectedBaseBranch, setSelectedBaseBranch] = useState(baseBranch ?? 'origin/main');
+  const [copiedBranch, setCopiedBranch] = useState(false);
+  const [popoverOpen, setPopoverOpen] = useState(false);
+  const [copiedRepo, setCopiedRepo] = useState(false);
+  const [copiedWorktree, setCopiedWorktree] = useState(false);
 
   // Get git status from store
   const gitStatus = useAppStore((state) => state.gitStatus);
+
+
+
+  // Use worktree branch if available, otherwise fall back to base branch
+  const displayBranch = worktreeBranch || baseBranch;
 
   // Calculate total additions and deletions from all files
   const { totalAdditions, totalDeletions } = useMemo(() => {
@@ -75,6 +87,33 @@ const TaskTopBar = memo(function TaskTopBar({
     );
   }, [gitStatus.files]);
 
+  const handleBranchClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (displayBranch) {
+      navigator.clipboard?.writeText(displayBranch);
+      setCopiedBranch(true);
+      setTimeout(() => setCopiedBranch(false), 500);
+    }
+  };
+
+  const handleCopyRepo = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (repositoryPath) {
+      navigator.clipboard?.writeText(formatUserHomePath(repositoryPath));
+      setCopiedRepo(true);
+      setTimeout(() => setCopiedRepo(false), 500);
+    }
+  };
+
+  const handleCopyWorktree = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (worktreePath) {
+      navigator.clipboard?.writeText(formatUserHomePath(worktreePath));
+      setCopiedWorktree(true);
+      setTimeout(() => setCopiedWorktree(false), 500);
+    }
+  };
+
   return (
     <header className="flex items-center justify-between p-3">
       <div className="flex items-center gap-3">
@@ -84,86 +123,91 @@ const TaskTopBar = memo(function TaskTopBar({
             Back
           </Link>
         </Button>
-        <span className="text-xs text-muted-foreground">{taskTitle ?? 'Task details'}</span>
-        <div className="flex items-center gap-2">
-          <div className="group flex items-center gap-2 rounded-md px-2 h-8 hover:bg-muted/40 cursor-default">
-            <IconGitFork className="h-4 w-4 text-muted-foreground" />
-            {isEditingBranch ? (
-              <input
-                className="bg-background text-sm outline-none w-[160px] rounded-md border border-border/70 px-1"
-                value={branchName}
-                onChange={(event) => setBranchName(event.target.value)}
-                onBlur={() => setIsEditingBranch(false)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === 'Escape') {
-                    setIsEditingBranch(false);
-                  }
-                }}
-                autoFocus
-              />
-            ) : (
-              <>
-                <span className="text-sm font-medium">{branchName}</span>
-                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        className="text-muted-foreground hover:text-foreground cursor-pointer"
-                        onClick={() => setIsEditingBranch(true)}
-                      >
-                        <IconPencil className="h-3.5 w-3.5" />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent>Edit branch name</TooltipContent>
-                  </Tooltip>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        className="text-muted-foreground hover:text-foreground cursor-pointer"
-                        onClick={() => navigator.clipboard?.writeText(branchName)}
-                      >
-                        <IconCopy className="h-3.5 w-3.5" />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent>Copy branch name</TooltipContent>
-                  </Tooltip>
-                </div>
-              </>
-            )}
-          </div>
-          <IconChevronRight className="h-4 w-4 text-muted-foreground" />
-          <Select
-            value={selectedBaseBranch}
-            onValueChange={setSelectedBaseBranch}
-            disabled={branches.length === 0 && !branchesLoading}
-          >
+        {repositoryName && (
+          <>
+            <span className="text-sm text-muted-foreground">{repositoryName}</span>
+            <span className="text-sm text-muted-foreground">›</span>
+          </>
+        )}
+        <span className="text-sm font-medium">{taskTitle ?? 'Task details'}</span>
+        <SessionsDropdown taskTitle={taskTitle} taskDescription={taskDescription} />
+        {displayBranch && (
+          <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
             <Tooltip>
               <TooltipTrigger asChild>
-                <SelectTrigger className="w-[190px] h-8 cursor-pointer border border-transparent bg-transparent hover:bg-muted/40 data-[state=open]:bg-background data-[state=open]:border-border/70">
-                  <SelectValue
-                    placeholder={branchesLoading ? 'Loading branches...' : 'Base branch'}
-                  />
-                </SelectTrigger>
+                <PopoverTrigger asChild>
+                  <div className="group flex items-center gap-1.5 rounded-md px-2 h-7 bg-muted/40 hover:bg-muted/60 cursor-pointer transition-colors">
+                    <IconGitBranch className="h-3.5 w-3.5 text-muted-foreground" />
+                    <span className="text-xs text-muted-foreground">{displayBranch}</span>
+                    <button
+                      type="button"
+                      onClick={handleBranchClick}
+                      className="opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer ml-0.5"
+                    >
+                      {copiedBranch ? (
+                        <IconCheck className="h-3 w-3 text-green-500" />
+                      ) : (
+                        <IconCopy className="h-3 w-3 text-muted-foreground hover:text-foreground" />
+                      )}
+                    </button>
+                  </div>
+                </PopoverTrigger>
               </TooltipTrigger>
-              <TooltipContent>Change base branch</TooltipContent>
+              <TooltipContent side="right">Current branch</TooltipContent>
             </Tooltip>
-            <SelectContent>
-              {branches.length === 0 ? (
-                <SelectItem value={selectedBaseBranch} disabled>
-                  {selectedBaseBranch}
-                </SelectItem>
-              ) : (
-                branches.map((branch) => (
-                  <SelectItem key={`${branch.type}-${branch.remote || ''}-${branch.name}`} value={branch.name}>
-                    {branch.type === 'remote' && branch.remote ? `${branch.remote}/${branch.name}` : branch.name}
-                  </SelectItem>
-                ))
-              )}
-            </SelectContent>
-          </Select>
-        </div>
+            <PopoverContent
+              side="bottom"
+              sideOffset={5}
+              className="p-0 w-auto max-w-[600px] gap-1"
+            >
+              <div className="px-2 pt-1 pb-2 space-y-1.5">
+                {repositoryPath && (
+                  <div className="space-y-0.5">
+                    <div className="text-xs text-muted-foreground">Repository</div>
+                    <div className="relative group/repo overflow-hidden">
+                      <div className="text-xs text-muted-foreground bg-muted/50 px-2 py-1.5 pr-9 rounded-sm select-text cursor-text whitespace-nowrap">
+                        {formatUserHomePath(repositoryPath)}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleCopyRepo}
+                        className="absolute right-1 top-1 p-1 rounded bg-card/80 backdrop-blur-sm hover:bg-card transition-all shadow-sm"
+                      >
+                        {copiedRepo ? (
+                          <IconCheck className="h-3 w-3 text-green-500" />
+                        ) : (
+                          <IconCopy className="h-3 w-3 text-muted-foreground" />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {worktreePath && (
+                  <div className="space-y-0.5">
+                    <div className="text-xs text-muted-foreground">Worktree</div>
+                    <div className="relative group/worktree overflow-hidden">
+                      <div className="text-xs bg-muted/50 px-2 py-1.5 pr-9 rounded-sm select-text cursor-text whitespace-nowrap text-muted-foreground">
+                        {formatUserHomePath(worktreePath)}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleCopyWorktree}
+                        className="absolute right-1 top-1 p-1 rounded bg-card/80 backdrop-blur-sm hover:bg-card transition-all shadow-sm"
+                      >
+                        {copiedWorktree ? (
+                          <IconCheck className="h-3 w-3 text-green-500" />
+                        ) : (
+                          <IconCopy className="h-3 w-3 text-muted-foreground" />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </PopoverContent>
+          </Popover>
+        )}
+
         {/* Git Status: Ahead/Behind */}
         {(gitStatus.ahead > 0 || gitStatus.behind > 0) && (
           <div className="flex items-center gap-1">
@@ -193,6 +237,7 @@ const TaskTopBar = memo(function TaskTopBar({
             )}
           </div>
         )}
+
         {/* Git Status: Lines Changed */}
         {(totalAdditions > 0 || totalDeletions > 0) && (
           <Tooltip>
@@ -204,42 +249,7 @@ const TaskTopBar = memo(function TaskTopBar({
             <TooltipContent>Lines changed</TooltipContent>
           </Tooltip>
         )}
-        {/* Worktree Info */}
-        {worktreePath && (
-          <div className="flex items-center gap-2 ml-2 pl-2 border-l border-border/50">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <div className="group flex items-center gap-1.5 rounded-md px-2 h-7 bg-muted/40 hover:bg-muted/60 cursor-pointer">
-                  <IconFolder className="h-3.5 w-3.5 text-muted-foreground" />
-                  <span className="text-xs text-muted-foreground max-w-[200px] truncate">
-                    {worktreePath}
-                  </span>
-                  <button
-                    type="button"
-                    className="text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      navigator.clipboard?.writeText(worktreePath);
-                    }}
-                  >
-                    <IconCopy className="h-3 w-3" />
-                  </button>
-                </div>
-              </TooltipTrigger>
-              <TooltipContent className="max-w-[400px]">
-                <div className="space-y-1">
-                  <div className="font-medium">Worktree Path</div>
-                  <div className="text-xs text-muted-foreground break-all">{worktreePath}</div>
-                  {worktreeBranch && (
-                    <div className="text-xs">
-                      Branch: <span className="font-mono">{worktreeBranch}</span>
-                    </div>
-                  )}
-                </div>
-              </TooltipContent>
-            </Tooltip>
-          </div>
-        )}
+
       </div>
       <div className="flex items-center gap-2">
         {/* Start/Stop Agent Button */}
@@ -284,65 +294,129 @@ const TaskTopBar = memo(function TaskTopBar({
             <TooltipContent>Start the agent on this task</TooltipContent>
           </Tooltip>
         )}
+
+        {/* Editor Button */}
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button size="sm" variant="outline" className="cursor-pointer">
+            <Button
+              size="sm"
+              variant="outline"
+              className="cursor-pointer"
+              onClick={() => {
+                // TODO: Implement open in editor
+                console.log('Open in editor');
+              }}
+            >
               <IconBrandVscode className="h-4 w-4" />
               Editor
             </Button>
           </TooltipTrigger>
           <TooltipContent>Open in editor</TooltipContent>
         </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button size="sm" variant="outline" className="cursor-pointer">
-              <IconArrowDown className="h-4 w-4" />
-              Pull
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Pull from remote</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button size="sm" variant="outline" className="cursor-pointer">
-              <IconEye className="h-4 w-4" />
-              Review
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Open review</TooltipContent>
-        </Tooltip>
+
+        {/* Create PR Split Button */}
         <div className="inline-flex rounded-md border border-border overflow-hidden">
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button size="sm" variant="outline" className="rounded-none border-0 cursor-pointer">
+              <Button
+                size="sm"
+                variant="outline"
+                className="rounded-none border-0 cursor-pointer"
+                onClick={() => {
+                  // TODO: Implement create PR
+                  console.log('Create PR');
+                }}
+              >
                 <IconGitPullRequest className="h-4 w-4" />
                 Create PR
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Create PR</TooltipContent>
+            <TooltipContent>Create pull request</TooltipContent>
           </Tooltip>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button size="sm" variant="outline" className="rounded-none border-0 px-2 cursor-pointer">
+              <Button size="sm" variant="outline" className="rounded-none border-0 border-l px-2 cursor-pointer">
                 <IconChevronDown className="h-4 w-4" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem>
-                <IconPencil className="h-4 w-4" />
-                Create PR manually
+              <DropdownMenuItem
+                className="cursor-pointer"
+                onClick={() => {
+                  // TODO: Implement pull
+                  console.log('Pull from remote');
+                }}
+              >
+                <IconArrowUp className="h-4 w-4 rotate-180" />
+                Pull
               </DropdownMenuItem>
-              <DropdownMenuItem>
-                <IconGitMerge className="h-4 w-4" />
-                Merge
-              </DropdownMenuItem>
-              <DropdownMenuItem>
+              <DropdownMenuItem
+                className="cursor-pointer"
+                onClick={() => {
+                  // TODO: Implement rebase
+                  console.log('Rebase');
+                }}
+              >
                 <IconGitBranch className="h-4 w-4" />
                 Rebase
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="cursor-pointer"
+                onClick={() => {
+                  // TODO: Implement push
+                  console.log('Push to remote');
+                }}
+              >
+                <IconArrowUp className="h-4 w-4" />
+                Push
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="cursor-pointer"
+                onClick={() => {
+                  // TODO: Implement merge
+                  console.log('Merge');
+                }}
+              >
+                <IconGitMerge className="h-4 w-4" />
+                Merge
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
+
+        {/* More Options (3-dot) Dropdown */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button size="sm" variant="outline" className="cursor-pointer px-2">
+              <IconDots className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-[220px]">
+            <DropdownMenuItem
+              className="cursor-pointer"
+              onClick={() => {
+                if (worktreePath) {
+                  navigator.clipboard?.writeText(worktreePath);
+                }
+              }}
+              disabled={!worktreePath}
+            >
+              <IconCopy className="h-4 w-4" />
+              Copy workspace path
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className="cursor-pointer"
+              onClick={() => {
+                // TODO: Implement open workspace folder
+                console.log('Open workspace folder:', worktreePath);
+              }}
+              disabled={!worktreePath}
+            >
+              <IconFolderOpen className="h-4 w-4" />
+              Open workspace folder
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
     </header>
   );
