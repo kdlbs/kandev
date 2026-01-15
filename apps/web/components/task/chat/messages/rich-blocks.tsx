@@ -4,7 +4,7 @@ import { IconBrain, IconCode, IconListCheck } from '@tabler/icons-react';
 import { DiffModeEnum, DiffView } from '@git-diff-view/react';
 import { useTheme } from 'next-themes';
 import { cn } from '@/lib/utils';
-import type { Comment } from '@/lib/types/http';
+import type { Message } from '@/lib/types/http';
 import type { DiffPayload, RichMetadata } from '@/components/task/chat/types';
 
 function resolveDiffPayload(diff: unknown): DiffPayload | null {
@@ -28,7 +28,7 @@ function resolveDiffPayload(diff: unknown): DiffPayload | null {
   return null;
 }
 
-export function RichBlocks({ comment }: { comment: Comment }) {
+export function RichBlocks({ comment }: { comment: Message }) {
   const metadata = comment.metadata as RichMetadata | undefined;
   const { resolvedTheme } = useTheme();
   if (!metadata) return null;

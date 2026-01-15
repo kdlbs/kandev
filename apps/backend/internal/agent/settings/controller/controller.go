@@ -18,19 +18,26 @@ import (
 var (
 	ErrAgentNotFound        = errors.New("agent not found")
 	ErrAgentProfileNotFound = errors.New("agent profile not found")
+	ErrAgentProfileInUse    = errors.New("agent profile is used by an active agent session")
 )
 
 type Controller struct {
-	repo      store.Repository
-	discovery *discovery.Registry
-	logger    *logger.Logger
+	repo           store.Repository
+	discovery      *discovery.Registry
+	sessionChecker SessionChecker
+	logger         *logger.Logger
 }
 
-func NewController(repo store.Repository, discoveryRegistry *discovery.Registry, log *logger.Logger) *Controller {
+type SessionChecker interface {
+	HasActiveAgentSessionsByAgentProfile(ctx context.Context, agentProfileID string) (bool, error)
+}
+
+func NewController(repo store.Repository, discoveryRegistry *discovery.Registry, sessionChecker SessionChecker, log *logger.Logger) *Controller {
 	return &Controller{
-		repo:      repo,
-		discovery: discoveryRegistry,
-		logger:    log.WithFields(zap.String("component", "agent-settings-controller")),
+		repo:           repo,
+		discovery:      discoveryRegistry,
+		sessionChecker: sessionChecker,
+		logger:         log.WithFields(zap.String("component", "agent-settings-controller")),
 	}
 }
 
@@ -265,6 +272,15 @@ func (c *Controller) DeleteProfile(ctx context.Context, id string) (*dto.AgentPr
 			return nil, ErrAgentProfileNotFound
 		}
 		return nil, err
+	}
+	if c.sessionChecker != nil {
+		active, err := c.sessionChecker.HasActiveAgentSessionsByAgentProfile(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if active {
+			return nil, ErrAgentProfileInUse
+		}
 	}
 	if err := c.repo.DeleteAgentProfile(ctx, id); err != nil {
 		if strings.Contains(err.Error(), "agent profile not found") {

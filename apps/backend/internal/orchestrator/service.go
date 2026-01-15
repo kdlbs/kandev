@@ -11,14 +11,16 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/queue"
 	"github.com/kandev/kandev/internal/orchestrator/scheduler"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
-	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"github.com/kandev/kandev/pkg/acp/protocol"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // Common errors
@@ -46,11 +48,13 @@ func DefaultServiceConfig() ServiceConfig {
 // InputRequestHandler is called when an agent requests user input
 type InputRequestHandler func(ctx context.Context, taskID, agentID, message string) error
 
-// CommentCreator is an interface for creating comments on tasks
-type CommentCreator interface {
-	CreateAgentComment(ctx context.Context, taskID, content, agentSessionID string) error
-	CreateToolCallComment(ctx context.Context, taskID, toolCallID, title, status, agentSessionID string, args map[string]interface{}) error
-	UpdateToolCallComment(ctx context.Context, taskID, toolCallID, status, result string) error
+// MessageCreator is an interface for creating messages on tasks
+type MessageCreator interface {
+	CreateAgentMessage(ctx context.Context, taskID, content, agentSessionID string) error
+	CreateUserMessage(ctx context.Context, taskID, content, agentSessionID string) error
+	CreateToolCallMessage(ctx context.Context, taskID, toolCallID, title, status, agentSessionID string, args map[string]interface{}) error
+	UpdateToolCallMessage(ctx context.Context, taskID, toolCallID, status, result, agentSessionID string) error
+	CreateSessionMessage(ctx context.Context, taskID, content, agentSessionID, messageType string, metadata map[string]interface{}, requestsInput bool) error
 }
 
 // Service is the main orchestrator service
@@ -75,13 +79,21 @@ type Service struct {
 	// Input request handler (for agent-user conversation)
 	inputRequestHandler InputRequestHandler
 
-	// Comment creator for saving agent responses
-	commentCreator CommentCreator
+	// Message creator for saving agent responses
+	messageCreator MessageCreator
 
 	// Service state
 	mu        sync.RWMutex
 	running   bool
 	startedAt time.Time
+
+	readyMu     sync.Mutex
+	readyStates map[string]*readyState
+}
+
+type readyState struct {
+	readySeen         bool
+	promptCompleteSeen bool
 }
 
 // Status contains orchestrator status information
@@ -131,6 +143,7 @@ func NewService(
 		executor:     exec,
 		scheduler:    sched,
 		acpHandlers:  make([]func(taskID string, msg *protocol.Message), 0),
+		readyStates:  make(map[string]*readyState),
 	}
 
 	// Create the watcher with event handlers that wire everything together
@@ -150,9 +163,9 @@ func NewService(
 	return s
 }
 
-// SetCommentCreator sets the comment creator for saving agent responses
-func (s *Service) SetCommentCreator(cc CommentCreator) {
-	s.commentCreator = cc
+// SetMessageCreator sets the message creator for saving agent responses
+func (s *Service) SetMessageCreator(mc MessageCreator) {
+	s.messageCreator = mc
 }
 
 // Start starts all orchestrator components
@@ -282,6 +295,12 @@ func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID s
 		zap.String("agent_profile_id", agentProfileID),
 		zap.Int("priority", priority))
 
+	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateScheduling); err != nil {
+		s.logger.Warn("failed to update task state to SCHEDULING",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+	}
+
 	// Fetch the task from the repository to get complete task info
 	task, err := s.scheduler.GetTask(ctx, taskID)
 	if err != nil {
@@ -291,15 +310,34 @@ func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID s
 		return nil, err
 	}
 
-	// Override agent_profile_id and priority if provided in the request
-	if agentProfileID != "" {
-		task.AgentProfileID = &agentProfileID
-	}
+	// Override priority if provided in the request
 	if priority > 0 {
 		task.Priority = priority
 	}
 
-	return s.executor.Execute(ctx, task)
+	execution, err := s.executor.ExecuteWithProfile(ctx, task, agentProfileID)
+	if err != nil {
+		return nil, err
+	}
+
+	if execution.SessionID != "" {
+		s.updateAgentSessionState(ctx, taskID, execution.SessionID, models.AgentSessionStateRunning, "", true)
+		if s.messageCreator != nil && task.Description != "" {
+			if err := s.messageCreator.CreateUserMessage(ctx, taskID, task.Description, execution.SessionID); err != nil {
+				s.logger.Error("failed to create initial user message",
+					zap.String("task_id", taskID),
+					zap.Error(err))
+			}
+		}
+	}
+
+	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateInProgress); err != nil {
+		s.logger.Warn("failed to update task state to IN_PROGRESS",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+	}
+
+	return execution, nil
 }
 
 // StopTask stops agent execution for a task
@@ -322,6 +360,9 @@ func (s *Service) PromptTask(ctx context.Context, taskID string, prompt string) 
 	s.logger.Info("sending prompt to task agent",
 		zap.String("task_id", taskID),
 		zap.Int("prompt_length", len(prompt)))
+	if sessionID, err := s.executor.GetActiveSessionID(ctx, taskID); err == nil && sessionID != "" {
+		s.updateAgentSessionState(ctx, taskID, sessionID, models.AgentSessionStateRunning, "", true)
+	}
 	result, err := s.executor.Prompt(ctx, taskID, prompt)
 	if err != nil {
 		return nil, err
@@ -423,20 +464,7 @@ func (s *Service) handleTaskStateChanged(ctx context.Context, data watcher.TaskE
 	s.logger.Debug("handling task state changed",
 		zap.String("task_id", data.TaskID))
 
-	// Add task to queue if state is TODO and agent_profile_id is set
-	if data.NewState != nil && *data.NewState == v1.TaskStateTODO {
-		if data.Task != nil && data.Task.AgentProfileID != nil && *data.Task.AgentProfileID != "" {
-			if err := s.scheduler.EnqueueTask(data.Task); err != nil {
-				s.logger.Error("failed to enqueue task on state change",
-					zap.String("task_id", data.TaskID),
-					zap.Error(err))
-			} else {
-				s.logger.Info("task enqueued on state change to TODO",
-					zap.String("task_id", data.TaskID),
-					zap.String("agent_profile_id", *data.Task.AgentProfileID))
-			}
-		}
-	}
+	// No auto-enqueue on TODO; sessions are started explicitly with agent profile.
 }
 
 // handleAgentReady handles agent ready events (prompt completed, ready for follow-up)
@@ -448,33 +476,8 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 		zap.String("task_id", data.TaskID),
 		zap.String("agent_instance_id", data.AgentInstanceID))
 
-	// Get current task state to determine if we should transition to REVIEW
-	task, err := s.taskRepo.GetTask(ctx, data.TaskID)
-	if err != nil {
-		s.logger.Error("failed to get task for state check",
-			zap.String("task_id", data.TaskID),
-			zap.Error(err))
-		return
-	}
-
-	// Only transition to REVIEW if the task is currently IN_PROGRESS
-	// This implements the forward movement: IN_PROGRESS → (agent finishes) → REVIEW
-	// This works for both:
-	// 1. Initial task execution: Task starts IN_PROGRESS, agent finishes → REVIEW
-	// 2. Follow-up prompts: User message sets IN_PROGRESS, agent finishes → REVIEW
-	if task.State == v1.TaskStateInProgress {
-		if err := s.taskRepo.UpdateTaskState(ctx, data.TaskID, v1.TaskStateReview); err != nil {
-			s.logger.Error("failed to update task state to REVIEW",
-				zap.String("task_id", data.TaskID),
-				zap.Error(err))
-		} else {
-			s.logger.Info("task moved to REVIEW state",
-				zap.String("task_id", data.TaskID))
-		}
-	} else {
-		s.logger.Debug("task not in IN_PROGRESS state, skipping REVIEW transition",
-			zap.String("task_id", data.TaskID),
-			zap.String("current_state", string(task.State)))
+	if s.markAgentReady(data.TaskID) {
+		s.finalizeAgentReady(data.TaskID, "")
 	}
 }
 
@@ -537,8 +540,222 @@ func (s *Service) handleACPMessage(ctx context.Context, taskID string, msg *prot
 		s.handleInputRequired(ctx, taskID, msg)
 	}
 
+	// Normalize ACP messages into session messages for persistence.
+	normalized := s.normalizeACPMessage(msg)
+	if normalized != nil && s.messageCreator != nil {
+		sessionID, err := s.executor.GetActiveSessionID(ctx, taskID)
+		if err == nil && sessionID != "" {
+			if err := s.messageCreator.CreateSessionMessage(
+				ctx,
+				taskID,
+				normalized.content,
+				sessionID,
+				normalized.messageType,
+				normalized.metadata,
+				normalized.requestsInput,
+			); err != nil {
+				s.logger.Error("failed to create normalized session message",
+					zap.String("task_id", taskID),
+					zap.String("message_type", normalized.messageType),
+					zap.Error(err))
+			}
+
+			if normalized.bumpToRunning {
+				s.updateAgentSessionState(ctx, taskID, sessionID, models.AgentSessionStateRunning, "", false)
+			}
+		}
+	}
+
 	// Broadcast to all registered handlers (WebSocket streaming)
 	s.broadcastACP(taskID, msg)
+}
+
+type normalizedACPMessage struct {
+	messageType   string
+	content       string
+	metadata      map[string]interface{}
+	requestsInput bool
+	bumpToRunning bool
+}
+
+func (s *Service) normalizeACPMessage(msg *protocol.Message) *normalizedACPMessage {
+	if msg == nil {
+		return nil
+	}
+
+	switch msg.Type {
+	case protocol.MessageTypeProgress:
+		return &normalizedACPMessage{
+			messageType:   string(v1.MessageTypeProgress),
+			content:       extractACPContent(msg),
+			metadata:      buildACPMetadata(msg),
+			bumpToRunning: true,
+		}
+	case protocol.MessageTypeStatus:
+		return &normalizedACPMessage{
+			messageType:   string(v1.MessageTypeStatus),
+			content:       extractACPContent(msg),
+			metadata:      buildACPMetadata(msg),
+			bumpToRunning: true,
+		}
+	case protocol.MessageTypeLog:
+		return &normalizedACPMessage{
+			messageType:   string(v1.MessageTypeStatus),
+			content:       extractACPContent(msg),
+			metadata:      buildACPMetadata(msg),
+			bumpToRunning: true,
+		}
+	case protocol.MessageTypeError:
+		return &normalizedACPMessage{
+			messageType:   string(v1.MessageTypeError),
+			content:       extractACPContent(msg),
+			metadata:      buildACPMetadata(msg),
+			bumpToRunning: true,
+		}
+	case protocol.MessageTypeInputRequired:
+		return nil
+	default:
+		return nil
+	}
+}
+
+func extractACPContent(msg *protocol.Message) string {
+	if msg == nil || msg.Data == nil {
+		return string(msg.Type)
+	}
+	for _, key := range []string{"message", "text", "content", "detail"} {
+		if value, ok := msg.Data[key].(string); ok && value != "" {
+			return value
+		}
+	}
+	return string(msg.Type)
+}
+
+func buildACPMetadata(msg *protocol.Message) map[string]interface{} {
+	if msg == nil {
+		return nil
+	}
+	metadata := map[string]interface{}{
+		"provider":       "acp",
+		"provider_type":  string(msg.Type),
+		"provider_agent": msg.AgentID,
+	}
+	if msg.Data != nil && len(msg.Data) > 0 {
+		metadata["provider_data"] = msg.Data
+	}
+	return metadata
+}
+
+func (s *Service) updateAgentSessionState(ctx context.Context, taskID, sessionID string, nextState models.AgentSessionState, errorMessage string, allowWakeFromWaiting bool) {
+	session, err := s.repo.GetAgentSession(ctx, sessionID)
+	if err != nil {
+		return
+	}
+	if session.State == models.AgentSessionStateWaitingForInput && nextState == models.AgentSessionStateRunning && !allowWakeFromWaiting {
+		return
+	}
+	oldState := session.State
+	switch session.State {
+	case models.AgentSessionStateCompleted, models.AgentSessionStateFailed, models.AgentSessionStateCancelled:
+		return
+	}
+	if session.State == nextState {
+		return
+	}
+	if err := s.repo.UpdateAgentSessionState(ctx, sessionID, nextState, errorMessage); err != nil {
+		s.logger.Error("failed to update agent session state",
+			zap.String("session_id", sessionID),
+			zap.String("state", string(nextState)),
+			zap.Error(err))
+	}
+	s.logger.Info("agent session state updated",
+		zap.String("task_id", taskID),
+		zap.String("session_id", sessionID),
+		zap.String("old_state", string(oldState)),
+		zap.String("new_state", string(nextState)))
+	if s.eventBus != nil {
+		_ = s.eventBus.Publish(ctx, events.AgentSessionStateChanged, bus.NewEvent(events.AgentSessionStateChanged, "agent-session", map[string]interface{}{
+			"task_id":          taskID,
+			"agent_session_id": sessionID,
+			"old_state":        string(oldState),
+			"new_state":        string(nextState),
+		}))
+	}
+	if taskID != "" {
+		s.executor.UpdateExecutionState(taskID, v1.AgentSessionState(nextState))
+	}
+}
+
+func (s *Service) markAgentReady(taskID string) bool {
+	s.readyMu.Lock()
+	defer s.readyMu.Unlock()
+
+	state, ok := s.readyStates[taskID]
+	if !ok {
+		state = &readyState{}
+		s.readyStates[taskID] = state
+	}
+
+	state.readySeen = true
+	readyToFinalize := state.promptCompleteSeen
+	if readyToFinalize {
+		delete(s.readyStates, taskID)
+	}
+
+	return readyToFinalize
+}
+
+func (s *Service) markPromptComplete(taskID string) bool {
+	s.readyMu.Lock()
+	defer s.readyMu.Unlock()
+
+	state, ok := s.readyStates[taskID]
+	if !ok {
+		state = &readyState{}
+		s.readyStates[taskID] = state
+	}
+
+	state.promptCompleteSeen = true
+	readyToFinalize := state.readySeen
+	if readyToFinalize {
+		delete(s.readyStates, taskID)
+	}
+
+	return readyToFinalize
+}
+
+func (s *Service) finalizeAgentReady(taskID, sessionID string) {
+	ctx := context.Background()
+	if sessionID == "" {
+		sessionID, _ = s.executor.GetActiveSessionID(ctx, taskID)
+	}
+
+	if sessionID != "" {
+		s.updateAgentSessionState(ctx, taskID, sessionID, models.AgentSessionStateWaitingForInput, "", false)
+	}
+
+	task, err := s.taskRepo.GetTask(ctx, taskID)
+	if err != nil {
+		s.logger.Error("failed to get task for state check",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return
+	}
+
+	if task.State == v1.TaskStateInProgress {
+		if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateReview); err != nil {
+			s.logger.Error("failed to update task state to REVIEW",
+				zap.String("task_id", taskID),
+				zap.Error(err))
+		} else {
+			s.logger.Info("task moved to REVIEW state",
+				zap.String("task_id", taskID))
+		}
+	} else {
+		s.logger.Debug("task not in IN_PROGRESS state, skipping REVIEW transition",
+			zap.String("task_id", taskID),
+			zap.String("current_state", string(task.State)))
+	}
 }
 
 // handleInputRequired handles agent input request messages
@@ -560,6 +777,11 @@ func (s *Service) handleInputRequired(ctx context.Context, taskID string, msg *p
 		s.logger.Error("failed to update task state to WAITING_FOR_INPUT",
 			zap.String("task_id", taskID),
 			zap.Error(err))
+	}
+
+	// Update session state to WAITING_FOR_INPUT
+	if sessionID, err := s.executor.GetActiveSessionID(ctx, taskID); err == nil && sessionID != "" {
+		s.updateAgentSessionState(ctx, taskID, sessionID, models.AgentSessionStateWaitingForInput, "", false)
 	}
 
 	// Call the input request handler if set
@@ -620,7 +842,7 @@ func (s *Service) handleGitStatusUpdated(ctx context.Context, data watcher.GitSt
 	}()
 }
 
-// handlePromptComplete handles prompt complete events and saves agent response as comment
+// handlePromptComplete handles prompt complete events and saves agent response as message
 // Note: This is called for EVERY agent message (including intermediate ones before tool calls),
 // so we should NOT transition task state here. State transitions happen in the comment handler
 // after the synchronous PromptTask call returns.
@@ -629,57 +851,70 @@ func (s *Service) handlePromptComplete(ctx context.Context, data watcher.PromptC
 		zap.String("task_id", data.TaskID),
 		zap.Int("message_length", len(data.AgentMessage)))
 
-	// Save agent response as a comment if we have a comment creator
-	if s.commentCreator != nil && data.AgentMessage != "" {
+	// Save agent response as a message if we have a message creator
+	if s.messageCreator != nil && data.AgentMessage != "" {
 		// Get the active session ID for this task
 		sessionID, _ := s.executor.GetActiveSessionID(ctx, data.TaskID)
 
-		if err := s.commentCreator.CreateAgentComment(ctx, data.TaskID, data.AgentMessage, sessionID); err != nil {
-			s.logger.Error("failed to create agent comment",
+		if err := s.messageCreator.CreateAgentMessage(ctx, data.TaskID, data.AgentMessage, sessionID); err != nil {
+			s.logger.Error("failed to create agent message",
 				zap.String("task_id", data.TaskID),
 				zap.Error(err))
 		} else {
-			s.logger.Info("created agent comment",
+			s.logger.Info("created agent message",
 				zap.String("task_id", data.TaskID),
 				zap.Int("message_length", len(data.AgentMessage)))
+		}
+
+		if s.markPromptComplete(data.TaskID) {
+			s.finalizeAgentReady(data.TaskID, sessionID)
 		}
 	}
 }
 
-// handleToolCallStarted handles tool call started events and saves as comment
+// handleToolCallStarted handles tool call started events and saves as message
 func (s *Service) handleToolCallStarted(ctx context.Context, data watcher.ToolCallData) {
 	s.logger.Info("handling tool call started",
 		zap.String("task_id", data.TaskID),
 		zap.String("tool_call_id", data.ToolCallID),
 		zap.String("title", data.Title))
 
-	// Save tool call as a comment if we have a comment creator
-	if s.commentCreator != nil {
+	// Save tool call as a message if we have a message creator
+	if s.messageCreator != nil {
 		// Get the active session ID for this task
 		sessionID, _ := s.executor.GetActiveSessionID(ctx, data.TaskID)
 
-		if err := s.commentCreator.CreateToolCallComment(ctx, data.TaskID, data.ToolCallID, data.Title, data.Status, sessionID, data.Args); err != nil {
-			s.logger.Error("failed to create tool call comment",
+		if err := s.messageCreator.CreateToolCallMessage(ctx, data.TaskID, data.ToolCallID, data.Title, data.Status, sessionID, data.Args); err != nil {
+			s.logger.Error("failed to create tool call message",
 				zap.String("task_id", data.TaskID),
 				zap.String("tool_call_id", data.ToolCallID),
 				zap.Error(err))
 		} else {
-			s.logger.Info("created tool call comment",
+			s.logger.Info("created tool call message",
 				zap.String("task_id", data.TaskID),
 				zap.String("tool_call_id", data.ToolCallID))
+		}
+
+		if sessionID != "" {
+			s.updateAgentSessionState(ctx, data.TaskID, sessionID, models.AgentSessionStateRunning, "", false)
 		}
 	}
 }
 
-// handleToolCallComplete handles tool call complete events and updates the comment
+// handleToolCallComplete handles tool call complete events and updates the message
 func (s *Service) handleToolCallComplete(ctx context.Context, data watcher.ToolCallCompleteData) {
-	// Update tool call comment status if we have a comment creator
-	if s.commentCreator != nil {
-		if err := s.commentCreator.UpdateToolCallComment(ctx, data.TaskID, data.ToolCallID, data.Status, data.Result); err != nil {
-			s.logger.Error("failed to update tool call comment",
+	// Update tool call message status if we have a message creator
+	if s.messageCreator != nil {
+		sessionID, _ := s.executor.GetActiveSessionID(ctx, data.TaskID)
+		if err := s.messageCreator.UpdateToolCallMessage(ctx, data.TaskID, data.ToolCallID, data.Status, data.Result, sessionID); err != nil {
+			s.logger.Error("failed to update tool call message",
 				zap.String("task_id", data.TaskID),
 				zap.String("tool_call_id", data.ToolCallID),
 				zap.Error(err))
+		}
+
+		if sessionID != "" {
+			s.updateAgentSessionState(ctx, data.TaskID, sessionID, models.AgentSessionStateRunning, "", false)
 		}
 	}
 }

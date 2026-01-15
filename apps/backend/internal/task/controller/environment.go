@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/service"
@@ -70,6 +71,9 @@ func (c *EnvironmentController) UpdateEnvironment(ctx context.Context, req dto.U
 
 func (c *EnvironmentController) DeleteEnvironment(ctx context.Context, req dto.DeleteEnvironmentRequest) (dto.SuccessResponse, error) {
 	if err := c.service.DeleteEnvironment(ctx, req.ID); err != nil {
+		if errors.Is(err, service.ErrActiveAgentSessions) {
+			return dto.SuccessResponse{}, ErrActiveAgentSessions
+		}
 		return dto.SuccessResponse{}, err
 	}
 	return dto.SuccessResponse{Success: true}, nil

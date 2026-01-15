@@ -93,15 +93,17 @@ func TestService_CreateTask(t *testing.T) {
 	_ = repo.CreateBoard(ctx, board)
 	column := &models.Column{ID: "col-123", BoardID: "board-123", Name: "To Do", State: v1.TaskStateTODO}
 	_ = repo.CreateColumn(ctx, column)
+	repository := &models.Repository{ID: "repo-123", WorkspaceID: "ws-1", Name: "Test Repo"}
+	_ = repo.CreateRepository(ctx, repository)
 
 	req := &CreateTaskRequest{
-		WorkspaceID: "ws-1",
-		BoardID:     "board-123",
-		ColumnID:    "col-123",
-		Title:       "Test Task",
-		Description: "A test task",
-		Priority:    5,
-		RepositoryURL: "/tmp/repo",
+		WorkspaceID:  "ws-1",
+		BoardID:      "board-123",
+		ColumnID:     "col-123",
+		Title:        "Test Task",
+		Description:  "A test task",
+		Priority:     5,
+		RepositoryID: "repo-123",
 	}
 
 	task, err := svc.CreateTask(ctx, req)
@@ -452,7 +454,7 @@ func TestService_ListColumns(t *testing.T) {
 	}
 }
 
-// Comment tests
+// Message tests
 
 func setupTestTask(t *testing.T, repo repository.Repository) {
 	t.Helper()
@@ -463,22 +465,36 @@ func setupTestTask(t *testing.T, repo repository.Repository) {
 	_ = repo.CreateTask(ctx, &models.Task{ID: "task-123", WorkspaceID: "ws-1", BoardID: "board-123", ColumnID: "col-123", Title: "Test Task"})
 }
 
-func TestService_CreateComment(t *testing.T) {
+func setupTestSession(t *testing.T, repo repository.Repository) string {
+	t.Helper()
+	ctx := context.Background()
+	session := &models.AgentSession{
+		ID:             "session-123",
+		TaskID:         "task-123",
+		AgentProfileID: "profile-123",
+		State:          models.AgentSessionStateStarting,
+	}
+	_ = repo.CreateAgentSession(ctx, session)
+	return session.ID
+}
+
+func TestService_CreateMessage(t *testing.T) {
 	svc, eventBus, repo := createTestService(t)
 	ctx := context.Background()
 
 	// Create a task first
 	setupTestTask(t, repo)
+	sessionID := setupTestSession(t, repo)
 	eventBus.ClearEvents()
 
-	req := &CreateCommentRequest{
-		TaskID:     "task-123",
-		Content:    "This is a test comment",
-		AuthorType: "user",
-		AuthorID:   "user-123",
+	req := &CreateMessageRequest{
+		AgentSessionID: sessionID,
+		Content:        "This is a test comment",
+		AuthorType:     "user",
+		AuthorID:       "user-123",
 	}
 
-	comment, err := svc.CreateComment(ctx, req)
+	comment, err := svc.CreateMessage(ctx, req)
 	if err != nil {
 		t.Fatalf("failed to create comment: %v", err)
 	}
@@ -489,7 +505,7 @@ func TestService_CreateComment(t *testing.T) {
 	if comment.Content != "This is a test comment" {
 		t.Errorf("expected content 'This is a test comment', got %s", comment.Content)
 	}
-	if comment.AuthorType != models.CommentAuthorUser {
+	if comment.AuthorType != models.MessageAuthorUser {
 		t.Errorf("expected author type 'user', got %s", comment.AuthorType)
 	}
 
@@ -498,67 +514,65 @@ func TestService_CreateComment(t *testing.T) {
 	if len(events) != 1 {
 		t.Errorf("expected 1 event, got %d", len(events))
 	}
-	if events[0].Type != "comment.added" {
-		t.Errorf("expected event type 'comment.added', got %s", events[0].Type)
+	if events[0].Type != "message.added" {
+		t.Errorf("expected event type 'message.added', got %s", events[0].Type)
 	}
 }
 
-func TestService_CreateAgentComment(t *testing.T) {
+func TestService_CreateAgentMessage(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
 
 	setupTestTask(t, repo)
+	sessionID := setupTestSession(t, repo)
 
-	req := &CreateCommentRequest{
-		TaskID:        "task-123",
-		Content:       "What should I do next?",
-		AuthorType:    "agent",
-		AuthorID:      "agent-123",
-		RequestsInput: true,
-		ACPSessionID:  "session-abc",
+	req := &CreateMessageRequest{
+		AgentSessionID: sessionID,
+		Content:        "What should I do next?",
+		AuthorType:     "agent",
+		AuthorID:       "agent-123",
+		RequestsInput:  true,
 	}
 
-	comment, err := svc.CreateComment(ctx, req)
+	comment, err := svc.CreateMessage(ctx, req)
 	if err != nil {
 		t.Fatalf("failed to create comment: %v", err)
 	}
 
-	if comment.AuthorType != models.CommentAuthorAgent {
+	if comment.AuthorType != models.MessageAuthorAgent {
 		t.Errorf("expected author type 'agent', got %s", comment.AuthorType)
 	}
 	if !comment.RequestsInput {
 		t.Error("expected RequestsInput to be true")
 	}
-	if comment.ACPSessionID != "session-abc" {
-		t.Errorf("expected ACPSessionID 'session-abc', got %s", comment.ACPSessionID)
-	}
 }
 
-func TestService_CreateCommentTaskNotFound(t *testing.T) {
+func TestService_CreateMessageSessionNotFound(t *testing.T) {
 	svc, _, _ := createTestService(t)
 	ctx := context.Background()
 
-	req := &CreateCommentRequest{
-		TaskID:  "nonexistent",
-		Content: "Test comment",
+	req := &CreateMessageRequest{
+		AgentSessionID: "nonexistent",
+		Content:        "Test comment",
 	}
 
-	_, err := svc.CreateComment(ctx, req)
+	_, err := svc.CreateMessage(ctx, req)
 	if err == nil {
 		t.Error("expected error for nonexistent task")
 	}
 }
 
-func TestService_GetComment(t *testing.T) {
+func TestService_GetMessage(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
 
 	setupTestTask(t, repo)
+	sessionID := setupTestSession(t, repo)
 
-	comment := &models.Comment{ID: "comment-123", TaskID: "task-123", AuthorType: models.CommentAuthorUser, Content: "Test"}
-	_ = repo.CreateComment(ctx, comment)
+	comment := &models.Message{ID: "comment-123", AgentSessionID: sessionID, TaskID: "task-123", AuthorType: models.MessageAuthorUser, Content: "Test"}
+	_ = repo.CreateMessage(ctx, comment)
 
-	retrieved, err := svc.GetComment(ctx, "comment-123")
+	retrieved, err := svc.GetMessage(ctx, "comment-123")
 	if err != nil {
 		t.Fatalf("failed to get comment: %v", err)
 	}
@@ -567,16 +581,17 @@ func TestService_GetComment(t *testing.T) {
 	}
 }
 
-func TestService_ListComments(t *testing.T) {
+func TestService_ListMessages(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
 
 	setupTestTask(t, repo)
+	sessionID := setupTestSession(t, repo)
 
-	_ = repo.CreateComment(ctx, &models.Comment{ID: "comment-1", TaskID: "task-123", AuthorType: models.CommentAuthorUser, Content: "Comment 1"})
-	_ = repo.CreateComment(ctx, &models.Comment{ID: "comment-2", TaskID: "task-123", AuthorType: models.CommentAuthorAgent, Content: "Comment 2"})
+	_ = repo.CreateMessage(ctx, &models.Message{ID: "comment-1", AgentSessionID: sessionID, TaskID: "task-123", AuthorType: models.MessageAuthorUser, Content: "Comment 1"})
+	_ = repo.CreateMessage(ctx, &models.Message{ID: "comment-2", AgentSessionID: sessionID, TaskID: "task-123", AuthorType: models.MessageAuthorAgent, Content: "Comment 2"})
 
-	comments, err := svc.ListComments(ctx, "task-123")
+	comments, err := svc.ListMessages(ctx, sessionID)
 	if err != nil {
 		t.Fatalf("failed to list comments: %v", err)
 	}
@@ -585,21 +600,22 @@ func TestService_ListComments(t *testing.T) {
 	}
 }
 
-func TestService_DeleteComment(t *testing.T) {
+func TestService_DeleteMessage(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
 
 	setupTestTask(t, repo)
+	sessionID := setupTestSession(t, repo)
 
-	comment := &models.Comment{ID: "comment-123", TaskID: "task-123", AuthorType: models.CommentAuthorUser, Content: "Test"}
-	_ = repo.CreateComment(ctx, comment)
+	comment := &models.Message{ID: "comment-123", AgentSessionID: sessionID, TaskID: "task-123", AuthorType: models.MessageAuthorUser, Content: "Test"}
+	_ = repo.CreateMessage(ctx, comment)
 
-	err := svc.DeleteComment(ctx, "comment-123")
+	err := svc.DeleteMessage(ctx, "comment-123")
 	if err != nil {
 		t.Fatalf("failed to delete comment: %v", err)
 	}
 
-	_, err = svc.GetComment(ctx, "comment-123")
+	_, err = svc.GetMessage(ctx, "comment-123")
 	if err == nil {
 		t.Error("expected comment to be deleted")
 	}

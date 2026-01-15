@@ -7,7 +7,7 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
-type ListCommentsOptions struct {
+type ListMessagesOptions struct {
 	Limit  int
 	Before string
 	After  string
@@ -49,14 +49,14 @@ type Repository interface {
 	DeleteColumn(ctx context.Context, id string) error
 	ListColumns(ctx context.Context, boardID string) ([]*models.Column, error)
 
-	// Comment operations
-	CreateComment(ctx context.Context, comment *models.Comment) error
-	GetComment(ctx context.Context, id string) (*models.Comment, error)
-	GetCommentByToolCallID(ctx context.Context, taskID, toolCallID string) (*models.Comment, error)
-	UpdateComment(ctx context.Context, comment *models.Comment) error
-	ListComments(ctx context.Context, taskID string) ([]*models.Comment, error)
-	ListCommentsPaginated(ctx context.Context, taskID string, opts ListCommentsOptions) ([]*models.Comment, bool, error)
-	DeleteComment(ctx context.Context, id string) error
+	// Message operations
+	CreateMessage(ctx context.Context, message *models.Message) error
+	GetMessage(ctx context.Context, id string) (*models.Message, error)
+	GetMessageByToolCallID(ctx context.Context, sessionID, toolCallID string) (*models.Message, error)
+	UpdateMessage(ctx context.Context, message *models.Message) error
+	ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error)
+	ListMessagesPaginated(ctx context.Context, sessionID string, opts ListMessagesOptions) ([]*models.Message, bool, error)
+	DeleteMessage(ctx context.Context, id string) error
 
 	// Agent Session operations
 	CreateAgentSession(ctx context.Context, session *models.AgentSession) error
@@ -64,9 +64,13 @@ type Repository interface {
 	GetAgentSessionByTaskID(ctx context.Context, taskID string) (*models.AgentSession, error)
 	GetActiveAgentSessionByTaskID(ctx context.Context, taskID string) (*models.AgentSession, error)
 	UpdateAgentSession(ctx context.Context, session *models.AgentSession) error
-	UpdateAgentSessionStatus(ctx context.Context, id string, status models.AgentSessionStatus, errorMessage string) error
+	UpdateAgentSessionState(ctx context.Context, id string, state models.AgentSessionState, errorMessage string) error
 	ListAgentSessions(ctx context.Context, taskID string) ([]*models.AgentSession, error)
 	ListActiveAgentSessions(ctx context.Context) ([]*models.AgentSession, error)
+	HasActiveAgentSessionsByAgentProfile(ctx context.Context, agentProfileID string) (bool, error)
+	HasActiveAgentSessionsByExecutor(ctx context.Context, executorID string) (bool, error)
+	HasActiveAgentSessionsByEnvironment(ctx context.Context, environmentID string) (bool, error)
+	HasActiveAgentSessionsByRepository(ctx context.Context, repositoryID string) (bool, error)
 	DeleteAgentSession(ctx context.Context, id string) error
 
 	// Repository operations

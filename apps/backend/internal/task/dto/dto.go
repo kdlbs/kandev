@@ -100,9 +100,8 @@ type TaskDTO struct {
 	Description     string                 `json:"description"`
 	State           v1.TaskState           `json:"state"`
 	Priority        int                    `json:"priority"`
-	AgentProfileID  *string                `json:"agent_profile_id,omitempty"`
-	RepositoryURL   *string                `json:"repository_url,omitempty"`
-	Branch          *string                `json:"branch,omitempty"`
+	RepositoryID    *string                `json:"repository_id,omitempty"`
+	BaseBranch      *string                `json:"base_branch,omitempty"`
 	AssignedAgentID *string                `json:"assigned_agent_id,omitempty"`
 	Position        int                    `json:"position"`
 	CreatedAt       time.Time              `json:"created_at"`
@@ -119,8 +118,8 @@ type BoardSnapshotDTO struct {
 	Tasks   []TaskDTO   `json:"tasks"`
 }
 
-type ListCommentsResponse struct {
-	Comments []*v1.Comment `json:"comments"`
+type ListMessagesResponse struct {
+	Messages []*v1.Message `json:"messages"`
 	Total    int           `json:"total"`
 	HasMore  bool          `json:"has_more"`
 	Cursor   string        `json:"cursor"`
@@ -318,17 +317,13 @@ func FromLocalRepository(repo service.LocalRepository) LocalRepositoryDTO {
 }
 
 func FromTask(task *models.Task) TaskDTO {
-	var agentProfileID *string
-	if task.AgentProfileID != "" {
-		agentProfileID = &task.AgentProfileID
+	var repositoryID *string
+	if task.RepositoryID != "" {
+		repositoryID = &task.RepositoryID
 	}
-	var repositoryURL *string
-	if task.RepositoryURL != "" {
-		repositoryURL = &task.RepositoryURL
-	}
-	var branch *string
-	if task.Branch != "" {
-		branch = &task.Branch
+	var baseBranch *string
+	if task.BaseBranch != "" {
+		baseBranch = &task.BaseBranch
 	}
 	var assignedAgentID *string
 	if task.AssignedTo != "" {
@@ -344,9 +339,8 @@ func FromTask(task *models.Task) TaskDTO {
 		Description:     task.Description,
 		State:           task.State,
 		Priority:        task.Priority,
-		AgentProfileID:  agentProfileID,
-		RepositoryURL:   repositoryURL,
-		Branch:          branch,
+		RepositoryID:    repositoryID,
+		BaseBranch:      baseBranch,
 		AssignedAgentID: assignedAgentID,
 		Position:        task.Position,
 		CreatedAt:       task.CreatedAt,

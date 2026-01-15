@@ -2,10 +2,10 @@
 
 import { IconAlertTriangle, IconInfoCircle } from '@tabler/icons-react';
 import { cn } from '@/lib/utils';
-import type { Comment } from '@/lib/types/http';
+import type { Message } from '@/lib/types/http';
 import type { StatusMetadata } from '@/components/task/chat/types';
 
-export function StatusMessage({ comment }: { comment: Comment }) {
+export function StatusMessage({ comment }: { comment: Message }) {
   const metadata = comment.metadata as StatusMetadata | undefined;
   const progress =
     typeof metadata?.progress === 'number' ? Math.min(Math.max(metadata.progress, 0), 100) : null;

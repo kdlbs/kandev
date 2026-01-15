@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo } from 'react';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import { fetchUserSettings, updateUserSettings } from '@/lib/http';
-import { mapSelectedRepositoryPaths } from '@/lib/kanban/filters';
+import { mapSelectedRepositoryIds } from '@/lib/kanban/filters';
 import { useAppStore } from '@/components/state-provider';
 import { useRepositories } from '@/hooks/use-repositories';
 
@@ -133,8 +133,8 @@ export function useUserDisplaySettings({
   }, [commitSettings, repositories, userSettings.boardId, userSettings.loaded, userSettings.repositoryIds, userSettings.workspaceId]);
 
   const allRepositoriesSelected = userSettings.repositoryIds.length === 0;
-  const selectedRepositoryPaths = useMemo(
-    () => mapSelectedRepositoryPaths(repositories, userSettings.repositoryIds),
+  const selectedRepositoryIds = useMemo(
+    () => mapSelectedRepositoryIds(repositories, userSettings.repositoryIds),
     [repositories, userSettings.repositoryIds]
   );
 
@@ -144,6 +144,6 @@ export function useUserDisplaySettings({
     repositories,
     repositoriesLoading,
     allRepositoriesSelected,
-    selectedRepositoryPaths,
+    selectedRepositoryIds,
   };
 }

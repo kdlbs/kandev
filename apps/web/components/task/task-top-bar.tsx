@@ -20,12 +20,20 @@ import {
 } from '@tabler/icons-react';
 import { Button } from '@kandev/ui/button';
 import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@kandev/ui/dialog';
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@kandev/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@kandev/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@kandev/ui/popover';
 import { SessionsDropdown } from './sessions-dropdown';
 import { CommitStatBadge, LineStat } from '@/components/diff-stat';
@@ -36,7 +44,7 @@ type TaskTopBarProps = {
   taskTitle?: string;
   taskDescription?: string;
   baseBranch?: string;
-  onStartAgent?: () => void;
+  onStartAgent?: (agentProfileId: string) => void;
   onStopAgent?: () => void;
   isAgentRunning?: boolean;
   isAgentLoading?: boolean;
@@ -63,9 +71,19 @@ const TaskTopBar = memo(function TaskTopBar({
   const [popoverOpen, setPopoverOpen] = useState(false);
   const [copiedRepo, setCopiedRepo] = useState(false);
   const [copiedWorktree, setCopiedWorktree] = useState(false);
+  const [startDialogOpen, setStartDialogOpen] = useState(false);
+  const [selectedAgentProfileId, setSelectedAgentProfileId] = useState<string | null>(null);
 
   // Get git status from store
   const gitStatus = useAppStore((state) => state.gitStatus);
+  const agentProfiles = useAppStore((state) => state.agentProfiles.items);
+
+  const resolvedAgentProfileId = useMemo(() => {
+    if (selectedAgentProfileId && agentProfiles.some((profile) => profile.id === selectedAgentProfileId)) {
+      return selectedAgentProfileId;
+    }
+    return agentProfiles[0]?.id ?? '';
+  }, [agentProfiles, selectedAgentProfileId]);
 
 
 
@@ -280,8 +298,8 @@ const TaskTopBar = memo(function TaskTopBar({
                 size="sm"
                 variant="default"
                 className="cursor-pointer"
-                onClick={onStartAgent}
-                disabled={isAgentLoading}
+                onClick={() => setStartDialogOpen(true)}
+                disabled={isAgentLoading || agentProfiles.length === 0}
               >
                 {isAgentLoading ? (
                   <IconLoader2 className="h-4 w-4 animate-spin" />
@@ -291,9 +309,55 @@ const TaskTopBar = memo(function TaskTopBar({
                 Start Agent
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Start the agent on this task</TooltipContent>
+            <TooltipContent>
+              {agentProfiles.length === 0 ? 'Add an agent profile to start.' : 'Start the agent on this task'}
+            </TooltipContent>
           </Tooltip>
         )}
+
+        <Dialog open={startDialogOpen} onOpenChange={setStartDialogOpen}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Start Agent</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3">
+              <div className="text-sm text-muted-foreground">
+                Select an agent profile to start a new session.
+              </div>
+              <Select
+                value={resolvedAgentProfileId}
+                onValueChange={(value) => setSelectedAgentProfileId(value)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select agent profile" />
+                </SelectTrigger>
+                <SelectContent>
+                  {agentProfiles.map((profile) => (
+                    <SelectItem key={profile.id} value={profile.id}>
+                      {profile.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" type="button" onClick={() => setStartDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                onClick={() => {
+                  if (!resolvedAgentProfileId) return;
+                  onStartAgent?.(resolvedAgentProfileId);
+                  setStartDialogOpen(false);
+                }}
+                disabled={!resolvedAgentProfileId || isAgentLoading}
+              >
+                Start Agent
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* Editor Button */}
         <Tooltip>

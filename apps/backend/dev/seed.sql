@@ -66,18 +66,18 @@ VALUES
     ('task-103', 'dev-board-2', 'col-planned', 'Agent type marketplace', 'Browse and install different agent types', 'TODO', 6, 0, '', '$KANDEV_REPO_PATH', '', '{}', datetime('now'), datetime('now'));
 
 -- Sample comments on tasks
-INSERT OR REPLACE INTO task_comments (id, task_id, author_type, author_id, content, type, metadata, requests_input, acp_session_id, agent_session_id, created_at)
+INSERT OR REPLACE INTO task_comments (id, task_id, author_type, author_id, content, type, metadata, requests_input, agent_session_id, created_at)
 VALUES
     -- Comments on task-005 (Agent session persistence)
-    ('comment-001', 'task-005', 'user', 'dev-user', 'Starting work on database schema for agent sessions', 'message', '{}', 0, '', '', datetime('now', '-2 hours')),
-    ('comment-002', 'task-005', 'agent', 'augment-agent', 'I''ll help you implement the agent session persistence. Let me start by analyzing the current codebase structure.', 'message', '{}', 0, '', '', datetime('now', '-1 hour')),
-    ('comment-003', 'task-005', 'agent', 'augment-agent', 'codebase-retrieval', 'tool_call', '{"tool_call_id": "tc-001", "title": "codebase-retrieval: Looking for agent execution tracking", "status": "completed"}', 0, '', '', datetime('now', '-55 minutes')),
+    ('comment-001', 'task-005', 'user', 'dev-user', 'Starting work on database schema for agent sessions', 'message', '{}', 0, '', datetime('now', '-2 hours')),
+    ('comment-002', 'task-005', 'agent', 'augment-agent', 'I''ll help you implement the agent session persistence. Let me start by analyzing the current codebase structure.', 'message', '{}', 0, '', datetime('now', '-1 hour')),
+    ('comment-003', 'task-005', 'agent', 'augment-agent', 'codebase-retrieval', 'tool_call', '{"tool_call_id": "tc-001", "title": "codebase-retrieval: Looking for agent execution tracking", "status": "completed"}', 0, '', datetime('now', '-55 minutes')),
     
     -- Comments on task-006 (Comment system)
-    ('comment-004', 'task-006', 'user', 'dev-user', 'Need to add support for tool call rendering in the chat panel', 'message', '{}', 0, '', '', datetime('now', '-1 day')),
-    ('comment-005', 'task-006', 'agent', 'augment-agent', 'I''ve implemented the tool call comment type with proper rendering. The changes include:\n\n1. Added `type` field to comments\n2. Added `metadata` for tool call details\n3. Updated the frontend to render tool calls differently', 'message', '{}', 0, '', '', datetime('now', '-20 hours'));
+    ('comment-004', 'task-006', 'user', 'dev-user', 'Need to add support for tool call rendering in the chat panel', 'message', '{}', 0, '', datetime('now', '-1 day')),
+    ('comment-005', 'task-006', 'agent', 'augment-agent', 'I''ve implemented the tool call comment type with proper rendering. The changes include:\n\n1. Added `type` field to comments\n2. Added `metadata` for tool call details\n3. Updated the frontend to render tool calls differently', 'message', '{}', 0, '', datetime('now', '-20 hours'));
 
 -- Sample agent session
-INSERT OR REPLACE INTO agent_sessions (id, task_id, agent_instance_id, agent_type, acp_session_id, status, progress, error_message, metadata, started_at, completed_at, updated_at)
+INSERT OR REPLACE INTO agent_sessions (id, task_id, agent_instance_id, agent_type, state, progress, error_message, metadata, started_at, completed_at, updated_at)
 VALUES
-    ('session-001', 'task-005', 'agent-instance-123', 'augment-agent', 'acp-session-abc', 'running', 0.0, '', '{}', datetime('now', '-1 hour'), NULL, datetime('now'));
+    ('session-001', 'task-005', 'agent-instance-123', 'augment-agent', 'RUNNING', 0.0, '', '{}', datetime('now', '-1 hour'), NULL, datetime('now'));

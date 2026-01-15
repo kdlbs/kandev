@@ -71,7 +71,8 @@ func (c *Controller) StartTask(ctx context.Context, req dto.StartTaskRequest) (d
 		Success:         true,
 		TaskID:          execution.TaskID,
 		AgentInstanceID: execution.AgentInstanceID,
-		Status:          string(execution.Status),
+		AgentSessionID:  execution.SessionID,
+		State:           string(execution.SessionState),
 	}
 
 	// Include worktree info if available
@@ -152,9 +153,9 @@ func (c *Controller) GetTaskExecution(ctx context.Context, req dto.GetTaskExecut
 		TaskID:          execution.TaskID,
 		AgentInstanceID: execution.AgentInstanceID,
 		AgentProfileID:  execution.AgentProfileID,
-		Status:          string(execution.Status),
+		AgentSessionID:  execution.SessionID,
+		State:           string(execution.SessionState),
 		Progress:        execution.Progress,
 		StartedAt:       execution.StartedAt.Format("2006-01-02T15:04:05Z"),
 	}, nil
 }
-

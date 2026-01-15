@@ -8,22 +8,21 @@ import (
 
 // Task represents a task in the database
 type Task struct {
-	ID            string                 `json:"id"`
-	WorkspaceID   string                 `json:"workspace_id"`
-	BoardID       string                 `json:"board_id"`
-	ColumnID      string                 `json:"column_id"`
-	Title         string                 `json:"title"`
-	Description   string                 `json:"description"`
-	State         v1.TaskState           `json:"state"`
-	Priority      int                    `json:"priority"`
-	AgentProfileID string                 `json:"agent_profile_id,omitempty"`
-	RepositoryURL string                 `json:"repository_url,omitempty"`
-	Branch        string                 `json:"branch,omitempty"`
-	AssignedTo    string                 `json:"assigned_to,omitempty"`
-	Position      int                    `json:"position"` // Order within column
-	Metadata      map[string]interface{} `json:"metadata,omitempty"`
-	CreatedAt     time.Time              `json:"created_at"`
-	UpdatedAt     time.Time              `json:"updated_at"`
+	ID           string                 `json:"id"`
+	WorkspaceID  string                 `json:"workspace_id"`
+	BoardID      string                 `json:"board_id"`
+	ColumnID     string                 `json:"column_id"`
+	Title        string                 `json:"title"`
+	Description  string                 `json:"description"`
+	State        v1.TaskState           `json:"state"`
+	Priority     int                    `json:"priority"`
+	RepositoryID string                 `json:"repository_id,omitempty"`
+	BaseBranch   string                 `json:"base_branch,omitempty"`
+	AssignedTo   string                 `json:"assigned_to,omitempty"`
+	Position     int                    `json:"position"` // Order within column
+	Metadata     map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt    time.Time              `json:"created_at"`
+	UpdatedAt    time.Time              `json:"updated_at"`
 }
 
 // Board represents a Kanban board
@@ -61,108 +60,115 @@ type Column struct {
 	UpdatedAt time.Time    `json:"updated_at"`
 }
 
-// CommentAuthorType represents who authored a comment
-type CommentAuthorType string
+// MessageAuthorType represents who authored a message
+type MessageAuthorType string
 
 const (
-	// CommentAuthorUser indicates a comment from a human user
-	CommentAuthorUser CommentAuthorType = "user"
-	// CommentAuthorAgent indicates a comment from an AI agent
-	CommentAuthorAgent CommentAuthorType = "agent"
+	// MessageAuthorUser indicates a message from a human user
+	MessageAuthorUser MessageAuthorType = "user"
+	// MessageAuthorAgent indicates a message from an AI agent
+	MessageAuthorAgent MessageAuthorType = "agent"
 )
 
-// CommentType represents the type of comment content
-type CommentType string
+// MessageType represents the type of message content
+type MessageType string
 
 const (
-	// CommentTypeMessage is the default type for user/agent regular messages
-	CommentTypeMessage CommentType = "message"
-	// CommentTypeContent is for agent response content
-	CommentTypeContent CommentType = "content"
-	// CommentTypeToolCall is when agent uses a tool
-	CommentTypeToolCall CommentType = "tool_call"
-	// CommentTypeProgress is for progress updates
-	CommentTypeProgress CommentType = "progress"
-	// CommentTypeError is for error messages
-	CommentTypeError CommentType = "error"
-	// CommentTypeStatus is for status changes: started, completed, failed
-	CommentTypeStatus CommentType = "status"
+	// MessageTypeMessage is the default type for user/agent regular messages
+	MessageTypeMessage MessageType = "message"
+	// MessageTypeContent is for agent response content
+	MessageTypeContent MessageType = "content"
+	// MessageTypeToolCall is when agent uses a tool
+	MessageTypeToolCall MessageType = "tool_call"
+	// MessageTypeProgress is for progress updates
+	MessageTypeProgress MessageType = "progress"
+	// MessageTypeError is for error messages
+	MessageTypeError MessageType = "error"
+	// MessageTypeStatus is for status changes: started, completed, failed
+	MessageTypeStatus MessageType = "status"
 )
 
-// Comment represents a comment on a task
-type Comment struct {
+// Message represents a message in an agent session
+type Message struct {
 	ID             string                 `json:"id"`
-	TaskID         string                 `json:"task_id"`
-	AuthorType     CommentAuthorType      `json:"author_type"`
+	AgentSessionID string                 `json:"agent_session_id"`
+	TaskID         string                 `json:"task_id,omitempty"`
+	AuthorType     MessageAuthorType      `json:"author_type"`
 	AuthorID       string                 `json:"author_id,omitempty"` // User ID or Agent Instance ID
 	Content        string                 `json:"content"`
-	Type           CommentType            `json:"type,omitempty"` // Defaults to "message" for backward compatibility
+	Type           MessageType            `json:"type,omitempty"` // Defaults to "message"
 	Metadata       map[string]interface{} `json:"metadata,omitempty"`
 	RequestsInput  bool                   `json:"requests_input"` // True if agent is requesting user input
-	ACPSessionID   string                 `json:"acp_session_id,omitempty"`
-	AgentSessionID string                 `json:"agent_session_id,omitempty"`
 	CreatedAt      time.Time              `json:"created_at"`
 }
 
-// ToAPI converts internal Comment to API type
-func (c *Comment) ToAPI() *v1.Comment {
-	commentType := string(c.Type)
-	if commentType == "" {
-		commentType = string(CommentTypeMessage)
+// ToAPI converts internal Message to API type
+func (m *Message) ToAPI() *v1.Message {
+	messageType := string(m.Type)
+	if messageType == "" {
+		messageType = string(MessageTypeMessage)
 	}
-	result := &v1.Comment{
-		ID:            c.ID,
-		TaskID:        c.TaskID,
-		AuthorType:    string(c.AuthorType),
-		AuthorID:      c.AuthorID,
-		Content:       c.Content,
-		Type:          commentType,
-		Metadata:      c.Metadata,
-		RequestsInput: c.RequestsInput,
-		CreatedAt:     c.CreatedAt,
-	}
-	if c.AgentSessionID != "" {
-		result.AgentSessionID = c.AgentSessionID
+	result := &v1.Message{
+		ID:             m.ID,
+		AgentSessionID: m.AgentSessionID,
+		TaskID:         m.TaskID,
+		AuthorType:     string(m.AuthorType),
+		AuthorID:       m.AuthorID,
+		Content:        m.Content,
+		Type:           messageType,
+		Metadata:       m.Metadata,
+		RequestsInput:  m.RequestsInput,
+		CreatedAt:      m.CreatedAt,
 	}
 	return result
 }
 
-// AgentSessionStatus represents the status of an agent session
-type AgentSessionStatus string
+// AgentSessionState represents the state of an agent session
+type AgentSessionState string
 
 const (
-	// AgentSessionStatusPending - session created but agent not started
-	AgentSessionStatusPending AgentSessionStatus = "pending"
-	// AgentSessionStatusRunning - agent is actively running
-	AgentSessionStatusRunning AgentSessionStatus = "running"
-	// AgentSessionStatusWaiting - agent waiting for user input
-	AgentSessionStatusWaiting AgentSessionStatus = "waiting"
-	// AgentSessionStatusCompleted - agent finished successfully
-	AgentSessionStatusCompleted AgentSessionStatus = "completed"
-	// AgentSessionStatusFailed - agent failed with error
-	AgentSessionStatusFailed AgentSessionStatus = "failed"
-	// AgentSessionStatusStopped - agent was manually stopped
-	AgentSessionStatusStopped AgentSessionStatus = "stopped"
+	// AgentSessionStateCreated - session created but agent not started
+	AgentSessionStateCreated AgentSessionState = "CREATED"
+	// AgentSessionStateStarting - agent is starting up
+	AgentSessionStateStarting AgentSessionState = "STARTING"
+	// AgentSessionStateRunning - agent is actively running
+	AgentSessionStateRunning AgentSessionState = "RUNNING"
+	// AgentSessionStateWaitingForInput - agent waiting for user input
+	AgentSessionStateWaitingForInput AgentSessionState = "WAITING_FOR_INPUT"
+	// AgentSessionStateCompleted - agent finished successfully
+	AgentSessionStateCompleted AgentSessionState = "COMPLETED"
+	// AgentSessionStateFailed - agent failed with error
+	AgentSessionStateFailed AgentSessionState = "FAILED"
+	// AgentSessionStateCancelled - agent was manually stopped
+	AgentSessionStateCancelled AgentSessionState = "CANCELLED"
 )
 
 // AgentSession represents a persistent agent execution session for a task.
 // This replaces the in-memory TaskExecution tracking and survives backend restarts.
 type AgentSession struct {
-	ID              string                 `json:"id"`
-	TaskID          string                 `json:"task_id"`
-	AgentInstanceID string                 `json:"agent_instance_id"` // Docker container/agent instance
-	ContainerID     string                 `json:"container_id"`      // Docker container ID for cleanup
-	AgentProfileID  string                 `json:"agent_profile_id"`  // ID of the agent profile used
-	ACPSessionID    string                 `json:"acp_session_id"`    // ACP protocol session for resumption
-	ExecutorID      string                 `json:"executor_id"`
-	EnvironmentID   string                 `json:"environment_id"`
-	Status          AgentSessionStatus     `json:"status"`
-	Progress        int                    `json:"progress"` // 0-100
-	ErrorMessage    string                 `json:"error_message,omitempty"`
-	Metadata        map[string]interface{} `json:"metadata,omitempty"`
-	StartedAt       time.Time              `json:"started_at"`
-	CompletedAt     *time.Time             `json:"completed_at,omitempty"`
-	UpdatedAt       time.Time              `json:"updated_at"`
+	ID                   string                 `json:"id"`
+	TaskID               string                 `json:"task_id"`
+	AgentInstanceID      string                 `json:"agent_instance_id"` // Docker container/agent instance
+	ContainerID          string                 `json:"container_id"`      // Docker container ID for cleanup
+	AgentProfileID       string                 `json:"agent_profile_id"`  // ID of the agent profile used
+	ExecutorID           string                 `json:"executor_id"`
+	EnvironmentID        string                 `json:"environment_id"`
+	RepositoryID         string                 `json:"repository_id"`
+	BaseBranch           string                 `json:"base_branch"`
+	WorktreeID           string                 `json:"worktree_id"`
+	WorktreePath         string                 `json:"worktree_path"`
+	WorktreeBranch       string                 `json:"worktree_branch"`
+	AgentProfileSnapshot map[string]interface{} `json:"agent_profile_snapshot,omitempty"`
+	ExecutorSnapshot     map[string]interface{} `json:"executor_snapshot,omitempty"`
+	EnvironmentSnapshot  map[string]interface{} `json:"environment_snapshot,omitempty"`
+	RepositorySnapshot   map[string]interface{} `json:"repository_snapshot,omitempty"`
+	State                AgentSessionState      `json:"state"`
+	Progress             int                    `json:"progress"` // 0-100
+	ErrorMessage         string                 `json:"error_message,omitempty"`
+	Metadata             map[string]interface{} `json:"metadata,omitempty"`
+	StartedAt            time.Time              `json:"started_at"`
+	CompletedAt          *time.Time             `json:"completed_at,omitempty"`
+	UpdatedAt            time.Time              `json:"updated_at"`
 }
 
 // ToAPI converts internal AgentSession to API type
@@ -174,10 +180,14 @@ func (s *AgentSession) ToAPI() map[string]interface{} {
 		"agent_instance_id": s.AgentInstanceID,
 		"container_id":      s.ContainerID,
 		"agent_profile_id":  s.AgentProfileID,
-		"acp_session_id":    s.ACPSessionID,
 		"executor_id":       s.ExecutorID,
 		"environment_id":    s.EnvironmentID,
-		"status":            string(s.Status),
+		"repository_id":     s.RepositoryID,
+		"base_branch":       s.BaseBranch,
+		"worktree_id":       s.WorktreeID,
+		"worktree_path":     s.WorktreePath,
+		"worktree_branch":   s.WorktreeBranch,
+		"state":             string(s.State),
 		"progress":          s.Progress,
 		"started_at":        s.StartedAt,
 		"updated_at":        s.UpdatedAt,
@@ -190,6 +200,18 @@ func (s *AgentSession) ToAPI() map[string]interface{} {
 	}
 	if s.Metadata != nil {
 		result["metadata"] = s.Metadata
+	}
+	if s.AgentProfileSnapshot != nil {
+		result["agent_profile_snapshot"] = s.AgentProfileSnapshot
+	}
+	if s.ExecutorSnapshot != nil {
+		result["executor_snapshot"] = s.ExecutorSnapshot
+	}
+	if s.EnvironmentSnapshot != nil {
+		result["environment_snapshot"] = s.EnvironmentSnapshot
+	}
+	if s.RepositorySnapshot != nil {
+		result["repository_snapshot"] = s.RepositorySnapshot
 	}
 	return result
 }
@@ -204,15 +226,16 @@ type Repository struct {
 	// populated after the repo is cloned/synced on the agent host.
 	LocalPath string `json:"local_path"`
 	// Provider fields describe the upstream source (e.g. github/gitlab) for future syncing.
-	Provider       string    `json:"provider"`
-	ProviderRepoID string    `json:"provider_repo_id"`
-	ProviderOwner  string    `json:"provider_owner"`
-	ProviderName   string    `json:"provider_name"`
-	DefaultBranch  string    `json:"default_branch"`
-	SetupScript    string    `json:"setup_script"`
-	CleanupScript  string    `json:"cleanup_script"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	Provider       string     `json:"provider"`
+	ProviderRepoID string     `json:"provider_repo_id"`
+	ProviderOwner  string     `json:"provider_owner"`
+	ProviderName   string     `json:"provider_name"`
+	DefaultBranch  string     `json:"default_branch"`
+	SetupScript    string     `json:"setup_script"`
+	CleanupScript  string     `json:"cleanup_script"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+	DeletedAt      *time.Time `json:"deleted_at,omitempty"`
 }
 
 // RepositoryScript represents a custom script for a repository
@@ -261,6 +284,7 @@ type Executor struct {
 	Config    map[string]string `json:"config,omitempty"`
 	CreatedAt time.Time         `json:"created_at"`
 	UpdatedAt time.Time         `json:"updated_at"`
+	DeletedAt *time.Time        `json:"deleted_at,omitempty"`
 }
 
 // EnvironmentKind represents the runtime type for environments.
@@ -287,23 +311,19 @@ type Environment struct {
 	BuildConfig  map[string]string `json:"build_config,omitempty"`
 	CreatedAt    time.Time         `json:"created_at"`
 	UpdatedAt    time.Time         `json:"updated_at"`
+	DeletedAt    *time.Time        `json:"deleted_at,omitempty"`
 }
 
 // ToAPI converts internal Task to API type
 func (t *Task) ToAPI() *v1.Task {
-	var agentProfileID *string
-	if t.AgentProfileID != "" {
-		agentProfileID = &t.AgentProfileID
+	var repositoryID *string
+	if t.RepositoryID != "" {
+		repositoryID = &t.RepositoryID
 	}
 
-	var repositoryURL *string
-	if t.RepositoryURL != "" {
-		repositoryURL = &t.RepositoryURL
-	}
-
-	var branch *string
-	if t.Branch != "" {
-		branch = &t.Branch
+	var baseBranch *string
+	if t.BaseBranch != "" {
+		baseBranch = &t.BaseBranch
 	}
 
 	var assignedAgentID *string
@@ -319,9 +339,8 @@ func (t *Task) ToAPI() *v1.Task {
 		Description:     t.Description,
 		State:           t.State,
 		Priority:        t.Priority,
-		AgentProfileID:  agentProfileID,
-		RepositoryURL:   repositoryURL,
-		Branch:          branch,
+		RepositoryID:    repositoryID,
+		BaseBranch:      baseBranch,
 		AssignedAgentID: assignedAgentID,
 		CreatedAt:       t.CreatedAt,
 		UpdatedAt:       t.UpdatedAt,

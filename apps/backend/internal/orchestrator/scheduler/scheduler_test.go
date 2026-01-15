@@ -135,16 +135,14 @@ func createTestExecutor(t *testing.T, agentMgr *mockAgentManager, log *logger.Lo
 }
 
 func createTestTask(id string, priority int) *v1.Task {
-	agentProfileID := "test-agent"
 	return &v1.Task{
-		ID:             id,
-		BoardID:        "test-board",
-		Title:          "Test Task " + id,
-		Priority:       priority,
-		AgentProfileID: &agentProfileID,
-		State:          v1.TaskStateTODO,
-		CreatedAt:      time.Now(),
-		UpdatedAt:      time.Now(),
+		ID:        id,
+		BoardID:   "test-board",
+		Title:     "Test Task " + id,
+		Priority:  priority,
+		State:     v1.TaskStateTODO,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
 	}
 }
 
@@ -495,4 +493,3 @@ func TestRetryTaskNotFound(t *testing.T) {
 		t.Error("retry should fail for non-existent task")
 	}
 }
-

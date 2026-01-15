@@ -38,7 +38,7 @@ export function KanbanBoard() {
     repositories,
     repositoriesLoading,
     allRepositoriesSelected,
-    selectedRepositoryPaths,
+    selectedRepositoryIds,
   } = useUserDisplaySettings({
     workspaceId: workspaceState.activeId,
     boardId: boardsState.activeId,
@@ -86,14 +86,14 @@ export function KanbanBoard() {
         state: task.state,
         description: task.description,
         position: task.position,
-        repositoryUrl: task.repositoryUrl,
+        repositoryId: task.repositoryId,
       })),
     [kanban.tasks]
   );
   const activeColumns = kanban.boardId ? backendColumns : [];
   const visibleTasks = useMemo(
-    () => filterTasksByRepositories(backendTasks, selectedRepositoryPaths),
-    [backendTasks, selectedRepositoryPaths]
+    () => filterTasksByRepositories(backendTasks, selectedRepositoryIds),
+    [backendTasks, selectedRepositoryIds]
   );
   const activeTask = useMemo(
     () => visibleTasks.find((task) => task.id === activeTaskId) ?? null,
@@ -164,7 +164,7 @@ export function KanbanBoard() {
               description: task.description ?? undefined,
               position: task.position ?? 0,
               state: task.state,
-              repositoryUrl: task.repository_url ?? undefined,
+              repositoryId: task.repository_id ?? undefined,
             },
           ],
         },
@@ -183,7 +183,7 @@ export function KanbanBoard() {
                 columnId: task.column_id ?? item.columnId,
                 position: task.position ?? item.position,
                 state: task.state ?? item.state,
-                repositoryUrl: task.repository_url ?? item.repositoryUrl,
+                repositoryId: task.repository_id ?? item.repositoryId,
               }
             : item
         ),

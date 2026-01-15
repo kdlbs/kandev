@@ -10,6 +10,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@kandev/ui/dropdown-menu';
+import { useMemo } from 'react';
+import { useAppStore } from '@/components/state-provider';
 import { cn, getRepositoryDisplayName } from '@/lib/utils';
 
 export interface Task {
@@ -19,7 +21,7 @@ export interface Task {
   state?: string;
   description?: string;
   position?: number;
-  repositoryUrl?: string;
+  repositoryId?: string;
 }
 
 interface KanbanCardProps {
@@ -59,7 +61,12 @@ function KanbanCardBody({
 }
 
 function KanbanCardLayout({ task, className }: KanbanCardProps & { className?: string }) {
-  const repoName = getRepositoryDisplayName(task.repositoryUrl);
+  const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
+  const repository = useMemo(
+    () => Object.values(repositoriesByWorkspace).flat().find((repo) => repo.id === task.repositoryId) ?? null,
+    [repositoriesByWorkspace, task.repositoryId]
+  );
+  const repoName = getRepositoryDisplayName(repository?.local_path);
 
   return (
     <Card size="sm" className={cn('w-full py-0', className)}>
@@ -75,7 +82,12 @@ export function KanbanCard({ task, onClick, onEdit, onDelete }: KanbanCardProps)
     id: task.id,
   });
 
-  const repoName = getRepositoryDisplayName(task.repositoryUrl);
+  const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
+  const repository = useMemo(
+    () => Object.values(repositoriesByWorkspace).flat().find((repo) => repo.id === task.repositoryId) ?? null,
+    [repositoriesByWorkspace, task.repositoryId]
+  );
+  const repoName = getRepositoryDisplayName(repository?.local_path);
 
   const statusIcon = (() => {
     switch (task.state) {

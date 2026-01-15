@@ -36,6 +36,7 @@ func (h *BoardHandlers) registerHTTP(router *gin.Engine) {
 	api := router.Group("/api/v1")
 	api.GET("/boards", h.httpListBoards)
 	api.GET("/workspaces/:id/boards", h.httpListBoardsByWorkspace)
+	api.GET("/workspaces/:id/board-snapshot", h.httpGetWorkspaceBoardSnapshot)
 	api.GET("/boards/:id", h.httpGetBoard)
 	api.GET("/boards/:id/columns", h.httpListColumns)
 	api.GET("/boards/:id/snapshot", h.httpGetBoardSnapshot)
@@ -241,6 +242,24 @@ func (h *BoardHandlers) httpDeleteColumn(c *gin.Context) {
 
 func (h *BoardHandlers) httpGetBoardSnapshot(c *gin.Context) {
 	resp, err := h.controller.GetSnapshot(c.Request.Context(), dto.GetBoardSnapshotRequest{BoardID: c.Param("id")})
+	if err != nil {
+		handleNotFound(c, h.logger, err, "board not found")
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+func (h *BoardHandlers) httpGetWorkspaceBoardSnapshot(c *gin.Context) {
+	workspaceID := c.Param("id")
+	if workspaceID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "workspace id is required"})
+		return
+	}
+	boardID := c.Query("board_id")
+	resp, err := h.controller.GetWorkspaceSnapshot(c.Request.Context(), dto.GetWorkspaceBoardSnapshotRequest{
+		WorkspaceID: workspaceID,
+		BoardID:     boardID,
+	})
 	if err != nil {
 		handleNotFound(c, h.logger, err, "board not found")
 		return

@@ -1,10 +1,10 @@
 'use client';
 
 import { IconBrain } from '@tabler/icons-react';
-import type { Comment } from '@/lib/types/http';
+import type { Message } from '@/lib/types/http';
 import type { RichMetadata } from '@/components/task/chat/types';
 
-export function ThinkingMessage({ comment }: { comment: Comment }) {
+export function ThinkingMessage({ comment }: { comment: Message }) {
   const metadata = comment.metadata as RichMetadata | undefined;
   const text = metadata?.thinking ?? comment.content;
   if (!text) return null;

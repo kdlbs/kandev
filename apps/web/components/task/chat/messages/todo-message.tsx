@@ -2,10 +2,10 @@
 
 import { IconListCheck } from '@tabler/icons-react';
 import { cn } from '@/lib/utils';
-import type { Comment } from '@/lib/types/http';
+import type { Message } from '@/lib/types/http';
 import type { RichMetadata } from '@/components/task/chat/types';
 
-export function TodoMessage({ comment }: { comment: Comment }) {
+export function TodoMessage({ comment }: { comment: Message }) {
   const metadata = comment.metadata as RichMetadata | undefined;
   const todos = metadata?.todos ?? [];
   const todoItems = todos

@@ -3,36 +3,34 @@ import type { KanbanState } from '@/lib/state/store';
 
 export type KanbanTask = KanbanState['tasks'][number];
 
-// Minimal task type for filtering - only needs id and repositoryUrl
+// Minimal task type for filtering - only needs id and repositoryId
 export type FilterableTask = {
   id: string;
-  repositoryUrl?: string;
+  repositoryId?: string;
 };
 
-export function mapSelectedRepositoryPaths(
+export function mapSelectedRepositoryIds(
   repositories: Repository[],
   selectedIds: string[]
 ): Set<string> {
   if (selectedIds.length === 0) {
     return new Set();
   }
-  const repoById = new Map(repositories.map((repo) => [repo.id, repo]));
-  const paths = new Set<string>();
-  selectedIds.forEach((id) => {
-    const repo = repoById.get(id);
-    if (repo?.local_path) {
-      paths.add(repo.local_path);
+  const repoIds = new Set<string>();
+  repositories.forEach((repo) => {
+    if (selectedIds.includes(repo.id)) {
+      repoIds.add(repo.id);
     }
   });
-  return paths;
+  return repoIds;
 }
 
 export function filterTasksByRepositories<T extends FilterableTask>(
   tasks: T[],
-  selectedRepositoryPaths: Set<string>
+  selectedRepositoryIds: Set<string>
 ): T[] {
-  if (selectedRepositoryPaths.size === 0) {
+  if (selectedRepositoryIds.size === 0) {
     return tasks;
   }
-  return tasks.filter((task) => task.repositoryUrl && selectedRepositoryPaths.has(task.repositoryUrl));
+  return tasks.filter((task) => task.repositoryId && selectedRepositoryIds.has(task.repositoryId));
 }

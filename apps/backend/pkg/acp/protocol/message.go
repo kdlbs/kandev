@@ -17,7 +17,6 @@ const (
 	MessageTypeStatus        MessageType = "status"
 	MessageTypeHeartbeat     MessageType = "heartbeat"
 	MessageTypeInputRequired MessageType = "input_required" // Agent requests input from user
-	MessageTypeSessionInfo   MessageType = "session_info"   // Agent reports session information
 
 	// Backend → Agent message types
 	MessageTypeControl       MessageType = "control"        // Control commands (pause, resume, stop)
@@ -58,4 +57,3 @@ func (m *Message) IsValid() bool {
 	}
 	return true
 }
-

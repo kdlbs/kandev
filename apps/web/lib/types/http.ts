@@ -10,6 +10,15 @@ export type TaskState =
   | 'FAILED'
   | 'CANCELLED';
 
+export type AgentSessionState =
+  | 'CREATED'
+  | 'STARTING'
+  | 'RUNNING'
+  | 'WAITING_FOR_INPUT'
+  | 'COMPLETED'
+  | 'FAILED'
+  | 'CANCELLED';
+
 export type Board = {
   id: string;
   workspace_id: string;
@@ -79,9 +88,8 @@ export type Task = {
   description: string;
   state: TaskState;
   priority: number;
-  agent_profile_id?: string | null;
-  repository_url?: string | null;
-  branch?: string | null;
+  repository_id?: string | null;
+  base_branch?: string | null;
   assigned_agent_id?: string | null;
   created_at: string;
   updated_at: string;
@@ -212,15 +220,15 @@ export type ListEnvironmentsResponse = {
   total: number;
 };
 
-export type ListCommentsResponse = {
-  comments: Comment[];
+export type ListMessagesResponse = {
+  messages: Message[];
   total: number;
   has_more: boolean;
   cursor: string;
 };
 
-export type CommentAuthorType = 'user' | 'agent';
-export type CommentType =
+export type MessageAuthorType = 'user' | 'agent';
+export type MessageType =
   | 'message'
   | 'content'
   | 'tool_call'
@@ -230,13 +238,14 @@ export type CommentType =
   | 'thinking'
   | 'todo';
 
-export type Comment = {
+export type Message = {
   id: string;
+  agent_session_id: string;
   task_id: string;
-  author_type: CommentAuthorType;
+  author_type: MessageAuthorType;
   author_id?: string;
   content: string;
-  type: CommentType;
+  type: MessageType;
   metadata?: Record<string, unknown>;
   requests_input?: boolean;
   created_at: string;

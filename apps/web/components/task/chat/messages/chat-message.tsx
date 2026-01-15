@@ -4,11 +4,11 @@ import ReactMarkdown from 'react-markdown';
 import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
 import { cn } from '@/lib/utils';
-import type { Comment } from '@/lib/types/http';
+import type { Message } from '@/lib/types/http';
 import { RichBlocks } from '@/components/task/chat/messages/rich-blocks';
 
 type ChatMessageProps = {
-  comment: Comment;
+  comment: Message;
   label: string;
   className: string;
   showRichBlocks?: boolean;

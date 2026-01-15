@@ -18,8 +18,9 @@ export type BackendMessageType =
   | 'column.created'
   | 'column.updated'
   | 'column.deleted'
-  | 'comment.added'
-  | 'comment.updated'
+  | 'message.added'
+  | 'message.updated'
+  | 'agent_session.state_changed'
   | 'executor.created'
   | 'executor.updated'
   | 'executor.deleted'
@@ -64,7 +65,7 @@ export type TaskEventPayload = {
   state?: TaskState;
   priority?: number;
   position?: number;
-  repository_url?: string;
+  repository_id?: string;
 };
 
 export type AgentUpdatePayload = {
@@ -126,9 +127,10 @@ export type ColumnPayload = {
   updated_at?: string;
 };
 
-export type CommentAddedPayload = {
+export type MessageAddedPayload = {
   task_id: string;
-  comment_id: string;
+  message_id: string;
+  agent_session_id: string;
   author_type: 'user' | 'agent';
   author_id?: string;
   content: string;
@@ -136,6 +138,13 @@ export type CommentAddedPayload = {
   metadata?: Record<string, unknown>;
   requests_input?: boolean;
   created_at: string;
+};
+
+export type AgentSessionStateChangedPayload = {
+  task_id: string;
+  agent_session_id: string;
+  old_state?: string;
+  new_state: string;
 };
 
 export type FileInfo = {
@@ -234,8 +243,9 @@ export type BackendMessageMap = {
   'column.created': BackendMessage<'column.created', ColumnPayload>;
   'column.updated': BackendMessage<'column.updated', ColumnPayload>;
   'column.deleted': BackendMessage<'column.deleted', ColumnPayload>;
-  'comment.added': BackendMessage<'comment.added', CommentAddedPayload>;
-  'comment.updated': BackendMessage<'comment.updated', CommentAddedPayload>;
+  'message.added': BackendMessage<'message.added', MessageAddedPayload>;
+  'message.updated': BackendMessage<'message.updated', MessageAddedPayload>;
+  'agent_session.state_changed': BackendMessage<'agent_session.state_changed', AgentSessionStateChangedPayload>;
   'executor.created': BackendMessage<'executor.created', ExecutorPayload>;
   'executor.updated': BackendMessage<'executor.updated', ExecutorPayload>;
   'executor.deleted': BackendMessage<'executor.deleted', ExecutorPayload>;

@@ -254,6 +254,10 @@ func (h *Handlers) httpDeleteProfile(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "agent profile not found"})
 			return
 		}
+		if err == controller.ErrAgentProfileInUse {
+			c.JSON(http.StatusConflict, gin.H{"error": "agent profile is used by an active agent session"})
+			return
+		}
 		h.logger.Error("failed to delete profile", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete profile"})
 		return

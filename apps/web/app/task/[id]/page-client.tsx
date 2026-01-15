@@ -5,11 +5,14 @@ import '@git-diff-view/react/styles/diff-view.css';
 import { TooltipProvider } from '@kandev/ui/tooltip';
 import { TaskTopBar } from '@/components/task/task-top-bar';
 import { TaskLayout } from '@/components/task/task-layout';
+import { DebugOverlay } from '@/components/debug-overlay';
 import type { Task } from '@/lib/types/http';
+import { DEBUG_UI } from '@/lib/config';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import { useRepositories } from '@/hooks/use-repositories';
 import { useTaskAgent } from '@/hooks/use-task-agent';
-import { useTaskComments } from '@/hooks/use-task-comments';
+import { useTaskMessages } from '@/hooks/use-task-messages';
+import { useAppStore } from '@/components/state-provider';
 
 type TaskPageClientProps = {
   task: Task | null;
@@ -17,11 +20,40 @@ type TaskPageClientProps = {
 
 export default function TaskPage({ task: initialTask }: TaskPageClientProps) {
   const [isMounted, setIsMounted] = useState(false);
-  const task = initialTask;
+  const kanbanTask = useAppStore((state) =>
+    initialTask?.id ? state.kanban.tasks.find((item) => item.id === initialTask.id) ?? null : null
+  );
+  const task = useMemo(() => {
+    if (!initialTask) return null;
+    if (!kanbanTask) return initialTask;
+    return {
+      ...initialTask,
+      title: kanbanTask.title ?? initialTask.title,
+      description: kanbanTask.description ?? initialTask.description,
+      column_id: (kanbanTask.columnId as string | undefined) ?? initialTask.column_id,
+      position: kanbanTask.position ?? initialTask.position,
+      state: (kanbanTask.state as Task['state'] | undefined) ?? initialTask.state,
+      repository_id: (kanbanTask.repositoryId as string | undefined) ?? initialTask.repository_id,
+    };
+  }, [initialTask, kanbanTask]);
+  const connectionStatus = useAppStore((state) => state.connection.status);
 
   // Custom hooks for state management
-  const { isAgentRunning, isAgentLoading, worktreePath, worktreeBranch, handleStartAgent, handleStopAgent } = useTaskAgent(task);
-  const { isLoading: isLoadingComments } = useTaskComments(task?.id ?? null);
+  const {
+    isAgentRunning,
+    isAgentLoading,
+    worktreePath,
+    worktreeBranch,
+    agentSessionId,
+    agentSessionState,
+    handleStartAgent,
+    handleStopAgent,
+  } = useTaskAgent(task);
+  const isAgentWorking =
+    agentSessionState !== null
+      ? agentSessionState === 'STARTING' || agentSessionState === 'RUNNING'
+      : isAgentRunning && (task?.state === 'IN_PROGRESS' || task?.state === 'SCHEDULING');
+  const { isLoading: isLoadingMessages } = useTaskMessages(task?.id ?? null, agentSessionId);
 
   useEffect(() => {
     queueMicrotask(() => setIsMounted(true));
@@ -29,8 +61,8 @@ export default function TaskPage({ task: initialTask }: TaskPageClientProps) {
 
   const { repositories } = useRepositories(task?.workspace_id ?? null, Boolean(task?.workspace_id));
   const repository = useMemo(
-    () => repositories.find((item) => item.local_path === task?.repository_url) ?? null,
-    [repositories, task?.repository_url]
+    () => repositories.find((item) => item.id === task?.repository_id) ?? null,
+    [repositories, task?.repository_id]
   );
 
   const handleSendMessage = useCallback(async (content: string) => {
@@ -39,12 +71,21 @@ export default function TaskPage({ task: initialTask }: TaskPageClientProps) {
     const client = getWebSocketClient();
     if (!client) return;
 
-    try {
-      await client.request('comment.add', { task_id: task.id, content }, 10000);
-    } catch (error) {
-      console.error('Failed to send comment:', error);
+    if (!agentSessionId) {
+      console.error('No active agent session. Start an agent before sending a message.');
+      return;
     }
-  }, [task]);
+
+    try {
+      await client.request(
+        'message.add',
+        { task_id: task.id, agent_session_id: agentSessionId, content },
+        10000
+      );
+    } catch (error) {
+      console.error('Failed to send message:', error);
+    }
+  }, [agentSessionId, task]);
 
   if (!isMounted) {
     return <div className="h-screen w-full bg-background" />;
@@ -53,25 +94,38 @@ export default function TaskPage({ task: initialTask }: TaskPageClientProps) {
   return (
     <TooltipProvider>
       <div className="h-screen w-full flex flex-col bg-background">
+        {DEBUG_UI && (
+          <DebugOverlay
+            title="Task Debug"
+            entries={{
+              ws_status: connectionStatus,
+              task_id: task?.id ?? null,
+              agent_session_id: agentSessionId ?? null,
+              task_state: task?.state ?? null,
+              agent_session_state: agentSessionState ?? null,
+              is_agent_working: isAgentWorking,
+            }}
+          />
+        )}
         <TaskTopBar
           taskTitle={task?.title}
           taskDescription={task?.description}
-          baseBranch={task?.branch ?? undefined}
+          baseBranch={task?.base_branch ?? undefined}
           onStartAgent={handleStartAgent}
           onStopAgent={handleStopAgent}
           isAgentRunning={isAgentRunning}
           isAgentLoading={isAgentLoading}
           worktreePath={worktreePath}
           worktreeBranch={worktreeBranch}
-          repositoryPath={task?.repository_url ?? null}
+          repositoryPath={repository?.local_path ?? null}
           repositoryName={repository?.name ?? null}
         />
 
         <TaskLayout
           taskId={task?.id ?? null}
           taskDescription={task?.description}
-          isLoadingComments={isLoadingComments}
-          isAgentWorking={isAgentRunning}
+          isLoadingMessages={isLoadingMessages}
+          isAgentWorking={isAgentWorking}
           onSendMessage={handleSendMessage}
         />
       </div>

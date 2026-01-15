@@ -1,6 +1,6 @@
 package service
 
 const (
-	DefaultCommentsPageSize = 10
-	MaxCommentsPageSize = 100
+	DefaultMessagesPageSize = 10
+	MaxMessagesPageSize     = 100
 )

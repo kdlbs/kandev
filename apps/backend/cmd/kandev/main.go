@@ -28,8 +28,8 @@ import (
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
 
 	// Agent Manager packages
-	agentcontroller "github.com/kandev/kandev/internal/agent/controller"
 	"github.com/kandev/kandev/internal/agent/agentctl/launcher"
+	agentcontroller "github.com/kandev/kandev/internal/agent/controller"
 	"github.com/kandev/kandev/internal/agent/credentials"
 	"github.com/kandev/kandev/internal/agent/discovery"
 	"github.com/kandev/kandev/internal/agent/docker"
@@ -50,6 +50,7 @@ import (
 	// Task Service packages
 	taskcontroller "github.com/kandev/kandev/internal/task/controller"
 	taskhandlers "github.com/kandev/kandev/internal/task/handlers"
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	usercontroller "github.com/kandev/kandev/internal/user/controller"
@@ -202,7 +203,7 @@ func main() {
 	if err != nil {
 		log.Fatal("Failed to load agent discovery config", zap.Error(err))
 	}
-	agentSettingsController := agentsettingscontroller.NewController(agentSettingsRepo, discoveryRegistry, log)
+	agentSettingsController := agentsettingscontroller.NewController(agentSettingsRepo, discoveryRegistry, taskRepo, log)
 
 	userSvc := userservice.NewService(userRepo, eventBus, log)
 	userCtrl := usercontroller.NewController(userSvc)
@@ -360,9 +361,10 @@ func main() {
 
 	serviceCfg := orchestrator.DefaultServiceConfig()
 	orchestratorSvc := orchestrator.NewService(serviceCfg, eventBus, agentManagerClient, taskRepoAdapter, taskRepo, log)
+	taskSvc.SetExecutionStopper(orchestratorSvc)
 
 	// Set up comment creator for saving agent responses as comments
-	orchestratorSvc.SetCommentCreator(&commentCreatorAdapter{svc: taskSvc})
+	orchestratorSvc.SetMessageCreator(&messageCreatorAdapter{svc: taskSvc})
 
 	// ============================================
 	// WEBSOCKET GATEWAY (All communication via WebSocket)
@@ -379,7 +381,7 @@ func main() {
 	if worktreeMgr != nil {
 		taskController.SetWorktreeLookup(worktreeMgr) // Enable worktree info in task responses
 	}
-	commentController := taskcontroller.NewCommentController(taskSvc)
+	messageController := taskcontroller.NewMessageController(taskSvc)
 	repositoryController := taskcontroller.NewRepositoryController(taskSvc)
 	executorController := taskcontroller.NewExecutorController(taskSvc)
 	environmentController := taskcontroller.NewEnvironmentController(taskSvc)
@@ -409,33 +411,38 @@ func main() {
 	gateways.RegisterUserNotifications(ctx, eventBus, gateway.Hub, log)
 
 	// Set up historical logs provider for task subscriptions
-	// Uses comments instead of execution logs - all agent messages are now comments
+	// Uses messages instead of execution logs - all agent messages are now messages
 	gateway.Hub.SetHistoricalLogsProvider(func(ctx context.Context, taskID string) ([]*ws.Message, error) {
-		comments, err := taskSvc.ListComments(ctx, taskID)
+		var session *models.AgentSession
+		session, err = taskRepo.GetActiveAgentSessionByTaskID(ctx, taskID)
+		if err != nil {
+			session, err = taskRepo.GetAgentSessionByTaskID(ctx, taskID)
+			if err != nil {
+				return nil, nil
+			}
+		}
+
+		messages, err := taskSvc.ListMessages(ctx, session.ID)
 		if err != nil {
 			return nil, err
 		}
 
-		// Convert comments to ws.Message notifications
-		result := make([]*ws.Message, 0, len(comments))
-		for _, comment := range comments {
-			// Determine the action based on comment type
-			action := ws.ActionCommentAdded
+		result := make([]*ws.Message, 0, len(messages))
+		for _, message := range messages {
+			action := ws.ActionMessageAdded
 			payload := map[string]interface{}{
-				"comment_id":     comment.ID,
-				"task_id":        comment.TaskID,
-				"author_type":    string(comment.AuthorType),
-				"author_id":      comment.AuthorID,
-				"content":        comment.Content,
-				"type":           string(comment.Type),
-				"requests_input": comment.RequestsInput,
-				"created_at":     comment.CreatedAt.Format(time.RFC3339),
+				"message_id":       message.ID,
+				"agent_session_id": message.AgentSessionID,
+				"task_id":          message.TaskID,
+				"author_type":      string(message.AuthorType),
+				"author_id":        message.AuthorID,
+				"content":          message.Content,
+				"type":             string(message.Type),
+				"requests_input":   message.RequestsInput,
+				"created_at":       message.CreatedAt.Format(time.RFC3339),
 			}
-			if comment.ACPSessionID != "" {
-				payload["acp_session_id"] = comment.ACPSessionID
-			}
-			if comment.Metadata != nil {
-				payload["metadata"] = comment.Metadata
+			if message.Metadata != nil {
+				payload["metadata"] = message.Metadata
 			}
 			notification, err := ws.NewNotification(action, payload)
 			if err != nil {
@@ -445,7 +452,7 @@ func main() {
 		}
 
 		// Also send current git status if available
-		session, err := taskRepo.GetActiveAgentSessionByTaskID(ctx, taskID)
+		session, err = taskRepo.GetActiveAgentSessionByTaskID(ctx, taskID)
 		if err == nil && session != nil && session.Metadata != nil {
 			if gitStatus, ok := session.Metadata["git_status"]; ok {
 				// Add task_id to the git status data
@@ -464,7 +471,7 @@ func main() {
 
 		return result, nil
 	})
-	log.Info("Historical logs provider configured for task subscriptions (using comments and git status)")
+	log.Info("Historical logs provider configured for task subscriptions (using messages and git status)")
 
 	// NOTE: We no longer create comments for each ACP message chunk.
 	// Instead, the lifecycle manager accumulates message chunks and:
@@ -494,70 +501,53 @@ func main() {
 			})
 			gateway.Hub.BroadcastToTask(taskID, notification)
 		default:
-			// Skip other message types (session/update, session_info, etc.)
+			// Skip other message types (session/update, etc.)
 		}
 	})
 
-	// Wire ACP handler to extract session_id from session_info messages and store in task metadata
-	orchestratorSvc.RegisterACPHandler(func(taskID string, msg *protocol.Message) {
-		log.Debug("ACP handler received message",
-			zap.String("task_id", taskID),
-			zap.String("message_type", string(msg.Type)))
-
-		// Check for session_info message type (custom type from augment-agent)
-		if msg.Type == "session_info" && msg.Data != nil {
-			log.Debug("session_info message received, extracting session_id")
-			if sessionID, ok := msg.Data["session_id"].(string); ok && sessionID != "" {
-				metadata := map[string]interface{}{
-					"auggie_session_id": sessionID,
-				}
-				if _, err := taskSvc.UpdateTaskMetadata(context.Background(), taskID, metadata); err != nil {
-					log.Error("failed to store auggie session_id in task metadata",
-						zap.String("task_id", taskID),
-						zap.String("session_id", sessionID),
-						zap.Error(err))
-				} else {
-					log.Info("stored auggie session_id in task metadata",
-						zap.String("task_id", taskID),
-						zap.String("session_id", sessionID))
-				}
-			}
-		}
-	})
-
-	// Wire input request handler to create agent comments when input is requested
+	// Wire input request handler to create agent messages when input is requested
 	orchestratorSvc.SetInputRequestHandler(func(ctx context.Context, taskID, agentID, message string) error {
-		log.Info("agent requesting user input, creating comment",
+		log.Info("agent requesting user input, creating message",
 			zap.String("task_id", taskID),
 			zap.String("agent_id", agentID))
 
-		// Create a comment from the agent
-		comment, err := taskSvc.CreateComment(ctx, &taskservice.CreateCommentRequest{
-			TaskID:        taskID,
-			Content:       message,
-			AuthorType:    "agent",
-			AuthorID:      agentID,
-			RequestsInput: true,
-		})
+		session, err := taskRepo.GetActiveAgentSessionByTaskID(ctx, taskID)
 		if err != nil {
-			log.Error("failed to create agent comment",
+			log.Error("failed to resolve active agent session for input request",
 				zap.String("task_id", taskID),
 				zap.Error(err))
 			return err
 		}
 
-		// Broadcast comment.added notification to task subscribers
-		notification, _ := ws.NewNotification(ws.ActionCommentAdded, map[string]interface{}{
-			"task_id":        taskID,
-			"comment":        comment.ToAPI(),
-			"requests_input": true,
+		// Create a message from the agent
+		messageRecord, err := taskSvc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
+			AgentSessionID: session.ID,
+			TaskID:         taskID,
+			Content:        message,
+			AuthorType:     "agent",
+			AuthorID:       agentID,
+			RequestsInput:  true,
+		})
+		if err != nil {
+			log.Error("failed to create agent message",
+				zap.String("task_id", taskID),
+				zap.Error(err))
+			return err
+		}
+
+		// Broadcast message.added notification to task subscribers
+		notification, _ := ws.NewNotification(ws.ActionMessageAdded, map[string]interface{}{
+			"task_id":          taskID,
+			"agent_session_id": session.ID,
+			"message":          messageRecord.ToAPI(),
+			"requests_input":   true,
 		})
 		gateway.Hub.BroadcastToTask(taskID, notification)
 
 		// Also broadcast input.requested notification
 		inputNotification, _ := ws.NewNotification(ws.ActionInputRequested, map[string]interface{}{
 			"task_id":    taskID,
-			"comment_id": comment.ID,
+			"message_id": messageRecord.ID,
 			"message":    message,
 		})
 		gateway.Hub.BroadcastToTask(taskID, inputNotification)
@@ -570,74 +560,99 @@ func main() {
 	}
 	log.Info("Orchestrator initialized")
 
-	// Subscribe to comment.added events and broadcast to WebSocket subscribers
-	_, err = eventBus.Subscribe(events.CommentAdded, func(ctx context.Context, event *bus.Event) error {
+	// Subscribe to message.added events and broadcast to WebSocket subscribers
+	_, err = eventBus.Subscribe(events.MessageAdded, func(ctx context.Context, event *bus.Event) error {
 		data := event.Data
+		agentSessionID, _ := data["agent_session_id"].(string)
 		taskID, _ := data["task_id"].(string)
-		if taskID == "" {
+		if agentSessionID == "" {
 			return nil
 		}
 
 		payload := map[string]interface{}{
-			"task_id":        taskID,
-			"comment_id":     data["comment_id"],
-			"author_type":    data["author_type"],
-			"author_id":      data["author_id"],
-			"content":        data["content"],
-			"type":           data["type"],
-			"requests_input": data["requests_input"],
-			"created_at":     data["created_at"],
+			"task_id":          taskID,
+			"agent_session_id": agentSessionID,
+			"message_id":       data["message_id"],
+			"author_type":      data["author_type"],
+			"author_id":        data["author_id"],
+			"content":          data["content"],
+			"type":             data["type"],
+			"requests_input":   data["requests_input"],
+			"created_at":       data["created_at"],
 		}
 		if metadata, ok := data["metadata"]; ok && metadata != nil {
 			payload["metadata"] = metadata
 		}
-		notification, err := ws.NewNotification(ws.ActionCommentAdded, payload)
+		notification, err := ws.NewNotification(ws.ActionMessageAdded, payload)
 		if err != nil {
-			log.Error("Failed to create comment.added notification", zap.Error(err))
+			log.Error("Failed to create message.added notification", zap.Error(err))
 			return nil
 		}
 		gateway.Hub.BroadcastToTask(taskID, notification)
 		return nil
 	})
 	if err != nil {
-		log.Error("Failed to subscribe to comment.added events", zap.Error(err))
+		log.Error("Failed to subscribe to message.added events", zap.Error(err))
 	} else {
-		log.Info("Subscribed to comment.added events for WebSocket broadcasting")
+		log.Info("Subscribed to message.added events for WebSocket broadcasting")
 	}
 
-	// Subscribe to comment.updated events and broadcast to WebSocket subscribers
-	_, err = eventBus.Subscribe(events.CommentUpdated, func(ctx context.Context, event *bus.Event) error {
+	// Subscribe to message.updated events and broadcast to WebSocket subscribers
+	_, err = eventBus.Subscribe(events.MessageUpdated, func(ctx context.Context, event *bus.Event) error {
 		data := event.Data
+		agentSessionID, _ := data["agent_session_id"].(string)
 		taskID, _ := data["task_id"].(string)
-		if taskID == "" {
-			log.Warn("comment.updated event has no task_id, skipping")
+		if agentSessionID == "" {
+			log.Warn("message.updated event has no agent_session_id, skipping")
 			return nil
 		}
 		payload := map[string]interface{}{
-			"comment_id":     data["comment_id"],
-			"task_id":        taskID,
-			"author_type":    data["author_type"],
-			"author_id":      data["author_id"],
-			"content":        data["content"],
-			"type":           data["type"],
-			"requests_input": data["requests_input"],
-			"created_at":     data["created_at"],
+			"message_id":       data["message_id"],
+			"agent_session_id": agentSessionID,
+			"task_id":          taskID,
+			"author_type":      data["author_type"],
+			"author_id":        data["author_id"],
+			"content":          data["content"],
+			"type":             data["type"],
+			"requests_input":   data["requests_input"],
+			"created_at":       data["created_at"],
 		}
 		if metadata, ok := data["metadata"]; ok && metadata != nil {
 			payload["metadata"] = metadata
 		}
-		notification, err := ws.NewNotification(ws.ActionCommentUpdated, payload)
+		notification, err := ws.NewNotification(ws.ActionMessageUpdated, payload)
 		if err != nil {
-			log.Error("Failed to create comment.updated notification", zap.Error(err))
+			log.Error("Failed to create message.updated notification", zap.Error(err))
 			return nil
 		}
 		gateway.Hub.BroadcastToTask(taskID, notification)
 		return nil
 	})
 	if err != nil {
-		log.Error("Failed to subscribe to comment.updated events", zap.Error(err))
+		log.Error("Failed to subscribe to message.updated events", zap.Error(err))
 	} else {
-		log.Info("Subscribed to comment.updated events for WebSocket broadcasting")
+		log.Info("Subscribed to message.updated events for WebSocket broadcasting")
+	}
+
+	// Subscribe to agent_session.state_changed events and broadcast to task subscribers
+	_, err = eventBus.Subscribe(events.AgentSessionStateChanged, func(ctx context.Context, event *bus.Event) error {
+		data := event.Data
+		taskID, _ := data["task_id"].(string)
+		if taskID == "" {
+			return nil
+		}
+		notification, err := ws.NewNotification(ws.ActionAgentSessionStateChanged, data)
+		if err != nil {
+			log.Error("Failed to create agent_session.state_changed notification", zap.Error(err))
+			return nil
+		}
+		gateway.Hub.BroadcastToTask(taskID, notification)
+		return nil
+	})
+	if err != nil {
+		log.Error("Failed to subscribe to agent_session.state_changed events", zap.Error(err))
+	} else {
+		log.Info("Subscribed to agent_session.state_changed events for WebSocket broadcasting")
 	}
 
 	// Subscribe to git status events and broadcast to WebSocket subscribers
@@ -698,10 +713,10 @@ func main() {
 	taskhandlers.RegisterRepositoryRoutes(router, gateway.Dispatcher, repositoryController, log)
 	taskhandlers.RegisterExecutorRoutes(router, gateway.Dispatcher, executorController, log)
 	taskhandlers.RegisterEnvironmentRoutes(router, gateway.Dispatcher, environmentController, log)
-	taskhandlers.RegisterCommentRoutes(
+	taskhandlers.RegisterMessageRoutes(
 		router,
 		gateway.Dispatcher,
-		commentController,
+		messageController,
 		taskController,
 		&orchestratorAdapter{svc: orchestratorSvc},
 		log,
@@ -990,24 +1005,35 @@ func (a *orchestratorAdapter) PromptTask(ctx context.Context, taskID string, pro
 	}, nil
 }
 
-// commentCreatorAdapter adapts the task service to the orchestrator.CommentCreator interface
-type commentCreatorAdapter struct {
+// messageCreatorAdapter adapts the task service to the orchestrator.MessageCreator interface
+type messageCreatorAdapter struct {
 	svc *taskservice.Service
 }
 
-// CreateAgentComment creates a comment with author_type="agent"
-func (a *commentCreatorAdapter) CreateAgentComment(ctx context.Context, taskID, content, agentSessionID string) error {
-	_, err := a.svc.CreateComment(ctx, &taskservice.CreateCommentRequest{
+// CreateAgentMessage creates a message with author_type="agent"
+func (a *messageCreatorAdapter) CreateAgentMessage(ctx context.Context, taskID, content, agentSessionID string) error {
+	_, err := a.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
+		AgentSessionID: agentSessionID,
 		TaskID:         taskID,
 		Content:        content,
 		AuthorType:     "agent",
-		AgentSessionID: agentSessionID,
 	})
 	return err
 }
 
-// CreateToolCallComment creates a comment for a tool call with type="tool_call"
-func (a *commentCreatorAdapter) CreateToolCallComment(ctx context.Context, taskID, toolCallID, title, status, agentSessionID string, args map[string]interface{}) error {
+// CreateUserMessage creates a message with author_type="user"
+func (a *messageCreatorAdapter) CreateUserMessage(ctx context.Context, taskID, content, agentSessionID string) error {
+	_, err := a.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
+		AgentSessionID: agentSessionID,
+		TaskID:         taskID,
+		Content:        content,
+		AuthorType:     "user",
+	})
+	return err
+}
+
+// CreateToolCallMessage creates a message for a tool call with type="tool_call"
+func (a *messageCreatorAdapter) CreateToolCallMessage(ctx context.Context, taskID, toolCallID, title, status, agentSessionID string, args map[string]interface{}) error {
 	metadata := map[string]interface{}{
 		"tool_call_id": toolCallID,
 		"title":        title,
@@ -1024,20 +1050,32 @@ func (a *commentCreatorAdapter) CreateToolCallComment(ctx context.Context, taskI
 		}
 	}
 
-	_, err := a.svc.CreateComment(ctx, &taskservice.CreateCommentRequest{
+	_, err := a.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
+		AgentSessionID: agentSessionID,
 		TaskID:         taskID,
 		Content:        title,
 		AuthorType:     "agent",
-		AgentSessionID: agentSessionID,
 		Type:           "tool_call",
 		Metadata:       metadata,
 	})
 	return err
 }
 
-// UpdateToolCallComment updates a tool call comment's status
-func (a *commentCreatorAdapter) UpdateToolCallComment(ctx context.Context, taskID, toolCallID, status, result string) error {
-	return a.svc.UpdateToolCallComment(ctx, taskID, toolCallID, status, result)
+// UpdateToolCallMessage updates a tool call message's status
+func (a *messageCreatorAdapter) UpdateToolCallMessage(ctx context.Context, taskID, toolCallID, status, result, agentSessionID string) error {
+	return a.svc.UpdateToolCallMessage(ctx, agentSessionID, toolCallID, status, result)
 }
 
-
+// CreateSessionMessage creates a message for non-chat session updates (status/progress/error/etc).
+func (a *messageCreatorAdapter) CreateSessionMessage(ctx context.Context, taskID, content, agentSessionID, messageType string, metadata map[string]interface{}, requestsInput bool) error {
+	_, err := a.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
+		AgentSessionID: agentSessionID,
+		TaskID:         taskID,
+		Content:        content,
+		AuthorType:     "agent",
+		Type:           messageType,
+		Metadata:       metadata,
+		RequestsInput:  requestsInput,
+	})
+	return err
+}

@@ -3,9 +3,9 @@ import type {
   Agent,
   AgentDiscovery,
   Branch,
-  Comment,
   Environment,
   Executor,
+  Message,
   Repository,
   TaskState as TaskStatus,
 } from '@/lib/types/http';
@@ -22,7 +22,7 @@ export type KanbanState = {
     description?: string;
     position: number;
     state?: TaskStatus;
-    repositoryUrl?: string;
+    repositoryId?: string;
   }>;
 };
 
@@ -143,9 +143,9 @@ export type ConnectionState = {
   error: string | null;
 };
 
-export type CommentsState = {
-  taskId: string | null;
-  items: Comment[];
+export type MessagesState = {
+  sessionId: string | null;
+  items: Message[];
   isLoading: boolean;
   hasMore: boolean;
   oldestCursor: string | null;
@@ -170,7 +170,8 @@ export type AppState = {
   diffs: DiffState;
   gitStatus: GitStatusState;
   connection: ConnectionState;
-  comments: CommentsState;
+  messages: MessagesState;
+  agentSessionStatesByTaskId: Record<string, string>;
   hydrate: (state: Partial<AppState>) => void;
   setActiveWorkspace: (workspaceId: string | null) => void;
   setWorkspaces: (workspaces: WorkspaceState['items']) => void;
@@ -189,17 +190,18 @@ export type AppState = {
   setUserSettings: (settings: UserSettingsState) => void;
   setTerminalOutput: (terminalId: string, data: string) => void;
   setConnectionStatus: (status: ConnectionState['status'], error?: string | null) => void;
-  setComments: (
-    taskId: string,
-    comments: Comment[],
+  setMessages: (
+    sessionId: string | null,
+    messages: Message[],
     meta?: { hasMore?: boolean; oldestCursor?: string | null }
   ) => void;
-  setCommentsTaskId: (taskId: string | null) => void;
-  addComment: (comment: Comment) => void;
-  updateComment: (comment: Comment) => void;
-  prependComments: (comments: Comment[], meta?: { hasMore?: boolean; oldestCursor?: string | null }) => void;
-  setCommentsMetadata: (meta: { hasMore?: boolean; isLoading?: boolean; oldestCursor?: string | null }) => void;
-  setCommentsLoading: (loading: boolean) => void;
+  setMessagesSessionId: (sessionId: string | null) => void;
+  addMessage: (message: Message) => void;
+  updateMessage: (message: Message) => void;
+  prependMessages: (messages: Message[], meta?: { hasMore?: boolean; oldestCursor?: string | null }) => void;
+  setMessagesMetadata: (meta: { hasMore?: boolean; isLoading?: boolean; oldestCursor?: string | null }) => void;
+  setMessagesLoading: (loading: boolean) => void;
+  setAgentSessionState: (taskId: string, state: string) => void;
   setGitStatus: (taskId: string, gitStatus: Omit<GitStatusState, 'taskId'>) => void;
   clearGitStatus: () => void;
   bumpAgentProfilesVersion: () => void;
@@ -239,7 +241,8 @@ const defaultState: AppState = {
     timestamp: null,
   },
   connection: { status: 'disconnected', error: null },
-  comments: { taskId: null, items: [], isLoading: false, hasMore: false, oldestCursor: null },
+  messages: { sessionId: null, items: [], isLoading: false, hasMore: false, oldestCursor: null },
+  agentSessionStatesByTaskId: {},
   hydrate: () => undefined,
   setActiveWorkspace: () => undefined,
   setWorkspaces: () => undefined,
@@ -258,13 +261,14 @@ const defaultState: AppState = {
   setUserSettings: () => undefined,
   setTerminalOutput: () => undefined,
   setConnectionStatus: () => undefined,
-  setComments: () => undefined,
-  setCommentsTaskId: () => undefined,
-  addComment: () => undefined,
-  updateComment: () => undefined,
-  prependComments: () => undefined,
-  setCommentsMetadata: () => undefined,
-  setCommentsLoading: () => undefined,
+  setMessages: () => undefined,
+  setMessagesSessionId: () => undefined,
+  addMessage: () => undefined,
+  updateMessage: () => undefined,
+  prependMessages: () => undefined,
+  setMessagesMetadata: () => undefined,
+  setMessagesLoading: () => undefined,
+  setAgentSessionState: () => undefined,
   setGitStatus: () => undefined,
   clearGitStatus: () => undefined,
   bumpAgentProfilesVersion: () => undefined,
@@ -292,13 +296,14 @@ function mergeInitialState(
   | 'setUserSettings'
   | 'setTerminalOutput'
   | 'setConnectionStatus'
-  | 'setComments'
-  | 'setCommentsTaskId'
-  | 'addComment'
-  | 'updateComment'
-  | 'prependComments'
-  | 'setCommentsMetadata'
-  | 'setCommentsLoading'
+  | 'setMessages'
+  | 'setMessagesSessionId'
+  | 'addMessage'
+  | 'updateMessage'
+  | 'prependMessages'
+  | 'setMessagesMetadata'
+  | 'setMessagesLoading'
+  | 'setAgentSessionState'
   | 'setGitStatus'
   | 'clearGitStatus'
   | 'bumpAgentProfilesVersion'
@@ -323,7 +328,11 @@ function mergeInitialState(
     diffs: { ...defaultState.diffs, ...initialState.diffs },
     gitStatus: { ...defaultState.gitStatus, ...initialState.gitStatus },
     connection: { ...defaultState.connection, ...initialState.connection },
-    comments: { ...defaultState.comments, ...initialState.comments },
+    messages: { ...defaultState.messages, ...initialState.messages },
+    agentSessionStatesByTaskId: {
+      ...defaultState.agentSessionStatesByTaskId,
+      ...initialState.agentSessionStatesByTaskId,
+    },
   };
 }
 
@@ -352,7 +361,10 @@ export function createAppStore(initialState?: Partial<AppState>) {
           if (state.terminal) Object.assign(draft.terminal, state.terminal);
           if (state.diffs) Object.assign(draft.diffs, state.diffs);
           if (state.connection) Object.assign(draft.connection, state.connection);
-          if (state.comments) Object.assign(draft.comments, state.comments);
+          if (state.messages) Object.assign(draft.messages, state.messages);
+          if (state.agentSessionStatesByTaskId) {
+            Object.assign(draft.agentSessionStatesByTaskId, state.agentSessionStatesByTaskId);
+          }
         }),
       setActiveWorkspace: (workspaceId) =>
         set((draft) => {
@@ -444,94 +456,104 @@ export function createAppStore(initialState?: Partial<AppState>) {
           draft.connection.status = status;
           draft.connection.error = error;
         }),
-      setComments: (taskId, comments, meta) =>
+      setMessages: (sessionId, messages, meta) =>
         set((draft) => {
-          draft.comments.taskId = taskId;
-          draft.comments.items = comments;
-          draft.comments.isLoading = false;
-          draft.comments.hasMore = meta?.hasMore ?? false;
+          draft.messages.sessionId = sessionId;
+          draft.messages.items = messages;
+          draft.messages.isLoading = false;
+          draft.messages.hasMore = meta?.hasMore ?? false;
           if (meta?.oldestCursor !== undefined) {
-            draft.comments.oldestCursor = meta.oldestCursor;
-          } else if (comments.length) {
-            draft.comments.oldestCursor = comments[0].id;
+            draft.messages.oldestCursor = meta.oldestCursor;
+          } else if (messages.length) {
+            draft.messages.oldestCursor = messages[0].id;
           } else {
-            draft.comments.oldestCursor = null;
+            draft.messages.oldestCursor = null;
           }
         }),
-      setCommentsTaskId: (taskId) =>
+      setMessagesSessionId: (sessionId) =>
         set((draft) => {
-          draft.comments.taskId = taskId;
-          // Initialize items array if null to allow addComment to work
-          // before setComments is called
-          if (draft.comments.items === null) {
-            draft.comments.items = [];
+          draft.messages.sessionId = sessionId;
+          // Initialize items array if null to allow addMessage to work
+          // before setMessages is called
+          if (draft.messages.items === null) {
+            draft.messages.items = [];
           }
         }),
-      addComment: (comment) =>
+      addMessage: (message) =>
         set((draft) => {
           // Initialize items array if null
-          if (draft.comments.items === null) {
-            draft.comments.items = [];
+          if (draft.messages.items === null) {
+            draft.messages.items = [];
           }
-          // Only add if this comment is for the current task
-          if (draft.comments.taskId === comment.task_id) {
-            // Check if comment already exists (avoid duplicates)
-            const exists = draft.comments.items.some((c) => c.id === comment.id);
+          if (!draft.messages.sessionId) {
+            draft.messages.sessionId = message.agent_session_id;
+          }
+          // Only add if this message is for the current session
+          if (draft.messages.sessionId === message.agent_session_id) {
+            // Check if message already exists (avoid duplicates)
+            const exists = draft.messages.items.some((item) => item.id === message.id);
             if (!exists) {
-              draft.comments.items.push(comment);
-              if (!draft.comments.oldestCursor) {
-                draft.comments.oldestCursor = comment.id;
+              draft.messages.items.push(message);
+              if (!draft.messages.oldestCursor) {
+                draft.messages.oldestCursor = message.id;
               }
             }
           }
         }),
-      updateComment: (comment) =>
+      updateMessage: (message) =>
         set((draft) => {
-          // Only update if this comment is for the current task
-          if (draft.comments.taskId === comment.task_id && draft.comments.items) {
-            const index = draft.comments.items.findIndex((c) => c.id === comment.id);
+          if (!draft.messages.sessionId) {
+            draft.messages.sessionId = message.agent_session_id;
+          }
+          // Only update if this message is for the current session
+          if (draft.messages.sessionId === message.agent_session_id && draft.messages.items) {
+            const index = draft.messages.items.findIndex((item) => item.id === message.id);
             if (index !== -1) {
-              draft.comments.items[index] = comment;
+              draft.messages.items[index] = message;
             }
           }
         }),
-      prependComments: (comments, meta) =>
+      prependMessages: (messages, meta) =>
         set((draft) => {
-          if (draft.comments.items === null) {
-            draft.comments.items = [];
+          if (draft.messages.items === null) {
+            draft.messages.items = [];
           }
-          const existingIds = new Set(draft.comments.items.map((comment) => comment.id));
-          const incoming = comments.filter((comment) => !existingIds.has(comment.id));
+          const existingIds = new Set(draft.messages.items.map((item) => item.id));
+          const incoming = messages.filter((item) => !existingIds.has(item.id));
           if (incoming.length) {
-            draft.comments.items = [...incoming, ...draft.comments.items];
+            draft.messages.items = [...incoming, ...draft.messages.items];
           }
           if (meta?.hasMore !== undefined) {
-            draft.comments.hasMore = meta.hasMore;
+            draft.messages.hasMore = meta.hasMore;
           }
           if (meta?.oldestCursor !== undefined) {
-            draft.comments.oldestCursor = meta.oldestCursor;
-          } else if (draft.comments.items.length) {
-            draft.comments.oldestCursor = draft.comments.items[0].id;
+            draft.messages.oldestCursor = meta.oldestCursor;
+          } else if (draft.messages.items.length) {
+            draft.messages.oldestCursor = draft.messages.items[0].id;
           } else {
-            draft.comments.oldestCursor = null;
+            draft.messages.oldestCursor = null;
           }
-          draft.comments.isLoading = false;
+          draft.messages.isLoading = false;
         }),
-      setCommentsMetadata: (meta) =>
+      setMessagesMetadata: (meta) =>
         set((draft) => {
           if (meta.hasMore !== undefined) {
-            draft.comments.hasMore = meta.hasMore;
+            draft.messages.hasMore = meta.hasMore;
           }
           if (meta.isLoading !== undefined) {
-            draft.comments.isLoading = meta.isLoading;
+            draft.messages.isLoading = meta.isLoading;
           }
           if (meta.oldestCursor !== undefined) {
-            draft.comments.oldestCursor = meta.oldestCursor;
+            draft.messages.oldestCursor = meta.oldestCursor;
           }
         }),
-      setCommentsLoading: (loading) =>
+      setMessagesLoading: (loading) =>
         set((draft) => {
-          draft.comments.isLoading = loading;
+          draft.messages.isLoading = loading;
+        }),
+      setAgentSessionState: (taskId, state) =>
+        set((draft) => {
+          draft.agentSessionStatesByTaskId[taskId] = state;
         }),
       setGitStatus: (taskId, gitStatus) =>
         set((draft) => {

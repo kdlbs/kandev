@@ -15,11 +15,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/components/state-provider';
-import type { Comment } from '@/lib/types/http';
+import type { Message } from '@/lib/types/http';
 import { SHORTCUTS } from '@/lib/keyboard/constants';
 import { KeyboardShortcutTooltip } from '@/components/keyboard-shortcut-tooltip';
 import { TaskChatInput } from '@/components/task/task-chat-input';
-import { useLazyLoadComments } from '@/hooks/use-lazy-load-comments';
+import { useLazyLoadMessages } from '@/hooks/use-lazy-load-messages';
 import { MessageRenderer } from '@/components/task/chat/message-renderer';
 import { TypingIndicator } from '@/components/task/chat/messages/typing-indicator';
 import { TodoSummary } from '@/components/task/chat/todo-summary';
@@ -34,58 +34,70 @@ type TaskChatPanelProps = {
   onSend: (message: string) => void;
   isLoading?: boolean;
   isAgentWorking?: boolean;
+  taskId?: string;
   taskDescription?: string;
 };
 
-export function TaskChatPanel({ agents, onSend, isLoading, isAgentWorking, taskDescription }: TaskChatPanelProps) {
+export function TaskChatPanel({
+  agents,
+  onSend,
+  isLoading,
+  isAgentWorking,
+  taskId,
+  taskDescription,
+}: TaskChatPanelProps) {
   const [messageInput, setMessageInput] = useState('');
   const [selectedAgent, setSelectedAgent] = useState(agents[0]?.id ?? '');
   const [planModeEnabled, setPlanModeEnabled] = useState(false);
   const [isSending, setIsSending] = useState(false);
-  const [isAwaitingResponse, setIsAwaitingResponse] = useState(false);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const lastAgentMessageCountRef = useRef(0);
   const wasAtBottomRef = useRef(true);
 
-  const commentsState = useAppStore((state) => state.comments);
-  const comments = commentsState?.items ?? [];
-  const commentsLoading = commentsState?.isLoading ?? false;
-  const isInitialLoading = commentsLoading && comments.length === 0;
-  const { loadMore, hasMore, isLoading: isLoadingMore } = useLazyLoadComments(
-    commentsState?.taskId ?? null
+  const messagesState = useAppStore((state) => state.messages);
+  const messages = messagesState?.items ?? [];
+  const messagesLoading = messagesState?.isLoading ?? false;
+  const isInitialLoading = messagesLoading && messages.length === 0;
+  const showLoadingState = (isLoading || isInitialLoading) && !isAgentWorking;
+  const { loadMore, hasMore, isLoading: isLoadingMore } = useLazyLoadMessages(
+    messagesState?.sessionId ?? null
   );
 
   // Filter to only show chat-relevant types.
-  const visibleComments = comments.filter((comment) =>
-    !comment.type ||
-    comment.type === 'message' ||
-    comment.type === 'content' ||
-    comment.type === 'tool_call' ||
-    comment.type === 'progress' ||
-    comment.type === 'status' ||
-    comment.type === 'error' ||
-    comment.type === 'thinking' ||
-    comment.type === 'todo'
+  const visibleMessages = messages.filter((message) =>
+    !message.type ||
+    message.type === 'message' ||
+    message.type === 'content' ||
+    message.type === 'tool_call' ||
+    message.type === 'progress' ||
+    message.type === 'status' ||
+    message.type === 'error' ||
+    message.type === 'thinking' ||
+    message.type === 'todo'
   );
 
   // Create a synthetic "user" message for the task description
-  const taskDescriptionMessage: Comment | null = taskDescription ? {
-    id: 'task-description',
-    task_id: commentsState?.taskId ?? '',
-    author_type: 'user',
-    content: taskDescription,
-    type: 'message',
-    created_at: '',
-  } : null;
+  const taskDescriptionMessage: Message | null =
+    taskDescription && visibleMessages.length === 0
+      ? {
+          id: 'task-description',
+          task_id: taskId ?? '',
+          agent_session_id: messagesState?.sessionId ?? '',
+          author_type: 'user',
+          content: taskDescription,
+          type: 'message',
+          created_at: '',
+        }
+      : null;
 
-  // Combine task description with visible comments
+  // Combine task description with visible messages
   const allMessages = taskDescriptionMessage
-    ? [taskDescriptionMessage, ...visibleComments]
-    : visibleComments;
+    ? [taskDescriptionMessage, ...visibleMessages]
+    : visibleMessages;
 
-  const latestTodos = [...visibleComments]
+  const latestTodos = [...visibleMessages]
     .reverse()
-    .find((comment) => comment.type === 'todo' || (comment.metadata as { todos?: unknown })?.todos);
+    .find((message) => message.type === 'todo' || (message.metadata as { todos?: unknown })?.todos);
 
   const todoItems = (latestTodos?.metadata as { todos?: Array<{ text: string; done?: boolean } | string> } | undefined)
     ?.todos
@@ -93,20 +105,19 @@ export function TaskChatPanel({ agents, onSend, isLoading, isAgentWorking, taskD
     .filter((item) => item.text) ?? [];
 
   // Count agent messages to detect new responses
-  const agentMessageCount = visibleComments.filter((c) => c.author_type !== 'user').length;
+  const agentMessageCount = visibleMessages.filter((c) => c.author_type !== 'user').length;
 
   // Clear awaiting state when a new agent message arrives
   useEffect(() => {
-    if (agentMessageCount > lastAgentMessageCountRef.current) {
-      setIsAwaitingResponse(false);
-    }
     lastAgentMessageCountRef.current = agentMessageCount;
   }, [agentMessageCount]);
 
-  // Show typing indicator when awaiting response AND agent session is active
-  const showTypingIndicator = isAwaitingResponse && isAgentWorking;
+  const lastVisibleMessage = visibleMessages[visibleMessages.length - 1];
+  const lastMessageRequestsInput = Boolean(lastVisibleMessage?.requests_input);
+  const shouldShowTypingIndicator = Boolean(isAgentWorking) && !lastMessageRequestsInput;
+  const typingIndicatorLabel = visibleMessages.length === 0 ? 'Agent is starting...' : 'Agent is thinking...';
 
-  const itemCount = allMessages.length + (showTypingIndicator ? 1 : 0);
+  const itemCount = allMessages.length + (shouldShowTypingIndicator ? 1 : 0);
 
   const virtualizer = useVirtualizer({
     count: itemCount,
@@ -129,7 +140,7 @@ export function TaskChatPanel({ agents, onSend, isLoading, isAgentWorking, taskD
     return () => element.removeEventListener('scroll', checkAtBottom);
   }, [checkAtBottom]);
 
-  // Scroll to bottom when new comments arrive or when typing indicator appears
+  // Scroll to bottom when new messages arrive or when typing indicator appears
   useEffect(() => {
     if (itemCount === 0) return;
     if (wasAtBottomRef.current) {
@@ -189,13 +200,13 @@ export function TaskChatPanel({ agents, onSend, isLoading, isAgentWorking, taskD
             Loading older messages...
           </div>
         )}
-        {(isLoading || isInitialLoading) && (
+        {showLoadingState && (
           <div className="flex items-center justify-center py-8 text-muted-foreground">
             <IconLoader2 className="h-5 w-5 animate-spin mr-2" />
-            <span>Loading comments...</span>
+            <span>Loading messages...</span>
           </div>
         )}
-        {!isLoading && !isInitialLoading && allMessages.length === 0 && (
+        {!isLoading && !isInitialLoading && visibleMessages.length === 0 && !isAgentWorking && (
           <div className="flex items-center justify-center py-8 text-muted-foreground">
             <span>No messages yet. Start the conversation!</span>
           </div>
@@ -203,7 +214,7 @@ export function TaskChatPanel({ agents, onSend, isLoading, isAgentWorking, taskD
         {!isLoading && !isInitialLoading && itemCount > 0 && (
           <div className="relative w-full" style={{ height: `${virtualizer.getTotalSize()}px` }}>
             {virtualizer.getVirtualItems().map((virtualRow) => {
-              const isTypingRow = showTypingIndicator && virtualRow.index === allMessages.length;
+              const isTypingRow = shouldShowTypingIndicator && virtualRow.index === allMessages.length;
               const message = allMessages[virtualRow.index];
               return (
                 <div
@@ -213,16 +224,16 @@ export function TaskChatPanel({ agents, onSend, isLoading, isAgentWorking, taskD
                   className="absolute left-0 top-0 w-full"
                   style={{ transform: `translateY(${virtualRow.start}px)` }}
                 >
-                <div className="pb-3">
-                  {isTypingRow ? (
-                    <TypingIndicator />
-                  ) : (
-                    <MessageRenderer
-                      comment={message}
-                      isTaskDescription={message.id === 'task-description'}
-                    />
-                  )}
-                </div>
+                  <div className="pb-3">
+                    {isTypingRow ? (
+                      <TypingIndicator label={typingIndicatorLabel} />
+                    ) : (
+                      <MessageRenderer
+                        comment={message}
+                        isTaskDescription={message.id === 'task-description'}
+                      />
+                    )}
+                  </div>
                 </div>
               );
             })}

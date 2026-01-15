@@ -20,7 +20,6 @@ var (
 type QueuedTask struct {
 	TaskID         string
 	Priority       int       // Higher priority = processed first
-	AgentProfileID string
 	QueuedAt       time.Time
 	Task           *v1.Task // Full task data
 	index          int      // Index in the heap (used by container/heap)
@@ -95,15 +94,9 @@ func (q *TaskQueue) Enqueue(task *v1.Task) error {
 		return ErrQueueFull
 	}
 
-	agentProfileID := ""
-	if task.AgentProfileID != nil {
-		agentProfileID = *task.AgentProfileID
-	}
-
 	qt := &QueuedTask{
 		TaskID:         task.ID,
 		Priority:       task.Priority,
-		AgentProfileID: agentProfileID,
 		QueuedAt:       time.Now(),
 		Task:           task,
 	}
@@ -213,4 +206,3 @@ func (q *TaskQueue) Clear() {
 	q.taskMap = make(map[string]*QueuedTask)
 	heap.Init(&q.heap)
 }
-

@@ -18,6 +18,33 @@ const (
 	TaskStateCancelled       TaskState = "CANCELLED"
 )
 
+// AgentSessionState represents the state of an agent session.
+type AgentSessionState string
+
+const (
+	AgentSessionStateCreated         AgentSessionState = "CREATED"
+	AgentSessionStateStarting        AgentSessionState = "STARTING"
+	AgentSessionStateRunning         AgentSessionState = "RUNNING"
+	AgentSessionStateWaitingForInput AgentSessionState = "WAITING_FOR_INPUT"
+	AgentSessionStateCompleted       AgentSessionState = "COMPLETED"
+	AgentSessionStateFailed          AgentSessionState = "FAILED"
+	AgentSessionStateCancelled       AgentSessionState = "CANCELLED"
+)
+
+// MessageType represents a normalized session message type.
+type MessageType string
+
+const (
+	MessageTypeMessage  MessageType = "message"
+	MessageTypeContent  MessageType = "content"
+	MessageTypeToolCall MessageType = "tool_call"
+	MessageTypeProgress MessageType = "progress"
+	MessageTypeError    MessageType = "error"
+	MessageTypeStatus   MessageType = "status"
+	MessageTypeThinking MessageType = "thinking"
+	MessageTypeTodo     MessageType = "todo"
+)
+
 // Task represents a Kanban task
 type Task struct {
 	ID              string                 `json:"id"`
@@ -27,9 +54,8 @@ type Task struct {
 	Description     string                 `json:"description"`
 	State           TaskState              `json:"state"`
 	Priority        int                    `json:"priority"`
-	AgentProfileID  *string                `json:"agent_profile_id,omitempty"`
-	RepositoryURL   *string                `json:"repository_url,omitempty"`
-	Branch          *string                `json:"branch,omitempty"`
+	RepositoryID    *string                `json:"repository_id,omitempty"`
+	BaseBranch      *string                `json:"base_branch,omitempty"`
 	AssignedAgentID *string                `json:"assigned_agent_id,omitempty"`
 	CreatedBy       string                 `json:"created_by"`
 	CreatedAt       time.Time              `json:"created_at"`
@@ -41,24 +67,22 @@ type Task struct {
 
 // CreateTaskRequest for creating a new task
 type CreateTaskRequest struct {
-	Title         string                 `json:"title" binding:"required,max=500"`
-	Description   string                 `json:"description" binding:"required"`
-	Priority       int                    `json:"priority" binding:"min=0,max=10"`
-	AgentProfileID *string                `json:"agent_profile_id,omitempty"`
-	RepositoryURL *string                `json:"repository_url,omitempty"`
-	Branch        *string                `json:"branch,omitempty"`
-	Metadata      map[string]interface{} `json:"metadata,omitempty"`
+	Title        string                 `json:"title" binding:"required,max=500"`
+	Description  string                 `json:"description" binding:"required"`
+	Priority     int                    `json:"priority" binding:"min=0,max=10"`
+	RepositoryID *string                `json:"repository_id,omitempty"`
+	BaseBranch   *string                `json:"base_branch,omitempty"`
+	Metadata     map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // UpdateTaskRequest for updating an existing task
 type UpdateTaskRequest struct {
-	Title         *string                `json:"title,omitempty" binding:"omitempty,max=500"`
-	Description   *string                `json:"description,omitempty"`
-	Priority      *int                   `json:"priority,omitempty" binding:"omitempty,min=0,max=10"`
-	AgentType     *string                `json:"agent_type,omitempty"`
-	RepositoryURL *string                `json:"repository_url,omitempty"`
-	Branch        *string                `json:"branch,omitempty"`
-	Metadata      map[string]interface{} `json:"metadata,omitempty"`
+	Title        *string                `json:"title,omitempty" binding:"omitempty,max=500"`
+	Description  *string                `json:"description,omitempty"`
+	Priority     *int                   `json:"priority,omitempty" binding:"omitempty,min=0,max=10"`
+	RepositoryID *string                `json:"repository_id,omitempty"`
+	BaseBranch   *string                `json:"base_branch,omitempty"`
+	Metadata     map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // UpdateTaskStateRequest for changing task state
@@ -78,28 +102,28 @@ type TaskEvent struct {
 	CreatedAt time.Time              `json:"created_at"`
 }
 
-// Comment represents a comment on a task (user or agent)
-type Comment struct {
+// Message represents a message in an agent session (user or agent)
+type Message struct {
 	ID             string                 `json:"id"`
-	TaskID         string                 `json:"task_id"`
+	AgentSessionID string                 `json:"agent_session_id"`
+	TaskID         string                 `json:"task_id,omitempty"`
 	AuthorType     string                 `json:"author_type"` // "user" or "agent"
 	Type           string                 `json:"type,omitempty"`
 	AuthorID       string                 `json:"author_id,omitempty"`
 	Content        string                 `json:"content"`
 	RequestsInput  bool                   `json:"requests_input"` // True if agent is requesting user input
 	Metadata       map[string]interface{} `json:"metadata,omitempty"`
-	AgentSessionID string                 `json:"agent_session_id,omitempty"`
 	CreatedAt      time.Time              `json:"created_at"`
 }
 
-// CreateCommentRequest for adding a comment to a task
-type CreateCommentRequest struct {
-	TaskID        string                 `json:"task_id" binding:"required"`
-	Content       string                 `json:"content" binding:"required"`
-	AuthorType    string                 `json:"author_type,omitempty"` // Defaults to "user" if not specified
-	Type          string                 `json:"type,omitempty"`
-	RequestsInput bool                   `json:"requests_input,omitempty"`
-	Metadata      map[string]interface{} `json:"metadata,omitempty"`
+// CreateMessageRequest for adding a message to an agent session
+type CreateMessageRequest struct {
+	AgentSessionID string                 `json:"agent_session_id" binding:"required"`
+	Content        string                 `json:"content" binding:"required"`
+	AuthorType     string                 `json:"author_type,omitempty"` // Defaults to "user" if not specified
+	Type           string                 `json:"type,omitempty"`
+	RequestsInput  bool                   `json:"requests_input,omitempty"`
+	Metadata       map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // PermissionOption represents a permission choice presented to the user
@@ -111,20 +135,20 @@ type PermissionOption struct {
 
 // PermissionRequest represents an agent's request for user permission
 type PermissionRequest struct {
-	RequestID   string             `json:"request_id"`   // Unique ID for this request (JSON-RPC ID)
-	TaskID      string             `json:"task_id"`      // Task the agent is working on
-	InstanceID  string             `json:"instance_id"`  // Agent instance ID
-	SessionID   string             `json:"session_id"`   // ACP session ID
-	ToolCallID  string             `json:"tool_call_id"` // Tool call requesting permission
-	Title       string             `json:"title"`        // Human-readable title
+	RequestID   string             `json:"request_id"`            // Unique ID for this request (JSON-RPC ID)
+	TaskID      string             `json:"task_id"`               // Task the agent is working on
+	InstanceID  string             `json:"instance_id"`           // Agent instance ID
+	SessionID   string             `json:"session_id"`            // ACP session ID
+	ToolCallID  string             `json:"tool_call_id"`          // Tool call requesting permission
+	Title       string             `json:"title"`                 // Human-readable title
 	Description string             `json:"description,omitempty"` // Additional context
-	Options     []PermissionOption `json:"options"`      // Available choices
+	Options     []PermissionOption `json:"options"`               // Available choices
 	CreatedAt   time.Time          `json:"created_at"`
 }
 
 // PermissionResponse represents the user's response to a permission request
 type PermissionResponse struct {
-	RequestID  string `json:"request_id" binding:"required"` // The request being responded to
-	OptionID   string `json:"option_id,omitempty"`           // Selected option (if not cancelled)
-	Cancelled  bool   `json:"cancelled,omitempty"`           // True if user cancelled
+	RequestID string `json:"request_id" binding:"required"` // The request being responded to
+	OptionID  string `json:"option_id,omitempty"`           // Selected option (if not cancelled)
+	Cancelled bool   `json:"cancelled,omitempty"`           // True if user cancelled
 }

@@ -8,7 +8,7 @@ import type {
   ListExecutorsResponse,
   ListRepositoriesResponse,
   ListWorkspacesResponse,
-  ListCommentsResponse,
+  ListMessagesResponse,
   RepositoryBranchesResponse,
   Task,
   UserSettingsResponse,
@@ -92,11 +92,8 @@ export async function createTask(
     title: string;
     description?: string;
     position?: number;
-    repository_url?: string;
-    branch?: string;
-    agent_profile_id?: string;
-    environment_id?: string;
-    executor_id?: string;
+    repository_id?: string;
+    base_branch?: string;
     state?: Task['state'];
   },
   options?: ApiRequestOptions
@@ -113,9 +110,10 @@ export async function updateTask(
     title?: string;
     description?: string;
     position?: number;
-    agent_profile_id?: string;
     assigned_to?: string;
     state?: Task['state'];
+    repository_id?: string;
+    base_branch?: string;
   },
   options?: ApiRequestOptions
 ) {
@@ -161,8 +159,8 @@ export async function fetchTask(taskId: string, options?: ApiRequestOptions) {
   return fetchJson<Task>(`/api/v1/tasks/${taskId}`, options);
 }
 
-export async function listTaskComments(
-  taskId: string,
+export async function listAgentSessionMessages(
+  agentSessionId: string,
   params?: { limit?: number; before?: string; after?: string; sort?: 'asc' | 'desc' },
   options?: ApiRequestOptions
 ) {
@@ -172,8 +170,8 @@ export async function listTaskComments(
   if (params?.after) query.set('after', params.after);
   if (params?.sort) query.set('sort', params.sort);
   const suffix = query.toString();
-  const url = `/api/v1/tasks/${taskId}/comments${suffix ? `?${suffix}` : ''}`;
-  return fetchJson<ListCommentsResponse>(url, options);
+  const url = `/api/v1/agent-sessions/${agentSessionId}/messages${suffix ? `?${suffix}` : ''}`;
+  return fetchJson<ListMessagesResponse>(url, options);
 }
 
 export async function listExecutors(options?: ApiRequestOptions): Promise<ListExecutorsResponse> {

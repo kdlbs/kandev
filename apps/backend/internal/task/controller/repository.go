@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/service"
@@ -79,6 +80,9 @@ func (c *RepositoryController) UpdateRepository(ctx context.Context, req dto.Upd
 
 func (c *RepositoryController) DeleteRepository(ctx context.Context, req dto.DeleteRepositoryRequest) (dto.SuccessResponse, error) {
 	if err := c.service.DeleteRepository(ctx, req.ID); err != nil {
+		if errors.Is(err, service.ErrActiveAgentSessions) {
+			return dto.SuccessResponse{}, ErrActiveAgentSessions
+		}
 		return dto.SuccessResponse{}, err
 	}
 	return dto.SuccessResponse{Success: true}, nil

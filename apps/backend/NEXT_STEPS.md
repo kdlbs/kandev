@@ -23,7 +23,6 @@ The backend is a unified Go binary (`cmd/kandev/main.go`) that runs:
 
 3. **Session Resumption**
    - Sessions persist in `~/.augment/sessions/` (mounted into containers)
-   - Task metadata stores `auggie_session_id`
    - Follow-up agents can resume with `AUGGIE_SESSION_ID` env var
 
 4. **Real-time Streaming**

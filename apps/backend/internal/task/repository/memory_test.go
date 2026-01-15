@@ -348,25 +348,38 @@ func TestMemoryRepository_ListTasksByColumn(t *testing.T) {
 	}
 }
 
-// Comment CRUD tests
+// Message CRUD tests
 
-func TestMemoryRepository_CommentCRUD(t *testing.T) {
+func setupMemoryTestSession(ctx context.Context, repo *MemoryRepository, taskID string) string {
+	session := &models.AgentSession{
+		ID:             "session-123",
+		TaskID:         taskID,
+		AgentProfileID: "profile-123",
+		State:          models.AgentSessionStateStarting,
+	}
+	_ = repo.CreateAgentSession(ctx, session)
+	return session.ID
+}
+
+func TestMemoryRepository_MessageCRUD(t *testing.T) {
 	repo := NewMemoryRepository()
 	ctx := context.Background()
 
 	// Create a task first
 	task := &models.Task{ID: "task-123", BoardID: "board-123", ColumnID: "col-123", Title: "Test Task"}
 	_ = repo.CreateTask(ctx, task)
+	sessionID := setupMemoryTestSession(ctx, repo, task.ID)
 
 	// Create comment
-	comment := &models.Comment{
-		TaskID:        "task-123",
-		AuthorType:    models.CommentAuthorUser,
-		AuthorID:      "user-123",
-		Content:       "This is a test comment",
-		RequestsInput: false,
+	comment := &models.Message{
+		AgentSessionID: sessionID,
+		TaskID:         "task-123",
+		AuthorType:     models.MessageAuthorUser,
+		AuthorID:       "user-123",
+		Content:        "This is a test comment",
+		RequestsInput:  false,
 	}
-	if err := repo.CreateComment(ctx, comment); err != nil {
+	if err := repo.CreateMessage(ctx, comment); err != nil {
 		t.Fatalf("failed to create comment: %v", err)
 	}
 	if comment.ID == "" {
@@ -377,56 +390,57 @@ func TestMemoryRepository_CommentCRUD(t *testing.T) {
 	}
 
 	// Get comment
-	retrieved, err := repo.GetComment(ctx, comment.ID)
+	retrieved, err := repo.GetMessage(ctx, comment.ID)
 	if err != nil {
 		t.Fatalf("failed to get comment: %v", err)
 	}
 	if retrieved.Content != "This is a test comment" {
 		t.Errorf("expected content 'This is a test comment', got %s", retrieved.Content)
 	}
-	if retrieved.AuthorType != models.CommentAuthorUser {
+	if retrieved.AuthorType != models.MessageAuthorUser {
 		t.Errorf("expected author type 'user', got %s", retrieved.AuthorType)
 	}
 
 	// Delete comment
-	if err := repo.DeleteComment(ctx, comment.ID); err != nil {
+	if err := repo.DeleteMessage(ctx, comment.ID); err != nil {
 		t.Fatalf("failed to delete comment: %v", err)
 	}
-	_, err = repo.GetComment(ctx, comment.ID)
+	_, err = repo.GetMessage(ctx, comment.ID)
 	if err == nil {
 		t.Error("expected comment to be deleted")
 	}
 }
 
-func TestMemoryRepository_CommentNotFound(t *testing.T) {
+func TestMemoryRepository_MessageNotFound(t *testing.T) {
 	repo := NewMemoryRepository()
 	ctx := context.Background()
 
-	_, err := repo.GetComment(ctx, "nonexistent")
+	_, err := repo.GetMessage(ctx, "nonexistent")
 	if err == nil {
 		t.Error("expected error for nonexistent comment")
 	}
 
-	err = repo.DeleteComment(ctx, "nonexistent")
+	err = repo.DeleteMessage(ctx, "nonexistent")
 	if err == nil {
 		t.Error("expected error for deleting nonexistent comment")
 	}
 }
 
-func TestMemoryRepository_ListComments(t *testing.T) {
+func TestMemoryRepository_ListMessages(t *testing.T) {
 	repo := NewMemoryRepository()
 	ctx := context.Background()
 
 	// Create a task
 	task := &models.Task{ID: "task-123", BoardID: "board-123", ColumnID: "col-123", Title: "Test Task"}
 	_ = repo.CreateTask(ctx, task)
+	sessionID := setupMemoryTestSession(ctx, repo, task.ID)
 
 	// Create multiple comments
-	_ = repo.CreateComment(ctx, &models.Comment{ID: "comment-1", TaskID: "task-123", AuthorType: models.CommentAuthorUser, Content: "Comment 1"})
-	_ = repo.CreateComment(ctx, &models.Comment{ID: "comment-2", TaskID: "task-123", AuthorType: models.CommentAuthorAgent, Content: "Comment 2"})
-	_ = repo.CreateComment(ctx, &models.Comment{ID: "comment-3", TaskID: "task-456", AuthorType: models.CommentAuthorUser, Content: "Comment 3"})
+	_ = repo.CreateMessage(ctx, &models.Message{ID: "comment-1", AgentSessionID: sessionID, TaskID: "task-123", AuthorType: models.MessageAuthorUser, Content: "Comment 1"})
+	_ = repo.CreateMessage(ctx, &models.Message{ID: "comment-2", AgentSessionID: sessionID, TaskID: "task-123", AuthorType: models.MessageAuthorAgent, Content: "Comment 2"})
+	_ = repo.CreateMessage(ctx, &models.Message{ID: "comment-3", AgentSessionID: "session-456", TaskID: "task-456", AuthorType: models.MessageAuthorUser, Content: "Comment 3"})
 
-	comments, err := repo.ListComments(ctx, "task-123")
+	comments, err := repo.ListMessages(ctx, sessionID)
 	if err != nil {
 		t.Fatalf("failed to list comments: %v", err)
 	}
@@ -435,37 +449,41 @@ func TestMemoryRepository_ListComments(t *testing.T) {
 	}
 }
 
-func TestMemoryRepository_ListCommentsPagination(t *testing.T) {
+func TestMemoryRepository_ListMessagesPagination(t *testing.T) {
 	repo := NewMemoryRepository()
 	ctx := context.Background()
 
 	task := &models.Task{ID: "task-123", BoardID: "board-123", ColumnID: "col-123", Title: "Test Task"}
 	_ = repo.CreateTask(ctx, task)
+	sessionID := setupMemoryTestSession(ctx, repo, task.ID)
 
 	baseTime := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
-	_ = repo.CreateComment(ctx, &models.Comment{
-		ID:        "comment-1",
-		TaskID:    "task-123",
-		AuthorType: models.CommentAuthorUser,
-		Content:   "Comment 1",
-		CreatedAt: baseTime.Add(-2 * time.Minute),
+	_ = repo.CreateMessage(ctx, &models.Message{
+		ID:             "comment-1",
+		AgentSessionID: sessionID,
+		TaskID:         "task-123",
+		AuthorType:     models.MessageAuthorUser,
+		Content:        "Comment 1",
+		CreatedAt:      baseTime.Add(-2 * time.Minute),
 	})
-	_ = repo.CreateComment(ctx, &models.Comment{
-		ID:        "comment-2",
-		TaskID:    "task-123",
-		AuthorType: models.CommentAuthorUser,
-		Content:   "Comment 2",
-		CreatedAt: baseTime.Add(-1 * time.Minute),
+	_ = repo.CreateMessage(ctx, &models.Message{
+		ID:             "comment-2",
+		AgentSessionID: sessionID,
+		TaskID:         "task-123",
+		AuthorType:     models.MessageAuthorUser,
+		Content:        "Comment 2",
+		CreatedAt:      baseTime.Add(-1 * time.Minute),
 	})
-	_ = repo.CreateComment(ctx, &models.Comment{
-		ID:        "comment-3",
-		TaskID:    "task-123",
-		AuthorType: models.CommentAuthorUser,
-		Content:   "Comment 3",
-		CreatedAt: baseTime,
+	_ = repo.CreateMessage(ctx, &models.Message{
+		ID:             "comment-3",
+		AgentSessionID: sessionID,
+		TaskID:         "task-123",
+		AuthorType:     models.MessageAuthorUser,
+		Content:        "Comment 3",
+		CreatedAt:      baseTime,
 	})
 
-	comments, hasMore, err := repo.ListCommentsPaginated(ctx, "task-123", ListCommentsOptions{
+	comments, hasMore, err := repo.ListMessagesPaginated(ctx, sessionID, ListMessagesOptions{
 		Limit: 2,
 		Sort:  "desc",
 	})
@@ -483,32 +501,30 @@ func TestMemoryRepository_ListCommentsPagination(t *testing.T) {
 	}
 }
 
-func TestMemoryRepository_CommentWithRequestsInput(t *testing.T) {
+func TestMemoryRepository_MessageWithRequestsInput(t *testing.T) {
 	repo := NewMemoryRepository()
 	ctx := context.Background()
 
 	// Create a task
 	task := &models.Task{ID: "task-123", BoardID: "board-123", ColumnID: "col-123", Title: "Test Task"}
 	_ = repo.CreateTask(ctx, task)
+	sessionID := setupMemoryTestSession(ctx, repo, task.ID)
 
 	// Create agent comment requesting input
-	comment := &models.Comment{
-		TaskID:        "task-123",
-		AuthorType:    models.CommentAuthorAgent,
-		AuthorID:      "agent-123",
-		Content:       "What should I do next?",
-		RequestsInput: true,
-		ACPSessionID:  "session-abc",
+	comment := &models.Message{
+		AgentSessionID: sessionID,
+		TaskID:         "task-123",
+		AuthorType:     models.MessageAuthorAgent,
+		AuthorID:       "agent-123",
+		Content:        "What should I do next?",
+		RequestsInput:  true,
 	}
-	if err := repo.CreateComment(ctx, comment); err != nil {
+	if err := repo.CreateMessage(ctx, comment); err != nil {
 		t.Fatalf("failed to create comment: %v", err)
 	}
 
-	retrieved, _ := repo.GetComment(ctx, comment.ID)
+	retrieved, _ := repo.GetMessage(ctx, comment.ID)
 	if !retrieved.RequestsInput {
 		t.Error("expected RequestsInput to be true")
-	}
-	if retrieved.ACPSessionID != "session-abc" {
-		t.Errorf("expected ACPSessionID 'session-abc', got %s", retrieved.ACPSessionID)
 	}
 }

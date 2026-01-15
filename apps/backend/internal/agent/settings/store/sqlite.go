@@ -93,6 +93,7 @@ func (r *SQLiteRepository) initSchema() error {
 		plan TEXT DEFAULT '',
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL,
+		deleted_at DATETIME,
 		FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
 	);
 
@@ -101,7 +102,13 @@ func (r *SQLiteRepository) initSchema() error {
 	CREATE INDEX IF NOT EXISTS idx_agent_profiles_agent_id ON agent_profiles(agent_id);
 	`
 	_, err := r.db.Exec(schema)
-	return err
+	if err != nil {
+		return err
+	}
+	if err := ensureColumn(r.db, "agent_profiles", "deleted_at", "DATETIME"); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (r *SQLiteRepository) Close() error {
@@ -195,10 +202,10 @@ func (r *SQLiteRepository) CreateAgentProfile(ctx context.Context, profile *mode
 	profile.CreatedAt = now
 	profile.UpdatedAt = now
 	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO agent_profiles (id, agent_id, name, model, auto_approve, dangerously_skip_permissions, plan, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO agent_profiles (id, agent_id, name, model, auto_approve, dangerously_skip_permissions, plan, created_at, updated_at, deleted_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, profile.ID, profile.AgentID, profile.Name, profile.Model, boolToInt(profile.AutoApprove),
-		boolToInt(profile.DangerouslySkipPermissions), profile.Plan, profile.CreatedAt, profile.UpdatedAt)
+		boolToInt(profile.DangerouslySkipPermissions), profile.Plan, profile.CreatedAt, profile.UpdatedAt, profile.DeletedAt)
 	return err
 }
 
@@ -207,7 +214,7 @@ func (r *SQLiteRepository) UpdateAgentProfile(ctx context.Context, profile *mode
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE agent_profiles
 		SET name = ?, model = ?, auto_approve = ?, dangerously_skip_permissions = ?, plan = ?, updated_at = ?
-		WHERE id = ?
+		WHERE id = ? AND deleted_at IS NULL
 	`, profile.Name, profile.Model, boolToInt(profile.AutoApprove),
 		boolToInt(profile.DangerouslySkipPermissions), profile.Plan, profile.UpdatedAt, profile.ID)
 	if err != nil {
@@ -221,7 +228,10 @@ func (r *SQLiteRepository) UpdateAgentProfile(ctx context.Context, profile *mode
 }
 
 func (r *SQLiteRepository) DeleteAgentProfile(ctx context.Context, id string) error {
-	result, err := r.db.ExecContext(ctx, `DELETE FROM agent_profiles WHERE id = ?`, id)
+	now := time.Now().UTC()
+	result, err := r.db.ExecContext(ctx, `
+		UPDATE agent_profiles SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL
+	`, now, now, id)
 	if err != nil {
 		return err
 	}
@@ -234,16 +244,16 @@ func (r *SQLiteRepository) DeleteAgentProfile(ctx context.Context, id string) er
 
 func (r *SQLiteRepository) GetAgentProfile(ctx context.Context, id string) (*models.AgentProfile, error) {
 	row := r.db.QueryRowContext(ctx, `
-		SELECT id, agent_id, name, model, auto_approve, dangerously_skip_permissions, plan, created_at, updated_at
-		FROM agent_profiles WHERE id = ?
+		SELECT id, agent_id, name, model, auto_approve, dangerously_skip_permissions, plan, created_at, updated_at, deleted_at
+		FROM agent_profiles WHERE id = ? AND deleted_at IS NULL
 	`, id)
 	return scanAgentProfile(row)
 }
 
 func (r *SQLiteRepository) ListAgentProfiles(ctx context.Context, agentID string) ([]*models.AgentProfile, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, agent_id, name, model, auto_approve, dangerously_skip_permissions, plan, created_at, updated_at
-		FROM agent_profiles WHERE agent_id = ? ORDER BY created_at DESC
+		SELECT id, agent_id, name, model, auto_approve, dangerously_skip_permissions, plan, created_at, updated_at, deleted_at
+		FROM agent_profiles WHERE agent_id = ? AND deleted_at IS NULL ORDER BY created_at DESC
 	`, agentID)
 	if err != nil {
 		return nil, err
@@ -301,12 +311,47 @@ func scanAgentProfile(scanner interface {
 		&profile.Plan,
 		&profile.CreatedAt,
 		&profile.UpdatedAt,
+		&profile.DeletedAt,
 	); err != nil {
 		return nil, err
 	}
 	profile.AutoApprove = autoApprove == 1
 	profile.DangerouslySkipPermissions = skipPermissions == 1
 	return profile, nil
+}
+
+func ensureColumn(db *sql.DB, table, column, definition string) error {
+	exists, err := columnExists(db, table, column)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+	query := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, definition)
+	_, err = db.Exec(query)
+	return err
+}
+
+func columnExists(db *sql.DB, table, column string) (bool, error) {
+	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return false, err
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
 }
 
 func boolToInt(value bool) int {

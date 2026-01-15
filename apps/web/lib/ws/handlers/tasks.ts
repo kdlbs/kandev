@@ -17,7 +17,7 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
           description: message.payload.description,
           position: message.payload.position ?? 0,
           state: message.payload.state,
-          repositoryUrl: message.payload.repository_url,
+          repositoryId: message.payload.repository_id,
         };
         return {
           ...state,
@@ -42,7 +42,7 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
           description: message.payload.description,
           position: message.payload.position ?? 0,
           state: message.payload.state,
-          repositoryUrl: message.payload.repository_url,
+          repositoryId: message.payload.repository_id,
         };
         return {
           ...state,
@@ -86,7 +86,7 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
           description: message.payload.description,
           position: message.payload.position ?? 0,
           state: message.payload.state,
-          repositoryUrl: message.payload.repository_url,
+          repositoryId: message.payload.repository_id,
         };
         console.log('[WS Router] Next task:', nextTask);
         return {

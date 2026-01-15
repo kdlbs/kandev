@@ -18,9 +18,9 @@ export function registerGitStatusHandlers(store: StoreApi<AppState>): WsHandlers
 
       // Only update git status if it's for the current task
       // This prevents stale data from showing when switching tasks
-      if (state.comments.taskId !== payload.task_id) {
+      if (state.tasks.activeTaskId !== payload.task_id) {
         console.log('[WS] Ignoring git.status for different task:', {
-          current_task: state.comments.taskId,
+          current_task: state.tasks.activeTaskId,
           received_task: payload.task_id,
         });
         return;

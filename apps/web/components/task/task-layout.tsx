@@ -13,7 +13,7 @@ const DEFAULT_HORIZONTAL_LAYOUT: [number, number] = [75, 25];
 type TaskLayoutProps = {
   taskId: string | null;
   taskDescription?: string;
-  isLoadingComments: boolean;
+  isLoadingMessages: boolean;
   isAgentWorking: boolean;
   onSendMessage: (content: string) => Promise<void>;
 };
@@ -21,7 +21,7 @@ type TaskLayoutProps = {
 export const TaskLayout = memo(function TaskLayout({
   taskId,
   taskDescription,
-  isLoadingComments,
+  isLoadingMessages,
   isAgentWorking,
   onSendMessage,
 }: TaskLayoutProps) {
@@ -61,7 +61,7 @@ export const TaskLayout = memo(function TaskLayout({
           <TaskLeftPanel
             taskId={taskId}
             taskDescription={taskDescription}
-            isLoadingComments={isLoadingComments}
+            isLoadingMessages={isLoadingMessages}
             isAgentWorking={isAgentWorking}
             onSendMessage={onSendMessage}
             selectedDiffPath={selectedDiffPath}
@@ -78,4 +78,3 @@ export const TaskLayout = memo(function TaskLayout({
     </div>
   );
 });
-

@@ -43,6 +43,7 @@ import { useSettingsData } from '@/hooks/use-settings-data';
 import { SHORTCUTS } from '@/lib/keyboard/constants';
 import { useKeyboardShortcutHandler } from '@/hooks/use-keyboard-shortcut';
 import { KeyboardShortcutTooltip } from '@/components/keyboard-shortcut-tooltip';
+import { getWebSocketClient } from '@/lib/ws/connection';
 
 interface TaskCreateDialogProps {
   open: boolean;
@@ -90,7 +91,7 @@ export function TaskCreateDialog({
   const [description, setDescription] = useState(initialValues?.description ?? '');
   const [repositoryId, setRepositoryId] = useState(initialValues?.repositoryId ?? '');
   const [branch, setBranch] = useState(initialValues?.branch ?? '');
-  const [startAgent, setStartAgent] = useState(false);
+  const [startAgent, setStartAgent] = useState(!isEditMode);
   const [agentProfileId, setAgentProfileId] = useState('');
   const [environmentId, setEnvironmentId] = useState('');
   const [executorId, setExecutorId] = useState('');
@@ -117,11 +118,12 @@ export function TaskCreateDialog({
     setDescription(initialValues?.description ?? '');
     setRepositoryId(initialValues?.repositoryId ?? '');
     setBranch(initialValues?.branch ?? '');
-    setStartAgent(false);
+    setStartAgent(!isEditMode);
     setAgentProfileId('');
     setEnvironmentId('');
     setExecutorId('');
   }, [
+    isEditMode,
     initialValues?.branch,
     initialValues?.description,
     initialValues?.repositoryId,
@@ -152,6 +154,7 @@ export function TaskCreateDialog({
 
   useEffect(() => {
     if (!open || agentProfileId || agentProfiles.length === 0) return;
+    if (!isSessionMode && !startAgent) return;
     if (isEditMode && agentProfiles.length > 1) return;
     const defaultProfileId = workspaceDefaults?.default_agent_profile_id ?? null;
     if (defaultProfileId && agentProfiles.some((profile) => profile.id === defaultProfileId)) {
@@ -159,10 +162,11 @@ export function TaskCreateDialog({
       return;
     }
     setAgentProfileId(agentProfiles[0].id);
-  }, [open, isEditMode, agentProfileId, agentProfiles, workspaceDefaults]);
+  }, [open, isEditMode, agentProfileId, agentProfiles, workspaceDefaults, isSessionMode, startAgent]);
 
   useEffect(() => {
     if (!open || isEditMode || environmentId || environments.length === 0) return;
+    if (!isSessionMode && !startAgent) return;
     const defaultEnvironmentId = workspaceDefaults?.default_environment_id ?? null;
     if (
       defaultEnvironmentId &&
@@ -175,10 +179,11 @@ export function TaskCreateDialog({
       (environment) => environment.kind === DEFAULT_LOCAL_ENVIRONMENT_KIND
     );
     setEnvironmentId(localEnvironment?.id ?? environments[0].id);
-  }, [open, isEditMode, environmentId, environments, workspaceDefaults]);
+  }, [open, isEditMode, environmentId, environments, workspaceDefaults, isSessionMode, startAgent]);
 
   useEffect(() => {
     if (!open || isEditMode || executorId || executors.length === 0) return;
+    if (!isSessionMode && !startAgent) return;
     const defaultExecutorId = workspaceDefaults?.default_executor_id ?? null;
     if (defaultExecutorId && executors.some((executor) => executor.id === defaultExecutorId)) {
       setExecutorId(defaultExecutorId);
@@ -188,7 +193,7 @@ export function TaskCreateDialog({
       (executor) => executor.type === DEFAULT_LOCAL_EXECUTOR_TYPE
     );
     setExecutorId(localExecutor?.id ?? executors[0].id);
-  }, [open, isEditMode, executorId, executors, workspaceDefaults]);
+  }, [open, isEditMode, executorId, executors, workspaceDefaults, isSessionMode, startAgent]);
 
   useEffect(() => {
     const textarea = descriptionRef.current;
@@ -261,7 +266,6 @@ export function TaskCreateDialog({
       targetColumnId = progressColumn?.id ?? columnId;
       targetState = 'IN_PROGRESS';
     }
-    const repository = repositories.find((repo) => repo.id === repositoryId);
     try {
       const task = await createTask({
         workspace_id: workspaceId,
@@ -269,23 +273,43 @@ export function TaskCreateDialog({
         column_id: targetColumnId,
         title: trimmedTitle,
         description: description.trim(),
-        repository_url: repository?.local_path ?? '',
-        branch: branch || '',
-        agent_profile_id: agentProfileId || undefined,
-        environment_id: environmentId || undefined,
-        executor_id: executorId || undefined,
+        repository_id: repositoryId,
+        base_branch: branch || undefined,
         state: targetState,
       });
+      console.log('[TaskCreateDialog] task created', {
+        taskId: task.id,
+        startAgent,
+        agentProfileId,
+      });
+      if (startAgent && agentProfileId) {
+        const client = getWebSocketClient();
+        if (client) {
+          try {
+            console.log('[TaskCreateDialog] orchestrator.start request', {
+              taskId: task.id,
+              agentProfileId,
+            });
+            await client.request(
+              'orchestrator.start',
+              { task_id: task.id, agent_profile_id: agentProfileId },
+              15000
+            );
+          } catch (error) {
+            console.error('Failed to start agent for new task:', error);
+          }
+        }
+      }
       onSuccess?.(task, 'create');
     } finally {
       setTitle('');
       setDescription('');
       setRepositoryId('');
       setBranch('');
-      setStartAgent(false);
-      setAgentProfileId('');
-      setEnvironmentId('');
-      setExecutorId('');
+        setStartAgent(!isEditMode);
+        setAgentProfileId('');
+        setEnvironmentId('');
+        setExecutorId('');
       onOpenChange(false);
     }
   };
@@ -295,7 +319,7 @@ export function TaskCreateDialog({
     setDescription('');
     setRepositoryId('');
     setBranch('');
-    setStartAgent(false);
+    setStartAgent(!isEditMode);
     setAgentProfileId('');
     setEnvironmentId('');
     setExecutorId('');
@@ -431,36 +455,38 @@ export function TaskCreateDialog({
                   className={isEditMode || !repositoryId || branchesLoading ? undefined : 'cursor-pointer'}
                 />
               </div>
-              <div>
-                {agentProfiles.length === 0 && !agentProfilesLoading ? (
-                  <div className="flex h-7 items-center justify-center gap-2 rounded-sm border border-input px-3 text-xs text-muted-foreground">
-                    <span>No agents found.</span>
-                    <Link href="/settings/agents" className="text-primary hover:underline">
-                      Add agent
-                    </Link>
-                  </div>
-                ) : (
-                  <Combobox
-                    options={agentProfiles.map((profile) => ({
-                      value: profile.id,
-                      label: profile.label,
-                    }))}
-                    value={agentProfileId}
-                    onValueChange={setAgentProfileId}
-                    placeholder={
-                      agentProfilesLoading
-                        ? 'Loading agents...'
-                        : agentProfiles.length === 0
-                          ? 'No agents available'
-                          : 'Select agent'
-                    }
-                    searchPlaceholder="Search agents..."
-                    emptyMessage="No agent found."
-                    dropdownLabel="Agent profile"
-                    className={agentProfilesLoading ? undefined : 'cursor-pointer'}
-                  />
-                )}
-              </div>
+              {startAgent && (
+                <div>
+                  {agentProfiles.length === 0 && !agentProfilesLoading ? (
+                    <div className="flex h-7 items-center justify-center gap-2 rounded-sm border border-input px-3 text-xs text-muted-foreground">
+                      <span>No agents found.</span>
+                      <Link href="/settings/agents" className="text-primary hover:underline">
+                        Add agent
+                      </Link>
+                    </div>
+                  ) : (
+                    <Combobox
+                      options={agentProfiles.map((profile) => ({
+                        value: profile.id,
+                        label: profile.label,
+                      }))}
+                      value={agentProfileId}
+                      onValueChange={setAgentProfileId}
+                      placeholder={
+                        agentProfilesLoading
+                          ? 'Loading agents...'
+                          : agentProfiles.length === 0
+                            ? 'No agents available'
+                            : 'Select agent'
+                      }
+                      searchPlaceholder="Search agents..."
+                      emptyMessage="No agent found."
+                      dropdownLabel="Agent profile"
+                      className={agentProfilesLoading ? undefined : 'cursor-pointer'}
+                    />
+                  )}
+                </div>
+              )}
             </div>
             )}
 
@@ -497,7 +523,7 @@ export function TaskCreateDialog({
               </div>
             )}
 
-            {!isSessionMode && (
+            {!isSessionMode && startAgent && (
               <div className="flex items-center justify-end gap-2">
                 <Button
                   type="button"
@@ -555,7 +581,7 @@ export function TaskCreateDialog({
                 </div>
               </div>
             )}
-            {showAdvancedSettings && !isSessionMode && (
+            {showAdvancedSettings && !isSessionMode && startAgent && (
               <div className="grid gap-4 md:grid-cols-2">
                 <div>
                   <Select value={environmentId} onValueChange={setEnvironmentId} disabled={isEditMode}>
@@ -651,7 +677,9 @@ export function TaskCreateDialog({
                 disabled={
                   isSessionMode
                     ? !description.trim() || !agentProfileId
-                    : !title.trim() || (!isEditMode && !repositoryId)
+                    : !title.trim() ||
+                      (!isEditMode && !repositoryId) ||
+                      (startAgent && !agentProfileId)
                 }
               >
                 {isSessionMode ? 'Create Session' : submitLabel}

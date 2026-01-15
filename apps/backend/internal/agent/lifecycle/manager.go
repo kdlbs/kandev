@@ -654,23 +654,6 @@ func (m *Manager) buildStandaloneEnv(instanceID string, req *LaunchRequest, agen
 		}
 	}
 
-	// Check for ACP session resumption
-	// Only pass session ID if the session file exists locally
-	// Docker sessions won't exist on standalone hosts and vice versa
-	if req.Metadata != nil {
-		if sessionID, ok := req.Metadata["auggie_session_id"].(string); ok && sessionID != "" {
-			// Check if session file exists
-			homeDir, _ := os.UserHomeDir()
-			sessionPath := filepath.Join(homeDir, ".augment", "sessions", sessionID+".json")
-			if _, err := os.Stat(sessionPath); err == nil {
-				env["AUGGIE_SESSION_ID"] = sessionID
-			} else {
-				// Session file doesn't exist - don't pass the ID
-				// This happens when switching between Docker and standalone modes
-			}
-		}
-	}
-
 	return env
 }
 
@@ -804,19 +787,6 @@ func (m *Manager) initializeACPSession(ctx context.Context, instance *AgentInsta
 	m.logger.Info("ACP session created",
 		zap.String("instance_id", instance.ID),
 		zap.String("session_id", sessionID))
-
-	// Store session ID in instance
-	m.mu.Lock()
-	if inst, exists := m.instances[instance.ID]; exists {
-		if inst.Metadata == nil {
-			inst.Metadata = make(map[string]interface{})
-		}
-		inst.Metadata["acp_session_id"] = sessionID
-	}
-	m.mu.Unlock()
-
-	// Publish session_info event so the orchestrator can store it in task metadata
-	m.publishSessionInfo(instance, sessionID)
 
 	// 3. Set up updates stream to receive session notifications
 	// Use a ready channel to signal when the stream is connected
@@ -1207,41 +1177,6 @@ func (m *Manager) publishSessionUpdate(instance *AgentInstance, update agentctl.
 	}
 }
 
-// publishSessionInfo publishes a session_info event with the session ID
-// This allows the orchestrator to store the session ID in task metadata for resumption
-func (m *Manager) publishSessionInfo(instance *AgentInstance, sessionID string) {
-	if m.eventBus == nil {
-		return
-	}
-
-	// Structure must match protocol.Message so it can be parsed correctly
-	// The session_id goes in the "data" field, not at the top level
-	data := map[string]interface{}{
-		"type":      "session_info",
-		"timestamp": time.Now().UTC().Format(time.RFC3339Nano),
-		"agent_id":  instance.ID,
-		"task_id":   instance.TaskID,
-		"data": map[string]interface{}{
-			"session_id": sessionID,
-		},
-	}
-
-	event := bus.NewEvent(events.ACPMessage, "agent-manager", data)
-	subject := events.BuildACPSubject(instance.TaskID)
-
-	if err := m.eventBus.Publish(context.Background(), subject, event); err != nil {
-		m.logger.Error("failed to publish session_info event",
-			zap.String("instance_id", instance.ID),
-			zap.String("task_id", instance.TaskID),
-			zap.String("session_id", sessionID),
-			zap.Error(err))
-	} else {
-		m.logger.Info("published session_info event",
-			zap.String("task_id", instance.TaskID),
-			zap.String("session_id", sessionID))
-	}
-}
-
 // handleGitStatusUpdate processes git status updates from the workspace tracker
 func (m *Manager) handleGitStatusUpdate(instance *AgentInstance, update *agentctl.GitStatusUpdate) {
 	// Store git status in instance metadata
@@ -1579,13 +1514,6 @@ func (m *Manager) buildContainerConfig(instanceID string, req *LaunchRequest, ag
 		"GIT_CONFIG_KEY_0=safe.directory",
 		"GIT_CONFIG_VALUE_0=*", // Trust all directories in the container
 	)
-
-	// Extract auggie_session_id from metadata for session resumption
-	if req.Metadata != nil {
-		if sessionID, ok := req.Metadata["auggie_session_id"].(string); ok && sessionID != "" {
-			env = append(env, fmt.Sprintf("AUGGIE_SESSION_ID=%s", sessionID))
-		}
-	}
 
 	// Inject required credentials from credentials manager
 	if m.credsMgr != nil && len(agentConfig.RequiredEnv) > 0 {

@@ -2,18 +2,19 @@ import type { StoreApi } from 'zustand';
 import type { AppState } from '@/lib/state/store';
 import type { WsHandlers } from '@/lib/ws/handlers/types';
 
-export function registerCommentsHandlers(store: StoreApi<AppState>): WsHandlers {
+export function registerMessagesHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
-    'comment.added': (message) => {
+    'message.added': (message) => {
       const payload = message.payload;
-      console.log('[WS] comment.added payload:', JSON.stringify(payload, null, 2));
+      console.log('[WS] message.added payload:', JSON.stringify(payload, null, 2));
       const state = store.getState();
       console.log('[WS] store state:', {
-        hasAddComment: typeof state.addComment,
-        commentsTaskId: state.comments?.taskId,
+        hasAddMessage: typeof state.addMessage,
+        messagesSessionId: state.messages?.sessionId,
       });
-      state.addComment({
-        id: payload.comment_id,
+      state.addMessage({
+        id: payload.message_id,
+        agent_session_id: payload.agent_session_id,
         task_id: payload.task_id,
         author_type: payload.author_type,
         author_id: payload.author_id,
@@ -23,14 +24,15 @@ export function registerCommentsHandlers(store: StoreApi<AppState>): WsHandlers 
         requests_input: payload.requests_input,
         created_at: payload.created_at,
       });
-      console.log('[WS] addComment called');
+      console.log('[WS] addMessage called');
     },
-    'comment.updated': (message) => {
+    'message.updated': (message) => {
       const payload = message.payload;
-      console.log('[WS] comment.updated payload:', JSON.stringify(payload, null, 2));
+      console.log('[WS] message.updated payload:', JSON.stringify(payload, null, 2));
       const state = store.getState();
-      state.updateComment({
-        id: payload.comment_id,
+      state.updateMessage({
+        id: payload.message_id,
+        agent_session_id: payload.agent_session_id,
         task_id: payload.task_id,
         author_type: payload.author_type,
         author_id: payload.author_id,
@@ -40,7 +42,7 @@ export function registerCommentsHandlers(store: StoreApi<AppState>): WsHandlers 
         requests_input: payload.requests_input,
         created_at: payload.created_at,
       });
-      console.log('[WS] updateComment called');
+      console.log('[WS] updateMessage called');
     },
   };
 }

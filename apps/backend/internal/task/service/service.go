@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -23,13 +24,21 @@ type WorktreeCleanup interface {
 	OnTaskDeleted(ctx context.Context, taskID string) error
 }
 
+// TaskExecutionStopper stops active task execution (agent session + instance).
+type TaskExecutionStopper interface {
+	StopTask(ctx context.Context, taskID, reason string, force bool) error
+}
+
+var ErrActiveAgentSessions = errors.New("active agent sessions exist")
+
 // Service provides task business logic
 type Service struct {
-	repo            repository.Repository
-	eventBus        bus.EventBus
-	logger          *logger.Logger
-	discoveryConfig RepositoryDiscoveryConfig
-	worktreeCleanup WorktreeCleanup
+	repo             repository.Repository
+	eventBus         bus.EventBus
+	logger           *logger.Logger
+	discoveryConfig  RepositoryDiscoveryConfig
+	worktreeCleanup  WorktreeCleanup
+	executionStopper TaskExecutionStopper
 }
 
 // NewService creates a new task service
@@ -47,35 +56,40 @@ func (s *Service) SetWorktreeCleanup(cleanup WorktreeCleanup) {
 	s.worktreeCleanup = cleanup
 }
 
+// SetExecutionStopper wires the task execution stopper (orchestrator).
+func (s *Service) SetExecutionStopper(stopper TaskExecutionStopper) {
+	s.executionStopper = stopper
+}
+
 // Request types
 
 // CreateTaskRequest contains the data for creating a new task
 type CreateTaskRequest struct {
-	WorkspaceID   string                 `json:"workspace_id"`
-	BoardID       string                 `json:"board_id"`
-	ColumnID      string                 `json:"column_id"`
-	Title         string                 `json:"title"`
-	Description   string                 `json:"description"`
-	Priority      int                    `json:"priority"`
-	State         *v1.TaskState          `json:"state,omitempty"`
-	AgentProfileID string                 `json:"agent_profile_id,omitempty"`
-	RepositoryURL string                 `json:"repository_url,omitempty"`
-	Branch        string                 `json:"branch,omitempty"`
-	AssignedTo    string                 `json:"assigned_to,omitempty"`
-	Position      int                    `json:"position"`
-	Metadata      map[string]interface{} `json:"metadata,omitempty"`
+	WorkspaceID  string                 `json:"workspace_id"`
+	BoardID      string                 `json:"board_id"`
+	ColumnID     string                 `json:"column_id"`
+	Title        string                 `json:"title"`
+	Description  string                 `json:"description"`
+	Priority     int                    `json:"priority"`
+	State        *v1.TaskState          `json:"state,omitempty"`
+	RepositoryID string                 `json:"repository_id,omitempty"`
+	BaseBranch   string                 `json:"base_branch,omitempty"`
+	AssignedTo   string                 `json:"assigned_to,omitempty"`
+	Position     int                    `json:"position"`
+	Metadata     map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // UpdateTaskRequest contains the data for updating a task
 type UpdateTaskRequest struct {
-	Title       *string                `json:"title,omitempty"`
-	Description *string                `json:"description,omitempty"`
-	Priority    *int                   `json:"priority,omitempty"`
-	State       *v1.TaskState          `json:"state,omitempty"`
-	AgentProfileID *string                `json:"agent_profile_id,omitempty"`
-	AssignedTo  *string                `json:"assigned_to,omitempty"`
-	Position    *int                   `json:"position,omitempty"`
-	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+	Title        *string                `json:"title,omitempty"`
+	Description  *string                `json:"description,omitempty"`
+	Priority     *int                   `json:"priority,omitempty"`
+	State        *v1.TaskState          `json:"state,omitempty"`
+	RepositoryID *string                `json:"repository_id,omitempty"`
+	BaseBranch   *string                `json:"base_branch,omitempty"`
+	AssignedTo   *string                `json:"assigned_to,omitempty"`
+	Position     *int                   `json:"position,omitempty"`
+	Metadata     map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // CreateBoardRequest contains the data for creating a new board
@@ -193,12 +207,12 @@ type UpdateEnvironmentRequest struct {
 	BuildConfig  map[string]string       `json:"build_config,omitempty"`
 }
 
-type ListCommentsRequest struct {
-	TaskID string
-	Limit  int
-	Before string
-	After  string
-	Sort   string
+type ListMessagesRequest struct {
+	AgentSessionID string
+	Limit          int
+	Before         string
+	After          string
+	Sort           string
 }
 
 // CreateRepositoryScriptRequest contains the data for creating a repository script
@@ -220,28 +234,27 @@ type UpdateRepositoryScriptRequest struct {
 
 // CreateTask creates a new task and publishes a task.created event
 func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*models.Task, error) {
-	if strings.TrimSpace(req.RepositoryURL) == "" {
-		return nil, fmt.Errorf("repository_url is required")
+	if strings.TrimSpace(req.RepositoryID) == "" {
+		return nil, fmt.Errorf("repository_id is required")
 	}
 	state := v1.TaskStateCreated
 	if req.State != nil {
 		state = *req.State
 	}
 	task := &models.Task{
-		ID:            uuid.New().String(),
-		WorkspaceID:   req.WorkspaceID,
-		BoardID:       req.BoardID,
-		ColumnID:      req.ColumnID,
-		Title:         req.Title,
-		Description:   req.Description,
-		State:         state,
-		Priority:      req.Priority,
-		AgentProfileID: req.AgentProfileID,
-		RepositoryURL: req.RepositoryURL,
-		Branch:        req.Branch,
-		AssignedTo:    req.AssignedTo,
-		Position:      req.Position,
-		Metadata:      req.Metadata,
+		ID:           uuid.New().String(),
+		WorkspaceID:  req.WorkspaceID,
+		BoardID:      req.BoardID,
+		ColumnID:     req.ColumnID,
+		Title:        req.Title,
+		Description:  req.Description,
+		State:        state,
+		Priority:     req.Priority,
+		RepositoryID: req.RepositoryID,
+		BaseBranch:   req.BaseBranch,
+		AssignedTo:   req.AssignedTo,
+		Position:     req.Position,
+		Metadata:     req.Metadata,
 	}
 
 	if err := s.repo.CreateTask(ctx, task); err != nil {
@@ -284,8 +297,11 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 		task.State = *req.State
 		stateChanged = true
 	}
-	if req.AgentProfileID != nil {
-		task.AgentProfileID = *req.AgentProfileID
+	if req.RepositoryID != nil {
+		task.RepositoryID = *req.RepositoryID
+	}
+	if req.BaseBranch != nil {
+		task.BaseBranch = *req.BaseBranch
 	}
 	if req.AssignedTo != nil {
 		task.AssignedTo = *req.AssignedTo
@@ -317,6 +333,14 @@ func (s *Service) DeleteTask(ctx context.Context, id string) error {
 	task, err := s.repo.GetTask(ctx, id)
 	if err != nil {
 		return err
+	}
+
+	if s.executionStopper != nil {
+		if err := s.executionStopper.StopTask(ctx, id, "task deleted", true); err != nil {
+			s.logger.Warn("failed to stop task execution on delete",
+				zap.String("task_id", id),
+				zap.Error(err))
+		}
 	}
 
 	// Clean up worktree BEFORE deleting task (CASCADE would delete worktree DB records)
@@ -815,6 +839,14 @@ func (s *Service) DeleteRepository(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
+	active, err := s.repo.HasActiveAgentSessionsByRepository(ctx, id)
+	if err != nil {
+		s.logger.Error("failed to check active agent sessions for repository", zap.String("repository_id", id), zap.Error(err))
+		return err
+	}
+	if active {
+		return ErrActiveAgentSessions
+	}
 	if err := s.repo.DeleteRepository(ctx, id); err != nil {
 		s.logger.Error("failed to delete repository", zap.String("repository_id", id), zap.Error(err))
 		return err
@@ -953,6 +985,14 @@ func (s *Service) DeleteExecutor(ctx context.Context, id string) error {
 	if executor.IsSystem {
 		return fmt.Errorf("system executors cannot be deleted")
 	}
+	active, err := s.repo.HasActiveAgentSessionsByExecutor(ctx, id)
+	if err != nil {
+		s.logger.Error("failed to check active agent sessions for executor", zap.String("executor_id", id), zap.Error(err))
+		return err
+	}
+	if active {
+		return ErrActiveAgentSessions
+	}
 	if err := s.repo.DeleteExecutor(ctx, id); err != nil {
 		return err
 	}
@@ -1032,6 +1072,14 @@ func (s *Service) DeleteEnvironment(ctx context.Context, id string) error {
 	if environment.IsSystem {
 		return fmt.Errorf("system environments cannot be deleted")
 	}
+	active, err := s.repo.HasActiveAgentSessionsByEnvironment(ctx, id)
+	if err != nil {
+		s.logger.Error("failed to check active agent sessions for environment", zap.String("environment_id", id), zap.Error(err))
+		return err
+	}
+	if active {
+		return ErrActiveAgentSessions
+	}
 	if err := s.repo.DeleteEnvironment(ctx, id); err != nil {
 		return err
 	}
@@ -1062,14 +1110,14 @@ func (s *Service) publishTaskEvent(ctx context.Context, eventType string, task *
 		"updated_at":  task.UpdatedAt.Format(time.RFC3339),
 	}
 
-	if task.AgentProfileID != "" {
-		data["agent_profile_id"] = task.AgentProfileID
-	}
 	if task.AssignedTo != "" {
 		data["assigned_to"] = task.AssignedTo
 	}
-	if task.RepositoryURL != "" {
-		data["repository_url"] = task.RepositoryURL
+	if task.RepositoryID != "" {
+		data["repository_id"] = task.RepositoryID
+	}
+	if task.BaseBranch != "" {
+		data["base_branch"] = task.BaseBranch
 	}
 	if task.Metadata != nil {
 		data["metadata"] = task.Metadata
@@ -1104,15 +1152,15 @@ func (s *Service) publishWorkspaceEvent(ctx context.Context, eventType string, w
 	}
 
 	data := map[string]interface{}{
-		"id":                        workspace.ID,
-		"name":                      workspace.Name,
-		"description":               workspace.Description,
-		"owner_id":                  workspace.OwnerID,
-		"default_executor_id":       workspace.DefaultExecutorID,
-		"default_environment_id":    workspace.DefaultEnvironmentID,
+		"id":                       workspace.ID,
+		"name":                     workspace.Name,
+		"description":              workspace.Description,
+		"owner_id":                 workspace.OwnerID,
+		"default_executor_id":      workspace.DefaultExecutorID,
+		"default_environment_id":   workspace.DefaultEnvironmentID,
 		"default_agent_profile_id": workspace.DefaultAgentProfileID,
-		"created_at":                workspace.CreatedAt.Format(time.RFC3339),
-		"updated_at":                workspace.UpdatedAt.Format(time.RFC3339),
+		"created_at":               workspace.CreatedAt.Format(time.RFC3339),
+		"updated_at":               workspace.UpdatedAt.Format(time.RFC3339),
 	}
 
 	event := bus.NewEvent(eventType, "task-service", data)
@@ -1224,89 +1272,91 @@ func (s *Service) publishEnvironmentEvent(ctx context.Context, eventType string,
 	}
 }
 
-// Comment operations
+// Message operations
 
-// CreateCommentRequest contains the data for creating a new comment
-type CreateCommentRequest struct {
-	TaskID         string                 `json:"task_id"`
+// CreateMessageRequest contains the data for creating a new message
+type CreateMessageRequest struct {
+	AgentSessionID string                 `json:"agent_session_id"`
+	TaskID         string                 `json:"task_id,omitempty"`
 	Content        string                 `json:"content"`
 	AuthorType     string                 `json:"author_type,omitempty"` // "user" or "agent", defaults to "user"
 	AuthorID       string                 `json:"author_id,omitempty"`
 	RequestsInput  bool                   `json:"requests_input,omitempty"`
-	ACPSessionID   string                 `json:"acp_session_id,omitempty"`
-	AgentSessionID string                 `json:"agent_session_id,omitempty"`
 	Type           string                 `json:"type,omitempty"`
 	Metadata       map[string]interface{} `json:"metadata,omitempty"`
 }
 
-// CreateComment creates a new comment on a task
-func (s *Service) CreateComment(ctx context.Context, req *CreateCommentRequest) (*models.Comment, error) {
-	// Verify task exists
-	_, err := s.repo.GetTask(ctx, req.TaskID)
+// CreateMessage creates a new message on an agent session
+func (s *Service) CreateMessage(ctx context.Context, req *CreateMessageRequest) (*models.Message, error) {
+	session, err := s.repo.GetAgentSession(ctx, req.AgentSessionID)
 	if err != nil {
 		return nil, err
 	}
 
-	authorType := models.CommentAuthorUser
+	authorType := models.MessageAuthorUser
 	if req.AuthorType == "agent" {
-		authorType = models.CommentAuthorAgent
+		authorType = models.MessageAuthorAgent
 	}
 
-	commentType := models.CommentType(req.Type)
-	if commentType == "" {
-		commentType = models.CommentTypeMessage
+	messageType := models.MessageType(req.Type)
+	if messageType == "" {
+		messageType = models.MessageTypeMessage
 	}
 
-	comment := &models.Comment{
+	taskID := req.TaskID
+	if taskID == "" && session != nil {
+		taskID = session.TaskID
+	}
+
+	message := &models.Message{
 		ID:             uuid.New().String(),
-		TaskID:         req.TaskID,
+		AgentSessionID: req.AgentSessionID,
+		TaskID:         taskID,
 		AuthorType:     authorType,
 		AuthorID:       req.AuthorID,
 		Content:        req.Content,
-		Type:           commentType,
+		Type:           messageType,
 		Metadata:       req.Metadata,
 		RequestsInput:  req.RequestsInput,
-		ACPSessionID:   req.ACPSessionID,
-		AgentSessionID: req.AgentSessionID,
 		CreatedAt:      time.Now().UTC(),
 	}
 
-	if err := s.repo.CreateComment(ctx, comment); err != nil {
-		s.logger.Error("failed to create comment", zap.Error(err))
+	if err := s.repo.CreateMessage(ctx, message); err != nil {
+		s.logger.Error("failed to create message", zap.Error(err))
 		return nil, err
 	}
 
-	// Publish comment.added event
-	s.publishCommentEvent(ctx, events.CommentAdded, comment)
+	// Publish message.added event
+	s.publishMessageEvent(ctx, events.MessageAdded, message)
 
-	s.logger.Info("comment created",
-		zap.String("comment_id", comment.ID),
-		zap.String("task_id", comment.TaskID),
-		zap.String("author_type", string(comment.AuthorType)))
+	s.logger.Info("message created",
+		zap.String("message_id", message.ID),
+		zap.String("agent_session_id", message.AgentSessionID),
+		zap.String("author_type", string(message.AuthorType)))
 
-	return comment, nil
+	return message, nil
 }
 
-// GetComment retrieves a comment by ID
-func (s *Service) GetComment(ctx context.Context, id string) (*models.Comment, error) {
-	return s.repo.GetComment(ctx, id)
+// GetMessage retrieves a message by ID
+func (s *Service) GetMessage(ctx context.Context, id string) (*models.Message, error) {
+	return s.repo.GetMessage(ctx, id)
 }
 
-// ListComments returns all comments for a task.
-func (s *Service) ListComments(ctx context.Context, taskID string) ([]*models.Comment, error) {
-	return s.repo.ListComments(ctx, taskID)
+// ListMessages returns all messages for a session.
+func (s *Service) ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error) {
+	return s.repo.ListMessages(ctx, sessionID)
 }
 
-// ListCommentsPaginated returns comments for a task with pagination options.
-func (s *Service) ListCommentsPaginated(ctx context.Context, req ListCommentsRequest) ([]*models.Comment, bool, error) {
+// ListMessagesPaginated returns messages for a session with pagination options.
+func (s *Service) ListMessagesPaginated(ctx context.Context, req ListMessagesRequest) ([]*models.Message, bool, error) {
 	limit := req.Limit
 	if limit <= 0 && (req.Before != "" || req.After != "") {
-		limit = DefaultCommentsPageSize
+		limit = DefaultMessagesPageSize
 	}
-	if limit > MaxCommentsPageSize {
-		limit = MaxCommentsPageSize
+	if limit > MaxMessagesPageSize {
+		limit = MaxMessagesPageSize
 	}
-	return s.repo.ListCommentsPaginated(ctx, req.TaskID, repository.ListCommentsOptions{
+	return s.repo.ListMessagesPaginated(ctx, req.AgentSessionID, repository.ListMessagesOptions{
 		Limit:  limit,
 		Before: req.Before,
 		After:  req.After,
@@ -1314,95 +1364,89 @@ func (s *Service) ListCommentsPaginated(ctx context.Context, req ListCommentsReq
 	})
 }
 
-// DeleteComment deletes a comment
-func (s *Service) DeleteComment(ctx context.Context, id string) error {
-	if err := s.repo.DeleteComment(ctx, id); err != nil {
-		s.logger.Error("failed to delete comment", zap.String("comment_id", id), zap.Error(err))
+// DeleteMessage deletes a message
+func (s *Service) DeleteMessage(ctx context.Context, id string) error {
+	if err := s.repo.DeleteMessage(ctx, id); err != nil {
+		s.logger.Error("failed to delete message", zap.String("message_id", id), zap.Error(err))
 		return err
 	}
 
-	s.logger.Info("comment deleted", zap.String("comment_id", id))
+	s.logger.Info("message deleted", zap.String("message_id", id))
 	return nil
 }
 
-// UpdateToolCallComment updates a tool call comment's status
-func (s *Service) UpdateToolCallComment(ctx context.Context, taskID, toolCallID, status, result string) error {
-	// Find the comment by tool_call_id
-	comment, err := s.repo.GetCommentByToolCallID(ctx, taskID, toolCallID)
+// UpdateToolCallMessage updates a tool call message's status
+func (s *Service) UpdateToolCallMessage(ctx context.Context, sessionID, toolCallID, status, result string) error {
+	message, err := s.repo.GetMessageByToolCallID(ctx, sessionID, toolCallID)
 	if err != nil {
-		s.logger.Warn("tool call comment not found for update",
-			zap.String("task_id", taskID),
+		s.logger.Warn("tool call message not found for update",
+			zap.String("agent_session_id", sessionID),
 			zap.String("tool_call_id", toolCallID),
 			zap.Error(err))
 		return err
 	}
 
-	// Update the metadata status
-	if comment.Metadata == nil {
-		comment.Metadata = make(map[string]interface{})
+	if message.Metadata == nil {
+		message.Metadata = make(map[string]interface{})
 	}
-	comment.Metadata["status"] = status
+	message.Metadata["status"] = status
 	if result != "" {
-		comment.Metadata["result"] = result
+		message.Metadata["result"] = result
 	}
 
-	// Save the updated comment
-	if err := s.repo.UpdateComment(ctx, comment); err != nil {
-		s.logger.Error("failed to update tool call comment",
-			zap.String("comment_id", comment.ID),
+	if err := s.repo.UpdateMessage(ctx, message); err != nil {
+		s.logger.Error("failed to update tool call message",
+			zap.String("message_id", message.ID),
 			zap.String("tool_call_id", toolCallID),
 			zap.Error(err))
 		return err
 	}
 
-	// Publish comment.updated event
-	s.publishCommentEvent(ctx, events.CommentUpdated, comment)
+	// Publish message.updated event
+	s.publishMessageEvent(ctx, events.MessageUpdated, message)
 
-	s.logger.Info("tool call comment updated",
-		zap.String("comment_id", comment.ID),
+	s.logger.Info("tool call message updated",
+		zap.String("message_id", message.ID),
 		zap.String("tool_call_id", toolCallID),
 		zap.String("status", status))
 
 	return nil
 }
 
-// publishCommentEvent publishes comment events to the event bus
-func (s *Service) publishCommentEvent(ctx context.Context, eventType string, comment *models.Comment) {
+// publishMessageEvent publishes message events to the event bus
+func (s *Service) publishMessageEvent(ctx context.Context, eventType string, message *models.Message) {
 	if s.eventBus == nil {
-		s.logger.Warn("publishCommentEvent: eventBus is nil, skipping")
+		s.logger.Warn("publishMessageEvent: eventBus is nil, skipping")
 		return
 	}
 
-	commentType := string(comment.Type)
-	if commentType == "" {
-		commentType = "message"
+	messageType := string(message.Type)
+	if messageType == "" {
+		messageType = "message"
 	}
 
 	data := map[string]interface{}{
-		"comment_id":     comment.ID,
-		"task_id":        comment.TaskID,
-		"author_type":    string(comment.AuthorType),
-		"author_id":      comment.AuthorID,
-		"content":        comment.Content,
-		"type":           commentType,
-		"requests_input": comment.RequestsInput,
-		"created_at":     comment.CreatedAt.Format(time.RFC3339),
+		"message_id":       message.ID,
+		"agent_session_id": message.AgentSessionID,
+		"task_id":          message.TaskID,
+		"author_type":      string(message.AuthorType),
+		"author_id":        message.AuthorID,
+		"content":          message.Content,
+		"type":             messageType,
+		"requests_input":   message.RequestsInput,
+		"created_at":       message.CreatedAt.Format(time.RFC3339),
 	}
 
-	if comment.ACPSessionID != "" {
-		data["acp_session_id"] = comment.ACPSessionID
-	}
-
-	if comment.Metadata != nil {
-		data["metadata"] = comment.Metadata
+	if message.Metadata != nil {
+		data["metadata"] = message.Metadata
 	}
 
 	event := bus.NewEvent(eventType, "task-service", data)
 
 	if err := s.eventBus.Publish(ctx, eventType, event); err != nil {
-		s.logger.Error("failed to publish comment event",
+		s.logger.Error("failed to publish message event",
 			zap.String("event_type", eventType),
-			zap.String("comment_id", comment.ID),
+			zap.String("message_id", message.ID),
 			zap.Error(err))
 	}
 }

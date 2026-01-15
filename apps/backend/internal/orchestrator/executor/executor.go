@@ -18,9 +18,9 @@ import (
 
 // Common errors
 var (
-	ErrMaxConcurrentReached  = errors.New("maximum concurrent executions reached")
-	ErrNoAgentProfileID      = errors.New("task has no agent_profile_id configured")
-	ErrExecutionNotFound     = errors.New("execution not found")
+	ErrMaxConcurrentReached = errors.New("maximum concurrent executions reached")
+	ErrNoAgentProfileID     = errors.New("task has no agent_profile_id configured")
+	ErrExecutionNotFound    = errors.New("execution not found")
 )
 
 // PromptResult contains the result of a prompt operation
@@ -92,7 +92,7 @@ type TaskExecution struct {
 	AgentInstanceID string
 	AgentProfileID  string
 	StartedAt       time.Time
-	Status          v1.AgentStatus
+	SessionState    v1.AgentSessionState
 	Progress        int
 	LastUpdate      time.Time
 	// SessionID is the database ID of the agent session
@@ -109,49 +109,16 @@ func FromAgentSession(s *models.AgentSession) *TaskExecution {
 		AgentInstanceID: s.AgentInstanceID,
 		AgentProfileID:  s.AgentProfileID,
 		StartedAt:       s.StartedAt,
-		Status:          agentSessionStatusToV1(s.Status),
+		SessionState:    agentSessionStateToV1(s.State),
 		Progress:        s.Progress,
 		LastUpdate:      s.UpdatedAt,
 		SessionID:       s.ID,
 	}
 }
 
-// agentSessionStatusToV1 converts models.AgentSessionStatus to v1.AgentStatus
-func agentSessionStatusToV1(status models.AgentSessionStatus) v1.AgentStatus {
-	switch status {
-	case models.AgentSessionStatusPending:
-		return v1.AgentStatusStarting
-	case models.AgentSessionStatusRunning:
-		return v1.AgentStatusRunning
-	case models.AgentSessionStatusWaiting:
-		return v1.AgentStatusRunning // Waiting is still "running" from agent perspective
-	case models.AgentSessionStatusCompleted:
-		return v1.AgentStatusCompleted
-	case models.AgentSessionStatusFailed:
-		return v1.AgentStatusFailed
-	case models.AgentSessionStatusStopped:
-		return v1.AgentStatusStopped
-	default:
-		return v1.AgentStatusPending
-	}
-}
-
-// v1StatusToAgentSessionStatus converts v1.AgentStatus to models.AgentSessionStatus
-func v1StatusToAgentSessionStatus(status v1.AgentStatus) models.AgentSessionStatus {
-	switch status {
-	case v1.AgentStatusStarting:
-		return models.AgentSessionStatusPending
-	case v1.AgentStatusRunning:
-		return models.AgentSessionStatusRunning
-	case v1.AgentStatusCompleted:
-		return models.AgentSessionStatusCompleted
-	case v1.AgentStatusFailed:
-		return models.AgentSessionStatusFailed
-	case v1.AgentStatusStopped:
-		return models.AgentSessionStatusStopped
-	default:
-		return models.AgentSessionStatusPending
-	}
+// agentSessionStateToV1 converts models.AgentSessionState to v1.AgentSessionState
+func agentSessionStateToV1(state models.AgentSessionState) v1.AgentSessionState {
+	return v1.AgentSessionState(state)
 }
 
 // Executor manages agent execution for tasks
@@ -216,7 +183,7 @@ func (e *Executor) LoadActiveSessionsFromDB(ctx context.Context) error {
 		e.logger.Info("restored agent session from database",
 			zap.String("task_id", session.TaskID),
 			zap.String("session_id", session.ID),
-			zap.String("status", string(session.Status)))
+			zap.String("state", string(session.State)))
 	}
 
 	e.logger.Info("loaded active agent sessions from database",
@@ -251,7 +218,7 @@ func (e *Executor) SyncWithRecoveredInstances(ctx context.Context, instances []R
 			AgentInstanceID: inst.InstanceID,
 			AgentProfileID:  inst.AgentProfileID,
 			StartedAt:       time.Now(), // We don't know exact start time
-			Status:          v1.AgentStatusRunning,
+			SessionState:    v1.AgentSessionStateRunning,
 			Progress:        0,
 			LastUpdate:      time.Now(),
 		}
@@ -264,6 +231,11 @@ func (e *Executor) SyncWithRecoveredInstances(ctx context.Context, instances []R
 
 // Execute starts agent execution for a task
 func (e *Executor) Execute(ctx context.Context, task *v1.Task) (*TaskExecution, error) {
+	return e.ExecuteWithProfile(ctx, task, "")
+}
+
+// ExecuteWithProfile starts agent execution for a task using an explicit agent profile.
+func (e *Executor) ExecuteWithProfile(ctx context.Context, task *v1.Task, agentProfileID string) (*TaskExecution, error) {
 	// Check if max concurrent limit is reached
 	if !e.CanExecute() {
 		e.logger.Warn("max concurrent executions reached",
@@ -272,8 +244,7 @@ func (e *Executor) Execute(ctx context.Context, task *v1.Task) (*TaskExecution, 
 		return nil, ErrMaxConcurrentReached
 	}
 
-	// Verify task has an agent_profile_id configured
-	if task.AgentProfileID == nil || *task.AgentProfileID == "" {
+	if agentProfileID == "" {
 		e.logger.Error("task has no agent_profile_id configured", zap.String("task_id", task.ID))
 		return nil, ErrNoAgentProfileID
 	}
@@ -282,33 +253,53 @@ func (e *Executor) Execute(ctx context.Context, task *v1.Task) (*TaskExecution, 
 	req := &LaunchAgentRequest{
 		TaskID:          task.ID,
 		TaskTitle:       task.Title,
-		AgentProfileID:  *task.AgentProfileID,
+		AgentProfileID:  agentProfileID,
 		TaskDescription: task.Description,
 		Priority:        task.Priority,
 		Metadata:        task.Metadata,
 	}
-	if task.RepositoryURL != nil {
-		req.RepositoryURL = *task.RepositoryURL
-	}
-	if task.Branch != nil {
-		req.Branch = *task.Branch
+	var repositoryPath string
+	var repositoryID string
+	var baseBranch string
+	if task.RepositoryID != nil && *task.RepositoryID != "" {
+		repositoryID = *task.RepositoryID
+		repository, err := e.repo.GetRepository(ctx, repositoryID)
+		if err != nil {
+			e.logger.Error("failed to load repository for task",
+				zap.String("task_id", task.ID),
+				zap.String("repository_id", repositoryID),
+				zap.Error(err))
+			return nil, err
+		}
+		repositoryPath = repository.LocalPath
+		if repositoryPath != "" {
+			req.RepositoryURL = repositoryPath
+		}
+		if task.BaseBranch != nil && *task.BaseBranch != "" {
+			baseBranch = *task.BaseBranch
+		} else if repository.DefaultBranch != "" {
+			baseBranch = repository.DefaultBranch
+		}
+		if baseBranch != "" {
+			req.Branch = baseBranch
+		}
 	}
 
 	// Configure worktree if enabled and repository path is available
-	if e.worktreeEnabled && req.RepositoryURL != "" {
+	if e.worktreeEnabled && repositoryPath != "" {
 		req.UseWorktree = true
-		req.RepositoryPath = req.RepositoryURL // RepositoryURL is actually a local path
-		req.RepositoryID = task.ID             // Use task ID as repository identifier for worktree tracking
-		if req.Branch != "" {
-			req.BaseBranch = req.Branch
+		req.RepositoryPath = repositoryPath
+		req.RepositoryID = repositoryID
+		if baseBranch != "" {
+			req.BaseBranch = baseBranch
 		} else {
-			req.BaseBranch = "main" // Default base branch
+			req.BaseBranch = "main"
 		}
 	}
 
 	e.logger.Info("launching agent for task",
 		zap.String("task_id", task.ID),
-		zap.String("agent_profile_id", *task.AgentProfileID),
+		zap.String("agent_profile_id", agentProfileID),
 		zap.Bool("use_worktree", req.UseWorktree))
 
 	// Call the AgentManager to launch the container
@@ -328,8 +319,12 @@ func (e *Executor) Execute(ctx context.Context, task *v1.Task) (*TaskExecution, 
 		TaskID:          task.ID,
 		AgentInstanceID: resp.AgentInstanceID,
 		ContainerID:     resp.ContainerID,
-		AgentProfileID:  *task.AgentProfileID,
-		Status:          v1StatusToAgentSessionStatus(resp.Status),
+		AgentProfileID:  agentProfileID,
+		RepositoryID:    repositoryID,
+		BaseBranch:      baseBranch,
+		WorktreePath:    resp.WorktreePath,
+		WorktreeBranch:  resp.WorktreeBranch,
+		State:           models.AgentSessionStateStarting,
 		Progress:        0,
 		StartedAt:       now,
 		UpdatedAt:       now,
@@ -346,9 +341,9 @@ func (e *Executor) Execute(ctx context.Context, task *v1.Task) (*TaskExecution, 
 	execution := &TaskExecution{
 		TaskID:          task.ID,
 		AgentInstanceID: resp.AgentInstanceID,
-		AgentProfileID:  *task.AgentProfileID,
+		AgentProfileID:  agentProfileID,
 		StartedAt:       now,
-		Status:          resp.Status,
+		SessionState:    v1.AgentSessionStateStarting,
 		Progress:        0,
 		LastUpdate:      now,
 		SessionID:       sessionID,
@@ -396,7 +391,7 @@ func (e *Executor) Stop(ctx context.Context, taskID string, reason string, force
 	// Update execution status in memory and database regardless of agent stop result
 	e.mu.Lock()
 	if exec, ok := e.executions[taskID]; ok {
-		exec.Status = v1.AgentStatusStopped
+		exec.SessionState = v1.AgentSessionStateCancelled
 		exec.LastUpdate = time.Now()
 	}
 	delete(e.executions, taskID) // Remove from cache so GetExecution returns false
@@ -404,7 +399,7 @@ func (e *Executor) Stop(ctx context.Context, taskID string, reason string, force
 
 	// Update database
 	if execution.SessionID != "" {
-		if dbErr := e.repo.UpdateAgentSessionStatus(ctx, execution.SessionID, models.AgentSessionStatusStopped, reason); dbErr != nil {
+		if dbErr := e.repo.UpdateAgentSessionState(ctx, execution.SessionID, models.AgentSessionStateCancelled, reason); dbErr != nil {
 			e.logger.Error("failed to update agent session status in database",
 				zap.String("task_id", taskID),
 				zap.String("session_id", execution.SessionID),
@@ -494,7 +489,7 @@ func (e *Executor) GetExecution(taskID string) (*TaskExecution, bool) {
 
 			// Also update DB if we have a session
 			if execution.SessionID != "" {
-				_ = e.repo.UpdateAgentSessionStatus(ctx, execution.SessionID, models.AgentSessionStatusStopped, "agent process stopped")
+				_ = e.repo.UpdateAgentSessionState(ctx, execution.SessionID, models.AgentSessionStateCancelled, "agent process stopped")
 			}
 			return nil, false
 		}
@@ -517,7 +512,7 @@ func (e *Executor) GetExecution(taskID string) (*TaskExecution, bool) {
 		e.logger.Info("stale agent session detected - agent not running",
 			zap.String("task_id", taskID),
 			zap.String("session_id", session.ID))
-		_ = e.repo.UpdateAgentSessionStatus(ctx, session.ID, models.AgentSessionStatusStopped, "agent not running after backend restart")
+		_ = e.repo.UpdateAgentSessionState(ctx, session.ID, models.AgentSessionStateCancelled, "agent not running after backend restart")
 		return nil, false
 	}
 
@@ -547,7 +542,7 @@ func (e *Executor) GetExecutionWithContext(ctx context.Context, taskID string) (
 
 			// Also update DB if we have a session
 			if execution.SessionID != "" {
-				_ = e.repo.UpdateAgentSessionStatus(ctx, execution.SessionID, models.AgentSessionStatusStopped, "agent process stopped")
+				_ = e.repo.UpdateAgentSessionState(ctx, execution.SessionID, models.AgentSessionStateCancelled, "agent process stopped")
 			}
 			return nil, false
 		}
@@ -567,7 +562,7 @@ func (e *Executor) GetExecutionWithContext(ctx context.Context, taskID string) (
 		e.logger.Info("stale agent session detected - agent not running",
 			zap.String("task_id", taskID),
 			zap.String("session_id", session.ID))
-		_ = e.repo.UpdateAgentSessionStatus(ctx, session.ID, models.AgentSessionStatusStopped, "agent not running after backend restart")
+		_ = e.repo.UpdateAgentSessionState(ctx, session.ID, models.AgentSessionStateCancelled, "agent not running after backend restart")
 		return nil, false
 	}
 
@@ -607,19 +602,19 @@ func (e *Executor) CanExecute() bool {
 }
 
 // UpdateProgress updates the progress of an execution (called when ACP progress messages are received)
-func (e *Executor) UpdateProgress(ctx context.Context, taskID string, progress int, status v1.AgentStatus) {
+func (e *Executor) UpdateProgress(ctx context.Context, taskID string, progress int, state v1.AgentSessionState) {
 	e.mu.Lock()
 	var sessionID string
 	if exec, ok := e.executions[taskID]; ok {
 		exec.Progress = progress
-		exec.Status = status
+		exec.SessionState = state
 		exec.LastUpdate = time.Now()
 		sessionID = exec.SessionID
 
 		e.logger.Debug("updated execution progress",
 			zap.String("task_id", taskID),
 			zap.Int("progress", progress),
-			zap.String("status", string(status)))
+			zap.String("state", string(state)))
 	}
 	e.mu.Unlock()
 
@@ -631,7 +626,7 @@ func (e *Executor) UpdateProgress(ctx context.Context, taskID string, progress i
 				return
 			}
 			session.Progress = progress
-			session.Status = v1StatusToAgentSessionStatus(status)
+			session.State = models.AgentSessionState(state)
 			if err := e.repo.UpdateAgentSession(ctx, session); err != nil {
 				e.logger.Error("failed to update agent session progress in database",
 					zap.String("session_id", sessionID),
@@ -642,29 +637,40 @@ func (e *Executor) UpdateProgress(ctx context.Context, taskID string, progress i
 }
 
 // MarkCompleted marks an execution as completed
-func (e *Executor) MarkCompleted(ctx context.Context, taskID string, status v1.AgentStatus) {
+func (e *Executor) MarkCompleted(ctx context.Context, taskID string, state v1.AgentSessionState) {
 	e.mu.Lock()
 	var sessionID string
 	if exec, ok := e.executions[taskID]; ok {
-		exec.Status = status
+		exec.SessionState = state
 		exec.Progress = 100
 		exec.LastUpdate = time.Now()
 		sessionID = exec.SessionID
 
 		e.logger.Info("execution completed",
 			zap.String("task_id", taskID),
-			zap.String("status", string(status)))
+			zap.String("state", string(state)))
 	}
 	e.mu.Unlock()
 
 	// Update database
 	if sessionID != "" {
-		dbStatus := v1StatusToAgentSessionStatus(status)
-		if err := e.repo.UpdateAgentSessionStatus(ctx, sessionID, dbStatus, ""); err != nil {
+		dbState := models.AgentSessionState(state)
+		if err := e.repo.UpdateAgentSessionState(ctx, sessionID, dbState, ""); err != nil {
 			e.logger.Error("failed to update agent session status in database",
 				zap.String("session_id", sessionID),
 				zap.Error(err))
 		}
+	}
+}
+
+// UpdateExecutionState updates the in-memory execution state for a task.
+func (e *Executor) UpdateExecutionState(taskID string, state v1.AgentSessionState) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if exec, ok := e.executions[taskID]; ok {
+		exec.SessionState = state
+		exec.LastUpdate = time.Now()
 	}
 }
 
@@ -698,17 +704,6 @@ func (e *Executor) GetActiveSessionID(ctx context.Context, taskID string) (strin
 	}
 
 	return session.ID, nil
-}
-
-// UpdateSessionACPSessionID updates the ACP session ID for an agent session
-func (e *Executor) UpdateSessionACPSessionID(ctx context.Context, taskID, acpSessionID string) error {
-	session, err := e.repo.GetActiveAgentSessionByTaskID(ctx, taskID)
-	if err != nil {
-		return err
-	}
-
-	session.ACPSessionID = acpSessionID
-	return e.repo.UpdateAgentSession(ctx, session)
 }
 
 // MockAgentManagerClient is a placeholder implementation

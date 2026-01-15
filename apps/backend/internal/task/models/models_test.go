@@ -45,7 +45,8 @@ func TestTaskStructInitialization(t *testing.T) {
 		Description:    "A test task description",
 		State:          v1.TaskStateTODO,
 		Priority:       5,
-		AgentProfileID: "coding",
+		RepositoryID:   "repo-123",
+		BaseBranch:     "main",
 		AssignedTo:     "agent-001",
 		Position:       1,
 		Metadata:       map[string]interface{}{"key": "value"},
@@ -77,8 +78,11 @@ func TestTaskStructInitialization(t *testing.T) {
 	if task.Priority != 5 {
 		t.Errorf("expected Priority 5, got %d", task.Priority)
 	}
-	if task.AgentProfileID != "coding" {
-		t.Errorf("expected AgentProfileID 'coding', got %s", task.AgentProfileID)
+	if task.RepositoryID != "repo-123" {
+		t.Errorf("expected RepositoryID 'repo-123', got %s", task.RepositoryID)
+	}
+	if task.BaseBranch != "main" {
+		t.Errorf("expected BaseBranch 'main', got %s", task.BaseBranch)
 	}
 	if task.AssignedTo != "agent-001" {
 		t.Errorf("expected AssignedTo 'agent-001', got %s", task.AssignedTo)
@@ -156,7 +160,8 @@ func TestTaskToAPI(t *testing.T) {
 		Description:    "A test task description",
 		State:          v1.TaskStateInProgress,
 		Priority:       3,
-		AgentProfileID: "coding",
+		RepositoryID:   "repo-123",
+		BaseBranch:     "main",
 		AssignedTo:     "agent-001",
 		Position:       2,
 		Metadata:       map[string]interface{}{"key": "value"},
@@ -187,8 +192,11 @@ func TestTaskToAPI(t *testing.T) {
 	if apiTask.Priority != task.Priority {
 		t.Errorf("expected Priority %d, got %d", task.Priority, apiTask.Priority)
 	}
-	if apiTask.AgentProfileID == nil || *apiTask.AgentProfileID != task.AgentProfileID {
-		t.Errorf("expected AgentProfileID %s, got %v", task.AgentProfileID, apiTask.AgentProfileID)
+	if apiTask.RepositoryID == nil || *apiTask.RepositoryID != task.RepositoryID {
+		t.Errorf("expected RepositoryID %s, got %v", task.RepositoryID, apiTask.RepositoryID)
+	}
+	if apiTask.BaseBranch == nil || *apiTask.BaseBranch != task.BaseBranch {
+		t.Errorf("expected BaseBranch %s, got %v", task.BaseBranch, apiTask.BaseBranch)
 	}
 	if apiTask.AssignedAgentID == nil || *apiTask.AssignedAgentID != task.AssignedTo {
 		t.Errorf("expected AssignedAgentID %s, got %v", task.AssignedTo, apiTask.AssignedAgentID)
@@ -209,7 +217,8 @@ func TestTaskToAPIWithEmptyOptionalFields(t *testing.T) {
 		Description:    "A test task description",
 		State:          v1.TaskStateTODO,
 		Priority:       0,
-		AgentProfileID: "",
+		RepositoryID:   "",
+		BaseBranch:     "",
 		AssignedTo:     "",
 		Position:       0,
 		Metadata:       nil,
@@ -219,8 +228,11 @@ func TestTaskToAPIWithEmptyOptionalFields(t *testing.T) {
 
 	apiTask := task.ToAPI()
 
-	if apiTask.AgentProfileID != nil {
-		t.Errorf("expected AgentProfileID nil, got %v", apiTask.AgentProfileID)
+	if apiTask.RepositoryID != nil {
+		t.Errorf("expected RepositoryID nil, got %v", apiTask.RepositoryID)
+	}
+	if apiTask.BaseBranch != nil {
+		t.Errorf("expected BaseBranch nil, got %v", apiTask.BaseBranch)
 	}
 	if apiTask.AssignedAgentID != nil {
 		t.Errorf("expected AssignedAgentID nil, got %v", apiTask.AssignedAgentID)

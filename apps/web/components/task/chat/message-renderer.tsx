@@ -1,6 +1,6 @@
 'use client';
 
-import type { Comment } from '@/lib/types/http';
+import type { Message } from '@/lib/types/http';
 import { ChatMessage } from '@/components/task/chat/messages/chat-message';
 import { StatusMessage } from '@/components/task/chat/messages/status-message';
 import { ToolCallMessage } from '@/components/task/chat/messages/tool-call-message';
@@ -12,8 +12,8 @@ type AdapterContext = {
 };
 
 type MessageAdapter = {
-  matches: (comment: Comment, ctx: AdapterContext) => boolean;
-  render: (comment: Comment, ctx: AdapterContext) => JSX.Element;
+  matches: (comment: Message, ctx: AdapterContext) => boolean;
+  render: (comment: Message, ctx: AdapterContext) => JSX.Element;
 };
 
 const adapters: MessageAdapter[] = [
@@ -67,7 +67,7 @@ const adapters: MessageAdapter[] = [
   },
 ];
 
-export function MessageRenderer({ comment, isTaskDescription }: { comment: Comment; isTaskDescription: boolean }) {
+export function MessageRenderer({ comment, isTaskDescription }: { comment: Message; isTaskDescription: boolean }) {
   const ctx = { isTaskDescription };
   const adapter = adapters.find((entry) => entry.matches(comment, ctx)) ?? adapters[adapters.length - 1];
   return adapter.render(comment, ctx);

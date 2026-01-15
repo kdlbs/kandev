@@ -93,6 +93,9 @@ func (h *Handlers) wsStartTask(ctx context.Context, msg *ws.Message) (*ws.Messag
 	if req.TaskID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 	}
+	if req.AgentProfileID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "agent_profile_id is required", nil)
+	}
 
 	resp, err := h.controller.StartTask(ctx, dto.StartTaskRequest{
 		TaskID:         req.TaskID,

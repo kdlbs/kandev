@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -144,6 +145,10 @@ func (h *ExecutorHandlers) httpUpdateExecutor(c *gin.Context) {
 func (h *ExecutorHandlers) httpDeleteExecutor(c *gin.Context) {
 	resp, err := h.controller.DeleteExecutor(c.Request.Context(), dto.DeleteExecutorRequest{ID: c.Param("id")})
 	if err != nil {
+		if errors.Is(err, controller.ErrActiveAgentSessions) {
+			c.JSON(http.StatusConflict, gin.H{"error": "executor is used by an active agent session"})
+			return
+		}
 		h.logger.Error("failed to delete executor", zap.Error(err))
 		c.JSON(http.StatusBadRequest, gin.H{"error": "executor not deleted"})
 		return
@@ -268,6 +273,9 @@ func (h *ExecutorHandlers) wsDeleteExecutor(ctx context.Context, msg *ws.Message
 	resp, err := h.controller.DeleteExecutor(ctx, dto.DeleteExecutorRequest{ID: req.ID})
 	if err != nil {
 		h.logger.Error("failed to delete executor", zap.Error(err))
+		if errors.Is(err, controller.ErrActiveAgentSessions) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "executor is used by an active agent session", nil)
+		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to delete executor", nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, resp)

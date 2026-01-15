@@ -80,9 +80,8 @@ type httpCreateTaskRequest struct {
 	Description   string                 `json:"description,omitempty"`
 	Priority      int                    `json:"priority,omitempty"`
 	State         *v1.TaskState          `json:"state,omitempty"`
-	AgentProfileID string                 `json:"agent_profile_id,omitempty"`
-	RepositoryURL string                 `json:"repository_url,omitempty"`
-	Branch        string                 `json:"branch,omitempty"`
+	RepositoryID string                 `json:"repository_id,omitempty"`
+	BaseBranch   string                 `json:"base_branch,omitempty"`
 	AssignedTo    string                 `json:"assigned_to,omitempty"`
 	Position      int                    `json:"position,omitempty"`
 	Metadata      map[string]interface{} `json:"metadata,omitempty"`
@@ -98,8 +97,8 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id is required"})
 		return
 	}
-	if body.RepositoryURL == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "repository_url is required"})
+	if body.RepositoryID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "repository_id is required"})
 		return
 	}
 	resp, err := h.controller.CreateTask(c.Request.Context(), dto.CreateTaskRequest{
@@ -110,9 +109,8 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		Description:   body.Description,
 		Priority:      body.Priority,
 		State:         body.State,
-		AgentProfileID: body.AgentProfileID,
-		RepositoryURL: body.RepositoryURL,
-		Branch:        body.Branch,
+		RepositoryID:  body.RepositoryID,
+		BaseBranch:    body.BaseBranch,
 		AssignedTo:    body.AssignedTo,
 		Position:      body.Position,
 		Metadata:      body.Metadata,
@@ -129,7 +127,8 @@ type httpUpdateTaskRequest struct {
 	Description *string                `json:"description,omitempty"`
 	Priority    *int                   `json:"priority,omitempty"`
 	State       *v1.TaskState          `json:"state,omitempty"`
-	AgentProfileID *string                `json:"agent_profile_id,omitempty"`
+	RepositoryID *string               `json:"repository_id,omitempty"`
+	BaseBranch   *string               `json:"base_branch,omitempty"`
 	AssignedTo  *string                `json:"assigned_to,omitempty"`
 	Position    *int                   `json:"position,omitempty"`
 	Metadata    map[string]interface{} `json:"metadata,omitempty"`
@@ -147,7 +146,8 @@ func (h *TaskHandlers) httpUpdateTask(c *gin.Context) {
 		Description: body.Description,
 		Priority:    body.Priority,
 		State:       body.State,
-		AgentProfileID: body.AgentProfileID,
+		RepositoryID: body.RepositoryID,
+		BaseBranch:   body.BaseBranch,
 		AssignedTo:  body.AssignedTo,
 		Position:    body.Position,
 		Metadata:    body.Metadata,
@@ -228,9 +228,8 @@ type wsCreateTaskRequest struct {
 	Description   string                 `json:"description,omitempty"`
 	Priority      int                    `json:"priority,omitempty"`
 	State         *v1.TaskState          `json:"state,omitempty"`
-	AgentProfileID string                 `json:"agent_profile_id,omitempty"`
-	RepositoryURL string                 `json:"repository_url,omitempty"`
-	Branch        string                 `json:"branch,omitempty"`
+	RepositoryID string                 `json:"repository_id,omitempty"`
+	BaseBranch   string                 `json:"base_branch,omitempty"`
 	AssignedTo    string                 `json:"assigned_to,omitempty"`
 	Position      int                    `json:"position,omitempty"`
 	Metadata      map[string]interface{} `json:"metadata,omitempty"`
@@ -253,8 +252,8 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	if req.Title == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "title is required", nil)
 	}
-	if req.RepositoryURL == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "repository_url is required", nil)
+	if req.RepositoryID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "repository_id is required", nil)
 	}
 
 	resp, err := h.controller.CreateTask(ctx, dto.CreateTaskRequest{
@@ -265,9 +264,8 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		Description:   req.Description,
 		Priority:      req.Priority,
 		State:         req.State,
-		AgentProfileID: req.AgentProfileID,
-		RepositoryURL: req.RepositoryURL,
-		Branch:        req.Branch,
+		RepositoryID:  req.RepositoryID,
+		BaseBranch:    req.BaseBranch,
 		AssignedTo:    req.AssignedTo,
 		Position:      req.Position,
 		Metadata:      req.Metadata,
@@ -305,7 +303,8 @@ type wsUpdateTaskRequest struct {
 	Description *string                `json:"description,omitempty"`
 	Priority    *int                   `json:"priority,omitempty"`
 	State       *v1.TaskState          `json:"state,omitempty"`
-	AgentProfileID *string                `json:"agent_profile_id,omitempty"`
+	RepositoryID *string               `json:"repository_id,omitempty"`
+	BaseBranch   *string               `json:"base_branch,omitempty"`
 	AssignedTo  *string                `json:"assigned_to,omitempty"`
 	Position    *int                   `json:"position,omitempty"`
 	Metadata    map[string]interface{} `json:"metadata,omitempty"`
@@ -326,7 +325,8 @@ func (h *TaskHandlers) wsUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		Description: req.Description,
 		Priority:    req.Priority,
 		State:       req.State,
-		AgentProfileID: req.AgentProfileID,
+		RepositoryID: req.RepositoryID,
+		BaseBranch:   req.BaseBranch,
 		AssignedTo:  req.AssignedTo,
 		Position:    req.Position,
 		Metadata:    req.Metadata,

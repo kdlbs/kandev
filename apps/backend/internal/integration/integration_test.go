@@ -83,9 +83,11 @@ func NewTestServer(t *testing.T) *TestServer {
 	taskController := taskcontroller.NewTaskController(taskSvc)
 	executorController := taskcontroller.NewExecutorController(taskSvc)
 	environmentController := taskcontroller.NewEnvironmentController(taskSvc)
+	repositoryController := taskcontroller.NewRepositoryController(taskSvc)
 	taskhandlers.RegisterWorkspaceRoutes(router, gateway.Dispatcher, workspaceController, log)
 	taskhandlers.RegisterBoardRoutes(router, gateway.Dispatcher, boardController, log)
 	taskhandlers.RegisterTaskRoutes(router, gateway.Dispatcher, taskController, log)
+	taskhandlers.RegisterRepositoryRoutes(router, gateway.Dispatcher, repositoryController, log)
 	taskhandlers.RegisterExecutorRoutes(router, gateway.Dispatcher, executorController, log)
 	taskhandlers.RegisterEnvironmentRoutes(router, gateway.Dispatcher, environmentController, log)
 
@@ -153,6 +155,24 @@ func createWorkspace(t *testing.T, client *WSClient) string {
 
 	resp, err := client.SendRequest("workspace-1", ws.ActionWorkspaceCreate, map[string]interface{}{
 		"name": "Test Workspace",
+	})
+	require.NoError(t, err)
+
+	var payload map[string]interface{}
+	err = resp.ParsePayload(&payload)
+	require.NoError(t, err)
+
+	return payload["id"].(string)
+}
+
+func createRepository(t *testing.T, client *WSClient, workspaceID string) string {
+	t.Helper()
+
+	resp, err := client.SendRequest("repo-1", ws.ActionRepositoryCreate, map[string]interface{}{
+		"workspace_id": workspaceID,
+		"name":         "Test Repo",
+		"source_type":  "local",
+		"local_path":   "/tmp/repo",
 	})
 	require.NoError(t, err)
 
@@ -411,6 +431,7 @@ func TestTaskCRUD(t *testing.T) {
 	defer client.Close()
 
 	workspaceID := createWorkspace(t, client)
+	repositoryID := createRepository(t, client, workspaceID)
 
 	// Create board and column first
 	boardResp, err := client.SendRequest("board-1", ws.ActionBoardCreate, map[string]interface{}{
@@ -447,7 +468,8 @@ func TestTaskCRUD(t *testing.T) {
 			"title":        "Test Task",
 			"description":  "A test task for integration testing",
 			"priority":     3, // HIGH priority (1=LOW, 2=MEDIUM, 3=HIGH)
-			"repository_url": "/tmp/repo",
+			"repository_id": repositoryID,
+			"base_branch":   "main",
 		})
 		require.NoError(t, err)
 
@@ -557,6 +579,7 @@ func TestTaskStateTransitions(t *testing.T) {
 	defer client.Close()
 
 	workspaceID := createWorkspace(t, client)
+	repositoryID := createRepository(t, client, workspaceID)
 
 	// Create board, column, and task
 	boardResp, _ := client.SendRequest("board-1", ws.ActionBoardCreate, map[string]interface{}{
@@ -582,7 +605,8 @@ func TestTaskStateTransitions(t *testing.T) {
 		"column_id":    columnID,
 		"title":        "State Test Task",
 		"description":  "Test state transitions",
-		"repository_url": "/tmp/repo",
+		"repository_id": repositoryID,
+		"base_branch":   "main",
 	})
 	var taskPayload map[string]interface{}
 	taskResp.ParsePayload(&taskPayload)
@@ -633,6 +657,7 @@ func TestTaskMove(t *testing.T) {
 	defer client.Close()
 
 	workspaceID := createWorkspace(t, client)
+	repositoryID := createRepository(t, client, workspaceID)
 
 	// Create board with two columns
 	boardResp, _ := client.SendRequest("board-1", ws.ActionBoardCreate, map[string]interface{}{
@@ -667,7 +692,8 @@ func TestTaskMove(t *testing.T) {
 		"board_id":     boardID,
 		"column_id":    col1ID,
 		"title":        "Movable Task",
-		"repository_url": "/tmp/repo",
+		"repository_id": repositoryID,
+		"base_branch":   "main",
 	})
 	var taskPayload map[string]interface{}
 	taskResp.ParsePayload(&taskPayload)
@@ -720,6 +746,7 @@ func TestMultipleClients(t *testing.T) {
 	defer client2.Close()
 
 	workspaceID := createWorkspace(t, client1)
+	repositoryID := createRepository(t, client1, workspaceID)
 
 	// Client 1 creates a board
 	boardResp, err := client1.SendRequest("c1-board-1", ws.ActionBoardCreate, map[string]interface{}{
@@ -780,7 +807,8 @@ func TestMultipleClients(t *testing.T) {
 		"board_id":     boardID,
 		"column_id":    columnID,
 		"title":        "Task by Client 1",
-		"repository_url": "/tmp/repo",
+		"repository_id": repositoryID,
+		"base_branch":   "main",
 	})
 	require.NoError(t, err)
 
@@ -877,6 +905,7 @@ func TestTaskSubscription(t *testing.T) {
 	defer client.Close()
 
 	workspaceID := createWorkspace(t, client)
+	repositoryID := createRepository(t, client, workspaceID)
 
 	// Create a task first
 	boardResp, _ := client.SendRequest("board-1", ws.ActionBoardCreate, map[string]interface{}{
@@ -901,7 +930,8 @@ func TestTaskSubscription(t *testing.T) {
 		"board_id":     boardID,
 		"column_id":    columnID,
 		"title":        "Subscribable Task",
-		"repository_url": "/tmp/repo",
+		"repository_id": repositoryID,
+		"base_branch":   "main",
 	})
 	var taskPayload map[string]interface{}
 	taskResp.ParsePayload(&taskPayload)
@@ -951,6 +981,7 @@ func TestConcurrentRequests(t *testing.T) {
 	defer client.Close()
 
 	workspaceID := createWorkspace(t, client)
+	repositoryID := createRepository(t, client, workspaceID)
 
 	// Create board and column
 	boardResp, _ := client.SendRequest("board-1", ws.ActionBoardCreate, map[string]interface{}{
@@ -992,7 +1023,8 @@ func TestConcurrentRequests(t *testing.T) {
 					"board_id":     boardID,
 					"column_id":    columnID,
 					"title":        "Concurrent Task " + string(rune('0'+idx)),
-					"repository_url": "/tmp/repo",
+					"repository_id": repositoryID,
+					"base_branch":   "main",
 				},
 			)
 			results <- err

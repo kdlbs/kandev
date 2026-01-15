@@ -220,6 +220,11 @@ type GetBoardSnapshotRequest struct {
 	BoardID string
 }
 
+type GetWorkspaceBoardSnapshotRequest struct {
+	WorkspaceID string
+	BoardID     string
+}
+
 type ListTasksRequest struct {
 	BoardID string
 }
@@ -236,9 +241,8 @@ type CreateTaskRequest struct {
 	Description   string
 	Priority      int
 	State         *v1.TaskState
-	AgentProfileID string
-	RepositoryURL string
-	Branch        string
+	RepositoryID string
+	BaseBranch   string
 	AssignedTo    string
 	Position      int
 	Metadata      map[string]interface{}
@@ -250,7 +254,8 @@ type UpdateTaskRequest struct {
 	Description *string
 	Priority    *int
 	State       *v1.TaskState
-	AgentProfileID *string
+	RepositoryID *string
+	BaseBranch   *string
 	AssignedTo  *string
 	Position    *int
 	Metadata    map[string]interface{}
@@ -260,24 +265,23 @@ type DeleteTaskRequest struct {
 	ID string
 }
 
-type ListCommentsRequest struct {
-	TaskID string
+type ListMessagesRequest struct {
+	AgentSessionID string
 	Limit  int
 	Before string
 	After  string
 	Sort   string
 }
 
-type CreateCommentRequest struct {
-	TaskID        string
+type CreateMessageRequest struct {
+	AgentSessionID string
 	Content       string
 	AuthorType    string
 	AuthorID      string
 	Type          string
 	RequestsInput bool
 	Metadata      map[string]interface{}
-	ACPSessionID  string
-	AgentSessionID string
+	TaskID        string
 }
 
 type MoveTaskRequest struct {

@@ -8,16 +8,15 @@ import (
 )
 
 // createTestTask creates a task for testing with the given parameters
-func createTestTask(id string, priority int, agentProfileID string) *v1.Task {
+func createTestTask(id string, priority int) *v1.Task {
 	return &v1.Task{
-		ID:             id,
-		BoardID:        "test-board",
-		Title:          "Test Task " + id,
-		Priority:       priority,
-		AgentProfileID: &agentProfileID,
-		State:          v1.TaskStateTODO,
-		CreatedAt:      time.Now(),
-		UpdatedAt:      time.Now(),
+		ID:        id,
+		BoardID:   "test-board",
+		Title:     "Test Task " + id,
+		Priority:  priority,
+		State:     v1.TaskStateTODO,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
 	}
 }
 
@@ -36,7 +35,7 @@ func TestNewTaskQueue(t *testing.T) {
 
 func TestEnqueue(t *testing.T) {
 	q := NewTaskQueue(10)
-	task := createTestTask("task-1", 5, "test-agent")
+	task := createTestTask("task-1", 5)
 
 	err := q.Enqueue(task)
 	if err != nil {
@@ -50,7 +49,7 @@ func TestEnqueue(t *testing.T) {
 
 func TestEnqueueDuplicate(t *testing.T) {
 	q := NewTaskQueue(10)
-	task := createTestTask("task-1", 5, "test-agent")
+	task := createTestTask("task-1", 5)
 
 	_ = q.Enqueue(task)
 	err := q.Enqueue(task)
@@ -62,9 +61,9 @@ func TestEnqueueDuplicate(t *testing.T) {
 func TestEnqueueQueueFull(t *testing.T) {
 	q := NewTaskQueue(2)
 
-	_ = q.Enqueue(createTestTask("task-1", 5, "test-agent"))
-	_ = q.Enqueue(createTestTask("task-2", 5, "test-agent"))
-	err := q.Enqueue(createTestTask("task-3", 5, "test-agent"))
+	_ = q.Enqueue(createTestTask("task-1", 5))
+	_ = q.Enqueue(createTestTask("task-2", 5))
+	err := q.Enqueue(createTestTask("task-3", 5))
 
 	if err != ErrQueueFull {
 		t.Errorf("expected ErrQueueFull, got %v", err)
@@ -73,7 +72,7 @@ func TestEnqueueQueueFull(t *testing.T) {
 
 func TestDequeue(t *testing.T) {
 	q := NewTaskQueue(10)
-	task := createTestTask("task-1", 5, "test-agent")
+	task := createTestTask("task-1", 5)
 
 	_ = q.Enqueue(task)
 	dequeued := q.Dequeue()
@@ -101,9 +100,9 @@ func TestPriorityOrdering(t *testing.T) {
 	q := NewTaskQueue(10)
 
 	// Enqueue tasks with different priorities
-	_ = q.Enqueue(createTestTask("low", 1, "test-agent"))
-	_ = q.Enqueue(createTestTask("high", 10, "test-agent"))
-	_ = q.Enqueue(createTestTask("medium", 5, "test-agent"))
+	_ = q.Enqueue(createTestTask("low", 1))
+	_ = q.Enqueue(createTestTask("high", 10))
+	_ = q.Enqueue(createTestTask("medium", 5))
 
 	// Dequeue should return highest priority first
 	first := q.Dequeue()
@@ -131,7 +130,7 @@ func TestPeek(t *testing.T) {
 		t.Errorf("expected nil from Peek on empty queue")
 	}
 
-	_ = q.Enqueue(createTestTask("task-1", 5, "test-agent"))
+	_ = q.Enqueue(createTestTask("task-1", 5))
 	peeked = q.Peek()
 
 	if peeked == nil {
@@ -149,8 +148,8 @@ func TestPeek(t *testing.T) {
 func TestRemove(t *testing.T) {
 	q := NewTaskQueue(10)
 
-	_ = q.Enqueue(createTestTask("task-1", 5, "test-agent"))
-	_ = q.Enqueue(createTestTask("task-2", 3, "test-agent"))
+	_ = q.Enqueue(createTestTask("task-1", 5))
+	_ = q.Enqueue(createTestTask("task-2", 3))
 
 	removed := q.Remove("task-1")
 	if !removed {
@@ -175,8 +174,8 @@ func TestRemoveNonExistent(t *testing.T) {
 func TestUpdatePriority(t *testing.T) {
 	q := NewTaskQueue(10)
 
-	_ = q.Enqueue(createTestTask("task-1", 1, "test-agent"))
-	_ = q.Enqueue(createTestTask("task-2", 10, "test-agent"))
+	_ = q.Enqueue(createTestTask("task-1", 1))
+	_ = q.Enqueue(createTestTask("task-2", 10))
 
 	// task-2 should be first initially
 	peeked := q.Peek()
@@ -208,7 +207,7 @@ func TestUpdatePriorityNonExistent(t *testing.T) {
 func TestContains(t *testing.T) {
 	q := NewTaskQueue(10)
 
-	_ = q.Enqueue(createTestTask("task-1", 5, "test-agent"))
+	_ = q.Enqueue(createTestTask("task-1", 5))
 
 	if !q.Contains("task-1") {
 		t.Error("Contains should return true for existing task")
@@ -225,12 +224,12 @@ func TestIsFull(t *testing.T) {
 		t.Error("empty queue should not be full")
 	}
 
-	_ = q.Enqueue(createTestTask("task-1", 5, "test-agent"))
+	_ = q.Enqueue(createTestTask("task-1", 5))
 	if q.IsFull() {
 		t.Error("queue with 1 item (capacity 2) should not be full")
 	}
 
-	_ = q.Enqueue(createTestTask("task-2", 5, "test-agent"))
+	_ = q.Enqueue(createTestTask("task-2", 5))
 	if !q.IsFull() {
 		t.Error("queue at capacity should be full")
 	}
@@ -239,9 +238,9 @@ func TestIsFull(t *testing.T) {
 func TestList(t *testing.T) {
 	q := NewTaskQueue(10)
 
-	_ = q.Enqueue(createTestTask("task-1", 5, "test-agent"))
-	_ = q.Enqueue(createTestTask("task-2", 3, "test-agent"))
-	_ = q.Enqueue(createTestTask("task-3", 7, "test-agent"))
+	_ = q.Enqueue(createTestTask("task-1", 5))
+	_ = q.Enqueue(createTestTask("task-2", 3))
+	_ = q.Enqueue(createTestTask("task-3", 7))
 
 	list := q.List()
 	if len(list) != 3 {
@@ -252,8 +251,8 @@ func TestList(t *testing.T) {
 func TestClear(t *testing.T) {
 	q := NewTaskQueue(10)
 
-	_ = q.Enqueue(createTestTask("task-1", 5, "test-agent"))
-	_ = q.Enqueue(createTestTask("task-2", 3, "test-agent"))
+	_ = q.Enqueue(createTestTask("task-1", 5))
+	_ = q.Enqueue(createTestTask("task-2", 3))
 
 	q.Clear()
 	if q.Len() != 0 {
@@ -269,7 +268,7 @@ func TestUnlimitedQueue(t *testing.T) {
 	q := NewTaskQueue(0)
 
 	for i := 0; i < 100; i++ {
-		err := q.Enqueue(createTestTask(string(rune('a'+i)), 5, "test-agent"))
+		err := q.Enqueue(createTestTask(string(rune('a'+i)), 5))
 		if err != nil {
 			t.Fatalf("Enqueue failed on unlimited queue: %v", err)
 		}
@@ -284,11 +283,11 @@ func TestFIFOWithSamePriority(t *testing.T) {
 	q := NewTaskQueue(10)
 
 	// All tasks have same priority - should be FIFO
-	_ = q.Enqueue(createTestTask("first", 5, "test-agent"))
+	_ = q.Enqueue(createTestTask("first", 5))
 	time.Sleep(1 * time.Millisecond) // Ensure different timestamps
-	_ = q.Enqueue(createTestTask("second", 5, "test-agent"))
+	_ = q.Enqueue(createTestTask("second", 5))
 	time.Sleep(1 * time.Millisecond)
-	_ = q.Enqueue(createTestTask("third", 5, "test-agent"))
+	_ = q.Enqueue(createTestTask("third", 5))
 
 	first := q.Dequeue()
 	if first.TaskID != "first" {
@@ -300,4 +299,3 @@ func TestFIFOWithSamePriority(t *testing.T) {
 		t.Errorf("expected 'second' with FIFO ordering, got %s", second.TaskID)
 	}
 }
-

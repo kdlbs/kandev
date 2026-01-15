@@ -1,5 +1,5 @@
 import type { AppState, KanbanState } from '@/lib/state/store';
-import type { BoardSnapshot, Comment, Task } from '@/lib/types/http';
+import type { BoardSnapshot, Message, Task } from '@/lib/types/http';
 
 type KanbanTask = KanbanState['tasks'][number];
 
@@ -15,7 +15,7 @@ export function snapshotToState(snapshot: BoardSnapshot): Partial<AppState> {
         description: task.description ?? undefined,
         position: task.position ?? 0,
         state: task.state,
-        repositoryUrl: task.repository_url ?? undefined,
+        repositoryId: task.repository_id ?? undefined,
       } as KanbanTask;
     })
     .filter((task): task is KanbanTask => task !== null);
@@ -36,19 +36,19 @@ export function snapshotToState(snapshot: BoardSnapshot): Partial<AppState> {
 
 export function taskToState(
   task: Task,
-  comments?: { items: Comment[]; hasMore?: boolean; oldestCursor?: string | null }
+  messages?: { items: Message[]; hasMore?: boolean; oldestCursor?: string | null }
 ): Partial<AppState> {
   return {
     tasks: {
       activeTaskId: task.id,
     },
-    comments: comments
+    messages: messages
       ? {
-          taskId: task.id,
-          items: comments.items,
+          sessionId: messages.items[0]?.agent_session_id ?? null,
+          items: messages.items,
           isLoading: false,
-          hasMore: comments.hasMore ?? false,
-          oldestCursor: comments.oldestCursor ?? (comments.items[0]?.id ?? null),
+          hasMore: messages.hasMore ?? false,
+          oldestCursor: messages.oldestCursor ?? (messages.items[0]?.id ?? null),
         }
       : undefined,
   };

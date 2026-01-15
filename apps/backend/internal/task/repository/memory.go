@@ -19,7 +19,7 @@ type MemoryRepository struct {
 	tasks          map[string]*models.Task
 	boards         map[string]*models.Board
 	columns        map[string]*models.Column
-	comments       map[string]*models.Comment
+	messages       map[string]*models.Message
 	repositories   map[string]*models.Repository
 	repoScripts    map[string]*models.RepositoryScript
 	agentSessions  map[string]*models.AgentSession
@@ -40,7 +40,7 @@ func NewMemoryRepository() *MemoryRepository {
 		tasks:          make(map[string]*models.Task),
 		boards:         make(map[string]*models.Board),
 		columns:        make(map[string]*models.Column),
-		comments:       make(map[string]*models.Comment),
+		messages:       make(map[string]*models.Message),
 		repositories:   make(map[string]*models.Repository),
 		repoScripts:    make(map[string]*models.RepositoryScript),
 		agentSessions:  make(map[string]*models.AgentSession),
@@ -243,15 +243,9 @@ func (r *MemoryRepository) ListTasks(ctx context.Context, boardID string) ([]*mo
 
 	var result []*models.Task
 	for _, task := range r.tasks {
-		placement, ok := r.getTaskPlacement(task.ID, boardID)
-		if !ok {
-			continue
+		if task.BoardID == boardID {
+			result = append(result, task)
 		}
-		copy := *task
-		copy.BoardID = placement.boardID
-		copy.ColumnID = placement.columnID
-		copy.Position = placement.position
-		result = append(result, &copy)
 	}
 	return result, nil
 }
@@ -263,19 +257,8 @@ func (r *MemoryRepository) ListTasksByColumn(ctx context.Context, columnID strin
 
 	var result []*models.Task
 	for _, task := range r.tasks {
-		placements, ok := r.taskPlacements[task.ID]
-		if !ok {
-			continue
-		}
-		for _, placement := range placements {
-			if placement.columnID != columnID {
-				continue
-			}
-			copy := *task
-			copy.BoardID = placement.boardID
-			copy.ColumnID = placement.columnID
-			copy.Position = placement.position
-			result = append(result, &copy)
+		if task.ColumnID == columnID {
+			result = append(result, task)
 		}
 	}
 	return result, nil
@@ -300,9 +283,15 @@ func (r *MemoryRepository) AddTaskToBoard(ctx context.Context, taskID, boardID, 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if _, ok := r.tasks[taskID]; !ok {
+	task, ok := r.tasks[taskID]
+	if !ok {
 		return fmt.Errorf("task not found: %s", taskID)
 	}
+	task.BoardID = boardID
+	task.ColumnID = columnID
+	task.Position = position
+	task.UpdatedAt = time.Now().UTC()
+	r.tasks[taskID] = task
 	r.addTaskPlacement(taskID, boardID, columnID, position)
 	return nil
 }
@@ -312,8 +301,16 @@ func (r *MemoryRepository) RemoveTaskFromBoard(ctx context.Context, taskID, boar
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if _, ok := r.tasks[taskID]; !ok {
+	task, ok := r.tasks[taskID]
+	if !ok {
 		return fmt.Errorf("task not found: %s", taskID)
+	}
+	if task.BoardID == boardID {
+		task.BoardID = ""
+		task.ColumnID = ""
+		task.Position = 0
+		task.UpdatedAt = time.Now().UTC()
+		r.tasks[taskID] = task
 	}
 	if placements, ok := r.taskPlacements[taskID]; ok {
 		delete(placements, boardID)
@@ -497,7 +494,7 @@ func (r *MemoryRepository) GetRepository(ctx context.Context, id string) (*model
 	defer r.mu.RUnlock()
 
 	repository, ok := r.repositories[id]
-	if !ok {
+	if !ok || repository.DeletedAt != nil {
 		return nil, fmt.Errorf("repository not found: %s", id)
 	}
 	return repository, nil
@@ -507,7 +504,7 @@ func (r *MemoryRepository) UpdateRepository(ctx context.Context, repository *mod
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if _, ok := r.repositories[repository.ID]; !ok {
+	if existing, ok := r.repositories[repository.ID]; !ok || existing.DeletedAt != nil {
 		return fmt.Errorf("repository not found: %s", repository.ID)
 	}
 	repository.UpdatedAt = time.Now().UTC()
@@ -519,15 +516,14 @@ func (r *MemoryRepository) DeleteRepository(ctx context.Context, id string) erro
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if _, ok := r.repositories[id]; !ok {
+	repository, ok := r.repositories[id]
+	if !ok || repository.DeletedAt != nil {
 		return fmt.Errorf("repository not found: %s", id)
 	}
-	delete(r.repositories, id)
-	for scriptID, script := range r.repoScripts {
-		if script.RepositoryID == id {
-			delete(r.repoScripts, scriptID)
-		}
-	}
+	now := time.Now().UTC()
+	repository.DeletedAt = &now
+	repository.UpdatedAt = now
+	r.repositories[id] = repository
 	return nil
 }
 
@@ -537,7 +533,7 @@ func (r *MemoryRepository) ListRepositories(ctx context.Context, workspaceID str
 
 	result := make([]*models.Repository, 0)
 	for _, repository := range r.repositories {
-		if repository.WorkspaceID == workspaceID {
+		if repository.WorkspaceID == workspaceID && repository.DeletedAt == nil {
 			result = append(result, repository)
 		}
 	}
@@ -623,6 +619,13 @@ func (r *MemoryRepository) addTaskPlacement(taskID, boardID, columnID string, po
 	}
 }
 
+func isSessionActive(status models.AgentSessionState) bool {
+	return status == models.AgentSessionStateCreated ||
+		status == models.AgentSessionStateRunning ||
+		status == models.AgentSessionStateWaitingForInput ||
+		status == models.AgentSessionStateStarting
+}
+
 func (r *MemoryRepository) getTaskPlacement(taskID, boardID string) (*taskPlacement, bool) {
 	placements, ok := r.taskPlacements[taskID]
 	if !ok {
@@ -632,83 +635,83 @@ func (r *MemoryRepository) getTaskPlacement(taskID, boardID string) (*taskPlacem
 	return placement, ok
 }
 
-// Comment operations
+// Message operations
 
-// CreateComment creates a new comment
-func (r *MemoryRepository) CreateComment(ctx context.Context, comment *models.Comment) error {
+// CreateMessage creates a new message
+func (r *MemoryRepository) CreateMessage(ctx context.Context, message *models.Message) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if comment.ID == "" {
-		comment.ID = uuid.New().String()
+	if message.ID == "" {
+		message.ID = uuid.New().String()
 	}
-	if comment.CreatedAt.IsZero() {
-		comment.CreatedAt = time.Now().UTC()
+	if message.CreatedAt.IsZero() {
+		message.CreatedAt = time.Now().UTC()
 	}
-	if comment.AuthorType == "" {
-		comment.AuthorType = models.CommentAuthorUser
+	if message.AuthorType == "" {
+		message.AuthorType = models.MessageAuthorUser
 	}
-	if comment.Type == "" {
-		comment.Type = models.CommentTypeMessage
+	if message.Type == "" {
+		message.Type = models.MessageTypeMessage
 	}
 
-	r.comments[comment.ID] = comment
+	r.messages[message.ID] = message
 	return nil
 }
 
-// GetComment retrieves a comment by ID
-func (r *MemoryRepository) GetComment(ctx context.Context, id string) (*models.Comment, error) {
+// GetMessage retrieves a message by ID
+func (r *MemoryRepository) GetMessage(ctx context.Context, id string) (*models.Message, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	comment, ok := r.comments[id]
+	message, ok := r.messages[id]
 	if !ok {
-		return nil, fmt.Errorf("comment not found: %s", id)
+		return nil, fmt.Errorf("message not found: %s", id)
 	}
-	return comment, nil
+	return message, nil
 }
 
-// GetCommentByToolCallID retrieves a comment by task ID and tool_call_id in metadata.
-func (r *MemoryRepository) GetCommentByToolCallID(ctx context.Context, taskID, toolCallID string) (*models.Comment, error) {
+// GetMessageByToolCallID retrieves a message by session ID and tool_call_id in metadata.
+func (r *MemoryRepository) GetMessageByToolCallID(ctx context.Context, sessionID, toolCallID string) (*models.Message, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	for _, comment := range r.comments {
-		if comment.TaskID != taskID || comment.Metadata == nil {
+	for _, message := range r.messages {
+		if message.AgentSessionID != sessionID || message.Metadata == nil {
 			continue
 		}
-		if value, ok := comment.Metadata["tool_call_id"]; ok {
+		if value, ok := message.Metadata["tool_call_id"]; ok {
 			if toolCallIDValue, ok := value.(string); ok && toolCallIDValue == toolCallID {
-				return comment, nil
+				return message, nil
 			}
 		}
 	}
-	return nil, fmt.Errorf("comment not found: %s", toolCallID)
+	return nil, fmt.Errorf("message not found: %s", toolCallID)
 }
 
-// UpdateComment updates an existing comment.
-func (r *MemoryRepository) UpdateComment(ctx context.Context, comment *models.Comment) error {
+// UpdateMessage updates an existing message.
+func (r *MemoryRepository) UpdateMessage(ctx context.Context, message *models.Message) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	existing, ok := r.comments[comment.ID]
+	existing, ok := r.messages[message.ID]
 	if !ok {
-		return fmt.Errorf("comment not found: %s", comment.ID)
+		return fmt.Errorf("message not found: %s", message.ID)
 	}
-	comment.CreatedAt = existing.CreatedAt
-	r.comments[comment.ID] = comment
+	message.CreatedAt = existing.CreatedAt
+	r.messages[message.ID] = message
 	return nil
 }
 
-// ListComments returns all comments for a task ordered by creation time.
-func (r *MemoryRepository) ListComments(ctx context.Context, taskID string) ([]*models.Comment, error) {
+// ListMessages returns all messages for a session ordered by creation time.
+func (r *MemoryRepository) ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	var result []*models.Comment
-	for _, comment := range r.comments {
-		if comment.TaskID == taskID {
-			result = append(result, comment)
+	var result []*models.Message
+	for _, message := range r.messages {
+		if message.AgentSessionID == sessionID {
+			result = append(result, message)
 		}
 	}
 	sort.Slice(result, func(i, j int) bool {
@@ -720,8 +723,8 @@ func (r *MemoryRepository) ListComments(ctx context.Context, taskID string) ([]*
 	return result, nil
 }
 
-// ListCommentsPaginated returns comments for a task ordered by creation time with pagination.
-func (r *MemoryRepository) ListCommentsPaginated(ctx context.Context, taskID string, opts ListCommentsOptions) ([]*models.Comment, bool, error) {
+// ListMessagesPaginated returns messages for a session ordered by creation time with pagination.
+func (r *MemoryRepository) ListMessagesPaginated(ctx context.Context, sessionID string, opts ListMessagesOptions) ([]*models.Message, bool, error) {
 	limit := opts.Limit
 	if limit < 0 {
 		limit = 0
@@ -730,32 +733,32 @@ func (r *MemoryRepository) ListCommentsPaginated(ctx context.Context, taskID str
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	var cursor *models.Comment
+	var cursor *models.Message
 	if opts.Before != "" {
-		comment, ok := r.comments[opts.Before]
+		message, ok := r.messages[opts.Before]
 		if !ok {
-			return nil, false, fmt.Errorf("comment not found: %s", opts.Before)
+			return nil, false, fmt.Errorf("message not found: %s", opts.Before)
 		}
-		if comment.TaskID != taskID {
-			return nil, false, fmt.Errorf("comment cursor not found: %s", opts.Before)
+		if message.AgentSessionID != sessionID {
+			return nil, false, fmt.Errorf("message cursor not found: %s", opts.Before)
 		}
-		cursor = comment
+		cursor = message
 	}
 	if opts.After != "" {
-		comment, ok := r.comments[opts.After]
+		message, ok := r.messages[opts.After]
 		if !ok {
-			return nil, false, fmt.Errorf("comment not found: %s", opts.After)
+			return nil, false, fmt.Errorf("message not found: %s", opts.After)
 		}
-		if comment.TaskID != taskID {
-			return nil, false, fmt.Errorf("comment cursor not found: %s", opts.After)
+		if message.AgentSessionID != sessionID {
+			return nil, false, fmt.Errorf("message cursor not found: %s", opts.After)
 		}
-		cursor = comment
+		cursor = message
 	}
 
-	var result []*models.Comment
-	for _, comment := range r.comments {
-		if comment.TaskID == taskID {
-			result = append(result, comment)
+	var result []*models.Message
+	for _, message := range r.messages {
+		if message.AgentSessionID == sessionID {
+			result = append(result, message)
 		}
 	}
 	sort.Slice(result, func(i, j int) bool {
@@ -767,14 +770,14 @@ func (r *MemoryRepository) ListCommentsPaginated(ctx context.Context, taskID str
 
 	if cursor != nil {
 		filtered := result[:0]
-		for _, comment := range result {
+		for _, message := range result {
 			if opts.Before != "" {
-				if comment.CreatedAt.Before(cursor.CreatedAt) || (comment.CreatedAt.Equal(cursor.CreatedAt) && comment.ID < cursor.ID) {
-					filtered = append(filtered, comment)
+				if message.CreatedAt.Before(cursor.CreatedAt) || (message.CreatedAt.Equal(cursor.CreatedAt) && message.ID < cursor.ID) {
+					filtered = append(filtered, message)
 				}
 			} else if opts.After != "" {
-				if comment.CreatedAt.After(cursor.CreatedAt) || (comment.CreatedAt.Equal(cursor.CreatedAt) && comment.ID > cursor.ID) {
-					filtered = append(filtered, comment)
+				if message.CreatedAt.After(cursor.CreatedAt) || (message.CreatedAt.Equal(cursor.CreatedAt) && message.ID > cursor.ID) {
+					filtered = append(filtered, message)
 				}
 			}
 		}
@@ -795,15 +798,15 @@ func (r *MemoryRepository) ListCommentsPaginated(ctx context.Context, taskID str
 	return result, hasMore, nil
 }
 
-// DeleteComment deletes a comment by ID
-func (r *MemoryRepository) DeleteComment(ctx context.Context, id string) error {
+// DeleteMessage deletes a message by ID
+func (r *MemoryRepository) DeleteMessage(ctx context.Context, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if _, ok := r.comments[id]; !ok {
-		return fmt.Errorf("comment not found: %s", id)
+	if _, ok := r.messages[id]; !ok {
+		return fmt.Errorf("message not found: %s", id)
 	}
-	delete(r.comments, id)
+	delete(r.messages, id)
 	return nil
 }
 
@@ -820,6 +823,9 @@ func (r *MemoryRepository) CreateAgentSession(ctx context.Context, session *mode
 	now := time.Now().UTC()
 	if session.StartedAt.IsZero() {
 		session.StartedAt = now
+	}
+	if session.State == "" {
+		session.State = models.AgentSessionStateCreated
 	}
 	session.UpdatedAt = now
 
@@ -864,7 +870,7 @@ func (r *MemoryRepository) GetActiveAgentSessionByTaskID(ctx context.Context, ta
 	defer r.mu.RUnlock()
 
 	for _, session := range r.agentSessions {
-		if session.TaskID == taskID && (session.Status == models.AgentSessionStatusRunning || session.Status == models.AgentSessionStatusWaiting || session.Status == models.AgentSessionStatusPending) {
+		if session.TaskID == taskID && (session.State == models.AgentSessionStateCreated || session.State == models.AgentSessionStateStarting || session.State == models.AgentSessionStateRunning || session.State == models.AgentSessionStateWaitingForInput) {
 			return session, nil
 		}
 	}
@@ -884,8 +890,8 @@ func (r *MemoryRepository) UpdateAgentSession(ctx context.Context, session *mode
 	return nil
 }
 
-// UpdateAgentSessionStatus updates the status of an agent session
-func (r *MemoryRepository) UpdateAgentSessionStatus(ctx context.Context, id string, status models.AgentSessionStatus, errorMessage string) error {
+// UpdateAgentSessionState updates the status of an agent session
+func (r *MemoryRepository) UpdateAgentSessionState(ctx context.Context, id string, status models.AgentSessionState, errorMessage string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -893,10 +899,10 @@ func (r *MemoryRepository) UpdateAgentSessionStatus(ctx context.Context, id stri
 	if !ok {
 		return fmt.Errorf("agent session not found: %s", id)
 	}
-	session.Status = status
+	session.State = status
 	session.ErrorMessage = errorMessage
 	session.UpdatedAt = time.Now().UTC()
-	if status == models.AgentSessionStatusCompleted || status == models.AgentSessionStatusFailed || status == models.AgentSessionStatusStopped {
+	if status == models.AgentSessionStateCompleted || status == models.AgentSessionStateFailed || status == models.AgentSessionStateCancelled {
 		now := time.Now().UTC()
 		session.CompletedAt = &now
 	}
@@ -924,11 +930,66 @@ func (r *MemoryRepository) ListActiveAgentSessions(ctx context.Context) ([]*mode
 
 	var result []*models.AgentSession
 	for _, session := range r.agentSessions {
-		if session.Status == models.AgentSessionStatusRunning || session.Status == models.AgentSessionStatusWaiting || session.Status == models.AgentSessionStatusPending {
+		if session.State == models.AgentSessionStateCreated || session.State == models.AgentSessionStateStarting || session.State == models.AgentSessionStateRunning || session.State == models.AgentSessionStateWaitingForInput {
 			result = append(result, session)
 		}
 	}
 	return result, nil
+}
+
+func (r *MemoryRepository) HasActiveAgentSessionsByAgentProfile(ctx context.Context, agentProfileID string) (bool, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	for _, session := range r.agentSessions {
+		if session.AgentProfileID == agentProfileID && isSessionActive(session.State) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (r *MemoryRepository) HasActiveAgentSessionsByExecutor(ctx context.Context, executorID string) (bool, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	for _, session := range r.agentSessions {
+		if session.ExecutorID == executorID && isSessionActive(session.State) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (r *MemoryRepository) HasActiveAgentSessionsByEnvironment(ctx context.Context, environmentID string) (bool, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	for _, session := range r.agentSessions {
+		if session.EnvironmentID == environmentID && isSessionActive(session.State) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (r *MemoryRepository) HasActiveAgentSessionsByRepository(ctx context.Context, repositoryID string) (bool, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	for _, session := range r.agentSessions {
+		if !isSessionActive(session.State) {
+			continue
+		}
+		task, ok := r.tasks[session.TaskID]
+		if !ok {
+			continue
+		}
+		if task.RepositoryID == repositoryID {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // DeleteAgentSession deletes an agent session by ID
@@ -965,7 +1026,7 @@ func (r *MemoryRepository) GetExecutor(ctx context.Context, id string) (*models.
 	defer r.mu.RUnlock()
 
 	executor, ok := r.executors[id]
-	if !ok {
+	if !ok || executor.DeletedAt != nil {
 		return nil, fmt.Errorf("executor not found: %s", id)
 	}
 	return executor, nil
@@ -975,7 +1036,7 @@ func (r *MemoryRepository) UpdateExecutor(ctx context.Context, executor *models.
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if _, ok := r.executors[executor.ID]; !ok {
+	if existing, ok := r.executors[executor.ID]; !ok || existing.DeletedAt != nil {
 		return fmt.Errorf("executor not found: %s", executor.ID)
 	}
 	executor.UpdatedAt = time.Now().UTC()
@@ -987,10 +1048,14 @@ func (r *MemoryRepository) DeleteExecutor(ctx context.Context, id string) error 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if _, ok := r.executors[id]; !ok {
+	executor, ok := r.executors[id]
+	if !ok || executor.DeletedAt != nil {
 		return fmt.Errorf("executor not found: %s", id)
 	}
-	delete(r.executors, id)
+	now := time.Now().UTC()
+	executor.DeletedAt = &now
+	executor.UpdatedAt = now
+	r.executors[id] = executor
 	return nil
 }
 
@@ -1000,7 +1065,9 @@ func (r *MemoryRepository) ListExecutors(ctx context.Context) ([]*models.Executo
 
 	result := make([]*models.Executor, 0, len(r.executors))
 	for _, executor := range r.executors {
-		result = append(result, executor)
+		if executor.DeletedAt == nil {
+			result = append(result, executor)
+		}
 	}
 	return result, nil
 }
@@ -1026,7 +1093,7 @@ func (r *MemoryRepository) GetEnvironment(ctx context.Context, id string) (*mode
 	defer r.mu.RUnlock()
 
 	environment, ok := r.environments[id]
-	if !ok {
+	if !ok || environment.DeletedAt != nil {
 		return nil, fmt.Errorf("environment not found: %s", id)
 	}
 	return environment, nil
@@ -1036,7 +1103,7 @@ func (r *MemoryRepository) UpdateEnvironment(ctx context.Context, environment *m
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if _, ok := r.environments[environment.ID]; !ok {
+	if existing, ok := r.environments[environment.ID]; !ok || existing.DeletedAt != nil {
 		return fmt.Errorf("environment not found: %s", environment.ID)
 	}
 	environment.UpdatedAt = time.Now().UTC()
@@ -1048,10 +1115,14 @@ func (r *MemoryRepository) DeleteEnvironment(ctx context.Context, id string) err
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if _, ok := r.environments[id]; !ok {
+	environment, ok := r.environments[id]
+	if !ok || environment.DeletedAt != nil {
 		return fmt.Errorf("environment not found: %s", id)
 	}
-	delete(r.environments, id)
+	now := time.Now().UTC()
+	environment.DeletedAt = &now
+	environment.UpdatedAt = now
+	r.environments[id] = environment
 	return nil
 }
 
@@ -1061,7 +1132,9 @@ func (r *MemoryRepository) ListEnvironments(ctx context.Context) ([]*models.Envi
 
 	result := make([]*models.Environment, 0, len(r.environments))
 	for _, environment := range r.environments {
-		result = append(result, environment)
+		if environment.DeletedAt == nil {
+			result = append(result, environment)
+		}
 	}
 	return result, nil
 }

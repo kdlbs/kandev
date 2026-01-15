@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/service"
@@ -67,6 +68,9 @@ func (c *ExecutorController) UpdateExecutor(ctx context.Context, req dto.UpdateE
 
 func (c *ExecutorController) DeleteExecutor(ctx context.Context, req dto.DeleteExecutorRequest) (dto.SuccessResponse, error) {
 	if err := c.service.DeleteExecutor(ctx, req.ID); err != nil {
+		if errors.Is(err, service.ErrActiveAgentSessions) {
+			return dto.SuccessResponse{}, ErrActiveAgentSessions
+		}
 		return dto.SuccessResponse{}, err
 	}
 	return dto.SuccessResponse{Success: true}, nil

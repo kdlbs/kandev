@@ -32,8 +32,13 @@ const (
 
 // Event types for comments
 const (
-	CommentAdded   = "comment.added"
-	CommentUpdated = "comment.updated"
+	MessageAdded   = "message.added"
+	MessageUpdated = "message.updated"
+)
+
+// Event types for agent sessions
+const (
+	AgentSessionStateChanged = "agent_session.state_changed"
 )
 
 // Event types for repositories

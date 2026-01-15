@@ -15,7 +15,7 @@ import {
   IconX,
 } from '@tabler/icons-react';
 import { cn } from '@/lib/utils';
-import type { Comment } from '@/lib/types/http';
+import type { Message } from '@/lib/types/http';
 import type { ToolCallMetadata } from '@/components/task/chat/types';
 
 function getToolIcon(toolName: string | undefined, className: string) {
@@ -51,7 +51,7 @@ function getStatusIcon(status?: string) {
   }
 }
 
-export function ToolCallMessage({ comment }: { comment: Comment }) {
+export function ToolCallMessage({ comment }: { comment: Message }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const metadata = comment.metadata as ToolCallMetadata | undefined;
 

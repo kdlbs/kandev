@@ -18,7 +18,7 @@ const AGENTS = [
 type TaskLeftPanelProps = {
   taskId: string | null;
   taskDescription?: string;
-  isLoadingComments: boolean;
+  isLoadingMessages: boolean;
   isAgentWorking: boolean;
   onSendMessage: (content: string) => Promise<void>;
   selectedDiffPath: string | null;
@@ -30,7 +30,7 @@ type TaskLeftPanelProps = {
 export const TaskLeftPanel = memo(function TaskLeftPanel({
   taskId,
   taskDescription,
-  isLoadingComments,
+  isLoadingMessages,
   isAgentWorking,
   onSendMessage,
   selectedDiffPath: externalSelectedDiffPath,
@@ -163,8 +163,9 @@ export const TaskLeftPanel = memo(function TaskLeftPanel({
             <TaskChatPanel
               agents={AGENTS}
               onSend={onSendMessage}
-              isLoading={isLoadingComments}
+              isLoading={isLoadingMessages}
               isAgentWorking={isAgentWorking}
+              taskId={taskId ?? undefined}
               taskDescription={taskDescription}
             />
           ) : (
@@ -183,4 +184,3 @@ export const TaskLeftPanel = memo(function TaskLeftPanel({
     </div>
   );
 });
-

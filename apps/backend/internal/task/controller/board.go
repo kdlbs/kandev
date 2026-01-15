@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/service"
@@ -132,6 +133,50 @@ func (c *BoardController) GetSnapshot(ctx context.Context, req dto.GetBoardSnaps
 		return dto.BoardSnapshotDTO{}, err
 	}
 	tasks, err := c.service.ListTasks(ctx, req.BoardID)
+	if err != nil {
+		return dto.BoardSnapshotDTO{}, err
+	}
+
+	resp := dto.BoardSnapshotDTO{
+		Board:   dto.FromBoard(board),
+		Columns: make([]dto.ColumnDTO, 0, len(columns)),
+		Tasks:   make([]dto.TaskDTO, 0, len(tasks)),
+	}
+	for _, column := range columns {
+		resp.Columns = append(resp.Columns, dto.FromColumn(column))
+	}
+	for _, task := range tasks {
+		resp.Tasks = append(resp.Tasks, dto.FromTask(task))
+	}
+	return resp, nil
+}
+
+func (c *BoardController) GetWorkspaceSnapshot(ctx context.Context, req dto.GetWorkspaceBoardSnapshotRequest) (dto.BoardSnapshotDTO, error) {
+	boardID := req.BoardID
+	if boardID == "" {
+		boards, err := c.service.ListBoards(ctx, req.WorkspaceID)
+		if err != nil {
+			return dto.BoardSnapshotDTO{}, err
+		}
+		if len(boards) == 0 {
+			return dto.BoardSnapshotDTO{}, fmt.Errorf("no boards found for workspace: %s", req.WorkspaceID)
+		}
+		boardID = boards[0].ID
+	}
+
+	board, err := c.service.GetBoard(ctx, boardID)
+	if err != nil {
+		return dto.BoardSnapshotDTO{}, err
+	}
+	if board.WorkspaceID != req.WorkspaceID {
+		return dto.BoardSnapshotDTO{}, fmt.Errorf("board does not belong to workspace: %s", req.WorkspaceID)
+	}
+
+	columns, err := c.service.ListColumns(ctx, boardID)
+	if err != nil {
+		return dto.BoardSnapshotDTO{}, err
+	}
+	tasks, err := c.service.ListTasks(ctx, boardID)
 	if err != nil {
 		return dto.BoardSnapshotDTO{}, err
 	}
