@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -92,7 +93,7 @@ type Service struct {
 }
 
 type readyState struct {
-	readySeen         bool
+	readySeen          bool
 	promptCompleteSeen bool
 }
 
@@ -148,15 +149,16 @@ func NewService(
 
 	// Create the watcher with event handlers that wire everything together
 	handlers := watcher.EventHandlers{
-		OnTaskStateChanged: s.handleTaskStateChanged,
-		OnAgentReady:       s.handleAgentReady,
-		OnAgentCompleted:   s.handleAgentCompleted,
-		OnAgentFailed:      s.handleAgentFailed,
-		OnACPMessage:       s.handleACPMessage,
-		OnPromptComplete:   s.handlePromptComplete,
-		OnToolCallStarted:  s.handleToolCallStarted,
-		OnToolCallComplete: s.handleToolCallComplete,
-		OnGitStatusUpdated: s.handleGitStatusUpdated,
+		OnTaskStateChanged:  s.handleTaskStateChanged,
+		OnAgentReady:        s.handleAgentReady,
+		OnAgentCompleted:    s.handleAgentCompleted,
+		OnAgentFailed:       s.handleAgentFailed,
+		OnACPMessage:        s.handleACPMessage,
+		OnACPSessionCreated: s.handleACPSessionCreated,
+		OnPromptComplete:    s.handlePromptComplete,
+		OnToolCallStarted:   s.handleToolCallStarted,
+		OnToolCallComplete:  s.handleToolCallComplete,
+		OnGitStatusUpdated:  s.handleGitStatusUpdated,
 	}
 	s.watcher = watcher.NewWatcher(eventBus, handlers, log)
 
@@ -342,6 +344,62 @@ func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID s
 	return execution, nil
 }
 
+// ResumeTaskSession restarts a specific task session using its stored worktree.
+func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID string) (*executor.TaskExecution, error) {
+	s.logger.Info("resuming task session",
+		zap.String("task_id", taskID),
+		zap.String("task_session_id", sessionID))
+
+	if exec, ok := s.executor.GetExecutionWithContext(ctx, taskID); ok && exec != nil {
+		return nil, executor.ErrExecutionAlreadyRunning
+	}
+
+	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateScheduling); err != nil {
+		s.logger.Warn("failed to update task state to SCHEDULING",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+	}
+
+	task, err := s.scheduler.GetTask(ctx, taskID)
+	if err != nil {
+		s.logger.Error("failed to fetch task for resume",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return nil, err
+	}
+
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if session.TaskID != taskID {
+		return nil, fmt.Errorf("task session does not belong to task")
+	}
+	if session.WorktreePath == "" {
+		return nil, fmt.Errorf("task session has no worktree path")
+	}
+	if _, err := os.Stat(session.WorktreePath); err != nil {
+		return nil, fmt.Errorf("worktree path not found: %w", err)
+	}
+
+	s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateStarting, "", true)
+
+	execution, err := s.executor.ResumeSession(ctx, task, session)
+	if err != nil {
+		return nil, err
+	}
+
+	s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateRunning, "", true)
+
+	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateInProgress); err != nil {
+		s.logger.Warn("failed to update task state to IN_PROGRESS",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+	}
+
+	return execution, nil
+}
+
 // StopTask stops agent execution for a task
 func (s *Service) StopTask(ctx context.Context, taskID string, reason string, force bool) error {
 	s.logger.Info("stopping task execution",
@@ -481,6 +539,57 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 	if s.markAgentReady(data.TaskID) {
 		s.finalizeAgentReady(data.TaskID, "")
 	}
+}
+
+func (s *Service) handleACPSessionCreated(ctx context.Context, data watcher.ACPSessionEventData) {
+	if data.TaskID == "" || data.ACPSessionID == "" {
+		return
+	}
+
+	sessionID := ""
+	if exec, ok := s.executor.GetExecution(data.TaskID); ok && exec != nil {
+		sessionID = exec.SessionID
+	}
+	if sessionID == "" {
+		if session, err := s.repo.GetTaskSessionByTaskID(ctx, data.TaskID); err == nil && session != nil {
+			sessionID = session.ID
+		}
+	}
+	if sessionID == "" {
+		s.logger.Warn("no task session found to store ACP session id",
+			zap.String("task_id", data.TaskID))
+		return
+	}
+
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to load task session for ACP session update",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return
+	}
+
+	if session.Metadata == nil {
+		session.Metadata = make(map[string]interface{})
+	}
+	if existing, ok := session.Metadata["acp_session_id"].(string); ok && existing == data.ACPSessionID {
+		return
+	}
+	session.Metadata["acp_session_id"] = data.ACPSessionID
+
+	if err := s.repo.UpdateTaskSession(ctx, session); err != nil {
+		s.logger.Warn("failed to persist ACP session id",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return
+	}
+
+	s.logger.Info("stored ACP session id for task session",
+		zap.String("task_id", data.TaskID),
+		zap.String("task_session_id", sessionID),
+		zap.String("acp_session_id", data.ACPSessionID))
 }
 
 // handleAgentCompleted handles agent completion events
@@ -665,22 +774,22 @@ func (s *Service) updateTaskSessionState(ctx context.Context, taskID, sessionID 
 		return
 	}
 	if err := s.repo.UpdateTaskSessionState(ctx, sessionID, nextState, errorMessage); err != nil {
-		s.logger.Error("failed to update agent session state",
+		s.logger.Error("failed to update task session state",
 			zap.String("session_id", sessionID),
 			zap.String("state", string(nextState)),
 			zap.Error(err))
 	}
-	s.logger.Info("agent session state updated",
+	s.logger.Info("task session state updated",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID),
 		zap.String("old_state", string(oldState)),
 		zap.String("new_state", string(nextState)))
 	if s.eventBus != nil {
-		_ = s.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(events.TaskSessionStateChanged, "agent-session", map[string]interface{}{
-			"task_id":          taskID,
-			"agent_session_id": sessionID,
-			"old_state":        string(oldState),
-			"new_state":        string(nextState),
+		_ = s.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(events.TaskSessionStateChanged, "task-session", map[string]interface{}{
+			"task_id":         taskID,
+			"task_session_id": sessionID,
+			"old_state":       string(oldState),
+			"new_state":       string(nextState),
 		}))
 	}
 	if taskID != "" {

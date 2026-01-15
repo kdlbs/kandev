@@ -41,6 +41,8 @@ import { useAppStore } from '@/components/state-provider';
 import { formatUserHomePath } from '@/lib/utils';
 
 type TaskTopBarProps = {
+  taskId?: string | null;
+  activeSessionId?: string | null;
   taskTitle?: string;
   taskDescription?: string;
   baseBranch?: string;
@@ -55,6 +57,8 @@ type TaskTopBarProps = {
 };
 
 const TaskTopBar = memo(function TaskTopBar({
+  taskId,
+  activeSessionId,
   taskTitle,
   taskDescription,
   baseBranch,
@@ -148,7 +152,12 @@ const TaskTopBar = memo(function TaskTopBar({
           </>
         )}
         <span className="text-sm font-medium">{taskTitle ?? 'Task details'}</span>
-        <SessionsDropdown taskTitle={taskTitle} taskDescription={taskDescription} />
+        <SessionsDropdown
+          taskId={taskId ?? null}
+          activeSessionId={activeSessionId ?? null}
+          taskTitle={taskTitle}
+          taskDescription={taskDescription}
+        />
         {displayBranch && (
           <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
             <Tooltip>

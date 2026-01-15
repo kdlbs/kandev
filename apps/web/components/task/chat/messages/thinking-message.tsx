@@ -9,7 +9,7 @@ export function ThinkingMessage({ comment }: { comment: Message }) {
   const text = metadata?.thinking ?? comment.content;
   if (!text) return null;
   return (
-    <div className="max-w-[85%] rounded-lg border border-border/50 bg-background/60 px-4 py-3 text-sm">
+    <div className="w-full rounded-lg border border-border/60 bg-background/60 px-4 py-3 text-sm">
       <div className="flex items-center gap-2 text-muted-foreground mb-2 uppercase tracking-wide text-[11px]">
         <IconBrain className="h-3.5 w-3.5" />
         <span>Thinking</span>

@@ -25,10 +25,10 @@ type ControlServer struct {
 	router  *gin.Engine
 
 	// Single-instance mode: embedded process manager and config
-	singleMode   bool
-	singleCfg    *config.Config
+	singleMode    bool
+	singleCfg     *config.Config
 	singleProcMgr *process.Manager
-	upgrader     websocket.Upgrader
+	upgrader      websocket.Upgrader
 }
 
 // NewControlServer creates a new ControlServer for multi-instance management.
@@ -106,6 +106,7 @@ func (m *ControlServer) setupSingleInstanceRoutes(api *gin.RouterGroup) {
 	// ACP high-level methods
 	api.POST("/acp/initialize", m.handleACPInitialize)
 	api.POST("/acp/session/new", m.handleACPNewSession)
+	api.POST("/acp/session/load", m.handleACPLoadSession)
 	api.POST("/acp/prompt", m.handleACPPrompt)
 	api.GET("/acp/stream", m.handleACPStreamWS)
 
@@ -259,7 +260,6 @@ func (m *ControlServer) handleStop(c *gin.Context) {
 	})
 }
 
-
 // ACP handlers for single-instance mode
 
 func (m *ControlServer) handleACPInitialize(c *gin.Context) {
@@ -346,6 +346,50 @@ func (m *ControlServer) handleACPNewSession(c *gin.Context) {
 	})
 }
 
+func (m *ControlServer) handleACPLoadSession(c *gin.Context) {
+	var req LoadSessionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, LoadSessionResponse{
+			Success: false,
+			Error:   "invalid request: " + err.Error(),
+		})
+		return
+	}
+	if req.SessionID == "" {
+		c.JSON(http.StatusBadRequest, LoadSessionResponse{
+			Success: false,
+			Error:   "session_id is required",
+		})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+	defer cancel()
+
+	adapter := m.singleProcMgr.GetAdapter()
+	if adapter == nil {
+		c.JSON(http.StatusServiceUnavailable, LoadSessionResponse{
+			Success: false,
+			Error:   "agent not running",
+		})
+		return
+	}
+
+	if err := adapter.LoadSession(ctx, req.SessionID); err != nil {
+		m.logger.Error("load session failed", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, LoadSessionResponse{
+			Success: false,
+			Error:   err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, LoadSessionResponse{
+		Success:   true,
+		SessionID: req.SessionID,
+	})
+}
+
 func (m *ControlServer) handleACPPrompt(c *gin.Context) {
 	var req PromptRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -392,7 +436,6 @@ func (m *ControlServer) handleACPPrompt(c *gin.Context) {
 		Success: true,
 	})
 }
-
 
 func (m *ControlServer) handleACPStreamWS(c *gin.Context) {
 	conn, err := m.upgrader.Upgrade(c.Writer, c.Request, nil)
@@ -507,7 +550,6 @@ func (m *ControlServer) handlePermissionRespond(c *gin.Context) {
 		Success: true,
 	})
 }
-
 
 // Workspace handlers for single-instance mode
 

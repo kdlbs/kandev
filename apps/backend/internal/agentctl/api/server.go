@@ -66,6 +66,7 @@ func (s *Server) setupRoutes() {
 		// ACP high-level methods (using acp-go-sdk)
 		api.POST("/acp/initialize", s.handleACPInitialize)
 		api.POST("/acp/session/new", s.handleACPNewSession)
+		api.POST("/acp/session/load", s.handleACPLoadSession)
 		api.POST("/acp/prompt", s.handleACPPrompt)
 		api.GET("/acp/stream", s.handleACPStreamWS)
 

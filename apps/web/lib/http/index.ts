@@ -11,6 +11,7 @@ import type {
   ListMessagesResponse,
   RepositoryBranchesResponse,
   Task,
+  TaskSessionsResponse,
   UserSettingsResponse,
   Workspace,
 } from '@/lib/types/http';
@@ -157,6 +158,10 @@ export async function updateUserSettings(
 
 export async function fetchTask(taskId: string, options?: ApiRequestOptions) {
   return fetchJson<Task>(`/api/v1/tasks/${taskId}`, options);
+}
+
+export async function listTaskSessions(taskId: string, options?: ApiRequestOptions) {
+  return fetchJson<TaskSessionsResponse>(`/api/v1/tasks/${taskId}/sessions`, options);
 }
 
 export async function listTaskSessionMessages(

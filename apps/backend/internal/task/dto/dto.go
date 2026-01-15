@@ -112,6 +112,37 @@ type TaskDTO struct {
 	WorktreeBranch *string `json:"worktree_branch,omitempty"`
 }
 
+type TaskSessionDTO struct {
+	ID                   string                 `json:"id"`
+	TaskID               string                 `json:"task_id"`
+	AgentInstanceID      string                 `json:"agent_instance_id,omitempty"`
+	ContainerID          string                 `json:"container_id,omitempty"`
+	AgentProfileID       string                 `json:"agent_profile_id,omitempty"`
+	ExecutorID           string                 `json:"executor_id,omitempty"`
+	EnvironmentID        string                 `json:"environment_id,omitempty"`
+	RepositoryID         string                 `json:"repository_id,omitempty"`
+	BaseBranch           string                 `json:"base_branch,omitempty"`
+	WorktreeID           string                 `json:"worktree_id,omitempty"`
+	WorktreePath         string                 `json:"worktree_path,omitempty"`
+	WorktreeBranch       string                 `json:"worktree_branch,omitempty"`
+	State                models.TaskSessionState `json:"state"`
+	Progress             int                    `json:"progress"`
+	ErrorMessage         string                 `json:"error_message,omitempty"`
+	Metadata             map[string]interface{} `json:"metadata,omitempty"`
+	AgentProfileSnapshot map[string]interface{} `json:"agent_profile_snapshot,omitempty"`
+	ExecutorSnapshot     map[string]interface{} `json:"executor_snapshot,omitempty"`
+	EnvironmentSnapshot  map[string]interface{} `json:"environment_snapshot,omitempty"`
+	RepositorySnapshot   map[string]interface{} `json:"repository_snapshot,omitempty"`
+	StartedAt            time.Time              `json:"started_at"`
+	CompletedAt          *time.Time             `json:"completed_at,omitempty"`
+	UpdatedAt            time.Time              `json:"updated_at"`
+}
+
+type ListTaskSessionsResponse struct {
+	Sessions []TaskSessionDTO `json:"sessions"`
+	Total    int              `json:"total"`
+}
+
 type BoardSnapshotDTO struct {
 	Board   BoardDTO    `json:"board"`
 	Columns []ColumnDTO `json:"columns"`
@@ -347,4 +378,33 @@ func FromTask(task *models.Task) TaskDTO {
 		UpdatedAt:       task.UpdatedAt,
 		Metadata:        task.Metadata,
 	}
+}
+
+func FromTaskSession(session *models.TaskSession) TaskSessionDTO {
+	result := TaskSessionDTO{
+		ID:                   session.ID,
+		TaskID:               session.TaskID,
+		AgentInstanceID:      session.AgentInstanceID,
+		ContainerID:          session.ContainerID,
+		AgentProfileID:       session.AgentProfileID,
+		ExecutorID:           session.ExecutorID,
+		EnvironmentID:        session.EnvironmentID,
+		RepositoryID:         session.RepositoryID,
+		BaseBranch:           session.BaseBranch,
+		WorktreeID:           session.WorktreeID,
+		WorktreePath:         session.WorktreePath,
+		WorktreeBranch:       session.WorktreeBranch,
+		State:                session.State,
+		Progress:             session.Progress,
+		ErrorMessage:         session.ErrorMessage,
+		Metadata:             session.Metadata,
+		AgentProfileSnapshot: session.AgentProfileSnapshot,
+		ExecutorSnapshot:     session.ExecutorSnapshot,
+		EnvironmentSnapshot:  session.EnvironmentSnapshot,
+		RepositorySnapshot:   session.RepositorySnapshot,
+		StartedAt:            session.StartedAt,
+		CompletedAt:          session.CompletedAt,
+		UpdatedAt:            session.UpdatedAt,
+	}
+	return result
 }

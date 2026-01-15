@@ -36,6 +36,7 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api := router.Group("/api/v1")
 	api.GET("/boards/:id/tasks", h.httpListTasks)
 	api.GET("/tasks/:id", h.httpGetTask)
+	api.GET("/tasks/:id/sessions", h.httpListTaskSessions)
 	api.POST("/tasks", h.httpCreateTask)
 	api.PATCH("/tasks/:id", h.httpUpdateTask)
 	api.POST("/tasks/:id/move", h.httpMoveTask)
@@ -50,6 +51,7 @@ func (h *TaskHandlers) registerWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionTaskDelete, h.wsDeleteTask)
 	dispatcher.RegisterFunc(ws.ActionTaskMove, h.wsMoveTask)
 	dispatcher.RegisterFunc(ws.ActionTaskState, h.wsUpdateTaskState)
+	dispatcher.RegisterFunc(ws.ActionTaskSessionList, h.wsListTaskSessions)
 }
 
 // HTTP handlers
@@ -67,6 +69,15 @@ func (h *TaskHandlers) httpGetTask(c *gin.Context) {
 	resp, err := h.controller.GetTask(c.Request.Context(), dto.GetTaskRequest{ID: c.Param("id")})
 	if err != nil {
 		handleNotFound(c, h.logger, err, "task not found")
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+func (h *TaskHandlers) httpListTaskSessions(c *gin.Context) {
+	resp, err := h.controller.ListTaskSessions(c.Request.Context(), dto.ListTaskSessionsRequest{TaskID: c.Param("id")})
+	if err != nil {
+		handleNotFound(c, h.logger, err, "task sessions not found")
 		return
 	}
 	c.JSON(http.StatusOK, resp)
@@ -198,6 +209,27 @@ func (h *TaskHandlers) httpDeleteTask(c *gin.Context) {
 }
 
 // WS handlers
+
+type wsListTaskSessionsRequest struct {
+	TaskID string `json:"task_id"`
+}
+
+func (h *TaskHandlers) wsListTaskSessions(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req wsListTaskSessionsRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.TaskID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+	}
+
+	resp, err := h.controller.ListTaskSessions(ctx, dto.ListTaskSessionsRequest{TaskID: req.TaskID})
+	if err != nil {
+		h.logger.Error("failed to list task sessions", zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list task sessions", nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, resp)
+}
 
 type wsListTasksRequest struct {
 	BoardID string `json:"board_id"`

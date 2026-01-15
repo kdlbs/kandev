@@ -2,9 +2,11 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -12,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/controller"
 	"github.com/kandev/kandev/internal/task/dto"
+	"github.com/kandev/kandev/internal/orchestrator/executor"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -25,6 +28,7 @@ type PromptResult struct {
 // OrchestratorService defines the interface for orchestrator operations
 type OrchestratorService interface {
 	PromptTask(ctx context.Context, taskID string, prompt string) (*PromptResult, error)
+	ResumeTaskSession(ctx context.Context, taskID, taskSessionID string) error
 }
 
 // MessageHandlers handles WebSocket requests for messages
@@ -65,7 +69,7 @@ func (h *MessageHandlers) registerWS(dispatcher *ws.Dispatcher) {
 func (h *MessageHandlers) httpListMessages(c *gin.Context) {
 	sessionID := c.Param("id")
 	if sessionID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "agent session id is required"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "task session id is required"})
 		return
 	}
 	before := c.Query("before")
@@ -115,7 +119,7 @@ func (h *MessageHandlers) httpListMessages(c *gin.Context) {
 
 type wsAddMessageRequest struct {
 	TaskID         string `json:"task_id"`
-	TaskSessionID string `json:"agent_session_id"`
+	TaskSessionID  string `json:"task_session_id"`
 	Content        string `json:"content"`
 	AuthorID       string `json:"author_id,omitempty"`
 }
@@ -126,7 +130,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
 	if req.TaskSessionID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "agent_session_id is required", nil)
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_session_id is required", nil)
 	}
 	if req.TaskID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
@@ -171,6 +175,22 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	if h.orchestrator != nil {
 		_, err := h.orchestrator.PromptTask(ctx, req.TaskID, req.Content)
 		if err != nil {
+			if errors.Is(err, executor.ErrExecutionNotFound) {
+				if resumeErr := h.orchestrator.ResumeTaskSession(ctx, req.TaskID, req.TaskSessionID); resumeErr != nil {
+					h.logger.Warn("failed to resume task session for prompt",
+						zap.String("task_id", req.TaskID),
+						zap.String("task_session_id", req.TaskSessionID),
+						zap.Error(resumeErr))
+				} else {
+					for attempt := 0; attempt < 3; attempt++ {
+						time.Sleep(500 * time.Millisecond)
+						_, err = h.orchestrator.PromptTask(ctx, req.TaskID, req.Content)
+						if err == nil {
+							break
+						}
+					}
+				}
+			}
 			h.logger.Warn("failed to forward message as prompt to agent",
 				zap.String("task_id", req.TaskID),
 				zap.Error(err))
@@ -181,7 +201,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 }
 
 type wsListMessagesRequest struct {
-	TaskSessionID string `json:"agent_session_id"`
+	TaskSessionID  string `json:"task_session_id"`
 	Limit          int    `json:"limit"`
 	Before         string `json:"before"`
 	After          string `json:"after"`
@@ -194,7 +214,7 @@ func (h *MessageHandlers) wsListMessages(ctx context.Context, msg *ws.Message) (
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
 	if req.TaskSessionID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "agent_session_id is required", nil)
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_session_id is required", nil)
 	}
 	if req.Before != "" && req.After != "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "only one of before or after can be set", nil)
