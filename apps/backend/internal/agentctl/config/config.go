@@ -35,6 +35,9 @@ type Config struct {
 	// Auto-approve permission requests (for testing/CI)
 	AutoApprovePermissions bool
 
+	// Shell configuration
+	ShellEnabled bool // Enable auto-shell feature (default: true)
+
 	// Logging configuration
 	LogLevel  string
 	LogFormat string
@@ -54,6 +57,7 @@ func Load() *Config {
 		WorkDir:                workDir,
 		AutoStart:              getEnvBool("AGENTCTL_AUTO_START", false),
 		AutoApprovePermissions: getEnvBool("AGENTCTL_AUTO_APPROVE_PERMISSIONS", false),
+		ShellEnabled:           getEnvBool("AGENTCTL_SHELL_ENABLED", true),
 		LogLevel:               getEnv("AGENTCTL_LOG_LEVEL", "info"),
 		LogFormat:              getEnv("AGENTCTL_LOG_FORMAT", "json"),
 		HealthCheckInterval:    getEnvInt("AGENTCTL_HEALTH_CHECK_INTERVAL", 5),

@@ -31,6 +31,9 @@ type MultiConfig struct {
 	// AutoApprovePermissions auto-approves permission requests (for testing/CI)
 	AutoApprovePermissions bool
 
+	// ShellEnabled enables auto-shell feature for each instance (default: true)
+	ShellEnabled bool
+
 	// LogLevel is the logging level (debug, info, warn, error)
 	LogLevel string
 
@@ -53,6 +56,7 @@ func LoadMulti() *MultiConfig {
 		DefaultAgentCommand:    getEnv("AGENTCTL_AGENT_COMMAND", "auggie --acp"),
 		DefaultWorkDir:         getEnv("AGENTCTL_WORKDIR", "/workspace"),
 		AutoApprovePermissions: getEnvBool("AGENTCTL_AUTO_APPROVE_PERMISSIONS", false),
+		ShellEnabled:           getEnvBool("AGENTCTL_SHELL_ENABLED", true),
 		LogLevel:               getEnv("AGENTCTL_LOG_LEVEL", "info"),
 		LogFormat:              getEnv("AGENTCTL_LOG_FORMAT", "json"),
 		Mode:                   getEnv("AGENTCTL_MODE", "auto"),

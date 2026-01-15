@@ -26,6 +26,7 @@ type Client struct {
 	permissionConn  *websocket.Conn
 	gitStatusConn   *websocket.Conn
 	fileChangesConn *websocket.Conn
+	shellConn       *websocket.Conn
 	mu              sync.RWMutex
 }
 
@@ -372,10 +373,116 @@ func (c *Client) CloseFileChangesStream() {
 	}
 }
 
-// Close closes all connections (ACP, permissions, git status, file changes)
+// Close closes all connections (ACP, permissions, git status, file changes, shell)
 func (c *Client) Close() {
 	c.CloseACPStream()
 	c.ClosePermissionStream()
 	c.CloseGitStatusStream()
 	c.CloseFileChangesStream()
+	c.CloseShellStream()
+}
+
+// ShellStatusResponse from agentctl shell status endpoint
+type ShellStatusResponse struct {
+	Running   bool   `json:"running"`
+	Pid       int    `json:"pid"`
+	Shell     string `json:"shell"`
+	Cwd       string `json:"cwd"`
+	StartedAt string `json:"started_at"`
+}
+
+// ShellStatus gets the status of the embedded shell session
+func (c *Client) ShellStatus(ctx context.Context) (*ShellStatusResponse, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/api/v1/shell/status", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("shell status failed: %s", resp.Status)
+	}
+
+	var result ShellStatusResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+
+	return &result, nil
+}
+
+// ShellMessage represents a message to/from the shell
+type ShellMessage struct {
+	Type string `json:"type"` // "input", "output", "ping", "pong", "exit"
+	Data string `json:"data,omitempty"`
+	Code int    `json:"code,omitempty"` // For exit type
+}
+
+// StreamShell connects to the shell WebSocket stream and returns channels for I/O
+func (c *Client) StreamShell(ctx context.Context) (<-chan ShellMessage, chan<- ShellMessage, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.shellConn != nil {
+		return nil, nil, fmt.Errorf("shell stream already connected")
+	}
+
+	wsURL := "ws" + c.baseURL[4:] + "/api/v1/shell/stream"
+	conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, nil)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to connect shell stream: %w", err)
+	}
+	c.shellConn = conn
+
+	outputCh := make(chan ShellMessage, 256)
+	inputCh := make(chan ShellMessage, 64)
+
+	// Read from WebSocket
+	go func() {
+		defer close(outputCh)
+		for {
+			var msg ShellMessage
+			if err := conn.ReadJSON(&msg); err != nil {
+				if !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+					c.logger.Debug("shell stream read error", zap.Error(err))
+				}
+				return
+			}
+			select {
+			case outputCh <- msg:
+			default:
+				// Channel full, skip
+			}
+		}
+	}()
+
+	// Write to WebSocket
+	go func() {
+		for msg := range inputCh {
+			if err := conn.WriteJSON(msg); err != nil {
+				c.logger.Debug("shell stream write error", zap.Error(err))
+				return
+			}
+		}
+	}()
+
+	return outputCh, inputCh, nil
+}
+
+// CloseShellStream closes the shell stream connection
+func (c *Client) CloseShellStream() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.shellConn != nil {
+		if err := c.shellConn.Close(); err != nil {
+			c.logger.Debug("failed to close shell stream", zap.Error(err))
+		}
+		c.shellConn = nil
+	}
 }

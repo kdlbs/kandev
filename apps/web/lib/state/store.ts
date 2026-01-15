@@ -111,6 +111,21 @@ export type TerminalState = {
   terminals: Array<{ id: string; output: string[] }>;
 };
 
+export type ShellState = {
+  // Map of taskId to shell output buffer (raw bytes as string)
+  outputs: Record<string, string>;
+  // Map of taskId to shell status
+  statuses: Record<
+    string,
+    {
+      available: boolean;
+      running?: boolean;
+      shell?: string;
+      cwd?: string;
+    }
+  >;
+};
+
 export type FileInfo = {
   path: string;
   status: 'modified' | 'added' | 'deleted' | 'untracked' | 'renamed';
@@ -168,6 +183,7 @@ export type AppState = {
   agentProfiles: AgentProfilesState;
   userSettings: UserSettingsState;
   terminal: TerminalState;
+  shell: ShellState;
   diffs: DiffState;
   gitStatus: GitStatusState;
   connection: ConnectionState;
@@ -190,6 +206,12 @@ export type AppState = {
   setSettingsData: (next: Partial<SettingsDataState>) => void;
   setUserSettings: (settings: UserSettingsState) => void;
   setTerminalOutput: (terminalId: string, data: string) => void;
+  appendShellOutput: (taskId: string, data: string) => void;
+  setShellStatus: (
+    taskId: string,
+    status: { available: boolean; running?: boolean; shell?: string; cwd?: string }
+  ) => void;
+  clearShellOutput: (taskId: string) => void;
   setConnectionStatus: (status: ConnectionState['status'], error?: string | null) => void;
   setMessages: (
     sessionId: string | null,
@@ -226,6 +248,7 @@ const defaultState: AppState = {
   agentProfiles: { items: [], version: 0 },
   userSettings: { workspaceId: null, boardId: null, repositoryIds: [], loaded: false },
   terminal: { terminals: [] },
+  shell: { outputs: {}, statuses: {} },
   diffs: { files: [] },
   gitStatus: {
     taskId: null,
@@ -261,6 +284,9 @@ const defaultState: AppState = {
   setSettingsData: () => undefined,
   setUserSettings: () => undefined,
   setTerminalOutput: () => undefined,
+  appendShellOutput: () => undefined,
+  setShellStatus: () => undefined,
+  clearShellOutput: () => undefined,
   setConnectionStatus: () => undefined,
   setMessages: () => undefined,
   setMessagesSessionId: () => undefined,
@@ -296,6 +322,9 @@ function mergeInitialState(
   | 'setSettingsData'
   | 'setUserSettings'
   | 'setTerminalOutput'
+  | 'appendShellOutput'
+  | 'setShellStatus'
+  | 'clearShellOutput'
   | 'setConnectionStatus'
   | 'setMessages'
   | 'setMessagesSessionId'
@@ -326,6 +355,7 @@ function mergeInitialState(
     agentProfiles: { ...defaultState.agentProfiles, ...initialState.agentProfiles },
     userSettings: { ...defaultState.userSettings, ...initialState.userSettings },
     terminal: { ...defaultState.terminal, ...initialState.terminal },
+    shell: { ...defaultState.shell, ...initialState.shell },
     diffs: { ...defaultState.diffs, ...initialState.diffs },
     gitStatus: { ...defaultState.gitStatus, ...initialState.gitStatus },
     connection: { ...defaultState.connection, ...initialState.connection },
@@ -360,6 +390,7 @@ export function createAppStore(initialState?: Partial<AppState>) {
           if (state.agentProfiles) Object.assign(draft.agentProfiles, state.agentProfiles);
           if (state.userSettings) Object.assign(draft.userSettings, state.userSettings);
           if (state.terminal) Object.assign(draft.terminal, state.terminal);
+          if (state.shell) Object.assign(draft.shell, state.shell);
           if (state.diffs) Object.assign(draft.diffs, state.diffs);
           if (state.connection) Object.assign(draft.connection, state.connection);
           if (state.messages) Object.assign(draft.messages, state.messages);
@@ -451,6 +482,18 @@ export function createAppStore(initialState?: Partial<AppState>) {
           } else {
             draft.terminal.terminals.push({ id: terminalId, output: [data] });
           }
+        }),
+      appendShellOutput: (taskId, data) =>
+        set((draft) => {
+          draft.shell.outputs[taskId] = (draft.shell.outputs[taskId] || '') + data;
+        }),
+      setShellStatus: (taskId, status) =>
+        set((draft) => {
+          draft.shell.statuses[taskId] = status;
+        }),
+      clearShellOutput: (taskId) =>
+        set((draft) => {
+          draft.shell.outputs[taskId] = '';
         }),
       setConnectionStatus: (status, error = null) =>
         set((draft) => {

@@ -105,6 +105,7 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 		WorkDir:                req.WorkspacePath,
 		AutoStart:              req.AutoStart,
 		AutoApprovePermissions: m.config.AutoApprovePermissions,
+		ShellEnabled:           m.config.ShellEnabled,
 		LogLevel:               m.config.LogLevel,
 		LogFormat:              m.config.LogFormat,
 	}

@@ -413,6 +413,11 @@ func main() {
 		workspaceFileHandlers := agenthandlers.NewWorkspaceFileHandlers(lifecycleMgr, log)
 		workspaceFileHandlers.RegisterHandlers(gateway.Dispatcher)
 		log.Info("Registered Workspace File WebSocket handlers")
+
+		// Register shell handlers
+		shellHandlers := agenthandlers.NewShellHandlers(lifecycleMgr, log)
+		shellHandlers.RegisterHandlers(gateway.Dispatcher)
+		log.Info("Registered Shell WebSocket handlers")
 	}
 
 	// Start the WebSocket hub

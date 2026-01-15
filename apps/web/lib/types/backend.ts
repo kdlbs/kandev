@@ -31,7 +31,8 @@ export type BackendMessageType =
   | 'agent.profile.created'
   | 'agent.profile.updated'
   | 'user.settings.updated'
-  | 'workspace.file.changes';
+  | 'workspace.file.changes'
+  | 'shell.output';
 
 export type BackendMessage<T extends BackendMessageType, P> = {
   id?: string;
@@ -223,6 +224,13 @@ export type UserSettingsUpdatedPayload = {
   updated_at?: string;
 };
 
+export type ShellOutputPayload = {
+  task_id: string;
+  type: 'output' | 'exit';
+  data?: string;
+  code?: number;
+};
+
 export type BackendMessageMap = {
   'kanban.update': BackendMessage<'kanban.update', KanbanUpdatePayload>;
   'task.created': BackendMessage<'task.created', TaskEventPayload>;
@@ -257,6 +265,7 @@ export type BackendMessageMap = {
   'agent.profile.updated': BackendMessage<'agent.profile.updated', AgentProfileChangedPayload>;
   'user.settings.updated': BackendMessage<'user.settings.updated', UserSettingsUpdatedPayload>;
   'workspace.file.changes': BackendMessage<'workspace.file.changes', FileChangeNotificationPayload>;
+  'shell.output': BackendMessage<'shell.output', ShellOutputPayload>;
 };
 
 // Workspace file types

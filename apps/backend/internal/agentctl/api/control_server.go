@@ -122,6 +122,10 @@ func (m *ControlServer) setupSingleInstanceRoutes(api *gin.RouterGroup) {
 	// Workspace file operations (simple HTTP)
 	api.GET("/workspace/tree", m.handleFileTree)
 	api.GET("/workspace/file/content", m.handleFileContent)
+
+	// Shell terminal
+	api.GET("/shell/status", m.handleShellStatus)
+	api.GET("/shell/stream", m.handleShellStreamWS)
 }
 
 func (m *ControlServer) handleHealth(c *gin.Context) {
@@ -681,4 +685,107 @@ func (m *ControlServer) handleFileContent(c *gin.Context) {
 	}
 
 	c.JSON(200, process.FileContentResponse{Path: path, Content: content, Size: size})
+}
+
+// handleShellStatus returns the status of the embedded shell session
+func (m *ControlServer) handleShellStatus(c *gin.Context) {
+	shellSession := m.singleProcMgr.Shell()
+	if shellSession == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error":   "shell_not_available",
+			"message": "Shell session is not available",
+		})
+		return
+	}
+
+	status := shellSession.Status()
+	c.JSON(http.StatusOK, gin.H{
+		"running":    status.Running,
+		"pid":        status.Pid,
+		"shell":      status.Shell,
+		"cwd":        status.Cwd,
+		"started_at": status.StartedAt.Format(time.RFC3339),
+	})
+}
+
+// handleShellStreamWS handles WebSocket connections for shell I/O streaming
+func (m *ControlServer) handleShellStreamWS(c *gin.Context) {
+	shellSession := m.singleProcMgr.Shell()
+	if shellSession == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error":   "shell_not_available",
+			"message": "Shell session is not available",
+		})
+		return
+	}
+
+	conn, err := m.upgrader.Upgrade(c.Writer, c.Request, nil)
+	if err != nil {
+		m.logger.Error("failed to upgrade shell websocket", zap.Error(err))
+		return
+	}
+	defer conn.Close()
+
+	// Create output channel and subscribe
+	outputCh := make(chan []byte, 256)
+	shellSession.Subscribe(outputCh)
+	defer shellSession.Unsubscribe(outputCh)
+
+	// Done channel for cleanup
+	done := make(chan struct{})
+	defer close(done)
+
+	// Read from WebSocket (client input)
+	go func() {
+		for {
+			select {
+			case <-done:
+				return
+			default:
+			}
+
+			_, message, err := conn.ReadMessage()
+			if err != nil {
+				if !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+					m.logger.Debug("shell ws read error", zap.Error(err))
+				}
+				return
+			}
+
+			// Parse the message
+			var msg struct {
+				Type string `json:"type"`
+				Data string `json:"data"`
+			}
+			if err := json.Unmarshal(message, &msg); err != nil {
+				m.logger.Debug("shell ws invalid message", zap.Error(err))
+				continue
+			}
+
+			switch msg.Type {
+			case "input":
+				if _, err := shellSession.Write([]byte(msg.Data)); err != nil {
+					m.logger.Debug("shell write error", zap.Error(err))
+				}
+			case "ping":
+				_ = conn.WriteJSON(map[string]string{"type": "pong"})
+			}
+		}
+	}()
+
+	// Write to WebSocket (shell output)
+	for {
+		select {
+		case data := <-outputCh:
+			if err := conn.WriteJSON(map[string]string{
+				"type": "output",
+				"data": string(data),
+			}); err != nil {
+				m.logger.Debug("shell ws write error", zap.Error(err))
+				return
+			}
+		case <-done:
+			return
+		}
+	}
 }
