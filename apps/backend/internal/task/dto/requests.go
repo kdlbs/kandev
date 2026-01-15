@@ -229,6 +229,10 @@ type ListTasksRequest struct {
 	BoardID string
 }
 
+type ListTaskSessionsRequest struct {
+	TaskID string
+}
+
 type GetTaskRequest struct {
 	ID string
 }

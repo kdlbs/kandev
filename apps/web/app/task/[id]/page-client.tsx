@@ -16,9 +16,10 @@ import { useAppStore } from '@/components/state-provider';
 
 type TaskPageClientProps = {
   task: Task | null;
+  sessionId?: string | null;
 };
 
-export default function TaskPage({ task: initialTask }: TaskPageClientProps) {
+export default function TaskPage({ task: initialTask, sessionId = null }: TaskPageClientProps) {
   const [isMounted, setIsMounted] = useState(false);
   const kanbanTask = useAppStore((state) =>
     initialTask?.id ? state.kanban.tasks.find((item) => item.id === initialTask.id) ?? null : null
@@ -49,15 +50,17 @@ export default function TaskPage({ task: initialTask }: TaskPageClientProps) {
     handleStartAgent,
     handleStopAgent,
   } = useTaskAgent(task);
+  const activeSessionId = sessionId ?? taskSessionId;
   const isAgentWorking =
     taskSessionState !== null
       ? taskSessionState === 'STARTING' || taskSessionState === 'RUNNING'
       : isAgentRunning && (task?.state === 'IN_PROGRESS' || task?.state === 'SCHEDULING');
-  const { isLoading: isLoadingMessages } = useTaskMessages(task?.id ?? null, taskSessionId);
+  const { isLoading: isLoadingMessages } = useTaskMessages(task?.id ?? null, activeSessionId);
 
   useEffect(() => {
     queueMicrotask(() => setIsMounted(true));
   }, []);
+
 
   const { repositories } = useRepositories(task?.workspace_id ?? null, Boolean(task?.workspace_id));
   const repository = useMemo(
@@ -71,7 +74,7 @@ export default function TaskPage({ task: initialTask }: TaskPageClientProps) {
     const client = getWebSocketClient();
     if (!client) return;
 
-    if (!taskSessionId) {
+    if (!activeSessionId) {
       console.error('No active agent session. Start an agent before sending a message.');
       return;
     }
@@ -79,13 +82,13 @@ export default function TaskPage({ task: initialTask }: TaskPageClientProps) {
     try {
       await client.request(
         'message.add',
-        { task_id: task.id, task_session_id: taskSessionId, content },
+        { task_id: task.id, task_session_id: activeSessionId, content },
         10000
       );
     } catch (error) {
       console.error('Failed to send message:', error);
     }
-  }, [taskSessionId, task]);
+  }, [activeSessionId, task]);
 
   if (!isMounted) {
     return <div className="h-screen w-full bg-background" />;
@@ -100,14 +103,16 @@ export default function TaskPage({ task: initialTask }: TaskPageClientProps) {
             entries={{
               ws_status: connectionStatus,
               task_id: task?.id ?? null,
-              task_session_id: taskSessionId ?? null,
+              task_session_id: activeSessionId ?? null,
               task_state: task?.state ?? null,
-              agent_session_state: taskSessionState ?? null,
+              task_session_state: taskSessionState ?? null,
               is_agent_working: isAgentWorking,
             }}
           />
         )}
         <TaskTopBar
+          taskId={task?.id ?? null}
+          activeSessionId={activeSessionId ?? null}
           taskTitle={task?.title}
           taskDescription={task?.description}
           baseBranch={task?.base_branch ?? undefined}

@@ -36,6 +36,7 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionOrchestratorComplete, h.wsCompleteTask)
 	d.RegisterFunc(ws.ActionPermissionRespond, h.wsRespondToPermission)
 	d.RegisterFunc(ws.ActionTaskExecution, h.wsGetTaskExecution)
+	d.RegisterFunc(ws.ActionTaskSessionResume, h.wsResumeTaskSession)
 }
 
 // WS handlers
@@ -105,6 +106,37 @@ func (h *Handlers) wsStartTask(ctx context.Context, msg *ws.Message) (*ws.Messag
 	if err != nil {
 		h.logger.Error("failed to start task", zap.String("task_id", req.TaskID), zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to start task: "+err.Error(), nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, resp)
+}
+
+type wsResumeTaskSessionRequest struct {
+	TaskID        string `json:"task_id"`
+	TaskSessionID string `json:"task_session_id"`
+}
+
+func (h *Handlers) wsResumeTaskSession(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req wsResumeTaskSessionRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.TaskID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+	}
+	if req.TaskSessionID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_session_id is required", nil)
+	}
+
+	resp, err := h.controller.ResumeTaskSession(ctx, dto.ResumeTaskSessionRequest{
+		TaskID:        req.TaskID,
+		TaskSessionID: req.TaskSessionID,
+	})
+	if err != nil {
+		h.logger.Error("failed to resume task session",
+			zap.String("task_id", req.TaskID),
+			zap.String("task_session_id", req.TaskSessionID),
+			zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to resume task session: "+err.Error(), nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }

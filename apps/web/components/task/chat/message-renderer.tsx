@@ -42,7 +42,7 @@ const adapters: MessageAdapter[] = [
           <ChatMessage
             comment={comment}
             label="Task"
-            className="ml-auto bg-primary/20 text-foreground border border-primary/40"
+            className="bg-amber-500/10 text-foreground border-amber-500/30"
             showRichBlocks
           />
         );
@@ -52,7 +52,7 @@ const adapters: MessageAdapter[] = [
           <ChatMessage
             comment={comment}
             label="You"
-            className="ml-auto bg-primary text-primary-foreground"
+            className="bg-primary/10 text-foreground border-primary/30"
           />
         );
       }
@@ -60,7 +60,7 @@ const adapters: MessageAdapter[] = [
         <ChatMessage
           comment={comment}
           label="Agent"
-          className="bg-muted text-foreground"
+          className="bg-muted/40 text-foreground border-border/60"
           showRichBlocks={comment.type === 'message' || comment.type === 'content' || !comment.type}
         />
       );

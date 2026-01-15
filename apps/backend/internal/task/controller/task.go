@@ -54,6 +54,21 @@ func (c *TaskController) ListTasks(ctx context.Context, req dto.ListTasksRequest
 	return resp, nil
 }
 
+func (c *TaskController) ListTaskSessions(ctx context.Context, req dto.ListTaskSessionsRequest) (dto.ListTaskSessionsResponse, error) {
+	sessions, err := c.service.ListTaskSessions(ctx, req.TaskID)
+	if err != nil {
+		return dto.ListTaskSessionsResponse{}, err
+	}
+	resp := dto.ListTaskSessionsResponse{
+		Sessions: make([]dto.TaskSessionDTO, 0, len(sessions)),
+		Total:    len(sessions),
+	}
+	for _, session := range sessions {
+		resp.Sessions = append(resp.Sessions, dto.FromTaskSession(session))
+	}
+	return resp, nil
+}
+
 func (c *TaskController) GetTask(ctx context.Context, req dto.GetTaskRequest) (dto.TaskDTO, error) {
 	task, err := c.service.GetTask(ctx, req.ID)
 	if err != nil {

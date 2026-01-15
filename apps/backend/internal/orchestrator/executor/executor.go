@@ -18,9 +18,10 @@ import (
 
 // Common errors
 var (
-	ErrMaxConcurrentReached = errors.New("maximum concurrent executions reached")
-	ErrNoAgentProfileID     = errors.New("task has no agent_profile_id configured")
-	ErrExecutionNotFound    = errors.New("execution not found")
+	ErrMaxConcurrentReached    = errors.New("maximum concurrent executions reached")
+	ErrNoAgentProfileID        = errors.New("task has no agent_profile_id configured")
+	ErrExecutionNotFound       = errors.New("execution not found")
+	ErrExecutionAlreadyRunning = errors.New("execution already running")
 )
 
 // PromptResult contains the result of a prompt operation
@@ -69,6 +70,8 @@ type LaunchAgentRequest struct {
 	TaskDescription string // Task description to send via ACP prompt
 	Priority        int
 	Metadata        map[string]interface{}
+	Env             map[string]string
+	ACPSessionID    string // ACP session ID to resume, if available
 
 	// Worktree configuration for concurrent agent execution
 	UseWorktree    bool   // Whether to use a Git worktree for isolation
@@ -362,6 +365,152 @@ func (e *Executor) ExecuteWithProfile(ctx context.Context, task *v1.Task, agentP
 		zap.String("container_id", resp.ContainerID),
 		zap.String("worktree_path", resp.WorktreePath),
 		zap.String("worktree_branch", resp.WorktreeBranch))
+
+	return execution, nil
+}
+
+// ResumeSession restarts an existing task session using its stored worktree.
+func (e *Executor) ResumeSession(ctx context.Context, task *v1.Task, session *models.TaskSession) (*TaskExecution, error) {
+	if session == nil {
+		return nil, ErrExecutionNotFound
+	}
+
+	if !e.CanExecute() {
+		e.logger.Warn("max concurrent executions reached",
+			zap.Int("max", e.maxConcurrent),
+			zap.Int("current", e.ActiveCount()))
+		return nil, ErrMaxConcurrentReached
+	}
+
+	if session.AgentProfileID == "" {
+		e.logger.Error("task session has no agent_profile_id configured",
+			zap.String("task_id", task.ID),
+			zap.String("session_id", session.ID))
+		return nil, ErrNoAgentProfileID
+	}
+
+	if existing, ok := e.GetExecutionWithContext(ctx, task.ID); ok && existing != nil {
+		return nil, ErrExecutionAlreadyRunning
+	}
+
+	req := &LaunchAgentRequest{
+		TaskID:          task.ID,
+		TaskTitle:       task.Title,
+		AgentProfileID:  session.AgentProfileID,
+		TaskDescription: "",
+		Priority:        task.Priority,
+	}
+
+	metadata := map[string]interface{}{}
+	if session.Metadata != nil {
+		for key, value := range session.Metadata {
+			metadata[key] = value
+		}
+	}
+	if session.WorktreeID != "" {
+		metadata["worktree_id"] = session.WorktreeID
+	}
+	if len(metadata) > 0 {
+		req.Metadata = metadata
+	}
+
+	repositoryID := session.RepositoryID
+	var repositoryPath string
+	if repositoryID == "" && task.RepositoryID != nil {
+		repositoryID = *task.RepositoryID
+	}
+	if repositoryID != "" {
+		repository, err := e.repo.GetRepository(ctx, repositoryID)
+		if err != nil {
+			e.logger.Error("failed to load repository for task session resume",
+				zap.String("task_id", task.ID),
+				zap.String("repository_id", repositoryID),
+				zap.Error(err))
+			return nil, err
+		}
+		repositoryPath = repository.LocalPath
+		if repositoryPath != "" {
+			req.RepositoryURL = repositoryPath
+		}
+	}
+
+	baseBranch := session.BaseBranch
+	if baseBranch == "" && task.BaseBranch != nil && *task.BaseBranch != "" {
+		baseBranch = *task.BaseBranch
+	}
+	if baseBranch != "" {
+		req.Branch = baseBranch
+	}
+
+	if e.worktreeEnabled && repositoryPath != "" {
+		req.UseWorktree = true
+		req.RepositoryPath = repositoryPath
+		req.RepositoryID = repositoryID
+		if baseBranch != "" {
+			req.BaseBranch = baseBranch
+		} else {
+			req.BaseBranch = "main"
+		}
+	}
+
+	if session.Metadata != nil {
+		if acpSessionID, ok := session.Metadata["acp_session_id"].(string); ok && acpSessionID != "" {
+			req.ACPSessionID = acpSessionID
+		}
+	}
+
+	e.logger.Info("resuming agent session",
+		zap.String("task_id", task.ID),
+		zap.String("session_id", session.ID),
+		zap.String("agent_profile_id", session.AgentProfileID),
+		zap.Bool("use_worktree", req.UseWorktree))
+
+	resp, err := e.agentManager.LaunchAgent(ctx, req)
+	if err != nil {
+		e.logger.Error("failed to relaunch agent for session",
+			zap.String("task_id", task.ID),
+			zap.String("session_id", session.ID),
+			zap.Error(err))
+		return nil, err
+	}
+
+	session.AgentInstanceID = resp.AgentInstanceID
+	session.ContainerID = resp.ContainerID
+	if resp.WorktreePath != "" {
+		session.WorktreePath = resp.WorktreePath
+	}
+	if resp.WorktreeBranch != "" {
+		session.WorktreeBranch = resp.WorktreeBranch
+	}
+	session.Progress = 0
+	session.ErrorMessage = ""
+	session.State = models.TaskSessionStateStarting
+	session.CompletedAt = nil
+
+	if err := e.repo.UpdateTaskSession(ctx, session); err != nil {
+		e.logger.Error("failed to update task session for resume",
+			zap.String("task_id", task.ID),
+			zap.String("session_id", session.ID),
+			zap.Error(err))
+	}
+
+	now := time.Now().UTC()
+	execution := &TaskExecution{
+		TaskID:          task.ID,
+		AgentInstanceID: resp.AgentInstanceID,
+		AgentProfileID:  session.AgentProfileID,
+		StartedAt:       now,
+		SessionState:    v1.TaskSessionStateStarting,
+		Progress:        0,
+		LastUpdate:      now,
+		SessionID:       session.ID,
+		WorktreePath:    session.WorktreePath,
+		WorktreeBranch:  session.WorktreeBranch,
+	}
+
+	e.mu.Lock()
+	e.executions[task.ID] = execution
+	e.mu.Unlock()
 
 	return execution, nil
 }

@@ -15,10 +15,11 @@ import { useBoardSnapshot } from '@/hooks/use-board-snapshot';
 import { useTaskActions } from '@/hooks/use-task-actions';
 import { KanbanBoardHeader } from './kanban-board-header';
 import { KanbanBoardGrid } from './kanban-board-grid';
+import { getWebSocketClient } from '@/lib/ws/connection';
 
 interface KanbanBoardProps {
   onPreviewTask?: (task: Task) => void;
-  onOpenTask?: (task: Task) => void;
+  onOpenTask?: (task: Task, sessionId: string) => void;
 }
 
 export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}) {
@@ -26,6 +27,7 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [isMovingTask, setIsMovingTask] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [taskSessionAvailability, setTaskSessionAvailability] = useState<Record<string, boolean>>({});
   const router = useRouter();
   const kanban = useAppStore((state) => state.kanban);
   const workspaceState = useAppStore((state) => state.workspaces);
@@ -100,9 +102,16 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
     () => filterTasksByRepositories(backendTasks, selectedRepositoryIds),
     [backendTasks, selectedRepositoryIds]
   );
+  const visibleTasksWithSessions = useMemo(
+    () => visibleTasks.map((task) => ({
+      ...task,
+      hasSession: taskSessionAvailability[task.id],
+    })),
+    [visibleTasks, taskSessionAvailability]
+  );
   const activeTask = useMemo(
-    () => visibleTasks.find((task) => task.id === activeTaskId) ?? null,
-    [visibleTasks, activeTaskId]
+    () => visibleTasksWithSessions.find((task) => task.id === activeTaskId) ?? null,
+    [visibleTasksWithSessions, activeTaskId]
   );
 
   const handleDragStart = (event: DragStartEvent) => {
@@ -196,15 +205,47 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
     });
   };
 
-  const handleOpenTask = (task: Task) => {
-    if (onOpenTask) {
-      onOpenTask(task);
-    } else {
-      router.push(`/task/${task.id}`);
+  const fetchLatestSessionId = async (taskId: string) => {
+    const client = getWebSocketClient();
+    if (!client) return null;
+    try {
+      const response = await client.request<{ sessions: Array<{ id: string }> }>(
+        'task.session.list',
+        { task_id: taskId },
+        10000
+      );
+      setTaskSessionAvailability((prev) => ({
+        ...prev,
+        [taskId]: response.sessions.length > 0,
+      }));
+      return response.sessions[0]?.id ?? null;
+    } catch (error) {
+      console.error('Failed to load task sessions:', error);
+      return null;
     }
   };
 
-  const handlePreviewTask = (task: Task) => {
+  const handleOpenTask = async (task: Task) => {
+    const latestSessionId = await fetchLatestSessionId(task.id);
+    if (!latestSessionId) {
+      setEditingTask(task);
+      setIsDialogOpen(true);
+      return;
+    }
+    if (onOpenTask) {
+      onOpenTask(task, latestSessionId);
+    } else {
+      router.push(`/task/${task.id}/${latestSessionId}`);
+    }
+  };
+
+  const handlePreviewTask = async (task: Task) => {
+    const latestSessionId = await fetchLatestSessionId(task.id);
+    if (!latestSessionId) {
+      setEditingTask(task);
+      setIsDialogOpen(true);
+      return;
+    }
     if (onPreviewTask) {
       onPreviewTask(task);
     } else {
@@ -375,7 +416,7 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
       />
       <KanbanBoardGrid
         columns={activeColumns}
-        tasks={visibleTasks}
+        tasks={visibleTasksWithSessions}
         onPreviewTask={handlePreviewTask}
         onOpenTask={handleOpenTask}
         onEditTask={handleEditTask}

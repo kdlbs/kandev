@@ -102,10 +102,10 @@ type TaskEvent struct {
 	CreatedAt time.Time              `json:"created_at"`
 }
 
-// Message represents a message in an agent session (user or agent)
+// Message represents a message in a task session (user or agent)
 type Message struct {
 	ID             string                 `json:"id"`
-	TaskSessionID string                 `json:"agent_session_id"`
+	TaskSessionID string                 `json:"task_session_id"`
 	TaskID         string                 `json:"task_id,omitempty"`
 	AuthorType     string                 `json:"author_type"` // "user" or "agent"
 	Type           string                 `json:"type,omitempty"`
@@ -116,9 +116,9 @@ type Message struct {
 	CreatedAt      time.Time              `json:"created_at"`
 }
 
-// CreateMessageRequest for adding a message to an agent session
+// CreateMessageRequest for adding a message to a task session
 type CreateMessageRequest struct {
-	TaskSessionID string                 `json:"agent_session_id" binding:"required"`
+	TaskSessionID string                 `json:"task_session_id" binding:"required"`
 	Content        string                 `json:"content" binding:"required"`
 	AuthorType     string                 `json:"author_type,omitempty"` // Defaults to "user" if not specified
 	Type           string                 `json:"type,omitempty"`

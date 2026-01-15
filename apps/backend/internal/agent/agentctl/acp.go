@@ -111,6 +111,46 @@ func (c *Client) NewSession(ctx context.Context, cwd string) (string, error) {
 	return result.SessionID, nil
 }
 
+// LoadSession resumes an existing ACP session
+func (c *Client) LoadSession(ctx context.Context, sessionID string) error {
+	reqBody := struct {
+		SessionID string `json:"session_id"`
+	}{SessionID: sessionID}
+
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/v1/acp/session/load", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			c.logger.Debug("failed to close load session response body", zap.Error(err))
+		}
+	}()
+
+	var result struct {
+		Success bool   `json:"success"`
+		Error   string `json:"error,omitempty"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return err
+	}
+	if !result.Success {
+		return fmt.Errorf("load session failed: %s", result.Error)
+	}
+	return nil
+}
+
 // PromptResponse contains the response from a prompt call
 type PromptResponse struct {
 	Success    bool           `json:"success"`

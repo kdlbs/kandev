@@ -22,6 +22,7 @@ export interface Task {
   description?: string;
   position?: number;
   repositoryId?: string;
+  hasSession?: boolean;
 }
 
 interface KanbanCardProps {
@@ -138,7 +139,7 @@ export function KanbanCard({ task, onClick, onEdit, onDelete, onOpenFullPage }: 
           actions={
             <div className="flex items-center gap-2">
               {statusIcon}
-              {onOpenFullPage && (
+              {onOpenFullPage && task.hasSession !== false && (
                 <button
                   type="button"
                   className="text-muted-foreground hover:text-foreground hover:bg-accent rounded-sm p-1 -m-1 transition-colors cursor-pointer"
