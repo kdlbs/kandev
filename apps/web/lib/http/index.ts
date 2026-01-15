@@ -161,8 +161,19 @@ export async function fetchTask(taskId: string, options?: ApiRequestOptions) {
   return fetchJson<Task>(`/api/v1/tasks/${taskId}`, options);
 }
 
-export async function listTaskComments(taskId: string, options?: ApiRequestOptions) {
-  return fetchJson<ListCommentsResponse>(`/api/v1/tasks/${taskId}/comments`, options);
+export async function listTaskComments(
+  taskId: string,
+  params?: { limit?: number; before?: string; after?: string; sort?: 'asc' | 'desc' },
+  options?: ApiRequestOptions
+) {
+  const query = new URLSearchParams();
+  if (params?.limit) query.set('limit', params.limit.toString());
+  if (params?.before) query.set('before', params.before);
+  if (params?.after) query.set('after', params.after);
+  if (params?.sort) query.set('sort', params.sort);
+  const suffix = query.toString();
+  const url = `/api/v1/tasks/${taskId}/comments${suffix ? `?${suffix}` : ''}`;
+  return fetchJson<ListCommentsResponse>(url, options);
 }
 
 export async function listExecutors(options?: ApiRequestOptions): Promise<ListExecutorsResponse> {

@@ -193,6 +193,14 @@ type UpdateEnvironmentRequest struct {
 	BuildConfig  map[string]string       `json:"build_config,omitempty"`
 }
 
+type ListCommentsRequest struct {
+	TaskID string
+	Limit  int
+	Before string
+	After  string
+	Sort   string
+}
+
 // CreateRepositoryScriptRequest contains the data for creating a repository script
 type CreateRepositoryScriptRequest struct {
 	RepositoryID string `json:"repository_id"`
@@ -1284,9 +1292,26 @@ func (s *Service) GetComment(ctx context.Context, id string) (*models.Comment, e
 	return s.repo.GetComment(ctx, id)
 }
 
-// ListComments returns all comments for a task
+// ListComments returns all comments for a task.
 func (s *Service) ListComments(ctx context.Context, taskID string) ([]*models.Comment, error) {
 	return s.repo.ListComments(ctx, taskID)
+}
+
+// ListCommentsPaginated returns comments for a task with pagination options.
+func (s *Service) ListCommentsPaginated(ctx context.Context, req ListCommentsRequest) ([]*models.Comment, bool, error) {
+	limit := req.Limit
+	if limit <= 0 && (req.Before != "" || req.After != "") {
+		limit = DefaultCommentsPageSize
+	}
+	if limit > MaxCommentsPageSize {
+		limit = MaxCommentsPageSize
+	}
+	return s.repo.ListCommentsPaginated(ctx, req.TaskID, repository.ListCommentsOptions{
+		Limit:  limit,
+		Before: req.Before,
+		After:  req.After,
+		Sort:   req.Sort,
+	})
 }
 
 // DeleteComment deletes a comment

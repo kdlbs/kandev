@@ -215,10 +215,20 @@ export type ListEnvironmentsResponse = {
 export type ListCommentsResponse = {
   comments: Comment[];
   total: number;
+  has_more: boolean;
+  cursor: string;
 };
 
 export type CommentAuthorType = 'user' | 'agent';
-export type CommentType = 'message' | 'content' | 'tool_call' | 'progress' | 'error' | 'status';
+export type CommentType =
+  | 'message'
+  | 'content'
+  | 'tool_call'
+  | 'progress'
+  | 'error'
+  | 'status'
+  | 'thinking'
+  | 'todo';
 
 export type Comment = {
   id: string;

@@ -3,6 +3,8 @@ package handlers
 import (
 	"context"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -66,7 +68,41 @@ func (h *CommentHandlers) httpListComments(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "task id is required"})
 		return
 	}
-	resp, err := h.commentController.ListComments(c.Request.Context(), dto.ListCommentsRequest{TaskID: taskID})
+	before := c.Query("before")
+	after := c.Query("after")
+	sort := strings.ToLower(strings.TrimSpace(c.Query("sort")))
+	limitProvided := strings.TrimSpace(c.Query("limit")) != ""
+	paginated := limitProvided || before != "" || after != "" || sort != ""
+	if before != "" && after != "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "only one of before or after can be set"})
+		return
+	}
+	limit := 0
+	if rawLimit := strings.TrimSpace(c.Query("limit")); rawLimit != "" {
+		if parsed, err := strconv.Atoi(rawLimit); err == nil {
+			limit = parsed
+		}
+	}
+	if sort != "" && sort != "asc" && sort != "desc" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "sort must be asc or desc"})
+		return
+	}
+
+	var (
+		resp dto.ListCommentsResponse
+		err  error
+	)
+	if paginated {
+		resp, err = h.commentController.ListComments(c.Request.Context(), dto.ListCommentsRequest{
+			TaskID: taskID,
+			Limit:  limit,
+			Before: before,
+			After:  after,
+			Sort:   sort,
+		})
+	} else {
+		resp, err = h.commentController.ListAllComments(c.Request.Context(), taskID)
+	}
 	if err != nil {
 		h.logger.Error("failed to list comments", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list comments"})
@@ -147,6 +183,10 @@ func (h *CommentHandlers) wsAddComment(ctx context.Context, msg *ws.Message) (*w
 
 type wsListCommentsRequest struct {
 	TaskID string `json:"task_id"`
+	Limit  int    `json:"limit"`
+	Before string `json:"before"`
+	After  string `json:"after"`
+	Sort   string `json:"sort"`
 }
 
 func (h *CommentHandlers) wsListComments(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -157,8 +197,29 @@ func (h *CommentHandlers) wsListComments(ctx context.Context, msg *ws.Message) (
 	if req.TaskID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 	}
+	if req.Before != "" && req.After != "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "only one of before or after can be set", nil)
+	}
+	sort := strings.ToLower(strings.TrimSpace(req.Sort))
+	if sort != "" && sort != "asc" && sort != "desc" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "sort must be asc or desc", nil)
+	}
 
-	resp, err := h.commentController.ListComments(ctx, dto.ListCommentsRequest{TaskID: req.TaskID})
+	var (
+		resp dto.ListCommentsResponse
+		err  error
+	)
+	if req.Limit != 0 || req.Before != "" || req.After != "" || sort != "" {
+		resp, err = h.commentController.ListComments(ctx, dto.ListCommentsRequest{
+			TaskID: req.TaskID,
+			Limit:  req.Limit,
+			Before: req.Before,
+			After:  req.After,
+			Sort:   sort,
+		})
+	} else {
+		resp, err = h.commentController.ListAllComments(ctx, req.TaskID)
+	}
 	if err != nil {
 		h.logger.Error("failed to list comments", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list comments", nil)

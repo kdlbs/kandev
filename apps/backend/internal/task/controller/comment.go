@@ -17,7 +17,34 @@ func NewCommentController(svc *service.Service) *CommentController {
 }
 
 func (c *CommentController) ListComments(ctx context.Context, req dto.ListCommentsRequest) (dto.ListCommentsResponse, error) {
-	comments, err := c.service.ListComments(ctx, req.TaskID)
+	comments, hasMore, err := c.service.ListCommentsPaginated(ctx, service.ListCommentsRequest{
+		TaskID: req.TaskID,
+		Limit:  req.Limit,
+		Before: req.Before,
+		After:  req.After,
+		Sort:   req.Sort,
+	})
+	if err != nil {
+		return dto.ListCommentsResponse{}, err
+	}
+	result := make([]*v1.Comment, 0, len(comments))
+	for _, comment := range comments {
+		result = append(result, comment.ToAPI())
+	}
+	cursor := ""
+	if len(result) > 0 {
+		cursor = result[len(result)-1].ID
+	}
+	return dto.ListCommentsResponse{
+		Comments: result,
+		Total:    len(result),
+		HasMore:  hasMore,
+		Cursor:   cursor,
+	}, nil
+}
+
+func (c *CommentController) ListAllComments(ctx context.Context, taskID string) (dto.ListCommentsResponse, error) {
+	comments, err := c.service.ListComments(ctx, taskID)
 	if err != nil {
 		return dto.ListCommentsResponse{}, err
 	}
@@ -28,6 +55,8 @@ func (c *CommentController) ListComments(ctx context.Context, req dto.ListCommen
 	return dto.ListCommentsResponse{
 		Comments: result,
 		Total:    len(result),
+		HasMore:  false,
+		Cursor:   "",
 	}, nil
 }
 

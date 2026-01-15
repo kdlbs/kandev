@@ -34,7 +34,10 @@ export function snapshotToState(snapshot: BoardSnapshot): Partial<AppState> {
   };
 }
 
-export function taskToState(task: Task, comments?: Comment[]): Partial<AppState> {
+export function taskToState(
+  task: Task,
+  comments?: { items: Comment[]; hasMore?: boolean; oldestCursor?: string | null }
+): Partial<AppState> {
   return {
     tasks: {
       activeTaskId: task.id,
@@ -42,8 +45,10 @@ export function taskToState(task: Task, comments?: Comment[]): Partial<AppState>
     comments: comments
       ? {
           taskId: task.id,
-          items: comments,
+          items: comments.items,
           isLoading: false,
+          hasMore: comments.hasMore ?? false,
+          oldestCursor: comments.oldestCursor ?? (comments.items[0]?.id ?? null),
         }
       : undefined,
   };

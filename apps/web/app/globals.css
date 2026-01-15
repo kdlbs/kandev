@@ -149,3 +149,138 @@
     box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.22);
   }
 }
+
+.cm-tooltip {
+  border: 1px solid var(--border) !important;
+  background: var(--popover, oklch(0.205 0 0)) !important;
+  color: var(--popover-foreground, oklch(0.985 0 0)) !important;
+  border-radius: calc(var(--radius) + 2px);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
+  padding: 8px;
+}
+
+.cm-tooltip-autocomplete {
+  padding: 0;
+  background: var(--popover, oklch(0.205 0 0)) !important;
+}
+
+.cm-tooltip-autocomplete ul {
+  list-style: none;
+  margin: 0;
+  padding: 12px;
+  max-height: 240px;
+  overflow: auto;
+}
+
+.cm-tooltip-autocomplete li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  color: var(--popover-foreground, oklch(0.985 0 0));
+}
+
+.cm-tooltip-autocomplete li[aria-selected="true"] {
+  background: color-mix(in oklab, var(--primary) 20%, var(--popover)) !important;
+  color: var(--primary-foreground) !important;
+  border-radius: 0;
+}
+
+.cm-tooltip-autocomplete li[aria-selected="true"]:first-child {
+  border-top-left-radius: 6px;
+  border-top-right-radius: 6px;
+}
+
+.cm-tooltip-autocomplete li[aria-selected="true"]:last-child {
+  border-bottom-left-radius: 6px;
+  border-bottom-right-radius: 6px;
+}
+
+.cm-completionLabel {
+  font-weight: 500;
+}
+
+.cm-completionDetail {
+  margin-left: auto;
+  font-size: 0.875rem;
+  color: var(--muted-foreground) !important;
+}
+
+.cm-completionMatchedText {
+  text-decoration: none;
+  color: var(--primary) !important;
+}
+
+.cm-tooltip-autocomplete li[aria-selected="true"] .cm-completionMatchedText {
+  color: var(--primary-foreground);
+}
+
+.cm-completionIcon {
+  opacity: 0.65;
+}
+
+.cm-completionIcon {
+  width: 14px;
+  height: 14px;
+  display: inline-block;
+  margin-right: 6px;
+  color: var(--muted-foreground);
+  background-color: currentColor;
+  mask-size: contain;
+  mask-repeat: no-repeat;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+}
+
+.cm-completionIcon-slash {
+  mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M7 9a2 2 0 1 1 2 -2v10a2 2 0 1 1 -2 -2h10a2 2 0 1 1 -2 2v-10a2 2 0 1 1 2 2h-10'/></svg>");
+  -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M7 9a2 2 0 1 1 2 -2v10a2 2 0 1 1 -2 -2h10a2 2 0 1 1 -2 2v-10a2 2 0 1 1 2 2h-10'/></svg>");
+}
+
+.cm-completionIcon-mention {
+  mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M8 12a4 4 0 1 0 8 0a4 4 0 1 0 -8 0'/><path d='M16 12v1.5a2.5 2.5 0 0 0 5 0v-1.5a9 9 0 1 0 -5.5 8.28'/></svg>");
+  -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M8 12a4 4 0 1 0 8 0a4 4 0 1 0 -8 0'/><path d='M16 12v1.5a2.5 2.5 0 0 0 5 0v-1.5a9 9 0 1 0 -5.5 8.28'/></svg>");
+}
+
+.cm-tooltip-autocomplete li[aria-selected="true"] .cm-completionIcon {
+  color: var(--primary-foreground);
+}
+
+.task-chat-editor .cm-placeholder {
+  color: var(--muted-foreground) !important;
+}
+
+.task-chat-editor .cm-editor {
+  background: transparent;
+  box-shadow: none;
+  outline: none;
+}
+
+.task-chat-editor .cm-editor.cm-focused {
+  outline: none;
+}
+
+.task-chat-editor .cm-scroller,
+.task-chat-editor .cm-content,
+.task-chat-editor .cm-line,
+.task-chat-editor .cm-line span {
+  background: transparent;
+  color: var(--foreground);
+}
+
+.task-chat-editor .cm-cursor {
+  border-left-color: var(--foreground);
+}
+
+.task-chat-editor .cm-selectionBackground {
+  background: color-mix(in oklab, var(--primary) 25%, var(--background)) !important;
+}
+
+.task-chat-editor .cm-content ::selection {
+  background: color-mix(in oklab, var(--primary) 30%, var(--background));
+}

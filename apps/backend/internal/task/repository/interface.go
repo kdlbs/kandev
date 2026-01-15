@@ -7,6 +7,13 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
+type ListCommentsOptions struct {
+	Limit  int
+	Before string
+	After  string
+	Sort   string
+}
+
 // Repository defines the interface for task storage operations
 type Repository interface {
 	// Workspace operations
@@ -48,6 +55,7 @@ type Repository interface {
 	GetCommentByToolCallID(ctx context.Context, taskID, toolCallID string) (*models.Comment, error)
 	UpdateComment(ctx context.Context, comment *models.Comment) error
 	ListComments(ctx context.Context, taskID string) ([]*models.Comment, error)
+	ListCommentsPaginated(ctx context.Context, taskID string, opts ListCommentsOptions) ([]*models.Comment, bool, error)
 	DeleteComment(ctx context.Context, id string) error
 
 	// Agent Session operations

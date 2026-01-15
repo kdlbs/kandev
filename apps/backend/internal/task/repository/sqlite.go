@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -1292,7 +1293,7 @@ func (r *SQLiteRepository) GetComment(ctx context.Context, id string) (*models.C
 	return comment, nil
 }
 
-// ListComments returns all comments for a task ordered by creation time
+// ListComments returns all comments for a task ordered by creation time.
 func (r *SQLiteRepository) ListComments(ctx context.Context, taskID string) ([]*models.Comment, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, task_id, author_type, author_id, content, requests_input, acp_session_id, type, metadata, created_at
@@ -1325,7 +1326,101 @@ func (r *SQLiteRepository) ListComments(ctx context.Context, taskID string) ([]*
 
 		result = append(result, comment)
 	}
-	return result, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// ListCommentsPaginated returns comments for a task ordered by creation time with pagination.
+func (r *SQLiteRepository) ListCommentsPaginated(ctx context.Context, taskID string, opts ListCommentsOptions) ([]*models.Comment, bool, error) {
+	limit := opts.Limit
+	if limit < 0 {
+		limit = 0
+	}
+
+	sortDir := "ASC"
+	if strings.EqualFold(opts.Sort, "desc") {
+		sortDir = "DESC"
+	}
+
+	var cursor *models.Comment
+	if opts.Before != "" {
+		var err error
+		cursor, err = r.GetComment(ctx, opts.Before)
+		if err != nil {
+			return nil, false, err
+		}
+		if cursor.TaskID != taskID {
+			return nil, false, fmt.Errorf("comment cursor not found: %s", opts.Before)
+		}
+	}
+	if opts.After != "" {
+		var err error
+		cursor, err = r.GetComment(ctx, opts.After)
+		if err != nil {
+			return nil, false, err
+		}
+		if cursor.TaskID != taskID {
+			return nil, false, fmt.Errorf("comment cursor not found: %s", opts.After)
+		}
+	}
+
+	query := `
+		SELECT id, task_id, author_type, author_id, content, requests_input, acp_session_id, type, metadata, created_at
+		FROM task_comments WHERE task_id = ?`
+	args := []interface{}{taskID}
+	if cursor != nil {
+		if opts.Before != "" {
+			query += " AND (created_at < ? OR (created_at = ? AND id < ?))"
+		} else if opts.After != "" {
+			query += " AND (created_at > ? OR (created_at = ? AND id > ?))"
+		}
+		args = append(args, cursor.CreatedAt, cursor.CreatedAt, cursor.ID)
+	}
+	query += fmt.Sprintf(" ORDER BY created_at %s, id %s", sortDir, sortDir)
+	if limit > 0 {
+		query += " LIMIT ?"
+		args = append(args, limit+1)
+	}
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, false, err
+	}
+	defer rows.Close()
+
+	var result []*models.Comment
+	for rows.Next() {
+		comment := &models.Comment{}
+		var requestsInput int
+		var commentType string
+		var metadataJSON string
+		err := rows.Scan(&comment.ID, &comment.TaskID, &comment.AuthorType, &comment.AuthorID, &comment.Content, &requestsInput, &comment.ACPSessionID, &commentType, &metadataJSON, &comment.CreatedAt)
+		if err != nil {
+			return nil, false, err
+		}
+		comment.RequestsInput = requestsInput == 1
+		comment.Type = models.CommentType(commentType)
+
+		// Deserialize metadata from JSON
+		if metadataJSON != "" && metadataJSON != "{}" {
+			if err := json.Unmarshal([]byte(metadataJSON), &comment.Metadata); err != nil {
+				return nil, false, fmt.Errorf("failed to deserialize comment metadata: %w", err)
+			}
+		}
+
+		result = append(result, comment)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+	hasMore := false
+	if limit > 0 && len(result) > limit {
+		hasMore = true
+		result = result[:limit]
+	}
+	return result, hasMore, nil
 }
 
 // DeleteComment deletes a comment by ID

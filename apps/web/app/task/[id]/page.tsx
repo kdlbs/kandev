@@ -12,8 +12,17 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
   try {
     const { id } = await params;
     task = await fetchTask(id, { cache: 'no-store' });
-    comments = await listTaskComments(id, { cache: 'no-store' });
-    initialState = taskToState(task, comments.comments);
+    comments = await listTaskComments(
+      id,
+      { limit: 10, sort: 'desc' },
+      { cache: 'no-store' }
+    );
+    const orderedComments = [...comments.comments].reverse();
+    initialState = taskToState(task, {
+      items: orderedComments,
+      hasMore: comments.has_more,
+      oldestCursor: comments.cursor || (orderedComments[0]?.id ?? null),
+    });
   } catch {
     initialState = null;
     task = null;

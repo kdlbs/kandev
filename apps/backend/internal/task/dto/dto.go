@@ -122,6 +122,8 @@ type BoardSnapshotDTO struct {
 type ListCommentsResponse struct {
 	Comments []*v1.Comment `json:"comments"`
 	Total    int           `json:"total"`
+	HasMore  bool          `json:"has_more"`
+	Cursor   string        `json:"cursor"`
 }
 
 type ListBoardsResponse struct {

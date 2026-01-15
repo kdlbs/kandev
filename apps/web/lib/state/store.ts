@@ -147,6 +147,8 @@ export type CommentsState = {
   taskId: string | null;
   items: Comment[];
   isLoading: boolean;
+  hasMore: boolean;
+  oldestCursor: string | null;
 };
 
 export type AppState = {
@@ -187,10 +189,16 @@ export type AppState = {
   setUserSettings: (settings: UserSettingsState) => void;
   setTerminalOutput: (terminalId: string, data: string) => void;
   setConnectionStatus: (status: ConnectionState['status'], error?: string | null) => void;
-  setComments: (taskId: string, comments: Comment[]) => void;
+  setComments: (
+    taskId: string,
+    comments: Comment[],
+    meta?: { hasMore?: boolean; oldestCursor?: string | null }
+  ) => void;
   setCommentsTaskId: (taskId: string | null) => void;
   addComment: (comment: Comment) => void;
   updateComment: (comment: Comment) => void;
+  prependComments: (comments: Comment[], meta?: { hasMore?: boolean; oldestCursor?: string | null }) => void;
+  setCommentsMetadata: (meta: { hasMore?: boolean; isLoading?: boolean; oldestCursor?: string | null }) => void;
   setCommentsLoading: (loading: boolean) => void;
   setGitStatus: (taskId: string, gitStatus: Omit<GitStatusState, 'taskId'>) => void;
   clearGitStatus: () => void;
@@ -231,7 +239,7 @@ const defaultState: AppState = {
     timestamp: null,
   },
   connection: { status: 'disconnected', error: null },
-  comments: { taskId: null, items: [], isLoading: false },
+  comments: { taskId: null, items: [], isLoading: false, hasMore: false, oldestCursor: null },
   hydrate: () => undefined,
   setActiveWorkspace: () => undefined,
   setWorkspaces: () => undefined,
@@ -254,6 +262,8 @@ const defaultState: AppState = {
   setCommentsTaskId: () => undefined,
   addComment: () => undefined,
   updateComment: () => undefined,
+  prependComments: () => undefined,
+  setCommentsMetadata: () => undefined,
   setCommentsLoading: () => undefined,
   setGitStatus: () => undefined,
   clearGitStatus: () => undefined,
@@ -286,6 +296,8 @@ function mergeInitialState(
   | 'setCommentsTaskId'
   | 'addComment'
   | 'updateComment'
+  | 'prependComments'
+  | 'setCommentsMetadata'
   | 'setCommentsLoading'
   | 'setGitStatus'
   | 'clearGitStatus'
@@ -432,11 +444,19 @@ export function createAppStore(initialState?: Partial<AppState>) {
           draft.connection.status = status;
           draft.connection.error = error;
         }),
-      setComments: (taskId, comments) =>
+      setComments: (taskId, comments, meta) =>
         set((draft) => {
           draft.comments.taskId = taskId;
           draft.comments.items = comments;
           draft.comments.isLoading = false;
+          draft.comments.hasMore = meta?.hasMore ?? false;
+          if (meta?.oldestCursor !== undefined) {
+            draft.comments.oldestCursor = meta.oldestCursor;
+          } else if (comments.length) {
+            draft.comments.oldestCursor = comments[0].id;
+          } else {
+            draft.comments.oldestCursor = null;
+          }
         }),
       setCommentsTaskId: (taskId) =>
         set((draft) => {
@@ -459,6 +479,9 @@ export function createAppStore(initialState?: Partial<AppState>) {
             const exists = draft.comments.items.some((c) => c.id === comment.id);
             if (!exists) {
               draft.comments.items.push(comment);
+              if (!draft.comments.oldestCursor) {
+                draft.comments.oldestCursor = comment.id;
+              }
             }
           }
         }),
@@ -470,6 +493,40 @@ export function createAppStore(initialState?: Partial<AppState>) {
             if (index !== -1) {
               draft.comments.items[index] = comment;
             }
+          }
+        }),
+      prependComments: (comments, meta) =>
+        set((draft) => {
+          if (draft.comments.items === null) {
+            draft.comments.items = [];
+          }
+          const existingIds = new Set(draft.comments.items.map((comment) => comment.id));
+          const incoming = comments.filter((comment) => !existingIds.has(comment.id));
+          if (incoming.length) {
+            draft.comments.items = [...incoming, ...draft.comments.items];
+          }
+          if (meta?.hasMore !== undefined) {
+            draft.comments.hasMore = meta.hasMore;
+          }
+          if (meta?.oldestCursor !== undefined) {
+            draft.comments.oldestCursor = meta.oldestCursor;
+          } else if (draft.comments.items.length) {
+            draft.comments.oldestCursor = draft.comments.items[0].id;
+          } else {
+            draft.comments.oldestCursor = null;
+          }
+          draft.comments.isLoading = false;
+        }),
+      setCommentsMetadata: (meta) =>
+        set((draft) => {
+          if (meta.hasMore !== undefined) {
+            draft.comments.hasMore = meta.hasMore;
+          }
+          if (meta.isLoading !== undefined) {
+            draft.comments.isLoading = meta.isLoading;
+          }
+          if (meta.oldestCursor !== undefined) {
+            draft.comments.oldestCursor = meta.oldestCursor;
           }
         }),
       setCommentsLoading: (loading) =>

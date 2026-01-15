@@ -154,3 +154,23 @@ export function matchesShortcut(
   return true;
 }
 
+/**
+ * Convert a keyboard shortcut definition to a CodeMirror keybinding string.
+ */
+export function shortcutToCodeMirrorKeybinding(shortcut: KeyboardShortcut): string {
+  const parts: string[] = [];
+
+  if (shortcut.modifiers) {
+    if (shortcut.modifiers.ctrlOrCmd) {
+      parts.push('Mod');
+    } else {
+      if (shortcut.modifiers.ctrl) parts.push('Ctrl');
+      if (shortcut.modifiers.cmd) parts.push('Mod');
+      if (shortcut.modifiers.alt) parts.push('Alt');
+      if (shortcut.modifiers.shift) parts.push('Shift');
+    }
+  }
+
+  parts.push(shortcut.key);
+  return parts.join('-');
+}

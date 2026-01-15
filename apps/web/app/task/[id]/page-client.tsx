@@ -10,7 +10,7 @@ import { IconX } from '@tabler/icons-react';
 import { getLocalStorage, setLocalStorage } from '@/lib/local-storage';
 import { TaskChatPanel } from '@/components/task/task-chat-panel';
 import { TaskTopBar } from '@/components/task/task-top-bar';
-import type { Task, Comment } from '@/lib/types/http';
+import type { Task } from '@/lib/types/http';
 import type { OpenFileTab } from '@/lib/types/backend';
 import { FILE_EXTENSION_COLORS } from '@/lib/types/backend';
 import { TaskFilesPanel } from '@/components/task/task-files-panel';
@@ -21,6 +21,7 @@ import { getWebSocketClient } from '@/lib/ws/connection';
 import { useAppStore, useAppStoreApi } from '@/components/state-provider';
 import { useRepositories } from '@/hooks/use-repositories';
 import { useRepositoryBranches } from '@/hooks/use-repository-branches';
+import { listTaskComments } from '@/lib/http';
 
 const AGENTS = [
   { id: 'codex', label: 'Codex' },
@@ -113,19 +114,19 @@ export default function TaskPage({ task: initialTask }: TaskPageClientProps) {
     }
 
     const fetchComments = async () => {
-      const client = getWebSocketClient();
-      if (!client) return;
-
       setIsLoadingComments(true);
       store.getState().setCommentsLoading(true);
 
       try {
-        const response = await client.request<{ comments: Comment[] }>('comment.list', { task_id: task.id }, 10000);
-        console.log('[API] comment.list response:', JSON.stringify(response, null, 2));
-        store.getState().setComments(task.id, response.comments ?? []);
+        const response = await listTaskComments(task.id, { limit: 10, sort: 'desc' });
+        const orderedComments = [...(response.comments ?? [])].reverse();
+        store.getState().setComments(task.id, orderedComments, {
+          hasMore: response.has_more,
+          oldestCursor: response.cursor || (orderedComments[0]?.id ?? null),
+        });
       } catch (error) {
         console.error('Failed to fetch comments:', error);
-        store.getState().setComments(task.id, []);
+        store.getState().setComments(task.id, [], { hasMore: false, oldestCursor: null });
       } finally {
         setIsLoadingComments(false);
       }

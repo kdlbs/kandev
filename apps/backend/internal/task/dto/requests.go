@@ -262,6 +262,10 @@ type DeleteTaskRequest struct {
 
 type ListCommentsRequest struct {
 	TaskID string
+	Limit  int
+	Before string
+	After  string
+	Sort   string
 }
 
 type CreateCommentRequest struct {

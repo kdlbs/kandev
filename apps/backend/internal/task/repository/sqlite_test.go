@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -593,6 +594,59 @@ func TestSQLiteRepository_ListComments(t *testing.T) {
 	}
 	if len(comments) != 2 {
 		t.Errorf("expected 2 comments for task-123, got %d", len(comments))
+	}
+}
+
+func TestSQLiteRepository_ListCommentsPagination(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	board := &models.Board{ID: "board-123", Name: "Test Board"}
+	_ = repo.CreateBoard(ctx, board)
+	column := &models.Column{ID: "col-123", BoardID: "board-123", Name: "Test Column"}
+	_ = repo.CreateColumn(ctx, column)
+	task := &models.Task{ID: "task-123", BoardID: "board-123", ColumnID: "col-123", Title: "Test Task"}
+	_ = repo.CreateTask(ctx, task)
+
+	baseTime := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	_ = repo.CreateComment(ctx, &models.Comment{
+		ID:        "comment-1",
+		TaskID:    "task-123",
+		AuthorType: models.CommentAuthorUser,
+		Content:   "Comment 1",
+		CreatedAt: baseTime.Add(-2 * time.Minute),
+	})
+	_ = repo.CreateComment(ctx, &models.Comment{
+		ID:        "comment-2",
+		TaskID:    "task-123",
+		AuthorType: models.CommentAuthorUser,
+		Content:   "Comment 2",
+		CreatedAt: baseTime.Add(-1 * time.Minute),
+	})
+	_ = repo.CreateComment(ctx, &models.Comment{
+		ID:        "comment-3",
+		TaskID:    "task-123",
+		AuthorType: models.CommentAuthorUser,
+		Content:   "Comment 3",
+		CreatedAt: baseTime,
+	})
+
+	comments, hasMore, err := repo.ListCommentsPaginated(ctx, "task-123", ListCommentsOptions{
+		Limit: 2,
+		Sort:  "desc",
+	})
+	if err != nil {
+		t.Fatalf("failed to list comments: %v", err)
+	}
+	if len(comments) != 2 {
+		t.Fatalf("expected 2 comments, got %d", len(comments))
+	}
+	if !hasMore {
+		t.Error("expected hasMore to be true")
+	}
+	if comments[0].ID != "comment-3" {
+		t.Errorf("expected newest comment first, got %s", comments[0].ID)
 	}
 }
 

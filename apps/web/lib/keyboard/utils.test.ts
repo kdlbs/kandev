@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, vi } from 'vitest';
-import { detectPlatform, isMac, formatShortcut, matchesShortcut } from './utils';
+import { detectPlatform, isMac, formatShortcut, matchesShortcut, shortcutToCodeMirrorKeybinding } from './utils';
 import { KEYS, SHORTCUTS } from './constants';
 import type { KeyboardShortcut } from './constants';
 
@@ -313,3 +313,21 @@ describe('matchesShortcut', () => {
   });
 });
 
+describe('shortcutToCodeMirrorKeybinding', () => {
+  it('formats ctrlOrCmd shortcuts with Mod', () => {
+    expect(shortcutToCodeMirrorKeybinding(SHORTCUTS.SUBMIT)).toBe('Mod-Enter');
+  });
+
+  it('formats explicit modifiers', () => {
+    const shortcut: KeyboardShortcut = {
+      key: KEYS.S,
+      modifiers: { ctrl: true, shift: true },
+    };
+    expect(shortcutToCodeMirrorKeybinding(shortcut)).toBe('Ctrl-Shift-s');
+  });
+
+  it('formats without modifiers', () => {
+    const shortcut: KeyboardShortcut = { key: KEYS.ESCAPE };
+    expect(shortcutToCodeMirrorKeybinding(shortcut)).toBe('Escape');
+  });
+});

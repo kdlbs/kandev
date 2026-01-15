@@ -1,28 +1,10 @@
 'use client';
 
-import { FormEvent, useEffect, useRef, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import {
-  IconBrain,
-  IconCheck,
-  IconChevronDown,
-  IconChevronRight,
-  IconCode,
-  IconEdit,
-  IconEye,
-  IconFile,
-  IconListCheck,
-  IconLoader2,
-  IconPaperclip,
-  IconSearch,
-  IconTerminal2,
-  IconX,
-} from '@tabler/icons-react';
-import ReactMarkdown from 'react-markdown';
-import remarkBreaks from 'remark-breaks';
-import remarkGfm from 'remark-gfm';
+import { IconBrain, IconListCheck, IconLoader2, IconPaperclip } from '@tabler/icons-react';
 import { Button } from '@kandev/ui/button';
-import { Textarea } from '@kandev/ui/textarea';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -35,8 +17,12 @@ import { cn } from '@/lib/utils';
 import { useAppStore } from '@/components/state-provider';
 import type { Comment } from '@/lib/types/http';
 import { SHORTCUTS } from '@/lib/keyboard/constants';
-import { useKeyboardShortcutHandler } from '@/hooks/use-keyboard-shortcut';
 import { KeyboardShortcutTooltip } from '@/components/keyboard-shortcut-tooltip';
+import { TaskChatInput } from '@/components/task/task-chat-input';
+import { useLazyLoadComments } from '@/hooks/use-lazy-load-comments';
+import { MessageRenderer } from '@/components/task/chat/message-renderer';
+import { TypingIndicator } from '@/components/task/chat/messages/typing-indicator';
+import { TodoSummary } from '@/components/task/chat/todo-summary';
 
 type AgentOption = {
   id: string;
@@ -51,159 +37,6 @@ type TaskChatPanelProps = {
   taskDescription?: string;
 };
 
-type ToolCallMetadata = {
-  tool_call_id?: string;
-  tool_name?: string;
-  title?: string;
-  status?: 'pending' | 'running' | 'complete' | 'error';
-  args?: Record<string, unknown>;
-  result?: string;
-};
-
-function getToolIcon(toolName: string | undefined, className: string) {
-  const name = toolName?.toLowerCase() ?? '';
-  // Match ACP ToolKind values: read, edit, delete, move, search, execute
-  if (name === 'edit' || name.includes('edit') || name.includes('replace') || name.includes('write') || name.includes('save')) {
-    return <IconEdit className={className} />;
-  }
-  if (name === 'read' || name.includes('view') || name.includes('read')) {
-    return <IconEye className={className} />;
-  }
-  if (name === 'search' || name.includes('search') || name.includes('find') || name.includes('retrieval')) {
-    return <IconSearch className={className} />;
-  }
-  if (name === 'execute' || name.includes('terminal') || name.includes('exec') || name.includes('launch') || name.includes('process')) {
-    return <IconTerminal2 className={className} />;
-  }
-  if (name === 'delete' || name === 'move' || name.includes('file') || name.includes('create')) {
-    return <IconFile className={className} />;
-  }
-  return <IconCode className={className} />;
-}
-
-function getStatusIcon(status?: string) {
-  switch (status) {
-    case 'complete':
-      return <IconCheck className="h-3.5 w-3.5 text-green-500" />;
-    case 'error':
-      return <IconX className="h-3.5 w-3.5 text-red-500" />;
-    case 'running':
-      return <IconLoader2 className="h-3.5 w-3.5 text-blue-500 animate-spin" />;
-    default:
-      return null;
-  }
-}
-
-function ToolCallCard({ comment }: { comment: Comment }) {
-  const [isExpanded, setIsExpanded] = useState(false);
-  const metadata = comment.metadata as ToolCallMetadata | undefined;
-
-  const toolName = metadata?.tool_name ?? '';
-  const title = metadata?.title ?? comment.content ?? 'Tool call';
-  const status = metadata?.status;
-  const args = metadata?.args;
-  const result = metadata?.result;
-
-  const toolIcon = getToolIcon(toolName, 'h-4 w-4 text-amber-600 dark:text-amber-400 flex-shrink-0');
-  const hasDetails = args && Object.keys(args).length > 0;
-
-  // Extract file path from various possible sources
-  let filePath: string | undefined;
-  const rawPath = args?.path ?? args?.file ?? args?.file_path;
-  if (typeof rawPath === 'string') {
-    filePath = rawPath;
-  }
-  // Also try to get path from locations array if available
-  if (!filePath && Array.isArray(args?.locations) && args.locations.length > 0) {
-    const firstLoc = args.locations[0] as { path?: string } | undefined;
-    if (firstLoc?.path) {
-      filePath = firstLoc.path;
-    }
-  }
-
-  return (
-    <div className="rounded-md border border-border/40 bg-muted/20 overflow-hidden">
-      <button
-        type="button"
-        onClick={() => hasDetails && setIsExpanded(!isExpanded)}
-        className={cn(
-          'w-full flex items-center gap-2 px-3 py-2 text-sm text-left',
-          hasDetails && 'cursor-pointer hover:bg-muted/40 transition-colors'
-        )}
-        disabled={!hasDetails}
-      >
-        {toolIcon}
-        <span className="flex-1 font-mono text-xs text-muted-foreground truncate">
-          {title}
-        </span>
-        {filePath && (
-          <span className="text-xs text-muted-foreground/60 truncate max-w-[200px]">
-            {filePath}
-          </span>
-        )}
-        {getStatusIcon(status)}
-        {hasDetails && (
-          isExpanded
-            ? <IconChevronDown className="h-4 w-4 text-muted-foreground/50" />
-            : <IconChevronRight className="h-4 w-4 text-muted-foreground/50" />
-        )}
-      </button>
-
-      {isExpanded && hasDetails && (
-        <div className="border-t border-border/30 bg-background/50 p-3 space-y-2">
-          {args && Object.entries(args).map(([key, value]) => {
-            const strValue = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
-            const isLongValue = strValue.length > 100 || strValue.includes('\n');
-
-            return (
-              <div key={key} className="text-xs">
-                <span className="font-medium text-muted-foreground">{key}:</span>
-                {isLongValue ? (
-                  <pre className="mt-1 p-2 bg-muted/50 rounded text-[11px] overflow-x-auto max-h-[200px] overflow-y-auto whitespace-pre-wrap break-all">
-                    {strValue}
-                  </pre>
-                ) : (
-                  <span className="ml-2 font-mono text-foreground/80">{strValue}</span>
-                )}
-              </div>
-            );
-          })}
-          {result && (
-            <div className="text-xs border-t border-border/30 pt-2 mt-2">
-              <span className="font-medium text-muted-foreground">Result:</span>
-              <pre className="mt-1 p-2 bg-muted/50 rounded text-[11px] overflow-x-auto max-h-[150px] overflow-y-auto whitespace-pre-wrap">
-                {result}
-              </pre>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function TypingIndicator() {
-  return (
-    <div className="flex items-center gap-2 px-4 py-3 max-w-[85%] rounded-lg bg-muted text-muted-foreground">
-      <div className="flex items-center gap-1" role="status" aria-label="Agent is typing">
-        <span className="text-[11px] uppercase tracking-wide opacity-70 mr-2">Agent</span>
-        <span
-          className="w-2 h-2 rounded-full bg-current animate-bounce"
-          style={{ animationDelay: '0ms', animationDuration: '1s' }}
-        />
-        <span
-          className="w-2 h-2 rounded-full bg-current animate-bounce"
-          style={{ animationDelay: '150ms', animationDuration: '1s' }}
-        />
-        <span
-          className="w-2 h-2 rounded-full bg-current animate-bounce"
-          style={{ animationDelay: '300ms', animationDuration: '1s' }}
-        />
-      </div>
-    </div>
-  );
-}
-
 export function TaskChatPanel({ agents, onSend, isLoading, isAgentWorking, taskDescription }: TaskChatPanelProps) {
   const [messageInput, setMessageInput] = useState('');
   const [selectedAgent, setSelectedAgent] = useState(agents[0]?.id ?? '');
@@ -212,14 +45,27 @@ export function TaskChatPanel({ agents, onSend, isLoading, isAgentWorking, taskD
   const [isAwaitingResponse, setIsAwaitingResponse] = useState(false);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const lastAgentMessageCountRef = useRef(0);
+  const wasAtBottomRef = useRef(true);
 
   const commentsState = useAppStore((state) => state.comments);
   const comments = commentsState?.items ?? [];
   const commentsLoading = commentsState?.isLoading ?? false;
+  const isInitialLoading = commentsLoading && comments.length === 0;
+  const { loadMore, hasMore, isLoading: isLoadingMore } = useLazyLoadComments(
+    commentsState?.taskId ?? null
+  );
 
-  // Filter to only show message, content, and tool_call types (not progress, etc)
-  const visibleComments = comments.filter(
-    (c) => c.type === 'message' || c.type === 'content' || c.type === 'tool_call' || !c.type
+  // Filter to only show chat-relevant types.
+  const visibleComments = comments.filter((comment) =>
+    !comment.type ||
+    comment.type === 'message' ||
+    comment.type === 'content' ||
+    comment.type === 'tool_call' ||
+    comment.type === 'progress' ||
+    comment.type === 'status' ||
+    comment.type === 'error' ||
+    comment.type === 'thinking' ||
+    comment.type === 'todo'
   );
 
   // Create a synthetic "user" message for the task description
@@ -236,6 +82,15 @@ export function TaskChatPanel({ agents, onSend, isLoading, isAgentWorking, taskD
   const allMessages = taskDescriptionMessage
     ? [taskDescriptionMessage, ...visibleComments]
     : visibleComments;
+
+  const latestTodos = [...visibleComments]
+    .reverse()
+    .find((comment) => comment.type === 'todo' || (comment.metadata as { todos?: unknown })?.todos);
+
+  const todoItems = (latestTodos?.metadata as { todos?: Array<{ text: string; done?: boolean } | string> } | undefined)
+    ?.todos
+    ?.map((item) => (typeof item === 'string' ? { text: item, done: false } : item))
+    .filter((item) => item.text) ?? [];
 
   // Count agent messages to detect new responses
   const agentMessageCount = visibleComments.filter((c) => c.author_type !== 'user').length;
@@ -260,19 +115,61 @@ export function TaskChatPanel({ agents, onSend, isLoading, isAgentWorking, taskD
     overscan: 6,
   });
 
+  const checkAtBottom = useCallback(() => {
+    const element = messagesContainerRef.current;
+    if (!element) return;
+    const { scrollTop, scrollHeight, clientHeight } = element;
+    wasAtBottomRef.current = scrollHeight - scrollTop - clientHeight < 48;
+  }, []);
+
+  useEffect(() => {
+    const element = messagesContainerRef.current;
+    if (!element) return;
+    element.addEventListener('scroll', checkAtBottom);
+    return () => element.removeEventListener('scroll', checkAtBottom);
+  }, [checkAtBottom]);
+
   // Scroll to bottom when new comments arrive or when typing indicator appears
   useEffect(() => {
     if (itemCount === 0) return;
-    virtualizer.scrollToIndex(itemCount - 1, { align: 'end', behavior: 'smooth' });
+    if (wasAtBottomRef.current) {
+      virtualizer.scrollToIndex(itemCount - 1, { align: 'end' });
+    }
   }, [itemCount, virtualizer]);
 
-  const handleSubmit = async (event: FormEvent) => {
-    event.preventDefault();
+  const virtualItems = virtualizer.getVirtualItems();
+
+  useEffect(() => {
+    const [firstItem] = virtualItems;
+    if (!firstItem) return;
+    const element = messagesContainerRef.current;
+    if (!element) return;
+    if (firstItem.index !== 0 || element.scrollTop > 40) {
+      return;
+    }
+    if (!hasMore || isLoadingMore) {
+      return;
+    }
+    const prevScrollHeight = element.scrollHeight;
+    const prevScrollTop = element.scrollTop;
+    loadMore().then((added) => {
+      if (!added) return;
+      requestAnimationFrame(() => {
+        const nextScrollHeight = element.scrollHeight;
+        element.scrollTop = prevScrollTop + (nextScrollHeight - prevScrollHeight);
+      });
+    });
+  }, [virtualItems, hasMore, isLoadingMore, loadMore]);
+
+  const handleSubmit = async (event?: FormEvent) => {
+    event?.preventDefault();
     const trimmed = messageInput.trim();
     if (!trimmed || isSending) return;
     setIsSending(true);
     setIsAwaitingResponse(true);
-    setMessageInput('');
+    flushSync(() => {
+      setMessageInput('');
+    });
     try {
       await onSend(trimmed);
     } finally {
@@ -280,80 +177,30 @@ export function TaskChatPanel({ agents, onSend, isLoading, isAgentWorking, taskD
     }
   };
 
-  // Use keyboard shortcut hook for Cmd+Enter / Ctrl+Enter
-  const handleKeyDown = useKeyboardShortcutHandler(SHORTCUTS.SUBMIT, (event) => {
-    handleSubmit(event as unknown as FormEvent);
-  });
-
-  const formatContent = (comment: Comment) => {
-    // For content type comments, the content might be streamed chunks
-    // For message type, show as-is
-    return comment.content || '(empty)';
-  };
-
-  const renderMessage = (comment: Comment) => {
-    if (comment.type === 'tool_call') {
-      return <ToolCallCard comment={comment} />;
-    }
-
-    const isUser = comment.author_type === 'user';
-    const isTaskDescription = comment.id === 'task-description';
-
-    let label: string;
-    let containerClass: string;
-
-    if (isTaskDescription) {
-      label = 'Task';
-      containerClass = 'ml-auto bg-primary/20 text-foreground border border-primary/40';
-    } else if (isUser) {
-      label = 'You';
-      containerClass = 'ml-auto bg-primary text-primary-foreground';
-    } else {
-      label = 'Agent';
-      containerClass = 'bg-muted text-foreground';
-    }
-
-    return (
-      <div className={cn('max-w-[85%] rounded-lg px-4 py-3 text-sm', containerClass)}>
-        <p
-          className={cn(
-            'text-[11px] uppercase tracking-wide mb-2',
-            isTaskDescription ? 'text-primary font-medium' : 'opacity-70'
-          )}
-        >
-          {label}
-        </p>
-        {isUser ? (
-          <p className="whitespace-pre-wrap">{formatContent(comment)}</p>
-        ) : (
-          <div className="prose prose-sm dark:prose-invert max-w-none prose-p:my-2 prose-p:leading-relaxed prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-pre:my-3 prose-code:px-1.5 prose-code:py-0.5 prose-code:bg-background/50 prose-code:rounded prose-code:text-xs prose-code:before:content-none prose-code:after:content-none prose-pre:bg-background/80 prose-pre:text-xs prose-strong:text-foreground prose-headings:text-foreground">
-            <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>
-              {formatContent(comment)}
-            </ReactMarkdown>
-          </div>
-        )}
-      </div>
-    );
-  };
 
   return (
     <>
       <div
         ref={messagesContainerRef}
-        className="flex-1 min-h-0 overflow-y-auto rounded-lg bg-background p-3"
+        className="relative flex-1 min-h-0 overflow-y-auto rounded-lg bg-background p-3"
       >
-        {(isLoading || commentsLoading) && (
+        {isLoadingMore && hasMore && (
+          <div className="absolute top-2 left-1/2 -translate-x-1/2 text-xs text-muted-foreground">
+            Loading older messages...
+          </div>
+        )}
+        {(isLoading || isInitialLoading) && (
           <div className="flex items-center justify-center py-8 text-muted-foreground">
             <IconLoader2 className="h-5 w-5 animate-spin mr-2" />
             <span>Loading comments...</span>
           </div>
         )}
-        {!isLoading && !commentsLoading && allMessages.length === 0 && (
+        {!isLoading && !isInitialLoading && allMessages.length === 0 && (
           <div className="flex items-center justify-center py-8 text-muted-foreground">
             <span>No messages yet. Start the conversation!</span>
           </div>
         )}
-        {!isLoading && !commentsLoading && itemCount > 0 && (
+        {!isLoading && !isInitialLoading && itemCount > 0 && (
           <div className="relative w-full" style={{ height: `${virtualizer.getTotalSize()}px` }}>
             {virtualizer.getVirtualItems().map((virtualRow) => {
               const isTypingRow = showTypingIndicator && virtualRow.index === allMessages.length;
@@ -366,9 +213,16 @@ export function TaskChatPanel({ agents, onSend, isLoading, isAgentWorking, taskD
                   className="absolute left-0 top-0 w-full"
                   style={{ transform: `translateY(${virtualRow.start}px)` }}
                 >
-                  <div className="pb-3">
-                    {isTypingRow ? <TypingIndicator /> : renderMessage(message)}
-                  </div>
+                <div className="pb-3">
+                  {isTypingRow ? (
+                    <TypingIndicator />
+                  ) : (
+                    <MessageRenderer
+                      comment={message}
+                      isTaskDescription={message.id === 'task-description'}
+                    />
+                  )}
+                </div>
                 </div>
               );
             })}
@@ -376,16 +230,15 @@ export function TaskChatPanel({ agents, onSend, isLoading, isAgentWorking, taskD
         )}
       </div>
       <form onSubmit={handleSubmit} className="mt-3 flex flex-col gap-2">
-        <Textarea
+        {todoItems.length > 0 && (
+          <TodoSummary todos={todoItems} />
+        )}
+        <TaskChatInput
           value={messageInput}
-          onChange={(event) => setMessageInput(event.target.value)}
-          onKeyDown={handleKeyDown}
+          onChange={setMessageInput}
+          onSubmit={() => handleSubmit()}
           placeholder="Write to submit work to the agent..."
-          className={cn(
-            'min-h-[90px] resize-none',
-            planModeEnabled &&
-              'border-dashed border-primary/60 !bg-primary/20 dark:!bg-primary/20 shadow-[inset_0_0_0_1px_rgba(59,130,246,0.35)]'
-          )}
+          planModeEnabled={planModeEnabled}
         />
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
