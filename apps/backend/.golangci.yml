@@ -1,0 +1,2 @@
+version: "2"
+# Default golangci-lint configuration (uses built-in defaults).

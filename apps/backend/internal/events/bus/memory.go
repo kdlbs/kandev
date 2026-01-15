@@ -226,7 +226,9 @@ func (b *MemoryEventBus) Request(ctx context.Context, subject string, event *Eve
 	if err != nil {
 		return nil, fmt.Errorf("failed to create reply subscription: %w", err)
 	}
-	defer sub.Unsubscribe()
+	defer func() {
+		_ = sub.Unsubscribe()
+	}()
 
 	// Add reply subject to event data
 	if event.Data == nil {

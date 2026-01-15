@@ -135,26 +135,6 @@ func newTestRegistry() *registry.Registry {
 	return reg
 }
 
-// managerWithMock creates a manager with a mock docker client
-// We need to use reflection or a wrapper to inject the mock
-type testManager struct {
-	*Manager
-	mockDocker *MockDockerClient
-}
-
-func newTestManager(mockDocker *MockDockerClient, eventBus bus.EventBus) *testManager {
-	log := newTestLogger()
-	reg := newTestRegistry()
-
-	// Create a real manager first
-	mgr := NewManager(nil, reg, eventBus, testAgentConfig(), log)
-
-	return &testManager{
-		Manager:    mgr,
-		mockDocker: mockDocker,
-	}
-}
-
 func TestNewManager(t *testing.T) {
 	log := newTestLogger()
 	reg := newTestRegistry()
@@ -519,4 +499,3 @@ func TestManager_StartStop(t *testing.T) {
 		t.Fatalf("unexpected error stopping manager: %v", err)
 	}
 }
-

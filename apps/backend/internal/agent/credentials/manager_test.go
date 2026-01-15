@@ -47,8 +47,7 @@ func TestManager_GetCredential_FromEnv(t *testing.T) {
 	// Set up test environment variable
 	testKey := "TEST_CREDENTIAL_KEY_12345"
 	testValue := "test-secret-value"
-	os.Setenv(testKey, testValue)
-	defer os.Unsetenv(testKey)
+	t.Setenv(testKey, testValue)
 
 	log := newTestLogger()
 	mgr := NewManager(log)
@@ -74,8 +73,7 @@ func TestManager_GetCredential_FromEnv(t *testing.T) {
 func TestManager_GetCredential_Cached(t *testing.T) {
 	testKey := "TEST_CACHED_KEY"
 	testValue := "cached-value"
-	os.Setenv(testKey, testValue)
-	defer os.Unsetenv(testKey)
+	t.Setenv(testKey, testValue)
 
 	log := newTestLogger()
 	mgr := NewManager(log)
@@ -90,7 +88,9 @@ func TestManager_GetCredential_Cached(t *testing.T) {
 	}
 
 	// Remove from env - should still get cached value
-	os.Unsetenv(testKey)
+	if err := os.Unsetenv(testKey); err != nil {
+		t.Fatalf("failed to unset env var: %v", err)
+	}
 
 	cred2, err := mgr.GetCredential(ctx, testKey)
 	if err != nil {
@@ -117,12 +117,8 @@ func TestManager_GetCredential_NotFound(t *testing.T) {
 func TestManager_GetCredentials(t *testing.T) {
 	testKey1 := "TEST_MULTI_KEY_1"
 	testKey2 := "TEST_MULTI_KEY_2"
-	os.Setenv(testKey1, "value1")
-	os.Setenv(testKey2, "value2")
-	defer func() {
-		os.Unsetenv(testKey1)
-		os.Unsetenv(testKey2)
-	}()
+	t.Setenv(testKey1, "value1")
+	t.Setenv(testKey2, "value2")
 
 	log := newTestLogger()
 	mgr := NewManager(log)
@@ -147,8 +143,7 @@ func TestManager_GetCredentials(t *testing.T) {
 
 func TestManager_GetCredentials_PartialFailure(t *testing.T) {
 	testKey := "TEST_PARTIAL_KEY"
-	os.Setenv(testKey, "value")
-	defer os.Unsetenv(testKey)
+	t.Setenv(testKey, "value")
 
 	log := newTestLogger()
 	mgr := NewManager(log)
@@ -169,8 +164,7 @@ func TestManager_GetCredentials_PartialFailure(t *testing.T) {
 func TestManager_BuildEnvVars(t *testing.T) {
 	testKey := "TEST_BUILD_ENV_KEY"
 	testValue := "build-env-value"
-	os.Setenv(testKey, testValue)
-	defer os.Unsetenv(testKey)
+	t.Setenv(testKey, testValue)
 
 	log := newTestLogger()
 	mgr := NewManager(log)
@@ -219,8 +213,7 @@ func TestManager_BuildEnvVars_MissingRequired(t *testing.T) {
 
 func TestManager_HasCredential(t *testing.T) {
 	testKey := "TEST_HAS_CREDENTIAL"
-	os.Setenv(testKey, "value")
-	defer os.Unsetenv(testKey)
+	t.Setenv(testKey, "value")
 
 	log := newTestLogger()
 	mgr := NewManager(log)
@@ -238,8 +231,7 @@ func TestManager_HasCredential(t *testing.T) {
 
 func TestManager_ListAvailable(t *testing.T) {
 	testKey := "TEST_LIST_AVAILABLE_API_KEY"
-	os.Setenv(testKey, "value")
-	defer os.Unsetenv(testKey)
+	t.Setenv(testKey, "value")
 
 	log := newTestLogger()
 	mgr := NewManager(log)
@@ -263,8 +255,7 @@ func TestManager_ListAvailable(t *testing.T) {
 
 func TestManager_ClearCache(t *testing.T) {
 	testKey := "TEST_CLEAR_CACHE"
-	os.Setenv(testKey, "original-value")
-	defer os.Unsetenv(testKey)
+	t.Setenv(testKey, "original-value")
 
 	log := newTestLogger()
 	mgr := NewManager(log)
@@ -279,7 +270,9 @@ func TestManager_ClearCache(t *testing.T) {
 	}
 
 	// Update the env and clear cache
-	os.Setenv(testKey, "new-value")
+	if err := os.Setenv(testKey, "new-value"); err != nil {
+		t.Fatalf("failed to update env var: %v", err)
+	}
 	mgr.ClearCache()
 
 	// Should get new value
@@ -301,8 +294,7 @@ func TestEnvProvider_Name(t *testing.T) {
 func TestEnvProvider_GetCredential(t *testing.T) {
 	testKey := "TEST_ENV_PROVIDER_KEY"
 	testValue := "env-provider-value"
-	os.Setenv(testKey, testValue)
-	defer os.Unsetenv(testKey)
+	t.Setenv(testKey, testValue)
 
 	provider := NewEnvProvider("")
 	ctx := context.Background()
@@ -323,8 +315,7 @@ func TestEnvProvider_GetCredential_WithPrefix(t *testing.T) {
 	prefix := "KANDEV_"
 	testKey := "MY_SECRET"
 	testValue := "prefixed-value"
-	os.Setenv(prefix+testKey, testValue)
-	defer os.Unsetenv(prefix + testKey)
+	t.Setenv(prefix+testKey, testValue)
 
 	provider := NewEnvProvider(prefix)
 	ctx := context.Background()
@@ -343,8 +334,7 @@ func TestEnvProvider_GetCredential_WithPrefix(t *testing.T) {
 
 func TestEnvProvider_ListAvailable(t *testing.T) {
 	testKey := "ANTHROPIC_API_KEY"
-	os.Setenv(testKey, "test-value")
-	defer os.Unsetenv(testKey)
+	t.Setenv(testKey, "test-value")
 
 	provider := NewEnvProvider("")
 	ctx := context.Background()
@@ -412,7 +402,9 @@ func TestFileProvider_GetCredential_NotFound(t *testing.T) {
 
 	creds := map[string]string{"EXISTING": "value"}
 	data, _ := json.Marshal(creds)
-	os.WriteFile(configPath, data, 0644)
+	if err := os.WriteFile(configPath, data, 0644); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
+	}
 
 	provider := NewFileProvider(configPath)
 	ctx := context.Background()
@@ -438,7 +430,9 @@ func TestFileProvider_InvalidJSON(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "invalid.json")
 
-	os.WriteFile(configPath, []byte("invalid json"), 0644)
+	if err := os.WriteFile(configPath, []byte("invalid json"), 0644); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
+	}
 
 	provider := NewFileProvider(configPath)
 	ctx := context.Background()
@@ -458,7 +452,9 @@ func TestFileProvider_ListAvailable(t *testing.T) {
 		"KEY_2": "value2",
 	}
 	data, _ := json.Marshal(creds)
-	os.WriteFile(configPath, data, 0644)
+	if err := os.WriteFile(configPath, data, 0644); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
+	}
 
 	provider := NewFileProvider(configPath)
 	ctx := context.Background()
@@ -480,7 +476,9 @@ func TestFileProvider_Reload(t *testing.T) {
 	// Initial content
 	creds := map[string]string{"KEY": "original"}
 	data, _ := json.Marshal(creds)
-	os.WriteFile(configPath, data, 0644)
+	if err := os.WriteFile(configPath, data, 0644); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
+	}
 
 	provider := NewFileProvider(configPath)
 	ctx := context.Background()
@@ -494,7 +492,9 @@ func TestFileProvider_Reload(t *testing.T) {
 	// Update file
 	creds["KEY"] = "updated"
 	data, _ = json.Marshal(creds)
-	os.WriteFile(configPath, data, 0644)
+	if err := os.WriteFile(configPath, data, 0644); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
+	}
 
 	// Reload
 	err := provider.Reload()
@@ -508,4 +508,3 @@ func TestFileProvider_Reload(t *testing.T) {
 		t.Errorf("expected updated, got %q", cred.Value)
 	}
 }
-

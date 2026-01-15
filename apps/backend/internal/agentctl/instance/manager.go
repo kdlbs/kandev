@@ -124,7 +124,9 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 		// Default to a simple handler if no factory is set
 		handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusServiceUnavailable)
-			w.Write([]byte("server factory not configured"))
+			if _, err := w.Write([]byte("server factory not configured")); err != nil {
+				m.logger.Debug("failed to write default response", zap.Error(err))
+			}
 		})
 	}
 
@@ -277,4 +279,3 @@ func collectEnvForInstance(env map[string]string) []string {
 	}
 	return result
 }
-

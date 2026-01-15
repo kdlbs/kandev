@@ -51,7 +51,11 @@ func (c *Client) Initialize(ctx context.Context, clientName, clientVersion strin
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			c.logger.Debug("failed to close initialize response body", zap.Error(err))
+		}
+	}()
 
 	var result InitializeResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
@@ -91,7 +95,11 @@ func (c *Client) NewSession(ctx context.Context, cwd string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			c.logger.Debug("failed to close session response body", zap.Error(err))
+		}
+	}()
 
 	var result NewSessionResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
@@ -137,7 +145,11 @@ func (c *Client) Prompt(ctx context.Context, text string) (*PromptResponse, erro
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			c.logger.Debug("failed to close prompt response body", zap.Error(err))
+		}
+	}()
 
 	var result PromptResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
@@ -230,7 +242,9 @@ func (c *Client) StreamUpdates(ctx context.Context, handler func(SessionUpdate))
 			c.mu.Lock()
 			c.acpConn = nil
 			c.mu.Unlock()
-			conn.Close()
+			if err := conn.Close(); err != nil {
+				c.logger.Debug("failed to close updates websocket", zap.Error(err))
+			}
 		}()
 
 		for {
@@ -268,7 +282,9 @@ func (c *Client) CloseACPStream() {
 	defer c.mu.Unlock()
 
 	if c.acpConn != nil {
-		c.acpConn.Close()
+		if err := c.acpConn.Close(); err != nil {
+			c.logger.Debug("failed to close ACP stream", zap.Error(err))
+		}
 		c.acpConn = nil
 	}
 }
@@ -294,7 +310,9 @@ func (c *Client) StreamPermissions(ctx context.Context, handler func(*Permission
 			c.mu.Lock()
 			c.permissionConn = nil
 			c.mu.Unlock()
-			conn.Close()
+			if err := conn.Close(); err != nil {
+				c.logger.Debug("failed to close permissions websocket", zap.Error(err))
+			}
 		}()
 
 		for {
@@ -327,7 +345,9 @@ func (c *Client) ClosePermissionStream() {
 	defer c.mu.Unlock()
 
 	if c.permissionConn != nil {
-		c.permissionConn.Close()
+		if err := c.permissionConn.Close(); err != nil {
+			c.logger.Debug("failed to close permission stream", zap.Error(err))
+		}
 		c.permissionConn = nil
 	}
 }
@@ -355,7 +375,11 @@ func (c *Client) RespondToPermission(ctx context.Context, pendingID, optionID st
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			c.logger.Debug("failed to close permission response body", zap.Error(err))
+		}
+	}()
 
 	var result PermissionRespondResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {

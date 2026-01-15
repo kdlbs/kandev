@@ -400,28 +400,25 @@ func (m *ControlServer) handleACPStreamWS(c *gin.Context) {
 		m.logger.Error("WebSocket upgrade failed", zap.Error(err))
 		return
 	}
-	defer conn.Close()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			m.logger.Debug("failed to close ACP stream websocket", zap.Error(err))
+		}
+	}()
 
 	m.logger.Info("ACP stream WebSocket connected")
 
 	updatesCh := m.singleProcMgr.GetUpdates()
 
-	for {
-		select {
-		case notification, ok := <-updatesCh:
-			if !ok {
-				return
-			}
+	for notification := range updatesCh {
+		data, err := json.Marshal(notification)
+		if err != nil {
+			m.logger.Error("failed to marshal notification", zap.Error(err))
+			continue
+		}
 
-			data, err := json.Marshal(notification)
-			if err != nil {
-				m.logger.Error("failed to marshal notification", zap.Error(err))
-				continue
-			}
-
-			if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
-				return
-			}
+		if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+			return
 		}
 	}
 }
@@ -458,29 +455,26 @@ func (m *ControlServer) handlePermissionStreamWS(c *gin.Context) {
 		m.logger.Error("WebSocket upgrade failed", zap.Error(err))
 		return
 	}
-	defer conn.Close()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			m.logger.Debug("failed to close permission websocket", zap.Error(err))
+		}
+	}()
 
 	m.logger.Info("Permission stream WebSocket connected")
 
 	permissionCh := m.singleProcMgr.GetPermissionRequests()
 
-	for {
-		select {
-		case notification, ok := <-permissionCh:
-			if !ok {
-				return
-			}
+	for notification := range permissionCh {
+		data, err := json.Marshal(notification)
+		if err != nil {
+			m.logger.Error("failed to marshal permission notification", zap.Error(err))
+			continue
+		}
 
-			data, err := json.Marshal(notification)
-			if err != nil {
-				m.logger.Error("failed to marshal permission notification", zap.Error(err))
-				continue
-			}
-
-			if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
-				m.logger.Debug("WebSocket write error", zap.Error(err))
-				return
-			}
+		if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+			m.logger.Debug("WebSocket write error", zap.Error(err))
+			return
 		}
 	}
 }
@@ -523,7 +517,11 @@ func (m *ControlServer) handleGitStatusStreamWS(c *gin.Context) {
 		m.logger.Error("WebSocket upgrade failed", zap.Error(err))
 		return
 	}
-	defer conn.Close()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			m.logger.Debug("failed to close git status websocket", zap.Error(err))
+		}
+	}()
 
 	sub := m.singleProcMgr.GetWorkspaceTracker().SubscribeGitStatus()
 	defer m.singleProcMgr.GetWorkspaceTracker().UnsubscribeGitStatus(sub)
@@ -565,7 +563,11 @@ func (m *ControlServer) handleFilesStreamWS(c *gin.Context) {
 		m.logger.Error("WebSocket upgrade failed", zap.Error(err))
 		return
 	}
-	defer conn.Close()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			m.logger.Debug("failed to close files websocket", zap.Error(err))
+		}
+	}()
 
 	sub := m.singleProcMgr.GetWorkspaceTracker().SubscribeFiles()
 	defer m.singleProcMgr.GetWorkspaceTracker().UnsubscribeFiles(sub)
@@ -607,7 +609,11 @@ func (m *ControlServer) handleFileChangesStreamWS(c *gin.Context) {
 		m.logger.Error("WebSocket upgrade failed", zap.Error(err))
 		return
 	}
-	defer conn.Close()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			m.logger.Debug("failed to close file changes websocket", zap.Error(err))
+		}
+	}()
 
 	sub := m.singleProcMgr.GetWorkspaceTracker().SubscribeFileChanges()
 	defer m.singleProcMgr.GetWorkspaceTracker().UnsubscribeFileChanges(sub)

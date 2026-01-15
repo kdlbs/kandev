@@ -72,7 +72,9 @@ func (s *StandaloneCtl) Health(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("health check failed: %d", resp.StatusCode)
@@ -97,13 +99,15 @@ func (s *StandaloneCtl) CreateInstance(ctx context.Context, req *CreateInstanceR
 	if err != nil {
 		return nil, fmt.Errorf("failed to create instance: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
 		var errResp struct {
 			Error string `json:"error"`
 		}
-		json.NewDecoder(resp.Body).Decode(&errResp)
+		if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
+			return nil, fmt.Errorf("failed to decode error response: %w", err)
+		}
 		return nil, fmt.Errorf("failed to create instance: %s (status %d)", errResp.Error, resp.StatusCode)
 	}
 
@@ -130,13 +134,17 @@ func (s *StandaloneCtl) DeleteInstance(ctx context.Context, instanceID string) e
 	if err != nil {
 		return fmt.Errorf("failed to delete instance: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
 		var errResp struct {
 			Error string `json:"error"`
 		}
-		json.NewDecoder(resp.Body).Decode(&errResp)
+		if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
+			return fmt.Errorf("failed to decode error response: %w", err)
+		}
 		return fmt.Errorf("failed to delete instance: %s (status %d)", errResp.Error, resp.StatusCode)
 	}
 
@@ -155,7 +163,7 @@ func (s *StandaloneCtl) GetInstance(ctx context.Context, instanceID string) (*In
 	if err != nil {
 		return nil, fmt.Errorf("failed to get instance: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusNotFound {
 		return nil, fmt.Errorf("instance %q not found", instanceID)
@@ -182,7 +190,7 @@ func (s *StandaloneCtl) ListInstances(ctx context.Context) ([]*InstanceInfo, err
 	if err != nil {
 		return nil, fmt.Errorf("failed to list instances: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("failed to list instances: status %d", resp.StatusCode)
@@ -196,4 +204,3 @@ func (s *StandaloneCtl) ListInstances(ctx context.Context) ([]*InstanceInfo, err
 	}
 	return result.Instances, nil
 }
-

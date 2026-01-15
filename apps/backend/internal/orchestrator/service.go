@@ -204,7 +204,9 @@ func (s *Service) Start(ctx context.Context) error {
 
 	// Start the scheduler processing loop
 	if err := s.scheduler.Start(ctx); err != nil {
-		s.watcher.Stop()
+		if stopErr := s.watcher.Stop(); stopErr != nil {
+			s.logger.Warn("failed to stop watcher after scheduler start failure", zap.Error(stopErr))
+		}
 		s.mu.Lock()
 		s.running = false
 		s.mu.Unlock()
@@ -640,7 +642,7 @@ func buildACPMetadata(msg *protocol.Message) map[string]interface{} {
 		"provider_type":  string(msg.Type),
 		"provider_agent": msg.AgentID,
 	}
-	if msg.Data != nil && len(msg.Data) > 0 {
+	if len(msg.Data) > 0 {
 		metadata["provider_data"] = msg.Data
 	}
 	return metadata

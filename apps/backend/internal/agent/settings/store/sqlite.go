@@ -38,7 +38,9 @@ func NewSQLiteRepository(dbPath string) (*SQLiteRepository, error) {
 
 	repo := &SQLiteRepository{db: db}
 	if err := repo.initSchema(); err != nil {
-		db.Close()
+		if closeErr := db.Close(); closeErr != nil {
+			return nil, fmt.Errorf("failed to close database after schema error: %w", closeErr)
+		}
 		return nil, fmt.Errorf("failed to initialize schema: %w", err)
 	}
 	return repo, nil
@@ -181,7 +183,9 @@ func (r *SQLiteRepository) ListAgents(ctx context.Context) ([]*models.Agent, err
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 
 	var result []*models.Agent
 	for rows.Next() {
@@ -258,7 +262,9 @@ func (r *SQLiteRepository) ListAgentProfiles(ctx context.Context, agentID string
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 
 	var result []*models.AgentProfile
 	for rows.Next() {
@@ -338,7 +344,9 @@ func columnExists(db *sql.DB, table, column string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 	for rows.Next() {
 		var cid int
 		var name, ctype string

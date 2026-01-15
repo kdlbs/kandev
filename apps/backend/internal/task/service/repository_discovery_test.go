@@ -277,7 +277,11 @@ func newDiscoveryService(t *testing.T, root string) *Service {
 	if err != nil {
 		t.Fatalf("failed to create test repository: %v", err)
 	}
-	t.Cleanup(func() { repo.Close() })
+	t.Cleanup(func() {
+		if err := repo.Close(); err != nil {
+			t.Errorf("failed to close repo: %v", err)
+		}
+	})
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
 	eventBus := bus.NewMemoryEventBus(log)
 	return NewService(repo, eventBus, log, RepositoryDiscoveryConfig{

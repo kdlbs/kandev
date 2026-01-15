@@ -48,7 +48,9 @@ func NewSQLiteRepository(dbPath string) (*SQLiteRepository, error) {
 
 	// Initialize schema
 	if err := repo.initSchema(); err != nil {
-		db.Close()
+		if closeErr := db.Close(); closeErr != nil {
+			return nil, fmt.Errorf("failed to close database after schema error: %w", closeErr)
+		}
 		return nil, fmt.Errorf("failed to initialize schema: %w", err)
 	}
 
@@ -342,7 +344,7 @@ func (r *SQLiteRepository) columnExists(table, column string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var cid int
@@ -589,26 +591,6 @@ func (r *SQLiteRepository) ensureWorkspaceIndexes() error {
 	return nil
 }
 
-func (r *SQLiteRepository) backfillTaskMappings() error {
-	ctx := context.Background()
-
-	_, err := r.db.ExecContext(ctx, `
-		INSERT OR IGNORE INTO task_boards (task_id, board_id)
-		SELECT id, board_id FROM tasks WHERE board_id != ''
-	`)
-	if err != nil {
-		return err
-	}
-
-	_, err = r.db.ExecContext(ctx, `
-		INSERT OR IGNORE INTO task_columns (task_id, board_id, column_id, position)
-		SELECT id, board_id, column_id, position
-		FROM tasks
-		WHERE board_id != '' AND column_id != ''
-	`)
-	return err
-}
-
 // Close closes the database connection
 func (r *SQLiteRepository) Close() error {
 	return r.db.Close()
@@ -733,7 +715,7 @@ func (r *SQLiteRepository) ListWorkspaces(ctx context.Context) ([]*models.Worksp
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var result []*models.Workspace
 	for rows.Next() {
@@ -794,7 +776,9 @@ func (r *SQLiteRepository) CreateTask(ctx context.Context, task *models.Task) er
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, task.ID, task.WorkspaceID, task.BoardID, task.ColumnID, task.Title, task.Description, task.State, task.Priority, task.RepositoryID, task.BaseBranch, task.AssignedTo, task.Position, string(metadata), task.CreatedAt, task.UpdatedAt)
 	if err != nil {
-		tx.Rollback()
+		if rollbackErr := tx.Rollback(); rollbackErr != nil {
+			return fmt.Errorf("failed to rollback task insert: %w", rollbackErr)
+		}
 		return err
 	}
 
@@ -875,7 +859,7 @@ func (r *SQLiteRepository) ListTasks(ctx context.Context, boardID string) ([]*mo
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	return r.scanTasks(rows)
 }
@@ -890,7 +874,7 @@ func (r *SQLiteRepository) ListTasksByColumn(ctx context.Context, columnID strin
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	return r.scanTasks(rows)
 }
@@ -957,13 +941,6 @@ func (r *SQLiteRepository) RemoveTaskFromBoard(ctx context.Context, taskID, boar
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE tasks SET board_id = '', column_id = '', position = 0, updated_at = ? WHERE id = ? AND board_id = ?
 	`, time.Now().UTC(), taskID, boardID)
-	return err
-}
-
-func (r *SQLiteRepository) addTaskToBoardTx(ctx context.Context, tx *sql.Tx, taskID, boardID, columnID string, position int) error {
-	_, err := tx.ExecContext(ctx, `
-		UPDATE tasks SET board_id = ?, column_id = ?, position = ?, updated_at = ? WHERE id = ?
-	`, boardID, columnID, position, time.Now().UTC(), taskID)
 	return err
 }
 
@@ -1049,7 +1026,7 @@ func (r *SQLiteRepository) ListBoards(ctx context.Context, workspaceID string) (
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var result []*models.Board
 	for rows.Next() {
@@ -1153,7 +1130,7 @@ func (r *SQLiteRepository) ListColumns(ctx context.Context, boardID string) ([]*
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var result []*models.Column
 	for rows.Next() {
@@ -1242,7 +1219,7 @@ func (r *SQLiteRepository) ListMessages(ctx context.Context, sessionID string) (
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var result []*models.Message
 	for rows.Next() {
@@ -1327,7 +1304,7 @@ func (r *SQLiteRepository) ListMessagesPaginated(ctx context.Context, sessionID 
 	if err != nil {
 		return nil, false, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var result []*models.Message
 	for rows.Next() {
@@ -1516,7 +1493,7 @@ func (r *SQLiteRepository) ListRepositories(ctx context.Context, workspaceID str
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var result []*models.Repository
 	for rows.Next() {
@@ -1604,7 +1581,7 @@ func (r *SQLiteRepository) ListRepositoryScripts(ctx context.Context, repository
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var result []*models.RepositoryScript
 	for rows.Next() {
@@ -1949,7 +1926,7 @@ func (r *SQLiteRepository) ListAgentSessions(ctx context.Context, taskID string)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	return r.scanAgentSessions(rows)
 }
@@ -1966,7 +1943,7 @@ func (r *SQLiteRepository) ListActiveAgentSessions(ctx context.Context) ([]*mode
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	return r.scanAgentSessions(rows)
 }
@@ -2194,7 +2171,7 @@ func (r *SQLiteRepository) ListExecutors(ctx context.Context) ([]*models.Executo
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var result []*models.Executor
 	for rows.Next() {
@@ -2313,7 +2290,7 @@ func (r *SQLiteRepository) ListEnvironments(ctx context.Context) ([]*models.Envi
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var result []*models.Environment
 	for rows.Next() {

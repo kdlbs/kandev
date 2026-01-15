@@ -74,7 +74,11 @@ func createTestService(t *testing.T) (*Service, *MockEventBus, repository.Reposi
 	if err != nil {
 		t.Fatalf("failed to create test repository: %v", err)
 	}
-	t.Cleanup(func() { repo.Close() })
+	t.Cleanup(func() {
+		if err := repo.Close(); err != nil {
+			t.Errorf("failed to close repo: %v", err)
+		}
+	})
 	eventBus := NewMockEventBus()
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
 	svc := NewService(repo, eventBus, log, RepositoryDiscoveryConfig{})

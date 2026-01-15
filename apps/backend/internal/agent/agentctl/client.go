@@ -62,7 +62,7 @@ func (c *Client) Health(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("health check failed: %d", resp.StatusCode)
@@ -81,7 +81,7 @@ func (c *Client) GetStatus(ctx context.Context) (*StatusResponse, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var status StatusResponse
 	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
@@ -101,7 +101,7 @@ func (c *Client) Start(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var result struct {
 		Success bool   `json:"success"`
@@ -127,7 +127,7 @@ func (c *Client) Stop(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var result struct {
 		Success bool   `json:"success"`
@@ -205,7 +205,9 @@ func (c *Client) StreamGitStatus(ctx context.Context, handler func(*GitStatusUpd
 			c.mu.Lock()
 			c.gitStatusConn = nil
 			c.mu.Unlock()
-			conn.Close()
+			if err := conn.Close(); err != nil {
+				c.logger.Debug("failed to close git status websocket", zap.Error(err))
+			}
 		}()
 
 		for {
@@ -238,7 +240,9 @@ func (c *Client) CloseGitStatusStream() {
 	defer c.mu.Unlock()
 
 	if c.gitStatusConn != nil {
-		c.gitStatusConn.Close()
+		if err := c.gitStatusConn.Close(); err != nil {
+			c.logger.Debug("failed to close git status stream", zap.Error(err))
+		}
 		c.gitStatusConn = nil
 	}
 }
@@ -264,7 +268,9 @@ func (c *Client) StreamFileChanges(ctx context.Context, handler func(*FileChange
 			c.mu.Lock()
 			c.fileChangesConn = nil
 			c.mu.Unlock()
-			conn.Close()
+			if err := conn.Close(); err != nil {
+				c.logger.Debug("failed to close file changes websocket", zap.Error(err))
+			}
 		}()
 
 		for {
@@ -304,7 +310,11 @@ func (c *Client) RequestFileTree(ctx context.Context, path string, depth int) (*
 	if err != nil {
 		return nil, fmt.Errorf("failed to request file tree: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			c.logger.Debug("failed to close file tree response body", zap.Error(err))
+		}
+	}()
 
 	var response FileTreeResponse
 	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
@@ -331,7 +341,11 @@ func (c *Client) RequestFileContent(ctx context.Context, path string) (*FileCont
 	if err != nil {
 		return nil, fmt.Errorf("failed to request file content: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			c.logger.Debug("failed to close file content response body", zap.Error(err))
+		}
+	}()
 
 	var response FileContentResponse
 	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
@@ -351,7 +365,9 @@ func (c *Client) CloseFileChangesStream() {
 	defer c.mu.Unlock()
 
 	if c.fileChangesConn != nil {
-		c.fileChangesConn.Close()
+		if err := c.fileChangesConn.Close(); err != nil {
+			c.logger.Debug("failed to close file changes stream", zap.Error(err))
+		}
 		c.fileChangesConn = nil
 	}
 }

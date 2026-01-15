@@ -42,7 +42,9 @@ func NewSQLiteRepository(dbPath string) (*SQLiteRepository, error) {
 
 	repo := &SQLiteRepository{db: db}
 	if err := repo.initSchema(); err != nil {
-		db.Close()
+		if closeErr := db.Close(); closeErr != nil {
+			return nil, fmt.Errorf("failed to close database after schema error: %w", closeErr)
+		}
 		return nil, fmt.Errorf("failed to initialize schema: %w", err)
 	}
 	return repo, nil
@@ -112,7 +114,9 @@ func (r *SQLiteRepository) columnExists(table, column string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 
 	for rows.Next() {
 		var cid int

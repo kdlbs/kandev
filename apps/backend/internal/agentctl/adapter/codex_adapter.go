@@ -93,10 +93,10 @@ func (a *CodexAdapter) Initialize(ctx context.Context) error {
 		},
 	})
 	if err != nil {
-		return fmt.Errorf("Codex initialize handshake failed: %w", err)
+		return fmt.Errorf("codex initialize handshake failed: %w", err)
 	}
 	if resp.Error != nil {
-		return fmt.Errorf("Codex initialize error: %s", resp.Error.Message)
+		return fmt.Errorf("codex initialize error: %s", resp.Error.Message)
 	}
 
 	// Parse initialize result
@@ -563,7 +563,9 @@ func (a *CodexAdapter) handleRequest(id interface{}, method string, params json.
 		var p codex.CommandApprovalParams
 		if err := json.Unmarshal(params, &p); err != nil {
 			a.logger.Warn("failed to parse command approval request", zap.Error(err))
-			a.client.SendResponse(id, nil, &codex.Error{Code: codex.InvalidParams, Message: "invalid params"})
+			if err := a.client.SendResponse(id, nil, &codex.Error{Code: codex.InvalidParams, Message: "invalid params"}); err != nil {
+				a.logger.Warn("failed to send invalid params response", zap.Error(err))
+			}
 			return
 		}
 		a.handleApprovalRequest(id, handler, threadID, p.ItemID, types.ActionTypeCommand, p.Command, map[string]interface{}{
@@ -576,7 +578,9 @@ func (a *CodexAdapter) handleRequest(id interface{}, method string, params json.
 		var p codex.FileChangeApprovalParams
 		if err := json.Unmarshal(params, &p); err != nil {
 			a.logger.Warn("failed to parse file change approval request", zap.Error(err))
-			a.client.SendResponse(id, nil, &codex.Error{Code: codex.InvalidParams, Message: "invalid params"})
+			if err := a.client.SendResponse(id, nil, &codex.Error{Code: codex.InvalidParams, Message: "invalid params"}); err != nil {
+				a.logger.Warn("failed to send invalid params response", zap.Error(err))
+			}
 			return
 		}
 		a.handleApprovalRequest(id, handler, threadID, p.ItemID, types.ActionTypeFileWrite, p.Path, map[string]interface{}{
@@ -587,7 +591,9 @@ func (a *CodexAdapter) handleRequest(id interface{}, method string, params json.
 
 	default:
 		a.logger.Warn("unhandled request", zap.String("method", method))
-		a.client.SendResponse(id, nil, &codex.Error{Code: codex.MethodNotFound, Message: "method not found"})
+		if err := a.client.SendResponse(id, nil, &codex.Error{Code: codex.MethodNotFound, Message: "method not found"}); err != nil {
+			a.logger.Warn("failed to send method not found response", zap.Error(err))
+		}
 	}
 }
 
@@ -606,9 +612,10 @@ func (a *CodexAdapter) handleApprovalRequest(
 	options := make([]PermissionOption, len(optionStrings))
 	for i, opt := range optionStrings {
 		kind := "allow_once"
-		if opt == "approveAlways" {
+		switch opt {
+		case "approveAlways":
 			kind = "allow_always"
-		} else if opt == "reject" {
+		case "reject":
 			kind = "reject_once"
 		}
 		options[i] = PermissionOption{
@@ -638,10 +645,12 @@ func (a *CodexAdapter) handleApprovalRequest(
 	if handler == nil {
 		// Auto-approve if no handler
 		a.logger.Info("auto-approving request (no handler)", zap.String("item_id", itemID))
-		a.client.SendResponse(id, &codex.ApprovalResponse{
+		if err := a.client.SendResponse(id, &codex.ApprovalResponse{
 			ItemID:   itemID,
 			Decision: "approve",
-		}, nil)
+		}, nil); err != nil {
+			a.logger.Warn("failed to send approval response", zap.Error(err))
+		}
 		return
 	}
 
@@ -650,10 +659,12 @@ func (a *CodexAdapter) handleApprovalRequest(
 	resp, err := handler(ctx, req)
 	if err != nil {
 		a.logger.Error("permission handler error", zap.Error(err))
-		a.client.SendResponse(id, &codex.ApprovalResponse{
+		if err := a.client.SendResponse(id, &codex.ApprovalResponse{
 			ItemID:   itemID,
 			Decision: "reject",
-		}, nil)
+		}, nil); err != nil {
+			a.logger.Warn("failed to send reject response", zap.Error(err))
+		}
 		return
 	}
 
@@ -664,12 +675,13 @@ func (a *CodexAdapter) handleApprovalRequest(
 		decision = resp.OptionID
 	}
 
-	a.client.SendResponse(id, &codex.ApprovalResponse{
+	if err := a.client.SendResponse(id, &codex.ApprovalResponse{
 		ItemID:   itemID,
 		Decision: decision,
-	}, nil)
+	}, nil); err != nil {
+		a.logger.Warn("failed to send approval response", zap.Error(err))
+	}
 }
 
 // Verify interface implementation
 var _ AgentAdapter = (*CodexAdapter)(nil)
-

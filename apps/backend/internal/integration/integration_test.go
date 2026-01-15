@@ -61,7 +61,11 @@ func NewTestServer(t *testing.T) *TestServer {
 	if err != nil {
 		t.Fatalf("failed to create test repository: %v", err)
 	}
-	t.Cleanup(func() { taskRepo.Close() })
+	t.Cleanup(func() {
+		if err := taskRepo.Close(); err != nil {
+			t.Errorf("failed to close task repo: %v", err)
+		}
+	})
 
 	// Initialize task service
 	taskSvc := taskservice.NewService(taskRepo, eventBus, log, taskservice.RepositoryDiscoveryConfig{})
@@ -109,7 +113,9 @@ func NewTestServer(t *testing.T) *TestServer {
 func (ts *TestServer) Close() {
 	ts.cancelFunc()
 	ts.Server.Close()
-	ts.TaskRepo.Close()
+	if err := ts.TaskRepo.Close(); err != nil {
+		ts.Logger.Error("failed to close task repo: " + err.Error())
+	}
 	ts.EventBus.Close()
 }
 
@@ -216,7 +222,9 @@ func (c *WSClient) readPump() {
 
 // Close closes the WebSocket connection
 func (c *WSClient) Close() {
-	c.conn.Close()
+	if err := c.conn.Close(); err != nil {
+		c.t.Logf("failed to close websocket: %v", err)
+	}
 	<-c.done
 }
 
@@ -476,7 +484,9 @@ func TestTaskCRUD(t *testing.T) {
 		// Debug: print error if there is one
 		if resp.Type == ws.MessageTypeError {
 			var errPayload ws.ErrorPayload
-			resp.ParsePayload(&errPayload)
+			if err := resp.ParsePayload(&errPayload); err != nil {
+				t.Fatalf("failed to parse error payload: %v", err)
+			}
 			t.Logf("Error response: %+v", errPayload)
 		}
 
@@ -587,7 +597,9 @@ func TestTaskStateTransitions(t *testing.T) {
 		"name":         "State Test Board",
 	})
 	var boardPayload map[string]interface{}
-	boardResp.ParsePayload(&boardPayload)
+	if err := boardResp.ParsePayload(&boardPayload); err != nil {
+		t.Fatalf("failed to parse board payload: %v", err)
+	}
 	boardID := boardPayload["id"].(string)
 
 	colResp, _ := client.SendRequest("col-1", ws.ActionColumnCreate, map[string]interface{}{
@@ -596,7 +608,9 @@ func TestTaskStateTransitions(t *testing.T) {
 		"position": 0,
 	})
 	var colPayload map[string]interface{}
-	colResp.ParsePayload(&colPayload)
+	if err := colResp.ParsePayload(&colPayload); err != nil {
+		t.Fatalf("failed to parse column payload: %v", err)
+	}
 	columnID := colPayload["id"].(string)
 
 	taskResp, _ := client.SendRequest("task-1", ws.ActionTaskCreate, map[string]interface{}{
@@ -609,7 +623,9 @@ func TestTaskStateTransitions(t *testing.T) {
 		"base_branch":   "main",
 	})
 	var taskPayload map[string]interface{}
-	taskResp.ParsePayload(&taskPayload)
+	if err := taskResp.ParsePayload(&taskPayload); err != nil {
+		t.Fatalf("failed to parse task payload: %v", err)
+	}
 	taskID := taskPayload["id"].(string)
 
 	// Test state transitions
@@ -665,7 +681,9 @@ func TestTaskMove(t *testing.T) {
 		"name":         "Move Test Board",
 	})
 	var boardPayload map[string]interface{}
-	boardResp.ParsePayload(&boardPayload)
+	if err := boardResp.ParsePayload(&boardPayload); err != nil {
+		t.Fatalf("failed to parse board payload: %v", err)
+	}
 	boardID := boardPayload["id"].(string)
 
 	col1Resp, _ := client.SendRequest("col-1", ws.ActionColumnCreate, map[string]interface{}{
@@ -674,7 +692,9 @@ func TestTaskMove(t *testing.T) {
 		"position": 0,
 	})
 	var col1Payload map[string]interface{}
-	col1Resp.ParsePayload(&col1Payload)
+	if err := col1Resp.ParsePayload(&col1Payload); err != nil {
+		t.Fatalf("failed to parse column payload: %v", err)
+	}
 	col1ID := col1Payload["id"].(string)
 
 	col2Resp, _ := client.SendRequest("col-2", ws.ActionColumnCreate, map[string]interface{}{
@@ -683,7 +703,9 @@ func TestTaskMove(t *testing.T) {
 		"position": 1,
 	})
 	var col2Payload map[string]interface{}
-	col2Resp.ParsePayload(&col2Payload)
+	if err := col2Resp.ParsePayload(&col2Payload); err != nil {
+		t.Fatalf("failed to parse column payload: %v", err)
+	}
 	col2ID := col2Payload["id"].(string)
 
 	// Create task in first column
@@ -696,7 +718,9 @@ func TestTaskMove(t *testing.T) {
 		"base_branch":   "main",
 	})
 	var taskPayload map[string]interface{}
-	taskResp.ParsePayload(&taskPayload)
+	if err := taskResp.ParsePayload(&taskPayload); err != nil {
+		t.Fatalf("failed to parse task payload: %v", err)
+	}
 	taskID := taskPayload["id"].(string)
 
 	// Move task to second column
@@ -913,7 +937,9 @@ func TestTaskSubscription(t *testing.T) {
 		"name":         "Sub Test Board",
 	})
 	var boardPayload map[string]interface{}
-	boardResp.ParsePayload(&boardPayload)
+	if err := boardResp.ParsePayload(&boardPayload); err != nil {
+		t.Fatalf("failed to parse board payload: %v", err)
+	}
 	boardID := boardPayload["id"].(string)
 
 	colResp, _ := client.SendRequest("col-1", ws.ActionColumnCreate, map[string]interface{}{
@@ -922,7 +948,9 @@ func TestTaskSubscription(t *testing.T) {
 		"position": 0,
 	})
 	var colPayload map[string]interface{}
-	colResp.ParsePayload(&colPayload)
+	if err := colResp.ParsePayload(&colPayload); err != nil {
+		t.Fatalf("failed to parse column payload: %v", err)
+	}
 	columnID := colPayload["id"].(string)
 
 	taskResp, _ := client.SendRequest("task-1", ws.ActionTaskCreate, map[string]interface{}{
@@ -934,7 +962,9 @@ func TestTaskSubscription(t *testing.T) {
 		"base_branch":   "main",
 	})
 	var taskPayload map[string]interface{}
-	taskResp.ParsePayload(&taskPayload)
+	if err := taskResp.ParsePayload(&taskPayload); err != nil {
+		t.Fatalf("failed to parse task payload: %v", err)
+	}
 	taskID := taskPayload["id"].(string)
 
 	// Subscribe to the task
@@ -989,7 +1019,9 @@ func TestConcurrentRequests(t *testing.T) {
 		"name":         "Concurrent Test Board",
 	})
 	var boardPayload map[string]interface{}
-	boardResp.ParsePayload(&boardPayload)
+	if err := boardResp.ParsePayload(&boardPayload); err != nil {
+		t.Fatalf("failed to parse board payload: %v", err)
+	}
 	boardID := boardPayload["id"].(string)
 
 	colResp, _ := client.SendRequest("col-1", ws.ActionColumnCreate, map[string]interface{}{
@@ -998,7 +1030,9 @@ func TestConcurrentRequests(t *testing.T) {
 		"position": 0,
 	})
 	var colPayload map[string]interface{}
-	colResp.ParsePayload(&colPayload)
+	if err := colResp.ParsePayload(&colPayload); err != nil {
+		t.Fatalf("failed to parse column payload: %v", err)
+	}
 	columnID := colPayload["id"].(string)
 
 	// Create multiple tasks concurrently

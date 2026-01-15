@@ -126,7 +126,11 @@ func createTestExecutor(t *testing.T, agentMgr *mockAgentManager, log *logger.Lo
 	if err != nil {
 		t.Fatalf("failed to create test repository: %v", err)
 	}
-	t.Cleanup(func() { repo.Close() })
+	t.Cleanup(func() {
+		if err := repo.Close(); err != nil {
+			t.Errorf("failed to close repo: %v", err)
+		}
+	})
 	cfg := executor.ExecutorConfig{
 		MaxConcurrent:   maxConcurrent,
 		WorktreeEnabled: true,
@@ -215,7 +219,9 @@ func TestStartAlreadyRunning(t *testing.T) {
 	s := NewScheduler(q, exec, taskRepo, log, DefaultSchedulerConfig())
 
 	_ = s.Start(context.Background())
-	defer s.Stop()
+	defer func() {
+		_ = s.Stop()
+	}()
 
 	err := s.Start(context.Background())
 	if err != ErrSchedulerAlreadyRunning {

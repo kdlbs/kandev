@@ -68,7 +68,9 @@ func main() {
 		fmt.Fprintf(os.Stderr, "failed to initialize logger: %v\n", err)
 		os.Exit(1)
 	}
-	defer log.Sync()
+	defer func() {
+		_ = log.Sync()
+	}()
 
 	// Determine mode
 	mode := detectMode(cfg.Mode)
@@ -290,4 +292,3 @@ func collectAgentEnv() []string {
 	}
 	return env
 }
-

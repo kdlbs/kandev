@@ -196,7 +196,11 @@ func (s *Server) handleACPStreamWS(c *gin.Context) {
 		s.logger.Error("WebSocket upgrade failed", zap.Error(err))
 		return
 	}
-	defer conn.Close()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			s.logger.Debug("failed to close ACP stream websocket", zap.Error(err))
+		}
+	}()
 
 	s.logger.Info("ACP stream WebSocket connected")
 
@@ -204,22 +208,15 @@ func (s *Server) handleACPStreamWS(c *gin.Context) {
 	updatesCh := s.procMgr.GetUpdates()
 
 	// Stream session notifications to WebSocket
-	for {
-		select {
-		case notification, ok := <-updatesCh:
-			if !ok {
-				return
-			}
+	for notification := range updatesCh {
+		data, err := json.Marshal(notification)
+		if err != nil {
+			s.logger.Error("failed to marshal notification", zap.Error(err))
+			continue
+		}
 
-			data, err := json.Marshal(notification)
-			if err != nil {
-				s.logger.Error("failed to marshal notification", zap.Error(err))
-				continue
-			}
-
-			if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
-				return
-			}
+		if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+			return
 		}
 	}
 }
@@ -318,7 +315,11 @@ func (s *Server) handlePermissionStreamWS(c *gin.Context) {
 		s.logger.Error("WebSocket upgrade failed", zap.Error(err))
 		return
 	}
-	defer conn.Close()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			s.logger.Debug("failed to close permission websocket", zap.Error(err))
+		}
+	}()
 
 	s.logger.Info("Permission stream WebSocket connected")
 
@@ -326,23 +327,16 @@ func (s *Server) handlePermissionStreamWS(c *gin.Context) {
 	permissionCh := s.procMgr.GetPermissionRequests()
 
 	// Stream permission notifications to WebSocket
-	for {
-		select {
-		case notification, ok := <-permissionCh:
-			if !ok {
-				return
-			}
+	for notification := range permissionCh {
+		data, err := json.Marshal(notification)
+		if err != nil {
+			s.logger.Error("failed to marshal permission notification", zap.Error(err))
+			continue
+		}
 
-			data, err := json.Marshal(notification)
-			if err != nil {
-				s.logger.Error("failed to marshal permission notification", zap.Error(err))
-				continue
-			}
-
-			if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
-				s.logger.Debug("WebSocket write error", zap.Error(err))
-				return
-			}
+		if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+			s.logger.Debug("WebSocket write error", zap.Error(err))
+			return
 		}
 	}
 }

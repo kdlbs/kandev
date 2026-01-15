@@ -626,15 +626,6 @@ func isSessionActive(status models.AgentSessionState) bool {
 		status == models.AgentSessionStateStarting
 }
 
-func (r *MemoryRepository) getTaskPlacement(taskID, boardID string) (*taskPlacement, bool) {
-	placements, ok := r.taskPlacements[taskID]
-	if !ok {
-		return nil, false
-	}
-	placement, ok := placements[boardID]
-	return placement, ok
-}
-
 // Message operations
 
 // CreateMessage creates a new message

@@ -7,6 +7,12 @@ repos:
         language: system
         pass_filenames: false
 
+      - id: go-lint
+        name: Go Lint (backend)
+        entry: make lint-backend
+        language: system
+        pass_filenames: false
+
       - id: web-tests
         name: Web tests
         entry: make test-web

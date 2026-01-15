@@ -340,7 +340,9 @@ func (s *SimulatedAgentManagerClient) PromptAgent(ctx context.Context, agentInst
 
 		event := bus.NewEvent(events.ACPMessage, "simulated-agent", msgData)
 		subject := events.BuildACPSubject(instance.taskID)
-		s.eventBus.Publish(context.Background(), subject, event)
+		if err := s.eventBus.Publish(context.Background(), subject, event); err != nil {
+			s.logger.Warn("failed to publish simulated ACP message", zap.Error(err))
+		}
 	}()
 
 	return &executor.PromptResult{
@@ -474,7 +476,11 @@ func NewOrchestratorTestServer(t *testing.T) *OrchestratorTestServer {
 	if err != nil {
 		t.Fatalf("failed to create test repository: %v", err)
 	}
-	t.Cleanup(func() { taskRepo.Close() })
+	t.Cleanup(func() {
+		if err := taskRepo.Close(); err != nil {
+			t.Errorf("failed to close task repo: %v", err)
+		}
+	})
 
 	// Initialize task service
 	taskSvc := taskservice.NewService(taskRepo, eventBus, log, taskservice.RepositoryDiscoveryConfig{})
@@ -554,11 +560,15 @@ func NewOrchestratorTestServer(t *testing.T) *OrchestratorTestServer {
 
 // Close shuts down the test server
 func (ts *OrchestratorTestServer) Close() {
-	ts.OrchestratorSvc.Stop()
+	if err := ts.OrchestratorSvc.Stop(); err != nil {
+		ts.Logger.Warn("failed to stop orchestrator", zap.Error(err))
+	}
 	ts.AgentManager.Close()
 	ts.cancelFunc()
 	ts.Server.Close()
-	ts.TaskRepo.Close()
+	if err := ts.TaskRepo.Close(); err != nil {
+		ts.Logger.Warn("failed to close task repo", zap.Error(err))
+	}
 	ts.EventBus.Close()
 }
 
@@ -657,8 +667,7 @@ func createOrchestratorWorkspace(t *testing.T, client *OrchestratorWSClient) str
 	require.NoError(t, err)
 
 	var payload map[string]interface{}
-	err = resp.ParsePayload(&payload)
-	require.NoError(t, err)
+	require.NoError(t, resp.ParsePayload(&payload))
 
 	return payload["id"].(string)
 }
@@ -693,7 +702,9 @@ func (c *OrchestratorWSClient) readPump() {
 
 // Close closes the WebSocket connection
 func (c *OrchestratorWSClient) Close() {
-	c.conn.Close()
+	if err := c.conn.Close(); err != nil {
+		c.t.Logf("failed to close websocket: %v", err)
+	}
 	<-c.done
 }
 
@@ -1020,7 +1031,10 @@ func TestOrchestratorConcurrentTasks(t *testing.T) {
 			}
 
 			var payload map[string]interface{}
-			resp.ParsePayload(&payload)
+			if err := resp.ParsePayload(&payload); err != nil {
+				t.Logf("failed to parse start response: %v", err)
+				return
+			}
 			results <- payload
 		}(i, taskID)
 	}

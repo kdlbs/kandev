@@ -49,7 +49,9 @@ func TestMemoryEventBus_PublishSubscribe(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Subscribe failed: %v", err)
 	}
-	defer sub.Unsubscribe()
+	defer func() {
+		_ = sub.Unsubscribe()
+	}()
 
 	event := NewEvent("test.type", "test-source", map[string]interface{}{"key": "value"})
 	if err := bus.Publish(ctx, "test.subject", event); err != nil {
@@ -86,7 +88,9 @@ func TestMemoryEventBus_MultipleSubscribers(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Subscribe %d failed: %v", i, err)
 		}
-		defer sub.Unsubscribe()
+		defer func() {
+			_ = sub.Unsubscribe()
+		}()
 	}
 
 	event := NewEvent("test.type", "test-source", nil)
@@ -159,7 +163,9 @@ func TestMemoryEventBus_SingleTokenWildcard(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Subscribe failed: %v", err)
 	}
-	defer sub.Unsubscribe()
+	defer func() {
+		_ = sub.Unsubscribe()
+	}()
 
 	// Should match - "user" fills the * slot
 	event1 := NewEvent("user.created", "test", nil)
@@ -201,7 +207,9 @@ func TestMemoryEventBus_MultiTokenWildcard(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Subscribe failed: %v", err)
 	}
-	defer sub.Unsubscribe()
+	defer func() {
+		_ = sub.Unsubscribe()
+	}()
 
 	// Should match - single remaining token
 	event1 := NewEvent("email", "test", nil)
@@ -238,7 +246,9 @@ func TestMemoryEventBus_WildcardNoMatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Subscribe failed: %v", err)
 	}
-	defer sub.Unsubscribe()
+	defer func() {
+		_ = sub.Unsubscribe()
+	}()
 
 	// This should NOT match - missing middle token
 	event := NewEvent("test", "test", nil)
@@ -269,7 +279,9 @@ func TestMemoryEventBus_ExactMatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Subscribe failed: %v", err)
 	}
-	defer sub.Unsubscribe()
+	defer func() {
+		_ = sub.Unsubscribe()
+	}()
 
 	// Should match exactly
 	event1 := NewEvent("test", "test", nil)
@@ -312,7 +324,9 @@ func TestMemoryEventBus_QueueSubscribe(t *testing.T) {
 		if err != nil {
 			t.Fatalf("QueueSubscribe %d failed: %v", i, err)
 		}
-		defer sub.Unsubscribe()
+		defer func() {
+			_ = sub.Unsubscribe()
+		}()
 	}
 
 	// Publish multiple events
@@ -338,6 +352,7 @@ func TestMemoryEventBus_ConcurrentAccess(t *testing.T) {
 
 	ctx := context.Background()
 	var receivedCount int32
+	var publishErrorCount int32
 	var wg sync.WaitGroup
 
 	// Subscribe
@@ -348,7 +363,9 @@ func TestMemoryEventBus_ConcurrentAccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Subscribe failed: %v", err)
 	}
-	defer sub.Unsubscribe()
+	defer func() {
+		_ = sub.Unsubscribe()
+	}()
 
 	// Publish concurrently from multiple goroutines
 	numGoroutines := 10
@@ -360,12 +377,17 @@ func TestMemoryEventBus_ConcurrentAccess(t *testing.T) {
 			defer wg.Done()
 			for j := 0; j < eventsPerGoroutine; j++ {
 				event := NewEvent("test.type", "test-source", nil)
-				bus.Publish(ctx, "test.concurrent", event)
+				if err := bus.Publish(ctx, "test.concurrent", event); err != nil {
+					atomic.AddInt32(&publishErrorCount, 1)
+				}
 			}
 		}()
 	}
 
 	wg.Wait()
+	if publishErrorCount > 0 {
+		t.Errorf("publish errors: %d", publishErrorCount)
+	}
 	time.Sleep(200 * time.Millisecond) // Allow handlers to complete
 
 	expectedCount := int32(numGoroutines * eventsPerGoroutine)
@@ -426,7 +448,9 @@ func TestMemoryEventBus_Request(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Subscribe failed: %v", err)
 	}
-	defer sub.Unsubscribe()
+	defer func() {
+		_ = sub.Unsubscribe()
+	}()
 
 	// Make a request
 	request := NewEvent("echo.request", "requester", map[string]interface{}{
@@ -484,4 +508,3 @@ func TestNewEvent(t *testing.T) {
 		t.Error("Expected timestamp to be set correctly")
 	}
 }
-

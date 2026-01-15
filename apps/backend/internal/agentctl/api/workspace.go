@@ -16,7 +16,11 @@ func (s *Server) handleGitStatusStreamWS(c *gin.Context) {
 		s.logger.Error("WebSocket upgrade failed", zap.Error(err))
 		return
 	}
-	defer conn.Close()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			s.logger.Debug("failed to close git status websocket", zap.Error(err))
+		}
+	}()
 
 	// Subscribe to git status updates
 	sub := s.procMgr.GetWorkspaceTracker().SubscribeGitStatus()
@@ -62,7 +66,11 @@ func (s *Server) handleFilesStreamWS(c *gin.Context) {
 		s.logger.Error("WebSocket upgrade failed", zap.Error(err))
 		return
 	}
-	defer conn.Close()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			s.logger.Debug("failed to close files websocket", zap.Error(err))
+		}
+	}()
 
 	// Subscribe to file updates
 	sub := s.procMgr.GetWorkspaceTracker().SubscribeFiles()
@@ -108,7 +116,11 @@ func (s *Server) handleFileChangesStreamWS(c *gin.Context) {
 		s.logger.Error("WebSocket upgrade failed", zap.Error(err))
 		return
 	}
-	defer conn.Close()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			s.logger.Debug("failed to close file changes websocket", zap.Error(err))
+		}
+	}()
 
 	// Subscribe to file change notifications
 	sub := s.procMgr.GetWorkspaceTracker().SubscribeFileChanges()
@@ -186,6 +198,8 @@ func (s *Server) handleFileContent(c *gin.Context) {
 // mustParseInt parses a string to int, returns 0 on error
 func mustParseInt(s string) int {
 	var n int
-	json.Unmarshal([]byte(s), &n)
+	if err := json.Unmarshal([]byte(s), &n); err != nil {
+		return 0
+	}
 	return n
 }

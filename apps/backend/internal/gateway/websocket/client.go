@@ -57,14 +57,17 @@ func NewClient(id string, conn *websocket.Conn, hub *Hub, log *logger.Logger) *C
 func (c *Client) ReadPump(ctx context.Context) {
 	defer func() {
 		c.hub.Unregister(c)
-		c.conn.Close()
+		if err := c.conn.Close(); err != nil {
+			c.logger.Debug("failed to close websocket connection", zap.Error(err))
+		}
 	}()
 
 	c.conn.SetReadLimit(maxMessageSize)
-	c.conn.SetReadDeadline(time.Now().Add(pongWait))
+	if err := c.conn.SetReadDeadline(time.Now().Add(pongWait)); err != nil {
+		c.logger.Debug("failed to set read deadline", zap.Error(err))
+	}
 	c.conn.SetPongHandler(func(string) error {
-		c.conn.SetReadDeadline(time.Now().Add(pongWait))
-		return nil
+		return c.conn.SetReadDeadline(time.Now().Add(pongWait))
 	})
 
 	for {
@@ -310,16 +313,22 @@ func (c *Client) WritePump() {
 	ticker := time.NewTicker(pingPeriod)
 	defer func() {
 		ticker.Stop()
-		c.conn.Close()
+		if err := c.conn.Close(); err != nil {
+			c.logger.Debug("failed to close websocket connection", zap.Error(err))
+		}
 	}()
 
 	for {
 		select {
 		case message, ok := <-c.send:
-			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if err := c.conn.SetWriteDeadline(time.Now().Add(writeWait)); err != nil {
+				c.logger.Debug("failed to set write deadline", zap.Error(err))
+			}
 			if !ok {
 				// Hub closed the channel
-				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
+				if err := c.conn.WriteMessage(websocket.CloseMessage, []byte{}); err != nil {
+					c.logger.Debug("failed to write close message", zap.Error(err))
+				}
 				return
 			}
 
@@ -327,13 +336,25 @@ func (c *Client) WritePump() {
 			if err != nil {
 				return
 			}
-			w.Write(message)
+			if _, err := w.Write(message); err != nil {
+				c.logger.Debug("failed to write websocket message", zap.Error(err))
+				_ = w.Close()
+				return
+			}
 
 			// Batch additional queued messages
 			n := len(c.send)
 			for i := 0; i < n; i++ {
-				w.Write([]byte{'\n'})
-				w.Write(<-c.send)
+				if _, err := w.Write([]byte{'\n'}); err != nil {
+					c.logger.Debug("failed to write websocket delimiter", zap.Error(err))
+					_ = w.Close()
+					return
+				}
+				if _, err := w.Write(<-c.send); err != nil {
+					c.logger.Debug("failed to write queued websocket message", zap.Error(err))
+					_ = w.Close()
+					return
+				}
 			}
 
 			if err := w.Close(); err != nil {
@@ -341,7 +362,9 @@ func (c *Client) WritePump() {
 			}
 
 		case <-ticker.C:
-			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if err := c.conn.SetWriteDeadline(time.Now().Add(writeWait)); err != nil {
+				c.logger.Debug("failed to set write deadline", zap.Error(err))
+			}
 			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return
 			}

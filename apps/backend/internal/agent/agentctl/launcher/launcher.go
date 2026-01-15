@@ -164,7 +164,9 @@ func (l *Launcher) Start(ctx context.Context) error {
 	// Wait for health check to pass
 	if err := l.waitForHealthy(ctx); err != nil {
 		// Kill the process if health check fails
-		l.cmd.Process.Kill()
+		if killErr := l.cmd.Process.Kill(); killErr != nil {
+			l.logger.Warn("failed to kill agentctl process after failed health check", zap.Error(killErr))
+		}
 		return fmt.Errorf("agentctl failed to become healthy: %w", err)
 	}
 
@@ -230,7 +232,9 @@ func (l *Launcher) checkPortAvailable() error {
 	if err != nil {
 		return err
 	}
-	ln.Close()
+	if err := ln.Close(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -255,7 +259,9 @@ func (l *Launcher) waitForHealthy(ctx context.Context) error {
 
 		resp, err := client.Get(healthURL)
 		if err == nil {
-			resp.Body.Close()
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				l.logger.Debug("failed to close health response body", zap.Error(closeErr))
+			}
 			if resp.StatusCode == http.StatusOK {
 				return nil
 			}

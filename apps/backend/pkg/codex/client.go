@@ -228,7 +228,8 @@ func (c *Client) handleRequest(id interface{}, method string, params json.RawMes
 		c.onRequest(id, method, params)
 	} else {
 		c.logger.Warn("received request but no handler registered", zap.String("method", method))
-		c.SendResponse(id, nil, &Error{Code: MethodNotFound, Message: "Method not found"})
+		if err := c.SendResponse(id, nil, &Error{Code: MethodNotFound, Message: "Method not found"}); err != nil {
+			c.logger.Warn("failed to send method not found response", zap.Error(err))
+		}
 	}
 }
-

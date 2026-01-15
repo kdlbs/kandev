@@ -312,7 +312,9 @@ func (m *Manager) Stop(ctx context.Context) error {
 
 	// Close the adapter
 	if m.adapter != nil {
-		m.adapter.Close()
+		if err := m.adapter.Close(); err != nil {
+			m.logger.Debug("failed to close adapter", zap.Error(err))
+		}
 	}
 
 	// Close stop channel to signal readers
@@ -322,7 +324,9 @@ func (m *Manager) Stop(ctx context.Context) error {
 
 	// Close stdin to signal EOF to agent
 	if m.stdin != nil {
-		m.stdin.Close()
+		if err := m.stdin.Close(); err != nil {
+			m.logger.Debug("failed to close stdin", zap.Error(err))
+		}
 	}
 
 	// Wait for process to exit with timeout
@@ -339,7 +343,9 @@ func (m *Manager) Stop(ctx context.Context) error {
 		// Force kill
 		if m.cmd != nil && m.cmd.Process != nil {
 			m.logger.Warn("force killing agent process")
-			m.cmd.Process.Kill()
+			if err := m.cmd.Process.Kill(); err != nil {
+				m.logger.Warn("failed to kill agent process", zap.Error(err))
+			}
 		}
 	}
 
@@ -562,5 +568,4 @@ func (m *Manager) GetPendingPermissions() []*PendingPermission {
 	}
 	return result
 }
-
 

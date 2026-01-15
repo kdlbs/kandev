@@ -59,7 +59,9 @@ func (b *mockEventBus) Publish(ctx context.Context, subject string, event *bus.E
 	// Call handlers for matching subjects
 	if handlers, ok := b.subscriptions[subject]; ok {
 		for _, handler := range handlers {
-			go handler(ctx, event)
+			go func(handler bus.EventHandler) {
+				_ = handler(ctx, event)
+			}(handler)
 		}
 	}
 
@@ -67,7 +69,9 @@ func (b *mockEventBus) Publish(ctx context.Context, subject string, event *bus.E
 	for _, queueGroup := range b.queuedSubs {
 		if handlers, ok := queueGroup[subject]; ok && len(handlers) > 0 {
 			// Deliver to first handler (simplified)
-			go handlers[0](ctx, event)
+			go func(handler bus.EventHandler) {
+				_ = handler(ctx, event)
+			}(handlers[0])
 		}
 	}
 
@@ -217,7 +221,9 @@ func TestTaskEventHandling(t *testing.T) {
 
 	w := NewWatcher(eventBus, handlers, log)
 	_ = w.Start(context.Background())
-	defer w.Stop()
+	defer func() {
+		_ = w.Stop()
+	}()
 
 	// Simulate publishing a task state changed event
 	oldState := v1.TaskStateTODO
@@ -262,7 +268,9 @@ func TestAgentEventHandling(t *testing.T) {
 
 	w := NewWatcher(eventBus, handlers, log)
 	_ = w.Start(context.Background())
-	defer w.Stop()
+	defer func() {
+		_ = w.Stop()
+	}()
 
 	// Simulate publishing an agent completed event
 	exitCode := 0
@@ -312,7 +320,9 @@ func TestACPMessageHandling(t *testing.T) {
 
 	w := NewWatcher(eventBus, handlers, log)
 	_ = w.Start(context.Background())
-	defer w.Stop()
+	defer func() {
+		_ = w.Stop()
+	}()
 
 	// Simulate publishing an ACP message
 	event := bus.NewEvent(events.BuildACPSubject("task-789"), "test", map[string]interface{}{
@@ -407,4 +417,3 @@ func TestIsRunning(t *testing.T) {
 		t.Error("watcher should not be running after Stop")
 	}
 }
-

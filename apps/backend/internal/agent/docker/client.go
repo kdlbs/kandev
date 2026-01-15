@@ -107,7 +107,11 @@ func (c *Client) PullImage(ctx context.Context, imageName string) error {
 		c.logger.Error("Failed to pull image", zap.String("image", imageName), zap.Error(err))
 		return fmt.Errorf("failed to pull image %s: %w", imageName, err)
 	}
-	defer reader.Close()
+	defer func() {
+		if err := reader.Close(); err != nil {
+			c.logger.Warn("Failed to close image pull reader", zap.Error(err))
+		}
+	}()
 
 	// Read the output to ensure the image is fully pulled
 	_, err = io.Copy(io.Discard, reader)
@@ -303,14 +307,8 @@ func (c *Client) GetContainerIP(ctx context.Context, containerID string) (string
 		return "", err
 	}
 
-	// Try to get IP from default bridge network first
 	if inspect.NetworkSettings != nil {
-		// Check bridge network
-		if inspect.NetworkSettings.IPAddress != "" {
-			return inspect.NetworkSettings.IPAddress, nil
-		}
-
-		// Check other networks
+		// Check available networks for an IP address.
 		for netName, netSettings := range inspect.NetworkSettings.Networks {
 			if netSettings.IPAddress != "" {
 				c.logger.Debug("Found container IP",
@@ -538,7 +536,9 @@ func (c *Client) AttachContainer(ctx context.Context, containerID string) (*Atta
 
 	// Start goroutine to copy from pipe to container
 	go func() {
-		io.Copy(resp.Conn, stdinReader)
+		if _, err := io.Copy(resp.Conn, stdinReader); err != nil {
+			c.logger.Debug("failed to copy stdin to container", zap.Error(err))
+		}
 	}()
 
 	// Create a pipe for demultiplexed stdout
@@ -547,7 +547,11 @@ func (c *Client) AttachContainer(ctx context.Context, containerID string) (*Atta
 
 	// Start goroutine to demultiplex stdout/stderr
 	go func() {
-		defer stdoutWriter.Close()
+		defer func() {
+			if err := stdoutWriter.Close(); err != nil {
+				c.logger.Debug("failed to close stdout writer", zap.Error(err))
+			}
+		}()
 		c.demultiplexStream(resp.Reader, stdoutWriter)
 	}()
 
@@ -594,7 +598,9 @@ func (c *Client) demultiplexStream(reader io.Reader, writer io.Writer) {
 			// Write stdout (type 1) and stderr (type 2) to writer
 			// We want both for ACP since errors should be visible
 			if streamType == 1 || streamType == 2 {
-				writer.Write(data)
+				if _, err := writer.Write(data); err != nil {
+					c.logger.Debug("failed to write demultiplexed data", zap.Error(err))
+				}
 			}
 		}
 	}
@@ -603,10 +609,14 @@ func (c *Client) demultiplexStream(reader io.Reader, writer io.Writer) {
 // Close closes the attach result
 func (a *AttachResult) Close() error {
 	if a.Stdin != nil {
-		a.Stdin.Close()
+		if err := a.Stdin.Close(); err != nil {
+			return err
+		}
 	}
 	if a.Conn != nil {
-		a.Conn.Close()
+		if err := a.Conn.Close(); err != nil {
+			return err
+		}
 	}
 	return nil
 }

@@ -69,7 +69,6 @@ var (
 	flagAgentRuntime = flag.String("agent-runtime", "", "Agent runtime mode: 'docker' or 'standalone'")
 	flagPort         = flag.Int("port", 0, "HTTP server port (default: 8080)")
 	flagLogLevel     = flag.String("log-level", "", "Log level: debug, info, warn, error")
-	flagConfigPath   = flag.String("config", "", "Path to config file")
 	flagHelp         = flag.Bool("help", false, "Show help message")
 	flagVersion      = flag.Bool("version", false, "Show version information")
 )
@@ -127,7 +126,9 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
 		os.Exit(1)
 	}
-	defer log.Sync()
+	defer func() {
+		_ = log.Sync()
+	}()
 	logger.SetDefault(log)
 
 	log.Info("Starting Kandev (unified mode)...")
@@ -158,7 +159,9 @@ func main() {
 		log.Warn("Failed to initialize Docker client - agent features will be disabled", zap.Error(err))
 		dockerClient = nil
 	} else {
-		defer dockerClient.Close()
+		defer func() {
+			_ = dockerClient.Close()
+		}()
 		if err := dockerClient.Ping(ctx); err != nil {
 			log.Warn("Docker daemon not available - agent features will be disabled", zap.Error(err))
 			dockerClient = nil
@@ -184,20 +187,26 @@ func main() {
 	if err != nil {
 		log.Fatal("Failed to initialize SQLite database", zap.Error(err), zap.String("db_path", dbPath))
 	}
-	defer taskRepo.Close()
+	defer func() {
+		_ = taskRepo.Close()
+	}()
 	log.Info("SQLite database initialized", zap.String("db_path", dbPath))
 
 	agentSettingsRepo, err := settingsstore.NewSQLiteRepository(dbPath)
 	if err != nil {
 		log.Fatal("Failed to initialize agent settings store", zap.Error(err), zap.String("db_path", dbPath))
 	}
-	defer agentSettingsRepo.Close()
+	defer func() {
+		_ = agentSettingsRepo.Close()
+	}()
 
 	userRepo, err := userstore.NewSQLiteRepository(dbPath)
 	if err != nil {
 		log.Fatal("Failed to initialize user store", zap.Error(err), zap.String("db_path", dbPath))
 	}
-	defer userRepo.Close()
+	defer func() {
+		_ = userRepo.Close()
+	}()
 
 	discoveryRegistry, err := discovery.LoadRegistry()
 	if err != nil {
@@ -1041,7 +1050,7 @@ func (a *messageCreatorAdapter) CreateToolCallMessage(ctx context.Context, taskI
 	}
 
 	// Add args if provided (contains kind, path, locations, raw_input)
-	if args != nil && len(args) > 0 {
+	if len(args) > 0 {
 		metadata["args"] = args
 
 		// Extract kind as tool_name for icon selection in the frontend

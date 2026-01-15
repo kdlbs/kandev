@@ -22,8 +22,12 @@ func createTestSQLiteRepo(t *testing.T) (*SQLiteRepository, func()) {
 	}
 
 	cleanup := func() {
-		repo.Close()
-		os.Remove(dbPath)
+		if err := repo.Close(); err != nil {
+			t.Errorf("failed to close repo: %v", err)
+		}
+		if err := os.Remove(dbPath); err != nil && !os.IsNotExist(err) {
+			t.Errorf("failed to remove db path: %v", err)
+		}
 	}
 
 	return repo, cleanup
@@ -475,14 +479,20 @@ func TestSQLiteRepository_Persistence(t *testing.T) {
 	_ = repo1.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
 	board := &models.Board{ID: "persist-board", WorkspaceID: "ws-1", Name: "Persistent Board"}
 	_ = repo1.CreateBoard(ctx, board)
-	repo1.Close()
+	if err := repo1.Close(); err != nil {
+		t.Fatalf("failed to close repo: %v", err)
+	}
 
 	// Reopen repository and verify data persisted
 	repo2, err := NewSQLiteRepository(dbPath)
 	if err != nil {
 		t.Fatalf("failed to create second repository: %v", err)
 	}
-	defer repo2.Close()
+	defer func() {
+		if err := repo2.Close(); err != nil {
+			t.Errorf("failed to close repo: %v", err)
+		}
+	}()
 
 	retrieved, err := repo2.GetBoard(ctx, "persist-board")
 	if err != nil {

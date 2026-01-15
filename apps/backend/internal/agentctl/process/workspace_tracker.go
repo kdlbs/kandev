@@ -86,7 +86,9 @@ func (wt *WorkspaceTracker) Start(ctx context.Context) {
 func (wt *WorkspaceTracker) Stop() {
 	close(wt.stopCh)
 	if wt.watcher != nil {
-		wt.watcher.Close()
+		if err := wt.watcher.Close(); err != nil {
+			wt.logger.Debug("failed to close watcher", zap.Error(err))
+		}
 	}
 	wt.wg.Wait()
 	wt.logger.Info("workspace tracker stopped")
@@ -611,7 +613,9 @@ func (wt *WorkspaceTracker) watchFilesystem(ctx context.Context) {
 			// If a directory was created, watch it
 			if event.Op&fsnotify.Create == fsnotify.Create {
 				if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
-					wt.addDirectoryRecursive(event.Name)
+					if err := wt.addDirectoryRecursive(event.Name); err != nil {
+						wt.logger.Debug("failed to watch new directory", zap.Error(err))
+					}
 				}
 			}
 
@@ -752,7 +756,9 @@ func (wt *WorkspaceTracker) GetFileContent(reqPath string) (string, int64, error
 	if err != nil {
 		return "", 0, fmt.Errorf("failed to open file: %w", err)
 	}
-	defer file.Close()
+	defer func() {
+		_ = file.Close()
+	}()
 
 	content, err := io.ReadAll(file)
 	if err != nil {
@@ -761,6 +767,5 @@ func (wt *WorkspaceTracker) GetFileContent(reqPath string) (string, int64, error
 
 	return string(content), info.Size(), nil
 }
-
 
 

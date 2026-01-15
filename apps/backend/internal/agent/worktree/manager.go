@@ -240,7 +240,9 @@ func (m *Manager) createWorktree(ctx context.Context, req CreateRequest) (*Workt
 	if m.store != nil {
 		if err := m.store.CreateWorktree(ctx, wt); err != nil {
 			// Cleanup on failure
-			m.removeWorktreeDir(ctx, worktreePath, req.RepositoryPath)
+			if cleanupErr := m.removeWorktreeDir(ctx, worktreePath, req.RepositoryPath); cleanupErr != nil {
+				m.logger.Warn("failed to cleanup worktree after persist failure", zap.Error(cleanupErr))
+			}
 			return nil, fmt.Errorf("failed to persist worktree: %w", err)
 		}
 	}
@@ -561,7 +563,9 @@ func (m *Manager) removeWorktreeDir(ctx context.Context, worktreePath, repoPath 
 		// Prune stale worktree entries
 		cmd = exec.CommandContext(ctx, "git", "worktree", "prune")
 		cmd.Dir = repoPath
-		cmd.Run() // Ignore errors
+		if err := cmd.Run(); err != nil {
+			m.logger.Debug("git worktree prune failed", zap.Error(err))
+		}
 	}
 	return nil
 }
@@ -570,13 +574,17 @@ func (m *Manager) removeWorktreeDir(ctx context.Context, worktreePath, repoPath 
 func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRequest) (*Worktree, error) {
 	// Clean up existing directory if present
 	if existing.Path != "" {
-		os.RemoveAll(existing.Path)
+		if err := os.RemoveAll(existing.Path); err != nil {
+			m.logger.Debug("failed to remove existing worktree path", zap.Error(err))
+		}
 	}
 
 	// Remove from git worktree list
 	cmd := exec.CommandContext(ctx, "git", "worktree", "prune")
 	cmd.Dir = req.RepositoryPath
-	cmd.Run() // Ignore errors
+	if err := cmd.Run(); err != nil {
+		m.logger.Debug("git worktree prune failed", zap.Error(err))
+	}
 
 	// Get repository lock
 	repoLock := m.getRepoLock(req.RepositoryPath)
