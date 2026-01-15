@@ -2,7 +2,7 @@
 
 import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
-import { IconAlertTriangle, IconCircleCheck, IconCircleX, IconDots, IconLoader2 } from '@tabler/icons-react';
+import { IconAlertTriangle, IconCircleCheck, IconCircleX, IconDots, IconLoader2, IconArrowsMaximize } from '@tabler/icons-react';
 import { Card, CardContent } from '@kandev/ui/card';
 import {
   DropdownMenu,
@@ -29,6 +29,7 @@ interface KanbanCardProps {
   onClick?: (task: Task) => void;
   onEdit?: (task: Task) => void;
   onDelete?: (task: Task) => void;
+  onOpenFullPage?: (task: Task) => void;
 }
 
 function KanbanCardBody({
@@ -77,7 +78,7 @@ function KanbanCardLayout({ task, className }: KanbanCardProps & { className?: s
   );
 }
 
-export function KanbanCard({ task, onClick, onEdit, onDelete }: KanbanCardProps) {
+export function KanbanCard({ task, onClick, onEdit, onDelete, onOpenFullPage }: KanbanCardProps) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: task.id,
   });
@@ -137,13 +138,29 @@ export function KanbanCard({ task, onClick, onEdit, onDelete }: KanbanCardProps)
           actions={
             <div className="flex items-center gap-2">
               {statusIcon}
+              {onOpenFullPage && (
+                <button
+                  type="button"
+                  className="text-muted-foreground hover:text-foreground hover:bg-accent rounded-sm p-1 -m-1 transition-colors cursor-pointer"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onOpenFullPage(task);
+                  }}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  aria-label="Open full page"
+                  title="Open full page"
+                >
+                  <IconArrowsMaximize className="h-4 w-4" />
+                </button>
+              )}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button
                     type="button"
-                    className="text-muted-foreground hover:text-foreground cursor-pointer"
+                    className="text-muted-foreground hover:text-foreground hover:bg-muted rounded-sm p-1 -m-1 transition-colors cursor-pointer"
                     onClick={(event) => event.stopPropagation()}
                     onPointerDown={(event) => event.stopPropagation()}
+                    aria-label="More options"
                   >
                     <IconDots className="h-4 w-4" />
                   </button>

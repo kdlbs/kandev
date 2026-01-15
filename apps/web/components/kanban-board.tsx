@@ -16,7 +16,12 @@ import { useTaskActions } from '@/hooks/use-task-actions';
 import { KanbanBoardHeader } from './kanban-board-header';
 import { KanbanBoardGrid } from './kanban-board-grid';
 
-export function KanbanBoard() {
+interface KanbanBoardProps {
+  onPreviewTask?: (task: Task) => void;
+  onOpenTask?: (task: Task) => void;
+}
+
+export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}) {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [isMovingTask, setIsMovingTask] = useState(false);
@@ -192,7 +197,20 @@ export function KanbanBoard() {
   };
 
   const handleOpenTask = (task: Task) => {
-    router.push(`/task/${task.id}`);
+    if (onOpenTask) {
+      onOpenTask(task);
+    } else {
+      router.push(`/task/${task.id}`);
+    }
+  };
+
+  const handlePreviewTask = (task: Task) => {
+    if (onPreviewTask) {
+      onPreviewTask(task);
+    } else {
+      // Fallback to opening full page if no preview handler
+      handleOpenTask(task);
+    }
   };
 
   const handleEditTask = (task: Task) => {
@@ -358,6 +376,7 @@ export function KanbanBoard() {
       <KanbanBoardGrid
         columns={activeColumns}
         tasks={visibleTasks}
+        onPreviewTask={handlePreviewTask}
         onOpenTask={handleOpenTask}
         onEditTask={handleEditTask}
         onDeleteTask={handleDeleteTask}

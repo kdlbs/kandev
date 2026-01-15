@@ -15,6 +15,7 @@ import { KanbanCardPreview, Task } from './kanban-card';
 export type KanbanBoardGridProps = {
   columns: Column[];
   tasks: Task[];
+  onPreviewTask: (task: Task) => void;
   onOpenTask: (task: Task) => void;
   onEditTask: (task: Task) => void;
   onDeleteTask: (task: Task) => void;
@@ -27,6 +28,7 @@ export type KanbanBoardGridProps = {
 export function KanbanBoardGrid({
   columns,
   tasks,
+  onPreviewTask,
   onOpenTask,
   onEditTask,
   onDeleteTask,
@@ -72,6 +74,7 @@ export function KanbanBoardGrid({
                 key={column.id}
                 column={column}
                 tasks={getTasksForColumn(column.id)}
+                onPreviewTask={onPreviewTask}
                 onOpenTask={onOpenTask}
                 onEditTask={onEditTask}
                 onDeleteTask={onDeleteTask}

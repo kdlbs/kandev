@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 
-import { KanbanBoard } from '@/components/kanban-board';
+import { KanbanWithPreview } from '@/components/kanban-with-preview';
 import { OnboardingDialog } from '@/components/onboarding-dialog';
 import { getLocalStorage, setLocalStorage } from '@/lib/local-storage';
 import { STORAGE_KEYS } from '@/lib/settings/constants';
@@ -24,7 +24,7 @@ export function PageClient() {
   return (
     <>
       <OnboardingDialog open={showOnboarding} onComplete={handleOnboardingComplete} />
-      <KanbanBoard key={boardKey} />
+      <KanbanWithPreview key={boardKey} />
     </>
   );
 }

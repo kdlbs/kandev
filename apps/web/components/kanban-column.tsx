@@ -14,12 +14,13 @@ export interface Column {
 interface KanbanColumnProps {
   column: Column;
   tasks: Task[];
+  onPreviewTask: (task: Task) => void;
   onOpenTask: (task: Task) => void;
   onEditTask: (task: Task) => void;
   onDeleteTask: (task: Task) => void;
 }
 
-export function KanbanColumn({ column, tasks, onOpenTask, onEditTask, onDeleteTask }: KanbanColumnProps) {
+export function KanbanColumn({ column, tasks, onPreviewTask, onOpenTask, onEditTask, onDeleteTask }: KanbanColumnProps) {
   const { setNodeRef, isOver } = useDroppable({
     id: column.id,
   });
@@ -52,7 +53,8 @@ export function KanbanColumn({ column, tasks, onOpenTask, onEditTask, onDeleteTa
             <KanbanCard
               key={task.id}
               task={task}
-              onClick={onOpenTask}
+              onClick={onPreviewTask}
+              onOpenFullPage={onOpenTask}
               onEdit={onEditTask}
               onDelete={onDeleteTask}
             />
