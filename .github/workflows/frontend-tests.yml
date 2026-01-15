@@ -18,6 +18,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: '9'
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -25,10 +30,8 @@ jobs:
           cache: 'pnpm'
           cache-dependency-path: apps/pnpm-lock.yaml
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: '9'
+      - name: Enable corepack
+        run: corepack enable
 
       - name: Install dependencies
         run: pnpm install
