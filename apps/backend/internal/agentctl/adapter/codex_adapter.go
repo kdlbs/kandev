@@ -131,16 +131,19 @@ func (a *CodexAdapter) GetAgentInfo() *AgentInfo {
 
 // NewSession creates a new Codex thread (session).
 func (a *CodexAdapter) NewSession(ctx context.Context) (string, error) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
+	// Check client under lock, but don't hold lock during Call() to avoid deadlock
+	// with handleNotification which also needs the lock
+	a.mu.RLock()
+	client := a.client
+	a.mu.RUnlock()
 
-	if a.client == nil {
+	if client == nil {
 		return "", fmt.Errorf("adapter not initialized")
 	}
 
-	resp, err := a.client.Call(ctx, codex.MethodThreadStart, &codex.ThreadStartParams{
+	resp, err := client.Call(ctx, codex.MethodThreadStart, &codex.ThreadStartParams{
 		Cwd:            a.cfg.WorkDir,
-		ApprovalPolicy: "never",             // Valid values: untrusted, on-failure, on-request, never
+		ApprovalPolicy: "never",              // Valid values: untrusted, on-failure, on-request, never
 		Sandbox:        "danger-full-access", // Disable sandbox to avoid landlock permission issues
 	})
 	if err != nil {
@@ -155,7 +158,10 @@ func (a *CodexAdapter) NewSession(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("failed to parse thread start result: %w", err)
 	}
 
+	a.mu.Lock()
 	a.threadID = result.Thread.ID
+	a.mu.Unlock()
+
 	a.logger.Info("created new thread", zap.String("thread_id", a.threadID))
 
 	return a.threadID, nil
@@ -163,14 +169,17 @@ func (a *CodexAdapter) NewSession(ctx context.Context) (string, error) {
 
 // LoadSession resumes an existing Codex thread.
 func (a *CodexAdapter) LoadSession(ctx context.Context, sessionID string) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
+	// Check client under lock, but don't hold lock during Call() to avoid deadlock
+	// with handleNotification which also needs the lock
+	a.mu.RLock()
+	client := a.client
+	a.mu.RUnlock()
 
-	if a.client == nil {
+	if client == nil {
 		return fmt.Errorf("adapter not initialized")
 	}
 
-	resp, err := a.client.Call(ctx, codex.MethodThreadResume, &codex.ThreadResumeParams{
+	resp, err := client.Call(ctx, codex.MethodThreadResume, &codex.ThreadResumeParams{
 		ThreadID: sessionID,
 	})
 	if err != nil {
@@ -180,7 +189,10 @@ func (a *CodexAdapter) LoadSession(ctx context.Context, sessionID string) error 
 		return fmt.Errorf("thread resume error: %s", resp.Error.Message)
 	}
 
+	a.mu.Lock()
 	a.threadID = sessionID
+	a.mu.Unlock()
+
 	a.logger.Info("resumed thread", zap.String("thread_id", a.threadID))
 
 	return nil
@@ -189,6 +201,7 @@ func (a *CodexAdapter) LoadSession(ctx context.Context, sessionID string) error 
 // Prompt sends a prompt to the agent, starting a new turn.
 func (a *CodexAdapter) Prompt(ctx context.Context, message string) error {
 	a.mu.Lock()
+	client := a.client
 	threadID := a.threadID
 	// Reset accumulators for new turn
 	a.messageBuffer = ""
@@ -196,7 +209,7 @@ func (a *CodexAdapter) Prompt(ctx context.Context, message string) error {
 	a.summaryBuffer = ""
 	a.mu.Unlock()
 
-	if a.client == nil {
+	if client == nil {
 		return fmt.Errorf("adapter not initialized")
 	}
 
@@ -209,7 +222,7 @@ func (a *CodexAdapter) Prompt(ctx context.Context, message string) error {
 		},
 	}
 
-	resp, err := a.client.Call(ctx, codex.MethodTurnStart, params)
+	resp, err := client.Call(ctx, codex.MethodTurnStart, params)
 	if err != nil {
 		return fmt.Errorf("failed to start turn: %w", err)
 	}
@@ -244,18 +257,19 @@ func (a *CodexAdapter) Prompt(ctx context.Context, message string) error {
 // Cancel interrupts the current turn.
 func (a *CodexAdapter) Cancel(ctx context.Context) error {
 	a.mu.RLock()
+	client := a.client
 	threadID := a.threadID
 	turnID := a.turnID
 	a.mu.RUnlock()
 
-	if a.client == nil {
+	if client == nil {
 		return fmt.Errorf("adapter not initialized")
 	}
 
 	a.logger.Info("cancelling turn", zap.String("thread_id", threadID), zap.String("turn_id", turnID))
 
 	// Codex uses turn/interrupt to cancel
-	_, err := a.client.Call(ctx, codex.MethodTurnInterrupt, map[string]string{
+	_, err := client.Call(ctx, codex.MethodTurnInterrupt, map[string]string{
 		"threadId": threadID,
 		"turnId":   turnID,
 	})

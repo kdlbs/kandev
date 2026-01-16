@@ -86,7 +86,7 @@ func DefaultAgents() []*AgentTypeConfig {
 			ModelFlag:    "--model",
 			Protocol:     agent.ProtocolCodex,
 			SessionConfig: SessionConfig{
-				ResumeViaACP: true, // Codex uses ACP session/load for resume
+				ResumeViaACP: true, // Codex uses thread/resume via ACP
 			},
 		},
 		{
