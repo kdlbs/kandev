@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/orchestrator/dto"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/queue"
 	"github.com/kandev/kandev/internal/orchestrator/scheduler"
@@ -398,6 +399,99 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 	}
 
 	return execution, nil
+}
+
+// GetActiveSessionID returns the active (running) session ID for a task
+func (s *Service) GetActiveSessionID(ctx context.Context, taskID string) (string, error) {
+	return s.executor.GetActiveSessionID(ctx, taskID)
+}
+
+// GetTaskSessionStatus returns the status of a task session including whether it's resumable
+func (s *Service) GetTaskSessionStatus(ctx context.Context, taskID, sessionID string) (dto.TaskSessionStatusResponse, error) {
+	s.logger.Info("checking task session status",
+		zap.String("task_id", taskID),
+		zap.String("session_id", sessionID))
+
+	resp := dto.TaskSessionStatusResponse{
+		SessionID: sessionID,
+		TaskID:    taskID,
+	}
+
+	// 1. Load session from database
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		resp.Error = "session not found"
+		return resp, nil
+	}
+
+	if session.TaskID != taskID {
+		resp.Error = "session does not belong to task"
+		return resp, nil
+	}
+
+	resp.State = string(session.State)
+	resp.AgentProfileID = session.AgentProfileID
+
+	// Extract ACP session ID from metadata - this is the key requirement for resumption
+	var acpSessionID string
+	if session.Metadata != nil {
+		if id, ok := session.Metadata["acp_session_id"].(string); ok {
+			acpSessionID = id
+			resp.ACPSessionID = acpSessionID
+		}
+	}
+
+	// Extract worktree info
+	if len(session.Worktrees) > 0 {
+		wt := session.Worktrees[0]
+		if wt.WorktreePath != "" {
+			resp.WorktreePath = &wt.WorktreePath
+		}
+		if wt.WorktreeBranch != "" {
+			resp.WorktreeBranch = &wt.WorktreeBranch
+		}
+	}
+
+	// 2. Check if we have an active execution in memory and agent is running
+	if exec, ok := s.executor.GetExecutionWithContext(ctx, taskID); ok && exec != nil {
+		resp.IsAgentRunning = true
+		resp.IsResumable = true
+		resp.NeedsResume = false
+		return resp, nil
+	}
+
+	// 3. Session can be resumed if it has an ACP session ID
+	// Any session type with an acp_session_id can be resumed
+	if acpSessionID == "" {
+		resp.IsAgentRunning = false
+		resp.IsResumable = false
+		resp.NeedsResume = false
+		resp.Error = "session has no acp_session_id"
+		return resp, nil
+	}
+
+	// 4. Additional validations for resumption
+	if session.AgentProfileID == "" {
+		resp.Error = "session missing agent profile"
+		resp.IsResumable = false
+		return resp, nil
+	}
+
+	// Check if worktree exists (if one was used)
+	if len(session.Worktrees) > 0 && session.Worktrees[0].WorktreePath != "" {
+		if _, err := os.Stat(session.Worktrees[0].WorktreePath); err != nil {
+			resp.Error = "worktree not found"
+			resp.IsResumable = false
+			return resp, nil
+		}
+	}
+
+	resp.IsAgentRunning = false
+	resp.IsResumable = true
+	resp.NeedsResume = true
+	resp.ResumeReason = "agent_not_running"
+
+	return resp, nil
 }
 
 // StopTask stops agent execution for a task

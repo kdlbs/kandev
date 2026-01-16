@@ -9,20 +9,10 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/docker"
 	"github.com/kandev/kandev/internal/agent/registry"
-	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
-
-// testAgentConfig returns a default AgentConfig for testing (docker mode)
-func testAgentConfig() config.AgentConfig {
-	return config.AgentConfig{
-		Runtime:        "docker",
-		StandaloneHost: "localhost",
-		StandalonePort: 9999,
-	}
-}
 
 // MockDockerClient implements a mock for the docker.Client for testing
 type MockDockerClient struct {
@@ -135,26 +125,50 @@ func newTestRegistry() *registry.Registry {
 	return reg
 }
 
-func TestNewManager(t *testing.T) {
+// MockCredentialsManager implements CredentialsManager for testing
+type MockCredentialsManager struct{}
+
+func (m *MockCredentialsManager) GetCredentialValue(ctx context.Context, key string) (string, error) {
+	return "", nil
+}
+
+// MockProfileResolver implements ProfileResolver for testing
+type MockProfileResolver struct{}
+
+func (m *MockProfileResolver) ResolveProfile(ctx context.Context, profileID string) (*AgentProfileInfo, error) {
+	return &AgentProfileInfo{
+		ProfileID:   profileID,
+		ProfileName: "Test Profile",
+		AgentID:     "augment-agent",
+		AgentName:   "auggie",
+		Model:       "claude-sonnet-4-20250514",
+	}, nil
+}
+
+// newTestManager creates a Manager for testing with mock dependencies
+func newTestManager() *Manager {
 	log := newTestLogger()
 	reg := newTestRegistry()
 	eventBus := &MockEventBus{}
+	credsMgr := &MockCredentialsManager{}
+	profileResolver := &MockProfileResolver{}
+	// Pass nil for runtime and containerManager - tests don't need them
+	return NewManager(reg, eventBus, nil, nil, credsMgr, profileResolver, log)
+}
 
-	mgr := NewManager(nil, reg, eventBus, testAgentConfig(), log)
+func TestNewManager(t *testing.T) {
+	mgr := newTestManager()
 
 	if mgr == nil {
 		t.Fatal("expected non-nil manager")
 	}
-	if len(mgr.instances) != 0 {
-		t.Errorf("expected empty instances, got %d", len(mgr.instances))
+	if len(mgr.ListInstances()) != 0 {
+		t.Errorf("expected empty instances, got %d", len(mgr.ListInstances()))
 	}
 }
 
 func TestManager_GetInstance(t *testing.T) {
-	log := newTestLogger()
-	reg := newTestRegistry()
-	eventBus := &MockEventBus{}
-	mgr := NewManager(nil, reg, eventBus, testAgentConfig(), log)
+	mgr := newTestManager()
 
 	// Manually add an instance for testing
 	instance := &AgentInstance{
@@ -166,11 +180,7 @@ func TestManager_GetInstance(t *testing.T) {
 		StartedAt:      time.Now(),
 	}
 
-	mgr.mu.Lock()
-	mgr.instances[instance.ID] = instance
-	mgr.byTask[instance.TaskID] = instance.ID
-	mgr.byContainer[instance.ContainerID] = instance.ID
-	mgr.mu.Unlock()
+	mgr.instanceStore.Add(instance)
 
 	// Test GetInstance
 	got, found := mgr.GetInstance("test-instance-id")
@@ -189,10 +199,7 @@ func TestManager_GetInstance(t *testing.T) {
 }
 
 func TestManager_GetInstanceByTaskID(t *testing.T) {
-	log := newTestLogger()
-	reg := newTestRegistry()
-	eventBus := &MockEventBus{}
-	mgr := NewManager(nil, reg, eventBus, testAgentConfig(), log)
+	mgr := newTestManager()
 
 	instance := &AgentInstance{
 		ID:             "test-instance-id",
@@ -203,10 +210,7 @@ func TestManager_GetInstanceByTaskID(t *testing.T) {
 		StartedAt:      time.Now(),
 	}
 
-	mgr.mu.Lock()
-	mgr.instances[instance.ID] = instance
-	mgr.byTask[instance.TaskID] = instance.ID
-	mgr.mu.Unlock()
+	mgr.instanceStore.Add(instance)
 
 	// Test GetInstanceByTaskID
 	got, found := mgr.GetInstanceByTaskID("test-task-id")
@@ -225,10 +229,7 @@ func TestManager_GetInstanceByTaskID(t *testing.T) {
 }
 
 func TestManager_GetInstanceByContainerID(t *testing.T) {
-	log := newTestLogger()
-	reg := newTestRegistry()
-	eventBus := &MockEventBus{}
-	mgr := NewManager(nil, reg, eventBus, testAgentConfig(), log)
+	mgr := newTestManager()
 
 	instance := &AgentInstance{
 		ID:             "test-instance-id",
@@ -239,10 +240,7 @@ func TestManager_GetInstanceByContainerID(t *testing.T) {
 		StartedAt:      time.Now(),
 	}
 
-	mgr.mu.Lock()
-	mgr.instances[instance.ID] = instance
-	mgr.byContainer[instance.ContainerID] = instance.ID
-	mgr.mu.Unlock()
+	mgr.instanceStore.Add(instance)
 
 	// Test GetInstanceByContainerID
 	got, found := mgr.GetInstanceByContainerID("container-123")
@@ -261,10 +259,7 @@ func TestManager_GetInstanceByContainerID(t *testing.T) {
 }
 
 func TestManager_ListInstances(t *testing.T) {
-	log := newTestLogger()
-	reg := newTestRegistry()
-	eventBus := &MockEventBus{}
-	mgr := NewManager(nil, reg, eventBus, testAgentConfig(), log)
+	mgr := newTestManager()
 
 	// Empty list
 	list := mgr.ListInstances()
@@ -273,10 +268,8 @@ func TestManager_ListInstances(t *testing.T) {
 	}
 
 	// Add instances
-	mgr.mu.Lock()
-	mgr.instances["instance-1"] = &AgentInstance{ID: "instance-1", TaskID: "task-1", Status: v1.AgentStatusRunning}
-	mgr.instances["instance-2"] = &AgentInstance{ID: "instance-2", TaskID: "task-2", Status: v1.AgentStatusCompleted}
-	mgr.mu.Unlock()
+	mgr.instanceStore.Add(&AgentInstance{ID: "instance-1", TaskID: "task-1", Status: v1.AgentStatusRunning})
+	mgr.instanceStore.Add(&AgentInstance{ID: "instance-2", TaskID: "task-2", Status: v1.AgentStatusCompleted})
 
 	list = mgr.ListInstances()
 	if len(list) != 2 {
@@ -285,10 +278,7 @@ func TestManager_ListInstances(t *testing.T) {
 }
 
 func TestManager_UpdateStatus(t *testing.T) {
-	log := newTestLogger()
-	reg := newTestRegistry()
-	eventBus := &MockEventBus{}
-	mgr := NewManager(nil, reg, eventBus, testAgentConfig(), log)
+	mgr := newTestManager()
 
 	instance := &AgentInstance{
 		ID:     "test-instance-id",
@@ -296,9 +286,7 @@ func TestManager_UpdateStatus(t *testing.T) {
 		Status: v1.AgentStatusRunning,
 	}
 
-	mgr.mu.Lock()
-	mgr.instances[instance.ID] = instance
-	mgr.mu.Unlock()
+	mgr.instanceStore.Add(instance)
 
 	// Test UpdateStatus
 	err := mgr.UpdateStatus("test-instance-id", v1.AgentStatusCompleted)
@@ -319,10 +307,7 @@ func TestManager_UpdateStatus(t *testing.T) {
 }
 
 func TestManager_UpdateProgress(t *testing.T) {
-	log := newTestLogger()
-	reg := newTestRegistry()
-	eventBus := &MockEventBus{}
-	mgr := NewManager(nil, reg, eventBus, testAgentConfig(), log)
+	mgr := newTestManager()
 
 	instance := &AgentInstance{
 		ID:       "test-instance-id",
@@ -331,9 +316,7 @@ func TestManager_UpdateProgress(t *testing.T) {
 		Progress: 0,
 	}
 
-	mgr.mu.Lock()
-	mgr.instances[instance.ID] = instance
-	mgr.mu.Unlock()
+	mgr.instanceStore.Add(instance)
 
 	// Test UpdateProgress
 	err := mgr.UpdateProgress("test-instance-id", 50)
@@ -354,10 +337,7 @@ func TestManager_UpdateProgress(t *testing.T) {
 }
 
 func TestManager_MarkCompleted_Success(t *testing.T) {
-	log := newTestLogger()
-	reg := newTestRegistry()
-	eventBus := &MockEventBus{}
-	mgr := NewManager(nil, reg, eventBus, testAgentConfig(), log)
+	mgr := newTestManager()
 
 	instance := &AgentInstance{
 		ID:             "test-instance-id",
@@ -369,9 +349,7 @@ func TestManager_MarkCompleted_Success(t *testing.T) {
 		Progress:       50,
 	}
 
-	mgr.mu.Lock()
-	mgr.instances[instance.ID] = instance
-	mgr.mu.Unlock()
+	mgr.instanceStore.Add(instance)
 
 	// Mark as completed successfully (exit code 0)
 	err := mgr.MarkCompleted("test-instance-id", 0, "")
@@ -395,10 +373,7 @@ func TestManager_MarkCompleted_Success(t *testing.T) {
 }
 
 func TestManager_MarkCompleted_Failure(t *testing.T) {
-	log := newTestLogger()
-	reg := newTestRegistry()
-	eventBus := &MockEventBus{}
-	mgr := NewManager(nil, reg, eventBus, testAgentConfig(), log)
+	mgr := newTestManager()
 
 	instance := &AgentInstance{
 		ID:             "test-instance-id",
@@ -409,9 +384,7 @@ func TestManager_MarkCompleted_Failure(t *testing.T) {
 		StartedAt:      time.Now(),
 	}
 
-	mgr.mu.Lock()
-	mgr.instances[instance.ID] = instance
-	mgr.mu.Unlock()
+	mgr.instanceStore.Add(instance)
 
 	// Mark as failed
 	err := mgr.MarkCompleted("test-instance-id", 1, "process failed")
@@ -432,10 +405,7 @@ func TestManager_MarkCompleted_Failure(t *testing.T) {
 }
 
 func TestManager_MarkCompleted_NotFound(t *testing.T) {
-	log := newTestLogger()
-	reg := newTestRegistry()
-	eventBus := &MockEventBus{}
-	mgr := NewManager(nil, reg, eventBus, testAgentConfig(), log)
+	mgr := newTestManager()
 
 	err := mgr.MarkCompleted("non-existent", 0, "")
 	if err == nil {
@@ -444,10 +414,7 @@ func TestManager_MarkCompleted_NotFound(t *testing.T) {
 }
 
 func TestManager_RemoveInstance(t *testing.T) {
-	log := newTestLogger()
-	reg := newTestRegistry()
-	eventBus := &MockEventBus{}
-	mgr := NewManager(nil, reg, eventBus, testAgentConfig(), log)
+	mgr := newTestManager()
 
 	instance := &AgentInstance{
 		ID:          "test-instance-id",
@@ -455,11 +422,7 @@ func TestManager_RemoveInstance(t *testing.T) {
 		ContainerID: "container-123",
 	}
 
-	mgr.mu.Lock()
-	mgr.instances[instance.ID] = instance
-	mgr.byTask[instance.TaskID] = instance.ID
-	mgr.byContainer[instance.ContainerID] = instance.ID
-	mgr.mu.Unlock()
+	mgr.instanceStore.Add(instance)
 
 	// Remove instance
 	mgr.RemoveInstance("test-instance-id")
@@ -480,10 +443,7 @@ func TestManager_RemoveInstance(t *testing.T) {
 }
 
 func TestManager_StartStop(t *testing.T) {
-	log := newTestLogger()
-	reg := newTestRegistry()
-	eventBus := &MockEventBus{}
-	mgr := NewManager(nil, reg, eventBus, testAgentConfig(), log)
+	mgr := newTestManager()
 
 	ctx := context.Background()
 

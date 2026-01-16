@@ -180,9 +180,16 @@ type Item struct {
 	// For fileChange type
 	Changes []FileChange `json:"changes,omitempty"`
 
-	// For reasoning type
-	Summary []string `json:"summary,omitempty"`
-	Content []string `json:"content,omitempty"`
+	// For reasoning type - content can be objects like [{type: "text", text: "..."}]
+	Summary []ContentPart `json:"summary,omitempty"`
+	Content []ContentPart `json:"content,omitempty"`
+}
+
+// ContentPart represents a content part in a Codex item.
+// This handles the OpenAI responses format where content is an array of typed objects.
+type ContentPart struct {
+	Type string `json:"type,omitempty"` // "text", "output_text", "refusal", "input_text", etc.
+	Text string `json:"text,omitempty"`
 }
 
 // FileChange represents a file change in a fileChange item

@@ -13,11 +13,17 @@ import (
 	"go.uber.org/zap"
 )
 
+// SessionResumer is an interface for resuming task sessions
+type SessionResumer interface {
+	ResumeTaskSession(ctx context.Context, taskID, taskSessionID string) error
+}
+
 // ShellHandlers provides WebSocket handlers for shell terminal operations
 type ShellHandlers struct {
-	lifecycleMgr *lifecycle.Manager
-	logger       *logger.Logger
-	hub          ShellOutputBroadcaster
+	lifecycleMgr    *lifecycle.Manager
+	logger          *logger.Logger
+	hub             ShellOutputBroadcaster
+	sessionResumer  SessionResumer
 
 	// Track active shell streams per task
 	activeStreams map[string]context.CancelFunc
@@ -41,6 +47,11 @@ func NewShellHandlers(lifecycleMgr *lifecycle.Manager, log *logger.Logger) *Shel
 // SetHub sets the hub for broadcasting shell output
 func (h *ShellHandlers) SetHub(hub ShellOutputBroadcaster) {
 	h.hub = hub
+}
+
+// SetSessionResumer sets the session resumer for auto-resuming sessions on shell subscribe
+func (h *ShellHandlers) SetSessionResumer(resumer SessionResumer) {
+	h.sessionResumer = resumer
 }
 
 // RegisterHandlers registers shell handlers with the WebSocket dispatcher
@@ -194,12 +205,22 @@ func (h *ShellHandlers) StartShellStreamWithHub(ctx context.Context, taskID stri
 		return nil // Already streaming
 	}
 
-	streamCtx, cancel := context.WithCancel(ctx)
+	streamCtx, cancel := context.WithCancel(context.Background()) // Use background context so stream survives request
 	h.activeStreams[taskID] = cancel
 	h.mu.Unlock()
 
-	go h.runShellStream(streamCtx, taskID, hub)
-	return nil
+	// Use a channel to wait for stream setup to complete
+	readyCh := make(chan error, 1)
+	go h.runShellStreamWithReady(streamCtx, taskID, hub, readyCh)
+
+	// Wait for stream to be ready (or fail)
+	select {
+	case err := <-readyCh:
+		return err
+	case <-ctx.Done():
+		cancel()
+		return ctx.Err()
+	}
 }
 
 // StopShellStream stops the shell stream for a task
@@ -217,8 +238,8 @@ type ShellOutputBroadcaster interface {
 	BroadcastToTask(taskID string, msg *ws.Message)
 }
 
-// runShellStream runs the shell output stream for a task
-func (h *ShellHandlers) runShellStream(ctx context.Context, taskID string, hub ShellOutputBroadcaster) {
+// runShellStreamWithReady runs the shell output stream for a task and signals when ready
+func (h *ShellHandlers) runShellStreamWithReady(ctx context.Context, taskID string, hub ShellOutputBroadcaster, readyCh chan<- error) {
 	defer func() {
 		h.mu.Lock()
 		delete(h.activeStreams, taskID)
@@ -228,18 +249,21 @@ func (h *ShellHandlers) runShellStream(ctx context.Context, taskID string, hub S
 	instance, ok := h.lifecycleMgr.GetInstanceByTaskID(taskID)
 	if !ok {
 		h.logger.Debug("no agent instance for shell stream", zap.String("task_id", taskID))
+		readyCh <- fmt.Errorf("no agent instance for task %s", taskID)
 		return
 	}
 
 	client := instance.GetAgentCtlClient()
 	if client == nil {
 		h.logger.Debug("no client for shell stream", zap.String("task_id", taskID))
+		readyCh <- fmt.Errorf("no agent client for task %s", taskID)
 		return
 	}
 
 	outputCh, inputCh, err := client.StreamShell(ctx)
 	if err != nil {
 		h.logger.Error("failed to start shell stream", zap.String("task_id", taskID), zap.Error(err))
+		readyCh <- fmt.Errorf("failed to start shell stream: %w", err)
 		return
 	}
 
@@ -248,6 +272,9 @@ func (h *ShellHandlers) runShellStream(ctx context.Context, taskID string, hub S
 	defer h.removeInputChannel(taskID)
 
 	h.logger.Info("shell stream started", zap.String("task_id", taskID))
+
+	// Signal that we're ready - input channel is now stored
+	readyCh <- nil
 
 	for {
 		select {

@@ -111,6 +111,19 @@ func (c *Controller) ResumeTaskSession(ctx context.Context, req dto.ResumeTaskSe
 	return resp, nil
 }
 
+// GetTaskSessionStatus returns the status of a task session including whether it's resumable
+func (c *Controller) GetTaskSessionStatus(ctx context.Context, req dto.TaskSessionStatusRequest) (dto.TaskSessionStatusResponse, error) {
+	status, err := c.service.GetTaskSessionStatus(ctx, req.TaskID, req.TaskSessionID)
+	if err != nil {
+		return dto.TaskSessionStatusResponse{
+			SessionID: req.TaskSessionID,
+			TaskID:    req.TaskID,
+			Error:     err.Error(),
+		}, nil
+	}
+	return status, nil
+}
+
 // StopTask stops task execution
 func (c *Controller) StopTask(ctx context.Context, req dto.StopTaskRequest) (dto.SuccessResponse, error) {
 	reason := req.Reason

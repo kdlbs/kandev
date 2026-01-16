@@ -33,8 +33,12 @@ type PromptResult struct {
 // AgentManagerClient is an interface for the Agent Manager service
 // This will be implemented via gRPC or HTTP client
 type AgentManagerClient interface {
-	// LaunchAgent starts a new agent container for a task
+	// LaunchAgent creates a new agentctl instance for a task (agent not started yet)
 	LaunchAgent(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error)
+
+	// StartAgentProcess starts the agent subprocess for an instance.
+	// The command is built internally based on the instance's agent profile.
+	StartAgentProcess(ctx context.Context, agentInstanceID string) error
 
 	// StopAgent stops a running agent
 	StopAgent(ctx context.Context, agentInstanceID string, force bool) error
@@ -58,6 +62,10 @@ type AgentManagerClient interface {
 	// IsAgentRunningForTask checks if an agent is actually running for a task
 	// This probes the actual agent (Docker container or standalone process) rather than relying on cached state
 	IsAgentRunningForTask(ctx context.Context, taskID string) bool
+
+	// CleanupStaleInstanceByTaskID removes a stale agent instance from tracking without trying to stop it.
+	// This is used when we detect the agent process has stopped but the instance is still tracked.
+	CleanupStaleInstanceByTaskID(ctx context.Context, taskID string) error
 }
 
 // LaunchAgentRequest contains parameters for launching an agent
@@ -411,6 +419,19 @@ func (e *Executor) ExecuteWithProfile(ctx context.Context, task *v1.Task, agentP
 	e.executions[task.ID] = execution
 	e.mu.Unlock()
 
+	// Start the agent process (agentctl instance was created above)
+	go func() {
+		startCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+
+		if err := e.agentManager.StartAgentProcess(startCtx, resp.AgentInstanceID); err != nil {
+			e.logger.Error("failed to start agent process",
+				zap.String("task_id", task.ID),
+				zap.String("agent_instance_id", resp.AgentInstanceID),
+				zap.Error(err))
+		}
+	}()
+
 	e.logger.Info("agent launched successfully",
 		zap.String("task_id", task.ID),
 		zap.String("session_id", sessionID),
@@ -510,6 +531,9 @@ func (e *Executor) ResumeSession(ctx context.Context, task *v1.Task, session *mo
 	if session.Metadata != nil {
 		if acpSessionID, ok := session.Metadata["acp_session_id"].(string); ok && acpSessionID != "" {
 			req.ACPSessionID = acpSessionID
+			e.logger.Info("found acp_session_id in session metadata for resumption",
+				zap.String("task_id", task.ID),
+				zap.String("acp_session_id", acpSessionID))
 		}
 	}
 
@@ -517,6 +541,7 @@ func (e *Executor) ResumeSession(ctx context.Context, task *v1.Task, session *mo
 		zap.String("task_id", task.ID),
 		zap.String("session_id", session.ID),
 		zap.String("agent_profile_id", session.AgentProfileID),
+		zap.String("acp_session_id", req.ACPSessionID),
 		zap.Bool("use_worktree", req.UseWorktree))
 
 	resp, err := e.agentManager.LaunchAgent(ctx, req)
@@ -593,6 +618,20 @@ func (e *Executor) ResumeSession(ctx context.Context, task *v1.Task, session *mo
 	e.mu.Lock()
 	e.executions[task.ID] = execution
 	e.mu.Unlock()
+
+	// Start the agent process (agentctl instance was created above)
+	go func() {
+		startCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+
+		if err := e.agentManager.StartAgentProcess(startCtx, resp.AgentInstanceID); err != nil {
+			e.logger.Error("failed to start agent process on resume",
+				zap.String("task_id", task.ID),
+				zap.String("session_id", session.ID),
+				zap.String("agent_instance_id", resp.AgentInstanceID),
+				zap.Error(err))
+		}
+	}()
 
 	return execution, nil
 }
@@ -722,6 +761,13 @@ func (e *Executor) GetExecution(taskID string) (*TaskExecution, bool) {
 			if execution.SessionID != "" {
 				_ = e.repo.UpdateTaskSessionState(ctx, execution.SessionID, models.TaskSessionStateCancelled, "agent process stopped")
 			}
+
+			// Clean up the stale instance from the agent manager
+			if err := e.agentManager.CleanupStaleInstanceByTaskID(ctx, taskID); err != nil {
+				e.logger.Warn("failed to cleanup stale agent instance",
+					zap.String("task_id", taskID),
+					zap.Error(err))
+			}
 			return nil, false
 		}
 
@@ -744,6 +790,13 @@ func (e *Executor) GetExecution(taskID string) (*TaskExecution, bool) {
 			zap.String("task_id", taskID),
 			zap.String("session_id", session.ID))
 		_ = e.repo.UpdateTaskSessionState(ctx, session.ID, models.TaskSessionStateCancelled, "agent not running after backend restart")
+
+		// Clean up the stale instance from the agent manager
+		if err := e.agentManager.CleanupStaleInstanceByTaskID(ctx, taskID); err != nil {
+			e.logger.Warn("failed to cleanup stale agent instance",
+				zap.String("task_id", taskID),
+				zap.Error(err))
+		}
 		return nil, false
 	}
 
@@ -775,6 +828,13 @@ func (e *Executor) GetExecutionWithContext(ctx context.Context, taskID string) (
 			if execution.SessionID != "" {
 				_ = e.repo.UpdateTaskSessionState(ctx, execution.SessionID, models.TaskSessionStateCancelled, "agent process stopped")
 			}
+
+			// Clean up the stale instance from the agent manager
+			if err := e.agentManager.CleanupStaleInstanceByTaskID(ctx, taskID); err != nil {
+				e.logger.Warn("failed to cleanup stale agent instance",
+					zap.String("task_id", taskID),
+					zap.Error(err))
+			}
 			return nil, false
 		}
 
@@ -794,6 +854,13 @@ func (e *Executor) GetExecutionWithContext(ctx context.Context, taskID string) (
 			zap.String("task_id", taskID),
 			zap.String("session_id", session.ID))
 		_ = e.repo.UpdateTaskSessionState(ctx, session.ID, models.TaskSessionStateCancelled, "agent not running after backend restart")
+
+		// Clean up the stale instance from the agent manager
+		if err := e.agentManager.CleanupStaleInstanceByTaskID(ctx, taskID); err != nil {
+			e.logger.Warn("failed to cleanup stale agent instance",
+				zap.String("task_id", taskID),
+				zap.Error(err))
+		}
 		return nil, false
 	}
 
@@ -964,6 +1031,13 @@ func (m *MockAgentManagerClient) LaunchAgent(ctx context.Context, req *LaunchAge
 	}, nil
 }
 
+// StartAgentProcess mocks starting the agent subprocess
+func (m *MockAgentManagerClient) StartAgentProcess(ctx context.Context, agentInstanceID string) error {
+	m.logger.Info("mock: starting agent process",
+		zap.String("agent_instance_id", agentInstanceID))
+	return nil
+}
+
 // StopAgent mocks stopping an agent
 func (m *MockAgentManagerClient) StopAgent(ctx context.Context, agentInstanceID string, force bool) error {
 	m.logger.Info("mock: stopping agent",
@@ -1026,4 +1100,9 @@ func (m *MockAgentManagerClient) GetRecoveredInstances() []RecoveredInstanceInfo
 // IsAgentRunningForTask mocks checking if an agent is running (always returns false for mock)
 func (m *MockAgentManagerClient) IsAgentRunningForTask(ctx context.Context, taskID string) bool {
 	return false
+}
+
+// CleanupStaleInstanceByTaskID mocks cleaning up a stale instance (no-op for mock)
+func (m *MockAgentManagerClient) CleanupStaleInstanceByTaskID(ctx context.Context, taskID string) error {
+	return nil
 }

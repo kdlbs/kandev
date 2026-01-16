@@ -28,6 +28,7 @@ import (
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
 
 	// Agent Manager packages
+	"github.com/kandev/kandev/internal/agent/agentctl"
 	"github.com/kandev/kandev/internal/agent/agentctl/launcher"
 	agentcontroller "github.com/kandev/kandev/internal/agent/controller"
 	"github.com/kandev/kandev/internal/agent/credentials"
@@ -296,10 +297,39 @@ func main() {
 			credsMgr.AddProvider(credentials.NewFileProvider(credsFile))
 		}
 
+		// Profile Resolver
+		profileResolver := lifecycle.NewStoreProfileResolver(agentSettingsRepo)
+
+		// Create the appropriate runtime based on configuration
+		var agentRuntime lifecycle.Runtime
+		var containerMgr *lifecycle.ContainerManager
+		switch cfg.Agent.Runtime {
+		case "standalone":
+			standaloneCtl := agentctl.NewStandaloneCtl(
+				cfg.Agent.StandaloneHost,
+				cfg.Agent.StandalonePort,
+				log,
+			)
+			agentRuntime = lifecycle.NewStandaloneRuntime(
+				standaloneCtl,
+				cfg.Agent.StandaloneHost,
+				cfg.Agent.StandalonePort,
+				log,
+			)
+			log.Info("Using standalone runtime",
+				zap.String("host", cfg.Agent.StandaloneHost),
+				zap.Int("port", cfg.Agent.StandalonePort))
+		default:
+			// Docker mode (default)
+			if dockerClient != nil {
+				containerMgr = lifecycle.NewContainerManager(dockerClient, "", log)
+				agentRuntime = lifecycle.NewDockerRuntime(dockerClient, log)
+				log.Info("Using Docker runtime")
+			}
+		}
+
 		// Lifecycle Manager (uses agentctl for agent communication)
-		lifecycleMgr = lifecycle.NewManager(dockerClient, agentRegistry, eventBus, cfg.Agent, log)
-		lifecycleMgr.SetCredentialsManager(credsMgr)
-		lifecycleMgr.SetProfileResolver(lifecycle.NewStoreProfileResolver(agentSettingsRepo))
+		lifecycleMgr = lifecycle.NewManager(agentRegistry, eventBus, agentRuntime, containerMgr, credsMgr, profileResolver, log)
 
 		if err := lifecycleMgr.Start(ctx); err != nil {
 			log.Fatal("Failed to start lifecycle manager", zap.Error(err))
@@ -417,6 +447,7 @@ func main() {
 		// Register shell handlers
 		shellHandlers := agenthandlers.NewShellHandlers(lifecycleMgr, log)
 		shellHandlers.SetHub(gateway.Hub)
+		shellHandlers.SetSessionResumer(&shellSessionResumerAdapter{svc: orchestratorSvc})
 		shellHandlers.RegisterHandlers(gateway.Dispatcher)
 		lifecycleMgr.SetShellStreamStarter(shellHandlers)
 		log.Info("Registered Shell WebSocket handlers")
@@ -866,7 +897,8 @@ func newLifecycleAdapter(mgr *lifecycle.Manager, reg *registry.Registry, log *lo
 	}
 }
 
-// LaunchAgent starts a new agent container for a task
+// LaunchAgent creates a new agentctl instance for a task.
+// Agent subprocess is NOT started - call StartAgentProcess() explicitly.
 func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
 	// The RepositoryURL field contains a local filesystem path for the workspace
 	// If empty, the agent will run without a mounted workspace
@@ -887,12 +919,11 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 		BaseBranch:     req.BaseBranch,
 	}
 
+	// Create the agentctl instance (does NOT start agent process)
 	instance, err := a.mgr.Launch(ctx, launchReq)
 	if err != nil {
 		return nil, err
 	}
-
-	// Streaming is now handled by the lifecycle manager
 
 	// Extract worktree info from metadata if available
 	var worktreeID, worktreePath, worktreeBranch string
@@ -916,6 +947,12 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 		WorktreePath:    worktreePath,
 		WorktreeBranch:  worktreeBranch,
 	}, nil
+}
+
+// StartAgentProcess starts the agent subprocess for an instance.
+// The command is built internally based on the instance's agent profile.
+func (a *lifecycleAdapter) StartAgentProcess(ctx context.Context, agentInstanceID string) error {
+	return a.mgr.StartAgentProcess(ctx, agentInstanceID)
 }
 
 // StopAgent stops a running agent
@@ -1002,6 +1039,11 @@ func (a *lifecycleAdapter) IsAgentRunningForTask(ctx context.Context, taskID str
 	return a.mgr.IsAgentRunningForTask(ctx, taskID)
 }
 
+// CleanupStaleInstanceByTaskID removes a stale agent instance from tracking without trying to stop it.
+func (a *lifecycleAdapter) CleanupStaleInstanceByTaskID(ctx context.Context, taskID string) error {
+	return a.mgr.CleanupStaleInstanceByTaskID(ctx, taskID)
+}
+
 // corsMiddleware returns a CORS middleware for HTTP and WebSocket connections
 func corsMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -1037,6 +1079,16 @@ func (a *orchestratorAdapter) PromptTask(ctx context.Context, taskID string, pro
 }
 
 func (a *orchestratorAdapter) ResumeTaskSession(ctx context.Context, taskID, taskSessionID string) error {
+	_, err := a.svc.ResumeTaskSession(ctx, taskID, taskSessionID)
+	return err
+}
+
+// shellSessionResumerAdapter adapts the orchestrator service to the shell handlers' SessionResumer interface
+type shellSessionResumerAdapter struct {
+	svc *orchestrator.Service
+}
+
+func (a *shellSessionResumerAdapter) ResumeTaskSession(ctx context.Context, taskID, taskSessionID string) error {
 	_, err := a.svc.ResumeTaskSession(ctx, taskID, taskSessionID)
 	return err
 }

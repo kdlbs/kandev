@@ -142,6 +142,13 @@ func (s *SimulatedAgentManagerClient) LaunchAgent(ctx context.Context, req *exec
 	}, nil
 }
 
+// StartAgentProcess simulates starting the agent subprocess
+func (s *SimulatedAgentManagerClient) StartAgentProcess(ctx context.Context, agentInstanceID string) error {
+	s.logger.Info("simulated: starting agent process",
+		zap.String("agent_instance_id", agentInstanceID))
+	return nil
+}
+
 // runAgentSimulation simulates the agent execution lifecycle
 func (s *SimulatedAgentManagerClient) runAgentSimulation(instance *simulatedInstance, req *executor.LaunchAgentRequest) {
 	// Wait for launch delay
@@ -428,6 +435,10 @@ func (s *SimulatedAgentManagerClient) IsAgentRunningForTask(ctx context.Context,
 		}
 	}
 	return false
+}
+
+func (s *SimulatedAgentManagerClient) CleanupStaleInstanceByTaskID(ctx context.Context, taskID string) error {
+	return nil
 }
 
 // ============================================

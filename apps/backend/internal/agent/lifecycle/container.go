@@ -256,3 +256,20 @@ func (cm *ContainerManager) buildEnvVars(config ContainerConfig) []string {
 
 	return env
 }
+
+// ListManagedContainers returns all containers managed by kandev
+func (cm *ContainerManager) ListManagedContainers(ctx context.Context) ([]docker.ContainerInfo, error) {
+	return cm.dockerClient.ListContainers(ctx, map[string]string{
+		"kandev.managed": "true",
+	})
+}
+
+// GetContainerInfo returns information about a specific container
+func (cm *ContainerManager) GetContainerInfo(ctx context.Context, containerID string) (*docker.ContainerInfo, error) {
+	return cm.dockerClient.GetContainerInfo(ctx, containerID)
+}
+
+// RemoveContainer removes a container
+func (cm *ContainerManager) RemoveContainer(ctx context.Context, containerID string, force bool) error {
+	return cm.dockerClient.RemoveContainer(ctx, containerID, force)
+}

@@ -2,6 +2,7 @@
 package agentctl
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -36,9 +37,10 @@ type StatusResponse struct {
 	ProcessInfo map[string]interface{} `json:"process_info"`
 }
 
-// IsAgentRunning returns true if the agent process is running
+// IsAgentRunning returns true if the agent process is running or starting
+// (i.e., the agent is active and should not be considered stale)
 func (s *StatusResponse) IsAgentRunning() bool {
-	return s.AgentStatus == "running"
+	return s.AgentStatus == "running" || s.AgentStatus == "starting"
 }
 
 // NewClient creates a new agentctl client
@@ -89,6 +91,46 @@ func (c *Client) GetStatus(ctx context.Context) (*StatusResponse, error) {
 		return nil, err
 	}
 	return &status, nil
+}
+
+// ConfigureAgent configures the agent command. Must be called before Start().
+func (c *Client) ConfigureAgent(ctx context.Context, command string, env map[string]string) error {
+	payload := struct {
+		Command string            `json:"command"`
+		Env     map[string]string `json:"env,omitempty"`
+	}{
+		Command: command,
+		Env:     env,
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/v1/agent/configure", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var result struct {
+		Success bool   `json:"success"`
+		Error   string `json:"error,omitempty"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return err
+	}
+	if !result.Success {
+		return fmt.Errorf("configure failed: %s", result.Error)
+	}
+	return nil
 }
 
 // Start starts the agent process

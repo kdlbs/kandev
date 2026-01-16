@@ -41,6 +41,10 @@ func (m *mockAgentManager) LaunchAgent(ctx context.Context, req *executor.Launch
 	}, nil
 }
 
+func (m *mockAgentManager) StartAgentProcess(ctx context.Context, agentInstanceID string) error {
+	return nil
+}
+
 func (m *mockAgentManager) StopAgent(ctx context.Context, agentInstanceID string, force bool) error {
 	return nil
 }
@@ -70,6 +74,10 @@ func (m *mockAgentManager) GetRecoveredInstances() []executor.RecoveredInstanceI
 
 func (m *mockAgentManager) IsAgentRunningForTask(ctx context.Context, taskID string) bool {
 	return false
+}
+
+func (m *mockAgentManager) CleanupStaleInstanceByTaskID(ctx context.Context, taskID string) error {
+	return nil
 }
 
 // testTaskRepository is an in-memory task repository for testing
