@@ -150,6 +150,7 @@ export default function TaskPage({ task: initialTask, sessionId = null }: TaskPa
 
         <TaskLayout
           taskId={task?.id ?? null}
+          sessionId={activeSessionId ?? null}
           onSendMessage={handleSendMessage}
         />
       </div>
