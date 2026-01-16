@@ -42,4 +42,3 @@ func (r *StoreProfileResolver) ResolveProfile(ctx context.Context, profileID str
 		Plan:                       profile.Plan,
 	}, nil
 }
-

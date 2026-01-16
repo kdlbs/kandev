@@ -19,7 +19,6 @@ func DefaultAgents() []*AgentTypeConfig {
 			},
 			Mounts: []MountTemplate{
 				{Source: "{workspace}", Target: "/workspace", ReadOnly: false},
-				{Source: "{augment_sessions}", Target: "/root/.augment/sessions", ReadOnly: false},
 			},
 			ResourceLimits: ResourceLimits{
 				MemoryMB:       4096,
@@ -31,6 +30,12 @@ func DefaultAgents() []*AgentTypeConfig {
 			ModelFlag:     "--model",
 			WorkspaceFlag: "--workspace-root",
 			Protocol:      agent.ProtocolACP,
+			SessionConfig: SessionConfig{
+				ResumeViaACP:       false, // Auggie handles resume via CLI flag
+				ResumeFlag:         "--resume",
+				SessionDirTemplate: "{home}/.augment/sessions",
+				SessionDirTarget:   "/root/.augment/sessions",
+			},
 		},
 		{
 			ID:          "claude-agent",
@@ -54,6 +59,9 @@ func DefaultAgents() []*AgentTypeConfig {
 			Enabled:      true,
 			ModelFlag:    "--model",
 			Protocol:     agent.ProtocolACP,
+			SessionConfig: SessionConfig{
+				ResumeViaACP: true, // Claude uses ACP session/load for resume
+			},
 		},
 		{
 			ID:          "codex-agent",
@@ -77,6 +85,9 @@ func DefaultAgents() []*AgentTypeConfig {
 			Enabled:      true,
 			ModelFlag:    "--model",
 			Protocol:     agent.ProtocolCodex,
+			SessionConfig: SessionConfig{
+				ResumeViaACP: true, // Codex uses ACP session/load for resume
+			},
 		},
 		{
 			ID:          "gemini-agent",
@@ -100,6 +111,9 @@ func DefaultAgents() []*AgentTypeConfig {
 			Enabled:      true,
 			ModelFlag:    "--model",
 			Protocol:     agent.ProtocolACP,
+			SessionConfig: SessionConfig{
+				ResumeViaACP: true, // Gemini uses ACP session/load for resume
+			},
 		},
 		{
 			ID:          "opencode-agent",
@@ -123,6 +137,9 @@ func DefaultAgents() []*AgentTypeConfig {
 			Enabled:      true,
 			ModelFlag:    "--model",
 			Protocol:     agent.ProtocolACP,
+			SessionConfig: SessionConfig{
+				ResumeViaACP: true, // OpenCode uses ACP session/load for resume
+			},
 		},
 		{
 			ID:          "copilot-agent",
@@ -146,6 +163,9 @@ func DefaultAgents() []*AgentTypeConfig {
 			Enabled:      true,
 			ModelFlag:    "--model",
 			Protocol:     agent.ProtocolACP,
+			SessionConfig: SessionConfig{
+				ResumeViaACP: true, // Copilot uses ACP session/load for resume
+			},
 		},
 	}
 }
