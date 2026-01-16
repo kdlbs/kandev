@@ -4,6 +4,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -375,6 +376,32 @@ func (m *Manager) Stop() error {
 	return nil
 }
 
+// StopAllAgents attempts a graceful shutdown of all active agents.
+func (m *Manager) StopAllAgents(ctx context.Context) error {
+	instanceIDs := make([]string, 0)
+	m.mu.RLock()
+	for instanceID := range m.instances {
+		instanceIDs = append(instanceIDs, instanceID)
+	}
+	m.mu.RUnlock()
+
+	if len(instanceIDs) == 0 {
+		return nil
+	}
+
+	var errs []error
+	for _, instanceID := range instanceIDs {
+		if err := m.StopAgent(ctx, instanceID, false); err != nil {
+			errs = append(errs, err)
+			m.logger.Warn("failed to stop agent during shutdown",
+				zap.String("instance_id", instanceID),
+				zap.Error(err))
+		}
+	}
+
+	return errors.Join(errs...)
+}
+
 // Launch launches a new agent for a task
 func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentInstance, error) {
 	m.logger.Info("launching agent",
@@ -596,6 +623,9 @@ func (m *Manager) launchStandalone(ctx context.Context, instanceID string, req *
 		agentCommand = agentCommand + " " + agentConfig.ModelFlag + " " + profileInfo.Model
 	}
 	if req.ACPSessionID != "" && profileInfo != nil && profileInfo.AgentName == "auggie" {
+		m.logger.Info("adding auggie resume flag to command (standalone)",
+			zap.String("task_id", req.TaskID),
+			zap.String("session_id", req.ACPSessionID))
 		agentCommand = agentCommand + " --resume " + req.ACPSessionID
 	}
 	// If empty, agentctl will use its default (auggie --acp)
@@ -835,6 +865,10 @@ func (m *Manager) initializeACPSession(ctx context.Context, instance *AgentInsta
 	}
 
 	instance.ACPSessionID = sessionID
+	m.logger.Info("ACP session ready",
+		zap.String("instance_id", instance.ID),
+		zap.String("session_id", sessionID),
+		zap.String("agent_name", agentName))
 	m.publishACPSessionCreated(instance, sessionID)
 
 	// 3. Set up updates stream to receive session notifications
@@ -1594,6 +1628,9 @@ func (m *Manager) buildContainerConfig(instanceID string, req *LaunchRequest, ag
 		cmd = append(cmd, agentConfig.ModelFlag, profileInfo.Model)
 	}
 	if req.ACPSessionID != "" && profileInfo != nil && profileInfo.AgentName == "auggie" {
+		m.logger.Info("adding auggie resume flag to command",
+			zap.String("task_id", req.TaskID),
+			zap.String("session_id", req.ACPSessionID))
 		cmd = append(cmd, "--resume", req.ACPSessionID)
 	}
 
@@ -1631,7 +1668,7 @@ func (m *Manager) expandMountTemplate(source, workspacePath, taskID string) stri
 		}
 		augmentSessionsDir := filepath.Join(homeDir, ".augment", "sessions")
 		// Ensure the directory exists
-		_ = os.MkdirAll(augmentSessionsDir, 0755)
+		_ = os.MkdirAll(augmentSessionsDir, 0o755)
 		result = strings.ReplaceAll(result, "{augment_sessions}", augmentSessionsDir)
 	}
 
@@ -2059,6 +2096,12 @@ func (m *Manager) publishACPSessionCreated(instance *AgentInstance, sessionID st
 			zap.String("event_type", events.AgentACPSessionCreated),
 			zap.String("instance_id", instance.ID),
 			zap.Error(err))
+	} else {
+		m.logger.Info("published ACP session event",
+			zap.String("event_type", events.AgentACPSessionCreated),
+			zap.String("task_id", instance.TaskID),
+			zap.String("agent_instance_id", instance.ID),
+			zap.String("acp_session_id", sessionID))
 	}
 }
 

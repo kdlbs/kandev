@@ -806,6 +806,13 @@ func main() {
 	}
 
 	if lifecycleMgr != nil {
+		log.Info("Stopping agents gracefully...")
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), 20*time.Second)
+		if err := lifecycleMgr.StopAllAgents(stopCtx); err != nil {
+			log.Error("Graceful agent stop error", zap.Error(err))
+		}
+		stopCancel()
+
 		if err := lifecycleMgr.Stop(); err != nil {
 			log.Error("Lifecycle manager stop error", zap.Error(err))
 		}

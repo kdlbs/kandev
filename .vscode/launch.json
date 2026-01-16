@@ -1,0 +1,22 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug Kandev Backend",
+      "type": "go",
+      "request": "launch",
+      "mode": "debug",
+      "program": "${workspaceFolder}/apps/backend/cmd/kandev",
+      "cwd": "${workspaceFolder}/apps/backend",
+      "env": {
+        "PATH": "${workspaceFolder}/apps/backend/bin:${env:PATH}"
+      },
+      "preLaunchTask": "build-backend",
+      "console": "integratedTerminal",
+      "stopOnEntry": false,
+      "showLog": true,
+      "trace": "verbose",
+      "logOutput": "debugger,dap",
+    }
+  ]
+}

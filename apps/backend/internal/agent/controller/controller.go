@@ -161,4 +161,3 @@ func (c *Controller) ListAgentTypes(ctx context.Context, req dto.ListAgentTypesR
 
 	return resp, nil
 }
-
