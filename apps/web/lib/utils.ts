@@ -90,7 +90,7 @@ export function formatUserHomePath(path: string): string {
 /**
  * Truncate a repository path for display, favoring the last segments.
  */
-export function truncateRepoPath(path: string, maxLength = 28): string {
+export function truncateRepoPath(path: string, maxLength = 34): string {
     const displayPath = formatUserHomePath(path);
     if (displayPath.length <= maxLength) return displayPath;
     const normalizedPath = displayPath.replace(/\\/g, '/');
@@ -99,8 +99,11 @@ export function truncateRepoPath(path: string, maxLength = 28): string {
     const prefix = hasHomePrefix ? '~/' : hasRootPrefix ? '/' : '';
     const parts = normalizedPath.replace(/^~\//, '').replace(/^\//, '').split('/').filter(Boolean);
     if (parts.length === 0) return displayPath;
+    const lastThree = parts.slice(-3).join('/');
+    let result = `${prefix}.../${lastThree}`;
+    if (result.length <= maxLength) return result;
     const lastTwo = parts.slice(-2).join('/');
-    let result = `${prefix}.../${lastTwo}`;
+    result = `${prefix}.../${lastTwo}`;
     if (result.length <= maxLength) return result;
     const lastOne = parts.slice(-1).join('/');
     result = `${prefix}.../${lastOne}`;

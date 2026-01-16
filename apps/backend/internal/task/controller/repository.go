@@ -163,6 +163,25 @@ func (c *RepositoryController) ListRepositoryBranches(ctx context.Context, req d
 	}, nil
 }
 
+func (c *RepositoryController) ListLocalRepositoryBranches(ctx context.Context, req dto.ListLocalRepositoryBranchesRequest) (dto.RepositoryBranchesResponse, error) {
+	branches, err := c.service.ListLocalRepositoryBranches(ctx, req.Path)
+	if err != nil {
+		return dto.RepositoryBranchesResponse{}, err
+	}
+	dtoBranches := make([]dto.BranchDTO, len(branches))
+	for i, branch := range branches {
+		dtoBranches[i] = dto.BranchDTO{
+			Name:   branch.Name,
+			Type:   branch.Type,
+			Remote: branch.Remote,
+		}
+	}
+	return dto.RepositoryBranchesResponse{
+		Branches: dtoBranches,
+		Total:    len(dtoBranches),
+	}, nil
+}
+
 func (c *RepositoryController) DiscoverRepositories(ctx context.Context, req dto.DiscoverRepositoriesRequest) (dto.RepositoryDiscoveryResponse, error) {
 	result, err := c.service.DiscoverLocalRepositories(ctx, req.Root)
 	if err != nil {

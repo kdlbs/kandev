@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -65,8 +66,11 @@ func (s *Service) SetExecutionStopper(stopper TaskExecutionStopper) {
 
 // TaskRepositoryInput for creating/updating task repositories
 type TaskRepositoryInput struct {
-	RepositoryID string `json:"repository_id"`
-	BaseBranch   string `json:"base_branch"`
+	RepositoryID  string `json:"repository_id"`
+	BaseBranch    string `json:"base_branch"`
+	LocalPath     string `json:"local_path,omitempty"`
+	Name          string `json:"name,omitempty"`
+	DefaultBranch string `json:"default_branch,omitempty"`
 }
 
 // CreateTaskRequest contains the data for creating a new task
@@ -213,10 +217,10 @@ type UpdateEnvironmentRequest struct {
 
 type ListMessagesRequest struct {
 	TaskSessionID string
-	Limit          int
-	Before         string
-	After          string
-	Sort           string
+	Limit         int
+	Before        string
+	After         string
+	Sort          string
 }
 
 // CreateRepositoryScriptRequest contains the data for creating a repository script
@@ -262,11 +266,64 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*mode
 	}
 
 	// Create task-repository associations
+	var repoByPath map[string]*models.Repository
+	for _, repoInput := range req.Repositories {
+		if repoInput.RepositoryID == "" && repoInput.LocalPath != "" {
+			repos, err := s.repo.ListRepositories(ctx, req.WorkspaceID)
+			if err != nil {
+				s.logger.Error("failed to list repositories", zap.Error(err))
+				return nil, err
+			}
+			repoByPath = make(map[string]*models.Repository, len(repos))
+			for _, repo := range repos {
+				if repo.LocalPath == "" {
+					continue
+				}
+				repoByPath[repo.LocalPath] = repo
+			}
+			break
+		}
+	}
+
 	for i, repoInput := range req.Repositories {
+		repositoryID := repoInput.RepositoryID
+		baseBranch := repoInput.BaseBranch
+		if repositoryID == "" && repoInput.LocalPath != "" {
+			repo := repoByPath[repoInput.LocalPath]
+			if repo == nil {
+				name := strings.TrimSpace(repoInput.Name)
+				if name == "" {
+					name = filepath.Base(repoInput.LocalPath)
+				}
+				defaultBranch := repoInput.DefaultBranch
+				if defaultBranch == "" {
+					defaultBranch = repoInput.BaseBranch
+				}
+				created, err := s.CreateRepository(ctx, &CreateRepositoryRequest{
+					WorkspaceID:   req.WorkspaceID,
+					Name:          name,
+					SourceType:    "local",
+					LocalPath:     repoInput.LocalPath,
+					DefaultBranch: defaultBranch,
+				})
+				if err != nil {
+					return nil, err
+				}
+				repo = created
+				repoByPath[repoInput.LocalPath] = repo
+			}
+			repositoryID = repo.ID
+			if baseBranch == "" {
+				baseBranch = repo.DefaultBranch
+			}
+		}
+		if repositoryID == "" {
+			return nil, fmt.Errorf("repository_id is required")
+		}
 		taskRepo := &models.TaskRepository{
 			TaskID:       task.ID,
-			RepositoryID: repoInput.RepositoryID,
-			BaseBranch:   repoInput.BaseBranch,
+			RepositoryID: repositoryID,
+			BaseBranch:   baseBranch,
 			Position:     i,
 			Metadata:     make(map[string]interface{}),
 		}
@@ -1352,13 +1409,13 @@ func (s *Service) publishEnvironmentEvent(ctx context.Context, eventType string,
 // CreateMessageRequest contains the data for creating a new message
 type CreateMessageRequest struct {
 	TaskSessionID string                 `json:"task_session_id"`
-	TaskID         string                 `json:"task_id,omitempty"`
-	Content        string                 `json:"content"`
-	AuthorType     string                 `json:"author_type,omitempty"` // "user" or "agent", defaults to "user"
-	AuthorID       string                 `json:"author_id,omitempty"`
-	RequestsInput  bool                   `json:"requests_input,omitempty"`
-	Type           string                 `json:"type,omitempty"`
-	Metadata       map[string]interface{} `json:"metadata,omitempty"`
+	TaskID        string                 `json:"task_id,omitempty"`
+	Content       string                 `json:"content"`
+	AuthorType    string                 `json:"author_type,omitempty"` // "user" or "agent", defaults to "user"
+	AuthorID      string                 `json:"author_id,omitempty"`
+	RequestsInput bool                   `json:"requests_input,omitempty"`
+	Type          string                 `json:"type,omitempty"`
+	Metadata      map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // CreateMessage creates a new message on an agent session
@@ -1384,16 +1441,16 @@ func (s *Service) CreateMessage(ctx context.Context, req *CreateMessageRequest) 
 	}
 
 	message := &models.Message{
-		ID:             uuid.New().String(),
+		ID:            uuid.New().String(),
 		TaskSessionID: req.TaskSessionID,
-		TaskID:         taskID,
-		AuthorType:     authorType,
-		AuthorID:       req.AuthorID,
-		Content:        req.Content,
-		Type:           messageType,
-		Metadata:       req.Metadata,
-		RequestsInput:  req.RequestsInput,
-		CreatedAt:      time.Now().UTC(),
+		TaskID:        taskID,
+		AuthorType:    authorType,
+		AuthorID:      req.AuthorID,
+		Content:       req.Content,
+		Type:          messageType,
+		Metadata:      req.Metadata,
+		RequestsInput: req.RequestsInput,
+		CreatedAt:     time.Now().UTC(),
 	}
 
 	if err := s.repo.CreateMessage(ctx, message); err != nil {
@@ -1501,15 +1558,15 @@ func (s *Service) publishMessageEvent(ctx context.Context, eventType string, mes
 	}
 
 	data := map[string]interface{}{
-		"message_id":       message.ID,
+		"message_id":      message.ID,
 		"task_session_id": message.TaskSessionID,
-		"task_id":          message.TaskID,
-		"author_type":      string(message.AuthorType),
-		"author_id":        message.AuthorID,
-		"content":          message.Content,
-		"type":             messageType,
-		"requests_input":   message.RequestsInput,
-		"created_at":       message.CreatedAt.Format(time.RFC3339),
+		"task_id":         message.TaskID,
+		"author_type":     string(message.AuthorType),
+		"author_id":       message.AuthorID,
+		"content":         message.Content,
+		"type":            messageType,
+		"requests_input":  message.RequestsInput,
+		"created_at":      message.CreatedAt.Format(time.RFC3339),
 	}
 
 	if message.Metadata != nil {

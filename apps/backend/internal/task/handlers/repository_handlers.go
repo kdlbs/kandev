@@ -38,6 +38,7 @@ func (h *RepositoryHandlers) registerHTTP(router *gin.Engine) {
 	api.GET("/workspaces/:id/repositories", h.httpListRepositories)
 	api.POST("/workspaces/:id/repositories", h.httpCreateRepository)
 	api.GET("/workspaces/:id/repositories/discover", h.httpDiscoverRepositories)
+	api.GET("/workspaces/:id/repositories/branches", h.httpListLocalRepositoryBranches)
 	api.GET("/workspaces/:id/repositories/validate", h.httpValidateRepositoryPath)
 	api.GET("/repositories/:id", h.httpGetRepository)
 	api.GET("/repositories/:id/branches", h.httpListRepositoryBranches)
@@ -106,6 +107,28 @@ func (h *RepositoryHandlers) httpValidateRepositoryPath(c *gin.Context) {
 	if err != nil {
 		h.logger.Error("failed to validate repository path", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to validate repository path"})
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+func (h *RepositoryHandlers) httpListLocalRepositoryBranches(c *gin.Context) {
+	path := c.Query("path")
+	if path == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "path is required"})
+		return
+	}
+	resp, err := h.controller.ListLocalRepositoryBranches(c.Request.Context(), dto.ListLocalRepositoryBranchesRequest{
+		WorkspaceID: c.Param("id"),
+		Path:        path,
+	})
+	if err != nil {
+		if errors.Is(err, service.ErrPathNotAllowed) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "path is not within allowed roots"})
+			return
+		}
+		h.logger.Error("failed to list local repository branches", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list local repository branches"})
 		return
 	}
 	c.JSON(http.StatusOK, resp)

@@ -206,6 +206,11 @@ type ListRepositoryBranchesRequest struct {
 	ID string
 }
 
+type ListLocalRepositoryBranchesRequest struct {
+	WorkspaceID string
+	Path        string
+}
+
 type DiscoverRepositoriesRequest struct {
 	WorkspaceID string
 	Root        string
@@ -238,22 +243,25 @@ type GetTaskRequest struct {
 }
 
 type TaskRepositoryInput struct {
-	RepositoryID string
-	BaseBranch   string
+	RepositoryID  string
+	BaseBranch    string
+	LocalPath     string
+	Name          string
+	DefaultBranch string
 }
 
 type CreateTaskRequest struct {
-	WorkspaceID   string
-	BoardID       string
-	ColumnID      string
-	Title         string
-	Description   string
-	Priority      int
-	State         *v1.TaskState
-	Repositories  []TaskRepositoryInput
-	AssignedTo    string
-	Position      int
-	Metadata      map[string]interface{}
+	WorkspaceID  string
+	BoardID      string
+	ColumnID     string
+	Title        string
+	Description  string
+	Priority     int
+	State        *v1.TaskState
+	Repositories []TaskRepositoryInput
+	AssignedTo   string
+	Position     int
+	Metadata     map[string]interface{}
 }
 
 type UpdateTaskRequest struct {
@@ -274,10 +282,10 @@ type DeleteTaskRequest struct {
 
 type ListMessagesRequest struct {
 	TaskSessionID string
-	Limit  int
-	Before string
-	After  string
-	Sort   string
+	Limit         int
+	Before        string
+	After         string
+	Sort          string
 }
 
 type CreateMessageRequest struct {

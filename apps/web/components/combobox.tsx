@@ -90,15 +90,18 @@ export function Combobox({
                 <CommandItem
                   key={option.value}
                   value={option.value}
-                  onSelect={(currentValue) => {
-                    onValueChange(currentValue === value ? "" : currentValue)
+                  onSelect={() => {
+                    onValueChange(option.value === value ? "" : option.value)
                     setOpen(false)
                   }}
+                  className="relative pr-7"
                 >
-                  {option.renderLabel ? option.renderLabel() : option.label}
+                  <div className="flex min-w-0 flex-1 items-center">
+                    {option.renderLabel ? option.renderLabel() : option.label}
+                  </div>
                   <IconCheck
                     className={cn(
-                      "ml-auto h-4 w-4",
+                      "absolute right-2 h-4 w-4",
                       value === option.value ? "opacity-100" : "opacity-0"
                     )}
                   />
