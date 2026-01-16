@@ -14,8 +14,8 @@ type WorktreeLookup interface {
 }
 
 type TaskController struct {
-	service         *service.Service
-	worktreeLookup  WorktreeLookup
+	service        *service.Service
+	worktreeLookup WorktreeLookup
 }
 
 func NewTaskController(svc *service.Service) *TaskController {
@@ -84,23 +84,26 @@ func (c *TaskController) CreateTask(ctx context.Context, req dto.CreateTaskReque
 	var repos []service.TaskRepositoryInput
 	for _, r := range req.Repositories {
 		repos = append(repos, service.TaskRepositoryInput{
-			RepositoryID: r.RepositoryID,
-			BaseBranch:   r.BaseBranch,
+			RepositoryID:  r.RepositoryID,
+			BaseBranch:    r.BaseBranch,
+			LocalPath:     r.LocalPath,
+			Name:          r.Name,
+			DefaultBranch: r.DefaultBranch,
 		})
 	}
 
 	task, err := c.service.CreateTask(ctx, &service.CreateTaskRequest{
-		WorkspaceID:   req.WorkspaceID,
-		BoardID:       req.BoardID,
-		ColumnID:      req.ColumnID,
-		Title:         req.Title,
-		Description:   req.Description,
-		Priority:      req.Priority,
-		State:         req.State,
-		Repositories:  repos,
-		AssignedTo:    req.AssignedTo,
-		Position:      req.Position,
-		Metadata:      req.Metadata,
+		WorkspaceID:  req.WorkspaceID,
+		BoardID:      req.BoardID,
+		ColumnID:     req.ColumnID,
+		Title:        req.Title,
+		Description:  req.Description,
+		Priority:     req.Priority,
+		State:        req.State,
+		Repositories: repos,
+		AssignedTo:   req.AssignedTo,
+		Position:     req.Position,
+		Metadata:     req.Metadata,
 	})
 	if err != nil {
 		return dto.TaskDTO{}, err
@@ -113,8 +116,11 @@ func (c *TaskController) UpdateTask(ctx context.Context, req dto.UpdateTaskReque
 	var repos []service.TaskRepositoryInput
 	for _, r := range req.Repositories {
 		repos = append(repos, service.TaskRepositoryInput{
-			RepositoryID: r.RepositoryID,
-			BaseBranch:   r.BaseBranch,
+			RepositoryID:  r.RepositoryID,
+			BaseBranch:    r.BaseBranch,
+			LocalPath:     r.LocalPath,
+			Name:          r.Name,
+			DefaultBranch: r.DefaultBranch,
 		})
 	}
 

@@ -221,6 +221,7 @@ export type UserSettingsUpdatedPayload = {
   workspace_id: string;
   board_id: string;
   repository_ids: string[];
+  initial_setup_complete?: boolean;
   updated_at?: string;
 };
 

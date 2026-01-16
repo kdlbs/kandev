@@ -14,15 +14,16 @@ type UserDTO struct {
 }
 
 type UserSettingsDTO struct {
-	UserID        string   `json:"user_id"`
-	WorkspaceID   string   `json:"workspace_id"`
-	BoardID       string   `json:"board_id"`
-	RepositoryIDs []string `json:"repository_ids"`
-	UpdatedAt     string   `json:"updated_at"`
+	UserID               string   `json:"user_id"`
+	WorkspaceID          string   `json:"workspace_id"`
+	BoardID              string   `json:"board_id"`
+	RepositoryIDs        []string `json:"repository_ids"`
+	InitialSetupComplete bool     `json:"initial_setup_complete"`
+	UpdatedAt            string   `json:"updated_at"`
 }
 
 type UserResponse struct {
-	User     UserDTO        `json:"user"`
+	User     UserDTO         `json:"user"`
 	Settings UserSettingsDTO `json:"settings"`
 }
 
@@ -31,9 +32,10 @@ type UserSettingsResponse struct {
 }
 
 type UpdateUserSettingsRequest struct {
-	WorkspaceID   *string  `json:"workspace_id,omitempty"`
-	BoardID       *string  `json:"board_id,omitempty"`
-	RepositoryIDs *[]string `json:"repository_ids,omitempty"`
+	WorkspaceID          *string   `json:"workspace_id,omitempty"`
+	BoardID              *string   `json:"board_id,omitempty"`
+	RepositoryIDs        *[]string `json:"repository_ids,omitempty"`
+	InitialSetupComplete *bool     `json:"initial_setup_complete,omitempty"`
 }
 
 func FromUser(user *models.User) UserDTO {
@@ -47,10 +49,11 @@ func FromUser(user *models.User) UserDTO {
 
 func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 	return UserSettingsDTO{
-		UserID:        settings.UserID,
-		WorkspaceID:   settings.WorkspaceID,
-		BoardID:       settings.BoardID,
-		RepositoryIDs: settings.RepositoryIDs,
-		UpdatedAt:     settings.UpdatedAt.Format(time.RFC3339),
+		UserID:               settings.UserID,
+		WorkspaceID:          settings.WorkspaceID,
+		BoardID:              settings.BoardID,
+		RepositoryIDs:        settings.RepositoryIDs,
+		InitialSetupComplete: settings.InitialSetupComplete,
+		UpdatedAt:            settings.UpdatedAt.Format(time.RFC3339),
 	}
 }

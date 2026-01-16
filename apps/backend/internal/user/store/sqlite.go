@@ -5,10 +5,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	_ "github.com/mattn/go-sqlite3"
 	"os"
 	"path/filepath"
 	"time"
-	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/kandev/kandev/internal/user/models"
 )
@@ -187,9 +187,10 @@ func (r *SQLiteRepository) UpsertUserSettings(ctx context.Context, settings *mod
 		settings.CreatedAt = settings.UpdatedAt
 	}
 	settingsPayload, err := json.Marshal(map[string]interface{}{
-		"workspace_id":   settings.WorkspaceID,
-		"board_id":       settings.BoardID,
-		"repository_ids": settings.RepositoryIDs,
+		"workspace_id":           settings.WorkspaceID,
+		"board_id":               settings.BoardID,
+		"repository_ids":         settings.RepositoryIDs,
+		"initial_setup_complete": settings.InitialSetupComplete,
 	})
 	if err != nil {
 		return err
@@ -228,9 +229,10 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		return settings, nil
 	}
 	var payload struct {
-		WorkspaceID   string   `json:"workspace_id"`
-		BoardID       string   `json:"board_id"`
-		RepositoryIDs []string `json:"repository_ids"`
+		WorkspaceID          string   `json:"workspace_id"`
+		BoardID              string   `json:"board_id"`
+		RepositoryIDs        []string `json:"repository_ids"`
+		InitialSetupComplete bool     `json:"initial_setup_complete"`
 	}
 	if err := json.Unmarshal([]byte(settingsRaw), &payload); err != nil {
 		return nil, err
@@ -238,5 +240,6 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	settings.WorkspaceID = payload.WorkspaceID
 	settings.BoardID = payload.BoardID
 	settings.RepositoryIDs = payload.RepositoryIDs
+	settings.InitialSetupComplete = payload.InitialSetupComplete
 	return settings, nil
 }

@@ -8,6 +8,7 @@ import type {
   ListColumnsResponse,
   RepositoryDiscoveryResponse,
   ListRepositoriesResponse,
+  RepositoryBranchesResponse,
   ListRepositoryScriptsResponse,
   ListWorkspacesResponse,
   RepositoryPathValidationResponse,
@@ -140,6 +141,16 @@ export async function deleteColumnAction(id: string) {
 
 export async function listRepositoriesAction(workspaceId: string): Promise<ListRepositoriesResponse> {
   return fetchJson<ListRepositoriesResponse>(`${apiBaseUrl}/api/v1/workspaces/${workspaceId}/repositories`);
+}
+
+export async function listLocalRepositoryBranchesAction(
+  workspaceId: string,
+  path: string
+): Promise<RepositoryBranchesResponse> {
+  const params = `?path=${encodeURIComponent(path)}`;
+  return fetchJson<RepositoryBranchesResponse>(
+    `${apiBaseUrl}/api/v1/workspaces/${workspaceId}/repositories/branches${params}`
+  );
 }
 
 export async function discoverRepositoriesAction(

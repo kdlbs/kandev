@@ -96,6 +96,9 @@ export async function createTask(
     repositories?: Array<{
       repository_id: string;
       base_branch?: string;
+      local_path?: string;
+      name?: string;
+      default_branch?: string;
     }>;
     state?: Task['state'];
   },

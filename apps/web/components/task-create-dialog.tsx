@@ -18,16 +18,14 @@ import { Button } from '@kandev/ui/button';
 import {
   Select,
   SelectContent,
-  SelectGroup,
   SelectItem,
-  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from '@kandev/ui/select';
 import { Combobox } from './combobox';
 import { Badge } from '@kandev/ui/badge';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@kandev/ui/tooltip';
-import type { Task } from '@/lib/types/http';
+import type { LocalRepository, Task } from '@/lib/types/http';
 import {
   DEFAULT_LOCAL_ENVIRONMENT_KIND,
   DEFAULT_LOCAL_EXECUTOR_TYPE,
@@ -44,6 +42,8 @@ import { SHORTCUTS } from '@/lib/keyboard/constants';
 import { useKeyboardShortcutHandler } from '@/hooks/use-keyboard-shortcut';
 import { KeyboardShortcutTooltip } from '@/components/keyboard-shortcut-tooltip';
 import { getWebSocketClient } from '@/lib/ws/connection';
+import { useToast } from '@/components/toast-provider';
+import { discoverRepositoriesAction, listLocalRepositoryBranchesAction } from '@/app/actions/workspaces';
 
 interface TaskCreateDialogProps {
   open: boolean;
@@ -71,6 +71,119 @@ interface TaskCreateDialogProps {
   submitLabel?: string;
 }
 
+type RepositoryOption = {
+  value: string;
+  label: string;
+  renderLabel: () => React.ReactNode;
+};
+
+type RepositorySelectorProps = {
+  options: RepositoryOption[];
+  value: string;
+  onValueChange: (value: string) => void;
+  disabled: boolean;
+  placeholder: string;
+  searchPlaceholder: string;
+  emptyMessage: string;
+};
+
+function RepositorySelector({
+  options,
+  value,
+  onValueChange,
+  disabled,
+  placeholder,
+  searchPlaceholder,
+  emptyMessage,
+}: RepositorySelectorProps) {
+  return (
+    <Combobox
+      options={options}
+      value={value}
+      onValueChange={onValueChange}
+      placeholder={placeholder}
+      searchPlaceholder={searchPlaceholder}
+      emptyMessage={emptyMessage}
+      disabled={disabled}
+      dropdownLabel="Repository"
+      className={disabled ? undefined : 'cursor-pointer'}
+    />
+  );
+}
+
+type BranchOption = {
+  value: string;
+  label: string;
+  renderLabel: () => React.ReactNode;
+};
+
+type BranchSelectorProps = {
+  options: BranchOption[];
+  value: string;
+  onValueChange: (value: string) => void;
+  disabled: boolean;
+  placeholder: string;
+  searchPlaceholder: string;
+  emptyMessage: string;
+};
+
+function BranchSelector({
+  options,
+  value,
+  onValueChange,
+  disabled,
+  placeholder,
+  searchPlaceholder,
+  emptyMessage,
+}: BranchSelectorProps) {
+  return (
+    <Combobox
+      options={options}
+      value={value}
+      onValueChange={onValueChange}
+      placeholder={placeholder}
+      searchPlaceholder={searchPlaceholder}
+      emptyMessage={emptyMessage}
+      disabled={disabled}
+      dropdownLabel="Base Branch"
+      className={disabled ? undefined : 'cursor-pointer'}
+    />
+  );
+}
+
+type AgentSelectorProps = {
+  options: Array<{ value: string; label: string; renderLabel: () => React.ReactNode }>;
+  value: string;
+  onValueChange: (value: string) => void;
+  disabled: boolean;
+  placeholder: string;
+  triggerClassName?: string;
+};
+
+function AgentSelector({
+  options,
+  value,
+  onValueChange,
+  disabled,
+  placeholder,
+  triggerClassName,
+}: AgentSelectorProps) {
+  return (
+    <Combobox
+      options={options}
+      value={value}
+      onValueChange={onValueChange}
+      placeholder={placeholder}
+      searchPlaceholder="Search agents..."
+      emptyMessage="No agent found."
+      disabled={disabled}
+      dropdownLabel="Agent profile"
+      className={disabled ? undefined : 'cursor-pointer'}
+      triggerClassName={triggerClassName}
+    />
+  );
+}
+
 export function TaskCreateDialog({
   open,
   onOpenChange,
@@ -96,12 +209,20 @@ export function TaskCreateDialog({
   const [environmentId, setEnvironmentId] = useState('');
   const [executorId, setExecutorId] = useState('');
   const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
+  const [discoveredRepositories, setDiscoveredRepositories] = useState<LocalRepository[]>([]);
+  const [discoveredRepoPath, setDiscoveredRepoPath] = useState('');
+  const [selectedLocalRepo, setSelectedLocalRepo] = useState<LocalRepository | null>(null);
+  const [localBranches, setLocalBranches] = useState<typeof branches>([]);
+  const [localBranchesLoading, setLocalBranchesLoading] = useState(false);
+  const [discoverReposLoading, setDiscoverReposLoading] = useState(false);
+  const [discoverReposLoaded, setDiscoverReposLoaded] = useState(false);
   const workspaces = useAppStore((state) => state.workspaces.items);
   const agentProfiles = useAppStore((state) => state.agentProfiles.items);
   const executors = useAppStore((state) => state.executors.items);
   const environments = useAppStore((state) => state.environments.items);
   const settingsData = useAppStore((state) => state.settingsData);
   const descriptionRef = useRef<HTMLTextAreaElement | null>(null);
+  const { toast } = useToast();
   useSettingsData(open);
   const { repositories, isLoading: repositoriesLoading } = useRepositories(workspaceId, open);
   const { branches, isLoading: branchesLoading } = useRepositoryBranches(
@@ -131,16 +252,56 @@ export function TaskCreateDialog({
     open,
   ]);
 
+  useEffect(() => {
+    if (!open) return;
+    setDiscoveredRepositories([]);
+    setDiscoveredRepoPath('');
+    setSelectedLocalRepo(null);
+    setLocalBranches([]);
+    setDiscoverReposLoaded(false);
+  }, [open, workspaceId]);
+
   const workspaceDefaults = workspaceId
     ? workspaces.find((workspace) => workspace.id === workspaceId)
     : null;
 
   useEffect(() => {
     if (!open || !workspaceId) return;
-    if (!repositoryId && repositories.length === 1) {
+    if (!repositoryId && !selectedLocalRepo && repositories.length === 1) {
       setRepositoryId(repositories[0].id);
     }
-  }, [open, repositories, repositoryId, workspaceId]);
+  }, [open, repositories, repositoryId, selectedLocalRepo, workspaceId]);
+
+  useEffect(() => {
+    if (!open || !workspaceId) return;
+    if (repositoriesLoading) return;
+    if (discoverReposLoaded || discoverReposLoading) return;
+    setDiscoverReposLoading(true);
+    discoverRepositoriesAction(workspaceId)
+      .then((response) => {
+        setDiscoveredRepositories(response.repositories);
+      })
+      .catch((error) => {
+        toast({
+          title: 'Failed to discover repositories',
+          description: error instanceof Error ? error.message : 'Request failed',
+          variant: 'error',
+        });
+        setDiscoveredRepositories([]);
+      })
+      .finally(() => {
+        setDiscoverReposLoading(false);
+        setDiscoverReposLoaded(true);
+      });
+  }, [
+    discoverReposLoaded,
+    discoverReposLoading,
+    open,
+    repositories.length,
+    repositoriesLoading,
+    toast,
+    workspaceId,
+  ]);
 
   useEffect(() => {
     if (!repositoryId) return;
@@ -151,6 +312,89 @@ export function TaskCreateDialog({
       }
     }
   }, [branch, branches, repositoryId]);
+
+  const handleSelectLocalRepository = (path: string) => {
+    const selected = discoveredRepositories.find((repo) => repo.path === path) ?? null;
+    setDiscoveredRepoPath(path);
+    setSelectedLocalRepo(selected);
+    setRepositoryId('');
+    setBranch('');
+    setLocalBranches([]);
+  };
+
+  const hasRepositorySelection = Boolean(repositoryId || selectedLocalRepo);
+  const branchOptions = repositoryId
+    ? branches
+    : localBranches;
+  const normalizeRepoPath = (path: string) => path.replace(/\\/g, '/').replace(/\/+$/g, '');
+  const workspaceRepoPaths = new Set(
+    repositories
+      .map((repo) => repo.local_path)
+      .filter(Boolean)
+      .map((path) => normalizeRepoPath(path))
+  );
+  const localRepoOptions = discoveredRepositories.filter(
+    (repo) => !workspaceRepoPaths.has(normalizeRepoPath(repo.path))
+  );
+  const repositoryOptions: RepositoryOption[] = [
+    ...repositories.map((repo) => ({
+      value: repo.id,
+      label: repo.name,
+      renderLabel: () => (
+        <span className="flex min-w-0 flex-1 items-center gap-2">
+          <span className="shrink-0">{repo.name}</span>
+          <Badge
+            variant="secondary"
+            className="text-xs text-muted-foreground max-w-[220px] min-w-0 truncate ml-auto"
+            title={formatUserHomePath(repo.local_path)}
+          >
+            {truncateRepoPath(repo.local_path)}
+          </Badge>
+        </span>
+      ),
+    })),
+    ...localRepoOptions.map((repo) => ({
+      value: repo.path,
+      label: formatUserHomePath(repo.path),
+      renderLabel: () => (
+        <span
+          className="flex min-w-0 flex-1 items-center truncate"
+          title={formatUserHomePath(repo.path)}
+        >
+          {truncateRepoPath(repo.path)}
+        </span>
+      ),
+    })),
+  ];
+
+  useEffect(() => {
+    if (!open || !workspaceId || !selectedLocalRepo) return;
+    setLocalBranchesLoading(true);
+    listLocalRepositoryBranchesAction(workspaceId, selectedLocalRepo.path)
+      .then((response) => {
+        setLocalBranches(response.branches);
+      })
+      .catch((error) => {
+        toast({
+          title: 'Failed to load branches',
+          description: error instanceof Error ? error.message : 'Request failed',
+          variant: 'error',
+        });
+        setLocalBranches([]);
+      })
+      .finally(() => {
+        setLocalBranchesLoading(false);
+      });
+  }, [open, selectedLocalRepo, toast, workspaceId]);
+
+  useEffect(() => {
+    if (repositoryId || localBranches.length === 0) return;
+    if (branch) return;
+    const preferredBranch = selectPreferredBranch(localBranches);
+    if (preferredBranch) {
+      setBranch(preferredBranch);
+    }
+  }, [branch, localBranches, repositoryId]);
 
   useEffect(() => {
     if (!open || agentProfileId || agentProfiles.length === 0) return;
@@ -254,7 +498,7 @@ export function TaskCreateDialog({
       return;
     }
     if (!workspaceId || !boardId) return;
-    if (!repositoryId) return;
+    if (!repositoryId && !selectedLocalRepo) return;
     const columnId = editingTask?.columnId ?? defaultColumnId;
     if (!columnId) return;
     let targetColumnId = columnId;
@@ -273,10 +517,23 @@ export function TaskCreateDialog({
         column_id: targetColumnId,
         title: trimmedTitle,
         description: description.trim(),
-        repositories: repositoryId ? [{
-          repository_id: repositoryId,
-          base_branch: branch || undefined,
-        }] : [],
+        repositories: repositoryId
+          ? [
+            {
+              repository_id: repositoryId,
+              base_branch: branch || undefined,
+            },
+          ]
+          : selectedLocalRepo
+            ? [
+              {
+                repository_id: '',
+                base_branch: branch || undefined,
+                local_path: selectedLocalRepo.path,
+                default_branch: selectedLocalRepo.default_branch || undefined,
+              },
+            ]
+            : [],
         state: targetState,
       });
       console.log('[TaskCreateDialog] task created', {
@@ -308,10 +565,10 @@ export function TaskCreateDialog({
       setDescription('');
       setRepositoryId('');
       setBranch('');
-        setStartAgent(!isEditMode);
-        setAgentProfileId('');
-        setEnvironmentId('');
-        setExecutorId('');
+      setStartAgent(!isEditMode);
+      setAgentProfileId('');
+      setEnvironmentId('');
+      setExecutorId('');
       onOpenChange(false);
     }
   };
@@ -379,60 +636,55 @@ export function TaskCreateDialog({
             {!isSessionMode && (
               <div className="grid gap-4 md:grid-cols-3">
                 <div>
-                {repositories.length === 0 && !repositoriesLoading ? (
-                  <div className="flex items-center justify-center h-10 px-3 py-2 text-sm border border-input rounded-md bg-background">
-                    <span className="text-muted-foreground mr-2">No repositories found.</span>
-                    <Link href="/settings/workspace" className="text-primary hover:underline">
-                      Add repository
-                    </Link>
-                  </div>
-                ) : (
-                  <Combobox
-                    options={repositories.map((repo) => ({
-                      value: repo.id,
-                      label: repo.name,
-                      renderLabel: () => (
-                        <span className="flex min-w-0 flex-1 items-center gap-2">
-                          <span className="shrink-0">{repo.name}</span>
-                          <Badge
-                            variant="secondary"
-                            className="text-xs text-muted-foreground max-w-[220px] min-w-0 truncate ml-auto"
-                            title={formatUserHomePath(repo.local_path)}
-                          >
-                            {truncateRepoPath(repo.local_path)}
-                          </Badge>
-                        </span>
-                      ),
-                    }))}
-                    value={repositoryId}
+                  <RepositorySelector
+                    options={repositoryOptions}
+                    value={repositoryId || discoveredRepoPath}
                     onValueChange={(value) => {
-                      setRepositoryId(value);
-                      setBranch('');
+                      const workspaceRepo = repositories.find((repo) => repo.id === value);
+                      if (workspaceRepo) {
+                        setRepositoryId(value);
+                        setDiscoveredRepoPath('');
+                        setSelectedLocalRepo(null);
+                        setLocalBranches([]);
+                        setBranch('');
+                        return;
+                      }
+                      handleSelectLocalRepository(value);
                     }}
-                    placeholder={repositoriesLoading ? 'Loading repositories...' : 'Select repository'}
+                    placeholder={
+                      !workspaceId
+                        ? 'Select workspace first'
+                        : repositoriesLoading || discoverReposLoading
+                          ? 'Loading repositories...'
+                          : 'Select repository'
+                    }
                     searchPlaceholder="Search repositories..."
-                    emptyMessage="No repository found."
-                    disabled={isEditMode || repositoriesLoading}
-                    dropdownLabel="Repository"
-                    className={isEditMode || repositoriesLoading ? undefined : 'cursor-pointer'}
+                    emptyMessage={
+                      repositoriesLoading || discoverReposLoading
+                        ? 'Loading repositories...'
+                        : 'No repositories found.'
+                    }
+                    disabled={!workspaceId || repositoriesLoading || discoverReposLoading || isEditMode}
                   />
-                )}
-              </div>
+                </div>
               <div>
-                <Combobox
-                  options={branches.map((branchObj) => {
-                    const displayName = branchObj.type === 'remote' && branchObj.remote
-                      ? `${branchObj.remote}/${branchObj.name}`
-                      : branchObj.name;
+                <BranchSelector
+                  options={branchOptions.map((branchObj) => {
+                    const displayName =
+                      branchObj.type === 'remote' && branchObj.remote
+                        ? `${branchObj.remote}/${branchObj.name}`
+                        : branchObj.name;
                     // Use display name as unique value since it includes remote prefix
                     return {
                       value: displayName,
                       label: displayName,
                       renderLabel: () => (
                         <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
-                          <span className="truncate">{displayName}</span>
+                          <span className="truncate" title={displayName}>
+                            {displayName}
+                          </span>
                           <Badge variant={branchObj.type === 'local' ? 'default' : 'secondary'} className="text-xs">
-                            {branchObj.type}
+                            {branchObj.type === 'local' ? 'local' : branchObj.remote || 'remote'}
                           </Badge>
                         </span>
                       ),
@@ -444,33 +696,57 @@ export function TaskCreateDialog({
                     setBranch(displayName);
                   }}
                   placeholder={
-                    !repositoryId
+                    !hasRepositorySelection
                       ? 'Select repository first'
-                      : branchesLoading
-                        ? 'Loading branches...'
-                        : 'Select branch'
+                      : repositoryId
+                        ? branchesLoading
+                          ? 'Loading branches...'
+                          : 'Select branch'
+                        : localBranchesLoading
+                          ? 'Loading branches...'
+                          : branchOptions.length > 0
+                            ? 'Select branch'
+                            : 'No branches found'
                   }
                   searchPlaceholder="Search branches..."
                   emptyMessage="No branch found."
-                  disabled={isEditMode || !repositoryId || branchesLoading}
-                  dropdownLabel="Base Branch"
-                  className={isEditMode || !repositoryId || branchesLoading ? undefined : 'cursor-pointer'}
+                  disabled={
+                    isEditMode ||
+                    !hasRepositorySelection ||
+                    (repositoryId && branchesLoading) ||
+                    (!repositoryId && (localBranchesLoading || branchOptions.length === 0))
+                  }
                 />
               </div>
-              {startAgent && (
-                <div>
-                  {agentProfiles.length === 0 && !agentProfilesLoading ? (
-                    <div className="flex h-7 items-center justify-center gap-2 rounded-sm border border-input px-3 text-xs text-muted-foreground">
-                      <span>No agents found.</span>
-                      <Link href="/settings/agents" className="text-primary hover:underline">
-                        Add agent
-                      </Link>
-                    </div>
-                  ) : (
-                    <Combobox
+                {startAgent && (
+                  <div>
+                    {agentProfiles.length === 0 && !agentProfilesLoading ? (
+                      <div className="flex h-7 items-center justify-center gap-2 rounded-sm border border-input px-3 text-xs text-muted-foreground">
+                        <span>No agents found.</span>
+                        <Link href="/settings/agents" className="text-primary hover:underline">
+                          Add agent
+                        </Link>
+                      </div>
+                    ) : (
+                    <AgentSelector
                       options={agentProfiles.map((profile) => ({
                         value: profile.id,
                         label: profile.label,
+                        renderLabel: () => {
+                          const parts = profile.label.split(' • ');
+                          const agentLabel = parts[0] ?? profile.label;
+                          const profileLabel = parts[1] ?? '';
+                          return (
+                            <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
+                              <span className="truncate">{agentLabel}</span>
+                              {profileLabel ? (
+                                <Badge variant="secondary" className="text-xs">
+                                  {profileLabel}
+                                </Badge>
+                              ) : null}
+                            </span>
+                          );
+                        },
                       }))}
                       value={agentProfileId}
                       onValueChange={setAgentProfileId}
@@ -481,36 +757,44 @@ export function TaskCreateDialog({
                             ? 'No agents available'
                             : 'Select agent'
                       }
-                      searchPlaceholder="Search agents..."
-                      emptyMessage="No agent found."
-                      dropdownLabel="Agent profile"
-                      className={agentProfilesLoading ? undefined : 'cursor-pointer'}
+                      disabled={agentProfilesLoading}
                     />
-                  )}
-                </div>
-              )}
-            </div>
+                    )}
+                  </div>
+                )}
+              </div>
             )}
 
             {/* Agent Profile - shown in session mode */}
             {isSessionMode && (
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
-                  <Label htmlFor="agent-profile" className="text-sm whitespace-nowrap">
-                    Agent Profile
-                  </Label>
-                  <Select value={agentProfileId} onValueChange={setAgentProfileId} required>
-                    <SelectTrigger id="agent-profile" className="w-[280px]">
-                      <SelectValue placeholder={agentProfilesLoading ? 'Loading agent profiles...' : 'Select agent profile'} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {agentProfiles.map((profile) => (
-                        <SelectItem key={profile.id} value={profile.id}>
-                          {profile.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <AgentSelector
+                    options={agentProfiles.map((profile) => ({
+                      value: profile.id,
+                      label: profile.label,
+                      renderLabel: () => {
+                        const parts = profile.label.split(' • ');
+                        const agentLabel = parts[0] ?? profile.label;
+                        const profileLabel = parts[1] ?? '';
+                        return (
+                          <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
+                            <span className="truncate">{agentLabel}</span>
+                            {profileLabel ? (
+                              <Badge variant="secondary" className="text-xs">
+                                {profileLabel}
+                              </Badge>
+                            ) : null}
+                          </span>
+                        );
+                      },
+                    }))}
+                    value={agentProfileId}
+                    onValueChange={setAgentProfileId}
+                    placeholder={agentProfilesLoading ? 'Loading agent profiles...' : 'Select agent profile'}
+                    disabled={agentProfilesLoading}
+                    triggerClassName="w-[280px]"
+                  />
                 </div>
 
                 {/* More Options Toggle */}
@@ -541,34 +825,13 @@ export function TaskCreateDialog({
             )}
             {showAdvancedSettings && isSessionMode && (
               <div className="pt-2 border-t">
-                {/* Executor and Environment in same row */}
-                <div className="flex items-center gap-6">
-                  {/* Executor */}
-                  <div className="flex items-center gap-3">
-                    <Label htmlFor="executor" className="text-sm whitespace-nowrap">
-                      Executor
-                    </Label>
-                    <Select value={executorId} onValueChange={setExecutorId}>
-                      <SelectTrigger id="executor" className="w-[200px]">
-                        <SelectValue placeholder={executorsLoading ? 'Loading executors...' : 'Select executor'} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {executors.map((executor) => (
-                          <SelectItem key={executor.id} value={executor.id}>
-                            {executor.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  {/* Environment */}
+                <div className="grid gap-4 md:grid-cols-2">
                   <div className="flex items-center gap-3">
                     <Label htmlFor="environment" className="text-sm whitespace-nowrap">
                       Environment
                     </Label>
                     <Select value={environmentId} onValueChange={setEnvironmentId}>
-                      <SelectTrigger id="environment" className="w-[200px]">
+                      <SelectTrigger id="environment" className="w-full">
                         <SelectValue placeholder={environmentsLoading ? 'Loading environments...' : 'Select environment'} />
                       </SelectTrigger>
                       <SelectContent>
@@ -580,12 +843,30 @@ export function TaskCreateDialog({
                       </SelectContent>
                     </Select>
                   </div>
+                  <div className="flex items-center gap-3">
+                    <Label htmlFor="executor" className="text-sm whitespace-nowrap">
+                      Executor
+                    </Label>
+                    <Select value={executorId} onValueChange={setExecutorId}>
+                      <SelectTrigger id="executor" className="w-full">
+                        <SelectValue placeholder={executorsLoading ? 'Loading executors...' : 'Select executor'} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {executors.map((executor) => (
+                          <SelectItem key={executor.id} value={executor.id}>
+                            {executor.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
               </div>
             )}
             {showAdvancedSettings && !isSessionMode && startAgent && (
               <div className="grid gap-4 md:grid-cols-2">
-                <div>
+                <div className="flex items-center gap-3">
+                  <Label className="text-sm whitespace-nowrap">Environment</Label>
                   <Select value={environmentId} onValueChange={setEnvironmentId} disabled={isEditMode}>
                     <SelectTrigger className="w-full">
                       <SelectValue
@@ -599,18 +880,16 @@ export function TaskCreateDialog({
                       />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectGroup>
-                        <SelectLabel>Environment</SelectLabel>
-                        {environments.map((environment) => (
-                          <SelectItem key={environment.id} value={environment.id}>
-                            {environment.name}
-                          </SelectItem>
-                        ))}
-                      </SelectGroup>
+                      {environments.map((environment) => (
+                        <SelectItem key={environment.id} value={environment.id}>
+                          {environment.name}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
-                <div>
+                <div className="flex items-center gap-3">
+                  <Label className="text-sm whitespace-nowrap">Executor</Label>
                   <Select value={executorId} onValueChange={setExecutorId} disabled={isEditMode}>
                     <SelectTrigger className="w-full">
                       <SelectValue
@@ -624,14 +903,11 @@ export function TaskCreateDialog({
                       />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectGroup>
-                        <SelectLabel>Executor</SelectLabel>
-                        {executors.map((executor) => (
-                          <SelectItem key={executor.id} value={executor.id}>
-                            {executor.name}
-                          </SelectItem>
-                        ))}
-                      </SelectGroup>
+                      {executors.map((executor) => (
+                        <SelectItem key={executor.id} value={executor.id}>
+                          {executor.name}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
@@ -663,7 +939,7 @@ export function TaskCreateDialog({
                 </div>
                 {startAgent && (
                   <span className="text-xs text-muted-foreground">
-                    A git worktree will be created from the above branch.
+                    A git worktree will be created from the base branch.
                   </span>
                 )}
               </div>
@@ -680,8 +956,9 @@ export function TaskCreateDialog({
                   isSessionMode
                     ? !description.trim() || !agentProfileId
                     : !title.trim() ||
-                      (!isEditMode && !repositoryId) ||
-                      (startAgent && !agentProfileId)
+                    !description.trim() ||
+                    (!isEditMode && !repositoryId && !selectedLocalRepo) ||
+                    (startAgent && !agentProfileId)
                 }
               >
                 {isSessionMode ? 'Create Session' : submitLabel}
