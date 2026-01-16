@@ -21,6 +21,7 @@ export type BackendMessageType =
   | 'message.added'
   | 'message.updated'
   | 'task_session.state_changed'
+  | 'task_session.waiting_for_input'
   | 'executor.created'
   | 'executor.updated'
   | 'executor.deleted'
@@ -148,6 +149,13 @@ export type TaskSessionStateChangedPayload = {
   new_state: string;
 };
 
+export type TaskSessionWaitingForInputPayload = {
+  task_id: string;
+  task_session_id: string;
+  title: string;
+  body: string;
+};
+
 export type FileInfo = {
   path: string;
   status: 'modified' | 'added' | 'deleted' | 'untracked' | 'renamed';
@@ -255,6 +263,7 @@ export type BackendMessageMap = {
   'message.added': BackendMessage<'message.added', MessageAddedPayload>;
   'message.updated': BackendMessage<'message.updated', MessageAddedPayload>;
   'task_session.state_changed': BackendMessage<'task_session.state_changed', TaskSessionStateChangedPayload>;
+  'task_session.waiting_for_input': BackendMessage<'task_session.waiting_for_input', TaskSessionWaitingForInputPayload>;
   'executor.created': BackendMessage<'executor.created', ExecutorPayload>;
   'executor.updated': BackendMessage<'executor.updated', ExecutorPayload>;
   'executor.deleted': BackendMessage<'executor.deleted', ExecutorPayload>;
