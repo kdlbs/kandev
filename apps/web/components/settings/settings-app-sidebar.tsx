@@ -7,6 +7,7 @@ import {
   IconFolder,
   IconServer,
   IconRobot,
+  IconBell,
   IconChevronRight,
   IconCpu,
   IconPlug,
@@ -62,14 +63,38 @@ export function SettingsAppSidebar() {
           <SidebarGroupContent>
             <SidebarMenu>
               {/* General */}
-              <SidebarMenuItem>
-                <SidebarMenuButton asChild isActive={pathname === '/settings/general'}>
-                  <Link href="/settings/general">
-                    <IconSettings className="h-4 w-4" />
-                    <span>General</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
+              <Collapsible defaultOpen className="group/collapsible">
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild tooltip="General">
+                    <Link href="/settings/general">
+                      <IconSettings className="h-4 w-4" />
+                      <span>General</span>
+                    </Link>
+                  </SidebarMenuButton>
+                  <CollapsibleTrigger asChild>
+                    <SidebarMenuAction className="data-[state=open]:rotate-90">
+                      <IconChevronRight className="h-4 w-4" />
+                      <span className="sr-only">Toggle</span>
+                    </SidebarMenuAction>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <SidebarMenuSub>
+                      <SidebarMenuSubItem>
+                        <SidebarMenuSubButton
+                          asChild
+                          size="sm"
+                          isActive={pathname === '/settings/general/notifications'}
+                        >
+                          <Link href="/settings/general/notifications">
+                            <IconBell className="h-4 w-4" />
+                            <span>Notifications</span>
+                          </Link>
+                        </SidebarMenuSubButton>
+                      </SidebarMenuSubItem>
+                    </SidebarMenuSub>
+                  </CollapsibleContent>
+                </SidebarMenuItem>
+              </Collapsible>
 
               {/* Workspaces */}
               <Collapsible defaultOpen className="group/collapsible">

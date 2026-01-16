@@ -124,6 +124,7 @@ const (
 	ActionMessageAdded             = "message.added"
 	ActionMessageUpdated           = "message.updated"
 	ActionTaskSessionStateChanged = "task_session.state_changed"
+	ActionTaskSessionWaitingForInput = "task_session.waiting_for_input"
 	ActionInputRequested           = "input.requested"
 	ActionRepositoryCreated        = "repository.created"
 	ActionRepositoryUpdated        = "repository.updated"

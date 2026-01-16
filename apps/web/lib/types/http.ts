@@ -140,6 +140,25 @@ export type TaskSessionsResponse = {
   total: number;
 };
 
+export type NotificationProviderType = 'local' | 'apprise';
+
+export type NotificationProvider = {
+  id: string;
+  name: string;
+  type: NotificationProviderType;
+  config: Record<string, unknown>;
+  enabled: boolean;
+  events: string[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type NotificationProvidersResponse = {
+  providers: NotificationProvider[];
+  apprise_available: boolean;
+  events: string[];
+};
+
 export type User = {
   id: string;
   email: string;

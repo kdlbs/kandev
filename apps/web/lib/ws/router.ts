@@ -5,6 +5,7 @@ import { registerTaskSessionHandlers } from '@/lib/ws/handlers/agent-session';
 import { registerBoardsHandlers } from '@/lib/ws/handlers/boards';
 import { registerColumnsHandlers } from '@/lib/ws/handlers/columns';
 import { registerMessagesHandlers } from '@/lib/ws/handlers/messages';
+import { registerNotificationsHandlers } from '@/lib/ws/handlers/notifications';
 import { registerDiffsHandlers } from '@/lib/ws/handlers/diffs';
 import { registerEnvironmentsHandlers } from '@/lib/ws/handlers/environments';
 import { registerExecutorsHandlers } from '@/lib/ws/handlers/executors';
@@ -31,6 +32,7 @@ export function registerWsHandlers(store: StoreApi<AppState>) {
     ...registerTerminalsHandlers(store),
     ...registerDiffsHandlers(store),
     ...registerMessagesHandlers(store),
+    ...registerNotificationsHandlers(store),
     ...registerGitStatusHandlers(store),
     ...registerSystemEventsHandlers(store),
   };
