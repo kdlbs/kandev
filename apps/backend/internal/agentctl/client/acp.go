@@ -57,9 +57,18 @@ func (c *Client) Initialize(ctx context.Context, clientName, clientVersion strin
 		}
 	}()
 
+	respBody, err := readResponseBody(resp)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("initialize request failed with status %d: %s", resp.StatusCode, string(respBody))
+	}
+
 	var result InitializeResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, err
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse initialize response (status %d, body: %s): %w", resp.StatusCode, truncateBody(respBody), err)
 	}
 	if !result.Success {
 		return nil, fmt.Errorf("initialize failed: %s", result.Error)
@@ -101,9 +110,18 @@ func (c *Client) NewSession(ctx context.Context, cwd string) (string, error) {
 		}
 	}()
 
+	respBody, err := readResponseBody(resp)
+	if err != nil {
+		return "", fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("new session request failed with status %d: %s", resp.StatusCode, string(respBody))
+	}
+
 	var result NewSessionResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", err
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return "", fmt.Errorf("failed to parse new session response (status %d, body: %s): %w", resp.StatusCode, truncateBody(respBody), err)
 	}
 	if !result.Success {
 		return "", fmt.Errorf("new session failed: %s", result.Error)
@@ -138,12 +156,21 @@ func (c *Client) LoadSession(ctx context.Context, sessionID string) error {
 		}
 	}()
 
+	respBody, err := readResponseBody(resp)
+	if err != nil {
+		return fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("load session request failed with status %d: %s", resp.StatusCode, string(respBody))
+	}
+
 	var result struct {
 		Success bool   `json:"success"`
 		Error   string `json:"error,omitempty"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return err
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return fmt.Errorf("failed to parse load session response (status %d, body: %s): %w", resp.StatusCode, truncateBody(respBody), err)
 	}
 	if !result.Success {
 		return fmt.Errorf("load session failed: %s", result.Error)
@@ -191,9 +218,18 @@ func (c *Client) Prompt(ctx context.Context, text string) (*PromptResponse, erro
 		}
 	}()
 
+	respBody, err := readResponseBody(resp)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("prompt request failed with status %d: %s", resp.StatusCode, string(respBody))
+	}
+
 	var result PromptResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, err
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse prompt response (status %d, body: %s): %w", resp.StatusCode, truncateBody(respBody), err)
 	}
 	if !result.Success {
 		return nil, fmt.Errorf("prompt failed: %s", result.Error)
@@ -421,9 +457,18 @@ func (c *Client) RespondToPermission(ctx context.Context, pendingID, optionID st
 		}
 	}()
 
+	respBody, err := readResponseBody(resp)
+	if err != nil {
+		return fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("permission response request failed with status %d: %s", resp.StatusCode, string(respBody))
+	}
+
 	var result PermissionRespondResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return err
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return fmt.Errorf("failed to parse permission response (status %d, body: %s): %w", resp.StatusCode, truncateBody(respBody), err)
 	}
 	if !result.Success {
 		return fmt.Errorf("permission response failed: %s", result.Error)

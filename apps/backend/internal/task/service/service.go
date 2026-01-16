@@ -1450,13 +1450,45 @@ func (s *Service) DeleteMessage(ctx context.Context, id string) error {
 	return nil
 }
 
-// UpdateToolCallMessage updates a tool call message's status
+// UpdateToolCallMessage updates a tool call message's status.
+// It includes retry logic to handle race conditions where the complete event
+// may arrive before the message has been created by the start event.
 func (s *Service) UpdateToolCallMessage(ctx context.Context, sessionID, toolCallID, status, result string) error {
-	message, err := s.repo.GetMessageByToolCallID(ctx, sessionID, toolCallID)
+	const maxRetries = 5
+	const retryDelay = 100 * time.Millisecond
+
+	var message *models.Message
+	var err error
+
+	// Retry loop to handle race condition where complete event arrives before start event
+	// has finished creating the message in the database
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		message, err = s.repo.GetMessageByToolCallID(ctx, sessionID, toolCallID)
+		if err == nil {
+			break // Found the message, proceed with update
+		}
+
+		// If context is cancelled, don't retry
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		// Log retry attempt (only warn on final failure)
+		if attempt < maxRetries-1 {
+			s.logger.Debug("tool call message not found, retrying",
+				zap.String("task_session_id", sessionID),
+				zap.String("tool_call_id", toolCallID),
+				zap.Int("attempt", attempt+1),
+				zap.Int("max_retries", maxRetries))
+			time.Sleep(retryDelay)
+		}
+	}
+
 	if err != nil {
-		s.logger.Warn("tool call message not found for update",
+		s.logger.Warn("tool call message not found for update after retries",
 			zap.String("task_session_id", sessionID),
 			zap.String("tool_call_id", toolCallID),
+			zap.Int("retries", maxRetries),
 			zap.Error(err))
 		return err
 	}

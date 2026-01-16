@@ -48,8 +48,8 @@ func NewContainerManager(dockerClient *docker.Client, networkName string, log *l
 	}
 }
 
-// LaunchContainer creates and starts a Docker container for an agent
-// Returns the container ID and agentctl client
+// LaunchContainer creates and starts a Docker container for an agent.
+// Returns the container ID and agentctl client pointing to the instance.
 func (cm *ContainerManager) LaunchContainer(ctx context.Context, config ContainerConfig) (string, *agentctl.Client, error) {
 	// Build container config
 	containerCfg, err := cm.buildContainerConfig(config)
@@ -78,15 +78,58 @@ func (cm *ContainerManager) LaunchContainer(ctx context.Context, config Containe
 		containerIP = "127.0.0.1"
 	}
 
-	// Create agentctl client pointing to the container
-	agentctlClient := agentctl.NewClient(containerIP, AgentCtlPort, cm.logger)
+	// Create StandaloneCtl to communicate with the container's ControlServer
+	ctl := agentctl.NewStandaloneCtl(containerIP, AgentCtlPort, cm.logger)
+
+	// Wait for agentctl to be healthy
+	if err := cm.waitForHealth(ctx, ctl); err != nil {
+		_ = cm.dockerClient.RemoveContainer(ctx, containerID, true)
+		return "", nil, fmt.Errorf("agentctl health check failed: %w", err)
+	}
+
+	// Create an instance via the control API (same flow as standalone mode)
+	createReq := &agentctl.CreateInstanceRequest{
+		ID:            config.InstanceID,
+		WorkspacePath: "/workspace",
+		AgentCommand:  "", // Agent command set via Configure endpoint later
+		Env:           config.Credentials,
+		AutoStart:     false,
+	}
+
+	resp, err := ctl.CreateInstance(ctx, createReq)
+	if err != nil {
+		_ = cm.dockerClient.RemoveContainer(ctx, containerID, true)
+		return "", nil, fmt.Errorf("failed to create instance in container: %w", err)
+	}
+
+	// Create agentctl client pointing to the instance port
+	agentctlClient := agentctl.NewClient(containerIP, resp.Port, cm.logger)
 
 	cm.logger.Info("docker container launched",
 		zap.String("container_id", containerID),
 		zap.String("container_ip", containerIP),
-		zap.String("instance_id", config.InstanceID))
+		zap.String("instance_id", config.InstanceID),
+		zap.Int("instance_port", resp.Port))
 
 	return containerID, agentctlClient, nil
+}
+
+// waitForHealth waits for agentctl to be healthy with retries
+func (cm *ContainerManager) waitForHealth(ctx context.Context, ctl *agentctl.StandaloneCtl) error {
+	const maxRetries = 30
+	const retryDelay = 500 * time.Millisecond
+
+	for i := 0; i < maxRetries; i++ {
+		if err := ctl.Health(ctx); err == nil {
+			return nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		time.Sleep(retryDelay)
+	}
+
+	return fmt.Errorf("agentctl not healthy after %d retries", maxRetries)
 }
 
 // StopContainer stops and removes a Docker container

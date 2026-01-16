@@ -86,9 +86,18 @@ func (c *Client) GetStatus(ctx context.Context) (*StatusResponse, error) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
+	respBody, err := readResponseBody(resp)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("status request failed with status %d: %s", resp.StatusCode, string(respBody))
+	}
+
 	var status StatusResponse
-	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
-		return nil, err
+	if err := json.Unmarshal(respBody, &status); err != nil {
+		return nil, fmt.Errorf("failed to parse status response (status %d, body: %s): %w", resp.StatusCode, truncateBody(respBody), err)
 	}
 	return &status, nil
 }
@@ -120,12 +129,23 @@ func (c *Client) ConfigureAgent(ctx context.Context, command string, env map[str
 	}
 	defer func() { _ = resp.Body.Close() }()
 
+	// Read the response body for better error handling
+	respBody, err := readResponseBody(resp)
+	if err != nil {
+		return fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	// Check HTTP status code first
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("configure request failed with status %d: %s", resp.StatusCode, string(respBody))
+	}
+
 	var result struct {
 		Success bool   `json:"success"`
 		Error   string `json:"error,omitempty"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return err
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return fmt.Errorf("failed to parse configure response (status %d, body: %s): %w", resp.StatusCode, truncateBody(respBody), err)
 	}
 	if !result.Success {
 		return fmt.Errorf("configure failed: %s", result.Error)
@@ -146,12 +166,21 @@ func (c *Client) Start(ctx context.Context) error {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
+	respBody, err := readResponseBody(resp)
+	if err != nil {
+		return fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("start request failed with status %d: %s", resp.StatusCode, string(respBody))
+	}
+
 	var result struct {
 		Success bool   `json:"success"`
 		Error   string `json:"error,omitempty"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return err
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return fmt.Errorf("failed to parse start response (status %d, body: %s): %w", resp.StatusCode, truncateBody(respBody), err)
 	}
 	if !result.Success {
 		return fmt.Errorf("start failed: %s", result.Error)
@@ -172,12 +201,21 @@ func (c *Client) Stop(ctx context.Context) error {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
+	respBody, err := readResponseBody(resp)
+	if err != nil {
+		return fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("stop request failed with status %d: %s", resp.StatusCode, string(respBody))
+	}
+
 	var result struct {
 		Success bool   `json:"success"`
 		Error   string `json:"error,omitempty"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return err
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return fmt.Errorf("failed to parse stop response (status %d, body: %s): %w", resp.StatusCode, truncateBody(respBody), err)
 	}
 	if !result.Success {
 		return fmt.Errorf("stop failed: %s", result.Error)
@@ -557,4 +595,22 @@ func (c *Client) CloseShellStream() {
 		}
 		c.shellConn = nil
 	}
+}
+
+// readResponseBody reads and returns the response body
+func readResponseBody(resp *http.Response) ([]byte, error) {
+	var buf bytes.Buffer
+	if _, err := buf.ReadFrom(resp.Body); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// truncateBody truncates body for error messages to avoid huge logs
+func truncateBody(body []byte) string {
+	const maxLen = 200
+	if len(body) > maxLen {
+		return string(body[:maxLen]) + "..."
+	}
+	return string(body)
 }

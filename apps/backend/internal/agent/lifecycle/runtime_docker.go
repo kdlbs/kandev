@@ -151,7 +151,18 @@ func (r *DockerRuntime) RecoverInstances(ctx context.Context) ([]*RuntimeInstanc
 			containerIP = "127.0.0.1"
 		}
 
-		client := agentctl.NewClient(containerIP, AgentCtlPort, r.logger)
+		// Query the ControlServer to get the instance port
+		ctl := agentctl.NewStandaloneCtl(containerIP, AgentCtlPort, r.logger)
+		instanceInfo, err := ctl.GetInstance(ctx, instanceID)
+		if err != nil {
+			r.logger.Warn("failed to get instance info from container",
+				zap.String("container_id", ctr.ID),
+				zap.String("instance_id", instanceID),
+				zap.Error(err))
+			continue
+		}
+
+		client := agentctl.NewClient(containerIP, instanceInfo.Port, r.logger)
 
 		recovered = append(recovered, &RuntimeInstance{
 			InstanceID:    instanceID,
@@ -166,7 +177,8 @@ func (r *DockerRuntime) RecoverInstances(ctx context.Context) ([]*RuntimeInstanc
 		r.logger.Info("recovered docker instance",
 			zap.String("instance_id", instanceID),
 			zap.String("task_id", taskID),
-			zap.String("container_id", ctr.ID))
+			zap.String("container_id", ctr.ID),
+			zap.Int("instance_port", instanceInfo.Port))
 	}
 
 	return recovered, nil
