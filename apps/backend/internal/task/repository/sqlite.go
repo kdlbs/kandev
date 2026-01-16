@@ -237,7 +237,7 @@ func (r *SQLiteRepository) initSchema() error {
 	CREATE TABLE IF NOT EXISTS task_sessions (
 		id TEXT PRIMARY KEY,
 		task_id TEXT NOT NULL,
-		agent_instance_id TEXT NOT NULL DEFAULT '',
+		agent_execution_id TEXT NOT NULL DEFAULT '',
 		container_id TEXT NOT NULL DEFAULT '',
 		agent_profile_id TEXT NOT NULL,
 		executor_id TEXT DEFAULT '',
@@ -1802,12 +1802,12 @@ func (r *SQLiteRepository) CreateTaskSession(ctx context.Context, session *model
 
 	_, err = r.db.ExecContext(ctx, `
 		INSERT INTO task_sessions (
-			id, task_id, agent_instance_id, container_id, agent_profile_id, executor_id, environment_id,
+			id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, environment_id,
 			repository_id, base_branch,
 			agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 			state, progress, error_message, metadata, started_at, completed_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, session.ID, session.TaskID, session.AgentInstanceID, session.ContainerID, session.AgentProfileID,
+	`, session.ID, session.TaskID, session.AgentExecutionID, session.ContainerID, session.AgentProfileID,
 		session.ExecutorID, session.EnvironmentID, session.RepositoryID, session.BaseBranch,
 		string(agentProfileSnapshotJSON), string(executorSnapshotJSON), string(environmentSnapshotJSON), string(repositorySnapshotJSON),
 		string(session.State), session.Progress, session.ErrorMessage, string(metadataJSON),
@@ -1828,13 +1828,13 @@ func (r *SQLiteRepository) GetTaskSession(ctx context.Context, id string) (*mode
 	var completedAt sql.NullTime
 
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, task_id, agent_instance_id, container_id, agent_profile_id, executor_id, environment_id,
+		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, environment_id,
 		       repository_id, base_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 		       state, progress, error_message, metadata, started_at, completed_at, updated_at
 		FROM task_sessions WHERE id = ?
 	`, id).Scan(
-		&session.ID, &session.TaskID, &session.AgentInstanceID, &session.ContainerID, &session.AgentProfileID,
+		&session.ID, &session.TaskID, &session.AgentExecutionID, &session.ContainerID, &session.AgentProfileID,
 		&session.ExecutorID, &session.EnvironmentID,
 		&session.RepositoryID, &session.BaseBranch,
 		&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
@@ -1899,13 +1899,13 @@ func (r *SQLiteRepository) GetTaskSessionByTaskID(ctx context.Context, taskID st
 	var completedAt sql.NullTime
 
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, task_id, agent_instance_id, container_id, agent_profile_id, executor_id, environment_id,
+		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, environment_id,
 		       repository_id, base_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 		       state, progress, error_message, metadata, started_at, completed_at, updated_at
 		FROM task_sessions WHERE task_id = ? ORDER BY started_at DESC LIMIT 1
 	`, taskID).Scan(
-		&session.ID, &session.TaskID, &session.AgentInstanceID, &session.ContainerID, &session.AgentProfileID,
+		&session.ID, &session.TaskID, &session.AgentExecutionID, &session.ContainerID, &session.AgentProfileID,
 		&session.ExecutorID, &session.EnvironmentID,
 		&session.RepositoryID, &session.BaseBranch,
 		&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
@@ -1970,7 +1970,7 @@ func (r *SQLiteRepository) GetActiveTaskSessionByTaskID(ctx context.Context, tas
 	var completedAt sql.NullTime
 
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, task_id, agent_instance_id, container_id, agent_profile_id, executor_id, environment_id,
+		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, environment_id,
 		       repository_id, base_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 		       state, progress, error_message, metadata, started_at, completed_at, updated_at
@@ -1978,7 +1978,7 @@ func (r *SQLiteRepository) GetActiveTaskSessionByTaskID(ctx context.Context, tas
 		WHERE task_id = ? AND state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
 		ORDER BY started_at DESC LIMIT 1
 	`, taskID).Scan(
-		&session.ID, &session.TaskID, &session.AgentInstanceID, &session.ContainerID, &session.AgentProfileID,
+		&session.ID, &session.TaskID, &session.AgentExecutionID, &session.ContainerID, &session.AgentProfileID,
 		&session.ExecutorID, &session.EnvironmentID,
 		&session.RepositoryID, &session.BaseBranch,
 		&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
@@ -2058,12 +2058,12 @@ func (r *SQLiteRepository) UpdateTaskSession(ctx context.Context, session *model
 
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE task_sessions SET
-			agent_instance_id = ?, container_id = ?, agent_profile_id = ?, executor_id = ?, environment_id = ?,
+			agent_execution_id = ?, container_id = ?, agent_profile_id = ?, executor_id = ?, environment_id = ?,
 			repository_id = ?, base_branch = ?,
 			agent_profile_snapshot = ?, executor_snapshot = ?, environment_snapshot = ?, repository_snapshot = ?,
 			state = ?, progress = ?, error_message = ?, metadata = ?, completed_at = ?, updated_at = ?
 		WHERE id = ?
-	`, session.AgentInstanceID, session.ContainerID, session.AgentProfileID, session.ExecutorID, session.EnvironmentID,
+	`, session.AgentExecutionID, session.ContainerID, session.AgentProfileID, session.ExecutorID, session.EnvironmentID,
 		session.RepositoryID, session.BaseBranch,
 		string(agentProfileSnapshotJSON), string(executorSnapshotJSON), string(environmentSnapshotJSON), string(repositorySnapshotJSON),
 		string(session.State), session.Progress, session.ErrorMessage, string(metadataJSON), session.CompletedAt,
@@ -2102,10 +2102,10 @@ func (r *SQLiteRepository) UpdateTaskSessionState(ctx context.Context, id string
 	return nil
 }
 
-// ListAgentSessions returns all agent sessions for a task
+// ListTaskSessions returns all agent sessions for a task
 func (r *SQLiteRepository) ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, task_id, agent_instance_id, container_id, agent_profile_id, executor_id, environment_id,
+		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, environment_id,
 		       repository_id, base_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 		       state, progress, error_message, metadata, started_at, completed_at, updated_at
@@ -2130,10 +2130,10 @@ func (r *SQLiteRepository) ListTaskSessions(ctx context.Context, taskID string) 
 	return sessions, nil
 }
 
-// ListActiveAgentSessions returns all active agent sessions across all tasks
+// ListActiveTaskSessions returns all active agent sessions across all tasks
 func (r *SQLiteRepository) ListActiveTaskSessions(ctx context.Context) ([]*models.TaskSession, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, task_id, agent_instance_id, container_id, agent_profile_id, executor_id, environment_id,
+		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, environment_id,
 		       repository_id, base_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 		       state, progress, error_message, metadata, started_at, completed_at, updated_at
@@ -2227,7 +2227,7 @@ func (r *SQLiteRepository) scanTaskSessions(ctx context.Context, rows *sql.Rows)
 		var completedAt sql.NullTime
 
 		err := rows.Scan(
-			&session.ID, &session.TaskID, &session.AgentInstanceID, &session.ContainerID, &session.AgentProfileID,
+			&session.ID, &session.TaskID, &session.AgentExecutionID, &session.ContainerID, &session.AgentProfileID,
 			&session.ExecutorID, &session.EnvironmentID,
 			&session.RepositoryID, &session.BaseBranch,
 			&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,

@@ -189,12 +189,12 @@ func (s *Service) Start(ctx context.Context) error {
 		s.logger.Warn("failed to load active sessions from database (non-fatal)", zap.Error(err))
 	}
 
-	// Sync with instances recovered from Docker by the lifecycle manager
+	// Sync with executions recovered from Docker by the lifecycle manager
 	// This ensures we track containers that are running but weren't in the DB as active
-	recovered := s.agentManager.GetRecoveredInstances()
+	recovered := s.agentManager.GetRecoveredExecutions()
 	if len(recovered) > 0 {
-		s.logger.Info("syncing with recovered Docker instances", zap.Int("count", len(recovered)))
-		s.executor.SyncWithRecoveredInstances(ctx, recovered)
+		s.logger.Info("syncing with recovered Docker executions", zap.Int("count", len(recovered)))
+		s.executor.SyncWithRecoveredExecutions(ctx, recovered)
 	}
 
 	// Start the watcher first to begin receiving events
@@ -628,7 +628,7 @@ func (s *Service) handleTaskStateChanged(ctx context.Context, data watcher.TaskE
 func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventData) {
 	s.logger.Info("handling agent ready",
 		zap.String("task_id", data.TaskID),
-		zap.String("agent_instance_id", data.AgentInstanceID))
+		zap.String("agent_execution_id", data.AgentExecutionID))
 
 	if s.markAgentReady(data.TaskID) {
 		s.finalizeAgentReady(data.TaskID, "")
@@ -690,7 +690,7 @@ func (s *Service) handleACPSessionCreated(ctx context.Context, data watcher.ACPS
 func (s *Service) handleAgentCompleted(ctx context.Context, data watcher.AgentEventData) {
 	s.logger.Info("handling agent completed",
 		zap.String("task_id", data.TaskID),
-		zap.String("agent_instance_id", data.AgentInstanceID))
+		zap.String("agent_execution_id", data.AgentExecutionID))
 
 	// Update scheduler and remove from queue
 	s.scheduler.HandleTaskCompleted(data.TaskID, true)
@@ -712,7 +712,7 @@ func (s *Service) handleAgentCompleted(ctx context.Context, data watcher.AgentEv
 func (s *Service) handleAgentFailed(ctx context.Context, data watcher.AgentEventData) {
 	s.logger.Warn("handling agent failed",
 		zap.String("task_id", data.TaskID),
-		zap.String("agent_instance_id", data.AgentInstanceID),
+		zap.String("agent_execution_id", data.AgentExecutionID),
 		zap.String("error_message", data.ErrorMessage))
 
 	// Trigger retry logic

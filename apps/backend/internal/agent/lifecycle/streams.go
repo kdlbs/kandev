@@ -12,13 +12,13 @@ import (
 
 // StreamCallbacks defines callbacks for stream events
 type StreamCallbacks struct {
-	OnSessionUpdate func(instance *AgentInstance, update agentctl.SessionUpdate)
-	OnPermission    func(instance *AgentInstance, notification *agentctl.PermissionNotification)
-	OnGitStatus     func(instance *AgentInstance, update *agentctl.GitStatusUpdate)
-	OnFileChange    func(instance *AgentInstance, notification *agentctl.FileChangeNotification)
+	OnSessionUpdate func(execution *AgentExecution, update agentctl.SessionUpdate)
+	OnPermission    func(execution *AgentExecution, notification *agentctl.PermissionNotification)
+	OnGitStatus     func(execution *AgentExecution, update *agentctl.GitStatusUpdate)
+	OnFileChange    func(execution *AgentExecution, notification *agentctl.FileChangeNotification)
 }
 
-// StreamManager manages WebSocket streams to agent instances
+// StreamManager manages WebSocket streams to agent executions
 type StreamManager struct {
 	logger    *logger.Logger
 	callbacks StreamCallbacks
@@ -32,21 +32,21 @@ func NewStreamManager(log *logger.Logger, callbacks StreamCallbacks) *StreamMana
 	}
 }
 
-// ConnectAll connects to all streams for an instance.
+// ConnectAll connects to all streams for an execution.
 // If ready is non-nil, it will be closed when the updates stream is connected.
-func (sm *StreamManager) ConnectAll(instance *AgentInstance, ready chan<- struct{}) {
-	go sm.connectUpdatesStream(instance, ready)
-	go sm.connectPermissionStream(instance)
-	go sm.connectGitStatusStream(instance)
-	go sm.connectFileChangesStream(instance)
+func (sm *StreamManager) ConnectAll(execution *AgentExecution, ready chan<- struct{}) {
+	go sm.connectUpdatesStream(execution, ready)
+	go sm.connectPermissionStream(execution)
+	go sm.connectGitStatusStream(execution)
+	go sm.connectFileChangesStream(execution)
 }
 
 // ReconnectAll reconnects to all streams (used after backend restart).
 // This waits for agentctl to be ready before connecting to streams.
-func (sm *StreamManager) ReconnectAll(instance *AgentInstance) {
+func (sm *StreamManager) ReconnectAll(execution *AgentExecution) {
 	sm.logger.Info("reconnecting to agent streams after recovery",
-		zap.String("instance_id", instance.ID),
-		zap.String("task_id", instance.TaskID))
+		zap.String("instance_id", execution.ID),
+		zap.String("task_id", execution.TaskID))
 
 	// Wait a moment for any startup operations to settle
 	time.Sleep(500 * time.Millisecond)
@@ -55,28 +55,28 @@ func (sm *StreamManager) ReconnectAll(instance *AgentInstance) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if err := instance.agentctl.WaitForReady(ctx, 10*time.Second); err != nil {
+	if err := execution.agentctl.WaitForReady(ctx, 10*time.Second); err != nil {
 		sm.logger.Warn("agentctl not ready for stream reconnection",
-			zap.String("instance_id", instance.ID),
+			zap.String("instance_id", execution.ID),
 			zap.Error(err))
 		// Don't return - still try to connect to streams
 	}
 
 	// Reconnect to WebSocket streams
-	sm.ConnectAll(instance, nil)
+	sm.ConnectAll(execution, nil)
 
 	sm.logger.Info("agent streams reconnected",
-		zap.String("instance_id", instance.ID),
-		zap.String("task_id", instance.TaskID))
+		zap.String("instance_id", execution.ID),
+		zap.String("task_id", execution.TaskID))
 }
 
 // connectUpdatesStream handles the updates WebSocket stream with ready signaling
-func (sm *StreamManager) connectUpdatesStream(instance *AgentInstance, ready chan<- struct{}) {
+func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready chan<- struct{}) {
 	ctx := context.Background()
 
-	err := instance.agentctl.StreamUpdates(ctx, func(update agentctl.SessionUpdate) {
+	err := execution.agentctl.StreamUpdates(ctx, func(update agentctl.SessionUpdate) {
 		if sm.callbacks.OnSessionUpdate != nil {
-			sm.callbacks.OnSessionUpdate(instance, update)
+			sm.callbacks.OnSessionUpdate(execution, update)
 		}
 	})
 
@@ -89,29 +89,29 @@ func (sm *StreamManager) connectUpdatesStream(instance *AgentInstance, ready cha
 
 	if err != nil {
 		sm.logger.Error("failed to connect to updates stream",
-			zap.String("instance_id", instance.ID),
+			zap.String("instance_id", execution.ID),
 			zap.Error(err))
 	}
 }
 
 // connectPermissionStream handles the permission WebSocket stream
-func (sm *StreamManager) connectPermissionStream(instance *AgentInstance) {
+func (sm *StreamManager) connectPermissionStream(execution *AgentExecution) {
 	ctx := context.Background()
 
-	err := instance.agentctl.StreamPermissions(ctx, func(notification *agentctl.PermissionNotification) {
+	err := execution.agentctl.StreamPermissions(ctx, func(notification *agentctl.PermissionNotification) {
 		if sm.callbacks.OnPermission != nil {
-			sm.callbacks.OnPermission(instance, notification)
+			sm.callbacks.OnPermission(execution, notification)
 		}
 	})
 	if err != nil {
 		sm.logger.Error("failed to connect to permission stream",
-			zap.String("instance_id", instance.ID),
+			zap.String("instance_id", execution.ID),
 			zap.Error(err))
 	}
 }
 
 // connectGitStatusStream handles git status stream with retry logic
-func (sm *StreamManager) connectGitStatusStream(instance *AgentInstance) {
+func (sm *StreamManager) connectGitStatusStream(execution *AgentExecution) {
 	ctx := context.Background()
 
 	// Retry connection with exponential backoff
@@ -119,9 +119,9 @@ func (sm *StreamManager) connectGitStatusStream(instance *AgentInstance) {
 	backoff := 1 * time.Second
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		err := instance.agentctl.StreamGitStatus(ctx, func(update *agentctl.GitStatusUpdate) {
+		err := execution.agentctl.StreamGitStatus(ctx, func(update *agentctl.GitStatusUpdate) {
 			if sm.callbacks.OnGitStatus != nil {
-				sm.callbacks.OnGitStatus(instance, update)
+				sm.callbacks.OnGitStatus(execution, update)
 			}
 		})
 
@@ -131,7 +131,7 @@ func (sm *StreamManager) connectGitStatusStream(instance *AgentInstance) {
 		}
 
 		sm.logger.Debug("git status stream connection failed, retrying",
-			zap.String("instance_id", instance.ID),
+			zap.String("instance_id", execution.ID),
 			zap.Int("attempt", attempt),
 			zap.Int("max_retries", maxRetries),
 			zap.Error(err))
@@ -143,12 +143,12 @@ func (sm *StreamManager) connectGitStatusStream(instance *AgentInstance) {
 	}
 
 	sm.logger.Error("failed to connect to git status stream after retries",
-		zap.String("instance_id", instance.ID),
+		zap.String("instance_id", execution.ID),
 		zap.Int("max_retries", maxRetries))
 }
 
 // connectFileChangesStream handles file changes stream with retry logic
-func (sm *StreamManager) connectFileChangesStream(instance *AgentInstance) {
+func (sm *StreamManager) connectFileChangesStream(execution *AgentExecution) {
 	ctx := context.Background()
 
 	// Retry connection with exponential backoff
@@ -156,9 +156,9 @@ func (sm *StreamManager) connectFileChangesStream(instance *AgentInstance) {
 	backoff := 1 * time.Second
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		err := instance.agentctl.StreamFileChanges(ctx, func(notification *agentctl.FileChangeNotification) {
+		err := execution.agentctl.StreamFileChanges(ctx, func(notification *agentctl.FileChangeNotification) {
 			if sm.callbacks.OnFileChange != nil {
-				sm.callbacks.OnFileChange(instance, notification)
+				sm.callbacks.OnFileChange(execution, notification)
 			}
 		})
 
@@ -168,7 +168,7 @@ func (sm *StreamManager) connectFileChangesStream(instance *AgentInstance) {
 		}
 
 		sm.logger.Debug("file changes stream connection failed, retrying",
-			zap.String("instance_id", instance.ID),
+			zap.String("instance_id", execution.ID),
 			zap.Int("attempt", attempt),
 			zap.Int("max_retries", maxRetries),
 			zap.Error(err))
@@ -180,6 +180,6 @@ func (sm *StreamManager) connectFileChangesStream(instance *AgentInstance) {
 	}
 
 	sm.logger.Error("failed to connect to file changes stream after retries",
-		zap.String("instance_id", instance.ID),
+		zap.String("instance_id", execution.ID),
 		zap.Int("max_retries", maxRetries))
 }

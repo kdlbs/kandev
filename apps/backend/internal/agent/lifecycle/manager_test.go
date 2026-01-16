@@ -162,17 +162,17 @@ func TestNewManager(t *testing.T) {
 	if mgr == nil {
 		t.Fatal("expected non-nil manager")
 	}
-	if len(mgr.ListInstances()) != 0 {
-		t.Errorf("expected empty instances, got %d", len(mgr.ListInstances()))
+	if len(mgr.ListExecutions()) != 0 {
+		t.Errorf("expected empty executions, got %d", len(mgr.ListExecutions()))
 	}
 }
 
-func TestManager_GetInstance(t *testing.T) {
+func TestManager_GetExecution(t *testing.T) {
 	mgr := newTestManager()
 
-	// Manually add an instance for testing
-	instance := &AgentInstance{
-		ID:             "test-instance-id",
+	// Manually add an execution for testing
+	execution := &AgentExecution{
+		ID:             "test-execution-id",
 		TaskID:         "test-task-id",
 		AgentProfileID: "test-agent",
 		ContainerID:    "container-123",
@@ -180,29 +180,29 @@ func TestManager_GetInstance(t *testing.T) {
 		StartedAt:      time.Now(),
 	}
 
-	mgr.instanceStore.Add(instance)
+	mgr.executionStore.Add(execution)
 
-	// Test GetInstance
-	got, found := mgr.GetInstance("test-instance-id")
+	// Test GetExecution
+	got, found := mgr.GetExecution("test-execution-id")
 	if !found {
-		t.Fatal("expected to find instance")
+		t.Fatal("expected to find execution")
 	}
-	if got.ID != instance.ID {
-		t.Errorf("expected ID %q, got %q", instance.ID, got.ID)
+	if got.ID != execution.ID {
+		t.Errorf("expected ID %q, got %q", execution.ID, got.ID)
 	}
 
 	// Test not found
-	_, found = mgr.GetInstance("non-existent")
+	_, found = mgr.GetExecution("non-existent")
 	if found {
-		t.Error("expected not to find instance")
+		t.Error("expected not to find execution")
 	}
 }
 
-func TestManager_GetInstanceByTaskID(t *testing.T) {
+func TestManager_GetExecutionByTaskID(t *testing.T) {
 	mgr := newTestManager()
 
-	instance := &AgentInstance{
-		ID:             "test-instance-id",
+	execution := &AgentExecution{
+		ID:             "test-execution-id",
 		TaskID:         "test-task-id",
 		AgentProfileID: "test-agent",
 		ContainerID:    "container-123",
@@ -210,29 +210,29 @@ func TestManager_GetInstanceByTaskID(t *testing.T) {
 		StartedAt:      time.Now(),
 	}
 
-	mgr.instanceStore.Add(instance)
+	mgr.executionStore.Add(execution)
 
-	// Test GetInstanceByTaskID
-	got, found := mgr.GetInstanceByTaskID("test-task-id")
+	// Test GetExecutionByTaskID
+	got, found := mgr.GetExecutionByTaskID("test-task-id")
 	if !found {
-		t.Fatal("expected to find instance")
+		t.Fatal("expected to find execution")
 	}
-	if got.TaskID != instance.TaskID {
-		t.Errorf("expected TaskID %q, got %q", instance.TaskID, got.TaskID)
+	if got.TaskID != execution.TaskID {
+		t.Errorf("expected TaskID %q, got %q", execution.TaskID, got.TaskID)
 	}
 
 	// Test not found
-	_, found = mgr.GetInstanceByTaskID("non-existent")
+	_, found = mgr.GetExecutionByTaskID("non-existent")
 	if found {
-		t.Error("expected not to find instance")
+		t.Error("expected not to find execution")
 	}
 }
 
-func TestManager_GetInstanceByContainerID(t *testing.T) {
+func TestManager_GetExecutionByContainerID(t *testing.T) {
 	mgr := newTestManager()
 
-	instance := &AgentInstance{
-		ID:             "test-instance-id",
+	execution := &AgentExecution{
+		ID:             "test-execution-id",
 		TaskID:         "test-task-id",
 		AgentProfileID: "test-agent",
 		ContainerID:    "container-123",
@@ -240,61 +240,61 @@ func TestManager_GetInstanceByContainerID(t *testing.T) {
 		StartedAt:      time.Now(),
 	}
 
-	mgr.instanceStore.Add(instance)
+	mgr.executionStore.Add(execution)
 
-	// Test GetInstanceByContainerID
-	got, found := mgr.GetInstanceByContainerID("container-123")
+	// Test GetExecutionByContainerID
+	got, found := mgr.GetExecutionByContainerID("container-123")
 	if !found {
-		t.Fatal("expected to find instance")
+		t.Fatal("expected to find execution")
 	}
-	if got.ContainerID != instance.ContainerID {
-		t.Errorf("expected ContainerID %q, got %q", instance.ContainerID, got.ContainerID)
+	if got.ContainerID != execution.ContainerID {
+		t.Errorf("expected ContainerID %q, got %q", execution.ContainerID, got.ContainerID)
 	}
 
 	// Test not found
-	_, found = mgr.GetInstanceByContainerID("non-existent")
+	_, found = mgr.GetExecutionByContainerID("non-existent")
 	if found {
-		t.Error("expected not to find instance")
+		t.Error("expected not to find execution")
 	}
 }
 
-func TestManager_ListInstances(t *testing.T) {
+func TestManager_ListExecutions(t *testing.T) {
 	mgr := newTestManager()
 
 	// Empty list
-	list := mgr.ListInstances()
+	list := mgr.ListExecutions()
 	if len(list) != 0 {
 		t.Errorf("expected empty list, got %d", len(list))
 	}
 
-	// Add instances
-	mgr.instanceStore.Add(&AgentInstance{ID: "instance-1", TaskID: "task-1", Status: v1.AgentStatusRunning})
-	mgr.instanceStore.Add(&AgentInstance{ID: "instance-2", TaskID: "task-2", Status: v1.AgentStatusCompleted})
+	// Add executions
+	mgr.executionStore.Add(&AgentExecution{ID: "execution-1", TaskID: "task-1", Status: v1.AgentStatusRunning})
+	mgr.executionStore.Add(&AgentExecution{ID: "execution-2", TaskID: "task-2", Status: v1.AgentStatusCompleted})
 
-	list = mgr.ListInstances()
+	list = mgr.ListExecutions()
 	if len(list) != 2 {
-		t.Errorf("expected 2 instances, got %d", len(list))
+		t.Errorf("expected 2 executions, got %d", len(list))
 	}
 }
 
 func TestManager_UpdateStatus(t *testing.T) {
 	mgr := newTestManager()
 
-	instance := &AgentInstance{
-		ID:     "test-instance-id",
+	execution := &AgentExecution{
+		ID:     "test-execution-id",
 		TaskID: "test-task-id",
 		Status: v1.AgentStatusRunning,
 	}
 
-	mgr.instanceStore.Add(instance)
+	mgr.executionStore.Add(execution)
 
 	// Test UpdateStatus
-	err := mgr.UpdateStatus("test-instance-id", v1.AgentStatusCompleted)
+	err := mgr.UpdateStatus("test-execution-id", v1.AgentStatusCompleted)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	got, _ := mgr.GetInstance("test-instance-id")
+	got, _ := mgr.GetExecution("test-execution-id")
 	if got.Status != v1.AgentStatusCompleted {
 		t.Errorf("expected status %v, got %v", v1.AgentStatusCompleted, got.Status)
 	}
@@ -302,29 +302,29 @@ func TestManager_UpdateStatus(t *testing.T) {
 	// Test not found
 	err = mgr.UpdateStatus("non-existent", v1.AgentStatusCompleted)
 	if err == nil {
-		t.Error("expected error for non-existent instance")
+		t.Error("expected error for non-existent execution")
 	}
 }
 
 func TestManager_UpdateProgress(t *testing.T) {
 	mgr := newTestManager()
 
-	instance := &AgentInstance{
-		ID:       "test-instance-id",
+	execution := &AgentExecution{
+		ID:       "test-execution-id",
 		TaskID:   "test-task-id",
 		Status:   v1.AgentStatusRunning,
 		Progress: 0,
 	}
 
-	mgr.instanceStore.Add(instance)
+	mgr.executionStore.Add(execution)
 
 	// Test UpdateProgress
-	err := mgr.UpdateProgress("test-instance-id", 50)
+	err := mgr.UpdateProgress("test-execution-id", 50)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	got, _ := mgr.GetInstance("test-instance-id")
+	got, _ := mgr.GetExecution("test-execution-id")
 	if got.Progress != 50 {
 		t.Errorf("expected progress 50, got %d", got.Progress)
 	}
@@ -332,15 +332,15 @@ func TestManager_UpdateProgress(t *testing.T) {
 	// Test not found
 	err = mgr.UpdateProgress("non-existent", 50)
 	if err == nil {
-		t.Error("expected error for non-existent instance")
+		t.Error("expected error for non-existent execution")
 	}
 }
 
 func TestManager_MarkCompleted_Success(t *testing.T) {
 	mgr := newTestManager()
 
-	instance := &AgentInstance{
-		ID:             "test-instance-id",
+	execution := &AgentExecution{
+		ID:             "test-execution-id",
 		TaskID:         "test-task-id",
 		AgentProfileID: "test-agent",
 		ContainerID:    "container-123",
@@ -349,15 +349,15 @@ func TestManager_MarkCompleted_Success(t *testing.T) {
 		Progress:       50,
 	}
 
-	mgr.instanceStore.Add(instance)
+	mgr.executionStore.Add(execution)
 
 	// Mark as completed successfully (exit code 0)
-	err := mgr.MarkCompleted("test-instance-id", 0, "")
+	err := mgr.MarkCompleted("test-execution-id", 0, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	got, _ := mgr.GetInstance("test-instance-id")
+	got, _ := mgr.GetExecution("test-execution-id")
 	if got.Status != v1.AgentStatusCompleted {
 		t.Errorf("expected status %v, got %v", v1.AgentStatusCompleted, got.Status)
 	}
@@ -375,8 +375,8 @@ func TestManager_MarkCompleted_Success(t *testing.T) {
 func TestManager_MarkCompleted_Failure(t *testing.T) {
 	mgr := newTestManager()
 
-	instance := &AgentInstance{
-		ID:             "test-instance-id",
+	execution := &AgentExecution{
+		ID:             "test-execution-id",
 		TaskID:         "test-task-id",
 		AgentProfileID: "test-agent",
 		ContainerID:    "container-123",
@@ -384,15 +384,15 @@ func TestManager_MarkCompleted_Failure(t *testing.T) {
 		StartedAt:      time.Now(),
 	}
 
-	mgr.instanceStore.Add(instance)
+	mgr.executionStore.Add(execution)
 
 	// Mark as failed
-	err := mgr.MarkCompleted("test-instance-id", 1, "process failed")
+	err := mgr.MarkCompleted("test-execution-id", 1, "process failed")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	got, _ := mgr.GetInstance("test-instance-id")
+	got, _ := mgr.GetExecution("test-execution-id")
 	if got.Status != v1.AgentStatusFailed {
 		t.Errorf("expected status %v, got %v", v1.AgentStatusFailed, got.Status)
 	}
@@ -409,37 +409,37 @@ func TestManager_MarkCompleted_NotFound(t *testing.T) {
 
 	err := mgr.MarkCompleted("non-existent", 0, "")
 	if err == nil {
-		t.Error("expected error for non-existent instance")
+		t.Error("expected error for non-existent execution")
 	}
 }
 
-func TestManager_RemoveInstance(t *testing.T) {
+func TestManager_RemoveExecution(t *testing.T) {
 	mgr := newTestManager()
 
-	instance := &AgentInstance{
-		ID:          "test-instance-id",
+	execution := &AgentExecution{
+		ID:          "test-execution-id",
 		TaskID:      "test-task-id",
 		ContainerID: "container-123",
 	}
 
-	mgr.instanceStore.Add(instance)
+	mgr.executionStore.Add(execution)
 
-	// Remove instance
-	mgr.RemoveInstance("test-instance-id")
+	// Remove execution
+	mgr.RemoveExecution("test-execution-id")
 
 	// Verify it's gone from all maps
-	if _, found := mgr.GetInstance("test-instance-id"); found {
-		t.Error("instance should be removed from instances map")
+	if _, found := mgr.GetExecution("test-execution-id"); found {
+		t.Error("execution should be removed from executions map")
 	}
-	if _, found := mgr.GetInstanceByTaskID("test-task-id"); found {
-		t.Error("instance should be removed from byTask map")
+	if _, found := mgr.GetExecutionByTaskID("test-task-id"); found {
+		t.Error("execution should be removed from byTask map")
 	}
-	if _, found := mgr.GetInstanceByContainerID("container-123"); found {
-		t.Error("instance should be removed from byContainer map")
+	if _, found := mgr.GetExecutionByContainerID("container-123"); found {
+		t.Error("execution should be removed from byContainer map")
 	}
 
 	// Remove non-existent should not panic
-	mgr.RemoveInstance("non-existent")
+	mgr.RemoveExecution("non-existent")
 }
 
 func TestManager_StartStop(t *testing.T) {

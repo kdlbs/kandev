@@ -88,31 +88,31 @@ type ListAgentTypesResponse struct {
 	Total int            `json:"total"`
 }
 
-// FromAgentInstance converts a lifecycle.AgentInstance to AgentDTO
-func FromAgentInstance(a *AgentInstanceData) AgentDTO {
+// FromAgentExecution converts a lifecycle.AgentExecution to AgentDTO
+func FromAgentExecution(execution *AgentExecutionData) AgentDTO {
 	agent := AgentDTO{
-		ID:             a.ID,
-		TaskID:         a.TaskID,
-		AgentProfileID: a.AgentProfileID,
-		ContainerID:    a.ContainerID,
-		Status:         a.Status,
-		Progress:       a.Progress,
-		StartedAt:      a.StartedAt.Format("2006-01-02T15:04:05Z"),
+		ID:             execution.ID,
+		TaskID:         execution.TaskID,
+		AgentProfileID: execution.AgentProfileID,
+		ContainerID:    execution.ContainerID,
+		Status:         execution.Status,
+		Progress:       execution.Progress,
+		StartedAt:      execution.StartedAt.Format("2006-01-02T15:04:05Z"),
 	}
-	if a.FinishedAt != nil && !a.FinishedAt.IsZero() {
-		agent.FinishedAt = a.FinishedAt.Format("2006-01-02T15:04:05Z")
+	if execution.FinishedAt != nil && !execution.FinishedAt.IsZero() {
+		agent.FinishedAt = execution.FinishedAt.Format("2006-01-02T15:04:05Z")
 	}
-	if a.ExitCode != nil {
-		agent.ExitCode = a.ExitCode
+	if execution.ExitCode != nil {
+		agent.ExitCode = execution.ExitCode
 	}
-	if a.ErrorMessage != "" {
-		agent.Error = a.ErrorMessage
+	if execution.ErrorMessage != "" {
+		agent.Error = execution.ErrorMessage
 	}
 	return agent
 }
 
-// AgentInstanceData is the input data for FromAgentInstance (avoids circular import)
-type AgentInstanceData struct {
+// AgentExecutionData is the input data for FromAgentExecution (avoids circular import)
+type AgentExecutionData struct {
 	ID             string
 	TaskID         string
 	AgentProfileID string

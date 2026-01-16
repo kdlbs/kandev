@@ -735,9 +735,9 @@ func TestSQLiteRepository_TaskSessionCRUD(t *testing.T) {
 
 	// Create agent session
 	session := &models.TaskSession{
-		TaskID:          "task-123",
-		AgentInstanceID: "instance-abc",
-		ContainerID:     "container-xyz",
+		TaskID:           "task-123",
+		AgentExecutionID: "execution-abc",
+		ContainerID:      "container-xyz",
 		AgentProfileID:  "profile-123",
 		ExecutorID:      "executor-1",
 		EnvironmentID:   "env-1",

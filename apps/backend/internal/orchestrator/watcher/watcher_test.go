@@ -275,10 +275,10 @@ func TestAgentEventHandling(t *testing.T) {
 	// Simulate publishing an agent completed event
 	exitCode := 0
 	event := bus.NewEvent(events.AgentCompleted, "test", map[string]interface{}{
-		"task_id":           "task-123",
-		"agent_instance_id": "agent-456",
-		"agent_type":        "test-agent",
-		"exit_code":         exitCode,
+		"task_id":            "task-123",
+		"agent_execution_id": "agent-456",
+		"agent_type":         "test-agent",
+		"exit_code":          exitCode,
 	})
 
 	_ = eventBus.Publish(context.Background(), events.AgentCompleted, event)
@@ -294,8 +294,8 @@ func TestAgentEventHandling(t *testing.T) {
 	if receivedData.TaskID != "task-123" {
 		t.Errorf("expected task_id = 'task-123', got %s", receivedData.TaskID)
 	}
-	if receivedData.AgentInstanceID != "agent-456" {
-		t.Errorf("expected agent_instance_id = 'agent-456', got %s", receivedData.AgentInstanceID)
+	if receivedData.AgentExecutionID != "agent-456" {
+		t.Errorf("expected agent_execution_id = 'agent-456', got %s", receivedData.AgentExecutionID)
 	}
 }
 

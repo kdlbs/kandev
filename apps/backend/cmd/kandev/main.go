@@ -919,30 +919,30 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 		BaseBranch:     req.BaseBranch,
 	}
 
-	// Create the agentctl instance (does NOT start agent process)
-	instance, err := a.mgr.Launch(ctx, launchReq)
+	// Create the agentctl execution (does NOT start agent process)
+	execution, err := a.mgr.Launch(ctx, launchReq)
 	if err != nil {
 		return nil, err
 	}
 
 	// Extract worktree info from metadata if available
 	var worktreeID, worktreePath, worktreeBranch string
-	if instance.Metadata != nil {
-		if id, ok := instance.Metadata["worktree_id"].(string); ok {
+	if execution.Metadata != nil {
+		if id, ok := execution.Metadata["worktree_id"].(string); ok {
 			worktreeID = id
 		}
-		if path, ok := instance.Metadata["worktree_path"].(string); ok {
+		if path, ok := execution.Metadata["worktree_path"].(string); ok {
 			worktreePath = path
 		}
-		if branch, ok := instance.Metadata["worktree_branch"].(string); ok {
+		if branch, ok := execution.Metadata["worktree_branch"].(string); ok {
 			worktreeBranch = branch
 		}
 	}
 
 	return &executor.LaunchAgentResponse{
-		AgentInstanceID: instance.ID,
-		ContainerID:     instance.ContainerID,
-		Status:          instance.Status,
+		AgentExecutionID: execution.ID,
+		ContainerID:     execution.ContainerID,
+		Status:          execution.Status,
 		WorktreeID:      worktreeID,
 		WorktreePath:    worktreePath,
 		WorktreeBranch:  worktreeBranch,
@@ -960,32 +960,32 @@ func (a *lifecycleAdapter) StopAgent(ctx context.Context, agentInstanceID string
 	return a.mgr.StopAgent(ctx, agentInstanceID, force)
 }
 
-// GetAgentStatus returns the status of an agent instance
-func (a *lifecycleAdapter) GetAgentStatus(ctx context.Context, agentInstanceID string) (*v1.AgentInstance, error) {
-	instance, found := a.mgr.GetInstance(agentInstanceID)
+// GetAgentStatus returns the status of an agent execution
+func (a *lifecycleAdapter) GetAgentStatus(ctx context.Context, agentInstanceID string) (*v1.AgentExecution, error) {
+	execution, found := a.mgr.GetExecution(agentInstanceID)
 	if !found {
-		return nil, fmt.Errorf("agent instance %q not found", agentInstanceID)
+		return nil, fmt.Errorf("agent execution %q not found", agentInstanceID)
 	}
 
-	containerID := instance.ContainerID
+	containerID := execution.ContainerID
 	now := time.Now()
-	result := &v1.AgentInstance{
-		ID:             instance.ID,
-		TaskID:         instance.TaskID,
-		AgentProfileID: instance.AgentProfileID,
+	result := &v1.AgentExecution{
+		ID:             execution.ID,
+		TaskID:         execution.TaskID,
+		AgentProfileID: execution.AgentProfileID,
 		ContainerID:    &containerID,
-		Status:         instance.Status,
-		StartedAt:      &instance.StartedAt,
-		StoppedAt:      instance.FinishedAt,
-		CreatedAt:      instance.StartedAt,
+		Status:         execution.Status,
+		StartedAt:      &execution.StartedAt,
+		StoppedAt:      execution.FinishedAt,
+		CreatedAt:      execution.StartedAt,
 		UpdatedAt:      now,
 	}
 
-	if instance.ExitCode != nil {
-		result.ExitCode = instance.ExitCode
+	if execution.ExitCode != nil {
+		result.ExitCode = execution.ExitCode
 	}
-	if instance.ErrorMessage != "" {
-		result.ErrorMessage = &instance.ErrorMessage
+	if execution.ErrorMessage != "" {
+		result.ErrorMessage = &execution.ErrorMessage
 	}
 
 	return result, nil
@@ -1018,13 +1018,13 @@ func (a *lifecycleAdapter) RespondToPermissionByTaskID(ctx context.Context, task
 	return a.mgr.RespondToPermissionByTaskID(taskID, pendingID, optionID, cancelled)
 }
 
-// GetRecoveredInstances returns instances recovered from Docker during startup
-func (a *lifecycleAdapter) GetRecoveredInstances() []executor.RecoveredInstanceInfo {
-	recovered := a.mgr.GetRecoveredInstances()
-	result := make([]executor.RecoveredInstanceInfo, len(recovered))
+// GetRecoveredExecutions returns executions recovered from Docker during startup
+func (a *lifecycleAdapter) GetRecoveredExecutions() []executor.RecoveredExecutionInfo {
+	recovered := a.mgr.GetRecoveredExecutions()
+	result := make([]executor.RecoveredExecutionInfo, len(recovered))
 	for i, r := range recovered {
-		result[i] = executor.RecoveredInstanceInfo{
-			InstanceID:     r.InstanceID,
+		result[i] = executor.RecoveredExecutionInfo{
+			ExecutionID:    r.ExecutionID,
 			TaskID:         r.TaskID,
 			ContainerID:    r.ContainerID,
 			AgentProfileID: r.AgentProfileID,
@@ -1039,9 +1039,9 @@ func (a *lifecycleAdapter) IsAgentRunningForTask(ctx context.Context, taskID str
 	return a.mgr.IsAgentRunningForTask(ctx, taskID)
 }
 
-// CleanupStaleInstanceByTaskID removes a stale agent instance from tracking without trying to stop it.
-func (a *lifecycleAdapter) CleanupStaleInstanceByTaskID(ctx context.Context, taskID string) error {
-	return a.mgr.CleanupStaleInstanceByTaskID(ctx, taskID)
+// CleanupStaleExecutionByTaskID removes a stale agent execution from tracking without trying to stop it.
+func (a *lifecycleAdapter) CleanupStaleExecutionByTaskID(ctx context.Context, taskID string) error {
+	return a.mgr.CleanupStaleExecutionByTaskID(ctx, taskID)
 }
 
 // corsMiddleware returns a CORS middleware for HTTP and WebSocket connections

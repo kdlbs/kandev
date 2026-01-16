@@ -29,27 +29,27 @@ func NewEventPublisher(eventBus bus.EventBus, log *logger.Logger) *EventPublishe
 }
 
 // PublishAgentEvent publishes an agent lifecycle event (started, stopped, ready, completed, failed).
-func (p *EventPublisher) PublishAgentEvent(ctx context.Context, eventType string, instance *AgentInstance) {
+func (p *EventPublisher) PublishAgentEvent(ctx context.Context, eventType string, execution *AgentExecution) {
 	if p.eventBus == nil {
 		return
 	}
 
 	data := map[string]interface{}{
-		"instance_id":      instance.ID,
-		"task_id":          instance.TaskID,
-		"agent_profile_id": instance.AgentProfileID,
-		"container_id":     instance.ContainerID,
-		"status":           string(instance.Status),
-		"started_at":       instance.StartedAt,
-		"progress":         instance.Progress,
-		"error_message":    instance.ErrorMessage,
+		"instance_id":      execution.ID,
+		"task_id":          execution.TaskID,
+		"agent_profile_id": execution.AgentProfileID,
+		"container_id":     execution.ContainerID,
+		"status":           string(execution.Status),
+		"started_at":       execution.StartedAt,
+		"progress":         execution.Progress,
+		"error_message":    execution.ErrorMessage,
 	}
 
-	if instance.FinishedAt != nil {
-		data["finished_at"] = *instance.FinishedAt
+	if execution.FinishedAt != nil {
+		data["finished_at"] = *execution.FinishedAt
 	}
-	if instance.ExitCode != nil {
-		data["exit_code"] = *instance.ExitCode
+	if execution.ExitCode != nil {
+		data["exit_code"] = *execution.ExitCode
 	}
 
 	event := bus.NewEvent(eventType, "agent-manager", data)
@@ -57,24 +57,24 @@ func (p *EventPublisher) PublishAgentEvent(ctx context.Context, eventType string
 	if err := p.eventBus.Publish(ctx, eventType, event); err != nil {
 		p.logger.Error("failed to publish event",
 			zap.String("event_type", eventType),
-			zap.String("instance_id", instance.ID),
+			zap.String("instance_id", execution.ID),
 			zap.Error(err))
 	} else {
 		p.logger.Debug("published agent event",
 			zap.String("event_type", eventType),
-			zap.String("instance_id", instance.ID))
+			zap.String("instance_id", execution.ID))
 	}
 }
 
 // PublishACPSessionCreated publishes an event when an ACP session is created.
-func (p *EventPublisher) PublishACPSessionCreated(instance *AgentInstance, sessionID string) {
+func (p *EventPublisher) PublishACPSessionCreated(execution *AgentExecution, sessionID string) {
 	if p.eventBus == nil || sessionID == "" {
 		return
 	}
 
 	data := map[string]interface{}{
-		"task_id":           instance.TaskID,
-		"agent_instance_id": instance.ID,
+		"task_id":           execution.TaskID,
+		"agent_instance_id": execution.ID,
 		"acp_session_id":    sessionID,
 	}
 
@@ -82,13 +82,13 @@ func (p *EventPublisher) PublishACPSessionCreated(instance *AgentInstance, sessi
 	if err := p.eventBus.Publish(context.Background(), events.AgentACPSessionCreated, event); err != nil {
 		p.logger.Error("failed to publish ACP session event",
 			zap.String("event_type", events.AgentACPSessionCreated),
-			zap.String("instance_id", instance.ID),
+			zap.String("instance_id", execution.ID),
 			zap.Error(err))
 	}
 }
 
 // PublishSessionUpdate publishes a session update to the event bus for WebSocket streaming.
-func (p *EventPublisher) PublishSessionUpdate(instance *AgentInstance, update agentctl.SessionUpdate) {
+func (p *EventPublisher) PublishSessionUpdate(execution *AgentExecution, update agentctl.SessionUpdate) {
 	if p.eventBus == nil {
 		return
 	}
@@ -133,32 +133,32 @@ func (p *EventPublisher) PublishSessionUpdate(instance *AgentInstance, update ag
 	data := map[string]interface{}{
 		"type":       "session/update",
 		"timestamp":  time.Now().UTC().Format(time.RFC3339Nano),
-		"agent_id":   instance.ID,
-		"task_id":    instance.TaskID,
+		"agent_id":   execution.ID,
+		"task_id":    execution.TaskID,
 		"session_id": update.SessionID,
 		"data":       updateData,
 	}
 
 	event := bus.NewEvent(events.ACPMessage, "agent-manager", data)
-	subject := events.BuildACPSubject(instance.TaskID)
+	subject := events.BuildACPSubject(execution.TaskID)
 
 	if err := p.eventBus.Publish(context.Background(), subject, event); err != nil {
 		p.logger.Error("failed to publish session update",
-			zap.String("instance_id", instance.ID),
-			zap.String("task_id", instance.TaskID),
+			zap.String("instance_id", execution.ID),
+			zap.String("task_id", execution.TaskID),
 			zap.Error(err))
 	}
 }
 
 // PublishGitStatus publishes a git status update to the event bus.
-func (p *EventPublisher) PublishGitStatus(instance *AgentInstance, update *agentctl.GitStatusUpdate) {
+func (p *EventPublisher) PublishGitStatus(execution *AgentExecution, update *agentctl.GitStatusUpdate) {
 	if p.eventBus == nil {
 		return
 	}
 
 	data := map[string]interface{}{
-		"task_id":       instance.TaskID,
-		"agent_id":      instance.ID,
+		"task_id":       execution.TaskID,
+		"agent_id":      execution.ID,
 		"branch":        update.Branch,
 		"remote_branch": update.RemoteBranch,
 		"modified":      update.Modified,
@@ -173,44 +173,44 @@ func (p *EventPublisher) PublishGitStatus(instance *AgentInstance, update *agent
 	}
 
 	event := bus.NewEvent(events.GitStatusUpdated, "agent-manager", data)
-	subject := events.BuildGitStatusSubject(instance.TaskID)
+	subject := events.BuildGitStatusSubject(execution.TaskID)
 
 	if err := p.eventBus.Publish(context.Background(), subject, event); err != nil {
 		p.logger.Error("failed to publish git status event",
-			zap.String("instance_id", instance.ID),
-			zap.String("task_id", instance.TaskID),
+			zap.String("instance_id", execution.ID),
+			zap.String("task_id", execution.TaskID),
 			zap.Error(err))
 	}
 }
 
 // PublishFileChange publishes a file change notification to the event bus.
-func (p *EventPublisher) PublishFileChange(instance *AgentInstance, notification *agentctl.FileChangeNotification) {
+func (p *EventPublisher) PublishFileChange(execution *AgentExecution, notification *agentctl.FileChangeNotification) {
 	if p.eventBus == nil {
 		return
 	}
 
 	data := map[string]interface{}{
-		"task_id":   instance.TaskID,
-		"agent_id":  instance.ID,
+		"task_id":   execution.TaskID,
+		"agent_id":  execution.ID,
 		"path":      notification.Path,
 		"operation": notification.Operation,
 		"timestamp": notification.Timestamp.Format(time.RFC3339Nano),
 	}
 
 	event := bus.NewEvent(events.FileChangeNotified, "agent-manager", data)
-	subject := events.BuildFileChangeSubject(instance.TaskID)
+	subject := events.BuildFileChangeSubject(execution.TaskID)
 
 	if err := p.eventBus.Publish(context.Background(), subject, event); err != nil {
 		p.logger.Error("failed to publish file change event",
-			zap.String("instance_id", instance.ID),
-			zap.String("task_id", instance.TaskID),
+			zap.String("instance_id", execution.ID),
+			zap.String("task_id", execution.TaskID),
 			zap.Error(err))
 	}
 }
 
 // PublishPromptComplete publishes a prompt_complete event when an agent finishes responding.
 // This is used to save the agent's response as a comment on the task.
-func (p *EventPublisher) PublishPromptComplete(instance *AgentInstance, agentMessage, reasoning, summary string) {
+func (p *EventPublisher) PublishPromptComplete(execution *AgentExecution, agentMessage, reasoning, summary string) {
 	if p.eventBus == nil {
 		return
 	}
@@ -223,8 +223,8 @@ func (p *EventPublisher) PublishPromptComplete(instance *AgentInstance, agentMes
 	data := map[string]interface{}{
 		"type":          "prompt_complete",
 		"timestamp":     time.Now().UTC().Format(time.RFC3339Nano),
-		"agent_id":      instance.ID,
-		"task_id":       instance.TaskID,
+		"agent_id":      execution.ID,
+		"task_id":       execution.TaskID,
 		"agent_message": agentMessage,
 	}
 	if reasoning != "" {
@@ -236,18 +236,18 @@ func (p *EventPublisher) PublishPromptComplete(instance *AgentInstance, agentMes
 
 	event := bus.NewEvent(events.PromptComplete, "agent-manager", data)
 	// Publish on task-specific subject so orchestrator can subscribe
-	subject := events.PromptComplete + "." + instance.TaskID
+	subject := events.PromptComplete + "." + execution.TaskID
 
 	if err := p.eventBus.Publish(context.Background(), subject, event); err != nil {
 		p.logger.Error("failed to publish prompt_complete event",
-			zap.String("instance_id", instance.ID),
-			zap.String("task_id", instance.TaskID),
+			zap.String("instance_id", execution.ID),
+			zap.String("task_id", execution.TaskID),
 			zap.Error(err))
 	}
 }
 
 // PublishToolCall publishes a tool call start event (to be saved as a comment).
-func (p *EventPublisher) PublishToolCall(instance *AgentInstance, toolCallID, title, status string, args map[string]interface{}) {
+func (p *EventPublisher) PublishToolCall(execution *AgentExecution, toolCallID, title, status string, args map[string]interface{}) {
 	if p.eventBus == nil {
 		return
 	}
@@ -255,8 +255,8 @@ func (p *EventPublisher) PublishToolCall(instance *AgentInstance, toolCallID, ti
 	data := map[string]interface{}{
 		"type":         "tool_call",
 		"timestamp":    time.Now().UTC().Format(time.RFC3339Nano),
-		"agent_id":     instance.ID,
-		"task_id":      instance.TaskID,
+		"agent_id":     execution.ID,
+		"task_id":      execution.TaskID,
 		"tool_call_id": toolCallID,
 		"title":        title,
 		"status":       status,
@@ -266,23 +266,23 @@ func (p *EventPublisher) PublishToolCall(instance *AgentInstance, toolCallID, ti
 	}
 
 	event := bus.NewEvent(events.ToolCallStarted, "agent-manager", data)
-	subject := events.ToolCallStarted + "." + instance.TaskID
+	subject := events.ToolCallStarted + "." + execution.TaskID
 
 	if err := p.eventBus.Publish(context.Background(), subject, event); err != nil {
 		p.logger.Error("failed to publish tool_call event",
-			zap.String("instance_id", instance.ID),
-			zap.String("task_id", instance.TaskID),
+			zap.String("instance_id", execution.ID),
+			zap.String("task_id", execution.TaskID),
 			zap.Error(err))
 	} else {
 		p.logger.Debug("published tool_call event",
-			zap.String("task_id", instance.TaskID),
+			zap.String("task_id", execution.TaskID),
 			zap.String("tool_call_id", toolCallID),
 			zap.String("title", title))
 	}
 }
 
 // PublishToolCallComplete publishes a tool call completion event from a SessionUpdate.
-func (p *EventPublisher) PublishToolCallComplete(instance *AgentInstance, update agentctl.SessionUpdate) {
+func (p *EventPublisher) PublishToolCallComplete(execution *AgentExecution, update agentctl.SessionUpdate) {
 	if p.eventBus == nil {
 		return
 	}
@@ -290,25 +290,25 @@ func (p *EventPublisher) PublishToolCallComplete(instance *AgentInstance, update
 	data := map[string]interface{}{
 		"type":         "tool_call_complete",
 		"timestamp":    time.Now().UTC().Format(time.RFC3339Nano),
-		"agent_id":     instance.ID,
-		"task_id":      instance.TaskID,
+		"agent_id":     execution.ID,
+		"task_id":      execution.TaskID,
 		"tool_call_id": update.ToolCallID,
 		"status":       update.ToolStatus,
 	}
 
 	event := bus.NewEvent(events.ToolCallComplete, "agent-manager", data)
-	subject := events.ToolCallComplete + "." + instance.TaskID
+	subject := events.ToolCallComplete + "." + execution.TaskID
 
 	if err := p.eventBus.Publish(context.Background(), subject, event); err != nil {
 		p.logger.Error("failed to publish tool_call_complete event",
-			zap.String("instance_id", instance.ID),
-			zap.String("task_id", instance.TaskID),
+			zap.String("instance_id", execution.ID),
+			zap.String("task_id", execution.TaskID),
 			zap.Error(err))
 	}
 }
 
 // PublishPermissionRequest publishes a permission request event.
-func (p *EventPublisher) PublishPermissionRequest(instance *AgentInstance, notification *agentctl.PermissionNotification) {
+func (p *EventPublisher) PublishPermissionRequest(execution *AgentExecution, notification *agentctl.PermissionNotification) {
 	if p.eventBus == nil {
 		return
 	}
@@ -325,8 +325,8 @@ func (p *EventPublisher) PublishPermissionRequest(instance *AgentInstance, notif
 
 	data := map[string]interface{}{
 		"type":              "permission_request",
-		"task_id":           instance.TaskID,
-		"agent_instance_id": instance.ID,
+		"task_id":           execution.TaskID,
+		"agent_instance_id": execution.ID,
 		"pending_id":        notification.PendingID,
 		"session_id":        notification.SessionID,
 		"tool_call_id":      notification.ToolCallID,
@@ -337,16 +337,16 @@ func (p *EventPublisher) PublishPermissionRequest(instance *AgentInstance, notif
 	}
 
 	event := bus.NewEvent(events.ACPMessage, "agent-manager", data)
-	subject := events.BuildACPSubject(instance.TaskID)
+	subject := events.BuildACPSubject(execution.TaskID)
 
 	if err := p.eventBus.Publish(context.Background(), subject, event); err != nil {
 		p.logger.Error("failed to publish permission_request event",
-			zap.String("instance_id", instance.ID),
-			zap.String("task_id", instance.TaskID),
+			zap.String("instance_id", execution.ID),
+			zap.String("task_id", execution.TaskID),
 			zap.Error(err))
 	} else {
 		p.logger.Info("published permission_request event",
-			zap.String("task_id", instance.TaskID),
+			zap.String("task_id", execution.TaskID),
 			zap.String("pending_id", notification.PendingID),
 			zap.String("title", notification.Title))
 	}

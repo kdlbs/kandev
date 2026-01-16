@@ -50,7 +50,7 @@ type RuntimeCreateRequest struct {
 }
 
 // RuntimeInstance represents an agentctl instance created by a runtime.
-// This is returned by the runtime and contains enough info to build an AgentInstance.
+// This is returned by the runtime and contains enough info to build an AgentExecution.
 type RuntimeInstance struct {
 	// Core identifiers
 	InstanceID string
@@ -70,8 +70,8 @@ type RuntimeInstance struct {
 	Metadata      map[string]interface{}
 }
 
-// ToAgentInstance converts a RuntimeInstance to an AgentInstance.
-func (ri *RuntimeInstance) ToAgentInstance(req *RuntimeCreateRequest) *AgentInstance {
+// ToAgentExecution converts a RuntimeInstance to an AgentExecution.
+func (ri *RuntimeInstance) ToAgentExecution(req *RuntimeCreateRequest) *AgentExecution {
 	metadata := req.Metadata
 	if metadata == nil {
 		metadata = make(map[string]interface{})
@@ -86,7 +86,7 @@ func (ri *RuntimeInstance) ToAgentInstance(req *RuntimeCreateRequest) *AgentInst
 		workspacePath = req.WorkspacePath
 	}
 
-	return &AgentInstance{
+	return &AgentExecution{
 		ID:                   ri.InstanceID,
 		TaskID:               req.TaskID,
 		AgentProfileID:       req.AgentProfileID,

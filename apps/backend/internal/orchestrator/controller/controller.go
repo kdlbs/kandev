@@ -68,11 +68,11 @@ func (c *Controller) StartTask(ctx context.Context, req dto.StartTaskRequest) (d
 	}
 
 	resp := dto.StartTaskResponse{
-		Success:         true,
-		TaskID:          execution.TaskID,
-		AgentInstanceID: execution.AgentInstanceID,
-		TaskSessionID:  execution.SessionID,
-		State:           string(execution.SessionState),
+		Success:          true,
+		TaskID:           execution.TaskID,
+		AgentExecutionID: execution.AgentExecutionID,
+		TaskSessionID:    execution.SessionID,
+		State:            string(execution.SessionState),
 	}
 
 	// Include worktree info if available
@@ -94,11 +94,11 @@ func (c *Controller) ResumeTaskSession(ctx context.Context, req dto.ResumeTaskSe
 	}
 
 	resp := dto.ResumeTaskSessionResponse{
-		Success:         true,
-		TaskID:          execution.TaskID,
-		AgentInstanceID: execution.AgentInstanceID,
-		TaskSessionID:  execution.SessionID,
-		State:           string(execution.SessionState),
+		Success:          true,
+		TaskID:           execution.TaskID,
+		AgentExecutionID: execution.AgentExecutionID,
+		TaskSessionID:    execution.SessionID,
+		State:            string(execution.SessionState),
 	}
 
 	if execution.WorktreePath != "" {
@@ -187,13 +187,13 @@ func (c *Controller) GetTaskExecution(ctx context.Context, req dto.GetTaskExecut
 	}
 
 	return dto.TaskExecutionResponse{
-		HasExecution:    true,
-		TaskID:          execution.TaskID,
-		AgentInstanceID: execution.AgentInstanceID,
-		AgentProfileID:  execution.AgentProfileID,
-		TaskSessionID:  execution.SessionID,
-		State:           string(execution.SessionState),
-		Progress:        execution.Progress,
-		StartedAt:       execution.StartedAt.Format("2006-01-02T15:04:05Z"),
+		HasExecution:     true,
+		TaskID:           execution.TaskID,
+		AgentExecutionID: execution.AgentExecutionID,
+		AgentProfileID:   execution.AgentProfileID,
+		TaskSessionID:    execution.SessionID,
+		State:            string(execution.SessionState),
+		Progress:         execution.Progress,
+		StartedAt:        execution.StartedAt.Format("2006-01-02T15:04:05Z"),
 	}, nil
 }

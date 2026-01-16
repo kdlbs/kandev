@@ -1,0 +1,132 @@
+// Package lifecycle manages agent execution lifecycles including tracking,
+// state transitions, and cleanup.
+package lifecycle
+
+import (
+	"context"
+	"strings"
+	"sync"
+	"time"
+
+	agentctl "github.com/kandev/kandev/internal/agentctl/client"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
+)
+
+// Default agentctl port
+const AgentCtlPort = 9999
+
+// AgentExecution represents a running agent execution
+type AgentExecution struct {
+	ID             string
+	TaskID         string
+	AgentProfileID string
+	ContainerID    string
+	ContainerIP    string // IP address of the container for agentctl communication
+	WorkspacePath  string // Path to the workspace (worktree or repository path)
+	ACPSessionID   string // ACP session ID to resume, if available
+	AgentCommand   string // Command to start the agent subprocess
+	Status         v1.AgentStatus
+	StartedAt      time.Time
+	FinishedAt     *time.Time
+	ExitCode       *int
+	ErrorMessage   string
+	Progress       int
+	Metadata       map[string]interface{}
+
+	// agentctl client for this execution
+	agentctl *agentctl.Client
+
+	// Standalone mode info (when not using Docker)
+	standaloneInstanceID string // Instance ID in standalone agentctl
+	standalonePort       int    // Port of the standalone execution
+
+	// Buffers for accumulating agent response during a prompt
+	messageBuffer   strings.Builder
+	reasoningBuffer strings.Builder
+	summaryBuffer   strings.Builder
+	messageMu       sync.Mutex
+}
+
+// GetAgentCtlClient returns the agentctl client for this execution
+func (ae *AgentExecution) GetAgentCtlClient() *agentctl.Client {
+	return ae.agentctl
+}
+
+// LaunchRequest contains parameters for launching an agent
+type LaunchRequest struct {
+	TaskID          string
+	SessionID       string
+	TaskTitle       string // Human-readable task title for semantic worktree naming
+	AgentProfileID  string
+	WorkspacePath   string            // Host path to workspace (original repository path)
+	TaskDescription string            // Task description to send via ACP prompt
+	Env             map[string]string // Additional env vars
+	ACPSessionID    string            // ACP session ID to resume, if available
+	Metadata        map[string]interface{}
+
+	// Worktree configuration
+	UseWorktree    bool   // Whether to use a Git worktree for isolation
+	RepositoryID   string // Repository ID for worktree tracking
+	RepositoryPath string // Path to the main repository (for worktree creation)
+	BaseBranch     string // Base branch for the worktree (e.g., "main")
+}
+
+// CredentialsManager interface for credential retrieval
+type CredentialsManager interface {
+	GetCredentialValue(ctx context.Context, key string) (value string, err error)
+}
+
+// AgentProfileInfo contains resolved profile information
+type AgentProfileInfo struct {
+	ProfileID                  string
+	ProfileName                string
+	AgentID                    string
+	AgentName                  string // e.g., "auggie", "claude", "codex"
+	Model                      string
+	AutoApprove                bool
+	DangerouslySkipPermissions bool
+	Plan                       string
+}
+
+// ProfileResolver resolves agent profile IDs to profile information
+type ProfileResolver interface {
+	ResolveProfile(ctx context.Context, profileID string) (*AgentProfileInfo, error)
+}
+
+// ShellStreamStarter is called to start shell streaming for an agent execution
+type ShellStreamStarter interface {
+	StartShellStream(ctx context.Context, taskID string) error
+}
+
+// WorkspaceInfo contains information about a task's workspace for on-demand execution creation
+type WorkspaceInfo struct {
+	TaskID         string
+	SessionID      string // Task session ID (from task_sessions table)
+	WorkspacePath  string // Path to the workspace/repository
+	AgentProfileID string // Optional - agent profile for the task
+	AgentID        string // Agent type ID (e.g., "auggie-agent") - required for runtime creation
+	ACPSessionID   string // Agent's session ID for conversation resumption (from session metadata)
+}
+
+// WorkspaceInfoProvider provides workspace information for tasks
+type WorkspaceInfoProvider interface {
+	// GetWorkspaceInfo returns workspace info for a task (uses most recent session)
+	GetWorkspaceInfo(ctx context.Context, taskID string) (*WorkspaceInfo, error)
+	// GetWorkspaceInfoForSession returns workspace info for a specific task session
+	GetWorkspaceInfoForSession(ctx context.Context, taskID, sessionID string) (*WorkspaceInfo, error)
+}
+
+// RecoveredExecution contains info about an execution recovered from a runtime.
+type RecoveredExecution struct {
+	ExecutionID    string
+	TaskID         string
+	ContainerID    string
+	AgentProfileID string
+}
+
+// PromptResult contains the result of a prompt operation
+type PromptResult struct {
+	StopReason   string // The reason the agent stopped (e.g., "end_turn")
+	AgentMessage string // The agent's accumulated response message
+}
+

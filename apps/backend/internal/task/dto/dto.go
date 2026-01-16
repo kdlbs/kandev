@@ -125,7 +125,7 @@ type TaskRepositoryDTO struct {
 type TaskSessionDTO struct {
 	ID                   string                 `json:"id"`
 	TaskID               string                 `json:"task_id"`
-	AgentInstanceID      string                 `json:"agent_instance_id,omitempty"`
+	AgentExecutionID     string                 `json:"agent_execution_id,omitempty"`
 	ContainerID          string                 `json:"container_id,omitempty"`
 	AgentProfileID       string                 `json:"agent_profile_id,omitempty"`
 	ExecutorID           string                 `json:"executor_id,omitempty"`
@@ -400,7 +400,7 @@ func FromTaskSession(session *models.TaskSession) TaskSessionDTO {
 	result := TaskSessionDTO{
 		ID:                   session.ID,
 		TaskID:               session.TaskID,
-		AgentInstanceID:      session.AgentInstanceID,
+		AgentExecutionID:     session.AgentExecutionID,
 		ContainerID:          session.ContainerID,
 		AgentProfileID:       session.AgentProfileID,
 		ExecutorID:           session.ExecutorID,

@@ -83,8 +83,8 @@ func (h *ShellHandlers) wsShellStatus(ctx context.Context, msg *ws.Message) (*ws
 		return nil, fmt.Errorf("task_id is required")
 	}
 
-	// Get the agent instance for this task
-	instance, ok := h.lifecycleMgr.GetInstanceByTaskID(req.TaskID)
+	// Get the agent execution for this task
+	execution, ok := h.lifecycleMgr.GetExecutionByTaskID(req.TaskID)
 	if !ok {
 		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 			"available": false,
@@ -93,7 +93,7 @@ func (h *ShellHandlers) wsShellStatus(ctx context.Context, msg *ws.Message) (*ws
 	}
 
 	// Get shell status from agentctl
-	client := instance.GetAgentCtlClient()
+	client := execution.GetAgentCtlClient()
 	if client == nil {
 		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 			"available": false,
@@ -135,8 +135,8 @@ func (h *ShellHandlers) wsShellSubscribe(ctx context.Context, msg *ws.Message) (
 		return nil, fmt.Errorf("task_id is required")
 	}
 
-	// Verify the agent instance exists for this task
-	instance, ok := h.lifecycleMgr.GetInstanceByTaskID(req.TaskID)
+	// Verify the agent execution exists for this task
+	execution, ok := h.lifecycleMgr.GetExecutionByTaskID(req.TaskID)
 	if !ok {
 		return nil, fmt.Errorf("no agent running for task %s", req.TaskID)
 	}
@@ -149,7 +149,7 @@ func (h *ShellHandlers) wsShellSubscribe(ctx context.Context, msg *ws.Message) (
 	// Get buffered output to include in response
 	// This ensures client gets current shell state without duplicate broadcasts
 	buffer := ""
-	if client := instance.GetAgentCtlClient(); client != nil {
+	if client := execution.GetAgentCtlClient(); client != nil {
 		if b, err := client.ShellBuffer(ctx); err == nil {
 			buffer = b
 		}
@@ -173,8 +173,8 @@ func (h *ShellHandlers) wsShellInput(ctx context.Context, msg *ws.Message) (*ws.
 		return nil, fmt.Errorf("task_id is required")
 	}
 
-	// Verify the agent instance exists for this task
-	if _, ok := h.lifecycleMgr.GetInstanceByTaskID(req.TaskID); !ok {
+	// Verify the agent execution exists for this task
+	if _, ok := h.lifecycleMgr.GetExecutionByTaskID(req.TaskID); !ok {
 		return nil, fmt.Errorf("no agent running for task %s", req.TaskID)
 	}
 
@@ -246,14 +246,14 @@ func (h *ShellHandlers) runShellStreamWithReady(ctx context.Context, taskID stri
 		h.mu.Unlock()
 	}()
 
-	instance, ok := h.lifecycleMgr.GetInstanceByTaskID(taskID)
+	execution, ok := h.lifecycleMgr.GetExecutionByTaskID(taskID)
 	if !ok {
-		h.logger.Debug("no agent instance for shell stream", zap.String("task_id", taskID))
-		readyCh <- fmt.Errorf("no agent instance for task %s", taskID)
+		h.logger.Debug("no agent execution for shell stream", zap.String("task_id", taskID))
+		readyCh <- fmt.Errorf("no agent execution for task %s", taskID)
 		return
 	}
 
-	client := instance.GetAgentCtlClient()
+	client := execution.GetAgentCtlClient()
 	if client == nil {
 		h.logger.Debug("no client for shell stream", zap.String("task_id", taskID))
 		readyCh <- fmt.Errorf("no agent client for task %s", taskID)
