@@ -42,12 +42,17 @@ export function useTaskMessages(
 
   useEffect(() => {
     if (!taskSessionId) return;
+    // Don't set waiting state if messages are already loaded (from SSR or cache)
+    if (messagesState.sessionId === taskSessionId && messagesState.items.length > 0) {
+      setIsWaitingForInitialMessages(false);
+      return;
+    }
     if (messagesState.items.length > 0) return;
     if (initialFetchStartRef.current === null) {
       initialFetchStartRef.current = Date.now();
       setIsWaitingForInitialMessages(true);
     }
-  }, [taskSessionId, messagesState.items.length]);
+  }, [taskSessionId, messagesState.sessionId, messagesState.items.length]);
 
   // Fetch messages on mount and when session changes
   useEffect(() => {
@@ -61,7 +66,15 @@ export function useTaskMessages(
     // before the API call completes (fixes race condition on first agent start)
     store.getState().setMessagesSessionId(taskSessionId);
 
-    if (lastFetchedSessionIdRef.current === taskSessionId && messagesState.items.length > 0) {
+    // Check if messages are already loaded (from SSR or previous fetch)
+    if (messagesState.sessionId === taskSessionId && messagesState.items.length > 0) {
+      console.log('[useTaskMessages] messages already loaded from SSR or cache, skipping fetch');
+      lastFetchedSessionIdRef.current = taskSessionId;
+      setIsWaitingForInitialMessages(false);
+      return;
+    }
+
+    if (lastFetchedSessionIdRef.current === taskSessionId) {
       return;
     }
 
@@ -102,7 +115,7 @@ export function useTaskMessages(
     };
 
     fetchMessages();
-  }, [taskSessionId, connectionStatus, messagesState.items.length, store]);
+  }, [taskSessionId, connectionStatus, messagesState.sessionId, messagesState.items.length, store]);
 
   // Subscribe to task for real-time updates
   useEffect(() => {

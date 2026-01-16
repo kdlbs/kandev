@@ -11,7 +11,6 @@ import { DEBUG_UI } from '@/lib/config';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import { useRepositories } from '@/hooks/use-repositories';
 import { useTaskAgent } from '@/hooks/use-task-agent';
-import { useTaskMessages } from '@/hooks/use-task-messages';
 import { useAppStore } from '@/components/state-provider';
 
 type TaskPageClientProps = {
@@ -51,11 +50,12 @@ export default function TaskPage({ task: initialTask, sessionId = null }: TaskPa
     handleStopAgent,
   } = useTaskAgent(task);
   const activeSessionId = sessionId ?? taskSessionId;
+
+  // Derive working state for debug overlay
   const isAgentWorking =
     taskSessionState !== null
       ? taskSessionState === 'STARTING' || taskSessionState === 'RUNNING'
       : isAgentRunning && (task?.state === 'IN_PROGRESS' || task?.state === 'SCHEDULING');
-  const { isLoading: isLoadingMessages } = useTaskMessages(task?.id ?? null, activeSessionId);
 
   useEffect(() => {
     queueMicrotask(() => setIsMounted(true));
@@ -128,9 +128,6 @@ export default function TaskPage({ task: initialTask, sessionId = null }: TaskPa
 
         <TaskLayout
           taskId={task?.id ?? null}
-          taskDescription={task?.description}
-          isLoadingMessages={isLoadingMessages}
-          isAgentWorking={isAgentWorking}
           onSendMessage={handleSendMessage}
         />
       </div>

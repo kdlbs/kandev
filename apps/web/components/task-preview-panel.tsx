@@ -4,7 +4,6 @@ import { IconArrowsMaximize, IconX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import type { Task } from "./kanban-card";
 import { TaskChatPanel } from "./task/task-chat-panel";
-import { useTaskMessages } from "@/hooks/use-task-messages";
 import { useTaskChatSession } from "@/hooks/use-task-chat-session";
 import { getWebSocketClient } from "@/lib/ws/connection";
 
@@ -21,10 +20,8 @@ const AGENTS = [
 ];
 
 export function TaskPreviewPanel({ task, sessionId = null, onClose, onMaximize }: TaskPreviewPanelProps) {
-  const { taskSessionId, isTaskSessionWorking } = useTaskChatSession(task?.id ?? null);
+  const { taskSessionId } = useTaskChatSession(task?.id ?? null);
   const activeSessionId = sessionId ?? taskSessionId;
-  const isActiveSessionWorking = sessionId ? isTaskSessionWorking && sessionId === taskSessionId : isTaskSessionWorking;
-  const { isLoading: isLoadingMessages } = useTaskMessages(task?.id ?? null, activeSessionId);
 
   const handleSendMessage = async (content: string) => {
     if (!task?.id) return;
@@ -81,10 +78,7 @@ export function TaskPreviewPanel({ task, sessionId = null, onClose, onMaximize }
           <TaskChatPanel
             agents={AGENTS}
             onSend={handleSendMessage}
-            isLoading={isLoadingMessages}
-            isAgentWorking={isActiveSessionWorking}
-            taskId={task.id}
-            taskDescription={task.description}
+            sessionId={activeSessionId}
           />
         ) : (
           <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
