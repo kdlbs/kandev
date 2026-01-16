@@ -34,7 +34,7 @@ export default function TaskPage({ task: initialTask, sessionId = null }: TaskPa
       column_id: (kanbanTask.columnId as string | undefined) ?? initialTask.column_id,
       position: kanbanTask.position ?? initialTask.position,
       state: (kanbanTask.state as Task['state'] | undefined) ?? initialTask.state,
-      repository_id: (kanbanTask.repositoryId as string | undefined) ?? initialTask.repository_id,
+      repositories: initialTask.repositories,
     };
   }, [initialTask, kanbanTask]);
   const connectionStatus = useAppStore((state) => state.connection.status);
@@ -64,8 +64,8 @@ export default function TaskPage({ task: initialTask, sessionId = null }: TaskPa
 
   const { repositories } = useRepositories(task?.workspace_id ?? null, Boolean(task?.workspace_id));
   const repository = useMemo(
-    () => repositories.find((item) => item.id === task?.repository_id) ?? null,
-    [repositories, task?.repository_id]
+    () => repositories.find((item) => item.id === task?.repositories?.[0]?.repository_id) ?? null,
+    [repositories, task?.repositories]
   );
 
   const handleSendMessage = useCallback(async (content: string) => {
@@ -115,7 +115,7 @@ export default function TaskPage({ task: initialTask, sessionId = null }: TaskPa
           activeSessionId={activeSessionId ?? null}
           taskTitle={task?.title}
           taskDescription={task?.description}
-          baseBranch={task?.base_branch ?? undefined}
+          baseBranch={task?.repositories?.[0]?.base_branch ?? undefined}
           onStartAgent={handleStartAgent}
           onStopAgent={handleStopAgent}
           isAgentRunning={isAgentRunning}

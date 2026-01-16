@@ -15,19 +15,21 @@ import (
 
 // MemoryRepository provides in-memory task storage operations
 type MemoryRepository struct {
-	workspaces     map[string]*models.Workspace
-	tasks          map[string]*models.Task
-	boards         map[string]*models.Board
-	columns        map[string]*models.Column
-	messages       map[string]*models.Message
-	repositories   map[string]*models.Repository
-	repoScripts    map[string]*models.RepositoryScript
-	taskSessions  map[string]*models.TaskSession
-	executors      map[string]*models.Executor
-	environments   map[string]*models.Environment
-	taskBoards     map[string]map[string]struct{}
-	taskPlacements map[string]map[string]*taskPlacement
-	mu             sync.RWMutex
+	workspaces           map[string]*models.Workspace
+	tasks                map[string]*models.Task
+	boards               map[string]*models.Board
+	columns              map[string]*models.Column
+	messages             map[string]*models.Message
+	repositories         map[string]*models.Repository
+	repoScripts          map[string]*models.RepositoryScript
+	taskRepositories     map[string]*models.TaskRepository
+	taskSessions         map[string]*models.TaskSession
+	taskSessionWorktrees map[string]*models.TaskSessionWorktree
+	executors            map[string]*models.Executor
+	environments         map[string]*models.Environment
+	taskBoards           map[string]map[string]struct{}
+	taskPlacements       map[string]map[string]*taskPlacement
+	mu                   sync.RWMutex
 }
 
 // Ensure MemoryRepository implements Repository interface
@@ -36,18 +38,20 @@ var _ Repository = (*MemoryRepository)(nil)
 // NewMemoryRepository creates a new in-memory task repository
 func NewMemoryRepository() *MemoryRepository {
 	repo := &MemoryRepository{
-		workspaces:     make(map[string]*models.Workspace),
-		tasks:          make(map[string]*models.Task),
-		boards:         make(map[string]*models.Board),
-		columns:        make(map[string]*models.Column),
-		messages:       make(map[string]*models.Message),
-		repositories:   make(map[string]*models.Repository),
-		repoScripts:    make(map[string]*models.RepositoryScript),
-		taskSessions:  make(map[string]*models.TaskSession),
-		executors:      make(map[string]*models.Executor),
-		environments:   make(map[string]*models.Environment),
-		taskBoards:     make(map[string]map[string]struct{}),
-		taskPlacements: make(map[string]map[string]*taskPlacement),
+		workspaces:           make(map[string]*models.Workspace),
+		tasks:                make(map[string]*models.Task),
+		boards:               make(map[string]*models.Board),
+		columns:              make(map[string]*models.Column),
+		messages:             make(map[string]*models.Message),
+		repositories:         make(map[string]*models.Repository),
+		repoScripts:          make(map[string]*models.RepositoryScript),
+		taskRepositories:     make(map[string]*models.TaskRepository),
+		taskSessions:         make(map[string]*models.TaskSession),
+		taskSessionWorktrees: make(map[string]*models.TaskSessionWorktree),
+		executors:            make(map[string]*models.Executor),
+		environments:         make(map[string]*models.Environment),
+		taskBoards:           make(map[string]map[string]struct{}),
+		taskPlacements:       make(map[string]map[string]*taskPlacement),
 	}
 	repo.seedDefaults()
 	return repo
@@ -319,6 +323,111 @@ func (r *MemoryRepository) RemoveTaskFromBoard(ctx context.Context, taskID, boar
 		delete(boards, boardID)
 	}
 	return nil
+}
+
+// TaskRepository operations
+
+// CreateTaskRepository creates a new task-repository association
+func (r *MemoryRepository) CreateTaskRepository(ctx context.Context, taskRepo *models.TaskRepository) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if taskRepo.ID == "" {
+		taskRepo.ID = uuid.New().String()
+	}
+	now := time.Now().UTC()
+	taskRepo.CreatedAt = now
+	taskRepo.UpdatedAt = now
+
+	r.taskRepositories[taskRepo.ID] = taskRepo
+	return nil
+}
+
+// GetTaskRepository retrieves a task repository by ID
+func (r *MemoryRepository) GetTaskRepository(ctx context.Context, id string) (*models.TaskRepository, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	taskRepo, ok := r.taskRepositories[id]
+	if !ok {
+		return nil, fmt.Errorf("task repository not found: %s", id)
+	}
+	return taskRepo, nil
+}
+
+// ListTaskRepositories retrieves all repositories for a task, ordered by position
+func (r *MemoryRepository) ListTaskRepositories(ctx context.Context, taskID string) ([]*models.TaskRepository, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var result []*models.TaskRepository
+	for _, taskRepo := range r.taskRepositories {
+		if taskRepo.TaskID == taskID {
+			result = append(result, taskRepo)
+		}
+	}
+
+	// Sort by position then created_at
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Position != result[j].Position {
+			return result[i].Position < result[j].Position
+		}
+		return result[i].CreatedAt.Before(result[j].CreatedAt)
+	})
+
+	return result, nil
+}
+
+// UpdateTaskRepository updates an existing task repository
+func (r *MemoryRepository) UpdateTaskRepository(ctx context.Context, taskRepo *models.TaskRepository) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, ok := r.taskRepositories[taskRepo.ID]; !ok {
+		return fmt.Errorf("task repository not found: %s", taskRepo.ID)
+	}
+
+	taskRepo.UpdatedAt = time.Now().UTC()
+	r.taskRepositories[taskRepo.ID] = taskRepo
+	return nil
+}
+
+// DeleteTaskRepository deletes a task repository by ID
+func (r *MemoryRepository) DeleteTaskRepository(ctx context.Context, id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, ok := r.taskRepositories[id]; !ok {
+		return fmt.Errorf("task repository not found: %s", id)
+	}
+
+	delete(r.taskRepositories, id)
+	return nil
+}
+
+// DeleteTaskRepositoriesByTask deletes all repositories for a task
+func (r *MemoryRepository) DeleteTaskRepositoriesByTask(ctx context.Context, taskID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for id, taskRepo := range r.taskRepositories {
+		if taskRepo.TaskID == taskID {
+			delete(r.taskRepositories, id)
+		}
+	}
+	return nil
+}
+
+// GetPrimaryTaskRepository retrieves the primary repository for a task (position=0 or first by created_at)
+func (r *MemoryRepository) GetPrimaryTaskRepository(ctx context.Context, taskID string) (*models.TaskRepository, error) {
+	repos, err := r.ListTaskRepositories(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	if len(repos) == 0 {
+		return nil, nil // No repositories for this task
+	}
+	return repos[0], nil
 }
 
 // Board operations
@@ -827,19 +936,26 @@ func (r *MemoryRepository) CreateTaskSession(ctx context.Context, session *model
 // GetTaskSession retrieves an agent session by ID
 func (r *MemoryRepository) GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error) {
 	r.mu.RLock()
-	defer r.mu.RUnlock()
 
 	session, ok := r.taskSessions[id]
 	if !ok {
+		r.mu.RUnlock()
 		return nil, fmt.Errorf("agent session not found: %s", id)
 	}
-	return session, nil
+	sessionCopy := *session
+	r.mu.RUnlock()
+
+	worktrees, err := r.ListTaskSessionWorktrees(ctx, sessionCopy.ID)
+	if err != nil {
+		return nil, err
+	}
+	sessionCopy.Worktrees = worktrees
+	return &sessionCopy, nil
 }
 
 // GetTaskSessionByTaskID retrieves the most recent agent session for a task
 func (r *MemoryRepository) GetTaskSessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error) {
 	r.mu.RLock()
-	defer r.mu.RUnlock()
 
 	var latest *models.TaskSession
 	for _, session := range r.taskSessions {
@@ -850,21 +966,38 @@ func (r *MemoryRepository) GetTaskSessionByTaskID(ctx context.Context, taskID st
 		}
 	}
 	if latest == nil {
+		r.mu.RUnlock()
 		return nil, fmt.Errorf("no agent session found for task: %s", taskID)
 	}
-	return latest, nil
+	sessionCopy := *latest
+	r.mu.RUnlock()
+
+	worktrees, err := r.ListTaskSessionWorktrees(ctx, sessionCopy.ID)
+	if err != nil {
+		return nil, err
+	}
+	sessionCopy.Worktrees = worktrees
+	return &sessionCopy, nil
 }
 
 // GetActiveTaskSessionByTaskID retrieves the active agent session for a task
 func (r *MemoryRepository) GetActiveTaskSessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error) {
 	r.mu.RLock()
-	defer r.mu.RUnlock()
 
 	for _, session := range r.taskSessions {
 		if session.TaskID == taskID && (session.State == models.TaskSessionStateCreated || session.State == models.TaskSessionStateStarting || session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateWaitingForInput) {
-			return session, nil
+			sessionCopy := *session
+			r.mu.RUnlock()
+
+			worktrees, err := r.ListTaskSessionWorktrees(ctx, sessionCopy.ID)
+			if err != nil {
+				return nil, err
+			}
+			sessionCopy.Worktrees = worktrees
+			return &sessionCopy, nil
 		}
 	}
+	r.mu.RUnlock()
 	return nil, fmt.Errorf("no active agent session found for task: %s", taskID)
 }
 
@@ -903,13 +1036,22 @@ func (r *MemoryRepository) UpdateTaskSessionState(ctx context.Context, id string
 // ListTaskSessions returns all agent sessions for a task
 func (r *MemoryRepository) ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
 	r.mu.RLock()
-	defer r.mu.RUnlock()
 
 	var result []*models.TaskSession
 	for _, session := range r.taskSessions {
 		if session.TaskID == taskID {
-			result = append(result, session)
+			sessionCopy := *session
+			result = append(result, &sessionCopy)
 		}
+	}
+	r.mu.RUnlock()
+
+	for _, session := range result {
+		worktrees, err := r.ListTaskSessionWorktrees(ctx, session.ID)
+		if err != nil {
+			return nil, err
+		}
+		session.Worktrees = worktrees
 	}
 	return result, nil
 }
@@ -917,13 +1059,22 @@ func (r *MemoryRepository) ListTaskSessions(ctx context.Context, taskID string) 
 // ListActiveTaskSessions returns all active agent sessions
 func (r *MemoryRepository) ListActiveTaskSessions(ctx context.Context) ([]*models.TaskSession, error) {
 	r.mu.RLock()
-	defer r.mu.RUnlock()
 
 	var result []*models.TaskSession
 	for _, session := range r.taskSessions {
 		if session.State == models.TaskSessionStateCreated || session.State == models.TaskSessionStateStarting || session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateWaitingForInput {
-			result = append(result, session)
+			sessionCopy := *session
+			result = append(result, &sessionCopy)
 		}
+	}
+	r.mu.RUnlock()
+
+	for _, session := range result {
+		worktrees, err := r.ListTaskSessionWorktrees(ctx, session.ID)
+		if err != nil {
+			return nil, err
+		}
+		session.Worktrees = worktrees
 	}
 	return result, nil
 }
@@ -972,12 +1123,11 @@ func (r *MemoryRepository) HasActiveTaskSessionsByRepository(ctx context.Context
 		if !isSessionActive(session.State) {
 			continue
 		}
-		task, ok := r.tasks[session.TaskID]
-		if !ok {
-			continue
-		}
-		if task.RepositoryID == repositoryID {
-			return true, nil
+		// Check if any task repository matches
+		for _, taskRepo := range r.taskRepositories {
+			if taskRepo.TaskID == session.TaskID && taskRepo.RepositoryID == repositoryID {
+				return true, nil
+			}
 		}
 	}
 	return false, nil
@@ -992,6 +1142,80 @@ func (r *MemoryRepository) DeleteTaskSession(ctx context.Context, id string) err
 		return fmt.Errorf("agent session not found: %s", id)
 	}
 	delete(r.taskSessions, id)
+	for wtID, wt := range r.taskSessionWorktrees {
+		if wt.SessionID == id {
+			delete(r.taskSessionWorktrees, wtID)
+		}
+	}
+	return nil
+}
+
+// Task Session Worktree operations
+
+func (r *MemoryRepository) CreateTaskSessionWorktree(ctx context.Context, sessionWorktree *models.TaskSessionWorktree) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for _, existing := range r.taskSessionWorktrees {
+		if existing.SessionID == sessionWorktree.SessionID && existing.WorktreeID == sessionWorktree.WorktreeID {
+			existing.RepositoryID = sessionWorktree.RepositoryID
+			existing.Position = sessionWorktree.Position
+			existing.WorktreePath = sessionWorktree.WorktreePath
+			existing.WorktreeBranch = sessionWorktree.WorktreeBranch
+			return nil
+		}
+	}
+	if sessionWorktree.ID == "" {
+		sessionWorktree.ID = uuid.New().String()
+	}
+	sessionWorktree.CreatedAt = time.Now().UTC()
+
+	r.taskSessionWorktrees[sessionWorktree.ID] = sessionWorktree
+	return nil
+}
+
+func (r *MemoryRepository) ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskSessionWorktree, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var worktrees []*models.TaskSessionWorktree
+	for _, wt := range r.taskSessionWorktrees {
+		if wt.SessionID == sessionID {
+			worktrees = append(worktrees, wt)
+		}
+	}
+
+	// Sort by position, then created_at
+	sort.Slice(worktrees, func(i, j int) bool {
+		if worktrees[i].Position != worktrees[j].Position {
+			return worktrees[i].Position < worktrees[j].Position
+		}
+		return worktrees[i].CreatedAt.Before(worktrees[j].CreatedAt)
+	})
+
+	return worktrees, nil
+}
+
+func (r *MemoryRepository) DeleteTaskSessionWorktree(ctx context.Context, id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, ok := r.taskSessionWorktrees[id]; !ok {
+		return fmt.Errorf("task session worktree not found: %s", id)
+	}
+	delete(r.taskSessionWorktrees, id)
+	return nil
+}
+
+func (r *MemoryRepository) DeleteTaskSessionWorktreesBySession(ctx context.Context, sessionID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for id, wt := range r.taskSessionWorktrees {
+		if wt.SessionID == sessionID {
+			delete(r.taskSessionWorktrees, id)
+		}
+	}
 	return nil
 }
 

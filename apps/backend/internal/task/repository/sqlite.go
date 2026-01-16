@@ -155,8 +155,6 @@ func (r *SQLiteRepository) initSchema() error {
 		description TEXT DEFAULT '',
 		state TEXT DEFAULT 'TODO',
 		priority INTEGER DEFAULT 0,
-		repository_id TEXT DEFAULT '',
-		base_branch TEXT DEFAULT '',
 		assigned_to TEXT DEFAULT '',
 		position INTEGER DEFAULT 0,
 		metadata TEXT DEFAULT '{}',
@@ -164,6 +162,20 @@ func (r *SQLiteRepository) initSchema() error {
 		updated_at DATETIME NOT NULL,
 		FOREIGN KEY (board_id) REFERENCES boards(id) ON DELETE CASCADE,
 		FOREIGN KEY (column_id) REFERENCES columns(id) ON DELETE CASCADE
+	);
+
+	CREATE TABLE IF NOT EXISTS task_repositories (
+		id TEXT PRIMARY KEY,
+		task_id TEXT NOT NULL,
+		repository_id TEXT NOT NULL,
+		base_branch TEXT DEFAULT '',
+		position INTEGER DEFAULT 0,
+		metadata TEXT DEFAULT '{}',
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL,
+		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+		FOREIGN KEY (repository_id) REFERENCES repositories(id) ON DELETE CASCADE,
+		UNIQUE(task_id, repository_id)
 	);
 
 	CREATE TABLE IF NOT EXISTS repositories (
@@ -198,6 +210,8 @@ func (r *SQLiteRepository) initSchema() error {
 
 	CREATE INDEX IF NOT EXISTS idx_tasks_board_id ON tasks(board_id);
 	CREATE INDEX IF NOT EXISTS idx_tasks_column_id ON tasks(column_id);
+	CREATE INDEX IF NOT EXISTS idx_task_repositories_task_id ON task_repositories(task_id);
+	CREATE INDEX IF NOT EXISTS idx_task_repositories_repository_id ON task_repositories(repository_id);
 	CREATE INDEX IF NOT EXISTS idx_columns_board_id ON columns(board_id);
 	CREATE INDEX IF NOT EXISTS idx_repositories_workspace_id ON repositories(workspace_id);
 	CREATE INDEX IF NOT EXISTS idx_repository_scripts_repo_id ON repository_scripts(repository_id);
@@ -230,9 +244,6 @@ func (r *SQLiteRepository) initSchema() error {
 		environment_id TEXT DEFAULT '',
 		repository_id TEXT DEFAULT '',
 		base_branch TEXT DEFAULT '',
-		worktree_id TEXT DEFAULT '',
-		worktree_path TEXT DEFAULT '',
-		worktree_branch TEXT DEFAULT '',
 		agent_profile_snapshot TEXT DEFAULT '{}',
 		executor_snapshot TEXT DEFAULT '{}',
 		environment_snapshot TEXT DEFAULT '{}',
@@ -250,6 +261,28 @@ func (r *SQLiteRepository) initSchema() error {
 	CREATE INDEX IF NOT EXISTS idx_task_sessions_task_id ON task_sessions(task_id);
 	CREATE INDEX IF NOT EXISTS idx_task_sessions_state ON task_sessions(state);
 	CREATE INDEX IF NOT EXISTS idx_task_sessions_task_state ON task_sessions(task_id, state);
+
+	CREATE TABLE IF NOT EXISTS task_session_worktrees (
+		id TEXT PRIMARY KEY,
+		session_id TEXT NOT NULL,
+		worktree_id TEXT NOT NULL,
+		repository_id TEXT NOT NULL,
+		position INTEGER DEFAULT 0,
+		worktree_path TEXT DEFAULT '',
+		worktree_branch TEXT DEFAULT '',
+		status TEXT NOT NULL DEFAULT 'active',
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL,
+		merged_at DATETIME,
+		deleted_at DATETIME,
+		FOREIGN KEY (session_id) REFERENCES task_sessions(id) ON DELETE CASCADE,
+		UNIQUE(session_id, worktree_id)
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_task_session_worktrees_session_id ON task_session_worktrees(session_id);
+	CREATE INDEX IF NOT EXISTS idx_task_session_worktrees_worktree_id ON task_session_worktrees(worktree_id);
+	CREATE INDEX IF NOT EXISTS idx_task_session_worktrees_repository_id ON task_session_worktrees(repository_id);
+	CREATE INDEX IF NOT EXISTS idx_task_session_worktrees_status ON task_session_worktrees(status);
 	`
 
 	if _, err := r.db.Exec(schema); err != nil {
@@ -772,9 +805,9 @@ func (r *SQLiteRepository) CreateTask(ctx context.Context, task *models.Task) er
 	}
 
 	_, err = tx.ExecContext(ctx, `
-		INSERT INTO tasks (id, workspace_id, board_id, column_id, title, description, state, priority, repository_id, base_branch, assigned_to, position, metadata, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, task.ID, task.WorkspaceID, task.BoardID, task.ColumnID, task.Title, task.Description, task.State, task.Priority, task.RepositoryID, task.BaseBranch, task.AssignedTo, task.Position, string(metadata), task.CreatedAt, task.UpdatedAt)
+		INSERT INTO tasks (id, workspace_id, board_id, column_id, title, description, state, priority, assigned_to, position, metadata, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, task.ID, task.WorkspaceID, task.BoardID, task.ColumnID, task.Title, task.Description, task.State, task.Priority, task.AssignedTo, task.Position, string(metadata), task.CreatedAt, task.UpdatedAt)
 	if err != nil {
 		if rollbackErr := tx.Rollback(); rollbackErr != nil {
 			return fmt.Errorf("failed to rollback task insert: %w", rollbackErr)
@@ -789,12 +822,12 @@ func (r *SQLiteRepository) CreateTask(ctx context.Context, task *models.Task) er
 func (r *SQLiteRepository) GetTask(ctx context.Context, id string) (*models.Task, error) {
 	task := &models.Task{}
 	var metadata string
-	var repositoryID, baseBranch, assignedTo sql.NullString
+	var assignedTo sql.NullString
 
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, workspace_id, board_id, column_id, title, description, state, priority, repository_id, base_branch, assigned_to, position, metadata, created_at, updated_at
+		SELECT id, workspace_id, board_id, column_id, title, description, state, priority, assigned_to, position, metadata, created_at, updated_at
 		FROM tasks WHERE id = ?
-	`, id).Scan(&task.ID, &task.WorkspaceID, &task.BoardID, &task.ColumnID, &task.Title, &task.Description, &task.State, &task.Priority, &repositoryID, &baseBranch, &assignedTo, &task.Position, &metadata, &task.CreatedAt, &task.UpdatedAt)
+	`, id).Scan(&task.ID, &task.WorkspaceID, &task.BoardID, &task.ColumnID, &task.Title, &task.Description, &task.State, &task.Priority, &assignedTo, &task.Position, &metadata, &task.CreatedAt, &task.UpdatedAt)
 
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("task not found: %s", id)
@@ -803,8 +836,6 @@ func (r *SQLiteRepository) GetTask(ctx context.Context, id string) (*models.Task
 		return nil, err
 	}
 
-	task.RepositoryID = repositoryID.String
-	task.BaseBranch = baseBranch.String
 	task.AssignedTo = assignedTo.String
 	_ = json.Unmarshal([]byte(metadata), &task.Metadata)
 	return task, nil
@@ -820,9 +851,9 @@ func (r *SQLiteRepository) UpdateTask(ctx context.Context, task *models.Task) er
 	}
 
 	result, err := r.db.ExecContext(ctx, `
-		UPDATE tasks SET workspace_id = ?, board_id = ?, column_id = ?, title = ?, description = ?, state = ?, priority = ?, repository_id = ?, base_branch = ?, assigned_to = ?, position = ?, metadata = ?, updated_at = ?
+		UPDATE tasks SET workspace_id = ?, board_id = ?, column_id = ?, title = ?, description = ?, state = ?, priority = ?, assigned_to = ?, position = ?, metadata = ?, updated_at = ?
 		WHERE id = ?
-	`, task.WorkspaceID, task.BoardID, task.ColumnID, task.Title, task.Description, task.State, task.Priority, task.RepositoryID, task.BaseBranch, task.AssignedTo, task.Position, string(metadata), task.UpdatedAt, task.ID)
+	`, task.WorkspaceID, task.BoardID, task.ColumnID, task.Title, task.Description, task.State, task.Priority, task.AssignedTo, task.Position, string(metadata), task.UpdatedAt, task.ID)
 	if err != nil {
 		return err
 	}
@@ -851,7 +882,7 @@ func (r *SQLiteRepository) DeleteTask(ctx context.Context, id string) error {
 // ListTasks returns all tasks for a board
 func (r *SQLiteRepository) ListTasks(ctx context.Context, boardID string) ([]*models.Task, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, workspace_id, board_id, column_id, title, description, state, priority, repository_id, base_branch, assigned_to, position, metadata, created_at, updated_at
+		SELECT id, workspace_id, board_id, column_id, title, description, state, priority, assigned_to, position, metadata, created_at, updated_at
 		FROM tasks
 		WHERE board_id = ?
 		ORDER BY position
@@ -867,7 +898,7 @@ func (r *SQLiteRepository) ListTasks(ctx context.Context, boardID string) ([]*mo
 // ListTasksByColumn returns all tasks in a column
 func (r *SQLiteRepository) ListTasksByColumn(ctx context.Context, columnID string) ([]*models.Task, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, workspace_id, board_id, column_id, title, description, state, priority, repository_id, base_branch, assigned_to, position, metadata, created_at, updated_at
+		SELECT id, workspace_id, board_id, column_id, title, description, state, priority, assigned_to, position, metadata, created_at, updated_at
 		FROM tasks
 		WHERE column_id = ? ORDER BY position
 	`, columnID)
@@ -884,7 +915,7 @@ func (r *SQLiteRepository) scanTasks(rows *sql.Rows) ([]*models.Task, error) {
 	for rows.Next() {
 		task := &models.Task{}
 		var metadata string
-		var repositoryID, baseBranch, assignedTo sql.NullString
+		var assignedTo sql.NullString
 		err := rows.Scan(
 			&task.ID,
 			&task.WorkspaceID,
@@ -894,8 +925,6 @@ func (r *SQLiteRepository) scanTasks(rows *sql.Rows) ([]*models.Task, error) {
 			&task.Description,
 			&task.State,
 			&task.Priority,
-			&repositoryID,
-			&baseBranch,
 			&assignedTo,
 			&task.Position,
 			&metadata,
@@ -905,8 +934,6 @@ func (r *SQLiteRepository) scanTasks(rows *sql.Rows) ([]*models.Task, error) {
 		if err != nil {
 			return nil, err
 		}
-		task.RepositoryID = repositoryID.String
-		task.BaseBranch = baseBranch.String
 		task.AssignedTo = assignedTo.String
 		_ = json.Unmarshal([]byte(metadata), &task.Metadata)
 		result = append(result, task)
@@ -926,6 +953,149 @@ func (r *SQLiteRepository) UpdateTaskState(ctx context.Context, id string, state
 		return fmt.Errorf("task not found: %s", id)
 	}
 	return nil
+}
+
+// TaskRepository operations
+
+func (r *SQLiteRepository) CreateTaskRepository(ctx context.Context, taskRepo *models.TaskRepository) error {
+	if taskRepo.ID == "" {
+		taskRepo.ID = uuid.New().String()
+	}
+	now := time.Now().UTC()
+	taskRepo.CreatedAt = now
+	taskRepo.UpdatedAt = now
+
+	metadataJSON, err := json.Marshal(taskRepo.Metadata)
+	if err != nil {
+		metadataJSON = []byte("{}")
+	}
+
+	_, err = r.db.ExecContext(ctx, `
+		INSERT INTO task_repositories (
+			id, task_id, repository_id, base_branch, position, metadata, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`, taskRepo.ID, taskRepo.TaskID, taskRepo.RepositoryID, taskRepo.BaseBranch, taskRepo.Position, string(metadataJSON), taskRepo.CreatedAt, taskRepo.UpdatedAt)
+	return err
+}
+
+func (r *SQLiteRepository) GetTaskRepository(ctx context.Context, id string) (*models.TaskRepository, error) {
+	taskRepo := &models.TaskRepository{}
+	var metadataJSON string
+
+	err := r.db.QueryRowContext(ctx, `
+		SELECT id, task_id, repository_id, base_branch, position, metadata, created_at, updated_at
+		FROM task_repositories WHERE id = ?
+	`, id).Scan(
+		&taskRepo.ID,
+		&taskRepo.TaskID,
+		&taskRepo.RepositoryID,
+		&taskRepo.BaseBranch,
+		&taskRepo.Position,
+		&metadataJSON,
+		&taskRepo.CreatedAt,
+		&taskRepo.UpdatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("task repository not found: %s", id)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if metadataJSON != "" && metadataJSON != "{}" {
+		if err := json.Unmarshal([]byte(metadataJSON), &taskRepo.Metadata); err != nil {
+			return nil, fmt.Errorf("failed to deserialize task repository metadata: %w", err)
+		}
+	}
+	return taskRepo, nil
+}
+
+func (r *SQLiteRepository) ListTaskRepositories(ctx context.Context, taskID string) ([]*models.TaskRepository, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, task_id, repository_id, base_branch, position, metadata, created_at, updated_at
+		FROM task_repositories
+		WHERE task_id = ?
+		ORDER BY position ASC, created_at ASC
+	`, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var result []*models.TaskRepository
+	for rows.Next() {
+		taskRepo := &models.TaskRepository{}
+		var metadataJSON string
+		if err := rows.Scan(
+			&taskRepo.ID,
+			&taskRepo.TaskID,
+			&taskRepo.RepositoryID,
+			&taskRepo.BaseBranch,
+			&taskRepo.Position,
+			&metadataJSON,
+			&taskRepo.CreatedAt,
+			&taskRepo.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		if metadataJSON != "" && metadataJSON != "{}" {
+			if err := json.Unmarshal([]byte(metadataJSON), &taskRepo.Metadata); err != nil {
+				return nil, fmt.Errorf("failed to deserialize task repository metadata: %w", err)
+			}
+		}
+		result = append(result, taskRepo)
+	}
+	return result, rows.Err()
+}
+
+func (r *SQLiteRepository) UpdateTaskRepository(ctx context.Context, taskRepo *models.TaskRepository) error {
+	taskRepo.UpdatedAt = time.Now().UTC()
+
+	metadataJSON, err := json.Marshal(taskRepo.Metadata)
+	if err != nil {
+		metadataJSON = []byte("{}")
+	}
+
+	result, err := r.db.ExecContext(ctx, `
+		UPDATE task_repositories SET
+			task_id = ?, repository_id = ?, base_branch = ?, position = ?, metadata = ?, updated_at = ?
+		WHERE id = ?
+	`, taskRepo.TaskID, taskRepo.RepositoryID, taskRepo.BaseBranch, taskRepo.Position, string(metadataJSON), taskRepo.UpdatedAt, taskRepo.ID)
+	if err != nil {
+		return err
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("task repository not found: %s", taskRepo.ID)
+	}
+	return nil
+}
+
+func (r *SQLiteRepository) DeleteTaskRepository(ctx context.Context, id string) error {
+	result, err := r.db.ExecContext(ctx, `DELETE FROM task_repositories WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("task repository not found: %s", id)
+	}
+	return nil
+}
+
+func (r *SQLiteRepository) DeleteTaskRepositoriesByTask(ctx context.Context, taskID string) error {
+	_, err := r.db.ExecContext(ctx, `DELETE FROM task_repositories WHERE task_id = ?`, taskID)
+	return err
+}
+
+func (r *SQLiteRepository) GetPrimaryTaskRepository(ctx context.Context, taskID string) (*models.TaskRepository, error) {
+	repos, err := r.ListTaskRepositories(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	if len(repos) == 0 {
+		return nil, nil
+	}
+	return repos[0], nil
 }
 
 // AddTaskToBoard adds a task to a board with placement
@@ -1633,12 +1803,12 @@ func (r *SQLiteRepository) CreateTaskSession(ctx context.Context, session *model
 	_, err = r.db.ExecContext(ctx, `
 		INSERT INTO task_sessions (
 			id, task_id, agent_instance_id, container_id, agent_profile_id, executor_id, environment_id,
-			repository_id, base_branch, worktree_id, worktree_path, worktree_branch,
+			repository_id, base_branch,
 			agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 			state, progress, error_message, metadata, started_at, completed_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, session.ID, session.TaskID, session.AgentInstanceID, session.ContainerID, session.AgentProfileID,
-		session.ExecutorID, session.EnvironmentID, session.RepositoryID, session.BaseBranch, session.WorktreeID, session.WorktreePath, session.WorktreeBranch,
+		session.ExecutorID, session.EnvironmentID, session.RepositoryID, session.BaseBranch,
 		string(agentProfileSnapshotJSON), string(executorSnapshotJSON), string(environmentSnapshotJSON), string(repositorySnapshotJSON),
 		string(session.State), session.Progress, session.ErrorMessage, string(metadataJSON),
 		session.StartedAt, session.CompletedAt, session.UpdatedAt)
@@ -1659,14 +1829,14 @@ func (r *SQLiteRepository) GetTaskSession(ctx context.Context, id string) (*mode
 
 	err := r.db.QueryRowContext(ctx, `
 		SELECT id, task_id, agent_instance_id, container_id, agent_profile_id, executor_id, environment_id,
-		       repository_id, base_branch, worktree_id, worktree_path, worktree_branch,
+		       repository_id, base_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 		       state, progress, error_message, metadata, started_at, completed_at, updated_at
 		FROM task_sessions WHERE id = ?
 	`, id).Scan(
 		&session.ID, &session.TaskID, &session.AgentInstanceID, &session.ContainerID, &session.AgentProfileID,
 		&session.ExecutorID, &session.EnvironmentID,
-		&session.RepositoryID, &session.BaseBranch, &session.WorktreeID, &session.WorktreePath, &session.WorktreeBranch,
+		&session.RepositoryID, &session.BaseBranch,
 		&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
 		&state, &session.Progress, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
 	)
@@ -1708,6 +1878,12 @@ func (r *SQLiteRepository) GetTaskSession(ctx context.Context, id string) (*mode
 		}
 	}
 
+	worktrees, err := r.ListTaskSessionWorktrees(ctx, session.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load session worktrees: %w", err)
+	}
+	session.Worktrees = worktrees
+
 	return session, nil
 }
 
@@ -1724,14 +1900,14 @@ func (r *SQLiteRepository) GetTaskSessionByTaskID(ctx context.Context, taskID st
 
 	err := r.db.QueryRowContext(ctx, `
 		SELECT id, task_id, agent_instance_id, container_id, agent_profile_id, executor_id, environment_id,
-		       repository_id, base_branch, worktree_id, worktree_path, worktree_branch,
+		       repository_id, base_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 		       state, progress, error_message, metadata, started_at, completed_at, updated_at
 		FROM task_sessions WHERE task_id = ? ORDER BY started_at DESC LIMIT 1
 	`, taskID).Scan(
 		&session.ID, &session.TaskID, &session.AgentInstanceID, &session.ContainerID, &session.AgentProfileID,
 		&session.ExecutorID, &session.EnvironmentID,
-		&session.RepositoryID, &session.BaseBranch, &session.WorktreeID, &session.WorktreePath, &session.WorktreeBranch,
+		&session.RepositoryID, &session.BaseBranch,
 		&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
 		&state, &session.Progress, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
 	)
@@ -1773,6 +1949,12 @@ func (r *SQLiteRepository) GetTaskSessionByTaskID(ctx context.Context, taskID st
 		}
 	}
 
+	worktrees, err := r.ListTaskSessionWorktrees(ctx, session.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load session worktrees: %w", err)
+	}
+	session.Worktrees = worktrees
+
 	return session, nil
 }
 
@@ -1789,7 +1971,7 @@ func (r *SQLiteRepository) GetActiveTaskSessionByTaskID(ctx context.Context, tas
 
 	err := r.db.QueryRowContext(ctx, `
 		SELECT id, task_id, agent_instance_id, container_id, agent_profile_id, executor_id, environment_id,
-		       repository_id, base_branch, worktree_id, worktree_path, worktree_branch,
+		       repository_id, base_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 		       state, progress, error_message, metadata, started_at, completed_at, updated_at
 		FROM task_sessions
@@ -1798,7 +1980,7 @@ func (r *SQLiteRepository) GetActiveTaskSessionByTaskID(ctx context.Context, tas
 	`, taskID).Scan(
 		&session.ID, &session.TaskID, &session.AgentInstanceID, &session.ContainerID, &session.AgentProfileID,
 		&session.ExecutorID, &session.EnvironmentID,
-		&session.RepositoryID, &session.BaseBranch, &session.WorktreeID, &session.WorktreePath, &session.WorktreeBranch,
+		&session.RepositoryID, &session.BaseBranch,
 		&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
 		&state, &session.Progress, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
 	)
@@ -1840,6 +2022,12 @@ func (r *SQLiteRepository) GetActiveTaskSessionByTaskID(ctx context.Context, tas
 		}
 	}
 
+	worktrees, err := r.ListTaskSessionWorktrees(ctx, session.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load session worktrees: %w", err)
+	}
+	session.Worktrees = worktrees
+
 	return session, nil
 }
 
@@ -1871,12 +2059,12 @@ func (r *SQLiteRepository) UpdateTaskSession(ctx context.Context, session *model
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE task_sessions SET
 			agent_instance_id = ?, container_id = ?, agent_profile_id = ?, executor_id = ?, environment_id = ?,
-			repository_id = ?, base_branch = ?, worktree_id = ?, worktree_path = ?, worktree_branch = ?,
+			repository_id = ?, base_branch = ?,
 			agent_profile_snapshot = ?, executor_snapshot = ?, environment_snapshot = ?, repository_snapshot = ?,
 			state = ?, progress = ?, error_message = ?, metadata = ?, completed_at = ?, updated_at = ?
 		WHERE id = ?
 	`, session.AgentInstanceID, session.ContainerID, session.AgentProfileID, session.ExecutorID, session.EnvironmentID,
-		session.RepositoryID, session.BaseBranch, session.WorktreeID, session.WorktreePath, session.WorktreeBranch,
+		session.RepositoryID, session.BaseBranch,
 		string(agentProfileSnapshotJSON), string(executorSnapshotJSON), string(environmentSnapshotJSON), string(repositorySnapshotJSON),
 		string(session.State), session.Progress, session.ErrorMessage, string(metadataJSON), session.CompletedAt,
 		session.UpdatedAt, session.ID)
@@ -1918,7 +2106,7 @@ func (r *SQLiteRepository) UpdateTaskSessionState(ctx context.Context, id string
 func (r *SQLiteRepository) ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, task_id, agent_instance_id, container_id, agent_profile_id, executor_id, environment_id,
-		       repository_id, base_branch, worktree_id, worktree_path, worktree_branch,
+		       repository_id, base_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 		       state, progress, error_message, metadata, started_at, completed_at, updated_at
 		FROM task_sessions WHERE task_id = ? ORDER BY started_at DESC
@@ -1928,14 +2116,25 @@ func (r *SQLiteRepository) ListTaskSessions(ctx context.Context, taskID string) 
 	}
 	defer func() { _ = rows.Close() }()
 
-	return r.scanTaskSessions(rows)
+	sessions, err := r.scanTaskSessions(ctx, rows)
+	if err != nil {
+		return nil, err
+	}
+	for _, session := range sessions {
+		worktrees, err := r.ListTaskSessionWorktrees(ctx, session.ID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load session worktrees: %w", err)
+		}
+		session.Worktrees = worktrees
+	}
+	return sessions, nil
 }
 
 // ListActiveAgentSessions returns all active agent sessions across all tasks
 func (r *SQLiteRepository) ListActiveTaskSessions(ctx context.Context) ([]*models.TaskSession, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, task_id, agent_instance_id, container_id, agent_profile_id, executor_id, environment_id,
-		       repository_id, base_branch, worktree_id, worktree_path, worktree_branch,
+		       repository_id, base_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 		       state, progress, error_message, metadata, started_at, completed_at, updated_at
 		FROM task_sessions WHERE state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT') ORDER BY started_at DESC
@@ -1945,7 +2144,18 @@ func (r *SQLiteRepository) ListActiveTaskSessions(ctx context.Context) ([]*model
 	}
 	defer func() { _ = rows.Close() }()
 
-	return r.scanTaskSessions(rows)
+	sessions, err := r.scanTaskSessions(ctx, rows)
+	if err != nil {
+		return nil, err
+	}
+	for _, session := range sessions {
+		worktrees, err := r.ListTaskSessionWorktrees(ctx, session.ID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load session worktrees: %w", err)
+		}
+		session.Worktrees = worktrees
+	}
+	return sessions, nil
 }
 
 func (r *SQLiteRepository) HasActiveTaskSessionsByAgentProfile(ctx context.Context, agentProfileID string) (bool, error) {
@@ -2004,7 +2214,7 @@ func (r *SQLiteRepository) HasActiveTaskSessionsByRepository(ctx context.Context
 }
 
 // scanAgentSessions is a helper to scan multiple agent session rows
-func (r *SQLiteRepository) scanTaskSessions(rows *sql.Rows) ([]*models.TaskSession, error) {
+func (r *SQLiteRepository) scanTaskSessions(ctx context.Context, rows *sql.Rows) ([]*models.TaskSession, error) {
 	var result []*models.TaskSession
 	for rows.Next() {
 		session := &models.TaskSession{}
@@ -2019,7 +2229,7 @@ func (r *SQLiteRepository) scanTaskSessions(rows *sql.Rows) ([]*models.TaskSessi
 		err := rows.Scan(
 			&session.ID, &session.TaskID, &session.AgentInstanceID, &session.ContainerID, &session.AgentProfileID,
 			&session.ExecutorID, &session.EnvironmentID,
-			&session.RepositoryID, &session.BaseBranch, &session.WorktreeID, &session.WorktreePath, &session.WorktreeBranch,
+			&session.RepositoryID, &session.BaseBranch,
 			&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
 			&state, &session.Progress, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
 		)
@@ -2074,6 +2284,94 @@ func (r *SQLiteRepository) DeleteTaskSession(ctx context.Context, id string) err
 		return fmt.Errorf("agent session not found: %s", id)
 	}
 	return nil
+}
+
+// Task Session Worktree operations
+
+func (r *SQLiteRepository) CreateTaskSessionWorktree(ctx context.Context, sessionWorktree *models.TaskSessionWorktree) error {
+	if sessionWorktree.ID == "" {
+		sessionWorktree.ID = uuid.New().String()
+	}
+	now := time.Now().UTC()
+	sessionWorktree.CreatedAt = now
+	updatedAt := now
+
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO task_session_worktrees (
+			id, session_id, worktree_id, repository_id, position,
+			worktree_path, worktree_branch, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(session_id, worktree_id) DO UPDATE SET
+			repository_id = excluded.repository_id,
+			position = excluded.position,
+			worktree_path = excluded.worktree_path,
+			worktree_branch = excluded.worktree_branch,
+			updated_at = excluded.updated_at
+	`,
+		sessionWorktree.ID,
+		sessionWorktree.SessionID,
+		sessionWorktree.WorktreeID,
+		sessionWorktree.RepositoryID,
+		sessionWorktree.Position,
+		sessionWorktree.WorktreePath,
+		sessionWorktree.WorktreeBranch,
+		sessionWorktree.CreatedAt,
+		updatedAt,
+	)
+	return err
+}
+
+func (r *SQLiteRepository) ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskSessionWorktree, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT
+			tsw.id, tsw.session_id, tsw.worktree_id, tsw.repository_id, tsw.position,
+			tsw.worktree_path, tsw.worktree_branch, tsw.created_at
+		FROM task_session_worktrees tsw
+		WHERE tsw.session_id = ?
+		ORDER BY tsw.position ASC, tsw.created_at ASC
+	`, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var worktrees []*models.TaskSessionWorktree
+	for rows.Next() {
+		var wt models.TaskSessionWorktree
+		err := rows.Scan(
+			&wt.ID,
+			&wt.SessionID,
+			&wt.WorktreeID,
+			&wt.RepositoryID,
+			&wt.Position,
+			&wt.WorktreePath,
+			&wt.WorktreeBranch,
+			&wt.CreatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+		worktrees = append(worktrees, &wt)
+	}
+	return worktrees, rows.Err()
+}
+
+func (r *SQLiteRepository) DeleteTaskSessionWorktree(ctx context.Context, id string) error {
+	result, err := r.db.ExecContext(ctx, `DELETE FROM task_session_worktrees WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("task session worktree not found: %s", id)
+	}
+	return nil
+}
+
+func (r *SQLiteRepository) DeleteTaskSessionWorktreesBySession(ctx context.Context, sessionID string) error {
+	_, err := r.db.ExecContext(ctx, `DELETE FROM task_session_worktrees WHERE session_id = ?`, sessionID)
+	return err
 }
 
 // Executor operations

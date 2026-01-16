@@ -80,6 +80,15 @@ func (c *TaskController) GetTask(ctx context.Context, req dto.GetTaskRequest) (d
 }
 
 func (c *TaskController) CreateTask(ctx context.Context, req dto.CreateTaskRequest) (dto.TaskDTO, error) {
+	// Convert DTO repositories to service layer input
+	var repos []service.TaskRepositoryInput
+	for _, r := range req.Repositories {
+		repos = append(repos, service.TaskRepositoryInput{
+			RepositoryID: r.RepositoryID,
+			BaseBranch:   r.BaseBranch,
+		})
+	}
+
 	task, err := c.service.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID:   req.WorkspaceID,
 		BoardID:       req.BoardID,
@@ -88,8 +97,7 @@ func (c *TaskController) CreateTask(ctx context.Context, req dto.CreateTaskReque
 		Description:   req.Description,
 		Priority:      req.Priority,
 		State:         req.State,
-		RepositoryID:  req.RepositoryID,
-		BaseBranch:    req.BaseBranch,
+		Repositories:  repos,
 		AssignedTo:    req.AssignedTo,
 		Position:      req.Position,
 		Metadata:      req.Metadata,
@@ -101,16 +109,24 @@ func (c *TaskController) CreateTask(ctx context.Context, req dto.CreateTaskReque
 }
 
 func (c *TaskController) UpdateTask(ctx context.Context, req dto.UpdateTaskRequest) (dto.TaskDTO, error) {
+	// Convert DTO repositories to service layer input
+	var repos []service.TaskRepositoryInput
+	for _, r := range req.Repositories {
+		repos = append(repos, service.TaskRepositoryInput{
+			RepositoryID: r.RepositoryID,
+			BaseBranch:   r.BaseBranch,
+		})
+	}
+
 	task, err := c.service.UpdateTask(ctx, req.ID, &service.UpdateTaskRequest{
-		Title:       req.Title,
-		Description: req.Description,
-		Priority:    req.Priority,
-		State:       req.State,
-		RepositoryID: req.RepositoryID,
-		BaseBranch:   req.BaseBranch,
-		AssignedTo:  req.AssignedTo,
-		Position:    req.Position,
-		Metadata:    req.Metadata,
+		Title:        req.Title,
+		Description:  req.Description,
+		Priority:     req.Priority,
+		State:        req.State,
+		Repositories: repos,
+		AssignedTo:   req.AssignedTo,
+		Position:     req.Position,
+		Metadata:     req.Metadata,
 	})
 	if err != nil {
 		return dto.TaskDTO{}, err

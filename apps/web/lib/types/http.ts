@@ -78,6 +78,17 @@ export type RepositoryScript = {
   updated_at: string;
 };
 
+export type TaskRepository = {
+  id: string;
+  task_id: string;
+  repository_id: string;
+  base_branch: string;
+  position: number;
+  metadata?: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
 export type Task = {
   id: string;
   workspace_id: string;
@@ -88,8 +99,7 @@ export type Task = {
   description: string;
   state: TaskState;
   priority: number;
-  repository_id?: string | null;
-  base_branch?: string | null;
+  repositories?: TaskRepository[];
   assigned_agent_id?: string | null;
   created_at: string;
   updated_at: string;

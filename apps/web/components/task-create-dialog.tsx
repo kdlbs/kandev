@@ -273,8 +273,10 @@ export function TaskCreateDialog({
         column_id: targetColumnId,
         title: trimmedTitle,
         description: description.trim(),
-        repository_id: repositoryId,
-        base_branch: branch || undefined,
+        repositories: repositoryId ? [{
+          repository_id: repositoryId,
+          base_branch: branch || undefined,
+        }] : [],
         state: targetState,
       });
       console.log('[TaskCreateDialog] task created', {

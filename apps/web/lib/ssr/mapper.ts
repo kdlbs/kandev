@@ -15,7 +15,7 @@ export function snapshotToState(snapshot: BoardSnapshot): Partial<AppState> {
         description: task.description ?? undefined,
         position: task.position ?? 0,
         state: task.state,
-        repositoryId: task.repository_id ?? undefined,
+        repositoryId: task.repositories?.[0]?.repository_id ?? undefined,
       } as KanbanTask;
     })
     .filter((task): task is KanbanTask => task !== null);

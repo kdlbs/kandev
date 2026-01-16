@@ -375,10 +375,10 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 	if session.TaskID != taskID {
 		return nil, fmt.Errorf("task session does not belong to task")
 	}
-	if session.WorktreePath == "" {
+	if len(session.Worktrees) == 0 || session.Worktrees[0].WorktreePath == "" {
 		return nil, fmt.Errorf("task session has no worktree path")
 	}
-	if _, err := os.Stat(session.WorktreePath); err != nil {
+	if _, err := os.Stat(session.Worktrees[0].WorktreePath); err != nil {
 		return nil, fmt.Errorf("worktree path not found: %w", err)
 	}
 

@@ -806,6 +806,13 @@ func main() {
 	}
 
 	if lifecycleMgr != nil {
+		log.Info("Stopping agents gracefully...")
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), 20*time.Second)
+		if err := lifecycleMgr.StopAllAgents(stopCtx); err != nil {
+			log.Error("Graceful agent stop error", zap.Error(err))
+		}
+		stopCancel()
+
 		if err := lifecycleMgr.Stop(); err != nil {
 			log.Error("Lifecycle manager stop error", zap.Error(err))
 		}
@@ -865,6 +872,7 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 	// If empty, the agent will run without a mounted workspace
 	launchReq := &lifecycle.LaunchRequest{
 		TaskID:          req.TaskID,
+		SessionID:       req.SessionID,
 		TaskTitle:       req.TaskTitle,
 		AgentProfileID:  req.AgentProfileID,
 		WorkspacePath:   req.RepositoryURL, // May be empty - lifecycle manager handles this
@@ -887,8 +895,11 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 	// Streaming is now handled by the lifecycle manager
 
 	// Extract worktree info from metadata if available
-	var worktreePath, worktreeBranch string
+	var worktreeID, worktreePath, worktreeBranch string
 	if instance.Metadata != nil {
+		if id, ok := instance.Metadata["worktree_id"].(string); ok {
+			worktreeID = id
+		}
 		if path, ok := instance.Metadata["worktree_path"].(string); ok {
 			worktreePath = path
 		}
@@ -901,6 +912,7 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 		AgentInstanceID: instance.ID,
 		ContainerID:     instance.ContainerID,
 		Status:          instance.Status,
+		WorktreeID:      worktreeID,
 		WorktreePath:    worktreePath,
 		WorktreeBranch:  worktreeBranch,
 	}, nil

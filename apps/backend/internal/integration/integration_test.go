@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kandev/kandev/internal/agent/worktree"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
@@ -66,6 +67,9 @@ func NewTestServer(t *testing.T) *TestServer {
 			t.Errorf("failed to close task repo: %v", err)
 		}
 	})
+	if _, err := worktree.NewSQLiteStore(taskRepo.DB()); err != nil {
+		t.Fatalf("failed to init worktree store: %v", err)
+	}
 
 	// Initialize task service
 	taskSvc := taskservice.NewService(taskRepo, eventBus, log, taskservice.RepositoryDiscoveryConfig{})

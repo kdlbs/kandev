@@ -21,6 +21,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/worktree"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -494,6 +495,9 @@ func NewOrchestratorTestServer(t *testing.T) *OrchestratorTestServer {
 			t.Errorf("failed to close task repo: %v", err)
 		}
 	})
+	if _, err := worktree.NewSQLiteStore(taskRepo.DB()); err != nil {
+		t.Fatalf("failed to init worktree store: %v", err)
+	}
 
 	// Initialize task service
 	taskSvc := taskservice.NewService(taskRepo, eventBus, log, taskservice.RepositoryDiscoveryConfig{})
@@ -626,8 +630,12 @@ func (ts *OrchestratorTestServer) CreateTestTask(t *testing.T, agentProfileID st
 		Title:          "Test Task",
 		Description:    "This is a test task for the orchestrator",
 		Priority:       priority,
-		RepositoryID:   repository.ID,
-		BaseBranch:     "main",
+		Repositories: []taskservice.TaskRepositoryInput{
+			{
+				RepositoryID: repository.ID,
+				BaseBranch:   "main",
+			},
+		},
 	})
 	require.NoError(t, err)
 

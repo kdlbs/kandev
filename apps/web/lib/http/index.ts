@@ -93,8 +93,10 @@ export async function createTask(
     title: string;
     description?: string;
     position?: number;
-    repository_id?: string;
-    base_branch?: string;
+    repositories?: Array<{
+      repository_id: string;
+      base_branch?: string;
+    }>;
     state?: Task['state'];
   },
   options?: ApiRequestOptions
@@ -113,8 +115,10 @@ export async function updateTask(
     position?: number;
     assigned_to?: string;
     state?: Task['state'];
-    repository_id?: string;
-    base_branch?: string;
+    repositories?: Array<{
+      repository_id: string;
+      base_branch?: string;
+    }>;
   },
   options?: ApiRequestOptions
 ) {

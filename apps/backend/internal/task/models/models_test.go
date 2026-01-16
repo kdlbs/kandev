@@ -36,6 +36,18 @@ func TestTaskStateConstants(t *testing.T) {
 
 func TestTaskStructInitialization(t *testing.T) {
 	now := time.Now().UTC()
+	repos := []*TaskRepository{
+		{
+			ID:           "task-repo-1",
+			TaskID:       "task-123",
+			RepositoryID: "repo-123",
+			BaseBranch:   "main",
+			Position:     0,
+			Metadata:     map[string]interface{}{"role": "primary"},
+			CreatedAt:    now,
+			UpdatedAt:    now,
+		},
+	}
 	task := Task{
 		ID:          "task-123",
 		WorkspaceID: "workspace-001",
@@ -45,11 +57,10 @@ func TestTaskStructInitialization(t *testing.T) {
 		Description:    "A test task description",
 		State:          v1.TaskStateTODO,
 		Priority:       5,
-		RepositoryID:   "repo-123",
-		BaseBranch:     "main",
 		AssignedTo:     "agent-001",
 		Position:       1,
 		Metadata:       map[string]interface{}{"key": "value"},
+		Repositories:   repos,
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
@@ -78,11 +89,14 @@ func TestTaskStructInitialization(t *testing.T) {
 	if task.Priority != 5 {
 		t.Errorf("expected Priority 5, got %d", task.Priority)
 	}
-	if task.RepositoryID != "repo-123" {
-		t.Errorf("expected RepositoryID 'repo-123', got %s", task.RepositoryID)
+	if len(task.Repositories) != 1 {
+		t.Fatalf("expected 1 repository, got %d", len(task.Repositories))
 	}
-	if task.BaseBranch != "main" {
-		t.Errorf("expected BaseBranch 'main', got %s", task.BaseBranch)
+	if task.Repositories[0].RepositoryID != "repo-123" {
+		t.Errorf("expected RepositoryID 'repo-123', got %s", task.Repositories[0].RepositoryID)
+	}
+	if task.Repositories[0].BaseBranch != "main" {
+		t.Errorf("expected BaseBranch 'main', got %s", task.Repositories[0].BaseBranch)
 	}
 	if task.AssignedTo != "agent-001" {
 		t.Errorf("expected AssignedTo 'agent-001', got %s", task.AssignedTo)
@@ -160,8 +174,18 @@ func TestTaskToAPI(t *testing.T) {
 		Description:    "A test task description",
 		State:          v1.TaskStateInProgress,
 		Priority:       3,
-		RepositoryID:   "repo-123",
-		BaseBranch:     "main",
+		Repositories: []*TaskRepository{
+			{
+				ID:           "task-repo-1",
+				TaskID:       "task-123",
+				RepositoryID: "repo-123",
+				BaseBranch:   "main",
+				Position:     0,
+				Metadata:     map[string]interface{}{"role": "primary"},
+				CreatedAt:    now,
+				UpdatedAt:    now,
+			},
+		},
 		AssignedTo:     "agent-001",
 		Position:       2,
 		Metadata:       map[string]interface{}{"key": "value"},
@@ -192,11 +216,14 @@ func TestTaskToAPI(t *testing.T) {
 	if apiTask.Priority != task.Priority {
 		t.Errorf("expected Priority %d, got %d", task.Priority, apiTask.Priority)
 	}
-	if apiTask.RepositoryID == nil || *apiTask.RepositoryID != task.RepositoryID {
-		t.Errorf("expected RepositoryID %s, got %v", task.RepositoryID, apiTask.RepositoryID)
+	if len(apiTask.Repositories) != 1 {
+		t.Fatalf("expected 1 repository, got %d", len(apiTask.Repositories))
 	}
-	if apiTask.BaseBranch == nil || *apiTask.BaseBranch != task.BaseBranch {
-		t.Errorf("expected BaseBranch %s, got %v", task.BaseBranch, apiTask.BaseBranch)
+	if apiTask.Repositories[0].RepositoryID != "repo-123" {
+		t.Errorf("expected RepositoryID repo-123, got %s", apiTask.Repositories[0].RepositoryID)
+	}
+	if apiTask.Repositories[0].BaseBranch != "main" {
+		t.Errorf("expected BaseBranch main, got %s", apiTask.Repositories[0].BaseBranch)
 	}
 	if apiTask.AssignedAgentID == nil || *apiTask.AssignedAgentID != task.AssignedTo {
 		t.Errorf("expected AssignedAgentID %s, got %v", task.AssignedTo, apiTask.AssignedAgentID)
@@ -217,8 +244,6 @@ func TestTaskToAPIWithEmptyOptionalFields(t *testing.T) {
 		Description:    "A test task description",
 		State:          v1.TaskStateTODO,
 		Priority:       0,
-		RepositoryID:   "",
-		BaseBranch:     "",
 		AssignedTo:     "",
 		Position:       0,
 		Metadata:       nil,
@@ -228,11 +253,8 @@ func TestTaskToAPIWithEmptyOptionalFields(t *testing.T) {
 
 	apiTask := task.ToAPI()
 
-	if apiTask.RepositoryID != nil {
-		t.Errorf("expected RepositoryID nil, got %v", apiTask.RepositoryID)
-	}
-	if apiTask.BaseBranch != nil {
-		t.Errorf("expected BaseBranch nil, got %v", apiTask.BaseBranch)
+	if len(apiTask.Repositories) != 0 {
+		t.Errorf("expected no repositories, got %d", len(apiTask.Repositories))
 	}
 	if apiTask.AssignedAgentID != nil {
 		t.Errorf("expected AssignedAgentID nil, got %v", apiTask.AssignedAgentID)

@@ -45,24 +45,41 @@ const (
 	MessageTypeTodo     MessageType = "todo"
 )
 
+// TaskRepository represents a repository associated with a task
+type TaskRepository struct {
+	ID           string                 `json:"id"`
+	TaskID       string                 `json:"task_id"`
+	RepositoryID string                 `json:"repository_id"`
+	BaseBranch   string                 `json:"base_branch"`
+	Position     int                    `json:"position"`
+	Metadata     map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt    time.Time              `json:"created_at"`
+	UpdatedAt    time.Time              `json:"updated_at"`
+}
+
 // Task represents a Kanban task
 type Task struct {
-	ID              string                 `json:"id"`
-	WorkspaceID     string                 `json:"workspace_id"`
-	BoardID         string                 `json:"board_id"`
-	Title           string                 `json:"title"`
-	Description     string                 `json:"description"`
-	State           TaskState              `json:"state"`
-	Priority        int                    `json:"priority"`
-	RepositoryID    *string                `json:"repository_id,omitempty"`
-	BaseBranch      *string                `json:"base_branch,omitempty"`
-	AssignedAgentID *string                `json:"assigned_agent_id,omitempty"`
-	CreatedBy       string                 `json:"created_by"`
-	CreatedAt       time.Time              `json:"created_at"`
-	UpdatedAt       time.Time              `json:"updated_at"`
-	StartedAt       *time.Time             `json:"started_at,omitempty"`
-	CompletedAt     *time.Time             `json:"completed_at,omitempty"`
+	ID              string           `json:"id"`
+	WorkspaceID     string           `json:"workspace_id"`
+	BoardID         string           `json:"board_id"`
+	Title           string           `json:"title"`
+	Description     string           `json:"description"`
+	State           TaskState        `json:"state"`
+	Priority        int              `json:"priority"`
+	AssignedAgentID *string          `json:"assigned_agent_id,omitempty"`
+	Repositories    []TaskRepository `json:"repositories,omitempty"`
+	CreatedBy       string           `json:"created_by"`
+	CreatedAt       time.Time        `json:"created_at"`
+	UpdatedAt       time.Time        `json:"updated_at"`
+	StartedAt       *time.Time       `json:"started_at,omitempty"`
+	CompletedAt     *time.Time       `json:"completed_at,omitempty"`
 	Metadata        map[string]interface{} `json:"metadata,omitempty"`
+}
+
+// TaskRepositoryInput for creating/updating task repositories
+type TaskRepositoryInput struct {
+	RepositoryID string `json:"repository_id" binding:"required"`
+	BaseBranch   string `json:"base_branch" binding:"required"`
 }
 
 // CreateTaskRequest for creating a new task
@@ -70,8 +87,7 @@ type CreateTaskRequest struct {
 	Title        string                 `json:"title" binding:"required,max=500"`
 	Description  string                 `json:"description" binding:"required"`
 	Priority     int                    `json:"priority" binding:"min=0,max=10"`
-	RepositoryID *string                `json:"repository_id,omitempty"`
-	BaseBranch   *string                `json:"base_branch,omitempty"`
+	Repositories []TaskRepositoryInput  `json:"repositories,omitempty"`
 	Metadata     map[string]interface{} `json:"metadata,omitempty"`
 }
 
@@ -80,8 +96,7 @@ type UpdateTaskRequest struct {
 	Title        *string                `json:"title,omitempty" binding:"omitempty,max=500"`
 	Description  *string                `json:"description,omitempty"`
 	Priority     *int                   `json:"priority,omitempty" binding:"omitempty,min=0,max=10"`
-	RepositoryID *string                `json:"repository_id,omitempty"`
-	BaseBranch   *string                `json:"base_branch,omitempty"`
+	Repositories []TaskRepositoryInput  `json:"repositories,omitempty"`
 	Metadata     map[string]interface{} `json:"metadata,omitempty"`
 }
 

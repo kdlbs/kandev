@@ -225,6 +225,7 @@ func (m *Manager) createWorktree(ctx context.Context, req CreateRequest) (*Workt
 	now := time.Now()
 	wt := &Worktree{
 		ID:             worktreeID,
+		SessionID:      req.SessionID,
 		TaskID:         req.TaskID,
 		RepositoryID:   req.RepositoryID,
 		RepositoryPath: req.RepositoryPath,
@@ -238,12 +239,18 @@ func (m *Manager) createWorktree(ctx context.Context, req CreateRequest) (*Workt
 
 	// Persist to store
 	if m.store != nil {
+		if req.SessionID == "" {
+			m.logger.Warn("skipping worktree persistence: missing session_id",
+				zap.String("task_id", req.TaskID),
+				zap.String("worktree_id", wt.ID))
+		} else {
 		if err := m.store.CreateWorktree(ctx, wt); err != nil {
 			// Cleanup on failure
 			if cleanupErr := m.removeWorktreeDir(ctx, worktreePath, req.RepositoryPath); cleanupErr != nil {
 				m.logger.Warn("failed to cleanup worktree after persist failure", zap.Error(cleanupErr))
 			}
 			return nil, fmt.Errorf("failed to persist worktree: %w", err)
+		}
 		}
 	}
 

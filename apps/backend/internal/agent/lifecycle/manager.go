@@ -4,6 +4,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -67,6 +68,7 @@ func (ai *AgentInstance) GetAgentCtlClient() *agentctl.Client {
 // LaunchRequest contains parameters for launching an agent
 type LaunchRequest struct {
 	TaskID          string
+	SessionID       string
 	TaskTitle       string // Human-readable task title for semantic worktree naming
 	AgentProfileID  string
 	WorkspacePath   string            // Host path to workspace (original repository path)
@@ -411,6 +413,32 @@ func (m *Manager) Stop() error {
 	return nil
 }
 
+// StopAllAgents attempts a graceful shutdown of all active agents.
+func (m *Manager) StopAllAgents(ctx context.Context) error {
+	instanceIDs := make([]string, 0)
+	m.mu.RLock()
+	for instanceID := range m.instances {
+		instanceIDs = append(instanceIDs, instanceID)
+	}
+	m.mu.RUnlock()
+
+	if len(instanceIDs) == 0 {
+		return nil
+	}
+
+	var errs []error
+	for _, instanceID := range instanceIDs {
+		if err := m.StopAgent(ctx, instanceID, false); err != nil {
+			errs = append(errs, err)
+			m.logger.Warn("failed to stop agent during shutdown",
+				zap.String("instance_id", instanceID),
+				zap.Error(err))
+		}
+	}
+
+	return errors.Join(errs...)
+}
+
 // Launch launches a new agent for a task
 func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentInstance, error) {
 	m.logger.Info("launching agent",
@@ -726,6 +754,7 @@ func (m *Manager) getOrCreateWorktree(ctx context.Context, req *LaunchRequest) (
 	// Create request with optional WorktreeID for resumption
 	createReq := worktree.CreateRequest{
 		TaskID:         req.TaskID,
+		SessionID:      req.SessionID,
 		TaskTitle:      req.TaskTitle,
 		RepositoryID:   req.RepositoryID,
 		RepositoryPath: req.RepositoryPath,
@@ -1622,7 +1651,7 @@ func (m *Manager) expandMountTemplate(source, workspacePath, taskID string) stri
 		}
 		augmentSessionsDir := filepath.Join(homeDir, ".augment", "sessions")
 		// Ensure the directory exists
-		_ = os.MkdirAll(augmentSessionsDir, 0755)
+		_ = os.MkdirAll(augmentSessionsDir, 0o755)
 		result = strings.ReplaceAll(result, "{augment_sessions}", augmentSessionsDir)
 	}
 
@@ -2050,6 +2079,12 @@ func (m *Manager) publishACPSessionCreated(instance *AgentInstance, sessionID st
 			zap.String("event_type", events.AgentACPSessionCreated),
 			zap.String("instance_id", instance.ID),
 			zap.Error(err))
+	} else {
+		m.logger.Info("published ACP session event",
+			zap.String("event_type", events.AgentACPSessionCreated),
+			zap.String("task_id", instance.TaskID),
+			zap.String("agent_instance_id", instance.ID),
+			zap.String("acp_session_id", sessionID))
 	}
 }
 
