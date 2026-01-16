@@ -59,6 +59,7 @@ func RegisterMessageRoutes(router *gin.Engine, dispatcher *ws.Dispatcher, messag
 func (h *MessageHandlers) registerHTTP(router *gin.Engine) {
 	api := router.Group("/api/v1")
 	api.GET("/agent-sessions/:id/messages", h.httpListMessages)
+	api.GET("/task-sessions/:id/messages", h.httpListMessages) // Alias for SSR compatibility
 }
 
 func (h *MessageHandlers) registerWS(dispatcher *ws.Dispatcher) {

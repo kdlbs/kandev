@@ -23,9 +23,10 @@ type Service struct {
 }
 
 type UpdateUserSettingsRequest struct {
-	WorkspaceID   *string
-	BoardID       *string
-	RepositoryIDs *[]string
+	WorkspaceID          *string
+	BoardID              *string
+	RepositoryIDs        *[]string
+	InitialSetupComplete *bool
 }
 
 func NewService(repo store.Repository, eventBus bus.EventBus, log *logger.Logger) *Service {
@@ -67,6 +68,9 @@ func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSetting
 	if req.RepositoryIDs != nil {
 		settings.RepositoryIDs = *req.RepositoryIDs
 	}
+	if req.InitialSetupComplete != nil {
+		settings.InitialSetupComplete = *req.InitialSetupComplete
+	}
 	settings.UpdatedAt = time.Now().UTC()
 	if err := s.repo.UpsertUserSettings(ctx, settings); err != nil {
 		return nil, err
@@ -80,11 +84,12 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		return
 	}
 	data := map[string]interface{}{
-		"user_id":        settings.UserID,
-		"workspace_id":   settings.WorkspaceID,
-		"board_id":       settings.BoardID,
-		"repository_ids": settings.RepositoryIDs,
-		"updated_at":     settings.UpdatedAt.Format(time.RFC3339),
+		"user_id":                settings.UserID,
+		"workspace_id":           settings.WorkspaceID,
+		"board_id":               settings.BoardID,
+		"repository_ids":         settings.RepositoryIDs,
+		"initial_setup_complete": settings.InitialSetupComplete,
+		"updated_at":             settings.UpdatedAt.Format(time.RFC3339),
 	}
 	if err := s.eventBus.Publish(ctx, events.UserSettingsUpdated, bus.NewEvent(events.UserSettingsUpdated, "user-service", data)); err != nil {
 		s.logger.Error("failed to publish user settings event", zap.Error(err))

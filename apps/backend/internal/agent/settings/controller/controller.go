@@ -21,6 +21,8 @@ var (
 	ErrAgentProfileInUse    = errors.New("agent profile is used by an active agent session")
 )
 
+const defaultAgentProfileName = "default"
+
 type Controller struct {
 	repo           store.Repository
 	discovery      *discovery.Registry
@@ -74,6 +76,49 @@ func (c *Controller) ListAgents(ctx context.Context) (*dto.ListAgentsResponse, e
 		payload = append(payload, toAgentDTO(agent, profiles))
 	}
 	return &dto.ListAgentsResponse{Agents: payload, Total: len(payload)}, nil
+}
+
+func (c *Controller) EnsureInitialAgentProfiles(ctx context.Context) error {
+	results, err := c.discovery.Detect(ctx)
+	if err != nil {
+		return err
+	}
+	for _, result := range results {
+		if !result.Available {
+			continue
+		}
+		agent, err := c.repo.GetAgentByName(ctx, result.Name)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if errors.Is(err, sql.ErrNoRows) || agent == nil {
+			agent = &models.Agent{
+				Name:          result.Name,
+				SupportsMCP:   result.SupportsMCP,
+				MCPConfigPath: result.MCPConfigPath,
+			}
+			if err := c.repo.CreateAgent(ctx, agent); err != nil {
+				return err
+			}
+		}
+		profiles, err := c.repo.ListAgentProfiles(ctx, agent.ID)
+		if err != nil {
+			return err
+		}
+		if len(profiles) > 0 {
+			continue
+		}
+		defaultProfile := &models.AgentProfile{
+			AgentID: agent.ID,
+			Name:    defaultAgentProfileName,
+			Model:   "",
+			Plan:    "",
+		}
+		if err := c.repo.CreateAgentProfile(ctx, defaultProfile); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (c *Controller) GetAgent(ctx context.Context, id string) (*dto.AgentDTO, error) {

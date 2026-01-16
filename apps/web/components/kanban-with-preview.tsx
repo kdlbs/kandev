@@ -10,7 +10,12 @@ import { Task } from "./kanban-card";
 import { PREVIEW_PANEL } from "@/lib/settings/constants";
 import { getWebSocketClient } from "@/lib/ws/connection";
 
-export function KanbanWithPreview() {
+type KanbanWithPreviewProps = {
+  initialTaskId?: string;
+  initialSessionId?: string;
+};
+
+export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWithPreviewProps) {
   const router = useRouter();
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState<number>(0);
@@ -27,11 +32,14 @@ export function KanbanWithPreview() {
     close,
     updatePreviewWidth,
   } = useKanbanPreview({
+    initialTaskId,
     onClose: () => {
       // Cleanup handled by close
     },
   });
-  const [selectedTaskSessionId, setSelectedTaskSessionId] = useState<string | null>(null);
+  // Use initialSessionId if provided, otherwise fetch from WebSocket
+  const [selectedTaskSessionId, setSelectedTaskSessionId] = useState<string | null>(initialSessionId ?? null);
+  const hasLoadedInitialSession = useRef(false);
 
   // Compute selected task from kanbanTasks and selectedTaskId
   const selectedTask = useMemo(() => {
@@ -53,6 +61,12 @@ export function KanbanWithPreview() {
 
   useEffect(() => {
     if (!selectedTaskId) {
+      return;
+    }
+
+    // If we have an initial session ID and haven't loaded yet, skip the first fetch
+    if (initialSessionId && !hasLoadedInitialSession.current) {
+      hasLoadedInitialSession.current = true;
       return;
     }
 
@@ -87,7 +101,7 @@ export function KanbanWithPreview() {
     return () => {
       isActive = false;
     };
-  }, [selectedTaskId]);
+  }, [selectedTaskId, initialSessionId]);
 
   // Measure container width on mount and resize
   useEffect(() => {
@@ -128,6 +142,27 @@ export function KanbanWithPreview() {
     },
     [close, router]
   );
+
+  // Update URL query params when task selection changes
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const url = new URL(window.location.href);
+    if (selectedTaskId) {
+      url.searchParams.set('taskId', selectedTaskId);
+    } else {
+      url.searchParams.delete('taskId');
+      url.searchParams.delete('sessionId');
+    }
+
+    // Update sessionId param when it's available
+    if (selectedTaskId && selectedTaskSessionId) {
+      url.searchParams.set('sessionId', selectedTaskSessionId);
+    }
+
+    // Use replaceState to avoid adding to browser history on every click
+    window.history.replaceState({}, '', url.toString());
+  }, [selectedTaskId, selectedTaskSessionId]);
 
   // Preview handler - task data is computed from selectedTaskId
   // Toggle behavior: clicking the same task closes the panel

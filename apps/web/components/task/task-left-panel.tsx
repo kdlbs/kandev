@@ -9,6 +9,7 @@ import { TaskChangesPanel } from './task-changes-panel';
 import { FileViewerContent } from './file-viewer-content';
 import type { OpenFileTab } from '@/lib/types/backend';
 import { FILE_EXTENSION_COLORS } from '@/lib/types/backend';
+import { useTaskChatSession } from '@/hooks/use-task-chat-session';
 
 const AGENTS = [
   { id: 'codex', label: 'Codex' },
@@ -17,9 +18,6 @@ const AGENTS = [
 
 type TaskLeftPanelProps = {
   taskId: string | null;
-  taskDescription?: string;
-  isLoadingMessages: boolean;
-  isAgentWorking: boolean;
   onSendMessage: (content: string) => Promise<void>;
   selectedDiffPath: string | null;
   openFileRequest: OpenFileTab | null;
@@ -29,15 +27,14 @@ type TaskLeftPanelProps = {
 
 export const TaskLeftPanel = memo(function TaskLeftPanel({
   taskId,
-  taskDescription,
-  isLoadingMessages,
-  isAgentWorking,
   onSendMessage,
   selectedDiffPath: externalSelectedDiffPath,
   openFileRequest,
   onDiffPathHandled,
   onFileOpenHandled,
 }: TaskLeftPanelProps) {
+  // Get session ID from task ID
+  const { taskSessionId } = useTaskChatSession(taskId);
   const [leftTab, setLeftTab] = useState('chat');
   const [selectedDiffPath, setSelectedDiffPath] = useState<string | null>(null);
   const [notes, setNotes] = useState('');
@@ -163,10 +160,7 @@ export const TaskLeftPanel = memo(function TaskLeftPanel({
             <TaskChatPanel
               agents={AGENTS}
               onSend={onSendMessage}
-              isLoading={isLoadingMessages}
-              isAgentWorking={isAgentWorking}
-              taskId={taskId ?? undefined}
-              taskDescription={taskDescription}
+              sessionId={taskSessionId}
             />
           ) : (
             <div className="flex items-center justify-center h-full text-muted-foreground">

@@ -148,6 +148,27 @@ func (s *Service) ListRepositoryBranches(ctx context.Context, repoID string) ([]
 	return listGitBranches(absPath)
 }
 
+func (s *Service) ListLocalRepositoryBranches(ctx context.Context, path string) ([]Branch, error) {
+	if path == "" {
+		return nil, fmt.Errorf("repository path is required")
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return nil, fmt.Errorf("invalid repository path: %w", err)
+	}
+	if !isPathAllowed(absPath, s.discoveryRoots()) {
+		return nil, ErrPathNotAllowed
+	}
+	info, err := os.Stat(absPath)
+	if err != nil {
+		return nil, err
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("repository path is not a directory")
+	}
+	return listGitBranches(absPath)
+}
+
 func (s *Service) discoveryRoots() []string {
 	if len(s.discoveryConfig.Roots) > 0 {
 		return normalizeRoots(s.discoveryConfig.Roots)
@@ -344,15 +365,32 @@ func resolveGitDir(repoPath string) (string, error) {
 	return filepath.Clean(filepath.Join(repoPath, gitDir)), nil
 }
 
+func resolveCommonGitDir(gitDir string) string {
+	commonFile := filepath.Join(gitDir, "commondir")
+	content, err := os.ReadFile(commonFile)
+	if err != nil {
+		return gitDir
+	}
+	commonDir := strings.TrimSpace(string(content))
+	if commonDir == "" {
+		return gitDir
+	}
+	if filepath.IsAbs(commonDir) {
+		return filepath.Clean(commonDir)
+	}
+	return filepath.Clean(filepath.Join(gitDir, commonDir))
+}
+
 func listGitBranches(repoPath string) ([]Branch, error) {
 	gitDir, err := resolveGitDir(repoPath)
 	if err != nil {
 		return nil, err
 	}
+	refsRoot := resolveCommonGitDir(gitDir)
 	branchMap := make(map[string]Branch)
 
 	// List local branches from refs/heads
-	localRefsRoot := filepath.Join(gitDir, "refs", "heads")
+	localRefsRoot := filepath.Join(refsRoot, "refs", "heads")
 	_ = filepath.WalkDir(localRefsRoot, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
@@ -376,7 +414,7 @@ func listGitBranches(repoPath string) ([]Branch, error) {
 	})
 
 	// List remote branches from refs/remotes
-	remoteRefsRoot := filepath.Join(gitDir, "refs", "remotes")
+	remoteRefsRoot := filepath.Join(refsRoot, "refs", "remotes")
 	_ = filepath.WalkDir(remoteRefsRoot, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
@@ -412,7 +450,7 @@ func listGitBranches(repoPath string) ([]Branch, error) {
 	})
 
 	// Read packed-refs file for additional branches
-	packedRefs := filepath.Join(gitDir, "packed-refs")
+	packedRefs := filepath.Join(refsRoot, "packed-refs")
 	if content, err := os.ReadFile(packedRefs); err == nil {
 		lines := strings.Split(string(content), "\n")
 		for _, line := range lines {

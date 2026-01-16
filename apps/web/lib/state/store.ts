@@ -9,6 +9,7 @@ import type {
   Message,
   Repository,
   TaskState as TaskStatus,
+  TaskSession,
 } from '@/lib/types/http';
 import { createStore } from 'zustand/vanilla';
 import { immer } from 'zustand/middleware/immer';
@@ -167,6 +168,10 @@ export type MessagesState = {
   oldestCursor: string | null;
 };
 
+export type TaskSessionsState = {
+  items: Record<string, TaskSession>;
+};
+
 export type AppState = {
   kanban: KanbanState;
   workspaces: WorkspaceState;
@@ -188,6 +193,7 @@ export type AppState = {
   gitStatus: GitStatusState;
   connection: ConnectionState;
   messages: MessagesState;
+  taskSessions: TaskSessionsState;
   taskSessionStatesByTaskId: Record<string, TaskSessionState>;
   hydrate: (state: Partial<AppState>) => void;
   setActiveWorkspace: (workspaceId: string | null) => void;
@@ -224,6 +230,7 @@ export type AppState = {
   prependMessages: (messages: Message[], meta?: { hasMore?: boolean; oldestCursor?: string | null }) => void;
   setMessagesMetadata: (meta: { hasMore?: boolean; isLoading?: boolean; oldestCursor?: string | null }) => void;
   setMessagesLoading: (loading: boolean) => void;
+  setTaskSession: (session: TaskSession) => void;
   setTaskSessionState: (taskId: string, state: TaskSessionState) => void;
   setGitStatus: (taskId: string, gitStatus: Omit<GitStatusState, 'taskId'>) => void;
   clearGitStatus: () => void;
@@ -266,6 +273,7 @@ const defaultState: AppState = {
   },
   connection: { status: 'disconnected', error: null },
   messages: { sessionId: null, items: [], isLoading: false, hasMore: false, oldestCursor: null },
+  taskSessions: { items: {} },
   taskSessionStatesByTaskId: {},
   hydrate: () => undefined,
   setActiveWorkspace: () => undefined,
@@ -295,6 +303,7 @@ const defaultState: AppState = {
   prependMessages: () => undefined,
   setMessagesMetadata: () => undefined,
   setMessagesLoading: () => undefined,
+  setTaskSession: () => undefined,
   setTaskSessionState: () => undefined,
   setGitStatus: () => undefined,
   clearGitStatus: () => undefined,
@@ -333,6 +342,7 @@ function mergeInitialState(
   | 'prependMessages'
   | 'setMessagesMetadata'
   | 'setMessagesLoading'
+  | 'setTaskSession'
   | 'setTaskSessionState'
   | 'setGitStatus'
   | 'clearGitStatus'
@@ -360,6 +370,7 @@ function mergeInitialState(
     gitStatus: { ...defaultState.gitStatus, ...initialState.gitStatus },
     connection: { ...defaultState.connection, ...initialState.connection },
     messages: { ...defaultState.messages, ...initialState.messages },
+    taskSessions: { ...defaultState.taskSessions, ...initialState.taskSessions },
     taskSessionStatesByTaskId: {
       ...defaultState.taskSessionStatesByTaskId,
       ...initialState.taskSessionStatesByTaskId,
@@ -394,6 +405,7 @@ export function createAppStore(initialState?: Partial<AppState>) {
           if (state.diffs) Object.assign(draft.diffs, state.diffs);
           if (state.connection) Object.assign(draft.connection, state.connection);
           if (state.messages) Object.assign(draft.messages, state.messages);
+          if (state.taskSessions) Object.assign(draft.taskSessions, state.taskSessions);
           if (state.taskSessionStatesByTaskId) {
             Object.assign(draft.taskSessionStatesByTaskId, state.taskSessionStatesByTaskId);
           }
@@ -594,6 +606,12 @@ export function createAppStore(initialState?: Partial<AppState>) {
       setMessagesLoading: (loading) =>
         set((draft) => {
           draft.messages.isLoading = loading;
+        }),
+      setTaskSession: (session) =>
+        set((draft) => {
+          draft.taskSessions.items[session.id] = session;
+          // Also update the task session state by task ID
+          draft.taskSessionStatesByTaskId[session.task_id] = session.state;
         }),
       setTaskSessionState: (taskId, state) =>
         set((draft) => {

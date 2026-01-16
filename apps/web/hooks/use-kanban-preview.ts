@@ -6,6 +6,7 @@ import { PREVIEW_PANEL } from "@/lib/settings/constants";
 
 interface UseKanbanPreviewOptions {
   onClose?: () => void;
+  initialTaskId?: string;
 }
 
 export function useKanbanPreview(options: UseKanbanPreviewOptions = {}) {
@@ -14,27 +15,34 @@ export function useKanbanPreview(options: UseKanbanPreviewOptions = {}) {
   const [isOpen, setIsOpen] = useState(false);
   const [previewWidthPx, setPreviewWidthPx] = useState<number>(PREVIEW_PANEL.DEFAULT_WIDTH_PX);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const hasInitialized = useRef(false);
 
   // Load persisted state from localStorage AFTER hydration
-  // This is necessary to avoid hydration mismatch between server and client
+  // Prioritize initialTaskId from SSR over localStorage
   useEffect(() => {
+    if (hasInitialized.current) return;
+    hasInitialized.current = true;
+
     const savedState = getKanbanPreviewState({
       isOpen: false,
       previewWidthPx: PREVIEW_PANEL.DEFAULT_WIDTH_PX,
       selectedTaskId: null,
     });
 
-    if (savedState.isOpen) {
+    // Prioritize initial task ID from SSR
+    const taskIdToUse = options.initialTaskId ?? savedState.selectedTaskId;
+
+    if (taskIdToUse || savedState.isOpen) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setIsOpen(true);
     }
     if (savedState.previewWidthPx) {
       setPreviewWidthPx(Math.max(PREVIEW_PANEL.MIN_WIDTH_PX, savedState.previewWidthPx));
     }
-    if (savedState.selectedTaskId) {
-      setSelectedTaskId(savedState.selectedTaskId);
+    if (taskIdToUse) {
+      setSelectedTaskId(taskIdToUse);
     }
-  }, []);
+  }, [options.initialTaskId]);
 
   // Persist state to localStorage
   useEffect(() => {

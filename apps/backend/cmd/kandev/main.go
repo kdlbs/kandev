@@ -230,6 +230,10 @@ func main() {
 	)
 	log.Info("Task Service initialized")
 
+	if err := runInitialAgentSetup(ctx, userSvc, agentSettingsController, log); err != nil {
+		log.Warn("Failed to run initial agent setup", zap.Error(err))
+	}
+
 	// ACP messages are now stored as comments in the task_comments table
 	// The comment system provides unified storage for all task-related communication
 	log.Info("ACP messages will be stored as comments")
@@ -858,6 +862,32 @@ func main() {
 	}
 
 	log.Info("Kandev stopped")
+}
+
+func runInitialAgentSetup(
+	ctx context.Context,
+	userSvc *userservice.Service,
+	agentSettingsController *agentsettingscontroller.Controller,
+	log *logger.Logger,
+) error {
+	settings, err := userSvc.GetUserSettings(ctx)
+	if err != nil {
+		return err
+	}
+	if settings.InitialSetupComplete {
+		return nil
+	}
+	if err := agentSettingsController.EnsureInitialAgentProfiles(ctx); err != nil {
+		return err
+	}
+	complete := true
+	if _, err := userSvc.UpdateUserSettings(ctx, &userservice.UpdateUserSettingsRequest{
+		InitialSetupComplete: &complete,
+	}); err != nil {
+		return err
+	}
+	log.Info("Initial agent setup complete")
+	return nil
 }
 
 // taskRepositoryAdapter adapts the task repository for the orchestrator's scheduler

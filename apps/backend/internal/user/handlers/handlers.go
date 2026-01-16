@@ -64,9 +64,10 @@ func (h *Handlers) httpGetUserSettings(c *gin.Context) {
 }
 
 type httpUpdateUserSettingsRequest struct {
-	WorkspaceID   *string  `json:"workspace_id,omitempty"`
-	BoardID       *string  `json:"board_id,omitempty"`
-	RepositoryIDs *[]string `json:"repository_ids,omitempty"`
+	WorkspaceID          *string   `json:"workspace_id,omitempty"`
+	BoardID              *string   `json:"board_id,omitempty"`
+	RepositoryIDs        *[]string `json:"repository_ids,omitempty"`
+	InitialSetupComplete *bool     `json:"initial_setup_complete,omitempty"`
 }
 
 func (h *Handlers) httpUpdateUserSettings(c *gin.Context) {
@@ -76,9 +77,10 @@ func (h *Handlers) httpUpdateUserSettings(c *gin.Context) {
 		return
 	}
 	resp, err := h.controller.UpdateUserSettings(c.Request.Context(), dto.UpdateUserSettingsRequest{
-		WorkspaceID:   body.WorkspaceID,
-		BoardID:       body.BoardID,
-		RepositoryIDs: body.RepositoryIDs,
+		WorkspaceID:          body.WorkspaceID,
+		BoardID:              body.BoardID,
+		RepositoryIDs:        body.RepositoryIDs,
+		InitialSetupComplete: body.InitialSetupComplete,
 	})
 	if err != nil {
 		h.logger.Error("failed to update user settings", zap.Error(err))
@@ -97,9 +99,10 @@ func (h *Handlers) wsGetUser(ctx context.Context, msg *ws.Message) (*ws.Message,
 }
 
 type wsUpdateUserSettingsRequest struct {
-	WorkspaceID   *string  `json:"workspace_id,omitempty"`
-	BoardID       *string  `json:"board_id,omitempty"`
-	RepositoryIDs *[]string `json:"repository_ids,omitempty"`
+	WorkspaceID          *string   `json:"workspace_id,omitempty"`
+	BoardID              *string   `json:"board_id,omitempty"`
+	RepositoryIDs        *[]string `json:"repository_ids,omitempty"`
+	InitialSetupComplete *bool     `json:"initial_setup_complete,omitempty"`
 }
 
 func (h *Handlers) wsUpdateUserSettings(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -108,9 +111,10 @@ func (h *Handlers) wsUpdateUserSettings(ctx context.Context, msg *ws.Message) (*
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
 	resp, err := h.controller.UpdateUserSettings(ctx, dto.UpdateUserSettingsRequest{
-		WorkspaceID:   req.WorkspaceID,
-		BoardID:       req.BoardID,
-		RepositoryIDs: req.RepositoryIDs,
+		WorkspaceID:          req.WorkspaceID,
+		BoardID:              req.BoardID,
+		RepositoryIDs:        req.RepositoryIDs,
+		InitialSetupComplete: req.InitialSetupComplete,
 	})
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update user settings", nil)

@@ -40,9 +40,10 @@ func (c *Controller) GetUserSettings(ctx context.Context) (dto.UserSettingsRespo
 
 func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserSettingsRequest) (dto.UserSettingsResponse, error) {
 	settings, err := c.svc.UpdateUserSettings(ctx, &service.UpdateUserSettingsRequest{
-		WorkspaceID:   req.WorkspaceID,
-		BoardID:       req.BoardID,
-		RepositoryIDs: req.RepositoryIDs,
+		WorkspaceID:          req.WorkspaceID,
+		BoardID:              req.BoardID,
+		RepositoryIDs:        req.RepositoryIDs,
+		InitialSetupComplete: req.InitialSetupComplete,
 	})
 	if err != nil {
 		return dto.UserSettingsResponse{}, err

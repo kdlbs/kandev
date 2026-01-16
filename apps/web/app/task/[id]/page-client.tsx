@@ -11,8 +11,7 @@ import { DEBUG_UI } from '@/lib/config';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import { useRepositories } from '@/hooks/use-repositories';
 import { useTaskAgent } from '@/hooks/use-task-agent';
-import { useTaskMessages } from '@/hooks/use-task-messages';
-import { useSessionResumption } from '@/hooks/use-session-resumption';
+
 import { useAppStore } from '@/components/state-provider';
 
 type TaskPageClientProps = {
@@ -63,20 +62,12 @@ export default function TaskPage({ task: initialTask, sessionId = null }: TaskPa
 
   // Merge state from resumption and regular agent hooks
   const activeSessionId = sessionId ?? taskSessionId;
-  const isResuming = resumptionState === 'checking' || resumptionState === 'resuming';
-  const isResumed = resumptionState === 'resumed' || resumptionState === 'running';
 
-  // Both hooks read taskSessionState from the store, so prefer resumedSessionState as it's always
-  // updated when we have a sessionId from URL. For worktree, use resumed values when resuming/resumed.
-  const taskSessionState = resumedSessionState ?? agentSessionState;
-  const worktreePath = sessionId ? (resumedWorktreePath ?? agentWorktreePath) : agentWorktreePath;
-  const worktreeBranch = sessionId ? (resumedWorktreeBranch ?? agentWorktreeBranch) : agentWorktreeBranch;
-
+  // Derive working state for debug overlay
   const isAgentWorking =
     taskSessionState !== null
       ? taskSessionState === 'STARTING' || taskSessionState === 'RUNNING'
       : isAgentRunning && (task?.state === 'IN_PROGRESS' || task?.state === 'SCHEDULING');
-  const { isLoading: isLoadingMessages } = useTaskMessages(task?.id ?? null, activeSessionId);
 
   useEffect(() => {
     queueMicrotask(() => setIsMounted(true));
@@ -151,10 +142,6 @@ export default function TaskPage({ task: initialTask, sessionId = null }: TaskPa
 
         <TaskLayout
           taskId={task?.id ?? null}
-          sessionId={activeSessionId ?? null}
-          taskDescription={task?.description}
-          isLoadingMessages={isLoadingMessages}
-          isAgentWorking={isAgentWorking}
           onSendMessage={handleSendMessage}
         />
       </div>

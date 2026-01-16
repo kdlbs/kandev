@@ -84,22 +84,25 @@ func (h *TaskHandlers) httpListTaskSessions(c *gin.Context) {
 }
 
 type httpTaskRepositoryInput struct {
-	RepositoryID string `json:"repository_id"`
-	BaseBranch   string `json:"base_branch"`
+	RepositoryID  string `json:"repository_id"`
+	BaseBranch    string `json:"base_branch"`
+	LocalPath     string `json:"local_path"`
+	Name          string `json:"name"`
+	DefaultBranch string `json:"default_branch"`
 }
 
 type httpCreateTaskRequest struct {
-	WorkspaceID  string                     `json:"workspace_id"`
-	BoardID      string                     `json:"board_id"`
-	ColumnID     string                     `json:"column_id"`
-	Title        string                     `json:"title"`
-	Description  string                     `json:"description,omitempty"`
-	Priority     int                        `json:"priority,omitempty"`
-	State        *v1.TaskState              `json:"state,omitempty"`
-	Repositories []httpTaskRepositoryInput  `json:"repositories,omitempty"`
-	AssignedTo   string                     `json:"assigned_to,omitempty"`
-	Position     int                        `json:"position,omitempty"`
-	Metadata     map[string]interface{}     `json:"metadata,omitempty"`
+	WorkspaceID  string                    `json:"workspace_id"`
+	BoardID      string                    `json:"board_id"`
+	ColumnID     string                    `json:"column_id"`
+	Title        string                    `json:"title"`
+	Description  string                    `json:"description,omitempty"`
+	Priority     int                       `json:"priority,omitempty"`
+	State        *v1.TaskState             `json:"state,omitempty"`
+	Repositories []httpTaskRepositoryInput `json:"repositories,omitempty"`
+	AssignedTo   string                    `json:"assigned_to,omitempty"`
+	Position     int                       `json:"position,omitempty"`
+	Metadata     map[string]interface{}    `json:"metadata,omitempty"`
 }
 
 func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
@@ -116,9 +119,16 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 	// Convert repositories
 	var repos []dto.TaskRepositoryInput
 	for _, r := range body.Repositories {
+		if r.RepositoryID == "" && r.LocalPath == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "repository_id or local_path is required"})
+			return
+		}
 		repos = append(repos, dto.TaskRepositoryInput{
-			RepositoryID: r.RepositoryID,
-			BaseBranch:   r.BaseBranch,
+			RepositoryID:  r.RepositoryID,
+			BaseBranch:    r.BaseBranch,
+			LocalPath:     r.LocalPath,
+			Name:          r.Name,
+			DefaultBranch: r.DefaultBranch,
 		})
 	}
 
@@ -165,8 +175,11 @@ func (h *TaskHandlers) httpUpdateTask(c *gin.Context) {
 	if body.Repositories != nil {
 		for _, r := range body.Repositories {
 			repos = append(repos, dto.TaskRepositoryInput{
-				RepositoryID: r.RepositoryID,
-				BaseBranch:   r.BaseBranch,
+				RepositoryID:  r.RepositoryID,
+				BaseBranch:    r.BaseBranch,
+				LocalPath:     r.LocalPath,
+				Name:          r.Name,
+				DefaultBranch: r.DefaultBranch,
 			})
 		}
 	}
@@ -272,17 +285,17 @@ func (h *TaskHandlers) wsListTasks(ctx context.Context, msg *ws.Message) (*ws.Me
 }
 
 type wsCreateTaskRequest struct {
-	WorkspaceID  string                     `json:"workspace_id"`
-	BoardID      string                     `json:"board_id"`
-	ColumnID     string                     `json:"column_id"`
-	Title        string                     `json:"title"`
-	Description  string                     `json:"description,omitempty"`
-	Priority     int                        `json:"priority,omitempty"`
-	State        *v1.TaskState              `json:"state,omitempty"`
-	Repositories []httpTaskRepositoryInput  `json:"repositories,omitempty"`
-	AssignedTo   string                     `json:"assigned_to,omitempty"`
-	Position     int                        `json:"position,omitempty"`
-	Metadata     map[string]interface{}     `json:"metadata,omitempty"`
+	WorkspaceID  string                    `json:"workspace_id"`
+	BoardID      string                    `json:"board_id"`
+	ColumnID     string                    `json:"column_id"`
+	Title        string                    `json:"title"`
+	Description  string                    `json:"description,omitempty"`
+	Priority     int                       `json:"priority,omitempty"`
+	State        *v1.TaskState             `json:"state,omitempty"`
+	Repositories []httpTaskRepositoryInput `json:"repositories,omitempty"`
+	AssignedTo   string                    `json:"assigned_to,omitempty"`
+	Position     int                       `json:"position,omitempty"`
+	Metadata     map[string]interface{}    `json:"metadata,omitempty"`
 }
 
 func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -306,9 +319,15 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	// Convert repositories
 	var repos []dto.TaskRepositoryInput
 	for _, r := range req.Repositories {
+		if r.RepositoryID == "" && r.LocalPath == "" {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "repository_id or local_path is required", nil)
+		}
 		repos = append(repos, dto.TaskRepositoryInput{
-			RepositoryID: r.RepositoryID,
-			BaseBranch:   r.BaseBranch,
+			RepositoryID:  r.RepositoryID,
+			BaseBranch:    r.BaseBranch,
+			LocalPath:     r.LocalPath,
+			Name:          r.Name,
+			DefaultBranch: r.DefaultBranch,
 		})
 	}
 
@@ -378,8 +397,11 @@ func (h *TaskHandlers) wsUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	if req.Repositories != nil {
 		for _, r := range req.Repositories {
 			repos = append(repos, dto.TaskRepositoryInput{
-				RepositoryID: r.RepositoryID,
-				BaseBranch:   r.BaseBranch,
+				RepositoryID:  r.RepositoryID,
+				BaseBranch:    r.BaseBranch,
+				LocalPath:     r.LocalPath,
+				Name:          r.Name,
+				DefaultBranch: r.DefaultBranch,
 			})
 		}
 	}
