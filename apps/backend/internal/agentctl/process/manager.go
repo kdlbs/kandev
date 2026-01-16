@@ -13,6 +13,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agentctl/adapter"
 	"github.com/kandev/kandev/internal/agentctl/config"
+	"github.com/kandev/kandev/internal/agentctl/shell"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/pkg/agent"
 	"go.uber.org/zap"
@@ -69,6 +70,9 @@ type Manager struct {
 
 	// Workspace tracker for git status and file changes
 	workspaceTracker *WorkspaceTracker
+
+	// Embedded shell session (auto-created when agent starts)
+	shell *shell.Session
 
 	// Protocol adapter for agent communication
 	adapter adapter.AgentAdapter
@@ -212,6 +216,19 @@ func (m *Manager) Start(ctx context.Context) error {
 	// Start workspace tracker with background context (not tied to HTTP request)
 	m.workspaceTracker.Start(context.Background())
 
+	// Auto-create shell session if enabled
+	if m.cfg.ShellEnabled {
+		shellCfg := shell.DefaultConfig(m.cfg.WorkDir)
+		shellSession, err := shell.NewSession(shellCfg, m.logger)
+		if err != nil {
+			m.logger.Warn("failed to create shell session", zap.Error(err))
+			// Non-fatal: agent can still work without shell
+		} else {
+			m.shell = shellSession
+			m.logger.Info("shell session auto-created")
+		}
+	}
+
 	m.status.Store(StatusRunning)
 	m.logger.Info("agent process started", zap.Int("pid", m.cmd.Process.Pid))
 
@@ -304,6 +321,14 @@ func (m *Manager) Stop(ctx context.Context) error {
 
 	m.logger.Info("stopping agent process")
 	m.status.Store(StatusStopping)
+
+	// Stop shell session
+	if m.shell != nil {
+		if err := m.shell.Stop(); err != nil {
+			m.logger.Debug("failed to stop shell session", zap.Error(err))
+		}
+		m.shell = nil
+	}
 
 	// Stop workspace tracker
 	if m.workspaceTracker != nil {
@@ -569,3 +594,9 @@ func (m *Manager) GetPendingPermissions() []*PendingPermission {
 	return result
 }
 
+// Shell returns the embedded shell session, or nil if not available
+func (m *Manager) Shell() *shell.Session {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.shell
+}

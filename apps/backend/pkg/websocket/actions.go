@@ -150,6 +150,12 @@ const (
 	ActionWorkspaceFileContentGet = "workspace.file.get"
 	ActionWorkspaceFileChanges    = "workspace.file.changes" // Notification
 
+	// Shell actions
+	ActionShellStatus    = "shell.status"    // Get shell status
+	ActionShellSubscribe = "shell.subscribe" // Subscribe to shell output
+	ActionShellInput     = "shell.input"     // Send input to shell
+	ActionShellOutput    = "shell.output"    // Shell output notification
+
 	// User actions
 	ActionUserGet             = "user.get"
 	ActionUserSettingsUpdate  = "user.settings.update"

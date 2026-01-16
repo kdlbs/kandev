@@ -6,11 +6,12 @@ toolchain go1.24.11
 
 require (
 	github.com/coder/acp-go-sdk v0.6.3
+	github.com/creack/pty v1.1.18
 	github.com/docker/docker v28.5.2+incompatible
+	github.com/fsnotify/fsnotify v1.6.0
 	github.com/gin-gonic/gin v1.9.1
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
-	github.com/jackc/pgx/v5 v5.8.0
 	github.com/mattn/go-sqlite3 v1.14.33
 	github.com/nats-io/nats.go v1.31.0
 	github.com/spf13/viper v1.16.0
@@ -31,7 +32,6 @@ require (
 	github.com/docker/go-connections v0.6.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
-	github.com/fsnotify/fsnotify v1.6.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.2 // indirect
 	github.com/gin-contrib/sse v0.1.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
@@ -41,9 +41,6 @@ require (
 	github.com/go-playground/validator/v10 v10.14.0 // indirect
 	github.com/goccy/go-json v0.10.2 // indirect
 	github.com/hashicorp/hcl v1.0.0 // indirect
-	github.com/jackc/pgpassfile v1.0.0 // indirect
-	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
-	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/compress v1.17.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.4 // indirect
@@ -82,7 +79,6 @@ require (
 	golang.org/x/arch v0.3.0 // indirect
 	golang.org/x/crypto v0.44.0 // indirect
 	golang.org/x/net v0.47.0 // indirect
-	golang.org/x/sync v0.18.0 // indirect
 	golang.org/x/sys v0.39.0 // indirect
 	golang.org/x/text v0.31.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20251202230838-ff82c1b0f217 // indirect

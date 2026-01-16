@@ -72,7 +72,7 @@ export const TaskLayout = memo(function TaskLayout({
         </ResizablePanel>
         <ResizableHandle className="w-px" />
         <ResizablePanel defaultSize={horizontalLayout[1]} minSize={20}>
-          <TaskRightPanel topPanel={topFilesPanel} />
+          <TaskRightPanel topPanel={topFilesPanel} taskId={taskId ?? ''} />
         </ResizablePanel>
       </ResizablePanelGroup>
     </div>
