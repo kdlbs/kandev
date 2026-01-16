@@ -308,17 +308,11 @@ func (s *Server) handleShellStreamWS(c *gin.Context) {
 	}()
 
 	// Write output from shell to WebSocket
-	for {
-		select {
-		case data, ok := <-outputCh:
-			if !ok {
-				return
-			}
-			msg := ShellMessage{Type: "output", Data: string(data)}
-			if err := conn.WriteJSON(msg); err != nil {
-				s.logger.Debug("shell WebSocket write error", zap.Error(err))
-				return
-			}
+	for data := range outputCh {
+		msg := ShellMessage{Type: "output", Data: string(data)}
+		if err := conn.WriteJSON(msg); err != nil {
+			s.logger.Debug("shell WebSocket write error", zap.Error(err))
+			return
 		}
 	}
 }

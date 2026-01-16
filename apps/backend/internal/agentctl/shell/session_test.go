@@ -74,10 +74,10 @@ func TestDetectShellWithSHELLEnv(t *testing.T) {
 	}
 
 	originalShell := os.Getenv("SHELL")
-	defer os.Setenv("SHELL", originalShell)
+	defer func() { _ = os.Setenv("SHELL", originalShell) }()
 
 	// Test with custom SHELL
-	os.Setenv("SHELL", "/bin/custom-shell")
+	_ = os.Setenv("SHELL", "/bin/custom-shell")
 	shell, args := detectShell()
 
 	if shell != "/bin/custom-shell" {
@@ -107,7 +107,7 @@ func TestNewSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession failed: %v", err)
 	}
-	defer session.Stop()
+	defer func() { _ = session.Stop() }()
 
 	// Verify session is running
 	status := session.Status()
@@ -182,7 +182,7 @@ func TestSessionWrite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession failed: %v", err)
 	}
-	defer session.Stop()
+	defer func() { _ = session.Stop() }()
 
 	// Write a simple command
 	data := []byte("echo hello\n")
@@ -215,7 +215,7 @@ func TestSessionWriteNotRunning(t *testing.T) {
 	}
 
 	// Stop the session first
-	session.Stop()
+	_ = session.Stop()
 
 	// Write should fail
 	_, err = session.Write([]byte("echo hello\n"))
@@ -242,7 +242,7 @@ func TestSessionSubscribeUnsubscribe(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession failed: %v", err)
 	}
-	defer session.Stop()
+	defer func() { _ = session.Stop() }()
 
 	// Create subscriber channel
 	ch := make(chan []byte, 100)
@@ -251,7 +251,7 @@ func TestSessionSubscribeUnsubscribe(t *testing.T) {
 	session.Subscribe(ch)
 
 	// Write something to trigger output
-	session.Write([]byte("echo test\n"))
+	_, _ = session.Write([]byte("echo test\n"))
 
 	// Wait a bit for output
 	time.Sleep(100 * time.Millisecond)
@@ -289,7 +289,7 @@ func TestSessionMultipleSubscribers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession failed: %v", err)
 	}
-	defer session.Stop()
+	defer func() { _ = session.Stop() }()
 
 	// Create multiple subscriber channels
 	ch1 := make(chan []byte, 100)
@@ -301,7 +301,7 @@ func TestSessionMultipleSubscribers(t *testing.T) {
 	session.Subscribe(ch3)
 
 	// Write something
-	session.Write([]byte("echo multi\n"))
+	_, _ = session.Write([]byte("echo multi\n"))
 
 	// Wait for output
 	time.Sleep(100 * time.Millisecond)
@@ -332,7 +332,7 @@ func TestSessionStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession failed: %v", err)
 	}
-	defer session.Stop()
+	defer func() { _ = session.Stop() }()
 
 	status := session.Status()
 
@@ -376,7 +376,7 @@ func TestSessionStatusAfterStop(t *testing.T) {
 		t.Fatalf("NewSession failed: %v", err)
 	}
 
-	session.Stop()
+	_ = session.Stop()
 
 	status := session.Status()
 	if status.Running {
@@ -432,7 +432,7 @@ func TestSessionConcurrentSubscribe(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession failed: %v", err)
 	}
-	defer session.Stop()
+	defer func() { _ = session.Stop() }()
 
 	// Concurrently subscribe and unsubscribe
 	var wg sync.WaitGroup
@@ -468,7 +468,7 @@ func TestSessionConcurrentWrite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession failed: %v", err)
 	}
-	defer session.Stop()
+	defer func() { _ = session.Stop() }()
 
 	// Concurrently write
 	var wg sync.WaitGroup
@@ -501,7 +501,7 @@ func TestSessionConcurrentStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession failed: %v", err)
 	}
-	defer session.Stop()
+	defer func() { _ = session.Stop() }()
 
 	// Concurrently read status
 	var wg sync.WaitGroup
@@ -526,10 +526,10 @@ func TestDetectShellFallback(t *testing.T) {
 	}
 
 	originalShell := os.Getenv("SHELL")
-	defer os.Setenv("SHELL", originalShell)
+	defer func() { _ = os.Setenv("SHELL", originalShell) }()
 
 	// Unset SHELL
-	os.Unsetenv("SHELL")
+	_ = os.Unsetenv("SHELL")
 
 	shell, _ := detectShell()
 

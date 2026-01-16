@@ -402,7 +402,7 @@ func (c *Client) ShellStatus(ctx context.Context) (*ShellStatusResponse, error) 
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("shell status failed: %s", resp.Status)
@@ -439,7 +439,7 @@ func (c *Client) ShellBuffer(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("shell buffer failed: %s", resp.Status)
