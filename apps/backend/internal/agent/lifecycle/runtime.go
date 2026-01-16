@@ -5,7 +5,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/kandev/kandev/internal/agent/agentctl"
+	agentctl "github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/agent/registry"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )

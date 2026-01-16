@@ -28,8 +28,8 @@ import (
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
 
 	// Agent Manager packages
-	"github.com/kandev/kandev/internal/agent/agentctl"
-	"github.com/kandev/kandev/internal/agent/agentctl/launcher"
+	agentctl "github.com/kandev/kandev/internal/agentctl/client"
+	"github.com/kandev/kandev/internal/agentctl/client/launcher"
 	agentcontroller "github.com/kandev/kandev/internal/agent/controller"
 	"github.com/kandev/kandev/internal/agent/credentials"
 	"github.com/kandev/kandev/internal/agent/discovery"

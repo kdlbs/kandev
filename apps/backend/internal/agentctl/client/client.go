@@ -1,5 +1,5 @@
 // Package agentctl provides a client for communicating with agentctl running inside containers
-package agentctl
+package client
 
 import (
 	"bytes"
@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/kandev/kandev/internal/agentctl/process"
+	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/zap"
 )
@@ -213,18 +213,18 @@ func (c *Client) BaseURL() string {
 	return c.baseURL
 }
 
-// Re-export types from process package for convenience
+// Re-export types from types package for convenience
 type (
-	GitStatusUpdate        = process.GitStatusUpdate
-	FileInfo               = process.FileInfo
-	FileListUpdate         = process.FileListUpdate
-	FileEntry              = process.FileEntry
-	FileTreeNode           = process.FileTreeNode
-	FileTreeRequest        = process.FileTreeRequest
-	FileTreeResponse       = process.FileTreeResponse
-	FileContentRequest     = process.FileContentRequest
-	FileContentResponse    = process.FileContentResponse
-	FileChangeNotification = process.FileChangeNotification
+	GitStatusUpdate        = types.GitStatusUpdate
+	FileInfo               = types.FileInfo
+	FileListUpdate         = types.FileListUpdate
+	FileEntry              = types.FileEntry
+	FileTreeNode           = types.FileTreeNode
+	FileTreeRequest        = types.FileTreeRequest
+	FileTreeResponse       = types.FileTreeResponse
+	FileContentRequest     = types.FileContentRequest
+	FileContentResponse    = types.FileContentResponse
+	FileChangeNotification = types.FileChangeNotification
 )
 
 // StreamGitStatus opens a WebSocket connection for streaming git status updates

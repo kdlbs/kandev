@@ -1,4 +1,4 @@
-package agentctl
+package client
 
 import (
 	"bytes"
