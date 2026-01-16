@@ -37,6 +37,29 @@ type AgentTypeConfig struct {
 	// Protocol configuration
 	Protocol       agent.Protocol    `json:"protocol,omitempty"`        // Communication protocol: "acp", "rest", "mcp"
 	ProtocolConfig map[string]string `json:"protocol_config,omitempty"` // Protocol-specific settings (e.g., base_url for REST)
+
+	// Session resumption configuration
+	SessionConfig SessionConfig `json:"session_config,omitempty"` // How to handle session resumption
+}
+
+// SessionConfig defines how session resumption is handled for an agent type
+type SessionConfig struct {
+	// ResumeViaACP indicates whether session resumption should use the ACP session/load method.
+	// If false, session resumption is handled via CLI flags (ResumeFlag).
+	ResumeViaACP bool `json:"resume_via_acp"`
+
+	// ResumeFlag is the CLI flag used for session resumption when ResumeViaACP is false.
+	// Example: "--resume" for auggie, empty for agents that use ACP session/load.
+	ResumeFlag string `json:"resume_flag,omitempty"`
+
+	// SessionDirTemplate is a template for the host directory where session data is stored.
+	// Supports variables: {home} (user home directory).
+	// Example: "{home}/.augment/sessions" for auggie.
+	SessionDirTemplate string `json:"session_dir_template,omitempty"`
+
+	// SessionDirTarget is the container path where the session directory is mounted.
+	// Example: "/root/.augment/sessions" for auggie.
+	SessionDirTarget string `json:"session_dir_target,omitempty"`
 }
 
 // MountTemplate defines a mount with template support

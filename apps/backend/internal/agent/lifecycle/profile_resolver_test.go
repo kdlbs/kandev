@@ -11,10 +11,10 @@ import (
 
 // MockRepository implements store.Repository for testing
 type MockRepository struct {
-	GetAgentFn         func(ctx context.Context, id string) (*models.Agent, error)
-	GetAgentByNameFn   func(ctx context.Context, name string) (*models.Agent, error)
-	GetAgentProfileFn  func(ctx context.Context, id string) (*models.AgentProfile, error)
-	ListAgentsFn       func(ctx context.Context) ([]*models.Agent, error)
+	GetAgentFn          func(ctx context.Context, id string) (*models.Agent, error)
+	GetAgentByNameFn    func(ctx context.Context, name string) (*models.Agent, error)
+	GetAgentProfileFn   func(ctx context.Context, id string) (*models.AgentProfile, error)
+	ListAgentsFn        func(ctx context.Context) ([]*models.Agent, error)
 	ListAgentProfilesFn func(ctx context.Context, agentID string) ([]*models.AgentProfile, error)
 }
 
@@ -214,4 +214,3 @@ func TestStoreProfileResolver_ResolveProfile_AgentNotFound(t *testing.T) {
 		t.Errorf("expected error message to start with '%s', got '%s'", expectedMsg, err.Error())
 	}
 }
-

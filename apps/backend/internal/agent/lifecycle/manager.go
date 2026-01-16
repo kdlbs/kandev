@@ -118,6 +118,13 @@ type Manager struct {
 	agentCfg      config.AgentConfig
 	standaloneCtl *agentctl.StandaloneCtl // Client for standalone agentctl control API
 
+	// Refactored components for separation of concerns
+	commandBuilder   *CommandBuilder   // Builds agent commands from registry config
+	sessionManager   *SessionManager   // Handles ACP session initialization
+	streamManager    *StreamManager    // Manages WebSocket streams
+	eventPublisher   *EventPublisher   // Publishes lifecycle events
+	containerManager *ContainerManager // Manages Docker containers
+
 	// Track active instances
 	instances   map[string]*AgentInstance // by instance ID
 	byTask      map[string]string         // taskID -> instanceID
@@ -138,18 +145,48 @@ func NewManager(
 	agentCfg config.AgentConfig,
 	log *logger.Logger,
 ) *Manager {
-	mgr := &Manager{
-		docker:          dockerClient,
-		registry:        reg,
-		eventBus:        eventBus,
-		agentCfg:        agentCfg,
-		logger:          log.WithFields(zap.String("component", "lifecycle-manager")),
-		instances:       make(map[string]*AgentInstance),
-		byTask:          make(map[string]string),
-		byContainer:     make(map[string]string),
-		cleanupInterval: 30 * time.Second,
-		stopCh:          make(chan struct{}),
+	componentLogger := log.WithFields(zap.String("component", "lifecycle-manager"))
+
+	// Initialize command builder
+	commandBuilder := NewCommandBuilder()
+
+	// Initialize session manager
+	sessionManager := NewSessionManager(log)
+
+	// Initialize event publisher
+	eventPublisher := NewEventPublisher(eventBus, log)
+
+	// Initialize container manager (only if docker client is available)
+	// Note: Network configuration is not used currently - containers use default Docker networking
+	var containerManager *ContainerManager
+	if dockerClient != nil {
+		containerManager = NewContainerManager(dockerClient, "", log)
 	}
+
+	mgr := &Manager{
+		docker:           dockerClient,
+		registry:         reg,
+		eventBus:         eventBus,
+		agentCfg:         agentCfg,
+		logger:           componentLogger,
+		commandBuilder:   commandBuilder,
+		sessionManager:   sessionManager,
+		eventPublisher:   eventPublisher,
+		containerManager: containerManager,
+		instances:        make(map[string]*AgentInstance),
+		byTask:           make(map[string]string),
+		byContainer:      make(map[string]string),
+		cleanupInterval:  30 * time.Second,
+		stopCh:           make(chan struct{}),
+	}
+
+	// Initialize stream manager with callbacks that delegate to manager methods
+	mgr.streamManager = NewStreamManager(log, StreamCallbacks{
+		OnSessionUpdate: mgr.handleSessionUpdate,
+		OnPermission:    mgr.handlePermissionNotification,
+		OnGitStatus:     mgr.handleGitStatusUpdate,
+		OnFileChange:    mgr.handleFileChangeNotification,
+	})
 
 	// Initialize standalone agentctl client if in standalone mode
 	if agentCfg.Runtime == "standalone" {
@@ -496,7 +533,7 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentInstanc
 	m.publishEvent(ctx, events.AgentStarted, instance)
 
 	// 10. Wait for agentctl to be ready and start the agent process
-	go m.initializeAgent(instance, req.TaskDescription)
+	go m.initializeAgent(instance, agentConfig, req.TaskDescription)
 
 	m.logger.Info("agent launched successfully",
 		zap.String("instance_id", instanceID),
@@ -571,20 +608,17 @@ func (m *Manager) launchStandalone(ctx context.Context, instanceID string, req *
 	// Build environment variables for the agent
 	env := m.buildStandaloneEnv(instanceID, req, agentConfig)
 
-	// Build agent command from registry config
-	// If Cmd is specified, join it; otherwise use default auggie command
-	agentCommand := ""
-	if len(agentConfig.Cmd) > 0 {
-		agentCommand = strings.Join(agentConfig.Cmd, " ")
+	// Build agent command using CommandBuilder (configuration-driven, no hardcoded agent names)
+	model := ""
+	if profileInfo != nil {
+		model = profileInfo.Model
 	}
-	// Append model flag if agent supports it and profile has a model configured
-	if agentConfig.ModelFlag != "" && profileInfo != nil && profileInfo.Model != "" {
-		agentCommand = agentCommand + " " + agentConfig.ModelFlag + " " + profileInfo.Model
+	cmdOpts := CommandOptions{
+		Model:     model,
+		SessionID: req.ACPSessionID, // CommandBuilder handles resume flag based on SessionConfig
 	}
-	if req.ACPSessionID != "" && profileInfo != nil && profileInfo.AgentName == "auggie" {
-		agentCommand = agentCommand + " --resume " + req.ACPSessionID
-	}
-	// If empty, agentctl will use its default (auggie --acp)
+	agentCommand := m.commandBuilder.BuildCommandString(agentConfig, cmdOpts)
+	// If empty, agentctl will use its default
 
 	// Create instance via control API
 	createReq := &agentctl.CreateInstanceRequest{
@@ -709,7 +743,7 @@ func (m *Manager) getOrCreateWorktree(ctx context.Context, req *LaunchRequest) (
 }
 
 // initializeAgent waits for agentctl to be ready and initializes the agent
-func (m *Manager) initializeAgent(instance *AgentInstance, taskDescription string) {
+func (m *Manager) initializeAgent(instance *AgentInstance, agentConfig *registry.AgentTypeConfig, taskDescription string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
@@ -741,8 +775,8 @@ func (m *Manager) initializeAgent(instance *AgentInstance, taskDescription strin
 	// Give the agent process a moment to initialize
 	time.Sleep(500 * time.Millisecond)
 
-	// Initialize ACP session
-	if err := m.initializeACPSession(ctx, instance, taskDescription); err != nil {
+	// Initialize ACP session using configuration-driven SessionManager
+	if err := m.initializeACPSession(ctx, instance, agentConfig, taskDescription); err != nil {
 		m.logger.Error("failed to initialize ACP session",
 			zap.String("instance_id", instance.ID),
 			zap.Error(err))
@@ -751,90 +785,43 @@ func (m *Manager) initializeAgent(instance *AgentInstance, taskDescription strin
 	}
 }
 
-// initializeACPSession sends the ACP initialization messages using the acp-go-sdk
-func (m *Manager) initializeACPSession(ctx context.Context, instance *AgentInstance, taskDescription string) error {
+// initializeACPSession sends the ACP initialization messages using the SessionManager
+// The agentConfig is used for configuration-driven session resumption behavior
+func (m *Manager) initializeACPSession(ctx context.Context, instance *AgentInstance, agentConfig *registry.AgentTypeConfig, taskDescription string) error {
 	m.logger.Info("initializing ACP session",
 		zap.String("instance_id", instance.ID),
-		zap.String("agentctl_url", instance.agentctl.BaseURL()))
+		zap.String("agentctl_url", instance.agentctl.BaseURL()),
+		zap.String("agent_type", agentConfig.ID))
 
-	// 1. Send initialize request
-	m.logger.Info("sending ACP initialize request",
-		zap.String("instance_id", instance.ID))
-
-	agentInfo, err := instance.agentctl.Initialize(ctx, "kandev", "1.0.0")
+	// Use SessionManager for configuration-driven session initialization
+	// This replaces the hardcoded auggie-specific logic with registry-based configuration
+	result, err := m.sessionManager.InitializeSession(
+		ctx,
+		instance.agentctl,
+		agentConfig,
+		instance.ACPSessionID, // Existing session ID to resume (if any)
+		instance.WorkspacePath,
+	)
 	if err != nil {
-		m.logger.Error("ACP initialize failed",
+		m.logger.Error("session initialization failed",
 			zap.String("instance_id", instance.ID),
 			zap.Error(err))
-		return fmt.Errorf("initialize failed: %w", err)
+		return err
 	}
-	agentName := "unknown"
-	agentVersion := "unknown"
-	if agentInfo != nil {
-		agentName = agentInfo.Name
-		agentVersion = agentInfo.Version
-	}
-	m.logger.Info("ACP initialize response received",
+
+	m.logger.Info("ACP session initialized",
 		zap.String("instance_id", instance.ID),
-		zap.String("agent_name", agentName),
-		zap.String("agent_version", agentVersion))
+		zap.String("agent_name", result.AgentName),
+		zap.String("agent_version", result.AgentVersion),
+		zap.String("session_id", result.SessionID))
 
-	// 2. Create or resume ACP session
-	sessionID := ""
-	if instance.ACPSessionID != "" && agentName != "auggie" {
-		m.logger.Info("sending ACP session/load request",
-			zap.String("instance_id", instance.ID),
-			zap.String("session_id", instance.ACPSessionID))
+	instance.ACPSessionID = result.SessionID
+	m.publishACPSessionCreated(instance, result.SessionID)
 
-		if err := instance.agentctl.LoadSession(ctx, instance.ACPSessionID); err != nil {
-			m.logger.Error("ACP session/load failed",
-				zap.String("instance_id", instance.ID),
-				zap.Error(err))
-			return fmt.Errorf("session/load failed: %w", err)
-		}
-		sessionID = instance.ACPSessionID
-		m.logger.Info("ACP session loaded",
-			zap.String("instance_id", instance.ID),
-			zap.String("session_id", sessionID))
-	} else {
-		if instance.ACPSessionID != "" && agentName == "auggie" {
-			m.logger.Info("skipping ACP session/load for auggie (resume handled via CLI)",
-				zap.String("instance_id", instance.ID),
-				zap.String("session_id", instance.ACPSessionID))
-		}
-		m.logger.Info("sending ACP session/new request",
-			zap.String("instance_id", instance.ID),
-			zap.String("workspace_path", instance.WorkspacePath))
-
-		newSessionID, err := instance.agentctl.NewSession(ctx, instance.WorkspacePath)
-		if err != nil {
-			m.logger.Error("ACP session/new failed",
-				zap.String("instance_id", instance.ID),
-				zap.Error(err))
-			return fmt.Errorf("session/new failed: %w", err)
-		}
-		sessionID = newSessionID
-		m.logger.Info("ACP session created",
-			zap.String("instance_id", instance.ID),
-			zap.String("session_id", sessionID))
-	}
-
-	instance.ACPSessionID = sessionID
-	m.publishACPSessionCreated(instance, sessionID)
-
-	// 3. Set up updates stream to receive session notifications
-	// Use a ready channel to signal when the stream is connected
+	// Set up WebSocket streams using StreamManager
+	// Use a ready channel to signal when the updates stream is connected
 	updatesReady := make(chan struct{})
-	go m.handleUpdatesStream(instance, updatesReady)
-
-	// 4. Set up permission stream to receive permission requests
-	go m.handlePermissionStream(instance)
-
-	// 5. Set up git status stream to track workspace changes
-	go m.handleGitStatusStream(instance)
-
-	// 6. Set up file changes stream to track filesystem changes
-	go m.handleFileChangesStream(instance)
+	m.streamManager.ConnectAll(instance, updatesReady)
 
 	// Wait for the updates stream to connect before sending prompt
 	// This prevents race conditions where notifications are sent before streams are ready
@@ -849,7 +836,7 @@ func (m *Manager) initializeACPSession(ctx context.Context, instance *AgentInsta
 	if taskDescription != "" {
 		m.logger.Info("sending ACP prompt",
 			zap.String("instance_id", instance.ID),
-			zap.String("session_id", sessionID),
+			zap.String("session_id", instance.ACPSessionID),
 			zap.String("task_description", taskDescription))
 
 		// Clear buffers before starting prompt
@@ -1300,6 +1287,11 @@ func (m *Manager) handleFileChangesStream(instance *AgentInstance) {
 		zap.Int("max_retries", maxRetries))
 }
 
+// handleFileChangeNotification processes file change notifications from the workspace tracker
+func (m *Manager) handleFileChangeNotification(instance *AgentInstance, notification *agentctl.FileChangeNotification) {
+	m.publishFileChange(instance, notification)
+}
+
 // publishFileChange publishes a file change notification to the event bus
 func (m *Manager) publishFileChange(instance *AgentInstance, notification *agentctl.FileChangeNotification) {
 	if m.eventBus == nil {
@@ -1567,15 +1559,16 @@ func (m *Manager) buildContainerConfig(instanceID string, req *LaunchRequest, ag
 
 	containerName := fmt.Sprintf("kandev-agent-%s", instanceID[:8])
 
-	// Build command, appending model flag if agent supports it and profile has a model
-	cmd := make([]string, len(agentConfig.Cmd))
-	copy(cmd, agentConfig.Cmd)
-	if agentConfig.ModelFlag != "" && profileInfo != nil && profileInfo.Model != "" {
-		cmd = append(cmd, agentConfig.ModelFlag, profileInfo.Model)
+	// Build command using CommandBuilder (configuration-driven, no hardcoded agent names)
+	model := ""
+	if profileInfo != nil {
+		model = profileInfo.Model
 	}
-	if req.ACPSessionID != "" && profileInfo != nil && profileInfo.AgentName == "auggie" {
-		cmd = append(cmd, "--resume", req.ACPSessionID)
+	cmdOpts := CommandOptions{
+		Model:     model,
+		SessionID: req.ACPSessionID, // CommandBuilder handles resume flag based on SessionConfig
 	}
+	cmd := m.commandBuilder.BuildCommand(agentConfig, cmdOpts)
 
 	return docker.ContainerConfig{
 		Name:       containerName,
