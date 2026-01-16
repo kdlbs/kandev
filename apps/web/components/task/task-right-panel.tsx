@@ -8,14 +8,16 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@kandev/ui
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@kandev/ui/tabs';
 import { getLocalStorage, setLocalStorage } from '@/lib/local-storage';
 import { COMMANDS } from '@/components/task/task-data';
+import { ShellTerminal } from '@/components/task/shell-terminal';
 
 type TaskRightPanelProps = {
   topPanel: ReactNode;
+  taskId: string;
 };
 
 const DEFAULT_RIGHT_LAYOUT: [number, number] = [55, 45];
 
-const TaskRightPanel = memo(function TaskRightPanel({ topPanel }: TaskRightPanelProps) {
+const TaskRightPanel = memo(function TaskRightPanel({ topPanel, taskId }: TaskRightPanelProps) {
   const [rightLayout, setRightLayout] = useState<[number, number]>(() =>
     getLocalStorage('task-layout-right', DEFAULT_RIGHT_LAYOUT)
   );
@@ -176,11 +178,8 @@ const TaskRightPanel = memo(function TaskRightPanel({ topPanel }: TaskRightPanel
             </TabsContent>
             {terminalIds.map((id) => (
               <TabsContent key={id} value={`terminal-${id}`} className="flex-1 min-h-0">
-                <div className="flex-1 min-h-0 overflow-y-auto rounded-lg bg-background p-3 space-y-3 h-full">
-                  <div className="rounded-md border border-border bg-black/90 text-green-200 font-mono text-xs p-3 space-y-2">
-                    <p className="text-green-400">kan-dev@workspace:~$</p>
-                    <p className="text-green-200">_</p>
-                  </div>
+                <div className="flex-1 min-h-0 h-full p-1">
+                  <ShellTerminal taskId={taskId} />
                 </div>
               </TabsContent>
             ))}

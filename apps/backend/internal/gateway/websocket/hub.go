@@ -164,17 +164,21 @@ func (h *Hub) BroadcastToTask(taskID string, msg *ws.Message) {
 		return
 	}
 
+	// Copy client list while holding the lock to avoid race conditions
 	h.mu.RLock()
-	clients := h.taskSubscribers[taskID]
-	numClients := len(clients)
+	subscriberMap := h.taskSubscribers[taskID]
+	clients := make([]*Client, 0, len(subscriberMap))
+	for client := range subscriberMap {
+		clients = append(clients, client)
+	}
 	h.mu.RUnlock()
 
 	h.logger.Debug("BroadcastToTask",
 		zap.String("task_id", taskID),
 		zap.String("action", msg.Action),
-		zap.Int("subscriber_count", numClients))
+		zap.Int("subscriber_count", len(clients)))
 
-	for client := range clients {
+	for _, client := range clients {
 		if client.sendBytes(data) {
 			h.logger.Debug("Sent message to client",
 				zap.String("client_id", client.ID),
@@ -195,17 +199,21 @@ func (h *Hub) BroadcastToUser(userID string, msg *ws.Message) {
 		return
 	}
 
+	// Copy client list while holding the lock to avoid race conditions
 	h.mu.RLock()
-	clients := h.userSubscribers[userID]
-	numClients := len(clients)
+	subscriberMap := h.userSubscribers[userID]
+	clients := make([]*Client, 0, len(subscriberMap))
+	for client := range subscriberMap {
+		clients = append(clients, client)
+	}
 	h.mu.RUnlock()
 
 	h.logger.Debug("BroadcastToUser",
 		zap.String("user_id", userID),
 		zap.String("action", msg.Action),
-		zap.Int("subscriber_count", numClients))
+		zap.Int("subscriber_count", len(clients)))
 
-	for client := range clients {
+	for _, client := range clients {
 		if client.sendBytes(data) {
 			h.logger.Debug("Sent message to client",
 				zap.String("client_id", client.ID),

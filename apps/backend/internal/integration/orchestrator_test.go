@@ -64,6 +64,7 @@ type simulatedInstance struct {
 	taskID         string
 	agentProfileID string
 	status         v1.AgentStatus
+	statusMu       sync.Mutex // Protects status field
 	stopCh         chan struct{}
 }
 
@@ -168,18 +169,24 @@ func (s *SimulatedAgentManagerClient) runAgentSimulation(instance *simulatedInst
 	}
 
 	// Publish agent ready (finished prompt, waiting for follow-up or completion)
+	instance.statusMu.Lock()
 	instance.status = v1.AgentStatusReady
+	instance.statusMu.Unlock()
 	s.publishAgentEvent(events.AgentReady, instance)
 }
 
 // publishAgentEvent publishes an agent lifecycle event
 func (s *SimulatedAgentManagerClient) publishAgentEvent(eventType string, instance *simulatedInstance) {
+	instance.statusMu.Lock()
+	status := instance.status
+	instance.statusMu.Unlock()
+
 	data := map[string]interface{}{
 		"instance_id":      instance.id,
 		"task_id":          instance.taskID,
 		"agent_profile_id": instance.agentProfileID,
 		"container_id":     "sim-container-" + instance.id[:8],
-		"status":           string(instance.status),
+		"status":           string(status),
 		"started_at":       time.Now(),
 		"progress":         50,
 	}
@@ -261,7 +268,9 @@ func (s *SimulatedAgentManagerClient) StopAgent(ctx context.Context, agentInstan
 	}
 
 	close(instance.stopCh)
+	instance.statusMu.Lock()
 	instance.status = v1.AgentStatusStopped
+	instance.statusMu.Unlock()
 
 	s.publishAgentEvent(events.AgentStopped, instance)
 	return nil
@@ -277,11 +286,15 @@ func (s *SimulatedAgentManagerClient) GetAgentStatus(ctx context.Context, agentI
 		return nil, fmt.Errorf("agent instance %q not found", agentInstanceID)
 	}
 
+	instance.statusMu.Lock()
+	status := instance.status
+	instance.statusMu.Unlock()
+
 	return &v1.AgentInstance{
 		ID:             instance.id,
 		TaskID:         instance.taskID,
 		AgentProfileID: instance.agentProfileID,
-		Status:         instance.status,
+		Status:         status,
 	}, nil
 }
 

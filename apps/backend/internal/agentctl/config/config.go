@@ -34,6 +34,9 @@ type Config struct {
 	// Defaults provides default values for new instances
 	Defaults InstanceDefaults
 
+	// Shell configuration
+	ShellEnabled bool // Enable auto-shell feature (default: true)
+
 	// Logging configuration
 	LogLevel  string
 	LogFormat string
@@ -96,6 +99,9 @@ type InstanceConfig struct {
 	// AutoApprovePermissions auto-approves permission requests
 	AutoApprovePermissions bool
 
+	// ShellEnabled enables auto-shell feature
+	ShellEnabled bool
+
 	// LogLevel for this instance
 	LogLevel string
 
@@ -120,8 +126,9 @@ func Load() *Config {
 			AutoApprovePermissions: getEnvBool("AGENTCTL_AUTO_APPROVE_PERMISSIONS", false),
 			HealthCheckInterval:    getEnvInt("AGENTCTL_HEALTH_CHECK_INTERVAL", 5),
 		},
-		LogLevel:  getEnv("AGENTCTL_LOG_LEVEL", "info"),
-		LogFormat: getEnv("AGENTCTL_LOG_FORMAT", "json"),
+		ShellEnabled: getEnvBool("AGENTCTL_SHELL_ENABLED", true),
+		LogLevel:     getEnv("AGENTCTL_LOG_LEVEL", "info"),
+		LogFormat:    getEnv("AGENTCTL_LOG_FORMAT", "json"),
 	}
 }
 
@@ -135,6 +142,7 @@ func (c *Config) NewInstanceConfig(port int, overrides *InstanceOverrides) *Inst
 		WorkDir:                c.Defaults.WorkDir,
 		AutoStart:              c.Defaults.AutoStart,
 		AutoApprovePermissions: c.Defaults.AutoApprovePermissions,
+		ShellEnabled:           c.ShellEnabled,
 		LogLevel:               c.LogLevel,
 		LogFormat:              c.LogFormat,
 	}

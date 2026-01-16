@@ -83,6 +83,11 @@ func (s *Server) setupRoutes() {
 		// Workspace file operations (simple HTTP)
 		api.GET("/workspace/tree", s.handleFileTree)
 		api.GET("/workspace/file/content", s.handleFileContent)
+
+		// Shell access
+		api.GET("/shell/status", s.handleShellStatus)
+		api.GET("/shell/stream", s.handleShellStreamWS)
+		api.GET("/shell/buffer", s.handleShellBuffer)
 	}
 }
 
@@ -182,4 +187,132 @@ func (s *Server) handleStop(c *gin.Context) {
 		Success: true,
 		Message: "agent stopped",
 	})
+}
+
+// ShellStatusResponse represents shell status
+type ShellStatusResponse struct {
+	Available bool   `json:"available"`
+	Running   bool   `json:"running"`
+	Pid       int    `json:"pid,omitempty"`
+	Shell     string `json:"shell,omitempty"`
+	Cwd       string `json:"cwd,omitempty"`
+	StartedAt string `json:"started_at,omitempty"`
+	Error     string `json:"error,omitempty"`
+}
+
+func (s *Server) handleShellStatus(c *gin.Context) {
+	shell := s.procMgr.Shell()
+	if shell == nil {
+		c.JSON(http.StatusOK, ShellStatusResponse{
+			Available: false,
+			Error:     "shell not available",
+		})
+		return
+	}
+
+	status := shell.Status()
+	c.JSON(http.StatusOK, ShellStatusResponse{
+		Available: true,
+		Running:   status.Running,
+		Pid:       status.Pid,
+		Shell:     status.Shell,
+		Cwd:       status.Cwd,
+		StartedAt: status.StartedAt.Format("2006-01-02T15:04:05Z07:00"),
+	})
+}
+
+// ShellMessage represents a shell I/O message
+type ShellMessage struct {
+	Type string `json:"type"` // "input", "output", "ping", "pong", "exit"
+	Data string `json:"data,omitempty"`
+	Code int    `json:"code,omitempty"`
+}
+
+// ShellBufferResponse is the response for GET /api/v1/shell/buffer
+type ShellBufferResponse struct {
+	Data string `json:"data"`
+}
+
+func (s *Server) handleShellBuffer(c *gin.Context) {
+	shell := s.procMgr.Shell()
+	if shell == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "shell not available"})
+		return
+	}
+
+	buffered := shell.GetBufferedOutput()
+	c.JSON(http.StatusOK, ShellBufferResponse{
+		Data: string(buffered),
+	})
+}
+
+func (s *Server) handleShellStreamWS(c *gin.Context) {
+	shell := s.procMgr.Shell()
+	if shell == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "shell not available"})
+		return
+	}
+
+	conn, err := s.upgrader.Upgrade(c.Writer, c.Request, nil)
+	if err != nil {
+		s.logger.Error("WebSocket upgrade failed", zap.Error(err))
+		return
+	}
+	defer func() {
+		if err := conn.Close(); err != nil {
+			s.logger.Debug("failed to close shell websocket", zap.Error(err))
+		}
+	}()
+
+	s.logger.Info("Shell stream WebSocket connected")
+
+	// Create output channel and subscribe to shell output
+	outputCh := make(chan []byte, 256)
+	shell.Subscribe(outputCh)
+	defer shell.Unsubscribe(outputCh)
+
+	// Note: Buffered output is sent via GET /api/v1/shell/buffer when clients subscribe
+	// This avoids duplicate output when clients reconnect
+
+	// Done channel to signal goroutine shutdown
+	done := make(chan struct{})
+	defer close(done)
+
+	// Read input from WebSocket and write to shell
+	go func() {
+		for {
+			select {
+			case <-done:
+				return
+			default:
+				var msg ShellMessage
+				if err := conn.ReadJSON(&msg); err != nil {
+					s.logger.Debug("shell WebSocket read error", zap.Error(err))
+					return
+				}
+
+				switch msg.Type {
+				case "input":
+					if _, err := shell.Write([]byte(msg.Data)); err != nil {
+						s.logger.Debug("shell write error", zap.Error(err))
+					}
+				case "ping":
+					// Respond with pong
+					if err := conn.WriteJSON(ShellMessage{Type: "pong"}); err != nil {
+						s.logger.Debug("shell pong write error", zap.Error(err))
+						return
+					}
+				}
+			}
+		}
+	}()
+
+	// Write output from shell to WebSocket
+	for data := range outputCh {
+		msg := ShellMessage{Type: "output", Data: string(data)}
+		if err := conn.WriteJSON(msg); err != nil {
+			s.logger.Debug("shell WebSocket write error", zap.Error(err))
+			return
+		}
+	}
 }
