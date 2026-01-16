@@ -20,8 +20,10 @@ import { SHORTCUTS } from '@/lib/keyboard/constants';
 import { KeyboardShortcutTooltip } from '@/components/keyboard-shortcut-tooltip';
 import { TaskChatInput } from '@/components/task/task-chat-input';
 import { useLazyLoadMessages } from '@/hooks/use-lazy-load-messages';
+import { useTaskSession } from '@/hooks/use-task-session';
+import { useTaskMessages } from '@/hooks/use-task-messages';
 import { MessageRenderer } from '@/components/task/chat/message-renderer';
-import { TypingIndicator } from '@/components/task/chat/messages/typing-indicator';
+import { RunningIndicator } from '@/components/task/chat/messages/running-indicator';
 import { TodoSummary } from '@/components/task/chat/todo-summary';
 
 type AgentOption = {
@@ -32,19 +34,13 @@ type AgentOption = {
 type TaskChatPanelProps = {
   agents: AgentOption[];
   onSend: (message: string) => void;
-  isLoading?: boolean;
-  isAgentWorking?: boolean;
-  taskId?: string;
-  taskDescription?: string;
+  sessionId: string | null;
 };
 
 export function TaskChatPanel({
   agents,
   onSend,
-  isLoading,
-  isAgentWorking,
-  taskId,
-  taskDescription,
+  sessionId,
 }: TaskChatPanelProps) {
   const [messageInput, setMessageInput] = useState('');
   const [selectedAgent, setSelectedAgent] = useState(agents[0]?.id ?? '');
@@ -54,11 +50,17 @@ export function TaskChatPanel({
   const lastAgentMessageCountRef = useRef(0);
   const wasAtBottomRef = useRef(true);
 
+  // Get task session details and derived task information from session ID
+  const { session, taskId, taskDescription, isWorking } = useTaskSession(sessionId);
+
+  // Fetch messages for this session
+  useTaskMessages(taskId, sessionId);
+
   const messagesState = useAppStore((state) => state.messages);
   const messages = messagesState?.items ?? [];
   const messagesLoading = messagesState?.isLoading ?? false;
   const isInitialLoading = messagesLoading && messages.length === 0;
-  const showLoadingState = (isLoading || isInitialLoading) && !isAgentWorking;
+  const showLoadingState = (messagesLoading || isInitialLoading) && !isWorking;
   const { loadMore, hasMore, isLoading: isLoadingMore } = useLazyLoadMessages(
     messagesState?.sessionId ?? null
   );
@@ -80,14 +82,14 @@ export function TaskChatPanel({
   const taskDescriptionMessage: Message | null =
     taskDescription && visibleMessages.length === 0
       ? {
-          id: 'task-description',
-          task_id: taskId ?? '',
-          task_session_id: messagesState?.sessionId ?? '',
-          author_type: 'user',
-          content: taskDescription,
-          type: 'message',
-          created_at: '',
-        }
+        id: 'task-description',
+        task_id: taskId ?? '',
+        task_session_id: messagesState?.sessionId ?? '',
+        author_type: 'user',
+        content: taskDescription,
+        type: 'message',
+        created_at: '',
+      }
       : null;
 
   // Combine task description with visible messages
@@ -112,12 +114,7 @@ export function TaskChatPanel({
     lastAgentMessageCountRef.current = agentMessageCount;
   }, [agentMessageCount]);
 
-  const lastVisibleMessage = visibleMessages[visibleMessages.length - 1];
-  const lastMessageRequestsInput = Boolean(lastVisibleMessage?.requests_input);
-  const shouldShowTypingIndicator = Boolean(isAgentWorking) && !lastMessageRequestsInput;
-  const typingIndicatorLabel = visibleMessages.length === 0 ? 'Agent is starting...' : 'Agent is thinking...';
-
-  const itemCount = allMessages.length + (shouldShowTypingIndicator ? 1 : 0);
+  const itemCount = allMessages.length;
 
   const virtualizer = useVirtualizer({
     count: itemCount,
@@ -199,21 +196,23 @@ export function TaskChatPanel({
             Loading older messages...
           </div>
         )}
+        {/* Show loading messages spinner when initially loading */}
         {showLoadingState && (
           <div className="flex items-center justify-center py-8 text-muted-foreground">
             <IconLoader2 className="h-5 w-5 animate-spin mr-2" />
             <span>Loading messages...</span>
           </div>
         )}
-        {!isLoading && !isInitialLoading && visibleMessages.length === 0 && !isAgentWorking && (
+        {/* Show empty state when no messages and no loading */}
+        {!messagesLoading && !isInitialLoading && visibleMessages.length === 0 && (
           <div className="flex items-center justify-center py-8 text-muted-foreground">
             <span>No messages yet. Start the conversation!</span>
           </div>
         )}
-        {!isLoading && !isInitialLoading && itemCount > 0 && (
+        {/* Render messages */}
+        {!isInitialLoading && itemCount > 0 && (
           <div className="relative w-full" style={{ height: `${virtualizer.getTotalSize()}px` }}>
             {virtualizer.getVirtualItems().map((virtualRow) => {
-              const isTypingRow = shouldShowTypingIndicator && virtualRow.index === allMessages.length;
               const message = allMessages[virtualRow.index];
               return (
                 <div
@@ -224,14 +223,10 @@ export function TaskChatPanel({
                   style={{ transform: `translateY(${virtualRow.start}px)` }}
                 >
                   <div className="pb-3">
-                    {isTypingRow ? (
-                      <TypingIndicator label={typingIndicatorLabel} />
-                    ) : (
-                      <MessageRenderer
-                        comment={message}
-                        isTaskDescription={message.id === 'task-description'}
-                      />
-                    )}
+                    <MessageRenderer
+                      comment={message}
+                      isTaskDescription={message.id === 'task-description'}
+                    />
                   </div>
                 </div>
               );
@@ -239,6 +234,14 @@ export function TaskChatPanel({
           </div>
         )}
       </div>
+
+      {/* Running indicator - shows agent state */}
+      {session?.state && (
+        <div className="mt-2">
+          <RunningIndicator state={session.state} />
+        </div>
+      )}
+
       <form onSubmit={handleSubmit} className="mt-3 flex flex-col gap-2">
         {todoItems.length > 0 && (
           <TodoSummary todos={todoItems} />
@@ -292,7 +295,7 @@ export function TaskChatPanel({
                     className={cn(
                       'h-9 w-9 cursor-pointer',
                       planModeEnabled &&
-                        'bg-primary/15 text-primary border-primary/40 shadow-[0_0_0_1px_rgba(59,130,246,0.35)]'
+                      'bg-primary/15 text-primary border-primary/40 shadow-[0_0_0_1px_rgba(59,130,246,0.35)]'
                     )}
                     onClick={() => setPlanModeEnabled((value) => !value)}
                   >

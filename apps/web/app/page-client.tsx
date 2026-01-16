@@ -7,7 +7,12 @@ import { OnboardingDialog } from '@/components/onboarding-dialog';
 import { getLocalStorage, setLocalStorage } from '@/lib/local-storage';
 import { STORAGE_KEYS } from '@/lib/settings/constants';
 
-export function PageClient() {
+type PageClientProps = {
+  initialTaskId?: string;
+  initialSessionId?: string;
+};
+
+export function PageClient({ initialTaskId, initialSessionId }: PageClientProps) {
   const [showOnboarding, setShowOnboarding] = useState(() => {
     if (typeof window === 'undefined') return false;
     const completed = getLocalStorage(STORAGE_KEYS.ONBOARDING_COMPLETED, false);
@@ -24,7 +29,7 @@ export function PageClient() {
   return (
     <>
       <OnboardingDialog open={showOnboarding} onComplete={handleOnboardingComplete} />
-      <KanbanWithPreview key={boardKey} />
+      <KanbanWithPreview key={boardKey} initialTaskId={initialTaskId} initialSessionId={initialSessionId} />
     </>
   );
 }

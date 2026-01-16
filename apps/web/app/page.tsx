@@ -1,6 +1,6 @@
 import { PageClient } from '@/app/page-client';
 import { StateHydrator } from '@/components/state-hydrator';
-import { fetchBoardSnapshot, fetchUserSettings, listBoards, listRepositories, listWorkspaces } from '@/lib/http';
+import { fetchBoardSnapshot, fetchUserSettings, listBoards, listRepositories, listWorkspaces, listTaskSessionMessages } from '@/lib/http';
 import { snapshotToState } from '@/lib/ssr/mapper';
 import type { AppState } from '@/lib/state/store';
 
@@ -14,8 +14,12 @@ export default async function Page({ searchParams }: PageProps) {
     const resolvedParams = searchParams ? await searchParams : {};
     const workspaceParam = resolvedParams.workspaceId;
     const boardParam = resolvedParams.boardId;
+    const taskIdParam = resolvedParams.taskId;
+    const sessionIdParam = resolvedParams.sessionId;
     const workspaceId = Array.isArray(workspaceParam) ? workspaceParam[0] : workspaceParam;
     const boardIdParam = Array.isArray(boardParam) ? boardParam[0] : boardParam;
+    const taskId = Array.isArray(taskIdParam) ? taskIdParam[0] : taskIdParam;
+    const sessionId = Array.isArray(sessionIdParam) ? sessionIdParam[0] : sessionIdParam;
 
     const [workspaces, userSettingsResponse] = await Promise.all([
       listWorkspaces({ cache: 'no-store' }),
@@ -66,6 +70,9 @@ export default async function Page({ searchParams }: PageProps) {
       listBoards(activeWorkspaceId, { cache: 'no-store' }),
       listRepositories(activeWorkspaceId, { cache: 'no-store' }).catch(() => ({ repositories: [] })),
     ]);
+
+    // Use boardIdParam if it exists in this workspace, otherwise fall back
+    // Client-side code will handle task selection even if board doesn't match
     const boardId =
       boardList.boards.find((board) => board.id === boardIdParam)?.id ??
       boardList.boards.find((board) => board.id === settingsBoardId)?.id ??
@@ -98,10 +105,31 @@ export default async function Page({ searchParams }: PageProps) {
 
     const snapshot = await fetchBoardSnapshot(boardId, { cache: 'no-store' });
     initialState = { ...initialState, ...snapshotToState(snapshot) };
+
+    // Load messages for selected task session if provided (SSR optimization)
+    if (taskId && sessionId) {
+      try {
+        const messagesResponse = await listTaskSessionMessages(sessionId, { limit: 50, sort: 'asc' }, { cache: 'no-store' });
+        initialState = {
+          ...initialState,
+          messages: {
+            sessionId,
+            items: messagesResponse.messages ?? [],
+            isLoading: false,
+            hasMore: messagesResponse.has_more ?? false,
+            oldestCursor: messagesResponse.cursor ?? (messagesResponse.messages?.[0]?.id ?? null),
+          },
+        };
+      } catch (error) {
+        // SSR failed - client will load messages via WebSocket
+        console.warn('Could not SSR messages (client will load via WebSocket):', error instanceof Error ? error.message : String(error));
+      }
+    }
+
     return (
       <>
         <StateHydrator initialState={initialState} />
-        <PageClient />
+        <PageClient initialTaskId={taskId} initialSessionId={sessionId} />
       </>
     );
   } catch {
