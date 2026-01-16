@@ -118,7 +118,6 @@ type Manager struct {
 
 	// Refactored components for separation of concerns
 	instanceStore    *InstanceStore    // Thread-safe instance tracking
-	agentController  *AgentController  // Agent control operations (start, prompt)
 	commandBuilder   *CommandBuilder   // Builds agent commands from registry config
 	sessionManager   *SessionManager   // Handles ACP session initialization
 	streamManager    *StreamManager    // Manages WebSocket streams
@@ -186,17 +185,6 @@ func NewManager(
 		OnGitStatus:     mgr.handleGitStatusUpdate,
 		OnFileChange:    mgr.handleFileChangeNotification,
 	})
-
-	// Initialize agent controller (needs stream manager to be set first)
-	mgr.agentController = NewAgentController(
-		reg,
-		profileResolver,
-		commandBuilder,
-		sessionManager,
-		mgr.streamManager,
-		eventPublisher,
-		log,
-	)
 
 	if runtime != nil {
 		mgr.logger.Info("initialized with runtime", zap.String("runtime", runtime.Name()))
