@@ -67,6 +67,7 @@ func (ai *AgentInstance) GetAgentCtlClient() *agentctl.Client {
 // LaunchRequest contains parameters for launching an agent
 type LaunchRequest struct {
 	TaskID          string
+	SessionID       string
 	TaskTitle       string // Human-readable task title for semantic worktree naming
 	AgentProfileID  string
 	WorkspacePath   string            // Host path to workspace (original repository path)
@@ -692,6 +693,7 @@ func (m *Manager) getOrCreateWorktree(ctx context.Context, req *LaunchRequest) (
 	// Create request with optional WorktreeID for resumption
 	createReq := worktree.CreateRequest{
 		TaskID:         req.TaskID,
+		SessionID:      req.SessionID,
 		TaskTitle:      req.TaskTitle,
 		RepositoryID:   req.RepositoryID,
 		RepositoryPath: req.RepositoryPath,

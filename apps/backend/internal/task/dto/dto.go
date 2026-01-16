@@ -92,24 +92,34 @@ type EnvironmentDTO struct {
 }
 
 type TaskDTO struct {
-	ID              string                 `json:"id"`
-	WorkspaceID     string                 `json:"workspace_id"`
-	BoardID         string                 `json:"board_id"`
-	ColumnID        string                 `json:"column_id"`
-	Title           string                 `json:"title"`
-	Description     string                 `json:"description"`
-	State           v1.TaskState           `json:"state"`
-	Priority        int                    `json:"priority"`
-	RepositoryID    *string                `json:"repository_id,omitempty"`
-	BaseBranch      *string                `json:"base_branch,omitempty"`
-	AssignedAgentID *string                `json:"assigned_agent_id,omitempty"`
-	Position        int                    `json:"position"`
-	CreatedAt       time.Time              `json:"created_at"`
-	UpdatedAt       time.Time              `json:"updated_at"`
-	Metadata        map[string]interface{} `json:"metadata,omitempty"`
+	ID              string                   `json:"id"`
+	WorkspaceID     string                   `json:"workspace_id"`
+	BoardID         string                   `json:"board_id"`
+	ColumnID        string                   `json:"column_id"`
+	Title           string                   `json:"title"`
+	Description     string                   `json:"description"`
+	State           v1.TaskState             `json:"state"`
+	Priority        int                      `json:"priority"`
+	Repositories    []TaskRepositoryDTO      `json:"repositories,omitempty"`
+	AssignedAgentID *string                  `json:"assigned_agent_id,omitempty"`
+	Position        int                      `json:"position"`
+	CreatedAt       time.Time                `json:"created_at"`
+	UpdatedAt       time.Time                `json:"updated_at"`
+	Metadata        map[string]interface{}   `json:"metadata,omitempty"`
 	// Worktree information (populated if worktree exists for this task)
 	WorktreePath   *string `json:"worktree_path,omitempty"`
 	WorktreeBranch *string `json:"worktree_branch,omitempty"`
+}
+
+type TaskRepositoryDTO struct {
+	ID           string                 `json:"id"`
+	TaskID       string                 `json:"task_id"`
+	RepositoryID string                 `json:"repository_id"`
+	BaseBranch   string                 `json:"base_branch"`
+	Position     int                    `json:"position"`
+	Metadata     map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt    time.Time              `json:"created_at"`
+	UpdatedAt    time.Time              `json:"updated_at"`
 }
 
 type TaskSessionDTO struct {
@@ -348,17 +358,24 @@ func FromLocalRepository(repo service.LocalRepository) LocalRepositoryDTO {
 }
 
 func FromTask(task *models.Task) TaskDTO {
-	var repositoryID *string
-	if task.RepositoryID != "" {
-		repositoryID = &task.RepositoryID
-	}
-	var baseBranch *string
-	if task.BaseBranch != "" {
-		baseBranch = &task.BaseBranch
-	}
 	var assignedAgentID *string
 	if task.AssignedTo != "" {
 		assignedAgentID = &task.AssignedTo
+	}
+
+	// Convert repositories
+	var repositories []TaskRepositoryDTO
+	for _, repo := range task.Repositories {
+		repositories = append(repositories, TaskRepositoryDTO{
+			ID:           repo.ID,
+			TaskID:       repo.TaskID,
+			RepositoryID: repo.RepositoryID,
+			BaseBranch:   repo.BaseBranch,
+			Position:     repo.Position,
+			Metadata:     repo.Metadata,
+			CreatedAt:    repo.CreatedAt,
+			UpdatedAt:    repo.UpdatedAt,
+		})
 	}
 
 	return TaskDTO{
@@ -370,8 +387,7 @@ func FromTask(task *models.Task) TaskDTO {
 		Description:     task.Description,
 		State:           task.State,
 		Priority:        task.Priority,
-		RepositoryID:    repositoryID,
-		BaseBranch:      baseBranch,
+		Repositories:    repositories,
 		AssignedAgentID: assignedAgentID,
 		Position:        task.Position,
 		CreatedAt:       task.CreatedAt,
@@ -391,9 +407,6 @@ func FromTaskSession(session *models.TaskSession) TaskSessionDTO {
 		EnvironmentID:        session.EnvironmentID,
 		RepositoryID:         session.RepositoryID,
 		BaseBranch:           session.BaseBranch,
-		WorktreeID:           session.WorktreeID,
-		WorktreePath:         session.WorktreePath,
-		WorktreeBranch:       session.WorktreeBranch,
 		State:                session.State,
 		Progress:             session.Progress,
 		ErrorMessage:         session.ErrorMessage,
@@ -405,6 +418,11 @@ func FromTaskSession(session *models.TaskSession) TaskSessionDTO {
 		StartedAt:            session.StartedAt,
 		CompletedAt:          session.CompletedAt,
 		UpdatedAt:            session.UpdatedAt,
+	}
+	if len(session.Worktrees) > 0 {
+		result.WorktreeID = session.Worktrees[0].WorktreeID
+		result.WorktreePath = session.Worktrees[0].WorktreePath
+		result.WorktreeBranch = session.Worktrees[0].WorktreeBranch
 	}
 	return result
 }

@@ -63,6 +63,7 @@ type AgentManagerClient interface {
 // LaunchAgentRequest contains parameters for launching an agent
 type LaunchAgentRequest struct {
 	TaskID          string
+	SessionID       string
 	TaskTitle       string // Human-readable task title for semantic worktree naming
 	AgentProfileID  string
 	RepositoryURL   string
@@ -85,6 +86,7 @@ type LaunchAgentResponse struct {
 	AgentInstanceID string
 	ContainerID     string
 	Status          v1.AgentStatus
+	WorktreeID      string
 	WorktreePath    string
 	WorktreeBranch  string
 }
@@ -107,7 +109,7 @@ type TaskExecution struct {
 
 // FromTaskSession converts a models.TaskSession to TaskExecution
 func FromTaskSession(s *models.TaskSession) *TaskExecution {
-	return &TaskExecution{
+	execution := &TaskExecution{
 		TaskID:          s.TaskID,
 		AgentInstanceID: s.AgentInstanceID,
 		AgentProfileID:  s.AgentProfileID,
@@ -117,6 +119,11 @@ func FromTaskSession(s *models.TaskSession) *TaskExecution {
 		LastUpdate:      s.UpdatedAt,
 		SessionID:       s.ID,
 	}
+	if len(s.Worktrees) > 0 {
+		execution.WorktreePath = s.Worktrees[0].WorktreePath
+		execution.WorktreeBranch = s.Worktrees[0].WorktreeBranch
+	}
+	return execution
 }
 
 // agentSessionStateToV1 converts models.TaskSessionState to v1.TaskSessionState
@@ -264,8 +271,20 @@ func (e *Executor) ExecuteWithProfile(ctx context.Context, task *v1.Task, agentP
 	var repositoryPath string
 	var repositoryID string
 	var baseBranch string
-	if task.RepositoryID != nil && *task.RepositoryID != "" {
-		repositoryID = *task.RepositoryID
+
+	// Get the primary repository for this task
+	primaryTaskRepo, err := e.repo.GetPrimaryTaskRepository(ctx, task.ID)
+	if err != nil {
+		e.logger.Error("failed to get primary task repository",
+			zap.String("task_id", task.ID),
+			zap.Error(err))
+		return nil, err
+	}
+
+	if primaryTaskRepo != nil {
+		repositoryID = primaryTaskRepo.RepositoryID
+		baseBranch = primaryTaskRepo.BaseBranch
+
 		repository, err := e.repo.GetRepository(ctx, repositoryID)
 		if err != nil {
 			e.logger.Error("failed to load repository for task",
@@ -278,9 +297,7 @@ func (e *Executor) ExecuteWithProfile(ctx context.Context, task *v1.Task, agentP
 		if repositoryPath != "" {
 			req.RepositoryURL = repositoryPath
 		}
-		if task.BaseBranch != nil && *task.BaseBranch != "" {
-			baseBranch = *task.BaseBranch
-		} else if repository.DefaultBranch != "" {
+		if baseBranch == "" && repository.DefaultBranch != "" {
 			baseBranch = repository.DefaultBranch
 		}
 		if baseBranch != "" {
@@ -300,6 +317,30 @@ func (e *Executor) ExecuteWithProfile(ctx context.Context, task *v1.Task, agentP
 		}
 	}
 
+	// Create agent session in database before launch so worktree associations can persist.
+	sessionID := uuid.New().String()
+	now := time.Now().UTC()
+	session := &models.TaskSession{
+		ID:             sessionID,
+		TaskID:         task.ID,
+		AgentProfileID: agentProfileID,
+		RepositoryID:   repositoryID,
+		BaseBranch:     baseBranch,
+		State:          models.TaskSessionStateCreated,
+		Progress:       0,
+		StartedAt:      now,
+		UpdatedAt:      now,
+	}
+
+	if err := e.repo.CreateTaskSession(ctx, session); err != nil {
+		e.logger.Error("failed to persist agent session before launch",
+			zap.String("task_id", task.ID),
+			zap.Error(err))
+		return nil, err
+	}
+
+	req.SessionID = sessionID
+
 	e.logger.Info("launching agent for task",
 		zap.String("task_id", task.ID),
 		zap.String("agent_profile_id", agentProfileID),
@@ -311,33 +352,45 @@ func (e *Executor) ExecuteWithProfile(ctx context.Context, task *v1.Task, agentP
 		e.logger.Error("failed to launch agent",
 			zap.String("task_id", task.ID),
 			zap.Error(err))
+		if updateErr := e.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateFailed, err.Error()); updateErr != nil {
+			e.logger.Warn("failed to mark session as failed after launch error",
+				zap.String("task_id", task.ID),
+				zap.String("session_id", sessionID),
+				zap.Error(updateErr))
+		}
 		return nil, err
 	}
 
-	// Create agent session in database
-	sessionID := uuid.New().String()
-	now := time.Now().UTC()
-	session := &models.TaskSession{
-		ID:              sessionID,
-		TaskID:          task.ID,
-		AgentInstanceID: resp.AgentInstanceID,
-		ContainerID:     resp.ContainerID,
-		AgentProfileID:  agentProfileID,
-		RepositoryID:    repositoryID,
-		BaseBranch:      baseBranch,
-		WorktreePath:    resp.WorktreePath,
-		WorktreeBranch:  resp.WorktreeBranch,
-		State:           models.TaskSessionStateStarting,
-		Progress:        0,
-		StartedAt:       now,
-		UpdatedAt:       now,
+	session.AgentInstanceID = resp.AgentInstanceID
+	session.ContainerID = resp.ContainerID
+	session.State = models.TaskSessionStateStarting
+	session.Progress = 0
+	session.ErrorMessage = ""
+	session.UpdatedAt = time.Now().UTC()
+
+	if err := e.repo.UpdateTaskSession(ctx, session); err != nil {
+		e.logger.Error("failed to update agent session after launch",
+			zap.String("task_id", task.ID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
 	}
 
-	if err := e.repo.CreateTaskSession(ctx, session); err != nil {
-		e.logger.Error("failed to persist agent session",
-			zap.String("task_id", task.ID),
-			zap.Error(err))
-		// Continue anyway - the agent is already running
+	if resp.WorktreeID != "" {
+		sessionWorktree := &models.TaskSessionWorktree{
+			SessionID:    session.ID,
+			WorktreeID:   resp.WorktreeID,
+			RepositoryID: repositoryID,
+			Position:     0,
+			WorktreePath: resp.WorktreePath,
+			WorktreeBranch: resp.WorktreeBranch,
+		}
+		if err := e.repo.CreateTaskSessionWorktree(ctx, sessionWorktree); err != nil {
+			e.logger.Error("failed to persist session worktree association",
+				zap.String("task_id", task.ID),
+				zap.String("session_id", session.ID),
+				zap.String("worktree_id", resp.WorktreeID),
+				zap.Error(err))
+		}
 	}
 
 	// Track the execution in the in-memory cache
@@ -395,6 +448,7 @@ func (e *Executor) ResumeSession(ctx context.Context, task *v1.Task, session *mo
 
 	req := &LaunchAgentRequest{
 		TaskID:          task.ID,
+		SessionID:       session.ID,
 		TaskTitle:       task.Title,
 		AgentProfileID:  session.AgentProfileID,
 		TaskDescription: "",
@@ -407,8 +461,8 @@ func (e *Executor) ResumeSession(ctx context.Context, task *v1.Task, session *mo
 			metadata[key] = value
 		}
 	}
-	if session.WorktreeID != "" {
-		metadata["worktree_id"] = session.WorktreeID
+	if len(session.Worktrees) > 0 && session.Worktrees[0].WorktreeID != "" {
+		metadata["worktree_id"] = session.Worktrees[0].WorktreeID
 	}
 	if len(metadata) > 0 {
 		req.Metadata = metadata
@@ -416,8 +470,8 @@ func (e *Executor) ResumeSession(ctx context.Context, task *v1.Task, session *mo
 
 	repositoryID := session.RepositoryID
 	var repositoryPath string
-	if repositoryID == "" && task.RepositoryID != nil {
-		repositoryID = *task.RepositoryID
+	if repositoryID == "" && len(task.Repositories) > 0 {
+		repositoryID = task.Repositories[0].RepositoryID
 	}
 	if repositoryID != "" {
 		repository, err := e.repo.GetRepository(ctx, repositoryID)
@@ -435,8 +489,8 @@ func (e *Executor) ResumeSession(ctx context.Context, task *v1.Task, session *mo
 	}
 
 	baseBranch := session.BaseBranch
-	if baseBranch == "" && task.BaseBranch != nil && *task.BaseBranch != "" {
-		baseBranch = *task.BaseBranch
+	if baseBranch == "" && len(task.Repositories) > 0 && task.Repositories[0].BaseBranch != "" {
+		baseBranch = task.Repositories[0].BaseBranch
 	}
 	if baseBranch != "" {
 		req.Branch = baseBranch
@@ -476,12 +530,6 @@ func (e *Executor) ResumeSession(ctx context.Context, task *v1.Task, session *mo
 
 	session.AgentInstanceID = resp.AgentInstanceID
 	session.ContainerID = resp.ContainerID
-	if resp.WorktreePath != "" {
-		session.WorktreePath = resp.WorktreePath
-	}
-	if resp.WorktreeBranch != "" {
-		session.WorktreeBranch = resp.WorktreeBranch
-	}
 	session.Progress = 0
 	session.ErrorMessage = ""
 	session.State = models.TaskSessionStateStarting
@@ -494,6 +542,40 @@ func (e *Executor) ResumeSession(ctx context.Context, task *v1.Task, session *mo
 			zap.Error(err))
 	}
 
+	if resp.WorktreeID != "" {
+		hasWorktree := false
+		for _, wt := range session.Worktrees {
+			if wt.WorktreeID == resp.WorktreeID {
+				hasWorktree = true
+				break
+			}
+		}
+		if !hasWorktree {
+			sessionWorktree := &models.TaskSessionWorktree{
+				SessionID:    session.ID,
+				WorktreeID:   resp.WorktreeID,
+				RepositoryID: repositoryID,
+				Position:     0,
+				WorktreePath: resp.WorktreePath,
+				WorktreeBranch: resp.WorktreeBranch,
+			}
+			if err := e.repo.CreateTaskSessionWorktree(ctx, sessionWorktree); err != nil {
+				e.logger.Error("failed to persist session worktree association on resume",
+					zap.String("task_id", task.ID),
+					zap.String("session_id", session.ID),
+					zap.String("worktree_id", resp.WorktreeID),
+					zap.Error(err))
+			}
+		}
+	}
+
+	worktreePath := resp.WorktreePath
+	worktreeBranch := resp.WorktreeBranch
+	if worktreePath == "" && len(session.Worktrees) > 0 {
+		worktreePath = session.Worktrees[0].WorktreePath
+		worktreeBranch = session.Worktrees[0].WorktreeBranch
+	}
+
 	now := time.Now().UTC()
 	execution := &TaskExecution{
 		TaskID:          task.ID,
@@ -504,8 +586,8 @@ func (e *Executor) ResumeSession(ctx context.Context, task *v1.Task, session *mo
 		Progress:        0,
 		LastUpdate:      now,
 		SessionID:       session.ID,
-		WorktreePath:    session.WorktreePath,
-		WorktreeBranch:  session.WorktreeBranch,
+		WorktreePath:    worktreePath,
+		WorktreeBranch:  worktreeBranch,
 	}
 
 	e.mu.Lock()

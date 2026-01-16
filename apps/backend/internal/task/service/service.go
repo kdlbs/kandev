@@ -63,6 +63,12 @@ func (s *Service) SetExecutionStopper(stopper TaskExecutionStopper) {
 
 // Request types
 
+// TaskRepositoryInput for creating/updating task repositories
+type TaskRepositoryInput struct {
+	RepositoryID string `json:"repository_id"`
+	BaseBranch   string `json:"base_branch"`
+}
+
 // CreateTaskRequest contains the data for creating a new task
 type CreateTaskRequest struct {
 	WorkspaceID  string                 `json:"workspace_id"`
@@ -72,8 +78,7 @@ type CreateTaskRequest struct {
 	Description  string                 `json:"description"`
 	Priority     int                    `json:"priority"`
 	State        *v1.TaskState          `json:"state,omitempty"`
-	RepositoryID string                 `json:"repository_id,omitempty"`
-	BaseBranch   string                 `json:"base_branch,omitempty"`
+	Repositories []TaskRepositoryInput  `json:"repositories,omitempty"`
 	AssignedTo   string                 `json:"assigned_to,omitempty"`
 	Position     int                    `json:"position"`
 	Metadata     map[string]interface{} `json:"metadata,omitempty"`
@@ -85,8 +90,7 @@ type UpdateTaskRequest struct {
 	Description  *string                `json:"description,omitempty"`
 	Priority     *int                   `json:"priority,omitempty"`
 	State        *v1.TaskState          `json:"state,omitempty"`
-	RepositoryID *string                `json:"repository_id,omitempty"`
-	BaseBranch   *string                `json:"base_branch,omitempty"`
+	Repositories []TaskRepositoryInput  `json:"repositories,omitempty"`
 	AssignedTo   *string                `json:"assigned_to,omitempty"`
 	Position     *int                   `json:"position,omitempty"`
 	Metadata     map[string]interface{} `json:"metadata,omitempty"`
@@ -234,32 +238,50 @@ type UpdateRepositoryScriptRequest struct {
 
 // CreateTask creates a new task and publishes a task.created event
 func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*models.Task, error) {
-	if strings.TrimSpace(req.RepositoryID) == "" {
-		return nil, fmt.Errorf("repository_id is required")
-	}
 	state := v1.TaskStateCreated
 	if req.State != nil {
 		state = *req.State
 	}
 	task := &models.Task{
-		ID:           uuid.New().String(),
-		WorkspaceID:  req.WorkspaceID,
-		BoardID:      req.BoardID,
-		ColumnID:     req.ColumnID,
-		Title:        req.Title,
-		Description:  req.Description,
-		State:        state,
-		Priority:     req.Priority,
-		RepositoryID: req.RepositoryID,
-		BaseBranch:   req.BaseBranch,
-		AssignedTo:   req.AssignedTo,
-		Position:     req.Position,
-		Metadata:     req.Metadata,
+		ID:          uuid.New().String(),
+		WorkspaceID: req.WorkspaceID,
+		BoardID:     req.BoardID,
+		ColumnID:    req.ColumnID,
+		Title:       req.Title,
+		Description: req.Description,
+		State:       state,
+		Priority:    req.Priority,
+		AssignedTo:  req.AssignedTo,
+		Position:    req.Position,
+		Metadata:    req.Metadata,
 	}
 
 	if err := s.repo.CreateTask(ctx, task); err != nil {
 		s.logger.Error("failed to create task", zap.Error(err))
 		return nil, err
+	}
+
+	// Create task-repository associations
+	for i, repoInput := range req.Repositories {
+		taskRepo := &models.TaskRepository{
+			TaskID:       task.ID,
+			RepositoryID: repoInput.RepositoryID,
+			BaseBranch:   repoInput.BaseBranch,
+			Position:     i,
+			Metadata:     make(map[string]interface{}),
+		}
+		if err := s.repo.CreateTaskRepository(ctx, taskRepo); err != nil {
+			s.logger.Error("failed to create task repository", zap.Error(err))
+			return nil, err
+		}
+	}
+
+	// Load repositories into task for response
+	repos, err := s.repo.ListTaskRepositories(ctx, task.ID)
+	if err != nil {
+		s.logger.Error("failed to list task repositories", zap.Error(err))
+	} else {
+		task.Repositories = repos
 	}
 
 	s.publishTaskEvent(ctx, events.TaskCreated, task, nil)
@@ -268,9 +290,22 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*mode
 	return task, nil
 }
 
-// GetTask retrieves a task by ID
+// GetTask retrieves a task by ID and populates repositories
 func (s *Service) GetTask(ctx context.Context, id string) (*models.Task, error) {
-	return s.repo.GetTask(ctx, id)
+	task, err := s.repo.GetTask(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	// Load task repositories
+	repos, err := s.repo.ListTaskRepositories(ctx, id)
+	if err != nil {
+		s.logger.Error("failed to list task repositories", zap.Error(err))
+	} else {
+		task.Repositories = repos
+	}
+
+	return task, nil
 }
 
 // UpdateTask updates an existing task and publishes a task.updated event
@@ -297,12 +332,6 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 		task.State = *req.State
 		stateChanged = true
 	}
-	if req.RepositoryID != nil {
-		task.RepositoryID = *req.RepositoryID
-	}
-	if req.BaseBranch != nil {
-		task.BaseBranch = *req.BaseBranch
-	}
 	if req.AssignedTo != nil {
 		task.AssignedTo = *req.AssignedTo
 	}
@@ -317,6 +346,38 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 	if err := s.repo.UpdateTask(ctx, task); err != nil {
 		s.logger.Error("failed to update task", zap.String("task_id", id), zap.Error(err))
 		return nil, err
+	}
+
+	// Update task repositories if provided
+	if req.Repositories != nil {
+		// Delete existing repositories
+		if err := s.repo.DeleteTaskRepositoriesByTask(ctx, id); err != nil {
+			s.logger.Error("failed to delete task repositories", zap.Error(err))
+			return nil, err
+		}
+
+		// Create new repositories
+		for i, repoInput := range req.Repositories {
+			taskRepo := &models.TaskRepository{
+				TaskID:       task.ID,
+				RepositoryID: repoInput.RepositoryID,
+				BaseBranch:   repoInput.BaseBranch,
+				Position:     i,
+				Metadata:     make(map[string]interface{}),
+			}
+			if err := s.repo.CreateTaskRepository(ctx, taskRepo); err != nil {
+				s.logger.Error("failed to create task repository", zap.Error(err))
+				return nil, err
+			}
+		}
+	}
+
+	// Load repositories into task for response
+	repos, err := s.repo.ListTaskRepositories(ctx, task.ID)
+	if err != nil {
+		s.logger.Error("failed to list task repositories", zap.Error(err))
+	} else {
+		task.Repositories = repos
 	}
 
 	if stateChanged && oldState != nil {
@@ -366,7 +427,22 @@ func (s *Service) DeleteTask(ctx context.Context, id string) error {
 
 // ListTasks returns all tasks for a board
 func (s *Service) ListTasks(ctx context.Context, boardID string) ([]*models.Task, error) {
-	return s.repo.ListTasks(ctx, boardID)
+	tasks, err := s.repo.ListTasks(ctx, boardID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Load repositories for each task
+	for _, task := range tasks {
+		repos, err := s.repo.ListTaskRepositories(ctx, task.ID)
+		if err != nil {
+			s.logger.Error("failed to list task repositories", zap.String("task_id", task.ID), zap.Error(err))
+		} else {
+			task.Repositories = repos
+		}
+	}
+
+	return tasks, nil
 }
 
 // ListTaskSessions returns all sessions for a task.
@@ -1117,12 +1193,6 @@ func (s *Service) publishTaskEvent(ctx context.Context, eventType string, task *
 
 	if task.AssignedTo != "" {
 		data["assigned_to"] = task.AssignedTo
-	}
-	if task.RepositoryID != "" {
-		data["repository_id"] = task.RepositoryID
-	}
-	if task.BaseBranch != "" {
-		data["base_branch"] = task.BaseBranch
 	}
 	if task.Metadata != nil {
 		data["metadata"] = task.Metadata

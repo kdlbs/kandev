@@ -15,7 +15,7 @@ type SQLiteStore struct {
 }
 
 // NewSQLiteStore creates a new SQLite-backed worktree store.
-// It uses the provided sql.DB connection and ensures the worktrees table exists.
+// It uses the provided sql.DB connection and ensures the task_session_worktrees table exists.
 func NewSQLiteStore(db *sql.DB) (*SQLiteStore, error) {
 	store := &SQLiteStore{db: db}
 	if err := store.initSchema(); err != nil {
@@ -24,28 +24,30 @@ func NewSQLiteStore(db *sql.DB) (*SQLiteStore, error) {
 	return store, nil
 }
 
-// initSchema creates the worktrees table if it doesn't exist.
+// initSchema creates the task_session_worktrees table if it doesn't exist.
 func (s *SQLiteStore) initSchema() error {
 	schema := `
-	CREATE TABLE IF NOT EXISTS worktrees (
+	CREATE TABLE IF NOT EXISTS task_session_worktrees (
 		id TEXT PRIMARY KEY,
-		task_id TEXT NOT NULL,
+		session_id TEXT NOT NULL,
+		worktree_id TEXT NOT NULL,
 		repository_id TEXT NOT NULL,
-		repository_path TEXT NOT NULL,
-		path TEXT NOT NULL,
-		branch TEXT NOT NULL,
-		base_branch TEXT NOT NULL,
+		position INTEGER DEFAULT 0,
+		worktree_path TEXT DEFAULT '',
+		worktree_branch TEXT DEFAULT '',
 		status TEXT NOT NULL DEFAULT 'active',
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL,
 		merged_at DATETIME,
 		deleted_at DATETIME,
-		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+		FOREIGN KEY (session_id) REFERENCES task_sessions(id) ON DELETE CASCADE,
+		UNIQUE(session_id, worktree_id)
 	);
 
-	CREATE INDEX IF NOT EXISTS idx_worktrees_task_id ON worktrees(task_id);
-	CREATE INDEX IF NOT EXISTS idx_worktrees_repository_id ON worktrees(repository_id);
-	CREATE INDEX IF NOT EXISTS idx_worktrees_status ON worktrees(status);
+	CREATE INDEX IF NOT EXISTS idx_task_session_worktrees_session_id ON task_session_worktrees(session_id);
+	CREATE INDEX IF NOT EXISTS idx_task_session_worktrees_worktree_id ON task_session_worktrees(worktree_id);
+	CREATE INDEX IF NOT EXISTS idx_task_session_worktrees_repository_id ON task_session_worktrees(repository_id);
+	CREATE INDEX IF NOT EXISTS idx_task_session_worktrees_status ON task_session_worktrees(status);
 	`
 
 	_, err := s.db.Exec(schema)
@@ -57,6 +59,12 @@ func (s *SQLiteStore) CreateWorktree(ctx context.Context, wt *Worktree) error {
 	if wt.ID == "" {
 		wt.ID = uuid.New().String()
 	}
+	if wt.SessionID == "" {
+		return fmt.Errorf("session ID is required to persist worktree")
+	}
+	if wt.Status == "" {
+		wt.Status = StatusActive
+	}
 	now := time.Now().UTC()
 	if wt.CreatedAt.IsZero() {
 		wt.CreatedAt = now
@@ -66,12 +74,22 @@ func (s *SQLiteStore) CreateWorktree(ctx context.Context, wt *Worktree) error {
 	}
 
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO worktrees (
-			id, task_id, repository_id, repository_path, path, branch, base_branch,
-			status, created_at, updated_at, merged_at, deleted_at
+		INSERT INTO task_session_worktrees (
+			id, session_id, worktree_id, repository_id, position,
+			worktree_path, worktree_branch, status,
+			created_at, updated_at, merged_at, deleted_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, wt.ID, wt.TaskID, wt.RepositoryID, wt.RepositoryPath, wt.Path, wt.Branch,
-		wt.BaseBranch, wt.Status, wt.CreatedAt, wt.UpdatedAt, wt.MergedAt, wt.DeletedAt)
+		ON CONFLICT(session_id, worktree_id) DO UPDATE SET
+			repository_id = excluded.repository_id,
+			worktree_path = excluded.worktree_path,
+			worktree_branch = excluded.worktree_branch,
+			status = excluded.status,
+			updated_at = excluded.updated_at,
+			merged_at = excluded.merged_at,
+			deleted_at = excluded.deleted_at
+	`, uuid.New().String(), wt.SessionID, wt.ID, wt.RepositoryID, 0,
+		wt.Path, wt.Branch, wt.Status,
+		wt.CreatedAt, wt.UpdatedAt, wt.MergedAt, wt.DeletedAt)
 
 	return err
 }
@@ -80,15 +98,41 @@ func (s *SQLiteStore) CreateWorktree(ctx context.Context, wt *Worktree) error {
 func (s *SQLiteStore) GetWorktreeByID(ctx context.Context, id string) (*Worktree, error) {
 	wt := &Worktree{}
 	var mergedAt, deletedAt sql.NullTime
+	var repositoryPath, baseBranch sql.NullString
 
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, task_id, repository_id, repository_path, path, branch, base_branch,
-		       status, created_at, updated_at, merged_at, deleted_at
-		FROM worktrees WHERE id = ?
+		SELECT
+			tsw.worktree_id,
+			tsw.session_id,
+			s.task_id,
+			tsw.repository_id,
+			r.local_path,
+			tsw.worktree_path,
+			tsw.worktree_branch,
+			s.base_branch,
+			tsw.status,
+			tsw.created_at,
+			tsw.updated_at,
+			tsw.merged_at,
+			tsw.deleted_at
+		FROM task_session_worktrees tsw
+		LEFT JOIN task_sessions s ON tsw.session_id = s.id
+		LEFT JOIN repositories r ON tsw.repository_id = r.id
+		WHERE tsw.worktree_id = ?
 	`, id).Scan(
-		&wt.ID, &wt.TaskID, &wt.RepositoryID, &wt.RepositoryPath, &wt.Path,
-		&wt.Branch, &wt.BaseBranch, &wt.Status, &wt.CreatedAt, &wt.UpdatedAt,
-		&mergedAt, &deletedAt,
+		&wt.ID,
+		&wt.SessionID,
+		&wt.TaskID,
+		&wt.RepositoryID,
+		&repositoryPath,
+		&wt.Path,
+		&wt.Branch,
+		&baseBranch,
+		&wt.Status,
+		&wt.CreatedAt,
+		&wt.UpdatedAt,
+		&mergedAt,
+		&deletedAt,
 	)
 
 	if err == sql.ErrNoRows {
@@ -98,6 +142,12 @@ func (s *SQLiteStore) GetWorktreeByID(ctx context.Context, id string) (*Worktree
 		return nil, err
 	}
 
+	if repositoryPath.Valid {
+		wt.RepositoryPath = repositoryPath.String
+	}
+	if baseBranch.Valid {
+		wt.BaseBranch = baseBranch.String
+	}
 	if mergedAt.Valid {
 		wt.MergedAt = &mergedAt.Time
 	}
@@ -113,15 +163,42 @@ func (s *SQLiteStore) GetWorktreeByID(ctx context.Context, id string) (*Worktree
 func (s *SQLiteStore) GetWorktreeByTaskID(ctx context.Context, taskID string) (*Worktree, error) {
 	wt := &Worktree{}
 	var mergedAt, deletedAt sql.NullTime
+	var repositoryPath, baseBranch sql.NullString
 
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, task_id, repository_id, repository_path, path, branch, base_branch,
-		       status, created_at, updated_at, merged_at, deleted_at
-		FROM worktrees WHERE task_id = ? AND status = ? ORDER BY created_at DESC LIMIT 1
+		SELECT
+			tsw.worktree_id,
+			tsw.session_id,
+			s.task_id,
+			tsw.repository_id,
+			r.local_path,
+			tsw.worktree_path,
+			tsw.worktree_branch,
+			s.base_branch,
+			tsw.status,
+			tsw.created_at,
+			tsw.updated_at,
+			tsw.merged_at,
+			tsw.deleted_at
+		FROM task_session_worktrees tsw
+		INNER JOIN task_sessions s ON tsw.session_id = s.id
+		LEFT JOIN repositories r ON tsw.repository_id = r.id
+		WHERE s.task_id = ? AND tsw.status = ?
+		ORDER BY tsw.created_at DESC LIMIT 1
 	`, taskID, StatusActive).Scan(
-		&wt.ID, &wt.TaskID, &wt.RepositoryID, &wt.RepositoryPath, &wt.Path,
-		&wt.Branch, &wt.BaseBranch, &wt.Status, &wt.CreatedAt, &wt.UpdatedAt,
-		&mergedAt, &deletedAt,
+		&wt.ID,
+		&wt.SessionID,
+		&wt.TaskID,
+		&wt.RepositoryID,
+		&repositoryPath,
+		&wt.Path,
+		&wt.Branch,
+		&baseBranch,
+		&wt.Status,
+		&wt.CreatedAt,
+		&wt.UpdatedAt,
+		&mergedAt,
+		&deletedAt,
 	)
 
 	if err == sql.ErrNoRows {
@@ -131,6 +208,12 @@ func (s *SQLiteStore) GetWorktreeByTaskID(ctx context.Context, taskID string) (*
 		return nil, err
 	}
 
+	if repositoryPath.Valid {
+		wt.RepositoryPath = repositoryPath.String
+	}
+	if baseBranch.Valid {
+		wt.BaseBranch = baseBranch.String
+	}
 	if mergedAt.Valid {
 		wt.MergedAt = &mergedAt.Time
 	}
@@ -144,9 +227,24 @@ func (s *SQLiteStore) GetWorktreeByTaskID(ctx context.Context, taskID string) (*
 // GetWorktreesByTaskID retrieves all worktrees for a task.
 func (s *SQLiteStore) GetWorktreesByTaskID(ctx context.Context, taskID string) ([]*Worktree, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, task_id, repository_id, repository_path, path, branch, base_branch,
-		       status, created_at, updated_at, merged_at, deleted_at
-		FROM worktrees WHERE task_id = ? ORDER BY created_at DESC
+		SELECT
+			tsw.worktree_id,
+			tsw.session_id,
+			s.task_id,
+			tsw.repository_id,
+			r.local_path,
+			tsw.worktree_path,
+			tsw.worktree_branch,
+			s.base_branch,
+			tsw.status,
+			tsw.created_at,
+			tsw.updated_at,
+			tsw.merged_at,
+			tsw.deleted_at
+		FROM task_session_worktrees tsw
+		INNER JOIN task_sessions s ON tsw.session_id = s.id
+		LEFT JOIN repositories r ON tsw.repository_id = r.id
+		WHERE s.task_id = ? ORDER BY tsw.created_at DESC
 	`, taskID)
 	if err != nil {
 		return nil, err
@@ -159,9 +257,24 @@ func (s *SQLiteStore) GetWorktreesByTaskID(ctx context.Context, taskID string) (
 // GetWorktreesByRepositoryID retrieves all worktrees for a repository.
 func (s *SQLiteStore) GetWorktreesByRepositoryID(ctx context.Context, repoID string) ([]*Worktree, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, task_id, repository_id, repository_path, path, branch, base_branch,
-		       status, created_at, updated_at, merged_at, deleted_at
-		FROM worktrees WHERE repository_id = ?
+		SELECT
+			tsw.worktree_id,
+			tsw.session_id,
+			s.task_id,
+			tsw.repository_id,
+			r.local_path,
+			tsw.worktree_path,
+			tsw.worktree_branch,
+			s.base_branch,
+			tsw.status,
+			tsw.created_at,
+			tsw.updated_at,
+			tsw.merged_at,
+			tsw.deleted_at
+		FROM task_session_worktrees tsw
+		LEFT JOIN task_sessions s ON tsw.session_id = s.id
+		LEFT JOIN repositories r ON tsw.repository_id = r.id
+		WHERE tsw.repository_id = ?
 	`, repoID)
 	if err != nil {
 		return nil, err
@@ -175,13 +288,28 @@ func (s *SQLiteStore) GetWorktreesByRepositoryID(ctx context.Context, repoID str
 func (s *SQLiteStore) UpdateWorktree(ctx context.Context, wt *Worktree) error {
 	wt.UpdatedAt = time.Now().UTC()
 
-	result, err := s.db.ExecContext(ctx, `
-		UPDATE worktrees SET
-			repository_id = ?, repository_path = ?, path = ?, branch = ?, base_branch = ?,
+	query := `
+		UPDATE task_session_worktrees SET
+			repository_id = ?, worktree_path = ?, worktree_branch = ?,
 			status = ?, updated_at = ?, merged_at = ?, deleted_at = ?
-		WHERE id = ?
-	`, wt.RepositoryID, wt.RepositoryPath, wt.Path, wt.Branch, wt.BaseBranch,
-		wt.Status, wt.UpdatedAt, wt.MergedAt, wt.DeletedAt, wt.ID)
+		WHERE worktree_id = ?
+	`
+	args := []interface{}{
+		wt.RepositoryID,
+		wt.Path,
+		wt.Branch,
+		wt.Status,
+		wt.UpdatedAt,
+		wt.MergedAt,
+		wt.DeletedAt,
+		wt.ID,
+	}
+	if wt.SessionID != "" {
+		query += " AND session_id = ?"
+		args = append(args, wt.SessionID)
+	}
+
+	result, err := s.db.ExecContext(ctx, query, args...)
 	if err != nil {
 		return err
 	}
@@ -195,7 +323,7 @@ func (s *SQLiteStore) UpdateWorktree(ctx context.Context, wt *Worktree) error {
 
 // DeleteWorktree removes a worktree record.
 func (s *SQLiteStore) DeleteWorktree(ctx context.Context, id string) error {
-	result, err := s.db.ExecContext(ctx, `DELETE FROM worktrees WHERE id = ?`, id)
+	result, err := s.db.ExecContext(ctx, `DELETE FROM task_session_worktrees WHERE worktree_id = ?`, id)
 	if err != nil {
 		return err
 	}
@@ -210,9 +338,24 @@ func (s *SQLiteStore) DeleteWorktree(ctx context.Context, id string) error {
 // ListActiveWorktrees returns all worktrees with status 'active'.
 func (s *SQLiteStore) ListActiveWorktrees(ctx context.Context) ([]*Worktree, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, task_id, repository_id, repository_path, path, branch, base_branch,
-		       status, created_at, updated_at, merged_at, deleted_at
-		FROM worktrees WHERE status = ?
+		SELECT
+			tsw.worktree_id,
+			tsw.session_id,
+			s.task_id,
+			tsw.repository_id,
+			r.local_path,
+			tsw.worktree_path,
+			tsw.worktree_branch,
+			s.base_branch,
+			tsw.status,
+			tsw.created_at,
+			tsw.updated_at,
+			tsw.merged_at,
+			tsw.deleted_at
+		FROM task_session_worktrees tsw
+		LEFT JOIN task_sessions s ON tsw.session_id = s.id
+		LEFT JOIN repositories r ON tsw.repository_id = r.id
+		WHERE tsw.status = ?
 	`, StatusActive)
 	if err != nil {
 		return nil, err
@@ -228,16 +371,33 @@ func (s *SQLiteStore) scanWorktrees(rows *sql.Rows) ([]*Worktree, error) {
 	for rows.Next() {
 		wt := &Worktree{}
 		var mergedAt, deletedAt sql.NullTime
+		var repositoryPath, baseBranch sql.NullString
 
 		err := rows.Scan(
-			&wt.ID, &wt.TaskID, &wt.RepositoryID, &wt.RepositoryPath, &wt.Path,
-			&wt.Branch, &wt.BaseBranch, &wt.Status, &wt.CreatedAt, &wt.UpdatedAt,
-			&mergedAt, &deletedAt,
+			&wt.ID,
+			&wt.SessionID,
+			&wt.TaskID,
+			&wt.RepositoryID,
+			&repositoryPath,
+			&wt.Path,
+			&wt.Branch,
+			&baseBranch,
+			&wt.Status,
+			&wt.CreatedAt,
+			&wt.UpdatedAt,
+			&mergedAt,
+			&deletedAt,
 		)
 		if err != nil {
 			return nil, err
 		}
 
+		if repositoryPath.Valid {
+			wt.RepositoryPath = repositoryPath.String
+		}
+		if baseBranch.Valid {
+			wt.BaseBranch = baseBranch.String
+		}
 		if mergedAt.Valid {
 			wt.MergedAt = &mergedAt.Time
 		}
@@ -252,4 +412,3 @@ func (s *SQLiteStore) scanWorktrees(rows *sql.Rows) ([]*Worktree, error) {
 
 // Ensure SQLiteStore implements Store interface.
 var _ Store = (*SQLiteStore)(nil)
-

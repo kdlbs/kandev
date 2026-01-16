@@ -7,6 +7,9 @@ type Worktree struct {
 	// ID is the unique identifier for this worktree record.
 	ID string `json:"id"`
 
+	// SessionID is the task session associated with this worktree.
+	SessionID string `json:"session_id,omitempty"`
+
 	// TaskID is the ID of the task this worktree is associated with.
 	// Multiple worktrees can exist for the same task (one per agent session).
 	TaskID string `json:"task_id"`
@@ -48,6 +51,9 @@ type Worktree struct {
 type CreateRequest struct {
 	// TaskID is the unique task identifier (required).
 	TaskID string
+
+	// SessionID is the task session identifier (required for persistence).
+	SessionID string
 
 	// TaskTitle is the human-readable task title (optional).
 	// If provided, it will be used to generate semantic worktree/branch names.
@@ -103,4 +109,3 @@ const StatusMerged = "merged"
 
 // StatusDeleted is the status for a deleted worktree.
 const StatusDeleted = "deleted"
-

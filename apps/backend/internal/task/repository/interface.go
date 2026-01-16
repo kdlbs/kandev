@@ -34,6 +34,15 @@ type Repository interface {
 	AddTaskToBoard(ctx context.Context, taskID, boardID, columnID string, position int) error
 	RemoveTaskFromBoard(ctx context.Context, taskID, boardID string) error
 
+	// TaskRepository operations
+	CreateTaskRepository(ctx context.Context, taskRepo *models.TaskRepository) error
+	GetTaskRepository(ctx context.Context, id string) (*models.TaskRepository, error)
+	ListTaskRepositories(ctx context.Context, taskID string) ([]*models.TaskRepository, error)
+	UpdateTaskRepository(ctx context.Context, taskRepo *models.TaskRepository) error
+	DeleteTaskRepository(ctx context.Context, id string) error
+	DeleteTaskRepositoriesByTask(ctx context.Context, taskID string) error
+	GetPrimaryTaskRepository(ctx context.Context, taskID string) (*models.TaskRepository, error)
+
 	// Board operations
 	CreateBoard(ctx context.Context, board *models.Board) error
 	GetBoard(ctx context.Context, id string) (*models.Board, error)
@@ -72,6 +81,12 @@ type Repository interface {
 	HasActiveTaskSessionsByEnvironment(ctx context.Context, environmentID string) (bool, error)
 	HasActiveTaskSessionsByRepository(ctx context.Context, repositoryID string) (bool, error)
 	DeleteTaskSession(ctx context.Context, id string) error
+
+	// Task Session Worktree operations
+	CreateTaskSessionWorktree(ctx context.Context, sessionWorktree *models.TaskSessionWorktree) error
+	ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskSessionWorktree, error)
+	DeleteTaskSessionWorktree(ctx context.Context, id string) error
+	DeleteTaskSessionWorktreesBySession(ctx context.Context, sessionID string) error
 
 	// Repository operations
 	CreateRepository(ctx context.Context, repository *models.Repository) error

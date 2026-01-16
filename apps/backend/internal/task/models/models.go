@@ -16,11 +16,10 @@ type Task struct {
 	Description  string                 `json:"description"`
 	State        v1.TaskState           `json:"state"`
 	Priority     int                    `json:"priority"`
-	RepositoryID string                 `json:"repository_id,omitempty"`
-	BaseBranch   string                 `json:"base_branch,omitempty"`
 	AssignedTo   string                 `json:"assigned_to,omitempty"`
 	Position     int                    `json:"position"` // Order within column
 	Metadata     map[string]interface{} `json:"metadata,omitempty"`
+	Repositories []*TaskRepository      `json:"repositories,omitempty"`
 	CreatedAt    time.Time              `json:"created_at"`
 	UpdatedAt    time.Time              `json:"updated_at"`
 }
@@ -58,6 +57,18 @@ type Column struct {
 	Color     string       `json:"color"`
 	CreatedAt time.Time    `json:"created_at"`
 	UpdatedAt time.Time    `json:"updated_at"`
+}
+
+// TaskRepository represents a repository associated with a task
+type TaskRepository struct {
+	ID           string                 `json:"id"`
+	TaskID       string                 `json:"task_id"`
+	RepositoryID string                 `json:"repository_id"`
+	BaseBranch   string                 `json:"base_branch"`
+	Position     int                    `json:"position"`
+	Metadata     map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt    time.Time              `json:"created_at"`
+	UpdatedAt    time.Time              `json:"updated_at"`
 }
 
 // MessageAuthorType represents who authored a message
@@ -143,6 +154,20 @@ const (
 	TaskSessionStateCancelled TaskSessionState = "CANCELLED"
 )
 
+// TaskSessionWorktree represents the association between a task session and a worktree
+type TaskSessionWorktree struct {
+	ID           string    `json:"id"`
+	SessionID    string    `json:"session_id"`
+	WorktreeID   string    `json:"worktree_id"`
+	RepositoryID string    `json:"repository_id"`
+	Position     int       `json:"position"`
+	CreatedAt    time.Time `json:"created_at"`
+
+	// Worktree details stored on this association
+	WorktreePath   string `json:"worktree_path,omitempty"`
+	WorktreeBranch string `json:"worktree_branch,omitempty"`
+}
+
 // TaskSession represents a persistent agent execution session for a task.
 // This replaces the in-memory TaskExecution tracking and survives backend restarts.
 type TaskSession struct {
@@ -153,11 +178,9 @@ type TaskSession struct {
 	AgentProfileID       string                 `json:"agent_profile_id"`  // ID of the agent profile used
 	ExecutorID           string                 `json:"executor_id"`
 	EnvironmentID        string                 `json:"environment_id"`
-	RepositoryID         string                 `json:"repository_id"`
-	BaseBranch           string                 `json:"base_branch"`
-	WorktreeID           string                 `json:"worktree_id"`
-	WorktreePath         string                 `json:"worktree_path"`
-	WorktreeBranch       string                 `json:"worktree_branch"`
+	RepositoryID         string                 `json:"repository_id"`     // Primary repository (for backward compatibility)
+	BaseBranch           string                 `json:"base_branch"`       // Primary base branch (for backward compatibility)
+	Worktrees            []*TaskSessionWorktree `json:"worktrees,omitempty"` // Associated worktrees
 	AgentProfileSnapshot map[string]interface{} `json:"agent_profile_snapshot,omitempty"`
 	ExecutorSnapshot     map[string]interface{} `json:"executor_snapshot,omitempty"`
 	EnvironmentSnapshot  map[string]interface{} `json:"environment_snapshot,omitempty"`
@@ -184,13 +207,16 @@ func (s *TaskSession) ToAPI() map[string]interface{} {
 		"environment_id":    s.EnvironmentID,
 		"repository_id":     s.RepositoryID,
 		"base_branch":       s.BaseBranch,
-		"worktree_id":       s.WorktreeID,
-		"worktree_path":     s.WorktreePath,
-		"worktree_branch":   s.WorktreeBranch,
+		"worktrees":         s.Worktrees,
 		"state":             string(s.State),
 		"progress":          s.Progress,
 		"started_at":        s.StartedAt,
 		"updated_at":        s.UpdatedAt,
+	}
+	// For backward compatibility, populate worktree_path and worktree_branch from first worktree
+	if len(s.Worktrees) > 0 {
+		result["worktree_path"] = s.Worktrees[0].WorktreePath
+		result["worktree_branch"] = s.Worktrees[0].WorktreeBranch
 	}
 	if s.ErrorMessage != "" {
 		result["error_message"] = s.ErrorMessage
@@ -316,19 +342,24 @@ type Environment struct {
 
 // ToAPI converts internal Task to API type
 func (t *Task) ToAPI() *v1.Task {
-	var repositoryID *string
-	if t.RepositoryID != "" {
-		repositoryID = &t.RepositoryID
-	}
-
-	var baseBranch *string
-	if t.BaseBranch != "" {
-		baseBranch = &t.BaseBranch
-	}
-
 	var assignedAgentID *string
 	if t.AssignedTo != "" {
 		assignedAgentID = &t.AssignedTo
+	}
+
+	// Convert TaskRepository models to API types
+	var repositories []v1.TaskRepository
+	for _, repo := range t.Repositories {
+		repositories = append(repositories, v1.TaskRepository{
+			ID:           repo.ID,
+			TaskID:       repo.TaskID,
+			RepositoryID: repo.RepositoryID,
+			BaseBranch:   repo.BaseBranch,
+			Position:     repo.Position,
+			Metadata:     repo.Metadata,
+			CreatedAt:    repo.CreatedAt,
+			UpdatedAt:    repo.UpdatedAt,
+		})
 	}
 
 	return &v1.Task{
@@ -339,9 +370,8 @@ func (t *Task) ToAPI() *v1.Task {
 		Description:     t.Description,
 		State:           t.State,
 		Priority:        t.Priority,
-		RepositoryID:    repositoryID,
-		BaseBranch:      baseBranch,
 		AssignedAgentID: assignedAgentID,
+		Repositories:    repositories,
 		CreatedAt:       t.CreatedAt,
 		UpdatedAt:       t.UpdatedAt,
 		Metadata:        t.Metadata,

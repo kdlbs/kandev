@@ -178,7 +178,7 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
               description: task.description ?? undefined,
               position: task.position ?? 0,
               state: task.state,
-              repositoryId: task.repository_id ?? undefined,
+              repositoryId: task.repositories?.[0]?.repository_id ?? undefined,
             },
           ],
         },
@@ -197,7 +197,7 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
                 columnId: task.column_id ?? item.columnId,
                 position: task.position ?? item.position,
                 state: task.state ?? item.state,
-                repositoryId: task.repository_id ?? item.repositoryId,
+                repositoryId: task.repositories?.[0]?.repository_id ?? item.repositoryId,
               }
             : item
         ),

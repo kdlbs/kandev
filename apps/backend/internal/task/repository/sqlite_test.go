@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/worktree"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -19,6 +20,9 @@ func createTestSQLiteRepo(t *testing.T) (*SQLiteRepository, func()) {
 	repo, err := NewSQLiteRepository(dbPath)
 	if err != nil {
 		t.Fatalf("failed to create SQLite repository: %v", err)
+	}
+	if _, err := worktree.NewSQLiteStore(repo.DB()); err != nil {
+		t.Fatalf("failed to init worktree store: %v", err)
 	}
 
 	cleanup := func() {

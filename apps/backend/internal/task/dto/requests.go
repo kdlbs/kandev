@@ -237,6 +237,11 @@ type GetTaskRequest struct {
 	ID string
 }
 
+type TaskRepositoryInput struct {
+	RepositoryID string
+	BaseBranch   string
+}
+
 type CreateTaskRequest struct {
 	WorkspaceID   string
 	BoardID       string
@@ -245,24 +250,22 @@ type CreateTaskRequest struct {
 	Description   string
 	Priority      int
 	State         *v1.TaskState
-	RepositoryID string
-	BaseBranch   string
+	Repositories  []TaskRepositoryInput
 	AssignedTo    string
 	Position      int
 	Metadata      map[string]interface{}
 }
 
 type UpdateTaskRequest struct {
-	ID          string
-	Title       *string
-	Description *string
-	Priority    *int
-	State       *v1.TaskState
-	RepositoryID *string
-	BaseBranch   *string
-	AssignedTo  *string
-	Position    *int
-	Metadata    map[string]interface{}
+	ID           string
+	Title        *string
+	Description  *string
+	Priority     *int
+	State        *v1.TaskState
+	Repositories []TaskRepositoryInput
+	AssignedTo   *string
+	Position     *int
+	Metadata     map[string]interface{}
 }
 
 type DeleteTaskRequest struct {

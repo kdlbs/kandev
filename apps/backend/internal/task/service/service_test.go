@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/worktree"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
@@ -74,6 +75,9 @@ func createTestService(t *testing.T) (*Service, *MockEventBus, repository.Reposi
 	if err != nil {
 		t.Fatalf("failed to create test repository: %v", err)
 	}
+	if _, err := worktree.NewSQLiteStore(repo.DB()); err != nil {
+		t.Fatalf("failed to init worktree store: %v", err)
+	}
 	t.Cleanup(func() {
 		if err := repo.Close(); err != nil {
 			t.Errorf("failed to close repo: %v", err)
@@ -107,7 +111,12 @@ func TestService_CreateTask(t *testing.T) {
 		Title:        "Test Task",
 		Description:  "A test task",
 		Priority:     5,
-		RepositoryID: "repo-123",
+		Repositories: []TaskRepositoryInput{
+			{
+				RepositoryID: "repo-123",
+				BaseBranch:   "main",
+			},
+		},
 	}
 
 	task, err := svc.CreateTask(ctx, req)
