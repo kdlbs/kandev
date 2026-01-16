@@ -13,11 +13,12 @@ import { ShellTerminal } from '@/components/task/shell-terminal';
 type TaskRightPanelProps = {
   topPanel: ReactNode;
   taskId: string;
+  sessionId: string | null;
 };
 
 const DEFAULT_RIGHT_LAYOUT: [number, number] = [55, 45];
 
-const TaskRightPanel = memo(function TaskRightPanel({ topPanel, taskId }: TaskRightPanelProps) {
+const TaskRightPanel = memo(function TaskRightPanel({ topPanel, taskId, sessionId }: TaskRightPanelProps) {
   const [rightLayout, setRightLayout] = useState<[number, number]>(() =>
     getLocalStorage('task-layout-right', DEFAULT_RIGHT_LAYOUT)
   );
@@ -179,7 +180,7 @@ const TaskRightPanel = memo(function TaskRightPanel({ topPanel, taskId }: TaskRi
             {terminalIds.map((id) => (
               <TabsContent key={id} value={`terminal-${id}`} className="flex-1 min-h-0">
                 <div className="flex-1 min-h-0 h-full p-1">
-                  <ShellTerminal taskId={taskId} />
+                  <ShellTerminal taskId={taskId} sessionId={sessionId} />
                 </div>
               </TabsContent>
             ))}

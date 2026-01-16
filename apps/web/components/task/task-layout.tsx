@@ -12,11 +12,13 @@ const DEFAULT_HORIZONTAL_LAYOUT: [number, number] = [75, 25];
 
 type TaskLayoutProps = {
   taskId: string | null;
+  sessionId: string | null;
   onSendMessage: (content: string) => Promise<void>;
 };
 
 export const TaskLayout = memo(function TaskLayout({
   taskId,
+  sessionId,
   onSendMessage,
 }: TaskLayoutProps) {
   const [horizontalLayout, setHorizontalLayout] = useState<[number, number]>(
@@ -63,7 +65,7 @@ export const TaskLayout = memo(function TaskLayout({
         </ResizablePanel>
         <ResizableHandle className="w-px" />
         <ResizablePanel defaultSize={horizontalLayout[1]} minSize={20}>
-          <TaskRightPanel topPanel={topFilesPanel} taskId={taskId ?? ''} />
+          <TaskRightPanel topPanel={topFilesPanel} taskId={taskId ?? ''} sessionId={sessionId} />
         </ResizablePanel>
       </ResizablePanelGroup>
     </div>

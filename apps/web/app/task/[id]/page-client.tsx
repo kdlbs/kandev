@@ -11,6 +11,7 @@ import { DEBUG_UI } from '@/lib/config';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import { useRepositories } from '@/hooks/use-repositories';
 import { useTaskAgent } from '@/hooks/use-task-agent';
+import { useSessionResumption } from '@/hooks/use-session-resumption';
 import { useAppStore } from '@/components/state-provider';
 
 type TaskPageClientProps = {
@@ -38,18 +39,37 @@ export default function TaskPage({ task: initialTask, sessionId = null }: TaskPa
   }, [initialTask, kanbanTask]);
   const connectionStatus = useAppStore((state) => state.connection.status);
 
-  // Custom hooks for state management
+  // Session resumption hook - handles auto-resume on page reload
+  const {
+    resumptionState,
+    error: resumptionError,
+    taskSessionState: resumedSessionState,
+    worktreePath: resumedWorktreePath,
+    worktreeBranch: resumedWorktreeBranch,
+  } = useSessionResumption(task?.id ?? null, sessionId);
+
+  // Regular task agent hook for non-resumed sessions
   const {
     isAgentRunning,
     isAgentLoading,
-    worktreePath,
-    worktreeBranch,
+    worktreePath: agentWorktreePath,
+    worktreeBranch: agentWorktreeBranch,
     taskSessionId,
-    taskSessionState,
+    taskSessionState: agentSessionState,
     handleStartAgent,
     handleStopAgent,
   } = useTaskAgent(task);
+
+  // Merge state from resumption and regular agent hooks
   const activeSessionId = sessionId ?? taskSessionId;
+  const isResuming = resumptionState === 'checking' || resumptionState === 'resuming';
+  const isResumed = resumptionState === 'resumed' || resumptionState === 'running';
+
+  // Both hooks read taskSessionState from the store, so prefer resumedSessionState as it's always
+  // updated when we have a sessionId from URL. For worktree, use resumed values when resuming/resumed.
+  const taskSessionState = resumedSessionState ?? agentSessionState;
+  const worktreePath = sessionId ? (resumedWorktreePath ?? agentWorktreePath) : agentWorktreePath;
+  const worktreeBranch = sessionId ? (resumedWorktreeBranch ?? agentWorktreeBranch) : agentWorktreeBranch;
 
   // Derive working state for debug overlay
   const isAgentWorking =
@@ -107,6 +127,8 @@ export default function TaskPage({ task: initialTask, sessionId = null }: TaskPa
               task_state: task?.state ?? null,
               task_session_state: taskSessionState ?? null,
               is_agent_working: isAgentWorking,
+              resumption_state: resumptionState,
+              resumption_error: resumptionError,
             }}
           />
         )}
@@ -118,8 +140,8 @@ export default function TaskPage({ task: initialTask, sessionId = null }: TaskPa
           baseBranch={task?.repositories?.[0]?.base_branch ?? undefined}
           onStartAgent={handleStartAgent}
           onStopAgent={handleStopAgent}
-          isAgentRunning={isAgentRunning}
-          isAgentLoading={isAgentLoading}
+          isAgentRunning={isAgentRunning || isResumed}
+          isAgentLoading={isAgentLoading || isResuming}
           worktreePath={worktreePath}
           worktreeBranch={worktreeBranch}
           repositoryPath={repository?.local_path ?? null}
@@ -128,6 +150,7 @@ export default function TaskPage({ task: initialTask, sessionId = null }: TaskPa
 
         <TaskLayout
           taskId={task?.id ?? null}
+          sessionId={activeSessionId ?? null}
           onSendMessage={handleSendMessage}
         />
       </div>

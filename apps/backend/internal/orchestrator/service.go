@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/orchestrator/dto"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/queue"
 	"github.com/kandev/kandev/internal/orchestrator/scheduler"
@@ -188,12 +189,12 @@ func (s *Service) Start(ctx context.Context) error {
 		s.logger.Warn("failed to load active sessions from database (non-fatal)", zap.Error(err))
 	}
 
-	// Sync with instances recovered from Docker by the lifecycle manager
+	// Sync with executions recovered from Docker by the lifecycle manager
 	// This ensures we track containers that are running but weren't in the DB as active
-	recovered := s.agentManager.GetRecoveredInstances()
+	recovered := s.agentManager.GetRecoveredExecutions()
 	if len(recovered) > 0 {
-		s.logger.Info("syncing with recovered Docker instances", zap.Int("count", len(recovered)))
-		s.executor.SyncWithRecoveredInstances(ctx, recovered)
+		s.logger.Info("syncing with recovered Docker executions", zap.Int("count", len(recovered)))
+		s.executor.SyncWithRecoveredExecutions(ctx, recovered)
 	}
 
 	// Start the watcher first to begin receiving events
@@ -400,6 +401,99 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 	return execution, nil
 }
 
+// GetActiveSessionID returns the active (running) session ID for a task
+func (s *Service) GetActiveSessionID(ctx context.Context, taskID string) (string, error) {
+	return s.executor.GetActiveSessionID(ctx, taskID)
+}
+
+// GetTaskSessionStatus returns the status of a task session including whether it's resumable
+func (s *Service) GetTaskSessionStatus(ctx context.Context, taskID, sessionID string) (dto.TaskSessionStatusResponse, error) {
+	s.logger.Info("checking task session status",
+		zap.String("task_id", taskID),
+		zap.String("session_id", sessionID))
+
+	resp := dto.TaskSessionStatusResponse{
+		SessionID: sessionID,
+		TaskID:    taskID,
+	}
+
+	// 1. Load session from database
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		resp.Error = "session not found"
+		return resp, nil
+	}
+
+	if session.TaskID != taskID {
+		resp.Error = "session does not belong to task"
+		return resp, nil
+	}
+
+	resp.State = string(session.State)
+	resp.AgentProfileID = session.AgentProfileID
+
+	// Extract ACP session ID from metadata - this is the key requirement for resumption
+	var acpSessionID string
+	if session.Metadata != nil {
+		if id, ok := session.Metadata["acp_session_id"].(string); ok {
+			acpSessionID = id
+			resp.ACPSessionID = acpSessionID
+		}
+	}
+
+	// Extract worktree info
+	if len(session.Worktrees) > 0 {
+		wt := session.Worktrees[0]
+		if wt.WorktreePath != "" {
+			resp.WorktreePath = &wt.WorktreePath
+		}
+		if wt.WorktreeBranch != "" {
+			resp.WorktreeBranch = &wt.WorktreeBranch
+		}
+	}
+
+	// 2. Check if we have an active execution in memory and agent is running
+	if exec, ok := s.executor.GetExecutionWithContext(ctx, taskID); ok && exec != nil {
+		resp.IsAgentRunning = true
+		resp.IsResumable = true
+		resp.NeedsResume = false
+		return resp, nil
+	}
+
+	// 3. Session can be resumed if it has an ACP session ID
+	// Any session type with an acp_session_id can be resumed
+	if acpSessionID == "" {
+		resp.IsAgentRunning = false
+		resp.IsResumable = false
+		resp.NeedsResume = false
+		resp.Error = "session has no acp_session_id"
+		return resp, nil
+	}
+
+	// 4. Additional validations for resumption
+	if session.AgentProfileID == "" {
+		resp.Error = "session missing agent profile"
+		resp.IsResumable = false
+		return resp, nil
+	}
+
+	// Check if worktree exists (if one was used)
+	if len(session.Worktrees) > 0 && session.Worktrees[0].WorktreePath != "" {
+		if _, err := os.Stat(session.Worktrees[0].WorktreePath); err != nil {
+			resp.Error = "worktree not found"
+			resp.IsResumable = false
+			return resp, nil
+		}
+	}
+
+	resp.IsAgentRunning = false
+	resp.IsResumable = true
+	resp.NeedsResume = true
+	resp.ResumeReason = "agent_not_running"
+
+	return resp, nil
+}
+
 // StopTask stops agent execution for a task
 func (s *Service) StopTask(ctx context.Context, taskID string, reason string, force bool) error {
 	s.logger.Info("stopping task execution",
@@ -534,7 +628,7 @@ func (s *Service) handleTaskStateChanged(ctx context.Context, data watcher.TaskE
 func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventData) {
 	s.logger.Info("handling agent ready",
 		zap.String("task_id", data.TaskID),
-		zap.String("agent_instance_id", data.AgentInstanceID))
+		zap.String("agent_execution_id", data.AgentExecutionID))
 
 	if s.markAgentReady(data.TaskID) {
 		s.finalizeAgentReady(data.TaskID, "")
@@ -596,7 +690,7 @@ func (s *Service) handleACPSessionCreated(ctx context.Context, data watcher.ACPS
 func (s *Service) handleAgentCompleted(ctx context.Context, data watcher.AgentEventData) {
 	s.logger.Info("handling agent completed",
 		zap.String("task_id", data.TaskID),
-		zap.String("agent_instance_id", data.AgentInstanceID))
+		zap.String("agent_execution_id", data.AgentExecutionID))
 
 	// Update scheduler and remove from queue
 	s.scheduler.HandleTaskCompleted(data.TaskID, true)
@@ -618,7 +712,7 @@ func (s *Service) handleAgentCompleted(ctx context.Context, data watcher.AgentEv
 func (s *Service) handleAgentFailed(ctx context.Context, data watcher.AgentEventData) {
 	s.logger.Warn("handling agent failed",
 		zap.String("task_id", data.TaskID),
-		zap.String("agent_instance_id", data.AgentInstanceID),
+		zap.String("agent_execution_id", data.AgentExecutionID),
 		zap.String("error_message", data.ErrorMessage))
 
 	// Trigger retry logic

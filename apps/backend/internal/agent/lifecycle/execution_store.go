@@ -1,0 +1,193 @@
+// Package lifecycle manages agent execution lifecycles including tracking,
+// state transitions, and cleanup.
+package lifecycle
+
+import (
+	"sync"
+
+	v1 "github.com/kandev/kandev/pkg/api/v1"
+)
+
+// ExecutionStore provides thread-safe storage and retrieval of agent executions.
+// It maintains three indexes for efficient lookup by execution ID, task ID, and container ID.
+type ExecutionStore struct {
+	executions  map[string]*AgentExecution
+	byTask      map[string]string // taskID -> executionID
+	byContainer map[string]string // containerID -> executionID
+	mu          sync.RWMutex
+}
+
+// NewExecutionStore creates a new ExecutionStore with initialized maps.
+func NewExecutionStore() *ExecutionStore {
+	return &ExecutionStore{
+		executions:  make(map[string]*AgentExecution),
+		byTask:      make(map[string]string),
+		byContainer: make(map[string]string),
+	}
+}
+
+// Add adds an agent execution to all tracking maps.
+// The execution must have a valid ID. TaskID and ContainerID are optional
+// but will be indexed if present.
+func (s *ExecutionStore) Add(execution *AgentExecution) {
+	if execution == nil || execution.ID == "" {
+		return
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.executions[execution.ID] = execution
+
+	if execution.TaskID != "" {
+		s.byTask[execution.TaskID] = execution.ID
+	}
+
+	if execution.ContainerID != "" {
+		s.byContainer[execution.ContainerID] = execution.ID
+	}
+}
+
+// Remove removes an agent execution from all tracking maps.
+func (s *ExecutionStore) Remove(executionID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	execution, exists := s.executions[executionID]
+	if !exists {
+		return
+	}
+
+	// Remove from secondary indexes
+	if execution.TaskID != "" {
+		delete(s.byTask, execution.TaskID)
+	}
+	if execution.ContainerID != "" {
+		delete(s.byContainer, execution.ContainerID)
+	}
+
+	// Remove from primary map
+	delete(s.executions, executionID)
+}
+
+// Get returns an agent execution by its ID.
+func (s *ExecutionStore) Get(executionID string) (*AgentExecution, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	execution, exists := s.executions[executionID]
+	return execution, exists
+}
+
+// GetByTaskID returns the agent execution associated with a task ID.
+func (s *ExecutionStore) GetByTaskID(taskID string) (*AgentExecution, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	executionID, exists := s.byTask[taskID]
+	if !exists {
+		return nil, false
+	}
+
+	execution, exists := s.executions[executionID]
+	return execution, exists
+}
+
+// GetByContainerID returns the agent execution associated with a container ID.
+func (s *ExecutionStore) GetByContainerID(containerID string) (*AgentExecution, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	executionID, exists := s.byContainer[containerID]
+	if !exists {
+		return nil, false
+	}
+
+	execution, exists := s.executions[executionID]
+	return execution, exists
+}
+
+// List returns all tracked agent executions.
+func (s *ExecutionStore) List() []*AgentExecution {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	result := make([]*AgentExecution, 0, len(s.executions))
+	for _, execution := range s.executions {
+		result = append(result, execution)
+	}
+	return result
+}
+
+// UpdateStatus updates the status of an agent execution.
+func (s *ExecutionStore) UpdateStatus(executionID string, status v1.AgentStatus) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if execution, exists := s.executions[executionID]; exists {
+		execution.Status = status
+	}
+}
+
+// UpdateProgress updates the progress of an agent execution.
+func (s *ExecutionStore) UpdateProgress(executionID string, progress int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if execution, exists := s.executions[executionID]; exists {
+		execution.Progress = progress
+	}
+}
+
+// UpdateError updates the error message of an agent execution and sets its status to failed.
+func (s *ExecutionStore) UpdateError(executionID string, errorMsg string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if execution, exists := s.executions[executionID]; exists {
+		execution.ErrorMessage = errorMsg
+		execution.Status = v1.AgentStatusFailed
+	}
+}
+
+// UpdateMetadata updates the metadata of an agent execution using the provided function.
+func (s *ExecutionStore) UpdateMetadata(executionID string, updateFn func(metadata map[string]interface{}) map[string]interface{}) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if execution, exists := s.executions[executionID]; exists {
+		if execution.Metadata == nil {
+			execution.Metadata = make(map[string]interface{})
+		}
+		execution.Metadata = updateFn(execution.Metadata)
+	}
+}
+
+// WithLock executes a function with the store lock held, providing access to the execution.
+// Returns false if the execution doesn't exist.
+func (s *ExecutionStore) WithLock(executionID string, fn func(execution *AgentExecution)) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	execution, exists := s.executions[executionID]
+	if !exists {
+		return false
+	}
+	fn(execution)
+	return true
+}
+
+// WithRLock executes a function with the store read lock held, providing access to the execution.
+// Returns false if the execution doesn't exist.
+func (s *ExecutionStore) WithRLock(executionID string, fn func(execution *AgentExecution)) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	execution, exists := s.executions[executionID]
+	if !exists {
+		return false
+	}
+	fn(execution)
+	return true
+}
+

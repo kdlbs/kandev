@@ -2,7 +2,7 @@ package v1
 
 import "time"
 
-// AgentStatus represents the status of an agent instance
+// AgentStatus represents the status of an agent execution
 type AgentStatus string
 
 const (
@@ -22,8 +22,8 @@ type ResourceLimits struct {
 	DiskLimit   string `json:"disk_limit"`
 }
 
-// AgentInstance represents a running or completed agent container
-type AgentInstance struct {
+// AgentExecution represents a running or completed agent container
+type AgentExecution struct {
 	ID             string         `json:"id"`
 	TaskID         string         `json:"task_id"`
 	AgentProfileID string         `json:"agent_profile_id"`
@@ -57,8 +57,8 @@ type AgentType struct {
 
 // AgentLog represents a log entry from an agent
 type AgentLog struct {
-	ID              int64                  `json:"id"`
-	AgentInstanceID string                 `json:"agent_instance_id"`
+	ID               int64                  `json:"id"`
+	AgentExecutionID string                 `json:"agent_execution_id"`
 	LogLevel        string                 `json:"log_level"`
 	Message         string                 `json:"message"`
 	Metadata        map[string]interface{} `json:"metadata,omitempty"`

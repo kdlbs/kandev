@@ -3,17 +3,22 @@ package lifecycle
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"go.uber.org/zap"
 
-	"github.com/kandev/kandev/internal/agent/agentctl"
+	agentctl "github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/common/logger"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // SessionManager handles ACP session initialization and management
 type SessionManager struct {
-	logger *logger.Logger
+	logger         *logger.Logger
+	eventPublisher *EventPublisher
+	streamManager  *StreamManager
+	executionStore *ExecutionStore
 }
 
 // NewSessionManager creates a new SessionManager
@@ -21,6 +26,14 @@ func NewSessionManager(log *logger.Logger) *SessionManager {
 	return &SessionManager{
 		logger: log,
 	}
+}
+
+// SetDependencies sets the optional dependencies for full session orchestration.
+// These are set after construction to avoid circular dependencies.
+func (sm *SessionManager) SetDependencies(ep *EventPublisher, strm *StreamManager, store *ExecutionStore) {
+	sm.eventPublisher = ep
+	sm.streamManager = strm
+	sm.executionStore = store
 }
 
 // InitializeResult contains the result of session initialization
@@ -166,4 +179,171 @@ func (sm *SessionManager) createNewSession(
 		zap.String("session_id", sessionID))
 
 	return sessionID, nil
+}
+
+// InitializeAndPrompt performs full ACP session initialization and sends the initial prompt.
+// This orchestrates:
+// 1. Session initialization (initialize + session/new or session/load)
+// 2. Publishing ACP session created event
+// 3. Connecting WebSocket streams
+// 4. Sending the initial task prompt (if provided)
+// 5. Marking the execution as ready
+//
+// Returns the session ID on success.
+func (sm *SessionManager) InitializeAndPrompt(
+	ctx context.Context,
+	execution *AgentExecution,
+	agentConfig *registry.AgentTypeConfig,
+	taskDescription string,
+	markReady func(executionID string) error,
+) error {
+	sm.logger.Info("initializing ACP session",
+		zap.String("execution_id", execution.ID),
+		zap.String("agentctl_url", execution.agentctl.BaseURL()),
+		zap.String("agent_type", agentConfig.ID),
+		zap.String("existing_acp_session_id", execution.ACPSessionID),
+		zap.Bool("resume_via_acp", agentConfig.SessionConfig.ResumeViaACP))
+
+	// Use InitializeSession for configuration-driven session initialization
+	result, err := sm.InitializeSession(
+		ctx,
+		execution.agentctl,
+		agentConfig,
+		execution.ACPSessionID,
+		execution.WorkspacePath,
+	)
+	if err != nil {
+		sm.logger.Error("session initialization failed",
+			zap.String("execution_id", execution.ID),
+			zap.Error(err))
+		return err
+	}
+
+	sm.logger.Info("ACP session initialized",
+		zap.String("execution_id", execution.ID),
+		zap.String("agent_name", result.AgentName),
+		zap.String("agent_version", result.AgentVersion),
+		zap.String("session_id", result.SessionID))
+
+	execution.ACPSessionID = result.SessionID
+
+	// Publish session created event
+	if sm.eventPublisher != nil {
+		sm.eventPublisher.PublishACPSessionCreated(execution, result.SessionID)
+	}
+
+	// Set up WebSocket streams
+	if sm.streamManager != nil {
+		updatesReady := make(chan struct{})
+		sm.streamManager.ConnectAll(execution, updatesReady)
+
+		// Wait for the updates stream to connect before sending prompt
+		select {
+		case <-updatesReady:
+			sm.logger.Debug("updates stream ready")
+		case <-time.After(5 * time.Second):
+			sm.logger.Warn("timeout waiting for updates stream to connect, proceeding anyway")
+		}
+	}
+
+	// Send the task prompt if provided
+	if taskDescription != "" {
+		// Use a long timeout for initial prompts
+		promptCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+
+		_, err := sm.SendPrompt(promptCtx, execution, taskDescription, false, markReady)
+		if err != nil {
+			return err
+		}
+	} else {
+		sm.logger.Warn("no task description provided, marking as ready",
+			zap.String("execution_id", execution.ID))
+		if err := markReady(execution.ID); err != nil {
+			sm.logger.Error("failed to mark execution as ready",
+				zap.String("execution_id", execution.ID),
+				zap.Error(err))
+		}
+	}
+
+	return nil
+}
+
+// SendPrompt sends a prompt to an agent execution and waits for completion.
+// For initial prompts, pass validateStatus=false. For follow-up prompts, pass validateStatus=true.
+// Returns the prompt result containing the stop reason and agent message.
+func (sm *SessionManager) SendPrompt(
+	ctx context.Context,
+	execution *AgentExecution,
+	prompt string,
+	validateStatus bool,
+	markReady func(executionID string) error,
+) (*PromptResult, error) {
+	if execution.agentctl == nil {
+		return nil, fmt.Errorf("execution %q has no agentctl client", execution.ID)
+	}
+
+	// For follow-up prompts, validate status and update to RUNNING
+	if validateStatus {
+		if execution.Status != v1.AgentStatusRunning && execution.Status != v1.AgentStatusReady {
+			return nil, fmt.Errorf("execution %q is not ready for prompts (status: %s)", execution.ID, execution.Status)
+		}
+		if sm.executionStore != nil {
+			sm.executionStore.UpdateStatus(execution.ID, v1.AgentStatusRunning)
+		}
+	}
+
+	// Clear buffers before starting prompt
+	execution.messageMu.Lock()
+	execution.messageBuffer.Reset()
+	execution.reasoningBuffer.Reset()
+	execution.summaryBuffer.Reset()
+	execution.messageMu.Unlock()
+
+	sm.logger.Info("sending prompt to agent",
+		zap.String("execution_id", execution.ID),
+		zap.Int("prompt_length", len(prompt)))
+
+	// Prompt is synchronous - blocks until agent completes
+	resp, err := execution.agentctl.Prompt(ctx, prompt)
+	if err != nil {
+		sm.logger.Error("ACP prompt failed",
+			zap.String("execution_id", execution.ID),
+			zap.Error(err))
+		return nil, fmt.Errorf("prompt failed: %w", err)
+	}
+
+	// Extract accumulated content from buffers
+	execution.messageMu.Lock()
+	agentMessage := execution.messageBuffer.String()
+	execution.messageBuffer.Reset()
+	execution.reasoningBuffer.Reset()
+	execution.summaryBuffer.Reset()
+	execution.messageMu.Unlock()
+
+	stopReason := ""
+	if resp != nil {
+		stopReason = string(resp.StopReason)
+	}
+
+	sm.logger.Info("ACP prompt completed",
+		zap.String("execution_id", execution.ID),
+		zap.String("stop_reason", stopReason))
+
+	// Publish prompt_complete event
+	if sm.eventPublisher != nil {
+		sm.eventPublisher.PublishPromptComplete(execution, agentMessage, "", "")
+	}
+
+	// Mark as READY for next prompt
+	if err := markReady(execution.ID); err != nil {
+		sm.logger.Error("failed to mark execution as ready after prompt",
+			zap.String("execution_id", execution.ID),
+			zap.Error(err))
+	}
+
+	return &PromptResult{
+		StopReason:   stopReason,
+		AgentMessage: agentMessage,
+	}, nil
 }

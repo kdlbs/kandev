@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/zap"
 )
@@ -24,14 +25,14 @@ type WorkspaceTracker struct {
 	logger  *logger.Logger
 
 	// Current state
-	currentStatus GitStatusUpdate
-	currentFiles  FileListUpdate
+	currentStatus types.GitStatusUpdate
+	currentFiles  types.FileListUpdate
 	mu            sync.RWMutex
 
 	// Subscribers
-	gitStatusSubscribers   map[GitStatusSubscriber]struct{}
-	filesSubscribers       map[FilesSubscriber]struct{}
-	fileChangeSubscribers  map[FileChangeSubscriber]struct{}
+	gitStatusSubscribers   map[types.GitStatusSubscriber]struct{}
+	filesSubscribers       map[types.FilesSubscriber]struct{}
+	fileChangeSubscribers  map[types.FileChangeSubscriber]struct{}
 	subMu                  sync.RWMutex
 
 	// Filesystem watcher
@@ -56,9 +57,9 @@ func NewWorkspaceTracker(workDir string, log *logger.Logger) *WorkspaceTracker {
 	return &WorkspaceTracker{
 		workDir:               workDir,
 		logger:                log.WithFields(zap.String("component", "workspace-tracker")),
-		gitStatusSubscribers:  make(map[GitStatusSubscriber]struct{}),
-		filesSubscribers:      make(map[FilesSubscriber]struct{}),
-		fileChangeSubscribers: make(map[FileChangeSubscriber]struct{}),
+		gitStatusSubscribers:  make(map[types.GitStatusSubscriber]struct{}),
+		filesSubscribers:      make(map[types.FilesSubscriber]struct{}),
+		fileChangeSubscribers: make(map[types.FileChangeSubscriber]struct{}),
 		watcher:               watcher,
 		fsChangeTrigger:       make(chan struct{}, 1), // Buffered to avoid blocking
 		stopCh:                make(chan struct{}),
@@ -147,7 +148,7 @@ func (wt *WorkspaceTracker) monitorLoop(ctx context.Context) {
 				wt.updateGitStatus(ctx)
 				wt.updateFiles(ctx)
 				// Notify file change subscribers that workspace changed
-				wt.notifyFileChangeSubscribers(FileChangeNotification{
+				wt.notifyFileChangeSubscribers(types.FileChangeNotification{
 					Timestamp: time.Now(),
 					Path:      "",
 					Operation: "refresh",
@@ -175,15 +176,15 @@ func (wt *WorkspaceTracker) updateGitStatus(ctx context.Context) {
 }
 
 // getGitStatus retrieves the current git status
-func (wt *WorkspaceTracker) getGitStatus(ctx context.Context) (GitStatusUpdate, error) {
-	update := GitStatusUpdate{
+func (wt *WorkspaceTracker) getGitStatus(ctx context.Context) (types.GitStatusUpdate, error) {
+	update := types.GitStatusUpdate{
 		Timestamp: time.Now(),
 		Modified:  []string{},
 		Added:     []string{},
 		Deleted:   []string{},
 		Untracked: []string{},
 		Renamed:   []string{},
-		Files:     make(map[string]FileInfo),
+		Files:     make(map[string]types.FileInfo),
 	}
 
 	// Get current branch
@@ -233,7 +234,7 @@ func (wt *WorkspaceTracker) getGitStatus(ctx context.Context) (GitStatusUpdate, 
 		statusCode := line[:2]
 		filePath := strings.TrimSpace(line[3:])
 
-		fileInfo := FileInfo{
+		fileInfo := types.FileInfo{
 			Path: filePath,
 		}
 
@@ -271,7 +272,7 @@ func (wt *WorkspaceTracker) getGitStatus(ctx context.Context) (GitStatusUpdate, 
 }
 
 // enrichWithDiffData adds diff information (additions, deletions, diff content) to file info
-func (wt *WorkspaceTracker) enrichWithDiffData(ctx context.Context, update *GitStatusUpdate) {
+func (wt *WorkspaceTracker) enrichWithDiffData(ctx context.Context, update *types.GitStatusUpdate) {
 	// Determine the base ref to compare against
 	// Use remote branch if available, otherwise use HEAD
 	baseRef := "HEAD"
@@ -321,7 +322,7 @@ func (wt *WorkspaceTracker) enrichWithDiffData(ctx context.Context, update *GitS
 		} else {
 			// File might be committed but not in status (because it's committed)
 			// Add it to the Files map
-			fileInfo := FileInfo{
+			fileInfo := types.FileInfo{
 				Path:      filePath,
 				Status:    "modified", // Assume modified if it has a diff
 				Additions: additions,
@@ -431,10 +432,10 @@ func (wt *WorkspaceTracker) updateFiles(ctx context.Context) {
 }
 
 // getFileList retrieves the list of files in the workspace
-func (wt *WorkspaceTracker) getFileList(ctx context.Context) (FileListUpdate, error) {
-	update := FileListUpdate{
+func (wt *WorkspaceTracker) getFileList(ctx context.Context) (types.FileListUpdate, error) {
+	update := types.FileListUpdate{
 		Timestamp: time.Now(),
-		Files:     []FileEntry{},
+		Files:     []types.FileEntry{},
 	}
 
 	// Use git ls-files to get tracked files
@@ -451,7 +452,7 @@ func (wt *WorkspaceTracker) getFileList(ctx context.Context) (FileListUpdate, er
 		if line == "" {
 			continue
 		}
-		update.Files = append(update.Files, FileEntry{
+		update.Files = append(update.Files, types.FileEntry{
 			Path:  line,
 			IsDir: false,
 		})
@@ -465,8 +466,8 @@ func (wt *WorkspaceTracker) getFileList(ctx context.Context) (FileListUpdate, er
 // Subscriber management methods
 
 // SubscribeGitStatus creates a new git status subscriber
-func (wt *WorkspaceTracker) SubscribeGitStatus() GitStatusSubscriber {
-	sub := make(GitStatusSubscriber, 10)
+func (wt *WorkspaceTracker) SubscribeGitStatus() types.GitStatusSubscriber {
+	sub := make(types.GitStatusSubscriber, 10)
 
 	wt.subMu.Lock()
 	wt.gitStatusSubscribers[sub] = struct{}{}
@@ -490,7 +491,7 @@ func (wt *WorkspaceTracker) SubscribeGitStatus() GitStatusSubscriber {
 }
 
 // UnsubscribeGitStatus removes a git status subscriber
-func (wt *WorkspaceTracker) UnsubscribeGitStatus(sub GitStatusSubscriber) {
+func (wt *WorkspaceTracker) UnsubscribeGitStatus(sub types.GitStatusSubscriber) {
 	wt.subMu.Lock()
 	delete(wt.gitStatusSubscribers, sub)
 	wt.subMu.Unlock()
@@ -498,8 +499,8 @@ func (wt *WorkspaceTracker) UnsubscribeGitStatus(sub GitStatusSubscriber) {
 }
 
 // SubscribeFiles creates a new files subscriber
-func (wt *WorkspaceTracker) SubscribeFiles() FilesSubscriber {
-	sub := make(FilesSubscriber, 10)
+func (wt *WorkspaceTracker) SubscribeFiles() types.FilesSubscriber {
+	sub := make(types.FilesSubscriber, 10)
 
 	wt.subMu.Lock()
 	wt.filesSubscribers[sub] = struct{}{}
@@ -523,7 +524,7 @@ func (wt *WorkspaceTracker) SubscribeFiles() FilesSubscriber {
 }
 
 // UnsubscribeFiles removes a files subscriber
-func (wt *WorkspaceTracker) UnsubscribeFiles(sub FilesSubscriber) {
+func (wt *WorkspaceTracker) UnsubscribeFiles(sub types.FilesSubscriber) {
 	wt.subMu.Lock()
 	delete(wt.filesSubscribers, sub)
 	wt.subMu.Unlock()
@@ -533,7 +534,7 @@ func (wt *WorkspaceTracker) UnsubscribeFiles(sub FilesSubscriber) {
 // Notification methods
 
 // notifyGitStatusSubscribers notifies all git status subscribers
-func (wt *WorkspaceTracker) notifyGitStatusSubscribers(update GitStatusUpdate) {
+func (wt *WorkspaceTracker) notifyGitStatusSubscribers(update types.GitStatusUpdate) {
 	wt.subMu.RLock()
 	defer wt.subMu.RUnlock()
 
@@ -547,7 +548,7 @@ func (wt *WorkspaceTracker) notifyGitStatusSubscribers(update GitStatusUpdate) {
 }
 
 // notifyFilesSubscribers notifies all files subscribers
-func (wt *WorkspaceTracker) notifyFilesSubscribers(update FileListUpdate) {
+func (wt *WorkspaceTracker) notifyFilesSubscribers(update types.FileListUpdate) {
 	wt.subMu.RLock()
 	defer wt.subMu.RUnlock()
 
@@ -563,8 +564,8 @@ func (wt *WorkspaceTracker) notifyFilesSubscribers(update FileListUpdate) {
 
 
 // SubscribeFileChanges creates a new file change subscriber
-func (wt *WorkspaceTracker) SubscribeFileChanges() FileChangeSubscriber {
-	sub := make(FileChangeSubscriber, 100)
+func (wt *WorkspaceTracker) SubscribeFileChanges() types.FileChangeSubscriber {
+	sub := make(types.FileChangeSubscriber, 100)
 
 	wt.subMu.Lock()
 	wt.fileChangeSubscribers[sub] = struct{}{}
@@ -574,7 +575,7 @@ func (wt *WorkspaceTracker) SubscribeFileChanges() FileChangeSubscriber {
 }
 
 // UnsubscribeFileChanges removes a file change subscriber
-func (wt *WorkspaceTracker) UnsubscribeFileChanges(sub FileChangeSubscriber) {
+func (wt *WorkspaceTracker) UnsubscribeFileChanges(sub types.FileChangeSubscriber) {
 	wt.subMu.Lock()
 	delete(wt.fileChangeSubscribers, sub)
 	wt.subMu.Unlock()
@@ -582,7 +583,7 @@ func (wt *WorkspaceTracker) UnsubscribeFileChanges(sub FileChangeSubscriber) {
 }
 
 // notifyFileChangeSubscribers notifies all file change subscribers
-func (wt *WorkspaceTracker) notifyFileChangeSubscribers(notification FileChangeNotification) {
+func (wt *WorkspaceTracker) notifyFileChangeSubscribers(notification types.FileChangeNotification) {
 	wt.subMu.RLock()
 	defer wt.subMu.RUnlock()
 
@@ -660,7 +661,7 @@ func (wt *WorkspaceTracker) addDirectoryRecursive(dir string) error {
 }
 
 // GetFileTree returns the file tree for a given path and depth
-func (wt *WorkspaceTracker) GetFileTree(reqPath string, depth int) (*FileTreeNode, error) {
+func (wt *WorkspaceTracker) GetFileTree(reqPath string, depth int) (*types.FileTreeNode, error) {
 	// Resolve the full path
 	fullPath := filepath.Join(wt.workDir, reqPath)
 
@@ -680,8 +681,8 @@ func (wt *WorkspaceTracker) GetFileTree(reqPath string, depth int) (*FileTreeNod
 }
 
 // buildFileTreeNode recursively builds a file tree node
-func (wt *WorkspaceTracker) buildFileTreeNode(fullPath, relPath string, info os.FileInfo, maxDepth, currentDepth int) (*FileTreeNode, error) {
-	node := &FileTreeNode{
+func (wt *WorkspaceTracker) buildFileTreeNode(fullPath, relPath string, info os.FileInfo, maxDepth, currentDepth int) (*types.FileTreeNode, error) {
+	node := &types.FileTreeNode{
 		Name:  info.Name(),
 		Path:  relPath,
 		IsDir: info.IsDir(),
@@ -700,7 +701,7 @@ func (wt *WorkspaceTracker) buildFileTreeNode(fullPath, relPath string, info os.
 	}
 
 	// Build children
-	node.Children = make([]*FileTreeNode, 0, len(entries))
+	node.Children = make([]*types.FileTreeNode, 0, len(entries))
 	for _, entry := range entries {
 		// Skip hidden files and common ignore patterns
 		name := entry.Name()

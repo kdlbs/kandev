@@ -9,9 +9,10 @@ import { getWebSocketClient } from '@/lib/ws/connection';
 
 type ShellTerminalProps = {
   taskId: string;
+  sessionId: string | null;
 };
 
-export function ShellTerminal({ taskId }: ShellTerminalProps) {
+export function ShellTerminal({ taskId, sessionId }: ShellTerminalProps) {
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -74,7 +75,7 @@ export function ShellTerminal({ taskId }: ShellTerminalProps) {
 
     // Handle user input
     terminal.onData((data) => {
-      send('shell.input', { task_id: taskId, data });
+      send('shell.input', { task_id: taskId, session_id: sessionId, data });
     });
 
     // Handle resize
@@ -89,7 +90,7 @@ export function ShellTerminal({ taskId }: ShellTerminalProps) {
       xtermRef.current = null;
       fitAddonRef.current = null;
     };
-  }, [taskId, send]);
+  }, [taskId, sessionId, send]);
 
   // Write new output to terminal
   useEffect(() => {
@@ -104,9 +105,14 @@ export function ShellTerminal({ taskId }: ShellTerminalProps) {
   }, [shellOutput]);
 
   // Subscribe to shell on mount to start the shell stream
+  // Uses retry logic to handle cases where agent isn't ready yet (e.g., session resumption)
   useEffect(() => {
     // Increment subscription ID to invalidate any pending requests
     const currentSubscriptionId = ++subscriptionIdRef.current;
+    let retryCount = 0;
+    const maxRetries = 10;
+    const retryDelay = 1000; // 1 second between retries
+    let retryTimeout: ReturnType<typeof setTimeout> | null = null;
 
     // Clear any stale output before subscribing to get fresh buffer
     storeApi.getState().clearShellOutput(taskId);
@@ -117,10 +123,15 @@ export function ShellTerminal({ taskId }: ShellTerminalProps) {
       xtermRef.current.clear();
     }
 
-    const client = getWebSocketClient();
-    if (client) {
+    const attemptSubscribe = () => {
+      const client = getWebSocketClient();
+      if (!client) return;
+
+      // Check if this subscription is still valid
+      if (subscriptionIdRef.current !== currentSubscriptionId) return;
+
       client
-        .request<{ success: boolean; buffer?: string }>('shell.subscribe', { task_id: taskId })
+        .request<{ success: boolean; buffer?: string }>('shell.subscribe', { task_id: taskId, session_id: sessionId })
         .then((response) => {
           // Only process if this is still the current subscription (handles React Strict Mode)
           if (subscriptionIdRef.current !== currentSubscriptionId) return;
@@ -132,10 +143,26 @@ export function ShellTerminal({ taskId }: ShellTerminalProps) {
         })
         .catch((err) => {
           if (subscriptionIdRef.current !== currentSubscriptionId) return;
-          console.error('Failed to subscribe to shell:', err);
+
+          // Retry if agent not ready yet (common during session resumption)
+          if (retryCount < maxRetries) {
+            retryCount++;
+            console.log(`[ShellTerminal] Retrying shell subscription (${retryCount}/${maxRetries})...`);
+            retryTimeout = setTimeout(attemptSubscribe, retryDelay);
+          } else {
+            console.error('Failed to subscribe to shell after retries:', err);
+          }
         });
-    }
-  }, [taskId, storeApi]);
+    };
+
+    attemptSubscribe();
+
+    return () => {
+      if (retryTimeout) {
+        clearTimeout(retryTimeout);
+      }
+    };
+  }, [taskId, sessionId, storeApi]);
 
   return (
     <div

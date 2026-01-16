@@ -7,8 +7,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
-	"github.com/kandev/kandev/internal/agentctl/config"
-	"github.com/kandev/kandev/internal/agentctl/process"
+	"github.com/kandev/kandev/internal/agentctl/server/config"
+	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/zap"
 )
@@ -60,6 +60,7 @@ func (s *Server) setupRoutes() {
 		api.GET("/info", s.handleInfo)
 
 		// Process control
+		api.POST("/agent/configure", s.handleAgentConfigure)
 		api.POST("/start", s.handleStart)
 		api.POST("/stop", s.handleStop)
 
@@ -159,6 +160,52 @@ func (s *Server) handleStart(c *gin.Context) {
 	c.JSON(http.StatusOK, StartResponse{
 		Success: true,
 		Message: "agent started",
+	})
+}
+
+// AgentConfigure request/response - configures the agent command before starting
+type AgentConfigureRequest struct {
+	Command string            `json:"command"`
+	Env     map[string]string `json:"env,omitempty"`
+}
+
+type AgentConfigureResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+func (s *Server) handleAgentConfigure(c *gin.Context) {
+	var req AgentConfigureRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, AgentConfigureResponse{
+			Success: false,
+			Error:   "invalid request: " + err.Error(),
+		})
+		return
+	}
+
+	if req.Command == "" {
+		c.JSON(http.StatusBadRequest, AgentConfigureResponse{
+			Success: false,
+			Error:   "command is required",
+		})
+		return
+	}
+
+	if err := s.procMgr.Configure(req.Command, req.Env); err != nil {
+		s.logger.Error("failed to configure agent", zap.Error(err), zap.String("command", req.Command))
+		c.JSON(http.StatusInternalServerError, AgentConfigureResponse{
+			Success: false,
+			Error:   err.Error(),
+		})
+		return
+	}
+
+	s.logger.Info("agent configured", zap.String("command", req.Command))
+	c.JSON(http.StatusOK, AgentConfigureResponse{
+		Success: true,
+		Message: "agent configured",
 	})
 }
 

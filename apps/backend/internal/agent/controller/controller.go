@@ -29,14 +29,14 @@ func (c *Controller) ListAgents(ctx context.Context, req dto.ListAgentsRequest) 
 		return dto.ListAgentsResponse{}, ErrLifecycleManagerNotAvailable
 	}
 
-	agents := c.lifecycle.ListInstances()
+	agents := c.lifecycle.ListExecutions()
 	resp := dto.ListAgentsResponse{
 		Agents: make([]dto.AgentDTO, 0, len(agents)),
 		Total:  len(agents),
 	}
 
 	for _, a := range agents {
-		agent := dto.FromAgentInstance(&dto.AgentInstanceData{
+		agent := dto.FromAgentExecution(&dto.AgentExecutionData{
 			ID:             a.ID,
 			TaskID:         a.TaskID,
 			AgentProfileID: a.AgentProfileID,
@@ -67,14 +67,14 @@ func (c *Controller) LaunchAgent(ctx context.Context, req dto.LaunchAgentRequest
 		Env:            req.Env,
 	}
 
-	instance, err := c.lifecycle.Launch(ctx, launchReq)
+	execution, err := c.lifecycle.Launch(ctx, launchReq)
 	if err != nil {
 		return dto.LaunchAgentResponse{}, err
 	}
 
 	return dto.LaunchAgentResponse{
 		Success: true,
-		AgentID: instance.ID,
+		AgentID: execution.ID,
 		TaskID:  req.TaskID,
 	}, nil
 }
@@ -85,12 +85,12 @@ func (c *Controller) GetAgentStatus(ctx context.Context, req dto.GetAgentStatusR
 		return dto.AgentDTO{}, ErrLifecycleManagerNotAvailable
 	}
 
-	agent, found := c.lifecycle.GetInstance(req.AgentID)
+	agent, found := c.lifecycle.GetExecution(req.AgentID)
 	if !found {
 		return dto.AgentDTO{}, ErrAgentNotFound
 	}
 
-	return dto.FromAgentInstance(&dto.AgentInstanceData{
+	return dto.FromAgentExecution(&dto.AgentExecutionData{
 		ID:             agent.ID,
 		TaskID:         agent.TaskID,
 		AgentProfileID: agent.AgentProfileID,
@@ -110,7 +110,7 @@ func (c *Controller) GetAgentLogs(ctx context.Context, req dto.GetAgentLogsReque
 		return dto.GetAgentLogsResponse{}, ErrLifecycleManagerNotAvailable
 	}
 
-	_, found := c.lifecycle.GetInstance(req.AgentID)
+	_, found := c.lifecycle.GetExecution(req.AgentID)
 	if !found {
 		return dto.GetAgentLogsResponse{}, ErrAgentNotFound
 	}

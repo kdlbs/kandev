@@ -105,7 +105,7 @@ type Message struct {
 	TaskSessionID string                 `json:"task_session_id"`
 	TaskID         string                 `json:"task_id,omitempty"`
 	AuthorType     MessageAuthorType      `json:"author_type"`
-	AuthorID       string                 `json:"author_id,omitempty"` // User ID or Agent Instance ID
+	AuthorID       string                 `json:"author_id,omitempty"` // User ID or Agent Execution ID
 	Content        string                 `json:"content"`
 	Type           MessageType            `json:"type,omitempty"` // Defaults to "message"
 	Metadata       map[string]interface{} `json:"metadata,omitempty"`
@@ -173,8 +173,8 @@ type TaskSessionWorktree struct {
 type TaskSession struct {
 	ID                   string                 `json:"id"`
 	TaskID               string                 `json:"task_id"`
-	AgentInstanceID      string                 `json:"agent_instance_id"` // Docker container/agent instance
-	ContainerID          string                 `json:"container_id"`      // Docker container ID for cleanup
+	AgentExecutionID     string                 `json:"agent_execution_id"` // Docker container/agent execution
+	ContainerID          string                 `json:"container_id"`       // Docker container ID for cleanup
 	AgentProfileID       string                 `json:"agent_profile_id"`  // ID of the agent profile used
 	ExecutorID           string                 `json:"executor_id"`
 	EnvironmentID        string                 `json:"environment_id"`
@@ -198,10 +198,10 @@ type TaskSession struct {
 // TODO: Add v1.TaskSession type to pkg/api/v1/
 func (s *TaskSession) ToAPI() map[string]interface{} {
 	result := map[string]interface{}{
-		"id":                s.ID,
-		"task_id":           s.TaskID,
-		"agent_instance_id": s.AgentInstanceID,
-		"container_id":      s.ContainerID,
+		"id":                 s.ID,
+		"task_id":            s.TaskID,
+		"agent_execution_id": s.AgentExecutionID,
+		"container_id":       s.ContainerID,
 		"agent_profile_id":  s.AgentProfileID,
 		"executor_id":       s.ExecutorID,
 		"environment_id":    s.EnvironmentID,

@@ -55,7 +55,7 @@ type SimulatedAgentManagerClient struct {
 	shouldFail    bool
 	failAfter     int // Fail after N successful launches
 	launchCount   int32
-	acpMessageFn  func(taskID, instanceID string) []protocol.Message // Custom ACP messages
+	acpMessageFn  func(taskID, executionID string) []protocol.Message // Custom ACP messages
 	stopCh        chan struct{}
 }
 
@@ -102,7 +102,7 @@ func (s *SimulatedAgentManagerClient) SetFailAfter(n int) {
 }
 
 // SetACPMessageFn sets a custom function to generate ACP messages
-func (s *SimulatedAgentManagerClient) SetACPMessageFn(fn func(taskID, instanceID string) []protocol.Message) {
+func (s *SimulatedAgentManagerClient) SetACPMessageFn(fn func(taskID, executionID string) []protocol.Message) {
 	s.acpMessageFn = fn
 }
 
@@ -118,28 +118,35 @@ func (s *SimulatedAgentManagerClient) LaunchAgent(ctx context.Context, req *exec
 		return nil, fmt.Errorf("simulated launch failure after %d attempts", s.failAfter)
 	}
 
-	instanceID := uuid.New().String()
-	containerID := "sim-container-" + instanceID[:8]
+	executionID := uuid.New().String()
+	containerID := "sim-container-" + executionID[:8]
 
 	s.mu.Lock()
 	instance := &simulatedInstance{
-		id:             instanceID,
+		id:             executionID,
 		taskID:         req.TaskID,
 		agentProfileID: req.AgentProfileID,
 		status:         v1.AgentStatusStarting,
 		stopCh:         make(chan struct{}),
 	}
-	s.instances[instanceID] = instance
+	s.instances[executionID] = instance
 	s.mu.Unlock()
 
 	// Simulate agent lifecycle in background
 	go s.runAgentSimulation(instance, req)
 
 	return &executor.LaunchAgentResponse{
-		AgentInstanceID: instanceID,
+		AgentExecutionID: executionID,
 		ContainerID:     containerID,
 		Status:          v1.AgentStatusStarting,
 	}, nil
+}
+
+// StartAgentProcess simulates starting the agent subprocess
+func (s *SimulatedAgentManagerClient) StartAgentProcess(ctx context.Context, agentExecutionID string) error {
+	s.logger.Info("simulated: starting agent process",
+		zap.String("agent_execution_id", agentExecutionID))
+	return nil
 }
 
 // runAgentSimulation simulates the agent execution lifecycle
@@ -259,42 +266,42 @@ func (s *SimulatedAgentManagerClient) publishACPMessages(instance *simulatedInst
 }
 
 // StopAgent simulates stopping an agent
-func (s *SimulatedAgentManagerClient) StopAgent(ctx context.Context, agentInstanceID string, force bool) error {
+func (s *SimulatedAgentManagerClient) StopAgent(ctx context.Context, agentExecutionID string, force bool) error {
 	s.mu.Lock()
-	instance, exists := s.instances[agentInstanceID]
+	execution, exists := s.instances[agentExecutionID]
 	s.mu.Unlock()
 
 	if !exists {
-		return fmt.Errorf("agent instance %q not found", agentInstanceID)
+		return fmt.Errorf("agent execution %q not found", agentExecutionID)
 	}
 
-	close(instance.stopCh)
-	instance.statusMu.Lock()
-	instance.status = v1.AgentStatusStopped
-	instance.statusMu.Unlock()
+	close(execution.stopCh)
+	execution.statusMu.Lock()
+	execution.status = v1.AgentStatusStopped
+	execution.statusMu.Unlock()
 
-	s.publishAgentEvent(events.AgentStopped, instance)
+	s.publishAgentEvent(events.AgentStopped, execution)
 	return nil
 }
 
 // GetAgentStatus returns the status of a simulated agent
-func (s *SimulatedAgentManagerClient) GetAgentStatus(ctx context.Context, agentInstanceID string) (*v1.AgentInstance, error) {
+func (s *SimulatedAgentManagerClient) GetAgentStatus(ctx context.Context, agentExecutionID string) (*v1.AgentExecution, error) {
 	s.mu.Lock()
-	instance, exists := s.instances[agentInstanceID]
+	execution, exists := s.instances[agentExecutionID]
 	s.mu.Unlock()
 
 	if !exists {
-		return nil, fmt.Errorf("agent instance %q not found", agentInstanceID)
+		return nil, fmt.Errorf("agent execution %q not found", agentExecutionID)
 	}
 
-	instance.statusMu.Lock()
-	status := instance.status
-	instance.statusMu.Unlock()
+	execution.statusMu.Lock()
+	status := execution.status
+	execution.statusMu.Unlock()
 
-	return &v1.AgentInstance{
-		ID:             instance.id,
-		TaskID:         instance.taskID,
-		AgentProfileID: instance.agentProfileID,
+	return &v1.AgentExecution{
+		ID:             execution.id,
+		TaskID:         execution.taskID,
+		AgentProfileID: execution.agentProfileID,
 		Status:         status,
 	}, nil
 }
@@ -322,13 +329,13 @@ func (s *SimulatedAgentManagerClient) ListAgentTypes(ctx context.Context) ([]*v1
 }
 
 // PromptAgent sends a follow-up prompt to a running agent
-func (s *SimulatedAgentManagerClient) PromptAgent(ctx context.Context, agentInstanceID string, prompt string) (*executor.PromptResult, error) {
+func (s *SimulatedAgentManagerClient) PromptAgent(ctx context.Context, agentExecutionID string, prompt string) (*executor.PromptResult, error) {
 	s.mu.Lock()
-	instance, exists := s.instances[agentInstanceID]
+	execution, exists := s.instances[agentExecutionID]
 	s.mu.Unlock()
 
 	if !exists {
-		return nil, fmt.Errorf("agent instance %q not found", agentInstanceID)
+		return nil, fmt.Errorf("agent execution %q not found", agentExecutionID)
 	}
 
 	// Simulate receiving prompt and generating response
@@ -337,7 +344,7 @@ func (s *SimulatedAgentManagerClient) PromptAgent(ctx context.Context, agentInst
 
 		msg := protocol.Message{
 			Type:      protocol.MessageTypeLog,
-			TaskID:    instance.taskID,
+			TaskID:    execution.taskID,
 			Timestamp: time.Now(),
 			Data: map[string]interface{}{
 				"level":   "info",
@@ -353,7 +360,7 @@ func (s *SimulatedAgentManagerClient) PromptAgent(ctx context.Context, agentInst
 		}
 
 		event := bus.NewEvent(events.ACPMessage, "simulated-agent", msgData)
-		subject := events.BuildACPSubject(instance.taskID)
+		subject := events.BuildACPSubject(execution.taskID)
 		if err := s.eventBus.Publish(context.Background(), subject, event); err != nil {
 			s.logger.Warn("failed to publish simulated ACP message", zap.Error(err))
 		}
@@ -375,31 +382,31 @@ func (s *SimulatedAgentManagerClient) RespondToPermissionByTaskID(ctx context.Co
 }
 
 // CompleteAgent marks an agent as completed
-func (s *SimulatedAgentManagerClient) CompleteAgent(instanceID string) {
+func (s *SimulatedAgentManagerClient) CompleteAgent(executionID string) {
 	s.mu.Lock()
-	instance, exists := s.instances[instanceID]
+	execution, exists := s.instances[executionID]
 	s.mu.Unlock()
 
 	if !exists {
 		return
 	}
 
-	instance.status = v1.AgentStatusCompleted
-	s.publishAgentEvent(events.AgentCompleted, instance)
+	execution.status = v1.AgentStatusCompleted
+	s.publishAgentEvent(events.AgentCompleted, execution)
 }
 
 // FailAgent marks an agent as failed
-func (s *SimulatedAgentManagerClient) FailAgent(instanceID string, reason string) {
+func (s *SimulatedAgentManagerClient) FailAgent(executionID string, reason string) {
 	s.mu.Lock()
-	instance, exists := s.instances[instanceID]
+	execution, exists := s.instances[executionID]
 	s.mu.Unlock()
 
 	if !exists {
 		return
 	}
 
-	instance.status = v1.AgentStatusFailed
-	s.publishAgentEvent(events.AgentFailed, instance)
+	execution.status = v1.AgentStatusFailed
+	s.publishAgentEvent(events.AgentFailed, execution)
 }
 
 // GetLaunchCount returns the number of times LaunchAgent was called
@@ -412,8 +419,8 @@ func (s *SimulatedAgentManagerClient) Close() {
 	close(s.stopCh)
 }
 
-// GetRecoveredInstances returns recovered instances (none for simulated agent)
-func (s *SimulatedAgentManagerClient) GetRecoveredInstances() []executor.RecoveredInstanceInfo {
+// GetRecoveredExecutions returns recovered executions (none for simulated agent)
+func (s *SimulatedAgentManagerClient) GetRecoveredExecutions() []executor.RecoveredExecutionInfo {
 	return nil
 }
 
@@ -428,6 +435,10 @@ func (s *SimulatedAgentManagerClient) IsAgentRunningForTask(ctx context.Context,
 		}
 	}
 	return false
+}
+
+func (s *SimulatedAgentManagerClient) CleanupStaleExecutionByTaskID(ctx context.Context, taskID string) error {
+	return nil
 }
 
 // ============================================
@@ -863,7 +874,7 @@ func TestOrchestratorStartTask(t *testing.T) {
 
 	assert.True(t, payload["success"].(bool))
 	assert.Equal(t, taskID, payload["task_id"])
-	assert.NotEmpty(t, payload["agent_instance_id"])
+	assert.NotEmpty(t, payload["agent_execution_id"])
 
 	// Wait for ACP notifications
 	time.Sleep(500 * time.Millisecond)
@@ -1087,7 +1098,7 @@ func TestOrchestratorACPStreaming(t *testing.T) {
 	defer ts.Close()
 
 	// Configure simulated agent to emit specific ACP messages
-	ts.AgentManager.SetACPMessageFn(func(taskID, instanceID string) []protocol.Message {
+	ts.AgentManager.SetACPMessageFn(func(taskID, executionID string) []protocol.Message {
 		return []protocol.Message{
 			{
 				Type:      protocol.MessageTypeProgress,
@@ -1438,8 +1449,8 @@ func TestOrchestratorEndToEndWorkflow(t *testing.T) {
 	var startPayload map[string]interface{}
 	require.NoError(t, startResp.ParsePayload(&startPayload))
 	assert.True(t, startPayload["success"].(bool))
-	agentInstanceID := startPayload["agent_instance_id"].(string)
-	assert.NotEmpty(t, agentInstanceID)
+	agentExecutionID := startPayload["agent_execution_id"].(string)
+	assert.NotEmpty(t, agentExecutionID)
 
 	// 6. Collect notifications during execution
 	time.Sleep(400 * time.Millisecond)

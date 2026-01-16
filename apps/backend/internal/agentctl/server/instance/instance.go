@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/kandev/kandev/internal/agentctl/process"
+	"github.com/kandev/kandev/internal/agentctl/server/process"
 )
 
 // Instance represents a single agent instance running as a subprocess.

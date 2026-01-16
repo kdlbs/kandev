@@ -46,14 +46,14 @@ func (h *WorkspaceFileHandlers) wsGetFileTree(ctx context.Context, msg *ws.Messa
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 	}
 
-	// Get agent instance for this task
-	instance, found := h.lifecycle.GetInstanceByTaskID(req.TaskID)
+	// Get agent execution for this task
+	execution, found := h.lifecycle.GetExecutionByTaskID(req.TaskID)
 	if !found {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "No agent found for task", nil)
 	}
 
 	// Get agentctl client
-	client := instance.GetAgentCtlClient()
+	client := execution.GetAgentCtlClient()
 	if client == nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Agent client not available", nil)
 	}
@@ -87,14 +87,14 @@ func (h *WorkspaceFileHandlers) wsGetFileContent(ctx context.Context, msg *ws.Me
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "path is required", nil)
 	}
 
-	// Get agent instance for this task
-	instance, found := h.lifecycle.GetInstanceByTaskID(req.TaskID)
+	// Get agent execution for this task
+	execution, found := h.lifecycle.GetExecutionByTaskID(req.TaskID)
 	if !found {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "No agent found for task", nil)
 	}
 
 	// Get agentctl client
-	client := instance.GetAgentCtlClient()
+	client := execution.GetAgentCtlClient()
 	if client == nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Agent client not available", nil)
 	}

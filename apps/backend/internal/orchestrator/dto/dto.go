@@ -49,13 +49,13 @@ type StartTaskRequest struct {
 
 // StartTaskResponse is the response for orchestrator.start
 type StartTaskResponse struct {
-	Success         bool    `json:"success"`
-	TaskID          string  `json:"task_id"`
-	AgentInstanceID string  `json:"agent_instance_id"`
-	TaskSessionID  string  `json:"task_session_id,omitempty"`
-	State           string  `json:"state"`
-	WorktreePath    *string `json:"worktree_path,omitempty"`
-	WorktreeBranch  *string `json:"worktree_branch,omitempty"`
+	Success          bool    `json:"success"`
+	TaskID           string  `json:"task_id"`
+	AgentExecutionID string  `json:"agent_execution_id"`
+	TaskSessionID    string  `json:"task_session_id,omitempty"`
+	State            string  `json:"state"`
+	WorktreePath     *string `json:"worktree_path,omitempty"`
+	WorktreeBranch   *string `json:"worktree_branch,omitempty"`
 }
 
 // ResumeTaskSessionRequest is the payload for task.session.resume
@@ -66,13 +66,44 @@ type ResumeTaskSessionRequest struct {
 
 // ResumeTaskSessionResponse is the response for task.session.resume
 type ResumeTaskSessionResponse struct {
-	Success         bool    `json:"success"`
-	TaskID          string  `json:"task_id"`
-	AgentInstanceID string  `json:"agent_instance_id"`
-	TaskSessionID  string  `json:"task_session_id,omitempty"`
-	State           string  `json:"state"`
-	WorktreePath    *string `json:"worktree_path,omitempty"`
-	WorktreeBranch  *string `json:"worktree_branch,omitempty"`
+	Success          bool    `json:"success"`
+	TaskID           string  `json:"task_id"`
+	AgentExecutionID string  `json:"agent_execution_id"`
+	TaskSessionID    string  `json:"task_session_id,omitempty"`
+	State            string  `json:"state"`
+	WorktreePath     *string `json:"worktree_path,omitempty"`
+	WorktreeBranch   *string `json:"worktree_branch,omitempty"`
+}
+
+// TaskSessionStatusRequest is the payload for task.session.status
+type TaskSessionStatusRequest struct {
+	TaskID        string `json:"task_id"`
+	TaskSessionID string `json:"task_session_id"`
+}
+
+// TaskSessionStatusResponse is the response for task.session.status
+type TaskSessionStatusResponse struct {
+	// Session metadata
+	SessionID      string `json:"session_id"`
+	TaskID         string `json:"task_id"`
+	State          string `json:"state"`
+	AgentProfileID string `json:"agent_profile_id,omitempty"`
+
+	// Runtime status
+	IsAgentRunning bool   `json:"is_agent_running"`    // Agent process is currently running
+	IsResumable    bool   `json:"is_resumable"`        // Session can be resumed
+	NeedsResume    bool   `json:"needs_resume"`        // Session needs resumption (page reload scenario)
+	ResumeReason   string `json:"resume_reason,omitempty"` // Why resume is needed (e.g., "agent_not_running")
+
+	// ACP session info
+	ACPSessionID string `json:"acp_session_id,omitempty"`
+
+	// Worktree info
+	WorktreePath   *string `json:"worktree_path,omitempty"`
+	WorktreeBranch *string `json:"worktree_branch,omitempty"`
+
+	// Error info
+	Error string `json:"error,omitempty"`
 }
 
 // StopTaskRequest is the payload for orchestrator.stop
@@ -132,12 +163,12 @@ type GetTaskExecutionRequest struct {
 
 // TaskExecutionResponse is the response for task.execution
 type TaskExecutionResponse struct {
-	HasExecution    bool   `json:"has_execution"`
-	TaskID          string `json:"task_id"`
-	AgentInstanceID string `json:"agent_instance_id,omitempty"`
-	AgentProfileID  string `json:"agent_profile_id,omitempty"`
-	TaskSessionID  string `json:"task_session_id,omitempty"`
-	State           string `json:"state,omitempty"`
-	Progress        int    `json:"progress,omitempty"`
-	StartedAt       string `json:"started_at,omitempty"`
+	HasExecution     bool   `json:"has_execution"`
+	TaskID           string `json:"task_id"`
+	AgentExecutionID string `json:"agent_execution_id,omitempty"`
+	AgentProfileID   string `json:"agent_profile_id,omitempty"`
+	TaskSessionID    string `json:"task_session_id,omitempty"`
+	State            string `json:"state,omitempty"`
+	Progress         int    `json:"progress,omitempty"`
+	StartedAt        string `json:"started_at,omitempty"`
 }

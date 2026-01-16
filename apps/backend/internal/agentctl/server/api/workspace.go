@@ -5,7 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
-	"github.com/kandev/kandev/internal/agentctl/process"
+	"github.com/kandev/kandev/internal/agentctl/types"
 	"go.uber.org/zap"
 )
 
@@ -171,28 +171,28 @@ func (s *Server) handleFileTree(c *gin.Context) {
 
 	tree, err := s.procMgr.GetWorkspaceTracker().GetFileTree(path, depth)
 	if err != nil {
-		c.JSON(400, process.FileTreeResponse{Error: err.Error()})
+		c.JSON(400, types.FileTreeResponse{Error: err.Error()})
 		return
 	}
 
-	c.JSON(200, process.FileTreeResponse{Root: tree})
+	c.JSON(200, types.FileTreeResponse{Root: tree})
 }
 
 // handleFileContent handles file content requests via HTTP GET
 func (s *Server) handleFileContent(c *gin.Context) {
 	path := c.Query("path")
 	if path == "" {
-		c.JSON(400, process.FileContentResponse{Error: "path is required"})
+		c.JSON(400, types.FileContentResponse{Error: "path is required"})
 		return
 	}
 
 	content, size, err := s.procMgr.GetWorkspaceTracker().GetFileContent(path)
 	if err != nil {
-		c.JSON(400, process.FileContentResponse{Path: path, Error: err.Error(), Size: size})
+		c.JSON(400, types.FileContentResponse{Path: path, Error: err.Error(), Size: size})
 		return
 	}
 
-	c.JSON(200, process.FileContentResponse{Path: path, Content: content, Size: size})
+	c.JSON(200, types.FileContentResponse{Path: path, Content: content, Size: size})
 }
 
 // mustParseInt parses a string to int, returns 0 on error

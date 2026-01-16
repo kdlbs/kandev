@@ -57,8 +57,6 @@ type ErrorPayload struct {
 	Details map[string]interface{} `json:"details,omitempty"`
 }
 
-
-
 // NewRequest creates a new request message
 func NewRequest(id, action string, payload interface{}) (*Message, error) {
 	data, err := json.Marshal(payload)

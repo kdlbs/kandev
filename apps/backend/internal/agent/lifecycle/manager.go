@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -15,100 +14,17 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
-	"github.com/kandev/kandev/internal/agent/agentctl"
-	"github.com/kandev/kandev/internal/agent/docker"
+	agentctl "github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/worktree"
-	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
-// Default agentctl port
-const AgentCtlPort = 9999
-
-// AgentInstance represents a running agent instance
-type AgentInstance struct {
-	ID             string
-	TaskID         string
-	AgentProfileID string
-	ContainerID    string
-	ContainerIP    string // IP address of the container for agentctl communication
-	WorkspacePath  string // Path to the workspace (worktree or repository path)
-	ACPSessionID   string // ACP session ID to resume, if available
-	Status         v1.AgentStatus
-	StartedAt      time.Time
-	FinishedAt     *time.Time
-	ExitCode       *int
-	ErrorMessage   string
-	Progress       int
-	Metadata       map[string]interface{}
-
-	// agentctl client for this instance
-	agentctl *agentctl.Client
-
-	// Standalone mode info (when not using Docker)
-	standaloneInstanceID string // Instance ID in standalone agentctl
-	standalonePort       int    // Port of the standalone instance
-
-	// Buffers for accumulating agent response during a prompt
-	messageBuffer   strings.Builder
-	reasoningBuffer strings.Builder
-	summaryBuffer   strings.Builder
-	messageMu       sync.Mutex
-}
-
-// GetAgentCtlClient returns the agentctl client for this instance
-func (ai *AgentInstance) GetAgentCtlClient() *agentctl.Client {
-	return ai.agentctl
-}
-
-// LaunchRequest contains parameters for launching an agent
-type LaunchRequest struct {
-	TaskID          string
-	SessionID       string
-	TaskTitle       string // Human-readable task title for semantic worktree naming
-	AgentProfileID  string
-	WorkspacePath   string            // Host path to workspace (original repository path)
-	TaskDescription string            // Task description to send via ACP prompt
-	Env             map[string]string // Additional env vars
-	ACPSessionID    string            // ACP session ID to resume, if available
-	Metadata        map[string]interface{}
-
-	// Worktree configuration
-	UseWorktree    bool   // Whether to use a Git worktree for isolation
-	RepositoryID   string // Repository ID for worktree tracking
-	RepositoryPath string // Path to the main repository (for worktree creation)
-	BaseBranch     string // Base branch for the worktree (e.g., "main")
-}
-
-// CredentialsManager interface for credential retrieval
-type CredentialsManager interface {
-	GetCredentialValue(ctx context.Context, key string) (value string, err error)
-}
-
-// AgentProfileInfo contains resolved profile information
-type AgentProfileInfo struct {
-	ProfileID                  string
-	ProfileName                string
-	AgentID                    string
-	AgentName                  string // e.g., "auggie", "claude", "codex"
-	Model                      string
-	AutoApprove                bool
-	DangerouslySkipPermissions bool
-	Plan                       string
-}
-
-// ProfileResolver resolves agent profile IDs to profile information
-type ProfileResolver interface {
-	ResolveProfile(ctx context.Context, profileID string) (*AgentProfileInfo, error)
-}
-
 // Manager manages agent instance lifecycles
 type Manager struct {
-	docker          *docker.Client
 	registry        *registry.Registry
 	eventBus        bus.EventBus
 	credsMgr        CredentialsManager
@@ -116,25 +32,22 @@ type Manager struct {
 	worktreeMgr     *worktree.Manager
 	logger          *logger.Logger
 
-	// Agent runtime configuration
-	agentCfg      config.AgentConfig
-	standaloneCtl *agentctl.StandaloneCtl // Client for standalone agentctl control API
+	// Agent runtime abstraction (Docker, Standalone, K8s, SSH, etc.)
+	runtime Runtime
 
 	// Refactored components for separation of concerns
+	executionStore   *ExecutionStore   // Thread-safe execution tracking
 	commandBuilder   *CommandBuilder   // Builds agent commands from registry config
 	sessionManager   *SessionManager   // Handles ACP session initialization
 	streamManager    *StreamManager    // Manages WebSocket streams
 	eventPublisher   *EventPublisher   // Publishes lifecycle events
-	containerManager *ContainerManager // Manages Docker containers
+	containerManager *ContainerManager // Manages Docker containers (optional, nil for non-Docker runtimes)
 
 	// Shell stream starter for auto-starting shell streams
 	shellStreamStarter ShellStreamStarter
 
-	// Track active instances
-	instances   map[string]*AgentInstance // by instance ID
-	byTask      map[string]string         // taskID -> instanceID
-	byContainer map[string]string         // containerID -> instanceID
-	mu          sync.RWMutex
+	// Workspace info provider for on-demand instance creation
+	workspaceInfoProvider WorkspaceInfoProvider
 
 	// Background cleanup
 	cleanupInterval time.Duration
@@ -142,12 +55,16 @@ type Manager struct {
 	wg              sync.WaitGroup
 }
 
-// NewManager creates a new lifecycle manager
+// NewManager creates a new lifecycle manager.
+// The runtime parameter is the agent execution runtime (Docker, Standalone, etc.).
+// The containerManager parameter is optional and used for Docker cleanup (pass nil for non-Docker runtimes).
 func NewManager(
-	dockerClient *docker.Client,
 	reg *registry.Registry,
 	eventBus bus.EventBus,
-	agentCfg config.AgentConfig,
+	runtime Runtime,
+	containerManager *ContainerManager,
+	credsMgr CredentialsManager,
+	profileResolver ProfileResolver,
 	log *logger.Logger,
 ) *Manager {
 	componentLogger := log.WithFields(zap.String("component", "lifecycle-manager"))
@@ -161,26 +78,21 @@ func NewManager(
 	// Initialize event publisher
 	eventPublisher := NewEventPublisher(eventBus, log)
 
-	// Initialize container manager (only if docker client is available)
-	// Note: Network configuration is not used currently - containers use default Docker networking
-	var containerManager *ContainerManager
-	if dockerClient != nil {
-		containerManager = NewContainerManager(dockerClient, "", log)
-	}
+	// Initialize execution store
+	executionStore := NewExecutionStore()
 
 	mgr := &Manager{
-		docker:           dockerClient,
 		registry:         reg,
 		eventBus:         eventBus,
-		agentCfg:         agentCfg,
+		runtime:          runtime,
+		credsMgr:         credsMgr,
+		profileResolver:  profileResolver,
 		logger:           componentLogger,
+		executionStore:   executionStore,
 		commandBuilder:   commandBuilder,
 		sessionManager:   sessionManager,
 		eventPublisher:   eventPublisher,
 		containerManager: containerManager,
-		instances:        make(map[string]*AgentInstance),
-		byTask:           make(map[string]string),
-		byContainer:      make(map[string]string),
 		cleanupInterval:  30 * time.Second,
 		stopCh:           make(chan struct{}),
 	}
@@ -193,34 +105,14 @@ func NewManager(
 		OnFileChange:    mgr.handleFileChangeNotification,
 	})
 
-	// Initialize standalone agentctl client if in standalone mode
-	if agentCfg.Runtime == "standalone" {
-		mgr.standaloneCtl = agentctl.NewStandaloneCtl(
-			agentCfg.StandaloneHost,
-			agentCfg.StandalonePort,
-			log,
-		)
-		mgr.logger.Info("initialized for standalone mode",
-			zap.String("host", agentCfg.StandaloneHost),
-			zap.Int("port", agentCfg.StandalonePort))
+	// Set session manager dependencies for full orchestration
+	sessionManager.SetDependencies(eventPublisher, mgr.streamManager, executionStore)
+
+	if runtime != nil {
+		mgr.logger.Info("initialized with runtime", zap.String("runtime", runtime.Name()))
 	}
 
 	return mgr
-}
-
-// IsStandaloneMode returns true if running in standalone mode
-func (m *Manager) IsStandaloneMode() bool {
-	return m.agentCfg.Runtime == "standalone"
-}
-
-// SetCredentialsManager sets the credentials manager for injecting secrets
-func (m *Manager) SetCredentialsManager(credsMgr CredentialsManager) {
-	m.credsMgr = credsMgr
-}
-
-// SetProfileResolver sets the profile resolver for looking up agent profiles
-func (m *Manager) SetProfileResolver(resolver ProfileResolver) {
-	m.profileResolver = resolver
 }
 
 // SetWorktreeManager sets the worktree manager for Git worktree isolation
@@ -228,176 +120,199 @@ func (m *Manager) SetWorktreeManager(worktreeMgr *worktree.Manager) {
 	m.worktreeMgr = worktreeMgr
 }
 
-// ShellStreamStarter is called to start shell streaming for an agent instance
-type ShellStreamStarter interface {
-	StartShellStream(ctx context.Context, taskID string) error
-}
-
 // SetShellStreamStarter sets the shell stream starter
 func (m *Manager) SetShellStreamStarter(starter ShellStreamStarter) {
 	m.shellStreamStarter = starter
 }
 
+// SetWorkspaceInfoProvider sets the provider for workspace information
+func (m *Manager) SetWorkspaceInfoProvider(provider WorkspaceInfoProvider) {
+	m.workspaceInfoProvider = provider
+}
+
+// EnsureWorkspaceExecution ensures an agentctl execution exists for a task's workspace.
+// If an execution already exists, it returns it. Otherwise, it creates a new execution
+// for workspace access (shell, git, file operations) WITHOUT starting the agent process.
+// This is used to restore workspace access after backend restart.
+func (m *Manager) EnsureWorkspaceExecution(ctx context.Context, taskID string) (*AgentExecution, error) {
+	// Check if execution already exists
+	if execution, exists := m.executionStore.GetByTaskID(taskID); exists {
+		return execution, nil
+	}
+
+	// Need to create a new execution - get workspace info
+	if m.workspaceInfoProvider == nil {
+		return nil, fmt.Errorf("workspace info provider not configured")
+	}
+
+	info, err := m.workspaceInfoProvider.GetWorkspaceInfo(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get workspace info: %w", err)
+	}
+
+	if info.WorkspacePath == "" {
+		return nil, fmt.Errorf("no workspace path available for task %s", taskID)
+	}
+
+	m.logger.Info("creating execution for task",
+		zap.String("task_id", taskID),
+		zap.String("workspace_path", info.WorkspacePath))
+
+	return m.createExecution(ctx, taskID, info)
+}
+
+// EnsureWorkspaceExecutionForSession ensures an agentctl execution exists for a specific task session.
+// This is used when the frontend provides a session ID (e.g., from URL path /task/[id]/[sessionId]).
+// If an execution already exists for the task, it returns it. Otherwise, it creates a new execution
+// using the session's workspace configuration from the database.
+func (m *Manager) EnsureWorkspaceExecutionForSession(ctx context.Context, taskID, sessionID string) (*AgentExecution, error) {
+	// Check if execution already exists
+	if execution, exists := m.executionStore.GetByTaskID(taskID); exists {
+		return execution, nil
+	}
+
+	// Need to create a new execution - get workspace info for the specific session
+	if m.workspaceInfoProvider == nil {
+		return nil, fmt.Errorf("workspace info provider not configured")
+	}
+
+	info, err := m.workspaceInfoProvider.GetWorkspaceInfoForSession(ctx, taskID, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get workspace info for session %s: %w", sessionID, err)
+	}
+
+	if info.WorkspacePath == "" {
+		return nil, fmt.Errorf("no workspace path available for session %s", sessionID)
+	}
+
+	m.logger.Info("creating execution for task session",
+		zap.String("task_id", taskID),
+		zap.String("session_id", sessionID),
+		zap.String("workspace_path", info.WorkspacePath),
+		zap.String("acp_session_id", info.ACPSessionID))
+
+	return m.createExecution(ctx, taskID, info)
+}
+
+// createExecution creates an agentctl execution.
+// The agent subprocess is NOT started - call ConfigureAgent + Start explicitly.
+func (m *Manager) createExecution(ctx context.Context, taskID string, info *WorkspaceInfo) (*AgentExecution, error) {
+	if m.runtime == nil {
+		return nil, fmt.Errorf("no runtime configured")
+	}
+
+	if info.AgentID == "" {
+		return nil, fmt.Errorf("agent ID is required in WorkspaceInfo")
+	}
+
+	executionID := uuid.New().String()
+
+	agentConfig, err := m.registry.Get(info.AgentID)
+	if err != nil {
+		return nil, fmt.Errorf("agent type %q not found in registry: %w", info.AgentID, err)
+	}
+
+	req := &RuntimeCreateRequest{
+		InstanceID:     executionID,
+		TaskID:         taskID,
+		AgentProfileID: info.AgentProfileID,
+		WorkspacePath:  info.WorkspacePath,
+		Protocol:       string(agentConfig.Protocol),
+	}
+
+	runtimeInstance, err := m.runtime.CreateInstance(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create execution: %w", err)
+	}
+
+	execution := runtimeInstance.ToAgentExecution(req)
+
+	// Set the ACP session ID for session resumption
+	if info.ACPSessionID != "" {
+		execution.ACPSessionID = info.ACPSessionID
+	}
+
+	m.executionStore.Add(execution)
+
+	go m.waitForAgentctlReady(execution)
+
+	m.logger.Info("execution created",
+		zap.String("execution_id", executionID),
+		zap.String("task_id", taskID),
+		zap.String("workspace_path", info.WorkspacePath),
+		zap.String("runtime", m.runtime.Name()))
+
+	return execution, nil
+}
+
 // Start starts the lifecycle manager background tasks
 func (m *Manager) Start(ctx context.Context) error {
-	m.logger.Info("starting lifecycle manager",
-		zap.String("runtime", m.agentCfg.Runtime))
+	runtimeName := "none"
+	if m.runtime != nil {
+		runtimeName = m.runtime.Name()
+	}
+	m.logger.Info("starting lifecycle manager", zap.String("runtime", runtimeName))
 
-	if m.IsStandaloneMode() {
-		// Check if standalone agentctl is reachable
-		if err := m.standaloneCtl.Health(ctx); err != nil {
-			m.logger.Warn("standalone agentctl not reachable",
-				zap.String("host", m.agentCfg.StandaloneHost),
-				zap.Int("port", m.agentCfg.StandalonePort),
-				zap.Error(err))
-			// Continue anyway - it might come up later
-		} else {
-			m.logger.Info("standalone agentctl is reachable")
-		}
+	if m.runtime == nil {
+		m.logger.Warn("no runtime configured")
+		return nil
+	}
+
+	// Check runtime health
+	if err := m.runtime.HealthCheck(ctx); err != nil {
+		m.logger.Warn("runtime health check failed",
+			zap.String("runtime", runtimeName),
+			zap.Error(err))
+		// Continue anyway - it might come up later
 	} else {
-		// Docker mode - reconcile with Docker to find running containers from previous runs
-		if _, err := m.reconcileWithDocker(ctx); err != nil {
-			m.logger.Warn("failed to reconcile with Docker", zap.Error(err))
-			// Continue anyway - this is best-effort
-		}
+		m.logger.Info("runtime is healthy", zap.String("runtime", runtimeName))
+	}
 
-		// Start cleanup loop only if docker client is available
-		if m.docker != nil {
-			m.wg.Add(1)
-			go m.cleanupLoop(ctx)
-			m.logger.Info("cleanup loop started")
-		} else {
-			m.logger.Warn("cleanup loop not started - no docker client available")
+	// Try to recover executions from previous runs
+	recovered, err := m.runtime.RecoverInstances(ctx)
+	if err != nil {
+		m.logger.Warn("failed to recover executions", zap.Error(err))
+	} else if len(recovered) > 0 {
+		for _, ri := range recovered {
+			execution := &AgentExecution{
+				ID:                   ri.InstanceID,
+				TaskID:               ri.TaskID,
+				ContainerID:          ri.ContainerID,
+				ContainerIP:          ri.ContainerIP,
+				WorkspacePath:        ri.WorkspacePath,
+				Status:               v1.AgentStatusRunning,
+				StartedAt:            time.Now(),
+				Metadata:             ri.Metadata,
+				agentctl:             ri.Client,
+				standaloneInstanceID: ri.StandaloneInstanceID,
+				standalonePort:       ri.StandalonePort,
+			}
+			m.executionStore.Add(execution)
 		}
+		m.logger.Info("recovered executions", zap.Int("count", len(recovered)))
+	}
+
+	// Start cleanup loop when container manager is available (Docker mode)
+	if m.containerManager != nil {
+		m.wg.Add(1)
+		go m.cleanupLoop(ctx)
+		m.logger.Info("cleanup loop started")
 	}
 
 	return nil
 }
 
-// RecoveredInstance contains info about an instance recovered from Docker
-type RecoveredInstance struct {
-	InstanceID     string
-	TaskID         string
-	ContainerID    string
-	AgentProfileID string
-}
-
-// reconcileWithDocker finds running kandev containers and re-populates tracking maps
-// Returns a list of recovered instances so the caller can sync with the database
-func (m *Manager) reconcileWithDocker(ctx context.Context) ([]RecoveredInstance, error) {
-	// Skip reconciliation if docker client is not available (e.g., in tests)
-	if m.docker == nil {
-		m.logger.Debug("skipping Docker reconciliation - no docker client")
-		return nil, nil
-	}
-
-	m.logger.Info("reconciling with Docker - looking for running containers")
-
-	// List all containers with our label
-	containers, err := m.docker.ListContainers(ctx, map[string]string{
-		"kandev.managed": "true",
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to list containers: %w", err)
-	}
-
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	var recovered []RecoveredInstance
-	for _, ctr := range containers {
-		// Only recover running containers
-		if ctr.State != "running" {
-			m.logger.Debug("skipping non-running container",
-				zap.String("container_id", ctr.ID),
-				zap.String("state", ctr.State))
-			continue
-		}
-
-		// Get container details to extract labels
-		labels, err := m.docker.GetContainerLabels(ctx, ctr.ID)
-		if err != nil {
-			m.logger.Warn("failed to get container labels",
-				zap.String("container_id", ctr.ID),
-				zap.Error(err))
-			continue
-		}
-
-		instanceID := labels["kandev.instance_id"]
-		taskID := labels["kandev.task_id"]
-		agentProfileID := labels["kandev.agent_profile_id"]
-
-		if instanceID == "" || taskID == "" {
-			m.logger.Warn("container missing required labels",
-				zap.String("container_id", ctr.ID))
-			continue
-		}
-
-		// Get container IP
-		containerIP, err := m.docker.GetContainerIP(ctx, ctr.ID)
-		if err != nil {
-			m.logger.Warn("failed to get container IP",
-				zap.String("container_id", ctr.ID),
-				zap.Error(err))
-			containerIP = "localhost"
-		}
-
-		// Create instance record
-		instance := &AgentInstance{
-			ID:             instanceID,
-			TaskID:         taskID,
-			AgentProfileID: agentProfileID,
-			ContainerID:    ctr.ID,
-			ContainerIP:    containerIP,
-			Status:         v1.AgentStatusRunning,
-			StartedAt:      time.Now(), // We don't know exact start time
-		}
-
-		// Create agentctl client
-		instance.agentctl = agentctl.NewClient(containerIP, AgentCtlPort, m.logger)
-
-		// Add to tracking maps
-		m.instances[instanceID] = instance
-		m.byTask[taskID] = instanceID
-		m.byContainer[ctr.ID] = instanceID
-
-		recovered = append(recovered, RecoveredInstance{
-			InstanceID:     instanceID,
-			TaskID:         taskID,
-			ContainerID:    ctr.ID,
-			AgentProfileID: agentProfileID,
-		})
-
-		// Reconnect to WebSocket streams for updates and permissions
-		// This runs in goroutines so we don't block reconciliation
-		go m.reconnectStreams(instance)
-
-		m.logger.Info("recovered running container",
-			zap.String("instance_id", instanceID),
-			zap.String("task_id", taskID),
-			zap.String("container_id", ctr.ID))
-	}
-
-	m.logger.Info("reconciliation complete",
-		zap.Int("containers_found", len(containers)),
-		zap.Int("recovered", len(recovered)))
-
-	return recovered, nil
-}
-
-// GetRecoveredInstances returns a snapshot of all currently tracked instances
+// GetRecoveredExecutions returns a snapshot of all currently tracked executions
 // This can be used by the orchestrator to sync with the database
-func (m *Manager) GetRecoveredInstances() []RecoveredInstance {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	result := make([]RecoveredInstance, 0, len(m.instances))
-	for _, inst := range m.instances {
-		result = append(result, RecoveredInstance{
-			InstanceID:     inst.ID,
-			TaskID:         inst.TaskID,
-			ContainerID:    inst.ContainerID,
-			AgentProfileID: inst.AgentProfileID,
+func (m *Manager) GetRecoveredExecutions() []RecoveredExecution {
+	executions := m.executionStore.List()
+	result := make([]RecoveredExecution, 0, len(executions))
+	for _, exec := range executions {
+		result = append(result, RecoveredExecution{
+			ExecutionID:    exec.ID,
+			TaskID:         exec.TaskID,
+			ContainerID:    exec.ContainerID,
+			AgentProfileID: exec.AgentProfileID,
 		})
 	}
 	return result
@@ -415,23 +330,17 @@ func (m *Manager) Stop() error {
 
 // StopAllAgents attempts a graceful shutdown of all active agents.
 func (m *Manager) StopAllAgents(ctx context.Context) error {
-	instanceIDs := make([]string, 0)
-	m.mu.RLock()
-	for instanceID := range m.instances {
-		instanceIDs = append(instanceIDs, instanceID)
-	}
-	m.mu.RUnlock()
-
-	if len(instanceIDs) == 0 {
+	executions := m.executionStore.List()
+	if len(executions) == 0 {
 		return nil
 	}
 
 	var errs []error
-	for _, instanceID := range instanceIDs {
-		if err := m.StopAgent(ctx, instanceID, false); err != nil {
+	for _, exec := range executions {
+		if err := m.StopAgent(ctx, exec.ID, false); err != nil {
 			errs = append(errs, err)
 			m.logger.Warn("failed to stop agent during shutdown",
-				zap.String("instance_id", instanceID),
+				zap.String("execution_id", exec.ID),
 				zap.Error(err))
 		}
 	}
@@ -440,7 +349,7 @@ func (m *Manager) StopAllAgents(ctx context.Context) error {
 }
 
 // Launch launches a new agent for a task
-func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentInstance, error) {
+func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecution, error) {
 	m.logger.Info("launching agent",
 		zap.String("task_id", req.TaskID),
 		zap.String("agent_profile_id", req.AgentProfileID),
@@ -479,12 +388,9 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentInstanc
 	}
 
 	// 3. Check if task already has an agent running
-	m.mu.RLock()
-	if existingID, exists := m.byTask[req.TaskID]; exists {
-		m.mu.RUnlock()
-		return nil, fmt.Errorf("task %q already has an agent running (instance: %s)", req.TaskID, existingID)
+	if existingExecution, exists := m.executionStore.GetByTaskID(req.TaskID); exists {
+		return nil, fmt.Errorf("task %q already has an agent running (execution: %s)", req.TaskID, existingExecution.ID)
 	}
-	m.mu.RUnlock()
 
 	// 4. Handle worktree creation/reuse if enabled
 	workspacePath := req.WorkspacePath
@@ -509,27 +415,26 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentInstanc
 			// that points back to the main .git directory (usually '../..')
 			// We need to mount the entire .git directory for git commands to work
 			mainRepoGitDir = filepath.Join(req.RepositoryPath, ".git")
-			m.logger.Info("using worktree for agent",
-				zap.String("task_id", req.TaskID),
-				zap.String("worktree_id", worktreeID),
-				zap.String("worktree_path", workspacePath),
-				zap.String("main_repo_git_dir", mainRepoGitDir),
-				zap.String("branch", wt.Branch))
 		}
 	} else if req.RepositoryPath != "" && workspacePath == "" {
 		// No worktree, but we have a repository path - use it as workspace
 		workspacePath = req.RepositoryPath
-		m.logger.Info("using repository path as workspace (no worktree)",
-			zap.String("task_id", req.TaskID),
-			zap.String("workspace_path", workspacePath))
 	}
 
-	// 5. Generate a new instance ID
-	instanceID := uuid.New().String()
+	// 5. Generate a new execution ID
+	executionID := uuid.New().String()
 
 	// 6. Prepare request with worktree path
 	reqWithWorktree := *req
 	reqWithWorktree.WorkspacePath = workspacePath
+
+	// Store task description in metadata for StartAgentProcess
+	if reqWithWorktree.Metadata == nil {
+		reqWithWorktree.Metadata = make(map[string]interface{})
+	}
+	if req.TaskDescription != "" {
+		reqWithWorktree.Metadata["task_description"] = req.TaskDescription
+	}
 
 	// 6b. Add profile settings to environment
 	if profileInfo != nil {
@@ -550,172 +455,150 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentInstanc
 		}
 	}
 
-	// 7. Launch via appropriate runtime (Docker or Standalone)
-	var instance *AgentInstance
-	if m.IsStandaloneMode() {
-		instance, err = m.launchStandalone(ctx, instanceID, &reqWithWorktree, agentConfig, profileInfo, worktreeID, worktreeBranch)
-	} else {
-		instance, err = m.launchDocker(ctx, instanceID, &reqWithWorktree, agentConfig, profileInfo, mainRepoGitDir, worktreeID, worktreeBranch)
+	// 7. Launch via runtime - creates agentctl instance with workspace access only
+	// Agent subprocess is NOT started - call StartAgentProcess() explicitly
+	if m.runtime == nil {
+		return nil, fmt.Errorf("no runtime configured")
 	}
+
+	// Build environment variables
+	env := m.buildEnvForRuntime(executionID, &reqWithWorktree, agentConfig)
+
+	// Create runtime request (agent command not included - started explicitly later)
+	runtimeReq := &RuntimeCreateRequest{
+		InstanceID:     executionID,
+		TaskID:         reqWithWorktree.TaskID,
+		AgentProfileID: reqWithWorktree.AgentProfileID,
+		WorkspacePath:  reqWithWorktree.WorkspacePath,
+		Protocol:       string(agentConfig.Protocol),
+		Env:            env,
+		Metadata:       reqWithWorktree.Metadata,
+		WorktreeID:     worktreeID,
+		WorktreeBranch: worktreeBranch,
+		MainRepoGitDir: mainRepoGitDir,
+		AgentConfig:    agentConfig,
+	}
+
+	runtimeInstance, err := m.runtime.CreateInstance(ctx, runtimeReq)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create execution: %w", err)
 	}
 
-	// 8. Track the instance
-	m.mu.Lock()
-	m.instances[instanceID] = instance
-	m.byTask[req.TaskID] = instanceID
-	if instance.ContainerID != "" {
-		m.byContainer[instance.ContainerID] = instanceID
-	}
-	m.mu.Unlock()
+	// Convert to AgentExecution
+	execution := runtimeInstance.ToAgentExecution(runtimeReq)
 
-	// 9. Publish agent.started event
-	m.publishEvent(ctx, events.AgentStarted, instance)
-
-	// 10. Wait for agentctl to be ready and start the agent process
-	go m.initializeAgent(instance, agentConfig, req.TaskDescription)
-
-	m.logger.Info("agent launched successfully",
-		zap.String("instance_id", instanceID),
-		zap.String("task_id", req.TaskID),
-		zap.String("runtime", m.agentCfg.Runtime))
-
-	return instance, nil
-}
-
-// launchDocker launches an agent in a Docker container
-func (m *Manager) launchDocker(ctx context.Context, instanceID string, req *LaunchRequest, agentConfig *registry.AgentTypeConfig, profileInfo *AgentProfileInfo, mainRepoGitDir, worktreeID, worktreeBranch string) (*AgentInstance, error) {
-	// Build container config from registry config
-	containerConfig := m.buildContainerConfig(instanceID, req, agentConfig, profileInfo, mainRepoGitDir)
-
-	// Create and start the container
-	containerID, err := m.docker.CreateContainer(ctx, containerConfig)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create container: %w", err)
+	// Set ACP session ID for session resumption (used by InitializeSession)
+	if req.ACPSessionID != "" {
+		execution.ACPSessionID = req.ACPSessionID
 	}
 
-	if err := m.docker.StartContainer(ctx, containerID); err != nil {
-		_ = m.docker.RemoveContainer(ctx, containerID, true)
-		return nil, fmt.Errorf("failed to start container: %w", err)
-	}
-
-	// Get container IP for agentctl communication
-	containerIP, err := m.docker.GetContainerIP(ctx, containerID)
-	if err != nil {
-		m.logger.Warn("failed to get container IP, trying localhost",
-			zap.String("container_id", containerID),
-			zap.Error(err))
-		containerIP = "127.0.0.1"
-	}
-
-	// Create agentctl client pointing to the container
-	agentctlClient := agentctl.NewClient(containerIP, AgentCtlPort, m.logger)
-
-	// Build instance metadata
-	instanceMetadata := req.Metadata
-	if instanceMetadata == nil {
-		instanceMetadata = make(map[string]interface{})
-	}
-	if worktreeID != "" {
-		instanceMetadata["worktree_id"] = worktreeID
-		instanceMetadata["worktree_path"] = req.WorkspacePath
-		instanceMetadata["worktree_branch"] = worktreeBranch
-	}
-
-	m.logger.Info("docker agent created",
-		zap.String("instance_id", instanceID),
-		zap.String("container_id", containerID),
-		zap.String("container_ip", containerIP))
-
-	return &AgentInstance{
-		ID:             instanceID,
-		TaskID:         req.TaskID,
-		AgentProfileID: req.AgentProfileID,
-		ContainerID:    containerID,
-		ContainerIP:    containerIP,
-		WorkspacePath:  "/workspace", // Docker mounts workspace to /workspace
-		ACPSessionID:   req.ACPSessionID,
-		Status:         v1.AgentStatusRunning,
-		StartedAt:      time.Now(),
-		Progress:       0,
-		Metadata:       instanceMetadata,
-		agentctl:       agentctlClient,
-	}, nil
-}
-
-// launchStandalone launches an agent via standalone agentctl
-func (m *Manager) launchStandalone(ctx context.Context, instanceID string, req *LaunchRequest, agentConfig *registry.AgentTypeConfig, profileInfo *AgentProfileInfo, worktreeID, worktreeBranch string) (*AgentInstance, error) {
-	// Build environment variables for the agent
-	env := m.buildStandaloneEnv(instanceID, req, agentConfig)
-
-	// Build agent command using CommandBuilder (configuration-driven, no hardcoded agent names)
+	// Build agent command string for later use with StartAgentProcess
 	model := ""
 	if profileInfo != nil {
 		model = profileInfo.Model
 	}
 	cmdOpts := CommandOptions{
 		Model:     model,
-		SessionID: req.ACPSessionID, // CommandBuilder handles resume flag based on SessionConfig
+		SessionID: req.ACPSessionID,
 	}
-	agentCommand := m.commandBuilder.BuildCommandString(agentConfig, cmdOpts)
-	// If empty, agentctl will use its default
+	execution.AgentCommand = m.commandBuilder.BuildCommandString(agentConfig, cmdOpts)
 
-	// Create instance via control API
-	createReq := &agentctl.CreateInstanceRequest{
-		ID:            instanceID,
-		WorkspacePath: req.WorkspacePath,
-		AgentCommand:  agentCommand,
-		Protocol:      string(agentConfig.Protocol), // Pass protocol from registry
-		WorkspaceFlag: agentConfig.WorkspaceFlag,    // CLI flag for workspace path
-		Env:           env,
-		AutoStart:     false, // We'll start via ACP initialize flow
+	// 8. Track the execution
+	m.executionStore.Add(execution)
+
+	// 9. Publish agent.started event
+	m.eventPublisher.PublishAgentEvent(ctx, events.AgentStarted, execution)
+
+	// 10. Wait for agentctl to be ready (for shell/workspace access)
+	// NOTE: This does NOT start the agent process - call StartAgentProcess() explicitly
+	go m.waitForAgentctlReady(execution)
+
+	runtimeName := "unknown"
+	if m.runtime != nil {
+		runtimeName = m.runtime.Name()
 	}
+	m.logger.Info("agentctl execution created (agent not started)",
+		zap.String("execution_id", executionID),
+		zap.String("task_id", req.TaskID),
+		zap.String("runtime", runtimeName))
 
-	resp, err := m.standaloneCtl.CreateInstance(ctx, createReq)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create standalone instance: %w", err)
-	}
-
-	// Create agentctl client pointing to the instance port
-	agentctlClient := agentctl.NewClient(m.agentCfg.StandaloneHost, resp.Port, m.logger)
-
-	// Build instance metadata
-	instanceMetadata := req.Metadata
-	if instanceMetadata == nil {
-		instanceMetadata = make(map[string]interface{})
-	}
-	if worktreeID != "" {
-		instanceMetadata["worktree_id"] = worktreeID
-		instanceMetadata["worktree_path"] = req.WorkspacePath
-		instanceMetadata["worktree_branch"] = worktreeBranch
-	}
-	// Store standalone-specific info in metadata
-	instanceMetadata["standalone_port"] = resp.Port
-
-	m.logger.Info("standalone agent created",
-		zap.String("instance_id", instanceID),
-		zap.Int("port", resp.Port),
-		zap.String("workspace", req.WorkspacePath))
-
-	return &AgentInstance{
-		ID:                   instanceID,
-		TaskID:               req.TaskID,
-		AgentProfileID:       req.AgentProfileID,
-		WorkspacePath:        req.WorkspacePath,
-		ACPSessionID:         req.ACPSessionID,
-		Status:               v1.AgentStatusRunning,
-		StartedAt:            time.Now(),
-		Progress:             0,
-		Metadata:             instanceMetadata,
-		agentctl:             agentctlClient,
-		standaloneInstanceID: resp.ID,
-		standalonePort:       resp.Port,
-	}, nil
+	return execution, nil
 }
 
-// buildStandaloneEnv builds environment variables for a standalone agent instance
-func (m *Manager) buildStandaloneEnv(instanceID string, req *LaunchRequest, agentConfig *registry.AgentTypeConfig) map[string]string {
+// StartAgentProcess configures and starts the agent subprocess for an execution.
+// This must be called after Launch() to actually start the agent (e.g., auggie, codex).
+// The command is built internally based on the execution's agent profile.
+func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) error {
+	execution, exists := m.executionStore.Get(executionID)
+	if !exists {
+		return fmt.Errorf("execution %q not found", executionID)
+	}
+
+	if execution.agentctl == nil {
+		return fmt.Errorf("execution %q has no agentctl client", executionID)
+	}
+
+	if execution.AgentCommand == "" {
+		return fmt.Errorf("execution %q has no agent command configured", executionID)
+	}
+
+	// Wait for agentctl to be ready
+	if err := execution.agentctl.WaitForReady(ctx, 60*time.Second); err != nil {
+		m.updateExecutionError(executionID, "agentctl not ready: "+err.Error())
+		return fmt.Errorf("agentctl not ready: %w", err)
+	}
+
+	// Get task description from metadata
+	taskDescription := ""
+	if execution.Metadata != nil {
+		if desc, ok := execution.Metadata["task_description"].(string); ok {
+			taskDescription = desc
+		}
+	}
+
+	// Build environment for the agent process
+	env := map[string]string{}
+	if taskDescription != "" {
+		env["TASK_DESCRIPTION"] = taskDescription
+	}
+
+	// Configure the agent command
+	if err := execution.agentctl.ConfigureAgent(ctx, execution.AgentCommand, env); err != nil {
+		return fmt.Errorf("failed to configure agent: %w", err)
+	}
+
+	// Start the agent process
+	if err := execution.agentctl.Start(ctx); err != nil {
+		m.updateExecutionError(executionID, "failed to start agent: "+err.Error())
+		return fmt.Errorf("failed to start agent: %w", err)
+	}
+
+	m.logger.Info("agent process started",
+		zap.String("execution_id", executionID),
+		zap.String("task_id", execution.TaskID),
+		zap.String("command", execution.AgentCommand))
+
+	// Give the agent process a moment to initialize
+	time.Sleep(500 * time.Millisecond)
+
+	// Get agent config for ACP session initialization
+	agentConfig, err := m.getAgentConfigForExecution(execution)
+	if err != nil {
+		return fmt.Errorf("failed to get agent config: %w", err)
+	}
+
+	// Initialize ACP session
+	if err := m.initializeACPSession(ctx, execution, agentConfig, taskDescription); err != nil {
+		m.updateExecutionError(executionID, "failed to initialize ACP: "+err.Error())
+		return fmt.Errorf("failed to initialize ACP: %w", err)
+	}
+
+	return nil
+}
+
+// buildEnvForRuntime builds environment variables for any runtime.
+// This is the unified method used by the runtime interface.
+func (m *Manager) buildEnvForRuntime(executionID string, req *LaunchRequest, agentConfig *registry.AgentTypeConfig) map[string]string {
 	env := make(map[string]string)
 
 	// Copy request environment
@@ -723,16 +606,19 @@ func (m *Manager) buildStandaloneEnv(instanceID string, req *LaunchRequest, agen
 		env[k] = v
 	}
 
-	// Add standard variables
-	env["KANDEV_INSTANCE_ID"] = instanceID
+	// Add standard variables for recovery after backend restart
+	env["KANDEV_INSTANCE_ID"] = executionID
 	env["KANDEV_TASK_ID"] = req.TaskID
+	env["KANDEV_AGENT_PROFILE_ID"] = req.AgentProfileID
 	env["TASK_DESCRIPTION"] = req.TaskDescription
 
-	// Add credentials if available
-	if m.credsMgr != nil {
+	// Add required credentials from agent config
+	if m.credsMgr != nil && agentConfig != nil {
 		ctx := context.Background()
-		if sessionAuth, err := m.credsMgr.GetCredentialValue(ctx, "AUGMENT_SESSION_AUTH"); err == nil && sessionAuth != "" {
-			env["AUGMENT_SESSION_AUTH"] = sessionAuth
+		for _, credKey := range agentConfig.RequiredEnv {
+			if value, err := m.credsMgr.GetCredentialValue(ctx, credKey); err == nil && value != "" {
+				env[credKey] = value
+			}
 		}
 	}
 
@@ -784,476 +670,158 @@ func (m *Manager) getOrCreateWorktree(ctx context.Context, req *LaunchRequest) (
 	return wt, nil
 }
 
-// initializeAgent waits for agentctl to be ready and initializes the agent
-func (m *Manager) initializeAgent(instance *AgentInstance, agentConfig *registry.AgentTypeConfig, taskDescription string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+// waitForAgentctlReady waits for the agentctl HTTP server to be ready.
+// This enables shell/workspace features without starting the agent process.
+func (m *Manager) waitForAgentctlReady(execution *AgentExecution) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
 	m.logger.Info("waiting for agentctl to be ready",
-		zap.String("instance_id", instance.ID),
-		zap.String("url", instance.agentctl.BaseURL()))
+		zap.String("execution_id", execution.ID),
+		zap.String("url", execution.agentctl.BaseURL()))
 
-	// Wait for agentctl HTTP server to be ready
-	if err := instance.agentctl.WaitForReady(ctx, 60*time.Second); err != nil {
+	if err := execution.agentctl.WaitForReady(ctx, 60*time.Second); err != nil {
 		m.logger.Error("agentctl not ready",
-			zap.String("instance_id", instance.ID),
+			zap.String("execution_id", execution.ID),
 			zap.Error(err))
-		m.updateInstanceError(instance.ID, "agentctl not ready: "+err.Error())
+		m.updateExecutionError(execution.ID, "agentctl not ready: "+err.Error())
 		return
 	}
 
-	// Start the agent process via agentctl
-	if err := instance.agentctl.Start(ctx); err != nil {
-		m.logger.Error("failed to start agent via agentctl",
-			zap.String("instance_id", instance.ID),
-			zap.Error(err))
-		m.updateInstanceError(instance.ID, "failed to start agent: "+err.Error())
-		return
-	}
-
-	m.logger.Info("agent process started via agentctl",
-		zap.String("instance_id", instance.ID))
-
-	// Give the agent process a moment to initialize
-	time.Sleep(500 * time.Millisecond)
-
-	// Initialize ACP session using configuration-driven SessionManager
-	if err := m.initializeACPSession(ctx, instance, agentConfig, taskDescription); err != nil {
-		m.logger.Error("failed to initialize ACP session",
-			zap.String("instance_id", instance.ID),
-			zap.Error(err))
-		m.updateInstanceError(instance.ID, "failed to initialize ACP: "+err.Error())
-		return
-	}
+	m.logger.Info("agentctl ready - shell/workspace access available",
+		zap.String("execution_id", execution.ID))
 }
 
-// initializeACPSession sends the ACP initialization messages using the SessionManager
-// The agentConfig is used for configuration-driven session resumption behavior
-func (m *Manager) initializeACPSession(ctx context.Context, instance *AgentInstance, agentConfig *registry.AgentTypeConfig, taskDescription string) error {
-	m.logger.Info("initializing ACP session",
-		zap.String("instance_id", instance.ID),
-		zap.String("agentctl_url", instance.agentctl.BaseURL()),
-		zap.String("agent_type", agentConfig.ID))
 
-	// Use SessionManager for configuration-driven session initialization
-	// This replaces the hardcoded auggie-specific logic with registry-based configuration
-	result, err := m.sessionManager.InitializeSession(
-		ctx,
-		instance.agentctl,
-		agentConfig,
-		instance.ACPSessionID, // Existing session ID to resume (if any)
-		instance.WorkspacePath,
-	)
+
+// getAgentConfigForExecution retrieves the agent configuration for an execution.
+// The execution must have AgentCommand set (which includes the agent type).
+func (m *Manager) getAgentConfigForExecution(execution *AgentExecution) (*registry.AgentTypeConfig, error) {
+	if execution.AgentProfileID == "" {
+		return nil, fmt.Errorf("execution %s has no agent profile ID", execution.ID)
+	}
+
+	if m.profileResolver == nil {
+		return nil, fmt.Errorf("profile resolver not configured")
+	}
+
+	profileInfo, err := m.profileResolver.ResolveProfile(context.Background(), execution.AgentProfileID)
 	if err != nil {
-		m.logger.Error("session initialization failed",
-			zap.String("instance_id", instance.ID),
-			zap.Error(err))
-		return err
+		return nil, fmt.Errorf("failed to resolve profile: %w", err)
 	}
 
-	m.logger.Info("ACP session initialized",
-		zap.String("instance_id", instance.ID),
-		zap.String("agent_name", result.AgentName),
-		zap.String("agent_version", result.AgentVersion),
-		zap.String("session_id", result.SessionID))
-
-	instance.ACPSessionID = result.SessionID
-	m.publishACPSessionCreated(instance, result.SessionID)
-
-	// Set up WebSocket streams using StreamManager
-	// Use a ready channel to signal when the updates stream is connected
-	updatesReady := make(chan struct{})
-	m.streamManager.ConnectAll(instance, updatesReady)
-
-	// Note: Shell stream is started on-demand when a client sends shell.subscribe
-	// This ensures the buffered output (including initial prompt) is received
-	// when a client is actually listening
-
-	// Wait for the updates stream to connect before sending prompt
-	// This prevents race conditions where notifications are sent before streams are ready
-	select {
-	case <-updatesReady:
-		m.logger.Debug("updates stream ready")
-	case <-time.After(5 * time.Second):
-		m.logger.Warn("timeout waiting for updates stream to connect, proceeding anyway")
-	}
-
-	// 7. Send the task prompt if provided
-	if taskDescription != "" {
-		m.logger.Info("sending ACP prompt",
-			zap.String("instance_id", instance.ID),
-			zap.String("session_id", instance.ACPSessionID),
-			zap.String("task_description", taskDescription))
-
-		// Clear buffers before starting prompt
-		instance.messageMu.Lock()
-		instance.messageBuffer.Reset()
-		instance.reasoningBuffer.Reset()
-		instance.summaryBuffer.Reset()
-		instance.messageMu.Unlock()
-
-		// Prompt is SYNCHRONOUS - it blocks until the agent completes the task
-		// Use a long timeout context for this
-		promptCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-		defer cancel()
-
-		resp, err := instance.agentctl.Prompt(promptCtx, taskDescription)
-		if err != nil {
-			m.logger.Error("ACP prompt failed",
-				zap.String("instance_id", instance.ID),
-				zap.Error(err))
-			return fmt.Errorf("prompt failed: %w", err)
-		}
-
-		// Extract accumulated content from buffers
-		instance.messageMu.Lock()
-		agentMessage := instance.messageBuffer.String()
-		instance.messageBuffer.Reset()
-		instance.reasoningBuffer.Reset()
-		instance.summaryBuffer.Reset()
-		instance.messageMu.Unlock()
-
-		stopReason := ""
-		if resp != nil {
-			stopReason = string(resp.StopReason)
-		}
-		m.logger.Info("ACP prompt completed",
-			zap.String("instance_id", instance.ID),
-			zap.String("stop_reason", stopReason))
-
-		// Publish prompt_complete event with the agent's response (for saving as comment)
-		m.publishPromptComplete(instance, agentMessage, "", "")
-
-		// Prompt completed - mark agent as READY for follow-up prompts
-		m.logger.Info("agent ready for follow-up prompts",
-			zap.String("instance_id", instance.ID))
-		if err := m.MarkReady(instance.ID); err != nil {
-			m.logger.Error("failed to mark instance as ready",
-				zap.String("instance_id", instance.ID),
-				zap.Error(err))
-		}
-	} else {
-		m.logger.Warn("no task description provided, marking as ready",
-			zap.String("instance_id", instance.ID))
-		if err := m.MarkReady(instance.ID); err != nil {
-			m.logger.Error("failed to mark instance as ready",
-				zap.String("instance_id", instance.ID),
-				zap.Error(err))
-		}
-	}
-
-	return nil
-}
-
-// handleUpdatesStream handles streaming session notifications from the agent.
-// If ready is non-nil, it will be closed when the stream connection is established (or fails).
-func (m *Manager) handleUpdatesStream(instance *AgentInstance, ready chan<- struct{}) {
-	ctx := context.Background()
-
-	err := instance.agentctl.StreamUpdates(ctx, func(update agentctl.SessionUpdate) {
-		m.handleSessionUpdate(instance, update)
-	})
-
-	// Signal that the stream connection attempt is complete (success or failure)
-	// StreamUpdates returns immediately after establishing the WebSocket connection
-	// and starting the read goroutine, so this signals that we're ready to receive updates
-	if ready != nil {
-		close(ready)
-	}
-
+	// Map agent name to registry ID (e.g., "auggie" -> "auggie-agent")
+	agentTypeName := profileInfo.AgentName + "-agent"
+	agentConfig, err := m.registry.GetAgentType(agentTypeName)
 	if err != nil {
-		m.logger.Error("failed to connect to updates stream",
-			zap.String("instance_id", instance.ID),
-			zap.Error(err))
+		return nil, fmt.Errorf("agent type not found: %s", agentTypeName)
 	}
+
+	return agentConfig, nil
 }
 
-// handlePermissionStream handles streaming permission requests from the agent
-func (m *Manager) handlePermissionStream(instance *AgentInstance) {
-	ctx := context.Background()
-
-	err := instance.agentctl.StreamPermissions(ctx, func(notification *agentctl.PermissionNotification) {
-		m.handlePermissionNotification(instance, notification)
-	})
-	if err != nil {
-		m.logger.Error("failed to connect to permission stream",
-			zap.String("instance_id", instance.ID),
-			zap.Error(err))
-	}
-}
-
-// handleGitStatusStream handles streaming git status updates from the agent workspace
-func (m *Manager) handleGitStatusStream(instance *AgentInstance) {
-	ctx := context.Background()
-
-	// Retry connection with exponential backoff
-	maxRetries := 5
-	backoff := 1 * time.Second
-
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		err := instance.agentctl.StreamGitStatus(ctx, func(update *agentctl.GitStatusUpdate) {
-			m.handleGitStatusUpdate(instance, update)
-		})
-
-		if err == nil {
-			// Connection closed normally
-			return
-		}
-
-		if attempt < maxRetries {
-			time.Sleep(backoff)
-			backoff *= 2 // Exponential backoff
-		}
-	}
-
-	m.logger.Error("failed to connect to git status stream after retries",
-		zap.String("instance_id", instance.ID),
-		zap.Int("max_retries", maxRetries))
-}
-
-// reconnectStreams reconnects to agent WebSocket streams after backend restart
-// This is called for recovered instances that were running before the restart
-func (m *Manager) reconnectStreams(instance *AgentInstance) {
-	m.logger.Info("reconnecting to agent streams after recovery",
-		zap.String("instance_id", instance.ID),
-		zap.String("task_id", instance.TaskID))
-
-	// Wait a moment for any startup operations to settle
-	time.Sleep(500 * time.Millisecond)
-
-	// Check if agentctl is responsive
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	if err := instance.agentctl.WaitForReady(ctx, 10*time.Second); err != nil {
-		m.logger.Warn("agentctl not ready for stream reconnection",
-			zap.String("instance_id", instance.ID),
-			zap.Error(err))
-		// Don't return - still try to connect to streams
-	}
-
-	// Reconnect to WebSocket streams
-	go m.handleUpdatesStream(instance, nil)
-	go m.handlePermissionStream(instance)
-	go m.handleGitStatusStream(instance)
-	go m.handleFileChangesStream(instance)
-	// Note: Shell stream is started on-demand via shell.subscribe
-
-	// Mark the instance as READY so it can accept prompts
-	m.mu.Lock()
-	instance.Status = v1.AgentStatusReady
-	m.mu.Unlock()
-
-	m.logger.Info("agent streams reconnected, ready for prompts",
-		zap.String("instance_id", instance.ID),
-		zap.String("task_id", instance.TaskID))
+// initializeACPSession delegates to SessionManager for full ACP session initialization and prompting
+func (m *Manager) initializeACPSession(ctx context.Context, execution *AgentExecution, agentConfig *registry.AgentTypeConfig, taskDescription string) error {
+	return m.sessionManager.InitializeAndPrompt(ctx, execution, agentConfig, taskDescription, m.MarkReady)
 }
 
 // handlePermissionNotification processes incoming permission requests from the agent
-func (m *Manager) handlePermissionNotification(instance *AgentInstance, notification *agentctl.PermissionNotification) {
+func (m *Manager) handlePermissionNotification(execution *AgentExecution, notification *agentctl.PermissionNotification) {
 	m.logger.Info("received permission request",
-		zap.String("instance_id", instance.ID),
-		zap.String("task_id", instance.TaskID),
+		zap.String("execution_id", execution.ID),
+		zap.String("task_id", execution.TaskID),
 		zap.String("pending_id", notification.PendingID),
 		zap.String("title", notification.Title),
 		zap.Int("num_options", len(notification.Options)))
 
 	// Publish permission request event to the event bus
-	m.publishPermissionRequest(instance, notification)
-}
-
-// publishPermissionRequest publishes a permission request event
-func (m *Manager) publishPermissionRequest(instance *AgentInstance, notification *agentctl.PermissionNotification) {
-	// Convert options to a serializable format
-	options := make([]map[string]interface{}, len(notification.Options))
-	for i, opt := range notification.Options {
-		options[i] = map[string]interface{}{
-			"option_id": opt.OptionID,
-			"name":      opt.Name,
-			"kind":      opt.Kind,
-		}
-	}
-
-	data := map[string]interface{}{
-		"type":              "permission_request",
-		"task_id":           instance.TaskID,
-		"agent_instance_id": instance.ID,
-		"pending_id":        notification.PendingID,
-		"session_id":        notification.SessionID,
-		"tool_call_id":      notification.ToolCallID,
-		"title":             notification.Title,
-		"options":           options,
-		"created_at":        notification.CreatedAt,
-		"timestamp":         time.Now().UTC().Format(time.RFC3339),
-	}
-
-	event := bus.NewEvent(events.ACPMessage, "agent-manager", data)
-	subject := events.BuildACPSubject(instance.TaskID)
-
-	if err := m.eventBus.Publish(context.Background(), subject, event); err != nil {
-		m.logger.Error("failed to publish permission_request event",
-			zap.String("instance_id", instance.ID),
-			zap.String("task_id", instance.TaskID),
-			zap.Error(err))
-	} else {
-		m.logger.Info("published permission_request event",
-			zap.String("task_id", instance.TaskID),
-			zap.String("pending_id", notification.PendingID),
-			zap.String("title", notification.Title))
-	}
+	m.eventPublisher.PublishPermissionRequest(execution, notification)
 }
 
 // handleSessionUpdate processes incoming session updates from the agent
-func (m *Manager) handleSessionUpdate(instance *AgentInstance, update agentctl.SessionUpdate) {
+func (m *Manager) handleSessionUpdate(execution *AgentExecution, update agentctl.SessionUpdate) {
 	// Handle different update types based on the Type field
 	switch update.Type {
 	case "message_chunk":
-		m.updateInstanceProgress(instance.ID, 50)
+		m.updateExecutionProgress(execution.ID, 50)
 
 		// Accumulate message content for saving as comment when a step completes
 		if update.Text != "" {
-			instance.messageMu.Lock()
-			instance.messageBuffer.WriteString(update.Text)
-			instance.messageMu.Unlock()
+			execution.messageMu.Lock()
+			execution.messageBuffer.WriteString(update.Text)
+			execution.messageMu.Unlock()
 		}
 
 	case "reasoning":
 		// Accumulate reasoning/thinking content
-		instance.messageMu.Lock()
+		execution.messageMu.Lock()
 		if update.ReasoningText != "" {
-			instance.reasoningBuffer.WriteString(update.ReasoningText)
+			execution.reasoningBuffer.WriteString(update.ReasoningText)
 		}
 		if update.ReasoningSummary != "" {
-			instance.summaryBuffer.WriteString(update.ReasoningSummary)
+			execution.summaryBuffer.WriteString(update.ReasoningSummary)
 		}
-		instance.messageMu.Unlock()
+		execution.messageMu.Unlock()
 
 	case "tool_call":
 		// Tool call starting marks a step boundary - flush the accumulated message as a comment
 		// This way, each agent response before a tool use becomes a separate comment
-		m.flushMessageBufferAsComment(instance)
+		m.flushMessageBufferAsComment(execution)
 
 		m.logger.Info("tool call started",
-			zap.String("instance_id", instance.ID),
+			zap.String("execution_id", execution.ID),
 			zap.String("tool_call_id", update.ToolCallID),
 			zap.String("title", update.ToolTitle),
 			zap.String("tool_name", update.ToolName))
-		m.updateInstanceProgress(instance.ID, 60)
+		m.updateExecutionProgress(execution.ID, 60)
 
 		// Publish tool call as a comment so it appears in the chat
-		m.publishToolCall(instance, update.ToolCallID, update.ToolTitle, update.ToolStatus, update.ToolArgs)
+		m.eventPublisher.PublishToolCall(execution, update.ToolCallID, update.ToolTitle, update.ToolStatus, update.ToolArgs)
 
 	case "tool_update":
 		// Check if tool call completed
 		switch update.ToolStatus {
 		case "complete", "completed":
-			m.updateInstanceProgress(instance.ID, 80)
-			m.publishToolCallCompleteFromUpdate(instance, update)
+			m.updateExecutionProgress(execution.ID, 80)
+			m.eventPublisher.PublishToolCallComplete(execution, update)
 		case "error", "failed":
-			m.publishToolCallCompleteFromUpdate(instance, update)
+			m.eventPublisher.PublishToolCallComplete(execution, update)
 		}
 
 	case "plan":
 		m.logger.Info("agent plan update",
-			zap.String("instance_id", instance.ID))
+			zap.String("execution_id", execution.ID))
 
 	case "error":
 		m.logger.Error("agent error",
-			zap.String("instance_id", instance.ID),
+			zap.String("execution_id", execution.ID),
 			zap.String("error", update.Error))
 
 	case "complete":
 		m.logger.Info("agent turn complete",
-			zap.String("instance_id", instance.ID),
+			zap.String("execution_id", execution.ID),
 			zap.String("session_id", update.SessionID))
 
 		// Flush accumulated message buffer as a comment
-		m.flushMessageBufferAsComment(instance)
+		m.flushMessageBufferAsComment(execution)
 
 		// Mark agent as READY for follow-up prompts
-		if err := m.MarkReady(instance.ID); err != nil {
-			m.logger.Error("failed to mark instance as ready after complete",
-				zap.String("instance_id", instance.ID),
+		if err := m.MarkReady(execution.ID); err != nil {
+			m.logger.Error("failed to mark execution as ready after complete",
+				zap.String("execution_id", execution.ID),
 				zap.Error(err))
 		}
 	}
 
 	// Publish session update to event bus for WebSocket streaming
-	m.publishSessionUpdate(instance, update)
-}
-
-// publishSessionUpdate publishes a session update to the event bus
-func (m *Manager) publishSessionUpdate(instance *AgentInstance, update agentctl.SessionUpdate) {
-	if m.eventBus == nil {
-		return
-	}
-
-	// Build the update data - our SessionUpdate type marshals cleanly
-	updateData := map[string]interface{}{
-		"type": update.Type,
-	}
-
-	if update.SessionID != "" {
-		updateData["session_id"] = update.SessionID
-	}
-	if update.Text != "" {
-		updateData["text"] = update.Text
-	}
-	if update.ToolCallID != "" {
-		updateData["tool_call_id"] = update.ToolCallID
-	}
-	if update.ToolName != "" {
-		updateData["tool_name"] = update.ToolName
-	}
-	if update.ToolTitle != "" {
-		updateData["tool_title"] = update.ToolTitle
-	}
-	if update.ToolStatus != "" {
-		updateData["tool_status"] = update.ToolStatus
-	}
-	if update.ToolArgs != nil {
-		updateData["tool_args"] = update.ToolArgs
-	}
-	if update.ToolResult != nil {
-		updateData["tool_result"] = update.ToolResult
-	}
-	if update.Error != "" {
-		updateData["error"] = update.Error
-	}
-	if update.Data != nil {
-		updateData["data"] = update.Data
-	}
-
-	// Build ACP message data
-	data := map[string]interface{}{
-		"type":       "session/update",
-		"timestamp":  time.Now().UTC().Format(time.RFC3339Nano),
-		"agent_id":   instance.ID,
-		"task_id":    instance.TaskID,
-		"session_id": update.SessionID,
-		"data":       updateData,
-	}
-
-	event := bus.NewEvent(events.ACPMessage, "agent-manager", data)
-	subject := events.BuildACPSubject(instance.TaskID)
-
-	if err := m.eventBus.Publish(context.Background(), subject, event); err != nil {
-		m.logger.Error("failed to publish session update",
-			zap.String("instance_id", instance.ID),
-			zap.String("task_id", instance.TaskID),
-			zap.Error(err))
-	}
+	m.eventPublisher.PublishSessionUpdate(execution, update)
 }
 
 // handleGitStatusUpdate processes git status updates from the workspace tracker
-func (m *Manager) handleGitStatusUpdate(instance *AgentInstance, update *agentctl.GitStatusUpdate) {
-	// Store git status in instance metadata
-	m.mu.Lock()
-	if inst, exists := m.instances[instance.ID]; exists {
-		if inst.Metadata == nil {
-			inst.Metadata = make(map[string]interface{})
-		}
-		inst.Metadata["git_status"] = map[string]interface{}{
+func (m *Manager) handleGitStatusUpdate(execution *AgentExecution, update *agentctl.GitStatusUpdate) {
+	// Store git status in execution metadata
+	m.executionStore.UpdateMetadata(execution.ID, func(metadata map[string]interface{}) map[string]interface{} {
+		metadata["git_status"] = map[string]interface{}{
 			"branch":        update.Branch,
 			"remote_branch": update.RemoteBranch,
 			"modified":      update.Modified,
@@ -1265,155 +833,30 @@ func (m *Manager) handleGitStatusUpdate(instance *AgentInstance, update *agentct
 			"behind":        update.Behind,
 			"timestamp":     update.Timestamp,
 		}
-	}
-	m.mu.Unlock()
+		return metadata
+	})
 
 	// Publish git status update to event bus for WebSocket streaming
-	m.publishGitStatus(instance, update)
-}
-
-// publishGitStatus publishes a git status update to the event bus
-func (m *Manager) publishGitStatus(instance *AgentInstance, update *agentctl.GitStatusUpdate) {
-	if m.eventBus == nil {
-		return
-	}
-
-	data := map[string]interface{}{
-		"task_id":       instance.TaskID,
-		"agent_id":      instance.ID,
-		"branch":        update.Branch,
-		"remote_branch": update.RemoteBranch,
-		"modified":      update.Modified,
-		"added":         update.Added,
-		"deleted":       update.Deleted,
-		"untracked":     update.Untracked,
-		"renamed":       update.Renamed,
-		"ahead":         update.Ahead,
-		"behind":        update.Behind,
-		"files":         update.Files,
-		"timestamp":     update.Timestamp.Format(time.RFC3339Nano),
-	}
-
-	event := bus.NewEvent(events.GitStatusUpdated, "agent-manager", data)
-	subject := events.BuildGitStatusSubject(instance.TaskID)
-
-	if err := m.eventBus.Publish(context.Background(), subject, event); err != nil {
-		m.logger.Error("failed to publish git status event",
-			zap.String("instance_id", instance.ID),
-			zap.String("task_id", instance.TaskID),
-			zap.Error(err))
-	}
-}
-
-// handleFileChangesStream handles streaming file change notifications from the agent workspace
-func (m *Manager) handleFileChangesStream(instance *AgentInstance) {
-	ctx := context.Background()
-
-	// Retry connection with exponential backoff
-	maxRetries := 5
-	backoff := 1 * time.Second
-
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		err := instance.agentctl.StreamFileChanges(ctx, func(notification *agentctl.FileChangeNotification) {
-			m.publishFileChange(instance, notification)
-		})
-
-		if err == nil {
-			// Connection closed normally
-			return
-		}
-
-		if attempt < maxRetries {
-			time.Sleep(backoff)
-			backoff *= 2 // Exponential backoff
-		}
-	}
-
-	m.logger.Error("failed to connect to file changes stream after retries",
-		zap.String("instance_id", instance.ID),
-		zap.Int("max_retries", maxRetries))
+	m.eventPublisher.PublishGitStatus(execution, update)
 }
 
 // handleFileChangeNotification processes file change notifications from the workspace tracker
-func (m *Manager) handleFileChangeNotification(instance *AgentInstance, notification *agentctl.FileChangeNotification) {
-	m.publishFileChange(instance, notification)
-}
-
-// publishFileChange publishes a file change notification to the event bus
-func (m *Manager) publishFileChange(instance *AgentInstance, notification *agentctl.FileChangeNotification) {
-	if m.eventBus == nil {
-		return
-	}
-
-	data := map[string]interface{}{
-		"task_id":   instance.TaskID,
-		"agent_id":  instance.ID,
-		"path":      notification.Path,
-		"operation": notification.Operation,
-		"timestamp": notification.Timestamp.Format(time.RFC3339Nano),
-	}
-
-	event := bus.NewEvent(events.FileChangeNotified, "agent-manager", data)
-	subject := events.BuildFileChangeSubject(instance.TaskID)
-
-	if err := m.eventBus.Publish(context.Background(), subject, event); err != nil {
-		m.logger.Error("failed to publish file change event",
-			zap.String("instance_id", instance.ID),
-			zap.String("task_id", instance.TaskID),
-			zap.Error(err))
-	}
-}
-
-// publishPromptComplete publishes a prompt_complete event when an agent finishes responding
-// This is used to save the agent's response as a comment on the task
-func (m *Manager) publishPromptComplete(instance *AgentInstance, agentMessage, reasoning, summary string) {
-	if m.eventBus == nil {
-		return
-	}
-
-	// Only publish if there's actual content
-	if agentMessage == "" {
-		return
-	}
-
-	data := map[string]interface{}{
-		"type":          "prompt_complete",
-		"timestamp":     time.Now().UTC().Format(time.RFC3339Nano),
-		"agent_id":      instance.ID,
-		"task_id":       instance.TaskID,
-		"agent_message": agentMessage,
-	}
-	if reasoning != "" {
-		data["reasoning"] = reasoning
-	}
-	if summary != "" {
-		data["summary"] = summary
-	}
-
-	event := bus.NewEvent(events.PromptComplete, "agent-manager", data)
-	// Publish on task-specific subject so orchestrator can subscribe
-	subject := events.PromptComplete + "." + instance.TaskID
-
-	if err := m.eventBus.Publish(context.Background(), subject, event); err != nil {
-		m.logger.Error("failed to publish prompt_complete event",
-			zap.String("instance_id", instance.ID),
-			zap.String("task_id", instance.TaskID),
-			zap.Error(err))
-	}
+func (m *Manager) handleFileChangeNotification(execution *AgentExecution, notification *agentctl.FileChangeNotification) {
+	m.eventPublisher.PublishFileChange(execution, notification)
 }
 
 // flushMessageBufferAsComment extracts any accumulated message from the buffer and
 // publishes it as a step complete event (which will be saved as a comment).
 // This is called when a tool use starts to save the agent's response before the tool call.
-func (m *Manager) flushMessageBufferAsComment(instance *AgentInstance) {
-	instance.messageMu.Lock()
-	agentMessage := instance.messageBuffer.String()
-	reasoning := instance.reasoningBuffer.String()
-	summary := instance.summaryBuffer.String()
-	instance.messageBuffer.Reset()
-	instance.reasoningBuffer.Reset()
-	instance.summaryBuffer.Reset()
-	instance.messageMu.Unlock()
+func (m *Manager) flushMessageBufferAsComment(execution *AgentExecution) {
+	execution.messageMu.Lock()
+	agentMessage := execution.messageBuffer.String()
+	reasoning := execution.reasoningBuffer.String()
+	summary := execution.summaryBuffer.String()
+	execution.messageBuffer.Reset()
+	execution.reasoningBuffer.Reset()
+	execution.summaryBuffer.Reset()
+	execution.messageMu.Unlock()
 
 	// Only publish if there's actual content (ignore whitespace-only)
 	trimmed := strings.TrimSpace(agentMessage)
@@ -1422,486 +865,131 @@ func (m *Manager) flushMessageBufferAsComment(instance *AgentInstance) {
 	}
 
 	// Reuse the prompt_complete event type - the orchestrator handles it the same way
-	m.publishPromptComplete(instance, agentMessage, reasoning, summary)
+	m.eventPublisher.PublishPromptComplete(execution, agentMessage, reasoning, summary)
 }
 
-// publishToolCall publishes a tool call start event (to be saved as a comment)
-func (m *Manager) publishToolCall(instance *AgentInstance, toolCallID, title, status string, args map[string]interface{}) {
-	if m.eventBus == nil {
-		return
-	}
-
-	data := map[string]interface{}{
-		"type":         "tool_call",
-		"timestamp":    time.Now().UTC().Format(time.RFC3339Nano),
-		"agent_id":     instance.ID,
-		"task_id":      instance.TaskID,
-		"tool_call_id": toolCallID,
-		"title":        title,
-		"status":       status,
-	}
-	if args != nil {
-		data["args"] = args
-	}
-
-	event := bus.NewEvent(events.ToolCallStarted, "agent-manager", data)
-	subject := events.ToolCallStarted + "." + instance.TaskID
-
-	if err := m.eventBus.Publish(context.Background(), subject, event); err != nil {
-		m.logger.Error("failed to publish tool_call event",
-			zap.String("instance_id", instance.ID),
-			zap.String("task_id", instance.TaskID),
-			zap.Error(err))
-	} else {
-		m.logger.Debug("published tool_call event",
-			zap.String("task_id", instance.TaskID),
-			zap.String("tool_call_id", toolCallID),
-			zap.String("title", title))
-	}
+// updateExecutionProgress updates an execution's progress
+func (m *Manager) updateExecutionProgress(executionID string, progress int) {
+	m.executionStore.UpdateProgress(executionID, progress)
 }
 
-// publishToolCallCompleteFromUpdate publishes a tool call completion event from a SessionUpdate
-func (m *Manager) publishToolCallCompleteFromUpdate(instance *AgentInstance, update agentctl.SessionUpdate) {
-	if m.eventBus == nil {
-		return
-	}
-
-	data := map[string]interface{}{
-		"type":         "tool_call_complete",
-		"timestamp":    time.Now().UTC().Format(time.RFC3339Nano),
-		"agent_id":     instance.ID,
-		"task_id":      instance.TaskID,
-		"tool_call_id": update.ToolCallID,
-		"status":       update.ToolStatus,
-	}
-
-	event := bus.NewEvent(events.ToolCallComplete, "agent-manager", data)
-	subject := events.ToolCallComplete + "." + instance.TaskID
-
-	if err := m.eventBus.Publish(context.Background(), subject, event); err != nil {
-		m.logger.Error("failed to publish tool_call_complete event",
-			zap.String("instance_id", instance.ID),
-			zap.String("task_id", instance.TaskID),
-			zap.Error(err))
-	}
-}
-
-// updateInstanceProgress updates an instance's progress
-func (m *Manager) updateInstanceProgress(instanceID string, progress int) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	instance, exists := m.instances[instanceID]
-	if !exists {
-		return
-	}
-
-	instance.Progress = progress
-}
-
-// updateInstanceError updates an instance with an error
-func (m *Manager) updateInstanceError(instanceID, errorMsg string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	instance, exists := m.instances[instanceID]
-	if !exists {
-		return
-	}
-
-	instance.Status = v1.AgentStatusFailed
-	instance.ErrorMessage = errorMsg
-	now := time.Now()
-	instance.FinishedAt = &now
-}
-
-// buildContainerConfig builds a Docker container config from agent registry config
-// mainRepoGitDir is the host path to the main repository's .git directory (e.g., /path/to/repo/.git)
-// If non-empty, it will be mounted into the container at the same path so git worktree commands work correctly
-func (m *Manager) buildContainerConfig(instanceID string, req *LaunchRequest, agentConfig *registry.AgentTypeConfig, profileInfo *AgentProfileInfo, mainRepoGitDir string) docker.ContainerConfig {
-	// Build image name with tag
-	imageName := agentConfig.Image
-	if agentConfig.Tag != "" {
-		imageName = fmt.Sprintf("%s:%s", agentConfig.Image, agentConfig.Tag)
-	}
-
-	// Expand mount templates
-	mounts := make([]docker.MountConfig, 0, len(agentConfig.Mounts))
-	for _, mt := range agentConfig.Mounts {
-		// Skip workspace mounts if no workspace path is provided
-		if strings.Contains(mt.Source, "{workspace}") && req.WorkspacePath == "" {
-			m.logger.Debug("skipping workspace mount - no workspace path provided",
-				zap.String("target", mt.Target))
-			continue
-		}
-		source := m.expandMountTemplate(mt.Source, req.WorkspacePath, req.TaskID)
-		mounts = append(mounts, docker.MountConfig{
-			Source:   source,
-			Target:   mt.Target,
-			ReadOnly: mt.ReadOnly,
-		})
-	}
-
-	// Add main repository's .git directory mount if using a worktree
-	// Git worktrees have a .git file pointing to {repo}/.git/worktrees/{name}
-	// That metadata directory has a 'commondir' file pointing back to the main .git
-	// We need to mount the entire .git directory for git commands to work
-	if mainRepoGitDir != "" {
-		mounts = append(mounts, docker.MountConfig{
-			Source:   mainRepoGitDir,
-			Target:   mainRepoGitDir, // Same path inside container
-			ReadOnly: false,
-		})
-		m.logger.Debug("added main repo .git directory mount for worktree",
-			zap.String("path", mainRepoGitDir))
-	}
-
-	// Merge environment variables
-	env := make([]string, 0)
-	// Add default env from agent config
-	for k, v := range agentConfig.Env {
-		env = append(env, fmt.Sprintf("%s=%s", k, v))
-	}
-	// Add request-specific env vars (override defaults)
-	for k, v := range req.Env {
-		env = append(env, fmt.Sprintf("%s=%s", k, v))
-	}
-	// Add standard kandev env vars
-	env = append(env,
-		fmt.Sprintf("KANDEV_TASK_ID=%s", req.TaskID),
-		fmt.Sprintf("KANDEV_INSTANCE_ID=%s", instanceID),
-	)
-
-	// Pass protocol to agentctl inside the container
-	if agentConfig.Protocol != "" {
-		env = append(env, fmt.Sprintf("AGENTCTL_PROTOCOL=%s", agentConfig.Protocol))
-	}
-
-	// Configure Git to trust the workspace directory
-	// This is needed because the container runs as root but files are owned by host user
-	// Uses Git's environment-based config (GIT_CONFIG_COUNT, GIT_CONFIG_KEY_n, GIT_CONFIG_VALUE_n)
-	env = append(env,
-		"GIT_CONFIG_COUNT=1",
-		"GIT_CONFIG_KEY_0=safe.directory",
-		"GIT_CONFIG_VALUE_0=*", // Trust all directories in the container
-	)
-
-	// Inject required credentials from credentials manager
-	if m.credsMgr != nil && len(agentConfig.RequiredEnv) > 0 {
-		for _, key := range agentConfig.RequiredEnv {
-			value, err := m.credsMgr.GetCredentialValue(context.Background(), key)
-			if err != nil {
-				m.logger.Warn("required credential not found",
-					zap.String("key", key),
-					zap.Error(err))
-				continue
-			}
-			env = append(env, fmt.Sprintf("%s=%s", key, value))
-		}
-	}
-
-	// Calculate resource limits
-	memoryBytes := agentConfig.ResourceLimits.MemoryMB * 1024 * 1024
-	cpuQuota := int64(agentConfig.ResourceLimits.CPUCores * 100000) // Docker CPU quota
-
-	containerName := fmt.Sprintf("kandev-agent-%s", instanceID[:8])
-
-	// Build command using CommandBuilder (configuration-driven, no hardcoded agent names)
-	model := ""
-	if profileInfo != nil {
-		model = profileInfo.Model
-	}
-	cmdOpts := CommandOptions{
-		Model:     model,
-		SessionID: req.ACPSessionID, // CommandBuilder handles resume flag based on SessionConfig
-	}
-	cmd := m.commandBuilder.BuildCommand(agentConfig, cmdOpts)
-
-	return docker.ContainerConfig{
-		Name:       containerName,
-		Image:      imageName,
-		Cmd:        cmd,
-		Env:        env,
-		WorkingDir: agentConfig.WorkingDir,
-		Mounts:     mounts,
-		Memory:     memoryBytes,
-		CPUQuota:   cpuQuota,
-		Labels: map[string]string{
-			"kandev.managed":          "true",
-			"kandev.instance_id":      instanceID,
-			"kandev.task_id":          req.TaskID,
-			"kandev.agent_profile_id": req.AgentProfileID,
-		},
-		AutoRemove: false, // We manage cleanup ourselves
-	}
-}
-
-// expandMountTemplate expands template variables in mount source paths
-func (m *Manager) expandMountTemplate(source, workspacePath, taskID string) string {
-	result := source
-	result = strings.ReplaceAll(result, "{workspace}", workspacePath)
-	result = strings.ReplaceAll(result, "{task_id}", taskID)
-
-	// Expand {augment_sessions} to the user's augment sessions directory
-	// This allows session resumption across container runs
-	if strings.Contains(result, "{augment_sessions}") {
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			homeDir = "/tmp"
-		}
-		augmentSessionsDir := filepath.Join(homeDir, ".augment", "sessions")
-		// Ensure the directory exists
-		_ = os.MkdirAll(augmentSessionsDir, 0o755)
-		result = strings.ReplaceAll(result, "{augment_sessions}", augmentSessionsDir)
-	}
-
-	return result
+// updateExecutionError updates an execution with an error
+func (m *Manager) updateExecutionError(executionID, errorMsg string) {
+	m.executionStore.UpdateError(executionID, errorMsg)
 }
 
 // PromptAgent sends a follow-up prompt to a running agent
-// PromptResult contains the result of a prompt operation
-type PromptResult struct {
-	StopReason   string // The reason the agent stopped (e.g., "end_turn")
-	AgentMessage string // The agent's accumulated response message
+func (m *Manager) PromptAgent(ctx context.Context, executionID string, prompt string) (*PromptResult, error) {
+	execution, exists := m.executionStore.Get(executionID)
+	if !exists {
+		return nil, fmt.Errorf("execution %q not found", executionID)
+	}
+	return m.sessionManager.SendPrompt(ctx, execution, prompt, true, m.MarkReady)
 }
 
-// PromptAgent sends a follow-up prompt to a running agent
-func (m *Manager) PromptAgent(ctx context.Context, instanceID string, prompt string) (*PromptResult, error) {
-	m.mu.Lock()
-	instance, exists := m.instances[instanceID]
+// StopAgent stops an agent execution
+func (m *Manager) StopAgent(ctx context.Context, executionID string, force bool) error {
+	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
-		m.mu.Unlock()
-		return nil, fmt.Errorf("instance %q not found", instanceID)
+		return fmt.Errorf("execution %q not found", executionID)
 	}
 
-	if instance.agentctl == nil {
-		m.mu.Unlock()
-		return nil, fmt.Errorf("instance %q has no agentctl client", instanceID)
+	runtimeName := "unknown"
+	if m.runtime != nil {
+		runtimeName = m.runtime.Name()
 	}
-
-	// Accept both RUNNING (initial) and READY (after first prompt) states
-	if instance.Status != v1.AgentStatusRunning && instance.Status != v1.AgentStatusReady {
-		m.mu.Unlock()
-		return nil, fmt.Errorf("instance %q is not ready for prompts (status: %s)", instanceID, instance.Status)
-	}
-
-	// Set status to RUNNING while processing
-	instance.Status = v1.AgentStatusRunning
-
-	// Clear buffers before starting new prompt
-	instance.messageMu.Lock()
-	instance.messageBuffer.Reset()
-	instance.reasoningBuffer.Reset()
-	instance.summaryBuffer.Reset()
-	instance.messageMu.Unlock()
-
-	m.mu.Unlock()
-
-	m.logger.Info("sending prompt to agent",
-		zap.String("instance_id", instanceID),
-		zap.Int("prompt_length", len(prompt)))
-
-	// Prompt is synchronous - blocks until agent completes
-	resp, err := instance.agentctl.Prompt(ctx, prompt)
-	if err != nil {
-		return nil, err
-	}
-
-	// Extract accumulated content from buffers
-	instance.messageMu.Lock()
-	agentMessage := instance.messageBuffer.String()
-	instance.messageBuffer.Reset()
-	instance.reasoningBuffer.Reset()
-	instance.summaryBuffer.Reset()
-	instance.messageMu.Unlock()
-
-	result := &PromptResult{
-		StopReason:   string(resp.StopReason),
-		AgentMessage: agentMessage,
-	}
-
-	// Publish prompt_complete event with the agent's response (for saving as comment)
-	m.publishPromptComplete(instance, agentMessage, "", "")
-
-	// Prompt completed - mark as READY for next prompt
-	if err := m.MarkReady(instanceID); err != nil {
-		m.logger.Error("failed to mark instance as ready after prompt",
-			zap.String("instance_id", instanceID),
-			zap.Error(err))
-	}
-
-	return result, nil
-}
-
-// StopAgent stops an agent instance
-func (m *Manager) StopAgent(ctx context.Context, instanceID string, force bool) error {
-	m.mu.RLock()
-	instance, exists := m.instances[instanceID]
-	m.mu.RUnlock()
-
-	if !exists {
-		return fmt.Errorf("instance %q not found", instanceID)
-	}
-
 	m.logger.Info("stopping agent",
-		zap.String("instance_id", instanceID),
+		zap.String("execution_id", executionID),
 		zap.Bool("force", force),
-		zap.String("runtime", m.agentCfg.Runtime))
+		zap.String("runtime", runtimeName))
 
 	// Try to gracefully stop via agentctl first
-	if instance.agentctl != nil && !force {
-		if err := instance.agentctl.Stop(ctx); err != nil {
+	if execution.agentctl != nil && !force {
+		if err := execution.agentctl.Stop(ctx); err != nil {
 			m.logger.Warn("failed to stop agent via agentctl",
-				zap.String("instance_id", instanceID),
+				zap.String("execution_id", executionID),
 				zap.Error(err))
 		}
-		instance.agentctl.Close()
+		execution.agentctl.Close()
 	}
 
-	// Stop the agent instance based on runtime mode
-	var err error
-	if m.IsStandaloneMode() {
-		err = m.stopStandaloneInstance(ctx, instance)
-	} else {
-		err = m.stopDockerContainer(ctx, instance, force)
+	// Stop the agent execution via runtime
+	if m.runtime != nil {
+		runtimeInstance := &RuntimeInstance{
+			InstanceID:           execution.ID,
+			TaskID:               execution.TaskID,
+			ContainerID:          execution.ContainerID,
+			StandaloneInstanceID: execution.standaloneInstanceID,
+			StandalonePort:       execution.standalonePort,
+		}
+		if err := m.runtime.StopInstance(ctx, runtimeInstance, force); err != nil {
+			return err
+		}
 	}
 
-	if err != nil {
-		return err
-	}
-
-	// Update instance status and remove from tracking maps
-	m.mu.Lock()
-	instance.Status = v1.AgentStatusStopped
-	now := time.Now()
-	instance.FinishedAt = &now
-	delete(m.instances, instanceID)
-	delete(m.byTask, instance.TaskID)
-	if instance.ContainerID != "" {
-		delete(m.byContainer, instance.ContainerID)
-	}
-	m.mu.Unlock()
+	// Update execution status and remove from tracking
+	m.executionStore.WithLock(executionID, func(exec *AgentExecution) {
+		exec.Status = v1.AgentStatusStopped
+		now := time.Now()
+		exec.FinishedAt = &now
+	})
+	m.executionStore.Remove(executionID)
 
 	m.logger.Info("agent stopped and removed from tracking",
-		zap.String("instance_id", instanceID),
-		zap.String("task_id", instance.TaskID))
+		zap.String("execution_id", executionID),
+		zap.String("task_id", execution.TaskID))
 
 	// Publish stopped event
-	m.publishEvent(ctx, events.AgentStopped, instance)
-
-	return nil
-}
-
-// stopDockerContainer stops a Docker container
-func (m *Manager) stopDockerContainer(ctx context.Context, instance *AgentInstance, force bool) error {
-	if instance.ContainerID == "" {
-		return nil // No container to stop
-	}
-
-	var err error
-	if force {
-		err = m.docker.KillContainer(ctx, instance.ContainerID, "SIGKILL")
-	} else {
-		err = m.docker.StopContainer(ctx, instance.ContainerID, 30*time.Second)
-	}
-
-	if err != nil {
-		return fmt.Errorf("failed to stop container: %w", err)
-	}
-
-	return nil
-}
-
-// stopStandaloneInstance stops a standalone agentctl instance
-func (m *Manager) stopStandaloneInstance(ctx context.Context, instance *AgentInstance) error {
-	if instance.standaloneInstanceID == "" {
-		return nil // No standalone instance to stop
-	}
-
-	if err := m.standaloneCtl.DeleteInstance(ctx, instance.standaloneInstanceID); err != nil {
-		return fmt.Errorf("failed to stop standalone instance: %w", err)
-	}
+	m.eventPublisher.PublishAgentEvent(ctx, events.AgentStopped, execution)
 
 	return nil
 }
 
 // StopByTaskID stops the agent for a specific task
 func (m *Manager) StopByTaskID(ctx context.Context, taskID string, force bool) error {
-	m.mu.RLock()
-	instanceID, exists := m.byTask[taskID]
-	m.mu.RUnlock()
-
+	execution, exists := m.executionStore.GetByTaskID(taskID)
 	if !exists {
 		return fmt.Errorf("no agent running for task %q", taskID)
 	}
 
-	return m.StopAgent(ctx, instanceID, force)
+	return m.StopAgent(ctx, execution.ID, force)
 }
 
-// GetInstance returns an agent instance by ID
-func (m *Manager) GetInstance(instanceID string) (*AgentInstance, bool) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	instance, exists := m.instances[instanceID]
-	return instance, exists
+// GetExecution returns an agent execution by ID
+func (m *Manager) GetExecution(executionID string) (*AgentExecution, bool) {
+	return m.executionStore.Get(executionID)
 }
 
-// GetInstanceByTaskID returns the agent instance for a task
-func (m *Manager) GetInstanceByTaskID(taskID string) (*AgentInstance, bool) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	instanceID, exists := m.byTask[taskID]
-	if !exists {
-		return nil, false
-	}
-
-	instance, exists := m.instances[instanceID]
-	return instance, exists
+// GetExecutionByTaskID returns the agent execution for a task
+func (m *Manager) GetExecutionByTaskID(taskID string) (*AgentExecution, bool) {
+	return m.executionStore.GetByTaskID(taskID)
 }
 
-// GetInstanceByContainerID returns the agent instance for a container
-func (m *Manager) GetInstanceByContainerID(containerID string) (*AgentInstance, bool) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	instanceID, exists := m.byContainer[containerID]
-	if !exists {
-		return nil, false
-	}
-
-	instance, exists := m.instances[instanceID]
-	return instance, exists
+// GetExecutionByContainerID returns the agent execution for a container
+func (m *Manager) GetExecutionByContainerID(containerID string) (*AgentExecution, bool) {
+	return m.executionStore.GetByContainerID(containerID)
 }
 
-// ListInstances returns all active instances
-func (m *Manager) ListInstances() []*AgentInstance {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	result := make([]*AgentInstance, 0, len(m.instances))
-	for _, instance := range m.instances {
-		result = append(result, instance)
-	}
-	return result
+// ListExecutions returns all active executions
+func (m *Manager) ListExecutions() []*AgentExecution {
+	return m.executionStore.List()
 }
 
 // IsAgentRunningForTask checks if an agent is actually running for a task
 // This probes agentctl's status endpoint to verify the agent process is running
 func (m *Manager) IsAgentRunningForTask(ctx context.Context, taskID string) bool {
-	// First check if we have an instance tracked for this task
-	instance, exists := m.GetInstanceByTaskID(taskID)
+	// First check if we have an execution tracked for this task
+	execution, exists := m.GetExecutionByTaskID(taskID)
 	if !exists {
 		return false
 	}
 
 	// Probe agentctl status to verify the agent process is running
-	if instance.agentctl == nil {
+	if execution.agentctl == nil {
 		return false
 	}
 
-	status, err := instance.agentctl.GetStatus(ctx)
+	status, err := execution.agentctl.GetStatus(ctx)
 	if err != nil {
 		m.logger.Debug("failed to get agentctl status",
 			zap.String("task_id", taskID),
@@ -1912,180 +1000,118 @@ func (m *Manager) IsAgentRunningForTask(ctx context.Context, taskID string) bool
 	return status.IsAgentRunning()
 }
 
-// UpdateStatus updates the status of an instance
-func (m *Manager) UpdateStatus(instanceID string, status v1.AgentStatus) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	instance, exists := m.instances[instanceID]
-	if !exists {
-		return fmt.Errorf("instance %q not found", instanceID)
+// UpdateStatus updates the status of an execution
+func (m *Manager) UpdateStatus(executionID string, status v1.AgentStatus) error {
+	if !m.executionStore.WithLock(executionID, func(execution *AgentExecution) {
+		execution.Status = status
+	}) {
+		return fmt.Errorf("execution %q not found", executionID)
 	}
 
-	instance.Status = status
-	m.logger.Debug("updated instance status",
-		zap.String("instance_id", instanceID),
+	m.logger.Debug("updated execution status",
+		zap.String("execution_id", executionID),
 		zap.String("status", string(status)))
 
 	return nil
 }
 
-// UpdateProgress updates the progress of an instance
-func (m *Manager) UpdateProgress(instanceID string, progress int) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	instance, exists := m.instances[instanceID]
-	if !exists {
-		return fmt.Errorf("instance %q not found", instanceID)
+// UpdateProgress updates the progress of an execution
+func (m *Manager) UpdateProgress(executionID string, progress int) error {
+	if !m.executionStore.WithLock(executionID, func(execution *AgentExecution) {
+		execution.Progress = progress
+	}) {
+		return fmt.Errorf("execution %q not found", executionID)
 	}
 
-	instance.Progress = progress
-	m.logger.Debug("updated instance progress",
-		zap.String("instance_id", instanceID),
+	m.logger.Debug("updated execution progress",
+		zap.String("execution_id", executionID),
 		zap.Int("progress", progress))
 
 	return nil
 }
 
-// MarkReady marks an instance as ready for follow-up prompts
-func (m *Manager) MarkReady(instanceID string) error {
-	m.mu.Lock()
-	instance, exists := m.instances[instanceID]
+// MarkReady marks an execution as ready for follow-up prompts
+func (m *Manager) MarkReady(executionID string) error {
+	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
-		m.mu.Unlock()
-		return fmt.Errorf("instance %q not found", instanceID)
+		return fmt.Errorf("execution %q not found", executionID)
 	}
 
-	instance.Status = v1.AgentStatusReady
-	m.mu.Unlock()
+	m.executionStore.UpdateStatus(executionID, v1.AgentStatusReady)
 
-	m.logger.Info("instance ready for follow-up prompts",
-		zap.String("instance_id", instanceID))
+	m.logger.Info("execution ready for follow-up prompts",
+		zap.String("execution_id", executionID))
 
 	// Publish ready event
-	m.publishEvent(context.Background(), events.AgentReady, instance)
+	m.eventPublisher.PublishAgentEvent(context.Background(), events.AgentReady, execution)
 
 	return nil
 }
 
-// MarkCompleted marks an instance as completed
-func (m *Manager) MarkCompleted(instanceID string, exitCode int, errorMessage string) error {
-	m.mu.Lock()
-	instance, exists := m.instances[instanceID]
+// MarkCompleted marks an execution as completed
+func (m *Manager) MarkCompleted(executionID string, exitCode int, errorMessage string) error {
+	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
-		m.mu.Unlock()
-		return fmt.Errorf("instance %q not found", instanceID)
+		return fmt.Errorf("execution %q not found", executionID)
 	}
 
-	now := time.Now()
-	instance.FinishedAt = &now
-	instance.ExitCode = &exitCode
-	instance.ErrorMessage = errorMessage
+	m.executionStore.WithLock(executionID, func(exec *AgentExecution) {
+		now := time.Now()
+		exec.FinishedAt = &now
+		exec.ExitCode = &exitCode
+		exec.ErrorMessage = errorMessage
 
-	if exitCode == 0 && errorMessage == "" {
-		instance.Status = v1.AgentStatusCompleted
-		instance.Progress = 100
-	} else {
-		instance.Status = v1.AgentStatusFailed
-	}
-	m.mu.Unlock()
+		if exitCode == 0 && errorMessage == "" {
+			exec.Status = v1.AgentStatusCompleted
+			exec.Progress = 100
+		} else {
+			exec.Status = v1.AgentStatusFailed
+		}
+	})
 
-	m.logger.Info("instance completed",
-		zap.String("instance_id", instanceID),
+	m.logger.Info("execution completed",
+		zap.String("execution_id", executionID),
 		zap.Int("exit_code", exitCode),
-		zap.String("status", string(instance.Status)))
+		zap.String("status", string(execution.Status)))
 
 	// Publish completion event
 	eventType := events.AgentCompleted
-	if instance.Status == v1.AgentStatusFailed {
+	if execution.Status == v1.AgentStatusFailed {
 		eventType = events.AgentFailed
 	}
-	m.publishEvent(context.Background(), eventType, instance)
+	m.eventPublisher.PublishAgentEvent(context.Background(), eventType, execution)
 
 	return nil
 }
 
-// RemoveInstance removes a completed instance from tracking
-func (m *Manager) RemoveInstance(instanceID string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+// RemoveExecution removes a completed execution from tracking
+func (m *Manager) RemoveExecution(executionID string) {
+	m.executionStore.Remove(executionID)
+	m.logger.Debug("removed execution from tracking",
+		zap.String("execution_id", executionID))
+}
 
-	instance, exists := m.instances[instanceID]
+// CleanupStaleExecutionByTaskID removes a stale agent execution from tracking without trying to stop it.
+// This is used when we detect the agent process has stopped but the execution is still tracked.
+func (m *Manager) CleanupStaleExecutionByTaskID(ctx context.Context, taskID string) error {
+	execution, exists := m.executionStore.GetByTaskID(taskID)
 	if !exists {
-		return
+		return nil // No execution to clean up
 	}
 
-	delete(m.instances, instanceID)
-	delete(m.byTask, instance.TaskID)
-	delete(m.byContainer, instance.ContainerID)
+	m.logger.Info("cleaning up stale agent execution",
+		zap.String("task_id", taskID),
+		zap.String("execution_id", execution.ID))
 
-	m.logger.Debug("removed instance from tracking",
-		zap.String("instance_id", instanceID))
-}
-
-// publishEvent publishes an agent lifecycle event to NATS
-func (m *Manager) publishEvent(ctx context.Context, eventType string, instance *AgentInstance) {
-	if m.eventBus == nil {
-		return
+	// Close agentctl connection if it exists
+	if execution.agentctl != nil {
+		execution.agentctl.Close()
 	}
 
-	data := map[string]interface{}{
-		"instance_id":      instance.ID,
-		"task_id":          instance.TaskID,
-		"agent_profile_id": instance.AgentProfileID,
-		"container_id":     instance.ContainerID,
-		"status":           string(instance.Status),
-		"started_at":       instance.StartedAt,
-		"progress":         instance.Progress,
-		"error_message":    instance.ErrorMessage,
-	}
+	// Remove from execution store
+	m.executionStore.Remove(execution.ID)
 
-	if instance.FinishedAt != nil {
-		data["finished_at"] = *instance.FinishedAt
-	}
-	if instance.ExitCode != nil {
-		data["exit_code"] = *instance.ExitCode
-	}
-
-	event := bus.NewEvent(eventType, "agent-manager", data)
-
-	if err := m.eventBus.Publish(ctx, eventType, event); err != nil {
-		m.logger.Error("failed to publish event",
-			zap.String("event_type", eventType),
-			zap.String("instance_id", instance.ID),
-			zap.Error(err))
-	} else {
-		m.logger.Debug("published event",
-			zap.String("event_type", eventType),
-			zap.String("instance_id", instance.ID))
-	}
-}
-
-func (m *Manager) publishACPSessionCreated(instance *AgentInstance, sessionID string) {
-	if m.eventBus == nil || sessionID == "" {
-		return
-	}
-
-	data := map[string]interface{}{
-		"task_id":           instance.TaskID,
-		"agent_instance_id": instance.ID,
-		"acp_session_id":    sessionID,
-	}
-
-	event := bus.NewEvent(events.AgentACPSessionCreated, "agent-manager", data)
-	if err := m.eventBus.Publish(context.Background(), events.AgentACPSessionCreated, event); err != nil {
-		m.logger.Error("failed to publish ACP session event",
-			zap.String("event_type", events.AgentACPSessionCreated),
-			zap.String("instance_id", instance.ID),
-			zap.Error(err))
-	} else {
-		m.logger.Info("published ACP session event",
-			zap.String("event_type", events.AgentACPSessionCreated),
-			zap.String("task_id", instance.TaskID),
-			zap.String("agent_instance_id", instance.ID),
-			zap.String("acp_session_id", sessionID))
-	}
+	return nil
 }
 
 // cleanupLoop runs periodic cleanup of stale containers
@@ -2113,16 +1139,14 @@ func (m *Manager) cleanupLoop(ctx context.Context) {
 func (m *Manager) performCleanup(ctx context.Context) {
 	m.logger.Debug("running cleanup check")
 
-	// Skip cleanup if docker client is not available (e.g., in tests)
-	if m.docker == nil {
-		m.logger.Debug("skipping cleanup - no docker client")
+	// Skip cleanup if container manager is not available
+	if m.containerManager == nil {
+		m.logger.Debug("skipping cleanup - no container manager")
 		return
 	}
 
 	// List all kandev-managed containers
-	containers, err := m.docker.ListContainers(ctx, map[string]string{
-		"kandev.managed": "true",
-	})
+	containers, err := m.containerManager.ListManagedContainers(ctx)
 	if err != nil {
 		m.logger.Error("failed to list containers for cleanup", zap.Error(err))
 		return
@@ -2131,13 +1155,10 @@ func (m *Manager) performCleanup(ctx context.Context) {
 	for _, container := range containers {
 		// Check if container is exited and we're tracking it
 		if container.State == "exited" {
-			m.mu.RLock()
-			instanceID, tracked := m.byContainer[container.ID]
-			m.mu.RUnlock()
-
+			execution, tracked := m.executionStore.GetByContainerID(container.ID)
 			if tracked {
 				// Get container info to get exit code
-				info, err := m.docker.GetContainerInfo(ctx, container.ID)
+				info, err := m.containerManager.GetContainerInfo(ctx, container.ID)
 				if err != nil {
 					m.logger.Warn("failed to get container info during cleanup",
 						zap.String("container_id", container.ID),
@@ -2145,43 +1166,40 @@ func (m *Manager) performCleanup(ctx context.Context) {
 					continue
 				}
 
-				// Mark instance as completed
+				// Mark execution as completed
 				errorMsg := ""
 				if info.ExitCode != 0 {
 					errorMsg = fmt.Sprintf("container exited with code %d", info.ExitCode)
 				}
-				_ = m.MarkCompleted(instanceID, info.ExitCode, errorMsg)
+				_ = m.MarkCompleted(execution.ID, info.ExitCode, errorMsg)
 
 				// Remove the container
-				if err := m.docker.RemoveContainer(ctx, container.ID, false); err != nil {
+				if err := m.containerManager.RemoveContainer(ctx, container.ID, false); err != nil {
 					m.logger.Warn("failed to remove container during cleanup",
 						zap.String("container_id", container.ID),
 						zap.Error(err))
 				}
 
-				// Remove the instance from tracking so new agents can be launched
-				m.RemoveInstance(instanceID)
+				// Remove the execution from tracking so new agents can be launched
+				m.RemoveExecution(execution.ID)
 			}
 		}
 	}
 }
 
-// RespondToPermission sends a response to a permission request for an agent instance
-func (m *Manager) RespondToPermission(instanceID, pendingID, optionID string, cancelled bool) error {
-	m.mu.RLock()
-	instance, exists := m.instances[instanceID]
-	m.mu.RUnlock()
-
+// RespondToPermission sends a response to a permission request for an agent execution
+func (m *Manager) RespondToPermission(executionID, pendingID, optionID string, cancelled bool) error {
+	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
-		return fmt.Errorf("agent instance not found: %s", instanceID)
+		return fmt.Errorf("agent execution not found: %s", executionID)
 	}
 
-	if instance.agentctl == nil {
-		return fmt.Errorf("agent instance has no agentctl client: %s", instanceID)
+	if execution.agentctl == nil {
+		return fmt.Errorf("agent execution has no agentctl client: %s", executionID)
 	}
 
 	m.logger.Info("responding to permission request",
-		zap.String("instance_id", instanceID),
+		zap.String("execution_id", executionID),
 		zap.String("pending_id", pendingID),
 		zap.String("option_id", optionID),
 		zap.Bool("cancelled", cancelled))
@@ -2189,25 +1207,15 @@ func (m *Manager) RespondToPermission(instanceID, pendingID, optionID string, ca
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	return instance.agentctl.RespondToPermission(ctx, pendingID, optionID, cancelled)
+	return execution.agentctl.RespondToPermission(ctx, pendingID, optionID, cancelled)
 }
 
 // RespondToPermissionByTaskID sends a response to a permission request for a task
 func (m *Manager) RespondToPermissionByTaskID(taskID, pendingID, optionID string, cancelled bool) error {
-	// Find the instance by task ID
-	m.mu.RLock()
-	var instance *AgentInstance
-	for _, inst := range m.instances {
-		if inst.TaskID == taskID {
-			instance = inst
-			break
-		}
-	}
-	m.mu.RUnlock()
-
-	if instance == nil {
-		return fmt.Errorf("no agent instance found for task: %s", taskID)
+	execution, exists := m.executionStore.GetByTaskID(taskID)
+	if !exists {
+		return fmt.Errorf("no agent execution found for task: %s", taskID)
 	}
 
-	return m.RespondToPermission(instance.ID, pendingID, optionID, cancelled)
+	return m.RespondToPermission(execution.ID, pendingID, optionID, cancelled)
 }

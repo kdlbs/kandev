@@ -37,6 +37,7 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionPermissionRespond, h.wsRespondToPermission)
 	d.RegisterFunc(ws.ActionTaskExecution, h.wsGetTaskExecution)
 	d.RegisterFunc(ws.ActionTaskSessionResume, h.wsResumeTaskSession)
+	d.RegisterFunc(ws.ActionTaskSessionStatus, h.wsGetTaskSessionStatus)
 }
 
 // WS handlers
@@ -278,6 +279,38 @@ func (h *Handlers) wsGetTaskExecution(ctx context.Context, msg *ws.Message) (*ws
 	if err != nil {
 		h.logger.Error("failed to get task execution", zap.String("task_id", req.TaskID), zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get task execution: "+err.Error(), nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, resp)
+}
+
+type wsGetTaskSessionStatusRequest struct {
+	TaskID        string `json:"task_id"`
+	TaskSessionID string `json:"task_session_id"`
+}
+
+func (h *Handlers) wsGetTaskSessionStatus(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req wsGetTaskSessionStatusRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid request payload", nil)
+	}
+
+	if req.TaskID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "task_id is required", nil)
+	}
+	if req.TaskSessionID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "task_session_id is required", nil)
+	}
+
+	resp, err := h.controller.GetTaskSessionStatus(ctx, dto.TaskSessionStatusRequest{
+		TaskID:        req.TaskID,
+		TaskSessionID: req.TaskSessionID,
+	})
+	if err != nil {
+		h.logger.Error("failed to get task session status",
+			zap.String("task_id", req.TaskID),
+			zap.String("task_session_id", req.TaskSessionID),
+			zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get task session status: "+err.Error(), nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }

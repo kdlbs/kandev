@@ -1,6 +1,6 @@
 // Package agentctl provides a client for communicating with agentctl.
 // This file contains the StandaloneCtl client for the multi-instance control API.
-package agentctl
+package client
 
 import (
 	"bytes"

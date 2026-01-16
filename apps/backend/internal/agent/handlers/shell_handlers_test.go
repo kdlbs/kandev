@@ -8,7 +8,6 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/agent/registry"
-	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -42,13 +41,24 @@ func (m *MockEventBus) IsConnected() bool {
 	return true
 }
 
-// testAgentConfig returns a default AgentConfig for testing
-func testAgentConfig() config.AgentConfig {
-	return config.AgentConfig{
-		Runtime:        "docker",
-		StandaloneHost: "localhost",
-		StandalonePort: 9999,
-	}
+// MockCredentialsManager implements lifecycle.CredentialsManager for testing
+type MockCredentialsManager struct{}
+
+func (m *MockCredentialsManager) GetCredentialValue(ctx context.Context, key string) (string, error) {
+	return "", nil
+}
+
+// MockProfileResolver implements lifecycle.ProfileResolver for testing
+type MockProfileResolver struct{}
+
+func (m *MockProfileResolver) ResolveProfile(ctx context.Context, profileID string) (*lifecycle.AgentProfileInfo, error) {
+	return &lifecycle.AgentProfileInfo{
+		ProfileID:   profileID,
+		ProfileName: "Test Profile",
+		AgentID:     "augment-agent",
+		AgentName:   "auggie",
+		Model:       "claude-sonnet-4-20250514",
+	}, nil
 }
 
 func newTestRegistry() *registry.Registry {
@@ -176,7 +186,10 @@ func newTestManager() *lifecycle.Manager {
 	log := newTestLogger()
 	reg := newTestRegistry()
 	eventBus := &MockEventBus{}
-	return lifecycle.NewManager(nil, reg, eventBus, testAgentConfig(), log)
+	credsMgr := &MockCredentialsManager{}
+	profileResolver := &MockProfileResolver{}
+	// Pass nil for runtime and containerManager - tests don't need them
+	return lifecycle.NewManager(reg, eventBus, nil, nil, credsMgr, profileResolver, log)
 }
 
 func TestWsShellStatus_NoInstanceFound(t *testing.T) {

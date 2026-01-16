@@ -11,9 +11,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/kandev/kandev/internal/agentctl/adapter"
-	"github.com/kandev/kandev/internal/agentctl/config"
-	"github.com/kandev/kandev/internal/agentctl/shell"
+	"github.com/kandev/kandev/internal/agentctl/server/adapter"
+	"github.com/kandev/kandev/internal/agentctl/server/config"
+	"github.com/kandev/kandev/internal/agentctl/server/shell"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/pkg/agent"
 	"go.uber.org/zap"
@@ -231,6 +231,44 @@ func (m *Manager) Start(ctx context.Context) error {
 
 	m.status.Store(StatusRunning)
 	m.logger.Info("agent process started", zap.Int("pid", m.cmd.Process.Pid))
+
+	return nil
+}
+
+// Configure sets the agent command and optional environment variables.
+// This must be called before Start() if the instance was created without a command.
+func (m *Manager) Configure(command string, env map[string]string) error {
+	m.startMu.Lock()
+	defer m.startMu.Unlock()
+
+	if m.Status() == StatusRunning || m.Status() == StatusStarting {
+		return fmt.Errorf("cannot configure while agent is running")
+	}
+
+	if command == "" {
+		return fmt.Errorf("agent command cannot be empty")
+	}
+
+	// Parse the command string and update config
+	args := config.ParseCommand(command)
+	if len(args) == 0 {
+		return fmt.Errorf("failed to parse agent command")
+	}
+
+	m.cfg.AgentCommand = command
+	m.cfg.AgentArgs = args
+
+	// Merge additional env vars
+	if len(env) > 0 {
+		for k, v := range env {
+			m.cfg.AgentEnv = append(m.cfg.AgentEnv, fmt.Sprintf("%s=%s", k, v))
+		}
+	}
+
+	m.logger.Info("agent configured",
+		zap.String("command", command),
+		zap.Strings("args", args),
+		zap.Int("env_count", len(env)))
 
 	return nil
 }

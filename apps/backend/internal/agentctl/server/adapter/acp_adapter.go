@@ -8,7 +8,7 @@ import (
 	"sync"
 
 	"github.com/coder/acp-go-sdk"
-	acpclient "github.com/kandev/kandev/internal/agentctl/acp"
+	acpclient "github.com/kandev/kandev/internal/agentctl/server/acp"
 	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/zap"
 )

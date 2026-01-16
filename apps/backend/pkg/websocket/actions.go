@@ -65,6 +65,7 @@ const (
 	ActionTaskExecution = "task.execution"
 	ActionTaskSessionList   = "task.session.list"
 	ActionTaskSessionResume = "task.session.resume"
+	ActionTaskSessionStatus = "task.session.status"
 
 	// Agent actions
 	ActionAgentList    = "agent.list"

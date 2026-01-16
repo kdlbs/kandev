@@ -26,18 +26,18 @@ type TaskEventData struct {
 
 // AgentEventData contains data from agent events
 type AgentEventData struct {
-	TaskID          string `json:"task_id"`
-	AgentInstanceID string `json:"agent_instance_id"`
-	AgentProfileID  string `json:"agent_profile_id"`
-	ExitCode        *int   `json:"exit_code,omitempty"`
-	ErrorMessage    string `json:"error_message,omitempty"`
+	TaskID           string `json:"task_id"`
+	AgentExecutionID string `json:"agent_execution_id"`
+	AgentProfileID   string `json:"agent_profile_id"`
+	ExitCode         *int   `json:"exit_code,omitempty"`
+	ErrorMessage     string `json:"error_message,omitempty"`
 }
 
 // ACPSessionEventData contains data from ACP session events
 type ACPSessionEventData struct {
-	TaskID          string `json:"task_id"`
-	AgentInstanceID string `json:"agent_instance_id"`
-	ACPSessionID    string `json:"acp_session_id"`
+	TaskID           string `json:"task_id"`
+	AgentExecutionID string `json:"agent_execution_id"`
+	ACPSessionID     string `json:"acp_session_id"`
 }
 
 // PromptCompleteData contains data from prompt_complete events
@@ -360,7 +360,7 @@ func (w *Watcher) createAgentEventHandler(handler func(ctx context.Context, data
 		w.logger.Debug("Handling agent event",
 			zap.String("event_type", event.Type),
 			zap.String("task_id", data.TaskID),
-			zap.String("agent_instance_id", data.AgentInstanceID))
+			zap.String("agent_execution_id", data.AgentExecutionID))
 
 		handler(ctx, data)
 		return nil

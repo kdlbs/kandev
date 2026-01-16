@@ -35,19 +35,23 @@ func (m *mockAgentManager) LaunchAgent(ctx context.Context, req *executor.Launch
 	m.mu.Unlock()
 
 	return &executor.LaunchAgentResponse{
-		AgentInstanceID: "agent-" + req.TaskID,
-		ContainerID:     "container-" + req.TaskID,
-		Status:          v1.AgentStatusRunning,
+		AgentExecutionID: "agent-" + req.TaskID,
+		ContainerID:      "container-" + req.TaskID,
+		Status:           v1.AgentStatusRunning,
 	}, nil
 }
 
-func (m *mockAgentManager) StopAgent(ctx context.Context, agentInstanceID string, force bool) error {
+func (m *mockAgentManager) StartAgentProcess(ctx context.Context, agentExecutionID string) error {
 	return nil
 }
 
-func (m *mockAgentManager) GetAgentStatus(ctx context.Context, agentInstanceID string) (*v1.AgentInstance, error) {
-	return &v1.AgentInstance{
-		ID:     agentInstanceID,
+func (m *mockAgentManager) StopAgent(ctx context.Context, agentExecutionID string, force bool) error {
+	return nil
+}
+
+func (m *mockAgentManager) GetAgentStatus(ctx context.Context, agentExecutionID string) (*v1.AgentExecution, error) {
+	return &v1.AgentExecution{
+		ID:     agentExecutionID,
 		Status: v1.AgentStatusRunning,
 	}, nil
 }
@@ -56,7 +60,7 @@ func (m *mockAgentManager) ListAgentTypes(ctx context.Context) ([]*v1.AgentType,
 	return []*v1.AgentType{}, nil
 }
 
-func (m *mockAgentManager) PromptAgent(ctx context.Context, agentInstanceID string, prompt string) (*executor.PromptResult, error) {
+func (m *mockAgentManager) PromptAgent(ctx context.Context, agentExecutionID string, prompt string) (*executor.PromptResult, error) {
 	return &executor.PromptResult{StopReason: "end_turn"}, nil
 }
 
@@ -64,12 +68,16 @@ func (m *mockAgentManager) RespondToPermissionByTaskID(ctx context.Context, task
 	return nil
 }
 
-func (m *mockAgentManager) GetRecoveredInstances() []executor.RecoveredInstanceInfo {
+func (m *mockAgentManager) GetRecoveredExecutions() []executor.RecoveredExecutionInfo {
 	return nil
 }
 
 func (m *mockAgentManager) IsAgentRunningForTask(ctx context.Context, taskID string) bool {
 	return false
+}
+
+func (m *mockAgentManager) CleanupStaleExecutionByTaskID(ctx context.Context, taskID string) error {
+	return nil
 }
 
 // testTaskRepository is an in-memory task repository for testing
