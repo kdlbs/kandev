@@ -23,6 +23,7 @@ type Session struct {
 	workDir   string
 	shell     string   // Shell command (detected based on OS)
 	shellArgs []string // Shell arguments
+	config    Config   // Stored config for respawn
 
 	// PTY and process
 	pty *os.File
@@ -42,8 +43,9 @@ type Session struct {
 	bufferMu     sync.RWMutex
 
 	// Lifecycle
-	stopCh chan struct{}
-	doneCh chan struct{}
+	stopCh   chan struct{}
+	doneCh   chan struct{}
+	stopping bool // true when Stop() has been called (don't respawn)
 }
 
 // Maximum size of output buffer (16KB should be enough for recent history)
@@ -113,6 +115,7 @@ func NewSession(cfg Config, log *logger.Logger) (*Session, error) {
 		workDir:     cfg.WorkDir,
 		shell:       shell,
 		shellArgs:   args,
+		config:      cfg,
 		subscribers: make(map[chan<- []byte]struct{}),
 		stopCh:      make(chan struct{}),
 		doneCh:      make(chan struct{}),
@@ -170,6 +173,7 @@ func (s *Session) Stop() error {
 		return nil
 	}
 	s.running = false
+	s.stopping = true // Mark as stopping to prevent respawn
 	s.mu.Unlock()
 
 	s.logger.Info("stopping shell session")
@@ -313,19 +317,75 @@ func (s *Session) GetBufferedOutput() []byte {
 	return result
 }
 
-// waitForExit waits for the shell process to exit
+// waitForExit waits for the shell process to exit and respawns if not stopping
 func (s *Session) waitForExit() {
-	defer close(s.doneCh)
-
 	if s.cmd != nil {
 		_ = s.cmd.Wait()
 	}
 
 	s.mu.Lock()
+	stopping := s.stopping
 	s.running = false
 	s.mu.Unlock()
 
-	s.logger.Info("shell process exited")
+	// If Stop() was called, don't respawn - just signal done
+	if stopping {
+		s.logger.Info("shell process exited (stopping)")
+		close(s.doneCh)
+		return
+	}
+
+	s.logger.Info("shell process exited unexpectedly, respawning...")
+
+	// Small delay before respawn to avoid tight loop on repeated failures
+	time.Sleep(100 * time.Millisecond)
+
+	// Respawn the shell
+	if err := s.respawn(); err != nil {
+		s.logger.Error("failed to respawn shell", zap.Error(err))
+		close(s.doneCh)
+	}
+}
+
+// respawn restarts the shell process after an unexpected exit
+func (s *Session) respawn() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Check if we're stopping (Stop() called during respawn)
+	if s.stopping {
+		return nil
+	}
+
+	s.cmd = exec.Command(s.shell, s.shellArgs...)
+	s.cmd.Dir = s.workDir
+	s.cmd.Env = buildShellEnv(s.workDir)
+
+	// Start with PTY
+	var err error
+	s.pty, err = pty.StartWithSize(s.cmd, &pty.Winsize{
+		Cols: uint16(s.config.Cols),
+		Rows: uint16(s.config.Rows),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to start PTY: %w", err)
+	}
+
+	s.running = true
+	s.startedAt = time.Now()
+
+	s.logger.Info("shell session respawned",
+		zap.String("shell", s.shell),
+		zap.String("cwd", s.workDir),
+		zap.Int("pid", s.cmd.Process.Pid))
+
+	// Start output reader
+	go s.readOutput()
+
+	// Wait for process exit (recursive respawn on exit)
+	go s.waitForExit()
+
+	return nil
 }
 
 // buildShellEnv creates the environment for the shell process
