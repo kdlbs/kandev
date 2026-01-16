@@ -84,6 +84,9 @@ func TestNewShellHandlers(t *testing.T) {
 	if handlers.activeStreams == nil {
 		t.Error("expected non-nil activeStreams map")
 	}
+	if handlers.inputChannels == nil {
+		t.Error("expected non-nil inputChannels map")
+	}
 }
 
 func TestRegisterHandlers(t *testing.T) {

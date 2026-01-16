@@ -416,7 +416,9 @@ func main() {
 
 		// Register shell handlers
 		shellHandlers := agenthandlers.NewShellHandlers(lifecycleMgr, log)
+		shellHandlers.SetHub(gateway.Hub)
 		shellHandlers.RegisterHandlers(gateway.Dispatcher)
+		lifecycleMgr.SetShellStreamStarter(shellHandlers)
 		log.Info("Registered Shell WebSocket handlers")
 	}
 

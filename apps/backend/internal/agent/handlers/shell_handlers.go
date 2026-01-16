@@ -17,10 +17,15 @@ import (
 type ShellHandlers struct {
 	lifecycleMgr *lifecycle.Manager
 	logger       *logger.Logger
+	hub          ShellOutputBroadcaster
 
 	// Track active shell streams per task
 	activeStreams map[string]context.CancelFunc
 	mu            sync.RWMutex
+
+	// Input channels for sending input to shell streams
+	inputChannels map[string]chan<- agentctl.ShellMessage
+	inputMu       sync.RWMutex
 }
 
 // NewShellHandlers creates a new ShellHandlers instance
@@ -29,12 +34,19 @@ func NewShellHandlers(lifecycleMgr *lifecycle.Manager, log *logger.Logger) *Shel
 		lifecycleMgr:  lifecycleMgr,
 		logger:        log.WithFields(zap.String("component", "shell_handlers")),
 		activeStreams: make(map[string]context.CancelFunc),
+		inputChannels: make(map[string]chan<- agentctl.ShellMessage),
 	}
+}
+
+// SetHub sets the hub for broadcasting shell output
+func (h *ShellHandlers) SetHub(hub ShellOutputBroadcaster) {
+	h.hub = hub
 }
 
 // RegisterHandlers registers shell handlers with the WebSocket dispatcher
 func (h *ShellHandlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionShellStatus, h.wsShellStatus)
+	d.RegisterFunc(ws.ActionShellSubscribe, h.wsShellSubscribe)
 	d.RegisterFunc(ws.ActionShellInput, h.wsShellInput)
 }
 
@@ -96,6 +108,49 @@ func (h *ShellHandlers) wsShellStatus(ctx context.Context, msg *ws.Message) (*ws
 	})
 }
 
+// ShellSubscribeRequest for shell.subscribe action
+type ShellSubscribeRequest struct {
+	TaskID string `json:"task_id"`
+}
+
+// wsShellSubscribe subscribes to shell output for a task and starts the shell stream if needed
+func (h *ShellHandlers) wsShellSubscribe(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req ShellSubscribeRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return nil, fmt.Errorf("invalid payload: %w", err)
+	}
+
+	if req.TaskID == "" {
+		return nil, fmt.Errorf("task_id is required")
+	}
+
+	// Verify the agent instance exists for this task
+	instance, ok := h.lifecycleMgr.GetInstanceByTaskID(req.TaskID)
+	if !ok {
+		return nil, fmt.Errorf("no agent running for task %s", req.TaskID)
+	}
+
+	// Start the shell stream (idempotent - does nothing if already running)
+	if err := h.StartShellStream(ctx, req.TaskID); err != nil {
+		return nil, fmt.Errorf("failed to start shell stream: %w", err)
+	}
+
+	// Get buffered output to include in response
+	// This ensures client gets current shell state without duplicate broadcasts
+	buffer := ""
+	if client := instance.GetAgentCtlClient(); client != nil {
+		if b, err := client.ShellBuffer(ctx); err == nil {
+			buffer = b
+		}
+	}
+
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		"success": true,
+		"task_id": req.TaskID,
+		"buffer":  buffer,
+	})
+}
+
 // wsShellInput sends input to a shell session
 func (h *ShellHandlers) wsShellInput(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req ShellInputRequest
@@ -122,8 +177,17 @@ func (h *ShellHandlers) wsShellInput(ctx context.Context, msg *ws.Message) (*ws.
 	})
 }
 
-// StartShellStream starts streaming shell output for a task to the hub
-func (h *ShellHandlers) StartShellStream(ctx context.Context, taskID string, hub ShellOutputBroadcaster) error {
+// StartShellStream starts streaming shell output for a task using the configured hub.
+// This implements the lifecycle.ShellStreamStarter interface.
+func (h *ShellHandlers) StartShellStream(ctx context.Context, taskID string) error {
+	if h.hub == nil {
+		return fmt.Errorf("hub not configured")
+	}
+	return h.StartShellStreamWithHub(ctx, taskID, h.hub)
+}
+
+// StartShellStreamWithHub starts streaming shell output for a task to a specific hub
+func (h *ShellHandlers) StartShellStreamWithHub(ctx context.Context, taskID string, hub ShellOutputBroadcaster) error {
 	h.mu.Lock()
 	if _, exists := h.activeStreams[taskID]; exists {
 		h.mu.Unlock()
@@ -209,32 +273,26 @@ func (h *ShellHandlers) runShellStream(ctx context.Context, taskID string, hub S
 	}
 }
 
-// Input channel storage
-var inputChannels = struct {
-	sync.RWMutex
-	channels map[string]chan<- agentctl.ShellMessage
-}{channels: make(map[string]chan<- agentctl.ShellMessage)}
-
 func (h *ShellHandlers) storeInputChannel(taskID string, ch chan<- agentctl.ShellMessage) {
-	inputChannels.Lock()
-	inputChannels.channels[taskID] = ch
-	inputChannels.Unlock()
+	h.inputMu.Lock()
+	h.inputChannels[taskID] = ch
+	h.inputMu.Unlock()
 }
 
 func (h *ShellHandlers) removeInputChannel(taskID string) {
-	inputChannels.Lock()
-	if ch, exists := inputChannels.channels[taskID]; exists {
+	h.inputMu.Lock()
+	if ch, exists := h.inputChannels[taskID]; exists {
 		close(ch)
-		delete(inputChannels.channels, taskID)
+		delete(h.inputChannels, taskID)
 	}
-	inputChannels.Unlock()
+	h.inputMu.Unlock()
 }
 
 // SendShellInput sends input to an active shell stream
 func (h *ShellHandlers) SendShellInput(taskID, data string) error {
-	inputChannels.RLock()
-	ch, exists := inputChannels.channels[taskID]
-	inputChannels.RUnlock()
+	h.inputMu.RLock()
+	ch, exists := h.inputChannels[taskID]
+	h.inputMu.RUnlock()
 
 	if !exists {
 		return fmt.Errorf("no active shell stream for task %s", taskID)

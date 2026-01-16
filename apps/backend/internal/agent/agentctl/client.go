@@ -423,6 +423,36 @@ type ShellMessage struct {
 	Code int    `json:"code,omitempty"` // For exit type
 }
 
+// ShellBufferResponse is the response from the shell buffer endpoint
+type ShellBufferResponse struct {
+	Data string `json:"data"`
+}
+
+// ShellBuffer returns the buffered shell output
+func (c *Client) ShellBuffer(ctx context.Context) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/api/v1/shell/buffer", nil)
+	if err != nil {
+		return "", err
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("shell buffer failed: %s", resp.Status)
+	}
+
+	var result ShellBufferResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", err
+	}
+
+	return result.Data, nil
+}
+
 // StreamShell connects to the shell WebSocket stream and returns channels for I/O
 func (c *Client) StreamShell(ctx context.Context) (<-chan ShellMessage, chan<- ShellMessage, error) {
 	c.mu.Lock()

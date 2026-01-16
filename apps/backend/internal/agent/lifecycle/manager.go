@@ -118,6 +118,9 @@ type Manager struct {
 	agentCfg      config.AgentConfig
 	standaloneCtl *agentctl.StandaloneCtl // Client for standalone agentctl control API
 
+	// Shell stream starter for auto-starting shell streams
+	shellStreamStarter ShellStreamStarter
+
 	// Track active instances
 	instances   map[string]*AgentInstance // by instance ID
 	byTask      map[string]string         // taskID -> instanceID
@@ -184,6 +187,16 @@ func (m *Manager) SetProfileResolver(resolver ProfileResolver) {
 // SetWorktreeManager sets the worktree manager for Git worktree isolation
 func (m *Manager) SetWorktreeManager(worktreeMgr *worktree.Manager) {
 	m.worktreeMgr = worktreeMgr
+}
+
+// ShellStreamStarter is called to start shell streaming for an agent instance
+type ShellStreamStarter interface {
+	StartShellStream(ctx context.Context, taskID string) error
+}
+
+// SetShellStreamStarter sets the shell stream starter
+func (m *Manager) SetShellStreamStarter(starter ShellStreamStarter) {
+	m.shellStreamStarter = starter
 }
 
 // Start starts the lifecycle manager background tasks
@@ -836,6 +849,10 @@ func (m *Manager) initializeACPSession(ctx context.Context, instance *AgentInsta
 	// 6. Set up file changes stream to track filesystem changes
 	go m.handleFileChangesStream(instance)
 
+	// Note: Shell stream is started on-demand when a client sends shell.subscribe
+	// This ensures the buffered output (including initial prompt) is received
+	// when a client is actually listening
+
 	// Wait for the updates stream to connect before sending prompt
 	// This prevents race conditions where notifications are sent before streams are ready
 	select {
@@ -1004,6 +1021,7 @@ func (m *Manager) reconnectStreams(instance *AgentInstance) {
 	go m.handlePermissionStream(instance)
 	go m.handleGitStatusStream(instance)
 	go m.handleFileChangesStream(instance)
+	// Note: Shell stream is started on-demand via shell.subscribe
 
 	// Mark the instance as READY so it can accept prompts
 	m.mu.Lock()

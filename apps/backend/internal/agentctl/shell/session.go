@@ -37,10 +37,17 @@ type Session struct {
 	subscribers map[chan<- []byte]struct{}
 	subMu       sync.RWMutex
 
+	// Ring buffer for recent output (for new subscribers)
+	outputBuffer []byte
+	bufferMu     sync.RWMutex
+
 	// Lifecycle
 	stopCh chan struct{}
 	doneCh chan struct{}
 }
+
+// Maximum size of output buffer (16KB should be enough for recent history)
+const maxOutputBufferSize = 16 * 1024
 
 // Config holds shell session configuration
 type Config struct {
@@ -261,8 +268,11 @@ func (s *Session) readOutput() {
 	}
 }
 
-// broadcast sends data to all subscribers
+// broadcast sends data to all subscribers and stores in buffer
 func (s *Session) broadcast(data []byte) {
+	// Store in ring buffer for new subscribers
+	s.appendToBuffer(data)
+
 	s.subMu.RLock()
 	defer s.subMu.RUnlock()
 
@@ -273,6 +283,34 @@ func (s *Session) broadcast(data []byte) {
 			// Subscriber channel full, skip
 		}
 	}
+}
+
+// appendToBuffer adds data to the output ring buffer
+func (s *Session) appendToBuffer(data []byte) {
+	s.bufferMu.Lock()
+	defer s.bufferMu.Unlock()
+
+	s.outputBuffer = append(s.outputBuffer, data...)
+
+	// Trim if exceeds max size (keep the most recent data)
+	if len(s.outputBuffer) > maxOutputBufferSize {
+		s.outputBuffer = s.outputBuffer[len(s.outputBuffer)-maxOutputBufferSize:]
+	}
+}
+
+// GetBufferedOutput returns the buffered recent output
+func (s *Session) GetBufferedOutput() []byte {
+	s.bufferMu.RLock()
+	defer s.bufferMu.RUnlock()
+
+	if len(s.outputBuffer) == 0 {
+		return nil
+	}
+
+	// Return a copy to avoid race conditions
+	result := make([]byte, len(s.outputBuffer))
+	copy(result, s.outputBuffer)
+	return result
 }
 
 // waitForExit waits for the shell process to exit

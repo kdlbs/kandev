@@ -4,7 +4,7 @@ import { useEffect, useRef, useCallback } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
-import { useAppStore } from '@/components/state-provider';
+import { useAppStore, useAppStoreApi } from '@/components/state-provider';
 import { getWebSocketClient } from '@/lib/ws/connection';
 
 type ShellTerminalProps = {
@@ -16,6 +16,8 @@ export function ShellTerminal({ taskId }: ShellTerminalProps) {
   const xtermRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const lastOutputLengthRef = useRef(0);
+  const subscriptionIdRef = useRef(0);
+  const storeApi = useAppStoreApi();
 
   const shellOutput = useAppStore((state) => state.shell.outputs[taskId] || '');
 
@@ -101,10 +103,39 @@ export function ShellTerminal({ taskId }: ShellTerminalProps) {
     }
   }, [shellOutput]);
 
-  // Request shell status on mount
+  // Subscribe to shell on mount to start the shell stream
   useEffect(() => {
-    send('shell.status', { task_id: taskId });
-  }, [taskId, send]);
+    // Increment subscription ID to invalidate any pending requests
+    const currentSubscriptionId = ++subscriptionIdRef.current;
+
+    // Clear any stale output before subscribing to get fresh buffer
+    storeApi.getState().clearShellOutput(taskId);
+    lastOutputLengthRef.current = 0;
+
+    // Also clear the terminal display
+    if (xtermRef.current) {
+      xtermRef.current.clear();
+    }
+
+    const client = getWebSocketClient();
+    if (client) {
+      client
+        .request<{ success: boolean; buffer?: string }>('shell.subscribe', { task_id: taskId })
+        .then((response) => {
+          // Only process if this is still the current subscription (handles React Strict Mode)
+          if (subscriptionIdRef.current !== currentSubscriptionId) return;
+
+          // Write buffered output from response
+          if (response.buffer) {
+            storeApi.getState().appendShellOutput(taskId, response.buffer);
+          }
+        })
+        .catch((err) => {
+          if (subscriptionIdRef.current !== currentSubscriptionId) return;
+          console.error('Failed to subscribe to shell:', err);
+        });
+    }
+  }, [taskId, storeApi]);
 
   return (
     <div
