@@ -9,7 +9,7 @@ import { Input } from '@kandev/ui/input';
 import { Separator } from '@kandev/ui/separator';
 import { Textarea } from '@kandev/ui/textarea';
 import { SettingsPageTemplate } from '@/components/settings/settings-page-template';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@kandev/ui/tooltip';
 import {
   createNotificationProvider,
   deleteNotificationProvider,

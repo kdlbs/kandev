@@ -23,6 +23,13 @@ export function useRepositories(workspaceId: string | null, enabled = true) {
 
   useEffect(() => {
     if (!enabled || !workspaceId) return;
+    if (isLoaded && isLoading) {
+      setRepositoriesLoading(workspaceId, false);
+    }
+  }, [enabled, isLoaded, isLoading, setRepositoriesLoading, workspaceId]);
+
+  useEffect(() => {
+    if (!enabled || !workspaceId) return;
     if (isLoaded || inFlightRef.current) return;
     let cancelled = false;
     inFlightRef.current = true;
