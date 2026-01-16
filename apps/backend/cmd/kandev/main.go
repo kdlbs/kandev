@@ -446,15 +446,15 @@ func main() {
 		for _, message := range messages {
 			action := ws.ActionMessageAdded
 			payload := map[string]interface{}{
-				"message_id":       message.ID,
+				"message_id":      message.ID,
 				"task_session_id": message.TaskSessionID,
-				"task_id":          message.TaskID,
-				"author_type":      string(message.AuthorType),
-				"author_id":        message.AuthorID,
-				"content":          message.Content,
-				"type":             string(message.Type),
-				"requests_input":   message.RequestsInput,
-				"created_at":       message.CreatedAt.Format(time.RFC3339),
+				"task_id":         message.TaskID,
+				"author_type":     string(message.AuthorType),
+				"author_id":       message.AuthorID,
+				"content":         message.Content,
+				"type":            string(message.Type),
+				"requests_input":  message.RequestsInput,
+				"created_at":      message.CreatedAt.Format(time.RFC3339),
 			}
 			if message.Metadata != nil {
 				payload["metadata"] = message.Metadata
@@ -537,11 +537,11 @@ func main() {
 		// Create a message from the agent
 		messageRecord, err := taskSvc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
 			TaskSessionID: session.ID,
-			TaskID:         taskID,
-			Content:        message,
-			AuthorType:     "agent",
-			AuthorID:       agentID,
-			RequestsInput:  true,
+			TaskID:        taskID,
+			Content:       message,
+			AuthorType:    "agent",
+			AuthorID:      agentID,
+			RequestsInput: true,
 		})
 		if err != nil {
 			log.Error("failed to create agent message",
@@ -552,10 +552,10 @@ func main() {
 
 		// Broadcast message.added notification to task subscribers
 		notification, _ := ws.NewNotification(ws.ActionMessageAdded, map[string]interface{}{
-			"task_id":          taskID,
+			"task_id":         taskID,
 			"task_session_id": session.ID,
-			"message":          messageRecord.ToAPI(),
-			"requests_input":   true,
+			"message":         messageRecord.ToAPI(),
+			"requests_input":  true,
 		})
 		gateway.Hub.BroadcastToTask(taskID, notification)
 
@@ -578,22 +578,22 @@ func main() {
 	// Subscribe to message.added events and broadcast to WebSocket subscribers
 	_, err = eventBus.Subscribe(events.MessageAdded, func(ctx context.Context, event *bus.Event) error {
 		data := event.Data
-		agentSessionID, _ := data["agent_session_id"].(string)
+		taskSessionID, _ := data["task_session_id"].(string)
 		taskID, _ := data["task_id"].(string)
-		if agentSessionID == "" {
+		if taskSessionID == "" {
 			return nil
 		}
 
 		payload := map[string]interface{}{
-			"task_id":          taskID,
-			"task_session_id": agentSessionID,
-			"message_id":       data["message_id"],
-			"author_type":      data["author_type"],
-			"author_id":        data["author_id"],
-			"content":          data["content"],
-			"type":             data["type"],
-			"requests_input":   data["requests_input"],
-			"created_at":       data["created_at"],
+			"task_id":         taskID,
+			"task_session_id": taskSessionID,
+			"message_id":      data["message_id"],
+			"author_type":     data["author_type"],
+			"author_id":       data["author_id"],
+			"content":         data["content"],
+			"type":            data["type"],
+			"requests_input":  data["requests_input"],
+			"created_at":      data["created_at"],
 		}
 		if metadata, ok := data["metadata"]; ok && metadata != nil {
 			payload["metadata"] = metadata
@@ -615,22 +615,22 @@ func main() {
 	// Subscribe to message.updated events and broadcast to WebSocket subscribers
 	_, err = eventBus.Subscribe(events.MessageUpdated, func(ctx context.Context, event *bus.Event) error {
 		data := event.Data
-		agentSessionID, _ := data["agent_session_id"].(string)
+		taskSessionID, _ := data["task_session_id"].(string)
 		taskID, _ := data["task_id"].(string)
-		if agentSessionID == "" {
-			log.Warn("message.updated event has no agent_session_id, skipping")
+		if taskSessionID == "" {
+			log.Warn("message.updated event has no task_session_id, skipping")
 			return nil
 		}
 		payload := map[string]interface{}{
-			"message_id":       data["message_id"],
-			"task_session_id": agentSessionID,
-			"task_id":          taskID,
-			"author_type":      data["author_type"],
-			"author_id":        data["author_id"],
-			"content":          data["content"],
-			"type":             data["type"],
-			"requests_input":   data["requests_input"],
-			"created_at":       data["created_at"],
+			"message_id":      data["message_id"],
+			"task_session_id": taskSessionID,
+			"task_id":         taskID,
+			"author_type":     data["author_type"],
+			"author_id":       data["author_id"],
+			"content":         data["content"],
+			"type":            data["type"],
+			"requests_input":  data["requests_input"],
+			"created_at":      data["created_at"],
 		}
 		if metadata, ok := data["metadata"]; ok && metadata != nil {
 			payload["metadata"] = metadata
@@ -649,7 +649,7 @@ func main() {
 		log.Info("Subscribed to message.updated events for WebSocket broadcasting")
 	}
 
-	// Subscribe to agent_session.state_changed events and broadcast to task subscribers
+	// Subscribe to task_session.state_changed events and broadcast to task subscribers
 	_, err = eventBus.Subscribe(events.TaskSessionStateChanged, func(ctx context.Context, event *bus.Event) error {
 		data := event.Data
 		taskID, _ := data["task_id"].(string)
@@ -658,16 +658,16 @@ func main() {
 		}
 		notification, err := ws.NewNotification(ws.ActionTaskSessionStateChanged, data)
 		if err != nil {
-			log.Error("Failed to create agent_session.state_changed notification", zap.Error(err))
+			log.Error("Failed to create task_session.state_changed notification", zap.Error(err))
 			return nil
 		}
 		gateway.Hub.BroadcastToTask(taskID, notification)
 		return nil
 	})
 	if err != nil {
-		log.Error("Failed to subscribe to agent_session.state_changed events", zap.Error(err))
+		log.Error("Failed to subscribe to task_session.state_changed events", zap.Error(err))
 	} else {
-		log.Info("Subscribed to agent_session.state_changed events for WebSocket broadcasting")
+		log.Info("Subscribed to task_session.state_changed events for WebSocket broadcasting")
 	}
 
 	// Subscribe to git status events and broadcast to WebSocket subscribers
@@ -867,6 +867,8 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 		AgentProfileID:  req.AgentProfileID,
 		WorkspacePath:   req.RepositoryURL, // May be empty - lifecycle manager handles this
 		TaskDescription: req.TaskDescription,
+		Env:             req.Env,
+		ACPSessionID:    req.ACPSessionID,
 		Metadata:        req.Metadata,
 		// Worktree configuration for concurrent agent execution
 		UseWorktree:    req.UseWorktree,
@@ -1020,6 +1022,11 @@ func (a *orchestratorAdapter) PromptTask(ctx context.Context, taskID string, pro
 	}, nil
 }
 
+func (a *orchestratorAdapter) ResumeTaskSession(ctx context.Context, taskID, taskSessionID string) error {
+	_, err := a.svc.ResumeTaskSession(ctx, taskID, taskSessionID)
+	return err
+}
+
 // messageCreatorAdapter adapts the task service to the orchestrator.MessageCreator interface
 type messageCreatorAdapter struct {
 	svc *taskservice.Service
@@ -1029,9 +1036,9 @@ type messageCreatorAdapter struct {
 func (a *messageCreatorAdapter) CreateAgentMessage(ctx context.Context, taskID, content, agentSessionID string) error {
 	_, err := a.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
 		TaskSessionID: agentSessionID,
-		TaskID:         taskID,
-		Content:        content,
-		AuthorType:     "agent",
+		TaskID:        taskID,
+		Content:       content,
+		AuthorType:    "agent",
 	})
 	return err
 }
@@ -1040,9 +1047,9 @@ func (a *messageCreatorAdapter) CreateAgentMessage(ctx context.Context, taskID, 
 func (a *messageCreatorAdapter) CreateUserMessage(ctx context.Context, taskID, content, agentSessionID string) error {
 	_, err := a.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
 		TaskSessionID: agentSessionID,
-		TaskID:         taskID,
-		Content:        content,
-		AuthorType:     "user",
+		TaskID:        taskID,
+		Content:       content,
+		AuthorType:    "user",
 	})
 	return err
 }
@@ -1067,11 +1074,11 @@ func (a *messageCreatorAdapter) CreateToolCallMessage(ctx context.Context, taskI
 
 	_, err := a.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
 		TaskSessionID: agentSessionID,
-		TaskID:         taskID,
-		Content:        title,
-		AuthorType:     "agent",
-		Type:           "tool_call",
-		Metadata:       metadata,
+		TaskID:        taskID,
+		Content:       title,
+		AuthorType:    "agent",
+		Type:          "tool_call",
+		Metadata:      metadata,
 	})
 	return err
 }
@@ -1085,12 +1092,12 @@ func (a *messageCreatorAdapter) UpdateToolCallMessage(ctx context.Context, taskI
 func (a *messageCreatorAdapter) CreateSessionMessage(ctx context.Context, taskID, content, agentSessionID, messageType string, metadata map[string]interface{}, requestsInput bool) error {
 	_, err := a.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
 		TaskSessionID: agentSessionID,
-		TaskID:         taskID,
-		Content:        content,
-		AuthorType:     "agent",
-		Type:           messageType,
-		Metadata:       metadata,
-		RequestsInput:  requestsInput,
+		TaskID:        taskID,
+		Content:       content,
+		AuthorType:    "agent",
+		Type:          messageType,
+		Metadata:      metadata,
+		RequestsInput: requestsInput,
 	})
 	return err
 }

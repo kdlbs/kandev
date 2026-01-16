@@ -77,7 +77,7 @@ export function ToolCallMessage({ comment }: { comment: Message }) {
   }
 
   return (
-    <div className="rounded-md border border-border/40 bg-muted/20 overflow-hidden max-w-[85%]">
+    <div className="w-full rounded-md border border-border/50 bg-muted/20 overflow-hidden">
       <button
         type="button"
         onClick={() => hasDetails && setIsExpanded(!isExpanded)}

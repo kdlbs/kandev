@@ -1,4 +1,13 @@
-// Package config provides configuration for agentctl
+// Package config provides unified configuration for agentctl.
+//
+// agentctl is runtime-agnostic - it behaves identically whether running
+// inside a Docker container or directly on the host. The caller (kandev backend)
+// handles any Docker vs standalone differences.
+//
+// Configuration hierarchy:
+//   - Config: Global server settings (ports, logging, instance limits)
+//   - Config.Defaults: Default values for new instances
+//   - InstanceConfig: Per-instance settings (derived from Defaults + overrides)
 package config
 
 import (
@@ -9,31 +18,21 @@ import (
 	"github.com/kandev/kandev/pkg/agent"
 )
 
-// Config holds the agentctl configuration
+// Config is the agentctl configuration.
+// agentctl always exposes the same instance management API regardless of
+// deployment context (Docker container or host machine).
 type Config struct {
-	// HTTP server port
+	// Port is the control/API server port
 	Port int
 
-	// Protocol used to communicate with the agent
-	Protocol agent.Protocol
+	// Ports configures the port range for instance allocation
+	Ports PortConfig
 
-	// Agent command to execute (e.g., "auggie --acp")
-	AgentCommand string
+	// MaxInstances is the maximum number of concurrent agent instances.
+	MaxInstances int
 
-	// Agent arguments (parsed from AgentCommand)
-	AgentArgs []string
-
-	// Working directory for the agent process
-	WorkDir string
-
-	// Environment variables to pass to the agent
-	AgentEnv []string
-
-	// Auto-start the agent on agentctl startup
-	AutoStart bool
-
-	// Auto-approve permission requests (for testing/CI)
-	AutoApprovePermissions bool
+	// Defaults provides default values for new instances
+	Defaults InstanceDefaults
 
 	// Shell configuration
 	ShellEnabled bool // Enable auto-shell feature (default: true)
@@ -41,53 +40,183 @@ type Config struct {
 	// Logging configuration
 	LogLevel  string
 	LogFormat string
+}
 
-	// Health check interval
+// PortConfig defines port allocation for instances
+type PortConfig struct {
+	// Base is the starting port for instance allocation (multi-instance mode)
+	Base int
+	// Max is the maximum port for instance allocation
+	Max int
+}
+
+// InstanceDefaults provides default values for new instances.
+// These can be overridden when creating an instance.
+type InstanceDefaults struct {
+	// Protocol for agent communication (acp, codex, mcp)
+	Protocol agent.Protocol
+
+	// AgentCommand is the command to run the agent (e.g., "auggie --acp")
+	AgentCommand string
+
+	// WorkDir is the default working directory
+	WorkDir string
+
+	// AutoStart starts the agent automatically when the instance is created
+	AutoStart bool
+
+	// AutoApprovePermissions auto-approves permission requests (for testing/CI)
+	AutoApprovePermissions bool
+
+	// HealthCheckInterval is the interval in seconds for health checks
 	HealthCheckInterval int
 }
 
-// Load loads configuration from environment variables
-func Load() *Config {
-	workDir := getEnv("AGENTCTL_WORKDIR", "/workspace")
+// InstanceConfig holds configuration for a single agent instance.
+// This is passed to the process manager and API server.
+type InstanceConfig struct {
+	// Port is the HTTP server port for this instance
+	Port int
 
-	cfg := &Config{
-		Port:                   getEnvInt("AGENTCTL_PORT", 9999),
-		Protocol:               agent.Protocol(getEnv("AGENTCTL_PROTOCOL", string(agent.ProtocolACP))),
-		AgentCommand:           getEnv("AGENTCTL_AGENT_COMMAND", "auggie --acp"),
-		WorkDir:                workDir,
-		AutoStart:              getEnvBool("AGENTCTL_AUTO_START", false),
-		AutoApprovePermissions: getEnvBool("AGENTCTL_AUTO_APPROVE_PERMISSIONS", false),
-		ShellEnabled:           getEnvBool("AGENTCTL_SHELL_ENABLED", true),
-		LogLevel:               getEnv("AGENTCTL_LOG_LEVEL", "info"),
-		LogFormat:              getEnv("AGENTCTL_LOG_FORMAT", "json"),
-		HealthCheckInterval:    getEnvInt("AGENTCTL_HEALTH_CHECK_INTERVAL", 5),
+	// Protocol for agent communication
+	Protocol agent.Protocol
+
+	// AgentCommand is the command to run the agent
+	AgentCommand string
+
+	// AgentArgs is the parsed command (derived from AgentCommand)
+	AgentArgs []string
+
+	// WorkDir is the working directory for the agent process
+	WorkDir string
+
+	// AgentEnv is the environment variables to pass to the agent
+	AgentEnv []string
+
+	// AutoStart starts the agent automatically
+	AutoStart bool
+
+	// AutoApprovePermissions auto-approves permission requests
+	AutoApprovePermissions bool
+
+	// ShellEnabled enables auto-shell feature
+	ShellEnabled bool
+
+	// LogLevel for this instance
+	LogLevel string
+
+	// LogFormat for this instance
+	LogFormat string
+}
+
+// Load loads the configuration from environment variables.
+func Load() *Config {
+	return &Config{
+		Port:         getEnvInt("AGENTCTL_PORT", 9999),
+		MaxInstances: getEnvInt("AGENTCTL_MAX_INSTANCES", 10),
+		Ports: PortConfig{
+			Base: getEnvInt("AGENTCTL_INSTANCE_PORT_BASE", 10001),
+			Max:  getEnvInt("AGENTCTL_INSTANCE_PORT_MAX", 10100),
+		},
+		Defaults: InstanceDefaults{
+			Protocol:               agent.Protocol(getEnv("AGENTCTL_PROTOCOL", string(agent.ProtocolACP))),
+			AgentCommand:           getEnv("AGENTCTL_AGENT_COMMAND", "auggie --acp"),
+			WorkDir:                getEnv("AGENTCTL_WORKDIR", "/workspace"),
+			AutoStart:              getEnvBool("AGENTCTL_AUTO_START", false),
+			AutoApprovePermissions: getEnvBool("AGENTCTL_AUTO_APPROVE_PERMISSIONS", false),
+			HealthCheckInterval:    getEnvInt("AGENTCTL_HEALTH_CHECK_INTERVAL", 5),
+		},
+		ShellEnabled: getEnvBool("AGENTCTL_SHELL_ENABLED", true),
+		LogLevel:     getEnv("AGENTCTL_LOG_LEVEL", "info"),
+		LogFormat:    getEnv("AGENTCTL_LOG_FORMAT", "json"),
+	}
+}
+
+// NewInstanceConfig creates an InstanceConfig from defaults with optional overrides.
+// If port is 0, it should be allocated by the caller.
+func (c *Config) NewInstanceConfig(port int, overrides *InstanceOverrides) *InstanceConfig {
+	cfg := &InstanceConfig{
+		Port:                   port,
+		Protocol:               c.Defaults.Protocol,
+		AgentCommand:           c.Defaults.AgentCommand,
+		WorkDir:                c.Defaults.WorkDir,
+		AutoStart:              c.Defaults.AutoStart,
+		AutoApprovePermissions: c.Defaults.AutoApprovePermissions,
+		ShellEnabled:           c.ShellEnabled,
+		LogLevel:               c.LogLevel,
+		LogFormat:              c.LogFormat,
+	}
+
+	// Apply overrides if provided
+	if overrides != nil {
+		if overrides.Protocol != "" {
+			cfg.Protocol = overrides.Protocol
+		}
+		if overrides.AgentCommand != "" {
+			cfg.AgentCommand = overrides.AgentCommand
+		}
+		if overrides.WorkDir != "" {
+			cfg.WorkDir = overrides.WorkDir
+		}
+		if overrides.AutoStart != nil {
+			cfg.AutoStart = *overrides.AutoStart
+		}
+		if overrides.Env != nil {
+			cfg.AgentEnv = overrides.Env
+		}
 	}
 
 	// Parse agent command into args
-	cfg.AgentArgs = parseCommand(cfg.AgentCommand)
+	cfg.AgentArgs = ParseCommand(cfg.AgentCommand)
 
-	// Collect agent environment variables (pass through most env vars)
-	cfg.AgentEnv = collectAgentEnv()
+	// Collect environment if not explicitly set
+	if cfg.AgentEnv == nil {
+		cfg.AgentEnv = CollectAgentEnv(nil)
+	}
 
 	return cfg
 }
 
-// parseCommand splits a command string into arguments
-func parseCommand(cmd string) []string {
-	// Simple split by spaces (doesn't handle quotes, but good enough for now)
+// InstanceOverrides allows overriding default values when creating an instance
+type InstanceOverrides struct {
+	Protocol     agent.Protocol
+	AgentCommand string
+	WorkDir      string
+	AutoStart    *bool
+	Env          []string
+}
+
+// ParseCommand splits a command string into arguments
+func ParseCommand(cmd string) []string {
 	return strings.Fields(cmd)
 }
 
-// collectAgentEnv collects environment variables to pass to the agent
-func collectAgentEnv() []string {
-	// Pass through all environment variables except AGENTCTL_* ones
-	var env []string
+// CollectAgentEnv collects environment variables to pass to the agent.
+// It filters out AGENTCTL_* variables and optionally merges additional env vars.
+func CollectAgentEnv(additional map[string]string) []string {
+	envMap := make(map[string]string)
+
+	// Start with current environment, excluding AGENTCTL_* vars
 	for _, e := range os.Environ() {
-		if !strings.HasPrefix(e, "AGENTCTL_") {
-			env = append(env, e)
+		if idx := strings.Index(e, "="); idx > 0 {
+			key := e[:idx]
+			if !strings.HasPrefix(key, "AGENTCTL_") {
+				envMap[key] = e[idx+1:]
+			}
 		}
 	}
-	return env
+
+	// Merge additional env vars
+	for k, v := range additional {
+		envMap[k] = v
+	}
+
+	// Convert back to slice
+	result := make([]string, 0, len(envMap))
+	for k, v := range envMap {
+		result = append(result, k+"="+v)
+	}
+	return result
 }
 
 func getEnv(key, defaultValue string) string {

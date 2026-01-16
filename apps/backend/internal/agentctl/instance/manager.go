@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -19,13 +18,13 @@ import (
 )
 
 // ServerFactory creates an HTTP handler for an instance given its config and process manager.
-type ServerFactory func(cfg *config.Config, procMgr *process.Manager, log *logger.Logger) http.Handler
+type ServerFactory func(cfg *config.InstanceConfig, procMgr *process.Manager, log *logger.Logger) http.Handler
 
 // Manager manages multiple agent instances.
 // It handles creation, tracking, and removal of agent instances,
 // each with their own HTTP server on a dedicated port.
 type Manager struct {
-	config        *config.MultiConfig
+	config        *config.Config
 	logger        *logger.Logger
 	instances     map[string]*Instance
 	portAlloc     *PortAllocator
@@ -34,12 +33,12 @@ type Manager struct {
 }
 
 // NewManager creates a new instance manager.
-func NewManager(cfg *config.MultiConfig, log *logger.Logger) *Manager {
+func NewManager(cfg *config.Config, log *logger.Logger) *Manager {
 	return &Manager{
 		config:    cfg,
 		logger:    log.WithFields(zap.String("component", "instance-manager")),
 		instances: make(map[string]*Instance),
-		portAlloc: NewPortAllocator(cfg.InstancePortBase, cfg.InstancePortMax),
+		portAlloc: NewPortAllocator(cfg.Ports.Base, cfg.Ports.Max),
 	}
 }
 
@@ -76,43 +75,29 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 		return nil, fmt.Errorf("failed to allocate port: %w", err)
 	}
 
-	// Determine agent command
+	// Determine agent command, adding workspace flag if needed
 	agentCmd := req.AgentCommand
 	if agentCmd == "" {
-		agentCmd = m.config.DefaultAgentCommand
+		agentCmd = m.config.Defaults.AgentCommand
 	}
-
-	// Determine protocol
-	protocol := agent.Protocol(req.Protocol)
-	if protocol == "" {
-		protocol = m.config.DefaultProtocol
-	}
-
-	// Add workspace path flag if configured
-	// Note: We also set cmd.Dir to the workspace path, so this is mainly for
-	// agents that need an explicit flag rather than relying on cwd
 	if req.WorkspacePath != "" && req.WorkspaceFlag != "" {
 		if !strings.Contains(agentCmd, req.WorkspaceFlag) {
 			agentCmd = agentCmd + " " + req.WorkspaceFlag + " " + req.WorkspacePath
 		}
 	}
 
-	// Create config for the process manager
-	instanceCfg := &config.Config{
-		Port:                   port,
-		Protocol:               protocol,
-		AgentCommand:           agentCmd,
-		WorkDir:                req.WorkspacePath,
-		AutoStart:              req.AutoStart,
-		AutoApprovePermissions: m.config.AutoApprovePermissions,
-		ShellEnabled:           m.config.ShellEnabled,
-		LogLevel:               m.config.LogLevel,
-		LogFormat:              m.config.LogFormat,
+	// Build overrides from request
+	autoStart := req.AutoStart
+	overrides := &config.InstanceOverrides{
+		Protocol:     agent.Protocol(req.Protocol),
+		AgentCommand: agentCmd,
+		WorkDir:      req.WorkspacePath,
+		AutoStart:    &autoStart,
+		Env:          config.CollectAgentEnv(req.Env),
 	}
-	// Parse agent args
-	instanceCfg.AgentArgs = strings.Fields(instanceCfg.AgentCommand)
-	// Collect environment
-	instanceCfg.AgentEnv = collectEnvForInstance(req.Env)
+
+	// Create instance config using the unified method
+	instanceCfg := m.config.NewInstanceConfig(port, overrides)
 
 	// Create process manager
 	procMgr := process.NewManager(instanceCfg, m.logger)
@@ -250,33 +235,4 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 	}
 
 	return lastErr
-}
-
-// collectEnvForInstance collects environment variables for an instance.
-// It starts with os.Environ() (excluding AGENTCTL_* vars), then adds/overrides
-// with the provided env map.
-func collectEnvForInstance(env map[string]string) []string {
-	// Start with current environment, excluding AGENTCTL_* vars
-	envMap := make(map[string]string)
-	for _, e := range os.Environ() {
-		parts := strings.SplitN(e, "=", 2)
-		if len(parts) == 2 {
-			key := parts[0]
-			if !strings.HasPrefix(key, "AGENTCTL_") {
-				envMap[key] = parts[1]
-			}
-		}
-	}
-
-	// Add/override with provided env
-	for k, v := range env {
-		envMap[k] = v
-	}
-
-	// Convert back to []string
-	result := make([]string, 0, len(envMap))
-	for k, v := range envMap {
-		result = append(result, fmt.Sprintf("%s=%s", k, v))
-	}
-	return result
 }

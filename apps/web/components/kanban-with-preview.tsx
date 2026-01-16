@@ -8,6 +8,7 @@ import { useKanbanPreview } from "@/hooks/use-kanban-preview";
 import { useAppStore } from "@/components/state-provider";
 import { Task } from "./kanban-card";
 import { PREVIEW_PANEL } from "@/lib/settings/constants";
+import { getWebSocketClient } from "@/lib/ws/connection";
 
 export function KanbanWithPreview() {
   const router = useRouter();
@@ -30,6 +31,7 @@ export function KanbanWithPreview() {
       // Cleanup handled by close
     },
   });
+  const [selectedTaskSessionId, setSelectedTaskSessionId] = useState<string | null>(null);
 
   // Compute selected task from kanbanTasks and selectedTaskId
   const selectedTask = useMemo(() => {
@@ -48,6 +50,44 @@ export function KanbanWithPreview() {
       repositoryId: task.repositoryId,
     };
   }, [selectedTaskId, kanbanTasks]);
+
+  useEffect(() => {
+    if (!selectedTaskId) {
+      return;
+    }
+
+    let isActive = true;
+    const loadLatestSession = async () => {
+      const client = getWebSocketClient();
+      if (!client) {
+        if (isActive) {
+          setSelectedTaskSessionId(null);
+        }
+        return;
+      }
+      try {
+        const response = await client.request<{ sessions: Array<{ id: string }> }>(
+          "task.session.list",
+          { task_id: selectedTaskId },
+          10000
+        );
+        if (isActive) {
+          setSelectedTaskSessionId(response.sessions[0]?.id ?? null);
+        }
+      } catch (error) {
+        console.error("Failed to load task sessions:", error);
+        if (isActive) {
+          setSelectedTaskSessionId(null);
+        }
+      }
+    };
+
+    loadLatestSession();
+
+    return () => {
+      isActive = false;
+    };
+  }, [selectedTaskId]);
 
   // Measure container width on mount and resize
   useEffect(() => {
@@ -82,9 +122,9 @@ export function KanbanWithPreview() {
   }, [isOpen, selectedTaskId, selectedTask, close]);
 
   const handleNavigateToTask = useCallback(
-    (task: Task) => {
+    (task: Task, sessionId: string) => {
       close();
-      router.push(`/task/${task.id}`);
+      router.push(`/task/${task.id}/${sessionId}`);
     },
     [close, router]
   );
@@ -149,6 +189,8 @@ export function KanbanWithPreview() {
     ? minKanbanWidthPx
     : (isOpen ? containerWidth - previewWidthPx : containerWidth);
 
+  const activeSessionId = selectedTaskId ? selectedTaskSessionId : null;
+
   return (
     <div ref={containerRef} className="h-screen w-full flex flex-col bg-background relative">
       {shouldFloat ? (
@@ -192,7 +234,16 @@ export function KanbanWithPreview() {
 
             {/* Panel content */}
             <div className="flex-1 min-w-0 overflow-hidden">
-              <TaskPreviewPanel task={selectedTask} onClose={close} onMaximize={handleNavigateToTask} />
+              <TaskPreviewPanel
+                task={selectedTask}
+                sessionId={activeSessionId}
+                onClose={close}
+                onMaximize={
+                  activeSessionId
+                    ? (task) => handleNavigateToTask(task, activeSessionId)
+                    : undefined
+                }
+              />
             </div>
           </div>
         </>
@@ -231,7 +282,16 @@ export function KanbanWithPreview() {
 
               {/* Panel content */}
               <div className="flex-1 min-w-0 overflow-hidden">
-                <TaskPreviewPanel task={selectedTask} onClose={close} onMaximize={handleNavigateToTask} />
+                <TaskPreviewPanel
+                  task={selectedTask}
+                  sessionId={activeSessionId}
+                  onClose={close}
+                  onMaximize={
+                    activeSessionId
+                      ? (task) => handleNavigateToTask(task, activeSessionId)
+                      : undefined
+                  }
+                />
               </div>
             </div>
           )}

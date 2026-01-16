@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useCallback, useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   IconStack2,
   IconLoader2,
@@ -20,8 +21,10 @@ import {
 import { Badge } from '@kandev/ui/badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
 import { TaskCreateDialog } from '../task-create-dialog';
+import { useAppStore } from '@/components/state-provider';
+import { getWebSocketClient } from '@/lib/ws/connection';
 
-type SessionStatus = 'running' | 'waiting_input' | 'complete' | 'failed';
+type SessionStatus = 'running' | 'waiting_input' | 'complete' | 'failed' | 'cancelled';
 
 type Session = {
   id: string;
@@ -31,12 +34,17 @@ type Session = {
   status: SessionStatus;
 };
 
-// Dummy data - will be replaced with real data later
-const DUMMY_SESSIONS: Session[] = [
-  { id: '1', number: 1, agentProfile: 'Gemini Flash 2.0', startedAt: new Date(Date.now() - 114000), status: 'running' },
-  { id: '2', number: 2, agentProfile: 'Auggie Sonnet 4.5', startedAt: new Date(Date.now() - 192000), status: 'complete' },
-  { id: '3', number: 3, agentProfile: 'Gemini Flash 2.0', startedAt: new Date(Date.now() - 45000), status: 'waiting_input' },
-];
+type TaskSessionResponse = {
+  id: string;
+  agent_profile_id?: string;
+  started_at: string;
+  state: string;
+};
+
+type ListTaskSessionsResponse = {
+  sessions: TaskSessionResponse[];
+  total: number;
+};
 
 // Format duration from start time
 function formatDuration(startedAt: Date, isRunning: boolean): string {
@@ -65,6 +73,7 @@ function getStatusIcon(status: SessionStatus) {
     case 'waiting_input':
       return <IconAlertCircle className="h-3.5 w-3.5 text-yellow-500" />;
     case 'failed':
+    case 'cancelled':
       return <IconX className="h-3.5 w-3.5 text-red-500" />;
   }
 }
@@ -79,19 +88,74 @@ function getStatusLabel(status: SessionStatus) {
       return 'Waiting for input';
     case 'failed':
       return 'Failed';
+    case 'cancelled':
+      return 'Cancelled';
+  }
+}
+
+function mapSessionStatus(state: string): SessionStatus {
+  switch (state) {
+    case 'RUNNING':
+    case 'STARTING':
+      return 'running';
+    case 'WAITING_FOR_INPUT':
+      return 'waiting_input';
+    case 'COMPLETED':
+      return 'complete';
+    case 'FAILED':
+      return 'failed';
+    case 'CANCELLED':
+      return 'cancelled';
+    default:
+      return 'running';
   }
 }
 
 type SessionsDropdownProps = {
+  taskId: string | null;
+  activeSessionId?: string | null;
   taskTitle?: string;
   taskDescription?: string;
 };
 
-export function SessionsDropdown({ taskTitle = '', taskDescription = '' }: SessionsDropdownProps) {
-  const [sessions] = useState<Session[]>(DUMMY_SESSIONS);
-  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+export function SessionsDropdown({ taskId, activeSessionId = null, taskTitle = '', taskDescription = '' }: SessionsDropdownProps) {
+  const [sessions, setSessions] = useState<Session[]>([]);
   const [currentTime, setCurrentTime] = useState(() => Date.now());
   const [showNewSessionDialog, setShowNewSessionDialog] = useState(false);
+  const agentProfiles = useAppStore((state) => state.agentProfiles.items);
+  const router = useRouter();
+  const visibleSessions = taskId ? sessions : [];
+
+  const fetchSessions = useCallback(async (targetTaskId: string) => {
+    const client = getWebSocketClient();
+    if (!client) return;
+    try {
+      const response = await client.request<ListTaskSessionsResponse>('task.session.list', {
+        task_id: targetTaskId,
+      });
+      const total = response.sessions.length;
+      const mapped = response.sessions.map((session, index) => {
+        const label = agentProfiles.find((profile) => profile.id === session.agent_profile_id)?.label
+          ?? session.agent_profile_id
+          ?? 'Unknown agent';
+        return {
+          id: session.id,
+          number: total - index,
+          agentProfile: label,
+          startedAt: new Date(session.started_at),
+          status: mapSessionStatus(session.state),
+        };
+      });
+      setSessions(mapped);
+    } catch (error) {
+      console.error('Failed to load task sessions:', error);
+    }
+  }, [agentProfiles]);
+
+  const handleOpenChange = useCallback((open: boolean) => {
+    if (!open || !taskId) return;
+    fetchSessions(taskId);
+  }, [fetchSessions, taskId]);
 
   // Update timer every second for running sessions
   useEffect(() => {
@@ -111,10 +175,21 @@ export function SessionsDropdown({ taskTitle = '', taskDescription = '' }: Sessi
     console.log('Cancel session:', sessionId);
   };
 
-  const handleSelectSession = (sessionId: string) => {
-    setSelectedSessionId(sessionId);
-    // TODO: Implement session switching
-    console.log('Select session:', sessionId);
+  const handleSelectSession = async (sessionId: string) => {
+    if (!taskId) return;
+    const client = getWebSocketClient();
+    if (!client) return;
+
+    try {
+      await client.request('task.session.resume', {
+        task_id: taskId,
+        task_session_id: sessionId,
+      }, 15000);
+      await fetchSessions(taskId);
+      router.push(`/task/${taskId}/${sessionId}`);
+    } catch (error) {
+      console.error('Failed to resume task session:', error);
+    }
   };
 
   const handleCreateSession = (data: {
@@ -129,7 +204,7 @@ export function SessionsDropdown({ taskTitle = '', taskDescription = '' }: Sessi
 
   return (
     <>
-    <DropdownMenu>
+    <DropdownMenu onOpenChange={handleOpenChange}>
       <DropdownMenuTrigger asChild>
         <Button
           variant="ghost"
@@ -138,13 +213,13 @@ export function SessionsDropdown({ taskTitle = '', taskDescription = '' }: Sessi
         >
           <IconStack2 className="h-4 w-4 text-muted-foreground" />
           <Badge variant="secondary" className="h-5 px-1.5 text-xs font-normal">
-            {sessions.length}
+            {visibleSessions.length}
           </Badge>
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-[480px]">
         <div className="flex items-center justify-between px-2 py-1.5">
-          <span className="text-xs font-medium text-muted-foreground">Agent Sessions</span>
+          <span className="text-xs font-medium text-muted-foreground">Task Sessions</span>
           <button
             type="button"
             onClick={() => setShowNewSessionDialog(true)}
@@ -156,13 +231,13 @@ export function SessionsDropdown({ taskTitle = '', taskDescription = '' }: Sessi
         </div>
         <DropdownMenuSeparator />
         <div className="max-h-[300px] overflow-y-auto">
-          {sessions.length === 0 ? (
+          {visibleSessions.length === 0 ? (
             <div className="px-2 py-6 text-center text-sm text-muted-foreground">
               No sessions yet
             </div>
           ) : (
             <div className="space-y-0.5">
-              {sessions.map((session) => {
+              {visibleSessions.map((session) => {
                 const duration = formatDuration(session.startedAt, session.status === 'running');
                 // Use currentTime to force re-render when timer updates
                 void currentTime;
@@ -172,7 +247,7 @@ export function SessionsDropdown({ taskTitle = '', taskDescription = '' }: Sessi
                     key={session.id}
                     onClick={() => handleSelectSession(session.id)}
                     className={`w-full flex items-center gap-3 px-2 py-1.5 hover:bg-muted/50 rounded-sm cursor-pointer transition-colors ${
-                      selectedSessionId === session.id ? 'bg-muted/50' : ''
+                      activeSessionId === session.id ? 'bg-muted/50' : ''
                     }`}
                   >
                     {/* Session Number - Fixed width */}
@@ -245,4 +320,3 @@ export function SessionsDropdown({ taskTitle = '', taskDescription = '' }: Sessi
   </>
   );
 }
-

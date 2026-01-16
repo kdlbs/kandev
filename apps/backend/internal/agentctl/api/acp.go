@@ -128,6 +128,62 @@ func (s *Server) handleACPNewSession(c *gin.Context) {
 	})
 }
 
+// LoadSessionRequest is a request to load an existing ACP session
+type LoadSessionRequest struct {
+	SessionID string `json:"session_id"`
+}
+
+// LoadSessionResponse is the response to a load session call
+type LoadSessionResponse struct {
+	Success   bool   `json:"success"`
+	SessionID string `json:"session_id,omitempty"`
+	Error     string `json:"error,omitempty"`
+}
+
+func (s *Server) handleACPLoadSession(c *gin.Context) {
+	var req LoadSessionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, LoadSessionResponse{
+			Success: false,
+			Error:   "invalid request: " + err.Error(),
+		})
+		return
+	}
+	if req.SessionID == "" {
+		c.JSON(http.StatusBadRequest, LoadSessionResponse{
+			Success: false,
+			Error:   "session_id is required",
+		})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+	defer cancel()
+
+	adapter := s.procMgr.GetAdapter()
+	if adapter == nil {
+		c.JSON(http.StatusServiceUnavailable, LoadSessionResponse{
+			Success: false,
+			Error:   "agent not running",
+		})
+		return
+	}
+
+	if err := adapter.LoadSession(ctx, req.SessionID); err != nil {
+		s.logger.Error("load session failed", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, LoadSessionResponse{
+			Success: false,
+			Error:   err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, LoadSessionResponse{
+		Success:   true,
+		SessionID: req.SessionID,
+	})
+}
+
 // PromptRequest is a request to send a prompt to the agent
 type PromptRequest struct {
 	Text string `json:"text"` // Simple text prompt
@@ -220,8 +276,6 @@ func (s *Server) handleACPStreamWS(c *gin.Context) {
 		}
 	}
 }
-
-
 
 // PermissionRespondRequest is a request to respond to a permission request
 type PermissionRespondRequest struct {

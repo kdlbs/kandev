@@ -18,7 +18,7 @@ export function ChatMessage({ comment, label, className, showRichBlocks }: ChatM
   const isUser = comment.author_type === 'user';
 
   return (
-    <div className={cn('max-w-[85%] rounded-lg px-4 py-3 text-sm', className)}>
+    <div className={cn('w-full rounded-lg border px-4 py-3 text-sm', className)}>
       <p className="text-[11px] uppercase tracking-wide mb-2 opacity-70">
         {label}
         {comment.requests_input ? (

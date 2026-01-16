@@ -66,7 +66,7 @@ VALUES
     ('task-103', 'dev-board-2', 'col-planned', 'Agent type marketplace', 'Browse and install different agent types', 'TODO', 6, 0, '', '$KANDEV_REPO_PATH', '', '{}', datetime('now'), datetime('now'));
 
 -- Sample comments on tasks
-INSERT OR REPLACE INTO task_comments (id, task_id, author_type, author_id, content, type, metadata, requests_input, agent_session_id, created_at)
+INSERT OR REPLACE INTO task_comments (id, task_id, author_type, author_id, content, type, metadata, requests_input, task_session_id, created_at)
 VALUES
     -- Comments on task-005 (Agent session persistence)
     ('comment-001', 'task-005', 'user', 'dev-user', 'Starting work on database schema for agent sessions', 'message', '{}', 0, '', datetime('now', '-2 hours')),

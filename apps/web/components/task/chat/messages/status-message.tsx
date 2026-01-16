@@ -17,10 +17,10 @@ export function StatusMessage({ comment }: { comment: Message }) {
   return (
     <div
       className={cn(
-        'max-w-[85%] rounded-lg border px-4 py-3 text-sm',
+        'w-full rounded-lg border px-4 py-3 text-sm',
         comment.type === 'error'
           ? 'border-red-500/40 bg-red-500/10 text-foreground'
-          : 'border-border/50 bg-muted/40 text-foreground'
+          : 'border-border/60 bg-muted/30 text-foreground'
       )}
     >
       <div className="flex items-center gap-2 mb-2 text-[11px] uppercase tracking-wide opacity-70">

@@ -369,6 +369,11 @@ func (s *Service) ListTasks(ctx context.Context, boardID string) ([]*models.Task
 	return s.repo.ListTasks(ctx, boardID)
 }
 
+// ListTaskSessions returns all sessions for a task.
+func (s *Service) ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
+	return s.repo.ListTaskSessions(ctx, taskID)
+}
+
 // UpdateTaskState updates the state of a task, moves it to the matching column,
 // and publishes a task.state_changed event
 func (s *Service) UpdateTaskState(ctx context.Context, id string, state v1.TaskState) (*models.Task, error) {
@@ -1276,7 +1281,7 @@ func (s *Service) publishEnvironmentEvent(ctx context.Context, eventType string,
 
 // CreateMessageRequest contains the data for creating a new message
 type CreateMessageRequest struct {
-	TaskSessionID string                 `json:"agent_session_id"`
+	TaskSessionID string                 `json:"task_session_id"`
 	TaskID         string                 `json:"task_id,omitempty"`
 	Content        string                 `json:"content"`
 	AuthorType     string                 `json:"author_type,omitempty"` // "user" or "agent", defaults to "user"
@@ -1331,7 +1336,7 @@ func (s *Service) CreateMessage(ctx context.Context, req *CreateMessageRequest) 
 
 	s.logger.Info("message created",
 		zap.String("message_id", message.ID),
-		zap.String("agent_session_id", message.TaskSessionID),
+		zap.String("task_session_id", message.TaskSessionID),
 		zap.String("author_type", string(message.AuthorType)))
 
 	return message, nil
@@ -1380,7 +1385,7 @@ func (s *Service) UpdateToolCallMessage(ctx context.Context, sessionID, toolCall
 	message, err := s.repo.GetMessageByToolCallID(ctx, sessionID, toolCallID)
 	if err != nil {
 		s.logger.Warn("tool call message not found for update",
-			zap.String("agent_session_id", sessionID),
+			zap.String("task_session_id", sessionID),
 			zap.String("tool_call_id", toolCallID),
 			zap.Error(err))
 		return err
@@ -1427,7 +1432,7 @@ func (s *Service) publishMessageEvent(ctx context.Context, eventType string, mes
 
 	data := map[string]interface{}{
 		"message_id":       message.ID,
-		"agent_session_id": message.TaskSessionID,
+		"task_session_id": message.TaskSessionID,
 		"task_id":          message.TaskID,
 		"author_type":      string(message.AuthorType),
 		"author_id":        message.AuthorID,

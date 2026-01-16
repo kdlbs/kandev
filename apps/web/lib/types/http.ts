@@ -99,6 +99,37 @@ export type Task = {
   worktree_branch?: string | null;
 };
 
+export type TaskSession = {
+  id: string;
+  task_id: string;
+  agent_instance_id?: string;
+  container_id?: string;
+  agent_profile_id?: string;
+  executor_id?: string;
+  environment_id?: string;
+  repository_id?: string;
+  base_branch?: string;
+  worktree_id?: string;
+  worktree_path?: string;
+  worktree_branch?: string;
+  state: TaskSessionState;
+  progress: number;
+  error_message?: string;
+  metadata?: Record<string, unknown> | null;
+  agent_profile_snapshot?: Record<string, unknown> | null;
+  executor_snapshot?: Record<string, unknown> | null;
+  environment_snapshot?: Record<string, unknown> | null;
+  repository_snapshot?: Record<string, unknown> | null;
+  started_at: string;
+  completed_at?: string | null;
+  updated_at: string;
+};
+
+export type TaskSessionsResponse = {
+  sessions: TaskSession[];
+  total: number;
+};
+
 export type User = {
   id: string;
   email: string;

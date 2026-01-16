@@ -86,6 +86,31 @@ func (c *Controller) StartTask(ctx context.Context, req dto.StartTaskRequest) (d
 	return resp, nil
 }
 
+// ResumeTaskSession resumes a specific task session execution.
+func (c *Controller) ResumeTaskSession(ctx context.Context, req dto.ResumeTaskSessionRequest) (dto.ResumeTaskSessionResponse, error) {
+	execution, err := c.service.ResumeTaskSession(ctx, req.TaskID, req.TaskSessionID)
+	if err != nil {
+		return dto.ResumeTaskSessionResponse{}, err
+	}
+
+	resp := dto.ResumeTaskSessionResponse{
+		Success:         true,
+		TaskID:          execution.TaskID,
+		AgentInstanceID: execution.AgentInstanceID,
+		TaskSessionID:  execution.SessionID,
+		State:           string(execution.SessionState),
+	}
+
+	if execution.WorktreePath != "" {
+		resp.WorktreePath = &execution.WorktreePath
+	}
+	if execution.WorktreeBranch != "" {
+		resp.WorktreeBranch = &execution.WorktreeBranch
+	}
+
+	return resp, nil
+}
+
 // StopTask stops task execution
 func (c *Controller) StopTask(ctx context.Context, req dto.StopTaskRequest) (dto.SuccessResponse, error) {
 	reason := req.Reason

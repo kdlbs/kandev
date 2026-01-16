@@ -34,15 +34,16 @@ type AgentInstance struct {
 	TaskID         string
 	AgentProfileID string
 	ContainerID    string
-	ContainerIP   string // IP address of the container for agentctl communication
-	WorkspacePath string // Path to the workspace (worktree or repository path)
-	Status        v1.AgentStatus
-	StartedAt     time.Time
-	FinishedAt    *time.Time
-	ExitCode      *int
-	ErrorMessage  string
-	Progress      int
-	Metadata      map[string]interface{}
+	ContainerIP    string // IP address of the container for agentctl communication
+	WorkspacePath  string // Path to the workspace (worktree or repository path)
+	ACPSessionID   string // ACP session ID to resume, if available
+	Status         v1.AgentStatus
+	StartedAt      time.Time
+	FinishedAt     *time.Time
+	ExitCode       *int
+	ErrorMessage   string
+	Progress       int
+	Metadata       map[string]interface{}
 
 	// agentctl client for this instance
 	agentctl *agentctl.Client
@@ -66,11 +67,12 @@ func (ai *AgentInstance) GetAgentCtlClient() *agentctl.Client {
 // LaunchRequest contains parameters for launching an agent
 type LaunchRequest struct {
 	TaskID          string
-	TaskTitle       string                 // Human-readable task title for semantic worktree naming
+	TaskTitle       string // Human-readable task title for semantic worktree naming
 	AgentProfileID  string
-	WorkspacePath   string                 // Host path to workspace (original repository path)
-	TaskDescription string                 // Task description to send via ACP prompt
-	Env             map[string]string      // Additional env vars
+	WorkspacePath   string            // Host path to workspace (original repository path)
+	TaskDescription string            // Task description to send via ACP prompt
+	Env             map[string]string // Additional env vars
+	ACPSessionID    string            // ACP session ID to resume, if available
 	Metadata        map[string]interface{}
 
 	// Worktree configuration
@@ -294,9 +296,9 @@ func (m *Manager) reconcileWithDocker(ctx context.Context) ([]RecoveredInstance,
 			TaskID:         taskID,
 			AgentProfileID: agentProfileID,
 			ContainerID:    ctr.ID,
-			ContainerIP: containerIP,
-			Status:      v1.AgentStatusRunning,
-			StartedAt:   time.Now(), // We don't know exact start time
+			ContainerIP:    containerIP,
+			Status:         v1.AgentStatusRunning,
+			StartedAt:      time.Now(), // We don't know exact start time
 		}
 
 		// Create agentctl client
@@ -555,6 +557,7 @@ func (m *Manager) launchDocker(ctx context.Context, instanceID string, req *Laun
 		ContainerID:    containerID,
 		ContainerIP:    containerIP,
 		WorkspacePath:  "/workspace", // Docker mounts workspace to /workspace
+		ACPSessionID:   req.ACPSessionID,
 		Status:         v1.AgentStatusRunning,
 		StartedAt:      time.Now(),
 		Progress:       0,
@@ -578,6 +581,9 @@ func (m *Manager) launchStandalone(ctx context.Context, instanceID string, req *
 	if agentConfig.ModelFlag != "" && profileInfo != nil && profileInfo.Model != "" {
 		agentCommand = agentCommand + " " + agentConfig.ModelFlag + " " + profileInfo.Model
 	}
+	if req.ACPSessionID != "" && profileInfo != nil && profileInfo.AgentName == "auggie" {
+		agentCommand = agentCommand + " --resume " + req.ACPSessionID
+	}
 	// If empty, agentctl will use its default (auggie --acp)
 
 	// Create instance via control API
@@ -585,8 +591,8 @@ func (m *Manager) launchStandalone(ctx context.Context, instanceID string, req *
 		ID:            instanceID,
 		WorkspacePath: req.WorkspacePath,
 		AgentCommand:  agentCommand,
-		Protocol:      string(agentConfig.Protocol),  // Pass protocol from registry
-		WorkspaceFlag: agentConfig.WorkspaceFlag,     // CLI flag for workspace path
+		Protocol:      string(agentConfig.Protocol), // Pass protocol from registry
+		WorkspaceFlag: agentConfig.WorkspaceFlag,    // CLI flag for workspace path
 		Env:           env,
 		AutoStart:     false, // We'll start via ACP initialize flow
 	}
@@ -622,6 +628,7 @@ func (m *Manager) launchStandalone(ctx context.Context, instanceID string, req *
 		TaskID:               req.TaskID,
 		AgentProfileID:       req.AgentProfileID,
 		WorkspacePath:        req.WorkspacePath,
+		ACPSessionID:         req.ACPSessionID,
 		Status:               v1.AgentStatusRunning,
 		StartedAt:            time.Now(),
 		Progress:             0,
@@ -772,21 +779,48 @@ func (m *Manager) initializeACPSession(ctx context.Context, instance *AgentInsta
 		zap.String("agent_name", agentName),
 		zap.String("agent_version", agentVersion))
 
-	// 2. Create new session
-	m.logger.Info("sending ACP session/new request",
-		zap.String("instance_id", instance.ID),
-		zap.String("workspace_path", instance.WorkspacePath))
-
-	sessionID, err := instance.agentctl.NewSession(ctx, instance.WorkspacePath)
-	if err != nil {
-		m.logger.Error("ACP session/new failed",
+	// 2. Create or resume ACP session
+	sessionID := ""
+	if instance.ACPSessionID != "" && agentName != "auggie" {
+		m.logger.Info("sending ACP session/load request",
 			zap.String("instance_id", instance.ID),
-			zap.Error(err))
-		return fmt.Errorf("session/new failed: %w", err)
+			zap.String("session_id", instance.ACPSessionID))
+
+		if err := instance.agentctl.LoadSession(ctx, instance.ACPSessionID); err != nil {
+			m.logger.Error("ACP session/load failed",
+				zap.String("instance_id", instance.ID),
+				zap.Error(err))
+			return fmt.Errorf("session/load failed: %w", err)
+		}
+		sessionID = instance.ACPSessionID
+		m.logger.Info("ACP session loaded",
+			zap.String("instance_id", instance.ID),
+			zap.String("session_id", sessionID))
+	} else {
+		if instance.ACPSessionID != "" && agentName == "auggie" {
+			m.logger.Info("skipping ACP session/load for auggie (resume handled via CLI)",
+				zap.String("instance_id", instance.ID),
+				zap.String("session_id", instance.ACPSessionID))
+		}
+		m.logger.Info("sending ACP session/new request",
+			zap.String("instance_id", instance.ID),
+			zap.String("workspace_path", instance.WorkspacePath))
+
+		newSessionID, err := instance.agentctl.NewSession(ctx, instance.WorkspacePath)
+		if err != nil {
+			m.logger.Error("ACP session/new failed",
+				zap.String("instance_id", instance.ID),
+				zap.Error(err))
+			return fmt.Errorf("session/new failed: %w", err)
+		}
+		sessionID = newSessionID
+		m.logger.Info("ACP session created",
+			zap.String("instance_id", instance.ID),
+			zap.String("session_id", sessionID))
 	}
-	m.logger.Info("ACP session created",
-		zap.String("instance_id", instance.ID),
-		zap.String("session_id", sessionID))
+
+	instance.ACPSessionID = sessionID
+	m.publishACPSessionCreated(instance, sessionID)
 
 	// 3. Set up updates stream to receive session notifications
 	// Use a ready channel to signal when the stream is connected
@@ -1007,16 +1041,16 @@ func (m *Manager) publishPermissionRequest(instance *AgentInstance, notification
 	}
 
 	data := map[string]interface{}{
-		"type":             "permission_request",
-		"task_id":          instance.TaskID,
+		"type":              "permission_request",
+		"task_id":           instance.TaskID,
 		"agent_instance_id": instance.ID,
-		"pending_id":       notification.PendingID,
-		"session_id":       notification.SessionID,
-		"tool_call_id":     notification.ToolCallID,
-		"title":            notification.Title,
-		"options":          options,
-		"created_at":       notification.CreatedAt,
-		"timestamp":        time.Now().UTC().Format(time.RFC3339),
+		"pending_id":        notification.PendingID,
+		"session_id":        notification.SessionID,
+		"tool_call_id":      notification.ToolCallID,
+		"title":             notification.Title,
+		"options":           options,
+		"created_at":        notification.CreatedAt,
+		"timestamp":         time.Now().UTC().Format(time.RFC3339),
 	}
 
 	event := bus.NewEvent(events.ACPMessage, "agent-manager", data)
@@ -1426,8 +1460,6 @@ func (m *Manager) updateInstanceProgress(instanceID string, progress int) {
 	instance.Progress = progress
 }
 
-
-
 // updateInstanceError updates an instance with an error
 func (m *Manager) updateInstanceError(instanceID, errorMsg string) {
 	m.mu.Lock()
@@ -1540,6 +1572,9 @@ func (m *Manager) buildContainerConfig(instanceID string, req *LaunchRequest, ag
 	copy(cmd, agentConfig.Cmd)
 	if agentConfig.ModelFlag != "" && profileInfo != nil && profileInfo.Model != "" {
 		cmd = append(cmd, agentConfig.ModelFlag, profileInfo.Model)
+	}
+	if req.ACPSessionID != "" && profileInfo != nil && profileInfo.AgentName == "auggie" {
+		cmd = append(cmd, "--resume", req.ACPSessionID)
 	}
 
 	return docker.ContainerConfig{
@@ -1984,6 +2019,26 @@ func (m *Manager) publishEvent(ctx context.Context, eventType string, instance *
 		m.logger.Debug("published event",
 			zap.String("event_type", eventType),
 			zap.String("instance_id", instance.ID))
+	}
+}
+
+func (m *Manager) publishACPSessionCreated(instance *AgentInstance, sessionID string) {
+	if m.eventBus == nil || sessionID == "" {
+		return
+	}
+
+	data := map[string]interface{}{
+		"task_id":           instance.TaskID,
+		"agent_instance_id": instance.ID,
+		"acp_session_id":    sessionID,
+	}
+
+	event := bus.NewEvent(events.AgentACPSessionCreated, "agent-manager", data)
+	if err := m.eventBus.Publish(context.Background(), events.AgentACPSessionCreated, event); err != nil {
+		m.logger.Error("failed to publish ACP session event",
+			zap.String("event_type", events.AgentACPSessionCreated),
+			zap.String("instance_id", instance.ID),
+			zap.Error(err))
 	}
 }
 

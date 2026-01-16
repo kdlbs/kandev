@@ -1,31 +1,33 @@
 import { StateHydrator } from '@/components/state-hydrator';
-import { fetchTask, listTaskSessions } from '@/lib/http';
+import { fetchTask } from '@/lib/http';
 import type { Task } from '@/lib/types/http';
 import { taskToState } from '@/lib/ssr/mapper';
-import TaskPageClient from './page-client';
-import { redirect } from 'next/navigation';
+import TaskPageClient from '../page-client';
 
-export default async function TaskPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function TaskSessionPage({
+  params,
+}: {
+  params: Promise<{ id: string; sessionId: string }>;
+}) {
   let initialState: ReturnType<typeof taskToState> | null = null;
   let task: Task | null = null;
+  let sessionId: string | null = null;
 
   try {
-    const { id } = await params;
+    const { id, sessionId: paramSessionId } = await params;
+    sessionId = paramSessionId;
     task = await fetchTask(id, { cache: 'no-store' });
-    const sessions = await listTaskSessions(id, { cache: 'no-store' });
-    if (sessions.sessions.length > 0) {
-      redirect(`/task/${id}/${sessions.sessions[0].id}`);
-    }
     initialState = taskToState(task);
   } catch {
     initialState = null;
     task = null;
+    sessionId = null;
   }
 
   return (
     <>
       {initialState ? <StateHydrator initialState={initialState} /> : null}
-      <TaskPageClient task={task} />
+      <TaskPageClient task={task} sessionId={sessionId} />
     </>
   );
 }

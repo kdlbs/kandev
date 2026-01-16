@@ -12,8 +12,8 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
-	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"github.com/kandev/kandev/pkg/acp/protocol"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // TaskEventData contains data from task events
@@ -31,6 +31,13 @@ type AgentEventData struct {
 	AgentProfileID  string `json:"agent_profile_id"`
 	ExitCode        *int   `json:"exit_code,omitempty"`
 	ErrorMessage    string `json:"error_message,omitempty"`
+}
+
+// ACPSessionEventData contains data from ACP session events
+type ACPSessionEventData struct {
+	TaskID          string `json:"task_id"`
+	AgentInstanceID string `json:"agent_instance_id"`
+	ACPSessionID    string `json:"acp_session_id"`
 }
 
 // PromptCompleteData contains data from prompt_complete events
@@ -85,11 +92,12 @@ type EventHandlers struct {
 	OnTaskDeleted      func(ctx context.Context, data TaskEventData)
 
 	// Agent events
-	OnAgentStarted   func(ctx context.Context, data AgentEventData)
-	OnAgentReady     func(ctx context.Context, data AgentEventData)
-	OnAgentCompleted func(ctx context.Context, data AgentEventData)
-	OnAgentFailed    func(ctx context.Context, data AgentEventData)
-	OnAgentStopped   func(ctx context.Context, data AgentEventData)
+	OnAgentStarted      func(ctx context.Context, data AgentEventData)
+	OnAgentReady        func(ctx context.Context, data AgentEventData)
+	OnAgentCompleted    func(ctx context.Context, data AgentEventData)
+	OnAgentFailed       func(ctx context.Context, data AgentEventData)
+	OnAgentStopped      func(ctx context.Context, data AgentEventData)
+	OnACPSessionCreated func(ctx context.Context, data ACPSessionEventData)
 
 	// ACP messages
 	OnACPMessage func(ctx context.Context, taskID string, msg *protocol.Message)
@@ -147,6 +155,12 @@ func (w *Watcher) Start(ctx context.Context) error {
 
 	// Subscribe to agent events
 	if err := w.subscribeToAgentEvents(); err != nil {
+		w.unsubscribeAll()
+		return err
+	}
+
+	// Subscribe to ACP session events
+	if err := w.subscribeToACPSessionEvents(); err != nil {
 		w.unsubscribeAll()
 		return err
 	}
@@ -272,6 +286,23 @@ func (w *Watcher) subscribeToAgentEvents() error {
 	return nil
 }
 
+// subscribeToACPSessionEvents subscribes to ACP session lifecycle events
+func (w *Watcher) subscribeToACPSessionEvents() error {
+	if w.handlers.OnACPSessionCreated == nil {
+		return nil
+	}
+
+	sub, err := w.eventBus.QueueSubscribe(events.AgentACPSessionCreated, queueName, w.createACPSessionEventHandler(w.handlers.OnACPSessionCreated))
+	if err != nil {
+		w.logger.Error("Failed to subscribe to ACP session event",
+			zap.String("subject", events.AgentACPSessionCreated),
+			zap.Error(err))
+		return err
+	}
+	w.subscriptions = append(w.subscriptions, sub)
+	return nil
+}
+
 // subscribeToACPMessages subscribes to ACP messages using wildcard
 func (w *Watcher) subscribeToACPMessages() error {
 	if w.handlers.OnACPMessage == nil {
@@ -330,6 +361,28 @@ func (w *Watcher) createAgentEventHandler(handler func(ctx context.Context, data
 			zap.String("event_type", event.Type),
 			zap.String("task_id", data.TaskID),
 			zap.String("agent_instance_id", data.AgentInstanceID))
+
+		handler(ctx, data)
+		return nil
+	}
+}
+
+// createACPSessionEventHandler creates a bus.EventHandler for ACP session events
+func (w *Watcher) createACPSessionEventHandler(handler func(ctx context.Context, data ACPSessionEventData)) bus.EventHandler {
+	return func(ctx context.Context, event *bus.Event) error {
+		var data ACPSessionEventData
+		if err := w.parseEventData(event.Data, &data); err != nil {
+			w.logger.Error("Failed to parse ACP session event data",
+				zap.String("event_type", event.Type),
+				zap.String("event_id", event.ID),
+				zap.Error(err))
+			return nil
+		}
+
+		w.logger.Debug("Handling ACP session event",
+			zap.String("event_type", event.Type),
+			zap.String("task_id", data.TaskID),
+			zap.String("acp_session_id", data.ACPSessionID))
 
 		handler(ctx, data)
 		return nil

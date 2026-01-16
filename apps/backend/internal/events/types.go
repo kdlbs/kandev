@@ -76,12 +76,13 @@ const (
 
 // Event types for agents
 const (
-	AgentStarted   = "agent.started"
-	AgentRunning   = "agent.running"
-	AgentReady     = "agent.ready" // Agent finished prompt, ready for follow-up
-	AgentCompleted = "agent.completed"
-	AgentFailed    = "agent.failed"
-	AgentStopped   = "agent.stopped"
+	AgentStarted           = "agent.started"
+	AgentRunning           = "agent.running"
+	AgentReady             = "agent.ready" // Agent finished prompt, ready for follow-up
+	AgentCompleted         = "agent.completed"
+	AgentFailed            = "agent.failed"
+	AgentStopped           = "agent.stopped"
+	AgentACPSessionCreated = "agent.acp_session_created"
 )
 
 // Event types for ACP messages
