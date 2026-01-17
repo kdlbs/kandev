@@ -47,8 +47,8 @@ func DefaultServiceConfig() ServiceConfig {
 	}
 }
 
-// InputRequestHandler is called when an agent requests user input
-type InputRequestHandler func(ctx context.Context, taskID, agentID, message string) error
+// InputRequestHandler is called when an agent requests user input.
+type InputRequestHandler func(ctx context.Context, taskID, sessionID, agentID, message string) error
 
 // MessageCreator is an interface for creating messages on tasks
 type MessageCreator interface {
@@ -351,7 +351,7 @@ func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID s
 func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID string) (*executor.TaskExecution, error) {
 	s.logger.Info("resuming task session",
 		zap.String("task_id", taskID),
-		zap.String("task_session_id", sessionID))
+		zap.String("session_id", sessionID))
 
 	if exec, ok := s.executor.GetExecutionWithContext(ctx, taskID); ok && exec != nil {
 		return nil, executor.ErrExecutionAlreadyRunning
@@ -421,11 +421,6 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 		zap.String("session_id", sessionID))
 
 	return execution, nil
-}
-
-// GetActiveSessionID returns the active (running) session ID for a task
-func (s *Service) GetActiveSessionID(ctx context.Context, taskID string) (string, error) {
-	return s.executor.GetActiveSessionID(ctx, taskID)
 }
 
 // GetTaskSessionStatus returns the status of a task session including whether it's resumable
@@ -531,15 +526,17 @@ type PromptResult struct {
 	AgentMessage string // The agent's accumulated response message
 }
 
-// PromptTask sends a follow-up prompt to a running agent for a task
-func (s *Service) PromptTask(ctx context.Context, taskID string, prompt string) (*PromptResult, error) {
+// PromptTask sends a follow-up prompt to a running agent for a task session.
+func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prompt string) (*PromptResult, error) {
 	s.logger.Info("sending prompt to task agent",
 		zap.String("task_id", taskID),
+		zap.String("session_id", sessionID),
 		zap.Int("prompt_length", len(prompt)))
-	if sessionID, err := s.executor.GetActiveSessionID(ctx, taskID); err == nil && sessionID != "" {
-		s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateRunning, "", true)
+	if sessionID == "" {
+		return nil, fmt.Errorf("session_id is required")
 	}
-	result, err := s.executor.Prompt(ctx, taskID, prompt)
+	s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateRunning, "", true)
+	result, err := s.executor.Prompt(ctx, taskID, sessionID, prompt)
 	if err != nil {
 		return nil, err
 	}
@@ -549,14 +546,14 @@ func (s *Service) PromptTask(ctx context.Context, taskID string, prompt string) 
 	}, nil
 }
 
-// RespondToPermission sends a response to a permission request for a task
-func (s *Service) RespondToPermission(ctx context.Context, taskID, pendingID, optionID string, cancelled bool) error {
+// RespondToPermission sends a response to a permission request for a session
+func (s *Service) RespondToPermission(ctx context.Context, sessionID, pendingID, optionID string, cancelled bool) error {
 	s.logger.Info("responding to permission request",
-		zap.String("task_id", taskID),
+		zap.String("session_id", sessionID),
 		zap.String("pending_id", pendingID),
 		zap.String("option_id", optionID),
 		zap.Bool("cancelled", cancelled))
-	return s.executor.RespondToPermission(ctx, taskID, pendingID, optionID, cancelled)
+	return s.executor.RespondToPermission(ctx, sessionID, pendingID, optionID, cancelled)
 }
 
 // CompleteTask explicitly completes a task and stops its agent
@@ -704,7 +701,7 @@ func (s *Service) handleACPSessionCreated(ctx context.Context, data watcher.ACPS
 
 	s.logger.Info("stored ACP session id for task session",
 		zap.String("task_id", data.TaskID),
-		zap.String("task_session_id", sessionID),
+		zap.String("session_id", sessionID),
 		zap.String("acp_session_id", data.ACPSessionID))
 }
 
@@ -764,32 +761,33 @@ func (s *Service) handleACPMessage(ctx context.Context, taskID string, msg *prot
 
 	// Handle input_required messages specially
 	if msg.Type == protocol.MessageTypeInputRequired {
-		s.handleInputRequired(ctx, taskID, msg)
+		s.handleInputRequired(ctx, taskID, msg.SessionID, msg)
 	}
 
 	// Normalize ACP messages into session messages for persistence.
 	normalized := s.normalizeACPMessage(msg)
 	if normalized != nil && s.messageCreator != nil {
-		sessionID, err := s.executor.GetActiveSessionID(ctx, taskID)
-		if err == nil && sessionID != "" {
-			if err := s.messageCreator.CreateSessionMessage(
-				ctx,
-				taskID,
-				normalized.content,
-				sessionID,
-				normalized.messageType,
-				normalized.metadata,
-				normalized.requestsInput,
-			); err != nil {
-				s.logger.Error("failed to create normalized session message",
-					zap.String("task_id", taskID),
-					zap.String("message_type", normalized.messageType),
-					zap.Error(err))
-			}
+		if msg.SessionID == "" {
+			s.logger.Warn("ACP message missing session_id",
+				zap.String("task_id", taskID),
+				zap.String("message_type", normalized.messageType))
+		} else if err := s.messageCreator.CreateSessionMessage(
+			ctx,
+			taskID,
+			normalized.content,
+			msg.SessionID,
+			normalized.messageType,
+			normalized.metadata,
+			normalized.requestsInput,
+		); err != nil {
+			s.logger.Error("failed to create normalized session message",
+				zap.String("task_id", taskID),
+				zap.String("message_type", normalized.messageType),
+				zap.Error(err))
+		}
 
-			if normalized.bumpToRunning {
-				s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateRunning, "", false)
-			}
+		if normalized.bumpToRunning && msg.SessionID != "" {
+			s.updateTaskSessionState(ctx, taskID, msg.SessionID, models.TaskSessionStateRunning, "", false)
 		}
 	}
 
@@ -903,7 +901,7 @@ func (s *Service) updateTaskSessionState(ctx context.Context, taskID, sessionID 
 	if s.eventBus != nil {
 		_ = s.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(events.TaskSessionStateChanged, "task-session", map[string]interface{}{
 			"task_id":         taskID,
-			"task_session_id": sessionID,
+			"session_id": sessionID,
 			"old_state":       string(oldState),
 			"new_state":       string(nextState),
 		}))
@@ -954,12 +952,12 @@ func (s *Service) markPromptComplete(taskID string) bool {
 func (s *Service) finalizeAgentReady(taskID, sessionID string) {
 	ctx := context.Background()
 	if sessionID == "" {
-		sessionID, _ = s.executor.GetActiveSessionID(ctx, taskID)
+		s.logger.Warn("missing session_id for finalizeAgentReady",
+			zap.String("task_id", taskID))
+		return
 	}
 
-	if sessionID != "" {
-		s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateWaitingForInput, "", false)
-	}
+	s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateWaitingForInput, "", false)
 
 	task, err := s.taskRepo.GetTask(ctx, taskID)
 	if err != nil {
@@ -986,9 +984,10 @@ func (s *Service) finalizeAgentReady(taskID, sessionID string) {
 }
 
 // handleInputRequired handles agent input request messages
-func (s *Service) handleInputRequired(ctx context.Context, taskID string, msg *protocol.Message) {
+func (s *Service) handleInputRequired(ctx context.Context, taskID, sessionID string, msg *protocol.Message) {
 	s.logger.Info("agent requesting user input",
 		zap.String("task_id", taskID),
+		zap.String("session_id", sessionID),
 		zap.String("agent_id", msg.AgentID))
 
 	// Extract message from data
@@ -999,6 +998,12 @@ func (s *Service) handleInputRequired(ctx context.Context, taskID string, msg *p
 		}
 	}
 
+	if sessionID == "" {
+		s.logger.Warn("missing session_id for input_required",
+			zap.String("task_id", taskID))
+		return
+	}
+
 	// Update task state to WAITING_FOR_INPUT
 	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateWaitingForInput); err != nil {
 		s.logger.Error("failed to update task state to WAITING_FOR_INPUT",
@@ -1007,13 +1012,11 @@ func (s *Service) handleInputRequired(ctx context.Context, taskID string, msg *p
 	}
 
 	// Update session state to WAITING_FOR_INPUT
-	if sessionID, err := s.executor.GetActiveSessionID(ctx, taskID); err == nil && sessionID != "" {
-		s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateWaitingForInput, "", false)
-	}
+	s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateWaitingForInput, "", false)
 
 	// Call the input request handler if set
 	if s.inputRequestHandler != nil {
-		if err := s.inputRequestHandler(ctx, taskID, msg.AgentID, message); err != nil {
+		if err := s.inputRequestHandler(ctx, taskID, sessionID, msg.AgentID, message); err != nil {
 			s.logger.Error("input request handler failed",
 				zap.String("task_id", taskID),
 				zap.Error(err))
@@ -1027,11 +1030,16 @@ func (s *Service) handleGitStatusUpdated(ctx context.Context, data watcher.GitSt
 		zap.String("task_id", data.TaskID),
 		zap.String("branch", data.Branch))
 
-	// Get the active agent session for this task
-	session, err := s.repo.GetActiveTaskSessionByTaskID(ctx, data.TaskID)
+	if data.TaskSessionID == "" {
+		s.logger.Debug("missing session_id for git status update",
+			zap.String("task_id", data.TaskID))
+		return
+	}
+
+	session, err := s.repo.GetTaskSession(ctx, data.TaskSessionID)
 	if err != nil {
-		s.logger.Debug("no active agent session for git status update",
-			zap.String("task_id", data.TaskID),
+		s.logger.Debug("no task session for git status update",
+			zap.String("session_id", data.TaskSessionID),
 			zap.Error(err))
 		return
 	}
@@ -1078,12 +1086,15 @@ func (s *Service) handlePromptComplete(ctx context.Context, data watcher.PromptC
 		zap.String("task_id", data.TaskID),
 		zap.Int("message_length", len(data.AgentMessage)))
 
+	if data.TaskSessionID == "" {
+		s.logger.Warn("missing session_id for prompt_complete",
+			zap.String("task_id", data.TaskID))
+		return
+	}
+
 	// Save agent response as a message if we have a message creator
 	if s.messageCreator != nil && data.AgentMessage != "" {
-		// Get the active session ID for this task
-		sessionID, _ := s.executor.GetActiveSessionID(ctx, data.TaskID)
-
-		if err := s.messageCreator.CreateAgentMessage(ctx, data.TaskID, data.AgentMessage, sessionID); err != nil {
+		if err := s.messageCreator.CreateAgentMessage(ctx, data.TaskID, data.AgentMessage, data.TaskSessionID); err != nil {
 			s.logger.Error("failed to create agent message",
 				zap.String("task_id", data.TaskID),
 				zap.Error(err))
@@ -1094,7 +1105,7 @@ func (s *Service) handlePromptComplete(ctx context.Context, data watcher.PromptC
 		}
 
 		if s.markPromptComplete(data.TaskID) {
-			s.finalizeAgentReady(data.TaskID, sessionID)
+			s.finalizeAgentReady(data.TaskID, data.TaskSessionID)
 		}
 	}
 }
@@ -1106,12 +1117,16 @@ func (s *Service) handleToolCallStarted(ctx context.Context, data watcher.ToolCa
 		zap.String("tool_call_id", data.ToolCallID),
 		zap.String("title", data.Title))
 
+	if data.TaskSessionID == "" {
+		s.logger.Warn("missing session_id for tool_call",
+			zap.String("task_id", data.TaskID),
+			zap.String("tool_call_id", data.ToolCallID))
+		return
+	}
+
 	// Save tool call as a message if we have a message creator
 	if s.messageCreator != nil {
-		// Get the active session ID for this task
-		sessionID, _ := s.executor.GetActiveSessionID(ctx, data.TaskID)
-
-		if err := s.messageCreator.CreateToolCallMessage(ctx, data.TaskID, data.ToolCallID, data.Title, data.Status, sessionID, data.Args); err != nil {
+		if err := s.messageCreator.CreateToolCallMessage(ctx, data.TaskID, data.ToolCallID, data.Title, data.Status, data.TaskSessionID, data.Args); err != nil {
 			s.logger.Error("failed to create tool call message",
 				zap.String("task_id", data.TaskID),
 				zap.String("tool_call_id", data.ToolCallID),
@@ -1122,9 +1137,7 @@ func (s *Service) handleToolCallStarted(ctx context.Context, data watcher.ToolCa
 				zap.String("tool_call_id", data.ToolCallID))
 		}
 
-		if sessionID != "" {
-			s.updateTaskSessionState(ctx, data.TaskID, sessionID, models.TaskSessionStateRunning, "", false)
-		}
+		s.updateTaskSessionState(ctx, data.TaskID, data.TaskSessionID, models.TaskSessionStateRunning, "", false)
 	}
 }
 
@@ -1132,17 +1145,14 @@ func (s *Service) handleToolCallStarted(ctx context.Context, data watcher.ToolCa
 func (s *Service) handleToolCallComplete(ctx context.Context, data watcher.ToolCallCompleteData) {
 	// Update tool call message status if we have a message creator
 	if s.messageCreator != nil {
-		sessionID, _ := s.executor.GetActiveSessionID(ctx, data.TaskID)
-		if sessionID == "" {
-			// No active session - can't update tool call message
-			// This can happen during startup or if session was cleared
-			s.logger.Debug("skipping tool call update - no active session",
+		if data.TaskSessionID == "" {
+			s.logger.Warn("missing session_id for tool_call_complete",
 				zap.String("task_id", data.TaskID),
 				zap.String("tool_call_id", data.ToolCallID))
 			return
 		}
 
-		if err := s.messageCreator.UpdateToolCallMessage(ctx, data.TaskID, data.ToolCallID, data.Status, data.Result, sessionID); err != nil {
+		if err := s.messageCreator.UpdateToolCallMessage(ctx, data.TaskID, data.ToolCallID, data.Status, data.Result, data.TaskSessionID); err != nil {
 			// Log as warning since this is often a race condition (complete arrives before start)
 			s.logger.Warn("failed to update tool call message",
 				zap.String("task_id", data.TaskID),
@@ -1150,6 +1160,6 @@ func (s *Service) handleToolCallComplete(ctx context.Context, data watcher.ToolC
 				zap.Error(err))
 		}
 
-		s.updateTaskSessionState(ctx, data.TaskID, sessionID, models.TaskSessionStateRunning, "", false)
+		s.updateTaskSessionState(ctx, data.TaskID, data.TaskSessionID, models.TaskSessionStateRunning, "", false)
 	}
 }

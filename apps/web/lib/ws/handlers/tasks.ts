@@ -67,20 +67,11 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
       }));
     },
     'task.state_changed': (message) => {
-      console.log('[WS Router] task.state_changed received:', {
-        task_id: message.payload.task_id,
-        board_id: message.payload.board_id,
-        column_id: message.payload.column_id,
-        state: message.payload.state,
-      });
       store.setState((state) => {
-        console.log('[WS Router] Current board_id:', state.kanban.boardId, 'Event board_id:', message.payload.board_id);
         if (state.kanban.boardId !== message.payload.board_id) {
-          console.log('[WS Router] Skipping - board_id mismatch');
           return state;
         }
         const existingTask = state.kanban.tasks.find((t) => t.id === message.payload.task_id);
-        console.log('[WS Router] Existing task:', existingTask);
         const nextTask = {
           id: message.payload.task_id,
           columnId: message.payload.column_id,
@@ -90,7 +81,6 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
           state: message.payload.state,
           repositoryId: message.payload.repository_id ?? existingTask?.repositoryId,
         };
-        console.log('[WS Router] Next task:', nextTask);
         return {
           ...state,
           kanban: {

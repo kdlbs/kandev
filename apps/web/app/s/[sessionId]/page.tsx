@@ -1,62 +1,60 @@
 import { StateHydrator } from '@/components/state-hydrator';
 import {
   fetchBoardSnapshot,
+  fetchTaskSession,
   fetchTask,
   listAgents,
   listRepositories,
   listTaskSessionMessages,
-  listTaskSessions,
 } from '@/lib/http';
 import type { Task } from '@/lib/types/http';
 import { snapshotToState, taskToState } from '@/lib/ssr/mapper';
-import TaskPageClient from '../page-client';
+import TaskPageClient from '@/app/task/[id]/page-client';
 
-export default async function TaskSessionPage({
+export default async function SessionPage({
   params,
 }: {
-  params: Promise<{ id: string; sessionId: string }>;
+  params: Promise<{ sessionId: string }>;
 }) {
   let initialState: ReturnType<typeof taskToState> | null = null;
   let task: Task | null = null;
   let sessionId: string | null = null;
-  let sessionsByTask: Record<string, Awaited<ReturnType<typeof listTaskSessions>>['sessions']> = {};
 
   try {
-    const { id, sessionId: paramSessionId } = await params;
+    const { sessionId: paramSessionId } = await params;
     sessionId = paramSessionId;
-    task = await fetchTask(id, { cache: 'no-store' });
 
+    const sessionResponse = await fetchTaskSession(sessionId, { cache: 'no-store' });
+    const session = sessionResponse.session;
+    if (!session?.task_id) {
+      throw new Error('No task_id found for session');
+    }
+
+    task = await fetchTask(session.task_id, { cache: 'no-store' });
     const [snapshot, agents, repositories] = await Promise.all([
       fetchBoardSnapshot(task.board_id, { cache: 'no-store' }),
       listAgents({ cache: 'no-store' }),
       listRepositories(task.workspace_id, { cache: 'no-store' }),
     ]);
-
-    const sessionResults = await Promise.all(
-      snapshot.tasks.map((taskItem) =>
-        listTaskSessions(taskItem.id, { cache: 'no-store' }).then((result) => [taskItem.id, result.sessions] as const)
-      )
-    );
-    sessionsByTask = Object.fromEntries(sessionResults);
-
-    let taskState = taskToState(task, sessionId);
+    let messagesResponse = { messages: [], has_more: false, cursor: null };
     try {
-      const messagesResponse = await listTaskSessionMessages(
+      messagesResponse = await listTaskSessionMessages(
         sessionId,
         { limit: 50, sort: 'asc' },
         { cache: 'no-store' }
       );
-      taskState = taskToState(task, sessionId, {
-        items: messagesResponse.messages ?? [],
-        hasMore: messagesResponse.has_more ?? false,
-        oldestCursor: messagesResponse.cursor ?? (messagesResponse.messages?.[0]?.id ?? null),
-      });
     } catch (error) {
       console.warn(
-        'Could not SSR messages (client will load via WebSocket):',
+        'Could not load session messages for SSR:',
         error instanceof Error ? error.message : String(error)
       );
     }
+
+    const taskState = taskToState(task, sessionId, {
+      items: messagesResponse.messages ?? [],
+      hasMore: messagesResponse.has_more ?? false,
+      oldestCursor: messagesResponse.cursor ?? (messagesResponse.messages?.[0]?.id ?? null),
+    });
 
     initialState = {
       ...snapshotToState(snapshot),
@@ -82,6 +80,42 @@ export default async function TaskSessionPage({
         ),
         version: 0,
       },
+      taskSessions: {
+        items: {
+          [session.id]: session,
+        },
+      },
+      taskSessionsByTask: {
+        itemsByTaskId: {
+          [task.id]: [session],
+        },
+        loadingByTaskId: {
+          [task.id]: false,
+        },
+        loadedByTaskId: {
+          [task.id]: true,
+        },
+      },
+      worktrees: session.worktree_id
+        ? {
+            items: {
+              [session.worktree_id]: {
+                id: session.worktree_id,
+                sessionId: session.id,
+                repositoryId: session.repository_id ?? undefined,
+                path: session.worktree_path ?? undefined,
+                branch: session.worktree_branch ?? undefined,
+              },
+            },
+          }
+        : undefined,
+      sessionWorktreesBySessionId: session.worktree_id
+        ? {
+            itemsBySessionId: {
+              [session.id]: [session.worktree_id],
+            },
+          }
+        : undefined,
       settingsAgents: {
         items: agents.agents,
       },
@@ -91,11 +125,14 @@ export default async function TaskSessionPage({
         environmentsLoaded: false,
       },
     };
-  } catch {
+  } catch (error) {
+    console.warn(
+      'Could not SSR session (client will load via WebSocket):',
+      error instanceof Error ? error.message : String(error)
+    );
     initialState = null;
     task = null;
     sessionId = null;
-    sessionsByTask = {};
   }
 
   return (
@@ -104,9 +141,7 @@ export default async function TaskSessionPage({
       <TaskPageClient
         task={task}
         sessionId={sessionId}
-        initialSessionsByTask={sessionsByTask}
         initialRepositories={initialState?.repositories?.itemsByWorkspaceId?.[task?.workspace_id ?? ''] ?? []}
-        initialAgentProfiles={initialState?.agentProfiles?.items ?? []}
       />
     </>
   );

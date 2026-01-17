@@ -10,6 +10,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { getLocalStorage, setLocalStorage } from '@/lib/local-storage';
 import { useAppStore } from '@/components/state-provider';
+import { useSessionGitStatus } from '@/hooks/use-session-git-status';
 
 type TaskChangesPanelProps = {
   selectedDiffPath: string | null;
@@ -26,22 +27,23 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
     getLocalStorage('task-diff-view-mode', DEFAULT_DIFF_MODE)
   );
   const { resolvedTheme } = useTheme();
-  const gitStatus = useAppStore((state) => state.gitStatus);
+  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const gitStatus = useSessionGitStatus(activeSessionId);
 
   // Convert git status files to array for display
   const changedFiles = useMemo(() => {
-    if (!gitStatus.files || Object.keys(gitStatus.files).length === 0) {
+    if (!gitStatus?.files || Object.keys(gitStatus.files).length === 0) {
       return [];
     }
     return Object.values(gitStatus.files);
-  }, [gitStatus.files]);
+  }, [gitStatus]);
   const diffTargets = useMemo(
     () => (selectedDiffPath ? [selectedDiffPath] : changedFiles.map((file) => file.path)),
     [selectedDiffPath, changedFiles]
   );
   const diffModeEnum = diffViewMode === 'split' ? DiffModeEnum.Split : DiffModeEnum.Unified;
   const diffTheme = resolvedTheme === 'dark' ? 'dark' : 'light';
-  const selectedFile = selectedDiffPath ? gitStatus.files[selectedDiffPath] : null;
+  const selectedFile = selectedDiffPath && gitStatus ? gitStatus.files[selectedDiffPath] : null;
   const selectedDiffContent = selectedFile?.diff ?? '';
   const isSingleDiffSelected = Boolean(selectedDiffPath && selectedFile);
 

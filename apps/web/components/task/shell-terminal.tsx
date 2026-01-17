@@ -6,13 +6,10 @@ import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import { useAppStore, useAppStoreApi } from '@/components/state-provider';
 import { getWebSocketClient } from '@/lib/ws/connection';
+import { useSession } from '@/hooks/use-session';
+import { useSessionAgentctl } from '@/hooks/use-session-agentctl';
 
-type ShellTerminalProps = {
-  taskId: string;
-  sessionId: string | null;
-};
-
-export function ShellTerminal({ taskId, sessionId }: ShellTerminalProps) {
+export function ShellTerminal() {
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -21,15 +18,14 @@ export function ShellTerminal({ taskId, sessionId }: ShellTerminalProps) {
   const onDataDisposableRef = useRef<{ dispose: () => void } | null>(null);
   const storeApi = useAppStoreApi();
 
-  const shellOutput = useAppStore((state) => state.shell.outputs[taskId] || '');
-  const sessionState = useAppStore((state) => {
-    if (sessionId) {
-      return state.taskSessions.items[sessionId]?.state ?? null;
-    }
-    return state.taskSessionStatesByTaskId[taskId] ?? null;
-  });
-  const canSubscribe =
-    Boolean(sessionId) && (sessionState === 'RUNNING' || sessionState === 'WAITING_FOR_INPUT');
+  const sessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const { session, isActive } = useSession(sessionId);
+  const { isReady: isAgentctlReady } = useSessionAgentctl(sessionId);
+  const taskId = session?.task_id ?? null;
+  const shellOutput = useAppStore((state) =>
+    sessionId ? state.shell.outputs[sessionId] || '' : ''
+  );
+  const canSubscribe = Boolean(sessionId && isActive && isAgentctlReady);
 
   const send = useCallback(
     (action: string, payload: Record<string, unknown>) => {
@@ -101,10 +97,10 @@ export function ShellTerminal({ taskId, sessionId }: ShellTerminalProps) {
     onDataDisposableRef.current?.dispose();
     onDataDisposableRef.current = null;
 
-    if (!sessionId) return;
+    if (!taskId || !sessionId) return;
 
     onDataDisposableRef.current = xtermRef.current.onData((data) => {
-      send('shell.input', { task_id: taskId, session_id: sessionId, data });
+      send('shell.input', { session_id: sessionId, data });
     });
 
     return () => {
@@ -125,20 +121,14 @@ export function ShellTerminal({ taskId, sessionId }: ShellTerminalProps) {
     }
   }, [shellOutput]);
 
-  // Subscribe to shell on mount to start the shell stream
-  // Uses retry logic to handle cases where agent isn't ready yet (e.g., session resumption)
+  // Subscribe to shell once agentctl is ready.
   useEffect(() => {
-    if (!canSubscribe) return;
+    if (!taskId || !sessionId || !canSubscribe) return;
 
-    // Increment subscription ID to invalidate any pending requests
     const currentSubscriptionId = ++subscriptionIdRef.current;
-    let retryCount = 0;
-    const maxRetries = 10;
-    const retryDelay = 1000; // 1 second between retries
-    let retryTimeout: ReturnType<typeof setTimeout> | null = null;
 
     // Clear any stale output before subscribing to get fresh buffer
-    storeApi.getState().clearShellOutput(taskId);
+    storeApi.getState().clearShellOutput(sessionId);
     lastOutputLengthRef.current = 0;
 
     // Also clear the terminal display
@@ -146,44 +136,24 @@ export function ShellTerminal({ taskId, sessionId }: ShellTerminalProps) {
       xtermRef.current.clear();
     }
 
-    const attemptSubscribe = () => {
-      const client = getWebSocketClient();
-      if (!client) return;
+    const client = getWebSocketClient();
+    if (!client) return;
 
-      // Check if this subscription is still valid
-      if (subscriptionIdRef.current !== currentSubscriptionId) return;
-
-      client
-        .request<{ success: boolean; buffer?: string }>('shell.subscribe', { task_id: taskId, session_id: sessionId })
-        .then((response) => {
-          // Only process if this is still the current subscription (handles React Strict Mode)
-          if (subscriptionIdRef.current !== currentSubscriptionId) return;
-
-          // Write buffered output from response
-          if (response.buffer) {
-            storeApi.getState().appendShellOutput(taskId, response.buffer);
-          }
-        })
-        .catch((err) => {
-          if (subscriptionIdRef.current !== currentSubscriptionId) return;
-
-          // Retry if agent not ready yet (common during session resumption)
-          if (retryCount < maxRetries) {
-            retryCount++;
-            console.log(`[ShellTerminal] Retrying shell subscription (${retryCount}/${maxRetries})...`);
-            retryTimeout = setTimeout(attemptSubscribe, retryDelay);
-          } else {
-            console.error('Failed to subscribe to shell after retries:', err);
-          }
-        });
-    };
-
-    attemptSubscribe();
+    client
+      .request<{ success: boolean; buffer?: string }>('shell.subscribe', { session_id: sessionId })
+      .then((response) => {
+        if (subscriptionIdRef.current !== currentSubscriptionId) return;
+        if (response.buffer) {
+          storeApi.getState().appendShellOutput(sessionId, response.buffer);
+        }
+      })
+      .catch((err) => {
+        if (subscriptionIdRef.current !== currentSubscriptionId) return;
+        console.error('Failed to subscribe to shell:', err);
+      });
 
     return () => {
-      if (retryTimeout) {
-        clearTimeout(retryTimeout);
-      }
+      subscriptionIdRef.current += 1;
     };
   }, [taskId, sessionId, storeApi, canSubscribe]);
 

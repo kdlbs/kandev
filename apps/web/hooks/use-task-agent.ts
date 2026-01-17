@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import { useAppStore } from '@/components/state-provider';
-import type { TaskSessionState, Task } from '@/lib/types/http';
+import type { TaskSessionState, Task, TaskSession } from '@/lib/types/http';
+
+const EMPTY_SESSIONS: TaskSession[] = [];
 
 interface UseTaskAgentReturn {
   isAgentRunning: boolean;
@@ -22,9 +24,20 @@ export function useTaskAgent(task: Task | null): UseTaskAgentReturn {
   const [worktreePath, setWorktreePath] = useState<string | null>(task?.worktree_path ?? null);
   const [worktreeBranch, setWorktreeBranch] = useState<string | null>(task?.worktree_branch ?? null);
   const connectionStatus = useAppStore((state) => state.connection.status);
-  const wsTaskSessionState = useAppStore((state) =>
-    task?.id ? state.taskSessionStatesByTaskId[task.id] : undefined
+  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const activeSession = useAppStore((state) =>
+    activeSessionId ? state.taskSessions.items[activeSessionId] ?? null : null
   );
+  const sessionsForTask = useAppStore((state) =>
+    task?.id ? state.taskSessionsByTask.itemsByTaskId[task.id] ?? EMPTY_SESSIONS : EMPTY_SESSIONS
+  );
+  const wsTaskSessionState = useMemo(() => {
+    if (!task?.id) return undefined;
+    if (activeSession && activeSession.task_id === task.id) {
+      return activeSession.state;
+    }
+    return sessionsForTask[0]?.state;
+  }, [activeSession, sessionsForTask, task?.id]);
 
   useEffect(() => {
     setIsAgentRunning(false);
@@ -53,7 +66,7 @@ export function useTaskAgent(task: Task | null): UseTaskAgentReturn {
           has_execution: boolean;
           task_id: string;
           state?: string;
-          task_session_id?: string;
+          session_id?: string;
         }>('task.execution', { task_id: task.id });
 
         console.log('[useTaskAgent] Task execution check:', response);
@@ -62,8 +75,8 @@ export function useTaskAgent(task: Task | null): UseTaskAgentReturn {
           if (response.state) {
             setTaskSessionState(response.state as TaskSessionState);
           }
-          if (response.task_session_id) {
-            setAgentSessionId(response.task_session_id);
+          if (response.session_id) {
+            setAgentSessionId(response.session_id);
           }
         } else {
           setIsAgentRunning(false);
@@ -98,7 +111,7 @@ export function useTaskAgent(task: Task | null): UseTaskAgentReturn {
         success: boolean;
         task_id: string;
         agent_instance_id: string;
-        task_session_id?: string;
+        session_id?: string;
         state: string;
         worktree_path?: string;
         worktree_branch?: string;
@@ -114,8 +127,8 @@ export function useTaskAgent(task: Task | null): UseTaskAgentReturn {
       console.log('[useTaskAgent] orchestrator.start response', response);
       setIsAgentRunning(true);
       setTaskSessionState(response.state as TaskSessionState);
-      if (response?.task_session_id) {
-        setAgentSessionId(response.task_session_id);
+      if (response?.session_id) {
+        setAgentSessionId(response.session_id);
       }
 
       // Update worktree info from response

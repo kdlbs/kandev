@@ -38,6 +38,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@kandev/ui/popover';
 import { SessionsDropdown } from './sessions-dropdown';
 import { CommitStatBadge, LineStat } from '@/components/diff-stat';
 import { useAppStore } from '@/components/state-provider';
+import { useSessionGitStatus } from '@/hooks/use-session-git-status';
 import { formatUserHomePath } from '@/lib/utils';
 
 type TaskTopBarProps = {
@@ -78,8 +79,7 @@ const TaskTopBar = memo(function TaskTopBar({
   const [startDialogOpen, setStartDialogOpen] = useState(false);
   const [selectedAgentProfileId, setSelectedAgentProfileId] = useState<string | null>(null);
 
-  // Get git status from store
-  const gitStatus = useAppStore((state) => state.gitStatus);
+  const gitStatus = useSessionGitStatus(activeSessionId ?? null);
   const agentProfiles = useAppStore((state) => state.agentProfiles.items);
 
   const resolvedAgentProfileId = useMemo(() => {
@@ -96,7 +96,7 @@ const TaskTopBar = memo(function TaskTopBar({
 
   // Calculate total additions and deletions from all files
   const { totalAdditions, totalDeletions } = useMemo(() => {
-    if (!gitStatus.files || Object.keys(gitStatus.files).length === 0) {
+    if (!gitStatus?.files || Object.keys(gitStatus.files).length === 0) {
       return { totalAdditions: 0, totalDeletions: 0 };
     }
 
@@ -107,7 +107,7 @@ const TaskTopBar = memo(function TaskTopBar({
       }),
       { totalAdditions: 0, totalDeletions: 0 }
     );
-  }, [gitStatus.files]);
+  }, [gitStatus?.files]);
 
   const handleBranchClick = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -236,29 +236,29 @@ const TaskTopBar = memo(function TaskTopBar({
         )}
 
         {/* Git Status: Ahead/Behind */}
-        {(gitStatus.ahead > 0 || gitStatus.behind > 0) && (
+        {((gitStatus?.ahead ?? 0) > 0 || (gitStatus?.behind ?? 0) > 0) && (
           <div className="flex items-center gap-1">
-            {gitStatus.ahead > 0 && (
+            {(gitStatus?.ahead ?? 0) > 0 && (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <span className="cursor-default">
-                    <CommitStatBadge label={`${gitStatus.ahead} ahead`} tone="ahead" />
+                    <CommitStatBadge label={`${gitStatus?.ahead ?? 0} ahead`} tone="ahead" />
                   </span>
                 </TooltipTrigger>
                 <TooltipContent>
-                  {gitStatus.ahead} commit{gitStatus.ahead !== 1 ? 's' : ''} ahead of {gitStatus.remote_branch || 'remote'}
+                  {gitStatus?.ahead ?? 0} commit{(gitStatus?.ahead ?? 0) !== 1 ? 's' : ''} ahead of {gitStatus?.remote_branch || 'remote'}
                 </TooltipContent>
               </Tooltip>
             )}
-            {gitStatus.behind > 0 && (
+            {(gitStatus?.behind ?? 0) > 0 && (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <span className="cursor-default">
-                    <CommitStatBadge label={`${gitStatus.behind} behind`} tone="behind" />
+                    <CommitStatBadge label={`${gitStatus?.behind ?? 0} behind`} tone="behind" />
                   </span>
                 </TooltipTrigger>
                 <TooltipContent>
-                  {gitStatus.behind} commit{gitStatus.behind !== 1 ? 's' : ''} behind {gitStatus.remote_branch || 'remote'}
+                  {gitStatus?.behind ?? 0} commit{(gitStatus?.behind ?? 0) !== 1 ? 's' : ''} behind {gitStatus?.remote_branch || 'remote'}
                 </TooltipContent>
               </Tooltip>
             )}

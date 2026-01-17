@@ -1,3 +1,3 @@
-export function linkToTaskSession(taskId: string, sessionId: string): string {
-  return `/task/${taskId}/${sessionId}`;
+export function linkToSession(sessionId: string): string {
+  return `/s/${sessionId}`;
 }

@@ -37,6 +37,7 @@ type Runtime interface {
 type RuntimeCreateRequest struct {
 	InstanceID     string
 	TaskID         string
+	SessionID      string
 	AgentProfileID string
 	WorkspacePath  string
 	Protocol       string
@@ -55,6 +56,7 @@ type RuntimeInstance struct {
 	// Core identifiers
 	InstanceID string
 	TaskID     string
+	SessionID  string
 
 	// Agentctl client for communicating with this instance
 	Client *agentctl.Client
@@ -89,6 +91,7 @@ func (ri *RuntimeInstance) ToAgentExecution(req *RuntimeCreateRequest) *AgentExe
 	return &AgentExecution{
 		ID:                   ri.InstanceID,
 		TaskID:               req.TaskID,
+		SessionID:            req.SessionID,
 		AgentProfileID:       req.AgentProfileID,
 		ContainerID:          ri.ContainerID,
 		ContainerIP:          ri.ContainerIP,
@@ -102,4 +105,3 @@ func (ri *RuntimeInstance) ToAgentExecution(req *RuntimeCreateRequest) *AgentExe
 		standalonePort:       ri.StandalonePort,
 	}
 }
-

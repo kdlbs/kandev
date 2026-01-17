@@ -40,7 +40,7 @@ export function taskToState(
   messages?: { items: Message[]; hasMore?: boolean; oldestCursor?: string | null }
 ): Partial<AppState> {
   const resolvedSessionId =
-    sessionId ?? messages?.items[0]?.task_session_id ?? null;
+    sessionId ?? messages?.items[0]?.session_id ?? null;
   return {
     tasks: {
       activeTaskId: task.id,

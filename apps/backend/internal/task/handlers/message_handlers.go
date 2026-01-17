@@ -12,9 +12,9 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/controller"
 	"github.com/kandev/kandev/internal/task/dto"
-	"github.com/kandev/kandev/internal/orchestrator/executor"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -27,7 +27,7 @@ type PromptResult struct {
 
 // OrchestratorService defines the interface for orchestrator operations
 type OrchestratorService interface {
-	PromptTask(ctx context.Context, taskID string, prompt string) (*PromptResult, error)
+	PromptTask(ctx context.Context, taskID, sessionID, prompt string) (*PromptResult, error)
 	ResumeTaskSession(ctx context.Context, taskID, taskSessionID string) error
 }
 
@@ -100,10 +100,10 @@ func (h *MessageHandlers) httpListMessages(c *gin.Context) {
 	if paginated {
 		resp, err = h.messageController.ListMessages(c.Request.Context(), dto.ListMessagesRequest{
 			TaskSessionID: sessionID,
-			Limit:          limit,
-			Before:         before,
-			After:          after,
-			Sort:           sort,
+			Limit:         limit,
+			Before:        before,
+			After:         after,
+			Sort:          sort,
 		})
 	} else {
 		resp, err = h.messageController.ListAllMessages(c.Request.Context(), sessionID)
@@ -119,10 +119,10 @@ func (h *MessageHandlers) httpListMessages(c *gin.Context) {
 // WS handlers
 
 type wsAddMessageRequest struct {
-	TaskID         string `json:"task_id"`
-	TaskSessionID  string `json:"task_session_id"`
-	Content        string `json:"content"`
-	AuthorID       string `json:"author_id,omitempty"`
+	TaskID        string `json:"task_id"`
+	TaskSessionID string `json:"session_id"`
+	Content       string `json:"content"`
+	AuthorID      string `json:"author_id,omitempty"`
 }
 
 func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -131,7 +131,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
 	if req.TaskSessionID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_session_id is required", nil)
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
 	}
 	if req.TaskID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
@@ -162,10 +162,10 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 
 	message, err := h.messageController.CreateMessage(ctx, dto.CreateMessageRequest{
 		TaskSessionID: req.TaskSessionID,
-		TaskID:         req.TaskID,
-		Content:        req.Content,
-		AuthorType:     "user",
-		AuthorID:       req.AuthorID,
+		TaskID:        req.TaskID,
+		Content:       req.Content,
+		AuthorType:    "user",
+		AuthorID:      req.AuthorID,
 	})
 	if err != nil {
 		h.logger.Error("failed to create message", zap.Error(err))
@@ -174,18 +174,18 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 
 	// Auto-forward message as prompt to running agent if orchestrator is available
 	if h.orchestrator != nil {
-		_, err := h.orchestrator.PromptTask(ctx, req.TaskID, req.Content)
+		_, err := h.orchestrator.PromptTask(ctx, req.TaskID, req.TaskSessionID, req.Content)
 		if err != nil {
 			if errors.Is(err, executor.ErrExecutionNotFound) {
 				if resumeErr := h.orchestrator.ResumeTaskSession(ctx, req.TaskID, req.TaskSessionID); resumeErr != nil {
 					h.logger.Warn("failed to resume task session for prompt",
 						zap.String("task_id", req.TaskID),
-						zap.String("task_session_id", req.TaskSessionID),
+						zap.String("session_id", req.TaskSessionID),
 						zap.Error(resumeErr))
 				} else {
 					for attempt := 0; attempt < 3; attempt++ {
 						time.Sleep(500 * time.Millisecond)
-						_, err = h.orchestrator.PromptTask(ctx, req.TaskID, req.Content)
+						_, err = h.orchestrator.PromptTask(ctx, req.TaskID, req.TaskSessionID, req.Content)
 						if err == nil {
 							break
 						}
@@ -202,11 +202,11 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 }
 
 type wsListMessagesRequest struct {
-	TaskSessionID  string `json:"task_session_id"`
-	Limit          int    `json:"limit"`
-	Before         string `json:"before"`
-	After          string `json:"after"`
-	Sort           string `json:"sort"`
+	TaskSessionID string `json:"session_id"`
+	Limit         int    `json:"limit"`
+	Before        string `json:"before"`
+	After         string `json:"after"`
+	Sort          string `json:"sort"`
 }
 
 func (h *MessageHandlers) wsListMessages(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -215,7 +215,7 @@ func (h *MessageHandlers) wsListMessages(ctx context.Context, msg *ws.Message) (
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
 	if req.TaskSessionID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_session_id is required", nil)
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
 	}
 	if req.Before != "" && req.After != "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "only one of before or after can be set", nil)
@@ -226,10 +226,10 @@ func (h *MessageHandlers) wsListMessages(ctx context.Context, msg *ws.Message) (
 
 	resp, err := h.messageController.ListMessages(ctx, dto.ListMessagesRequest{
 		TaskSessionID: req.TaskSessionID,
-		Limit:          req.Limit,
-		Before:         req.Before,
-		After:          req.After,
-		Sort:           req.Sort,
+		Limit:         req.Limit,
+		Before:        req.Before,
+		After:         req.After,
+		Sort:          req.Sort,
 	})
 	if err != nil {
 		h.logger.Error("failed to list messages", zap.Error(err))

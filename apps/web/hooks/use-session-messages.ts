@@ -3,28 +3,33 @@ import { getWebSocketClient } from '@/lib/ws/connection';
 import { useAppStore, useAppStoreApi } from '@/components/state-provider';
 import type { TaskSessionState, Message } from '@/lib/types/http';
 
-interface UseTaskMessagesReturn {
+interface UseSessionMessagesReturn {
   isLoading: boolean;
   messages: Message[];
   hasMore: boolean;
   oldestCursor: string | null;
 }
 
-export function useTaskMessages(
-  taskId: string | null,
+const EMPTY_MESSAGES: Message[] = [];
+const EMPTY_META = { isLoading: false, hasMore: false, oldestCursor: null };
+
+export function useSessionMessages(
   taskSessionId: string | null
-): UseTaskMessagesReturn {
+): UseSessionMessagesReturn {
   const store = useAppStoreApi();
+  const session = useAppStore((state) =>
+    taskSessionId ? state.taskSessions.items[taskSessionId] ?? null : null
+  );
   const messages = useAppStore((state) =>
-    taskSessionId ? state.messages.bySession[taskSessionId] ?? [] : []
+    taskSessionId ? state.messages.bySession[taskSessionId] ?? EMPTY_MESSAGES : EMPTY_MESSAGES
   );
   const messagesMeta = useAppStore((state) =>
     taskSessionId
-      ? state.messages.metaBySession[taskSessionId] ?? { isLoading: false, hasMore: false, oldestCursor: null }
-      : { isLoading: false, hasMore: false, oldestCursor: null }
+      ? state.messages.metaBySession[taskSessionId] ?? EMPTY_META
+      : EMPTY_META
   );
   const taskSessionState = useAppStore((state) =>
-    taskId ? (state.taskSessionStatesByTaskId[taskId] ?? null) : null
+    taskSessionId ? state.taskSessions.items[taskSessionId]?.state ?? null : null
   );
   const connectionStatus = useAppStore((state) => state.connection.status);
   const [isLoading, setIsLoading] = useState(false);
@@ -35,13 +40,8 @@ export function useTaskMessages(
   const hasAgentMessage = messages.some((message) => message.author_type === 'agent');
 
   useEffect(() => {
-    if (!taskId) return;
-    store.getState().clearGitStatus();
-  }, [store, taskId]);
-
-  useEffect(() => {
     if (!taskSessionId) {
-      console.log('[useTaskMessages] no task_session_id yet, clearing messages');
+      console.log('[useSessionMessages] no session_id yet, clearing messages');
       initialFetchStartRef.current = null;
       lastFetchedSessionIdRef.current = null;
       setIsWaitingForInitialMessages(false);
@@ -66,13 +66,13 @@ export function useTaskMessages(
   useEffect(() => {
     if (!taskSessionId) return;
     if (connectionStatus !== 'connected') {
-      console.warn('[useTaskMessages] WebSocket not connected yet, waiting to fetch messages');
+      console.warn('[useSessionMessages] WebSocket not connected yet, waiting to fetch messages');
       return;
     }
 
     // Check if messages are already loaded (from SSR or previous fetch)
     if (messages.length > 0) {
-      console.log('[useTaskMessages] messages already loaded from SSR or cache, skipping fetch');
+      console.log('[useSessionMessages] messages already loaded from SSR or cache, skipping fetch');
       lastFetchedSessionIdRef.current = taskSessionId;
       setIsWaitingForInitialMessages(false);
       return;
@@ -85,7 +85,7 @@ export function useTaskMessages(
     const fetchMessages = async () => {
       const client = getWebSocketClient();
       if (!client) {
-        console.warn('[useTaskMessages] WebSocket client not ready');
+        console.warn('[useSessionMessages] WebSocket client not ready');
         return;
       }
 
@@ -97,13 +97,13 @@ export function useTaskMessages(
       }
 
       try {
-        console.log('[useTaskMessages] requesting message.list', { taskSessionId });
+        console.log('[useSessionMessages] requesting message.list', { taskSessionId });
         const response = await client.request<{ messages: Message[] }>(
           'message.list',
-          { task_session_id: taskSessionId },
+          { session_id: taskSessionId },
           10000
         );
-        console.log('[useTaskMessages] message.list response:', JSON.stringify(response, null, 2));
+        console.log('[useSessionMessages] message.list response:', JSON.stringify(response, null, 2));
         store.getState().setMessages(taskSessionId, response.messages ?? []);
         lastFetchedSessionIdRef.current = taskSessionId;
         if ((response.messages ?? []).length > 0) {
@@ -121,29 +121,18 @@ export function useTaskMessages(
     fetchMessages();
   }, [taskSessionId, connectionStatus, messages.length, store]);
 
-  // Subscribe to task for real-time updates
   useEffect(() => {
-    if (!taskId) return;
-
+    if (!taskSessionId) return;
     const client = getWebSocketClient();
-    if (!client) {
-      console.warn('[useTaskMessages] WebSocket client not ready for subscribe');
-      return;
-    }
-
-    // Subscribe to task updates
-    console.log('[useTaskMessages] subscribing to task', { taskId });
-    const unsubscribe = client.subscribe(taskId);
-
+    if (!client) return;
+    const unsubscribe = client.subscribeSession(taskSessionId);
     return () => {
-      // Unsubscribe when leaving
-      console.log('[useTaskMessages] unsubscribing from task', { taskId });
       unsubscribe();
     };
-  }, [taskId]);
+  }, [taskSessionId]);
 
   useEffect(() => {
-    if (!taskSessionId || !taskSessionState || !taskId) return;
+    if (!taskSessionId || !taskSessionState) return;
     if (hasAgentMessage) return;
 
     const terminalStates = new Set<TaskSessionState>(['WAITING_FOR_INPUT', 'COMPLETED', 'FAILED']);
@@ -160,17 +149,17 @@ export function useTaskMessages(
     const fetchMessages = async () => {
       const client = getWebSocketClient();
       if (!client) {
-        console.warn('[useTaskMessages] WebSocket client not ready for state fetch');
+        console.warn('[useSessionMessages] WebSocket client not ready for state fetch');
         return;
       }
 
       setIsLoading(true);
       store.getState().setMessagesLoading(taskSessionId, true);
       try {
-        console.log('[useTaskMessages] requesting message.list after state change', { taskSessionId, taskSessionState });
+        console.log('[useSessionMessages] requesting message.list after state change', { taskSessionId, taskSessionState });
         const response = await client.request<{ messages: Message[] }>(
           'message.list',
-          { task_session_id: taskSessionId },
+          { session_id: taskSessionId },
           10000
         );
         store.getState().setMessages(taskSessionId, response.messages ?? []);
@@ -185,7 +174,7 @@ export function useTaskMessages(
     };
 
     fetchMessages();
-  }, [taskSessionId, taskSessionState, hasAgentMessage, store, taskId]);
+  }, [taskSessionId, taskSessionState, hasAgentMessage, store]);
 
   return {
     isLoading: isLoading || isWaitingForInitialMessages || messagesMeta.isLoading,

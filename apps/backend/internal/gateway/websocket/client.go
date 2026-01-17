@@ -29,27 +29,29 @@ const (
 
 // Client represents a single WebSocket connection
 type Client struct {
-	ID            string
-	conn          *websocket.Conn
-	hub           *Hub
-	send          chan []byte
-	subscriptions map[string]bool // Task IDs this client is subscribed to
-	userSubscriptions map[string]bool // User IDs this client is subscribed to
-	mu            sync.RWMutex
-	closed        bool
-	logger        *logger.Logger
+	ID                   string
+	conn                 *websocket.Conn
+	hub                  *Hub
+	send                 chan []byte
+	subscriptions        map[string]bool // Task IDs this client is subscribed to
+	sessionSubscriptions map[string]bool // Session IDs this client is subscribed to
+	userSubscriptions    map[string]bool // User IDs this client is subscribed to
+	mu                   sync.RWMutex
+	closed               bool
+	logger               *logger.Logger
 }
 
 // NewClient creates a new WebSocket client
 func NewClient(id string, conn *websocket.Conn, hub *Hub, log *logger.Logger) *Client {
 	return &Client{
-		ID:            id,
-		conn:          conn,
-		hub:           hub,
-		send:          make(chan []byte, 256),
-		subscriptions: make(map[string]bool),
-		userSubscriptions: make(map[string]bool),
-		logger:        log.WithFields(zap.String("client_id", id)),
+		ID:                   id,
+		conn:                 conn,
+		hub:                  hub,
+		send:                 make(chan []byte, 256),
+		subscriptions:        make(map[string]bool),
+		sessionSubscriptions: make(map[string]bool),
+		userSubscriptions:    make(map[string]bool),
+		logger:               log.WithFields(zap.String("client_id", id)),
 	}
 }
 
@@ -110,6 +112,12 @@ func (c *Client) handleMessage(ctx context.Context, msg *ws.Message) {
 		return
 	case ws.ActionTaskUnsubscribe:
 		c.handleUnsubscribe(msg)
+		return
+	case ws.ActionSessionSubscribe:
+		c.handleSessionSubscribe(msg)
+		return
+	case ws.ActionSessionUnsubscribe:
+		c.handleSessionUnsubscribe(msg)
 		return
 	case ws.ActionUserSubscribe:
 		c.handleUserSubscribe(msg)
@@ -172,6 +180,10 @@ type UserSubscribeRequest struct {
 	UserID string `json:"user_id,omitempty"`
 }
 
+type SessionSubscribeRequest struct {
+	SessionID string `json:"session_id"`
+}
+
 func (c *Client) handleUserSubscribe(msg *ws.Message) {
 	var req UserSubscribeRequest
 	if err := msg.ParsePayload(&req); err != nil {
@@ -192,6 +204,26 @@ func (c *Client) handleUserSubscribe(msg *ws.Message) {
 	resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 		"success": true,
 		"user_id": userID,
+	})
+	c.sendMessage(resp)
+}
+
+func (c *Client) handleSessionSubscribe(msg *ws.Message) {
+	var req SessionSubscribeRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		c.sendError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+		return
+	}
+
+	if req.SessionID == "" {
+		c.sendError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+		return
+	}
+
+	c.hub.SubscribeToSession(c, req.SessionID)
+	resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		"success":    true,
+		"session_id": req.SessionID,
 	})
 	c.sendMessage(resp)
 }
@@ -286,6 +318,28 @@ func (c *Client) handleUnsubscribe(msg *ws.Message) {
 	resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 		"success": true,
 		"task_id": req.TaskID,
+	})
+	c.sendMessage(resp)
+}
+
+// handleSessionUnsubscribe handles session.unsubscribe action
+func (c *Client) handleSessionUnsubscribe(msg *ws.Message) {
+	var req SessionSubscribeRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		c.sendError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+		return
+	}
+
+	if req.SessionID == "" {
+		c.sendError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+		return
+	}
+
+	c.hub.UnsubscribeFromSession(c, req.SessionID)
+
+	resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		"success":    true,
+		"session_id": req.SessionID,
 	})
 	c.sendMessage(resp)
 }

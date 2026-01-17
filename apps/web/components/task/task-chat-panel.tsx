@@ -15,13 +15,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/components/state-provider';
+import { getWebSocketClient } from '@/lib/ws/connection';
 import type { Message } from '@/lib/types/http';
 import { SHORTCUTS } from '@/lib/keyboard/constants';
 import { KeyboardShortcutTooltip } from '@/components/keyboard-shortcut-tooltip';
 import { TaskChatInput } from '@/components/task/task-chat-input';
 import { useLazyLoadMessages } from '@/hooks/use-lazy-load-messages';
-import { useTaskSession } from '@/hooks/use-task-session';
-import { useTaskMessages } from '@/hooks/use-task-messages';
+import { useSession } from '@/hooks/use-session';
+import { useTask } from '@/hooks/use-task';
+import { useSessionMessages } from '@/hooks/use-session-messages';
 import { MessageRenderer } from '@/components/task/chat/message-renderer';
 import { RunningIndicator } from '@/components/task/chat/messages/running-indicator';
 import { TodoSummary } from '@/components/task/chat/todo-summary';
@@ -33,7 +35,7 @@ type AgentOption = {
 
 type TaskChatPanelProps = {
   agents: AgentOption[];
-  onSend: (message: string) => void;
+  onSend?: (message: string) => void;
   sessionId?: string | null;
 };
 
@@ -54,10 +56,14 @@ export function TaskChatPanel({
   const resolvedSessionId = sessionId ?? activeSessionId;
 
   // Get task session details and derived task information from session ID
-  const { session, taskId, taskDescription, isWorking } = useTaskSession(resolvedSessionId);
+  const { session } = useSession(resolvedSessionId);
+  const task = useTask(session?.task_id ?? null);
+  const taskId = session?.task_id ?? null;
+  const taskDescription = task?.description ?? null;
+  const isWorking = session?.state === 'STARTING' || session?.state === 'RUNNING';
 
   // Fetch messages for this session
-  const { messages, isLoading: messagesLoading } = useTaskMessages(taskId, resolvedSessionId);
+  const { messages, isLoading: messagesLoading } = useSessionMessages(resolvedSessionId);
   const isInitialLoading = messagesLoading && messages.length === 0;
   const showLoadingState = (messagesLoading || isInitialLoading) && !isWorking;
   const { loadMore, hasMore, isLoading: isLoadingMore } = useLazyLoadMessages(resolvedSessionId);
@@ -81,7 +87,7 @@ export function TaskChatPanel({
       ? {
         id: 'task-description',
         task_id: taskId ?? '',
-        task_session_id: resolvedSessionId ?? '',
+        session_id: resolvedSessionId ?? '',
         author_type: 'user',
         content: taskDescription,
         type: 'message',
@@ -166,6 +172,20 @@ export function TaskChatPanel({
     });
   }, [virtualItems, hasMore, isLoadingMore, loadMore]);
 
+  const handleSendMessage = useCallback(async (message: string) => {
+    if (!taskId || !resolvedSessionId) {
+      console.error('No active task session. Start an agent before sending a message.');
+      return;
+    }
+    const client = getWebSocketClient();
+    if (!client) return;
+    await client.request(
+      'message.add',
+      { task_id: taskId, session_id: resolvedSessionId, content: message },
+      10000
+    );
+  }, [resolvedSessionId, taskId]);
+
   const handleSubmit = async (event?: FormEvent) => {
     event?.preventDefault();
     const trimmed = messageInput.trim();
@@ -175,7 +195,11 @@ export function TaskChatPanel({
       setMessageInput('');
     });
     try {
-      await onSend(trimmed);
+      if (onSend) {
+        await onSend(trimmed);
+      } else {
+        await handleSendMessage(trimmed);
+      }
     } finally {
       setIsSending(false);
     }

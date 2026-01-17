@@ -43,6 +43,7 @@ export class WebSocketClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private intentionalClose = false;
   private subscriptions = new Map<string, number>();
+  private sessionSubscriptions = new Map<string, number>();
   private userSubscriptionCount = 0;
   private heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
   private heartbeatTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
@@ -192,6 +193,21 @@ export class WebSocketClient {
     return () => this.unsubscribe(taskId);
   }
 
+  subscribeSession(sessionId: string) {
+    const currentCount = this.sessionSubscriptions.get(sessionId) ?? 0;
+    const nextCount = currentCount + 1;
+    this.sessionSubscriptions.set(sessionId, nextCount);
+    if (this.status === 'open' && nextCount === 1) {
+      this.send({
+        id: generateUUID(),
+        type: 'request',
+        action: 'session.subscribe',
+        payload: { session_id: sessionId },
+      });
+    }
+    return () => this.unsubscribeSession(sessionId);
+  }
+
   subscribeUser() {
     this.userSubscriptionCount += 1;
     if (this.status === 'open' && this.userSubscriptionCount === 1) {
@@ -221,6 +237,25 @@ export class WebSocketClient {
       return;
     }
     this.subscriptions.set(taskId, nextCount);
+  }
+
+  unsubscribeSession(sessionId: string) {
+    const currentCount = this.sessionSubscriptions.get(sessionId);
+    if (!currentCount) return;
+    const nextCount = currentCount - 1;
+    if (nextCount <= 0) {
+      this.sessionSubscriptions.delete(sessionId);
+      if (this.status === 'open') {
+        this.send({
+          id: generateUUID(),
+          type: 'request',
+          action: 'session.unsubscribe',
+          payload: { session_id: sessionId },
+        });
+      }
+      return;
+    }
+    this.sessionSubscriptions.set(sessionId, nextCount);
   }
 
   unsubscribeUser() {
@@ -315,6 +350,14 @@ export class WebSocketClient {
         type: 'request',
         action: 'task.subscribe',
         payload: { task_id: taskId },
+      });
+    });
+    this.sessionSubscriptions.forEach((_count, sessionId) => {
+      this.send({
+        id: generateUUID(),
+        type: 'request',
+        action: 'session.subscribe',
+        payload: { session_id: sessionId },
       });
     });
     if (this.userSubscriptionCount > 0) {

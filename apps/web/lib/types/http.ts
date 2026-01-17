@@ -100,13 +100,17 @@ export type Task = {
   state: TaskState;
   priority: number;
   repositories?: TaskRepository[];
-  assigned_agent_id?: string | null;
   created_at: string;
   updated_at: string;
   metadata?: Record<string, unknown> | null;
   // Worktree information (present if agent has created a worktree for this task)
   worktree_path?: string | null;
   worktree_branch?: string | null;
+};
+
+export type CreateTaskResponse = Task & {
+  session_id?: string;
+  agent_execution_id?: string;
 };
 
 export type TaskSession = {
@@ -138,6 +142,10 @@ export type TaskSession = {
 export type TaskSessionsResponse = {
   sessions: TaskSession[];
   total: number;
+};
+
+export type TaskSessionResponse = {
+  session: TaskSession;
 };
 
 export type NotificationProviderType = 'local' | 'apprise';
@@ -303,7 +311,7 @@ export type MessageType =
 
 export type Message = {
   id: string;
-  task_session_id: string;
+  session_id: string;
   task_id: string;
   author_type: MessageAuthorType;
   author_id?: string;

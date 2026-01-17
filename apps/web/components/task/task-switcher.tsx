@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { IconChevronRight } from '@tabler/icons-react';
-import type { TaskSession, TaskState } from '@/lib/types/http';
+import type { TaskState } from '@/lib/types/http';
 import {
   Item,
   ItemActions,
@@ -28,9 +28,7 @@ type TaskSwitcherProps = {
   columns: Array<{ id: string; title: string }>;
   activeTaskId: string | null;
   selectedTaskId: string | null;
-  sessionsByTask: Record<string, TaskSession[]>;
-  onLoadTaskSessions: (taskId: string) => void;
-  onSelectTask: (taskId: string, sessionId: string | null) => void;
+  onSelectTask: (taskId: string) => void;
 };
 
 export function TaskSwitcher({
@@ -38,8 +36,6 @@ export function TaskSwitcher({
   columns,
   activeTaskId,
   selectedTaskId,
-  sessionsByTask,
-  onLoadTaskSessions,
   onSelectTask,
 }: TaskSwitcherProps) {
   const [collapsedColumnIds, setCollapsedColumnIds] = useState<Set<string>>(() => new Set());
@@ -107,7 +103,6 @@ export function TaskSwitcher({
                     <ItemGroup className="gap-2">
                       {columnTasks.map((task) => {
                         const isActive = task.id === activeTaskId;
-                        const sessions = sessionsByTask[task.id] ?? [];
                         const isSelected = task.id === selectedTaskId || isActive;
                         const repoLabel = task.repositoryPath ? truncateRepoPath(task.repositoryPath) : 'No repository';
                         return (
@@ -123,16 +118,12 @@ export function TaskSwitcher({
                               href="#"
                               onClick={(event) => {
                                 event.preventDefault();
-                                const firstSessionId = sessions[0]?.id ?? null;
-                                onSelectTask(task.id, firstSessionId);
-                                onLoadTaskSessions(task.id);
+                                onSelectTask(task.id);
                               }}
                               onKeyDown={(event) => {
                                 if (event.key === 'Enter' || event.key === ' ') {
                                   event.preventDefault();
-                                  const firstSessionId = sessions[0]?.id ?? null;
-                                  onSelectTask(task.id, firstSessionId);
-                                  onLoadTaskSessions(task.id);
+                                  onSelectTask(task.id);
                                 }
                               }}
                               className="flex w-full items-center gap-2"

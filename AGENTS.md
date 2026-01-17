@@ -33,7 +33,7 @@ make -C apps/backend lint
 
 ## Backend Architecture (High Level)
 
-- **Transport**: WebSocket-only for client <-> backend.
+- **Transport**: WebSocket for realtime updates; HTTP for CRUD + SSR fetches.
 - **Gateway**: Single WS endpoint at `ws://localhost:8080/ws`.
 - **Orchestrator**: Starts/stops/resumes tasks, manages sessions.
 - **Agent lifecycle**:
@@ -118,8 +118,8 @@ Layer 3: Components (subscribe + render)
 - Task/session scoped data is keyed in store:
   - `messages.bySession[sessionId]`
   - `messages.metaBySession[sessionId]`
-  - `gitStatus` keyed by `taskId`
-  - `shell.outputs` keyed by `taskId`
+  - `gitStatus` keyed by `sessionId`
+  - `shell.outputs` keyed by `sessionId`
 - Active selection state lives in store:
   - `tasks.activeTaskId`
   - `tasks.activeSessionId`
@@ -127,16 +127,16 @@ Layer 3: Components (subscribe + render)
 ### Custom Hooks Pattern
 
 - Hooks own subscriptions and return data from store:
-  - `useTaskMessages(taskId, sessionId)` → messages + loading/meta
+  - `useSessionMessages(sessionId)` → messages + loading/meta
   - `useLazyLoadMessages(sessionId)` → pagination
-  - `useGitStatus(taskId)` → git state
-  - `useShellOutput(taskId, sessionId)` → shell output
+  - `useSessionGitStatus(sessionId)` → git state
+  - `useSessionShellOutput(sessionId)` → shell output
 - Hooks subscribe on mount, cleanup on unmount; no manual dedup in components.
 
 ### Page-Level Responsibilities
 
 - SSR fetches initial task/session + board snapshot, hydrates store.
-- Page reads URL `taskId` + `sessionId`, calls `setActiveSession(taskId, sessionId)`.
+- Page reads URL `sessionId`, resolves task via session, and calls `setActiveSession(taskId, sessionId)` after load.
 - Page coordinates task list + session list loading (e.g., `listTaskSessions`).
 - Components render from store and trigger hooks for live updates.
 

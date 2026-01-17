@@ -64,7 +64,7 @@ func (m *mockAgentManager) PromptAgent(ctx context.Context, agentExecutionID str
 	return &executor.PromptResult{StopReason: "end_turn"}, nil
 }
 
-func (m *mockAgentManager) RespondToPermissionByTaskID(ctx context.Context, taskID, pendingID, optionID string, cancelled bool) error {
+func (m *mockAgentManager) RespondToPermissionBySessionID(ctx context.Context, sessionID, pendingID, optionID string, cancelled bool) error {
 	return nil
 }
 
@@ -72,11 +72,11 @@ func (m *mockAgentManager) GetRecoveredExecutions() []executor.RecoveredExecutio
 	return nil
 }
 
-func (m *mockAgentManager) IsAgentRunningForTask(ctx context.Context, taskID string) bool {
+func (m *mockAgentManager) IsAgentRunningForSession(ctx context.Context, sessionID string) bool {
 	return false
 }
 
-func (m *mockAgentManager) CleanupStaleExecutionByTaskID(ctx context.Context, taskID string) error {
+func (m *mockAgentManager) CleanupStaleExecutionBySessionID(ctx context.Context, sessionID string) error {
 	return nil
 }
 

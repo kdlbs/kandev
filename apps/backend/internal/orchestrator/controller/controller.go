@@ -140,7 +140,7 @@ func (c *Controller) StopTask(ctx context.Context, req dto.StopTaskRequest) (dto
 
 // PromptTask sends a prompt to a running task
 func (c *Controller) PromptTask(ctx context.Context, req dto.PromptTaskRequest) (dto.PromptTaskResponse, error) {
-	result, err := c.service.PromptTask(ctx, req.TaskID, req.Prompt)
+	result, err := c.service.PromptTask(ctx, req.TaskID, req.TaskSessionID, req.Prompt)
 	if err != nil {
 		return dto.PromptTaskResponse{}, err
 	}
@@ -165,13 +165,13 @@ func (c *Controller) CompleteTask(ctx context.Context, req dto.CompleteTaskReque
 
 // RespondToPermission responds to a permission request
 func (c *Controller) RespondToPermission(ctx context.Context, req dto.PermissionRespondRequest) (dto.PermissionRespondResponse, error) {
-	if err := c.service.RespondToPermission(ctx, req.TaskID, req.PendingID, req.OptionID, req.Cancelled); err != nil {
+	if err := c.service.RespondToPermission(ctx, req.SessionID, req.PendingID, req.OptionID, req.Cancelled); err != nil {
 		return dto.PermissionRespondResponse{}, err
 	}
 
 	return dto.PermissionRespondResponse{
 		Success:   true,
-		TaskID:    req.TaskID,
+		SessionID: req.SessionID,
 		PendingID: req.PendingID,
 	}, nil
 }

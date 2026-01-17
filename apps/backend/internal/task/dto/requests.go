@@ -238,6 +238,10 @@ type ListTaskSessionsRequest struct {
 	TaskID string
 }
 
+type GetTaskSessionRequest struct {
+	TaskSessionID string
+}
+
 type GetTaskRequest struct {
 	ID string
 }
@@ -259,7 +263,6 @@ type CreateTaskRequest struct {
 	Priority     int
 	State        *v1.TaskState
 	Repositories []TaskRepositoryInput
-	AssignedTo   string
 	Position     int
 	Metadata     map[string]interface{}
 }
@@ -271,7 +274,6 @@ type UpdateTaskRequest struct {
 	Priority     *int
 	State        *v1.TaskState
 	Repositories []TaskRepositoryInput
-	AssignedTo   *string
 	Position     *int
 	Metadata     map[string]interface{}
 }

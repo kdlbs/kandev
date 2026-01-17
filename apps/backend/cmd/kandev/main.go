@@ -28,8 +28,6 @@ import (
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
 
 	// Agent Manager packages
-	agentctl "github.com/kandev/kandev/internal/agentctl/client"
-	"github.com/kandev/kandev/internal/agentctl/client/launcher"
 	agentcontroller "github.com/kandev/kandev/internal/agent/controller"
 	"github.com/kandev/kandev/internal/agent/credentials"
 	"github.com/kandev/kandev/internal/agent/discovery"
@@ -41,6 +39,8 @@ import (
 	agentsettingshandlers "github.com/kandev/kandev/internal/agent/settings/handlers"
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/agent/worktree"
+	agentctl "github.com/kandev/kandev/internal/agentctl/client"
+	"github.com/kandev/kandev/internal/agentctl/client/launcher"
 	notificationcontroller "github.com/kandev/kandev/internal/notifications/controller"
 	notificationhandlers "github.com/kandev/kandev/internal/notifications/handlers"
 	notificationservice "github.com/kandev/kandev/internal/notifications/service"
@@ -481,7 +481,7 @@ func main() {
 		_, err = eventBus.Subscribe(events.TaskSessionStateChanged, func(ctx context.Context, event *bus.Event) error {
 			data := event.Data
 			taskID, _ := data["task_id"].(string)
-			sessionID, _ := data["task_session_id"].(string)
+			sessionID, _ := data["session_id"].(string)
 			newState, _ := data["new_state"].(string)
 			notificationSvc.HandleTaskSessionStateChanged(ctx, taskID, sessionID, newState)
 			return nil
@@ -510,17 +510,17 @@ func main() {
 
 		result := make([]*ws.Message, 0, len(messages))
 		for _, message := range messages {
-			action := ws.ActionMessageAdded
+			action := ws.ActionSessionMessageAdded
 			payload := map[string]interface{}{
-				"message_id":      message.ID,
-				"task_session_id": message.TaskSessionID,
-				"task_id":         message.TaskID,
-				"author_type":     string(message.AuthorType),
-				"author_id":       message.AuthorID,
-				"content":         message.Content,
-				"type":            string(message.Type),
-				"requests_input":  message.RequestsInput,
-				"created_at":      message.CreatedAt.Format(time.RFC3339),
+				"message_id":     message.ID,
+				"session_id":     message.TaskSessionID,
+				"task_id":        message.TaskID,
+				"author_type":    string(message.AuthorType),
+				"author_id":      message.AuthorID,
+				"content":        message.Content,
+				"type":           string(message.Type),
+				"requests_input": message.RequestsInput,
+				"created_at":     message.CreatedAt.Format(time.RFC3339),
 			}
 			if message.Metadata != nil {
 				payload["metadata"] = message.Metadata
@@ -543,7 +543,7 @@ func main() {
 				}
 				gitStatusData["task_id"] = taskID
 
-				gitStatusNotification, err := ws.NewNotification("git.status", gitStatusData)
+				gitStatusNotification, err := ws.NewNotification("session.git.status", gitStatusData)
 				if err == nil {
 					result = append(result, gitStatusNotification)
 				}
@@ -559,7 +559,11 @@ func main() {
 		if lifecycleMgr == nil {
 			return nil, nil
 		}
-		permissions, err := lifecycleMgr.GetPendingPermissionsForTask(ctx, taskID)
+		session, err := taskRepo.GetActiveTaskSessionByTaskID(ctx, taskID)
+		if err != nil || session == nil || session.ID == "" {
+			return nil, nil
+		}
+		permissions, err := lifecycleMgr.GetPendingPermissionsForSession(ctx, session.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -599,6 +603,12 @@ func main() {
 	orchestratorSvc.RegisterACPHandler(func(taskID string, msg *protocol.Message) {
 		// Check for permission_request events (type is in msg.Type, payload in msg.Data)
 		if msg.Type == "permission_request" {
+			sessionID := msg.SessionID
+			if sessionID == "" {
+				log.Warn("permission_request missing session_id, skipping",
+					zap.String("task_id", taskID))
+				return
+			}
 			// Build payload for frontend with all necessary fields
 			payload := map[string]interface{}{
 				"type":              "permission_request",
@@ -612,7 +622,7 @@ func main() {
 			}
 			// Broadcast permission.requested notification to task subscribers
 			notification, _ := ws.NewNotification(ws.ActionPermissionRequested, payload)
-			gateway.Hub.BroadcastToTask(taskID, notification)
+			gateway.Hub.BroadcastToSession(sessionID, notification)
 			log.Info("broadcasted permission.requested notification",
 				zap.String("task_id", taskID),
 				zap.Any("pending_id", payload["pending_id"]))
@@ -629,37 +639,43 @@ func main() {
 			protocol.MessageTypeStatus,
 			protocol.MessageTypeHeartbeat,
 			protocol.MessageTypeInputRequired:
+			if msg.SessionID == "" {
+				log.Warn("ACP notification missing session_id, skipping",
+					zap.String("task_id", taskID),
+					zap.String("type", string(msg.Type)))
+				return
+			}
 			// Convert ACP message to WebSocket notification
 			action := "acp." + string(msg.Type)
 			notification, _ := ws.NewNotification(action, map[string]interface{}{
-				"task_id":   taskID,
-				"type":      msg.Type,
-				"data":      msg.Data,
-				"timestamp": msg.Timestamp,
+				"task_id":    taskID,
+				"session_id": msg.SessionID,
+				"type":       msg.Type,
+				"data":       msg.Data,
+				"timestamp":  msg.Timestamp,
 			})
-			gateway.Hub.BroadcastToTask(taskID, notification)
+			gateway.Hub.BroadcastToSession(msg.SessionID, notification)
 		default:
 			// Skip other message types (session/update, etc.)
 		}
 	})
 
 	// Wire input request handler to create agent messages when input is requested
-	orchestratorSvc.SetInputRequestHandler(func(ctx context.Context, taskID, agentID, message string) error {
+	orchestratorSvc.SetInputRequestHandler(func(ctx context.Context, taskID, sessionID, agentID, message string) error {
 		log.Info("agent requesting user input, creating message",
 			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
 			zap.String("agent_id", agentID))
 
-		session, err := taskRepo.GetActiveTaskSessionByTaskID(ctx, taskID)
-		if err != nil {
-			log.Error("failed to resolve active agent session for input request",
-				zap.String("task_id", taskID),
-				zap.Error(err))
-			return err
+		if sessionID == "" {
+			log.Error("missing task session id for input request",
+				zap.String("task_id", taskID))
+			return fmt.Errorf("missing task session id for input request")
 		}
 
 		// Create a message from the agent
 		messageRecord, err := taskSvc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
-			TaskSessionID: session.ID,
+			TaskSessionID: sessionID,
 			TaskID:        taskID,
 			Content:       message,
 			AuthorType:    "agent",
@@ -673,22 +689,23 @@ func main() {
 			return err
 		}
 
-		// Broadcast message.added notification to task subscribers
-		notification, _ := ws.NewNotification(ws.ActionMessageAdded, map[string]interface{}{
-			"task_id":         taskID,
-			"task_session_id": session.ID,
-			"message":         messageRecord.ToAPI(),
-			"requests_input":  true,
+		// Broadcast message.added notification to session subscribers
+		notification, _ := ws.NewNotification(ws.ActionSessionMessageAdded, map[string]interface{}{
+			"task_id":        taskID,
+			"session_id":     sessionID,
+			"message":        messageRecord.ToAPI(),
+			"requests_input": true,
 		})
-		gateway.Hub.BroadcastToTask(taskID, notification)
+		gateway.Hub.BroadcastToSession(sessionID, notification)
 
 		// Also broadcast input.requested notification
 		inputNotification, _ := ws.NewNotification(ws.ActionInputRequested, map[string]interface{}{
 			"task_id":    taskID,
+			"session_id": sessionID,
 			"message_id": messageRecord.ID,
 			"message":    message,
 		})
-		gateway.Hub.BroadcastToTask(taskID, inputNotification)
+		gateway.Hub.BroadcastToSession(sessionID, inputNotification)
 
 		return nil
 	})
@@ -701,32 +718,32 @@ func main() {
 	// Subscribe to message.added events and broadcast to WebSocket subscribers
 	_, err = eventBus.Subscribe(events.MessageAdded, func(ctx context.Context, event *bus.Event) error {
 		data := event.Data
-		taskSessionID, _ := data["task_session_id"].(string)
+		taskSessionID, _ := data["session_id"].(string)
 		taskID, _ := data["task_id"].(string)
 		if taskSessionID == "" {
 			return nil
 		}
 
 		payload := map[string]interface{}{
-			"task_id":         taskID,
-			"task_session_id": taskSessionID,
-			"message_id":      data["message_id"],
-			"author_type":     data["author_type"],
-			"author_id":       data["author_id"],
-			"content":         data["content"],
-			"type":            data["type"],
-			"requests_input":  data["requests_input"],
-			"created_at":      data["created_at"],
+			"task_id":        taskID,
+			"session_id":     taskSessionID,
+			"message_id":     data["message_id"],
+			"author_type":    data["author_type"],
+			"author_id":      data["author_id"],
+			"content":        data["content"],
+			"type":           data["type"],
+			"requests_input": data["requests_input"],
+			"created_at":     data["created_at"],
 		}
 		if metadata, ok := data["metadata"]; ok && metadata != nil {
 			payload["metadata"] = metadata
 		}
-		notification, err := ws.NewNotification(ws.ActionMessageAdded, payload)
+		notification, err := ws.NewNotification(ws.ActionSessionMessageAdded, payload)
 		if err != nil {
 			log.Error("Failed to create message.added notification", zap.Error(err))
 			return nil
 		}
-		gateway.Hub.BroadcastToTask(taskID, notification)
+		gateway.Hub.BroadcastToSession(taskSessionID, notification)
 		return nil
 	})
 	if err != nil {
@@ -738,32 +755,32 @@ func main() {
 	// Subscribe to message.updated events and broadcast to WebSocket subscribers
 	_, err = eventBus.Subscribe(events.MessageUpdated, func(ctx context.Context, event *bus.Event) error {
 		data := event.Data
-		taskSessionID, _ := data["task_session_id"].(string)
+		taskSessionID, _ := data["session_id"].(string)
 		taskID, _ := data["task_id"].(string)
 		if taskSessionID == "" {
-			log.Warn("message.updated event has no task_session_id, skipping")
+			log.Warn("message.updated event has no session_id, skipping")
 			return nil
 		}
 		payload := map[string]interface{}{
-			"message_id":      data["message_id"],
-			"task_session_id": taskSessionID,
-			"task_id":         taskID,
-			"author_type":     data["author_type"],
-			"author_id":       data["author_id"],
-			"content":         data["content"],
-			"type":            data["type"],
-			"requests_input":  data["requests_input"],
-			"created_at":      data["created_at"],
+			"message_id":     data["message_id"],
+			"session_id":     taskSessionID,
+			"task_id":        taskID,
+			"author_type":    data["author_type"],
+			"author_id":      data["author_id"],
+			"content":        data["content"],
+			"type":           data["type"],
+			"requests_input": data["requests_input"],
+			"created_at":     data["created_at"],
 		}
 		if metadata, ok := data["metadata"]; ok && metadata != nil {
 			payload["metadata"] = metadata
 		}
-		notification, err := ws.NewNotification(ws.ActionMessageUpdated, payload)
+		notification, err := ws.NewNotification(ws.ActionSessionMessageUpdated, payload)
 		if err != nil {
 			log.Error("Failed to create message.updated notification", zap.Error(err))
 			return nil
 		}
-		gateway.Hub.BroadcastToTask(taskID, notification)
+		gateway.Hub.BroadcastToSession(taskSessionID, notification)
 		return nil
 	})
 	if err != nil {
@@ -775,16 +792,16 @@ func main() {
 	// Subscribe to task_session.state_changed events and broadcast to task subscribers
 	_, err = eventBus.Subscribe(events.TaskSessionStateChanged, func(ctx context.Context, event *bus.Event) error {
 		data := event.Data
-		taskID, _ := data["task_id"].(string)
-		if taskID == "" {
+		taskSessionID, _ := data["session_id"].(string)
+		if taskSessionID == "" {
 			return nil
 		}
-		notification, err := ws.NewNotification(ws.ActionTaskSessionStateChanged, data)
+		notification, err := ws.NewNotification(ws.ActionSessionStateChanged, data)
 		if err != nil {
 			log.Error("Failed to create task_session.state_changed notification", zap.Error(err))
 			return nil
 		}
-		gateway.Hub.BroadcastToTask(taskID, notification)
+		gateway.Hub.BroadcastToSession(taskSessionID, notification)
 		return nil
 	})
 	if err != nil {
@@ -796,14 +813,14 @@ func main() {
 	// Subscribe to git status events and broadcast to WebSocket subscribers
 	_, err = eventBus.Subscribe(events.BuildGitStatusWildcardSubject(), func(ctx context.Context, event *bus.Event) error {
 		data := event.Data
-		taskID, _ := data["task_id"].(string)
-		if taskID == "" {
+		taskSessionID, _ := data["session_id"].(string)
+		if taskSessionID == "" {
 			return nil
 		}
 
-		// Broadcast git status update to task subscribers
-		notification, _ := ws.NewNotification("git.status", data)
-		gateway.Hub.BroadcastToTask(taskID, notification)
+		// Broadcast git status update to session subscribers
+		notification, _ := ws.NewNotification("session.git.status", data)
+		gateway.Hub.BroadcastToSession(taskSessionID, notification)
 		return nil
 	})
 	if err != nil {
@@ -815,14 +832,14 @@ func main() {
 	// Subscribe to file change events and broadcast to WebSocket subscribers
 	_, err = eventBus.Subscribe(events.BuildFileChangeWildcardSubject(), func(ctx context.Context, event *bus.Event) error {
 		data := event.Data
-		taskID, _ := data["task_id"].(string)
-		if taskID == "" {
+		taskSessionID, _ := data["session_id"].(string)
+		if taskSessionID == "" {
 			return nil
 		}
 
-		// Broadcast file change notification to task subscribers
-		notification, _ := ws.NewNotification("workspace.file.changes", data)
-		gateway.Hub.BroadcastToTask(taskID, notification)
+		// Broadcast file change notification to session subscribers
+		notification, _ := ws.NewNotification(ws.ActionWorkspaceFileChanges, data)
+		gateway.Hub.BroadcastToSession(taskSessionID, notification)
 		return nil
 	})
 	if err != nil {
@@ -847,7 +864,7 @@ func main() {
 	// Task Service handlers (HTTP + WebSocket)
 	taskhandlers.RegisterWorkspaceRoutes(router, gateway.Dispatcher, workspaceController, log)
 	taskhandlers.RegisterBoardRoutes(router, gateway.Dispatcher, boardController, log)
-	taskhandlers.RegisterTaskRoutes(router, gateway.Dispatcher, taskController, log)
+	taskhandlers.RegisterTaskRoutes(router, gateway.Dispatcher, taskController, orchestratorSvc, log)
 	taskhandlers.RegisterRepositoryRoutes(router, gateway.Dispatcher, repositoryController, log)
 	taskhandlers.RegisterExecutorRoutes(router, gateway.Dispatcher, executorController, log)
 	taskhandlers.RegisterEnvironmentRoutes(router, gateway.Dispatcher, environmentController, log)
@@ -1060,11 +1077,11 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 
 	return &executor.LaunchAgentResponse{
 		AgentExecutionID: execution.ID,
-		ContainerID:     execution.ContainerID,
-		Status:          execution.Status,
-		WorktreeID:      worktreeID,
-		WorktreePath:    worktreePath,
-		WorktreeBranch:  worktreeBranch,
+		ContainerID:      execution.ContainerID,
+		Status:           execution.Status,
+		WorktreeID:       worktreeID,
+		WorktreePath:     worktreePath,
+		WorktreeBranch:   worktreeBranch,
 	}, nil
 }
 
@@ -1132,9 +1149,9 @@ func (a *lifecycleAdapter) PromptAgent(ctx context.Context, agentInstanceID stri
 	}, nil
 }
 
-// RespondToPermissionByTaskID sends a response to a permission request for a task
-func (a *lifecycleAdapter) RespondToPermissionByTaskID(ctx context.Context, taskID, pendingID, optionID string, cancelled bool) error {
-	return a.mgr.RespondToPermissionByTaskID(taskID, pendingID, optionID, cancelled)
+// RespondToPermissionBySessionID sends a response to a permission request for a session
+func (a *lifecycleAdapter) RespondToPermissionBySessionID(ctx context.Context, sessionID, pendingID, optionID string, cancelled bool) error {
+	return a.mgr.RespondToPermissionBySessionID(sessionID, pendingID, optionID, cancelled)
 }
 
 // GetRecoveredExecutions returns executions recovered from Docker during startup
@@ -1145,6 +1162,7 @@ func (a *lifecycleAdapter) GetRecoveredExecutions() []executor.RecoveredExecutio
 		result[i] = executor.RecoveredExecutionInfo{
 			ExecutionID:    r.ExecutionID,
 			TaskID:         r.TaskID,
+			SessionID:      r.SessionID,
 			ContainerID:    r.ContainerID,
 			AgentProfileID: r.AgentProfileID,
 		}
@@ -1152,15 +1170,15 @@ func (a *lifecycleAdapter) GetRecoveredExecutions() []executor.RecoveredExecutio
 	return result
 }
 
-// IsAgentRunningForTask checks if an agent is actually running for a task
+// IsAgentRunningForSession checks if an agent is actually running for a session
 // This probes the actual agent (Docker container or standalone process)
-func (a *lifecycleAdapter) IsAgentRunningForTask(ctx context.Context, taskID string) bool {
-	return a.mgr.IsAgentRunningForTask(ctx, taskID)
+func (a *lifecycleAdapter) IsAgentRunningForSession(ctx context.Context, sessionID string) bool {
+	return a.mgr.IsAgentRunningForSession(ctx, sessionID)
 }
 
-// CleanupStaleExecutionByTaskID removes a stale agent execution from tracking without trying to stop it.
-func (a *lifecycleAdapter) CleanupStaleExecutionByTaskID(ctx context.Context, taskID string) error {
-	return a.mgr.CleanupStaleExecutionByTaskID(ctx, taskID)
+// CleanupStaleExecutionBySessionID removes a stale agent execution from tracking without trying to stop it.
+func (a *lifecycleAdapter) CleanupStaleExecutionBySessionID(ctx context.Context, sessionID string) error {
+	return a.mgr.CleanupStaleExecutionBySessionID(ctx, sessionID)
 }
 
 // corsMiddleware returns a CORS middleware for HTTP and WebSocket connections
@@ -1186,8 +1204,8 @@ type orchestratorAdapter struct {
 }
 
 // PromptTask forwards to the orchestrator service and converts the result type
-func (a *orchestratorAdapter) PromptTask(ctx context.Context, taskID string, prompt string) (*taskhandlers.PromptResult, error) {
-	result, err := a.svc.PromptTask(ctx, taskID, prompt)
+func (a *orchestratorAdapter) PromptTask(ctx context.Context, taskID, taskSessionID, prompt string) (*taskhandlers.PromptResult, error) {
+	result, err := a.svc.PromptTask(ctx, taskID, taskSessionID, prompt)
 	if err != nil {
 		return nil, err
 	}
@@ -1211,6 +1229,7 @@ func (a *shellSessionResumerAdapter) ResumeTaskSession(ctx context.Context, task
 	_, err := a.svc.ResumeTaskSession(ctx, taskID, taskSessionID)
 	return err
 }
+
 
 // messageCreatorAdapter adapts the task service to the orchestrator.MessageCreator interface
 type messageCreatorAdapter struct {

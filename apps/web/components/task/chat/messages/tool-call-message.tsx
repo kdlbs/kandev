@@ -65,6 +65,7 @@ export function ToolCallMessage({ comment, taskId }: ToolCallMessageProps) {
   const metadata = comment.metadata as ToolCallMetadata | undefined;
   const pendingPermissions = useAppStore((state) => state.permissions.pending);
   const removePendingPermission = useAppStore((state) => state.removePendingPermission);
+  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
 
   const toolCallId = metadata?.tool_call_id;
   const toolName = metadata?.tool_name ?? '';
@@ -75,7 +76,11 @@ export function ToolCallMessage({ comment, taskId }: ToolCallMessageProps) {
 
   // Find pending permission for this tool call (only if we have a valid tool_call_id)
   const pendingPermission = pendingPermissions.find(
-    (p) => toolCallId && p.tool_call_id === toolCallId && (!taskId || p.task_id === taskId)
+    (p) =>
+      toolCallId &&
+      p.tool_call_id === toolCallId &&
+      (!activeSessionId || p.session_id === activeSessionId) &&
+      (!taskId || p.task_id === taskId)
   );
   const isPendingApproval = !!pendingPermission;
 
@@ -93,7 +98,7 @@ export function ToolCallMessage({ comment, taskId }: ToolCallMessageProps) {
 
       try {
         await client.request('permission.respond', {
-          task_id: pendingPermission.task_id,
+          session_id: pendingPermission.session_id,
           pending_id: pendingPermission.pending_id,
           option_id: cancelled ? undefined : optionId,
           cancelled,

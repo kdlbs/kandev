@@ -6,12 +6,11 @@ import type { TaskSession, TaskSessionState } from '@/lib/types/http';
 import { Badge } from '@kandev/ui/badge';
 import { Command, CommandGroup, CommandItem, CommandList } from '@kandev/ui/command';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
+import { useAppStore } from '@/components/state-provider';
 
 type SessionSwitcherProps = {
   taskId: string | null;
-  activeSessionId: string | null;
   sessions: TaskSession[];
-  agentLabelsById: Record<string, string>;
   onSelectSession: (taskId: string, sessionId: string) => void;
   showHeader?: boolean;
   onCreateSession?: () => void;
@@ -88,13 +87,16 @@ function formatDuration(startedAt: string, isRunning: boolean, now: number) {
 
 export function TaskSessionSwitcher({
   taskId,
-  activeSessionId,
   sessions,
-  agentLabelsById,
   onSelectSession,
   showHeader = true,
   onCreateSession,
 }: SessionSwitcherProps) {
+  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const agentProfiles = useAppStore((state) => state.agentProfiles.items);
+  const agentLabelsById = useMemo(() => {
+    return Object.fromEntries(agentProfiles.map((profile) => [profile.id, profile.label]));
+  }, [agentProfiles]);
   const [currentTime, setCurrentTime] = useState(() => Date.now());
   const sortedSessions = useMemo(() => {
     return [...sessions].sort((a, b) => {

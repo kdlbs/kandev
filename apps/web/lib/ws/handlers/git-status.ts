@@ -4,29 +4,20 @@ import type { WsHandlers } from '@/lib/ws/handlers/types';
 
 export function registerGitStatusHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
-    'git.status': (message) => {
+    'session.git.status': (message) => {
       const payload = message.payload;
+      if (!payload.session_id) {
+        return;
+      }
       console.log('[WS] git.status received:', {
-        task_id: payload.task_id,
+        session_id: payload.session_id,
         branch: payload.branch,
         modified: payload.modified.length,
         added: payload.added.length,
         deleted: payload.deleted.length,
         untracked: payload.untracked.length,
       });
-      const state = store.getState();
-
-      // Only update git status if it's for the current task
-      // This prevents stale data from showing when switching tasks
-      if (state.tasks.activeTaskId !== payload.task_id) {
-        console.log('[WS] Ignoring git.status for different task:', {
-          current_task: state.tasks.activeTaskId,
-          received_task: payload.task_id,
-        });
-        return;
-      }
-
-      state.setGitStatus(payload.task_id, {
+      store.getState().setGitStatus(payload.session_id, {
         branch: payload.branch,
         remote_branch: payload.remote_branch ?? null,
         modified: payload.modified,

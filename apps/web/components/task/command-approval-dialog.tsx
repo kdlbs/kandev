@@ -46,13 +46,17 @@ export function CommandApprovalDialog({ taskId, standaloneOnly = false }: Comman
   // If standaloneOnly, filter out permissions that have a matching tool call
   const permission = useMemo(() => {
     return pendingPermissions.find((p) => {
-      if (p.task_id !== taskId) return false;
+      if (activeSessionId) {
+        if (p.session_id !== activeSessionId) return false;
+      } else if (p.task_id !== taskId) {
+        return false;
+      }
       if (standaloneOnly && p.tool_call_id && toolCallIds.has(p.tool_call_id)) {
         return false; // This permission will be handled by inline UI
       }
       return true;
     });
-  }, [pendingPermissions, taskId, standaloneOnly, toolCallIds]);
+  }, [pendingPermissions, activeSessionId, taskId, standaloneOnly, toolCallIds]);
 
   const handleRespond = useCallback(
     async (optionId: string, cancelled: boolean = false) => {
@@ -68,7 +72,7 @@ export function CommandApprovalDialog({ taskId, standaloneOnly = false }: Comman
 
       try {
         await client.request('permission.respond', {
-          task_id: taskId,
+          session_id: permission.session_id,
           pending_id: permission.pending_id,
           option_id: cancelled ? undefined : optionId,
           cancelled,
@@ -80,7 +84,7 @@ export function CommandApprovalDialog({ taskId, standaloneOnly = false }: Comman
         setIsResponding(false);
       }
     },
-    [permission, taskId, removePendingPermission]
+    [permission, removePendingPermission]
   );
 
   const handleApprove = useCallback(() => {

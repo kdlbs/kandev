@@ -2,7 +2,6 @@ import type { ReactNode } from 'react';
 import type {
   Agent,
   AgentDiscovery,
-  TaskSessionState,
   Branch,
   Environment,
   Executor,
@@ -115,9 +114,9 @@ export type TerminalState = {
 };
 
 export type ShellState = {
-  // Map of taskId to shell output buffer (raw bytes as string)
+  // Map of sessionId to shell output buffer (raw bytes as string)
   outputs: Record<string, string>;
-  // Map of taskId to shell status
+  // Map of sessionId to shell status
   statuses: Record<
     string,
     {
@@ -138,8 +137,7 @@ export type FileInfo = {
   diff?: string;
 };
 
-export type GitStatusState = {
-  taskId: string | null;
+export type GitStatusEntry = {
   branch: string | null;
   remote_branch: string | null;
   modified: string[];
@@ -151,6 +149,26 @@ export type GitStatusState = {
   behind: number;
   files: Record<string, FileInfo>;
   timestamp: string | null;
+};
+
+export type GitStatusState = {
+  bySessionId: Record<string, GitStatusEntry>;
+};
+
+export type Worktree = {
+  id: string;
+  sessionId: string;
+  repositoryId?: string;
+  path?: string;
+  branch?: string;
+};
+
+export type WorktreesState = {
+  items: Record<string, Worktree>;
+};
+
+export type SessionWorktreesState = {
+  itemsBySessionId: Record<string, string[]>;
 };
 
 export type DiffState = {
@@ -202,6 +220,23 @@ export type TaskSessionsState = {
   items: Record<string, TaskSession>;
 };
 
+export type TaskSessionsByTaskState = {
+  itemsByTaskId: Record<string, TaskSession[]>;
+  loadingByTaskId: Record<string, boolean>;
+  loadedByTaskId: Record<string, boolean>;
+};
+
+export type SessionAgentctlStatus = {
+  status: 'starting' | 'ready' | 'error';
+  errorMessage?: string;
+  agentExecutionId?: string;
+  updatedAt?: string;
+};
+
+export type SessionAgentctlState = {
+  itemsBySessionId: Record<string, SessionAgentctlStatus>;
+};
+
 export type AppState = {
   kanban: KanbanState;
   workspaces: WorkspaceState;
@@ -224,7 +259,10 @@ export type AppState = {
   connection: ConnectionState;
   messages: MessagesState;
   taskSessions: TaskSessionsState;
-  taskSessionStatesByTaskId: Record<string, TaskSessionState>;
+  taskSessionsByTask: TaskSessionsByTaskState;
+  sessionAgentctl: SessionAgentctlState;
+  worktrees: WorktreesState;
+  sessionWorktreesBySessionId: SessionWorktreesState;
   permissions: PermissionsState;
   hydrate: (state: Partial<AppState>) => void;
   setActiveWorkspace: (workspaceId: string | null) => void;
@@ -243,12 +281,12 @@ export type AppState = {
   setSettingsData: (next: Partial<SettingsDataState>) => void;
   setUserSettings: (settings: UserSettingsState) => void;
   setTerminalOutput: (terminalId: string, data: string) => void;
-  appendShellOutput: (taskId: string, data: string) => void;
+  appendShellOutput: (sessionId: string, data: string) => void;
   setShellStatus: (
-    taskId: string,
+    sessionId: string,
     status: { available: boolean; running?: boolean; shell?: string; cwd?: string }
   ) => void;
-  clearShellOutput: (taskId: string) => void;
+  clearShellOutput: (sessionId: string) => void;
   setConnectionStatus: (status: ConnectionState['status'], error?: string | null) => void;
   setMessages: (
     sessionId: string,
@@ -268,15 +306,20 @@ export type AppState = {
   ) => void;
   setMessagesLoading: (sessionId: string, loading: boolean) => void;
   setActiveSession: (taskId: string, sessionId: string) => void;
+  setActiveTask: (taskId: string) => void;
   clearActiveSession: () => void;
   setTaskSession: (session: TaskSession) => void;
-  setTaskSessionState: (taskId: string, state: TaskSessionState) => void;
-  setGitStatus: (taskId: string, gitStatus: Omit<GitStatusState, 'taskId'>) => void;
-  clearGitStatus: () => void;
+  setTaskSessionsForTask: (taskId: string, sessions: TaskSession[]) => void;
+  setTaskSessionsLoading: (taskId: string, loading: boolean) => void;
+  setSessionAgentctlStatus: (sessionId: string, status: SessionAgentctlStatus) => void;
+  setWorktree: (worktree: Worktree) => void;
+  setSessionWorktrees: (sessionId: string, worktreeIds: string[]) => void;
+  setGitStatus: (sessionId: string, gitStatus: GitStatusEntry) => void;
+  clearGitStatus: (sessionId: string) => void;
   bumpAgentProfilesVersion: () => void;
   addPendingPermission: (permission: PendingPermission) => void;
   removePendingPermission: (pendingId: string) => void;
-  clearPendingPermissions: (taskId?: string) => void;
+  clearPendingPermissions: (sessionId?: string) => void;
 };
 
 export type AppStore = ReturnType<typeof createAppStore>;
@@ -305,24 +348,14 @@ const defaultState: AppState = {
   terminal: { terminals: [] },
   shell: { outputs: {}, statuses: {} },
   diffs: { files: [] },
-  gitStatus: {
-    taskId: null,
-    branch: null,
-    remote_branch: null,
-    modified: [],
-    added: [],
-    deleted: [],
-    untracked: [],
-    renamed: [],
-    ahead: 0,
-    behind: 0,
-    files: {},
-    timestamp: null,
-  },
+  gitStatus: { bySessionId: {} },
   connection: { status: 'disconnected', error: null },
   messages: { bySession: {}, metaBySession: {} },
   taskSessions: { items: {} },
-  taskSessionStatesByTaskId: {},
+  taskSessionsByTask: { itemsByTaskId: {}, loadingByTaskId: {}, loadedByTaskId: {} },
+  sessionAgentctl: { itemsBySessionId: {} },
+  worktrees: { items: {} },
+  sessionWorktreesBySessionId: { itemsBySessionId: {} },
   permissions: { pending: [] },
   hydrate: () => undefined,
   setActiveWorkspace: () => undefined,
@@ -352,9 +385,14 @@ const defaultState: AppState = {
   setMessagesMetadata: () => undefined,
   setMessagesLoading: () => undefined,
   setActiveSession: () => undefined,
+  setActiveTask: () => undefined,
   clearActiveSession: () => undefined,
   setTaskSession: () => undefined,
-  setTaskSessionState: () => undefined,
+  setTaskSessionsForTask: () => undefined,
+  setTaskSessionsLoading: () => undefined,
+  setSessionAgentctlStatus: () => undefined,
+  setWorktree: () => undefined,
+  setSessionWorktrees: () => undefined,
   setGitStatus: () => undefined,
   clearGitStatus: () => undefined,
   bumpAgentProfilesVersion: () => undefined,
@@ -395,9 +433,12 @@ function mergeInitialState(
   | 'setMessagesMetadata'
   | 'setMessagesLoading'
   | 'setActiveSession'
+  | 'setActiveTask'
   | 'clearActiveSession'
   | 'setTaskSession'
-  | 'setTaskSessionState'
+  | 'setTaskSessionsForTask'
+  | 'setTaskSessionsLoading'
+  | 'setSessionAgentctlStatus'
   | 'setGitStatus'
   | 'clearGitStatus'
   | 'bumpAgentProfilesVersion'
@@ -428,9 +469,12 @@ function mergeInitialState(
     connection: { ...defaultState.connection, ...initialState.connection },
     messages: { ...defaultState.messages, ...initialState.messages },
     taskSessions: { ...defaultState.taskSessions, ...initialState.taskSessions },
-    taskSessionStatesByTaskId: {
-      ...defaultState.taskSessionStatesByTaskId,
-      ...initialState.taskSessionStatesByTaskId,
+    taskSessionsByTask: { ...defaultState.taskSessionsByTask, ...initialState.taskSessionsByTask },
+    sessionAgentctl: { ...defaultState.sessionAgentctl, ...initialState.sessionAgentctl },
+    worktrees: { ...defaultState.worktrees, ...initialState.worktrees },
+    sessionWorktreesBySessionId: {
+      ...defaultState.sessionWorktreesBySessionId,
+      ...initialState.sessionWorktreesBySessionId,
     },
     permissions: { ...defaultState.permissions, ...initialState.permissions },
   };
@@ -461,11 +505,19 @@ export function createAppStore(initialState?: Partial<AppState>) {
           if (state.terminal) Object.assign(draft.terminal, state.terminal);
           if (state.shell) Object.assign(draft.shell, state.shell);
           if (state.diffs) Object.assign(draft.diffs, state.diffs);
+          if (state.gitStatus) Object.assign(draft.gitStatus, state.gitStatus);
           if (state.connection) Object.assign(draft.connection, state.connection);
           if (state.messages) Object.assign(draft.messages, state.messages);
           if (state.taskSessions) Object.assign(draft.taskSessions, state.taskSessions);
-          if (state.taskSessionStatesByTaskId) {
-            Object.assign(draft.taskSessionStatesByTaskId, state.taskSessionStatesByTaskId);
+          if (state.taskSessionsByTask) {
+            Object.assign(draft.taskSessionsByTask, state.taskSessionsByTask);
+          }
+          if (state.sessionAgentctl) {
+            Object.assign(draft.sessionAgentctl, state.sessionAgentctl);
+          }
+          if (state.worktrees) Object.assign(draft.worktrees, state.worktrees);
+          if (state.sessionWorktreesBySessionId) {
+            Object.assign(draft.sessionWorktreesBySessionId, state.sessionWorktreesBySessionId);
           }
           if (state.permissions) Object.assign(draft.permissions, state.permissions);
         }),
@@ -554,17 +606,17 @@ export function createAppStore(initialState?: Partial<AppState>) {
             draft.terminal.terminals.push({ id: terminalId, output: [data] });
           }
         }),
-      appendShellOutput: (taskId, data) =>
+      appendShellOutput: (sessionId, data) =>
         set((draft) => {
-          draft.shell.outputs[taskId] = (draft.shell.outputs[taskId] || '') + data;
+          draft.shell.outputs[sessionId] = (draft.shell.outputs[sessionId] || '') + data;
         }),
-      setShellStatus: (taskId, status) =>
+      setShellStatus: (sessionId, status) =>
         set((draft) => {
-          draft.shell.statuses[taskId] = status;
+          draft.shell.statuses[sessionId] = status;
         }),
-      clearShellOutput: (taskId) =>
+      clearShellOutput: (sessionId) =>
         set((draft) => {
-          draft.shell.outputs[taskId] = '';
+          draft.shell.outputs[sessionId] = '';
         }),
       setConnectionStatus: (status, error = null) =>
         set((draft) => {
@@ -584,10 +636,10 @@ export function createAppStore(initialState?: Partial<AppState>) {
         }),
       addMessage: (message) =>
         set((draft) => {
-          if (!message.task_session_id) {
+          if (!message.session_id) {
             return;
           }
-          const sessionId = message.task_session_id;
+          const sessionId = message.session_id;
           const list = draft.messages.bySession[sessionId] ?? [];
           const exists = list.some((item) => item.id === message.id);
           if (exists) {
@@ -606,10 +658,10 @@ export function createAppStore(initialState?: Partial<AppState>) {
         }),
       updateMessage: (message) =>
         set((draft) => {
-          if (!message.task_session_id) {
+          if (!message.session_id) {
             return;
           }
-          const sessionId = message.task_session_id;
+          const sessionId = message.session_id;
           const list = draft.messages.bySession[sessionId];
           if (!list) return;
           const index = list.findIndex((item) => item.id === message.id);
@@ -664,6 +716,11 @@ export function createAppStore(initialState?: Partial<AppState>) {
           draft.tasks.activeTaskId = taskId;
           draft.tasks.activeSessionId = sessionId;
         }),
+      setActiveTask: (taskId) =>
+        set((draft) => {
+          draft.tasks.activeTaskId = taskId;
+          draft.tasks.activeSessionId = null;
+        }),
       clearActiveSession: () =>
         set((draft) => {
           draft.tasks.activeTaskId = null;
@@ -672,36 +729,63 @@ export function createAppStore(initialState?: Partial<AppState>) {
       setTaskSession: (session) =>
         set((draft) => {
           draft.taskSessions.items[session.id] = session;
-          // Also update the task session state by task ID
-          draft.taskSessionStatesByTaskId[session.task_id] = session.state;
+          if (session.worktree_id) {
+            draft.worktrees.items[session.worktree_id] = {
+              id: session.worktree_id,
+              sessionId: session.id,
+              repositoryId: session.repository_id ?? undefined,
+              path: session.worktree_path ?? undefined,
+              branch: session.worktree_branch ?? undefined,
+            };
+            draft.sessionWorktreesBySessionId.itemsBySessionId[session.id] = [session.worktree_id];
+          }
         }),
-      setTaskSessionState: (taskId, state) =>
+      setTaskSessionsForTask: (taskId, sessions) =>
         set((draft) => {
-          draft.taskSessionStatesByTaskId[taskId] = state;
+          sessions.forEach((session) => {
+            draft.taskSessions.items[session.id] = session;
+            if (session.worktree_id) {
+              draft.worktrees.items[session.worktree_id] = {
+                id: session.worktree_id,
+                sessionId: session.id,
+                repositoryId: session.repository_id ?? undefined,
+                path: session.worktree_path ?? undefined,
+                branch: session.worktree_branch ?? undefined,
+              };
+              draft.sessionWorktreesBySessionId.itemsBySessionId[session.id] = [session.worktree_id];
+            }
+          });
+          draft.taskSessionsByTask.itemsByTaskId[taskId] = sessions;
+          draft.taskSessionsByTask.loadedByTaskId[taskId] = true;
+          draft.taskSessionsByTask.loadingByTaskId[taskId] = false;
         }),
-      setGitStatus: (taskId, gitStatus) =>
+      setTaskSessionsLoading: (taskId, loading) =>
         set((draft) => {
-          draft.gitStatus = {
-            taskId,
-            ...gitStatus,
-          };
+          draft.taskSessionsByTask.loadingByTaskId[taskId] = loading;
         }),
-      clearGitStatus: () =>
+      setSessionAgentctlStatus: (sessionId, status) =>
         set((draft) => {
-          draft.gitStatus = {
-            taskId: null,
-            branch: null,
-            remote_branch: null,
-            modified: [],
-            added: [],
-            deleted: [],
-            untracked: [],
-            renamed: [],
-            ahead: 0,
-            behind: 0,
-            files: {},
-            timestamp: null,
-          };
+          draft.sessionAgentctl.itemsBySessionId[sessionId] = status;
+        }),
+      setWorktree: (worktree) =>
+        set((draft) => {
+          draft.worktrees.items[worktree.id] = worktree;
+          const existing = draft.sessionWorktreesBySessionId.itemsBySessionId[worktree.sessionId] ?? [];
+          if (!existing.includes(worktree.id)) {
+            draft.sessionWorktreesBySessionId.itemsBySessionId[worktree.sessionId] = [...existing, worktree.id];
+          }
+        }),
+      setSessionWorktrees: (sessionId, worktreeIds) =>
+        set((draft) => {
+          draft.sessionWorktreesBySessionId.itemsBySessionId[sessionId] = worktreeIds;
+        }),
+      setGitStatus: (sessionId, gitStatus) =>
+        set((draft) => {
+          draft.gitStatus.bySessionId[sessionId] = gitStatus;
+        }),
+      clearGitStatus: (sessionId) =>
+        set((draft) => {
+          delete draft.gitStatus.bySessionId[sessionId];
         }),
       bumpAgentProfilesVersion: () =>
         set((draft) => {
@@ -719,10 +803,10 @@ export function createAppStore(initialState?: Partial<AppState>) {
         set((draft) => {
           draft.permissions.pending = draft.permissions.pending.filter((p) => p.pending_id !== pendingId);
         }),
-      clearPendingPermissions: (taskId) =>
+      clearPendingPermissions: (sessionId) =>
         set((draft) => {
-          if (taskId) {
-            draft.permissions.pending = draft.permissions.pending.filter((p) => p.task_id !== taskId);
+          if (sessionId) {
+            draft.permissions.pending = draft.permissions.pending.filter((p) => p.session_id !== sessionId);
           } else {
             draft.permissions.pending = [];
           }

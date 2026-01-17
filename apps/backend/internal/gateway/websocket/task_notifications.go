@@ -50,6 +50,9 @@ func RegisterTaskNotifications(ctx context.Context, eventBus bus.EventBus, hub *
 	b.subscribe(eventBus, events.EnvironmentCreated, ws.ActionEnvironmentCreated)
 	b.subscribe(eventBus, events.EnvironmentUpdated, ws.ActionEnvironmentUpdated)
 	b.subscribe(eventBus, events.EnvironmentDeleted, ws.ActionEnvironmentDeleted)
+	b.subscribe(eventBus, events.AgentctlStarting, ws.ActionSessionAgentctlStarting)
+	b.subscribe(eventBus, events.AgentctlReady, ws.ActionSessionAgentctlReady)
+	b.subscribe(eventBus, events.AgentctlError, ws.ActionSessionAgentctlError)
 
 	go func() {
 		<-ctx.Done()
@@ -74,6 +77,13 @@ func (b *TaskEventBroadcaster) subscribe(eventBus bus.EventBus, subject, action 
 		if err != nil {
 			b.logger.Error("failed to build websocket notification", zap.String("action", action), zap.Error(err))
 			return nil
+		}
+		switch action {
+		case ws.ActionSessionAgentctlStarting, ws.ActionSessionAgentctlReady, ws.ActionSessionAgentctlError:
+			if sessionID, ok := event.Data["session_id"].(string); ok && sessionID != "" {
+				b.hub.BroadcastToSession(sessionID, msg)
+				return nil
+			}
 		}
 		b.hub.Broadcast(msg)
 		return nil

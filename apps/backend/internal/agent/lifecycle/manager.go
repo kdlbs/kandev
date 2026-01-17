@@ -14,9 +14,9 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
-	agentctl "github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/worktree"
+	agentctl "github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -130,44 +130,13 @@ func (m *Manager) SetWorkspaceInfoProvider(provider WorkspaceInfoProvider) {
 	m.workspaceInfoProvider = provider
 }
 
-// EnsureWorkspaceExecution ensures an agentctl execution exists for a task's workspace.
-// If an execution already exists, it returns it. Otherwise, it creates a new execution
-// for workspace access (shell, git, file operations) WITHOUT starting the agent process.
-// This is used to restore workspace access after backend restart.
-func (m *Manager) EnsureWorkspaceExecution(ctx context.Context, taskID string) (*AgentExecution, error) {
-	// Check if execution already exists
-	if execution, exists := m.executionStore.GetByTaskID(taskID); exists {
-		return execution, nil
-	}
-
-	// Need to create a new execution - get workspace info
-	if m.workspaceInfoProvider == nil {
-		return nil, fmt.Errorf("workspace info provider not configured")
-	}
-
-	info, err := m.workspaceInfoProvider.GetWorkspaceInfo(ctx, taskID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get workspace info: %w", err)
-	}
-
-	if info.WorkspacePath == "" {
-		return nil, fmt.Errorf("no workspace path available for task %s", taskID)
-	}
-
-	m.logger.Info("creating execution for task",
-		zap.String("task_id", taskID),
-		zap.String("workspace_path", info.WorkspacePath))
-
-	return m.createExecution(ctx, taskID, info)
-}
-
 // EnsureWorkspaceExecutionForSession ensures an agentctl execution exists for a specific task session.
 // This is used when the frontend provides a session ID (e.g., from URL path /task/[id]/[sessionId]).
-// If an execution already exists for the task, it returns it. Otherwise, it creates a new execution
+// If an execution already exists for the session, it returns it. Otherwise, it creates a new execution
 // using the session's workspace configuration from the database.
 func (m *Manager) EnsureWorkspaceExecutionForSession(ctx context.Context, taskID, sessionID string) (*AgentExecution, error) {
 	// Check if execution already exists
-	if execution, exists := m.executionStore.GetByTaskID(taskID); exists {
+	if execution, exists := m.executionStore.GetBySessionID(sessionID); exists {
 		return execution, nil
 	}
 
@@ -215,6 +184,7 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 	req := &RuntimeCreateRequest{
 		InstanceID:     executionID,
 		TaskID:         taskID,
+		SessionID:      info.SessionID,
 		AgentProfileID: info.AgentProfileID,
 		WorkspacePath:  info.WorkspacePath,
 		Protocol:       string(agentConfig.Protocol),
@@ -277,6 +247,7 @@ func (m *Manager) Start(ctx context.Context) error {
 			execution := &AgentExecution{
 				ID:                   ri.InstanceID,
 				TaskID:               ri.TaskID,
+				SessionID:            ri.SessionID,
 				ContainerID:          ri.ContainerID,
 				ContainerIP:          ri.ContainerIP,
 				WorkspacePath:        ri.WorkspacePath,
@@ -311,6 +282,7 @@ func (m *Manager) GetRecoveredExecutions() []RecoveredExecution {
 		result = append(result, RecoveredExecution{
 			ExecutionID:    exec.ID,
 			TaskID:         exec.TaskID,
+			SessionID:      exec.SessionID,
 			ContainerID:    exec.ContainerID,
 			AgentProfileID: exec.AgentProfileID,
 		})
@@ -387,9 +359,11 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 		return nil, fmt.Errorf("agent type %q is disabled", agentTypeName)
 	}
 
-	// 3. Check if task already has an agent running
-	if existingExecution, exists := m.executionStore.GetByTaskID(req.TaskID); exists {
-		return nil, fmt.Errorf("task %q already has an agent running (execution: %s)", req.TaskID, existingExecution.ID)
+	// 3. Check if session already has an agent running
+	if req.SessionID != "" {
+		if existingExecution, exists := m.executionStore.GetBySessionID(req.SessionID); exists {
+			return nil, fmt.Errorf("session %q already has an agent running (execution: %s)", req.SessionID, existingExecution.ID)
+		}
 	}
 
 	// 4. Handle worktree creation/reuse if enabled
@@ -435,6 +409,9 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 	if req.TaskDescription != "" {
 		reqWithWorktree.Metadata["task_description"] = req.TaskDescription
 	}
+	if req.SessionID != "" {
+		reqWithWorktree.Metadata["session_id"] = req.SessionID
+	}
 
 	// 6b. Add profile settings to environment
 	if profileInfo != nil {
@@ -468,6 +445,7 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 	runtimeReq := &RuntimeCreateRequest{
 		InstanceID:     executionID,
 		TaskID:         reqWithWorktree.TaskID,
+		SessionID:      reqWithWorktree.SessionID,
 		AgentProfileID: reqWithWorktree.AgentProfileID,
 		WorkspacePath:  reqWithWorktree.WorkspacePath,
 		Protocol:       string(agentConfig.Protocol),
@@ -511,6 +489,7 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 
 	// 9. Publish agent.started event
 	m.eventPublisher.PublishAgentEvent(ctx, events.AgentStarted, execution)
+	m.eventPublisher.PublishAgentctlEvent(ctx, events.AgentctlStarting, execution, "")
 
 	// 10. Wait for agentctl to be ready (for shell/workspace access)
 	// NOTE: This does NOT start the agent process - call StartAgentProcess() explicitly
@@ -612,6 +591,7 @@ func (m *Manager) buildEnvForRuntime(executionID string, req *LaunchRequest, age
 	// Add standard variables for recovery after backend restart
 	env["KANDEV_INSTANCE_ID"] = executionID
 	env["KANDEV_TASK_ID"] = req.TaskID
+	env["KANDEV_SESSION_ID"] = req.SessionID
 	env["KANDEV_AGENT_PROFILE_ID"] = req.AgentProfileID
 	env["TASK_DESCRIPTION"] = req.TaskDescription
 
@@ -688,14 +668,14 @@ func (m *Manager) waitForAgentctlReady(execution *AgentExecution) {
 			zap.String("execution_id", execution.ID),
 			zap.Error(err))
 		m.updateExecutionError(execution.ID, "agentctl not ready: "+err.Error())
+		m.eventPublisher.PublishAgentctlEvent(context.Background(), events.AgentctlError, execution, err.Error())
 		return
 	}
 
 	m.logger.Info("agentctl ready - shell/workspace access available",
 		zap.String("execution_id", execution.ID))
+	m.eventPublisher.PublishAgentctlEvent(context.Background(), events.AgentctlReady, execution, "")
 }
-
-
 
 // getAgentConfigForExecution retrieves the agent configuration for an execution.
 // The execution must have AgentCommand set (which includes the agent type).
@@ -940,11 +920,11 @@ func (m *Manager) StopAgent(ctx context.Context, executionID string, force bool)
 	return nil
 }
 
-// StopByTaskID stops the agent for a specific task
-func (m *Manager) StopByTaskID(ctx context.Context, taskID string, force bool) error {
-	execution, exists := m.executionStore.GetByTaskID(taskID)
+// StopBySessionID stops the agent for a specific session
+func (m *Manager) StopBySessionID(ctx context.Context, sessionID string, force bool) error {
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
 	if !exists {
-		return fmt.Errorf("no agent running for task %q", taskID)
+		return fmt.Errorf("no agent running for session %q", sessionID)
 	}
 
 	return m.StopAgent(ctx, execution.ID, force)
@@ -955,9 +935,9 @@ func (m *Manager) GetExecution(executionID string) (*AgentExecution, bool) {
 	return m.executionStore.Get(executionID)
 }
 
-// GetExecutionByTaskID returns the agent execution for a task
-func (m *Manager) GetExecutionByTaskID(taskID string) (*AgentExecution, bool) {
-	return m.executionStore.GetByTaskID(taskID)
+// GetExecutionBySessionID returns the agent execution for a session
+func (m *Manager) GetExecutionBySessionID(sessionID string) (*AgentExecution, bool) {
+	return m.executionStore.GetBySessionID(sessionID)
 }
 
 // GetExecutionByContainerID returns the agent execution for a container
@@ -970,11 +950,11 @@ func (m *Manager) ListExecutions() []*AgentExecution {
 	return m.executionStore.List()
 }
 
-// IsAgentRunningForTask checks if an agent is actually running for a task
+// IsAgentRunningForSession checks if an agent is actually running for a session
 // This probes agentctl's status endpoint to verify the agent process is running
-func (m *Manager) IsAgentRunningForTask(ctx context.Context, taskID string) bool {
-	// First check if we have an execution tracked for this task
-	execution, exists := m.GetExecutionByTaskID(taskID)
+func (m *Manager) IsAgentRunningForSession(ctx context.Context, sessionID string) bool {
+	// First check if we have an execution tracked for this session
+	execution, exists := m.GetExecutionBySessionID(sessionID)
 	if !exists {
 		return false
 	}
@@ -987,7 +967,7 @@ func (m *Manager) IsAgentRunningForTask(ctx context.Context, taskID string) bool
 	status, err := execution.agentctl.GetStatus(ctx)
 	if err != nil {
 		m.logger.Debug("failed to get agentctl status",
-			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
 			zap.Error(err))
 		return false
 	}
@@ -1086,16 +1066,16 @@ func (m *Manager) RemoveExecution(executionID string) {
 		zap.String("execution_id", executionID))
 }
 
-// CleanupStaleExecutionByTaskID removes a stale agent execution from tracking without trying to stop it.
+// CleanupStaleExecutionBySessionID removes a stale agent execution from tracking without trying to stop it.
 // This is used when we detect the agent process has stopped but the execution is still tracked.
-func (m *Manager) CleanupStaleExecutionByTaskID(ctx context.Context, taskID string) error {
-	execution, exists := m.executionStore.GetByTaskID(taskID)
+func (m *Manager) CleanupStaleExecutionBySessionID(ctx context.Context, sessionID string) error {
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
 	if !exists {
 		return nil // No execution to clean up
 	}
 
 	m.logger.Info("cleaning up stale agent execution",
-		zap.String("task_id", taskID),
+		zap.String("session_id", sessionID),
 		zap.String("execution_id", execution.ID))
 
 	// Close agentctl connection if it exists
@@ -1205,21 +1185,21 @@ func (m *Manager) RespondToPermission(executionID, pendingID, optionID string, c
 	return execution.agentctl.RespondToPermission(ctx, pendingID, optionID, cancelled)
 }
 
-// RespondToPermissionByTaskID sends a response to a permission request for a task
-func (m *Manager) RespondToPermissionByTaskID(taskID, pendingID, optionID string, cancelled bool) error {
-	execution, exists := m.executionStore.GetByTaskID(taskID)
+// RespondToPermissionBySessionID sends a response to a permission request for a session
+func (m *Manager) RespondToPermissionBySessionID(sessionID, pendingID, optionID string, cancelled bool) error {
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
 	if !exists {
-		return fmt.Errorf("no agent execution found for task: %s", taskID)
+		return fmt.Errorf("no agent execution found for session: %s", sessionID)
 	}
 
 	return m.RespondToPermission(execution.ID, pendingID, optionID, cancelled)
 }
 
-// GetPendingPermissionsForTask returns all pending permissions for a task
-func (m *Manager) GetPendingPermissionsForTask(ctx context.Context, taskID string) ([]agentctl.PermissionNotification, error) {
-	execution, exists := m.executionStore.GetByTaskID(taskID)
+// GetPendingPermissionsForSession returns all pending permissions for a session
+func (m *Manager) GetPendingPermissionsForSession(ctx context.Context, sessionID string) ([]agentctl.PermissionNotification, error) {
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
 	if !exists {
-		// No active execution for this task, so no pending permissions
+		// No active execution for this session, so no pending permissions
 		return nil, nil
 	}
 

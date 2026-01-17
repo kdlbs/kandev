@@ -208,6 +208,7 @@ func (cm *ContainerManager) buildContainerConfig(config ContainerConfig) (docker
 			"kandev.managed":     "true",
 			"kandev.instance_id": config.InstanceID,
 			"kandev.task_id":     config.TaskID,
+			"kandev.session_id":  config.SessionID,
 		},
 		AutoRemove: false, // We manage cleanup ourselves
 	}, nil

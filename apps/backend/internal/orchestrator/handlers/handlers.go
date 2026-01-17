@@ -113,7 +113,7 @@ func (h *Handlers) wsStartTask(ctx context.Context, msg *ws.Message) (*ws.Messag
 
 type wsResumeTaskSessionRequest struct {
 	TaskID        string `json:"task_id"`
-	TaskSessionID string `json:"task_session_id"`
+	TaskSessionID string `json:"session_id"`
 }
 
 func (h *Handlers) wsResumeTaskSession(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -125,7 +125,7 @@ func (h *Handlers) wsResumeTaskSession(ctx context.Context, msg *ws.Message) (*w
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 	}
 	if req.TaskSessionID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_session_id is required", nil)
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
 	}
 
 	resp, err := h.controller.ResumeTaskSession(ctx, dto.ResumeTaskSessionRequest{
@@ -135,7 +135,7 @@ func (h *Handlers) wsResumeTaskSession(ctx context.Context, msg *ws.Message) (*w
 	if err != nil {
 		h.logger.Error("failed to resume task session",
 			zap.String("task_id", req.TaskID),
-			zap.String("task_session_id", req.TaskSessionID),
+			zap.String("session_id", req.TaskSessionID),
 			zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to resume task session: "+err.Error(), nil)
 	}
@@ -170,8 +170,9 @@ func (h *Handlers) wsStopTask(ctx context.Context, msg *ws.Message) (*ws.Message
 }
 
 type wsPromptTaskRequest struct {
-	TaskID string `json:"task_id"`
-	Prompt string `json:"prompt"`
+	TaskID        string `json:"task_id"`
+	TaskSessionID string `json:"session_id"`
+	Prompt        string `json:"prompt"`
 }
 
 func (h *Handlers) wsPromptTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -182,13 +183,17 @@ func (h *Handlers) wsPromptTask(ctx context.Context, msg *ws.Message) (*ws.Messa
 	if req.TaskID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 	}
+	if req.TaskSessionID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+	}
 	if req.Prompt == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "prompt is required", nil)
 	}
 
 	resp, err := h.controller.PromptTask(ctx, dto.PromptTaskRequest{
-		TaskID: req.TaskID,
-		Prompt: req.Prompt,
+		TaskID:        req.TaskID,
+		TaskSessionID: req.TaskSessionID,
+		Prompt:        req.Prompt,
 	})
 	if err != nil {
 		h.logger.Error("failed to send prompt", zap.String("task_id", req.TaskID), zap.Error(err))
@@ -219,7 +224,7 @@ func (h *Handlers) wsCompleteTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 }
 
 type wsPermissionRespondRequest struct {
-	TaskID    string `json:"task_id"`
+	SessionID string `json:"session_id"`
 	PendingID string `json:"pending_id"`
 	OptionID  string `json:"option_id,omitempty"`
 	Cancelled bool   `json:"cancelled,omitempty"`
@@ -230,8 +235,8 @@ func (h *Handlers) wsRespondToPermission(ctx context.Context, msg *ws.Message) (
 	if err := msg.ParsePayload(&req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
-	if req.TaskID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+	if req.SessionID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
 	}
 	if req.PendingID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "pending_id is required", nil)
@@ -241,19 +246,19 @@ func (h *Handlers) wsRespondToPermission(ctx context.Context, msg *ws.Message) (
 	}
 
 	h.logger.Info("responding to permission request",
-		zap.String("task_id", req.TaskID),
+		zap.String("session_id", req.SessionID),
 		zap.String("pending_id", req.PendingID),
 		zap.String("option_id", req.OptionID),
 		zap.Bool("cancelled", req.Cancelled))
 
 	resp, err := h.controller.RespondToPermission(ctx, dto.PermissionRespondRequest{
-		TaskID:    req.TaskID,
+		SessionID: req.SessionID,
 		PendingID: req.PendingID,
 		OptionID:  req.OptionID,
 		Cancelled: req.Cancelled,
 	})
 	if err != nil {
-		h.logger.Error("failed to respond to permission", zap.String("task_id", req.TaskID), zap.Error(err))
+		h.logger.Error("failed to respond to permission", zap.String("session_id", req.SessionID), zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to respond to permission: "+err.Error(), nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, resp)
@@ -285,7 +290,7 @@ func (h *Handlers) wsGetTaskExecution(ctx context.Context, msg *ws.Message) (*ws
 
 type wsGetTaskSessionStatusRequest struct {
 	TaskID        string `json:"task_id"`
-	TaskSessionID string `json:"task_session_id"`
+	TaskSessionID string `json:"session_id"`
 }
 
 func (h *Handlers) wsGetTaskSessionStatus(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -298,7 +303,7 @@ func (h *Handlers) wsGetTaskSessionStatus(ctx context.Context, msg *ws.Message) 
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "task_id is required", nil)
 	}
 	if req.TaskSessionID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "task_session_id is required", nil)
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "session_id is required", nil)
 	}
 
 	resp, err := h.controller.GetTaskSessionStatus(ctx, dto.TaskSessionStatusRequest{
@@ -308,7 +313,7 @@ func (h *Handlers) wsGetTaskSessionStatus(ctx context.Context, msg *ws.Message) 
 	if err != nil {
 		h.logger.Error("failed to get task session status",
 			zap.String("task_id", req.TaskID),
-			zap.String("task_session_id", req.TaskSessionID),
+			zap.String("session_id", req.TaskSessionID),
 			zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get task session status: "+err.Error(), nil)
 	}

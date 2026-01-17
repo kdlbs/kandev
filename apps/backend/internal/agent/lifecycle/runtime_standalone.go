@@ -44,6 +44,7 @@ func (r *StandaloneRuntime) CreateInstance(ctx context.Context, req *RuntimeCrea
 		env = make(map[string]string)
 	}
 	env["KANDEV_TASK_ID"] = req.TaskID
+	env["KANDEV_SESSION_ID"] = req.SessionID
 
 	// Create instance via control API
 	// Agent command is NOT set - workspace access only. Agent is started explicitly via agentctl client.
@@ -81,6 +82,7 @@ func (r *StandaloneRuntime) CreateInstance(ctx context.Context, req *RuntimeCrea
 	return &RuntimeInstance{
 		InstanceID:           req.InstanceID,
 		TaskID:               req.TaskID,
+		SessionID:            req.SessionID,
 		Client:               client,
 		StandaloneInstanceID: resp.ID,
 		StandalonePort:       resp.Port,

@@ -198,12 +198,13 @@ func TestManager_GetExecution(t *testing.T) {
 	}
 }
 
-func TestManager_GetExecutionByTaskID(t *testing.T) {
+func TestManager_GetExecutionBySessionID(t *testing.T) {
 	mgr := newTestManager()
 
 	execution := &AgentExecution{
 		ID:             "test-execution-id",
 		TaskID:         "test-task-id",
+		SessionID:      "test-session-id",
 		AgentProfileID: "test-agent",
 		ContainerID:    "container-123",
 		Status:         v1.AgentStatusRunning,
@@ -212,17 +213,17 @@ func TestManager_GetExecutionByTaskID(t *testing.T) {
 
 	mgr.executionStore.Add(execution)
 
-	// Test GetExecutionByTaskID
-	got, found := mgr.GetExecutionByTaskID("test-task-id")
+	// Test GetExecutionBySessionID
+	got, found := mgr.GetExecutionBySessionID("test-session-id")
 	if !found {
 		t.Fatal("expected to find execution")
 	}
-	if got.TaskID != execution.TaskID {
-		t.Errorf("expected TaskID %q, got %q", execution.TaskID, got.TaskID)
+	if got.SessionID != execution.SessionID {
+		t.Errorf("expected SessionID %q, got %q", execution.SessionID, got.SessionID)
 	}
 
 	// Test not found
-	_, found = mgr.GetExecutionByTaskID("non-existent")
+	_, found = mgr.GetExecutionBySessionID("non-existent")
 	if found {
 		t.Error("expected not to find execution")
 	}
@@ -419,6 +420,7 @@ func TestManager_RemoveExecution(t *testing.T) {
 	execution := &AgentExecution{
 		ID:          "test-execution-id",
 		TaskID:      "test-task-id",
+		SessionID:   "test-session-id",
 		ContainerID: "container-123",
 	}
 
@@ -431,8 +433,8 @@ func TestManager_RemoveExecution(t *testing.T) {
 	if _, found := mgr.GetExecution("test-execution-id"); found {
 		t.Error("execution should be removed from executions map")
 	}
-	if _, found := mgr.GetExecutionByTaskID("test-task-id"); found {
-		t.Error("execution should be removed from byTask map")
+	if _, found := mgr.GetExecutionBySessionID("test-session-id"); found {
+		t.Error("execution should be removed from bySession map")
 	}
 	if _, found := mgr.GetExecutionByContainerID("container-123"); found {
 		t.Error("execution should be removed from byContainer map")

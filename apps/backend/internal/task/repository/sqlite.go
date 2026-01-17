@@ -155,7 +155,6 @@ func (r *SQLiteRepository) initSchema() error {
 		description TEXT DEFAULT '',
 		state TEXT DEFAULT 'TODO',
 		priority INTEGER DEFAULT 0,
-		assigned_to TEXT DEFAULT '',
 		position INTEGER DEFAULT 0,
 		metadata TEXT DEFAULT '{}',
 		created_at DATETIME NOT NULL,
@@ -216,7 +215,7 @@ func (r *SQLiteRepository) initSchema() error {
 	CREATE INDEX IF NOT EXISTS idx_repositories_workspace_id ON repositories(workspace_id);
 	CREATE INDEX IF NOT EXISTS idx_repository_scripts_repo_id ON repository_scripts(repository_id);
 
-	CREATE TABLE IF NOT EXISTS task_messages (
+	CREATE TABLE IF NOT EXISTS task_session_messages (
 		id TEXT PRIMARY KEY,
 		task_session_id TEXT NOT NULL,
 		task_id TEXT DEFAULT '',
@@ -230,9 +229,9 @@ func (r *SQLiteRepository) initSchema() error {
 		FOREIGN KEY (task_session_id) REFERENCES task_sessions(id) ON DELETE CASCADE
 	);
 
-	CREATE INDEX IF NOT EXISTS idx_messages_session_id ON task_messages(task_session_id);
-	CREATE INDEX IF NOT EXISTS idx_messages_created_at ON task_messages(created_at);
-	CREATE INDEX IF NOT EXISTS idx_messages_session_created ON task_messages(task_session_id, created_at);
+	CREATE INDEX IF NOT EXISTS idx_messages_session_id ON task_session_messages(task_session_id);
+	CREATE INDEX IF NOT EXISTS idx_messages_created_at ON task_session_messages(created_at);
+	CREATE INDEX IF NOT EXISTS idx_messages_session_created ON task_session_messages(task_session_id, created_at);
 
 	CREATE TABLE IF NOT EXISTS task_sessions (
 		id TEXT PRIMARY KEY,
@@ -321,13 +320,13 @@ func (r *SQLiteRepository) initSchema() error {
 	}
 
 	// Ensure new message columns exist for existing databases
-	if err := r.ensureColumn("task_messages", "type", "TEXT NOT NULL DEFAULT 'message'"); err != nil {
+	if err := r.ensureColumn("task_session_messages", "type", "TEXT NOT NULL DEFAULT 'message'"); err != nil {
 		return err
 	}
-	if err := r.ensureColumn("task_messages", "metadata", "TEXT DEFAULT '{}'"); err != nil {
+	if err := r.ensureColumn("task_session_messages", "metadata", "TEXT DEFAULT '{}'"); err != nil {
 		return err
 	}
-	if err := r.ensureColumn("task_messages", "task_session_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+	if err := r.ensureColumn("task_session_messages", "task_session_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
 
@@ -805,9 +804,9 @@ func (r *SQLiteRepository) CreateTask(ctx context.Context, task *models.Task) er
 	}
 
 	_, err = tx.ExecContext(ctx, `
-		INSERT INTO tasks (id, workspace_id, board_id, column_id, title, description, state, priority, assigned_to, position, metadata, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, task.ID, task.WorkspaceID, task.BoardID, task.ColumnID, task.Title, task.Description, task.State, task.Priority, task.AssignedTo, task.Position, string(metadata), task.CreatedAt, task.UpdatedAt)
+		INSERT INTO tasks (id, workspace_id, board_id, column_id, title, description, state, priority, position, metadata, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, task.ID, task.WorkspaceID, task.BoardID, task.ColumnID, task.Title, task.Description, task.State, task.Priority, task.Position, string(metadata), task.CreatedAt, task.UpdatedAt)
 	if err != nil {
 		if rollbackErr := tx.Rollback(); rollbackErr != nil {
 			return fmt.Errorf("failed to rollback task insert: %w", rollbackErr)
@@ -822,12 +821,10 @@ func (r *SQLiteRepository) CreateTask(ctx context.Context, task *models.Task) er
 func (r *SQLiteRepository) GetTask(ctx context.Context, id string) (*models.Task, error) {
 	task := &models.Task{}
 	var metadata string
-	var assignedTo sql.NullString
-
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, workspace_id, board_id, column_id, title, description, state, priority, assigned_to, position, metadata, created_at, updated_at
+		SELECT id, workspace_id, board_id, column_id, title, description, state, priority, position, metadata, created_at, updated_at
 		FROM tasks WHERE id = ?
-	`, id).Scan(&task.ID, &task.WorkspaceID, &task.BoardID, &task.ColumnID, &task.Title, &task.Description, &task.State, &task.Priority, &assignedTo, &task.Position, &metadata, &task.CreatedAt, &task.UpdatedAt)
+	`, id).Scan(&task.ID, &task.WorkspaceID, &task.BoardID, &task.ColumnID, &task.Title, &task.Description, &task.State, &task.Priority, &task.Position, &metadata, &task.CreatedAt, &task.UpdatedAt)
 
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("task not found: %s", id)
@@ -836,7 +833,6 @@ func (r *SQLiteRepository) GetTask(ctx context.Context, id string) (*models.Task
 		return nil, err
 	}
 
-	task.AssignedTo = assignedTo.String
 	_ = json.Unmarshal([]byte(metadata), &task.Metadata)
 	return task, nil
 }
@@ -851,9 +847,9 @@ func (r *SQLiteRepository) UpdateTask(ctx context.Context, task *models.Task) er
 	}
 
 	result, err := r.db.ExecContext(ctx, `
-		UPDATE tasks SET workspace_id = ?, board_id = ?, column_id = ?, title = ?, description = ?, state = ?, priority = ?, assigned_to = ?, position = ?, metadata = ?, updated_at = ?
+		UPDATE tasks SET workspace_id = ?, board_id = ?, column_id = ?, title = ?, description = ?, state = ?, priority = ?, position = ?, metadata = ?, updated_at = ?
 		WHERE id = ?
-	`, task.WorkspaceID, task.BoardID, task.ColumnID, task.Title, task.Description, task.State, task.Priority, task.AssignedTo, task.Position, string(metadata), task.UpdatedAt, task.ID)
+	`, task.WorkspaceID, task.BoardID, task.ColumnID, task.Title, task.Description, task.State, task.Priority, task.Position, string(metadata), task.UpdatedAt, task.ID)
 	if err != nil {
 		return err
 	}
@@ -882,7 +878,7 @@ func (r *SQLiteRepository) DeleteTask(ctx context.Context, id string) error {
 // ListTasks returns all tasks for a board
 func (r *SQLiteRepository) ListTasks(ctx context.Context, boardID string) ([]*models.Task, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, workspace_id, board_id, column_id, title, description, state, priority, assigned_to, position, metadata, created_at, updated_at
+		SELECT id, workspace_id, board_id, column_id, title, description, state, priority, position, metadata, created_at, updated_at
 		FROM tasks
 		WHERE board_id = ?
 		ORDER BY position
@@ -898,7 +894,7 @@ func (r *SQLiteRepository) ListTasks(ctx context.Context, boardID string) ([]*mo
 // ListTasksByColumn returns all tasks in a column
 func (r *SQLiteRepository) ListTasksByColumn(ctx context.Context, columnID string) ([]*models.Task, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, workspace_id, board_id, column_id, title, description, state, priority, assigned_to, position, metadata, created_at, updated_at
+		SELECT id, workspace_id, board_id, column_id, title, description, state, priority, position, metadata, created_at, updated_at
 		FROM tasks
 		WHERE column_id = ? ORDER BY position
 	`, columnID)
@@ -915,7 +911,6 @@ func (r *SQLiteRepository) scanTasks(rows *sql.Rows) ([]*models.Task, error) {
 	for rows.Next() {
 		task := &models.Task{}
 		var metadata string
-		var assignedTo sql.NullString
 		err := rows.Scan(
 			&task.ID,
 			&task.WorkspaceID,
@@ -925,7 +920,6 @@ func (r *SQLiteRepository) scanTasks(rows *sql.Rows) ([]*models.Task, error) {
 			&task.Description,
 			&task.State,
 			&task.Priority,
-			&assignedTo,
 			&task.Position,
 			&metadata,
 			&task.CreatedAt,
@@ -934,7 +928,6 @@ func (r *SQLiteRepository) scanTasks(rows *sql.Rows) ([]*models.Task, error) {
 		if err != nil {
 			return nil, err
 		}
-		task.AssignedTo = assignedTo.String
 		_ = json.Unmarshal([]byte(metadata), &task.Metadata)
 		result = append(result, task)
 	}
@@ -1348,7 +1341,7 @@ func (r *SQLiteRepository) CreateMessage(ctx context.Context, message *models.Me
 	}
 
 	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO task_messages (id, task_session_id, task_id, author_type, author_id, content, requests_input, type, metadata, created_at)
+		INSERT INTO task_session_messages (id, task_session_id, task_id, author_type, author_id, content, requests_input, type, metadata, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, message.ID, message.TaskSessionID, message.TaskID, message.AuthorType, message.AuthorID, message.Content, requestsInput, messageType, metadataJSON, message.CreatedAt)
 
@@ -1363,7 +1356,7 @@ func (r *SQLiteRepository) GetMessage(ctx context.Context, id string) (*models.M
 	var metadataJSON string
 	err := r.db.QueryRowContext(ctx, `
 		SELECT id, task_session_id, task_id, author_type, author_id, content, requests_input, type, metadata, created_at
-		FROM task_messages WHERE id = ?
+		FROM task_session_messages WHERE id = ?
 	`, id).Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.AuthorType, &message.AuthorID, &message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt)
 	if err != nil {
 		return nil, err
@@ -1384,7 +1377,7 @@ func (r *SQLiteRepository) GetMessage(ctx context.Context, id string) (*models.M
 func (r *SQLiteRepository) ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, task_session_id, task_id, author_type, author_id, content, requests_input, type, metadata, created_at
-		FROM task_messages WHERE task_session_id = ? ORDER BY created_at ASC
+		FROM task_session_messages WHERE task_session_id = ? ORDER BY created_at ASC
 	`, sessionID)
 	if err != nil {
 		return nil, err
@@ -1454,7 +1447,7 @@ func (r *SQLiteRepository) ListMessagesPaginated(ctx context.Context, sessionID 
 
 	query := `
 		SELECT id, task_session_id, task_id, author_type, author_id, content, requests_input, type, metadata, created_at
-		FROM task_messages WHERE task_session_id = ?`
+		FROM task_session_messages WHERE task_session_id = ?`
 	args := []interface{}{sessionID}
 	if cursor != nil {
 		if opts.Before != "" {
@@ -1510,7 +1503,7 @@ func (r *SQLiteRepository) ListMessagesPaginated(ctx context.Context, sessionID 
 
 // DeleteMessage deletes a message by ID
 func (r *SQLiteRepository) DeleteMessage(ctx context.Context, id string) error {
-	result, err := r.db.ExecContext(ctx, `DELETE FROM task_messages WHERE id = ?`, id)
+	result, err := r.db.ExecContext(ctx, `DELETE FROM task_session_messages WHERE id = ?`, id)
 	if err != nil {
 		return err
 	}
@@ -1530,7 +1523,7 @@ func (r *SQLiteRepository) GetMessageByToolCallID(ctx context.Context, sessionID
 	var metadataJSON string
 	err := r.db.QueryRowContext(ctx, `
 		SELECT id, task_session_id, task_id, author_type, author_id, content, requests_input, type, metadata, created_at
-		FROM task_messages WHERE task_session_id = ? AND json_extract(metadata, '$.tool_call_id') = ?
+		FROM task_session_messages WHERE task_session_id = ? AND json_extract(metadata, '$.tool_call_id') = ?
 	`, sessionID, toolCallID).Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.AuthorType, &message.AuthorID,
 		&message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt)
 	if err != nil {
@@ -1557,7 +1550,7 @@ func (r *SQLiteRepository) UpdateMessage(ctx context.Context, message *models.Me
 	}
 
 	result, err := r.db.ExecContext(ctx, `
-		UPDATE task_messages SET content = ?, requests_input = ?, type = ?, metadata = ?
+		UPDATE task_session_messages SET content = ?, requests_input = ?, type = ?, metadata = ?
 		WHERE id = ?
 	`, message.Content, requestsInput, string(message.Type), string(metadataJSON), message.ID)
 	if err != nil {
