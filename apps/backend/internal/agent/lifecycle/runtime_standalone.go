@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -37,7 +38,38 @@ func (r *StandaloneRuntime) HealthCheck(ctx context.Context) error {
 	return r.ctl.Health(ctx)
 }
 
+func (r *StandaloneRuntime) waitForReady(ctx context.Context) error {
+	if err := r.ctl.Health(ctx); err == nil {
+		return nil
+	}
+
+	waitCtx := ctx
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		waitCtx, cancel = context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+	}
+
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-waitCtx.Done():
+			return fmt.Errorf("agentctl not ready: %w", waitCtx.Err())
+		case <-ticker.C:
+			if err := r.ctl.Health(waitCtx); err == nil {
+				return nil
+			}
+		}
+	}
+}
+
 func (r *StandaloneRuntime) CreateInstance(ctx context.Context, req *RuntimeCreateRequest) (*RuntimeInstance, error) {
+	if err := r.waitForReady(ctx); err != nil {
+		return nil, err
+	}
+
 	// Build environment variables
 	env := req.Env
 	if env == nil {

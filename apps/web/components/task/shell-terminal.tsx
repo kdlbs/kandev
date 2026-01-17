@@ -16,6 +16,7 @@ export function ShellTerminal() {
   const lastOutputLengthRef = useRef(0);
   const subscriptionIdRef = useRef(0);
   const onDataDisposableRef = useRef<{ dispose: () => void } | null>(null);
+  const retryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const storeApi = useAppStoreApi();
 
   const sessionId = useAppStore((state) => state.tasks.activeSessionId);
@@ -139,21 +140,46 @@ export function ShellTerminal() {
     const client = getWebSocketClient();
     if (!client) return;
 
-    client
-      .request<{ success: boolean; buffer?: string }>('shell.subscribe', { session_id: sessionId })
-      .then((response) => {
-        if (subscriptionIdRef.current !== currentSubscriptionId) return;
-        if (response.buffer) {
-          storeApi.getState().appendShellOutput(sessionId, response.buffer);
-        }
-      })
-      .catch((err) => {
-        if (subscriptionIdRef.current !== currentSubscriptionId) return;
-        console.error('Failed to subscribe to shell:', err);
-      });
+    if (retryTimeoutRef.current) {
+      clearTimeout(retryTimeoutRef.current);
+      retryTimeoutRef.current = null;
+    }
+
+    let cancelled = false;
+
+    const attemptSubscribe = () => {
+      client
+        .request<{ success: boolean; buffer?: string }>('shell.subscribe', { session_id: sessionId })
+        .then((response) => {
+          if (cancelled || subscriptionIdRef.current !== currentSubscriptionId) return;
+          if (response.buffer) {
+            storeApi.getState().appendShellOutput(sessionId, response.buffer);
+          }
+        })
+        .catch((err) => {
+          if (cancelled || subscriptionIdRef.current !== currentSubscriptionId) return;
+          const message = err instanceof Error ? err.message : String(err);
+          if (message.includes('no agent running')) {
+            retryTimeoutRef.current = setTimeout(() => {
+              if (!cancelled && subscriptionIdRef.current === currentSubscriptionId) {
+                attemptSubscribe();
+              }
+            }, 1000);
+            return;
+          }
+          console.error('Failed to subscribe to shell:', err);
+        });
+    };
+
+    attemptSubscribe();
 
     return () => {
       subscriptionIdRef.current += 1;
+      cancelled = true;
+      if (retryTimeoutRef.current) {
+        clearTimeout(retryTimeoutRef.current);
+        retryTimeoutRef.current = null;
+      }
     };
   }, [taskId, sessionId, storeApi, canSubscribe]);
 

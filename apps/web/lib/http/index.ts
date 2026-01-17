@@ -35,7 +35,8 @@ function resolveUrl(pathOrUrl: string, baseUrl: string) {
 
 async function fetchJson<T>(pathOrUrl: string, options?: ApiRequestOptions): Promise<T> {
   const baseUrl = options?.baseUrl ?? getBackendConfig().apiBaseUrl;
-  const response = await fetch(resolveUrl(pathOrUrl, baseUrl), {
+  const url = resolveUrl(pathOrUrl, baseUrl);
+  const response = await fetch(url, {
     ...options?.init,
     cache: options?.cache,
     headers: {

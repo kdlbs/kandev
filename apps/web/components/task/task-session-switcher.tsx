@@ -170,12 +170,13 @@ export function TaskSessionSwitcher({
                   <CommandItem
                     key={session.id}
                     value={session.id}
-                    data-selected={isActive}
                     onSelect={() => {
                       if (!taskId) return;
                       onSelectSession(taskId, session.id);
                     }}
-                    className="group flex w-full cursor-pointer items-center gap-3 px-2 py-1.5 rounded-sm text-left transition-colors data-[selected=true]:bg-muted"
+                    className={`group flex w-full cursor-pointer items-center gap-3 px-2 py-1.5 rounded-sm text-left transition-colors ${
+                      isActive ? 'bg-muted' : 'hover:bg-muted/30'
+                    }`}
                   >
                     <span className="text-xs font-medium text-muted-foreground w-8 shrink-0">
                       {formatSessionLabel(index, sortedSessions.length)}

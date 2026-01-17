@@ -69,13 +69,15 @@ export default function TaskPage({
 
   const initialSessionId = sessionId ?? taskSessionId ?? null;
   const effectiveSessionId = activeSessionId ?? initialSessionId;
+  const storeSessionState = useAppStore((state) =>
+    effectiveSessionId ? state.taskSessions.items[effectiveSessionId]?.state ?? null : null
+  );
   const agentctlStatus = useSessionAgentctl(effectiveSessionId);
 
   // Session resumption hook - handles auto-resume on page reload
   const {
     resumptionState,
     error: resumptionError,
-    taskSessionState: resumedSessionState,
     worktreePath: resumedWorktreePath,
     worktreeBranch: resumedWorktreeBranch,
   } = useSessionResumption(task?.id ?? null, effectiveSessionId);
@@ -86,7 +88,7 @@ export default function TaskPage({
 
   // Both hooks read taskSessionState from the store, so prefer resumedSessionState as it's always
   // updated when we have a sessionId from URL. For worktree, use resumed values when resuming/resumed.
-  const taskSessionState = resumedSessionState ?? agentSessionState;
+  const taskSessionState = storeSessionState ?? agentSessionState;
   const worktreePath = effectiveSessionId ? (resumedWorktreePath ?? agentWorktreePath) : agentWorktreePath;
   const worktreeBranch = effectiveSessionId ? (resumedWorktreeBranch ?? agentWorktreeBranch) : agentWorktreeBranch;
 

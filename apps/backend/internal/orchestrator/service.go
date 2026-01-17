@@ -486,7 +486,6 @@ func (s *Service) GetTaskSessionStatus(ctx context.Context, taskID, sessionID st
 		resp.IsAgentRunning = false
 		resp.IsResumable = false
 		resp.NeedsResume = false
-		resp.Error = "session has no resume token"
 		return resp, nil
 	}
 
