@@ -307,7 +307,8 @@ export type MessageType =
   | 'error'
   | 'status'
   | 'thinking'
-  | 'todo';
+  | 'todo'
+  | 'permission_request';
 
 export type Message = {
   id: string;

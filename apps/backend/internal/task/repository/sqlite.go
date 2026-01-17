@@ -1546,7 +1546,7 @@ func (r *SQLiteRepository) DeleteMessage(ctx context.Context, id string) error {
 	return nil
 }
 
-// GetMessageByToolCallID retrieves a message by session ID and tool_call_id in metadata
+// GetMessageByToolCallID retrieves a tool_call message by session ID and tool_call_id in metadata
 func (r *SQLiteRepository) GetMessageByToolCallID(ctx context.Context, sessionID, toolCallID string) (*models.Message, error) {
 	message := &models.Message{}
 	var requestsInput int
@@ -1554,8 +1554,30 @@ func (r *SQLiteRepository) GetMessageByToolCallID(ctx context.Context, sessionID
 	var metadataJSON string
 	err := r.db.QueryRowContext(ctx, `
 		SELECT id, task_session_id, task_id, author_type, author_id, content, requests_input, type, metadata, created_at
-		FROM task_session_messages WHERE task_session_id = ? AND json_extract(metadata, '$.tool_call_id') = ?
+		FROM task_session_messages WHERE task_session_id = ? AND type = 'tool_call' AND json_extract(metadata, '$.tool_call_id') = ?
 	`, sessionID, toolCallID).Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.AuthorType, &message.AuthorID,
+		&message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	message.RequestsInput = requestsInput == 1
+	message.Type = models.MessageType(messageType)
+	if metadataJSON != "" {
+		_ = json.Unmarshal([]byte(metadataJSON), &message.Metadata)
+	}
+	return message, nil
+}
+
+// GetMessageByPendingID retrieves a message by session ID and pending_id in metadata
+func (r *SQLiteRepository) GetMessageByPendingID(ctx context.Context, sessionID, pendingID string) (*models.Message, error) {
+	message := &models.Message{}
+	var requestsInput int
+	var messageType string
+	var metadataJSON string
+	err := r.db.QueryRowContext(ctx, `
+		SELECT id, task_session_id, task_id, author_type, author_id, content, requests_input, type, metadata, created_at
+		FROM task_session_messages WHERE task_session_id = ? AND json_extract(metadata, '$.pending_id') = ?
+	`, sessionID, pendingID).Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.AuthorType, &message.AuthorID,
 		&message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt)
 	if err != nil {
 		return nil, err

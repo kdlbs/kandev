@@ -154,8 +154,8 @@ func (r *DockerRuntime) RecoverInstances(ctx context.Context) ([]*RuntimeInstanc
 			containerIP = "127.0.0.1"
 		}
 
-		// Query the ControlServer to get the instance port
-		ctl := agentctl.NewStandaloneCtl(containerIP, AgentCtlPort, r.logger)
+		// Query the control server to get the instance port
+		ctl := agentctl.NewControlClient(containerIP, AgentCtlPort, r.logger)
 		instanceInfo, err := ctl.GetInstance(ctx, instanceID)
 		if err != nil {
 			r.logger.Warn("failed to get instance info from container",

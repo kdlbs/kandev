@@ -12,10 +12,9 @@ import (
 
 // StreamCallbacks defines callbacks for stream events
 type StreamCallbacks struct {
-	OnSessionUpdate func(execution *AgentExecution, update agentctl.SessionUpdate)
-	OnPermission    func(execution *AgentExecution, notification *agentctl.PermissionNotification)
-	OnGitStatus     func(execution *AgentExecution, update *agentctl.GitStatusUpdate)
-	OnFileChange    func(execution *AgentExecution, notification *agentctl.FileChangeNotification)
+	OnAgentEvent func(execution *AgentExecution, event agentctl.AgentEvent)
+	OnGitStatus  func(execution *AgentExecution, update *agentctl.GitStatusUpdate)
+	OnFileChange func(execution *AgentExecution, notification *agentctl.FileChangeNotification)
 }
 
 // StreamManager manages WebSocket streams to agent executions
@@ -36,7 +35,6 @@ func NewStreamManager(log *logger.Logger, callbacks StreamCallbacks) *StreamMana
 // If ready is non-nil, it will be closed when the updates stream is connected.
 func (sm *StreamManager) ConnectAll(execution *AgentExecution, ready chan<- struct{}) {
 	go sm.connectUpdatesStream(execution, ready)
-	go sm.connectPermissionStream(execution)
 	go sm.connectGitStatusStream(execution)
 	go sm.connectFileChangesStream(execution)
 }
@@ -74,9 +72,9 @@ func (sm *StreamManager) ReconnectAll(execution *AgentExecution) {
 func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready chan<- struct{}) {
 	ctx := context.Background()
 
-	err := execution.agentctl.StreamUpdates(ctx, func(update agentctl.SessionUpdate) {
-		if sm.callbacks.OnSessionUpdate != nil {
-			sm.callbacks.OnSessionUpdate(execution, update)
+	err := execution.agentctl.StreamUpdates(ctx, func(event agentctl.AgentEvent) {
+		if sm.callbacks.OnAgentEvent != nil {
+			sm.callbacks.OnAgentEvent(execution, event)
 		}
 	})
 
@@ -94,28 +92,7 @@ func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready c
 	}
 }
 
-// connectPermissionStream handles the permission WebSocket stream
-func (sm *StreamManager) connectPermissionStream(execution *AgentExecution) {
-	ctx := context.Background()
 
-	sm.logger.Debug("connecting to permission stream",
-		zap.String("instance_id", execution.ID),
-		zap.String("task_id", execution.TaskID))
-
-	err := execution.agentctl.StreamPermissions(ctx, func(notification *agentctl.PermissionNotification) {
-		sm.logger.Debug("received permission notification from stream",
-			zap.String("pending_id", notification.PendingID),
-			zap.String("title", notification.Title))
-		if sm.callbacks.OnPermission != nil {
-			sm.callbacks.OnPermission(execution, notification)
-		}
-	})
-	if err != nil {
-		sm.logger.Error("failed to connect to permission stream",
-			zap.String("instance_id", execution.ID),
-			zap.Error(err))
-	}
-}
 
 // connectGitStatusStream handles git status stream with retry logic
 func (sm *StreamManager) connectGitStatusStream(execution *AgentExecution) {

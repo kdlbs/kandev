@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/shell"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/pkg/agent"
 	"go.uber.org/zap"
@@ -80,11 +81,8 @@ type Manager struct {
 	// Protocol adapter for agent communication
 	adapter adapter.AgentAdapter
 
-	// Session update notifications (protocol-agnostic)
-	updatesCh chan adapter.SessionUpdate
-
-	// Permission request notifications (sent to backend)
-	permissionCh chan *PermissionNotification
+	// Agent event notifications (protocol-agnostic)
+	updatesCh chan adapter.AgentEvent
 
 	// Pending permission requests waiting for user response
 	pendingPermissions map[string]*PendingPermission
@@ -104,8 +102,7 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 		cfg:                cfg,
 		logger:             log.WithFields(zap.String("component", "process-manager")),
 		workspaceTracker:   NewWorkspaceTracker(cfg.WorkDir, log),
-		updatesCh:          make(chan adapter.SessionUpdate, 100),
-		permissionCh:       make(chan *PermissionNotification, 10),
+		updatesCh:          make(chan adapter.AgentEvent, 100),
 		pendingPermissions: make(map[string]*PendingPermission),
 	}
 	m.status.Store(StatusStopped)
@@ -344,8 +341,8 @@ func (m *Manager) forwardUpdates() {
 	}
 }
 
-// GetUpdates returns the channel for session update notifications
-func (m *Manager) GetUpdates() <-chan adapter.SessionUpdate {
+// GetUpdates returns the channel for agent event notifications
+func (m *Manager) GetUpdates() <-chan adapter.AgentEvent {
 	return m.updatesCh
 }
 
@@ -586,36 +583,37 @@ func (m *Manager) autoApprovePermission(req *adapter.PermissionRequest) (*adapte
 	}, nil
 }
 
-// sendPermissionNotification sends a permission request notification to the backend
+// sendPermissionNotification sends a permission request notification through the updates channel
 func (m *Manager) sendPermissionNotification(pending *PendingPermission) {
-	notification := &PermissionNotification{
-		PendingID:     pending.ID,
-		SessionID:     pending.Request.SessionID,
-		ToolCallID:    pending.Request.ToolCallID,
-		Title:         pending.Request.Title,
-		Options:       pending.Request.Options,
-		ActionType:    pending.Request.ActionType,
-		ActionDetails: pending.Request.ActionDetails,
-		CreatedAt:     pending.CreatedAt,
+	// Convert options to streams.PermissionOption (types.PermissionOption is an alias)
+	options := make([]streams.PermissionOption, len(pending.Request.Options))
+	for i, opt := range pending.Request.Options {
+		options[i] = streams.PermissionOption(opt)
 	}
 
-	m.logger.Info("sending permission notification to backend",
+	event := adapter.AgentEvent{
+		Type:              adapter.EventTypePermissionRequest,
+		SessionID:         pending.Request.SessionID,
+		ToolCallID:        pending.Request.ToolCallID,
+		PendingID:         pending.ID,
+		PermissionTitle:   pending.Request.Title,
+		PermissionOptions: options,
+		ActionType:        pending.Request.ActionType,
+		ActionDetails:     pending.Request.ActionDetails,
+	}
+
+	m.logger.Info("sending permission notification via updates channel",
 		zap.String("pending_id", pending.ID),
 		zap.String("title", pending.Request.Title),
 		zap.String("action_type", pending.Request.ActionType))
 
 	select {
-	case m.permissionCh <- notification:
+	case m.updatesCh <- event:
 		// Sent successfully
 	default:
-		m.logger.Warn("permission channel full, dropping notification",
+		m.logger.Warn("updates channel full, dropping permission notification",
 			zap.String("pending_id", pending.ID))
 	}
-}
-
-// GetPermissionRequests returns the channel for permission request notifications
-func (m *Manager) GetPermissionRequests() <-chan *PermissionNotification {
-	return m.permissionCh
 }
 
 // RespondToPermission responds to a pending permission request
@@ -645,17 +643,7 @@ func (m *Manager) RespondToPermission(pendingID string, optionID string, cancell
 	}
 }
 
-// GetPendingPermissions returns all pending permission requests
-func (m *Manager) GetPendingPermissions() []*PendingPermission {
-	m.permissionMu.RLock()
-	defer m.permissionMu.RUnlock()
 
-	result := make([]*PendingPermission, 0, len(m.pendingPermissions))
-	for _, p := range m.pendingPermissions {
-		result = append(result, p)
-	}
-	return result
-}
 
 // Shell returns the embedded shell session, or nil if not available
 func (m *Manager) Shell() *shell.Session {

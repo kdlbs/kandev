@@ -14,14 +14,14 @@ import (
 // StandaloneRuntime implements Runtime for standalone agentctl execution.
 // In this mode, a single agentctl control server manages multiple agent instances.
 type StandaloneRuntime struct {
-	ctl    *agentctl.StandaloneCtl
+	ctl    *agentctl.ControlClient
 	host   string
 	port   int
 	logger *logger.Logger
 }
 
 // NewStandaloneRuntime creates a new standalone runtime.
-func NewStandaloneRuntime(ctl *agentctl.StandaloneCtl, host string, port int, log *logger.Logger) *StandaloneRuntime {
+func NewStandaloneRuntime(ctl *agentctl.ControlClient, host string, port int, log *logger.Logger) *StandaloneRuntime {
 	return &StandaloneRuntime{
 		ctl:    ctl,
 		host:   host,

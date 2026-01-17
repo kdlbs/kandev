@@ -3,6 +3,7 @@
 import type { ReactElement } from 'react';
 import type { Message } from '@/lib/types/http';
 import { ChatMessage } from '@/components/task/chat/messages/chat-message';
+import { PermissionRequestMessage } from '@/components/task/chat/messages/permission-request-message';
 import { StatusMessage } from '@/components/task/chat/messages/status-message';
 import { ToolCallMessage } from '@/components/task/chat/messages/tool-call-message';
 import { ThinkingMessage } from '@/components/task/chat/messages/thinking-message';
@@ -11,6 +12,7 @@ import { TodoMessage } from '@/components/task/chat/messages/todo-message';
 type AdapterContext = {
   isTaskDescription: boolean;
   taskId?: string;
+  permissionsByToolCallId?: Map<string, Message>;
 };
 
 type MessageAdapter = {
@@ -29,11 +31,20 @@ const adapters: MessageAdapter[] = [
   },
   {
     matches: (comment) => comment.type === 'tool_call',
-    render: (comment, ctx) => <ToolCallMessage comment={comment} taskId={ctx.taskId} />,
+    render: (comment, ctx) => {
+      const toolCallId = (comment.metadata as { tool_call_id?: string } | undefined)?.tool_call_id;
+      const permissionMessage = toolCallId ? ctx.permissionsByToolCallId?.get(toolCallId) : undefined;
+      return <ToolCallMessage comment={comment} permissionMessage={permissionMessage} />;
+    },
   },
   {
     matches: (comment) => comment.type === 'error' || comment.type === 'status' || comment.type === 'progress',
     render: (comment) => <StatusMessage comment={comment} />,
+  },
+  {
+    // Standalone permission requests (no matching tool call)
+    matches: (comment) => comment.type === 'permission_request',
+    render: (comment) => <PermissionRequestMessage comment={comment} />,
   },
   {
     matches: () => true,
@@ -73,10 +84,11 @@ type MessageRendererProps = {
   comment: Message;
   isTaskDescription: boolean;
   taskId?: string;
+  permissionsByToolCallId?: Map<string, Message>;
 };
 
-export function MessageRenderer({ comment, isTaskDescription, taskId }: MessageRendererProps) {
-  const ctx = { isTaskDescription, taskId };
+export function MessageRenderer({ comment, isTaskDescription, taskId, permissionsByToolCallId }: MessageRendererProps) {
+  const ctx = { isTaskDescription, taskId, permissionsByToolCallId };
   const adapter = adapters.find((entry) => entry.matches(comment, ctx)) ?? adapters[adapters.length - 1];
   return adapter.render(comment, ctx);
 }

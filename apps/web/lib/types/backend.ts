@@ -36,8 +36,7 @@ export type BackendMessageType =
   | 'agent.profile.updated'
   | 'user.settings.updated'
   | 'session.workspace.file.changes'
-  | 'session.shell.output'
-  | 'permission.requested';
+  | 'session.shell.output';
 
 export type BackendMessage<T extends BackendMessageType, P> = {
   id?: string;
@@ -254,26 +253,6 @@ export type ShellOutputPayload = {
   code?: number;
 };
 
-export type PermissionOptionPayload = {
-  option_id: string;
-  name: string;
-  kind: string; // allow_once, allow_always, reject_once, reject_always
-};
-
-export type PermissionRequestedPayload = {
-  pending_id: string;
-  task_id: string;
-  agent_instance_id: string;
-  session_id: string;
-  tool_call_id: string;
-  title: string;
-  options: PermissionOptionPayload[];
-  action_type?: string; // command, file_write, file_read, network, mcp_tool, other
-  action_details?: Record<string, unknown>;
-  created_at: string;
-  timestamp: string;
-};
-
 export type BackendMessageMap = {
   'kanban.update': BackendMessage<'kanban.update', KanbanUpdatePayload>;
   'task.created': BackendMessage<'task.created', TaskEventPayload>;
@@ -313,7 +292,6 @@ export type BackendMessageMap = {
   'user.settings.updated': BackendMessage<'user.settings.updated', UserSettingsUpdatedPayload>;
   'session.workspace.file.changes': BackendMessage<'session.workspace.file.changes', FileChangeNotificationPayload>;
   'session.shell.output': BackendMessage<'session.shell.output', ShellOutputPayload>;
-  'permission.requested': BackendMessage<'permission.requested', PermissionRequestedPayload>;
 };
 
 // Workspace file types

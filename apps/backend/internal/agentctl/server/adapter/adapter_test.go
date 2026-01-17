@@ -6,7 +6,7 @@ import (
 )
 
 func TestSessionUpdate_Fields(t *testing.T) {
-	update := SessionUpdate{
+	update := AgentEvent{
 		Type:       "tool_call",
 		SessionID:  "session-123",
 		Text:       "test message",
@@ -56,7 +56,7 @@ func TestSessionUpdate_Fields(t *testing.T) {
 }
 
 func TestSessionUpdate_JSONSerialization(t *testing.T) {
-	update := SessionUpdate{
+	update := AgentEvent{
 		Type:       "message_chunk",
 		SessionID:  "session-abc",
 		Text:       "Hello, world!",
@@ -68,7 +68,7 @@ func TestSessionUpdate_JSONSerialization(t *testing.T) {
 		t.Fatalf("failed to marshal SessionUpdate: %v", err)
 	}
 
-	var decoded SessionUpdate
+	var decoded AgentEvent
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		t.Fatalf("failed to unmarshal SessionUpdate: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestSessionUpdate_JSONSerialization(t *testing.T) {
 
 func TestSessionUpdate_JSONOmitEmpty(t *testing.T) {
 	// Test that omitempty fields are not included when empty
-	update := SessionUpdate{
+	update := AgentEvent{
 		Type: "error",
 	}
 
@@ -257,7 +257,7 @@ func TestSessionUpdate_UpdateTypes(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			update := SessionUpdate{Type: tc.updateType}
+			update := AgentEvent{Type: tc.updateType}
 			if update.Type != tc.updateType {
 				t.Errorf("expected Type %q, got %q", tc.updateType, update.Type)
 			}
@@ -288,7 +288,7 @@ func TestPlanEntry_StatusValues(t *testing.T) {
 
 func TestSessionUpdate_WithComplexToolArgs(t *testing.T) {
 	// Test with complex nested ToolArgs
-	update := SessionUpdate{
+	update := AgentEvent{
 		Type:       "tool_call",
 		ToolCallID: "call-123",
 		ToolName:   "file_edit",
@@ -311,7 +311,7 @@ func TestSessionUpdate_WithComplexToolArgs(t *testing.T) {
 		t.Fatalf("failed to marshal: %v", err)
 	}
 
-	var decoded SessionUpdate
+	var decoded AgentEvent
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		t.Fatalf("failed to unmarshal: %v", err)
 	}
@@ -328,4 +328,3 @@ func TestSessionUpdate_WithComplexToolArgs(t *testing.T) {
 		t.Errorf("expected 2 locations, got %d", len(locations))
 	}
 }
-

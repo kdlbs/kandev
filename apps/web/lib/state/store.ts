@@ -175,30 +175,6 @@ export type DiffState = {
   files: Array<{ path: string; status: 'A' | 'M' | 'D'; plus: number; minus: number }>;
 };
 
-export type PermissionOption = {
-  option_id: string;
-  name: string;
-  kind: string; // allow_once, allow_always, reject_once, reject_always
-};
-
-export type PendingPermission = {
-  pending_id: string;
-  task_id: string;
-  agent_instance_id: string;
-  session_id: string;
-  tool_call_id: string;
-  title: string;
-  options: PermissionOption[];
-  action_type?: string; // command, file_write, file_read, network, mcp_tool, other
-  action_details?: Record<string, unknown>;
-  created_at: string;
-  timestamp: string;
-};
-
-export type PermissionsState = {
-  pending: PendingPermission[];
-};
-
 export type ConnectionState = {
   status: 'disconnected' | 'connecting' | 'connected' | 'error' | 'reconnecting';
   error: string | null;
@@ -263,7 +239,6 @@ export type AppState = {
   sessionAgentctl: SessionAgentctlState;
   worktrees: WorktreesState;
   sessionWorktreesBySessionId: SessionWorktreesState;
-  permissions: PermissionsState;
   hydrate: (state: Partial<AppState>) => void;
   setActiveWorkspace: (workspaceId: string | null) => void;
   setWorkspaces: (workspaces: WorkspaceState['items']) => void;
@@ -317,9 +292,6 @@ export type AppState = {
   setGitStatus: (sessionId: string, gitStatus: GitStatusEntry) => void;
   clearGitStatus: (sessionId: string) => void;
   bumpAgentProfilesVersion: () => void;
-  addPendingPermission: (permission: PendingPermission) => void;
-  removePendingPermission: (pendingId: string) => void;
-  clearPendingPermissions: (sessionId?: string) => void;
 };
 
 export type AppStore = ReturnType<typeof createAppStore>;
@@ -356,7 +328,6 @@ const defaultState: AppState = {
   sessionAgentctl: { itemsBySessionId: {} },
   worktrees: { items: {} },
   sessionWorktreesBySessionId: { itemsBySessionId: {} },
-  permissions: { pending: [] },
   hydrate: () => undefined,
   setActiveWorkspace: () => undefined,
   setWorkspaces: () => undefined,
@@ -396,9 +367,6 @@ const defaultState: AppState = {
   setGitStatus: () => undefined,
   clearGitStatus: () => undefined,
   bumpAgentProfilesVersion: () => undefined,
-  addPendingPermission: () => undefined,
-  removePendingPermission: () => undefined,
-  clearPendingPermissions: () => undefined,
 };
 
 function mergeInitialState(
@@ -444,9 +412,6 @@ function mergeInitialState(
   | 'setGitStatus'
   | 'clearGitStatus'
   | 'bumpAgentProfilesVersion'
-  | 'addPendingPermission'
-  | 'removePendingPermission'
-  | 'clearPendingPermissions'
 > {
   if (!initialState) return defaultState;
   return {
@@ -478,7 +443,6 @@ function mergeInitialState(
       ...defaultState.sessionWorktreesBySessionId,
       ...initialState.sessionWorktreesBySessionId,
     },
-    permissions: { ...defaultState.permissions, ...initialState.permissions },
   };
 }
 
@@ -521,7 +485,6 @@ export function createAppStore(initialState?: Partial<AppState>) {
           if (state.sessionWorktreesBySessionId) {
             Object.assign(draft.sessionWorktreesBySessionId, state.sessionWorktreesBySessionId);
           }
-          if (state.permissions) Object.assign(draft.permissions, state.permissions);
         }),
       setActiveWorkspace: (workspaceId) =>
         set((draft) => {
@@ -792,26 +755,6 @@ export function createAppStore(initialState?: Partial<AppState>) {
       bumpAgentProfilesVersion: () =>
         set((draft) => {
           draft.agentProfiles.version += 1;
-        }),
-      addPendingPermission: (permission) =>
-        set((draft) => {
-          // Avoid duplicates
-          const exists = draft.permissions.pending.some((p) => p.pending_id === permission.pending_id);
-          if (!exists) {
-            draft.permissions.pending.push(permission);
-          }
-        }),
-      removePendingPermission: (pendingId) =>
-        set((draft) => {
-          draft.permissions.pending = draft.permissions.pending.filter((p) => p.pending_id !== pendingId);
-        }),
-      clearPendingPermissions: (sessionId) =>
-        set((draft) => {
-          if (sessionId) {
-            draft.permissions.pending = draft.permissions.pending.filter((p) => p.session_id !== sessionId);
-          } else {
-            draft.permissions.pending = [];
-          }
         }),
     }))
   );

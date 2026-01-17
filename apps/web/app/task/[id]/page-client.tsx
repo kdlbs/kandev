@@ -5,7 +5,6 @@ import '@git-diff-view/react/styles/diff-view.css';
 import { TooltipProvider } from '@kandev/ui/tooltip';
 import { TaskTopBar } from '@/components/task/task-top-bar';
 import { TaskLayout } from '@/components/task/task-layout';
-import { CommandApprovalDialog } from '@/components/task/command-approval-dialog';
 import { DebugOverlay } from '@/components/debug-overlay';
 import type { Repository, Task } from '@/lib/types/http';
 import { DEBUG_UI } from '@/lib/config';
@@ -174,9 +173,6 @@ export default function TaskPage({
           workspaceId={task?.workspace_id ?? null}
           boardId={task?.board_id ?? null}
         />
-
-        {/* Fallback dialog for permissions without matching tool call (e.g., workspace indexing) */}
-        {task?.id && <CommandApprovalDialog taskId={task.id} standaloneOnly />}
       </div>
     </TooltipProvider>
   );

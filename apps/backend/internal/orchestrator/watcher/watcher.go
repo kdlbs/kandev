@@ -69,6 +69,19 @@ type ToolCallCompleteData struct {
 	Result        string `json:"result,omitempty"`
 }
 
+// PermissionRequestData contains data from permission_request events
+type PermissionRequestData struct {
+	TaskID        string                   `json:"task_id"`
+	TaskSessionID string                   `json:"session_id"`
+	AgentID       string                   `json:"agent_id"`
+	PendingID     string                   `json:"pending_id"`
+	ToolCallID    string                   `json:"tool_call_id"`
+	Title         string                   `json:"title"`
+	Options       []map[string]interface{} `json:"options"`
+	ActionType    string                   `json:"action_type"`
+	ActionDetails map[string]interface{}   `json:"action_details"`
+}
+
 // GitStatusData contains data from git status events
 type GitStatusData struct {
 	TaskID        string                 `json:"task_id"`
@@ -112,6 +125,9 @@ type EventHandlers struct {
 	// Tool call events
 	OnToolCallStarted  func(ctx context.Context, data ToolCallData)
 	OnToolCallComplete func(ctx context.Context, data ToolCallCompleteData)
+
+	// Permission request events
+	OnPermissionRequest func(ctx context.Context, data PermissionRequestData)
 
 	// Git status events
 	OnGitStatusUpdated func(ctx context.Context, data GitStatusData)
@@ -183,6 +199,12 @@ func (w *Watcher) Start(ctx context.Context) error {
 
 	// Subscribe to tool call events
 	if err := w.subscribeToToolCallEvents(); err != nil {
+		w.unsubscribeAll()
+		return err
+	}
+
+	// Subscribe to permission request events
+	if err := w.subscribeToPermissionRequestEvents(); err != nil {
 		w.unsubscribeAll()
 		return err
 	}
@@ -543,6 +565,46 @@ func (w *Watcher) createToolCallCompleteHandler() bus.EventHandler {
 			zap.String("status", data.Status))
 
 		w.handlers.OnToolCallComplete(ctx, data)
+		return nil
+	}
+}
+
+// subscribeToPermissionRequestEvents subscribes to permission request events
+func (w *Watcher) subscribeToPermissionRequestEvents() error {
+	if w.handlers.OnPermissionRequest == nil {
+		return nil
+	}
+
+	subject := events.PermissionRequestReceived + ".*"
+	sub, err := w.eventBus.Subscribe(subject, w.createPermissionRequestHandler())
+	if err != nil {
+		w.logger.Error("Failed to subscribe to permission request events",
+			zap.String("subject", subject),
+			zap.Error(err))
+		return err
+	}
+	w.subscriptions = append(w.subscriptions, sub)
+	return nil
+}
+
+// createPermissionRequestHandler creates a bus.EventHandler for permission request events
+func (w *Watcher) createPermissionRequestHandler() bus.EventHandler {
+	return func(ctx context.Context, event *bus.Event) error {
+		var data PermissionRequestData
+		if err := w.parseEventData(event.Data, &data); err != nil {
+			w.logger.Error("Failed to parse permission request event data",
+				zap.String("event_type", event.Type),
+				zap.String("event_id", event.ID),
+				zap.Error(err))
+			return nil
+		}
+
+		w.logger.Debug("Handling permission request event",
+			zap.String("task_id", data.TaskID),
+			zap.String("pending_id", data.PendingID),
+			zap.String("title", data.Title))
+
+		w.handlers.OnPermissionRequest(ctx, data)
 		return nil
 	}
 }

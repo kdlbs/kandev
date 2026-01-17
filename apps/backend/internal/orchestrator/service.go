@@ -57,6 +57,8 @@ type MessageCreator interface {
 	CreateToolCallMessage(ctx context.Context, taskID, toolCallID, title, status, agentSessionID string, args map[string]interface{}) error
 	UpdateToolCallMessage(ctx context.Context, taskID, toolCallID, status, result, agentSessionID string) error
 	CreateSessionMessage(ctx context.Context, taskID, content, agentSessionID, messageType string, metadata map[string]interface{}, requestsInput bool) error
+	CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, pendingID, toolCallID, title string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}) (string, error)
+	UpdatePermissionMessage(ctx context.Context, sessionID, pendingID, status string) error
 }
 
 // Service is the main orchestrator service
@@ -152,16 +154,17 @@ func NewService(
 
 	// Create the watcher with event handlers that wire everything together
 	handlers := watcher.EventHandlers{
-		OnTaskStateChanged:  s.handleTaskStateChanged,
-		OnAgentReady:        s.handleAgentReady,
-		OnAgentCompleted:    s.handleAgentCompleted,
-		OnAgentFailed:       s.handleAgentFailed,
-		OnACPMessage:        s.handleACPMessage,
-		OnACPSessionCreated: s.handleACPSessionCreated,
-		OnPromptComplete:    s.handlePromptComplete,
-		OnToolCallStarted:   s.handleToolCallStarted,
-		OnToolCallComplete:  s.handleToolCallComplete,
-		OnGitStatusUpdated:  s.handleGitStatusUpdated,
+		OnTaskStateChanged:   s.handleTaskStateChanged,
+		OnAgentReady:         s.handleAgentReady,
+		OnAgentCompleted:     s.handleAgentCompleted,
+		OnAgentFailed:        s.handleAgentFailed,
+		OnACPMessage:         s.handleACPMessage,
+		OnACPSessionCreated:  s.handleACPSessionCreated,
+		OnPromptComplete:     s.handlePromptComplete,
+		OnToolCallStarted:    s.handleToolCallStarted,
+		OnToolCallComplete:   s.handleToolCallComplete,
+		OnPermissionRequest:  s.handlePermissionRequest,
+		OnGitStatusUpdated:   s.handleGitStatusUpdated,
 	}
 	s.watcher = watcher.NewWatcher(eventBus, handlers, log)
 
@@ -554,7 +557,31 @@ func (s *Service) RespondToPermission(ctx context.Context, sessionID, pendingID,
 		zap.String("pending_id", pendingID),
 		zap.String("option_id", optionID),
 		zap.Bool("cancelled", cancelled))
-	return s.executor.RespondToPermission(ctx, sessionID, pendingID, optionID, cancelled)
+
+	// Respond to the permission via agentctl
+	if err := s.executor.RespondToPermission(ctx, sessionID, pendingID, optionID, cancelled); err != nil {
+		return err
+	}
+
+	// Determine status based on response
+	status := "approved"
+	if cancelled {
+		status = "rejected"
+	}
+
+	// Update the permission message with the new status
+	if s.messageCreator != nil {
+		if err := s.messageCreator.UpdatePermissionMessage(ctx, sessionID, pendingID, status); err != nil {
+			s.logger.Warn("failed to update permission message status",
+				zap.String("session_id", sessionID),
+				zap.String("pending_id", pendingID),
+				zap.String("status", status),
+				zap.Error(err))
+			// Don't fail the whole operation if message update fails
+		}
+	}
+
+	return nil
 }
 
 // CompleteTask explicitly completes a task and stops its agent
@@ -1178,5 +1205,44 @@ func (s *Service) handleToolCallComplete(ctx context.Context, data watcher.ToolC
 		}
 
 		s.updateTaskSessionState(ctx, data.TaskID, data.TaskSessionID, models.TaskSessionStateRunning, "", false)
+	}
+}
+
+// handlePermissionRequest handles permission request events and saves as message
+func (s *Service) handlePermissionRequest(ctx context.Context, data watcher.PermissionRequestData) {
+	s.logger.Info("handling permission request",
+		zap.String("task_id", data.TaskID),
+		zap.String("pending_id", data.PendingID),
+		zap.String("title", data.Title))
+
+	if data.TaskSessionID == "" {
+		s.logger.Warn("missing session_id for permission_request",
+			zap.String("task_id", data.TaskID),
+			zap.String("pending_id", data.PendingID))
+		return
+	}
+
+	if s.messageCreator != nil {
+		_, err := s.messageCreator.CreatePermissionRequestMessage(
+			ctx,
+			data.TaskID,
+			data.TaskSessionID,
+			data.PendingID,
+			data.ToolCallID,
+			data.Title,
+			data.Options,
+			data.ActionType,
+			data.ActionDetails,
+		)
+		if err != nil {
+			s.logger.Error("failed to create permission request message",
+				zap.String("task_id", data.TaskID),
+				zap.String("pending_id", data.PendingID),
+				zap.Error(err))
+		} else {
+			s.logger.Info("created permission request message",
+				zap.String("task_id", data.TaskID),
+				zap.String("pending_id", data.PendingID))
+		}
 	}
 }

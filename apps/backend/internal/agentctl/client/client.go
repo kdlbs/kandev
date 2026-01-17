@@ -24,7 +24,6 @@ type Client struct {
 
 	// WebSocket connections for streaming
 	acpConn         *websocket.Conn
-	permissionConn  *websocket.Conn
 	gitStatusConn   *websocket.Conn
 	fileChangesConn *websocket.Conn
 	shellConn       *websocket.Conn
@@ -251,7 +250,8 @@ func (c *Client) BaseURL() string {
 	return c.baseURL
 }
 
-// Re-export types from types package for convenience
+// Re-export types from types package for convenience.
+// These types are defined in the streams subpackage and re-exported through types.
 type (
 	GitStatusUpdate        = types.GitStatusUpdate
 	FileInfo               = types.FileInfo
@@ -263,6 +263,9 @@ type (
 	FileContentRequest     = types.FileContentRequest
 	FileContentResponse    = types.FileContentResponse
 	FileChangeNotification = types.FileChangeNotification
+	ShellMessage           = types.ShellMessage
+	ShellStatusResponse    = types.ShellStatusResponse
+	ShellBufferResponse    = types.ShellBufferResponse
 )
 
 // StreamGitStatus opens a WebSocket connection for streaming git status updates
@@ -453,23 +456,16 @@ func (c *Client) CloseFileChangesStream() {
 	}
 }
 
-// Close closes all connections (ACP, permissions, git status, file changes, shell)
+// Close closes all connections
 func (c *Client) Close() {
-	c.CloseACPStream()
-	c.ClosePermissionStream()
+	c.CloseUpdatesStream()
 	c.CloseGitStatusStream()
 	c.CloseFileChangesStream()
 	c.CloseShellStream()
 }
 
-// ShellStatusResponse from agentctl shell status endpoint
-type ShellStatusResponse struct {
-	Running   bool   `json:"running"`
-	Pid       int    `json:"pid"`
-	Shell     string `json:"shell"`
-	Cwd       string `json:"cwd"`
-	StartedAt string `json:"started_at"`
-}
+// Note: ShellStatusResponse, ShellMessage, ShellBufferResponse are re-exported
+// from streams package at the top of this file in the type block.
 
 // ShellStatus gets the status of the embedded shell session
 func (c *Client) ShellStatus(ctx context.Context) (*ShellStatusResponse, error) {
@@ -494,18 +490,6 @@ func (c *Client) ShellStatus(ctx context.Context) (*ShellStatusResponse, error) 
 	}
 
 	return &result, nil
-}
-
-// ShellMessage represents a message to/from the shell
-type ShellMessage struct {
-	Type string `json:"type"` // "input", "output", "ping", "pong", "exit"
-	Data string `json:"data,omitempty"`
-	Code int    `json:"code,omitempty"` // For exit type
-}
-
-// ShellBufferResponse is the response from the shell buffer endpoint
-type ShellBufferResponse struct {
-	Data string `json:"data"`
 }
 
 // ShellBuffer returns the buffered shell output

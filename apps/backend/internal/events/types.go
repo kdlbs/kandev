@@ -95,9 +95,10 @@ const (
 
 // Event types for agent prompts
 const (
-	PromptComplete   = "prompt.complete"    // Agent finished responding to a prompt
-	ToolCallStarted  = "tool_call.started"  // Agent started a tool call
-	ToolCallComplete = "tool_call.complete" // Agent finished a tool call
+	PromptComplete            = "prompt.complete"             // Agent finished responding to a prompt
+	ToolCallStarted           = "tool_call.started"           // Agent started a tool call
+	ToolCallComplete          = "tool_call.complete"          // Agent finished a tool call
+	PermissionRequestReceived = "permission_request.received" // Agent requested permission
 )
 
 // Event types for workspace/git status

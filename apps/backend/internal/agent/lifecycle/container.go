@@ -78,8 +78,8 @@ func (cm *ContainerManager) LaunchContainer(ctx context.Context, config Containe
 		containerIP = "127.0.0.1"
 	}
 
-	// Create StandaloneCtl to communicate with the container's ControlServer
-	ctl := agentctl.NewStandaloneCtl(containerIP, AgentCtlPort, cm.logger)
+	// Create ControlClient to communicate with the container's control server
+	ctl := agentctl.NewControlClient(containerIP, AgentCtlPort, cm.logger)
 
 	// Wait for agentctl to be healthy
 	if err := cm.waitForHealth(ctx, ctl); err != nil {
@@ -115,7 +115,7 @@ func (cm *ContainerManager) LaunchContainer(ctx context.Context, config Containe
 }
 
 // waitForHealth waits for agentctl to be healthy with retries
-func (cm *ContainerManager) waitForHealth(ctx context.Context, ctl *agentctl.StandaloneCtl) error {
+func (cm *ContainerManager) waitForHealth(ctx context.Context, ctl *agentctl.ControlClient) error {
 	const maxRetries = 30
 	const retryDelay = 500 * time.Millisecond
 

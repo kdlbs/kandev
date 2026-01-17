@@ -39,7 +39,7 @@ type CodexAdapter struct {
 	agentInfo *AgentInfo
 
 	// Update channel
-	updatesCh chan SessionUpdate
+	updatesCh chan AgentEvent
 
 	// Permission handler
 	permissionHandler PermissionHandler
@@ -65,7 +65,7 @@ func NewCodexAdapter(stdin io.Writer, stdout io.Reader, cfg *Config, log *logger
 		stdout:    stdout,
 		ctx:       ctx,
 		cancel:    cancel,
-		updatesCh: make(chan SessionUpdate, 100),
+		updatesCh: make(chan AgentEvent, 100),
 	}
 }
 
@@ -292,8 +292,8 @@ func (a *CodexAdapter) Cancel(ctx context.Context) error {
 	return err
 }
 
-// Updates returns the channel for session updates.
-func (a *CodexAdapter) Updates() <-chan SessionUpdate {
+// Updates returns the channel for agent events.
+func (a *CodexAdapter) Updates() <-chan AgentEvent {
 	return a.updatesCh
 }
 
@@ -346,8 +346,8 @@ func (a *CodexAdapter) Close() error {
 	return nil
 }
 
-// sendUpdate safely sends an update to the updates channel.
-func (a *CodexAdapter) sendUpdate(update SessionUpdate) {
+// sendUpdate safely sends an event to the updates channel.
+func (a *CodexAdapter) sendUpdate(update AgentEvent) {
 	select {
 	case a.updatesCh <- update:
 	default:
@@ -355,7 +355,7 @@ func (a *CodexAdapter) sendUpdate(update SessionUpdate) {
 	}
 }
 
-// handleNotification processes Codex notifications and emits SessionUpdates.
+// handleNotification processes Codex notifications and emits AgentEvents.
 func (a *CodexAdapter) handleNotification(method string, params json.RawMessage) {
 	a.mu.RLock()
 	threadID := a.threadID
@@ -373,8 +373,8 @@ func (a *CodexAdapter) handleNotification(method string, params json.RawMessage)
 		a.mu.Lock()
 		a.messageBuffer += p.Delta
 		a.mu.Unlock()
-		a.sendUpdate(SessionUpdate{
-			Type:        UpdateTypeMessageChunk,
+		a.sendUpdate(AgentEvent{
+			Type:        EventTypeMessageChunk,
 			SessionID:   threadID,
 			OperationID: turnID,
 			Text:        p.Delta,
@@ -389,8 +389,8 @@ func (a *CodexAdapter) handleNotification(method string, params json.RawMessage)
 		a.mu.Lock()
 		a.reasoningBuffer += p.Delta
 		a.mu.Unlock()
-		a.sendUpdate(SessionUpdate{
-			Type:          UpdateTypeReasoning,
+		a.sendUpdate(AgentEvent{
+			Type:          EventTypeReasoning,
 			SessionID:     threadID,
 			OperationID:   turnID,
 			ReasoningText: p.Delta,
@@ -405,8 +405,8 @@ func (a *CodexAdapter) handleNotification(method string, params json.RawMessage)
 		a.mu.Lock()
 		a.summaryBuffer += p.Delta
 		a.mu.Unlock()
-		a.sendUpdate(SessionUpdate{
-			Type:             UpdateTypeReasoning,
+		a.sendUpdate(AgentEvent{
+			Type:             EventTypeReasoning,
 			SessionID:        threadID,
 			OperationID:      turnID,
 			ReasoningSummary: p.Delta,
@@ -418,13 +418,13 @@ func (a *CodexAdapter) handleNotification(method string, params json.RawMessage)
 			a.logger.Warn("failed to parse turn completed", zap.Error(err))
 			return
 		}
-		update := SessionUpdate{
-			Type:        UpdateTypeComplete,
+		update := AgentEvent{
+			Type:        EventTypeComplete,
 			SessionID:   threadID,
 			OperationID: p.TurnID,
 		}
 		if !p.Success && p.Error != "" {
-			update.Type = UpdateTypeError
+			update.Type = EventTypeError
 			update.Error = p.Error
 		}
 		a.sendUpdate(update)
@@ -435,8 +435,8 @@ func (a *CodexAdapter) handleNotification(method string, params json.RawMessage)
 			a.logger.Warn("failed to parse turn diff updated", zap.Error(err))
 			return
 		}
-		a.sendUpdate(SessionUpdate{
-			Type:        UpdateTypeMessageChunk,
+		a.sendUpdate(AgentEvent{
+			Type:        EventTypeMessageChunk,
 			SessionID:   threadID,
 			OperationID: p.TurnID,
 			Diff:        p.Diff,
@@ -455,8 +455,8 @@ func (a *CodexAdapter) handleNotification(method string, params json.RawMessage)
 				Status:      e.Status,
 			}
 		}
-		a.sendUpdate(SessionUpdate{
-			Type:        UpdateTypePlan,
+		a.sendUpdate(AgentEvent{
+			Type:        EventTypePlan,
 			SessionID:   threadID,
 			OperationID: p.TurnID,
 			PlanEntries: entries,
@@ -468,8 +468,8 @@ func (a *CodexAdapter) handleNotification(method string, params json.RawMessage)
 			a.logger.Warn("failed to parse error notification", zap.Error(err))
 			return
 		}
-		a.sendUpdate(SessionUpdate{
-			Type:      UpdateTypeError,
+		a.sendUpdate(AgentEvent{
+			Type:      EventTypeError,
 			SessionID: threadID,
 			Error:     p.Message,
 		})
@@ -487,8 +487,8 @@ func (a *CodexAdapter) handleNotification(method string, params json.RawMessage)
 		// Item types: "userMessage", "agentMessage", "commandExecution", "fileChange", "reasoning"
 		switch p.Item.Type {
 		case "commandExecution":
-			a.sendUpdate(SessionUpdate{
-				Type:        UpdateTypeToolCall,
+			a.sendUpdate(AgentEvent{
+				Type:        EventTypeToolCall,
 				SessionID:   threadID,
 				OperationID: turnID,
 				ToolCallID:  p.Item.ID,
@@ -509,8 +509,8 @@ func (a *CodexAdapter) handleNotification(method string, params json.RawMessage)
 					title += fmt.Sprintf(" (+%d more)", len(p.Item.Changes)-1)
 				}
 			}
-			a.sendUpdate(SessionUpdate{
-				Type:        UpdateTypeToolCall,
+			a.sendUpdate(AgentEvent{
+				Type:        EventTypeToolCall,
 				SessionID:   threadID,
 				OperationID: turnID,
 				ToolCallID:  p.Item.ID,
@@ -535,8 +535,8 @@ func (a *CodexAdapter) handleNotification(method string, params json.RawMessage)
 			if p.Item.Status == "failed" {
 				status = "error"
 			}
-			update := SessionUpdate{
-				Type:        UpdateTypeToolUpdate,
+			update := AgentEvent{
+				Type:        EventTypeToolUpdate,
 				SessionID:   threadID,
 				OperationID: turnID,
 				ToolCallID:  p.Item.ID,
@@ -567,8 +567,8 @@ func (a *CodexAdapter) handleNotification(method string, params json.RawMessage)
 			a.logger.Warn("failed to parse command output delta", zap.Error(err))
 			return
 		}
-		a.sendUpdate(SessionUpdate{
-			Type:        UpdateTypeToolUpdate,
+		a.sendUpdate(AgentEvent{
+			Type:        EventTypeToolUpdate,
 			SessionID:   threadID,
 			OperationID: turnID,
 			ToolCallID:  p.ItemID,
