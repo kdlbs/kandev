@@ -230,6 +230,7 @@ export type UserSettingsUpdatedPayload = {
   board_id: string;
   repository_ids: string[];
   initial_setup_complete?: boolean;
+  preferred_shell?: string;
   updated_at?: string;
 };
 

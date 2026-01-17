@@ -143,6 +143,7 @@ func agentSessionStateToV1(state models.TaskSessionState) v1.TaskSessionState {
 type Executor struct {
 	agentManager AgentManagerClient
 	repo         repository.Repository
+	shellPrefs   ShellPreferenceProvider
 	logger       *logger.Logger
 
 	// In-memory cache for fast lookups (synced with database)
@@ -160,6 +161,11 @@ type Executor struct {
 type ExecutorConfig struct {
 	MaxConcurrent   int  // Maximum concurrent agent executions
 	WorktreeEnabled bool // Whether to use Git worktrees for agent isolation
+	ShellPrefs      ShellPreferenceProvider
+}
+
+type ShellPreferenceProvider interface {
+	PreferredShell(ctx context.Context) (string, error)
 }
 
 // NewExecutor creates a new executor
@@ -171,6 +177,7 @@ func NewExecutor(agentManager AgentManagerClient, repo repository.Repository, lo
 	return &Executor{
 		agentManager:    agentManager,
 		repo:            repo,
+		shellPrefs:      cfg.ShellPrefs,
 		logger:          log.WithFields(zap.String("component", "executor")),
 		executions:      make(map[string]*TaskExecution),
 		maxConcurrent:   maxConcurrent,
@@ -183,6 +190,26 @@ func NewExecutor(agentManager AgentManagerClient, repo repository.Repository, lo
 // SetWorktreeEnabled enables or disables worktree mode
 func (e *Executor) SetWorktreeEnabled(enabled bool) {
 	e.worktreeEnabled = enabled
+}
+
+func (e *Executor) applyPreferredShellEnv(ctx context.Context, env map[string]string) map[string]string {
+	if e.shellPrefs == nil {
+		return env
+	}
+	preferred, err := e.shellPrefs.PreferredShell(ctx)
+	if err != nil {
+		return env
+	}
+	preferred = strings.TrimSpace(preferred)
+	if preferred == "" {
+		return env
+	}
+	if env == nil {
+		env = make(map[string]string)
+	}
+	env["AGENTCTL_SHELL_COMMAND"] = preferred
+	env["SHELL"] = preferred
+	return env
 }
 
 // LoadActiveSessionsFromDB loads active agent sessions from the database into memory
@@ -353,6 +380,8 @@ func (e *Executor) ExecuteWithProfile(ctx context.Context, task *v1.Task, agentP
 		zap.String("task_id", task.ID),
 		zap.String("agent_profile_id", agentProfileID),
 		zap.Bool("use_worktree", req.UseWorktree))
+
+	req.Env = e.applyPreferredShellEnv(ctx, req.Env)
 
 	// Call the AgentManager to launch the container
 	resp, err := e.agentManager.LaunchAgent(ctx, req)
@@ -543,6 +572,8 @@ func (e *Executor) ResumeSession(ctx context.Context, task *v1.Task, session *mo
 		zap.String("agent_profile_id", session.AgentProfileID),
 		zap.String("acp_session_id", req.ACPSessionID),
 		zap.Bool("use_worktree", req.UseWorktree))
+
+	req.Env = e.applyPreferredShellEnv(ctx, req.Env)
 
 	resp, err := e.agentManager.LaunchAgent(ctx, req)
 	if err != nil {

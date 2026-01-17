@@ -116,6 +116,7 @@ func NewService(
 	agentManager executor.AgentManagerClient,
 	taskRepo scheduler.TaskRepository,
 	repo repository.Repository,
+	shellPrefs executor.ShellPreferenceProvider,
 	log *logger.Logger,
 ) *Service {
 	svcLogger := log.WithFields(zap.String("component", "orchestrator"))
@@ -127,6 +128,7 @@ func NewService(
 	execCfg := executor.ExecutorConfig{
 		MaxConcurrent:   cfg.Scheduler.MaxConcurrent,
 		WorktreeEnabled: cfg.WorktreeEnabled,
+		ShellPrefs:      shellPrefs,
 	}
 	exec := executor.NewExecutor(agentManager, repo, log, execCfg)
 

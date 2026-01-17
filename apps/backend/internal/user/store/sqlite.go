@@ -191,6 +191,7 @@ func (r *SQLiteRepository) UpsertUserSettings(ctx context.Context, settings *mod
 		"board_id":               settings.BoardID,
 		"repository_ids":         settings.RepositoryIDs,
 		"initial_setup_complete": settings.InitialSetupComplete,
+		"preferred_shell":        settings.PreferredShell,
 	})
 	if err != nil {
 		return err
@@ -233,6 +234,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		BoardID              string   `json:"board_id"`
 		RepositoryIDs        []string `json:"repository_ids"`
 		InitialSetupComplete bool     `json:"initial_setup_complete"`
+		PreferredShell       string   `json:"preferred_shell"`
 	}
 	if err := json.Unmarshal([]byte(settingsRaw), &payload); err != nil {
 		return nil, err
@@ -241,5 +243,6 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	settings.BoardID = payload.BoardID
 	settings.RepositoryIDs = payload.RepositoryIDs
 	settings.InitialSetupComplete = payload.InitialSetupComplete
+	settings.PreferredShell = payload.PreferredShell
 	return settings, nil
 }

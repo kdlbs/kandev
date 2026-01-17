@@ -418,7 +418,7 @@ func main() {
 	}
 
 	serviceCfg := orchestrator.DefaultServiceConfig()
-	orchestratorSvc := orchestrator.NewService(serviceCfg, eventBus, agentManagerClient, taskRepoAdapter, taskRepo, log)
+	orchestratorSvc := orchestrator.NewService(serviceCfg, eventBus, agentManagerClient, taskRepoAdapter, taskRepo, userSvc, log)
 	taskSvc.SetExecutionStopper(orchestratorSvc)
 
 	// Set up comment creator for saving agent responses as comments
