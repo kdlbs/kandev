@@ -36,6 +36,10 @@ type AgentExecution struct {
 	// agentctl client for this execution
 	agentctl *agentctl.Client
 
+	// Unified workspace stream for shell I/O, git status, and file changes
+	workspaceStream *agentctl.WorkspaceStream
+	workspaceStreamMu sync.RWMutex
+
 	// Standalone mode info (when not using Docker)
 	standaloneInstanceID string // Instance ID in standalone agentctl
 	standalonePort       int    // Port of the standalone execution
@@ -50,6 +54,20 @@ type AgentExecution struct {
 // GetAgentCtlClient returns the agentctl client for this execution
 func (ae *AgentExecution) GetAgentCtlClient() *agentctl.Client {
 	return ae.agentctl
+}
+
+// SetWorkspaceStream sets the unified workspace stream for this execution
+func (ae *AgentExecution) SetWorkspaceStream(ws *agentctl.WorkspaceStream) {
+	ae.workspaceStreamMu.Lock()
+	defer ae.workspaceStreamMu.Unlock()
+	ae.workspaceStream = ws
+}
+
+// GetWorkspaceStream returns the unified workspace stream for this execution
+func (ae *AgentExecution) GetWorkspaceStream() *agentctl.WorkspaceStream {
+	ae.workspaceStreamMu.RLock()
+	defer ae.workspaceStreamMu.RUnlock()
+	return ae.workspaceStream
 }
 
 // LaunchRequest contains parameters for launching an agent

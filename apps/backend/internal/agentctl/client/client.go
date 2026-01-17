@@ -23,12 +23,13 @@ type Client struct {
 	logger     *logger.Logger
 
 	// WebSocket connections for streaming
-	acpConn         *websocket.Conn
-	permissionConn  *websocket.Conn
-	gitStatusConn   *websocket.Conn
-	fileChangesConn *websocket.Conn
-	shellConn       *websocket.Conn
-	mu              sync.RWMutex
+	acpConn            *websocket.Conn
+	permissionConn     *websocket.Conn
+	gitStatusConn      *websocket.Conn
+	fileChangesConn    *websocket.Conn
+	shellConn          *websocket.Conn
+	workspaceStreamConn *websocket.Conn // Unified workspace stream
+	mu                 sync.RWMutex
 }
 
 // StatusResponse from agentctl
@@ -453,13 +454,14 @@ func (c *Client) CloseFileChangesStream() {
 	}
 }
 
-// Close closes all connections (ACP, permissions, git status, file changes, shell)
+// Close closes all connections (ACP, permissions, git status, file changes, shell, workspace stream)
 func (c *Client) Close() {
 	c.CloseACPStream()
 	c.ClosePermissionStream()
 	c.CloseGitStatusStream()
 	c.CloseFileChangesStream()
 	c.CloseShellStream()
+	c.CloseWorkspaceStream()
 }
 
 // ShellStatusResponse from agentctl shell status endpoint
@@ -613,4 +615,196 @@ func truncateBody(body []byte) string {
 		return string(body[:maxLen]) + "..."
 	}
 	return string(body)
+}
+
+// WorkspaceStreamCallbacks defines callbacks for workspace stream events
+type WorkspaceStreamCallbacks struct {
+	OnShellOutput func(data string)
+	OnShellExit   func(code int)
+	OnGitStatus   func(update *GitStatusUpdate)
+	OnFileChange  func(notification *FileChangeNotification)
+	OnFileList    func(update *FileListUpdate)
+	OnConnected   func()
+	OnError       func(err string)
+}
+
+// WorkspaceStreamMessage is re-exported from types for convenience
+type WorkspaceStreamMessage = types.WorkspaceStreamMessage
+
+// WorkspaceStream represents an active workspace stream connection
+type WorkspaceStream struct {
+	conn      *websocket.Conn
+	inputCh   chan types.WorkspaceStreamMessage
+	closeCh   chan struct{}
+	closeOnce sync.Once
+	logger    *logger.Logger
+}
+
+// StreamWorkspace opens a unified WebSocket connection for all workspace events.
+// This combines shell I/O, git status, and file changes into a single stream.
+func (c *Client) StreamWorkspace(ctx context.Context, callbacks WorkspaceStreamCallbacks) (*WorkspaceStream, error) {
+	c.mu.Lock()
+	if c.workspaceStreamConn != nil {
+		c.mu.Unlock()
+		return nil, fmt.Errorf("workspace stream already connected")
+	}
+
+	wsURL := "ws" + c.baseURL[4:] + "/api/v1/workspace/stream"
+	conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, nil)
+	if err != nil {
+		c.mu.Unlock()
+		return nil, fmt.Errorf("failed to connect to workspace stream: %w", err)
+	}
+	c.workspaceStreamConn = conn
+	c.mu.Unlock()
+
+	c.logger.Info("connected to unified workspace stream", zap.String("url", wsURL))
+
+	ws := &WorkspaceStream{
+		conn:    conn,
+		inputCh: make(chan types.WorkspaceStreamMessage, 64),
+		closeCh: make(chan struct{}),
+		logger:  c.logger,
+	}
+
+	// Read messages in a goroutine
+	go func() {
+		defer func() {
+			c.mu.Lock()
+			c.workspaceStreamConn = nil
+			c.mu.Unlock()
+			if err := conn.Close(); err != nil {
+				c.logger.Debug("failed to close workspace stream websocket", zap.Error(err))
+			}
+			ws.closeOnce.Do(func() { close(ws.closeCh) })
+		}()
+
+		for {
+			_, message, err := conn.ReadMessage()
+			if err != nil {
+				if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+					c.logger.Info("workspace stream closed normally")
+				} else {
+					c.logger.Debug("workspace stream error", zap.Error(err))
+				}
+				return
+			}
+
+			var msg types.WorkspaceStreamMessage
+			if err := json.Unmarshal(message, &msg); err != nil {
+				c.logger.Warn("failed to parse workspace stream message", zap.Error(err))
+				continue
+			}
+
+			// Route message to appropriate callback
+			switch msg.Type {
+			case types.WorkspaceMessageTypeShellOutput:
+				if callbacks.OnShellOutput != nil {
+					callbacks.OnShellOutput(msg.Data)
+				}
+			case types.WorkspaceMessageTypeShellExit:
+				if callbacks.OnShellExit != nil {
+					callbacks.OnShellExit(msg.Code)
+				}
+			case types.WorkspaceMessageTypeGitStatus:
+				if callbacks.OnGitStatus != nil && msg.GitStatus != nil {
+					callbacks.OnGitStatus(msg.GitStatus)
+				}
+			case types.WorkspaceMessageTypeFileChange:
+				if callbacks.OnFileChange != nil && msg.FileChange != nil {
+					callbacks.OnFileChange(msg.FileChange)
+				}
+			case types.WorkspaceMessageTypeFileList:
+				if callbacks.OnFileList != nil && msg.FileList != nil {
+					callbacks.OnFileList(msg.FileList)
+				}
+			case types.WorkspaceMessageTypeConnected:
+				if callbacks.OnConnected != nil {
+					callbacks.OnConnected()
+				}
+			case types.WorkspaceMessageTypeError:
+				if callbacks.OnError != nil {
+					callbacks.OnError(msg.Error)
+				}
+			}
+		}
+	}()
+
+	// Write messages in a goroutine
+	go func() {
+		for {
+			select {
+			case <-ws.closeCh:
+				return
+			case msg := <-ws.inputCh:
+				if err := conn.WriteJSON(msg); err != nil {
+					c.logger.Debug("workspace stream write error", zap.Error(err))
+					return
+				}
+			}
+		}
+	}()
+
+	return ws, nil
+}
+
+// WriteShellInput sends input to the shell through the workspace stream
+func (ws *WorkspaceStream) WriteShellInput(data string) error {
+	select {
+	case <-ws.closeCh:
+		return fmt.Errorf("workspace stream closed")
+	case ws.inputCh <- types.NewWorkspaceShellInput(data):
+		return nil
+	}
+}
+
+// ResizeShell sends a shell resize command through the workspace stream
+func (ws *WorkspaceStream) ResizeShell(cols, rows int) error {
+	msg := types.WorkspaceStreamMessage{
+		Type: types.WorkspaceMessageTypeShellResize,
+		Cols: cols,
+		Rows: rows,
+	}
+	select {
+	case <-ws.closeCh:
+		return fmt.Errorf("workspace stream closed")
+	case ws.inputCh <- msg:
+		return nil
+	}
+}
+
+// Ping sends a ping message through the workspace stream
+func (ws *WorkspaceStream) Ping() error {
+	msg := types.WorkspaceStreamMessage{
+		Type: types.WorkspaceMessageTypePing,
+	}
+	select {
+	case <-ws.closeCh:
+		return fmt.Errorf("workspace stream closed")
+	case ws.inputCh <- msg:
+		return nil
+	}
+}
+
+// Close closes the workspace stream
+func (ws *WorkspaceStream) Close() {
+	ws.closeOnce.Do(func() {
+		close(ws.closeCh)
+		if err := ws.conn.Close(); err != nil {
+			ws.logger.Debug("failed to close workspace stream", zap.Error(err))
+		}
+	})
+}
+
+// CloseWorkspaceStream closes the workspace stream connection
+func (c *Client) CloseWorkspaceStream() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.workspaceStreamConn != nil {
+		if err := c.workspaceStreamConn.Close(); err != nil {
+			c.logger.Debug("failed to close workspace stream", zap.Error(err))
+		}
+		c.workspaceStreamConn = nil
+	}
 }

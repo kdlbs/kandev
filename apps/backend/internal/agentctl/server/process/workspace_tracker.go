@@ -29,11 +29,15 @@ type WorkspaceTracker struct {
 	currentFiles  types.FileListUpdate
 	mu            sync.RWMutex
 
-	// Subscribers
+	// Subscribers (legacy - kept for backward compatibility)
 	gitStatusSubscribers   map[types.GitStatusSubscriber]struct{}
 	filesSubscribers       map[types.FilesSubscriber]struct{}
 	fileChangeSubscribers  map[types.FileChangeSubscriber]struct{}
 	subMu                  sync.RWMutex
+
+	// Unified workspace stream subscribers
+	workspaceStreamSubscribers map[types.WorkspaceStreamSubscriber]struct{}
+	workspaceSubMu             sync.RWMutex
 
 	// Filesystem watcher
 	watcher *fsnotify.Watcher
@@ -55,14 +59,15 @@ func NewWorkspaceTracker(workDir string, log *logger.Logger) *WorkspaceTracker {
 	}
 
 	return &WorkspaceTracker{
-		workDir:               workDir,
-		logger:                log.WithFields(zap.String("component", "workspace-tracker")),
-		gitStatusSubscribers:  make(map[types.GitStatusSubscriber]struct{}),
-		filesSubscribers:      make(map[types.FilesSubscriber]struct{}),
-		fileChangeSubscribers: make(map[types.FileChangeSubscriber]struct{}),
-		watcher:               watcher,
-		fsChangeTrigger:       make(chan struct{}, 1), // Buffered to avoid blocking
-		stopCh:                make(chan struct{}),
+		workDir:                    workDir,
+		logger:                     log.WithFields(zap.String("component", "workspace-tracker")),
+		gitStatusSubscribers:       make(map[types.GitStatusSubscriber]struct{}),
+		filesSubscribers:           make(map[types.FilesSubscriber]struct{}),
+		fileChangeSubscribers:      make(map[types.FileChangeSubscriber]struct{}),
+		workspaceStreamSubscribers: make(map[types.WorkspaceStreamSubscriber]struct{}),
+		watcher:                    watcher,
+		fsChangeTrigger:            make(chan struct{}, 1), // Buffered to avoid blocking
+		stopCh:                     make(chan struct{}),
 	}
 }
 
@@ -545,6 +550,9 @@ func (wt *WorkspaceTracker) notifyGitStatusSubscribers(update types.GitStatusUpd
 			// Subscriber is slow, skip
 		}
 	}
+
+	// Also notify unified workspace stream subscribers
+	wt.notifyWorkspaceStreamGitStatus(update)
 }
 
 // notifyFilesSubscribers notifies all files subscribers
@@ -559,6 +567,9 @@ func (wt *WorkspaceTracker) notifyFilesSubscribers(update types.FileListUpdate) 
 			// Subscriber is slow, skip
 		}
 	}
+
+	// Also notify unified workspace stream subscribers
+	wt.notifyWorkspaceStreamFileList(update)
 }
 
 
@@ -590,6 +601,114 @@ func (wt *WorkspaceTracker) notifyFileChangeSubscribers(notification types.FileC
 	for sub := range wt.fileChangeSubscribers {
 		select {
 		case sub <- notification:
+		default:
+			// Subscriber is slow, skip
+		}
+	}
+
+	// Also notify unified workspace stream subscribers
+	wt.notifyWorkspaceStreamFileChange(notification)
+}
+
+// Unified Workspace Stream subscriber methods
+
+// SubscribeWorkspaceStream creates a new unified workspace stream subscriber.
+// This subscriber receives all workspace events (git status, file changes, file list)
+// through a single channel.
+func (wt *WorkspaceTracker) SubscribeWorkspaceStream() types.WorkspaceStreamSubscriber {
+	sub := make(types.WorkspaceStreamSubscriber, 100)
+
+	wt.workspaceSubMu.Lock()
+	wt.workspaceStreamSubscribers[sub] = struct{}{}
+	wt.workspaceSubMu.Unlock()
+
+	// Send current git status immediately
+	wt.mu.RLock()
+	currentStatus := wt.currentStatus
+	currentFiles := wt.currentFiles
+	wt.mu.RUnlock()
+
+	// Send initial git status if available
+	if !currentStatus.Timestamp.IsZero() {
+		select {
+		case sub <- types.NewWorkspaceGitStatus(&currentStatus):
+		default:
+		}
+	}
+
+	// Send initial file list if available
+	if !currentFiles.Timestamp.IsZero() {
+		select {
+		case sub <- types.NewWorkspaceFileList(&currentFiles):
+		default:
+		}
+	}
+
+	return sub
+}
+
+// UnsubscribeWorkspaceStream removes a unified workspace stream subscriber
+func (wt *WorkspaceTracker) UnsubscribeWorkspaceStream(sub types.WorkspaceStreamSubscriber) {
+	wt.workspaceSubMu.Lock()
+	delete(wt.workspaceStreamSubscribers, sub)
+	wt.workspaceSubMu.Unlock()
+	close(sub)
+}
+
+// notifyWorkspaceStreamGitStatus notifies unified stream subscribers of git status update
+func (wt *WorkspaceTracker) notifyWorkspaceStreamGitStatus(update types.GitStatusUpdate) {
+	wt.workspaceSubMu.RLock()
+	defer wt.workspaceSubMu.RUnlock()
+
+	msg := types.NewWorkspaceGitStatus(&update)
+	for sub := range wt.workspaceStreamSubscribers {
+		select {
+		case sub <- msg:
+		default:
+			// Subscriber is slow, skip
+		}
+	}
+}
+
+// notifyWorkspaceStreamFileChange notifies unified stream subscribers of file change
+func (wt *WorkspaceTracker) notifyWorkspaceStreamFileChange(notification types.FileChangeNotification) {
+	wt.workspaceSubMu.RLock()
+	defer wt.workspaceSubMu.RUnlock()
+
+	msg := types.NewWorkspaceFileChange(&notification)
+	for sub := range wt.workspaceStreamSubscribers {
+		select {
+		case sub <- msg:
+		default:
+			// Subscriber is slow, skip
+		}
+	}
+}
+
+// notifyWorkspaceStreamFileList notifies unified stream subscribers of file list update
+func (wt *WorkspaceTracker) notifyWorkspaceStreamFileList(update types.FileListUpdate) {
+	wt.workspaceSubMu.RLock()
+	defer wt.workspaceSubMu.RUnlock()
+
+	msg := types.NewWorkspaceFileList(&update)
+	for sub := range wt.workspaceStreamSubscribers {
+		select {
+		case sub <- msg:
+		default:
+			// Subscriber is slow, skip
+		}
+	}
+}
+
+// NotifyWorkspaceStreamMessage sends a workspace message to all unified stream subscribers.
+// This is used by the API server to forward shell output to subscribers.
+func (wt *WorkspaceTracker) NotifyWorkspaceStreamMessage(msg types.WorkspaceStreamMessage) {
+	wt.workspaceSubMu.RLock()
+	defer wt.workspaceSubMu.RUnlock()
+
+	for sub := range wt.workspaceStreamSubscribers {
+		select {
+		case sub <- msg:
 		default:
 			// Subscriber is slow, skip
 		}

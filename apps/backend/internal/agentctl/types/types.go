@@ -149,3 +149,136 @@ type FilesSubscriber chan FileListUpdate
 // FileChangeSubscriber is a channel that receives file change notifications
 type FileChangeSubscriber chan FileChangeNotification
 
+// WorkspaceMessageType represents the type of workspace stream message
+type WorkspaceMessageType string
+
+const (
+	// Workspace stream message types
+	WorkspaceMessageTypeShellOutput   WorkspaceMessageType = "shell_output"
+	WorkspaceMessageTypeShellInput    WorkspaceMessageType = "shell_input"
+	WorkspaceMessageTypeShellExit     WorkspaceMessageType = "shell_exit"
+	WorkspaceMessageTypePing          WorkspaceMessageType = "ping"
+	WorkspaceMessageTypePong          WorkspaceMessageType = "pong"
+	WorkspaceMessageTypeGitStatus     WorkspaceMessageType = "git_status"
+	WorkspaceMessageTypeFileChange    WorkspaceMessageType = "file_change"
+	WorkspaceMessageTypeFileList      WorkspaceMessageType = "file_list"
+	WorkspaceMessageTypeError         WorkspaceMessageType = "error"
+	WorkspaceMessageTypeConnected     WorkspaceMessageType = "connected"
+	WorkspaceMessageTypeShellResize   WorkspaceMessageType = "shell_resize"
+)
+
+// WorkspaceStreamMessage is the unified message format for the workspace stream.
+// It carries all workspace events (shell I/O, git status, file changes) with
+// message type differentiation.
+type WorkspaceStreamMessage struct {
+	Type      WorkspaceMessageType `json:"type"`
+	Timestamp int64                `json:"timestamp"` // Unix milliseconds
+
+	// Shell fields (for shell_output, shell_input, shell_exit)
+	Data string `json:"data,omitempty"` // Shell output or input data
+	Code int    `json:"code,omitempty"` // Exit code for shell_exit
+
+	// Shell resize fields (for shell_resize)
+	Cols int `json:"cols,omitempty"`
+	Rows int `json:"rows,omitempty"`
+
+	// Git status fields (for git_status)
+	GitStatus *GitStatusUpdate `json:"git_status,omitempty"`
+
+	// File change fields (for file_change)
+	FileChange *FileChangeNotification `json:"file_change,omitempty"`
+
+	// File list fields (for file_list)
+	FileList *FileListUpdate `json:"file_list,omitempty"`
+
+	// Error fields (for error)
+	Error string `json:"error,omitempty"`
+}
+
+// NewWorkspaceShellOutput creates a shell output message
+func NewWorkspaceShellOutput(data string) WorkspaceStreamMessage {
+	return WorkspaceStreamMessage{
+		Type:      WorkspaceMessageTypeShellOutput,
+		Timestamp: timeNowUnixMilli(),
+		Data:      data,
+	}
+}
+
+// NewWorkspaceShellInput creates a shell input message
+func NewWorkspaceShellInput(data string) WorkspaceStreamMessage {
+	return WorkspaceStreamMessage{
+		Type:      WorkspaceMessageTypeShellInput,
+		Timestamp: timeNowUnixMilli(),
+		Data:      data,
+	}
+}
+
+// NewWorkspaceShellExit creates a shell exit message
+func NewWorkspaceShellExit(code int) WorkspaceStreamMessage {
+	return WorkspaceStreamMessage{
+		Type:      WorkspaceMessageTypeShellExit,
+		Timestamp: timeNowUnixMilli(),
+		Code:      code,
+	}
+}
+
+// NewWorkspaceGitStatus creates a git status message
+func NewWorkspaceGitStatus(status *GitStatusUpdate) WorkspaceStreamMessage {
+	return WorkspaceStreamMessage{
+		Type:      WorkspaceMessageTypeGitStatus,
+		Timestamp: timeNowUnixMilli(),
+		GitStatus: status,
+	}
+}
+
+// NewWorkspaceFileChange creates a file change message
+func NewWorkspaceFileChange(notification *FileChangeNotification) WorkspaceStreamMessage {
+	return WorkspaceStreamMessage{
+		Type:       WorkspaceMessageTypeFileChange,
+		Timestamp:  timeNowUnixMilli(),
+		FileChange: notification,
+	}
+}
+
+// NewWorkspaceFileList creates a file list message
+func NewWorkspaceFileList(update *FileListUpdate) WorkspaceStreamMessage {
+	return WorkspaceStreamMessage{
+		Type:      WorkspaceMessageTypeFileList,
+		Timestamp: timeNowUnixMilli(),
+		FileList:  update,
+	}
+}
+
+// NewWorkspacePong creates a pong message
+func NewWorkspacePong() WorkspaceStreamMessage {
+	return WorkspaceStreamMessage{
+		Type:      WorkspaceMessageTypePong,
+		Timestamp: timeNowUnixMilli(),
+	}
+}
+
+// NewWorkspaceConnected creates a connected message
+func NewWorkspaceConnected() WorkspaceStreamMessage {
+	return WorkspaceStreamMessage{
+		Type:      WorkspaceMessageTypeConnected,
+		Timestamp: timeNowUnixMilli(),
+	}
+}
+
+// NewWorkspaceError creates an error message
+func NewWorkspaceError(err string) WorkspaceStreamMessage {
+	return WorkspaceStreamMessage{
+		Type:      WorkspaceMessageTypeError,
+		Timestamp: timeNowUnixMilli(),
+		Error:     err,
+	}
+}
+
+// WorkspaceStreamSubscriber is a channel that receives unified workspace messages
+type WorkspaceStreamSubscriber chan WorkspaceStreamMessage
+
+// timeNowUnixMilli returns current time in unix milliseconds
+func timeNowUnixMilli() int64 {
+	return time.Now().UnixMilli()
+}
+

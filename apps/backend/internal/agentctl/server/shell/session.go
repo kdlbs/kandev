@@ -234,6 +234,21 @@ func (s *Session) Write(data []byte) (int, error) {
 	return s.pty.Write(data)
 }
 
+// Resize changes the terminal size
+func (s *Session) Resize(cols, rows int) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if !s.running || s.pty == nil {
+		return fmt.Errorf("shell not running")
+	}
+
+	return pty.Setsize(s.pty, &pty.Winsize{
+		Cols: uint16(cols),
+		Rows: uint16(rows),
+	})
+}
+
 // Subscribe adds a subscriber for shell output
 func (s *Session) Subscribe(ch chan<- []byte) {
 	s.subMu.Lock()

@@ -203,3 +203,121 @@ func mustParseInt(s string) int {
 	}
 	return n
 }
+
+// handleWorkspaceStreamWS handles the unified workspace stream WebSocket endpoint.
+// This consolidates all workspace streams (shell I/O, git status, file changes)
+// into a single bidirectional WebSocket connection.
+func (s *Server) handleWorkspaceStreamWS(c *gin.Context) {
+	conn, err := s.upgrader.Upgrade(c.Writer, c.Request, nil)
+	if err != nil {
+		s.logger.Error("WebSocket upgrade failed", zap.Error(err))
+		return
+	}
+	defer func() {
+		if err := conn.Close(); err != nil {
+			s.logger.Debug("failed to close workspace stream websocket", zap.Error(err))
+		}
+	}()
+
+	s.logger.Info("Unified workspace stream WebSocket connected")
+
+	// Subscribe to unified workspace updates
+	workspaceSub := s.procMgr.GetWorkspaceTracker().SubscribeWorkspaceStream()
+	defer s.procMgr.GetWorkspaceTracker().UnsubscribeWorkspaceStream(workspaceSub)
+
+	// Also subscribe to shell output if available
+	shell := s.procMgr.Shell()
+	var shellOutputCh chan []byte
+	if shell != nil {
+		shellOutputCh = make(chan []byte, 256)
+		shell.Subscribe(shellOutputCh)
+		defer shell.Unsubscribe(shellOutputCh)
+	}
+
+	// Send connected message
+	if err := conn.WriteJSON(types.NewWorkspaceConnected()); err != nil {
+		s.logger.Debug("workspace stream write error", zap.Error(err))
+		return
+	}
+
+	// Done channel to signal goroutine shutdown
+	done := make(chan struct{})
+	defer close(done)
+
+	// Read input from WebSocket (for shell input and other commands)
+	go s.handleWorkspaceStreamInput(conn, done, shell)
+
+	// Write output from all sources to WebSocket
+	for {
+		select {
+		case <-done:
+			return
+
+		case msg, ok := <-workspaceSub:
+			if !ok {
+				return
+			}
+			if err := conn.WriteJSON(msg); err != nil {
+				s.logger.Debug("workspace stream write error", zap.Error(err))
+				return
+			}
+
+		case data, ok := <-shellOutputCh:
+			if !ok {
+				// Shell output channel closed, continue without shell
+				shellOutputCh = nil
+				continue
+			}
+			msg := types.NewWorkspaceShellOutput(string(data))
+			if err := conn.WriteJSON(msg); err != nil {
+				s.logger.Debug("workspace stream write error", zap.Error(err))
+				return
+			}
+		}
+	}
+}
+
+// handleWorkspaceStreamInput handles incoming messages from the workspace stream WebSocket
+func (s *Server) handleWorkspaceStreamInput(conn *websocket.Conn, done chan struct{}, shell interface {
+	Write([]byte) (int, error)
+	Resize(cols, rows int) error
+}) {
+	for {
+		select {
+		case <-done:
+			return
+		default:
+			var msg types.WorkspaceStreamMessage
+			if err := conn.ReadJSON(&msg); err != nil {
+				if !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+					s.logger.Debug("workspace stream read error", zap.Error(err))
+				}
+				close(done)
+				return
+			}
+
+			switch msg.Type {
+			case types.WorkspaceMessageTypeShellInput:
+				if shell != nil && msg.Data != "" {
+					if _, err := shell.Write([]byte(msg.Data)); err != nil {
+						s.logger.Debug("shell write error", zap.Error(err))
+					}
+				}
+
+			case types.WorkspaceMessageTypeShellResize:
+				if shell != nil && msg.Cols > 0 && msg.Rows > 0 {
+					if err := shell.Resize(msg.Cols, msg.Rows); err != nil {
+						s.logger.Debug("shell resize error", zap.Error(err))
+					}
+				}
+
+			case types.WorkspaceMessageTypePing:
+				// Respond with pong
+				if err := conn.WriteJSON(types.NewWorkspacePong()); err != nil {
+					s.logger.Debug("workspace stream pong write error", zap.Error(err))
+					return
+				}
+			}
+		}
+	}
+}

@@ -76,16 +76,19 @@ func (s *Server) setupRoutes() {
 		api.GET("/acp/permissions/stream", s.handlePermissionStreamWS)
 		api.POST("/acp/permissions/respond", s.handlePermissionRespond)
 
-		// Workspace monitoring (git status, files)
+		// Workspace monitoring (git status, files) - legacy endpoints
 		api.GET("/workspace/git-status/stream", s.handleGitStatusStreamWS)
 		api.GET("/workspace/files/stream", s.handleFilesStreamWS)
 		api.GET("/workspace/file-changes/stream", s.handleFileChangesStreamWS)
+
+		// Unified workspace stream - combines shell, git status, and file changes
+		api.GET("/workspace/stream", s.handleWorkspaceStreamWS)
 
 		// Workspace file operations (simple HTTP)
 		api.GET("/workspace/tree", s.handleFileTree)
 		api.GET("/workspace/file/content", s.handleFileContent)
 
-		// Shell access
+		// Shell access - legacy endpoints
 		api.GET("/shell/status", s.handleShellStatus)
 		api.GET("/shell/stream", s.handleShellStreamWS)
 		api.GET("/shell/buffer", s.handleShellBuffer)
