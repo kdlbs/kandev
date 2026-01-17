@@ -1,0 +1,37 @@
+---
+title: "kandev.ai Launch"
+date: "2026-01-17"
+surface: "Platform"
+summary:
+  - "kandev.ai ships a WebSocket-first Kanban + AI agent workflow for developer teams."
+  - "Tasks run inside isolated git worktrees and Docker containers with approval gates."
+---
+
+## What is kandev.ai?
+
+kandev.ai is a Kanban-native development platform that pairs task management with AI agents. Every task can be executed by an agent in a clean, isolated environment, while you keep control over approvals and merge decisions.
+
+![kandev launch overview](/changelog/2026-01-17-launch/launch-hero.svg)
+
+## Initial launch features
+
+- **Kanban boards for engineering work** with task metadata, priorities, and agent selection.
+- **Isolated git worktrees** so parallel tasks never collide.
+- **Docker-based execution** for secure, repeatable runs.
+- **Agent control plane** via `agentctl` with start/stop/status and ACP relays.
+- **WebSocket-only client API** for real-time orchestration and updates.
+- **Approval gates** for sensitive paths and commands.
+
+## How it works (high level)
+
+1. The client opens a single WebSocket connection to the backend.
+2. The backend spins up an agent container with `agentctl` as a sidecar.
+3. The backend initializes ACP over stdin/stdout and creates a session.
+4. The task prompt is streamed to the agent and progress events flow back in real time.
+5. Results are reviewed, approved, and merged back into the main branch.
+
+![High-level flow](/changelog/2026-01-17-launch/high-level-flow.svg)
+
+### What’s next
+
+Expect expanded agent types, richer approvals, and deeper task analytics in upcoming releases.

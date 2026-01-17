@@ -29,34 +29,13 @@ const sections = [
       { title: 'Docker Execution', href: '/docs/docker' },
     ],
   },
-  {
-    title: 'Integrations',
-    items: [
-      { title: 'MCP Servers', href: '/docs/mcp' },
-      { title: 'GitHub', href: '/docs/github' },
-    ],
-  },
-  {
-    title: 'Security',
-    items: [
-      { title: 'Approval Workflows', href: '/docs/approvals' },
-      { title: 'Audit Logs', href: '/docs/audit-logs' },
-    ],
-  },
-  {
-    title: 'Advanced',
-    items: [
-      { title: 'Configuration', href: '/docs/configuration' },
-      { title: 'CLI Reference', href: '/docs/cli' },
-    ],
-  },
 ];
 
 export function DocsSidebar() {
   const pathname = usePathname();
 
   return (
-    <aside className="sticky top-14 h-[calc(100vh-3.5rem)] w-64 shrink-0 overflow-y-auto border-r border-border py-8 pr-6">
+    <aside className="sticky top-22 h-[calc(100vh-3.5rem)] w-64 shrink-0 overflow-y-auto border-r border-border py-8 pr-6">
       <nav className="space-y-6">
         {sections.map((section) => (
           <div key={section.title}>
