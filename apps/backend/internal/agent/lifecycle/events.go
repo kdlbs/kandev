@@ -308,6 +308,7 @@ func (p *EventPublisher) PublishToolCallComplete(execution *AgentExecution, upda
 }
 
 // PublishPermissionRequest publishes a permission request event.
+// The event is structured as a protocol.Message so it can be parsed by the watcher.
 func (p *EventPublisher) PublishPermissionRequest(execution *AgentExecution, notification *agentctl.PermissionNotification) {
 	if p.eventBus == nil {
 		return
@@ -323,17 +324,25 @@ func (p *EventPublisher) PublishPermissionRequest(execution *AgentExecution, not
 		}
 	}
 
+	// Build payload data (goes into msg.Data when parsed as protocol.Message)
+	payloadData := map[string]interface{}{
+		"pending_id":     notification.PendingID,
+		"session_id":     notification.SessionID,
+		"tool_call_id":   notification.ToolCallID,
+		"title":          notification.Title,
+		"options":        options,
+		"action_type":    notification.ActionType,
+		"action_details": notification.ActionDetails,
+		"created_at":     notification.CreatedAt,
+	}
+
+	// Structure as protocol.Message so watcher can parse it correctly
 	data := map[string]interface{}{
-		"type":              "permission_request",
-		"task_id":           execution.TaskID,
-		"agent_instance_id": execution.ID,
-		"pending_id":        notification.PendingID,
-		"session_id":        notification.SessionID,
-		"tool_call_id":      notification.ToolCallID,
-		"title":             notification.Title,
-		"options":           options,
-		"created_at":        notification.CreatedAt,
-		"timestamp":         time.Now().UTC().Format(time.RFC3339),
+		"type":      "permission_request",
+		"timestamp": time.Now().UTC().Format(time.RFC3339Nano),
+		"agent_id":  execution.ID,
+		"task_id":   execution.TaskID,
+		"data":      payloadData,
 	}
 
 	event := bus.NewEvent(events.ACPMessage, "agent-manager", data)
@@ -345,7 +354,7 @@ func (p *EventPublisher) PublishPermissionRequest(execution *AgentExecution, not
 			zap.String("task_id", execution.TaskID),
 			zap.Error(err))
 	} else {
-		p.logger.Info("published permission_request event",
+		p.logger.Debug("published permission_request event",
 			zap.String("task_id", execution.TaskID),
 			zap.String("pending_id", notification.PendingID),
 			zap.String("title", notification.Title))

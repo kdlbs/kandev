@@ -261,9 +261,8 @@ func main() {
 		log.Info("Starting agentctl for standalone mode...")
 
 		agentctlLauncher = launcher.New(launcher.Config{
-			Host:                   cfg.Agent.StandaloneHost,
-			Port:                   cfg.Agent.StandalonePort,
-			AutoApprovePermissions: true, // Always auto-approve in standalone mode (reindex, etc.)
+			Host: cfg.Agent.StandaloneHost,
+			Port: cfg.Agent.StandalonePort,
 		}, log)
 
 		if err := agentctlLauncher.Start(ctx); err != nil {
@@ -555,6 +554,41 @@ func main() {
 	})
 	log.Info("Historical logs provider configured for task subscriptions (using messages and git status)")
 
+	// Set up pending permissions provider for task subscriptions
+	gateway.Hub.SetPendingPermissionsProvider(func(ctx context.Context, taskID string) ([]*ws.Message, error) {
+		if lifecycleMgr == nil {
+			return nil, nil
+		}
+		permissions, err := lifecycleMgr.GetPendingPermissionsForTask(ctx, taskID)
+		if err != nil {
+			return nil, err
+		}
+
+		result := make([]*ws.Message, 0, len(permissions))
+		for _, p := range permissions {
+			// Build payload matching the permission.requested format
+			payload := map[string]interface{}{
+				"type":           "permission_request",
+				"task_id":        taskID,
+				"pending_id":     p.PendingID,
+				"session_id":     p.SessionID,
+				"tool_call_id":   p.ToolCallID,
+				"title":          p.Title,
+				"options":        p.Options,
+				"action_type":    p.ActionType,
+				"action_details": p.ActionDetails,
+				"created_at":     p.CreatedAt.Format(time.RFC3339),
+			}
+			notification, err := ws.NewNotification(ws.ActionPermissionRequested, payload)
+			if err != nil {
+				continue
+			}
+			result = append(result, notification)
+		}
+		return result, nil
+	})
+	log.Info("Pending permissions provider configured for task subscriptions")
+
 	// NOTE: We no longer create comments for each ACP message chunk.
 	// Instead, the lifecycle manager accumulates message chunks and:
 	// 1. Flushes the buffer as a comment when a tool use starts (step boundary)
@@ -563,6 +597,28 @@ func main() {
 
 	// Wire ACP handler to broadcast to WebSocket clients as notifications
 	orchestratorSvc.RegisterACPHandler(func(taskID string, msg *protocol.Message) {
+		// Check for permission_request events (type is in msg.Type, payload in msg.Data)
+		if msg.Type == "permission_request" {
+			// Build payload for frontend with all necessary fields
+			payload := map[string]interface{}{
+				"type":              "permission_request",
+				"task_id":           taskID,
+				"agent_instance_id": msg.AgentID,
+				"timestamp":         msg.Timestamp,
+			}
+			// Copy all fields from msg.Data (pending_id, options, action_type, etc.)
+			for k, v := range msg.Data {
+				payload[k] = v
+			}
+			// Broadcast permission.requested notification to task subscribers
+			notification, _ := ws.NewNotification(ws.ActionPermissionRequested, payload)
+			gateway.Hub.BroadcastToTask(taskID, notification)
+			log.Info("broadcasted permission.requested notification",
+				zap.String("task_id", taskID),
+				zap.Any("pending_id", payload["pending_id"]))
+			return
+		}
+
 		// Only broadcast message types that the frontend handles
 		// Skip internal message types like session/update
 		switch msg.Type {

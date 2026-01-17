@@ -40,6 +40,9 @@ type AgentTypeConfig struct {
 
 	// Session resumption configuration
 	SessionConfig SessionConfig `json:"session_config,omitempty"` // How to handle session resumption
+
+	// Permission configuration
+	PermissionConfig PermissionConfig `json:"permission_config,omitempty"` // How to handle tool permissions
 }
 
 // SessionConfig defines how session resumption is handled for an agent type
@@ -60,6 +63,19 @@ type SessionConfig struct {
 	// SessionDirTarget is the container path where the session directory is mounted.
 	// Example: "/root/.augment/sessions" for auggie.
 	SessionDirTarget string `json:"session_dir_target,omitempty"`
+}
+
+// PermissionConfig defines how tool permissions are requested for an agent type
+type PermissionConfig struct {
+	// PermissionFlag is the CLI flag format for requesting tool permissions.
+	// Example: "--permission" for auggie (used as "--permission tool:ask-user").
+	// If empty, the agent doesn't support CLI-based permission configuration.
+	PermissionFlag string `json:"permission_flag,omitempty"`
+
+	// ToolsRequiringPermission lists tools that should require user permission.
+	// When AutoApprove is false, these tools will be configured to ask for permission.
+	// Example: ["launch-process", "save-file", "str-replace-editor", "remove-files"]
+	ToolsRequiringPermission []string `json:"tools_requiring_permission,omitempty"`
 }
 
 // MountTemplate defines a mount with template support

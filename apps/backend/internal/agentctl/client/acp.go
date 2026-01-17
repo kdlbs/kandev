@@ -276,12 +276,14 @@ type PermissionOption struct {
 
 // PermissionNotification is received when the agent requests permission
 type PermissionNotification struct {
-	PendingID  string             `json:"pending_id"`
-	SessionID  string             `json:"session_id"`
-	ToolCallID string             `json:"tool_call_id"`
-	Title      string             `json:"title"`
-	Options    []PermissionOption `json:"options"`
-	CreatedAt  time.Time          `json:"created_at"`
+	PendingID     string                 `json:"pending_id"`
+	SessionID     string                 `json:"session_id"`
+	ToolCallID    string                 `json:"tool_call_id"`
+	Title         string                 `json:"title"`
+	Options       []PermissionOption     `json:"options"`
+	ActionType    string                 `json:"action_type,omitempty"`    // command, file_write, file_read, network, mcp_tool, other
+	ActionDetails map[string]interface{} `json:"action_details,omitempty"` // Additional details about the action
+	CreatedAt     time.Time              `json:"created_at"`
 }
 
 // PermissionResponse is the user's response to a permission request
@@ -474,4 +476,37 @@ func (c *Client) RespondToPermission(ctx context.Context, pendingID, optionID st
 		return fmt.Errorf("permission response failed: %s", result.Error)
 	}
 	return nil
+}
+
+// GetPendingPermissions retrieves all pending permission requests from agentctl
+func (c *Client) GetPendingPermissions(ctx context.Context) ([]PermissionNotification, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/api/v1/acp/permissions", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			c.logger.Debug("failed to close permissions response body", zap.Error(err))
+		}
+	}()
+
+	respBody, err := readResponseBody(resp)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("get pending permissions failed with status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var result []PermissionNotification
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse permissions response: %w", err)
+	}
+	return result, nil
 }

@@ -46,12 +46,14 @@ type PendingPermission struct {
 
 // PermissionNotification is sent when the agent requests permission
 type PermissionNotification struct {
-	PendingID  string                   `json:"pending_id"`
-	SessionID  string                   `json:"session_id"`
-	ToolCallID string                   `json:"tool_call_id"`
-	Title      string                   `json:"title"`
-	Options    []adapter.PermissionOption `json:"options"`
-	CreatedAt  time.Time                `json:"created_at"`
+	PendingID     string                     `json:"pending_id"`
+	SessionID     string                     `json:"session_id"`
+	ToolCallID    string                     `json:"tool_call_id"`
+	Title         string                     `json:"title"`
+	Options       []adapter.PermissionOption `json:"options"`
+	ActionType    string                     `json:"action_type,omitempty"`
+	ActionDetails map[string]interface{}     `json:"action_details,omitempty"`
+	CreatedAt     time.Time                  `json:"created_at"`
 }
 
 // Manager manages the agent subprocess
@@ -281,8 +283,9 @@ func (m *Manager) createAdapter() error {
 	}
 
 	adapterCfg := &adapter.Config{
-		WorkDir:     m.cfg.WorkDir,
-		AutoApprove: m.cfg.AutoApprovePermissions,
+		WorkDir:        m.cfg.WorkDir,
+		AutoApprove:    m.cfg.AutoApprovePermissions,
+		ApprovalPolicy: m.cfg.ApprovalPolicy,
 	}
 
 	switch protocol {
@@ -567,17 +570,20 @@ func (m *Manager) autoApprovePermission(req *adapter.PermissionRequest) (*adapte
 // sendPermissionNotification sends a permission request notification to the backend
 func (m *Manager) sendPermissionNotification(pending *PendingPermission) {
 	notification := &PermissionNotification{
-		PendingID:  pending.ID,
-		SessionID:  pending.Request.SessionID,
-		ToolCallID: pending.Request.ToolCallID,
-		Title:      pending.Request.Title,
-		Options:    pending.Request.Options,
-		CreatedAt:  pending.CreatedAt,
+		PendingID:     pending.ID,
+		SessionID:     pending.Request.SessionID,
+		ToolCallID:    pending.Request.ToolCallID,
+		Title:         pending.Request.Title,
+		Options:       pending.Request.Options,
+		ActionType:    pending.Request.ActionType,
+		ActionDetails: pending.Request.ActionDetails,
+		CreatedAt:     pending.CreatedAt,
 	}
 
 	m.logger.Info("sending permission notification to backend",
 		zap.String("pending_id", pending.ID),
-		zap.String("title", pending.Request.Title))
+		zap.String("title", pending.Request.Title),
+		zap.String("action_type", pending.Request.ActionType))
 
 	select {
 	case m.permissionCh <- notification:

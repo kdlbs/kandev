@@ -141,10 +141,26 @@ func (a *CodexAdapter) NewSession(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("adapter not initialized")
 	}
 
+	// Determine approval policy - default to "untrusted" if not specified.
+	// "untrusted" forces Codex to request approval for all commands/writes.
+	// Other options: "on-failure", "on-request", "never"
+	approvalPolicy := a.cfg.ApprovalPolicy
+	if approvalPolicy == "" {
+		approvalPolicy = "untrusted"
+	}
+
+	a.logger.Info("starting codex thread with approval policy",
+		zap.String("approval_policy", approvalPolicy),
+		zap.String("work_dir", a.cfg.WorkDir))
+
 	resp, err := client.Call(ctx, codex.MethodThreadStart, &codex.ThreadStartParams{
 		Cwd:            a.cfg.WorkDir,
-		ApprovalPolicy: "never",              // Valid values: untrusted, on-failure, on-request, never
-		Sandbox:        "danger-full-access", // Disable sandbox to avoid landlock permission issues
+		ApprovalPolicy: approvalPolicy, // "untrusted", "on-failure", "on-request", "never"
+		SandboxPolicy: &codex.SandboxPolicy{
+			Type:          "workspaceWrite",        // Sandbox to workspace only
+			WritableRoots: []string{a.cfg.WorkDir}, // Allow writing to workspace
+			NetworkAccess: true,
+		},
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to start thread: %w", err)
@@ -567,9 +583,12 @@ func (a *CodexAdapter) handleNotification(method string, params json.RawMessage)
 
 // handleRequest processes Codex requests (approval requests) and calls permissionHandler.
 func (a *CodexAdapter) handleRequest(id interface{}, method string, params json.RawMessage) {
+	a.logger.Debug("codex: received request",
+		zap.Any("id", id),
+		zap.String("method", method))
+
 	a.mu.RLock()
 	handler := a.permissionHandler
-	threadID := a.threadID
 	a.mu.RUnlock()
 
 	switch method {
@@ -582,7 +601,7 @@ func (a *CodexAdapter) handleRequest(id interface{}, method string, params json.
 			}
 			return
 		}
-		a.handleApprovalRequest(id, handler, threadID, p.ItemID, types.ActionTypeCommand, p.Command, map[string]interface{}{
+		a.handleApprovalRequest(id, handler, p.ThreadID, p.ItemID, types.ActionTypeCommand, p.Command, map[string]interface{}{
 			"command":   p.Command,
 			"cwd":       p.Cwd,
 			"reasoning": p.Reasoning,
@@ -597,7 +616,7 @@ func (a *CodexAdapter) handleRequest(id interface{}, method string, params json.
 			}
 			return
 		}
-		a.handleApprovalRequest(id, handler, threadID, p.ItemID, types.ActionTypeFileWrite, p.Path, map[string]interface{}{
+		a.handleApprovalRequest(id, handler, p.ThreadID, p.ItemID, types.ActionTypeFileWrite, p.Path, map[string]interface{}{
 			"path":      p.Path,
 			"diff":      p.Diff,
 			"reasoning": p.Reasoning,
@@ -615,7 +634,7 @@ func (a *CodexAdapter) handleRequest(id interface{}, method string, params json.
 func (a *CodexAdapter) handleApprovalRequest(
 	id interface{},
 	handler PermissionHandler,
-	sessionID string,
+	threadID string,
 	itemID string,
 	actionType string,
 	title string,
@@ -648,7 +667,7 @@ func (a *CodexAdapter) handleApprovalRequest(
 	}
 
 	req := &PermissionRequest{
-		SessionID:     sessionID,
+		SessionID:     threadID,
 		ToolCallID:    itemID,
 		Title:         title,
 		Options:       options,
@@ -658,39 +677,49 @@ func (a *CodexAdapter) handleApprovalRequest(
 
 	if handler == nil {
 		// Auto-approve if no handler
-		a.logger.Info("auto-approving request (no handler)", zap.String("item_id", itemID))
-		if err := a.client.SendResponse(id, &codex.ApprovalResponse{
-			ItemID:   itemID,
-			Decision: "approve",
+		if err := a.client.SendResponse(id, &codex.CommandApprovalResponse{
+			Decision: "accept",
 		}, nil); err != nil {
 			a.logger.Warn("failed to send approval response", zap.Error(err))
 		}
 		return
 	}
 
-	// Call the permission handler
 	ctx := context.Background()
 	resp, err := handler(ctx, req)
 	if err != nil {
 		a.logger.Error("permission handler error", zap.Error(err))
-		if err := a.client.SendResponse(id, &codex.ApprovalResponse{
-			ItemID:   itemID,
-			Decision: "reject",
+		if err := a.client.SendResponse(id, &codex.CommandApprovalResponse{
+			Decision: "decline",
 		}, nil); err != nil {
-			a.logger.Warn("failed to send reject response", zap.Error(err))
+			a.logger.Warn("failed to send decline response", zap.Error(err))
 		}
 		return
 	}
 
-	decision := "approve"
+	// Map frontend option to Codex decision
+	// Codex accepts: "accept", "acceptForSession", "decline", "cancel"
+	decision := "accept"
 	if resp.Cancelled {
-		decision = "reject"
-	} else if resp.OptionID != "" {
-		decision = resp.OptionID
+		decision = "cancel"
+	} else {
+		switch resp.OptionID {
+		case "approve", "allow", "accept":
+			decision = "accept"
+		case "approveAlways", "allowAlways", "acceptForSession":
+			decision = "acceptForSession"
+		case "reject", "deny", "decline":
+			decision = "decline"
+		case "cancel":
+			decision = "cancel"
+		default:
+			if resp.OptionID != "" {
+				decision = resp.OptionID
+			}
+		}
 	}
 
-	if err := a.client.SendResponse(id, &codex.ApprovalResponse{
-		ItemID:   itemID,
+	if err := a.client.SendResponse(id, &codex.CommandApprovalResponse{
 		Decision: decision,
 	}, nil); err != nil {
 		a.logger.Warn("failed to send approval response", zap.Error(err))

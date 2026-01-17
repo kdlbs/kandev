@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import {
   IconCheck,
   IconChevronDown,
@@ -14,9 +14,12 @@ import {
   IconTerminal2,
   IconX,
 } from '@tabler/icons-react';
+import { Button } from '@kandev/ui/button';
 import { cn } from '@/lib/utils';
 import type { Message } from '@/lib/types/http';
 import type { ToolCallMetadata } from '@/components/task/chat/types';
+import { useAppStore } from '@/components/state-provider';
+import { getWebSocketClient } from '@/lib/ws/connection';
 
 function getToolIcon(toolName: string | undefined, className: string) {
   const name = toolName?.toLowerCase() ?? '';
@@ -51,15 +54,79 @@ function getStatusIcon(status?: string) {
   }
 }
 
-export function ToolCallMessage({ comment }: { comment: Message }) {
-  const [isExpanded, setIsExpanded] = useState(false);
-  const metadata = comment.metadata as ToolCallMetadata | undefined;
+type ToolCallMessageProps = {
+  comment: Message;
+  taskId?: string;
+};
 
+export function ToolCallMessage({ comment, taskId }: ToolCallMessageProps) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [isResponding, setIsResponding] = useState(false);
+  const metadata = comment.metadata as ToolCallMetadata | undefined;
+  const pendingPermissions = useAppStore((state) => state.permissions.pending);
+  const removePendingPermission = useAppStore((state) => state.removePendingPermission);
+
+  const toolCallId = metadata?.tool_call_id;
   const toolName = metadata?.tool_name ?? '';
   const title = metadata?.title ?? comment.content ?? 'Tool call';
   const status = metadata?.status;
   const args = metadata?.args;
   const result = metadata?.result;
+
+  // Find pending permission for this tool call (only if we have a valid tool_call_id)
+  const pendingPermission = pendingPermissions.find(
+    (p) => toolCallId && p.tool_call_id === toolCallId && (!taskId || p.task_id === taskId)
+  );
+  const isPendingApproval = !!pendingPermission;
+
+  const handleRespond = useCallback(
+    async (optionId: string, cancelled: boolean = false) => {
+      if (!pendingPermission) return;
+      setIsResponding(true);
+
+      const client = getWebSocketClient();
+      if (!client) {
+        console.error('WebSocket client not available');
+        setIsResponding(false);
+        return;
+      }
+
+      try {
+        await client.request('permission.respond', {
+          task_id: pendingPermission.task_id,
+          pending_id: pendingPermission.pending_id,
+          option_id: cancelled ? undefined : optionId,
+          cancelled,
+        });
+        removePendingPermission(pendingPermission.pending_id);
+      } catch (error) {
+        console.error('Failed to respond to permission request:', error);
+      } finally {
+        setIsResponding(false);
+      }
+    },
+    [pendingPermission, removePendingPermission]
+  );
+
+  const handleApprove = useCallback(() => {
+    const allowOption = pendingPermission?.options.find(
+      (opt) => opt.kind === 'allow_once' || opt.kind === 'allow_always'
+    );
+    if (allowOption) {
+      handleRespond(allowOption.option_id);
+    }
+  }, [pendingPermission, handleRespond]);
+
+  const handleReject = useCallback(() => {
+    const rejectOption = pendingPermission?.options.find(
+      (opt) => opt.kind === 'reject_once' || opt.kind === 'reject_always'
+    );
+    if (rejectOption) {
+      handleRespond(rejectOption.option_id);
+    } else {
+      handleRespond('', true);
+    }
+  }, [pendingPermission, handleRespond]);
 
   const toolIcon = getToolIcon(toolName, 'h-4 w-4 text-amber-600 dark:text-amber-400 flex-shrink-0');
   const hasDetails = args && Object.keys(args).length > 0;
@@ -77,7 +144,12 @@ export function ToolCallMessage({ comment }: { comment: Message }) {
   }
 
   return (
-    <div className="w-full rounded-md border border-border/50 bg-muted/20 overflow-hidden">
+    <div className={cn(
+      'w-full rounded-md border overflow-hidden',
+      isPendingApproval
+        ? 'border-amber-500/50 bg-amber-500/5'
+        : 'border-border/50 bg-muted/20'
+    )}>
       <button
         type="button"
         onClick={() => hasDetails && setIsExpanded(!isExpanded)}
@@ -96,13 +168,46 @@ export function ToolCallMessage({ comment }: { comment: Message }) {
             {filePath}
           </span>
         )}
-        {getStatusIcon(status)}
+        {!isPendingApproval && getStatusIcon(status)}
         {hasDetails && (
           isExpanded
             ? <IconChevronDown className="h-4 w-4 text-muted-foreground/50" />
             : <IconChevronRight className="h-4 w-4 text-muted-foreground/50" />
         )}
       </button>
+
+      {/* Inline approval buttons when permission is pending */}
+      {isPendingApproval && (
+        <div className="flex items-center gap-2 px-3 py-2 border-t border-amber-500/30 bg-amber-500/10">
+          <span className="text-xs text-amber-600 dark:text-amber-400 flex-1">
+            Approve this action?
+          </span>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={handleReject}
+            disabled={isResponding}
+            className="h-7 px-2 text-red-600 hover:text-red-700 hover:bg-red-500/10"
+          >
+            <IconX className="h-4 w-4 mr-1" />
+            Deny
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={handleApprove}
+            disabled={isResponding}
+            className="h-7 px-2 text-green-600 hover:text-green-700 hover:bg-green-500/10"
+          >
+            {isResponding ? (
+              <IconLoader2 className="h-4 w-4 mr-1 animate-spin" />
+            ) : (
+              <IconCheck className="h-4 w-4 mr-1" />
+            )}
+            Approve
+          </Button>
+        </div>
+      )}
 
       {isExpanded && hasDetails && (
         <div className="border-t border-border/30 bg-background/50 p-3 space-y-2">

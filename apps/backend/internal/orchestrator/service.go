@@ -398,6 +398,26 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 			zap.Error(err))
 	}
 
+	// Session resume doesn't send an initial prompt, so the agent is immediately
+	// ready for follow-up prompts. Transition directly to WaitingForInput state.
+	// This bypasses the normal AgentReady + PromptComplete event coordination
+	// which only applies when an initial prompt is sent.
+	s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateWaitingForInput, "", true)
+
+	// Update the execution's state to reflect the final state for the response
+	execution.SessionState = v1.TaskSessionStateWaitingForInput
+
+	// Also transition task to Review state since agent is ready for user input
+	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateReview); err != nil {
+		s.logger.Warn("failed to update task state to REVIEW after resume",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+	}
+
+	s.logger.Info("task session resumed and ready for input",
+		zap.String("task_id", taskID),
+		zap.String("session_id", sessionID))
+
 	return execution, nil
 }
 

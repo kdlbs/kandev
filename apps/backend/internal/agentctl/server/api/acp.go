@@ -382,6 +382,10 @@ func (s *Server) handlePermissionStreamWS(c *gin.Context) {
 
 	// Stream permission notifications to WebSocket
 	for notification := range permissionCh {
+		s.logger.Info("streaming permission notification to backend",
+			zap.String("pending_id", notification.PendingID),
+			zap.String("title", notification.Title))
+
 		data, err := json.Marshal(notification)
 		if err != nil {
 			s.logger.Error("failed to marshal permission notification", zap.Error(err))

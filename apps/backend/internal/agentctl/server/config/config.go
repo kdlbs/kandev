@@ -99,6 +99,11 @@ type InstanceConfig struct {
 	// AutoApprovePermissions auto-approves permission requests
 	AutoApprovePermissions bool
 
+	// ApprovalPolicy controls when the agent requests approval.
+	// Valid values: "untrusted" (always), "on-failure", "on-request", "never".
+	// Defaults to "on-request" if empty.
+	ApprovalPolicy string
+
 	// ShellEnabled enables auto-shell feature
 	ShellEnabled bool
 
@@ -164,6 +169,9 @@ func (c *Config) NewInstanceConfig(port int, overrides *InstanceOverrides) *Inst
 		if overrides.Env != nil {
 			cfg.AgentEnv = overrides.Env
 		}
+		if overrides.ApprovalPolicy != "" {
+			cfg.ApprovalPolicy = overrides.ApprovalPolicy
+		}
 	}
 
 	// Parse agent command into args
@@ -179,11 +187,12 @@ func (c *Config) NewInstanceConfig(port int, overrides *InstanceOverrides) *Inst
 
 // InstanceOverrides allows overriding default values when creating an instance
 type InstanceOverrides struct {
-	Protocol     agent.Protocol
-	AgentCommand string
-	WorkDir      string
-	AutoStart    *bool
-	Env          []string
+	Protocol       agent.Protocol
+	AgentCommand   string
+	WorkDir        string
+	AutoStart      *bool
+	Env            []string
+	ApprovalPolicy string
 }
 
 // ParseCommand splits a command string into arguments

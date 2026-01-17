@@ -139,6 +139,11 @@ type Config struct {
 	// AutoApprove automatically approves permission requests
 	AutoApprove bool
 
+	// ApprovalPolicy controls when the agent requests approval.
+	// Valid values: "untrusted" (always), "on-failure", "on-request", "never".
+	// Defaults to "on-request" if empty.
+	ApprovalPolicy string
+
 	// For HTTP-based adapters (REST)
 	BaseURL    string            // Base URL of the agent's HTTP API
 	AuthHeader string            // Optional auth header name

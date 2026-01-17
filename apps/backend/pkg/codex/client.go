@@ -62,6 +62,10 @@ func (c *Client) SendResponse(id interface{}, result interface{}, err *Error) er
 		}
 	}
 	resp := &Response{ID: id, Result: resultJSON, Error: err}
+	c.logger.Info("sending response to codex",
+		zap.Any("id", id),
+		zap.String("result", string(resultJSON)),
+		zap.Any("error", err))
 	return c.send(resp)
 }
 
@@ -179,9 +183,15 @@ func (c *Client) readLoop(ctx context.Context) {
 		hasResult := msg.Result != nil
 		hasError := msg.Error != nil
 
+		c.logger.Info("codex: received message",
+			zap.Bool("hasID", hasID),
+			zap.Bool("hasMethod", hasMethod),
+			zap.String("method", msg.Method))
+
 		if hasID && !hasMethod && (hasResult || hasError) {
 			c.handleResponse(&Response{ID: msg.ID, Result: msg.Result, Error: msg.Error})
 		} else if hasID && hasMethod {
+			c.logger.Info("codex: routing as request", zap.Any("id", msg.ID), zap.String("method", msg.Method))
 			c.handleRequest(msg.ID, msg.Method, msg.Params)
 		} else if hasMethod && !hasID {
 			c.handleNotification(msg.Method, msg.Params)
