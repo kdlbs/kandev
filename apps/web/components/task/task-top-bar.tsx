@@ -94,20 +94,15 @@ const TaskTopBar = memo(function TaskTopBar({
   // Use worktree branch if available, otherwise fall back to base branch
   const displayBranch = worktreeBranch || baseBranch;
 
-  // Calculate total additions and deletions from all files
-  const { totalAdditions, totalDeletions } = useMemo(() => {
-    if (!gitStatus?.files || Object.keys(gitStatus.files).length === 0) {
-      return { totalAdditions: 0, totalDeletions: 0 };
+  // Calculate total additions and deletions from all files.
+  let totalAdditions = 0;
+  let totalDeletions = 0;
+  if (gitStatus?.files && Object.keys(gitStatus.files).length > 0) {
+    for (const file of Object.values(gitStatus.files)) {
+      totalAdditions += file.additions || 0;
+      totalDeletions += file.deletions || 0;
     }
-
-    return Object.values(gitStatus.files).reduce(
-      (acc, file) => ({
-        totalAdditions: acc.totalAdditions + (file.additions || 0),
-        totalDeletions: acc.totalDeletions + (file.deletions || 0),
-      }),
-      { totalAdditions: 0, totalDeletions: 0 }
-    );
-  }, [gitStatus?.files]);
+  }
 
   const handleBranchClick = (e: React.MouseEvent) => {
     e.stopPropagation();

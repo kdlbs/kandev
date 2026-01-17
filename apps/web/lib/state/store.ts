@@ -439,6 +439,8 @@ function mergeInitialState(
   | 'setTaskSessionsForTask'
   | 'setTaskSessionsLoading'
   | 'setSessionAgentctlStatus'
+  | 'setWorktree'
+  | 'setSessionWorktrees'
   | 'setGitStatus'
   | 'clearGitStatus'
   | 'bumpAgentProfilesVersion'

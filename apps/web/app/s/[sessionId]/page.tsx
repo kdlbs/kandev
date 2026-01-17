@@ -7,7 +7,7 @@ import {
   listRepositories,
   listTaskSessionMessages,
 } from '@/lib/http';
-import type { Task } from '@/lib/types/http';
+import type { ListMessagesResponse, Task } from '@/lib/types/http';
 import { snapshotToState, taskToState } from '@/lib/ssr/mapper';
 import TaskPageClient from '@/app/task/[id]/page-client';
 
@@ -36,7 +36,7 @@ export default async function SessionPage({
       listAgents({ cache: 'no-store' }),
       listRepositories(task.workspace_id, { cache: 'no-store' }),
     ]);
-    let messagesResponse = { messages: [], has_more: false, cursor: null };
+    let messagesResponse: ListMessagesResponse | null = null;
     try {
       messagesResponse = await listTaskSessionMessages(
         sessionId,
@@ -50,10 +50,11 @@ export default async function SessionPage({
       );
     }
 
+    const messages = messagesResponse?.messages ?? [];
     const taskState = taskToState(task, sessionId, {
-      items: messagesResponse.messages ?? [],
-      hasMore: messagesResponse.has_more ?? false,
-      oldestCursor: messagesResponse.cursor ?? (messagesResponse.messages?.[0]?.id ?? null),
+      items: messages,
+      hasMore: messagesResponse?.has_more ?? false,
+      oldestCursor: messagesResponse?.cursor ?? (messages[0]?.id ?? null),
     });
 
     initialState = {

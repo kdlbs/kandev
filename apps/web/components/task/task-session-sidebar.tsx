@@ -78,7 +78,7 @@ export function TaskSessionSidebar({ workspaceId, boardId }: TaskSessionSidebarP
     return () => {
       unsubscribers.forEach((unsubscribe) => unsubscribe());
     };
-  }, [selectedSessions]);
+  }, [selectedSessions, selectedTaskId]);
 
   const updateUrl = useCallback((sessionId: string) => {
     if (typeof window === 'undefined') return;

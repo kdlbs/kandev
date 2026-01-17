@@ -17,9 +17,6 @@ export function useSessionMessages(
   taskSessionId: string | null
 ): UseSessionMessagesReturn {
   const store = useAppStoreApi();
-  const session = useAppStore((state) =>
-    taskSessionId ? state.taskSessions.items[taskSessionId] ?? null : null
-  );
   const messages = useAppStore((state) =>
     taskSessionId ? state.messages.bySession[taskSessionId] ?? EMPTY_MESSAGES : EMPTY_MESSAGES
   );

@@ -28,7 +28,6 @@ interface UseSessionResumptionReturn {
   worktreePath: string | null;
   worktreeBranch: string | null;
   resumeSession: () => Promise<boolean>;
-  startNewSession: (agentProfileId: string) => Promise<boolean>;
 }
 
 /**
@@ -54,11 +53,6 @@ export function useSessionResumption(
 
   useEffect(() => {
     hasAttemptedResume.current = false;
-    setResumptionState('idle');
-    setSessionStatus(null);
-    setError(null);
-    setWorktreePath(null);
-    setWorktreeBranch(null);
   }, [sessionId, taskId]);
 
   // Check session status and auto-resume if needed
@@ -223,56 +217,6 @@ export function useSessionResumption(
     }
   }, [taskId, sessionId, setTaskSession, session]);
 
-  // Start new session function (fallback when resume fails)
-  const startNewSession = useCallback(async (agentProfileId: string): Promise<boolean> => {
-    if (!taskId) return false;
-
-    const client = getWebSocketClient();
-    if (!client) return false;
-
-    setResumptionState('resuming');
-    setError(null);
-
-    try {
-      const response = await client.request<{
-        success: boolean;
-        session_id?: string;
-        state?: string;
-        worktree_path?: string;
-        worktree_branch?: string;
-      }>('orchestrator.start', {
-        task_id: taskId,
-        agent_profile_id: agentProfileId,
-      }, 15000);
-
-      if (response.success) {
-        setResumptionState('resumed');
-        if (taskId && response.state && response.session_id) {
-          setTaskSession({
-            id: response.session_id,
-            task_id: taskId,
-            state: response.state as TaskSessionState,
-            progress: 0,
-            started_at: '',
-            updated_at: '',
-          });
-        }
-        if (response.worktree_path) {
-          setWorktreePath(response.worktree_path);
-        }
-        if (response.worktree_branch) {
-          setWorktreeBranch(response.worktree_branch);
-        }
-        return true;
-      }
-      return false;
-    } catch (err) {
-      setResumptionState('error');
-      setError(err instanceof Error ? err.message : 'Unknown error');
-      return false;
-    }
-  }, [taskId, setTaskSession]);
-
   return {
     resumptionState,
     sessionStatus,
@@ -281,6 +225,5 @@ export function useSessionResumption(
     worktreePath,
     worktreeBranch,
     resumeSession,
-    startNewSession,
   };
 }

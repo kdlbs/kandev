@@ -114,11 +114,16 @@ export default async function Page({ searchParams }: PageProps) {
         initialState = {
           ...initialState,
           messages: {
-            sessionId,
-            items: messagesResponse.messages ?? [],
-            isLoading: false,
-            hasMore: messagesResponse.has_more ?? false,
-            oldestCursor: messagesResponse.cursor ?? (messagesResponse.messages?.[0]?.id ?? null),
+            bySession: {
+              [sessionId]: messagesResponse.messages ?? [],
+            },
+            metaBySession: {
+              [sessionId]: {
+                isLoading: false,
+                hasMore: messagesResponse.has_more ?? false,
+                oldestCursor: messagesResponse.cursor ?? (messagesResponse.messages?.[0]?.id ?? null),
+              },
+            },
           },
         };
       } catch (error) {

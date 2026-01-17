@@ -165,7 +165,7 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
     setActiveTaskId(null);
   };
 
-  const handleDialogSuccess = (task: BackendTask, mode: 'create' | 'edit', _meta?: { taskSessionId?: string | null }) => {
+  const handleDialogSuccess = (task: BackendTask, mode: 'create' | 'edit') => {
     if (mode === 'create') {
       store.getState().hydrate({
         kanban: {

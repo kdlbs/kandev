@@ -162,7 +162,7 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
         ) : (
           <div className="space-y-4">
             {diffTargets.map((path) => {
-              const file = gitStatus.files[path];
+              const file = gitStatus?.files?.[path];
               if (!file || !file.diff) {
                 return null;
               }
