@@ -6,6 +6,7 @@ import (
 	"context"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
 
 // Re-export permission types from the shared types package for convenience.
@@ -14,71 +15,27 @@ import (
 type (
 	PermissionRequest  = types.PermissionRequest
 	PermissionResponse = types.PermissionResponse
-	PermissionOption   = types.PermissionOption
+	PermissionOption   = streams.PermissionOption
 	PermissionHandler  = types.PermissionHandler
 )
 
-// SessionUpdate type constants
-const (
-	UpdateTypeMessageChunk = "message_chunk" // Agent text streaming
-	UpdateTypeReasoning    = "reasoning"     // Chain-of-thought/thinking
-	UpdateTypeToolCall     = "tool_call"     // Tool invocation started
-	UpdateTypeToolUpdate   = "tool_update"   // Tool status update
-	UpdateTypePlan         = "plan"          // Agent plan updates
-	UpdateTypeComplete     = "complete"      // Turn/session complete
-	UpdateTypeError        = "error"         // Error occurred
+// Re-export stream types for convenience.
+type (
+	AgentEvent = streams.AgentEvent
+	PlanEntry  = streams.PlanEntry
 )
 
-// SessionUpdate is a protocol-agnostic update from the agent.
-// All protocol adapters normalize their updates to this format.
-type SessionUpdate struct {
-	// Type identifies the update type. Use UpdateType* constants.
-	Type string `json:"type"`
-
-	// SessionID is the current session identifier
-	SessionID string `json:"session_id,omitempty"`
-
-	// OperationID identifies the current in-flight operation (turn, prompt, etc.)
-	// Used to target specific operations for cancellation or status updates.
-	// For Codex this is the turn ID, for other protocols it may be empty.
-	OperationID string `json:"operation_id,omitempty"`
-
-	// Message fields (for "message_chunk" type)
-	Text string `json:"text,omitempty"`
-
-	// Reasoning fields (for "reasoning" type)
-	// Used for chain-of-thought, thinking traces, etc.
-	ReasoningText    string `json:"reasoning_text,omitempty"`    // Full reasoning content
-	ReasoningSummary string `json:"reasoning_summary,omitempty"` // Summarized version (if available)
-
-	// Tool call fields (for "tool_call" and "tool_update" types)
-	ToolCallID string                 `json:"tool_call_id,omitempty"`
-	ToolName   string                 `json:"tool_name,omitempty"`
-	ToolTitle  string                 `json:"tool_title,omitempty"`
-	ToolStatus string                 `json:"tool_status,omitempty"` // "started", "running", "completed", "error"
-	ToolArgs   map[string]interface{} `json:"tool_args,omitempty"`
-	ToolResult interface{}            `json:"tool_result,omitempty"`
-
-	// Diff contains unified diff content for file changes.
-	// Populated when tools modify files, providing the aggregated diff.
-	Diff string `json:"diff,omitempty"`
-
-	// Plan fields (for "plan" type)
-	PlanEntries []PlanEntry `json:"plan_entries,omitempty"`
-
-	// Error fields (for "error" type)
-	Error string `json:"error,omitempty"`
-
-	// Raw data for protocol-specific extensions
-	Data map[string]interface{} `json:"data,omitempty"`
-}
-
-// PlanEntry represents an entry in the agent's execution plan
-type PlanEntry struct {
-	Description string `json:"description,omitempty"` // Content/description of the task
-	Status      string `json:"status,omitempty"`      // "pending", "in_progress", "completed", "failed"
-	Priority    string `json:"priority,omitempty"`    // Relative importance
-}
+// Re-export agent event type constants from streams package.
+const (
+	EventTypeMessageChunk       = streams.EventTypeMessageChunk
+	EventTypeReasoning          = streams.EventTypeReasoning
+	EventTypeToolCall           = streams.EventTypeToolCall
+	EventTypeToolUpdate         = streams.EventTypeToolUpdate
+	EventTypePlan               = streams.EventTypePlan
+	EventTypeComplete           = streams.EventTypeComplete
+	EventTypeError              = streams.EventTypeError
+	EventTypePermissionRequest  = streams.EventTypePermissionRequest
+)
 
 // AgentInfo contains information about the connected agent.
 type AgentInfo struct {
@@ -88,7 +45,7 @@ type AgentInfo struct {
 
 // AgentAdapter defines the interface for protocol adapters.
 // Each adapter translates a specific protocol (ACP, REST, MCP, etc.) into the
-// normalized SessionUpdate format that agentctl exposes via its HTTP API.
+// normalized AgentEvent format that agentctl exposes via its HTTP API.
 type AgentAdapter interface {
 	// Initialize establishes the connection with the agent and exchanges capabilities.
 	// For subprocess-based agents (ACP), this sends the initialize request.
@@ -112,9 +69,9 @@ type AgentAdapter interface {
 	// Cancel cancels the current operation.
 	Cancel(ctx context.Context) error
 
-	// Updates returns a channel that receives session updates.
+	// Updates returns a channel that receives agent events.
 	// The channel is closed when the adapter is closed.
-	Updates() <-chan SessionUpdate
+	Updates() <-chan AgentEvent
 
 	// GetSessionID returns the current session ID.
 	GetSessionID() string

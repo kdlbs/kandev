@@ -114,63 +114,64 @@ func (p *EventPublisher) PublishACPSessionCreated(execution *AgentExecution, ses
 	}
 }
 
-// PublishSessionUpdate publishes a session update to the event bus for WebSocket streaming.
-func (p *EventPublisher) PublishSessionUpdate(execution *AgentExecution, update agentctl.SessionUpdate) {
+// PublishAgentStreamEvent publishes an agent stream event to the event bus for WebSocket streaming.
+// This is different from PublishAgentEvent which publishes lifecycle events (started, stopped, etc.).
+func (p *EventPublisher) PublishAgentStreamEvent(execution *AgentExecution, event agentctl.AgentEvent) {
 	if p.eventBus == nil {
 		return
 	}
 
-	// Build the update data - our SessionUpdate type marshals cleanly
-	updateData := map[string]interface{}{
-		"type": update.Type,
+	// Build the event data - our AgentEvent type marshals cleanly
+	eventData := map[string]interface{}{
+		"type": event.Type,
 	}
 
-	if update.SessionID != "" {
-		updateData["session_id"] = update.SessionID
+	if event.SessionID != "" {
+		eventData["session_id"] = event.SessionID
 	}
-	if update.Text != "" {
-		updateData["text"] = update.Text
+	if event.Text != "" {
+		eventData["text"] = event.Text
 	}
-	if update.ToolCallID != "" {
-		updateData["tool_call_id"] = update.ToolCallID
+	if event.ToolCallID != "" {
+		eventData["tool_call_id"] = event.ToolCallID
 	}
-	if update.ToolName != "" {
-		updateData["tool_name"] = update.ToolName
+	if event.ToolName != "" {
+		eventData["tool_name"] = event.ToolName
 	}
-	if update.ToolTitle != "" {
-		updateData["tool_title"] = update.ToolTitle
+	if event.ToolTitle != "" {
+		eventData["tool_title"] = event.ToolTitle
 	}
-	if update.ToolStatus != "" {
-		updateData["tool_status"] = update.ToolStatus
+	if event.ToolStatus != "" {
+		eventData["tool_status"] = event.ToolStatus
 	}
-	if update.ToolArgs != nil {
-		updateData["tool_args"] = update.ToolArgs
+	if event.ToolArgs != nil {
+		eventData["tool_args"] = event.ToolArgs
 	}
-	if update.ToolResult != nil {
-		updateData["tool_result"] = update.ToolResult
+	if event.ToolResult != nil {
+		eventData["tool_result"] = event.ToolResult
 	}
-	if update.Error != "" {
-		updateData["error"] = update.Error
+	if event.Error != "" {
+		eventData["error"] = event.Error
 	}
-	if update.Data != nil {
-		updateData["data"] = update.Data
+	if event.Data != nil {
+		eventData["data"] = event.Data
 	}
 
-	// Build ACP message data
+	// Build agent event message data
 	data := map[string]interface{}{
-		"type":       "session/update",
+		"type":       "agent/event",
 		"timestamp":  time.Now().UTC().Format(time.RFC3339Nano),
 		"agent_id":   execution.ID,
 		"task_id":    execution.TaskID,
-		"session_id": update.SessionID,
-		"data":       updateData,
+		"session_id": event.SessionID,
+		"data":       eventData,
 	}
 
-	event := bus.NewEvent(events.ACPMessage, "agent-manager", data)
+	busEvent := bus.NewEvent(events.ACPMessage, "agent-manager", data)
 	subject := events.BuildACPSubject(execution.TaskID)
 
-	if err := p.eventBus.Publish(context.Background(), subject, event); err != nil {
-		p.logger.Error("failed to publish session update",
+	if err := p.eventBus.Publish(context.Background(), subject, busEvent); err != nil {
+		p.logger.Error("failed to publish agent stream event",
 			zap.String("instance_id", execution.ID),
 			zap.String("task_id", execution.TaskID),
 			zap.Error(err))
@@ -320,8 +321,8 @@ func (p *EventPublisher) PublishToolCall(execution *AgentExecution, toolCallID, 
 	}
 }
 
-// PublishToolCallComplete publishes a tool call completion event from a SessionUpdate.
-func (p *EventPublisher) PublishToolCallComplete(execution *AgentExecution, update agentctl.SessionUpdate) {
+// PublishToolCallComplete publishes a tool call completion event from an AgentEvent.
+func (p *EventPublisher) PublishToolCallComplete(execution *AgentExecution, event agentctl.AgentEvent) {
 	if p.eventBus == nil {
 		return
 	}
@@ -334,14 +335,14 @@ func (p *EventPublisher) PublishToolCallComplete(execution *AgentExecution, upda
 		"agent_id":     execution.ID,
 		"task_id":      execution.TaskID,
 		"session_id":   sessionID,
-		"tool_call_id": update.ToolCallID,
-		"status":       update.ToolStatus,
+		"tool_call_id": event.ToolCallID,
+		"status":       event.ToolStatus,
 	}
 
-	event := bus.NewEvent(events.ToolCallComplete, "agent-manager", data)
+	busEvent := bus.NewEvent(events.ToolCallComplete, "agent-manager", data)
 	subject := events.ToolCallComplete + "." + execution.TaskID
 
-	if err := p.eventBus.Publish(context.Background(), subject, event); err != nil {
+	if err := p.eventBus.Publish(context.Background(), subject, busEvent); err != nil {
 		p.logger.Error("failed to publish tool_call_complete event",
 			zap.String("instance_id", execution.ID),
 			zap.String("task_id", execution.TaskID),
@@ -349,16 +350,15 @@ func (p *EventPublisher) PublishToolCallComplete(execution *AgentExecution, upda
 	}
 }
 
-// PublishPermissionRequest publishes a permission request event.
-// The event is structured as a protocol.Message so it can be parsed by the watcher.
-func (p *EventPublisher) PublishPermissionRequest(execution *AgentExecution, notification *agentctl.PermissionNotification) {
+// PublishPermissionRequest publishes a permission request event to the event bus.
+func (p *EventPublisher) PublishPermissionRequest(execution *AgentExecution, event agentctl.AgentEvent) {
 	if p.eventBus == nil {
 		return
 	}
 
 	// Convert options to a serializable format
-	options := make([]map[string]interface{}, len(notification.Options))
-	for i, opt := range notification.Options {
+	options := make([]map[string]interface{}, len(event.PermissionOptions))
+	for i, opt := range event.PermissionOptions {
 		options[i] = map[string]interface{}{
 			"option_id": opt.OptionID,
 			"name":      opt.Name,
@@ -366,32 +366,24 @@ func (p *EventPublisher) PublishPermissionRequest(execution *AgentExecution, not
 		}
 	}
 
-	// Build payload data (goes into msg.Data when parsed as protocol.Message)
-	payloadData := map[string]interface{}{
-		"pending_id":     notification.PendingID,
-		"session_id":     notification.SessionID,
-		"tool_call_id":   notification.ToolCallID,
-		"title":          notification.Title,
-		"options":        options,
-		"action_type":    notification.ActionType,
-		"action_details": notification.ActionDetails,
-		"created_at":     notification.CreatedAt,
-	}
-
-	// Structure as protocol.Message so watcher can parse it correctly
 	data := map[string]interface{}{
-		"type":       "permission_request",
-		"timestamp":  time.Now().UTC().Format(time.RFC3339Nano),
-		"agent_id":   execution.ID,
-		"task_id":    execution.TaskID,
-		"session_id": notification.SessionID,
-		"data":       payloadData,
+		"type":           "permission_request",
+		"timestamp":      time.Now().UTC().Format(time.RFC3339Nano),
+		"agent_id":       execution.ID,
+		"task_id":        execution.TaskID,
+		"session_id":     execution.SessionID,
+		"pending_id":     event.PendingID,
+		"tool_call_id":   event.ToolCallID,
+		"title":          event.PermissionTitle,
+		"options":        options,
+		"action_type":    event.ActionType,
+		"action_details": event.ActionDetails,
 	}
 
-	event := bus.NewEvent(events.ACPMessage, "agent-manager", data)
-	subject := events.BuildACPSubject(execution.TaskID)
+	busEvent := bus.NewEvent(events.PermissionRequestReceived, "agent-manager", data)
+	subject := events.PermissionRequestReceived + "." + execution.TaskID
 
-	if err := p.eventBus.Publish(context.Background(), subject, event); err != nil {
+	if err := p.eventBus.Publish(context.Background(), subject, busEvent); err != nil {
 		p.logger.Error("failed to publish permission_request event",
 			zap.String("instance_id", execution.ID),
 			zap.String("task_id", execution.TaskID),
@@ -399,7 +391,7 @@ func (p *EventPublisher) PublishPermissionRequest(execution *AgentExecution, not
 	} else {
 		p.logger.Debug("published permission_request event",
 			zap.String("task_id", execution.TaskID),
-			zap.String("pending_id", notification.PendingID),
-			zap.String("title", notification.Title))
+			zap.String("pending_id", event.PendingID),
+			zap.String("title", event.PermissionTitle))
 	}
 }

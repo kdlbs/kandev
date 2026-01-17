@@ -34,7 +34,7 @@ type ACPAdapter struct {
 	agentInfo *AgentInfo
 
 	// Update channel
-	updatesCh chan SessionUpdate
+	updatesCh chan AgentEvent
 
 	// Permission handler
 	permissionHandler PermissionHandler
@@ -52,7 +52,7 @@ func NewACPAdapter(stdin io.Writer, stdout io.Reader, cfg *Config, log *logger.L
 		logger:    log.WithFields(zap.String("adapter", "acp")),
 		stdin:     stdin,
 		stdout:    stdout,
-		updatesCh: make(chan SessionUpdate, 100),
+		updatesCh: make(chan AgentEvent, 100),
 	}
 }
 
@@ -62,7 +62,7 @@ func (a *ACPAdapter) Initialize(ctx context.Context) error {
 	a.logger.Info("initializing ACP adapter",
 		zap.String("workdir", a.cfg.WorkDir))
 
-	// Create ACP client with update handler that converts to SessionUpdate
+	// Create ACP client with update handler that converts to AgentEvent
 	a.acpClient = acpclient.NewClient(
 		acpclient.WithLogger(a.logger.Zap()),
 		acpclient.WithWorkspaceRoot(a.cfg.WorkDir),
@@ -190,8 +190,8 @@ func (a *ACPAdapter) Cancel(ctx context.Context) error {
 	})
 }
 
-// Updates returns the channel for session updates.
-func (a *ACPAdapter) Updates() <-chan SessionUpdate {
+// Updates returns the channel for agent events.
+func (a *ACPAdapter) Updates() <-chan AgentEvent {
 	return a.updatesCh
 }
 
@@ -244,20 +244,20 @@ func (a *ACPAdapter) GetACPConnection() *acp.ClientSideConnection {
 	return a.acpConn
 }
 
-// handleACPUpdate converts ACP SessionNotification to protocol-agnostic SessionUpdate.
+// handleACPUpdate converts ACP SessionNotification to protocol-agnostic AgentEvent.
 func (a *ACPAdapter) handleACPUpdate(n acp.SessionNotification) {
-	update := a.convertNotification(n)
-	if update != nil {
+	event := a.convertNotification(n)
+	if event != nil {
 		select {
-		case a.updatesCh <- *update:
+		case a.updatesCh <- *event:
 		default:
 			a.logger.Warn("updates channel full, dropping notification")
 		}
 	}
 }
 
-// convertNotification converts an ACP SessionNotification to a SessionUpdate.
-func (a *ACPAdapter) convertNotification(n acp.SessionNotification) *SessionUpdate {
+// convertNotification converts an ACP SessionNotification to an AgentEvent.
+func (a *ACPAdapter) convertNotification(n acp.SessionNotification) *AgentEvent {
 	u := n.Update
 
 	// Log what update types we're receiving
@@ -271,8 +271,8 @@ func (a *ACPAdapter) convertNotification(n acp.SessionNotification) *SessionUpda
 	switch {
 	case u.AgentMessageChunk != nil:
 		if u.AgentMessageChunk.Content.Text != nil {
-			return &SessionUpdate{
-				Type:      UpdateTypeMessageChunk,
+			return &AgentEvent{
+				Type:      EventTypeMessageChunk,
 				SessionID: string(n.SessionId),
 				Text:      u.AgentMessageChunk.Content.Text.Text,
 			}
@@ -281,8 +281,8 @@ func (a *ACPAdapter) convertNotification(n acp.SessionNotification) *SessionUpda
 	case u.AgentThoughtChunk != nil:
 		// Agent thinking/reasoning - map to the new reasoning type
 		if u.AgentThoughtChunk.Content.Text != nil {
-			return &SessionUpdate{
-				Type:          UpdateTypeReasoning,
+			return &AgentEvent{
+				Type:          EventTypeReasoning,
 				SessionID:     string(n.SessionId),
 				ReasoningText: u.AgentThoughtChunk.Content.Text.Text,
 			}
@@ -324,8 +324,8 @@ func (a *ACPAdapter) convertNotification(n acp.SessionNotification) *SessionUpda
 			status = "running"
 		}
 
-		return &SessionUpdate{
-			Type:       UpdateTypeToolCall,
+		return &AgentEvent{
+			Type:       EventTypeToolCall,
 			SessionID:  string(n.SessionId),
 			ToolCallID: string(u.ToolCall.ToolCallId),
 			ToolName:   string(u.ToolCall.Kind), // Kind is effectively the tool name
@@ -343,8 +343,8 @@ func (a *ACPAdapter) convertNotification(n acp.SessionNotification) *SessionUpda
 		if status == "completed" {
 			status = "complete"
 		}
-		return &SessionUpdate{
-			Type:       UpdateTypeToolUpdate,
+		return &AgentEvent{
+			Type:       EventTypeToolUpdate,
 			SessionID:  string(n.SessionId),
 			ToolCallID: string(u.ToolCallUpdate.ToolCallId),
 			ToolStatus: status,
@@ -359,8 +359,8 @@ func (a *ACPAdapter) convertNotification(n acp.SessionNotification) *SessionUpda
 				Priority:    string(e.Priority),
 			}
 		}
-		return &SessionUpdate{
-			Type:        UpdateTypePlan,
+		return &AgentEvent{
+			Type:        EventTypePlan,
 			SessionID:   string(n.SessionId),
 			PlanEntries: entries,
 		}

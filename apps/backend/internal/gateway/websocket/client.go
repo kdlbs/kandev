@@ -169,11 +169,8 @@ func (c *Client) handleSubscribe(msg *ws.Message) {
 	})
 	c.sendMessage(resp)
 
-	// Send historical logs if available
+	// Send historical logs if available (now includes pending permission request messages)
 	c.sendHistoricalLogs(req.TaskID)
-
-	// Send pending permissions if available
-	c.sendPendingPermissions(req.TaskID)
 }
 
 type UserSubscribeRequest struct {
@@ -275,30 +272,9 @@ func (c *Client) sendHistoricalLogs(taskID string) {
 	}
 }
 
-// sendPendingPermissions sends any pending permission requests to the client
-func (c *Client) sendPendingPermissions(taskID string) {
-	ctx := context.Background()
-	permissions, err := c.hub.GetPendingPermissions(ctx, taskID)
-	if err != nil {
-		c.logger.Error("Failed to get pending permissions",
-			zap.String("task_id", taskID),
-			zap.Error(err))
-		return
-	}
-
-	if len(permissions) == 0 {
-		return
-	}
-
-	c.logger.Debug("Sending pending permissions",
-		zap.String("task_id", taskID),
-		zap.Int("count", len(permissions)))
-
-	// Send each pending permission as a notification
-	for _, permission := range permissions {
-		c.sendMessage(permission)
-	}
-}
+// sendPendingPermissions is deprecated. Pending permissions are now stored as messages
+// and sent via sendHistoricalLogs. This function is kept for reference but is unused.
+// func (c *Client) sendPendingPermissions(taskID string) {}
 
 // handleUnsubscribe handles task.unsubscribe action
 func (c *Client) handleUnsubscribe(msg *ws.Message) {

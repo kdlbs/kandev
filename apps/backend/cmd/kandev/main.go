@@ -322,13 +322,13 @@ func main() {
 		var containerMgr *lifecycle.ContainerManager
 		switch cfg.Agent.Runtime {
 		case "standalone":
-			standaloneCtl := agentctl.NewStandaloneCtl(
+			controlClient := agentctl.NewControlClient(
 				cfg.Agent.StandaloneHost,
 				cfg.Agent.StandalonePort,
 				log,
 			)
 			agentRuntime = lifecycle.NewStandaloneRuntime(
-				standaloneCtl,
+				controlClient,
 				cfg.Agent.StandaloneHost,
 				cfg.Agent.StandalonePort,
 				log,
@@ -421,7 +421,8 @@ func main() {
 	taskSvc.SetExecutionStopper(orchestratorSvc)
 
 	// Set up comment creator for saving agent responses as comments
-	orchestratorSvc.SetMessageCreator(&messageCreatorAdapter{svc: taskSvc})
+	msgCreator := &messageCreatorAdapter{svc: taskSvc}
+	orchestratorSvc.SetMessageCreator(msgCreator)
 
 	// ============================================
 	// WEBSOCKET GATEWAY (All communication via WebSocket)
@@ -554,44 +555,8 @@ func main() {
 	})
 	log.Info("Historical logs provider configured for task subscriptions (using messages and git status)")
 
-	// Set up pending permissions provider for task subscriptions
-	gateway.Hub.SetPendingPermissionsProvider(func(ctx context.Context, taskID string) ([]*ws.Message, error) {
-		if lifecycleMgr == nil {
-			return nil, nil
-		}
-		session, err := taskRepo.GetActiveTaskSessionByTaskID(ctx, taskID)
-		if err != nil || session == nil || session.ID == "" {
-			return nil, nil
-		}
-		permissions, err := lifecycleMgr.GetPendingPermissionsForSession(ctx, session.ID)
-		if err != nil {
-			return nil, err
-		}
-
-		result := make([]*ws.Message, 0, len(permissions))
-		for _, p := range permissions {
-			// Build payload matching the permission.requested format
-			payload := map[string]interface{}{
-				"type":           "permission_request",
-				"task_id":        taskID,
-				"pending_id":     p.PendingID,
-				"session_id":     p.SessionID,
-				"tool_call_id":   p.ToolCallID,
-				"title":          p.Title,
-				"options":        p.Options,
-				"action_type":    p.ActionType,
-				"action_details": p.ActionDetails,
-				"created_at":     p.CreatedAt.Format(time.RFC3339),
-			}
-			notification, err := ws.NewNotification(ws.ActionPermissionRequested, payload)
-			if err != nil {
-				continue
-			}
-			result = append(result, notification)
-		}
-		return result, nil
-	})
-	log.Info("Pending permissions provider configured for task subscriptions")
+	// NOTE: Pending permissions are now stored as messages and retrieved via the historical logs provider.
+	// The separate pending permissions provider is no longer needed.
 
 	// NOTE: We no longer create comments for each ACP message chunk.
 	// Instead, the lifecycle manager accumulates message chunks and:
@@ -600,35 +565,9 @@ func main() {
 	// This is handled via the prompt.complete and step.complete events.
 
 	// Wire ACP handler to broadcast to WebSocket clients as notifications
+	// NOTE: Permission requests are now handled via message creation in the lifecycle manager
+	// and broadcast automatically via the session.message.added event
 	orchestratorSvc.RegisterACPHandler(func(taskID string, msg *protocol.Message) {
-		// Check for permission_request events (type is in msg.Type, payload in msg.Data)
-		if msg.Type == "permission_request" {
-			sessionID := msg.SessionID
-			if sessionID == "" {
-				log.Warn("permission_request missing session_id, skipping",
-					zap.String("task_id", taskID))
-				return
-			}
-			// Build payload for frontend with all necessary fields
-			payload := map[string]interface{}{
-				"type":              "permission_request",
-				"task_id":           taskID,
-				"agent_instance_id": msg.AgentID,
-				"timestamp":         msg.Timestamp,
-			}
-			// Copy all fields from msg.Data (pending_id, options, action_type, etc.)
-			for k, v := range msg.Data {
-				payload[k] = v
-			}
-			// Broadcast permission.requested notification to task subscribers
-			notification, _ := ws.NewNotification(ws.ActionPermissionRequested, payload)
-			gateway.Hub.BroadcastToSession(sessionID, notification)
-			log.Info("broadcasted permission.requested notification",
-				zap.String("task_id", taskID),
-				zap.Any("pending_id", payload["pending_id"]))
-			return
-		}
-
 		// Only broadcast message types that the frontend handles
 		// Skip internal message types like session/update
 		switch msg.Type {
@@ -1310,4 +1249,33 @@ func (a *messageCreatorAdapter) CreateSessionMessage(ctx context.Context, taskID
 		RequestsInput: requestsInput,
 	})
 	return err
+}
+
+// CreatePermissionRequestMessage creates a message for a permission request
+func (a *messageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, pendingID, toolCallID, title string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}) (string, error) {
+	metadata := map[string]interface{}{
+		"pending_id":     pendingID,
+		"tool_call_id":   toolCallID,
+		"options":        options,
+		"action_type":    actionType,
+		"action_details": actionDetails,
+	}
+
+	msg, err := a.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
+		TaskSessionID: sessionID,
+		TaskID:        taskID,
+		Content:       title,
+		AuthorType:    "agent",
+		Type:          "permission_request",
+		Metadata:      metadata,
+	})
+	if err != nil {
+		return "", err
+	}
+	return msg.ID, nil
+}
+
+// UpdatePermissionMessage updates a permission message's status
+func (a *messageCreatorAdapter) UpdatePermissionMessage(ctx context.Context, sessionID, pendingID, status string) error {
+	return a.svc.UpdatePermissionMessage(ctx, sessionID, pendingID, status)
 }

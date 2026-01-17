@@ -96,6 +96,8 @@ const (
 	MessageTypeError MessageType = "error"
 	// MessageTypeStatus is for status changes: started, completed, failed
 	MessageTypeStatus MessageType = "status"
+	// MessageTypePermissionRequest is for agent permission requests
+	MessageTypePermissionRequest MessageType = "permission_request"
 )
 
 // Message represents a message in a task session

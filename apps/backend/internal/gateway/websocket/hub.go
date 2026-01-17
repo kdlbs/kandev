@@ -14,8 +14,9 @@ import (
 // HistoricalLogsProvider is a function that retrieves historical logs for a task
 type HistoricalLogsProvider func(ctx context.Context, taskID string) ([]*ws.Message, error)
 
-// PendingPermissionsProvider is a function that retrieves pending permissions for a task
-type PendingPermissionsProvider func(ctx context.Context, taskID string) ([]*ws.Message, error)
+// PendingPermissionsProvider is deprecated. Pending permissions are now stored as messages
+// and retrieved via the HistoricalLogsProvider.
+// type PendingPermissionsProvider func(ctx context.Context, taskID string) ([]*ws.Message, error)
 
 // Hub manages all WebSocket client connections
 type Hub struct {
@@ -41,8 +42,8 @@ type Hub struct {
 
 	// Optional provider for historical logs on subscription
 	historicalLogsProvider HistoricalLogsProvider
-	// Optional provider for pending permissions on subscription
-	pendingPermissionsProvider PendingPermissionsProvider
+	// NOTE: pendingPermissionsProvider is deprecated. Pending permissions are now stored
+	// as messages and retrieved via the historicalLogsProvider.
 
 	mu     sync.RWMutex
 	logger *logger.Logger
@@ -392,15 +393,10 @@ func (h *Hub) GetHistoricalLogs(ctx context.Context, taskID string) ([]*ws.Messa
 	return h.historicalLogsProvider(ctx, taskID)
 }
 
-// SetPendingPermissionsProvider sets the provider for pending permissions on subscription
-func (h *Hub) SetPendingPermissionsProvider(provider PendingPermissionsProvider) {
-	h.pendingPermissionsProvider = provider
-}
+// SetPendingPermissionsProvider is deprecated. Pending permissions are now stored as messages
+// and retrieved via the HistoricalLogsProvider. This method is a no-op for backwards compatibility.
+// func (h *Hub) SetPendingPermissionsProvider(provider PendingPermissionsProvider) {}
 
-// GetPendingPermissions retrieves pending permissions for a task if a provider is set
-func (h *Hub) GetPendingPermissions(ctx context.Context, taskID string) ([]*ws.Message, error) {
-	if h.pendingPermissionsProvider == nil {
-		return nil, nil
-	}
-	return h.pendingPermissionsProvider(ctx, taskID)
-}
+// GetPendingPermissions is deprecated. Pending permissions are now stored as messages
+// and retrieved via the HistoricalLogsProvider. This method always returns nil.
+// func (h *Hub) GetPendingPermissions(ctx context.Context, taskID string) ([]*ws.Message, error) {}

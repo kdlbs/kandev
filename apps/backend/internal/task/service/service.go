@@ -1611,6 +1611,69 @@ func (s *Service) UpdateToolCallMessage(ctx context.Context, sessionID, toolCall
 	return nil
 }
 
+// UpdatePermissionMessage updates a permission request message's status.
+// It includes retry logic to handle race conditions.
+func (s *Service) UpdatePermissionMessage(ctx context.Context, sessionID, pendingID, status string) error {
+	const maxRetries = 5
+	const retryDelay = 100 * time.Millisecond
+
+	var message *models.Message
+	var err error
+
+	// Retry loop to handle race condition
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		message, err = s.repo.GetMessageByPendingID(ctx, sessionID, pendingID)
+		if err == nil {
+			break
+		}
+
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		if attempt < maxRetries-1 {
+			s.logger.Debug("permission message not found, retrying",
+				zap.String("session_id", sessionID),
+				zap.String("pending_id", pendingID),
+				zap.Int("attempt", attempt+1),
+				zap.Int("max_retries", maxRetries))
+			time.Sleep(retryDelay)
+		}
+	}
+
+	if err != nil {
+		s.logger.Warn("permission message not found for update after retries",
+			zap.String("session_id", sessionID),
+			zap.String("pending_id", pendingID),
+			zap.Int("retries", maxRetries),
+			zap.Error(err))
+		return err
+	}
+
+	if message.Metadata == nil {
+		message.Metadata = make(map[string]interface{})
+	}
+	message.Metadata["status"] = status
+
+	if err := s.repo.UpdateMessage(ctx, message); err != nil {
+		s.logger.Error("failed to update permission message",
+			zap.String("message_id", message.ID),
+			zap.String("pending_id", pendingID),
+			zap.Error(err))
+		return err
+	}
+
+	// Publish message.updated event
+	s.publishMessageEvent(ctx, events.MessageUpdated, message)
+
+	s.logger.Info("permission message updated",
+		zap.String("message_id", message.ID),
+		zap.String("pending_id", pendingID),
+		zap.String("status", status))
+
+	return nil
+}
+
 // publishMessageEvent publishes message events to the event bus
 func (s *Service) publishMessageEvent(ctx context.Context, eventType string, message *models.Message) {
 	if s.eventBus == nil {

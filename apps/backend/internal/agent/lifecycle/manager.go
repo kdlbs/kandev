@@ -99,10 +99,9 @@ func NewManager(
 
 	// Initialize stream manager with callbacks that delegate to manager methods
 	mgr.streamManager = NewStreamManager(log, StreamCallbacks{
-		OnSessionUpdate: mgr.handleSessionUpdate,
-		OnPermission:    mgr.handlePermissionNotification,
-		OnGitStatus:     mgr.handleGitStatusUpdate,
-		OnFileChange:    mgr.handleFileChangeNotification,
+		OnAgentEvent: mgr.handleAgentEvent,
+		OnGitStatus:  mgr.handleGitStatusUpdate,
+		OnFileChange: mgr.handleFileChangeNotification,
 	})
 
 	// Set session manager dependencies for full orchestration
@@ -708,34 +707,33 @@ func (m *Manager) initializeACPSession(ctx context.Context, execution *AgentExec
 	return m.sessionManager.InitializeAndPrompt(ctx, execution, agentConfig, taskDescription, m.MarkReady)
 }
 
-// handlePermissionNotification processes incoming permission requests from the agent
-func (m *Manager) handlePermissionNotification(execution *AgentExecution, notification *agentctl.PermissionNotification) {
-	// Publish permission request event to the event bus (logged at Debug level there)
-	m.eventPublisher.PublishPermissionRequest(execution, notification)
+// handlePermissionRequestEvent processes permission requests from the unified agent event stream
+func (m *Manager) handlePermissionRequestEvent(execution *AgentExecution, event agentctl.AgentEvent) {
+	m.eventPublisher.PublishPermissionRequest(execution, event)
 }
 
-// handleSessionUpdate processes incoming session updates from the agent
-func (m *Manager) handleSessionUpdate(execution *AgentExecution, update agentctl.SessionUpdate) {
-	// Handle different update types based on the Type field
-	switch update.Type {
+// handleAgentEvent processes incoming agent events from the agent
+func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.AgentEvent) {
+	// Handle different event types based on the Type field
+	switch event.Type {
 	case "message_chunk":
 		m.updateExecutionProgress(execution.ID, 50)
 
 		// Accumulate message content for saving as comment when a step completes
-		if update.Text != "" {
+		if event.Text != "" {
 			execution.messageMu.Lock()
-			execution.messageBuffer.WriteString(update.Text)
+			execution.messageBuffer.WriteString(event.Text)
 			execution.messageMu.Unlock()
 		}
 
 	case "reasoning":
 		// Accumulate reasoning/thinking content
 		execution.messageMu.Lock()
-		if update.ReasoningText != "" {
-			execution.reasoningBuffer.WriteString(update.ReasoningText)
+		if event.ReasoningText != "" {
+			execution.reasoningBuffer.WriteString(event.ReasoningText)
 		}
-		if update.ReasoningSummary != "" {
-			execution.summaryBuffer.WriteString(update.ReasoningSummary)
+		if event.ReasoningSummary != "" {
+			execution.summaryBuffer.WriteString(event.ReasoningSummary)
 		}
 		execution.messageMu.Unlock()
 
@@ -746,21 +744,21 @@ func (m *Manager) handleSessionUpdate(execution *AgentExecution, update agentctl
 
 		m.logger.Debug("tool call started",
 			zap.String("execution_id", execution.ID),
-			zap.String("tool_call_id", update.ToolCallID),
-			zap.String("tool_name", update.ToolName))
+			zap.String("tool_call_id", event.ToolCallID),
+			zap.String("tool_name", event.ToolName))
 		m.updateExecutionProgress(execution.ID, 60)
 
 		// Publish tool call as a comment so it appears in the chat
-		m.eventPublisher.PublishToolCall(execution, update.ToolCallID, update.ToolTitle, update.ToolStatus, update.ToolArgs)
+		m.eventPublisher.PublishToolCall(execution, event.ToolCallID, event.ToolTitle, event.ToolStatus, event.ToolArgs)
 
 	case "tool_update":
 		// Check if tool call completed
-		switch update.ToolStatus {
+		switch event.ToolStatus {
 		case "complete", "completed":
 			m.updateExecutionProgress(execution.ID, 80)
-			m.eventPublisher.PublishToolCallComplete(execution, update)
+			m.eventPublisher.PublishToolCallComplete(execution, event)
 		case "error", "failed":
-			m.eventPublisher.PublishToolCallComplete(execution, update)
+			m.eventPublisher.PublishToolCallComplete(execution, event)
 		}
 
 	case "plan":
@@ -770,12 +768,12 @@ func (m *Manager) handleSessionUpdate(execution *AgentExecution, update agentctl
 	case "error":
 		m.logger.Error("agent error",
 			zap.String("execution_id", execution.ID),
-			zap.String("error", update.Error))
+			zap.String("error", event.Error))
 
 	case "complete":
 		m.logger.Info("agent turn complete",
 			zap.String("execution_id", execution.ID),
-			zap.String("session_id", update.SessionID))
+			zap.String("session_id", event.SessionID))
 
 		// Flush accumulated message buffer as a comment
 		m.flushMessageBufferAsComment(execution)
@@ -786,10 +784,19 @@ func (m *Manager) handleSessionUpdate(execution *AgentExecution, update agentctl
 				zap.String("execution_id", execution.ID),
 				zap.Error(err))
 		}
+
+	case "permission_request":
+		m.logger.Debug("permission request received",
+			zap.String("execution_id", execution.ID),
+			zap.String("pending_id", event.PendingID),
+			zap.String("title", event.PermissionTitle))
+
+		// Handle permission request inline
+		m.handlePermissionRequestEvent(execution, event)
 	}
 
-	// Publish session update to event bus for WebSocket streaming
-	m.eventPublisher.PublishSessionUpdate(execution, update)
+	// Publish agent stream event to event bus for WebSocket streaming
+	m.eventPublisher.PublishAgentStreamEvent(execution, event)
 }
 
 // handleGitStatusUpdate processes git status updates from the workspace tracker
@@ -1195,17 +1202,4 @@ func (m *Manager) RespondToPermissionBySessionID(sessionID, pendingID, optionID 
 	return m.RespondToPermission(execution.ID, pendingID, optionID, cancelled)
 }
 
-// GetPendingPermissionsForSession returns all pending permissions for a session
-func (m *Manager) GetPendingPermissionsForSession(ctx context.Context, sessionID string) ([]agentctl.PermissionNotification, error) {
-	execution, exists := m.executionStore.GetBySessionID(sessionID)
-	if !exists {
-		// No active execution for this session, so no pending permissions
-		return nil, nil
-	}
 
-	if execution.agentctl == nil {
-		return nil, nil
-	}
-
-	return execution.agentctl.GetPendingPermissions(ctx)
-}

@@ -11,7 +11,6 @@ import { registerEnvironmentsHandlers } from '@/lib/ws/handlers/environments';
 import { registerExecutorsHandlers } from '@/lib/ws/handlers/executors';
 import { registerGitStatusHandlers } from '@/lib/ws/handlers/git-status';
 import { registerKanbanHandlers } from '@/lib/ws/handlers/kanban';
-import { registerPermissionsHandlers } from '@/lib/ws/handlers/permissions';
 import { registerSystemEventsHandlers } from '@/lib/ws/handlers/system-events';
 import { registerTasksHandlers } from '@/lib/ws/handlers/tasks';
 import { registerTerminalsHandlers } from '@/lib/ws/handlers/terminals';
@@ -35,7 +34,6 @@ export function registerWsHandlers(store: StoreApi<AppState>) {
     ...registerMessagesHandlers(store),
     ...registerNotificationsHandlers(store),
     ...registerGitStatusHandlers(store),
-    ...registerPermissionsHandlers(store),
     ...registerSystemEventsHandlers(store),
   };
 }
