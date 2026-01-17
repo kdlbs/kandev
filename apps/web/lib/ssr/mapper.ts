@@ -36,20 +36,30 @@ export function snapshotToState(snapshot: BoardSnapshot): Partial<AppState> {
 
 export function taskToState(
   task: Task,
+  sessionId?: string | null,
   messages?: { items: Message[]; hasMore?: boolean; oldestCursor?: string | null }
 ): Partial<AppState> {
+  const resolvedSessionId =
+    sessionId ?? messages?.items[0]?.session_id ?? null;
   return {
     tasks: {
       activeTaskId: task.id,
+      activeSessionId: resolvedSessionId,
     },
-    messages: messages
-      ? {
-          sessionId: messages.items[0]?.task_session_id ?? null,
-          items: messages.items,
-          isLoading: false,
-          hasMore: messages.hasMore ?? false,
-          oldestCursor: messages.oldestCursor ?? (messages.items[0]?.id ?? null),
-        }
-      : undefined,
+    messages:
+      resolvedSessionId && messages
+        ? {
+            bySession: {
+              [resolvedSessionId]: messages.items,
+            },
+            metaBySession: {
+              [resolvedSessionId]: {
+                isLoading: false,
+                hasMore: messages.hasMore ?? false,
+                oldestCursor: messages.oldestCursor ?? (messages.items[0]?.id ?? null),
+              },
+            },
+          }
+        : undefined,
   };
 }

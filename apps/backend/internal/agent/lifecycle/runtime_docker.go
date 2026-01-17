@@ -47,6 +47,7 @@ func (r *DockerRuntime) CreateInstance(ctx context.Context, req *RuntimeCreateRe
 		AgentConfig:    req.AgentConfig,
 		WorkspacePath:  req.WorkspacePath,
 		TaskID:         req.TaskID,
+		SessionID:      req.SessionID,
 		InstanceID:     req.InstanceID,
 		MainRepoGitDir: req.MainRepoGitDir,
 		Credentials:    req.Env, // Env contains credentials from the caller
@@ -77,6 +78,7 @@ func (r *DockerRuntime) CreateInstance(ctx context.Context, req *RuntimeCreateRe
 	return &RuntimeInstance{
 		InstanceID:    req.InstanceID,
 		TaskID:        req.TaskID,
+		SessionID:     req.SessionID,
 		Client:        client,
 		ContainerID:   containerID,
 		ContainerIP:   containerIP,
@@ -134,6 +136,7 @@ func (r *DockerRuntime) RecoverInstances(ctx context.Context) ([]*RuntimeInstanc
 
 		instanceID := labels["kandev.instance_id"]
 		taskID := labels["kandev.task_id"]
+		sessionID := labels["kandev.session_id"]
 		agentProfileID := labels["kandev.agent_profile_id"]
 
 		if instanceID == "" || taskID == "" {
@@ -167,6 +170,7 @@ func (r *DockerRuntime) RecoverInstances(ctx context.Context) ([]*RuntimeInstanc
 		recovered = append(recovered, &RuntimeInstance{
 			InstanceID:    instanceID,
 			TaskID:        taskID,
+			SessionID:     sessionID,
 			Client:        client,
 			ContainerID:   ctr.ID,
 			ContainerIP:   containerIP,
@@ -183,4 +187,3 @@ func (r *DockerRuntime) RecoverInstances(ctx context.Context) ([]*RuntimeInstanc
 
 	return recovered, nil
 }
-

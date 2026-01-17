@@ -24,6 +24,8 @@ type Hub struct {
 
 	// Clients subscribed to specific tasks (for ACP notifications)
 	taskSubscribers map[string]map[*Client]bool
+	// Clients subscribed to specific sessions
+	sessionSubscribers map[string]map[*Client]bool
 	// Clients subscribed to specific users (for user settings notifications)
 	userSubscribers map[string]map[*Client]bool
 
@@ -49,14 +51,15 @@ type Hub struct {
 // NewHub creates a new WebSocket hub
 func NewHub(dispatcher *ws.Dispatcher, log *logger.Logger) *Hub {
 	return &Hub{
-		clients:         make(map[*Client]bool),
-		taskSubscribers: make(map[string]map[*Client]bool),
-		userSubscribers: make(map[string]map[*Client]bool),
-		register:        make(chan *Client),
-		unregister:      make(chan *Client),
-		broadcast:       make(chan *ws.Message, 256),
-		dispatcher:      dispatcher,
-		logger:          log.WithFields(zap.String("component", "ws_hub")),
+		clients:            make(map[*Client]bool),
+		taskSubscribers:    make(map[string]map[*Client]bool),
+		sessionSubscribers: make(map[string]map[*Client]bool),
+		userSubscribers:    make(map[string]map[*Client]bool),
+		register:           make(chan *Client),
+		unregister:         make(chan *Client),
+		broadcast:          make(chan *ws.Message, 256),
+		dispatcher:         dispatcher,
+		logger:             log.WithFields(zap.String("component", "ws_hub")),
 	}
 }
 
@@ -96,6 +99,7 @@ func (h *Hub) closeAllClients() {
 		delete(h.clients, client)
 	}
 	h.taskSubscribers = make(map[string]map[*Client]bool)
+	h.sessionSubscribers = make(map[string]map[*Client]bool)
 }
 
 // removeClient removes a client from the hub
@@ -113,6 +117,14 @@ func (h *Hub) removeClient(client *Client) {
 				delete(clients, client)
 				if len(clients) == 0 {
 					delete(h.taskSubscribers, taskID)
+				}
+			}
+		}
+		for sessionID := range client.sessionSubscriptions {
+			if clients, ok := h.sessionSubscribers[sessionID]; ok {
+				delete(clients, client)
+				if len(clients) == 0 {
+					delete(h.sessionSubscribers, sessionID)
 				}
 			}
 		}
@@ -196,6 +208,40 @@ func (h *Hub) BroadcastToTask(taskID string, msg *ws.Message) {
 	}
 }
 
+// BroadcastToSession sends a notification to clients subscribed to a specific session
+func (h *Hub) BroadcastToSession(sessionID string, msg *ws.Message) {
+	data, err := json.Marshal(msg)
+	if err != nil {
+		h.logger.Error("Failed to marshal message", zap.Error(err))
+		return
+	}
+
+	h.mu.RLock()
+	subscriberMap := h.sessionSubscribers[sessionID]
+	clients := make([]*Client, 0, len(subscriberMap))
+	for client := range subscriberMap {
+		clients = append(clients, client)
+	}
+	h.mu.RUnlock()
+
+	h.logger.Debug("BroadcastToSession",
+		zap.String("session_id", sessionID),
+		zap.String("action", msg.Action),
+		zap.Int("subscriber_count", len(clients)))
+
+	for _, client := range clients {
+		if client.sendBytes(data) {
+			h.logger.Debug("Sent message to client",
+				zap.String("client_id", client.ID),
+				zap.String("action", msg.Action))
+		} else {
+			h.logger.Warn("Client send buffer full, dropping message",
+				zap.String("client_id", client.ID),
+				zap.String("action", msg.Action))
+		}
+	}
+}
+
 // BroadcastToUser sends a notification to clients subscribed to a specific user
 func (h *Hub) BroadcastToUser(userID string, msg *ws.Message) {
 	data, err := json.Marshal(msg)
@@ -245,6 +291,36 @@ func (h *Hub) SubscribeToTask(client *Client, taskID string) {
 	h.logger.Debug("Client subscribed to task",
 		zap.String("client_id", client.ID),
 		zap.String("task_id", taskID))
+}
+
+// SubscribeToSession subscribes a client to session notifications
+func (h *Hub) SubscribeToSession(client *Client, sessionID string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	if _, ok := h.sessionSubscribers[sessionID]; !ok {
+		h.sessionSubscribers[sessionID] = make(map[*Client]bool)
+	}
+	h.sessionSubscribers[sessionID][client] = true
+	client.sessionSubscriptions[sessionID] = true
+
+	h.logger.Debug("Client subscribed to session",
+		zap.String("client_id", client.ID),
+		zap.String("session_id", sessionID))
+}
+
+// UnsubscribeFromSession unsubscribes a client from session notifications
+func (h *Hub) UnsubscribeFromSession(client *Client, sessionID string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	delete(client.sessionSubscriptions, sessionID)
+	if clients, ok := h.sessionSubscribers[sessionID]; ok {
+		delete(clients, client)
+		if len(clients) == 0 {
+			delete(h.sessionSubscribers, sessionID)
+		}
+	}
 }
 
 // SubscribeToUser subscribes a client to user notifications

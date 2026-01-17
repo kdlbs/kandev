@@ -5,17 +5,14 @@ import type { TaskSessionState } from '@/lib/types/http';
 
 export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
-    'task_session.state_changed': (message) => {
+    'session.state_changed': (message) => {
       const payload = message.payload;
       if (!payload?.task_id || !payload?.new_state) {
         return;
       }
       const taskId = payload.task_id;
       const newState = payload.new_state as TaskSessionState;
-      const sessionId = payload.task_session_id;
-
-      // Update task session state by task ID
-      store.getState().setTaskSessionState(taskId, newState);
+      const sessionId = payload.session_id;
 
       // Also update or create the session object if we have the session ID
       if (sessionId) {
@@ -37,7 +34,61 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
             updated_at: '',
           });
         }
+
+        const sessionsByTask = store.getState().taskSessionsByTask.itemsByTaskId[taskId];
+        if (sessionsByTask) {
+          const hasSession = sessionsByTask.some((session) => session.id === sessionId);
+          if (!hasSession) {
+            store.getState().setTaskSessionsForTask(taskId, [...sessionsByTask, {
+              id: sessionId,
+              task_id: taskId,
+              state: newState,
+              progress: 0,
+              started_at: '',
+              updated_at: '',
+            }]);
+          } else {
+            const nextSessions = sessionsByTask.map((session) =>
+              session.id === sessionId ? { ...session, state: newState } : session
+            );
+            store.getState().setTaskSessionsForTask(taskId, nextSessions);
+          }
+        }
       }
+    },
+    'session.agentctl_starting': (message) => {
+      const payload = message.payload;
+      if (!payload?.session_id) {
+        return;
+      }
+      store.getState().setSessionAgentctlStatus(payload.session_id, {
+        status: 'starting',
+        agentExecutionId: payload.agent_execution_id,
+        updatedAt: message.timestamp,
+      });
+    },
+    'session.agentctl_ready': (message) => {
+      const payload = message.payload;
+      if (!payload?.session_id) {
+        return;
+      }
+      store.getState().setSessionAgentctlStatus(payload.session_id, {
+        status: 'ready',
+        agentExecutionId: payload.agent_execution_id,
+        updatedAt: message.timestamp,
+      });
+    },
+    'session.agentctl_error': (message) => {
+      const payload = message.payload;
+      if (!payload?.session_id) {
+        return;
+      }
+      store.getState().setSessionAgentctlStatus(payload.session_id, {
+        status: 'error',
+        agentExecutionId: payload.agent_execution_id,
+        errorMessage: payload.error_message,
+        updatedAt: message.timestamp,
+      });
     },
   };
 }

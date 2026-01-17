@@ -41,11 +41,12 @@ func (c *ExecutorController) GetExecutor(ctx context.Context, req dto.GetExecuto
 
 func (c *ExecutorController) CreateExecutor(ctx context.Context, req dto.CreateExecutorRequest) (dto.ExecutorDTO, error) {
 	executor, err := c.service.CreateExecutor(ctx, &service.CreateExecutorRequest{
-		Name:     req.Name,
-		Type:     req.Type,
-		Status:   req.Status,
-		IsSystem: req.IsSystem,
-		Config:   req.Config,
+		Name:      req.Name,
+		Type:      req.Type,
+		Status:    req.Status,
+		IsSystem:  req.IsSystem,
+		Resumable: req.Resumable,
+		Config:    req.Config,
 	})
 	if err != nil {
 		return dto.ExecutorDTO{}, err
@@ -55,10 +56,11 @@ func (c *ExecutorController) CreateExecutor(ctx context.Context, req dto.CreateE
 
 func (c *ExecutorController) UpdateExecutor(ctx context.Context, req dto.UpdateExecutorRequest) (dto.ExecutorDTO, error) {
 	executor, err := c.service.UpdateExecutor(ctx, req.ID, &service.UpdateExecutorRequest{
-		Name:   req.Name,
-		Type:   req.Type,
-		Status: req.Status,
-		Config: req.Config,
+		Name:      req.Name,
+		Type:      req.Type,
+		Status:    req.Status,
+		Resumable: req.Resumable,
+		Config:    req.Config,
 	})
 	if err != nil {
 		return dto.ExecutorDTO{}, err

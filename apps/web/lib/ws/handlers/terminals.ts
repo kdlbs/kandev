@@ -7,13 +7,16 @@ export function registerTerminalsHandlers(store: StoreApi<AppState>): WsHandlers
     'terminal.output': (message) => {
       store.getState().setTerminalOutput(message.payload.terminalId, message.payload.data);
     },
-    'shell.output': (message) => {
-      const { task_id, type, data } = message.payload;
+    'session.shell.output': (message) => {
+      const { session_id, type, data } = message.payload;
+      if (!session_id) {
+        return;
+      }
       if (type === 'output' && data) {
-        store.getState().appendShellOutput(task_id, data);
+        store.getState().appendShellOutput(session_id, data);
       } else if (type === 'exit') {
         // Shell exited - update status
-        store.getState().setShellStatus(task_id, { available: false });
+        store.getState().setShellStatus(session_id, { available: false });
       }
     },
   };

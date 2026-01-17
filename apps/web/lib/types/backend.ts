@@ -7,7 +7,7 @@ export type BackendMessageType =
   | 'agent.updated'
   | 'terminal.output'
   | 'diff.update'
-  | 'git.status'
+  | 'session.git.status'
   | 'system.error'
   | 'workspace.created'
   | 'workspace.updated'
@@ -18,10 +18,13 @@ export type BackendMessageType =
   | 'column.created'
   | 'column.updated'
   | 'column.deleted'
-  | 'message.added'
-  | 'message.updated'
-  | 'task_session.state_changed'
-  | 'task_session.waiting_for_input'
+  | 'session.message.added'
+  | 'session.message.updated'
+  | 'session.state_changed'
+  | 'session.waiting_for_input'
+  | 'session.agentctl_starting'
+  | 'session.agentctl_ready'
+  | 'session.agentctl_error'
   | 'executor.created'
   | 'executor.updated'
   | 'executor.deleted'
@@ -32,8 +35,8 @@ export type BackendMessageType =
   | 'agent.profile.created'
   | 'agent.profile.updated'
   | 'user.settings.updated'
-  | 'workspace.file.changes'
-  | 'shell.output'
+  | 'session.workspace.file.changes'
+  | 'session.shell.output'
   | 'permission.requested';
 
 export type BackendMessage<T extends BackendMessageType, P> = {
@@ -133,7 +136,7 @@ export type ColumnPayload = {
 export type MessageAddedPayload = {
   task_id: string;
   message_id: string;
-  task_session_id: string;
+  session_id: string;
   author_type: 'user' | 'agent';
   author_id?: string;
   content: string;
@@ -145,16 +148,23 @@ export type MessageAddedPayload = {
 
 export type TaskSessionStateChangedPayload = {
   task_id: string;
-  task_session_id: string;
+  session_id: string;
   old_state?: string;
   new_state: string;
 };
 
 export type TaskSessionWaitingForInputPayload = {
   task_id: string;
-  task_session_id: string;
+  session_id: string;
   title: string;
   body: string;
+};
+
+export type TaskSessionAgentctlPayload = {
+  task_id: string;
+  session_id: string;
+  agent_execution_id?: string;
+  error_message?: string;
 };
 
 export type FileInfo = {
@@ -168,6 +178,7 @@ export type FileInfo = {
 
 export type GitStatusPayload = {
   task_id: string;
+  session_id?: string;
   branch: string;
   remote_branch?: string;
   modified: string[];
@@ -237,6 +248,7 @@ export type UserSettingsUpdatedPayload = {
 
 export type ShellOutputPayload = {
   task_id: string;
+  session_id: string;
   type: 'output' | 'exit';
   data?: string;
   code?: number;
@@ -271,7 +283,7 @@ export type BackendMessageMap = {
   'agent.updated': BackendMessage<'agent.updated', AgentUpdatePayload>;
   'terminal.output': BackendMessage<'terminal.output', TerminalOutputPayload>;
   'diff.update': BackendMessage<'diff.update', DiffUpdatePayload>;
-  'git.status': BackendMessage<'git.status', GitStatusPayload>;
+  'session.git.status': BackendMessage<'session.git.status', GitStatusPayload>;
   'system.error': BackendMessage<'system.error', SystemErrorPayload>;
   'workspace.created': BackendMessage<'workspace.created', WorkspacePayload>;
   'workspace.updated': BackendMessage<'workspace.updated', WorkspacePayload>;
@@ -282,10 +294,13 @@ export type BackendMessageMap = {
   'column.created': BackendMessage<'column.created', ColumnPayload>;
   'column.updated': BackendMessage<'column.updated', ColumnPayload>;
   'column.deleted': BackendMessage<'column.deleted', ColumnPayload>;
-  'message.added': BackendMessage<'message.added', MessageAddedPayload>;
-  'message.updated': BackendMessage<'message.updated', MessageAddedPayload>;
-  'task_session.state_changed': BackendMessage<'task_session.state_changed', TaskSessionStateChangedPayload>;
-  'task_session.waiting_for_input': BackendMessage<'task_session.waiting_for_input', TaskSessionWaitingForInputPayload>;
+  'session.message.added': BackendMessage<'session.message.added', MessageAddedPayload>;
+  'session.message.updated': BackendMessage<'session.message.updated', MessageAddedPayload>;
+  'session.state_changed': BackendMessage<'session.state_changed', TaskSessionStateChangedPayload>;
+  'session.waiting_for_input': BackendMessage<'session.waiting_for_input', TaskSessionWaitingForInputPayload>;
+  'session.agentctl_starting': BackendMessage<'session.agentctl_starting', TaskSessionAgentctlPayload>;
+  'session.agentctl_ready': BackendMessage<'session.agentctl_ready', TaskSessionAgentctlPayload>;
+  'session.agentctl_error': BackendMessage<'session.agentctl_error', TaskSessionAgentctlPayload>;
   'executor.created': BackendMessage<'executor.created', ExecutorPayload>;
   'executor.updated': BackendMessage<'executor.updated', ExecutorPayload>;
   'executor.deleted': BackendMessage<'executor.deleted', ExecutorPayload>;
@@ -296,8 +311,8 @@ export type BackendMessageMap = {
   'agent.profile.created': BackendMessage<'agent.profile.created', AgentProfileChangedPayload>;
   'agent.profile.updated': BackendMessage<'agent.profile.updated', AgentProfileChangedPayload>;
   'user.settings.updated': BackendMessage<'user.settings.updated', UserSettingsUpdatedPayload>;
-  'workspace.file.changes': BackendMessage<'workspace.file.changes', FileChangeNotificationPayload>;
-  'shell.output': BackendMessage<'shell.output', ShellOutputPayload>;
+  'session.workspace.file.changes': BackendMessage<'session.workspace.file.changes', FileChangeNotificationPayload>;
+  'session.shell.output': BackendMessage<'session.shell.output', ShellOutputPayload>;
   'permission.requested': BackendMessage<'permission.requested', PermissionRequestedPayload>;
 };
 

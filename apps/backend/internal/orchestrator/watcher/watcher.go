@@ -42,45 +42,49 @@ type ACPSessionEventData struct {
 
 // PromptCompleteData contains data from prompt_complete events
 type PromptCompleteData struct {
-	TaskID       string `json:"task_id"`
-	AgentID      string `json:"agent_id"`
-	AgentMessage string `json:"agent_message"`
+	TaskID        string `json:"task_id"`
+	TaskSessionID string `json:"session_id"`
+	AgentID       string `json:"agent_id"`
+	AgentMessage  string `json:"agent_message"`
 }
 
 // ToolCallData contains data from tool_call events
 type ToolCallData struct {
-	TaskID     string                 `json:"task_id"`
-	AgentID    string                 `json:"agent_id"`
-	ToolCallID string                 `json:"tool_call_id"`
-	Title      string                 `json:"title"`
-	Status     string                 `json:"status"`
-	Args       map[string]interface{} `json:"args,omitempty"` // Tool call arguments (kind, path, locations, raw_input)
+	TaskID        string                 `json:"task_id"`
+	TaskSessionID string                 `json:"session_id"`
+	AgentID       string                 `json:"agent_id"`
+	ToolCallID    string                 `json:"tool_call_id"`
+	Title         string                 `json:"title"`
+	Status        string                 `json:"status"`
+	Args          map[string]interface{} `json:"args,omitempty"` // Tool call arguments (kind, path, locations, raw_input)
 }
 
 // ToolCallCompleteData contains data from tool_call_complete events
 type ToolCallCompleteData struct {
-	TaskID     string `json:"task_id"`
-	AgentID    string `json:"agent_id"`
-	ToolCallID string `json:"tool_call_id"`
-	Status     string `json:"status"` // "complete" or "error"
-	Result     string `json:"result,omitempty"`
+	TaskID        string `json:"task_id"`
+	TaskSessionID string `json:"session_id"`
+	AgentID       string `json:"agent_id"`
+	ToolCallID    string `json:"tool_call_id"`
+	Status        string `json:"status"` // "complete" or "error"
+	Result        string `json:"result,omitempty"`
 }
 
 // GitStatusData contains data from git status events
 type GitStatusData struct {
-	TaskID       string                 `json:"task_id"`
-	AgentID      string                 `json:"agent_id"`
-	Branch       string                 `json:"branch"`
-	RemoteBranch string                 `json:"remote_branch"`
-	Modified     []string               `json:"modified"`
-	Added        []string               `json:"added"`
-	Deleted      []string               `json:"deleted"`
-	Untracked    []string               `json:"untracked"`
-	Renamed      []string               `json:"renamed"`
-	Ahead        int                    `json:"ahead"`
-	Behind       int                    `json:"behind"`
-	Files        map[string]interface{} `json:"files"`
-	Timestamp    string                 `json:"timestamp"`
+	TaskID        string                 `json:"task_id"`
+	TaskSessionID string                 `json:"session_id"`
+	AgentID       string                 `json:"agent_id"`
+	Branch        string                 `json:"branch"`
+	RemoteBranch  string                 `json:"remote_branch"`
+	Modified      []string               `json:"modified"`
+	Added         []string               `json:"added"`
+	Deleted       []string               `json:"deleted"`
+	Untracked     []string               `json:"untracked"`
+	Renamed       []string               `json:"renamed"`
+	Ahead         int                    `json:"ahead"`
+	Behind        int                    `json:"behind"`
+	Files         map[string]interface{} `json:"files"`
+	Timestamp     string                 `json:"timestamp"`
 }
 
 // EventHandlers contains callbacks for different event types

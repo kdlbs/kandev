@@ -52,7 +52,7 @@ type StartTaskResponse struct {
 	Success          bool    `json:"success"`
 	TaskID           string  `json:"task_id"`
 	AgentExecutionID string  `json:"agent_execution_id"`
-	TaskSessionID    string  `json:"task_session_id,omitempty"`
+	TaskSessionID    string  `json:"session_id,omitempty"`
 	State            string  `json:"state"`
 	WorktreePath     *string `json:"worktree_path,omitempty"`
 	WorktreeBranch   *string `json:"worktree_branch,omitempty"`
@@ -61,7 +61,7 @@ type StartTaskResponse struct {
 // ResumeTaskSessionRequest is the payload for task.session.resume
 type ResumeTaskSessionRequest struct {
 	TaskID        string `json:"task_id"`
-	TaskSessionID string `json:"task_session_id"`
+	TaskSessionID string `json:"session_id"`
 }
 
 // ResumeTaskSessionResponse is the response for task.session.resume
@@ -69,7 +69,7 @@ type ResumeTaskSessionResponse struct {
 	Success          bool    `json:"success"`
 	TaskID           string  `json:"task_id"`
 	AgentExecutionID string  `json:"agent_execution_id"`
-	TaskSessionID    string  `json:"task_session_id,omitempty"`
+	TaskSessionID    string  `json:"session_id,omitempty"`
 	State            string  `json:"state"`
 	WorktreePath     *string `json:"worktree_path,omitempty"`
 	WorktreeBranch   *string `json:"worktree_branch,omitempty"`
@@ -78,7 +78,7 @@ type ResumeTaskSessionResponse struct {
 // TaskSessionStatusRequest is the payload for task.session.status
 type TaskSessionStatusRequest struct {
 	TaskID        string `json:"task_id"`
-	TaskSessionID string `json:"task_session_id"`
+	TaskSessionID string `json:"session_id"`
 }
 
 // TaskSessionStatusResponse is the response for task.session.status
@@ -90,9 +90,9 @@ type TaskSessionStatusResponse struct {
 	AgentProfileID string `json:"agent_profile_id,omitempty"`
 
 	// Runtime status
-	IsAgentRunning bool   `json:"is_agent_running"`    // Agent process is currently running
-	IsResumable    bool   `json:"is_resumable"`        // Session can be resumed
-	NeedsResume    bool   `json:"needs_resume"`        // Session needs resumption (page reload scenario)
+	IsAgentRunning bool   `json:"is_agent_running"`        // Agent process is currently running
+	IsResumable    bool   `json:"is_resumable"`            // Session can be resumed
+	NeedsResume    bool   `json:"needs_resume"`            // Session needs resumption (page reload scenario)
 	ResumeReason   string `json:"resume_reason,omitempty"` // Why resume is needed (e.g., "agent_not_running")
 
 	// ACP session info
@@ -120,8 +120,9 @@ type SuccessResponse struct {
 
 // PromptTaskRequest is the payload for orchestrator.prompt
 type PromptTaskRequest struct {
-	TaskID string `json:"task_id"`
-	Prompt string `json:"prompt"`
+	TaskID        string `json:"task_id"`
+	TaskSessionID string `json:"session_id"`
+	Prompt        string `json:"prompt"`
 }
 
 // PromptTaskResponse is the response for orchestrator.prompt
@@ -143,7 +144,7 @@ type CompleteTaskResponse struct {
 
 // PermissionRespondRequest is the payload for permission.respond
 type PermissionRespondRequest struct {
-	TaskID    string `json:"task_id"`
+	SessionID string `json:"session_id"`
 	PendingID string `json:"pending_id"`
 	OptionID  string `json:"option_id,omitempty"`
 	Cancelled bool   `json:"cancelled,omitempty"`
@@ -152,7 +153,7 @@ type PermissionRespondRequest struct {
 // PermissionRespondResponse is the response for permission.respond
 type PermissionRespondResponse struct {
 	Success   bool   `json:"success"`
-	TaskID    string `json:"task_id"`
+	SessionID string `json:"session_id"`
 	PendingID string `json:"pending_id"`
 }
 
@@ -167,7 +168,7 @@ type TaskExecutionResponse struct {
 	TaskID           string `json:"task_id"`
 	AgentExecutionID string `json:"agent_execution_id,omitempty"`
 	AgentProfileID   string `json:"agent_profile_id,omitempty"`
-	TaskSessionID    string `json:"task_session_id,omitempty"`
+	TaskSessionID    string `json:"session_id,omitempty"`
 	State            string `json:"state,omitempty"`
 	Progress         int    `json:"progress,omitempty"`
 	StartedAt        string `json:"started_at,omitempty"`

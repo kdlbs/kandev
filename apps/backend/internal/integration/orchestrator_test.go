@@ -63,6 +63,7 @@ type SimulatedAgentManagerClient struct {
 type simulatedInstance struct {
 	id             string
 	taskID         string
+	sessionID      string
 	agentProfileID string
 	status         v1.AgentStatus
 	statusMu       sync.Mutex // Protects status field
@@ -125,6 +126,7 @@ func (s *SimulatedAgentManagerClient) LaunchAgent(ctx context.Context, req *exec
 	instance := &simulatedInstance{
 		id:             executionID,
 		taskID:         req.TaskID,
+		sessionID:      req.SessionID,
 		agentProfileID: req.AgentProfileID,
 		status:         v1.AgentStatusStarting,
 		stopCh:         make(chan struct{}),
@@ -137,8 +139,8 @@ func (s *SimulatedAgentManagerClient) LaunchAgent(ctx context.Context, req *exec
 
 	return &executor.LaunchAgentResponse{
 		AgentExecutionID: executionID,
-		ContainerID:     containerID,
-		Status:          v1.AgentStatusStarting,
+		ContainerID:      containerID,
+		Status:           v1.AgentStatusStarting,
 	}, nil
 }
 
@@ -248,11 +250,16 @@ func (s *SimulatedAgentManagerClient) publishACPMessages(instance *simulatedInst
 
 	// Publish each message with a small delay
 	for _, msg := range messages {
+		sessionID := msg.SessionID
+		if sessionID == "" {
+			sessionID = instance.sessionID
+		}
 		msgData := map[string]interface{}{
-			"type":      msg.Type,
-			"task_id":   msg.TaskID,
-			"timestamp": msg.Timestamp,
-			"data":      msg.Data,
+			"type":       msg.Type,
+			"task_id":    msg.TaskID,
+			"session_id": sessionID,
+			"timestamp":  msg.Timestamp,
+			"data":       msg.Data,
 		}
 
 		event := bus.NewEvent(events.ACPMessage, "simulated-agent", msgData)
@@ -371,10 +378,10 @@ func (s *SimulatedAgentManagerClient) PromptAgent(ctx context.Context, agentExec
 	}, nil
 }
 
-// RespondToPermissionByTaskID responds to a permission request for a task
-func (s *SimulatedAgentManagerClient) RespondToPermissionByTaskID(ctx context.Context, taskID, pendingID, optionID string, cancelled bool) error {
+// RespondToPermissionBySessionID responds to a permission request for a session
+func (s *SimulatedAgentManagerClient) RespondToPermissionBySessionID(ctx context.Context, sessionID, pendingID, optionID string, cancelled bool) error {
 	s.logger.Info("simulated: responding to permission",
-		zap.String("task_id", taskID),
+		zap.String("session_id", sessionID),
 		zap.String("pending_id", pendingID),
 		zap.String("option_id", optionID),
 		zap.Bool("cancelled", cancelled))
@@ -424,20 +431,20 @@ func (s *SimulatedAgentManagerClient) GetRecoveredExecutions() []executor.Recove
 	return nil
 }
 
-// IsAgentRunningForTask checks if a simulated agent is running for a task
-func (s *SimulatedAgentManagerClient) IsAgentRunningForTask(ctx context.Context, taskID string) bool {
+// IsAgentRunningForSession checks if a simulated agent is running for a session
+func (s *SimulatedAgentManagerClient) IsAgentRunningForSession(ctx context.Context, sessionID string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	for _, inst := range s.instances {
-		if inst.taskID == taskID && inst.status == v1.AgentStatusRunning {
+		if inst.sessionID == sessionID && inst.status == v1.AgentStatusRunning {
 			return true
 		}
 	}
 	return false
 }
 
-func (s *SimulatedAgentManagerClient) CleanupStaleExecutionByTaskID(ctx context.Context, taskID string) error {
+func (s *SimulatedAgentManagerClient) CleanupStaleExecutionBySessionID(ctx context.Context, sessionID string) error {
 	return nil
 }
 
@@ -564,7 +571,7 @@ func NewOrchestratorTestServer(t *testing.T) *OrchestratorTestServer {
 	repositoryController := taskcontroller.NewRepositoryController(taskSvc)
 	taskhandlers.RegisterWorkspaceRoutes(router, gateway.Dispatcher, workspaceController, log)
 	taskhandlers.RegisterBoardRoutes(router, gateway.Dispatcher, boardController, log)
-	taskhandlers.RegisterTaskRoutes(router, gateway.Dispatcher, taskController, log)
+	taskhandlers.RegisterTaskRoutes(router, gateway.Dispatcher, taskController, nil, log)
 	taskhandlers.RegisterRepositoryRoutes(router, gateway.Dispatcher, repositoryController, log)
 	taskhandlers.RegisterExecutorRoutes(router, gateway.Dispatcher, executorController, log)
 	taskhandlers.RegisterEnvironmentRoutes(router, gateway.Dispatcher, environmentController, log)
@@ -635,12 +642,12 @@ func (ts *OrchestratorTestServer) CreateTestTask(t *testing.T, agentProfileID st
 	require.NoError(t, err)
 
 	task, err := ts.TaskSvc.CreateTask(context.Background(), &taskservice.CreateTaskRequest{
-		WorkspaceID:    workspace.ID,
-		BoardID:        board.ID,
-		ColumnID:       col.ID,
-		Title:          "Test Task",
-		Description:    "This is a test task for the orchestrator",
-		Priority:       priority,
+		WorkspaceID: workspace.ID,
+		BoardID:     board.ID,
+		ColumnID:    col.ID,
+		Title:       "Test Task",
+		Description: "This is a test task for the orchestrator",
+		Priority:    priority,
 		Repositories: []taskservice.TaskRepositoryInput{
 			{
 				RepositoryID: repository.ID,
@@ -875,6 +882,11 @@ func TestOrchestratorStartTask(t *testing.T) {
 	assert.True(t, payload["success"].(bool))
 	assert.Equal(t, taskID, payload["task_id"])
 	assert.NotEmpty(t, payload["agent_execution_id"])
+	sessionID, _ := payload["session_id"].(string)
+	require.NotEmpty(t, sessionID)
+
+	_, err = client.SendRequest("session-sub-1", ws.ActionSessionSubscribe, map[string]string{"session_id": sessionID})
+	require.NoError(t, err)
 
 	// Wait for ACP notifications
 	time.Sleep(500 * time.Millisecond)
@@ -930,10 +942,14 @@ func TestOrchestratorStopTask(t *testing.T) {
 		"agent_profile_id": "augment-agent",
 	})
 	require.NoError(t, err)
-
 	var startPayload map[string]interface{}
 	require.NoError(t, startResp.ParsePayload(&startPayload))
 	require.True(t, startPayload["success"].(bool))
+	sessionID, _ := startPayload["session_id"].(string)
+	require.NotEmpty(t, sessionID)
+
+	_, err = client.SendRequest("session-sub-1", ws.ActionSessionSubscribe, map[string]string{"session_id": sessionID})
+	require.NoError(t, err)
 
 	// Stop task
 	stopResp, err := client.SendRequest("stop-1", ws.ActionOrchestratorStop, map[string]interface{}{
@@ -971,14 +987,20 @@ func TestOrchestratorPromptTask(t *testing.T) {
 	var startPayload map[string]interface{}
 	require.NoError(t, startResp.ParsePayload(&startPayload))
 	require.True(t, startPayload["success"].(bool))
+	sessionID, _ := startPayload["session_id"].(string)
+	require.NotEmpty(t, sessionID)
+
+	_, err = client.SendRequest("session-sub-1", ws.ActionSessionSubscribe, map[string]string{"session_id": sessionID})
+	require.NoError(t, err)
 
 	// Wait for agent to be ready
 	time.Sleep(300 * time.Millisecond)
 
 	// Send follow-up prompt
 	promptResp, err := client.SendRequest("prompt-1", ws.ActionOrchestratorPrompt, map[string]interface{}{
-		"task_id": taskID,
-		"prompt":  "Please continue and add error handling",
+		"task_id":         taskID,
+		"session_id": sessionID,
+		"prompt":          "Please continue and add error handling",
 	})
 	require.NoError(t, err)
 
@@ -1194,10 +1216,19 @@ func TestOrchestratorMultipleClients(t *testing.T) {
 	require.NoError(t, err)
 
 	// Client 1 starts the task
-	_, err = client1.SendRequest("start-1", ws.ActionOrchestratorStart, map[string]interface{}{
+	startResp, err := client1.SendRequest("start-1", ws.ActionOrchestratorStart, map[string]interface{}{
 		"task_id":          taskID,
 		"agent_profile_id": "augment-agent",
 	})
+	require.NoError(t, err)
+	var startPayload map[string]interface{}
+	require.NoError(t, startResp.ParsePayload(&startPayload))
+	sessionID, _ := startPayload["session_id"].(string)
+	require.NotEmpty(t, sessionID)
+
+	_, err = client1.SendRequest("session-sub-1", ws.ActionSessionSubscribe, map[string]string{"session_id": sessionID})
+	require.NoError(t, err)
+	_, err = client2.SendRequest("session-sub-1", ws.ActionSessionSubscribe, map[string]string{"session_id": sessionID})
 	require.NoError(t, err)
 
 	// Both clients should receive notifications
@@ -1256,7 +1287,8 @@ func TestOrchestratorErrorHandling(t *testing.T) {
 		defer client.Close()
 
 		resp, err := client.SendRequest("prompt-1", ws.ActionOrchestratorPrompt, map[string]interface{}{
-			"task_id": taskID,
+			"task_id":         taskID,
+			"session_id": "session-1",
 		})
 		require.NoError(t, err)
 
@@ -1420,14 +1452,14 @@ func TestOrchestratorEndToEndWorkflow(t *testing.T) {
 	repositoryID := repoPayload["id"].(string)
 
 	taskResp, err := client.SendRequest("task-1", ws.ActionTaskCreate, map[string]interface{}{
-		"workspace_id":     workspaceID,
-		"board_id":         boardID,
-		"column_id":        colID,
-		"title":            "Implement feature X",
-		"description":      "Create a new feature with tests",
-		"priority":         2,
-		"repository_id":    repositoryID,
-		"base_branch":      "main",
+		"workspace_id":  workspaceID,
+		"board_id":      boardID,
+		"column_id":     colID,
+		"title":         "Implement feature X",
+		"description":   "Create a new feature with tests",
+		"priority":      2,
+		"repository_id": repositoryID,
+		"base_branch":   "main",
 	})
 	require.NoError(t, err)
 
@@ -1451,6 +1483,11 @@ func TestOrchestratorEndToEndWorkflow(t *testing.T) {
 	assert.True(t, startPayload["success"].(bool))
 	agentExecutionID := startPayload["agent_execution_id"].(string)
 	assert.NotEmpty(t, agentExecutionID)
+	sessionID, _ := startPayload["session_id"].(string)
+	require.NotEmpty(t, sessionID)
+
+	_, err = client.SendRequest("session-sub-1", ws.ActionSessionSubscribe, map[string]string{"session_id": sessionID})
+	require.NoError(t, err)
 
 	// 6. Collect notifications during execution
 	time.Sleep(400 * time.Millisecond)

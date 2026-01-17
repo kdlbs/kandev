@@ -12,8 +12,8 @@ import (
 
 // WorkspaceFileHandlers handles workspace file operations
 type WorkspaceFileHandlers struct {
-	lifecycle *lifecycle.Manager
-	logger    *logger.Logger
+	lifecycle       *lifecycle.Manager
+	logger          *logger.Logger
 }
 
 // NewWorkspaceFileHandlers creates new workspace file handlers
@@ -33,23 +33,22 @@ func (h *WorkspaceFileHandlers) RegisterHandlers(d *ws.Dispatcher) {
 // wsGetFileTree handles workspace.tree.get action
 func (h *WorkspaceFileHandlers) wsGetFileTree(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
-		TaskID string `json:"task_id"`
-		Path   string `json:"path"`
-		Depth  int    `json:"depth"`
+		SessionID string `json:"session_id"`
+		Path      string `json:"path"`
+		Depth     int    `json:"depth"`
 	}
 
 	if err := msg.ParsePayload(&req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
 
-	if req.TaskID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+	if req.SessionID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
 	}
-
-	// Get agent execution for this task
-	execution, found := h.lifecycle.GetExecutionByTaskID(req.TaskID)
+	// Get agent execution for this session
+	execution, found := h.lifecycle.GetExecutionBySessionID(req.SessionID)
 	if !found {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "No agent found for task", nil)
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "No agent found for session", nil)
 	}
 
 	// Get agentctl client
@@ -61,7 +60,7 @@ func (h *WorkspaceFileHandlers) wsGetFileTree(ctx context.Context, msg *ws.Messa
 	// Request file tree from agentctl
 	response, err := client.RequestFileTree(ctx, req.Path, req.Depth)
 	if err != nil {
-		h.logger.Error("failed to get file tree", zap.Error(err), zap.String("task_id", req.TaskID))
+		h.logger.Error("failed to get file tree", zap.Error(err), zap.String("session_id", req.SessionID))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, fmt.Sprintf("Failed to get file tree: %v", err), nil)
 	}
 
@@ -71,26 +70,25 @@ func (h *WorkspaceFileHandlers) wsGetFileTree(ctx context.Context, msg *ws.Messa
 // wsGetFileContent handles workspace.file.get action
 func (h *WorkspaceFileHandlers) wsGetFileContent(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
-		TaskID string `json:"task_id"`
-		Path   string `json:"path"`
+		SessionID string `json:"session_id"`
+		Path      string `json:"path"`
 	}
 
 	if err := msg.ParsePayload(&req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
 
-	if req.TaskID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+	if req.SessionID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
 	}
-
 	if req.Path == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "path is required", nil)
 	}
 
-	// Get agent execution for this task
-	execution, found := h.lifecycle.GetExecutionByTaskID(req.TaskID)
+	// Get agent execution for this session
+	execution, found := h.lifecycle.GetExecutionBySessionID(req.SessionID)
 	if !found {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "No agent found for task", nil)
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "No agent found for session", nil)
 	}
 
 	// Get agentctl client
@@ -102,7 +100,7 @@ func (h *WorkspaceFileHandlers) wsGetFileContent(ctx context.Context, msg *ws.Me
 	// Request file content from agentctl
 	response, err := client.RequestFileContent(ctx, req.Path)
 	if err != nil {
-		h.logger.Error("failed to get file content", zap.Error(err), zap.String("task_id", req.TaskID), zap.String("path", req.Path))
+		h.logger.Error("failed to get file content", zap.Error(err), zap.String("session_id", req.SessionID), zap.String("path", req.Path))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, fmt.Sprintf("Failed to get file content: %v", err), nil)
 	}
 

@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/controller"
 	"github.com/kandev/kandev/internal/task/dto"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -15,19 +16,25 @@ import (
 )
 
 type TaskHandlers struct {
-	controller *controller.TaskController
-	logger     *logger.Logger
+	controller   *controller.TaskController
+	orchestrator OrchestratorStarter
+	logger       *logger.Logger
 }
 
-func NewTaskHandlers(ctrl *controller.TaskController, log *logger.Logger) *TaskHandlers {
+type OrchestratorStarter interface {
+	StartTask(ctx context.Context, taskID string, agentProfileID string, priority int) (*executor.TaskExecution, error)
+}
+
+func NewTaskHandlers(ctrl *controller.TaskController, orchestrator OrchestratorStarter, log *logger.Logger) *TaskHandlers {
 	return &TaskHandlers{
-		controller: ctrl,
-		logger:     log.WithFields(zap.String("component", "task-task-handlers")),
+		controller:   ctrl,
+		orchestrator: orchestrator,
+		logger:       log.WithFields(zap.String("component", "task-task-handlers")),
 	}
 }
 
-func RegisterTaskRoutes(router *gin.Engine, dispatcher *ws.Dispatcher, ctrl *controller.TaskController, log *logger.Logger) {
-	handlers := NewTaskHandlers(ctrl, log)
+func RegisterTaskRoutes(router *gin.Engine, dispatcher *ws.Dispatcher, ctrl *controller.TaskController, orchestrator OrchestratorStarter, log *logger.Logger) {
+	handlers := NewTaskHandlers(ctrl, orchestrator, log)
 	handlers.registerHTTP(router)
 	handlers.registerWS(dispatcher)
 }
@@ -36,6 +43,7 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api := router.Group("/api/v1")
 	api.GET("/boards/:id/tasks", h.httpListTasks)
 	api.GET("/tasks/:id", h.httpGetTask)
+	api.GET("/task-sessions/:id", h.httpGetTaskSession)
 	api.GET("/tasks/:id/sessions", h.httpListTaskSessions)
 	api.POST("/tasks", h.httpCreateTask)
 	api.PATCH("/tasks/:id", h.httpUpdateTask)
@@ -83,6 +91,18 @@ func (h *TaskHandlers) httpListTaskSessions(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
+func (h *TaskHandlers) httpGetTaskSession(c *gin.Context) {
+	resp, err := h.controller.GetTaskSession(
+		c.Request.Context(),
+		dto.GetTaskSessionRequest{TaskSessionID: c.Param("id")},
+	)
+	if err != nil {
+		handleNotFound(c, h.logger, err, "task session not found")
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
 type httpTaskRepositoryInput struct {
 	RepositoryID  string `json:"repository_id"`
 	BaseBranch    string `json:"base_branch"`
@@ -92,17 +112,24 @@ type httpTaskRepositoryInput struct {
 }
 
 type httpCreateTaskRequest struct {
-	WorkspaceID  string                    `json:"workspace_id"`
-	BoardID      string                    `json:"board_id"`
-	ColumnID     string                    `json:"column_id"`
-	Title        string                    `json:"title"`
-	Description  string                    `json:"description,omitempty"`
-	Priority     int                       `json:"priority,omitempty"`
-	State        *v1.TaskState             `json:"state,omitempty"`
-	Repositories []httpTaskRepositoryInput `json:"repositories,omitempty"`
-	AssignedTo   string                    `json:"assigned_to,omitempty"`
-	Position     int                       `json:"position,omitempty"`
-	Metadata     map[string]interface{}    `json:"metadata,omitempty"`
+	WorkspaceID    string                    `json:"workspace_id"`
+	BoardID        string                    `json:"board_id"`
+	ColumnID       string                    `json:"column_id"`
+	Title          string                    `json:"title"`
+	Description    string                    `json:"description,omitempty"`
+	Priority       int                       `json:"priority,omitempty"`
+	State          *v1.TaskState             `json:"state,omitempty"`
+	Repositories   []httpTaskRepositoryInput `json:"repositories,omitempty"`
+	Position       int                       `json:"position,omitempty"`
+	Metadata       map[string]interface{}    `json:"metadata,omitempty"`
+	StartAgent     bool                      `json:"start_agent,omitempty"`
+	AgentProfileID string                    `json:"agent_profile_id,omitempty"`
+}
+
+type createTaskResponse struct {
+	dto.TaskDTO
+	TaskSessionID    string `json:"session_id,omitempty"`
+	AgentExecutionID string `json:"agent_execution_id,omitempty"`
 }
 
 func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
@@ -113,6 +140,10 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 	}
 	if body.WorkspaceID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id is required"})
+		return
+	}
+	if body.StartAgent && body.AgentProfileID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "agent_profile_id is required to start agent"})
 		return
 	}
 
@@ -141,7 +172,6 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		Priority:     body.Priority,
 		State:        body.State,
 		Repositories: repos,
-		AssignedTo:   body.AssignedTo,
 		Position:     body.Position,
 		Metadata:     body.Metadata,
 	})
@@ -149,7 +179,20 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		handleNotFound(c, h.logger, err, "task not created")
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+
+	response := createTaskResponse{TaskDTO: resp}
+	if body.StartAgent && body.AgentProfileID != "" && h.orchestrator != nil {
+		execution, err := h.orchestrator.StartTask(c.Request.Context(), resp.ID, body.AgentProfileID, body.Priority)
+		if err != nil {
+			h.logger.Error("failed to start agent for task", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to start agent for task"})
+			return
+		}
+		response.TaskSessionID = execution.SessionID
+		response.AgentExecutionID = execution.AgentExecutionID
+	}
+
+	c.JSON(http.StatusOK, response)
 }
 
 type httpUpdateTaskRequest struct {
@@ -158,7 +201,6 @@ type httpUpdateTaskRequest struct {
 	Priority     *int                      `json:"priority,omitempty"`
 	State        *v1.TaskState             `json:"state,omitempty"`
 	Repositories []httpTaskRepositoryInput `json:"repositories,omitempty"`
-	AssignedTo   *string                   `json:"assigned_to,omitempty"`
 	Position     *int                      `json:"position,omitempty"`
 	Metadata     map[string]interface{}    `json:"metadata,omitempty"`
 }
@@ -191,7 +233,6 @@ func (h *TaskHandlers) httpUpdateTask(c *gin.Context) {
 		Priority:     body.Priority,
 		State:        body.State,
 		Repositories: repos,
-		AssignedTo:   body.AssignedTo,
 		Position:     body.Position,
 		Metadata:     body.Metadata,
 	})
@@ -285,17 +326,18 @@ func (h *TaskHandlers) wsListTasks(ctx context.Context, msg *ws.Message) (*ws.Me
 }
 
 type wsCreateTaskRequest struct {
-	WorkspaceID  string                    `json:"workspace_id"`
-	BoardID      string                    `json:"board_id"`
-	ColumnID     string                    `json:"column_id"`
-	Title        string                    `json:"title"`
-	Description  string                    `json:"description,omitempty"`
-	Priority     int                       `json:"priority,omitempty"`
-	State        *v1.TaskState             `json:"state,omitempty"`
-	Repositories []httpTaskRepositoryInput `json:"repositories,omitempty"`
-	AssignedTo   string                    `json:"assigned_to,omitempty"`
-	Position     int                       `json:"position,omitempty"`
-	Metadata     map[string]interface{}    `json:"metadata,omitempty"`
+	WorkspaceID    string                    `json:"workspace_id"`
+	BoardID        string                    `json:"board_id"`
+	ColumnID       string                    `json:"column_id"`
+	Title          string                    `json:"title"`
+	Description    string                    `json:"description,omitempty"`
+	Priority       int                       `json:"priority,omitempty"`
+	State          *v1.TaskState             `json:"state,omitempty"`
+	Repositories   []httpTaskRepositoryInput `json:"repositories,omitempty"`
+	Position       int                       `json:"position,omitempty"`
+	Metadata       map[string]interface{}    `json:"metadata,omitempty"`
+	StartAgent     bool                      `json:"start_agent,omitempty"`
+	AgentProfileID string                    `json:"agent_profile_id,omitempty"`
 }
 
 func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -314,6 +356,9 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	}
 	if req.Title == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "title is required", nil)
+	}
+	if req.StartAgent && req.AgentProfileID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "agent_profile_id is required to start agent", nil)
 	}
 
 	// Convert repositories
@@ -340,7 +385,6 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		Priority:     req.Priority,
 		State:        req.State,
 		Repositories: repos,
-		AssignedTo:   req.AssignedTo,
 		Position:     req.Position,
 		Metadata:     req.Metadata,
 	})
@@ -348,7 +392,18 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		h.logger.Error("failed to create task", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create task", nil)
 	}
-	return ws.NewResponse(msg.ID, msg.Action, resp)
+
+	response := createTaskResponse{TaskDTO: resp}
+	if req.StartAgent && req.AgentProfileID != "" && h.orchestrator != nil {
+		execution, err := h.orchestrator.StartTask(ctx, resp.ID, req.AgentProfileID, req.Priority)
+		if err != nil {
+			h.logger.Error("failed to start agent for task", zap.Error(err))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to start agent for task", nil)
+		}
+		response.TaskSessionID = execution.SessionID
+		response.AgentExecutionID = execution.AgentExecutionID
+	}
+	return ws.NewResponse(msg.ID, msg.Action, response)
 }
 
 type wsGetTaskRequest struct {
@@ -378,7 +433,6 @@ type wsUpdateTaskRequest struct {
 	Priority     *int                      `json:"priority,omitempty"`
 	State        *v1.TaskState             `json:"state,omitempty"`
 	Repositories []httpTaskRepositoryInput `json:"repositories,omitempty"`
-	AssignedTo   *string                   `json:"assigned_to,omitempty"`
 	Position     *int                      `json:"position,omitempty"`
 	Metadata     map[string]interface{}    `json:"metadata,omitempty"`
 }
@@ -413,7 +467,6 @@ func (h *TaskHandlers) wsUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		Priority:     req.Priority,
 		State:        req.State,
 		Repositories: repos,
-		AssignedTo:   req.AssignedTo,
 		Position:     req.Position,
 		Metadata:     req.Metadata,
 	})

@@ -6,12 +6,12 @@ import type { FileTreeResponse, FileContentResponse } from '@/lib/types/backend'
  */
 export async function requestFileTree(
   client: WebSocketClient,
-  taskId: string,
+  sessionId: string,
   path: string = '',
   depth: number = 1
 ): Promise<FileTreeResponse> {
   return client.request<FileTreeResponse>('workspace.tree.get', {
-    task_id: taskId,
+    session_id: sessionId,
     path,
     depth,
   });
@@ -22,11 +22,11 @@ export async function requestFileTree(
  */
 export async function requestFileContent(
   client: WebSocketClient,
-  taskId: string,
+  sessionId: string,
   path: string
 ): Promise<FileContentResponse> {
   return client.request<FileContentResponse>('workspace.file.get', {
-    task_id: taskId,
+    session_id: sessionId,
     path,
   });
 }

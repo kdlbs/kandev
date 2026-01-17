@@ -16,7 +16,6 @@ type Task struct {
 	Description  string                 `json:"description"`
 	State        v1.TaskState           `json:"state"`
 	Priority     int                    `json:"priority"`
-	AssignedTo   string                 `json:"assigned_to,omitempty"`
 	Position     int                    `json:"position"` // Order within column
 	Metadata     map[string]interface{} `json:"metadata,omitempty"`
 	Repositories []*TaskRepository      `json:"repositories,omitempty"`
@@ -101,16 +100,16 @@ const (
 
 // Message represents a message in a task session
 type Message struct {
-	ID             string                 `json:"id"`
-	TaskSessionID string                 `json:"task_session_id"`
-	TaskID         string                 `json:"task_id,omitempty"`
-	AuthorType     MessageAuthorType      `json:"author_type"`
-	AuthorID       string                 `json:"author_id,omitempty"` // User ID or Agent Execution ID
-	Content        string                 `json:"content"`
-	Type           MessageType            `json:"type,omitempty"` // Defaults to "message"
-	Metadata       map[string]interface{} `json:"metadata,omitempty"`
-	RequestsInput  bool                   `json:"requests_input"` // True if agent is requesting user input
-	CreatedAt      time.Time              `json:"created_at"`
+	ID            string                 `json:"id"`
+	TaskSessionID string                 `json:"session_id"`
+	TaskID        string                 `json:"task_id,omitempty"`
+	AuthorType    MessageAuthorType      `json:"author_type"`
+	AuthorID      string                 `json:"author_id,omitempty"` // User ID or Agent Execution ID
+	Content       string                 `json:"content"`
+	Type          MessageType            `json:"type,omitempty"` // Defaults to "message"
+	Metadata      map[string]interface{} `json:"metadata,omitempty"`
+	RequestsInput bool                   `json:"requests_input"` // True if agent is requesting user input
+	CreatedAt     time.Time              `json:"created_at"`
 }
 
 // ToAPI converts internal Message to API type
@@ -120,16 +119,16 @@ func (m *Message) ToAPI() *v1.Message {
 		messageType = string(MessageTypeMessage)
 	}
 	result := &v1.Message{
-		ID:             m.ID,
+		ID:            m.ID,
 		TaskSessionID: m.TaskSessionID,
-		TaskID:         m.TaskID,
-		AuthorType:     string(m.AuthorType),
-		AuthorID:       m.AuthorID,
-		Content:        m.Content,
-		Type:           messageType,
-		Metadata:       m.Metadata,
-		RequestsInput:  m.RequestsInput,
-		CreatedAt:      m.CreatedAt,
+		TaskID:        m.TaskID,
+		AuthorType:    string(m.AuthorType),
+		AuthorID:      m.AuthorID,
+		Content:       m.Content,
+		Type:          messageType,
+		Metadata:      m.Metadata,
+		RequestsInput: m.RequestsInput,
+		CreatedAt:     m.CreatedAt,
 	}
 	return result
 }
@@ -175,17 +174,17 @@ type TaskSession struct {
 	TaskID               string                 `json:"task_id"`
 	AgentExecutionID     string                 `json:"agent_execution_id"` // Docker container/agent execution
 	ContainerID          string                 `json:"container_id"`       // Docker container ID for cleanup
-	AgentProfileID       string                 `json:"agent_profile_id"`  // ID of the agent profile used
+	AgentProfileID       string                 `json:"agent_profile_id"`   // ID of the agent profile used
 	ExecutorID           string                 `json:"executor_id"`
 	EnvironmentID        string                 `json:"environment_id"`
-	RepositoryID         string                 `json:"repository_id"`     // Primary repository (for backward compatibility)
-	BaseBranch           string                 `json:"base_branch"`       // Primary base branch (for backward compatibility)
+	RepositoryID         string                 `json:"repository_id"`       // Primary repository (for backward compatibility)
+	BaseBranch           string                 `json:"base_branch"`         // Primary base branch (for backward compatibility)
 	Worktrees            []*TaskSessionWorktree `json:"worktrees,omitempty"` // Associated worktrees
 	AgentProfileSnapshot map[string]interface{} `json:"agent_profile_snapshot,omitempty"`
 	ExecutorSnapshot     map[string]interface{} `json:"executor_snapshot,omitempty"`
 	EnvironmentSnapshot  map[string]interface{} `json:"environment_snapshot,omitempty"`
 	RepositorySnapshot   map[string]interface{} `json:"repository_snapshot,omitempty"`
-	State                TaskSessionState      `json:"state"`
+	State                TaskSessionState       `json:"state"`
 	Progress             int                    `json:"progress"` // 0-100
 	ErrorMessage         string                 `json:"error_message,omitempty"`
 	Metadata             map[string]interface{} `json:"metadata,omitempty"`
@@ -202,16 +201,16 @@ func (s *TaskSession) ToAPI() map[string]interface{} {
 		"task_id":            s.TaskID,
 		"agent_execution_id": s.AgentExecutionID,
 		"container_id":       s.ContainerID,
-		"agent_profile_id":  s.AgentProfileID,
-		"executor_id":       s.ExecutorID,
-		"environment_id":    s.EnvironmentID,
-		"repository_id":     s.RepositoryID,
-		"base_branch":       s.BaseBranch,
-		"worktrees":         s.Worktrees,
-		"state":             string(s.State),
-		"progress":          s.Progress,
-		"started_at":        s.StartedAt,
-		"updated_at":        s.UpdatedAt,
+		"agent_profile_id":   s.AgentProfileID,
+		"executor_id":        s.ExecutorID,
+		"environment_id":     s.EnvironmentID,
+		"repository_id":      s.RepositoryID,
+		"base_branch":        s.BaseBranch,
+		"worktrees":          s.Worktrees,
+		"state":              string(s.State),
+		"progress":           s.Progress,
+		"started_at":         s.StartedAt,
+		"updated_at":         s.UpdatedAt,
 	}
 	// For backward compatibility, populate worktree_path and worktree_branch from first worktree
 	if len(s.Worktrees) > 0 {
@@ -307,10 +306,35 @@ type Executor struct {
 	Type      ExecutorType      `json:"type"`
 	Status    ExecutorStatus    `json:"status"`
 	IsSystem  bool              `json:"is_system"`
+	Resumable bool              `json:"resumable"`
 	Config    map[string]string `json:"config,omitempty"`
 	CreatedAt time.Time         `json:"created_at"`
 	UpdatedAt time.Time         `json:"updated_at"`
 	DeletedAt *time.Time        `json:"deleted_at,omitempty"`
+}
+
+// ExecutorRunning tracks an active executor instance for a session.
+type ExecutorRunning struct {
+	ID               string     `json:"id"`
+	SessionID        string     `json:"session_id"`
+	TaskID           string     `json:"task_id"`
+	ExecutorID       string     `json:"executor_id"`
+	Runtime          string     `json:"runtime,omitempty"`
+	Status           string     `json:"status"`
+	Resumable        bool       `json:"resumable"`
+	ResumeToken      string     `json:"resume_token,omitempty"`
+	AgentExecutionID string     `json:"agent_execution_id,omitempty"`
+	ContainerID      string     `json:"container_id,omitempty"`
+	AgentctlURL      string     `json:"agentctl_url,omitempty"`
+	AgentctlPort     int        `json:"agentctl_port,omitempty"`
+	PID              int        `json:"pid,omitempty"`
+	WorktreeID       string     `json:"worktree_id,omitempty"`
+	WorktreePath     string     `json:"worktree_path,omitempty"`
+	WorktreeBranch   string     `json:"worktree_branch,omitempty"`
+	ErrorMessage     string     `json:"error_message,omitempty"`
+	LastSeenAt       *time.Time `json:"last_seen_at,omitempty"`
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
 }
 
 // EnvironmentKind represents the runtime type for environments.
@@ -342,11 +366,6 @@ type Environment struct {
 
 // ToAPI converts internal Task to API type
 func (t *Task) ToAPI() *v1.Task {
-	var assignedAgentID *string
-	if t.AssignedTo != "" {
-		assignedAgentID = &t.AssignedTo
-	}
-
 	// Convert TaskRepository models to API types
 	var repositories []v1.TaskRepository
 	for _, repo := range t.Repositories {
@@ -363,17 +382,16 @@ func (t *Task) ToAPI() *v1.Task {
 	}
 
 	return &v1.Task{
-		ID:              t.ID,
-		WorkspaceID:     t.WorkspaceID,
-		BoardID:         t.BoardID,
-		Title:           t.Title,
-		Description:     t.Description,
-		State:           t.State,
-		Priority:        t.Priority,
-		AssignedAgentID: assignedAgentID,
-		Repositories:    repositories,
-		CreatedAt:       t.CreatedAt,
-		UpdatedAt:       t.UpdatedAt,
-		Metadata:        t.Metadata,
+		ID:           t.ID,
+		WorkspaceID:  t.WorkspaceID,
+		BoardID:      t.BoardID,
+		Title:        t.Title,
+		Description:  t.Description,
+		State:        t.State,
+		Priority:     t.Priority,
+		Repositories: repositories,
+		CreatedAt:    t.CreatedAt,
+		UpdatedAt:    t.UpdatedAt,
+		Metadata:     t.Metadata,
 	}
 }

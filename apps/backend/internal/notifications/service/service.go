@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	EventTaskSessionWaitingForInput = "task_session.waiting_for_input"
+	EventTaskSessionWaitingForInput = "session.waiting_for_input"
 )
 
 var ErrProviderNotFound = errors.New("notification provider not found")

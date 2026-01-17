@@ -28,7 +28,6 @@ interface UseSessionResumptionReturn {
   worktreePath: string | null;
   worktreeBranch: string | null;
   resumeSession: () => Promise<boolean>;
-  startNewSession: (agentProfileId: string) => Promise<boolean>;
 }
 
 /**
@@ -46,10 +45,15 @@ export function useSessionResumption(
   const [worktreePath, setWorktreePath] = useState<string | null>(null);
   const [worktreeBranch, setWorktreeBranch] = useState<string | null>(null);
   const connectionStatus = useAppStore((state) => state.connection.status);
-  // Read task session state from store so WebSocket updates are reflected
-  const taskSessionState = useAppStore((state) => taskId ? state.taskSessionStatesByTaskId[taskId] ?? null : null);
-  const setStoreTaskSessionState = useAppStore((state) => state.setTaskSessionState);
+  const session = useAppStore((state) =>
+    sessionId ? state.taskSessions.items[sessionId] ?? null : null
+  );
+  const setTaskSession = useAppStore((state) => state.setTaskSession);
   const hasAttemptedResume = useRef(false);
+
+  useEffect(() => {
+    hasAttemptedResume.current = false;
+  }, [sessionId, taskId]);
 
   // Check session status and auto-resume if needed
   useEffect(() => {
@@ -70,7 +74,7 @@ export function useSessionResumption(
         console.log('[useSessionResumption] Checking session status:', { taskId, sessionId });
         const status = await client.request<SessionStatus>('task.session.status', {
           task_id: taskId,
-          task_session_id: sessionId,
+          session_id: sessionId,
         });
         console.log('[useSessionResumption] Session status:', status);
         setSessionStatus(status);
@@ -84,8 +88,15 @@ export function useSessionResumption(
         // Update worktree info
         setWorktreePath(status.worktree_path ?? null);
         setWorktreeBranch(status.worktree_branch ?? null);
-        if (taskId && status.state) {
-          setStoreTaskSessionState(taskId, status.state as TaskSessionState);
+        if (taskId && sessionId && status.state) {
+          setTaskSession({
+            id: sessionId,
+            task_id: taskId,
+            state: status.state as TaskSessionState,
+            progress: session?.progress ?? 0,
+            started_at: session?.started_at ?? '',
+            updated_at: session?.updated_at ?? '',
+          });
         }
 
         // 2. If agent is already running, we're good
@@ -108,14 +119,21 @@ export function useSessionResumption(
             error?: string;
           }>('task.session.resume', {
             task_id: taskId,
-            task_session_id: sessionId,
+            session_id: sessionId,
           }, 30000);
 
           if (resumeResp.success) {
             console.log('[useSessionResumption] Session resumed successfully');
             setResumptionState('resumed');
-            if (taskId && resumeResp.state) {
-              setStoreTaskSessionState(taskId, resumeResp.state as TaskSessionState);
+            if (taskId && sessionId && resumeResp.state) {
+              setTaskSession({
+                id: sessionId,
+                task_id: taskId,
+                state: resumeResp.state as TaskSessionState,
+                progress: session?.progress ?? 0,
+                started_at: session?.started_at ?? '',
+                updated_at: session?.updated_at ?? '',
+              });
             }
             if (resumeResp.worktree_path) {
               setWorktreePath(resumeResp.worktree_path);
@@ -144,7 +162,7 @@ export function useSessionResumption(
     };
 
     checkAndResume();
-  }, [taskId, sessionId, connectionStatus, setStoreTaskSessionState]);
+  }, [taskId, sessionId, connectionStatus, setTaskSession, session]);
 
   // Manual resume function
   const resumeSession = useCallback(async (): Promise<boolean> => {
@@ -165,13 +183,20 @@ export function useSessionResumption(
         error?: string;
       }>('task.session.resume', {
         task_id: taskId,
-        task_session_id: sessionId,
+        session_id: sessionId,
       }, 30000);
 
       if (response.success) {
         setResumptionState('resumed');
-        if (taskId && response.state) {
-          setStoreTaskSessionState(taskId, response.state as TaskSessionState);
+        if (taskId && sessionId && response.state) {
+          setTaskSession({
+            id: sessionId,
+            task_id: taskId,
+            state: response.state as TaskSessionState,
+            progress: session?.progress ?? 0,
+            started_at: session?.started_at ?? '',
+            updated_at: session?.updated_at ?? '',
+          });
         }
         if (response.worktree_path) {
           setWorktreePath(response.worktree_path);
@@ -190,60 +215,15 @@ export function useSessionResumption(
       setError(err instanceof Error ? err.message : 'Unknown error');
       return false;
     }
-  }, [taskId, sessionId, setStoreTaskSessionState]);
-
-  // Start new session function (fallback when resume fails)
-  const startNewSession = useCallback(async (agentProfileId: string): Promise<boolean> => {
-    if (!taskId) return false;
-
-    const client = getWebSocketClient();
-    if (!client) return false;
-
-    setResumptionState('resuming');
-    setError(null);
-
-    try {
-      const response = await client.request<{
-        success: boolean;
-        task_session_id?: string;
-        state?: string;
-        worktree_path?: string;
-        worktree_branch?: string;
-      }>('orchestrator.start', {
-        task_id: taskId,
-        agent_profile_id: agentProfileId,
-      }, 15000);
-
-      if (response.success) {
-        setResumptionState('resumed');
-        if (taskId && response.state) {
-          setStoreTaskSessionState(taskId, response.state as TaskSessionState);
-        }
-        if (response.worktree_path) {
-          setWorktreePath(response.worktree_path);
-        }
-        if (response.worktree_branch) {
-          setWorktreeBranch(response.worktree_branch);
-        }
-        return true;
-      }
-      return false;
-    } catch (err) {
-      setResumptionState('error');
-      setError(err instanceof Error ? err.message : 'Unknown error');
-      return false;
-    }
-  }, [taskId, setStoreTaskSessionState]);
+  }, [taskId, sessionId, setTaskSession, session]);
 
   return {
     resumptionState,
     sessionStatus,
     error,
-    taskSessionState,
+    taskSessionState: session?.state ?? null,
     worktreePath,
     worktreeBranch,
     resumeSession,
-    startNewSession,
   };
 }
-

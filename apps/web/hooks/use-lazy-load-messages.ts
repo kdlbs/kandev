@@ -3,7 +3,15 @@ import { listTaskSessionMessages } from '@/lib/http';
 import { useAppStore } from '@/components/state-provider';
 
 export function useLazyLoadMessages(sessionId: string | null) {
-  const { hasMore, oldestCursor, isLoading } = useAppStore((state) => state.messages);
+  const hasMore = useAppStore((state) =>
+    sessionId ? state.messages.metaBySession[sessionId]?.hasMore ?? false : false
+  );
+  const oldestCursor = useAppStore((state) =>
+    sessionId ? state.messages.metaBySession[sessionId]?.oldestCursor ?? null : null
+  );
+  const isLoading = useAppStore((state) =>
+    sessionId ? state.messages.metaBySession[sessionId]?.isLoading ?? false : false
+  );
   const prependMessages = useAppStore((state) => state.prependMessages);
   const setMessagesMetadata = useAppStore((state) => state.setMessagesMetadata);
 
@@ -12,7 +20,7 @@ export function useLazyLoadMessages(sessionId: string | null) {
       return 0;
     }
 
-    setMessagesMetadata({ isLoading: true });
+    setMessagesMetadata(sessionId, { isLoading: true });
     try {
       const response = await listTaskSessionMessages(sessionId, {
         limit: 20,
@@ -20,13 +28,13 @@ export function useLazyLoadMessages(sessionId: string | null) {
         sort: 'desc',
       });
       const orderedMessages = [...(response.messages ?? [])].reverse();
-      prependMessages(orderedMessages, {
+      prependMessages(sessionId, orderedMessages, {
         hasMore: response.has_more,
         oldestCursor: response.cursor || (orderedMessages[0]?.id ?? null),
       });
       return orderedMessages.length;
     } catch {
-      setMessagesMetadata({ isLoading: false });
+      setMessagesMetadata(sessionId, { isLoading: false });
       return 0;
     }
   }, [sessionId, hasMore, isLoading, oldestCursor, prependMessages, setMessagesMetadata]);

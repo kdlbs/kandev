@@ -105,10 +105,34 @@ func (r *SQLiteRepository) initSchema() error {
 		type TEXT NOT NULL,
 		status TEXT NOT NULL DEFAULT 'active',
 		is_system INTEGER NOT NULL DEFAULT 0,
+		resumable INTEGER NOT NULL DEFAULT 1,
 		config TEXT DEFAULT '{}',
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL,
 		deleted_at DATETIME
+	);
+
+	CREATE TABLE IF NOT EXISTS executors_running (
+		id TEXT PRIMARY KEY,
+		session_id TEXT NOT NULL UNIQUE,
+		task_id TEXT NOT NULL,
+		executor_id TEXT NOT NULL,
+		runtime TEXT DEFAULT '',
+		status TEXT NOT NULL DEFAULT 'starting',
+		resumable INTEGER NOT NULL DEFAULT 0,
+		resume_token TEXT DEFAULT '',
+		agent_execution_id TEXT DEFAULT '',
+		container_id TEXT DEFAULT '',
+		agentctl_url TEXT DEFAULT '',
+		agentctl_port INTEGER DEFAULT 0,
+		pid INTEGER DEFAULT 0,
+		worktree_id TEXT DEFAULT '',
+		worktree_path TEXT DEFAULT '',
+		worktree_branch TEXT DEFAULT '',
+		last_seen_at DATETIME,
+		error_message TEXT DEFAULT '',
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL
 	);
 
 	CREATE TABLE IF NOT EXISTS environments (
@@ -155,7 +179,6 @@ func (r *SQLiteRepository) initSchema() error {
 		description TEXT DEFAULT '',
 		state TEXT DEFAULT 'TODO',
 		priority INTEGER DEFAULT 0,
-		assigned_to TEXT DEFAULT '',
 		position INTEGER DEFAULT 0,
 		metadata TEXT DEFAULT '{}',
 		created_at DATETIME NOT NULL,
@@ -216,7 +239,7 @@ func (r *SQLiteRepository) initSchema() error {
 	CREATE INDEX IF NOT EXISTS idx_repositories_workspace_id ON repositories(workspace_id);
 	CREATE INDEX IF NOT EXISTS idx_repository_scripts_repo_id ON repository_scripts(repository_id);
 
-	CREATE TABLE IF NOT EXISTS task_messages (
+	CREATE TABLE IF NOT EXISTS task_session_messages (
 		id TEXT PRIMARY KEY,
 		task_session_id TEXT NOT NULL,
 		task_id TEXT DEFAULT '',
@@ -230,9 +253,9 @@ func (r *SQLiteRepository) initSchema() error {
 		FOREIGN KEY (task_session_id) REFERENCES task_sessions(id) ON DELETE CASCADE
 	);
 
-	CREATE INDEX IF NOT EXISTS idx_messages_session_id ON task_messages(task_session_id);
-	CREATE INDEX IF NOT EXISTS idx_messages_created_at ON task_messages(created_at);
-	CREATE INDEX IF NOT EXISTS idx_messages_session_created ON task_messages(task_session_id, created_at);
+	CREATE INDEX IF NOT EXISTS idx_messages_session_id ON task_session_messages(task_session_id);
+	CREATE INDEX IF NOT EXISTS idx_messages_created_at ON task_session_messages(created_at);
+	CREATE INDEX IF NOT EXISTS idx_messages_session_created ON task_session_messages(task_session_id, created_at);
 
 	CREATE TABLE IF NOT EXISTS task_sessions (
 		id TEXT PRIMARY KEY,
@@ -316,18 +339,21 @@ func (r *SQLiteRepository) initSchema() error {
 	if err := r.ensureColumn("executors", "deleted_at", "DATETIME"); err != nil {
 		return err
 	}
+	if err := r.ensureColumn("executors", "resumable", "INTEGER NOT NULL DEFAULT 1"); err != nil {
+		return err
+	}
 	if err := r.ensureColumn("environments", "deleted_at", "DATETIME"); err != nil {
 		return err
 	}
 
 	// Ensure new message columns exist for existing databases
-	if err := r.ensureColumn("task_messages", "type", "TEXT NOT NULL DEFAULT 'message'"); err != nil {
+	if err := r.ensureColumn("task_session_messages", "type", "TEXT NOT NULL DEFAULT 'message'"); err != nil {
 		return err
 	}
-	if err := r.ensureColumn("task_messages", "metadata", "TEXT DEFAULT '{}'"); err != nil {
+	if err := r.ensureColumn("task_session_messages", "metadata", "TEXT DEFAULT '{}'"); err != nil {
 		return err
 	}
-	if err := r.ensureColumn("task_messages", "task_session_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+	if err := r.ensureColumn("task_session_messages", "task_session_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
 
@@ -504,38 +530,42 @@ func (r *SQLiteRepository) ensureDefaultExecutorsAndEnvironments() error {
 	if executorCount == 0 {
 		now := time.Now().UTC()
 		executors := []struct {
-			id       string
-			name     string
-			execType models.ExecutorType
-			status   models.ExecutorStatus
-			isSystem bool
-			config   map[string]string
+			id        string
+			name      string
+			execType  models.ExecutorType
+			status    models.ExecutorStatus
+			isSystem  bool
+			resumable bool
+			config    map[string]string
 		}{
 			{
-				id:       models.ExecutorIDLocalPC,
-				name:     "Local PC",
-				execType: models.ExecutorTypeLocalPC,
-				status:   models.ExecutorStatusActive,
-				isSystem: true,
-				config:   map[string]string{},
+				id:        models.ExecutorIDLocalPC,
+				name:      "Local PC",
+				execType:  models.ExecutorTypeLocalPC,
+				status:    models.ExecutorStatusActive,
+				isSystem:  true,
+				resumable: true,
+				config:    map[string]string{},
 			},
 			{
-				id:       models.ExecutorIDLocalDocker,
-				name:     "Local Docker",
-				execType: models.ExecutorTypeLocalDocker,
-				status:   models.ExecutorStatusActive,
-				isSystem: false,
+				id:        models.ExecutorIDLocalDocker,
+				name:      "Local Docker",
+				execType:  models.ExecutorTypeLocalDocker,
+				status:    models.ExecutorStatusActive,
+				isSystem:  false,
+				resumable: true,
 				config: map[string]string{
 					"docker_host": "unix:///var/run/docker.sock",
 				},
 			},
 			{
-				id:       models.ExecutorIDRemoteDocker,
-				name:     "Remote Docker",
-				execType: models.ExecutorTypeRemoteDocker,
-				status:   models.ExecutorStatusDisabled,
-				isSystem: false,
-				config:   map[string]string{},
+				id:        models.ExecutorIDRemoteDocker,
+				name:      "Remote Docker",
+				execType:  models.ExecutorTypeRemoteDocker,
+				status:    models.ExecutorStatusDisabled,
+				isSystem:  false,
+				resumable: true,
+				config:    map[string]string{},
 			},
 		}
 
@@ -545,9 +575,9 @@ func (r *SQLiteRepository) ensureDefaultExecutorsAndEnvironments() error {
 				return fmt.Errorf("failed to serialize executor config: %w", err)
 			}
 			if _, err := r.db.ExecContext(ctx, `
-				INSERT INTO executors (id, name, type, status, is_system, config, created_at, updated_at)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-			`, executor.id, executor.name, executor.execType, executor.status, boolToInt(executor.isSystem), string(configJSON), now, now); err != nil {
+				INSERT INTO executors (id, name, type, status, is_system, resumable, config, created_at, updated_at)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+			`, executor.id, executor.name, executor.execType, executor.status, boolToInt(executor.isSystem), boolToInt(executor.resumable), string(configJSON), now, now); err != nil {
 				return err
 			}
 		}
@@ -805,9 +835,9 @@ func (r *SQLiteRepository) CreateTask(ctx context.Context, task *models.Task) er
 	}
 
 	_, err = tx.ExecContext(ctx, `
-		INSERT INTO tasks (id, workspace_id, board_id, column_id, title, description, state, priority, assigned_to, position, metadata, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, task.ID, task.WorkspaceID, task.BoardID, task.ColumnID, task.Title, task.Description, task.State, task.Priority, task.AssignedTo, task.Position, string(metadata), task.CreatedAt, task.UpdatedAt)
+		INSERT INTO tasks (id, workspace_id, board_id, column_id, title, description, state, priority, position, metadata, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, task.ID, task.WorkspaceID, task.BoardID, task.ColumnID, task.Title, task.Description, task.State, task.Priority, task.Position, string(metadata), task.CreatedAt, task.UpdatedAt)
 	if err != nil {
 		if rollbackErr := tx.Rollback(); rollbackErr != nil {
 			return fmt.Errorf("failed to rollback task insert: %w", rollbackErr)
@@ -822,12 +852,10 @@ func (r *SQLiteRepository) CreateTask(ctx context.Context, task *models.Task) er
 func (r *SQLiteRepository) GetTask(ctx context.Context, id string) (*models.Task, error) {
 	task := &models.Task{}
 	var metadata string
-	var assignedTo sql.NullString
-
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, workspace_id, board_id, column_id, title, description, state, priority, assigned_to, position, metadata, created_at, updated_at
+		SELECT id, workspace_id, board_id, column_id, title, description, state, priority, position, metadata, created_at, updated_at
 		FROM tasks WHERE id = ?
-	`, id).Scan(&task.ID, &task.WorkspaceID, &task.BoardID, &task.ColumnID, &task.Title, &task.Description, &task.State, &task.Priority, &assignedTo, &task.Position, &metadata, &task.CreatedAt, &task.UpdatedAt)
+	`, id).Scan(&task.ID, &task.WorkspaceID, &task.BoardID, &task.ColumnID, &task.Title, &task.Description, &task.State, &task.Priority, &task.Position, &metadata, &task.CreatedAt, &task.UpdatedAt)
 
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("task not found: %s", id)
@@ -836,7 +864,6 @@ func (r *SQLiteRepository) GetTask(ctx context.Context, id string) (*models.Task
 		return nil, err
 	}
 
-	task.AssignedTo = assignedTo.String
 	_ = json.Unmarshal([]byte(metadata), &task.Metadata)
 	return task, nil
 }
@@ -851,9 +878,9 @@ func (r *SQLiteRepository) UpdateTask(ctx context.Context, task *models.Task) er
 	}
 
 	result, err := r.db.ExecContext(ctx, `
-		UPDATE tasks SET workspace_id = ?, board_id = ?, column_id = ?, title = ?, description = ?, state = ?, priority = ?, assigned_to = ?, position = ?, metadata = ?, updated_at = ?
+		UPDATE tasks SET workspace_id = ?, board_id = ?, column_id = ?, title = ?, description = ?, state = ?, priority = ?, position = ?, metadata = ?, updated_at = ?
 		WHERE id = ?
-	`, task.WorkspaceID, task.BoardID, task.ColumnID, task.Title, task.Description, task.State, task.Priority, task.AssignedTo, task.Position, string(metadata), task.UpdatedAt, task.ID)
+	`, task.WorkspaceID, task.BoardID, task.ColumnID, task.Title, task.Description, task.State, task.Priority, task.Position, string(metadata), task.UpdatedAt, task.ID)
 	if err != nil {
 		return err
 	}
@@ -882,7 +909,7 @@ func (r *SQLiteRepository) DeleteTask(ctx context.Context, id string) error {
 // ListTasks returns all tasks for a board
 func (r *SQLiteRepository) ListTasks(ctx context.Context, boardID string) ([]*models.Task, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, workspace_id, board_id, column_id, title, description, state, priority, assigned_to, position, metadata, created_at, updated_at
+		SELECT id, workspace_id, board_id, column_id, title, description, state, priority, position, metadata, created_at, updated_at
 		FROM tasks
 		WHERE board_id = ?
 		ORDER BY position
@@ -898,7 +925,7 @@ func (r *SQLiteRepository) ListTasks(ctx context.Context, boardID string) ([]*mo
 // ListTasksByColumn returns all tasks in a column
 func (r *SQLiteRepository) ListTasksByColumn(ctx context.Context, columnID string) ([]*models.Task, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, workspace_id, board_id, column_id, title, description, state, priority, assigned_to, position, metadata, created_at, updated_at
+		SELECT id, workspace_id, board_id, column_id, title, description, state, priority, position, metadata, created_at, updated_at
 		FROM tasks
 		WHERE column_id = ? ORDER BY position
 	`, columnID)
@@ -915,7 +942,6 @@ func (r *SQLiteRepository) scanTasks(rows *sql.Rows) ([]*models.Task, error) {
 	for rows.Next() {
 		task := &models.Task{}
 		var metadata string
-		var assignedTo sql.NullString
 		err := rows.Scan(
 			&task.ID,
 			&task.WorkspaceID,
@@ -925,7 +951,6 @@ func (r *SQLiteRepository) scanTasks(rows *sql.Rows) ([]*models.Task, error) {
 			&task.Description,
 			&task.State,
 			&task.Priority,
-			&assignedTo,
 			&task.Position,
 			&metadata,
 			&task.CreatedAt,
@@ -934,7 +959,6 @@ func (r *SQLiteRepository) scanTasks(rows *sql.Rows) ([]*models.Task, error) {
 		if err != nil {
 			return nil, err
 		}
-		task.AssignedTo = assignedTo.String
 		_ = json.Unmarshal([]byte(metadata), &task.Metadata)
 		result = append(result, task)
 	}
@@ -1348,7 +1372,7 @@ func (r *SQLiteRepository) CreateMessage(ctx context.Context, message *models.Me
 	}
 
 	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO task_messages (id, task_session_id, task_id, author_type, author_id, content, requests_input, type, metadata, created_at)
+		INSERT INTO task_session_messages (id, task_session_id, task_id, author_type, author_id, content, requests_input, type, metadata, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, message.ID, message.TaskSessionID, message.TaskID, message.AuthorType, message.AuthorID, message.Content, requestsInput, messageType, metadataJSON, message.CreatedAt)
 
@@ -1363,7 +1387,7 @@ func (r *SQLiteRepository) GetMessage(ctx context.Context, id string) (*models.M
 	var metadataJSON string
 	err := r.db.QueryRowContext(ctx, `
 		SELECT id, task_session_id, task_id, author_type, author_id, content, requests_input, type, metadata, created_at
-		FROM task_messages WHERE id = ?
+		FROM task_session_messages WHERE id = ?
 	`, id).Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.AuthorType, &message.AuthorID, &message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt)
 	if err != nil {
 		return nil, err
@@ -1384,7 +1408,7 @@ func (r *SQLiteRepository) GetMessage(ctx context.Context, id string) (*models.M
 func (r *SQLiteRepository) ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, task_session_id, task_id, author_type, author_id, content, requests_input, type, metadata, created_at
-		FROM task_messages WHERE task_session_id = ? ORDER BY created_at ASC
+		FROM task_session_messages WHERE task_session_id = ? ORDER BY created_at ASC
 	`, sessionID)
 	if err != nil {
 		return nil, err
@@ -1454,7 +1478,7 @@ func (r *SQLiteRepository) ListMessagesPaginated(ctx context.Context, sessionID 
 
 	query := `
 		SELECT id, task_session_id, task_id, author_type, author_id, content, requests_input, type, metadata, created_at
-		FROM task_messages WHERE task_session_id = ?`
+		FROM task_session_messages WHERE task_session_id = ?`
 	args := []interface{}{sessionID}
 	if cursor != nil {
 		if opts.Before != "" {
@@ -1510,7 +1534,7 @@ func (r *SQLiteRepository) ListMessagesPaginated(ctx context.Context, sessionID 
 
 // DeleteMessage deletes a message by ID
 func (r *SQLiteRepository) DeleteMessage(ctx context.Context, id string) error {
-	result, err := r.db.ExecContext(ctx, `DELETE FROM task_messages WHERE id = ?`, id)
+	result, err := r.db.ExecContext(ctx, `DELETE FROM task_session_messages WHERE id = ?`, id)
 	if err != nil {
 		return err
 	}
@@ -1530,7 +1554,7 @@ func (r *SQLiteRepository) GetMessageByToolCallID(ctx context.Context, sessionID
 	var metadataJSON string
 	err := r.db.QueryRowContext(ctx, `
 		SELECT id, task_session_id, task_id, author_type, author_id, content, requests_input, type, metadata, created_at
-		FROM task_messages WHERE task_session_id = ? AND json_extract(metadata, '$.tool_call_id') = ?
+		FROM task_session_messages WHERE task_session_id = ? AND json_extract(metadata, '$.tool_call_id') = ?
 	`, sessionID, toolCallID).Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.AuthorType, &message.AuthorID,
 		&message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt)
 	if err != nil {
@@ -1557,7 +1581,7 @@ func (r *SQLiteRepository) UpdateMessage(ctx context.Context, message *models.Me
 	}
 
 	result, err := r.db.ExecContext(ctx, `
-		UPDATE task_messages SET content = ?, requests_input = ?, type = ?, metadata = ?
+		UPDATE task_session_messages SET content = ?, requests_input = ?, type = ?, metadata = ?
 		WHERE id = ?
 	`, message.Content, requestsInput, string(message.Type), string(metadataJSON), message.ID)
 	if err != nil {
@@ -2390,9 +2414,9 @@ func (r *SQLiteRepository) CreateExecutor(ctx context.Context, executor *models.
 	}
 
 	_, err = r.db.ExecContext(ctx, `
-		INSERT INTO executors (id, name, type, status, is_system, config, created_at, updated_at, deleted_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, executor.ID, executor.Name, executor.Type, executor.Status, boolToInt(executor.IsSystem), string(configJSON), executor.CreatedAt, executor.UpdatedAt, executor.DeletedAt)
+		INSERT INTO executors (id, name, type, status, is_system, resumable, config, created_at, updated_at, deleted_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, executor.ID, executor.Name, executor.Type, executor.Status, boolToInt(executor.IsSystem), boolToInt(executor.Resumable), string(configJSON), executor.CreatedAt, executor.UpdatedAt, executor.DeletedAt)
 	return err
 }
 
@@ -2400,13 +2424,14 @@ func (r *SQLiteRepository) GetExecutor(ctx context.Context, id string) (*models.
 	executor := &models.Executor{}
 	var configJSON string
 	var isSystem int
+	var resumable int
 
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, name, type, status, is_system, config, created_at, updated_at, deleted_at
+		SELECT id, name, type, status, is_system, resumable, config, created_at, updated_at, deleted_at
 		FROM executors WHERE id = ? AND deleted_at IS NULL
 	`, id).Scan(
 		&executor.ID, &executor.Name, &executor.Type, &executor.Status,
-		&isSystem, &configJSON, &executor.CreatedAt, &executor.UpdatedAt, &executor.DeletedAt,
+		&isSystem, &resumable, &configJSON, &executor.CreatedAt, &executor.UpdatedAt, &executor.DeletedAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("executor not found: %s", id)
@@ -2416,6 +2441,7 @@ func (r *SQLiteRepository) GetExecutor(ctx context.Context, id string) (*models.
 	}
 
 	executor.IsSystem = isSystem == 1
+	executor.Resumable = resumable == 1
 	if configJSON != "" && configJSON != "{}" {
 		if err := json.Unmarshal([]byte(configJSON), &executor.Config); err != nil {
 			return nil, fmt.Errorf("failed to deserialize executor config: %w", err)
@@ -2433,9 +2459,9 @@ func (r *SQLiteRepository) UpdateExecutor(ctx context.Context, executor *models.
 	}
 
 	result, err := r.db.ExecContext(ctx, `
-		UPDATE executors SET name = ?, type = ?, status = ?, is_system = ?, config = ?, updated_at = ?
+		UPDATE executors SET name = ?, type = ?, status = ?, is_system = ?, resumable = ?, config = ?, updated_at = ?
 		WHERE id = ? AND deleted_at IS NULL
-	`, executor.Name, executor.Type, executor.Status, boolToInt(executor.IsSystem), string(configJSON), executor.UpdatedAt, executor.ID)
+	`, executor.Name, executor.Type, executor.Status, boolToInt(executor.IsSystem), boolToInt(executor.Resumable), string(configJSON), executor.UpdatedAt, executor.ID)
 	if err != nil {
 		return err
 	}
@@ -2463,7 +2489,7 @@ func (r *SQLiteRepository) DeleteExecutor(ctx context.Context, id string) error 
 
 func (r *SQLiteRepository) ListExecutors(ctx context.Context) ([]*models.Executor, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, name, type, status, is_system, config, created_at, updated_at, deleted_at
+		SELECT id, name, type, status, is_system, resumable, config, created_at, updated_at, deleted_at
 		FROM executors WHERE deleted_at IS NULL ORDER BY created_at ASC
 	`)
 	if err != nil {
@@ -2476,13 +2502,15 @@ func (r *SQLiteRepository) ListExecutors(ctx context.Context) ([]*models.Executo
 		executor := &models.Executor{}
 		var configJSON string
 		var isSystem int
+		var resumable int
 		if err := rows.Scan(
 			&executor.ID, &executor.Name, &executor.Type, &executor.Status,
-			&isSystem, &configJSON, &executor.CreatedAt, &executor.UpdatedAt, &executor.DeletedAt,
+			&isSystem, &resumable, &configJSON, &executor.CreatedAt, &executor.UpdatedAt, &executor.DeletedAt,
 		); err != nil {
 			return nil, err
 		}
 		executor.IsSystem = isSystem == 1
+		executor.Resumable = resumable == 1
 		if configJSON != "" && configJSON != "{}" {
 			if err := json.Unmarshal([]byte(configJSON), &executor.Config); err != nil {
 				return nil, fmt.Errorf("failed to deserialize executor config: %w", err)
@@ -2491,6 +2519,138 @@ func (r *SQLiteRepository) ListExecutors(ctx context.Context) ([]*models.Executo
 		result = append(result, executor)
 	}
 	return result, rows.Err()
+}
+
+func (r *SQLiteRepository) UpsertExecutorRunning(ctx context.Context, running *models.ExecutorRunning) error {
+	if running == nil {
+		return fmt.Errorf("executor running is nil")
+	}
+	if running.SessionID == "" {
+		return fmt.Errorf("session_id is required")
+	}
+	if running.ID == "" {
+		running.ID = running.SessionID
+	}
+	now := time.Now().UTC()
+	if running.CreatedAt.IsZero() {
+		running.CreatedAt = now
+	}
+	running.UpdatedAt = now
+
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO executors_running (
+			id, session_id, task_id, executor_id, runtime, status, resumable, resume_token,
+			agent_execution_id, container_id, agentctl_url, agentctl_port, pid,
+			worktree_id, worktree_path, worktree_branch, last_seen_at, error_message,
+			created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(session_id) DO UPDATE SET
+			id = excluded.id,
+			task_id = excluded.task_id,
+			executor_id = excluded.executor_id,
+			runtime = excluded.runtime,
+			status = excluded.status,
+			resumable = excluded.resumable,
+			resume_token = excluded.resume_token,
+			agent_execution_id = excluded.agent_execution_id,
+			container_id = excluded.container_id,
+			agentctl_url = excluded.agentctl_url,
+			agentctl_port = excluded.agentctl_port,
+			pid = excluded.pid,
+			worktree_id = excluded.worktree_id,
+			worktree_path = excluded.worktree_path,
+			worktree_branch = excluded.worktree_branch,
+			last_seen_at = excluded.last_seen_at,
+			error_message = excluded.error_message,
+			updated_at = excluded.updated_at
+	`,
+		running.ID,
+		running.SessionID,
+		running.TaskID,
+		running.ExecutorID,
+		running.Runtime,
+		running.Status,
+		boolToInt(running.Resumable),
+		running.ResumeToken,
+		running.AgentExecutionID,
+		running.ContainerID,
+		running.AgentctlURL,
+		running.AgentctlPort,
+		running.PID,
+		running.WorktreeID,
+		running.WorktreePath,
+		running.WorktreeBranch,
+		running.LastSeenAt,
+		running.ErrorMessage,
+		running.CreatedAt,
+		running.UpdatedAt,
+	)
+	return err
+}
+
+func (r *SQLiteRepository) GetExecutorRunningBySessionID(ctx context.Context, sessionID string) (*models.ExecutorRunning, error) {
+	if sessionID == "" {
+		return nil, fmt.Errorf("session_id is required")
+	}
+	running := &models.ExecutorRunning{}
+	var resumable int
+	var lastSeen sql.NullTime
+
+	err := r.db.QueryRowContext(ctx, `
+		SELECT id, session_id, task_id, executor_id, runtime, status, resumable, resume_token,
+		       agent_execution_id, container_id, agentctl_url, agentctl_port, pid,
+		       worktree_id, worktree_path, worktree_branch, last_seen_at, error_message,
+		       created_at, updated_at
+		FROM executors_running
+		WHERE session_id = ?
+	`, sessionID).Scan(
+		&running.ID,
+		&running.SessionID,
+		&running.TaskID,
+		&running.ExecutorID,
+		&running.Runtime,
+		&running.Status,
+		&resumable,
+		&running.ResumeToken,
+		&running.AgentExecutionID,
+		&running.ContainerID,
+		&running.AgentctlURL,
+		&running.AgentctlPort,
+		&running.PID,
+		&running.WorktreeID,
+		&running.WorktreePath,
+		&running.WorktreeBranch,
+		&lastSeen,
+		&running.ErrorMessage,
+		&running.CreatedAt,
+		&running.UpdatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("executor running not found for session: %s", sessionID)
+	}
+	if err != nil {
+		return nil, err
+	}
+	running.Resumable = resumable == 1
+	if lastSeen.Valid {
+		running.LastSeenAt = &lastSeen.Time
+	}
+	return running, nil
+}
+
+func (r *SQLiteRepository) DeleteExecutorRunningBySessionID(ctx context.Context, sessionID string) error {
+	if sessionID == "" {
+		return fmt.Errorf("session_id is required")
+	}
+	result, err := r.db.ExecContext(ctx, `DELETE FROM executors_running WHERE session_id = ?`, sessionID)
+	if err != nil {
+		return err
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("executor running not found for session: %s", sessionID)
+	}
+	return nil
 }
 
 // Environment operations

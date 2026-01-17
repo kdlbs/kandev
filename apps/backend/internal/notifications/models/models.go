@@ -35,6 +35,6 @@ type Delivery struct {
 	UserID        string    `json:"user_id"`
 	ProviderID    string    `json:"provider_id"`
 	EventType     string    `json:"event_type"`
-	TaskSessionID string    `json:"task_session_id"`
+	TaskSessionID string    `json:"session_id"`
 	CreatedAt     time.Time `json:"created_at"`
 }

@@ -66,6 +66,33 @@ func (p *EventPublisher) PublishAgentEvent(ctx context.Context, eventType string
 	}
 }
 
+// PublishAgentctlEvent publishes an agentctl lifecycle event (starting, ready, error).
+func (p *EventPublisher) PublishAgentctlEvent(ctx context.Context, eventType string, execution *AgentExecution, errMsg string) {
+	if p.eventBus == nil {
+		return
+	}
+
+	sessionID := execution.SessionID
+
+	data := map[string]interface{}{
+		"task_id":            execution.TaskID,
+		"session_id":         sessionID,
+		"agent_execution_id": execution.ID,
+	}
+
+	if errMsg != "" {
+		data["error_message"] = errMsg
+	}
+
+	event := bus.NewEvent(eventType, "agent-manager", data)
+	if err := p.eventBus.Publish(ctx, eventType, event); err != nil {
+		p.logger.Error("failed to publish agentctl event",
+			zap.String("event_type", eventType),
+			zap.String("instance_id", execution.ID),
+			zap.Error(err))
+	}
+}
+
 // PublishACPSessionCreated publishes an event when an ACP session is created.
 func (p *EventPublisher) PublishACPSessionCreated(execution *AgentExecution, sessionID string) {
 	if p.eventBus == nil || sessionID == "" {
@@ -156,8 +183,11 @@ func (p *EventPublisher) PublishGitStatus(execution *AgentExecution, update *age
 		return
 	}
 
+	sessionID := execution.SessionID
+
 	data := map[string]interface{}{
 		"task_id":       execution.TaskID,
+		"session_id":    sessionID,
 		"agent_id":      execution.ID,
 		"branch":        update.Branch,
 		"remote_branch": update.RemoteBranch,
@@ -189,12 +219,15 @@ func (p *EventPublisher) PublishFileChange(execution *AgentExecution, notificati
 		return
 	}
 
+	sessionID := execution.SessionID
+
 	data := map[string]interface{}{
-		"task_id":   execution.TaskID,
-		"agent_id":  execution.ID,
-		"path":      notification.Path,
-		"operation": notification.Operation,
-		"timestamp": notification.Timestamp.Format(time.RFC3339Nano),
+		"task_id":    execution.TaskID,
+		"session_id": sessionID,
+		"agent_id":   execution.ID,
+		"path":       notification.Path,
+		"operation":  notification.Operation,
+		"timestamp":  notification.Timestamp.Format(time.RFC3339Nano),
 	}
 
 	event := bus.NewEvent(events.FileChangeNotified, "agent-manager", data)
@@ -220,11 +253,14 @@ func (p *EventPublisher) PublishPromptComplete(execution *AgentExecution, agentM
 		return
 	}
 
+	sessionID := execution.SessionID
+
 	data := map[string]interface{}{
 		"type":          "prompt_complete",
 		"timestamp":     time.Now().UTC().Format(time.RFC3339Nano),
 		"agent_id":      execution.ID,
 		"task_id":       execution.TaskID,
+		"session_id":    sessionID,
 		"agent_message": agentMessage,
 	}
 	if reasoning != "" {
@@ -252,11 +288,14 @@ func (p *EventPublisher) PublishToolCall(execution *AgentExecution, toolCallID, 
 		return
 	}
 
+	sessionID := execution.SessionID
+
 	data := map[string]interface{}{
 		"type":         "tool_call",
 		"timestamp":    time.Now().UTC().Format(time.RFC3339Nano),
 		"agent_id":     execution.ID,
 		"task_id":      execution.TaskID,
+		"session_id":   sessionID,
 		"tool_call_id": toolCallID,
 		"title":        title,
 		"status":       status,
@@ -287,11 +326,14 @@ func (p *EventPublisher) PublishToolCallComplete(execution *AgentExecution, upda
 		return
 	}
 
+	sessionID := execution.SessionID
+
 	data := map[string]interface{}{
 		"type":         "tool_call_complete",
 		"timestamp":    time.Now().UTC().Format(time.RFC3339Nano),
 		"agent_id":     execution.ID,
 		"task_id":      execution.TaskID,
+		"session_id":   sessionID,
 		"tool_call_id": update.ToolCallID,
 		"status":       update.ToolStatus,
 	}
@@ -338,11 +380,12 @@ func (p *EventPublisher) PublishPermissionRequest(execution *AgentExecution, not
 
 	// Structure as protocol.Message so watcher can parse it correctly
 	data := map[string]interface{}{
-		"type":      "permission_request",
-		"timestamp": time.Now().UTC().Format(time.RFC3339Nano),
-		"agent_id":  execution.ID,
-		"task_id":   execution.TaskID,
-		"data":      payloadData,
+		"type":       "permission_request",
+		"timestamp":  time.Now().UTC().Format(time.RFC3339Nano),
+		"agent_id":   execution.ID,
+		"task_id":    execution.TaskID,
+		"session_id": notification.SessionID,
+		"data":       payloadData,
 	}
 
 	event := bus.NewEvent(events.ACPMessage, "agent-manager", data)

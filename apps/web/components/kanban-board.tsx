@@ -16,7 +16,7 @@ import { useTaskActions } from '@/hooks/use-task-actions';
 import { KanbanBoardHeader } from './kanban-board-header';
 import { KanbanBoardGrid } from './kanban-board-grid';
 import { getWebSocketClient } from '@/lib/ws/connection';
-import { linkToTaskSession } from '@/lib/links';
+import { linkToSession } from '@/lib/links';
 
 interface KanbanBoardProps {
   onPreviewTask?: (task: Task) => void;
@@ -236,7 +236,7 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
     if (onOpenTask) {
       onOpenTask(task, latestSessionId);
     } else {
-      router.push(linkToTaskSession(task.id, latestSessionId));
+      router.push(linkToSession(latestSessionId));
     }
   };
 

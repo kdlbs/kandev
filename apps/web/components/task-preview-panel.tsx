@@ -37,7 +37,7 @@ export function TaskPreviewPanel({ task, sessionId = null, onClose, onMaximize }
     try {
       await client.request(
         "message.add",
-        { task_id: task.id, task_session_id: activeSessionId, content },
+        { task_id: task.id, session_id: activeSessionId, content },
         10000
       );
     } catch (error) {

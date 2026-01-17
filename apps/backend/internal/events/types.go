@@ -83,6 +83,9 @@ const (
 	AgentFailed            = "agent.failed"
 	AgentStopped           = "agent.stopped"
 	AgentACPSessionCreated = "agent.acp_session_created"
+	AgentctlStarting       = "agentctl.starting"
+	AgentctlReady          = "agentctl.ready"
+	AgentctlError          = "agentctl.error"
 )
 
 // Event types for ACP messages

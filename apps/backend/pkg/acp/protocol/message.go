@@ -29,6 +29,7 @@ type Message struct {
 	Timestamp time.Time              `json:"timestamp"`
 	AgentID   string                 `json:"agent_id"`
 	TaskID    string                 `json:"task_id"`
+	SessionID string                 `json:"session_id"`
 	Data      map[string]interface{} `json:"data"`
 }
 

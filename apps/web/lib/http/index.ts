@@ -12,8 +12,10 @@ import type {
   RepositoryBranchesResponse,
   NotificationProvidersResponse,
   NotificationProvider,
+  CreateTaskResponse,
   Task,
   TaskSessionsResponse,
+  TaskSessionResponse,
   UserSettingsResponse,
   Workspace,
 } from '@/lib/types/http';
@@ -42,7 +44,7 @@ async function fetchJson<T>(pathOrUrl: string, options?: ApiRequestOptions): Pro
     },
   });
   if (!response.ok) {
-    throw new Error(`Request failed: ${response.status} ${response.statusText}`);
+    throw new Error(`Request failed: ${response.status} ${response.statusText} (${url})`);
   }
   if (response.status === 204) {
     return undefined as T;
@@ -103,10 +105,12 @@ export async function createTask(
       default_branch?: string;
     }>;
     state?: Task['state'];
+    start_agent?: boolean;
+    agent_profile_id?: string;
   },
   options?: ApiRequestOptions
 ) {
-  return fetchJson<Task>('/api/v1/tasks', {
+  return fetchJson<CreateTaskResponse>('/api/v1/tasks', {
     ...options,
     init: { method: 'POST', body: JSON.stringify(payload), ...(options?.init ?? {}) },
   });
@@ -118,7 +122,6 @@ export async function updateTask(
     title?: string;
     description?: string;
     position?: number;
-    assigned_to?: string;
     state?: Task['state'];
     repositories?: Array<{
       repository_id: string;
@@ -220,6 +223,10 @@ export async function fetchTask(taskId: string, options?: ApiRequestOptions) {
 
 export async function listTaskSessions(taskId: string, options?: ApiRequestOptions) {
   return fetchJson<TaskSessionsResponse>(`/api/v1/tasks/${taskId}/sessions`, options);
+}
+
+export async function fetchTaskSession(taskSessionId: string, options?: ApiRequestOptions) {
+  return fetchJson<TaskSessionResponse>(`/api/v1/task-sessions/${taskSessionId}`, options);
 }
 
 export async function listTaskSessionMessages(

@@ -49,20 +49,19 @@ func TestTaskStructInitialization(t *testing.T) {
 		},
 	}
 	task := Task{
-		ID:          "task-123",
-		WorkspaceID: "workspace-001",
-		BoardID:     "board-456",
-		ColumnID:       "column-789",
-		Title:          "Test Task",
-		Description:    "A test task description",
-		State:          v1.TaskStateTODO,
-		Priority:       5,
-		AssignedTo:     "agent-001",
-		Position:       1,
-		Metadata:       map[string]interface{}{"key": "value"},
-		Repositories:   repos,
-		CreatedAt:      now,
-		UpdatedAt:      now,
+		ID:           "task-123",
+		WorkspaceID:  "workspace-001",
+		BoardID:      "board-456",
+		ColumnID:     "column-789",
+		Title:        "Test Task",
+		Description:  "A test task description",
+		State:        v1.TaskStateTODO,
+		Priority:     5,
+		Position:     1,
+		Metadata:     map[string]interface{}{"key": "value"},
+		Repositories: repos,
+		CreatedAt:    now,
+		UpdatedAt:    now,
 	}
 
 	if task.ID != "task-123" {
@@ -97,9 +96,6 @@ func TestTaskStructInitialization(t *testing.T) {
 	}
 	if task.Repositories[0].BaseBranch != "main" {
 		t.Errorf("expected BaseBranch 'main', got %s", task.Repositories[0].BaseBranch)
-	}
-	if task.AssignedTo != "agent-001" {
-		t.Errorf("expected AssignedTo 'agent-001', got %s", task.AssignedTo)
 	}
 	if task.Position != 1 {
 		t.Errorf("expected Position 1, got %d", task.Position)
@@ -169,11 +165,11 @@ func TestTaskToAPI(t *testing.T) {
 		ID:          "task-123",
 		WorkspaceID: "workspace-001",
 		BoardID:     "board-456",
-		ColumnID:       "column-789",
-		Title:          "Test Task",
-		Description:    "A test task description",
-		State:          v1.TaskStateInProgress,
-		Priority:       3,
+		ColumnID:    "column-789",
+		Title:       "Test Task",
+		Description: "A test task description",
+		State:       v1.TaskStateInProgress,
+		Priority:    3,
 		Repositories: []*TaskRepository{
 			{
 				ID:           "task-repo-1",
@@ -186,11 +182,10 @@ func TestTaskToAPI(t *testing.T) {
 				UpdatedAt:    now,
 			},
 		},
-		AssignedTo:     "agent-001",
-		Position:       2,
-		Metadata:       map[string]interface{}{"key": "value"},
-		CreatedAt:      now,
-		UpdatedAt:      now,
+		Position:  2,
+		Metadata:  map[string]interface{}{"key": "value"},
+		CreatedAt: now,
+		UpdatedAt: now,
 	}
 
 	apiTask := task.ToAPI()
@@ -225,9 +220,6 @@ func TestTaskToAPI(t *testing.T) {
 	if apiTask.Repositories[0].BaseBranch != "main" {
 		t.Errorf("expected BaseBranch main, got %s", apiTask.Repositories[0].BaseBranch)
 	}
-	if apiTask.AssignedAgentID == nil || *apiTask.AssignedAgentID != task.AssignedTo {
-		t.Errorf("expected AssignedAgentID %s, got %v", task.AssignedTo, apiTask.AssignedAgentID)
-	}
 	if apiTask.Metadata["key"] != "value" {
 		t.Errorf("expected Metadata key 'value', got %v", apiTask.Metadata["key"])
 	}
@@ -237,26 +229,22 @@ func TestTaskToAPIWithEmptyOptionalFields(t *testing.T) {
 	now := time.Now().UTC()
 	task := &Task{
 		ID:          "task-123",
-		WorkspaceID:    "workspace-001",
-		BoardID:        "board-456",
-		ColumnID:       "column-789",
-		Title:          "Test Task",
-		Description:    "A test task description",
-		State:          v1.TaskStateTODO,
-		Priority:       0,
-		AssignedTo:     "",
-		Position:       0,
-		Metadata:       nil,
-		CreatedAt:      now,
-		UpdatedAt:      now,
+		WorkspaceID: "workspace-001",
+		BoardID:     "board-456",
+		ColumnID:    "column-789",
+		Title:       "Test Task",
+		Description: "A test task description",
+		State:       v1.TaskStateTODO,
+		Priority:    0,
+		Position:    0,
+		Metadata:    nil,
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}
 
 	apiTask := task.ToAPI()
 
 	if len(apiTask.Repositories) != 0 {
 		t.Errorf("expected no repositories, got %d", len(apiTask.Repositories))
-	}
-	if apiTask.AssignedAgentID != nil {
-		t.Errorf("expected AssignedAgentID nil, got %v", apiTask.AssignedAgentID)
 	}
 }

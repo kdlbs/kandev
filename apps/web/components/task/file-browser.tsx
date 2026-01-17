@@ -5,14 +5,16 @@ import { IconChevronRight, IconChevronDown, IconFile, IconFolder, IconFolderOpen
 import { ScrollArea } from '@kandev/ui/scroll-area';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import { requestFileTree, requestFileContent } from '@/lib/ws/workspace-files';
+import { useSessionAgentctl } from '@/hooks/use-session-agentctl';
 import type { FileTreeNode, FileContentResponse, OpenFileTab } from '@/lib/types/backend';
 
 type FileBrowserProps = {
-  taskId: string;
+  sessionId: string;
   onOpenFile: (file: OpenFileTab) => void;
 };
 
-export function FileBrowser({ taskId, onOpenFile }: FileBrowserProps) {
+export function FileBrowser({ sessionId, onOpenFile }: FileBrowserProps) {
+  const { isReady } = useSessionAgentctl(sessionId);
   const [tree, setTree] = useState<FileTreeNode | null>(null);
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const [loadingPaths, setLoadingPaths] = useState<Set<string>>(new Set());
@@ -20,12 +22,19 @@ export function FileBrowser({ taskId, onOpenFile }: FileBrowserProps) {
 
   // Load initial tree
   useEffect(() => {
+    setTree(null);
+    setExpandedPaths(new Set());
+    setLoadingPaths(new Set());
+    setIsLoadingTree(true);
+    if (!isReady) {
+      return;
+    }
     const loadTree = async () => {
       try {
         const client = getWebSocketClient();
         if (!client) return;
 
-        const response = await requestFileTree(client, taskId, '', 1);
+        const response = await requestFileTree(client, sessionId, '', 1);
         setTree(response.root);
       } catch (error) {
         console.error('Failed to load file tree:', error);
@@ -35,17 +44,18 @@ export function FileBrowser({ taskId, onOpenFile }: FileBrowserProps) {
     };
 
     loadTree();
-  }, [taskId]);
+  }, [isReady, sessionId]);
 
   // Subscribe to file changes and refresh tree
   useEffect(() => {
+    if (!isReady) return;
     const client = getWebSocketClient();
     if (!client) return;
 
-    const unsubscribe = client.on('workspace.file.changes', async () => {
+    const unsubscribe = client.on('session.workspace.file.changes', async () => {
       // Refresh the root tree when any file changes
       try {
-        const response = await requestFileTree(client, taskId, '', 1);
+        const response = await requestFileTree(client, sessionId, '', 1);
         setTree(response.root);
       } catch (error) {
         console.error('Failed to refresh file tree:', error);
@@ -53,7 +63,7 @@ export function FileBrowser({ taskId, onOpenFile }: FileBrowserProps) {
     });
 
     return unsubscribe;
-  }, [taskId]);
+  }, [isReady, sessionId]);
 
   const toggleExpand = useCallback(async (node: FileTreeNode) => {
     if (!node.is_dir) return;
@@ -71,7 +81,7 @@ export function FileBrowser({ taskId, onOpenFile }: FileBrowserProps) {
           const client = getWebSocketClient();
           if (!client) return;
 
-          const response = await requestFileTree(client, taskId, node.path, 1);
+          const response = await requestFileTree(client, sessionId, node.path, 1);
 
           // Update tree with new children
           const updateNode = (n: FileTreeNode): FileTreeNode => {
@@ -101,16 +111,17 @@ export function FileBrowser({ taskId, onOpenFile }: FileBrowserProps) {
       newExpanded.add(node.path);
       setExpandedPaths(newExpanded);
     }
-  }, [expandedPaths, taskId, tree]);
+  }, [expandedPaths, sessionId, tree]);
 
   const openFile = useCallback(async (node: FileTreeNode) => {
     if (node.is_dir) return;
 
+    if (!isReady) return;
     try {
       const client = getWebSocketClient();
       if (!client) return;
 
-      const response: FileContentResponse = await requestFileContent(client, taskId, node.path);
+      const response: FileContentResponse = await requestFileContent(client, sessionId, node.path);
 
       onOpenFile({
         path: node.path,
@@ -120,7 +131,7 @@ export function FileBrowser({ taskId, onOpenFile }: FileBrowserProps) {
     } catch (error) {
       console.error('Failed to load file content:', error);
     }
-  }, [taskId, onOpenFile]);
+  }, [isReady, sessionId, onOpenFile]);
 
   const renderTreeNode = (node: FileTreeNode, depth: number = 0): React.ReactNode => {
     const isExpanded = expandedPaths.has(node.path);

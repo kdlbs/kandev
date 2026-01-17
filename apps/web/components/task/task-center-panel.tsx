@@ -9,32 +9,27 @@ import { TaskChangesPanel } from './task-changes-panel';
 import { FileViewerContent } from './file-viewer-content';
 import type { OpenFileTab } from '@/lib/types/backend';
 import { FILE_EXTENSION_COLORS } from '@/lib/types/backend';
-import { useTaskChatSession } from '@/hooks/use-task-chat-session';
+import { useAppStore } from '@/components/state-provider';
 
 const AGENTS = [
   { id: 'codex', label: 'Codex' },
   { id: 'claude', label: 'Claude Code' },
 ];
 
-type TaskLeftPanelProps = {
-  taskId: string | null;
-  onSendMessage: (content: string) => Promise<void>;
+type TaskCenterPanelProps = {
   selectedDiffPath: string | null;
   openFileRequest: OpenFileTab | null;
   onDiffPathHandled: () => void;
   onFileOpenHandled: () => void;
 };
 
-export const TaskLeftPanel = memo(function TaskLeftPanel({
-  taskId,
-  onSendMessage,
+export const TaskCenterPanel = memo(function TaskCenterPanel({
   selectedDiffPath: externalSelectedDiffPath,
   openFileRequest,
   onDiffPathHandled,
   onFileOpenHandled,
-}: TaskLeftPanelProps) {
-  // Get session ID from task ID
-  const { taskSessionId } = useTaskChatSession(taskId);
+}: TaskCenterPanelProps) {
+  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const [leftTab, setLeftTab] = useState('chat');
   const [selectedDiffPath, setSelectedDiffPath] = useState<string | null>(null);
   const [notes, setNotes] = useState('');
@@ -156,12 +151,8 @@ export const TaskLeftPanel = memo(function TaskLeftPanel({
         </TabsContent>
 
         <TabsContent value="chat" className="mt-3 flex flex-col min-h-0 flex-1">
-          {taskId ? (
-            <TaskChatPanel
-              agents={AGENTS}
-              onSend={onSendMessage}
-              sessionId={taskSessionId}
-            />
+          {activeTaskId ? (
+            <TaskChatPanel agents={AGENTS} />
           ) : (
             <div className="flex items-center justify-center h-full text-muted-foreground">
               No task selected

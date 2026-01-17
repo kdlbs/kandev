@@ -138,15 +138,15 @@ func TestWsShellStatus_MissingTaskID(t *testing.T) {
 	log := newTestLogger()
 	handlers := NewShellHandlers(nil, log)
 
-	// Create a message with empty task_id
-	msg, _ := ws.NewRequest("test-1", ws.ActionShellStatus, ShellStatusRequest{TaskID: ""})
+	// Create a message with empty session_id
+	msg, _ := ws.NewRequest("test-1", ws.ActionShellStatus, ShellStatusRequest{SessionID: ""})
 
 	_, err := handlers.wsShellStatus(context.Background(), msg)
 	if err == nil {
-		t.Error("expected error for missing task_id")
+		t.Error("expected error for missing session_id")
 	}
-	if err.Error() != "task_id is required" {
-		t.Errorf("expected 'task_id is required' error, got: %v", err)
+	if err.Error() != "session_id is required" {
+		t.Errorf("expected 'session_id is required' error, got: %v", err)
 	}
 }
 
@@ -170,14 +170,14 @@ func TestWsShellInput_MissingTaskID(t *testing.T) {
 	log := newTestLogger()
 	handlers := NewShellHandlers(nil, log)
 
-	msg, _ := ws.NewRequest("test-1", ws.ActionShellInput, ShellInputRequest{TaskID: "", Data: "test"})
+	msg, _ := ws.NewRequest("test-1", ws.ActionShellInput, ShellInputRequest{SessionID: "", Data: "test"})
 
 	_, err := handlers.wsShellInput(context.Background(), msg)
 	if err == nil {
-		t.Error("expected error for missing task_id")
+		t.Error("expected error for missing session_id")
 	}
-	if err.Error() != "task_id is required" {
-		t.Errorf("expected 'task_id is required' error, got: %v", err)
+	if err.Error() != "session_id is required" {
+		t.Errorf("expected 'session_id is required' error, got: %v", err)
 	}
 }
 
@@ -197,7 +197,7 @@ func TestWsShellStatus_NoInstanceFound(t *testing.T) {
 	mgr := newTestManager()
 	handlers := NewShellHandlers(mgr, log)
 
-	msg, _ := ws.NewRequest("test-1", ws.ActionShellStatus, ShellStatusRequest{TaskID: "non-existent-task"})
+	msg, _ := ws.NewRequest("test-1", ws.ActionShellStatus, ShellStatusRequest{SessionID: "session-1"})
 
 	resp, err := handlers.wsShellStatus(context.Background(), msg)
 	if err != nil {
@@ -213,8 +213,8 @@ func TestWsShellStatus_NoInstanceFound(t *testing.T) {
 	if payload["available"] != false {
 		t.Errorf("expected available=false, got %v", payload["available"])
 	}
-	if payload["error"] != "no agent running for this task" {
-		t.Errorf("expected 'no agent running for this task', got %v", payload["error"])
+	if payload["error"] != "no agent running for this session" {
+		t.Errorf("expected 'no agent running for this session', got %v", payload["error"])
 	}
 }
 
@@ -227,7 +227,7 @@ func TestWsShellStatus_NoClientAvailable(t *testing.T) {
 	// Note: Testing the "agent client not available" path requires injecting an
 	// instance with nil agentctl client, which requires access to lifecycle.Manager
 	// internal maps. This test verifies the handler works correctly with the manager.
-	msg, _ := ws.NewRequest("test-1", ws.ActionShellStatus, ShellStatusRequest{TaskID: "test-task-id"})
+	msg, _ := ws.NewRequest("test-1", ws.ActionShellStatus, ShellStatusRequest{SessionID: "session-1"})
 
 	resp, err := handlers.wsShellStatus(context.Background(), msg)
 	if err != nil {
@@ -251,15 +251,15 @@ func TestWsShellInput_NoInstanceFound(t *testing.T) {
 	handlers := NewShellHandlers(mgr, log)
 
 	msg, _ := ws.NewRequest("test-1", ws.ActionShellInput, ShellInputRequest{
-		TaskID: "non-existent-task",
-		Data:   "test input",
+		SessionID: "session-1",
+		Data:      "test input",
 	})
 
 	_, err := handlers.wsShellInput(context.Background(), msg)
 	if err == nil {
-		t.Error("expected error for non-existent task")
+		t.Error("expected error for non-existent session")
 	}
-	expectedErr := "no agent running for task non-existent-task"
+	expectedErr := "no agent running for session session-1"
 	if err.Error() != expectedErr {
 		t.Errorf("expected '%s', got: %v", expectedErr, err)
 	}
@@ -269,11 +269,11 @@ func TestSendShellInput_NoActiveStream(t *testing.T) {
 	log := newTestLogger()
 	handlers := NewShellHandlers(nil, log)
 
-	err := handlers.SendShellInput("non-existent-task", "test input")
+	err := handlers.SendShellInput("non-existent-session", "test input")
 	if err == nil {
 		t.Error("expected error for non-existent stream")
 	}
-	expectedErr := "no active shell stream for task non-existent-task"
+	expectedErr := "no active shell stream for session non-existent-session"
 	if err.Error() != expectedErr {
 		t.Errorf("expected '%s', got: %v", expectedErr, err)
 	}
@@ -283,8 +283,8 @@ func TestStopShellStream_NonExistent(t *testing.T) {
 	log := newTestLogger()
 	handlers := NewShellHandlers(nil, log)
 
-	// StopShellStream should not panic when called with non-existent taskID
-	handlers.StopShellStream("non-existent-task")
+	// StopShellStream should not panic when called with non-existent sessionID
+	handlers.StopShellStream("non-existent-session")
 	// No panic = success
 }
 
@@ -310,10 +310,10 @@ func TestRegisterHandlers_DispatcherReceivesMessages(t *testing.T) {
 	handlers.RegisterHandlers(dispatcher)
 
 	// Test that dispatcher can dispatch to shell.status
-	msg, _ := ws.NewRequest("test-1", ws.ActionShellStatus, ShellStatusRequest{TaskID: ""})
+	msg, _ := ws.NewRequest("test-1", ws.ActionShellStatus, ShellStatusRequest{SessionID: ""})
 	_, err := dispatcher.Dispatch(context.Background(), msg)
 
-	// Should get "task_id is required" error since we passed empty task ID
+	// Should get "session_id is required" error since we passed empty session ID
 	if err == nil {
 		t.Error("expected error from dispatcher")
 	}

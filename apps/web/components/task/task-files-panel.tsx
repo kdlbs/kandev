@@ -13,6 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@kandev/ui/tabs';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
 import { LineStat } from '@/components/diff-stat';
 import { useAppStore } from '@/components/state-provider';
+import { useSessionGitStatus } from '@/hooks/use-session-git-status';
 import type { FileInfo } from '@/lib/state/store';
 import { FileBrowser } from '@/components/task/file-browser';
 
@@ -23,7 +24,6 @@ type OpenFileTab = {
 };
 
 type TaskFilesPanelProps = {
-  taskId: string | null;
   onSelectDiffPath: (path: string) => void;
   onOpenFile: (file: OpenFileTab) => void;
 };
@@ -75,13 +75,14 @@ const splitPath = (path: string) => {
   };
 };
 
-const TaskFilesPanel = memo(function TaskFilesPanel({ taskId, onSelectDiffPath, onOpenFile }: TaskFilesPanelProps) {
+const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiffPath, onOpenFile }: TaskFilesPanelProps) {
   const [topTab, setTopTab] = useState<'diff' | 'files'>('diff');
-  const gitStatus = useAppStore((state) => state.gitStatus);
+  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const gitStatus = useSessionGitStatus(activeSessionId);
 
   // Convert git status files to array for display
   const changedFiles = useMemo(() => {
-    if (!gitStatus.files || Object.keys(gitStatus.files).length === 0) {
+    if (!gitStatus?.files || Object.keys(gitStatus.files).length === 0) {
       return [];
     }
     return Object.values(gitStatus.files).map((file) => ({
@@ -91,7 +92,7 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ taskId, onSelectDiffPath, 
       minus: file.deletions,
       oldPath: file.old_path,
     }));
-  }, [gitStatus.files]);
+  }, [gitStatus]);
 
   return (
     <div className="h-full min-h-0 bg-card p-4 flex flex-col rounded-lg border border-border/70 border-l-0">
@@ -174,8 +175,8 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ taskId, onSelectDiffPath, 
         </TabsContent>
         <TabsContent value="files" className="mt-3 flex-1 min-h-0">
           <div className="flex-1 min-h-0 overflow-y-auto rounded-lg bg-background h-full">
-            {taskId ? (
-              <FileBrowser taskId={taskId} onOpenFile={onOpenFile} />
+            {activeSessionId ? (
+              <FileBrowser sessionId={activeSessionId} onOpenFile={onOpenFile} />
             ) : (
               <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
                 No task selected

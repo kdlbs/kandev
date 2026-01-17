@@ -14,6 +14,9 @@ import {
 } from '@kandev/ui/alert-dialog';
 import { useAppStore } from '@/components/state-provider';
 import { getWebSocketClient } from '@/lib/ws/connection';
+import type { Message } from '@/lib/types/http';
+
+const EMPTY_MESSAGES: Message[] = [];
 
 type CommandApprovalDialogProps = {
   taskId: string;
@@ -25,7 +28,10 @@ export function CommandApprovalDialog({ taskId, standaloneOnly = false }: Comman
   const [isResponding, setIsResponding] = useState(false);
   const pendingPermissions = useAppStore((state) => state.permissions.pending);
   const removePendingPermission = useAppStore((state) => state.removePendingPermission);
-  const messages = useAppStore((state) => state.messages.items);
+  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const messages = useAppStore((state) =>
+    activeSessionId ? state.messages.bySession[activeSessionId] ?? EMPTY_MESSAGES : EMPTY_MESSAGES
+  );
 
   // Get tool_call_ids from all tool call messages
   const toolCallIds = useMemo(() => {
@@ -43,13 +49,17 @@ export function CommandApprovalDialog({ taskId, standaloneOnly = false }: Comman
   // If standaloneOnly, filter out permissions that have a matching tool call
   const permission = useMemo(() => {
     return pendingPermissions.find((p) => {
-      if (p.task_id !== taskId) return false;
+      if (activeSessionId) {
+        if (p.session_id !== activeSessionId) return false;
+      } else if (p.task_id !== taskId) {
+        return false;
+      }
       if (standaloneOnly && p.tool_call_id && toolCallIds.has(p.tool_call_id)) {
         return false; // This permission will be handled by inline UI
       }
       return true;
     });
-  }, [pendingPermissions, taskId, standaloneOnly, toolCallIds]);
+  }, [pendingPermissions, activeSessionId, taskId, standaloneOnly, toolCallIds]);
 
   const handleRespond = useCallback(
     async (optionId: string, cancelled: boolean = false) => {
@@ -65,7 +75,7 @@ export function CommandApprovalDialog({ taskId, standaloneOnly = false }: Comman
 
       try {
         await client.request('permission.respond', {
-          task_id: taskId,
+          session_id: permission.session_id,
           pending_id: permission.pending_id,
           option_id: cancelled ? undefined : optionId,
           cancelled,
@@ -77,7 +87,7 @@ export function CommandApprovalDialog({ taskId, standaloneOnly = false }: Comman
         setIsResponding(false);
       }
     },
-    [permission, taskId, removePendingPermission]
+    [permission, removePendingPermission]
   );
 
   const handleApprove = useCallback(() => {

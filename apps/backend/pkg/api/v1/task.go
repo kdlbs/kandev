@@ -59,21 +59,20 @@ type TaskRepository struct {
 
 // Task represents a Kanban task
 type Task struct {
-	ID              string           `json:"id"`
-	WorkspaceID     string           `json:"workspace_id"`
-	BoardID         string           `json:"board_id"`
-	Title           string           `json:"title"`
-	Description     string           `json:"description"`
-	State           TaskState        `json:"state"`
-	Priority        int              `json:"priority"`
-	AssignedAgentID *string          `json:"assigned_agent_id,omitempty"`
-	Repositories    []TaskRepository `json:"repositories,omitempty"`
-	CreatedBy       string           `json:"created_by"`
-	CreatedAt       time.Time        `json:"created_at"`
-	UpdatedAt       time.Time        `json:"updated_at"`
-	StartedAt       *time.Time       `json:"started_at,omitempty"`
-	CompletedAt     *time.Time       `json:"completed_at,omitempty"`
-	Metadata        map[string]interface{} `json:"metadata,omitempty"`
+	ID           string                 `json:"id"`
+	WorkspaceID  string                 `json:"workspace_id"`
+	BoardID      string                 `json:"board_id"`
+	Title        string                 `json:"title"`
+	Description  string                 `json:"description"`
+	State        TaskState              `json:"state"`
+	Priority     int                    `json:"priority"`
+	Repositories []TaskRepository       `json:"repositories,omitempty"`
+	CreatedBy    string                 `json:"created_by"`
+	CreatedAt    time.Time              `json:"created_at"`
+	UpdatedAt    time.Time              `json:"updated_at"`
+	StartedAt    *time.Time             `json:"started_at,omitempty"`
+	CompletedAt  *time.Time             `json:"completed_at,omitempty"`
+	Metadata     map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // TaskRepositoryInput for creating/updating task repositories
@@ -84,11 +83,13 @@ type TaskRepositoryInput struct {
 
 // CreateTaskRequest for creating a new task
 type CreateTaskRequest struct {
-	Title        string                 `json:"title" binding:"required,max=500"`
-	Description  string                 `json:"description" binding:"required"`
-	Priority     int                    `json:"priority" binding:"min=0,max=10"`
-	Repositories []TaskRepositoryInput  `json:"repositories,omitempty"`
-	Metadata     map[string]interface{} `json:"metadata,omitempty"`
+	Title          string                 `json:"title" binding:"required,max=500"`
+	Description    string                 `json:"description" binding:"required"`
+	Priority       int                    `json:"priority" binding:"min=0,max=10"`
+	Repositories   []TaskRepositoryInput  `json:"repositories,omitempty"`
+	Metadata       map[string]interface{} `json:"metadata,omitempty"`
+	StartAgent     bool                   `json:"start_agent,omitempty"`
+	AgentProfileID string                 `json:"agent_profile_id,omitempty"`
 }
 
 // UpdateTaskRequest for updating an existing task
@@ -119,26 +120,26 @@ type TaskEvent struct {
 
 // Message represents a message in a task session (user or agent)
 type Message struct {
-	ID             string                 `json:"id"`
-	TaskSessionID string                 `json:"task_session_id"`
-	TaskID         string                 `json:"task_id,omitempty"`
-	AuthorType     string                 `json:"author_type"` // "user" or "agent"
-	Type           string                 `json:"type,omitempty"`
-	AuthorID       string                 `json:"author_id,omitempty"`
-	Content        string                 `json:"content"`
-	RequestsInput  bool                   `json:"requests_input"` // True if agent is requesting user input
-	Metadata       map[string]interface{} `json:"metadata,omitempty"`
-	CreatedAt      time.Time              `json:"created_at"`
+	ID            string                 `json:"id"`
+	TaskSessionID string                 `json:"session_id"`
+	TaskID        string                 `json:"task_id,omitempty"`
+	AuthorType    string                 `json:"author_type"` // "user" or "agent"
+	Type          string                 `json:"type,omitempty"`
+	AuthorID      string                 `json:"author_id,omitempty"`
+	Content       string                 `json:"content"`
+	RequestsInput bool                   `json:"requests_input"` // True if agent is requesting user input
+	Metadata      map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt     time.Time              `json:"created_at"`
 }
 
 // CreateMessageRequest for adding a message to a task session
 type CreateMessageRequest struct {
-	TaskSessionID string                 `json:"task_session_id" binding:"required"`
-	Content        string                 `json:"content" binding:"required"`
-	AuthorType     string                 `json:"author_type,omitempty"` // Defaults to "user" if not specified
-	Type           string                 `json:"type,omitempty"`
-	RequestsInput  bool                   `json:"requests_input,omitempty"`
-	Metadata       map[string]interface{} `json:"metadata,omitempty"`
+	TaskSessionID string                 `json:"session_id" binding:"required"`
+	Content       string                 `json:"content" binding:"required"`
+	AuthorType    string                 `json:"author_type,omitempty"` // Defaults to "user" if not specified
+	Type          string                 `json:"type,omitempty"`
+	RequestsInput bool                   `json:"requests_input,omitempty"`
+	Metadata      map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // PermissionOption represents a permission choice presented to the user

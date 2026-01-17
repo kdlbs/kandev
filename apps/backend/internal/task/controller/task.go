@@ -69,6 +69,16 @@ func (c *TaskController) ListTaskSessions(ctx context.Context, req dto.ListTaskS
 	return resp, nil
 }
 
+func (c *TaskController) GetTaskSession(ctx context.Context, req dto.GetTaskSessionRequest) (dto.GetTaskSessionResponse, error) {
+	session, err := c.service.GetTaskSession(ctx, req.TaskSessionID)
+	if err != nil {
+		return dto.GetTaskSessionResponse{}, err
+	}
+	return dto.GetTaskSessionResponse{
+		Session: dto.FromTaskSession(session),
+	}, nil
+}
+
 func (c *TaskController) GetTask(ctx context.Context, req dto.GetTaskRequest) (dto.TaskDTO, error) {
 	task, err := c.service.GetTask(ctx, req.ID)
 	if err != nil {
@@ -101,7 +111,6 @@ func (c *TaskController) CreateTask(ctx context.Context, req dto.CreateTaskReque
 		Priority:     req.Priority,
 		State:        req.State,
 		Repositories: repos,
-		AssignedTo:   req.AssignedTo,
 		Position:     req.Position,
 		Metadata:     req.Metadata,
 	})
@@ -130,7 +139,6 @@ func (c *TaskController) UpdateTask(ctx context.Context, req dto.UpdateTaskReque
 		Priority:     req.Priority,
 		State:        req.State,
 		Repositories: repos,
-		AssignedTo:   req.AssignedTo,
 		Position:     req.Position,
 		Metadata:     req.Metadata,
 	})

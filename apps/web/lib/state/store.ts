@@ -2,7 +2,6 @@ import type { ReactNode } from 'react';
 import type {
   Agent,
   AgentDiscovery,
-  TaskSessionState,
   Branch,
   Environment,
   Executor,
@@ -72,6 +71,7 @@ export type BoardState = {
 
 export type TaskState = {
   activeTaskId: string | null;
+  activeSessionId: string | null;
 };
 
 export type AgentState = {
@@ -114,9 +114,9 @@ export type TerminalState = {
 };
 
 export type ShellState = {
-  // Map of taskId to shell output buffer (raw bytes as string)
+  // Map of sessionId to shell output buffer (raw bytes as string)
   outputs: Record<string, string>;
-  // Map of taskId to shell status
+  // Map of sessionId to shell status
   statuses: Record<
     string,
     {
@@ -137,8 +137,7 @@ export type FileInfo = {
   diff?: string;
 };
 
-export type GitStatusState = {
-  taskId: string | null;
+export type GitStatusEntry = {
   branch: string | null;
   remote_branch: string | null;
   modified: string[];
@@ -150,6 +149,26 @@ export type GitStatusState = {
   behind: number;
   files: Record<string, FileInfo>;
   timestamp: string | null;
+};
+
+export type GitStatusState = {
+  bySessionId: Record<string, GitStatusEntry>;
+};
+
+export type Worktree = {
+  id: string;
+  sessionId: string;
+  repositoryId?: string;
+  path?: string;
+  branch?: string;
+};
+
+export type WorktreesState = {
+  items: Record<string, Worktree>;
+};
+
+export type SessionWorktreesState = {
+  itemsBySessionId: Record<string, string[]>;
 };
 
 export type DiffState = {
@@ -186,15 +205,36 @@ export type ConnectionState = {
 };
 
 export type MessagesState = {
-  sessionId: string | null;
-  items: Message[];
-  isLoading: boolean;
-  hasMore: boolean;
-  oldestCursor: string | null;
+  bySession: Record<string, Message[]>;
+  metaBySession: Record<
+    string,
+    {
+      isLoading: boolean;
+      hasMore: boolean;
+      oldestCursor: string | null;
+    }
+  >;
 };
 
 export type TaskSessionsState = {
   items: Record<string, TaskSession>;
+};
+
+export type TaskSessionsByTaskState = {
+  itemsByTaskId: Record<string, TaskSession[]>;
+  loadingByTaskId: Record<string, boolean>;
+  loadedByTaskId: Record<string, boolean>;
+};
+
+export type SessionAgentctlStatus = {
+  status: 'starting' | 'ready' | 'error';
+  errorMessage?: string;
+  agentExecutionId?: string;
+  updatedAt?: string;
+};
+
+export type SessionAgentctlState = {
+  itemsBySessionId: Record<string, SessionAgentctlStatus>;
 };
 
 export type AppState = {
@@ -219,7 +259,10 @@ export type AppState = {
   connection: ConnectionState;
   messages: MessagesState;
   taskSessions: TaskSessionsState;
-  taskSessionStatesByTaskId: Record<string, TaskSessionState>;
+  taskSessionsByTask: TaskSessionsByTaskState;
+  sessionAgentctl: SessionAgentctlState;
+  worktrees: WorktreesState;
+  sessionWorktreesBySessionId: SessionWorktreesState;
   permissions: PermissionsState;
   hydrate: (state: Partial<AppState>) => void;
   setActiveWorkspace: (workspaceId: string | null) => void;
@@ -238,32 +281,45 @@ export type AppState = {
   setSettingsData: (next: Partial<SettingsDataState>) => void;
   setUserSettings: (settings: UserSettingsState) => void;
   setTerminalOutput: (terminalId: string, data: string) => void;
-  appendShellOutput: (taskId: string, data: string) => void;
+  appendShellOutput: (sessionId: string, data: string) => void;
   setShellStatus: (
-    taskId: string,
+    sessionId: string,
     status: { available: boolean; running?: boolean; shell?: string; cwd?: string }
   ) => void;
-  clearShellOutput: (taskId: string) => void;
+  clearShellOutput: (sessionId: string) => void;
   setConnectionStatus: (status: ConnectionState['status'], error?: string | null) => void;
   setMessages: (
-    sessionId: string | null,
+    sessionId: string,
     messages: Message[],
     meta?: { hasMore?: boolean; oldestCursor?: string | null }
   ) => void;
-  setMessagesSessionId: (sessionId: string | null) => void;
   addMessage: (message: Message) => void;
   updateMessage: (message: Message) => void;
-  prependMessages: (messages: Message[], meta?: { hasMore?: boolean; oldestCursor?: string | null }) => void;
-  setMessagesMetadata: (meta: { hasMore?: boolean; isLoading?: boolean; oldestCursor?: string | null }) => void;
-  setMessagesLoading: (loading: boolean) => void;
+  prependMessages: (
+    sessionId: string,
+    messages: Message[],
+    meta?: { hasMore?: boolean; oldestCursor?: string | null }
+  ) => void;
+  setMessagesMetadata: (
+    sessionId: string,
+    meta: { hasMore?: boolean; isLoading?: boolean; oldestCursor?: string | null }
+  ) => void;
+  setMessagesLoading: (sessionId: string, loading: boolean) => void;
+  setActiveSession: (taskId: string, sessionId: string) => void;
+  setActiveTask: (taskId: string) => void;
+  clearActiveSession: () => void;
   setTaskSession: (session: TaskSession) => void;
-  setTaskSessionState: (taskId: string, state: TaskSessionState) => void;
-  setGitStatus: (taskId: string, gitStatus: Omit<GitStatusState, 'taskId'>) => void;
-  clearGitStatus: () => void;
+  setTaskSessionsForTask: (taskId: string, sessions: TaskSession[]) => void;
+  setTaskSessionsLoading: (taskId: string, loading: boolean) => void;
+  setSessionAgentctlStatus: (sessionId: string, status: SessionAgentctlStatus) => void;
+  setWorktree: (worktree: Worktree) => void;
+  setSessionWorktrees: (sessionId: string, worktreeIds: string[]) => void;
+  setGitStatus: (sessionId: string, gitStatus: GitStatusEntry) => void;
+  clearGitStatus: (sessionId: string) => void;
   bumpAgentProfilesVersion: () => void;
   addPendingPermission: (permission: PendingPermission) => void;
   removePendingPermission: (pendingId: string) => void;
-  clearPendingPermissions: (taskId?: string) => void;
+  clearPendingPermissions: (sessionId?: string) => void;
 };
 
 export type AppStore = ReturnType<typeof createAppStore>;
@@ -279,7 +335,7 @@ const defaultState: AppState = {
   repositories: { itemsByWorkspaceId: {}, loadingByWorkspaceId: {}, loadedByWorkspaceId: {} },
   repositoryBranches: { itemsByRepositoryId: {}, loadingByRepositoryId: {}, loadedByRepositoryId: {} },
   settingsData: { executorsLoaded: false, environmentsLoaded: false, agentsLoaded: false },
-  tasks: { activeTaskId: null },
+  tasks: { activeTaskId: null, activeSessionId: null },
   agents: { agents: [] },
   agentProfiles: { items: [], version: 0 },
   userSettings: {
@@ -292,24 +348,14 @@ const defaultState: AppState = {
   terminal: { terminals: [] },
   shell: { outputs: {}, statuses: {} },
   diffs: { files: [] },
-  gitStatus: {
-    taskId: null,
-    branch: null,
-    remote_branch: null,
-    modified: [],
-    added: [],
-    deleted: [],
-    untracked: [],
-    renamed: [],
-    ahead: 0,
-    behind: 0,
-    files: {},
-    timestamp: null,
-  },
+  gitStatus: { bySessionId: {} },
   connection: { status: 'disconnected', error: null },
-  messages: { sessionId: null, items: [], isLoading: false, hasMore: false, oldestCursor: null },
+  messages: { bySession: {}, metaBySession: {} },
   taskSessions: { items: {} },
-  taskSessionStatesByTaskId: {},
+  taskSessionsByTask: { itemsByTaskId: {}, loadingByTaskId: {}, loadedByTaskId: {} },
+  sessionAgentctl: { itemsBySessionId: {} },
+  worktrees: { items: {} },
+  sessionWorktreesBySessionId: { itemsBySessionId: {} },
   permissions: { pending: [] },
   hydrate: () => undefined,
   setActiveWorkspace: () => undefined,
@@ -333,14 +379,20 @@ const defaultState: AppState = {
   clearShellOutput: () => undefined,
   setConnectionStatus: () => undefined,
   setMessages: () => undefined,
-  setMessagesSessionId: () => undefined,
   addMessage: () => undefined,
   updateMessage: () => undefined,
   prependMessages: () => undefined,
   setMessagesMetadata: () => undefined,
   setMessagesLoading: () => undefined,
+  setActiveSession: () => undefined,
+  setActiveTask: () => undefined,
+  clearActiveSession: () => undefined,
   setTaskSession: () => undefined,
-  setTaskSessionState: () => undefined,
+  setTaskSessionsForTask: () => undefined,
+  setTaskSessionsLoading: () => undefined,
+  setSessionAgentctlStatus: () => undefined,
+  setWorktree: () => undefined,
+  setSessionWorktrees: () => undefined,
   setGitStatus: () => undefined,
   clearGitStatus: () => undefined,
   bumpAgentProfilesVersion: () => undefined,
@@ -375,14 +427,20 @@ function mergeInitialState(
   | 'clearShellOutput'
   | 'setConnectionStatus'
   | 'setMessages'
-  | 'setMessagesSessionId'
   | 'addMessage'
   | 'updateMessage'
   | 'prependMessages'
   | 'setMessagesMetadata'
   | 'setMessagesLoading'
+  | 'setActiveSession'
+  | 'setActiveTask'
+  | 'clearActiveSession'
   | 'setTaskSession'
-  | 'setTaskSessionState'
+  | 'setTaskSessionsForTask'
+  | 'setTaskSessionsLoading'
+  | 'setSessionAgentctlStatus'
+  | 'setWorktree'
+  | 'setSessionWorktrees'
   | 'setGitStatus'
   | 'clearGitStatus'
   | 'bumpAgentProfilesVersion'
@@ -413,9 +471,12 @@ function mergeInitialState(
     connection: { ...defaultState.connection, ...initialState.connection },
     messages: { ...defaultState.messages, ...initialState.messages },
     taskSessions: { ...defaultState.taskSessions, ...initialState.taskSessions },
-    taskSessionStatesByTaskId: {
-      ...defaultState.taskSessionStatesByTaskId,
-      ...initialState.taskSessionStatesByTaskId,
+    taskSessionsByTask: { ...defaultState.taskSessionsByTask, ...initialState.taskSessionsByTask },
+    sessionAgentctl: { ...defaultState.sessionAgentctl, ...initialState.sessionAgentctl },
+    worktrees: { ...defaultState.worktrees, ...initialState.worktrees },
+    sessionWorktreesBySessionId: {
+      ...defaultState.sessionWorktreesBySessionId,
+      ...initialState.sessionWorktreesBySessionId,
     },
     permissions: { ...defaultState.permissions, ...initialState.permissions },
   };
@@ -446,11 +507,19 @@ export function createAppStore(initialState?: Partial<AppState>) {
           if (state.terminal) Object.assign(draft.terminal, state.terminal);
           if (state.shell) Object.assign(draft.shell, state.shell);
           if (state.diffs) Object.assign(draft.diffs, state.diffs);
+          if (state.gitStatus) Object.assign(draft.gitStatus, state.gitStatus);
           if (state.connection) Object.assign(draft.connection, state.connection);
           if (state.messages) Object.assign(draft.messages, state.messages);
           if (state.taskSessions) Object.assign(draft.taskSessions, state.taskSessions);
-          if (state.taskSessionStatesByTaskId) {
-            Object.assign(draft.taskSessionStatesByTaskId, state.taskSessionStatesByTaskId);
+          if (state.taskSessionsByTask) {
+            Object.assign(draft.taskSessionsByTask, state.taskSessionsByTask);
+          }
+          if (state.sessionAgentctl) {
+            Object.assign(draft.sessionAgentctl, state.sessionAgentctl);
+          }
+          if (state.worktrees) Object.assign(draft.worktrees, state.worktrees);
+          if (state.sessionWorktreesBySessionId) {
+            Object.assign(draft.sessionWorktreesBySessionId, state.sessionWorktreesBySessionId);
           }
           if (state.permissions) Object.assign(draft.permissions, state.permissions);
         }),
@@ -539,17 +608,17 @@ export function createAppStore(initialState?: Partial<AppState>) {
             draft.terminal.terminals.push({ id: terminalId, output: [data] });
           }
         }),
-      appendShellOutput: (taskId, data) =>
+      appendShellOutput: (sessionId, data) =>
         set((draft) => {
-          draft.shell.outputs[taskId] = (draft.shell.outputs[taskId] || '') + data;
+          draft.shell.outputs[sessionId] = (draft.shell.outputs[sessionId] || '') + data;
         }),
-      setShellStatus: (taskId, status) =>
+      setShellStatus: (sessionId, status) =>
         set((draft) => {
-          draft.shell.statuses[taskId] = status;
+          draft.shell.statuses[sessionId] = status;
         }),
-      clearShellOutput: (taskId) =>
+      clearShellOutput: (sessionId) =>
         set((draft) => {
-          draft.shell.outputs[taskId] = '';
+          draft.shell.outputs[sessionId] = '';
         }),
       setConnectionStatus: (status, error = null) =>
         set((draft) => {
@@ -558,132 +627,167 @@ export function createAppStore(initialState?: Partial<AppState>) {
         }),
       setMessages: (sessionId, messages, meta) =>
         set((draft) => {
-          draft.messages.sessionId = sessionId;
-          draft.messages.items = messages;
-          draft.messages.isLoading = false;
-          draft.messages.hasMore = meta?.hasMore ?? false;
-          if (meta?.oldestCursor !== undefined) {
-            draft.messages.oldestCursor = meta.oldestCursor;
-          } else if (messages.length) {
-            draft.messages.oldestCursor = messages[0].id;
-          } else {
-            draft.messages.oldestCursor = null;
-          }
-        }),
-      setMessagesSessionId: (sessionId) =>
-        set((draft) => {
-          draft.messages.sessionId = sessionId;
-          // Initialize items array if null to allow addMessage to work
-          // before setMessages is called
-          if (draft.messages.items === null) {
-            draft.messages.items = [];
-          }
+          draft.messages.bySession[sessionId] = messages;
+          const existingMeta = draft.messages.metaBySession[sessionId];
+          draft.messages.metaBySession[sessionId] = {
+            isLoading: false,
+            hasMore: meta?.hasMore ?? existingMeta?.hasMore ?? false,
+            oldestCursor:
+              meta?.oldestCursor ?? (messages.length ? messages[0].id : existingMeta?.oldestCursor ?? null),
+          };
         }),
       addMessage: (message) =>
         set((draft) => {
-          // Initialize items array if null
-          if (draft.messages.items === null) {
-            draft.messages.items = [];
+          if (!message.session_id) {
+            return;
           }
-          if (!draft.messages.sessionId) {
-            draft.messages.sessionId = message.task_session_id;
+          const sessionId = message.session_id;
+          const list = draft.messages.bySession[sessionId] ?? [];
+          const exists = list.some((item) => item.id === message.id);
+          if (exists) {
+            return;
           }
-          // Only add if this message is for the current session
-          if (draft.messages.sessionId === message.task_session_id) {
-            // Check if message already exists (avoid duplicates)
-            const exists = draft.messages.items.some((item) => item.id === message.id);
-            if (!exists) {
-              draft.messages.items.push(message);
-              if (!draft.messages.oldestCursor) {
-                draft.messages.oldestCursor = message.id;
-              }
-            }
+          draft.messages.bySession[sessionId] = [...list, message];
+          const meta = draft.messages.metaBySession[sessionId] ?? {
+            isLoading: false,
+            hasMore: false,
+            oldestCursor: null,
+          };
+          if (!meta.oldestCursor) {
+            meta.oldestCursor = message.id;
           }
+          draft.messages.metaBySession[sessionId] = meta;
         }),
       updateMessage: (message) =>
         set((draft) => {
-          if (!draft.messages.sessionId) {
-            draft.messages.sessionId = message.task_session_id;
+          if (!message.session_id) {
+            return;
           }
-          // Only update if this message is for the current session
-          if (draft.messages.sessionId === message.task_session_id && draft.messages.items) {
-            const index = draft.messages.items.findIndex((item) => item.id === message.id);
-            if (index !== -1) {
-              draft.messages.items[index] = message;
-            }
+          const sessionId = message.session_id;
+          const list = draft.messages.bySession[sessionId];
+          if (!list) return;
+          const index = list.findIndex((item) => item.id === message.id);
+          if (index !== -1) {
+            list[index] = message;
           }
         }),
-      prependMessages: (messages, meta) =>
+      prependMessages: (sessionId, messages, meta) =>
         set((draft) => {
-          if (draft.messages.items === null) {
-            draft.messages.items = [];
-          }
-          const existingIds = new Set(draft.messages.items.map((item) => item.id));
+          const existing = draft.messages.bySession[sessionId] ?? [];
+          const existingIds = new Set(existing.map((item) => item.id));
           const incoming = messages.filter((item) => !existingIds.has(item.id));
-          if (incoming.length) {
-            draft.messages.items = [...incoming, ...draft.messages.items];
-          }
-          if (meta?.hasMore !== undefined) {
-            draft.messages.hasMore = meta.hasMore;
-          }
-          if (meta?.oldestCursor !== undefined) {
-            draft.messages.oldestCursor = meta.oldestCursor;
-          } else if (draft.messages.items.length) {
-            draft.messages.oldestCursor = draft.messages.items[0].id;
-          } else {
-            draft.messages.oldestCursor = null;
-          }
-          draft.messages.isLoading = false;
+          const next = incoming.length ? [...incoming, ...existing] : existing;
+          draft.messages.bySession[sessionId] = next;
+          const currentMeta = draft.messages.metaBySession[sessionId] ?? {
+            isLoading: false,
+            hasMore: false,
+            oldestCursor: null,
+          };
+          draft.messages.metaBySession[sessionId] = {
+            isLoading: false,
+            hasMore: meta?.hasMore ?? currentMeta.hasMore,
+            oldestCursor:
+              meta?.oldestCursor ?? (next.length ? next[0].id : currentMeta.oldestCursor ?? null),
+          };
         }),
-      setMessagesMetadata: (meta) =>
+      setMessagesMetadata: (sessionId, meta) =>
         set((draft) => {
-          if (meta.hasMore !== undefined) {
-            draft.messages.hasMore = meta.hasMore;
-          }
-          if (meta.isLoading !== undefined) {
-            draft.messages.isLoading = meta.isLoading;
-          }
-          if (meta.oldestCursor !== undefined) {
-            draft.messages.oldestCursor = meta.oldestCursor;
-          }
+          const currentMeta = draft.messages.metaBySession[sessionId] ?? {
+            isLoading: false,
+            hasMore: false,
+            oldestCursor: null,
+          };
+          draft.messages.metaBySession[sessionId] = {
+            isLoading: meta.isLoading ?? currentMeta.isLoading,
+            hasMore: meta.hasMore ?? currentMeta.hasMore,
+            oldestCursor: meta.oldestCursor ?? currentMeta.oldestCursor,
+          };
         }),
-      setMessagesLoading: (loading) =>
+      setMessagesLoading: (sessionId, loading) =>
         set((draft) => {
-          draft.messages.isLoading = loading;
+          const currentMeta = draft.messages.metaBySession[sessionId] ?? {
+            isLoading: false,
+            hasMore: false,
+            oldestCursor: null,
+          };
+          currentMeta.isLoading = loading;
+          draft.messages.metaBySession[sessionId] = currentMeta;
+        }),
+      setActiveSession: (taskId, sessionId) =>
+        set((draft) => {
+          draft.tasks.activeTaskId = taskId;
+          draft.tasks.activeSessionId = sessionId;
+        }),
+      setActiveTask: (taskId) =>
+        set((draft) => {
+          draft.tasks.activeTaskId = taskId;
+          draft.tasks.activeSessionId = null;
+        }),
+      clearActiveSession: () =>
+        set((draft) => {
+          draft.tasks.activeTaskId = null;
+          draft.tasks.activeSessionId = null;
         }),
       setTaskSession: (session) =>
         set((draft) => {
           draft.taskSessions.items[session.id] = session;
-          // Also update the task session state by task ID
-          draft.taskSessionStatesByTaskId[session.task_id] = session.state;
+          if (session.worktree_id) {
+            draft.worktrees.items[session.worktree_id] = {
+              id: session.worktree_id,
+              sessionId: session.id,
+              repositoryId: session.repository_id ?? undefined,
+              path: session.worktree_path ?? undefined,
+              branch: session.worktree_branch ?? undefined,
+            };
+            draft.sessionWorktreesBySessionId.itemsBySessionId[session.id] = [session.worktree_id];
+          }
         }),
-      setTaskSessionState: (taskId, state) =>
+      setTaskSessionsForTask: (taskId, sessions) =>
         set((draft) => {
-          draft.taskSessionStatesByTaskId[taskId] = state;
+          sessions.forEach((session) => {
+            draft.taskSessions.items[session.id] = session;
+            if (session.worktree_id) {
+              draft.worktrees.items[session.worktree_id] = {
+                id: session.worktree_id,
+                sessionId: session.id,
+                repositoryId: session.repository_id ?? undefined,
+                path: session.worktree_path ?? undefined,
+                branch: session.worktree_branch ?? undefined,
+              };
+              draft.sessionWorktreesBySessionId.itemsBySessionId[session.id] = [session.worktree_id];
+            }
+          });
+          draft.taskSessionsByTask.itemsByTaskId[taskId] = sessions;
+          draft.taskSessionsByTask.loadedByTaskId[taskId] = true;
+          draft.taskSessionsByTask.loadingByTaskId[taskId] = false;
         }),
-      setGitStatus: (taskId, gitStatus) =>
+      setTaskSessionsLoading: (taskId, loading) =>
         set((draft) => {
-          draft.gitStatus = {
-            taskId,
-            ...gitStatus,
-          };
+          draft.taskSessionsByTask.loadingByTaskId[taskId] = loading;
         }),
-      clearGitStatus: () =>
+      setSessionAgentctlStatus: (sessionId, status) =>
         set((draft) => {
-          draft.gitStatus = {
-            taskId: null,
-            branch: null,
-            remote_branch: null,
-            modified: [],
-            added: [],
-            deleted: [],
-            untracked: [],
-            renamed: [],
-            ahead: 0,
-            behind: 0,
-            files: {},
-            timestamp: null,
-          };
+          draft.sessionAgentctl.itemsBySessionId[sessionId] = status;
+        }),
+      setWorktree: (worktree) =>
+        set((draft) => {
+          draft.worktrees.items[worktree.id] = worktree;
+          const existing = draft.sessionWorktreesBySessionId.itemsBySessionId[worktree.sessionId] ?? [];
+          if (!existing.includes(worktree.id)) {
+            draft.sessionWorktreesBySessionId.itemsBySessionId[worktree.sessionId] = [...existing, worktree.id];
+          }
+        }),
+      setSessionWorktrees: (sessionId, worktreeIds) =>
+        set((draft) => {
+          draft.sessionWorktreesBySessionId.itemsBySessionId[sessionId] = worktreeIds;
+        }),
+      setGitStatus: (sessionId, gitStatus) =>
+        set((draft) => {
+          draft.gitStatus.bySessionId[sessionId] = gitStatus;
+        }),
+      clearGitStatus: (sessionId) =>
+        set((draft) => {
+          delete draft.gitStatus.bySessionId[sessionId];
         }),
       bumpAgentProfilesVersion: () =>
         set((draft) => {
@@ -701,10 +805,10 @@ export function createAppStore(initialState?: Partial<AppState>) {
         set((draft) => {
           draft.permissions.pending = draft.permissions.pending.filter((p) => p.pending_id !== pendingId);
         }),
-      clearPendingPermissions: (taskId) =>
+      clearPendingPermissions: (sessionId) =>
         set((draft) => {
-          if (taskId) {
-            draft.permissions.pending = draft.permissions.pending.filter((p) => p.task_id !== taskId);
+          if (sessionId) {
+            draft.permissions.pending = draft.permissions.pending.filter((p) => p.session_id !== sessionId);
           } else {
             draft.permissions.pending = [];
           }

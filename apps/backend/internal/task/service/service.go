@@ -83,7 +83,6 @@ type CreateTaskRequest struct {
 	Priority     int                    `json:"priority"`
 	State        *v1.TaskState          `json:"state,omitempty"`
 	Repositories []TaskRepositoryInput  `json:"repositories,omitempty"`
-	AssignedTo   string                 `json:"assigned_to,omitempty"`
 	Position     int                    `json:"position"`
 	Metadata     map[string]interface{} `json:"metadata,omitempty"`
 }
@@ -95,7 +94,6 @@ type UpdateTaskRequest struct {
 	Priority     *int                   `json:"priority,omitempty"`
 	State        *v1.TaskState          `json:"state,omitempty"`
 	Repositories []TaskRepositoryInput  `json:"repositories,omitempty"`
-	AssignedTo   *string                `json:"assigned_to,omitempty"`
 	Position     *int                   `json:"position,omitempty"`
 	Metadata     map[string]interface{} `json:"metadata,omitempty"`
 }
@@ -180,19 +178,21 @@ type UpdateRepositoryRequest struct {
 
 // CreateExecutorRequest contains the data for creating an executor
 type CreateExecutorRequest struct {
-	Name     string                `json:"name"`
-	Type     models.ExecutorType   `json:"type"`
-	Status   models.ExecutorStatus `json:"status"`
-	IsSystem bool                  `json:"is_system"`
-	Config   map[string]string     `json:"config,omitempty"`
+	Name      string                `json:"name"`
+	Type      models.ExecutorType   `json:"type"`
+	Status    models.ExecutorStatus `json:"status"`
+	IsSystem  bool                  `json:"is_system"`
+	Resumable bool                  `json:"resumable"`
+	Config    map[string]string     `json:"config,omitempty"`
 }
 
 // UpdateExecutorRequest contains the data for updating an executor
 type UpdateExecutorRequest struct {
-	Name   *string                `json:"name,omitempty"`
-	Type   *models.ExecutorType   `json:"type,omitempty"`
-	Status *models.ExecutorStatus `json:"status,omitempty"`
-	Config map[string]string      `json:"config,omitempty"`
+	Name      *string                `json:"name,omitempty"`
+	Type      *models.ExecutorType   `json:"type,omitempty"`
+	Status    *models.ExecutorStatus `json:"status,omitempty"`
+	Resumable *bool                  `json:"resumable,omitempty"`
+	Config    map[string]string      `json:"config,omitempty"`
 }
 
 // CreateEnvironmentRequest contains the data for creating an environment
@@ -255,7 +255,6 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*mode
 		Description: req.Description,
 		State:       state,
 		Priority:    req.Priority,
-		AssignedTo:  req.AssignedTo,
 		Position:    req.Position,
 		Metadata:    req.Metadata,
 	}
@@ -389,9 +388,6 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 		task.State = *req.State
 		stateChanged = true
 	}
-	if req.AssignedTo != nil {
-		task.AssignedTo = *req.AssignedTo
-	}
 	if req.Position != nil {
 		task.Position = *req.Position
 	}
@@ -471,6 +467,37 @@ func (s *Service) DeleteTask(ctx context.Context, id string) error {
 		}
 	}
 
+	sessions, err := s.repo.ListTaskSessions(ctx, id)
+	if err != nil {
+		s.logger.Warn("failed to list task sessions for delete",
+			zap.String("task_id", id),
+			zap.Error(err))
+	} else {
+		for _, session := range sessions {
+			if session == nil || session.ID == "" {
+				continue
+			}
+			if err := s.repo.DeleteExecutorRunningBySessionID(ctx, session.ID); err != nil {
+				s.logger.Debug("failed to delete executor runtime for session",
+					zap.String("task_id", id),
+					zap.String("session_id", session.ID),
+					zap.Error(err))
+			}
+			if err := s.repo.DeleteTaskSessionWorktreesBySession(ctx, session.ID); err != nil {
+				s.logger.Warn("failed to delete session worktrees",
+					zap.String("task_id", id),
+					zap.String("session_id", session.ID),
+					zap.Error(err))
+			}
+			if err := s.repo.DeleteTaskSession(ctx, session.ID); err != nil {
+				s.logger.Warn("failed to delete task session",
+					zap.String("task_id", id),
+					zap.String("session_id", session.ID),
+					zap.Error(err))
+			}
+		}
+	}
+
 	if err := s.repo.DeleteTask(ctx, id); err != nil {
 		s.logger.Error("failed to delete task", zap.String("task_id", id), zap.Error(err))
 		return err
@@ -505,6 +532,11 @@ func (s *Service) ListTasks(ctx context.Context, boardID string) ([]*models.Task
 // ListTaskSessions returns all sessions for a task.
 func (s *Service) ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
 	return s.repo.ListTaskSessions(ctx, taskID)
+}
+
+// GetTaskSession returns a single session by ID.
+func (s *Service) GetTaskSession(ctx context.Context, sessionID string) (*models.TaskSession, error) {
+	return s.repo.GetTaskSession(ctx, sessionID)
 }
 
 // UpdateTaskState updates the state of a task, moves it to the matching column,
@@ -1068,12 +1100,13 @@ func (s *Service) ListRepositoryScripts(ctx context.Context, repositoryID string
 
 func (s *Service) CreateExecutor(ctx context.Context, req *CreateExecutorRequest) (*models.Executor, error) {
 	executor := &models.Executor{
-		ID:       uuid.New().String(),
-		Name:     req.Name,
-		Type:     req.Type,
-		Status:   req.Status,
-		IsSystem: req.IsSystem,
-		Config:   req.Config,
+		ID:        uuid.New().String(),
+		Name:      req.Name,
+		Type:      req.Type,
+		Status:    req.Status,
+		IsSystem:  req.IsSystem,
+		Resumable: req.Resumable,
+		Config:    req.Config,
 	}
 
 	if err := s.repo.CreateExecutor(ctx, executor); err != nil {
@@ -1103,6 +1136,9 @@ func (s *Service) UpdateExecutor(ctx context.Context, id string, req *UpdateExec
 	}
 	if req.Status != nil {
 		executor.Status = *req.Status
+	}
+	if req.Resumable != nil {
+		executor.Resumable = *req.Resumable
 	}
 	if req.Config != nil {
 		executor.Config = req.Config
@@ -1248,9 +1284,6 @@ func (s *Service) publishTaskEvent(ctx context.Context, eventType string, task *
 		"updated_at":  task.UpdatedAt.Format(time.RFC3339),
 	}
 
-	if task.AssignedTo != "" {
-		data["assigned_to"] = task.AssignedTo
-	}
 	if task.Metadata != nil {
 		data["metadata"] = task.Metadata
 	}
@@ -1363,6 +1396,7 @@ func (s *Service) publishExecutorEvent(ctx context.Context, eventType string, ex
 		"type":       executor.Type,
 		"status":     executor.Status,
 		"is_system":  executor.IsSystem,
+		"resumable":  executor.Resumable,
 		"config":     executor.Config,
 		"created_at": executor.CreatedAt.Format(time.RFC3339),
 		"updated_at": executor.UpdatedAt.Format(time.RFC3339),
@@ -1408,7 +1442,7 @@ func (s *Service) publishEnvironmentEvent(ctx context.Context, eventType string,
 
 // CreateMessageRequest contains the data for creating a new message
 type CreateMessageRequest struct {
-	TaskSessionID string                 `json:"task_session_id"`
+	TaskSessionID string                 `json:"session_id"`
 	TaskID        string                 `json:"task_id,omitempty"`
 	Content       string                 `json:"content"`
 	AuthorType    string                 `json:"author_type,omitempty"` // "user" or "agent", defaults to "user"
@@ -1463,7 +1497,7 @@ func (s *Service) CreateMessage(ctx context.Context, req *CreateMessageRequest) 
 
 	s.logger.Info("message created",
 		zap.String("message_id", message.ID),
-		zap.String("task_session_id", message.TaskSessionID),
+		zap.String("session_id", message.TaskSessionID),
 		zap.String("author_type", string(message.AuthorType)))
 
 	return message, nil
@@ -1533,7 +1567,7 @@ func (s *Service) UpdateToolCallMessage(ctx context.Context, sessionID, toolCall
 		// Log retry attempt (only warn on final failure)
 		if attempt < maxRetries-1 {
 			s.logger.Debug("tool call message not found, retrying",
-				zap.String("task_session_id", sessionID),
+				zap.String("session_id", sessionID),
 				zap.String("tool_call_id", toolCallID),
 				zap.Int("attempt", attempt+1),
 				zap.Int("max_retries", maxRetries))
@@ -1543,7 +1577,7 @@ func (s *Service) UpdateToolCallMessage(ctx context.Context, sessionID, toolCall
 
 	if err != nil {
 		s.logger.Warn("tool call message not found for update after retries",
-			zap.String("task_session_id", sessionID),
+			zap.String("session_id", sessionID),
 			zap.String("tool_call_id", toolCallID),
 			zap.Int("retries", maxRetries),
 			zap.Error(err))
@@ -1590,15 +1624,15 @@ func (s *Service) publishMessageEvent(ctx context.Context, eventType string, mes
 	}
 
 	data := map[string]interface{}{
-		"message_id":      message.ID,
-		"task_session_id": message.TaskSessionID,
-		"task_id":         message.TaskID,
-		"author_type":     string(message.AuthorType),
-		"author_id":       message.AuthorID,
-		"content":         message.Content,
-		"type":            messageType,
-		"requests_input":  message.RequestsInput,
-		"created_at":      message.CreatedAt.Format(time.RFC3339),
+		"message_id":     message.ID,
+		"session_id":     message.TaskSessionID,
+		"task_id":        message.TaskID,
+		"author_type":    string(message.AuthorType),
+		"author_id":      message.AuthorID,
+		"content":        message.Content,
+		"type":           messageType,
+		"requests_input": message.RequestsInput,
+		"created_at":     message.CreatedAt.Format(time.RFC3339),
 	}
 
 	if message.Metadata != nil {

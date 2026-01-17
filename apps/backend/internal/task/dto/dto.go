@@ -73,6 +73,7 @@ type ExecutorDTO struct {
 	Type      models.ExecutorType   `json:"type"`
 	Status    models.ExecutorStatus `json:"status"`
 	IsSystem  bool                  `json:"is_system"`
+	Resumable bool                  `json:"resumable"`
 	Config    map[string]string     `json:"config,omitempty"`
 	CreatedAt time.Time             `json:"created_at"`
 	UpdatedAt time.Time             `json:"updated_at"`
@@ -92,20 +93,19 @@ type EnvironmentDTO struct {
 }
 
 type TaskDTO struct {
-	ID              string                   `json:"id"`
-	WorkspaceID     string                   `json:"workspace_id"`
-	BoardID         string                   `json:"board_id"`
-	ColumnID        string                   `json:"column_id"`
-	Title           string                   `json:"title"`
-	Description     string                   `json:"description"`
-	State           v1.TaskState             `json:"state"`
-	Priority        int                      `json:"priority"`
-	Repositories    []TaskRepositoryDTO      `json:"repositories,omitempty"`
-	AssignedAgentID *string                  `json:"assigned_agent_id,omitempty"`
-	Position        int                      `json:"position"`
-	CreatedAt       time.Time                `json:"created_at"`
-	UpdatedAt       time.Time                `json:"updated_at"`
-	Metadata        map[string]interface{}   `json:"metadata,omitempty"`
+	ID           string                 `json:"id"`
+	WorkspaceID  string                 `json:"workspace_id"`
+	BoardID      string                 `json:"board_id"`
+	ColumnID     string                 `json:"column_id"`
+	Title        string                 `json:"title"`
+	Description  string                 `json:"description"`
+	State        v1.TaskState           `json:"state"`
+	Priority     int                    `json:"priority"`
+	Repositories []TaskRepositoryDTO    `json:"repositories,omitempty"`
+	Position     int                    `json:"position"`
+	CreatedAt    time.Time              `json:"created_at"`
+	UpdatedAt    time.Time              `json:"updated_at"`
+	Metadata     map[string]interface{} `json:"metadata,omitempty"`
 	// Worktree information (populated if worktree exists for this task)
 	WorktreePath   *string `json:"worktree_path,omitempty"`
 	WorktreeBranch *string `json:"worktree_branch,omitempty"`
@@ -123,29 +123,33 @@ type TaskRepositoryDTO struct {
 }
 
 type TaskSessionDTO struct {
-	ID                   string                 `json:"id"`
-	TaskID               string                 `json:"task_id"`
-	AgentExecutionID     string                 `json:"agent_execution_id,omitempty"`
-	ContainerID          string                 `json:"container_id,omitempty"`
-	AgentProfileID       string                 `json:"agent_profile_id,omitempty"`
-	ExecutorID           string                 `json:"executor_id,omitempty"`
-	EnvironmentID        string                 `json:"environment_id,omitempty"`
-	RepositoryID         string                 `json:"repository_id,omitempty"`
-	BaseBranch           string                 `json:"base_branch,omitempty"`
-	WorktreeID           string                 `json:"worktree_id,omitempty"`
-	WorktreePath         string                 `json:"worktree_path,omitempty"`
-	WorktreeBranch       string                 `json:"worktree_branch,omitempty"`
+	ID                   string                  `json:"id"`
+	TaskID               string                  `json:"task_id"`
+	AgentExecutionID     string                  `json:"agent_execution_id,omitempty"`
+	ContainerID          string                  `json:"container_id,omitempty"`
+	AgentProfileID       string                  `json:"agent_profile_id,omitempty"`
+	ExecutorID           string                  `json:"executor_id,omitempty"`
+	EnvironmentID        string                  `json:"environment_id,omitempty"`
+	RepositoryID         string                  `json:"repository_id,omitempty"`
+	BaseBranch           string                  `json:"base_branch,omitempty"`
+	WorktreeID           string                  `json:"worktree_id,omitempty"`
+	WorktreePath         string                  `json:"worktree_path,omitempty"`
+	WorktreeBranch       string                  `json:"worktree_branch,omitempty"`
 	State                models.TaskSessionState `json:"state"`
-	Progress             int                    `json:"progress"`
-	ErrorMessage         string                 `json:"error_message,omitempty"`
-	Metadata             map[string]interface{} `json:"metadata,omitempty"`
-	AgentProfileSnapshot map[string]interface{} `json:"agent_profile_snapshot,omitempty"`
-	ExecutorSnapshot     map[string]interface{} `json:"executor_snapshot,omitempty"`
-	EnvironmentSnapshot  map[string]interface{} `json:"environment_snapshot,omitempty"`
-	RepositorySnapshot   map[string]interface{} `json:"repository_snapshot,omitempty"`
-	StartedAt            time.Time              `json:"started_at"`
-	CompletedAt          *time.Time             `json:"completed_at,omitempty"`
-	UpdatedAt            time.Time              `json:"updated_at"`
+	Progress             int                     `json:"progress"`
+	ErrorMessage         string                  `json:"error_message,omitempty"`
+	Metadata             map[string]interface{}  `json:"metadata,omitempty"`
+	AgentProfileSnapshot map[string]interface{}  `json:"agent_profile_snapshot,omitempty"`
+	ExecutorSnapshot     map[string]interface{}  `json:"executor_snapshot,omitempty"`
+	EnvironmentSnapshot  map[string]interface{}  `json:"environment_snapshot,omitempty"`
+	RepositorySnapshot   map[string]interface{}  `json:"repository_snapshot,omitempty"`
+	StartedAt            time.Time               `json:"started_at"`
+	CompletedAt          *time.Time              `json:"completed_at,omitempty"`
+	UpdatedAt            time.Time               `json:"updated_at"`
+}
+
+type GetTaskSessionResponse struct {
+	Session TaskSessionDTO `json:"session"`
 }
 
 type ListTaskSessionsResponse struct {
@@ -328,6 +332,7 @@ func FromExecutor(executor *models.Executor) ExecutorDTO {
 		Type:      executor.Type,
 		Status:    executor.Status,
 		IsSystem:  executor.IsSystem,
+		Resumable: executor.Resumable,
 		Config:    executor.Config,
 		CreatedAt: executor.CreatedAt,
 		UpdatedAt: executor.UpdatedAt,
@@ -358,11 +363,6 @@ func FromLocalRepository(repo service.LocalRepository) LocalRepositoryDTO {
 }
 
 func FromTask(task *models.Task) TaskDTO {
-	var assignedAgentID *string
-	if task.AssignedTo != "" {
-		assignedAgentID = &task.AssignedTo
-	}
-
 	// Convert repositories
 	var repositories []TaskRepositoryDTO
 	for _, repo := range task.Repositories {
@@ -379,20 +379,19 @@ func FromTask(task *models.Task) TaskDTO {
 	}
 
 	return TaskDTO{
-		ID:              task.ID,
-		WorkspaceID:     task.WorkspaceID,
-		BoardID:         task.BoardID,
-		ColumnID:        task.ColumnID,
-		Title:           task.Title,
-		Description:     task.Description,
-		State:           task.State,
-		Priority:        task.Priority,
-		Repositories:    repositories,
-		AssignedAgentID: assignedAgentID,
-		Position:        task.Position,
-		CreatedAt:       task.CreatedAt,
-		UpdatedAt:       task.UpdatedAt,
-		Metadata:        task.Metadata,
+		ID:           task.ID,
+		WorkspaceID:  task.WorkspaceID,
+		BoardID:      task.BoardID,
+		ColumnID:     task.ColumnID,
+		Title:        task.Title,
+		Description:  task.Description,
+		State:        task.State,
+		Priority:     task.Priority,
+		Repositories: repositories,
+		Position:     task.Position,
+		CreatedAt:    task.CreatedAt,
+		UpdatedAt:    task.UpdatedAt,
+		Metadata:     task.Metadata,
 	}
 }
 

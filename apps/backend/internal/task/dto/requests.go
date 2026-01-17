@@ -136,19 +136,21 @@ type GetExecutorRequest struct {
 }
 
 type CreateExecutorRequest struct {
-	Name     string
-	Type     models.ExecutorType
-	Status   models.ExecutorStatus
-	IsSystem bool
-	Config   map[string]string
+	Name      string
+	Type      models.ExecutorType
+	Status    models.ExecutorStatus
+	IsSystem  bool
+	Resumable bool
+	Config    map[string]string
 }
 
 type UpdateExecutorRequest struct {
-	ID     string
-	Name   *string
-	Type   *models.ExecutorType
-	Status *models.ExecutorStatus
-	Config map[string]string
+	ID        string
+	Name      *string
+	Type      *models.ExecutorType
+	Status    *models.ExecutorStatus
+	Resumable *bool
+	Config    map[string]string
 }
 
 type DeleteExecutorRequest struct {
@@ -238,6 +240,10 @@ type ListTaskSessionsRequest struct {
 	TaskID string
 }
 
+type GetTaskSessionRequest struct {
+	TaskSessionID string
+}
+
 type GetTaskRequest struct {
 	ID string
 }
@@ -259,7 +265,6 @@ type CreateTaskRequest struct {
 	Priority     int
 	State        *v1.TaskState
 	Repositories []TaskRepositoryInput
-	AssignedTo   string
 	Position     int
 	Metadata     map[string]interface{}
 }
@@ -271,7 +276,6 @@ type UpdateTaskRequest struct {
 	Priority     *int
 	State        *v1.TaskState
 	Repositories []TaskRepositoryInput
-	AssignedTo   *string
 	Position     *int
 	Metadata     map[string]interface{}
 }

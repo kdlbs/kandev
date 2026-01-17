@@ -42,8 +42,9 @@ export class WebSocketClient {
   private reconnectAttempts = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private intentionalClose = false;
-  private subscriptions = new Set<string>();
-  private userSubscriptionActive = false;
+  private subscriptions = new Map<string, number>();
+  private sessionSubscriptions = new Map<string, number>();
+  private userSubscriptionCount = 0;
   private heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
   private heartbeatTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
   private lastMessageTime: number = Date.now();
@@ -178,8 +179,10 @@ export class WebSocketClient {
   }
 
   subscribe(taskId: string) {
-    this.subscriptions.add(taskId);
-    if (this.status === 'open') {
+    const currentCount = this.subscriptions.get(taskId) ?? 0;
+    const nextCount = currentCount + 1;
+    this.subscriptions.set(taskId, nextCount);
+    if (this.status === 'open' && nextCount === 1) {
       this.send({
         id: generateUUID(),
         type: 'request',
@@ -187,11 +190,27 @@ export class WebSocketClient {
         payload: { task_id: taskId },
       });
     }
+    return () => this.unsubscribe(taskId);
+  }
+
+  subscribeSession(sessionId: string) {
+    const currentCount = this.sessionSubscriptions.get(sessionId) ?? 0;
+    const nextCount = currentCount + 1;
+    this.sessionSubscriptions.set(sessionId, nextCount);
+    if (this.status === 'open' && nextCount === 1) {
+      this.send({
+        id: generateUUID(),
+        type: 'request',
+        action: 'session.subscribe',
+        payload: { session_id: sessionId },
+      });
+    }
+    return () => this.unsubscribeSession(sessionId);
   }
 
   subscribeUser() {
-    this.userSubscriptionActive = true;
-    if (this.status === 'open') {
+    this.userSubscriptionCount += 1;
+    if (this.status === 'open' && this.userSubscriptionCount === 1) {
       this.send({
         id: generateUUID(),
         type: 'request',
@@ -202,20 +221,46 @@ export class WebSocketClient {
   }
 
   unsubscribe(taskId: string) {
-    this.subscriptions.delete(taskId);
-    if (this.status === 'open') {
-      this.send({
-        id: generateUUID(),
-        type: 'request',
-        action: 'task.unsubscribe',
-        payload: { task_id: taskId },
-      });
+    const currentCount = this.subscriptions.get(taskId);
+    if (!currentCount) return;
+    const nextCount = currentCount - 1;
+    if (nextCount <= 0) {
+      this.subscriptions.delete(taskId);
+      if (this.status === 'open') {
+        this.send({
+          id: generateUUID(),
+          type: 'request',
+          action: 'task.unsubscribe',
+          payload: { task_id: taskId },
+        });
+      }
+      return;
     }
+    this.subscriptions.set(taskId, nextCount);
+  }
+
+  unsubscribeSession(sessionId: string) {
+    const currentCount = this.sessionSubscriptions.get(sessionId);
+    if (!currentCount) return;
+    const nextCount = currentCount - 1;
+    if (nextCount <= 0) {
+      this.sessionSubscriptions.delete(sessionId);
+      if (this.status === 'open') {
+        this.send({
+          id: generateUUID(),
+          type: 'request',
+          action: 'session.unsubscribe',
+          payload: { session_id: sessionId },
+        });
+      }
+      return;
+    }
+    this.sessionSubscriptions.set(sessionId, nextCount);
   }
 
   unsubscribeUser() {
-    this.userSubscriptionActive = false;
-    if (this.status === 'open') {
+    this.userSubscriptionCount = Math.max(0, this.userSubscriptionCount - 1);
+    if (this.status === 'open' && this.userSubscriptionCount === 0) {
       this.send({
         id: generateUUID(),
         type: 'request',
@@ -299,7 +344,7 @@ export class WebSocketClient {
 
   private resubscribe() {
     // Re-subscribe to all tasks after reconnection
-    this.subscriptions.forEach((taskId) => {
+    this.subscriptions.forEach((_count, taskId) => {
       this.send({
         id: generateUUID(),
         type: 'request',
@@ -307,7 +352,15 @@ export class WebSocketClient {
         payload: { task_id: taskId },
       });
     });
-    if (this.userSubscriptionActive) {
+    this.sessionSubscriptions.forEach((_count, sessionId) => {
+      this.send({
+        id: generateUUID(),
+        type: 'request',
+        action: 'session.subscribe',
+        payload: { session_id: sessionId },
+      });
+    });
+    if (this.userSubscriptionCount > 0) {
       this.send({
         id: generateUUID(),
         type: 'request',

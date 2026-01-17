@@ -41,7 +41,6 @@ import { useSettingsData } from '@/hooks/use-settings-data';
 import { SHORTCUTS } from '@/lib/keyboard/constants';
 import { useKeyboardShortcutHandler } from '@/hooks/use-keyboard-shortcut';
 import { KeyboardShortcutTooltip } from '@/components/keyboard-shortcut-tooltip';
-import { getWebSocketClient } from '@/lib/ws/connection';
 import { useToast } from '@/components/toast-provider';
 import { discoverRepositoriesAction, listLocalRepositoryBranchesAction } from '@/app/actions/workspaces';
 
@@ -54,7 +53,7 @@ interface TaskCreateDialogProps {
   defaultColumnId: string | null;
   columns: Array<{ id: string; title: string }>;
   editingTask?: { id: string; title: string; description?: string; columnId: string; state?: Task['state'] } | null;
-  onSuccess?: (task: Task, mode: 'create' | 'edit') => void;
+  onSuccess?: (task: Task, mode: 'create' | 'edit', meta?: { taskSessionId?: string | null }) => void;
   onCreateSession?: (data: {
     prompt: string;
     agentProfileId: string;
@@ -511,7 +510,7 @@ export function TaskCreateDialog({
       targetState = 'IN_PROGRESS';
     }
     try {
-      const task = await createTask({
+      const taskResponse = await createTask({
         workspace_id: workspaceId,
         board_id: boardId,
         column_id: targetColumnId,
@@ -535,31 +534,17 @@ export function TaskCreateDialog({
             ]
             : [],
         state: targetState,
+        start_agent: Boolean(startAgent && !isEditMode && agentProfileId),
+        agent_profile_id: startAgent ? agentProfileId || undefined : undefined,
       });
       console.log('[TaskCreateDialog] task created', {
-        taskId: task.id,
+        taskId: taskResponse.id,
         startAgent,
         agentProfileId,
       });
-      if (startAgent && agentProfileId) {
-        const client = getWebSocketClient();
-        if (client) {
-          try {
-            console.log('[TaskCreateDialog] orchestrator.start request', {
-              taskId: task.id,
-              agentProfileId,
-            });
-            await client.request(
-              'orchestrator.start',
-              { task_id: task.id, agent_profile_id: agentProfileId },
-              15000
-            );
-          } catch (error) {
-            console.error('Failed to start agent for new task:', error);
-          }
-        }
-      }
-      onSuccess?.(task, 'create');
+      onSuccess?.(taskResponse, 'create', {
+        taskSessionId: taskResponse.session_id ?? null,
+      });
     } finally {
       setTitle('');
       setDescription('');

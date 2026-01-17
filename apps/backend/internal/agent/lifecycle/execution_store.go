@@ -9,10 +9,10 @@ import (
 )
 
 // ExecutionStore provides thread-safe storage and retrieval of agent executions.
-// It maintains three indexes for efficient lookup by execution ID, task ID, and container ID.
+// It maintains three indexes for efficient lookup by execution ID, session ID, and container ID.
 type ExecutionStore struct {
 	executions  map[string]*AgentExecution
-	byTask      map[string]string // taskID -> executionID
+	bySession   map[string]string // sessionID -> executionID
 	byContainer map[string]string // containerID -> executionID
 	mu          sync.RWMutex
 }
@@ -21,13 +21,13 @@ type ExecutionStore struct {
 func NewExecutionStore() *ExecutionStore {
 	return &ExecutionStore{
 		executions:  make(map[string]*AgentExecution),
-		byTask:      make(map[string]string),
+		bySession:   make(map[string]string),
 		byContainer: make(map[string]string),
 	}
 }
 
 // Add adds an agent execution to all tracking maps.
-// The execution must have a valid ID. TaskID and ContainerID are optional
+// The execution must have a valid ID. SessionID and ContainerID are optional
 // but will be indexed if present.
 func (s *ExecutionStore) Add(execution *AgentExecution) {
 	if execution == nil || execution.ID == "" {
@@ -39,8 +39,8 @@ func (s *ExecutionStore) Add(execution *AgentExecution) {
 
 	s.executions[execution.ID] = execution
 
-	if execution.TaskID != "" {
-		s.byTask[execution.TaskID] = execution.ID
+	if execution.SessionID != "" {
+		s.bySession[execution.SessionID] = execution.ID
 	}
 
 	if execution.ContainerID != "" {
@@ -59,8 +59,8 @@ func (s *ExecutionStore) Remove(executionID string) {
 	}
 
 	// Remove from secondary indexes
-	if execution.TaskID != "" {
-		delete(s.byTask, execution.TaskID)
+	if execution.SessionID != "" {
+		delete(s.bySession, execution.SessionID)
 	}
 	if execution.ContainerID != "" {
 		delete(s.byContainer, execution.ContainerID)
@@ -79,12 +79,12 @@ func (s *ExecutionStore) Get(executionID string) (*AgentExecution, bool) {
 	return execution, exists
 }
 
-// GetByTaskID returns the agent execution associated with a task ID.
-func (s *ExecutionStore) GetByTaskID(taskID string) (*AgentExecution, bool) {
+// GetBySessionID returns the agent execution associated with a session ID.
+func (s *ExecutionStore) GetBySessionID(sessionID string) (*AgentExecution, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	executionID, exists := s.byTask[taskID]
+	executionID, exists := s.bySession[sessionID]
 	if !exists {
 		return nil, false
 	}
@@ -190,4 +190,3 @@ func (s *ExecutionStore) WithRLock(executionID string, fn func(execution *AgentE
 	fn(execution)
 	return true
 }
-

@@ -79,7 +79,6 @@ export type Task = {
   agent_type?: string | null;
   repository_url?: string | null;
   branch?: string | null;
-  assigned_agent_id?: string | null;
   created_at: string;
   updated_at: string;
   metadata?: Record<string, unknown> | null;

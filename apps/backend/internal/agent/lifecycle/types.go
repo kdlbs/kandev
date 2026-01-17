@@ -19,6 +19,7 @@ const AgentCtlPort = 9999
 type AgentExecution struct {
 	ID             string
 	TaskID         string
+	SessionID      string
 	AgentProfileID string
 	ContainerID    string
 	ContainerIP    string // IP address of the container for agentctl communication
@@ -95,7 +96,7 @@ type ProfileResolver interface {
 
 // ShellStreamStarter is called to start shell streaming for an agent execution
 type ShellStreamStarter interface {
-	StartShellStream(ctx context.Context, taskID string) error
+	StartShellStream(ctx context.Context, sessionID string) error
 }
 
 // WorkspaceInfo contains information about a task's workspace for on-demand execution creation
@@ -110,8 +111,6 @@ type WorkspaceInfo struct {
 
 // WorkspaceInfoProvider provides workspace information for tasks
 type WorkspaceInfoProvider interface {
-	// GetWorkspaceInfo returns workspace info for a task (uses most recent session)
-	GetWorkspaceInfo(ctx context.Context, taskID string) (*WorkspaceInfo, error)
 	// GetWorkspaceInfoForSession returns workspace info for a specific task session
 	GetWorkspaceInfoForSession(ctx context.Context, taskID, sessionID string) (*WorkspaceInfo, error)
 }
@@ -120,6 +119,7 @@ type WorkspaceInfoProvider interface {
 type RecoveredExecution struct {
 	ExecutionID    string
 	TaskID         string
+	SessionID      string
 	ContainerID    string
 	AgentProfileID string
 }
@@ -129,4 +129,3 @@ type PromptResult struct {
 	StopReason   string // The reason the agent stopped (e.g., "end_turn")
 	AgentMessage string // The agent's accumulated response message
 }
-
