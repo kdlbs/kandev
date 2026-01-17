@@ -37,13 +37,13 @@ export function Navbar() {
             Documentation
           </Link>
           <Link
-            href="/blog"
+            href="/changelog"
             className={cn(
               'text-sm font-medium transition-colors hover:text-foreground cursor-pointer',
-              pathname?.startsWith('/blog') ? 'text-foreground' : 'text-muted-foreground'
+              pathname?.startsWith('/changelog') ? 'text-foreground' : 'text-muted-foreground'
             )}
           >
-            Blog
+            Changelog
           </Link>
         </nav>
 

@@ -1,0 +1,18 @@
+<svg width="1200" height="640" viewBox="0 0 1200 640" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="640" rx="32" fill="#0B1220"/>
+  <rect x="80" y="120" width="240" height="120" rx="20" fill="#111827" stroke="#1F2937" stroke-width="2"/>
+  <rect x="360" y="120" width="240" height="120" rx="20" fill="#111827" stroke="#1F2937" stroke-width="2"/>
+  <rect x="640" y="120" width="240" height="120" rx="20" fill="#111827" stroke="#1F2937" stroke-width="2"/>
+  <rect x="920" y="120" width="200" height="120" rx="20" fill="#111827" stroke="#1F2937" stroke-width="2"/>
+  <path d="M320 180H360" stroke="#38BDF8" stroke-width="6" stroke-linecap="round"/>
+  <path d="M600 180H640" stroke="#38BDF8" stroke-width="6" stroke-linecap="round"/>
+  <path d="M880 180H920" stroke="#38BDF8" stroke-width="6" stroke-linecap="round"/>
+  <text x="110" y="190" fill="#E2E8F0" font-family="Figtree, sans-serif" font-size="16">Client WS</text>
+  <text x="390" y="190" fill="#E2E8F0" font-family="Figtree, sans-serif" font-size="16">Backend</text>
+  <text x="670" y="190" fill="#E2E8F0" font-family="Figtree, sans-serif" font-size="16">agentctl</text>
+  <text x="950" y="190" fill="#E2E8F0" font-family="Figtree, sans-serif" font-size="16">Agent</text>
+  <rect x="80" y="300" width="1040" height="200" rx="24" fill="#0F172A" stroke="#1E293B" stroke-width="2"/>
+  <text x="120" y="360" fill="#94A3B8" font-family="Figtree, sans-serif" font-size="16">orchestrator.start → /api/v1/start → ACP initialize/session/prompt → session/update</text>
+  <text x="120" y="400" fill="#94A3B8" font-family="Figtree, sans-serif" font-size="16">Real-time progress streamed back over WebSocket</text>
+  <text x="96" y="96" fill="#E2E8F0" font-family="Figtree, sans-serif" font-size="24" font-weight="600">High-level execution flow</text>
+</svg>
