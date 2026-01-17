@@ -1131,15 +1131,23 @@ func (s *Service) handleToolCallComplete(ctx context.Context, data watcher.ToolC
 	// Update tool call message status if we have a message creator
 	if s.messageCreator != nil {
 		sessionID, _ := s.executor.GetActiveSessionID(ctx, data.TaskID)
+		if sessionID == "" {
+			// No active session - can't update tool call message
+			// This can happen during startup or if session was cleared
+			s.logger.Debug("skipping tool call update - no active session",
+				zap.String("task_id", data.TaskID),
+				zap.String("tool_call_id", data.ToolCallID))
+			return
+		}
+
 		if err := s.messageCreator.UpdateToolCallMessage(ctx, data.TaskID, data.ToolCallID, data.Status, data.Result, sessionID); err != nil {
-			s.logger.Error("failed to update tool call message",
+			// Log as warning since this is often a race condition (complete arrives before start)
+			s.logger.Warn("failed to update tool call message",
 				zap.String("task_id", data.TaskID),
 				zap.String("tool_call_id", data.ToolCallID),
 				zap.Error(err))
 		}
 
-		if sessionID != "" {
-			s.updateTaskSessionState(ctx, data.TaskID, sessionID, models.TaskSessionStateRunning, "", false)
-		}
+		s.updateTaskSessionState(ctx, data.TaskID, sessionID, models.TaskSessionStateRunning, "", false)
 	}
 }
