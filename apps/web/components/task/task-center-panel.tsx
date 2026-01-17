@@ -16,7 +16,7 @@ const AGENTS = [
   { id: 'claude', label: 'Claude Code' },
 ];
 
-type TaskLeftPanelProps = {
+type TaskCenterPanelProps = {
   taskId: string | null;
   onSendMessage: (content: string) => Promise<void>;
   selectedDiffPath: string | null;
@@ -25,14 +25,14 @@ type TaskLeftPanelProps = {
   onFileOpenHandled: () => void;
 };
 
-export const TaskLeftPanel = memo(function TaskLeftPanel({
+export const TaskCenterPanel = memo(function TaskCenterPanel({
   taskId,
   onSendMessage,
   selectedDiffPath: externalSelectedDiffPath,
   openFileRequest,
   onDiffPathHandled,
   onFileOpenHandled,
-}: TaskLeftPanelProps) {
+}: TaskCenterPanelProps) {
   // Get session ID from task ID
   const { taskSessionId } = useTaskChatSession(taskId);
   const [leftTab, setLeftTab] = useState('chat');

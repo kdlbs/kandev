@@ -3,7 +3,7 @@
 import { memo, useMemo, useState } from 'react';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@kandev/ui/resizable';
 import { getLocalStorage, setLocalStorage } from '@/lib/local-storage';
-import { TaskLeftPanel } from './task-left-panel';
+import { TaskCenterPanel } from './task-center-panel';
 import { TaskRightPanel } from './task-right-panel';
 import { TaskFilesPanel } from './task-files-panel';
 import { TaskSessionSidebar } from './task-session-sidebar';
@@ -118,7 +118,7 @@ export const TaskLayout = memo(function TaskLayout({
         </ResizablePanel>
         <ResizableHandle className="w-px" />
         <ResizablePanel defaultSize={horizontalLayout[1]} minSize={45} className="min-h-0 min-w-0">
-          <TaskLeftPanel
+          <TaskCenterPanel
             taskId={taskId}
             onSendMessage={onSendMessage}
             selectedDiffPath={selectedDiffPath}
