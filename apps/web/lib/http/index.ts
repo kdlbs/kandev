@@ -10,6 +10,8 @@ import type {
   ListWorkspacesResponse,
   ListMessagesResponse,
   RepositoryBranchesResponse,
+  NotificationProvidersResponse,
+  NotificationProvider,
   Task,
   TaskSessionsResponse,
   UserSettingsResponse,
@@ -160,6 +162,50 @@ export async function updateUserSettings(
   return fetchJson<UserSettingsResponse>('/api/v1/user/settings', {
     ...options,
     init: { method: 'PATCH', body: JSON.stringify(payload), ...(options?.init ?? {}) },
+  });
+}
+
+export async function listNotificationProviders(options?: ApiRequestOptions) {
+  return fetchJson<NotificationProvidersResponse>('/api/v1/notification-providers', options);
+}
+
+export async function createNotificationProvider(
+  payload: {
+    name: string;
+    type: NotificationProvider['type'];
+    config?: NotificationProvider['config'];
+    enabled?: boolean;
+    events?: string[];
+  },
+  options?: ApiRequestOptions
+) {
+  return fetchJson<NotificationProvider>('/api/v1/notification-providers', {
+    ...options,
+    init: { method: 'POST', body: JSON.stringify(payload), ...(options?.init ?? {}) },
+  });
+}
+
+export async function updateNotificationProvider(
+  providerId: string,
+  payload: Partial<{
+    name: string;
+    type: NotificationProvider['type'];
+    config: NotificationProvider['config'];
+    enabled: boolean;
+    events: string[];
+  }>,
+  options?: ApiRequestOptions
+) {
+  return fetchJson<NotificationProvider>(`/api/v1/notification-providers/${providerId}`, {
+    ...options,
+    init: { method: 'PATCH', body: JSON.stringify(payload), ...(options?.init ?? {}) },
+  });
+}
+
+export async function deleteNotificationProvider(providerId: string, options?: ApiRequestOptions) {
+  return fetchJson<void>(`/api/v1/notification-providers/${providerId}`, {
+    ...options,
+    init: { method: 'DELETE', ...(options?.init ?? {}) },
   });
 }
 

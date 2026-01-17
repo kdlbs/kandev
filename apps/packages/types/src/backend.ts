@@ -16,7 +16,8 @@ export type BackendMessageType =
   | 'board.deleted'
   | 'column.created'
   | 'column.updated'
-  | 'column.deleted';
+  | 'column.deleted'
+  | 'task_session.waiting_for_input';
 
 export type BackendMessage<T extends BackendMessageType, P> = {
   id?: string;
@@ -77,6 +78,13 @@ export type SystemErrorPayload = {
   code?: string;
 };
 
+export type TaskSessionWaitingForInputPayload = {
+  task_id: string;
+  task_session_id: string;
+  title: string;
+  body: string;
+};
+
 export type WorkspacePayload = {
   id: string;
   name: string;
@@ -125,4 +133,8 @@ export type BackendMessageMap = {
   'column.created': BackendMessage<'column.created', ColumnPayload>;
   'column.updated': BackendMessage<'column.updated', ColumnPayload>;
   'column.deleted': BackendMessage<'column.deleted', ColumnPayload>;
+  'task_session.waiting_for_input': BackendMessage<
+    'task_session.waiting_for_input',
+    TaskSessionWaitingForInputPayload
+  >;
 };

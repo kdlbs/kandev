@@ -2,7 +2,7 @@
 
 import { useState, useSyncExternalStore } from 'react';
 import { useTheme } from 'next-themes';
-import { IconPalette, IconCode, IconBell, IconServer } from '@tabler/icons-react';
+import { IconPalette, IconCode, IconServer } from '@tabler/icons-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@kandev/ui/card';
 import { Label } from '@kandev/ui/label';
 import { Input } from '@kandev/ui/input';
@@ -11,7 +11,7 @@ import { Separator } from '@kandev/ui/separator';
 import { SettingsSection } from '@/components/settings/settings-section';
 import { SETTINGS_DATA } from '@/lib/settings/dummy-data';
 import { getBackendConfig } from '@/lib/config';
-import type { Theme, Editor, Notifications } from '@/lib/settings/types';
+import type { Theme, Editor } from '@/lib/settings/types';
 
 export default function GeneralSettingsPage() {
   const { theme: currentTheme, setTheme } = useTheme();
@@ -19,19 +19,12 @@ export default function GeneralSettingsPage() {
   const [customEditorCommand, setCustomEditorCommand] = useState<string>(
     SETTINGS_DATA.general.customEditorCommand || ''
   );
-  const [notifications, setNotifications] = useState<Notifications>(
-    SETTINGS_DATA.general.notifications
-  );
   const [backendUrl] = useState<string>(() => getBackendConfig().apiBaseUrl);
   const mounted = useSyncExternalStore(
     () => () => undefined,
     () => true,
     () => false
   );
-
-  const handleNotificationToggle = (key: keyof Notifications) => {
-    setNotifications((prev) => ({ ...prev, [key]: !prev[key] }));
-  };
 
   const displayBackendUrl = backendUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
 
@@ -122,102 +115,6 @@ export default function GeneralSettingsPage() {
                 </p>
               </div>
             )}
-          </CardContent>
-        </Card>
-      </SettingsSection>
-
-      <Separator />
-
-      <SettingsSection
-        icon={<IconBell className="h-5 w-5" />}
-        title="Notifications"
-        description="Control what notifications you receive"
-      >
-        <Card>
-          <CardContent className="pt-6">
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label htmlFor="task-updates" className="text-base font-medium">
-                    Task Updates
-                  </Label>
-                  <p className="text-sm text-muted-foreground">
-                    Get notified when tasks change status
-                  </p>
-                </div>
-                <button
-                  id="task-updates"
-                  role="switch"
-                  aria-checked={notifications.taskUpdates}
-                  onClick={() => handleNotificationToggle('taskUpdates')}
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                    notifications.taskUpdates ? 'bg-primary' : 'bg-muted'
-                  }`}
-                >
-                  <span
-                    className={`inline-block h-4 w-4 transform rounded-full bg-background transition-transform ${
-                      notifications.taskUpdates ? 'translate-x-6' : 'translate-x-1'
-                    }`}
-                  />
-                </button>
-              </div>
-
-              <Separator />
-
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label htmlFor="agent-completion" className="text-base font-medium">
-                    Agent Completion
-                  </Label>
-                  <p className="text-sm text-muted-foreground">
-                    Get notified when agents complete tasks
-                  </p>
-                </div>
-                <button
-                  id="agent-completion"
-                  role="switch"
-                  aria-checked={notifications.agentCompletion}
-                  onClick={() => handleNotificationToggle('agentCompletion')}
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                    notifications.agentCompletion ? 'bg-primary' : 'bg-muted'
-                  }`}
-                >
-                  <span
-                    className={`inline-block h-4 w-4 transform rounded-full bg-background transition-transform ${
-                      notifications.agentCompletion ? 'translate-x-6' : 'translate-x-1'
-                    }`}
-                  />
-                </button>
-              </div>
-
-              <Separator />
-
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label htmlFor="errors" className="text-base font-medium">
-                    Errors
-                  </Label>
-                  <p className="text-sm text-muted-foreground">
-                    Get notified about errors and failures
-                  </p>
-                </div>
-                <button
-                  id="errors"
-                  role="switch"
-                  aria-checked={notifications.errors}
-                  onClick={() => handleNotificationToggle('errors')}
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                    notifications.errors ? 'bg-primary' : 'bg-muted'
-                  }`}
-                >
-                  <span
-                    className={`inline-block h-4 w-4 transform rounded-full bg-background transition-transform ${
-                      notifications.errors ? 'translate-x-6' : 'translate-x-1'
-                    }`}
-                  />
-                </button>
-              </div>
-            </div>
           </CardContent>
         </Card>
       </SettingsSection>

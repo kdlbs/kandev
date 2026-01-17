@@ -22,11 +22,10 @@ import (
 
 // Launcher manages an agentctl subprocess.
 type Launcher struct {
-	binaryPath             string
-	host                   string
-	port                   int
-	autoApprovePermissions bool
-	logger                 *logger.Logger
+	binaryPath string
+	host       string
+	port       int
+	logger     *logger.Logger
 
 	cmd    *exec.Cmd
 	exited chan struct{}
@@ -38,10 +37,9 @@ type Launcher struct {
 
 // Config holds configuration for the launcher.
 type Config struct {
-	BinaryPath             string // Path to agentctl binary (auto-detected if empty)
-	Host                   string // Host to bind to (default: localhost)
-	Port                   int    // Control port (default: 9999)
-	AutoApprovePermissions bool   // Auto-approve permission requests (default: true for standalone)
+	BinaryPath string // Path to agentctl binary (auto-detected if empty)
+	Host       string // Host to bind to (default: localhost)
+	Port       int    // Control port (default: 9999)
 }
 
 // New creates a new Launcher.
@@ -57,12 +55,11 @@ func New(cfg Config, log *logger.Logger) *Launcher {
 	}
 
 	return &Launcher{
-		binaryPath:             cfg.BinaryPath,
-		host:                   cfg.Host,
-		port:                   cfg.Port,
-		autoApprovePermissions: cfg.AutoApprovePermissions,
-		logger:                 log.WithFields(zap.String("component", "agentctl-launcher")),
-		exited:                 make(chan struct{}),
+		binaryPath: cfg.BinaryPath,
+		host:       cfg.Host,
+		port:       cfg.Port,
+		logger:     log.WithFields(zap.String("component", "agentctl-launcher")),
+		exited:     make(chan struct{}),
 	}
 }
 
@@ -115,8 +112,7 @@ func (l *Launcher) Start(ctx context.Context) error {
 
 	l.logger.Info("starting agentctl subprocess",
 		zap.String("binary", l.binaryPath),
-		zap.Int("port", l.port),
-		zap.Bool("auto_approve_permissions", l.autoApprovePermissions))
+		zap.Int("port", l.port))
 
 	// Build command with flags
 	// Note: We use exec.Command (not CommandContext) because we want to control
@@ -126,10 +122,8 @@ func (l *Launcher) Start(ctx context.Context) error {
 		fmt.Sprintf("-port=%d", l.port),
 	)
 
-	// Set environment variables (inherit from parent + add agentctl-specific ones)
-	l.cmd.Env = append(os.Environ(),
-		fmt.Sprintf("AGENTCTL_AUTO_APPROVE_PERMISSIONS=%t", l.autoApprovePermissions),
-	)
+	// Inherit environment from parent process
+	l.cmd.Env = os.Environ()
 
 	// Set process attributes:
 	// - Pdeathsig on Linux: kernel sends SIGTERM to child when parent dies.

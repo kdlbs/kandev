@@ -41,6 +41,10 @@ import (
 	agentsettingshandlers "github.com/kandev/kandev/internal/agent/settings/handlers"
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/agent/worktree"
+	notificationcontroller "github.com/kandev/kandev/internal/notifications/controller"
+	notificationhandlers "github.com/kandev/kandev/internal/notifications/handlers"
+	notificationservice "github.com/kandev/kandev/internal/notifications/service"
+	notificationstore "github.com/kandev/kandev/internal/notifications/store"
 
 	// Orchestrator packages
 	"github.com/kandev/kandev/internal/orchestrator"
@@ -210,6 +214,14 @@ func main() {
 		_ = userRepo.Close()
 	}()
 
+	notificationRepo, err := notificationstore.NewSQLiteRepository(dbPath)
+	if err != nil {
+		log.Fatal("Failed to initialize notification store", zap.Error(err), zap.String("db_path", dbPath))
+	}
+	defer func() {
+		_ = notificationRepo.Close()
+	}()
+
 	discoveryRegistry, err := discovery.LoadRegistry()
 	if err != nil {
 		log.Fatal("Failed to load agent discovery config", zap.Error(err))
@@ -218,6 +230,8 @@ func main() {
 
 	userSvc := userservice.NewService(userRepo, eventBus, log)
 	userCtrl := usercontroller.NewController(userSvc)
+	var notificationSvc *notificationservice.Service
+	var notificationCtrl *notificationcontroller.Controller
 
 	taskSvc := taskservice.NewService(
 		taskRepo,
@@ -247,9 +261,8 @@ func main() {
 		log.Info("Starting agentctl for standalone mode...")
 
 		agentctlLauncher = launcher.New(launcher.Config{
-			Host:                   cfg.Agent.StandaloneHost,
-			Port:                   cfg.Agent.StandalonePort,
-			AutoApprovePermissions: false, // Let agents request approval from the user
+			Host: cfg.Agent.StandaloneHost,
+			Port: cfg.Agent.StandalonePort,
 		}, log)
 
 		if err := agentctlLauncher.Start(ctx); err != nil {
@@ -461,6 +474,22 @@ func main() {
 	go gateway.Hub.Run(ctx)
 	gateways.RegisterTaskNotifications(ctx, eventBus, gateway.Hub, log)
 	gateways.RegisterUserNotifications(ctx, eventBus, gateway.Hub, log)
+
+	notificationSvc = notificationservice.NewService(notificationRepo, taskRepo, gateway.Hub, log)
+	notificationCtrl = notificationcontroller.NewController(notificationSvc)
+	if eventBus != nil {
+		_, err = eventBus.Subscribe(events.TaskSessionStateChanged, func(ctx context.Context, event *bus.Event) error {
+			data := event.Data
+			taskID, _ := data["task_id"].(string)
+			sessionID, _ := data["task_session_id"].(string)
+			newState, _ := data["new_state"].(string)
+			notificationSvc.HandleTaskSessionStateChanged(ctx, taskID, sessionID, newState)
+			return nil
+		})
+		if err != nil {
+			log.Error("Failed to subscribe to task session notifications", zap.Error(err))
+		}
+	}
 
 	// Set up historical logs provider for task subscriptions
 	// Uses messages instead of execution logs - all agent messages are now messages
@@ -837,6 +866,9 @@ func main() {
 
 	userhandlers.RegisterRoutes(router, gateway.Dispatcher, userCtrl, log)
 	log.Info("Registered User handlers (HTTP + WebSocket)")
+
+	notificationhandlers.RegisterRoutes(router, notificationCtrl, log)
+	log.Info("Registered Notification handlers (HTTP)")
 
 	// Health check (simple HTTP for load balancers/monitoring)
 	router.GET("/health", func(c *gin.Context) {
