@@ -1,4 +1,7 @@
 packages:
-  - 'web'
-  - 'landing'
-  - 'packages/*'
+  - web
+  - landing
+  - mobile
+  - packages/*
+
+nodeLinker: hoisted
