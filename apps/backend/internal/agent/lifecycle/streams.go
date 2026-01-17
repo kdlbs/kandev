@@ -98,7 +98,14 @@ func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready c
 func (sm *StreamManager) connectPermissionStream(execution *AgentExecution) {
 	ctx := context.Background()
 
+	sm.logger.Debug("connecting to permission stream",
+		zap.String("instance_id", execution.ID),
+		zap.String("task_id", execution.TaskID))
+
 	err := execution.agentctl.StreamPermissions(ctx, func(notification *agentctl.PermissionNotification) {
+		sm.logger.Debug("received permission notification from stream",
+			zap.String("pending_id", notification.PendingID),
+			zap.String("title", notification.Title))
 		if sm.callbacks.OnPermission != nil {
 			sm.callbacks.OnPermission(execution, notification)
 		}

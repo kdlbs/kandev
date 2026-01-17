@@ -10,6 +10,7 @@ import { TodoMessage } from '@/components/task/chat/messages/todo-message';
 
 type AdapterContext = {
   isTaskDescription: boolean;
+  taskId?: string;
 };
 
 type MessageAdapter = {
@@ -28,7 +29,7 @@ const adapters: MessageAdapter[] = [
   },
   {
     matches: (comment) => comment.type === 'tool_call',
-    render: (comment) => <ToolCallMessage comment={comment} />,
+    render: (comment, ctx) => <ToolCallMessage comment={comment} taskId={ctx.taskId} />,
   },
   {
     matches: (comment) => comment.type === 'error' || comment.type === 'status' || comment.type === 'progress',
@@ -68,8 +69,14 @@ const adapters: MessageAdapter[] = [
   },
 ];
 
-export function MessageRenderer({ comment, isTaskDescription }: { comment: Message; isTaskDescription: boolean }) {
-  const ctx = { isTaskDescription };
+type MessageRendererProps = {
+  comment: Message;
+  isTaskDescription: boolean;
+  taskId?: string;
+};
+
+export function MessageRenderer({ comment, isTaskDescription, taskId }: MessageRendererProps) {
+  const ctx = { isTaskDescription, taskId };
   const adapter = adapters.find((entry) => entry.matches(comment, ctx)) ?? adapters[adapters.length - 1];
   return adapter.render(comment, ctx);
 }

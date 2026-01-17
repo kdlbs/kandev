@@ -226,6 +226,7 @@ export function TaskChatPanel({
                     <MessageRenderer
                       comment={message}
                       isTaskDescription={message.id === 'task-description'}
+                      taskId={taskId ?? undefined}
                     />
                   </div>
                 </div>

@@ -181,8 +181,9 @@ type Item struct {
 	Changes []FileChange `json:"changes,omitempty"`
 
 	// For reasoning type - content can be objects like [{type: "text", text: "..."}]
-	Summary []ContentPart `json:"summary,omitempty"`
-	Content []ContentPart `json:"content,omitempty"`
+	// or plain strings. FlexibleContent handles both formats.
+	Summary FlexibleContent `json:"summary,omitempty"`
+	Content FlexibleContent `json:"content,omitempty"`
 }
 
 // ContentPart represents a content part in a Codex item.
@@ -190,6 +191,32 @@ type Item struct {
 type ContentPart struct {
 	Type string `json:"type,omitempty"` // "text", "output_text", "refusal", "input_text", etc.
 	Text string `json:"text,omitempty"`
+}
+
+// FlexibleContent is a type that can unmarshal from either a string or []ContentPart.
+// Codex sometimes sends summary/content as a plain string, other times as an array.
+type FlexibleContent []ContentPart
+
+// UnmarshalJSON implements custom unmarshaling for FlexibleContent.
+// It handles both string and array formats from Codex.
+func (fc *FlexibleContent) UnmarshalJSON(data []byte) error {
+	// Try to unmarshal as array first (most common case)
+	var parts []ContentPart
+	if err := json.Unmarshal(data, &parts); err == nil {
+		*fc = parts
+		return nil
+	}
+
+	// Try to unmarshal as string
+	var str string
+	if err := json.Unmarshal(data, &str); err == nil {
+		*fc = []ContentPart{{Type: "text", Text: str}}
+		return nil
+	}
+
+	// If both fail, return empty (don't fail parsing)
+	*fc = nil
+	return nil
 }
 
 // FileChange represents a file change in a fileChange item
@@ -292,12 +319,16 @@ type PlanEntry struct {
 	Status      string `json:"status"` // "pending", "in_progress", "completed", "failed"
 }
 
-// ApprovalResponse for responding to approval requests
-type ApprovalResponse struct {
-	ThreadID string `json:"threadId"`
-	TurnID   string `json:"turnId"`
-	ItemID   string `json:"itemId"`
-	Decision string `json:"decision"` // "approve", "reject", "approveAlways"
+// CommandApprovalResponse for responding to command execution approval requests
+// Decision values: "accept", "acceptForSession", "decline", "cancel"
+type CommandApprovalResponse struct {
+	Decision string `json:"decision"`
+}
+
+// FileChangeApprovalResponse for responding to file change approval requests
+// Decision values: "accept", "acceptForSession", "decline", "cancel"
+type FileChangeApprovalResponse struct {
+	Decision string `json:"decision"`
 }
 
 // ErrorParams for error notification

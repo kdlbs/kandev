@@ -19,8 +19,9 @@ func NewCommandBuilder() *CommandBuilder {
 
 // CommandOptions contains options for building a command
 type CommandOptions struct {
-	Model     string // Model to use (appended via ModelFlag if set)
-	SessionID string // Session ID to resume (appended via SessionConfig.ResumeFlag if not ResumeViaACP)
+	Model       string // Model to use (appended via ModelFlag if set)
+	SessionID   string // Session ID to resume (appended via SessionConfig.ResumeFlag if not ResumeViaACP)
+	AutoApprove bool   // If true, skip permission flags (auto-approve all tool calls)
 }
 
 // BuildCommand builds a command slice from agent config and options
@@ -41,6 +42,15 @@ func (cb *CommandBuilder) BuildCommand(agentConfig *registry.AgentTypeConfig, op
 	// 3. Agent has a ResumeFlag configured
 	if opts.SessionID != "" && !agentConfig.SessionConfig.ResumeViaACP && agentConfig.SessionConfig.ResumeFlag != "" {
 		cmd = append(cmd, agentConfig.SessionConfig.ResumeFlag, opts.SessionID)
+	}
+
+	// Add permission flags when AutoApprove is false
+	// This makes the agent request permission via ACP for tool calls
+	permConfig := agentConfig.PermissionConfig
+	if !opts.AutoApprove && permConfig.PermissionFlag != "" && len(permConfig.ToolsRequiringPermission) > 0 {
+		for _, tool := range permConfig.ToolsRequiringPermission {
+			cmd = append(cmd, permConfig.PermissionFlag, tool+":ask-user")
+		}
 	}
 
 	return cmd

@@ -14,6 +14,9 @@ import (
 // HistoricalLogsProvider is a function that retrieves historical logs for a task
 type HistoricalLogsProvider func(ctx context.Context, taskID string) ([]*ws.Message, error)
 
+// PendingPermissionsProvider is a function that retrieves pending permissions for a task
+type PendingPermissionsProvider func(ctx context.Context, taskID string) ([]*ws.Message, error)
+
 // Hub manages all WebSocket client connections
 type Hub struct {
 	// All registered clients
@@ -36,6 +39,8 @@ type Hub struct {
 
 	// Optional provider for historical logs on subscription
 	historicalLogsProvider HistoricalLogsProvider
+	// Optional provider for pending permissions on subscription
+	pendingPermissionsProvider PendingPermissionsProvider
 
 	mu     sync.RWMutex
 	logger *logger.Logger
@@ -309,4 +314,17 @@ func (h *Hub) GetHistoricalLogs(ctx context.Context, taskID string) ([]*ws.Messa
 		return nil, nil
 	}
 	return h.historicalLogsProvider(ctx, taskID)
+}
+
+// SetPendingPermissionsProvider sets the provider for pending permissions on subscription
+func (h *Hub) SetPendingPermissionsProvider(provider PendingPermissionsProvider) {
+	h.pendingPermissionsProvider = provider
+}
+
+// GetPendingPermissions retrieves pending permissions for a task if a provider is set
+func (h *Hub) GetPendingPermissions(ctx context.Context, taskID string) ([]*ws.Message, error) {
+	if h.pendingPermissionsProvider == nil {
+		return nil, nil
+	}
+	return h.pendingPermissionsProvider(ctx, taskID)
 }

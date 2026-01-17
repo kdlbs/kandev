@@ -445,7 +445,7 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 			reqWithWorktree.Env["AGENT_MODEL"] = profileInfo.Model
 		}
 		if profileInfo.AutoApprove {
-			reqWithWorktree.Env["AGENT_AUTO_APPROVE"] = "true"
+			reqWithWorktree.Env["AGENTCTL_AUTO_APPROVE_PERMISSIONS"] = "true"
 		}
 		if profileInfo.DangerouslySkipPermissions {
 			reqWithWorktree.Env["AGENT_DANGEROUSLY_SKIP_PERMISSIONS"] = "true"
@@ -494,12 +494,15 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 
 	// Build agent command string for later use with StartAgentProcess
 	model := ""
+	autoApprove := false
 	if profileInfo != nil {
 		model = profileInfo.Model
+		autoApprove = profileInfo.AutoApprove
 	}
 	cmdOpts := CommandOptions{
-		Model:     model,
-		SessionID: req.ACPSessionID,
+		Model:       model,
+		SessionID:   req.ACPSessionID,
+		AutoApprove: autoApprove,
 	}
 	execution.AgentCommand = m.commandBuilder.BuildCommandString(agentConfig, cmdOpts)
 
@@ -727,14 +730,7 @@ func (m *Manager) initializeACPSession(ctx context.Context, execution *AgentExec
 
 // handlePermissionNotification processes incoming permission requests from the agent
 func (m *Manager) handlePermissionNotification(execution *AgentExecution, notification *agentctl.PermissionNotification) {
-	m.logger.Info("received permission request",
-		zap.String("execution_id", execution.ID),
-		zap.String("task_id", execution.TaskID),
-		zap.String("pending_id", notification.PendingID),
-		zap.String("title", notification.Title),
-		zap.Int("num_options", len(notification.Options)))
-
-	// Publish permission request event to the event bus
+	// Publish permission request event to the event bus (logged at Debug level there)
 	m.eventPublisher.PublishPermissionRequest(execution, notification)
 }
 
@@ -768,10 +764,9 @@ func (m *Manager) handleSessionUpdate(execution *AgentExecution, update agentctl
 		// This way, each agent response before a tool use becomes a separate comment
 		m.flushMessageBufferAsComment(execution)
 
-		m.logger.Info("tool call started",
+		m.logger.Debug("tool call started",
 			zap.String("execution_id", execution.ID),
 			zap.String("tool_call_id", update.ToolCallID),
-			zap.String("title", update.ToolTitle),
 			zap.String("tool_name", update.ToolName))
 		m.updateExecutionProgress(execution.ID, 60)
 
@@ -789,7 +784,7 @@ func (m *Manager) handleSessionUpdate(execution *AgentExecution, update agentctl
 		}
 
 	case "plan":
-		m.logger.Info("agent plan update",
+		m.logger.Debug("agent plan update",
 			zap.String("execution_id", execution.ID))
 
 	case "error":
@@ -1218,4 +1213,19 @@ func (m *Manager) RespondToPermissionByTaskID(taskID, pendingID, optionID string
 	}
 
 	return m.RespondToPermission(execution.ID, pendingID, optionID, cancelled)
+}
+
+// GetPendingPermissionsForTask returns all pending permissions for a task
+func (m *Manager) GetPendingPermissionsForTask(ctx context.Context, taskID string) ([]agentctl.PermissionNotification, error) {
+	execution, exists := m.executionStore.GetByTaskID(taskID)
+	if !exists {
+		// No active execution for this task, so no pending permissions
+		return nil, nil
+	}
+
+	if execution.agentctl == nil {
+		return nil, nil
+	}
+
+	return execution.agentctl.GetPendingPermissions(ctx)
 }

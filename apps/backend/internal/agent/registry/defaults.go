@@ -14,9 +14,7 @@ func DefaultAgents() []*AgentTypeConfig {
 			Cmd:           []string{"auggie", "--acp"},
 			WorkingDir:    "/workspace",
 			RequiredEnv:   []string{"AUGMENT_SESSION_AUTH"},
-			Env: map[string]string{
-				"AGENTCTL_AUTO_APPROVE_PERMISSIONS": "true",
-			},
+			Env: map[string]string{},
 			Mounts: []MountTemplate{
 				{Source: "{workspace}", Target: "/workspace", ReadOnly: false},
 			},
@@ -35,6 +33,15 @@ func DefaultAgents() []*AgentTypeConfig {
 				ResumeFlag:         "--resume",
 				SessionDirTemplate: "{home}/.augment/sessions",
 				SessionDirTarget:   "/root/.augment/sessions",
+			},
+			PermissionConfig: PermissionConfig{
+				PermissionFlag: "--permission",
+				ToolsRequiringPermission: []string{
+					"launch-process",
+					"save-file",
+					"str-replace-editor",
+					"remove-files",
+				},
 			},
 		},
 		{
