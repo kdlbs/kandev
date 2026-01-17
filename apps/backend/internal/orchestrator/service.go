@@ -360,12 +360,6 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 		return nil, executor.ErrExecutionAlreadyRunning
 	}
 
-	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateScheduling); err != nil {
-		s.logger.Warn("failed to update task state to SCHEDULING",
-			zap.String("task_id", taskID),
-			zap.Error(err))
-	}
-
 	task, err := s.scheduler.GetTask(ctx, taskID)
 	if err != nil {
 		s.logger.Error("failed to fetch task for resume",
@@ -392,36 +386,12 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 		return nil, fmt.Errorf("worktree path not found: %w", err)
 	}
 
-	s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateStarting, "", true)
-
 	execution, err := s.executor.ResumeSession(ctx, task, session)
 	if err != nil {
 		return nil, err
 	}
-
-	s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateRunning, "", true)
-
-	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateInProgress); err != nil {
-		s.logger.Warn("failed to update task state to IN_PROGRESS",
-			zap.String("task_id", taskID),
-			zap.Error(err))
-	}
-
-	// Session resume doesn't send an initial prompt, so the agent is immediately
-	// ready for follow-up prompts. Transition directly to WaitingForInput state.
-	// This bypasses the normal AgentReady + PromptComplete event coordination
-	// which only applies when an initial prompt is sent.
-	s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateWaitingForInput, "", true)
-
-	// Update the execution's state to reflect the final state for the response
-	execution.SessionState = v1.TaskSessionStateWaitingForInput
-
-	// Also transition task to Review state since agent is ready for user input
-	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateReview); err != nil {
-		s.logger.Warn("failed to update task state to REVIEW after resume",
-			zap.String("task_id", taskID),
-			zap.Error(err))
-	}
+	// Preserve persisted task/session state; resume should not mutate state/columns.
+	execution.SessionState = v1.TaskSessionState(session.State)
 
 	s.logger.Info("task session resumed and ready for input",
 		zap.String("task_id", taskID),
