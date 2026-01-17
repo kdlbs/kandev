@@ -97,30 +97,6 @@ type PromptCompleteEventPayload struct {
 	Summary      string `json:"summary,omitempty"`
 }
 
-// ToolCallEventPayload is the payload when an agent starts a tool call.
-type ToolCallEventPayload struct {
-	Type       string                 `json:"type"` // Always "tool_call"
-	Timestamp  string                 `json:"timestamp"`
-	AgentID    string                 `json:"agent_id"`
-	TaskID     string                 `json:"task_id"`
-	SessionID  string                 `json:"session_id"`
-	ToolCallID string                 `json:"tool_call_id"`
-	Title      string                 `json:"title"`
-	Status     string                 `json:"status"`
-	Args       map[string]interface{} `json:"args,omitempty"`
-}
-
-// ToolCallCompleteEventPayload is the payload when an agent completes a tool call.
-type ToolCallCompleteEventPayload struct {
-	Type       string `json:"type"` // Always "tool_call_complete"
-	Timestamp  string `json:"timestamp"`
-	AgentID    string `json:"agent_id"`
-	TaskID     string `json:"task_id"`
-	SessionID  string `json:"session_id"`
-	ToolCallID string `json:"tool_call_id"`
-	Status     string `json:"status"`
-}
-
 // PermissionOption represents a single permission option in a permission request.
 type PermissionOption struct {
 	OptionID string `json:"option_id"`

@@ -63,8 +63,7 @@ import (
 	userservice "github.com/kandev/kandev/internal/user/service"
 	userstore "github.com/kandev/kandev/internal/user/store"
 
-	// ACP protocol
-	"github.com/kandev/kandev/pkg/acp/protocol"
+	// API types
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -567,39 +566,39 @@ func main() {
 	// 2. Flushes the buffer as a comment when the prompt completes (final response)
 	// This is handled via the prompt.complete and step.complete events.
 
-	// Wire ACP handler to broadcast to WebSocket clients as notifications
+	// Wire stream handler to broadcast agent stream events to WebSocket clients
 	// NOTE: Permission requests are now handled via message creation in the lifecycle manager
 	// and broadcast automatically via the session.message.added event
-	orchestratorSvc.RegisterACPHandler(func(taskID string, msg *protocol.Message) {
-		// Only broadcast message types that the frontend handles
-		// Skip internal message types like session/update
-		switch msg.Type {
-		case protocol.MessageTypeProgress,
-			protocol.MessageTypeLog,
-			protocol.MessageTypeResult,
-			protocol.MessageTypeError,
-			protocol.MessageTypeStatus,
-			protocol.MessageTypeHeartbeat,
-			protocol.MessageTypeInputRequired:
-			if msg.SessionID == "" {
-				log.Warn("ACP notification missing session_id, skipping",
-					zap.String("task_id", taskID),
-					zap.String("type", string(msg.Type)))
-				return
-			}
-			// Convert ACP message to WebSocket notification
-			action := "acp." + string(msg.Type)
-			notification, _ := ws.NewNotification(action, map[string]interface{}{
-				"task_id":    taskID,
-				"session_id": msg.SessionID,
-				"type":       msg.Type,
-				"data":       msg.Data,
-				"timestamp":  msg.Timestamp,
-			})
-			gateway.Hub.BroadcastToSession(msg.SessionID, notification)
-		default:
-			// Skip other message types (session/update, etc.)
+	orchestratorSvc.RegisterStreamHandler(func(payload *lifecycle.AgentStreamEventPayload) {
+		if payload == nil || payload.Data == nil {
+			return
 		}
+
+		sessionID := payload.SessionID
+		if sessionID == "" {
+			log.Warn("agent stream event missing session_id, skipping",
+				zap.String("task_id", payload.TaskID),
+				zap.String("type", payload.Data.Type))
+			return
+		}
+
+		// Broadcast agent stream event to session subscribers
+		action := "agent." + payload.Data.Type
+		notification, _ := ws.NewNotification(action, map[string]interface{}{
+			"task_id":       payload.TaskID,
+			"session_id":    sessionID,
+			"type":          payload.Data.Type,
+			"text":          payload.Data.Text,
+			"tool_call_id":  payload.Data.ToolCallID,
+			"tool_name":     payload.Data.ToolName,
+			"tool_title":    payload.Data.ToolTitle,
+			"tool_status":   payload.Data.ToolStatus,
+			"tool_args":     payload.Data.ToolArgs,
+			"tool_result":   payload.Data.ToolResult,
+			"error":         payload.Data.Error,
+			"timestamp":     payload.Timestamp,
+		})
+		gateway.Hub.BroadcastToSession(sessionID, notification)
 	})
 
 	// Wire input request handler to create agent messages when input is requested

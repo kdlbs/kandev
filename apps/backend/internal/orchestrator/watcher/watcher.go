@@ -8,10 +8,10 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
-	"github.com/kandev/kandev/pkg/acp/protocol"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -45,27 +45,6 @@ type PromptCompleteData struct {
 	TaskSessionID string `json:"session_id"`
 	AgentID       string `json:"agent_id"`
 	AgentMessage  string `json:"agent_message"`
-}
-
-// ToolCallData contains data from tool_call events
-type ToolCallData struct {
-	TaskID        string                 `json:"task_id"`
-	TaskSessionID string                 `json:"session_id"`
-	AgentID       string                 `json:"agent_id"`
-	ToolCallID    string                 `json:"tool_call_id"`
-	Title         string                 `json:"title"`
-	Status        string                 `json:"status"`
-	Args          map[string]interface{} `json:"args,omitempty"` // Tool call arguments (kind, path, locations, raw_input)
-}
-
-// ToolCallCompleteData contains data from tool_call_complete events
-type ToolCallCompleteData struct {
-	TaskID        string `json:"task_id"`
-	TaskSessionID string `json:"session_id"`
-	AgentID       string `json:"agent_id"`
-	ToolCallID    string `json:"tool_call_id"`
-	Status        string `json:"status"` // "complete" or "error"
-	Result        string `json:"result,omitempty"`
 }
 
 // PermissionRequestData contains data from permission_request events
@@ -115,15 +94,11 @@ type EventHandlers struct {
 	OnAgentStopped      func(ctx context.Context, data AgentEventData)
 	OnACPSessionCreated func(ctx context.Context, data ACPSessionEventData)
 
-	// ACP messages
-	OnACPMessage func(ctx context.Context, taskID string, msg *protocol.Message)
+	// Agent stream events (tool calls, message chunks, complete, etc.)
+	OnAgentStreamEvent func(ctx context.Context, payload *lifecycle.AgentStreamEventPayload)
 
 	// Prompt events
 	OnPromptComplete func(ctx context.Context, data PromptCompleteData)
-
-	// Tool call events
-	OnToolCallStarted  func(ctx context.Context, data ToolCallData)
-	OnToolCallComplete func(ctx context.Context, data ToolCallCompleteData)
 
 	// Permission request events
 	OnPermissionRequest func(ctx context.Context, data PermissionRequestData)
@@ -184,20 +159,14 @@ func (w *Watcher) Start(ctx context.Context) error {
 		return err
 	}
 
-	// Subscribe to ACP messages
-	if err := w.subscribeToACPMessages(); err != nil {
+	// Subscribe to agent stream events
+	if err := w.subscribeToAgentStreamEvents(); err != nil {
 		w.unsubscribeAll()
 		return err
 	}
 
 	// Subscribe to prompt complete events
 	if err := w.subscribeToPromptCompleteEvents(); err != nil {
-		w.unsubscribeAll()
-		return err
-	}
-
-	// Subscribe to tool call events
-	if err := w.subscribeToToolCallEvents(); err != nil {
 		w.unsubscribeAll()
 		return err
 	}
@@ -328,19 +297,19 @@ func (w *Watcher) subscribeToACPSessionEvents() error {
 	return nil
 }
 
-// subscribeToACPMessages subscribes to ACP messages using wildcard
-func (w *Watcher) subscribeToACPMessages() error {
-	if w.handlers.OnACPMessage == nil {
+// subscribeToAgentStreamEvents subscribes to agent stream events using wildcard
+func (w *Watcher) subscribeToAgentStreamEvents() error {
+	if w.handlers.OnAgentStreamEvent == nil {
 		return nil
 	}
 
-	// Use wildcard to subscribe to all ACP messages (acp.message.*)
+	// Use wildcard to subscribe to all agent stream events (acp.message.*)
 	subject := events.BuildACPWildcardSubject()
 
-	// Use regular subscription for ACP messages (each instance needs all messages for WebSocket streaming)
-	sub, err := w.eventBus.Subscribe(subject, w.createACPMessageHandler())
+	// Use regular subscription (each instance needs all messages for WebSocket streaming)
+	sub, err := w.eventBus.Subscribe(subject, w.createAgentStreamEventHandler())
 	if err != nil {
-		w.logger.Error("Failed to subscribe to ACP messages",
+		w.logger.Error("Failed to subscribe to agent stream events",
 			zap.String("subject", subject),
 			zap.Error(err))
 		return err
@@ -414,33 +383,36 @@ func (w *Watcher) createACPSessionEventHandler(handler func(ctx context.Context,
 	}
 }
 
-// createACPMessageHandler creates a bus.EventHandler for ACP messages
-func (w *Watcher) createACPMessageHandler() bus.EventHandler {
+// createAgentStreamEventHandler creates a bus.EventHandler for agent stream events
+func (w *Watcher) createAgentStreamEventHandler() bus.EventHandler {
 	return func(ctx context.Context, event *bus.Event) error {
-		// Parse the ACP message from event data
-		// Note: session_id in the payload is the task session ID (not ACP session ID)
-		var msg protocol.Message
-		if err := w.parseEventData(event.Data, &msg); err != nil {
-			w.logger.Error("Failed to parse ACP message",
+		// Parse the agent stream event payload
+		var payload lifecycle.AgentStreamEventPayload
+		if err := w.parseEventData(event.Data, &payload); err != nil {
+			w.logger.Error("Failed to parse agent stream event",
 				zap.String("event_id", event.ID),
 				zap.Error(err))
 			return nil // Don't return error to continue processing other events
 		}
 
-		// Extract task ID from payload
-		taskID := msg.TaskID
-		if taskID == "" {
-			w.logger.Warn("ACP message missing task_id",
+		// Validate required fields
+		if payload.TaskID == "" {
+			w.logger.Warn("Agent stream event missing task_id",
 				zap.String("event_id", event.ID))
 			return nil
 		}
 
-		w.logger.Debug("Handling ACP message",
-			zap.String("task_id", taskID),
-			zap.String("session_id", msg.SessionID),
-			zap.String("message_type", string(msg.Type)))
+		eventType := ""
+		if payload.Data != nil {
+			eventType = payload.Data.Type
+		}
 
-		w.handlers.OnACPMessage(ctx, taskID, &msg)
+		w.logger.Debug("Handling agent stream event",
+			zap.String("task_id", payload.TaskID),
+			zap.String("session_id", payload.SessionID),
+			zap.String("event_type", eventType))
+
+		w.handlers.OnAgentStreamEvent(ctx, &payload)
 		return nil
 	}
 }
@@ -483,81 +455,6 @@ func (w *Watcher) createPromptCompleteHandler() bus.EventHandler {
 			zap.Int("message_length", len(data.AgentMessage)))
 
 		w.handlers.OnPromptComplete(ctx, data)
-		return nil
-	}
-}
-
-// subscribeToToolCallEvents subscribes to tool call events
-func (w *Watcher) subscribeToToolCallEvents() error {
-	// Subscribe to tool call started events (tool_call.started.{session_id})
-	if w.handlers.OnToolCallStarted != nil {
-		subject := events.BuildToolCallStartedWildcardSubject()
-		sub, err := w.eventBus.Subscribe(subject, w.createToolCallStartedHandler())
-		if err != nil {
-			w.logger.Error("Failed to subscribe to tool call started events",
-				zap.String("subject", subject),
-				zap.Error(err))
-			return err
-		}
-		w.subscriptions = append(w.subscriptions, sub)
-	}
-
-	// Subscribe to tool call complete events (tool_call.complete.{session_id})
-	if w.handlers.OnToolCallComplete != nil {
-		subject := events.BuildToolCallCompleteWildcardSubject()
-		sub, err := w.eventBus.Subscribe(subject, w.createToolCallCompleteHandler())
-		if err != nil {
-			w.logger.Error("Failed to subscribe to tool call complete events",
-				zap.String("subject", subject),
-				zap.Error(err))
-			return err
-		}
-		w.subscriptions = append(w.subscriptions, sub)
-	}
-
-	return nil
-}
-
-// createToolCallStartedHandler creates a bus.EventHandler for tool call started events
-func (w *Watcher) createToolCallStartedHandler() bus.EventHandler {
-	return func(ctx context.Context, event *bus.Event) error {
-		var data ToolCallData
-		if err := w.parseEventData(event.Data, &data); err != nil {
-			w.logger.Error("Failed to parse tool call event data",
-				zap.String("event_type", event.Type),
-				zap.String("event_id", event.ID),
-				zap.Error(err))
-			return nil // Don't return error to continue processing other events
-		}
-
-		w.logger.Debug("Handling tool call started event",
-			zap.String("task_id", data.TaskID),
-			zap.String("tool_call_id", data.ToolCallID),
-			zap.String("title", data.Title))
-
-		w.handlers.OnToolCallStarted(ctx, data)
-		return nil
-	}
-}
-
-// createToolCallCompleteHandler creates a bus.EventHandler for tool call complete events
-func (w *Watcher) createToolCallCompleteHandler() bus.EventHandler {
-	return func(ctx context.Context, event *bus.Event) error {
-		var data ToolCallCompleteData
-		if err := w.parseEventData(event.Data, &data); err != nil {
-			w.logger.Error("Failed to parse tool call complete event data",
-				zap.String("event_type", event.Type),
-				zap.String("event_id", event.ID),
-				zap.Error(err))
-			return nil
-		}
-
-		w.logger.Debug("Handling tool call complete event",
-			zap.String("task_id", data.TaskID),
-			zap.String("tool_call_id", data.ToolCallID),
-			zap.String("status", data.Status))
-
-		w.handlers.OnToolCallComplete(ctx, data)
 		return nil
 	}
 }

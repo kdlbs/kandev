@@ -747,18 +747,15 @@ func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.Age
 			zap.String("tool_call_id", event.ToolCallID),
 			zap.String("tool_name", event.ToolName))
 		m.updateExecutionProgress(execution.ID, 60)
-
-		// Publish tool call as a comment so it appears in the chat
-		m.eventPublisher.PublishToolCall(execution, event.ToolCallID, event.ToolTitle, event.ToolStatus, event.ToolArgs)
+		// Tool call message creation is handled by orchestrator via AgentStreamEvent
 
 	case "tool_update":
-		// Check if tool call completed
+		// Check if tool call completed - orchestrator will create/update the message
 		switch event.ToolStatus {
 		case "complete", "completed":
 			m.updateExecutionProgress(execution.ID, 80)
-			m.eventPublisher.PublishToolCallComplete(execution, event)
 		case "error", "failed":
-			m.eventPublisher.PublishToolCallComplete(execution, event)
+			// Error status is passed through the stream event
 		}
 
 	case "plan":
