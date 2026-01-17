@@ -4,7 +4,6 @@ package watcher
 import (
 	"context"
 	"encoding/json"
-	"strings"
 	"sync"
 
 	"go.uber.org/zap"
@@ -419,6 +418,7 @@ func (w *Watcher) createACPSessionEventHandler(handler func(ctx context.Context,
 func (w *Watcher) createACPMessageHandler() bus.EventHandler {
 	return func(ctx context.Context, event *bus.Event) error {
 		// Parse the ACP message from event data
+		// Note: session_id in the payload is the task session ID (not ACP session ID)
 		var msg protocol.Message
 		if err := w.parseEventData(event.Data, &msg); err != nil {
 			w.logger.Error("Failed to parse ACP message",
@@ -427,16 +427,8 @@ func (w *Watcher) createACPMessageHandler() bus.EventHandler {
 			return nil // Don't return error to continue processing other events
 		}
 
-		// Extract task ID from subject (acp.message.{task_id})
+		// Extract task ID from payload
 		taskID := msg.TaskID
-		if taskID == "" {
-			// Try to extract from event type if not in message
-			parts := strings.Split(event.Type, ".")
-			if len(parts) >= 3 {
-				taskID = parts[2]
-			}
-		}
-
 		if taskID == "" {
 			w.logger.Warn("ACP message missing task_id",
 				zap.String("event_id", event.ID))
@@ -445,6 +437,7 @@ func (w *Watcher) createACPMessageHandler() bus.EventHandler {
 
 		w.logger.Debug("Handling ACP message",
 			zap.String("task_id", taskID),
+			zap.String("session_id", msg.SessionID),
 			zap.String("message_type", string(msg.Type)))
 
 		w.handlers.OnACPMessage(ctx, taskID, &msg)
@@ -458,8 +451,8 @@ func (w *Watcher) subscribeToPromptCompleteEvents() error {
 		return nil
 	}
 
-	// Use wildcard to subscribe to all prompt complete events (prompt.complete.*)
-	subject := events.PromptComplete + ".*"
+	// Use wildcard to subscribe to all prompt complete events (prompt.complete.{session_id})
+	subject := events.BuildPromptCompleteWildcardSubject()
 
 	// Use regular subscription (each instance needs all messages for comment creation)
 	sub, err := w.eventBus.Subscribe(subject, w.createPromptCompleteHandler())
@@ -496,9 +489,9 @@ func (w *Watcher) createPromptCompleteHandler() bus.EventHandler {
 
 // subscribeToToolCallEvents subscribes to tool call events
 func (w *Watcher) subscribeToToolCallEvents() error {
-	// Subscribe to tool call started events
+	// Subscribe to tool call started events (tool_call.started.{session_id})
 	if w.handlers.OnToolCallStarted != nil {
-		subject := events.ToolCallStarted + ".*"
+		subject := events.BuildToolCallStartedWildcardSubject()
 		sub, err := w.eventBus.Subscribe(subject, w.createToolCallStartedHandler())
 		if err != nil {
 			w.logger.Error("Failed to subscribe to tool call started events",
@@ -509,9 +502,9 @@ func (w *Watcher) subscribeToToolCallEvents() error {
 		w.subscriptions = append(w.subscriptions, sub)
 	}
 
-	// Subscribe to tool call complete events
+	// Subscribe to tool call complete events (tool_call.complete.{session_id})
 	if w.handlers.OnToolCallComplete != nil {
-		subject := events.ToolCallComplete + ".*"
+		subject := events.BuildToolCallCompleteWildcardSubject()
 		sub, err := w.eventBus.Subscribe(subject, w.createToolCallCompleteHandler())
 		if err != nil {
 			w.logger.Error("Failed to subscribe to tool call complete events",
@@ -575,7 +568,8 @@ func (w *Watcher) subscribeToPermissionRequestEvents() error {
 		return nil
 	}
 
-	subject := events.PermissionRequestReceived + ".*"
+	// Use wildcard to subscribe to all permission request events (permission_request.received.{session_id})
+	subject := events.BuildPermissionRequestWildcardSubject()
 	sub, err := w.eventBus.Subscribe(subject, w.createPermissionRequestHandler())
 	if err != nil {
 		w.logger.Error("Failed to subscribe to permission request events",
@@ -615,7 +609,7 @@ func (w *Watcher) subscribeToGitStatusEvents() error {
 		return nil
 	}
 
-	// Use wildcard to subscribe to all git status events (git.status.updated.*)
+	// Use wildcard to subscribe to all git status events (git.status.updated.{session_id})
 	subject := events.BuildGitStatusWildcardSubject()
 
 	// Use regular subscription (each instance needs all messages)
@@ -652,8 +646,8 @@ func (w *Watcher) createGitStatusHandler() bus.EventHandler {
 	}
 }
 
-// parseEventData converts event data map to a typed struct
-func (w *Watcher) parseEventData(data map[string]interface{}, target interface{}) error {
+// parseEventData converts event data (map or struct) to a typed struct
+func (w *Watcher) parseEventData(data interface{}, target interface{}) error {
 	// Marshal to JSON and unmarshal to target type
 	jsonData, err := json.Marshal(data)
 	if err != nil {

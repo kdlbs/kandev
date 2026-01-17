@@ -231,10 +231,23 @@ func (b *MemoryEventBus) Request(ctx context.Context, subject string, event *Eve
 	}()
 
 	// Add reply subject to event data
-	if event.Data == nil {
-		event.Data = make(map[string]interface{})
+	// We need to handle the case where Data is a struct or a map
+	switch data := event.Data.(type) {
+	case map[string]interface{}:
+		if data == nil {
+			data = make(map[string]interface{})
+		}
+		data["_reply"] = replySubject
+		event.Data = data
+	case nil:
+		event.Data = map[string]interface{}{"_reply": replySubject}
+	default:
+		// For struct types, wrap in a map with the original data and reply subject
+		event.Data = map[string]interface{}{
+			"data":   data,
+			"_reply": replySubject,
+		}
 	}
-	event.Data["_reply"] = replySubject
 
 	// Publish the request
 	if err := b.Publish(ctx, subject, event); err != nil {

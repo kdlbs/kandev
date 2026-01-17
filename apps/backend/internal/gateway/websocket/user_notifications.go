@@ -46,12 +46,17 @@ func (b *UserEventBroadcaster) Close() {
 
 func (b *UserEventBroadcaster) subscribe(eventBus bus.EventBus, subject, action string) {
 	sub, err := eventBus.Subscribe(subject, func(ctx context.Context, event *bus.Event) error {
-		data := event.Data
-		userID, _ := data["user_id"].(string)
+		// Try to extract user_id from event data (works for both map and struct types)
+		var userID string
+		if data, ok := event.Data.(map[string]interface{}); ok {
+			userID, _ = data["user_id"].(string)
+		} else if data, ok := event.Data.(interface{ GetUserID() string }); ok {
+			userID = data.GetUserID()
+		}
 		if userID == "" {
 			return nil
 		}
-		msg, err := ws.NewNotification(action, data)
+		msg, err := ws.NewNotification(action, event.Data)
 		if err != nil {
 			b.logger.Error("failed to build websocket notification", zap.String("action", action), zap.Error(err))
 			return nil

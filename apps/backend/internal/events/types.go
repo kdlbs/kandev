@@ -107,9 +107,9 @@ const (
 	FileChangeNotified = "file.change.notified" // File changed in workspace
 )
 
-// BuildACPSubject creates an ACP subject for a specific task
-func BuildACPSubject(taskID string) string {
-	return ACPMessage + "." + taskID
+// BuildACPSubject creates an ACP subject for a specific session
+func BuildACPSubject(sessionID string) string {
+	return ACPMessage + "." + sessionID
 }
 
 // BuildACPWildcardSubject creates a wildcard subscription for all ACP messages
@@ -117,9 +117,9 @@ func BuildACPWildcardSubject() string {
 	return ACPMessage + ".*"
 }
 
-// BuildGitStatusSubject creates a git status subject for a specific task
-func BuildGitStatusSubject(taskID string) string {
-	return GitStatusUpdated + "." + taskID
+// BuildGitStatusSubject creates a git status subject for a specific session
+func BuildGitStatusSubject(sessionID string) string {
+	return GitStatusUpdated + "." + sessionID
 }
 
 // BuildGitStatusWildcardSubject creates a wildcard subscription for all git status updates
@@ -127,12 +127,52 @@ func BuildGitStatusWildcardSubject() string {
 	return GitStatusUpdated + ".*"
 }
 
-// BuildFileChangeSubject creates a file change subject for a specific task
-func BuildFileChangeSubject(taskID string) string {
-	return FileChangeNotified + "." + taskID
+// BuildFileChangeSubject creates a file change subject for a specific session
+func BuildFileChangeSubject(sessionID string) string {
+	return FileChangeNotified + "." + sessionID
 }
 
 // BuildFileChangeWildcardSubject creates a wildcard subscription for all file change notifications
 func BuildFileChangeWildcardSubject() string {
 	return FileChangeNotified + ".*"
+}
+
+// BuildPromptCompleteSubject creates a prompt complete subject for a specific session
+func BuildPromptCompleteSubject(sessionID string) string {
+	return PromptComplete + "." + sessionID
+}
+
+// BuildPromptCompleteWildcardSubject creates a wildcard subscription for all prompt complete events
+func BuildPromptCompleteWildcardSubject() string {
+	return PromptComplete + ".*"
+}
+
+// BuildToolCallStartedSubject creates a tool call started subject for a specific session
+func BuildToolCallStartedSubject(sessionID string) string {
+	return ToolCallStarted + "." + sessionID
+}
+
+// BuildToolCallStartedWildcardSubject creates a wildcard subscription for all tool call started events
+func BuildToolCallStartedWildcardSubject() string {
+	return ToolCallStarted + ".*"
+}
+
+// BuildToolCallCompleteSubject creates a tool call complete subject for a specific session
+func BuildToolCallCompleteSubject(sessionID string) string {
+	return ToolCallComplete + "." + sessionID
+}
+
+// BuildToolCallCompleteWildcardSubject creates a wildcard subscription for all tool call complete events
+func BuildToolCallCompleteWildcardSubject() string {
+	return ToolCallComplete + ".*"
+}
+
+// BuildPermissionRequestSubject creates a permission request subject for a specific session
+func BuildPermissionRequestSubject(sessionID string) string {
+	return PermissionRequestReceived + "." + sessionID
+}
+
+// BuildPermissionRequestWildcardSubject creates a wildcard subscription for all permission request events
+func BuildPermissionRequestWildcardSubject() string {
+	return PermissionRequestReceived + ".*"
 }

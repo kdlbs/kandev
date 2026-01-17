@@ -10,15 +10,16 @@ import (
 
 // Event represents a message on the event bus
 type Event struct {
-	ID        string                 `json:"id"`
-	Type      string                 `json:"type"`
-	Source    string                 `json:"source"` // Service that produced the event
-	Timestamp time.Time              `json:"timestamp"`
-	Data      map[string]interface{} `json:"data"`
+	ID        string      `json:"id"`
+	Type      string      `json:"type"`
+	Source    string      `json:"source"` // Service that produced the event
+	Timestamp time.Time   `json:"timestamp"`
+	Data      interface{} `json:"data"`
 }
 
-// NewEvent creates a new event with a UUID and current timestamp
-func NewEvent(eventType, source string, data map[string]interface{}) *Event {
+// NewEvent creates a new event with a UUID and current timestamp.
+// The data parameter can be any type that is JSON-serializable (struct, map, etc.).
+func NewEvent(eventType, source string, data interface{}) *Event {
 	return &Event{
 		ID:        uuid.New().String(),
 		Type:      eventType,

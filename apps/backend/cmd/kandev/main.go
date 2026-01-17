@@ -480,7 +480,10 @@ func main() {
 	notificationCtrl = notificationcontroller.NewController(notificationSvc)
 	if eventBus != nil {
 		_, err = eventBus.Subscribe(events.TaskSessionStateChanged, func(ctx context.Context, event *bus.Event) error {
-			data := event.Data
+			data, ok := event.Data.(map[string]interface{})
+			if !ok {
+				return nil
+			}
 			taskID, _ := data["task_id"].(string)
 			sessionID, _ := data["session_id"].(string)
 			newState, _ := data["new_state"].(string)
@@ -656,7 +659,10 @@ func main() {
 
 	// Subscribe to message.added events and broadcast to WebSocket subscribers
 	_, err = eventBus.Subscribe(events.MessageAdded, func(ctx context.Context, event *bus.Event) error {
-		data := event.Data
+		data, ok := event.Data.(map[string]interface{})
+		if !ok {
+			return nil
+		}
 		taskSessionID, _ := data["session_id"].(string)
 		taskID, _ := data["task_id"].(string)
 		if taskSessionID == "" {
@@ -693,7 +699,10 @@ func main() {
 
 	// Subscribe to message.updated events and broadcast to WebSocket subscribers
 	_, err = eventBus.Subscribe(events.MessageUpdated, func(ctx context.Context, event *bus.Event) error {
-		data := event.Data
+		data, ok := event.Data.(map[string]interface{})
+		if !ok {
+			return nil
+		}
 		taskSessionID, _ := data["session_id"].(string)
 		taskID, _ := data["task_id"].(string)
 		if taskSessionID == "" {
@@ -730,7 +739,10 @@ func main() {
 
 	// Subscribe to task_session.state_changed events and broadcast to task subscribers
 	_, err = eventBus.Subscribe(events.TaskSessionStateChanged, func(ctx context.Context, event *bus.Event) error {
-		data := event.Data
+		data, ok := event.Data.(map[string]interface{})
+		if !ok {
+			return nil
+		}
 		taskSessionID, _ := data["session_id"].(string)
 		if taskSessionID == "" {
 			return nil
@@ -750,15 +762,21 @@ func main() {
 	}
 
 	// Subscribe to git status events and broadcast to WebSocket subscribers
+	// Note: event.Data can be a struct (GitStatusEventPayload) or map, so we pass it directly
 	_, err = eventBus.Subscribe(events.BuildGitStatusWildcardSubject(), func(ctx context.Context, event *bus.Event) error {
-		data := event.Data
-		taskSessionID, _ := data["session_id"].(string)
+		// Extract session_id from the event data (works for both map and struct types)
+		var taskSessionID string
+		if data, ok := event.Data.(map[string]interface{}); ok {
+			taskSessionID, _ = data["session_id"].(string)
+		} else if data, ok := event.Data.(interface{ GetSessionID() string }); ok {
+			taskSessionID = data.GetSessionID()
+		}
 		if taskSessionID == "" {
 			return nil
 		}
 
 		// Broadcast git status update to session subscribers
-		notification, _ := ws.NewNotification("session.git.status", data)
+		notification, _ := ws.NewNotification("session.git.status", event.Data)
 		gateway.Hub.BroadcastToSession(taskSessionID, notification)
 		return nil
 	})
@@ -769,15 +787,21 @@ func main() {
 	}
 
 	// Subscribe to file change events and broadcast to WebSocket subscribers
+	// Note: event.Data can be a struct (FileChangeEventPayload) or map, so we handle both
 	_, err = eventBus.Subscribe(events.BuildFileChangeWildcardSubject(), func(ctx context.Context, event *bus.Event) error {
-		data := event.Data
-		taskSessionID, _ := data["session_id"].(string)
+		// Extract session_id from the event data (works for both map and struct types)
+		var taskSessionID string
+		if data, ok := event.Data.(map[string]interface{}); ok {
+			taskSessionID, _ = data["session_id"].(string)
+		} else if data, ok := event.Data.(interface{ GetSessionID() string }); ok {
+			taskSessionID = data.GetSessionID()
+		}
 		if taskSessionID == "" {
 			return nil
 		}
 
 		// Broadcast file change notification to session subscribers
-		notification, _ := ws.NewNotification(ws.ActionWorkspaceFileChanges, data)
+		notification, _ := ws.NewNotification(ws.ActionWorkspaceFileChanges, event.Data)
 		gateway.Hub.BroadcastToSession(taskSessionID, notification)
 		return nil
 	})
