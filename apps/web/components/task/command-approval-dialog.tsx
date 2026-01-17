@@ -11,7 +11,7 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
+} from '@kandev/ui/alert-dialog';
 import { useAppStore } from '@/components/state-provider';
 import { getWebSocketClient } from '@/lib/ws/connection';
 
@@ -175,4 +175,3 @@ export function CommandApprovalDialog({ taskId, standaloneOnly = false }: Comman
     </AlertDialog>
   );
 }
-

@@ -9,6 +9,7 @@ import { useAppStore } from "@/components/state-provider";
 import { Task } from "./kanban-card";
 import { PREVIEW_PANEL } from "@/lib/settings/constants";
 import { getWebSocketClient } from "@/lib/ws/connection";
+import { linkToTaskSession } from "@/lib/links";
 
 type KanbanWithPreviewProps = {
   initialTaskId?: string;
@@ -138,7 +139,7 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
   const handleNavigateToTask = useCallback(
     (task: Task, sessionId: string) => {
       close();
-      router.push(`/task/${task.id}/${sessionId}`);
+      router.push(linkToTaskSession(task.id, sessionId));
     },
     [close, router]
   );

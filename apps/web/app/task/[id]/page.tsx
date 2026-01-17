@@ -1,31 +1,18 @@
-import { StateHydrator } from '@/components/state-hydrator';
 import { fetchTask, listTaskSessions } from '@/lib/http';
-import type { Task } from '@/lib/types/http';
-import { taskToState } from '@/lib/ssr/mapper';
-import TaskPageClient from './page-client';
 import { redirect } from 'next/navigation';
+import { linkToTaskSession } from '@/lib/links';
 
 export default async function TaskPage({ params }: { params: Promise<{ id: string }> }) {
-  let initialState: ReturnType<typeof taskToState> | null = null;
-  let task: Task | null = null;
-
   try {
     const { id } = await params;
-    task = await fetchTask(id, { cache: 'no-store' });
+    const task = await fetchTask(id, { cache: 'no-store' });
     const sessions = await listTaskSessions(id, { cache: 'no-store' });
     if (sessions.sessions.length > 0) {
-      redirect(`/task/${id}/${sessions.sessions[0].id}`);
+      redirect(linkToTaskSession(id, sessions.sessions[0].id));
     }
-    initialState = taskToState(task);
+    redirect(`/?boardId=${task.board_id}`);
   } catch {
-    initialState = null;
-    task = null;
+    redirect('/');
   }
-
-  return (
-    <>
-      {initialState ? <StateHydrator initialState={initialState} /> : null}
-      <TaskPageClient task={task} />
-    </>
-  );
+  return null;
 }

@@ -18,9 +18,18 @@ export function ShellTerminal({ taskId, sessionId }: ShellTerminalProps) {
   const fitAddonRef = useRef<FitAddon | null>(null);
   const lastOutputLengthRef = useRef(0);
   const subscriptionIdRef = useRef(0);
+  const onDataDisposableRef = useRef<{ dispose: () => void } | null>(null);
   const storeApi = useAppStoreApi();
 
   const shellOutput = useAppStore((state) => state.shell.outputs[taskId] || '');
+  const sessionState = useAppStore((state) => {
+    if (sessionId) {
+      return state.taskSessions.items[sessionId]?.state ?? null;
+    }
+    return state.taskSessionStatesByTaskId[taskId] ?? null;
+  });
+  const canSubscribe =
+    Boolean(sessionId) && (sessionState === 'RUNNING' || sessionState === 'WAITING_FOR_INPUT');
 
   const send = useCallback(
     (action: string, payload: Record<string, unknown>) => {
@@ -73,11 +82,6 @@ export function ShellTerminal({ taskId, sessionId }: ShellTerminalProps) {
     xtermRef.current = terminal;
     fitAddonRef.current = fitAddon;
 
-    // Handle user input
-    terminal.onData((data) => {
-      send('shell.input', { task_id: taskId, session_id: sessionId, data });
-    });
-
     // Handle resize
     const resizeObserver = new ResizeObserver(() => {
       fitAddon.fit();
@@ -89,6 +93,23 @@ export function ShellTerminal({ taskId, sessionId }: ShellTerminalProps) {
       terminal.dispose();
       xtermRef.current = null;
       fitAddonRef.current = null;
+    };
+  }, [taskId, sessionId, send]);
+
+  useEffect(() => {
+    if (!xtermRef.current) return;
+    onDataDisposableRef.current?.dispose();
+    onDataDisposableRef.current = null;
+
+    if (!sessionId) return;
+
+    onDataDisposableRef.current = xtermRef.current.onData((data) => {
+      send('shell.input', { task_id: taskId, session_id: sessionId, data });
+    });
+
+    return () => {
+      onDataDisposableRef.current?.dispose();
+      onDataDisposableRef.current = null;
     };
   }, [taskId, sessionId, send]);
 
@@ -107,6 +128,8 @@ export function ShellTerminal({ taskId, sessionId }: ShellTerminalProps) {
   // Subscribe to shell on mount to start the shell stream
   // Uses retry logic to handle cases where agent isn't ready yet (e.g., session resumption)
   useEffect(() => {
+    if (!canSubscribe) return;
+
     // Increment subscription ID to invalidate any pending requests
     const currentSubscriptionId = ++subscriptionIdRef.current;
     let retryCount = 0;
@@ -162,7 +185,7 @@ export function ShellTerminal({ taskId, sessionId }: ShellTerminalProps) {
         clearTimeout(retryTimeout);
       }
     };
-  }, [taskId, sessionId, storeApi]);
+  }, [taskId, sessionId, storeApi, canSubscribe]);
 
   return (
     <div
@@ -171,4 +194,3 @@ export function ShellTerminal({ taskId, sessionId }: ShellTerminalProps) {
     />
   );
 }
-

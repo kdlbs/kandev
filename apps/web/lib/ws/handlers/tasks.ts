@@ -10,6 +10,7 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
           return state;
         }
         const exists = state.kanban.tasks.some((task) => task.id === message.payload.task_id);
+        const existingTask = state.kanban.tasks.find((task) => task.id === message.payload.task_id);
         const nextTask = {
           id: message.payload.task_id,
           columnId: message.payload.column_id,
@@ -17,7 +18,7 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
           description: message.payload.description,
           position: message.payload.position ?? 0,
           state: message.payload.state,
-          repositoryId: message.payload.repository_id,
+          repositoryId: message.payload.repository_id ?? existingTask?.repositoryId,
         };
         return {
           ...state,
@@ -35,6 +36,7 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
         if (state.kanban.boardId !== message.payload.board_id) {
           return state;
         }
+        const existingTask = state.kanban.tasks.find((task) => task.id === message.payload.task_id);
         const nextTask = {
           id: message.payload.task_id,
           columnId: message.payload.column_id,
@@ -42,7 +44,7 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
           description: message.payload.description,
           position: message.payload.position ?? 0,
           state: message.payload.state,
-          repositoryId: message.payload.repository_id,
+          repositoryId: message.payload.repository_id ?? existingTask?.repositoryId,
         };
         return {
           ...state,
@@ -86,7 +88,7 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
           description: message.payload.description,
           position: message.payload.position ?? 0,
           state: message.payload.state,
-          repositoryId: message.payload.repository_id,
+          repositoryId: message.payload.repository_id ?? existingTask?.repositoryId,
         };
         console.log('[WS Router] Next task:', nextTask);
         return {

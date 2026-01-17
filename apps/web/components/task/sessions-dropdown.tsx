@@ -23,6 +23,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
 import { TaskCreateDialog } from '../task-create-dialog';
 import { useAppStore } from '@/components/state-provider';
 import { getWebSocketClient } from '@/lib/ws/connection';
+import { linkToTaskSession } from '@/lib/links';
 
 type SessionStatus = 'running' | 'waiting_input' | 'complete' | 'failed' | 'cancelled';
 
@@ -186,7 +187,7 @@ export function SessionsDropdown({ taskId, activeSessionId = null, taskTitle = '
         task_session_id: sessionId,
       }, 15000);
       await fetchSessions(taskId);
-      router.push(`/task/${taskId}/${sessionId}`);
+      router.push(linkToTaskSession(taskId, sessionId));
     } catch (error) {
       console.error('Failed to resume task session:', error);
     }

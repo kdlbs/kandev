@@ -7,37 +7,57 @@ import { TaskTopBar } from '@/components/task/task-top-bar';
 import { TaskLayout } from '@/components/task/task-layout';
 import { CommandApprovalDialog } from '@/components/task/command-approval-dialog';
 import { DebugOverlay } from '@/components/debug-overlay';
-import type { Task } from '@/lib/types/http';
+import type { Repository, Task, TaskSession } from '@/lib/types/http';
 import { DEBUG_UI } from '@/lib/config';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import { useRepositories } from '@/hooks/use-repositories';
 import { useTaskAgent } from '@/hooks/use-task-agent';
+import { useTaskMessages } from '@/hooks/use-task-messages';
 import { useSessionResumption } from '@/hooks/use-session-resumption';
 import { useAppStore } from '@/components/state-provider';
+import { fetchTask, listTaskSessions } from '@/lib/http';
+import { linkToTaskSession } from '@/lib/links';
 
 type TaskPageClientProps = {
   task: Task | null;
   sessionId?: string | null;
+  initialSessionsByTask?: Record<string, TaskSession[]>;
+  initialRepositories?: Repository[];
+  initialAgentProfiles?: Array<{ id: string; label: string; agent_id: string }>;
 };
 
-export default function TaskPage({ task: initialTask, sessionId = null }: TaskPageClientProps) {
+export default function TaskPage({
+  task: initialTask,
+  sessionId = null,
+  initialSessionsByTask = {},
+  initialRepositories = [],
+  initialAgentProfiles = [],
+}: TaskPageClientProps) {
+  const [activeTaskOverride, setActiveTaskOverride] = useState<Task | null>(null);
+  const [activeSessionOverride, setActiveSessionOverride] = useState<string | null>(null);
   const [isMounted, setIsMounted] = useState(false);
+  const effectiveTaskId = activeTaskOverride?.id ?? initialTask?.id ?? null;
   const kanbanTask = useAppStore((state) =>
-    initialTask?.id ? state.kanban.tasks.find((item) => item.id === initialTask.id) ?? null : null
+    effectiveTaskId ? state.kanban.tasks.find((item) => item.id === effectiveTaskId) ?? null : null
   );
+  const boardTasks = useAppStore((state) => state.kanban.tasks);
+  const boardColumns = useAppStore((state) => state.kanban.columns);
+  const workspaces = useAppStore((state) => state.workspaces.items);
+  const agentProfiles = useAppStore((state) => state.agentProfiles.items);
   const task = useMemo(() => {
-    if (!initialTask) return null;
-    if (!kanbanTask) return initialTask;
+    const baseTask = activeTaskOverride ?? initialTask;
+    if (!baseTask) return null;
+    if (!kanbanTask) return baseTask;
     return {
-      ...initialTask,
-      title: kanbanTask.title ?? initialTask.title,
-      description: kanbanTask.description ?? initialTask.description,
-      column_id: (kanbanTask.columnId as string | undefined) ?? initialTask.column_id,
-      position: kanbanTask.position ?? initialTask.position,
-      state: (kanbanTask.state as Task['state'] | undefined) ?? initialTask.state,
-      repositories: initialTask.repositories,
+      ...baseTask,
+      title: kanbanTask.title ?? baseTask.title,
+      description: kanbanTask.description ?? baseTask.description,
+      column_id: (kanbanTask.columnId as string | undefined) ?? baseTask.column_id,
+      position: kanbanTask.position ?? baseTask.position,
+      state: (kanbanTask.state as Task['state'] | undefined) ?? baseTask.state,
+      repositories: baseTask.repositories,
     };
-  }, [initialTask, kanbanTask]);
+  }, [activeTaskOverride, initialTask, kanbanTask]);
   const connectionStatus = useAppStore((state) => state.connection.status);
 
   // Session resumption hook - handles auto-resume on page reload
@@ -62,7 +82,7 @@ export default function TaskPage({ task: initialTask, sessionId = null }: TaskPa
   } = useTaskAgent(task);
 
   // Merge state from resumption and regular agent hooks
-  const activeSessionId = sessionId ?? taskSessionId;
+  const activeSessionId = activeSessionOverride ?? sessionId ?? taskSessionId;
   const isResuming = resumptionState === 'checking' || resumptionState === 'resuming';
   const isResumed = resumptionState === 'resumed' || resumptionState === 'running';
 
@@ -77,16 +97,23 @@ export default function TaskPage({ task: initialTask, sessionId = null }: TaskPa
     taskSessionState !== null
       ? taskSessionState === 'STARTING' || taskSessionState === 'RUNNING'
       : isAgentRunning && (task?.state === 'IN_PROGRESS' || task?.state === 'SCHEDULING');
+  useTaskMessages(task?.id ?? null, activeSessionId);
+  const [sessionsByTask, setSessionsByTask] = useState<Record<string, TaskSession[]>>(
+    initialSessionsByTask
+  );
 
   useEffect(() => {
     queueMicrotask(() => setIsMounted(true));
   }, []);
-
-
   const { repositories } = useRepositories(task?.workspace_id ?? null, Boolean(task?.workspace_id));
+  const effectiveRepositories = repositories.length ? repositories : initialRepositories;
+  const repositoryPathsById = useMemo(
+    () => Object.fromEntries(effectiveRepositories.map((repo) => [repo.id, repo.local_path])),
+    [effectiveRepositories]
+  );
   const repository = useMemo(
-    () => repositories.find((item) => item.id === task?.repositories?.[0]?.repository_id) ?? null,
-    [repositories, task?.repositories]
+    () => effectiveRepositories.find((item) => item.id === task?.repositories?.[0]?.repository_id) ?? null,
+    [effectiveRepositories, task?.repositories]
   );
 
   const handleSendMessage = useCallback(async (content: string) => {
@@ -110,6 +137,171 @@ export default function TaskPage({ task: initialTask, sessionId = null }: TaskPa
       console.error('Failed to send message:', error);
     }
   }, [activeSessionId, task]);
+
+  const updateUrl = useCallback((taskId: string, sessionIdToOpen: string) => {
+    if (typeof window === 'undefined') return;
+    window.history.replaceState({}, '', linkToTaskSession(taskId, sessionIdToOpen));
+  }, []);
+
+  const handleSelectSession = useCallback(
+    (taskId: string, sessionIdToOpen: string) => {
+      setActiveSessionOverride(sessionIdToOpen);
+      updateUrl(taskId, sessionIdToOpen);
+    },
+    [updateUrl]
+  );
+
+  const handleLoadTaskSessions = useCallback(async (taskId: string) => {
+    try {
+      const response = await listTaskSessions(taskId, { cache: 'no-store' });
+      setSessionsByTask((prev) => ({ ...prev, [taskId]: response.sessions }));
+    } catch (error) {
+      console.error('Failed to load task sessions:', error);
+    }
+  }, []);
+
+  const handleSelectTask = useCallback(
+    async (taskId: string, sessionId: string | null) => {
+      try {
+        const nextTask = await fetchTask(taskId, { cache: 'no-store' });
+        setActiveTaskOverride(nextTask);
+      } catch (error) {
+        console.error('Failed to load task details:', error);
+      }
+
+      let targetSessionId = sessionId;
+      if (!targetSessionId) {
+        try {
+          const response = await listTaskSessions(taskId, { cache: 'no-store' });
+          targetSessionId = response.sessions[0]?.id ?? null;
+        } catch (error) {
+          console.error('Failed to load task sessions for navigation:', error);
+        }
+      }
+
+      if (!targetSessionId) {
+        setActiveSessionOverride(null);
+        return;
+      }
+
+      setActiveSessionOverride(targetSessionId);
+      updateUrl(taskId, targetSessionId);
+    },
+    [updateUrl]
+  );
+
+  const handleCreateSessionForTask = useCallback(
+    async (
+      taskId: string,
+      data: { prompt: string; agentProfileId: string; executorId: string; environmentId: string }
+    ) => {
+      const client = getWebSocketClient();
+      if (!client) return;
+
+      try {
+        const response = await client.request<{
+          success: boolean;
+          task_id: string;
+          agent_instance_id: string;
+          task_session_id?: string;
+          state: string;
+        }>(
+          'orchestrator.start',
+          { task_id: taskId, agent_profile_id: data.agentProfileId },
+          15000
+        );
+
+        if (response?.task_session_id && data.prompt.trim()) {
+          await client.request(
+            'message.add',
+            { task_id: taskId, task_session_id: response.task_session_id, content: data.prompt.trim() },
+            10000
+          );
+        }
+
+        await handleLoadTaskSessions(taskId);
+
+        if (response?.task_session_id) {
+          setActiveSessionOverride(response.task_session_id);
+          updateUrl(taskId, response.task_session_id);
+        }
+      } catch (error) {
+        console.error('Failed to create task session:', error);
+      }
+    },
+    [handleLoadTaskSessions, updateUrl]
+  );
+
+  const workspaceName = useMemo(() => {
+    if (!task?.workspace_id) return 'Workspace';
+    return workspaces.find((workspace) => workspace.id === task.workspace_id)?.name ?? 'Workspace';
+  }, [task, workspaces]);
+
+  const effectiveAgentProfiles = agentProfiles.length ? agentProfiles : initialAgentProfiles;
+  const agentLabelsById = useMemo(() => {
+    return Object.fromEntries(effectiveAgentProfiles.map((profile) => [profile.id, profile.label]));
+  }, [effectiveAgentProfiles]);
+
+  const tasksWithRepositories = useMemo(
+    () =>
+      boardTasks.map((taskItem) => ({
+        ...taskItem,
+        repositoryPath: taskItem.repositoryId ? repositoryPathsById[taskItem.repositoryId] : undefined,
+      })),
+    [boardTasks, repositoryPathsById]
+  );
+
+  useEffect(() => {
+    if (!task?.id) return;
+    if (sessionsByTask[task.id]) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    handleLoadTaskSessions(task.id);
+  }, [handleLoadTaskSessions, sessionsByTask, task?.id]);
+
+  useEffect(() => {
+    const client = getWebSocketClient();
+    if (!client) return;
+
+    const taskIds = boardTasks.map((item) => item.id);
+    taskIds.forEach((taskId) => client.subscribe(taskId));
+
+    return () => {
+      taskIds.forEach((taskId) => client.unsubscribe(taskId));
+    };
+  }, [boardTasks]);
+
+  useEffect(() => {
+    const client = getWebSocketClient();
+    if (!client) return;
+
+    const pending = new Set<string>();
+    const unsubscribe = client.on('task_session.state_changed', (message) => {
+      const taskId = message.payload?.task_id;
+      const sessionId = message.payload?.task_session_id;
+      const payload = message.payload as Record<string, unknown> | undefined;
+      const nextState = (payload?.new_state ?? payload?.state) as TaskSession['state'] | undefined;
+      if (taskId && sessionId && nextState) {
+        setSessionsByTask((prev) => {
+          const sessions = prev[taskId];
+          if (!sessions) return prev;
+          const nextSessions = sessions.map((session) =>
+            session.id === sessionId ? { ...session, state: nextState } : session
+          );
+          return { ...prev, [taskId]: nextSessions };
+        });
+      }
+      if (!taskId || pending.has(taskId)) return;
+      pending.add(taskId);
+      setTimeout(() => {
+        pending.delete(taskId);
+        handleLoadTaskSessions(taskId);
+      }, 250);
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [handleLoadTaskSessions]);
 
   if (!isMounted) {
     return <div className="h-screen w-full bg-background" />;
@@ -153,6 +345,18 @@ export default function TaskPage({ task: initialTask, sessionId = null }: TaskPa
           taskId={task?.id ?? null}
           sessionId={activeSessionId ?? null}
           onSendMessage={handleSendMessage}
+          tasks={tasksWithRepositories}
+          columns={boardColumns.map((column) => ({ id: column.id, title: column.title }))}
+          workspaceId={task?.workspace_id ?? null}
+          boardId={task?.board_id ?? null}
+          workspaceName={workspaceName}
+          agentLabelsById={agentLabelsById}
+          activeSessionId={activeSessionId ?? null}
+          sessionsByTask={sessionsByTask}
+          onSelectSession={handleSelectSession}
+          onLoadTaskSessions={handleLoadTaskSessions}
+          onSelectTask={handleSelectTask}
+          onCreateSession={handleCreateSessionForTask}
         />
 
         {/* Fallback dialog for permissions without matching tool call (e.g., workspace indexing) */}
