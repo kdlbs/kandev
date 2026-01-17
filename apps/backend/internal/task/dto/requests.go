@@ -136,19 +136,21 @@ type GetExecutorRequest struct {
 }
 
 type CreateExecutorRequest struct {
-	Name     string
-	Type     models.ExecutorType
-	Status   models.ExecutorStatus
-	IsSystem bool
-	Config   map[string]string
+	Name      string
+	Type      models.ExecutorType
+	Status    models.ExecutorStatus
+	IsSystem  bool
+	Resumable bool
+	Config    map[string]string
 }
 
 type UpdateExecutorRequest struct {
-	ID     string
-	Name   *string
-	Type   *models.ExecutorType
-	Status *models.ExecutorStatus
-	Config map[string]string
+	ID        string
+	Name      *string
+	Type      *models.ExecutorType
+	Status    *models.ExecutorStatus
+	Resumable *bool
+	Config    map[string]string
 }
 
 type DeleteExecutorRequest struct {

@@ -414,6 +414,32 @@ func (e *Executor) ExecuteWithProfile(ctx context.Context, task *v1.Task, agentP
 			zap.Error(err))
 	}
 
+	resumable := true
+	if session.ExecutorID != "" {
+		if executor, err := e.repo.GetExecutor(ctx, session.ExecutorID); err == nil && executor != nil {
+			resumable = executor.Resumable
+		}
+	}
+	running := &models.ExecutorRunning{
+		ID:               session.ID,
+		SessionID:        session.ID,
+		TaskID:           task.ID,
+		ExecutorID:       session.ExecutorID,
+		Status:           "starting",
+		Resumable:        resumable,
+		AgentExecutionID: resp.AgentExecutionID,
+		ContainerID:      resp.ContainerID,
+		WorktreeID:       resp.WorktreeID,
+		WorktreePath:     resp.WorktreePath,
+		WorktreeBranch:   resp.WorktreeBranch,
+	}
+	if err := e.repo.UpsertExecutorRunning(ctx, running); err != nil {
+		e.logger.Warn("failed to persist executor runtime after launch",
+			zap.String("task_id", task.ID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
+
 	if resp.WorktreeID != "" {
 		sessionWorktree := &models.TaskSessionWorktree{
 			SessionID:      session.ID,
@@ -559,12 +585,12 @@ func (e *Executor) ResumeSession(ctx context.Context, task *v1.Task, session *mo
 		}
 	}
 
-	if session.Metadata != nil {
-		if acpSessionID, ok := session.Metadata["acp_session_id"].(string); ok && acpSessionID != "" {
-			req.ACPSessionID = acpSessionID
-			e.logger.Info("found acp_session_id in session metadata for resumption",
+	if running, err := e.repo.GetExecutorRunningBySessionID(ctx, session.ID); err == nil && running != nil {
+		if running.ResumeToken != "" {
+			req.ACPSessionID = running.ResumeToken
+			e.logger.Info("found resume token for session resumption",
 				zap.String("task_id", task.ID),
-				zap.String("acp_session_id", acpSessionID))
+				zap.String("session_id", session.ID))
 		}
 	}
 
@@ -572,7 +598,7 @@ func (e *Executor) ResumeSession(ctx context.Context, task *v1.Task, session *mo
 		zap.String("task_id", task.ID),
 		zap.String("session_id", session.ID),
 		zap.String("agent_profile_id", session.AgentProfileID),
-		zap.String("acp_session_id", req.ACPSessionID),
+		zap.String("resume_token", req.ACPSessionID),
 		zap.Bool("use_worktree", req.UseWorktree))
 
 	req.Env = e.applyPreferredShellEnv(ctx, req.Env)
@@ -595,6 +621,32 @@ func (e *Executor) ResumeSession(ctx context.Context, task *v1.Task, session *mo
 
 	if err := e.repo.UpdateTaskSession(ctx, session); err != nil {
 		e.logger.Error("failed to update task session for resume",
+			zap.String("task_id", task.ID),
+			zap.String("session_id", session.ID),
+			zap.Error(err))
+	}
+
+	resumable := true
+	if session.ExecutorID != "" {
+		if executor, err := e.repo.GetExecutor(ctx, session.ExecutorID); err == nil && executor != nil {
+			resumable = executor.Resumable
+		}
+	}
+	running := &models.ExecutorRunning{
+		ID:               session.ID,
+		SessionID:        session.ID,
+		TaskID:           task.ID,
+		ExecutorID:       session.ExecutorID,
+		Status:           "starting",
+		Resumable:        resumable,
+		AgentExecutionID: resp.AgentExecutionID,
+		ContainerID:      resp.ContainerID,
+		WorktreeID:       resp.WorktreeID,
+		WorktreePath:     resp.WorktreePath,
+		WorktreeBranch:   resp.WorktreeBranch,
+	}
+	if err := e.repo.UpsertExecutorRunning(ctx, running); err != nil {
+		e.logger.Warn("failed to persist executor runtime after resume",
 			zap.String("task_id", task.ID),
 			zap.String("session_id", session.ID),
 			zap.Error(err))

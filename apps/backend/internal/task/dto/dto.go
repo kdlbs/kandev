@@ -73,6 +73,7 @@ type ExecutorDTO struct {
 	Type      models.ExecutorType   `json:"type"`
 	Status    models.ExecutorStatus `json:"status"`
 	IsSystem  bool                  `json:"is_system"`
+	Resumable bool                  `json:"resumable"`
 	Config    map[string]string     `json:"config,omitempty"`
 	CreatedAt time.Time             `json:"created_at"`
 	UpdatedAt time.Time             `json:"updated_at"`
@@ -331,6 +332,7 @@ func FromExecutor(executor *models.Executor) ExecutorDTO {
 		Type:      executor.Type,
 		Status:    executor.Status,
 		IsSystem:  executor.IsSystem,
+		Resumable: executor.Resumable,
 		Config:    executor.Config,
 		CreatedAt: executor.CreatedAt,
 		UpdatedAt: executor.UpdatedAt,

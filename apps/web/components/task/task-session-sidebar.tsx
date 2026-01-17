@@ -239,7 +239,6 @@ export function TaskSessionSidebar({ workspaceId, boardId }: TaskSessionSidebarP
               },
             };
           });
-          setSelectedTaskId(task.id);
           setActiveTask(task.id);
           if (meta?.taskSessionId) {
             setActiveSession(task.id, meta.taskSessionId);

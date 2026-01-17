@@ -306,10 +306,35 @@ type Executor struct {
 	Type      ExecutorType      `json:"type"`
 	Status    ExecutorStatus    `json:"status"`
 	IsSystem  bool              `json:"is_system"`
+	Resumable bool              `json:"resumable"`
 	Config    map[string]string `json:"config,omitempty"`
 	CreatedAt time.Time         `json:"created_at"`
 	UpdatedAt time.Time         `json:"updated_at"`
 	DeletedAt *time.Time        `json:"deleted_at,omitempty"`
+}
+
+// ExecutorRunning tracks an active executor instance for a session.
+type ExecutorRunning struct {
+	ID               string     `json:"id"`
+	SessionID        string     `json:"session_id"`
+	TaskID           string     `json:"task_id"`
+	ExecutorID       string     `json:"executor_id"`
+	Runtime          string     `json:"runtime,omitempty"`
+	Status           string     `json:"status"`
+	Resumable        bool       `json:"resumable"`
+	ResumeToken      string     `json:"resume_token,omitempty"`
+	AgentExecutionID string     `json:"agent_execution_id,omitempty"`
+	ContainerID      string     `json:"container_id,omitempty"`
+	AgentctlURL      string     `json:"agentctl_url,omitempty"`
+	AgentctlPort     int        `json:"agentctl_port,omitempty"`
+	PID              int        `json:"pid,omitempty"`
+	WorktreeID       string     `json:"worktree_id,omitempty"`
+	WorktreePath     string     `json:"worktree_path,omitempty"`
+	WorktreeBranch   string     `json:"worktree_branch,omitempty"`
+	ErrorMessage     string     `json:"error_message,omitempty"`
+	LastSeenAt       *time.Time `json:"last_seen_at,omitempty"`
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
 }
 
 // EnvironmentKind represents the runtime type for environments.

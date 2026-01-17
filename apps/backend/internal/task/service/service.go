@@ -178,19 +178,21 @@ type UpdateRepositoryRequest struct {
 
 // CreateExecutorRequest contains the data for creating an executor
 type CreateExecutorRequest struct {
-	Name     string                `json:"name"`
-	Type     models.ExecutorType   `json:"type"`
-	Status   models.ExecutorStatus `json:"status"`
-	IsSystem bool                  `json:"is_system"`
-	Config   map[string]string     `json:"config,omitempty"`
+	Name      string                `json:"name"`
+	Type      models.ExecutorType   `json:"type"`
+	Status    models.ExecutorStatus `json:"status"`
+	IsSystem  bool                  `json:"is_system"`
+	Resumable bool                  `json:"resumable"`
+	Config    map[string]string     `json:"config,omitempty"`
 }
 
 // UpdateExecutorRequest contains the data for updating an executor
 type UpdateExecutorRequest struct {
-	Name   *string                `json:"name,omitempty"`
-	Type   *models.ExecutorType   `json:"type,omitempty"`
-	Status *models.ExecutorStatus `json:"status,omitempty"`
-	Config map[string]string      `json:"config,omitempty"`
+	Name      *string                `json:"name,omitempty"`
+	Type      *models.ExecutorType   `json:"type,omitempty"`
+	Status    *models.ExecutorStatus `json:"status,omitempty"`
+	Resumable *bool                  `json:"resumable,omitempty"`
+	Config    map[string]string      `json:"config,omitempty"`
 }
 
 // CreateEnvironmentRequest contains the data for creating an environment
@@ -462,6 +464,37 @@ func (s *Service) DeleteTask(ctx context.Context, id string) error {
 			s.logger.Warn("failed to cleanup worktree on task deletion",
 				zap.String("task_id", id),
 				zap.Error(err))
+		}
+	}
+
+	sessions, err := s.repo.ListTaskSessions(ctx, id)
+	if err != nil {
+		s.logger.Warn("failed to list task sessions for delete",
+			zap.String("task_id", id),
+			zap.Error(err))
+	} else {
+		for _, session := range sessions {
+			if session == nil || session.ID == "" {
+				continue
+			}
+			if err := s.repo.DeleteExecutorRunningBySessionID(ctx, session.ID); err != nil {
+				s.logger.Debug("failed to delete executor runtime for session",
+					zap.String("task_id", id),
+					zap.String("session_id", session.ID),
+					zap.Error(err))
+			}
+			if err := s.repo.DeleteTaskSessionWorktreesBySession(ctx, session.ID); err != nil {
+				s.logger.Warn("failed to delete session worktrees",
+					zap.String("task_id", id),
+					zap.String("session_id", session.ID),
+					zap.Error(err))
+			}
+			if err := s.repo.DeleteTaskSession(ctx, session.ID); err != nil {
+				s.logger.Warn("failed to delete task session",
+					zap.String("task_id", id),
+					zap.String("session_id", session.ID),
+					zap.Error(err))
+			}
 		}
 	}
 
@@ -1067,12 +1100,13 @@ func (s *Service) ListRepositoryScripts(ctx context.Context, repositoryID string
 
 func (s *Service) CreateExecutor(ctx context.Context, req *CreateExecutorRequest) (*models.Executor, error) {
 	executor := &models.Executor{
-		ID:       uuid.New().String(),
-		Name:     req.Name,
-		Type:     req.Type,
-		Status:   req.Status,
-		IsSystem: req.IsSystem,
-		Config:   req.Config,
+		ID:        uuid.New().String(),
+		Name:      req.Name,
+		Type:      req.Type,
+		Status:    req.Status,
+		IsSystem:  req.IsSystem,
+		Resumable: req.Resumable,
+		Config:    req.Config,
 	}
 
 	if err := s.repo.CreateExecutor(ctx, executor); err != nil {
@@ -1102,6 +1136,9 @@ func (s *Service) UpdateExecutor(ctx context.Context, id string, req *UpdateExec
 	}
 	if req.Status != nil {
 		executor.Status = *req.Status
+	}
+	if req.Resumable != nil {
+		executor.Resumable = *req.Resumable
 	}
 	if req.Config != nil {
 		executor.Config = req.Config
@@ -1359,6 +1396,7 @@ func (s *Service) publishExecutorEvent(ctx context.Context, eventType string, ex
 		"type":       executor.Type,
 		"status":     executor.Status,
 		"is_system":  executor.IsSystem,
+		"resumable":  executor.Resumable,
 		"config":     executor.Config,
 		"created_at": executor.CreatedAt.Format(time.RFC3339),
 		"updated_at": executor.UpdatedAt.Format(time.RFC3339),

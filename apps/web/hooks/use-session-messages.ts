@@ -114,6 +114,7 @@ export function useSessionMessages(
         store.getState().setMessages(taskSessionId, []);
         lastFetchedSessionIdRef.current = taskSessionId;
       } finally {
+        store.getState().setMessagesLoading(taskSessionId, false);
         setIsLoading(false);
       }
     };
@@ -169,6 +170,7 @@ export function useSessionMessages(
       } catch (error) {
         console.error('Failed to fetch messages after state change:', error);
       } finally {
+        store.getState().setMessagesLoading(taskSessionId, false);
         setIsLoading(false);
       }
     };

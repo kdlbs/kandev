@@ -3,10 +3,14 @@ import { listTaskSessionMessages } from '@/lib/http';
 import { useAppStore } from '@/components/state-provider';
 
 export function useLazyLoadMessages(sessionId: string | null) {
-  const { hasMore, oldestCursor, isLoading } = useAppStore((state) =>
-    sessionId
-      ? state.messages.metaBySession[sessionId] ?? { hasMore: false, oldestCursor: null, isLoading: false }
-      : { hasMore: false, oldestCursor: null, isLoading: false }
+  const hasMore = useAppStore((state) =>
+    sessionId ? state.messages.metaBySession[sessionId]?.hasMore ?? false : false
+  );
+  const oldestCursor = useAppStore((state) =>
+    sessionId ? state.messages.metaBySession[sessionId]?.oldestCursor ?? null : null
+  );
+  const isLoading = useAppStore((state) =>
+    sessionId ? state.messages.metaBySession[sessionId]?.isLoading ?? false : false
   );
   const prependMessages = useAppStore((state) => state.prependMessages);
   const setMessagesMetadata = useAppStore((state) => state.setMessagesMetadata);

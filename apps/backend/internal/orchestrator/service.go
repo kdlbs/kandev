@@ -378,6 +378,10 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 	if session.TaskID != taskID {
 		return nil, fmt.Errorf("task session does not belong to task")
 	}
+	running, err := s.repo.GetExecutorRunningBySessionID(ctx, sessionID)
+	if err != nil || running == nil || running.ResumeToken == "" || !running.Resumable {
+		return nil, fmt.Errorf("session is not resumable")
+	}
 	if len(session.Worktrees) == 0 || session.Worktrees[0].WorktreePath == "" {
 		return nil, fmt.Errorf("task session has no worktree path")
 	}
@@ -449,12 +453,13 @@ func (s *Service) GetTaskSessionStatus(ctx context.Context, taskID, sessionID st
 	resp.State = string(session.State)
 	resp.AgentProfileID = session.AgentProfileID
 
-	// Extract ACP session ID from metadata - this is the key requirement for resumption
-	var acpSessionID string
-	if session.Metadata != nil {
-		if id, ok := session.Metadata["acp_session_id"].(string); ok {
-			acpSessionID = id
-			resp.ACPSessionID = acpSessionID
+	// Extract resume token from executor runtime state.
+	var resumeToken string
+	if running, err := s.repo.GetExecutorRunningBySessionID(ctx, sessionID); err == nil && running != nil {
+		resumeToken = running.ResumeToken
+		resp.ACPSessionID = resumeToken
+		if running.Resumable {
+			resp.IsResumable = true
 		}
 	}
 
@@ -472,18 +477,16 @@ func (s *Service) GetTaskSessionStatus(ctx context.Context, taskID, sessionID st
 	// 2. Check if we have an active execution in memory and agent is running
 	if exec, ok := s.executor.GetExecutionWithContext(ctx, taskID); ok && exec != nil {
 		resp.IsAgentRunning = true
-		resp.IsResumable = true
 		resp.NeedsResume = false
 		return resp, nil
 	}
 
-	// 3. Session can be resumed if it has an ACP session ID
-	// Any session type with an acp_session_id can be resumed
-	if acpSessionID == "" {
+	// 3. Session can be resumed if it has a resume token
+	if resumeToken == "" {
 		resp.IsAgentRunning = false
 		resp.IsResumable = false
 		resp.NeedsResume = false
-		resp.Error = "session has no acp_session_id"
+		resp.Error = "session has no resume token"
 		return resp, nil
 	}
 
@@ -504,7 +507,6 @@ func (s *Service) GetTaskSessionStatus(ctx context.Context, taskID, sessionID st
 	}
 
 	resp.IsAgentRunning = false
-	resp.IsResumable = true
 	resp.NeedsResume = true
 	resp.ResumeReason = "agent_not_running"
 
@@ -683,26 +685,42 @@ func (s *Service) handleACPSessionCreated(ctx context.Context, data watcher.ACPS
 		return
 	}
 
-	if session.Metadata == nil {
-		session.Metadata = make(map[string]interface{})
+	resumable := true
+	if session.ExecutorID != "" {
+		if executor, err := s.repo.GetExecutor(ctx, session.ExecutorID); err == nil && executor != nil {
+			resumable = executor.Resumable
+		}
 	}
-	if existing, ok := session.Metadata["acp_session_id"].(string); ok && existing == data.ACPSessionID {
-		return
-	}
-	session.Metadata["acp_session_id"] = data.ACPSessionID
 
-	if err := s.repo.UpdateTaskSession(ctx, session); err != nil {
-		s.logger.Warn("failed to persist ACP session id",
+	running := &models.ExecutorRunning{
+		ID:               session.ID,
+		SessionID:        session.ID,
+		TaskID:           session.TaskID,
+		ExecutorID:       session.ExecutorID,
+		Status:           "ready",
+		Resumable:        resumable,
+		ResumeToken:      data.ACPSessionID,
+		AgentExecutionID: session.AgentExecutionID,
+		ContainerID:      session.ContainerID,
+	}
+	if len(session.Worktrees) > 0 {
+		running.WorktreeID = session.Worktrees[0].WorktreeID
+		running.WorktreePath = session.Worktrees[0].WorktreePath
+		running.WorktreeBranch = session.Worktrees[0].WorktreeBranch
+	}
+
+	if err := s.repo.UpsertExecutorRunning(ctx, running); err != nil {
+		s.logger.Warn("failed to persist resume token for session",
 			zap.String("task_id", data.TaskID),
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 		return
 	}
 
-	s.logger.Info("stored ACP session id for task session",
+	s.logger.Info("stored resume token for task session",
 		zap.String("task_id", data.TaskID),
 		zap.String("session_id", sessionID),
-		zap.String("acp_session_id", data.ACPSessionID))
+		zap.String("resume_token", data.ACPSessionID))
 }
 
 // handleAgentCompleted handles agent completion events
@@ -900,10 +918,10 @@ func (s *Service) updateTaskSessionState(ctx context.Context, taskID, sessionID 
 		zap.String("new_state", string(nextState)))
 	if s.eventBus != nil {
 		_ = s.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(events.TaskSessionStateChanged, "task-session", map[string]interface{}{
-			"task_id":         taskID,
+			"task_id":    taskID,
 			"session_id": sessionID,
-			"old_state":       string(oldState),
-			"new_state":       string(nextState),
+			"old_state":  string(oldState),
+			"new_state":  string(nextState),
 		}))
 	}
 	if taskID != "" {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/lifecycle"
 	agentctl "github.com/kandev/kandev/internal/agentctl/client"
@@ -258,6 +259,12 @@ func (h *ShellHandlers) runShellStreamWithReady(ctx context.Context, sessionID s
 	if client == nil {
 		h.logger.Debug("no client for shell stream", zap.String("session_id", sessionID))
 		readyCh <- fmt.Errorf("no agent client for session %s", sessionID)
+		return
+	}
+
+	if err := client.WaitForReady(ctx, 10*time.Second); err != nil {
+		h.logger.Error("agentctl not ready for shell stream", zap.String("session_id", sessionID), zap.Error(err))
+		readyCh <- fmt.Errorf("agentctl not ready: %w", err)
 		return
 	}
 

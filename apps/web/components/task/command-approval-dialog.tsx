@@ -14,6 +14,9 @@ import {
 } from '@kandev/ui/alert-dialog';
 import { useAppStore } from '@/components/state-provider';
 import { getWebSocketClient } from '@/lib/ws/connection';
+import type { Message } from '@/lib/types/http';
+
+const EMPTY_MESSAGES: Message[] = [];
 
 type CommandApprovalDialogProps = {
   taskId: string;
@@ -27,7 +30,7 @@ export function CommandApprovalDialog({ taskId, standaloneOnly = false }: Comman
   const removePendingPermission = useAppStore((state) => state.removePendingPermission);
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const messages = useAppStore((state) =>
-    activeSessionId ? state.messages.bySession[activeSessionId] ?? [] : []
+    activeSessionId ? state.messages.bySession[activeSessionId] ?? EMPTY_MESSAGES : EMPTY_MESSAGES
   );
 
   // Get tool_call_ids from all tool call messages
