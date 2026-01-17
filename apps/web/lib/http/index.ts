@@ -44,7 +44,7 @@ async function fetchJson<T>(pathOrUrl: string, options?: ApiRequestOptions): Pro
     },
   });
   if (!response.ok) {
-    throw new Error(`Request failed: ${response.status} ${response.statusText}`);
+    throw new Error(`Request failed: ${response.status} ${response.statusText} (${url})`);
   }
   if (response.status === 204) {
     return undefined as T;

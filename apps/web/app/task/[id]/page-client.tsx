@@ -12,6 +12,7 @@ import { DEBUG_UI } from '@/lib/config';
 import { useRepositories } from '@/hooks/use-repositories';
 import { useTaskAgent } from '@/hooks/use-task-agent';
 import { useSessionResumption } from '@/hooks/use-session-resumption';
+import { useSessionAgentctl } from '@/hooks/use-session-agentctl';
 import { useAppStore } from '@/components/state-provider';
 import { fetchTask } from '@/lib/http';
 import { useTasks } from '@/hooks/use-tasks';
@@ -68,6 +69,7 @@ export default function TaskPage({
 
   const initialSessionId = sessionId ?? taskSessionId ?? null;
   const effectiveSessionId = activeSessionId ?? initialSessionId;
+  const agentctlStatus = useSessionAgentctl(effectiveSessionId);
 
   // Session resumption hook - handles auto-resume on page reload
   const {
@@ -143,6 +145,10 @@ export default function TaskPage({
               is_agent_working: isAgentWorking,
               resumption_state: resumptionState,
               resumption_error: resumptionError,
+              agentctl_status: agentctlStatus.status,
+              agentctl_ready: agentctlStatus.isReady,
+              agentctl_error: agentctlStatus.errorMessage ?? null,
+              agentctl_execution_id: agentctlStatus.agentExecutionId ?? null,
             }}
           />
         )}

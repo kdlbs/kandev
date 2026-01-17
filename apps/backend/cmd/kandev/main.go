@@ -926,16 +926,23 @@ func main() {
 	// ============================================
 	// GRACEFUL SHUTDOWN
 	// ============================================
-	quit := make(chan os.Signal, 1)
+	quit := make(chan os.Signal, 2)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	sig := <-quit
+
+	// If we get a second signal, exit immediately.
+	go func() {
+		second := <-quit
+		log.Warn("Received second shutdown signal, forcing exit", zap.String("signal", second.String()))
+		os.Exit(1)
+	}()
 
 	log.Info("Received shutdown signal", zap.String("signal", sig.String()))
 
 	log.Info("Shutting down Kandev...")
 	cancel()
 
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 
 	if err := server.Shutdown(shutdownCtx); err != nil {
@@ -948,7 +955,7 @@ func main() {
 
 	if lifecycleMgr != nil {
 		log.Info("Stopping agents gracefully...")
-		stopCtx, stopCancel := context.WithTimeout(context.Background(), 20*time.Second)
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		if err := lifecycleMgr.StopAllAgents(stopCtx); err != nil {
 			log.Error("Graceful agent stop error", zap.Error(err))
 		}
@@ -1229,7 +1236,6 @@ func (a *shellSessionResumerAdapter) ResumeTaskSession(ctx context.Context, task
 	_, err := a.svc.ResumeTaskSession(ctx, taskID, taskSessionID)
 	return err
 }
-
 
 // messageCreatorAdapter adapts the task service to the orchestrator.MessageCreator interface
 type messageCreatorAdapter struct {
