@@ -92,7 +92,11 @@ Client (WS)             Backend                Runtime              agentctl    
 
 ### Subscription Strategy
 
-TODO
+- Components subscribe to the channels they need (task, session, repo), using hooks.
+- WebSocket client deduplicates subscriptions with reference counting.
+- Reconnects re-subscribe all active channels automatically.
+- Event handlers update store slices; components only read from store.
+- URL params set active task/session in store for consistent view state.
 
 **Why This Works**
 
@@ -111,15 +115,30 @@ Layer 3: Components (subscribe + render)
 
 ### Store Structure
 
-TODO
+- Task/session scoped data is keyed in store:
+  - `messages.bySession[sessionId]`
+  - `messages.metaBySession[sessionId]`
+  - `gitStatus` keyed by `taskId`
+  - `shell.outputs` keyed by `taskId`
+- Active selection state lives in store:
+  - `tasks.activeTaskId`
+  - `tasks.activeSessionId`
 
 ### Custom Hooks Pattern
 
-TODO
+- Hooks own subscriptions and return data from store:
+  - `useTaskMessages(taskId, sessionId)` → messages + loading/meta
+  - `useLazyLoadMessages(sessionId)` → pagination
+  - `useGitStatus(taskId)` → git state
+  - `useShellOutput(taskId, sessionId)` → shell output
+- Hooks subscribe on mount, cleanup on unmount; no manual dedup in components.
 
 ### Page-Level Responsibilities
 
-TODO
+- SSR fetches initial task/session + board snapshot, hydrates store.
+- Page reads URL `taskId` + `sessionId`, calls `setActiveSession(taskId, sessionId)`.
+- Page coordinates task list + session list loading (e.g., `listTaskSessions`).
+- Components render from store and trigger hooks for live updates.
 
 ## Agents and ACP
 

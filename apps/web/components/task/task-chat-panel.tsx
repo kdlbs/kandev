@@ -34,13 +34,13 @@ type AgentOption = {
 type TaskChatPanelProps = {
   agents: AgentOption[];
   onSend: (message: string) => void;
-  sessionId: string | null;
+  sessionId?: string | null;
 };
 
 export function TaskChatPanel({
   agents,
   onSend,
-  sessionId,
+  sessionId = null,
 }: TaskChatPanelProps) {
   const [messageInput, setMessageInput] = useState('');
   const [selectedAgent, setSelectedAgent] = useState(agents[0]?.id ?? '');
@@ -50,20 +50,17 @@ export function TaskChatPanel({
   const lastAgentMessageCountRef = useRef(0);
   const wasAtBottomRef = useRef(true);
 
+  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const resolvedSessionId = sessionId ?? activeSessionId;
+
   // Get task session details and derived task information from session ID
-  const { session, taskId, taskDescription, isWorking } = useTaskSession(sessionId);
+  const { session, taskId, taskDescription, isWorking } = useTaskSession(resolvedSessionId);
 
   // Fetch messages for this session
-  useTaskMessages(taskId, sessionId);
-
-  const messagesState = useAppStore((state) => state.messages);
-  const messages = messagesState?.items ?? [];
-  const messagesLoading = messagesState?.isLoading ?? false;
+  const { messages, isLoading: messagesLoading } = useTaskMessages(taskId, resolvedSessionId);
   const isInitialLoading = messagesLoading && messages.length === 0;
   const showLoadingState = (messagesLoading || isInitialLoading) && !isWorking;
-  const { loadMore, hasMore, isLoading: isLoadingMore } = useLazyLoadMessages(
-    messagesState?.sessionId ?? null
-  );
+  const { loadMore, hasMore, isLoading: isLoadingMore } = useLazyLoadMessages(resolvedSessionId);
 
   // Filter to only show chat-relevant types.
   const visibleMessages = messages.filter((message) =>
@@ -84,7 +81,7 @@ export function TaskChatPanel({
       ? {
         id: 'task-description',
         task_id: taskId ?? '',
-        task_session_id: messagesState?.sessionId ?? '',
+        task_session_id: resolvedSessionId ?? '',
         author_type: 'user',
         content: taskDescription,
         type: 'message',

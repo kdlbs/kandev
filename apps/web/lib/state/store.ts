@@ -72,6 +72,7 @@ export type BoardState = {
 
 export type TaskState = {
   activeTaskId: string | null;
+  activeSessionId: string | null;
 };
 
 export type AgentState = {
@@ -186,11 +187,15 @@ export type ConnectionState = {
 };
 
 export type MessagesState = {
-  sessionId: string | null;
-  items: Message[];
-  isLoading: boolean;
-  hasMore: boolean;
-  oldestCursor: string | null;
+  bySession: Record<string, Message[]>;
+  metaBySession: Record<
+    string,
+    {
+      isLoading: boolean;
+      hasMore: boolean;
+      oldestCursor: string | null;
+    }
+  >;
 };
 
 export type TaskSessionsState = {
@@ -246,16 +251,24 @@ export type AppState = {
   clearShellOutput: (taskId: string) => void;
   setConnectionStatus: (status: ConnectionState['status'], error?: string | null) => void;
   setMessages: (
-    sessionId: string | null,
+    sessionId: string,
     messages: Message[],
     meta?: { hasMore?: boolean; oldestCursor?: string | null }
   ) => void;
-  setMessagesSessionId: (sessionId: string | null) => void;
   addMessage: (message: Message) => void;
   updateMessage: (message: Message) => void;
-  prependMessages: (messages: Message[], meta?: { hasMore?: boolean; oldestCursor?: string | null }) => void;
-  setMessagesMetadata: (meta: { hasMore?: boolean; isLoading?: boolean; oldestCursor?: string | null }) => void;
-  setMessagesLoading: (loading: boolean) => void;
+  prependMessages: (
+    sessionId: string,
+    messages: Message[],
+    meta?: { hasMore?: boolean; oldestCursor?: string | null }
+  ) => void;
+  setMessagesMetadata: (
+    sessionId: string,
+    meta: { hasMore?: boolean; isLoading?: boolean; oldestCursor?: string | null }
+  ) => void;
+  setMessagesLoading: (sessionId: string, loading: boolean) => void;
+  setActiveSession: (taskId: string, sessionId: string) => void;
+  clearActiveSession: () => void;
   setTaskSession: (session: TaskSession) => void;
   setTaskSessionState: (taskId: string, state: TaskSessionState) => void;
   setGitStatus: (taskId: string, gitStatus: Omit<GitStatusState, 'taskId'>) => void;
@@ -279,7 +292,7 @@ const defaultState: AppState = {
   repositories: { itemsByWorkspaceId: {}, loadingByWorkspaceId: {}, loadedByWorkspaceId: {} },
   repositoryBranches: { itemsByRepositoryId: {}, loadingByRepositoryId: {}, loadedByRepositoryId: {} },
   settingsData: { executorsLoaded: false, environmentsLoaded: false, agentsLoaded: false },
-  tasks: { activeTaskId: null },
+  tasks: { activeTaskId: null, activeSessionId: null },
   agents: { agents: [] },
   agentProfiles: { items: [], version: 0 },
   userSettings: {
@@ -307,7 +320,7 @@ const defaultState: AppState = {
     timestamp: null,
   },
   connection: { status: 'disconnected', error: null },
-  messages: { sessionId: null, items: [], isLoading: false, hasMore: false, oldestCursor: null },
+  messages: { bySession: {}, metaBySession: {} },
   taskSessions: { items: {} },
   taskSessionStatesByTaskId: {},
   permissions: { pending: [] },
@@ -333,12 +346,13 @@ const defaultState: AppState = {
   clearShellOutput: () => undefined,
   setConnectionStatus: () => undefined,
   setMessages: () => undefined,
-  setMessagesSessionId: () => undefined,
   addMessage: () => undefined,
   updateMessage: () => undefined,
   prependMessages: () => undefined,
   setMessagesMetadata: () => undefined,
   setMessagesLoading: () => undefined,
+  setActiveSession: () => undefined,
+  clearActiveSession: () => undefined,
   setTaskSession: () => undefined,
   setTaskSessionState: () => undefined,
   setGitStatus: () => undefined,
@@ -375,12 +389,13 @@ function mergeInitialState(
   | 'clearShellOutput'
   | 'setConnectionStatus'
   | 'setMessages'
-  | 'setMessagesSessionId'
   | 'addMessage'
   | 'updateMessage'
   | 'prependMessages'
   | 'setMessagesMetadata'
   | 'setMessagesLoading'
+  | 'setActiveSession'
+  | 'clearActiveSession'
   | 'setTaskSession'
   | 'setTaskSessionState'
   | 'setGitStatus'
@@ -558,98 +573,101 @@ export function createAppStore(initialState?: Partial<AppState>) {
         }),
       setMessages: (sessionId, messages, meta) =>
         set((draft) => {
-          draft.messages.sessionId = sessionId;
-          draft.messages.items = messages;
-          draft.messages.isLoading = false;
-          draft.messages.hasMore = meta?.hasMore ?? false;
-          if (meta?.oldestCursor !== undefined) {
-            draft.messages.oldestCursor = meta.oldestCursor;
-          } else if (messages.length) {
-            draft.messages.oldestCursor = messages[0].id;
-          } else {
-            draft.messages.oldestCursor = null;
-          }
-        }),
-      setMessagesSessionId: (sessionId) =>
-        set((draft) => {
-          draft.messages.sessionId = sessionId;
-          // Initialize items array if null to allow addMessage to work
-          // before setMessages is called
-          if (draft.messages.items === null) {
-            draft.messages.items = [];
-          }
+          draft.messages.bySession[sessionId] = messages;
+          const existingMeta = draft.messages.metaBySession[sessionId];
+          draft.messages.metaBySession[sessionId] = {
+            isLoading: false,
+            hasMore: meta?.hasMore ?? existingMeta?.hasMore ?? false,
+            oldestCursor:
+              meta?.oldestCursor ?? (messages.length ? messages[0].id : existingMeta?.oldestCursor ?? null),
+          };
         }),
       addMessage: (message) =>
         set((draft) => {
-          // Initialize items array if null
-          if (draft.messages.items === null) {
-            draft.messages.items = [];
+          if (!message.task_session_id) {
+            return;
           }
-          if (!draft.messages.sessionId) {
-            draft.messages.sessionId = message.task_session_id;
+          const sessionId = message.task_session_id;
+          const list = draft.messages.bySession[sessionId] ?? [];
+          const exists = list.some((item) => item.id === message.id);
+          if (exists) {
+            return;
           }
-          // Only add if this message is for the current session
-          if (draft.messages.sessionId === message.task_session_id) {
-            // Check if message already exists (avoid duplicates)
-            const exists = draft.messages.items.some((item) => item.id === message.id);
-            if (!exists) {
-              draft.messages.items.push(message);
-              if (!draft.messages.oldestCursor) {
-                draft.messages.oldestCursor = message.id;
-              }
-            }
+          draft.messages.bySession[sessionId] = [...list, message];
+          const meta = draft.messages.metaBySession[sessionId] ?? {
+            isLoading: false,
+            hasMore: false,
+            oldestCursor: null,
+          };
+          if (!meta.oldestCursor) {
+            meta.oldestCursor = message.id;
           }
+          draft.messages.metaBySession[sessionId] = meta;
         }),
       updateMessage: (message) =>
         set((draft) => {
-          if (!draft.messages.sessionId) {
-            draft.messages.sessionId = message.task_session_id;
+          if (!message.task_session_id) {
+            return;
           }
-          // Only update if this message is for the current session
-          if (draft.messages.sessionId === message.task_session_id && draft.messages.items) {
-            const index = draft.messages.items.findIndex((item) => item.id === message.id);
-            if (index !== -1) {
-              draft.messages.items[index] = message;
-            }
+          const sessionId = message.task_session_id;
+          const list = draft.messages.bySession[sessionId];
+          if (!list) return;
+          const index = list.findIndex((item) => item.id === message.id);
+          if (index !== -1) {
+            list[index] = message;
           }
         }),
-      prependMessages: (messages, meta) =>
+      prependMessages: (sessionId, messages, meta) =>
         set((draft) => {
-          if (draft.messages.items === null) {
-            draft.messages.items = [];
-          }
-          const existingIds = new Set(draft.messages.items.map((item) => item.id));
+          const existing = draft.messages.bySession[sessionId] ?? [];
+          const existingIds = new Set(existing.map((item) => item.id));
           const incoming = messages.filter((item) => !existingIds.has(item.id));
-          if (incoming.length) {
-            draft.messages.items = [...incoming, ...draft.messages.items];
-          }
-          if (meta?.hasMore !== undefined) {
-            draft.messages.hasMore = meta.hasMore;
-          }
-          if (meta?.oldestCursor !== undefined) {
-            draft.messages.oldestCursor = meta.oldestCursor;
-          } else if (draft.messages.items.length) {
-            draft.messages.oldestCursor = draft.messages.items[0].id;
-          } else {
-            draft.messages.oldestCursor = null;
-          }
-          draft.messages.isLoading = false;
+          const next = incoming.length ? [...incoming, ...existing] : existing;
+          draft.messages.bySession[sessionId] = next;
+          const currentMeta = draft.messages.metaBySession[sessionId] ?? {
+            isLoading: false,
+            hasMore: false,
+            oldestCursor: null,
+          };
+          draft.messages.metaBySession[sessionId] = {
+            isLoading: false,
+            hasMore: meta?.hasMore ?? currentMeta.hasMore,
+            oldestCursor:
+              meta?.oldestCursor ?? (next.length ? next[0].id : currentMeta.oldestCursor ?? null),
+          };
         }),
-      setMessagesMetadata: (meta) =>
+      setMessagesMetadata: (sessionId, meta) =>
         set((draft) => {
-          if (meta.hasMore !== undefined) {
-            draft.messages.hasMore = meta.hasMore;
-          }
-          if (meta.isLoading !== undefined) {
-            draft.messages.isLoading = meta.isLoading;
-          }
-          if (meta.oldestCursor !== undefined) {
-            draft.messages.oldestCursor = meta.oldestCursor;
-          }
+          const currentMeta = draft.messages.metaBySession[sessionId] ?? {
+            isLoading: false,
+            hasMore: false,
+            oldestCursor: null,
+          };
+          draft.messages.metaBySession[sessionId] = {
+            isLoading: meta.isLoading ?? currentMeta.isLoading,
+            hasMore: meta.hasMore ?? currentMeta.hasMore,
+            oldestCursor: meta.oldestCursor ?? currentMeta.oldestCursor,
+          };
         }),
-      setMessagesLoading: (loading) =>
+      setMessagesLoading: (sessionId, loading) =>
         set((draft) => {
-          draft.messages.isLoading = loading;
+          const currentMeta = draft.messages.metaBySession[sessionId] ?? {
+            isLoading: false,
+            hasMore: false,
+            oldestCursor: null,
+          };
+          currentMeta.isLoading = loading;
+          draft.messages.metaBySession[sessionId] = currentMeta;
+        }),
+      setActiveSession: (taskId, sessionId) =>
+        set((draft) => {
+          draft.tasks.activeTaskId = taskId;
+          draft.tasks.activeSessionId = sessionId;
+        }),
+      clearActiveSession: () =>
+        set((draft) => {
+          draft.tasks.activeTaskId = null;
+          draft.tasks.activeSessionId = null;
         }),
       setTaskSession: (session) =>
         set((draft) => {

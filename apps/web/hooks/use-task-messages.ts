@@ -5,6 +5,9 @@ import type { TaskSessionState, Message } from '@/lib/types/http';
 
 interface UseTaskMessagesReturn {
   isLoading: boolean;
+  messages: Message[];
+  hasMore: boolean;
+  oldestCursor: string | null;
 }
 
 export function useTaskMessages(
@@ -12,7 +15,14 @@ export function useTaskMessages(
   taskSessionId: string | null
 ): UseTaskMessagesReturn {
   const store = useAppStoreApi();
-  const messagesState = useAppStore((state) => state.messages);
+  const messages = useAppStore((state) =>
+    taskSessionId ? state.messages.bySession[taskSessionId] ?? [] : []
+  );
+  const messagesMeta = useAppStore((state) =>
+    taskSessionId
+      ? state.messages.metaBySession[taskSessionId] ?? { isLoading: false, hasMore: false, oldestCursor: null }
+      : { isLoading: false, hasMore: false, oldestCursor: null }
+  );
   const taskSessionState = useAppStore((state) =>
     taskId ? (state.taskSessionStatesByTaskId[taskId] ?? null) : null
   );
@@ -22,7 +32,7 @@ export function useTaskMessages(
   const initialFetchStartRef = useRef<number | null>(null);
   const lastFetchedSessionIdRef = useRef<string | null>(null);
   const lastFetchStateKeyRef = useRef<string | null>(null);
-  const hasAgentMessage = messagesState.items.some((message) => message.author_type === 'agent');
+  const hasAgentMessage = messages.some((message) => message.author_type === 'agent');
 
   useEffect(() => {
     if (!taskId) return;
@@ -30,10 +40,8 @@ export function useTaskMessages(
   }, [store, taskId]);
 
   useEffect(() => {
-    store.getState().setMessagesSessionId(taskSessionId);
     if (!taskSessionId) {
       console.log('[useTaskMessages] no task_session_id yet, clearing messages');
-      store.getState().setMessages(null, []);
       initialFetchStartRef.current = null;
       lastFetchedSessionIdRef.current = null;
       setIsWaitingForInitialMessages(false);
@@ -43,16 +51,16 @@ export function useTaskMessages(
   useEffect(() => {
     if (!taskSessionId) return;
     // Don't set waiting state if messages are already loaded (from SSR or cache)
-    if (messagesState.sessionId === taskSessionId && messagesState.items.length > 0) {
+    if (messages.length > 0) {
       setIsWaitingForInitialMessages(false);
       return;
     }
-    if (messagesState.items.length > 0) return;
+    if (messages.length > 0) return;
     if (initialFetchStartRef.current === null) {
       initialFetchStartRef.current = Date.now();
       setIsWaitingForInitialMessages(true);
     }
-  }, [taskSessionId, messagesState.sessionId, messagesState.items.length]);
+  }, [taskSessionId, messages.length]);
 
   // Fetch messages on mount and when session changes
   useEffect(() => {
@@ -62,12 +70,8 @@ export function useTaskMessages(
       return;
     }
 
-    // Set sessionId immediately so that incoming WebSocket notifications are processed
-    // before the API call completes (fixes race condition on first agent start)
-    store.getState().setMessagesSessionId(taskSessionId);
-
     // Check if messages are already loaded (from SSR or previous fetch)
-    if (messagesState.sessionId === taskSessionId && messagesState.items.length > 0) {
+    if (messages.length > 0) {
       console.log('[useTaskMessages] messages already loaded from SSR or cache, skipping fetch');
       lastFetchedSessionIdRef.current = taskSessionId;
       setIsWaitingForInitialMessages(false);
@@ -86,7 +90,7 @@ export function useTaskMessages(
       }
 
       setIsLoading(true);
-      store.getState().setMessagesLoading(true);
+      store.getState().setMessagesLoading(taskSessionId, true);
       if (initialFetchStartRef.current === null) {
         initialFetchStartRef.current = Date.now();
         setIsWaitingForInitialMessages(true);
@@ -115,7 +119,7 @@ export function useTaskMessages(
     };
 
     fetchMessages();
-  }, [taskSessionId, connectionStatus, messagesState.sessionId, messagesState.items.length, store]);
+  }, [taskSessionId, connectionStatus, messages.length, store]);
 
   // Subscribe to task for real-time updates
   useEffect(() => {
@@ -129,12 +133,12 @@ export function useTaskMessages(
 
     // Subscribe to task updates
     console.log('[useTaskMessages] subscribing to task', { taskId });
-    client.subscribe(taskId);
+    const unsubscribe = client.subscribe(taskId);
 
     return () => {
       // Unsubscribe when leaving
       console.log('[useTaskMessages] unsubscribing from task', { taskId });
-      client.unsubscribe(taskId);
+      unsubscribe();
     };
   }, [taskId]);
 
@@ -161,7 +165,7 @@ export function useTaskMessages(
       }
 
       setIsLoading(true);
-      store.getState().setMessagesLoading(true);
+      store.getState().setMessagesLoading(taskSessionId, true);
       try {
         console.log('[useTaskMessages] requesting message.list after state change', { taskSessionId, taskSessionState });
         const response = await client.request<{ messages: Message[] }>(
@@ -184,6 +188,9 @@ export function useTaskMessages(
   }, [taskSessionId, taskSessionState, hasAgentMessage, store, taskId]);
 
   return {
-    isLoading: isLoading || isWaitingForInitialMessages,
+    isLoading: isLoading || isWaitingForInitialMessages || messagesMeta.isLoading,
+    messages,
+    hasMore: messagesMeta.hasMore,
+    oldestCursor: messagesMeta.oldestCursor,
   };
 }

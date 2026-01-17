@@ -7,7 +7,7 @@ import { TaskSwitcher } from './task-switcher';
 import { Button } from '@kandev/ui/button';
 import { IconPlus } from '@tabler/icons-react';
 import { TaskCreateDialog } from '@/components/task-create-dialog';
-import { useAppStoreApi } from '@/components/state-provider';
+import { useAppStore, useAppStoreApi } from '@/components/state-provider';
 
 type TaskSummary = {
   id: string;
@@ -24,8 +24,6 @@ type TaskSessionSidebarProps = {
   columns: Array<{ id: string; title: string }>;
   workspaceId: string | null;
   boardId: string | null;
-  activeTaskId: string | null;
-  activeSessionId: string | null;
   sessionsByTask: Record<string, TaskSession[]>;
   agentLabelsById: Record<string, string>;
   onSelectSession: (taskId: string, sessionId: string) => void;
@@ -40,8 +38,6 @@ export function TaskSessionSidebar({
   columns,
   workspaceId,
   boardId,
-  activeTaskId,
-  activeSessionId,
   sessionsByTask,
   agentLabelsById,
   onSelectSession,
@@ -49,6 +45,8 @@ export function TaskSessionSidebar({
   onSelectTask,
   onCreateSession,
 }: TaskSessionSidebarProps) {
+  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
+  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const [selectedTaskId, setSelectedTaskId] = useState(activeTaskId);
   const selectedSessions = selectedTaskId ? sessionsByTask[selectedTaskId] ?? [] : [];
   const [taskDialogOpen, setTaskDialogOpen] = useState(false);

@@ -9,7 +9,6 @@ import { TaskChangesPanel } from './task-changes-panel';
 import { FileViewerContent } from './file-viewer-content';
 import type { OpenFileTab } from '@/lib/types/backend';
 import { FILE_EXTENSION_COLORS } from '@/lib/types/backend';
-import { useTaskChatSession } from '@/hooks/use-task-chat-session';
 
 const AGENTS = [
   { id: 'codex', label: 'Codex' },
@@ -33,8 +32,6 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
   onDiffPathHandled,
   onFileOpenHandled,
 }: TaskCenterPanelProps) {
-  // Get session ID from task ID
-  const { taskSessionId } = useTaskChatSession(taskId);
   const [leftTab, setLeftTab] = useState('chat');
   const [selectedDiffPath, setSelectedDiffPath] = useState<string | null>(null);
   const [notes, setNotes] = useState('');
@@ -160,7 +157,6 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
             <TaskChatPanel
               agents={AGENTS}
               onSend={onSendMessage}
-              sessionId={taskSessionId}
             />
           ) : (
             <div className="flex items-center justify-center h-full text-muted-foreground">

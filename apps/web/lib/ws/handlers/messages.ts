@@ -6,13 +6,10 @@ export function registerMessagesHandlers(store: StoreApi<AppState>): WsHandlers 
   return {
     'message.added': (message) => {
       const payload = message.payload;
-      console.log('[WS] message.added payload:', JSON.stringify(payload, null, 2));
-      const state = store.getState();
-      console.log('[WS] store state:', {
-        hasAddMessage: typeof state.addMessage,
-        messagesSessionId: state.messages?.sessionId,
-      });
-      state.addMessage({
+      if (!payload.task_session_id) {
+        return;
+      }
+      store.getState().addMessage({
         id: payload.message_id,
         task_session_id: payload.task_session_id,
         task_id: payload.task_id,
@@ -24,13 +21,13 @@ export function registerMessagesHandlers(store: StoreApi<AppState>): WsHandlers 
         requests_input: payload.requests_input,
         created_at: payload.created_at,
       });
-      console.log('[WS] addMessage called');
     },
     'message.updated': (message) => {
       const payload = message.payload;
-      console.log('[WS] message.updated payload:', JSON.stringify(payload, null, 2));
-      const state = store.getState();
-      state.updateMessage({
+      if (!payload.task_session_id) {
+        return;
+      }
+      store.getState().updateMessage({
         id: payload.message_id,
         task_session_id: payload.task_session_id,
         task_id: payload.task_id,
@@ -42,7 +39,6 @@ export function registerMessagesHandlers(store: StoreApi<AppState>): WsHandlers 
         requests_input: payload.requests_input,
         created_at: payload.created_at,
       });
-      console.log('[WS] updateMessage called');
     },
   };
 }

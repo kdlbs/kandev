@@ -9,22 +9,23 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@kandev/ui/tabs';
 import { getLocalStorage, setLocalStorage } from '@/lib/local-storage';
 import { COMMANDS } from '@/components/task/task-data';
 import { ShellTerminal } from '@/components/task/shell-terminal';
+import { useAppStore } from '@/components/state-provider';
 
 type TaskRightPanelProps = {
   topPanel: ReactNode;
   taskId: string;
-  sessionId: string | null;
 };
 
 const DEFAULT_RIGHT_LAYOUT: [number, number] = [55, 45];
 
-const TaskRightPanel = memo(function TaskRightPanel({ topPanel, taskId, sessionId }: TaskRightPanelProps) {
+const TaskRightPanel = memo(function TaskRightPanel({ topPanel, taskId }: TaskRightPanelProps) {
   const [rightLayout, setRightLayout] = useState<[number, number]>(() =>
     getLocalStorage('task-layout-right', DEFAULT_RIGHT_LAYOUT)
   );
   const [activeTerminalId, setActiveTerminalId] = useState(1);
   const [terminalIds, setTerminalIds] = useState([1]);
   const [isBottomCollapsed, setIsBottomCollapsed] = useState(false);
+  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
 
   const addTerminal = () => {
     setTerminalIds((ids) => {
@@ -180,7 +181,7 @@ const TaskRightPanel = memo(function TaskRightPanel({ topPanel, taskId, sessionI
             {terminalIds.map((id) => (
               <TabsContent key={id} value={`terminal-${id}`} className="flex-1 min-h-0">
                 <div className="flex-1 min-h-0 h-full p-1">
-                  <ShellTerminal taskId={taskId} sessionId={sessionId} />
+                  <ShellTerminal taskId={taskId} sessionId={activeSessionId} />
                 </div>
               </TabsContent>
             ))}

@@ -21,11 +21,12 @@ export function useTaskSession(sessionId: string | null): UseTaskSessionReturn {
   );
 
   // Get task ID from session or fallback to messages
-  const messages = useAppStore((state) => state.messages.items);
+  const messages = useAppStore((state) =>
+    sessionId ? state.messages.bySession[sessionId] ?? [] : []
+  );
   const taskIdFromMessages = useMemo(() => {
     if (!sessionId || !messages.length) return null;
-    const messageForSession = messages.find((m) => m.task_session_id === sessionId);
-    return messageForSession?.task_id ?? null;
+    return messages[0]?.task_id ?? null;
   }, [sessionId, messages]);
 
   const taskId = session?.task_id ?? taskIdFromMessages;

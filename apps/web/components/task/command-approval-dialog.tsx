@@ -25,7 +25,10 @@ export function CommandApprovalDialog({ taskId, standaloneOnly = false }: Comman
   const [isResponding, setIsResponding] = useState(false);
   const pendingPermissions = useAppStore((state) => state.permissions.pending);
   const removePendingPermission = useAppStore((state) => state.removePendingPermission);
-  const messages = useAppStore((state) => state.messages.items);
+  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const messages = useAppStore((state) =>
+    activeSessionId ? state.messages.bySession[activeSessionId] ?? [] : []
+  );
 
   // Get tool_call_ids from all tool call messages
   const toolCallIds = useMemo(() => {

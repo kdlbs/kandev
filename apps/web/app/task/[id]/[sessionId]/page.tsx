@@ -39,14 +39,14 @@ export default async function TaskSessionPage({
     );
     sessionsByTask = Object.fromEntries(sessionResults);
 
-    let taskState = taskToState(task);
+    let taskState = taskToState(task, sessionId);
     try {
       const messagesResponse = await listTaskSessionMessages(
         sessionId,
         { limit: 50, sort: 'asc' },
         { cache: 'no-store' }
       );
-      taskState = taskToState(task, {
+      taskState = taskToState(task, sessionId, {
         items: messagesResponse.messages ?? [],
         hasMore: messagesResponse.has_more ?? false,
         oldestCursor: messagesResponse.cursor ?? (messagesResponse.messages?.[0]?.id ?? null),

@@ -14,7 +14,6 @@ const DEFAULT_HORIZONTAL_LAYOUT: [number, number, number] = [18, 57, 25];
 
 type TaskLayoutProps = {
   taskId: string | null;
-  sessionId: string | null;
   onSendMessage: (content: string) => Promise<void>;
   tasks: Array<{
     id: string;
@@ -29,7 +28,6 @@ type TaskLayoutProps = {
   boardId: string | null;
   workspaceName: string;
   agentLabelsById: Record<string, string>;
-  activeSessionId: string | null;
   sessionsByTask: Record<string, TaskSession[]>;
   onSelectSession: (taskId: string, sessionId: string) => void;
   onLoadTaskSessions: (taskId: string) => void;
@@ -39,7 +37,6 @@ type TaskLayoutProps = {
 
 export const TaskLayout = memo(function TaskLayout({
   taskId,
-  sessionId,
   onSendMessage,
   tasks,
   columns,
@@ -47,7 +44,6 @@ export const TaskLayout = memo(function TaskLayout({
   boardId,
   workspaceName,
   agentLabelsById,
-  activeSessionId,
   sessionsByTask,
   onSelectSession,
   onLoadTaskSessions,
@@ -106,8 +102,6 @@ export const TaskLayout = memo(function TaskLayout({
             columns={columns}
             workspaceId={workspaceId}
             boardId={boardId}
-            activeTaskId={taskId}
-            activeSessionId={activeSessionId}
             sessionsByTask={sessionsByTask}
             onSelectSession={onSelectSession}
             onLoadTaskSessions={onLoadTaskSessions}
@@ -129,7 +123,7 @@ export const TaskLayout = memo(function TaskLayout({
         </ResizablePanel>
         <ResizableHandle className="w-px" />
         <ResizablePanel defaultSize={horizontalLayout[2]} minSize={20} className="min-h-0 min-w-0">
-          <TaskRightPanel topPanel={topFilesPanel} taskId={taskId ?? ''} sessionId={sessionId} />
+          <TaskRightPanel topPanel={topFilesPanel} taskId={taskId ?? ''} />
         </ResizablePanel>
       </ResizablePanelGroup>
     </div>
