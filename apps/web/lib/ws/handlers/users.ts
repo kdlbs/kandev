@@ -12,6 +12,7 @@ export function registerUsersHandlers(store: StoreApi<AppState>): WsHandlers {
           workspaceId: message.payload.workspace_id || null,
           boardId: message.payload.board_id || null,
           repositoryIds,
+          preferredShell: message.payload.preferred_shell || null,
           loaded: true,
         },
       }));

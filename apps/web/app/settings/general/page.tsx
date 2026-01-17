@@ -1,14 +1,18 @@
 'use client';
 
-import { useState, useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { useTheme } from 'next-themes';
 import { IconPalette, IconCode, IconServer } from '@tabler/icons-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@kandev/ui/card';
+import { Button } from '@kandev/ui/button';
 import { Label } from '@kandev/ui/label';
 import { Input } from '@kandev/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@kandev/ui/select';
 import { Separator } from '@kandev/ui/separator';
 import { SettingsSection } from '@/components/settings/settings-section';
+import { useAppStore, useAppStoreApi } from '@/components/state-provider';
+import { fetchUserSettings, updateUserSettings } from '@/lib/http';
+import { useRequest } from '@/lib/http/use-request';
 import { SETTINGS_DATA } from '@/lib/settings/dummy-data';
 import { getBackendConfig } from '@/lib/config';
 import type { Theme, Editor } from '@/lib/settings/types';
@@ -20,6 +24,30 @@ export default function GeneralSettingsPage() {
     SETTINGS_DATA.general.customEditorCommand || ''
   );
   const [backendUrl] = useState<string>(() => getBackendConfig().apiBaseUrl);
+  const [preferredShell, setPreferredShell] = useState('');
+  const [customShell, setCustomShell] = useState('');
+  const [shellSelection, setShellSelection] = useState('auto');
+  const [baselineShell, setBaselineShell] = useState('');
+  const [shellLoaded, setShellLoaded] = useState(false);
+  const [shellOptions, setShellOptions] = useState<Array<{ value: string; label: string }>>([]);
+  const setUserSettings = useAppStore((state) => state.setUserSettings);
+  const storeApi = useAppStoreApi();
+  const saveShellRequest = useRequest(async () => {
+    const trimmed = preferredShell.trim();
+    const currentSettings = storeApi.getState().userSettings;
+    await updateUserSettings({
+      workspace_id: currentSettings.workspaceId ?? '',
+      board_id: currentSettings.boardId ?? '',
+      repository_ids: currentSettings.repositoryIds,
+      preferred_shell: trimmed,
+    });
+    setBaselineShell(trimmed);
+    setUserSettings({
+      ...currentSettings,
+      preferredShell: trimmed || null,
+      loaded: true,
+    });
+  });
   const mounted = useSyncExternalStore(
     () => () => undefined,
     () => true,
@@ -27,6 +55,45 @@ export default function GeneralSettingsPage() {
   );
 
   const displayBackendUrl = backendUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
+  const shellDirty = preferredShell.trim() !== baselineShell.trim();
+
+  useEffect(() => {
+    let isActive = true;
+    fetchUserSettings({ cache: 'no-store' })
+      .then((data) => {
+        if (!isActive || !data?.settings) return;
+        const shellValue = data.settings.preferred_shell || '';
+        setPreferredShell(shellValue);
+        setBaselineShell(shellValue);
+        const nextShellOptions = data.shell_options ?? [];
+        setShellOptions(nextShellOptions);
+        if (shellValue === '') {
+          setShellSelection('auto');
+          setCustomShell('');
+        } else if (nextShellOptions.some((option) => option.value === shellValue)) {
+          setShellSelection(shellValue);
+          setCustomShell('');
+        } else {
+          setShellSelection('custom');
+          setCustomShell(shellValue);
+        }
+        setShellLoaded(true);
+        const currentSettings = storeApi.getState().userSettings;
+        setUserSettings({
+          ...currentSettings,
+          preferredShell: shellValue || null,
+          loaded: true,
+        });
+      })
+      .catch(() => {
+        if (isActive) {
+          setShellLoaded(true);
+        }
+      });
+    return () => {
+      isActive = false;
+    };
+  }, [setUserSettings, storeApi]);
 
   if (!mounted) {
     return null;
@@ -115,6 +182,85 @@ export default function GeneralSettingsPage() {
                 </p>
               </div>
             )}
+          </CardContent>
+        </Card>
+      </SettingsSection>
+
+      <Separator />
+
+      <SettingsSection
+        icon={<IconCode className="h-5 w-5" />}
+        title="Shell"
+        description="Pick the default shell for task sessions"
+      >
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-4">
+            <CardTitle className="text-base">Preferred Shell</CardTitle>
+            <Button
+              type="button"
+              onClick={() => saveShellRequest.run()}
+              disabled={!shellLoaded || !shellDirty || saveShellRequest.isLoading}
+            >
+              {saveShellRequest.isLoading ? 'Saving...' : 'Save'}
+            </Button>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Select
+                value={shellSelection}
+                onValueChange={(value) => {
+                  setShellSelection(value);
+                  if (value === 'auto') {
+                    setPreferredShell('');
+                    setCustomShell('');
+                    return;
+                  }
+                  if (value === 'custom') {
+                    setPreferredShell(customShell);
+                    return;
+                  }
+                  setPreferredShell(value);
+                  setCustomShell('');
+                }}
+                disabled={!shellLoaded || shellOptions.length === 0}
+              >
+                <SelectTrigger>
+                  <SelectValue
+                    placeholder={
+                      shellOptions.length === 0
+                        ? 'Shell options unavailable'
+                        : 'Select a shell'
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  {shellOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {shellSelection === 'custom' && (
+              <div className="space-y-2">
+                <Input
+                  value={customShell}
+                  onChange={(event) => {
+                    const nextValue = event.target.value;
+                    setCustomShell(nextValue);
+                    setPreferredShell(nextValue);
+                  }}
+                  placeholder="/bin/zsh"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Enter a shell path or command available in the agent environment.
+                </p>
+              </div>
+            )}
+            <p className="text-xs text-muted-foreground">
+              New task sessions will use this shell. Existing sessions keep their current shell.
+            </p>
           </CardContent>
         </Card>
       </SettingsSection>

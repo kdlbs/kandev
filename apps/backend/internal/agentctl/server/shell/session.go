@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -53,9 +54,11 @@ const maxOutputBufferSize = 16 * 1024
 
 // Config holds shell session configuration
 type Config struct {
-	WorkDir string // Working directory (default: workspace)
-	Cols    int    // Initial terminal columns (default: 80)
-	Rows    int    // Initial terminal rows (default: 24)
+	WorkDir      string   // Working directory (default: workspace)
+	Cols         int      // Initial terminal columns (default: 80)
+	Rows         int      // Initial terminal rows (default: 24)
+	ShellCommand string   // Optional shell command override
+	ShellArgs    []string // Optional shell args override
 }
 
 // DefaultConfig returns the default shell configuration
@@ -109,6 +112,14 @@ func detectShell() (string, []string) {
 // This is called automatically when agentctl starts.
 func NewSession(cfg Config, log *logger.Logger) (*Session, error) {
 	shell, args := detectShell()
+	if cfg.ShellCommand != "" {
+		shell = cfg.ShellCommand
+		if len(cfg.ShellArgs) > 0 {
+			args = cfg.ShellArgs
+		} else {
+			args = defaultShellArgs(shell)
+		}
+	}
 
 	s := &Session{
 		logger:      log.WithFields(zap.String("component", "shell")),
@@ -126,6 +137,17 @@ func NewSession(cfg Config, log *logger.Logger) (*Session, error) {
 	}
 
 	return s, nil
+}
+
+func defaultShellArgs(shellCommand string) []string {
+	if runtime.GOOS == "windows" {
+		lower := strings.ToLower(shellCommand)
+		if strings.Contains(lower, "pwsh") || strings.Contains(lower, "powershell") {
+			return []string{"-NoLogo", "-NoExit"}
+		}
+		return nil
+	}
+	return []string{"-l"}
 }
 
 // start initializes and starts the shell process
@@ -400,4 +422,3 @@ func buildShellEnv(workDir string) []string {
 
 	return env
 }
-

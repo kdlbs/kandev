@@ -105,6 +105,7 @@ export type UserSettingsState = {
   workspaceId: string | null;
   boardId: string | null;
   repositoryIds: string[];
+  preferredShell: string | null;
   loaded: boolean;
 };
 
@@ -281,7 +282,13 @@ const defaultState: AppState = {
   tasks: { activeTaskId: null },
   agents: { agents: [] },
   agentProfiles: { items: [], version: 0 },
-  userSettings: { workspaceId: null, boardId: null, repositoryIds: [], loaded: false },
+  userSettings: {
+    workspaceId: null,
+    boardId: null,
+    repositoryIds: [],
+    preferredShell: null,
+    loaded: false,
+  },
   terminal: { terminals: [] },
   shell: { outputs: {}, statuses: {} },
   diffs: { files: [] },

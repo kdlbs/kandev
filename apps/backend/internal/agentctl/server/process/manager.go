@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -221,6 +222,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	// Auto-create shell session if enabled
 	if m.cfg.ShellEnabled {
 		shellCfg := shell.DefaultConfig(m.cfg.WorkDir)
+		shellCfg.ShellCommand = preferredShellCommand(m.cfg.AgentEnv)
 		shellSession, err := shell.NewSession(shellCfg, m.logger)
 		if err != nil {
 			m.logger.Warn("failed to create shell session", zap.Error(err))
@@ -235,6 +237,23 @@ func (m *Manager) Start(ctx context.Context) error {
 	m.logger.Info("agent process started", zap.Int("pid", m.cmd.Process.Pid))
 
 	return nil
+}
+
+func preferredShellCommand(env []string) string {
+	if value := lookupEnvValue(env, "AGENTCTL_SHELL_COMMAND"); value != "" {
+		return value
+	}
+	return lookupEnvValue(env, "SHELL")
+}
+
+func lookupEnvValue(env []string, key string) string {
+	prefix := key + "="
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			return strings.TrimPrefix(entry, prefix)
+		}
+	}
+	return ""
 }
 
 // Configure sets the agent command and optional environment variables.

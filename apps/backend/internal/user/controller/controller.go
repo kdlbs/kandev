@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"runtime"
 
 	"github.com/kandev/kandev/internal/user/dto"
 	"github.com/kandev/kandev/internal/user/service"
@@ -35,7 +36,10 @@ func (c *Controller) GetUserSettings(ctx context.Context) (dto.UserSettingsRespo
 	if err != nil {
 		return dto.UserSettingsResponse{}, err
 	}
-	return dto.UserSettingsResponse{Settings: dto.FromUserSettings(settings)}, nil
+	return dto.UserSettingsResponse{
+		Settings:     dto.FromUserSettings(settings),
+		ShellOptions: shellOptionsForOS(),
+	}, nil
 }
 
 func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserSettingsRequest) (dto.UserSettingsResponse, error) {
@@ -44,9 +48,34 @@ func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserS
 		BoardID:              req.BoardID,
 		RepositoryIDs:        req.RepositoryIDs,
 		InitialSetupComplete: req.InitialSetupComplete,
+		PreferredShell:       req.PreferredShell,
 	})
 	if err != nil {
 		return dto.UserSettingsResponse{}, err
 	}
-	return dto.UserSettingsResponse{Settings: dto.FromUserSettings(settings)}, nil
+	return dto.UserSettingsResponse{
+		Settings:     dto.FromUserSettings(settings),
+		ShellOptions: shellOptionsForOS(),
+	}, nil
+}
+
+func shellOptionsForOS() []dto.ShellOption {
+	switch runtime.GOOS {
+	case "windows":
+		return []dto.ShellOption{
+			{Value: "auto", Label: "System default"},
+			{Value: "pwsh.exe", Label: "PowerShell (pwsh)"},
+			{Value: "powershell.exe", Label: "Windows PowerShell"},
+			{Value: "cmd.exe", Label: "Command Prompt"},
+			{Value: "custom", Label: "Custom"},
+		}
+	default:
+		return []dto.ShellOption{
+			{Value: "auto", Label: "System default"},
+			{Value: "/bin/zsh", Label: "zsh"},
+			{Value: "/bin/bash", Label: "bash"},
+			{Value: "/bin/sh", Label: "sh"},
+			{Value: "custom", Label: "Custom"},
+		}
+	}
 }

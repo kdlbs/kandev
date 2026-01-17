@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -27,6 +28,7 @@ type UpdateUserSettingsRequest struct {
 	BoardID              *string
 	RepositoryIDs        *[]string
 	InitialSetupComplete *bool
+	PreferredShell       *string
 }
 
 func NewService(repo store.Repository, eventBus bus.EventBus, log *logger.Logger) *Service {
@@ -54,6 +56,14 @@ func (s *Service) GetUserSettings(ctx context.Context) (*models.UserSettings, er
 	return settings, nil
 }
 
+func (s *Service) PreferredShell(ctx context.Context) (string, error) {
+	settings, err := s.repo.GetUserSettings(ctx, s.defaultUser)
+	if err != nil {
+		return "", err
+	}
+	return settings.PreferredShell, nil
+}
+
 func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSettingsRequest) (*models.UserSettings, error) {
 	settings, err := s.repo.GetUserSettings(ctx, s.defaultUser)
 	if err != nil {
@@ -70,6 +80,9 @@ func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSetting
 	}
 	if req.InitialSetupComplete != nil {
 		settings.InitialSetupComplete = *req.InitialSetupComplete
+	}
+	if req.PreferredShell != nil {
+		settings.PreferredShell = strings.TrimSpace(*req.PreferredShell)
 	}
 	settings.UpdatedAt = time.Now().UTC()
 	if err := s.repo.UpsertUserSettings(ctx, settings); err != nil {
@@ -89,6 +102,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"board_id":               settings.BoardID,
 		"repository_ids":         settings.RepositoryIDs,
 		"initial_setup_complete": settings.InitialSetupComplete,
+		"preferred_shell":        settings.PreferredShell,
 		"updated_at":             settings.UpdatedAt.Format(time.RFC3339),
 	}
 	if err := s.eventBus.Publish(ctx, events.UserSettingsUpdated, bus.NewEvent(events.UserSettingsUpdated, "user-service", data)); err != nil {

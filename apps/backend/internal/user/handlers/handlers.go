@@ -68,6 +68,7 @@ type httpUpdateUserSettingsRequest struct {
 	BoardID              *string   `json:"board_id,omitempty"`
 	RepositoryIDs        *[]string `json:"repository_ids,omitempty"`
 	InitialSetupComplete *bool     `json:"initial_setup_complete,omitempty"`
+	PreferredShell       *string   `json:"preferred_shell,omitempty"`
 }
 
 func (h *Handlers) httpUpdateUserSettings(c *gin.Context) {
@@ -81,6 +82,7 @@ func (h *Handlers) httpUpdateUserSettings(c *gin.Context) {
 		BoardID:              body.BoardID,
 		RepositoryIDs:        body.RepositoryIDs,
 		InitialSetupComplete: body.InitialSetupComplete,
+		PreferredShell:       body.PreferredShell,
 	})
 	if err != nil {
 		h.logger.Error("failed to update user settings", zap.Error(err))
@@ -103,6 +105,7 @@ type wsUpdateUserSettingsRequest struct {
 	BoardID              *string   `json:"board_id,omitempty"`
 	RepositoryIDs        *[]string `json:"repository_ids,omitempty"`
 	InitialSetupComplete *bool     `json:"initial_setup_complete,omitempty"`
+	PreferredShell       *string   `json:"preferred_shell,omitempty"`
 }
 
 func (h *Handlers) wsUpdateUserSettings(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -115,6 +118,7 @@ func (h *Handlers) wsUpdateUserSettings(ctx context.Context, msg *ws.Message) (*
 		BoardID:              req.BoardID,
 		RepositoryIDs:        req.RepositoryIDs,
 		InitialSetupComplete: req.InitialSetupComplete,
+		PreferredShell:       req.PreferredShell,
 	})
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update user settings", nil)

@@ -9,6 +9,7 @@ type DisplaySettings = {
   workspaceId: string | null;
   boardId: string | null;
   repositoryIds: string[];
+  preferredShell: string | null;
   loaded: boolean;
 };
 
@@ -23,6 +24,7 @@ type CommitPayload = {
   workspaceId: string | null;
   boardId: string | null;
   repositoryIds: string[];
+  preferredShell?: string | null;
 };
 
 export function useUserDisplaySettings({
@@ -38,7 +40,13 @@ export function useUserDisplaySettings({
   const commitSettings = useCallback(
     (next: CommitPayload) => {
       const repositoryIds = Array.from(new Set(next.repositoryIds)).sort();
-      const normalized: DisplaySettings = { ...next, repositoryIds, loaded: true };
+      const normalized: DisplaySettings = {
+        workspaceId: next.workspaceId,
+        boardId: next.boardId,
+        repositoryIds,
+        preferredShell: next.preferredShell ?? userSettings.preferredShell ?? null,
+        loaded: true,
+      };
       const sameWorkspace = normalized.workspaceId === userSettings.workspaceId;
       const sameBoard = normalized.boardId === userSettings.boardId;
       const sameRepos =
@@ -77,6 +85,7 @@ export function useUserDisplaySettings({
           workspaceId: data.settings.workspace_id || null,
           boardId: data.settings.board_id || null,
           repositoryIds,
+          preferredShell: data.settings.preferred_shell || null,
           loaded: true,
         });
       })

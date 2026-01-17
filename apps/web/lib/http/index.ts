@@ -156,7 +156,12 @@ export async function fetchUserSettings(options?: ApiRequestOptions) {
 }
 
 export async function updateUserSettings(
-  payload: { workspace_id: string; board_id: string; repository_ids: string[] },
+  payload: {
+    workspace_id: string;
+    board_id: string;
+    repository_ids: string[];
+    preferred_shell?: string;
+  },
   options?: ApiRequestOptions
 ) {
   return fetchJson<UserSettingsResponse>('/api/v1/user/settings', {

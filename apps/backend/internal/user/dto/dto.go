@@ -19,6 +19,7 @@ type UserSettingsDTO struct {
 	BoardID              string   `json:"board_id"`
 	RepositoryIDs        []string `json:"repository_ids"`
 	InitialSetupComplete bool     `json:"initial_setup_complete"`
+	PreferredShell       string   `json:"preferred_shell"`
 	UpdatedAt            string   `json:"updated_at"`
 }
 
@@ -28,7 +29,13 @@ type UserResponse struct {
 }
 
 type UserSettingsResponse struct {
-	Settings UserSettingsDTO `json:"settings"`
+	Settings     UserSettingsDTO `json:"settings"`
+	ShellOptions []ShellOption   `json:"shell_options"`
+}
+
+type ShellOption struct {
+	Value string `json:"value"`
+	Label string `json:"label"`
 }
 
 type UpdateUserSettingsRequest struct {
@@ -36,6 +43,7 @@ type UpdateUserSettingsRequest struct {
 	BoardID              *string   `json:"board_id,omitempty"`
 	RepositoryIDs        *[]string `json:"repository_ids,omitempty"`
 	InitialSetupComplete *bool     `json:"initial_setup_complete,omitempty"`
+	PreferredShell       *string   `json:"preferred_shell,omitempty"`
 }
 
 func FromUser(user *models.User) UserDTO {
@@ -54,6 +62,7 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		BoardID:              settings.BoardID,
 		RepositoryIDs:        settings.RepositoryIDs,
 		InitialSetupComplete: settings.InitialSetupComplete,
+		PreferredShell:       settings.PreferredShell,
 		UpdatedAt:            settings.UpdatedAt.Format(time.RFC3339),
 	}
 }

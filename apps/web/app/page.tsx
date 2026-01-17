@@ -53,6 +53,7 @@ export default async function Page({ searchParams }: PageProps) {
         workspaceId: settingsWorkspaceId,
         boardId: settingsBoardId,
         repositoryIds: settingsRepositoryIds,
+        preferredShell: userSettings?.preferred_shell || null,
         loaded: Boolean(userSettings),
       },
     };
