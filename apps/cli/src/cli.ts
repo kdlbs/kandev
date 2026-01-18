@@ -94,6 +94,13 @@ function parseArgs(argv: string[]): CliOptions {
 function findRepoRoot(startDir: string): string | null {
   let current = path.resolve(startDir);
   while (true) {
+    if (current.endsWith(`${path.sep}apps`)) {
+      const backendInApps = path.join(current, "backend");
+      const webInApps = path.join(current, "web");
+      if (fs.existsSync(backendInApps) && fs.existsSync(webInApps)) {
+        return path.dirname(current);
+      }
+    }
     const backendDir = path.join(current, "apps", "backend");
     const webDir = path.join(current, "apps", "web");
     if (fs.existsSync(backendDir) && fs.existsSync(webDir)) {

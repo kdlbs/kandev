@@ -10,7 +10,8 @@ import {
   DEFAULT_WEB_PORT,
   HEALTH_TIMEOUT_MS,
 } from "./constants";
-import { CACHE_DIR, ensureAsset, getRelease } from "./github";
+import { ensureAsset, getRelease } from "./github";
+import { CACHE_DIR } from "./constants";
 import { waitForHealth } from "./health";
 import { getBinaryName, getPlatformDir } from "./platform";
 import { pickAvailablePort } from "./ports";
@@ -139,7 +140,7 @@ function launchReleaseApps(prepared: PreparedRelease): {
     label: "web",
   });
 
-  return { supervisor, backendProc, webServerPath, webProc };
+  return { supervisor, backendProc, webServerPath };
 }
 
 export async function runRelease({ version, backendPort, webPort }: RunOptions) {
