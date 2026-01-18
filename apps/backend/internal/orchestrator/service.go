@@ -139,9 +139,9 @@ func NewService(
 
 	// Create the service (watcher will be created after we have handlers)
 	s := &Service{
-		config:       cfg,
-		logger:       svcLogger,
-		eventBus:     eventBus,
+		config:         cfg,
+		logger:         svcLogger,
+		eventBus:       eventBus,
 		taskRepo:       taskRepo,
 		repo:           repo,
 		agentManager:   agentManager,
@@ -154,14 +154,14 @@ func NewService(
 
 	// Create the watcher with event handlers that wire everything together
 	handlers := watcher.EventHandlers{
-		OnTaskStateChanged:   s.handleTaskStateChanged,
-		OnAgentReady:         s.handleAgentReady,
-		OnAgentCompleted:     s.handleAgentCompleted,
-		OnAgentFailed:        s.handleAgentFailed,
-		OnAgentStreamEvent:   s.handleAgentStreamEvent,
-		OnACPSessionCreated:  s.handleACPSessionCreated,
-		OnPermissionRequest:  s.handlePermissionRequest,
-		OnGitStatusUpdated:   s.handleGitStatusUpdated,
+		OnTaskStateChanged:  s.handleTaskStateChanged,
+		OnAgentReady:        s.handleAgentReady,
+		OnAgentCompleted:    s.handleAgentCompleted,
+		OnAgentFailed:       s.handleAgentFailed,
+		OnAgentStreamEvent:  s.handleAgentStreamEvent,
+		OnACPSessionCreated: s.handleACPSessionCreated,
+		OnPermissionRequest: s.handlePermissionRequest,
+		OnGitStatusUpdated:  s.handleGitStatusUpdated,
 	}
 	s.watcher = watcher.NewWatcher(eventBus, handlers, log)
 
@@ -278,6 +278,21 @@ func (s *Service) resumeExecutorsOnStartup(ctx context.Context) {
 			_ = s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateFailed, "executor not resumable")
 			continue
 		}
+
+		// When the executors start, the session changes to RUNNING state.
+		// After resuming, we need to restore the previous state.
+		previousState := session.State
+		switch previousState {
+		case models.TaskSessionStateCompleted, models.TaskSessionStateFailed, models.TaskSessionStateCancelled:
+			// Session was already in a terminal state; no need to resume.
+			if err := s.repo.DeleteExecutorRunningBySessionID(ctx, sessionID); err != nil {
+				s.logger.Warn("failed to remove executor record for terminal session",
+					zap.String("session_id", sessionID),
+					zap.Error(err))
+			}
+			continue
+		}
+		// validate the environment (e.g., worktrees) before resuming
 		if err := validateSessionWorktrees(session); err != nil {
 			s.logger.Warn("worktree validation failed; marking session as failed",
 				zap.String("session_id", sessionID),
@@ -292,6 +307,16 @@ func (s *Service) resumeExecutorsOnStartup(ctx context.Context) {
 				zap.String("session_id", sessionID),
 				zap.Error(err))
 			_ = s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateFailed, err.Error())
+			continue
+		}
+
+		// Restore previous state if not CREATED or STARTING
+		if previousState != models.TaskSessionStateCreated && previousState != models.TaskSessionStateStarting {
+			if err := s.repo.UpdateTaskSessionState(ctx, sessionID, previousState, ""); err != nil {
+				s.logger.Warn("failed to restore session state after resume",
+					zap.String("session_id", sessionID),
+					zap.Error(err))
+			}
 		}
 	}
 }

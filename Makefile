@@ -77,9 +77,15 @@ dev:
 	@echo ""
 	@trap 'stty sane 2>/dev/null || true' EXIT INT TERM; \
 	bash -c ' \
+		cleanup_called=0; \
 		cleanup() { \
+			if [ "$$cleanup_called" -eq 1 ]; then \
+				return; \
+			fi; \
+			cleanup_called=1; \
 			echo ""; \
 			echo "Shutting down..."; \
+			trap - EXIT INT TERM; \
 			kill 0 2>/dev/null || true; \
 			stty sane 2>/dev/null || true; \
 			exit 0; \

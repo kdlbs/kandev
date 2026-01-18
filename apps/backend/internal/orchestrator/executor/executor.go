@@ -924,17 +924,6 @@ func (e *Executor) UpdateProgressBySession(ctx context.Context, sessionID string
 	}()
 }
 
-// UpdateProgress updates the progress of an execution by task ID (uses most recent session)
-// Deprecated: Use UpdateProgressBySession instead when session ID is available
-func (e *Executor) UpdateProgress(ctx context.Context, taskID string, progress int, state v1.TaskSessionState) {
-	ctx2 := context.Background()
-	session, err := e.repo.GetActiveTaskSessionByTaskID(ctx2, taskID)
-	if err != nil {
-		return
-	}
-	e.UpdateProgressBySession(ctx, session.ID, progress, state)
-}
-
 // MarkCompletedBySession marks an execution as completed by session ID
 func (e *Executor) MarkCompletedBySession(ctx context.Context, sessionID string, state v1.TaskSessionState) {
 	e.logger.Info("execution completed",
