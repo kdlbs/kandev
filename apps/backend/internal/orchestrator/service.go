@@ -90,14 +90,6 @@ type Service struct {
 	mu        sync.RWMutex
 	running   bool
 	startedAt time.Time
-
-	readyMu     sync.Mutex
-	readyStates map[string]*readyState
-}
-
-type readyState struct {
-	readySeen          bool
-	promptCompleteSeen bool
 }
 
 // Status contains orchestrator status information
@@ -149,7 +141,6 @@ func NewService(
 		executor:       exec,
 		scheduler:      sched,
 		streamHandlers: make([]func(payload *lifecycle.AgentStreamEventPayload), 0),
-		readyStates:    make(map[string]*readyState),
 	}
 
 	// Create the watcher with event handlers that wire everything together
@@ -723,17 +714,13 @@ func (s *Service) handleTaskStateChanged(ctx context.Context, data watcher.TaskE
 }
 
 // handleAgentReady handles agent ready events (prompt completed, ready for follow-up)
-// This is the definitive signal that the agent has finished processing a prompt.
-// AgentReady fires ONCE after each prompt completes (unlike PromptComplete which
-// fires for intermediate messages before tool calls).
+// Now that both ACP and Codex Prompt() calls are synchronous, this event fires after
+// the "complete" stream event. The state transition is already handled by handleAgentStreamEvent
+// on the "complete" event, so this handler just logs the event for debugging.
 func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventData) {
-	s.logger.Info("handling agent ready",
+	s.logger.Debug("agent ready event received (state transition handled by complete event)",
 		zap.String("task_id", data.TaskID),
 		zap.String("agent_execution_id", data.AgentExecutionID))
-
-	if s.markAgentReady(data.TaskID) {
-		s.finalizeAgentReady(data.TaskID, "")
-	}
 }
 
 func (s *Service) handleACPSessionCreated(ctx context.Context, data watcher.ACPSessionEventData) {
@@ -881,10 +868,10 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	case "complete":
 		// Save any accumulated text as an agent message
 		s.saveAgentTextIfPresent(ctx, payload)
-		// Mark prompt as complete and finalize agent ready state
-		if s.markPromptComplete(taskID) {
-			s.finalizeAgentReady(taskID, sessionID)
-		}
+		// Now that both ACP and Codex Prompt() calls are synchronous (return when turn is done),
+		// we can directly finalize the agent ready state here.
+		// The "complete" event is now the single source of truth for turn completion.
+		s.finalizeAgentReady(taskID, sessionID)
 
 	case "error":
 		// Handle error events
@@ -1037,44 +1024,6 @@ func (s *Service) updateTaskSessionState(ctx context.Context, taskID, sessionID 
 			"new_state":  string(nextState),
 		}))
 	}
-}
-
-func (s *Service) markAgentReady(taskID string) bool {
-	s.readyMu.Lock()
-	defer s.readyMu.Unlock()
-
-	state, ok := s.readyStates[taskID]
-	if !ok {
-		state = &readyState{}
-		s.readyStates[taskID] = state
-	}
-
-	state.readySeen = true
-	readyToFinalize := state.promptCompleteSeen
-	if readyToFinalize {
-		delete(s.readyStates, taskID)
-	}
-
-	return readyToFinalize
-}
-
-func (s *Service) markPromptComplete(taskID string) bool {
-	s.readyMu.Lock()
-	defer s.readyMu.Unlock()
-
-	state, ok := s.readyStates[taskID]
-	if !ok {
-		state = &readyState{}
-		s.readyStates[taskID] = state
-	}
-
-	state.promptCompleteSeen = true
-	readyToFinalize := state.readySeen
-	if readyToFinalize {
-		delete(s.readyStates, taskID)
-	}
-
-	return readyToFinalize
 }
 
 func (s *Service) finalizeAgentReady(taskID, sessionID string) {

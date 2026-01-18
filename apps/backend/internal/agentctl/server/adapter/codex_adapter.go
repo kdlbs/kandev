@@ -49,9 +49,18 @@ type CodexAdapter struct {
 	reasoningBuffer string
 	summaryBuffer   string
 
+	// Turn completion signaling
+	turnCompleteCh chan turnCompleteResult
+
 	// Synchronization
 	mu     sync.RWMutex
 	closed bool
+}
+
+// turnCompleteResult holds the result of a completed turn
+type turnCompleteResult struct {
+	success bool
+	err     string
 }
 
 // NewCodexAdapter creates a new Codex protocol adapter.
@@ -236,6 +245,7 @@ func (a *CodexAdapter) LoadSession(ctx context.Context, sessionID string) error 
 }
 
 // Prompt sends a prompt to the agent, starting a new turn.
+// This method blocks until the turn completes (turn/completed notification received).
 func (a *CodexAdapter) Prompt(ctx context.Context, message string) error {
 	a.mu.Lock()
 	client := a.client
@@ -244,6 +254,8 @@ func (a *CodexAdapter) Prompt(ctx context.Context, message string) error {
 	a.messageBuffer = ""
 	a.reasoningBuffer = ""
 	a.summaryBuffer = ""
+	// Create channel to wait for turn completion
+	a.turnCompleteCh = make(chan turnCompleteResult, 1)
 	a.mu.Unlock()
 
 	if client == nil {
@@ -261,10 +273,16 @@ func (a *CodexAdapter) Prompt(ctx context.Context, message string) error {
 
 	resp, err := client.Call(ctx, codex.MethodTurnStart, params)
 	if err != nil {
+		a.mu.Lock()
+		a.turnCompleteCh = nil
+		a.mu.Unlock()
 		return fmt.Errorf("failed to start turn: %w", err)
 	}
 
 	if resp.Error != nil {
+		a.mu.Lock()
+		a.turnCompleteCh = nil
+		a.mu.Unlock()
 		return fmt.Errorf("turn start error: %s", resp.Error.Message)
 	}
 
@@ -280,15 +298,32 @@ func (a *CodexAdapter) Prompt(ctx context.Context, message string) error {
 
 	a.mu.Lock()
 	a.turnID = turnID
+	completeCh := a.turnCompleteCh
 	a.mu.Unlock()
 
 	if result.Turn != nil {
-		a.logger.Info("started turn", zap.String("turn_id", turnID), zap.String("status", result.Turn.Status))
+		a.logger.Info("started turn, waiting for completion", zap.String("turn_id", turnID), zap.String("status", result.Turn.Status))
 	} else {
-		a.logger.Info("started turn", zap.String("turn_id", turnID))
+		a.logger.Info("started turn, waiting for completion", zap.String("turn_id", turnID))
 	}
 
-	return nil
+	// Wait for turn completion or context cancellation
+	select {
+	case <-ctx.Done():
+		a.mu.Lock()
+		a.turnCompleteCh = nil
+		a.mu.Unlock()
+		return ctx.Err()
+	case completeResult := <-completeCh:
+		a.mu.Lock()
+		a.turnCompleteCh = nil
+		a.mu.Unlock()
+		if !completeResult.success && completeResult.err != "" {
+			return fmt.Errorf("turn failed: %s", completeResult.err)
+		}
+		a.logger.Info("turn completed", zap.String("turn_id", turnID), zap.Bool("success", completeResult.success))
+		return nil
+	}
 }
 
 // Cancel interrupts the current turn.
@@ -439,16 +474,30 @@ func (a *CodexAdapter) handleNotification(method string, params json.RawMessage)
 			a.logger.Warn("failed to parse turn completed", zap.Error(err))
 			return
 		}
-		update := AgentEvent{
-			Type:        EventTypeComplete,
-			SessionID:   threadID,
-			OperationID: p.TurnID,
+
+		// Signal turn completion to the waiting Prompt() call
+		a.mu.RLock()
+		completeCh := a.turnCompleteCh
+		a.mu.RUnlock()
+
+		if completeCh != nil {
+			select {
+			case completeCh <- turnCompleteResult{success: p.Success, err: p.Error}:
+				a.logger.Debug("signaled turn completion", zap.String("turn_id", p.TurnID), zap.Bool("success", p.Success))
+			default:
+				a.logger.Warn("turn complete channel full, dropping signal")
+			}
 		}
+
+		// Send error event if the turn failed (for UI notification)
 		if !p.Success && p.Error != "" {
-			update.Type = EventTypeError
-			update.Error = p.Error
+			a.sendUpdate(AgentEvent{
+				Type:        EventTypeError,
+				SessionID:   threadID,
+				OperationID: p.TurnID,
+				Error:       p.Error,
+			})
 		}
-		a.sendUpdate(update)
 
 	case codex.NotifyTurnDiffUpdated:
 		var p codex.TurnDiffUpdatedParams
