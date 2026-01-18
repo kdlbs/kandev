@@ -531,7 +531,7 @@ func (m *Manager) handlePermissionRequest(ctx context.Context, req *adapter.Perm
 	// We use a custom notification type that the backend will recognize
 	m.sendPermissionNotification(pending)
 
-	// Wait for response with timeout
+	// Wait for response indefinitely - user may close and reopen the page
 	select {
 	case resp := <-pending.ResponseCh:
 		m.logger.Info("received permission response",
@@ -541,10 +541,6 @@ func (m *Manager) handlePermissionRequest(ctx context.Context, req *adapter.Perm
 		return resp, nil
 	case <-ctx.Done():
 		m.logger.Warn("permission request context cancelled",
-			zap.String("pending_id", pendingID))
-		return &adapter.PermissionResponse{Cancelled: true}, nil
-	case <-time.After(5 * time.Minute):
-		m.logger.Warn("permission request timed out",
 			zap.String("pending_id", pendingID))
 		return &adapter.PermissionResponse{Cancelled: true}, nil
 	}
