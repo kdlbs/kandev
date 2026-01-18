@@ -98,7 +98,7 @@ type LaunchAgentResponse struct {
 	WorktreeBranch   string
 }
 
-// TaskExecution tracks an active task execution (kept for API compatibility)
+// TaskExecution tracks an active task execution
 type TaskExecution struct {
 	TaskID           string
 	AgentExecutionID string
@@ -937,17 +937,6 @@ func (e *Executor) MarkCompletedBySession(ctx context.Context, sessionID string,
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 	}
-}
-
-// MarkCompleted marks an execution as completed by task ID (uses most recent session)
-// Deprecated: Use MarkCompletedBySession instead when session ID is available
-func (e *Executor) MarkCompleted(ctx context.Context, taskID string, state v1.TaskSessionState) {
-	ctx2 := context.Background()
-	session, err := e.repo.GetActiveTaskSessionByTaskID(ctx2, taskID)
-	if err != nil {
-		return
-	}
-	e.MarkCompletedBySession(ctx, session.ID, state)
 }
 
 // MockAgentManagerClient is a placeholder implementation

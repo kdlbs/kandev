@@ -14,10 +14,6 @@ import (
 // HistoricalLogsProvider is a function that retrieves historical logs for a task
 type HistoricalLogsProvider func(ctx context.Context, taskID string) ([]*ws.Message, error)
 
-// PendingPermissionsProvider is deprecated. Pending permissions are now stored as messages
-// and retrieved via the HistoricalLogsProvider.
-// type PendingPermissionsProvider func(ctx context.Context, taskID string) ([]*ws.Message, error)
-
 // Hub manages all WebSocket client connections
 type Hub struct {
 	// All registered clients
@@ -42,8 +38,6 @@ type Hub struct {
 
 	// Optional provider for historical logs on subscription
 	historicalLogsProvider HistoricalLogsProvider
-	// NOTE: pendingPermissionsProvider is deprecated. Pending permissions are now stored
-	// as messages and retrieved via the historicalLogsProvider.
 
 	mu     sync.RWMutex
 	logger *logger.Logger
@@ -392,11 +386,3 @@ func (h *Hub) GetHistoricalLogs(ctx context.Context, taskID string) ([]*ws.Messa
 	}
 	return h.historicalLogsProvider(ctx, taskID)
 }
-
-// SetPendingPermissionsProvider is deprecated. Pending permissions are now stored as messages
-// and retrieved via the HistoricalLogsProvider. This method is a no-op for backwards compatibility.
-// func (h *Hub) SetPendingPermissionsProvider(provider PendingPermissionsProvider) {}
-
-// GetPendingPermissions is deprecated. Pending permissions are now stored as messages
-// and retrieved via the HistoricalLogsProvider. This method always returns nil.
-// func (h *Hub) GetPendingPermissions(ctx context.Context, taskID string) ([]*ws.Message, error) {}
