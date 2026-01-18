@@ -194,6 +194,9 @@ func (s *Service) Start(ctx context.Context) error {
 		s.logger.Warn("failed to load active sessions from database (non-fatal)", zap.Error(err))
 	}
 
+	// Resume executors from persisted runtime state on startup.
+	s.resumeExecutorsOnStartup(ctx)
+
 	// Sync with executions recovered from Docker by the lifecycle manager
 	// This ensures we track containers that are running but weren't in the DB as active
 	recovered := s.agentManager.GetRecoveredExecutions()
@@ -255,6 +258,69 @@ func (s *Service) Stop() error {
 	}
 
 	s.logger.Info("orchestrator service stopped successfully")
+	return nil
+}
+
+func (s *Service) resumeExecutorsOnStartup(ctx context.Context) {
+	runningExecutors, err := s.repo.ListExecutorsRunning(ctx)
+	if err != nil {
+		s.logger.Warn("failed to list executors running on startup", zap.Error(err))
+		return
+	}
+	if len(runningExecutors) == 0 {
+		s.logger.Info("no executors to resume on startup")
+		return
+	}
+
+	s.logger.Info("resuming executors on startup", zap.Int("count", len(runningExecutors)))
+
+	for _, running := range runningExecutors {
+		sessionID := running.SessionID
+		if sessionID == "" {
+			continue
+		}
+
+		session, err := s.repo.GetTaskSession(ctx, sessionID)
+		if err != nil {
+			s.logger.Warn("failed to load session for resume",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+			continue
+		}
+
+		if !running.Resumable {
+			s.logger.Warn("executor not resumable; marking session as failed",
+				zap.String("session_id", sessionID))
+			_ = s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateFailed, "executor not resumable")
+			continue
+		}
+		if err := validateSessionWorktrees(session); err != nil {
+			s.logger.Warn("worktree validation failed; marking session as failed",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+			_ = s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateFailed, err.Error())
+			continue
+		}
+
+		startAgent := running.ResumeToken != ""
+		if _, err := s.executor.ResumeSession(ctx, session, startAgent); err != nil {
+			s.logger.Warn("failed to resume executor on startup",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+			_ = s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateFailed, err.Error())
+		}
+	}
+}
+
+func validateSessionWorktrees(session *models.TaskSession) error {
+	for _, wt := range session.Worktrees {
+		if wt.WorktreePath == "" {
+			continue
+		}
+		if _, err := os.Stat(wt.WorktreePath); err != nil {
+			return fmt.Errorf("worktree path not found: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -357,15 +423,9 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 		zap.String("session_id", sessionID))
 
 	if exec, ok := s.executor.GetExecutionWithContext(ctx, taskID); ok && exec != nil {
-		return nil, executor.ErrExecutionAlreadyRunning
-	}
-
-	task, err := s.scheduler.GetTask(ctx, taskID)
-	if err != nil {
-		s.logger.Error("failed to fetch task for resume",
-			zap.String("task_id", taskID),
-			zap.Error(err))
-		return nil, err
+		if exec.SessionID != "" && exec.SessionID != sessionID {
+			return nil, executor.ErrExecutionAlreadyRunning
+		}
 	}
 
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
@@ -379,15 +439,13 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 	if err != nil || running == nil || running.ResumeToken == "" || !running.Resumable {
 		return nil, fmt.Errorf("session is not resumable")
 	}
-	if len(session.Worktrees) == 0 || session.Worktrees[0].WorktreePath == "" {
-		return nil, fmt.Errorf("task session has no worktree path")
-	}
-	if _, err := os.Stat(session.Worktrees[0].WorktreePath); err != nil {
-		return nil, fmt.Errorf("worktree path not found: %w", err)
+	if err := validateSessionWorktrees(session); err != nil {
+		return nil, err
 	}
 
-	execution, err := s.executor.ResumeSession(ctx, task, session)
+	execution, err := s.executor.ResumeSession(ctx, session, true)
 	if err != nil {
+		_ = s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateFailed, err.Error())
 		return nil, err
 	}
 	// Preserve persisted task/session state; resume should not mutate state/columns.

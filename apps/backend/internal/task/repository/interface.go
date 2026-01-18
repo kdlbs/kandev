@@ -111,6 +111,7 @@ type Repository interface {
 	ListExecutors(ctx context.Context) ([]*models.Executor, error)
 
 	// Executor running operations
+	ListExecutorsRunning(ctx context.Context) ([]*models.ExecutorRunning, error)
 	UpsertExecutorRunning(ctx context.Context, running *models.ExecutorRunning) error
 	GetExecutorRunningBySessionID(ctx context.Context, sessionID string) (*models.ExecutorRunning, error)
 	DeleteExecutorRunningBySessionID(ctx context.Context, sessionID string) error

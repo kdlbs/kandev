@@ -2610,6 +2610,51 @@ func (r *SQLiteRepository) UpsertExecutorRunning(ctx context.Context, running *m
 	return err
 }
 
+func (r *SQLiteRepository) ListExecutorsRunning(ctx context.Context) ([]*models.ExecutorRunning, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, session_id, task_id, executor_id, runtime, status, resumable, resume_token,
+			agent_execution_id, container_id, agentctl_url, agentctl_port,
+			worktree_id, worktree_path, worktree_branch, created_at, updated_at
+		FROM executors_running
+		ORDER BY updated_at DESC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var results []*models.ExecutorRunning
+	for rows.Next() {
+		running := &models.ExecutorRunning{}
+		if scanErr := rows.Scan(
+			&running.ID,
+			&running.SessionID,
+			&running.TaskID,
+			&running.ExecutorID,
+			&running.Runtime,
+			&running.Status,
+			&running.Resumable,
+			&running.ResumeToken,
+			&running.AgentExecutionID,
+			&running.ContainerID,
+			&running.AgentctlURL,
+			&running.AgentctlPort,
+			&running.WorktreeID,
+			&running.WorktreePath,
+			&running.WorktreeBranch,
+			&running.CreatedAt,
+			&running.UpdatedAt,
+		); scanErr != nil {
+			return nil, scanErr
+		}
+		results = append(results, running)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return results, nil
+}
+
 func (r *SQLiteRepository) GetExecutorRunningBySessionID(ctx context.Context, sessionID string) (*models.ExecutorRunning, error) {
 	if sessionID == "" {
 		return nil, fmt.Errorf("session_id is required")

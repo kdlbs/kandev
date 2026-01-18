@@ -501,8 +501,22 @@ func (e *Executor) ExecuteWithProfile(ctx context.Context, task *v1.Task, agentP
 }
 
 // ResumeSession restarts an existing task session using its stored worktree.
-func (e *Executor) ResumeSession(ctx context.Context, task *v1.Task, session *models.TaskSession) (*TaskExecution, error) {
+// When startAgent is false, only the executor runtime is started (agent process is not launched).
+func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSession, startAgent bool) (*TaskExecution, error) {
 	if session == nil {
+		return nil, ErrExecutionNotFound
+	}
+
+	taskModel, err := e.repo.GetTask(ctx, session.TaskID)
+	if err != nil {
+		e.logger.Error("failed to load task for session resume",
+			zap.String("task_id", session.TaskID),
+			zap.String("session_id", session.ID),
+			zap.Error(err))
+		return nil, err
+	}
+	task := taskModel.ToAPI()
+	if task == nil {
 		return nil, ErrExecutionNotFound
 	}
 
@@ -515,7 +529,7 @@ func (e *Executor) ResumeSession(ctx context.Context, task *v1.Task, session *mo
 
 	if session.AgentProfileID == "" {
 		e.logger.Error("task session has no agent_profile_id configured",
-			zap.String("task_id", task.ID),
+			zap.String("task_id", session.TaskID),
 			zap.String("session_id", session.ID))
 		return nil, ErrNoAgentProfileID
 	}
@@ -586,7 +600,7 @@ func (e *Executor) ResumeSession(ctx context.Context, task *v1.Task, session *mo
 	}
 
 	if running, err := e.repo.GetExecutorRunningBySessionID(ctx, session.ID); err == nil && running != nil {
-		if running.ResumeToken != "" {
+		if running.ResumeToken != "" && startAgent {
 			req.ACPSessionID = running.ResumeToken
 			e.logger.Info("found resume token for session resumption",
 				zap.String("task_id", task.ID),
@@ -595,7 +609,7 @@ func (e *Executor) ResumeSession(ctx context.Context, task *v1.Task, session *mo
 	}
 
 	e.logger.Info("resuming agent session",
-		zap.String("task_id", task.ID),
+		zap.String("task_id", session.TaskID),
 		zap.String("session_id", session.ID),
 		zap.String("agent_profile_id", session.AgentProfileID),
 		zap.String("resume_token", req.ACPSessionID),
@@ -616,8 +630,10 @@ func (e *Executor) ResumeSession(ctx context.Context, task *v1.Task, session *mo
 	session.ContainerID = resp.ContainerID
 	session.Progress = 0
 	session.ErrorMessage = ""
-	session.State = models.TaskSessionStateStarting
-	session.CompletedAt = nil
+	if startAgent {
+		session.State = models.TaskSessionStateStarting
+		session.CompletedAt = nil
+	}
 
 	if err := e.repo.UpdateTaskSession(ctx, session); err != nil {
 		e.logger.Error("failed to update task session for resume",
@@ -704,19 +720,21 @@ func (e *Executor) ResumeSession(ctx context.Context, task *v1.Task, session *mo
 	e.executions[task.ID] = execution
 	e.mu.Unlock()
 
-	// Start the agent process (agentctl execution was created above)
-	go func() {
-		startCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		defer cancel()
+	if startAgent {
+		// Start the agent process (agentctl execution was created above)
+		go func() {
+			startCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer cancel()
 
-		if err := e.agentManager.StartAgentProcess(startCtx, resp.AgentExecutionID); err != nil {
-			e.logger.Error("failed to start agent process on resume",
-				zap.String("task_id", task.ID),
-				zap.String("session_id", session.ID),
-				zap.String("agent_execution_id", resp.AgentExecutionID),
-				zap.Error(err))
-		}
-	}()
+			if err := e.agentManager.StartAgentProcess(startCtx, resp.AgentExecutionID); err != nil {
+				e.logger.Error("failed to start agent process on resume",
+					zap.String("task_id", task.ID),
+					zap.String("session_id", session.ID),
+					zap.String("agent_execution_id", resp.AgentExecutionID),
+					zap.Error(err))
+			}
+		}()
+	}
 
 	return execution, nil
 }
