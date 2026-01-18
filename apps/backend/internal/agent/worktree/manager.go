@@ -21,7 +21,7 @@ type Manager struct {
 	config     Config
 	logger     *logger.Logger
 	store      Store
-	worktrees  map[string]*Worktree // taskID -> worktree (in-memory cache)
+	worktrees  map[string]*Worktree // sessionID -> worktree (in-memory cache)
 	mu         sync.RWMutex         // Protects worktrees map
 	repoLocks  map[string]*sync.Mutex
 	repoLockMu sync.Mutex
@@ -33,9 +33,9 @@ type Store interface {
 	CreateWorktree(ctx context.Context, wt *Worktree) error
 	// GetWorktreeByID retrieves a worktree by its unique ID.
 	GetWorktreeByID(ctx context.Context, id string) (*Worktree, error)
-	// GetWorktreeByTaskID retrieves the most recent worktree by task ID.
-	GetWorktreeByTaskID(ctx context.Context, taskID string) (*Worktree, error)
-	// GetWorktreesByTaskID retrieves all worktrees for a task.
+	// GetWorktreeBySessionID retrieves the worktree by session ID.
+	GetWorktreeBySessionID(ctx context.Context, sessionID string) (*Worktree, error)
+	// GetWorktreesByTaskID retrieves all worktrees for a task (used for cleanup on task deletion).
 	GetWorktreesByTaskID(ctx context.Context, taskID string) ([]*Worktree, error)
 	// GetWorktreesByRepositoryID retrieves all worktrees for a repository.
 	GetWorktreesByRepositoryID(ctx context.Context, repoID string) ([]*Worktree, error)
@@ -94,40 +94,34 @@ func (m *Manager) IsEnabled() bool {
 	return m.config.Enabled
 }
 
-// GetWorktreeInfo returns worktree path and branch for a task.
-// Returns nil values if no worktree exists for the task.
-// This method implements the WorktreeLookup interface for task enrichment.
-func (m *Manager) GetWorktreeInfo(ctx context.Context, taskID string) (path, branch *string) {
-	wt, err := m.GetByTaskID(ctx, taskID)
-	if err != nil || wt == nil {
-		return nil, nil
-	}
-	return &wt.Path, &wt.Branch
-}
-
-// Create creates a new worktree for a task, or returns an existing one.
-// First checks if a worktree already exists for the task ID, then by WorktreeID if provided.
-// Only creates a new worktree if none exists.
+// Create creates a new worktree for a session, or returns an existing one.
+// Each session gets its own worktree for isolation. Checks by SessionID first,
+// then by WorktreeID if provided (for session resumption).
+// Only creates a new worktree if none exists for the session.
 func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, error) {
 	if err := req.Validate(); err != nil {
 		return nil, err
 	}
 
-	// First, check if a worktree already exists for this task
-	existing, err := m.GetByTaskID(ctx, req.TaskID)
-	if err == nil && existing != nil {
-		if m.IsValid(existing.Path) {
-			m.logger.Info("reusing existing worktree by task ID",
+	// First, check if a worktree already exists for this session
+	if req.SessionID != "" {
+		existing, err := m.GetBySessionID(ctx, req.SessionID)
+		if err == nil && existing != nil {
+			if m.IsValid(existing.Path) {
+				m.logger.Info("reusing existing worktree by session ID",
+					zap.String("worktree_id", existing.ID),
+					zap.String("session_id", req.SessionID),
+					zap.String("task_id", req.TaskID),
+					zap.String("path", existing.Path))
+				return existing, nil
+			}
+			// Worktree record exists but directory is invalid - recreate
+			m.logger.Warn("worktree directory invalid, recreating",
 				zap.String("worktree_id", existing.ID),
-				zap.String("task_id", req.TaskID),
-				zap.String("path", existing.Path))
-			return existing, nil
+				zap.String("session_id", req.SessionID),
+				zap.String("task_id", req.TaskID))
+			return m.recreate(ctx, existing, req)
 		}
-		// Worktree record exists but directory is invalid - recreate
-		m.logger.Warn("worktree directory invalid, recreating",
-			zap.String("worktree_id", existing.ID),
-			zap.String("task_id", req.TaskID))
-		return m.recreate(ctx, existing, req)
 	}
 
 	// If WorktreeID is provided, try to reuse that specific worktree (session resumption)
@@ -137,6 +131,7 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 			if m.IsValid(existing.Path) {
 				m.logger.Info("reusing existing worktree by ID",
 					zap.String("worktree_id", req.WorktreeID),
+					zap.String("session_id", req.SessionID),
 					zap.String("task_id", req.TaskID),
 					zap.String("path", existing.Path))
 				return existing, nil
@@ -144,12 +139,14 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 			// Worktree record exists but directory is invalid - recreate
 			m.logger.Warn("worktree directory invalid, recreating",
 				zap.String("worktree_id", req.WorktreeID),
+				zap.String("session_id", req.SessionID),
 				zap.String("task_id", req.TaskID))
 			return m.recreate(ctx, existing, req)
 		}
 		// WorktreeID provided but not found - fall through to create new
 		m.logger.Warn("worktree ID not found, creating new worktree",
 			zap.String("worktree_id", req.WorktreeID),
+			zap.String("session_id", req.SessionID),
 			zap.String("task_id", req.TaskID))
 	}
 
@@ -254,12 +251,15 @@ func (m *Manager) createWorktree(ctx context.Context, req CreateRequest) (*Workt
 		}
 	}
 
-	// Update cache
-	m.mu.Lock()
-	m.worktrees[req.TaskID] = wt
-	m.mu.Unlock()
+	// Update cache (keyed by sessionID)
+	if req.SessionID != "" {
+		m.mu.Lock()
+		m.worktrees[req.SessionID] = wt
+		m.mu.Unlock()
+	}
 
 	m.logger.Info("created worktree",
+		zap.String("session_id", req.SessionID),
 		zap.String("task_id", req.TaskID),
 		zap.String("path", worktreePath),
 		zap.String("branch", branchName))
@@ -267,11 +267,11 @@ func (m *Manager) createWorktree(ctx context.Context, req CreateRequest) (*Workt
 	return wt, nil
 }
 
-// GetByTaskID returns the worktree for a task, if it exists.
-func (m *Manager) GetByTaskID(ctx context.Context, taskID string) (*Worktree, error) {
-	// Check cache first
+// GetBySessionID returns the worktree for a session, if it exists.
+func (m *Manager) GetBySessionID(ctx context.Context, sessionID string) (*Worktree, error) {
+	// Check cache first (keyed by sessionID)
 	m.mu.RLock()
-	if wt, ok := m.worktrees[taskID]; ok {
+	if wt, ok := m.worktrees[sessionID]; ok {
 		m.mu.RUnlock()
 		return wt, nil
 	}
@@ -279,14 +279,14 @@ func (m *Manager) GetByTaskID(ctx context.Context, taskID string) (*Worktree, er
 
 	// Check store
 	if m.store != nil {
-		wt, err := m.store.GetWorktreeByTaskID(ctx, taskID)
+		wt, err := m.store.GetWorktreeBySessionID(ctx, sessionID)
 		if err != nil {
 			return nil, err
 		}
 		if wt != nil {
 			// Update cache
 			m.mu.Lock()
-			m.worktrees[taskID] = wt
+			m.worktrees[sessionID] = wt
 			m.mu.Unlock()
 			return wt, nil
 		}
@@ -340,16 +340,6 @@ func (m *Manager) IsValid(path string) bool {
 	}
 
 	return true
-}
-
-// Remove removes a worktree by task ID and optionally its branch.
-// Deprecated: Use RemoveByID for specific worktree removal.
-func (m *Manager) Remove(ctx context.Context, taskID string, removeBranch bool) error {
-	wt, err := m.GetByTaskID(ctx, taskID)
-	if err != nil {
-		return err
-	}
-	return m.removeWorktree(ctx, wt, removeBranch)
 }
 
 // RemoveByID removes a specific worktree by its ID and optionally its branch.
@@ -628,12 +618,15 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 		}
 	}
 
-	// Update cache
-	m.mu.Lock()
-	m.worktrees[req.TaskID] = existing
-	m.mu.Unlock()
+	// Update cache (keyed by sessionID)
+	if req.SessionID != "" {
+		m.mu.Lock()
+		m.worktrees[req.SessionID] = existing
+		m.mu.Unlock()
+	}
 
 	m.logger.Info("recreated worktree",
+		zap.String("session_id", req.SessionID),
 		zap.String("task_id", req.TaskID),
 		zap.String("path", worktreePath))
 

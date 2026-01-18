@@ -43,13 +43,21 @@ func (s *mockStore) CreateWorktree(ctx context.Context, wt *Worktree) error {
 	return nil
 }
 
-func (s *mockStore) GetWorktreeByTaskID(ctx context.Context, taskID string) (*Worktree, error) {
+func (s *mockStore) GetWorktreeBySessionID(ctx context.Context, sessionID string) (*Worktree, error) {
 	for _, wt := range s.worktrees {
-		if wt.TaskID == taskID {
+		if wt.SessionID == sessionID {
 			return wt, nil
 		}
 	}
 	return nil, nil
+}
+
+func (s *mockStore) GetWorktreeByID(ctx context.Context, id string) (*Worktree, error) {
+	wt, ok := s.worktrees[id]
+	if !ok {
+		return nil, nil
+	}
+	return wt, nil
 }
 
 func (s *mockStore) GetWorktreesByTaskID(ctx context.Context, taskID string) ([]*Worktree, error) {
@@ -60,14 +68,6 @@ func (s *mockStore) GetWorktreesByTaskID(ctx context.Context, taskID string) ([]
 		}
 	}
 	return result, nil
-}
-
-func (s *mockStore) GetWorktreeByID(ctx context.Context, id string) (*Worktree, error) {
-	wt, ok := s.worktrees[id]
-	if !ok {
-		return nil, nil
-	}
-	return wt, nil
 }
 
 func (s *mockStore) GetWorktreesByRepositoryID(ctx context.Context, repoID string) ([]*Worktree, error) {

@@ -21,12 +21,14 @@ export function ShellTerminal() {
 
   const sessionId = useAppStore((state) => state.tasks.activeSessionId);
   const { session, isActive } = useSession(sessionId);
-  const { isReady: isAgentctlReady } = useSessionAgentctl(sessionId);
+  // Hook also subscribes to session channel for real-time updates
+  useSessionAgentctl(sessionId);
   const taskId = session?.task_id ?? null;
   const shellOutput = useAppStore((state) =>
     sessionId ? state.shell.outputs[sessionId] || '' : ''
   );
-  const canSubscribe = Boolean(sessionId && isActive && isAgentctlReady);
+  // Don't gate on isAgentctlReady - shell works as long as session is active
+  const canSubscribe = Boolean(sessionId && isActive);
 
   const send = useCallback(
     (action: string, payload: Record<string, unknown>) => {
@@ -79,14 +81,39 @@ export function ShellTerminal() {
     xtermRef.current = terminal;
     fitAddonRef.current = fitAddon;
 
+    // Ensure terminal is properly sized after initial render
+    const initialFitTimeout = setTimeout(() => {
+      fitAddon.fit();
+    }, 100);
+
     // Handle resize
     const resizeObserver = new ResizeObserver(() => {
       fitAddon.fit();
     });
     resizeObserver.observe(terminalRef.current);
 
+    // Handle visibility changes (e.g., when tab becomes visible)
+    const intersectionObserver = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting && fitAddonRef.current) {
+            requestAnimationFrame(() => {
+              fitAddonRef.current?.fit();
+            });
+          }
+        });
+      },
+      { threshold: 0.1 }
+    );
+    intersectionObserver.observe(terminalRef.current);
+
+    // Reset output tracking when session changes
+    lastOutputLengthRef.current = 0;
+
     return () => {
+      clearTimeout(initialFitTimeout);
       resizeObserver.disconnect();
+      intersectionObserver.disconnect();
       terminal.dispose();
       xtermRef.current = null;
       fitAddonRef.current = null;
@@ -101,6 +128,12 @@ export function ShellTerminal() {
     if (!taskId || !sessionId) return;
 
     onDataDisposableRef.current = xtermRef.current.onData((data) => {
+      // Filter out terminal query responses (e.g., cursor position reports)
+      // These are responses to DSR queries like \x1b[6n and look like \x1b[row;colR
+      // They should NOT be sent to the shell as input
+      if (/^\x1b\[\d+;\d+R$/.test(data) || /^\x1b\[\d+R$/.test(data)) {
+        return;
+      }
       send('shell.input', { session_id: sessionId, data });
     });
 
@@ -155,6 +188,13 @@ export function ShellTerminal() {
           if (response.buffer) {
             storeApi.getState().appendShellOutput(sessionId, response.buffer);
           }
+          // Send Ctrl+L to clear screen and redraw prompt
+          // This ensures a clean state after loading the buffer which may contain garbage escape sequences
+          setTimeout(() => {
+            if (!cancelled && subscriptionIdRef.current === currentSubscriptionId) {
+              send('shell.input', { session_id: sessionId, data: '\x0c' });
+            }
+          }, 100);
         })
         .catch((err) => {
           if (cancelled || subscriptionIdRef.current !== currentSubscriptionId) return;
@@ -181,7 +221,7 @@ export function ShellTerminal() {
         retryTimeoutRef.current = null;
       }
     };
-  }, [taskId, sessionId, storeApi, canSubscribe]);
+  }, [taskId, sessionId, storeApi, canSubscribe, send]);
 
   return (
     <div

@@ -22,7 +22,7 @@ type TaskHandlers struct {
 }
 
 type OrchestratorStarter interface {
-	StartTask(ctx context.Context, taskID string, agentProfileID string, priority int) (*executor.TaskExecution, error)
+	StartTask(ctx context.Context, taskID string, agentProfileID string, priority int, prompt string) (*executor.TaskExecution, error)
 }
 
 func NewTaskHandlers(ctrl *controller.TaskController, orchestrator OrchestratorStarter, log *logger.Logger) *TaskHandlers {
@@ -182,7 +182,8 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 
 	response := createTaskResponse{TaskDTO: resp}
 	if body.StartAgent && body.AgentProfileID != "" && h.orchestrator != nil {
-		execution, err := h.orchestrator.StartTask(c.Request.Context(), resp.ID, body.AgentProfileID, body.Priority)
+		// Use task description as the initial prompt
+		execution, err := h.orchestrator.StartTask(c.Request.Context(), resp.ID, body.AgentProfileID, body.Priority, resp.Description)
 		if err != nil {
 			h.logger.Error("failed to start agent for task", zap.Error(err))
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to start agent for task"})
@@ -395,7 +396,8 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 
 	response := createTaskResponse{TaskDTO: resp}
 	if req.StartAgent && req.AgentProfileID != "" && h.orchestrator != nil {
-		execution, err := h.orchestrator.StartTask(ctx, resp.ID, req.AgentProfileID, req.Priority)
+		// Use task description as the initial prompt
+		execution, err := h.orchestrator.StartTask(ctx, resp.ID, req.AgentProfileID, req.Priority, resp.Description)
 		if err != nil {
 			h.logger.Error("failed to start agent for task", zap.Error(err))
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to start agent for task", nil)

@@ -85,6 +85,7 @@ type wsStartTaskRequest struct {
 	TaskID         string `json:"task_id"`
 	AgentProfileID string `json:"agent_profile_id,omitempty"`
 	Priority       int    `json:"priority,omitempty"`
+	Prompt         string `json:"prompt,omitempty"`
 }
 
 func (h *Handlers) wsStartTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -103,6 +104,7 @@ func (h *Handlers) wsStartTask(ctx context.Context, msg *ws.Message) (*ws.Messag
 		TaskID:         req.TaskID,
 		AgentProfileID: req.AgentProfileID,
 		Priority:       req.Priority,
+		Prompt:         req.Prompt,
 	})
 	if err != nil {
 		h.logger.Error("failed to start task", zap.String("task_id", req.TaskID), zap.Error(err))

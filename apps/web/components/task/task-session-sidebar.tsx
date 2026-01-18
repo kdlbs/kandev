@@ -146,17 +146,13 @@ export function TaskSessionSidebar({ workspaceId, boardId }: TaskSessionSidebarP
           state: string;
         }>(
           'orchestrator.start',
-          { task_id: taskId, agent_profile_id: data.agentProfileId },
+          {
+            task_id: taskId,
+            agent_profile_id: data.agentProfileId,
+            prompt: data.prompt.trim(),
+          },
           15000
         );
-
-        if (response?.session_id && data.prompt.trim()) {
-          await client.request(
-            'message.add',
-            { task_id: taskId, session_id: response.session_id, content: data.prompt.trim() },
-            10000
-          );
-        }
 
         await loadSelectedSessions(true);
 

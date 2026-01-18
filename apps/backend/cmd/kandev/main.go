@@ -435,9 +435,6 @@ func main() {
 	workspaceController := taskcontroller.NewWorkspaceController(taskSvc)
 	boardController := taskcontroller.NewBoardController(taskSvc)
 	taskController := taskcontroller.NewTaskController(taskSvc)
-	if worktreeMgr != nil {
-		taskController.SetWorktreeLookup(worktreeMgr) // Enable worktree info in task responses
-	}
 	messageController := taskcontroller.NewMessageController(taskSvc)
 	repositoryController := taskcontroller.NewRepositoryController(taskSvc)
 	executorController := taskcontroller.NewExecutorController(taskSvc)

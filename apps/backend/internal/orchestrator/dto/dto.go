@@ -45,6 +45,7 @@ type StartTaskRequest struct {
 	TaskID         string `json:"task_id"`
 	AgentProfileID string `json:"agent_profile_id,omitempty"`
 	Priority       int    `json:"priority,omitempty"`
+	Prompt         string `json:"prompt,omitempty"` // Initial prompt to send to the agent
 }
 
 // StartTaskResponse is the response for orchestrator.start

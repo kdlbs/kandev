@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -146,10 +145,6 @@ type Executor struct {
 	shellPrefs   ShellPreferenceProvider
 	logger       *logger.Logger
 
-	// In-memory cache for fast lookups (synced with database)
-	executions map[string]*TaskExecution
-	mu         sync.RWMutex
-
 	// Configuration
 	maxConcurrent   int
 	retryLimit      int
@@ -179,7 +174,6 @@ func NewExecutor(agentManager AgentManagerClient, repo repository.Repository, lo
 		repo:            repo,
 		shellPrefs:      cfg.ShellPrefs,
 		logger:          log.WithFields(zap.String("component", "executor")),
-		executions:      make(map[string]*TaskExecution),
 		maxConcurrent:   maxConcurrent,
 		retryLimit:      3,
 		retryDelay:      5 * time.Second,
@@ -212,31 +206,6 @@ func (e *Executor) applyPreferredShellEnv(ctx context.Context, env map[string]st
 	return env
 }
 
-// LoadActiveSessionsFromDB loads active agent sessions from the database into memory
-// This should be called on startup to restore state after a restart
-func (e *Executor) LoadActiveSessionsFromDB(ctx context.Context) error {
-	sessions, err := e.repo.ListActiveTaskSessions(ctx)
-	if err != nil {
-		return err
-	}
-
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	for _, session := range sessions {
-		e.executions[session.TaskID] = FromTaskSession(session)
-		e.logger.Info("restored agent session from database",
-			zap.String("task_id", session.TaskID),
-			zap.String("session_id", session.ID),
-			zap.String("state", string(session.State)))
-	}
-
-	e.logger.Info("loaded active agent sessions from database",
-		zap.Int("count", len(sessions)))
-
-	return nil
-}
-
 // RecoveredExecutionInfo contains info about an execution recovered from Docker
 type RecoveredExecutionInfo struct {
 	ExecutionID    string
@@ -246,43 +215,14 @@ type RecoveredExecutionInfo struct {
 	AgentProfileID string
 }
 
-// SyncWithRecoveredExecutions ensures the executor's cache is in sync with
-// executions recovered from Docker by the lifecycle manager.
-// For each recovered execution, if not already in cache, add it.
-func (e *Executor) SyncWithRecoveredExecutions(ctx context.Context, executions []RecoveredExecutionInfo) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	for _, exec := range executions {
-		if _, exists := e.executions[exec.TaskID]; exists {
-			continue // Already have this execution
-		}
-
-		// Add to cache - this execution is running in Docker but wasn't in DB as active
-		e.executions[exec.TaskID] = &TaskExecution{
-			TaskID:           exec.TaskID,
-			AgentExecutionID: exec.ExecutionID,
-			AgentProfileID:   exec.AgentProfileID,
-			StartedAt:        time.Now(), // We don't know exact start time
-			SessionState:     v1.TaskSessionStateRunning,
-			Progress:         0,
-			LastUpdate:       time.Now(),
-			SessionID:        exec.SessionID,
-		}
-
-		e.logger.Info("synced recovered execution to executor cache",
-			zap.String("task_id", exec.TaskID),
-			zap.String("execution_id", exec.ExecutionID))
-	}
-}
-
 // Execute starts agent execution for a task
 func (e *Executor) Execute(ctx context.Context, task *v1.Task) (*TaskExecution, error) {
-	return e.ExecuteWithProfile(ctx, task, "")
+	return e.ExecuteWithProfile(ctx, task, "", task.Description)
 }
 
 // ExecuteWithProfile starts agent execution for a task using an explicit agent profile.
-func (e *Executor) ExecuteWithProfile(ctx context.Context, task *v1.Task, agentProfileID string) (*TaskExecution, error) {
+// The prompt parameter is the initial prompt to send to the agent.
+func (e *Executor) ExecuteWithProfile(ctx context.Context, task *v1.Task, agentProfileID string, prompt string) (*TaskExecution, error) {
 	// Check if max concurrent limit is reached
 	if !e.CanExecute() {
 		e.logger.Warn("max concurrent executions reached",
@@ -297,11 +237,12 @@ func (e *Executor) ExecuteWithProfile(ctx context.Context, task *v1.Task, agentP
 	}
 
 	// Create a LaunchAgentRequest from the task
+	// Use the provided prompt instead of task.Description
 	req := &LaunchAgentRequest{
 		TaskID:          task.ID,
 		TaskTitle:       task.Title,
 		AgentProfileID:  agentProfileID,
-		TaskDescription: task.Description,
+		TaskDescription: prompt, // Use the provided prompt
 		Priority:        task.Priority,
 		Metadata:        task.Metadata,
 	}
@@ -458,7 +399,7 @@ func (e *Executor) ExecuteWithProfile(ctx context.Context, task *v1.Task, agentP
 		}
 	}
 
-	// Track the execution in the in-memory cache
+	// Build result from stored session
 	execution := &TaskExecution{
 		TaskID:           task.ID,
 		AgentExecutionID: resp.AgentExecutionID,
@@ -472,11 +413,8 @@ func (e *Executor) ExecuteWithProfile(ctx context.Context, task *v1.Task, agentP
 		WorktreeBranch:   resp.WorktreeBranch,
 	}
 
-	e.mu.Lock()
-	e.executions[task.ID] = execution
-	e.mu.Unlock()
-
-	// Start the agent process (agentctl execution was created above)
+	// Start the agent process asynchronously.
+	// The initial prompt is sent as part of InitializeAndPrompt in the goroutine.
 	go func() {
 		startCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
@@ -486,10 +424,17 @@ func (e *Executor) ExecuteWithProfile(ctx context.Context, task *v1.Task, agentP
 				zap.String("task_id", task.ID),
 				zap.String("agent_execution_id", resp.AgentExecutionID),
 				zap.Error(err))
+			// Update session state to failed
+			if updateErr := e.repo.UpdateTaskSessionState(context.Background(), sessionID, models.TaskSessionStateFailed, err.Error()); updateErr != nil {
+				e.logger.Warn("failed to mark session as failed after start error",
+					zap.String("task_id", task.ID),
+					zap.String("session_id", sessionID),
+					zap.Error(updateErr))
+			}
 		}
 	}()
 
-	e.logger.Info("agent launched successfully",
+	e.logger.Info("agent launched",
 		zap.String("task_id", task.ID),
 		zap.String("session_id", sessionID),
 		zap.String("agent_execution_id", resp.AgentExecutionID),
@@ -534,7 +479,8 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 		return nil, ErrNoAgentProfileID
 	}
 
-	if existing, ok := e.GetExecutionWithContext(ctx, task.ID); ok && existing != nil {
+	// Check if this specific session is already running
+	if existing, ok := e.GetExecutionBySession(session.ID); ok && existing != nil {
 		return nil, ErrExecutionAlreadyRunning
 	}
 
@@ -716,12 +662,8 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 		WorktreeBranch:   worktreeBranch,
 	}
 
-	e.mu.Lock()
-	e.executions[task.ID] = execution
-	e.mu.Unlock()
-
 	if startAgent {
-		// Start the agent process (agentctl execution was created above)
+		// Start the agent process asynchronously
 		go func() {
 			startCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 			defer cancel()
@@ -732,6 +674,13 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 					zap.String("session_id", session.ID),
 					zap.String("agent_execution_id", resp.AgentExecutionID),
 					zap.Error(err))
+				// Update session state to failed
+				if updateErr := e.repo.UpdateTaskSessionState(context.Background(), session.ID, models.TaskSessionStateFailed, err.Error()); updateErr != nil {
+					e.logger.Warn("failed to mark session as failed after start error on resume",
+						zap.String("task_id", task.ID),
+						zap.String("session_id", session.ID),
+						zap.Error(updateErr))
+				}
 			}
 		}()
 	}
@@ -739,45 +688,73 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 	return execution, nil
 }
 
-// Stop stops an active execution
-func (e *Executor) Stop(ctx context.Context, taskID string, reason string, force bool) error {
-	execution, err := e.getOrLoadExecution(ctx, taskID)
+// Stop stops an active execution by session ID
+func (e *Executor) Stop(ctx context.Context, sessionID string, reason string, force bool) error {
+	session, err := e.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
-		return err
+		return ErrExecutionNotFound
+	}
+	if session.AgentExecutionID == "" {
+		return ErrExecutionNotFound
 	}
 
 	e.logger.Info("stopping execution",
-		zap.String("task_id", taskID),
-		zap.String("agent_execution_id", execution.AgentExecutionID),
+		zap.String("task_id", session.TaskID),
+		zap.String("session_id", sessionID),
+		zap.String("agent_execution_id", session.AgentExecutionID),
 		zap.String("reason", reason),
 		zap.Bool("force", force))
 
-	err = e.agentManager.StopAgent(ctx, execution.AgentExecutionID, force)
+	err = e.agentManager.StopAgent(ctx, session.AgentExecutionID, force)
 	if err != nil {
 		// Log the error but continue to clean up execution state
 		// The agent instance may already be gone (container stopped externally)
 		e.logger.Warn("failed to stop agent (may already be stopped)",
-			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
 			zap.Error(err))
 	}
 
-	// Update execution status in memory and database regardless of agent stop result
-	e.mu.Lock()
-	if exec, ok := e.executions[taskID]; ok {
-		exec.SessionState = v1.TaskSessionStateCancelled
-		exec.LastUpdate = time.Now()
-	}
-	delete(e.executions, taskID) // Remove from cache so GetExecution returns false
-	e.mu.Unlock()
-
 	// Update database
-	if execution.SessionID != "" {
-		if dbErr := e.repo.UpdateTaskSessionState(ctx, execution.SessionID, models.TaskSessionStateCancelled, reason); dbErr != nil {
-			e.logger.Error("failed to update agent session status in database",
+	if dbErr := e.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateCancelled, reason); dbErr != nil {
+		e.logger.Error("failed to update agent session status in database",
+			zap.String("session_id", sessionID),
+			zap.Error(dbErr))
+	}
+
+	return nil
+}
+
+// StopByTaskID stops all active executions for a task
+func (e *Executor) StopByTaskID(ctx context.Context, taskID string, reason string, force bool) error {
+	// Get all active sessions for this task from database
+	sessions, err := e.repo.ListActiveTaskSessionsByTaskID(ctx, taskID)
+	if err != nil {
+		e.logger.Warn("failed to list active sessions for task",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return ErrExecutionNotFound
+	}
+
+	if len(sessions) == 0 {
+		return ErrExecutionNotFound
+	}
+
+	var lastErr error
+	stoppedCount := 0
+	for _, session := range sessions {
+		if err := e.Stop(ctx, session.ID, reason, force); err != nil {
+			e.logger.Warn("failed to stop session",
 				zap.String("task_id", taskID),
-				zap.String("session_id", execution.SessionID),
-				zap.Error(dbErr))
+				zap.String("session_id", session.ID),
+				zap.Error(err))
+			lastErr = err
+		} else {
+			stoppedCount++
 		}
+	}
+
+	if stoppedCount == 0 && lastErr != nil {
+		return lastErr
 	}
 
 	return nil
@@ -786,67 +763,6 @@ func (e *Executor) Stop(ctx context.Context, taskID string, reason string, force
 // Prompt sends a follow-up prompt to a running agent for a task
 // Returns PromptResult indicating if the agent needs input
 func (e *Executor) Prompt(ctx context.Context, taskID, sessionID string, prompt string) (*PromptResult, error) {
-	execution, err := e.getOrLoadExecutionForSession(ctx, taskID, sessionID)
-	if err != nil {
-		return nil, err
-	}
-
-	e.logger.Info("sending prompt to agent",
-		zap.String("task_id", taskID),
-		zap.String("session_id", sessionID),
-		zap.String("agent_execution_id", execution.AgentExecutionID),
-		zap.Int("prompt_length", len(prompt)))
-
-	return e.agentManager.PromptAgent(ctx, execution.AgentExecutionID, prompt)
-}
-
-// getOrLoadExecution gets execution from memory cache or loads from database.
-func (e *Executor) getOrLoadExecution(ctx context.Context, taskID string) (*TaskExecution, error) {
-	// First check in-memory cache
-	e.mu.RLock()
-	execution, exists := e.executions[taskID]
-	e.mu.RUnlock()
-
-	if exists {
-		return execution, nil
-	}
-
-	// Try to load from database
-	session, err := e.repo.GetActiveTaskSessionByTaskID(ctx, taskID)
-	if err != nil {
-		// Check if it's a "not found" error
-		if strings.Contains(err.Error(), "no active agent session") {
-			return nil, ErrExecutionNotFound
-		}
-		return nil, err
-	}
-
-	// Cache it in memory
-	execution = FromTaskSession(session)
-	e.mu.Lock()
-	e.executions[taskID] = execution
-	e.mu.Unlock()
-
-	e.logger.Info("loaded agent session from database",
-		zap.String("task_id", taskID),
-		zap.String("session_id", session.ID))
-
-	return execution, nil
-}
-
-// getOrLoadExecutionForSession gets execution for a specific task session.
-func (e *Executor) getOrLoadExecutionForSession(ctx context.Context, taskID, sessionID string) (*TaskExecution, error) {
-	if sessionID == "" {
-		return nil, ErrExecutionNotFound
-	}
-
-	e.mu.RLock()
-	execution, exists := e.executions[taskID]
-	e.mu.RUnlock()
-	if exists && execution.SessionID == sessionID {
-		return execution, nil
-	}
-
 	session, err := e.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return nil, ErrExecutionNotFound
@@ -858,12 +774,13 @@ func (e *Executor) getOrLoadExecutionForSession(ctx context.Context, taskID, ses
 		return nil, ErrExecutionNotFound
 	}
 
-	execution = FromTaskSession(session)
-	e.mu.Lock()
-	e.executions[taskID] = execution
-	e.mu.Unlock()
+	e.logger.Info("sending prompt to agent",
+		zap.String("task_id", taskID),
+		zap.String("session_id", sessionID),
+		zap.String("agent_execution_id", session.AgentExecutionID),
+		zap.Int("prompt_length", len(prompt)))
 
-	return execution, nil
+	return e.agentManager.PromptAgent(ctx, session.AgentExecutionID, prompt)
 }
 
 // RespondToPermission sends a response to a permission request for a session
@@ -877,31 +794,12 @@ func (e *Executor) RespondToPermission(ctx context.Context, sessionID, pendingID
 	return e.agentManager.RespondToPermissionBySessionID(ctx, sessionID, pendingID, optionID, cancelled)
 }
 
-// GetExecution returns the current execution state for a task
+// GetExecution returns the current execution state for a task (returns most recent active session)
 func (e *Executor) GetExecution(taskID string) (*TaskExecution, bool) {
 	ctx := context.Background()
 	const startupGracePeriod = 30 * time.Second
 
-	e.mu.RLock()
-	execution, exists := e.executions[taskID]
-	e.mu.RUnlock()
-
-	if exists {
-		// Verify the agent is actually running by probing agentctl
-		if execution.SessionID == "" || !e.agentManager.IsAgentRunningForSession(ctx, execution.SessionID) {
-			if time.Since(execution.StartedAt) < startupGracePeriod {
-				execCopy := *execution
-				return &execCopy, true
-			}
-			return nil, false
-		}
-
-		// Return a copy to avoid data races
-		execCopy := *execution
-		return &execCopy, true
-	}
-
-	// Try to load from database
+	// Load from database
 	session, err := e.repo.GetActiveTaskSessionByTaskID(ctx, taskID)
 	if err != nil {
 		return nil, false
@@ -912,112 +810,90 @@ func (e *Executor) GetExecution(taskID string) (*TaskExecution, bool) {
 	if session.ID == "" || !e.agentManager.IsAgentRunningForSession(ctx, session.ID) {
 		if (session.State == models.TaskSessionStateStarting || session.State == models.TaskSessionStateRunning) &&
 			time.Since(session.UpdatedAt) < startupGracePeriod {
-			execution = FromTaskSession(session)
-			e.mu.Lock()
-			e.executions[taskID] = execution
-			e.mu.Unlock()
-			execCopy := *execution
-			return &execCopy, true
+			return FromTaskSession(session), true
 		}
 		return nil, false
 	}
 
-	// Cache it in memory
-	execution = FromTaskSession(session)
-	e.mu.Lock()
-	e.executions[taskID] = execution
-	e.mu.Unlock()
-
-	execCopy := *execution
-	return &execCopy, true
+	return FromTaskSession(session), true
 }
 
-// GetExecutionWithContext returns the current execution state for a task with context
-func (e *Executor) GetExecutionWithContext(ctx context.Context, taskID string) (*TaskExecution, bool) {
-	e.mu.RLock()
-	execution, exists := e.executions[taskID]
-	e.mu.RUnlock()
+// GetExecutionBySession returns the execution state for a specific session
+func (e *Executor) GetExecutionBySession(sessionID string) (*TaskExecution, bool) {
+	ctx := context.Background()
+	const startupGracePeriod = 30 * time.Second
 
-	if exists {
-		// Verify the agent is actually running by probing agentctl
-		if execution.SessionID == "" || !e.agentManager.IsAgentRunningForSession(ctx, execution.SessionID) {
-			// Agent stopped - clean up in-memory state
-			e.mu.Lock()
-			delete(e.executions, taskID)
-			e.mu.Unlock()
-
-			// Also update DB if we have a session
-			if execution.SessionID != "" {
-				_ = e.repo.UpdateTaskSessionState(ctx, execution.SessionID, models.TaskSessionStateCancelled, "agent process stopped")
-			}
-
-			// Clean up the stale execution from the agent manager
-			if execution.SessionID != "" {
-				if err := e.agentManager.CleanupStaleExecutionBySessionID(ctx, execution.SessionID); err != nil {
-					e.logger.Warn("failed to cleanup stale agent execution",
-						zap.String("session_id", execution.SessionID),
-						zap.Error(err))
-				}
-			}
-			return nil, false
-		}
-
-		execCopy := *execution
-		return &execCopy, true
+	// Load from database
+	session, err := e.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, false
+	}
+	if session.AgentExecutionID == "" {
+		return nil, false
 	}
 
-	// Try to load from database
+	// Verify the agent is actually running
+	if !e.agentManager.IsAgentRunningForSession(ctx, sessionID) {
+		if (session.State == models.TaskSessionStateStarting || session.State == models.TaskSessionStateRunning) &&
+			time.Since(session.UpdatedAt) < startupGracePeriod {
+			return FromTaskSession(session), true
+		}
+		return nil, false
+	}
+
+	return FromTaskSession(session), true
+}
+
+// GetExecutionWithContext returns the current execution state for a task with context (returns most recent active session)
+// This is a read-only check - it does NOT cancel sessions as a side effect.
+func (e *Executor) GetExecutionWithContext(ctx context.Context, taskID string) (*TaskExecution, bool) {
+	const startupGracePeriod = 30 * time.Second
+
+	// Load from database
 	session, err := e.repo.GetActiveTaskSessionByTaskID(ctx, taskID)
 	if err != nil {
 		return nil, false
 	}
+	if session.ID == "" {
+		return nil, false
+	}
 
 	// Verify the agent is actually running by probing the lifecycle manager
-	if session.ID == "" || !e.agentManager.IsAgentRunningForSession(ctx, session.ID) {
-		e.logger.Info("stale agent session detected - agent not running",
-			zap.String("task_id", taskID),
-			zap.String("session_id", session.ID))
-		_ = e.repo.UpdateTaskSessionState(ctx, session.ID, models.TaskSessionStateCancelled, "agent not running after backend restart")
-
-		// Clean up the stale execution from the agent manager
-		if session.ID != "" {
-			if err := e.agentManager.CleanupStaleExecutionBySessionID(ctx, session.ID); err != nil {
-				e.logger.Warn("failed to cleanup stale agent execution",
-					zap.String("session_id", session.ID),
-					zap.Error(err))
-			}
+	if !e.agentManager.IsAgentRunningForSession(ctx, session.ID) {
+		// Allow a grace period for sessions that are starting up
+		if (session.State == models.TaskSessionStateStarting || session.State == models.TaskSessionStateRunning) &&
+			time.Since(session.UpdatedAt) < startupGracePeriod {
+			return FromTaskSession(session), true
 		}
 		return nil, false
 	}
 
-	// Cache it in memory
-	execution = FromTaskSession(session)
-	e.mu.Lock()
-	e.executions[taskID] = execution
-	e.mu.Unlock()
-
-	execCopy := *execution
-	return &execCopy, true
+	return FromTaskSession(session), true
 }
 
 // ListExecutions returns all active executions
 func (e *Executor) ListExecutions() []*TaskExecution {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
+	ctx := context.Background()
+	sessions, err := e.repo.ListActiveTaskSessions(ctx)
+	if err != nil {
+		return nil
+	}
 
-	result := make([]*TaskExecution, 0, len(e.executions))
-	for _, exec := range e.executions {
-		execCopy := *exec
-		result = append(result, &execCopy)
+	result := make([]*TaskExecution, 0, len(sessions))
+	for _, session := range sessions {
+		result = append(result, FromTaskSession(session))
 	}
 	return result
 }
 
 // ActiveCount returns the number of active executions
 func (e *Executor) ActiveCount() int {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	return len(e.executions)
+	ctx := context.Background()
+	sessions, err := e.repo.ListActiveTaskSessions(ctx)
+	if err != nil {
+		return 0
+	}
+	return len(sessions)
 }
 
 // CanExecute returns true if there's capacity for another execution
@@ -1025,89 +901,64 @@ func (e *Executor) CanExecute() bool {
 	return e.ActiveCount() < e.maxConcurrent
 }
 
-// UpdateProgress updates the progress of an execution (called when ACP progress messages are received)
-func (e *Executor) UpdateProgress(ctx context.Context, taskID string, progress int, state v1.TaskSessionState) {
-	e.mu.Lock()
-	var sessionID string
-	if exec, ok := e.executions[taskID]; ok {
-		exec.Progress = progress
-		exec.SessionState = state
-		exec.LastUpdate = time.Now()
-		sessionID = exec.SessionID
-
-		e.logger.Debug("updated execution progress",
-			zap.String("task_id", taskID),
-			zap.Int("progress", progress),
-			zap.String("state", string(state)))
-	}
-	e.mu.Unlock()
+// UpdateProgressBySession updates the progress of an execution by session ID
+func (e *Executor) UpdateProgressBySession(ctx context.Context, sessionID string, progress int, state v1.TaskSessionState) {
+	e.logger.Debug("updating execution progress",
+		zap.String("session_id", sessionID),
+		zap.Int("progress", progress),
+		zap.String("state", string(state)))
 
 	// Update database asynchronously (don't block on this)
-	if sessionID != "" {
-		go func() {
-			session, err := e.repo.GetTaskSession(ctx, sessionID)
-			if err != nil {
-				return
-			}
-			session.Progress = progress
-			session.State = models.TaskSessionState(state)
-			if err := e.repo.UpdateTaskSession(ctx, session); err != nil {
-				e.logger.Error("failed to update agent session progress in database",
-					zap.String("session_id", sessionID),
-					zap.Error(err))
-			}
-		}()
-	}
-}
-
-// MarkCompleted marks an execution as completed
-func (e *Executor) MarkCompleted(ctx context.Context, taskID string, state v1.TaskSessionState) {
-	e.mu.Lock()
-	var sessionID string
-	if exec, ok := e.executions[taskID]; ok {
-		exec.SessionState = state
-		exec.Progress = 100
-		exec.LastUpdate = time.Now()
-		sessionID = exec.SessionID
-
-		e.logger.Info("execution completed",
-			zap.String("task_id", taskID),
-			zap.String("state", string(state)))
-	}
-	e.mu.Unlock()
-
-	// Update database
-	if sessionID != "" {
-		dbState := models.TaskSessionState(state)
-		if err := e.repo.UpdateTaskSessionState(ctx, sessionID, dbState, ""); err != nil {
-			e.logger.Error("failed to update agent session status in database",
+	go func() {
+		session, err := e.repo.GetTaskSession(ctx, sessionID)
+		if err != nil {
+			return
+		}
+		session.Progress = progress
+		session.State = models.TaskSessionState(state)
+		if err := e.repo.UpdateTaskSession(ctx, session); err != nil {
+			e.logger.Error("failed to update agent session progress in database",
 				zap.String("session_id", sessionID),
 				zap.Error(err))
 		}
+	}()
+}
+
+// UpdateProgress updates the progress of an execution by task ID (uses most recent session)
+// Deprecated: Use UpdateProgressBySession instead when session ID is available
+func (e *Executor) UpdateProgress(ctx context.Context, taskID string, progress int, state v1.TaskSessionState) {
+	ctx2 := context.Background()
+	session, err := e.repo.GetActiveTaskSessionByTaskID(ctx2, taskID)
+	if err != nil {
+		return
+	}
+	e.UpdateProgressBySession(ctx, session.ID, progress, state)
+}
+
+// MarkCompletedBySession marks an execution as completed by session ID
+func (e *Executor) MarkCompletedBySession(ctx context.Context, sessionID string, state v1.TaskSessionState) {
+	e.logger.Info("execution completed",
+		zap.String("session_id", sessionID),
+		zap.String("state", string(state)))
+
+	// Update database
+	dbState := models.TaskSessionState(state)
+	if err := e.repo.UpdateTaskSessionState(ctx, sessionID, dbState, ""); err != nil {
+		e.logger.Error("failed to update agent session status in database",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
 	}
 }
 
-// UpdateExecutionState updates the in-memory execution state for a task.
-func (e *Executor) UpdateExecutionState(taskID string, state v1.TaskSessionState) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	if exec, ok := e.executions[taskID]; ok {
-		exec.SessionState = state
-		exec.LastUpdate = time.Now()
+// MarkCompleted marks an execution as completed by task ID (uses most recent session)
+// Deprecated: Use MarkCompletedBySession instead when session ID is available
+func (e *Executor) MarkCompleted(ctx context.Context, taskID string, state v1.TaskSessionState) {
+	ctx2 := context.Background()
+	session, err := e.repo.GetActiveTaskSessionByTaskID(ctx2, taskID)
+	if err != nil {
+		return
 	}
-}
-
-// RemoveExecution removes a completed/failed execution from in-memory tracking
-// Note: The database record is preserved for history
-func (e *Executor) RemoveExecution(taskID string) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	if _, ok := e.executions[taskID]; ok {
-		delete(e.executions, taskID)
-		e.logger.Debug("removed execution from tracking", zap.String("task_id", taskID))
-	}
+	e.MarkCompletedBySession(ctx, session.ID, state)
 }
 
 // MockAgentManagerClient is a placeholder implementation

@@ -2204,6 +2204,34 @@ func (r *SQLiteRepository) ListActiveTaskSessions(ctx context.Context) ([]*model
 	return sessions, nil
 }
 
+// ListActiveTaskSessionsByTaskID returns all active agent sessions for a specific task
+func (r *SQLiteRepository) ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, environment_id,
+		       repository_id, base_branch,
+		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
+		       state, progress, error_message, metadata, started_at, completed_at, updated_at
+		FROM task_sessions WHERE task_id = ? AND state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT') ORDER BY started_at DESC
+	`, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	sessions, err := r.scanTaskSessions(ctx, rows)
+	if err != nil {
+		return nil, err
+	}
+	for _, session := range sessions {
+		worktrees, err := r.ListTaskSessionWorktrees(ctx, session.ID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load session worktrees: %w", err)
+		}
+		session.Worktrees = worktrees
+	}
+	return sessions, nil
+}
+
 func (r *SQLiteRepository) HasActiveTaskSessionsByAgentProfile(ctx context.Context, agentProfileID string) (bool, error) {
 	var exists int
 	err := r.db.QueryRowContext(ctx, `
