@@ -1,12 +1,7 @@
 'use client';
 
 import { useCallback, useState } from 'react';
-import {
-  IconAlertTriangle,
-  IconCheck,
-  IconX,
-  IconLoader2,
-} from '@tabler/icons-react';
+import { IconAlertTriangle, IconCheck, IconX, IconLoader2 } from '@tabler/icons-react';
 import { Button } from '@kandev/ui/button';
 import { cn } from '@/lib/utils';
 import { getWebSocketClient } from '@/lib/ws/connection';
@@ -140,20 +135,20 @@ export function PermissionRequestMessage({ comment }: PermissionRequestMessagePr
           </span>
           <Button
             size="sm"
-            variant="ghost"
+            variant="outline"
             onClick={handleReject}
             disabled={isResponding}
-            className="h-7 px-2 text-red-600 hover:text-red-700 hover:bg-red-500/10"
+            className="h-7 px-3 text-red-600 border-red-500/40 bg-red-500/10 hover:bg-red-500/20 hover:text-red-700 hover:border-red-500/60"
           >
             <IconX className="h-4 w-4 mr-1" />
             Deny
           </Button>
           <Button
             size="sm"
-            variant="ghost"
+            variant="outline"
             onClick={handleApprove}
             disabled={isResponding}
-            className="h-7 px-2 text-green-600 hover:text-green-700 hover:bg-green-500/10"
+            className="h-7 px-3 text-green-600 border-green-500/40 bg-green-500/10 hover:bg-green-500/20 hover:text-green-700 hover:border-green-500/60"
           >
             {isResponding ? (
               <IconLoader2 className="h-4 w-4 mr-1 animate-spin" />
@@ -167,4 +162,3 @@ export function PermissionRequestMessage({ comment }: PermissionRequestMessagePr
     </div>
   );
 }
-

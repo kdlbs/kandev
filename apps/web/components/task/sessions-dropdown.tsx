@@ -97,6 +97,7 @@ export function SessionsDropdown({
 }: SessionsDropdownProps) {
   const [currentTime, setCurrentTime] = useState(() => Date.now());
   const [showNewSessionDialog, setShowNewSessionDialog] = useState(false);
+  const [open, setOpen] = useState(false);
   const agentProfiles = useAppStore((state) => state.agentProfiles.items);
   const setActiveSession = useAppStore((state) => state.setActiveSession);
   const { sessions, loadSessions } = useTaskSessions(taskId);
@@ -106,8 +107,9 @@ export function SessionsDropdown({
   }, [agentProfiles]);
 
   const handleOpenChange = useCallback(
-    (open: boolean) => {
-      if (!open || !taskId) return;
+    (nextOpen: boolean) => {
+      setOpen(nextOpen);
+      if (!nextOpen || !taskId) return;
       loadSessions(true);
     },
     [loadSessions, taskId]
@@ -136,6 +138,7 @@ export function SessionsDropdown({
     if (!taskId) return;
     setActiveSession(taskId, sessionId);
     updateUrl(sessionId);
+    setOpen(false);
   };
 
   const handleCreateSession = async (data: {
@@ -194,12 +197,12 @@ export function SessionsDropdown({
 
   return (
     <>
-      <DropdownMenu onOpenChange={handleOpenChange}>
+      <DropdownMenu open={open} onOpenChange={handleOpenChange}>
         <DropdownMenuTrigger asChild>
           <Button
             variant="ghost"
             size="sm"
-            className="h-9 gap-1.5 px-2 cursor-pointer hover:bg-muted/40 border border-border"
+            className="h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40 border border-border"
           >
             <IconStack2 className="h-4 w-4 text-muted-foreground" />
             <Badge variant="secondary" className="h-5 px-1.5 text-xs font-normal">
@@ -207,13 +210,13 @@ export function SessionsDropdown({
             </Badge>
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-[280px]">
-          <div className="flex items-center justify-between px-2 py-1.5">
+        <DropdownMenuContent align="end" className="w-auto min-w-[240px] max-w-[420px]">
+          <div className="flex items-center justify-between px-2 py-0">
             <span className="text-xs font-medium text-muted-foreground">Sessions</span>
             <button
               type="button"
               onClick={() => setShowNewSessionDialog(true)}
-              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+              className="flex items-center gap-1 rounded-md border border-border/60 px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:border-border transition-colors cursor-pointer"
             >
               <IconPlus className="h-3.5 w-3.5" />
               New
@@ -234,6 +237,7 @@ export function SessionsDropdown({
                     status === 'running',
                     currentTime
                   );
+                  const showDuration = duration !== '0s';
                   const number = sortedSessions.length - index;
 
                   return (
@@ -247,18 +251,20 @@ export function SessionsDropdown({
                         #{number}
                       </span>
 
-                      <span className="text-xs text-foreground flex-1 text-left truncate">
+                      <span className="text-xs text-foreground flex-1 text-left">
                         {resolveAgentLabel(session)}
                       </span>
 
-                      <span className="text-xs text-muted-foreground w-16 text-right shrink-0">
-                        {duration}
-                      </span>
+                      {showDuration ?
+                        <span className="text-xs text-muted-foreground w-16 text-right shrink-0">
+                          {duration}
+                        </span>
+                        : ''}
 
                       <div className="w-5 shrink-0 flex items-center justify-center">
                         <Tooltip>
                           <TooltipTrigger asChild>
-                          <div>{getSessionStateIcon(session.state, 'h-3.5 w-3.5')}</div>
+                            <div>{getSessionStateIcon(session.state, 'h-3.5 w-3.5')}</div>
                           </TooltipTrigger>
                           <TooltipContent side="left">{getStatusLabel(status)}</TooltipContent>
                         </Tooltip>

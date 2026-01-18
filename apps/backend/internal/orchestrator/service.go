@@ -1090,14 +1090,7 @@ func (s *Service) updateTaskSessionState(ctx context.Context, taskID, sessionID 
 	}
 }
 
-func (s *Service) finalizeAgentReady(taskID, sessionID string) {
-	ctx := context.Background()
-	if sessionID == "" {
-		s.logger.Warn("missing session_id for finalizeAgentReady",
-			zap.String("task_id", taskID))
-		return
-	}
-
+func (s *Service) setSessionWaitingForInput(ctx context.Context, taskID, sessionID string) {
 	s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateWaitingForInput, "", false)
 
 	task, err := s.taskRepo.GetTask(ctx, taskID)
@@ -1122,6 +1115,17 @@ func (s *Service) finalizeAgentReady(taskID, sessionID string) {
 			zap.String("task_id", taskID),
 			zap.String("current_state", string(task.State)))
 	}
+}
+
+func (s *Service) finalizeAgentReady(taskID, sessionID string) {
+	ctx := context.Background()
+	if sessionID == "" {
+		s.logger.Warn("missing session_id for finalizeAgentReady",
+			zap.String("task_id", taskID))
+		return
+	}
+
+	s.setSessionWaitingForInput(ctx, taskID, sessionID)
 }
 
 // handleGitStatusUpdated handles git status updates and persists them to agent session metadata
@@ -1190,6 +1194,8 @@ func (s *Service) handlePermissionRequest(ctx context.Context, data watcher.Perm
 			zap.String("pending_id", data.PendingID))
 		return
 	}
+
+	s.setSessionWaitingForInput(ctx, data.TaskID, data.TaskSessionID)
 
 	if s.messageCreator != nil {
 		_, err := s.messageCreator.CreatePermissionRequestMessage(

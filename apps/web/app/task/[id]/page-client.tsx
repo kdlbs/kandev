@@ -9,7 +9,7 @@ import { DebugOverlay } from '@/components/debug-overlay';
 import type { Repository, Task } from '@/lib/types/http';
 import { DEBUG_UI } from '@/lib/config';
 import { useRepositories } from '@/hooks/use-repositories';
-import { useTaskAgent } from '@/hooks/use-task-agent';
+import { useSessionAgent } from '@/hooks/use-session-agent';
 import { useSessionResumption } from '@/hooks/use-session-resumption';
 import { useSessionAgentctl } from '@/hooks/use-session-agentctl';
 import { useAppStore } from '@/components/state-provider';
@@ -64,7 +64,7 @@ export default function TaskPage({
     taskSessionState: agentSessionState,
     handleStartAgent,
     handleStopAgent,
-  } = useTaskAgent(task);
+  } = useSessionAgent(task);
 
   const initialSessionId = sessionId ?? taskSessionId ?? null;
   const effectiveSessionId = activeSessionId ?? initialSessionId;

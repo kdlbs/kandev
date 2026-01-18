@@ -74,7 +74,6 @@ function getStatusIcon(status?: string, permissionStatus?: string) {
     case 'error':
       return <IconX className="h-3.5 w-3.5 text-red-500" />;
     case 'running':
-      return <IconLoader2 className="h-3.5 w-3.5 text-blue-500 animate-spin" />;
     default:
       return null;
   }
@@ -236,25 +235,25 @@ export function ToolCallMessage({ comment, permissionMessage }: ToolCallMessageP
           </span>
           <Button
             size="sm"
-            variant="ghost"
+            variant="outline"
             onClick={handleReject}
             disabled={isResponding}
-            className="h-7 px-2 text-red-600 hover:text-red-700 hover:bg-red-500/10"
+            className="h-7 px-3 text-foreground border-border bg-background hover:bg-muted hover:border-foreground/40 transition-colors cursor-pointer"
           >
-            <IconX className="h-4 w-4 mr-1" />
+            <IconX className="h-4 w-4 mr-1 text-red-500" />
             Deny
           </Button>
           <Button
             size="sm"
-            variant="ghost"
+            variant="outline"
             onClick={handleApprove}
             disabled={isResponding}
-            className="h-7 px-2 text-green-600 hover:text-green-700 hover:bg-green-500/10"
+            className="h-7 px-3 text-foreground border-border bg-background hover:bg-muted hover:border-foreground/40 transition-colors cursor-pointer"
           >
             {isResponding ? (
               <IconLoader2 className="h-4 w-4 mr-1 animate-spin" />
             ) : (
-              <IconCheck className="h-4 w-4 mr-1" />
+              <IconCheck className="h-4 w-4 mr-1 text-green-500" />
             )}
             Approve
           </Button>

@@ -320,7 +320,11 @@ export function TaskChatPanel({
           value={messageInput}
           onChange={setMessageInput}
           onSubmit={() => handleSubmit()}
-          placeholder="Write to submit work to the agent..."
+          placeholder={
+            agentMessageCount > 0
+              ? 'Continue working on this task...'
+              : 'Write to submit work to the agent...'
+          }
           planModeEnabled={planModeEnabled}
         />
         <div className="flex items-center justify-between gap-2">
@@ -341,7 +345,7 @@ export function TaskChatPanel({
               <Tooltip>
                 <TooltipTrigger asChild>
                   <DropdownMenuTrigger asChild>
-                    <Button type="button" variant="outline" size="icon" className="h-9 w-9 cursor-pointer">
+                    <Button type="button" variant="outline" size="icon" className="h-7 w-7 cursor-pointer">
                       <IconBrain className="h-4 w-4" />
                     </Button>
                   </DropdownMenuTrigger>
@@ -363,7 +367,7 @@ export function TaskChatPanel({
                     variant="outline"
                     size="icon"
                     className={cn(
-                      'h-9 w-9 cursor-pointer',
+                      'h-7 w-7 cursor-pointer',
                       planModeEnabled &&
                       'bg-primary/15 text-primary border-primary/40 shadow-[0_0_0_1px_rgba(59,130,246,0.35)]'
                     )}
@@ -388,7 +392,7 @@ export function TaskChatPanel({
             />
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button type="button" variant="outline" size="icon" className="h-9 w-9 cursor-pointer">
+                <Button type="button" variant="outline" size="icon" className="h-7 w-7 cursor-pointer">
                   <IconPaperclip className="h-4 w-4" />
                 </Button>
               </TooltipTrigger>
@@ -398,7 +402,7 @@ export function TaskChatPanel({
               <Button
                 type={isAgentBusy ? 'button' : 'submit'}
                 variant={isAgentBusy ? 'destructive' : 'default'}
-                className={cn('h-9', isAgentBusy && 'gap-2')}
+                className={cn('h-7', isAgentBusy && 'gap-2')}
                 disabled={isStarting || isSending}
               >
                 {isAgentBusy ? (
