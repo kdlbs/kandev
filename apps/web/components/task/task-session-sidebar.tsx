@@ -2,16 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { TaskState } from '@/lib/types/http';
-import { TaskSessionSwitcher } from './task-session-switcher';
 import { TaskSwitcher } from './task-switcher';
 import { Button } from '@kandev/ui/button';
 import { IconPlus } from '@tabler/icons-react';
 import { TaskCreateDialog } from '@/components/task-create-dialog';
 import { useAppStore, useAppStoreApi } from '@/components/state-provider';
-import { getWebSocketClient } from '@/lib/ws/connection';
 import { linkToSession } from '@/lib/links';
 import { listTaskSessions } from '@/lib/http';
-import { useTaskSessions } from '@/hooks/use-task-sessions';
 import { useTasks } from '@/hooks/use-tasks';
 
 type TaskSummary = {
@@ -36,8 +33,8 @@ export function TaskSessionSidebar({ workspaceId, boardId }: TaskSessionSidebarP
   const columns = useAppStore((state) => state.kanban.columns);
   const workspaces = useAppStore((state) => state.workspaces.items);
   const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
-  const setActiveSession = useAppStore((state) => state.setActiveSession);
   const setActiveTask = useAppStore((state) => state.setActiveTask);
+  const setActiveSession = useAppStore((state) => state.setActiveSession);
   const setTaskSessionsForTask = useAppStore((state) => state.setTaskSessionsForTask);
   const setTaskSessionsLoading = useAppStore((state) => state.setTaskSessionsLoading);
   const selectedTaskId = useMemo(() => {
@@ -46,10 +43,7 @@ export function TaskSessionSidebar({ workspaceId, boardId }: TaskSessionSidebarP
     }
     return activeTaskId;
   }, [activeSessionId, activeTaskId, sessionsById]);
-  const { sessions: selectedSessions, loadSessions: loadSelectedSessions } = useTaskSessions(selectedTaskId ?? null);
   const [taskDialogOpen, setTaskDialogOpen] = useState(false);
-  const [sessionDialogOpen, setSessionDialogOpen] = useState(false);
-  const [sessionTask, setSessionTask] = useState<TaskSummary | null>(null);
   const store = useAppStoreApi();
 
   const workspaceName = useMemo(() => {
@@ -69,16 +63,6 @@ export function TaskSessionSidebar({ workspaceId, boardId }: TaskSessionSidebarP
       repositoryPath: task.repositoryId ? repositoryPathsById.get(task.repositoryId) : undefined,
     }));
   }, [repositoriesByWorkspace, tasks, workspaceId]);
-
-  useEffect(() => {
-    if (!selectedTaskId) return;
-    const client = getWebSocketClient();
-    if (!client) return;
-    const unsubscribers = selectedSessions.map((session) => client.subscribeSession(session.id));
-    return () => {
-      unsubscribers.forEach((unsubscribe) => unsubscribe());
-    };
-  }, [selectedSessions, selectedTaskId]);
 
   const updateUrl = useCallback((sessionId: string) => {
     if (typeof window === 'undefined') return;
@@ -110,13 +94,6 @@ export function TaskSessionSidebar({ workspaceId, boardId }: TaskSessionSidebarP
     [setTaskSessionsForTask, setTaskSessionsLoading, store]
   );
 
-  const handleSelectSession = useCallback(
-    (taskId: string, sessionId: string) => {
-      setActiveSession(taskId, sessionId);
-      updateUrl(sessionId);
-    },
-    [setActiveSession, updateUrl]
-  );
 
   const handleSelectTask = useCallback(
     async (taskId: string) => {
@@ -132,40 +109,6 @@ export function TaskSessionSidebar({ workspaceId, boardId }: TaskSessionSidebarP
     [loadTaskSessionsForTask, setActiveSession, setActiveTask, updateUrl]
   );
 
-  const handleCreateSession = useCallback(
-    async (taskId: string, data: { prompt: string; agentProfileId: string; executorId: string; environmentId: string }) => {
-      const client = getWebSocketClient();
-      if (!client) return;
-
-      try {
-        const response = await client.request<{
-          success: boolean;
-          task_id: string;
-          agent_instance_id: string;
-          session_id?: string;
-          state: string;
-        }>(
-          'orchestrator.start',
-          {
-            task_id: taskId,
-            agent_profile_id: data.agentProfileId,
-            prompt: data.prompt.trim(),
-          },
-          15000
-        );
-
-        await loadSelectedSessions(true);
-
-        if (response?.session_id) {
-          setActiveSession(taskId, response.session_id);
-          updateUrl(response.session_id);
-        }
-      } catch (error) {
-        console.error('Failed to create task session:', error);
-      }
-    },
-    [loadSelectedSessions, setActiveSession, updateUrl]
-  );
 
   return (
     <>
@@ -183,17 +126,6 @@ export function TaskSessionSidebar({ workspaceId, boardId }: TaskSessionSidebarP
           </Button>
         </div>
         <div className="flex-1 min-h-0 overflow-y-auto space-y-4 pt-3">
-          <TaskSessionSwitcher
-            taskId={selectedTaskId}
-            sessions={selectedSessions}
-            onSelectSession={handleSelectSession}
-            onCreateSession={() => {
-              if (!selectedTaskId) return;
-              const task = tasksWithRepositories.find((item) => item.id === selectedTaskId) ?? null;
-              setSessionTask(task);
-              setSessionDialogOpen(true);
-            }}
-          />
           <TaskSwitcher
             tasks={tasksWithRepositories}
             columns={columns.map((column) => ({ id: column.id, title: column.title }))}
@@ -240,23 +172,6 @@ export function TaskSessionSidebar({ workspaceId, boardId }: TaskSessionSidebarP
             setActiveSession(task.id, meta.taskSessionId);
             updateUrl(meta.taskSessionId);
           }
-        }}
-      />
-      <TaskCreateDialog
-        open={sessionDialogOpen}
-        onOpenChange={setSessionDialogOpen}
-        mode="session"
-        workspaceId={workspaceId}
-        boardId={boardId}
-        defaultColumnId={columns[0]?.id ?? null}
-        columns={columns.map((column) => ({ id: column.id, title: column.title }))}
-        initialValues={{
-          title: sessionTask?.title ?? '',
-          description: sessionTask?.description ?? '',
-        }}
-        onCreateSession={(data) => {
-          if (!sessionTask) return;
-          handleCreateSession(sessionTask.id, data);
         }}
       />
     </>

@@ -14,11 +14,11 @@ import {
   IconTerminal2,
   IconX,
 } from '@tabler/icons-react';
-import { Button } from '@kandev/ui/button';
 import { cn } from '@/lib/utils';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import type { Message } from '@/lib/types/http';
 import type { ToolCallMetadata } from '@/components/task/chat/types';
+import { PermissionActionRow } from './permission-action-row';
 
 type PermissionOption = {
   option_id: string;
@@ -74,7 +74,6 @@ function getStatusIcon(status?: string, permissionStatus?: string) {
     case 'error':
       return <IconX className="h-3.5 w-3.5 text-red-500" />;
     case 'running':
-      return <IconLoader2 className="h-3.5 w-3.5 text-blue-500 animate-spin" />;
     default:
       return null;
   }
@@ -230,35 +229,11 @@ export function ToolCallMessage({ comment, permissionMessage }: ToolCallMessageP
 
       {/* Inline permission approval UI */}
       {isPermissionPending && (
-        <div className="flex items-center gap-2 px-3 py-2 border-t border-amber-500/30 bg-amber-500/10">
-          <span className="text-xs text-amber-600 dark:text-amber-400 flex-1">
-            Approve this action?
-          </span>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={handleReject}
-            disabled={isResponding}
-            className="h-7 px-2 text-red-600 hover:text-red-700 hover:bg-red-500/10"
-          >
-            <IconX className="h-4 w-4 mr-1" />
-            Deny
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={handleApprove}
-            disabled={isResponding}
-            className="h-7 px-2 text-green-600 hover:text-green-700 hover:bg-green-500/10"
-          >
-            {isResponding ? (
-              <IconLoader2 className="h-4 w-4 mr-1 animate-spin" />
-            ) : (
-              <IconCheck className="h-4 w-4 mr-1" />
-            )}
-            Approve
-          </Button>
-        </div>
+        <PermissionActionRow
+          onApprove={handleApprove}
+          onReject={handleReject}
+          isResponding={isResponding}
+        />
       )}
     </div>
   );

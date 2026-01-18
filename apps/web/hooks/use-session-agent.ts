@@ -5,7 +5,7 @@ import type { TaskSessionState, Task, TaskSession } from '@/lib/types/http';
 
 const EMPTY_SESSIONS: TaskSession[] = [];
 
-interface UseTaskAgentReturn {
+interface UseSessionAgentReturn {
   isAgentRunning: boolean;
   isAgentLoading: boolean;
   taskSessionId: string | null;
@@ -16,7 +16,7 @@ interface UseTaskAgentReturn {
   handleStopAgent: () => Promise<void>;
 }
 
-export function useTaskAgent(task: Task | null): UseTaskAgentReturn {
+export function useSessionAgent(task: Task | null): UseSessionAgentReturn {
   const [isAgentRunning, setIsAgentRunning] = useState(false);
   const [isAgentLoading, setIsAgentLoading] = useState(false);
   const [taskSessionId, setAgentSessionId] = useState<string | null>(null);
@@ -45,7 +45,7 @@ export function useTaskAgent(task: Task | null): UseTaskAgentReturn {
       setWorktreePath(activeSession.worktree_path ?? null);
       setWorktreeBranch(activeSession.worktree_branch ?? null);
     }
-  }, [activeSession?.worktree_path, activeSession?.worktree_branch]);
+  }, [activeSession]);
 
   useEffect(() => {
     setIsAgentRunning(false);
@@ -77,7 +77,7 @@ export function useTaskAgent(task: Task | null): UseTaskAgentReturn {
           session_id?: string;
         }>('task.execution', { task_id: task.id });
 
-        console.log('[useTaskAgent] Task execution check:', response);
+        console.log('[useSessionAgent] Task execution check:', response);
         if (response.has_execution) {
           setIsAgentRunning(true);
           if (response.state) {
@@ -92,7 +92,7 @@ export function useTaskAgent(task: Task | null): UseTaskAgentReturn {
           setTaskSessionState(null);
         }
       } catch (err) {
-        console.error('[useTaskAgent] Failed to check task execution:', err);
+        console.error('[useSessionAgent] Failed to check task execution:', err);
       }
     };
 
@@ -124,7 +124,7 @@ export function useTaskAgent(task: Task | null): UseTaskAgentReturn {
         worktree_path?: string;
         worktree_branch?: string;
       }
-      console.log('[useTaskAgent] orchestrator.start request', {
+      console.log('[useSessionAgent] orchestrator.start request', {
         taskId: task.id,
         agentProfileId,
         promptLength: prompt?.length ?? 0,
@@ -134,7 +134,7 @@ export function useTaskAgent(task: Task | null): UseTaskAgentReturn {
         agent_profile_id: agentProfileId,
         prompt: prompt ?? task.description ?? '',
       }, 15000);
-      console.log('[useTaskAgent] orchestrator.start response', response);
+      console.log('[useSessionAgent] orchestrator.start response', response);
       setIsAgentRunning(true);
       setTaskSessionState(response.state as TaskSessionState);
       if (response?.session_id) {
