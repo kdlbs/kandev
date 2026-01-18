@@ -114,17 +114,18 @@ func (p *EventPublisher) PublishAgentStreamEvent(execution *AgentExecution, even
 	// Build the nested event data
 	// event.SessionID is the ACP session ID (internal agent protocol session)
 	eventData := &AgentStreamEventData{
-		Type:         event.Type,
-		ACPSessionID: event.SessionID,
-		Text:         event.Text,
-		ToolCallID:   event.ToolCallID,
-		ToolName:     event.ToolName,
-		ToolTitle:    event.ToolTitle,
-		ToolStatus:   event.ToolStatus,
-		ToolArgs:     event.ToolArgs,
-		ToolResult:   event.ToolResult,
-		Error:        event.Error,
-		Data:         event.Data,
+		Type:          event.Type,
+		ACPSessionID:  event.SessionID,
+		Text:          event.Text,
+		ToolCallID:    event.ToolCallID,
+		ToolName:      event.ToolName,
+		ToolTitle:     event.ToolTitle,
+		ToolStatus:    event.ToolStatus,
+		ToolArgs:      event.ToolArgs,
+		ToolResult:    event.ToolResult,
+		Error:         event.Error,
+		SessionStatus: event.SessionStatus,
+		Data:          event.Data,
 	}
 
 	// Build agent event message payload

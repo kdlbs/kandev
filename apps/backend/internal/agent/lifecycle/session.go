@@ -101,8 +101,7 @@ func (sm *SessionManager) InitializeSession(
 	return result, nil
 }
 
-// createOrLoadSession determines whether to create a new session or load an existing one
-// based on the agent configuration and whether an existing session ID is provided.
+// createOrLoadSession creates a new session or loads an existing one based on agent config.
 func (sm *SessionManager) createOrLoadSession(
 	ctx context.Context,
 	client *agentctl.Client,
@@ -110,23 +109,9 @@ func (sm *SessionManager) createOrLoadSession(
 	existingSessionID string,
 	workspacePath string,
 ) (string, error) {
-	// Use session/load only when:
-	// 1. ResumeViaACP is true (agent supports ACP-based resume)
-	// 2. An existing session ID is provided
-	shouldLoadSession := agentConfig.SessionConfig.ResumeViaACP && existingSessionID != ""
-
-	if shouldLoadSession {
+	if agentConfig.SessionConfig.ResumeViaACP && existingSessionID != "" {
 		return sm.loadSession(ctx, client, agentConfig, existingSessionID)
 	}
-
-	// Log why we're creating a new session when an existing session ID was provided
-	if existingSessionID != "" && !agentConfig.SessionConfig.ResumeViaACP {
-		sm.logger.Info("skipping ACP session/load (resume handled via CLI)",
-			zap.String("agent_type", agentConfig.ID),
-			zap.String("session_id", existingSessionID),
-			zap.String("resume_flag", agentConfig.SessionConfig.ResumeFlag))
-	}
-
 	return sm.createNewSession(ctx, client, agentConfig, workspacePath)
 }
 

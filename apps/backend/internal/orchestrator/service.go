@@ -932,6 +932,31 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 					zap.Error(err))
 			}
 		}
+
+	case "session_status":
+		// Handle session status events (resumed vs new session)
+		if sessionID != "" && s.messageCreator != nil {
+			var statusMsg string
+			if payload.Data.SessionStatus == "resumed" {
+				statusMsg = "Session resumed"
+			} else {
+				statusMsg = "New session started"
+			}
+			if err := s.messageCreator.CreateSessionMessage(
+				ctx,
+				taskID,
+				statusMsg,
+				sessionID,
+				string(v1.MessageTypeStatus),
+				nil,
+				false,
+			); err != nil {
+				s.logger.Error("failed to create session status message",
+					zap.String("task_id", taskID),
+					zap.String("session_id", sessionID),
+					zap.Error(err))
+			}
+		}
 	}
 
 	// Broadcast to all registered handlers (WebSocket streaming)
