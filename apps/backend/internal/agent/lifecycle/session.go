@@ -3,11 +3,13 @@ package lifecycle
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
 
 	agentctl "github.com/kandev/kandev/internal/agentctl/client"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/common/logger"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -328,11 +330,19 @@ func (sm *SessionManager) SendPrompt(
 
 	sm.logger.Info("ACP prompt completed",
 		zap.String("execution_id", execution.ID),
-		zap.String("stop_reason", stopReason))
+		zap.String("stop_reason", stopReason),
+		zap.Int("message_length", len(agentMessage)))
 
-	// Publish prompt_complete event
+	// Publish complete event with accumulated agent message
+	// This is needed for ACP where Prompt() is synchronous and there's no
+	// separate "complete" notification from the agent
 	if sm.eventPublisher != nil {
-		sm.eventPublisher.PublishPromptComplete(execution, agentMessage, "", "")
+		completeEvent := streams.AgentEvent{
+			Type:      streams.EventTypeComplete,
+			SessionID: execution.ACPSessionID,
+			Text:      strings.TrimSpace(agentMessage),
+		}
+		sm.eventPublisher.PublishAgentStreamEvent(execution, completeEvent)
 	}
 
 	// Mark as READY for next prompt

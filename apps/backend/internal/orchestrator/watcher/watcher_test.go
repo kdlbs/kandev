@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
-	"github.com/kandev/kandev/pkg/acp/protocol"
 )
 
 // mockSubscription implements bus.Subscription for testing
@@ -299,19 +299,17 @@ func TestAgentEventHandling(t *testing.T) {
 	}
 }
 
-func TestACPMessageHandling(t *testing.T) {
+func TestAgentStreamEventHandling(t *testing.T) {
 	eventBus := newMockEventBus()
 
-	var receivedMsg *protocol.Message
-	var receivedTaskID string
+	var receivedPayload *lifecycle.AgentStreamEventPayload
 	var received bool
 	var mu sync.Mutex
 
 	handlers := EventHandlers{
-		OnACPMessage: func(ctx context.Context, taskID string, msg *protocol.Message) {
+		OnAgentStreamEvent: func(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
 			mu.Lock()
-			receivedTaskID = taskID
-			receivedMsg = msg
+			receivedPayload = payload
 			received = true
 			mu.Unlock()
 		},
@@ -324,18 +322,23 @@ func TestACPMessageHandling(t *testing.T) {
 		_ = w.Stop()
 	}()
 
-	// Simulate publishing an ACP message
-	event := bus.NewEvent(events.BuildACPSubject("task-789"), "test", map[string]interface{}{
-		"type":      "progress",
-		"task_id":   "task-789",
-		"agent_id":  "agent-123",
-		"timestamp": time.Now().Format(time.RFC3339),
+	// Simulate publishing an agent stream event
+	event := bus.NewEvent(events.BuildAgentStreamSubject("session-789"), "test", map[string]interface{}{
+		"type":       "agent/event",
+		"task_id":    "task-789",
+		"session_id": "session-789",
+		"agent_id":   "agent-123",
+		"timestamp":  time.Now().Format(time.RFC3339),
 		"data": map[string]interface{}{
-			"progress": 50,
+			"type":         "tool_call",
+			"tool_call_id": "tc-1",
+			"tool_name":    "view",
+			"tool_title":   "View file",
+			"tool_status":  "running",
 		},
 	})
 
-	_ = eventBus.Publish(context.Background(), events.BuildACPWildcardSubject(), event)
+	_ = eventBus.Publish(context.Background(), events.BuildAgentStreamWildcardSubject(), event)
 
 	// Wait for handler to be called
 	time.Sleep(50 * time.Millisecond)
@@ -343,13 +346,13 @@ func TestACPMessageHandling(t *testing.T) {
 	mu.Lock()
 	defer mu.Unlock()
 	if !received {
-		t.Error("OnACPMessage handler was not called")
+		t.Error("OnAgentStreamEvent handler was not called")
 	}
-	if receivedTaskID != "task-789" {
-		t.Errorf("expected task_id = 'task-789', got %s", receivedTaskID)
+	if receivedPayload == nil {
+		t.Error("received payload should not be nil")
 	}
-	if receivedMsg == nil {
-		t.Error("received message should not be nil")
+	if receivedPayload.TaskID != "task-789" {
+		t.Errorf("expected task_id = 'task-789', got %s", receivedPayload.TaskID)
 	}
 }
 

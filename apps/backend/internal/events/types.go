@@ -88,16 +88,13 @@ const (
 	AgentctlError          = "agentctl.error"
 )
 
-// Event types for ACP messages
+// Event types for agent stream messages
 const (
-	ACPMessage = "acp.message" // Base subject for ACP messages
+	AgentStream = "agent.stream" // Base subject for agent stream events
 )
 
 // Event types for agent prompts
 const (
-	PromptComplete            = "prompt.complete"             // Agent finished responding to a prompt
-	ToolCallStarted           = "tool_call.started"           // Agent started a tool call
-	ToolCallComplete          = "tool_call.complete"          // Agent finished a tool call
 	PermissionRequestReceived = "permission_request.received" // Agent requested permission
 )
 
@@ -107,19 +104,19 @@ const (
 	FileChangeNotified = "file.change.notified" // File changed in workspace
 )
 
-// BuildACPSubject creates an ACP subject for a specific task
-func BuildACPSubject(taskID string) string {
-	return ACPMessage + "." + taskID
+// BuildAgentStreamSubject creates an agent stream subject for a specific session
+func BuildAgentStreamSubject(sessionID string) string {
+	return AgentStream + "." + sessionID
 }
 
-// BuildACPWildcardSubject creates a wildcard subscription for all ACP messages
-func BuildACPWildcardSubject() string {
-	return ACPMessage + ".*"
+// BuildAgentStreamWildcardSubject creates a wildcard subscription for all agent stream events
+func BuildAgentStreamWildcardSubject() string {
+	return AgentStream + ".*"
 }
 
-// BuildGitStatusSubject creates a git status subject for a specific task
-func BuildGitStatusSubject(taskID string) string {
-	return GitStatusUpdated + "." + taskID
+// BuildGitStatusSubject creates a git status subject for a specific session
+func BuildGitStatusSubject(sessionID string) string {
+	return GitStatusUpdated + "." + sessionID
 }
 
 // BuildGitStatusWildcardSubject creates a wildcard subscription for all git status updates
@@ -127,12 +124,22 @@ func BuildGitStatusWildcardSubject() string {
 	return GitStatusUpdated + ".*"
 }
 
-// BuildFileChangeSubject creates a file change subject for a specific task
-func BuildFileChangeSubject(taskID string) string {
-	return FileChangeNotified + "." + taskID
+// BuildFileChangeSubject creates a file change subject for a specific session
+func BuildFileChangeSubject(sessionID string) string {
+	return FileChangeNotified + "." + sessionID
 }
 
 // BuildFileChangeWildcardSubject creates a wildcard subscription for all file change notifications
 func BuildFileChangeWildcardSubject() string {
 	return FileChangeNotified + ".*"
+}
+
+// BuildPermissionRequestSubject creates a permission request subject for a specific session
+func BuildPermissionRequestSubject(sessionID string) string {
+	return PermissionRequestReceived + "." + sessionID
+}
+
+// BuildPermissionRequestWildcardSubject creates a wildcard subscription for all permission request events
+func BuildPermissionRequestWildcardSubject() string {
+	return PermissionRequestReceived + ".*"
 }

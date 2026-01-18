@@ -436,12 +436,16 @@ func TestMemoryEventBus_Request(t *testing.T) {
 
 	// Set up a responder
 	sub, err := bus.Subscribe("service.echo", func(ctx context.Context, event *Event) error {
-		replySubject, ok := event.Data["_reply"].(string)
+		data, ok := event.Data.(map[string]interface{})
+		if !ok {
+			return nil
+		}
+		replySubject, ok := data["_reply"].(string)
 		if !ok {
 			return nil
 		}
 		response := NewEvent("echo.response", "responder", map[string]interface{}{
-			"echo": event.Data["message"],
+			"echo": data["message"],
 		})
 		return bus.Publish(ctx, replySubject, response)
 	})
@@ -462,8 +466,12 @@ func TestMemoryEventBus_Request(t *testing.T) {
 		t.Fatalf("Request failed: %v", err)
 	}
 
-	if response.Data["echo"] != "hello" {
-		t.Errorf("Expected echo 'hello', got %v", response.Data["echo"])
+	responseData, ok := response.Data.(map[string]interface{})
+	if !ok {
+		t.Fatal("Expected response.Data to be map[string]interface{}")
+	}
+	if responseData["echo"] != "hello" {
+		t.Errorf("Expected echo 'hello', got %v", responseData["echo"])
 	}
 }
 
@@ -501,7 +509,10 @@ func TestNewEvent(t *testing.T) {
 	if event.Source != source {
 		t.Errorf("Expected source %s, got %s", source, event.Source)
 	}
-	if event.Data["user_id"] != 123 {
+	eventData, ok := event.Data.(map[string]interface{})
+	if !ok {
+		t.Error("Expected event.Data to be map[string]interface{}")
+	} else if eventData["user_id"] != 123 {
 		t.Error("Expected data to contain user_id=123")
 	}
 	if event.Timestamp.Before(before) || event.Timestamp.After(after) {

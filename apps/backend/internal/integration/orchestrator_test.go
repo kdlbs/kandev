@@ -21,6 +21,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/agent/worktree"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
@@ -262,10 +263,10 @@ func (s *SimulatedAgentManagerClient) publishACPMessages(instance *simulatedInst
 			"data":       msg.Data,
 		}
 
-		event := bus.NewEvent(events.ACPMessage, "simulated-agent", msgData)
-		subject := events.BuildACPSubject(instance.taskID)
+		event := bus.NewEvent(events.AgentStream, "simulated-agent", msgData)
+		subject := events.BuildAgentStreamSubject(instance.taskID)
 		if err := s.eventBus.Publish(context.Background(), subject, event); err != nil {
-			s.logger.Error("failed to publish ACP message")
+			s.logger.Error("failed to publish agent stream event")
 		}
 
 		time.Sleep(20 * time.Millisecond)
@@ -366,10 +367,10 @@ func (s *SimulatedAgentManagerClient) PromptAgent(ctx context.Context, agentExec
 			"data":      msg.Data,
 		}
 
-		event := bus.NewEvent(events.ACPMessage, "simulated-agent", msgData)
-		subject := events.BuildACPSubject(execution.taskID)
+		event := bus.NewEvent(events.AgentStream, "simulated-agent", msgData)
+		subject := events.BuildAgentStreamSubject(execution.taskID)
 		if err := s.eventBus.Publish(context.Background(), subject, event); err != nil {
-			s.logger.Warn("failed to publish simulated ACP message", zap.Error(err))
+			s.logger.Warn("failed to publish simulated agent stream event", zap.Error(err))
 		}
 	}()
 
@@ -542,16 +543,23 @@ func NewOrchestratorTestServer(t *testing.T) *OrchestratorTestServer {
 	// Start hub
 	go gateway.Hub.Run(ctx)
 
-	// Wire ACP handler to broadcast to WebSocket clients
-	orchestratorSvc.RegisterACPHandler(func(taskID string, msg *protocol.Message) {
-		action := "acp." + string(msg.Type)
+	// Wire stream handler to broadcast agent events to WebSocket clients
+	orchestratorSvc.RegisterStreamHandler(func(payload *lifecycle.AgentStreamEventPayload) {
+		if payload == nil || payload.Data == nil {
+			return
+		}
+		action := "agent." + payload.Data.Type
 		notification, _ := ws.NewNotification(action, map[string]interface{}{
-			"task_id":   taskID,
-			"type":      msg.Type,
-			"data":      msg.Data,
-			"timestamp": msg.Timestamp,
+			"task_id":     payload.TaskID,
+			"session_id":  payload.SessionID,
+			"type":        payload.Data.Type,
+			"text":        payload.Data.Text,
+			"tool_call_id": payload.Data.ToolCallID,
+			"tool_name":   payload.Data.ToolName,
+			"tool_status": payload.Data.ToolStatus,
+			"timestamp":   payload.Timestamp,
 		})
-		gateway.Hub.BroadcastToTask(taskID, notification)
+		gateway.Hub.BroadcastToSession(payload.SessionID, notification)
 	})
 
 	// Start orchestrator
@@ -1174,25 +1182,34 @@ func TestOrchestratorACPStreaming(t *testing.T) {
 	require.NoError(t, err)
 
 	// Start task
-	_, err = client.SendRequest("start-1", ws.ActionOrchestratorStart, map[string]interface{}{
+	startResp, err := client.SendRequest("start-1", ws.ActionOrchestratorStart, map[string]interface{}{
 		"task_id":          taskID,
 		"agent_profile_id": "augment-agent",
 	})
 	require.NoError(t, err)
 
-	// Collect ACP notifications
+	// Extract session_id and subscribe to session for agent stream events
+	var startPayload map[string]interface{}
+	require.NoError(t, startResp.ParsePayload(&startPayload))
+	sessionID, _ := startPayload["session_id"].(string)
+	require.NotEmpty(t, sessionID)
+
+	_, err = client.SendRequest("session-sub-1", ws.ActionSessionSubscribe, map[string]string{"session_id": sessionID})
+	require.NoError(t, err)
+
+	// Collect agent stream notifications
 	time.Sleep(500 * time.Millisecond)
 	notifications := client.CollectNotifications(200 * time.Millisecond)
 
-	// Verify we received progress notifications
-	progressCount := 0
+	// Verify we received agent stream notifications
+	agentEventCount := 0
 	for _, n := range notifications {
-		if strings.HasPrefix(n.Action, "acp.") {
-			progressCount++
+		if strings.HasPrefix(n.Action, "agent.") {
+			agentEventCount++
 		}
 	}
 
-	assert.GreaterOrEqual(t, progressCount, 3, "Expected at least 3 ACP notifications")
+	assert.GreaterOrEqual(t, agentEventCount, 3, "Expected at least 3 agent event notifications")
 }
 
 func TestOrchestratorMultipleClients(t *testing.T) {

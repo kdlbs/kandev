@@ -11,6 +11,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -21,7 +22,6 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
-	"github.com/kandev/kandev/pkg/acp/protocol"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -76,9 +76,9 @@ type Service struct {
 	scheduler *scheduler.Scheduler
 	watcher   *watcher.Watcher
 
-	// ACP message handlers (for WebSocket streaming)
-	acpHandlers []func(taskID string, msg *protocol.Message)
-	acpMu       sync.RWMutex
+	// Agent stream event handlers (for WebSocket streaming)
+	streamHandlers []func(payload *lifecycle.AgentStreamEventPayload)
+	streamMu       sync.RWMutex
 
 	// Input request handler (for agent-user conversation)
 	inputRequestHandler InputRequestHandler
@@ -142,14 +142,14 @@ func NewService(
 		config:       cfg,
 		logger:       svcLogger,
 		eventBus:     eventBus,
-		taskRepo:     taskRepo,
-		repo:         repo,
-		agentManager: agentManager,
-		queue:        taskQueue,
-		executor:     exec,
-		scheduler:    sched,
-		acpHandlers:  make([]func(taskID string, msg *protocol.Message), 0),
-		readyStates:  make(map[string]*readyState),
+		taskRepo:       taskRepo,
+		repo:           repo,
+		agentManager:   agentManager,
+		queue:          taskQueue,
+		executor:       exec,
+		scheduler:      sched,
+		streamHandlers: make([]func(payload *lifecycle.AgentStreamEventPayload), 0),
+		readyStates:    make(map[string]*readyState),
 	}
 
 	// Create the watcher with event handlers that wire everything together
@@ -158,11 +158,8 @@ func NewService(
 		OnAgentReady:         s.handleAgentReady,
 		OnAgentCompleted:     s.handleAgentCompleted,
 		OnAgentFailed:        s.handleAgentFailed,
-		OnACPMessage:         s.handleACPMessage,
+		OnAgentStreamEvent:   s.handleAgentStreamEvent,
 		OnACPSessionCreated:  s.handleACPSessionCreated,
-		OnPromptComplete:     s.handlePromptComplete,
-		OnToolCallStarted:    s.handleToolCallStarted,
-		OnToolCallComplete:   s.handleToolCallComplete,
 		OnPermissionRequest:  s.handlePermissionRequest,
 		OnGitStatusUpdated:   s.handleGitStatusUpdated,
 	}
@@ -645,38 +642,38 @@ func (s *Service) GetQueuedTasks() []*queue.QueuedTask {
 	return s.queue.List()
 }
 
-// RegisterACPHandler registers a handler for ACP messages (used by WebSocket streaming)
-func (s *Service) RegisterACPHandler(handler func(taskID string, msg *protocol.Message)) {
-	s.acpMu.Lock()
-	defer s.acpMu.Unlock()
-	s.acpHandlers = append(s.acpHandlers, handler)
-	s.logger.Debug("registered ACP handler", zap.Int("total_handlers", len(s.acpHandlers)))
+// RegisterStreamHandler registers a handler for agent stream events (used by WebSocket streaming)
+func (s *Service) RegisterStreamHandler(handler func(payload *lifecycle.AgentStreamEventPayload)) {
+	s.streamMu.Lock()
+	defer s.streamMu.Unlock()
+	s.streamHandlers = append(s.streamHandlers, handler)
+	s.logger.Debug("registered stream handler", zap.Int("total_handlers", len(s.streamHandlers)))
 }
 
-// UnregisterACPHandler removes an ACP handler
-func (s *Service) UnregisterACPHandler(handler func(taskID string, msg *protocol.Message)) {
-	s.acpMu.Lock()
-	defer s.acpMu.Unlock()
+// UnregisterStreamHandler removes a stream handler
+func (s *Service) UnregisterStreamHandler(handler func(payload *lifecycle.AgentStreamEventPayload)) {
+	s.streamMu.Lock()
+	defer s.streamMu.Unlock()
 
 	// Find and remove the handler by comparing function pointers
 	// Note: This uses a simple approach - in production you might want to use handler IDs
-	for i := range s.acpHandlers {
+	for i := range s.streamHandlers {
 		// We can't directly compare functions, so we'll keep the handler in the list
 		// In a real implementation, you'd use unique handler IDs
 		_ = i
 	}
-	s.logger.Debug("unregister ACP handler called")
+	s.logger.Debug("unregister stream handler called")
 }
 
-// broadcastACP broadcasts an ACP message to all registered handlers
-func (s *Service) broadcastACP(taskID string, msg *protocol.Message) {
-	s.acpMu.RLock()
-	handlers := make([]func(taskID string, msg *protocol.Message), len(s.acpHandlers))
-	copy(handlers, s.acpHandlers)
-	s.acpMu.RUnlock()
+// broadcastStreamEvent broadcasts an agent stream event to all registered handlers
+func (s *Service) broadcastStreamEvent(payload *lifecycle.AgentStreamEventPayload) {
+	s.streamMu.RLock()
+	handlers := make([]func(payload *lifecycle.AgentStreamEventPayload), len(s.streamHandlers))
+	copy(handlers, s.streamHandlers)
+	s.streamMu.RUnlock()
 
 	for _, handler := range handlers {
-		handler(taskID, msg)
+		handler(payload)
 	}
 }
 
@@ -825,122 +822,155 @@ func (s *Service) handleAgentFailed(ctx context.Context, data watcher.AgentEvent
 	}
 }
 
-// handleACPMessage handles ACP messages from agents
-func (s *Service) handleACPMessage(ctx context.Context, taskID string, msg *protocol.Message) {
-	s.logger.Debug("handling ACP message",
-		zap.String("task_id", taskID),
-		zap.String("message_type", string(msg.Type)))
-
-	// Handle input_required messages specially
-	if msg.Type == protocol.MessageTypeInputRequired {
-		s.handleInputRequired(ctx, taskID, msg.SessionID, msg)
+// handleAgentStreamEvent handles agent stream events (tool calls, message chunks, etc.)
+func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
+	if payload == nil || payload.Data == nil {
+		return
 	}
 
-	// Normalize ACP messages into session messages for persistence.
-	normalized := s.normalizeACPMessage(msg)
-	if normalized != nil && s.messageCreator != nil {
-		if msg.SessionID == "" {
-			s.logger.Warn("ACP message missing session_id",
-				zap.String("task_id", taskID),
-				zap.String("message_type", normalized.messageType))
-		} else if err := s.messageCreator.CreateSessionMessage(
-			ctx,
-			taskID,
-			normalized.content,
-			msg.SessionID,
-			normalized.messageType,
-			normalized.metadata,
-			normalized.requestsInput,
-		); err != nil {
-			s.logger.Error("failed to create normalized session message",
-				zap.String("task_id", taskID),
-				zap.String("message_type", normalized.messageType),
-				zap.Error(err))
+	taskID := payload.TaskID
+	sessionID := payload.SessionID
+	eventType := payload.Data.Type
+
+	s.logger.Debug("handling agent stream event",
+		zap.String("task_id", taskID),
+		zap.String("session_id", sessionID),
+		zap.String("event_type", eventType))
+
+	// Handle different event types
+	switch eventType {
+	case "tool_call":
+		// Create tool call message when a tool call starts
+		// If there's accumulated text, save it as an agent message first
+		s.saveAgentTextIfPresent(ctx, payload)
+		s.handleToolCallEvent(ctx, payload)
+
+	case "tool_update":
+		// Update tool call message when status changes
+		s.handleToolUpdateEvent(ctx, payload)
+
+	case "complete":
+		// Save any accumulated text as an agent message
+		s.saveAgentTextIfPresent(ctx, payload)
+		// Mark prompt as complete and finalize agent ready state
+		if s.markPromptComplete(taskID) {
+			s.finalizeAgentReady(taskID, sessionID)
 		}
 
-		if normalized.bumpToRunning && msg.SessionID != "" {
-			s.updateTaskSessionState(ctx, taskID, msg.SessionID, models.TaskSessionStateRunning, "", false)
+	case "error":
+		// Handle error events
+		if sessionID != "" && s.messageCreator != nil {
+			if err := s.messageCreator.CreateSessionMessage(
+				ctx,
+				taskID,
+				payload.Data.Error,
+				sessionID,
+				string(v1.MessageTypeError),
+				map[string]interface{}{
+					"provider":       "agent",
+					"provider_agent": payload.AgentID,
+				},
+				false,
+			); err != nil {
+				s.logger.Error("failed to create error message",
+					zap.String("task_id", taskID),
+					zap.Error(err))
+			}
 		}
 	}
 
 	// Broadcast to all registered handlers (WebSocket streaming)
-	s.broadcastACP(taskID, msg)
+	s.broadcastStreamEvent(payload)
 }
 
-type normalizedACPMessage struct {
-	messageType   string
-	content       string
-	metadata      map[string]interface{}
-	requestsInput bool
-	bumpToRunning bool
-}
-
-func (s *Service) normalizeACPMessage(msg *protocol.Message) *normalizedACPMessage {
-	if msg == nil {
-		return nil
+// handleToolCallEvent handles tool_call events and creates messages
+func (s *Service) handleToolCallEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
+	if payload.SessionID == "" {
+		s.logger.Warn("missing session_id for tool_call",
+			zap.String("task_id", payload.TaskID),
+			zap.String("tool_call_id", payload.Data.ToolCallID))
+		return
 	}
 
-	switch msg.Type {
-	case protocol.MessageTypeProgress:
-		return &normalizedACPMessage{
-			messageType:   string(v1.MessageTypeProgress),
-			content:       extractACPContent(msg),
-			metadata:      buildACPMetadata(msg),
-			bumpToRunning: true,
+	if s.messageCreator != nil {
+		if err := s.messageCreator.CreateToolCallMessage(
+			ctx,
+			payload.TaskID,
+			payload.Data.ToolCallID,
+			payload.Data.ToolTitle,
+			payload.Data.ToolStatus,
+			payload.SessionID,
+			payload.Data.ToolArgs,
+		); err != nil {
+			s.logger.Error("failed to create tool call message",
+				zap.String("task_id", payload.TaskID),
+				zap.String("tool_call_id", payload.Data.ToolCallID),
+				zap.Error(err))
+		} else {
+			s.logger.Info("created tool call message",
+				zap.String("task_id", payload.TaskID),
+				zap.String("tool_call_id", payload.Data.ToolCallID))
 		}
-	case protocol.MessageTypeStatus:
-		return &normalizedACPMessage{
-			messageType:   string(v1.MessageTypeStatus),
-			content:       extractACPContent(msg),
-			metadata:      buildACPMetadata(msg),
-			bumpToRunning: true,
-		}
-	case protocol.MessageTypeLog:
-		return &normalizedACPMessage{
-			messageType:   string(v1.MessageTypeStatus),
-			content:       extractACPContent(msg),
-			metadata:      buildACPMetadata(msg),
-			bumpToRunning: true,
-		}
-	case protocol.MessageTypeError:
-		return &normalizedACPMessage{
-			messageType:   string(v1.MessageTypeError),
-			content:       extractACPContent(msg),
-			metadata:      buildACPMetadata(msg),
-			bumpToRunning: true,
-		}
-	case protocol.MessageTypeInputRequired:
-		return nil
-	default:
-		return nil
+
+		s.updateTaskSessionState(ctx, payload.TaskID, payload.SessionID, models.TaskSessionStateRunning, "", false)
 	}
 }
 
-func extractACPContent(msg *protocol.Message) string {
-	if msg == nil || msg.Data == nil {
-		return string(msg.Type)
+// saveAgentTextIfPresent saves any accumulated agent text as an agent message
+func (s *Service) saveAgentTextIfPresent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
+	if payload.Data.Text == "" || payload.SessionID == "" {
+		return
 	}
-	for _, key := range []string{"message", "text", "content", "detail"} {
-		if value, ok := msg.Data[key].(string); ok && value != "" {
-			return value
+
+	if s.messageCreator != nil {
+		if err := s.messageCreator.CreateAgentMessage(ctx, payload.TaskID, payload.Data.Text, payload.SessionID); err != nil {
+			s.logger.Error("failed to create agent message",
+				zap.String("task_id", payload.TaskID),
+				zap.Error(err))
+		} else {
+			s.logger.Info("created agent message",
+				zap.String("task_id", payload.TaskID),
+				zap.Int("message_length", len(payload.Data.Text)))
 		}
 	}
-	return string(msg.Type)
 }
 
-func buildACPMetadata(msg *protocol.Message) map[string]interface{} {
-	if msg == nil {
-		return nil
+// handleToolUpdateEvent handles tool_update events and updates messages
+func (s *Service) handleToolUpdateEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
+	if payload.SessionID == "" {
+		s.logger.Warn("missing session_id for tool_update",
+			zap.String("task_id", payload.TaskID),
+			zap.String("tool_call_id", payload.Data.ToolCallID))
+		return
 	}
-	metadata := map[string]interface{}{
-		"provider":       "acp",
-		"provider_type":  string(msg.Type),
-		"provider_agent": msg.AgentID,
+
+	// Only update message when tool call completes or errors
+	switch payload.Data.ToolStatus {
+	case "complete", "completed", "error", "failed":
+		if s.messageCreator != nil {
+			result := ""
+			if payload.Data.ToolResult != nil {
+				if str, ok := payload.Data.ToolResult.(string); ok {
+					result = str
+				}
+			}
+			if err := s.messageCreator.UpdateToolCallMessage(
+				ctx,
+				payload.TaskID,
+				payload.Data.ToolCallID,
+				payload.Data.ToolStatus,
+				result,
+				payload.SessionID,
+			); err != nil {
+				s.logger.Warn("failed to update tool call message",
+					zap.String("task_id", payload.TaskID),
+					zap.String("tool_call_id", payload.Data.ToolCallID),
+					zap.Error(err))
+			}
+
+			s.updateTaskSessionState(ctx, payload.TaskID, payload.SessionID, models.TaskSessionStateRunning, "", false)
+		}
 	}
-	if len(msg.Data) > 0 {
-		metadata["provider_data"] = msg.Data
-	}
-	return metadata
 }
 
 func (s *Service) updateTaskSessionState(ctx context.Context, taskID, sessionID string, nextState models.TaskSessionState, errorMessage string, allowWakeFromWaiting bool) {
@@ -1055,47 +1085,6 @@ func (s *Service) finalizeAgentReady(taskID, sessionID string) {
 	}
 }
 
-// handleInputRequired handles agent input request messages
-func (s *Service) handleInputRequired(ctx context.Context, taskID, sessionID string, msg *protocol.Message) {
-	s.logger.Info("agent requesting user input",
-		zap.String("task_id", taskID),
-		zap.String("session_id", sessionID),
-		zap.String("agent_id", msg.AgentID))
-
-	// Extract message from data
-	message := ""
-	if msg.Data != nil {
-		if m, ok := msg.Data["message"].(string); ok {
-			message = m
-		}
-	}
-
-	if sessionID == "" {
-		s.logger.Warn("missing session_id for input_required",
-			zap.String("task_id", taskID))
-		return
-	}
-
-	// Update task state to WAITING_FOR_INPUT
-	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateWaitingForInput); err != nil {
-		s.logger.Error("failed to update task state to WAITING_FOR_INPUT",
-			zap.String("task_id", taskID),
-			zap.Error(err))
-	}
-
-	// Update session state to WAITING_FOR_INPUT
-	s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateWaitingForInput, "", false)
-
-	// Call the input request handler if set
-	if s.inputRequestHandler != nil {
-		if err := s.inputRequestHandler(ctx, taskID, sessionID, msg.AgentID, message); err != nil {
-			s.logger.Error("input request handler failed",
-				zap.String("task_id", taskID),
-				zap.Error(err))
-		}
-	}
-}
-
 // handleGitStatusUpdated handles git status updates and persists them to agent session metadata
 func (s *Service) handleGitStatusUpdated(ctx context.Context, data watcher.GitStatusData) {
 	s.logger.Debug("handling git status update",
@@ -1147,93 +1136,6 @@ func (s *Service) handleGitStatusUpdated(ctx context.Context, data watcher.GitSt
 				zap.String("session_id", session.ID))
 		}
 	}()
-}
-
-// handlePromptComplete handles prompt complete events and saves agent response as message
-// Note: This is called for EVERY agent message (including intermediate ones before tool calls),
-// so we should NOT transition task state here. State transitions happen in the comment handler
-// after the synchronous PromptTask call returns.
-func (s *Service) handlePromptComplete(ctx context.Context, data watcher.PromptCompleteData) {
-	s.logger.Info("handling prompt complete",
-		zap.String("task_id", data.TaskID),
-		zap.Int("message_length", len(data.AgentMessage)))
-
-	if data.TaskSessionID == "" {
-		s.logger.Warn("missing session_id for prompt_complete",
-			zap.String("task_id", data.TaskID))
-		return
-	}
-
-	// Save agent response as a message if we have a message creator
-	if s.messageCreator != nil && data.AgentMessage != "" {
-		if err := s.messageCreator.CreateAgentMessage(ctx, data.TaskID, data.AgentMessage, data.TaskSessionID); err != nil {
-			s.logger.Error("failed to create agent message",
-				zap.String("task_id", data.TaskID),
-				zap.Error(err))
-		} else {
-			s.logger.Info("created agent message",
-				zap.String("task_id", data.TaskID),
-				zap.Int("message_length", len(data.AgentMessage)))
-		}
-
-		if s.markPromptComplete(data.TaskID) {
-			s.finalizeAgentReady(data.TaskID, data.TaskSessionID)
-		}
-	}
-}
-
-// handleToolCallStarted handles tool call started events and saves as message
-func (s *Service) handleToolCallStarted(ctx context.Context, data watcher.ToolCallData) {
-	s.logger.Info("handling tool call started",
-		zap.String("task_id", data.TaskID),
-		zap.String("tool_call_id", data.ToolCallID),
-		zap.String("title", data.Title))
-
-	if data.TaskSessionID == "" {
-		s.logger.Warn("missing session_id for tool_call",
-			zap.String("task_id", data.TaskID),
-			zap.String("tool_call_id", data.ToolCallID))
-		return
-	}
-
-	// Save tool call as a message if we have a message creator
-	if s.messageCreator != nil {
-		if err := s.messageCreator.CreateToolCallMessage(ctx, data.TaskID, data.ToolCallID, data.Title, data.Status, data.TaskSessionID, data.Args); err != nil {
-			s.logger.Error("failed to create tool call message",
-				zap.String("task_id", data.TaskID),
-				zap.String("tool_call_id", data.ToolCallID),
-				zap.Error(err))
-		} else {
-			s.logger.Info("created tool call message",
-				zap.String("task_id", data.TaskID),
-				zap.String("tool_call_id", data.ToolCallID))
-		}
-
-		s.updateTaskSessionState(ctx, data.TaskID, data.TaskSessionID, models.TaskSessionStateRunning, "", false)
-	}
-}
-
-// handleToolCallComplete handles tool call complete events and updates the message
-func (s *Service) handleToolCallComplete(ctx context.Context, data watcher.ToolCallCompleteData) {
-	// Update tool call message status if we have a message creator
-	if s.messageCreator != nil {
-		if data.TaskSessionID == "" {
-			s.logger.Warn("missing session_id for tool_call_complete",
-				zap.String("task_id", data.TaskID),
-				zap.String("tool_call_id", data.ToolCallID))
-			return
-		}
-
-		if err := s.messageCreator.UpdateToolCallMessage(ctx, data.TaskID, data.ToolCallID, data.Status, data.Result, data.TaskSessionID); err != nil {
-			// Log as warning since this is often a race condition (complete arrives before start)
-			s.logger.Warn("failed to update tool call message",
-				zap.String("task_id", data.TaskID),
-				zap.String("tool_call_id", data.ToolCallID),
-				zap.Error(err))
-		}
-
-		s.updateTaskSessionState(ctx, data.TaskID, data.TaskSessionID, models.TaskSessionStateRunning, "", false)
-	}
 }
 
 // handlePermissionRequest handles permission request events and saves as message

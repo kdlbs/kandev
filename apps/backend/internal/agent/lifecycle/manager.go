@@ -738,27 +738,27 @@ func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.Age
 		execution.messageMu.Unlock()
 
 	case "tool_call":
-		// Tool call starting marks a step boundary - flush the accumulated message as a comment
+		// Tool call starting marks a step boundary - flush the accumulated message
 		// This way, each agent response before a tool use becomes a separate comment
-		m.flushMessageBufferAsComment(execution)
+		// Include the flushed text in the event for the orchestrator to save
+		if flushedText := m.flushMessageBuffer(execution); flushedText != "" {
+			event.Text = flushedText
+		}
 
 		m.logger.Debug("tool call started",
 			zap.String("execution_id", execution.ID),
 			zap.String("tool_call_id", event.ToolCallID),
 			zap.String("tool_name", event.ToolName))
 		m.updateExecutionProgress(execution.ID, 60)
-
-		// Publish tool call as a comment so it appears in the chat
-		m.eventPublisher.PublishToolCall(execution, event.ToolCallID, event.ToolTitle, event.ToolStatus, event.ToolArgs)
+		// Tool call message creation is handled by orchestrator via AgentStreamEvent
 
 	case "tool_update":
-		// Check if tool call completed
+		// Check if tool call completed - orchestrator will create/update the message
 		switch event.ToolStatus {
 		case "complete", "completed":
 			m.updateExecutionProgress(execution.ID, 80)
-			m.eventPublisher.PublishToolCallComplete(execution, event)
 		case "error", "failed":
-			m.eventPublisher.PublishToolCallComplete(execution, event)
+			// Error status is passed through the stream event
 		}
 
 	case "plan":
@@ -775,8 +775,11 @@ func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.Age
 			zap.String("execution_id", execution.ID),
 			zap.String("session_id", event.SessionID))
 
-		// Flush accumulated message buffer as a comment
-		m.flushMessageBufferAsComment(execution)
+		// Flush accumulated message buffer and include in the event
+		// The orchestrator will save this as an agent message
+		if flushedText := m.flushMessageBuffer(execution); flushedText != "" {
+			event.Text = flushedText
+		}
 
 		// Mark agent as READY for follow-up prompts
 		if err := m.MarkReady(execution.ID); err != nil {
@@ -827,27 +830,17 @@ func (m *Manager) handleFileChangeNotification(execution *AgentExecution, notifi
 	m.eventPublisher.PublishFileChange(execution, notification)
 }
 
-// flushMessageBufferAsComment extracts any accumulated message from the buffer and
-// publishes it as a step complete event (which will be saved as a comment).
-// This is called when a tool use starts to save the agent's response before the tool call.
-func (m *Manager) flushMessageBufferAsComment(execution *AgentExecution) {
+// flushMessageBuffer extracts any accumulated message from the buffer and returns it.
+// This is called when a tool use starts or on complete to get the agent's response.
+func (m *Manager) flushMessageBuffer(execution *AgentExecution) string {
 	execution.messageMu.Lock()
 	agentMessage := execution.messageBuffer.String()
-	reasoning := execution.reasoningBuffer.String()
-	summary := execution.summaryBuffer.String()
 	execution.messageBuffer.Reset()
 	execution.reasoningBuffer.Reset()
 	execution.summaryBuffer.Reset()
 	execution.messageMu.Unlock()
 
-	// Only publish if there's actual content (ignore whitespace-only)
-	trimmed := strings.TrimSpace(agentMessage)
-	if trimmed == "" {
-		return
-	}
-
-	// Reuse the prompt_complete event type - the orchestrator handles it the same way
-	m.eventPublisher.PublishPromptComplete(execution, agentMessage, reasoning, summary)
+	return strings.TrimSpace(agentMessage)
 }
 
 // updateExecutionProgress updates an execution's progress

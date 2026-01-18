@@ -128,7 +128,10 @@ type ThreadStartResult struct {
 
 // ThreadResumeParams for thread/resume
 type ThreadResumeParams struct {
-	ThreadID string `json:"threadId"`
+	ThreadID       string         `json:"threadId"`
+	Cwd            string         `json:"cwd,omitempty"`
+	ApprovalPolicy string         `json:"approvalPolicy,omitempty"` // "untrusted", "on-failure", "on-request", "never"
+	SandboxPolicy  *SandboxPolicy `json:"sandboxPolicy,omitempty"`
 }
 
 // ThreadResumeResult from thread/resume

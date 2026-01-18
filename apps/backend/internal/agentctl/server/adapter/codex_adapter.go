@@ -184,6 +184,8 @@ func (a *CodexAdapter) NewSession(ctx context.Context) (string, error) {
 }
 
 // LoadSession resumes an existing Codex thread.
+// It passes the same approval policy and sandbox settings as NewSession to ensure
+// permission requirements are preserved across resume (see openai/codex#5322).
 func (a *CodexAdapter) LoadSession(ctx context.Context, sessionID string) error {
 	// Check client under lock, but don't hold lock during Call() to avoid deadlock
 	// with handleNotification which also needs the lock
@@ -195,8 +197,27 @@ func (a *CodexAdapter) LoadSession(ctx context.Context, sessionID string) error 
 		return fmt.Errorf("adapter not initialized")
 	}
 
+	// Determine approval policy - same logic as NewSession
+	// "untrusted" forces Codex to request approval for all commands/writes.
+	approvalPolicy := a.cfg.ApprovalPolicy
+	if approvalPolicy == "" {
+		approvalPolicy = "untrusted"
+	}
+
+	a.logger.Info("resuming codex thread with approval policy",
+		zap.String("thread_id", sessionID),
+		zap.String("approval_policy", approvalPolicy),
+		zap.String("work_dir", a.cfg.WorkDir))
+
 	resp, err := client.Call(ctx, codex.MethodThreadResume, &codex.ThreadResumeParams{
-		ThreadID: sessionID,
+		ThreadID:       sessionID,
+		Cwd:            a.cfg.WorkDir,
+		ApprovalPolicy: approvalPolicy,
+		SandboxPolicy: &codex.SandboxPolicy{
+			Type:          "workspaceWrite",
+			WritableRoots: []string{a.cfg.WorkDir},
+			NetworkAccess: true,
+		},
 	})
 	if err != nil {
 		return fmt.Errorf("failed to resume thread: %w", err)

@@ -81,14 +81,21 @@ func (b *TaskEventBroadcaster) subscribe(eventBus bus.EventBus, subject, action 
 			b.logger.Error("failed to build websocket notification", zap.String("action", action), zap.Error(err))
 			return nil
 		}
+		// Try to extract session_id from event data (works for both map and struct types)
+		var sessionID string
+		if data, ok := event.Data.(map[string]interface{}); ok {
+			sessionID, _ = data["session_id"].(string)
+		} else if data, ok := event.Data.(interface{ GetSessionID() string }); ok {
+			sessionID = data.GetSessionID()
+		}
 		switch action {
 		case ws.ActionSessionAgentctlStarting, ws.ActionSessionAgentctlReady, ws.ActionSessionAgentctlError, ws.ActionSessionStateChanged:
-			if sessionID, ok := event.Data["session_id"].(string); ok && sessionID != "" {
+			if sessionID != "" {
 				b.hub.BroadcastToSession(sessionID, msg)
 				return nil
 			}
 		case ws.ActionSessionMessageAdded, ws.ActionSessionMessageUpdated:
-			if sessionID, ok := event.Data["session_id"].(string); ok && sessionID != "" {
+			if sessionID != "" {
 				b.hub.BroadcastToSession(sessionID, msg)
 				return nil
 			}
