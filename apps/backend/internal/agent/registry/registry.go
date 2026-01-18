@@ -194,11 +194,6 @@ func (r *Registry) Get(id string) (*AgentTypeConfig, error) {
 	return config, nil
 }
 
-// GetAgentType is an alias for Get for backward compatibility
-func (r *Registry) GetAgentType(id string) (*AgentTypeConfig, error) {
-	return r.Get(id)
-}
-
 // GetDefault returns the default agent type configuration.
 // It tries "augment-agent" first, then falls back to the first enabled agent.
 func (r *Registry) GetDefault() (*AgentTypeConfig, error) {

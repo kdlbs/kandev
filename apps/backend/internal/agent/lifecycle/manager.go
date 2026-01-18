@@ -694,7 +694,7 @@ func (m *Manager) getAgentConfigForExecution(execution *AgentExecution) (*regist
 
 	// Map agent name to registry ID (e.g., "auggie" -> "auggie-agent")
 	agentTypeName := profileInfo.AgentName + "-agent"
-	agentConfig, err := m.registry.GetAgentType(agentTypeName)
+	agentConfig, err := m.registry.Get(agentTypeName)
 	if err != nil {
 		return nil, fmt.Errorf("agent type not found: %s", agentTypeName)
 	}

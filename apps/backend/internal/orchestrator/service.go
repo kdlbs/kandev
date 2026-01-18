@@ -47,9 +47,6 @@ func DefaultServiceConfig() ServiceConfig {
 	}
 }
 
-// InputRequestHandler is called when an agent requests user input.
-type InputRequestHandler func(ctx context.Context, taskID, sessionID, agentID, message string) error
-
 // MessageCreator is an interface for creating messages on tasks
 type MessageCreator interface {
 	CreateAgentMessage(ctx context.Context, taskID, content, agentSessionID string) error
@@ -79,9 +76,6 @@ type Service struct {
 	// Agent stream event handlers (for WebSocket streaming)
 	streamHandlers []func(payload *lifecycle.AgentStreamEventPayload)
 	streamMu       sync.RWMutex
-
-	// Input request handler (for agent-user conversation)
-	inputRequestHandler InputRequestHandler
 
 	// Message creator for saving agent responses
 	messageCreator MessageCreator
@@ -695,12 +689,6 @@ func (s *Service) broadcastStreamEvent(payload *lifecycle.AgentStreamEventPayloa
 	for _, handler := range handlers {
 		handler(payload)
 	}
-}
-
-// SetInputRequestHandler sets the handler for agent input requests
-func (s *Service) SetInputRequestHandler(handler InputRequestHandler) {
-	s.inputRequestHandler = handler
-	s.logger.Debug("input request handler set")
 }
 
 // Event handlers

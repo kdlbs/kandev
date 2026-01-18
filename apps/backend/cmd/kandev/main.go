@@ -598,56 +598,6 @@ func main() {
 		gateway.Hub.BroadcastToSession(sessionID, notification)
 	})
 
-	// Wire input request handler to create agent messages when input is requested
-	orchestratorSvc.SetInputRequestHandler(func(ctx context.Context, taskID, sessionID, agentID, message string) error {
-		log.Info("agent requesting user input, creating message",
-			zap.String("task_id", taskID),
-			zap.String("session_id", sessionID),
-			zap.String("agent_id", agentID))
-
-		if sessionID == "" {
-			log.Error("missing task session id for input request",
-				zap.String("task_id", taskID))
-			return fmt.Errorf("missing task session id for input request")
-		}
-
-		// Create a message from the agent
-		messageRecord, err := taskSvc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
-			TaskSessionID: sessionID,
-			TaskID:        taskID,
-			Content:       message,
-			AuthorType:    "agent",
-			AuthorID:      agentID,
-			RequestsInput: true,
-		})
-		if err != nil {
-			log.Error("failed to create agent message",
-				zap.String("task_id", taskID),
-				zap.Error(err))
-			return err
-		}
-
-		// Broadcast message.added notification to session subscribers
-		notification, _ := ws.NewNotification(ws.ActionSessionMessageAdded, map[string]interface{}{
-			"task_id":        taskID,
-			"session_id":     sessionID,
-			"message":        messageRecord.ToAPI(),
-			"requests_input": true,
-		})
-		gateway.Hub.BroadcastToSession(sessionID, notification)
-
-		// Also broadcast input.requested notification
-		inputNotification, _ := ws.NewNotification(ws.ActionInputRequested, map[string]interface{}{
-			"task_id":    taskID,
-			"session_id": sessionID,
-			"message_id": messageRecord.ID,
-			"message":    message,
-		})
-		gateway.Hub.BroadcastToSession(sessionID, inputNotification)
-
-		return nil
-	})
-
 	if err := orchestratorSvc.Start(ctx); err != nil {
 		log.Fatal("Failed to start orchestrator", zap.Error(err))
 	}

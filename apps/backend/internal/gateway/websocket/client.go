@@ -272,10 +272,6 @@ func (c *Client) sendHistoricalLogs(taskID string) {
 	}
 }
 
-// sendPendingPermissions is deprecated. Pending permissions are now stored as messages
-// and sent via sendHistoricalLogs. This function is kept for reference but is unused.
-// func (c *Client) sendPendingPermissions(taskID string) {}
-
 // handleUnsubscribe handles task.unsubscribe action
 func (c *Client) handleUnsubscribe(msg *ws.Message) {
 	var req SubscribeRequest
