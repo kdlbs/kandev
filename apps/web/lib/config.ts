@@ -12,6 +12,11 @@ export function getBackendConfig(): AppConfig {
       apiBaseUrl: process.env.KANDEV_API_BASE_URL ?? DEFAULT_API_BASE_URL,
     };
   }
+  if (window.__KANDEV_API_BASE_URL) {
+    return {
+      apiBaseUrl: window.__KANDEV_API_BASE_URL,
+    };
+  }
   return {
     apiBaseUrl: process.env.NEXT_PUBLIC_KANDEV_API_BASE_URL ?? DEFAULT_API_BASE_URL,
   };
