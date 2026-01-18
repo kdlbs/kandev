@@ -28,9 +28,6 @@ type Config struct {
 	// Ports configures the port range for instance allocation
 	Ports PortConfig
 
-	// MaxInstances is the maximum number of concurrent agent instances.
-	MaxInstances int
-
 	// Defaults provides default values for new instances
 	Defaults InstanceDefaults
 
@@ -117,8 +114,7 @@ type InstanceConfig struct {
 // Load loads the configuration from environment variables.
 func Load() *Config {
 	return &Config{
-		Port:         getEnvInt("AGENTCTL_PORT", 9999),
-		MaxInstances: getEnvInt("AGENTCTL_MAX_INSTANCES", 10),
+		Port: getEnvInt("AGENTCTL_PORT", 9999),
 		Ports: PortConfig{
 			Base: getEnvInt("AGENTCTL_INSTANCE_PORT_BASE", 10001),
 			Max:  getEnvInt("AGENTCTL_INSTANCE_PORT_MAX", 10100),

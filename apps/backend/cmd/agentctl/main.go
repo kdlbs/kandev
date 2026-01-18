@@ -32,7 +32,6 @@ var (
 	agentCommandFlag = flag.String("agent-command", "", "Command to run the agent")
 	workDirFlag      = flag.String("workdir", "", "Working directory for the agent")
 	portFlag         = flag.Int("port", 0, "HTTP server port")
-	maxInstancesFlag = flag.Int("max-instances", 0, "Maximum number of concurrent instances")
 )
 
 func main() {
@@ -54,9 +53,6 @@ func main() {
 	if *portFlag != 0 {
 		cfg.Port = *portFlag
 	}
-	if *maxInstancesFlag != 0 {
-		cfg.MaxInstances = *maxInstancesFlag
-	}
 
 	// Initialize logger
 	log, err := logger.NewLogger(logger.LoggingConfig{
@@ -73,8 +69,7 @@ func main() {
 	}()
 
 	log.Info("starting agentctl",
-		zap.Int("port", cfg.Port),
-		zap.Int("max_instances", cfg.MaxInstances))
+		zap.Int("port", cfg.Port))
 
 	run(cfg, log)
 }

@@ -25,6 +25,15 @@ const (
 
 	// EventTypePermissionRequest indicates the agent is requesting permission.
 	EventTypePermissionRequest = "permission_request"
+
+	// EventTypeSessionStatus indicates a session status update (resumed or new).
+	EventTypeSessionStatus = "session_status"
+)
+
+// Session status constants for EventTypeSessionStatus events.
+const (
+	SessionStatusResumed = "resumed"
+	SessionStatusNew     = "new"
 )
 
 // AgentEvent is the message type streamed from the agent process.
@@ -109,6 +118,12 @@ type AgentEvent struct {
 
 	// ActionDetails contains structured details about the action.
 	ActionDetails map[string]interface{} `json:"action_details,omitempty"`
+
+	// --- Session status fields (for "session_status" type) ---
+
+	// SessionStatus indicates whether the session was resumed or new.
+	// Use SessionStatus* constants: "resumed", "new".
+	SessionStatus string `json:"session_status,omitempty"`
 
 	// --- Extension fields ---
 

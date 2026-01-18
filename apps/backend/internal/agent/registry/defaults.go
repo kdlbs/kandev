@@ -2,6 +2,11 @@ package registry
 
 import "github.com/kandev/kandev/pkg/agent"
 
+// boolPtr returns a pointer to a bool value
+func boolPtr(v bool) *bool {
+	return &v
+}
+
 // DefaultAgents returns the default agent configurations
 func DefaultAgents() []*AgentTypeConfig {
 	return []*AgentTypeConfig{
@@ -31,6 +36,7 @@ func DefaultAgents() []*AgentTypeConfig {
 			SessionConfig: SessionConfig{
 				ResumeViaACP:       false, // Auggie handles resume via CLI flag
 				ResumeFlag:         "--resume",
+				CanRecover:         boolPtr(false), // Auggie cannot recover sessions after backend restart
 				SessionDirTemplate: "{home}/.augment/sessions",
 				SessionDirTarget:   "/root/.augment/sessions",
 			},

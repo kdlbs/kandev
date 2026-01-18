@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/worktree"
 	agentctl "github.com/kandev/kandev/internal/agentctl/client"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -574,6 +575,8 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) err
 		return fmt.Errorf("failed to initialize ACP: %w", err)
 	}
 
+	m.emitSessionStatusEvent(execution, agentConfig)
+
 	return nil
 }
 
@@ -705,6 +708,29 @@ func (m *Manager) getAgentConfigForExecution(execution *AgentExecution) (*regist
 // initializeACPSession delegates to SessionManager for full ACP session initialization and prompting
 func (m *Manager) initializeACPSession(ctx context.Context, execution *AgentExecution, agentConfig *registry.AgentTypeConfig, taskDescription string) error {
 	return m.sessionManager.InitializeAndPrompt(ctx, execution, agentConfig, taskDescription, m.MarkReady)
+}
+
+// emitSessionStatusEvent emits a session_status event indicating whether the session was resumed or new.
+func (m *Manager) emitSessionStatusEvent(execution *AgentExecution, agentConfig *registry.AgentTypeConfig) {
+	wasResumed := false
+	if execution.ACPSessionID != "" {
+		if agentConfig.SessionConfig.ResumeViaACP {
+			wasResumed = true
+		} else if agentConfig.SessionConfig.ResumeFlag != "" && agentConfig.SessionConfig.SupportsRecovery() {
+			wasResumed = true
+		}
+	}
+
+	sessionStatus := streams.SessionStatusNew
+	if wasResumed {
+		sessionStatus = streams.SessionStatusResumed
+	}
+
+	m.eventPublisher.PublishAgentStreamEvent(execution, streams.AgentEvent{
+		Type:          streams.EventTypeSessionStatus,
+		SessionID:     execution.ACPSessionID,
+		SessionStatus: sessionStatus,
+	})
 }
 
 // handlePermissionRequestEvent processes permission requests from the unified agent event stream

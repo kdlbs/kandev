@@ -56,9 +56,8 @@ func (m *ControlServer) setupRoutes() {
 
 func (m *ControlServer) handleHealth(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
-		"status":        "ok",
-		"timestamp":     time.Now().UTC().Format(time.RFC3339),
-		"max_instances": m.cfg.MaxInstances,
+		"status":    "ok",
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
 	})
 }
 

@@ -34,17 +34,18 @@ type ACPSessionCreatedPayload struct {
 
 // AgentStreamEventData contains the nested event data within AgentStreamEventPayload.
 type AgentStreamEventData struct {
-	Type         string                 `json:"type"`
-	ACPSessionID string                 `json:"acp_session_id,omitempty"`
-	Text         string                 `json:"text,omitempty"`
-	ToolCallID   string                 `json:"tool_call_id,omitempty"`
-	ToolName     string                 `json:"tool_name,omitempty"`
-	ToolTitle    string                 `json:"tool_title,omitempty"`
-	ToolStatus   string                 `json:"tool_status,omitempty"`
-	ToolArgs     map[string]interface{} `json:"tool_args,omitempty"`
-	ToolResult   interface{}            `json:"tool_result,omitempty"`
-	Error        string                 `json:"error,omitempty"`
-	Data         interface{}            `json:"data,omitempty"`
+	Type          string                 `json:"type"`
+	ACPSessionID  string                 `json:"acp_session_id,omitempty"`
+	Text          string                 `json:"text,omitempty"`
+	ToolCallID    string                 `json:"tool_call_id,omitempty"`
+	ToolName      string                 `json:"tool_name,omitempty"`
+	ToolTitle     string                 `json:"tool_title,omitempty"`
+	ToolStatus    string                 `json:"tool_status,omitempty"`
+	ToolArgs      map[string]interface{} `json:"tool_args,omitempty"`
+	ToolResult    interface{}            `json:"tool_result,omitempty"`
+	Error         string                 `json:"error,omitempty"`
+	SessionStatus string                 `json:"session_status,omitempty"` // "resumed" or "new" for session_status events
+	Data          interface{}            `json:"data,omitempty"`
 }
 
 // AgentStreamEventPayload is the payload for agent stream events (WebSocket streaming).

@@ -147,10 +147,9 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get task", nil)
 	}
 
-	// If task is in REVIEW state, transition back to IN_PROGRESS
+	// If task is in REVIEW state, transition back to IN_PROGRESS (also moves to matching column)
 	if task.State == v1.TaskStateReview {
-		nextState := v1.TaskStateInProgress
-		if _, err := h.taskController.UpdateTask(ctx, dto.UpdateTaskRequest{ID: req.TaskID, State: &nextState}); err != nil {
+		if _, err := h.taskController.UpdateTaskState(ctx, dto.UpdateTaskStateRequest{ID: req.TaskID, State: v1.TaskStateInProgress}); err != nil {
 			h.logger.Error("failed to transition task from REVIEW to IN_PROGRESS",
 				zap.String("task_id", req.TaskID),
 				zap.Error(err))
@@ -173,11 +172,14 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	}
 
 	// Auto-forward message as prompt to running agent if orchestrator is available
+	// Use context.WithoutCancel so the prompt continues even if the WebSocket client disconnects.
+	// The user's message is already saved, and agent responses are broadcast via notifications.
 	if h.orchestrator != nil {
-		_, err := h.orchestrator.PromptTask(ctx, req.TaskID, req.TaskSessionID, req.Content)
+		promptCtx := context.WithoutCancel(ctx)
+		_, err := h.orchestrator.PromptTask(promptCtx, req.TaskID, req.TaskSessionID, req.Content)
 		if err != nil {
 			if errors.Is(err, executor.ErrExecutionNotFound) {
-				if resumeErr := h.orchestrator.ResumeTaskSession(ctx, req.TaskID, req.TaskSessionID); resumeErr != nil {
+				if resumeErr := h.orchestrator.ResumeTaskSession(promptCtx, req.TaskID, req.TaskSessionID); resumeErr != nil {
 					h.logger.Warn("failed to resume task session for prompt",
 						zap.String("task_id", req.TaskID),
 						zap.String("session_id", req.TaskSessionID),
@@ -185,7 +187,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 				} else {
 					for attempt := 0; attempt < 3; attempt++ {
 						time.Sleep(500 * time.Millisecond)
-						_, err = h.orchestrator.PromptTask(ctx, req.TaskID, req.TaskSessionID, req.Content)
+						_, err = h.orchestrator.PromptTask(promptCtx, req.TaskID, req.TaskSessionID, req.Content)
 						if err == nil {
 							break
 						}

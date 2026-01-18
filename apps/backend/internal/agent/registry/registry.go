@@ -55,6 +55,12 @@ type SessionConfig struct {
 	// Example: "--resume" for auggie, empty for agents that use ACP session/load.
 	ResumeFlag string `json:"resume_flag,omitempty"`
 
+	// CanRecover indicates whether this agent supports session recovery after a backend restart.
+	// When false, sessions for this agent cannot be resumed after the backend restarts.
+	// On recovery, a new session will be started instead of trying to resume.
+	// Default is true (agent supports recovery).
+	CanRecover *bool `json:"can_recover,omitempty"`
+
 	// SessionDirTemplate is a template for the host directory where session data is stored.
 	// Supports variables: {home} (user home directory).
 	// Example: "{home}/.augment/sessions" for auggie.
@@ -63,6 +69,15 @@ type SessionConfig struct {
 	// SessionDirTarget is the container path where the session directory is mounted.
 	// Example: "/root/.augment/sessions" for auggie.
 	SessionDirTarget string `json:"session_dir_target,omitempty"`
+}
+
+// SupportsRecovery returns whether the agent supports session recovery after backend restart.
+// Returns true by default if CanRecover is not explicitly set.
+func (c SessionConfig) SupportsRecovery() bool {
+	if c.CanRecover == nil {
+		return true
+	}
+	return *c.CanRecover
 }
 
 // PermissionConfig defines how tool permissions are requested for an agent type
