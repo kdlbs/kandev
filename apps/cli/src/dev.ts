@@ -34,6 +34,7 @@ export async function runDev({ repoRoot, backendPort, webPort }: DevOptions): Pr
     KANDEV_API_BASE_URL: backendUrl,
     NEXT_PUBLIC_KANDEV_API_BASE_URL: backendUrl,
     PORT: String(actualWebPort),
+    NEXT_PUBLIC_KANDEV_DEBUG: "true",
   };
 
   console.log("[kandev] dev mode: using local repo");

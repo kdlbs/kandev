@@ -21,6 +21,7 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <body className="antialiased font-sans">
         {runtimeApiBaseUrl ? (
+          // Inject runtime API base URL for production bundles where ports are chosen at launch.
           <script
             dangerouslySetInnerHTML={{
               __html: `window.__KANDEV_API_BASE_URL = ${JSON.stringify(runtimeApiBaseUrl)};`,
