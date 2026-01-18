@@ -7,34 +7,12 @@ import (
 	"github.com/kandev/kandev/internal/task/service"
 )
 
-// WorktreeLookup provides worktree information for tasks.
-type WorktreeLookup interface {
-	// GetWorktreeInfo returns worktree path and branch for a task, or nil if no worktree exists.
-	GetWorktreeInfo(ctx context.Context, taskID string) (path, branch *string)
-}
-
 type TaskController struct {
-	service        *service.Service
-	worktreeLookup WorktreeLookup
+	service *service.Service
 }
 
 func NewTaskController(svc *service.Service) *TaskController {
 	return &TaskController{service: svc}
-}
-
-// SetWorktreeLookup sets the worktree lookup for enriching task responses.
-func (c *TaskController) SetWorktreeLookup(lookup WorktreeLookup) {
-	c.worktreeLookup = lookup
-}
-
-// enrichWithWorktree adds worktree info to a TaskDTO if available.
-func (c *TaskController) enrichWithWorktree(ctx context.Context, task *dto.TaskDTO) {
-	if c.worktreeLookup == nil {
-		return
-	}
-	path, branch := c.worktreeLookup.GetWorktreeInfo(ctx, task.ID)
-	task.WorktreePath = path
-	task.WorktreeBranch = branch
 }
 
 func (c *TaskController) ListTasks(ctx context.Context, req dto.ListTasksRequest) (dto.ListTasksResponse, error) {
@@ -48,7 +26,6 @@ func (c *TaskController) ListTasks(ctx context.Context, req dto.ListTasksRequest
 	}
 	for _, task := range tasks {
 		taskDTO := dto.FromTask(task)
-		c.enrichWithWorktree(ctx, &taskDTO)
 		resp.Tasks = append(resp.Tasks, taskDTO)
 	}
 	return resp, nil
@@ -84,9 +61,7 @@ func (c *TaskController) GetTask(ctx context.Context, req dto.GetTaskRequest) (d
 	if err != nil {
 		return dto.TaskDTO{}, err
 	}
-	taskDTO := dto.FromTask(task)
-	c.enrichWithWorktree(ctx, &taskDTO)
-	return taskDTO, nil
+	return dto.FromTask(task), nil
 }
 
 func (c *TaskController) CreateTask(ctx context.Context, req dto.CreateTaskRequest) (dto.TaskDTO, error) {

@@ -6,6 +6,7 @@ import {
   listAgents,
   listRepositories,
   listTaskSessionMessages,
+  listTaskSessions,
 } from '@/lib/http';
 import type { ListMessagesResponse, Task } from '@/lib/types/http';
 import { snapshotToState, taskToState } from '@/lib/ssr/mapper';
@@ -31,11 +32,13 @@ export default async function SessionPage({
     }
 
     task = await fetchTask(session.task_id, { cache: 'no-store' });
-    const [snapshot, agents, repositories] = await Promise.all([
+    const [snapshot, agents, repositories, allSessionsResponse] = await Promise.all([
       fetchBoardSnapshot(task.board_id, { cache: 'no-store' }),
       listAgents({ cache: 'no-store' }),
       listRepositories(task.workspace_id, { cache: 'no-store' }),
+      listTaskSessions(session.task_id, { cache: 'no-store' }),
     ]);
+    const allSessions = allSessionsResponse.sessions ?? [session];
     let messagesResponse: ListMessagesResponse | null = null;
     try {
       messagesResponse = await listTaskSessionMessages(
@@ -82,13 +85,11 @@ export default async function SessionPage({
         version: 0,
       },
       taskSessions: {
-        items: {
-          [session.id]: session,
-        },
+        items: Object.fromEntries(allSessions.map((s) => [s.id, s])),
       },
       taskSessionsByTask: {
         itemsByTaskId: {
-          [task.id]: [session],
+          [task.id]: allSessions,
         },
         loadingByTaskId: {
           [task.id]: false,
@@ -97,26 +98,29 @@ export default async function SessionPage({
           [task.id]: true,
         },
       },
-      worktrees: session.worktree_id
-        ? {
-            items: {
-              [session.worktree_id]: {
-                id: session.worktree_id,
-                sessionId: session.id,
-                repositoryId: session.repository_id ?? undefined,
-                path: session.worktree_path ?? undefined,
-                branch: session.worktree_branch ?? undefined,
+      worktrees: {
+        items: Object.fromEntries(
+          allSessions
+            .filter((s) => s.worktree_id)
+            .map((s) => [
+              s.worktree_id,
+              {
+                id: s.worktree_id!,
+                sessionId: s.id,
+                repositoryId: s.repository_id ?? undefined,
+                path: s.worktree_path ?? undefined,
+                branch: s.worktree_branch ?? undefined,
               },
-            },
-          }
-        : undefined,
-      sessionWorktreesBySessionId: session.worktree_id
-        ? {
-            itemsBySessionId: {
-              [session.id]: [session.worktree_id],
-            },
-          }
-        : undefined,
+            ])
+        ),
+      },
+      sessionWorktreesBySessionId: {
+        itemsBySessionId: Object.fromEntries(
+          allSessions
+            .filter((s) => s.worktree_id)
+            .map((s) => [s.id, [s.worktree_id!]])
+        ),
+      },
       settingsAgents: {
         items: agents.agents,
       },

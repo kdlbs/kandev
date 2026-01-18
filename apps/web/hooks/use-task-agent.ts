@@ -12,7 +12,7 @@ interface UseTaskAgentReturn {
   taskSessionState: TaskSessionState | null;
   worktreePath: string | null;
   worktreeBranch: string | null;
-  handleStartAgent: (agentProfileId: string) => Promise<void>;
+  handleStartAgent: (agentProfileId: string, prompt?: string) => Promise<void>;
   handleStopAgent: () => Promise<void>;
 }
 
@@ -21,8 +21,8 @@ export function useTaskAgent(task: Task | null): UseTaskAgentReturn {
   const [isAgentLoading, setIsAgentLoading] = useState(false);
   const [taskSessionId, setAgentSessionId] = useState<string | null>(null);
   const [taskSessionState, setTaskSessionState] = useState<TaskSessionState | null>(null);
-  const [worktreePath, setWorktreePath] = useState<string | null>(task?.worktree_path ?? null);
-  const [worktreeBranch, setWorktreeBranch] = useState<string | null>(task?.worktree_branch ?? null);
+  const [worktreePath, setWorktreePath] = useState<string | null>(null);
+  const [worktreeBranch, setWorktreeBranch] = useState<string | null>(null);
   const connectionStatus = useAppStore((state) => state.connection.status);
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const activeSession = useAppStore((state) =>
@@ -39,13 +39,21 @@ export function useTaskAgent(task: Task | null): UseTaskAgentReturn {
     return sessionsForTask[0]?.state;
   }, [activeSession, sessionsForTask, task?.id]);
 
+  // Get worktree info from active session
+  useEffect(() => {
+    if (activeSession) {
+      setWorktreePath(activeSession.worktree_path ?? null);
+      setWorktreeBranch(activeSession.worktree_branch ?? null);
+    }
+  }, [activeSession?.worktree_path, activeSession?.worktree_branch]);
+
   useEffect(() => {
     setIsAgentRunning(false);
     setAgentSessionId(null);
     setTaskSessionState(null);
-    setWorktreePath(task?.worktree_path ?? null);
-    setWorktreeBranch(task?.worktree_branch ?? null);
-  }, [task?.id, task?.worktree_path, task?.worktree_branch]);
+    setWorktreePath(null);
+    setWorktreeBranch(null);
+  }, [task?.id]);
 
   useEffect(() => {
     if (!wsTaskSessionState) return;
@@ -98,7 +106,7 @@ export function useTaskAgent(task: Task | null): UseTaskAgentReturn {
     return () => clearInterval(interval);
   }, [connectionStatus, task?.id]);
 
-  const handleStartAgent = useCallback(async (agentProfileId: string) => {
+  const handleStartAgent = useCallback(async (agentProfileId: string, prompt?: string) => {
     if (!task?.id) return;
     if (!agentProfileId) return;
 
@@ -119,10 +127,12 @@ export function useTaskAgent(task: Task | null): UseTaskAgentReturn {
       console.log('[useTaskAgent] orchestrator.start request', {
         taskId: task.id,
         agentProfileId,
+        promptLength: prompt?.length ?? 0,
       });
       const response = await client.request<StartResponse>('orchestrator.start', {
         task_id: task.id,
         agent_profile_id: agentProfileId,
+        prompt: prompt ?? task.description ?? '',
       }, 15000);
       console.log('[useTaskAgent] orchestrator.start response', response);
       setIsAgentRunning(true);
@@ -141,7 +151,7 @@ export function useTaskAgent(task: Task | null): UseTaskAgentReturn {
     } finally {
       setIsAgentLoading(false);
     }
-  }, [task?.id]);
+  }, [task?.id, task?.description]);
 
   const handleStopAgent = useCallback(async () => {
     if (!task?.id) return;

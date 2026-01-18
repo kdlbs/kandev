@@ -188,9 +188,6 @@ func (s *Scheduler) HandleTaskCompleted(taskID string, success bool) {
 	} else {
 		atomic.AddInt64(&s.totalFailed, 1)
 	}
-
-	// Remove from executor tracking
-	s.executor.RemoveExecution(taskID)
 }
 
 // RetryTask re-queues a failed task if retry limit not exceeded

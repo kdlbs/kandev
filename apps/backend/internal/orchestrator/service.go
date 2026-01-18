@@ -186,21 +186,8 @@ func (s *Service) Start(ctx context.Context) error {
 
 	s.logger.Info("starting orchestrator service")
 
-	// Load any active sessions from the database to restore state
-	if err := s.executor.LoadActiveSessionsFromDB(ctx); err != nil {
-		s.logger.Warn("failed to load active sessions from database (non-fatal)", zap.Error(err))
-	}
-
 	// Resume executors from persisted runtime state on startup.
 	s.resumeExecutorsOnStartup(ctx)
-
-	// Sync with executions recovered from Docker by the lifecycle manager
-	// This ensures we track containers that are running but weren't in the DB as active
-	recovered := s.agentManager.GetRecoveredExecutions()
-	if len(recovered) > 0 {
-		s.logger.Info("syncing with recovered Docker executions", zap.Int("count", len(recovered)))
-		s.executor.SyncWithRecoveredExecutions(ctx, recovered)
-	}
 
 	// Start the watcher first to begin receiving events
 	if err := s.watcher.Start(ctx); err != nil {
@@ -362,11 +349,12 @@ func (s *Service) EnqueueTask(ctx context.Context, task *v1.Task) error {
 }
 
 // StartTask manually starts agent execution for a task
-func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID string, priority int) (*executor.TaskExecution, error) {
+func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID string, priority int, prompt string) (*executor.TaskExecution, error) {
 	s.logger.Info("manually starting task",
 		zap.String("task_id", taskID),
 		zap.String("agent_profile_id", agentProfileID),
-		zap.Int("priority", priority))
+		zap.Int("priority", priority),
+		zap.Int("prompt_length", len(prompt)))
 
 	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateScheduling); err != nil {
 		s.logger.Warn("failed to update task state to SCHEDULING",
@@ -388,15 +376,22 @@ func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID s
 		task.Priority = priority
 	}
 
-	execution, err := s.executor.ExecuteWithProfile(ctx, task, agentProfileID)
+	// Use provided prompt, fall back to task description
+	effectivePrompt := prompt
+	if effectivePrompt == "" {
+		effectivePrompt = task.Description
+	}
+
+	execution, err := s.executor.ExecuteWithProfile(ctx, task, agentProfileID, effectivePrompt)
 	if err != nil {
 		return nil, err
 	}
 
 	if execution.SessionID != "" {
 		s.updateTaskSessionState(ctx, taskID, execution.SessionID, models.TaskSessionStateRunning, "", true)
-		if s.messageCreator != nil && task.Description != "" {
-			if err := s.messageCreator.CreateUserMessage(ctx, taskID, task.Description, execution.SessionID); err != nil {
+		// Create user message for the initial prompt
+		if s.messageCreator != nil && effectivePrompt != "" {
+			if err := s.messageCreator.CreateUserMessage(ctx, taskID, effectivePrompt, execution.SessionID); err != nil {
 				s.logger.Error("failed to create initial user message",
 					zap.String("task_id", taskID),
 					zap.Error(err))
@@ -540,13 +535,22 @@ func (s *Service) GetTaskSessionStatus(ctx context.Context, taskID, sessionID st
 	return resp, nil
 }
 
-// StopTask stops agent execution for a task
+// StopTask stops agent execution for a task (stops all active sessions for the task)
 func (s *Service) StopTask(ctx context.Context, taskID string, reason string, force bool) error {
 	s.logger.Info("stopping task execution",
 		zap.String("task_id", taskID),
 		zap.String("reason", reason),
 		zap.Bool("force", force))
-	return s.executor.Stop(ctx, taskID, reason, force)
+	return s.executor.StopByTaskID(ctx, taskID, reason, force)
+}
+
+// StopSession stops agent execution for a specific session
+func (s *Service) StopSession(ctx context.Context, sessionID string, reason string, force bool) error {
+	s.logger.Info("stopping session execution",
+		zap.String("session_id", sessionID),
+		zap.String("reason", reason),
+		zap.Bool("force", force))
+	return s.executor.Stop(ctx, sessionID, reason, force)
 }
 
 // PromptResult contains the result of a prompt operation
@@ -609,15 +613,15 @@ func (s *Service) RespondToPermission(ctx context.Context, sessionID, pendingID,
 	return nil
 }
 
-// CompleteTask explicitly completes a task and stops its agent
+// CompleteTask explicitly completes a task and stops all its agents
 func (s *Service) CompleteTask(ctx context.Context, taskID string) error {
 	s.logger.Info("completing task",
 		zap.String("task_id", taskID))
 
-	// Stop the agent (which will trigger AgentCompleted event and update task state)
-	if err := s.executor.Stop(ctx, taskID, "task completed by user", false); err != nil {
-		// If agent is already stopped, just update the task state directly
-		s.logger.Warn("failed to stop agent, updating task state directly",
+	// Stop all agents for this task (which will trigger AgentCompleted events and update session states)
+	if err := s.executor.StopByTaskID(ctx, taskID, "task completed by user", false); err != nil {
+		// If agents are already stopped, just update the task state directly
+		s.logger.Warn("failed to stop agents, updating task state directly",
 			zap.String("task_id", taskID),
 			zap.Error(err))
 	}
@@ -1007,9 +1011,6 @@ func (s *Service) updateTaskSessionState(ctx context.Context, taskID, sessionID 
 			"old_state":  string(oldState),
 			"new_state":  string(nextState),
 		}))
-	}
-	if taskID != "" {
-		s.executor.UpdateExecutionState(taskID, v1.TaskSessionState(nextState))
 	}
 }
 

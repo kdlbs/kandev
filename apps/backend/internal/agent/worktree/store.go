@@ -158,6 +158,70 @@ func (s *SQLiteStore) GetWorktreeByID(ctx context.Context, id string) (*Worktree
 	return wt, nil
 }
 
+// GetWorktreeBySessionID retrieves the worktree by session ID.
+func (s *SQLiteStore) GetWorktreeBySessionID(ctx context.Context, sessionID string) (*Worktree, error) {
+	wt := &Worktree{}
+	var mergedAt, deletedAt sql.NullTime
+	var repositoryPath, baseBranch sql.NullString
+
+	err := s.db.QueryRowContext(ctx, `
+		SELECT
+			tsw.worktree_id,
+			tsw.session_id,
+			s.task_id,
+			tsw.repository_id,
+			r.local_path,
+			tsw.worktree_path,
+			tsw.worktree_branch,
+			s.base_branch,
+			tsw.status,
+			tsw.created_at,
+			tsw.updated_at,
+			tsw.merged_at,
+			tsw.deleted_at
+		FROM task_session_worktrees tsw
+		INNER JOIN task_sessions s ON tsw.session_id = s.id
+		LEFT JOIN repositories r ON tsw.repository_id = r.id
+		WHERE tsw.session_id = ? AND tsw.status = ?
+	`, sessionID, StatusActive).Scan(
+		&wt.ID,
+		&wt.SessionID,
+		&wt.TaskID,
+		&wt.RepositoryID,
+		&repositoryPath,
+		&wt.Path,
+		&wt.Branch,
+		&baseBranch,
+		&wt.Status,
+		&wt.CreatedAt,
+		&wt.UpdatedAt,
+		&mergedAt,
+		&deletedAt,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, nil // Not found, return nil without error
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	if repositoryPath.Valid {
+		wt.RepositoryPath = repositoryPath.String
+	}
+	if baseBranch.Valid {
+		wt.BaseBranch = baseBranch.String
+	}
+	if mergedAt.Valid {
+		wt.MergedAt = &mergedAt.Time
+	}
+	if deletedAt.Valid {
+		wt.DeletedAt = &deletedAt.Time
+	}
+
+	return wt, nil
+}
+
 // GetWorktreeByTaskID retrieves the most recent active worktree by task ID.
 // Since multiple worktrees can exist per task, this returns the most recently created active one.
 func (s *SQLiteStore) GetWorktreeByTaskID(ctx context.Context, taskID string) (*Worktree, error) {

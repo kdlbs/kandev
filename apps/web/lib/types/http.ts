@@ -103,9 +103,6 @@ export type Task = {
   created_at: string;
   updated_at: string;
   metadata?: Record<string, unknown> | null;
-  // Worktree information (present if agent has created a worktree for this task)
-  worktree_path?: string | null;
-  worktree_branch?: string | null;
 };
 
 export type CreateTaskResponse = Task & {

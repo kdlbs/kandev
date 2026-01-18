@@ -248,16 +248,21 @@ func (sm *SessionManager) InitializeAndPrompt(
 		}
 	}
 
-	// Send the task prompt if provided
+	// Send the task prompt if provided - run asynchronously so orchestrator.start returns quickly.
+	// The agent will process the prompt and emit events via the WebSocket stream.
 	if taskDescription != "" {
-		// Use a long timeout for initial prompts
-		promptCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-		defer cancel()
+		go func() {
+			// Use a long timeout for initial prompts
+			promptCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			defer cancel()
 
-		_, err := sm.SendPrompt(promptCtx, execution, taskDescription, false, markReady)
-		if err != nil {
-			return err
-		}
+			_, err := sm.SendPrompt(promptCtx, execution, taskDescription, false, markReady)
+			if err != nil {
+				sm.logger.Error("initial prompt failed",
+					zap.String("execution_id", execution.ID),
+					zap.Error(err))
+			}
+		}()
 	} else {
 		sm.logger.Warn("no task description provided, marking as ready",
 			zap.String("execution_id", execution.ID))

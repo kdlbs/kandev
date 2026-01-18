@@ -62,7 +62,7 @@ func (c *Controller) TriggerTask(ctx context.Context, req dto.TriggerTaskRequest
 
 // StartTask starts task execution
 func (c *Controller) StartTask(ctx context.Context, req dto.StartTaskRequest) (dto.StartTaskResponse, error) {
-	execution, err := c.service.StartTask(ctx, req.TaskID, req.AgentProfileID, req.Priority)
+	execution, err := c.service.StartTask(ctx, req.TaskID, req.AgentProfileID, req.Priority, req.Prompt)
 	if err != nil {
 		return dto.StartTaskResponse{}, err
 	}

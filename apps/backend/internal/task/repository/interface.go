@@ -77,6 +77,7 @@ type Repository interface {
 	UpdateTaskSessionState(ctx context.Context, id string, state models.TaskSessionState, errorMessage string) error
 	ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error)
 	ListActiveTaskSessions(ctx context.Context) ([]*models.TaskSession, error)
+	ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error)
 	HasActiveTaskSessionsByAgentProfile(ctx context.Context, agentProfileID string) (bool, error)
 	HasActiveTaskSessionsByExecutor(ctx context.Context, executorID string) (bool, error)
 	HasActiveTaskSessionsByEnvironment(ctx context.Context, environmentID string) (bool, error)
