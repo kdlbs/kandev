@@ -35,7 +35,6 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@kandev/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@kandev/ui/popover';
-import { SessionsDropdown } from './sessions-dropdown';
 import { CommitStatBadge, LineStat } from '@/components/diff-stat';
 import { useAppStore } from '@/components/state-provider';
 import { useSessionGitStatus } from '@/hooks/use-session-git-status';
@@ -58,10 +57,8 @@ type TaskTopBarProps = {
 };
 
 const TaskTopBar = memo(function TaskTopBar({
-  taskId,
   activeSessionId,
   taskTitle,
-  taskDescription,
   baseBranch,
   onStartAgent,
   onStopAgent,
@@ -147,12 +144,6 @@ const TaskTopBar = memo(function TaskTopBar({
           </>
         )}
         <span className="text-sm font-medium">{taskTitle ?? 'Task details'}</span>
-        <SessionsDropdown
-          taskId={taskId ?? null}
-          activeSessionId={activeSessionId ?? null}
-          taskTitle={taskTitle}
-          taskDescription={taskDescription}
-        />
         {displayBranch && (
           <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
             <Tooltip>

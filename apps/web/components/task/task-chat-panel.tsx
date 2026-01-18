@@ -27,6 +27,7 @@ import { useSessionMessages } from '@/hooks/use-session-messages';
 import { MessageRenderer } from '@/components/task/chat/message-renderer';
 import { RunningIndicator } from '@/components/task/chat/messages/running-indicator';
 import { TodoSummary } from '@/components/task/chat/todo-summary';
+import { SessionsDropdown } from '@/components/task/sessions-dropdown';
 
 type AgentOption = {
   id: string;
@@ -379,6 +380,12 @@ export function TaskChatPanel({
             </Tooltip>
           </div>
           <div className="flex items-center gap-2">
+            <SessionsDropdown
+              taskId={taskId}
+              activeSessionId={resolvedSessionId}
+              taskTitle={task?.title}
+              taskDescription={taskDescription ?? ''}
+            />
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button type="button" variant="outline" size="icon" className="h-9 w-9 cursor-pointer">

@@ -1,12 +1,13 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { IconCheck, IconLoader2, IconAlertCircle, IconPlayerStopFilled, IconPlus, IconX } from '@tabler/icons-react';
+import { IconPlayerStopFilled, IconPlus } from '@tabler/icons-react';
 import type { TaskSession, TaskSessionState } from '@/lib/types/http';
 import { Badge } from '@kandev/ui/badge';
 import { Command, CommandGroup, CommandItem, CommandList } from '@kandev/ui/command';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
 import { useAppStore } from '@/components/state-provider';
+import { getSessionStateIcon } from '@/lib/ui/state-icons';
 
 type SessionSwitcherProps = {
   taskId: string | null;
@@ -44,23 +45,6 @@ function getSessionStatus(state: TaskSessionState): SessionStatus {
       return 'cancelled';
     default:
       return 'waiting_input';
-  }
-}
-
-function getSessionIcon(status: SessionStatus) {
-  switch (status) {
-    case 'running':
-    case 'starting':
-      return <IconLoader2 className="h-3.5 w-3.5 text-blue-500 animate-spin" />;
-    case 'waiting_input':
-      return <IconAlertCircle className="h-3.5 w-3.5 text-yellow-500" />;
-    case 'complete':
-      return <IconCheck className="h-3.5 w-3.5 text-green-500" />;
-    case 'failed':
-    case 'cancelled':
-      return <IconX className="h-3.5 w-3.5 text-red-500" />;
-    default:
-      return null;
   }
 }
 
@@ -189,7 +173,7 @@ export function TaskSessionSwitcher({
                     </span>
                     <div className="ml-auto group/status relative h-5 w-5 shrink-0 flex items-center justify-center">
                       <div className="transition-opacity group-hover/status:opacity-0">
-                        {getSessionIcon(status)}
+                        {getSessionStateIcon(session.state, 'h-3.5 w-3.5')}
                       </div>
                       {(status === 'running' || status === 'starting') && (
                         <Tooltip>

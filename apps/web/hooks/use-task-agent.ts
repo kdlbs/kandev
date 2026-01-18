@@ -45,7 +45,7 @@ export function useTaskAgent(task: Task | null): UseTaskAgentReturn {
       setWorktreePath(activeSession.worktree_path ?? null);
       setWorktreeBranch(activeSession.worktree_branch ?? null);
     }
-  }, [activeSession?.worktree_path, activeSession?.worktree_branch]);
+  }, [activeSession]);
 
   useEffect(() => {
     setIsAgentRunning(false);

@@ -1,16 +1,7 @@
 'use client';
 
-import { useCallback, useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import {
-  IconStack2,
-  IconLoader2,
-  IconCheck,
-  IconAlertCircle,
-  IconX,
-  IconPlus,
-  IconPlayerStopFilled,
-} from '@tabler/icons-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { IconStack2, IconPlus } from '@tabler/icons-react';
 import { Button } from '@kandev/ui/button';
 import {
   DropdownMenu,
@@ -24,33 +15,26 @@ import { TaskCreateDialog } from '../task-create-dialog';
 import { useAppStore } from '@/components/state-provider';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import { linkToSession } from '@/lib/links';
+import { useTaskSessions } from '@/hooks/use-task-sessions';
+import type { TaskSession, TaskSessionState } from '@/lib/types/http';
+import { getSessionStateIcon } from '@/lib/ui/state-icons';
 
 type SessionStatus = 'running' | 'waiting_input' | 'complete' | 'failed' | 'cancelled';
 
-type Session = {
-  id: string;
-  number: number;
-  agentProfile: string;
-  startedAt: Date;
-  status: SessionStatus;
-};
-
-type TaskSessionResponse = {
-  id: string;
-  agent_profile_id?: string;
-  started_at: string;
-  state: string;
-};
-
-type ListTaskSessionsResponse = {
-  sessions: TaskSessionResponse[];
-  total: number;
+const STATUS_ORDER: Record<TaskSessionState, number> = {
+  RUNNING: 1,
+  STARTING: 1,
+  WAITING_FOR_INPUT: 2,
+  CREATED: 3,
+  COMPLETED: 4,
+  FAILED: 5,
+  CANCELLED: 6,
 };
 
 // Format duration from start time
-function formatDuration(startedAt: Date, isRunning: boolean): string {
-  const now = isRunning ? Date.now() : startedAt.getTime();
-  const diff = Math.floor((now - startedAt.getTime()) / 1000);
+function formatDuration(startedAt: string, isRunning: boolean, now: number): string {
+  const start = new Date(startedAt).getTime();
+  const diff = Math.floor(((isRunning ? now : start) - start) / 1000);
 
   const hours = Math.floor(diff / 3600);
   const minutes = Math.floor((diff % 3600) / 60);
@@ -58,25 +42,11 @@ function formatDuration(startedAt: Date, isRunning: boolean): string {
 
   if (hours > 0) {
     return `${hours}h ${minutes}m`;
-  } else if (minutes > 0) {
+  }
+  if (minutes > 0) {
     return `${minutes}m ${seconds}s`;
-  } else {
-    return `${seconds}s`;
   }
-}
-
-function getStatusIcon(status: SessionStatus) {
-  switch (status) {
-    case 'running':
-      return <IconLoader2 className="h-3.5 w-3.5 text-blue-500 animate-spin" />;
-    case 'complete':
-      return <IconCheck className="h-3.5 w-3.5 text-green-500" />;
-    case 'waiting_input':
-      return <IconAlertCircle className="h-3.5 w-3.5 text-yellow-500" />;
-    case 'failed':
-    case 'cancelled':
-      return <IconX className="h-3.5 w-3.5 text-red-500" />;
-  }
+  return `${seconds}s`;
 }
 
 function getStatusLabel(status: SessionStatus) {
@@ -94,7 +64,7 @@ function getStatusLabel(status: SessionStatus) {
   }
 }
 
-function mapSessionStatus(state: string): SessionStatus {
+function mapSessionStatus(state: TaskSessionState): SessionStatus {
   switch (state) {
     case 'RUNNING':
     case 'STARTING':
@@ -119,48 +89,35 @@ type SessionsDropdownProps = {
   taskDescription?: string;
 };
 
-export function SessionsDropdown({ taskId, activeSessionId = null, taskTitle = '', taskDescription = '' }: SessionsDropdownProps) {
-  const [sessions, setSessions] = useState<Session[]>([]);
+export function SessionsDropdown({
+  taskId,
+  activeSessionId = null,
+  taskTitle = '',
+  taskDescription = '',
+}: SessionsDropdownProps) {
   const [currentTime, setCurrentTime] = useState(() => Date.now());
   const [showNewSessionDialog, setShowNewSessionDialog] = useState(false);
   const agentProfiles = useAppStore((state) => state.agentProfiles.items);
-  const router = useRouter();
-  const visibleSessions = taskId ? sessions : [];
+  const setActiveSession = useAppStore((state) => state.setActiveSession);
+  const { sessions, loadSessions } = useTaskSessions(taskId);
 
-  const fetchSessions = useCallback(async (targetTaskId: string) => {
-    const client = getWebSocketClient();
-    if (!client) return;
-    try {
-      const response = await client.request<ListTaskSessionsResponse>('task.session.list', {
-        task_id: targetTaskId,
-      });
-      const total = response.sessions.length;
-      const mapped = response.sessions.map((session, index) => {
-        const label = agentProfiles.find((profile) => profile.id === session.agent_profile_id)?.label
-          ?? session.agent_profile_id
-          ?? 'Unknown agent';
-        return {
-          id: session.id,
-          number: total - index,
-          agentProfile: label,
-          startedAt: new Date(session.started_at),
-          status: mapSessionStatus(session.state),
-        };
-      });
-      setSessions(mapped);
-    } catch (error) {
-      console.error('Failed to load task sessions:', error);
-    }
+  const agentLabelsById = useMemo(() => {
+    return Object.fromEntries(agentProfiles.map((profile) => [profile.id, profile.label]));
   }, [agentProfiles]);
 
-  const handleOpenChange = useCallback((open: boolean) => {
-    if (!open || !taskId) return;
-    fetchSessions(taskId);
-  }, [fetchSessions, taskId]);
+  const handleOpenChange = useCallback(
+    (open: boolean) => {
+      if (!open || !taskId) return;
+      loadSessions(true);
+    },
+    [loadSessions, taskId]
+  );
 
   // Update timer every second for running sessions
   useEffect(() => {
-    const hasRunningSessions = sessions.some(s => s.status === 'running');
+    const hasRunningSessions = sessions.some(
+      (session) => session.state === 'RUNNING' || session.state === 'STARTING'
+    );
     if (!hasRunningSessions) return;
 
     const interval = setInterval(() => {
@@ -170,154 +127,165 @@ export function SessionsDropdown({ taskId, activeSessionId = null, taskTitle = '
     return () => clearInterval(interval);
   }, [sessions]);
 
-  const handleCancelSession = (e: React.MouseEvent, sessionId: string) => {
-    e.stopPropagation();
-    // TODO: Implement session cancellation
-    console.log('Cancel session:', sessionId);
-  };
+  const updateUrl = useCallback((sessionId: string) => {
+    if (typeof window === 'undefined') return;
+    window.history.replaceState({}, '', linkToSession(sessionId));
+  }, []);
 
-  const handleSelectSession = async (sessionId: string) => {
+  const handleSelectSession = (sessionId: string) => {
     if (!taskId) return;
-    const client = getWebSocketClient();
-    if (!client) return;
-
-    try {
-      await client.request('task.session.resume', {
-        task_id: taskId,
-        session_id: sessionId,
-      }, 15000);
-      await fetchSessions(taskId);
-      router.push(linkToSession(sessionId));
-    } catch (error) {
-      console.error('Failed to resume task session:', error);
-    }
+    setActiveSession(taskId, sessionId);
+    updateUrl(sessionId);
   };
 
-  const handleCreateSession = (data: {
+  const handleCreateSession = async (data: {
     prompt: string;
     agentProfileId: string;
     executorId: string;
     environmentId: string;
   }) => {
-    // TODO: Implement session creation
-    console.log('Create new session:', data);
+    if (!taskId) return;
+    const client = getWebSocketClient();
+    if (!client) return;
+
+    try {
+      const response = await client.request<{
+        success: boolean;
+        task_id: string;
+        agent_instance_id: string;
+        session_id?: string;
+        state: string;
+      }>(
+        'orchestrator.start',
+        {
+          task_id: taskId,
+          agent_profile_id: data.agentProfileId,
+          prompt: data.prompt.trim(),
+        },
+        15000
+      );
+
+      await loadSessions(true);
+
+      if (response?.session_id) {
+        setActiveSession(taskId, response.session_id);
+        updateUrl(response.session_id);
+      }
+    } catch (error) {
+      console.error('Failed to create task session:', error);
+    }
+  };
+
+  const sortedSessions = useMemo(() => {
+    const visibleSessions = taskId ? sessions : [];
+    return [...visibleSessions].sort((a, b) => {
+      const orderDelta = (STATUS_ORDER[a.state] ?? 99) - (STATUS_ORDER[b.state] ?? 99);
+      if (orderDelta !== 0) return orderDelta;
+      return new Date(b.started_at).getTime() - new Date(a.started_at).getTime();
+    });
+  }, [sessions, taskId]);
+
+  const resolveAgentLabel = (session: TaskSession) => {
+    if (session.agent_profile_id && agentLabelsById[session.agent_profile_id]) {
+      return agentLabelsById[session.agent_profile_id];
+    }
+    return 'Unknown agent';
   };
 
   return (
     <>
-    <DropdownMenu onOpenChange={handleOpenChange}>
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-8 gap-1.5 px-2 cursor-pointer hover:bg-muted/40 border border-border"
-        >
-          <IconStack2 className="h-4 w-4 text-muted-foreground" />
-          <Badge variant="secondary" className="h-5 px-1.5 text-xs font-normal">
-            {visibleSessions.length}
-          </Badge>
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-[480px]">
-        <div className="flex items-center justify-between px-2 py-1.5">
-          <span className="text-xs font-medium text-muted-foreground">Task Sessions</span>
-          <button
-            type="button"
-            onClick={() => setShowNewSessionDialog(true)}
-            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+      <DropdownMenu onOpenChange={handleOpenChange}>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-9 gap-1.5 px-2 cursor-pointer hover:bg-muted/40 border border-border"
           >
-            <IconPlus className="h-3.5 w-3.5" />
-            New session
-          </button>
-        </div>
-        <DropdownMenuSeparator />
-        <div className="max-h-[300px] overflow-y-auto">
-          {visibleSessions.length === 0 ? (
-            <div className="px-2 py-6 text-center text-sm text-muted-foreground">
-              No sessions yet
-            </div>
-          ) : (
-            <div className="space-y-0.5">
-              {visibleSessions.map((session) => {
-                const duration = formatDuration(session.startedAt, session.status === 'running');
-                // Use currentTime to force re-render when timer updates
-                void currentTime;
+            <IconStack2 className="h-4 w-4 text-muted-foreground" />
+            <Badge variant="secondary" className="h-5 px-1.5 text-xs font-normal">
+              {sortedSessions.length}
+            </Badge>
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-[280px]">
+          <div className="flex items-center justify-between px-2 py-1.5">
+            <span className="text-xs font-medium text-muted-foreground">Sessions</span>
+            <button
+              type="button"
+              onClick={() => setShowNewSessionDialog(true)}
+              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+            >
+              <IconPlus className="h-3.5 w-3.5" />
+              New
+            </button>
+          </div>
+          <DropdownMenuSeparator />
+          <div className="max-h-[300px] overflow-y-auto">
+            {sortedSessions.length === 0 ? (
+              <div className="px-2 py-6 text-center text-sm text-muted-foreground">
+                No sessions yet
+              </div>
+            ) : (
+              <div className="space-y-0.5">
+                {sortedSessions.map((session, index) => {
+                  const status = mapSessionStatus(session.state);
+                  const duration = formatDuration(
+                    session.started_at,
+                    status === 'running',
+                    currentTime
+                  );
+                  const number = sortedSessions.length - index;
 
-                return (
-                  <div
-                    key={session.id}
-                    onClick={() => handleSelectSession(session.id)}
-                    className={`w-full flex items-center gap-3 px-2 py-1.5 hover:bg-muted/50 rounded-sm cursor-pointer transition-colors ${
-                      activeSessionId === session.id ? 'bg-muted/50' : ''
-                    }`}
-                  >
-                    {/* Session Number - Fixed width */}
-                    <span className="text-xs font-medium text-muted-foreground w-8 shrink-0">
-                      #{session.number}
-                    </span>
+                  return (
+                    <div
+                      key={session.id}
+                      onClick={() => handleSelectSession(session.id)}
+                      className={`w-full flex items-center gap-3 px-2 py-1.5 hover:bg-muted/50 rounded-sm cursor-pointer transition-colors ${activeSessionId === session.id ? 'bg-muted/50' : ''
+                        }`}
+                    >
+                      <span className="text-xs font-medium text-muted-foreground w-8 shrink-0">
+                        #{number}
+                      </span>
 
-                    {/* Agent Profile - Flexible width */}
-                    <span className="text-xs text-foreground flex-1 text-left truncate">
-                      {session.agentProfile}
-                    </span>
+                      <span className="text-xs text-foreground flex-1 text-left truncate">
+                        {resolveAgentLabel(session)}
+                      </span>
 
-                    {/* Duration - Fixed width */}
-                    <span className="text-xs text-muted-foreground w-16 text-right shrink-0">
-                      {duration}
-                    </span>
+                      <span className="text-xs text-muted-foreground w-16 text-right shrink-0">
+                        {duration}
+                      </span>
 
-                    {/* Status Icon - Fixed width with tooltip */}
-                    <div className="w-5 shrink-0 flex items-center justify-center">
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <div>{getStatusIcon(session.status)}</div>
-                        </TooltipTrigger>
-                        <TooltipContent side="left">
-                          {getStatusLabel(session.status)}
-                        </TooltipContent>
-                      </Tooltip>
-                    </div>
-
-                    {/* Cancel Button - Only for running sessions */}
-                    <div className="w-7 shrink-0 flex items-center justify-center">
-                      {session.status === 'running' && (
+                      <div className="w-5 shrink-0 flex items-center justify-center">
                         <Tooltip>
                           <TooltipTrigger asChild>
-                            <button
-                              type="button"
-                              onClick={(e) => handleCancelSession(e, session.id)}
-                              className="h-5 w-5 flex items-center justify-center rounded-md border border-border bg-background text-muted-foreground hover:text-destructive hover:border-destructive transition-colors cursor-pointer"
-                            >
-                              <IconPlayerStopFilled className="h-3 w-3" />
-                            </button>
+                          <div>{getSessionStateIcon(session.state, 'h-3.5 w-3.5')}</div>
                           </TooltipTrigger>
-                          <TooltipContent side="left">Cancel session</TooltipContent>
+                          <TooltipContent side="left">{getStatusLabel(status)}</TooltipContent>
                         </Tooltip>
-                      )}
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </DropdownMenuContent>
-    </DropdownMenu>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </DropdownMenuContent>
+      </DropdownMenu>
 
-    <TaskCreateDialog
-      open={showNewSessionDialog}
-      onOpenChange={setShowNewSessionDialog}
-      mode="session"
-      workspaceId={null}
-      boardId={null}
-      defaultColumnId={null}
-      columns={[]}
-      onCreateSession={handleCreateSession}
-      initialValues={{
-        title: taskTitle,
-        description: taskDescription,
-      }}
-    />
-  </>
+      <TaskCreateDialog
+        open={showNewSessionDialog}
+        onOpenChange={setShowNewSessionDialog}
+        mode="session"
+        workspaceId={null}
+        boardId={null}
+        defaultColumnId={null}
+        columns={[]}
+        onCreateSession={handleCreateSession}
+        initialValues={{
+          title: taskTitle,
+          description: taskDescription,
+        }}
+      />
+    </>
   );
 }

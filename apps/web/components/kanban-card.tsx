@@ -2,7 +2,7 @@
 
 import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
-import { IconAlertTriangle, IconCircleCheck, IconCircleX, IconDots, IconLoader2, IconArrowsMaximize } from '@tabler/icons-react';
+import { IconDots, IconArrowsMaximize } from '@tabler/icons-react';
 import { Card, CardContent } from '@kandev/ui/card';
 import {
   DropdownMenu,
@@ -12,13 +12,15 @@ import {
 } from '@kandev/ui/dropdown-menu';
 import { useMemo } from 'react';
 import { useAppStore } from '@/components/state-provider';
+import type { TaskState } from '@/lib/types/http';
 import { cn, getRepositoryDisplayName } from '@/lib/utils';
+import { getTaskStateIcon } from '@/lib/ui/state-icons';
 
 export interface Task {
   id: string;
   title: string;
   columnId: string;
-  state?: string;
+  state?: TaskState;
   description?: string;
   position?: number;
   repositoryId?: string;
@@ -91,26 +93,7 @@ export function KanbanCard({ task, onClick, onEdit, onDelete, onOpenFullPage }: 
   );
   const repoName = getRepositoryDisplayName(repository?.local_path);
 
-  const statusIcon = (() => {
-    switch (task.state) {
-      case 'IN_PROGRESS':
-      case 'SCHEDULING':
-        return <IconLoader2 className="h-4 w-4 animate-spin text-[color:var(--accent)]" />;
-      case 'COMPLETED':
-        return <IconCircleCheck className="h-4 w-4 text-emerald-500" />;
-      case 'FAILED':
-      case 'CANCELLED':
-        return <IconCircleX className="h-4 w-4 text-red-500" />;
-      case 'BLOCKED':
-      case 'WAITING_FOR_INPUT':
-        return <IconAlertTriangle className="h-4 w-4 text-yellow-500" />;
-      case 'CREATED':
-      case 'TODO':
-      case 'REVIEW':
-      default:
-        return null
-    }
-  })();
+  const statusIcon = getTaskStateIcon(task.state, 'h-4 w-4');
 
   const style = {
     transform: CSS.Translate.toString(transform),
