@@ -147,10 +147,9 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get task", nil)
 	}
 
-	// If task is in REVIEW state, transition back to IN_PROGRESS
+	// If task is in REVIEW state, transition back to IN_PROGRESS (also moves to matching column)
 	if task.State == v1.TaskStateReview {
-		nextState := v1.TaskStateInProgress
-		if _, err := h.taskController.UpdateTask(ctx, dto.UpdateTaskRequest{ID: req.TaskID, State: &nextState}); err != nil {
+		if _, err := h.taskController.UpdateTaskState(ctx, dto.UpdateTaskStateRequest{ID: req.TaskID, State: v1.TaskStateInProgress}); err != nil {
 			h.logger.Error("failed to transition task from REVIEW to IN_PROGRESS",
 				zap.String("task_id", req.TaskID),
 				zap.Error(err))

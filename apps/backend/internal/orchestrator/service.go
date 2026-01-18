@@ -257,19 +257,14 @@ func (s *Service) resumeExecutorsOnStartup(ctx context.Context) {
 			continue
 		}
 
-		if !running.Resumable {
-			s.logger.Warn("executor not resumable; marking session as failed",
-				zap.String("session_id", sessionID))
-			_ = s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateFailed, "executor not resumable")
-			continue
-		}
-
-		// When the executors start, the session changes to RUNNING state.
-		// After resuming, we need to restore the previous state.
 		previousState := session.State
+
+		// Handle sessions in terminal states - clean up executor record
 		switch previousState {
 		case models.TaskSessionStateCompleted, models.TaskSessionStateFailed, models.TaskSessionStateCancelled:
-			// Session was already in a terminal state; no need to resume.
+			s.logger.Info("session in terminal state; cleaning up executor record",
+				zap.String("session_id", sessionID),
+				zap.String("state", string(previousState)))
 			if err := s.repo.DeleteExecutorRunningBySessionID(ctx, sessionID); err != nil {
 				s.logger.Warn("failed to remove executor record for terminal session",
 					zap.String("session_id", sessionID),
@@ -277,32 +272,88 @@ func (s *Service) resumeExecutorsOnStartup(ctx context.Context) {
 			}
 			continue
 		}
-		// validate the environment (e.g., worktrees) before resuming
+
+		// Handle sessions that never started - skip without failure
+		if previousState == models.TaskSessionStateCreated {
+			s.logger.Info("session was never started; skipping recovery",
+				zap.String("session_id", sessionID))
+			if err := s.repo.DeleteExecutorRunningBySessionID(ctx, sessionID); err != nil {
+				s.logger.Warn("failed to remove executor record for unstarted session",
+					zap.String("session_id", sessionID),
+					zap.Error(err))
+			}
+			continue
+		}
+
+		// For sessions that were STARTING, RUNNING, or WAITING_FOR_INPUT:
+		// We need a resume token to recover them
+		if running.ResumeToken == "" {
+			s.logger.Warn("no resume token available; marking session as failed",
+				zap.String("session_id", sessionID),
+				zap.String("previous_state", string(previousState)))
+			_ = s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateFailed,
+				"backend restarted and session cannot be resumed (no resume token)")
+			_ = s.repo.DeleteExecutorRunningBySessionID(ctx, sessionID)
+			continue
+		}
+
+		// Check if executor supports resume
+		if !running.Resumable {
+			s.logger.Warn("executor not resumable; marking session as failed",
+				zap.String("session_id", sessionID))
+			_ = s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateFailed,
+				"executor does not support session resume")
+			_ = s.repo.DeleteExecutorRunningBySessionID(ctx, sessionID)
+			continue
+		}
+
+		// Validate worktree exists before resuming
 		if err := validateSessionWorktrees(session); err != nil {
 			s.logger.Warn("worktree validation failed; marking session as failed",
 				zap.String("session_id", sessionID),
 				zap.Error(err))
 			_ = s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateFailed, err.Error())
+			_ = s.repo.DeleteExecutorRunningBySessionID(ctx, sessionID)
 			continue
 		}
 
-		startAgent := running.ResumeToken != ""
-		if _, err := s.executor.ResumeSession(ctx, session, startAgent); err != nil {
+		s.logger.Info("resuming session on startup",
+			zap.String("session_id", sessionID),
+			zap.String("task_id", running.TaskID),
+			zap.String("previous_state", string(previousState)),
+			zap.String("resume_token", running.ResumeToken))
+
+		// Resume the session - this will:
+		// 1. Create a new agentctl instance
+		// 2. Start the agent process
+		// 3. Initialize and load the session via ACP/Codex protocol
+		//
+		// ResumeSession will temporarily set state to STARTING during launch.
+		// After resume, the agent is immediately ready for input (session is loaded,
+		// no prompt is being processed). We set WAITING_FOR_INPUT directly because:
+		// - Session resume just loads conversation history, doesn't process a prompt
+		// - Agents don't send a "complete" event after session load (only after prompt completion)
+		// - The agent is ready for the next user prompt immediately after session loads
+		if _, err := s.executor.ResumeSession(ctx, session, true); err != nil {
 			s.logger.Warn("failed to resume executor on startup",
 				zap.String("session_id", sessionID),
 				zap.Error(err))
 			_ = s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateFailed, err.Error())
+			_ = s.repo.DeleteExecutorRunningBySessionID(ctx, sessionID)
 			continue
 		}
 
-		// Restore previous state if not CREATED or STARTING
-		if previousState != models.TaskSessionStateCreated && previousState != models.TaskSessionStateStarting {
-			if err := s.repo.UpdateTaskSessionState(ctx, sessionID, previousState, ""); err != nil {
-				s.logger.Warn("failed to restore session state after resume",
-					zap.String("session_id", sessionID),
-					zap.Error(err))
-			}
+		// Set state to WAITING_FOR_INPUT - agent is ready for the next prompt
+		if err := s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateWaitingForInput, ""); err != nil {
+			s.logger.Warn("failed to set session state to WAITING_FOR_INPUT after resume",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
 		}
+
+		s.logger.Info("session resumed successfully",
+			zap.String("session_id", sessionID),
+			zap.String("task_id", running.TaskID),
+			zap.String("state", string(models.TaskSessionStateWaitingForInput)))
 	}
 }
 

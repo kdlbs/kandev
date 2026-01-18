@@ -40,7 +40,8 @@ func (cb *CommandBuilder) BuildCommand(agentConfig *registry.AgentTypeConfig, op
 	// 1. Session ID is provided
 	// 2. Agent does NOT use ACP for session resumption (uses CLI flag instead)
 	// 3. Agent has a ResumeFlag configured
-	if opts.SessionID != "" && !agentConfig.SessionConfig.ResumeViaACP && agentConfig.SessionConfig.ResumeFlag != "" {
+	// 4. Agent supports session recovery (CanRecover is not false)
+	if opts.SessionID != "" && !agentConfig.SessionConfig.ResumeViaACP && agentConfig.SessionConfig.ResumeFlag != "" && agentConfig.SessionConfig.SupportsRecovery() {
 		cmd = append(cmd, agentConfig.SessionConfig.ResumeFlag, opts.SessionID)
 	}
 
