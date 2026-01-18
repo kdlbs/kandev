@@ -171,36 +171,47 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create message", nil)
 	}
 
-	// Auto-forward message as prompt to running agent if orchestrator is available
+	response, err := ws.NewResponse(msg.ID, msg.Action, message)
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to encode response", nil)
+	}
+
+	// Auto-forward message as prompt to running agent if orchestrator is available.
+	// This runs async so the WS request can respond immediately.
 	// Use context.WithoutCancel so the prompt continues even if the WebSocket client disconnects.
 	// The user's message is already saved, and agent responses are broadcast via notifications.
 	if h.orchestrator != nil {
-		promptCtx := context.WithoutCancel(ctx)
-		_, err := h.orchestrator.PromptTask(promptCtx, req.TaskID, req.TaskSessionID, req.Content)
-		if err != nil {
-			if errors.Is(err, executor.ErrExecutionNotFound) {
-				if resumeErr := h.orchestrator.ResumeTaskSession(promptCtx, req.TaskID, req.TaskSessionID); resumeErr != nil {
-					h.logger.Warn("failed to resume task session for prompt",
-						zap.String("task_id", req.TaskID),
-						zap.String("session_id", req.TaskSessionID),
-						zap.Error(resumeErr))
-				} else {
-					for attempt := 0; attempt < 3; attempt++ {
-						time.Sleep(500 * time.Millisecond)
-						_, err = h.orchestrator.PromptTask(promptCtx, req.TaskID, req.TaskSessionID, req.Content)
-						if err == nil {
-							break
+		taskID := req.TaskID
+		sessionID := req.TaskSessionID
+		content := req.Content
+		go func() {
+			promptCtx := context.WithoutCancel(ctx)
+			_, err := h.orchestrator.PromptTask(promptCtx, taskID, sessionID, content)
+			if err != nil {
+				if errors.Is(err, executor.ErrExecutionNotFound) {
+					if resumeErr := h.orchestrator.ResumeTaskSession(promptCtx, taskID, sessionID); resumeErr != nil {
+						h.logger.Warn("failed to resume task session for prompt",
+							zap.String("task_id", taskID),
+							zap.String("session_id", sessionID),
+							zap.Error(resumeErr))
+					} else {
+						for attempt := 0; attempt < 3; attempt++ {
+							time.Sleep(500 * time.Millisecond)
+							_, err = h.orchestrator.PromptTask(promptCtx, taskID, sessionID, content)
+							if err == nil {
+								break
+							}
 						}
 					}
 				}
+				h.logger.Warn("failed to forward message as prompt to agent",
+					zap.String("task_id", taskID),
+					zap.Error(err))
 			}
-			h.logger.Warn("failed to forward message as prompt to agent",
-				zap.String("task_id", req.TaskID),
-				zap.Error(err))
-		}
+		}()
 	}
 
-	return ws.NewResponse(msg.ID, msg.Action, message)
+	return response, nil
 }
 
 type wsListMessagesRequest struct {

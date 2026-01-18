@@ -60,7 +60,9 @@ export function TaskChatPanel({
   const task = useTask(session?.task_id ?? null);
   const taskId = session?.task_id ?? null;
   const taskDescription = task?.description ?? null;
-  const isWorking = session?.state === 'STARTING' || session?.state === 'RUNNING';
+  const isStarting = session?.state === 'STARTING';
+  const isWorking = isStarting || session?.state === 'RUNNING';
+  const isAgentBusy = session?.state === 'CREATED' || session?.state === 'RUNNING';
 
   // Fetch messages for this session
   const { messages, isLoading: messagesLoading } = useSessionMessages(resolvedSessionId);
@@ -385,8 +387,22 @@ export function TaskChatPanel({
               </TooltipTrigger>
               <TooltipContent>Add attachments</TooltipContent>
             </Tooltip>
-            <KeyboardShortcutTooltip shortcut={SHORTCUTS.SUBMIT}>
-              <Button type="submit">Submit</Button>
+            <KeyboardShortcutTooltip shortcut={SHORTCUTS.SUBMIT} enabled={!isAgentBusy && !isStarting}>
+              <Button
+                type={isAgentBusy ? 'button' : 'submit'}
+                variant={isAgentBusy ? 'destructive' : 'default'}
+                className={cn('h-9', isAgentBusy && 'gap-2')}
+                disabled={isStarting || isSending}
+              >
+                {isAgentBusy ? (
+                  <>
+                    <IconLoader2 className="h-3.5 w-3.5 animate-spin" />
+                    Stop
+                  </>
+                ) : (
+                  'Submit'
+                )}
+              </Button>
             </KeyboardShortcutTooltip>
           </div>
         </div>
