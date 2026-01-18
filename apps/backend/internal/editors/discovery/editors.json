@@ -1,0 +1,53 @@
+{
+  "editors": [
+    {
+      "type": "vscode",
+      "name": "VS Code",
+      "command": "code",
+      "scheme": "vscode",
+      "enabled": true
+    },
+    {
+      "type": "zed",
+      "name": "Zed",
+      "command": "zed",
+      "scheme": "zed",
+      "enabled": true
+    },
+    {
+      "type": "cursor",
+      "name": "Cursor",
+      "command": "cursor",
+      "scheme": "cursor",
+      "enabled": true
+    },
+    {
+      "type": "windsurf",
+      "name": "Windsurf",
+      "command": "windsurf",
+      "scheme": "windsurf",
+      "enabled": true
+    },
+    {
+      "type": "intellij",
+      "name": "IntelliJ IDEA",
+      "command": "idea",
+      "scheme": "idea",
+      "enabled": true
+    },
+    {
+      "type": "golang",
+      "name": "GoLand",
+      "command": "goland",
+      "scheme": "goland",
+      "enabled": true
+    },
+    {
+      "type": "phpstorm",
+      "name": "PhpStorm",
+      "command": "phpstorm",
+      "scheme": "phpstorm",
+      "enabled": true
+    }
+  ]
+}

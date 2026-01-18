@@ -6,6 +6,7 @@ import {
   listEnvironments,
   listExecutors,
   listWorkspaces,
+  fetchUserSettings,
 } from '@/lib/http';
 
 export default function SettingsLayout({
@@ -21,13 +22,15 @@ export default function SettingsLayout({
 async function SettingsLayoutServer({ children }: { children: React.ReactNode }) {
   let initialState = {};
   try {
-    const [workspaces, executors, environments, agents, discovery] = await Promise.all([
+    const [workspaces, executors, environments, agents, discovery, userSettings] = await Promise.all([
       listWorkspaces({ cache: 'no-store' }),
       listExecutors({ cache: 'no-store' }),
       listEnvironments({ cache: 'no-store' }),
       listAgents({ cache: 'no-store' }),
       listAgentDiscovery({ cache: 'no-store' }),
+      fetchUserSettings({ cache: 'no-store' }).catch(() => null),
     ]);
+    const settings = userSettings?.settings;
     initialState = {
       workspaces: {
         items: workspaces.workspaces.map((workspace) => ({
@@ -64,6 +67,14 @@ async function SettingsLayoutServer({ children }: { children: React.ReactNode })
         executorsLoaded: true,
         environmentsLoaded: true,
         agentsLoaded: true,
+      },
+      userSettings: {
+        workspaceId: settings?.workspace_id ?? null,
+        boardId: settings?.board_id ?? null,
+        repositoryIds: settings?.repository_ids ?? [],
+        preferredShell: settings?.preferred_shell ?? null,
+        defaultEditorId: settings?.default_editor_id ?? null,
+        loaded: Boolean(settings),
       },
     };
   } catch {

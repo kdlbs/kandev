@@ -69,6 +69,7 @@ type httpUpdateUserSettingsRequest struct {
 	RepositoryIDs        *[]string `json:"repository_ids,omitempty"`
 	InitialSetupComplete *bool     `json:"initial_setup_complete,omitempty"`
 	PreferredShell       *string   `json:"preferred_shell,omitempty"`
+	DefaultEditorID      *string   `json:"default_editor_id,omitempty"`
 }
 
 func (h *Handlers) httpUpdateUserSettings(c *gin.Context) {
@@ -83,6 +84,7 @@ func (h *Handlers) httpUpdateUserSettings(c *gin.Context) {
 		RepositoryIDs:        body.RepositoryIDs,
 		InitialSetupComplete: body.InitialSetupComplete,
 		PreferredShell:       body.PreferredShell,
+		DefaultEditorID:      body.DefaultEditorID,
 	})
 	if err != nil {
 		h.logger.Error("failed to update user settings", zap.Error(err))
@@ -106,6 +108,7 @@ type wsUpdateUserSettingsRequest struct {
 	RepositoryIDs        *[]string `json:"repository_ids,omitempty"`
 	InitialSetupComplete *bool     `json:"initial_setup_complete,omitempty"`
 	PreferredShell       *string   `json:"preferred_shell,omitempty"`
+	DefaultEditorID      *string   `json:"default_editor_id,omitempty"`
 }
 
 func (h *Handlers) wsUpdateUserSettings(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -119,6 +122,7 @@ func (h *Handlers) wsUpdateUserSettings(ctx context.Context, msg *ws.Message) (*
 		RepositoryIDs:        req.RepositoryIDs,
 		InitialSetupComplete: req.InitialSetupComplete,
 		PreferredShell:       req.PreferredShell,
+		DefaultEditorID:      req.DefaultEditorID,
 	})
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update user settings", nil)

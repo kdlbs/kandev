@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import type { TaskState } from '@/lib/types/http';
 import { TaskSwitcher } from './task-switcher';
 import { Button } from '@kandev/ui/button';
@@ -10,15 +10,6 @@ import { useAppStore, useAppStoreApi } from '@/components/state-provider';
 import { linkToSession } from '@/lib/links';
 import { listTaskSessions } from '@/lib/http';
 import { useTasks } from '@/hooks/use-tasks';
-
-type TaskSummary = {
-  id: string;
-  title: string;
-  state?: TaskState;
-  description?: string;
-  columnId?: string;
-  repositoryPath?: string;
-};
 
 type TaskSessionSidebarProps = {
   workspaceId: string | null;

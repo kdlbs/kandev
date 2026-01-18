@@ -13,16 +13,11 @@ import { SettingsSection } from '@/components/settings/settings-section';
 import { useAppStore, useAppStoreApi } from '@/components/state-provider';
 import { fetchUserSettings, updateUserSettings } from '@/lib/http';
 import { useRequest } from '@/lib/http/use-request';
-import { SETTINGS_DATA } from '@/lib/settings/dummy-data';
 import { getBackendConfig } from '@/lib/config';
-import type { Theme, Editor } from '@/lib/settings/types';
+import type { Theme } from '@/lib/settings/types';
 
 export default function GeneralSettingsPage() {
   const { theme: currentTheme, setTheme } = useTheme();
-  const [editor, setEditor] = useState<Editor>(SETTINGS_DATA.general.editor);
-  const [customEditorCommand, setCustomEditorCommand] = useState<string>(
-    SETTINGS_DATA.general.customEditorCommand || ''
-  );
   const [backendUrl] = useState<string>(() => getBackendConfig().apiBaseUrl);
   const [preferredShell, setPreferredShell] = useState('');
   const [customShell, setCustomShell] = useState('');
@@ -136,52 +131,6 @@ export default function GeneralSettingsPage() {
                 </SelectContent>
               </Select>
             </div>
-          </CardContent>
-        </Card>
-      </SettingsSection>
-
-      <Separator />
-
-      <SettingsSection
-        icon={<IconCode className="h-5 w-5" />}
-        title="Editor"
-        description="Choose your preferred code editor"
-      >
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Editor Preference</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="editor">Default Editor</Label>
-              <Select value={editor} onValueChange={(value) => setEditor(value as Editor)}>
-                <SelectTrigger id="editor">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="vscode">VS Code</SelectItem>
-                  <SelectItem value="cursor">Cursor</SelectItem>
-                  <SelectItem value="zed">Zed</SelectItem>
-                  <SelectItem value="vim">Vim</SelectItem>
-                  <SelectItem value="custom">Custom</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            {editor === 'custom' && (
-              <div className="space-y-2">
-                <Label htmlFor="custom-command">Custom Editor Command</Label>
-                <Input
-                  id="custom-command"
-                  value={customEditorCommand}
-                  onChange={(e) => setCustomEditorCommand(e.target.value)}
-                  placeholder="code --goto {file}:{line}"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Use {'{file}'} and {'{line}'} as placeholders
-                </p>
-              </div>
-            )}
           </CardContent>
         </Card>
       </SettingsSection>

@@ -13,6 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@kandev/ui/tabs';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
 import { LineStat } from '@/components/diff-stat';
 import { useAppStore } from '@/components/state-provider';
+import { useOpenSessionInEditor } from '@/hooks/use-open-session-in-editor';
 import { useSessionGitStatus } from '@/hooks/use-session-git-status';
 import type { FileInfo } from '@/lib/state/store';
 import { FileBrowser } from '@/components/task/file-browser';
@@ -79,6 +80,7 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiffPath, onOpenFi
   const [topTab, setTopTab] = useState<'diff' | 'files'>('diff');
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const gitStatus = useSessionGitStatus(activeSessionId);
+  const openEditor = useOpenSessionInEditor(activeSessionId ?? null);
 
   // Convert git status files to array for display
   const changedFiles = useMemo(() => {
@@ -155,6 +157,8 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiffPath, onOpenFi
                                 className="text-muted-foreground hover:text-foreground"
                                 onClick={(event) => {
                                   event.stopPropagation();
+                                  if (!activeSessionId) return;
+                                  void openEditor.open({ filePath: file.path });
                                 }}
                               >
                                 <IconExternalLink className="h-3.5 w-3.5" />

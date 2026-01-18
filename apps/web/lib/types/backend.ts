@@ -242,6 +242,7 @@ export type UserSettingsUpdatedPayload = {
   repository_ids: string[];
   initial_setup_complete?: boolean;
   preferred_shell?: string;
+  default_editor_id?: string;
   updated_at?: string;
 };
 
