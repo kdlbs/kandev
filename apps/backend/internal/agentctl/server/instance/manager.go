@@ -53,11 +53,6 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Check if max instances reached
-	if len(m.instances) >= m.config.MaxInstances {
-		return nil, fmt.Errorf("maximum number of instances (%d) reached", m.config.MaxInstances)
-	}
-
 	// Generate ID if not provided
 	id := req.ID
 	if id == "" {
