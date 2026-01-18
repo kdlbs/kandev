@@ -85,18 +85,6 @@ type FileChangeEventPayload struct {
 	Timestamp string `json:"timestamp"`
 }
 
-// PromptCompleteEventPayload is the payload when an agent finishes responding to a prompt.
-type PromptCompleteEventPayload struct {
-	Type         string `json:"type"` // Always "prompt_complete"
-	Timestamp    string `json:"timestamp"`
-	AgentID      string `json:"agent_id"`
-	TaskID       string `json:"task_id"`
-	SessionID    string `json:"session_id"`
-	AgentMessage string `json:"agent_message"`
-	Reasoning    string `json:"reasoning,omitempty"`
-	Summary      string `json:"summary,omitempty"`
-}
-
 // PermissionOption represents a single permission option in a permission request.
 type PermissionOption struct {
 	OptionID string `json:"option_id"`

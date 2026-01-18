@@ -262,10 +262,10 @@ func (s *SimulatedAgentManagerClient) publishACPMessages(instance *simulatedInst
 			"data":       msg.Data,
 		}
 
-		event := bus.NewEvent(events.ACPMessage, "simulated-agent", msgData)
-		subject := events.BuildACPSubject(instance.taskID)
+		event := bus.NewEvent(events.AgentStream, "simulated-agent", msgData)
+		subject := events.BuildAgentStreamSubject(instance.taskID)
 		if err := s.eventBus.Publish(context.Background(), subject, event); err != nil {
-			s.logger.Error("failed to publish ACP message")
+			s.logger.Error("failed to publish agent stream event")
 		}
 
 		time.Sleep(20 * time.Millisecond)
@@ -366,10 +366,10 @@ func (s *SimulatedAgentManagerClient) PromptAgent(ctx context.Context, agentExec
 			"data":      msg.Data,
 		}
 
-		event := bus.NewEvent(events.ACPMessage, "simulated-agent", msgData)
-		subject := events.BuildACPSubject(execution.taskID)
+		event := bus.NewEvent(events.AgentStream, "simulated-agent", msgData)
+		subject := events.BuildAgentStreamSubject(execution.taskID)
 		if err := s.eventBus.Publish(context.Background(), subject, event); err != nil {
-			s.logger.Warn("failed to publish simulated ACP message", zap.Error(err))
+			s.logger.Warn("failed to publish simulated agent stream event", zap.Error(err))
 		}
 	}()
 

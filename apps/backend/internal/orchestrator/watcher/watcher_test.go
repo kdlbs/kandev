@@ -323,7 +323,7 @@ func TestAgentStreamEventHandling(t *testing.T) {
 	}()
 
 	// Simulate publishing an agent stream event
-	event := bus.NewEvent(events.BuildACPSubject("session-789"), "test", map[string]interface{}{
+	event := bus.NewEvent(events.BuildAgentStreamSubject("session-789"), "test", map[string]interface{}{
 		"type":       "agent/event",
 		"task_id":    "task-789",
 		"session_id": "session-789",
@@ -338,7 +338,7 @@ func TestAgentStreamEventHandling(t *testing.T) {
 		},
 	})
 
-	_ = eventBus.Publish(context.Background(), events.BuildACPWildcardSubject(), event)
+	_ = eventBus.Publish(context.Background(), events.BuildAgentStreamWildcardSubject(), event)
 
 	// Wait for handler to be called
 	time.Sleep(50 * time.Millisecond)

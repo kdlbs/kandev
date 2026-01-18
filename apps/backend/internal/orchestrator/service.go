@@ -160,7 +160,6 @@ func NewService(
 		OnAgentFailed:        s.handleAgentFailed,
 		OnAgentStreamEvent:   s.handleAgentStreamEvent,
 		OnACPSessionCreated:  s.handleACPSessionCreated,
-		OnPromptComplete:     s.handlePromptComplete,
 		OnPermissionRequest:  s.handlePermissionRequest,
 		OnGitStatusUpdated:   s.handleGitStatusUpdated,
 	}
@@ -814,11 +813,21 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	switch eventType {
 	case "tool_call":
 		// Create tool call message when a tool call starts
+		// If there's accumulated text, save it as an agent message first
+		s.saveAgentTextIfPresent(ctx, payload)
 		s.handleToolCallEvent(ctx, payload)
 
 	case "tool_update":
 		// Update tool call message when status changes
 		s.handleToolUpdateEvent(ctx, payload)
+
+	case "complete":
+		// Save any accumulated text as an agent message
+		s.saveAgentTextIfPresent(ctx, payload)
+		// Mark prompt as complete and finalize agent ready state
+		if s.markPromptComplete(taskID) {
+			s.finalizeAgentReady(taskID, sessionID)
+		}
 
 	case "error":
 		// Handle error events
@@ -876,6 +885,25 @@ func (s *Service) handleToolCallEvent(ctx context.Context, payload *lifecycle.Ag
 		}
 
 		s.updateTaskSessionState(ctx, payload.TaskID, payload.SessionID, models.TaskSessionStateRunning, "", false)
+	}
+}
+
+// saveAgentTextIfPresent saves any accumulated agent text as an agent message
+func (s *Service) saveAgentTextIfPresent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
+	if payload.Data.Text == "" || payload.SessionID == "" {
+		return
+	}
+
+	if s.messageCreator != nil {
+		if err := s.messageCreator.CreateAgentMessage(ctx, payload.TaskID, payload.Data.Text, payload.SessionID); err != nil {
+			s.logger.Error("failed to create agent message",
+				zap.String("task_id", payload.TaskID),
+				zap.Error(err))
+		} else {
+			s.logger.Info("created agent message",
+				zap.String("task_id", payload.TaskID),
+				zap.Int("message_length", len(payload.Data.Text)))
+		}
 	}
 }
 
@@ -1080,39 +1108,6 @@ func (s *Service) handleGitStatusUpdated(ctx context.Context, data watcher.GitSt
 				zap.String("session_id", session.ID))
 		}
 	}()
-}
-
-// handlePromptComplete handles prompt complete events and saves agent response as message
-// Note: This is called for EVERY agent message (including intermediate ones before tool calls),
-// so we should NOT transition task state here. State transitions happen in the comment handler
-// after the synchronous PromptTask call returns.
-func (s *Service) handlePromptComplete(ctx context.Context, data watcher.PromptCompleteData) {
-	s.logger.Info("handling prompt complete",
-		zap.String("task_id", data.TaskID),
-		zap.Int("message_length", len(data.AgentMessage)))
-
-	if data.TaskSessionID == "" {
-		s.logger.Warn("missing session_id for prompt_complete",
-			zap.String("task_id", data.TaskID))
-		return
-	}
-
-	// Save agent response as a message if we have a message creator
-	if s.messageCreator != nil && data.AgentMessage != "" {
-		if err := s.messageCreator.CreateAgentMessage(ctx, data.TaskID, data.AgentMessage, data.TaskSessionID); err != nil {
-			s.logger.Error("failed to create agent message",
-				zap.String("task_id", data.TaskID),
-				zap.Error(err))
-		} else {
-			s.logger.Info("created agent message",
-				zap.String("task_id", data.TaskID),
-				zap.Int("message_length", len(data.AgentMessage)))
-		}
-
-		if s.markPromptComplete(data.TaskID) {
-			s.finalizeAgentReady(data.TaskID, data.TaskSessionID)
-		}
-	}
 }
 
 // handlePermissionRequest handles permission request events and saves as message

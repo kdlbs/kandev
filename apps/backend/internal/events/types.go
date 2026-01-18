@@ -88,16 +88,13 @@ const (
 	AgentctlError          = "agentctl.error"
 )
 
-// Event types for ACP messages
+// Event types for agent stream messages
 const (
-	ACPMessage = "acp.message" // Base subject for ACP messages
+	AgentStream = "agent.stream" // Base subject for agent stream events
 )
 
 // Event types for agent prompts
 const (
-	PromptComplete            = "prompt.complete"             // Agent finished responding to a prompt
-	ToolCallStarted           = "tool_call.started"           // Agent started a tool call
-	ToolCallComplete          = "tool_call.complete"          // Agent finished a tool call
 	PermissionRequestReceived = "permission_request.received" // Agent requested permission
 )
 
@@ -107,14 +104,14 @@ const (
 	FileChangeNotified = "file.change.notified" // File changed in workspace
 )
 
-// BuildACPSubject creates an ACP subject for a specific session
-func BuildACPSubject(sessionID string) string {
-	return ACPMessage + "." + sessionID
+// BuildAgentStreamSubject creates an agent stream subject for a specific session
+func BuildAgentStreamSubject(sessionID string) string {
+	return AgentStream + "." + sessionID
 }
 
-// BuildACPWildcardSubject creates a wildcard subscription for all ACP messages
-func BuildACPWildcardSubject() string {
-	return ACPMessage + ".*"
+// BuildAgentStreamWildcardSubject creates a wildcard subscription for all agent stream events
+func BuildAgentStreamWildcardSubject() string {
+	return AgentStream + ".*"
 }
 
 // BuildGitStatusSubject creates a git status subject for a specific session
@@ -135,36 +132,6 @@ func BuildFileChangeSubject(sessionID string) string {
 // BuildFileChangeWildcardSubject creates a wildcard subscription for all file change notifications
 func BuildFileChangeWildcardSubject() string {
 	return FileChangeNotified + ".*"
-}
-
-// BuildPromptCompleteSubject creates a prompt complete subject for a specific session
-func BuildPromptCompleteSubject(sessionID string) string {
-	return PromptComplete + "." + sessionID
-}
-
-// BuildPromptCompleteWildcardSubject creates a wildcard subscription for all prompt complete events
-func BuildPromptCompleteWildcardSubject() string {
-	return PromptComplete + ".*"
-}
-
-// BuildToolCallStartedSubject creates a tool call started subject for a specific session
-func BuildToolCallStartedSubject(sessionID string) string {
-	return ToolCallStarted + "." + sessionID
-}
-
-// BuildToolCallStartedWildcardSubject creates a wildcard subscription for all tool call started events
-func BuildToolCallStartedWildcardSubject() string {
-	return ToolCallStarted + ".*"
-}
-
-// BuildToolCallCompleteSubject creates a tool call complete subject for a specific session
-func BuildToolCallCompleteSubject(sessionID string) string {
-	return ToolCallComplete + "." + sessionID
-}
-
-// BuildToolCallCompleteWildcardSubject creates a wildcard subscription for all tool call complete events
-func BuildToolCallCompleteWildcardSubject() string {
-	return ToolCallComplete + ".*"
 }
 
 // BuildPermissionRequestSubject creates a permission request subject for a specific session

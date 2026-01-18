@@ -330,11 +330,6 @@ func (sm *SessionManager) SendPrompt(
 		zap.String("execution_id", execution.ID),
 		zap.String("stop_reason", stopReason))
 
-	// Publish prompt_complete event
-	if sm.eventPublisher != nil {
-		sm.eventPublisher.PublishPromptComplete(execution, agentMessage, "", "")
-	}
-
 	// Mark as READY for next prompt
 	if err := markReady(execution.ID); err != nil {
 		sm.logger.Error("failed to mark execution as ready after prompt",

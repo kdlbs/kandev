@@ -39,14 +39,6 @@ type ACPSessionEventData struct {
 	ACPSessionID     string `json:"acp_session_id"`
 }
 
-// PromptCompleteData contains data from prompt_complete events
-type PromptCompleteData struct {
-	TaskID        string `json:"task_id"`
-	TaskSessionID string `json:"session_id"`
-	AgentID       string `json:"agent_id"`
-	AgentMessage  string `json:"agent_message"`
-}
-
 // PermissionRequestData contains data from permission_request events
 type PermissionRequestData struct {
 	TaskID        string                   `json:"task_id"`
@@ -96,9 +88,6 @@ type EventHandlers struct {
 
 	// Agent stream events (tool calls, message chunks, complete, etc.)
 	OnAgentStreamEvent func(ctx context.Context, payload *lifecycle.AgentStreamEventPayload)
-
-	// Prompt events
-	OnPromptComplete func(ctx context.Context, data PromptCompleteData)
 
 	// Permission request events
 	OnPermissionRequest func(ctx context.Context, data PermissionRequestData)
@@ -161,12 +150,6 @@ func (w *Watcher) Start(ctx context.Context) error {
 
 	// Subscribe to agent stream events
 	if err := w.subscribeToAgentStreamEvents(); err != nil {
-		w.unsubscribeAll()
-		return err
-	}
-
-	// Subscribe to prompt complete events
-	if err := w.subscribeToPromptCompleteEvents(); err != nil {
 		w.unsubscribeAll()
 		return err
 	}
@@ -303,8 +286,8 @@ func (w *Watcher) subscribeToAgentStreamEvents() error {
 		return nil
 	}
 
-	// Use wildcard to subscribe to all agent stream events (acp.message.*)
-	subject := events.BuildACPWildcardSubject()
+	// Use wildcard to subscribe to all agent stream events (agent.stream.*)
+	subject := events.BuildAgentStreamWildcardSubject()
 
 	// Use regular subscription (each instance needs all messages for WebSocket streaming)
 	sub, err := w.eventBus.Subscribe(subject, w.createAgentStreamEventHandler())
@@ -413,48 +396,6 @@ func (w *Watcher) createAgentStreamEventHandler() bus.EventHandler {
 			zap.String("event_type", eventType))
 
 		w.handlers.OnAgentStreamEvent(ctx, &payload)
-		return nil
-	}
-}
-
-// subscribeToPromptCompleteEvents subscribes to prompt complete events
-func (w *Watcher) subscribeToPromptCompleteEvents() error {
-	if w.handlers.OnPromptComplete == nil {
-		return nil
-	}
-
-	// Use wildcard to subscribe to all prompt complete events (prompt.complete.{session_id})
-	subject := events.BuildPromptCompleteWildcardSubject()
-
-	// Use regular subscription (each instance needs all messages for comment creation)
-	sub, err := w.eventBus.Subscribe(subject, w.createPromptCompleteHandler())
-	if err != nil {
-		w.logger.Error("Failed to subscribe to prompt complete events",
-			zap.String("subject", subject),
-			zap.Error(err))
-		return err
-	}
-	w.subscriptions = append(w.subscriptions, sub)
-	return nil
-}
-
-// createPromptCompleteHandler creates a bus.EventHandler for prompt complete events
-func (w *Watcher) createPromptCompleteHandler() bus.EventHandler {
-	return func(ctx context.Context, event *bus.Event) error {
-		var data PromptCompleteData
-		if err := w.parseEventData(event.Data, &data); err != nil {
-			w.logger.Error("Failed to parse prompt complete event data",
-				zap.String("event_type", event.Type),
-				zap.String("event_id", event.ID),
-				zap.Error(err))
-			return nil // Don't return error to continue processing other events
-		}
-
-		w.logger.Debug("Handling prompt complete event",
-			zap.String("task_id", data.TaskID),
-			zap.Int("message_length", len(data.AgentMessage)))
-
-		w.handlers.OnPromptComplete(ctx, data)
 		return nil
 	}
 }

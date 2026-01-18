@@ -139,8 +139,8 @@ func (p *EventPublisher) PublishAgentStreamEvent(execution *AgentExecution, even
 		Data:      eventData,
 	}
 
-	busEvent := bus.NewEvent(events.ACPMessage, "agent-manager", payload)
-	subject := events.BuildACPSubject(execution.SessionID)
+	busEvent := bus.NewEvent(events.AgentStream, "agent-manager", payload)
+	subject := events.BuildAgentStreamSubject(execution.SessionID)
 
 	if err := p.eventBus.Publish(context.Background(), subject, busEvent); err != nil {
 		p.logger.Error("failed to publish agent stream event",
@@ -210,44 +210,6 @@ func (p *EventPublisher) PublishFileChange(execution *AgentExecution, notificati
 
 	if err := p.eventBus.Publish(context.Background(), subject, event); err != nil {
 		p.logger.Error("failed to publish file change event",
-			zap.String("instance_id", execution.ID),
-			zap.String("task_id", execution.TaskID),
-			zap.String("session_id", sessionID),
-			zap.Error(err))
-	}
-}
-
-// PublishPromptComplete publishes a prompt_complete event when an agent finishes responding.
-// This is used to save the agent's response as a comment on the task.
-func (p *EventPublisher) PublishPromptComplete(execution *AgentExecution, agentMessage, reasoning, summary string) {
-	if p.eventBus == nil {
-		return
-	}
-
-	// Only publish if there's actual content
-	if agentMessage == "" {
-		return
-	}
-
-	sessionID := execution.SessionID
-
-	payload := PromptCompleteEventPayload{
-		Type:         "prompt_complete",
-		Timestamp:    time.Now().UTC().Format(time.RFC3339Nano),
-		AgentID:      execution.ID,
-		TaskID:       execution.TaskID,
-		SessionID:    sessionID,
-		AgentMessage: agentMessage,
-		Reasoning:    reasoning,
-		Summary:      summary,
-	}
-
-	event := bus.NewEvent(events.PromptComplete, "agent-manager", payload)
-	// Publish on session-specific subject so orchestrator can subscribe
-	subject := events.BuildPromptCompleteSubject(sessionID)
-
-	if err := p.eventBus.Publish(context.Background(), subject, event); err != nil {
-		p.logger.Error("failed to publish prompt_complete event",
 			zap.String("instance_id", execution.ID),
 			zap.String("task_id", execution.TaskID),
 			zap.String("session_id", sessionID),
