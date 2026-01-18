@@ -761,14 +761,16 @@ func main() {
 	}
 
 	// Subscribe to git status events and broadcast to WebSocket subscribers
-	// Note: event.Data can be a struct (GitStatusEventPayload) or map, so we pass it directly
 	_, err = eventBus.Subscribe(events.BuildGitStatusWildcardSubject(), func(ctx context.Context, event *bus.Event) error {
-		// Extract session_id from the event data (works for both map and struct types)
+		// Extract session_id from the event data
 		var taskSessionID string
-		if data, ok := event.Data.(map[string]interface{}); ok {
+		switch data := event.Data.(type) {
+		case lifecycle.GitStatusEventPayload:
+			taskSessionID = data.SessionID
+		case *lifecycle.GitStatusEventPayload:
+			taskSessionID = data.SessionID
+		case map[string]interface{}:
 			taskSessionID, _ = data["session_id"].(string)
-		} else if data, ok := event.Data.(interface{ GetSessionID() string }); ok {
-			taskSessionID = data.GetSessionID()
 		}
 		if taskSessionID == "" {
 			return nil
@@ -786,14 +788,16 @@ func main() {
 	}
 
 	// Subscribe to file change events and broadcast to WebSocket subscribers
-	// Note: event.Data can be a struct (FileChangeEventPayload) or map, so we handle both
 	_, err = eventBus.Subscribe(events.BuildFileChangeWildcardSubject(), func(ctx context.Context, event *bus.Event) error {
-		// Extract session_id from the event data (works for both map and struct types)
+		// Extract session_id from the event data
 		var taskSessionID string
-		if data, ok := event.Data.(map[string]interface{}); ok {
+		switch data := event.Data.(type) {
+		case lifecycle.FileChangeEventPayload:
+			taskSessionID = data.SessionID
+		case *lifecycle.FileChangeEventPayload:
+			taskSessionID = data.SessionID
+		case map[string]interface{}:
 			taskSessionID, _ = data["session_id"].(string)
-		} else if data, ok := event.Data.(interface{ GetSessionID() string }); ok {
-			taskSessionID = data.GetSessionID()
 		}
 		if taskSessionID == "" {
 			return nil
