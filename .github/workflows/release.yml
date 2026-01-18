@@ -1,0 +1,108 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "9"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - name: Install dependencies
+        run: pnpm -C apps install --frozen-lockfile
+      - name: Build web (standalone)
+        run: pnpm -C apps --filter @kandev/web build
+      - name: Package web bundle
+        run: bash scripts/release/package-web.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-bundle
+          path: dist/web
+
+  build-bundles:
+    needs: build-web
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-x64
+          - os: macos-13
+            platform: macos-x64
+          - os: macos-14
+            platform: macos-arm64
+          - os: windows-latest
+            platform: windows-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: apps/backend/go.mod
+          cache-dependency-path: apps/backend/go.sum
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-bundle
+          path: dist/web
+
+      - name: Build backend binaries (unix)
+        if: runner.os != 'Windows'
+        run: |
+          cd apps/backend
+          mkdir -p bin
+          go build -o bin/kandev ./cmd/kandev
+          go build -o bin/agentctl ./cmd/agentctl
+
+      - name: Build backend binaries (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Set-Location apps/backend
+          New-Item -ItemType Directory -Force -Path bin | Out-Null
+          go build -o bin/kandev.exe ./cmd/kandev
+          go build -o bin/agentctl.exe ./cmd/agentctl
+
+      - name: Package bundle (unix)
+        if: runner.os != 'Windows'
+        run: |
+          rm -rf dist/kandev
+          mkdir -p dist/kandev/bin
+          cp apps/backend/bin/kandev dist/kandev/bin/
+          cp apps/backend/bin/agentctl dist/kandev/bin/
+          mkdir -p dist/kandev/web
+          cp -R dist/web/. dist/kandev/web/
+          cd dist
+          zip -r "kandev-${{ matrix.platform }}.zip" kandev
+          shasum -a 256 "kandev-${{ matrix.platform }}.zip" > "kandev-${{ matrix.platform }}.zip.sha256"
+
+      - name: Package bundle (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Remove-Item -Recurse -Force dist/kandev -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path dist/kandev/bin | Out-Null
+          Copy-Item apps/backend/bin/kandev.exe dist/kandev/bin/
+          Copy-Item apps/backend/bin/agentctl.exe dist/kandev/bin/
+          New-Item -ItemType Directory -Force -Path dist/kandev/web | Out-Null
+          Copy-Item dist/web/* dist/kandev/web/ -Recurse -Force
+          Compress-Archive -Path dist/kandev -DestinationPath dist/kandev-${{ matrix.platform }}.zip -Force
+          $hash = Get-FileHash dist/kandev-${{ matrix.platform }}.zip -Algorithm SHA256
+          "$($hash.Hash)  kandev-${{ matrix.platform }}.zip" | Out-File -FilePath dist/kandev-${{ matrix.platform }}.zip.sha256 -Encoding ascii
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/kandev-${{ matrix.platform }}.zip
+            dist/kandev-${{ matrix.platform }}.zip.sha256

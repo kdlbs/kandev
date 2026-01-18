@@ -65,6 +65,16 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture docum
 
 ### Build and Run
 
+#### NPX Launcher (recommended)
+
+```bash
+npx kandev
+```
+
+This downloads prebuilt backend + frontend bundles and starts them locally.
+
+#### From Source
+
 ```bash
 cd apps/backend
 
