@@ -172,11 +172,14 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	}
 
 	// Auto-forward message as prompt to running agent if orchestrator is available
+	// Use context.WithoutCancel so the prompt continues even if the WebSocket client disconnects.
+	// The user's message is already saved, and agent responses are broadcast via notifications.
 	if h.orchestrator != nil {
-		_, err := h.orchestrator.PromptTask(ctx, req.TaskID, req.TaskSessionID, req.Content)
+		promptCtx := context.WithoutCancel(ctx)
+		_, err := h.orchestrator.PromptTask(promptCtx, req.TaskID, req.TaskSessionID, req.Content)
 		if err != nil {
 			if errors.Is(err, executor.ErrExecutionNotFound) {
-				if resumeErr := h.orchestrator.ResumeTaskSession(ctx, req.TaskID, req.TaskSessionID); resumeErr != nil {
+				if resumeErr := h.orchestrator.ResumeTaskSession(promptCtx, req.TaskID, req.TaskSessionID); resumeErr != nil {
 					h.logger.Warn("failed to resume task session for prompt",
 						zap.String("task_id", req.TaskID),
 						zap.String("session_id", req.TaskSessionID),
@@ -184,7 +187,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 				} else {
 					for attempt := 0; attempt < 3; attempt++ {
 						time.Sleep(500 * time.Millisecond)
-						_, err = h.orchestrator.PromptTask(ctx, req.TaskID, req.TaskSessionID, req.Content)
+						_, err = h.orchestrator.PromptTask(promptCtx, req.TaskID, req.TaskSessionID, req.Content)
 						if err == nil {
 							break
 						}
