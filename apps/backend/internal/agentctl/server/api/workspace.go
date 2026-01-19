@@ -4,13 +4,13 @@ import (
 	"encoding/json"
 
 	"github.com/gin-gonic/gin"
-	"github.com/gorilla/websocket"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"go.uber.org/zap"
 )
 
-// handleGitStatusStreamWS streams git status updates via WebSocket
-func (s *Server) handleGitStatusStreamWS(c *gin.Context) {
+// handleWorkspaceStreamWS handles the unified workspace stream WebSocket endpoint.
+// It streams git status, file changes, file lists, and shell I/O over a single connection.
+func (s *Server) handleWorkspaceStreamWS(c *gin.Context) {
 	conn, err := s.upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		s.logger.Error("WebSocket upgrade failed", zap.Error(err))
@@ -18,143 +18,99 @@ func (s *Server) handleGitStatusStreamWS(c *gin.Context) {
 	}
 	defer func() {
 		if err := conn.Close(); err != nil {
-			s.logger.Debug("failed to close git status websocket", zap.Error(err))
+			s.logger.Debug("failed to close workspace stream websocket", zap.Error(err))
 		}
 	}()
 
-	// Subscribe to git status updates
-	sub := s.procMgr.GetWorkspaceTracker().SubscribeGitStatus()
-	defer s.procMgr.GetWorkspaceTracker().UnsubscribeGitStatus(sub)
+	s.logger.Info("Workspace stream WebSocket connected")
 
-	// Handle WebSocket close
-	closeCh := make(chan struct{})
-	go func() {
-		for {
-			_, _, err := conn.ReadMessage()
-			if err != nil {
-				close(closeCh)
-				return
-			}
-		}
-	}()
+	// Subscribe to unified workspace updates
+	sub := s.procMgr.GetWorkspaceTracker().SubscribeWorkspaceStream()
+	defer s.procMgr.GetWorkspaceTracker().UnsubscribeWorkspaceStream(sub)
 
-	// Stream git status updates to client
-	for {
-		select {
-		case update, ok := <-sub:
-			if !ok {
-				return
-			}
-			data, err := json.Marshal(update)
-			if err != nil {
-				s.logger.Error("failed to marshal git status update", zap.Error(err))
-				continue
-			}
-			if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
-				return
-			}
-		case <-closeCh:
-			return
-		}
+	// Get shell for input handling (may be nil)
+	shell := s.procMgr.Shell()
+
+	// Subscribe to shell output if shell is available
+	var shellOutputCh chan []byte
+	if shell != nil {
+		shellOutputCh = make(chan []byte, 256)
+		shell.Subscribe(shellOutputCh)
+		defer shell.Unsubscribe(shellOutputCh)
 	}
-}
 
-// handleFilesStreamWS streams file listing updates via WebSocket
-func (s *Server) handleFilesStreamWS(c *gin.Context) {
-	conn, err := s.upgrader.Upgrade(c.Writer, c.Request, nil)
-	if err != nil {
-		s.logger.Error("WebSocket upgrade failed", zap.Error(err))
+	// Send connected message
+	connectedMsg := types.NewWorkspaceConnected()
+	if err := conn.WriteJSON(connectedMsg); err != nil {
+		s.logger.Debug("failed to send connected message", zap.Error(err))
 		return
 	}
-	defer func() {
-		if err := conn.Close(); err != nil {
-			s.logger.Debug("failed to close files websocket", zap.Error(err))
-		}
-	}()
 
-	// Subscribe to file updates
-	sub := s.procMgr.GetWorkspaceTracker().SubscribeFiles()
-	defer s.procMgr.GetWorkspaceTracker().UnsubscribeFiles(sub)
+	// Done channel to signal goroutine shutdown
+	done := make(chan struct{})
+	defer close(done)
 
-	// Handle WebSocket close
-	closeCh := make(chan struct{})
+	// Handle incoming messages (shell_input, shell_resize, ping) in a goroutine
 	go func() {
 		for {
-			_, _, err := conn.ReadMessage()
-			if err != nil {
-				close(closeCh)
+			select {
+			case <-done:
 				return
+			default:
+				var msg types.WorkspaceStreamMessage
+				if err := conn.ReadJSON(&msg); err != nil {
+					s.logger.Debug("workspace stream WebSocket read error", zap.Error(err))
+					return
+				}
+
+				switch msg.Type {
+				case types.WorkspaceMessageTypeShellInput:
+					if shell != nil {
+						if _, err := shell.Write([]byte(msg.Data)); err != nil {
+							s.logger.Debug("shell write error", zap.Error(err))
+						}
+					}
+				case types.WorkspaceMessageTypeShellResize:
+					// Resize is currently not implemented in the shell session
+					// TODO: Implement shell.Resize(cols, rows) when needed
+					s.logger.Debug("shell resize requested", zap.Int("cols", msg.Cols), zap.Int("rows", msg.Rows))
+				case types.WorkspaceMessageTypePing:
+					// Respond with pong
+					pongMsg := types.NewWorkspacePong()
+					if err := conn.WriteJSON(pongMsg); err != nil {
+						s.logger.Debug("workspace stream pong write error", zap.Error(err))
+						return
+					}
+				}
 			}
 		}
 	}()
 
-	// Stream file updates to client
+	// Forward all workspace events to WebSocket
 	for {
 		select {
-		case update, ok := <-sub:
+		case <-done:
+			return
+		case msg, ok := <-sub:
 			if !ok {
 				return
 			}
-			data, err := json.Marshal(update)
-			if err != nil {
-				s.logger.Error("failed to marshal file update", zap.Error(err))
-				continue
-			}
-			if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+			if err := conn.WriteJSON(msg); err != nil {
+				s.logger.Debug("workspace stream write error", zap.Error(err))
 				return
 			}
-		case <-closeCh:
-			return
-		}
-	}
-}
-
-// handleFileChangesStreamWS streams filesystem change notifications via WebSocket
-func (s *Server) handleFileChangesStreamWS(c *gin.Context) {
-	conn, err := s.upgrader.Upgrade(c.Writer, c.Request, nil)
-	if err != nil {
-		s.logger.Error("WebSocket upgrade failed", zap.Error(err))
-		return
-	}
-	defer func() {
-		if err := conn.Close(); err != nil {
-			s.logger.Debug("failed to close file changes websocket", zap.Error(err))
-		}
-	}()
-
-	// Subscribe to file change notifications
-	sub := s.procMgr.GetWorkspaceTracker().SubscribeFileChanges()
-	defer s.procMgr.GetWorkspaceTracker().UnsubscribeFileChanges(sub)
-
-	// Handle WebSocket close
-	closeCh := make(chan struct{})
-	go func() {
-		for {
-			_, _, err := conn.ReadMessage()
-			if err != nil {
-				close(closeCh)
-				return
-			}
-		}
-	}()
-
-	// Stream file change notifications to client
-	for {
-		select {
-		case notification, ok := <-sub:
+		case data, ok := <-shellOutputCh:
 			if !ok {
-				return
-			}
-			data, err := json.Marshal(notification)
-			if err != nil {
-				s.logger.Error("failed to marshal file change notification", zap.Error(err))
+				// Shell output channel closed
+				shellOutputCh = nil
 				continue
 			}
-			if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+			// Forward shell output as workspace stream message
+			shellMsg := types.NewWorkspaceShellOutput(string(data))
+			if err := conn.WriteJSON(shellMsg); err != nil {
+				s.logger.Debug("workspace stream shell output write error", zap.Error(err))
 				return
 			}
-		case <-closeCh:
-			return
 		}
 	}
 }

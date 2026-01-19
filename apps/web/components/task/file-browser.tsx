@@ -5,7 +5,6 @@ import { IconChevronRight, IconChevronDown, IconFile, IconFolder, IconFolderOpen
 import { ScrollArea } from '@kandev/ui/scroll-area';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import { requestFileTree, requestFileContent } from '@/lib/ws/workspace-files';
-import { useSessionAgentctl } from '@/hooks/use-session-agentctl';
 import type { FileTreeNode, FileContentResponse, OpenFileTab } from '@/lib/types/backend';
 
 type FileBrowserProps = {
@@ -14,21 +13,18 @@ type FileBrowserProps = {
 };
 
 export function FileBrowser({ sessionId, onOpenFile }: FileBrowserProps) {
-  const { isReady } = useSessionAgentctl(sessionId);
   const [tree, setTree] = useState<FileTreeNode | null>(null);
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const [loadingPaths, setLoadingPaths] = useState<Set<string>>(new Set());
   const [isLoadingTree, setIsLoadingTree] = useState(true);
 
-  // Load initial tree
+  // Load initial tree - always try to load, don't wait for agentctl ready status
   useEffect(() => {
     setTree(null);
     setExpandedPaths(new Set());
     setLoadingPaths(new Set());
     setIsLoadingTree(true);
-    if (!isReady) {
-      return;
-    }
+
     const loadTree = async () => {
       try {
         const client = getWebSocketClient();
@@ -44,11 +40,10 @@ export function FileBrowser({ sessionId, onOpenFile }: FileBrowserProps) {
     };
 
     loadTree();
-  }, [isReady, sessionId]);
+  }, [sessionId]);
 
   // Subscribe to file changes and refresh tree
   useEffect(() => {
-    if (!isReady) return;
     const client = getWebSocketClient();
     if (!client) return;
 
@@ -63,7 +58,7 @@ export function FileBrowser({ sessionId, onOpenFile }: FileBrowserProps) {
     });
 
     return unsubscribe;
-  }, [isReady, sessionId]);
+  }, [sessionId]);
 
   const toggleExpand = useCallback(async (node: FileTreeNode) => {
     if (!node.is_dir) return;
@@ -116,7 +111,6 @@ export function FileBrowser({ sessionId, onOpenFile }: FileBrowserProps) {
   const openFile = useCallback(async (node: FileTreeNode) => {
     if (node.is_dir) return;
 
-    if (!isReady) return;
     try {
       const client = getWebSocketClient();
       if (!client) return;
@@ -131,7 +125,7 @@ export function FileBrowser({ sessionId, onOpenFile }: FileBrowserProps) {
     } catch (error) {
       console.error('Failed to load file content:', error);
     }
-  }, [isReady, sessionId, onOpenFile]);
+  }, [sessionId, onOpenFile]);
 
   const renderTreeNode = (node: FileTreeNode, depth: number = 0): React.ReactNode => {
     const isExpanded = expandedPaths.has(node.path);

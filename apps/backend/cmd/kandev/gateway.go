@@ -55,10 +55,7 @@ func provideGateway(
 		workspaceFileHandlers.RegisterHandlers(gateway.Dispatcher)
 
 		shellHandlers := agenthandlers.NewShellHandlers(lifecycleMgr, log)
-		shellHandlers.SetHub(gateway.Hub)
-		shellHandlers.SetSessionResumer(&shellSessionResumerAdapter{svc: orchestratorSvc})
 		shellHandlers.RegisterHandlers(gateway.Dispatcher)
-		lifecycleMgr.SetShellStreamStarter(shellHandlers)
 	}
 
 	go gateway.Hub.Run(ctx)

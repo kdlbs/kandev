@@ -27,24 +27,28 @@
 //
 // Message type: PermissionNotification
 //
-// # Git Status Stream (/api/v1/workspace/git-status/stream)
+// # Unified Workspace Stream (/api/v1/workspace/stream)
 //
-// Streams git status updates when the workspace state changes.
+// Bidirectional WebSocket that consolidates all workspace-related streams:
+//   - Shell I/O (input, output, exit, resize)
+//   - Git status updates
+//   - File change notifications
+//   - File list updates
+//   - Ping/pong keepalive
 //
-// Message type: GitStatusUpdate
+// Message type: WorkspaceStreamMessage (defined in types/types.go)
 //
-// # File Changes Stream (/api/v1/workspace/file-changes/stream)
-//
-// Streams file system change notifications when files are created,
-// modified, deleted, or renamed in the workspace.
-//
-// Message type: FileChangeNotification
-//
-// # Shell Stream (/api/v1/shell/stream)
-//
-// Bidirectional WebSocket for interactive shell I/O.
-//
-// Message type: ShellMessage (input/output/ping/pong/exit)
+// Message types (use WorkspaceMsg* constants):
+//   - shell_output: Shell output data
+//   - shell_input: Shell input data (client -> server)
+//   - shell_exit: Shell process exited
+//   - shell_resize: Terminal resize (client -> server)
+//   - git_status: Git status update
+//   - file_change: File change notification
+//   - file_list: File list update
+//   - ping/pong: Keepalive messages
+//   - connected: Connection established
+//   - error: Error occurred
 //
 // All streams use JSON-encoded messages over WebSocket connections.
 package streams

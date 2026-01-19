@@ -44,9 +44,6 @@ type Manager struct {
 	eventPublisher   *EventPublisher   // Publishes lifecycle events
 	containerManager *ContainerManager // Manages Docker containers (optional, nil for non-Docker runtimes)
 
-	// Shell stream starter for auto-starting shell streams
-	shellStreamStarter ShellStreamStarter
-
 	// Workspace info provider for on-demand instance creation
 	workspaceInfoProvider WorkspaceInfoProvider
 
@@ -100,9 +97,11 @@ func NewManager(
 
 	// Initialize stream manager with callbacks that delegate to manager methods
 	mgr.streamManager = NewStreamManager(log, StreamCallbacks{
-		OnAgentEvent: mgr.handleAgentEvent,
-		OnGitStatus:  mgr.handleGitStatusUpdate,
-		OnFileChange: mgr.handleFileChangeNotification,
+		OnAgentEvent:  mgr.handleAgentEvent,
+		OnGitStatus:   mgr.handleGitStatusUpdate,
+		OnFileChange:  mgr.handleFileChangeNotification,
+		OnShellOutput: mgr.handleShellOutput,
+		OnShellExit:   mgr.handleShellExit,
 	})
 
 	// Set session manager dependencies for full orchestration
@@ -118,11 +117,6 @@ func NewManager(
 // SetWorktreeManager sets the worktree manager for Git worktree isolation
 func (m *Manager) SetWorktreeManager(worktreeMgr *worktree.Manager) {
 	m.worktreeMgr = worktreeMgr
-}
-
-// SetShellStreamStarter sets the shell stream starter
-func (m *Manager) SetShellStreamStarter(starter ShellStreamStarter) {
-	m.shellStreamStarter = starter
 }
 
 // SetWorkspaceInfoProvider sets the provider for workspace information
@@ -854,6 +848,16 @@ func (m *Manager) handleGitStatusUpdate(execution *AgentExecution, update *agent
 // handleFileChangeNotification processes file change notifications from the workspace tracker
 func (m *Manager) handleFileChangeNotification(execution *AgentExecution, notification *agentctl.FileChangeNotification) {
 	m.eventPublisher.PublishFileChange(execution, notification)
+}
+
+// handleShellOutput processes shell output from the workspace stream
+func (m *Manager) handleShellOutput(execution *AgentExecution, data string) {
+	m.eventPublisher.PublishShellOutput(execution, data)
+}
+
+// handleShellExit processes shell exit events from the workspace stream
+func (m *Manager) handleShellExit(execution *AgentExecution, code int) {
+	m.eventPublisher.PublishShellExit(execution, code)
 }
 
 // flushMessageBuffer extracts any accumulated message from the buffer and returns it.

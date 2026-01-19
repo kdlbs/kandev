@@ -15,6 +15,8 @@ type StreamCallbacks struct {
 	OnAgentEvent func(execution *AgentExecution, event agentctl.AgentEvent)
 	OnGitStatus  func(execution *AgentExecution, update *agentctl.GitStatusUpdate)
 	OnFileChange func(execution *AgentExecution, notification *agentctl.FileChangeNotification)
+	OnShellOutput func(execution *AgentExecution, data string)
+	OnShellExit   func(execution *AgentExecution, code int)
 }
 
 // StreamManager manages WebSocket streams to agent executions
@@ -35,8 +37,7 @@ func NewStreamManager(log *logger.Logger, callbacks StreamCallbacks) *StreamMana
 // If ready is non-nil, it will be closed when the updates stream is connected.
 func (sm *StreamManager) ConnectAll(execution *AgentExecution, ready chan<- struct{}) {
 	go sm.connectUpdatesStream(execution, ready)
-	go sm.connectGitStatusStream(execution)
-	go sm.connectFileChangesStream(execution)
+	go sm.connectWorkspaceStream(execution)
 }
 
 // ReconnectAll reconnects to all streams (used after backend restart).
@@ -92,10 +93,8 @@ func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready c
 	}
 }
 
-
-
-// connectGitStatusStream handles git status stream with retry logic
-func (sm *StreamManager) connectGitStatusStream(execution *AgentExecution) {
+// connectWorkspaceStream handles the unified workspace stream with retry logic
+func (sm *StreamManager) connectWorkspaceStream(execution *AgentExecution) {
 	ctx := context.Background()
 
 	// Retry connection with exponential backoff
@@ -103,67 +102,64 @@ func (sm *StreamManager) connectGitStatusStream(execution *AgentExecution) {
 	backoff := 1 * time.Second
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		err := execution.agentctl.StreamGitStatus(ctx, func(update *agentctl.GitStatusUpdate) {
-			if sm.callbacks.OnGitStatus != nil {
-				sm.callbacks.OnGitStatus(execution, update)
+		callbacks := agentctl.WorkspaceStreamCallbacks{
+			OnShellOutput: func(data string) {
+				if sm.callbacks.OnShellOutput != nil {
+					sm.callbacks.OnShellOutput(execution, data)
+				}
+			},
+			OnShellExit: func(code int) {
+				if sm.callbacks.OnShellExit != nil {
+					sm.callbacks.OnShellExit(execution, code)
+				}
+			},
+			OnGitStatus: func(update *agentctl.GitStatusUpdate) {
+				if sm.callbacks.OnGitStatus != nil {
+					sm.callbacks.OnGitStatus(execution, update)
+				}
+			},
+			OnFileChange: func(notification *agentctl.FileChangeNotification) {
+				if sm.callbacks.OnFileChange != nil {
+					sm.callbacks.OnFileChange(execution, notification)
+				}
+			},
+			OnConnected: func() {
+				sm.logger.Debug("workspace stream connected",
+					zap.String("instance_id", execution.ID))
+			},
+			OnError: func(err string) {
+				sm.logger.Debug("workspace stream error",
+					zap.String("instance_id", execution.ID),
+					zap.String("error", err))
+			},
+		}
+
+		ws, err := execution.agentctl.StreamWorkspace(ctx, callbacks)
+		if err != nil {
+			sm.logger.Debug("workspace stream connection failed, retrying",
+				zap.String("instance_id", execution.ID),
+				zap.Int("attempt", attempt),
+				zap.Int("max_retries", maxRetries),
+				zap.Error(err))
+
+			if attempt < maxRetries {
+				time.Sleep(backoff)
+				backoff *= 2 // Exponential backoff
 			}
-		})
-
-		if err == nil {
-			// Connection closed normally
-			return
+			continue
 		}
 
-		sm.logger.Debug("git status stream connection failed, retrying",
-			zap.String("instance_id", execution.ID),
-			zap.Int("attempt", attempt),
-			zap.Int("max_retries", maxRetries),
-			zap.Error(err))
+		// Store the workspace stream on the execution for shell I/O
+		execution.SetWorkspaceStream(ws)
+		sm.logger.Info("connected to unified workspace stream",
+			zap.String("instance_id", execution.ID))
 
-		if attempt < maxRetries {
-			time.Sleep(backoff)
-			backoff *= 2 // Exponential backoff
-		}
+		// Wait for the stream to close (it stays open until disconnected)
+		<-ws.Done()
+		return
 	}
 
-	sm.logger.Error("failed to connect to git status stream after retries",
-		zap.String("instance_id", execution.ID),
-		zap.Int("max_retries", maxRetries))
-}
-
-// connectFileChangesStream handles file changes stream with retry logic
-func (sm *StreamManager) connectFileChangesStream(execution *AgentExecution) {
-	ctx := context.Background()
-
-	// Retry connection with exponential backoff
-	maxRetries := 5
-	backoff := 1 * time.Second
-
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		err := execution.agentctl.StreamFileChanges(ctx, func(notification *agentctl.FileChangeNotification) {
-			if sm.callbacks.OnFileChange != nil {
-				sm.callbacks.OnFileChange(execution, notification)
-			}
-		})
-
-		if err == nil {
-			// Connection closed normally
-			return
-		}
-
-		sm.logger.Debug("file changes stream connection failed, retrying",
-			zap.String("instance_id", execution.ID),
-			zap.Int("attempt", attempt),
-			zap.Int("max_retries", maxRetries),
-			zap.Error(err))
-
-		if attempt < maxRetries {
-			time.Sleep(backoff)
-			backoff *= 2 // Exponential backoff
-		}
-	}
-
-	sm.logger.Error("failed to connect to file changes stream after retries",
+	sm.logger.Error("failed to connect to workspace stream after retries",
 		zap.String("instance_id", execution.ID),
 		zap.Int("max_retries", maxRetries))
 }

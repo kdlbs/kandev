@@ -91,12 +91,6 @@ func TestNewShellHandlers(t *testing.T) {
 	if handlers.logger == nil {
 		t.Error("expected non-nil logger")
 	}
-	if handlers.activeStreams == nil {
-		t.Error("expected non-nil activeStreams map")
-	}
-	if handlers.inputChannels == nil {
-		t.Error("expected non-nil inputChannels map")
-	}
 }
 
 func TestRegisterHandlers(t *testing.T) {
@@ -263,29 +257,6 @@ func TestWsShellInput_NoInstanceFound(t *testing.T) {
 	if err.Error() != expectedErr {
 		t.Errorf("expected '%s', got: %v", expectedErr, err)
 	}
-}
-
-func TestSendShellInput_NoActiveStream(t *testing.T) {
-	log := newTestLogger()
-	handlers := NewShellHandlers(nil, log)
-
-	err := handlers.SendShellInput("non-existent-session", "test input")
-	if err == nil {
-		t.Error("expected error for non-existent stream")
-	}
-	expectedErr := "no active shell stream for session non-existent-session"
-	if err.Error() != expectedErr {
-		t.Errorf("expected '%s', got: %v", expectedErr, err)
-	}
-}
-
-func TestStopShellStream_NonExistent(t *testing.T) {
-	log := newTestLogger()
-	handlers := NewShellHandlers(nil, log)
-
-	// StopShellStream should not panic when called with non-existent sessionID
-	handlers.StopShellStream("non-existent-session")
-	// No panic = success
 }
 
 func TestNewShellHandlers_WithManager(t *testing.T) {

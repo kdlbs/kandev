@@ -108,3 +108,32 @@ type PermissionRequestEventPayload struct {
 	ActionDetails map[string]interface{} `json:"action_details,omitempty"`
 }
 
+// ShellOutputEventPayload is the payload for shell output events.
+type ShellOutputEventPayload struct {
+	TaskID    string `json:"task_id"`
+	SessionID string `json:"session_id"`
+	AgentID   string `json:"agent_id"`
+	Type      string `json:"type"` // Always "output" for shell output events
+	Data      string `json:"data"`
+	Timestamp string `json:"timestamp"`
+}
+
+// GetSessionID returns the session ID for this event (used by event routing).
+func (p ShellOutputEventPayload) GetSessionID() string {
+	return p.SessionID
+}
+
+// ShellExitEventPayload is the payload for shell exit events.
+type ShellExitEventPayload struct {
+	TaskID    string `json:"task_id"`
+	SessionID string `json:"session_id"`
+	AgentID   string `json:"agent_id"`
+	Type      string `json:"type"` // Always "exit" for shell exit events
+	Code      int    `json:"code"` // Exit code
+	Timestamp string `json:"timestamp"`
+}
+
+// GetSessionID returns the session ID for this event (used by event routing).
+func (p ShellExitEventPayload) GetSessionID() string {
+	return p.SessionID
+}
