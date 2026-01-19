@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useMemo, useState, type FormEvent } from 'react';
 import { IconBell, IconRefresh } from '@tabler/icons-react';
 import { Button } from '@kandev/ui/button';
 import { Checkbox } from '@kandev/ui/checkbox';
@@ -13,11 +13,11 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@kande
 import {
   createNotificationProvider,
   deleteNotificationProvider,
-  listNotificationProviders,
   updateNotificationProvider,
 } from '@/lib/http';
 import { useRequest } from '@/lib/http/use-request';
 import { DEFAULT_NOTIFICATION_EVENTS, EVENT_LABELS } from '@/lib/notifications/events';
+import { useNotificationProviders } from '@/hooks/use-notification-providers';
 import type { NotificationProvider } from '@/lib/types/http';
 
 type ProviderUpdatePayload = {
@@ -65,12 +65,6 @@ function normalizeEvents(events?: string[]): string {
   return [...events].sort().join('|');
 }
 
-type NotificationsSettingsProps = {
-  initialProviders?: NotificationProvider[];
-  initialEvents?: string[];
-  initialAppriseAvailable?: boolean;
-};
-
 type AppriseFormMode = 'create' | 'edit';
 
 function buildAppriseEdits(providers: NotificationProvider[]) {
@@ -86,29 +80,26 @@ function buildAppriseEdits(providers: NotificationProvider[]) {
   return { urls, names };
 }
 
-export function NotificationsSettings({
-  initialProviders,
-  initialEvents,
-  initialAppriseAvailable,
-}: NotificationsSettingsProps) {
-  const [providers, setProviders] = useState<NotificationProvider[]>(() => initialProviders ?? []);
+export function NotificationsSettings() {
+  const {
+    providers: storeProviders,
+    events: storeEvents,
+    appriseAvailable: storeAppriseAvailable,
+  } = useNotificationProviders();
+  const [providers, setProviders] = useState<NotificationProvider[]>(() => storeProviders ?? []);
   const [baselineProviders, setBaselineProviders] = useState<NotificationProvider[]>(
-    () => initialProviders ?? []
+    () => storeProviders ?? []
   );
-  const [notificationEvents, setNotificationEvents] = useState<string[]>(
-    () => initialEvents ?? []
-  );
-  const [appriseAvailable, setAppriseAvailable] = useState(
-    () => initialAppriseAvailable ?? true
-  );
-  const [isProvidersLoading, setIsProvidersLoading] = useState(false);
+  const [notificationEvents] = useState<string[]>(() => storeEvents ?? []);
+  const [appriseAvailable] = useState(() => storeAppriseAvailable ?? true);
+  const isProvidersLoading = false;
   const [appriseName, setAppriseName] = useState('');
   const [appriseUrls, setAppriseUrls] = useState('');
   const [appriseEdits, setAppriseEdits] = useState<Record<string, string>>(() => {
-    return buildAppriseEdits(initialProviders ?? []).urls;
+    return buildAppriseEdits(storeProviders ?? []).urls;
   });
   const [appriseNameEdits, setAppriseNameEdits] = useState<Record<string, string>>(() => {
-    return buildAppriseEdits(initialProviders ?? []).names;
+    return buildAppriseEdits(storeProviders ?? []).names;
   });
   const [showAppriseForm, setShowAppriseForm] = useState(false);
   const [appriseFormMode, setAppriseFormMode] = useState<AppriseFormMode>('create');
@@ -116,7 +107,12 @@ export function NotificationsSettings({
   const [pendingDeletes, setPendingDeletes] = useState<Set<string>>(new Set());
   const [notificationPermission, setNotificationPermission] = useState<
     NotificationPermission | 'unsupported'
-  >('default');
+  >(() => {
+    if (typeof Notification === 'undefined') {
+      return 'unsupported';
+    }
+    return Notification.permission;
+  });
 
   const saveRequest = useRequest(async () => {
     const updates: Array<Promise<NotificationProvider>> = [];
@@ -167,38 +163,7 @@ export function NotificationsSettings({
     return updated;
   });
 
-  useEffect(() => {
-    if (typeof Notification === 'undefined') {
-      setNotificationPermission('unsupported');
-    } else {
-      setNotificationPermission(Notification.permission);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (initialProviders) {
-      return;
-    }
-    const fetchProviders = async () => {
-      setIsProvidersLoading(true);
-      try {
-        const response = await listNotificationProviders();
-        const loaded = response.providers ?? [];
-        setProviders(loaded);
-        setBaselineProviders(loaded);
-        setNotificationEvents(response.events ?? []);
-        setAppriseAvailable(response.apprise_available ?? true);
-        const edits = buildAppriseEdits(loaded);
-        setAppriseEdits(edits.urls);
-        setAppriseNameEdits(edits.names);
-      } catch (error) {
-        console.error('[NotificationsSettings] Failed to load notification providers', error);
-      } finally {
-        setIsProvidersLoading(false);
-      }
-    };
-    fetchProviders();
-  }, [initialProviders]);
+  // Store data is SSR-hydrated for settings. Local state is initialized once.
 
   const appriseProviders = providers.filter((provider) => provider.type === 'apprise');
 

@@ -37,6 +37,8 @@ import (
 	notificationcontroller "github.com/kandev/kandev/internal/notifications/controller"
 	notificationhandlers "github.com/kandev/kandev/internal/notifications/handlers"
 	notificationservice "github.com/kandev/kandev/internal/notifications/service"
+	promptcontroller "github.com/kandev/kandev/internal/prompts/controller"
+	prompthandlers "github.com/kandev/kandev/internal/prompts/handlers"
 
 	// Task Service packages
 	taskcontroller "github.com/kandev/kandev/internal/task/controller"
@@ -178,12 +180,14 @@ func main() {
 	taskSvc := services.Task
 	userSvc := services.User
 	editorSvc := services.Editor
+	promptSvc := services.Prompts
 	log.Info("Task Service initialized")
 
 	userCtrl := usercontroller.NewController(userSvc)
 	var notificationSvc *notificationservice.Service
 	var notificationCtrl *notificationcontroller.Controller
 	editorCtrl := editorcontroller.NewController(editorSvc)
+	promptCtrl := promptcontroller.NewController(promptSvc)
 
 	if err := runInitialAgentSetup(ctx, userSvc, agentSettingsController, log); err != nil {
 		log.Warn("Failed to run initial agent setup", zap.Error(err))
@@ -666,6 +670,9 @@ func main() {
 
 	editorhandlers.RegisterRoutes(router, editorCtrl, log)
 	log.Info("Registered Editors handlers (HTTP)")
+
+	prompthandlers.RegisterRoutes(router, promptCtrl, log)
+	log.Info("Registered Prompts handlers (HTTP)")
 
 	// Health check (simple HTTP for load balancers/monitoring)
 	router.GET("/health", func(c *gin.Context) {

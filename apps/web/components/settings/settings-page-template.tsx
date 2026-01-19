@@ -10,6 +10,7 @@ type SettingsPageTemplateProps = {
   isDirty: boolean;
   saveStatus: 'idle' | 'loading' | 'success' | 'error';
   onSave: () => void;
+  showSaveButton?: boolean;
   children: React.ReactNode;
   deleteSection?: React.ReactNode;
 };
@@ -20,6 +21,7 @@ export function SettingsPageTemplate({
   isDirty,
   saveStatus,
   onSave,
+  showSaveButton = true,
   children,
   deleteSection,
 }: SettingsPageTemplateProps) {
@@ -32,15 +34,17 @@ export function SettingsPageTemplate({
             <p className="text-sm text-muted-foreground mt-1">{description}</p>
           )}
         </div>
-        <div className="flex items-center gap-3">
-          {isDirty && <UnsavedChangesBadge />}
-          <UnsavedSaveButton
-            isDirty={isDirty}
-            isLoading={saveStatus === 'loading'}
-            status={saveStatus}
-            onClick={onSave}
-          />
-        </div>
+        {showSaveButton && (
+          <div className="flex items-center gap-3">
+            {isDirty && <UnsavedChangesBadge />}
+            <UnsavedSaveButton
+              isDirty={isDirty}
+              isLoading={saveStatus === 'loading'}
+              status={saveStatus}
+              onClick={onSave}
+            />
+          </div>
+        )}
       </div>
 
       <Separator />

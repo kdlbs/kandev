@@ -203,6 +203,18 @@ export type EditorsResponse = {
   editors: EditorOption[];
 };
 
+export type CustomPrompt = {
+  id: string;
+  name: string;
+  content: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PromptsResponse = {
+  prompts: CustomPrompt[];
+};
+
 export type UserResponse = {
   user: User;
   settings: UserSettings;

@@ -9,14 +9,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { SettingsPageTemplate } from '@/components/settings/settings-page-template';
 import { Combobox, type ComboboxOption } from '@/components/combobox';
 import { useAppStore } from '@/components/state-provider';
+import { useEditors } from '@/hooks/use-editors';
 import { createEditor, deleteEditor, updateEditor, updateUserSettings } from '@/lib/http';
 import { useRequest } from '@/lib/http/use-request';
-import type { EditorOption, UserSettings } from '@/lib/types/http';
-
-type EditorsSettingsProps = {
-  initialEditors: EditorOption[];
-  initialSettings: UserSettings | null;
-};
+import type { EditorOption } from '@/lib/types/http';
 
 type CustomKind = 'custom_command' | 'custom_remote_ssh' | 'custom_hosted_url';
 
@@ -276,14 +272,15 @@ function resolveDefaultEditorId(editors: EditorOption[], desiredId: string) {
   return '';
 }
 
-export function EditorsSettings({ initialEditors, initialSettings }: EditorsSettingsProps) {
+export function EditorsSettings() {
   const setEditors = useAppStore((state) => state.setEditors);
   const setUserSettings = useAppStore((state) => state.setUserSettings);
   const currentUserSettings = useAppStore((state) => state.userSettings);
-  const [editors, setEditorItems] = useState<EditorOption[]>(() => initialEditors ?? []);
+  const { editors: storeEditors } = useEditors();
+  const [editors, setEditorItems] = useState<EditorOption[]>(() => storeEditors ?? []);
   const initialDefaultId = resolveDefaultEditorId(
-    initialEditors ?? [],
-    initialSettings?.default_editor_id ?? ''
+    editors ?? [],
+    currentUserSettings.defaultEditorId ?? ''
   );
   const [defaultEditorId, setDefaultEditorId] = useState(initialDefaultId);
   const [baselineDefaultId, setBaselineDefaultId] = useState(initialDefaultId);
@@ -344,15 +341,10 @@ export function EditorsSettings({ initialEditors, initialSettings }: EditorsSett
   const isDirty = defaultEditorId !== baselineDefaultId;
 
   const saveDefaultRequest = useRequest(async () => {
-    const fallbackSettings = {
+    const payload = {
       workspace_id: currentUserSettings.workspaceId ?? '',
       board_id: currentUserSettings.boardId ?? '',
       repository_ids: currentUserSettings.repositoryIds ?? [],
-    };
-    const payload = {
-      workspace_id: initialSettings?.workspace_id ?? fallbackSettings.workspace_id,
-      board_id: initialSettings?.board_id ?? fallbackSettings.board_id,
-      repository_ids: initialSettings?.repository_ids ?? fallbackSettings.repository_ids,
       default_editor_id: defaultEditorId || undefined,
     };
     const response = await updateUserSettings(payload, { cache: 'no-store' });
@@ -363,6 +355,7 @@ export function EditorsSettings({ initialEditors, initialSettings }: EditorsSett
         boardId: response.settings.board_id || null,
         repositoryIds: response.settings.repository_ids ?? [],
         preferredShell: response.settings.preferred_shell || null,
+        shellOptions: currentUserSettings.shellOptions ?? [],
         defaultEditorId: response.settings.default_editor_id || null,
         loaded: true,
       });

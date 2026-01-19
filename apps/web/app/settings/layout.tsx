@@ -1,5 +1,5 @@
 import { SettingsLayoutClient } from '@/components/settings/settings-layout-client';
-import { StateHydrator } from '@/components/state-hydrator';
+import { StateProvider } from '@/components/state-provider';
 import {
   listAgentDiscovery,
   listAgents,
@@ -7,6 +7,9 @@ import {
   listExecutors,
   listWorkspaces,
   fetchUserSettings,
+  listPrompts,
+  listNotificationProviders,
+  listEditors,
 } from '@/lib/http';
 
 export default function SettingsLayout({
@@ -22,13 +25,30 @@ export default function SettingsLayout({
 async function SettingsLayoutServer({ children }: { children: React.ReactNode }) {
   let initialState = {};
   try {
-    const [workspaces, executors, environments, agents, discovery, userSettings] = await Promise.all([
+    const [
+      workspaces,
+      executors,
+      environments,
+      agents,
+      discovery,
+      userSettings,
+      promptsResponse,
+      notificationProviders,
+      editorsResponse,
+    ] = await Promise.all([
       listWorkspaces({ cache: 'no-store' }),
       listExecutors({ cache: 'no-store' }),
       listEnvironments({ cache: 'no-store' }),
       listAgents({ cache: 'no-store' }),
       listAgentDiscovery({ cache: 'no-store' }),
       fetchUserSettings({ cache: 'no-store' }).catch(() => null),
+      listPrompts({ cache: 'no-store' }).catch(() => ({ prompts: [] })),
+      listNotificationProviders({ cache: 'no-store' }).catch(() => ({
+        providers: [],
+        apprise_available: false,
+        events: [],
+      })),
+      listEditors({ cache: 'no-store' }).catch(() => ({ editors: [] })),
     ]);
     const settings = userSettings?.settings;
     initialState = {
@@ -68,11 +88,29 @@ async function SettingsLayoutServer({ children }: { children: React.ReactNode })
         environmentsLoaded: true,
         agentsLoaded: true,
       },
+      prompts: {
+        items: promptsResponse.prompts ?? [],
+        loaded: true,
+        loading: false,
+      },
+      editors: {
+        items: editorsResponse.editors ?? [],
+        loaded: true,
+        loading: false,
+      },
+      notificationProviders: {
+        items: notificationProviders.providers ?? [],
+        events: notificationProviders.events ?? [],
+        appriseAvailable: notificationProviders.apprise_available ?? false,
+        loaded: true,
+        loading: false,
+      },
       userSettings: {
         workspaceId: settings?.workspace_id ?? null,
         boardId: settings?.board_id ?? null,
         repositoryIds: settings?.repository_ids ?? [],
         preferredShell: settings?.preferred_shell ?? null,
+        shellOptions: userSettings?.shell_options ?? [],
         defaultEditorId: settings?.default_editor_id ?? null,
         loaded: Boolean(settings),
       },
@@ -82,9 +120,8 @@ async function SettingsLayoutServer({ children }: { children: React.ReactNode })
   }
 
   return (
-    <>
-      <StateHydrator initialState={initialState} />
+    <StateProvider initialState={initialState}>
       <SettingsLayoutClient>{children}</SettingsLayoutClient>
-    </>
+    </StateProvider>
   );
 }

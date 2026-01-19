@@ -1,5 +1,6 @@
 'use client';
 
+import { useMemo } from 'react';
 import CodeMirror from '@uiw/react-codemirror';
 import { markdown } from '@codemirror/lang-markdown';
 import { EditorView, keymap, placeholder as cmPlaceholder } from '@codemirror/view';
@@ -10,6 +11,7 @@ import type { Extension } from '@codemirror/state';
 import { cn } from '@/lib/utils';
 import { SHORTCUTS } from '@/lib/keyboard/constants';
 import { matchesShortcut, shortcutToCodeMirrorKeybinding } from '@/lib/keyboard/utils';
+import { useCustomPrompts } from '@/hooks/use-custom-prompts';
 
 type TaskChatInputProps = {
   value: string;
@@ -31,6 +33,20 @@ export function TaskChatInput({
   planModeEnabled,
 }: TaskChatInputProps) {
   const submitKey = shortcutToCodeMirrorKeybinding(SHORTCUTS.SUBMIT);
+  const { prompts } = useCustomPrompts();
+
+  const promptOptions = useMemo(() => {
+    return prompts.map((prompt) => ({
+      id: prompt.id,
+      name: prompt.name,
+      content: prompt.content,
+    }));
+  }, [prompts]);
+
+  const truncatePreview = (text: string, max = 140) => {
+    if (text.length <= max) return text;
+    return `${text.slice(0, max)}…`;
+  };
 
   const completionSource = (context: CompletionContext) => {
     const slashMatch = context.matchBefore(/(^|\s)\/[\w-]*/);
@@ -50,13 +66,29 @@ export function TaskChatInput({
     const mentionMatch = context.matchBefore(/(^|\s)@[\w-]*/);
     if (mentionMatch) {
       const from = mentionMatch.from + (mentionMatch.text.startsWith('@') ? 0 : 1);
+      const trimmed = mentionMatch.text.trim();
+      const query = trimmed.startsWith('@') ? trimmed.slice(1).toLowerCase() : trimmed.toLowerCase();
+      const promptMatches = promptOptions
+        .filter((prompt) => prompt.name.toLowerCase().startsWith(query))
+        .map((prompt) => ({
+          label: `@${prompt.name}`,
+          type: 'prompt',
+          detail: 'Prompt',
+          info: truncatePreview(prompt.content),
+          apply: (view: EditorView, _completion: unknown, applyFrom: number, applyTo: number) => {
+            const insertText = `${prompt.content}\n`;
+            const cursorPos = applyFrom + insertText.length;
+            view.dispatch({
+              changes: { from: applyFrom, to: applyTo, insert: insertText },
+              selection: { anchor: cursorPos },
+            });
+            view.dispatch({ effects: EditorView.scrollIntoView(cursorPos) });
+          },
+        }));
       return {
         from,
-        options: [
-          { label: '@agent', type: 'mention', info: 'Notify the agent' },
-          { label: '@reviewer', type: 'mention', info: 'Tag a reviewer' },
-          { label: '@designer', type: 'mention', info: 'Tag design feedback' },
-        ],
+        // Future: add file path completions alongside prompts using additional providers.
+        options: [...promptMatches],
       };
     }
 
@@ -160,7 +192,7 @@ export function TaskChatInput({
       className={cn(
         'task-chat-editor rounded-md border border-input bg-muted/40 focus-within:border-ring focus-within:ring-[2px] focus-within:ring-ring/30 overflow-hidden',
         planModeEnabled &&
-          'border-dashed border-primary/60 !bg-primary/10 shadow-[inset_0_0_0_1px_rgba(59,130,246,0.35)]',
+        'border-dashed border-primary/60 !bg-primary/10 shadow-[inset_0_0_0_1px_rgba(59,130,246,0.35)]',
         className
       )}
     >

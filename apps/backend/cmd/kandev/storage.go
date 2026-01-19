@@ -11,6 +11,7 @@ import (
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	editorstore "github.com/kandev/kandev/internal/editors/store"
 	notificationstore "github.com/kandev/kandev/internal/notifications/store"
+	promptstore "github.com/kandev/kandev/internal/prompts/store"
 	userstore "github.com/kandev/kandev/internal/user/store"
 )
 
@@ -52,12 +53,19 @@ func provideRepositories(cfg *config.Config, log *logger.Logger) (*sql.DB, *Repo
 	}
 	cleanups = append(cleanups, cleanup)
 
+	promptRepo, cleanup, err := promptstore.Provide(dbConn)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	cleanups = append(cleanups, cleanup)
+
 	repos := &Repositories{
 		Task:          taskRepoImpl,
 		AgentSettings: agentSettingsRepo,
 		User:          userRepo,
 		Notification:  notificationRepo,
 		Editor:        editorRepo,
+		Prompts:       promptRepo,
 	}
 	return dbConn, repos, cleanups, nil
 }

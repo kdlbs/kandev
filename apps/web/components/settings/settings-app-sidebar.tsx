@@ -11,8 +11,7 @@ import {
   IconCode,
   IconChevronRight,
   IconCpu,
-  IconPlug,
-  IconPuzzle,
+  IconMessageCircle,
 } from '@tabler/icons-react';
 import {
   Sidebar,
@@ -31,6 +30,7 @@ import {
 } from '@kandev/ui/sidebar';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@kandev/ui/collapsible';
 import { useAppStore } from '@/components/state-provider';
+import { useAvailableAgents } from '@/hooks/use-available-agents';
 
 export function SettingsAppSidebar() {
   const pathname = usePathname();
@@ -38,6 +38,7 @@ export function SettingsAppSidebar() {
   const environments = useAppStore((state) => state.environments.items);
   const executors = useAppStore((state) => state.executors.items);
   const agents = useAppStore((state) => state.settingsAgents.items);
+  useAvailableAgents();
 
   return (
     <Sidebar variant="inset">
@@ -298,22 +299,12 @@ export function SettingsAppSidebar() {
                 </SidebarMenuItem>
               </Collapsible>
 
-              {/* Integrations */}
+              {/* Prompts */}
               <SidebarMenuItem>
-                <SidebarMenuButton asChild isActive={pathname === '/settings/integrations'}>
-                  <Link href="/settings/integrations">
-                    <IconPlug className="h-4 w-4" />
-                    <span>Integrations</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-
-              {/* Plugins */}
-              <SidebarMenuItem>
-                <SidebarMenuButton asChild isActive={pathname === '/settings/plugins'}>
-                  <Link href="/settings/plugins">
-                    <IconPuzzle className="h-4 w-4" />
-                    <span>Plugins</span>
+                <SidebarMenuButton asChild isActive={pathname === '/settings/prompts'}>
+                  <Link href="/settings/prompts">
+                    <IconMessageCircle className="h-4 w-4" />
+                    <span>Prompts</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
