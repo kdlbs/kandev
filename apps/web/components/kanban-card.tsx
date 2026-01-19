@@ -33,6 +33,7 @@ interface KanbanCardProps {
   onEdit?: (task: Task) => void;
   onDelete?: (task: Task) => void;
   onOpenFullPage?: (task: Task) => void;
+  showMaximizeButton?: boolean;
 }
 
 function KanbanCardBody({
@@ -81,7 +82,7 @@ function KanbanCardLayout({ task, className }: KanbanCardProps & { className?: s
   );
 }
 
-export function KanbanCard({ task, onClick, onEdit, onDelete, onOpenFullPage }: KanbanCardProps) {
+export function KanbanCard({ task, onClick, onEdit, onDelete, onOpenFullPage, showMaximizeButton = true }: KanbanCardProps) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: task.id,
   });
@@ -121,8 +122,8 @@ export function KanbanCard({ task, onClick, onEdit, onDelete, onOpenFullPage }: 
           repoName={repoName}
           actions={
             <div className="flex items-center gap-2">
-              {statusIcon}
-              {onOpenFullPage && task.hasSession !== false && (
+              {task.state === 'IN_PROGRESS' && statusIcon}
+              {showMaximizeButton && onOpenFullPage && task.hasSession !== false && (
                 <button
                   type="button"
                   className="text-muted-foreground hover:text-foreground hover:bg-accent rounded-sm p-1 -m-1 transition-colors cursor-pointer"

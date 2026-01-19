@@ -18,9 +18,10 @@ interface KanbanColumnProps {
   onOpenTask: (task: Task) => void;
   onEditTask: (task: Task) => void;
   onDeleteTask: (task: Task) => void;
+  showMaximizeButton?: boolean;
 }
 
-export function KanbanColumn({ column, tasks, onPreviewTask, onOpenTask, onEditTask, onDeleteTask }: KanbanColumnProps) {
+export function KanbanColumn({ column, tasks, onPreviewTask, onOpenTask, onEditTask, onDeleteTask, showMaximizeButton }: KanbanColumnProps) {
   const { setNodeRef, isOver } = useDroppable({
     id: column.id,
   });
@@ -57,6 +58,7 @@ export function KanbanColumn({ column, tasks, onPreviewTask, onOpenTask, onEditT
               onOpenFullPage={onOpenTask}
               onEdit={onEditTask}
               onDelete={onDeleteTask}
+              showMaximizeButton={showMaximizeButton}
             />
           ))
         )}

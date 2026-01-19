@@ -29,8 +29,10 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
     selectedTaskId,
     isOpen,
     previewWidthPx,
+    enablePreviewOnClick,
     open,
     close,
+    setEnablePreviewOnClick,
     updatePreviewWidth,
   } = useKanbanPreview({
     initialTaskId,
@@ -168,14 +170,46 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
   // Preview handler - task data is computed from selectedTaskId
   // Toggle behavior: clicking the same task closes the panel
   const handlePreviewTaskWithData = useCallback(
-    (task: Task) => {
-      if (isOpen && selectedTaskId === task.id) {
-        close();
+    async (task: Task) => {
+      if (enablePreviewOnClick) {
+        // Preview mode: open/toggle preview panel
+        if (isOpen && selectedTaskId === task.id) {
+          close();
+        } else {
+          open(task.id);
+        }
       } else {
-        open(task.id);
+        // Navigate mode: go directly to session details
+        // Need to fetch the session ID for the clicked task
+        const client = getWebSocketClient();
+        if (!client) {
+          // If no WebSocket client, fall back to opening preview
+          open(task.id);
+          return;
+        }
+
+        try {
+          const response = await client.request<{ sessions: Array<{ id: string }> }>(
+            "task.session.list",
+            { task_id: task.id },
+            10000
+          );
+          const sessionId = response.sessions[0]?.id;
+
+          if (sessionId) {
+            handleNavigateToTask(task, sessionId);
+          } else {
+            // If no session exists, fall back to opening preview
+            open(task.id);
+          }
+        } catch (error) {
+          console.error("Failed to load task sessions:", error);
+          // Fall back to opening preview on error
+          open(task.id);
+        }
       }
     },
-    [isOpen, selectedTaskId, open, close]
+    [enablePreviewOnClick, isOpen, selectedTaskId, open, close, handleNavigateToTask]
   );
 
   // Handle Escape key to close preview
@@ -241,6 +275,8 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
             <KanbanBoard
               onPreviewTask={handlePreviewTaskWithData}
               onOpenTask={handleNavigateToTask}
+              enablePreviewOnClick={enablePreviewOnClick}
+              onTogglePreviewOnClick={setEnablePreviewOnClick}
             />
           </div>
 
@@ -296,6 +332,8 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
             <KanbanBoard
               onPreviewTask={handlePreviewTaskWithData}
               onOpenTask={handleNavigateToTask}
+              enablePreviewOnClick={enablePreviewOnClick}
+              onTogglePreviewOnClick={setEnablePreviewOnClick}
             />
           </div>
 

@@ -21,9 +21,11 @@ import { linkToSession } from '@/lib/links';
 interface KanbanBoardProps {
   onPreviewTask?: (task: Task) => void;
   onOpenTask?: (task: Task, sessionId: string) => void;
+  enablePreviewOnClick?: boolean;
+  onTogglePreviewOnClick?: (enabled: boolean) => void;
 }
 
-export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}) {
+export function KanbanBoard({ onPreviewTask, onOpenTask, enablePreviewOnClick, onTogglePreviewOnClick }: KanbanBoardProps = {}) {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [isMovingTask, setIsMovingTask] = useState(false);
@@ -333,6 +335,8 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
         repositoriesLoading={repositoriesLoading}
         allRepositoriesSelected={allRepositoriesSelected}
         selectedRepositoryId={userSettings.repositoryIds[0] ?? null}
+        enablePreviewOnClick={enablePreviewOnClick}
+        onTogglePreviewOnClick={onTogglePreviewOnClick}
         onWorkspaceChange={(nextWorkspaceId) => {
           setActiveWorkspace(nextWorkspaceId);
           if (nextWorkspaceId) {
@@ -426,6 +430,7 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
         onDragEnd={handleDragEnd}
         onDragCancel={handleDragCancel}
         activeTask={activeTask}
+        showMaximizeButton={enablePreviewOnClick}
       />
     </div>
   );

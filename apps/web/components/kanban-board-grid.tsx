@@ -23,6 +23,7 @@ export type KanbanBoardGridProps = {
   onDragEnd: (event: DragEndEvent) => void;
   onDragCancel: () => void;
   activeTask: Task | null;
+  showMaximizeButton?: boolean;
 };
 
 export function KanbanBoardGrid({
@@ -36,6 +37,7 @@ export function KanbanBoardGrid({
   onDragEnd,
   onDragCancel,
   activeTask,
+  showMaximizeButton,
 }: KanbanBoardGridProps) {
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -78,6 +80,7 @@ export function KanbanBoardGrid({
                 onOpenTask={onOpenTask}
                 onEditTask={onEditTask}
                 onDeleteTask={onDeleteTask}
+                showMaximizeButton={showMaximizeButton}
               />
             ))}
           </div>
