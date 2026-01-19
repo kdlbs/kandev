@@ -10,6 +10,7 @@ type DisplaySettings = {
   boardId: string | null;
   repositoryIds: string[];
   preferredShell: string | null;
+  defaultEditorId: string | null;
   loaded: boolean;
 };
 
@@ -45,6 +46,7 @@ export function useUserDisplaySettings({
         boardId: next.boardId,
         repositoryIds,
         preferredShell: next.preferredShell ?? userSettings.preferredShell ?? null,
+        defaultEditorId: userSettings.defaultEditorId ?? null,
         loaded: true,
       };
       const sameWorkspace = normalized.workspaceId === userSettings.workspaceId;
@@ -86,6 +88,7 @@ export function useUserDisplaySettings({
           boardId: data.settings.board_id || null,
           repositoryIds,
           preferredShell: data.settings.preferred_shell || null,
+          defaultEditorId: data.settings.default_editor_id || null,
           loaded: true,
         });
       })

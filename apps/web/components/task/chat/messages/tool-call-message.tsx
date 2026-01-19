@@ -9,7 +9,6 @@ import {
   IconEdit,
   IconEye,
   IconFile,
-  IconLoader2,
   IconSearch,
   IconTerminal2,
   IconX,

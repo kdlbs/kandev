@@ -54,6 +54,7 @@ export default async function Page({ searchParams }: PageProps) {
         boardId: settingsBoardId,
         repositoryIds: settingsRepositoryIds,
         preferredShell: userSettings?.preferred_shell || null,
+        defaultEditorId: userSettings?.default_editor_id || null,
         loaded: Boolean(userSettings),
       },
     };

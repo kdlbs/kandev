@@ -45,6 +45,10 @@ import (
 	notificationhandlers "github.com/kandev/kandev/internal/notifications/handlers"
 	notificationservice "github.com/kandev/kandev/internal/notifications/service"
 	notificationstore "github.com/kandev/kandev/internal/notifications/store"
+	editorcontroller "github.com/kandev/kandev/internal/editors/controller"
+	editorhandlers "github.com/kandev/kandev/internal/editors/handlers"
+	editorservice "github.com/kandev/kandev/internal/editors/service"
+	editorstore "github.com/kandev/kandev/internal/editors/store"
 
 	// Orchestrator packages
 	"github.com/kandev/kandev/internal/orchestrator"
@@ -221,6 +225,14 @@ func main() {
 		_ = notificationRepo.Close()
 	}()
 
+	editorRepo, err := editorstore.NewSQLiteRepository(dbPath)
+	if err != nil {
+		log.Fatal("Failed to initialize editor store", zap.Error(err), zap.String("db_path", dbPath))
+	}
+	defer func() {
+		_ = editorRepo.Close()
+	}()
+
 	discoveryRegistry, err := discovery.LoadRegistry()
 	if err != nil {
 		log.Fatal("Failed to load agent discovery config", zap.Error(err))
@@ -231,6 +243,8 @@ func main() {
 	userCtrl := usercontroller.NewController(userSvc)
 	var notificationSvc *notificationservice.Service
 	var notificationCtrl *notificationcontroller.Controller
+	editorSvc := editorservice.NewService(editorRepo, taskRepo, userSvc)
+	editorCtrl := editorcontroller.NewController(editorSvc)
 
 	taskSvc := taskservice.NewService(
 		taskRepo,
@@ -799,6 +813,9 @@ func main() {
 
 	notificationhandlers.RegisterRoutes(router, notificationCtrl, log)
 	log.Info("Registered Notification handlers (HTTP)")
+
+	editorhandlers.RegisterRoutes(router, editorCtrl, log)
+	log.Info("Registered Editors handlers (HTTP)")
 
 	// Health check (simple HTTP for load balancers/monitoring)
 	router.GET("/health", func(c *gin.Context) {

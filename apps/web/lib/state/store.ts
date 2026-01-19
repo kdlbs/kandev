@@ -4,6 +4,7 @@ import type {
   AgentDiscovery,
   Branch,
   Environment,
+  EditorOption,
   Executor,
   Message,
   Repository,
@@ -64,6 +65,12 @@ export type AgentDiscoveryState = {
   items: AgentDiscovery[];
 };
 
+export type EditorsState = {
+  items: EditorOption[];
+  loaded: boolean;
+  loading: boolean;
+};
+
 export type BoardState = {
   items: Array<{ id: string; workspaceId: string; name: string }>;
   activeId: string | null;
@@ -106,6 +113,7 @@ export type UserSettingsState = {
   boardId: string | null;
   repositoryIds: string[];
   preferredShell: string | null;
+  defaultEditorId: string | null;
   loaded: boolean;
 };
 
@@ -224,6 +232,7 @@ export type AppState = {
   repositories: RepositoriesState;
   repositoryBranches: RepositoryBranchesState;
   settingsData: SettingsDataState;
+  editors: EditorsState;
   tasks: TaskState;
   agents: AgentState;
   agentProfiles: AgentProfilesState;
@@ -254,6 +263,8 @@ export type AppState = {
   setRepositoryBranches: (repositoryId: string, branches: Branch[]) => void;
   setRepositoryBranchesLoading: (repositoryId: string, loading: boolean) => void;
   setSettingsData: (next: Partial<SettingsDataState>) => void;
+  setEditors: (editors: EditorsState['items']) => void;
+  setEditorsLoading: (loading: boolean) => void;
   setUserSettings: (settings: UserSettingsState) => void;
   setTerminalOutput: (terminalId: string, data: string) => void;
   appendShellOutput: (sessionId: string, data: string) => void;
@@ -307,6 +318,7 @@ const defaultState: AppState = {
   repositories: { itemsByWorkspaceId: {}, loadingByWorkspaceId: {}, loadedByWorkspaceId: {} },
   repositoryBranches: { itemsByRepositoryId: {}, loadingByRepositoryId: {}, loadedByRepositoryId: {} },
   settingsData: { executorsLoaded: false, environmentsLoaded: false, agentsLoaded: false },
+  editors: { items: [], loaded: false, loading: false },
   tasks: { activeTaskId: null, activeSessionId: null },
   agents: { agents: [] },
   agentProfiles: { items: [], version: 0 },
@@ -315,6 +327,7 @@ const defaultState: AppState = {
     boardId: null,
     repositoryIds: [],
     preferredShell: null,
+    defaultEditorId: null,
     loaded: false,
   },
   terminal: { terminals: [] },
@@ -343,6 +356,8 @@ const defaultState: AppState = {
   setRepositoryBranches: () => undefined,
   setRepositoryBranchesLoading: () => undefined,
   setSettingsData: () => undefined,
+  setEditors: () => undefined,
+  setEditorsLoading: () => undefined,
   setUserSettings: () => undefined,
   setTerminalOutput: () => undefined,
   appendShellOutput: () => undefined,
@@ -388,6 +403,8 @@ function mergeInitialState(
   | 'setRepositoryBranches'
   | 'setRepositoryBranchesLoading'
   | 'setSettingsData'
+  | 'setEditors'
+  | 'setEditorsLoading'
   | 'setUserSettings'
   | 'setTerminalOutput'
   | 'appendShellOutput'
@@ -424,6 +441,7 @@ function mergeInitialState(
     repositories: { ...defaultState.repositories, ...initialState.repositories },
     repositoryBranches: { ...defaultState.repositoryBranches, ...initialState.repositoryBranches },
     settingsData: { ...defaultState.settingsData, ...initialState.settingsData },
+    editors: { ...defaultState.editors, ...initialState.editors },
     kanban: { ...defaultState.kanban, ...initialState.kanban },
     tasks: { ...defaultState.tasks, ...initialState.tasks },
     agents: { ...defaultState.agents, ...initialState.agents },
@@ -463,6 +481,7 @@ export function createAppStore(initialState?: Partial<AppState>) {
           if (state.repositories) Object.assign(draft.repositories, state.repositories);
           if (state.repositoryBranches) Object.assign(draft.repositoryBranches, state.repositoryBranches);
           if (state.settingsData) Object.assign(draft.settingsData, state.settingsData);
+          if (state.editors) Object.assign(draft.editors, state.editors);
           if (state.kanban) Object.assign(draft.kanban, state.kanban);
           if (state.tasks) Object.assign(draft.tasks, state.tasks);
           if (state.agents) Object.assign(draft.agents, state.agents);
@@ -557,6 +576,15 @@ export function createAppStore(initialState?: Partial<AppState>) {
       setSettingsData: (next) =>
         set((draft) => {
           draft.settingsData = { ...draft.settingsData, ...next };
+        }),
+      setEditors: (editors) =>
+        set((draft) => {
+          draft.editors.items = editors;
+          draft.editors.loaded = true;
+        }),
+      setEditorsLoading: (loading) =>
+        set((draft) => {
+          draft.editors.loading = loading;
         }),
       setUserSettings: (settings) =>
         set((draft) => {

@@ -178,12 +178,29 @@ export type UserSettings = {
   repository_ids: string[];
   initial_setup_complete?: boolean;
   preferred_shell?: string;
+  default_editor_id?: string;
   updated_at: string;
 };
 
 export type UserSettingsResponse = {
   settings: UserSettings;
   shell_options?: Array<{ value: string; label: string }>;
+};
+
+export type EditorOption = {
+  id: string;
+  type: string;
+  name: string;
+  kind: string;
+  command?: string;
+  scheme?: string;
+  config?: Record<string, unknown>;
+  installed: boolean;
+  enabled: boolean;
+};
+
+export type EditorsResponse = {
+  editors: EditorOption[];
 };
 
 export type UserResponse = {

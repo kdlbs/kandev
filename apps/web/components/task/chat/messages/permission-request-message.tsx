@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useState } from 'react';
-import { IconAlertTriangle, IconCheck, IconX, IconLoader2 } from '@tabler/icons-react';
+import { IconAlertTriangle, IconCheck, IconX } from '@tabler/icons-react';
 import { cn } from '@/lib/utils';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import type { Message } from '@/lib/types/http';

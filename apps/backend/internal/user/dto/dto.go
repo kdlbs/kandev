@@ -20,6 +20,7 @@ type UserSettingsDTO struct {
 	RepositoryIDs        []string `json:"repository_ids"`
 	InitialSetupComplete bool     `json:"initial_setup_complete"`
 	PreferredShell       string   `json:"preferred_shell"`
+	DefaultEditorID      string   `json:"default_editor_id"`
 	UpdatedAt            string   `json:"updated_at"`
 }
 
@@ -44,6 +45,7 @@ type UpdateUserSettingsRequest struct {
 	RepositoryIDs        *[]string `json:"repository_ids,omitempty"`
 	InitialSetupComplete *bool     `json:"initial_setup_complete,omitempty"`
 	PreferredShell       *string   `json:"preferred_shell,omitempty"`
+	DefaultEditorID      *string   `json:"default_editor_id,omitempty"`
 }
 
 func FromUser(user *models.User) UserDTO {
@@ -63,6 +65,7 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		RepositoryIDs:        settings.RepositoryIDs,
 		InitialSetupComplete: settings.InitialSetupComplete,
 		PreferredShell:       settings.PreferredShell,
+		DefaultEditorID:      settings.DefaultEditorID,
 		UpdatedAt:            settings.UpdatedAt.Format(time.RFC3339),
 	}
 }

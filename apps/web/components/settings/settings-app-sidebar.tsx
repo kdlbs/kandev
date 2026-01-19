@@ -8,6 +8,7 @@ import {
   IconServer,
   IconRobot,
   IconBell,
+  IconCode,
   IconChevronRight,
   IconCpu,
   IconPlug,
@@ -88,6 +89,18 @@ export function SettingsAppSidebar() {
                           <Link href="/settings/general/notifications">
                             <IconBell className="h-4 w-4" />
                             <span>Notifications</span>
+                          </Link>
+                        </SidebarMenuSubButton>
+                      </SidebarMenuSubItem>
+                      <SidebarMenuSubItem>
+                        <SidebarMenuSubButton
+                          asChild
+                          size="sm"
+                          isActive={pathname === '/settings/general/editors'}
+                        >
+                          <Link href="/settings/general/editors">
+                            <IconCode className="h-4 w-4" />
+                            <span>Editors</span>
                           </Link>
                         </SidebarMenuSubButton>
                       </SidebarMenuSubItem>

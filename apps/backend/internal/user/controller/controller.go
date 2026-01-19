@@ -49,6 +49,7 @@ func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserS
 		RepositoryIDs:        req.RepositoryIDs,
 		InitialSetupComplete: req.InitialSetupComplete,
 		PreferredShell:       req.PreferredShell,
+		DefaultEditorID:      req.DefaultEditorID,
 	})
 	if err != nil {
 		return dto.UserSettingsResponse{}, err
