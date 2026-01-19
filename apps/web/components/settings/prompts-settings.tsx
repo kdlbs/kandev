@@ -25,12 +25,8 @@ const defaultFormState = {
   content: '',
 };
 
-type PromptsSettingsProps = {
-  initialPrompts: CustomPrompt[];
-};
-
-export function PromptsSettings({ initialPrompts }: PromptsSettingsProps) {
-  const { loaded: promptsLoaded } = useCustomPrompts(initialPrompts);
+export function PromptsSettings() {
+  const { loaded: promptsLoaded } = useCustomPrompts();
   const prompts = useAppStore((state) => state.prompts.items);
   const setPrompts = useAppStore((state) => state.setPrompts);
 
@@ -48,8 +44,6 @@ export function PromptsSettings({ initialPrompts }: PromptsSettingsProps) {
     setFormState(defaultFormState);
   }, []);
 
-  const displayPrompts = promptsLoaded ? prompts : initialPrompts;
-
   const applyPrompts = useCallback(
     (next: CustomPrompt[]) => {
       const sorted = [...next].sort((a, b) => a.name.localeCompare(b.name));
@@ -64,7 +58,7 @@ export function PromptsSettings({ initialPrompts }: PromptsSettingsProps) {
       content: state.content.trim(),
     };
     const prompt = await createPrompt(payload, { cache: 'no-store' });
-    applyPrompts([...displayPrompts, prompt]);
+    applyPrompts([...prompts, prompt]);
     resetForm();
   });
 
@@ -74,13 +68,13 @@ export function PromptsSettings({ initialPrompts }: PromptsSettingsProps) {
       content: state.content.trim(),
     };
     const updated = await updatePrompt(id, payload, { cache: 'no-store' });
-    applyPrompts(displayPrompts.map((prompt) => (prompt.id === id ? updated : prompt)));
+    applyPrompts(prompts.map((prompt) => (prompt.id === id ? updated : prompt)));
     resetForm();
   });
 
   const deleteRequest = useRequest(async (id: string) => {
     await deletePrompt(id, { cache: 'no-store' });
-    applyPrompts(displayPrompts.filter((prompt) => prompt.id !== id));
+    applyPrompts(prompts.filter((prompt) => prompt.id !== id));
     if (editingId === id) {
       resetForm();
     }
@@ -185,12 +179,16 @@ export function PromptsSettings({ initialPrompts }: PromptsSettingsProps) {
         )}
 
         <div className="space-y-3">
-          {displayPrompts.length === 0 ? (
+          {!promptsLoaded ? (
+            <div className="rounded-lg border border-dashed border-border/70 p-6 text-sm text-muted-foreground">
+              Loading prompts…
+            </div>
+          ) : prompts.length === 0 ? (
             <div className="rounded-lg border border-dashed border-border/70 p-6 text-sm text-muted-foreground">
               No prompts yet. Add your first prompt to get started.
             </div>
           ) : (
-            displayPrompts.map((prompt) => (
+            prompts.map((prompt) => (
               <div
                 key={prompt.id}
                 className="rounded-lg border border-border/70 bg-background p-4 flex flex-col gap-3"

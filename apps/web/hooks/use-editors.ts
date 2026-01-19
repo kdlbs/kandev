@@ -49,6 +49,7 @@ export function useEditors() {
           boardId: data.settings.board_id || null,
           repositoryIds: data.settings.repository_ids ?? [],
           preferredShell: data.settings.preferred_shell || null,
+          shellOptions: data.shell_options ?? [],
           defaultEditorId: data.settings.default_editor_id || null,
           loaded: true,
         });

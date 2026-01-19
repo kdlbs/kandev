@@ -9,6 +9,7 @@ import type {
   EditorOption,
   Executor,
   Message,
+  NotificationProvider,
   Repository,
   TaskState as TaskStatus,
   TaskSession,
@@ -79,6 +80,14 @@ export type PromptsState = {
   loading: boolean;
 };
 
+export type NotificationProvidersState = {
+  items: NotificationProvider[];
+  events: string[];
+  appriseAvailable: boolean;
+  loaded: boolean;
+  loading: boolean;
+};
+
 export type AvailableAgentsState = {
   items: AvailableAgent[];
   loading: boolean;
@@ -127,6 +136,7 @@ export type UserSettingsState = {
   boardId: string | null;
   repositoryIds: string[];
   preferredShell: string | null;
+  shellOptions: Array<{ value: string; label: string }>;
   defaultEditorId: string | null;
   loaded: boolean;
 };
@@ -249,6 +259,7 @@ export type AppState = {
   settingsData: SettingsDataState;
   editors: EditorsState;
   prompts: PromptsState;
+  notificationProviders: NotificationProvidersState;
   tasks: TaskState;
   agents: AgentState;
   agentProfiles: AgentProfilesState;
@@ -285,6 +296,8 @@ export type AppState = {
   setEditorsLoading: (loading: boolean) => void;
   setPrompts: (prompts: PromptsState['items']) => void;
   setPromptsLoading: (loading: boolean) => void;
+  setNotificationProviders: (state: NotificationProvidersState) => void;
+  setNotificationProvidersLoading: (loading: boolean) => void;
   setUserSettings: (settings: UserSettingsState) => void;
   setTerminalOutput: (terminalId: string, data: string) => void;
   appendShellOutput: (sessionId: string, data: string) => void;
@@ -341,6 +354,13 @@ const defaultState: AppState = {
   settingsData: { executorsLoaded: false, environmentsLoaded: false, agentsLoaded: false },
   editors: { items: [], loaded: false, loading: false },
   prompts: { items: [], loaded: false, loading: false },
+  notificationProviders: {
+    items: [],
+    events: [],
+    appriseAvailable: false,
+    loaded: false,
+    loading: false,
+  },
   tasks: { activeTaskId: null, activeSessionId: null },
   agents: { agents: [] },
   agentProfiles: { items: [], version: 0 },
@@ -349,6 +369,7 @@ const defaultState: AppState = {
     boardId: null,
     repositoryIds: [],
     preferredShell: null,
+    shellOptions: [],
     defaultEditorId: null,
     loaded: false,
   },
@@ -384,6 +405,8 @@ const defaultState: AppState = {
   setEditorsLoading: () => undefined,
   setPrompts: () => undefined,
   setPromptsLoading: () => undefined,
+  setNotificationProviders: () => undefined,
+  setNotificationProvidersLoading: () => undefined,
   setUserSettings: () => undefined,
   setTerminalOutput: () => undefined,
   appendShellOutput: () => undefined,
@@ -435,6 +458,8 @@ function mergeInitialState(
   | 'setEditorsLoading'
   | 'setPrompts'
   | 'setPromptsLoading'
+  | 'setNotificationProviders'
+  | 'setNotificationProvidersLoading'
   | 'setUserSettings'
   | 'setTerminalOutput'
   | 'appendShellOutput'
@@ -474,6 +499,10 @@ function mergeInitialState(
     settingsData: { ...defaultState.settingsData, ...initialState.settingsData },
     editors: { ...defaultState.editors, ...initialState.editors },
     prompts: { ...defaultState.prompts, ...initialState.prompts },
+    notificationProviders: {
+      ...defaultState.notificationProviders,
+      ...initialState.notificationProviders,
+    },
     kanban: { ...defaultState.kanban, ...initialState.kanban },
     tasks: { ...defaultState.tasks, ...initialState.tasks },
     agents: { ...defaultState.agents, ...initialState.agents },
@@ -516,6 +545,9 @@ export function createAppStore(initialState?: Partial<AppState>) {
           if (state.settingsData) Object.assign(draft.settingsData, state.settingsData);
           if (state.editors) Object.assign(draft.editors, state.editors);
           if (state.prompts) Object.assign(draft.prompts, state.prompts);
+          if (state.notificationProviders) {
+            Object.assign(draft.notificationProviders, state.notificationProviders);
+          }
           if (state.kanban) Object.assign(draft.kanban, state.kanban);
           if (state.tasks) Object.assign(draft.tasks, state.tasks);
           if (state.agents) Object.assign(draft.agents, state.agents);
@@ -641,6 +673,18 @@ export function createAppStore(initialState?: Partial<AppState>) {
       setPromptsLoading: (loading) =>
         set((draft) => {
           draft.prompts.loading = loading;
+        }),
+      setNotificationProviders: (state) =>
+        set((draft) => {
+          draft.notificationProviders.items = state.items;
+          draft.notificationProviders.events = state.events;
+          draft.notificationProviders.appriseAvailable = state.appriseAvailable;
+          draft.notificationProviders.loaded = state.loaded;
+          draft.notificationProviders.loading = state.loading;
+        }),
+      setNotificationProvidersLoading: (loading) =>
+        set((draft) => {
+          draft.notificationProviders.loading = loading;
         }),
       setUserSettings: (settings) =>
         set((draft) => {
