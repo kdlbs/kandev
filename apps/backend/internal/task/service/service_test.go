@@ -2,12 +2,14 @@ package service
 
 import (
 	"context"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/worktree"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
@@ -71,7 +73,11 @@ func (m *MockEventBus) ClearEvents() {
 func createTestService(t *testing.T) (*Service, *MockEventBus, repository.Repository) {
 	t.Helper()
 	tmpDir := t.TempDir()
-	repo, err := repository.NewSQLiteRepository(tmpDir + "/test.db")
+	dbConn, err := db.OpenSQLite(filepath.Join(tmpDir, "test.db"))
+	if err != nil {
+		t.Fatalf("failed to open test database: %v", err)
+	}
+	repo, err := repository.NewSQLiteRepositoryWithDB(dbConn)
 	if err != nil {
 		t.Fatalf("failed to create test repository: %v", err)
 	}
@@ -79,6 +85,9 @@ func createTestService(t *testing.T) (*Service, *MockEventBus, repository.Reposi
 		t.Fatalf("failed to init worktree store: %v", err)
 	}
 	t.Cleanup(func() {
+		if err := dbConn.Close(); err != nil {
+			t.Errorf("failed to close sqlite db: %v", err)
+		}
 		if err := repo.Close(); err != nil {
 			t.Errorf("failed to close repo: %v", err)
 		}
@@ -105,12 +114,12 @@ func TestService_CreateTask(t *testing.T) {
 	_ = repo.CreateRepository(ctx, repository)
 
 	req := &CreateTaskRequest{
-		WorkspaceID:  "ws-1",
-		BoardID:      "board-123",
-		ColumnID:     "col-123",
-		Title:        "Test Task",
-		Description:  "A test task",
-		Priority:     5,
+		WorkspaceID: "ws-1",
+		BoardID:     "board-123",
+		ColumnID:    "col-123",
+		Title:       "Test Task",
+		Description: "A test task",
+		Priority:    5,
 		Repositories: []TaskRepositoryInput{
 			{
 				RepositoryID: "repo-123",
@@ -502,9 +511,9 @@ func TestService_CreateMessage(t *testing.T) {
 
 	req := &CreateMessageRequest{
 		TaskSessionID: sessionID,
-		Content:        "This is a test comment",
-		AuthorType:     "user",
-		AuthorID:       "user-123",
+		Content:       "This is a test comment",
+		AuthorType:    "user",
+		AuthorID:      "user-123",
 	}
 
 	comment, err := svc.CreateMessage(ctx, req)
@@ -541,10 +550,10 @@ func TestService_CreateAgentMessage(t *testing.T) {
 
 	req := &CreateMessageRequest{
 		TaskSessionID: sessionID,
-		Content:        "What should I do next?",
-		AuthorType:     "agent",
-		AuthorID:       "agent-123",
-		RequestsInput:  true,
+		Content:       "What should I do next?",
+		AuthorType:    "agent",
+		AuthorID:      "agent-123",
+		RequestsInput: true,
 	}
 
 	comment, err := svc.CreateMessage(ctx, req)
@@ -566,7 +575,7 @@ func TestService_CreateMessageSessionNotFound(t *testing.T) {
 
 	req := &CreateMessageRequest{
 		TaskSessionID: "nonexistent",
-		Content:        "Test comment",
+		Content:       "Test comment",
 	}
 
 	_, err := svc.CreateMessage(ctx, req)

@@ -5,9 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	_ "github.com/mattn/go-sqlite3"
-	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/kandev/kandev/internal/user/models"
@@ -19,62 +16,27 @@ const (
 )
 
 type SQLiteRepository struct {
-	db *sql.DB
+	db     *sql.DB
+	ownsDB bool
 }
 
 var _ Repository = (*SQLiteRepository)(nil)
 
-func NewSQLiteRepository(dbPath string) (*SQLiteRepository, error) {
-	normalizedPath := normalizeSQLitePath(dbPath)
-	if err := ensureSQLiteDir(normalizedPath); err != nil {
-		return nil, fmt.Errorf("failed to prepare database path: %w", err)
-	}
-	if err := ensureSQLiteFile(normalizedPath); err != nil {
-		return nil, fmt.Errorf("failed to create database file: %w", err)
-	}
-	dsn := fmt.Sprintf("file:%s?_foreign_keys=on&_mode=rwc", normalizedPath)
-	db, err := sql.Open("sqlite3", dsn)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open database: %w", err)
-	}
-	db.SetMaxOpenConns(1)
-	db.SetMaxIdleConns(1)
+func NewSQLiteRepositoryWithDB(dbConn *sql.DB) (*SQLiteRepository, error) {
+	return newSQLiteRepository(dbConn, false)
+}
 
-	repo := &SQLiteRepository{db: db}
+func newSQLiteRepository(dbConn *sql.DB, ownsDB bool) (*SQLiteRepository, error) {
+	repo := &SQLiteRepository{db: dbConn, ownsDB: ownsDB}
 	if err := repo.initSchema(); err != nil {
-		if closeErr := db.Close(); closeErr != nil {
-			return nil, fmt.Errorf("failed to close database after schema error: %w", closeErr)
+		if ownsDB {
+			if closeErr := dbConn.Close(); closeErr != nil {
+				return nil, fmt.Errorf("failed to close database after schema error: %w", closeErr)
+			}
 		}
 		return nil, fmt.Errorf("failed to initialize schema: %w", err)
 	}
 	return repo, nil
-}
-
-func ensureSQLiteDir(dbPath string) error {
-	dir := filepath.Dir(dbPath)
-	if dir == "." || dir == "" {
-		return nil
-	}
-	return os.MkdirAll(dir, 0o755)
-}
-
-func ensureSQLiteFile(dbPath string) error {
-	file, err := os.OpenFile(dbPath, os.O_RDWR|os.O_CREATE, 0o644)
-	if err != nil {
-		return err
-	}
-	return file.Close()
-}
-
-func normalizeSQLitePath(dbPath string) string {
-	if dbPath == "" {
-		return dbPath
-	}
-	abs, err := filepath.Abs(dbPath)
-	if err != nil {
-		return dbPath
-	}
-	return abs
 }
 
 func (r *SQLiteRepository) initSchema() error {
@@ -154,6 +116,9 @@ func (r *SQLiteRepository) ensureDefaultUser() error {
 }
 
 func (r *SQLiteRepository) Close() error {
+	if !r.ownsDB {
+		return nil
+	}
 	return r.db.Close()
 }
 

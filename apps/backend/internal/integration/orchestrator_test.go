@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -24,6 +25,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/agent/worktree"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
@@ -503,13 +505,15 @@ func NewOrchestratorTestServer(t *testing.T) *OrchestratorTestServer {
 	// Initialize event bus
 	eventBus := bus.NewMemoryEventBus(log)
 
-	// Initialize task repository (SQLite for tests)
 	tmpDir := t.TempDir()
-	taskRepo, err := repository.NewSQLiteRepository(tmpDir + "/test.db")
-	if err != nil {
-		t.Fatalf("failed to create test repository: %v", err)
-	}
+	dbConn, err := db.OpenSQLite(filepath.Join(tmpDir, "test.db"))
+	require.NoError(t, err)
+	taskRepo, err := repository.NewSQLiteRepositoryWithDB(dbConn)
+	require.NoError(t, err)
 	t.Cleanup(func() {
+		if err := dbConn.Close(); err != nil {
+			t.Errorf("failed to close sqlite db: %v", err)
+		}
 		if err := taskRepo.Close(); err != nil {
 			t.Errorf("failed to close task repo: %v", err)
 		}
@@ -550,14 +554,14 @@ func NewOrchestratorTestServer(t *testing.T) *OrchestratorTestServer {
 		}
 		action := "agent." + payload.Data.Type
 		notification, _ := ws.NewNotification(action, map[string]interface{}{
-			"task_id":     payload.TaskID,
-			"session_id":  payload.SessionID,
-			"type":        payload.Data.Type,
-			"text":        payload.Data.Text,
+			"task_id":      payload.TaskID,
+			"session_id":   payload.SessionID,
+			"type":         payload.Data.Type,
+			"text":         payload.Data.Text,
 			"tool_call_id": payload.Data.ToolCallID,
-			"tool_name":   payload.Data.ToolName,
-			"tool_status": payload.Data.ToolStatus,
-			"timestamp":   payload.Timestamp,
+			"tool_name":    payload.Data.ToolName,
+			"tool_status":  payload.Data.ToolStatus,
+			"timestamp":    payload.Timestamp,
 		})
 		gateway.Hub.BroadcastToSession(payload.SessionID, notification)
 	})
@@ -1006,9 +1010,9 @@ func TestOrchestratorPromptTask(t *testing.T) {
 
 	// Send follow-up prompt
 	promptResp, err := client.SendRequest("prompt-1", ws.ActionOrchestratorPrompt, map[string]interface{}{
-		"task_id":         taskID,
+		"task_id":    taskID,
 		"session_id": sessionID,
-		"prompt":          "Please continue and add error handling",
+		"prompt":     "Please continue and add error handling",
 	})
 	require.NoError(t, err)
 
@@ -1304,7 +1308,7 @@ func TestOrchestratorErrorHandling(t *testing.T) {
 		defer client.Close()
 
 		resp, err := client.SendRequest("prompt-1", ws.ActionOrchestratorPrompt, map[string]interface{}{
-			"task_id":         taskID,
+			"task_id":    taskID,
 			"session_id": "session-1",
 		})
 		require.NoError(t, err)

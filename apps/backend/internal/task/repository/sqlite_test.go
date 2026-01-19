@@ -2,12 +2,12 @@ package repository
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/worktree"
+	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -17,7 +17,11 @@ func createTestSQLiteRepo(t *testing.T) (*SQLiteRepository, func()) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	repo, err := NewSQLiteRepository(dbPath)
+	dbConn, err := db.OpenSQLite(dbPath)
+	if err != nil {
+		t.Fatalf("failed to open SQLite database: %v", err)
+	}
+	repo, err := NewSQLiteRepositoryWithDB(dbConn)
 	if err != nil {
 		t.Fatalf("failed to create SQLite repository: %v", err)
 	}
@@ -26,18 +30,18 @@ func createTestSQLiteRepo(t *testing.T) (*SQLiteRepository, func()) {
 	}
 
 	cleanup := func() {
+		if err := dbConn.Close(); err != nil {
+			t.Errorf("failed to close sqlite db: %v", err)
+		}
 		if err := repo.Close(); err != nil {
 			t.Errorf("failed to close repo: %v", err)
-		}
-		if err := os.Remove(dbPath); err != nil && !os.IsNotExist(err) {
-			t.Errorf("failed to remove db path: %v", err)
 		}
 	}
 
 	return repo, cleanup
 }
 
-func TestNewSQLiteRepository(t *testing.T) {
+func TestNewSQLiteRepositoryWithDB(t *testing.T) {
 	repo, cleanup := createTestSQLiteRepo(t)
 	defer cleanup()
 
@@ -475,7 +479,11 @@ func TestSQLiteRepository_Persistence(t *testing.T) {
 	ctx := context.Background()
 
 	// Create repository and add data
-	repo1, err := NewSQLiteRepository(dbPath)
+	dbConn1, err := db.OpenSQLite(dbPath)
+	if err != nil {
+		t.Fatalf("failed to open SQLite database: %v", err)
+	}
+	repo1, err := NewSQLiteRepositoryWithDB(dbConn1)
 	if err != nil {
 		t.Fatalf("failed to create first repository: %v", err)
 	}
@@ -486,13 +494,23 @@ func TestSQLiteRepository_Persistence(t *testing.T) {
 	if err := repo1.Close(); err != nil {
 		t.Fatalf("failed to close repo: %v", err)
 	}
+	if err := dbConn1.Close(); err != nil {
+		t.Fatalf("failed to close sqlite db: %v", err)
+	}
 
 	// Reopen repository and verify data persisted
-	repo2, err := NewSQLiteRepository(dbPath)
+	dbConn2, err := db.OpenSQLite(dbPath)
+	if err != nil {
+		t.Fatalf("failed to open SQLite database: %v", err)
+	}
+	repo2, err := NewSQLiteRepositoryWithDB(dbConn2)
 	if err != nil {
 		t.Fatalf("failed to create second repository: %v", err)
 	}
 	defer func() {
+		if err := dbConn2.Close(); err != nil {
+			t.Errorf("failed to close sqlite db: %v", err)
+		}
 		if err := repo2.Close(); err != nil {
 			t.Errorf("failed to close repo: %v", err)
 		}
@@ -539,11 +557,11 @@ func TestSQLiteRepository_MessageCRUD(t *testing.T) {
 	// Create comment
 	comment := &models.Message{
 		TaskSessionID: sessionID,
-		TaskID:         "task-123",
-		AuthorType:     models.MessageAuthorUser,
-		AuthorID:       "user-123",
-		Content:        "This is a test comment",
-		RequestsInput:  false,
+		TaskID:        "task-123",
+		AuthorType:    models.MessageAuthorUser,
+		AuthorID:      "user-123",
+		Content:       "This is a test comment",
+		RequestsInput: false,
 	}
 	if err := repo.CreateMessage(ctx, comment); err != nil {
 		t.Fatalf("failed to create comment: %v", err)
@@ -641,28 +659,28 @@ func TestSQLiteRepository_ListMessagesPagination(t *testing.T) {
 
 	baseTime := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 	_ = repo.CreateMessage(ctx, &models.Message{
-		ID:             "comment-1",
+		ID:            "comment-1",
 		TaskSessionID: sessionID,
-		TaskID:         "task-123",
-		AuthorType:     models.MessageAuthorUser,
-		Content:        "Comment 1",
-		CreatedAt:      baseTime.Add(-2 * time.Minute),
+		TaskID:        "task-123",
+		AuthorType:    models.MessageAuthorUser,
+		Content:       "Comment 1",
+		CreatedAt:     baseTime.Add(-2 * time.Minute),
 	})
 	_ = repo.CreateMessage(ctx, &models.Message{
-		ID:             "comment-2",
+		ID:            "comment-2",
 		TaskSessionID: sessionID,
-		TaskID:         "task-123",
-		AuthorType:     models.MessageAuthorUser,
-		Content:        "Comment 2",
-		CreatedAt:      baseTime.Add(-1 * time.Minute),
+		TaskID:        "task-123",
+		AuthorType:    models.MessageAuthorUser,
+		Content:       "Comment 2",
+		CreatedAt:     baseTime.Add(-1 * time.Minute),
 	})
 	_ = repo.CreateMessage(ctx, &models.Message{
-		ID:             "comment-3",
+		ID:            "comment-3",
 		TaskSessionID: sessionID,
-		TaskID:         "task-123",
-		AuthorType:     models.MessageAuthorUser,
-		Content:        "Comment 3",
-		CreatedAt:      baseTime,
+		TaskID:        "task-123",
+		AuthorType:    models.MessageAuthorUser,
+		Content:       "Comment 3",
+		CreatedAt:     baseTime,
 	})
 
 	comments, hasMore, err := repo.ListMessagesPaginated(ctx, sessionID, ListMessagesOptions{
@@ -702,11 +720,11 @@ func TestSQLiteRepository_MessageWithRequestsInput(t *testing.T) {
 	// Create agent comment requesting input
 	comment := &models.Message{
 		TaskSessionID: sessionID,
-		TaskID:         "task-123",
-		AuthorType:     models.MessageAuthorAgent,
-		AuthorID:       "agent-123",
-		Content:        "What should I do next?",
-		RequestsInput:  true,
+		TaskID:        "task-123",
+		AuthorType:    models.MessageAuthorAgent,
+		AuthorID:      "agent-123",
+		Content:       "What should I do next?",
+		RequestsInput: true,
 	}
 	if err := repo.CreateMessage(ctx, comment); err != nil {
 		t.Fatalf("failed to create comment: %v", err)
@@ -738,12 +756,12 @@ func TestSQLiteRepository_TaskSessionCRUD(t *testing.T) {
 		TaskID:           "task-123",
 		AgentExecutionID: "execution-abc",
 		ContainerID:      "container-xyz",
-		AgentProfileID:  "profile-123",
-		ExecutorID:      "executor-1",
-		EnvironmentID:   "env-1",
-		State:           models.TaskSessionStateStarting,
-		Progress:        0,
-		Metadata:        map[string]interface{}{"key": "value"},
+		AgentProfileID:   "profile-123",
+		ExecutorID:       "executor-1",
+		EnvironmentID:    "env-1",
+		State:            models.TaskSessionStateStarting,
+		Progress:         0,
+		Metadata:         map[string]interface{}{"key": "value"},
 	}
 	if err := repo.CreateTaskSession(ctx, session); err != nil {
 		t.Fatalf("failed to create agent session: %v", err)

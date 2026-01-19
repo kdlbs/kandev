@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/repository"
 )
@@ -273,11 +274,18 @@ func writeRef(t *testing.T, path string) {
 func newDiscoveryService(t *testing.T, root string) *Service {
 	t.Helper()
 	tmpDir := t.TempDir()
-	repo, err := repository.NewSQLiteRepository(tmpDir + "/test.db")
+	dbConn, err := db.OpenSQLite(filepath.Join(tmpDir, "test.db"))
+	if err != nil {
+		t.Fatalf("failed to open test database: %v", err)
+	}
+	repo, err := repository.NewSQLiteRepositoryWithDB(dbConn)
 	if err != nil {
 		t.Fatalf("failed to create test repository: %v", err)
 	}
 	t.Cleanup(func() {
+		if err := dbConn.Close(); err != nil {
+			t.Errorf("failed to close sqlite db: %v", err)
+		}
 		if err := repo.Close(); err != nil {
 			t.Errorf("failed to close repo: %v", err)
 		}
