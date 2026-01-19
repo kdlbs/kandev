@@ -278,15 +278,16 @@ func newDiscoveryService(t *testing.T, root string) *Service {
 	if err != nil {
 		t.Fatalf("failed to open test database: %v", err)
 	}
-	repo, err := repository.NewSQLiteRepositoryWithDB(dbConn)
+	repoImpl, cleanup, err := repository.Provide(dbConn)
 	if err != nil {
 		t.Fatalf("failed to create test repository: %v", err)
 	}
+	repo := repository.Repository(repoImpl)
 	t.Cleanup(func() {
 		if err := dbConn.Close(); err != nil {
 			t.Errorf("failed to close sqlite db: %v", err)
 		}
-		if err := repo.Close(); err != nil {
+		if err := cleanup(); err != nil {
 			t.Errorf("failed to close repo: %v", err)
 		}
 	})

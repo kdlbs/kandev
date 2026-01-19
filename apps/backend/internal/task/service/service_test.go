@@ -77,18 +77,19 @@ func createTestService(t *testing.T) (*Service, *MockEventBus, repository.Reposi
 	if err != nil {
 		t.Fatalf("failed to open test database: %v", err)
 	}
-	repo, err := repository.NewSQLiteRepositoryWithDB(dbConn)
+	repoImpl, cleanup, err := repository.Provide(dbConn)
 	if err != nil {
 		t.Fatalf("failed to create test repository: %v", err)
 	}
-	if _, err := worktree.NewSQLiteStore(repo.DB()); err != nil {
+	repo := repository.Repository(repoImpl)
+	if _, err := worktree.NewSQLiteStore(dbConn); err != nil {
 		t.Fatalf("failed to init worktree store: %v", err)
 	}
 	t.Cleanup(func() {
 		if err := dbConn.Close(); err != nil {
 			t.Errorf("failed to close sqlite db: %v", err)
 		}
-		if err := repo.Close(); err != nil {
+		if err := cleanup(); err != nil {
 			t.Errorf("failed to close repo: %v", err)
 		}
 	})

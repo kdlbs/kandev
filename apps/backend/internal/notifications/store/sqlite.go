@@ -12,19 +12,19 @@ import (
 	"github.com/kandev/kandev/internal/notifications/models"
 )
 
-type SQLiteRepository struct {
+type sqliteRepository struct {
 	db     *sql.DB
 	ownsDB bool
 }
 
-var _ Repository = (*SQLiteRepository)(nil)
+var _ Repository = (*sqliteRepository)(nil)
 
-func NewSQLiteRepositoryWithDB(dbConn *sql.DB) (*SQLiteRepository, error) {
+func newSQLiteRepositoryWithDB(dbConn *sql.DB) (*sqliteRepository, error) {
 	return newSQLiteRepository(dbConn, false)
 }
 
-func newSQLiteRepository(dbConn *sql.DB, ownsDB bool) (*SQLiteRepository, error) {
-	repo := &SQLiteRepository{db: dbConn, ownsDB: ownsDB}
+func newSQLiteRepository(dbConn *sql.DB, ownsDB bool) (*sqliteRepository, error) {
+	repo := &sqliteRepository{db: dbConn, ownsDB: ownsDB}
 	if err := repo.initSchema(); err != nil {
 		if ownsDB {
 			if closeErr := dbConn.Close(); closeErr != nil {
@@ -36,14 +36,14 @@ func newSQLiteRepository(dbConn *sql.DB, ownsDB bool) (*SQLiteRepository, error)
 	return repo, nil
 }
 
-func (r *SQLiteRepository) Close() error {
+func (r *sqliteRepository) Close() error {
 	if !r.ownsDB {
 		return nil
 	}
 	return r.db.Close()
 }
 
-func (r *SQLiteRepository) initSchema() error {
+func (r *sqliteRepository) initSchema() error {
 	schema := `
 	CREATE TABLE IF NOT EXISTS notification_providers (
 		id TEXT PRIMARY KEY,
@@ -88,7 +88,7 @@ func (r *SQLiteRepository) initSchema() error {
 	return err
 }
 
-func (r *SQLiteRepository) CreateProvider(ctx context.Context, provider *models.Provider) error {
+func (r *sqliteRepository) CreateProvider(ctx context.Context, provider *models.Provider) error {
 	provider.ID = uuid.New().String()
 	now := time.Now().UTC()
 	provider.CreatedAt = now
@@ -107,7 +107,7 @@ func (r *SQLiteRepository) CreateProvider(ctx context.Context, provider *models.
 	return err
 }
 
-func (r *SQLiteRepository) UpdateProvider(ctx context.Context, provider *models.Provider) error {
+func (r *sqliteRepository) UpdateProvider(ctx context.Context, provider *models.Provider) error {
 	provider.UpdatedAt = time.Now().UTC()
 	if provider.Config == nil {
 		provider.Config = map[string]interface{}{}
@@ -124,7 +124,7 @@ func (r *SQLiteRepository) UpdateProvider(ctx context.Context, provider *models.
 	return err
 }
 
-func (r *SQLiteRepository) GetProvider(ctx context.Context, id string) (*models.Provider, error) {
+func (r *sqliteRepository) GetProvider(ctx context.Context, id string) (*models.Provider, error) {
 	row := r.db.QueryRowContext(ctx, `
 		SELECT id, user_id, name, type, config, enabled, created_at, updated_at
 		FROM notification_providers
@@ -133,7 +133,7 @@ func (r *SQLiteRepository) GetProvider(ctx context.Context, id string) (*models.
 	return scanProvider(row)
 }
 
-func (r *SQLiteRepository) ListProvidersByUser(ctx context.Context, userID string) ([]*models.Provider, error) {
+func (r *sqliteRepository) ListProvidersByUser(ctx context.Context, userID string) ([]*models.Provider, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, user_id, name, type, config, enabled, created_at, updated_at
 		FROM notification_providers
@@ -161,12 +161,12 @@ func (r *SQLiteRepository) ListProvidersByUser(ctx context.Context, userID strin
 	return providers, nil
 }
 
-func (r *SQLiteRepository) DeleteProvider(ctx context.Context, id string) error {
+func (r *sqliteRepository) DeleteProvider(ctx context.Context, id string) error {
 	_, err := r.db.ExecContext(ctx, `DELETE FROM notification_providers WHERE id = ?`, id)
 	return err
 }
 
-func (r *SQLiteRepository) ListSubscriptionsByProvider(ctx context.Context, providerID string) ([]*models.Subscription, error) {
+func (r *sqliteRepository) ListSubscriptionsByProvider(ctx context.Context, providerID string) ([]*models.Subscription, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, user_id, provider_id, event_type, enabled, created_at, updated_at
 		FROM notification_subscriptions
@@ -194,7 +194,7 @@ func (r *SQLiteRepository) ListSubscriptionsByProvider(ctx context.Context, prov
 	return subs, nil
 }
 
-func (r *SQLiteRepository) ReplaceSubscriptions(ctx context.Context, providerID, userID string, events []string) error {
+func (r *sqliteRepository) ReplaceSubscriptions(ctx context.Context, providerID, userID string, events []string) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -221,7 +221,7 @@ func (r *SQLiteRepository) ReplaceSubscriptions(ctx context.Context, providerID,
 	return nil
 }
 
-func (r *SQLiteRepository) InsertDelivery(ctx context.Context, delivery *models.Delivery) (bool, error) {
+func (r *sqliteRepository) InsertDelivery(ctx context.Context, delivery *models.Delivery) (bool, error) {
 	delivery.ID = uuid.New().String()
 	delivery.CreatedAt = time.Now().UTC()
 	result, err := r.db.ExecContext(ctx, `
@@ -238,7 +238,7 @@ func (r *SQLiteRepository) InsertDelivery(ctx context.Context, delivery *models.
 	return rows > 0, nil
 }
 
-func (r *SQLiteRepository) DeleteDelivery(ctx context.Context, providerID, eventType, taskSessionID string) error {
+func (r *sqliteRepository) DeleteDelivery(ctx context.Context, providerID, eventType, taskSessionID string) error {
 	_, err := r.db.ExecContext(ctx, `
 		DELETE FROM notification_deliveries
 		WHERE provider_id = ? AND event_type = ? AND task_session_id = ?

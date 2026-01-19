@@ -508,17 +508,20 @@ func NewOrchestratorTestServer(t *testing.T) *OrchestratorTestServer {
 	tmpDir := t.TempDir()
 	dbConn, err := db.OpenSQLite(filepath.Join(tmpDir, "test.db"))
 	require.NoError(t, err)
-	taskRepo, err := repository.NewSQLiteRepositoryWithDB(dbConn)
+	taskRepoImpl, cleanup, err := repository.Provide(dbConn)
 	require.NoError(t, err)
+	taskRepo := repository.Repository(taskRepoImpl)
 	t.Cleanup(func() {
 		if err := dbConn.Close(); err != nil {
 			t.Errorf("failed to close sqlite db: %v", err)
 		}
-		if err := taskRepo.Close(); err != nil {
-			t.Errorf("failed to close task repo: %v", err)
+		if cleanup != nil {
+			if err := cleanup(); err != nil {
+				t.Errorf("failed to close task repo: %v", err)
+			}
 		}
 	})
-	if _, err := worktree.NewSQLiteStore(taskRepo.DB()); err != nil {
+	if _, err := worktree.NewSQLiteStore(dbConn); err != nil {
 		t.Fatalf("failed to init worktree store: %v", err)
 	}
 

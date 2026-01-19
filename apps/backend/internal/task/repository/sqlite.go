@@ -14,21 +14,21 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
-// SQLiteRepository provides SQLite-based task storage operations
-type SQLiteRepository struct {
+// sqliteRepository provides SQLite-based task storage operations.
+type sqliteRepository struct {
 	db     *sql.DB
 	ownsDB bool
 }
 
-// Ensure SQLiteRepository implements Repository interface
-var _ Repository = (*SQLiteRepository)(nil)
+// Ensure sqliteRepository implements Repository interface
+var _ Repository = (*sqliteRepository)(nil)
 
-func NewSQLiteRepositoryWithDB(dbConn *sql.DB) (*SQLiteRepository, error) {
+func newSQLiteRepositoryWithDB(dbConn *sql.DB) (*sqliteRepository, error) {
 	return newSQLiteRepository(dbConn, false)
 }
 
-func newSQLiteRepository(dbConn *sql.DB, ownsDB bool) (*SQLiteRepository, error) {
-	repo := &SQLiteRepository{db: dbConn, ownsDB: ownsDB}
+func newSQLiteRepository(dbConn *sql.DB, ownsDB bool) (*sqliteRepository, error) {
+	repo := &sqliteRepository{db: dbConn, ownsDB: ownsDB}
 	if err := repo.initSchema(); err != nil {
 		if ownsDB {
 			if closeErr := dbConn.Close(); closeErr != nil {
@@ -41,7 +41,7 @@ func newSQLiteRepository(dbConn *sql.DB, ownsDB bool) (*SQLiteRepository, error)
 }
 
 // initSchema creates the database tables if they don't exist
-func (r *SQLiteRepository) initSchema() error {
+func (r *sqliteRepository) initSchema() error {
 	schema := `
 	CREATE TABLE IF NOT EXISTS workspaces (
 		id TEXT PRIMARY KEY,
@@ -342,7 +342,7 @@ func (r *SQLiteRepository) initSchema() error {
 	return nil
 }
 
-func (r *SQLiteRepository) ensureColumn(table, column, definition string) error {
+func (r *sqliteRepository) ensureColumn(table, column, definition string) error {
 	exists, err := r.columnExists(table, column)
 	if err != nil {
 		return err
@@ -354,7 +354,7 @@ func (r *SQLiteRepository) ensureColumn(table, column, definition string) error 
 	return err
 }
 
-func (r *SQLiteRepository) columnExists(table, column string) (bool, error) {
+func (r *sqliteRepository) columnExists(table, column string) (bool, error) {
 	rows, err := r.db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
 	if err != nil {
 		return false, err
@@ -377,7 +377,7 @@ func (r *SQLiteRepository) columnExists(table, column string) (bool, error) {
 	return false, rows.Err()
 }
 
-func (r *SQLiteRepository) ensureDefaultWorkspace() error {
+func (r *sqliteRepository) ensureDefaultWorkspace() error {
 	ctx := context.Background()
 
 	var count int
@@ -475,7 +475,7 @@ func (r *SQLiteRepository) ensureDefaultWorkspace() error {
 	return nil
 }
 
-func (r *SQLiteRepository) ensureDefaultExecutorsAndEnvironments() error {
+func (r *sqliteRepository) ensureDefaultExecutorsAndEnvironments() error {
 	ctx := context.Background()
 
 	var executorCount int
@@ -600,7 +600,7 @@ func boolToInt(value bool) int {
 	return 0
 }
 
-func (r *SQLiteRepository) ensureWorkspaceIndexes() error {
+func (r *sqliteRepository) ensureWorkspaceIndexes() error {
 	if _, err := r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_tasks_workspace_id ON tasks(workspace_id)`); err != nil {
 		return err
 	}
@@ -611,7 +611,7 @@ func (r *SQLiteRepository) ensureWorkspaceIndexes() error {
 }
 
 // Close closes the database connection
-func (r *SQLiteRepository) Close() error {
+func (r *sqliteRepository) Close() error {
 	if !r.ownsDB {
 		return nil
 	}
@@ -619,14 +619,14 @@ func (r *SQLiteRepository) Close() error {
 }
 
 // DB returns the underlying sql.DB instance for shared access
-func (r *SQLiteRepository) DB() *sql.DB {
+func (r *sqliteRepository) DB() *sql.DB {
 	return r.db
 }
 
 // Workspace operations
 
 // CreateWorkspace creates a new workspace
-func (r *SQLiteRepository) CreateWorkspace(ctx context.Context, workspace *models.Workspace) error {
+func (r *sqliteRepository) CreateWorkspace(ctx context.Context, workspace *models.Workspace) error {
 	if workspace.ID == "" {
 		workspace.ID = uuid.New().String()
 	}
@@ -653,7 +653,7 @@ func (r *SQLiteRepository) CreateWorkspace(ctx context.Context, workspace *model
 }
 
 // GetWorkspace retrieves a workspace by ID
-func (r *SQLiteRepository) GetWorkspace(ctx context.Context, id string) (*models.Workspace, error) {
+func (r *sqliteRepository) GetWorkspace(ctx context.Context, id string) (*models.Workspace, error) {
 	workspace := &models.Workspace{}
 	var defaultExecutorID sql.NullString
 	var defaultEnvironmentID sql.NullString
@@ -690,7 +690,7 @@ func (r *SQLiteRepository) GetWorkspace(ctx context.Context, id string) (*models
 }
 
 // UpdateWorkspace updates an existing workspace
-func (r *SQLiteRepository) UpdateWorkspace(ctx context.Context, workspace *models.Workspace) error {
+func (r *sqliteRepository) UpdateWorkspace(ctx context.Context, workspace *models.Workspace) error {
 	workspace.UpdatedAt = time.Now().UTC()
 
 	result, err := r.db.ExecContext(ctx, `
@@ -715,7 +715,7 @@ func (r *SQLiteRepository) UpdateWorkspace(ctx context.Context, workspace *model
 }
 
 // DeleteWorkspace deletes a workspace by ID
-func (r *SQLiteRepository) DeleteWorkspace(ctx context.Context, id string) error {
+func (r *sqliteRepository) DeleteWorkspace(ctx context.Context, id string) error {
 	result, err := r.db.ExecContext(ctx, `DELETE FROM workspaces WHERE id = ?`, id)
 	if err != nil {
 		return err
@@ -729,7 +729,7 @@ func (r *SQLiteRepository) DeleteWorkspace(ctx context.Context, id string) error
 }
 
 // ListWorkspaces returns all workspaces
-func (r *SQLiteRepository) ListWorkspaces(ctx context.Context) ([]*models.Workspace, error) {
+func (r *sqliteRepository) ListWorkspaces(ctx context.Context) ([]*models.Workspace, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, name, description, owner_id, default_executor_id, default_environment_id, default_agent_profile_id, created_at, updated_at
 		FROM workspaces ORDER BY created_at DESC
@@ -775,7 +775,7 @@ func (r *SQLiteRepository) ListWorkspaces(ctx context.Context) ([]*models.Worksp
 // Task operations
 
 // CreateTask creates a new task
-func (r *SQLiteRepository) CreateTask(ctx context.Context, task *models.Task) error {
+func (r *sqliteRepository) CreateTask(ctx context.Context, task *models.Task) error {
 	if task.ID == "" {
 		task.ID = uuid.New().String()
 	}
@@ -808,7 +808,7 @@ func (r *SQLiteRepository) CreateTask(ctx context.Context, task *models.Task) er
 }
 
 // GetTask retrieves a task by ID
-func (r *SQLiteRepository) GetTask(ctx context.Context, id string) (*models.Task, error) {
+func (r *sqliteRepository) GetTask(ctx context.Context, id string) (*models.Task, error) {
 	task := &models.Task{}
 	var metadata string
 	err := r.db.QueryRowContext(ctx, `
@@ -828,7 +828,7 @@ func (r *SQLiteRepository) GetTask(ctx context.Context, id string) (*models.Task
 }
 
 // UpdateTask updates an existing task
-func (r *SQLiteRepository) UpdateTask(ctx context.Context, task *models.Task) error {
+func (r *sqliteRepository) UpdateTask(ctx context.Context, task *models.Task) error {
 	task.UpdatedAt = time.Now().UTC()
 
 	metadata, err := json.Marshal(task.Metadata)
@@ -852,7 +852,7 @@ func (r *SQLiteRepository) UpdateTask(ctx context.Context, task *models.Task) er
 }
 
 // DeleteTask deletes a task by ID
-func (r *SQLiteRepository) DeleteTask(ctx context.Context, id string) error {
+func (r *sqliteRepository) DeleteTask(ctx context.Context, id string) error {
 	result, err := r.db.ExecContext(ctx, `DELETE FROM tasks WHERE id = ?`, id)
 	if err != nil {
 		return err
@@ -866,7 +866,7 @@ func (r *SQLiteRepository) DeleteTask(ctx context.Context, id string) error {
 }
 
 // ListTasks returns all tasks for a board
-func (r *SQLiteRepository) ListTasks(ctx context.Context, boardID string) ([]*models.Task, error) {
+func (r *sqliteRepository) ListTasks(ctx context.Context, boardID string) ([]*models.Task, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, workspace_id, board_id, column_id, title, description, state, priority, position, metadata, created_at, updated_at
 		FROM tasks
@@ -882,7 +882,7 @@ func (r *SQLiteRepository) ListTasks(ctx context.Context, boardID string) ([]*mo
 }
 
 // ListTasksByColumn returns all tasks in a column
-func (r *SQLiteRepository) ListTasksByColumn(ctx context.Context, columnID string) ([]*models.Task, error) {
+func (r *sqliteRepository) ListTasksByColumn(ctx context.Context, columnID string) ([]*models.Task, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, workspace_id, board_id, column_id, title, description, state, priority, position, metadata, created_at, updated_at
 		FROM tasks
@@ -896,7 +896,7 @@ func (r *SQLiteRepository) ListTasksByColumn(ctx context.Context, columnID strin
 	return r.scanTasks(rows)
 }
 
-func (r *SQLiteRepository) scanTasks(rows *sql.Rows) ([]*models.Task, error) {
+func (r *sqliteRepository) scanTasks(rows *sql.Rows) ([]*models.Task, error) {
 	var result []*models.Task
 	for rows.Next() {
 		task := &models.Task{}
@@ -925,7 +925,7 @@ func (r *SQLiteRepository) scanTasks(rows *sql.Rows) ([]*models.Task, error) {
 }
 
 // UpdateTaskState updates the state of a task
-func (r *SQLiteRepository) UpdateTaskState(ctx context.Context, id string, state v1.TaskState) error {
+func (r *sqliteRepository) UpdateTaskState(ctx context.Context, id string, state v1.TaskState) error {
 	result, err := r.db.ExecContext(ctx, `UPDATE tasks SET state = ?, updated_at = ? WHERE id = ?`, state, time.Now().UTC(), id)
 	if err != nil {
 		return err
@@ -940,7 +940,7 @@ func (r *SQLiteRepository) UpdateTaskState(ctx context.Context, id string, state
 
 // TaskRepository operations
 
-func (r *SQLiteRepository) CreateTaskRepository(ctx context.Context, taskRepo *models.TaskRepository) error {
+func (r *sqliteRepository) CreateTaskRepository(ctx context.Context, taskRepo *models.TaskRepository) error {
 	if taskRepo.ID == "" {
 		taskRepo.ID = uuid.New().String()
 	}
@@ -961,7 +961,7 @@ func (r *SQLiteRepository) CreateTaskRepository(ctx context.Context, taskRepo *m
 	return err
 }
 
-func (r *SQLiteRepository) GetTaskRepository(ctx context.Context, id string) (*models.TaskRepository, error) {
+func (r *sqliteRepository) GetTaskRepository(ctx context.Context, id string) (*models.TaskRepository, error) {
 	taskRepo := &models.TaskRepository{}
 	var metadataJSON string
 
@@ -992,7 +992,7 @@ func (r *SQLiteRepository) GetTaskRepository(ctx context.Context, id string) (*m
 	return taskRepo, nil
 }
 
-func (r *SQLiteRepository) ListTaskRepositories(ctx context.Context, taskID string) ([]*models.TaskRepository, error) {
+func (r *sqliteRepository) ListTaskRepositories(ctx context.Context, taskID string) ([]*models.TaskRepository, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, task_id, repository_id, base_branch, position, metadata, created_at, updated_at
 		FROM task_repositories
@@ -1030,7 +1030,7 @@ func (r *SQLiteRepository) ListTaskRepositories(ctx context.Context, taskID stri
 	return result, rows.Err()
 }
 
-func (r *SQLiteRepository) UpdateTaskRepository(ctx context.Context, taskRepo *models.TaskRepository) error {
+func (r *sqliteRepository) UpdateTaskRepository(ctx context.Context, taskRepo *models.TaskRepository) error {
 	taskRepo.UpdatedAt = time.Now().UTC()
 
 	metadataJSON, err := json.Marshal(taskRepo.Metadata)
@@ -1053,7 +1053,7 @@ func (r *SQLiteRepository) UpdateTaskRepository(ctx context.Context, taskRepo *m
 	return nil
 }
 
-func (r *SQLiteRepository) DeleteTaskRepository(ctx context.Context, id string) error {
+func (r *sqliteRepository) DeleteTaskRepository(ctx context.Context, id string) error {
 	result, err := r.db.ExecContext(ctx, `DELETE FROM task_repositories WHERE id = ?`, id)
 	if err != nil {
 		return err
@@ -1065,12 +1065,12 @@ func (r *SQLiteRepository) DeleteTaskRepository(ctx context.Context, id string) 
 	return nil
 }
 
-func (r *SQLiteRepository) DeleteTaskRepositoriesByTask(ctx context.Context, taskID string) error {
+func (r *sqliteRepository) DeleteTaskRepositoriesByTask(ctx context.Context, taskID string) error {
 	_, err := r.db.ExecContext(ctx, `DELETE FROM task_repositories WHERE task_id = ?`, taskID)
 	return err
 }
 
-func (r *SQLiteRepository) GetPrimaryTaskRepository(ctx context.Context, taskID string) (*models.TaskRepository, error) {
+func (r *sqliteRepository) GetPrimaryTaskRepository(ctx context.Context, taskID string) (*models.TaskRepository, error) {
 	repos, err := r.ListTaskRepositories(ctx, taskID)
 	if err != nil {
 		return nil, err
@@ -1082,7 +1082,7 @@ func (r *SQLiteRepository) GetPrimaryTaskRepository(ctx context.Context, taskID 
 }
 
 // AddTaskToBoard adds a task to a board with placement
-func (r *SQLiteRepository) AddTaskToBoard(ctx context.Context, taskID, boardID, columnID string, position int) error {
+func (r *sqliteRepository) AddTaskToBoard(ctx context.Context, taskID, boardID, columnID string, position int) error {
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE tasks SET board_id = ?, column_id = ?, position = ?, updated_at = ? WHERE id = ?
 	`, boardID, columnID, position, time.Now().UTC(), taskID)
@@ -1090,7 +1090,7 @@ func (r *SQLiteRepository) AddTaskToBoard(ctx context.Context, taskID, boardID, 
 }
 
 // RemoveTaskFromBoard removes a task from a board
-func (r *SQLiteRepository) RemoveTaskFromBoard(ctx context.Context, taskID, boardID string) error {
+func (r *sqliteRepository) RemoveTaskFromBoard(ctx context.Context, taskID, boardID string) error {
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE tasks SET board_id = '', column_id = '', position = 0, updated_at = ? WHERE id = ? AND board_id = ?
 	`, time.Now().UTC(), taskID, boardID)
@@ -1100,7 +1100,7 @@ func (r *SQLiteRepository) RemoveTaskFromBoard(ctx context.Context, taskID, boar
 // Board operations
 
 // CreateBoard creates a new board
-func (r *SQLiteRepository) CreateBoard(ctx context.Context, board *models.Board) error {
+func (r *sqliteRepository) CreateBoard(ctx context.Context, board *models.Board) error {
 	if board.ID == "" {
 		board.ID = uuid.New().String()
 	}
@@ -1117,7 +1117,7 @@ func (r *SQLiteRepository) CreateBoard(ctx context.Context, board *models.Board)
 }
 
 // GetBoard retrieves a board by ID
-func (r *SQLiteRepository) GetBoard(ctx context.Context, id string) (*models.Board, error) {
+func (r *sqliteRepository) GetBoard(ctx context.Context, id string) (*models.Board, error) {
 	board := &models.Board{}
 
 	err := r.db.QueryRowContext(ctx, `
@@ -1132,7 +1132,7 @@ func (r *SQLiteRepository) GetBoard(ctx context.Context, id string) (*models.Boa
 }
 
 // UpdateBoard updates an existing board
-func (r *SQLiteRepository) UpdateBoard(ctx context.Context, board *models.Board) error {
+func (r *sqliteRepository) UpdateBoard(ctx context.Context, board *models.Board) error {
 	board.UpdatedAt = time.Now().UTC()
 
 	result, err := r.db.ExecContext(ctx, `
@@ -1150,7 +1150,7 @@ func (r *SQLiteRepository) UpdateBoard(ctx context.Context, board *models.Board)
 }
 
 // DeleteBoard deletes a board by ID
-func (r *SQLiteRepository) DeleteBoard(ctx context.Context, id string) error {
+func (r *sqliteRepository) DeleteBoard(ctx context.Context, id string) error {
 	result, err := r.db.ExecContext(ctx, `DELETE FROM boards WHERE id = ?`, id)
 	if err != nil {
 		return err
@@ -1164,7 +1164,7 @@ func (r *SQLiteRepository) DeleteBoard(ctx context.Context, id string) error {
 }
 
 // ListBoards returns all boards
-func (r *SQLiteRepository) ListBoards(ctx context.Context, workspaceID string) ([]*models.Board, error) {
+func (r *sqliteRepository) ListBoards(ctx context.Context, workspaceID string) ([]*models.Board, error) {
 	query := `
 		SELECT id, workspace_id, name, description, created_at, updated_at FROM boards
 	`
@@ -1196,7 +1196,7 @@ func (r *SQLiteRepository) ListBoards(ctx context.Context, workspaceID string) (
 // Column operations
 
 // CreateColumn creates a new column
-func (r *SQLiteRepository) CreateColumn(ctx context.Context, column *models.Column) error {
+func (r *sqliteRepository) CreateColumn(ctx context.Context, column *models.Column) error {
 	if column.ID == "" {
 		column.ID = uuid.New().String()
 	}
@@ -1213,7 +1213,7 @@ func (r *SQLiteRepository) CreateColumn(ctx context.Context, column *models.Colu
 }
 
 // GetColumn retrieves a column by ID
-func (r *SQLiteRepository) GetColumn(ctx context.Context, id string) (*models.Column, error) {
+func (r *sqliteRepository) GetColumn(ctx context.Context, id string) (*models.Column, error) {
 	column := &models.Column{}
 
 	err := r.db.QueryRowContext(ctx, `
@@ -1228,7 +1228,7 @@ func (r *SQLiteRepository) GetColumn(ctx context.Context, id string) (*models.Co
 }
 
 // GetColumnByState retrieves a column by board ID and state
-func (r *SQLiteRepository) GetColumnByState(ctx context.Context, boardID string, state v1.TaskState) (*models.Column, error) {
+func (r *sqliteRepository) GetColumnByState(ctx context.Context, boardID string, state v1.TaskState) (*models.Column, error) {
 	column := &models.Column{}
 
 	err := r.db.QueryRowContext(ctx, `
@@ -1243,7 +1243,7 @@ func (r *SQLiteRepository) GetColumnByState(ctx context.Context, boardID string,
 }
 
 // UpdateColumn updates an existing column
-func (r *SQLiteRepository) UpdateColumn(ctx context.Context, column *models.Column) error {
+func (r *sqliteRepository) UpdateColumn(ctx context.Context, column *models.Column) error {
 	column.UpdatedAt = time.Now().UTC()
 
 	result, err := r.db.ExecContext(ctx, `
@@ -1261,7 +1261,7 @@ func (r *SQLiteRepository) UpdateColumn(ctx context.Context, column *models.Colu
 }
 
 // DeleteColumn deletes a column by ID
-func (r *SQLiteRepository) DeleteColumn(ctx context.Context, id string) error {
+func (r *sqliteRepository) DeleteColumn(ctx context.Context, id string) error {
 	result, err := r.db.ExecContext(ctx, `DELETE FROM columns WHERE id = ?`, id)
 	if err != nil {
 		return err
@@ -1275,7 +1275,7 @@ func (r *SQLiteRepository) DeleteColumn(ctx context.Context, id string) error {
 }
 
 // ListColumns returns all columns for a board
-func (r *SQLiteRepository) ListColumns(ctx context.Context, boardID string) ([]*models.Column, error) {
+func (r *sqliteRepository) ListColumns(ctx context.Context, boardID string) ([]*models.Column, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, board_id, name, position, state, color, created_at, updated_at
 		FROM columns WHERE board_id = ? ORDER BY position
@@ -1300,7 +1300,7 @@ func (r *SQLiteRepository) ListColumns(ctx context.Context, boardID string) ([]*
 // Message operations
 
 // CreateMessage creates a new message
-func (r *SQLiteRepository) CreateMessage(ctx context.Context, message *models.Message) error {
+func (r *sqliteRepository) CreateMessage(ctx context.Context, message *models.Message) error {
 	if message.ID == "" {
 		message.ID = uuid.New().String()
 	}
@@ -1339,7 +1339,7 @@ func (r *SQLiteRepository) CreateMessage(ctx context.Context, message *models.Me
 }
 
 // GetMessage retrieves a message by ID
-func (r *SQLiteRepository) GetMessage(ctx context.Context, id string) (*models.Message, error) {
+func (r *sqliteRepository) GetMessage(ctx context.Context, id string) (*models.Message, error) {
 	message := &models.Message{}
 	var requestsInput int
 	var messageType string
@@ -1364,7 +1364,7 @@ func (r *SQLiteRepository) GetMessage(ctx context.Context, id string) (*models.M
 }
 
 // ListMessages returns all messages for a session ordered by creation time.
-func (r *SQLiteRepository) ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error) {
+func (r *sqliteRepository) ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, task_session_id, task_id, author_type, author_id, content, requests_input, type, metadata, created_at
 		FROM task_session_messages WHERE task_session_id = ? ORDER BY created_at ASC
@@ -1402,7 +1402,7 @@ func (r *SQLiteRepository) ListMessages(ctx context.Context, sessionID string) (
 }
 
 // ListMessagesPaginated returns messages for a session ordered by creation time with pagination.
-func (r *SQLiteRepository) ListMessagesPaginated(ctx context.Context, sessionID string, opts ListMessagesOptions) ([]*models.Message, bool, error) {
+func (r *sqliteRepository) ListMessagesPaginated(ctx context.Context, sessionID string, opts ListMessagesOptions) ([]*models.Message, bool, error) {
 	limit := opts.Limit
 	if limit < 0 {
 		limit = 0
@@ -1492,7 +1492,7 @@ func (r *SQLiteRepository) ListMessagesPaginated(ctx context.Context, sessionID 
 }
 
 // DeleteMessage deletes a message by ID
-func (r *SQLiteRepository) DeleteMessage(ctx context.Context, id string) error {
+func (r *sqliteRepository) DeleteMessage(ctx context.Context, id string) error {
 	result, err := r.db.ExecContext(ctx, `DELETE FROM task_session_messages WHERE id = ?`, id)
 	if err != nil {
 		return err
@@ -1506,7 +1506,7 @@ func (r *SQLiteRepository) DeleteMessage(ctx context.Context, id string) error {
 }
 
 // GetMessageByToolCallID retrieves a tool_call message by session ID and tool_call_id in metadata
-func (r *SQLiteRepository) GetMessageByToolCallID(ctx context.Context, sessionID, toolCallID string) (*models.Message, error) {
+func (r *sqliteRepository) GetMessageByToolCallID(ctx context.Context, sessionID, toolCallID string) (*models.Message, error) {
 	message := &models.Message{}
 	var requestsInput int
 	var messageType string
@@ -1528,7 +1528,7 @@ func (r *SQLiteRepository) GetMessageByToolCallID(ctx context.Context, sessionID
 }
 
 // GetMessageByPendingID retrieves a message by session ID and pending_id in metadata
-func (r *SQLiteRepository) GetMessageByPendingID(ctx context.Context, sessionID, pendingID string) (*models.Message, error) {
+func (r *sqliteRepository) GetMessageByPendingID(ctx context.Context, sessionID, pendingID string) (*models.Message, error) {
 	message := &models.Message{}
 	var requestsInput int
 	var messageType string
@@ -1550,7 +1550,7 @@ func (r *SQLiteRepository) GetMessageByPendingID(ctx context.Context, sessionID,
 }
 
 // UpdateMessage updates an existing message
-func (r *SQLiteRepository) UpdateMessage(ctx context.Context, message *models.Message) error {
+func (r *sqliteRepository) UpdateMessage(ctx context.Context, message *models.Message) error {
 	metadataJSON, err := json.Marshal(message.Metadata)
 	if err != nil {
 		return fmt.Errorf("failed to marshal metadata: %w", err)
@@ -1579,7 +1579,7 @@ func (r *SQLiteRepository) UpdateMessage(ctx context.Context, message *models.Me
 // Repository operations
 
 // CreateRepository creates a new repository
-func (r *SQLiteRepository) CreateRepository(ctx context.Context, repository *models.Repository) error {
+func (r *sqliteRepository) CreateRepository(ctx context.Context, repository *models.Repository) error {
 	if repository.ID == "" {
 		repository.ID = uuid.New().String()
 	}
@@ -1600,7 +1600,7 @@ func (r *SQLiteRepository) CreateRepository(ctx context.Context, repository *mod
 }
 
 // GetRepository retrieves a repository by ID
-func (r *SQLiteRepository) GetRepository(ctx context.Context, id string) (*models.Repository, error) {
+func (r *sqliteRepository) GetRepository(ctx context.Context, id string) (*models.Repository, error) {
 	repository := &models.Repository{}
 
 	err := r.db.QueryRowContext(ctx, `
@@ -1620,7 +1620,7 @@ func (r *SQLiteRepository) GetRepository(ctx context.Context, id string) (*model
 }
 
 // UpdateRepository updates an existing repository
-func (r *SQLiteRepository) UpdateRepository(ctx context.Context, repository *models.Repository) error {
+func (r *sqliteRepository) UpdateRepository(ctx context.Context, repository *models.Repository) error {
 	repository.UpdatedAt = time.Now().UTC()
 
 	result, err := r.db.ExecContext(ctx, `
@@ -1643,7 +1643,7 @@ func (r *SQLiteRepository) UpdateRepository(ctx context.Context, repository *mod
 }
 
 // DeleteRepository deletes a repository by ID
-func (r *SQLiteRepository) DeleteRepository(ctx context.Context, id string) error {
+func (r *sqliteRepository) DeleteRepository(ctx context.Context, id string) error {
 	now := time.Now().UTC()
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE repositories SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL
@@ -1659,7 +1659,7 @@ func (r *SQLiteRepository) DeleteRepository(ctx context.Context, id string) erro
 }
 
 // ListRepositories returns all repositories for a workspace
-func (r *SQLiteRepository) ListRepositories(ctx context.Context, workspaceID string) ([]*models.Repository, error) {
+func (r *sqliteRepository) ListRepositories(ctx context.Context, workspaceID string) ([]*models.Repository, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, workspace_id, name, source_type, local_path, provider, provider_repo_id, provider_owner,
 		       provider_name, default_branch, setup_script, cleanup_script, created_at, updated_at, deleted_at
@@ -1689,7 +1689,7 @@ func (r *SQLiteRepository) ListRepositories(ctx context.Context, workspaceID str
 // Repository script operations
 
 // CreateRepositoryScript creates a new repository script
-func (r *SQLiteRepository) CreateRepositoryScript(ctx context.Context, script *models.RepositoryScript) error {
+func (r *sqliteRepository) CreateRepositoryScript(ctx context.Context, script *models.RepositoryScript) error {
 	if script.ID == "" {
 		script.ID = uuid.New().String()
 	}
@@ -1706,7 +1706,7 @@ func (r *SQLiteRepository) CreateRepositoryScript(ctx context.Context, script *m
 }
 
 // GetRepositoryScript retrieves a repository script by ID
-func (r *SQLiteRepository) GetRepositoryScript(ctx context.Context, id string) (*models.RepositoryScript, error) {
+func (r *sqliteRepository) GetRepositoryScript(ctx context.Context, id string) (*models.RepositoryScript, error) {
 	script := &models.RepositoryScript{}
 	err := r.db.QueryRowContext(ctx, `
 		SELECT id, repository_id, name, command, position, created_at, updated_at
@@ -1719,7 +1719,7 @@ func (r *SQLiteRepository) GetRepositoryScript(ctx context.Context, id string) (
 }
 
 // UpdateRepositoryScript updates an existing repository script
-func (r *SQLiteRepository) UpdateRepositoryScript(ctx context.Context, script *models.RepositoryScript) error {
+func (r *sqliteRepository) UpdateRepositoryScript(ctx context.Context, script *models.RepositoryScript) error {
 	script.UpdatedAt = time.Now().UTC()
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE repository_scripts SET name = ?, command = ?, position = ?, updated_at = ? WHERE id = ?
@@ -1735,7 +1735,7 @@ func (r *SQLiteRepository) UpdateRepositoryScript(ctx context.Context, script *m
 }
 
 // DeleteRepositoryScript deletes a repository script by ID
-func (r *SQLiteRepository) DeleteRepositoryScript(ctx context.Context, id string) error {
+func (r *sqliteRepository) DeleteRepositoryScript(ctx context.Context, id string) error {
 	result, err := r.db.ExecContext(ctx, `DELETE FROM repository_scripts WHERE id = ?`, id)
 	if err != nil {
 		return err
@@ -1748,7 +1748,7 @@ func (r *SQLiteRepository) DeleteRepositoryScript(ctx context.Context, id string
 }
 
 // ListRepositoryScripts returns all scripts for a repository
-func (r *SQLiteRepository) ListRepositoryScripts(ctx context.Context, repositoryID string) ([]*models.RepositoryScript, error) {
+func (r *sqliteRepository) ListRepositoryScripts(ctx context.Context, repositoryID string) ([]*models.RepositoryScript, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, repository_id, name, command, position, created_at, updated_at
 		FROM repository_scripts WHERE repository_id = ? ORDER BY position
@@ -1773,7 +1773,7 @@ func (r *SQLiteRepository) ListRepositoryScripts(ctx context.Context, repository
 // Agent Session operations
 
 // CreateAgentSession creates a new agent session
-func (r *SQLiteRepository) CreateTaskSession(ctx context.Context, session *models.TaskSession) error {
+func (r *sqliteRepository) CreateTaskSession(ctx context.Context, session *models.TaskSession) error {
 	if session.ID == "" {
 		session.ID = uuid.New().String()
 	}
@@ -1822,7 +1822,7 @@ func (r *SQLiteRepository) CreateTaskSession(ctx context.Context, session *model
 }
 
 // GetAgentSession retrieves an agent session by ID
-func (r *SQLiteRepository) GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error) {
+func (r *sqliteRepository) GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error) {
 	session := &models.TaskSession{}
 	var state string
 	var metadataJSON string
@@ -1893,7 +1893,7 @@ func (r *SQLiteRepository) GetTaskSession(ctx context.Context, id string) (*mode
 }
 
 // GetAgentSessionByTaskID retrieves the most recent agent session for a task
-func (r *SQLiteRepository) GetTaskSessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error) {
+func (r *sqliteRepository) GetTaskSessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error) {
 	session := &models.TaskSession{}
 	var state string
 	var metadataJSON string
@@ -1964,7 +1964,7 @@ func (r *SQLiteRepository) GetTaskSessionByTaskID(ctx context.Context, taskID st
 }
 
 // GetActiveAgentSessionByTaskID retrieves the active (running/waiting) agent session for a task
-func (r *SQLiteRepository) GetActiveTaskSessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error) {
+func (r *sqliteRepository) GetActiveTaskSessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error) {
 	session := &models.TaskSession{}
 	var state string
 	var metadataJSON string
@@ -2037,7 +2037,7 @@ func (r *SQLiteRepository) GetActiveTaskSessionByTaskID(ctx context.Context, tas
 }
 
 // UpdateAgentSession updates an existing agent session
-func (r *SQLiteRepository) UpdateTaskSession(ctx context.Context, session *models.TaskSession) error {
+func (r *sqliteRepository) UpdateTaskSession(ctx context.Context, session *models.TaskSession) error {
 	session.UpdatedAt = time.Now().UTC()
 
 	metadataJSON, err := json.Marshal(session.Metadata)
@@ -2085,7 +2085,7 @@ func (r *SQLiteRepository) UpdateTaskSession(ctx context.Context, session *model
 }
 
 // UpdateAgentSessionState updates just the state and error message of an agent session
-func (r *SQLiteRepository) UpdateTaskSessionState(ctx context.Context, id string, status models.TaskSessionState, errorMessage string) error {
+func (r *sqliteRepository) UpdateTaskSessionState(ctx context.Context, id string, status models.TaskSessionState, errorMessage string) error {
 	now := time.Now().UTC()
 
 	var completedAt *time.Time
@@ -2108,7 +2108,7 @@ func (r *SQLiteRepository) UpdateTaskSessionState(ctx context.Context, id string
 }
 
 // ListTaskSessions returns all agent sessions for a task
-func (r *SQLiteRepository) ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
+func (r *sqliteRepository) ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, environment_id,
 		       repository_id, base_branch,
@@ -2136,7 +2136,7 @@ func (r *SQLiteRepository) ListTaskSessions(ctx context.Context, taskID string) 
 }
 
 // ListActiveTaskSessions returns all active agent sessions across all tasks
-func (r *SQLiteRepository) ListActiveTaskSessions(ctx context.Context) ([]*models.TaskSession, error) {
+func (r *sqliteRepository) ListActiveTaskSessions(ctx context.Context) ([]*models.TaskSession, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, environment_id,
 		       repository_id, base_branch,
@@ -2164,7 +2164,7 @@ func (r *SQLiteRepository) ListActiveTaskSessions(ctx context.Context) ([]*model
 }
 
 // ListActiveTaskSessionsByTaskID returns all active agent sessions for a specific task
-func (r *SQLiteRepository) ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
+func (r *sqliteRepository) ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, environment_id,
 		       repository_id, base_branch,
@@ -2191,7 +2191,7 @@ func (r *SQLiteRepository) ListActiveTaskSessionsByTaskID(ctx context.Context, t
 	return sessions, nil
 }
 
-func (r *SQLiteRepository) HasActiveTaskSessionsByAgentProfile(ctx context.Context, agentProfileID string) (bool, error) {
+func (r *sqliteRepository) HasActiveTaskSessionsByAgentProfile(ctx context.Context, agentProfileID string) (bool, error) {
 	var exists int
 	err := r.db.QueryRowContext(ctx, `
 		SELECT 1 FROM task_sessions
@@ -2204,7 +2204,7 @@ func (r *SQLiteRepository) HasActiveTaskSessionsByAgentProfile(ctx context.Conte
 	return err == nil, err
 }
 
-func (r *SQLiteRepository) HasActiveTaskSessionsByExecutor(ctx context.Context, executorID string) (bool, error) {
+func (r *sqliteRepository) HasActiveTaskSessionsByExecutor(ctx context.Context, executorID string) (bool, error) {
 	var exists int
 	err := r.db.QueryRowContext(ctx, `
 		SELECT 1 FROM task_sessions
@@ -2217,7 +2217,7 @@ func (r *SQLiteRepository) HasActiveTaskSessionsByExecutor(ctx context.Context, 
 	return err == nil, err
 }
 
-func (r *SQLiteRepository) HasActiveTaskSessionsByEnvironment(ctx context.Context, environmentID string) (bool, error) {
+func (r *sqliteRepository) HasActiveTaskSessionsByEnvironment(ctx context.Context, environmentID string) (bool, error) {
 	var exists int
 	err := r.db.QueryRowContext(ctx, `
 		SELECT 1 FROM task_sessions
@@ -2230,7 +2230,7 @@ func (r *SQLiteRepository) HasActiveTaskSessionsByEnvironment(ctx context.Contex
 	return err == nil, err
 }
 
-func (r *SQLiteRepository) HasActiveTaskSessionsByRepository(ctx context.Context, repositoryID string) (bool, error) {
+func (r *sqliteRepository) HasActiveTaskSessionsByRepository(ctx context.Context, repositoryID string) (bool, error) {
 	var exists int
 	err := r.db.QueryRowContext(ctx, `
 		SELECT 1
@@ -2247,7 +2247,7 @@ func (r *SQLiteRepository) HasActiveTaskSessionsByRepository(ctx context.Context
 }
 
 // scanAgentSessions is a helper to scan multiple agent session rows
-func (r *SQLiteRepository) scanTaskSessions(ctx context.Context, rows *sql.Rows) ([]*models.TaskSession, error) {
+func (r *sqliteRepository) scanTaskSessions(ctx context.Context, rows *sql.Rows) ([]*models.TaskSession, error) {
 	var result []*models.TaskSession
 	for rows.Next() {
 		session := &models.TaskSession{}
@@ -2306,7 +2306,7 @@ func (r *SQLiteRepository) scanTaskSessions(ctx context.Context, rows *sql.Rows)
 }
 
 // DeleteAgentSession deletes an agent session by ID
-func (r *SQLiteRepository) DeleteTaskSession(ctx context.Context, id string) error {
+func (r *sqliteRepository) DeleteTaskSession(ctx context.Context, id string) error {
 	result, err := r.db.ExecContext(ctx, `DELETE FROM task_sessions WHERE id = ?`, id)
 	if err != nil {
 		return err
@@ -2321,7 +2321,7 @@ func (r *SQLiteRepository) DeleteTaskSession(ctx context.Context, id string) err
 
 // Task Session Worktree operations
 
-func (r *SQLiteRepository) CreateTaskSessionWorktree(ctx context.Context, sessionWorktree *models.TaskSessionWorktree) error {
+func (r *sqliteRepository) CreateTaskSessionWorktree(ctx context.Context, sessionWorktree *models.TaskSessionWorktree) error {
 	if sessionWorktree.ID == "" {
 		sessionWorktree.ID = uuid.New().String()
 	}
@@ -2354,7 +2354,7 @@ func (r *SQLiteRepository) CreateTaskSessionWorktree(ctx context.Context, sessio
 	return err
 }
 
-func (r *SQLiteRepository) ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskSessionWorktree, error) {
+func (r *sqliteRepository) ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskSessionWorktree, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT
 			tsw.id, tsw.session_id, tsw.worktree_id, tsw.repository_id, tsw.position,
@@ -2389,7 +2389,7 @@ func (r *SQLiteRepository) ListTaskSessionWorktrees(ctx context.Context, session
 	return worktrees, rows.Err()
 }
 
-func (r *SQLiteRepository) DeleteTaskSessionWorktree(ctx context.Context, id string) error {
+func (r *sqliteRepository) DeleteTaskSessionWorktree(ctx context.Context, id string) error {
 	result, err := r.db.ExecContext(ctx, `DELETE FROM task_session_worktrees WHERE id = ?`, id)
 	if err != nil {
 		return err
@@ -2402,14 +2402,14 @@ func (r *SQLiteRepository) DeleteTaskSessionWorktree(ctx context.Context, id str
 	return nil
 }
 
-func (r *SQLiteRepository) DeleteTaskSessionWorktreesBySession(ctx context.Context, sessionID string) error {
+func (r *sqliteRepository) DeleteTaskSessionWorktreesBySession(ctx context.Context, sessionID string) error {
 	_, err := r.db.ExecContext(ctx, `DELETE FROM task_session_worktrees WHERE session_id = ?`, sessionID)
 	return err
 }
 
 // Executor operations
 
-func (r *SQLiteRepository) CreateExecutor(ctx context.Context, executor *models.Executor) error {
+func (r *sqliteRepository) CreateExecutor(ctx context.Context, executor *models.Executor) error {
 	if executor.ID == "" {
 		executor.ID = uuid.New().String()
 	}
@@ -2429,7 +2429,7 @@ func (r *SQLiteRepository) CreateExecutor(ctx context.Context, executor *models.
 	return err
 }
 
-func (r *SQLiteRepository) GetExecutor(ctx context.Context, id string) (*models.Executor, error) {
+func (r *sqliteRepository) GetExecutor(ctx context.Context, id string) (*models.Executor, error) {
 	executor := &models.Executor{}
 	var configJSON string
 	var isSystem int
@@ -2459,7 +2459,7 @@ func (r *SQLiteRepository) GetExecutor(ctx context.Context, id string) (*models.
 	return executor, nil
 }
 
-func (r *SQLiteRepository) UpdateExecutor(ctx context.Context, executor *models.Executor) error {
+func (r *sqliteRepository) UpdateExecutor(ctx context.Context, executor *models.Executor) error {
 	executor.UpdatedAt = time.Now().UTC()
 
 	configJSON, err := json.Marshal(executor.Config)
@@ -2481,7 +2481,7 @@ func (r *SQLiteRepository) UpdateExecutor(ctx context.Context, executor *models.
 	return nil
 }
 
-func (r *SQLiteRepository) DeleteExecutor(ctx context.Context, id string) error {
+func (r *sqliteRepository) DeleteExecutor(ctx context.Context, id string) error {
 	now := time.Now().UTC()
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE executors SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL
@@ -2496,7 +2496,7 @@ func (r *SQLiteRepository) DeleteExecutor(ctx context.Context, id string) error 
 	return nil
 }
 
-func (r *SQLiteRepository) ListExecutors(ctx context.Context) ([]*models.Executor, error) {
+func (r *sqliteRepository) ListExecutors(ctx context.Context) ([]*models.Executor, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, name, type, status, is_system, resumable, config, created_at, updated_at, deleted_at
 		FROM executors WHERE deleted_at IS NULL ORDER BY created_at ASC
@@ -2530,7 +2530,7 @@ func (r *SQLiteRepository) ListExecutors(ctx context.Context) ([]*models.Executo
 	return result, rows.Err()
 }
 
-func (r *SQLiteRepository) UpsertExecutorRunning(ctx context.Context, running *models.ExecutorRunning) error {
+func (r *sqliteRepository) UpsertExecutorRunning(ctx context.Context, running *models.ExecutorRunning) error {
 	if running == nil {
 		return fmt.Errorf("executor running is nil")
 	}
@@ -2597,7 +2597,7 @@ func (r *SQLiteRepository) UpsertExecutorRunning(ctx context.Context, running *m
 	return err
 }
 
-func (r *SQLiteRepository) ListExecutorsRunning(ctx context.Context) ([]*models.ExecutorRunning, error) {
+func (r *sqliteRepository) ListExecutorsRunning(ctx context.Context) ([]*models.ExecutorRunning, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, session_id, task_id, executor_id, runtime, status, resumable, resume_token,
 			agent_execution_id, container_id, agentctl_url, agentctl_port,
@@ -2642,7 +2642,7 @@ func (r *SQLiteRepository) ListExecutorsRunning(ctx context.Context) ([]*models.
 	return results, nil
 }
 
-func (r *SQLiteRepository) GetExecutorRunningBySessionID(ctx context.Context, sessionID string) (*models.ExecutorRunning, error) {
+func (r *sqliteRepository) GetExecutorRunningBySessionID(ctx context.Context, sessionID string) (*models.ExecutorRunning, error) {
 	if sessionID == "" {
 		return nil, fmt.Errorf("session_id is required")
 	}
@@ -2692,7 +2692,7 @@ func (r *SQLiteRepository) GetExecutorRunningBySessionID(ctx context.Context, se
 	return running, nil
 }
 
-func (r *SQLiteRepository) DeleteExecutorRunningBySessionID(ctx context.Context, sessionID string) error {
+func (r *sqliteRepository) DeleteExecutorRunningBySessionID(ctx context.Context, sessionID string) error {
 	if sessionID == "" {
 		return fmt.Errorf("session_id is required")
 	}
@@ -2709,7 +2709,7 @@ func (r *SQLiteRepository) DeleteExecutorRunningBySessionID(ctx context.Context,
 
 // Environment operations
 
-func (r *SQLiteRepository) CreateEnvironment(ctx context.Context, environment *models.Environment) error {
+func (r *sqliteRepository) CreateEnvironment(ctx context.Context, environment *models.Environment) error {
 	if environment.ID == "" {
 		environment.ID = uuid.New().String()
 	}
@@ -2729,7 +2729,7 @@ func (r *SQLiteRepository) CreateEnvironment(ctx context.Context, environment *m
 	return err
 }
 
-func (r *SQLiteRepository) GetEnvironment(ctx context.Context, id string) (*models.Environment, error) {
+func (r *sqliteRepository) GetEnvironment(ctx context.Context, id string) (*models.Environment, error) {
 	environment := &models.Environment{}
 	var buildConfigJSON string
 	var isSystem int
@@ -2757,7 +2757,7 @@ func (r *SQLiteRepository) GetEnvironment(ctx context.Context, id string) (*mode
 	return environment, nil
 }
 
-func (r *SQLiteRepository) UpdateEnvironment(ctx context.Context, environment *models.Environment) error {
+func (r *sqliteRepository) UpdateEnvironment(ctx context.Context, environment *models.Environment) error {
 	environment.UpdatedAt = time.Now().UTC()
 
 	buildConfigJSON, err := json.Marshal(environment.BuildConfig)
@@ -2779,7 +2779,7 @@ func (r *SQLiteRepository) UpdateEnvironment(ctx context.Context, environment *m
 	return nil
 }
 
-func (r *SQLiteRepository) DeleteEnvironment(ctx context.Context, id string) error {
+func (r *sqliteRepository) DeleteEnvironment(ctx context.Context, id string) error {
 	now := time.Now().UTC()
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE environments SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL
@@ -2794,7 +2794,7 @@ func (r *SQLiteRepository) DeleteEnvironment(ctx context.Context, id string) err
 	return nil
 }
 
-func (r *SQLiteRepository) ListEnvironments(ctx context.Context) ([]*models.Environment, error) {
+func (r *sqliteRepository) ListEnvironments(ctx context.Context) ([]*models.Environment, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, name, kind, is_system, worktree_root, image_tag, dockerfile, build_config, created_at, updated_at, deleted_at
 		FROM environments WHERE deleted_at IS NULL ORDER BY created_at ASC
