@@ -109,6 +109,10 @@ type InstanceConfig struct {
 
 	// LogFormat for this instance
 	LogFormat string
+
+	// AgentType identifies the agent (e.g., "auggie", "codex", "claude")
+	// Used for agent-specific adapter selection
+	AgentType string
 }
 
 // Load loads the configuration from environment variables.
@@ -168,6 +172,9 @@ func (c *Config) NewInstanceConfig(port int, overrides *InstanceOverrides) *Inst
 		if overrides.ApprovalPolicy != "" {
 			cfg.ApprovalPolicy = overrides.ApprovalPolicy
 		}
+		if overrides.AgentType != "" {
+			cfg.AgentType = overrides.AgentType
+		}
 	}
 
 	// Parse agent command into args
@@ -189,6 +196,7 @@ type InstanceOverrides struct {
 	AutoStart      *bool
 	Env            []string
 	ApprovalPolicy string
+	AgentType      string
 }
 
 // ParseCommand splits a command string into arguments

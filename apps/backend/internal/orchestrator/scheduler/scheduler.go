@@ -25,7 +25,6 @@ var (
 // SchedulerConfig holds scheduler configuration
 type SchedulerConfig struct {
 	ProcessInterval time.Duration // How often to process the queue
-	MaxConcurrent   int           // Max concurrent agent executions
 	RetryLimit      int           // Max retries for failed tasks
 	RetryDelay      time.Duration // Delay between retries
 }
@@ -34,7 +33,6 @@ type SchedulerConfig struct {
 func DefaultSchedulerConfig() SchedulerConfig {
 	return SchedulerConfig{
 		ProcessInterval: 5 * time.Second,
-		MaxConcurrent:   5,
 		RetryLimit:      3,
 		RetryDelay:      30 * time.Second,
 	}
@@ -50,7 +48,6 @@ type TaskRepository interface {
 type QueueStatus struct {
 	QueuedTasks      int
 	ActiveExecutions int
-	MaxConcurrent    int
 	TotalProcessed   int64
 	TotalFailed      int64
 }
@@ -107,8 +104,7 @@ func (s *Scheduler) Start(ctx context.Context) error {
 	s.mu.Unlock()
 
 	s.logger.Info("scheduler starting",
-		zap.Duration("process_interval", s.config.ProcessInterval),
-		zap.Int("max_concurrent", s.config.MaxConcurrent))
+		zap.Duration("process_interval", s.config.ProcessInterval))
 
 	s.wg.Add(1)
 	go s.processLoop(ctx)
@@ -162,7 +158,6 @@ func (s *Scheduler) GetQueueStatus() *QueueStatus {
 	return &QueueStatus{
 		QueuedTasks:      s.queue.Len(),
 		ActiveExecutions: s.executor.ActiveCount(),
-		MaxConcurrent:    s.config.MaxConcurrent,
 		TotalProcessed:   atomic.LoadInt64(&s.totalProcessed),
 		TotalFailed:      atomic.LoadInt64(&s.totalFailed),
 	}

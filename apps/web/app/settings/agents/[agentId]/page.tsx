@@ -8,6 +8,13 @@ import { Button } from '@kandev/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@kandev/ui/card';
 import { Input } from '@kandev/ui/input';
 import { Label } from '@kandev/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@kandev/ui/select';
 import { Separator } from '@kandev/ui/separator';
 import { Switch } from '@kandev/ui/switch';
 import { Textarea } from '@kandev/ui/textarea';
@@ -81,6 +88,12 @@ function AgentSetupForm({
   const [saveStatus, setSaveStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const resolveDisplayName = (name: string) =>
     availableAgents.find((item) => item.name === name)?.display_name ?? '';
+
+  // Get model config for the current agent
+  const currentAgentModelConfig = useMemo(() => {
+    const agent = availableAgents.find((item) => item.name === draftAgent.name);
+    return agent?.model_config ?? { default_model: '', available_models: [] };
+  }, [availableAgents, draftAgent.name]);
 
   const isProfileDirty = (draft: DraftProfile, saved?: AgentProfile) => {
     if (!saved) return true;
@@ -311,13 +324,34 @@ function AgentSetupForm({
 
                 <div className="space-y-2">
                   <Label>Model</Label>
-                  <Input
-                    value={profile.model}
-                    onChange={(event) =>
-                      handleProfileChange(profile.id, { model: event.target.value })
-                    }
-                    placeholder="model-id"
-                  />
+                  {currentAgentModelConfig.available_models.length > 0 ? (
+                    <Select
+                      value={profile.model || currentAgentModelConfig.default_model}
+                      onValueChange={(value) => handleProfileChange(profile.id, { model: value })}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Select a model" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {currentAgentModelConfig.available_models.map((model) => (
+                          <SelectItem key={model.id} value={model.id}>
+                            {model.name}
+                            {model.is_default && (
+                              <span className="ml-2 text-muted-foreground">(default)</span>
+                            )}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <Input
+                      value={profile.model}
+                      onChange={(event) =>
+                        handleProfileChange(profile.id, { model: event.target.value })
+                      }
+                      placeholder="model-id"
+                    />
+                  )}
                 </div>
 
                 <div className="space-y-2">

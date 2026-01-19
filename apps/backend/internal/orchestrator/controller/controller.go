@@ -24,10 +24,9 @@ func NewController(svc *orchestrator.Service) *Controller {
 func (c *Controller) GetStatus(ctx context.Context, req dto.GetStatusRequest) (dto.StatusResponse, error) {
 	status := c.service.GetStatus()
 	return dto.StatusResponse{
-		Running:       status.Running,
-		ActiveAgents:  status.ActiveAgents,
-		QueuedTasks:   status.QueuedTasks,
-		MaxConcurrent: 0, // Not available from service Status; would need scheduler access
+		Running:      status.Running,
+		ActiveAgents: status.ActiveAgents,
+		QueuedTasks:  status.QueuedTasks,
 	}, nil
 }
 

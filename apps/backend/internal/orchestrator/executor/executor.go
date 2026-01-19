@@ -17,7 +17,6 @@ import (
 
 // Common errors
 var (
-	ErrMaxConcurrentReached    = errors.New("maximum concurrent executions reached")
 	ErrNoAgentProfileID        = errors.New("task has no agent_profile_id configured")
 	ErrExecutionNotFound       = errors.New("execution not found")
 	ErrExecutionAlreadyRunning = errors.New("execution already running")
@@ -146,7 +145,6 @@ type Executor struct {
 	logger       *logger.Logger
 
 	// Configuration
-	maxConcurrent   int
 	retryLimit      int
 	retryDelay      time.Duration
 	worktreeEnabled bool // Whether to use Git worktrees for agent isolation
@@ -154,7 +152,6 @@ type Executor struct {
 
 // ExecutorConfig holds configuration for the Executor
 type ExecutorConfig struct {
-	MaxConcurrent   int  // Maximum concurrent agent executions
 	WorktreeEnabled bool // Whether to use Git worktrees for agent isolation
 	ShellPrefs      ShellPreferenceProvider
 }
@@ -165,16 +162,11 @@ type ShellPreferenceProvider interface {
 
 // NewExecutor creates a new executor
 func NewExecutor(agentManager AgentManagerClient, repo repository.Repository, log *logger.Logger, cfg ExecutorConfig) *Executor {
-	maxConcurrent := cfg.MaxConcurrent
-	if maxConcurrent <= 0 {
-		maxConcurrent = 5 // default
-	}
 	return &Executor{
 		agentManager:    agentManager,
 		repo:            repo,
 		shellPrefs:      cfg.ShellPrefs,
 		logger:          log.WithFields(zap.String("component", "executor")),
-		maxConcurrent:   maxConcurrent,
 		retryLimit:      3,
 		retryDelay:      5 * time.Second,
 		worktreeEnabled: cfg.WorktreeEnabled,
@@ -223,14 +215,6 @@ func (e *Executor) Execute(ctx context.Context, task *v1.Task) (*TaskExecution, 
 // ExecuteWithProfile starts agent execution for a task using an explicit agent profile.
 // The prompt parameter is the initial prompt to send to the agent.
 func (e *Executor) ExecuteWithProfile(ctx context.Context, task *v1.Task, agentProfileID string, prompt string) (*TaskExecution, error) {
-	// Check if max concurrent limit is reached
-	if !e.CanExecute() {
-		e.logger.Warn("max concurrent executions reached",
-			zap.Int("max", e.maxConcurrent),
-			zap.Int("current", e.ActiveCount()))
-		return nil, ErrMaxConcurrentReached
-	}
-
 	if agentProfileID == "" {
 		e.logger.Error("task has no agent_profile_id configured", zap.String("task_id", task.ID))
 		return nil, ErrNoAgentProfileID
@@ -463,13 +447,6 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 	task := taskModel.ToAPI()
 	if task == nil {
 		return nil, ErrExecutionNotFound
-	}
-
-	if !e.CanExecute() {
-		e.logger.Warn("max concurrent executions reached",
-			zap.Int("max", e.maxConcurrent),
-			zap.Int("current", e.ActiveCount()))
-		return nil, ErrMaxConcurrentReached
 	}
 
 	if session.AgentProfileID == "" {
@@ -896,9 +873,10 @@ func (e *Executor) ActiveCount() int {
 	return len(sessions)
 }
 
-// CanExecute returns true if there's capacity for another execution
+// CanExecute returns true if there's capacity for another execution.
+// Currently always returns true as there is no concurrent execution limit.
 func (e *Executor) CanExecute() bool {
-	return e.ActiveCount() < e.maxConcurrent
+	return true
 }
 
 // UpdateProgressBySession updates the progress of an execution by session ID

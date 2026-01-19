@@ -1,32 +1,32 @@
+// Package discovery provides agent installation detection and discovery functionality.
+// It reads agent definitions from the unified agents.json configuration in the registry package.
 package discovery
 
 import (
 	"context"
-	"embed"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/kandev/kandev/internal/agent/registry"
 )
 
-//go:embed agents.json
-var agentsFS embed.FS
+// OSPaths defines OS-specific paths for discovery (re-exported from registry for API compatibility)
+type OSPaths = registry.OSPaths
 
-type OSPaths struct {
-	Linux   []string `json:"linux"`
-	Windows []string `json:"windows"`
-	MacOS   []string `json:"macos"`
-}
+// Capabilities defines discovery-specific capabilities (re-exported from registry)
+type Capabilities = registry.DiscoveryCapabilities
 
-type Capabilities struct {
-	SupportsSessionResume bool `json:"supports_session_resume"`
-	SupportsShell         bool `json:"supports_shell"`
-	SupportsWorkspaceOnly bool `json:"supports_workspace_only"`
-}
+// ModelConfig defines the model configuration for an agent (re-exported from registry)
+type ModelConfig = registry.ModelConfig
 
-func (p OSPaths) ForOS(goos string) []string {
+// ModelEntry defines a single model available for an agent (re-exported from registry)
+type ModelEntry = registry.ModelEntry
+
+// ForOS returns paths for the specified operating system
+func ForOS(p OSPaths, goos string) []string {
 	switch goos {
 	case "windows":
 		return p.Windows
@@ -37,6 +37,7 @@ func (p OSPaths) ForOS(goos string) []string {
 	}
 }
 
+// KnownAgent represents an agent definition with discovery metadata
 type KnownAgent struct {
 	Name             string       `json:"name"`
 	DisplayName      string       `json:"display_name"`
@@ -44,12 +45,15 @@ type KnownAgent struct {
 	MCPConfigPath    OSPaths      `json:"mcp_config_path"`
 	InstallationPath OSPaths      `json:"installation_path"`
 	Capabilities     Capabilities `json:"capabilities"`
+	ModelConfig      ModelConfig  `json:"model_config"`
 }
 
+// Config is the legacy structure for agent discovery configuration
 type Config struct {
 	Agents []KnownAgent `json:"agents"`
 }
 
+// Availability represents the result of detecting an agent's installation
 type Availability struct {
 	Name              string   `json:"name"`
 	SupportsMCP       bool     `json:"supports_mcp"`
@@ -59,29 +63,53 @@ type Availability struct {
 	MatchedPath       string   `json:"matched_path,omitempty"`
 }
 
+// Adapter defines the interface for agent detection strategies
 type Adapter interface {
 	Detect(ctx context.Context) (Availability, error)
 }
 
+// Registry manages agent discovery adapters and definitions
 type Registry struct {
 	adapters    []Adapter
 	definitions []KnownAgent
 }
 
+// LoadRegistry creates a new discovery registry by loading agent definitions
+// from the unified agents.json configuration in the registry package.
 func LoadRegistry() (*Registry, error) {
-	data, err := agentsFS.ReadFile("agents.json")
+	agentConfigs, err := registry.GetAgentDefinitions()
 	if err != nil {
-		return nil, fmt.Errorf("read agents config: %w", err)
+		return nil, fmt.Errorf("load agent definitions: %w", err)
 	}
-	var cfg Config
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("parse agents config: %w", err)
+
+	definitions := make([]KnownAgent, 0, len(agentConfigs))
+	adapters := make([]Adapter, 0, len(agentConfigs))
+
+	for _, agentCfg := range agentConfigs {
+		// Convert registry.AgentTypeConfig to discovery.KnownAgent
+		knownAgent := KnownAgent{
+			Name:             extractAgentName(agentCfg.ID),
+			DisplayName:      agentCfg.DisplayName,
+			SupportsMCP:      agentCfg.Discovery.SupportsMCP,
+			MCPConfigPath:    agentCfg.Discovery.MCPConfigPath,
+			InstallationPath: agentCfg.Discovery.InstallationPath,
+			Capabilities:     agentCfg.Discovery.DiscoveryCapabilities,
+			ModelConfig:      agentCfg.ModelConfig,
+		}
+		if knownAgent.DisplayName == "" {
+			knownAgent.DisplayName = agentCfg.Name
+		}
+		definitions = append(definitions, knownAgent)
+		adapters = append(adapters, NewFilePresenceAdapter(knownAgent))
 	}
-	adapters := make([]Adapter, 0, len(cfg.Agents))
-	for _, agent := range cfg.Agents {
-		adapters = append(adapters, NewFilePresenceAdapter(agent))
-	}
-	return &Registry{adapters: adapters, definitions: cfg.Agents}, nil
+
+	return &Registry{adapters: adapters, definitions: definitions}, nil
+}
+
+// extractAgentName extracts the short name from an agent ID (e.g., "auggie-agent" -> "auggie")
+func extractAgentName(id string) string {
+	name := strings.TrimSuffix(id, "-agent")
+	return name
 }
 
 func (r *Registry) Definitions() []KnownAgent {
@@ -113,8 +141,8 @@ func NewFilePresenceAdapter(def KnownAgent) *FilePresenceAdapter {
 
 func (a *FilePresenceAdapter) Detect(ctx context.Context) (Availability, error) {
 	_ = ctx
-	paths := resolvePaths(a.definition.InstallationPath.ForOS(runtime.GOOS))
-	mcpPaths := resolvePaths(a.definition.MCPConfigPath.ForOS(runtime.GOOS))
+	paths := resolvePaths(ForOS(a.definition.InstallationPath, runtime.GOOS))
+	mcpPaths := resolvePaths(ForOS(a.definition.MCPConfigPath, runtime.GOOS))
 	available, matched := anyPathExists(paths)
 	mcpPath := ""
 	if len(mcpPaths) > 0 {

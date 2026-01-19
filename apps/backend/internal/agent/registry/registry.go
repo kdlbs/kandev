@@ -2,6 +2,7 @@
 package registry
 
 import (
+	"embed"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -14,6 +15,15 @@ import (
 	"github.com/kandev/kandev/pkg/agent"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+//go:embed agents.json
+var agentsFS embed.FS
+
+// agentsConfig is the structure of the agents.json file
+type agentsConfig struct {
+	Version string             `json:"version"`
+	Agents  []*AgentTypeConfig `json:"agents"`
+}
 
 // AgentTypeConfig holds configuration for an agent type
 type AgentTypeConfig struct {
@@ -43,6 +53,15 @@ type AgentTypeConfig struct {
 
 	// Permission configuration
 	PermissionConfig PermissionConfig `json:"permission_config,omitempty"` // How to handle tool permissions
+
+	// Discovery configuration (for detecting agent installation)
+	Discovery DiscoveryConfig `json:"discovery,omitempty"` // Discovery metadata for agent detection
+
+	// Model configuration
+	ModelConfig ModelConfig `json:"model_config,omitempty"` // Available models and default model
+
+	// Display name for UI (shorter than Name)
+	DisplayName string `json:"display_name,omitempty"`
 }
 
 // SessionConfig defines how session resumption is handled for an agent type
@@ -105,6 +124,43 @@ type ResourceLimits struct {
 	MemoryMB       int64   `json:"memory_mb"`
 	CPUCores       float64 `json:"cpu_cores"`
 	TimeoutSeconds int     `json:"timeout_seconds"`
+}
+
+// ModelConfig defines the model configuration for an agent
+type ModelConfig struct {
+	DefaultModel    string       `json:"default_model"`
+	AvailableModels []ModelEntry `json:"available_models"`
+}
+
+// ModelEntry defines a single model available for an agent
+type ModelEntry struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Provider      string `json:"provider"`
+	ContextWindow int    `json:"context_window"`
+	IsDefault     bool   `json:"is_default"`
+}
+
+// OSPaths defines OS-specific paths for discovery
+type OSPaths struct {
+	Linux   []string `json:"linux"`
+	Windows []string `json:"windows"`
+	MacOS   []string `json:"macos"`
+}
+
+// DiscoveryCapabilities defines discovery-specific capabilities
+type DiscoveryCapabilities struct {
+	SupportsSessionResume bool `json:"supports_session_resume"`
+	SupportsShell         bool `json:"supports_shell"`
+	SupportsWorkspaceOnly bool `json:"supports_workspace_only"`
+}
+
+// DiscoveryConfig holds discovery-related configuration for an agent
+type DiscoveryConfig struct {
+	SupportsMCP            bool                  `json:"supports_mcp"`
+	MCPConfigPath          OSPaths               `json:"mcp_config_path"`
+	InstallationPath       OSPaths               `json:"installation_path"`
+	DiscoveryCapabilities  DiscoveryCapabilities `json:"discovery_capabilities"`
 }
 
 // Registry manages agent type configurations
@@ -311,3 +367,54 @@ func ValidateConfig(config *AgentTypeConfig) error {
 	return nil
 }
 
+// DefaultAgents returns the default agent configurations loaded from agents.json
+func DefaultAgents() []*AgentTypeConfig {
+	agents, err := loadAgentsFromJSON()
+	if err != nil {
+		// Fall back to empty list if loading fails (should not happen with embedded file)
+		return []*AgentTypeConfig{}
+	}
+	return agents
+}
+
+// loadAgentsFromJSON loads agent configurations from the embedded agents.json file
+func loadAgentsFromJSON() ([]*AgentTypeConfig, error) {
+	data, err := agentsFS.ReadFile("agents.json")
+	if err != nil {
+		return nil, fmt.Errorf("read agents config: %w", err)
+	}
+
+	var cfg agentsConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parse agents config: %w", err)
+	}
+
+	// Post-process to convert protocol strings to agent.Protocol type
+	for _, agentCfg := range cfg.Agents {
+		agentCfg.Protocol = parseProtocol(string(agentCfg.Protocol))
+	}
+
+	return cfg.Agents, nil
+}
+
+// parseProtocol converts a protocol string to agent.Protocol
+func parseProtocol(p string) agent.Protocol {
+	switch p {
+	case "acp":
+		return agent.ProtocolACP
+	case "rest":
+		return agent.ProtocolREST
+	case "mcp":
+		return agent.ProtocolMCP
+	case "codex":
+		return agent.ProtocolCodex
+	default:
+		return agent.ProtocolACP // Default to ACP
+	}
+}
+
+// GetAgentDefinitions returns the raw agent definitions from agents.json for discovery.
+// This provides access to discovery metadata that may be needed by the discovery package.
+func GetAgentDefinitions() ([]*AgentTypeConfig, error) {
+	return loadAgentsFromJSON()
+}

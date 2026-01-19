@@ -114,7 +114,6 @@ func NewService(
 
 	// Create the executor with the agent manager client and repository for persistent sessions
 	execCfg := executor.ExecutorConfig{
-		MaxConcurrent:   cfg.Scheduler.MaxConcurrent,
 		WorktreeEnabled: cfg.WorktreeEnabled,
 		ShellPrefs:      shellPrefs,
 	}

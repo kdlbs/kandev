@@ -51,6 +51,19 @@ type AgentCapabilitiesDTO struct {
 	SupportsWorkspaceOnly bool `json:"supports_workspace_only"`
 }
 
+type ModelEntryDTO struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Provider      string `json:"provider"`
+	ContextWindow int    `json:"context_window"`
+	IsDefault     bool   `json:"is_default"`
+}
+
+type ModelConfigDTO struct {
+	DefaultModel    string          `json:"default_model"`
+	AvailableModels []ModelEntryDTO `json:"available_models"`
+}
+
 type AvailableAgentDTO struct {
 	Name              string               `json:"name"`
 	DisplayName       string               `json:"display_name"`
@@ -60,6 +73,7 @@ type AvailableAgentDTO struct {
 	Available         bool                 `json:"available"`
 	MatchedPath       string               `json:"matched_path,omitempty"`
 	Capabilities      AgentCapabilitiesDTO `json:"capabilities"`
+	ModelConfig       ModelConfigDTO       `json:"model_config"`
 	UpdatedAt         time.Time            `json:"updated_at"`
 }
 

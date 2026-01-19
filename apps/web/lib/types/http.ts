@@ -376,6 +376,19 @@ export type AgentCapabilities = {
   supports_workspace_only: boolean;
 };
 
+export type ModelEntry = {
+  id: string;
+  name: string;
+  provider: string;
+  context_window: number;
+  is_default: boolean;
+};
+
+export type ModelConfig = {
+  default_model: string;
+  available_models: ModelEntry[];
+};
+
 export type AvailableAgent = {
   name: string;
   display_name: string;
@@ -385,6 +398,7 @@ export type AvailableAgent = {
   available: boolean;
   matched_path?: string | null;
   capabilities: AgentCapabilities;
+  model_config: ModelConfig;
   updated_at: string;
 };
 

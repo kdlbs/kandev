@@ -31,7 +31,6 @@ import {
 } from '@kandev/ui/sidebar';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@kandev/ui/collapsible';
 import { useAppStore } from '@/components/state-provider';
-import { useAvailableAgents } from '@/hooks/use-available-agents';
 
 export function SettingsAppSidebar() {
   const pathname = usePathname();
@@ -39,7 +38,6 @@ export function SettingsAppSidebar() {
   const environments = useAppStore((state) => state.environments.items);
   const executors = useAppStore((state) => state.executors.items);
   const agents = useAppStore((state) => state.settingsAgents.items);
-  const availableAgents = useAvailableAgents().items;
 
   return (
     <Sidebar variant="inset">
