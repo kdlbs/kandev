@@ -217,4 +217,5 @@ clean-web:
 .PHONY: clean-db
 clean-db:
 	@echo "Removing local SQLite database..."
-	@rm -f kandev.db $(BACKEND_DIR)/kandev.db
+	@rm -f kandev.db kandev.db-wal kandev.db-shm \
+		$(BACKEND_DIR)/kandev.db $(BACKEND_DIR)/kandev.db-wal $(BACKEND_DIR)/kandev.db-shm

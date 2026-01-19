@@ -14,7 +14,7 @@ BUILD_TIME := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 
 LDFLAGS += -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuildTime=$(BUILD_TIME)
 
-.PHONY: all build build-all build-agentctl clean run dev dev-db dev-db-reset test lint fmt vet help
+.PHONY: all build build-all build-agentctl clean run dev test lint fmt vet help
 
 ## Default target
 all: build
@@ -47,24 +47,10 @@ run: build
 	@echo "Running $(BINARY_NAME)..."
 	./$(BUILD_DIR)/$(BINARY_NAME)
 
-## Run in development mode with pre-seeded database
-dev: build dev-db
+## Run in development mode
+dev: build
 	@echo "Running $(BINARY_NAME) in development mode..."
-	KANDEV_DB_PATH=./dev/kandev-dev.db ./$(BUILD_DIR)/$(BINARY_NAME)
-
-## Initialize/reset the development database
-dev-db:
-	@if [ ! -f ./dev/kandev-dev.db ]; then \
-		echo "Initializing development database..."; \
-		./dev/init-db.sh; \
-	else \
-		echo "Development database already exists. Use 'make dev-db-reset' to recreate."; \
-	fi
-
-## Reset the development database (recreate with fresh seed data)
-dev-db-reset:
-	@echo "Resetting development database..."
-	./dev/init-db.sh --reset
+	./$(BUILD_DIR)/$(BINARY_NAME)
 
 ## Run tests
 test:
@@ -124,9 +110,7 @@ help:
 	@echo "  build-agentctl Build the agentctl sidecar binary"
 	@echo "  clean         Remove build artifacts"
 	@echo "  run           Build and run the application"
-	@echo "  dev           Run in development mode with pre-seeded database"
-	@echo "  dev-db        Initialize development database (if not exists)"
-	@echo "  dev-db-reset  Reset development database with fresh seed data"
+	@echo "  dev           Run in development mode with a local database"
 	@echo "  test          Run tests"
 	@echo "  test-coverage Run tests with coverage report"
 	@echo "  lint          Run golangci-lint"
@@ -136,4 +120,3 @@ help:
 	@echo "  deps          Download dependencies"
 	@echo "  build-cross   Build for Linux, macOS, and Windows"
 	@echo "  help          Show this help message"
-
