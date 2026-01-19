@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -178,11 +180,12 @@ func createWorkspace(t *testing.T, client *WSClient) string {
 func createRepository(t *testing.T, client *WSClient, workspaceID string) string {
 	t.Helper()
 
+	repoPath := createTempRepoDir(t)
 	resp, err := client.SendRequest("repo-1", ws.ActionRepositoryCreate, map[string]interface{}{
 		"workspace_id": workspaceID,
 		"name":         "Test Repo",
 		"source_type":  "local",
-		"local_path":   "/tmp/repo",
+		"local_path":   repoPath,
 	})
 	require.NoError(t, err)
 
@@ -191,6 +194,16 @@ func createRepository(t *testing.T, client *WSClient, workspaceID string) string
 	require.NoError(t, err)
 
 	return payload["id"].(string)
+}
+
+func createTempRepoDir(t *testing.T) string {
+	t.Helper()
+
+	baseDir := t.TempDir()
+	repoPath := filepath.Join(baseDir, "repo")
+	require.NoError(t, os.MkdirAll(repoPath, 0o755))
+
+	return repoPath
 }
 
 // readPump reads messages from the WebSocket connection
