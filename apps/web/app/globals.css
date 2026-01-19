@@ -286,6 +286,13 @@
   -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M8 12a4 4 0 1 0 8 0a4 4 0 1 0 -8 0'/><path d='M16 12v1.5a2.5 2.5 0 0 0 5 0v-1.5a9 9 0 1 0 -5.5 8.28'/></svg>");
 }
 
+.cm-completionIcon-prompt {
+  display: none !important;
+  width: 0 !important;
+  margin-right: 0 !important;
+  background: none !important;
+}
+
 .cm-tooltip-autocomplete li[aria-selected="true"] .cm-completionIcon {
   color: var(--primary-foreground);
 }

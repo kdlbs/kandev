@@ -4,6 +4,7 @@ import type {
   AvailableAgent,
   AgentDiscovery,
   Branch,
+  CustomPrompt,
   Environment,
   EditorOption,
   Executor,
@@ -70,7 +71,13 @@ export type EditorsState = {
   items: EditorOption[];
   loaded: boolean;
   loading: boolean;
-}
+};
+
+export type PromptsState = {
+  items: CustomPrompt[];
+  loaded: boolean;
+  loading: boolean;
+};
 
 export type AvailableAgentsState = {
   items: AvailableAgent[];
@@ -241,6 +248,7 @@ export type AppState = {
   repositoryBranches: RepositoryBranchesState;
   settingsData: SettingsDataState;
   editors: EditorsState;
+  prompts: PromptsState;
   tasks: TaskState;
   agents: AgentState;
   agentProfiles: AgentProfilesState;
@@ -275,6 +283,8 @@ export type AppState = {
   setSettingsData: (next: Partial<SettingsDataState>) => void;
   setEditors: (editors: EditorsState['items']) => void;
   setEditorsLoading: (loading: boolean) => void;
+  setPrompts: (prompts: PromptsState['items']) => void;
+  setPromptsLoading: (loading: boolean) => void;
   setUserSettings: (settings: UserSettingsState) => void;
   setTerminalOutput: (terminalId: string, data: string) => void;
   appendShellOutput: (sessionId: string, data: string) => void;
@@ -330,6 +340,7 @@ const defaultState: AppState = {
   repositoryBranches: { itemsByRepositoryId: {}, loadingByRepositoryId: {}, loadedByRepositoryId: {} },
   settingsData: { executorsLoaded: false, environmentsLoaded: false, agentsLoaded: false },
   editors: { items: [], loaded: false, loading: false },
+  prompts: { items: [], loaded: false, loading: false },
   tasks: { activeTaskId: null, activeSessionId: null },
   agents: { agents: [] },
   agentProfiles: { items: [], version: 0 },
@@ -371,6 +382,8 @@ const defaultState: AppState = {
   setSettingsData: () => undefined,
   setEditors: () => undefined,
   setEditorsLoading: () => undefined,
+  setPrompts: () => undefined,
+  setPromptsLoading: () => undefined,
   setUserSettings: () => undefined,
   setTerminalOutput: () => undefined,
   appendShellOutput: () => undefined,
@@ -420,6 +433,8 @@ function mergeInitialState(
   | 'setSettingsData'
   | 'setEditors'
   | 'setEditorsLoading'
+  | 'setPrompts'
+  | 'setPromptsLoading'
   | 'setUserSettings'
   | 'setTerminalOutput'
   | 'appendShellOutput'
@@ -458,6 +473,7 @@ function mergeInitialState(
     repositoryBranches: { ...defaultState.repositoryBranches, ...initialState.repositoryBranches },
     settingsData: { ...defaultState.settingsData, ...initialState.settingsData },
     editors: { ...defaultState.editors, ...initialState.editors },
+    prompts: { ...defaultState.prompts, ...initialState.prompts },
     kanban: { ...defaultState.kanban, ...initialState.kanban },
     tasks: { ...defaultState.tasks, ...initialState.tasks },
     agents: { ...defaultState.agents, ...initialState.agents },
@@ -499,6 +515,7 @@ export function createAppStore(initialState?: Partial<AppState>) {
           if (state.repositoryBranches) Object.assign(draft.repositoryBranches, state.repositoryBranches);
           if (state.settingsData) Object.assign(draft.settingsData, state.settingsData);
           if (state.editors) Object.assign(draft.editors, state.editors);
+          if (state.prompts) Object.assign(draft.prompts, state.prompts);
           if (state.kanban) Object.assign(draft.kanban, state.kanban);
           if (state.tasks) Object.assign(draft.tasks, state.tasks);
           if (state.agents) Object.assign(draft.agents, state.agents);
@@ -615,6 +632,15 @@ export function createAppStore(initialState?: Partial<AppState>) {
       setEditorsLoading: (loading) =>
         set((draft) => {
           draft.editors.loading = loading;
+        }),
+      setPrompts: (prompts) =>
+        set((draft) => {
+          draft.prompts.items = prompts;
+          draft.prompts.loaded = true;
+        }),
+      setPromptsLoading: (loading) =>
+        set((draft) => {
+          draft.prompts.loading = loading;
         }),
       setUserSettings: (settings) =>
         set((draft) => {

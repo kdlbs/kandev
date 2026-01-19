@@ -6,6 +6,8 @@ import (
 	editorstore "github.com/kandev/kandev/internal/editors/store"
 	notificationservice "github.com/kandev/kandev/internal/notifications/service"
 	notificationstore "github.com/kandev/kandev/internal/notifications/store"
+	promptservice "github.com/kandev/kandev/internal/prompts/service"
+	promptstore "github.com/kandev/kandev/internal/prompts/store"
 	"github.com/kandev/kandev/internal/task/repository"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	userservice "github.com/kandev/kandev/internal/user/service"
@@ -18,6 +20,7 @@ type Repositories struct {
 	User          userstore.Repository
 	Notification  notificationstore.Repository
 	Editor        editorstore.Repository
+	Prompts       promptstore.Repository
 }
 
 type Services struct {
@@ -25,4 +28,5 @@ type Services struct {
 	User         *userservice.Service
 	Editor       *editorservice.Service
 	Notification *notificationservice.Service
+	Prompts      *promptservice.Service
 }

@@ -15,6 +15,8 @@ import type {
   NotificationProvider,
   EditorsResponse,
   EditorOption,
+  CustomPrompt,
+  PromptsResponse,
   CreateTaskResponse,
   Task,
   TaskSessionsResponse,
@@ -215,6 +217,38 @@ export async function updateEditor(
 
 export async function deleteEditor(editorId: string, options?: ApiRequestOptions) {
   return fetchJson<{ success: boolean }>(`/api/v1/editors/${editorId}`, {
+    ...options,
+    init: { method: 'DELETE', ...(options?.init ?? {}) },
+  });
+}
+
+export async function listPrompts(options?: ApiRequestOptions) {
+  return fetchJson<PromptsResponse>('/api/v1/prompts', options);
+}
+
+export async function createPrompt(
+  payload: { name: string; content: string },
+  options?: ApiRequestOptions
+) {
+  return fetchJson<CustomPrompt>('/api/v1/prompts', {
+    ...options,
+    init: { method: 'POST', body: JSON.stringify(payload), ...(options?.init ?? {}) },
+  });
+}
+
+export async function updatePrompt(
+  promptId: string,
+  payload: { name?: string; content?: string },
+  options?: ApiRequestOptions
+) {
+  return fetchJson<CustomPrompt>(`/api/v1/prompts/${promptId}`, {
+    ...options,
+    init: { method: 'PATCH', body: JSON.stringify(payload), ...(options?.init ?? {}) },
+  });
+}
+
+export async function deletePrompt(promptId: string, options?: ApiRequestOptions) {
+  return fetchJson<{ success: boolean }>(`/api/v1/prompts/${promptId}`, {
     ...options,
     init: { method: 'DELETE', ...(options?.init ?? {}) },
   });

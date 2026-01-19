@@ -7,6 +7,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	editorservice "github.com/kandev/kandev/internal/editors/service"
 	"github.com/kandev/kandev/internal/events/bus"
+	promptservice "github.com/kandev/kandev/internal/prompts/service"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	userservice "github.com/kandev/kandev/internal/user/service"
 )
@@ -20,6 +21,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 
 	userSvc := userservice.NewService(repos.User, eventBus, log)
 	editorSvc := editorservice.NewService(repos.Editor, repos.Task, userSvc)
+	promptSvc := promptservice.NewService(repos.Prompts)
 	taskSvc := taskservice.NewService(
 		repos.Task,
 		eventBus,
@@ -31,9 +33,10 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	)
 
 	return &Services{
-		Task:   taskSvc,
-		User:   userSvc,
-		Editor: editorSvc,
+		Task:    taskSvc,
+		User:    userSvc,
+		Editor:  editorSvc,
+		Prompts: promptSvc,
 		// Notification service is initialized after gateway is available.
 		Notification: nil,
 	}, agentSettingsController, nil
