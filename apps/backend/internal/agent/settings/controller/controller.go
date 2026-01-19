@@ -89,6 +89,18 @@ func (c *Controller) ListAvailableAgents(ctx context.Context) (*dto.ListAvailabl
 		if displayName == "" {
 			displayName = def.Name
 		}
+		// Convert model entries
+		modelEntries := make([]dto.ModelEntryDTO, 0, len(def.ModelConfig.AvailableModels))
+		for _, model := range def.ModelConfig.AvailableModels {
+			modelEntries = append(modelEntries, dto.ModelEntryDTO{
+				ID:            model.ID,
+				Name:          model.Name,
+				Provider:      model.Provider,
+				ContextWindow: model.ContextWindow,
+				IsDefault:     model.IsDefault,
+			})
+		}
+
 		payload = append(payload, dto.AvailableAgentDTO{
 			Name:              availability.Name,
 			DisplayName:       displayName,
@@ -101,6 +113,10 @@ func (c *Controller) ListAvailableAgents(ctx context.Context) (*dto.ListAvailabl
 				SupportsSessionResume: def.Capabilities.SupportsSessionResume,
 				SupportsShell:         def.Capabilities.SupportsShell,
 				SupportsWorkspaceOnly: def.Capabilities.SupportsWorkspaceOnly,
+			},
+			ModelConfig: dto.ModelConfigDTO{
+				DefaultModel:    def.ModelConfig.DefaultModel,
+				AvailableModels: modelEntries,
 			},
 			UpdatedAt: now,
 		})

@@ -1,0 +1,202 @@
+{
+  "$schema": "./agents.schema.json",
+  "version": "1.0",
+  "agents": [
+    {
+      "id": "auggie-agent",
+      "name": "Augment Coding Agent",
+      "display_name": "Auggie",
+      "description": "Auggie CLI-powered autonomous coding agent. Requires AUGMENT_SESSION_AUTH for authentication.",
+      "enabled": true,
+      "image": "kandev/augment-agent",
+      "tag": "latest",
+      "cmd": ["auggie", "--acp"],
+      "working_dir": "/workspace",
+      "required_env": ["AUGMENT_SESSION_AUTH"],
+      "env": {},
+      "mounts": [
+        {"source": "{workspace}", "target": "/workspace", "read_only": false}
+      ],
+      "resource_limits": {
+        "memory_mb": 4096,
+        "cpu_cores": 2.0,
+        "timeout_seconds": 3600
+      },
+      "capabilities": ["code_generation", "code_review", "refactoring", "testing", "shell_execution"],
+      "protocol": "acp",
+      "protocol_config": {},
+      "model_flag": "--model",
+      "workspace_flag": "--workspace-root",
+      "session_config": {
+        "resume_via_acp": false,
+        "resume_flag": "",
+        "can_recover": false,
+        "session_dir_template": "{home}/.augment/sessions",
+        "session_dir_target": "/root/.augment/sessions"
+      },
+      "permission_config": {
+        "permission_flag": "--permission",
+        "tools_requiring_permission": [
+          "launch-process",
+          "save-file",
+          "str-replace-editor",
+          "remove-files"
+        ]
+      },
+      "discovery": {
+        "supports_mcp": false,
+        "mcp_config_path": {
+          "linux": [],
+          "windows": [],
+          "macos": []
+        },
+        "installation_path": {
+          "linux": ["~/.augment/.auggie.json"],
+          "windows": ["~/.augment/.auggie.json"],
+          "macos": ["~/.augment/.auggie.json"]
+        },
+        "discovery_capabilities": {
+          "supports_session_resume": false,
+          "supports_shell": false,
+          "supports_workspace_only": false
+        }
+      },
+      "model_config": {
+        "default_model": "sonnet4.5",
+        "available_models": [
+          {
+            "id": "sonnet4.5",
+            "name": "Sonnet 4.5",
+            "provider": "anthropic",
+            "context_window": 200000,
+            "is_default": true
+          },
+          {
+            "id": "opus4.5",
+            "name": "Claude Opus 4.5",
+            "provider": "anthropic",
+            "context_window": 200000,
+            "is_default": false
+          },
+          {
+            "id": "haiku4.5",
+            "name": "Haiku 4.5",
+            "provider": "anthropic",
+            "context_window": 200000,
+            "is_default": false
+          },
+          {
+            "id": "sonnet4",
+            "name": "Sonnet 4",
+            "provider": "anthropic",
+            "context_window": 200000,
+            "is_default": false
+          },
+          {
+            "id": "gpt5.1",
+            "name": "GPT-5.1",
+            "provider": "openai",
+            "context_window": 128000,
+            "is_default": false
+          },
+          {
+            "id": "gpt5",
+            "name": "GPT-5",
+            "provider": "openai",
+            "context_window": 128000,
+            "is_default": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "codex-agent",
+      "name": "OpenAI Codex Agent",
+      "display_name": "Codex",
+      "description": "OpenAI Codex CLI-powered autonomous coding agent using the Codex app-server protocol.",
+      "enabled": true,
+      "image": "kandev/codex-agent",
+      "tag": "latest",
+      "cmd": ["codex", "app-server"],
+      "working_dir": "/workspace",
+      "required_env": [],
+      "env": {},
+      "mounts": [
+        {"source": "{workspace}", "target": "/workspace", "read_only": false}
+      ],
+      "resource_limits": {
+        "memory_mb": 4096,
+        "cpu_cores": 2.0,
+        "timeout_seconds": 3600
+      },
+      "capabilities": ["code_generation", "code_review", "refactoring", "testing", "shell_execution"],
+      "protocol": "codex",
+      "protocol_config": {},
+      "model_flag": "--model",
+      "workspace_flag": "",
+      "session_config": {
+        "resume_via_acp": true,
+        "resume_flag": "",
+        "can_recover": true,
+        "session_dir_template": "{home}/.codex/sessions",
+        "session_dir_target": "/root/.codex/sessions"
+      },
+      "permission_config": {
+        "permission_flag": "",
+        "tools_requiring_permission": []
+      },
+      "discovery": {
+        "supports_mcp": false,
+        "mcp_config_path": {
+          "linux": [],
+          "windows": [],
+          "macos": []
+        },
+        "installation_path": {
+          "linux": ["~/.codex/auth.json"],
+          "windows": ["~/.codex/auth.json"],
+          "macos": ["~/.codex/auth.json"]
+        },
+        "discovery_capabilities": {
+          "supports_session_resume": false,
+          "supports_shell": false,
+          "supports_workspace_only": false
+        }
+      },
+      "model_config": {
+        "default_model": "gpt-5.2-codex",
+        "available_models": [
+          {
+            "id": "gpt-5.2-codex",
+            "name": "GPT-5.2 Codex",
+            "provider": "openai",
+            "context_window": 200000,
+            "is_default": true
+          },
+          {
+            "id": "gpt-5.1-codex-max",
+            "name": "GPT-5.1 Codex Max",
+            "provider": "openai",
+            "context_window": 200000,
+            "is_default": false
+          },
+          {
+            "id": "gpt-5.1-codex-mini",
+            "name": "GPT-5.1 Codex Mini",
+            "provider": "openai",
+            "context_window": 200000,
+            "is_default": false
+          },
+          {
+            "id": "gpt-5.2",
+            "name": "GPT-5.2",
+            "provider": "openai",
+            "context_window": 200000,
+            "is_default": false
+          }
+        ]
+      }
+    }
+  ]
+}
+

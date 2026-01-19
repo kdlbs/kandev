@@ -9,21 +9,24 @@ import { Button } from '@kandev/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@kandev/ui/card';
 import { Input } from '@kandev/ui/input';
 import { Label } from '@kandev/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@kandev/ui/select';
 import { Separator } from '@kandev/ui/separator';
 import { Switch } from '@kandev/ui/switch';
 import { Textarea } from '@kandev/ui/textarea';
 import { useToast } from '@/components/toast-provider';
 import { UnsavedChangesBadge, UnsavedSaveButton } from '@/components/settings/unsaved-indicator';
 import { deleteAgentProfileAction, updateAgentProfileAction } from '@/app/actions/agents';
-import type { Agent, AgentProfile } from '@/lib/types/http';
+import type { Agent, AgentProfile, ModelConfig } from '@/lib/types/http';
 import { useAppStore } from '@/components/state-provider';
+import { useAvailableAgents } from '@/hooks/use-available-agents';
 
 type ProfileEditorProps = {
   agent: Agent;
   profile: AgentProfile;
+  modelConfig: ModelConfig;
 };
 
-function ProfileEditor({ agent, profile }: ProfileEditorProps) {
+function ProfileEditor({ agent, profile, modelConfig }: ProfileEditorProps) {
   const { toast } = useToast();
   const settingsAgents = useAppStore((state) => state.settingsAgents.items);
   const setSettingsAgents = useAppStore((state) => state.setSettingsAgents);
@@ -151,11 +154,32 @@ function ProfileEditor({ agent, profile }: ProfileEditorProps) {
 
           <div className="space-y-2">
             <Label>Model</Label>
-            <Input
-              value={draft.model}
-              onChange={(event) => setDraft({ ...draft, model: event.target.value })}
-              placeholder="model-id"
-            />
+            {modelConfig.available_models.length > 0 ? (
+              <Select
+                value={draft.model || modelConfig.default_model}
+                onValueChange={(value) => setDraft({ ...draft, model: value })}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select a model" />
+                </SelectTrigger>
+                <SelectContent>
+                  {modelConfig.available_models.map((model) => (
+                    <SelectItem key={model.id} value={model.id}>
+                      {model.name}
+                      {model.is_default && (
+                        <span className="ml-2 text-muted-foreground">(default)</span>
+                      )}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <Input
+                value={draft.model}
+                onChange={(event) => setDraft({ ...draft, model: event.target.value })}
+                placeholder="model-id"
+              />
+            )}
           </div>
 
           <div className="space-y-2">
@@ -225,6 +249,7 @@ export default function AgentProfilePage() {
   const agentKey = decodeURIComponent(agentParam ?? '');
   const profileId = profileParam ?? '';
   const settingsAgents = useAppStore((state) => state.settingsAgents.items);
+  const availableAgents = useAvailableAgents().items;
 
   const agent = useMemo(() => {
     return settingsAgents.find((item) => item.name === agentKey) ?? null;
@@ -233,6 +258,11 @@ export default function AgentProfilePage() {
   const profile = useMemo(() => {
     return agent?.profiles.find((item) => item.id === profileId) ?? null;
   }, [agent?.profiles, profileId]);
+
+  const modelConfig = useMemo(() => {
+    const availableAgent = availableAgents.find((item) => item.name === agent?.name);
+    return availableAgent?.model_config ?? { default_model: '', available_models: [] };
+  }, [availableAgents, agent?.name]);
 
   if (!agent || !profile) {
     return (
@@ -252,6 +282,7 @@ export default function AgentProfilePage() {
       key={profile.id}
       agent={agent}
       profile={profile}
+      modelConfig={modelConfig}
     />
   );
 }

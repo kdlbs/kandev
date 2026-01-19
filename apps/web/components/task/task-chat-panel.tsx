@@ -3,7 +3,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { IconBrain, IconListCheck, IconLoader2, IconPaperclip } from '@tabler/icons-react';
+import { IconBrain, IconCpu, IconListCheck, IconLoader2, IconPaperclip } from '@tabler/icons-react';
 import { Button } from '@kandev/ui/button';
 import {
   DropdownMenu,
@@ -24,6 +24,7 @@ import { useLazyLoadMessages } from '@/hooks/use-lazy-load-messages';
 import { useSession } from '@/hooks/use-session';
 import { useTask } from '@/hooks/use-task';
 import { useSessionMessages } from '@/hooks/use-session-messages';
+import { useSettingsData } from '@/hooks/use-settings-data';
 import { MessageRenderer } from '@/components/task/chat/message-renderer';
 import { RunningIndicator } from '@/components/task/chat/messages/running-indicator';
 import { TodoSummary } from '@/components/task/chat/todo-summary';
@@ -64,6 +65,22 @@ export function TaskChatPanel({
   const isStarting = session?.state === 'STARTING';
   const isWorking = isStarting || session?.state === 'RUNNING';
   const isAgentBusy = session?.state === 'CREATED' || session?.state === 'RUNNING';
+
+  // Ensure agent profile data is loaded (may not be hydrated from SSR in all navigation paths)
+  useSettingsData(true);
+
+  // Get model from agent profile using agent_profile_id
+  const settingsAgents = useAppStore((state) => state.settingsAgents.items);
+  const sessionProfile = useMemo(() => {
+    if (!session?.agent_profile_id) return null;
+    for (const agent of settingsAgents) {
+      const profile = agent.profiles.find((p) => p.id === session.agent_profile_id);
+      if (profile) return profile;
+    }
+    return null;
+  }, [session?.agent_profile_id, settingsAgents]);
+
+  const sessionModel = sessionProfile?.model ?? null;
 
   // Fetch messages for this session
   const { messages, isLoading: messagesLoading } = useSessionMessages(resolvedSessionId);
@@ -305,10 +322,17 @@ export function TaskChatPanel({
         )}
       </div>
 
-      {/* Running indicator - shows agent state */}
+      {/* Session info - shows agent state and model */}
       {session?.state && (
-        <div className="mt-2">
+        <div className="mt-2 flex items-center gap-2">
           <RunningIndicator state={session.state} />
+          {/* Model indicator */}
+          {sessionModel && (
+            <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-muted/50 text-xs text-muted-foreground border border-border/50">
+              <IconCpu className="h-3 w-3" />
+              <span className="font-medium">{sessionModel}</span>
+            </div>
+          )}
         </div>
       )}
 

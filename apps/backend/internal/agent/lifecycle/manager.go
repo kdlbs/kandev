@@ -1220,5 +1220,3 @@ func (m *Manager) RespondToPermissionBySessionID(sessionID, pendingID, optionID 
 
 	return m.RespondToPermission(execution.ID, pendingID, optionID, cancelled)
 }
-
-

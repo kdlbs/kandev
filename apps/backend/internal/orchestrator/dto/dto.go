@@ -6,10 +6,9 @@ type GetStatusRequest struct{}
 
 // StatusResponse is the response for orchestrator.status
 type StatusResponse struct {
-	Running       bool `json:"running"`
-	ActiveAgents  int  `json:"active_agents"`
-	QueuedTasks   int  `json:"queued_tasks"`
-	MaxConcurrent int  `json:"max_concurrent"`
+	Running      bool `json:"running"`
+	ActiveAgents int  `json:"active_agents"`
+	QueuedTasks  int  `json:"queued_tasks"`
 }
 
 // GetQueueRequest is the request for orchestrator.queue
