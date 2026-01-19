@@ -159,10 +159,10 @@ const (
 	ActionWorkspaceFileChanges    = "session.workspace.file.changes" // Notification
 
 	// Shell actions
-	ActionShellStatus    = "session.shell.status" // Get shell status
-	ActionShellSubscribe = "shell.subscribe"      // Subscribe to shell output
-	ActionShellInput     = "shell.input"          // Send input to shell
-	ActionShellOutput    = "session.shell.output" // Shell output notification
+	ActionShellStatus        = "session.shell.status" // Get shell status
+	ActionShellSubscribe     = "shell.subscribe"      // Subscribe to shell output
+	ActionShellInput         = "shell.input"          // Send input to shell
+	ActionSessionShellOutput = "session.shell.output" // Shell output notification (also used for exit with type: "exit")
 
 	// User actions
 	ActionUserGet             = "user.get"

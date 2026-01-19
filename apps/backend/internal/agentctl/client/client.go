@@ -23,11 +23,9 @@ type Client struct {
 	logger     *logger.Logger
 
 	// WebSocket connections for streaming
-	acpConn         *websocket.Conn
-	gitStatusConn   *websocket.Conn
-	fileChangesConn *websocket.Conn
-	shellConn       *websocket.Conn
-	mu              sync.RWMutex
+	acpConn             *websocket.Conn
+	workspaceStreamConn *websocket.Conn
+	mu                  sync.RWMutex
 }
 
 // StatusResponse from agentctl
@@ -268,119 +266,6 @@ type (
 	ShellBufferResponse    = types.ShellBufferResponse
 )
 
-// StreamGitStatus opens a WebSocket connection for streaming git status updates
-func (c *Client) StreamGitStatus(ctx context.Context, handler func(*GitStatusUpdate)) error {
-	wsURL := "ws" + c.baseURL[4:] + "/api/v1/workspace/git-status/stream"
-
-	conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, nil)
-	if err != nil {
-		return fmt.Errorf("failed to connect to git status stream: %w", err)
-	}
-
-	c.mu.Lock()
-	c.gitStatusConn = conn
-	c.mu.Unlock()
-
-	c.logger.Info("connected to git status stream", zap.String("url", wsURL))
-
-	// Read messages in a goroutine
-	go func() {
-		defer func() {
-			c.mu.Lock()
-			c.gitStatusConn = nil
-			c.mu.Unlock()
-			if err := conn.Close(); err != nil {
-				c.logger.Debug("failed to close git status websocket", zap.Error(err))
-			}
-		}()
-
-		for {
-			_, message, err := conn.ReadMessage()
-			if err != nil {
-				if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
-					c.logger.Info("git status stream closed normally")
-				} else {
-					c.logger.Debug("git status stream error", zap.Error(err))
-				}
-				return
-			}
-
-			var update GitStatusUpdate
-			if err := json.Unmarshal(message, &update); err != nil {
-				c.logger.Warn("failed to parse git status update", zap.Error(err))
-				continue
-			}
-
-			handler(&update)
-		}
-	}()
-
-	return nil
-}
-
-// CloseGitStatusStream closes the git status stream connection
-func (c *Client) CloseGitStatusStream() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if c.gitStatusConn != nil {
-		if err := c.gitStatusConn.Close(); err != nil {
-			c.logger.Debug("failed to close git status stream", zap.Error(err))
-		}
-		c.gitStatusConn = nil
-	}
-}
-
-// StreamFileChanges opens a WebSocket connection for streaming file change notifications
-func (c *Client) StreamFileChanges(ctx context.Context, handler func(*FileChangeNotification)) error {
-	wsURL := "ws" + c.baseURL[4:] + "/api/v1/workspace/file-changes/stream"
-
-	conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, nil)
-	if err != nil {
-		return fmt.Errorf("failed to connect to file changes stream: %w", err)
-	}
-
-	c.mu.Lock()
-	c.fileChangesConn = conn
-	c.mu.Unlock()
-
-	c.logger.Info("connected to file changes stream", zap.String("url", wsURL))
-
-	// Read messages in a goroutine
-	go func() {
-		defer func() {
-			c.mu.Lock()
-			c.fileChangesConn = nil
-			c.mu.Unlock()
-			if err := conn.Close(); err != nil {
-				c.logger.Debug("failed to close file changes websocket", zap.Error(err))
-			}
-		}()
-
-		for {
-			_, message, err := conn.ReadMessage()
-			if err != nil {
-				if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
-					c.logger.Info("file changes stream closed normally")
-				} else {
-					c.logger.Debug("file changes stream error", zap.Error(err))
-				}
-				return
-			}
-
-			var notification FileChangeNotification
-			if err := json.Unmarshal(message, &notification); err != nil {
-				c.logger.Warn("failed to parse file change notification", zap.Error(err))
-				continue
-			}
-
-			handler(&notification)
-		}
-	}()
-
-	return nil
-}
-
 // RequestFileTree requests a file tree via HTTP GET
 func (c *Client) RequestFileTree(ctx context.Context, path string, depth int) (*FileTreeResponse, error) {
 	url := fmt.Sprintf("%s/api/v1/workspace/tree?path=%s&depth=%d", c.baseURL, path, depth)
@@ -443,25 +328,10 @@ func (c *Client) RequestFileContent(ctx context.Context, path string) (*FileCont
 	return &response, nil
 }
 
-// CloseFileChangesStream closes the file changes stream connection
-func (c *Client) CloseFileChangesStream() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if c.fileChangesConn != nil {
-		if err := c.fileChangesConn.Close(); err != nil {
-			c.logger.Debug("failed to close file changes stream", zap.Error(err))
-		}
-		c.fileChangesConn = nil
-	}
-}
-
 // Close closes all connections
 func (c *Client) Close() {
 	c.CloseUpdatesStream()
-	c.CloseGitStatusStream()
-	c.CloseFileChangesStream()
-	c.CloseShellStream()
+	c.CloseWorkspaceStream()
 }
 
 // Note: ShellStatusResponse, ShellMessage, ShellBufferResponse are re-exported
@@ -517,67 +387,186 @@ func (c *Client) ShellBuffer(ctx context.Context) (string, error) {
 	return result.Data, nil
 }
 
-// StreamShell connects to the shell WebSocket stream and returns channels for I/O
-func (c *Client) StreamShell(ctx context.Context) (<-chan ShellMessage, chan<- ShellMessage, error) {
+// WorkspaceStreamCallbacks defines callbacks for workspace stream events
+type WorkspaceStreamCallbacks struct {
+	OnShellOutput func(data string)
+	OnShellExit   func(code int)
+	OnGitStatus   func(update *GitStatusUpdate)
+	OnFileChange  func(notification *FileChangeNotification)
+	OnFileList    func(update *FileListUpdate)
+	OnConnected   func()
+	OnError       func(err string)
+}
+
+// WorkspaceStream represents an active workspace stream connection
+type WorkspaceStream struct {
+	conn      *websocket.Conn
+	inputCh   chan types.WorkspaceStreamMessage
+	closeCh   chan struct{}
+	closeOnce sync.Once
+	logger    *logger.Logger
+}
+
+// StreamWorkspace opens a unified WebSocket connection for all workspace events
+func (c *Client) StreamWorkspace(ctx context.Context, callbacks WorkspaceStreamCallbacks) (*WorkspaceStream, error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if c.shellConn != nil {
-		return nil, nil, fmt.Errorf("shell stream already connected")
+	if c.workspaceStreamConn != nil {
+		c.mu.Unlock()
+		return nil, fmt.Errorf("workspace stream already connected")
 	}
+	c.mu.Unlock()
 
-	wsURL := "ws" + c.baseURL[4:] + "/api/v1/shell/stream"
+	wsURL := "ws" + c.baseURL[4:] + "/api/v1/workspace/stream"
 	conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, nil)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to connect shell stream: %w", err)
+		return nil, fmt.Errorf("failed to connect to workspace stream: %w", err)
 	}
-	c.shellConn = conn
 
-	outputCh := make(chan ShellMessage, 256)
-	inputCh := make(chan ShellMessage, 64)
+	c.mu.Lock()
+	c.workspaceStreamConn = conn
+	c.mu.Unlock()
 
-	// Read from WebSocket
+	c.logger.Info("connected to workspace stream", zap.String("url", wsURL))
+
+	ws := &WorkspaceStream{
+		conn:    conn,
+		inputCh: make(chan types.WorkspaceStreamMessage, 64),
+		closeCh: make(chan struct{}),
+		logger:  c.logger,
+	}
+
+	// Read goroutine - dispatches to callbacks
 	go func() {
-		defer close(outputCh)
+		defer func() {
+			c.mu.Lock()
+			c.workspaceStreamConn = nil
+			c.mu.Unlock()
+			ws.Close()
+		}()
+
 		for {
-			var msg ShellMessage
+			var msg types.WorkspaceStreamMessage
 			if err := conn.ReadJSON(&msg); err != nil {
 				if !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
-					c.logger.Debug("shell stream read error", zap.Error(err))
+					c.logger.Debug("workspace stream read error", zap.Error(err))
 				}
 				return
 			}
-			select {
-			case outputCh <- msg:
-			default:
-				// Channel full, skip
+
+			switch msg.Type {
+			case types.WorkspaceMessageTypeShellOutput:
+				if callbacks.OnShellOutput != nil {
+					callbacks.OnShellOutput(msg.Data)
+				}
+			case types.WorkspaceMessageTypeShellExit:
+				if callbacks.OnShellExit != nil {
+					callbacks.OnShellExit(msg.Code)
+				}
+			case types.WorkspaceMessageTypeGitStatus:
+				if callbacks.OnGitStatus != nil && msg.GitStatus != nil {
+					callbacks.OnGitStatus(msg.GitStatus)
+				}
+			case types.WorkspaceMessageTypeFileChange:
+				if callbacks.OnFileChange != nil && msg.FileChange != nil {
+					callbacks.OnFileChange(msg.FileChange)
+				}
+			case types.WorkspaceMessageTypeFileList:
+				if callbacks.OnFileList != nil && msg.FileList != nil {
+					callbacks.OnFileList(msg.FileList)
+				}
+			case types.WorkspaceMessageTypeConnected:
+				if callbacks.OnConnected != nil {
+					callbacks.OnConnected()
+				}
+			case types.WorkspaceMessageTypeError:
+				if callbacks.OnError != nil {
+					callbacks.OnError(msg.Error)
+				}
 			}
 		}
 	}()
 
-	// Write to WebSocket
+	// Write goroutine - sends from inputCh
 	go func() {
-		for msg := range inputCh {
-			if err := conn.WriteJSON(msg); err != nil {
-				c.logger.Debug("shell stream write error", zap.Error(err))
+		for {
+			select {
+			case <-ws.closeCh:
 				return
+			case msg, ok := <-ws.inputCh:
+				if !ok {
+					return
+				}
+				if err := conn.WriteJSON(msg); err != nil {
+					ws.logger.Debug("workspace stream write error", zap.Error(err))
+					return
+				}
 			}
 		}
 	}()
 
-	return outputCh, inputCh, nil
+	return ws, nil
 }
 
-// CloseShellStream closes the shell stream connection
-func (c *Client) CloseShellStream() {
+// WriteShellInput sends input to the shell through the workspace stream
+func (ws *WorkspaceStream) WriteShellInput(data string) error {
+	msg := types.NewWorkspaceShellInput(data)
+	select {
+	case ws.inputCh <- msg:
+		return nil
+	case <-ws.closeCh:
+		return fmt.Errorf("workspace stream closed")
+	}
+}
+
+// ResizeShell sends a shell resize command through the workspace stream
+func (ws *WorkspaceStream) ResizeShell(cols, rows int) error {
+	msg := types.NewWorkspaceShellResize(cols, rows)
+	select {
+	case ws.inputCh <- msg:
+		return nil
+	case <-ws.closeCh:
+		return fmt.Errorf("workspace stream closed")
+	}
+}
+
+// Ping sends a ping message through the workspace stream
+func (ws *WorkspaceStream) Ping() error {
+	msg := types.NewWorkspacePing()
+	select {
+	case ws.inputCh <- msg:
+		return nil
+	case <-ws.closeCh:
+		return fmt.Errorf("workspace stream closed")
+	}
+}
+
+// Close closes the workspace stream
+func (ws *WorkspaceStream) Close() {
+	ws.closeOnce.Do(func() {
+		close(ws.closeCh)
+		if ws.conn != nil {
+			if err := ws.conn.Close(); err != nil {
+				ws.logger.Debug("failed to close workspace stream connection", zap.Error(err))
+			}
+		}
+	})
+}
+
+// Done returns a channel that is closed when the stream is closed
+func (ws *WorkspaceStream) Done() <-chan struct{} {
+	return ws.closeCh
+}
+
+// CloseWorkspaceStream closes the workspace stream connection
+func (c *Client) CloseWorkspaceStream() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if c.shellConn != nil {
-		if err := c.shellConn.Close(); err != nil {
-			c.logger.Debug("failed to close shell stream", zap.Error(err))
+	if c.workspaceStreamConn != nil {
+		if err := c.workspaceStreamConn.Close(); err != nil {
+			c.logger.Debug("failed to close workspace stream", zap.Error(err))
 		}
-		c.shellConn = nil
+		c.workspaceStreamConn = nil
 	}
 }
 

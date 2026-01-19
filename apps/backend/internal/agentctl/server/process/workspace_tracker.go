@@ -29,11 +29,9 @@ type WorkspaceTracker struct {
 	currentFiles  types.FileListUpdate
 	mu            sync.RWMutex
 
-	// Subscribers
-	gitStatusSubscribers   map[types.GitStatusSubscriber]struct{}
-	filesSubscribers       map[types.FilesSubscriber]struct{}
-	fileChangeSubscribers  map[types.FileChangeSubscriber]struct{}
-	subMu                  sync.RWMutex
+	// Unified workspace stream subscribers
+	workspaceStreamSubscribers map[types.WorkspaceStreamSubscriber]struct{}
+	workspaceSubMu             sync.RWMutex
 
 	// Filesystem watcher
 	watcher *fsnotify.Watcher
@@ -55,14 +53,12 @@ func NewWorkspaceTracker(workDir string, log *logger.Logger) *WorkspaceTracker {
 	}
 
 	return &WorkspaceTracker{
-		workDir:               workDir,
-		logger:                log.WithFields(zap.String("component", "workspace-tracker")),
-		gitStatusSubscribers:  make(map[types.GitStatusSubscriber]struct{}),
-		filesSubscribers:      make(map[types.FilesSubscriber]struct{}),
-		fileChangeSubscribers: make(map[types.FileChangeSubscriber]struct{}),
-		watcher:               watcher,
-		fsChangeTrigger:       make(chan struct{}, 1), // Buffered to avoid blocking
-		stopCh:                make(chan struct{}),
+		workDir:                    workDir,
+		logger:                     log.WithFields(zap.String("component", "workspace-tracker")),
+		workspaceStreamSubscribers: make(map[types.WorkspaceStreamSubscriber]struct{}),
+		watcher:                    watcher,
+		fsChangeTrigger:            make(chan struct{}, 1), // Buffered to avoid blocking
+		stopCh:                     make(chan struct{}),
 	}
 }
 
@@ -147,8 +143,8 @@ func (wt *WorkspaceTracker) monitorLoop(ctx context.Context) {
 			if pendingUpdate {
 				wt.updateGitStatus(ctx)
 				wt.updateFiles(ctx)
-				// Notify file change subscribers that workspace changed
-				wt.notifyFileChangeSubscribers(types.FileChangeNotification{
+				// Notify workspace stream subscribers that workspace changed
+				wt.notifyWorkspaceStreamFileChange(types.FileChangeNotification{
 					Timestamp: time.Now(),
 					Path:      "",
 					Operation: "refresh",
@@ -171,8 +167,8 @@ func (wt *WorkspaceTracker) updateGitStatus(ctx context.Context) {
 	wt.currentStatus = status
 	wt.mu.Unlock()
 
-	// Notify subscribers
-	wt.notifyGitStatusSubscribers(status)
+	// Notify workspace stream subscribers
+	wt.notifyWorkspaceStreamGitStatus(status)
 }
 
 // getGitStatus retrieves the current git status
@@ -427,8 +423,8 @@ func (wt *WorkspaceTracker) updateFiles(ctx context.Context) {
 	wt.currentFiles = files
 	wt.mu.Unlock()
 
-	// Notify subscribers
-	wt.notifyFilesSubscribers(files)
+	// Notify workspace stream subscribers
+	wt.notifyWorkspaceStreamFileList(files)
 }
 
 // getFileList retrieves the list of files in the workspace
@@ -463,133 +459,94 @@ func (wt *WorkspaceTracker) getFileList(ctx context.Context) (types.FileListUpda
 
 
 
-// Subscriber management methods
+// Unified workspace stream subscriber management methods
 
-// SubscribeGitStatus creates a new git status subscriber
-func (wt *WorkspaceTracker) SubscribeGitStatus() types.GitStatusSubscriber {
-	sub := make(types.GitStatusSubscriber, 10)
+// SubscribeWorkspaceStream creates a new unified workspace stream subscriber
+// and sends current git status and file list immediately
+func (wt *WorkspaceTracker) SubscribeWorkspaceStream() types.WorkspaceStreamSubscriber {
+	sub := make(types.WorkspaceStreamSubscriber, 100)
 
-	wt.subMu.Lock()
-	wt.gitStatusSubscribers[sub] = struct{}{}
-	wt.subMu.Unlock()
+	wt.workspaceSubMu.Lock()
+	wt.workspaceStreamSubscribers[sub] = struct{}{}
+	wt.workspaceSubMu.Unlock()
 
-	// Send current status immediately
+	// Send current git status immediately
 	wt.mu.RLock()
-	current := wt.currentStatus
+	currentStatus := wt.currentStatus
+	currentFiles := wt.currentFiles
 	wt.mu.RUnlock()
 
-	if current.Timestamp.IsZero() {
-		current.Timestamp = time.Now()
+	if currentStatus.Timestamp.IsZero() {
+		currentStatus.Timestamp = time.Now()
+	}
+	if currentFiles.Timestamp.IsZero() {
+		currentFiles.Timestamp = time.Now()
 	}
 
+	// Send git status
 	select {
-	case sub <- current:
+	case sub <- types.NewWorkspaceGitStatus(&currentStatus):
+	default:
+	}
+
+	// Send file list
+	select {
+	case sub <- types.NewWorkspaceFileList(&currentFiles):
 	default:
 	}
 
 	return sub
 }
 
-// UnsubscribeGitStatus removes a git status subscriber
-func (wt *WorkspaceTracker) UnsubscribeGitStatus(sub types.GitStatusSubscriber) {
-	wt.subMu.Lock()
-	delete(wt.gitStatusSubscribers, sub)
-	wt.subMu.Unlock()
+// UnsubscribeWorkspaceStream removes and closes a workspace stream subscriber
+func (wt *WorkspaceTracker) UnsubscribeWorkspaceStream(sub types.WorkspaceStreamSubscriber) {
+	wt.workspaceSubMu.Lock()
+	delete(wt.workspaceStreamSubscribers, sub)
+	wt.workspaceSubMu.Unlock()
 	close(sub)
 }
 
-// SubscribeFiles creates a new files subscriber
-func (wt *WorkspaceTracker) SubscribeFiles() types.FilesSubscriber {
-	sub := make(types.FilesSubscriber, 10)
+// Notification methods for unified workspace stream
 
-	wt.subMu.Lock()
-	wt.filesSubscribers[sub] = struct{}{}
-	wt.subMu.Unlock()
+// notifyWorkspaceStreamGitStatus sends git status to all workspace stream subscribers
+func (wt *WorkspaceTracker) notifyWorkspaceStreamGitStatus(update types.GitStatusUpdate) {
+	wt.workspaceSubMu.RLock()
+	defer wt.workspaceSubMu.RUnlock()
 
-	// Send current files immediately
-	wt.mu.RLock()
-	current := wt.currentFiles
-	wt.mu.RUnlock()
-
-	if current.Timestamp.IsZero() {
-		current.Timestamp = time.Now()
-	}
-
-	select {
-	case sub <- current:
-	default:
-	}
-
-	return sub
-}
-
-// UnsubscribeFiles removes a files subscriber
-func (wt *WorkspaceTracker) UnsubscribeFiles(sub types.FilesSubscriber) {
-	wt.subMu.Lock()
-	delete(wt.filesSubscribers, sub)
-	wt.subMu.Unlock()
-	close(sub)
-}
-
-// Notification methods
-
-// notifyGitStatusSubscribers notifies all git status subscribers
-func (wt *WorkspaceTracker) notifyGitStatusSubscribers(update types.GitStatusUpdate) {
-	wt.subMu.RLock()
-	defer wt.subMu.RUnlock()
-
-	for sub := range wt.gitStatusSubscribers {
+	msg := types.NewWorkspaceGitStatus(&update)
+	for sub := range wt.workspaceStreamSubscribers {
 		select {
-		case sub <- update:
+		case sub <- msg:
 		default:
 			// Subscriber is slow, skip
 		}
 	}
 }
 
-// notifyFilesSubscribers notifies all files subscribers
-func (wt *WorkspaceTracker) notifyFilesSubscribers(update types.FileListUpdate) {
-	wt.subMu.RLock()
-	defer wt.subMu.RUnlock()
+// notifyWorkspaceStreamFileChange sends file change notification to all workspace stream subscribers
+func (wt *WorkspaceTracker) notifyWorkspaceStreamFileChange(notification types.FileChangeNotification) {
+	wt.workspaceSubMu.RLock()
+	defer wt.workspaceSubMu.RUnlock()
 
-	for sub := range wt.filesSubscribers {
+	msg := types.NewWorkspaceFileChange(&notification)
+	for sub := range wt.workspaceStreamSubscribers {
 		select {
-		case sub <- update:
+		case sub <- msg:
 		default:
 			// Subscriber is slow, skip
 		}
 	}
 }
 
+// notifyWorkspaceStreamFileList sends file list update to all workspace stream subscribers
+func (wt *WorkspaceTracker) notifyWorkspaceStreamFileList(update types.FileListUpdate) {
+	wt.workspaceSubMu.RLock()
+	defer wt.workspaceSubMu.RUnlock()
 
-
-// SubscribeFileChanges creates a new file change subscriber
-func (wt *WorkspaceTracker) SubscribeFileChanges() types.FileChangeSubscriber {
-	sub := make(types.FileChangeSubscriber, 100)
-
-	wt.subMu.Lock()
-	wt.fileChangeSubscribers[sub] = struct{}{}
-	wt.subMu.Unlock()
-
-	return sub
-}
-
-// UnsubscribeFileChanges removes a file change subscriber
-func (wt *WorkspaceTracker) UnsubscribeFileChanges(sub types.FileChangeSubscriber) {
-	wt.subMu.Lock()
-	delete(wt.fileChangeSubscribers, sub)
-	wt.subMu.Unlock()
-	close(sub)
-}
-
-// notifyFileChangeSubscribers notifies all file change subscribers
-func (wt *WorkspaceTracker) notifyFileChangeSubscribers(notification types.FileChangeNotification) {
-	wt.subMu.RLock()
-	defer wt.subMu.RUnlock()
-
-	for sub := range wt.fileChangeSubscribers {
+	msg := types.NewWorkspaceFileList(&update)
+	for sub := range wt.workspaceStreamSubscribers {
 		select {
-		case sub <- notification:
+		case sub <- msg:
 		default:
 			// Subscriber is slow, skip
 		}

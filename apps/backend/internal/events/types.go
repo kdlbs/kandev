@@ -104,6 +104,32 @@ const (
 	FileChangeNotified = "file.change.notified" // File changed in workspace
 )
 
+// Event types for shell I/O
+const (
+	ShellOutput = "shell.output" // Shell output data
+	ShellExit   = "shell.exit"   // Shell process exited
+)
+
+// BuildShellOutputSubject creates a shell output subject for a specific session
+func BuildShellOutputSubject(sessionID string) string {
+	return ShellOutput + "." + sessionID
+}
+
+// BuildShellOutputWildcardSubject creates a wildcard subscription for all shell output events
+func BuildShellOutputWildcardSubject() string {
+	return ShellOutput + ".*"
+}
+
+// BuildShellExitSubject creates a shell exit subject for a specific session
+func BuildShellExitSubject(sessionID string) string {
+	return ShellExit + "." + sessionID
+}
+
+// BuildShellExitWildcardSubject creates a wildcard subscription for all shell exit events
+func BuildShellExitWildcardSubject() string {
+	return ShellExit + ".*"
+}
+
 // BuildAgentStreamSubject creates an agent stream subject for a specific session
 func BuildAgentStreamSubject(sessionID string) string {
 	return AgentStream + "." + sessionID

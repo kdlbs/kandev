@@ -265,3 +265,61 @@ func (p *EventPublisher) PublishPermissionRequest(execution *AgentExecution, eve
 			zap.String("title", event.PermissionTitle))
 	}
 }
+
+// PublishShellOutput publishes a shell output event to the event bus.
+func (p *EventPublisher) PublishShellOutput(execution *AgentExecution, data string) {
+	if p.eventBus == nil {
+		return
+	}
+
+	sessionID := execution.SessionID
+
+	payload := ShellOutputEventPayload{
+		TaskID:    execution.TaskID,
+		SessionID: sessionID,
+		AgentID:   execution.ID,
+		Type:      "output",
+		Data:      data,
+		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
+	}
+
+	event := bus.NewEvent(events.ShellOutput, "agent-manager", payload)
+	subject := events.BuildShellOutputSubject(sessionID)
+
+	if err := p.eventBus.Publish(context.Background(), subject, event); err != nil {
+		p.logger.Error("failed to publish shell output event",
+			zap.String("instance_id", execution.ID),
+			zap.String("task_id", execution.TaskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
+}
+
+// PublishShellExit publishes a shell exit event to the event bus.
+func (p *EventPublisher) PublishShellExit(execution *AgentExecution, exitCode int) {
+	if p.eventBus == nil {
+		return
+	}
+
+	sessionID := execution.SessionID
+
+	payload := ShellExitEventPayload{
+		TaskID:    execution.TaskID,
+		SessionID: sessionID,
+		AgentID:   execution.ID,
+		Type:      "exit",
+		Code:      exitCode,
+		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
+	}
+
+	event := bus.NewEvent(events.ShellExit, "agent-manager", payload)
+	subject := events.BuildShellExitSubject(sessionID)
+
+	if err := p.eventBus.Publish(context.Background(), subject, event); err != nil {
+		p.logger.Error("failed to publish shell exit event",
+			zap.String("instance_id", execution.ID),
+			zap.String("task_id", execution.TaskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
+}

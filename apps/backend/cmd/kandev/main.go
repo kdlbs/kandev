@@ -561,6 +561,62 @@ func main() {
 		log.Info("Subscribed to file change events for WebSocket broadcasting")
 	}
 
+	// Subscribe to shell output events and broadcast to WebSocket subscribers
+	_, err = eventBus.Subscribe(events.BuildShellOutputWildcardSubject(), func(ctx context.Context, event *bus.Event) error {
+		// Extract session_id from the event data
+		var taskSessionID string
+		switch data := event.Data.(type) {
+		case lifecycle.ShellOutputEventPayload:
+			taskSessionID = data.SessionID
+		case *lifecycle.ShellOutputEventPayload:
+			taskSessionID = data.SessionID
+		case map[string]interface{}:
+			taskSessionID, _ = data["session_id"].(string)
+		}
+		if taskSessionID == "" {
+			return nil
+		}
+
+		// Broadcast shell output to session subscribers
+		notification, _ := ws.NewNotification(ws.ActionSessionShellOutput, event.Data)
+		gateway.Hub.BroadcastToSession(taskSessionID, notification)
+		return nil
+	})
+	if err != nil {
+		log.Error("Failed to subscribe to shell output events", zap.Error(err))
+	} else {
+		log.Info("Subscribed to shell output events for WebSocket broadcasting")
+	}
+
+	// Subscribe to shell exit events and broadcast to WebSocket subscribers
+	// Note: Frontend expects shell exit via session.shell.output with type: "exit"
+	_, err = eventBus.Subscribe(events.BuildShellExitWildcardSubject(), func(ctx context.Context, event *bus.Event) error {
+		// Extract session_id from the event data
+		var taskSessionID string
+		switch data := event.Data.(type) {
+		case lifecycle.ShellExitEventPayload:
+			taskSessionID = data.SessionID
+		case *lifecycle.ShellExitEventPayload:
+			taskSessionID = data.SessionID
+		case map[string]interface{}:
+			taskSessionID, _ = data["session_id"].(string)
+		}
+		if taskSessionID == "" {
+			return nil
+		}
+
+		// Broadcast shell exit to session subscribers via session.shell.output action
+		// Frontend handles exit events via type: "exit" in the same handler
+		notification, _ := ws.NewNotification(ws.ActionSessionShellOutput, event.Data)
+		gateway.Hub.BroadcastToSession(taskSessionID, notification)
+		return nil
+	})
+	if err != nil {
+		log.Error("Failed to subscribe to shell exit events", zap.Error(err))
+	} else {
+		log.Info("Subscribed to shell exit events for WebSocket broadcasting")
+	}
+
 	// ============================================
 	// HTTP SERVER (WebSocket + HTTP endpoints)
 	// ============================================

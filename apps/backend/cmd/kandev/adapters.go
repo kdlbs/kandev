@@ -225,16 +225,6 @@ func (a *orchestratorAdapter) ResumeTaskSession(ctx context.Context, taskID, tas
 	return err
 }
 
-// shellSessionResumerAdapter adapts the orchestrator service to the shell handlers' SessionResumer interface
-type shellSessionResumerAdapter struct {
-	svc *orchestrator.Service
-}
-
-func (a *shellSessionResumerAdapter) ResumeTaskSession(ctx context.Context, taskID, taskSessionID string) error {
-	_, err := a.svc.ResumeTaskSession(ctx, taskID, taskSessionID)
-	return err
-}
-
 // messageCreatorAdapter adapts the task service to the orchestrator.MessageCreator interface
 type messageCreatorAdapter struct {
 	svc *taskservice.Service
