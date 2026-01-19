@@ -37,24 +37,22 @@ import (
 	"github.com/kandev/kandev/internal/agent/registry"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
 	agentsettingshandlers "github.com/kandev/kandev/internal/agent/settings/handlers"
-	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/agent/worktree"
 	agentctl "github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/agentctl/client/launcher"
-	notificationcontroller "github.com/kandev/kandev/internal/notifications/controller"
-	notificationhandlers "github.com/kandev/kandev/internal/notifications/handlers"
-	notificationservice "github.com/kandev/kandev/internal/notifications/service"
-	notificationstore "github.com/kandev/kandev/internal/notifications/store"
 	editorcontroller "github.com/kandev/kandev/internal/editors/controller"
 	editorhandlers "github.com/kandev/kandev/internal/editors/handlers"
 	editorservice "github.com/kandev/kandev/internal/editors/service"
-	editorstore "github.com/kandev/kandev/internal/editors/store"
+	notificationcontroller "github.com/kandev/kandev/internal/notifications/controller"
+	notificationhandlers "github.com/kandev/kandev/internal/notifications/handlers"
+	notificationservice "github.com/kandev/kandev/internal/notifications/service"
 
 	// Orchestrator packages
 	"github.com/kandev/kandev/internal/orchestrator"
 	orchestratorcontroller "github.com/kandev/kandev/internal/orchestrator/controller"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	orchestratorhandlers "github.com/kandev/kandev/internal/orchestrator/handlers"
+	"github.com/kandev/kandev/internal/persistence"
 
 	// Task Service packages
 	taskcontroller "github.com/kandev/kandev/internal/task/controller"
@@ -65,7 +63,6 @@ import (
 	usercontroller "github.com/kandev/kandev/internal/user/controller"
 	userhandlers "github.com/kandev/kandev/internal/user/handlers"
 	userservice "github.com/kandev/kandev/internal/user/service"
-	userstore "github.com/kandev/kandev/internal/user/store"
 
 	// API types
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -189,49 +186,52 @@ func main() {
 	if dbPath == "" {
 		dbPath = "./kandev.db"
 	}
+	dbDriver := os.Getenv("KANDEV_DB_DRIVER")
+	if dbDriver == "" {
+		dbDriver = "sqlite"
+	}
 
-	// Initialize SQLite repository
+	// Initialize database provider
 	var taskRepo repository.Repository
-	taskRepo, err = repository.NewSQLiteRepository(dbPath)
+	var provider persistence.Provider
+	switch dbDriver {
+	case "sqlite":
+		provider, err = persistence.NewSQLiteProvider(dbPath)
+	default:
+		log.Fatal("Unsupported database driver", zap.String("db_driver", dbDriver))
+	}
 	if err != nil {
-		log.Fatal("Failed to initialize SQLite database", zap.Error(err), zap.String("db_path", dbPath))
+		log.Fatal("Failed to initialize database", zap.Error(err), zap.String("db_path", dbPath), zap.String("db_driver", dbDriver))
 	}
 	defer func() {
-		_ = taskRepo.Close()
+		_ = provider.Close()
 	}()
-	log.Info("SQLite database initialized", zap.String("db_path", dbPath))
+	log.Info("Database initialized", zap.String("db_path", dbPath), zap.String("db_driver", dbDriver))
 
-	agentSettingsRepo, err := settingsstore.NewSQLiteRepository(dbPath)
+	taskRepo, err = provider.TaskRepo()
+	if err != nil {
+		log.Fatal("Failed to initialize task repository", zap.Error(err), zap.String("db_path", dbPath))
+	}
+
+	agentSettingsRepo, err := provider.AgentSettingsRepo()
 	if err != nil {
 		log.Fatal("Failed to initialize agent settings store", zap.Error(err), zap.String("db_path", dbPath))
 	}
-	defer func() {
-		_ = agentSettingsRepo.Close()
-	}()
 
-	userRepo, err := userstore.NewSQLiteRepository(dbPath)
+	userRepo, err := provider.UserRepo()
 	if err != nil {
 		log.Fatal("Failed to initialize user store", zap.Error(err), zap.String("db_path", dbPath))
 	}
-	defer func() {
-		_ = userRepo.Close()
-	}()
 
-	notificationRepo, err := notificationstore.NewSQLiteRepository(dbPath)
+	notificationRepo, err := provider.NotificationRepo()
 	if err != nil {
 		log.Fatal("Failed to initialize notification store", zap.Error(err), zap.String("db_path", dbPath))
 	}
-	defer func() {
-		_ = notificationRepo.Close()
-	}()
 
-	editorRepo, err := editorstore.NewSQLiteRepository(dbPath)
+	editorRepo, err := provider.EditorRepo()
 	if err != nil {
 		log.Fatal("Failed to initialize editor store", zap.Error(err), zap.String("db_path", dbPath))
 	}
-	defer func() {
-		_ = editorRepo.Close()
-	}()
 
 	discoveryRegistry, err := discovery.LoadRegistry()
 	if err != nil {
@@ -377,41 +377,35 @@ func main() {
 	// ============================================
 	log.Info("Initializing Worktree Manager...")
 
-	// Create worktree store (uses same database as tasks)
-	// Type assert to get the *sql.DB from the SQLite repository
 	var worktreeMgr *worktree.Manager
-	if sqliteRepo, ok := taskRepo.(*repository.SQLiteRepository); ok {
-		worktreeStore, err := worktree.NewSQLiteStore(sqliteRepo.DB())
-		if err != nil {
-			log.Fatal("Failed to initialize worktree store", zap.Error(err))
-		}
-
-		// Create worktree manager with config from common config
-		worktreeMgr, err = worktree.NewManager(worktree.Config{
-			Enabled:      cfg.Worktree.Enabled,
-			BasePath:     cfg.Worktree.BasePath,
-			MaxPerRepo:   cfg.Worktree.MaxPerRepo,
-			BranchPrefix: "kandev/", // Default branch prefix
-		}, worktreeStore, log)
-		if err != nil {
-			log.Fatal("Failed to initialize worktree manager", zap.Error(err))
-		}
-		log.Info("Worktree Manager initialized",
-			zap.Bool("enabled", cfg.Worktree.Enabled),
-			zap.String("base_path", cfg.Worktree.BasePath))
-
-		// Wire worktree manager to lifecycle manager for agent isolation
-		if lifecycleMgr != nil {
-			lifecycleMgr.SetWorktreeManager(worktreeMgr)
-			log.Info("Worktree Manager connected to Lifecycle Manager")
-		}
-
-		// Wire worktree manager to task service for cleanup on task deletion
-		taskSvc.SetWorktreeCleanup(worktreeMgr)
-		log.Info("Worktree Manager connected to Task Service for cleanup")
-	} else {
-		log.Warn("Worktree Manager disabled (requires SQLite repository)")
+	worktreeStore, err := provider.WorktreeStore()
+	if err != nil {
+		log.Fatal("Failed to initialize worktree store", zap.Error(err))
 	}
+
+	// Create worktree manager with config from common config
+	worktreeMgr, err = worktree.NewManager(worktree.Config{
+		Enabled:      cfg.Worktree.Enabled,
+		BasePath:     cfg.Worktree.BasePath,
+		MaxPerRepo:   cfg.Worktree.MaxPerRepo,
+		BranchPrefix: "kandev/", // Default branch prefix
+	}, worktreeStore, log)
+	if err != nil {
+		log.Fatal("Failed to initialize worktree manager", zap.Error(err))
+	}
+	log.Info("Worktree Manager initialized",
+		zap.Bool("enabled", cfg.Worktree.Enabled),
+		zap.String("base_path", cfg.Worktree.BasePath))
+
+	// Wire worktree manager to lifecycle manager for agent isolation
+	if lifecycleMgr != nil {
+		lifecycleMgr.SetWorktreeManager(worktreeMgr)
+		log.Info("Worktree Manager connected to Lifecycle Manager")
+	}
+
+	// Wire worktree manager to task service for cleanup on task deletion
+	taskSvc.SetWorktreeCleanup(worktreeMgr)
+	log.Info("Worktree Manager connected to Task Service for cleanup")
 
 	// ============================================
 	// ORCHESTRATOR
@@ -596,18 +590,18 @@ func main() {
 		// Broadcast agent stream event to session subscribers
 		action := "agent." + payload.Data.Type
 		notification, _ := ws.NewNotification(action, map[string]interface{}{
-			"task_id":       payload.TaskID,
-			"session_id":    sessionID,
-			"type":          payload.Data.Type,
-			"text":          payload.Data.Text,
-			"tool_call_id":  payload.Data.ToolCallID,
-			"tool_name":     payload.Data.ToolName,
-			"tool_title":    payload.Data.ToolTitle,
-			"tool_status":   payload.Data.ToolStatus,
-			"tool_args":     payload.Data.ToolArgs,
-			"tool_result":   payload.Data.ToolResult,
-			"error":         payload.Data.Error,
-			"timestamp":     payload.Timestamp,
+			"task_id":      payload.TaskID,
+			"session_id":   sessionID,
+			"type":         payload.Data.Type,
+			"text":         payload.Data.Text,
+			"tool_call_id": payload.Data.ToolCallID,
+			"tool_name":    payload.Data.ToolName,
+			"tool_title":   payload.Data.ToolTitle,
+			"tool_status":  payload.Data.ToolStatus,
+			"tool_args":    payload.Data.ToolArgs,
+			"tool_result":  payload.Data.ToolResult,
+			"error":        payload.Data.Error,
+			"timestamp":    payload.Timestamp,
 		})
 		gateway.Hub.BroadcastToSession(sessionID, notification)
 	})

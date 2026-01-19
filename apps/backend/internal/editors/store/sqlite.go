@@ -5,51 +5,42 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
-	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/kandev/kandev/internal/editors/discovery"
 	"github.com/kandev/kandev/internal/editors/models"
 )
 
 type SQLiteRepository struct {
-	db *sql.DB
+	db     *sql.DB
+	ownsDB bool
 }
 
 var _ Repository = (*SQLiteRepository)(nil)
 
-func NewSQLiteRepository(dbPath string) (*SQLiteRepository, error) {
-	normalizedPath := normalizeSQLitePath(dbPath)
-	if err := ensureSQLiteDir(normalizedPath); err != nil {
-		return nil, fmt.Errorf("failed to prepare database path: %w", err)
-	}
-	if err := ensureSQLiteFile(normalizedPath); err != nil {
-		return nil, fmt.Errorf("failed to create database file: %w", err)
-	}
-	dsn := fmt.Sprintf("file:%s?_foreign_keys=on&_mode=rwc", normalizedPath)
-	db, err := sql.Open("sqlite3", dsn)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open database: %w", err)
-	}
-	db.SetMaxOpenConns(1)
-	db.SetMaxIdleConns(1)
+func NewSQLiteRepositoryWithDB(dbConn *sql.DB) (*SQLiteRepository, error) {
+	return newSQLiteRepository(dbConn, false)
+}
 
-	repo := &SQLiteRepository{db: db}
+func newSQLiteRepository(dbConn *sql.DB, ownsDB bool) (*SQLiteRepository, error) {
+	repo := &SQLiteRepository{db: dbConn, ownsDB: ownsDB}
 	if err := repo.initSchema(); err != nil {
-		if closeErr := db.Close(); closeErr != nil {
-			return nil, fmt.Errorf("failed to close database after schema error: %w", closeErr)
+		if ownsDB {
+			if closeErr := dbConn.Close(); closeErr != nil {
+				return nil, fmt.Errorf("failed to close database after schema error: %w", closeErr)
+			}
 		}
 		return nil, fmt.Errorf("failed to initialize schema: %w", err)
 	}
 	if err := repo.ensureDefaults(context.Background()); err != nil {
-		if closeErr := db.Close(); closeErr != nil {
-			return nil, fmt.Errorf("failed to close database after defaults error: %w", closeErr)
+		if ownsDB {
+			if closeErr := dbConn.Close(); closeErr != nil {
+				return nil, fmt.Errorf("failed to close database after defaults error: %w", closeErr)
+			}
 		}
 		return nil, fmt.Errorf("failed to seed editor defaults: %w", err)
 	}
@@ -57,34 +48,10 @@ func NewSQLiteRepository(dbPath string) (*SQLiteRepository, error) {
 }
 
 func (r *SQLiteRepository) Close() error {
-	return r.db.Close()
-}
-
-func ensureSQLiteDir(dbPath string) error {
-	dir := filepath.Dir(dbPath)
-	if dir == "." || dir == "" {
+	if !r.ownsDB {
 		return nil
 	}
-	return os.MkdirAll(dir, 0o755)
-}
-
-func ensureSQLiteFile(dbPath string) error {
-	file, err := os.OpenFile(dbPath, os.O_RDWR|os.O_CREATE, 0o644)
-	if err != nil {
-		return err
-	}
-	return file.Close()
-}
-
-func normalizeSQLitePath(dbPath string) string {
-	if dbPath == "" {
-		return dbPath
-	}
-	abs, err := filepath.Abs(dbPath)
-	if err != nil {
-		return dbPath
-	}
-	return abs
+	return r.db.Close()
 }
 
 func (r *SQLiteRepository) initSchema() error {

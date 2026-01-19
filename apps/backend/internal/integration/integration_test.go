@@ -21,6 +21,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/worktree"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events/bus"
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
 	taskcontroller "github.com/kandev/kandev/internal/task/controller"
@@ -58,13 +59,15 @@ func NewTestServer(t *testing.T) *TestServer {
 	// Initialize event bus
 	eventBus := bus.NewMemoryEventBus(log)
 
-	// Initialize task repository (SQLite for tests)
 	tmpDir := t.TempDir()
-	taskRepo, err := repository.NewSQLiteRepository(tmpDir + "/test.db")
-	if err != nil {
-		t.Fatalf("failed to create test repository: %v", err)
-	}
+	dbConn, err := db.OpenSQLite(filepath.Join(tmpDir, "test.db"))
+	require.NoError(t, err)
+	taskRepo, err := repository.NewSQLiteRepositoryWithDB(dbConn)
+	require.NoError(t, err)
 	t.Cleanup(func() {
+		if err := dbConn.Close(); err != nil {
+			t.Errorf("failed to close sqlite db: %v", err)
+		}
 		if err := taskRepo.Close(); err != nil {
 			t.Errorf("failed to close task repo: %v", err)
 		}
@@ -487,12 +490,12 @@ func TestTaskCRUD(t *testing.T) {
 	// Create task
 	t.Run("CreateTask", func(t *testing.T) {
 		resp, err := client.SendRequest("task-create-1", ws.ActionTaskCreate, map[string]interface{}{
-			"workspace_id": workspaceID,
-			"board_id":     boardID,
-			"column_id":    columnID,
-			"title":        "Test Task",
-			"description":  "A test task for integration testing",
-			"priority":     3, // HIGH priority (1=LOW, 2=MEDIUM, 3=HIGH)
+			"workspace_id":  workspaceID,
+			"board_id":      boardID,
+			"column_id":     columnID,
+			"title":         "Test Task",
+			"description":   "A test task for integration testing",
+			"priority":      3, // HIGH priority (1=LOW, 2=MEDIUM, 3=HIGH)
 			"repository_id": repositoryID,
 			"base_branch":   "main",
 		})
@@ -631,11 +634,11 @@ func TestTaskStateTransitions(t *testing.T) {
 	columnID := colPayload["id"].(string)
 
 	taskResp, _ := client.SendRequest("task-1", ws.ActionTaskCreate, map[string]interface{}{
-		"workspace_id": workspaceID,
-		"board_id":     boardID,
-		"column_id":    columnID,
-		"title":        "State Test Task",
-		"description":  "Test state transitions",
+		"workspace_id":  workspaceID,
+		"board_id":      boardID,
+		"column_id":     columnID,
+		"title":         "State Test Task",
+		"description":   "Test state transitions",
 		"repository_id": repositoryID,
 		"base_branch":   "main",
 	})
@@ -727,10 +730,10 @@ func TestTaskMove(t *testing.T) {
 
 	// Create task in first column
 	taskResp, _ := client.SendRequest("task-1", ws.ActionTaskCreate, map[string]interface{}{
-		"workspace_id": workspaceID,
-		"board_id":     boardID,
-		"column_id":    col1ID,
-		"title":        "Movable Task",
+		"workspace_id":  workspaceID,
+		"board_id":      boardID,
+		"column_id":     col1ID,
+		"title":         "Movable Task",
 		"repository_id": repositoryID,
 		"base_branch":   "main",
 	})
@@ -844,10 +847,10 @@ func TestMultipleClients(t *testing.T) {
 
 	// Client 1 creates a task in the column
 	taskResp, err := client1.SendRequest("c1-task-1", ws.ActionTaskCreate, map[string]interface{}{
-		"workspace_id": workspaceID,
-		"board_id":     boardID,
-		"column_id":    columnID,
-		"title":        "Task by Client 1",
+		"workspace_id":  workspaceID,
+		"board_id":      boardID,
+		"column_id":     columnID,
+		"title":         "Task by Client 1",
 		"repository_id": repositoryID,
 		"base_branch":   "main",
 	})
@@ -971,10 +974,10 @@ func TestTaskSubscription(t *testing.T) {
 	columnID := colPayload["id"].(string)
 
 	taskResp, _ := client.SendRequest("task-1", ws.ActionTaskCreate, map[string]interface{}{
-		"workspace_id": workspaceID,
-		"board_id":     boardID,
-		"column_id":    columnID,
-		"title":        "Subscribable Task",
+		"workspace_id":  workspaceID,
+		"board_id":      boardID,
+		"column_id":     columnID,
+		"title":         "Subscribable Task",
 		"repository_id": repositoryID,
 		"base_branch":   "main",
 	})
@@ -1070,10 +1073,10 @@ func TestConcurrentRequests(t *testing.T) {
 				"task-"+string(rune('0'+idx)),
 				ws.ActionTaskCreate,
 				map[string]interface{}{
-					"workspace_id": workspaceID,
-					"board_id":     boardID,
-					"column_id":    columnID,
-					"title":        "Concurrent Task " + string(rune('0'+idx)),
+					"workspace_id":  workspaceID,
+					"board_id":      boardID,
+					"column_id":     columnID,
+					"title":         "Concurrent Task " + string(rune('0'+idx)),
 					"repository_id": repositoryID,
 					"base_branch":   "main",
 				},
