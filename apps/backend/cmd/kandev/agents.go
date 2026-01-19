@@ -23,7 +23,7 @@ func provideLifecycleManager(
 	log *logger.Logger,
 	eventBus bus.EventBus,
 	dockerClient *docker.Client,
-	agentSettingsRepo *settingsstore.SQLiteRepository,
+	agentSettingsRepo settingsstore.Repository,
 ) (*lifecycle.Manager, *registry.Registry, error) {
 	agentManagerEnabled := (cfg.Agent.Runtime == "docker" && dockerClient != nil) ||
 		cfg.Agent.Runtime == "standalone"

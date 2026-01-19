@@ -14,11 +14,10 @@ import (
 
 type Repositories struct {
 	Task          repository.Repository
-	TaskImpl      *repository.SQLiteRepository
-	AgentSettings *settingsstore.SQLiteRepository
-	User          *userstore.SQLiteRepository
-	Notification  *notificationstore.SQLiteRepository
-	Editor        *editorstore.SQLiteRepository
+	AgentSettings settingsstore.Repository
+	User          userstore.Repository
+	Notification  notificationstore.Repository
+	Editor        editorstore.Repository
 }
 
 type Services struct {

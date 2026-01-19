@@ -11,19 +11,19 @@ import (
 	"github.com/kandev/kandev/internal/agent/settings/models"
 )
 
-type SQLiteRepository struct {
+type sqliteRepository struct {
 	db     *sql.DB
 	ownsDB bool
 }
 
-var _ Repository = (*SQLiteRepository)(nil)
+var _ Repository = (*sqliteRepository)(nil)
 
-func NewSQLiteRepositoryWithDB(dbConn *sql.DB) (*SQLiteRepository, error) {
+func newSQLiteRepositoryWithDB(dbConn *sql.DB) (*sqliteRepository, error) {
 	return newSQLiteRepository(dbConn, false)
 }
 
-func newSQLiteRepository(dbConn *sql.DB, ownsDB bool) (*SQLiteRepository, error) {
-	repo := &SQLiteRepository{db: dbConn, ownsDB: ownsDB}
+func newSQLiteRepository(dbConn *sql.DB, ownsDB bool) (*sqliteRepository, error) {
+	repo := &sqliteRepository{db: dbConn, ownsDB: ownsDB}
 	if err := repo.initSchema(); err != nil {
 		if ownsDB {
 			if closeErr := dbConn.Close(); closeErr != nil {
@@ -35,7 +35,7 @@ func newSQLiteRepository(dbConn *sql.DB, ownsDB bool) (*SQLiteRepository, error)
 	return repo, nil
 }
 
-func (r *SQLiteRepository) initSchema() error {
+func (r *sqliteRepository) initSchema() error {
 	schema := `
 	CREATE TABLE IF NOT EXISTS agents (
 		id TEXT PRIMARY KEY,
@@ -79,14 +79,14 @@ func (r *SQLiteRepository) initSchema() error {
 	return nil
 }
 
-func (r *SQLiteRepository) Close() error {
+func (r *sqliteRepository) Close() error {
 	if !r.ownsDB {
 		return nil
 	}
 	return r.db.Close()
 }
 
-func (r *SQLiteRepository) CreateAgent(ctx context.Context, agent *models.Agent) error {
+func (r *sqliteRepository) CreateAgent(ctx context.Context, agent *models.Agent) error {
 	if agent.ID == "" {
 		agent.ID = uuid.New().String()
 	}
@@ -100,7 +100,7 @@ func (r *SQLiteRepository) CreateAgent(ctx context.Context, agent *models.Agent)
 	return err
 }
 
-func (r *SQLiteRepository) GetAgent(ctx context.Context, id string) (*models.Agent, error) {
+func (r *sqliteRepository) GetAgent(ctx context.Context, id string) (*models.Agent, error) {
 	row := r.db.QueryRowContext(ctx, `
 		SELECT id, name, workspace_id, supports_mcp, mcp_config_path, created_at, updated_at
 		FROM agents WHERE id = ?
@@ -108,7 +108,7 @@ func (r *SQLiteRepository) GetAgent(ctx context.Context, id string) (*models.Age
 	return scanAgent(row)
 }
 
-func (r *SQLiteRepository) GetAgentByName(ctx context.Context, name string) (*models.Agent, error) {
+func (r *sqliteRepository) GetAgentByName(ctx context.Context, name string) (*models.Agent, error) {
 	row := r.db.QueryRowContext(ctx, `
 		SELECT id, name, workspace_id, supports_mcp, mcp_config_path, created_at, updated_at
 		FROM agents WHERE name = ?
@@ -116,7 +116,7 @@ func (r *SQLiteRepository) GetAgentByName(ctx context.Context, name string) (*mo
 	return scanAgent(row)
 }
 
-func (r *SQLiteRepository) UpdateAgent(ctx context.Context, agent *models.Agent) error {
+func (r *sqliteRepository) UpdateAgent(ctx context.Context, agent *models.Agent) error {
 	agent.UpdatedAt = time.Now().UTC()
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE agents SET workspace_id = ?, supports_mcp = ?, mcp_config_path = ?, updated_at = ?
@@ -132,7 +132,7 @@ func (r *SQLiteRepository) UpdateAgent(ctx context.Context, agent *models.Agent)
 	return nil
 }
 
-func (r *SQLiteRepository) DeleteAgent(ctx context.Context, id string) error {
+func (r *sqliteRepository) DeleteAgent(ctx context.Context, id string) error {
 	result, err := r.db.ExecContext(ctx, `DELETE FROM agents WHERE id = ?`, id)
 	if err != nil {
 		return err
@@ -144,7 +144,7 @@ func (r *SQLiteRepository) DeleteAgent(ctx context.Context, id string) error {
 	return nil
 }
 
-func (r *SQLiteRepository) ListAgents(ctx context.Context) ([]*models.Agent, error) {
+func (r *sqliteRepository) ListAgents(ctx context.Context) ([]*models.Agent, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, name, workspace_id, supports_mcp, mcp_config_path, created_at, updated_at
 		FROM agents ORDER BY created_at DESC
@@ -167,7 +167,7 @@ func (r *SQLiteRepository) ListAgents(ctx context.Context) ([]*models.Agent, err
 	return result, rows.Err()
 }
 
-func (r *SQLiteRepository) CreateAgentProfile(ctx context.Context, profile *models.AgentProfile) error {
+func (r *sqliteRepository) CreateAgentProfile(ctx context.Context, profile *models.AgentProfile) error {
 	if profile.ID == "" {
 		profile.ID = uuid.New().String()
 	}
@@ -182,7 +182,7 @@ func (r *SQLiteRepository) CreateAgentProfile(ctx context.Context, profile *mode
 	return err
 }
 
-func (r *SQLiteRepository) UpdateAgentProfile(ctx context.Context, profile *models.AgentProfile) error {
+func (r *sqliteRepository) UpdateAgentProfile(ctx context.Context, profile *models.AgentProfile) error {
 	profile.UpdatedAt = time.Now().UTC()
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE agent_profiles
@@ -200,7 +200,7 @@ func (r *SQLiteRepository) UpdateAgentProfile(ctx context.Context, profile *mode
 	return nil
 }
 
-func (r *SQLiteRepository) DeleteAgentProfile(ctx context.Context, id string) error {
+func (r *sqliteRepository) DeleteAgentProfile(ctx context.Context, id string) error {
 	now := time.Now().UTC()
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE agent_profiles SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL
@@ -215,7 +215,7 @@ func (r *SQLiteRepository) DeleteAgentProfile(ctx context.Context, id string) er
 	return nil
 }
 
-func (r *SQLiteRepository) GetAgentProfile(ctx context.Context, id string) (*models.AgentProfile, error) {
+func (r *sqliteRepository) GetAgentProfile(ctx context.Context, id string) (*models.AgentProfile, error) {
 	row := r.db.QueryRowContext(ctx, `
 		SELECT id, agent_id, name, agent_display_name, model, auto_approve, dangerously_skip_permissions, plan, created_at, updated_at, deleted_at
 		FROM agent_profiles WHERE id = ? AND deleted_at IS NULL
@@ -223,7 +223,7 @@ func (r *SQLiteRepository) GetAgentProfile(ctx context.Context, id string) (*mod
 	return scanAgentProfile(row)
 }
 
-func (r *SQLiteRepository) ListAgentProfiles(ctx context.Context, agentID string) ([]*models.AgentProfile, error) {
+func (r *sqliteRepository) ListAgentProfiles(ctx context.Context, agentID string) ([]*models.AgentProfile, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, agent_id, name, agent_display_name, model, auto_approve, dangerously_skip_permissions, plan, created_at, updated_at, deleted_at
 		FROM agent_profiles WHERE agent_id = ? AND deleted_at IS NULL ORDER BY created_at DESC

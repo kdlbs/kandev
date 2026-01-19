@@ -45,6 +45,18 @@ make -C apps/backend lint
   - Uses ACP (JSON-RPC 2.0 over stdin/stdout) to talk to agent process.
   - Streams ACP updates and workspace outputs to backend.
 
+### Provider Pattern (Backend)
+
+- **Goal**: Keep `cmd/kandev` thin by constructing dependencies via package-local providers.
+- **Location**: Providers live next to the implementation (e.g. `internal/events/provider.go`, `internal/task/repository/provider.go`).
+- **API contract**:
+  - Each package exposes `Provide(...)` that returns a pointer to the concrete implementation (not an interface), a `cleanup func() error`, and an `error`.
+  - Example signature: `func Provide(cfg *config.Config, log *logger.Logger) (*impl, func() error, error)`
+- **Usage**:
+  - External packages depend on the public interface type, but composition uses the concrete impl.
+  - Repositories expose a public `Repository` interface, while the implementation struct stays unexported.
+  - Call `cleanup()` during shutdown; providers should not own shared resources unless they created them.
+
 ### Runtime / agentctl Flow (Simplified)
 
 ```
@@ -202,4 +214,4 @@ The agentctl server now uses a protocol adapter layer to support multiple agent 
 
 ---
 
-**Last Updated**: 2026-01-11
+**Last Updated**: 2026-01-19

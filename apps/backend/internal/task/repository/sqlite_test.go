@@ -12,7 +12,7 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
-func createTestSQLiteRepo(t *testing.T) (*SQLiteRepository, func()) {
+func createTestSQLiteRepo(t *testing.T) (*sqliteRepository, func()) {
 	t.Helper()
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
@@ -21,7 +21,7 @@ func createTestSQLiteRepo(t *testing.T) (*SQLiteRepository, func()) {
 	if err != nil {
 		t.Fatalf("failed to open SQLite database: %v", err)
 	}
-	repo, err := NewSQLiteRepositoryWithDB(dbConn)
+	repo, err := newSQLiteRepositoryWithDB(dbConn)
 	if err != nil {
 		t.Fatalf("failed to create SQLite repository: %v", err)
 	}
@@ -483,7 +483,7 @@ func TestSQLiteRepository_Persistence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open SQLite database: %v", err)
 	}
-	repo1, err := NewSQLiteRepositoryWithDB(dbConn1)
+	repo1, err := newSQLiteRepositoryWithDB(dbConn1)
 	if err != nil {
 		t.Fatalf("failed to create first repository: %v", err)
 	}
@@ -503,7 +503,7 @@ func TestSQLiteRepository_Persistence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open SQLite database: %v", err)
 	}
-	repo2, err := NewSQLiteRepositoryWithDB(dbConn2)
+	repo2, err := newSQLiteRepositoryWithDB(dbConn2)
 	if err != nil {
 		t.Fatalf("failed to create second repository: %v", err)
 	}
@@ -527,7 +527,7 @@ func TestSQLiteRepository_Persistence(t *testing.T) {
 
 // Message CRUD tests
 
-func setupSQLiteTestSession(ctx context.Context, repo *SQLiteRepository, taskID, sessionID string) string {
+func setupSQLiteTestSession(ctx context.Context, repo *sqliteRepository, taskID, sessionID string) string {
 	session := &models.TaskSession{
 		ID:             sessionID,
 		TaskID:         taskID,

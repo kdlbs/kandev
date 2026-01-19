@@ -3,8 +3,8 @@ package store
 import "database/sql"
 
 // Provide creates the SQLite notifications store using the shared database connection.
-func Provide(db *sql.DB) (*SQLiteRepository, func() error, error) {
-	repo, err := NewSQLiteRepositoryWithDB(db)
+func Provide(db *sql.DB) (*sqliteRepository, func() error, error) {
+	repo, err := newSQLiteRepositoryWithDB(db)
 	if err != nil {
 		return nil, nil, err
 	}

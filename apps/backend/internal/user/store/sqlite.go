@@ -15,19 +15,19 @@ const (
 	DefaultUserEmail = "default@kandev.local"
 )
 
-type SQLiteRepository struct {
+type sqliteRepository struct {
 	db     *sql.DB
 	ownsDB bool
 }
 
-var _ Repository = (*SQLiteRepository)(nil)
+var _ Repository = (*sqliteRepository)(nil)
 
-func NewSQLiteRepositoryWithDB(dbConn *sql.DB) (*SQLiteRepository, error) {
+func newSQLiteRepositoryWithDB(dbConn *sql.DB) (*sqliteRepository, error) {
 	return newSQLiteRepository(dbConn, false)
 }
 
-func newSQLiteRepository(dbConn *sql.DB, ownsDB bool) (*SQLiteRepository, error) {
-	repo := &SQLiteRepository{db: dbConn, ownsDB: ownsDB}
+func newSQLiteRepository(dbConn *sql.DB, ownsDB bool) (*sqliteRepository, error) {
+	repo := &sqliteRepository{db: dbConn, ownsDB: ownsDB}
 	if err := repo.initSchema(); err != nil {
 		if ownsDB {
 			if closeErr := dbConn.Close(); closeErr != nil {
@@ -39,7 +39,7 @@ func newSQLiteRepository(dbConn *sql.DB, ownsDB bool) (*SQLiteRepository, error)
 	return repo, nil
 }
 
-func (r *SQLiteRepository) initSchema() error {
+func (r *sqliteRepository) initSchema() error {
 	schema := `
 	CREATE TABLE IF NOT EXISTS users (
 		id TEXT PRIMARY KEY,
@@ -59,7 +59,7 @@ func (r *SQLiteRepository) initSchema() error {
 	return r.ensureDefaultUser()
 }
 
-func (r *SQLiteRepository) ensureUserSettingsColumn() error {
+func (r *sqliteRepository) ensureUserSettingsColumn() error {
 	exists, err := r.columnExists("users", "settings")
 	if err != nil {
 		return err
@@ -71,7 +71,7 @@ func (r *SQLiteRepository) ensureUserSettingsColumn() error {
 	return err
 }
 
-func (r *SQLiteRepository) columnExists(table, column string) (bool, error) {
+func (r *sqliteRepository) columnExists(table, column string) (bool, error) {
 	rows, err := r.db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
 	if err != nil {
 		return false, err
@@ -96,7 +96,7 @@ func (r *SQLiteRepository) columnExists(table, column string) (bool, error) {
 	return false, rows.Err()
 }
 
-func (r *SQLiteRepository) ensureDefaultUser() error {
+func (r *sqliteRepository) ensureDefaultUser() error {
 	ctx := context.Background()
 	var count int
 	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(1) FROM users WHERE id = ?", DefaultUserID).Scan(&count); err != nil {
@@ -115,14 +115,14 @@ func (r *SQLiteRepository) ensureDefaultUser() error {
 	return nil
 }
 
-func (r *SQLiteRepository) Close() error {
+func (r *sqliteRepository) Close() error {
 	if !r.ownsDB {
 		return nil
 	}
 	return r.db.Close()
 }
 
-func (r *SQLiteRepository) GetUser(ctx context.Context, id string) (*models.User, error) {
+func (r *sqliteRepository) GetUser(ctx context.Context, id string) (*models.User, error) {
 	row := r.db.QueryRowContext(ctx, `
 		SELECT id, email, created_at, updated_at
 		FROM users WHERE id = ?
@@ -130,11 +130,11 @@ func (r *SQLiteRepository) GetUser(ctx context.Context, id string) (*models.User
 	return scanUser(row)
 }
 
-func (r *SQLiteRepository) GetDefaultUser(ctx context.Context) (*models.User, error) {
+func (r *sqliteRepository) GetDefaultUser(ctx context.Context) (*models.User, error) {
 	return r.GetUser(ctx, DefaultUserID)
 }
 
-func (r *SQLiteRepository) GetUserSettings(ctx context.Context, userID string) (*models.UserSettings, error) {
+func (r *sqliteRepository) GetUserSettings(ctx context.Context, userID string) (*models.UserSettings, error) {
 	row := r.db.QueryRowContext(ctx, `
 		SELECT settings, updated_at
 		FROM users WHERE id = ?
@@ -146,7 +146,7 @@ func (r *SQLiteRepository) GetUserSettings(ctx context.Context, userID string) (
 	return settings, nil
 }
 
-func (r *SQLiteRepository) UpsertUserSettings(ctx context.Context, settings *models.UserSettings) error {
+func (r *sqliteRepository) UpsertUserSettings(ctx context.Context, settings *models.UserSettings) error {
 	settings.UpdatedAt = time.Now().UTC()
 	if settings.CreatedAt.IsZero() {
 		settings.CreatedAt = settings.UpdatedAt

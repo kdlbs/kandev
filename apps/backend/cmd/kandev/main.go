@@ -132,11 +132,12 @@ func main() {
 	defer cancel()
 
 	// 4. Initialize event bus (in-memory for unified mode, or NATS if configured)
-	eventBus, cleanup, err := provideEventBus(cfg, log)
+	eventBusProvider, cleanup, err := events.Provide(cfg, log)
 	if err != nil {
 		log.Fatal("Failed to initialize event bus", zap.Error(err))
 	}
 	cleanups = append(cleanups, cleanup)
+	eventBus := eventBusProvider.Bus
 
 	// 5. Initialize Docker client
 	dockerClient, err := docker.NewClient(cfg.Docker, log)

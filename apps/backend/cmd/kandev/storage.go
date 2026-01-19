@@ -54,7 +54,6 @@ func provideRepositories(cfg *config.Config, log *logger.Logger) (*sql.DB, *Repo
 
 	repos := &Repositories{
 		Task:          taskRepoImpl,
-		TaskImpl:      taskRepoImpl,
 		AgentSettings: agentSettingsRepo,
 		User:          userRepo,
 		Notification:  notificationRepo,

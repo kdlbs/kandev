@@ -33,7 +33,7 @@ func provideGateway(
 	orchestratorSvc *orchestrator.Service,
 	lifecycleMgr *lifecycle.Manager,
 	agentRegistry *registry.Registry,
-	notificationRepo *notificationstore.SQLiteRepository,
+	notificationRepo notificationstore.Repository,
 	taskRepo repository.Repository,
 ) (*gateways.Gateway, *notificationservice.Service, *notificationcontroller.Controller, error) {
 	gateway, cleanup, err := gateways.Provide(log)
