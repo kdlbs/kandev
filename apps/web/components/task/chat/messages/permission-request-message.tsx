@@ -1,16 +1,11 @@
 'use client';
 
 import { useCallback, useState } from 'react';
-import {
-  IconAlertTriangle,
-  IconCheck,
-  IconX,
-  IconLoader2,
-} from '@tabler/icons-react';
-import { Button } from '@kandev/ui/button';
+import { IconAlertTriangle, IconCheck, IconX } from '@tabler/icons-react';
 import { cn } from '@/lib/utils';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import type { Message } from '@/lib/types/http';
+import { PermissionActionRow } from './permission-action-row';
 
 type PermissionOption = {
   option_id: string;
@@ -106,7 +101,7 @@ export function PermissionRequestMessage({ comment }: PermissionRequestMessagePr
     }
     return (
       <span className="inline-flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400">
-        <IconLoader2 className="h-3 w-3 animate-spin" /> Pending Approval
+        Pending Approval
       </span>
     );
   };
@@ -134,37 +129,12 @@ export function PermissionRequestMessage({ comment }: PermissionRequestMessagePr
 
       {/* Approval buttons - only show when pending */}
       {isPending && (
-        <div className="flex items-center gap-2 px-3 py-2 border-t border-amber-500/30 bg-amber-500/10">
-          <span className="text-xs text-amber-600 dark:text-amber-400 flex-1">
-            Approve this action?
-          </span>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={handleReject}
-            disabled={isResponding}
-            className="h-7 px-2 text-red-600 hover:text-red-700 hover:bg-red-500/10"
-          >
-            <IconX className="h-4 w-4 mr-1" />
-            Deny
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={handleApprove}
-            disabled={isResponding}
-            className="h-7 px-2 text-green-600 hover:text-green-700 hover:bg-green-500/10"
-          >
-            {isResponding ? (
-              <IconLoader2 className="h-4 w-4 mr-1 animate-spin" />
-            ) : (
-              <IconCheck className="h-4 w-4 mr-1" />
-            )}
-            Approve
-          </Button>
-        </div>
+        <PermissionActionRow
+          onApprove={handleApprove}
+          onReject={handleReject}
+          isResponding={isResponding}
+        />
       )}
     </div>
   );
 }
-

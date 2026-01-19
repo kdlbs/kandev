@@ -8,6 +8,7 @@ import {
   IconServer,
   IconRobot,
   IconBell,
+  IconCode,
   IconChevronRight,
   IconCpu,
   IconPlug,
@@ -30,6 +31,7 @@ import {
 } from '@kandev/ui/sidebar';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@kandev/ui/collapsible';
 import { useAppStore } from '@/components/state-provider';
+import { useAvailableAgents } from '@/hooks/use-available-agents';
 
 export function SettingsAppSidebar() {
   const pathname = usePathname();
@@ -37,6 +39,7 @@ export function SettingsAppSidebar() {
   const environments = useAppStore((state) => state.environments.items);
   const executors = useAppStore((state) => state.executors.items);
   const agents = useAppStore((state) => state.settingsAgents.items);
+  const availableAgents = useAvailableAgents().items;
 
   return (
     <Sidebar variant="inset">
@@ -88,6 +91,18 @@ export function SettingsAppSidebar() {
                           <Link href="/settings/general/notifications">
                             <IconBell className="h-4 w-4" />
                             <span>Notifications</span>
+                          </Link>
+                        </SidebarMenuSubButton>
+                      </SidebarMenuSubItem>
+                      <SidebarMenuSubItem>
+                        <SidebarMenuSubButton
+                          asChild
+                          size="sm"
+                          isActive={pathname === '/settings/general/editors'}
+                        >
+                          <Link href="/settings/general/editors">
+                            <IconCode className="h-4 w-4" />
+                            <span>Editors</span>
                           </Link>
                         </SidebarMenuSubButton>
                       </SidebarMenuSubItem>
@@ -263,6 +278,7 @@ export function SettingsAppSidebar() {
                             agent.profiles.map((profile) => {
                               const encodedAgent = encodeURIComponent(agent.name);
                               const profilePath = `/settings/agents/${encodedAgent}/profiles/${profile.id}`;
+                              const agentLabel = profile.agent_display_name || agent.name;
                               return (
                               <SidebarMenuSubItem key={profile.id}>
                                 <SidebarMenuSubButton
@@ -270,7 +286,7 @@ export function SettingsAppSidebar() {
                                   isActive={pathname === profilePath}
                                 >
                                   <Link href={profilePath}>
-                                    <span>{profile.name}</span>
+                                    <span>{agentLabel} • {profile.name}</span>
                                   </Link>
                                 </SidebarMenuSubButton>
                               </SidebarMenuSubItem>

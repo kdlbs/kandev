@@ -27,6 +27,7 @@ import { useSessionMessages } from '@/hooks/use-session-messages';
 import { MessageRenderer } from '@/components/task/chat/message-renderer';
 import { RunningIndicator } from '@/components/task/chat/messages/running-indicator';
 import { TodoSummary } from '@/components/task/chat/todo-summary';
+import { SessionsDropdown } from '@/components/task/sessions-dropdown';
 
 type AgentOption = {
   id: string;
@@ -60,7 +61,9 @@ export function TaskChatPanel({
   const task = useTask(session?.task_id ?? null);
   const taskId = session?.task_id ?? null;
   const taskDescription = task?.description ?? null;
-  const isWorking = session?.state === 'STARTING' || session?.state === 'RUNNING';
+  const isStarting = session?.state === 'STARTING';
+  const isWorking = isStarting || session?.state === 'RUNNING';
+  const isAgentBusy = session?.state === 'CREATED' || session?.state === 'RUNNING';
 
   // Fetch messages for this session
   const { messages, isLoading: messagesLoading } = useSessionMessages(resolvedSessionId);
@@ -317,7 +320,11 @@ export function TaskChatPanel({
           value={messageInput}
           onChange={setMessageInput}
           onSubmit={() => handleSubmit()}
-          placeholder="Write to submit work to the agent..."
+          placeholder={
+            agentMessageCount > 0
+              ? 'Continue working on this task...'
+              : 'Write to submit work to the agent...'
+          }
           planModeEnabled={planModeEnabled}
         />
         <div className="flex items-center justify-between gap-2">
@@ -338,7 +345,7 @@ export function TaskChatPanel({
               <Tooltip>
                 <TooltipTrigger asChild>
                   <DropdownMenuTrigger asChild>
-                    <Button type="button" variant="outline" size="icon" className="h-9 w-9 cursor-pointer">
+                    <Button type="button" variant="outline" size="icon" className="h-7 w-7 cursor-pointer">
                       <IconBrain className="h-4 w-4" />
                     </Button>
                   </DropdownMenuTrigger>
@@ -360,7 +367,7 @@ export function TaskChatPanel({
                     variant="outline"
                     size="icon"
                     className={cn(
-                      'h-9 w-9 cursor-pointer',
+                      'h-7 w-7 cursor-pointer',
                       planModeEnabled &&
                       'bg-primary/15 text-primary border-primary/40 shadow-[0_0_0_1px_rgba(59,130,246,0.35)]'
                     )}
@@ -377,16 +384,36 @@ export function TaskChatPanel({
             </Tooltip>
           </div>
           <div className="flex items-center gap-2">
+            <SessionsDropdown
+              taskId={taskId}
+              activeSessionId={resolvedSessionId}
+              taskTitle={task?.title}
+              taskDescription={taskDescription ?? ''}
+            />
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button type="button" variant="outline" size="icon" className="h-9 w-9 cursor-pointer">
+                <Button type="button" variant="outline" size="icon" className="h-7 w-7 cursor-pointer">
                   <IconPaperclip className="h-4 w-4" />
                 </Button>
               </TooltipTrigger>
               <TooltipContent>Add attachments</TooltipContent>
             </Tooltip>
-            <KeyboardShortcutTooltip shortcut={SHORTCUTS.SUBMIT}>
-              <Button type="submit">Submit</Button>
+            <KeyboardShortcutTooltip shortcut={SHORTCUTS.SUBMIT} enabled={!isAgentBusy && !isStarting}>
+              <Button
+                type={isAgentBusy ? 'button' : 'submit'}
+                variant={isAgentBusy ? 'destructive' : 'default'}
+                className={cn('h-7', isAgentBusy && 'gap-2')}
+                disabled={isStarting || isSending}
+              >
+                {isAgentBusy ? (
+                  <>
+                    <IconLoader2 className="h-3.5 w-3.5 animate-spin" />
+                    Stop
+                  </>
+                ) : (
+                  'Submit'
+                )}
+              </Button>
             </KeyboardShortcutTooltip>
           </div>
         </div>

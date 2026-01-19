@@ -1,31 +1,20 @@
 'use client';
 
-import { memo, useMemo, useState } from 'react';
+import { memo, useState } from 'react';
 import Link from 'next/link';
 import {
   IconArrowLeft,
   IconArrowUp,
-  IconBrandVscode,
-  IconChevronDown,
   IconCopy,
   IconDots,
   IconFolderOpen,
   IconGitBranch,
   IconGitMerge,
   IconGitPullRequest,
-  IconLoader2,
-  IconPlayerPlay,
-  IconPlayerStop,
+  IconChevronDown,
   IconCheck,
 } from '@tabler/icons-react';
 import { Button } from '@kandev/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@kandev/ui/dialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -33,13 +22,11 @@ import {
   DropdownMenuTrigger,
 } from '@kandev/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@kandev/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@kandev/ui/popover';
-import { SessionsDropdown } from './sessions-dropdown';
 import { CommitStatBadge, LineStat } from '@/components/diff-stat';
-import { useAppStore } from '@/components/state-provider';
 import { useSessionGitStatus } from '@/hooks/use-session-git-status';
 import { formatUserHomePath } from '@/lib/utils';
+import { EditorsMenu } from '@/components/task/editors-menu';
 
 type TaskTopBarProps = {
   taskId?: string | null;
@@ -58,15 +45,9 @@ type TaskTopBarProps = {
 };
 
 const TaskTopBar = memo(function TaskTopBar({
-  taskId,
   activeSessionId,
   taskTitle,
-  taskDescription,
   baseBranch,
-  onStartAgent,
-  onStopAgent,
-  isAgentRunning = false,
-  isAgentLoading = false,
   worktreePath,
   worktreeBranch,
   repositoryPath,
@@ -76,20 +57,8 @@ const TaskTopBar = memo(function TaskTopBar({
   const [popoverOpen, setPopoverOpen] = useState(false);
   const [copiedRepo, setCopiedRepo] = useState(false);
   const [copiedWorktree, setCopiedWorktree] = useState(false);
-  const [startDialogOpen, setStartDialogOpen] = useState(false);
-  const [selectedAgentProfileId, setSelectedAgentProfileId] = useState<string | null>(null);
 
   const gitStatus = useSessionGitStatus(activeSessionId ?? null);
-  const agentProfiles = useAppStore((state) => state.agentProfiles.items);
-
-  const resolvedAgentProfileId = useMemo(() => {
-    if (selectedAgentProfileId && agentProfiles.some((profile) => profile.id === selectedAgentProfileId)) {
-      return selectedAgentProfileId;
-    }
-    return agentProfiles[0]?.id ?? '';
-  }, [agentProfiles, selectedAgentProfileId]);
-
-
 
   // Use worktree branch if available, otherwise fall back to base branch
   const displayBranch = worktreeBranch || baseBranch;
@@ -147,12 +116,6 @@ const TaskTopBar = memo(function TaskTopBar({
           </>
         )}
         <span className="text-sm font-medium">{taskTitle ?? 'Task details'}</span>
-        <SessionsDropdown
-          taskId={taskId ?? null}
-          activeSessionId={activeSessionId ?? null}
-          taskTitle={taskTitle}
-          taskDescription={taskDescription}
-        />
         {displayBranch && (
           <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
             <Tooltip>
@@ -274,113 +237,7 @@ const TaskTopBar = memo(function TaskTopBar({
 
       </div>
       <div className="flex items-center gap-2">
-        {/* Start/Stop Agent Button */}
-        {isAgentRunning ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                size="sm"
-                variant="destructive"
-                className="cursor-pointer"
-                onClick={onStopAgent}
-                disabled={isAgentLoading}
-              >
-                {isAgentLoading ? (
-                  <IconLoader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <IconPlayerStop className="h-4 w-4" />
-                )}
-                Stop Agent
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Stop the agent</TooltipContent>
-          </Tooltip>
-        ) : (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                size="sm"
-                variant="default"
-                className="cursor-pointer"
-                onClick={() => setStartDialogOpen(true)}
-                disabled={isAgentLoading || agentProfiles.length === 0}
-              >
-                {isAgentLoading ? (
-                  <IconLoader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <IconPlayerPlay className="h-4 w-4" />
-                )}
-                Start Agent
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              {agentProfiles.length === 0 ? 'Add an agent profile to start.' : 'Start the agent on this task'}
-            </TooltipContent>
-          </Tooltip>
-        )}
-
-        <Dialog open={startDialogOpen} onOpenChange={setStartDialogOpen}>
-          <DialogContent className="max-w-md">
-            <DialogHeader>
-              <DialogTitle>Start Agent</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-3">
-              <div className="text-sm text-muted-foreground">
-                Select an agent profile to start a new session.
-              </div>
-              <Select
-                value={resolvedAgentProfileId}
-                onValueChange={(value) => setSelectedAgentProfileId(value)}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select agent profile" />
-                </SelectTrigger>
-                <SelectContent>
-                  {agentProfiles.map((profile) => (
-                    <SelectItem key={profile.id} value={profile.id}>
-                      {profile.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" type="button" onClick={() => setStartDialogOpen(false)}>
-                Cancel
-              </Button>
-              <Button
-                type="button"
-                onClick={() => {
-                  if (!resolvedAgentProfileId) return;
-                  onStartAgent?.(resolvedAgentProfileId);
-                  setStartDialogOpen(false);
-                }}
-                disabled={!resolvedAgentProfileId || isAgentLoading}
-              >
-                Start Agent
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
-        {/* Editor Button */}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              size="sm"
-              variant="outline"
-              className="cursor-pointer"
-              onClick={() => {
-                // TODO: Implement open in editor
-                console.log('Open in editor');
-              }}
-            >
-              <IconBrandVscode className="h-4 w-4" />
-              Editor
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Open in editor</TooltipContent>
-        </Tooltip>
+        <EditorsMenu activeSessionId={activeSessionId ?? null} />
 
         {/* Create PR Split Button */}
         <div className="inline-flex rounded-md border border-border overflow-hidden">

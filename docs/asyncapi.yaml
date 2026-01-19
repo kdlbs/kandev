@@ -181,6 +181,7 @@ components:
             - acp.heartbeat
             - task.updated
             - agent.updated
+            - agent.available.updated
         payload:
           type: object
           description: Notification data

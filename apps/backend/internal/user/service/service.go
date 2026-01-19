@@ -29,6 +29,7 @@ type UpdateUserSettingsRequest struct {
 	RepositoryIDs        *[]string
 	InitialSetupComplete *bool
 	PreferredShell       *string
+	DefaultEditorID      *string
 }
 
 func NewService(repo store.Repository, eventBus bus.EventBus, log *logger.Logger) *Service {
@@ -84,6 +85,9 @@ func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSetting
 	if req.PreferredShell != nil {
 		settings.PreferredShell = strings.TrimSpace(*req.PreferredShell)
 	}
+	if req.DefaultEditorID != nil {
+		settings.DefaultEditorID = strings.TrimSpace(*req.DefaultEditorID)
+	}
 	settings.UpdatedAt = time.Now().UTC()
 	if err := s.repo.UpsertUserSettings(ctx, settings); err != nil {
 		return nil, err
@@ -103,9 +107,30 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"repository_ids":         settings.RepositoryIDs,
 		"initial_setup_complete": settings.InitialSetupComplete,
 		"preferred_shell":        settings.PreferredShell,
+		"default_editor_id":      settings.DefaultEditorID,
 		"updated_at":             settings.UpdatedAt.Format(time.RFC3339),
 	}
 	if err := s.eventBus.Publish(ctx, events.UserSettingsUpdated, bus.NewEvent(events.UserSettingsUpdated, "user-service", data)); err != nil {
 		s.logger.Error("failed to publish user settings event", zap.Error(err))
 	}
+}
+
+func (s *Service) ClearDefaultEditorID(ctx context.Context, editorID string) error {
+	if editorID == "" {
+		return nil
+	}
+	settings, err := s.repo.GetUserSettings(ctx, s.defaultUser)
+	if err != nil {
+		return err
+	}
+	if settings.DefaultEditorID != editorID {
+		return nil
+	}
+	settings.DefaultEditorID = ""
+	settings.UpdatedAt = time.Now().UTC()
+	if err := s.repo.UpsertUserSettings(ctx, settings); err != nil {
+		return err
+	}
+	s.publishUserSettingsEvent(ctx, settings)
+	return nil
 }

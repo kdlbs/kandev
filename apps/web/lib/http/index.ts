@@ -3,6 +3,7 @@ import type {
   BoardSnapshot,
   ListAgentsResponse,
   ListAgentDiscoveryResponse,
+  ListAvailableAgentsResponse,
   ListBoardsResponse,
   ListEnvironmentsResponse,
   ListExecutorsResponse,
@@ -12,6 +13,8 @@ import type {
   RepositoryBranchesResponse,
   NotificationProvidersResponse,
   NotificationProvider,
+  EditorsResponse,
+  EditorOption,
   CreateTaskResponse,
   Task,
   TaskSessionsResponse,
@@ -165,12 +168,66 @@ export async function updateUserSettings(
     board_id: string;
     repository_ids: string[];
     preferred_shell?: string;
+    default_editor_id?: string;
   },
   options?: ApiRequestOptions
 ) {
   return fetchJson<UserSettingsResponse>('/api/v1/user/settings', {
     ...options,
     init: { method: 'PATCH', body: JSON.stringify(payload), ...(options?.init ?? {}) },
+  });
+}
+
+export async function listEditors(options?: ApiRequestOptions) {
+  return fetchJson<EditorsResponse>('/api/v1/editors', options);
+}
+
+export async function createEditor(
+  payload: {
+    name: string;
+    kind: string;
+    config?: Record<string, unknown>;
+    enabled?: boolean;
+  },
+  options?: ApiRequestOptions
+) {
+  return fetchJson<EditorOption>('/api/v1/editors', {
+    ...options,
+    init: { method: 'POST', body: JSON.stringify(payload), ...(options?.init ?? {}) },
+  });
+}
+
+export async function updateEditor(
+  editorId: string,
+  payload: {
+    name?: string;
+    kind?: string;
+    config?: Record<string, unknown>;
+    enabled?: boolean;
+  },
+  options?: ApiRequestOptions
+) {
+  return fetchJson<EditorOption>(`/api/v1/editors/${editorId}`, {
+    ...options,
+    init: { method: 'PATCH', body: JSON.stringify(payload), ...(options?.init ?? {}) },
+  });
+}
+
+export async function deleteEditor(editorId: string, options?: ApiRequestOptions) {
+  return fetchJson<{ success: boolean }>(`/api/v1/editors/${editorId}`, {
+    ...options,
+    init: { method: 'DELETE', ...(options?.init ?? {}) },
+  });
+}
+
+export async function openSessionInEditor(
+  sessionId: string,
+  payload: Partial<{ editor_id: string; editor_type: string; file_path: string; line: number; column: number }>,
+  options?: ApiRequestOptions
+) {
+  return fetchJson<{ url?: string }>(`/api/v1/task-sessions/${sessionId}/open-editor`, {
+    ...options,
+    init: { method: 'POST', body: JSON.stringify(payload), ...(options?.init ?? {}) },
   });
 }
 
@@ -261,4 +318,10 @@ export async function listAgentDiscovery(
   options?: ApiRequestOptions
 ): Promise<ListAgentDiscoveryResponse> {
   return fetchJson<ListAgentDiscoveryResponse>('/api/v1/agents/discovery', options);
+}
+
+export async function listAvailableAgents(
+  options?: ApiRequestOptions
+): Promise<ListAvailableAgentsResponse> {
+  return fetchJson<ListAvailableAgentsResponse>('/api/v1/agents/available', options);
 }

@@ -23,10 +23,11 @@ help:
 	@echo "Kandev - AI Agent Kanban Board"
 	@echo ""
 	@echo "Development Commands:"
+	@echo "  dev              Run backend + web via CLI (auto ports)"
 	@echo "  dev-backend      Run backend in development mode (port 8080)"
 	@echo "  dev-web          Run web app in development mode (port 3000)"
 	@echo "  dev-landing      Run landing page in development mode (port 3001)"
-	@echo "  dev              Note: Run dev-backend and dev-web in separate terminals"
+	@echo "  dev              Note: Uses apps/cli launcher (auto ports)"
 	@echo ""
 	@echo "Build Commands:"
 	@echo "  build            Build backend, web app, and landing page"
@@ -64,36 +65,8 @@ help:
 
 .PHONY: dev
 dev:
-	@echo "╔════════════════════════════════════════════════════════════════╗"
-	@echo "║  TIP: For better log visibility, run in separate terminals:   ║"
-	@echo "║                                                                ║"
-	@echo "║    Terminal 1: make dev-backend                                ║"
-	@echo "║    Terminal 2: make dev-web                                    ║"
-	@echo "╚════════════════════════════════════════════════════════════════╝"
-	@echo ""
-	@echo "Starting backend and web app..."
-	@echo "Backend: http://localhost:8080"
-	@echo "Web app: http://localhost:3000"
-	@echo ""
-	@trap 'stty sane 2>/dev/null || true' EXIT INT TERM; \
-	bash -c ' \
-		cleanup_called=0; \
-		cleanup() { \
-			if [ "$$cleanup_called" -eq 1 ]; then \
-				return; \
-			fi; \
-			cleanup_called=1; \
-			echo ""; \
-			echo "Shutting down..."; \
-			trap - EXIT INT TERM; \
-			kill 0 2>/dev/null || true; \
-			stty sane 2>/dev/null || true; \
-			exit 0; \
-		}; \
-		trap cleanup EXIT INT TERM; \
-		$(MAKE) -C $(BACKEND_DIR) run & \
-		cd $(APPS_DIR) && $(PNPM) --filter @kandev/web dev & \
-		wait'
+	@echo "Launching via CLI (auto ports)..."
+	@cd $(APPS_DIR) && $(PNPM) -C cli dev -- dev
 
 .PHONY: dev-backend
 dev-backend:

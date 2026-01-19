@@ -23,6 +23,7 @@ import {
 import type { Agent, AgentDiscovery, AgentProfile } from '@/lib/types/http';
 import { generateUUID } from '@/lib/utils';
 import { useAppStore } from '@/components/state-provider';
+import { useAvailableAgents } from '@/hooks/use-available-agents';
 
 type DraftAgent = Agent & { isNew?: boolean };
 type DraftProfile = AgentProfile & { isNew?: boolean };
@@ -34,18 +35,11 @@ type AgentSetupFormProps = {
   onToastError: (error: unknown) => void;
 };
 
-const AGENT_LABELS: Record<string, string> = {
-  claude: 'Claude',
-  gemini: 'Gemini',
-  codex: 'Codex',
-  opencode: 'OpenCode',
-  copilot: 'Copilot',
-};
-
-const createDraftProfile = (agentId: string): DraftProfile => ({
+const createDraftProfile = (agentId: string, agentDisplayName: string): DraftProfile => ({
   id: `draft-${generateUUID()}`,
   agent_id: agentId,
   name: '',
+  agent_display_name: agentDisplayName,
   model: '',
   auto_approve: false,
   dangerously_skip_permissions: false,
@@ -62,13 +56,13 @@ const cloneAgent = (agent: Agent): DraftAgent => ({
   profiles: agent.profiles.map((profile) => ({ ...profile })),
 });
 
-const ensureProfiles = (agent: DraftAgent): DraftAgent => {
+const ensureProfiles = (agent: DraftAgent, agentDisplayName: string): DraftAgent => {
   if (agent.profiles.length > 0) {
     return agent;
   }
   return {
     ...agent,
-    profiles: [createDraftProfile(agent.id)],
+    profiles: [createDraftProfile(agent.id, agentDisplayName)],
   };
 };
 
@@ -82,8 +76,11 @@ function AgentSetupForm({
   const settingsAgents = useAppStore((state) => state.settingsAgents.items);
   const setSettingsAgents = useAppStore((state) => state.setSettingsAgents);
   const setAgentProfiles = useAppStore((state) => state.setAgentProfiles);
+  const availableAgents = useAvailableAgents().items;
   const [draftAgent, setDraftAgent] = useState<DraftAgent>(initialAgent);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const resolveDisplayName = (name: string) =>
+    availableAgents.find((item) => item.name === name)?.display_name ?? '';
 
   const isProfileDirty = (draft: DraftProfile, saved?: AgentProfile) => {
     if (!saved) return true;
@@ -116,7 +113,7 @@ function AgentSetupForm({
       nextAgents.flatMap((agent) =>
         agent.profiles.map((profile) => ({
           id: profile.id,
-          label: `${agent.name} • ${profile.name}`,
+          label: `${profile.agent_display_name} • ${profile.name}`,
           agent_id: agent.id,
         }))
       )
@@ -134,7 +131,7 @@ function AgentSetupForm({
   const handleAddProfile = () => {
     setDraftAgent((current) => ({
       ...current,
-      profiles: [...current.profiles, createDraftProfile(current.id)],
+      profiles: [...current.profiles, createDraftProfile(current.id, resolveDisplayName(current.name))],
     }));
   };
 
@@ -143,7 +140,10 @@ function AgentSetupForm({
       const remaining = current.profiles.filter((profile) => profile.id !== profileId);
       return {
         ...current,
-        profiles: remaining.length > 0 ? remaining : [createDraftProfile(current.id)],
+        profiles:
+          remaining.length > 0
+            ? remaining
+            : [createDraftProfile(current.id, resolveDisplayName(current.name))],
       };
     });
   };
@@ -182,7 +182,7 @@ function AgentSetupForm({
           });
         }
         upsertAgent(created);
-        setDraftAgent(ensureProfiles(cloneAgent(created)));
+        setDraftAgent(ensureProfiles(cloneAgent(created), resolveDisplayName(created.name)));
         router.replace(`/settings/agents/${encodeURIComponent(created.name)}`);
       } else {
         const agentPatch: { workspace_id?: string | null; mcp_config_path?: string | null } = {};
@@ -238,7 +238,7 @@ function AgentSetupForm({
           profiles: nextProfiles,
         };
         upsertAgent(nextAgent);
-        setDraftAgent(ensureProfiles(cloneAgent(nextAgent)));
+        setDraftAgent(ensureProfiles(cloneAgent(nextAgent), resolveDisplayName(nextAgent.name)));
       }
       setSaveStatus('success');
     } catch (error) {
@@ -253,7 +253,7 @@ function AgentSetupForm({
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-2xl font-bold">
-              {AGENT_LABELS[draftAgent.name] ?? draftAgent.name}
+              {draftAgent.profiles[0]?.agent_display_name ?? draftAgent.name}
             </h2>
             <span className="text-xs text-muted-foreground border border-muted-foreground/30 rounded-full px-2 py-1">
               {discoveryAgent?.matched_path ?? 'Installation not detected'}
@@ -270,7 +270,7 @@ function AgentSetupForm({
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <div className="flex items-center gap-2">
-            <CardTitle>{AGENT_LABELS[draftAgent.name] ?? draftAgent.name} Profiles</CardTitle>
+            <CardTitle>{draftAgent.profiles[0]?.agent_display_name ?? draftAgent.name} Profiles</CardTitle>
             {isAgentDirty && <UnsavedChangesBadge />}
           </div>
           <Button size="sm" variant="outline" onClick={handleAddProfile}>
@@ -386,6 +386,7 @@ export default function AgentSetupPage() {
   const decodedKey = decodeURIComponent(agentKey ?? '');
   const discoveryAgents = useAppStore((state) => state.agentDiscovery.items);
   const savedAgents = useAppStore((state) => state.settingsAgents.items);
+  const availableAgents = useAvailableAgents().items;
 
   const discoveryAgent = useMemo(() => {
     return discoveryAgents.find((agent) => agent.name === decodedKey);
@@ -397,8 +398,10 @@ export default function AgentSetupPage() {
 
   const initialAgent = useMemo(() => {
     if (!decodedKey) return null;
+    const resolveDisplayName = (name: string) =>
+      availableAgents.find((item) => item.name === name)?.display_name ?? '';
     if (savedAgent) {
-      return ensureProfiles(cloneAgent(savedAgent));
+      return ensureProfiles(cloneAgent(savedAgent), resolveDisplayName(savedAgent.name));
     }
     if (discoveryAgent) {
       const draft: DraftAgent = {
@@ -412,10 +415,10 @@ export default function AgentSetupPage() {
         updated_at: new Date().toISOString(),
         isNew: true,
       };
-      return ensureProfiles(draft);
+      return ensureProfiles(draft, resolveDisplayName(draft.name));
     }
     return null;
-  }, [decodedKey, discoveryAgent, savedAgent]);
+  }, [decodedKey, discoveryAgent, savedAgent, availableAgents]);
 
   if (!initialAgent && discoveryAgents.length > 0) {
     return (

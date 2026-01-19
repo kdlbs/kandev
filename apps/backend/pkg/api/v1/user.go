@@ -11,10 +11,11 @@ type User struct {
 }
 
 type UserSettings struct {
-	UserID         string    `json:"user_id"`
-	WorkspaceID    string    `json:"workspace_id"`
-	BoardID        string    `json:"board_id"`
-	RepositoryIDs  []string  `json:"repository_ids"`
-	PreferredShell string    `json:"preferred_shell"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	UserID          string    `json:"user_id"`
+	WorkspaceID     string    `json:"workspace_id"`
+	BoardID         string    `json:"board_id"`
+	RepositoryIDs   []string  `json:"repository_ids"`
+	PreferredShell  string    `json:"preferred_shell"`
+	DefaultEditorID string    `json:"default_editor_id"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }

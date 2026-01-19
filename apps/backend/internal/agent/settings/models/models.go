@@ -13,14 +13,15 @@ type Agent struct {
 }
 
 type AgentProfile struct {
-	ID                         string    `json:"id"`
-	AgentID                    string    `json:"agent_id"`
-	Name                       string    `json:"name"`
-	Model                      string    `json:"model"`
-	AutoApprove                bool      `json:"auto_approve"`
-	DangerouslySkipPermissions bool      `json:"dangerously_skip_permissions"`
-	Plan                       string    `json:"plan"`
-	CreatedAt                  time.Time `json:"created_at"`
-	UpdatedAt                  time.Time `json:"updated_at"`
+	ID                         string     `json:"id"`
+	AgentID                    string     `json:"agent_id"`
+	Name                       string     `json:"name"`
+	AgentDisplayName           string     `json:"agent_display_name"`
+	Model                      string     `json:"model"`
+	AutoApprove                bool       `json:"auto_approve"`
+	DangerouslySkipPermissions bool       `json:"dangerously_skip_permissions"`
+	Plan                       string     `json:"plan"`
+	CreatedAt                  time.Time  `json:"created_at"`
+	UpdatedAt                  time.Time  `json:"updated_at"`
 	DeletedAt                  *time.Time `json:"deleted_at,omitempty"`
 }

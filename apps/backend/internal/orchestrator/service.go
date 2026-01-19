@@ -629,7 +629,7 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 	if sessionID == "" {
 		return nil, fmt.Errorf("session_id is required")
 	}
-	s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateRunning, "", true)
+	s.setSessionRunning(ctx, taskID, sessionID, nil)
 	result, err := s.executor.Prompt(ctx, taskID, sessionID, prompt)
 	if err != nil {
 		return nil, err
@@ -669,6 +669,17 @@ func (s *Service) RespondToPermission(ctx context.Context, sessionID, pendingID,
 				zap.Error(err))
 			// Don't fail the whole operation if message update fails
 		}
+	}
+
+	if !cancelled {
+		session, err := s.repo.GetTaskSession(ctx, sessionID)
+		if err != nil {
+			s.logger.Warn("failed to load task session after permission response",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+			return nil
+		}
+		s.setSessionRunning(ctx, session.TaskID, sessionID, nil)
 	}
 
 	return nil
@@ -1090,6 +1101,32 @@ func (s *Service) updateTaskSessionState(ctx context.Context, taskID, sessionID 
 	}
 }
 
+func (s *Service) setSessionWaitingForInput(ctx context.Context, taskID, sessionID string, _ *v1.TaskState) {
+	s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateWaitingForInput, "", false)
+
+	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateReview); err != nil {
+		s.logger.Error("failed to update task state to REVIEW",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+	} else {
+		s.logger.Info("task moved to REVIEW state",
+			zap.String("task_id", taskID))
+	}
+}
+
+func (s *Service) setSessionRunning(ctx context.Context, taskID, sessionID string, _ *v1.TaskState) {
+	s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateRunning, "", true)
+
+	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateInProgress); err != nil {
+		s.logger.Error("failed to update task state to IN_PROGRESS",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+	} else {
+		s.logger.Info("task moved to IN_PROGRESS state",
+			zap.String("task_id", taskID))
+	}
+}
+
 func (s *Service) finalizeAgentReady(taskID, sessionID string) {
 	ctx := context.Background()
 	if sessionID == "" {
@@ -1098,30 +1135,7 @@ func (s *Service) finalizeAgentReady(taskID, sessionID string) {
 		return
 	}
 
-	s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateWaitingForInput, "", false)
-
-	task, err := s.taskRepo.GetTask(ctx, taskID)
-	if err != nil {
-		s.logger.Error("failed to get task for state check",
-			zap.String("task_id", taskID),
-			zap.Error(err))
-		return
-	}
-
-	if task.State == v1.TaskStateInProgress {
-		if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateReview); err != nil {
-			s.logger.Error("failed to update task state to REVIEW",
-				zap.String("task_id", taskID),
-				zap.Error(err))
-		} else {
-			s.logger.Info("task moved to REVIEW state",
-				zap.String("task_id", taskID))
-		}
-	} else {
-		s.logger.Debug("task not in IN_PROGRESS state, skipping REVIEW transition",
-			zap.String("task_id", taskID),
-			zap.String("current_state", string(task.State)))
-	}
+	s.setSessionWaitingForInput(ctx, taskID, sessionID, nil)
 }
 
 // handleGitStatusUpdated handles git status updates and persists them to agent session metadata
@@ -1190,6 +1204,8 @@ func (s *Service) handlePermissionRequest(ctx context.Context, data watcher.Perm
 			zap.String("pending_id", data.PendingID))
 		return
 	}
+
+	s.setSessionWaitingForInput(ctx, data.TaskID, data.TaskSessionID, nil)
 
 	if s.messageCreator != nil {
 		_, err := s.messageCreator.CreatePermissionRequestMessage(

@@ -1,0 +1,32 @@
+{
+  "name": "kandev",
+  "version": "0.1.4",
+  "private": false,
+  "description": "NPX launcher for Kandev",
+  "license": "UNLICENSED",
+  "type": "commonjs",
+  "bin": {
+    "kandev": "bin/cli.js"
+  },
+  "main": "dist/cli.js",
+  "files": [
+    "bin",
+    "dist"
+  ],
+  "dependencies": {
+    "adm-zip": "^0.5.16",
+    "tree-kill": "^1.2.2"
+  },
+  "devDependencies": {
+    "@types/adm-zip": "^0.5.7",
+    "@types/node": "^20",
+    "tsx": "^4.15.7",
+    "typescript": "^5"
+  },
+  "scripts": {
+    "dev": "tsx src/cli.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/cli.js",
+    "prepublishOnly": "pnpm build"
+  }
+}

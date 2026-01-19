@@ -14,6 +14,7 @@ interface TaskPreviewPanelProps {
   onMaximize?: (task: Task, sessionId: string) => void;
 }
 
+// TODO: fix this
 const AGENTS = [
   { id: "codex", label: "Codex" },
   { id: "claude", label: "Claude Code" },
