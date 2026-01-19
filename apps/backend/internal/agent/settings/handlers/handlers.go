@@ -37,6 +37,7 @@ func RegisterRoutes(router *gin.Engine, ctrl *controller.Controller, hub Broadca
 func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api := router.Group("/api/v1")
 	api.GET("/agents/discovery", h.httpDiscoverAgents)
+	api.GET("/agents/available", h.httpListAvailableAgents)
 	api.GET("/agents", h.httpListAgents)
 	api.POST("/agents", h.httpCreateAgent)
 	api.GET("/agents/:id", h.httpGetAgent)
@@ -52,6 +53,27 @@ func (h *Handlers) httpDiscoverAgents(c *gin.Context) {
 	if err != nil {
 		h.logger.Error("failed to discover agents", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to discover agents"})
+		return
+	}
+	if h.hub != nil {
+		availableResp, err := h.controller.ListAvailableAgents(c.Request.Context())
+		if err != nil {
+			h.logger.Error("failed to list available agents", zap.Error(err))
+		} else {
+			notification, _ := ws.NewNotification(ws.ActionAgentAvailableUpdated, gin.H{
+				"agents": availableResp.Agents,
+			})
+			h.hub.Broadcast(notification)
+		}
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+func (h *Handlers) httpListAvailableAgents(c *gin.Context) {
+	resp, err := h.controller.ListAvailableAgents(c.Request.Context())
+	if err != nil {
+		h.logger.Error("failed to list available agents", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list available agents"})
 		return
 	}
 	c.JSON(http.StatusOK, resp)

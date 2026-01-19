@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/discovery"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
@@ -62,6 +63,51 @@ func (c *Controller) ListDiscovery(ctx context.Context) (*dto.ListDiscoveryRespo
 	return &dto.ListDiscoveryResponse{Agents: payload, Total: len(payload)}, nil
 }
 
+func (c *Controller) ListAvailableAgents(ctx context.Context) (*dto.ListAvailableAgentsResponse, error) {
+	results, err := c.discovery.Detect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	availabilityByName := make(map[string]discovery.Availability, len(results))
+	for _, result := range results {
+		availabilityByName[result.Name] = result
+	}
+	definitions := c.discovery.Definitions()
+	now := time.Now().UTC()
+	payload := make([]dto.AvailableAgentDTO, 0, len(definitions))
+	for _, def := range definitions {
+		availability, ok := availabilityByName[def.Name]
+		if !ok {
+			availability = discovery.Availability{
+				Name:          def.Name,
+				SupportsMCP:   def.SupportsMCP,
+				MCPConfigPath: "",
+				Available:     false,
+			}
+		}
+		displayName := def.DisplayName
+		if displayName == "" {
+			displayName = def.Name
+		}
+		payload = append(payload, dto.AvailableAgentDTO{
+			Name:              availability.Name,
+			DisplayName:       displayName,
+			SupportsMCP:       availability.SupportsMCP,
+			MCPConfigPath:     availability.MCPConfigPath,
+			InstallationPaths: availability.InstallationPaths,
+			Available:         availability.Available,
+			MatchedPath:       availability.MatchedPath,
+			Capabilities: dto.AgentCapabilitiesDTO{
+				SupportsSessionResume: def.Capabilities.SupportsSessionResume,
+				SupportsShell:         def.Capabilities.SupportsShell,
+				SupportsWorkspaceOnly: def.Capabilities.SupportsWorkspaceOnly,
+			},
+			UpdatedAt: now,
+		})
+	}
+	return &dto.ListAvailableAgentsResponse{Agents: payload, Total: len(payload)}, nil
+}
+
 func (c *Controller) ListAgents(ctx context.Context) (*dto.ListAgentsResponse, error) {
 	agents, err := c.repo.ListAgents(ctx)
 	if err != nil {
@@ -83,9 +129,14 @@ func (c *Controller) EnsureInitialAgentProfiles(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	displayNameByAgent := c.displayNameByAgent()
 	for _, result := range results {
 		if !result.Available {
 			continue
+		}
+		displayName, ok := displayNameByAgent[result.Name]
+		if !ok || displayName == "" {
+			return fmt.Errorf("unknown agent display name: %s", result.Name)
 		}
 		agent, err := c.repo.GetAgentByName(ctx, result.Name)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -109,10 +160,11 @@ func (c *Controller) EnsureInitialAgentProfiles(ctx context.Context) error {
 			continue
 		}
 		defaultProfile := &models.AgentProfile{
-			AgentID: agent.ID,
-			Name:    defaultAgentProfileName,
-			Model:   "",
-			Plan:    "",
+			AgentID:          agent.ID,
+			Name:             defaultAgentProfileName,
+			Model:            "",
+			Plan:             "",
+			AgentDisplayName: displayName,
 		}
 		if err := c.repo.CreateAgentProfile(ctx, defaultProfile); err != nil {
 			return err
@@ -179,6 +231,10 @@ func (c *Controller) CreateAgent(ctx context.Context, req CreateAgentRequest) (*
 	if !matched.Available {
 		return nil, fmt.Errorf("agent not installed: %s", req.Name)
 	}
+	displayName := c.mustDisplayName(req.Name)
+	if displayName == "" {
+		return nil, fmt.Errorf("unknown agent display name: %s", req.Name)
+	}
 	agent := &models.Agent{
 		Name:          matched.Name,
 		WorkspaceID:   req.WorkspaceID,
@@ -193,6 +249,7 @@ func (c *Controller) CreateAgent(ctx context.Context, req CreateAgentRequest) (*
 		profile := &models.AgentProfile{
 			AgentID:                    agent.ID,
 			Name:                       profileReq.Name,
+			AgentDisplayName:           displayName,
 			Model:                      profileReq.Model,
 			AutoApprove:                profileReq.AutoApprove,
 			DangerouslySkipPermissions: profileReq.DangerouslySkipPermissions,
@@ -259,9 +316,18 @@ type CreateProfileRequest struct {
 }
 
 func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest) (*dto.AgentProfileDTO, error) {
+	agent, err := c.repo.GetAgent(ctx, req.AgentID)
+	if err != nil {
+		return nil, err
+	}
+	displayName := c.mustDisplayName(agent.Name)
+	if displayName == "" {
+		return nil, fmt.Errorf("unknown agent display name: %s", agent.Name)
+	}
 	profile := &models.AgentProfile{
 		AgentID:                    req.AgentID,
 		Name:                       req.Name,
+		AgentDisplayName:           displayName,
 		Model:                      req.Model,
 		AutoApprove:                req.AutoApprove,
 		DangerouslySkipPermissions: req.DangerouslySkipPermissions,
@@ -359,6 +425,7 @@ func toProfileDTO(profile *models.AgentProfile) dto.AgentProfileDTO {
 		ID:                         profile.ID,
 		AgentID:                    profile.AgentID,
 		Name:                       profile.Name,
+		AgentDisplayName:           profile.AgentDisplayName,
 		Model:                      profile.Model,
 		AutoApprove:                profile.AutoApprove,
 		DangerouslySkipPermissions: profile.DangerouslySkipPermissions,
@@ -366,4 +433,29 @@ func toProfileDTO(profile *models.AgentProfile) dto.AgentProfileDTO {
 		CreatedAt:                  profile.CreatedAt,
 		UpdatedAt:                  profile.UpdatedAt,
 	}
+}
+
+func (c *Controller) displayNameByAgent() map[string]string {
+	definitions := c.discovery.Definitions()
+	mapped := make(map[string]string, len(definitions))
+	for _, def := range definitions {
+		if def.Name == "" || def.DisplayName == "" {
+			continue
+		}
+		mapped[def.Name] = def.DisplayName
+	}
+	return mapped
+}
+
+func (c *Controller) mustDisplayName(agentName string) string {
+	if agentName == "" {
+		return ""
+	}
+	definitions := c.discovery.Definitions()
+	for _, def := range definitions {
+		if def.Name == agentName {
+			return def.DisplayName
+		}
+	}
+	return ""
 }

@@ -166,7 +166,7 @@ function EditorForm({
     if (state.kind === 'custom_remote_ssh') return Boolean(state.host.trim());
     if (state.kind === 'custom_hosted_url') return Boolean(state.url.trim());
     return false;
-  }, [state.command, state.host, state.kind, state.name, state.url]);
+  }, [state]);
 
   return (
     <div className="rounded-lg border border-border/70 bg-background p-4 space-y-4">

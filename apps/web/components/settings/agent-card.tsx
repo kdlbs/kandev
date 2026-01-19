@@ -4,20 +4,14 @@ import Link from 'next/link';
 import { IconRobot, IconChevronRight } from '@tabler/icons-react';
 import { Card, CardContent } from '@kandev/ui/card';
 import { Badge } from '@kandev/ui/badge';
-import type { AgentProfile, AgentType } from '@/lib/settings/types';
+import type { AgentProfile } from '@/lib/settings/types';
 
 type AgentCardProps = {
   agent: AgentProfile;
 };
 
-const AGENT_LABELS: Record<AgentType, string> = {
-  'claude-code': 'Claude Code',
-  'codex': 'Codex',
-  'auggie': 'Auggie',
-};
-
 export function AgentCard({ agent }: AgentCardProps) {
-  const agentLabel = AGENT_LABELS[agent.agent] || agent.agent;
+  const agentLabel = agent.agentDisplayName;
 
   return (
     <Link href={`/settings/agents/${agent.id}`}>

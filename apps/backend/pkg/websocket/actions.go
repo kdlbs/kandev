@@ -114,6 +114,7 @@ const (
 	ActionTaskDeleted             = "task.deleted"
 	ActionTaskStateChanged        = "task.state_changed"
 	ActionAgentUpdated            = "agent.updated"
+	ActionAgentAvailableUpdated   = "agent.available.updated"
 	ActionWorkspaceCreated        = "workspace.created"
 	ActionWorkspaceUpdated        = "workspace.updated"
 	ActionWorkspaceDeleted        = "workspace.deleted"

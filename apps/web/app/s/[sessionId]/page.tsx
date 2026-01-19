@@ -78,7 +78,7 @@ export default async function SessionPage({
         items: agents.agents.flatMap((agent) =>
           agent.profiles.map((profile) => ({
             id: profile.id,
-            label: `${agent.name} • ${profile.name}`,
+            label: `${profile.agent_display_name} • ${profile.name}`,
             agent_id: agent.id,
           }))
         ),

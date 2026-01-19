@@ -1,9 +1,17 @@
 import type { StoreApi } from 'zustand';
 import type { AppState } from '@/lib/state/store';
 import type { WsHandlers } from '@/lib/ws/handlers/types';
-
 export function registerAgentsHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
+    'agent.available.updated': (message) => {
+      store.setState((state) => {
+        const availableAgents = message.payload.agents ?? [];
+        return {
+          ...state,
+          availableAgents: { items: availableAgents, loaded: true, loading: false },
+        };
+      });
+    },
     'agent.updated': (message) => {
       store.setState((state) => ({
         ...state,
@@ -20,10 +28,7 @@ export function registerAgentsHandlers(store: StoreApi<AppState>): WsHandlers {
     },
     'agent.profile.created': (message) => {
       store.setState((state) => {
-        const agent = state.settingsAgents.items.find(
-          (item) => item.id === message.payload.profile.agent_id
-        );
-        const label = agent ? `${agent.name} • ${message.payload.profile.name}` : message.payload.profile.name;
+        const label = `${message.payload.profile.agent_display_name} • ${message.payload.profile.name}`;
         const nextProfiles = [
           ...state.agentProfiles.items.filter((profile) => profile.id !== message.payload.profile.id),
           { id: message.payload.profile.id, label, agent_id: message.payload.profile.agent_id },
@@ -38,6 +43,7 @@ export function registerAgentsHandlers(store: StoreApi<AppState>): WsHandlers {
                     id: message.payload.profile.id,
                     agent_id: message.payload.profile.agent_id,
                     name: message.payload.profile.name,
+                    agent_display_name: message.payload.profile.agent_display_name,
                     model: message.payload.profile.model,
                     auto_approve: message.payload.profile.auto_approve,
                     dangerously_skip_permissions: message.payload.profile.dangerously_skip_permissions,
@@ -58,10 +64,7 @@ export function registerAgentsHandlers(store: StoreApi<AppState>): WsHandlers {
     },
     'agent.profile.updated': (message) => {
       store.setState((state) => {
-        const agent = state.settingsAgents.items.find(
-          (item) => item.id === message.payload.profile.agent_id
-        );
-        const label = agent ? `${agent.name} • ${message.payload.profile.name}` : message.payload.profile.name;
+        const label = `${message.payload.profile.agent_display_name} • ${message.payload.profile.name}`;
         const nextProfiles = state.agentProfiles.items.map((profile) =>
           profile.id === message.payload.profile.id
             ? { ...profile, label, agent_id: message.payload.profile.agent_id }
@@ -76,6 +79,7 @@ export function registerAgentsHandlers(store: StoreApi<AppState>): WsHandlers {
                     ? {
                         ...profile,
                         name: message.payload.profile.name,
+                        agent_display_name: message.payload.profile.agent_display_name,
                         model: message.payload.profile.model,
                         auto_approve: message.payload.profile.auto_approve,
                         dangerously_skip_permissions: message.payload.profile.dangerously_skip_permissions,

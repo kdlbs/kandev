@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import type {
   Agent,
+  AvailableAgent,
   AgentDiscovery,
   Branch,
   Environment,
@@ -69,6 +70,12 @@ export type EditorsState = {
   items: EditorOption[];
   loaded: boolean;
   loading: boolean;
+}
+
+export type AvailableAgentsState = {
+  items: AvailableAgent[];
+  loading: boolean;
+  loaded: boolean;
 };
 
 export type BoardState = {
@@ -229,6 +236,7 @@ export type AppState = {
   environments: EnvironmentsState;
   settingsAgents: SettingsAgentsState;
   agentDiscovery: AgentDiscoveryState;
+  availableAgents: AvailableAgentsState;
   repositories: RepositoriesState;
   repositoryBranches: RepositoryBranchesState;
   settingsData: SettingsDataState;
@@ -257,6 +265,8 @@ export type AppState = {
   setEnvironments: (environments: EnvironmentsState['items']) => void;
   setSettingsAgents: (agents: SettingsAgentsState['items']) => void;
   setAgentDiscovery: (agents: AgentDiscoveryState['items']) => void;
+  setAvailableAgents: (agents: AvailableAgentsState['items']) => void;
+  setAvailableAgentsLoading: (loading: boolean) => void;
   setAgentProfiles: (profiles: AgentProfilesState['items']) => void;
   setRepositories: (workspaceId: string, repositories: Repository[]) => void;
   setRepositoriesLoading: (workspaceId: string, loading: boolean) => void;
@@ -315,6 +325,7 @@ const defaultState: AppState = {
   environments: { items: [] },
   settingsAgents: { items: [] },
   agentDiscovery: { items: [] },
+  availableAgents: { items: [], loading: false, loaded: false },
   repositories: { itemsByWorkspaceId: {}, loadingByWorkspaceId: {}, loadedByWorkspaceId: {} },
   repositoryBranches: { itemsByRepositoryId: {}, loadingByRepositoryId: {}, loadedByRepositoryId: {} },
   settingsData: { executorsLoaded: false, environmentsLoaded: false, agentsLoaded: false },
@@ -350,6 +361,8 @@ const defaultState: AppState = {
   setEnvironments: () => undefined,
   setSettingsAgents: () => undefined,
   setAgentDiscovery: () => undefined,
+  setAvailableAgents: () => undefined,
+  setAvailableAgentsLoading: () => undefined,
   setAgentProfiles: () => undefined,
   setRepositories: () => undefined,
   setRepositoriesLoading: () => undefined,
@@ -397,6 +410,8 @@ function mergeInitialState(
   | 'setEnvironments'
   | 'setSettingsAgents'
   | 'setAgentDiscovery'
+  | 'setAvailableAgents'
+  | 'setAvailableAgentsLoading'
   | 'setAgentProfiles'
   | 'setRepositories'
   | 'setRepositoriesLoading'
@@ -438,6 +453,7 @@ function mergeInitialState(
     environments: { ...defaultState.environments, ...initialState.environments },
     settingsAgents: { ...defaultState.settingsAgents, ...initialState.settingsAgents },
     agentDiscovery: { ...defaultState.agentDiscovery, ...initialState.agentDiscovery },
+    availableAgents: { ...defaultState.availableAgents, ...initialState.availableAgents },
     repositories: { ...defaultState.repositories, ...initialState.repositories },
     repositoryBranches: { ...defaultState.repositoryBranches, ...initialState.repositoryBranches },
     settingsData: { ...defaultState.settingsData, ...initialState.settingsData },
@@ -478,6 +494,7 @@ export function createAppStore(initialState?: Partial<AppState>) {
           if (state.environments) Object.assign(draft.environments, state.environments);
           if (state.settingsAgents) Object.assign(draft.settingsAgents, state.settingsAgents);
           if (state.agentDiscovery) Object.assign(draft.agentDiscovery, state.agentDiscovery);
+          if (state.availableAgents) Object.assign(draft.availableAgents, state.availableAgents);
           if (state.repositories) Object.assign(draft.repositories, state.repositories);
           if (state.repositoryBranches) Object.assign(draft.repositoryBranches, state.repositoryBranches);
           if (state.settingsData) Object.assign(draft.settingsData, state.settingsData);
@@ -542,6 +559,19 @@ export function createAppStore(initialState?: Partial<AppState>) {
       setAgentDiscovery: (agents) =>
         set((draft) => {
           draft.agentDiscovery.items = agents;
+        }),
+      setAvailableAgents: (agents) =>
+        set((draft) => {
+          draft.availableAgents.items = agents;
+          draft.availableAgents.loading = false;
+          draft.availableAgents.loaded = true;
+        }),
+      setAvailableAgentsLoading: (loading) =>
+        set((draft) => {
+          draft.availableAgents.loading = loading;
+          if (!loading && !draft.availableAgents.loaded) {
+            draft.availableAgents.loaded = false;
+          }
         }),
       setAgentProfiles: (profiles) =>
         set((draft) => {

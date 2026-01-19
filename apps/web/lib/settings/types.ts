@@ -91,6 +91,7 @@ export type AgentProfile = {
   id: string;
   agent: AgentType;
   name: string;
+  agentDisplayName: string;
   model: string;
   autoApprove: boolean;
   temperature: number;

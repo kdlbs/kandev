@@ -18,14 +18,6 @@ import { deleteAgentProfileAction, updateAgentProfileAction } from '@/app/action
 import type { Agent, AgentProfile } from '@/lib/types/http';
 import { useAppStore } from '@/components/state-provider';
 
-const AGENT_LABELS: Record<string, string> = {
-  claude: 'Claude',
-  gemini: 'Gemini',
-  codex: 'Codex',
-  opencode: 'OpenCode',
-  copilot: 'Copilot',
-};
-
 type ProfileEditorProps = {
   agent: Agent;
   profile: AgentProfile;
@@ -45,7 +37,7 @@ function ProfileEditor({ agent, profile }: ProfileEditorProps) {
       nextAgents.flatMap((agentItem) =>
         agentItem.profiles.map((agentProfile) => ({
           id: agentProfile.id,
-          label: `${agentItem.name} • ${agentProfile.name}`,
+          label: `${agentProfile.agent_display_name} • ${agentProfile.name}`,
           agent_id: agentItem.id,
         }))
       )
@@ -77,11 +69,11 @@ function ProfileEditor({ agent, profile }: ProfileEditorProps) {
       const nextAgents = settingsAgents.map((agentItem) =>
         agentItem.id === agent.id
           ? {
-              ...agentItem,
-              profiles: agentItem.profiles.map((profileItem) =>
-                profileItem.id === updated.id ? updated : profileItem
-              ),
-            }
+            ...agentItem,
+            profiles: agentItem.profiles.map((profileItem) =>
+              profileItem.id === updated.id ? updated : profileItem
+            ),
+          }
           : agentItem
       );
       syncAgentsToStore(nextAgents);
@@ -102,9 +94,9 @@ function ProfileEditor({ agent, profile }: ProfileEditorProps) {
       const nextAgents = settingsAgents.map((agentItem) =>
         agentItem.id === agent.id
           ? {
-              ...agentItem,
-              profiles: agentItem.profiles.filter((profileItem) => profileItem.id !== draft.id),
-            }
+            ...agentItem,
+            profiles: agentItem.profiles.filter((profileItem) => profileItem.id !== draft.id),
+          }
           : agentItem
       );
       syncAgentsToStore(nextAgents);
@@ -122,9 +114,9 @@ function ProfileEditor({ agent, profile }: ProfileEditorProps) {
     <div className="space-y-8">
       <div className="flex items-start justify-between">
         <div>
-          <h2 className="text-2xl font-bold">{savedProfile.name}</h2>
+          <h2 className="text-2xl font-bold">{profile.agent_display_name} • {savedProfile.name}</h2>
           <p className="text-sm text-muted-foreground mt-1">
-            {AGENT_LABELS[agent.name] ?? agent.name} profile settings
+            {profile.agent_display_name} profile settings
           </p>
         </div>
         <div className="flex items-center gap-3">

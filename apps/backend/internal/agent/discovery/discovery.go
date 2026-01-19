@@ -20,6 +20,12 @@ type OSPaths struct {
 	MacOS   []string `json:"macos"`
 }
 
+type Capabilities struct {
+	SupportsSessionResume bool `json:"supports_session_resume"`
+	SupportsShell         bool `json:"supports_shell"`
+	SupportsWorkspaceOnly bool `json:"supports_workspace_only"`
+}
+
 func (p OSPaths) ForOS(goos string) []string {
 	switch goos {
 	case "windows":
@@ -32,10 +38,12 @@ func (p OSPaths) ForOS(goos string) []string {
 }
 
 type KnownAgent struct {
-	Name             string  `json:"name"`
-	SupportsMCP      bool    `json:"supports_mcp"`
-	MCPConfigPath    OSPaths `json:"mcp_config_path"`
-	InstallationPath OSPaths `json:"installation_path"`
+	Name             string       `json:"name"`
+	DisplayName      string       `json:"display_name"`
+	SupportsMCP      bool         `json:"supports_mcp"`
+	MCPConfigPath    OSPaths      `json:"mcp_config_path"`
+	InstallationPath OSPaths      `json:"installation_path"`
+	Capabilities     Capabilities `json:"capabilities"`
 }
 
 type Config struct {
@@ -56,7 +64,8 @@ type Adapter interface {
 }
 
 type Registry struct {
-	adapters []Adapter
+	adapters    []Adapter
+	definitions []KnownAgent
 }
 
 func LoadRegistry() (*Registry, error) {
@@ -72,7 +81,14 @@ func LoadRegistry() (*Registry, error) {
 	for _, agent := range cfg.Agents {
 		adapters = append(adapters, NewFilePresenceAdapter(agent))
 	}
-	return &Registry{adapters: adapters}, nil
+	return &Registry{adapters: adapters, definitions: cfg.Agents}, nil
+}
+
+func (r *Registry) Definitions() []KnownAgent {
+	if r == nil {
+		return nil
+	}
+	return append([]KnownAgent(nil), r.definitions...)
 }
 
 func (r *Registry) Detect(ctx context.Context) ([]Availability, error) {

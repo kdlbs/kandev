@@ -341,6 +341,7 @@ export type AgentProfile = {
   id: string;
   agent_id: string;
   name: string;
+  agent_display_name: string;
   model: string;
   auto_approve: boolean;
   dangerously_skip_permissions: boolean;
@@ -369,6 +370,24 @@ export type AgentDiscovery = {
   matched_path?: string | null;
 };
 
+export type AgentCapabilities = {
+  supports_session_resume: boolean;
+  supports_shell: boolean;
+  supports_workspace_only: boolean;
+};
+
+export type AvailableAgent = {
+  name: string;
+  display_name: string;
+  supports_mcp: boolean;
+  mcp_config_path?: string | null;
+  installation_paths: string[];
+  available: boolean;
+  matched_path?: string | null;
+  capabilities: AgentCapabilities;
+  updated_at: string;
+};
+
 export type ListAgentsResponse = {
   agents: Agent[];
   total: number;
@@ -376,5 +395,10 @@ export type ListAgentsResponse = {
 
 export type ListAgentDiscoveryResponse = {
   agents: AgentDiscovery[];
+  total: number;
+};
+
+export type ListAvailableAgentsResponse = {
+  agents: AvailableAgent[];
   total: number;
 };

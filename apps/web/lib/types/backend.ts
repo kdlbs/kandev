@@ -5,6 +5,7 @@ export type BackendMessageType =
   | 'task.deleted'
   | 'task.state_changed'
   | 'agent.updated'
+  | 'agent.available.updated'
   | 'terminal.output'
   | 'diff.update'
   | 'session.git.status'
@@ -46,7 +47,7 @@ export type BackendMessage<T extends BackendMessageType, P> = {
   timestamp?: string;
 };
 
-import type { TaskState } from '@/lib/types/http';
+import type { AvailableAgent, TaskState } from '@/lib/types/http';
 
 export type KanbanUpdatePayload = {
   boardId: string;
@@ -77,6 +78,10 @@ export type AgentUpdatePayload = {
   agentId: string;
   status: 'idle' | 'running' | 'error';
   message?: string;
+};
+
+export type AgentAvailableUpdatedPayload = {
+  agents: AvailableAgent[];
 };
 
 export type TerminalOutputPayload = {
@@ -219,6 +224,7 @@ export type AgentProfilePayload = {
   id: string;
   agent_id: string;
   name: string;
+  agent_display_name: string;
   model: string;
   auto_approve: boolean;
   dangerously_skip_permissions: boolean;
@@ -261,6 +267,7 @@ export type BackendMessageMap = {
   'task.deleted': BackendMessage<'task.deleted', TaskEventPayload>;
   'task.state_changed': BackendMessage<'task.state_changed', TaskEventPayload>;
   'agent.updated': BackendMessage<'agent.updated', AgentUpdatePayload>;
+  'agent.available.updated': BackendMessage<'agent.available.updated', AgentAvailableUpdatedPayload>;
   'terminal.output': BackendMessage<'terminal.output', TerminalOutputPayload>;
   'diff.update': BackendMessage<'diff.update', DiffUpdatePayload>;
   'session.git.status': BackendMessage<'session.git.status', GitStatusPayload>;

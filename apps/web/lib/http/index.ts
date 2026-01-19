@@ -3,6 +3,7 @@ import type {
   BoardSnapshot,
   ListAgentsResponse,
   ListAgentDiscoveryResponse,
+  ListAvailableAgentsResponse,
   ListBoardsResponse,
   ListEnvironmentsResponse,
   ListExecutorsResponse,
@@ -317,4 +318,10 @@ export async function listAgentDiscovery(
   options?: ApiRequestOptions
 ): Promise<ListAgentDiscoveryResponse> {
   return fetchJson<ListAgentDiscoveryResponse>('/api/v1/agents/discovery', options);
+}
+
+export async function listAvailableAgents(
+  options?: ApiRequestOptions
+): Promise<ListAvailableAgentsResponse> {
+  return fetchJson<ListAvailableAgentsResponse>('/api/v1/agents/available', options);
 }
