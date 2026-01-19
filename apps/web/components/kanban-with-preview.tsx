@@ -24,6 +24,7 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
 
   // Get tasks from the kanban store
   const kanbanTasks = useAppStore((state) => state.kanban.tasks);
+  const taskSessionsByTaskId = useAppStore((state) => state.taskSessionsByTask.itemsByTaskId);
 
   const {
     selectedTaskId,
@@ -180,7 +181,17 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
         }
       } else {
         // Navigate mode: go directly to session details
-        // Need to fetch the session ID for the clicked task
+        // First check if we have session data in the store
+        const sessionsFromStore = taskSessionsByTaskId[task.id];
+        const sessionIdFromStore = sessionsFromStore?.[0]?.id;
+
+        if (sessionIdFromStore) {
+          // We have a session ID in the store - use it directly
+          handleNavigateToTask(task, sessionIdFromStore);
+          return;
+        }
+
+        // No session in store - fetch from backend
         const client = getWebSocketClient();
         if (!client) {
           // If no WebSocket client, fall back to opening preview
@@ -209,7 +220,7 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
         }
       }
     },
-    [enablePreviewOnClick, isOpen, selectedTaskId, open, close, handleNavigateToTask]
+    [enablePreviewOnClick, isOpen, selectedTaskId, taskSessionsByTaskId, open, close, handleNavigateToTask]
   );
 
   // Handle Escape key to close preview
