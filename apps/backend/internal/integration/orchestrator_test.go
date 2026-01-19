@@ -645,7 +645,7 @@ func (ts *OrchestratorTestServer) CreateTestTask(t *testing.T, agentProfileID st
 	repository, err := ts.TaskSvc.CreateRepository(context.Background(), &taskservice.CreateRepositoryRequest{
 		WorkspaceID: workspace.ID,
 		Name:        "Test Repo",
-		LocalPath:   "/tmp/repo",
+		LocalPath:   createTempRepoDir(t),
 	})
 	require.NoError(t, err)
 
@@ -1460,7 +1460,7 @@ func TestOrchestratorEndToEndWorkflow(t *testing.T) {
 		"workspace_id": workspaceID,
 		"name":         "Test Repo",
 		"source_type":  "local",
-		"local_path":   "/tmp/repo",
+		"local_path":   createTempRepoDir(t),
 	})
 	require.NoError(t, err)
 
