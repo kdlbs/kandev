@@ -14,6 +14,7 @@ export function useKanbanPreview(options: UseKanbanPreviewOptions = {}) {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [isOpen, setIsOpen] = useState(false);
   const [previewWidthPx, setPreviewWidthPx] = useState<number>(PREVIEW_PANEL.DEFAULT_WIDTH_PX);
+  const [enablePreviewOnClick, setEnablePreviewOnClick] = useState<boolean>(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const hasInitialized = useRef(false);
 
@@ -27,6 +28,7 @@ export function useKanbanPreview(options: UseKanbanPreviewOptions = {}) {
       isOpen: false,
       previewWidthPx: PREVIEW_PANEL.DEFAULT_WIDTH_PX,
       selectedTaskId: null,
+      enablePreviewOnClick: false,
     });
 
     // Prioritize initial task ID from SSR
@@ -41,6 +43,9 @@ export function useKanbanPreview(options: UseKanbanPreviewOptions = {}) {
     }
     if (taskIdToUse) {
       setSelectedTaskId(taskIdToUse);
+    }
+    if (savedState.enablePreviewOnClick !== undefined) {
+      setEnablePreviewOnClick(savedState.enablePreviewOnClick);
     }
   }, [options.initialTaskId]);
 
@@ -58,6 +63,10 @@ export function useKanbanPreview(options: UseKanbanPreviewOptions = {}) {
   useEffect(() => {
     setKanbanPreviewState({ selectedTaskId });
   }, [selectedTaskId]);
+
+  useEffect(() => {
+    setKanbanPreviewState({ enablePreviewOnClick });
+  }, [enablePreviewOnClick]);
 
   const open = useCallback((taskId: string) => {
     setSelectedTaskId(taskId);
@@ -82,10 +91,12 @@ export function useKanbanPreview(options: UseKanbanPreviewOptions = {}) {
     selectedTaskId,
     isOpen,
     previewWidthPx,
+    enablePreviewOnClick,
     open,
     close,
     toggle,
     setSelectedTaskId,
+    setEnablePreviewOnClick,
     updatePreviewWidth,
     containerRef,
   };

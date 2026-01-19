@@ -24,13 +24,16 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
 
   // Get tasks from the kanban store
   const kanbanTasks = useAppStore((state) => state.kanban.tasks);
+  const taskSessionsByTaskId = useAppStore((state) => state.taskSessionsByTask.itemsByTaskId);
 
   const {
     selectedTaskId,
     isOpen,
     previewWidthPx,
+    enablePreviewOnClick,
     open,
     close,
+    setEnablePreviewOnClick,
     updatePreviewWidth,
   } = useKanbanPreview({
     initialTaskId,
@@ -168,14 +171,56 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
   // Preview handler - task data is computed from selectedTaskId
   // Toggle behavior: clicking the same task closes the panel
   const handlePreviewTaskWithData = useCallback(
-    (task: Task) => {
-      if (isOpen && selectedTaskId === task.id) {
-        close();
+    async (task: Task) => {
+      if (enablePreviewOnClick) {
+        // Preview mode: open/toggle preview panel
+        if (isOpen && selectedTaskId === task.id) {
+          close();
+        } else {
+          open(task.id);
+        }
       } else {
-        open(task.id);
+        // Navigate mode: go directly to session details
+        // First check if we have session data in the store
+        const sessionsFromStore = taskSessionsByTaskId[task.id];
+        const sessionIdFromStore = sessionsFromStore?.[0]?.id;
+
+        if (sessionIdFromStore) {
+          // We have a session ID in the store - use it directly
+          handleNavigateToTask(task, sessionIdFromStore);
+          return;
+        }
+
+        // No session in store - fetch from backend
+        const client = getWebSocketClient();
+        if (!client) {
+          // If no WebSocket client, fall back to opening preview
+          open(task.id);
+          return;
+        }
+
+        try {
+          const response = await client.request<{ sessions: Array<{ id: string }> }>(
+            "task.session.list",
+            { task_id: task.id },
+            10000
+          );
+          const sessionId = response.sessions[0]?.id;
+
+          if (sessionId) {
+            handleNavigateToTask(task, sessionId);
+          } else {
+            // If no session exists, fall back to opening preview
+            open(task.id);
+          }
+        } catch (error) {
+          console.error("Failed to load task sessions:", error);
+          // Fall back to opening preview on error
+          open(task.id);
+        }
       }
     },
-    [isOpen, selectedTaskId, open, close]
+    [enablePreviewOnClick, isOpen, selectedTaskId, taskSessionsByTaskId, open, close, handleNavigateToTask]
   );
 
   // Handle Escape key to close preview
@@ -241,6 +286,8 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
             <KanbanBoard
               onPreviewTask={handlePreviewTaskWithData}
               onOpenTask={handleNavigateToTask}
+              enablePreviewOnClick={enablePreviewOnClick}
+              onTogglePreviewOnClick={setEnablePreviewOnClick}
             />
           </div>
 
@@ -296,6 +343,8 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
             <KanbanBoard
               onPreviewTask={handlePreviewTaskWithData}
               onOpenTask={handleNavigateToTask}
+              enablePreviewOnClick={enablePreviewOnClick}
+              onTogglePreviewOnClick={setEnablePreviewOnClick}
             />
           </div>
 
