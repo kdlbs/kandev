@@ -49,6 +49,11 @@ export function RepositoryCard({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const saveRequest = useRequest(() => onSave(repository.id));
   const deleteRequest = useRequest(async () => { await onDelete(repository.id); });
+  const repositoryName = repository.name ?? '';
+  const repositoryLocalPath = repository.local_path ?? '';
+  const worktreeBranchPrefix = repository.worktree_branch_prefix ?? '';
+  const setupScript = repository.setup_script ?? '';
+  const cleanupScript = repository.cleanup_script ?? '';
 
   const handleSave = async () => {
     try {
@@ -99,40 +104,41 @@ export function RepositoryCard({
             <div className="space-y-2">
               <Label>Repository Name</Label>
               <Input
-                value={repository.name}
+                value={repositoryName}
                 onChange={(e) => onUpdate(repository.id, { name: e.target.value })}
                 placeholder="my-repo"
               />
             </div>
+            <div className="space-y-2">
+              <Label>Local Path</Label>
+              <Input
+                value={repositoryLocalPath}
+                onChange={(e) => onUpdate(repository.id, { local_path: e.target.value })}
+                placeholder="/path/to/repository"
+                disabled={repository.source_type !== 'local'}
+              />
+            </div>
           </div>
 
-          <div className="space-y-2">
-            <Label>Local Path</Label>
-            <Input
-              value={repository.local_path}
-              onChange={(e) => onUpdate(repository.id, { local_path: e.target.value })}
-              placeholder="/path/to/repository"
-              disabled={repository.source_type !== 'local'}
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label>Worktree Branch Prefix</Label>
-            <Input
-              value={repository.worktree_branch_prefix}
-              onChange={(e) => onUpdate(repository.id, { worktree_branch_prefix: e.target.value })}
-              placeholder="feature/"
-            />
-            <p className="text-xs text-muted-foreground">
-              Used for new worktree branches. Leave empty to use the default.
-            </p>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label>Worktree Branch Prefix</Label>
+              <Input
+                value={worktreeBranchPrefix}
+                onChange={(e) => onUpdate(repository.id, { worktree_branch_prefix: e.target.value })}
+                placeholder="feature/"
+              />
+              <p className="text-xs text-muted-foreground">
+                Used for new worktree branches. Leave empty to use the default.
+                Branches are generated as {'{prefix}{sanitized-title}-{rand}'}.</p>
+            </div>
           </div>
 
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
               <Label>Setup Script</Label>
               <Textarea
-                value={repository.setup_script}
+                value={setupScript}
                 onChange={(e) => onUpdate(repository.id, { setup_script: e.target.value })}
                 placeholder="#!/bin/bash&#10;# any manual setup you need"
                 rows={3}
@@ -145,7 +151,7 @@ export function RepositoryCard({
             <div className="space-y-2">
               <Label>Cleanup Script</Label>
               <Textarea
-                value={repository.cleanup_script}
+                value={cleanupScript}
                 onChange={(e) => onUpdate(repository.id, { cleanup_script: e.target.value })}
                 placeholder="#!/bin/bash&#10;# any manual clean up you need"
                 rows={3}
@@ -176,7 +182,7 @@ export function RepositoryCard({
                   <div key={script.id} className="grid gap-2">
                     <div className="flex items-center gap-2">
                       <Input
-                        value={script.name}
+                        value={script.name ?? ''}
                         onChange={(e) =>
                           onUpdateScript(repository.id, script.id, { name: e.target.value })
                         }
@@ -192,7 +198,7 @@ export function RepositoryCard({
                       </Button>
                     </div>
                     <Textarea
-                      value={script.command}
+                      value={script.command ?? ''}
                       onChange={(e) =>
                         onUpdateScript(repository.id, script.id, { command: e.target.value })
                       }

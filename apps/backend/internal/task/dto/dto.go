@@ -45,15 +45,15 @@ type RepositoryDTO struct {
 	WorkspaceID          string    `json:"workspace_id"`
 	Name                 string    `json:"name"`
 	SourceType           string    `json:"source_type"`
-	LocalPath            string    `json:"local_path,omitempty"`
-	Provider             string    `json:"provider,omitempty"`
-	ProviderRepoID       string    `json:"provider_repo_id,omitempty"`
-	ProviderOwner        string    `json:"provider_owner,omitempty"`
-	ProviderName         string    `json:"provider_name,omitempty"`
-	DefaultBranch        string    `json:"default_branch,omitempty"`
-	WorktreeBranchPrefix string    `json:"worktree_branch_prefix,omitempty"`
-	SetupScript          string    `json:"setup_script,omitempty"`
-	CleanupScript        string    `json:"cleanup_script,omitempty"`
+	LocalPath            string    `json:"local_path"`
+	Provider             string    `json:"provider"`
+	ProviderRepoID       string    `json:"provider_repo_id"`
+	ProviderOwner        string    `json:"provider_owner"`
+	ProviderName         string    `json:"provider_name"`
+	DefaultBranch        string    `json:"default_branch"`
+	WorktreeBranchPrefix string    `json:"worktree_branch_prefix"`
+	SetupScript          string    `json:"setup_script"`
+	CleanupScript        string    `json:"cleanup_script"`
 	CreatedAt            time.Time `json:"created_at"`
 	UpdatedAt            time.Time `json:"updated_at"`
 }
