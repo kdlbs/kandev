@@ -223,6 +223,9 @@ func (c *Client) handleSessionSubscribe(msg *ws.Message) {
 		"session_id": req.SessionID,
 	})
 	c.sendMessage(resp)
+
+	// Send initial session data (e.g., git status) if available
+	c.sendSessionData(req.SessionID)
 }
 
 func (c *Client) handleUserUnsubscribe(msg *ws.Message) {
@@ -269,6 +272,31 @@ func (c *Client) sendHistoricalLogs(taskID string) {
 	// Send each historical log as a notification
 	for _, log := range logs {
 		c.sendMessage(log)
+	}
+}
+
+// sendSessionData sends initial session data (e.g., git status) to the client
+func (c *Client) sendSessionData(sessionID string) {
+	ctx := context.Background()
+	data, err := c.hub.GetSessionData(ctx, sessionID)
+	if err != nil {
+		c.logger.Error("Failed to get session data",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return
+	}
+
+	if len(data) == 0 {
+		return
+	}
+
+	c.logger.Debug("Sending session data",
+		zap.String("session_id", sessionID),
+		zap.Int("count", len(data)))
+
+	// Send each piece of session data as a notification
+	for _, msg := range data {
+		c.sendMessage(msg)
 	}
 }
 

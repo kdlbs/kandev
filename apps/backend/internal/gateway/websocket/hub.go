@@ -14,6 +14,9 @@ import (
 // HistoricalLogsProvider is a function that retrieves historical logs for a task
 type HistoricalLogsProvider func(ctx context.Context, taskID string) ([]*ws.Message, error)
 
+// SessionDataProvider is a function that retrieves initial data for a session subscription (e.g., git status)
+type SessionDataProvider func(ctx context.Context, sessionID string) ([]*ws.Message, error)
+
 // Hub manages all WebSocket client connections
 type Hub struct {
 	// All registered clients
@@ -38,6 +41,9 @@ type Hub struct {
 
 	// Optional provider for historical logs on subscription
 	historicalLogsProvider HistoricalLogsProvider
+
+	// Optional provider for session data on subscription (e.g., git status)
+	sessionDataProvider SessionDataProvider
 
 	mu     sync.RWMutex
 	logger *logger.Logger
@@ -385,4 +391,17 @@ func (h *Hub) GetHistoricalLogs(ctx context.Context, taskID string) ([]*ws.Messa
 		return nil, nil
 	}
 	return h.historicalLogsProvider(ctx, taskID)
+}
+
+// SetSessionDataProvider sets the provider for session data on subscription
+func (h *Hub) SetSessionDataProvider(provider SessionDataProvider) {
+	h.sessionDataProvider = provider
+}
+
+// GetSessionData retrieves session data (e.g., git status) if a provider is set
+func (h *Hub) GetSessionData(ctx context.Context, sessionID string) ([]*ws.Message, error) {
+	if h.sessionDataProvider == nil {
+		return nil, nil
+	}
+	return h.sessionDataProvider(ctx, sessionID)
 }

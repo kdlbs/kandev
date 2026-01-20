@@ -358,6 +358,40 @@ func main() {
 	})
 	log.Info("Historical logs provider configured for task subscriptions (using messages and git status)")
 
+	// Set up session data provider for session subscriptions
+	// Sends initial git status when a client subscribes to a session
+	gateway.Hub.SetSessionDataProvider(func(ctx context.Context, sessionID string) ([]*ws.Message, error) {
+		session, err := taskRepo.GetTaskSession(ctx, sessionID)
+		if err != nil {
+			return nil, nil // Session not found, no data to send
+		}
+
+		var result []*ws.Message
+
+		// Send git status if available in session metadata
+		if session.Metadata != nil {
+			if gitStatus, ok := session.Metadata["git_status"]; ok {
+				gitStatusData, ok := gitStatus.(map[string]interface{})
+				if !ok {
+					gitStatusData = map[string]interface{}{"data": gitStatus}
+				}
+				// Ensure session_id is included
+				gitStatusData["session_id"] = sessionID
+				if session.TaskID != "" {
+					gitStatusData["task_id"] = session.TaskID
+				}
+
+				gitStatusNotification, err := ws.NewNotification("session.git.status", gitStatusData)
+				if err == nil {
+					result = append(result, gitStatusNotification)
+				}
+			}
+		}
+
+		return result, nil
+	})
+	log.Info("Session data provider configured for session subscriptions (git status)")
+
 	// NOTE: Pending permissions are now stored as messages and retrieved via the historical logs provider.
 	// The separate pending permissions provider is no longer needed.
 
