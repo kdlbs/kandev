@@ -98,7 +98,7 @@ func (g *GitOperator) triggerFsNotify() {
 		g.logger.Debug("failed to create sentinel file", zap.Error(err))
 		return
 	}
-	f.Close()
+	_ = f.Close()
 	if err := os.Remove(sentinelPath); err != nil {
 		g.logger.Debug("failed to remove sentinel file", zap.Error(err))
 	}
