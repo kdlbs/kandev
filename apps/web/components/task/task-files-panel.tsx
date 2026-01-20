@@ -7,6 +7,7 @@ import {
   IconPlus,
   IconCircleFilled,
   IconMinus,
+  IconCheck,
 } from '@tabler/icons-react';
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@kandev/ui/tabs';
@@ -15,6 +16,7 @@ import { LineStat } from '@/components/diff-stat';
 import { useAppStore } from '@/components/state-provider';
 import { useOpenSessionInEditor } from '@/hooks/use-open-session-in-editor';
 import { useSessionGitStatus } from '@/hooks/use-session-git-status';
+import { useGitOperations } from '@/hooks/use-git-operations';
 import type { FileInfo } from '@/lib/state/store';
 import { FileBrowser } from '@/components/task/file-browser';
 
@@ -81,6 +83,7 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiffPath, onOpenFi
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const gitStatus = useSessionGitStatus(activeSessionId);
   const openEditor = useOpenSessionInEditor(activeSessionId ?? null);
+  const gitOps = useGitOperations(activeSessionId ?? null);
 
   // Convert git status files to array for display
   const changedFiles = useMemo(() => {
@@ -90,6 +93,7 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiffPath, onOpenFi
     return Object.values(gitStatus.files).map((file) => ({
       path: file.path,
       status: file.status,
+      staged: file.staged,
       plus: file.additions,
       minus: file.deletions,
       oldPath: file.old_path,
@@ -123,17 +127,46 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiffPath, onOpenFi
                       className="group flex items-center justify-between gap-3 text-sm rounded-md px-1 py-0.5 -mx-1 hover:bg-muted/60 cursor-pointer"
                       onClick={() => onSelectDiffPath(file.path)}
                     >
-                      <button type="button" className="min-w-0 text-left cursor-pointer">
-                        <p className="truncate text-foreground">
-                          <span className="text-foreground/60">{folder}/</span>
-                          <span className="font-medium text-foreground">{name}</span>
-                        </p>
-                        {file.oldPath && (
-                          <p className="truncate text-xs text-muted-foreground">
-                            Renamed from: {file.oldPath}
-                          </p>
+                      <div className="flex items-center gap-2 min-w-0">
+                        {/* Staged indicator */}
+                        {file.staged ? (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <div className="flex items-center justify-center h-4 w-4 rounded bg-emerald-500/20 text-emerald-600">
+                                <IconCheck className="h-3 w-3" />
+                              </div>
+                            </TooltipTrigger>
+                            <TooltipContent>Staged for commit</TooltipContent>
+                          </Tooltip>
+                        ) : (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <button
+                                type="button"
+                                className="flex items-center justify-center h-4 w-4 rounded border border-dashed border-muted-foreground/50 text-muted-foreground hover:border-emerald-500 hover:text-emerald-500 hover:bg-emerald-500/10"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  void gitOps.stage([file.path]);
+                                }}
+                              >
+                                <IconPlus className="h-2.5 w-2.5" />
+                              </button>
+                            </TooltipTrigger>
+                            <TooltipContent>Stage file</TooltipContent>
+                          </Tooltip>
                         )}
-                      </button>
+                        <button type="button" className="min-w-0 text-left cursor-pointer">
+                          <p className="truncate text-foreground">
+                            <span className="text-foreground/60">{folder}/</span>
+                            <span className="font-medium text-foreground">{name}</span>
+                          </p>
+                          {file.oldPath && (
+                            <p className="truncate text-xs text-muted-foreground">
+                              Renamed from: {file.oldPath}
+                            </p>
+                          )}
+                        </button>
+                      </div>
                       <div className="flex items-center gap-2">
                         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
                           <Tooltip>

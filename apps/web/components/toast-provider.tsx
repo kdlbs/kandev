@@ -1,9 +1,10 @@
 'use client';
 
 import { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import { IconCheck, IconX, IconInfoCircle } from '@tabler/icons-react';
 import { cn, generateUUID } from '@/lib/utils';
 
-type ToastVariant = 'default' | 'error';
+type ToastVariant = 'default' | 'success' | 'error';
 
 type Toast = {
   id: string;
@@ -19,6 +20,24 @@ type ToastContextValue = {
 };
 
 const ToastContext = createContext<ToastContextValue | null>(null);
+
+const variantStyles: Record<ToastVariant, { container: string; icon: string; IconComponent: typeof IconCheck }> = {
+  default: {
+    container: 'border-border/60 bg-background',
+    icon: 'text-muted-foreground',
+    IconComponent: IconInfoCircle,
+  },
+  success: {
+    container: 'border-green-500/30 bg-green-500/10 dark:bg-green-500/5',
+    icon: 'text-green-600 dark:text-green-400',
+    IconComponent: IconCheck,
+  },
+  error: {
+    container: 'border-red-500/30 bg-red-500/10 dark:bg-red-500/5',
+    icon: 'text-red-600 dark:text-red-400',
+    IconComponent: IconX,
+  },
+};
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -36,8 +55,8 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
         description: input.description,
         variant: input.variant ?? 'default',
       };
-      setToasts((prev) => [nextToast, ...prev]);
-      const duration = input.duration ?? 3000;
+      setToasts((prev) => [...prev, nextToast]);
+      const duration = input.duration ?? 4000;
       window.setTimeout(() => removeToast(id), duration);
     },
     [removeToast]
@@ -48,21 +67,34 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   return (
     <ToastContext.Provider value={value}>
       {children}
-      <div className="fixed right-4 top-4 z-50 flex w-[320px] flex-col gap-2">
-        {toasts.map((toast) => (
-          <div
-            key={toast.id}
-            className={cn(
-              'rounded-md border border-border/60 bg-background px-3 py-2 shadow-md',
-              toast.variant === 'error' && 'border-destructive/50 bg-destructive/10'
-            )}
-          >
-            {toast.title && <div className="text-sm font-medium">{toast.title}</div>}
-            {toast.description && (
-              <div className="text-xs text-muted-foreground">{toast.description}</div>
-            )}
-          </div>
-        ))}
+      <div className="fixed bottom-4 right-4 z-50 flex w-[360px] flex-col-reverse gap-2">
+        {toasts.map((t) => {
+          const variant = t.variant ?? 'default';
+          const styles = variantStyles[variant];
+          const Icon = styles.IconComponent;
+          return (
+            <div
+              key={t.id}
+              className={cn(
+                'flex items-start gap-3 rounded-lg border px-4 py-3 shadow-lg backdrop-blur-sm',
+                'animate-in slide-in-from-right-full duration-300',
+                styles.container
+              )}
+            >
+              <div className={cn('mt-0.5 flex-shrink-0', styles.icon)}>
+                <Icon className="h-5 w-5" />
+              </div>
+              <div className="flex-1 space-y-1">
+                {t.title && (
+                  <div className="text-sm font-semibold leading-tight">{t.title}</div>
+                )}
+                {t.description && (
+                  <div className="text-xs leading-relaxed text-muted-foreground">{t.description}</div>
+                )}
+              </div>
+            </div>
+          );
+        })}
       </div>
     </ToastContext.Provider>
   );

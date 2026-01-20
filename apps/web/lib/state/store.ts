@@ -164,6 +164,7 @@ export type ShellState = {
 export type FileInfo = {
   path: string;
   status: 'modified' | 'added' | 'deleted' | 'untracked' | 'renamed';
+  staged: boolean;
   additions?: number;
   deletions?: number;
   old_path?: string;

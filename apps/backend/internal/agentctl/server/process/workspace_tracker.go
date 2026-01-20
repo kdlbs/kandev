@@ -221,35 +221,71 @@ func (wt *WorkspaceTracker) getGitStatus(ctx context.Context) (types.GitStatusUp
 	}
 
 	// Parse porcelain output
+	// Git status --porcelain format: XY filename
+	// X = index (staged) status, Y = working tree (unstaged) status
+	// ' ' = unmodified, M = modified, A = added, D = deleted, R = renamed, ? = untracked
 	lines := strings.Split(string(statusOut), "\n")
 	for _, line := range lines {
-		if len(line) < 4 {
+		if len(line) < 3 {
 			continue
 		}
 
-		statusCode := line[:2]
+		indexStatus := line[0]   // Staged status (X)
+		workTreeStatus := line[1] // Unstaged status (Y)
 		filePath := strings.TrimSpace(line[3:])
 
 		fileInfo := types.FileInfo{
 			Path: filePath,
 		}
 
-		// Parse status code
+		// Determine staged status based on index and worktree status.
+		// A file's change is "staged" if the relevant change is in the index.
+		// If there's a worktree change (like deletion), that change is unstaged.
+		//
+		// Examples:
+		// "M " = modified and staged (Staged=true)
+		// " M" = modified but unstaged (Staged=false)
+		// "MM" = modified staged + more unstaged modifications (Staged=false for the current state)
+		// "A " = added and staged (Staged=true)
+		// "AD" = added to index but deleted in worktree - deletion is unstaged (Staged=false)
+		// "D " = deleted and staged (Staged=true)
+		// " D" = deleted but unstaged (Staged=false)
+
+		// Parse status - prioritize worktree changes as they represent the current state
 		switch {
-		case strings.HasPrefix(statusCode, "M ") || strings.HasPrefix(statusCode, " M"):
-			fileInfo.Status = "modified"
-			update.Modified = append(update.Modified, filePath)
-		case strings.HasPrefix(statusCode, "A "):
-			fileInfo.Status = "added"
-			update.Added = append(update.Added, filePath)
-		case strings.HasPrefix(statusCode, "D ") || strings.HasPrefix(statusCode, " D"):
-			fileInfo.Status = "deleted"
-			update.Deleted = append(update.Deleted, filePath)
-		case strings.HasPrefix(statusCode, "??"):
+		case indexStatus == '?' && workTreeStatus == '?':
 			fileInfo.Status = "untracked"
+			fileInfo.Staged = false
 			update.Untracked = append(update.Untracked, filePath)
-		case strings.HasPrefix(statusCode, "R "):
+		case workTreeStatus == 'D':
+			// File deleted in worktree - this is an unstaged deletion
+			// Even if there were staged changes before (A, M), the deletion is unstaged
+			fileInfo.Status = "deleted"
+			fileInfo.Staged = false
+			update.Deleted = append(update.Deleted, filePath)
+		case indexStatus == 'D':
+			// File deleted and staged (no worktree status means deletion is complete)
+			fileInfo.Status = "deleted"
+			fileInfo.Staged = true
+			update.Deleted = append(update.Deleted, filePath)
+		case workTreeStatus == 'M':
+			// Modified in worktree - unstaged modification
+			fileInfo.Status = "modified"
+			fileInfo.Staged = false
+			update.Modified = append(update.Modified, filePath)
+		case indexStatus == 'M':
+			// Modified and staged (no worktree changes)
+			fileInfo.Status = "modified"
+			fileInfo.Staged = true
+			update.Modified = append(update.Modified, filePath)
+		case indexStatus == 'A':
+			// Added and staged
+			fileInfo.Status = "added"
+			fileInfo.Staged = true
+			update.Added = append(update.Added, filePath)
+		case indexStatus == 'R':
 			fileInfo.Status = "renamed"
+			fileInfo.Staged = true
 			// Renamed files have format "old -> new"
 			if idx := strings.Index(filePath, " -> "); idx != -1 {
 				fileInfo.OldPath = filePath[:idx]
@@ -302,7 +338,9 @@ func (wt *WorkspaceTracker) enrichWithDiffData(ctx context.Context, update *type
 		deletions, _ := strconv.Atoi(parts[1])
 		filePath := parts[2]
 
-		// Update existing file info if it exists
+		// Only update file info if it exists in status (uncommitted changes).
+		// Files that appear in diff but not in status are committed changes - we don't
+		// add them to the Files map as that would make git status show already-committed files.
 		if fileInfo, exists := update.Files[filePath]; exists {
 			fileInfo.Additions = additions
 			fileInfo.Deletions = deletions
@@ -315,26 +353,10 @@ func (wt *WorkspaceTracker) enrichWithDiffData(ctx context.Context, update *type
 			}
 
 			update.Files[filePath] = fileInfo
-		} else {
-			// File might be committed but not in status (because it's committed)
-			// Add it to the Files map
-			fileInfo := types.FileInfo{
-				Path:      filePath,
-				Status:    "modified", // Assume modified if it has a diff
-				Additions: additions,
-				Deletions: deletions,
-			}
-
-			// Get the actual diff content for this file
-			diffCmd := exec.CommandContext(ctx, "git", "diff", baseRef, "--", filePath)
-			diffCmd.Dir = wt.workDir
-			if diffOut, err := diffCmd.Output(); err == nil {
-				fileInfo.Diff = string(diffOut)
-			}
-
-			update.Files[filePath] = fileInfo
-			update.Modified = append(update.Modified, filePath)
 		}
+		// NOTE: We intentionally do NOT add files that are in the diff but not in git status.
+		// Those are committed changes, not uncommitted changes. The UI should only show
+		// uncommitted changes in the "files changed" count.
 	}
 
 	// Also check for staged changes

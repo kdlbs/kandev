@@ -1,10 +1,9 @@
 'use client';
 
-import { memo, useState } from 'react';
+import { memo, useState, useCallback } from 'react';
 import Link from 'next/link';
 import {
   IconArrowLeft,
-  IconArrowUp,
   IconCopy,
   IconDots,
   IconFolderOpen,
@@ -13,20 +12,39 @@ import {
   IconGitPullRequest,
   IconChevronDown,
   IconCheck,
+  IconLoader2,
+  IconCloudDownload,
+  IconCloudUpload,
+  IconGitCherryPick,
+  IconGitCommit,
 } from '@tabler/icons-react';
 import { Button } from '@kandev/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogClose,
+} from '@kandev/ui/dialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  DropdownMenuSeparator,
 } from '@kandev/ui/dropdown-menu';
+import { Textarea } from '@kandev/ui/textarea';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
 import { Popover, PopoverContent, PopoverTrigger } from '@kandev/ui/popover';
+import { Checkbox } from '@kandev/ui/checkbox';
+import { Label } from '@kandev/ui/label';
 import { CommitStatBadge, LineStat } from '@/components/diff-stat';
 import { useSessionGitStatus } from '@/hooks/use-session-git-status';
+import { useGitOperations } from '@/hooks/use-git-operations';
 import { formatUserHomePath } from '@/lib/utils';
 import { EditorsMenu } from '@/components/task/editors-menu';
+import { useToast } from '@/components/toast-provider';
 
 type TaskTopBarProps = {
   taskId?: string | null;
@@ -57,8 +75,16 @@ const TaskTopBar = memo(function TaskTopBar({
   const [popoverOpen, setPopoverOpen] = useState(false);
   const [copiedRepo, setCopiedRepo] = useState(false);
   const [copiedWorktree, setCopiedWorktree] = useState(false);
+  const [commitDialogOpen, setCommitDialogOpen] = useState(false);
+  const [commitMessage, setCommitMessage] = useState('');
+  const [stageAll, setStageAll] = useState(true);
+  const [prDialogOpen, setPrDialogOpen] = useState(false);
+  const [prTitle, setPrTitle] = useState('');
+  const [prBody, setPrBody] = useState('');
 
+  const { toast } = useToast();
   const gitStatus = useSessionGitStatus(activeSessionId ?? null);
+  const { pull, push, rebase, merge, commit, createPR, isLoading: isGitLoading } = useGitOperations(activeSessionId ?? null);
 
   // Use worktree branch if available, otherwise fall back to base branch
   const displayBranch = worktreeBranch || baseBranch;
@@ -72,6 +98,109 @@ const TaskTopBar = memo(function TaskTopBar({
       totalDeletions += file.deletions || 0;
     }
   }
+
+  const handleGitOperation = useCallback(async (
+    operation: () => Promise<{ success: boolean; output: string; error?: string; conflict_files?: string[] }>,
+    operationName: string
+  ) => {
+    try {
+      const result = await operation();
+      if (result.success) {
+        toast({
+          title: `${operationName} successful`,
+          description: result.output.slice(0, 200) || `${operationName} completed successfully`,
+          variant: 'success',
+        });
+      } else {
+        toast({
+          title: `${operationName} failed`,
+          description: result.error || 'An error occurred',
+          variant: 'error',
+        });
+        if (result.conflict_files && result.conflict_files.length > 0) {
+          console.log('Conflict files:', result.conflict_files);
+        }
+      }
+    } catch (error) {
+      toast({
+        title: `${operationName} failed`,
+        description: error instanceof Error ? error.message : 'An unexpected error occurred',
+        variant: 'error',
+      });
+    }
+  }, [toast]);
+
+  const handlePull = useCallback(() => {
+    handleGitOperation(() => pull(), 'Pull');
+  }, [handleGitOperation, pull]);
+
+  const handlePush = useCallback(() => {
+    handleGitOperation(() => push(), 'Push');
+  }, [handleGitOperation, push]);
+
+  const handleRebase = useCallback(() => {
+    // Rebase onto the base branch (e.g., origin/main)
+    const targetBranch = baseBranch || 'origin/main';
+    handleGitOperation(() => rebase(targetBranch), 'Rebase');
+  }, [handleGitOperation, rebase, baseBranch]);
+
+  const handleMerge = useCallback(() => {
+    // Merge from the base branch (e.g., origin/main)
+    const targetBranch = baseBranch || 'origin/main';
+    handleGitOperation(() => merge(targetBranch), 'Merge');
+  }, [handleGitOperation, merge, baseBranch]);
+
+  const handleOpenCommitDialog = useCallback(() => {
+    setCommitMessage('');
+    setStageAll(true);
+    setCommitDialogOpen(true);
+  }, []);
+
+  const handleCommit = useCallback(async () => {
+    if (!commitMessage.trim()) return;
+    setCommitDialogOpen(false);
+    await handleGitOperation(() => commit(commitMessage.trim(), stageAll), 'Commit');
+    setCommitMessage('');
+  }, [commitMessage, stageAll, handleGitOperation, commit]);
+
+  const handleOpenPRDialog = useCallback(() => {
+    setPrTitle(taskTitle || '');
+    setPrBody('');
+    setPrDialogOpen(true);
+  }, [taskTitle]);
+
+  const handleCreatePR = useCallback(async () => {
+    if (!prTitle.trim()) return;
+    setPrDialogOpen(false);
+    try {
+      const result = await createPR(prTitle.trim(), prBody.trim(), baseBranch);
+      if (result.success) {
+        toast({
+          title: 'Pull Request created',
+          description: result.pr_url || 'PR created successfully',
+          variant: 'success',
+        });
+        // Open the PR URL in a new tab
+        if (result.pr_url) {
+          window.open(result.pr_url, '_blank');
+        }
+      } else {
+        toast({
+          title: 'Create PR failed',
+          description: result.error || 'An error occurred',
+          variant: 'error',
+        });
+      }
+    } catch (e) {
+      toast({
+        title: 'Create PR failed',
+        description: e instanceof Error ? e.message : 'An error occurred',
+        variant: 'error',
+      });
+    }
+    setPrTitle('');
+    setPrBody('');
+  }, [prTitle, prBody, baseBranch, createPR, toast]);
 
   const handleBranchClick = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -239,71 +368,100 @@ const TaskTopBar = memo(function TaskTopBar({
       <div className="flex items-center gap-2">
         <EditorsMenu activeSessionId={activeSessionId ?? null} />
 
-        {/* Create PR Split Button */}
+        {/* Commit Split Button */}
         <div className="inline-flex rounded-md border border-border overflow-hidden">
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
                 size="sm"
                 variant="outline"
-                className="rounded-none border-0 cursor-pointer"
-                onClick={() => {
-                  // TODO: Implement create PR
-                  console.log('Create PR');
-                }}
+                className={`rounded-none border-0 cursor-pointer ${
+                  gitStatus?.files && Object.keys(gitStatus.files).length > 0
+                    ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20'
+                    : ''
+                }`}
+                onClick={handleOpenCommitDialog}
+                disabled={isGitLoading || !activeSessionId}
               >
-                <IconGitPullRequest className="h-4 w-4" />
-                Create PR
+                <IconGitCommit className={`h-4 w-4 ${gitStatus?.files && Object.keys(gitStatus.files).length > 0 ? 'text-amber-500' : ''}`} />
+                Commit
+                {gitStatus?.files && Object.keys(gitStatus.files).length > 0 && (
+                  <span className="ml-1 rounded-full bg-amber-500/20 px-1.5 py-0.5 text-xs font-medium">
+                    {Object.keys(gitStatus.files).length}
+                  </span>
+                )}
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Create pull request</TooltipContent>
+            <TooltipContent>
+              {gitStatus?.files && Object.keys(gitStatus.files).length > 0
+                ? `Commit ${Object.keys(gitStatus.files).length} changed file${Object.keys(gitStatus.files).length !== 1 ? 's' : ''}`
+                : 'No changes to commit'}
+            </TooltipContent>
           </Tooltip>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button size="sm" variant="outline" className="rounded-none border-0 border-l px-2 cursor-pointer">
-                <IconChevronDown className="h-4 w-4" />
+              <Button size="sm" variant="outline" className="rounded-none border-0 border-l px-2 cursor-pointer" disabled={isGitLoading}>
+                {isGitLoading ? (
+                  <IconLoader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <IconChevronDown className="h-4 w-4" />
+                )}
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
+            <DropdownMenuContent align="end" className="w-56">
               <DropdownMenuItem
-                className="cursor-pointer"
-                onClick={() => {
-                  // TODO: Implement pull
-                  console.log('Pull from remote');
-                }}
+                className="cursor-pointer gap-3"
+                onClick={handleOpenPRDialog}
+                disabled={isGitLoading || !activeSessionId}
               >
-                <IconArrowUp className="h-4 w-4 rotate-180" />
-                Pull
+                <IconGitPullRequest className="h-4 w-4 text-cyan-500" />
+                <span className="flex-1">Create PR</span>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                className="cursor-pointer gap-3"
+                onClick={handlePull}
+                disabled={isGitLoading || !activeSessionId}
+              >
+                <IconCloudDownload className="h-4 w-4 text-blue-500" />
+                <span className="flex-1">Pull</span>
+                {(gitStatus?.behind ?? 0) > 0 && (
+                  <span className="rounded-full bg-blue-500/10 px-2 py-0.5 text-xs font-medium text-blue-600 dark:text-blue-400">
+                    ↓{gitStatus?.behind}
+                  </span>
+                )}
               </DropdownMenuItem>
               <DropdownMenuItem
-                className="cursor-pointer"
-                onClick={() => {
-                  // TODO: Implement rebase
-                  console.log('Rebase');
-                }}
+                className="cursor-pointer gap-3"
+                onClick={handlePush}
+                disabled={isGitLoading || !activeSessionId}
               >
-                <IconGitBranch className="h-4 w-4" />
-                Rebase
+                <IconCloudUpload className="h-4 w-4 text-green-500" />
+                <span className="flex-1">Push</span>
+                {(gitStatus?.ahead ?? 0) > 0 && (
+                  <span className="rounded-full bg-green-500/10 px-2 py-0.5 text-xs font-medium text-green-600 dark:text-green-400">
+                    ↑{gitStatus?.ahead}
+                  </span>
+                )}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                className="cursor-pointer gap-3"
+                onClick={handleRebase}
+                disabled={isGitLoading || !activeSessionId}
+              >
+                <IconGitCherryPick className="h-4 w-4 text-orange-500" />
+                <span className="flex-1">Rebase</span>
+                <span className="text-xs text-muted-foreground">onto {baseBranch || 'origin/main'}</span>
               </DropdownMenuItem>
               <DropdownMenuItem
-                className="cursor-pointer"
-                onClick={() => {
-                  // TODO: Implement push
-                  console.log('Push to remote');
-                }}
+                className="cursor-pointer gap-3"
+                onClick={handleMerge}
+                disabled={isGitLoading || !activeSessionId}
               >
-                <IconArrowUp className="h-4 w-4" />
-                Push
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                className="cursor-pointer"
-                onClick={() => {
-                  // TODO: Implement merge
-                  console.log('Merge');
-                }}
-              >
-                <IconGitMerge className="h-4 w-4" />
-                Merge
+                <IconGitMerge className="h-4 w-4 text-purple-500" />
+                <span className="flex-1">Merge</span>
+                <span className="text-xs text-muted-foreground">from {baseBranch || 'origin/main'}</span>
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -343,6 +501,149 @@ const TaskTopBar = memo(function TaskTopBar({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+
+      {/* Commit Dialog */}
+      <Dialog open={commitDialogOpen} onOpenChange={setCommitDialogOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <IconGitCommit className="h-5 w-5 text-amber-500" />
+              Commit Changes
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="text-sm text-muted-foreground">
+              {gitStatus?.files && Object.keys(gitStatus.files).length > 0 ? (
+                <span>
+                  <span className="font-medium text-foreground">{Object.keys(gitStatus.files).length}</span> file{Object.keys(gitStatus.files).length !== 1 ? 's' : ''} changed
+                  {(totalAdditions > 0 || totalDeletions > 0) && (
+                    <span className="ml-2">
+                      (<span className="text-green-600">+{totalAdditions}</span>
+                      {' / '}
+                      <span className="text-red-600">-{totalDeletions}</span>)
+                    </span>
+                  )}
+                </span>
+              ) : (
+                <span>No changes to commit</span>
+              )}
+            </div>
+            <Textarea
+              placeholder="Enter commit message..."
+              value={commitMessage}
+              onChange={(e) => setCommitMessage(e.target.value)}
+              rows={4}
+              className="resize-none"
+              autoFocus
+            />
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="stage-all"
+                checked={stageAll}
+                onCheckedChange={(checked) => setStageAll(checked === true)}
+              />
+              <Label htmlFor="stage-all" className="text-sm text-muted-foreground cursor-pointer">
+                Stage all changes before committing
+              </Label>
+            </div>
+          </div>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button type="button" variant="outline">
+                Cancel
+              </Button>
+            </DialogClose>
+            <Button
+              onClick={handleCommit}
+              disabled={!commitMessage.trim() || isGitLoading}
+            >
+              {isGitLoading ? (
+                <>
+                  <IconLoader2 className="h-4 w-4 animate-spin mr-2" />
+                  Committing...
+                </>
+              ) : (
+                <>
+                  <IconCheck className="h-4 w-4 mr-2" />
+                  Commit
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Create PR Dialog */}
+      <Dialog open={prDialogOpen} onOpenChange={setPrDialogOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <IconGitPullRequest className="h-5 w-5 text-cyan-500" />
+              Create Pull Request
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="text-sm text-muted-foreground">
+              {baseBranch ? (
+                <span>
+                  Creating PR from <span className="font-medium text-foreground">{displayBranch}</span> → <span className="font-medium text-foreground">{baseBranch}</span>
+                </span>
+              ) : (
+                <span>
+                  Creating PR from <span className="font-medium text-foreground">{displayBranch}</span>
+                </span>
+              )}
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="pr-title" className="text-sm">Title</Label>
+              <input
+                id="pr-title"
+                type="text"
+                placeholder="Pull request title..."
+                value={prTitle}
+                onChange={(e) => setPrTitle(e.target.value)}
+                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                autoFocus
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="pr-body" className="text-sm">Description</Label>
+              <Textarea
+                id="pr-body"
+                placeholder="Describe your changes..."
+                value={prBody}
+                onChange={(e) => setPrBody(e.target.value)}
+                rows={6}
+                className="resize-none"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button type="button" variant="outline">
+                Cancel
+              </Button>
+            </DialogClose>
+            <Button
+              onClick={handleCreatePR}
+              disabled={!prTitle.trim() || isGitLoading}
+              className="bg-cyan-600 hover:bg-cyan-700 text-white"
+            >
+              {isGitLoading ? (
+                <>
+                  <IconLoader2 className="h-4 w-4 animate-spin mr-2" />
+                  Creating...
+                </>
+              ) : (
+                <>
+                  <IconGitPullRequest className="h-4 w-4 mr-2" />
+                  Create PR
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </header>
   );
 });

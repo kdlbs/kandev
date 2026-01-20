@@ -56,6 +56,9 @@ func provideGateway(
 
 		shellHandlers := agenthandlers.NewShellHandlers(lifecycleMgr, log)
 		shellHandlers.RegisterHandlers(gateway.Dispatcher)
+
+		gitHandlers := agenthandlers.NewGitHandlers(lifecycleMgr, log)
+		gitHandlers.RegisterHandlers(gateway.Dispatcher)
 	}
 
 	go gateway.Hub.Run(ctx)

@@ -49,6 +49,10 @@ type FileInfo struct {
 	// Status indicates the file status: "modified", "added", "deleted", "untracked", "renamed".
 	Status string `json:"status"`
 
+	// Staged indicates whether the file changes are staged (in the index).
+	// If false, the changes are unstaged (in the working tree only).
+	Staged bool `json:"staged"`
+
 	// Additions is the number of added lines.
 	Additions int `json:"additions,omitempty"`
 

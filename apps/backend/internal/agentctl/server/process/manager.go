@@ -88,6 +88,10 @@ type Manager struct {
 	pendingPermissions map[string]*PendingPermission
 	permissionMu       sync.RWMutex
 
+	// Git operator for git operations (lazy-initialized)
+	gitOperator   *GitOperator
+	gitOperatorMu sync.Mutex
+
 	// Synchronization
 	mu       sync.RWMutex
 	wg       sync.WaitGroup
@@ -133,6 +137,18 @@ func (m *Manager) ExitError() error {
 // GetWorkspaceTracker returns the workspace tracker for git status and file monitoring
 func (m *Manager) GetWorkspaceTracker() *WorkspaceTracker {
 	return m.workspaceTracker
+}
+
+// GitOperator returns the git operator for git operations.
+// The operator is lazy-initialized on first call.
+func (m *Manager) GitOperator() *GitOperator {
+	m.gitOperatorMu.Lock()
+	defer m.gitOperatorMu.Unlock()
+
+	if m.gitOperator == nil {
+		m.gitOperator = NewGitOperator(m.cfg.WorkDir, m.logger)
+	}
+	return m.gitOperator
 }
 
 // Start starts the agent process
