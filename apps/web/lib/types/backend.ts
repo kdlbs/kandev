@@ -249,6 +249,7 @@ export type UserSettingsUpdatedPayload = {
   initial_setup_complete?: boolean;
   preferred_shell?: string;
   default_editor_id?: string;
+  enable_preview_on_click?: boolean;
   updated_at?: string;
 };
 

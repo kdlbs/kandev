@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
-import { DragEndEvent, DragStartEvent } from '@dnd-kit/core';
 import { Column } from './kanban-column';
 import { Task } from './kanban-card';
 import { TaskCreateDialog } from './task-create-dialog';
@@ -12,24 +11,23 @@ import { filterTasksByRepositories } from '@/lib/kanban/filters';
 import { useUserDisplaySettings } from '@/hooks/use-user-display-settings';
 import { useBoards } from '@/hooks/use-boards';
 import { useBoardSnapshot } from '@/hooks/use-board-snapshot';
-import { useTaskActions } from '@/hooks/use-task-actions';
-import { KanbanBoardHeader } from './kanban-board-header';
+import { useDragAndDrop } from '@/hooks/use-drag-and-drop';
+import { useTaskCRUD } from '@/hooks/use-task-crud';
 import { KanbanBoardGrid } from './kanban-board-grid';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import { linkToSession } from '@/lib/links';
+import Link from 'next/link';
+import { Button } from '@kandev/ui/button';
+import { IconPlus, IconSettings } from '@tabler/icons-react';
+import { ConnectionStatus } from './connection-status';
+import { KanbanDisplayDropdown } from './kanban-display-dropdown';
 
 interface KanbanBoardProps {
   onPreviewTask?: (task: Task) => void;
   onOpenTask?: (task: Task, sessionId: string) => void;
-  enablePreviewOnClick?: boolean;
-  onTogglePreviewOnClick?: (enabled: boolean) => void;
 }
 
-export function KanbanBoard({ onPreviewTask, onOpenTask, enablePreviewOnClick, onTogglePreviewOnClick }: KanbanBoardProps = {}) {
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
-  const [isMovingTask, setIsMovingTask] = useState(false);
-  const [editingTask, setEditingTask] = useState<Task | null>(null);
+export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}) {
   const [taskSessionAvailability, setTaskSessionAvailability] = useState<Record<string, boolean>>({});
   const router = useRouter();
   const kanban = useAppStore((state) => state.kanban);
@@ -39,15 +37,16 @@ export function KanbanBoard({ onPreviewTask, onOpenTask, enablePreviewOnClick, o
   const setActiveBoard = useAppStore((state) => state.setActiveBoard);
   const setBoards = useAppStore((state) => state.setBoards);
   const store = useAppStoreApi();
-  const { moveTaskById, deleteTaskById } = useTaskActions();
+
+  // Get preview setting from store
+  const enablePreviewOnClick = useAppStore((state) => state.userSettings.enablePreviewOnClick);
+
   useBoards(workspaceState.activeId, true);
   useBoardSnapshot(boardsState.activeId);
+
   const {
     settings: userSettings,
     commitSettings,
-    repositories,
-    repositoriesLoading,
-    allRepositoriesSelected,
     selectedRepositoryIds,
   } = useUserDisplaySettings({
     workspaceId: workspaceState.activeId,
@@ -112,60 +111,10 @@ export function KanbanBoard({ onPreviewTask, onOpenTask, enablePreviewOnClick, o
     })),
     [visibleTasks, taskSessionAvailability]
   );
-  const activeTask = useMemo(
-    () => visibleTasksWithSessions.find((task) => task.id === activeTaskId) ?? null,
-    [visibleTasksWithSessions, activeTaskId]
-  );
 
-  const handleDragStart = (event: DragStartEvent) => {
-    setActiveTaskId(event.active.id as string);
-  };
-
-  const handleDragEnd = async (event: DragEndEvent) => {
-    const { active, over } = event;
-
-    setActiveTaskId(null);
-    if (!over) return;
-
-    const taskId = active.id as string;
-    const newStatus = over.id as string;
-
-    if (!kanban.boardId || isMovingTask) {
-      return;
-    }
-
-    const targetTasks = kanban.tasks
-      .filter((task) => task.columnId === newStatus && task.id !== taskId)
-      .sort((a, b) => a.position - b.position);
-    const nextPosition = targetTasks.length;
-    store.getState().hydrate({
-      kanban: {
-        ...kanban,
-        tasks: kanban.tasks.map((task) =>
-          task.id === taskId
-            ? { ...task, columnId: newStatus, position: nextPosition }
-            : task
-        ),
-      },
-    });
-
-    try {
-      setIsMovingTask(true);
-      await moveTaskById(taskId, {
-        board_id: kanban.boardId,
-        column_id: newStatus,
-        position: nextPosition,
-      });
-    } catch {
-      // Ignore move errors for now; WS updates or next snapshot will correct.
-    } finally {
-      setIsMovingTask(false);
-    }
-  };
-
-  const handleDragCancel = () => {
-    setActiveTaskId(null);
-  };
+  // Use custom hooks for drag-and-drop and CRUD operations
+  const { activeTask, handleDragStart, handleDragEnd, handleDragCancel } = useDragAndDrop(visibleTasksWithSessions);
+  const { isDialogOpen, editingTask, handleCreate, handleEdit, handleDelete, handleDialogOpenChange, setIsDialogOpen, setEditingTask } = useTaskCRUD();
 
   const handleDialogSuccess = (task: BackendTask, mode: 'create' | 'edit') => {
     if (mode === 'create') {
@@ -242,40 +191,32 @@ export function KanbanBoard({ onPreviewTask, onOpenTask, enablePreviewOnClick, o
     }
   };
 
-  const handlePreviewTask = async (task: Task) => {
-    const latestSessionId = await fetchLatestSessionId(task.id);
-    if (!latestSessionId) {
-      setEditingTask(task);
-      setIsDialogOpen(true);
-      return;
-    }
-    if (onPreviewTask) {
-      onPreviewTask(task);
+  const handleCardClick = async (task: Task) => {
+    // Capture the current mode at the start to avoid race conditions
+    const shouldOpenPreview = enablePreviewOnClick;
+
+    if (shouldOpenPreview) {
+      // Preview mode - just call the preview handler without fetching session
+      if (onPreviewTask) {
+        onPreviewTask(task);
+      }
     } else {
-      // Fallback to opening full page if no preview handler
-      handleOpenTask(task);
+      // Navigate mode - fetch session and navigate
+      const latestSessionId = await fetchLatestSessionId(task.id);
+      if (!latestSessionId) {
+        setEditingTask(task);
+        setIsDialogOpen(true);
+        return;
+      }
+
+      if (onOpenTask) {
+        onOpenTask(task, latestSessionId);
+      } else {
+        router.push(linkToSession(latestSessionId));
+      }
     }
   };
 
-  const handleEditTask = (task: Task) => {
-    setEditingTask(task);
-    setIsDialogOpen(true);
-  };
-
-  const handleDeleteTask = async (task: Task) => {
-    if (!kanban.boardId) return;
-    store.getState().hydrate({
-      kanban: {
-        ...kanban,
-        tasks: kanban.tasks.filter((item) => item.id !== task.id),
-      },
-    });
-    try {
-      await deleteTaskById(task.id);
-    } catch {
-      // Ignore delete errors for now.
-    }
-  };
 
 
   useEffect(() => {
@@ -326,72 +267,31 @@ export function KanbanBoard({ onPreviewTask, onOpenTask, enablePreviewOnClick, o
 
   return (
     <div className="h-screen w-full flex flex-col bg-background">
-      <KanbanBoardHeader
-        workspaces={workspaceState.items}
-        boards={boardsState.items}
-        activeWorkspaceId={workspaceState.activeId}
-        activeBoardId={boardsState.activeId}
-        repositories={repositories}
-        repositoriesLoading={repositoriesLoading}
-        allRepositoriesSelected={allRepositoriesSelected}
-        selectedRepositoryId={userSettings.repositoryIds[0] ?? null}
-        enablePreviewOnClick={enablePreviewOnClick}
-        onTogglePreviewOnClick={onTogglePreviewOnClick}
-        onWorkspaceChange={(nextWorkspaceId) => {
-          setActiveWorkspace(nextWorkspaceId);
-          if (nextWorkspaceId) {
-            router.push(`/?workspaceId=${nextWorkspaceId}`);
-          } else {
-            router.push('/');
-          }
-          commitSettings({
-            workspaceId: nextWorkspaceId,
-            boardId: null,
-            repositoryIds: [],
-          });
-        }}
-        onBoardChange={(nextBoardId) => {
-          setActiveBoard(nextBoardId);
-          if (nextBoardId) {
-            const workspaceId = boardsState.items.find((board) => board.id === nextBoardId)?.workspaceId;
-            const workspaceParam = workspaceId ? `&workspaceId=${workspaceId}` : '';
-            router.push(`/?boardId=${nextBoardId}${workspaceParam}`);
-          }
-          commitSettings({
-            workspaceId: userSettings.workspaceId,
-            boardId: nextBoardId,
-            repositoryIds: userSettings.repositoryIds,
-          });
-        }}
-        onRepositoryChange={(value) => {
-          if (value === 'all') {
-            commitSettings({
-              workspaceId: userSettings.workspaceId,
-              boardId: userSettings.boardId,
-              repositoryIds: [],
-            });
-            return;
-          }
-          commitSettings({
-            workspaceId: userSettings.workspaceId,
-            boardId: userSettings.boardId,
-            repositoryIds: [value],
-          });
-        }}
-        onAddTask={() => {
-          setEditingTask(null);
-          setIsDialogOpen(true);
-        }}
-      />
+      <header className="flex items-center justify-between p-4 pb-3">
+        <div className="flex items-center gap-3">
+          <Link href="/" className="text-2xl font-bold hover:opacity-80">
+            KanDev.ai
+          </Link>
+          <ConnectionStatus />
+        </div>
+        <div className="flex items-center gap-3">
+          <Button onClick={handleCreate} className="cursor-pointer">
+            <IconPlus className="h-4 w-4" />
+            Add task
+          </Button>
+          <KanbanDisplayDropdown />
+          <Link href="/settings" className="cursor-pointer">
+            <Button variant="outline" className="cursor-pointer">
+              <IconSettings className="h-4 w-4 mr-2" />
+              Settings
+            </Button>
+          </Link>
+        </div>
+      </header>
       <TaskCreateDialog
         key={isDialogOpen ? 'open' : 'closed'}
         open={isDialogOpen}
-        onOpenChange={(open) => {
-          setIsDialogOpen(open);
-          if (!open) {
-            setEditingTask(null);
-          }
-        }}
+        onOpenChange={handleDialogOpenChange}
         workspaceId={workspaceState.activeId}
         boardId={kanban.boardId}
         defaultColumnId={activeColumns[0]?.id ?? null}
@@ -422,10 +322,10 @@ export function KanbanBoard({ onPreviewTask, onOpenTask, enablePreviewOnClick, o
       <KanbanBoardGrid
         columns={activeColumns}
         tasks={visibleTasksWithSessions}
-        onPreviewTask={handlePreviewTask}
+        onPreviewTask={handleCardClick}
         onOpenTask={handleOpenTask}
-        onEditTask={handleEditTask}
-        onDeleteTask={handleDeleteTask}
+        onEditTask={handleEdit}
+        onDeleteTask={handleDelete}
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
         onDragCancel={handleDragCancel}

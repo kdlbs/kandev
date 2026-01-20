@@ -51,6 +51,7 @@ export function useEditors() {
           preferredShell: data.settings.preferred_shell || null,
           shellOptions: data.shell_options ?? [],
           defaultEditorId: data.settings.default_editor_id || null,
+          enablePreviewOnClick: data.settings.enable_preview_on_click ?? false,
           loaded: true,
         });
       })

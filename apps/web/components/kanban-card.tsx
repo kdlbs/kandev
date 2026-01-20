@@ -1,5 +1,6 @@
 'use client';
 
+import { useMemo } from 'react';
 import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 import { IconDots, IconArrowsMaximize } from '@tabler/icons-react';
@@ -10,11 +11,10 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@kandev/ui/dropdown-menu';
-import { useMemo } from 'react';
-import { useAppStore } from '@/components/state-provider';
 import type { TaskState } from '@/lib/types/http';
 import { cn, getRepositoryDisplayName } from '@/lib/utils';
 import { getTaskStateIcon } from '@/lib/ui/state-icons';
+import { useAppStore } from '@/components/state-provider';
 
 export interface Task {
   id: string;
@@ -29,6 +29,7 @@ export interface Task {
 
 interface KanbanCardProps {
   task: Task;
+  repositoryName?: string | null;
   onClick?: (task: Task) => void;
   onEdit?: (task: Task) => void;
   onDelete?: (task: Task) => void;
@@ -65,34 +66,20 @@ function KanbanCardBody({
   );
 }
 
-function KanbanCardLayout({ task, className }: KanbanCardProps & { className?: string }) {
-  const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
-  const repository = useMemo(
-    () => Object.values(repositoriesByWorkspace).flat().find((repo) => repo.id === task.repositoryId) ?? null,
-    [repositoriesByWorkspace, task.repositoryId]
-  );
-  const repoName = getRepositoryDisplayName(repository?.local_path);
-
+function KanbanCardLayout({ task, repositoryName, className }: KanbanCardProps & { className?: string }) {
   return (
     <Card size="sm" className={cn('w-full py-0', className)}>
       <CardContent className="px-2 py-1">
-        <KanbanCardBody task={task} repoName={repoName} />
+        <KanbanCardBody task={task} repoName={repositoryName ?? null} />
       </CardContent>
     </Card>
   );
 }
 
-export function KanbanCard({ task, onClick, onEdit, onDelete, onOpenFullPage, showMaximizeButton = true }: KanbanCardProps) {
+export function KanbanCard({ task, repositoryName, onClick, onEdit, onDelete, onOpenFullPage, showMaximizeButton = true }: KanbanCardProps) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: task.id,
   });
-
-  const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
-  const repository = useMemo(
-    () => Object.values(repositoriesByWorkspace).flat().find((repo) => repo.id === task.repositoryId) ?? null,
-    [repositoriesByWorkspace, task.repositoryId]
-  );
-  const repoName = getRepositoryDisplayName(repository?.local_path);
 
   const statusIcon = getTaskStateIcon(task.state, 'h-4 w-4');
 
@@ -119,7 +106,7 @@ export function KanbanCard({ task, onClick, onEdit, onDelete, onOpenFullPage, sh
       <CardContent className="px-2 py-1">
         <KanbanCardBody
           task={task}
-          repoName={repoName}
+          repoName={repositoryName ?? null}
           actions={
             <div className="flex items-center gap-2">
               {task.state === 'IN_PROGRESS' && statusIcon}
@@ -178,9 +165,18 @@ export function KanbanCard({ task, onClick, onEdit, onDelete, onOpenFullPage, sh
 }
 
 export function KanbanCardPreview({ task }: KanbanCardProps) {
+  // Access store to get repository name for the drag preview
+  const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
+  const repository = useMemo(
+    () => Object.values(repositoriesByWorkspace).flat().find((repo) => repo.id === task.repositoryId) ?? null,
+    [repositoriesByWorkspace, task.repositoryId]
+  );
+  const repositoryName = repository ? getRepositoryDisplayName(repository.local_path) : null;
+
   return (
     <KanbanCardLayout
       task={task}
+      repositoryName={repositoryName}
       className="cursor-grabbing shadow-lg ring-0 pointer-events-none border border-border"
     />
   );

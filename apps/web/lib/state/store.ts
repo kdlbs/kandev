@@ -138,6 +138,7 @@ export type UserSettingsState = {
   preferredShell: string | null;
   shellOptions: Array<{ value: string; label: string }>;
   defaultEditorId: string | null;
+  enablePreviewOnClick: boolean;
   loaded: boolean;
 };
 
@@ -371,6 +372,7 @@ const defaultState: AppState = {
     preferredShell: null,
     shellOptions: [],
     defaultEditorId: null,
+    enablePreviewOnClick: false,
     loaded: false,
   },
   terminal: { terminals: [] },

@@ -171,6 +171,7 @@ export async function updateUserSettings(
     repository_ids: string[];
     preferred_shell?: string;
     default_editor_id?: string;
+    enable_preview_on_click?: boolean;
   },
   options?: ApiRequestOptions
 ) {

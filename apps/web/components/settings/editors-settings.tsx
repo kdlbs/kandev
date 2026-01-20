@@ -357,6 +357,7 @@ export function EditorsSettings() {
         preferredShell: response.settings.preferred_shell || null,
         shellOptions: currentUserSettings.shellOptions ?? [],
         defaultEditorId: response.settings.default_editor_id || null,
+        enablePreviewOnClick: response.settings.enable_preview_on_click ?? false,
         loaded: true,
       });
     }
