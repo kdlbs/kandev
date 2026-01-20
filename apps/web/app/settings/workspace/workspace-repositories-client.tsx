@@ -35,6 +35,7 @@ import { useRequest } from '@/lib/http/use-request';
 import { useToast } from '@/components/toast-provider';
 
 type RepositoryWithScripts = Repository & { scripts: RepositoryScript[] };
+type RepositoryItem = RepositoryWithScripts & { __autoOpen?: boolean };
 
 type WorkspaceRepositoriesClientProps = {
   workspace: Workspace | null;
@@ -47,11 +48,10 @@ export function WorkspaceRepositoriesClient({
 }: WorkspaceRepositoriesClientProps) {
   const router = useRouter();
   const { toast } = useToast();
-  const [repositoryItems, setRepositoryItems] = useState<RepositoryWithScripts[]>(repositories);
+  const [repositoryItems, setRepositoryItems] = useState<RepositoryItem[]>(repositories);
   const [savedRepositoryItems, setSavedRepositoryItems] = useState<RepositoryWithScripts[]>(repositories);
   const [discoveredRepositories, setDiscoveredRepositories] = useState<LocalRepository[]>([]);
   const [localRepoDialogOpen, setLocalRepoDialogOpen] = useState(false);
-  const [remoteRepoDialogOpen, setRemoteRepoDialogOpen] = useState(false);
   const [repoSearch, setRepoSearch] = useState('');
   const [selectedRepoPath, setSelectedRepoPath] = useState<string | null>(null);
   const [manualRepoPath, setManualRepoPath] = useState('');
@@ -84,7 +84,7 @@ export function WorkspaceRepositoriesClient({
   const canSaveLocalRepo =
     Boolean(selectedRepoPath) || (manualValidation.status === 'success' && manualValidation.isValid);
 
-  const isRepositoryDirty = (repo: RepositoryWithScripts) => {
+  const isRepositoryDirty = (repo: RepositoryItem) => {
     const saved = savedRepositoriesById.get(repo.id);
     if (!saved) return true;
     return (
@@ -102,7 +102,7 @@ export function WorkspaceRepositoriesClient({
     );
   };
 
-  const areRepositoryScriptsDirty = (repo: RepositoryWithScripts) => {
+  const areRepositoryScriptsDirty = (repo: RepositoryItem) => {
     const saved = savedRepositoriesById.get(repo.id);
     if (!saved) return repo.scripts.length > 0;
     if (repo.scripts.length !== saved.scripts.length) return true;
@@ -186,7 +186,7 @@ export function WorkspaceRepositoriesClient({
     if (!path) return;
     const name = selectedRepo?.name || path.split('/').filter(Boolean).slice(-1)[0] || 'New Repository';
     const draftId = `temp-repo-${generateUUID()}`;
-    const draftRepo: RepositoryWithScripts = {
+    const draftRepo: RepositoryItem = {
       id: draftId,
       workspace_id: workspace.id,
       name,
@@ -203,6 +203,7 @@ export function WorkspaceRepositoriesClient({
       created_at: '',
       updated_at: '',
       scripts: [],
+      __autoOpen: true,
     };
     setRepositoryItems((prev) => [draftRepo, ...prev]);
     setLocalRepoDialogOpen(false);
@@ -386,11 +387,8 @@ export function WorkspaceRepositoriesClient({
         description="Repositories in this workspace"
         action={
           <div className="flex items-center gap-2">
-            <Button size="sm" onClick={openLocalRepositoryDialog}>
-              Local Repository
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => setRemoteRepoDialogOpen(true)}>
-              Remote Repository
+            <Button size="sm" className="cursor-pointer" onClick={openLocalRepositoryDialog}>
+              Add Local Repository
             </Button>
           </div>
         }
@@ -402,6 +400,7 @@ export function WorkspaceRepositoriesClient({
               repository={repo}
               isRepositoryDirty={isRepositoryDirty(repo)}
               areScriptsDirty={areRepositoryScriptsDirty(repo)}
+              autoOpen={Boolean(repo.__autoOpen)}
               onUpdate={handleUpdateRepository}
               onAddScript={handleAddRepositoryScript}
               onUpdateScript={handleUpdateRepositoryScript}
@@ -499,30 +498,6 @@ export function WorkspaceRepositoriesClient({
         </DialogContent>
       </Dialog>
 
-      <Dialog open={remoteRepoDialogOpen} onOpenChange={setRemoteRepoDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Add Remote Repository</DialogTitle>
-            <DialogDescription>Remote providers are coming soon.</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-2">
-            <Button type="button" variant="outline" className="w-full justify-start" disabled>
-              GitHub (coming soon)
-            </Button>
-            <Button type="button" variant="outline" className="w-full justify-start" disabled>
-              GitLab (coming soon)
-            </Button>
-            <Button type="button" variant="outline" className="w-full justify-start" disabled>
-              Bitbucket (coming soon)
-            </Button>
-          </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setRemoteRepoDialogOpen(false)}>
-              Close
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

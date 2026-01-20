@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { SettingsPageTemplate } from '@/components/settings/settings-page-template';
 import { Combobox, type ComboboxOption } from '@/components/combobox';
 import { useAppStore } from '@/components/state-provider';
+import { EditableCard } from '@/components/settings/editable-card';
 import { useEditors } from '@/hooks/use-editors';
 import { createEditor, deleteEditor, updateEditor, updateUserSettings } from '@/lib/http';
 import { useRequest } from '@/lib/http/use-request';
@@ -287,7 +288,19 @@ export function EditorsSettings() {
   const [isAdding, setIsAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
-  const customEditors = useMemo(() => editors.filter(isCustomEditor), [editors]);
+  const customEditors = useMemo(() => {
+    const items = editors.filter(isCustomEditor);
+    return items.slice().sort((a, b) => {
+      const createdA = a.created_at ? Date.parse(a.created_at) : 0;
+      const createdB = b.created_at ? Date.parse(b.created_at) : 0;
+      if (createdA !== createdB) return createdB - createdA;
+      const nameA = (a.name || '').toLowerCase();
+      const nameB = (b.name || '').toLowerCase();
+      if (nameA < nameB) return -1;
+      if (nameA > nameB) return 1;
+      return a.id.localeCompare(b.id);
+    });
+  }, [editors]);
   const builtInEditors = useMemo(() => editors.filter((editor) => !isCustomEditor(editor)), [editors]);
   const availableEditors = useMemo(() => resolveAvailableEditors(editors), [editors]);
 
@@ -295,7 +308,6 @@ export function EditorsSettings() {
     (updater: EditorOption[] | ((prev: EditorOption[]) => EditorOption[])) => {
       setEditorItems((prev) => {
         const next = typeof updater === 'function' ? updater(prev) : updater;
-        setEditors(next);
         const resolvedDefault = resolveDefaultEditorId(next, defaultEditorId);
         if (resolvedDefault !== defaultEditorId) {
           setDefaultEditorId(resolvedDefault);
@@ -304,7 +316,7 @@ export function EditorsSettings() {
         return next;
       });
     },
-    [defaultEditorId, setEditors]
+    [defaultEditorId]
   );
 
   useEffect(() => {
@@ -391,7 +403,6 @@ export function EditorsSettings() {
     applyEditors((prev: EditorOption[]) =>
       prev.map((editor: EditorOption) => (editor.id === editorId ? updated : editor))
     );
-    setEditingId(null);
   });
 
   const deleteRequest = useRequest(async (editorId: string) => {
@@ -409,8 +420,6 @@ export function EditorsSettings() {
       });
     }
   });
-
-
 
   return (
     <SettingsPageTemplate
@@ -471,57 +480,71 @@ export function EditorsSettings() {
               </div>
             )}
             {customEditors.map((editor) => {
-              if (editingId === editor.id) {
-                return (
-                  <EditorForm
-                    key={editor.id}
-                    title={`Edit ${editor.name}`}
-                    initialState={formStateFromEditor(editor)}
-                    onCancel={() => setEditingId(null)}
-                    onSave={(state) => {
-                      void updateRequest.run(editor.id, state);
-                    }}
-                    submitLabel="Save changes"
-                    isSaving={updateRequest.isLoading}
-                  />
-                );
-              }
               return (
-                <div
+                <EditableCard
                   key={editor.id}
-                  className="rounded-lg border border-border/70 bg-background p-4 flex items-center justify-between gap-3"
-                >
-                  <div className="min-w-0">
-                    <div className="font-medium text-sm text-foreground truncate">{editor.name}</div>
-                    <div className="text-xs text-muted-foreground truncate">
-                      {getCustomEditorSummary(editor)}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="cursor-pointer"
-                      onClick={() => setEditingId(editor.id)}
-                    >
-                      <IconEdit className="h-4 w-4" />
-                      Edit
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="cursor-pointer"
-                      onClick={() => {
-                        void deleteRequest.run(editor.id);
+                  isEditing={editingId === editor.id}
+                  historyId={`editor-${editor.id}`}
+                  onOpen={() => setEditingId(editor.id)}
+                  onClose={() => setEditingId(null)}
+                  renderEdit={({ close }) => (
+                    <EditorForm
+                      title={`Edit ${editor.name}`}
+                      initialState={formStateFromEditor(editor)}
+                      onCancel={close}
+                      onSave={(state) => {
+                        void updateRequest.run(editor.id, state).then(() => {
+                          close();
+                        });
                       }}
+                      submitLabel="Save changes"
+                      isSaving={updateRequest.isLoading}
+                    />
+                  )}
+                  renderPreview={({ open }) => (
+                    <div
+                      className="rounded-lg border border-border/70 bg-background p-4 flex items-center justify-between gap-3 cursor-pointer"
+                      onClick={open}
                     >
-                      <IconTrash className="h-4 w-4" />
-                      Remove
-                    </Button>
-                  </div>
-                </div>
+                      <div className="min-w-0">
+                        <div className="font-medium text-sm text-foreground truncate">
+                          {editor.name}
+                        </div>
+                        <div className="text-xs text-muted-foreground truncate">
+                          {getCustomEditorSummary(editor)}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="cursor-pointer"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            open();
+                          }}
+                        >
+                          <IconEdit className="h-4 w-4" />
+                          Edit
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="cursor-pointer"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void deleteRequest.run(editor.id);
+                          }}
+                        >
+                          <IconTrash className="h-4 w-4" />
+                          Remove
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                />
               );
             })}
           </div>
