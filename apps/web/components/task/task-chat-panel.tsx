@@ -250,6 +250,20 @@ export function TaskChatPanel({
     );
   }, [resolvedSessionId, taskId]);
 
+  // Cancels the current agent turn without terminating the agent process,
+  // allowing the user to interrupt and send a new prompt.
+  const handleCancelTurn = useCallback(async () => {
+    if (!resolvedSessionId) return;
+    const client = getWebSocketClient();
+    if (!client) return;
+
+    try {
+      await client.request('agent.cancel', { session_id: resolvedSessionId }, 15000);
+    } catch (error) {
+      console.error('Failed to cancel agent turn:', error);
+    }
+  }, [resolvedSessionId]);
+
   const handleSubmit = async (event?: FormEvent) => {
     event?.preventDefault();
     const trimmed = messageInput.trim();
@@ -428,6 +442,7 @@ export function TaskChatPanel({
                 variant={isAgentBusy ? 'destructive' : 'default'}
                 className={cn('h-7', isAgentBusy && 'gap-2')}
                 disabled={isStarting || isSending}
+                onClick={isAgentBusy ? handleCancelTurn : undefined}
               >
                 {isAgentBusy ? (
                   <>

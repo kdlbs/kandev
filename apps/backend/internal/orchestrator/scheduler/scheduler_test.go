@@ -82,6 +82,10 @@ func (m *mockAgentManager) CleanupStaleExecutionBySessionID(ctx context.Context,
 	return nil
 }
 
+func (m *mockAgentManager) CancelAgent(ctx context.Context, sessionID string) error {
+	return nil
+}
+
 // testTaskRepository is an in-memory task repository for testing
 type testTaskRepository struct {
 	tasks map[string]*v1.Task

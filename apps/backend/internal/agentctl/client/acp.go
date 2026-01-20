@@ -314,7 +314,48 @@ func (c *Client) CloseUpdatesStream() {
 	}
 }
 
+// CancelResponse is the response from the agentctl cancel endpoint.
+type CancelResponse struct {
+	Success bool   `json:"success"`
+	Error   string `json:"error,omitempty"`
+}
 
+// Cancel interrupts the current agent turn.
+func (c *Client) Cancel(ctx context.Context) error {
+	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/v1/acp/cancel", nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			c.logger.Debug("failed to close cancel response body", zap.Error(err))
+		}
+	}()
+
+	respBody, err := readResponseBody(resp)
+	if err != nil {
+		return fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("cancel request failed with status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var result CancelResponse
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return fmt.Errorf("failed to parse cancel response (status %d, body: %s): %w", resp.StatusCode, truncateBody(respBody), err)
+	}
+	if !result.Success {
+		return fmt.Errorf("cancel failed: %s", result.Error)
+	}
+	return nil
+}
 
 // RespondToPermission sends a response to a permission request
 func (c *Client) RespondToPermission(ctx context.Context, pendingID, optionID string, cancelled bool) error {

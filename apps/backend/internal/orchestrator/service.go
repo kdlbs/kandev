@@ -684,6 +684,53 @@ func (s *Service) RespondToPermission(ctx context.Context, sessionID, pendingID,
 	return nil
 }
 
+// CancelAgent interrupts the current agent turn without terminating the process,
+// allowing the user to send a new prompt.
+func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
+	s.logger.Info("cancelling agent turn", zap.String("session_id", sessionID))
+
+	// Fetch session for state updates and message creation
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to get session for cancel",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
+
+	if err := s.agentManager.CancelAgent(ctx, sessionID); err != nil {
+		return fmt.Errorf("cancel agent: %w", err)
+	}
+
+	// Transition to WAITING_FOR_INPUT so the user can send a new prompt
+	if session != nil {
+		s.updateTaskSessionState(ctx, session.TaskID, sessionID, models.TaskSessionStateWaitingForInput, "", true)
+	}
+
+	// Record cancellation in the message history
+	if s.messageCreator != nil && session != nil {
+		metadata := map[string]interface{}{
+			"cancelled": true,
+			"variant":   "warning",
+		}
+		if err := s.messageCreator.CreateSessionMessage(
+			ctx,
+			session.TaskID,
+			"Turn cancelled by user",
+			sessionID,
+			string(v1.MessageTypeStatus),
+			metadata,
+			false,
+		); err != nil {
+			s.logger.Warn("failed to create cancel message",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
+	}
+
+	s.logger.Info("agent turn cancelled", zap.String("session_id", sessionID))
+	return nil
+}
+
 // CompleteTask explicitly completes a task and stops all its agents
 func (s *Service) CompleteTask(ctx context.Context, taskID string) error {
 	s.logger.Info("completing task",

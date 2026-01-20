@@ -893,6 +893,53 @@ func (m *Manager) PromptAgent(ctx context.Context, executionID string, prompt st
 	return m.sessionManager.SendPrompt(ctx, execution, prompt, true, m.MarkReady)
 }
 
+// CancelAgent interrupts the current agent turn without terminating the process,
+// allowing the user to send a new prompt.
+func (m *Manager) CancelAgent(ctx context.Context, executionID string) error {
+	execution, exists := m.executionStore.Get(executionID)
+	if !exists {
+		return fmt.Errorf("execution %q not found", executionID)
+	}
+
+	if execution.agentctl == nil {
+		return fmt.Errorf("execution %q has no agentctl client", executionID)
+	}
+
+	m.logger.Info("cancelling agent turn",
+		zap.String("execution_id", executionID),
+		zap.String("task_id", execution.TaskID),
+		zap.String("session_id", execution.SessionID))
+
+	if err := execution.agentctl.Cancel(ctx); err != nil {
+		m.logger.Error("failed to cancel agent turn",
+			zap.String("execution_id", executionID),
+			zap.Error(err))
+		return fmt.Errorf("failed to cancel agent: %w", err)
+	}
+
+	// Mark as ready for follow-up prompts after successful cancel
+	if err := m.MarkReady(executionID); err != nil {
+		m.logger.Warn("failed to mark execution as ready after cancel",
+			zap.String("execution_id", executionID),
+			zap.Error(err))
+	}
+
+	m.logger.Info("agent turn cancelled successfully",
+		zap.String("execution_id", executionID))
+
+	return nil
+}
+
+// CancelAgentBySessionID cancels the current agent turn for a specific session
+func (m *Manager) CancelAgentBySessionID(ctx context.Context, sessionID string) error {
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
+	if !exists {
+		return fmt.Errorf("no agent running for session %q", sessionID)
+	}
+
+	return m.CancelAgent(ctx, execution.ID)
+}
+
 // StopAgent stops an agent execution
 func (m *Manager) StopAgent(ctx context.Context, executionID string, force bool) error {
 	execution, exists := m.executionStore.Get(executionID)

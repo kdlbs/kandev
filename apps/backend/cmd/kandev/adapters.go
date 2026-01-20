@@ -172,6 +172,11 @@ func (a *lifecycleAdapter) PromptAgent(ctx context.Context, agentInstanceID stri
 	}, nil
 }
 
+// CancelAgent interrupts the current agent turn without terminating the process.
+func (a *lifecycleAdapter) CancelAgent(ctx context.Context, sessionID string) error {
+	return a.mgr.CancelAgentBySessionID(ctx, sessionID)
+}
+
 // RespondToPermissionBySessionID sends a response to a permission request for a session
 func (a *lifecycleAdapter) RespondToPermissionBySessionID(ctx context.Context, sessionID, pendingID, optionID string, cancelled bool) error {
 	return a.mgr.RespondToPermissionBySessionID(sessionID, pendingID, optionID, cancelled)

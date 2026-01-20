@@ -173,3 +173,14 @@ type TaskExecutionResponse struct {
 	Progress         int    `json:"progress,omitempty"`
 	StartedAt        string `json:"started_at,omitempty"`
 }
+
+// CancelAgentRequest is the payload for the agent.cancel WebSocket action.
+type CancelAgentRequest struct {
+	SessionID string `json:"session_id"`
+}
+
+// CancelAgentResponse is the response for the agent.cancel WebSocket action.
+type CancelAgentResponse struct {
+	Success   bool   `json:"success"`
+	SessionID string `json:"session_id"`
+}
