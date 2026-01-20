@@ -431,21 +431,7 @@ func (g *GitOperator) Abort(ctx context.Context, operation string) (*GitOperatio
 	return result, nil
 }
 
-// getConflictFiles returns a list of files with conflicts using git status.
-func (g *GitOperator) getConflictFiles(ctx context.Context) []string {
-	output, err := g.runGitCommand(ctx, "diff", "--name-only", "--diff-filter=U")
-	if err != nil {
-		return nil
-	}
 
-	var files []string
-	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
-		if line != "" {
-			files = append(files, line)
-		}
-	}
-	return files
-}
 
 // tryLock attempts to acquire the operation lock without blocking.
 // Returns true if the lock was acquired, false if an operation is in progress.
@@ -512,10 +498,7 @@ func (g *GitOperator) CreatePR(ctx context.Context, title, body, baseBranch stri
 	args := []string{"pr", "create", "--title", title, "--body", body, "--head", branch}
 
 	// Strip remote prefix (e.g., "origin/main" -> "main") since gh expects just the branch name
-	cleanBaseBranch := baseBranch
-	if strings.HasPrefix(cleanBaseBranch, "origin/") {
-		cleanBaseBranch = strings.TrimPrefix(cleanBaseBranch, "origin/")
-	}
+	cleanBaseBranch := strings.TrimPrefix(baseBranch, "origin/")
 	if cleanBaseBranch != "" {
 		args = append(args, "--base", cleanBaseBranch)
 	}
