@@ -10,14 +10,16 @@ import (
 
 // Repository defines the storage requirements for MCP config access.
 type Repository interface {
-	GetAgentByName(ctx context.Context, name string) (*models.Agent, error)
-	GetAgentMcpConfig(ctx context.Context, agentID string) (*models.AgentMcpConfig, error)
-	UpsertAgentMcpConfig(ctx context.Context, config *models.AgentMcpConfig) error
+	GetAgent(ctx context.Context, id string) (*models.Agent, error)
+	GetAgentProfile(ctx context.Context, id string) (*models.AgentProfile, error)
+	GetAgentProfileMcpConfig(ctx context.Context, profileID string) (*models.AgentProfileMcpConfig, error)
+	UpsertAgentProfileMcpConfig(ctx context.Context, config *models.AgentProfileMcpConfig) error
 }
 
 var (
-	ErrAgentNotFound       = errors.New("agent not found")
-	ErrAgentMcpUnsupported = errors.New("mcp not supported by agent")
+	ErrAgentNotFound        = errors.New("agent not found")
+	ErrAgentProfileNotFound = errors.New("agent profile not found")
+	ErrAgentMcpUnsupported  = errors.New("mcp not supported by agent")
 )
 
 // Service provides MCP configuration access and validation.
@@ -29,8 +31,19 @@ func NewService(repo Repository) *Service {
 	return &Service{repo: repo}
 }
 
-func (s *Service) GetConfigByAgentName(ctx context.Context, agentName string) (*AgentConfig, error) {
-	agent, err := s.repo.GetAgentByName(ctx, agentName)
+func (s *Service) GetConfigByProfileID(ctx context.Context, profileID string) (*ProfileConfig, error) {
+	profile, err := s.repo.GetAgentProfile(ctx, profileID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrAgentProfileNotFound
+		}
+		return nil, err
+	}
+	if profile == nil {
+		return nil, ErrAgentProfileNotFound
+	}
+
+	agent, err := s.repo.GetAgent(ctx, profile.AgentID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrAgentNotFound
@@ -44,31 +57,46 @@ func (s *Service) GetConfigByAgentName(ctx context.Context, agentName string) (*
 		return nil, ErrAgentMcpUnsupported
 	}
 
-	config, err := s.repo.GetAgentMcpConfig(ctx, agent.ID)
+	config, err := s.repo.GetAgentProfileMcpConfig(ctx, profile.ID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return &AgentConfig{
-				AgentID:   agent.ID,
-				AgentName: agent.Name,
-				Enabled:   false,
-				Servers:   map[string]ServerDef{},
-				Meta:      map[string]any{},
+			return &ProfileConfig{
+				ProfileID:   profile.ID,
+				ProfileName: profile.Name,
+				AgentID:     agent.ID,
+				AgentName:   agent.Name,
+				Enabled:     false,
+				Servers:     map[string]ServerDef{},
+				Meta:        map[string]any{},
 			}, nil
 		}
 		return nil, err
 	}
 
-	return &AgentConfig{
-		AgentID:   agent.ID,
-		AgentName: agent.Name,
-		Enabled:   config.Enabled,
-		Servers:   castServerDefs(config.Servers),
-		Meta:      config.Meta,
+	return &ProfileConfig{
+		ProfileID:   profile.ID,
+		ProfileName: profile.Name,
+		AgentID:     agent.ID,
+		AgentName:   agent.Name,
+		Enabled:     config.Enabled,
+		Servers:     castServerDefs(config.Servers),
+		Meta:        config.Meta,
 	}, nil
 }
 
-func (s *Service) UpsertConfigByAgentName(ctx context.Context, agentName string, config *AgentConfig) (*AgentConfig, error) {
-	agent, err := s.repo.GetAgentByName(ctx, agentName)
+func (s *Service) UpsertConfigByProfileID(ctx context.Context, profileID string, config *ProfileConfig) (*ProfileConfig, error) {
+	profile, err := s.repo.GetAgentProfile(ctx, profileID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrAgentProfileNotFound
+		}
+		return nil, err
+	}
+	if profile == nil {
+		return nil, ErrAgentProfileNotFound
+	}
+
+	agent, err := s.repo.GetAgent(ctx, profile.AgentID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrAgentNotFound
@@ -82,25 +110,27 @@ func (s *Service) UpsertConfigByAgentName(ctx context.Context, agentName string,
 		return nil, ErrAgentMcpUnsupported
 	}
 	if config == nil {
-		config = &AgentConfig{}
+		config = &ProfileConfig{}
 	}
 
-	record := &models.AgentMcpConfig{
-		AgentID: agent.ID,
-		Enabled: config.Enabled,
-		Servers: castServerInterfaces(config.Servers),
-		Meta:    castMetaInterfaces(config.Meta),
+	record := &models.AgentProfileMcpConfig{
+		ProfileID: profile.ID,
+		Enabled:   config.Enabled,
+		Servers:   castServerInterfaces(config.Servers),
+		Meta:      castMetaInterfaces(config.Meta),
 	}
-	if err := s.repo.UpsertAgentMcpConfig(ctx, record); err != nil {
+	if err := s.repo.UpsertAgentProfileMcpConfig(ctx, record); err != nil {
 		return nil, err
 	}
 
-	return &AgentConfig{
-		AgentID:   agent.ID,
-		AgentName: agent.Name,
-		Enabled:   record.Enabled,
-		Servers:   config.Servers,
-		Meta:      config.Meta,
+	return &ProfileConfig{
+		ProfileID:   profile.ID,
+		ProfileName: profile.Name,
+		AgentID:     agent.ID,
+		AgentName:   agent.Name,
+		Enabled:     record.Enabled,
+		Servers:     config.Servers,
+		Meta:        config.Meta,
 	}, nil
 }
 

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/registry"
+	"github.com/kandev/kandev/internal/agent/runtime"
 	agentctl "github.com/kandev/kandev/internal/agentctl/client"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -15,7 +16,7 @@ import (
 // Agent subprocess launching is handled separately via agentctl client methods.
 type Runtime interface {
 	// Name returns the runtime identifier (e.g., "docker", "standalone", "k8s")
-	Name() string
+	Name() runtime.Name
 
 	// HealthCheck verifies the runtime is available and operational
 	HealthCheck(ctx context.Context) error

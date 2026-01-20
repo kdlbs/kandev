@@ -114,9 +114,9 @@ type ProfileResolver interface {
 	ResolveProfile(ctx context.Context, profileID string) (*AgentProfileInfo, error)
 }
 
-// McpConfigProvider returns MCP configuration for a given agent name.
+// McpConfigProvider returns MCP configuration for a given agent profile ID.
 type McpConfigProvider interface {
-	GetConfigByAgentName(ctx context.Context, agentName string) (*mcpconfig.AgentConfig, error)
+	GetConfigByProfileID(ctx context.Context, profileID string) (*mcpconfig.ProfileConfig, error)
 }
 
 // WorkspaceInfo contains information about a task's workspace for on-demand execution creation

@@ -16,6 +16,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/registry"
+	"github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agent/worktree"
 	agentctl "github.com/kandev/kandev/internal/agentctl/client"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
@@ -113,7 +114,7 @@ func NewManager(
 	sessionManager.SetDependencies(eventPublisher, mgr.streamManager, executionStore)
 
 	if runtime != nil {
-		mgr.logger.Info("initialized with runtime", zap.String("runtime", runtime.Name()))
+		mgr.logger.Info("initialized with runtime", zap.String("runtime", string(runtime.Name())))
 	}
 
 	return mgr
@@ -209,7 +210,7 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 		zap.String("execution_id", executionID),
 		zap.String("task_id", taskID),
 		zap.String("workspace_path", info.WorkspacePath),
-		zap.String("runtime", m.runtime.Name()))
+		zap.String("runtime", string(m.runtime.Name())))
 
 	return execution, nil
 }
@@ -218,7 +219,7 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 func (m *Manager) Start(ctx context.Context) error {
 	runtimeName := "none"
 	if m.runtime != nil {
-		runtimeName = m.runtime.Name()
+		runtimeName = string(m.runtime.Name())
 	}
 	m.logger.Info("starting lifecycle manager", zap.String("runtime", runtimeName))
 
@@ -496,7 +497,7 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 
 	runtimeName := "unknown"
 	if m.runtime != nil {
-		runtimeName = m.runtime.Name()
+		runtimeName = string(m.runtime.Name())
 	}
 	m.logger.Info("agentctl execution created (agent not started)",
 		zap.String("execution_id", executionID),
@@ -711,23 +712,30 @@ func (m *Manager) getAgentConfigForExecution(execution *AgentExecution) (*regist
 	return agentConfig, nil
 }
 
+// resolveMcpServers centralizes MCP resolution for a session:
+// - loads per-agent MCP config,
+// - applies executor-scoped transport rules, allow/deny lists, URL rewrites, and env injection,
+// - converts to ACP stdio server definitions used during session initialization.
 func (m *Manager) resolveMcpServers(ctx context.Context, execution *AgentExecution, agentConfig *registry.AgentTypeConfig) ([]agentctltypes.McpServer, error) {
 	if m.mcpProvider == nil || agentConfig == nil {
 		return nil, nil
 	}
 
-	agentName := strings.TrimSuffix(agentConfig.ID, "-agent")
-	if agentName == "" {
+	profileID := ""
+	if execution != nil {
+		profileID = strings.TrimSpace(execution.AgentProfileID)
+	}
+	if profileID == "" {
 		return nil, nil
 	}
 
-	config, err := m.mcpProvider.GetConfigByAgentName(ctx, agentName)
+	config, err := m.mcpProvider.GetConfigByProfileID(ctx, profileID)
 	if err != nil {
-		if errors.Is(err, mcpconfig.ErrAgentMcpUnsupported) || errors.Is(err, mcpconfig.ErrAgentNotFound) {
+		if errors.Is(err, mcpconfig.ErrAgentMcpUnsupported) || errors.Is(err, mcpconfig.ErrAgentProfileNotFound) {
 			return nil, nil
 		}
 		m.logger.Warn("failed to load MCP config",
-			zap.String("agent_name", agentName),
+			zap.String("profile_id", profileID),
 			zap.Error(err))
 		return nil, err
 	}
@@ -749,7 +757,7 @@ func (m *Manager) resolveMcpServers(ctx context.Context, execution *AgentExecuti
 			policy = updated
 			for _, warning := range policyWarnings {
 				m.logger.Warn("mcp policy warning",
-					zap.String("agent_name", agentName),
+					zap.String("profile_id", profileID),
 					zap.String("executor_id", executorID),
 					zap.String("warning", warning))
 			}
@@ -761,7 +769,7 @@ func (m *Manager) resolveMcpServers(ctx context.Context, execution *AgentExecuti
 	}
 	for _, warning := range warnings {
 		m.logger.Warn("mcp config warning",
-			zap.String("agent_name", agentName),
+			zap.String("profile_id", profileID),
 			zap.String("executor_id", executorID),
 			zap.String("warning", warning))
 	}
@@ -769,9 +777,9 @@ func (m *Manager) resolveMcpServers(ctx context.Context, execution *AgentExecuti
 	return mcpconfig.ToACPServers(resolved), nil
 }
 
-func runtimeName(rt Runtime) string {
+func runtimeName(rt Runtime) runtime.Name {
 	if rt == nil {
-		return ""
+		return runtime.NameUnknown
 	}
 	return rt.Name()
 }
@@ -1025,7 +1033,7 @@ func (m *Manager) StopAgent(ctx context.Context, executionID string, force bool)
 
 	runtimeName := "unknown"
 	if m.runtime != nil {
-		runtimeName = m.runtime.Name()
+		runtimeName = string(m.runtime.Name())
 	}
 	m.logger.Info("stopping agent",
 		zap.String("execution_id", executionID),

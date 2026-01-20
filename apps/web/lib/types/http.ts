@@ -392,9 +392,8 @@ export type McpServerDef = {
   extra?: Record<string, unknown>;
 };
 
-export type AgentMcpConfig = {
-  agent_id: string;
-  agent_name: string;
+export type AgentProfileMcpConfig = {
+  profile_id: string;
   enabled: boolean;
   servers: Record<string, McpServerDef>;
   meta?: Record<string, unknown>;

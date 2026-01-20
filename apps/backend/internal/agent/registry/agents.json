@@ -45,11 +45,6 @@
       },
       "discovery": {
         "supports_mcp": true,
-        "mcp_config_path": {
-          "linux": [],
-          "windows": [],
-          "macos": []
-        },
         "installation_path": {
           "linux": ["~/.augment/.auggie.json"],
           "windows": ["~/.augment/.auggie.json"],
@@ -147,11 +142,6 @@
       },
       "discovery": {
         "supports_mcp": false,
-        "mcp_config_path": {
-          "linux": [],
-          "windows": [],
-          "macos": []
-        },
         "installation_path": {
           "linux": ["~/.codex/auth.json"],
           "windows": ["~/.codex/auth.json"],

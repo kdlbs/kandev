@@ -2,9 +2,9 @@ package models
 
 import "time"
 
-// AgentMcpConfig stores MCP configuration for a specific agent.
-type AgentMcpConfig struct {
-	AgentID   string                 `json:"agent_id"`
+// AgentProfileMcpConfig stores MCP configuration for a specific agent profile.
+type AgentProfileMcpConfig struct {
+	ProfileID string                 `json:"profile_id"`
 	Enabled   bool                   `json:"enabled"`
 	Servers   map[string]interface{} `json:"servers"`
 	Meta      map[string]interface{} `json:"meta,omitempty"`

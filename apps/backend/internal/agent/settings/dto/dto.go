@@ -86,9 +86,8 @@ type ListAvailableAgentsResponse struct {
 	Total  int                 `json:"total"`
 }
 
-type AgentMcpConfigDTO struct {
-	AgentID   string                         `json:"agent_id"`
-	AgentName string                         `json:"agent_name"`
+type AgentProfileMcpConfigDTO struct {
+	ProfileID string                         `json:"profile_id"`
 	Enabled   bool                           `json:"enabled"`
 	Servers   map[string]mcpconfig.ServerDef `json:"servers"`
 	Meta      map[string]any                 `json:"meta,omitempty"`

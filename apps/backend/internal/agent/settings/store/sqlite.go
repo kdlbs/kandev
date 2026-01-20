@@ -48,16 +48,6 @@ func (r *sqliteRepository) initSchema() error {
 		updated_at DATETIME NOT NULL
 	);
 
-	CREATE TABLE IF NOT EXISTS agent_mcp_configs (
-		agent_id TEXT PRIMARY KEY,
-		enabled INTEGER NOT NULL DEFAULT 0,
-		servers_json TEXT NOT NULL DEFAULT '{}',
-		meta_json TEXT NOT NULL DEFAULT '{}',
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL,
-		FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
-	);
-
 	CREATE TABLE IF NOT EXISTS agent_profiles (
 		id TEXT PRIMARY KEY,
 		agent_id TEXT NOT NULL,
@@ -71,6 +61,16 @@ func (r *sqliteRepository) initSchema() error {
 		updated_at DATETIME NOT NULL,
 		deleted_at DATETIME,
 		FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
+	);
+
+	CREATE TABLE IF NOT EXISTS agent_profile_mcp_configs (
+		profile_id TEXT PRIMARY KEY,
+		enabled INTEGER NOT NULL DEFAULT 0,
+		servers_json TEXT NOT NULL DEFAULT '{}',
+		meta_json TEXT NOT NULL DEFAULT '{}',
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL,
+		FOREIGN KEY (profile_id) REFERENCES agent_profiles(id) ON DELETE CASCADE
 	);
 
 	DROP INDEX IF EXISTS idx_agents_name;
@@ -178,18 +178,18 @@ func (r *sqliteRepository) ListAgents(ctx context.Context) ([]*models.Agent, err
 	return result, rows.Err()
 }
 
-func (r *sqliteRepository) GetAgentMcpConfig(ctx context.Context, agentID string) (*models.AgentMcpConfig, error) {
+func (r *sqliteRepository) GetAgentProfileMcpConfig(ctx context.Context, profileID string) (*models.AgentProfileMcpConfig, error) {
 	row := r.db.QueryRowContext(ctx, `
-		SELECT agent_id, enabled, servers_json, meta_json, created_at, updated_at
-		FROM agent_mcp_configs
-		WHERE agent_id = ?
-	`, agentID)
+		SELECT profile_id, enabled, servers_json, meta_json, created_at, updated_at
+		FROM agent_profile_mcp_configs
+		WHERE profile_id = ?
+	`, profileID)
 
-	var config models.AgentMcpConfig
+	var config models.AgentProfileMcpConfig
 	var enabled int
 	var serversJSON string
 	var metaJSON string
-	if err := row.Scan(&config.AgentID, &enabled, &serversJSON, &metaJSON, &config.CreatedAt, &config.UpdatedAt); err != nil {
+	if err := row.Scan(&config.ProfileID, &enabled, &serversJSON, &metaJSON, &config.CreatedAt, &config.UpdatedAt); err != nil {
 		return nil, err
 	}
 	config.Enabled = enabled == 1
@@ -202,9 +202,9 @@ func (r *sqliteRepository) GetAgentMcpConfig(ctx context.Context, agentID string
 	return &config, nil
 }
 
-func (r *sqliteRepository) UpsertAgentMcpConfig(ctx context.Context, config *models.AgentMcpConfig) error {
-	if config.AgentID == "" {
-		return fmt.Errorf("agent ID is required")
+func (r *sqliteRepository) UpsertAgentProfileMcpConfig(ctx context.Context, config *models.AgentProfileMcpConfig) error {
+	if config.ProfileID == "" {
+		return fmt.Errorf("profile ID is required")
 	}
 	if config.Servers == nil {
 		config.Servers = map[string]interface{}{}
@@ -228,14 +228,14 @@ func (r *sqliteRepository) UpsertAgentMcpConfig(ctx context.Context, config *mod
 	}
 
 	_, err = r.db.ExecContext(ctx, `
-		INSERT INTO agent_mcp_configs (agent_id, enabled, servers_json, meta_json, created_at, updated_at)
+		INSERT INTO agent_profile_mcp_configs (profile_id, enabled, servers_json, meta_json, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?)
-		ON CONFLICT(agent_id) DO UPDATE SET
+		ON CONFLICT(profile_id) DO UPDATE SET
 			enabled = excluded.enabled,
 			servers_json = excluded.servers_json,
 			meta_json = excluded.meta_json,
 			updated_at = excluded.updated_at
-	`, config.AgentID, boolToInt(config.Enabled), string(serversJSON), string(metaJSON), config.CreatedAt, config.UpdatedAt)
+	`, config.ProfileID, boolToInt(config.Enabled), string(serversJSON), string(metaJSON), config.CreatedAt, config.UpdatedAt)
 	return err
 }
 

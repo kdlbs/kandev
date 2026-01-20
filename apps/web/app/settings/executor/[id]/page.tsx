@@ -60,6 +60,19 @@ function ExecutorEditForm({ executor }: ExecutorEditFormProps) {
 
   const isSystem = draft.is_system ?? false;
   const isLocalDocker = draft.type === 'local_docker';
+  const mcpPolicyError = useMemo(() => {
+    const value = draft.config?.mcp_policy ?? '';
+    if (!value.trim()) return null;
+    try {
+      const parsed = JSON.parse(value);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return 'MCP policy must be a JSON object';
+      }
+    } catch {
+      return 'Invalid JSON';
+    }
+    return null;
+  }, [draft.config?.mcp_policy]);
 
   const ExecutorIcon = useMemo(() => {
     return draft.type === 'local_pc' ? IconCpu : IconServer;
@@ -78,19 +91,21 @@ function ExecutorEditForm({ executor }: ExecutorEditFormProps) {
     if (!draft) return;
     setIsSaving(true);
     try {
-      const payload = {
-        name: draft.name,
-        type: draft.type,
-        status: draft.status,
-        config: draft.config ?? {},
-      };
+      const payload = isSystem
+        ? { config: draft.config ?? {} }
+        : {
+            name: draft.name,
+            type: draft.type,
+            status: draft.status,
+            config: draft.config ?? {},
+          };
       const client = getWebSocketClient();
       const updated = client
         ? await client.request<Executor>('executor.update', { id: draft.id, ...payload })
         : await updateExecutorAction(draft.id, payload);
       setDraft(updated);
       setSavedExecutor(updated);
-      router.push('/settings/executors');
+      // Stay on the executor page after saving so the user can continue editing.
     } finally {
       setIsSaving(false);
     }
@@ -122,8 +137,8 @@ function ExecutorEditForm({ executor }: ExecutorEditFormProps) {
             {draft.type === 'local_pc'
               ? 'Uses locally installed agents on this machine.'
               : draft.type === 'local_docker'
-              ? 'Runs Docker containers on this machine.'
-              : 'Remote Docker support is coming soon.'}
+                ? 'Runs Docker containers on this machine.'
+                : 'Remote Docker support is coming soon.'}
           </p>
         </div>
         <Button variant="outline" size="sm" onClick={() => router.push('/settings/executors')}>
@@ -199,8 +214,20 @@ function ExecutorEditForm({ executor }: ExecutorEditFormProps) {
 
       <Card>
         <CardHeader>
-          <CardTitle>MCP Policy</CardTitle>
-          <CardDescription>JSON policy overrides for MCP servers on this executor.</CardDescription>
+          <CardTitle className="flex items-center gap-2">
+            MCP Policy
+            <span className="rounded-full border border-muted-foreground/30 px-2 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+              Advanced
+            </span>
+          </CardTitle>
+          <CardDescription>
+            JSON policy overrides for MCP servers on this executor. Use it to enforce transport
+            rules, restrict which servers can run, or rewrite URLs for this runtime.
+            <p className="text-xs text-muted-foreground mt-2">
+              Examples: block stdio on remote runners, allowlist approved servers, or rewrite
+              localhost URLs for Docker/K8s networking.
+            </p>
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-2">
           <Label htmlFor="mcp-policy">MCP policy JSON</Label>
@@ -216,8 +243,125 @@ function ExecutorEditForm({ executor }: ExecutorEditFormProps) {
             placeholder='{"allow_stdio":true,"allow_http":true,"allowlist_servers":["github"],"url_rewrite":{"http://localhost:3000":"http://mcp-svc:3000"}}'
             rows={8}
           />
+          {mcpPolicyError && <p className="text-xs text-destructive">{mcpPolicyError}</p>}
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-xs font-medium text-muted-foreground">Quick presets</p>
+            <button
+              type="button"
+              className="text-xs rounded-full border border-muted-foreground/30 px-2 py-1 hover:bg-muted cursor-pointer"
+              onClick={() => {
+                let parsed: Record<string, unknown> = {};
+                try {
+                  if (draft.config?.mcp_policy?.trim()) {
+                    parsed = JSON.parse(draft.config.mcp_policy) as Record<string, unknown>;
+                  }
+                } catch {
+                  parsed = {};
+                }
+                const next = {
+                  ...parsed,
+                  allow_stdio: false,
+                  allow_http: true,
+                  allow_sse: true,
+                };
+                setDraft({
+                  ...draft,
+                  config: { ...(draft.config ?? {}), mcp_policy: JSON.stringify(next, null, 2) },
+                });
+              }}
+            >
+              Only HTTP/SSE
+            </button>
+            <button
+              type="button"
+              className="text-xs rounded-full border border-muted-foreground/30 px-2 py-1 hover:bg-muted cursor-pointer"
+              onClick={() => {
+                let parsed: Record<string, unknown> = {};
+                try {
+                  if (draft.config?.mcp_policy?.trim()) {
+                    parsed = JSON.parse(draft.config.mcp_policy) as Record<string, unknown>;
+                  }
+                } catch {
+                  parsed = {};
+                }
+                const next = {
+                  ...parsed,
+                  allow_stdio: true,
+                  allow_http: false,
+                  allow_sse: false,
+                };
+                setDraft({
+                  ...draft,
+                  config: { ...(draft.config ?? {}), mcp_policy: JSON.stringify(next, null, 2) },
+                });
+              }}
+            >
+              Only stdio
+            </button>
+            <button
+              type="button"
+              className="text-xs rounded-full border border-muted-foreground/30 px-2 py-1 hover:bg-muted cursor-pointer"
+              onClick={() => {
+                let parsed: Record<string, unknown> = {};
+                try {
+                  if (draft.config?.mcp_policy?.trim()) {
+                    parsed = JSON.parse(draft.config.mcp_policy) as Record<string, unknown>;
+                  }
+                } catch {
+                  parsed = {};
+                }
+                const existing = Array.isArray(parsed.allowlist_servers)
+                  ? (parsed.allowlist_servers as string[])
+                  : [];
+                const next = {
+                  ...parsed,
+                  allowlist_servers: Array.from(
+                    new Set([...existing, 'github', 'playwright'])
+                  ),
+                };
+                setDraft({
+                  ...draft,
+                  config: { ...(draft.config ?? {}), mcp_policy: JSON.stringify(next, null, 2) },
+                });
+              }}
+            >
+              Allowlist GitHub + Playwright
+            </button>
+            <button
+              type="button"
+              className="text-xs rounded-full border border-muted-foreground/30 px-2 py-1 hover:bg-muted cursor-pointer"
+              onClick={() => {
+                let parsed: Record<string, unknown> = {};
+                try {
+                  if (draft.config?.mcp_policy?.trim()) {
+                    parsed = JSON.parse(draft.config.mcp_policy) as Record<string, unknown>;
+                  }
+                } catch {
+                  parsed = {};
+                }
+                const existing =
+                  parsed.url_rewrite && typeof parsed.url_rewrite === 'object'
+                    ? (parsed.url_rewrite as Record<string, string>)
+                    : {};
+                const next = {
+                  ...parsed,
+                  url_rewrite: {
+                    ...existing,
+                    'http://localhost:3000': 'http://host.docker.internal:3000',
+                  },
+                };
+                setDraft({
+                  ...draft,
+                  config: { ...(draft.config ?? {}), mcp_policy: JSON.stringify(next, null, 2) },
+                });
+              }}
+            >
+              Rewrite localhost for Docker
+            </button>
+          </div>
           <p className="text-xs text-muted-foreground">
-            Leave empty to use the default policy for the runtime.
+            Leave empty to use the default policy for the runtime (local runs allow stdio + HTTP +
+            SSE, and apply no allowlist or URL rewrites).
           </p>
         </CardContent>
       </Card>
@@ -228,7 +372,7 @@ function ExecutorEditForm({ executor }: ExecutorEditFormProps) {
         <Button variant="outline" onClick={() => router.push('/settings/executors')}>
           Cancel
         </Button>
-        <Button onClick={handleSaveExecutor} disabled={!isDirty || isSystem || isSaving}>
+        <Button onClick={handleSaveExecutor} disabled={!isDirty || Boolean(mcpPolicyError) || isSaving}>
           {isSaving ? 'Saving...' : 'Save Changes'}
         </Button>
       </div>
@@ -256,7 +400,7 @@ function ExecutorEditForm({ executor }: ExecutorEditFormProps) {
               <DialogHeader>
                 <DialogTitle>Delete Executor</DialogTitle>
                 <DialogDescription>
-                Type &quot;delete&quot; to confirm deletion. This action cannot be undone.
+                  Type &quot;delete&quot; to confirm deletion. This action cannot be undone.
                 </DialogDescription>
               </DialogHeader>
               <div className="space-y-2">

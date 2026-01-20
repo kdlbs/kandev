@@ -24,18 +24,33 @@ import {
   createAgentAction,
   createAgentProfileAction,
   deleteAgentProfileAction,
-  getAgentMcpConfigAction,
   updateAgentAction,
-  updateAgentMcpConfigAction,
   updateAgentProfileAction,
+  updateAgentProfileMcpConfigAction,
 } from '@/app/actions/agents';
-import type { Agent, AgentDiscovery, AgentMcpConfig, AgentProfile, McpServerDef } from '@/lib/types/http';
+import type { Agent, AgentDiscovery, AgentProfile, McpServerDef } from '@/lib/types/http';
 import { generateUUID } from '@/lib/utils';
 import { useAppStore } from '@/components/state-provider';
 import { useAvailableAgents } from '@/hooks/use-available-agents';
+import { ProfileMcpConfigCard } from './profile-mcp-config-card';
 
-type DraftAgent = Agent & { isNew?: boolean };
-type DraftProfile = AgentProfile & { isNew?: boolean };
+type DraftProfile = AgentProfile & {
+  isNew?: boolean;
+  mcp_config?: {
+    enabled: boolean;
+    servers: string;
+    dirty: boolean;
+    error: string | null;
+  };
+};
+type DraftAgent = Omit<Agent, 'profiles'> & { profiles: DraftProfile[]; isNew?: boolean };
+
+const defaultMcpConfig: NonNullable<DraftProfile['mcp_config']> = {
+  enabled: false,
+  servers: '{\n  "mcpServers": {}\n}',
+  dirty: false,
+  error: null,
+};
 
 type AgentSetupFormProps = {
   initialAgent: DraftAgent;
@@ -56,13 +71,14 @@ const createDraftProfile = (agentId: string, agentDisplayName: string): DraftPro
   created_at: new Date().toISOString(),
   updated_at: new Date().toISOString(),
   isNew: true,
+  mcp_config: { ...defaultMcpConfig },
 });
 
 const cloneAgent = (agent: Agent): DraftAgent => ({
   ...agent,
   workspace_id: agent.workspace_id ?? null,
   mcp_config_path: agent.mcp_config_path ?? '',
-  profiles: agent.profiles.map((profile) => ({ ...profile })),
+  profiles: agent.profiles.map((profile) => ({ ...profile })) as DraftProfile[],
 });
 
 const ensureProfiles = (agent: DraftAgent, agentDisplayName: string): DraftAgent => {
@@ -88,56 +104,18 @@ function AgentSetupForm({
   const availableAgents = useAvailableAgents().items;
   const [draftAgent, setDraftAgent] = useState<DraftAgent>(initialAgent);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
-  const [mcpConfig, setMcpConfig] = useState<AgentMcpConfig | null>(null);
-  const [mcpEnabled, setMcpEnabled] = useState(false);
-  const [mcpServers, setMcpServers] = useState('{}');
-  const [mcpError, setMcpError] = useState<string | null>(null);
-  const [mcpDirty, setMcpDirty] = useState(false);
-  const [mcpStatus, setMcpStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [newProfileId, setNewProfileId] = useState<string | null>(null);
   const resolveDisplayName = (name: string) =>
     availableAgents.find((item) => item.name === name)?.display_name ?? '';
+  const hasInvalidMcpConfig = useMemo(() => {
+    return draftAgent.profiles.some((profile) => Boolean(profile.mcp_config?.error));
+  }, [draftAgent.profiles]);
 
   // Get model config for the current agent
   const currentAgentModelConfig = useMemo(() => {
     const agent = availableAgents.find((item) => item.name === draftAgent.name);
     return agent?.model_config ?? { default_model: '', available_models: [] };
   }, [availableAgents, draftAgent.name]);
-
-  useEffect(() => {
-    let active = true;
-    if (!draftAgent.supports_mcp) {
-      setMcpConfig(null);
-      setMcpEnabled(false);
-      setMcpServers('{}');
-      setMcpDirty(false);
-      setMcpError(null);
-      setMcpStatus('idle');
-      return () => {
-        active = false;
-      };
-    }
-
-    setMcpStatus('loading');
-    getAgentMcpConfigAction(draftAgent.name)
-      .then((config) => {
-        if (!active) return;
-        setMcpConfig(config);
-        setMcpEnabled(config.enabled);
-        setMcpServers(JSON.stringify(config.servers ?? {}, null, 2));
-        setMcpDirty(false);
-        setMcpError(null);
-        setMcpStatus('idle');
-      })
-      .catch((error) => {
-        if (!active) return;
-        setMcpError(error instanceof Error ? error.message : 'Failed to load MCP config');
-        setMcpStatus('error');
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [draftAgent.name, draftAgent.supports_mcp]);
 
   const isProfileDirty = (draft: DraftProfile, saved?: AgentProfile) => {
     if (!saved) return true;
@@ -186,10 +164,15 @@ function AgentSetupForm({
   };
 
   const handleAddProfile = () => {
+    const draftId = `draft-${generateUUID()}`;
     setDraftAgent((current) => ({
       ...current,
-      profiles: [...current.profiles, createDraftProfile(current.id, resolveDisplayName(current.name))],
+      profiles: [
+        ...current.profiles,
+        { ...createDraftProfile(current.id, resolveDisplayName(current.name)), id: draftId },
+      ],
     }));
+    setNewProfileId(draftId);
   };
 
   const handleRemoveProfile = (profileId: string) => {
@@ -203,6 +186,9 @@ function AgentSetupForm({
             : [createDraftProfile(current.id, resolveDisplayName(current.name))],
       };
     });
+    if (newProfileId === profileId) {
+      setNewProfileId(null);
+    }
   };
 
   const handleProfileChange = (profileId: string, patch: Partial<DraftProfile>) => {
@@ -214,59 +200,54 @@ function AgentSetupForm({
     }));
   };
 
-  const handleMcpServersChange = (value: string) => {
-    setMcpServers(value);
-    setMcpDirty(true);
-    if (!value.trim()) {
-      setMcpError(null);
-      return;
-    }
-    try {
-      const parsed = JSON.parse(value);
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        setMcpError(null);
-      } else {
-        setMcpError('MCP servers config must be a JSON object');
-      }
-    } catch {
-      setMcpError('Invalid JSON');
-    }
+  const handleProfileMcpChange = (
+    profileId: string,
+    patch: Partial<NonNullable<DraftProfile['mcp_config']>>
+  ) => {
+    setDraftAgent((current) => ({
+      ...current,
+      profiles: current.profiles.map((profile) =>
+        profile.id === profileId
+          ? { ...profile, mcp_config: { ...(profile.mcp_config ?? defaultMcpConfig), ...patch } }
+          : profile
+      ),
+    }));
   };
 
-  const handleSaveMcp = async () => {
-    setMcpStatus('loading');
-    let servers: Record<string, McpServerDef> = {};
-    try {
-      const parsed = mcpServers.trim() ? JSON.parse(mcpServers) : {};
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        throw new Error('MCP servers config must be a JSON object');
+  const parseProfileMcpServers = (raw: string) => {
+    if (!raw.trim()) return {};
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('MCP servers config must be a JSON object');
+    }
+    if ('mcpServers' in parsed) {
+      const nested = (parsed as { mcpServers?: unknown }).mcpServers;
+      if (!nested || typeof nested !== 'object' || Array.isArray(nested)) {
+        throw new Error('mcpServers must be a JSON object');
       }
-      servers = parsed as Record<string, McpServerDef>;
-    } catch (error) {
-      setMcpStatus('error');
-      setMcpError(error instanceof Error ? error.message : 'Invalid MCP config');
-      return;
+      return nested as Record<string, McpServerDef>;
     }
-
-    try {
-      const updated = await updateAgentMcpConfigAction(draftAgent.name, {
-        enabled: mcpEnabled,
-        servers,
-        meta: mcpConfig?.meta ?? {},
-      });
-      setMcpConfig(updated);
-      setMcpEnabled(updated.enabled);
-      setMcpServers(JSON.stringify(updated.servers ?? {}, null, 2));
-      setMcpDirty(false);
-      setMcpError(null);
-      setMcpStatus('success');
-    } catch (error) {
-      setMcpStatus('error');
-      onToastError(error);
-    }
+    return parsed as Record<string, McpServerDef>;
   };
+
+  useEffect(() => {
+    if (!newProfileId) return;
+    const target = document.getElementById(`profile-card-${newProfileId}`);
+    if (!target) return;
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const timeout = setTimeout(() => setNewProfileId(null), 1200);
+    return () => clearTimeout(timeout);
+  }, [newProfileId]);
 
   const handleSave = async () => {
+    if (draftAgent.profiles.some((profile) => !profile.name.trim())) {
+      onToastError(new Error('Profile name is required.'));
+      return;
+    }
+    if (hasInvalidMcpConfig) {
+      onToastError(new Error('Fix invalid MCP JSON before saving.'));
+      return;
+    }
     setSaveStatus('loading');
     try {
       if (!savedAgent) {
@@ -281,6 +262,50 @@ function AgentSetupForm({
             plan: profile.plan,
           })),
         });
+        if (created.profiles.length === draftAgent.profiles.length) {
+          for (let index = 0; index < draftAgent.profiles.length; index += 1) {
+            const draftProfile = draftAgent.profiles[index];
+            const createdProfile = created.profiles[index];
+            if (
+              draftProfile.mcp_config &&
+              draftProfile.mcp_config.dirty &&
+              draftProfile.mcp_config.servers.trim()
+            ) {
+              try {
+                const servers = parseProfileMcpServers(draftProfile.mcp_config.servers);
+                await updateAgentProfileMcpConfigAction(createdProfile.id, {
+                  enabled: draftProfile.mcp_config.enabled,
+                  mcpServers: servers,
+                });
+              } catch (error) {
+                onToastError(error);
+              }
+            }
+          }
+        } else {
+          for (const draftProfile of draftAgent.profiles) {
+            if (
+              !draftProfile.mcp_config ||
+              !draftProfile.mcp_config.dirty ||
+              !draftProfile.mcp_config.servers.trim()
+            ) {
+              continue;
+            }
+            const createdProfile = created.profiles.find(
+              (profile) => profile.name === draftProfile.name
+            );
+            if (!createdProfile) continue;
+            try {
+              const servers = parseProfileMcpServers(draftProfile.mcp_config.servers);
+              await updateAgentProfileMcpConfigAction(createdProfile.id, {
+                enabled: draftProfile.mcp_config.enabled,
+                mcpServers: servers,
+              });
+            } catch (error) {
+              onToastError(error);
+            }
+          }
+        }
         if ((draftAgent.mcp_config_path ?? '') !== (created.mcp_config_path ?? '')) {
           created = await updateAgentAction(created.id, {
             mcp_config_path: draftAgent.mcp_config_path ?? '',
@@ -313,6 +338,17 @@ function AgentSetupForm({
               dangerously_skip_permissions: profile.dangerously_skip_permissions,
               plan: profile.plan,
             });
+            if (profile.mcp_config && profile.mcp_config.dirty && profile.mcp_config.servers.trim()) {
+              try {
+                const servers = parseProfileMcpServers(profile.mcp_config.servers);
+                await updateAgentProfileMcpConfigAction(createdProfile.id, {
+                  enabled: profile.mcp_config.enabled,
+                  mcpServers: servers,
+                });
+              } catch (error) {
+                onToastError(error);
+              }
+            }
             nextProfiles.push(createdProfile);
             continue;
           }
@@ -378,14 +414,20 @@ function AgentSetupForm({
             <CardTitle>{draftAgent.profiles[0]?.agent_display_name ?? draftAgent.name} Profiles</CardTitle>
             {isAgentDirty && <UnsavedChangesBadge />}
           </div>
-          <Button size="sm" variant="outline" onClick={handleAddProfile}>
+          <Button size="sm" variant="outline" onClick={handleAddProfile} className="cursor-pointer">
             <IconPlus className="h-4 w-4 mr-2" />
             Add profile
           </Button>
         </CardHeader>
         <CardContent className="space-y-4">
-          {draftAgent.profiles.map((profile) => (
-            <Card key={profile.id} className="border-muted">
+          {draftAgent.profiles.map((profile) => {
+            const isNew = profile.id === newProfileId;
+            return (
+            <Card
+              key={profile.id}
+              id={`profile-card-${profile.id}`}
+              className={isNew ? 'border-amber-400/70 shadow-sm' : 'border-muted'}
+            >
               <CardContent className="pt-6 space-y-4">
                 <div className="flex items-center justify-between gap-4">
                   <div className="flex-1 space-y-2">
@@ -477,9 +519,18 @@ function AgentSetupForm({
                     />
                   </div>
                 </div>
+
+                <ProfileMcpConfigCard
+                  profileId={profile.id}
+                  supportsMcp={draftAgent.supports_mcp}
+                  draftState={profile.id.startsWith('draft-') ? profile.mcp_config : undefined}
+                  onDraftStateChange={(patch) => handleProfileMcpChange(profile.id, patch)}
+                  onToastError={onToastError}
+                />
               </CardContent>
             </Card>
-          ))}
+          );
+          })}
         </CardContent>
         <div className="flex justify-end px-6 pb-6">
           <UnsavedSaveButton
@@ -487,60 +538,11 @@ function AgentSetupForm({
             isLoading={saveStatus === 'loading'}
             status={saveStatus}
             onClick={handleSave}
+            disabled={hasInvalidMcpConfig}
           />
         </div>
       </Card>
 
-      {draftAgent.supports_mcp && (
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <div className="flex items-center gap-2">
-              <CardTitle>MCP Configuration</CardTitle>
-              {mcpDirty && <UnsavedChangesBadge />}
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center justify-between rounded-md border p-3">
-              <div className="space-y-1">
-                <Label>Enable MCP</Label>
-                <p className="text-xs text-muted-foreground">
-                  Allow this agent to use MCP servers during sessions.
-                </p>
-              </div>
-              <Switch
-                checked={mcpEnabled}
-                onCheckedChange={(checked) => {
-                  setMcpEnabled(checked);
-                  setMcpDirty(true);
-                }}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="mcp-servers">MCP servers (JSON)</Label>
-              <Textarea
-                id="mcp-servers"
-                className="min-h-[200px] font-mono text-xs"
-                value={mcpServers}
-                onChange={(event) => handleMcpServersChange(event.target.value)}
-                placeholder='{\"example\": {\"type\": \"stdio\", \"command\": \"npx\", \"args\": [\"-y\", \"tool\"], \"mode\": \"per_session\"}}'
-              />
-              <p className="text-xs text-muted-foreground">
-                Server definitions are stored centrally and resolved per executor at runtime.
-              </p>
-              {mcpError && <p className="text-sm text-destructive">{mcpError}</p>}
-            </div>
-          </CardContent>
-          <div className="flex justify-end px-6 pb-6">
-            <UnsavedSaveButton
-              isDirty={mcpDirty}
-              isLoading={mcpStatus === 'loading'}
-              status={mcpStatus}
-              onClick={handleSaveMcp}
-            />
-          </div>
-        </Card>
-      )}
     </div>
   );
 }

@@ -7,7 +7,7 @@ import (
 
 // Resolve converts the stored config into a list of runtime-resolved servers based on policy.
 // It returns warnings for skipped servers and a fatal error for invalid configurations.
-func Resolve(config *AgentConfig, policy Policy) ([]ResolvedServer, []string, error) {
+func Resolve(config *ProfileConfig, policy Policy) ([]ResolvedServer, []string, error) {
 	if config == nil || !config.Enabled {
 		return nil, nil, nil
 	}

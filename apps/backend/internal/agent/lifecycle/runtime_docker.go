@@ -7,8 +7,9 @@ import (
 
 	"go.uber.org/zap"
 
-	agentctl "github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/agent/docker"
+	"github.com/kandev/kandev/internal/agent/runtime"
+	agentctl "github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
@@ -28,8 +29,8 @@ func NewDockerRuntime(dockerClient *docker.Client, log *logger.Logger) *DockerRu
 	}
 }
 
-func (r *DockerRuntime) Name() string {
-	return "docker"
+func (r *DockerRuntime) Name() runtime.Name {
+	return runtime.NameDocker
 }
 
 func (r *DockerRuntime) HealthCheck(ctx context.Context) error {

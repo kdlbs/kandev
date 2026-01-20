@@ -224,50 +224,48 @@ func (c *Controller) GetAgent(ctx context.Context, id string) (*dto.AgentDTO, er
 	return &result, nil
 }
 
-type UpdateAgentMcpConfigRequest struct {
+type UpdateAgentProfileMcpConfigRequest struct {
 	Enabled bool
 	Servers map[string]mcpconfig.ServerDef
 	Meta    map[string]any
 }
 
-func (c *Controller) GetAgentMcpConfig(ctx context.Context, agentName string) (*dto.AgentMcpConfigDTO, error) {
-	config, err := c.mcpService.GetConfigByAgentName(ctx, agentName)
+func (c *Controller) GetAgentProfileMcpConfig(ctx context.Context, profileID string) (*dto.AgentProfileMcpConfigDTO, error) {
+	config, err := c.mcpService.GetConfigByProfileID(ctx, profileID)
 	if err != nil {
-		if errors.Is(err, mcpconfig.ErrAgentNotFound) {
-			return nil, ErrAgentNotFound
+		if errors.Is(err, mcpconfig.ErrAgentProfileNotFound) {
+			return nil, ErrAgentProfileNotFound
 		}
 		if errors.Is(err, mcpconfig.ErrAgentMcpUnsupported) {
 			return nil, ErrAgentMcpUnsupported
 		}
 		return nil, err
 	}
-	return &dto.AgentMcpConfigDTO{
-		AgentID:   config.AgentID,
-		AgentName: config.AgentName,
+	return &dto.AgentProfileMcpConfigDTO{
+		ProfileID: config.ProfileID,
 		Enabled:   config.Enabled,
 		Servers:   config.Servers,
 		Meta:      config.Meta,
 	}, nil
 }
 
-func (c *Controller) UpdateAgentMcpConfig(ctx context.Context, agentName string, req UpdateAgentMcpConfigRequest) (*dto.AgentMcpConfigDTO, error) {
-	config, err := c.mcpService.UpsertConfigByAgentName(ctx, agentName, &mcpconfig.AgentConfig{
+func (c *Controller) UpdateAgentProfileMcpConfig(ctx context.Context, profileID string, req UpdateAgentProfileMcpConfigRequest) (*dto.AgentProfileMcpConfigDTO, error) {
+	config, err := c.mcpService.UpsertConfigByProfileID(ctx, profileID, &mcpconfig.ProfileConfig{
 		Enabled: req.Enabled,
 		Servers: req.Servers,
 		Meta:    req.Meta,
 	})
 	if err != nil {
-		if errors.Is(err, mcpconfig.ErrAgentNotFound) {
-			return nil, ErrAgentNotFound
+		if errors.Is(err, mcpconfig.ErrAgentProfileNotFound) {
+			return nil, ErrAgentProfileNotFound
 		}
 		if errors.Is(err, mcpconfig.ErrAgentMcpUnsupported) {
 			return nil, ErrAgentMcpUnsupported
 		}
 		return nil, err
 	}
-	return &dto.AgentMcpConfigDTO{
-		AgentID:   config.AgentID,
-		AgentName: config.AgentName,
+	return &dto.AgentProfileMcpConfigDTO{
+		ProfileID: config.ProfileID,
 		Enabled:   config.Enabled,
 		Servers:   config.Servers,
 		Meta:      config.Meta,

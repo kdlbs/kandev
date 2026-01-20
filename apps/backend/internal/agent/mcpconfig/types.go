@@ -29,12 +29,14 @@ type ServerDef struct {
 	Extra   map[string]any    `json:"extra,omitempty"`
 }
 
-type AgentConfig struct {
-	AgentID   string               `json:"agent_id"`
-	AgentName string               `json:"agent_name"`
-	Enabled   bool                 `json:"enabled"`
-	Servers   map[string]ServerDef `json:"servers"`
-	Meta      map[string]any       `json:"meta,omitempty"`
+type ProfileConfig struct {
+	ProfileID   string               `json:"profile_id"`
+	ProfileName string               `json:"profile_name,omitempty"`
+	AgentID     string               `json:"agent_id,omitempty"`
+	AgentName   string               `json:"agent_name,omitempty"`
+	Enabled     bool                 `json:"enabled"`
+	Servers     map[string]ServerDef `json:"servers"`
+	Meta        map[string]any       `json:"meta,omitempty"`
 }
 
 type ResolvedServer struct {

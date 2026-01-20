@@ -4,7 +4,7 @@ import { getBackendConfig } from '@/lib/config';
 import type {
   Agent,
   AgentProfile,
-  AgentMcpConfig,
+  AgentProfileMcpConfig,
   McpServerDef,
   ListAgentsResponse,
   ListAgentDiscoveryResponse,
@@ -103,19 +103,15 @@ export async function deleteAgentProfileAction(id: string) {
   await fetchJson<void>(`${apiBaseUrl}/api/v1/agent-profiles/${id}`, { method: 'DELETE' });
 }
 
-export async function getAgentMcpConfigAction(agentName: string): Promise<AgentMcpConfig> {
-  const url = new URL(`${apiBaseUrl}/api/v1/mcp-config`);
-  url.searchParams.set('agent', agentName);
-  return fetchJson<AgentMcpConfig>(url.toString());
+export async function getAgentProfileMcpConfigAction(profileId: string): Promise<AgentProfileMcpConfig> {
+  return fetchJson<AgentProfileMcpConfig>(`${apiBaseUrl}/api/v1/agent-profiles/${profileId}/mcp-config`);
 }
 
-export async function updateAgentMcpConfigAction(
-  agentName: string,
-  payload: { enabled: boolean; servers: Record<string, McpServerDef>; meta?: Record<string, unknown> }
-): Promise<AgentMcpConfig> {
-  const url = new URL(`${apiBaseUrl}/api/v1/mcp-config`);
-  url.searchParams.set('agent', agentName);
-  return fetchJson<AgentMcpConfig>(url.toString(), {
+export async function updateAgentProfileMcpConfigAction(
+  profileId: string,
+  payload: { enabled: boolean; mcpServers: Record<string, McpServerDef>; meta?: Record<string, unknown> }
+): Promise<AgentProfileMcpConfig> {
+  return fetchJson<AgentProfileMcpConfig>(`${apiBaseUrl}/api/v1/agent-profiles/${profileId}/mcp-config`, {
     method: 'POST',
     body: JSON.stringify(payload),
   });
