@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, type FormEvent } from 'react';
+import { useMemo, useReducer, useState, useSyncExternalStore, type FormEvent } from 'react';
 import { IconBell, IconRefresh } from '@tabler/icons-react';
 import { Button } from '@kandev/ui/button';
 import { Checkbox } from '@kandev/ui/checkbox';
@@ -105,14 +105,17 @@ export function NotificationsSettings() {
   const [appriseFormMode, setAppriseFormMode] = useState<AppriseFormMode>('create');
   const [activeAppriseId, setActiveAppriseId] = useState<string | null>(null);
   const [pendingDeletes, setPendingDeletes] = useState<Set<string>>(new Set());
-  const [notificationPermission, setNotificationPermission] = useState<
-    NotificationPermission | 'unsupported'
-  >(() => {
-    if (typeof Notification === 'undefined') {
-      return 'unsupported';
-    }
-    return Notification.permission;
-  });
+  const mounted = useSyncExternalStore(
+    () => () => undefined,
+    () => true,
+    () => false
+  );
+  const [, bumpPermission] = useReducer((value) => value + 1, 0);
+  const notificationPermission: NotificationPermission | 'unsupported' = !mounted
+    ? 'default'
+    : typeof Notification === 'undefined'
+      ? 'unsupported'
+      : Notification.permission;
 
   const saveRequest = useRequest(async () => {
     const updates: Array<Promise<NotificationProvider>> = [];
@@ -215,19 +218,17 @@ export function NotificationsSettings() {
 
   const handleRequestPermission = async () => {
     if (typeof Notification === 'undefined') {
-      setNotificationPermission('unsupported');
       return;
     }
-    const result = await Notification.requestPermission();
-    setNotificationPermission(result);
+    await Notification.requestPermission();
+    bumpPermission();
   };
 
   const handleRefreshPermission = () => {
     if (typeof Notification === 'undefined') {
-      setNotificationPermission('unsupported');
       return;
     }
-    setNotificationPermission(Notification.permission);
+    bumpPermission();
   };
 
   const handleTestNotification = async () => {
@@ -237,7 +238,7 @@ export function NotificationsSettings() {
     let permission = Notification.permission;
     if (permission === 'default') {
       permission = await Notification.requestPermission();
-      setNotificationPermission(permission);
+      bumpPermission();
     }
     if (permission !== 'granted') {
       return;

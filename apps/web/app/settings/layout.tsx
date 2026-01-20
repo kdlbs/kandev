@@ -6,10 +6,6 @@ import {
   listEnvironments,
   listExecutors,
   listWorkspaces,
-  fetchUserSettings,
-  listPrompts,
-  listNotificationProviders,
-  listEditors,
 } from '@/lib/http';
 
 export default function SettingsLayout({
@@ -31,26 +27,13 @@ async function SettingsLayoutServer({ children }: { children: React.ReactNode })
       environments,
       agents,
       discovery,
-      userSettings,
-      promptsResponse,
-      notificationProviders,
-      editorsResponse,
     ] = await Promise.all([
       listWorkspaces({ cache: 'no-store' }),
       listExecutors({ cache: 'no-store' }),
       listEnvironments({ cache: 'no-store' }),
       listAgents({ cache: 'no-store' }),
       listAgentDiscovery({ cache: 'no-store' }),
-      fetchUserSettings({ cache: 'no-store' }).catch(() => null),
-      listPrompts({ cache: 'no-store' }).catch(() => ({ prompts: [] })),
-      listNotificationProviders({ cache: 'no-store' }).catch(() => ({
-        providers: [],
-        apprise_available: false,
-        events: [],
-      })),
-      listEditors({ cache: 'no-store' }).catch(() => ({ editors: [] })),
     ]);
-    const settings = userSettings?.settings;
     initialState = {
       workspaces: {
         items: workspaces.workspaces.map((workspace) => ({
@@ -87,32 +70,6 @@ async function SettingsLayoutServer({ children }: { children: React.ReactNode })
         executorsLoaded: true,
         environmentsLoaded: true,
         agentsLoaded: true,
-      },
-      prompts: {
-        items: promptsResponse.prompts ?? [],
-        loaded: true,
-        loading: false,
-      },
-      editors: {
-        items: editorsResponse.editors ?? [],
-        loaded: true,
-        loading: false,
-      },
-      notificationProviders: {
-        items: notificationProviders.providers ?? [],
-        events: notificationProviders.events ?? [],
-        appriseAvailable: notificationProviders.apprise_available ?? false,
-        loaded: true,
-        loading: false,
-      },
-      userSettings: {
-        workspaceId: settings?.workspace_id ?? null,
-        boardId: settings?.board_id ?? null,
-        repositoryIds: settings?.repository_ids ?? [],
-        preferredShell: settings?.preferred_shell ?? null,
-        shellOptions: userSettings?.shell_options ?? [],
-        defaultEditorId: settings?.default_editor_id ?? null,
-        loaded: Boolean(settings),
       },
     };
   } catch {
