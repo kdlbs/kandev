@@ -96,6 +96,7 @@ export function WorkspaceRepositoriesClient({
       repo.provider_owner !== saved.provider_owner ||
       repo.provider_name !== saved.provider_name ||
       repo.default_branch !== saved.default_branch ||
+      repo.worktree_branch_prefix !== saved.worktree_branch_prefix ||
       repo.setup_script !== saved.setup_script ||
       repo.cleanup_script !== saved.cleanup_script
     );
@@ -196,6 +197,7 @@ export function WorkspaceRepositoriesClient({
       provider_owner: '',
       provider_name: '',
       default_branch: selectedRepo?.default_branch || '',
+      worktree_branch_prefix: 'feature/',
       setup_script: '',
       cleanup_script: '',
       created_at: '',
@@ -266,6 +268,7 @@ export function WorkspaceRepositoriesClient({
         provider_owner: repo.provider_owner,
         provider_name: repo.provider_name,
         default_branch: repo.default_branch,
+        worktree_branch_prefix: repo.worktree_branch_prefix,
         setup_script: repo.setup_script,
         cleanup_script: repo.cleanup_script,
       });
@@ -294,6 +297,7 @@ export function WorkspaceRepositoriesClient({
       provider_owner: repo.provider_owner,
       provider_name: repo.provider_name,
       default_branch: repo.default_branch,
+      worktree_branch_prefix: repo.worktree_branch_prefix,
       setup_script: repo.setup_script,
       cleanup_script: repo.cleanup_script,
     });

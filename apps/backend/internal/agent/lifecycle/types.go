@@ -84,10 +84,11 @@ type LaunchRequest struct {
 	Metadata        map[string]interface{}
 
 	// Worktree configuration
-	UseWorktree    bool   // Whether to use a Git worktree for isolation
-	RepositoryID   string // Repository ID for worktree tracking
-	RepositoryPath string // Path to the main repository (for worktree creation)
-	BaseBranch     string // Base branch for the worktree (e.g., "main")
+	UseWorktree          bool   // Whether to use a Git worktree for isolation
+	RepositoryID         string // Repository ID for worktree tracking
+	RepositoryPath       string // Path to the main repository (for worktree creation)
+	BaseBranch           string // Base branch for the worktree (e.g., "main")
+	WorktreeBranchPrefix string // Branch prefix for worktree branches
 }
 
 // CredentialsManager interface for credential retrieval

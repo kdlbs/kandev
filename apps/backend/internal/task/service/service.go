@@ -12,6 +12,7 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/worktree"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -31,6 +32,7 @@ type TaskExecutionStopper interface {
 }
 
 var ErrActiveTaskSessions = errors.New("active agent sessions exist")
+var ErrInvalidRepositorySettings = errors.New("invalid repository settings")
 
 // Service provides task business logic
 type Service struct {
@@ -149,31 +151,33 @@ type UpdateColumnRequest struct {
 
 // CreateRepositoryRequest contains the data for creating a new repository
 type CreateRepositoryRequest struct {
-	WorkspaceID    string `json:"workspace_id"`
-	Name           string `json:"name"`
-	SourceType     string `json:"source_type"`
-	LocalPath      string `json:"local_path"`
-	Provider       string `json:"provider"`
-	ProviderRepoID string `json:"provider_repo_id"`
-	ProviderOwner  string `json:"provider_owner"`
-	ProviderName   string `json:"provider_name"`
-	DefaultBranch  string `json:"default_branch"`
-	SetupScript    string `json:"setup_script"`
-	CleanupScript  string `json:"cleanup_script"`
+	WorkspaceID          string `json:"workspace_id"`
+	Name                 string `json:"name"`
+	SourceType           string `json:"source_type"`
+	LocalPath            string `json:"local_path"`
+	Provider             string `json:"provider"`
+	ProviderRepoID       string `json:"provider_repo_id"`
+	ProviderOwner        string `json:"provider_owner"`
+	ProviderName         string `json:"provider_name"`
+	DefaultBranch        string `json:"default_branch"`
+	WorktreeBranchPrefix string `json:"worktree_branch_prefix"`
+	SetupScript          string `json:"setup_script"`
+	CleanupScript        string `json:"cleanup_script"`
 }
 
 // UpdateRepositoryRequest contains the data for updating a repository
 type UpdateRepositoryRequest struct {
-	Name           *string `json:"name,omitempty"`
-	SourceType     *string `json:"source_type,omitempty"`
-	LocalPath      *string `json:"local_path,omitempty"`
-	Provider       *string `json:"provider,omitempty"`
-	ProviderRepoID *string `json:"provider_repo_id,omitempty"`
-	ProviderOwner  *string `json:"provider_owner,omitempty"`
-	ProviderName   *string `json:"provider_name,omitempty"`
-	DefaultBranch  *string `json:"default_branch,omitempty"`
-	SetupScript    *string `json:"setup_script,omitempty"`
-	CleanupScript  *string `json:"cleanup_script,omitempty"`
+	Name                 *string `json:"name,omitempty"`
+	SourceType           *string `json:"source_type,omitempty"`
+	LocalPath            *string `json:"local_path,omitempty"`
+	Provider             *string `json:"provider,omitempty"`
+	ProviderRepoID       *string `json:"provider_repo_id,omitempty"`
+	ProviderOwner        *string `json:"provider_owner,omitempty"`
+	ProviderName         *string `json:"provider_name,omitempty"`
+	DefaultBranch        *string `json:"default_branch,omitempty"`
+	WorktreeBranchPrefix *string `json:"worktree_branch_prefix,omitempty"`
+	SetupScript          *string `json:"setup_script,omitempty"`
+	CleanupScript        *string `json:"cleanup_script,omitempty"`
 }
 
 // CreateExecutorRequest contains the data for creating an executor
@@ -928,19 +932,27 @@ func (s *Service) CreateRepository(ctx context.Context, req *CreateRepositoryReq
 	if sourceType == "" {
 		sourceType = "local"
 	}
+	prefix := strings.TrimSpace(req.WorktreeBranchPrefix)
+	if err := worktree.ValidateBranchPrefix(prefix); err != nil {
+		return nil, fmt.Errorf("%w: %s", ErrInvalidRepositorySettings, err)
+	}
+	if prefix == "" {
+		prefix = worktree.DefaultBranchPrefix
+	}
 	repository := &models.Repository{
-		ID:             uuid.New().String(),
-		WorkspaceID:    req.WorkspaceID,
-		Name:           req.Name,
-		SourceType:     sourceType,
-		LocalPath:      req.LocalPath,
-		Provider:       req.Provider,
-		ProviderRepoID: req.ProviderRepoID,
-		ProviderOwner:  req.ProviderOwner,
-		ProviderName:   req.ProviderName,
-		DefaultBranch:  req.DefaultBranch,
-		SetupScript:    req.SetupScript,
-		CleanupScript:  req.CleanupScript,
+		ID:                   uuid.New().String(),
+		WorkspaceID:          req.WorkspaceID,
+		Name:                 req.Name,
+		SourceType:           sourceType,
+		LocalPath:            req.LocalPath,
+		Provider:             req.Provider,
+		ProviderRepoID:       req.ProviderRepoID,
+		ProviderOwner:        req.ProviderOwner,
+		ProviderName:         req.ProviderName,
+		DefaultBranch:        req.DefaultBranch,
+		WorktreeBranchPrefix: prefix,
+		SetupScript:          req.SetupScript,
+		CleanupScript:        req.CleanupScript,
 	}
 
 	if err := s.repo.CreateRepository(ctx, repository); err != nil {
@@ -985,6 +997,13 @@ func (s *Service) UpdateRepository(ctx context.Context, id string, req *UpdateRe
 	}
 	if req.DefaultBranch != nil {
 		repository.DefaultBranch = *req.DefaultBranch
+	}
+	if req.WorktreeBranchPrefix != nil {
+		prefix := strings.TrimSpace(*req.WorktreeBranchPrefix)
+		if err := worktree.ValidateBranchPrefix(prefix); err != nil {
+			return nil, fmt.Errorf("%w: %s", ErrInvalidRepositorySettings, err)
+		}
+		repository.WorktreeBranchPrefix = prefix
 	}
 	if req.SetupScript != nil {
 		repository.SetupScript = *req.SetupScript
@@ -1717,20 +1736,21 @@ func (s *Service) publishRepositoryEvent(ctx context.Context, eventType string, 
 		return
 	}
 	data := map[string]interface{}{
-		"id":               repository.ID,
-		"workspace_id":     repository.WorkspaceID,
-		"name":             repository.Name,
-		"source_type":      repository.SourceType,
-		"local_path":       repository.LocalPath,
-		"provider":         repository.Provider,
-		"provider_repo_id": repository.ProviderRepoID,
-		"provider_owner":   repository.ProviderOwner,
-		"provider_name":    repository.ProviderName,
-		"default_branch":   repository.DefaultBranch,
-		"setup_script":     repository.SetupScript,
-		"cleanup_script":   repository.CleanupScript,
-		"created_at":       repository.CreatedAt.Format(time.RFC3339),
-		"updated_at":       repository.UpdatedAt.Format(time.RFC3339),
+		"id":                     repository.ID,
+		"workspace_id":           repository.WorkspaceID,
+		"name":                   repository.Name,
+		"source_type":            repository.SourceType,
+		"local_path":             repository.LocalPath,
+		"provider":               repository.Provider,
+		"provider_repo_id":       repository.ProviderRepoID,
+		"provider_owner":         repository.ProviderOwner,
+		"provider_name":          repository.ProviderName,
+		"default_branch":         repository.DefaultBranch,
+		"worktree_branch_prefix": repository.WorktreeBranchPrefix,
+		"setup_script":           repository.SetupScript,
+		"cleanup_script":         repository.CleanupScript,
+		"created_at":             repository.CreatedAt.Format(time.RFC3339),
+		"updated_at":             repository.UpdatedAt.Format(time.RFC3339),
 	}
 	event := bus.NewEvent(eventType, "task-service", data)
 	if err := s.eventBus.Publish(ctx, eventType, event); err != nil {

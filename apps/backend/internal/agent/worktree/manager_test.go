@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"regexp"
 	"testing"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -285,5 +286,56 @@ func TestSemanticWorktreeName(t *testing.T) {
 				t.Errorf("SemanticWorktreeName(%q, %q) = %q, want %q", tt.taskTitle, tt.suffix, result, tt.expected)
 			}
 		})
+	}
+}
+
+func TestSmallSuffix(t *testing.T) {
+	suffix := SmallSuffix(3)
+	if len(suffix) == 0 || len(suffix) > 3 {
+		t.Fatalf("expected suffix length 1-3, got %d (%q)", len(suffix), suffix)
+	}
+	if !regexp.MustCompile(`^[a-z0-9]{1,3}$`).MatchString(suffix) {
+		t.Fatalf("suffix contains invalid characters: %q", suffix)
+	}
+}
+
+func TestSmallSuffix_MaxLenCap(t *testing.T) {
+	suffix := SmallSuffix(10)
+	if len(suffix) != 3 {
+		t.Fatalf("expected suffix length 3, got %d (%q)", len(suffix), suffix)
+	}
+}
+
+func TestNormalizeBranchPrefix(t *testing.T) {
+	if got := NormalizeBranchPrefix(""); got != DefaultBranchPrefix {
+		t.Fatalf("expected default prefix %q, got %q", DefaultBranchPrefix, got)
+	}
+	if got := NormalizeBranchPrefix("  feature/ "); got != "feature/" {
+		t.Fatalf("expected trimmed prefix %q, got %q", "feature/", got)
+	}
+}
+
+func TestValidateBranchPrefix(t *testing.T) {
+	valid := []string{"feature/", "bugfix-", "release_1.0/", "team/alpha"}
+	for _, prefix := range valid {
+		if err := ValidateBranchPrefix(prefix); err != nil {
+			t.Fatalf("expected prefix %q to be valid: %v", prefix, err)
+		}
+	}
+
+	invalid := []string{"bad prefix", "feature@{", "foo..bar"}
+	for _, prefix := range invalid {
+		if err := ValidateBranchPrefix(prefix); err == nil {
+			t.Fatalf("expected prefix %q to be invalid", prefix)
+		}
+	}
+}
+
+func TestSemanticBranchName(t *testing.T) {
+	cfg := Config{BranchPrefix: "feature/"}
+	got := cfg.SemanticBranchName("fix-login", "abc")
+	want := "feature/fix-login-abc"
+	if got != want {
+		t.Fatalf("SemanticBranchName() = %q, want %q", got, want)
 	}
 }

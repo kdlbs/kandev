@@ -154,6 +154,32 @@ func TestService_CreateTask(t *testing.T) {
 	}
 }
 
+func TestService_CreateRepository_DefaultWorktreeBranchPrefix(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+
+	created, err := svc.CreateRepository(ctx, &CreateRepositoryRequest{
+		WorkspaceID: "ws-1",
+		Name:        "Test Repo",
+	})
+	if err != nil {
+		t.Fatalf("CreateRepository failed: %v", err)
+	}
+	if created.WorktreeBranchPrefix != worktree.DefaultBranchPrefix {
+		t.Fatalf("expected default prefix %q, got %q", worktree.DefaultBranchPrefix, created.WorktreeBranchPrefix)
+	}
+
+	stored, err := repo.GetRepository(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetRepository failed: %v", err)
+	}
+	if stored.WorktreeBranchPrefix != worktree.DefaultBranchPrefix {
+		t.Fatalf("expected stored prefix %q, got %q", worktree.DefaultBranchPrefix, stored.WorktreeBranchPrefix)
+	}
+}
+
 func TestService_GetTask(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()

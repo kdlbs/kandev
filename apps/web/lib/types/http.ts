@@ -62,6 +62,7 @@ export type Repository = {
   provider_owner: string;
   provider_name: string;
   default_branch: string;
+  worktree_branch_prefix: string;
   setup_script: string;
   cleanup_script: string;
   created_at: string;

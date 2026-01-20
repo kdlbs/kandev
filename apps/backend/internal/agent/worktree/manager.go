@@ -181,21 +181,26 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 func (m *Manager) createWorktree(ctx context.Context, req CreateRequest) (*Worktree, error) {
 	// Generate a unique worktree ID and random suffix
 	worktreeID := uuid.New().String()
-	suffix := worktreeID[:8] // Use first 8 chars of UUID as suffix
+	dirSuffix := worktreeID[:8] // Use first 8 chars of UUID for worktree dir uniqueness
+	branchSuffix := SmallSuffix(3)
+	prefix := NormalizeBranchPrefix(req.WorktreeBranchPrefix)
 
 	// Generate semantic name from task title if available
 	var worktreeDirName, branchName string
 	if req.TaskTitle != "" {
 		// Use semantic naming: {sanitized-title}_{suffix}
-		semanticName := SemanticWorktreeName(req.TaskTitle, suffix)
+		semanticName := SemanticWorktreeName(req.TaskTitle, dirSuffix)
 		worktreeDirName = semanticName
 		// For branch, use sanitized title (20 chars max) + suffix
 		sanitizedTitle := SanitizeForBranch(req.TaskTitle, 20)
-		branchName = m.config.SemanticBranchName(sanitizedTitle, suffix)
+		if sanitizedTitle == "" {
+			sanitizedTitle = SanitizeForBranch(req.TaskID, 20)
+		}
+		branchName = prefix + sanitizedTitle + "-" + branchSuffix
 	} else {
 		// Fallback to task ID based naming
-		worktreeDirName = req.TaskID + "_" + suffix
-		branchName = m.config.BranchName(req.TaskID, suffix)
+		worktreeDirName = req.TaskID + "_" + dirSuffix
+		branchName = prefix + SanitizeForBranch(req.TaskID, 20) + "-" + branchSuffix
 	}
 
 	worktreePath, err := m.config.WorktreePath(worktreeDirName)
@@ -241,13 +246,13 @@ func (m *Manager) createWorktree(ctx context.Context, req CreateRequest) (*Workt
 				zap.String("task_id", req.TaskID),
 				zap.String("worktree_id", wt.ID))
 		} else {
-		if err := m.store.CreateWorktree(ctx, wt); err != nil {
-			// Cleanup on failure
-			if cleanupErr := m.removeWorktreeDir(ctx, worktreePath, req.RepositoryPath); cleanupErr != nil {
-				m.logger.Warn("failed to cleanup worktree after persist failure", zap.Error(cleanupErr))
+			if err := m.store.CreateWorktree(ctx, wt); err != nil {
+				// Cleanup on failure
+				if cleanupErr := m.removeWorktreeDir(ctx, worktreePath, req.RepositoryPath); cleanupErr != nil {
+					m.logger.Warn("failed to cleanup worktree after persist failure", zap.Error(cleanupErr))
+				}
+				return nil, fmt.Errorf("failed to persist worktree: %w", err)
 			}
-			return nil, fmt.Errorf("failed to persist worktree: %w", err)
-		}
 		}
 	}
 
@@ -411,8 +416,6 @@ func (m *Manager) removeWorktree(ctx context.Context, wt *Worktree, removeBranch
 
 	return nil
 }
-
-
 
 // OnTaskDeleted cleans up all worktrees for a task when it is deleted.
 func (m *Manager) OnTaskDeleted(ctx context.Context, taskID string) error {

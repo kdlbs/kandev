@@ -253,16 +253,17 @@ type Repository struct {
 	// populated after the repo is cloned/synced on the agent host.
 	LocalPath string `json:"local_path"`
 	// Provider fields describe the upstream source (e.g. github/gitlab) for future syncing.
-	Provider       string     `json:"provider"`
-	ProviderRepoID string     `json:"provider_repo_id"`
-	ProviderOwner  string     `json:"provider_owner"`
-	ProviderName   string     `json:"provider_name"`
-	DefaultBranch  string     `json:"default_branch"`
-	SetupScript    string     `json:"setup_script"`
-	CleanupScript  string     `json:"cleanup_script"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
-	DeletedAt      *time.Time `json:"deleted_at,omitempty"`
+	Provider             string     `json:"provider"`
+	ProviderRepoID       string     `json:"provider_repo_id"`
+	ProviderOwner        string     `json:"provider_owner"`
+	ProviderName         string     `json:"provider_name"`
+	DefaultBranch        string     `json:"default_branch"`
+	WorktreeBranchPrefix string     `json:"worktree_branch_prefix"`
+	SetupScript          string     `json:"setup_script"`
+	CleanupScript        string     `json:"cleanup_script"`
+	CreatedAt            time.Time  `json:"created_at"`
+	UpdatedAt            time.Time  `json:"updated_at"`
+	DeletedAt            *time.Time `json:"deleted_at,omitempty"`
 }
 
 // RepositoryScript represents a custom script for a repository

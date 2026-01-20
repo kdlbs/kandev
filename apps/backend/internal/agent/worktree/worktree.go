@@ -70,6 +70,10 @@ type CreateRequest struct {
 	// Typically "main" or "master".
 	BaseBranch string
 
+	// WorktreeBranchPrefix is the prefix to use for the worktree branch name.
+	// If empty, the default prefix is used.
+	WorktreeBranchPrefix string
+
 	// WorktreeID is the ID of an existing worktree to reuse (optional).
 	// If provided and valid, the existing worktree is returned instead of creating a new one.
 	WorktreeID string

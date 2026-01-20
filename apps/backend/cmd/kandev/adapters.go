@@ -71,10 +71,11 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 		ACPSessionID:    req.ACPSessionID,
 		Metadata:        req.Metadata,
 		// Worktree configuration for concurrent agent execution
-		UseWorktree:    req.UseWorktree,
-		RepositoryID:   req.RepositoryID,
-		RepositoryPath: req.RepositoryPath,
-		BaseBranch:     req.BaseBranch,
+		UseWorktree:          req.UseWorktree,
+		RepositoryID:         req.RepositoryID,
+		RepositoryPath:       req.RepositoryPath,
+		BaseBranch:           req.BaseBranch,
+		WorktreeBranchPrefix: req.WorktreeBranchPrefix,
 	}
 
 	// Create the agentctl execution (does NOT start agent process)

@@ -41,17 +41,18 @@ func (c *RepositoryController) GetRepository(ctx context.Context, req dto.GetRep
 
 func (c *RepositoryController) CreateRepository(ctx context.Context, req dto.CreateRepositoryRequest) (dto.RepositoryDTO, error) {
 	repository, err := c.service.CreateRepository(ctx, &service.CreateRepositoryRequest{
-		WorkspaceID:    req.WorkspaceID,
-		Name:           req.Name,
-		SourceType:     req.SourceType,
-		LocalPath:      req.LocalPath,
-		Provider:       req.Provider,
-		ProviderRepoID: req.ProviderRepoID,
-		ProviderOwner:  req.ProviderOwner,
-		ProviderName:   req.ProviderName,
-		DefaultBranch:  req.DefaultBranch,
-		SetupScript:    req.SetupScript,
-		CleanupScript:  req.CleanupScript,
+		WorkspaceID:          req.WorkspaceID,
+		Name:                 req.Name,
+		SourceType:           req.SourceType,
+		LocalPath:            req.LocalPath,
+		Provider:             req.Provider,
+		ProviderRepoID:       req.ProviderRepoID,
+		ProviderOwner:        req.ProviderOwner,
+		ProviderName:         req.ProviderName,
+		DefaultBranch:        req.DefaultBranch,
+		WorktreeBranchPrefix: req.WorktreeBranchPrefix,
+		SetupScript:          req.SetupScript,
+		CleanupScript:        req.CleanupScript,
 	})
 	if err != nil {
 		return dto.RepositoryDTO{}, err
@@ -61,16 +62,17 @@ func (c *RepositoryController) CreateRepository(ctx context.Context, req dto.Cre
 
 func (c *RepositoryController) UpdateRepository(ctx context.Context, req dto.UpdateRepositoryRequest) (dto.RepositoryDTO, error) {
 	repository, err := c.service.UpdateRepository(ctx, req.ID, &service.UpdateRepositoryRequest{
-		Name:           req.Name,
-		SourceType:     req.SourceType,
-		LocalPath:      req.LocalPath,
-		Provider:       req.Provider,
-		ProviderRepoID: req.ProviderRepoID,
-		ProviderOwner:  req.ProviderOwner,
-		ProviderName:   req.ProviderName,
-		DefaultBranch:  req.DefaultBranch,
-		SetupScript:    req.SetupScript,
-		CleanupScript:  req.CleanupScript,
+		Name:                 req.Name,
+		SourceType:           req.SourceType,
+		LocalPath:            req.LocalPath,
+		Provider:             req.Provider,
+		ProviderRepoID:       req.ProviderRepoID,
+		ProviderOwner:        req.ProviderOwner,
+		ProviderName:         req.ProviderName,
+		DefaultBranch:        req.DefaultBranch,
+		WorktreeBranchPrefix: req.WorktreeBranchPrefix,
+		SetupScript:          req.SetupScript,
+		CleanupScript:        req.CleanupScript,
 	})
 	if err != nil {
 		return dto.RepositoryDTO{}, err

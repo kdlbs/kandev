@@ -116,6 +116,18 @@ export function RepositoryCard({
             />
           </div>
 
+          <div className="space-y-2">
+            <Label>Worktree Branch Prefix</Label>
+            <Input
+              value={repository.worktree_branch_prefix}
+              onChange={(e) => onUpdate(repository.id, { worktree_branch_prefix: e.target.value })}
+              placeholder="feature/"
+            />
+            <p className="text-xs text-muted-foreground">
+              Used for new worktree branches. Leave empty to use the default.
+            </p>
+          </div>
+
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
               <Label>Setup Script</Label>

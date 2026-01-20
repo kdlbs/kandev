@@ -90,31 +90,33 @@ type GetRepositoryRequest struct {
 }
 
 type CreateRepositoryRequest struct {
-	WorkspaceID    string
-	Name           string
-	SourceType     string
-	LocalPath      string
-	Provider       string
-	ProviderRepoID string
-	ProviderOwner  string
-	ProviderName   string
-	DefaultBranch  string
-	SetupScript    string
-	CleanupScript  string
+	WorkspaceID          string
+	Name                 string
+	SourceType           string
+	LocalPath            string
+	Provider             string
+	ProviderRepoID       string
+	ProviderOwner        string
+	ProviderName         string
+	DefaultBranch        string
+	WorktreeBranchPrefix string
+	SetupScript          string
+	CleanupScript        string
 }
 
 type UpdateRepositoryRequest struct {
-	ID             string
-	Name           *string
-	SourceType     *string
-	LocalPath      *string
-	Provider       *string
-	ProviderRepoID *string
-	ProviderOwner  *string
-	ProviderName   *string
-	DefaultBranch  *string
-	SetupScript    *string
-	CleanupScript  *string
+	ID                   string
+	Name                 *string
+	SourceType           *string
+	LocalPath            *string
+	Provider             *string
+	ProviderRepoID       *string
+	ProviderOwner        *string
+	ProviderName         *string
+	DefaultBranch        *string
+	WorktreeBranchPrefix *string
+	SetupScript          *string
+	CleanupScript        *string
 }
 
 type DeleteRepositoryRequest struct {
