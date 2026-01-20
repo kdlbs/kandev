@@ -139,16 +139,16 @@ const TaskTopBar = memo(function TaskTopBar({
   }, [handleGitOperation, push]);
 
   const handleRebase = useCallback(() => {
-    // Rebase onto the remote tracking branch or main
-    const targetBranch = gitStatus?.remote_branch || 'main';
+    // Rebase onto the base branch (e.g., origin/main)
+    const targetBranch = baseBranch || 'origin/main';
     handleGitOperation(() => rebase(targetBranch), 'Rebase');
-  }, [handleGitOperation, rebase, gitStatus?.remote_branch]);
+  }, [handleGitOperation, rebase, baseBranch]);
 
   const handleMerge = useCallback(() => {
-    // Merge from the remote tracking branch or main
-    const targetBranch = gitStatus?.remote_branch || 'main';
+    // Merge from the base branch (e.g., origin/main)
+    const targetBranch = baseBranch || 'origin/main';
     handleGitOperation(() => merge(targetBranch), 'Merge');
-  }, [handleGitOperation, merge, gitStatus?.remote_branch]);
+  }, [handleGitOperation, merge, baseBranch]);
 
   const handleOpenCommitDialog = useCallback(() => {
     setCommitMessage('');
@@ -452,7 +452,7 @@ const TaskTopBar = memo(function TaskTopBar({
               >
                 <IconGitCherryPick className="h-4 w-4 text-orange-500" />
                 <span className="flex-1">Rebase</span>
-                <span className="text-xs text-muted-foreground">onto {gitStatus?.remote_branch || 'main'}</span>
+                <span className="text-xs text-muted-foreground">onto {baseBranch || 'origin/main'}</span>
               </DropdownMenuItem>
               <DropdownMenuItem
                 className="cursor-pointer gap-3"
@@ -461,7 +461,7 @@ const TaskTopBar = memo(function TaskTopBar({
               >
                 <IconGitMerge className="h-4 w-4 text-purple-500" />
                 <span className="flex-1">Merge</span>
-                <span className="text-xs text-muted-foreground">from {gitStatus?.remote_branch || 'main'}</span>
+                <span className="text-xs text-muted-foreground">from {baseBranch || 'origin/main'}</span>
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
