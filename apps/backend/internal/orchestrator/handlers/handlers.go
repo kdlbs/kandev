@@ -38,6 +38,7 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionTaskExecution, h.wsGetTaskExecution)
 	d.RegisterFunc(ws.ActionTaskSessionResume, h.wsResumeTaskSession)
 	d.RegisterFunc(ws.ActionTaskSessionStatus, h.wsGetTaskSessionStatus)
+	d.RegisterFunc(ws.ActionAgentCancel, h.wsCancelAgent)
 }
 
 // WS handlers
@@ -318,6 +319,30 @@ func (h *Handlers) wsGetTaskSessionStatus(ctx context.Context, msg *ws.Message) 
 			zap.String("session_id", req.TaskSessionID),
 			zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get task session status: "+err.Error(), nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, resp)
+}
+
+type wsCancelAgentRequest struct {
+	SessionID string `json:"session_id"`
+}
+
+func (h *Handlers) wsCancelAgent(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req wsCancelAgentRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.SessionID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+	}
+
+	h.logger.Info("cancelling agent turn",
+		zap.String("session_id", req.SessionID))
+
+	resp, err := h.controller.CancelAgent(ctx, dto.CancelAgentRequest{SessionID: req.SessionID})
+	if err != nil {
+		h.logger.Error("failed to cancel agent", zap.String("session_id", req.SessionID), zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to cancel agent: "+err.Error(), nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }

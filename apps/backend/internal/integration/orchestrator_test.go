@@ -451,6 +451,13 @@ func (s *SimulatedAgentManagerClient) CleanupStaleExecutionBySessionID(ctx conte
 	return nil
 }
 
+// CancelAgent cancels the current agent turn for a session
+func (s *SimulatedAgentManagerClient) CancelAgent(ctx context.Context, sessionID string) error {
+	s.logger.Info("simulated: cancelling agent turn",
+		zap.String("session_id", sessionID))
+	return nil
+}
+
 // ============================================
 // ORCHESTRATOR TEST SERVER
 // ============================================

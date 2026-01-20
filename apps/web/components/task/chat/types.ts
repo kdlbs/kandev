@@ -14,6 +14,8 @@ export type StatusMetadata = {
   status?: string;
   stage?: string;
   message?: string;
+  variant?: 'default' | 'warning' | 'error';
+  cancelled?: boolean;
 };
 
 export type TodoMetadata =

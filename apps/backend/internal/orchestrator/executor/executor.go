@@ -51,6 +51,9 @@ type AgentManagerClient interface {
 	// Returns PromptResult indicating if the agent needs input
 	PromptAgent(ctx context.Context, agentExecutionID string, prompt string) (*PromptResult, error)
 
+	// CancelAgent interrupts the current agent turn without terminating the process.
+	CancelAgent(ctx context.Context, sessionID string) error
+
 	// RespondToPermission sends a response to a permission request
 	RespondToPermissionBySessionID(ctx context.Context, sessionID, pendingID, optionID string, cancelled bool) error
 
@@ -1006,6 +1009,13 @@ func (m *MockAgentManagerClient) RespondToPermissionBySessionID(ctx context.Cont
 		zap.String("pending_id", pendingID),
 		zap.String("option_id", optionID),
 		zap.Bool("cancelled", cancelled))
+	return nil
+}
+
+// CancelAgent mocks cancelling the current agent turn
+func (m *MockAgentManagerClient) CancelAgent(ctx context.Context, sessionID string) error {
+	m.logger.Info("mock: cancelling agent turn",
+		zap.String("session_id", sessionID))
 	return nil
 }
 

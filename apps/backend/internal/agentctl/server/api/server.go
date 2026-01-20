@@ -69,6 +69,7 @@ func (s *Server) setupRoutes() {
 		api.POST("/acp/session/new", s.handleACPNewSession)
 		api.POST("/acp/session/load", s.handleACPLoadSession)
 		api.POST("/acp/prompt", s.handleACPPrompt)
+		api.POST("/acp/cancel", s.handleACPCancel)
 		api.GET("/acp/stream", s.handleACPStreamWS)
 
 		// Permission request handling

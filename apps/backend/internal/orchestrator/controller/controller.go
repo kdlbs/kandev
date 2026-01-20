@@ -175,6 +175,18 @@ func (c *Controller) RespondToPermission(ctx context.Context, req dto.Permission
 	}, nil
 }
 
+// CancelAgent interrupts the current agent turn without terminating the process.
+func (c *Controller) CancelAgent(ctx context.Context, req dto.CancelAgentRequest) (dto.CancelAgentResponse, error) {
+	if err := c.service.CancelAgent(ctx, req.SessionID); err != nil {
+		return dto.CancelAgentResponse{}, err
+	}
+
+	return dto.CancelAgentResponse{
+		Success:   true,
+		SessionID: req.SessionID,
+	}, nil
+}
+
 // GetTaskExecution returns the execution state for a task
 func (c *Controller) GetTaskExecution(ctx context.Context, req dto.GetTaskExecutionRequest) (dto.TaskExecutionResponse, error) {
 	execution, exists := c.service.GetTaskExecution(req.TaskID)

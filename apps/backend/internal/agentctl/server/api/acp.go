@@ -319,3 +319,36 @@ func (s *Server) handlePermissionRespond(c *gin.Context) {
 	})
 }
 
+// CancelResponse is the response from a cancel request.
+type CancelResponse struct {
+	Success bool   `json:"success"`
+	Error   string `json:"error,omitempty"`
+}
+
+// handleACPCancel interrupts the current agent turn.
+func (s *Server) handleACPCancel(c *gin.Context) {
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+	defer cancel()
+
+	adapter := s.procMgr.GetAdapter()
+	if adapter == nil {
+		c.JSON(http.StatusServiceUnavailable, CancelResponse{
+			Success: false,
+			Error:   "agent not running",
+		})
+		return
+	}
+
+	if err := adapter.Cancel(ctx); err != nil {
+		s.logger.Error("cancel failed", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, CancelResponse{
+			Success: false,
+			Error:   err.Error(),
+		})
+		return
+	}
+
+	s.logger.Info("cancel completed")
+	c.JSON(http.StatusOK, CancelResponse{Success: true})
+}
+
