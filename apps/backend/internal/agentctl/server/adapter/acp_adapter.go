@@ -9,6 +9,7 @@ import (
 
 	"github.com/coder/acp-go-sdk"
 	acpclient "github.com/kandev/kandev/internal/agentctl/server/acp"
+	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/zap"
 )
@@ -108,7 +109,7 @@ func (a *ACPAdapter) GetAgentInfo() *AgentInfo {
 }
 
 // NewSession creates a new agent session.
-func (a *ACPAdapter) NewSession(ctx context.Context) (string, error) {
+func (a *ACPAdapter) NewSession(ctx context.Context, mcpServers []types.McpServer) (string, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -118,7 +119,7 @@ func (a *ACPAdapter) NewSession(ctx context.Context) (string, error) {
 
 	resp, err := a.acpConn.NewSession(ctx, acp.NewSessionRequest{
 		Cwd:        a.cfg.WorkDir,
-		McpServers: []acp.McpServer{},
+		McpServers: toACPMcpServers(mcpServers),
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to create session: %w", err)
@@ -128,6 +129,21 @@ func (a *ACPAdapter) NewSession(ctx context.Context) (string, error) {
 	a.logger.Info("created new session", zap.String("session_id", a.sessionID))
 
 	return a.sessionID, nil
+}
+
+func toACPMcpServers(servers []types.McpServer) []acp.McpServer {
+	if len(servers) == 0 {
+		return []acp.McpServer{}
+	}
+	out := make([]acp.McpServer, 0, len(servers))
+	for _, server := range servers {
+		out = append(out, acp.McpServer{
+			Name:    server.Name,
+			Command: server.Command,
+			Args:    append([]string{}, server.Args...),
+		})
+	}
+	return out
 }
 
 // LoadSession resumes an existing session.

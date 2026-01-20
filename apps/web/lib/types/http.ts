@@ -377,6 +377,29 @@ export type Agent = {
   updated_at: string;
 };
 
+export type McpServerType = 'stdio' | 'http' | 'sse' | 'streamable_http';
+export type McpServerMode = 'shared' | 'per_session' | 'auto';
+
+export type McpServerDef = {
+  type?: McpServerType;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  url?: string;
+  headers?: Record<string, string>;
+  mode?: McpServerMode;
+  meta?: Record<string, unknown>;
+  extra?: Record<string, unknown>;
+};
+
+export type AgentMcpConfig = {
+  agent_id: string;
+  agent_name: string;
+  enabled: boolean;
+  servers: Record<string, McpServerDef>;
+  meta?: Record<string, unknown>;
+};
+
 export type AgentDiscovery = {
   name: string;
   supports_mcp: boolean;

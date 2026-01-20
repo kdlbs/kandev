@@ -10,6 +10,7 @@ import (
 
 	"github.com/coder/acp-go-sdk"
 	"github.com/gorilla/websocket"
+	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"go.uber.org/zap"
 )
@@ -94,10 +95,11 @@ type NewSessionResponse struct {
 }
 
 // NewSession creates a new ACP session
-func (c *Client) NewSession(ctx context.Context, cwd string) (string, error) {
+func (c *Client) NewSession(ctx context.Context, cwd string, mcpServers []types.McpServer) (string, error) {
 	reqBody := struct {
-		Cwd string `json:"cwd"`
-	}{Cwd: cwd}
+		Cwd        string            `json:"cwd"`
+		McpServers []types.McpServer `json:"mcp_servers,omitempty"`
+	}{Cwd: cwd, McpServers: mcpServers}
 
 	body, err := json.Marshal(reqBody)
 	if err != nil {
@@ -356,7 +358,6 @@ func (c *Client) Cancel(ctx context.Context) error {
 	}
 	return nil
 }
-
 // RespondToPermission sends a response to a permission request
 func (c *Client) RespondToPermission(ctx context.Context, pendingID, optionID string, cancelled bool) error {
 	reqBody := PermissionRespondRequest{
@@ -404,5 +405,3 @@ func (c *Client) RespondToPermission(ctx context.Context, pendingID, optionID st
 	}
 	return nil
 }
-
-

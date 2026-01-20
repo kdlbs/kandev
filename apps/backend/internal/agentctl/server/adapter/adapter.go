@@ -27,14 +27,14 @@ type (
 
 // Re-export agent event type constants from streams package.
 const (
-	EventTypeMessageChunk       = streams.EventTypeMessageChunk
-	EventTypeReasoning          = streams.EventTypeReasoning
-	EventTypeToolCall           = streams.EventTypeToolCall
-	EventTypeToolUpdate         = streams.EventTypeToolUpdate
-	EventTypePlan               = streams.EventTypePlan
-	EventTypeComplete           = streams.EventTypeComplete
-	EventTypeError              = streams.EventTypeError
-	EventTypePermissionRequest  = streams.EventTypePermissionRequest
+	EventTypeMessageChunk      = streams.EventTypeMessageChunk
+	EventTypeReasoning         = streams.EventTypeReasoning
+	EventTypeToolCall          = streams.EventTypeToolCall
+	EventTypeToolUpdate        = streams.EventTypeToolUpdate
+	EventTypePlan              = streams.EventTypePlan
+	EventTypeComplete          = streams.EventTypeComplete
+	EventTypeError             = streams.EventTypeError
+	EventTypePermissionRequest = streams.EventTypePermissionRequest
 )
 
 // AgentInfo contains information about the connected agent.
@@ -57,7 +57,7 @@ type AgentAdapter interface {
 	GetAgentInfo() *AgentInfo
 
 	// NewSession creates a new agent session and returns the session ID.
-	NewSession(ctx context.Context) (string, error)
+	NewSession(ctx context.Context, mcpServers []types.McpServer) (string, error)
 
 	// LoadSession resumes an existing session by ID.
 	LoadSession(ctx context.Context, sessionID string) error
@@ -110,4 +110,3 @@ type Config struct {
 	// Protocol-specific configuration
 	Extra map[string]string
 }
-

@@ -183,7 +183,7 @@ func newTestManager() *lifecycle.Manager {
 	credsMgr := &MockCredentialsManager{}
 	profileResolver := &MockProfileResolver{}
 	// Pass nil for runtime and containerManager - tests don't need them
-	return lifecycle.NewManager(reg, eventBus, nil, nil, credsMgr, profileResolver, log)
+	return lifecycle.NewManager(reg, eventBus, nil, nil, credsMgr, profileResolver, nil, log)
 }
 
 func TestWsShellStatus_NoInstanceFound(t *testing.T) {

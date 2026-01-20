@@ -8,9 +8,10 @@ import (
 
 	"go.uber.org/zap"
 
-	agentctl "github.com/kandev/kandev/internal/agentctl/client"
-	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/agent/registry"
+	agentctl "github.com/kandev/kandev/internal/agentctl/client"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -58,6 +59,7 @@ func (sm *SessionManager) InitializeSession(
 	agentConfig *registry.AgentTypeConfig,
 	existingSessionID string,
 	workspacePath string,
+	mcpServers []agentctltypes.McpServer,
 ) (*InitializeResult, error) {
 	sm.logger.Info("initializing ACP session",
 		zap.String("agent_type", agentConfig.ID),
@@ -92,7 +94,7 @@ func (sm *SessionManager) InitializeSession(
 		zap.String("agent_version", result.AgentVersion))
 
 	// Step 2: Create or resume ACP session based on configuration
-	sessionID, err := sm.createOrLoadSession(ctx, client, agentConfig, existingSessionID, workspacePath)
+	sessionID, err := sm.createOrLoadSession(ctx, client, agentConfig, existingSessionID, workspacePath, mcpServers)
 	if err != nil {
 		return nil, err
 	}
@@ -108,11 +110,12 @@ func (sm *SessionManager) createOrLoadSession(
 	agentConfig *registry.AgentTypeConfig,
 	existingSessionID string,
 	workspacePath string,
+	mcpServers []agentctltypes.McpServer,
 ) (string, error) {
 	if agentConfig.SessionConfig.ResumeViaACP && existingSessionID != "" {
 		return sm.loadSession(ctx, client, agentConfig, existingSessionID)
 	}
-	return sm.createNewSession(ctx, client, agentConfig, workspacePath)
+	return sm.createNewSession(ctx, client, agentConfig, workspacePath, mcpServers)
 }
 
 // loadSession loads an existing session via ACP session/load
@@ -147,12 +150,13 @@ func (sm *SessionManager) createNewSession(
 	client *agentctl.Client,
 	agentConfig *registry.AgentTypeConfig,
 	workspacePath string,
+	mcpServers []agentctltypes.McpServer,
 ) (string, error) {
 	sm.logger.Info("sending ACP session/new request",
 		zap.String("agent_type", agentConfig.ID),
 		zap.String("workspace_path", workspacePath))
 
-	sessionID, err := client.NewSession(ctx, workspacePath)
+	sessionID, err := client.NewSession(ctx, workspacePath, mcpServers)
 	if err != nil {
 		sm.logger.Error("ACP session/new failed",
 			zap.String("agent_type", agentConfig.ID),
@@ -182,6 +186,7 @@ func (sm *SessionManager) InitializeAndPrompt(
 	execution *AgentExecution,
 	agentConfig *registry.AgentTypeConfig,
 	taskDescription string,
+	mcpServers []agentctltypes.McpServer,
 	markReady func(executionID string) error,
 ) error {
 	sm.logger.Info("initializing ACP session",
@@ -198,6 +203,7 @@ func (sm *SessionManager) InitializeAndPrompt(
 		agentConfig,
 		execution.ACPSessionID,
 		execution.WorkspacePath,
+		mcpServers,
 	)
 	if err != nil {
 		sm.logger.Error("session initialization failed",

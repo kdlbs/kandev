@@ -9,6 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/credentials"
 	"github.com/kandev/kandev/internal/agent/docker"
 	"github.com/kandev/kandev/internal/agent/lifecycle"
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/registry"
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	agentctl "github.com/kandev/kandev/internal/agentctl/client"
@@ -74,7 +75,8 @@ func provideLifecycleManager(
 		}
 	}
 
-	lifecycleMgr := lifecycle.NewManager(agentRegistry, eventBus, agentRuntime, containerMgr, credsMgr, profileResolver, log)
+	mcpService := mcpconfig.NewService(agentSettingsRepo)
+	lifecycleMgr := lifecycle.NewManager(agentRegistry, eventBus, agentRuntime, containerMgr, credsMgr, profileResolver, mcpService, log)
 	if err := lifecycleMgr.Start(ctx); err != nil {
 		return nil, nil, err
 	}

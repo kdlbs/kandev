@@ -44,7 +44,7 @@
         ]
       },
       "discovery": {
-        "supports_mcp": false,
+        "supports_mcp": true,
         "mcp_config_path": {
           "linux": [],
           "windows": [],
@@ -199,4 +199,3 @@
     }
   ]
 }
-

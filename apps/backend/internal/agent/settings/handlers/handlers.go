@@ -2,9 +2,11 @@ package handlers
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/settings/controller"
 	"github.com/kandev/kandev/internal/common/logger"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -46,6 +48,8 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api.POST("/agents/:id/profiles", h.httpCreateProfile)
 	api.PATCH("/agent-profiles/:id", h.httpUpdateProfile)
 	api.DELETE("/agent-profiles/:id", h.httpDeleteProfile)
+	api.GET("/mcp-config", h.httpGetMcpConfig)
+	api.POST("/mcp-config", h.httpUpdateMcpConfig)
 }
 
 func (h *Handlers) httpDiscoverAgents(c *gin.Context) {
@@ -191,6 +195,77 @@ func (h *Handlers) httpDeleteAgent(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+type updateMcpConfigRequest struct {
+	Enabled *bool                          `json:"enabled"`
+	Servers map[string]mcpconfig.ServerDef `json:"servers"`
+	Meta    map[string]any                 `json:"meta,omitempty"`
+}
+
+func (h *Handlers) httpGetMcpConfig(c *gin.Context) {
+	agentName := strings.TrimSpace(c.Query("agent"))
+	if agentName == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "agent is required"})
+		return
+	}
+
+	resp, err := h.controller.GetAgentMcpConfig(c.Request.Context(), agentName)
+	if err != nil {
+		if err == controller.ErrAgentNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "agent not found"})
+			return
+		}
+		if err == controller.ErrAgentMcpUnsupported {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "mcp not supported by agent"})
+			return
+		}
+		h.logger.Error("failed to get mcp config", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get mcp config"})
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+func (h *Handlers) httpUpdateMcpConfig(c *gin.Context) {
+	agentName := strings.TrimSpace(c.Query("agent"))
+	if agentName == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "agent is required"})
+		return
+	}
+
+	var body updateMcpConfigRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	if body.Enabled == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "enabled is required"})
+		return
+	}
+	if body.Servers == nil {
+		body.Servers = map[string]mcpconfig.ServerDef{}
+	}
+
+	resp, err := h.controller.UpdateAgentMcpConfig(c.Request.Context(), agentName, controller.UpdateAgentMcpConfigRequest{
+		Enabled: *body.Enabled,
+		Servers: body.Servers,
+		Meta:    body.Meta,
+	})
+	if err != nil {
+		if err == controller.ErrAgentNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "agent not found"})
+			return
+		}
+		if err == controller.ErrAgentMcpUnsupported {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "mcp not supported by agent"})
+			return
+		}
+		h.logger.Error("failed to update mcp config", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update mcp config"})
+		return
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
 type createProfileRequest struct {

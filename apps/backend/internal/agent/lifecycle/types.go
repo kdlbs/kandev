@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentctl "github.com/kandev/kandev/internal/agentctl/client"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -111,6 +112,11 @@ type AgentProfileInfo struct {
 // ProfileResolver resolves agent profile IDs to profile information
 type ProfileResolver interface {
 	ResolveProfile(ctx context.Context, profileID string) (*AgentProfileInfo, error)
+}
+
+// McpConfigProvider returns MCP configuration for a given agent name.
+type McpConfigProvider interface {
+	GetConfigByAgentName(ctx context.Context, agentName string) (*mcpconfig.AgentConfig, error)
 }
 
 // WorkspaceInfo contains information about a task's workspace for on-demand execution creation

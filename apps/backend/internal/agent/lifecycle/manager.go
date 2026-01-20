@@ -14,9 +14,11 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/worktree"
 	agentctl "github.com/kandev/kandev/internal/agentctl/client"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
@@ -31,6 +33,7 @@ type Manager struct {
 	credsMgr        CredentialsManager
 	profileResolver ProfileResolver
 	worktreeMgr     *worktree.Manager
+	mcpProvider     McpConfigProvider
 	logger          *logger.Logger
 
 	// Agent runtime abstraction (Docker, Standalone, K8s, SSH, etc.)
@@ -63,6 +66,7 @@ func NewManager(
 	containerManager *ContainerManager,
 	credsMgr CredentialsManager,
 	profileResolver ProfileResolver,
+	mcpProvider McpConfigProvider,
 	log *logger.Logger,
 ) *Manager {
 	componentLogger := log.WithFields(zap.String("component", "lifecycle-manager"))
@@ -85,6 +89,7 @@ func NewManager(
 		runtime:          runtime,
 		credsMgr:         credsMgr,
 		profileResolver:  profileResolver,
+		mcpProvider:      mcpProvider,
 		logger:           componentLogger,
 		executionStore:   executionStore,
 		commandBuilder:   commandBuilder,
@@ -563,8 +568,14 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) err
 		return fmt.Errorf("failed to get agent config: %w", err)
 	}
 
+	mcpServers, err := m.resolveMcpServers(ctx, agentConfig)
+	if err != nil {
+		m.updateExecutionError(executionID, "failed to resolve MCP config: "+err.Error())
+		return fmt.Errorf("failed to resolve MCP config: %w", err)
+	}
+
 	// Initialize ACP session
-	if err := m.initializeACPSession(ctx, execution, agentConfig, taskDescription); err != nil {
+	if err := m.initializeACPSession(ctx, execution, agentConfig, taskDescription, mcpServers); err != nil {
 		m.updateExecutionError(executionID, "failed to initialize ACP: "+err.Error())
 		return fmt.Errorf("failed to initialize ACP: %w", err)
 	}
@@ -700,9 +711,54 @@ func (m *Manager) getAgentConfigForExecution(execution *AgentExecution) (*regist
 	return agentConfig, nil
 }
 
+func (m *Manager) resolveMcpServers(ctx context.Context, agentConfig *registry.AgentTypeConfig) ([]agentctltypes.McpServer, error) {
+	if m.mcpProvider == nil || agentConfig == nil {
+		return nil, nil
+	}
+
+	agentName := strings.TrimSuffix(agentConfig.ID, "-agent")
+	if agentName == "" {
+		return nil, nil
+	}
+
+	config, err := m.mcpProvider.GetConfigByAgentName(ctx, agentName)
+	if err != nil {
+		if errors.Is(err, mcpconfig.ErrAgentMcpUnsupported) || errors.Is(err, mcpconfig.ErrAgentNotFound) {
+			return nil, nil
+		}
+		m.logger.Warn("failed to load MCP config",
+			zap.String("agent_name", agentName),
+			zap.Error(err))
+		return nil, err
+	}
+	if config == nil || !config.Enabled {
+		return nil, nil
+	}
+
+	policy := mcpconfig.DefaultPolicyForRuntime(runtimeName(m.runtime))
+	resolved, warnings, err := mcpconfig.Resolve(config, policy)
+	if err != nil {
+		return nil, err
+	}
+	for _, warning := range warnings {
+		m.logger.Warn("mcp config warning",
+			zap.String("agent_name", agentName),
+			zap.String("warning", warning))
+	}
+
+	return mcpconfig.ToACPServers(resolved), nil
+}
+
+func runtimeName(rt Runtime) string {
+	if rt == nil {
+		return ""
+	}
+	return rt.Name()
+}
+
 // initializeACPSession delegates to SessionManager for full ACP session initialization and prompting
-func (m *Manager) initializeACPSession(ctx context.Context, execution *AgentExecution, agentConfig *registry.AgentTypeConfig, taskDescription string) error {
-	return m.sessionManager.InitializeAndPrompt(ctx, execution, agentConfig, taskDescription, m.MarkReady)
+func (m *Manager) initializeACPSession(ctx context.Context, execution *AgentExecution, agentConfig *registry.AgentTypeConfig, taskDescription string, mcpServers []agentctltypes.McpServer) error {
+	return m.sessionManager.InitializeAndPrompt(ctx, execution, agentConfig, taskDescription, mcpServers, m.MarkReady)
 }
 
 // emitSessionStatusEvent emits a session_status event indicating whether the session was resumed or new.

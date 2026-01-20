@@ -139,7 +139,7 @@ func (a *CodexAdapter) GetAgentInfo() *AgentInfo {
 }
 
 // NewSession creates a new Codex thread (session).
-func (a *CodexAdapter) NewSession(ctx context.Context) (string, error) {
+func (a *CodexAdapter) NewSession(ctx context.Context, _ []types.McpServer) (string, error) {
 	// Check client under lock, but don't hold lock during Call() to avoid deadlock
 	// with handleNotification which also needs the lock
 	a.mu.RLock()

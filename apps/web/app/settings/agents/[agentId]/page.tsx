@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { IconPlus } from '@tabler/icons-react';
@@ -24,10 +24,12 @@ import {
   createAgentAction,
   createAgentProfileAction,
   deleteAgentProfileAction,
+  getAgentMcpConfigAction,
   updateAgentAction,
+  updateAgentMcpConfigAction,
   updateAgentProfileAction,
 } from '@/app/actions/agents';
-import type { Agent, AgentDiscovery, AgentProfile } from '@/lib/types/http';
+import type { Agent, AgentDiscovery, AgentMcpConfig, AgentProfile, McpServerDef } from '@/lib/types/http';
 import { generateUUID } from '@/lib/utils';
 import { useAppStore } from '@/components/state-provider';
 import { useAvailableAgents } from '@/hooks/use-available-agents';
@@ -86,6 +88,12 @@ function AgentSetupForm({
   const availableAgents = useAvailableAgents().items;
   const [draftAgent, setDraftAgent] = useState<DraftAgent>(initialAgent);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [mcpConfig, setMcpConfig] = useState<AgentMcpConfig | null>(null);
+  const [mcpEnabled, setMcpEnabled] = useState(false);
+  const [mcpServers, setMcpServers] = useState('{}');
+  const [mcpError, setMcpError] = useState<string | null>(null);
+  const [mcpDirty, setMcpDirty] = useState(false);
+  const [mcpStatus, setMcpStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const resolveDisplayName = (name: string) =>
     availableAgents.find((item) => item.name === name)?.display_name ?? '';
 
@@ -94,6 +102,42 @@ function AgentSetupForm({
     const agent = availableAgents.find((item) => item.name === draftAgent.name);
     return agent?.model_config ?? { default_model: '', available_models: [] };
   }, [availableAgents, draftAgent.name]);
+
+  useEffect(() => {
+    let active = true;
+    if (!draftAgent.supports_mcp) {
+      setMcpConfig(null);
+      setMcpEnabled(false);
+      setMcpServers('{}');
+      setMcpDirty(false);
+      setMcpError(null);
+      setMcpStatus('idle');
+      return () => {
+        active = false;
+      };
+    }
+
+    setMcpStatus('loading');
+    getAgentMcpConfigAction(draftAgent.name)
+      .then((config) => {
+        if (!active) return;
+        setMcpConfig(config);
+        setMcpEnabled(config.enabled);
+        setMcpServers(JSON.stringify(config.servers ?? {}, null, 2));
+        setMcpDirty(false);
+        setMcpError(null);
+        setMcpStatus('idle');
+      })
+      .catch((error) => {
+        if (!active) return;
+        setMcpError(error instanceof Error ? error.message : 'Failed to load MCP config');
+        setMcpStatus('error');
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [draftAgent.name, draftAgent.supports_mcp]);
 
   const isProfileDirty = (draft: DraftProfile, saved?: AgentProfile) => {
     if (!saved) return true;
@@ -170,8 +214,56 @@ function AgentSetupForm({
     }));
   };
 
-  const handleAgentFieldChange = (patch: Partial<DraftAgent>) => {
-    setDraftAgent((current) => ({ ...current, ...patch }));
+  const handleMcpServersChange = (value: string) => {
+    setMcpServers(value);
+    setMcpDirty(true);
+    if (!value.trim()) {
+      setMcpError(null);
+      return;
+    }
+    try {
+      const parsed = JSON.parse(value);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        setMcpError(null);
+      } else {
+        setMcpError('MCP servers config must be a JSON object');
+      }
+    } catch (error) {
+      setMcpError('Invalid JSON');
+    }
+  };
+
+  const handleSaveMcp = async () => {
+    setMcpStatus('loading');
+    let servers: Record<string, McpServerDef> = {};
+    try {
+      const parsed = mcpServers.trim() ? JSON.parse(mcpServers) : {};
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('MCP servers config must be a JSON object');
+      }
+      servers = parsed as Record<string, McpServerDef>;
+    } catch (error) {
+      setMcpStatus('error');
+      setMcpError(error instanceof Error ? error.message : 'Invalid MCP config');
+      return;
+    }
+
+    try {
+      const updated = await updateAgentMcpConfigAction(draftAgent.name, {
+        enabled: mcpEnabled,
+        servers,
+        meta: mcpConfig?.meta ?? {},
+      });
+      setMcpConfig(updated);
+      setMcpEnabled(updated.enabled);
+      setMcpServers(JSON.stringify(updated.servers ?? {}, null, 2));
+      setMcpDirty(false);
+      setMcpError(null);
+      setMcpStatus('success');
+    } catch (error) {
+      setMcpStatus('error');
+      onToastError(error);
+    }
   };
 
   const handleSave = async () => {
@@ -292,17 +384,6 @@ function AgentSetupForm({
           </Button>
         </CardHeader>
         <CardContent className="space-y-4">
-          {draftAgent.supports_mcp && (
-            <div className="space-y-2">
-              <Label htmlFor="mcp-config-path">MCP Config Path</Label>
-              <Input
-                id="mcp-config-path"
-                value={draftAgent.mcp_config_path ?? ''}
-                onChange={(event) => handleAgentFieldChange({ mcp_config_path: event.target.value })}
-                placeholder="~/.copilot/mcp-config.json"
-              />
-            </div>
-          )}
           {draftAgent.profiles.map((profile) => (
             <Card key={profile.id} className="border-muted">
               <CardContent className="pt-6 space-y-4">
@@ -409,6 +490,57 @@ function AgentSetupForm({
           />
         </div>
       </Card>
+
+      {draftAgent.supports_mcp && (
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <div className="flex items-center gap-2">
+              <CardTitle>MCP Configuration</CardTitle>
+              {mcpDirty && <UnsavedChangesBadge />}
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center justify-between rounded-md border p-3">
+              <div className="space-y-1">
+                <Label>Enable MCP</Label>
+                <p className="text-xs text-muted-foreground">
+                  Allow this agent to use MCP servers during sessions.
+                </p>
+              </div>
+              <Switch
+                checked={mcpEnabled}
+                onCheckedChange={(checked) => {
+                  setMcpEnabled(checked);
+                  setMcpDirty(true);
+                }}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="mcp-servers">MCP servers (JSON)</Label>
+              <Textarea
+                id="mcp-servers"
+                className="min-h-[200px] font-mono text-xs"
+                value={mcpServers}
+                onChange={(event) => handleMcpServersChange(event.target.value)}
+                placeholder='{\"example\": {\"type\": \"stdio\", \"command\": \"npx\", \"args\": [\"-y\", \"tool\"], \"mode\": \"per_session\"}}'
+              />
+              <p className="text-xs text-muted-foreground">
+                Server definitions are stored centrally and resolved per executor at runtime.
+              </p>
+              {mcpError && <p className="text-sm text-destructive">{mcpError}</p>}
+            </div>
+          </CardContent>
+          <div className="flex justify-end px-6 pb-6">
+            <UnsavedSaveButton
+              isDirty={mcpDirty}
+              isLoading={mcpStatus === 'loading'}
+              status={mcpStatus}
+              onClick={handleSaveMcp}
+            />
+          </div>
+        </Card>
+      )}
     </div>
   );
 }

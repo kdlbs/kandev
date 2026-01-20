@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -45,6 +46,16 @@ func (r *sqliteRepository) initSchema() error {
 		mcp_config_path TEXT DEFAULT '',
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS agent_mcp_configs (
+		agent_id TEXT PRIMARY KEY,
+		enabled INTEGER NOT NULL DEFAULT 0,
+		servers_json TEXT NOT NULL DEFAULT '{}',
+		meta_json TEXT NOT NULL DEFAULT '{}',
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL,
+		FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
 	);
 
 	CREATE TABLE IF NOT EXISTS agent_profiles (
@@ -165,6 +176,67 @@ func (r *sqliteRepository) ListAgents(ctx context.Context) ([]*models.Agent, err
 		result = append(result, agent)
 	}
 	return result, rows.Err()
+}
+
+func (r *sqliteRepository) GetAgentMcpConfig(ctx context.Context, agentID string) (*models.AgentMcpConfig, error) {
+	row := r.db.QueryRowContext(ctx, `
+		SELECT agent_id, enabled, servers_json, meta_json, created_at, updated_at
+		FROM agent_mcp_configs
+		WHERE agent_id = ?
+	`, agentID)
+
+	var config models.AgentMcpConfig
+	var enabled int
+	var serversJSON string
+	var metaJSON string
+	if err := row.Scan(&config.AgentID, &enabled, &serversJSON, &metaJSON, &config.CreatedAt, &config.UpdatedAt); err != nil {
+		return nil, err
+	}
+	config.Enabled = enabled == 1
+	if err := json.Unmarshal([]byte(serversJSON), &config.Servers); err != nil {
+		return nil, fmt.Errorf("failed to parse MCP servers JSON: %w", err)
+	}
+	if err := json.Unmarshal([]byte(metaJSON), &config.Meta); err != nil {
+		return nil, fmt.Errorf("failed to parse MCP meta JSON: %w", err)
+	}
+	return &config, nil
+}
+
+func (r *sqliteRepository) UpsertAgentMcpConfig(ctx context.Context, config *models.AgentMcpConfig) error {
+	if config.AgentID == "" {
+		return fmt.Errorf("agent ID is required")
+	}
+	if config.Servers == nil {
+		config.Servers = map[string]interface{}{}
+	}
+	if config.Meta == nil {
+		config.Meta = map[string]interface{}{}
+	}
+	now := time.Now().UTC()
+	if config.CreatedAt.IsZero() {
+		config.CreatedAt = now
+	}
+	config.UpdatedAt = now
+
+	serversJSON, err := json.Marshal(config.Servers)
+	if err != nil {
+		return fmt.Errorf("failed to serialize MCP servers: %w", err)
+	}
+	metaJSON, err := json.Marshal(config.Meta)
+	if err != nil {
+		return fmt.Errorf("failed to serialize MCP meta: %w", err)
+	}
+
+	_, err = r.db.ExecContext(ctx, `
+		INSERT INTO agent_mcp_configs (agent_id, enabled, servers_json, meta_json, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(agent_id) DO UPDATE SET
+			enabled = excluded.enabled,
+			servers_json = excluded.servers_json,
+			meta_json = excluded.meta_json,
+			updated_at = excluded.updated_at
+	`, config.AgentID, boolToInt(config.Enabled), string(serversJSON), string(metaJSON), config.CreatedAt, config.UpdatedAt)
+	return err
 }
 
 func (r *sqliteRepository) CreateAgentProfile(ctx context.Context, profile *models.AgentProfile) error {

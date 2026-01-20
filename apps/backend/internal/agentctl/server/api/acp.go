@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	"github.com/kandev/kandev/internal/agentctl/types"
 	"go.uber.org/zap"
 )
 
@@ -79,7 +80,8 @@ func (s *Server) handleACPInitialize(c *gin.Context) {
 
 // NewSessionRequest is a request to create a new ACP session
 type NewSessionRequest struct {
-	Cwd string `json:"cwd"` // Working directory for the session
+	Cwd        string            `json:"cwd"` // Working directory for the session
+	McpServers []types.McpServer `json:"mcp_servers,omitempty"`
 }
 
 // NewSessionResponse is the response to a new session call
@@ -111,7 +113,7 @@ func (s *Server) handleACPNewSession(c *gin.Context) {
 		return
 	}
 
-	sessionID, err := adapter.NewSession(ctx)
+	sessionID, err := adapter.NewSession(ctx, req.McpServers)
 	if err != nil {
 		s.logger.Error("new session failed", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, NewSessionResponse{
@@ -318,7 +320,6 @@ func (s *Server) handlePermissionRespond(c *gin.Context) {
 		Success: true,
 	})
 }
-
 // CancelResponse is the response from a cancel request.
 type CancelResponse struct {
 	Success bool   `json:"success"`
@@ -351,4 +352,3 @@ func (s *Server) handleACPCancel(c *gin.Context) {
 	s.logger.Info("cancel completed")
 	c.JSON(http.StatusOK, CancelResponse{Success: true})
 }
-

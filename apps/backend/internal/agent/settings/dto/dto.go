@@ -1,6 +1,10 @@
 package dto
 
-import "time"
+import (
+	"time"
+
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
+)
 
 type AgentProfileDTO struct {
 	ID                         string    `json:"id"`
@@ -80,4 +84,12 @@ type AvailableAgentDTO struct {
 type ListAvailableAgentsResponse struct {
 	Agents []AvailableAgentDTO `json:"agents"`
 	Total  int                 `json:"total"`
+}
+
+type AgentMcpConfigDTO struct {
+	AgentID   string                         `json:"agent_id"`
+	AgentName string                         `json:"agent_name"`
+	Enabled   bool                           `json:"enabled"`
+	Servers   map[string]mcpconfig.ServerDef `json:"servers"`
+	Meta      map[string]any                 `json:"meta,omitempty"`
 }
