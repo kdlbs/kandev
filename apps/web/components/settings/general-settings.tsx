@@ -37,11 +37,10 @@ export function GeneralSettings() {
       >
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Theme</CardTitle>
+            <CardTitle className="text-base">Color Theme</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="space-y-2">
-              <Label htmlFor="theme">Color Theme</Label>
               <Select value={themeValue} onValueChange={(value) => setTheme(value as Theme)}>
                 <SelectTrigger id="theme">
                   <SelectValue />

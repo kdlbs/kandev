@@ -34,7 +34,6 @@ const KANBAN_PREVIEW_KEYS = {
   OPEN: 'kandev.kanban.preview.open',
   WIDTH: 'kandev.kanban.preview.width',
   SELECTED_TASK: 'kandev.kanban.preview.selectedTask',
-  ENABLE_PREVIEW_ON_CLICK: 'kandev.kanban.preview.enablePreviewOnClick',
 } as const;
 
 // Kanban preview state type
@@ -42,7 +41,6 @@ export interface KanbanPreviewState {
   isOpen: boolean;
   previewWidthPx: number;
   selectedTaskId: string | null;
-  enablePreviewOnClick: boolean;
 }
 
 /**
@@ -55,7 +53,6 @@ export function getKanbanPreviewState(defaults: KanbanPreviewState): KanbanPrevi
     isOpen: getLocalStorage(KANBAN_PREVIEW_KEYS.OPEN, defaults.isOpen),
     previewWidthPx: getLocalStorage(KANBAN_PREVIEW_KEYS.WIDTH, defaults.previewWidthPx),
     selectedTaskId: getLocalStorage(KANBAN_PREVIEW_KEYS.SELECTED_TASK, defaults.selectedTaskId),
-    enablePreviewOnClick: getLocalStorage(KANBAN_PREVIEW_KEYS.ENABLE_PREVIEW_ON_CLICK, defaults.enablePreviewOnClick),
   };
 }
 
@@ -76,8 +73,5 @@ export function setKanbanPreviewState(state: Partial<KanbanPreviewState>): void 
     } else {
       setLocalStorage(KANBAN_PREVIEW_KEYS.SELECTED_TASK, state.selectedTaskId);
     }
-  }
-  if (state.enablePreviewOnClick !== undefined) {
-    setLocalStorage(KANBAN_PREVIEW_KEYS.ENABLE_PREVIEW_ON_CLICK, state.enablePreviewOnClick);
   }
 }

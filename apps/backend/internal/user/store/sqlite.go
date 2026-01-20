@@ -158,6 +158,7 @@ func (r *sqliteRepository) UpsertUserSettings(ctx context.Context, settings *mod
 		"initial_setup_complete": settings.InitialSetupComplete,
 		"preferred_shell":        settings.PreferredShell,
 		"default_editor_id":      settings.DefaultEditorID,
+		"enable_preview_on_click": settings.EnablePreviewOnClick,
 	})
 	if err != nil {
 		return err
@@ -202,6 +203,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		InitialSetupComplete bool     `json:"initial_setup_complete"`
 		PreferredShell       string   `json:"preferred_shell"`
 		DefaultEditorID      string   `json:"default_editor_id"`
+		EnablePreviewOnClick bool     `json:"enable_preview_on_click"`
 	}
 	if err := json.Unmarshal([]byte(settingsRaw), &payload); err != nil {
 		return nil, err
@@ -212,5 +214,6 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	settings.InitialSetupComplete = payload.InitialSetupComplete
 	settings.PreferredShell = payload.PreferredShell
 	settings.DefaultEditorID = payload.DefaultEditorID
+	settings.EnablePreviewOnClick = payload.EnablePreviewOnClick
 	return settings, nil
 }

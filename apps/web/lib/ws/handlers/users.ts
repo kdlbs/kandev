@@ -15,6 +15,7 @@ export function registerUsersHandlers(store: StoreApi<AppState>): WsHandlers {
           preferredShell: message.payload.preferred_shell || null,
           shellOptions: state.userSettings.shellOptions ?? [],
           defaultEditorId: message.payload.default_editor_id || null,
+          enablePreviewOnClick: message.payload.enable_preview_on_click ?? false,
           loaded: true,
         },
       }));

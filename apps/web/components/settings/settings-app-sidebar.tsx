@@ -9,7 +9,6 @@ import {
   IconRobot,
   IconBell,
   IconCode,
-  IconChevronRight,
   IconCpu,
   IconMessageCircle,
 } from '@tabler/icons-react';
@@ -25,11 +24,9 @@ import {
   SidebarMenuSub,
   SidebarMenuSubItem,
   SidebarMenuSubButton,
-  SidebarMenuAction,
   SidebarHeader,
 } from '@kandev/ui/sidebar';
 import { ScrollArea } from '@kandev/ui/scroll-area';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@kandev/ui/collapsible';
 import { useAppStore } from '@/components/state-provider';
 import { useAvailableAgents } from '@/hooks/use-available-agents';
 

@@ -29,6 +29,7 @@ export default async function Page({ searchParams }: PageProps) {
     const settingsWorkspaceId = userSettings?.workspace_id || null;
     const settingsBoardId = userSettings?.board_id || null;
     const settingsRepositoryIds = Array.from(new Set(userSettings?.repository_ids ?? [])).sort();
+    const settingsEnablePreviewOnClick = userSettings?.enable_preview_on_click ?? false;
     const activeWorkspaceId =
       workspaces.workspaces.find((workspace) => workspace.id === workspaceId)?.id ??
       workspaces.workspaces.find((workspace) => workspace.id === settingsWorkspaceId)?.id ??
@@ -56,6 +57,7 @@ export default async function Page({ searchParams }: PageProps) {
         preferredShell: userSettings?.preferred_shell || null,
         shellOptions: userSettingsResponse?.shell_options ?? [],
         defaultEditorId: userSettings?.default_editor_id || null,
+        enablePreviewOnClick: settingsEnablePreviewOnClick,
         loaded: Boolean(userSettings),
       },
     };

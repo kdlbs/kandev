@@ -21,6 +21,7 @@ type UserSettingsDTO struct {
 	InitialSetupComplete bool     `json:"initial_setup_complete"`
 	PreferredShell       string   `json:"preferred_shell"`
 	DefaultEditorID      string   `json:"default_editor_id"`
+	EnablePreviewOnClick bool     `json:"enable_preview_on_click"`
 	UpdatedAt            string   `json:"updated_at"`
 }
 
@@ -46,6 +47,7 @@ type UpdateUserSettingsRequest struct {
 	InitialSetupComplete *bool     `json:"initial_setup_complete,omitempty"`
 	PreferredShell       *string   `json:"preferred_shell,omitempty"`
 	DefaultEditorID      *string   `json:"default_editor_id,omitempty"`
+	EnablePreviewOnClick *bool     `json:"enable_preview_on_click,omitempty"`
 }
 
 func FromUser(user *models.User) UserDTO {
@@ -66,6 +68,7 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		InitialSetupComplete: settings.InitialSetupComplete,
 		PreferredShell:       settings.PreferredShell,
 		DefaultEditorID:      settings.DefaultEditorID,
+		EnablePreviewOnClick: settings.EnablePreviewOnClick,
 		UpdatedAt:            settings.UpdatedAt.Format(time.RFC3339),
 	}
 }

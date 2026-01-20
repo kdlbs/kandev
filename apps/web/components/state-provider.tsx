@@ -10,6 +10,7 @@ const StoreContext = createContext<StoreApi<AppState> | null>(null);
 
 export function StateProvider({ children, initialState }: StoreProviderProps) {
   const [store] = useState(() => createAppStore(initialState));
+
   return <StoreContext.Provider value={store}>{children}</StoreContext.Provider>;
 }
 

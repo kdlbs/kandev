@@ -12,6 +12,7 @@ type DisplaySettings = {
   preferredShell: string | null;
   shellOptions: Array<{ value: string; label: string }>;
   defaultEditorId: string | null;
+  enablePreviewOnClick: boolean;
   loaded: boolean;
 };
 
@@ -27,6 +28,7 @@ type CommitPayload = {
   boardId: string | null;
   repositoryIds: string[];
   preferredShell?: string | null;
+  enablePreviewOnClick?: boolean;
 };
 
 export function useUserDisplaySettings({
@@ -42,6 +44,7 @@ export function useUserDisplaySettings({
   const commitSettings = useCallback(
     (next: CommitPayload) => {
       const repositoryIds = Array.from(new Set(next.repositoryIds)).sort();
+      const enablePreviewOnClick = next.enablePreviewOnClick ?? userSettings.enablePreviewOnClick;
       const normalized: DisplaySettings = {
         workspaceId: next.workspaceId,
         boardId: next.boardId,
@@ -49,14 +52,16 @@ export function useUserDisplaySettings({
         preferredShell: next.preferredShell ?? userSettings.preferredShell ?? null,
         shellOptions: userSettings.shellOptions ?? [],
         defaultEditorId: userSettings.defaultEditorId ?? null,
+        enablePreviewOnClick,
         loaded: true,
       };
       const sameWorkspace = normalized.workspaceId === userSettings.workspaceId;
       const sameBoard = normalized.boardId === userSettings.boardId;
+      const samePreview = normalized.enablePreviewOnClick === userSettings.enablePreviewOnClick;
       const sameRepos =
         normalized.repositoryIds.length === userSettings.repositoryIds.length &&
         normalized.repositoryIds.every((id, index) => id === userSettings.repositoryIds[index]);
-      if (sameWorkspace && sameBoard && sameRepos && userSettings.loaded) {
+      if (sameWorkspace && sameBoard && sameRepos && samePreview && userSettings.loaded) {
         return;
       }
       setUserSettings(normalized);
@@ -64,6 +69,7 @@ export function useUserDisplaySettings({
         workspace_id: normalized.workspaceId ?? '',
         board_id: normalized.boardId ?? '',
         repository_ids: normalized.repositoryIds,
+        enable_preview_on_click: normalized.enablePreviewOnClick,
       };
       const client = getWebSocketClient();
       if (!client) {
@@ -73,7 +79,10 @@ export function useUserDisplaySettings({
         return;
       }
       client.request('user.settings.update', payload).catch(() => {
-        // Ignore update errors for now; local state stays responsive.
+        // Fall back to HTTP if WS update fails (e.g. navigation races).
+        updateUserSettings(payload, { cache: 'no-store' }).catch(() => {
+          // Ignore update errors for now; local state stays responsive.
+        });
       });
     },
     [setUserSettings, userSettings]
@@ -92,6 +101,7 @@ export function useUserDisplaySettings({
           preferredShell: data.settings.preferred_shell || null,
           shellOptions: data.shell_options ?? [],
           defaultEditorId: data.settings.default_editor_id || null,
+          enablePreviewOnClick: data.settings.enable_preview_on_click ?? false,
           loaded: true,
         });
       })

@@ -17,39 +17,25 @@ import {
   SelectValue,
 } from '@kandev/ui/select';
 import { IconAdjustmentsHorizontal } from '@tabler/icons-react';
-import type { Repository } from '@/lib/types/http';
+import { useKanbanDisplaySettings } from '@/hooks/use-kanban-display-settings';
 
-type KanbanDisplayDropdownProps = {
-  workspaces: Array<{ id: string; name: string }>;
-  boards: Array<{ id: string; workspaceId: string; name: string }>;
-  activeWorkspaceId: string | null;
-  activeBoardId: string | null;
-  repositories: Repository[];
-  repositoriesLoading: boolean;
-  allRepositoriesSelected: boolean;
-  selectedRepositoryId: string | null;
-  enablePreviewOnClick?: boolean;
-  onWorkspaceChange: (workspaceId: string | null) => void;
-  onBoardChange: (boardId: string | null) => void;
-  onRepositoryChange: (repositoryId: string | 'all') => void;
-  onTogglePreviewOnClick?: (enabled: boolean) => void;
-};
+export function KanbanDisplayDropdown() {
+  const {
+    workspaces,
+    boards,
+    activeWorkspaceId,
+    activeBoardId,
+    repositories,
+    repositoriesLoading,
+    allRepositoriesSelected,
+    selectedRepositoryId,
+    enablePreviewOnClick,
+    onWorkspaceChange,
+    onBoardChange,
+    onRepositoryChange,
+    onTogglePreviewOnClick,
+  } = useKanbanDisplaySettings();
 
-export function KanbanDisplayDropdown({
-  workspaces,
-  boards,
-  activeWorkspaceId,
-  activeBoardId,
-  repositories,
-  repositoriesLoading,
-  allRepositoriesSelected,
-  selectedRepositoryId,
-  enablePreviewOnClick,
-  onWorkspaceChange,
-  onBoardChange,
-  onRepositoryChange,
-  onTogglePreviewOnClick,
-}: KanbanDisplayDropdownProps) {
   const repositoryValue = allRepositoriesSelected ? 'all' : selectedRepositoryId ?? 'all';
 
   return (

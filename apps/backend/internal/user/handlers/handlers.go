@@ -70,6 +70,7 @@ type httpUpdateUserSettingsRequest struct {
 	InitialSetupComplete *bool     `json:"initial_setup_complete,omitempty"`
 	PreferredShell       *string   `json:"preferred_shell,omitempty"`
 	DefaultEditorID      *string   `json:"default_editor_id,omitempty"`
+	EnablePreviewOnClick *bool     `json:"enable_preview_on_click,omitempty"`
 }
 
 func (h *Handlers) httpUpdateUserSettings(c *gin.Context) {
@@ -85,6 +86,7 @@ func (h *Handlers) httpUpdateUserSettings(c *gin.Context) {
 		InitialSetupComplete: body.InitialSetupComplete,
 		PreferredShell:       body.PreferredShell,
 		DefaultEditorID:      body.DefaultEditorID,
+		EnablePreviewOnClick: body.EnablePreviewOnClick,
 	})
 	if err != nil {
 		h.logger.Error("failed to update user settings", zap.Error(err))
@@ -109,6 +111,7 @@ type wsUpdateUserSettingsRequest struct {
 	InitialSetupComplete *bool     `json:"initial_setup_complete,omitempty"`
 	PreferredShell       *string   `json:"preferred_shell,omitempty"`
 	DefaultEditorID      *string   `json:"default_editor_id,omitempty"`
+	EnablePreviewOnClick *bool     `json:"enable_preview_on_click,omitempty"`
 }
 
 func (h *Handlers) wsUpdateUserSettings(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -123,6 +126,7 @@ func (h *Handlers) wsUpdateUserSettings(ctx context.Context, msg *ws.Message) (*
 		InitialSetupComplete: req.InitialSetupComplete,
 		PreferredShell:       req.PreferredShell,
 		DefaultEditorID:      req.DefaultEditorID,
+		EnablePreviewOnClick: req.EnablePreviewOnClick,
 	})
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update user settings", nil)

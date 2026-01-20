@@ -1,9 +1,11 @@
 'use client';
 
+import { useMemo } from 'react';
 import { useDroppable } from '@dnd-kit/core';
 import { KanbanCard, Task } from './kanban-card';
 import { Badge } from '@kandev/ui/badge';
-import { cn } from '@/lib/utils';
+import { cn, getRepositoryDisplayName } from '@/lib/utils';
+import { useAppStore } from '@/components/state-provider';
 
 export interface Column {
   id: string;
@@ -25,6 +27,20 @@ export function KanbanColumn({ column, tasks, onPreviewTask, onOpenTask, onEditT
   const { setNodeRef, isOver } = useDroppable({
     id: column.id,
   });
+
+  // Access repositories from store to pass repository names to cards
+  const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
+  const repositories = useMemo(
+    () => Object.values(repositoriesByWorkspace).flat(),
+    [repositoriesByWorkspace]
+  );
+
+  // Helper function to get repository name for a task
+  const getRepositoryName = (repositoryId?: string): string | null => {
+    if (!repositoryId) return null;
+    const repository = repositories.find((repo) => repo.id === repositoryId);
+    return repository ? getRepositoryDisplayName(repository.local_path) : null;
+  };
 
   return (
     <div
@@ -54,6 +70,7 @@ export function KanbanColumn({ column, tasks, onPreviewTask, onOpenTask, onEditT
             <KanbanCard
               key={task.id}
               task={task}
+              repositoryName={getRepositoryName(task.repositoryId)}
               onClick={onPreviewTask}
               onOpenFullPage={onOpenTask}
               onEdit={onEditTask}
