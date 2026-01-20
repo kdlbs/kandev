@@ -16,6 +16,11 @@ func Resolve(config *AgentConfig, policy Policy) ([]ResolvedServer, []string, er
 	resolved := make([]ResolvedServer, 0, len(config.Servers))
 
 	for name, server := range config.Servers {
+		if !policyAllowsServerName(policy, name) {
+			warnings = append(warnings, fmt.Sprintf("mcp server %q skipped: server not allowed by policy", name))
+			continue
+		}
+
 		serverType := normalizeServerType(server)
 		if serverType == "" {
 			warnings = append(warnings, fmt.Sprintf("mcp server %q skipped: missing type", name))
@@ -32,7 +37,7 @@ func Resolve(config *AgentConfig, policy Policy) ([]ResolvedServer, []string, er
 		}
 
 		if serverType == ServerTypeStdio && mode == ServerModeShared {
-			return nil, warnings, fmt.Errorf("mcp server %q: shared mode with stdio requires proxy", name)
+			return nil, warnings, fmt.Errorf("mcp server %q: shared mode requires HTTP/SSE/streamable HTTP transport (stdio is per-session only)", name)
 		}
 
 		if !policyAllows(policy, serverType) {
@@ -106,6 +111,25 @@ func policyAllows(policy Policy, serverType ServerType) bool {
 	default:
 		return false
 	}
+}
+
+func policyAllowsServerName(policy Policy, name string) bool {
+	if len(policy.AllowlistServers) > 0 && !containsString(policy.AllowlistServers, name) {
+		return false
+	}
+	if len(policy.DenylistServers) > 0 && containsString(policy.DenylistServers, name) {
+		return false
+	}
+	return true
+}
+
+func containsString(list []string, value string) bool {
+	for _, item := range list {
+		if item == value {
+			return true
+		}
+	}
+	return false
 }
 
 func cloneStringMap(src map[string]string) map[string]string {

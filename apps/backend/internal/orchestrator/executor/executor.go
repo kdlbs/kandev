@@ -232,8 +232,8 @@ func (e *Executor) ExecuteWithProfile(ctx context.Context, task *v1.Task, agentP
 		AgentProfileID:  agentProfileID,
 		TaskDescription: prompt, // Use the provided prompt
 		Priority:        task.Priority,
-		Metadata:        task.Metadata,
 	}
+	metadata := cloneMetadata(task.Metadata)
 	var repositoryPath string
 	var repositoryID string
 	var baseBranch string
@@ -300,6 +300,10 @@ func (e *Executor) ExecuteWithProfile(ctx context.Context, task *v1.Task, agentP
 		StartedAt:      now,
 		UpdatedAt:      now,
 	}
+	if executorID := e.defaultExecutorID(ctx, task.WorkspaceID); executorID != "" {
+		session.ExecutorID = executorID
+		metadata = e.applyExecutorMetadata(ctx, metadata, executorID)
+	}
 
 	if err := e.repo.CreateTaskSession(ctx, session); err != nil {
 		e.logger.Error("failed to persist agent session before launch",
@@ -309,6 +313,9 @@ func (e *Executor) ExecuteWithProfile(ctx context.Context, task *v1.Task, agentP
 	}
 
 	req.SessionID = sessionID
+	if len(metadata) > 0 {
+		req.Metadata = metadata
+	}
 
 	e.logger.Info("launching agent for task",
 		zap.String("task_id", task.ID),
@@ -486,6 +493,12 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 	if len(session.Worktrees) > 0 && session.Worktrees[0].WorktreeID != "" {
 		metadata["worktree_id"] = session.Worktrees[0].WorktreeID
 	}
+	if session.ExecutorID == "" {
+		if executorID := e.defaultExecutorID(ctx, task.WorkspaceID); executorID != "" {
+			session.ExecutorID = executorID
+		}
+	}
+	metadata = e.applyExecutorMetadata(ctx, metadata, session.ExecutorID)
 	if len(metadata) > 0 {
 		req.Metadata = metadata
 	}
@@ -922,6 +935,46 @@ func (e *Executor) MarkCompletedBySession(ctx context.Context, sessionID string,
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 	}
+}
+
+func (e *Executor) defaultExecutorID(ctx context.Context, workspaceID string) string {
+	if workspaceID == "" {
+		return ""
+	}
+	workspace, err := e.repo.GetWorkspace(ctx, workspaceID)
+	if err != nil || workspace == nil || workspace.DefaultExecutorID == nil {
+		return ""
+	}
+	return strings.TrimSpace(*workspace.DefaultExecutorID)
+}
+
+func (e *Executor) applyExecutorMetadata(ctx context.Context, metadata map[string]interface{}, executorID string) map[string]interface{} {
+	if executorID == "" {
+		return metadata
+	}
+	if metadata == nil {
+		metadata = map[string]interface{}{}
+	}
+	metadata["executor_id"] = executorID
+	executor, err := e.repo.GetExecutor(ctx, executorID)
+	if err != nil || executor == nil {
+		return metadata
+	}
+	if policyJSON := strings.TrimSpace(executor.Config["mcp_policy"]); policyJSON != "" {
+		metadata["executor_mcp_policy"] = policyJSON
+	}
+	return metadata
+}
+
+func cloneMetadata(src map[string]interface{}) map[string]interface{} {
+	if len(src) == 0 {
+		return nil
+	}
+	out := make(map[string]interface{}, len(src))
+	for key, value := range src {
+		out[key] = value
+	}
+	return out
 }
 
 // MockAgentManagerClient is a placeholder implementation

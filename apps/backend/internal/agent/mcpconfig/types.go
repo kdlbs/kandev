@@ -56,4 +56,6 @@ type Policy struct {
 	AllowStreamableHTTP bool
 	URLRewrite          map[string]string
 	EnvInjection        map[string]string
+	AllowlistServers    []string
+	DenylistServers     []string
 }

@@ -10,5 +10,7 @@ func DefaultPolicyForRuntime(runtimeName string) Policy {
 		AllowStreamableHTTP: true,
 		URLRewrite:          map[string]string{},
 		EnvInjection:        map[string]string{},
+		AllowlistServers:    nil,
+		DenylistServers:     nil,
 	}
 }

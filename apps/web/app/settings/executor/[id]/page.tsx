@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@kand
 import { Input } from '@kandev/ui/input';
 import { Label } from '@kandev/ui/label';
 import { Separator } from '@kandev/ui/separator';
+import { Textarea } from '@kandev/ui/textarea';
 import {
   Dialog,
   DialogContent,
@@ -195,6 +196,31 @@ function ExecutorEditForm({ executor }: ExecutorEditFormProps) {
           </CardContent>
         </Card>
       )}
+
+      <Card>
+        <CardHeader>
+          <CardTitle>MCP Policy</CardTitle>
+          <CardDescription>JSON policy overrides for MCP servers on this executor.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          <Label htmlFor="mcp-policy">MCP policy JSON</Label>
+          <Textarea
+            id="mcp-policy"
+            value={draft.config?.mcp_policy ?? ''}
+            onChange={(event) =>
+              setDraft({
+                ...draft,
+                config: { ...(draft.config ?? {}), mcp_policy: event.target.value },
+              })
+            }
+            placeholder='{"allow_stdio":true,"allow_http":true,"allowlist_servers":["github"],"url_rewrite":{"http://localhost:3000":"http://mcp-svc:3000"}}'
+            rows={8}
+          />
+          <p className="text-xs text-muted-foreground">
+            Leave empty to use the default policy for the runtime.
+          </p>
+        </CardContent>
+      </Card>
 
       <Separator />
 

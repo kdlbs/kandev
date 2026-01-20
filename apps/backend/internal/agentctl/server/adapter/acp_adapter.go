@@ -138,9 +138,11 @@ func toACPMcpServers(servers []types.McpServer) []acp.McpServer {
 	out := make([]acp.McpServer, 0, len(servers))
 	for _, server := range servers {
 		out = append(out, acp.McpServer{
-			Name:    server.Name,
-			Command: server.Command,
-			Args:    append([]string{}, server.Args...),
+			Stdio: &acp.McpServerStdio{
+				Name:    server.Name,
+				Command: server.Command,
+				Args:    append([]string{}, server.Args...),
+			},
 		})
 	}
 	return out

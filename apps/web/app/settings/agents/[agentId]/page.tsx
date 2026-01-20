@@ -228,7 +228,7 @@ function AgentSetupForm({
       } else {
         setMcpError('MCP servers config must be a JSON object');
       }
-    } catch (error) {
+    } catch {
       setMcpError('Invalid JSON');
     }
   };

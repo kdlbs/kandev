@@ -568,7 +568,7 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) err
 		return fmt.Errorf("failed to get agent config: %w", err)
 	}
 
-	mcpServers, err := m.resolveMcpServers(ctx, agentConfig)
+	mcpServers, err := m.resolveMcpServers(ctx, execution, agentConfig)
 	if err != nil {
 		m.updateExecutionError(executionID, "failed to resolve MCP config: "+err.Error())
 		return fmt.Errorf("failed to resolve MCP config: %w", err)
@@ -711,7 +711,7 @@ func (m *Manager) getAgentConfigForExecution(execution *AgentExecution) (*regist
 	return agentConfig, nil
 }
 
-func (m *Manager) resolveMcpServers(ctx context.Context, agentConfig *registry.AgentTypeConfig) ([]agentctltypes.McpServer, error) {
+func (m *Manager) resolveMcpServers(ctx context.Context, execution *AgentExecution, agentConfig *registry.AgentTypeConfig) ([]agentctltypes.McpServer, error) {
 	if m.mcpProvider == nil || agentConfig == nil {
 		return nil, nil
 	}
@@ -736,6 +736,25 @@ func (m *Manager) resolveMcpServers(ctx context.Context, agentConfig *registry.A
 	}
 
 	policy := mcpconfig.DefaultPolicyForRuntime(runtimeName(m.runtime))
+	executorID := ""
+	if execution != nil && execution.Metadata != nil {
+		if value, ok := execution.Metadata["executor_id"].(string); ok {
+			executorID = value
+		}
+		if value, ok := execution.Metadata["executor_mcp_policy"]; ok {
+			updated, policyWarnings, err := mcpconfig.ApplyExecutorPolicy(policy, value)
+			if err != nil {
+				return nil, fmt.Errorf("invalid executor MCP policy: %w", err)
+			}
+			policy = updated
+			for _, warning := range policyWarnings {
+				m.logger.Warn("mcp policy warning",
+					zap.String("agent_name", agentName),
+					zap.String("executor_id", executorID),
+					zap.String("warning", warning))
+			}
+		}
+	}
 	resolved, warnings, err := mcpconfig.Resolve(config, policy)
 	if err != nil {
 		return nil, err
@@ -743,6 +762,7 @@ func (m *Manager) resolveMcpServers(ctx context.Context, agentConfig *registry.A
 	for _, warning := range warnings {
 		m.logger.Warn("mcp config warning",
 			zap.String("agent_name", agentName),
+			zap.String("executor_id", executorID),
 			zap.String("warning", warning))
 	}
 

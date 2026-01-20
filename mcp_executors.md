@@ -1,11 +1,11 @@
-# MCP Executors: Policies + Shared STDIO Proxy (LLD)
+# MCP Executors: Policies + Shared MCP (HTTP/SSE Only)
 
 ## Purpose
-Design executor-specific MCP policy resolution and a shared stdio MCP proxy for Kandev. This document provides low‑level implementation details and communication diagrams to be executed by another model.
+Design executor-specific MCP policy resolution and shared MCP behavior for Kandev. This document provides low‑level implementation details and communication diagrams to be executed by another model.
 
 ## Scope
 - Executor‑specific MCP allowlists, denylists, transport permissions, and URL rewrites.
-- Shared MCP proxy for stdio servers (so a single instance can be shared across sessions).
+- Shared MCP usage for transports that support multiple clients (HTTP/SSE/streamable HTTP).
 - Integration points in existing Kandev backend lifecycle + agentctl + web UI.
 
 ---
@@ -36,7 +36,7 @@ ExecutorMcpPolicy {
 
 **Storage**
 - Persist in `Executor.Config` (currently `map[string]string`).
-- Migrate to `map[string]any` (or keep `map[string]string` but JSON-encode `mcp_policy` as a string). Recommended: `map[string]any`.
+- Store `mcp_policy` as a JSON string in the config map.
 
 ### Backend Changes
 1) **Models**
