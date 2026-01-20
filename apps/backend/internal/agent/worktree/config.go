@@ -1,6 +1,8 @@
 package worktree
 
 import (
+	"crypto/rand"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -23,11 +25,12 @@ type Config struct {
 	MaxPerRepo int `mapstructure:"max_per_repo"`
 
 	// BranchPrefix is the prefix used for worktree branch names.
-	// Default: kandev/
+	// Default: feature/
 	BranchPrefix string `mapstructure:"branch_prefix"`
 }
 
-
+// DefaultBranchPrefix is used when no repository-specific prefix is provided.
+const DefaultBranchPrefix = "feature/"
 
 // Validate validates the configuration and returns an error if invalid.
 func (c *Config) Validate() error {
@@ -35,7 +38,7 @@ func (c *Config) Validate() error {
 		c.MaxPerRepo = 10
 	}
 	if c.BranchPrefix == "" {
-		c.BranchPrefix = "kandev/"
+		c.BranchPrefix = DefaultBranchPrefix
 	}
 	if c.BasePath == "" {
 		c.BasePath = "~/.kandev/worktrees"
@@ -66,15 +69,15 @@ func (c *Config) WorktreePath(worktreeID string) (string, error) {
 }
 
 // BranchName returns the branch name for a given task ID and suffix.
-// Format: {prefix}{taskID}_{suffix} e.g. kandev/abc123_xy7z
+// Format: {prefix}{taskID}-{suffix} e.g. feature/abc123-xyz
 func (c *Config) BranchName(taskID, suffix string) string {
-	return c.BranchPrefix + taskID + "_" + suffix
+	return c.BranchPrefix + taskID + "-" + suffix
 }
 
 // SemanticBranchName returns a branch name using a semantic name derived from task title.
-// Format: {prefix}{semanticName}_{suffix} e.g. kandev/fix-login-bug_ab12cd34
+// Format: {prefix}{semanticName}-{suffix} e.g. feature/fix-login-bug-abc
 func (c *Config) SemanticBranchName(semanticName, suffix string) string {
-	return c.BranchPrefix + semanticName + "_" + suffix
+	return c.BranchPrefix + semanticName + "-" + suffix
 }
 
 // SanitizeForBranch converts a task title into a valid git branch name component.
@@ -122,6 +125,53 @@ func SanitizeForBranch(title string, maxLen int) string {
 	return result
 }
 
+// NormalizeBranchPrefix trims and falls back to the default prefix.
+func NormalizeBranchPrefix(prefix string) string {
+	trimmed := strings.TrimSpace(prefix)
+	if trimmed == "" {
+		return DefaultBranchPrefix
+	}
+	return trimmed
+}
+
+// ValidateBranchPrefix ensures a prefix contains only safe branch characters.
+func ValidateBranchPrefix(prefix string) error {
+	trimmed := strings.TrimSpace(prefix)
+	if trimmed == "" {
+		return nil
+	}
+	for _, r := range trimmed {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '/' || r == '-' || r == '_' || r == '.' {
+			continue
+		}
+		return fmt.Errorf("invalid branch prefix")
+	}
+	if strings.Contains(trimmed, "..") || strings.Contains(trimmed, "@{") {
+		return fmt.Errorf("invalid branch prefix")
+	}
+	return nil
+}
+
+const branchSuffixAlphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
+
+// SmallSuffix returns a random suffix capped at 3 characters.
+func SmallSuffix(maxLen int) string {
+	if maxLen <= 0 {
+		return ""
+	}
+	if maxLen > 3 {
+		maxLen = 3
+	}
+	buf := make([]byte, maxLen)
+	if _, err := rand.Read(buf); err != nil {
+		return strings.Repeat("x", maxLen)
+	}
+	for i := range buf {
+		buf[i] = branchSuffixAlphabet[int(buf[i])%len(branchSuffixAlphabet)]
+	}
+	return string(buf)
+}
+
 // SemanticWorktreeName generates a semantic worktree directory name from a task title.
 // Format: {sanitizedTitle}_{suffix} e.g. fix-login-bug_ab12cd34
 // The title is truncated to 20 characters before adding the suffix.
@@ -133,4 +183,3 @@ func SemanticWorktreeName(taskTitle, suffix string) string {
 	}
 	return semanticName + "_" + suffix
 }
-

@@ -618,13 +618,14 @@ func (m *Manager) getOrCreateWorktree(ctx context.Context, req *LaunchRequest) (
 
 	// Create request with optional WorktreeID for resumption
 	createReq := worktree.CreateRequest{
-		TaskID:         req.TaskID,
-		SessionID:      req.SessionID,
-		TaskTitle:      req.TaskTitle,
-		RepositoryID:   req.RepositoryID,
-		RepositoryPath: req.RepositoryPath,
-		BaseBranch:     req.BaseBranch,
-		WorktreeID:     worktreeID, // If set, will try to reuse this worktree
+		TaskID:               req.TaskID,
+		SessionID:            req.SessionID,
+		TaskTitle:            req.TaskTitle,
+		RepositoryID:         req.RepositoryID,
+		RepositoryPath:       req.RepositoryPath,
+		BaseBranch:           req.BaseBranch,
+		WorktreeBranchPrefix: req.WorktreeBranchPrefix,
+		WorktreeID:           worktreeID, // If set, will try to reuse this worktree
 	}
 
 	wt, err := m.worktreeMgr.Create(ctx, createReq)

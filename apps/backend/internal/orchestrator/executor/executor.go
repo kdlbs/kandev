@@ -81,10 +81,11 @@ type LaunchAgentRequest struct {
 	ACPSessionID    string // ACP session ID to resume, if available
 
 	// Worktree configuration for concurrent agent execution
-	UseWorktree    bool   // Whether to use a Git worktree for isolation
-	RepositoryID   string // Repository ID for worktree tracking
-	RepositoryPath string // Path to the main repository (for worktree creation)
-	BaseBranch     string // Base branch for the worktree (e.g., "main")
+	UseWorktree          bool   // Whether to use a Git worktree for isolation
+	RepositoryID         string // Repository ID for worktree tracking
+	RepositoryPath       string // Path to the main repository (for worktree creation)
+	BaseBranch           string // Base branch for the worktree (e.g., "main")
+	WorktreeBranchPrefix string // Branch prefix for worktree branches
 }
 
 // LaunchAgentResponse contains the result of launching an agent
@@ -233,6 +234,7 @@ func (e *Executor) ExecuteWithProfile(ctx context.Context, task *v1.Task, agentP
 	var repositoryPath string
 	var repositoryID string
 	var baseBranch string
+	var worktreeBranchPrefix string
 
 	// Get the primary repository for this task
 	primaryTaskRepo, err := e.repo.GetPrimaryTaskRepository(ctx, task.ID)
@@ -256,6 +258,7 @@ func (e *Executor) ExecuteWithProfile(ctx context.Context, task *v1.Task, agentP
 			return nil, err
 		}
 		repositoryPath = repository.LocalPath
+		worktreeBranchPrefix = repository.WorktreeBranchPrefix
 		if repositoryPath != "" {
 			req.RepositoryURL = repositoryPath
 		}
@@ -277,6 +280,7 @@ func (e *Executor) ExecuteWithProfile(ctx context.Context, task *v1.Task, agentP
 		} else {
 			req.BaseBranch = "main"
 		}
+		req.WorktreeBranchPrefix = worktreeBranchPrefix
 	}
 
 	// Create agent session in database before launch so worktree associations can persist.

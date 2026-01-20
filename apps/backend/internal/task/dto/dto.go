@@ -41,20 +41,21 @@ type ColumnDTO struct {
 }
 
 type RepositoryDTO struct {
-	ID             string    `json:"id"`
-	WorkspaceID    string    `json:"workspace_id"`
-	Name           string    `json:"name"`
-	SourceType     string    `json:"source_type"`
-	LocalPath      string    `json:"local_path,omitempty"`
-	Provider       string    `json:"provider,omitempty"`
-	ProviderRepoID string    `json:"provider_repo_id,omitempty"`
-	ProviderOwner  string    `json:"provider_owner,omitempty"`
-	ProviderName   string    `json:"provider_name,omitempty"`
-	DefaultBranch  string    `json:"default_branch,omitempty"`
-	SetupScript    string    `json:"setup_script,omitempty"`
-	CleanupScript  string    `json:"cleanup_script,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID                   string    `json:"id"`
+	WorkspaceID          string    `json:"workspace_id"`
+	Name                 string    `json:"name"`
+	SourceType           string    `json:"source_type"`
+	LocalPath            string    `json:"local_path"`
+	Provider             string    `json:"provider"`
+	ProviderRepoID       string    `json:"provider_repo_id"`
+	ProviderOwner        string    `json:"provider_owner"`
+	ProviderName         string    `json:"provider_name"`
+	DefaultBranch        string    `json:"default_branch"`
+	WorktreeBranchPrefix string    `json:"worktree_branch_prefix"`
+	SetupScript          string    `json:"setup_script"`
+	CleanupScript        string    `json:"cleanup_script"`
+	CreatedAt            time.Time `json:"created_at"`
+	UpdatedAt            time.Time `json:"updated_at"`
 }
 
 type RepositoryScriptDTO struct {
@@ -293,20 +294,21 @@ func FromColumn(column *models.Column) ColumnDTO {
 
 func FromRepository(repository *models.Repository) RepositoryDTO {
 	return RepositoryDTO{
-		ID:             repository.ID,
-		WorkspaceID:    repository.WorkspaceID,
-		Name:           repository.Name,
-		SourceType:     repository.SourceType,
-		LocalPath:      repository.LocalPath,
-		Provider:       repository.Provider,
-		ProviderRepoID: repository.ProviderRepoID,
-		ProviderOwner:  repository.ProviderOwner,
-		ProviderName:   repository.ProviderName,
-		DefaultBranch:  repository.DefaultBranch,
-		SetupScript:    repository.SetupScript,
-		CleanupScript:  repository.CleanupScript,
-		CreatedAt:      repository.CreatedAt,
-		UpdatedAt:      repository.UpdatedAt,
+		ID:                   repository.ID,
+		WorkspaceID:          repository.WorkspaceID,
+		Name:                 repository.Name,
+		SourceType:           repository.SourceType,
+		LocalPath:            repository.LocalPath,
+		Provider:             repository.Provider,
+		ProviderRepoID:       repository.ProviderRepoID,
+		ProviderOwner:        repository.ProviderOwner,
+		ProviderName:         repository.ProviderName,
+		DefaultBranch:        repository.DefaultBranch,
+		WorktreeBranchPrefix: repository.WorktreeBranchPrefix,
+		SetupScript:          repository.SetupScript,
+		CleanupScript:        repository.CleanupScript,
+		CreatedAt:            repository.CreatedAt,
+		UpdatedAt:            repository.UpdatedAt,
 	}
 }
 
