@@ -196,7 +196,7 @@ func LoadWithPath(configPath string) (*Config, error) {
 	// Explicit bindings for snake_case env vars (camelCase config keys)
 	// AutomaticEnv does not handle camelCase to SNAKE_CASE conversion,
 	// so we explicitly bind keys where env var naming differs from config key naming.
-	_ = v.BindEnv("agent.standalonePort", "KANDEV_AGENT_STANDALONE_PORT")
+	_ = v.BindEnv("agent.standalonePort", "AGENTCTL_PORT", "KANDEV_AGENT_STANDALONE_PORT")
 	_ = v.BindEnv("agent.standaloneHost", "KANDEV_AGENT_STANDALONE_HOST")
 
 	// Configure config file

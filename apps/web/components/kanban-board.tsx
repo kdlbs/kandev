@@ -304,6 +304,7 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
                 description: editingTask.description,
                 columnId: editingTask.columnId,
                 state: editingTask.state as BackendTask['state'],
+                repositoryId: editingTask.repositoryId,
               }
             : null
         }
@@ -314,6 +315,7 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
                 title: editingTask.title,
                 description: editingTask.description,
                 state: editingTask.state as BackendTask['state'],
+                repositoryId: editingTask.repositoryId,
               }
             : undefined
         }
