@@ -88,6 +88,8 @@ func defaultNameForType(providerType string) string {
 	switch providerType {
 	case string(models.ProviderTypeApprise):
 		return "Apprise"
+	case string(models.ProviderTypeSystem):
+		return "System Notifications"
 	default:
 		return "Notifications"
 	}

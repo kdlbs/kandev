@@ -7,6 +7,7 @@ type ProviderType string
 const (
 	ProviderTypeLocal   ProviderType = "local"
 	ProviderTypeApprise ProviderType = "apprise"
+	ProviderTypeSystem  ProviderType = "system"
 )
 
 type Provider struct {

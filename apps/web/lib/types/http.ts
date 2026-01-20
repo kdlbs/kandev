@@ -145,7 +145,7 @@ export type TaskSessionResponse = {
   session: TaskSession;
 };
 
-export type NotificationProviderType = 'local' | 'apprise';
+export type NotificationProviderType = 'local' | 'apprise' | 'system';
 
 export type NotificationProvider = {
   id: string;

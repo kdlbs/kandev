@@ -36,6 +36,7 @@ func NewService(repo notificationstore.Repository, taskRepo repository.Repositor
 	providerMap := map[models.ProviderType]providers.Provider{
 		models.ProviderTypeLocal:   providers.NewLocalProvider(hub),
 		models.ProviderTypeApprise: providers.NewAppriseProvider(),
+		models.ProviderTypeSystem:  providers.NewSystemProvider(),
 	}
 	return &Service{
 		repo:      repo,
@@ -59,7 +60,7 @@ func (s *Service) AvailableEvents() []string {
 }
 
 func (s *Service) ListProviders(ctx context.Context, userID string) ([]*models.Provider, map[string][]string, error) {
-	if err := s.ensureDefaultLocalProvider(ctx, userID); err != nil {
+	if err := s.ensureDefaultProviders(ctx, userID); err != nil {
 		return nil, nil, err
 	}
 	providers, err := s.repo.ListProvidersByUser(ctx, userID)
@@ -234,28 +235,59 @@ func (s *Service) buildWaitingForInputMessage(ctx context.Context, taskID string
 	return title, body
 }
 
-func (s *Service) ensureDefaultLocalProvider(ctx context.Context, userID string) error {
+func (s *Service) ensureDefaultProviders(ctx context.Context, userID string) error {
 	providers, err := s.repo.ListProvidersByUser(ctx, userID)
 	if err != nil {
 		return err
 	}
+	hasLocal := false
+	hasSystem := false
 	for _, provider := range providers {
-		if provider.Type == models.ProviderTypeLocal {
-			return nil
+		switch provider.Type {
+		case models.ProviderTypeLocal:
+			hasLocal = true
+		case models.ProviderTypeSystem:
+			hasSystem = true
 		}
 	}
-	provider := &models.Provider{
-		ID:      uuid.New().String(),
-		UserID:  userID,
-		Name:    "Desktop Notifications",
-		Type:    models.ProviderTypeLocal,
-		Config:  map[string]interface{}{},
-		Enabled: true,
+	if !hasLocal {
+		provider := &models.Provider{
+			ID:      uuid.New().String(),
+			UserID:  userID,
+			Name:    "Desktop Notifications",
+			Type:    models.ProviderTypeLocal,
+			Config:  map[string]interface{}{},
+			Enabled: true,
+		}
+		if err := s.repo.CreateProvider(ctx, provider); err != nil {
+			return err
+		}
+		if err := s.repo.ReplaceSubscriptions(ctx, provider.ID, userID, []string{EventTaskSessionWaitingForInput}); err != nil {
+			return err
+		}
 	}
-	if err := s.repo.CreateProvider(ctx, provider); err != nil {
-		return err
+	if !hasSystem {
+		adapter := s.providers[models.ProviderTypeSystem]
+		if adapter != nil && adapter.Available() {
+			provider := &models.Provider{
+				ID:      uuid.New().String(),
+				UserID:  userID,
+				Name:    "System Notifications",
+				Type:    models.ProviderTypeSystem,
+				Config: map[string]interface{}{
+					"sound_enabled": false,
+				},
+				Enabled: true,
+			}
+			if err := s.repo.CreateProvider(ctx, provider); err != nil {
+				return err
+			}
+			if err := s.repo.ReplaceSubscriptions(ctx, provider.ID, userID, []string{EventTaskSessionWaitingForInput}); err != nil {
+				return err
+			}
+		}
 	}
-	return s.repo.ReplaceSubscriptions(ctx, provider.ID, userID, []string{EventTaskSessionWaitingForInput})
+	return nil
 }
 
 func (s *Service) validateProvider(providerType models.ProviderType, config map[string]interface{}) error {
