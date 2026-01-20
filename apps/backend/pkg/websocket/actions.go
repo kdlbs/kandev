@@ -164,6 +164,16 @@ const (
 	ActionShellInput         = "shell.input"          // Send input to shell
 	ActionSessionShellOutput = "session.shell.output" // Shell output notification (also used for exit with type: "exit")
 
+	// Git worktree actions
+	ActionWorktreePull     = "worktree.pull"      // Pull from remote
+	ActionWorktreePush     = "worktree.push"      // Push to remote
+	ActionWorktreeRebase   = "worktree.rebase"    // Rebase onto base branch
+	ActionWorktreeMerge    = "worktree.merge"     // Merge base branch into worktree
+	ActionWorktreeAbort    = "worktree.abort"     // Abort in-progress merge or rebase
+	ActionWorktreeCommit   = "worktree.commit"    // Commit changes
+	ActionWorktreeStage    = "worktree.stage"     // Stage files for commit
+	ActionWorktreeCreatePR = "worktree.create_pr" // Create a pull request
+
 	// User actions
 	ActionUserGet             = "user.get"
 	ActionUserSettingsUpdate  = "user.settings.update"

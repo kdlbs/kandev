@@ -84,6 +84,16 @@ func (s *Server) setupRoutes() {
 		// Shell access (HTTP endpoints only - streaming is via /workspace/stream)
 		api.GET("/shell/status", s.handleShellStatus)
 		api.GET("/shell/buffer", s.handleShellBuffer)
+
+		// Git operations
+		api.POST("/git/pull", s.handleGitPull)
+		api.POST("/git/push", s.handleGitPush)
+		api.POST("/git/rebase", s.handleGitRebase)
+		api.POST("/git/merge", s.handleGitMerge)
+		api.POST("/git/abort", s.handleGitAbort)
+		api.POST("/git/commit", s.handleGitCommit)
+		api.POST("/git/stage", s.handleGitStage)
+		api.POST("/git/create-pr", s.handleGitCreatePR)
 	}
 }
 
