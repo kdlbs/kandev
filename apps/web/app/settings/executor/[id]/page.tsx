@@ -198,20 +198,6 @@ function ExecutorEditForm({ executor }: ExecutorEditFormProps) {
         </Card>
       )}
 
-      {draft.type === 'remote_docker' && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Remote Docker</CardTitle>
-            <CardDescription>Coming soon.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm text-muted-foreground">
-              Remote Docker executors will support SSH and cloud runtimes in a future update.
-            </p>
-          </CardContent>
-        </Card>
-      )}
-
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">

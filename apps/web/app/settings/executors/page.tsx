@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { IconChevronRight, IconCloud, IconCpu, IconServer } from '@tabler/icons-react';
+import { IconChevronRight, IconCpu, IconServer } from '@tabler/icons-react';
 import { Badge } from '@kandev/ui/badge';
 import { Card, CardContent } from '@kandev/ui/card';
 import { Separator } from '@kandev/ui/separator';
@@ -17,30 +17,6 @@ export default function ExecutorsSettingsPage() {
       href: '/settings/executor/new?type=local_docker',
       icon: IconServer,
       enabled: true,
-    },
-    {
-      id: 'remote_docker',
-      label: 'Remote Docker',
-      description: 'Connect to a remote Docker host.',
-      href: '/settings/executor/new?type=remote_docker',
-      icon: IconCloud,
-      enabled: false,
-    },
-    {
-      id: 'remote_server',
-      label: 'Remote Server',
-      description: 'SSH into a dedicated host.',
-      href: '/settings/executor/new?type=remote_server',
-      icon: IconCloud,
-      enabled: false,
-    },
-    {
-      id: 'k8s',
-      label: 'K8s',
-      description: 'Run workloads in a Kubernetes cluster.',
-      href: '/settings/executor/new?type=k8s',
-      icon: IconCloud,
-      enabled: false,
     },
   ];
 
@@ -101,14 +77,22 @@ export default function ExecutorsSettingsPage() {
       </div>
 
       <div className="grid gap-3">
-        {executors.map((executor) => {
+        {executors
+          .filter((executor) => executor.type !== 'remote_docker')
+          .map((executor) => {
           const Icon = executor.type === 'local_pc' ? IconCpu : IconServer;
           const typeLabel =
             executor.type === 'local_pc'
               ? 'Local PC'
               : executor.type === 'local_docker'
               ? 'Local Docker'
-              : 'Remote Docker';
+              : executor.type === 'remote_docker'
+              ? 'Remote Docker'
+              : executor.type === 'remote_vps'
+              ? 'Remote Server'
+              : executor.type === 'k8s'
+              ? 'K8s'
+              : 'Remote';
           return (
             <Link key={executor.id} href={`/settings/executor/${executor.id}`}>
               <Card className="hover:bg-accent transition-colors cursor-pointer">

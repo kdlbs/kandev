@@ -12,7 +12,7 @@ import { Separator } from '@kandev/ui/separator';
 import { createExecutorAction } from '@/app/actions/executors';
 import { getWebSocketClient } from '@/lib/ws/connection';
 
-const EXECUTOR_TYPES = ['local_docker', 'remote_docker'] as const;
+const EXECUTOR_TYPES = ['local_docker'] as const;
 type ExecutorType = (typeof EXECUTOR_TYPES)[number];
 
 export default function ExecutorCreatePage() {
@@ -93,9 +93,6 @@ function ExecutorCreatePageContent() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="local_docker">Local Docker</SelectItem>
-                <SelectItem value="remote_docker" disabled>
-                  Remote Docker (coming soon)
-                </SelectItem>
               </SelectContent>
             </Select>
           </div>
