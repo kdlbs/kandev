@@ -1889,19 +1889,13 @@ func (s *Service) CompleteTurn(ctx context.Context, turnID string) error {
 		return nil // No active turn to complete
 	}
 
-	turn, err := s.repo.GetTurn(ctx, turnID)
-	if err != nil {
-		s.logger.Warn("failed to get turn for completion", zap.String("turn_id", turnID), zap.Error(err))
-		return err
-	}
-
 	if err := s.repo.CompleteTurn(ctx, turnID); err != nil {
 		s.logger.Error("failed to complete turn", zap.String("turn_id", turnID), zap.Error(err))
 		return err
 	}
 
-	// Refetch to get updated completed_at time
-	turn, err = s.repo.GetTurn(ctx, turnID)
+	// Fetch the completed turn to get the completed_at timestamp
+	turn, err := s.repo.GetTurn(ctx, turnID)
 	if err != nil {
 		s.logger.Warn("failed to refetch completed turn", zap.String("turn_id", turnID), zap.Error(err))
 		// Still publish with the old turn data
