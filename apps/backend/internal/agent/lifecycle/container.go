@@ -28,6 +28,7 @@ type ContainerConfig struct {
 	ProfileInfo     *AgentProfileInfo
 	InstanceID      string
 	MainRepoGitDir  string // Path to main repo's .git directory (for worktrees)
+	McpServers      []McpServerConfig
 }
 
 // ContainerManager handles Docker container lifecycle operations
@@ -87,6 +88,18 @@ func (cm *ContainerManager) LaunchContainer(ctx context.Context, config Containe
 		return "", nil, fmt.Errorf("agentctl health check failed: %w", err)
 	}
 
+	// Convert MCP server configs
+	var mcpServers []agentctl.McpServerConfig
+	for _, mcp := range config.McpServers {
+		mcpServers = append(mcpServers, agentctl.McpServerConfig{
+			Name:    mcp.Name,
+			URL:     mcp.URL,
+			Type:    mcp.Type,
+			Command: mcp.Command,
+			Args:    mcp.Args,
+		})
+	}
+
 	// Create an instance via the control API (same flow as standalone mode)
 	createReq := &agentctl.CreateInstanceRequest{
 		ID:            config.InstanceID,
@@ -94,6 +107,7 @@ func (cm *ContainerManager) LaunchContainer(ctx context.Context, config Containe
 		AgentCommand:  "", // Agent command set via Configure endpoint later
 		Env:           config.Credentials,
 		AutoStart:     false,
+		McpServers:    mcpServers,
 	}
 
 	resp, err := ctl.CreateInstance(ctx, createReq)

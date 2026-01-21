@@ -79,7 +79,8 @@ type Manager struct {
 	shell *shell.Session
 
 	// Protocol adapter for agent communication
-	adapter adapter.AgentAdapter
+	adapter    adapter.AgentAdapter
+	adapterCfg *adapter.Config
 
 	// Agent event notifications (protocol-agnostic)
 	updatesCh chan adapter.AgentEvent
@@ -201,6 +202,35 @@ func (m *Manager) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to create stderr pipe: %w", err)
 	}
 
+	// Build adapter config
+	mcpServers := make([]adapter.McpServerConfig, len(m.cfg.McpServers))
+	for i, mcp := range m.cfg.McpServers {
+		mcpServers[i] = adapter.McpServerConfig{
+			Name:    mcp.Name,
+			URL:     mcp.URL,
+			Type:    mcp.Type,
+			Command: mcp.Command,
+			Args:    mcp.Args,
+		}
+	}
+	m.adapterCfg = &adapter.Config{
+		WorkDir:        m.cfg.WorkDir,
+		AutoApprove:    m.cfg.AutoApprovePermissions,
+		ApprovalPolicy: m.cfg.ApprovalPolicy,
+		McpServers:     mcpServers,
+	}
+
+	// Create adapter before starting the process so we can call PrepareEnvironment
+	if err := m.createAdapter(); err != nil {
+		m.status.Store(StatusError)
+		return fmt.Errorf("failed to create adapter: %w", err)
+	}
+
+	// Prepare protocol-specific environment before starting the process
+	if err := m.adapter.PrepareEnvironment(); err != nil {
+		m.logger.Warn("failed to prepare protocol environment", zap.Error(err))
+	}
+
 	// Start the process
 	m.logger.Info("starting agent process",
 		zap.Strings("args", m.cfg.AgentArgs),
@@ -214,10 +244,10 @@ func (m *Manager) Start(ctx context.Context) error {
 	m.stopCh = make(chan struct{})
 	m.doneCh = make(chan struct{})
 
-	// Create protocol adapter based on configuration
-	if err := m.createAdapter(); err != nil {
+	// Connect adapter to the process stdin/stdout pipes
+	if err := m.adapter.Connect(m.stdin, m.stdout); err != nil {
 		m.status.Store(StatusError)
-		return fmt.Errorf("failed to create adapter: %w", err)
+		return fmt.Errorf("failed to connect adapter: %w", err)
 	}
 
 	// Start stderr reader and exit waiter
@@ -307,24 +337,20 @@ func (m *Manager) Configure(command string, env map[string]string) error {
 	return nil
 }
 
-// createAdapter creates the appropriate protocol adapter based on configuration
+// createAdapter creates the appropriate protocol adapter based on configuration.
+// This should be called before starting the process so PrepareEnvironment can run.
 func (m *Manager) createAdapter() error {
 	protocol := m.cfg.Protocol
 	if protocol == "" {
 		protocol = agent.ProtocolACP // Default to ACP
 	}
 
-	adapterCfg := &adapter.Config{
-		WorkDir:        m.cfg.WorkDir,
-		AutoApprove:    m.cfg.AutoApprovePermissions,
-		ApprovalPolicy: m.cfg.ApprovalPolicy,
-	}
-
+	// Use the adapter config built in Start()
 	switch protocol {
 	case agent.ProtocolACP:
-		m.adapter = adapter.NewACPAdapter(m.stdin, m.stdout, adapterCfg, m.logger)
+		m.adapter = adapter.NewACPAdapter(m.adapterCfg, m.logger)
 	case agent.ProtocolCodex:
-		m.adapter = adapter.NewCodexAdapter(m.stdin, m.stdout, adapterCfg, m.logger)
+		m.adapter = adapter.NewCodexAdapter(m.adapterCfg, m.logger)
 	default:
 		return fmt.Errorf("unsupported protocol: %s", protocol)
 	}

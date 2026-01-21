@@ -64,6 +64,10 @@ export function ProfileMcpConfigCard({
   const currentDirty = isDraft ? draftState?.dirty ?? false : mcpDirty;
 
   const popularServers: Record<string, Record<string, unknown>> = {
+    kandev: {
+      type: 'sse',
+      url: 'http://localhost:9090/sse',
+    },
     playwright: {
       type: 'stdio',
       command: 'npx',
@@ -198,6 +202,13 @@ export function ProfileMcpConfigCard({
             MCP definitions are stored in the database and resolved per executor at runtime. This does not override your local agent config.</p>
           <p className="text-xs font-medium text-muted-foreground">Popular servers</p>
           <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="text-xs rounded-full border border-muted-foreground/30 px-2 py-1 hover:bg-muted cursor-pointer"
+              onClick={() => applyPopularServer('kandev')}
+            >
+              + Kandev MCP
+            </button>
             <button
               type="button"
               className="text-xs rounded-full border border-muted-foreground/30 px-2 py-1 hover:bg-muted cursor-pointer"

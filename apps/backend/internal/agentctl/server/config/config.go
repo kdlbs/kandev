@@ -69,6 +69,20 @@ type InstanceDefaults struct {
 	HealthCheckInterval int
 }
 
+// McpServerConfig holds configuration for an MCP server.
+type McpServerConfig struct {
+	// Name is the human-readable name of the MCP server
+	Name string `json:"name"`
+	// URL is the URL for HTTP/SSE transport
+	URL string `json:"url,omitempty"`
+	// Type is the transport type: "sse" or "http"
+	Type string `json:"type,omitempty"`
+	// Command is the command for stdio transport
+	Command string `json:"command,omitempty"`
+	// Args are the arguments for stdio transport
+	Args []string `json:"args,omitempty"`
+}
+
 // InstanceConfig holds configuration for a single agent instance.
 // This is passed to the process manager and API server.
 type InstanceConfig struct {
@@ -113,6 +127,9 @@ type InstanceConfig struct {
 	// AgentType identifies the agent (e.g., "auggie", "codex", "claude")
 	// Used for agent-specific adapter selection
 	AgentType string
+
+	// McpServers is a list of MCP servers to configure for the agent
+	McpServers []McpServerConfig
 }
 
 // Load loads the configuration from environment variables.
@@ -175,6 +192,9 @@ func (c *Config) NewInstanceConfig(port int, overrides *InstanceOverrides) *Inst
 		if overrides.AgentType != "" {
 			cfg.AgentType = overrides.AgentType
 		}
+		if len(overrides.McpServers) > 0 {
+			cfg.McpServers = overrides.McpServers
+		}
 	}
 
 	// Parse agent command into args
@@ -197,6 +217,7 @@ type InstanceOverrides struct {
 	Env            []string
 	ApprovalPolicy string
 	AgentType      string
+	McpServers     []McpServerConfig
 }
 
 // ParseCommand splits a command string into arguments

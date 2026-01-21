@@ -219,6 +219,22 @@ func main() {
 	}
 
 	// ============================================
+	// MCP SERVER (embedded)
+	// ============================================
+	mcpServerURL, mcpCleanup, err := provideMcpServer(ctx, cfg, log)
+	if err != nil {
+		log.Fatal("Failed to start MCP server", zap.Error(err))
+	}
+	if mcpCleanup != nil {
+		cleanups = append(cleanups, mcpCleanup)
+		log.Info("MCP server started", zap.String("url", mcpServerURL))
+		// Auto-set the MCP server URL if not explicitly configured
+		if cfg.Agent.McpServerURL == "" {
+			cfg.Agent.McpServerURL = mcpServerURL
+		}
+	}
+
+	// ============================================
 	// AGENT MANAGER
 	// ============================================
 	lifecycleMgr, agentRegistry, err := provideLifecycleManager(ctx, cfg, log, eventBus, dockerClient, agentSettingsRepo)
@@ -255,7 +271,7 @@ func main() {
 	// WEBSOCKET GATEWAY (All communication via WebSocket)
 	// ============================================
 	log.Info("Initializing WebSocket Gateway...")
-	gateway, notificationSvc, _, err := provideGateway(
+	gateway, _, _, err := provideGateway(
 		ctx,
 		log,
 		eventBus,

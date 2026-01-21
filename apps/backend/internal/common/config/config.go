@@ -100,6 +100,17 @@ type AgentConfig struct {
 
 	// StandalonePort is the control port for standalone agentctl (default: 9999)
 	StandalonePort int `mapstructure:"standalonePort"`
+
+	// McpServerEnabled enables the embedded MCP server (default: true in standalone mode)
+	McpServerEnabled bool `mapstructure:"mcpServerEnabled"`
+
+	// McpServerPort is the port for the embedded MCP server (default: 9090)
+	McpServerPort int `mapstructure:"mcpServerPort"`
+
+	// McpServerURL is the URL of the Kandev MCP server for task management
+	// If set, agents with supports_mcp=true will be configured with this MCP server
+	// If McpServerEnabled is true and this is empty, it will be auto-set to http://localhost:{McpServerPort}/sse
+	McpServerURL string `mapstructure:"mcpServerUrl"`
 }
 
 // ReadTimeoutDuration returns the read timeout as a time.Duration.
@@ -152,6 +163,9 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("agent.runtime", "standalone")
 	v.SetDefault("agent.standaloneHost", "localhost")
 	v.SetDefault("agent.standalonePort", 9999)
+	v.SetDefault("agent.mcpServerEnabled", true)
+	v.SetDefault("agent.mcpServerPort", 9090)
+	v.SetDefault("agent.mcpServerUrl", "") // Empty means auto-set when mcpServerEnabled is true
 
 	// Auth defaults
 	v.SetDefault("auth.jwtSecret", "")

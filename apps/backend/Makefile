@@ -14,19 +14,19 @@ BUILD_TIME := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 
 LDFLAGS += -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuildTime=$(BUILD_TIME)
 
-.PHONY: all build build-all build-agentctl clean run dev test lint fmt vet help
+.PHONY: all build build-all build-agentctl build-mcp-server clean run dev test lint fmt vet help
 
 ## Default target
 all: build
 
 ## Build the unified kandev binary
-build: build-agentctl
+build: build-agentctl build-mcp-server
 	@echo "Building $(BINARY_NAME)..."
 	@mkdir -p $(BUILD_DIR)
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/kandev
 
-## Build all binaries (unified + individual services + agentctl)
-build-all: build build-agentctl
+## Build all binaries (unified + individual services + agentctl + mcp-server)
+build-all: build build-agentctl build-mcp-server
 	@echo "Building individual services..."
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agent-manager ./cmd/agent-manager
 
@@ -35,6 +35,12 @@ build-agentctl:
 	@echo "Building agentctl..."
 	@mkdir -p $(BUILD_DIR)
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl ./cmd/agentctl
+
+## Build the standalone MCP server binary
+build-mcp-server:
+	@echo "Building mcp-server..."
+	@mkdir -p $(BUILD_DIR)
+	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/mcp-server ./cmd/mcp-server
 
 ## Clean build artifacts
 clean:
@@ -105,9 +111,10 @@ help:
 	@echo "  make [target]"
 	@echo ""
 	@echo "Targets:"
-	@echo "  build         Build the unified kandev binary (default)"
-	@echo "  build-all     Build all binaries (unified + individual services + agentctl)"
-	@echo "  build-agentctl Build the agentctl sidecar binary"
+	@echo "  build           Build the unified kandev binary (default)"
+	@echo "  build-all       Build all binaries (unified + individual services + agentctl + mcp-server)"
+	@echo "  build-agentctl  Build the agentctl sidecar binary"
+	@echo "  build-mcp-server Build the standalone MCP server binary"
 	@echo "  clean         Remove build artifacts"
 	@echo "  run           Build and run the application"
 	@echo "  dev           Run in development mode with a local database"

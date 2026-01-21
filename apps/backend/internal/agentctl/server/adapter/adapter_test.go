@@ -286,6 +286,64 @@ func TestPlanEntry_StatusValues(t *testing.T) {
 	}
 }
 
+func TestConvertSSEToStreamableHTTP(t *testing.T) {
+	testCases := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "standard SSE endpoint",
+			input:    "http://localhost:9090/sse",
+			expected: "http://localhost:9090/mcp",
+		},
+		{
+			name:     "SSE endpoint with different port",
+			input:    "http://example.com:8080/sse",
+			expected: "http://example.com:8080/mcp",
+		},
+		{
+			name:     "trailing slash not converted",
+			input:    "http://localhost:9090/sse/",
+			expected: "http://localhost:9090/sse/",
+		},
+		{
+			name:     "non-SSE endpoint unchanged",
+			input:    "http://localhost:9090/other",
+			expected: "http://localhost:9090/other",
+		},
+		{
+			name:     "empty string",
+			input:    "",
+			expected: "",
+		},
+		{
+			name:     "already streamable HTTP endpoint",
+			input:    "http://localhost:9090/mcp",
+			expected: "http://localhost:9090/mcp",
+		},
+		{
+			name:     "sse in path but not at end",
+			input:    "http://localhost:9090/sse/something",
+			expected: "http://localhost:9090/sse/something",
+		},
+		{
+			name:     "https endpoint",
+			input:    "https://secure.example.com/sse",
+			expected: "https://secure.example.com/mcp",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := convertSSEToStreamableHTTP(tc.input)
+			if result != tc.expected {
+				t.Errorf("convertSSEToStreamableHTTP(%q) = %q, want %q", tc.input, result, tc.expected)
+			}
+		})
+	}
+}
+
 func TestSessionUpdate_WithComplexToolArgs(t *testing.T) {
 	// Test with complex nested ToolArgs
 	update := AgentEvent{

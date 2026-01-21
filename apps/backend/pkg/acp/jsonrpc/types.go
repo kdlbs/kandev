@@ -102,10 +102,13 @@ type SessionNewParams struct {
 }
 
 // McpServer configuration for MCP servers
+// Supports both stdio (command+args) and remote (url+type) transports
 type McpServer struct {
-	Name    string `json:"name"`
-	Command string `json:"command"`
-	Args    []string `json:"args,omitempty"`
+	Name    string   `json:"name"`
+	Command string   `json:"command,omitempty"` // For stdio transport
+	Args    []string `json:"args,omitempty"`    // For stdio transport
+	URL     string   `json:"url,omitempty"`     // For HTTP/SSE transport
+	Type    string   `json:"type,omitempty"`    // "sse" or "http" for remote transport
 }
 
 // SessionNewResult from session/new method

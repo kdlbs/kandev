@@ -83,12 +83,26 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 
 	// Build overrides from request
 	autoStart := req.AutoStart
+
+	// Convert MCP server configs
+	var mcpServers []config.McpServerConfig
+	for _, mcp := range req.McpServers {
+		mcpServers = append(mcpServers, config.McpServerConfig{
+			Name:    mcp.Name,
+			URL:     mcp.URL,
+			Type:    mcp.Type,
+			Command: mcp.Command,
+			Args:    mcp.Args,
+		})
+	}
+
 	overrides := &config.InstanceOverrides{
 		Protocol:     agent.Protocol(req.Protocol),
 		AgentCommand: agentCmd,
 		WorkDir:      req.WorkspacePath,
 		AutoStart:    &autoStart,
 		Env:          config.CollectAgentEnv(req.Env),
+		McpServers:   mcpServers,
 	}
 
 	// Create instance config using the unified method
