@@ -35,6 +35,7 @@ const (
 	EventTypeComplete          = streams.EventTypeComplete
 	EventTypeError             = streams.EventTypeError
 	EventTypePermissionRequest = streams.EventTypePermissionRequest
+	EventTypeContextWindow     = streams.EventTypeContextWindow
 )
 
 // AgentInfo contains information about the connected agent.

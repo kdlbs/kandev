@@ -54,6 +54,22 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
             store.getState().setTaskSessionsForTask(taskId, nextSessions);
           }
         }
+
+        // Extract context window data from metadata if present
+        const metadata = payload.metadata;
+        if (metadata && typeof metadata === 'object') {
+          const contextWindow = (metadata as Record<string, unknown>).context_window;
+          if (contextWindow && typeof contextWindow === 'object') {
+            const cw = contextWindow as Record<string, unknown>;
+            store.getState().setContextWindow(sessionId, {
+              size: (cw.size as number) ?? 0,
+              used: (cw.used as number) ?? 0,
+              remaining: (cw.remaining as number) ?? 0,
+              efficiency: (cw.efficiency as number) ?? 0,
+              timestamp: new Date().toISOString(),
+            });
+          }
+        }
       }
     },
     'session.agentctl_starting': (message) => {

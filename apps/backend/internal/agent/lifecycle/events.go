@@ -323,3 +323,34 @@ func (p *EventPublisher) PublishShellExit(execution *AgentExecution, exitCode in
 			zap.Error(err))
 	}
 }
+
+// PublishContextWindow publishes a context window update event to the event bus.
+func (p *EventPublisher) PublishContextWindow(execution *AgentExecution, size, used, remaining int64, efficiency float64) {
+	if p.eventBus == nil {
+		return
+	}
+
+	sessionID := execution.SessionID
+
+	payload := ContextWindowEventPayload{
+		TaskID:                 execution.TaskID,
+		SessionID:              sessionID,
+		AgentID:                execution.ID,
+		ContextWindowSize:      size,
+		ContextWindowUsed:      used,
+		ContextWindowRemaining: remaining,
+		ContextEfficiency:      efficiency,
+		Timestamp:              time.Now().UTC().Format(time.RFC3339Nano),
+	}
+
+	event := bus.NewEvent(events.ContextWindowUpdated, "agent-manager", payload)
+	subject := events.BuildContextWindowSubject(sessionID)
+
+	if err := p.eventBus.Publish(context.Background(), subject, event); err != nil {
+		p.logger.Error("failed to publish context window event",
+			zap.String("instance_id", execution.ID),
+			zap.String("task_id", execution.TaskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
+}

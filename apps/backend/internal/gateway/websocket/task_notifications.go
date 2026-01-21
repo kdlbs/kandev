@@ -88,6 +88,19 @@ func (b *TaskEventBroadcaster) subscribe(eventBus bus.EventBus, subject, action 
 		} else if data, ok := event.Data.(interface{ GetSessionID() string }); ok {
 			sessionID = data.GetSessionID()
 		}
+
+		// Debug logging for session state changes with metadata
+		if action == ws.ActionSessionStateChanged {
+			if data, ok := event.Data.(map[string]interface{}); ok {
+				if metadata, ok := data["metadata"]; ok {
+					b.logger.Info("received session.state_changed with metadata",
+						zap.String("action", action),
+						zap.String("session_id", sessionID),
+						zap.Any("metadata", metadata))
+				}
+			}
+		}
+
 		switch action {
 		case ws.ActionSessionAgentctlStarting, ws.ActionSessionAgentctlReady, ws.ActionSessionAgentctlError, ws.ActionSessionStateChanged:
 			if sessionID != "" {

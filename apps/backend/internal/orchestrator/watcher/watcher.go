@@ -70,6 +70,18 @@ type GitStatusData struct {
 	Timestamp     string                 `json:"timestamp"`
 }
 
+// ContextWindowData contains data from context window events
+type ContextWindowData struct {
+	TaskID                 string  `json:"task_id"`
+	TaskSessionID          string  `json:"session_id"`
+	AgentID                string  `json:"agent_id"`
+	ContextWindowSize      int64   `json:"context_window_size"`
+	ContextWindowUsed      int64   `json:"context_window_used"`
+	ContextWindowRemaining int64   `json:"context_window_remaining"`
+	ContextEfficiency      float64 `json:"context_efficiency"`
+	Timestamp              string  `json:"timestamp"`
+}
+
 // EventHandlers contains callbacks for different event types
 type EventHandlers struct {
 	// Task events
@@ -94,6 +106,9 @@ type EventHandlers struct {
 
 	// Git status events
 	OnGitStatusUpdated func(ctx context.Context, data GitStatusData)
+
+	// Context window events
+	OnContextWindowUpdated func(ctx context.Context, data ContextWindowData)
 }
 
 // Watcher subscribes to events and dispatches to handlers
@@ -162,6 +177,12 @@ func (w *Watcher) Start(ctx context.Context) error {
 
 	// Subscribe to git status events
 	if err := w.subscribeToGitStatusEvents(); err != nil {
+		w.unsubscribeAll()
+		return err
+	}
+
+	// Subscribe to context window events
+	if err := w.subscribeToContextWindowEvents(); err != nil {
 		w.unsubscribeAll()
 		return err
 	}
@@ -480,6 +501,50 @@ func (w *Watcher) createGitStatusHandler() bus.EventHandler {
 			zap.Int("modified", len(data.Modified)))
 
 		w.handlers.OnGitStatusUpdated(ctx, data)
+		return nil
+	}
+}
+
+// subscribeToContextWindowEvents subscribes to context window events
+func (w *Watcher) subscribeToContextWindowEvents() error {
+	if w.handlers.OnContextWindowUpdated == nil {
+		return nil
+	}
+
+	// Use wildcard to subscribe to all context window events (context_window.updated.{session_id})
+	subject := events.BuildContextWindowWildcardSubject()
+
+	// Use regular subscription (each instance needs all messages)
+	sub, err := w.eventBus.Subscribe(subject, w.createContextWindowHandler())
+	if err != nil {
+		w.logger.Error("Failed to subscribe to context window events",
+			zap.String("subject", subject),
+			zap.Error(err))
+		return err
+	}
+	w.subscriptions = append(w.subscriptions, sub)
+	return nil
+}
+
+// createContextWindowHandler creates a bus.EventHandler for context window events
+func (w *Watcher) createContextWindowHandler() bus.EventHandler {
+	return func(ctx context.Context, event *bus.Event) error {
+		var data ContextWindowData
+		if err := w.parseEventData(event.Data, &data); err != nil {
+			w.logger.Error("Failed to parse context window event data",
+				zap.String("event_type", event.Type),
+				zap.String("event_id", event.ID),
+				zap.Error(err))
+			return nil // Don't return error to continue processing other events
+		}
+
+		w.logger.Debug("Handling context window event",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.TaskSessionID),
+			zap.Int64("size", data.ContextWindowSize),
+			zap.Int64("used", data.ContextWindowUsed))
+
+		w.handlers.OnContextWindowUpdated(ctx, data)
 		return nil
 	}
 }

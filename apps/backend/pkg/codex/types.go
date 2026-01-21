@@ -78,6 +78,9 @@ const (
 	NotifyAccountUpdated                = "account/updated"
 	NotifyAccountLoginCompleted         = "account/login/completed"
 	NotifyError                         = "error"
+	NotifyTokenCount                    = "token_count"
+	NotifyThreadTokenUsageUpdated       = "thread/tokenUsage/updated"
+	NotifyContextCompacted              = "context_compacted"
 )
 
 // InitializeParams for initialize request
@@ -339,4 +342,70 @@ type ErrorParams struct {
 	Code    int    `json:"code,omitempty"`
 	Message string `json:"message"`
 	Data    any    `json:"data,omitempty"`
+}
+
+// TokenCountParams for token_count notification
+// This is emitted by Codex after each turn to report token usage.
+type TokenCountParams struct {
+	Info       *TokenUsageInfo   `json:"info,omitempty"`
+	RateLimits *RateLimitSnapshot `json:"rateLimits,omitempty"`
+}
+
+// TokenUsageInfo contains detailed token usage information.
+type TokenUsageInfo struct {
+	TotalTokenUsage    *TokenUsage `json:"totalTokenUsage,omitempty"`
+	LastTokenUsage     *TokenUsage `json:"lastTokenUsage,omitempty"`
+	ModelContextWindow *int64      `json:"modelContextWindow,omitempty"`
+}
+
+// TokenUsage contains token counts for a request/response cycle.
+type TokenUsage struct {
+	InputTokens           int32 `json:"inputTokens"`
+	CachedInputTokens     int32 `json:"cachedInputTokens"`
+	OutputTokens          int32 `json:"outputTokens"`
+	ReasoningOutputTokens int32 `json:"reasoningOutputTokens"`
+	TotalTokens           int32 `json:"totalTokens"`
+}
+
+// ThreadTokenUsageUpdatedParams for thread/tokenUsage/updated notification.
+// This is emitted by Codex after each turn completes with token usage info.
+type ThreadTokenUsageUpdatedParams struct {
+	ThreadID   string              `json:"threadId"`
+	TurnID     string              `json:"turnId"`
+	TokenUsage *ThreadTokenUsage   `json:"tokenUsage"`
+}
+
+// ThreadTokenUsage contains the token usage summary for a thread.
+type ThreadTokenUsage struct {
+	Total              *TokenUsage `json:"total,omitempty"`
+	Last               *TokenUsage `json:"last,omitempty"`
+	ModelContextWindow int64       `json:"modelContextWindow"`
+}
+
+// RateLimitSnapshot contains rate limit information.
+type RateLimitSnapshot struct {
+	Primary   *RateLimitWindow `json:"primary,omitempty"`
+	Secondary *RateLimitWindow `json:"secondary,omitempty"`
+	Credits   *CreditsSnapshot `json:"credits,omitempty"`
+	PlanType  *string          `json:"planType,omitempty"`
+}
+
+// RateLimitWindow contains rate limit window information.
+type RateLimitWindow struct {
+	UsedPercent       int32  `json:"usedPercent"`
+	WindowDurationMins *int64 `json:"windowDurationMins,omitempty"`
+	ResetsAt          *int64 `json:"resetsAt,omitempty"`
+}
+
+// CreditsSnapshot contains credits information (placeholder for future use).
+type CreditsSnapshot struct {
+	Remaining *int64 `json:"remaining,omitempty"`
+	Used      *int64 `json:"used,omitempty"`
+}
+
+// ContextCompactedParams for context_compacted notification.
+// Emitted when the context has been compacted due to reaching limits.
+type ContextCompactedParams struct {
+	ThreadID string `json:"threadId"`
+	TurnID   string `json:"turnId"`
 }

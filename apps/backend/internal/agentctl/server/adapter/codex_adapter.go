@@ -645,6 +645,55 @@ func (a *CodexAdapter) handleNotification(method string, params json.RawMessage)
 			ToolResult:  p.Delta,
 		})
 
+	case codex.NotifyThreadTokenUsageUpdated:
+		var p codex.ThreadTokenUsageUpdatedParams
+		if err := json.Unmarshal(params, &p); err != nil {
+			a.logger.Warn("failed to parse thread token usage updated notification", zap.Error(err))
+			return
+		}
+		// Extract context window information from the token usage update
+		if p.TokenUsage != nil && p.TokenUsage.ModelContextWindow > 0 {
+			contextWindowSize := p.TokenUsage.ModelContextWindow
+			contextWindowUsed := int64(p.TokenUsage.Last.TotalTokens)
+
+			remaining := contextWindowSize - contextWindowUsed
+			if remaining < 0 {
+				remaining = 0
+			}
+			efficiency := float64(contextWindowUsed) / float64(contextWindowSize) * 100
+
+			a.logger.Debug("emitting context window event",
+				zap.Int64("size", contextWindowSize),
+				zap.Int64("used", contextWindowUsed),
+				zap.Int64("remaining", remaining),
+				zap.Float64("efficiency", efficiency))
+
+			a.sendUpdate(AgentEvent{
+				Type:                   EventTypeContextWindow,
+				SessionID:              threadID,
+				OperationID:            turnID,
+				ContextWindowSize:      contextWindowSize,
+				ContextWindowUsed:      contextWindowUsed,
+				ContextWindowRemaining: remaining,
+				ContextEfficiency:      efficiency,
+			})
+		}
+
+	case codex.NotifyTokenCount:
+		// Legacy token_count notification - ignore as we now use thread/tokenUsage/updated
+		a.logger.Debug("ignoring legacy token_count notification")
+
+	case codex.NotifyContextCompacted:
+		var p codex.ContextCompactedParams
+		if err := json.Unmarshal(params, &p); err != nil {
+			a.logger.Warn("failed to parse context compacted notification", zap.Error(err))
+			return
+		}
+		a.logger.Info("context compacted",
+			zap.String("thread_id", p.ThreadID),
+			zap.String("turn_id", p.TurnID))
+		// We could emit an event here if we want to notify the frontend about compaction
+
 	default:
 		// Log unhandled notifications at debug level
 		a.logger.Debug("unhandled notification", zap.String("method", method))

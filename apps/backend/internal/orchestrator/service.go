@@ -138,14 +138,15 @@ func NewService(
 
 	// Create the watcher with event handlers that wire everything together
 	handlers := watcher.EventHandlers{
-		OnTaskStateChanged:  s.handleTaskStateChanged,
-		OnAgentReady:        s.handleAgentReady,
-		OnAgentCompleted:    s.handleAgentCompleted,
-		OnAgentFailed:       s.handleAgentFailed,
-		OnAgentStreamEvent:  s.handleAgentStreamEvent,
-		OnACPSessionCreated: s.handleACPSessionCreated,
-		OnPermissionRequest: s.handlePermissionRequest,
-		OnGitStatusUpdated:  s.handleGitStatusUpdated,
+		OnTaskStateChanged:     s.handleTaskStateChanged,
+		OnAgentReady:           s.handleAgentReady,
+		OnAgentCompleted:       s.handleAgentCompleted,
+		OnAgentFailed:          s.handleAgentFailed,
+		OnAgentStreamEvent:     s.handleAgentStreamEvent,
+		OnACPSessionCreated:    s.handleACPSessionCreated,
+		OnPermissionRequest:    s.handlePermissionRequest,
+		OnGitStatusUpdated:     s.handleGitStatusUpdated,
+		OnContextWindowUpdated: s.handleContextWindowUpdated,
 	}
 	s.watcher = watcher.NewWatcher(eventBus, handlers, log)
 
@@ -1235,6 +1236,72 @@ func (s *Service) handleGitStatusUpdated(ctx context.Context, data watcher.GitSt
 				zap.String("session_id", session.ID))
 		}
 	}()
+}
+
+// handleContextWindowUpdated handles context window updates and persists them to session metadata
+func (s *Service) handleContextWindowUpdated(ctx context.Context, data watcher.ContextWindowData) {
+	s.logger.Debug("handling context window update",
+		zap.String("task_id", data.TaskID),
+		zap.String("session_id", data.TaskSessionID),
+		zap.Int64("size", data.ContextWindowSize),
+		zap.Int64("used", data.ContextWindowUsed))
+
+	if data.TaskSessionID == "" {
+		s.logger.Debug("missing session_id for context window update",
+			zap.String("task_id", data.TaskID))
+		return
+	}
+
+	session, err := s.repo.GetTaskSession(ctx, data.TaskSessionID)
+	if err != nil {
+		s.logger.Debug("no task session for context window update",
+			zap.String("session_id", data.TaskSessionID),
+			zap.Error(err))
+		return
+	}
+
+	// Update session metadata with context window info
+	if session.Metadata == nil {
+		session.Metadata = make(map[string]interface{})
+	}
+	contextWindowData := map[string]interface{}{
+		"size":       data.ContextWindowSize,
+		"used":       data.ContextWindowUsed,
+		"remaining":  data.ContextWindowRemaining,
+		"efficiency": data.ContextEfficiency,
+	}
+	session.Metadata["context_window"] = contextWindowData
+
+	// Persist to database asynchronously
+	go func() {
+		if err := s.repo.UpdateTaskSession(context.Background(), session); err != nil {
+			s.logger.Error("failed to update session with context window",
+				zap.String("task_id", data.TaskID),
+				zap.String("session_id", session.ID),
+				zap.Error(err))
+		} else {
+			s.logger.Debug("persisted context window to session",
+				zap.String("task_id", data.TaskID),
+				zap.String("session_id", session.ID))
+		}
+	}()
+
+	// Broadcast session state change with metadata so frontend can update
+	// This uses the existing session.state_changed event with metadata included
+	if s.eventBus != nil {
+		_ = s.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(
+			events.TaskSessionStateChanged,
+			"orchestrator",
+			map[string]interface{}{
+				"task_id":    data.TaskID,
+				"session_id": session.ID,
+				"new_state":  string(session.State),
+				"metadata": map[string]interface{}{
+					"context_window": contextWindowData,
+				},
+			},
+		))
+	}
 }
 
 // handlePermissionRequest handles permission request events and saves as message

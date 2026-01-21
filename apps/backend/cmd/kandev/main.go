@@ -386,6 +386,20 @@ func main() {
 					result = append(result, gitStatusNotification)
 				}
 			}
+
+			if contextWindow, ok := session.Metadata["context_window"]; ok {
+				notification, err := ws.NewNotification(ws.ActionSessionStateChanged, map[string]interface{}{
+					"session_id": sessionID,
+					"task_id":    session.TaskID,
+					"new_state":  string(session.State),
+					"metadata": map[string]interface{}{
+						"context_window": contextWindow,
+					},
+				})
+				if err == nil {
+					result = append(result, notification)
+				}
+			}
 		}
 
 		return result, nil

@@ -901,6 +901,24 @@ func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.Age
 
 		// Handle permission request inline
 		m.handlePermissionRequestEvent(execution, event)
+
+	case "context_window":
+		m.logger.Debug("context window update received",
+			zap.String("execution_id", execution.ID),
+			zap.Int64("size", event.ContextWindowSize),
+			zap.Int64("used", event.ContextWindowUsed),
+			zap.Float64("efficiency", event.ContextEfficiency))
+
+		// Publish context window event to event bus for orchestrator to persist
+		m.eventPublisher.PublishContextWindow(
+			execution,
+			event.ContextWindowSize,
+			event.ContextWindowUsed,
+			event.ContextWindowRemaining,
+			event.ContextEfficiency,
+		)
+		// Return early - context window events don't need to be published as stream events
+		return
 	}
 
 	// Publish agent stream event to event bus for WebSocket streaming
