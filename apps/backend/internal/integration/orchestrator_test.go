@@ -458,6 +458,36 @@ func (s *SimulatedAgentManagerClient) CancelAgent(ctx context.Context, sessionID
 	return nil
 }
 
+// GetAgentType returns the agent type configuration
+func (s *SimulatedAgentManagerClient) GetAgentType(ctx context.Context, agentID string) (*v1.AgentType, error) {
+	agentTypes, _ := s.ListAgentTypes(ctx)
+	for _, at := range agentTypes {
+		if at.ID == agentID {
+			return at, nil
+		}
+	}
+	// Return a default agent type for testing
+	return &v1.AgentType{
+		ID:          agentID,
+		Name:        "Simulated Agent",
+		Description: "Simulated agent for testing",
+		DockerImage: "test/agent",
+		DockerTag:   "test",
+		Enabled:     true,
+	}, nil
+}
+
+// ResolveAgentProfile resolves an agent profile ID to profile information
+func (s *SimulatedAgentManagerClient) ResolveAgentProfile(ctx context.Context, profileID string) (*executor.AgentProfileInfo, error) {
+	return &executor.AgentProfileInfo{
+		ProfileID:   profileID,
+		ProfileName: "Simulated Profile",
+		AgentID:     "augment-agent",
+		AgentName:   "Augment Agent",
+		Model:       "claude-sonnet-4-20250514",
+	}, nil
+}
+
 // ============================================
 // ORCHESTRATOR TEST SERVER
 // ============================================

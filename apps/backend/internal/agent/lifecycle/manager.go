@@ -497,6 +497,10 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 		model = profileInfo.Model
 		autoApprove = profileInfo.AutoApprove
 	}
+	// Allow model override from request (for dynamic model switching)
+	if req.ModelOverride != "" {
+		model = req.ModelOverride
+	}
 	cmdOpts := CommandOptions{
 		Model:       model,
 		SessionID:   req.ACPSessionID,
@@ -595,13 +599,17 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) err
 		return fmt.Errorf("failed to resolve MCP config: %w", err)
 	}
 
+	// Capture the original ACP session ID before initialization overwrites it.
+	// This is used to determine if we're resuming an existing session or starting a new one.
+	providedACPSessionID := execution.ACPSessionID
+
 	// Initialize ACP session
 	if err := m.initializeACPSession(ctx, execution, agentConfig, taskDescription, mcpServers); err != nil {
 		m.updateExecutionError(executionID, "failed to initialize ACP: "+err.Error())
 		return fmt.Errorf("failed to initialize ACP: %w", err)
 	}
 
-	m.emitSessionStatusEvent(execution, agentConfig)
+	m.emitSessionStatusEvent(execution, agentConfig, providedACPSessionID)
 
 	return nil
 }
@@ -732,6 +740,16 @@ func (m *Manager) getAgentConfigForExecution(execution *AgentExecution) (*regist
 	return agentConfig, nil
 }
 
+// ResolveAgentProfile resolves an agent profile ID to profile information.
+// This is exposed for external callers (like the orchestrator executor) to get profile info.
+// The profile's model is guaranteed to be non-empty as it's validated at creation time.
+func (m *Manager) ResolveAgentProfile(ctx context.Context, profileID string) (*AgentProfileInfo, error) {
+	if m.profileResolver == nil {
+		return nil, fmt.Errorf("profile resolver not configured")
+	}
+	return m.profileResolver.ResolveProfile(ctx, profileID)
+}
+
 // resolveMcpServers centralizes MCP resolution for a session:
 // - loads per-agent MCP config,
 // - applies executor-scoped transport rules, allow/deny lists, URL rewrites, and env injection,
@@ -816,9 +834,11 @@ func (m *Manager) initializeACPSession(ctx context.Context, execution *AgentExec
 }
 
 // emitSessionStatusEvent emits a session_status event indicating whether the session was resumed or new.
-func (m *Manager) emitSessionStatusEvent(execution *AgentExecution, agentConfig *registry.AgentTypeConfig) {
+// providedACPSessionID is the ACP session ID that was provided BEFORE initialization (for resumption).
+// This must be captured before initializeACPSession runs, as that overwrites execution.ACPSessionID.
+func (m *Manager) emitSessionStatusEvent(execution *AgentExecution, agentConfig *registry.AgentTypeConfig, providedACPSessionID string) {
 	wasResumed := false
-	if execution.ACPSessionID != "" {
+	if providedACPSessionID != "" {
 		if agentConfig.SessionConfig.ResumeViaACP {
 			wasResumed = true
 		} else if agentConfig.SessionConfig.ResumeFlag != "" && agentConfig.SessionConfig.SupportsRecovery() {

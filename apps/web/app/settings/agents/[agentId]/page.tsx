@@ -59,12 +59,12 @@ type AgentSetupFormProps = {
   onToastError: (error: unknown) => void;
 };
 
-const createDraftProfile = (agentId: string, agentDisplayName: string): DraftProfile => ({
+const createDraftProfile = (agentId: string, agentDisplayName: string, defaultModel: string): DraftProfile => ({
   id: `draft-${generateUUID()}`,
   agent_id: agentId,
   name: '',
   agent_display_name: agentDisplayName,
-  model: '',
+  model: defaultModel,
   auto_approve: false,
   dangerously_skip_permissions: false,
   plan: '',
@@ -81,13 +81,13 @@ const cloneAgent = (agent: Agent): DraftAgent => ({
   profiles: agent.profiles.map((profile) => ({ ...profile })) as DraftProfile[],
 });
 
-const ensureProfiles = (agent: DraftAgent, agentDisplayName: string): DraftAgent => {
+const ensureProfiles = (agent: DraftAgent, agentDisplayName: string, defaultModel: string): DraftAgent => {
   if (agent.profiles.length > 0) {
     return agent;
   }
   return {
     ...agent,
-    profiles: [createDraftProfile(agent.id, agentDisplayName)],
+    profiles: [createDraftProfile(agent.id, agentDisplayName, defaultModel)],
   };
 };
 
@@ -169,7 +169,7 @@ function AgentSetupForm({
       ...current,
       profiles: [
         ...current.profiles,
-        { ...createDraftProfile(current.id, resolveDisplayName(current.name)), id: draftId },
+        { ...createDraftProfile(current.id, resolveDisplayName(current.name), currentAgentModelConfig.default_model), id: draftId },
       ],
     }));
     setNewProfileId(draftId);
@@ -183,7 +183,7 @@ function AgentSetupForm({
         profiles:
           remaining.length > 0
             ? remaining
-            : [createDraftProfile(current.id, resolveDisplayName(current.name))],
+            : [createDraftProfile(current.id, resolveDisplayName(current.name), currentAgentModelConfig.default_model)],
       };
     });
     if (newProfileId === profileId) {
@@ -242,6 +242,10 @@ function AgentSetupForm({
   const handleSave = async () => {
     if (draftAgent.profiles.some((profile) => !profile.name.trim())) {
       onToastError(new Error('Profile name is required.'));
+      return;
+    }
+    if (draftAgent.profiles.some((profile) => !profile.model.trim())) {
+      onToastError(new Error('Model is required for all profiles.'));
       return;
     }
     if (hasInvalidMcpConfig) {
@@ -312,7 +316,7 @@ function AgentSetupForm({
           });
         }
         upsertAgent(created);
-        setDraftAgent(ensureProfiles(cloneAgent(created), resolveDisplayName(created.name)));
+        setDraftAgent(ensureProfiles(cloneAgent(created), resolveDisplayName(created.name), currentAgentModelConfig.default_model));
         router.replace(`/settings/agents/${encodeURIComponent(created.name)}`);
       } else {
         const agentPatch: { workspace_id?: string | null; mcp_config_path?: string | null } = {};
@@ -379,7 +383,7 @@ function AgentSetupForm({
           profiles: nextProfiles,
         };
         upsertAgent(nextAgent);
-        setDraftAgent(ensureProfiles(cloneAgent(nextAgent), resolveDisplayName(nextAgent.name)));
+        setDraftAgent(ensureProfiles(cloneAgent(nextAgent), resolveDisplayName(nextAgent.name), currentAgentModelConfig.default_model));
       }
       setSaveStatus('success');
     } catch (error) {
@@ -568,8 +572,10 @@ export default function AgentSetupPage() {
     if (!decodedKey) return null;
     const resolveDisplayName = (name: string) =>
       availableAgents.find((item) => item.name === name)?.display_name ?? '';
+    const resolveDefaultModel = (name: string) =>
+      availableAgents.find((item) => item.name === name)?.model_config?.default_model ?? '';
     if (savedAgent) {
-      return ensureProfiles(cloneAgent(savedAgent), resolveDisplayName(savedAgent.name));
+      return ensureProfiles(cloneAgent(savedAgent), resolveDisplayName(savedAgent.name), resolveDefaultModel(savedAgent.name));
     }
     if (discoveryAgent) {
       const draft: DraftAgent = {
@@ -583,7 +589,7 @@ export default function AgentSetupPage() {
         updated_at: new Date().toISOString(),
         isNew: true,
       };
-      return ensureProfiles(draft, resolveDisplayName(draft.name));
+      return ensureProfiles(draft, resolveDisplayName(draft.name), resolveDefaultModel(draft.name));
     }
     return null;
   }, [decodedKey, discoveryAgent, savedAgent, availableAgents]);

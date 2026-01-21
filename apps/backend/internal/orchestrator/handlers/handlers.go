@@ -176,6 +176,7 @@ type wsPromptTaskRequest struct {
 	TaskID        string `json:"task_id"`
 	TaskSessionID string `json:"session_id"`
 	Prompt        string `json:"prompt"`
+	Model         string `json:"model,omitempty"`
 }
 
 func (h *Handlers) wsPromptTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -197,6 +198,7 @@ func (h *Handlers) wsPromptTask(ctx context.Context, msg *ws.Message) (*ws.Messa
 		TaskID:        req.TaskID,
 		TaskSessionID: req.TaskSessionID,
 		Prompt:        req.Prompt,
+		Model:         req.Model,
 	})
 	if err != nil {
 		h.logger.Error("failed to send prompt", zap.String("task_id", req.TaskID), zap.Error(err))

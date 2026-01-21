@@ -27,7 +27,7 @@ type PromptResult struct {
 
 // OrchestratorService defines the interface for orchestrator operations
 type OrchestratorService interface {
-	PromptTask(ctx context.Context, taskID, sessionID, prompt string) (*PromptResult, error)
+	PromptTask(ctx context.Context, taskID, sessionID, prompt, model string) (*PromptResult, error)
 	ResumeTaskSession(ctx context.Context, taskID, taskSessionID string) error
 }
 
@@ -123,6 +123,7 @@ type wsAddMessageRequest struct {
 	TaskSessionID string `json:"session_id"`
 	Content       string `json:"content"`
 	AuthorID      string `json:"author_id,omitempty"`
+	Model         string `json:"model,omitempty"`
 }
 
 func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -184,9 +185,10 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		taskID := req.TaskID
 		sessionID := req.TaskSessionID
 		content := req.Content
+		model := req.Model
 		go func() {
 			promptCtx := context.WithoutCancel(ctx)
-			_, err := h.orchestrator.PromptTask(promptCtx, taskID, sessionID, content)
+			_, err := h.orchestrator.PromptTask(promptCtx, taskID, sessionID, content, model)
 			if err != nil {
 				if errors.Is(err, executor.ErrExecutionNotFound) {
 					if resumeErr := h.orchestrator.ResumeTaskSession(promptCtx, taskID, sessionID); resumeErr != nil {
@@ -197,7 +199,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 					} else {
 						for attempt := 0; attempt < 3; attempt++ {
 							time.Sleep(500 * time.Millisecond)
-							_, err = h.orchestrator.PromptTask(promptCtx, taskID, sessionID, content)
+							_, err = h.orchestrator.PromptTask(promptCtx, taskID, sessionID, content, model)
 							if err == nil {
 								break
 							}

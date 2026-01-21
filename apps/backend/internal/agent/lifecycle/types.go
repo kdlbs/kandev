@@ -83,6 +83,7 @@ type LaunchRequest struct {
 	Env             map[string]string // Additional env vars
 	ACPSessionID    string            // ACP session ID to resume, if available
 	Metadata        map[string]interface{}
+	ModelOverride   string // If set, use this model instead of the profile's model
 
 	// Worktree configuration
 	UseWorktree          bool   // Whether to use a Git worktree for isolation

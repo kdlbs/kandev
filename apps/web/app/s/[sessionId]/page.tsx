@@ -4,6 +4,7 @@ import {
   fetchTaskSession,
   fetchTask,
   listAgents,
+  listAvailableAgents,
   listRepositories,
   listTaskSessionMessages,
   listTaskSessions,
@@ -32,13 +33,15 @@ export default async function SessionPage({
     }
 
     task = await fetchTask(session.task_id, { cache: 'no-store' });
-    const [snapshot, agents, repositories, allSessionsResponse] = await Promise.all([
+    const [snapshot, agents, repositories, allSessionsResponse, availableAgentsResponse] = await Promise.all([
       fetchBoardSnapshot(task.board_id, { cache: 'no-store' }),
       listAgents({ cache: 'no-store' }),
       listRepositories(task.workspace_id, { cache: 'no-store' }),
       listTaskSessions(session.task_id, { cache: 'no-store' }),
+      listAvailableAgents({ cache: 'no-store' }).catch(() => ({ agents: [] })),
     ]);
     const allSessions = allSessionsResponse.sessions ?? [session];
+    const availableAgents = availableAgentsResponse.agents ?? [];
     let messagesResponse: ListMessagesResponse | null = null;
     try {
       messagesResponse = await listTaskSessionMessages(
@@ -128,6 +131,11 @@ export default async function SessionPage({
         agentsLoaded: true,
         executorsLoaded: false,
         environmentsLoaded: false,
+      },
+      availableAgents: {
+        items: availableAgents,
+        loaded: true,
+        loading: false,
       },
     };
   } catch (error) {

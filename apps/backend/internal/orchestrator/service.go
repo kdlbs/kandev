@@ -621,7 +621,7 @@ type PromptResult struct {
 }
 
 // PromptTask sends a follow-up prompt to a running agent for a task session.
-func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prompt string) (*PromptResult, error) {
+func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prompt string, model string) (*PromptResult, error) {
 	s.logger.Info("sending prompt to task agent",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID),
@@ -629,6 +629,38 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 	if sessionID == "" {
 		return nil, fmt.Errorf("session_id is required")
 	}
+
+	// Check if model switching is requested
+	if model != "" {
+		// Get the current session to check current model
+		session, err := s.repo.GetTaskSession(ctx, sessionID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get session for model switch: %w", err)
+		}
+
+		// Get current model from agent profile snapshot
+		if session.AgentProfileSnapshot != nil {
+			if currentModel, ok := session.AgentProfileSnapshot["model"].(string); ok && currentModel != model {
+				// Model switch needed - delegate to executor
+				s.logger.Info("model switch requested",
+					zap.String("task_id", taskID),
+					zap.String("session_id", sessionID),
+					zap.String("current_model", currentModel),
+					zap.String("new_model", model))
+
+				// SwitchModel will stop agent, rebuild with new model, restart, and send prompt
+				switchResult, err := s.executor.SwitchModel(ctx, taskID, sessionID, model, prompt)
+				if err != nil {
+					return nil, err
+				}
+				return &PromptResult{
+					StopReason:   switchResult.StopReason,
+					AgentMessage: switchResult.AgentMessage,
+				}, nil
+			}
+		}
+	}
+
 	s.setSessionRunning(ctx, taskID, sessionID, nil)
 	result, err := s.executor.Prompt(ctx, taskID, sessionID, prompt)
 	if err != nil {
@@ -1140,10 +1172,11 @@ func (s *Service) updateTaskSessionState(ctx context.Context, taskID, sessionID 
 		zap.String("new_state", string(nextState)))
 	if s.eventBus != nil {
 		_ = s.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(events.TaskSessionStateChanged, "task-session", map[string]interface{}{
-			"task_id":    taskID,
-			"session_id": sessionID,
-			"old_state":  string(oldState),
-			"new_state":  string(nextState),
+			"task_id":          taskID,
+			"session_id":       sessionID,
+			"old_state":        string(oldState),
+			"new_state":        string(nextState),
+			"agent_profile_id": session.AgentProfileID,
 		}))
 	}
 }
@@ -1293,9 +1326,10 @@ func (s *Service) handleContextWindowUpdated(ctx context.Context, data watcher.C
 			events.TaskSessionStateChanged,
 			"orchestrator",
 			map[string]interface{}{
-				"task_id":    data.TaskID,
-				"session_id": session.ID,
-				"new_state":  string(session.State),
+				"task_id":          data.TaskID,
+				"session_id":       session.ID,
+				"new_state":        string(session.State),
+				"agent_profile_id": session.AgentProfileID,
 				"metadata": map[string]interface{}{
 					"context_window": contextWindowData,
 				},

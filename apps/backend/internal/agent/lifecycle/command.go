@@ -32,8 +32,12 @@ func (cb *CommandBuilder) BuildCommand(agentConfig *registry.AgentTypeConfig, op
 	copy(cmd, agentConfig.Cmd)
 
 	// Append model flag if agent supports it and model is specified
+	// ModelFlag supports {model} placeholder, e.g. "--model {model}" or "-c model=\"{model}\""
 	if agentConfig.ModelFlag != "" && opts.Model != "" {
-		cmd = append(cmd, agentConfig.ModelFlag, opts.Model)
+		expanded := strings.ReplaceAll(agentConfig.ModelFlag, "{model}", opts.Model)
+		// Split on first space to separate flag from value (if combined)
+		parts := strings.SplitN(expanded, " ", 2)
+		cmd = append(cmd, parts...)
 	}
 
 	// Append session resume flag if:

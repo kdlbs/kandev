@@ -86,6 +86,24 @@ func (m *mockAgentManager) CancelAgent(ctx context.Context, sessionID string) er
 	return nil
 }
 
+func (m *mockAgentManager) GetAgentType(ctx context.Context, agentID string) (*v1.AgentType, error) {
+	return &v1.AgentType{
+		ID:      agentID,
+		Name:    "Mock Agent",
+		Enabled: true,
+	}, nil
+}
+
+func (m *mockAgentManager) ResolveAgentProfile(ctx context.Context, profileID string) (*executor.AgentProfileInfo, error) {
+	return &executor.AgentProfileInfo{
+		ProfileID:   profileID,
+		ProfileName: "Mock Profile",
+		AgentID:     "mock-agent",
+		AgentName:   "Mock Agent",
+		Model:       "mock-model",
+	}, nil
+}
+
 // testTaskRepository is an in-memory task repository for testing
 type testTaskRepository struct {
 	tasks map[string]*v1.Task
