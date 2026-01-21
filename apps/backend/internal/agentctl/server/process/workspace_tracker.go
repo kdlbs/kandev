@@ -641,8 +641,12 @@ func (wt *WorkspaceTracker) addDirectoryRecursive(dir string) error {
 
 // GetFileTree returns the file tree for a given path and depth
 func (wt *WorkspaceTracker) GetFileTree(reqPath string, depth int) (*types.FileTreeNode, error) {
-	// Resolve the full path
-	fullPath := filepath.Join(wt.workDir, reqPath)
+	// Resolve the full path with path traversal protection
+	fullPath := filepath.Join(wt.workDir, filepath.Clean(reqPath))
+	cleanWorkDir := filepath.Clean(wt.workDir)
+	if !strings.HasPrefix(fullPath, cleanWorkDir+string(os.PathSeparator)) && fullPath != cleanWorkDir {
+		return nil, fmt.Errorf("path traversal detected")
+	}
 
 	// Check if path exists
 	info, err := os.Stat(fullPath)
@@ -712,8 +716,12 @@ func (wt *WorkspaceTracker) buildFileTreeNode(fullPath, relPath string, info os.
 
 // GetFileContent returns the content of a file
 func (wt *WorkspaceTracker) GetFileContent(reqPath string) (string, int64, error) {
-	// Resolve the full path
-	fullPath := filepath.Join(wt.workDir, reqPath)
+	// Resolve the full path with path traversal protection
+	fullPath := filepath.Join(wt.workDir, filepath.Clean(reqPath))
+	cleanWorkDir := filepath.Clean(wt.workDir)
+	if !strings.HasPrefix(fullPath, cleanWorkDir+string(os.PathSeparator)) && fullPath != cleanWorkDir {
+		return "", 0, fmt.Errorf("path traversal detected")
+	}
 
 	// Check if file exists and is a regular file
 	info, err := os.Stat(fullPath)

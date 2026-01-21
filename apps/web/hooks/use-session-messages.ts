@@ -38,7 +38,6 @@ export function useSessionMessages(
 
   useEffect(() => {
     if (!taskSessionId) {
-      console.log('[useSessionMessages] no session_id yet, clearing messages');
       initialFetchStartRef.current = null;
       lastFetchedSessionIdRef.current = null;
       setIsWaitingForInitialMessages(false);
@@ -52,7 +51,6 @@ export function useSessionMessages(
       setIsWaitingForInitialMessages(false);
       return;
     }
-    if (messages.length > 0) return;
     if (initialFetchStartRef.current === null) {
       initialFetchStartRef.current = Date.now();
       setIsWaitingForInitialMessages(true);
@@ -63,13 +61,11 @@ export function useSessionMessages(
   useEffect(() => {
     if (!taskSessionId) return;
     if (connectionStatus !== 'connected') {
-      console.warn('[useSessionMessages] WebSocket not connected yet, waiting to fetch messages');
       return;
     }
 
     // Check if messages are already loaded (from SSR or previous fetch)
     if (messages.length > 0) {
-      console.log('[useSessionMessages] messages already loaded from SSR or cache, skipping fetch');
       lastFetchedSessionIdRef.current = taskSessionId;
       setIsWaitingForInitialMessages(false);
       return;
@@ -82,7 +78,6 @@ export function useSessionMessages(
     const fetchMessages = async () => {
       const client = getWebSocketClient();
       if (!client) {
-        console.warn('[useSessionMessages] WebSocket client not ready');
         return;
       }
 
@@ -94,13 +89,11 @@ export function useSessionMessages(
       }
 
       try {
-        console.log('[useSessionMessages] requesting message.list', { taskSessionId });
         const response = await client.request<{ messages: Message[] }>(
           'message.list',
           { session_id: taskSessionId },
           10000
         );
-        console.log('[useSessionMessages] message.list response:', JSON.stringify(response, null, 2));
         store.getState().setMessages(taskSessionId, response.messages ?? []);
         lastFetchedSessionIdRef.current = taskSessionId;
         if ((response.messages ?? []).length > 0) {
@@ -147,14 +140,12 @@ export function useSessionMessages(
     const fetchMessages = async () => {
       const client = getWebSocketClient();
       if (!client) {
-        console.warn('[useSessionMessages] WebSocket client not ready for state fetch');
         return;
       }
 
       setIsLoading(true);
       store.getState().setMessagesLoading(taskSessionId, true);
       try {
-        console.log('[useSessionMessages] requesting message.list after state change', { taskSessionId, taskSessionState });
         const response = await client.request<{ messages: Message[] }>(
           'message.list',
           { session_id: taskSessionId },

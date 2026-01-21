@@ -814,7 +814,7 @@ func (e *Executor) Prompt(ctx context.Context, taskID, sessionID string, prompt 
 		return nil, ErrExecutionNotFound
 	}
 
-	e.logger.Info("sending prompt to agent",
+	e.logger.Debug("sending prompt to agent",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID),
 		zap.String("agent_execution_id", session.AgentExecutionID),
@@ -970,7 +970,7 @@ func (e *Executor) SwitchModel(ctx context.Context, taskID, sessionID, newModel,
 
 // RespondToPermission sends a response to a permission request for a session
 func (e *Executor) RespondToPermission(ctx context.Context, sessionID, pendingID, optionID string, cancelled bool) error {
-	e.logger.Info("responding to permission request",
+	e.logger.Debug("responding to permission request",
 		zap.String("session_id", sessionID),
 		zap.String("pending_id", pendingID),
 		zap.String("option_id", optionID),

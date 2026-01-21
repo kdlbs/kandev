@@ -14,12 +14,6 @@ interface TaskPreviewPanelProps {
   onMaximize?: (task: Task, sessionId: string) => void;
 }
 
-// TODO: fix this
-const AGENTS = [
-  { id: "codex", label: "Codex" },
-  { id: "claude", label: "Claude Code" },
-];
-
 export function TaskPreviewPanel({ task, sessionId = null, onClose, onMaximize }: TaskPreviewPanelProps) {
   const { taskSessionId } = useTaskChatSession(task?.id ?? null);
   const activeSessionId = sessionId ?? taskSessionId;
@@ -77,7 +71,6 @@ export function TaskPreviewPanel({ task, sessionId = null, onClose, onMaximize }
       <div className="flex-1 min-h-0 p-4 flex flex-col">
         {task ? (
           <TaskChatPanel
-            agents={AGENTS}
             onSend={handleSendMessage}
             sessionId={activeSessionId}
           />

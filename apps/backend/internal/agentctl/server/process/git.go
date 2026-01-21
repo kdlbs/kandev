@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -18,6 +19,30 @@ import (
 
 // ErrOperationInProgress is returned when a git operation is already in progress.
 var ErrOperationInProgress = errors.New("git operation already in progress")
+
+// ErrInvalidBranchName is returned when a branch name contains invalid characters.
+var ErrInvalidBranchName = errors.New("invalid branch name")
+
+// validBranchNameRegex matches safe git branch names.
+// Allows alphanumeric, hyphens, underscores, slashes, and dots.
+// Disallows: spaces, shell metacharacters, and control characters.
+var validBranchNameRegex = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._/-]*$`)
+
+// isValidBranchName validates that a branch name is safe to use in git commands.
+func isValidBranchName(branch string) bool {
+	if branch == "" || len(branch) > 255 {
+		return false
+	}
+	// Disallow ".." to prevent path traversal
+	if strings.Contains(branch, "..") {
+		return false
+	}
+	// Disallow ending with ".lock"
+	if strings.HasSuffix(branch, ".lock") {
+		return false
+	}
+	return validBranchNameRegex.MatchString(branch)
+}
 
 // GitOperationResult represents the result of a git operation.
 type GitOperationResult struct {
@@ -237,6 +262,11 @@ func (g *GitOperator) Push(ctx context.Context, force bool, setUpstream bool) (*
 
 // Rebase performs a git rebase onto the specified base branch.
 func (g *GitOperator) Rebase(ctx context.Context, baseBranch string) (*GitOperationResult, error) {
+	// Validate branch name to prevent command injection
+	if !isValidBranchName(baseBranch) {
+		return nil, ErrInvalidBranchName
+	}
+
 	if !g.tryLock("rebase") {
 		return nil, ErrOperationInProgress
 	}
@@ -279,6 +309,11 @@ func (g *GitOperator) Rebase(ctx context.Context, baseBranch string) (*GitOperat
 
 // Merge performs a git merge of the specified base branch.
 func (g *GitOperator) Merge(ctx context.Context, baseBranch string) (*GitOperationResult, error) {
+	// Validate branch name to prevent command injection
+	if !isValidBranchName(baseBranch) {
+		return nil, ErrInvalidBranchName
+	}
+
 	if !g.tryLock("merge") {
 		return nil, ErrOperationInProgress
 	}

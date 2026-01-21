@@ -11,11 +11,6 @@ import type { OpenFileTab } from '@/lib/types/backend';
 import { FILE_EXTENSION_COLORS } from '@/lib/types/backend';
 import { useAppStore } from '@/components/state-provider';
 
-const AGENTS = [
-  { id: 'codex', label: 'Codex' },
-  { id: 'claude', label: 'Claude Code' },
-];
-
 type TaskCenterPanelProps = {
   selectedDiffPath: string | null;
   openFileRequest: OpenFileTab | null;
@@ -154,7 +149,7 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
 
         <TabsContent value="chat" className="mt-3 flex flex-col min-h-0 flex-1">
           {activeTaskId ? (
-            <TaskChatPanel agents={AGENTS} sessionId={sessionId} />
+            <TaskChatPanel sessionId={sessionId} />
           ) : (
             <div className="flex items-center justify-center h-full text-muted-foreground">
               No task selected

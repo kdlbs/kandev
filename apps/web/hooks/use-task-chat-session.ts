@@ -62,8 +62,8 @@ export function useTaskChatSession(taskId: string | null): UseTaskChatSessionRet
             updated_at: '',
           });
         }
-      } catch (err) {
-        console.error('[useTaskChatSession] Failed to check task execution:', err);
+      } catch {
+        // Failed to check task execution
       }
     };
 
