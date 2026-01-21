@@ -19,39 +19,70 @@ function formatNumber(num: number): string {
   return num.toLocaleString();
 }
 
-function getBarColor(efficiency: number): string {
-  if (efficiency >= 90) return 'bg-red-500';
-  if (efficiency >= 75) return 'bg-orange-500';
-  if (efficiency >= 50) return 'bg-yellow-500';
-  return 'bg-emerald-500';
+function getCircleColor(efficiency: number): string {
+  if (efficiency >= 90) return 'text-yellow-500';
+  if (efficiency >= 75) return 'text-yellow-300';
+  if (efficiency >= 50) return 'text-blue-500';
+  return 'text-blue-300';
 }
 
 export function TokenUsageDisplay({ contextWindow, className }: TokenUsageDisplayProps) {
-  const { size, used, remaining, efficiency } = contextWindow;
+  const { size, used, efficiency } = contextWindow;
 
   if (size === 0) return null;
 
   const usagePercent = Math.min(efficiency, 100);
+  const progress = usagePercent / 100;
+
+  // SVG circle parameters
+  const radius = 10;
+  const strokeWidth = 2.5;
+  const circumference = 2 * Math.PI * radius;
+  const strokeDashoffset = circumference * (1 - progress);
 
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <div className={cn('flex items-center gap-1.5 cursor-default', className)}>
-          <div className="w-16 h-1.5 rounded-full bg-muted/50 overflow-hidden">
-            <div
-              className={cn('h-full rounded-full transition-all', getBarColor(efficiency))}
-              style={{ width: `${usagePercent}%` }}
-            />
+        <div className={cn('flex items-center gap-2 cursor-help', className)}>
+          <div className="relative flex items-center justify-center">
+            <svg
+              viewBox="0 0 24 24"
+              className="w-5 h-5 -rotate-90"
+              aria-hidden="true"
+            >
+              {/* Background circle */}
+              <circle
+                cx="12"
+                cy="12"
+                r={radius}
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={strokeWidth}
+                className="text-muted"
+              />
+              {/* Progress circle */}
+              <circle
+                cx="12"
+                cy="12"
+                r={radius}
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={strokeWidth}
+                strokeLinecap="round"
+                strokeDasharray={circumference}
+                strokeDashoffset={strokeDashoffset}
+                className={cn(
+                  getCircleColor(efficiency),
+                  'transition-all duration-300 ease-out'
+                )}
+              />
+            </svg>
           </div>
-          <span className="text-[10px] text-muted-foreground tabular-nums">
-            {efficiency.toFixed(0)}%
-          </span>
         </div>
       </TooltipTrigger>
       <TooltipContent side="top">
         <div className="text-xs space-y-1">
-          <div className="font-medium">Context: {formatNumber(used)} / {formatNumber(size)}</div>
-          <div className="text-muted-foreground">{formatNumber(remaining)} remaining</div>
+          <div className="font-medium">Context: {efficiency.toFixed(0)}% ({formatNumber(used)} / {formatNumber(size)})</div>
         </div>
       </TooltipContent>
     </Tooltip>
