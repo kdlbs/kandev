@@ -24,7 +24,6 @@ export function UnsavedSaveButton({
   isLoading,
   status,
   onClick,
-  cleanLabel = 'Save',
   disabled,
   cleanLabel = 'Save',
 }: UnsavedSaveButtonProps) {

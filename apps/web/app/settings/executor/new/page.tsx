@@ -11,6 +11,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Separator } from '@kandev/ui/separator';
 import { createExecutorAction } from '@/app/actions/executors';
 import { getWebSocketClient } from '@/lib/ws/connection';
+import { useAppStore } from '@/components/state-provider';
+import type { Executor } from '@/lib/types/http';
 
 const EXECUTOR_TYPES = ['local_docker'] as const;
 type ExecutorType = (typeof EXECUTOR_TYPES)[number];
@@ -36,6 +38,8 @@ function ExecutorCreatePageContent() {
   const [name, setName] = useState('Local Docker');
   const [dockerHost, setDockerHost] = useState('unix:///var/run/docker.sock');
   const [isCreating, setIsCreating] = useState(false);
+  const executors = useAppStore((state) => state.executors.items);
+  const setExecutors = useAppStore((state) => state.setExecutors);
 
   const handleCreate = async () => {
     if (type !== 'local_docker') {
@@ -50,11 +54,10 @@ function ExecutorCreatePageContent() {
         config: { docker_host: dockerHost },
       };
       const client = getWebSocketClient();
-      if (client) {
-        await client.request('executor.create', payload);
-      } else {
-        await createExecutorAction(payload);
-      }
+      const created = client
+        ? await client.request<Executor>('executor.create', payload)
+        : await createExecutorAction(payload);
+      setExecutors([...executors.filter((item) => item.id !== created.id), created]);
       router.push('/settings/executors');
     } finally {
       setIsCreating(false);

@@ -19,8 +19,8 @@ import {
 } from '@kandev/ui/dialog';
 import { updateExecutorAction, deleteExecutorAction } from '@/app/actions/executors';
 import { getWebSocketClient } from '@/lib/ws/connection';
-import type { Executor } from '@/lib/types/http';
 import { useAppStore } from '@/components/state-provider';
+import type { Executor } from '@/lib/types/http';
 
 export default function ExecutorEditPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -51,6 +51,8 @@ type ExecutorEditFormProps = {
 
 function ExecutorEditForm({ executor }: ExecutorEditFormProps) {
   const router = useRouter();
+  const executors = useAppStore((state) => state.executors.items);
+  const setExecutors = useAppStore((state) => state.setExecutors);
   const [draft, setDraft] = useState<Executor>({ ...executor });
   const [savedExecutor, setSavedExecutor] = useState<Executor>({ ...executor });
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -105,6 +107,9 @@ function ExecutorEditForm({ executor }: ExecutorEditFormProps) {
         : await updateExecutorAction(draft.id, payload);
       setDraft(updated);
       setSavedExecutor(updated);
+      setExecutors(
+        executors.map((item) => (item.id === updated.id ? { ...item, ...updated } : item))
+      );
       // Stay on the executor page after saving so the user can continue editing.
     } finally {
       setIsSaving(false);
@@ -121,6 +126,7 @@ function ExecutorEditForm({ executor }: ExecutorEditFormProps) {
       } else {
         await deleteExecutorAction(draft.id);
       }
+      setExecutors(executors.filter((item) => item.id !== draft.id));
       router.push('/settings/executors');
     } finally {
       setIsDeleting(false);
