@@ -1,17 +1,17 @@
 'use client';
 
-import { useMemo } from 'react';
 import CodeMirror from '@uiw/react-codemirror';
 import { markdown } from '@codemirror/lang-markdown';
 import { EditorView, keymap, placeholder as cmPlaceholder } from '@codemirror/view';
-import { autocompletion, closeBrackets, closeBracketsKeymap, CompletionContext } from '@codemirror/autocomplete';
+import { autocompletion, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { Prec } from '@codemirror/state';
 import type { Extension } from '@codemirror/state';
 import { cn } from '@/lib/utils';
 import { SHORTCUTS } from '@/lib/keyboard/constants';
 import { matchesShortcut, shortcutToCodeMirrorKeybinding } from '@/lib/keyboard/utils';
-import { useCustomPrompts } from '@/hooks/use-custom-prompts';
+import { chatEditorTheme } from '@/lib/editor/chat-editor-theme';
+import { useChatCompletions } from '@/hooks/use-chat-completions';
 
 type TaskChatInputProps = {
   value: string;
@@ -33,124 +33,7 @@ export function TaskChatInput({
   planModeEnabled,
 }: TaskChatInputProps) {
   const submitKey = shortcutToCodeMirrorKeybinding(SHORTCUTS.SUBMIT);
-  const { prompts } = useCustomPrompts();
-
-  const promptOptions = useMemo(() => {
-    return prompts.map((prompt) => ({
-      id: prompt.id,
-      name: prompt.name,
-      content: prompt.content,
-    }));
-  }, [prompts]);
-
-  const truncatePreview = (text: string, max = 140) => {
-    if (text.length <= max) return text;
-    return `${text.slice(0, max)}…`;
-  };
-
-  const completionSource = (context: CompletionContext) => {
-    const slashMatch = context.matchBefore(/(^|\s)\/[\w-]*/);
-    if (slashMatch) {
-      const from = slashMatch.from + (slashMatch.text.startsWith('/') ? 0 : 1);
-      return {
-        from,
-        options: [
-          { label: '/plan', type: 'slash', info: 'Start a planning response' },
-          { label: '/todo', type: 'slash', info: 'Add a todo list' },
-          { label: '/review', type: 'slash', info: 'Request a review' },
-          { label: '/summarize', type: 'slash', info: 'Summarize the task' },
-        ],
-      };
-    }
-
-    const mentionMatch = context.matchBefore(/(^|\s)@[\w-]*/);
-    if (mentionMatch) {
-      const from = mentionMatch.from + (mentionMatch.text.startsWith('@') ? 0 : 1);
-      const trimmed = mentionMatch.text.trim();
-      const query = trimmed.startsWith('@') ? trimmed.slice(1).toLowerCase() : trimmed.toLowerCase();
-      const promptMatches = promptOptions
-        .filter((prompt) => prompt.name.toLowerCase().startsWith(query))
-        .map((prompt) => ({
-          label: `@${prompt.name}`,
-          type: 'prompt',
-          detail: 'Prompt',
-          info: truncatePreview(prompt.content),
-          apply: (view: EditorView, _completion: unknown, applyFrom: number, applyTo: number) => {
-            const insertText = `${prompt.content}\n`;
-            const cursorPos = applyFrom + insertText.length;
-            view.dispatch({
-              changes: { from: applyFrom, to: applyTo, insert: insertText },
-              selection: { anchor: cursorPos },
-            });
-            view.dispatch({ effects: EditorView.scrollIntoView(cursorPos) });
-          },
-        }));
-      return {
-        from,
-        // Future: add file path completions alongside prompts using additional providers.
-        options: [...promptMatches],
-      };
-    }
-
-    return null;
-  };
-
-  const editorTheme = EditorView.theme({
-    '&': {
-      color: 'var(--foreground)',
-      fontSize: '0.875rem',
-      backgroundColor: 'transparent',
-    },
-    '.cm-editor': {
-      borderRadius: 'inherit',
-      background: 'transparent',
-      outline: 'none',
-      boxShadow: 'none',
-      overflow: 'hidden',
-    },
-    '.cm-editor.cm-focused': {
-      outline: 'none',
-      boxShadow: 'none',
-    },
-    '.cm-scroller': {
-      fontFamily: 'var(--font-sans)',
-      borderRadius: 'inherit',
-      background: 'transparent',
-      backgroundColor: 'transparent',
-      overflow: 'auto',
-    },
-    '.cm-content': {
-      padding: '0.5rem',
-      fontFamily: 'var(--font-sans)',
-      color: 'var(--foreground)',
-      background: 'transparent',
-    },
-    '.cm-line': {
-      color: 'var(--foreground)',
-    },
-    '.cm-placeholder': {
-      color: 'var(--muted-foreground)',
-      opacity: '0.8',
-    },
-    '.cm-tooltip-autocomplete, .cm-tooltip-autocomplete li, .cm-completionDetail': {
-      fontSize: '0.875rem',
-    },
-    '.cm-cursor': {
-      borderLeftColor: 'var(--foreground)',
-    },
-    '.cm-selectionBackground': {
-      backgroundColor: 'var(--primary)',
-      opacity: '0.7',
-    },
-    '.cm-selectionMatch': {
-      backgroundColor: 'var(--primary)',
-      opacity: '0.6',
-    },
-    '.cm-selectionLayer .cm-selectionBackground': {
-      backgroundColor: 'var(--primary)',
-      opacity: '0.7',
-    },
-  });
+  const completionSource = useChatCompletions();
 
   const handleSubmitKey = () => {
     onSubmit();
@@ -166,7 +49,7 @@ export function TaskChatInput({
 
   const extensions: Extension[] = [
     EditorView.lineWrapping,
-    editorTheme,
+    chatEditorTheme,
     EditorView.domEventHandlers({
       keydown: (event) => {
         if (matchesShortcut(event, SHORTCUTS.SUBMIT)) {

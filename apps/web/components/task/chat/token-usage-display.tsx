@@ -2,10 +2,10 @@
 
 import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
 import { cn } from '@/lib/utils';
-import type { ContextWindowEntry } from '@/lib/state/store';
+import { useSessionContextWindow } from '@/hooks/use-session-context-window';
 
 type TokenUsageDisplayProps = {
-  contextWindow: ContextWindowEntry;
+  sessionId: string | null;
   className?: string;
 };
 
@@ -26,10 +26,12 @@ function getCircleColor(efficiency: number): string {
   return 'text-blue-300';
 }
 
-export function TokenUsageDisplay({ contextWindow, className }: TokenUsageDisplayProps) {
-  const { size, used, efficiency } = contextWindow;
+export function TokenUsageDisplay({ sessionId, className }: TokenUsageDisplayProps) {
+  const contextWindow = useSessionContextWindow(sessionId);
 
-  if (size === 0) return null;
+  if (!contextWindow || contextWindow.size === 0) return null;
+
+  const { size, used, efficiency } = contextWindow;
 
   const usagePercent = Math.min(efficiency, 100);
   const progress = usagePercent / 100;
@@ -82,7 +84,7 @@ export function TokenUsageDisplay({ contextWindow, className }: TokenUsageDispla
       </TooltipTrigger>
       <TooltipContent side="top">
         <div className="text-xs space-y-1">
-          <div className="font-medium">Context: {efficiency.toFixed(0)}% ({formatNumber(used)} / {formatNumber(size)})</div>
+          <div className="font-medium">{efficiency.toFixed(0)}% ({formatNumber(used)} / {formatNumber(size)})</div>
         </div>
       </TooltipContent>
     </Tooltip>
