@@ -38,6 +38,7 @@ import { useAppStore } from '@/components/state-provider';
 import { useRepositories } from '@/hooks/use-repositories';
 import { useRepositoryBranches } from '@/hooks/use-repository-branches';
 import { useSettingsData } from '@/hooks/use-settings-data';
+import { getWebSocketClient } from '@/lib/ws/connection';
 import { SHORTCUTS } from '@/lib/keyboard/constants';
 import { useKeyboardShortcutHandler } from '@/hooks/use-keyboard-shortcut';
 import { KeyboardShortcutTooltip } from '@/components/keyboard-shortcut-tooltip';
@@ -52,7 +53,7 @@ interface TaskCreateDialogProps {
   boardId: string | null;
   defaultColumnId: string | null;
   columns: Array<{ id: string; title: string }>;
-  editingTask?: { id: string; title: string; description?: string; columnId: string; state?: Task['state'] } | null;
+  editingTask?: { id: string; title: string; description?: string; columnId: string; state?: Task['state']; repositoryId?: string } | null;
   onSuccess?: (task: Task, mode: 'create' | 'edit', meta?: { taskSessionId?: string | null }) => void;
   onCreateSession?: (data: {
     prompt: string;
@@ -480,11 +481,49 @@ export function TaskCreateDialog({
     if (!trimmedTitle) return;
     if (isEditMode && editingTask) {
       try {
-        const updatedTask = await updateTask(editingTask.id, {
+        const updatePayload: Parameters<typeof updateTask>[1] = {
           title: trimmedTitle,
           description: description.trim(),
-        });
-        onSuccess?.(updatedTask, 'edit');
+        };
+
+        const needsRepository = startAgent && !editingTask.repositoryId;
+        if (repositoryId) {
+          updatePayload.repositories = [{ repository_id: repositoryId, base_branch: branch || undefined }];
+        } else if (selectedLocalRepo && needsRepository) {
+          console.warn('[TaskCreateDialog] Local repo selection in edit mode not fully supported');
+        }
+
+        const updatedTask = await updateTask(editingTask.id, updatePayload);
+
+        let taskSessionId: string | null = null;
+        if (startAgent && agentProfileId) {
+          const client = getWebSocketClient();
+          if (client) {
+            try {
+              interface StartResponse {
+                success: boolean;
+                task_id: string;
+                agent_instance_id: string;
+                session_id?: string;
+                state: string;
+              }
+              const response = await client.request<StartResponse>(
+                'orchestrator.start',
+                {
+                  task_id: editingTask.id,
+                  agent_profile_id: agentProfileId,
+                  prompt: description.trim() || '',
+                },
+                15000
+              );
+              taskSessionId = response?.session_id ?? null;
+            } catch (error) {
+              console.error('[TaskCreateDialog] failed to start agent:', error);
+            }
+          }
+        }
+
+        onSuccess?.(updatedTask, 'edit', { taskSessionId });
       } finally {
         setTitle('');
         setDescription('');
@@ -908,7 +947,6 @@ export function TaskCreateDialog({
                     type="checkbox"
                     checked={startAgent}
                     onChange={(e) => setStartAgent(e.target.checked)}
-                    disabled={isEditMode}
                     className="h-4 w-4 rounded border border-input text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   />
                   <TooltipProvider>
@@ -918,7 +956,11 @@ export function TaskCreateDialog({
                           Start Agent
                         </Label>
                       </TooltipTrigger>
-                      <TooltipContent>Start the agent on task creation.</TooltipContent>
+                      <TooltipContent>
+                        {isEditMode
+                          ? 'Start the agent after saving changes.'
+                          : 'Start the agent on task creation.'}
+                      </TooltipContent>
                     </Tooltip>
                   </TooltipProvider>
                 </div>
@@ -943,7 +985,8 @@ export function TaskCreateDialog({
                     : !title.trim() ||
                     !description.trim() ||
                     (!isEditMode && !repositoryId && !selectedLocalRepo) ||
-                    (startAgent && !agentProfileId)
+                    (startAgent && !agentProfileId) ||
+                    (isEditMode && startAgent && !editingTask?.repositoryId && !repositoryId)
                 }
               >
                 {isSessionMode ? 'Create Session' : submitLabel}
