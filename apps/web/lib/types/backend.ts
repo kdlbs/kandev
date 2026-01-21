@@ -155,6 +155,7 @@ export type TaskSessionStateChangedPayload = {
   session_id: string;
   old_state?: string;
   new_state: string;
+  metadata?: Record<string, unknown>;
 };
 
 export type TaskSessionWaitingForInputPayload = {

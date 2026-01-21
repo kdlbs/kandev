@@ -137,3 +137,20 @@ type ShellExitEventPayload struct {
 func (p ShellExitEventPayload) GetSessionID() string {
 	return p.SessionID
 }
+
+// ContextWindowEventPayload is the payload for context window update events.
+type ContextWindowEventPayload struct {
+	TaskID                 string  `json:"task_id"`
+	SessionID              string  `json:"session_id"`
+	AgentID                string  `json:"agent_id"`
+	ContextWindowSize      int64   `json:"context_window_size"`
+	ContextWindowUsed      int64   `json:"context_window_used"`
+	ContextWindowRemaining int64   `json:"context_window_remaining"`
+	ContextEfficiency      float64 `json:"context_efficiency"`
+	Timestamp              string  `json:"timestamp"`
+}
+
+// GetSessionID returns the session ID for this event (used by event routing).
+func (p ContextWindowEventPayload) GetSessionID() string {
+	return p.SessionID
+}

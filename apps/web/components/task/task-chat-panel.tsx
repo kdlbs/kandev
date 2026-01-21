@@ -27,8 +27,10 @@ import { useSessionMessages } from '@/hooks/use-session-messages';
 import { useSettingsData } from '@/hooks/use-settings-data';
 import { MessageRenderer } from '@/components/task/chat/message-renderer';
 import { RunningIndicator } from '@/components/task/chat/messages/running-indicator';
+import { TokenUsageDisplay } from '@/components/task/chat/token-usage-display';
 import { TodoSummary } from '@/components/task/chat/todo-summary';
 import { SessionsDropdown } from '@/components/task/sessions-dropdown';
+import { useSessionContextWindow } from '@/hooks/use-session-context-window';
 
 type AgentOption = {
   id: string;
@@ -81,6 +83,9 @@ export function TaskChatPanel({
   }, [session?.agent_profile_id, settingsAgents]);
 
   const sessionModel = sessionProfile?.model ?? null;
+
+  // Fetch context window usage for this session
+  const contextWindow = useSessionContextWindow(resolvedSessionId);
 
   // Fetch messages for this session
   const { messages, isLoading: messagesLoading } = useSessionMessages(resolvedSessionId);
@@ -338,7 +343,7 @@ export function TaskChatPanel({
 
       {/* Session info - shows agent state and model */}
       {session?.state && (
-        <div className="mt-2 flex items-center gap-2">
+        <div className="mt-2 flex flex-wrap items-center gap-2">
           <RunningIndicator state={session.state} />
           {/* Model indicator */}
           {sessionModel && (
@@ -420,6 +425,8 @@ export function TaskChatPanel({
               </TooltipTrigger>
               <TooltipContent>Toggle plan mode</TooltipContent>
             </Tooltip>
+            {/* Context window usage indicator */}
+            {contextWindow && <TokenUsageDisplay contextWindow={contextWindow} />}
           </div>
           <div className="flex items-center gap-2">
             <SessionsDropdown

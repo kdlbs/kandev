@@ -189,6 +189,18 @@ export type GitStatusState = {
   bySessionId: Record<string, GitStatusEntry>;
 };
 
+export type ContextWindowEntry = {
+  size: number;
+  used: number;
+  remaining: number;
+  efficiency: number;
+  timestamp?: string;
+};
+
+export type ContextWindowState = {
+  bySessionId: Record<string, ContextWindowEntry>;
+};
+
 export type Worktree = {
   id: string;
   sessionId: string;
@@ -270,6 +282,7 @@ export type AppState = {
   shell: ShellState;
   diffs: DiffState;
   gitStatus: GitStatusState;
+  contextWindow: ContextWindowState;
   connection: ConnectionState;
   messages: MessagesState;
   taskSessions: TaskSessionsState;
@@ -337,6 +350,7 @@ export type AppState = {
   setSessionWorktrees: (sessionId: string, worktreeIds: string[]) => void;
   setGitStatus: (sessionId: string, gitStatus: GitStatusEntry) => void;
   clearGitStatus: (sessionId: string) => void;
+  setContextWindow: (sessionId: string, contextWindow: ContextWindowEntry) => void;
   bumpAgentProfilesVersion: () => void;
 };
 
@@ -380,6 +394,7 @@ const defaultState: AppState = {
   shell: { outputs: {}, statuses: {} },
   diffs: { files: [] },
   gitStatus: { bySessionId: {} },
+  contextWindow: { bySessionId: {} },
   connection: { status: 'disconnected', error: null },
   messages: { bySession: {}, metaBySession: {} },
   taskSessions: { items: {} },
@@ -433,6 +448,7 @@ const defaultState: AppState = {
   setSessionWorktrees: () => undefined,
   setGitStatus: () => undefined,
   clearGitStatus: () => undefined,
+  setContextWindow: () => undefined,
   bumpAgentProfilesVersion: () => undefined,
 };
 
@@ -486,6 +502,7 @@ function mergeInitialState(
   | 'setSessionWorktrees'
   | 'setGitStatus'
   | 'clearGitStatus'
+  | 'setContextWindow'
   | 'bumpAgentProfilesVersion'
 > {
   if (!initialState) return defaultState;
@@ -515,6 +532,7 @@ function mergeInitialState(
     shell: { ...defaultState.shell, ...initialState.shell },
     diffs: { ...defaultState.diffs, ...initialState.diffs },
     gitStatus: { ...defaultState.gitStatus, ...initialState.gitStatus },
+    contextWindow: { ...defaultState.contextWindow, ...initialState.contextWindow },
     connection: { ...defaultState.connection, ...initialState.connection },
     messages: { ...defaultState.messages, ...initialState.messages },
     taskSessions: { ...defaultState.taskSessions, ...initialState.taskSessions },
@@ -882,6 +900,10 @@ export function createAppStore(initialState?: Partial<AppState>) {
       clearGitStatus: (sessionId) =>
         set((draft) => {
           delete draft.gitStatus.bySessionId[sessionId];
+        }),
+      setContextWindow: (sessionId, contextWindow) =>
+        set((draft) => {
+          draft.contextWindow.bySessionId[sessionId] = contextWindow;
         }),
       bumpAgentProfilesVersion: () =>
         set((draft) => {

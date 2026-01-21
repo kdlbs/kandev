@@ -110,6 +110,11 @@ const (
 	ShellExit   = "shell.exit"   // Shell process exited
 )
 
+// Event types for context window
+const (
+	ContextWindowUpdated = "context_window.updated" // Context window usage updated
+)
+
 // BuildShellOutputSubject creates a shell output subject for a specific session
 func BuildShellOutputSubject(sessionID string) string {
 	return ShellOutput + "." + sessionID
@@ -168,4 +173,14 @@ func BuildPermissionRequestSubject(sessionID string) string {
 // BuildPermissionRequestWildcardSubject creates a wildcard subscription for all permission request events
 func BuildPermissionRequestWildcardSubject() string {
 	return PermissionRequestReceived + ".*"
+}
+
+// BuildContextWindowSubject creates a context window subject for a specific session
+func BuildContextWindowSubject(sessionID string) string {
+	return ContextWindowUpdated + "." + sessionID
+}
+
+// BuildContextWindowWildcardSubject creates a wildcard subscription for all context window events
+func BuildContextWindowWildcardSubject() string {
+	return ContextWindowUpdated + ".*"
 }

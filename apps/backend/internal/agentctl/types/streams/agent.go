@@ -28,6 +28,9 @@ const (
 
 	// EventTypeSessionStatus indicates a session status update (resumed or new).
 	EventTypeSessionStatus = "session_status"
+
+	// EventTypeContextWindow indicates a context window update.
+	EventTypeContextWindow = "context_window"
 )
 
 // Session status constants for EventTypeSessionStatus events.
@@ -129,6 +132,20 @@ type AgentEvent struct {
 
 	// Data contains raw protocol-specific extensions.
 	Data map[string]interface{} `json:"data,omitempty"`
+
+	// --- Context window fields ---
+
+	// ContextWindowSize is the total available tokens in the context window.
+	ContextWindowSize int64 `json:"context_window_size,omitempty"`
+
+	// ContextWindowUsed is the number of tokens currently consumed.
+	ContextWindowUsed int64 `json:"context_window_used,omitempty"`
+
+	// ContextWindowRemaining is the number of available tokens left.
+	ContextWindowRemaining int64 `json:"context_window_remaining,omitempty"`
+
+	// ContextEfficiency is the percentage utilization (0-100).
+	ContextEfficiency float64 `json:"context_efficiency,omitempty"`
 }
 
 // PlanEntry represents an entry in the agent's execution plan.
