@@ -152,6 +152,24 @@ func (p *EventPublisher) PublishAgentStreamEvent(execution *AgentExecution, even
 	}
 }
 
+// PublishAgentStreamEventPayload publishes a pre-built agent stream event payload.
+// This is used for streaming message events where the payload is constructed by the caller.
+func (p *EventPublisher) PublishAgentStreamEventPayload(payload *AgentStreamEventPayload) {
+	if p.eventBus == nil {
+		return
+	}
+
+	busEvent := bus.NewEvent(events.AgentStream, "agent-manager", *payload)
+	subject := events.BuildAgentStreamSubject(payload.SessionID)
+
+	if err := p.eventBus.Publish(context.Background(), subject, busEvent); err != nil {
+		p.logger.Error("failed to publish agent stream event payload",
+			zap.String("task_id", payload.TaskID),
+			zap.String("session_id", payload.SessionID),
+			zap.Error(err))
+	}
+}
+
 // PublishGitStatus publishes a git status update to the event bus.
 func (p *EventPublisher) PublishGitStatus(execution *AgentExecution, update *agentctl.GitStatusUpdate) {
 	if p.eventBus == nil {

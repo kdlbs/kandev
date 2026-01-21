@@ -17,7 +17,6 @@ export function EditorsMenu({ activeSessionId }: EditorsMenuProps) {
   const openEditor = useOpenSessionInEditor(activeSessionId ?? null);
   const { editors } = useEditors();
   const defaultEditorId = useAppStore((state) => state.userSettings.defaultEditorId);
-  console.warn("here[17]: editors-menu.tsx:19: defaultEditorId=", defaultEditorId)
 
   const enabledEditors = useMemo(
     () =>
@@ -28,7 +27,6 @@ export function EditorsMenu({ activeSessionId }: EditorsMenuProps) {
       }),
     [editors]
   );
-  console.warn("here[15]: editors-menu.tsx:21: enabledEditors=", enabledEditors)
 
   const resolvedEditorId = useMemo(() => {
     if (defaultEditorId && enabledEditors.some((editor) => editor.id === defaultEditorId)) {
@@ -36,7 +34,6 @@ export function EditorsMenu({ activeSessionId }: EditorsMenuProps) {
     }
     return enabledEditors[0]?.id ?? '';
   }, [defaultEditorId, enabledEditors]);
-  console.warn("here[16]: editors-menu.tsx:32: resolvedEditorId=", resolvedEditorId)
 
   return (
     <div className="inline-flex rounded-md border border-border overflow-hidden">

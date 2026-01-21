@@ -291,11 +291,13 @@ func (sm *SessionManager) SendPrompt(
 		}
 	}
 
-	// Clear buffers before starting prompt
+	// Clear buffers and streaming state before starting prompt
+	// This ensures each prompt starts fresh and doesn't append to previous message
 	execution.messageMu.Lock()
 	execution.messageBuffer.Reset()
 	execution.reasoningBuffer.Reset()
 	execution.summaryBuffer.Reset()
+	execution.currentMessageID = "" // Clear streaming message ID for new turn
 	execution.messageMu.Unlock()
 
 	sm.logger.Info("sending prompt to agent",
@@ -311,12 +313,14 @@ func (sm *SessionManager) SendPrompt(
 		return nil, fmt.Errorf("prompt failed: %w", err)
 	}
 
-	// Extract accumulated content from buffers
+	// Extract accumulated content from buffers and handle streaming message completion
 	execution.messageMu.Lock()
 	agentMessage := execution.messageBuffer.String()
 	execution.messageBuffer.Reset()
 	execution.reasoningBuffer.Reset()
 	execution.summaryBuffer.Reset()
+	currentMsgID := execution.currentMessageID
+	execution.currentMessageID = "" // Clear for next turn
 	execution.messageMu.Unlock()
 
 	stopReason := ""
@@ -324,19 +328,42 @@ func (sm *SessionManager) SendPrompt(
 		stopReason = string(resp.StopReason)
 	}
 
+	trimmedMessage := strings.TrimSpace(agentMessage)
+
 	sm.logger.Info("ACP prompt completed",
 		zap.String("execution_id", execution.ID),
 		zap.String("stop_reason", stopReason),
-		zap.Int("message_length", len(agentMessage)))
+		zap.Int("message_length", len(trimmedMessage)),
+		zap.Bool("has_streaming_msg", currentMsgID != ""))
 
-	// Publish complete event with accumulated agent message
-	// This is needed for ACP where Prompt() is synchronous and there's no
-	// separate "complete" notification from the agent
+	// Handle remaining content from the buffer
 	if sm.eventPublisher != nil {
+		// If there's remaining content and an active streaming message,
+		// append it to the streaming message instead of creating a new one
+		if trimmedMessage != "" && currentMsgID != "" {
+			// Publish streaming append with the remaining content
+			sm.eventPublisher.PublishAgentStreamEventPayload(&AgentStreamEventPayload{
+				Type:      "agent/event",
+				Timestamp: time.Now().UTC().Format(time.RFC3339),
+				AgentID:   execution.AgentProfileID,
+				TaskID:    execution.TaskID,
+				SessionID: execution.SessionID,
+				Data: &AgentStreamEventData{
+					Type:      "message_streaming",
+					MessageID: currentMsgID,
+					IsAppend:  true,
+					Text:      trimmedMessage,
+				},
+			})
+			// Content was handled via streaming, publish complete with empty text
+			trimmedMessage = ""
+		}
+
+		// Publish complete event (with remaining text only if no streaming message was active)
 		completeEvent := streams.AgentEvent{
 			Type:      streams.EventTypeComplete,
 			SessionID: execution.ACPSessionID,
-			Text:      strings.TrimSpace(agentMessage),
+			Text:      trimmedMessage,
 		}
 		sm.eventPublisher.PublishAgentStreamEvent(execution, completeEvent)
 	}

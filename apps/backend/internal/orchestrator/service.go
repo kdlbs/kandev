@@ -56,6 +56,10 @@ type MessageCreator interface {
 	CreateSessionMessage(ctx context.Context, taskID, content, agentSessionID, messageType string, metadata map[string]interface{}, requestsInput bool) error
 	CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, pendingID, toolCallID, title string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}) (string, error)
 	UpdatePermissionMessage(ctx context.Context, sessionID, pendingID, status string) error
+	// CreateAgentMessageStreaming creates a new agent message with a pre-generated ID for streaming updates
+	CreateAgentMessageStreaming(ctx context.Context, messageID, taskID, content, agentSessionID string) error
+	// AppendAgentMessage appends additional content to an existing streaming message
+	AppendAgentMessage(ctx context.Context, messageID, additionalContent string) error
 }
 
 // Service is the main orchestrator service
@@ -124,9 +128,9 @@ func NewService(
 
 	// Create the service (watcher will be created after we have handlers)
 	s := &Service{
-		config:         cfg,
-		logger:         svcLogger,
-		eventBus:       eventBus,
+		config:               cfg,
+		logger:               svcLogger,
+		eventBus:             eventBus,
 		taskRepo:       taskRepo,
 		repo:           repo,
 		agentManager:   agentManager,
@@ -403,7 +407,7 @@ func (s *Service) GetStatus() *Status {
 
 // EnqueueTask manually adds a task to the queue
 func (s *Service) EnqueueTask(ctx context.Context, task *v1.Task) error {
-	s.logger.Info("manually enqueueing task",
+	s.logger.Debug("manually enqueueing task",
 		zap.String("task_id", task.ID),
 		zap.String("title", task.Title))
 	return s.scheduler.EnqueueTask(task)
@@ -411,7 +415,7 @@ func (s *Service) EnqueueTask(ctx context.Context, task *v1.Task) error {
 
 // StartTask manually starts agent execution for a task
 func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID string, priority int, prompt string) (*executor.TaskExecution, error) {
-	s.logger.Info("manually starting task",
+	s.logger.Debug("manually starting task",
 		zap.String("task_id", taskID),
 		zap.String("agent_profile_id", agentProfileID),
 		zap.Int("priority", priority),
@@ -471,7 +475,7 @@ func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID s
 
 // ResumeTaskSession restarts a specific task session using its stored worktree.
 func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID string) (*executor.TaskExecution, error) {
-	s.logger.Info("resuming task session",
+	s.logger.Debug("resuming task session",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID))
 
@@ -504,7 +508,7 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 	// Preserve persisted task/session state; resume should not mutate state/columns.
 	execution.SessionState = v1.TaskSessionState(session.State)
 
-	s.logger.Info("task session resumed and ready for input",
+	s.logger.Debug("task session resumed and ready for input",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID))
 
@@ -513,7 +517,7 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 
 // GetTaskSessionStatus returns the status of a task session including whether it's resumable
 func (s *Service) GetTaskSessionStatus(ctx context.Context, taskID, sessionID string) (dto.TaskSessionStatusResponse, error) {
-	s.logger.Info("checking task session status",
+	s.logger.Debug("checking task session status",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID))
 
@@ -622,7 +626,7 @@ type PromptResult struct {
 
 // PromptTask sends a follow-up prompt to a running agent for a task session.
 func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prompt string, model string) (*PromptResult, error) {
-	s.logger.Info("sending prompt to task agent",
+	s.logger.Debug("sending prompt to task agent",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID),
 		zap.Int("prompt_length", len(prompt)))
@@ -642,7 +646,7 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 		if session.AgentProfileSnapshot != nil {
 			if currentModel, ok := session.AgentProfileSnapshot["model"].(string); ok && currentModel != model {
 				// Model switch needed - delegate to executor
-				s.logger.Info("model switch requested",
+				s.logger.Debug("model switch requested",
 					zap.String("task_id", taskID),
 					zap.String("session_id", sessionID),
 					zap.String("current_model", currentModel),
@@ -661,7 +665,7 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 		}
 	}
 
-	s.setSessionRunning(ctx, taskID, sessionID, nil)
+	s.setSessionRunning(ctx, taskID, sessionID)
 	result, err := s.executor.Prompt(ctx, taskID, sessionID, prompt)
 	if err != nil {
 		return nil, err
@@ -674,7 +678,7 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 
 // RespondToPermission sends a response to a permission request for a session
 func (s *Service) RespondToPermission(ctx context.Context, sessionID, pendingID, optionID string, cancelled bool) error {
-	s.logger.Info("responding to permission request",
+	s.logger.Debug("responding to permission request",
 		zap.String("session_id", sessionID),
 		zap.String("pending_id", pendingID),
 		zap.String("option_id", optionID),
@@ -711,7 +715,7 @@ func (s *Service) RespondToPermission(ctx context.Context, sessionID, pendingID,
 				zap.Error(err))
 			return nil
 		}
-		s.setSessionRunning(ctx, session.TaskID, sessionID, nil)
+		s.setSessionRunning(ctx, session.TaskID, sessionID)
 	}
 
 	return nil
@@ -720,7 +724,7 @@ func (s *Service) RespondToPermission(ctx context.Context, sessionID, pendingID,
 // CancelAgent interrupts the current agent turn without terminating the process,
 // allowing the user to send a new prompt.
 func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
-	s.logger.Info("cancelling agent turn", zap.String("session_id", sessionID))
+	s.logger.Debug("cancelling agent turn", zap.String("session_id", sessionID))
 
 	// Fetch session for state updates and message creation
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
@@ -760,7 +764,7 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 		}
 	}
 
-	s.logger.Info("agent turn cancelled", zap.String("session_id", sessionID))
+	s.logger.Debug("agent turn cancelled", zap.String("session_id", sessionID))
 	return nil
 }
 
@@ -805,20 +809,7 @@ func (s *Service) RegisterStreamHandler(handler func(payload *lifecycle.AgentStr
 	s.logger.Debug("registered stream handler", zap.Int("total_handlers", len(s.streamHandlers)))
 }
 
-// UnregisterStreamHandler removes a stream handler
-func (s *Service) UnregisterStreamHandler(handler func(payload *lifecycle.AgentStreamEventPayload)) {
-	s.streamMu.Lock()
-	defer s.streamMu.Unlock()
 
-	// Find and remove the handler by comparing function pointers
-	// Note: This uses a simple approach - in production you might want to use handler IDs
-	for i := range s.streamHandlers {
-		// We can't directly compare functions, so we'll keep the handler in the list
-		// In a real implementation, you'd use unique handler IDs
-		_ = i
-	}
-	s.logger.Debug("unregister stream handler called")
-}
 
 // broadcastStreamEvent broadcasts an agent stream event to all registered handlers
 func (s *Service) broadcastStreamEvent(payload *lifecycle.AgentStreamEventPayload) {
@@ -913,7 +904,7 @@ func (s *Service) handleACPSessionCreated(ctx context.Context, data watcher.ACPS
 		return
 	}
 
-	s.logger.Info("stored resume token for task session",
+	s.logger.Debug("stored resume token for task session",
 		zap.String("task_id", data.TaskID),
 		zap.String("session_id", sessionID),
 		zap.String("resume_token", data.ACPSessionID))
@@ -984,6 +975,10 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 
 	// Handle different event types
 	switch eventType {
+	case "message_streaming":
+		// Handle streaming message events (incremental text updates)
+		s.handleMessageStreamingEvent(ctx, payload)
+
 	case "tool_call":
 		// Create tool call message when a tool call starts
 		// If there's accumulated text, save it as an agent message first
@@ -1077,7 +1072,7 @@ func (s *Service) handleToolCallEvent(ctx context.Context, payload *lifecycle.Ag
 				zap.String("tool_call_id", payload.Data.ToolCallID),
 				zap.Error(err))
 		} else {
-			s.logger.Info("created tool call message",
+			s.logger.Debug("created tool call message",
 				zap.String("task_id", payload.TaskID),
 				zap.String("tool_call_id", payload.Data.ToolCallID))
 		}
@@ -1098,9 +1093,59 @@ func (s *Service) saveAgentTextIfPresent(ctx context.Context, payload *lifecycle
 				zap.String("task_id", payload.TaskID),
 				zap.Error(err))
 		} else {
-			s.logger.Info("created agent message",
+			s.logger.Debug("created agent message",
 				zap.String("task_id", payload.TaskID),
 				zap.Int("message_length", len(payload.Data.Text)))
+		}
+	}
+}
+
+// handleMessageStreamingEvent handles streaming message events for real-time text updates.
+// It creates a new message on first chunk (IsAppend=false) or appends to existing (IsAppend=true).
+func (s *Service) handleMessageStreamingEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
+	if payload.Data.Text == "" || payload.SessionID == "" {
+		return
+	}
+
+	if s.messageCreator == nil {
+		return
+	}
+
+	// MessageID is pre-generated by the manager to avoid race conditions
+	messageID := payload.Data.MessageID
+	if messageID == "" {
+		s.logger.Warn("streaming message event missing message ID",
+			zap.String("task_id", payload.TaskID),
+			zap.String("session_id", payload.SessionID))
+		return
+	}
+
+	if payload.Data.IsAppend {
+		// Append to existing message
+		if err := s.messageCreator.AppendAgentMessage(ctx, messageID, payload.Data.Text); err != nil {
+			s.logger.Error("failed to append to streaming message",
+				zap.String("task_id", payload.TaskID),
+				zap.String("message_id", messageID),
+				zap.Error(err))
+		} else {
+			s.logger.Debug("appended to streaming message",
+				zap.String("task_id", payload.TaskID),
+				zap.String("message_id", messageID),
+				zap.Int("content_length", len(payload.Data.Text)))
+		}
+	} else {
+		// Create new streaming message with the pre-generated ID
+		if err := s.messageCreator.CreateAgentMessageStreaming(ctx, messageID, payload.TaskID, payload.Data.Text, payload.SessionID); err != nil {
+			s.logger.Error("failed to create streaming message",
+				zap.String("task_id", payload.TaskID),
+				zap.String("message_id", messageID),
+				zap.Error(err))
+		} else {
+			s.logger.Debug("created streaming message",
+				zap.String("task_id", payload.TaskID),
+				zap.String("session_id", payload.SessionID),
+				zap.String("message_id", messageID),
+				zap.Int("content_length", len(payload.Data.Text)))
 		}
 	}
 }
@@ -1165,7 +1210,7 @@ func (s *Service) updateTaskSessionState(ctx context.Context, taskID, sessionID 
 			zap.String("state", string(nextState)),
 			zap.Error(err))
 	}
-	s.logger.Info("task session state updated",
+	s.logger.Debug("task session state updated",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID),
 		zap.String("old_state", string(oldState)),
@@ -1181,7 +1226,7 @@ func (s *Service) updateTaskSessionState(ctx context.Context, taskID, sessionID 
 	}
 }
 
-func (s *Service) setSessionWaitingForInput(ctx context.Context, taskID, sessionID string, _ *v1.TaskState) {
+func (s *Service) setSessionWaitingForInput(ctx context.Context, taskID, sessionID string) {
 	s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateWaitingForInput, "", false)
 
 	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateReview); err != nil {
@@ -1194,7 +1239,7 @@ func (s *Service) setSessionWaitingForInput(ctx context.Context, taskID, session
 	}
 }
 
-func (s *Service) setSessionRunning(ctx context.Context, taskID, sessionID string, _ *v1.TaskState) {
+func (s *Service) setSessionRunning(ctx context.Context, taskID, sessionID string) {
 	s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateRunning, "", true)
 
 	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateInProgress); err != nil {
@@ -1215,7 +1260,7 @@ func (s *Service) finalizeAgentReady(taskID, sessionID string) {
 		return
 	}
 
-	s.setSessionWaitingForInput(ctx, taskID, sessionID, nil)
+	s.setSessionWaitingForInput(ctx, taskID, sessionID)
 }
 
 // handleGitStatusUpdated handles git status updates and persists them to agent session metadata
@@ -1340,7 +1385,7 @@ func (s *Service) handleContextWindowUpdated(ctx context.Context, data watcher.C
 
 // handlePermissionRequest handles permission request events and saves as message
 func (s *Service) handlePermissionRequest(ctx context.Context, data watcher.PermissionRequestData) {
-	s.logger.Info("handling permission request",
+	s.logger.Debug("handling permission request",
 		zap.String("task_id", data.TaskID),
 		zap.String("pending_id", data.PendingID),
 		zap.String("title", data.Title))
@@ -1352,7 +1397,7 @@ func (s *Service) handlePermissionRequest(ctx context.Context, data watcher.Perm
 		return
 	}
 
-	s.setSessionWaitingForInput(ctx, data.TaskID, data.TaskSessionID, nil)
+	s.setSessionWaitingForInput(ctx, data.TaskID, data.TaskSessionID)
 
 	if s.messageCreator != nil {
 		_, err := s.messageCreator.CreatePermissionRequestMessage(
@@ -1372,7 +1417,7 @@ func (s *Service) handlePermissionRequest(ctx context.Context, data watcher.Perm
 				zap.String("pending_id", data.PendingID),
 				zap.Error(err))
 		} else {
-			s.logger.Info("created permission request message",
+			s.logger.Debug("created permission request message",
 				zap.String("task_id", data.TaskID),
 				zap.String("pending_id", data.PendingID))
 		}

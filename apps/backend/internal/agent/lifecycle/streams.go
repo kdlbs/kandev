@@ -43,7 +43,7 @@ func (sm *StreamManager) ConnectAll(execution *AgentExecution, ready chan<- stru
 // ReconnectAll reconnects to all streams (used after backend restart).
 // This waits for agentctl to be ready before connecting to streams.
 func (sm *StreamManager) ReconnectAll(execution *AgentExecution) {
-	sm.logger.Info("reconnecting to agent streams after recovery",
+	sm.logger.Debug("reconnecting to agent streams after recovery",
 		zap.String("instance_id", execution.ID),
 		zap.String("task_id", execution.TaskID))
 
@@ -64,7 +64,7 @@ func (sm *StreamManager) ReconnectAll(execution *AgentExecution) {
 	// Reconnect to WebSocket streams
 	sm.ConnectAll(execution, nil)
 
-	sm.logger.Info("agent streams reconnected",
+	sm.logger.Debug("agent streams reconnected",
 		zap.String("instance_id", execution.ID),
 		zap.String("task_id", execution.TaskID))
 }
@@ -151,7 +151,7 @@ func (sm *StreamManager) connectWorkspaceStream(execution *AgentExecution) {
 
 		// Store the workspace stream on the execution for shell I/O
 		execution.SetWorkspaceStream(ws)
-		sm.logger.Info("connected to unified workspace stream",
+		sm.logger.Debug("connected to unified workspace stream",
 			zap.String("instance_id", execution.ID))
 
 		// Wait for the stream to close (it stays open until disconnected)

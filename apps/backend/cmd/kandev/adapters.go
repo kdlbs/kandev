@@ -359,3 +359,20 @@ func (a *messageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Conte
 func (a *messageCreatorAdapter) UpdatePermissionMessage(ctx context.Context, sessionID, pendingID, status string) error {
 	return a.svc.UpdatePermissionMessage(ctx, sessionID, pendingID, status)
 }
+
+// CreateAgentMessageStreaming creates a new agent message with a pre-generated ID.
+// This is used for real-time streaming where content arrives incrementally.
+func (a *messageCreatorAdapter) CreateAgentMessageStreaming(ctx context.Context, messageID, taskID, content, agentSessionID string) error {
+	_, err := a.svc.CreateMessageWithID(ctx, messageID, &taskservice.CreateMessageRequest{
+		TaskSessionID: agentSessionID,
+		TaskID:        taskID,
+		Content:       content,
+		AuthorType:    "agent",
+	})
+	return err
+}
+
+// AppendAgentMessage appends additional content to an existing streaming message.
+func (a *messageCreatorAdapter) AppendAgentMessage(ctx context.Context, messageID, additionalContent string) error {
+	return a.svc.AppendMessageContent(ctx, messageID, additionalContent)
+}

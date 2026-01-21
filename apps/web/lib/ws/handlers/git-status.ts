@@ -9,14 +9,6 @@ export function registerGitStatusHandlers(store: StoreApi<AppState>): WsHandlers
       if (!payload.session_id) {
         return;
       }
-      console.log('[WS] git.status received:', {
-        session_id: payload.session_id,
-        branch: payload.branch,
-        modified: payload.modified.length,
-        added: payload.added.length,
-        deleted: payload.deleted.length,
-        untracked: payload.untracked.length,
-      });
       store.getState().setGitStatus(payload.session_id, {
         branch: payload.branch,
         remote_branch: payload.remote_branch ?? null,

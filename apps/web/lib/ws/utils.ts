@@ -24,10 +24,3 @@ export function isValidBackendUrl(url: string): boolean {
     return false;
   }
 }
-
-/**
- * Generate unique message ID
- */
-export function generateMessageId(): string {
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
-}

@@ -55,8 +55,7 @@ export function useTaskSession(taskId: string | null) {
           setFetchedSessionId(response.sessions[0]?.id ?? null);
           setIsLoading(false);
         }
-      } catch (error) {
-        console.error('Failed to load task sessions:', error);
+      } catch {
         if (isActive) {
           setFetchedSessionId(null);
           setIsLoading(false);

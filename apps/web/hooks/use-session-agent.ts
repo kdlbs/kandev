@@ -77,7 +77,6 @@ export function useSessionAgent(task: Task | null): UseSessionAgentReturn {
           session_id?: string;
         }>('task.execution', { task_id: task.id });
 
-        console.log('[useSessionAgent] Task execution check:', response);
         if (response.has_execution) {
           setIsAgentRunning(true);
           if (response.state) {
@@ -91,8 +90,8 @@ export function useSessionAgent(task: Task | null): UseSessionAgentReturn {
           setAgentSessionId(null);
           setTaskSessionState(null);
         }
-      } catch (err) {
-        console.error('[useSessionAgent] Failed to check task execution:', err);
+      } catch {
+        // Failed to check task execution
       }
     };
 
@@ -124,17 +123,11 @@ export function useSessionAgent(task: Task | null): UseSessionAgentReturn {
         worktree_path?: string;
         worktree_branch?: string;
       }
-      console.log('[useSessionAgent] orchestrator.start request', {
-        taskId: task.id,
-        agentProfileId,
-        promptLength: prompt?.length ?? 0,
-      });
       const response = await client.request<StartResponse>('orchestrator.start', {
         task_id: task.id,
         agent_profile_id: agentProfileId,
         prompt: prompt ?? task.description ?? '',
       }, 15000);
-      console.log('[useSessionAgent] orchestrator.start response', response);
       setIsAgentRunning(true);
       setTaskSessionState(response.state as TaskSessionState);
       if (response?.session_id) {
@@ -146,8 +139,8 @@ export function useSessionAgent(task: Task | null): UseSessionAgentReturn {
         setWorktreePath(response.worktree_path);
         setWorktreeBranch(response.worktree_branch ?? null);
       }
-    } catch (error) {
-      console.error('Failed to start agent:', error);
+    } catch {
+      // Failed to start agent
     } finally {
       setIsAgentLoading(false);
     }
@@ -165,8 +158,8 @@ export function useSessionAgent(task: Task | null): UseSessionAgentReturn {
       setIsAgentRunning(false);
       setAgentSessionId(null);
       setTaskSessionState(null);
-    } catch (error) {
-      console.error('Failed to stop agent:', error);
+    } catch {
+      // Failed to stop agent
     } finally {
       setIsAgentLoading(false);
     }

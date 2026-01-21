@@ -71,12 +71,10 @@ export function useSessionResumption(
 
       try {
         // 1. Check session status
-        console.log('[useSessionResumption] Checking session status:', { taskId, sessionId });
         const status = await client.request<SessionStatus>('task.session.status', {
           task_id: taskId,
           session_id: sessionId,
         });
-        console.log('[useSessionResumption] Session status:', status);
         setSessionStatus(status);
 
         if (status.error) {
@@ -101,14 +99,12 @@ export function useSessionResumption(
 
         // 2. If agent is already running, we're good
         if (status.is_agent_running) {
-          console.log('[useSessionResumption] Agent already running');
           setResumptionState('running');
           return;
         }
 
         // 3. If session needs resume and is resumable, auto-resume
         if (status.needs_resume && status.is_resumable) {
-          console.log('[useSessionResumption] Auto-resuming session');
           setResumptionState('resuming');
 
           const resumeResp = await client.request<{
@@ -123,7 +119,6 @@ export function useSessionResumption(
           }, 30000);
 
           if (resumeResp.success) {
-            console.log('[useSessionResumption] Session resumed successfully');
             setResumptionState('resumed');
             if (taskId && sessionId && resumeResp.state) {
               setTaskSession({
@@ -142,20 +137,17 @@ export function useSessionResumption(
               setWorktreeBranch(resumeResp.worktree_branch);
             }
           } else {
-            console.error('[useSessionResumption] Resume failed:', resumeResp.error);
             setResumptionState('error');
             setError(resumeResp.error ?? 'Failed to resume session');
           }
         } else if (!status.is_resumable) {
           // Session cannot be resumed (terminal state or missing data)
-          console.log('[useSessionResumption] Session not resumable');
           setResumptionState('idle');
         } else {
           // Session exists but doesn't need resume (already running or other state)
           setResumptionState('idle');
         }
       } catch (err) {
-        console.error('[useSessionResumption] Error checking/resuming session:', err);
         setResumptionState('error');
         setError(err instanceof Error ? err.message : 'Unknown error');
       }

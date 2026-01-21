@@ -14,6 +14,7 @@ import type {
   TaskState as TaskStatus,
   TaskSession,
 } from '@/lib/types/http';
+import type { FileInfo } from '@/lib/types/backend';
 import { createStore } from 'zustand/vanilla';
 import { immer } from 'zustand/middleware/immer';
 
@@ -161,15 +162,7 @@ export type ShellState = {
   >;
 };
 
-export type FileInfo = {
-  path: string;
-  status: 'modified' | 'added' | 'deleted' | 'untracked' | 'renamed';
-  staged: boolean;
-  additions?: number;
-  deletions?: number;
-  old_path?: string;
-  diff?: string;
-};
+export type { FileInfo };
 
 export type GitStatusEntry = {
   branch: string | null;
@@ -662,9 +655,6 @@ export function createAppStore(initialState?: Partial<AppState>) {
       setAvailableAgentsLoading: (loading) =>
         set((draft) => {
           draft.availableAgents.loading = loading;
-          if (!loading && !draft.availableAgents.loaded) {
-            draft.availableAgents.loaded = false;
-          }
         }),
       setAgentProfiles: (profiles) =>
         set((draft) => {
@@ -679,9 +669,6 @@ export function createAppStore(initialState?: Partial<AppState>) {
       setRepositoriesLoading: (workspaceId, loading) =>
         set((draft) => {
           draft.repositories.loadingByWorkspaceId[workspaceId] = loading;
-          if (!loading && !draft.repositories.loadedByWorkspaceId[workspaceId]) {
-            draft.repositories.loadedByWorkspaceId[workspaceId] = false;
-          }
         }),
       setRepositoryBranches: (repositoryId, branches) =>
         set((draft) => {
@@ -692,9 +679,6 @@ export function createAppStore(initialState?: Partial<AppState>) {
       setRepositoryBranchesLoading: (repositoryId, loading) =>
         set((draft) => {
           draft.repositoryBranches.loadingByRepositoryId[repositoryId] = loading;
-          if (!loading && !draft.repositoryBranches.loadedByRepositoryId[repositoryId]) {
-            draft.repositoryBranches.loadedByRepositoryId[repositoryId] = false;
-          }
         }),
       setSettingsData: (next) =>
         set((draft) => {

@@ -34,8 +34,6 @@ import { useSessionContextWindow } from '@/hooks/use-session-context-window';
 import { ModelSelector } from '@/components/task/model-selector';
 
 type TaskChatPanelProps = {
-  /** @deprecated No longer used - model selection is now handled by ModelSelector */
-  agents?: { id: string; label: string }[];
   onSend?: (message: string) => void;
   sessionId?: string | null;
 };
@@ -210,13 +208,21 @@ export function TaskChatPanel({
     return () => element.removeEventListener('scroll', checkAtBottom);
   }, [checkAtBottom]);
 
-  // Scroll to bottom when new messages arrive or when typing indicator appears
+  // Track last message content to detect streaming updates
+  // Use messages from store directly (stable reference) to avoid lint warning
+  const lastMessageContent = useMemo(() => {
+    if (messages.length === 0) return '';
+    const lastMsg = messages[messages.length - 1];
+    return lastMsg?.content ?? '';
+  }, [messages]);
+
+  // Scroll to bottom when new messages arrive or when last message content changes (streaming)
   useEffect(() => {
     if (itemCount === 0) return;
     if (wasAtBottomRef.current) {
       virtualizer.scrollToIndex(itemCount - 1, { align: 'end' });
     }
-  }, [itemCount, virtualizer]);
+  }, [itemCount, lastMessageContent, virtualizer]);
 
   const virtualItems = virtualizer.getVirtualItems();
 

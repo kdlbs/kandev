@@ -51,6 +51,10 @@ type AgentExecution struct {
 	reasoningBuffer strings.Builder
 	summaryBuffer   strings.Builder
 	messageMu       sync.Mutex
+
+	// Streaming message tracking - ID of the current in-progress message being streamed
+	// This is set when we create a streaming message and cleared on tool_call/complete
+	currentMessageID string
 }
 
 // GetAgentCtlClient returns the agentctl client for this execution
