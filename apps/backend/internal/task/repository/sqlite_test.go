@@ -538,6 +538,20 @@ func setupSQLiteTestSession(ctx context.Context, repo *sqliteRepository, taskID,
 	return session.ID
 }
 
+func setupSQLiteTestTurn(ctx context.Context, repo *sqliteRepository, sessionID, taskID, turnID string) string {
+	now := time.Now()
+	turn := &models.Turn{
+		ID:            turnID,
+		TaskSessionID: sessionID,
+		TaskID:        taskID,
+		StartedAt:     now,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	_ = repo.CreateTurn(ctx, turn)
+	return turn.ID
+}
+
 func TestSQLiteRepository_MessageCRUD(t *testing.T) {
 	repo, cleanup := createTestSQLiteRepo(t)
 	defer cleanup()
@@ -553,11 +567,13 @@ func TestSQLiteRepository_MessageCRUD(t *testing.T) {
 	task := &models.Task{ID: "task-123", BoardID: "board-123", ColumnID: "col-123", Title: "Test Task"}
 	_ = repo.CreateTask(ctx, task)
 	sessionID := setupSQLiteTestSession(ctx, repo, task.ID, "session-123")
+	turnID := setupSQLiteTestTurn(ctx, repo, sessionID, task.ID, "turn-123")
 
 	// Create comment
 	comment := &models.Message{
 		TaskSessionID: sessionID,
 		TaskID:        "task-123",
+		TurnID:        turnID,
 		AuthorType:    models.MessageAuthorUser,
 		AuthorID:      "user-123",
 		Content:       "This is a test comment",
@@ -628,12 +644,14 @@ func TestSQLiteRepository_ListMessages(t *testing.T) {
 	task2 := &models.Task{ID: "task-456", BoardID: "board-123", ColumnID: "col-123", Title: "Test Task 2"}
 	_ = repo.CreateTask(ctx, task2)
 	sessionID := setupSQLiteTestSession(ctx, repo, task.ID, "session-123")
-	_ = setupSQLiteTestSession(ctx, repo, task2.ID, "session-456")
+	session2ID := setupSQLiteTestSession(ctx, repo, task2.ID, "session-456")
+	turnID := setupSQLiteTestTurn(ctx, repo, sessionID, task.ID, "turn-123")
+	turn2ID := setupSQLiteTestTurn(ctx, repo, session2ID, task2.ID, "turn-456")
 
 	// Create multiple comments
-	_ = repo.CreateMessage(ctx, &models.Message{ID: "comment-1", TaskSessionID: sessionID, TaskID: "task-123", AuthorType: models.MessageAuthorUser, Content: "Comment 1"})
-	_ = repo.CreateMessage(ctx, &models.Message{ID: "comment-2", TaskSessionID: sessionID, TaskID: "task-123", AuthorType: models.MessageAuthorAgent, Content: "Comment 2"})
-	_ = repo.CreateMessage(ctx, &models.Message{ID: "comment-3", TaskSessionID: "session-456", TaskID: "task-456", AuthorType: models.MessageAuthorUser, Content: "Comment 3"})
+	_ = repo.CreateMessage(ctx, &models.Message{ID: "comment-1", TaskSessionID: sessionID, TaskID: "task-123", TurnID: turnID, AuthorType: models.MessageAuthorUser, Content: "Comment 1"})
+	_ = repo.CreateMessage(ctx, &models.Message{ID: "comment-2", TaskSessionID: sessionID, TaskID: "task-123", TurnID: turnID, AuthorType: models.MessageAuthorAgent, Content: "Comment 2"})
+	_ = repo.CreateMessage(ctx, &models.Message{ID: "comment-3", TaskSessionID: session2ID, TaskID: "task-456", TurnID: turn2ID, AuthorType: models.MessageAuthorUser, Content: "Comment 3"})
 
 	comments, err := repo.ListMessages(ctx, sessionID)
 	if err != nil {
@@ -656,12 +674,14 @@ func TestSQLiteRepository_ListMessagesPagination(t *testing.T) {
 	task := &models.Task{ID: "task-123", BoardID: "board-123", ColumnID: "col-123", Title: "Test Task"}
 	_ = repo.CreateTask(ctx, task)
 	sessionID := setupSQLiteTestSession(ctx, repo, task.ID, "session-123")
+	turnID := setupSQLiteTestTurn(ctx, repo, sessionID, task.ID, "turn-123")
 
 	baseTime := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 	_ = repo.CreateMessage(ctx, &models.Message{
 		ID:            "comment-1",
 		TaskSessionID: sessionID,
 		TaskID:        "task-123",
+		TurnID:        turnID,
 		AuthorType:    models.MessageAuthorUser,
 		Content:       "Comment 1",
 		CreatedAt:     baseTime.Add(-2 * time.Minute),
@@ -670,6 +690,7 @@ func TestSQLiteRepository_ListMessagesPagination(t *testing.T) {
 		ID:            "comment-2",
 		TaskSessionID: sessionID,
 		TaskID:        "task-123",
+		TurnID:        turnID,
 		AuthorType:    models.MessageAuthorUser,
 		Content:       "Comment 2",
 		CreatedAt:     baseTime.Add(-1 * time.Minute),
@@ -678,6 +699,7 @@ func TestSQLiteRepository_ListMessagesPagination(t *testing.T) {
 		ID:            "comment-3",
 		TaskSessionID: sessionID,
 		TaskID:        "task-123",
+		TurnID:        turnID,
 		AuthorType:    models.MessageAuthorUser,
 		Content:       "Comment 3",
 		CreatedAt:     baseTime,
@@ -716,11 +738,13 @@ func TestSQLiteRepository_MessageWithRequestsInput(t *testing.T) {
 	task := &models.Task{ID: "task-123", BoardID: "board-123", ColumnID: "col-123", Title: "Test Task"}
 	_ = repo.CreateTask(ctx, task)
 	sessionID := setupSQLiteTestSession(ctx, repo, task.ID, "session-123")
+	turnID := setupSQLiteTestTurn(ctx, repo, sessionID, task.ID, "turn-123")
 
 	// Create agent comment requesting input
 	comment := &models.Message{
 		TaskSessionID: sessionID,
 		TaskID:        "task-123",
+		TurnID:        turnID,
 		AuthorType:    models.MessageAuthorAgent,
 		AuthorID:      "agent-123",
 		Content:       "What should I do next?",

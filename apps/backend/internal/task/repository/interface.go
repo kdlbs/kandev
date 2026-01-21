@@ -68,6 +68,14 @@ type Repository interface {
 	ListMessagesPaginated(ctx context.Context, sessionID string, opts ListMessagesOptions) ([]*models.Message, bool, error)
 	DeleteMessage(ctx context.Context, id string) error
 
+	// Turn operations
+	CreateTurn(ctx context.Context, turn *models.Turn) error
+	GetTurn(ctx context.Context, id string) (*models.Turn, error)
+	GetActiveTurnBySessionID(ctx context.Context, sessionID string) (*models.Turn, error)
+	UpdateTurn(ctx context.Context, turn *models.Turn) error
+	CompleteTurn(ctx context.Context, id string) error
+	ListTurnsBySession(ctx context.Context, sessionID string) ([]*models.Turn, error)
+
 	// Task Session operations
 	CreateTaskSession(ctx context.Context, session *models.TaskSession) error
 	GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error)

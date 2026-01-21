@@ -26,6 +26,8 @@ export type BackendMessageType =
   | 'session.agentctl_starting'
   | 'session.agentctl_ready'
   | 'session.agentctl_error'
+  | 'session.turn.started'
+  | 'session.turn.completed'
   | 'executor.created'
   | 'executor.updated'
   | 'executor.deleted'
@@ -264,6 +266,17 @@ export type ShellOutputPayload = {
   code?: number;
 };
 
+export type TurnEventPayload = {
+  id: string;
+  session_id: string;
+  task_id: string;
+  started_at: string;
+  completed_at?: string;
+  metadata?: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
 export type BackendMessageMap = {
   'kanban.update': BackendMessage<'kanban.update', KanbanUpdatePayload>;
   'task.created': BackendMessage<'task.created', TaskEventPayload>;
@@ -292,6 +305,8 @@ export type BackendMessageMap = {
   'session.agentctl_starting': BackendMessage<'session.agentctl_starting', TaskSessionAgentctlPayload>;
   'session.agentctl_ready': BackendMessage<'session.agentctl_ready', TaskSessionAgentctlPayload>;
   'session.agentctl_error': BackendMessage<'session.agentctl_error', TaskSessionAgentctlPayload>;
+  'session.turn.started': BackendMessage<'session.turn.started', TurnEventPayload>;
+  'session.turn.completed': BackendMessage<'session.turn.completed', TurnEventPayload>;
   'executor.created': BackendMessage<'executor.created', ExecutorPayload>;
   'executor.updated': BackendMessage<'executor.updated', ExecutorPayload>;
   'executor.deleted': BackendMessage<'executor.deleted', ExecutorPayload>;

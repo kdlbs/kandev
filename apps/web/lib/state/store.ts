@@ -13,6 +13,7 @@ import type {
   Repository,
   TaskState as TaskStatus,
   TaskSession,
+  Turn,
 } from '@/lib/types/http';
 import type { FileInfo } from '@/lib/types/backend';
 import { createStore } from 'zustand/vanilla';
@@ -231,6 +232,11 @@ export type MessagesState = {
   >;
 };
 
+export type TurnsState = {
+  bySession: Record<string, Turn[]>;
+  activeBySession: Record<string, string | null>; // sessionId -> active turnId
+};
+
 export type TaskSessionsState = {
   items: Record<string, TaskSession>;
 };
@@ -286,6 +292,7 @@ export type AppState = {
   contextWindow: ContextWindowState;
   connection: ConnectionState;
   messages: MessagesState;
+  turns: TurnsState;
   taskSessions: TaskSessionsState;
   taskSessionsByTask: TaskSessionsByTaskState;
   sessionAgentctl: SessionAgentctlState;
@@ -331,6 +338,9 @@ export type AppState = {
     meta?: { hasMore?: boolean; oldestCursor?: string | null }
   ) => void;
   addMessage: (message: Message) => void;
+  addTurn: (turn: Turn) => void;
+  completeTurn: (sessionId: string, turnId: string, completedAt: string) => void;
+  setActiveTurn: (sessionId: string, turnId: string | null) => void;
   updateMessage: (message: Message) => void;
   prependMessages: (
     sessionId: string,
@@ -403,6 +413,10 @@ const defaultState: AppState = {
   contextWindow: { bySessionId: {} },
   connection: { status: 'disconnected', error: null },
   messages: { bySession: {}, metaBySession: {} },
+  turns: {
+    bySession: {},
+    activeBySession: {},
+  },
   taskSessions: { items: {} },
   taskSessionsByTask: { itemsByTaskId: {}, loadingByTaskId: {}, loadedByTaskId: {} },
   sessionAgentctl: { itemsBySessionId: {} },
@@ -441,6 +455,9 @@ const defaultState: AppState = {
   setConnectionStatus: () => undefined,
   setMessages: () => undefined,
   addMessage: () => undefined,
+  addTurn: () => undefined,
+  completeTurn: () => undefined,
+  setActiveTurn: () => undefined,
   updateMessage: () => undefined,
   prependMessages: () => undefined,
   setMessagesMetadata: () => undefined,
@@ -498,6 +515,9 @@ function mergeInitialState(
   | 'setConnectionStatus'
   | 'setMessages'
   | 'addMessage'
+  | 'addTurn'
+  | 'completeTurn'
+  | 'setActiveTurn'
   | 'updateMessage'
   | 'prependMessages'
   | 'setMessagesMetadata'
@@ -549,6 +569,7 @@ function mergeInitialState(
     contextWindow: { ...defaultState.contextWindow, ...initialState.contextWindow },
     connection: { ...defaultState.connection, ...initialState.connection },
     messages: { ...defaultState.messages, ...initialState.messages },
+    turns: { ...defaultState.turns, ...initialState.turns },
     taskSessions: { ...defaultState.taskSessions, ...initialState.taskSessions },
     taskSessionsByTask: { ...defaultState.taskSessionsByTask, ...initialState.taskSessionsByTask },
     sessionAgentctl: { ...defaultState.sessionAgentctl, ...initialState.sessionAgentctl },
@@ -596,6 +617,7 @@ export function createAppStore(initialState?: Partial<AppState>) {
           if (state.gitStatus) Object.assign(draft.gitStatus, state.gitStatus);
           if (state.connection) Object.assign(draft.connection, state.connection);
           if (state.messages) Object.assign(draft.messages, state.messages);
+          if (state.turns) Object.assign(draft.turns, state.turns);
           if (state.taskSessions) Object.assign(draft.taskSessions, state.taskSessions);
           if (state.taskSessionsByTask) {
             Object.assign(draft.taskSessionsByTask, state.taskSessionsByTask);
@@ -776,6 +798,41 @@ export function createAppStore(initialState?: Partial<AppState>) {
             meta.oldestCursor = message.id;
           }
           draft.messages.metaBySession[sessionId] = meta;
+        }),
+      addTurn: (turn) =>
+        set((state) => {
+          const sessionId = turn.session_id;
+          if (!state.turns.bySession[sessionId]) {
+            state.turns.bySession[sessionId] = [];
+          }
+          // Add turn if not already present
+          const existing = state.turns.bySession[sessionId].find((t) => t.id === turn.id);
+          if (!existing) {
+            state.turns.bySession[sessionId].push(turn);
+          }
+          // Set as active turn if not completed
+          if (!turn.completed_at) {
+            state.turns.activeBySession[sessionId] = turn.id;
+          }
+        }),
+      completeTurn: (sessionId, turnId, completedAt) =>
+        set((state) => {
+          const turns = state.turns.bySession[sessionId];
+          if (turns) {
+            const turn = turns.find((t) => t.id === turnId);
+            if (turn) {
+              turn.completed_at = completedAt;
+              turn.updated_at = completedAt;
+            }
+          }
+          // Clear active turn if it matches
+          if (state.turns.activeBySession[sessionId] === turnId) {
+            state.turns.activeBySession[sessionId] = null;
+          }
+        }),
+      setActiveTurn: (sessionId, turnId) =>
+        set((state) => {
+          state.turns.activeBySession[sessionId] = turnId;
         }),
       updateMessage: (message) =>
         set((draft) => {

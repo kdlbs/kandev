@@ -56,6 +56,8 @@ func RegisterTaskNotifications(ctx context.Context, eventBus bus.EventBus, hub *
 	b.subscribe(eventBus, events.AgentctlStarting, ws.ActionSessionAgentctlStarting)
 	b.subscribe(eventBus, events.AgentctlReady, ws.ActionSessionAgentctlReady)
 	b.subscribe(eventBus, events.AgentctlError, ws.ActionSessionAgentctlError)
+	b.subscribe(eventBus, events.TurnStarted, ws.ActionSessionTurnStarted)
+	b.subscribe(eventBus, events.TurnCompleted, ws.ActionSessionTurnCompleted)
 
 	go func() {
 		<-ctx.Done()

@@ -1,10 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { IconLoader2 } from '@tabler/icons-react';
 import type { Message } from '@/lib/types/http';
 import { MessageRenderer } from '@/components/task/chat/message-renderer';
+import { TurnSummary } from '@/components/task/chat/messages/turn-summary';
 import { useLazyLoadMessages } from '@/hooks/use-lazy-load-messages';
 
 type VirtualizedMessageListProps = {
@@ -55,13 +56,20 @@ export function VirtualizedMessageList({
     return () => element.removeEventListener('scroll', checkAtBottom);
   }, [checkAtBottom]);
 
-  // Scroll to bottom when new messages arrive or when typing indicator appears
+  // Track last message content to detect streaming updates
+  const lastMessageContent = useMemo(() => {
+    if (messages.length === 0) return '';
+    const lastMsg = messages[messages.length - 1];
+    return lastMsg?.content ?? '';
+  }, [messages]);
+
+  // Scroll to bottom when new messages arrive or when last message content changes (streaming)
   useEffect(() => {
     if (itemCount === 0) return;
     if (wasAtBottomRef.current) {
       virtualizer.scrollToIndex(itemCount - 1, { align: 'end' });
     }
-  }, [itemCount, virtualizer]);
+  }, [itemCount, lastMessageContent, virtualizer]);
 
   const virtualItems = virtualizer.getVirtualItems();
 
@@ -137,6 +145,8 @@ export function VirtualizedMessageList({
           })}
         </div>
       )}
+      {/* Turn summary - shows duration and model after last message */}
+      <TurnSummary sessionId={sessionId} />
     </div>
   );
 }

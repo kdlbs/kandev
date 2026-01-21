@@ -105,6 +105,7 @@ type Message struct {
 	ID            string                 `json:"id"`
 	TaskSessionID string                 `json:"session_id"`
 	TaskID        string                 `json:"task_id,omitempty"`
+	TurnID        string                 `json:"turn_id"` // FK to task_session_turns
 	AuthorType    MessageAuthorType      `json:"author_type"`
 	AuthorID      string                 `json:"author_id,omitempty"` // User ID or Agent Execution ID
 	Content       string                 `json:"content"`
@@ -124,6 +125,7 @@ func (m *Message) ToAPI() *v1.Message {
 		ID:            m.ID,
 		TaskSessionID: m.TaskSessionID,
 		TaskID:        m.TaskID,
+		TurnID:        m.TurnID,
 		AuthorType:    string(m.AuthorType),
 		AuthorID:      m.AuthorID,
 		Content:       m.Content,
@@ -133,6 +135,20 @@ func (m *Message) ToAPI() *v1.Message {
 		CreatedAt:     m.CreatedAt,
 	}
 	return result
+}
+
+// Turn represents a single prompt/response cycle within a task session.
+// A turn starts when a user sends a prompt and ends when the agent completes,
+// cancels, or errors.
+type Turn struct {
+	ID            string                 `json:"id"`
+	TaskSessionID string                 `json:"session_id"`
+	TaskID        string                 `json:"task_id"`
+	StartedAt     time.Time              `json:"started_at"`
+	CompletedAt   *time.Time             `json:"completed_at,omitempty"`
+	Metadata      map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt     time.Time              `json:"created_at"`
+	UpdatedAt     time.Time              `json:"updated_at"`
 }
 
 // TaskSessionState represents the state of an agent session

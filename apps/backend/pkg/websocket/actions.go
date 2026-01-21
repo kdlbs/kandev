@@ -131,6 +131,8 @@ const (
 	ActionSessionAgentctlStarting = "session.agentctl_starting"
 	ActionSessionAgentctlReady    = "session.agentctl_ready"
 	ActionSessionAgentctlError    = "session.agentctl_error"
+	ActionSessionTurnStarted      = "session.turn.started"
+	ActionSessionTurnCompleted    = "session.turn.completed"
 	ActionInputRequested          = "input.requested"
 	ActionRepositoryCreated       = "repository.created"
 	ActionRepositoryUpdated       = "repository.updated"

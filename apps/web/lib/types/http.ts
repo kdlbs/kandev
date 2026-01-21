@@ -344,6 +344,7 @@ export type Message = {
   id: string;
   session_id: string;
   task_id: string;
+  turn_id?: string;
   author_type: MessageAuthorType;
   author_id?: string;
   content: string;
@@ -351,6 +352,17 @@ export type Message = {
   metadata?: Record<string, unknown>;
   requests_input?: boolean;
   created_at: string;
+};
+
+export type Turn = {
+  id: string;
+  session_id: string;
+  task_id: string;
+  started_at: string;
+  completed_at?: string;
+  metadata?: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
 };
 
 export type AgentProfile = {

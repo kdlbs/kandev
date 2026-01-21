@@ -1504,6 +1504,7 @@ func (s *Service) publishEnvironmentEvent(ctx context.Context, eventType string,
 type CreateMessageRequest struct {
 	TaskSessionID string                 `json:"session_id"`
 	TaskID        string                 `json:"task_id,omitempty"`
+	TurnID        string                 `json:"turn_id"`
 	Content       string                 `json:"content"`
 	AuthorType    string                 `json:"author_type,omitempty"` // "user" or "agent", defaults to "user"
 	AuthorID      string                 `json:"author_id,omitempty"`
@@ -1534,10 +1535,25 @@ func (s *Service) CreateMessage(ctx context.Context, req *CreateMessageRequest) 
 		taskID = session.TaskID
 	}
 
+	// Ensure we have a turn ID - get active turn or start a new one
+	turnID := req.TurnID
+	if turnID == "" {
+		turn, err := s.getOrStartTurn(ctx, req.TaskSessionID)
+		if err != nil {
+			s.logger.Warn("failed to get or start turn for message",
+				zap.String("session_id", req.TaskSessionID),
+				zap.Error(err))
+			// Continue with empty turn ID - will fail on foreign key if turn is required
+		} else if turn != nil {
+			turnID = turn.ID
+		}
+	}
+
 	message := &models.Message{
 		ID:            uuid.New().String(),
 		TaskSessionID: req.TaskSessionID,
 		TaskID:        taskID,
+		TurnID:        turnID,
 		AuthorType:    authorType,
 		AuthorID:      req.AuthorID,
 		Content:       req.Content,
@@ -1586,10 +1602,25 @@ func (s *Service) CreateMessageWithID(ctx context.Context, id string, req *Creat
 		taskID = session.TaskID
 	}
 
+	// Ensure we have a turn ID - get active turn or start a new one
+	turnID := req.TurnID
+	if turnID == "" {
+		turn, err := s.getOrStartTurn(ctx, req.TaskSessionID)
+		if err != nil {
+			s.logger.Warn("failed to get or start turn for streaming message",
+				zap.String("session_id", req.TaskSessionID),
+				zap.Error(err))
+			// Continue with empty turn ID - will fail on foreign key if turn is required
+		} else if turn != nil {
+			turnID = turn.ID
+		}
+	}
+
 	message := &models.Message{
 		ID:            id,
 		TaskSessionID: req.TaskSessionID,
 		TaskID:        taskID,
+		TurnID:        turnID,
 		AuthorType:    authorType,
 		AuthorID:      req.AuthorID,
 		Content:       req.Content,
@@ -1816,6 +1847,109 @@ func (s *Service) UpdatePermissionMessage(ctx context.Context, sessionID, pendin
 		zap.String("status", status))
 
 	return nil
+}
+
+// Turn operations
+
+// StartTurn creates a new turn for a session and publishes the turn.started event.
+// Returns the created turn.
+func (s *Service) StartTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get session: %w", err)
+	}
+
+	turn := &models.Turn{
+		ID:            uuid.New().String(),
+		TaskSessionID: sessionID,
+		TaskID:        session.TaskID,
+		StartedAt:     time.Now().UTC(),
+		CreatedAt:     time.Now().UTC(),
+		UpdatedAt:     time.Now().UTC(),
+	}
+
+	if err := s.repo.CreateTurn(ctx, turn); err != nil {
+		s.logger.Error("failed to create turn", zap.Error(err))
+		return nil, err
+	}
+
+	s.publishTurnEvent(events.TurnStarted, turn)
+
+	s.logger.Debug("started turn",
+		zap.String("turn_id", turn.ID),
+		zap.String("session_id", sessionID),
+		zap.String("task_id", turn.TaskID))
+
+	return turn, nil
+}
+
+// CompleteTurn marks a turn as completed and publishes the turn.completed event.
+func (s *Service) CompleteTurn(ctx context.Context, turnID string) error {
+	if turnID == "" {
+		return nil // No active turn to complete
+	}
+
+	turn, err := s.repo.GetTurn(ctx, turnID)
+	if err != nil {
+		s.logger.Warn("failed to get turn for completion", zap.String("turn_id", turnID), zap.Error(err))
+		return err
+	}
+
+	if err := s.repo.CompleteTurn(ctx, turnID); err != nil {
+		s.logger.Error("failed to complete turn", zap.String("turn_id", turnID), zap.Error(err))
+		return err
+	}
+
+	// Refetch to get updated completed_at time
+	turn, err = s.repo.GetTurn(ctx, turnID)
+	if err != nil {
+		s.logger.Warn("failed to refetch completed turn", zap.String("turn_id", turnID), zap.Error(err))
+		// Still publish with the old turn data
+	}
+
+	s.publishTurnEvent(events.TurnCompleted, turn)
+
+	s.logger.Debug("completed turn",
+		zap.String("turn_id", turnID),
+		zap.String("session_id", turn.TaskSessionID),
+		zap.String("task_id", turn.TaskID))
+
+	return nil
+}
+
+// GetActiveTurn returns the currently active (non-completed) turn for a session.
+func (s *Service) GetActiveTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
+	return s.repo.GetActiveTurnBySessionID(ctx, sessionID)
+}
+
+// getOrStartTurn returns the active turn for a session, or starts a new one if none exists.
+// This is used to ensure messages always have a valid turn ID.
+func (s *Service) getOrStartTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
+	// First try to get an active turn
+	turn, err := s.repo.GetActiveTurnBySessionID(ctx, sessionID)
+	if err == nil && turn != nil {
+		return turn, nil
+	}
+
+	// No active turn, start a new one
+	return s.StartTurn(ctx, sessionID)
+}
+
+// publishTurnEvent publishes a turn event to the event bus.
+func (s *Service) publishTurnEvent(eventType string, turn *models.Turn) {
+	if s.eventBus == nil {
+		return
+	}
+	_ = s.eventBus.Publish(context.Background(), eventType, bus.NewEvent(eventType, "task-service", map[string]interface{}{
+		"id":           turn.ID,
+		"session_id":   turn.TaskSessionID,
+		"task_id":      turn.TaskID,
+		"started_at":   turn.StartedAt,
+		"completed_at": turn.CompletedAt,
+		"metadata":     turn.Metadata,
+		"created_at":   turn.CreatedAt,
+		"updated_at":   turn.UpdatedAt,
+	}))
 }
 
 // publishMessageEvent publishes message events to the event bus

@@ -49,17 +49,24 @@ func DefaultServiceConfig() ServiceConfig {
 
 // MessageCreator is an interface for creating messages on tasks
 type MessageCreator interface {
-	CreateAgentMessage(ctx context.Context, taskID, content, agentSessionID string) error
-	CreateUserMessage(ctx context.Context, taskID, content, agentSessionID string) error
-	CreateToolCallMessage(ctx context.Context, taskID, toolCallID, title, status, agentSessionID string, args map[string]interface{}) error
+	CreateAgentMessage(ctx context.Context, taskID, content, agentSessionID, turnID string) error
+	CreateUserMessage(ctx context.Context, taskID, content, agentSessionID, turnID string) error
+	CreateToolCallMessage(ctx context.Context, taskID, toolCallID, title, status, agentSessionID, turnID string, args map[string]interface{}) error
 	UpdateToolCallMessage(ctx context.Context, taskID, toolCallID, status, result, agentSessionID string) error
-	CreateSessionMessage(ctx context.Context, taskID, content, agentSessionID, messageType string, metadata map[string]interface{}, requestsInput bool) error
-	CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, pendingID, toolCallID, title string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}) (string, error)
+	CreateSessionMessage(ctx context.Context, taskID, content, agentSessionID, messageType, turnID string, metadata map[string]interface{}, requestsInput bool) error
+	CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}) (string, error)
 	UpdatePermissionMessage(ctx context.Context, sessionID, pendingID, status string) error
 	// CreateAgentMessageStreaming creates a new agent message with a pre-generated ID for streaming updates
-	CreateAgentMessageStreaming(ctx context.Context, messageID, taskID, content, agentSessionID string) error
+	CreateAgentMessageStreaming(ctx context.Context, messageID, taskID, content, agentSessionID, turnID string) error
 	// AppendAgentMessage appends additional content to an existing streaming message
 	AppendAgentMessage(ctx context.Context, messageID, additionalContent string) error
+}
+
+// TurnService is an interface for managing session turns
+type TurnService interface {
+	StartTurn(ctx context.Context, sessionID string) (*models.Turn, error)
+	CompleteTurn(ctx context.Context, turnID string) error
+	GetActiveTurn(ctx context.Context, sessionID string) (*models.Turn, error)
 }
 
 // Service is the main orchestrator service
@@ -83,6 +90,12 @@ type Service struct {
 
 	// Message creator for saving agent responses
 	messageCreator MessageCreator
+
+	// Turn service for managing session turns
+	turnService TurnService
+
+	// Active turns map: sessionID -> turnID
+	activeTurns sync.Map
 
 	// Service state
 	mu        sync.RWMutex
@@ -160,6 +173,72 @@ func NewService(
 // SetMessageCreator sets the message creator for saving agent responses
 func (s *Service) SetMessageCreator(mc MessageCreator) {
 	s.messageCreator = mc
+}
+
+// SetTurnService sets the turn service for the orchestrator.
+func (s *Service) SetTurnService(turnService TurnService) {
+	s.turnService = turnService
+}
+
+// startTurnForSession starts a new turn for the session and stores it.
+func (s *Service) startTurnForSession(ctx context.Context, sessionID string) string {
+	if s.turnService == nil {
+		return ""
+	}
+
+	turn, err := s.turnService.StartTurn(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to start turn",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return ""
+	}
+
+	s.activeTurns.Store(sessionID, turn.ID)
+	return turn.ID
+}
+
+// completeTurnForSession completes the active turn for the session.
+func (s *Service) completeTurnForSession(ctx context.Context, sessionID string) {
+	if s.turnService == nil {
+		return
+	}
+
+	turnIDVal, ok := s.activeTurns.LoadAndDelete(sessionID)
+	if !ok {
+		return
+	}
+
+	turnID, ok := turnIDVal.(string)
+	if !ok || turnID == "" {
+		return
+	}
+
+	if err := s.turnService.CompleteTurn(ctx, turnID); err != nil {
+		s.logger.Warn("failed to complete turn",
+			zap.String("session_id", sessionID),
+			zap.String("turn_id", turnID),
+			zap.Error(err))
+	}
+}
+
+// getActiveTurnID returns the active turn ID for a session.
+// If no active turn exists and the session ID is provided, it will start a new turn.
+// This ensures messages always have a valid turn ID even in edge cases like resumed sessions.
+func (s *Service) getActiveTurnID(sessionID string) string {
+	if sessionID == "" {
+		return ""
+	}
+	turnIDVal, ok := s.activeTurns.Load(sessionID)
+	if ok {
+		turnID, _ := turnIDVal.(string)
+		if turnID != "" {
+			return turnID
+		}
+	}
+	// No active turn exists - start one lazily
+	// This handles edge cases like resumed sessions or race conditions
+	return s.startTurnForSession(context.Background(), sessionID)
 }
 
 // Start starts all orchestrator components
@@ -456,7 +535,7 @@ func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID s
 		s.updateTaskSessionState(ctx, taskID, execution.SessionID, models.TaskSessionStateRunning, "", true)
 		// Create user message for the initial prompt
 		if s.messageCreator != nil && effectivePrompt != "" {
-			if err := s.messageCreator.CreateUserMessage(ctx, taskID, effectivePrompt, execution.SessionID); err != nil {
+			if err := s.messageCreator.CreateUserMessage(ctx, taskID, effectivePrompt, execution.SessionID, s.getActiveTurnID(execution.SessionID)); err != nil {
 				s.logger.Error("failed to create initial user message",
 					zap.String("task_id", taskID),
 					zap.Error(err))
@@ -652,6 +731,9 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 					zap.String("current_model", currentModel),
 					zap.String("new_model", model))
 
+				// Start a new turn for this prompt (model switch case)
+				s.startTurnForSession(ctx, sessionID)
+
 				// SwitchModel will stop agent, rebuild with new model, restart, and send prompt
 				switchResult, err := s.executor.SwitchModel(ctx, taskID, sessionID, model, prompt)
 				if err != nil {
@@ -666,6 +748,8 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 	}
 
 	s.setSessionRunning(ctx, taskID, sessionID)
+	// Start a new turn for this prompt
+	s.startTurnForSession(ctx, sessionID)
 	result, err := s.executor.Prompt(ctx, taskID, sessionID, prompt)
 	if err != nil {
 		return nil, err
@@ -755,6 +839,7 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 			"Turn cancelled by user",
 			sessionID,
 			string(v1.MessageTypeStatus),
+			s.getActiveTurnID(sessionID),
 			metadata,
 			false,
 		); err != nil {
@@ -763,6 +848,9 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 				zap.Error(err))
 		}
 	}
+
+	// Complete the turn since the agent was cancelled
+	s.completeTurnForSession(ctx, sessionID)
 
 	s.logger.Debug("agent turn cancelled", zap.String("session_id", sessionID))
 	return nil
@@ -992,6 +1080,8 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	case "complete":
 		// Save any accumulated text as an agent message
 		s.saveAgentTextIfPresent(ctx, payload)
+		// Complete the turn for this session
+		s.completeTurnForSession(ctx, sessionID)
 		// Now that both ACP and Codex Prompt() calls are synchronous (return when turn is done),
 		// we can directly finalize the agent ready state here.
 		// The "complete" event is now the single source of truth for turn completion.
@@ -1006,6 +1096,7 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 				payload.Data.Error,
 				sessionID,
 				string(v1.MessageTypeError),
+				s.getActiveTurnID(sessionID),
 				map[string]interface{}{
 					"provider":       "agent",
 					"provider_agent": payload.AgentID,
@@ -1017,6 +1108,8 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 					zap.Error(err))
 			}
 		}
+		// Complete the turn since the agent errored
+		s.completeTurnForSession(ctx, sessionID)
 
 	case "session_status":
 		// Handle session status events (resumed vs new session)
@@ -1033,6 +1126,7 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 				statusMsg,
 				sessionID,
 				string(v1.MessageTypeStatus),
+				s.getActiveTurnID(sessionID),
 				nil,
 				false,
 			); err != nil {
@@ -1065,6 +1159,7 @@ func (s *Service) handleToolCallEvent(ctx context.Context, payload *lifecycle.Ag
 			payload.Data.ToolTitle,
 			payload.Data.ToolStatus,
 			payload.SessionID,
+			s.getActiveTurnID(payload.SessionID),
 			payload.Data.ToolArgs,
 		); err != nil {
 			s.logger.Error("failed to create tool call message",
@@ -1088,7 +1183,7 @@ func (s *Service) saveAgentTextIfPresent(ctx context.Context, payload *lifecycle
 	}
 
 	if s.messageCreator != nil {
-		if err := s.messageCreator.CreateAgentMessage(ctx, payload.TaskID, payload.Data.Text, payload.SessionID); err != nil {
+		if err := s.messageCreator.CreateAgentMessage(ctx, payload.TaskID, payload.Data.Text, payload.SessionID, s.getActiveTurnID(payload.SessionID)); err != nil {
 			s.logger.Error("failed to create agent message",
 				zap.String("task_id", payload.TaskID),
 				zap.Error(err))
@@ -1135,7 +1230,7 @@ func (s *Service) handleMessageStreamingEvent(ctx context.Context, payload *life
 		}
 	} else {
 		// Create new streaming message with the pre-generated ID
-		if err := s.messageCreator.CreateAgentMessageStreaming(ctx, messageID, payload.TaskID, payload.Data.Text, payload.SessionID); err != nil {
+		if err := s.messageCreator.CreateAgentMessageStreaming(ctx, messageID, payload.TaskID, payload.Data.Text, payload.SessionID, s.getActiveTurnID(payload.SessionID)); err != nil {
 			s.logger.Error("failed to create streaming message",
 				zap.String("task_id", payload.TaskID),
 				zap.String("message_id", messageID),
@@ -1407,6 +1502,7 @@ func (s *Service) handlePermissionRequest(ctx context.Context, data watcher.Perm
 			data.PendingID,
 			data.ToolCallID,
 			data.Title,
+			s.getActiveTurnID(data.TaskSessionID),
 			data.Options,
 			data.ActionType,
 			data.ActionDetails,

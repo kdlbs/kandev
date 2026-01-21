@@ -124,7 +124,7 @@ export function TaskChatPanel({
       {/* Session info - shows agent state */}
       {session?.state && (
         <div className="mt-2 flex flex-wrap items-center gap-2">
-          <RunningIndicator state={session.state} />
+          <RunningIndicator state={session.state} sessionId={resolvedSessionId} />
         </div>
       )}
 
