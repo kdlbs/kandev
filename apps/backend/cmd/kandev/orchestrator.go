@@ -37,5 +37,7 @@ func provideOrchestrator(
 	msgCreator := &messageCreatorAdapter{svc: taskSvc}
 	orchestratorSvc.SetMessageCreator(msgCreator)
 
+	orchestratorSvc.SetTurnService(newTurnServiceAdapter(taskSvc))
+
 	return orchestratorSvc, nil
 }

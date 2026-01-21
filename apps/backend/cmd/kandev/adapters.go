@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	taskhandlers "github.com/kandev/kandev/internal/task/handlers"
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/pkg/api/v1"
@@ -265,10 +266,11 @@ type messageCreatorAdapter struct {
 }
 
 // CreateAgentMessage creates a message with author_type="agent"
-func (a *messageCreatorAdapter) CreateAgentMessage(ctx context.Context, taskID, content, agentSessionID string) error {
+func (a *messageCreatorAdapter) CreateAgentMessage(ctx context.Context, taskID, content, agentSessionID, turnID string) error {
 	_, err := a.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
 		TaskSessionID: agentSessionID,
 		TaskID:        taskID,
+		TurnID:        turnID,
 		Content:       content,
 		AuthorType:    "agent",
 	})
@@ -276,10 +278,11 @@ func (a *messageCreatorAdapter) CreateAgentMessage(ctx context.Context, taskID, 
 }
 
 // CreateUserMessage creates a message with author_type="user"
-func (a *messageCreatorAdapter) CreateUserMessage(ctx context.Context, taskID, content, agentSessionID string) error {
+func (a *messageCreatorAdapter) CreateUserMessage(ctx context.Context, taskID, content, agentSessionID, turnID string) error {
 	_, err := a.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
 		TaskSessionID: agentSessionID,
 		TaskID:        taskID,
+		TurnID:        turnID,
 		Content:       content,
 		AuthorType:    "user",
 	})
@@ -287,7 +290,7 @@ func (a *messageCreatorAdapter) CreateUserMessage(ctx context.Context, taskID, c
 }
 
 // CreateToolCallMessage creates a message for a tool call with type="tool_call"
-func (a *messageCreatorAdapter) CreateToolCallMessage(ctx context.Context, taskID, toolCallID, title, status, agentSessionID string, args map[string]interface{}) error {
+func (a *messageCreatorAdapter) CreateToolCallMessage(ctx context.Context, taskID, toolCallID, title, status, agentSessionID, turnID string, args map[string]interface{}) error {
 	metadata := map[string]interface{}{
 		"tool_call_id": toolCallID,
 		"title":        title,
@@ -304,6 +307,7 @@ func (a *messageCreatorAdapter) CreateToolCallMessage(ctx context.Context, taskI
 	_, err := a.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
 		TaskSessionID: agentSessionID,
 		TaskID:        taskID,
+		TurnID:        turnID,
 		Content:       title,
 		AuthorType:    "agent",
 		Type:          "tool_call",
@@ -318,10 +322,11 @@ func (a *messageCreatorAdapter) UpdateToolCallMessage(ctx context.Context, taskI
 }
 
 // CreateSessionMessage creates a message for non-chat session updates (status/progress/error/etc).
-func (a *messageCreatorAdapter) CreateSessionMessage(ctx context.Context, taskID, content, agentSessionID, messageType string, metadata map[string]interface{}, requestsInput bool) error {
+func (a *messageCreatorAdapter) CreateSessionMessage(ctx context.Context, taskID, content, agentSessionID, messageType, turnID string, metadata map[string]interface{}, requestsInput bool) error {
 	_, err := a.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
 		TaskSessionID: agentSessionID,
 		TaskID:        taskID,
+		TurnID:        turnID,
 		Content:       content,
 		AuthorType:    "agent",
 		Type:          messageType,
@@ -332,7 +337,7 @@ func (a *messageCreatorAdapter) CreateSessionMessage(ctx context.Context, taskID
 }
 
 // CreatePermissionRequestMessage creates a message for a permission request
-func (a *messageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, pendingID, toolCallID, title string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}) (string, error) {
+func (a *messageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}) (string, error) {
 	metadata := map[string]interface{}{
 		"pending_id":     pendingID,
 		"tool_call_id":   toolCallID,
@@ -344,6 +349,7 @@ func (a *messageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Conte
 	msg, err := a.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
 		TaskSessionID: sessionID,
 		TaskID:        taskID,
+		TurnID:        turnID,
 		Content:       title,
 		AuthorType:    "agent",
 		Type:          "permission_request",
@@ -362,10 +368,11 @@ func (a *messageCreatorAdapter) UpdatePermissionMessage(ctx context.Context, ses
 
 // CreateAgentMessageStreaming creates a new agent message with a pre-generated ID.
 // This is used for real-time streaming where content arrives incrementally.
-func (a *messageCreatorAdapter) CreateAgentMessageStreaming(ctx context.Context, messageID, taskID, content, agentSessionID string) error {
+func (a *messageCreatorAdapter) CreateAgentMessageStreaming(ctx context.Context, messageID, taskID, content, agentSessionID, turnID string) error {
 	_, err := a.svc.CreateMessageWithID(ctx, messageID, &taskservice.CreateMessageRequest{
 		TaskSessionID: agentSessionID,
 		TaskID:        taskID,
+		TurnID:        turnID,
 		Content:       content,
 		AuthorType:    "agent",
 	})
@@ -375,4 +382,25 @@ func (a *messageCreatorAdapter) CreateAgentMessageStreaming(ctx context.Context,
 // AppendAgentMessage appends additional content to an existing streaming message.
 func (a *messageCreatorAdapter) AppendAgentMessage(ctx context.Context, messageID, additionalContent string) error {
 	return a.svc.AppendMessageContent(ctx, messageID, additionalContent)
+}
+
+// turnServiceAdapter adapts the task service to the orchestrator.TurnService interface
+type turnServiceAdapter struct {
+	svc *taskservice.Service
+}
+
+func (a *turnServiceAdapter) StartTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
+	return a.svc.StartTurn(ctx, sessionID)
+}
+
+func (a *turnServiceAdapter) CompleteTurn(ctx context.Context, turnID string) error {
+	return a.svc.CompleteTurn(ctx, turnID)
+}
+
+func (a *turnServiceAdapter) GetActiveTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
+	return a.svc.GetActiveTurn(ctx, sessionID)
+}
+
+func newTurnServiceAdapter(svc *taskservice.Service) *turnServiceAdapter {
+	return &turnServiceAdapter{svc: svc}
 }

@@ -1,10 +1,12 @@
 'use client';
 
-import { IconAlertCircle, IconAlertTriangle } from '@tabler/icons-react';
+import { IconAlertCircle, IconAlertTriangle, IconClock } from '@tabler/icons-react';
 import type { TaskSessionState } from '@/lib/types/http';
+import { useActiveTurnTimer } from '@/hooks/use-active-turn-timer';
 
 type RunningIndicatorProps = {
   state: TaskSessionState;
+  sessionId?: string | null;
 };
 
 const STATE_CONFIG: Record<TaskSessionState, { label: string; icon: 'spinner' | 'error' | 'warning' | null }> = {
@@ -17,8 +19,9 @@ const STATE_CONFIG: Record<TaskSessionState, { label: string; icon: 'spinner' | 
   CANCELLED: { label: 'Agent has been cancelled', icon: 'warning' },
 };
 
-export function RunningIndicator({ state }: RunningIndicatorProps) {
+export function RunningIndicator({ state, sessionId }: RunningIndicatorProps) {
   const config = STATE_CONFIG[state];
+  const { isActive, formattedDuration } = useActiveTurnTimer(sessionId ?? null);
 
   // Don't show indicator for completed state or waiting for input
   if (!config.icon) {
@@ -57,6 +60,12 @@ export function RunningIndicator({ state }: RunningIndicatorProps) {
               style={{ animationDelay: '300ms', animationDuration: '1s' }}
             />
           </span>
+          {isActive && (
+            <span className="flex items-center gap-1 ml-2 pl-2 border-l border-current/20">
+              <IconClock className="h-3 w-3" aria-hidden="true" />
+              <span className="font-mono tabular-nums">{formattedDuration}</span>
+            </span>
+          )}
         </>
       )}
       {config.icon === 'error' && (

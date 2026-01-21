@@ -200,6 +200,7 @@ func (r *sqliteRepository) initSchema() error {
 		id TEXT PRIMARY KEY,
 		task_session_id TEXT NOT NULL,
 		task_id TEXT DEFAULT '',
+		turn_id TEXT NOT NULL,
 		author_type TEXT NOT NULL DEFAULT 'user',
 		author_id TEXT DEFAULT '',
 		content TEXT NOT NULL,
@@ -207,12 +208,30 @@ func (r *sqliteRepository) initSchema() error {
 		type TEXT NOT NULL DEFAULT 'message',
 		metadata TEXT DEFAULT '{}',
 		created_at DATETIME NOT NULL,
-		FOREIGN KEY (task_session_id) REFERENCES task_sessions(id) ON DELETE CASCADE
+		FOREIGN KEY (task_session_id) REFERENCES task_sessions(id) ON DELETE CASCADE,
+		FOREIGN KEY (turn_id) REFERENCES task_session_turns(id) ON DELETE CASCADE
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_messages_session_id ON task_session_messages(task_session_id);
 	CREATE INDEX IF NOT EXISTS idx_messages_created_at ON task_session_messages(created_at);
 	CREATE INDEX IF NOT EXISTS idx_messages_session_created ON task_session_messages(task_session_id, created_at);
+	CREATE INDEX IF NOT EXISTS idx_messages_turn_id ON task_session_messages(turn_id);
+
+	CREATE TABLE IF NOT EXISTS task_session_turns (
+		id TEXT PRIMARY KEY,
+		task_session_id TEXT NOT NULL,
+		task_id TEXT NOT NULL,
+		started_at DATETIME NOT NULL,
+		completed_at DATETIME,
+		metadata TEXT DEFAULT '{}',
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL,
+		FOREIGN KEY (task_session_id) REFERENCES task_sessions(id) ON DELETE CASCADE
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_turns_session_id ON task_session_turns(task_session_id);
+	CREATE INDEX IF NOT EXISTS idx_turns_session_started ON task_session_turns(task_session_id, started_at);
+	CREATE INDEX IF NOT EXISTS idx_turns_task_id ON task_session_turns(task_id);
 
 	CREATE TABLE IF NOT EXISTS task_sessions (
 		id TEXT PRIMARY KEY,
@@ -1335,9 +1354,9 @@ func (r *sqliteRepository) CreateMessage(ctx context.Context, message *models.Me
 	}
 
 	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO task_session_messages (id, task_session_id, task_id, author_type, author_id, content, requests_input, type, metadata, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, message.ID, message.TaskSessionID, message.TaskID, message.AuthorType, message.AuthorID, message.Content, requestsInput, messageType, metadataJSON, message.CreatedAt)
+		INSERT INTO task_session_messages (id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, message.ID, message.TaskSessionID, message.TaskID, message.TurnID, message.AuthorType, message.AuthorID, message.Content, requestsInput, messageType, metadataJSON, message.CreatedAt)
 
 	return err
 }
@@ -1349,9 +1368,9 @@ func (r *sqliteRepository) GetMessage(ctx context.Context, id string) (*models.M
 	var messageType string
 	var metadataJSON string
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, task_session_id, task_id, author_type, author_id, content, requests_input, type, metadata, created_at
+		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at
 		FROM task_session_messages WHERE id = ?
-	`, id).Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.AuthorType, &message.AuthorID, &message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt)
+	`, id).Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.TurnID, &message.AuthorType, &message.AuthorID, &message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -1370,7 +1389,7 @@ func (r *sqliteRepository) GetMessage(ctx context.Context, id string) (*models.M
 // ListMessages returns all messages for a session ordered by creation time.
 func (r *sqliteRepository) ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, task_session_id, task_id, author_type, author_id, content, requests_input, type, metadata, created_at
+		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at
 		FROM task_session_messages WHERE task_session_id = ? ORDER BY created_at ASC
 	`, sessionID)
 	if err != nil {
@@ -1384,7 +1403,7 @@ func (r *sqliteRepository) ListMessages(ctx context.Context, sessionID string) (
 		var requestsInput int
 		var messageType string
 		var metadataJSON string
-		err := rows.Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.AuthorType, &message.AuthorID, &message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt)
+		err := rows.Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.TurnID, &message.AuthorType, &message.AuthorID, &message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt)
 		if err != nil {
 			return nil, err
 		}
@@ -1440,7 +1459,7 @@ func (r *sqliteRepository) ListMessagesPaginated(ctx context.Context, sessionID 
 	}
 
 	query := `
-		SELECT id, task_session_id, task_id, author_type, author_id, content, requests_input, type, metadata, created_at
+		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at
 		FROM task_session_messages WHERE task_session_id = ?`
 	args := []interface{}{sessionID}
 	if cursor != nil {
@@ -1469,7 +1488,7 @@ func (r *sqliteRepository) ListMessagesPaginated(ctx context.Context, sessionID 
 		var requestsInput int
 		var messageType string
 		var metadataJSON string
-		err := rows.Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.AuthorType, &message.AuthorID, &message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt)
+		err := rows.Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.TurnID, &message.AuthorType, &message.AuthorID, &message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt)
 		if err != nil {
 			return nil, false, err
 		}
@@ -1516,9 +1535,9 @@ func (r *sqliteRepository) GetMessageByToolCallID(ctx context.Context, sessionID
 	var messageType string
 	var metadataJSON string
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, task_session_id, task_id, author_type, author_id, content, requests_input, type, metadata, created_at
+		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at
 		FROM task_session_messages WHERE task_session_id = ? AND type = 'tool_call' AND json_extract(metadata, '$.tool_call_id') = ?
-	`, sessionID, toolCallID).Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.AuthorType, &message.AuthorID,
+	`, sessionID, toolCallID).Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.TurnID, &message.AuthorType, &message.AuthorID,
 		&message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt)
 	if err != nil {
 		return nil, err
@@ -1538,9 +1557,9 @@ func (r *sqliteRepository) GetMessageByPendingID(ctx context.Context, sessionID,
 	var messageType string
 	var metadataJSON string
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, task_session_id, task_id, author_type, author_id, content, requests_input, type, metadata, created_at
+		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at
 		FROM task_session_messages WHERE task_session_id = ? AND json_extract(metadata, '$.pending_id') = ?
-	`, sessionID, pendingID).Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.AuthorType, &message.AuthorID,
+	`, sessionID, pendingID).Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.TurnID, &message.AuthorType, &message.AuthorID,
 		&message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt)
 	if err != nil {
 		return nil, err
@@ -1578,6 +1597,156 @@ func (r *sqliteRepository) UpdateMessage(ctx context.Context, message *models.Me
 		return fmt.Errorf("message not found: %s", message.ID)
 	}
 	return nil
+}
+
+// Turn operations
+
+// CreateTurn creates a new turn
+func (r *sqliteRepository) CreateTurn(ctx context.Context, turn *models.Turn) error {
+	if turn.ID == "" {
+		turn.ID = uuid.New().String()
+	}
+	now := time.Now().UTC()
+	if turn.StartedAt.IsZero() {
+		turn.StartedAt = now
+	}
+	if turn.CreatedAt.IsZero() {
+		turn.CreatedAt = now
+	}
+	turn.UpdatedAt = now
+
+	metadataJSON := "{}"
+	if turn.Metadata != nil {
+		metadataBytes, err := json.Marshal(turn.Metadata)
+		if err != nil {
+			return fmt.Errorf("failed to serialize turn metadata: %w", err)
+		}
+		metadataJSON = string(metadataBytes)
+	}
+
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO task_session_turns (id, task_session_id, task_id, started_at, completed_at, metadata, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`, turn.ID, turn.TaskSessionID, turn.TaskID, turn.StartedAt, turn.CompletedAt, metadataJSON, turn.CreatedAt, turn.UpdatedAt)
+
+	return err
+}
+
+// GetTurn retrieves a turn by ID
+func (r *sqliteRepository) GetTurn(ctx context.Context, id string) (*models.Turn, error) {
+	turn := &models.Turn{}
+	var metadataJSON string
+	var completedAt sql.NullTime
+	err := r.db.QueryRowContext(ctx, `
+		SELECT id, task_session_id, task_id, started_at, completed_at, metadata, created_at, updated_at
+		FROM task_session_turns WHERE id = ?
+	`, id).Scan(&turn.ID, &turn.TaskSessionID, &turn.TaskID, &turn.StartedAt, &completedAt, &metadataJSON, &turn.CreatedAt, &turn.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	if completedAt.Valid {
+		turn.CompletedAt = &completedAt.Time
+	}
+	if metadataJSON != "" && metadataJSON != "{}" {
+		if err := json.Unmarshal([]byte(metadataJSON), &turn.Metadata); err != nil {
+			return nil, fmt.Errorf("failed to deserialize turn metadata: %w", err)
+		}
+	}
+	return turn, nil
+}
+
+// GetActiveTurnBySessionID gets the currently active (non-completed) turn for a session
+func (r *sqliteRepository) GetActiveTurnBySessionID(ctx context.Context, sessionID string) (*models.Turn, error) {
+	turn := &models.Turn{}
+	var metadataJSON string
+	var completedAt sql.NullTime
+	err := r.db.QueryRowContext(ctx, `
+		SELECT id, task_session_id, task_id, started_at, completed_at, metadata, created_at, updated_at
+		FROM task_session_turns
+		WHERE task_session_id = ? AND completed_at IS NULL
+		ORDER BY started_at DESC LIMIT 1
+	`, sessionID).Scan(&turn.ID, &turn.TaskSessionID, &turn.TaskID, &turn.StartedAt, &completedAt, &metadataJSON, &turn.CreatedAt, &turn.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	if completedAt.Valid {
+		turn.CompletedAt = &completedAt.Time
+	}
+	if metadataJSON != "" && metadataJSON != "{}" {
+		if err := json.Unmarshal([]byte(metadataJSON), &turn.Metadata); err != nil {
+			return nil, fmt.Errorf("failed to deserialize turn metadata: %w", err)
+		}
+	}
+	return turn, nil
+}
+
+// UpdateTurn updates an existing turn
+func (r *sqliteRepository) UpdateTurn(ctx context.Context, turn *models.Turn) error {
+	turn.UpdatedAt = time.Now().UTC()
+
+	metadataJSON := "{}"
+	if turn.Metadata != nil {
+		metadataBytes, err := json.Marshal(turn.Metadata)
+		if err != nil {
+			return fmt.Errorf("failed to serialize turn metadata: %w", err)
+		}
+		metadataJSON = string(metadataBytes)
+	}
+
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE task_session_turns
+		SET completed_at = ?, metadata = ?, updated_at = ?
+		WHERE id = ?
+	`, turn.CompletedAt, metadataJSON, turn.UpdatedAt, turn.ID)
+
+	return err
+}
+
+// CompleteTurn marks a turn as completed with the current time
+func (r *sqliteRepository) CompleteTurn(ctx context.Context, id string) error {
+	now := time.Now().UTC()
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE task_session_turns
+		SET completed_at = ?, updated_at = ?
+		WHERE id = ?
+	`, now, now, id)
+	return err
+}
+
+// ListTurnsBySession returns all turns for a session ordered by start time
+func (r *sqliteRepository) ListTurnsBySession(ctx context.Context, sessionID string) ([]*models.Turn, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, task_session_id, task_id, started_at, completed_at, metadata, created_at, updated_at
+		FROM task_session_turns WHERE task_session_id = ? ORDER BY started_at ASC
+	`, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var result []*models.Turn
+	for rows.Next() {
+		turn := &models.Turn{}
+		var metadataJSON string
+		var completedAt sql.NullTime
+		err := rows.Scan(&turn.ID, &turn.TaskSessionID, &turn.TaskID, &turn.StartedAt, &completedAt, &metadataJSON, &turn.CreatedAt, &turn.UpdatedAt)
+		if err != nil {
+			return nil, err
+		}
+		if completedAt.Valid {
+			turn.CompletedAt = &completedAt.Time
+		}
+		if metadataJSON != "" && metadataJSON != "{}" {
+			if err := json.Unmarshal([]byte(metadataJSON), &turn.Metadata); err != nil {
+				return nil, fmt.Errorf("failed to deserialize turn metadata: %w", err)
+			}
+		}
+		result = append(result, turn)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 // Repository operations

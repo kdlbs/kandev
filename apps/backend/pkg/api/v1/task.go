@@ -123,7 +123,8 @@ type Message struct {
 	ID            string                 `json:"id"`
 	TaskSessionID string                 `json:"session_id"`
 	TaskID        string                 `json:"task_id,omitempty"`
-	AuthorType    string                 `json:"author_type"` // "user" or "agent"
+	TurnID        string                 `json:"turn_id,omitempty"` // FK to task_session_turns
+	AuthorType    string                 `json:"author_type"`       // "user" or "agent"
 	Type          string                 `json:"type,omitempty"`
 	AuthorID      string                 `json:"author_id,omitempty"`
 	Content       string                 `json:"content"`

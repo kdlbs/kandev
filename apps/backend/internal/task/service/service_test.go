@@ -527,6 +527,24 @@ func setupTestSession(t *testing.T, repo repository.Repository) string {
 	return session.ID
 }
 
+func setupTestTurn(t *testing.T, repo repository.Repository, sessionID, taskID, turnID string) string {
+	t.Helper()
+	ctx := context.Background()
+	now := time.Now()
+	turn := &models.Turn{
+		ID:            turnID,
+		TaskSessionID: sessionID,
+		TaskID:        taskID,
+		StartedAt:     now,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	if err := repo.CreateTurn(ctx, turn); err != nil {
+		t.Fatalf("failed to create test turn: %v", err)
+	}
+	return turn.ID
+}
+
 func TestService_CreateMessage(t *testing.T) {
 	svc, eventBus, repo := createTestService(t)
 	ctx := context.Background()
@@ -534,10 +552,12 @@ func TestService_CreateMessage(t *testing.T) {
 	// Create a task first
 	setupTestTask(t, repo)
 	sessionID := setupTestSession(t, repo)
+	turnID := setupTestTurn(t, repo, sessionID, "task-123", "turn-123")
 	eventBus.ClearEvents()
 
 	req := &CreateMessageRequest{
 		TaskSessionID: sessionID,
+		TurnID:        turnID,
 		Content:       "This is a test comment",
 		AuthorType:    "user",
 		AuthorID:      "user-123",
@@ -574,9 +594,11 @@ func TestService_CreateAgentMessage(t *testing.T) {
 
 	setupTestTask(t, repo)
 	sessionID := setupTestSession(t, repo)
+	turnID := setupTestTurn(t, repo, sessionID, "task-123", "turn-123")
 
 	req := &CreateMessageRequest{
 		TaskSessionID: sessionID,
+		TurnID:        turnID,
 		Content:       "What should I do next?",
 		AuthorType:    "agent",
 		AuthorID:      "agent-123",
@@ -617,8 +639,9 @@ func TestService_GetMessage(t *testing.T) {
 
 	setupTestTask(t, repo)
 	sessionID := setupTestSession(t, repo)
+	turnID := setupTestTurn(t, repo, sessionID, "task-123", "turn-123")
 
-	comment := &models.Message{ID: "comment-123", TaskSessionID: sessionID, TaskID: "task-123", AuthorType: models.MessageAuthorUser, Content: "Test"}
+	comment := &models.Message{ID: "comment-123", TaskSessionID: sessionID, TaskID: "task-123", TurnID: turnID, AuthorType: models.MessageAuthorUser, Content: "Test"}
 	_ = repo.CreateMessage(ctx, comment)
 
 	retrieved, err := svc.GetMessage(ctx, "comment-123")
@@ -636,9 +659,10 @@ func TestService_ListMessages(t *testing.T) {
 
 	setupTestTask(t, repo)
 	sessionID := setupTestSession(t, repo)
+	turnID := setupTestTurn(t, repo, sessionID, "task-123", "turn-123")
 
-	_ = repo.CreateMessage(ctx, &models.Message{ID: "comment-1", TaskSessionID: sessionID, TaskID: "task-123", AuthorType: models.MessageAuthorUser, Content: "Comment 1"})
-	_ = repo.CreateMessage(ctx, &models.Message{ID: "comment-2", TaskSessionID: sessionID, TaskID: "task-123", AuthorType: models.MessageAuthorAgent, Content: "Comment 2"})
+	_ = repo.CreateMessage(ctx, &models.Message{ID: "comment-1", TaskSessionID: sessionID, TaskID: "task-123", TurnID: turnID, AuthorType: models.MessageAuthorUser, Content: "Comment 1"})
+	_ = repo.CreateMessage(ctx, &models.Message{ID: "comment-2", TaskSessionID: sessionID, TaskID: "task-123", TurnID: turnID, AuthorType: models.MessageAuthorAgent, Content: "Comment 2"})
 
 	comments, err := svc.ListMessages(ctx, sessionID)
 	if err != nil {
@@ -655,8 +679,9 @@ func TestService_DeleteMessage(t *testing.T) {
 
 	setupTestTask(t, repo)
 	sessionID := setupTestSession(t, repo)
+	turnID := setupTestTurn(t, repo, sessionID, "task-123", "turn-123")
 
-	comment := &models.Message{ID: "comment-123", TaskSessionID: sessionID, TaskID: "task-123", AuthorType: models.MessageAuthorUser, Content: "Test"}
+	comment := &models.Message{ID: "comment-123", TaskSessionID: sessionID, TaskID: "task-123", TurnID: turnID, AuthorType: models.MessageAuthorUser, Content: "Test"}
 	_ = repo.CreateMessage(ctx, comment)
 
 	err := svc.DeleteMessage(ctx, "comment-123")

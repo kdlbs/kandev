@@ -41,6 +41,12 @@ const (
 	TaskSessionStateChanged = "task_session.state_changed"
 )
 
+// Event types for session turns
+const (
+	TurnStarted   = "turn.started"
+	TurnCompleted = "turn.completed"
+)
+
 // Event types for repositories
 const (
 	RepositoryCreated = "repository.created"
