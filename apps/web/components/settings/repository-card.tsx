@@ -59,11 +59,13 @@ export function RepositoryCard({
   const worktreeBranchPrefix = repository.worktree_branch_prefix ?? '';
   const setupScript = repository.setup_script ?? '';
   const cleanupScript = repository.cleanup_script ?? '';
+  const devScript = repository.dev_script ?? '';
   const isDirty = isRepositoryDirty || areScriptsDirty;
   const scriptsCount = repository.scripts.length;
   const hasSetupScript = Boolean(setupScript.trim());
   const hasCleanupScript = Boolean(cleanupScript.trim());
-  const showScriptsSummary = scriptsCount > 0 || hasSetupScript || hasCleanupScript;
+  const hasDevScript = Boolean(devScript.trim());
+  const showScriptsSummary = scriptsCount > 0 || hasSetupScript || hasCleanupScript || hasDevScript;
   const scriptsLabel = scriptsCount === 0
     ? 'No custom scripts'
     : `${scriptsCount} custom script${scriptsCount === 1 ? '' : 's'}`;
@@ -196,6 +198,20 @@ export function RepositoryCard({
                   </div>
                 </div>
 
+                <div className="space-y-2">
+                  <Label>Dev Script</Label>
+                  <Textarea
+                    value={devScript}
+                    onChange={(e) => onUpdate(repository.id, { dev_script: e.target.value })}
+                    placeholder="#!/bin/bash&#10;npm run dev"
+                    rows={3}
+                    className="font-mono text-sm"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Used to start the preview dev server for this repository.
+                  </p>
+                </div>
+
                 <div className="space-y-3">
                   <div className="flex items-center justify-between gap-3">
                     <Label className="flex items-center gap-2">
@@ -296,6 +312,7 @@ export function RepositoryCard({
                         {scriptsCount > 0 && <span>{scriptsLabel}</span>}
                         {hasSetupScript && <span>build script</span>}
                         {hasCleanupScript && <span>cleanup script</span>}
+                        {hasDevScript && <span>dev script</span>}
                       </div>
                     ) : null}
                   </div>

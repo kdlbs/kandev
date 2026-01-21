@@ -116,6 +116,12 @@ const (
 	ShellExit   = "shell.exit"   // Shell process exited
 )
 
+// Event types for dev server I/O
+const (
+	ProcessOutput = "process.output" // Process output data
+	ProcessStatus = "process.status" // Process status updates
+)
+
 // Event types for context window
 const (
 	ContextWindowUpdated = "context_window.updated" // Context window usage updated
@@ -139,6 +145,26 @@ func BuildShellExitSubject(sessionID string) string {
 // BuildShellExitWildcardSubject creates a wildcard subscription for all shell exit events
 func BuildShellExitWildcardSubject() string {
 	return ShellExit + ".*"
+}
+
+// BuildProcessOutputSubject creates a process output subject for a specific session
+func BuildProcessOutputSubject(sessionID string) string {
+	return ProcessOutput + "." + sessionID
+}
+
+// BuildProcessOutputWildcardSubject creates a wildcard subject for all process output events
+func BuildProcessOutputWildcardSubject() string {
+	return ProcessOutput + ".*"
+}
+
+// BuildProcessStatusSubject creates a process status subject for a specific session
+func BuildProcessStatusSubject(sessionID string) string {
+	return ProcessStatus + "." + sessionID
+}
+
+// BuildProcessStatusWildcardSubject creates a wildcard subject for all process status events
+func BuildProcessStatusWildcardSubject() string {
+	return ProcessStatus + ".*"
 }
 
 // BuildAgentStreamSubject creates an agent stream subject for a specific session

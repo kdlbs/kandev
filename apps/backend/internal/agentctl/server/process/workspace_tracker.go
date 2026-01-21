@@ -40,8 +40,9 @@ type WorkspaceTracker struct {
 	fsChangeTrigger chan struct{}
 
 	// Control
-	stopCh chan struct{}
-	wg     sync.WaitGroup
+	stopCh  chan struct{}
+	wg      sync.WaitGroup
+	started bool
 }
 
 // NewWorkspaceTracker creates a new workspace tracker
@@ -64,6 +65,15 @@ func NewWorkspaceTracker(workDir string, log *logger.Logger) *WorkspaceTracker {
 
 // Start begins monitoring the workspace
 func (wt *WorkspaceTracker) Start(ctx context.Context) {
+	wt.mu.Lock()
+	if wt.started {
+		wt.mu.Unlock()
+		wt.logger.Debug("workspace tracker already started, skipping")
+		return
+	}
+	wt.started = true
+	wt.mu.Unlock()
+
 	wt.wg.Add(1)
 	go wt.monitorLoop(ctx)
 
@@ -230,7 +240,7 @@ func (wt *WorkspaceTracker) getGitStatus(ctx context.Context) (types.GitStatusUp
 			continue
 		}
 
-		indexStatus := line[0]   // Staged status (X)
+		indexStatus := line[0]    // Staged status (X)
 		workTreeStatus := line[1] // Unstaged status (Y)
 		filePath := strings.TrimSpace(line[3:])
 
@@ -479,8 +489,6 @@ func (wt *WorkspaceTracker) getFileList(ctx context.Context) (types.FileListUpda
 	return update, nil
 }
 
-
-
 // Unified workspace stream subscriber management methods
 
 // SubscribeWorkspaceStream creates a new unified workspace stream subscriber
@@ -490,7 +498,9 @@ func (wt *WorkspaceTracker) SubscribeWorkspaceStream() types.WorkspaceStreamSubs
 
 	wt.workspaceSubMu.Lock()
 	wt.workspaceStreamSubscribers[sub] = struct{}{}
+	count := len(wt.workspaceStreamSubscribers)
 	wt.workspaceSubMu.Unlock()
+	wt.logger.Info("workspace stream subscriber added", zap.Int("subscribers", count))
 
 	// Send current git status immediately
 	wt.mu.RLock()
@@ -524,8 +534,10 @@ func (wt *WorkspaceTracker) SubscribeWorkspaceStream() types.WorkspaceStreamSubs
 func (wt *WorkspaceTracker) UnsubscribeWorkspaceStream(sub types.WorkspaceStreamSubscriber) {
 	wt.workspaceSubMu.Lock()
 	delete(wt.workspaceStreamSubscribers, sub)
+	count := len(wt.workspaceStreamSubscribers)
 	wt.workspaceSubMu.Unlock()
 	close(sub)
+	wt.logger.Info("workspace stream subscriber removed", zap.Int("subscribers", count))
 }
 
 // Notification methods for unified workspace stream
@@ -566,6 +578,48 @@ func (wt *WorkspaceTracker) notifyWorkspaceStreamFileList(update types.FileListU
 	defer wt.workspaceSubMu.RUnlock()
 
 	msg := types.NewWorkspaceFileList(&update)
+	for sub := range wt.workspaceStreamSubscribers {
+		select {
+		case sub <- msg:
+		default:
+			// Subscriber is slow, skip
+		}
+	}
+}
+
+// notifyWorkspaceStreamProcessOutput sends process output to all workspace stream subscribers
+func (wt *WorkspaceTracker) notifyWorkspaceStreamProcessOutput(output *types.ProcessOutput) {
+	wt.workspaceSubMu.RLock()
+	defer wt.workspaceSubMu.RUnlock()
+
+	msg := types.NewWorkspaceProcessOutput(output)
+	wt.logger.Debug("broadcast process output",
+		zap.String("session_id", output.SessionID),
+		zap.String("process_id", output.ProcessID),
+		zap.String("kind", string(output.Kind)),
+		zap.Int("subscribers", len(wt.workspaceStreamSubscribers)),
+	)
+	for sub := range wt.workspaceStreamSubscribers {
+		select {
+		case sub <- msg:
+		default:
+			// Subscriber is slow, skip
+		}
+	}
+}
+
+// notifyWorkspaceStreamProcessStatus sends process status updates to all workspace stream subscribers
+func (wt *WorkspaceTracker) notifyWorkspaceStreamProcessStatus(status *types.ProcessStatusUpdate) {
+	wt.workspaceSubMu.RLock()
+	defer wt.workspaceSubMu.RUnlock()
+
+	msg := types.NewWorkspaceProcessStatus(status)
+	wt.logger.Debug("broadcast process status",
+		zap.String("session_id", status.SessionID),
+		zap.String("process_id", status.ProcessID),
+		zap.String("status", string(status.Status)),
+		zap.Int("subscribers", len(wt.workspaceStreamSubscribers)),
+	)
 	for sub := range wt.workspaceStreamSubscribers {
 		select {
 		case sub <- msg:
@@ -755,5 +809,3 @@ func (wt *WorkspaceTracker) GetFileContent(reqPath string) (string, int64, error
 
 	return string(content), info.Size(), nil
 }
-
-

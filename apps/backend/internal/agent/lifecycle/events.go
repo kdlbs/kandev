@@ -343,6 +343,62 @@ func (p *EventPublisher) PublishShellExit(execution *AgentExecution, exitCode in
 	}
 }
 
+// PublishProcessOutput publishes a process output event to the event bus.
+func (p *EventPublisher) PublishProcessOutput(execution *AgentExecution, output *agentctl.ProcessOutput) {
+	if p.eventBus == nil || output == nil {
+		return
+	}
+
+	payload := ProcessOutputEventPayload{
+		TaskID:    execution.TaskID,
+		SessionID: output.SessionID,
+		ProcessID: output.ProcessID,
+		Kind:      string(output.Kind),
+		Stream:    output.Stream,
+		Data:      output.Data,
+		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
+	}
+
+	event := bus.NewEvent(events.ProcessOutput, "agent-manager", payload)
+	subject := events.BuildProcessOutputSubject(output.SessionID)
+
+	if err := p.eventBus.Publish(context.Background(), subject, event); err != nil {
+		p.logger.Error("failed to publish process output event",
+			zap.String("instance_id", execution.ID),
+			zap.String("task_id", execution.TaskID),
+			zap.String("session_id", output.SessionID),
+			zap.Error(err))
+	}
+}
+
+// PublishProcessStatus publishes a process status event to the event bus.
+func (p *EventPublisher) PublishProcessStatus(execution *AgentExecution, status *agentctl.ProcessStatusUpdate) {
+	if p.eventBus == nil || status == nil {
+		return
+	}
+
+	payload := ProcessStatusEventPayload{
+		SessionID:  status.SessionID,
+		ProcessID:  status.ProcessID,
+		Kind:       string(status.Kind),
+		ScriptName: status.ScriptName,
+		Status:     string(status.Status),
+		Command:    status.Command,
+		WorkingDir: status.WorkingDir,
+		ExitCode:   status.ExitCode,
+		Timestamp:  time.Now().UTC().Format(time.RFC3339Nano),
+	}
+
+	event := bus.NewEvent(events.ProcessStatus, "agent-manager", payload)
+	subject := events.BuildProcessStatusSubject(status.SessionID)
+
+	if err := p.eventBus.Publish(context.Background(), subject, event); err != nil {
+		p.logger.Error("failed to publish process status event",
+			zap.String("session_id", status.SessionID),
+			zap.Error(err))
+	}
+}
+
 // PublishContextWindow publishes a context window update event to the event bus.
 func (p *EventPublisher) PublishContextWindow(execution *AgentExecution, size, used, remaining int64, efficiency float64) {
 	if p.eventBus == nil {

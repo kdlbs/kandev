@@ -19,5 +19,42 @@ export function registerTerminalsHandlers(store: StoreApi<AppState>): WsHandlers
         store.getState().setShellStatus(session_id, { available: false });
       }
     },
+    'session.process.output': (message) => {
+      const { process_id, data } = message.payload;
+      if (!process_id || !data) {
+        return;
+      }
+      store.getState().appendProcessOutput(process_id, data);
+    },
+    'session.process.status': (message) => {
+      const {
+        session_id,
+        process_id,
+        kind,
+        status,
+        script_name,
+        command,
+        working_dir,
+        exit_code,
+        timestamp,
+      } = message.payload;
+      if (!session_id || !process_id || !status) {
+        return;
+      }
+      store.getState().upsertProcessStatus({
+        processId: process_id,
+        sessionId: session_id,
+        kind,
+        scriptName: script_name,
+        status,
+        command,
+        workingDir: working_dir,
+        exitCode: exit_code,
+        updatedAt: timestamp,
+      });
+      if (status === 'starting') {
+        store.getState().clearProcessOutput(process_id);
+      }
+    },
   };
 }

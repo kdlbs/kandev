@@ -103,11 +103,13 @@ func NewManager(
 
 	// Initialize stream manager with callbacks that delegate to manager methods
 	mgr.streamManager = NewStreamManager(log, StreamCallbacks{
-		OnAgentEvent:  mgr.handleAgentEvent,
-		OnGitStatus:   mgr.handleGitStatusUpdate,
-		OnFileChange:  mgr.handleFileChangeNotification,
-		OnShellOutput: mgr.handleShellOutput,
-		OnShellExit:   mgr.handleShellExit,
+		OnAgentEvent:    mgr.handleAgentEvent,
+		OnGitStatus:     mgr.handleGitStatusUpdate,
+		OnFileChange:    mgr.handleFileChangeNotification,
+		OnShellOutput:   mgr.handleShellOutput,
+		OnShellExit:     mgr.handleShellExit,
+		OnProcessOutput: mgr.handleProcessOutput,
+		OnProcessStatus: mgr.handleProcessStatus,
 	})
 
 	// Set session manager dependencies for full orchestration
@@ -130,6 +132,117 @@ func (m *Manager) SetWorkspaceInfoProvider(provider WorkspaceInfoProvider) {
 	m.workspaceInfoProvider = provider
 }
 
+// EnsureWorkspaceExecutionForSession ensures an agentctl execution exists for a specific task session.
+// This is used when the frontend provides a session ID (e.g., from URL path /task/[id]/[sessionId]).
+// If an execution already exists for the session, it returns it. Otherwise, it creates a new execution
+// using the session's workspace configuration from the database.
+func (m *Manager) EnsureWorkspaceExecutionForSession(ctx context.Context, taskID, sessionID string) (*AgentExecution, error) {
+	// Check if execution already exists
+	if execution, exists := m.executionStore.GetBySessionID(sessionID); exists {
+		return execution, nil
+	}
+
+	// Need to create a new execution - get workspace info for the specific session
+	if m.workspaceInfoProvider == nil {
+		return nil, fmt.Errorf("workspace info provider not configured")
+	}
+
+	info, err := m.workspaceInfoProvider.GetWorkspaceInfoForSession(ctx, taskID, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get workspace info for session %s: %w", sessionID, err)
+	}
+
+	if info.WorkspacePath == "" {
+		return nil, fmt.Errorf("no workspace path available for session %s", sessionID)
+	}
+
+	m.logger.Info("creating execution for task session",
+		zap.String("task_id", taskID),
+		zap.String("session_id", sessionID),
+		zap.String("workspace_path", info.WorkspacePath),
+		zap.String("acp_session_id", info.ACPSessionID))
+
+	execution, err := m.createExecution(ctx, taskID, info)
+	if err != nil {
+		return nil, err
+	}
+
+	// For workspace-only executions (no agent), wait for agentctl to be ready
+	// then connect the workspace stream so process output can be received
+	go func() {
+		// Wait for agentctl to be ready
+		waitCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+
+		if err := execution.agentctl.WaitForReady(waitCtx, 60*time.Second); err != nil {
+			m.logger.Error("agentctl not ready for workspace stream connection",
+				zap.String("execution_id", execution.ID),
+				zap.Error(err))
+			return
+		}
+
+		// Connect workspace stream for process output (agent stream not needed for workspace-only)
+		if m.streamManager != nil {
+			m.logger.Info("connecting workspace stream for workspace-only execution",
+				zap.String("execution_id", execution.ID))
+			go m.streamManager.connectWorkspaceStream(execution)
+		}
+	}()
+
+	return execution, nil
+}
+
+// createExecution creates an agentctl execution.
+// The agent subprocess is NOT started - call ConfigureAgent + Start explicitly.
+func (m *Manager) createExecution(ctx context.Context, taskID string, info *WorkspaceInfo) (*AgentExecution, error) {
+	if m.runtime == nil {
+		return nil, fmt.Errorf("no runtime configured")
+	}
+
+	if info.AgentID == "" {
+		return nil, fmt.Errorf("agent ID is required in WorkspaceInfo")
+	}
+
+	executionID := uuid.New().String()
+
+	agentConfig, err := m.registry.Get(info.AgentID)
+	if err != nil {
+		return nil, fmt.Errorf("agent type %q not found in registry: %w", info.AgentID, err)
+	}
+
+	req := &RuntimeCreateRequest{
+		InstanceID:     executionID,
+		TaskID:         taskID,
+		SessionID:      info.SessionID,
+		AgentProfileID: info.AgentProfileID,
+		WorkspacePath:  info.WorkspacePath,
+		Protocol:       string(agentConfig.Protocol),
+	}
+
+	runtimeInstance, err := m.runtime.CreateInstance(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create execution: %w", err)
+	}
+
+	execution := runtimeInstance.ToAgentExecution(req)
+
+	// Set the ACP session ID for session resumption
+	if info.ACPSessionID != "" {
+		execution.ACPSessionID = info.ACPSessionID
+	}
+
+	m.executionStore.Add(execution)
+
+	go m.waitForAgentctlReady(execution)
+
+	m.logger.Info("execution created",
+		zap.String("execution_id", executionID),
+		zap.String("task_id", taskID),
+		zap.String("workspace_path", info.WorkspacePath),
+		zap.String("runtime", string(m.runtime.Name())))
+
+	return execution, nil
+}
 // Start starts the lifecycle manager background tasks
 func (m *Manager) Start(ctx context.Context) error {
 	runtimeName := "none"
@@ -931,6 +1044,34 @@ func (m *Manager) handleFileChangeNotification(execution *AgentExecution, notifi
 // handleShellOutput processes shell output from the workspace stream
 func (m *Manager) handleShellOutput(execution *AgentExecution, data string) {
 	m.eventPublisher.PublishShellOutput(execution, data)
+}
+
+// handleProcessOutput processes script process output from the workspace stream
+func (m *Manager) handleProcessOutput(execution *AgentExecution, output *agentctl.ProcessOutput) {
+	if output == nil {
+		return
+	}
+	m.logger.Debug("lifecycle received process output",
+		zap.String("session_id", output.SessionID),
+		zap.String("process_id", output.ProcessID),
+		zap.String("kind", string(output.Kind)),
+		zap.String("stream", output.Stream),
+		zap.Int("bytes", len(output.Data)),
+	)
+	m.eventPublisher.PublishProcessOutput(execution, output)
+}
+
+// handleProcessStatus processes script process status updates from the workspace stream
+func (m *Manager) handleProcessStatus(execution *AgentExecution, status *agentctl.ProcessStatusUpdate) {
+	if status == nil {
+		return
+	}
+	m.logger.Debug("lifecycle received process status",
+		zap.String("session_id", status.SessionID),
+		zap.String("process_id", status.ProcessID),
+		zap.String("status", string(status.Status)),
+	)
+	m.eventPublisher.PublishProcessStatus(execution, status)
 }
 
 // handleShellExit processes shell exit events from the workspace stream

@@ -76,7 +76,7 @@ type Service struct {
 	queue     *queue.TaskQueue
 	executor  *executor.Executor
 	scheduler *scheduler.Scheduler
-	watcher *watcher.Watcher
+	watcher   *watcher.Watcher
 
 	// Message creator for saving agent responses
 	messageCreator MessageCreator
@@ -131,15 +131,15 @@ func NewService(
 
 	// Create the service (watcher will be created after we have handlers)
 	s := &Service{
-		config:               cfg,
-		logger:               svcLogger,
-		eventBus:             eventBus,
-		taskRepo:       taskRepo,
-		repo:           repo,
-		agentManager:   agentManager,
-		queue:          taskQueue,
-		executor:  exec,
-		scheduler: sched,
+		config:       cfg,
+		logger:       svcLogger,
+		eventBus:     eventBus,
+		taskRepo:     taskRepo,
+		repo:         repo,
+		agentManager: agentManager,
+		queue:        taskQueue,
+		executor:     exec,
+		scheduler:    sched,
 	}
 
 	// Create the watcher with event handlers that wire everything together
@@ -355,26 +355,13 @@ func (s *Service) resumeExecutorsOnStartup(ctx context.Context) {
 			continue
 		}
 
-		// For sessions that were STARTING, RUNNING, or WAITING_FOR_INPUT:
-		// We need a resume token to recover them
-		if running.ResumeToken == "" {
-			s.logger.Warn("no resume token available; marking session as failed",
+		startAgent := running.ResumeToken != "" && running.Resumable
+		if !startAgent {
+			s.logger.Warn("resuming workspace without agent session",
 				zap.String("session_id", sessionID),
-				zap.String("previous_state", string(previousState)))
-			_ = s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateFailed,
-				"backend restarted and session cannot be resumed (no resume token)")
-			_ = s.repo.DeleteExecutorRunningBySessionID(ctx, sessionID)
-			continue
-		}
-
-		// Check if executor supports resume
-		if !running.Resumable {
-			s.logger.Warn("executor not resumable; marking session as failed",
-				zap.String("session_id", sessionID))
-			_ = s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateFailed,
-				"executor does not support session resume")
-			_ = s.repo.DeleteExecutorRunningBySessionID(ctx, sessionID)
-			continue
+				zap.String("previous_state", string(previousState)),
+				zap.Bool("has_resume_token", running.ResumeToken != ""),
+				zap.Bool("resumable", running.Resumable))
 		}
 
 		// Validate worktree exists before resuming
@@ -391,7 +378,8 @@ func (s *Service) resumeExecutorsOnStartup(ctx context.Context) {
 			zap.String("session_id", sessionID),
 			zap.String("task_id", running.TaskID),
 			zap.String("previous_state", string(previousState)),
-			zap.String("resume_token", running.ResumeToken))
+			zap.String("resume_token", running.ResumeToken),
+			zap.Bool("start_agent", startAgent))
 
 		// Resume the session - this will:
 		// 1. Create a new agentctl instance
@@ -404,7 +392,7 @@ func (s *Service) resumeExecutorsOnStartup(ctx context.Context) {
 		// - Session resume just loads conversation history, doesn't process a prompt
 		// - Agents don't send a "complete" event after session load (only after prompt completion)
 		// - The agent is ready for the next user prompt immediately after session loads
-		if _, err := s.executor.ResumeSession(ctx, session, true); err != nil {
+		if _, err := s.executor.ResumeSession(ctx, session, startAgent); err != nil {
 			s.logger.Warn("failed to resume executor on startup",
 				zap.String("session_id", sessionID),
 				zap.Error(err))
@@ -413,16 +401,19 @@ func (s *Service) resumeExecutorsOnStartup(ctx context.Context) {
 			continue
 		}
 
-		// Set state to WAITING_FOR_INPUT - agent is ready for the next prompt
-		if err := s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateWaitingForInput, ""); err != nil {
-			s.logger.Warn("failed to set session state to WAITING_FOR_INPUT after resume",
-				zap.String("session_id", sessionID),
-				zap.Error(err))
+		if startAgent {
+			// Set state to WAITING_FOR_INPUT - agent is ready for the next prompt
+			if err := s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateWaitingForInput, ""); err != nil {
+				s.logger.Warn("failed to set session state to WAITING_FOR_INPUT after resume",
+					zap.String("session_id", sessionID),
+					zap.Error(err))
+			}
 		}
 
 		s.logger.Info("session resumed successfully",
 			zap.String("session_id", sessionID),
 			zap.String("task_id", running.TaskID),
+			zap.Bool("start_agent", startAgent),
 			zap.String("state", string(models.TaskSessionStateWaitingForInput)))
 	}
 }
@@ -458,5 +449,3 @@ func (s *Service) GetStatus() *Status {
 		LastHeartbeat:  time.Now(),
 	}
 }
-
-

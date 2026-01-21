@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { Column } from './kanban-column';
 import { Task } from './kanban-card';
 import { TaskCreateDialog } from './task-create-dialog';
@@ -44,14 +44,11 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
   useBoards(workspaceState.activeId, true);
   useBoardSnapshot(boardsState.activeId);
 
-  const {
-    settings: userSettings,
-    commitSettings,
-    selectedRepositoryIds,
-  } = useUserDisplaySettings({
-    workspaceId: workspaceState.activeId,
-    boardId: boardsState.activeId,
-    onWorkspaceChange: (nextWorkspaceId) => {
+  const handleWorkspaceChange = useCallback(
+    (nextWorkspaceId: string | null) => {
+      if (nextWorkspaceId === workspaceState.activeId) {
+        return;
+      }
       setActiveWorkspace(nextWorkspaceId);
       if (nextWorkspaceId) {
         router.push(`/?workspaceId=${nextWorkspaceId}`);
@@ -59,7 +56,14 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
         router.push('/');
       }
     },
-    onBoardChange: (nextBoardId) => {
+    [router, setActiveWorkspace, workspaceState.activeId]
+  );
+
+  const handleBoardChange = useCallback(
+    (nextBoardId: string | null) => {
+      if (nextBoardId === boardsState.activeId) {
+        return;
+      }
       setActiveBoard(nextBoardId);
       if (nextBoardId) {
         const workspaceId = boardsState.items.find((board) => board.id === nextBoardId)?.workspaceId;
@@ -67,6 +71,21 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
         router.push(`/?boardId=${nextBoardId}${workspaceParam}`);
       }
     },
+    [boardsState.activeId, boardsState.items, router, setActiveBoard]
+  );
+
+  const stableWorkspaceId = workspaceState.activeId;
+  const stableBoardId = boardsState.activeId;
+
+  const {
+    settings: userSettings,
+    commitSettings,
+    selectedRepositoryIds,
+  } = useUserDisplaySettings({
+    workspaceId: stableWorkspaceId,
+    boardId: stableBoardId,
+    onWorkspaceChange: handleWorkspaceChange,
+    onBoardChange: handleBoardChange,
   });
 
   const isMounted = useSyncExternalStore(

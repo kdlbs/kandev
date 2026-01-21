@@ -53,6 +53,7 @@ func (c *RepositoryController) CreateRepository(ctx context.Context, req dto.Cre
 		WorktreeBranchPrefix: req.WorktreeBranchPrefix,
 		SetupScript:          req.SetupScript,
 		CleanupScript:        req.CleanupScript,
+		DevScript:            req.DevScript,
 	})
 	if err != nil {
 		return dto.RepositoryDTO{}, err
@@ -73,6 +74,7 @@ func (c *RepositoryController) UpdateRepository(ctx context.Context, req dto.Upd
 		WorktreeBranchPrefix: req.WorktreeBranchPrefix,
 		SetupScript:          req.SetupScript,
 		CleanupScript:        req.CleanupScript,
+		DevScript:            req.DevScript,
 	})
 	if err != nil {
 		return dto.RepositoryDTO{}, err
