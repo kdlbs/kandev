@@ -70,6 +70,7 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 		Env:             req.Env,
 		ACPSessionID:    req.ACPSessionID,
 		Metadata:        req.Metadata,
+		ModelOverride:   req.ModelOverride,
 		// Worktree configuration for concurrent agent execution
 		UseWorktree:          req.UseWorktree,
 		RepositoryID:         req.RepositoryID,
@@ -209,14 +210,41 @@ func (a *lifecycleAdapter) CleanupStaleExecutionBySessionID(ctx context.Context,
 	return a.mgr.CleanupStaleExecutionBySessionID(ctx, sessionID)
 }
 
+// GetAgentType returns the agent type configuration
+func (a *lifecycleAdapter) GetAgentType(ctx context.Context, agentID string) (*v1.AgentType, error) {
+	config, err := a.registry.Get(agentID)
+	if err != nil {
+		return nil, err
+	}
+	return config.ToAPIType(), nil
+}
+
+// ResolveAgentProfile resolves an agent profile ID to profile information
+func (a *lifecycleAdapter) ResolveAgentProfile(ctx context.Context, profileID string) (*executor.AgentProfileInfo, error) {
+	info, err := a.mgr.ResolveAgentProfile(ctx, profileID)
+	if err != nil {
+		return nil, err
+	}
+	return &executor.AgentProfileInfo{
+		ProfileID:                  info.ProfileID,
+		ProfileName:                info.ProfileName,
+		AgentID:                    info.AgentID,
+		AgentName:                  info.AgentName,
+		Model:                      info.Model,
+		AutoApprove:                info.AutoApprove,
+		DangerouslySkipPermissions: info.DangerouslySkipPermissions,
+		Plan:                       info.Plan,
+	}, nil
+}
+
 // orchestratorAdapter adapts the orchestrator.Service to the taskhandlers.OrchestratorService interface
 type orchestratorAdapter struct {
 	svc *orchestrator.Service
 }
 
 // PromptTask forwards to the orchestrator service and converts the result type
-func (a *orchestratorAdapter) PromptTask(ctx context.Context, taskID, taskSessionID, prompt string) (*taskhandlers.PromptResult, error) {
-	result, err := a.svc.PromptTask(ctx, taskID, taskSessionID, prompt)
+func (a *orchestratorAdapter) PromptTask(ctx context.Context, taskID, taskSessionID, prompt, model string) (*taskhandlers.PromptResult, error) {
+	result, err := a.svc.PromptTask(ctx, taskID, taskSessionID, prompt, model)
 	if err != nil {
 		return nil, err
 	}

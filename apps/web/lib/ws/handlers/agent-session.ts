@@ -18,13 +18,15 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
       if (sessionId) {
         const existingSession = store.getState().taskSessions.items[sessionId];
         if (existingSession) {
-          // Update existing session
+          // Update existing session - preserve all existing fields
           store.getState().setTaskSession({
             ...existingSession,
             state: newState,
           });
         } else {
           // Create partial session object
+          // Include agent_profile_id from the payload if provided
+          const agentProfileId = payload.agent_profile_id;
           store.getState().setTaskSession({
             id: sessionId,
             task_id: taskId,
@@ -32,6 +34,7 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
             progress: 0,
             started_at: '',
             updated_at: '',
+            ...(agentProfileId ? { agent_profile_id: agentProfileId } : {}),
           });
         }
 
@@ -39,6 +42,7 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
         if (sessionsByTask) {
           const hasSession = sessionsByTask.some((session) => session.id === sessionId);
           if (!hasSession) {
+            const agentProfileId = payload.agent_profile_id;
             store.getState().setTaskSessionsForTask(taskId, [...sessionsByTask, {
               id: sessionId,
               task_id: taskId,
@@ -46,6 +50,7 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
               progress: 0,
               started_at: '',
               updated_at: '',
+              ...(agentProfileId ? { agent_profile_id: agentProfileId } : {}),
             }]);
           } else {
             const nextSessions = sessionsByTask.map((session) =>

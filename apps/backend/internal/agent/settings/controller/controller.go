@@ -22,6 +22,7 @@ var (
 	ErrAgentProfileNotFound = errors.New("agent profile not found")
 	ErrAgentProfileInUse    = errors.New("agent profile is used by an active agent session")
 	ErrAgentMcpUnsupported  = errors.New("mcp not supported by agent")
+	ErrModelRequired        = errors.New("model is required for agent profiles")
 )
 
 const defaultAgentProfileName = "default"
@@ -150,6 +151,7 @@ func (c *Controller) EnsureInitialAgentProfiles(ctx context.Context) error {
 		return err
 	}
 	displayNameByAgent := c.displayNameByAgent()
+	defaultModelByAgent := c.defaultModelByAgent()
 	for _, result := range results {
 		if !result.Available {
 			continue
@@ -157,6 +159,10 @@ func (c *Controller) EnsureInitialAgentProfiles(ctx context.Context) error {
 		displayName, ok := displayNameByAgent[result.Name]
 		if !ok || displayName == "" {
 			return fmt.Errorf("unknown agent display name: %s", result.Name)
+		}
+		defaultModel, ok := defaultModelByAgent[result.Name]
+		if !ok || defaultModel == "" {
+			return fmt.Errorf("unknown agent default model: %s", result.Name)
 		}
 		agent, err := c.repo.GetAgentByName(ctx, result.Name)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -197,7 +203,7 @@ func (c *Controller) EnsureInitialAgentProfiles(ctx context.Context) error {
 		defaultProfile := &models.AgentProfile{
 			AgentID:          agent.ID,
 			Name:             defaultAgentProfileName,
-			Model:            "",
+			Model:            defaultModel,
 			Plan:             "",
 			AgentDisplayName: displayName,
 		}
@@ -399,6 +405,10 @@ type CreateProfileRequest struct {
 }
 
 func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest) (*dto.AgentProfileDTO, error) {
+	// Validate that model is provided
+	if strings.TrimSpace(req.Model) == "" {
+		return nil, ErrModelRequired
+	}
 	agent, err := c.repo.GetAgent(ctx, req.AgentID)
 	if err != nil {
 		return nil, err
@@ -441,6 +451,10 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 		profile.Name = *req.Name
 	}
 	if req.Model != nil {
+		// Validate that model is not empty
+		if strings.TrimSpace(*req.Model) == "" {
+			return nil, ErrModelRequired
+		}
 		profile.Model = *req.Model
 	}
 	if req.AutoApprove != nil {
@@ -541,4 +555,16 @@ func (c *Controller) mustDisplayName(agentName string) string {
 		}
 	}
 	return ""
+}
+
+func (c *Controller) defaultModelByAgent() map[string]string {
+	definitions := c.discovery.Definitions()
+	mapped := make(map[string]string, len(definitions))
+	for _, def := range definitions {
+		if def.Name == "" || def.ModelConfig.DefaultModel == "" {
+			continue
+		}
+		mapped[def.Name] = def.ModelConfig.DefaultModel
+	}
+	return mapped
 }

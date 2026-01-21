@@ -14,11 +14,13 @@ const DEFAULT_HORIZONTAL_LAYOUT: [number, number, number] = [18, 57, 25];
 type TaskLayoutProps = {
   workspaceId: string | null;
   boardId: string | null;
+  sessionId?: string | null;
 };
 
 export const TaskLayout = memo(function TaskLayout({
   workspaceId,
   boardId,
+  sessionId = null,
 }: TaskLayoutProps) {
   const [horizontalLayout, setHorizontalLayout] = useState<[number, number, number]>(
     getLocalStorage('task-layout-horizontal-v2', DEFAULT_HORIZONTAL_LAYOUT)
@@ -64,6 +66,7 @@ export const TaskLayout = memo(function TaskLayout({
             openFileRequest={openFileRequest}
             onDiffPathHandled={() => setSelectedDiffPath(null)}
             onFileOpenHandled={() => setOpenFileRequest(null)}
+            sessionId={sessionId}
           />
         </ResizablePanel>
         <ResizableHandle className="w-px" />

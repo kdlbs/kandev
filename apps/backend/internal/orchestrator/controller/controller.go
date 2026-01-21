@@ -139,7 +139,7 @@ func (c *Controller) StopTask(ctx context.Context, req dto.StopTaskRequest) (dto
 
 // PromptTask sends a prompt to a running task
 func (c *Controller) PromptTask(ctx context.Context, req dto.PromptTaskRequest) (dto.PromptTaskResponse, error) {
-	result, err := c.service.PromptTask(ctx, req.TaskID, req.TaskSessionID, req.Prompt)
+	result, err := c.service.PromptTask(ctx, req.TaskID, req.TaskSessionID, req.Prompt, req.Model)
 	if err != nil {
 		return dto.PromptTaskResponse{}, err
 	}

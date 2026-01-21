@@ -4,6 +4,7 @@ package executor
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -67,6 +68,24 @@ type AgentManagerClient interface {
 	// CleanupStaleExecutionBySessionID removes a stale agent execution from tracking without trying to stop it.
 	// This is used when we detect the agent process has stopped but the execution is still tracked.
 	CleanupStaleExecutionBySessionID(ctx context.Context, sessionID string) error
+
+	// GetAgentType returns the agent type configuration
+	GetAgentType(ctx context.Context, agentID string) (*v1.AgentType, error)
+
+	// ResolveAgentProfile resolves an agent profile ID to profile information
+	ResolveAgentProfile(ctx context.Context, profileID string) (*AgentProfileInfo, error)
+}
+
+// AgentProfileInfo contains resolved profile information
+type AgentProfileInfo struct {
+	ProfileID                  string
+	ProfileName                string
+	AgentID                    string
+	AgentName                  string
+	Model                      string
+	AutoApprove                bool
+	DangerouslySkipPermissions bool
+	Plan                       string
 }
 
 // LaunchAgentRequest contains parameters for launching an agent
@@ -82,6 +101,7 @@ type LaunchAgentRequest struct {
 	Metadata        map[string]interface{}
 	Env             map[string]string
 	ACPSessionID    string // ACP session ID to resume, if available
+	ModelOverride   string // If set, use this model instead of the profile's model
 
 	// Worktree configuration for concurrent agent execution
 	UseWorktree          bool   // Whether to use a Git worktree for isolation
@@ -286,19 +306,42 @@ func (e *Executor) ExecuteWithProfile(ctx context.Context, task *v1.Task, agentP
 		req.WorktreeBranchPrefix = worktreeBranchPrefix
 	}
 
+	// Resolve agent profile to get model and other settings for snapshot
+	var agentProfileSnapshot map[string]interface{}
+	if profileInfo, err := e.agentManager.ResolveAgentProfile(ctx, agentProfileID); err == nil && profileInfo != nil {
+		agentProfileSnapshot = map[string]interface{}{
+			"id":                          profileInfo.ProfileID,
+			"name":                        profileInfo.ProfileName,
+			"agent_id":                    profileInfo.AgentID,
+			"agent_name":                  profileInfo.AgentName,
+			"model":                       profileInfo.Model,
+			"auto_approve":                profileInfo.AutoApprove,
+			"dangerously_skip_permissions": profileInfo.DangerouslySkipPermissions,
+			"plan":                        profileInfo.Plan,
+		}
+		e.logger.Debug("resolved agent profile for snapshot",
+			zap.String("profile_id", profileInfo.ProfileID),
+			zap.String("model", profileInfo.Model))
+	} else if err != nil {
+		e.logger.Warn("failed to resolve agent profile for snapshot, session will have empty snapshot",
+			zap.String("agent_profile_id", agentProfileID),
+			zap.Error(err))
+	}
+
 	// Create agent session in database before launch so worktree associations can persist.
 	sessionID := uuid.New().String()
 	now := time.Now().UTC()
 	session := &models.TaskSession{
-		ID:             sessionID,
-		TaskID:         task.ID,
-		AgentProfileID: agentProfileID,
-		RepositoryID:   repositoryID,
-		BaseBranch:     baseBranch,
-		State:          models.TaskSessionStateCreated,
-		Progress:       0,
-		StartedAt:      now,
-		UpdatedAt:      now,
+		ID:                   sessionID,
+		TaskID:               task.ID,
+		AgentProfileID:       agentProfileID,
+		RepositoryID:         repositoryID,
+		BaseBranch:           baseBranch,
+		State:                models.TaskSessionStateCreated,
+		Progress:             0,
+		StartedAt:            now,
+		UpdatedAt:            now,
+		AgentProfileSnapshot: agentProfileSnapshot,
 	}
 	if executorID := e.defaultExecutorID(ctx, task.WorkspaceID); executorID != "" {
 		session.ExecutorID = executorID
@@ -780,6 +823,151 @@ func (e *Executor) Prompt(ctx context.Context, taskID, sessionID string, prompt 
 	return e.agentManager.PromptAgent(ctx, session.AgentExecutionID, prompt)
 }
 
+// SwitchModel stops the current agent, restarts it with a new model, and sends the prompt.
+// For agents that support session resume (can_recover: true), it attempts to resume context.
+// For agents that don't support resume (can_recover: false), a fresh session is started.
+func (e *Executor) SwitchModel(ctx context.Context, taskID, sessionID, newModel, prompt string) (*PromptResult, error) {
+	e.logger.Info("switching model for session",
+		zap.String("task_id", taskID),
+		zap.String("session_id", sessionID),
+		zap.String("new_model", newModel))
+
+	// Get the session
+	session, err := e.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get session: %w", err)
+	}
+	if session.TaskID != taskID {
+		return nil, fmt.Errorf("session %s does not belong to task %s", sessionID, taskID)
+	}
+
+	// Get current execution ID
+	oldAgentExecutionID := session.AgentExecutionID
+	if oldAgentExecutionID == "" {
+		return nil, ErrExecutionNotFound
+	}
+
+	// Get the task for re-launching
+	task, err := e.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get task: %w", err)
+	}
+
+	// Get executor running info to check for resume token (ACP session ID)
+	var acpSessionID string
+	if running, err := e.repo.GetExecutorRunningBySessionID(ctx, sessionID); err == nil && running != nil {
+		acpSessionID = running.ResumeToken
+	}
+
+	// Stop the current agent
+	e.logger.Info("stopping current agent for model switch",
+		zap.String("agent_execution_id", oldAgentExecutionID))
+	if err := e.agentManager.StopAgent(ctx, oldAgentExecutionID, false); err != nil {
+		e.logger.Warn("failed to stop agent for model switch, continuing anyway",
+			zap.Error(err),
+			zap.String("agent_execution_id", oldAgentExecutionID))
+	}
+
+	// Build a new launch request with the model override
+	req := &LaunchAgentRequest{
+		TaskID:          task.ID,
+		SessionID:       sessionID, // Reuse the existing session ID
+		TaskTitle:       task.Title,
+		AgentProfileID:  session.AgentProfileID,
+		TaskDescription: prompt,
+		ModelOverride:   newModel, // This is the key - use the new model
+		ACPSessionID:    acpSessionID,
+	}
+
+	// Get repository info if available
+	if session.RepositoryID != "" {
+		repository, err := e.repo.GetRepository(ctx, session.RepositoryID)
+		if err == nil && repository != nil {
+			req.RepositoryURL = repository.LocalPath
+			req.Branch = session.BaseBranch
+		}
+	}
+
+	// Get worktree info from running state
+	if running, err := e.repo.GetExecutorRunningBySessionID(ctx, sessionID); err == nil && running != nil {
+		if running.WorktreePath != "" {
+			req.RepositoryURL = running.WorktreePath
+		}
+	}
+
+	req.Env = e.applyPreferredShellEnv(ctx, req.Env)
+
+	e.logger.Info("launching new agent with model override",
+		zap.String("task_id", task.ID),
+		zap.String("session_id", sessionID),
+		zap.String("model", newModel),
+		zap.String("acp_session_id", acpSessionID))
+
+	// Launch the new agent
+	resp, err := e.agentManager.LaunchAgent(ctx, req)
+	if err != nil {
+		e.logger.Error("failed to launch agent with new model",
+			zap.String("task_id", task.ID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return nil, fmt.Errorf("failed to launch agent with new model: %w", err)
+	}
+
+	// Update the session with the new execution ID
+	session.AgentExecutionID = resp.AgentExecutionID
+	session.ContainerID = resp.ContainerID
+	session.State = models.TaskSessionStateStarting
+	session.UpdatedAt = time.Now().UTC()
+
+	// Update the agent profile snapshot with the new model
+	if session.AgentProfileSnapshot == nil {
+		session.AgentProfileSnapshot = make(map[string]interface{})
+	}
+	session.AgentProfileSnapshot["model"] = newModel
+
+	if err := e.repo.UpdateTaskSession(ctx, session); err != nil {
+		e.logger.Error("failed to update session after model switch",
+			zap.String("task_id", task.ID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
+
+	// Update executor running state
+	if running, err := e.repo.GetExecutorRunningBySessionID(ctx, sessionID); err == nil && running != nil {
+		running.AgentExecutionID = resp.AgentExecutionID
+		running.ContainerID = resp.ContainerID
+		running.Status = "starting"
+		if err := e.repo.UpsertExecutorRunning(ctx, running); err != nil {
+			e.logger.Warn("failed to update executor running after model switch",
+				zap.String("task_id", task.ID),
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
+	}
+
+	// Start the agent process (this also handles initialization and prompting)
+	if err := e.agentManager.StartAgentProcess(ctx, resp.AgentExecutionID); err != nil {
+		e.logger.Error("failed to start agent process after model switch",
+			zap.String("task_id", task.ID),
+			zap.String("agent_execution_id", resp.AgentExecutionID),
+			zap.Error(err))
+		return nil, fmt.Errorf("failed to start agent after model switch: %w", err)
+	}
+
+	e.logger.Info("model switch complete, agent started",
+		zap.String("task_id", task.ID),
+		zap.String("session_id", sessionID),
+		zap.String("new_model", newModel),
+		zap.String("agent_execution_id", resp.AgentExecutionID))
+
+	// The agent initialization and prompt are handled as part of StartAgentProcess
+	// Return success - the actual prompt response will come via ACP events
+	return &PromptResult{
+		StopReason:   "model_switched",
+		AgentMessage: "",
+	}, nil
+}
+
 // RespondToPermission sends a response to a permission request for a session
 func (e *Executor) RespondToPermission(ctx context.Context, sessionID, pendingID, optionID string, cancelled bool) error {
 	e.logger.Info("responding to permission request",
@@ -1085,4 +1273,32 @@ func (m *MockAgentManagerClient) IsAgentRunningForSession(ctx context.Context, s
 // CleanupStaleExecutionBySessionID mocks cleaning up a stale execution (no-op for mock)
 func (m *MockAgentManagerClient) CleanupStaleExecutionBySessionID(ctx context.Context, sessionID string) error {
 	return nil
+}
+
+// GetAgentType mocks getting an agent type configuration
+func (m *MockAgentManagerClient) GetAgentType(ctx context.Context, agentID string) (*v1.AgentType, error) {
+	m.logger.Info("mock: getting agent type",
+		zap.String("agent_id", agentID))
+
+	return &v1.AgentType{
+		ID:          agentID,
+		Name:        "Mock Agent",
+		Description: "Mock agent type for testing",
+		Enabled:     true,
+	}, nil
+}
+
+// ResolveAgentProfile mocks resolving an agent profile
+func (m *MockAgentManagerClient) ResolveAgentProfile(ctx context.Context, profileID string) (*AgentProfileInfo, error) {
+	m.logger.Info("mock: resolving agent profile",
+		zap.String("profile_id", profileID))
+
+	return &AgentProfileInfo{
+		ProfileID:   profileID,
+		ProfileName: "Mock Profile",
+		AgentID:     "mock-agent",
+		AgentName:   "mock",
+		Model:       "mock-model",
+		AutoApprove: false,
+	}, nil
 }

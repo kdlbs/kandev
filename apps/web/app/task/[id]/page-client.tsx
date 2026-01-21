@@ -172,6 +172,7 @@ export default function TaskPage({
         <TaskLayout
           workspaceId={task?.workspace_id ?? null}
           boardId={task?.board_id ?? null}
+          sessionId={effectiveSessionId}
         />
       </div>
     </TooltipProvider>

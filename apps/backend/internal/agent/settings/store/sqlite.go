@@ -53,7 +53,7 @@ func (r *sqliteRepository) initSchema() error {
 		agent_id TEXT NOT NULL,
 		name TEXT NOT NULL,
 		agent_display_name TEXT NOT NULL,
-		model TEXT NOT NULL,
+		model TEXT NOT NULL CHECK(model != ''),
 		auto_approve INTEGER NOT NULL DEFAULT 0,
 		dangerously_skip_permissions INTEGER NOT NULL DEFAULT 0,
 		plan TEXT DEFAULT '',

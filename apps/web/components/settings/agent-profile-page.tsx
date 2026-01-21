@@ -69,6 +69,14 @@ function ProfileEditor({ agent, profile, modelConfig, initialMcpConfig }: Profil
       });
       return;
     }
+    if (!draft.model.trim()) {
+      toast({
+        title: 'Model is required',
+        description: 'Please select a model before saving.',
+        variant: 'error',
+      });
+      return;
+    }
     setSaveStatus('loading');
     try {
       const updated = await updateAgentProfileAction(draft.id, {

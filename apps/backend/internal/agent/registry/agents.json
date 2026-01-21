@@ -25,7 +25,7 @@
       "capabilities": ["code_generation", "code_review", "refactoring", "testing", "shell_execution"],
       "protocol": "acp",
       "protocol_config": {},
-      "model_flag": "--model",
+      "model_flag": "--model {model}",
       "workspace_flag": "--workspace-root",
       "session_config": {
         "resume_via_acp": false,
@@ -132,7 +132,7 @@
       "capabilities": ["code_generation", "code_review", "refactoring", "testing", "shell_execution"],
       "protocol": "codex",
       "protocol_config": {},
-      "model_flag": "--model",
+      "model_flag": "-c model=\"{model}\"",
       "workspace_flag": "",
       "session_config": {
         "resume_via_acp": true,
@@ -169,6 +169,7 @@
           {
             "id": "gpt-5.2-codex",
             "name": "GPT-5.2 Codex",
+            "description": "Latest frontier agentic coding model",
             "provider": "openai",
             "context_window": 200000,
             "is_default": true
@@ -176,6 +177,7 @@
           {
             "id": "gpt-5.1-codex-max",
             "name": "GPT-5.1 Codex Max",
+            "description": "Codex-optimized flagship for deep and fast reasoning",
             "provider": "openai",
             "context_window": 200000,
             "is_default": false
@@ -183,6 +185,7 @@
           {
             "id": "gpt-5.1-codex-mini",
             "name": "GPT-5.1 Codex Mini",
+            "description": "Optimized for codex. Cheaper, faster, but less capable",
             "provider": "openai",
             "context_window": 200000,
             "is_default": false
@@ -190,6 +193,7 @@
           {
             "id": "gpt-5.2",
             "name": "GPT-5.2",
+            "description": "Latest frontier model with improvements across knowledge, reasoning and coding",
             "provider": "openai",
             "context_window": 200000,
             "is_default": false

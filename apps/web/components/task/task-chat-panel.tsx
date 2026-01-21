@@ -3,7 +3,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { IconBrain, IconCpu, IconListCheck, IconLoader2, IconPaperclip } from '@tabler/icons-react';
+import { IconBrain, IconListCheck, IconLoader2, IconPaperclip } from '@tabler/icons-react';
 import { Button } from '@kandev/ui/button';
 import {
   DropdownMenu,
@@ -11,7 +11,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@kandev/ui/dropdown-menu';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@kandev/ui/select';
+
 import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/components/state-provider';
@@ -31,25 +31,20 @@ import { TokenUsageDisplay } from '@/components/task/chat/token-usage-display';
 import { TodoSummary } from '@/components/task/chat/todo-summary';
 import { SessionsDropdown } from '@/components/task/sessions-dropdown';
 import { useSessionContextWindow } from '@/hooks/use-session-context-window';
-
-type AgentOption = {
-  id: string;
-  label: string;
-};
+import { ModelSelector } from '@/components/task/model-selector';
 
 type TaskChatPanelProps = {
-  agents: AgentOption[];
+  /** @deprecated No longer used - model selection is now handled by ModelSelector */
+  agents?: { id: string; label: string }[];
   onSend?: (message: string) => void;
   sessionId?: string | null;
 };
 
 export function TaskChatPanel({
-  agents,
   onSend,
   sessionId = null,
 }: TaskChatPanelProps) {
   const [messageInput, setMessageInput] = useState('');
-  const [selectedAgent, setSelectedAgent] = useState(agents[0]?.id ?? '');
   const [planModeEnabled, setPlanModeEnabled] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -83,6 +78,12 @@ export function TaskChatPanel({
   }, [session?.agent_profile_id, settingsAgents]);
 
   const sessionModel = sessionProfile?.model ?? null;
+
+  // Get pending model state for this session
+  const pendingModels = useAppStore((state) => state.pendingModel.bySessionId);
+  const clearPendingModel = useAppStore((state) => state.clearPendingModel);
+  const setActiveModel = useAppStore((state) => state.setActiveModel);
+  const pendingModel = resolvedSessionId ? pendingModels[resolvedSessionId] : null;
 
   // Fetch context window usage for this session
   const contextWindow = useSessionContextWindow(resolvedSessionId);
@@ -248,12 +249,27 @@ export function TaskChatPanel({
     }
     const client = getWebSocketClient();
     if (!client) return;
+
+    // Include pending model in the request if one is selected
+    const modelToSend = pendingModel && pendingModel !== sessionModel ? pendingModel : undefined;
+
     await client.request(
       'message.add',
-      { task_id: taskId, session_id: resolvedSessionId, content: message },
+      {
+        task_id: taskId,
+        session_id: resolvedSessionId,
+        content: message,
+        ...(modelToSend && { model: modelToSend }),
+      },
       10000
     );
-  }, [resolvedSessionId, taskId]);
+
+    // Move pending model to active model after sending (it's now the model in use)
+    if (modelToSend && resolvedSessionId) {
+      setActiveModel(resolvedSessionId, modelToSend);
+      clearPendingModel(resolvedSessionId);
+    }
+  }, [resolvedSessionId, taskId, pendingModel, sessionModel, setActiveModel, clearPendingModel]);
 
   // Cancels the current agent turn without terminating the agent process,
   // allowing the user to interrupt and send a new prompt.
@@ -341,17 +357,10 @@ export function TaskChatPanel({
         )}
       </div>
 
-      {/* Session info - shows agent state and model */}
+      {/* Session info - shows agent state */}
       {session?.state && (
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <RunningIndicator state={session.state} />
-          {/* Model indicator */}
-          {sessionModel && (
-            <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-muted/50 text-xs text-muted-foreground border border-border/50">
-              <IconCpu className="h-3 w-3" />
-              <span className="font-medium">{sessionModel}</span>
-            </div>
-          )}
         </div>
       )}
 
@@ -372,18 +381,7 @@ export function TaskChatPanel({
         />
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
-            <Select value={selectedAgent} onValueChange={setSelectedAgent}>
-              <SelectTrigger className="w-[160px] cursor-pointer">
-                <SelectValue placeholder="Select agent" />
-              </SelectTrigger>
-              <SelectContent>
-                {agents.map((agent) => (
-                  <SelectItem key={agent.id} value={agent.id}>
-                    {agent.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <ModelSelector sessionId={resolvedSessionId} />
             <DropdownMenu>
               <Tooltip>
                 <TooltipTrigger asChild>

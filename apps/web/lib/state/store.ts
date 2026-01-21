@@ -259,6 +259,14 @@ export type SessionAgentctlState = {
   itemsBySessionId: Record<string, SessionAgentctlStatus>;
 };
 
+export type PendingModelState = {
+  bySessionId: Record<string, string>;
+};
+
+export type ActiveModelState = {
+  bySessionId: Record<string, string>;
+};
+
 export type AppState = {
   kanban: KanbanState;
   workspaces: WorkspaceState;
@@ -290,6 +298,8 @@ export type AppState = {
   sessionAgentctl: SessionAgentctlState;
   worktrees: WorktreesState;
   sessionWorktreesBySessionId: SessionWorktreesState;
+  pendingModel: PendingModelState;
+  activeModel: ActiveModelState;
   hydrate: (state: Partial<AppState>) => void;
   setActiveWorkspace: (workspaceId: string | null) => void;
   setWorkspaces: (workspaces: WorkspaceState['items']) => void;
@@ -352,6 +362,9 @@ export type AppState = {
   clearGitStatus: (sessionId: string) => void;
   setContextWindow: (sessionId: string, contextWindow: ContextWindowEntry) => void;
   bumpAgentProfilesVersion: () => void;
+  setPendingModel: (sessionId: string, modelId: string) => void;
+  clearPendingModel: (sessionId: string) => void;
+  setActiveModel: (sessionId: string, modelId: string) => void;
 };
 
 export type AppStore = ReturnType<typeof createAppStore>;
@@ -402,6 +415,8 @@ const defaultState: AppState = {
   sessionAgentctl: { itemsBySessionId: {} },
   worktrees: { items: {} },
   sessionWorktreesBySessionId: { itemsBySessionId: {} },
+  pendingModel: { bySessionId: {} },
+  activeModel: { bySessionId: {} },
   hydrate: () => undefined,
   setActiveWorkspace: () => undefined,
   setWorkspaces: () => undefined,
@@ -450,6 +465,9 @@ const defaultState: AppState = {
   clearGitStatus: () => undefined,
   setContextWindow: () => undefined,
   bumpAgentProfilesVersion: () => undefined,
+  setPendingModel: () => undefined,
+  clearPendingModel: () => undefined,
+  setActiveModel: () => undefined,
 };
 
 function mergeInitialState(
@@ -504,6 +522,9 @@ function mergeInitialState(
   | 'clearGitStatus'
   | 'setContextWindow'
   | 'bumpAgentProfilesVersion'
+  | 'setPendingModel'
+  | 'clearPendingModel'
+  | 'setActiveModel'
 > {
   if (!initialState) return defaultState;
   return {
@@ -543,6 +564,8 @@ function mergeInitialState(
       ...defaultState.sessionWorktreesBySessionId,
       ...initialState.sessionWorktreesBySessionId,
     },
+    pendingModel: { ...defaultState.pendingModel, ...initialState.pendingModel },
+    activeModel: { ...defaultState.activeModel, ...initialState.activeModel },
   };
 }
 
@@ -842,7 +865,11 @@ export function createAppStore(initialState?: Partial<AppState>) {
         }),
       setTaskSession: (session) =>
         set((draft) => {
-          draft.taskSessions.items[session.id] = session;
+          // Merge with existing session data to preserve fields like agent_profile_id
+          const existingSession = draft.taskSessions.items[session.id];
+          draft.taskSessions.items[session.id] = existingSession
+            ? { ...existingSession, ...session }
+            : session;
           if (session.worktree_id) {
             draft.worktrees.items[session.worktree_id] = {
               id: session.worktree_id,
@@ -908,6 +935,18 @@ export function createAppStore(initialState?: Partial<AppState>) {
       bumpAgentProfilesVersion: () =>
         set((draft) => {
           draft.agentProfiles.version += 1;
+        }),
+      setPendingModel: (sessionId, modelId) =>
+        set((draft) => {
+          draft.pendingModel.bySessionId[sessionId] = modelId;
+        }),
+      clearPendingModel: (sessionId) =>
+        set((draft) => {
+          delete draft.pendingModel.bySessionId[sessionId];
+        }),
+      setActiveModel: (sessionId, modelId) =>
+        set((draft) => {
+          draft.activeModel.bySessionId[sessionId] = modelId;
         }),
     }))
   );

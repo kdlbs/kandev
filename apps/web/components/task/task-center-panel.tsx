@@ -21,6 +21,7 @@ type TaskCenterPanelProps = {
   openFileRequest: OpenFileTab | null;
   onDiffPathHandled: () => void;
   onFileOpenHandled: () => void;
+  sessionId?: string | null;
 };
 
 export const TaskCenterPanel = memo(function TaskCenterPanel({
@@ -28,6 +29,7 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
   openFileRequest,
   onDiffPathHandled,
   onFileOpenHandled,
+  sessionId = null,
 }: TaskCenterPanelProps) {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const [leftTab, setLeftTab] = useState('chat');
@@ -152,7 +154,7 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
 
         <TabsContent value="chat" className="mt-3 flex flex-col min-h-0 flex-1">
           {activeTaskId ? (
-            <TaskChatPanel agents={AGENTS} />
+            <TaskChatPanel agents={AGENTS} sessionId={sessionId} />
           ) : (
             <div className="flex items-center justify-center h-full text-muted-foreground">
               No task selected
