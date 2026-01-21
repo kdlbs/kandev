@@ -34,6 +34,15 @@ type Runtime interface {
 	RecoverInstances(ctx context.Context) ([]*RuntimeInstance, error)
 }
 
+// McpServerConfig holds configuration for an MCP server.
+type McpServerConfig struct {
+	Name    string   `json:"name"`
+	URL     string   `json:"url,omitempty"`
+	Type    string   `json:"type,omitempty"`
+	Command string   `json:"command,omitempty"`
+	Args    []string `json:"args,omitempty"`
+}
+
 // RuntimeCreateRequest contains parameters for creating an agentctl instance.
 type RuntimeCreateRequest struct {
 	InstanceID     string
@@ -44,6 +53,7 @@ type RuntimeCreateRequest struct {
 	Protocol       string
 	Env            map[string]string
 	Metadata       map[string]interface{}
+	McpServers     []McpServerConfig
 	// Docker-specific
 	AgentConfig    *registry.AgentTypeConfig
 	MainRepoGitDir string

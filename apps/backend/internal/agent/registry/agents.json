@@ -6,7 +6,7 @@
       "id": "auggie-agent",
       "name": "Augment Coding Agent",
       "display_name": "Auggie",
-      "description": "Auggie CLI-powered autonomous coding agent. Requires AUGMENT_SESSION_AUTH for authentication.",
+      "description": "Auggie CLI-powered autonomous coding agent.",
       "enabled": true,
       "image": "kandev/augment-agent",
       "tag": "latest",
@@ -29,7 +29,7 @@
       "workspace_flag": "--workspace-root",
       "session_config": {
         "resume_via_acp": false,
-        "resume_flag": "",
+        "resume_flag": "--resume",
         "can_recover": false,
         "session_dir_template": "{home}/.augment/sessions",
         "session_dir_target": "/root/.augment/sessions"
@@ -45,6 +45,11 @@
       },
       "discovery": {
         "supports_mcp": true,
+        "mcp_config_path": {
+          "linux": [],
+          "windows": [],
+          "macos": []
+        },
         "installation_path": {
           "linux": ["~/.augment/.auggie.json"],
           "windows": ["~/.augment/.auggie.json"],
@@ -141,7 +146,12 @@
         "tools_requiring_permission": []
       },
       "discovery": {
-        "supports_mcp": false,
+        "supports_mcp": true,
+        "mcp_config_path": {
+          "linux": [],
+          "windows": [],
+          "macos": []
+        },
         "installation_path": {
           "linux": ["~/.codex/auth.json"],
           "windows": ["~/.codex/auth.json"],
@@ -189,3 +199,4 @@
     }
   ]
 }
+

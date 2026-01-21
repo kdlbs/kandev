@@ -23,6 +23,15 @@ type ControlClient struct {
 	logger     *logger.Logger
 }
 
+// McpServerConfig holds configuration for an MCP server.
+type McpServerConfig struct {
+	Name    string   `json:"name"`
+	URL     string   `json:"url,omitempty"`
+	Type    string   `json:"type,omitempty"`
+	Command string   `json:"command,omitempty"`
+	Args    []string `json:"args,omitempty"`
+}
+
 // CreateInstanceRequest contains the parameters for creating a new agent instance.
 type CreateInstanceRequest struct {
 	ID            string            `json:"id,omitempty"`
@@ -32,6 +41,7 @@ type CreateInstanceRequest struct {
 	WorkspaceFlag string            `json:"workspace_flag,omitempty"` // CLI flag for workspace path (e.g., "--workspace-root")
 	Env           map[string]string `json:"env,omitempty"`
 	AutoStart     bool              `json:"auto_start,omitempty"`
+	McpServers    []McpServerConfig `json:"mcp_servers,omitempty"`
 }
 
 // CreateInstanceResponse contains the result of creating a new agent instance.

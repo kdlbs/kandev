@@ -33,6 +33,7 @@
     "@kandev/theme": "workspace:*",
     "@kandev/types": "workspace:*",
     "@kandev/ui": "workspace:*",
+    "@lezer/highlight": "^1.2.3",
     "@tabler/icons-react": "^3.36.1",
     "@tanstack/react-virtual": "^3.13.18",
     "@uiw/codemirror-theme-vscode": "^4.25.4",

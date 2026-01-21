@@ -17,12 +17,12 @@ import (
 // ACPAdapter implements AgentAdapter for agents using the ACP protocol.
 // ACP (Agent Communication Protocol) uses JSON-RPC 2.0 over stdin/stdout.
 // The subprocess is managed externally (by process.Manager) and stdin/stdout
-// are passed to the adapter.
+// are connected via the Connect method after the process starts.
 type ACPAdapter struct {
 	cfg    *Config
 	logger *logger.Logger
 
-	// Subprocess stdin/stdout (managed externally)
+	// Subprocess stdin/stdout (set via Connect)
 	stdin  io.Writer
 	stdout io.Reader
 
@@ -46,15 +46,33 @@ type ACPAdapter struct {
 }
 
 // NewACPAdapter creates a new ACP protocol adapter.
-// stdin and stdout are the subprocess's stdin/stdout pipes (managed by process.Manager).
-func NewACPAdapter(stdin io.Writer, stdout io.Reader, cfg *Config, log *logger.Logger) *ACPAdapter {
+// Call Connect() after starting the subprocess to wire up stdin/stdout.
+func NewACPAdapter(cfg *Config, log *logger.Logger) *ACPAdapter {
 	return &ACPAdapter{
 		cfg:       cfg,
 		logger:    log.WithFields(zap.String("adapter", "acp")),
-		stdin:     stdin,
-		stdout:    stdout,
 		updatesCh: make(chan AgentEvent, 100),
 	}
+}
+
+// PrepareEnvironment is a no-op for ACP.
+// ACP passes MCP servers through the protocol during session creation.
+func (a *ACPAdapter) PrepareEnvironment() error {
+	return nil
+}
+
+// Connect wires up the stdin/stdout pipes from the running agent subprocess.
+func (a *ACPAdapter) Connect(stdin io.Writer, stdout io.Reader) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if a.stdin != nil || a.stdout != nil {
+		return fmt.Errorf("adapter already connected")
+	}
+
+	a.stdin = stdin
+	a.stdout = stdout
+	return nil
 }
 
 // Initialize establishes the ACP connection with the agent subprocess.
@@ -137,13 +155,25 @@ func toACPMcpServers(servers []types.McpServer) []acp.McpServer {
 	}
 	out := make([]acp.McpServer, 0, len(servers))
 	for _, server := range servers {
-		out = append(out, acp.McpServer{
-			Stdio: &acp.McpServerStdio{
-				Name:    server.Name,
-				Command: server.Command,
-				Args:    append([]string{}, server.Args...),
-			},
-		})
+		switch server.Type {
+		case "sse":
+			out = append(out, acp.McpServer{
+				Sse: &acp.McpServerSse{
+					Name:    server.Name,
+					Url:     server.URL,
+					Type:    "sse",
+					Headers: []acp.HttpHeader{},
+				},
+			})
+		default: // stdio
+			out = append(out, acp.McpServer{
+				Stdio: &acp.McpServerStdio{
+					Name:    server.Name,
+					Command: server.Command,
+					Args:    append([]string{}, server.Args...),
+				},
+			})
+		}
 	}
 	return out
 }

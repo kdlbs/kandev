@@ -5,12 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/pkg/codex"
+	"github.com/pelletier/go-toml/v2"
 	"go.uber.org/zap"
 )
 
@@ -20,7 +23,7 @@ type CodexAdapter struct {
 	cfg    *Config
 	logger *logger.Logger
 
-	// Subprocess stdin/stdout (managed externally)
+	// Subprocess stdin/stdout (set via Connect)
 	stdin  io.Writer
 	stdout io.Reader
 
@@ -64,18 +67,179 @@ type turnCompleteResult struct {
 }
 
 // NewCodexAdapter creates a new Codex protocol adapter.
-// stdin and stdout are the subprocess's stdin/stdout pipes (managed by process.Manager).
-func NewCodexAdapter(stdin io.Writer, stdout io.Reader, cfg *Config, log *logger.Logger) *CodexAdapter {
+// Call Connect() after starting the subprocess to wire up stdin/stdout.
+func NewCodexAdapter(cfg *Config, log *logger.Logger) *CodexAdapter {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &CodexAdapter{
 		cfg:       cfg,
 		logger:    log.WithFields(zap.String("adapter", "codex")),
-		stdin:     stdin,
-		stdout:    stdout,
 		ctx:       ctx,
 		cancel:    cancel,
 		updatesCh: make(chan AgentEvent, 100),
 	}
+}
+
+// PrepareEnvironment writes MCP servers to the Codex config file.
+// Codex reads MCP configuration from ~/.codex/config.toml at startup time.
+func (a *CodexAdapter) PrepareEnvironment() error {
+	a.logger.Info("PrepareEnvironment called",
+		zap.Int("mcp_server_count", len(a.cfg.McpServers)))
+	for i, srv := range a.cfg.McpServers {
+		a.logger.Info("MCP server config",
+			zap.Int("index", i),
+			zap.String("name", srv.Name),
+			zap.String("url", srv.URL),
+			zap.String("type", srv.Type),
+			zap.String("command", srv.Command))
+	}
+	return WriteCodexMcpConfig(a.cfg.McpServers, "", a.logger)
+}
+
+// Connect wires up the stdin/stdout pipes from the running agent subprocess.
+func (a *CodexAdapter) Connect(stdin io.Writer, stdout io.Reader) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if a.stdin != nil || a.stdout != nil {
+		return fmt.Errorf("adapter already connected")
+	}
+
+	a.stdin = stdin
+	a.stdout = stdout
+	return nil
+}
+
+// WriteCodexMcpConfig writes MCP server configuration to Codex's config.toml.
+// It merges with existing config, preserving other settings and existing MCP servers.
+// Codex reads MCP servers from ~/.codex/config.toml at startup time, not through the protocol.
+// This function should be called before starting the Codex process.
+// If homeDir is empty, it uses os.UserHomeDir().
+func WriteCodexMcpConfig(mcpServers []McpServerConfig, homeDir string, log *logger.Logger) error {
+	if len(mcpServers) == 0 {
+		return nil // Nothing to configure
+	}
+
+	// Determine config directory
+	if homeDir == "" {
+		var err error
+		homeDir, err = os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("failed to get user home directory: %w", err)
+		}
+	}
+	configDir := filepath.Join(homeDir, ".codex")
+	configPath := filepath.Join(configDir, "config.toml")
+
+	// Create config directory if it doesn't exist
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		return fmt.Errorf("failed to create codex config directory: %w", err)
+	}
+
+	// Read existing config if it exists
+	existingData, err := os.ReadFile(configPath)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to read existing codex config: %w", err)
+	}
+
+	// Parse existing config into a generic map to preserve all fields
+	var rawConfig map[string]interface{}
+	if len(existingData) > 0 {
+		if err := toml.Unmarshal(existingData, &rawConfig); err != nil {
+			if log != nil {
+				log.Warn("failed to parse existing codex config, will create new",
+					zap.String("path", configPath),
+					zap.Error(err))
+			}
+			rawConfig = make(map[string]interface{})
+		}
+	} else {
+		rawConfig = make(map[string]interface{})
+	}
+
+	// Get or create mcp_servers section
+	mcpServersSection, ok := rawConfig["mcp_servers"].(map[string]interface{})
+	if !ok {
+		mcpServersSection = make(map[string]interface{})
+	}
+
+	// Add/update our MCP servers
+	for _, server := range mcpServers {
+		safeName := sanitizeCodexServerName(server.Name)
+		serverConfig := make(map[string]interface{})
+
+		if server.Type == "sse" || server.Type == "http" {
+			// HTTP/SSE transport - use url field
+			// Codex doesn't support SSE transport - it uses streamable HTTP which requires POST requests.
+			// Convert SSE URLs (/sse) to streamable HTTP URLs (/mcp) for Codex compatibility.
+			url := server.URL
+			if url != "" {
+				url = convertSSEToStreamableHTTP(url)
+				serverConfig["url"] = url
+			}
+		} else {
+			// STDIO transport - use command and args
+			if server.Command != "" {
+				serverConfig["command"] = server.Command
+			}
+			if len(server.Args) > 0 {
+				serverConfig["args"] = server.Args
+			}
+		}
+
+		mcpServersSection[safeName] = serverConfig
+	}
+
+	// Update the mcp_servers section in the config
+	rawConfig["mcp_servers"] = mcpServersSection
+
+	// Marshal back to TOML
+	output, err := toml.Marshal(rawConfig)
+	if err != nil {
+		return fmt.Errorf("failed to marshal codex config: %w", err)
+	}
+
+	// Write config file
+	if err := os.WriteFile(configPath, output, 0644); err != nil {
+		return fmt.Errorf("failed to write codex config: %w", err)
+	}
+
+	if log != nil {
+		log.Info("wrote Codex MCP config",
+			zap.String("path", configPath),
+			zap.Int("server_count", len(mcpServers)),
+			zap.Int("total_mcp_servers", len(mcpServersSection)))
+	}
+
+	return nil
+}
+
+// sanitizeCodexServerName converts a server name to a valid TOML table name.
+// Replaces spaces and special characters with underscores.
+func sanitizeCodexServerName(name string) string {
+	var result strings.Builder
+	for _, r := range name {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
+			result.WriteRune(r)
+		} else {
+			result.WriteRune('_')
+		}
+	}
+	sanitized := result.String()
+	if sanitized == "" {
+		return "server"
+	}
+	return sanitized
+}
+
+// convertSSEToStreamableHTTP converts an SSE endpoint URL to a streamable HTTP endpoint URL.
+// Codex doesn't support SSE transport - it uses streamable HTTP which requires POST requests.
+// This converts URLs ending in /sse to /mcp for Kandev MCP server compatibility.
+// Example: http://localhost:9090/sse -> http://localhost:9090/mcp
+func convertSSEToStreamableHTTP(url string) string {
+	if strings.HasSuffix(url, "/sse") {
+		return strings.TrimSuffix(url, "/sse") + "/mcp"
+	}
+	return url
 }
 
 // Initialize establishes the Codex connection with the agent subprocess.
@@ -139,6 +303,9 @@ func (a *CodexAdapter) GetAgentInfo() *AgentInfo {
 }
 
 // NewSession creates a new Codex thread (session).
+// Note: The mcpServers parameter is ignored because Codex reads MCP configuration from
+// ~/.codex/config.toml at startup time, not through the protocol. MCP servers are written
+// to the config file by PrepareEnvironment() before the Codex process starts.
 func (a *CodexAdapter) NewSession(ctx context.Context, _ []types.McpServer) (string, error) {
 	// Check client under lock, but don't hold lock during Call() to avoid deadlock
 	// with handleNotification which also needs the lock

@@ -41,6 +41,15 @@ type Instance struct {
 	server *http.Server
 }
 
+// McpServerConfig holds configuration for an MCP server.
+type McpServerConfig struct {
+	Name    string   `json:"name"`
+	URL     string   `json:"url,omitempty"`
+	Type    string   `json:"type,omitempty"`
+	Command string   `json:"command,omitempty"`
+	Args    []string `json:"args,omitempty"`
+}
+
 // CreateRequest contains the parameters for creating a new agent instance.
 type CreateRequest struct {
 	// ID is an optional identifier for the instance. If empty, one will be generated.
@@ -64,6 +73,9 @@ type CreateRequest struct {
 
 	// AutoStart indicates whether to start the agent automatically after creation.
 	AutoStart bool `json:"auto_start,omitempty"`
+
+	// McpServers is a list of MCP servers to configure for the agent.
+	McpServers []McpServerConfig `json:"mcp_servers,omitempty"`
 }
 
 // CreateResponse contains the result of creating a new agent instance.

@@ -441,6 +441,25 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 	// Build environment variables
 	env := m.buildEnvForRuntime(executionID, &reqWithWorktree, agentConfig)
 
+	// Resolve MCP servers early so they're available for protocols that need them at startup (e.g., Codex)
+	acpMcpServers, err := m.resolveMcpServersWithParams(ctx, reqWithWorktree.AgentProfileID, reqWithWorktree.Metadata, agentConfig)
+	if err != nil {
+		m.logger.Warn("failed to resolve MCP servers for launch", zap.Error(err))
+		// Continue without MCP servers - not a fatal error
+	}
+
+	// Convert ACP MCP servers to runtime config format
+	var mcpServers []McpServerConfig
+	for _, srv := range acpMcpServers {
+		mcpServers = append(mcpServers, McpServerConfig{
+			Name:    srv.Name,
+			URL:     srv.URL,
+			Type:    srv.Type,
+			Command: srv.Command,
+			Args:    srv.Args,
+		})
+	}
+
 	// Create runtime request (agent command not included - started explicitly later)
 	runtimeReq := &RuntimeCreateRequest{
 		InstanceID:     executionID,
@@ -455,6 +474,7 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 		WorktreeBranch: worktreeBranch,
 		MainRepoGitDir: mainRepoGitDir,
 		AgentConfig:    agentConfig,
+		McpServers:     mcpServers,
 	}
 
 	runtimeInstance, err := m.runtime.CreateInstance(ctx, runtimeReq)
@@ -717,14 +737,20 @@ func (m *Manager) getAgentConfigForExecution(execution *AgentExecution) (*regist
 // - applies executor-scoped transport rules, allow/deny lists, URL rewrites, and env injection,
 // - converts to ACP stdio server definitions used during session initialization.
 func (m *Manager) resolveMcpServers(ctx context.Context, execution *AgentExecution, agentConfig *registry.AgentTypeConfig) ([]agentctltypes.McpServer, error) {
+	if execution == nil {
+		return nil, nil
+	}
+	return m.resolveMcpServersWithParams(ctx, execution.AgentProfileID, execution.Metadata, agentConfig)
+}
+
+// resolveMcpServersWithParams resolves MCP servers with explicit parameters.
+// This is used by Launch() before the execution object exists.
+func (m *Manager) resolveMcpServersWithParams(ctx context.Context, profileID string, metadata map[string]interface{}, agentConfig *registry.AgentTypeConfig) ([]agentctltypes.McpServer, error) {
 	if m.mcpProvider == nil || agentConfig == nil {
 		return nil, nil
 	}
 
-	profileID := ""
-	if execution != nil {
-		profileID = strings.TrimSpace(execution.AgentProfileID)
-	}
+	profileID = strings.TrimSpace(profileID)
 	if profileID == "" {
 		return nil, nil
 	}
@@ -745,11 +771,11 @@ func (m *Manager) resolveMcpServers(ctx context.Context, execution *AgentExecuti
 
 	policy := mcpconfig.DefaultPolicyForRuntime(runtimeName(m.runtime))
 	executorID := ""
-	if execution != nil && execution.Metadata != nil {
-		if value, ok := execution.Metadata["executor_id"].(string); ok {
+	if metadata != nil {
+		if value, ok := metadata["executor_id"].(string); ok {
 			executorID = value
 		}
-		if value, ok := execution.Metadata["executor_mcp_policy"]; ok {
+		if value, ok := metadata["executor_mcp_policy"]; ok {
 			updated, policyWarnings, err := mcpconfig.ApplyExecutorPolicy(policy, value)
 			if err != nil {
 				return nil, fmt.Errorf("invalid executor MCP policy: %w", err)

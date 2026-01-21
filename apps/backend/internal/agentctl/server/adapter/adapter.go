@@ -4,6 +4,7 @@ package adapter
 
 import (
 	"context"
+	"io"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -47,7 +48,26 @@ type AgentInfo struct {
 // AgentAdapter defines the interface for protocol adapters.
 // Each adapter translates a specific protocol (ACP, REST, MCP, etc.) into the
 // normalized AgentEvent format that agentctl exposes via its HTTP API.
+//
+// Lifecycle:
+//  1. Create adapter with New*Adapter(cfg, logger)
+//  2. Call PrepareEnvironment() before starting the agent process
+//  3. Start the agent process and obtain stdin/stdout pipes
+//  4. Call Connect(stdin, stdout) to wire up communication
+//  5. Call Initialize() to establish protocol handshake
+//  6. Use NewSession/LoadSession/Prompt/Cancel for agent interactions
+//  7. Call Close() when done
 type AgentAdapter interface {
+	// PrepareEnvironment performs protocol-specific setup before the agent process starts.
+	// For Codex, this writes MCP servers to ~/.codex/config.toml.
+	// For ACP, this is a no-op (MCP servers are passed through the protocol).
+	// Must be called before the agent subprocess is started.
+	PrepareEnvironment() error
+
+	// Connect wires up the stdin/stdout pipes from the running agent subprocess.
+	// Must be called after the subprocess is started and before Initialize.
+	Connect(stdin io.Writer, stdout io.Reader) error
+
 	// Initialize establishes the connection with the agent and exchanges capabilities.
 	// For subprocess-based agents (ACP), this sends the initialize request.
 	// For HTTP-based agents (REST), this might do a health check.
@@ -89,6 +109,20 @@ type AgentAdapter interface {
 	Close() error
 }
 
+// McpServerConfig holds configuration for an MCP server.
+type McpServerConfig struct {
+	// Name is the human-readable name of the MCP server
+	Name string `json:"name"`
+	// URL is the URL for HTTP/SSE transport
+	URL string `json:"url,omitempty"`
+	// Type is the transport type: "sse" or "http"
+	Type string `json:"type,omitempty"`
+	// Command is the command for stdio transport
+	Command string `json:"command,omitempty"`
+	// Args are the arguments for stdio transport
+	Args []string `json:"args,omitempty"`
+}
+
 // Config holds configuration for creating adapters
 type Config struct {
 	// WorkDir is the working directory for the agent
@@ -101,6 +135,9 @@ type Config struct {
 	// Valid values: "untrusted" (always), "on-failure", "on-request", "never".
 	// Defaults to "on-request" if empty.
 	ApprovalPolicy string
+
+	// McpServers is a list of MCP servers to configure for the agent
+	McpServers []McpServerConfig
 
 	// For HTTP-based adapters (REST)
 	BaseURL    string            // Base URL of the agent's HTTP API
