@@ -4,6 +4,7 @@ import type {
   ListAgentsResponse,
   ListAgentDiscoveryResponse,
   ListAvailableAgentsResponse,
+  AgentProfileMcpConfig,
   ListBoardsResponse,
   ListEnvironmentsResponse,
   ListExecutorsResponse,
@@ -359,4 +360,11 @@ export async function listAvailableAgents(
   options?: ApiRequestOptions
 ): Promise<ListAvailableAgentsResponse> {
   return fetchJson<ListAvailableAgentsResponse>('/api/v1/agents/available', options);
+}
+
+export async function getAgentProfileMcpConfig(
+  profileId: string,
+  options?: ApiRequestOptions
+): Promise<AgentProfileMcpConfig> {
+  return fetchJson<AgentProfileMcpConfig>(`/api/v1/agent-profiles/${profileId}/mcp-config`, options);
 }

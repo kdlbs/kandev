@@ -115,6 +115,13 @@ type PermissionHandler func(ctx context.Context, req *PermissionRequest) (*Permi
 // WorkspaceMessageType represents the type of workspace stream message
 type WorkspaceMessageType string
 
+// McpServer represents a stdio MCP server configuration.
+type McpServer struct {
+	Name    string   `json:"name"`
+	Command string   `json:"command"`
+	Args    []string `json:"args,omitempty"`
+}
+
 const (
 	// Workspace stream message types
 	WorkspaceMessageTypeShellOutput WorkspaceMessageType = "shell_output"

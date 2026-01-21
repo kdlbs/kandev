@@ -2,6 +2,7 @@ import { SettingsLayoutClient } from '@/components/settings/settings-layout-clie
 import { StateProvider } from '@/components/state-provider';
 import {
   listAgentDiscovery,
+  listAvailableAgents,
   listAgents,
   listEnvironments,
   listExecutors,
@@ -21,19 +22,23 @@ export default function SettingsLayout({
 async function SettingsLayoutServer({ children }: { children: React.ReactNode }) {
   let initialState = {};
   try {
-    const [
-      workspaces,
-      executors,
-      environments,
-      agents,
-      discovery,
-    ] = await Promise.all([
+    const [workspaces, executors, environments, agents, discovery] = await Promise.all([
       listWorkspaces({ cache: 'no-store' }),
       listExecutors({ cache: 'no-store' }),
       listEnvironments({ cache: 'no-store' }),
       listAgents({ cache: 'no-store' }),
       listAgentDiscovery({ cache: 'no-store' }),
     ]);
+    let availableAgents = { agents: [] as typeof discovery.agents };
+    let availableAgentsLoaded = true;
+    try {
+      availableAgents = await listAvailableAgents({
+        cache: 'no-store',
+      });
+    } catch {
+      availableAgents = { agents: [] as typeof discovery.agents };
+      availableAgentsLoaded = false;
+    }
     initialState = {
       workspaces: {
         items: workspaces.workspaces.map((workspace) => ({
@@ -65,6 +70,11 @@ async function SettingsLayoutServer({ children }: { children: React.ReactNode })
       },
       agentDiscovery: {
         items: discovery.agents,
+      },
+      availableAgents: {
+        items: availableAgents.agents ?? [],
+        loaded: availableAgentsLoaded,
+        loading: false,
       },
       settingsData: {
         executorsLoaded: true,

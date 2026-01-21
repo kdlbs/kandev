@@ -4,6 +4,8 @@ import { getBackendConfig } from '@/lib/config';
 import type {
   Agent,
   AgentProfile,
+  AgentProfileMcpConfig,
+  McpServerDef,
   ListAgentsResponse,
   ListAgentDiscoveryResponse,
 } from '@/lib/types/http';
@@ -99,4 +101,18 @@ export async function updateAgentProfileAction(
 
 export async function deleteAgentProfileAction(id: string) {
   await fetchJson<void>(`${apiBaseUrl}/api/v1/agent-profiles/${id}`, { method: 'DELETE' });
+}
+
+export async function getAgentProfileMcpConfigAction(profileId: string): Promise<AgentProfileMcpConfig> {
+  return fetchJson<AgentProfileMcpConfig>(`${apiBaseUrl}/api/v1/agent-profiles/${profileId}/mcp-config`);
+}
+
+export async function updateAgentProfileMcpConfigAction(
+  profileId: string,
+  payload: { enabled: boolean; mcpServers: Record<string, McpServerDef>; meta?: Record<string, unknown> }
+): Promise<AgentProfileMcpConfig> {
+  return fetchJson<AgentProfileMcpConfig>(`${apiBaseUrl}/api/v1/agent-profiles/${profileId}/mcp-config`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
 }

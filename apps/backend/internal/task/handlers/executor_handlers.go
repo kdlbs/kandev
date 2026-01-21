@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/task/controller"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -93,6 +94,10 @@ func (h *ExecutorHandlers) httpCreateExecutor(c *gin.Context) {
 		Config:    body.Config,
 	})
 	if err != nil {
+		if errors.Is(err, service.ErrInvalidExecutorConfig) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 		h.logger.Error("failed to create executor", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "executor not created"})
 		return
@@ -143,6 +148,10 @@ func (h *ExecutorHandlers) httpUpdateExecutor(c *gin.Context) {
 		Config:    body.Config,
 	})
 	if err != nil {
+		if errors.Is(err, service.ErrInvalidExecutorConfig) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 		h.logger.Error("failed to update executor", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "executor not updated"})
 		return
@@ -207,6 +216,9 @@ func (h *ExecutorHandlers) wsCreateExecutor(ctx context.Context, msg *ws.Message
 		Config:    req.Config,
 	})
 	if err != nil {
+		if errors.Is(err, service.ErrInvalidExecutorConfig) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+		}
 		h.logger.Error("failed to create executor", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create executor", nil)
 	}
@@ -268,6 +280,9 @@ func (h *ExecutorHandlers) wsUpdateExecutor(ctx context.Context, msg *ws.Message
 		Config:    req.Config,
 	})
 	if err != nil {
+		if errors.Is(err, service.ErrInvalidExecutorConfig) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+		}
 		h.logger.Error("failed to update executor", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update executor", nil)
 	}

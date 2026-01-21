@@ -7,6 +7,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/runtime"
 	agentctl "github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/common/logger"
 )
@@ -30,8 +31,8 @@ func NewStandaloneRuntime(ctl *agentctl.ControlClient, host string, port int, lo
 	}
 }
 
-func (r *StandaloneRuntime) Name() string {
-	return "standalone"
+func (r *StandaloneRuntime) Name() runtime.Name {
+	return runtime.NameStandalone
 }
 
 func (r *StandaloneRuntime) HealthCheck(ctx context.Context) error {

@@ -53,6 +53,14 @@ func (m *MockRepository) ListAgents(ctx context.Context) ([]*models.Agent, error
 	return []*models.Agent{}, nil
 }
 
+func (m *MockRepository) GetAgentProfileMcpConfig(ctx context.Context, profileID string) (*models.AgentProfileMcpConfig, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (m *MockRepository) UpsertAgentProfileMcpConfig(ctx context.Context, config *models.AgentProfileMcpConfig) error {
+	return nil
+}
+
 func (m *MockRepository) CreateAgentProfile(ctx context.Context, profile *models.AgentProfile) error {
 	return nil
 }

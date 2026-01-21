@@ -2,9 +2,11 @@ package handlers
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/settings/controller"
 	"github.com/kandev/kandev/internal/common/logger"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -46,6 +48,8 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api.POST("/agents/:id/profiles", h.httpCreateProfile)
 	api.PATCH("/agent-profiles/:id", h.httpUpdateProfile)
 	api.DELETE("/agent-profiles/:id", h.httpDeleteProfile)
+	api.GET("/agent-profiles/:id/mcp-config", h.httpGetProfileMcpConfig)
+	api.POST("/agent-profiles/:id/mcp-config", h.httpUpdateProfileMcpConfig)
 }
 
 func (h *Handlers) httpDiscoverAgents(c *gin.Context) {
@@ -115,6 +119,10 @@ func (h *Handlers) httpCreateAgent(c *gin.Context) {
 	}
 	profiles := make([]controller.CreateAgentProfileRequest, 0, len(body.Profiles))
 	for _, profile := range body.Profiles {
+		if strings.TrimSpace(profile.Name) == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "profile name is required"})
+			return
+		}
 		profiles = append(profiles, controller.CreateAgentProfileRequest{
 			Name:                       profile.Name,
 			Model:                      profile.Model,
@@ -193,6 +201,82 @@ func (h *Handlers) httpDeleteAgent(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
+type updateProfileMcpConfigRequest struct {
+	Enabled    *bool                          `json:"enabled"`
+	Servers    map[string]mcpconfig.ServerDef `json:"servers"`
+	MCPServers map[string]mcpconfig.ServerDef `json:"mcpServers"`
+	Meta       map[string]any                 `json:"meta,omitempty"`
+}
+
+func (h *Handlers) httpGetProfileMcpConfig(c *gin.Context) {
+	profileID := c.Param("id")
+	if profileID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "profile id is required"})
+		return
+	}
+
+	resp, err := h.controller.GetAgentProfileMcpConfig(c.Request.Context(), profileID)
+	if err != nil {
+		if err == controller.ErrAgentProfileNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "agent profile not found"})
+			return
+		}
+		if err == controller.ErrAgentMcpUnsupported {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "mcp not supported by agent"})
+			return
+		}
+		h.logger.Error("failed to get mcp config", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get mcp config"})
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+func (h *Handlers) httpUpdateProfileMcpConfig(c *gin.Context) {
+	profileID := c.Param("id")
+	if profileID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "profile id is required"})
+		return
+	}
+
+	var body updateProfileMcpConfigRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	if body.Enabled == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "enabled is required"})
+		return
+	}
+	servers := body.Servers
+	if len(servers) == 0 && len(body.MCPServers) > 0 {
+		servers = body.MCPServers
+	}
+	if servers == nil {
+		servers = map[string]mcpconfig.ServerDef{}
+	}
+
+	resp, err := h.controller.UpdateAgentProfileMcpConfig(c.Request.Context(), profileID, controller.UpdateAgentProfileMcpConfigRequest{
+		Enabled: *body.Enabled,
+		Servers: servers,
+		Meta:    body.Meta,
+	})
+	if err != nil {
+		if err == controller.ErrAgentProfileNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "agent profile not found"})
+			return
+		}
+		if err == controller.ErrAgentMcpUnsupported {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "mcp not supported by agent"})
+			return
+		}
+		h.logger.Error("failed to update mcp config", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update mcp config"})
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
 type createProfileRequest struct {
 	Name                       string `json:"name"`
 	Model                      string `json:"model"`
@@ -205,6 +289,10 @@ func (h *Handlers) httpCreateProfile(c *gin.Context) {
 	var body createProfileRequest
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	if strings.TrimSpace(body.Name) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "profile name is required"})
 		return
 	}
 	resp, err := h.controller.CreateProfile(c.Request.Context(), controller.CreateProfileRequest{
@@ -241,6 +329,10 @@ func (h *Handlers) httpUpdateProfile(c *gin.Context) {
 	var body updateProfileRequest
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	if body.Name != nil && strings.TrimSpace(*body.Name) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "profile name is required"})
 		return
 	}
 	resp, err := h.controller.UpdateProfile(c.Request.Context(), controller.UpdateProfileRequest{

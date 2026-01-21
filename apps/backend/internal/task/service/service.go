@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -31,8 +32,29 @@ type TaskExecutionStopper interface {
 	StopTask(ctx context.Context, taskID, reason string, force bool) error
 }
 
-var ErrActiveTaskSessions = errors.New("active agent sessions exist")
-var ErrInvalidRepositorySettings = errors.New("invalid repository settings")
+var (
+	ErrActiveTaskSessions        = errors.New("active agent sessions exist")
+	ErrInvalidRepositorySettings = errors.New("invalid repository settings")
+	ErrInvalidExecutorConfig     = errors.New("invalid executor config")
+)
+
+func validateExecutorConfig(config map[string]string) error {
+	if config == nil {
+		return nil
+	}
+	policy := strings.TrimSpace(config["mcp_policy"])
+	if policy == "" {
+		return nil
+	}
+	var decoded any
+	if err := json.Unmarshal([]byte(policy), &decoded); err != nil {
+		return fmt.Errorf("%w: mcp_policy must be valid JSON", ErrInvalidExecutorConfig)
+	}
+	if _, ok := decoded.(map[string]any); !ok {
+		return fmt.Errorf("%w: mcp_policy must be a JSON object", ErrInvalidExecutorConfig)
+	}
+	return nil
+}
 
 // Service provides task business logic
 type Service struct {
@@ -1118,6 +1140,9 @@ func (s *Service) ListRepositoryScripts(ctx context.Context, repositoryID string
 // Executor operations
 
 func (s *Service) CreateExecutor(ctx context.Context, req *CreateExecutorRequest) (*models.Executor, error) {
+	if err := validateExecutorConfig(req.Config); err != nil {
+		return nil, err
+	}
 	executor := &models.Executor{
 		ID:        uuid.New().String(),
 		Name:      req.Name,
@@ -1144,8 +1169,24 @@ func (s *Service) UpdateExecutor(ctx context.Context, id string, req *UpdateExec
 	if err != nil {
 		return nil, err
 	}
+	if req.Config != nil {
+		if err := validateExecutorConfig(req.Config); err != nil {
+			return nil, err
+		}
+	}
 	if executor.IsSystem {
-		return nil, fmt.Errorf("system executors cannot be modified")
+		if req.Name != nil && *req.Name != executor.Name {
+			return nil, fmt.Errorf("system executors cannot be modified")
+		}
+		if req.Type != nil && *req.Type != executor.Type {
+			return nil, fmt.Errorf("system executors cannot be modified")
+		}
+		if req.Status != nil && *req.Status != executor.Status {
+			return nil, fmt.Errorf("system executors cannot be modified")
+		}
+		if req.Resumable != nil && *req.Resumable != executor.Resumable {
+			return nil, fmt.Errorf("system executors cannot be modified")
+		}
 	}
 	if req.Name != nil {
 		executor.Name = *req.Name

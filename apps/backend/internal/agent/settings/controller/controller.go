@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/discovery"
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agent/settings/store"
@@ -20,6 +21,7 @@ var (
 	ErrAgentNotFound        = errors.New("agent not found")
 	ErrAgentProfileNotFound = errors.New("agent profile not found")
 	ErrAgentProfileInUse    = errors.New("agent profile is used by an active agent session")
+	ErrAgentMcpUnsupported  = errors.New("mcp not supported by agent")
 )
 
 const defaultAgentProfileName = "default"
@@ -28,6 +30,7 @@ type Controller struct {
 	repo           store.Repository
 	discovery      *discovery.Registry
 	sessionChecker SessionChecker
+	mcpService     *mcpconfig.Service
 	logger         *logger.Logger
 }
 
@@ -40,6 +43,7 @@ func NewController(repo store.Repository, discoveryRegistry *discovery.Registry,
 		repo:           repo,
 		discovery:      discoveryRegistry,
 		sessionChecker: sessionChecker,
+		mcpService:     mcpconfig.NewService(repo),
 		logger:         log.WithFields(zap.String("component", "agent-settings-controller")),
 	}
 }
@@ -167,6 +171,21 @@ func (c *Controller) EnsureInitialAgentProfiles(ctx context.Context) error {
 			if err := c.repo.CreateAgent(ctx, agent); err != nil {
 				return err
 			}
+		} else {
+			updated := false
+			if agent.SupportsMCP != result.SupportsMCP {
+				agent.SupportsMCP = result.SupportsMCP
+				updated = true
+			}
+			if agent.MCPConfigPath != result.MCPConfigPath {
+				agent.MCPConfigPath = result.MCPConfigPath
+				updated = true
+			}
+			if updated {
+				if err := c.repo.UpdateAgent(ctx, agent); err != nil {
+					return err
+				}
+			}
 		}
 		profiles, err := c.repo.ListAgentProfiles(ctx, agent.ID)
 		if err != nil {
@@ -203,6 +222,54 @@ func (c *Controller) GetAgent(ctx context.Context, id string) (*dto.AgentDTO, er
 	}
 	result := toAgentDTO(agent, profiles)
 	return &result, nil
+}
+
+type UpdateAgentProfileMcpConfigRequest struct {
+	Enabled bool
+	Servers map[string]mcpconfig.ServerDef
+	Meta    map[string]any
+}
+
+func (c *Controller) GetAgentProfileMcpConfig(ctx context.Context, profileID string) (*dto.AgentProfileMcpConfigDTO, error) {
+	config, err := c.mcpService.GetConfigByProfileID(ctx, profileID)
+	if err != nil {
+		if errors.Is(err, mcpconfig.ErrAgentProfileNotFound) {
+			return nil, ErrAgentProfileNotFound
+		}
+		if errors.Is(err, mcpconfig.ErrAgentMcpUnsupported) {
+			return nil, ErrAgentMcpUnsupported
+		}
+		return nil, err
+	}
+	return &dto.AgentProfileMcpConfigDTO{
+		ProfileID: config.ProfileID,
+		Enabled:   config.Enabled,
+		Servers:   config.Servers,
+		Meta:      config.Meta,
+	}, nil
+}
+
+func (c *Controller) UpdateAgentProfileMcpConfig(ctx context.Context, profileID string, req UpdateAgentProfileMcpConfigRequest) (*dto.AgentProfileMcpConfigDTO, error) {
+	config, err := c.mcpService.UpsertConfigByProfileID(ctx, profileID, &mcpconfig.ProfileConfig{
+		Enabled: req.Enabled,
+		Servers: req.Servers,
+		Meta:    req.Meta,
+	})
+	if err != nil {
+		if errors.Is(err, mcpconfig.ErrAgentProfileNotFound) {
+			return nil, ErrAgentProfileNotFound
+		}
+		if errors.Is(err, mcpconfig.ErrAgentMcpUnsupported) {
+			return nil, ErrAgentMcpUnsupported
+		}
+		return nil, err
+	}
+	return &dto.AgentProfileMcpConfigDTO{
+		ProfileID: config.ProfileID,
+		Enabled:   config.Enabled,
+		Servers:   config.Servers,
+		Meta:      config.Meta,
+	}, nil
 }
 
 type CreateAgentRequest struct {

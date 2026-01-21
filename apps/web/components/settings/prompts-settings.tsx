@@ -140,7 +140,7 @@ export function PromptsSettings() {
       onSave={() => undefined}
       showSaveButton={false}
     >
-      <div className="rounded-lg border border-border/70 bg-muted/30 p-4 text-sm text-muted-foreground">
+      <div className="rounded-lg border border-border/70 bg-muted/30 p-4 text-xs text-muted-foreground">
         Use <span className="font-medium text-foreground">@name</span> in the chat input to insert a
         prompt’s content. Prompts are matched by name and expanded in place.
       </div>
@@ -247,7 +247,7 @@ export function PromptsSettings() {
                     </div>
                   </div>
                 ) : (
-                  <div className="text-sm text-muted-foreground truncate">
+                  <div className="text-xs text-muted-foreground truncate">
                     {getPromptPreview(prompt.content)}
                   </div>
                 )}
