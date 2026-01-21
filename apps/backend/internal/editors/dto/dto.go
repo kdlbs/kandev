@@ -2,6 +2,7 @@ package dto
 
 import (
 	"encoding/json"
+	"time"
 
 	"github.com/kandev/kandev/internal/editors/models"
 )
@@ -16,6 +17,8 @@ type EditorDTO struct {
 	Config    json.RawMessage `json:"config,omitempty"`
 	Installed bool            `json:"installed"`
 	Enabled   bool            `json:"enabled"`
+	CreatedAt time.Time       `json:"created_at"`
+	UpdatedAt time.Time       `json:"updated_at"`
 }
 
 type EditorsResponse struct {
@@ -48,6 +51,8 @@ func FromEditor(editor *models.Editor) EditorDTO {
 		Config:    editor.Config,
 		Installed: editor.Installed,
 		Enabled:   editor.Enabled,
+		CreatedAt: editor.CreatedAt,
+		UpdatedAt: editor.UpdatedAt,
 	}
 }
 

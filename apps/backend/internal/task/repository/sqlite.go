@@ -2239,9 +2239,9 @@ func (r *sqliteRepository) HasActiveTaskSessionsByRepository(ctx context.Context
 	err := r.db.QueryRowContext(ctx, `
 		SELECT 1
 		FROM task_sessions s
-		INNER JOIN tasks t ON t.id = s.task_id
+		INNER JOIN task_repositories tr ON tr.task_id = s.task_id
 		WHERE s.state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
-			AND t.repository_id = ?
+			AND tr.repository_id = ?
 		LIMIT 1
 	`, repositoryID).Scan(&exists)
 	if err == sql.ErrNoRows {

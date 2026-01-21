@@ -9,6 +9,7 @@ type UnsavedSaveButtonProps = {
   isLoading: boolean;
   status: 'idle' | 'loading' | 'success' | 'error';
   onClick: () => void;
+  cleanLabel?: string;
 };
 
 const warningButtonClass = 'border-yellow-500/60 text-yellow-500 hover:bg-yellow-500/10';
@@ -17,7 +18,13 @@ export function UnsavedChangesBadge() {
   return <span className="text-xs text-yellow-500">Unsaved changes</span>;
 }
 
-export function UnsavedSaveButton({ isDirty, isLoading, status, onClick }: UnsavedSaveButtonProps) {
+export function UnsavedSaveButton({
+  isDirty,
+  isLoading,
+  status,
+  onClick,
+  cleanLabel = 'Save',
+}: UnsavedSaveButtonProps) {
   return (
     <Button
       type="button"
@@ -28,7 +35,7 @@ export function UnsavedSaveButton({ isDirty, isLoading, status, onClick }: Unsav
       className={isDirty ? warningButtonClass : 'cursor-pointer'}
     >
       {isDirty && <IconAlertCircle className="h-4 w-4 mr-2" />}
-      Save
+      {isDirty ? 'Save' : cleanLabel}
       {status !== 'idle' && (
         <span className="ml-2">
           <RequestIndicator status={status} />

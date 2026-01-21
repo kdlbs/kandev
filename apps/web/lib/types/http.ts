@@ -199,6 +199,8 @@ export type EditorOption = {
   config?: Record<string, unknown>;
   installed: boolean;
   enabled: boolean;
+  created_at?: string;
+  updated_at?: string;
 };
 
 export type EditorsResponse = {
