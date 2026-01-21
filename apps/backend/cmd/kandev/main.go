@@ -406,50 +406,6 @@ func main() {
 	})
 	log.Info("Session data provider configured for session subscriptions (git status)")
 
-	// NOTE: Pending permissions are now stored as messages and retrieved via the historical logs provider.
-	// The separate pending permissions provider is no longer needed.
-
-	// NOTE: We no longer create comments for each ACP message chunk.
-	// Instead, the lifecycle manager accumulates message chunks and:
-	// 1. Flushes the buffer as a comment when a tool use starts (step boundary)
-	// 2. Flushes the buffer as a comment when the prompt completes (final response)
-	// This is handled via the prompt.complete and step.complete events.
-
-	// Wire stream handler to broadcast agent stream events to WebSocket clients
-	// NOTE: Permission requests are now handled via message creation in the lifecycle manager
-	// and broadcast automatically via the session.message.added event
-	orchestratorSvc.RegisterStreamHandler(func(payload *lifecycle.AgentStreamEventPayload) {
-		if payload == nil || payload.Data == nil {
-			return
-		}
-
-		sessionID := payload.SessionID
-		if sessionID == "" {
-			log.Warn("agent stream event missing session_id, skipping",
-				zap.String("task_id", payload.TaskID),
-				zap.String("type", payload.Data.Type))
-			return
-		}
-
-		// Broadcast agent stream event to session subscribers
-		action := "agent." + payload.Data.Type
-		notification, _ := ws.NewNotification(action, map[string]interface{}{
-			"task_id":      payload.TaskID,
-			"session_id":   sessionID,
-			"type":         payload.Data.Type,
-			"text":         payload.Data.Text,
-			"tool_call_id": payload.Data.ToolCallID,
-			"tool_name":    payload.Data.ToolName,
-			"tool_title":   payload.Data.ToolTitle,
-			"tool_status":  payload.Data.ToolStatus,
-			"tool_args":    payload.Data.ToolArgs,
-			"tool_result":  payload.Data.ToolResult,
-			"error":        payload.Data.Error,
-			"timestamp":    payload.Timestamp,
-		})
-		gateway.Hub.BroadcastToSession(sessionID, notification)
-	})
-
 	if err := orchestratorSvc.Start(ctx); err != nil {
 		log.Fatal("Failed to start orchestrator", zap.Error(err))
 	}
