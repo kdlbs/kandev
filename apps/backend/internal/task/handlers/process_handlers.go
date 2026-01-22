@@ -17,6 +17,7 @@ import (
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/portutil"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
 )
@@ -171,6 +172,23 @@ func (h *ProcessHandlers) httpStartProcess(c *gin.Context) {
 		zap.String("command", command),
 	)
 
+	// Transform command to replace port placeholders
+	transformedCommand, portEnv, err := portutil.TransformCommand(command)
+	if err != nil {
+		h.logger.Error("failed to transform command with port placeholders",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "port allocation failed"})
+		return
+	}
+	command = transformedCommand
+
+	if len(portEnv) > 0 {
+		h.logger.Info("allocated ports for dev process",
+			zap.String("session_id", sessionID),
+			zap.Any("ports", portEnv))
+	}
+
 	if _, err := h.lifecycleMgr.EnsureWorkspaceExecutionForSession(
 		c.Request.Context(),
 		session.TaskID,
@@ -217,6 +235,7 @@ func (h *ProcessHandlers) httpStartProcess(c *gin.Context) {
 			ScriptName: scriptName,
 			Command:    command,
 			WorkingDir: workingDir,
+			Env:        portEnv,
 		})
 		if err != nil {
 			h.logger.Error("failed to start process",

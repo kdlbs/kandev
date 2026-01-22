@@ -203,12 +203,13 @@ export function RepositoryCard({
                   <Textarea
                     value={devScript}
                     onChange={(e) => onUpdate(repository.id, { dev_script: e.target.value })}
-                    placeholder="#!/bin/bash&#10;npm run dev"
+                    placeholder="#!/bin/bash&#10;npm run dev -- --port $PORT"
                     rows={3}
                     className="font-mono text-sm"
                   />
                   <p className="text-xs text-muted-foreground">
                     Used to start the preview dev server for this repository.
+                    Use <code className="px-1 py-0.5 bg-muted rounded">$PORT</code> for automatic port allocation.
                   </p>
                 </div>
 
