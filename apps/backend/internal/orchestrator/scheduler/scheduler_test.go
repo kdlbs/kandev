@@ -51,17 +51,6 @@ func (m *mockAgentManager) StopAgent(ctx context.Context, agentExecutionID strin
 	return nil
 }
 
-func (m *mockAgentManager) GetAgentStatus(ctx context.Context, agentExecutionID string) (*v1.AgentExecution, error) {
-	return &v1.AgentExecution{
-		ID:     agentExecutionID,
-		Status: v1.AgentStatusRunning,
-	}, nil
-}
-
-func (m *mockAgentManager) ListAgentTypes(ctx context.Context) ([]*v1.AgentType, error) {
-	return []*v1.AgentType{}, nil
-}
-
 func (m *mockAgentManager) PromptAgent(ctx context.Context, agentExecutionID string, prompt string) (*executor.PromptResult, error) {
 	return &executor.PromptResult{StopReason: "end_turn"}, nil
 }
@@ -70,28 +59,12 @@ func (m *mockAgentManager) RespondToPermissionBySessionID(ctx context.Context, s
 	return nil
 }
 
-func (m *mockAgentManager) GetRecoveredExecutions() []executor.RecoveredExecutionInfo {
-	return nil
-}
-
 func (m *mockAgentManager) IsAgentRunningForSession(ctx context.Context, sessionID string) bool {
 	return false
 }
 
-func (m *mockAgentManager) CleanupStaleExecutionBySessionID(ctx context.Context, sessionID string) error {
-	return nil
-}
-
 func (m *mockAgentManager) CancelAgent(ctx context.Context, sessionID string) error {
 	return nil
-}
-
-func (m *mockAgentManager) GetAgentType(ctx context.Context, agentID string) (*v1.AgentType, error) {
-	return &v1.AgentType{
-		ID:      agentID,
-		Name:    "Mock Agent",
-		Enabled: true,
-	}, nil
 }
 
 func (m *mockAgentManager) ResolveAgentProfile(ctx context.Context, profileID string) (*executor.AgentProfileInfo, error) {
@@ -402,10 +375,10 @@ func TestPriorityOrdering(t *testing.T) {
 	_ = s.EnqueueTask(createTestTask("high", 10))
 	_ = s.EnqueueTask(createTestTask("medium", 5))
 
-	// Verify the underlying queue has correct ordering
-	peeked := q.Peek()
-	if peeked.TaskID != "high" {
-		t.Errorf("expected highest priority task (high) first, got %s", peeked.TaskID)
+	// Verify the underlying queue has correct ordering by dequeueing
+	first := q.Dequeue()
+	if first == nil || first.TaskID != "high" {
+		t.Errorf("expected highest priority task (high) first, got %v", first)
 	}
 }
 

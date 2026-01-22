@@ -91,6 +91,7 @@ func (p *EventPublisher) PublishACPSessionCreated(execution *AgentExecution, ses
 
 	payload := ACPSessionCreatedPayload{
 		TaskID:          execution.TaskID,
+		SessionID:       execution.SessionID,
 		AgentInstanceID: execution.ID,
 		ACPSessionID:    sessionID,
 	}

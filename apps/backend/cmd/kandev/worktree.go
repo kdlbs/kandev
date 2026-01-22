@@ -4,7 +4,7 @@ import (
 	"database/sql"
 
 	"github.com/kandev/kandev/internal/agent/lifecycle"
-	"github.com/kandev/kandev/internal/agent/worktree"
+	"github.com/kandev/kandev/internal/worktree"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	taskservice "github.com/kandev/kandev/internal/task/service"

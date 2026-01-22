@@ -43,7 +43,6 @@ import (
 	// Task Service packages
 	taskcontroller "github.com/kandev/kandev/internal/task/controller"
 	taskhandlers "github.com/kandev/kandev/internal/task/handlers"
-	"github.com/kandev/kandev/internal/task/models"
 	usercontroller "github.com/kandev/kandev/internal/user/controller"
 	userhandlers "github.com/kandev/kandev/internal/user/handlers"
 
@@ -310,69 +309,6 @@ func main() {
 			log.Error("Failed to subscribe to task session notifications", zap.Error(err))
 		}
 	}
-
-	// Set up historical logs provider for task subscriptions
-	// Uses messages instead of execution logs - all agent messages are now messages
-	gateway.Hub.SetHistoricalLogsProvider(func(ctx context.Context, taskID string) ([]*ws.Message, error) {
-		var session *models.TaskSession
-		session, err = taskRepo.GetActiveTaskSessionByTaskID(ctx, taskID)
-		if err != nil {
-			session, err = taskRepo.GetTaskSessionByTaskID(ctx, taskID)
-			if err != nil {
-				return nil, nil
-			}
-		}
-
-		messages, err := taskSvc.ListMessages(ctx, session.ID)
-		if err != nil {
-			return nil, err
-		}
-
-		result := make([]*ws.Message, 0, len(messages))
-		for _, message := range messages {
-			action := ws.ActionSessionMessageAdded
-			payload := map[string]interface{}{
-				"message_id":     message.ID,
-				"session_id":     message.TaskSessionID,
-				"task_id":        message.TaskID,
-				"author_type":    string(message.AuthorType),
-				"author_id":      message.AuthorID,
-				"content":        message.Content,
-				"type":           string(message.Type),
-				"requests_input": message.RequestsInput,
-				"created_at":     message.CreatedAt.Format(time.RFC3339),
-			}
-			if message.Metadata != nil {
-				payload["metadata"] = message.Metadata
-			}
-			notification, err := ws.NewNotification(action, payload)
-			if err != nil {
-				continue
-			}
-			result = append(result, notification)
-		}
-
-		// Also send current git status if available
-		session, err = taskRepo.GetActiveTaskSessionByTaskID(ctx, taskID)
-		if err == nil && session != nil && session.Metadata != nil {
-			if gitStatus, ok := session.Metadata["git_status"]; ok {
-				// Add task_id to the git status data
-				gitStatusData, ok := gitStatus.(map[string]interface{})
-				if !ok {
-					gitStatusData = map[string]interface{}{"data": gitStatus}
-				}
-				gitStatusData["task_id"] = taskID
-
-				gitStatusNotification, err := ws.NewNotification("session.git.status", gitStatusData)
-				if err == nil {
-					result = append(result, gitStatusNotification)
-				}
-			}
-		}
-
-		return result, nil
-	})
-	log.Info("Historical logs provider configured for task subscriptions (using messages and git status)")
 
 	// Set up session data provider for session subscriptions
 	// Sends initial git status when a client subscribes to a session

@@ -28,6 +28,7 @@ type AgentctlEventPayload struct {
 // ACPSessionCreatedPayload is the payload when an ACP session is created.
 type ACPSessionCreatedPayload struct {
 	TaskID          string `json:"task_id"`
+	SessionID       string `json:"session_id"`
 	AgentInstanceID string `json:"agent_instance_id"`
 	ACPSessionID    string `json:"acp_session_id"`
 }

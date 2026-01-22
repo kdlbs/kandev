@@ -129,16 +129,6 @@ func (s *ExecutionStore) UpdateStatus(executionID string, status v1.AgentStatus)
 	}
 }
 
-// UpdateProgress updates the progress of an agent execution.
-func (s *ExecutionStore) UpdateProgress(executionID string, progress int) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if execution, exists := s.executions[executionID]; exists {
-		execution.Progress = progress
-	}
-}
-
 // UpdateError updates the error message of an agent execution and sets its status to failed.
 func (s *ExecutionStore) UpdateError(executionID string, errorMsg string) {
 	s.mu.Lock()
