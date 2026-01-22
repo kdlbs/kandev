@@ -12,6 +12,7 @@ import {
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@kandev/ui/tabs';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
+import { SessionPanel, SessionPanelContent } from '@kandev/ui/pannel-session';
 import { LineStat } from '@/components/diff-stat';
 import { useAppStore } from '@/components/state-provider';
 import { useOpenSessionInEditor } from '@/hooks/use-open-session-in-editor';
@@ -101,7 +102,7 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiffPath, onOpenFi
   }, [gitStatus]);
 
   return (
-    <div className="h-full min-h-0 bg-card p-4 flex flex-col rounded-lg border border-border/70 border-l-0">
+    <SessionPanel borderSide="left">
       <Tabs value={topTab} onValueChange={(value) => setTopTab(value as 'diff' | 'files')} className="flex-1 min-h-0">
         <TabsList>
           <TabsTrigger value="diff" className="cursor-pointer">
@@ -112,7 +113,7 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiffPath, onOpenFi
           </TabsTrigger>
         </TabsList>
         <TabsContent value="diff" className="mt-3 flex-1 min-h-0">
-          <div className="flex-1 min-h-0 overflow-y-auto rounded-lg bg-background p-3 h-full">
+          <SessionPanelContent>
             {changedFiles.length === 0 ? (
               <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
                 No changes detected
@@ -208,10 +209,10 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiffPath, onOpenFi
                 })}
               </ul>
             )}
-          </div>
+          </SessionPanelContent>
         </TabsContent>
         <TabsContent value="files" className="mt-3 flex-1 min-h-0">
-          <div className="flex-1 min-h-0 overflow-y-auto rounded-lg bg-background h-full">
+          <SessionPanelContent>
             {activeSessionId ? (
               <FileBrowser sessionId={activeSessionId} onOpenFile={onOpenFile} />
             ) : (
@@ -219,10 +220,10 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiffPath, onOpenFi
                 No task selected
               </div>
             )}
-          </div>
+          </SessionPanelContent>
         </TabsContent>
       </Tabs>
-    </div>
+    </SessionPanel>
   );
 });
 

@@ -3,6 +3,7 @@
 import { memo, useCallback, useState, useEffect } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@kandev/ui/tabs';
 import { Textarea } from '@kandev/ui/textarea';
+import { SessionPanel } from '@kandev/ui/pannel-session';
 import { IconX } from '@tabler/icons-react';
 import { TaskChatPanel } from './task-chat-panel';
 import { TaskChangesPanel } from './task-changes-panel';
@@ -72,7 +73,7 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
   }, [leftTab]);
 
   return (
-    <div className="h-full min-h-0 bg-card p-4 flex flex-col rounded-lg border border-border/70 border-r-0 mr-[5px]">
+    <SessionPanel borderSide="right" margin="right">
       <Tabs
         value={leftTab}
         onValueChange={(value) => setLeftTab(value)}
@@ -163,6 +164,6 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
           </TabsContent>
         ))}
       </Tabs>
-    </div>
+    </SessionPanel>
   );
 });

@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { IconRefresh, IconExternalLink, IconLoader2 } from '@tabler/icons-react';
 import { Button } from '@kandev/ui/button';
 import { Input } from '@kandev/ui/input';
+import { SessionPanel } from '@kandev/ui/pannel-session';
 import { usePreviewPanel } from '@/hooks/use-preview-panel';
 import { useAppStore, useAppStoreApi } from '@/components/state-provider';
 import { useLayoutStore } from '@/lib/state/layout-store';
@@ -182,7 +183,7 @@ export function PreviewPanel({ sessionId, hasDevScript }: PreviewPanelProps) {
   };
 
   return (
-    <div className="h-full min-h-0 flex flex-col rounded-lg border border-border/70 bg-card p-3 mr-[5px]">
+    <SessionPanel margin="right">
       <div className="flex flex-wrap items-center gap-2">
         <Input
           value={previewUrlDraft}
@@ -283,6 +284,6 @@ export function PreviewPanel({ sessionId, hasDevScript }: PreviewPanelProps) {
           </div>
         )}
       </div>
-    </div>
+    </SessionPanel>
   );
 }

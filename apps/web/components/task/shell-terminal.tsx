@@ -226,7 +226,7 @@ export function ShellTerminal() {
   return (
     <div
       ref={terminalRef}
-      className="h-full w-full overflow-hidden rounded-md border border-border bg-[#1e1e1e]"
+      className="h-full p-1 w-full overflow-hidden rounded-md bg-[#1e1e1e]"
     />
   );
 }

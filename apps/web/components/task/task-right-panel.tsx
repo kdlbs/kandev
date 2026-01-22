@@ -4,6 +4,7 @@ import type { ReactNode, MouseEvent } from 'react';
 import { memo, useEffect, useState } from 'react';
 import { IconChevronDown, IconChevronUp, IconX } from '@tabler/icons-react';
 import { Badge } from '@kandev/ui/badge';
+import { SessionPanel, SessionPanelContent } from '@kandev/ui/pannel-session';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@kandev/ui/resizable';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@kandev/ui/tabs';
 import { getLocalStorage, setLocalStorage } from '@/lib/local-storage';
@@ -128,7 +129,10 @@ const TaskRightPanel = memo(function TaskRightPanel({ topPanel, sessionId = null
     return (
       <div className="h-full min-h-0 flex flex-col gap-1">
         <div className="flex-1 min-h-0">{topPanel}</div>
-        <div className="h-12 border border-border/70 rounded-lg bg-card flex items-center justify-between px-3 border-l-0 mt-[2px]">
+        <SessionPanel
+          borderSide="left"
+          className="!h-12 !p-0 px-3 mt-[2px] justify-between items-center flex-row"
+        >
           <Tabs
             value={terminalTabValue}
             onValueChange={(value) => {
@@ -183,7 +187,7 @@ const TaskRightPanel = memo(function TaskRightPanel({ topPanel, sessionId = null
           >
             <IconChevronUp className="h-4 w-4" />
           </button>
-        </div>
+        </SessionPanel>
       </div>
     );
   }
@@ -204,7 +208,7 @@ const TaskRightPanel = memo(function TaskRightPanel({ topPanel, sessionId = null
       </ResizablePanel>
       <ResizableHandle className="h-px" />
       <ResizablePanel id="bottom" defaultSize={rightLayout.bottom} minSize={20}>
-        <div className="h-full min-h-0 bg-card p-4 flex flex-col rounded-lg border border-border/70 border-l-0 mt-[5px]">
+        <SessionPanel borderSide="left" margin="top">
           <Tabs
             value={terminalTabValue}
             onValueChange={(value) => {
@@ -279,7 +283,7 @@ const TaskRightPanel = memo(function TaskRightPanel({ topPanel, sessionId = null
               </button>
             </div>
             <TabsContent value="commands" className="flex-1 min-h-0">
-              <div className="flex-1 min-h-0 overflow-y-auto rounded-lg bg-background p-3 space-y-3 h-full">
+              <SessionPanelContent>
                 <div className="grid gap-2">
                   {COMMANDS.map((command) => (
                     <button
@@ -292,28 +296,28 @@ const TaskRightPanel = memo(function TaskRightPanel({ topPanel, sessionId = null
                     </button>
                   ))}
                 </div>
-              </div>
+              </SessionPanelContent>
             </TabsContent>
             {showDevTab ? (
               <TabsContent value="dev-server" className="flex-1 min-h-0">
-                <div className="flex-1 min-h-0 h-full p-1">
+                <SessionPanelContent>
                   <ProcessOutputTerminal
                     output={devOutput}
                     processId={devProcessId ?? null}
                     isStopping={isStoppingDev}
                   />
-                </div>
+                </SessionPanelContent>
               </TabsContent>
             ) : null}
             {terminalIds.map((id) => (
               <TabsContent key={id} value={`terminal-${id}`} className="flex-1 min-h-0">
-                <div className="flex-1 min-h-0 h-full p-1">
+                <SessionPanelContent className="p-0">
                   <ShellTerminal />
-                </div>
+                </SessionPanelContent>
               </TabsContent>
             ))}
           </Tabs>
-        </div>
+        </SessionPanel>
       </ResizablePanel>
     </ResizablePanelGroup>
   );

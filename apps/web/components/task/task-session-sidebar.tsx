@@ -5,6 +5,7 @@ import type { TaskState, Workspace, Repository } from '@/lib/types/http';
 import type { KanbanState } from '@/lib/state/slices';
 import { TaskSwitcher } from './task-switcher';
 import { Button } from '@kandev/ui/button';
+import { SessionPanel } from '@kandev/ui/pannel-session';
 import { IconPlus } from '@tabler/icons-react';
 import { TaskCreateDialog } from '@/components/task-create-dialog';
 import { useAppStore, useAppStoreApi } from '@/components/state-provider';
@@ -104,7 +105,7 @@ export function TaskSessionSidebar({ workspaceId, boardId }: TaskSessionSidebarP
 
   return (
     <>
-      <div className="h-full min-h-0 min-w-0 bg-card p-4 flex flex-col rounded-lg border border-border/70 border-r-0 mr-[5px]">
+      <SessionPanel borderSide="right" margin="right" className="min-w-0">
         <div className="flex items-center justify-between">
           <span className="text-sm font-medium truncate text-muted-foreground">{workspaceName || 'Workspace'}</span>
           <Button
@@ -128,7 +129,7 @@ export function TaskSessionSidebar({ workspaceId, boardId }: TaskSessionSidebarP
             }}
           />
         </div>
-      </div>
+      </SessionPanel>
       <TaskCreateDialog
         open={taskDialogOpen}
         onOpenChange={setTaskDialogOpen}

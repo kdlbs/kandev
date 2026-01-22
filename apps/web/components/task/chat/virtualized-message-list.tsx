@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { IconLoader2 } from '@tabler/icons-react';
+import { SessionPanelContent } from '@kandev/ui/pannel-session';
 import type { Message } from '@/lib/types/http';
 import { MessageRenderer } from '@/components/task/chat/message-renderer';
 import { TurnSummary } from '@/components/task/chat/messages/turn-summary';
@@ -97,9 +98,9 @@ export function VirtualizedMessageList({
   }, [virtualItems, hasMore, isLoadingMore, loadMore]);
 
   return (
-    <div
+    <SessionPanelContent
       ref={messagesContainerRef}
-      className="relative flex-1 min-h-0 overflow-y-auto rounded-lg bg-background p-3"
+      className="relative"
     >
       {isLoadingMore && hasMore && (
         <div className="absolute top-2 left-1/2 -translate-x-1/2 text-xs text-muted-foreground">
@@ -147,6 +148,6 @@ export function VirtualizedMessageList({
       )}
       {/* Turn summary - shows duration and model after last message */}
       <TurnSummary sessionId={sessionId} />
-    </div>
+    </SessionPanelContent>
   );
 }
