@@ -180,6 +180,16 @@ func (h *ProcessHandlers) httpStartProcess(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	readyCtx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+	defer cancel()
+	if err := h.lifecycleMgr.WaitForAgentctlReadyForSession(readyCtx, session.ID); err != nil {
+		h.logger.Warn("agentctl not ready for process start",
+			zap.String("session_id", sessionID),
+			zap.Error(err),
+		)
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "agentctl not ready"})
+		return
+	}
 
 	switch executor.Type {
 	case models.ExecutorTypeLocalPC, models.ExecutorTypeLocalDocker:
@@ -276,11 +286,15 @@ func (h *ProcessHandlers) httpStopProcessByID(c *gin.Context) {
 	switch executor.Type {
 	case models.ExecutorTypeLocalPC, models.ExecutorTypeLocalDocker:
 		proc, err := h.lifecycleMgr.GetProcess(c.Request.Context(), processID, false)
-		if err == nil && proc.SessionID != sessionID {
-			c.Status(http.StatusNoContent)
+		if err != nil {
+			handleNotFound(c, h.logger, err, "process not found")
 			return
 		}
-		if err := h.lifecycleMgr.StopProcess(c.Request.Context(), processID); err != nil {
+		if proc.SessionID != sessionID {
+			handleNotFound(c, h.logger, fmt.Errorf("process not found"), "process not found")
+			return
+		}
+		if err := h.lifecycleMgr.StopProcessForSession(c.Request.Context(), sessionID, processID); err != nil {
 			h.logger.Warn("failed to stop process (path)",
 				zap.String("session_id", sessionID),
 				zap.String("process_id", processID),

@@ -47,9 +47,6 @@ export function usePreviewPanel({ sessionId, hasDevScript = false }: UsePreviewP
   const previewUrlDraft = useAppStore((state) =>
     sessionId ? state.previewPanel.urlDraftBySessionId[sessionId] ?? '' : ''
   );
-  const previewView = useAppStore((state) =>
-    sessionId ? state.previewPanel.viewBySessionId[sessionId] ?? null : null
-  );
   const upsertProcessStatus = useAppStore((state) => state.upsertProcessStatus);
   const appendProcessOutput = useAppStore((state) => state.appendProcessOutput);
   const clearProcessOutput = useAppStore((state) => state.clearProcessOutput);
@@ -82,22 +79,7 @@ export function usePreviewPanel({ sessionId, hasDevScript = false }: UsePreviewP
   useEffect(() => {
     if (!sessionId) return;
     if (!previewOpen || previewStage !== 'logs') return;
-    if (!detectedUrl) {
-      console.log('preview-panel:url-not-detected', {
-        sessionId,
-        previewStage,
-        previewOpen,
-        outputLength: devOutput.length,
-        outputTail: devOutput.slice(-500),
-      });
-      return;
-    }
-    console.log('preview-panel:url-detected', {
-      sessionId,
-      previewStage,
-      previewOpen,
-      detectedUrl,
-    });
+    if (!detectedUrl) return;
     setPreviewUrl(sessionId, detectedUrl);
     setPreviewUrlDraft(sessionId, detectedUrl);
     setPreviewView(sessionId, 'preview');

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	agentctl "github.com/kandev/kandev/internal/agentctl/client"
 )
@@ -40,6 +41,22 @@ func (m *Manager) StartProcess(ctx context.Context, req StartProcessRequest) (*a
 	})
 }
 
+// WaitForAgentctlReadyForSession waits for agentctl to be ready for a session.
+func (m *Manager) WaitForAgentctlReadyForSession(ctx context.Context, sessionID string) error {
+	if sessionID == "" {
+		return fmt.Errorf("session_id is required")
+	}
+	execution, ok := m.executionStore.GetBySessionID(sessionID)
+	if !ok {
+		return fmt.Errorf("no execution found for session %s", sessionID)
+	}
+	client := execution.GetAgentCtlClient()
+	if client == nil {
+		return fmt.Errorf("agentctl client not available for session %s", sessionID)
+	}
+	return client.WaitForReady(ctx, 10*time.Second)
+}
+
 func (m *Manager) StopProcess(ctx context.Context, processID string) error {
 	if processID == "" {
 		return fmt.Errorf("process_id is required")
@@ -54,6 +71,25 @@ func (m *Manager) StopProcess(ctx context.Context, processID string) error {
 		}
 	}
 	return fmt.Errorf("process not found: %s", processID)
+}
+
+// StopProcessForSession stops a running process by ID within a specific session.
+func (m *Manager) StopProcessForSession(ctx context.Context, sessionID, processID string) error {
+	if sessionID == "" {
+		return fmt.Errorf("session_id is required")
+	}
+	if processID == "" {
+		return fmt.Errorf("process_id is required")
+	}
+	execution, ok := m.executionStore.GetBySessionID(sessionID)
+	if !ok {
+		return fmt.Errorf("no execution found for session %s", sessionID)
+	}
+	client := execution.GetAgentCtlClient()
+	if client == nil {
+		return fmt.Errorf("agentctl client not available for session %s", sessionID)
+	}
+	return client.StopProcess(ctx, processID)
 }
 
 func (m *Manager) ListProcesses(ctx context.Context, sessionID string) ([]agentctl.ProcessInfo, error) {

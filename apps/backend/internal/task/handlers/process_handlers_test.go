@@ -2,8 +2,22 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"reflect"
+	"strconv"
+	"strings"
+	"sync/atomic"
 	"testing"
+	"unsafe"
 
+	"github.com/gin-gonic/gin"
+	"github.com/kandev/kandev/internal/agent/lifecycle"
+	"github.com/kandev/kandev/internal/agent/registry"
+	agentctlclient "github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
@@ -13,6 +27,8 @@ import (
 
 type mockRepository struct {
 	scriptsByRepo map[string][]*models.RepositoryScript
+	sessions      map[string]*models.TaskSession
+	executors     map[string]*models.Executor
 }
 
 func (m *mockRepository) CreateWorkspace(ctx context.Context, workspace *models.Workspace) error {
@@ -157,7 +173,12 @@ func (m *mockRepository) CreateTaskSession(ctx context.Context, session *models.
 	return nil
 }
 func (m *mockRepository) GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error) {
-	return nil, nil
+	if m.sessions != nil {
+		if session, ok := m.sessions[id]; ok {
+			return session, nil
+		}
+	}
+	return nil, fmt.Errorf("task session not found: %s", id)
 }
 func (m *mockRepository) GetTaskSessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error) {
 	return nil, nil
@@ -244,7 +265,12 @@ func (m *mockRepository) CreateExecutor(ctx context.Context, executor *models.Ex
 	return nil
 }
 func (m *mockRepository) GetExecutor(ctx context.Context, id string) (*models.Executor, error) {
-	return nil, nil
+	if m.executors != nil {
+		if executor, ok := m.executors[id]; ok {
+			return executor, nil
+		}
+	}
+	return nil, fmt.Errorf("executor not found: %s", id)
 }
 func (m *mockRepository) UpdateExecutor(ctx context.Context, executor *models.Executor) error {
 	return nil
@@ -296,6 +322,58 @@ func newTestService(t *testing.T, scripts map[string][]*models.RepositoryScript)
 	}
 	repo := &mockRepository{scriptsByRepo: scripts}
 	return service.NewService(repo, nil, log, service.RepositoryDiscoveryConfig{})
+}
+
+func addExecution(t *testing.T, mgr *lifecycle.Manager, exec *lifecycle.AgentExecution) {
+	t.Helper()
+	store := getExecutionStore(t, mgr)
+	store.Add(exec)
+}
+
+func getExecutionStore(t *testing.T, mgr *lifecycle.Manager) *lifecycle.ExecutionStore {
+	t.Helper()
+	value := reflect.ValueOf(mgr).Elem().FieldByName("executionStore")
+	if !value.IsValid() {
+		t.Fatal("executionStore field not found on lifecycle manager")
+	}
+	value = reflect.NewAt(value.Type(), unsafe.Pointer(value.UnsafeAddr())).Elem()
+	store, ok := value.Interface().(*lifecycle.ExecutionStore)
+	if !ok {
+		t.Fatal("executionStore is not *lifecycle.ExecutionStore")
+	}
+	return store
+}
+
+func newLifecycleManager(t *testing.T, log *logger.Logger) *lifecycle.Manager {
+	t.Helper()
+	reg := registry.NewRegistry(log)
+	return lifecycle.NewManager(reg, nil, nil, nil, nil, nil, nil, log)
+}
+
+func newAgentctlClient(t *testing.T, serverURL string, log *logger.Logger) *agentctlclient.Client {
+	t.Helper()
+	parsed, err := url.Parse(serverURL)
+	if err != nil {
+		t.Fatalf("failed to parse server url: %v", err)
+	}
+	port, err := strconv.Atoi(parsed.Port())
+	if err != nil {
+		t.Fatalf("failed to parse server port: %v", err)
+	}
+	return agentctlclient.NewClient(parsed.Hostname(), port, log)
+}
+
+func newProcessStopRouter(
+	t *testing.T,
+	svc *service.Service,
+	lifecycleMgr *lifecycle.Manager,
+	log *logger.Logger,
+) *gin.Engine {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	RegisterProcessRoutes(router, svc, lifecycleMgr, log)
+	return router
 }
 
 func TestResolveScriptCommandBuiltins(t *testing.T) {
@@ -351,5 +429,130 @@ func TestResolveScriptCommandErrors(t *testing.T) {
 	}
 	if _, _, _, err := resolveScriptCommand(context.Background(), svc, repo, "custom", "unknown"); err == nil {
 		t.Fatal("expected error for unknown custom script")
+	}
+}
+
+func TestStopProcessRejectsDifferentSession(t *testing.T) {
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	if err != nil {
+		t.Fatalf("failed to create logger: %v", err)
+	}
+	stopCalled := atomic.Bool{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/processes/stop":
+			stopCalled.Store(true)
+			_, _ = w.Write([]byte(`{"success":true}`))
+			return
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/v1/processes/"):
+			resp := agentctlclient.ProcessInfo{
+				ID:        "proc-1",
+				SessionID: "session-other",
+				Kind:      agentctlclient.ProcessKind("dev"),
+				Status:    agentctlclient.ProcessStatus("running"),
+			}
+			data, _ := json.Marshal(resp)
+			_, _ = w.Write(data)
+			return
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	repo := &mockRepository{
+		sessions: map[string]*models.TaskSession{
+			"session-a": {ID: "session-a", TaskID: "task-1", ExecutorID: "exec-1"},
+		},
+		executors: map[string]*models.Executor{
+			"exec-1": {ID: "exec-1", Type: models.ExecutorTypeLocalPC},
+		},
+	}
+	svc := service.NewService(repo, nil, log, service.RepositoryDiscoveryConfig{})
+	lifecycleMgr := newLifecycleManager(t, log)
+	client := newAgentctlClient(t, server.URL, log)
+	exec := (&lifecycle.RuntimeInstance{
+		InstanceID: "exec-1",
+		TaskID:     "task-1",
+		SessionID:  "session-a",
+		Client:     client,
+	}).ToAgentExecution(&lifecycle.RuntimeCreateRequest{
+		InstanceID:     "exec-1",
+		TaskID:         "task-1",
+		SessionID:      "session-a",
+		AgentProfileID: "profile-1",
+		WorkspacePath:  "/tmp",
+	})
+	addExecution(t, lifecycleMgr, exec)
+
+	router := newProcessStopRouter(t, svc, lifecycleMgr, log)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/task-sessions/session-a/processes/proc-1/stop", nil)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for mismatched session, got %d", resp.Code)
+	}
+	if stopCalled.Load() {
+		t.Fatal("expected stop endpoint not to be called on session mismatch")
+	}
+}
+
+func TestStopProcessAgentctlUnavailable(t *testing.T) {
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	if err != nil {
+		t.Fatalf("failed to create logger: %v", err)
+	}
+	stopCalled := atomic.Bool{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/processes/stop":
+			stopCalled.Store(true)
+			_, _ = w.Write([]byte(`{"success":true}`))
+			return
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/v1/processes/"):
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	repo := &mockRepository{
+		sessions: map[string]*models.TaskSession{
+			"session-a": {ID: "session-a", TaskID: "task-1", ExecutorID: "exec-1"},
+		},
+		executors: map[string]*models.Executor{
+			"exec-1": {ID: "exec-1", Type: models.ExecutorTypeLocalPC},
+		},
+	}
+	svc := service.NewService(repo, nil, log, service.RepositoryDiscoveryConfig{})
+	lifecycleMgr := newLifecycleManager(t, log)
+	client := newAgentctlClient(t, server.URL, log)
+	exec := (&lifecycle.RuntimeInstance{
+		InstanceID: "exec-1",
+		TaskID:     "task-1",
+		SessionID:  "session-a",
+		Client:     client,
+	}).ToAgentExecution(&lifecycle.RuntimeCreateRequest{
+		InstanceID:     "exec-1",
+		TaskID:         "task-1",
+		SessionID:      "session-a",
+		AgentProfileID: "profile-1",
+		WorkspacePath:  "/tmp",
+	})
+	addExecution(t, lifecycleMgr, exec)
+
+	router := newProcessStopRouter(t, svc, lifecycleMgr, log)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/task-sessions/session-a/processes/proc-1/stop", nil)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 when agentctl is unavailable, got %d", resp.Code)
+	}
+	if stopCalled.Load() {
+		t.Fatal("expected stop endpoint not to be called when get process fails")
 	}
 }
