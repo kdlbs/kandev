@@ -21,6 +21,7 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agentctl/client"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/common/appctx"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -75,8 +76,11 @@ func NewManager(
 	// Initialize command builder
 	commandBuilder := NewCommandBuilder()
 
+	// Create stop channel for graceful shutdown
+	stopCh := make(chan struct{})
+
 	// Initialize session manager
-	sessionManager := NewSessionManager(log)
+	sessionManager := NewSessionManager(log, stopCh)
 
 	// Initialize event publisher
 	eventPublisher := NewEventPublisher(eventBus, log)
@@ -98,7 +102,7 @@ func NewManager(
 		eventPublisher:   eventPublisher,
 		containerManager: containerManager,
 		cleanupInterval:  30 * time.Second,
-		stopCh:           make(chan struct{}),
+		stopCh:           stopCh,
 	}
 
 	// Initialize stream manager with callbacks that delegate to manager methods
@@ -122,12 +126,31 @@ func NewManager(
 	return mgr
 }
 
-// SetWorktreeManager sets the worktree manager for Git worktree isolation
+// SetWorktreeManager sets the worktree manager for Git worktree isolation.
+//
+// This must be called before launching agents if Git worktree support is enabled in the runtime.
+// The worktree manager creates isolated Git working directories for each agent execution,
+// allowing multiple agents to work on the same repository without conflicts.
+//
+// Call this during initialization, typically when setting up the orchestrator service.
+// If not set, agents will work directly in the repository's main working directory.
 func (m *Manager) SetWorktreeManager(worktreeMgr *worktree.Manager) {
 	m.worktreeMgr = worktreeMgr
 }
 
-// SetWorkspaceInfoProvider sets the provider for workspace information
+// SetWorkspaceInfoProvider sets the provider for workspace information.
+//
+// The WorkspaceInfoProvider interface allows the lifecycle manager to dynamically create
+// agent executions on-demand when the frontend connects to a session that doesn't have
+// an active execution yet. This enables session resume after server restart or when
+// accessing a session via URL (/task/[id]/[sessionId]).
+//
+// The provider must implement:
+//   - GetWorkspaceInfoBySessionID(ctx, sessionID) - Returns workspace path, worktree info,
+//     and MCP servers configured for the session
+//
+// This is typically called during initialization, with the task service as the provider.
+// Without this, EnsureWorkspaceExecutionForSession will fail.
 func (m *Manager) SetWorkspaceInfoProvider(provider WorkspaceInfoProvider) {
 	m.workspaceInfoProvider = provider
 }
@@ -170,8 +193,8 @@ func (m *Manager) EnsureWorkspaceExecutionForSession(ctx context.Context, taskID
 	// For workspace-only executions (no agent), wait for agentctl to be ready
 	// then connect the workspace stream so process output can be received
 	go func() {
-		// Wait for agentctl to be ready
-		waitCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		// Use detached context that respects stopCh for graceful shutdown
+		waitCtx, cancel := appctx.Detached(ctx, m.stopCh, 60*time.Second)
 		defer cancel()
 
 		if err := execution.agentctl.WaitForReady(waitCtx, 60*time.Second); err != nil {
@@ -721,7 +744,9 @@ func (m *Manager) getOrCreateWorktree(ctx context.Context, req *LaunchRequest) (
 // waitForAgentctlReady waits for the agentctl HTTP server to be ready.
 // This enables shell/workspace features without starting the agent process.
 func (m *Manager) waitForAgentctlReady(execution *AgentExecution) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	opStart := time.Now()
+	// Use detached context that respects stopCh for graceful shutdown
+	ctx, cancel := appctx.Detached(context.Background(), m.stopCh, 60*time.Second)
 	defer cancel()
 
 	m.logger.Info("waiting for agentctl to be ready",
@@ -731,15 +756,26 @@ func (m *Manager) waitForAgentctlReady(execution *AgentExecution) {
 	if err := execution.agentctl.WaitForReady(ctx, 60*time.Second); err != nil {
 		m.logger.Error("agentctl not ready",
 			zap.String("execution_id", execution.ID),
+			zap.Duration("duration", time.Since(opStart)),
 			zap.Error(err))
 		m.updateExecutionError(execution.ID, "agentctl not ready: "+err.Error())
-		m.eventPublisher.PublishAgentctlEvent(context.Background(), events.AgentctlError, execution, err.Error())
+		// Use the timeout context for event publishing instead of a fresh Background context
+		m.eventPublisher.PublishAgentctlEvent(ctx, events.AgentctlError, execution, err.Error())
 		return
 	}
 
-	m.logger.Info("agentctl ready - shell/workspace access available",
-		zap.String("execution_id", execution.ID))
-	m.eventPublisher.PublishAgentctlEvent(context.Background(), events.AgentctlReady, execution, "")
+	elapsed := time.Since(opStart)
+	if elapsed > 10*time.Second {
+		m.logger.Warn("agentctl ready took longer than expected",
+			zap.String("execution_id", execution.ID),
+			zap.Duration("duration", elapsed))
+	} else {
+		m.logger.Info("agentctl ready - shell/workspace access available",
+			zap.String("execution_id", execution.ID),
+			zap.Duration("duration", elapsed))
+	}
+	// Use the timeout context for event publishing instead of a fresh Background context
+	m.eventPublisher.PublishAgentctlEvent(ctx, events.AgentctlReady, execution, "")
 }
 
 // getAgentConfigForExecution retrieves the agent configuration for an execution.
@@ -1284,7 +1320,7 @@ func (m *Manager) StopAgent(ctx context.Context, executionID string, force bool)
 	}
 
 	// Update execution status and remove from tracking
-	m.executionStore.WithLock(executionID, func(exec *AgentExecution) {
+	_ = m.executionStore.WithLock(executionID, func(exec *AgentExecution) {
 		exec.Status = v1.AgentStatusStopped
 		now := time.Now()
 		exec.FinishedAt = &now
@@ -1311,23 +1347,61 @@ func (m *Manager) StopBySessionID(ctx context.Context, sessionID string, force b
 	return m.StopAgent(ctx, execution.ID, force)
 }
 
-// GetExecution returns an agent execution by ID
+// GetExecution returns an agent execution by ID.
+//
+// Returns (execution, true) if found, or (nil, false) if not found.
+// The returned execution pointer should not be modified directly - use the Manager's
+// methods to update execution state (MarkReady, MarkCompleted, UpdateStatus).
+//
+// Thread-safe: Can be called concurrently from multiple goroutines.
 func (m *Manager) GetExecution(executionID string) (*AgentExecution, bool) {
 	return m.executionStore.Get(executionID)
 }
 
-// GetExecutionBySessionID returns the agent execution for a session
+// GetExecutionBySessionID returns the agent execution for a session.
+//
+// Returns (execution, true) if found, or (nil, false) if not found.
+// A session can have at most one active execution at a time. If a session exists
+// but has no active execution, this returns (nil, false).
+//
+// Thread-safe: Can be called concurrently from multiple goroutines.
 func (m *Manager) GetExecutionBySessionID(sessionID string) (*AgentExecution, bool) {
 	return m.executionStore.GetBySessionID(sessionID)
 }
 
-// ListExecutions returns all active executions
+// ListExecutions returns all currently tracked agent executions.
+//
+// Returns a snapshot of all executions in memory at the time of call. The returned slice
+// contains pointers to execution objects that may be modified by other goroutines after
+// this method returns. Do not modify execution state directly - use Manager methods instead.
+//
+// The list includes executions in all states:
+//   - Starting (process launching, agentctl initializing)
+//   - Running (actively processing prompts)
+//   - Ready (waiting for user input)
+//   - Completed/Failed (finished but not yet removed)
+//
+// Thread-safe: Can be called concurrently. Returns a new slice on each call.
+//
+// Typical usage: Status endpoints, debugging, cleanup loops.
 func (m *Manager) ListExecutions() []*AgentExecution {
 	return m.executionStore.List()
 }
 
-// IsAgentRunningForSession checks if an agent is actually running for a session
-// This probes agentctl's status endpoint to verify the agent process is running
+// IsAgentRunningForSession checks if an agent process is running or starting for a session.
+//
+// This probes agentctl's status endpoint to verify the agent process state. Returns true if:
+//   - Agent status is "running" (actively processing prompts)
+//   - Agent status is "starting" (process launched but not yet ready)
+//
+// Returns false if:
+//   - No execution exists for this session
+//   - agentctl client is not available
+//   - Status check fails (network/timeout error)
+//   - Agent is in any other state (stopped, failed, etc.)
+//
+// Note: The name "IsAgentRunning" is slightly misleading - it includes "starting" state.
+// Use this to check if an agent subprocess exists for the session, regardless of ready state.
 func (m *Manager) IsAgentRunningForSession(ctx context.Context, sessionID string) bool {
 	// First check if we have an execution tracked for this session
 	execution, exists := m.GetExecutionBySessionID(sessionID)
@@ -1353,10 +1427,13 @@ func (m *Manager) IsAgentRunningForSession(ctx context.Context, sessionID string
 
 // UpdateStatus updates the status of an execution
 func (m *Manager) UpdateStatus(executionID string, status v1.AgentStatus) error {
-	if !m.executionStore.WithLock(executionID, func(execution *AgentExecution) {
+	if err := m.executionStore.WithLock(executionID, func(execution *AgentExecution) {
 		execution.Status = status
-	}) {
-		return fmt.Errorf("execution %q not found", executionID)
+	}); err != nil {
+		if errors.Is(err, ErrExecutionNotFound) {
+			return fmt.Errorf("execution %q not found", executionID)
+		}
+		return err
 	}
 
 	m.logger.Debug("updated execution status",
@@ -1366,7 +1443,22 @@ func (m *Manager) UpdateStatus(executionID string, status v1.AgentStatus) error 
 	return nil
 }
 
-// MarkReady marks an execution as ready for follow-up prompts
+// MarkReady marks an execution as ready for follow-up prompts.
+//
+// This transitions the execution to the "ready" state, indicating the agent has finished
+// processing the current prompt and is waiting for user input. This is called:
+//   - After agent initialization completes (session loaded, workspace ready)
+//   - After agent finishes processing a prompt (via stream completion event)
+//   - After cancelling an agent turn (to allow new prompts)
+//
+// State Machine Transitions:
+//   Starting -> Ready (after initialization)
+//   Running  -> Ready (after prompt completion)
+//   Any      -> Ready (after cancel)
+//
+// Publishes an AgentReady event to notify subscribers (frontend, orchestrator).
+//
+// Returns error if execution not found.
 func (m *Manager) MarkReady(executionID string) error {
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
@@ -1384,14 +1476,33 @@ func (m *Manager) MarkReady(executionID string) error {
 	return nil
 }
 
-// MarkCompleted marks an execution as completed
+// MarkCompleted marks an execution as completed or failed.
+//
+// This is called when the agent process terminates, either successfully or with an error.
+// The final status is determined by exit code and error message:
+//
+//   - exitCode == 0 && errorMessage == "" → AgentStatusCompleted (success)
+//   - Otherwise                            → AgentStatusFailed (failure)
+//
+// Parameters:
+//   - executionID: The execution to mark as completed
+//   - exitCode: Process exit code (0 = success, non-zero = failure)
+//   - errorMessage: Human-readable error description (empty string if no error)
+//
+// State Machine:
+//   This is a terminal state transition - no further state changes are expected after this.
+//   Typical flow: Starting -> Running -> Ready -> ... -> Completed/Failed
+//
+// Publishes either AgentCompleted or AgentFailed event depending on final status.
+//
+// Returns error if execution not found.
 func (m *Manager) MarkCompleted(executionID string, exitCode int, errorMessage string) error {
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
 		return fmt.Errorf("execution %q not found", executionID)
 	}
 
-	m.executionStore.WithLock(executionID, func(exec *AgentExecution) {
+	_ = m.executionStore.WithLock(executionID, func(exec *AgentExecution) {
 		now := time.Now()
 		exec.FinishedAt = &now
 		exec.ExitCode = &exitCode
@@ -1420,15 +1531,55 @@ func (m *Manager) MarkCompleted(executionID string, exitCode int, errorMessage s
 	return nil
 }
 
-// RemoveExecution removes a completed execution from tracking
+// RemoveExecution removes an execution from tracking.
+//
+// ⚠️  WARNING: This is a potentially dangerous operation that should only be called when:
+//   1. The agent process has been fully stopped (via StopAgent)
+//   2. All cleanup operations have completed (worktree cleanup, container removal)
+//   3. The execution is in a terminal state (Completed, Failed, or Cancelled)
+//
+// This method:
+//   - Removes the execution from the in-memory store
+//   - Makes the sessionID available for new executions
+//   - Does NOT stop the agent process (call StopAgent first)
+//   - Does NOT close the agentctl client (call execution.agentctl.Close() first)
+//   - Does NOT clean up resources (worktrees, containers, etc.)
+//
+// After calling this, the executionID and sessionID can no longer be used to query
+// or control the execution. Any references to this execution will become invalid.
+//
+// Typical usage: Called by cleanup loops or after successful StopAgent completion.
+// For stale/dead executions, use CleanupStaleExecutionBySessionID instead.
 func (m *Manager) RemoveExecution(executionID string) {
 	m.executionStore.Remove(executionID)
 	m.logger.Debug("removed execution from tracking",
 		zap.String("execution_id", executionID))
 }
 
-// CleanupStaleExecutionBySessionID removes a stale agent execution from tracking without trying to stop it.
-// This is used when we detect the agent process has stopped but the execution is still tracked.
+// CleanupStaleExecutionBySessionID removes a stale execution from tracking without stopping it.
+//
+// A "stale" execution is one where the agent process has stopped externally (crashed, killed,
+// or terminated outside of our control) but the execution is still tracked in memory.
+//
+// When to use this:
+//   - After detecting the agentctl HTTP server is unreachable
+//   - When the agent container no longer exists (Docker runtime)
+//   - After server restart when recovering persisted state
+//   - When IsAgentRunningForSession returns false but execution exists
+//
+// This method performs cleanup:
+//   1. Closes the agentctl HTTP client connection
+//   2. Removes the execution from the in-memory tracking store
+//
+// What this does NOT do:
+//   - Stop the agent process (assumed already stopped)
+//   - Clean up worktrees or containers (caller's responsibility)
+//   - Update database session state (caller's responsibility)
+//
+// This is safe to call even if the process is still running - it won't send kill signals.
+// Use StopAgent if you need to actively terminate a running agent.
+//
+// Returns nil if no execution exists for the session (idempotent).
 func (m *Manager) CleanupStaleExecutionBySessionID(ctx context.Context, sessionID string) error {
 	execution, exists := m.executionStore.GetBySessionID(sessionID)
 	if !exists {
@@ -1523,7 +1674,30 @@ func (m *Manager) performCleanup(ctx context.Context) {
 	}
 }
 
-// RespondToPermission sends a response to a permission request for an agent execution
+// RespondToPermission sends a response to an agent's permission request.
+//
+// When an agent requests permission (e.g., to run a bash command, modify files, etc.),
+// it pauses execution and waits for user approval. This method sends the user's response.
+//
+// Parameters:
+//   - executionID: The agent execution waiting for permission
+//   - pendingID: Unique ID of the permission request (from permission request event)
+//   - optionID: The user-selected option ID (from the permission request's options array)
+//   - cancelled: If true, indicates user cancelled/rejected the permission request.
+//                When cancelled=true, optionID is ignored.
+//
+// Response Semantics:
+//   - cancelled=false, optionID="approve" → User approved the action
+//   - cancelled=false, optionID="deny"    → User explicitly denied the action
+//   - cancelled=true, optionID=""         → User cancelled/closed the dialog
+//
+// After receiving the response, the agent will either:
+//   - Continue executing (if approved)
+//   - Skip the action and report failure (if denied/cancelled)
+//
+// Timeout: 30 seconds for agentctl to acknowledge the response.
+//
+// Returns error if execution not found, agentctl unavailable, or communication fails.
 func (m *Manager) RespondToPermission(executionID, pendingID, optionID string, cancelled bool) error {
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
@@ -1546,7 +1720,10 @@ func (m *Manager) RespondToPermission(executionID, pendingID, optionID string, c
 	return execution.agentctl.RespondToPermission(ctx, pendingID, optionID, cancelled)
 }
 
-// RespondToPermissionBySessionID sends a response to a permission request for a session
+// RespondToPermissionBySessionID sends a response to a permission request using session ID.
+//
+// Convenience method that looks up the execution by session ID and delegates to RespondToPermission.
+// See RespondToPermission for parameter semantics and behavior.
 func (m *Manager) RespondToPermissionBySessionID(sessionID, pendingID, optionID string, cancelled bool) error {
 	execution, exists := m.executionStore.GetBySessionID(sessionID)
 	if !exists {
