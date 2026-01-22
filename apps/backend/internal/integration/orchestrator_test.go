@@ -717,7 +717,6 @@ func (c *OrchestratorWSClient) readPump() {
 func (c *OrchestratorWSClient) writePump() {
 	for data := range c.send {
 		if err := c.conn.WriteMessage(websocket.TextMessage, data); err != nil {
-			c.t.Logf("writePump: write error: %v", err)
 			return
 		}
 	}

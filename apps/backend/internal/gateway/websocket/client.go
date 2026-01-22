@@ -386,32 +386,10 @@ func (c *Client) WritePump() {
 				return
 			}
 
-			w, err := c.conn.NextWriter(websocket.TextMessage)
-			if err != nil {
-				return
-			}
-			if _, err := w.Write(message); err != nil {
+			// Send each message in its own WebSocket frame
+			// (previously batched with newlines, but clients expect one JSON object per frame)
+			if err := c.conn.WriteMessage(websocket.TextMessage, message); err != nil {
 				c.logger.Debug("failed to write websocket message", zap.Error(err))
-				_ = w.Close()
-				return
-			}
-
-			// Batch additional queued messages
-			n := len(c.send)
-			for i := 0; i < n; i++ {
-				if _, err := w.Write([]byte{'\n'}); err != nil {
-					c.logger.Debug("failed to write websocket delimiter", zap.Error(err))
-					_ = w.Close()
-					return
-				}
-				if _, err := w.Write(<-c.send); err != nil {
-					c.logger.Debug("failed to write queued websocket message", zap.Error(err))
-					_ = w.Close()
-					return
-				}
-			}
-
-			if err := w.Close(); err != nil {
 				return
 			}
 
