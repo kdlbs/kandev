@@ -121,30 +121,6 @@ func TestPriorityOrdering(t *testing.T) {
 	}
 }
 
-func TestPeek(t *testing.T) {
-	q := NewTaskQueue(10)
-
-	// Peek on empty queue
-	peeked := q.Peek()
-	if peeked != nil {
-		t.Errorf("expected nil from Peek on empty queue")
-	}
-
-	_ = q.Enqueue(createTestTask("task-1", 5))
-	peeked = q.Peek()
-
-	if peeked == nil {
-		t.Fatal("Peek returned nil on non-empty queue")
-	}
-	if peeked.TaskID != "task-1" {
-		t.Errorf("expected TaskID = task-1, got %s", peeked.TaskID)
-	}
-	// Verify it didn't remove the task
-	if q.Len() != 1 {
-		t.Errorf("Peek should not remove task from queue")
-	}
-}
-
 func TestRemove(t *testing.T) {
 	q := NewTaskQueue(10)
 
@@ -158,7 +134,8 @@ func TestRemove(t *testing.T) {
 	if q.Len() != 1 {
 		t.Errorf("expected Len() = 1 after remove, got %d", q.Len())
 	}
-	if q.Contains("task-1") {
+	// Verify task was removed by trying to remove again
+	if q.Remove("task-1") {
 		t.Error("queue should not contain removed task")
 	}
 }
@@ -168,52 +145,6 @@ func TestRemoveNonExistent(t *testing.T) {
 	removed := q.Remove("non-existent")
 	if removed {
 		t.Error("Remove should return false for non-existent task")
-	}
-}
-
-func TestUpdatePriority(t *testing.T) {
-	q := NewTaskQueue(10)
-
-	_ = q.Enqueue(createTestTask("task-1", 1))
-	_ = q.Enqueue(createTestTask("task-2", 10))
-
-	// task-2 should be first initially
-	peeked := q.Peek()
-	if peeked.TaskID != "task-2" {
-		t.Errorf("expected task-2 first initially")
-	}
-
-	// Update task-1 to have higher priority
-	updated := q.UpdatePriority("task-1", 20)
-	if !updated {
-		t.Error("UpdatePriority should return true for existing task")
-	}
-
-	// Now task-1 should be first
-	peeked = q.Peek()
-	if peeked.TaskID != "task-1" {
-		t.Errorf("expected task-1 first after priority update")
-	}
-}
-
-func TestUpdatePriorityNonExistent(t *testing.T) {
-	q := NewTaskQueue(10)
-	updated := q.UpdatePriority("non-existent", 10)
-	if updated {
-		t.Error("UpdatePriority should return false for non-existent task")
-	}
-}
-
-func TestContains(t *testing.T) {
-	q := NewTaskQueue(10)
-
-	_ = q.Enqueue(createTestTask("task-1", 5))
-
-	if !q.Contains("task-1") {
-		t.Error("Contains should return true for existing task")
-	}
-	if q.Contains("task-2") {
-		t.Error("Contains should return false for non-existent task")
 	}
 }
 
@@ -245,21 +176,6 @@ func TestList(t *testing.T) {
 	list := q.List()
 	if len(list) != 3 {
 		t.Errorf("expected List() to return 3 items, got %d", len(list))
-	}
-}
-
-func TestClear(t *testing.T) {
-	q := NewTaskQueue(10)
-
-	_ = q.Enqueue(createTestTask("task-1", 5))
-	_ = q.Enqueue(createTestTask("task-2", 3))
-
-	q.Clear()
-	if q.Len() != 0 {
-		t.Errorf("expected Len() = 0 after Clear, got %d", q.Len())
-	}
-	if q.Contains("task-1") || q.Contains("task-2") {
-		t.Error("Clear should remove all tasks")
 	}
 }
 

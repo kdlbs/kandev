@@ -184,40 +184,10 @@ func (a *lifecycleAdapter) RespondToPermissionBySessionID(ctx context.Context, s
 	return a.mgr.RespondToPermissionBySessionID(sessionID, pendingID, optionID, cancelled)
 }
 
-// GetRecoveredExecutions returns executions recovered from Docker during startup
-func (a *lifecycleAdapter) GetRecoveredExecutions() []executor.RecoveredExecutionInfo {
-	recovered := a.mgr.GetRecoveredExecutions()
-	result := make([]executor.RecoveredExecutionInfo, len(recovered))
-	for i, r := range recovered {
-		result[i] = executor.RecoveredExecutionInfo{
-			ExecutionID:    r.ExecutionID,
-			TaskID:         r.TaskID,
-			SessionID:      r.SessionID,
-			ContainerID:    r.ContainerID,
-			AgentProfileID: r.AgentProfileID,
-		}
-	}
-	return result
-}
-
 // IsAgentRunningForSession checks if an agent is actually running for a session
 // This probes the actual agent (Docker container or standalone process)
 func (a *lifecycleAdapter) IsAgentRunningForSession(ctx context.Context, sessionID string) bool {
 	return a.mgr.IsAgentRunningForSession(ctx, sessionID)
-}
-
-// CleanupStaleExecutionBySessionID removes a stale agent execution from tracking without trying to stop it.
-func (a *lifecycleAdapter) CleanupStaleExecutionBySessionID(ctx context.Context, sessionID string) error {
-	return a.mgr.CleanupStaleExecutionBySessionID(ctx, sessionID)
-}
-
-// GetAgentType returns the agent type configuration
-func (a *lifecycleAdapter) GetAgentType(ctx context.Context, agentID string) (*v1.AgentType, error) {
-	config, err := a.registry.Get(agentID)
-	if err != nil {
-		return nil, err
-	}
-	return config.ToAPIType(), nil
 }
 
 // ResolveAgentProfile resolves an agent profile ID to profile information

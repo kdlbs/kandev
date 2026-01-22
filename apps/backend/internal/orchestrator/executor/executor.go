@@ -42,12 +42,6 @@ type AgentManagerClient interface {
 	// StopAgent stops a running agent
 	StopAgent(ctx context.Context, agentExecutionID string, force bool) error
 
-	// GetAgentStatus returns the status of an agent execution
-	GetAgentStatus(ctx context.Context, agentExecutionID string) (*v1.AgentExecution, error)
-
-	// ListAgentTypes returns available agent types
-	ListAgentTypes(ctx context.Context) ([]*v1.AgentType, error)
-
 	// PromptAgent sends a prompt to a running agent
 	// Returns PromptResult indicating if the agent needs input
 	PromptAgent(ctx context.Context, agentExecutionID string, prompt string) (*PromptResult, error)
@@ -58,19 +52,9 @@ type AgentManagerClient interface {
 	// RespondToPermission sends a response to a permission request
 	RespondToPermissionBySessionID(ctx context.Context, sessionID, pendingID, optionID string, cancelled bool) error
 
-	// GetRecoveredExecutions returns executions recovered from Docker during startup
-	GetRecoveredExecutions() []RecoveredExecutionInfo
-
 	// IsAgentRunningForSession checks if an agent is actually running for a session
 	// This probes the actual agent (Docker container or standalone process) rather than relying on cached state
 	IsAgentRunningForSession(ctx context.Context, sessionID string) bool
-
-	// CleanupStaleExecutionBySessionID removes a stale agent execution from tracking without trying to stop it.
-	// This is used when we detect the agent process has stopped but the execution is still tracked.
-	CleanupStaleExecutionBySessionID(ctx context.Context, sessionID string) error
-
-	// GetAgentType returns the agent type configuration
-	GetAgentType(ctx context.Context, agentID string) (*v1.AgentType, error)
 
 	// ResolveAgentProfile resolves an agent profile ID to profile information
 	ResolveAgentProfile(ctx context.Context, profileID string) (*AgentProfileInfo, error)
@@ -197,11 +181,6 @@ func NewExecutor(agentManager AgentManagerClient, repo repository.Repository, lo
 	}
 }
 
-// SetWorktreeEnabled enables or disables worktree mode
-func (e *Executor) SetWorktreeEnabled(enabled bool) {
-	e.worktreeEnabled = enabled
-}
-
 func (e *Executor) applyPreferredShellEnv(ctx context.Context, env map[string]string) map[string]string {
 	if e.shellPrefs == nil {
 		return env
@@ -220,15 +199,6 @@ func (e *Executor) applyPreferredShellEnv(ctx context.Context, env map[string]st
 	env["AGENTCTL_SHELL_COMMAND"] = preferred
 	env["SHELL"] = preferred
 	return env
-}
-
-// RecoveredExecutionInfo contains info about an execution recovered from Docker
-type RecoveredExecutionInfo struct {
-	ExecutionID    string
-	TaskID         string
-	SessionID      string
-	ContainerID    string
-	AgentProfileID string
 }
 
 // Execute starts agent execution for a task
@@ -979,30 +949,6 @@ func (e *Executor) RespondToPermission(ctx context.Context, sessionID, pendingID
 	return e.agentManager.RespondToPermissionBySessionID(ctx, sessionID, pendingID, optionID, cancelled)
 }
 
-// GetExecution returns the current execution state for a task (returns most recent active session)
-func (e *Executor) GetExecution(taskID string) (*TaskExecution, bool) {
-	ctx := context.Background()
-	const startupGracePeriod = 30 * time.Second
-
-	// Load from database
-	session, err := e.repo.GetActiveTaskSessionByTaskID(ctx, taskID)
-	if err != nil {
-		return nil, false
-	}
-
-	// Verify the agent is actually running by probing the lifecycle manager
-	// This handles the case where backend was restarted and DB has stale "running" sessions
-	if session.ID == "" || !e.agentManager.IsAgentRunningForSession(ctx, session.ID) {
-		if (session.State == models.TaskSessionStateStarting || session.State == models.TaskSessionStateRunning) &&
-			time.Since(session.UpdatedAt) < startupGracePeriod {
-			return FromTaskSession(session), true
-		}
-		return nil, false
-	}
-
-	return FromTaskSession(session), true
-}
-
 // GetExecutionBySession returns the execution state for a specific session
 func (e *Executor) GetExecutionBySession(sessionID string) (*TaskExecution, bool) {
 	ctx := context.Background()
@@ -1019,33 +965,6 @@ func (e *Executor) GetExecutionBySession(sessionID string) (*TaskExecution, bool
 
 	// Verify the agent is actually running
 	if !e.agentManager.IsAgentRunningForSession(ctx, sessionID) {
-		if (session.State == models.TaskSessionStateStarting || session.State == models.TaskSessionStateRunning) &&
-			time.Since(session.UpdatedAt) < startupGracePeriod {
-			return FromTaskSession(session), true
-		}
-		return nil, false
-	}
-
-	return FromTaskSession(session), true
-}
-
-// GetExecutionWithContext returns the current execution state for a task with context (returns most recent active session)
-// This is a read-only check - it does NOT cancel sessions as a side effect.
-func (e *Executor) GetExecutionWithContext(ctx context.Context, taskID string) (*TaskExecution, bool) {
-	const startupGracePeriod = 30 * time.Second
-
-	// Load from database
-	session, err := e.repo.GetActiveTaskSessionByTaskID(ctx, taskID)
-	if err != nil {
-		return nil, false
-	}
-	if session.ID == "" {
-		return nil, false
-	}
-
-	// Verify the agent is actually running by probing the lifecycle manager
-	if !e.agentManager.IsAgentRunningForSession(ctx, session.ID) {
-		// Allow a grace period for sessions that are starting up
 		if (session.State == models.TaskSessionStateStarting || session.State == models.TaskSessionStateRunning) &&
 			time.Since(session.UpdatedAt) < startupGracePeriod {
 			return FromTaskSession(session), true
@@ -1085,29 +1004,6 @@ func (e *Executor) ActiveCount() int {
 // Currently always returns true as there is no concurrent execution limit.
 func (e *Executor) CanExecute() bool {
 	return true
-}
-
-// UpdateProgressBySession updates the progress of an execution by session ID
-func (e *Executor) UpdateProgressBySession(ctx context.Context, sessionID string, progress int, state v1.TaskSessionState) {
-	e.logger.Debug("updating execution progress",
-		zap.String("session_id", sessionID),
-		zap.Int("progress", progress),
-		zap.String("state", string(state)))
-
-	// Update database asynchronously (don't block on this)
-	go func() {
-		session, err := e.repo.GetTaskSession(ctx, sessionID)
-		if err != nil {
-			return
-		}
-		session.Progress = progress
-		session.State = models.TaskSessionState(state)
-		if err := e.repo.UpdateTaskSession(ctx, session); err != nil {
-			e.logger.Error("failed to update agent session progress in database",
-				zap.String("session_id", sessionID),
-				zap.Error(err))
-		}
-	}()
 }
 
 // MarkCompletedBySession marks an execution as completed by session ID
@@ -1163,142 +1059,4 @@ func cloneMetadata(src map[string]interface{}) map[string]interface{} {
 		out[key] = value
 	}
 	return out
-}
-
-// MockAgentManagerClient is a placeholder implementation
-type MockAgentManagerClient struct {
-	logger *logger.Logger
-}
-
-// NewMockAgentManagerClient creates a new mock agent manager client
-func NewMockAgentManagerClient(log *logger.Logger) *MockAgentManagerClient {
-	return &MockAgentManagerClient{
-		logger: log.WithFields(zap.String("component", "mock_agent_manager")),
-	}
-}
-
-// LaunchAgent mocks launching an agent container
-func (m *MockAgentManagerClient) LaunchAgent(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
-	m.logger.Info("mock: launching agent",
-		zap.String("task_id", req.TaskID),
-		zap.String("agent_profile_id", req.AgentProfileID),
-		zap.String("repository_url", req.RepositoryURL),
-		zap.String("branch", req.Branch))
-
-	return &LaunchAgentResponse{
-		AgentExecutionID: uuid.New().String(),
-		ContainerID:      "mock-container-" + uuid.New().String()[:8],
-		Status:           v1.AgentStatusStarting,
-	}, nil
-}
-
-// StartAgentProcess mocks starting the agent subprocess
-func (m *MockAgentManagerClient) StartAgentProcess(ctx context.Context, agentExecutionID string) error {
-	m.logger.Info("mock: starting agent process",
-		zap.String("agent_execution_id", agentExecutionID))
-	return nil
-}
-
-// StopAgent mocks stopping an agent
-func (m *MockAgentManagerClient) StopAgent(ctx context.Context, agentExecutionID string, force bool) error {
-	m.logger.Info("mock: stopping agent",
-		zap.String("agent_execution_id", agentExecutionID),
-		zap.Bool("force", force))
-	return nil
-}
-
-// GetAgentStatus mocks getting agent status
-func (m *MockAgentManagerClient) GetAgentStatus(ctx context.Context, agentExecutionID string) (*v1.AgentExecution, error) {
-	m.logger.Info("mock: getting agent status",
-		zap.String("agent_execution_id", agentExecutionID))
-
-	return &v1.AgentExecution{
-		ID:             agentExecutionID,
-		Status:         v1.AgentStatusRunning,
-		AgentProfileID: "mock-agent",
-	}, nil
-}
-
-// ListAgentTypes mocks listing available agent types
-func (m *MockAgentManagerClient) ListAgentTypes(ctx context.Context) ([]*v1.AgentType, error) {
-	m.logger.Info("mock: listing agent types")
-
-	return []*v1.AgentType{
-		{
-			ID:          "auggie-cli",
-			Name:        "Auggie CLI Agent",
-			Description: "CLI-based agent for code tasks",
-			DockerImage: "auggie-cli",
-			DockerTag:   "latest",
-			Enabled:     true,
-		},
-	}, nil
-}
-
-// PromptAgent mocks sending a prompt to an agent
-func (m *MockAgentManagerClient) PromptAgent(ctx context.Context, agentExecutionID string, prompt string) (*PromptResult, error) {
-	m.logger.Info("mock: prompting agent",
-		zap.String("agent_execution_id", agentExecutionID),
-		zap.Int("prompt_length", len(prompt)))
-	return &PromptResult{StopReason: "end_turn"}, nil
-}
-
-// RespondToPermissionBySessionID mocks responding to a permission request
-func (m *MockAgentManagerClient) RespondToPermissionBySessionID(ctx context.Context, sessionID, pendingID, optionID string, cancelled bool) error {
-	m.logger.Info("mock: responding to permission",
-		zap.String("session_id", sessionID),
-		zap.String("pending_id", pendingID),
-		zap.String("option_id", optionID),
-		zap.Bool("cancelled", cancelled))
-	return nil
-}
-
-// CancelAgent mocks cancelling the current agent turn
-func (m *MockAgentManagerClient) CancelAgent(ctx context.Context, sessionID string) error {
-	m.logger.Info("mock: cancelling agent turn",
-		zap.String("session_id", sessionID))
-	return nil
-}
-
-// GetRecoveredExecutions mocks getting recovered executions (returns empty for mock)
-func (m *MockAgentManagerClient) GetRecoveredExecutions() []RecoveredExecutionInfo {
-	return nil
-}
-
-// IsAgentRunningForSession mocks checking if an agent is running (always returns false for mock)
-func (m *MockAgentManagerClient) IsAgentRunningForSession(ctx context.Context, sessionID string) bool {
-	return false
-}
-
-// CleanupStaleExecutionBySessionID mocks cleaning up a stale execution (no-op for mock)
-func (m *MockAgentManagerClient) CleanupStaleExecutionBySessionID(ctx context.Context, sessionID string) error {
-	return nil
-}
-
-// GetAgentType mocks getting an agent type configuration
-func (m *MockAgentManagerClient) GetAgentType(ctx context.Context, agentID string) (*v1.AgentType, error) {
-	m.logger.Info("mock: getting agent type",
-		zap.String("agent_id", agentID))
-
-	return &v1.AgentType{
-		ID:          agentID,
-		Name:        "Mock Agent",
-		Description: "Mock agent type for testing",
-		Enabled:     true,
-	}, nil
-}
-
-// ResolveAgentProfile mocks resolving an agent profile
-func (m *MockAgentManagerClient) ResolveAgentProfile(ctx context.Context, profileID string) (*AgentProfileInfo, error) {
-	m.logger.Info("mock: resolving agent profile",
-		zap.String("profile_id", profileID))
-
-	return &AgentProfileInfo{
-		ProfileID:   profileID,
-		ProfileName: "Mock Profile",
-		AgentID:     "mock-agent",
-		AgentName:   "mock",
-		Model:       "mock-model",
-		AutoApprove: false,
-	}, nil
 }

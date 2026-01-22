@@ -121,17 +121,6 @@ func (q *TaskQueue) Dequeue() *QueuedTask {
 	return qt
 }
 
-// Peek returns the highest priority task without removing it
-func (q *TaskQueue) Peek() *QueuedTask {
-	q.mu.RLock()
-	defer q.mu.RUnlock()
-
-	if len(q.heap) == 0 {
-		return nil
-	}
-	return q.heap[0]
-}
-
 // Remove removes a specific task from the queue
 func (q *TaskQueue) Remove(taskID string) bool {
 	q.mu.Lock()
@@ -145,30 +134,6 @@ func (q *TaskQueue) Remove(taskID string) bool {
 	heap.Remove(&q.heap, qt.index)
 	delete(q.taskMap, taskID)
 	return true
-}
-
-// UpdatePriority updates the priority of a task in the queue
-func (q *TaskQueue) UpdatePriority(taskID string, newPriority int) bool {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-
-	qt, exists := q.taskMap[taskID]
-	if !exists {
-		return false
-	}
-
-	qt.Priority = newPriority
-	heap.Fix(&q.heap, qt.index)
-	return true
-}
-
-// Contains checks if a task is in the queue
-func (q *TaskQueue) Contains(taskID string) bool {
-	q.mu.RLock()
-	defer q.mu.RUnlock()
-
-	_, exists := q.taskMap[taskID]
-	return exists
 }
 
 // Len returns the number of tasks in the queue
@@ -195,14 +160,4 @@ func (q *TaskQueue) List() []*QueuedTask {
 	result := make([]*QueuedTask, len(q.heap))
 	copy(result, q.heap)
 	return result
-}
-
-// Clear removes all tasks from the queue
-func (q *TaskQueue) Clear() {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-
-	q.heap = make(taskHeap, 0)
-	q.taskMap = make(map[string]*QueuedTask)
-	heap.Init(&q.heap)
 }

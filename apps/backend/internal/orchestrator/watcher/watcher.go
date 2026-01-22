@@ -35,6 +35,7 @@ type AgentEventData struct {
 // ACPSessionEventData contains data from ACP session events
 type ACPSessionEventData struct {
 	TaskID           string `json:"task_id"`
+	SessionID        string `json:"session_id"`
 	AgentExecutionID string `json:"agent_execution_id"`
 	ACPSessionID     string `json:"acp_session_id"`
 }

@@ -162,15 +162,12 @@ func (c *Client) handleSubscribe(msg *ws.Message) {
 
 	c.hub.SubscribeToTask(c, req.TaskID)
 
-	// Send success response first
+	// Send success response
 	resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 		"success": true,
 		"task_id": req.TaskID,
 	})
 	c.sendMessage(resp)
-
-	// Send historical logs if available (now includes pending permission request messages)
-	c.sendHistoricalLogs(req.TaskID)
 }
 
 type UserSubscribeRequest struct {
@@ -248,31 +245,6 @@ func (c *Client) handleUserUnsubscribe(msg *ws.Message) {
 		"user_id": userID,
 	})
 	c.sendMessage(resp)
-}
-
-// sendHistoricalLogs sends historical execution logs to the client
-func (c *Client) sendHistoricalLogs(taskID string) {
-	ctx := context.Background()
-	logs, err := c.hub.GetHistoricalLogs(ctx, taskID)
-	if err != nil {
-		c.logger.Error("Failed to get historical logs",
-			zap.String("task_id", taskID),
-			zap.Error(err))
-		return
-	}
-
-	if len(logs) == 0 {
-		return
-	}
-
-	c.logger.Debug("Sending historical logs",
-		zap.String("task_id", taskID),
-		zap.Int("count", len(logs)))
-
-	// Send each historical log as a notification
-	for _, log := range logs {
-		c.sendMessage(log)
-	}
 }
 
 // sendSessionData sends initial session data (e.g., git status) to the client
@@ -414,32 +386,10 @@ func (c *Client) WritePump() {
 				return
 			}
 
-			w, err := c.conn.NextWriter(websocket.TextMessage)
-			if err != nil {
-				return
-			}
-			if _, err := w.Write(message); err != nil {
+			// Send each message in its own WebSocket frame
+			// (previously batched with newlines, but clients expect one JSON object per frame)
+			if err := c.conn.WriteMessage(websocket.TextMessage, message); err != nil {
 				c.logger.Debug("failed to write websocket message", zap.Error(err))
-				_ = w.Close()
-				return
-			}
-
-			// Batch additional queued messages
-			n := len(c.send)
-			for i := 0; i < n; i++ {
-				if _, err := w.Write([]byte{'\n'}); err != nil {
-					c.logger.Debug("failed to write websocket delimiter", zap.Error(err))
-					_ = w.Close()
-					return
-				}
-				if _, err := w.Write(<-c.send); err != nil {
-					c.logger.Debug("failed to write queued websocket message", zap.Error(err))
-					_ = w.Close()
-					return
-				}
-			}
-
-			if err := w.Close(); err != nil {
 				return
 			}
 

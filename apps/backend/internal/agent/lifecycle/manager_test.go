@@ -229,36 +229,6 @@ func TestManager_GetExecutionBySessionID(t *testing.T) {
 	}
 }
 
-func TestManager_GetExecutionByContainerID(t *testing.T) {
-	mgr := newTestManager()
-
-	execution := &AgentExecution{
-		ID:             "test-execution-id",
-		TaskID:         "test-task-id",
-		AgentProfileID: "test-agent",
-		ContainerID:    "container-123",
-		Status:         v1.AgentStatusRunning,
-		StartedAt:      time.Now(),
-	}
-
-	mgr.executionStore.Add(execution)
-
-	// Test GetExecutionByContainerID
-	got, found := mgr.GetExecutionByContainerID("container-123")
-	if !found {
-		t.Fatal("expected to find execution")
-	}
-	if got.ContainerID != execution.ContainerID {
-		t.Errorf("expected ContainerID %q, got %q", execution.ContainerID, got.ContainerID)
-	}
-
-	// Test not found
-	_, found = mgr.GetExecutionByContainerID("non-existent")
-	if found {
-		t.Error("expected not to find execution")
-	}
-}
-
 func TestManager_ListExecutions(t *testing.T) {
 	mgr := newTestManager()
 
@@ -302,36 +272,6 @@ func TestManager_UpdateStatus(t *testing.T) {
 
 	// Test not found
 	err = mgr.UpdateStatus("non-existent", v1.AgentStatusCompleted)
-	if err == nil {
-		t.Error("expected error for non-existent execution")
-	}
-}
-
-func TestManager_UpdateProgress(t *testing.T) {
-	mgr := newTestManager()
-
-	execution := &AgentExecution{
-		ID:       "test-execution-id",
-		TaskID:   "test-task-id",
-		Status:   v1.AgentStatusRunning,
-		Progress: 0,
-	}
-
-	mgr.executionStore.Add(execution)
-
-	// Test UpdateProgress
-	err := mgr.UpdateProgress("test-execution-id", 50)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	got, _ := mgr.GetExecution("test-execution-id")
-	if got.Progress != 50 {
-		t.Errorf("expected progress 50, got %d", got.Progress)
-	}
-
-	// Test not found
-	err = mgr.UpdateProgress("non-existent", 50)
 	if err == nil {
 		t.Error("expected error for non-existent execution")
 	}
@@ -435,9 +375,6 @@ func TestManager_RemoveExecution(t *testing.T) {
 	}
 	if _, found := mgr.GetExecutionBySessionID("test-session-id"); found {
 		t.Error("execution should be removed from bySession map")
-	}
-	if _, found := mgr.GetExecutionByContainerID("container-123"); found {
-		t.Error("execution should be removed from byContainer map")
 	}
 
 	// Remove non-existent should not panic

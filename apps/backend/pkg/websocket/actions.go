@@ -62,7 +62,7 @@ const (
 	ActionTaskDelete        = "task.delete"
 	ActionTaskMove          = "task.move"
 	ActionTaskState         = "task.state"
-	ActionTaskExecution     = "task.execution"
+
 	ActionTaskSessionList   = "task.session.list"
 	ActionTaskSessionResume = "task.session.resume"
 	ActionTaskSessionStatus = "task.session.status"

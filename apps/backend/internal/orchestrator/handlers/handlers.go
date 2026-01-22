@@ -35,7 +35,6 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionOrchestratorPrompt, h.wsPromptTask)
 	d.RegisterFunc(ws.ActionOrchestratorComplete, h.wsCompleteTask)
 	d.RegisterFunc(ws.ActionPermissionRespond, h.wsRespondToPermission)
-	d.RegisterFunc(ws.ActionTaskExecution, h.wsGetTaskExecution)
 	d.RegisterFunc(ws.ActionTaskSessionResume, h.wsResumeTaskSession)
 	d.RegisterFunc(ws.ActionTaskSessionStatus, h.wsGetTaskSessionStatus)
 	d.RegisterFunc(ws.ActionAgentCancel, h.wsCancelAgent)
@@ -265,30 +264,6 @@ func (h *Handlers) wsRespondToPermission(ctx context.Context, msg *ws.Message) (
 	if err != nil {
 		h.logger.Error("failed to respond to permission", zap.String("session_id", req.SessionID), zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to respond to permission: "+err.Error(), nil)
-	}
-	return ws.NewResponse(msg.ID, msg.Action, resp)
-}
-
-type wsGetTaskExecutionRequest struct {
-	TaskID string `json:"task_id"`
-}
-
-func (h *Handlers) wsGetTaskExecution(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req wsGetTaskExecutionRequest
-	if err := msg.ParsePayload(&req); err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid request payload", nil)
-	}
-
-	if req.TaskID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "task_id is required", nil)
-	}
-
-	resp, err := h.controller.GetTaskExecution(ctx, dto.GetTaskExecutionRequest{
-		TaskID: req.TaskID,
-	})
-	if err != nil {
-		h.logger.Error("failed to get task execution", zap.String("task_id", req.TaskID), zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get task execution: "+err.Error(), nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }

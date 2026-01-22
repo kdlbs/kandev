@@ -17,7 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/runtime"
-	"github.com/kandev/kandev/internal/agent/worktree"
+	"github.com/kandev/kandev/internal/worktree"
 	agentctl "github.com/kandev/kandev/internal/agentctl/client"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -128,91 +128,6 @@ func (m *Manager) SetWorktreeManager(worktreeMgr *worktree.Manager) {
 // SetWorkspaceInfoProvider sets the provider for workspace information
 func (m *Manager) SetWorkspaceInfoProvider(provider WorkspaceInfoProvider) {
 	m.workspaceInfoProvider = provider
-}
-
-// EnsureWorkspaceExecutionForSession ensures an agentctl execution exists for a specific task session.
-// This is used when the frontend provides a session ID (e.g., from URL path /task/[id]/[sessionId]).
-// If an execution already exists for the session, it returns it. Otherwise, it creates a new execution
-// using the session's workspace configuration from the database.
-func (m *Manager) EnsureWorkspaceExecutionForSession(ctx context.Context, taskID, sessionID string) (*AgentExecution, error) {
-	// Check if execution already exists
-	if execution, exists := m.executionStore.GetBySessionID(sessionID); exists {
-		return execution, nil
-	}
-
-	// Need to create a new execution - get workspace info for the specific session
-	if m.workspaceInfoProvider == nil {
-		return nil, fmt.Errorf("workspace info provider not configured")
-	}
-
-	info, err := m.workspaceInfoProvider.GetWorkspaceInfoForSession(ctx, taskID, sessionID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get workspace info for session %s: %w", sessionID, err)
-	}
-
-	if info.WorkspacePath == "" {
-		return nil, fmt.Errorf("no workspace path available for session %s", sessionID)
-	}
-
-	m.logger.Info("creating execution for task session",
-		zap.String("task_id", taskID),
-		zap.String("session_id", sessionID),
-		zap.String("workspace_path", info.WorkspacePath),
-		zap.String("acp_session_id", info.ACPSessionID))
-
-	return m.createExecution(ctx, taskID, info)
-}
-
-// createExecution creates an agentctl execution.
-// The agent subprocess is NOT started - call ConfigureAgent + Start explicitly.
-func (m *Manager) createExecution(ctx context.Context, taskID string, info *WorkspaceInfo) (*AgentExecution, error) {
-	if m.runtime == nil {
-		return nil, fmt.Errorf("no runtime configured")
-	}
-
-	if info.AgentID == "" {
-		return nil, fmt.Errorf("agent ID is required in WorkspaceInfo")
-	}
-
-	executionID := uuid.New().String()
-
-	agentConfig, err := m.registry.Get(info.AgentID)
-	if err != nil {
-		return nil, fmt.Errorf("agent type %q not found in registry: %w", info.AgentID, err)
-	}
-
-	req := &RuntimeCreateRequest{
-		InstanceID:     executionID,
-		TaskID:         taskID,
-		SessionID:      info.SessionID,
-		AgentProfileID: info.AgentProfileID,
-		WorkspacePath:  info.WorkspacePath,
-		Protocol:       string(agentConfig.Protocol),
-	}
-
-	runtimeInstance, err := m.runtime.CreateInstance(ctx, req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create execution: %w", err)
-	}
-
-	execution := runtimeInstance.ToAgentExecution(req)
-
-	// Set the ACP session ID for session resumption
-	if info.ACPSessionID != "" {
-		execution.ACPSessionID = info.ACPSessionID
-	}
-
-	m.executionStore.Add(execution)
-
-	go m.waitForAgentctlReady(execution)
-
-	m.logger.Info("execution created",
-		zap.String("execution_id", executionID),
-		zap.String("task_id", taskID),
-		zap.String("workspace_path", info.WorkspacePath),
-		zap.String("runtime", string(m.runtime.Name())))
-
-	return execution, nil
 }
 
 // Start starts the lifecycle manager background tasks
@@ -868,8 +783,6 @@ func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.Age
 	// Handle different event types based on the Type field
 	switch event.Type {
 	case "message_chunk":
-		m.updateExecutionProgress(execution.ID, 50)
-
 		// Accumulate message content and stream on newline boundaries for real-time feedback
 		if event.Text != "" {
 			execution.messageMu.Lock()
@@ -920,17 +833,10 @@ func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.Age
 			zap.String("execution_id", execution.ID),
 			zap.String("tool_call_id", event.ToolCallID),
 			zap.String("tool_name", event.ToolName))
-		m.updateExecutionProgress(execution.ID, 60)
 		// Tool call message creation is handled by orchestrator via AgentStreamEvent
 
 	case "tool_update":
-		// Check if tool call completed - orchestrator will create/update the message
-		switch event.ToolStatus {
-		case "complete", "completed":
-			m.updateExecutionProgress(execution.ID, 80)
-		case "error", "failed":
-			// Error status is passed through the stream event
-		}
+		// Tool update handled by orchestrator via AgentStreamEvent
 
 	case "plan":
 		m.logger.Debug("agent plan update",
@@ -1127,11 +1033,6 @@ func (m *Manager) publishStreamingMessageFinal(execution *AgentExecution, messag
 	m.eventPublisher.PublishAgentStreamEventPayload(payload)
 }
 
-// updateExecutionProgress updates an execution's progress
-func (m *Manager) updateExecutionProgress(executionID string, progress int) {
-	m.executionStore.UpdateProgress(executionID, progress)
-}
-
 // updateExecutionError updates an execution with an error
 func (m *Manager) updateExecutionError(executionID, errorMsg string) {
 	m.executionStore.UpdateError(executionID, errorMsg)
@@ -1279,11 +1180,6 @@ func (m *Manager) GetExecutionBySessionID(sessionID string) (*AgentExecution, bo
 	return m.executionStore.GetBySessionID(sessionID)
 }
 
-// GetExecutionByContainerID returns the agent execution for a container
-func (m *Manager) GetExecutionByContainerID(containerID string) (*AgentExecution, bool) {
-	return m.executionStore.GetByContainerID(containerID)
-}
-
 // ListExecutions returns all active executions
 func (m *Manager) ListExecutions() []*AgentExecution {
 	return m.executionStore.List()
@@ -1325,21 +1221,6 @@ func (m *Manager) UpdateStatus(executionID string, status v1.AgentStatus) error 
 	m.logger.Debug("updated execution status",
 		zap.String("execution_id", executionID),
 		zap.String("status", string(status)))
-
-	return nil
-}
-
-// UpdateProgress updates the progress of an execution
-func (m *Manager) UpdateProgress(executionID string, progress int) error {
-	if !m.executionStore.WithLock(executionID, func(execution *AgentExecution) {
-		execution.Progress = progress
-	}) {
-		return fmt.Errorf("execution %q not found", executionID)
-	}
-
-	m.logger.Debug("updated execution progress",
-		zap.String("execution_id", executionID),
-		zap.Int("progress", progress))
 
 	return nil
 }
