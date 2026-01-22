@@ -88,6 +88,9 @@ func (s *Server) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to listen on %s: %w", addr, err)
 	}
+	if tcpAddr, ok := listener.Addr().(*net.TCPAddr); ok {
+		s.cfg.Port = tcpAddr.Port
+	}
 
 	// Create HTTP server with the mux
 	s.httpServer = &http.Server{
@@ -174,4 +177,3 @@ func (s *Server) SSEEndpoint() string {
 func (s *Server) StreamableHTTPEndpoint() string {
 	return fmt.Sprintf("http://localhost:%d/mcp", s.cfg.Port)
 }
-

@@ -17,6 +17,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   const runtimeApiBaseUrl = process.env.KANDEV_API_BASE_URL ?? "";
+  const runtimeMcpServerUrl = process.env.KANDEV_MCP_SERVER_URL ?? "";
   return (
     <html lang="en" suppressHydrationWarning>
       <body className="antialiased font-sans">
@@ -25,6 +26,13 @@ export default function RootLayout({
           <script
             dangerouslySetInnerHTML={{
               __html: `window.__KANDEV_API_BASE_URL = ${JSON.stringify(runtimeApiBaseUrl)};`,
+            }}
+          />
+        ) : null}
+        {runtimeMcpServerUrl ? (
+          <script
+            dangerouslySetInnerHTML={{
+              __html: `window.__KANDEV_MCP_SERVER_URL = ${JSON.stringify(runtimeMcpServerUrl)};`,
             }}
           />
         ) : null}
