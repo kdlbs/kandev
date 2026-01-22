@@ -4,6 +4,7 @@ import { useCallback, useState } from 'react';
 import { useAppStore, useAppStoreApi } from '@/components/state-provider';
 import { useTaskActions } from '@/hooks/use-task-actions';
 import type { Task } from '@/components/kanban-card';
+import type { KanbanState } from '@/lib/state/slices';
 
 /**
  * Custom hook that extracts task CRUD operations from the KanbanBoard component.
@@ -36,7 +37,7 @@ export function useTaskCRUD() {
       store.getState().hydrate({
         kanban: {
           ...kanban,
-          tasks: kanban.tasks.filter((item) => item.id !== task.id),
+          tasks: kanban.tasks.filter((item: KanbanState['tasks'][number]) => item.id !== task.id),
         },
       });
 

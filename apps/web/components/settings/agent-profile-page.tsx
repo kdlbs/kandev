@@ -88,11 +88,11 @@ function ProfileEditor({ agent, profile, modelConfig, initialMcpConfig }: Profil
       });
       setSavedProfile(updated);
       setDraft(updated);
-      const nextAgents = settingsAgents.map((agentItem) =>
+      const nextAgents = settingsAgents.map((agentItem: Agent) =>
         agentItem.id === agent.id
           ? {
             ...agentItem,
-            profiles: agentItem.profiles.map((profileItem) =>
+            profiles: agentItem.profiles.map((profileItem: AgentProfile) =>
               profileItem.id === updated.id ? updated : profileItem
             ),
           }
@@ -113,11 +113,11 @@ function ProfileEditor({ agent, profile, modelConfig, initialMcpConfig }: Profil
   const handleDeleteProfile = async () => {
     try {
       await deleteAgentProfileAction(draft.id);
-      const nextAgents = settingsAgents.map((agentItem) =>
+      const nextAgents = settingsAgents.map((agentItem: Agent) =>
         agentItem.id === agent.id
           ? {
             ...agentItem,
-            profiles: agentItem.profiles.filter((profileItem) => profileItem.id !== draft.id),
+            profiles: agentItem.profiles.filter((profileItem: AgentProfile) => profileItem.id !== draft.id),
           }
           : agentItem
       );

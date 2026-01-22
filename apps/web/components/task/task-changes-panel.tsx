@@ -10,7 +10,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { getLocalStorage, setLocalStorage } from '@/lib/local-storage';
 import { useAppStore } from '@/components/state-provider';
-import { useSessionGitStatus } from '@/hooks/use-session-git-status';
+import { useSessionGitStatus } from '@/hooks/domains/session/use-session-git-status';
+import type { FileInfo } from '@/lib/state/slices';
 
 type TaskChangesPanelProps = {
   selectedDiffPath: string | null;
@@ -31,14 +32,14 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
   const gitStatus = useSessionGitStatus(activeSessionId);
 
   // Convert git status files to array for display
-  const changedFiles = useMemo(() => {
+  const changedFiles = useMemo<FileInfo[]>(() => {
     if (!gitStatus?.files || Object.keys(gitStatus.files).length === 0) {
       return [];
     }
-    return Object.values(gitStatus.files);
+    return Object.values(gitStatus.files) as FileInfo[];
   }, [gitStatus]);
   const diffTargets = useMemo(
-    () => (selectedDiffPath ? [selectedDiffPath] : changedFiles.map((file) => file.path)),
+    () => (selectedDiffPath ? [selectedDiffPath] : changedFiles.map((file: FileInfo) => file.path)),
     [selectedDiffPath, changedFiles]
   );
   const diffModeEnum = diffViewMode === 'split' ? DiffModeEnum.Split : DiffModeEnum.Unified;

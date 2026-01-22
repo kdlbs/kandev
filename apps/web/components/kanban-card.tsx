@@ -11,7 +11,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@kandev/ui/dropdown-menu';
-import type { TaskState } from '@/lib/types/http';
+import type { TaskState, Repository } from '@/lib/types/http';
 import { cn, getRepositoryDisplayName } from '@/lib/utils';
 import { getTaskStateIcon } from '@/lib/ui/state-icons';
 import { useAppStore } from '@/components/state-provider';
@@ -168,7 +168,7 @@ export function KanbanCardPreview({ task }: KanbanCardProps) {
   // Access store to get repository name for the drag preview
   const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
   const repository = useMemo(
-    () => Object.values(repositoriesByWorkspace).flat().find((repo) => repo.id === task.repositoryId) ?? null,
+    () => (Object.values(repositoriesByWorkspace).flat() as Repository[]).find((repo) => repo.id === task.repositoryId) ?? null,
     [repositoriesByWorkspace, task.repositoryId]
   );
   const repositoryName = repository ? getRepositoryDisplayName(repository.local_path) : null;

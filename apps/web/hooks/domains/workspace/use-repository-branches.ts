@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useAppStore } from '@/components/state-provider';
-import { listRepositoryBranches } from '@/lib/http';
+import { listRepositoryBranches } from '@/lib/api';
 import type { Branch } from '@/lib/types/http';
 
 const EMPTY_BRANCHES: Branch[] = [];

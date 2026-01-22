@@ -3,11 +3,11 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { getWebSocketClient } from '@/lib/ws/connection';
-import { useSessionMessages } from '@/hooks/use-session-messages';
-import { useSettingsData } from '@/hooks/use-settings-data';
-import { useSessionState } from '@/hooks/use-session-state';
+import { useSessionMessages } from '@/hooks/domains/session/use-session-messages';
+import { useSettingsData } from '@/hooks/domains/settings/use-settings-data';
+import { useSessionState } from '@/hooks/domains/session/use-session-state';
 import { useProcessedMessages } from '@/hooks/use-processed-messages';
-import { useSessionModel } from '@/hooks/use-session-model';
+import { useSessionModel } from '@/hooks/domains/session/use-session-model';
 import { useMessageHandler } from '@/hooks/use-message-handler';
 import { TaskChatInput } from '@/components/task/task-chat-input';
 import { RunningIndicator } from '@/components/task/chat/messages/running-indicator';

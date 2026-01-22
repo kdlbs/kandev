@@ -6,6 +6,7 @@ import { Badge } from '@kandev/ui/badge';
 import { Card, CardContent } from '@kandev/ui/card';
 import { Separator } from '@kandev/ui/separator';
 import { useAppStore } from '@/components/state-provider';
+import type { Executor } from '@/lib/types/http';
 
 export default function ExecutorsSettingsPage() {
   const executors = useAppStore((state) => state.executors.items);
@@ -78,8 +79,8 @@ export default function ExecutorsSettingsPage() {
 
       <div className="grid gap-3">
         {executors
-          .filter((executor) => executor.type !== 'remote_docker')
-          .map((executor) => {
+          .filter((executor: Executor) => executor.type !== 'remote_docker')
+          .map((executor: Executor) => {
           const Icon = executor.type === 'local_pc' ? IconCpu : IconServer;
           const typeLabel =
             executor.type === 'local_pc'

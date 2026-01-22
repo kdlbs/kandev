@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useAppStore } from '@/components/state-provider';
-import { listAgents, listEnvironments, listExecutors } from '@/lib/http';
+import { listAgents, listEnvironments, listExecutors } from '@/lib/api';
 
 export function useSettingsData(enabled = true) {
   const executors = useAppStore((state) => state.executors.items);

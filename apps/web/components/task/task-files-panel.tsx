@@ -15,7 +15,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
 import { LineStat } from '@/components/diff-stat';
 import { useAppStore } from '@/components/state-provider';
 import { useOpenSessionInEditor } from '@/hooks/use-open-session-in-editor';
-import { useSessionGitStatus } from '@/hooks/use-session-git-status';
+import { useSessionGitStatus } from '@/hooks/domains/session/use-session-git-status';
 import { useGitOperations } from '@/hooks/use-git-operations';
 import type { FileInfo } from '@/lib/state/store';
 import { FileBrowser } from '@/components/task/file-browser';
@@ -90,7 +90,7 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiffPath, onOpenFi
     if (!gitStatus?.files || Object.keys(gitStatus.files).length === 0) {
       return [];
     }
-    return Object.values(gitStatus.files).map((file) => ({
+    return (Object.values(gitStatus.files) as FileInfo[]).map((file: FileInfo) => ({
       path: file.path,
       status: file.status,
       staged: file.staged,

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
-import { fetchUserSettings, listEditors } from '@/lib/http';
+import { fetchUserSettings, listEditors } from '@/lib/api';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import { useAppStore } from '@/components/state-provider';
 

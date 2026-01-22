@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
-import { listNotificationProviders } from '@/lib/http';
+import { listNotificationProviders } from '@/lib/api';
 import { useAppStore } from '@/components/state-provider';
 
 export function useNotificationProviders() {

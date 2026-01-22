@@ -1,7 +1,7 @@
 'use client';
 
 import { IconChevronRight, IconClock, IconCpu } from '@tabler/icons-react';
-import { useSessionTurn } from '@/hooks/use-session-turn';
+import { useSessionTurn } from '@/hooks/domains/session/use-session-turn';
 
 type TurnSummaryProps = {
   sessionId: string | null;

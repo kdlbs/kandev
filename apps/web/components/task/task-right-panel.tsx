@@ -12,7 +12,7 @@ import { ShellTerminal } from '@/components/task/shell-terminal';
 import { ProcessOutputTerminal } from '@/components/task/process-output-terminal';
 import { useAppStore } from '@/components/state-provider';
 import { useLayoutStore } from '@/lib/state/layout-store';
-import { stopProcess } from '@/lib/http';
+import { stopProcess } from '@/lib/api';
 import type { Layout } from 'react-resizable-panels';
 
 type TaskRightPanelProps = {

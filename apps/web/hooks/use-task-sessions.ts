@@ -1,6 +1,6 @@
 import { useCallback, useEffect } from 'react';
 import { useAppStore } from '@/components/state-provider';
-import { listTaskSessions } from '@/lib/http';
+import { listTaskSessions } from '@/lib/api';
 import type { TaskSession } from '@/lib/types/http';
 
 const EMPTY_SESSIONS: TaskSession[] = [];

@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { useAppStore } from '@/components/state-provider';
-import { useSession } from '@/hooks/use-session';
+import { useSession } from '@/hooks/domains/session/use-session';
 
 export function useSessionWorktrees(sessionId: string | null) {
   const { session } = useSession(sessionId);
@@ -13,7 +13,7 @@ export function useSessionWorktrees(sessionId: string | null) {
     if (!sessionId) return [];
     const worktreeIds = sessionWorktreesBySessionId[sessionId];
     if (worktreeIds?.length) {
-      return worktreeIds.map((id) => worktrees[id]).filter(Boolean);
+      return worktreeIds.map((id: string) => worktrees[id]).filter(Boolean);
     }
     if (session?.worktree_id) {
       const worktree = worktrees[session.worktree_id];

@@ -28,10 +28,10 @@ import {
   updateAgentProfileAction,
   updateAgentProfileMcpConfigAction,
 } from '@/app/actions/agents';
-import type { Agent, AgentDiscovery, AgentProfile, McpServerDef } from '@/lib/types/http';
+import type { Agent, AgentDiscovery, AgentProfile, McpServerDef, AvailableAgent } from '@/lib/types/http';
 import { generateUUID } from '@/lib/utils';
 import { useAppStore } from '@/components/state-provider';
-import { useAvailableAgents } from '@/hooks/use-available-agents';
+import { useAvailableAgents } from '@/hooks/domains/settings/use-available-agents';
 import { ProfileMcpConfigCard } from './profile-mcp-config-card';
 
 type DraftProfile = AgentProfile & {
@@ -106,14 +106,14 @@ function AgentSetupForm({
   const [saveStatus, setSaveStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [newProfileId, setNewProfileId] = useState<string | null>(null);
   const resolveDisplayName = (name: string) =>
-    availableAgents.find((item) => item.name === name)?.display_name ?? '';
+    availableAgents.find((item: AvailableAgent) => item.name === name)?.display_name ?? '';
   const hasInvalidMcpConfig = useMemo(() => {
     return draftAgent.profiles.some((profile) => Boolean(profile.mcp_config?.error));
   }, [draftAgent.profiles]);
 
   // Get model config for the current agent
   const currentAgentModelConfig = useMemo(() => {
-    const agent = availableAgents.find((item) => item.name === draftAgent.name);
+    const agent = availableAgents.find((item: AvailableAgent) => item.name === draftAgent.name);
     return agent?.model_config ?? { default_model: '', available_models: [] };
   }, [availableAgents, draftAgent.name]);
 
@@ -156,9 +156,9 @@ function AgentSetupForm({
   };
 
   const upsertAgent = (agent: Agent) => {
-    const exists = settingsAgents.some((item) => item.id === agent.id);
+    const exists = settingsAgents.some((item: Agent) => item.id === agent.id);
     const nextAgents = exists
-      ? settingsAgents.map((item) => (item.id === agent.id ? agent : item))
+      ? settingsAgents.map((item: Agent) => (item.id === agent.id ? agent : item))
       : [...settingsAgents, agent];
     syncAgentsToStore(nextAgents);
   };
@@ -460,7 +460,7 @@ function AgentSetupForm({
                         <SelectValue placeholder="Select a model" />
                       </SelectTrigger>
                       <SelectContent>
-                        {currentAgentModelConfig.available_models.map((model) => (
+                        {currentAgentModelConfig.available_models.map((model: { id: string; name: string; is_default?: boolean }) => (
                           <SelectItem key={model.id} value={model.id}>
                             {model.name}
                             {model.is_default && (
@@ -561,19 +561,19 @@ export default function AgentSetupPage() {
   const availableAgents = useAvailableAgents().items;
 
   const discoveryAgent = useMemo(() => {
-    return discoveryAgents.find((agent) => agent.name === decodedKey);
+    return discoveryAgents.find((agent: AgentDiscovery) => agent.name === decodedKey);
   }, [decodedKey, discoveryAgents]);
 
   const savedAgent = useMemo(() => {
-    return savedAgents.find((agent) => agent.id === decodedKey || agent.name === decodedKey) ?? null;
+    return savedAgents.find((agent: Agent) => agent.id === decodedKey || agent.name === decodedKey) ?? null;
   }, [decodedKey, savedAgents]);
 
   const initialAgent = useMemo(() => {
     if (!decodedKey) return null;
     const resolveDisplayName = (name: string) =>
-      availableAgents.find((item) => item.name === name)?.display_name ?? '';
+      availableAgents.find((item: AvailableAgent) => item.name === name)?.display_name ?? '';
     const resolveDefaultModel = (name: string) =>
-      availableAgents.find((item) => item.name === name)?.model_config?.default_model ?? '';
+      availableAgents.find((item: AvailableAgent) => item.name === name)?.model_config?.default_model ?? '';
     if (savedAgent) {
       return ensureProfiles(cloneAgent(savedAgent), resolveDisplayName(savedAgent.name), resolveDefaultModel(savedAgent.name));
     }

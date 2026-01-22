@@ -1,8 +1,6 @@
 # Kandev Engineering Guide
 
 > **Purpose**: Architecture notes, key patterns, and conventions for LLM agents working on Kandev.
->
-> **Related**: [ARCHITECTURE.md](ARCHITECTURE.md), [docs/asyncapi.yaml](docs/asyncapi.yaml)
 
 ## Repo Layout
 
@@ -62,12 +60,13 @@ apps/backend/
 ### Key Concepts
 
 **Orchestrator** coordinates task execution:
-- Receives task start/stop/resume requests
+- Receives task start/stop/resume requests via WebSocket
 - Delegates to lifecycle manager for agent operations
 - Handles event-driven state transitions
+- Located in `internal/orchestrator/`
 
 **Lifecycle Manager** (`internal/agent/lifecycle/`) manages agent instances:
-- `Manager` - central coordinator (~900 lines after refactor)
+- `Manager` - central coordinator for agent lifecycle
 - `Runtime` interface - abstracts execution environment (Docker, Standalone)
 - `ExecutionStore` - thread-safe in-memory execution tracking
 - `SessionManager` - ACP session initialization and resume
@@ -81,22 +80,12 @@ apps/backend/
 - Exposes workspace operations (shell, git, files)
 - Supports multiple concurrent instances on different ports
 
-### Executor and Runtime
+**Executor Types** (database model):
+- `local_pc` - Standalone process on host ✅
+- `local_docker` - Docker container on host ✅
+- `remote_docker`, `remote_vps`, `k8s` - Planned
 
-**Executor** (database model) defines where agents run:
-
-| Type | Description | Status |
-|------|-------------|--------|
-| `local_pc` | Standalone process on host | Implemented |
-| `local_docker` | Docker container on host | Implemented |
-| `remote_docker` | Remote Docker daemon | Planned |
-| `remote_vps` | Remote server via SSH | Planned |
-| `k8s` | Kubernetes pods | Planned |
-
-**Runtime** (interface) implements execution:
-- `DockerRuntime` - creates containers, mounts workspace
-- `StandaloneRuntime` - uses shared agentctl process
-
+**Runtime Interface** implements execution:
 ```go
 type Runtime interface {
     Name() runtime.Name
@@ -110,48 +99,31 @@ type Runtime interface {
 ### Execution Flow
 
 ```
-Client (WS)        Orchestrator       Lifecycle Manager      Runtime           agentctl
-     |                  |                    |                  |                  |
-     | task.start       |                    |                  |                  |
-     |----------------->| LaunchAgent()      |                  |                  |
-     |                  |------------------->| CreateInstance() |                  |
-     |                  |                    |----------------->| (container/proc) |
-     |                  |                    |                  |----------------->|
-     |                  | StartAgentProcess()|                  |                  |
-     |                  |------------------->| ConfigureAgent() |                  |
-     |                  |                    |---------------------------------->|
-     |                  |                    | Start()          |                  |
-     |                  |                    |---------------------------------->|
-     |                  |                    |                  |    agent proc   |
-     |                  |                    |<---- stream updates (WS) ---------|
-     |<---- WS events --|                    |                  |                  |
+Client (WS)     Orchestrator        Lifecycle Manager       Runtime          agentctl
+    |                |                      |                  |                |
+    | task.start     |                      |                  |                |
+    |--------------->| LaunchAgent()        |                  |                |
+    |                |--------------------->| CreateInstance() |                |
+    |                |                      |----------------->| (container)    |
+    |                |                      |                  |--------------->|
+    |                | StartAgentProcess()  |                  |                |
+    |                |--------------------->| ConfigureAgent() |                |
+    |                |                      |----------------------------->     |
+    |                |                      | Start()          |                |
+    |                |                      |----------------------------->     |
+    |                |                      |                  |  agent proc    |
+    |                |                      |<---- stream updates (WS) ---------|
+    |<--- WS events -|                      |                  |                |
 ```
 
-### Session Resume
-
-Sessions can be resumed after interruption:
+**Session Resume:**
 - `TaskSession.ACPSessionID` - stored ACP session ID for resume
 - `ExecutorRunning` - tracks active executor state (container ID, port, worktree)
 - On backend restart: `RecoverInstances()` finds running containers, reconnects streams
 
-### Provider Pattern
+**Provider Pattern:** Packages expose `Provide(cfg, log) (*impl, cleanup, error)` for DI. Returns implementation, cleanup function, and error. Cleanup called during graceful shutdown.
 
-Packages expose `Provide(...)` functions for dependency injection:
-
-```go
-func Provide(cfg *config.Config, log *logger.Logger) (*impl, func() error, error)
-```
-
-- Returns concrete implementation, cleanup function, and error
-- Cleanup called during graceful shutdown
-- Keeps `cmd/kandev/main.go` thin
-
-### Worktrees
-
-Git worktrees provide workspace isolation:
-- Each session can have its own worktree (branch)
-- Prevents conflicts between concurrent agents
-- Managed by `internal/worktree/Manager`
+**Worktrees:** `internal/worktree/Manager` provides workspace isolation. Each session can have its own worktree (branch) to prevent conflicts between concurrent agents.
 
 ---
 
@@ -175,7 +147,6 @@ Git worktrees provide workspace isolation:
 ### Adapter Model
 
 Protocol adapters normalize different agent CLIs:
-
 - `AgentAdapter` interface defines `Start()`, `Stop()`, `Prompt()`, `Cancel()`
 - `ACPAdapter` - ACP JSON-RPC over stdio
 - `CodexAdapter` - Codex-style JSON-RPC
@@ -207,77 +178,53 @@ JSON-RPC 2.0 over stdin/stdout between agentctl and agent process.
 SSR Fetch -> Hydrate Store -> Components Read Store -> Hooks Subscribe
 ```
 
-**This pattern must be followed. Do not fetch data directly in components.**
+**Never fetch data directly in components.**
 
-1. **SSR fetches** in layout/page server components
-2. **Hydrate store** via `StateHydrator` component
-3. **Components read from store only** (Zustand selectors)
-4. **Hooks subscribe to WS channels** for real-time updates
-5. **WS events update store** via event handlers
+### Store Structure (Domain Slices)
 
-### Store Structure
+```
+lib/state/
+├── store.ts (~370 lines)          # Root composition
+├── slices/                         # Domain slices
+│   ├── kanban/                    # boards, tasks, columns
+│   ├── session/                   # sessions, messages, turns, worktrees
+│   ├── session-runtime/           # shell, processes, git, context
+│   ├── workspace/                 # workspaces, repos, branches
+│   ├── settings/                  # executors, agents, editors, prompts
+│   └── ui/                        # preview, connection, active state
+├── hydration/                     # SSR merge strategies
+└── selectors/                     # Memoized selectors (future)
 
-```typescript
-// Task/session data keyed by ID
-messages.bySession[sessionId]
-gitStatus[sessionId]
-shell.outputs[sessionId]
-
-// Active selection
-tasks.activeTaskId
-tasks.activeSessionId
+hooks/domains/{kanban,session,workspace,settings}/  # Domain-organized hooks
+lib/api/domains/{kanban,session,workspace,settings,process}-api.ts  # API clients
 ```
 
-### Custom Hooks Pattern
+**Key State Paths:**
+- `messages.bySession[sessionId]`, `shell.outputs[sessionId]`, `gitStatus.bySessionId[sessionId]`
+- `tasks.activeTaskId`, `tasks.activeSessionId`, `workspaces.activeId`
+- `repositories.byWorkspace`, `repositoryBranches.byRepository`
 
-Hooks encapsulate subscription + store access:
+**Hydration:** `lib/state/hydration/merge-strategies.ts` has `deepMerge()`, `mergeSessionMap()`, `mergeLoadingState()` to avoid overwriting live client state. Pass `activeSessionId` to protect active sessions.
 
-```typescript
-// Hook subscribes to WS channel, returns data from store
-function useSessionMessages(sessionId: string) {
-  useSessionSubscription(sessionId)  // Subscribe on mount, cleanup on unmount
-  return useStore(state => state.messages.bySession[sessionId])
-}
-```
+**Hooks Pattern:** Hooks in `hooks/domains/` encapsulate WS subscription + store selection. WS client deduplicates subscriptions automatically.
 
-### WebSocket Subscription
+### WS
 
-- Components call subscription hooks (e.g., `useTaskSubscription(taskId)`)
-- WS client **deduplicates** subscriptions with reference counting
-- Reconnects automatically re-subscribe all active channels
-- Event handlers route payloads to store slices
-
-**Why This Matters**: Without this pattern, you get duplicate subscriptions, stale data, and race conditions.
-
-### WS Message Format
-
-```json
-{
-  "id": "uuid",
-  "type": "request|response|notification|error",
-  "action": "action.name",
-  "payload": { ... },
-  "timestamp": "2026-01-10T12:00:00Z"
-}
-```
-
-See `docs/asyncapi.yaml` for all WS actions.
+**Format:** `{id, type, action, payload, timestamp}`. See `docs/asyncapi.yaml` for all actions.
 
 ---
 
 ## Best Practices
 
 ### Backend
-- Use provider pattern for dependency injection
-- Keep agents logging to stderr; stdout only for ACP
-- Pass context through call chains (but detach for background work)
-- Use event bus for cross-component communication
+- Provider pattern for DI; stderr for logs, stdout for ACP only
+- Pass context through chains; event bus for cross-component comm
 
 ### Frontend
-- Never fetch in components; use SSR + store hydration
-- Always use subscription hooks; never raw WS calls in components
-- Keep components reading from store only
-- Split large pages into smaller components
+- **Data:** SSR fetch → hydrate → read store. Never fetch in components
+- **Components:** <200 lines, extract to domain components, composition over props
+- **Hooks:** Domain-organized in `hooks/domains/`, encapsulate subscription + selection
+- **WS:** Use subscription hooks only; client auto-deduplicates
 
 ---
 

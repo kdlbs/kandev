@@ -17,6 +17,7 @@ import { getWebSocketClient } from '@/lib/ws/connection';
 import { linkToSession } from '@/lib/links';
 import { useTaskSessions } from '@/hooks/use-task-sessions';
 import type { TaskSession, TaskSessionState } from '@/lib/types/http';
+import type { AgentProfileOption } from '@/lib/state/slices';
 import { getSessionStateIcon } from '@/lib/ui/state-icons';
 
 type SessionStatus = 'running' | 'waiting_input' | 'complete' | 'failed' | 'cancelled';
@@ -103,7 +104,7 @@ export function SessionsDropdown({
   const { sessions, loadSessions } = useTaskSessions(taskId);
 
   const agentLabelsById = useMemo(() => {
-    return Object.fromEntries(agentProfiles.map((profile) => [profile.id, profile.label]));
+    return Object.fromEntries(agentProfiles.map((profile: AgentProfileOption) => [profile.id, profile.label]));
   }, [agentProfiles]);
 
   const handleOpenChange = useCallback(
@@ -118,7 +119,7 @@ export function SessionsDropdown({
   // Update timer every second for running sessions
   useEffect(() => {
     const hasRunningSessions = sessions.some(
-      (session) => session.state === 'RUNNING' || session.state === 'STARTING'
+      (session: TaskSession) => session.state === 'RUNNING' || session.state === 'STARTING'
     );
     if (!hasRunningSessions) return;
 
@@ -181,7 +182,7 @@ export function SessionsDropdown({
 
   const sortedSessions = useMemo(() => {
     const visibleSessions = taskId ? sessions : [];
-    return [...visibleSessions].sort((a, b) => {
+    return [...visibleSessions].sort((a: TaskSession, b: TaskSession) => {
       const orderDelta = (STATUS_ORDER[a.state] ?? 99) - (STATUS_ORDER[b.state] ?? 99);
       if (orderDelta !== 0) return orderDelta;
       return new Date(b.started_at).getTime() - new Date(a.started_at).getTime();

@@ -25,7 +25,8 @@ import {
 import { Combobox } from './combobox';
 import { Badge } from '@kandev/ui/badge';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@kandev/ui/tooltip';
-import type { LocalRepository, Task } from '@/lib/types/http';
+import type { LocalRepository, Task, Workspace, Repository, Environment, Executor, Branch } from '@/lib/types/http';
+import type { AgentProfileOption } from '@/lib/state/slices';
 import {
   DEFAULT_LOCAL_ENVIRONMENT_KIND,
   DEFAULT_LOCAL_EXECUTOR_TYPE,
@@ -33,11 +34,11 @@ import {
   selectPreferredBranch,
   truncateRepoPath,
 } from '@/lib/utils';
-import { createTask, updateTask } from '@/lib/http';
+import { createTask, updateTask } from '@/lib/api';
 import { useAppStore } from '@/components/state-provider';
-import { useRepositories } from '@/hooks/use-repositories';
-import { useRepositoryBranches } from '@/hooks/use-repository-branches';
-import { useSettingsData } from '@/hooks/use-settings-data';
+import { useRepositories } from '@/hooks/domains/workspace/use-repositories';
+import { useRepositoryBranches } from '@/hooks/domains/workspace/use-repository-branches';
+import { useSettingsData } from '@/hooks/domains/settings/use-settings-data';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import { SHORTCUTS } from '@/lib/keyboard/constants';
 import { useKeyboardShortcutHandler } from '@/hooks/use-keyboard-shortcut';
@@ -262,7 +263,7 @@ export function TaskCreateDialog({
   }, [open, workspaceId]);
 
   const workspaceDefaults = workspaceId
-    ? workspaces.find((workspace) => workspace.id === workspaceId)
+    ? workspaces.find((workspace: Workspace) => workspace.id === workspaceId)
     : null;
 
   useEffect(() => {
@@ -329,15 +330,15 @@ export function TaskCreateDialog({
   const normalizeRepoPath = (path: string) => path.replace(/\\/g, '/').replace(/\/+$/g, '');
   const workspaceRepoPaths = new Set(
     repositories
-      .map((repo) => repo.local_path)
+      .map((repo: Repository) => repo.local_path)
       .filter(Boolean)
-      .map((path) => normalizeRepoPath(path))
+      .map((path: string) => normalizeRepoPath(path))
   );
   const localRepoOptions = discoveredRepositories.filter(
-    (repo) => !workspaceRepoPaths.has(normalizeRepoPath(repo.path))
+    (repo: LocalRepository) => !workspaceRepoPaths.has(normalizeRepoPath(repo.path))
   );
   const repositoryOptions: RepositoryOption[] = [
-    ...repositories.map((repo) => ({
+    ...repositories.map((repo: Repository) => ({
       value: repo.id,
       label: repo.name,
       renderLabel: () => (
@@ -353,7 +354,7 @@ export function TaskCreateDialog({
         </span>
       ),
     })),
-    ...localRepoOptions.map((repo) => ({
+    ...localRepoOptions.map((repo: LocalRepository) => ({
       value: repo.path,
       label: formatUserHomePath(repo.path),
       renderLabel: () => (
@@ -401,7 +402,7 @@ export function TaskCreateDialog({
     if (!isSessionMode && !startAgent) return;
     if (isEditMode && agentProfiles.length > 1) return;
     const defaultProfileId = workspaceDefaults?.default_agent_profile_id ?? null;
-    if (defaultProfileId && agentProfiles.some((profile) => profile.id === defaultProfileId)) {
+    if (defaultProfileId && agentProfiles.some((profile: AgentProfileOption) => profile.id === defaultProfileId)) {
       setAgentProfileId(defaultProfileId);
       return;
     }
@@ -414,13 +415,13 @@ export function TaskCreateDialog({
     const defaultEnvironmentId = workspaceDefaults?.default_environment_id ?? null;
     if (
       defaultEnvironmentId &&
-      environments.some((environment) => environment.id === defaultEnvironmentId)
+      environments.some((environment: Environment) => environment.id === defaultEnvironmentId)
     ) {
       setEnvironmentId(defaultEnvironmentId);
       return;
     }
     const localEnvironment = environments.find(
-      (environment) => environment.kind === DEFAULT_LOCAL_ENVIRONMENT_KIND
+      (environment: Environment) => environment.kind === DEFAULT_LOCAL_ENVIRONMENT_KIND
     );
     setEnvironmentId(localEnvironment?.id ?? environments[0].id);
   }, [open, isEditMode, environmentId, environments, workspaceDefaults, isSessionMode, startAgent]);
@@ -429,12 +430,12 @@ export function TaskCreateDialog({
     if (!open || isEditMode || executorId || executors.length === 0) return;
     if (!isSessionMode && !startAgent) return;
     const defaultExecutorId = workspaceDefaults?.default_executor_id ?? null;
-    if (defaultExecutorId && executors.some((executor) => executor.id === defaultExecutorId)) {
+    if (defaultExecutorId && executors.some((executor: Executor) => executor.id === defaultExecutorId)) {
       setExecutorId(defaultExecutorId);
       return;
     }
     const localExecutor = executors.find(
-      (executor) => executor.type === DEFAULT_LOCAL_EXECUTOR_TYPE
+      (executor: Executor) => executor.type === DEFAULT_LOCAL_EXECUTOR_TYPE
     );
     setExecutorId(localExecutor?.id ?? executors[0].id);
   }, [open, isEditMode, executorId, executors, workspaceDefaults, isSessionMode, startAgent]);
@@ -664,7 +665,7 @@ export function TaskCreateDialog({
                     options={repositoryOptions}
                     value={repositoryId || discoveredRepoPath}
                     onValueChange={(value) => {
-                      const workspaceRepo = repositories.find((repo) => repo.id === value);
+                      const workspaceRepo = repositories.find((repo: Repository) => repo.id === value);
                       if (workspaceRepo) {
                         setRepositoryId(value);
                         setDiscoveredRepoPath('');
@@ -693,7 +694,7 @@ export function TaskCreateDialog({
                 </div>
               <div>
                 <BranchSelector
-                  options={branchOptions.map((branchObj) => {
+                  options={branchOptions.map((branchObj: Branch) => {
                     const displayName =
                       branchObj.type === 'remote' && branchObj.remote
                         ? `${branchObj.remote}/${branchObj.name}`
@@ -753,7 +754,7 @@ export function TaskCreateDialog({
                       </div>
                     ) : (
                     <AgentSelector
-                      options={agentProfiles.map((profile) => ({
+                      options={agentProfiles.map((profile: AgentProfileOption) => ({
                         value: profile.id,
                         label: profile.label,
                         renderLabel: () => {
@@ -794,7 +795,7 @@ export function TaskCreateDialog({
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
                   <AgentSelector
-                    options={agentProfiles.map((profile) => ({
+                    options={agentProfiles.map((profile: AgentProfileOption) => ({
                       value: profile.id,
                       label: profile.label,
                       renderLabel: () => {
@@ -859,7 +860,7 @@ export function TaskCreateDialog({
                         <SelectValue placeholder={environmentsLoading ? 'Loading environments...' : 'Select environment'} />
                       </SelectTrigger>
                       <SelectContent>
-                        {environments.map((env) => (
+                        {environments.map((env: Environment) => (
                           <SelectItem key={env.id} value={env.id}>
                             {env.name}
                           </SelectItem>
@@ -876,7 +877,7 @@ export function TaskCreateDialog({
                         <SelectValue placeholder={executorsLoading ? 'Loading executors...' : 'Select executor'} />
                       </SelectTrigger>
                       <SelectContent>
-                        {executors.map((executor) => (
+                        {executors.map((executor: Executor) => (
                           <SelectItem key={executor.id} value={executor.id}>
                             {executor.name}
                           </SelectItem>
@@ -904,7 +905,7 @@ export function TaskCreateDialog({
                       />
                     </SelectTrigger>
                     <SelectContent>
-                      {environments.map((environment) => (
+                      {environments.map((environment: Environment) => (
                         <SelectItem key={environment.id} value={environment.id}>
                           {environment.name}
                         </SelectItem>
@@ -927,7 +928,7 @@ export function TaskCreateDialog({
                       />
                     </SelectTrigger>
                     <SelectContent>
-                      {executors.map((executor) => (
+                      {executors.map((executor: Executor) => (
                         <SelectItem key={executor.id} value={executor.id}>
                           {executor.name}
                         </SelectItem>

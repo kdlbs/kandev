@@ -40,8 +40,9 @@ import { Popover, PopoverContent, PopoverTrigger } from '@kandev/ui/popover';
 import { Checkbox } from '@kandev/ui/checkbox';
 import { Label } from '@kandev/ui/label';
 import { CommitStatBadge, LineStat } from '@/components/diff-stat';
-import { useSessionGitStatus } from '@/hooks/use-session-git-status';
+import { useSessionGitStatus } from '@/hooks/domains/session/use-session-git-status';
 import { useGitOperations } from '@/hooks/use-git-operations';
+import type { FileInfo } from '@/lib/state/slices';
 import { formatUserHomePath } from '@/lib/utils';
 import { EditorsMenu } from '@/components/task/editors-menu';
 import { useToast } from '@/components/toast-provider';
@@ -96,7 +97,7 @@ const TaskTopBar = memo(function TaskTopBar({
   let totalAdditions = 0;
   let totalDeletions = 0;
   if (gitStatus?.files && Object.keys(gitStatus.files).length > 0) {
-    for (const file of Object.values(gitStatus.files)) {
+    for (const file of Object.values(gitStatus.files) as FileInfo[]) {
       totalAdditions += file.additions || 0;
       totalDeletions += file.deletions || 0;
     }

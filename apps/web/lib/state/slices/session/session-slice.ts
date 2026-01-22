@@ -1,0 +1,177 @@
+import type { StateCreator } from 'zustand';
+import type { SessionSlice, SessionSliceState } from './types';
+
+export const defaultSessionState: SessionSliceState = {
+  messages: { bySession: {}, metaBySession: {} },
+  turns: {
+    bySession: {},
+    activeBySession: {},
+  },
+  taskSessions: { items: {} },
+  taskSessionsByTask: { itemsByTaskId: {}, loadingByTaskId: {}, loadedByTaskId: {} },
+  sessionAgentctl: { itemsBySessionId: {} },
+  worktrees: { items: {} },
+  sessionWorktreesBySessionId: { itemsBySessionId: {} },
+  pendingModel: { bySessionId: {} },
+  activeModel: { bySessionId: {} },
+};
+
+export const createSessionSlice: StateCreator<
+  SessionSlice,
+  [['zustand/immer', never]],
+  [],
+  SessionSlice
+> = (set) => ({
+  ...defaultSessionState,
+  setMessages: (sessionId, messages, meta) =>
+    set((draft) => {
+      draft.messages.bySession[sessionId] = messages;
+      if (!draft.messages.metaBySession[sessionId]) {
+        draft.messages.metaBySession[sessionId] = {
+          isLoading: false,
+          hasMore: false,
+          oldestCursor: null,
+        };
+      }
+      if (meta?.hasMore !== undefined) {
+        draft.messages.metaBySession[sessionId].hasMore = meta.hasMore;
+      }
+      if (meta?.oldestCursor !== undefined) {
+        draft.messages.metaBySession[sessionId].oldestCursor = meta.oldestCursor;
+      }
+    }),
+  addMessage: (message) =>
+    set((draft) => {
+      const sessionId = message.session_id;
+      if (!draft.messages.bySession[sessionId]) {
+        draft.messages.bySession[sessionId] = [];
+      }
+      const existing = draft.messages.bySession[sessionId].find((m) => m.id === message.id);
+      if (!existing) {
+        draft.messages.bySession[sessionId].push(message);
+      }
+    }),
+  updateMessage: (message) =>
+    set((draft) => {
+      const sessionId = message.session_id;
+      const messages = draft.messages.bySession[sessionId];
+      if (messages) {
+        const index = messages.findIndex((m) => m.id === message.id);
+        if (index !== -1) {
+          messages[index] = message;
+        }
+      }
+    }),
+  prependMessages: (sessionId, messages, meta) =>
+    set((draft) => {
+      const existing = draft.messages.bySession[sessionId] || [];
+      draft.messages.bySession[sessionId] = [...messages, ...existing];
+      if (!draft.messages.metaBySession[sessionId]) {
+        draft.messages.metaBySession[sessionId] = {
+          isLoading: false,
+          hasMore: false,
+          oldestCursor: null,
+        };
+      }
+      if (meta?.hasMore !== undefined) {
+        draft.messages.metaBySession[sessionId].hasMore = meta.hasMore;
+      }
+      if (meta?.oldestCursor !== undefined) {
+        draft.messages.metaBySession[sessionId].oldestCursor = meta.oldestCursor;
+      }
+    }),
+  setMessagesMetadata: (sessionId, meta) =>
+    set((draft) => {
+      if (!draft.messages.metaBySession[sessionId]) {
+        draft.messages.metaBySession[sessionId] = {
+          isLoading: false,
+          hasMore: false,
+          oldestCursor: null,
+        };
+      }
+      if (meta.hasMore !== undefined) {
+        draft.messages.metaBySession[sessionId].hasMore = meta.hasMore;
+      }
+      if (meta.isLoading !== undefined) {
+        draft.messages.metaBySession[sessionId].isLoading = meta.isLoading;
+      }
+      if (meta.oldestCursor !== undefined) {
+        draft.messages.metaBySession[sessionId].oldestCursor = meta.oldestCursor;
+      }
+    }),
+  setMessagesLoading: (sessionId, loading) =>
+    set((draft) => {
+      if (!draft.messages.metaBySession[sessionId]) {
+        draft.messages.metaBySession[sessionId] = {
+          isLoading: loading,
+          hasMore: false,
+          oldestCursor: null,
+        };
+      } else {
+        draft.messages.metaBySession[sessionId].isLoading = loading;
+      }
+    }),
+  addTurn: (turn) =>
+    set((draft) => {
+      const sessionId = turn.session_id;
+      if (!draft.turns.bySession[sessionId]) {
+        draft.turns.bySession[sessionId] = [];
+      }
+      const existing = draft.turns.bySession[sessionId].find((t) => t.id === turn.id);
+      if (!existing) {
+        draft.turns.bySession[sessionId].push(turn);
+      }
+    }),
+  completeTurn: (sessionId, turnId, completedAt) =>
+    set((draft) => {
+      const turns = draft.turns.bySession[sessionId];
+      if (turns) {
+        const turn = turns.find((t) => t.id === turnId);
+        if (turn) {
+          turn.completed_at = completedAt;
+        }
+      }
+    }),
+  setActiveTurn: (sessionId, turnId) =>
+    set((draft) => {
+      draft.turns.activeBySession[sessionId] = turnId;
+    }),
+  setTaskSession: (session) =>
+    set((draft) => {
+      draft.taskSessions.items[session.id] = session;
+    }),
+  setTaskSessionsForTask: (taskId, sessions) =>
+    set((draft) => {
+      draft.taskSessionsByTask.itemsByTaskId[taskId] = sessions;
+      draft.taskSessionsByTask.loadingByTaskId[taskId] = false;
+      draft.taskSessionsByTask.loadedByTaskId[taskId] = true;
+    }),
+  setTaskSessionsLoading: (taskId, loading) =>
+    set((draft) => {
+      draft.taskSessionsByTask.loadingByTaskId[taskId] = loading;
+    }),
+  setSessionAgentctlStatus: (sessionId, status) =>
+    set((draft) => {
+      draft.sessionAgentctl.itemsBySessionId[sessionId] = status;
+    }),
+  setWorktree: (worktree) =>
+    set((draft) => {
+      draft.worktrees.items[worktree.id] = worktree;
+    }),
+  setSessionWorktrees: (sessionId, worktreeIds) =>
+    set((draft) => {
+      draft.sessionWorktreesBySessionId.itemsBySessionId[sessionId] = worktreeIds;
+    }),
+  setPendingModel: (sessionId, modelId) =>
+    set((draft) => {
+      draft.pendingModel.bySessionId[sessionId] = modelId;
+    }),
+  clearPendingModel: (sessionId) =>
+    set((draft) => {
+      delete draft.pendingModel.bySessionId[sessionId];
+    }),
+  setActiveModel: (sessionId, modelId) =>
+    set((draft) => {
+      draft.activeModel.bySessionId[sessionId] = modelId;
+    }),
+});

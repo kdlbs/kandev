@@ -1,6 +1,6 @@
 'use client';
 
-import { openSessionInEditor } from '@/lib/http';
+import { openSessionInEditor } from '@/lib/api';
 import { useRequest } from '@/lib/http/use-request';
 
 type OpenEditorOptions = {

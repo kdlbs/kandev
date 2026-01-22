@@ -1,5 +1,5 @@
 import { StateHydrator } from '@/components/state-hydrator';
-import { listAvailableAgents, getAgentProfileMcpConfig } from '@/lib/http';
+import { listAvailableAgents, getAgentProfileMcpConfig } from '@/lib/api';
 import type { AgentProfileMcpConfig } from '@/lib/types/http';
 import { AgentProfilePage } from '@/components/settings/agent-profile-page';
 

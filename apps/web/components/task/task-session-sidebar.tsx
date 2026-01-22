@@ -1,14 +1,15 @@
 'use client';
 
 import { useCallback, useMemo, useState } from 'react';
-import type { TaskState } from '@/lib/types/http';
+import type { TaskState, Workspace, Repository } from '@/lib/types/http';
+import type { KanbanState } from '@/lib/state/slices';
 import { TaskSwitcher } from './task-switcher';
 import { Button } from '@kandev/ui/button';
 import { IconPlus } from '@tabler/icons-react';
 import { TaskCreateDialog } from '@/components/task-create-dialog';
 import { useAppStore, useAppStoreApi } from '@/components/state-provider';
 import { linkToSession } from '@/lib/links';
-import { listTaskSessions } from '@/lib/http';
+import { listTaskSessions } from '@/lib/api';
 import { useTasks } from '@/hooks/use-tasks';
 
 type TaskSessionSidebarProps = {
@@ -39,13 +40,13 @@ export function TaskSessionSidebar({ workspaceId, boardId }: TaskSessionSidebarP
 
   const workspaceName = useMemo(() => {
     if (!workspaceId) return 'Workspace';
-    return workspaces.find((workspace) => workspace.id === workspaceId)?.name ?? 'Workspace';
+    return workspaces.find((workspace: Workspace) => workspace.id === workspaceId)?.name ?? 'Workspace';
   }, [workspaceId, workspaces]);
 
   const tasksWithRepositories = useMemo(() => {
     const repositories = workspaceId ? repositoriesByWorkspace[workspaceId] ?? [] : [];
-    const repositoryPathsById = new Map(repositories.map((repo) => [repo.id, repo.local_path]));
-    return tasks.map((task) => ({
+    const repositoryPathsById = new Map(repositories.map((repo: Repository) => [repo.id, repo.local_path]));
+    return tasks.map((task: KanbanState['tasks'][number]) => ({
       id: task.id,
       title: task.title,
       state: task.state as TaskState | undefined,
@@ -119,7 +120,7 @@ export function TaskSessionSidebar({ workspaceId, boardId }: TaskSessionSidebarP
         <div className="flex-1 min-h-0 overflow-y-auto space-y-4 pt-3">
           <TaskSwitcher
             tasks={tasksWithRepositories}
-            columns={columns.map((column) => ({ id: column.id, title: column.title }))}
+            columns={columns.map((column: KanbanState['columns'][number]) => ({ id: column.id, title: column.title }))}
             activeTaskId={activeTaskId}
             selectedTaskId={selectedTaskId}
             onSelectTask={(taskId) => {
@@ -135,7 +136,7 @@ export function TaskSessionSidebar({ workspaceId, boardId }: TaskSessionSidebarP
         workspaceId={workspaceId}
         boardId={boardId}
         defaultColumnId={columns[0]?.id ?? null}
-        columns={columns.map((column) => ({ id: column.id, title: column.title }))}
+        columns={columns.map((column: KanbanState['columns'][number]) => ({ id: column.id, title: column.title }))}
         onSuccess={(task, _mode, meta) => {
           store.setState((state) => {
             if (state.kanban.boardId !== task.board_id) return state;
@@ -152,8 +153,8 @@ export function TaskSessionSidebar({ workspaceId, boardId }: TaskSessionSidebarP
               ...state,
               kanban: {
                 ...state.kanban,
-                tasks: state.kanban.tasks.some((item) => item.id === task.id)
-                  ? state.kanban.tasks.map((item) => (item.id === task.id ? nextTask : item))
+                tasks: state.kanban.tasks.some((item: KanbanState['tasks'][number]) => item.id === task.id)
+                  ? state.kanban.tasks.map((item: KanbanState['tasks'][number]) => (item.id === task.id ? nextTask : item))
                   : [...state.kanban.tasks, nextTask],
               },
             };

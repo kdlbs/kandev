@@ -34,7 +34,7 @@ export function useSessionMessages(
   const initialFetchStartRef = useRef<number | null>(null);
   const lastFetchedSessionIdRef = useRef<string | null>(null);
   const lastFetchStateKeyRef = useRef<string | null>(null);
-  const hasAgentMessage = messages.some((message) => message.author_type === 'agent');
+  const hasAgentMessage = messages.some((message: Message) => message.author_type === 'agent');
 
   useEffect(() => {
     if (!taskSessionId) {

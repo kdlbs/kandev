@@ -9,6 +9,7 @@ import { useKanbanLayout } from "@/hooks/use-kanban-layout";
 import { useTaskSession } from "@/hooks/use-task-session";
 import { useAppStore } from "@/components/state-provider";
 import { Task } from "./kanban-card";
+import type { KanbanState } from "@/lib/state/slices";
 import { PREVIEW_PANEL } from "@/lib/settings/constants";
 import { linkToSession } from "@/lib/links";
 
@@ -48,7 +49,7 @@ export function KanbanWithPreview({ initialTaskId }: KanbanWithPreviewProps) {
   const selectedTask = useMemo(() => {
     if (!selectedTaskId || kanbanTasks.length === 0) return null;
 
-    const task = kanbanTasks.find((t) => t.id === selectedTaskId);
+    const task = kanbanTasks.find((t: KanbanState['tasks'][number]) => t.id === selectedTaskId);
     if (!task) return null;
 
     return {

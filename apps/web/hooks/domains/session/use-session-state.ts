@@ -1,5 +1,5 @@
 import { useAppStore } from '@/components/state-provider';
-import { useSession } from '@/hooks/use-session';
+import { useSession } from '@/hooks/domains/session/use-session';
 import { useTask } from '@/hooks/use-task';
 
 export function useSessionState(sessionId: string | null) {

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { getSessionProcess, listSessionProcesses, startProcess, stopProcess } from '@/lib/http';
+import { getSessionProcess, listSessionProcesses, startProcess, stopProcess } from '@/lib/api';
 import { useAppStore } from '@/components/state-provider';
 import { useLayoutStore } from '@/lib/state/layout-store';
 import type { ProcessInfo } from '@/lib/types/http';

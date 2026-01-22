@@ -1,6 +1,6 @@
 import { EditorsSettings } from '@/components/settings/editors-settings';
 import { StateProvider } from '@/components/state-provider';
-import { fetchUserSettings, listEditors } from '@/lib/http';
+import { fetchUserSettings, listEditors } from '@/lib/api';
 
 export default async function GeneralEditorsPage() {
   let initialState = {};
