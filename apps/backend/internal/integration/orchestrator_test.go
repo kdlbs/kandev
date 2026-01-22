@@ -627,10 +627,11 @@ func (ts *OrchestratorTestServer) CreateTestTask(t *testing.T, agentProfileID st
 type OrchestratorWSClient struct {
 	conn          *websocket.Conn
 	t             *testing.T
-	messages      chan *ws.Message
 	notifications chan *ws.Message
 	done          chan struct{}
-	mu            sync.Mutex
+	// pending tracks in-flight requests: request ID -> response channel
+	pending map[string]chan *ws.Message
+	mu      sync.Mutex
 }
 
 // NewOrchestratorWSClient creates a WebSocket connection to the test server
@@ -650,9 +651,9 @@ func NewOrchestratorWSClient(t *testing.T, serverURL string) *OrchestratorWSClie
 	client := &OrchestratorWSClient{
 		conn:          conn,
 		t:             t,
-		messages:      make(chan *ws.Message, 100),
 		notifications: make(chan *ws.Message, 100),
 		done:          make(chan struct{}),
+		pending:       make(map[string]chan *ws.Message),
 	}
 
 	go client.readPump()
@@ -694,10 +695,15 @@ func (c *OrchestratorWSClient) readPump() {
 			default:
 			}
 		} else {
-			select {
-			case c.messages <- &msg:
-			default:
+			// Route response to the pending request by ID
+			c.mu.Lock()
+			if ch, ok := c.pending[msg.ID]; ok {
+				select {
+				case ch <- &msg:
+				default:
+				}
 			}
+			c.mu.Unlock()
 		}
 	}
 }
@@ -712,9 +718,6 @@ func (c *OrchestratorWSClient) Close() {
 
 // SendRequest sends a request and waits for a response
 func (c *OrchestratorWSClient) SendRequest(id, action string, payload interface{}) (*ws.Message, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	msg, err := ws.NewRequest(id, action, payload)
 	if err != nil {
 		return nil, err
@@ -725,20 +728,35 @@ func (c *OrchestratorWSClient) SendRequest(id, action string, payload interface{
 		return nil, err
 	}
 
-	if err := c.conn.WriteMessage(websocket.TextMessage, data); err != nil {
-		return nil, err
+	// Create a response channel for this request
+	respCh := make(chan *ws.Message, 1)
+
+	// Register the pending request
+	c.mu.Lock()
+	c.pending[id] = respCh
+	c.mu.Unlock()
+
+	// Ensure we clean up when done
+	defer func() {
+		c.mu.Lock()
+		delete(c.pending, id)
+		c.mu.Unlock()
+	}()
+
+	// Send the request
+	c.mu.Lock()
+	writeErr := c.conn.WriteMessage(websocket.TextMessage, data)
+	c.mu.Unlock()
+	if writeErr != nil {
+		return nil, writeErr
 	}
 
-	timeout := time.After(10 * time.Second)
-	for {
-		select {
-		case resp := <-c.messages:
-			if resp.ID == id {
-				return resp, nil
-			}
-		case <-timeout:
-			return nil, context.DeadlineExceeded
-		}
+	// Wait for response on our dedicated channel
+	select {
+	case resp := <-respCh:
+		return resp, nil
+	case <-time.After(10 * time.Second):
+		return nil, context.DeadlineExceeded
 	}
 }
 
