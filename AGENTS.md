@@ -1,217 +1,284 @@
 # Kandev Engineering Guide
 
-> **Purpose**: This document captures up-to-date architecture notes, agent protocols, and frontend data-fetching patterns for Kandev.
+> **Purpose**: Architecture notes, key patterns, and conventions for LLM agents working on Kandev.
 >
 > **Related**: [ARCHITECTURE.md](ARCHITECTURE.md), [docs/asyncapi.yaml](docs/asyncapi.yaml)
 
 ## Repo Layout
 
-- `apps/backend/`: Go backend (WebSocket gateway, orchestrator, agent lifecycle, agentctl build).
-- `apps/web/`: Next.js frontend (SSR + WS + Zustand store).
-- `apps/packages/`: Shared packages/types.
-- `apps/landing/`: Marketing/landing site that shares UI components with the web app.
-- `apps/backend/dockerfiles/`: Agent container images (e.g., augment-agent).
-
-## Tooling and Workspace
-
-- **Package manager**: `pnpm` workspace.
-- **Workspace root**: repository root.
-- **Web app**: `apps/web` (Next.js, client + server components).
-- **Backend**: `apps/backend` (Go services, agent lifecycle, ws).
-- **UI**: Shadcn-based components are wrapped under `@kandev/ui`.
-
-Common commands:
-
-```bash
-pnpm -C apps/web dev
-pnpm -C apps/web lint
-pnpm -C apps/web typecheck
-
-make -C apps/backend test
-make -C apps/backend lint
+```
+kandev-3/
+├── apps/
+│   ├── backend/          # Go backend (orchestrator, lifecycle, agentctl, WS gateway)
+│   ├── web/              # Next.js frontend (SSR + WS + Zustand)
+│   ├── packages/         # Shared packages/types
+│   └── landing/          # Marketing site (shares UI with web)
 ```
 
-## Backend Architecture (High Level)
+## Tooling
 
-- **Transport**: WebSocket for realtime updates; HTTP for CRUD + SSR fetches.
-- **Gateway**: Single WS endpoint at `ws://localhost:8080/ws`.
-- **Orchestrator**: Starts/stops/resumes tasks, manages sessions.
-- **Agent lifecycle**:
-  - Supports Docker and standalone.
-  - Creates agentctl instances for workspace access (shell, git, file ops).
-  - Starts agent subprocesses explicitly.
-- **agentctl**:
-  - HTTP server for per-agent instance management.
-  - Uses ACP (JSON-RPC 2.0 over stdin/stdout) to talk to agent process.
-  - Streams ACP updates and workspace outputs to backend.
+- **Package manager**: `pnpm` workspace (root)
+- **Backend**: Go with Make (`make -C apps/backend test|lint|build`)
+- **Frontend**: Next.js (`pnpm -C apps/web dev|lint|typecheck`)
+- **UI**: Shadcn components via `@kandev/ui`
 
-### Provider Pattern (Backend)
+---
 
-- **Goal**: Keep `cmd/kandev` thin by constructing dependencies via package-local providers.
-- **Location**: Providers live next to the implementation (e.g. `internal/events/provider.go`, `internal/task/repository/provider.go`).
-- **API contract**:
-  - Each package exposes `Provide(...)` that returns a pointer to the concrete implementation (not an interface), a `cleanup func() error`, and an `error`.
-  - Example signature: `func Provide(cfg *config.Config, log *logger.Logger) (*impl, func() error, error)`
-- **Usage**:
-  - External packages depend on the public interface type, but composition uses the concrete impl.
-  - Repositories expose a public `Repository` interface, while the implementation struct stays unexported.
-  - Call `cleanup()` during shutdown; providers should not own shared resources unless they created them.
+## Backend Architecture
 
-### Runtime / agentctl Flow (Simplified)
+### Package Structure
 
 ```
-Client (WS)             Backend                Runtime              agentctl             Agent
-   | orchestrator.start |                      |                    |                    |
-   |------------------->| LaunchAgent          | Create instance    |                    |
-   |                    |--------------------->|------------------->|                    |
-   |                    | StartAgentProcess    | Configure/Start    |----> agent process |
-   |                    | ACP calls            |                    |<--- ACP messages   |
-   |<-------------------| WS notifications     |                    |                    |
+apps/backend/
+├── cmd/
+│   ├── kandev/           # Main backend binary entry point
+│   └── agentctl/         # Agentctl binary (runs inside containers or standalone)
+├── internal/
+│   ├── agent/
+│   │   ├── lifecycle/    # Agent instance management (see below)
+│   │   ├── registry/     # Agent type registry and defaults
+│   │   ├── runtime/      # Runtime name constants
+│   │   └── mcpconfig/    # MCP server configuration
+│   ├── agentctl/
+│   │   ├── client/       # HTTP client for talking to agentctl
+│   │   └── server/       # agentctl HTTP server
+│   │       ├── api/      # HTTP endpoints
+│   │       ├── instance/ # Multi-instance management
+│   │       ├── process/  # Agent subprocess management
+│   │       └── adapter/  # Protocol adapters (ACP, Codex, REST, MCP)
+│   ├── orchestrator/     # Task execution coordination
+│   │   ├── executor/     # Launches agents via lifecycle manager
+│   │   ├── scheduler/    # Task scheduling
+│   │   ├── queue/        # Task queue
+│   │   └── watcher/      # Event handlers
+│   ├── task/
+│   │   ├── models/       # Task, Session, Executor, Message models
+│   │   ├── service/      # Task business logic
+│   │   └── repository/   # Database access (SQLite)
+│   ├── worktree/         # Git worktree management for workspace isolation
+│   └── events/           # Event bus for internal pub/sub
 ```
 
-### Protocols
+### Key Concepts
 
-- **ACP**: JSON-RPC 2.0 over stdin/stdout (agent <-> agentctl <-> backend).
-- **WS Message Format**:
+**Orchestrator** coordinates task execution:
+- Receives task start/stop/resume requests
+- Delegates to lifecycle manager for agent operations
+- Handles event-driven state transitions
+
+**Lifecycle Manager** (`internal/agent/lifecycle/`) manages agent instances:
+- `Manager` - central coordinator (~900 lines after refactor)
+- `Runtime` interface - abstracts execution environment (Docker, Standalone)
+- `ExecutionStore` - thread-safe in-memory execution tracking
+- `SessionManager` - ACP session initialization and resume
+- `StreamManager` - WebSocket stream connections to agentctl
+- `EventPublisher` - publishes events to the event bus
+- `ContainerManager` - Docker container operations
+
+**agentctl** is an HTTP server that:
+- Runs inside Docker containers or as standalone process
+- Manages agent subprocess via stdin/stdout (ACP protocol)
+- Exposes workspace operations (shell, git, files)
+- Supports multiple concurrent instances on different ports
+
+### Executor and Runtime
+
+**Executor** (database model) defines where agents run:
+
+| Type | Description | Status |
+|------|-------------|--------|
+| `local_pc` | Standalone process on host | Implemented |
+| `local_docker` | Docker container on host | Implemented |
+| `remote_docker` | Remote Docker daemon | Planned |
+| `remote_vps` | Remote server via SSH | Planned |
+| `k8s` | Kubernetes pods | Planned |
+
+**Runtime** (interface) implements execution:
+- `DockerRuntime` - creates containers, mounts workspace
+- `StandaloneRuntime` - uses shared agentctl process
+
+```go
+type Runtime interface {
+    Name() runtime.Name
+    HealthCheck(ctx context.Context) error
+    CreateInstance(ctx context.Context, req *RuntimeCreateRequest) (*RuntimeInstance, error)
+    StopInstance(ctx context.Context, instance *RuntimeInstance, force bool) error
+    RecoverInstances(ctx context.Context) ([]*RuntimeInstance, error)
+}
+```
+
+### Execution Flow
+
+```
+Client (WS)        Orchestrator       Lifecycle Manager      Runtime           agentctl
+     |                  |                    |                  |                  |
+     | task.start       |                    |                  |                  |
+     |----------------->| LaunchAgent()      |                  |                  |
+     |                  |------------------->| CreateInstance() |                  |
+     |                  |                    |----------------->| (container/proc) |
+     |                  |                    |                  |----------------->|
+     |                  | StartAgentProcess()|                  |                  |
+     |                  |------------------->| ConfigureAgent() |                  |
+     |                  |                    |---------------------------------->|
+     |                  |                    | Start()          |                  |
+     |                  |                    |---------------------------------->|
+     |                  |                    |                  |    agent proc   |
+     |                  |                    |<---- stream updates (WS) ---------|
+     |<---- WS events --|                    |                  |                  |
+```
+
+### Session Resume
+
+Sessions can be resumed after interruption:
+- `TaskSession.ACPSessionID` - stored ACP session ID for resume
+- `ExecutorRunning` - tracks active executor state (container ID, port, worktree)
+- On backend restart: `RecoverInstances()` finds running containers, reconnects streams
+
+### Provider Pattern
+
+Packages expose `Provide(...)` functions for dependency injection:
+
+```go
+func Provide(cfg *config.Config, log *logger.Logger) (*impl, func() error, error)
+```
+
+- Returns concrete implementation, cleanup function, and error
+- Cleanup called during graceful shutdown
+- Keeps `cmd/kandev/main.go` thin
+
+### Worktrees
+
+Git worktrees provide workspace isolation:
+- Each session can have its own worktree (branch)
+- Prevents conflicts between concurrent agents
+- Managed by `internal/worktree/Manager`
+
+---
+
+## agentctl Server
+
+### HTTP Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/health` | GET | Health check |
+| `/api/v1/status` | GET | Agent status |
+| `/api/v1/configure` | POST | Configure agent before start |
+| `/api/v1/start` | POST | Start agent subprocess |
+| `/api/v1/stop` | POST | Stop agent |
+| `/api/v1/acp/*` | Various | ACP protocol (initialize, session/*, prompt) |
+| `/api/v1/shell/*` | Various | Shell operations |
+| `/api/v1/workspace/*` | Various | Git status, file changes |
+| `/ws/updates` | WS | Agent event stream |
+| `/ws/workspace` | WS | Workspace event stream (git, files, shell) |
+
+### Adapter Model
+
+Protocol adapters normalize different agent CLIs:
+
+- `AgentAdapter` interface defines `Start()`, `Stop()`, `Prompt()`, `Cancel()`
+- `ACPAdapter` - ACP JSON-RPC over stdio
+- `CodexAdapter` - Codex-style JSON-RPC
+- `process.Manager` owns subprocess, wires stdio to adapter
+
+---
+
+## ACP Protocol
+
+JSON-RPC 2.0 over stdin/stdout between agentctl and agent process.
+
+**Backend -> Agent (Requests)**
+- `initialize` - handshake
+- `session/new` - create new session
+- `session/load` - resume existing session
+- `session/prompt` - send user message
+- `session/cancel` - cancel current operation
+
+**Agent -> Backend (Notifications)**
+- `session/update` with types: `message_chunk`, `tool_call`, `tool_update`, `complete`, `error`, `permission_request`, `context_window`
+
+---
+
+## Frontend Architecture
+
+### Data Flow Pattern (Critical)
+
+```
+SSR Fetch -> Hydrate Store -> Components Read Store -> Hooks Subscribe
+```
+
+**This pattern must be followed. Do not fetch data directly in components.**
+
+1. **SSR fetches** in layout/page server components
+2. **Hydrate store** via `StateHydrator` component
+3. **Components read from store only** (Zustand selectors)
+4. **Hooks subscribe to WS channels** for real-time updates
+5. **WS events update store** via event handlers
+
+### Store Structure
+
+```typescript
+// Task/session data keyed by ID
+messages.bySession[sessionId]
+gitStatus[sessionId]
+shell.outputs[sessionId]
+
+// Active selection
+tasks.activeTaskId
+tasks.activeSessionId
+```
+
+### Custom Hooks Pattern
+
+Hooks encapsulate subscription + store access:
+
+```typescript
+// Hook subscribes to WS channel, returns data from store
+function useSessionMessages(sessionId: string) {
+  useSessionSubscription(sessionId)  // Subscribe on mount, cleanup on unmount
+  return useStore(state => state.messages.bySession[sessionId])
+}
+```
+
+### WebSocket Subscription
+
+- Components call subscription hooks (e.g., `useTaskSubscription(taskId)`)
+- WS client **deduplicates** subscriptions with reference counting
+- Reconnects automatically re-subscribe all active channels
+- Event handlers route payloads to store slices
+
+**Why This Matters**: Without this pattern, you get duplicate subscriptions, stale data, and race conditions.
+
+### WS Message Format
 
 ```json
 {
   "id": "uuid",
   "type": "request|response|notification|error",
   "action": "action.name",
-  "payload": { "...": "..." },
+  "payload": { ... },
   "timestamp": "2026-01-10T12:00:00Z"
 }
 ```
 
-- See `docs/asyncapi.yaml` for WS actions and payloads.
-
-## Frontend Architecture
-
-### Key Principles
-
-- **Store is the source of truth** (Zustand store slices).
-- **SSR preloads data** into the store via `StateHydrator`.
-- **Components read from store only**; avoid ad-hoc fetches in UI components.
-- **Reusable components** preferred; split large pages into smaller components.
-- **Data fetching should live where it is required**; avoid leaking fetches into parent controllers.
-
-### Data Fetching and SSR
-
-- SSR fetch in layout/page, map to store shape, hydrate via `StateHydrator`.
-- WebSocket events update store slices for real-time sync.
-- Only re-fetch when WS cannot deliver full payloads (document why).
-
-### Subscription Strategy
-
-- Components subscribe to the channels they need (task, session, repo), using hooks.
-- WebSocket client deduplicates subscriptions with reference counting.
-- Reconnects re-subscribe all active channels automatically.
-- Event handlers update store slices; components only read from store.
-- URL params set active task/session in store for consistent view state.
-
-**Why This Works**
-
-- Components declare their dependencies explicitly.
-- Subscription cleanup is automatic on unmount.
-- WebSocket client guarantees only one real subscription per channel.
-- Store updates flow globally, components re-render only on relevant slices.
-
-### Three-Layer Model
-
-```
-Layer 1: WebSocket Client (connection + dedup)
-Layer 2: Event Handlers (route WS payloads to store)
-Layer 3: Components (subscribe + render)
-```
-
-### Store Structure
-
-- Task/session scoped data is keyed in store:
-  - `messages.bySession[sessionId]`
-  - `messages.metaBySession[sessionId]`
-  - `gitStatus` keyed by `sessionId`
-  - `shell.outputs` keyed by `sessionId`
-- Active selection state lives in store:
-  - `tasks.activeTaskId`
-  - `tasks.activeSessionId`
-
-### Custom Hooks Pattern
-
-- Hooks own subscriptions and return data from store:
-  - `useSessionMessages(sessionId)` → messages + loading/meta
-  - `useLazyLoadMessages(sessionId)` → pagination
-  - `useSessionGitStatus(sessionId)` → git state
-  - `useSessionShellOutput(sessionId)` → shell output
-- Hooks subscribe on mount, cleanup on unmount; no manual dedup in components.
-
-### Page-Level Responsibilities
-
-- SSR fetches initial task/session + board snapshot, hydrates store.
-- Page reads URL `sessionId`, resolves task via session, and calls `setActiveSession(taskId, sessionId)` after load.
-- Page coordinates task list + session list loading (e.g., `listTaskSessions`).
-- Components render from store and trigger hooks for live updates.
-
-## Agents and ACP
-
-### ACP Basics
-
-- **Transport**: JSON-RPC 2.0 over stdin/stdout.
-- **Format**: newline-delimited JSON.
-- **Direction**: request/response + notifications.
-
-**Backend → Agent (Requests)**
-- `initialize`
-- `session/new`
-- `session/load`
-- `session/prompt`
-- `session/cancel`
-
-**Agent → Backend (Notifications)**
-- `session/update` (progress/content/tool calls/complete/error)
-
-### agentctl HTTP (Internal)
-
-- `/health` GET
-- `/api/v1/status` GET
-- `/api/v1/start` POST
-- `/api/v1/stop` POST
-- `/api/v1/acp/*` (initialize, session/new, session/load, prompt, stream)
-- `/api/v1/shell/*` (status, stream, buffer)
-- `/api/v1/workspace/*` (git status, file changes)
-
-### Agent Types
-
-- Augment agent lives at `apps/backend/dockerfiles/augment-agent/`.
-- Registry defaults in `apps/backend/internal/agent/registry/defaults.go`.
-
-## Frontend UI System (Shadcn)
-
-- Prefer `@kandev/ui` components over ad-hoc HTML.
-- Reuse components; avoid duplicating UI patterns.
-- Split large pages into smaller components; keep layout vs data vs presentation separated.
-
-## Best Practices
-
-- Prefer store-driven state over local fetches.
-- Prefer reusable components over duplication; split large pages into smaller child components.
-- Keep data fetching scoped to the component that needs it; avoid leaking fetches into parent controllers.
-- Avoid WS request/response inside UI components when store actions can handle it.
-- Keep SSR fetches minimal and map responses into store-friendly shapes.
-- Component subscriptions should be local; WS client should dedupe.
-- Keep agents logging to stderr; stdout only for ACP.
-
-## agentctl Server Architecture (Adapter Model)
-
-The agentctl server now uses a protocol adapter layer to support multiple agent CLIs while keeping a consistent HTTP + WebSocket surface for the backend.
-
-- `server/adapter/` defines the `AgentAdapter` interface and normalized `SessionUpdate` payloads.
-- `ACPAdapter` uses the ACP JSON-RPC protocol over stdio (`server/adapter/acp_adapter.go`).
-- `CodexAdapter` supports Codex-style JSON-RPC over stdio (`server/adapter/codex_adapter.go`).
-- `process.Manager` owns the subprocess, wires stdin/stdout into the selected adapter, and forwards normalized updates to API streams.
-- `api/acp.go` exposes protocol-agnostic endpoints (`/api/v1/acp/*`) that delegate to the adapter.
-- `instance/` manages per-agent instance servers on dedicated ports (control server creates instances; each instance hosts its own API server).
+See `docs/asyncapi.yaml` for all WS actions.
 
 ---
 
-**Last Updated**: 2026-01-19
+## Best Practices
+
+### Backend
+- Use provider pattern for dependency injection
+- Keep agents logging to stderr; stdout only for ACP
+- Pass context through call chains (but detach for background work)
+- Use event bus for cross-component communication
+
+### Frontend
+- Never fetch in components; use SSR + store hydration
+- Always use subscription hooks; never raw WS calls in components
+- Keep components reading from store only
+- Split large pages into smaller components
+
+---
+
+**Last Updated**: 2026-01-22

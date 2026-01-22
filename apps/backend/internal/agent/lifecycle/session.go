@@ -12,6 +12,7 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agentctl/client"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/common/appctx"
 	"github.com/kandev/kandev/internal/common/logger"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -22,12 +23,14 @@ type SessionManager struct {
 	eventPublisher *EventPublisher
 	streamManager  *StreamManager
 	executionStore *ExecutionStore
+	stopCh         <-chan struct{} // For graceful shutdown coordination
 }
 
 // NewSessionManager creates a new SessionManager
-func NewSessionManager(log *logger.Logger) *SessionManager {
+func NewSessionManager(log *logger.Logger, stopCh <-chan struct{}) *SessionManager {
 	return &SessionManager{
 		logger: log,
+		stopCh: stopCh,
 	}
 }
 
@@ -243,8 +246,8 @@ func (sm *SessionManager) InitializeAndPrompt(
 	// The agent will process the prompt and emit events via the WebSocket stream.
 	if taskDescription != "" {
 		go func() {
-			// Use a long timeout for initial prompts
-			promptCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			// Use detached context that respects stopCh for graceful shutdown
+			promptCtx, cancel := appctx.Detached(ctx, sm.stopCh, 10*time.Minute)
 			defer cancel()
 
 			_, err := sm.SendPrompt(promptCtx, execution, taskDescription, false, markReady)

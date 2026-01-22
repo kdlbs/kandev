@@ -27,6 +27,21 @@ type WorktreeCleanup interface {
 	OnTaskDeleted(ctx context.Context, taskID string) error
 }
 
+// WorktreeProvider extends WorktreeCleanup with query capabilities.
+// Implementations that support this can be type-asserted from WorktreeCleanup.
+type WorktreeProvider interface {
+	WorktreeCleanup
+	// GetAllByTaskID returns all worktrees associated with a task.
+	GetAllByTaskID(ctx context.Context, taskID string) ([]*worktree.Worktree, error)
+}
+
+// WorktreeBatchCleaner extends WorktreeProvider with batch cleanup.
+type WorktreeBatchCleaner interface {
+	WorktreeProvider
+	// CleanupWorktrees removes multiple worktrees in a single operation.
+	CleanupWorktrees(ctx context.Context, worktrees []*worktree.Worktree) error
+}
+
 // TaskExecutionStopper stops active task execution (agent session + instance).
 type TaskExecutionStopper interface {
 	StopTask(ctx context.Context, taskID, reason string, force bool) error
@@ -487,9 +502,7 @@ func (s *Service) DeleteTask(ctx context.Context, id string) error {
 
 	var worktrees []*worktree.Worktree
 	if s.worktreeCleanup != nil {
-		if provider, ok := s.worktreeCleanup.(interface {
-			GetAllByTaskID(context.Context, string) ([]*worktree.Worktree, error)
-		}); ok {
+		if provider, ok := s.worktreeCleanup.(WorktreeProvider); ok {
 			worktrees, err = provider.GetAllByTaskID(ctx, id)
 			if err != nil {
 				s.logger.Warn("failed to list worktrees for delete",
@@ -516,51 +529,77 @@ func (s *Service) DeleteTask(ctx context.Context, id string) error {
 		zap.String("task_id", id),
 		zap.Duration("duration", time.Since(start)))
 
+	// Perform cleanup synchronously with dedicated timeout
+	// Use background context since the original request may complete
 	if s.executionStopper != nil || s.worktreeCleanup != nil || len(sessions) > 0 {
-		go func(taskID string, sessions []*models.TaskSession, worktrees []*worktree.Worktree) {
-			cleanupStart := time.Now()
-			cleanupCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-			defer cancel()
+		cleanupStart := time.Now()
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
 
-			if s.executionStopper != nil {
-				if err := s.executionStopper.StopTask(cleanupCtx, taskID, "task deleted", true); err != nil {
-					s.logger.Warn("failed to stop task execution on delete",
-						zap.String("task_id", taskID),
-						zap.Error(err))
-				}
-			}
+		cleanupErrors := s.performTaskCleanup(cleanupCtx, id, sessions, worktrees)
 
-			if len(worktrees) > 0 {
-				if cleaner, ok := s.worktreeCleanup.(interface {
-					CleanupWorktrees(context.Context, []*worktree.Worktree) error
-				}); ok {
-					if err := cleaner.CleanupWorktrees(cleanupCtx, worktrees); err != nil {
-						s.logger.Warn("failed to cleanup worktrees after delete",
-							zap.String("task_id", taskID),
-							zap.Error(err))
-					}
-				}
-			}
-
-			for _, session := range sessions {
-				if session == nil || session.ID == "" {
-					continue
-				}
-				if err := s.repo.DeleteExecutorRunningBySessionID(cleanupCtx, session.ID); err != nil {
-					s.logger.Debug("failed to delete executor runtime for session",
-						zap.String("task_id", taskID),
-						zap.String("session_id", session.ID),
-						zap.Error(err))
-				}
-			}
-
-			s.logger.Info("task delete cleanup finished",
-				zap.String("task_id", taskID),
+		if len(cleanupErrors) > 0 {
+			s.logger.Warn("task cleanup completed with errors",
+				zap.String("task_id", id),
+				zap.Int("error_count", len(cleanupErrors)),
 				zap.Duration("duration", time.Since(cleanupStart)))
-		}(id, sessions, worktrees)
+		} else {
+			s.logger.Info("task cleanup completed",
+				zap.String("task_id", id),
+				zap.Duration("duration", time.Since(cleanupStart)))
+		}
 	}
 
 	return nil
+}
+
+// performTaskCleanup handles post-deletion cleanup operations.
+// Returns a slice of errors encountered (empty if all succeeded).
+func (s *Service) performTaskCleanup(
+	ctx context.Context,
+	taskID string,
+	sessions []*models.TaskSession,
+	worktrees []*worktree.Worktree,
+) []error {
+	var errs []error
+
+	// Stop any running execution
+	if s.executionStopper != nil {
+		if err := s.executionStopper.StopTask(ctx, taskID, "task deleted", true); err != nil {
+			s.logger.Warn("failed to stop task execution on delete",
+				zap.String("task_id", taskID),
+				zap.Error(err))
+			errs = append(errs, fmt.Errorf("stop execution: %w", err))
+		}
+	}
+
+	// Cleanup worktrees
+	if len(worktrees) > 0 {
+		if cleaner, ok := s.worktreeCleanup.(WorktreeBatchCleaner); ok {
+			if err := cleaner.CleanupWorktrees(ctx, worktrees); err != nil {
+				s.logger.Warn("failed to cleanup worktrees after delete",
+					zap.String("task_id", taskID),
+					zap.Error(err))
+				errs = append(errs, fmt.Errorf("cleanup worktrees: %w", err))
+			}
+		}
+	}
+
+	// Delete executor running records for sessions
+	for _, session := range sessions {
+		if session == nil || session.ID == "" {
+			continue
+		}
+		if err := s.repo.DeleteExecutorRunningBySessionID(ctx, session.ID); err != nil {
+			s.logger.Debug("failed to delete executor runtime for session",
+				zap.String("task_id", taskID),
+				zap.String("session_id", session.ID),
+				zap.Error(err))
+			// Don't add to errs - this is a debug-level issue
+		}
+	}
+
+	return errs
 }
 
 // ListTasks returns all tasks for a board
