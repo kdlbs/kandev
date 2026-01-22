@@ -158,23 +158,6 @@ type PermissionRespondResponse struct {
 	PendingID string `json:"pending_id"`
 }
 
-// GetTaskExecutionRequest is the payload for task.execution
-type GetTaskExecutionRequest struct {
-	TaskID string `json:"task_id"`
-}
-
-// TaskExecutionResponse is the response for task.execution
-type TaskExecutionResponse struct {
-	HasExecution     bool   `json:"has_execution"`
-	TaskID           string `json:"task_id"`
-	AgentExecutionID string `json:"agent_execution_id,omitempty"`
-	AgentProfileID   string `json:"agent_profile_id,omitempty"`
-	TaskSessionID    string `json:"session_id,omitempty"`
-	State            string `json:"state,omitempty"`
-	Progress         int    `json:"progress,omitempty"`
-	StartedAt        string `json:"started_at,omitempty"`
-}
-
 // CancelAgentRequest is the payload for the agent.cancel WebSocket action.
 type CancelAgentRequest struct {
 	SessionID string `json:"session_id"`

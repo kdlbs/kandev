@@ -107,12 +107,6 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID))
 
-	if exec, ok := s.executor.GetExecutionWithContext(ctx, taskID); ok && exec != nil {
-		if exec.SessionID != "" && exec.SessionID != sessionID {
-			return nil, executor.ErrExecutionAlreadyRunning
-		}
-	}
-
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return nil, err
@@ -190,8 +184,8 @@ func (s *Service) GetTaskSessionStatus(ctx context.Context, taskID, sessionID st
 		}
 	}
 
-	// 2. Check if we have an active execution in memory and agent is running
-	if exec, ok := s.executor.GetExecutionWithContext(ctx, taskID); ok && exec != nil {
+	// 2. Check if this session's agent is running
+	if exec, ok := s.executor.GetExecutionBySession(sessionID); ok && exec != nil {
 		resp.IsAgentRunning = true
 		resp.NeedsResume = false
 		return resp, nil
@@ -420,11 +414,6 @@ func (s *Service) CompleteTask(ctx context.Context, taskID string) error {
 	s.logger.Info("task marked as COMPLETED",
 		zap.String("task_id", taskID))
 	return nil
-}
-
-// GetTaskExecution returns the current execution state for a task
-func (s *Service) GetTaskExecution(taskID string) (*executor.TaskExecution, bool) {
-	return s.executor.GetExecution(taskID)
 }
 
 // GetQueuedTasks returns tasks in the queue

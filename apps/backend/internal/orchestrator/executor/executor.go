@@ -949,30 +949,6 @@ func (e *Executor) RespondToPermission(ctx context.Context, sessionID, pendingID
 	return e.agentManager.RespondToPermissionBySessionID(ctx, sessionID, pendingID, optionID, cancelled)
 }
 
-// GetExecution returns the current execution state for a task (returns most recent active session)
-func (e *Executor) GetExecution(taskID string) (*TaskExecution, bool) {
-	ctx := context.Background()
-	const startupGracePeriod = 30 * time.Second
-
-	// Load from database
-	session, err := e.repo.GetActiveTaskSessionByTaskID(ctx, taskID)
-	if err != nil {
-		return nil, false
-	}
-
-	// Verify the agent is actually running by probing the lifecycle manager
-	// This handles the case where backend was restarted and DB has stale "running" sessions
-	if session.ID == "" || !e.agentManager.IsAgentRunningForSession(ctx, session.ID) {
-		if (session.State == models.TaskSessionStateStarting || session.State == models.TaskSessionStateRunning) &&
-			time.Since(session.UpdatedAt) < startupGracePeriod {
-			return FromTaskSession(session), true
-		}
-		return nil, false
-	}
-
-	return FromTaskSession(session), true
-}
-
 // GetExecutionBySession returns the execution state for a specific session
 func (e *Executor) GetExecutionBySession(sessionID string) (*TaskExecution, bool) {
 	ctx := context.Background()
@@ -989,33 +965,6 @@ func (e *Executor) GetExecutionBySession(sessionID string) (*TaskExecution, bool
 
 	// Verify the agent is actually running
 	if !e.agentManager.IsAgentRunningForSession(ctx, sessionID) {
-		if (session.State == models.TaskSessionStateStarting || session.State == models.TaskSessionStateRunning) &&
-			time.Since(session.UpdatedAt) < startupGracePeriod {
-			return FromTaskSession(session), true
-		}
-		return nil, false
-	}
-
-	return FromTaskSession(session), true
-}
-
-// GetExecutionWithContext returns the current execution state for a task with context (returns most recent active session)
-// This is a read-only check - it does NOT cancel sessions as a side effect.
-func (e *Executor) GetExecutionWithContext(ctx context.Context, taskID string) (*TaskExecution, bool) {
-	const startupGracePeriod = 30 * time.Second
-
-	// Load from database
-	session, err := e.repo.GetActiveTaskSessionByTaskID(ctx, taskID)
-	if err != nil {
-		return nil, false
-	}
-	if session.ID == "" {
-		return nil, false
-	}
-
-	// Verify the agent is actually running by probing the lifecycle manager
-	if !e.agentManager.IsAgentRunningForSession(ctx, session.ID) {
-		// Allow a grace period for sessions that are starting up
 		if (session.State == models.TaskSessionStateStarting || session.State == models.TaskSessionStateRunning) &&
 			time.Since(session.UpdatedAt) < startupGracePeriod {
 			return FromTaskSession(session), true

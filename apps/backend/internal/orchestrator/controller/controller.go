@@ -186,25 +186,3 @@ func (c *Controller) CancelAgent(ctx context.Context, req dto.CancelAgentRequest
 		SessionID: req.SessionID,
 	}, nil
 }
-
-// GetTaskExecution returns the execution state for a task
-func (c *Controller) GetTaskExecution(ctx context.Context, req dto.GetTaskExecutionRequest) (dto.TaskExecutionResponse, error) {
-	execution, exists := c.service.GetTaskExecution(req.TaskID)
-	if !exists {
-		return dto.TaskExecutionResponse{
-			HasExecution: false,
-			TaskID:       req.TaskID,
-		}, nil
-	}
-
-	return dto.TaskExecutionResponse{
-		HasExecution:     true,
-		TaskID:           execution.TaskID,
-		AgentExecutionID: execution.AgentExecutionID,
-		AgentProfileID:   execution.AgentProfileID,
-		TaskSessionID:    execution.SessionID,
-		State:            string(execution.SessionState),
-		Progress:         execution.Progress,
-		StartedAt:        execution.StartedAt.Format("2006-01-02T15:04:05Z"),
-	}, nil
-}
