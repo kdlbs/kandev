@@ -130,58 +130,6 @@ func (m *Manager) SetWorkspaceInfoProvider(provider WorkspaceInfoProvider) {
 	m.workspaceInfoProvider = provider
 }
 
-// createExecution creates an agentctl execution.
-// The agent subprocess is NOT started - call ConfigureAgent + Start explicitly.
-func (m *Manager) createExecution(ctx context.Context, taskID string, info *WorkspaceInfo) (*AgentExecution, error) {
-	if m.runtime == nil {
-		return nil, fmt.Errorf("no runtime configured")
-	}
-
-	if info.AgentID == "" {
-		return nil, fmt.Errorf("agent ID is required in WorkspaceInfo")
-	}
-
-	executionID := uuid.New().String()
-
-	agentConfig, err := m.registry.Get(info.AgentID)
-	if err != nil {
-		return nil, fmt.Errorf("agent type %q not found in registry: %w", info.AgentID, err)
-	}
-
-	req := &RuntimeCreateRequest{
-		InstanceID:     executionID,
-		TaskID:         taskID,
-		SessionID:      info.SessionID,
-		AgentProfileID: info.AgentProfileID,
-		WorkspacePath:  info.WorkspacePath,
-		Protocol:       string(agentConfig.Protocol),
-	}
-
-	runtimeInstance, err := m.runtime.CreateInstance(ctx, req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create execution: %w", err)
-	}
-
-	execution := runtimeInstance.ToAgentExecution(req)
-
-	// Set the ACP session ID for session resumption
-	if info.ACPSessionID != "" {
-		execution.ACPSessionID = info.ACPSessionID
-	}
-
-	m.executionStore.Add(execution)
-
-	go m.waitForAgentctlReady(execution)
-
-	m.logger.Info("execution created",
-		zap.String("execution_id", executionID),
-		zap.String("task_id", taskID),
-		zap.String("workspace_path", info.WorkspacePath),
-		zap.String("runtime", string(m.runtime.Name())))
-
-	return execution, nil
-}
-
 // Start starts the lifecycle manager background tasks
 func (m *Manager) Start(ctx context.Context) error {
 	runtimeName := "none"
