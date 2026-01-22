@@ -212,6 +212,8 @@ func LoadWithPath(configPath string) (*Config, error) {
 	// so we explicitly bind keys where env var naming differs from config key naming.
 	_ = v.BindEnv("agent.standalonePort", "AGENTCTL_PORT", "KANDEV_AGENT_STANDALONE_PORT")
 	_ = v.BindEnv("agent.standaloneHost", "KANDEV_AGENT_STANDALONE_HOST")
+	_ = v.BindEnv("agent.mcpServerPort", "KANDEV_AGENT_MCP_SERVER_PORT")
+	_ = v.BindEnv("agent.mcpServerUrl", "KANDEV_AGENT_MCP_SERVER_URL")
 
 	// Configure config file
 	v.SetConfigName("config")

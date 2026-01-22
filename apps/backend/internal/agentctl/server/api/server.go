@@ -9,6 +9,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
+	"github.com/kandev/kandev/internal/common/httpmw"
 	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/zap"
 )
@@ -38,6 +39,8 @@ func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, log *logger
 			},
 		},
 	}
+
+	s.router.Use(httpmw.RequestLogger(s.logger, "agentctl-instance"))
 
 	s.setupRoutes()
 	return s

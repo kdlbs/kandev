@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/instance"
+	"github.com/kandev/kandev/internal/common/httpmw"
 	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/zap"
 )
@@ -32,6 +33,8 @@ func NewControlServer(cfg *config.Config, instMgr *instance.Manager, log *logger
 		logger:  log.WithFields(zap.String("component", "control-server")),
 		router:  gin.New(),
 	}
+
+	cs.router.Use(httpmw.RequestLogger(cs.logger, "agentctl-control"))
 
 	cs.setupRoutes()
 	return cs
