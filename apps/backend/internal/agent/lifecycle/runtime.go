@@ -109,7 +109,6 @@ func (ri *RuntimeInstance) ToAgentExecution(req *RuntimeCreateRequest) *AgentExe
 		WorkspacePath:        workspacePath,
 		Status:               v1.AgentStatusRunning,
 		StartedAt:            time.Now(),
-		Progress:             0,
 		Metadata:             metadata,
 		agentctl:             ri.Client,
 		standaloneInstanceID: ri.StandaloneInstanceID,

@@ -13,7 +13,6 @@ type AgentDTO struct {
 	AgentProfileID string            `json:"agent_profile_id"`
 	ContainerID    string            `json:"container_id,omitempty"`
 	Status         string            `json:"status"`
-	Progress       int               `json:"progress"`
 	StartedAt      string            `json:"started_at"`
 	FinishedAt     string            `json:"finished_at,omitempty"`
 	ExitCode       *int              `json:"exit_code,omitempty"`
@@ -96,7 +95,6 @@ func FromAgentExecution(execution *AgentExecutionData) AgentDTO {
 		AgentProfileID: execution.AgentProfileID,
 		ContainerID:    execution.ContainerID,
 		Status:         execution.Status,
-		Progress:       execution.Progress,
 		StartedAt:      execution.StartedAt.Format("2006-01-02T15:04:05Z"),
 	}
 	if execution.FinishedAt != nil && !execution.FinishedAt.IsZero() {
@@ -118,7 +116,6 @@ type AgentExecutionData struct {
 	AgentProfileID string
 	ContainerID    string
 	Status         string
-	Progress       int
 	StartedAt      time.Time
 	FinishedAt     *time.Time
 	ExitCode       *int

@@ -134,7 +134,6 @@ type TaskSessionDTO struct {
 	WorktreePath         string                  `json:"worktree_path,omitempty"`
 	WorktreeBranch       string                  `json:"worktree_branch,omitempty"`
 	State                models.TaskSessionState `json:"state"`
-	Progress             int                     `json:"progress"`
 	ErrorMessage         string                  `json:"error_message,omitempty"`
 	Metadata             map[string]interface{}  `json:"metadata,omitempty"`
 	AgentProfileSnapshot map[string]interface{}  `json:"agent_profile_snapshot,omitempty"`
@@ -406,7 +405,6 @@ func FromTaskSession(session *models.TaskSession) TaskSessionDTO {
 		RepositoryID:         session.RepositoryID,
 		BaseBranch:           session.BaseBranch,
 		State:                session.State,
-		Progress:             session.Progress,
 		ErrorMessage:         session.ErrorMessage,
 		Metadata:             session.Metadata,
 		AgentProfileSnapshot: session.AgentProfileSnapshot,

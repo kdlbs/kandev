@@ -91,7 +91,6 @@ export function useSessionResumption(
             id: sessionId,
             task_id: taskId,
             state: status.state as TaskSessionState,
-            progress: session?.progress ?? 0,
             started_at: session?.started_at ?? '',
             updated_at: session?.updated_at ?? '',
           });
@@ -125,7 +124,6 @@ export function useSessionResumption(
                 id: sessionId,
                 task_id: taskId,
                 state: resumeResp.state as TaskSessionState,
-                progress: session?.progress ?? 0,
                 started_at: session?.started_at ?? '',
                 updated_at: session?.updated_at ?? '',
               });
@@ -185,7 +183,6 @@ export function useSessionResumption(
             id: sessionId,
             task_id: taskId,
             state: response.state as TaskSessionState,
-            progress: session?.progress ?? 0,
             started_at: session?.started_at ?? '',
             updated_at: session?.updated_at ?? '',
           });

@@ -248,7 +248,6 @@ func (r *sqliteRepository) initSchema() error {
 		environment_snapshot TEXT DEFAULT '{}',
 		repository_snapshot TEXT DEFAULT '{}',
 		state TEXT NOT NULL DEFAULT 'CREATED',
-		progress INTEGER DEFAULT 0,
 		error_message TEXT DEFAULT '',
 		metadata TEXT DEFAULT '{}',
 		started_at DATETIME NOT NULL,
@@ -1983,12 +1982,12 @@ func (r *sqliteRepository) CreateTaskSession(ctx context.Context, session *model
 			id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, environment_id,
 			repository_id, base_branch,
 			agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
-			state, progress, error_message, metadata, started_at, completed_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			state, error_message, metadata, started_at, completed_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, session.ID, session.TaskID, session.AgentExecutionID, session.ContainerID, session.AgentProfileID,
 		session.ExecutorID, session.EnvironmentID, session.RepositoryID, session.BaseBranch,
 		string(agentProfileSnapshotJSON), string(executorSnapshotJSON), string(environmentSnapshotJSON), string(repositorySnapshotJSON),
-		string(session.State), session.Progress, session.ErrorMessage, string(metadataJSON),
+		string(session.State), session.ErrorMessage, string(metadataJSON),
 		session.StartedAt, session.CompletedAt, session.UpdatedAt)
 
 	return err
@@ -2009,14 +2008,14 @@ func (r *sqliteRepository) GetTaskSession(ctx context.Context, id string) (*mode
 		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, environment_id,
 		       repository_id, base_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
-		       state, progress, error_message, metadata, started_at, completed_at, updated_at
+		       state, error_message, metadata, started_at, completed_at, updated_at
 		FROM task_sessions WHERE id = ?
 	`, id).Scan(
 		&session.ID, &session.TaskID, &session.AgentExecutionID, &session.ContainerID, &session.AgentProfileID,
 		&session.ExecutorID, &session.EnvironmentID,
 		&session.RepositoryID, &session.BaseBranch,
 		&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
-		&state, &session.Progress, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
+		&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
 	)
 
 	if err == sql.ErrNoRows {
@@ -2080,14 +2079,14 @@ func (r *sqliteRepository) GetTaskSessionByTaskID(ctx context.Context, taskID st
 		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, environment_id,
 		       repository_id, base_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
-		       state, progress, error_message, metadata, started_at, completed_at, updated_at
+		       state, error_message, metadata, started_at, completed_at, updated_at
 		FROM task_sessions WHERE task_id = ? ORDER BY started_at DESC LIMIT 1
 	`, taskID).Scan(
 		&session.ID, &session.TaskID, &session.AgentExecutionID, &session.ContainerID, &session.AgentProfileID,
 		&session.ExecutorID, &session.EnvironmentID,
 		&session.RepositoryID, &session.BaseBranch,
 		&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
-		&state, &session.Progress, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
+		&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
 	)
 
 	if err == sql.ErrNoRows {
@@ -2151,7 +2150,7 @@ func (r *sqliteRepository) GetActiveTaskSessionByTaskID(ctx context.Context, tas
 		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, environment_id,
 		       repository_id, base_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
-		       state, progress, error_message, metadata, started_at, completed_at, updated_at
+		       state, error_message, metadata, started_at, completed_at, updated_at
 		FROM task_sessions
 		WHERE task_id = ? AND state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
 		ORDER BY started_at DESC LIMIT 1
@@ -2160,7 +2159,7 @@ func (r *sqliteRepository) GetActiveTaskSessionByTaskID(ctx context.Context, tas
 		&session.ExecutorID, &session.EnvironmentID,
 		&session.RepositoryID, &session.BaseBranch,
 		&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
-		&state, &session.Progress, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
+		&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
 	)
 
 	if err == sql.ErrNoRows {
@@ -2239,12 +2238,12 @@ func (r *sqliteRepository) UpdateTaskSession(ctx context.Context, session *model
 			agent_execution_id = ?, container_id = ?, agent_profile_id = ?, executor_id = ?, environment_id = ?,
 			repository_id = ?, base_branch = ?,
 			agent_profile_snapshot = ?, executor_snapshot = ?, environment_snapshot = ?, repository_snapshot = ?,
-			state = ?, progress = ?, error_message = ?, metadata = ?, completed_at = ?, updated_at = ?
+			state = ?, error_message = ?, metadata = ?, completed_at = ?, updated_at = ?
 		WHERE id = ?
 	`, session.AgentExecutionID, session.ContainerID, session.AgentProfileID, session.ExecutorID, session.EnvironmentID,
 		session.RepositoryID, session.BaseBranch,
 		string(agentProfileSnapshotJSON), string(executorSnapshotJSON), string(environmentSnapshotJSON), string(repositorySnapshotJSON),
-		string(session.State), session.Progress, session.ErrorMessage, string(metadataJSON), session.CompletedAt,
+		string(session.State), session.ErrorMessage, string(metadataJSON), session.CompletedAt,
 		session.UpdatedAt, session.ID)
 	if err != nil {
 		return err
@@ -2286,7 +2285,7 @@ func (r *sqliteRepository) ListTaskSessions(ctx context.Context, taskID string) 
 		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, environment_id,
 		       repository_id, base_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
-		       state, progress, error_message, metadata, started_at, completed_at, updated_at
+		       state, error_message, metadata, started_at, completed_at, updated_at
 		FROM task_sessions WHERE task_id = ? ORDER BY started_at DESC
 	`, taskID)
 	if err != nil {
@@ -2314,7 +2313,7 @@ func (r *sqliteRepository) ListActiveTaskSessions(ctx context.Context) ([]*model
 		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, environment_id,
 		       repository_id, base_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
-		       state, progress, error_message, metadata, started_at, completed_at, updated_at
+		       state, error_message, metadata, started_at, completed_at, updated_at
 		FROM task_sessions WHERE state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT') ORDER BY started_at DESC
 	`)
 	if err != nil {
@@ -2342,7 +2341,7 @@ func (r *sqliteRepository) ListActiveTaskSessionsByTaskID(ctx context.Context, t
 		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, environment_id,
 		       repository_id, base_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
-		       state, progress, error_message, metadata, started_at, completed_at, updated_at
+		       state, error_message, metadata, started_at, completed_at, updated_at
 		FROM task_sessions WHERE task_id = ? AND state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT') ORDER BY started_at DESC
 	`, taskID)
 	if err != nil {
@@ -2437,7 +2436,7 @@ func (r *sqliteRepository) scanTaskSessions(ctx context.Context, rows *sql.Rows)
 			&session.ExecutorID, &session.EnvironmentID,
 			&session.RepositoryID, &session.BaseBranch,
 			&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
-			&state, &session.Progress, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
+			&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
 		)
 		if err != nil {
 			return nil, err

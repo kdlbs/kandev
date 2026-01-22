@@ -125,7 +125,6 @@ export type TaskSession = {
   worktree_path?: string;
   worktree_branch?: string;
   state: TaskSessionState;
-  progress: number;
   error_message?: string;
   metadata?: Record<string, unknown> | null;
   agent_profile_snapshot?: Record<string, unknown> | null;

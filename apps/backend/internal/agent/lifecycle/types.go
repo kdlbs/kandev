@@ -27,13 +27,12 @@ type AgentExecution struct {
 	WorkspacePath  string // Path to the workspace (worktree or repository path)
 	ACPSessionID   string // ACP session ID to resume, if available
 	AgentCommand   string // Command to start the agent subprocess
-	Status         v1.AgentStatus
-	StartedAt      time.Time
-	FinishedAt     *time.Time
-	ExitCode       *int
-	ErrorMessage   string
-	Progress       int
-	Metadata       map[string]interface{}
+	Status       v1.AgentStatus
+	StartedAt    time.Time
+	FinishedAt   *time.Time
+	ExitCode     *int
+	ErrorMessage string
+	Metadata     map[string]interface{}
 
 	// agentctl client for this execution
 	agentctl *agentctl.Client

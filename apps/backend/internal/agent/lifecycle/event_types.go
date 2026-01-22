@@ -12,7 +12,6 @@ type AgentEventPayload struct {
 	Status         string     `json:"status"`
 	StartedAt      time.Time  `json:"started_at"`
 	FinishedAt     *time.Time `json:"finished_at,omitempty"`
-	Progress       int        `json:"progress"`
 	ErrorMessage   string     `json:"error_message,omitempty"`
 	ExitCode       *int       `json:"exit_code,omitempty"`
 }

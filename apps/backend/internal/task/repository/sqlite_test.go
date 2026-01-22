@@ -784,7 +784,6 @@ func TestSQLiteRepository_TaskSessionCRUD(t *testing.T) {
 		ExecutorID:       "executor-1",
 		EnvironmentID:    "env-1",
 		State:            models.TaskSessionStateStarting,
-		Progress:         0,
 		Metadata:         map[string]interface{}{"key": "value"},
 	}
 	if err := repo.CreateTaskSession(ctx, session); err != nil {
@@ -820,16 +819,12 @@ func TestSQLiteRepository_TaskSessionCRUD(t *testing.T) {
 
 	// Update agent session
 	session.State = models.TaskSessionStateRunning
-	session.Progress = 50
 	if err := repo.UpdateTaskSession(ctx, session); err != nil {
 		t.Fatalf("failed to update agent session: %v", err)
 	}
 	retrieved, _ = repo.GetTaskSession(ctx, session.ID)
 	if retrieved.State != models.TaskSessionStateRunning {
 		t.Errorf("expected state 'running', got %s", retrieved.State)
-	}
-	if retrieved.Progress != 50 {
-		t.Errorf("expected progress 50, got %d", retrieved.Progress)
 	}
 
 	// Delete agent session
