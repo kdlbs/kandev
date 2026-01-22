@@ -30,7 +30,6 @@ import (
 
 	// Agent Manager packages
 	"github.com/kandev/kandev/internal/agent/docker"
-	"github.com/kandev/kandev/internal/agent/lifecycle"
 	agentsettingshandlers "github.com/kandev/kandev/internal/agent/settings/handlers"
 
 	editorcontroller "github.com/kandev/kandev/internal/editors/controller"
@@ -291,6 +290,7 @@ func main() {
 	go gateway.Hub.Run(ctx)
 	gateways.RegisterTaskNotifications(ctx, eventBus, gateway.Hub, log)
 	gateways.RegisterUserNotifications(ctx, eventBus, gateway.Hub, log)
+	gateways.RegisterSessionStreamNotifications(ctx, eventBus, gateway.Hub, log)
 
 	notificationSvc = notificationservice.NewService(notificationRepo, taskRepo, gateway.Hub, log)
 	notificationCtrl = notificationcontroller.NewController(notificationSvc)
@@ -359,6 +359,7 @@ func main() {
 	})
 	log.Info("Session data provider configured for session subscriptions (git status)")
 
+	waitForAgentctlControlHealthy(ctx, cfg, log)
 	if err := orchestratorSvc.Start(ctx); err != nil {
 		log.Fatal("Failed to start orchestrator", zap.Error(err))
 	}
@@ -468,116 +469,6 @@ func main() {
 		log.Info("Subscribed to task_session.state_changed events for WebSocket broadcasting")
 	}
 
-	// Subscribe to git status events and broadcast to WebSocket subscribers
-	_, err = eventBus.Subscribe(events.BuildGitStatusWildcardSubject(), func(ctx context.Context, event *bus.Event) error {
-		// Extract session_id from the event data
-		var taskSessionID string
-		switch data := event.Data.(type) {
-		case lifecycle.GitStatusEventPayload:
-			taskSessionID = data.SessionID
-		case *lifecycle.GitStatusEventPayload:
-			taskSessionID = data.SessionID
-		case map[string]interface{}:
-			taskSessionID, _ = data["session_id"].(string)
-		}
-		if taskSessionID == "" {
-			return nil
-		}
-
-		// Broadcast git status update to session subscribers
-		notification, _ := ws.NewNotification("session.git.status", event.Data)
-		gateway.Hub.BroadcastToSession(taskSessionID, notification)
-		return nil
-	})
-	if err != nil {
-		log.Error("Failed to subscribe to git status events", zap.Error(err))
-	} else {
-		log.Info("Subscribed to git status events for WebSocket broadcasting")
-	}
-
-	// Subscribe to file change events and broadcast to WebSocket subscribers
-	_, err = eventBus.Subscribe(events.BuildFileChangeWildcardSubject(), func(ctx context.Context, event *bus.Event) error {
-		// Extract session_id from the event data
-		var taskSessionID string
-		switch data := event.Data.(type) {
-		case lifecycle.FileChangeEventPayload:
-			taskSessionID = data.SessionID
-		case *lifecycle.FileChangeEventPayload:
-			taskSessionID = data.SessionID
-		case map[string]interface{}:
-			taskSessionID, _ = data["session_id"].(string)
-		}
-		if taskSessionID == "" {
-			return nil
-		}
-
-		// Broadcast file change notification to session subscribers
-		notification, _ := ws.NewNotification(ws.ActionWorkspaceFileChanges, event.Data)
-		gateway.Hub.BroadcastToSession(taskSessionID, notification)
-		return nil
-	})
-	if err != nil {
-		log.Error("Failed to subscribe to file change events", zap.Error(err))
-	} else {
-		log.Info("Subscribed to file change events for WebSocket broadcasting")
-	}
-
-	// Subscribe to shell output events and broadcast to WebSocket subscribers
-	_, err = eventBus.Subscribe(events.BuildShellOutputWildcardSubject(), func(ctx context.Context, event *bus.Event) error {
-		// Extract session_id from the event data
-		var taskSessionID string
-		switch data := event.Data.(type) {
-		case lifecycle.ShellOutputEventPayload:
-			taskSessionID = data.SessionID
-		case *lifecycle.ShellOutputEventPayload:
-			taskSessionID = data.SessionID
-		case map[string]interface{}:
-			taskSessionID, _ = data["session_id"].(string)
-		}
-		if taskSessionID == "" {
-			return nil
-		}
-
-		// Broadcast shell output to session subscribers
-		notification, _ := ws.NewNotification(ws.ActionSessionShellOutput, event.Data)
-		gateway.Hub.BroadcastToSession(taskSessionID, notification)
-		return nil
-	})
-	if err != nil {
-		log.Error("Failed to subscribe to shell output events", zap.Error(err))
-	} else {
-		log.Info("Subscribed to shell output events for WebSocket broadcasting")
-	}
-
-	// Subscribe to shell exit events and broadcast to WebSocket subscribers
-	// Note: Frontend expects shell exit via session.shell.output with type: "exit"
-	_, err = eventBus.Subscribe(events.BuildShellExitWildcardSubject(), func(ctx context.Context, event *bus.Event) error {
-		// Extract session_id from the event data
-		var taskSessionID string
-		switch data := event.Data.(type) {
-		case lifecycle.ShellExitEventPayload:
-			taskSessionID = data.SessionID
-		case *lifecycle.ShellExitEventPayload:
-			taskSessionID = data.SessionID
-		case map[string]interface{}:
-			taskSessionID, _ = data["session_id"].(string)
-		}
-		if taskSessionID == "" {
-			return nil
-		}
-
-		// Broadcast shell exit to session subscribers via session.shell.output action
-		// Frontend handles exit events via type: "exit" in the same handler
-		notification, _ := ws.NewNotification(ws.ActionSessionShellOutput, event.Data)
-		gateway.Hub.BroadcastToSession(taskSessionID, notification)
-		return nil
-	})
-	if err != nil {
-		log.Error("Failed to subscribe to shell exit events", zap.Error(err))
-	} else {
-		log.Info("Subscribed to shell exit events for WebSocket broadcasting")
-	}
-
 	// ============================================
 	// HTTP SERVER (WebSocket + HTTP endpoints)
 	// ============================================
@@ -615,6 +506,7 @@ func main() {
 		&orchestratorAdapter{svc: orchestratorSvc},
 		log,
 	)
+	taskhandlers.RegisterProcessRoutes(router, taskSvc, lifecycleMgr, log)
 	log.Info("Registered Task Service handlers (HTTP + WebSocket)")
 
 	agentsettingshandlers.RegisterRoutes(router, agentSettingsController, gateway.Hub, log)

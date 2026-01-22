@@ -89,6 +89,12 @@ func (s *Server) setupRoutes() {
 		api.GET("/shell/status", s.handleShellStatus)
 		api.GET("/shell/buffer", s.handleShellBuffer)
 
+		// Process runner
+		api.POST("/processes/start", s.handleStartProcess)
+		api.POST("/processes/stop", s.handleStopProcess)
+		api.GET("/processes", s.handleListProcesses)
+		api.GET("/processes/:id", s.handleGetProcess)
+
 		// Git operations
 		api.POST("/git/pull", s.handleGitPull)
 		api.POST("/git/push", s.handleGitPush)

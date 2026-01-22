@@ -186,6 +186,7 @@ export async function createRepositoryAction(payload: {
   worktree_branch_prefix: string;
   setup_script: string;
   cleanup_script: string;
+  dev_script: string;
 }) {
   return fetchJson<Repository>(`${apiBaseUrl}/api/v1/workspaces/${payload.workspace_id}/repositories`, {
     method: 'POST',
@@ -201,6 +202,7 @@ export async function createRepositoryAction(payload: {
       worktree_branch_prefix: payload.worktree_branch_prefix,
       setup_script: payload.setup_script,
       cleanup_script: payload.cleanup_script,
+      dev_script: payload.dev_script,
     }),
   });
 }

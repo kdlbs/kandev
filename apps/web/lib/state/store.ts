@@ -15,9 +15,18 @@ import type {
   TaskSession,
   Turn,
 } from '@/lib/types/http';
-import type { FileInfo } from '@/lib/types/backend';
 import { createStore } from 'zustand/vanilla';
 import { immer } from 'zustand/middleware/immer';
+import { setLocalStorage } from '@/lib/local-storage';
+
+const maxProcessOutputBytes = 2 * 1024 * 1024;
+
+function trimProcessOutput(value: string) {
+  if (value.length <= maxProcessOutputBytes) {
+    return value;
+  }
+  return value.slice(value.length - maxProcessOutputBytes);
+}
 
 export type KanbanState = {
   boardId: string | null;
@@ -163,7 +172,54 @@ export type ShellState = {
   >;
 };
 
-export type { FileInfo };
+export type ProcessStatusEntry = {
+  processId: string;
+  sessionId: string;
+  kind: string;
+  scriptName?: string;
+  status: string;
+  command?: string;
+  workingDir?: string;
+  exitCode?: number | null;
+  startedAt?: string;
+  updatedAt?: string;
+};
+
+export type ProcessState = {
+  outputsByProcessId: Record<string, string>;
+  processesById: Record<string, ProcessStatusEntry>;
+  processIdsBySessionId: Record<string, string[]>;
+  activeProcessBySessionId: Record<string, string>;
+  devProcessBySessionId: Record<string, string>;
+};
+
+export type PreviewStage = 'closed' | 'logs' | 'preview';
+export type PreviewViewMode = 'preview' | 'output';
+export type PreviewDevicePreset = 'desktop' | 'tablet' | 'mobile';
+
+export type PreviewPanelState = {
+  openBySessionId: Record<string, boolean>;
+  viewBySessionId: Record<string, PreviewViewMode>;
+  deviceBySessionId: Record<string, PreviewDevicePreset>;
+  stageBySessionId: Record<string, PreviewStage>;
+  urlBySessionId: Record<string, string>;
+  urlDraftBySessionId: Record<string, string>;
+};
+
+export type RightPanelState = {
+  activeTabBySessionId: Record<string, string>;
+};
+
+
+export type FileInfo = {
+  path: string;
+  status: 'modified' | 'added' | 'deleted' | 'untracked' | 'renamed';
+  staged: boolean;
+  additions?: number;
+  deletions?: number;
+  old_path?: string;
+  diff?: string;
+};
 
 export type GitStatusEntry = {
   branch: string | null;
@@ -287,6 +343,9 @@ export type AppState = {
   userSettings: UserSettingsState;
   terminal: TerminalState;
   shell: ShellState;
+  processes: ProcessState;
+  previewPanel: PreviewPanelState;
+  rightPanel: RightPanelState;
   diffs: DiffState;
   gitStatus: GitStatusState;
   contextWindow: ContextWindowState;
@@ -331,6 +390,18 @@ export type AppState = {
     status: { available: boolean; running?: boolean; shell?: string; cwd?: string }
   ) => void;
   clearShellOutput: (sessionId: string) => void;
+  appendProcessOutput: (processId: string, data: string) => void;
+  upsertProcessStatus: (status: ProcessStatusEntry) => void;
+  clearProcessOutput: (processId: string) => void;
+  setActiveProcess: (sessionId: string, processId: string) => void;
+  setPreviewOpen: (sessionId: string, open: boolean) => void;
+  togglePreviewOpen: (sessionId: string) => void;
+  setPreviewView: (sessionId: string, view: PreviewViewMode) => void;
+  setPreviewDevice: (sessionId: string, device: PreviewDevicePreset) => void;
+  setPreviewStage: (sessionId: string, stage: PreviewStage) => void;
+  setPreviewUrl: (sessionId: string, url: string) => void;
+  setPreviewUrlDraft: (sessionId: string, url: string) => void;
+  setRightPanelActiveTab: (sessionId: string, tab: string) => void;
   setConnectionStatus: (status: ConnectionState['status'], error?: string | null) => void;
   setMessages: (
     sessionId: string,
@@ -408,6 +479,22 @@ const defaultState: AppState = {
   },
   terminal: { terminals: [] },
   shell: { outputs: {}, statuses: {} },
+  processes: {
+    outputsByProcessId: {},
+    processesById: {},
+    processIdsBySessionId: {},
+    activeProcessBySessionId: {},
+    devProcessBySessionId: {},
+  },
+  previewPanel: {
+    openBySessionId: {},
+    viewBySessionId: {},
+    deviceBySessionId: {},
+    stageBySessionId: {},
+    urlBySessionId: {},
+    urlDraftBySessionId: {},
+  },
+  rightPanel: { activeTabBySessionId: {} },
   diffs: { files: [] },
   gitStatus: { bySessionId: {} },
   contextWindow: { bySessionId: {} },
@@ -452,6 +539,18 @@ const defaultState: AppState = {
   appendShellOutput: () => undefined,
   setShellStatus: () => undefined,
   clearShellOutput: () => undefined,
+  appendProcessOutput: () => undefined,
+  upsertProcessStatus: () => undefined,
+  clearProcessOutput: () => undefined,
+  setActiveProcess: () => undefined,
+  setPreviewOpen: () => undefined,
+  togglePreviewOpen: () => undefined,
+  setPreviewView: () => undefined,
+  setPreviewDevice: () => undefined,
+  setPreviewStage: () => undefined,
+  setPreviewUrl: () => undefined,
+  setPreviewUrlDraft: () => undefined,
+  setRightPanelActiveTab: () => undefined,
   setConnectionStatus: () => undefined,
   setMessages: () => undefined,
   addMessage: () => undefined,
@@ -512,6 +611,18 @@ function mergeInitialState(
   | 'appendShellOutput'
   | 'setShellStatus'
   | 'clearShellOutput'
+  | 'appendProcessOutput'
+  | 'upsertProcessStatus'
+  | 'clearProcessOutput'
+  | 'setActiveProcess'
+  | 'setPreviewOpen'
+  | 'togglePreviewOpen'
+  | 'setPreviewView'
+  | 'setPreviewDevice'
+  | 'setPreviewStage'
+  | 'setPreviewUrl'
+  | 'setPreviewUrlDraft'
+  | 'setRightPanelActiveTab'
   | 'setConnectionStatus'
   | 'setMessages'
   | 'addMessage'
@@ -564,6 +675,9 @@ function mergeInitialState(
     userSettings: { ...defaultState.userSettings, ...initialState.userSettings },
     terminal: { ...defaultState.terminal, ...initialState.terminal },
     shell: { ...defaultState.shell, ...initialState.shell },
+    processes: { ...defaultState.processes, ...initialState.processes },
+    previewPanel: { ...defaultState.previewPanel, ...initialState.previewPanel },
+    rightPanel: { ...defaultState.rightPanel, ...initialState.rightPanel },
     diffs: { ...defaultState.diffs, ...initialState.diffs },
     gitStatus: { ...defaultState.gitStatus, ...initialState.gitStatus },
     contextWindow: { ...defaultState.contextWindow, ...initialState.contextWindow },
@@ -586,7 +700,7 @@ function mergeInitialState(
 export function createAppStore(initialState?: Partial<AppState>) {
   const merged = mergeInitialState(initialState);
   return createStore<AppState>()(
-    immer((set) => ({
+    immer((set, get) => ({
       ...merged,
       hydrate: (state) =>
         set((draft) => {
@@ -613,6 +727,9 @@ export function createAppStore(initialState?: Partial<AppState>) {
           if (state.userSettings) Object.assign(draft.userSettings, state.userSettings);
           if (state.terminal) Object.assign(draft.terminal, state.terminal);
           if (state.shell) Object.assign(draft.shell, state.shell);
+          if (state.processes) Object.assign(draft.processes, state.processes);
+          if (state.previewPanel) Object.assign(draft.previewPanel, state.previewPanel);
+          if (state.rightPanel) Object.assign(draft.rightPanel, state.rightPanel);
           if (state.diffs) Object.assign(draft.diffs, state.diffs);
           if (state.gitStatus) Object.assign(draft.gitStatus, state.gitStatus);
           if (state.connection) Object.assign(draft.connection, state.connection);
@@ -630,10 +747,14 @@ export function createAppStore(initialState?: Partial<AppState>) {
             Object.assign(draft.sessionWorktreesBySessionId, state.sessionWorktreesBySessionId);
           }
         }),
-      setActiveWorkspace: (workspaceId) =>
+      setActiveWorkspace: (workspaceId) => {
+        if (get().workspaces.activeId === workspaceId) {
+          return;
+        }
         set((draft) => {
           draft.workspaces.activeId = workspaceId;
-        }),
+        });
+      },
       setWorkspaces: (workspaces) =>
         set((draft) => {
           draft.workspaces.items = workspaces;
@@ -648,10 +769,14 @@ export function createAppStore(initialState?: Partial<AppState>) {
             draft.boards.activeId = boards[0].id;
           }
         }),
-      setActiveBoard: (boardId) =>
+      setActiveBoard: (boardId) => {
+        if (get().boards.activeId === boardId) {
+          return;
+        }
         set((draft) => {
           draft.boards.activeId = boardId;
-        }),
+        });
+      },
       setExecutors: (executors) =>
         set((draft) => {
           draft.executors.items = executors;
@@ -760,6 +885,84 @@ export function createAppStore(initialState?: Partial<AppState>) {
       clearShellOutput: (sessionId) =>
         set((draft) => {
           draft.shell.outputs[sessionId] = '';
+        }),
+      appendProcessOutput: (processId, data) =>
+        set((draft) => {
+          const next =
+            (draft.processes.outputsByProcessId[processId] || '') + data;
+          draft.processes.outputsByProcessId[processId] = trimProcessOutput(next);
+        }),
+      upsertProcessStatus: (status) =>
+        set((draft) => {
+          draft.processes.processesById[status.processId] = status;
+          const list = draft.processes.processIdsBySessionId[status.sessionId] || [];
+          if (!list.includes(status.processId)) {
+            list.push(status.processId);
+            draft.processes.processIdsBySessionId[status.sessionId] = list;
+          }
+          if (!draft.processes.activeProcessBySessionId[status.sessionId]) {
+            draft.processes.activeProcessBySessionId[status.sessionId] = status.processId;
+          }
+          if (status.kind === 'dev') {
+            draft.processes.devProcessBySessionId[status.sessionId] = status.processId;
+          }
+        }),
+      clearProcessOutput: (processId) =>
+        set((draft) => {
+          draft.processes.outputsByProcessId[processId] = '';
+        }),
+      setActiveProcess: (sessionId, processId) =>
+        set((draft) => {
+          draft.processes.activeProcessBySessionId[sessionId] = processId;
+        }),
+      setPreviewOpen: (sessionId, open) =>
+        set((draft) => {
+          draft.previewPanel.openBySessionId[sessionId] = open;
+          if (!draft.previewPanel.viewBySessionId[sessionId]) {
+            draft.previewPanel.viewBySessionId[sessionId] = 'preview';
+          }
+          if (!draft.previewPanel.deviceBySessionId[sessionId]) {
+            draft.previewPanel.deviceBySessionId[sessionId] = 'desktop';
+          }
+        }),
+      togglePreviewOpen: (sessionId) =>
+        set((draft) => {
+          const current = draft.previewPanel.openBySessionId[sessionId] ?? false;
+          draft.previewPanel.openBySessionId[sessionId] = !current;
+          if (!draft.previewPanel.viewBySessionId[sessionId]) {
+            draft.previewPanel.viewBySessionId[sessionId] = 'preview';
+          }
+          if (!draft.previewPanel.deviceBySessionId[sessionId]) {
+            draft.previewPanel.deviceBySessionId[sessionId] = 'desktop';
+          }
+        }),
+      setPreviewView: (sessionId, view) =>
+        set((draft) => {
+          draft.previewPanel.viewBySessionId[sessionId] = view;
+          // Persist to localStorage
+          const key = `preview-view:${sessionId}`;
+          setLocalStorage(key, view);
+        }),
+      setPreviewDevice: (sessionId, device) =>
+        set((draft) => {
+          draft.previewPanel.deviceBySessionId[sessionId] = device;
+        }),
+      setPreviewStage: (sessionId, stage) =>
+        set((draft) => {
+          draft.previewPanel.stageBySessionId[sessionId] = stage;
+          // layout changes handled by layout-store
+        }),
+      setPreviewUrl: (sessionId, url) =>
+        set((draft) => {
+          draft.previewPanel.urlBySessionId[sessionId] = url;
+        }),
+      setPreviewUrlDraft: (sessionId, url) =>
+        set((draft) => {
+          draft.previewPanel.urlDraftBySessionId[sessionId] = url;
+        }),
+      setRightPanelActiveTab: (sessionId, tab) =>
+        set((draft) => {
+          draft.rightPanel.activeTabBySessionId[sessionId] = tab;
         }),
       setConnectionStatus: (status, error = null) =>
         set((draft) => {

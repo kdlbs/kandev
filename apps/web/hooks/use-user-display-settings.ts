@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import { fetchUserSettings, updateUserSettings } from '@/lib/http';
 import { mapSelectedRepositoryIds } from '@/lib/kanban/filters';
@@ -40,6 +40,8 @@ export function useUserDisplaySettings({
   const userSettings = useAppStore((state) => state.userSettings);
   const setUserSettings = useAppStore((state) => state.setUserSettings);
   const { repositories, isLoading: repositoriesLoading } = useRepositories(workspaceId, true);
+  const lastAppliedWorkspaceIdRef = useRef<string | null>(null);
+  const lastAppliedBoardIdRef = useRef<string | null>(null);
 
   const commitSettings = useCallback(
     (next: CommitPayload) => {
@@ -113,7 +115,15 @@ export function useUserDisplaySettings({
   useEffect(() => {
     if (!userSettings.loaded) return;
     if (userSettings.workspaceId && userSettings.workspaceId !== workspaceId) {
+      if (lastAppliedWorkspaceIdRef.current === userSettings.workspaceId) {
+        return;
+      }
+      lastAppliedWorkspaceIdRef.current = userSettings.workspaceId;
       onWorkspaceChange?.(userSettings.workspaceId);
+      return;
+    }
+    if (userSettings.workspaceId === workspaceId) {
+      lastAppliedWorkspaceIdRef.current = null;
     }
   }, [onWorkspaceChange, userSettings.loaded, userSettings.workspaceId, workspaceId]);
 
@@ -133,7 +143,15 @@ export function useUserDisplaySettings({
   useEffect(() => {
     if (!userSettings.loaded) return;
     if (userSettings.boardId && userSettings.boardId !== boardId) {
+      if (lastAppliedBoardIdRef.current === userSettings.boardId) {
+        return;
+      }
+      lastAppliedBoardIdRef.current = userSettings.boardId;
       onBoardChange?.(userSettings.boardId);
+      return;
+    }
+    if (userSettings.boardId === boardId) {
+      lastAppliedBoardIdRef.current = null;
     }
   }, [boardId, onBoardChange, userSettings.boardId, userSettings.loaded]);
 

@@ -1,4 +1,5 @@
 import { StateHydrator } from '@/components/state-hydrator';
+import { readLayoutDefaults } from '@/lib/layout/read-layout-defaults';
 import {
   fetchBoardSnapshot,
   fetchTaskSession,
@@ -21,6 +22,7 @@ export default async function SessionPage({
   let initialState: ReturnType<typeof taskToState> | null = null;
   let task: Task | null = null;
   let sessionId: string | null = null;
+  const defaultLayouts = await readLayoutDefaults();
 
   try {
     const { sessionId: paramSessionId } = await params;
@@ -155,6 +157,7 @@ export default async function SessionPage({
         task={task}
         sessionId={sessionId}
         initialRepositories={initialState?.repositories?.itemsByWorkspaceId?.[task?.workspace_id ?? ''] ?? []}
+        defaultLayouts={defaultLayouts}
       />
     </>
   );

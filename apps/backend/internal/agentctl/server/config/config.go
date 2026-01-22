@@ -67,6 +67,9 @@ type InstanceDefaults struct {
 
 	// HealthCheckInterval is the interval in seconds for health checks
 	HealthCheckInterval int
+
+	// ProcessBufferMaxBytes is the max bytes per process output buffer (default 2MB)
+	ProcessBufferMaxBytes int64
 }
 
 // McpServerConfig holds configuration for an MCP server.
@@ -130,6 +133,9 @@ type InstanceConfig struct {
 
 	// McpServers is a list of MCP servers to configure for the agent
 	McpServers []McpServerConfig
+
+	// ProcessBufferMaxBytes caps per-process output buffer size
+	ProcessBufferMaxBytes int64
 }
 
 // Load loads the configuration from environment variables.
@@ -147,6 +153,7 @@ func Load() *Config {
 			AutoStart:              getEnvBool("AGENTCTL_AUTO_START", false),
 			AutoApprovePermissions: getEnvBool("AGENTCTL_AUTO_APPROVE_PERMISSIONS", false),
 			HealthCheckInterval:    getEnvInt("AGENTCTL_HEALTH_CHECK_INTERVAL", 5),
+			ProcessBufferMaxBytes:  getEnvInt64("AGENTCTL_PROCESS_BUFFER_MAX_BYTES", 2*1024*1024),
 		},
 		ShellEnabled: getEnvBool("AGENTCTL_SHELL_ENABLED", true),
 		LogLevel:     getEnv("AGENTCTL_LOG_LEVEL", "info"),
@@ -167,6 +174,7 @@ func (c *Config) NewInstanceConfig(port int, overrides *InstanceOverrides) *Inst
 		ShellEnabled:           c.ShellEnabled,
 		LogLevel:               c.LogLevel,
 		LogFormat:              c.LogFormat,
+		ProcessBufferMaxBytes:  c.Defaults.ProcessBufferMaxBytes,
 	}
 
 	// Apply overrides if provided
@@ -269,10 +277,18 @@ func getEnvInt(key string, defaultValue int) int {
 	return defaultValue
 }
 
+func getEnvInt64(key string, defaultValue int64) int64 {
+	if value := os.Getenv(key); value != "" {
+		if i, err := strconv.ParseInt(value, 10, 64); err == nil {
+			return i
+		}
+	}
+	return defaultValue
+}
+
 func getEnvBool(key string, defaultValue bool) bool {
 	if value := os.Getenv(key); value != "" {
 		return strings.ToLower(value) == "true" || value == "1"
 	}
 	return defaultValue
 }
-

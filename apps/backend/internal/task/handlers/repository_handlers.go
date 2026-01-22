@@ -146,6 +146,7 @@ type httpCreateRepositoryRequest struct {
 	WorktreeBranchPrefix string `json:"worktree_branch_prefix"`
 	SetupScript          string `json:"setup_script"`
 	CleanupScript        string `json:"cleanup_script"`
+	DevScript            string `json:"dev_script"`
 }
 
 func (h *RepositoryHandlers) httpCreateRepository(c *gin.Context) {
@@ -171,6 +172,7 @@ func (h *RepositoryHandlers) httpCreateRepository(c *gin.Context) {
 		WorktreeBranchPrefix: body.WorktreeBranchPrefix,
 		SetupScript:          body.SetupScript,
 		CleanupScript:        body.CleanupScript,
+		DevScript:            body.DevScript,
 	})
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidRepositorySettings) {
@@ -219,6 +221,7 @@ type httpUpdateRepositoryRequest struct {
 	WorktreeBranchPrefix *string `json:"worktree_branch_prefix"`
 	SetupScript          *string `json:"setup_script"`
 	CleanupScript        *string `json:"cleanup_script"`
+	DevScript            *string `json:"dev_script"`
 }
 
 func (h *RepositoryHandlers) httpUpdateRepository(c *gin.Context) {
@@ -240,6 +243,7 @@ func (h *RepositoryHandlers) httpUpdateRepository(c *gin.Context) {
 		WorktreeBranchPrefix: body.WorktreeBranchPrefix,
 		SetupScript:          body.SetupScript,
 		CleanupScript:        body.CleanupScript,
+		DevScript:            body.DevScript,
 	})
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidRepositorySettings) {
@@ -376,6 +380,7 @@ type wsCreateRepositoryRequest struct {
 	WorktreeBranchPrefix string `json:"worktree_branch_prefix"`
 	SetupScript          string `json:"setup_script"`
 	CleanupScript        string `json:"cleanup_script"`
+	DevScript            string `json:"dev_script"`
 }
 
 func (h *RepositoryHandlers) wsCreateRepository(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -399,6 +404,7 @@ func (h *RepositoryHandlers) wsCreateRepository(ctx context.Context, msg *ws.Mes
 		WorktreeBranchPrefix: req.WorktreeBranchPrefix,
 		SetupScript:          req.SetupScript,
 		CleanupScript:        req.CleanupScript,
+		DevScript:            req.DevScript,
 	})
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidRepositorySettings) {
@@ -442,6 +448,7 @@ type wsUpdateRepositoryRequest struct {
 	WorktreeBranchPrefix *string `json:"worktree_branch_prefix,omitempty"`
 	SetupScript          *string `json:"setup_script,omitempty"`
 	CleanupScript        *string `json:"cleanup_script,omitempty"`
+	DevScript            *string `json:"dev_script,omitempty"`
 }
 
 func (h *RepositoryHandlers) wsUpdateRepository(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -465,6 +472,7 @@ func (h *RepositoryHandlers) wsUpdateRepository(ctx context.Context, msg *ws.Mes
 		WorktreeBranchPrefix: req.WorktreeBranchPrefix,
 		SetupScript:          req.SetupScript,
 		CleanupScript:        req.CleanupScript,
+		DevScript:            req.DevScript,
 	})
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidRepositorySettings) {

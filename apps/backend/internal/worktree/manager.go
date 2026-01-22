@@ -417,6 +417,38 @@ func (m *Manager) removeWorktree(ctx context.Context, wt *Worktree, removeBranch
 	return nil
 }
 
+// CleanupWorktrees removes provided worktrees without re-fetching from the store.
+func (m *Manager) CleanupWorktrees(ctx context.Context, worktrees []*Worktree) error {
+	if len(worktrees) == 0 {
+		return nil
+	}
+
+	var lastErr error
+	for _, wt := range worktrees {
+		if wt == nil {
+			continue
+		}
+		if err := m.removeWorktree(ctx, wt, true); err != nil {
+			m.logger.Warn("failed to remove worktree on task deletion",
+				zap.String("task_id", wt.TaskID),
+				zap.String("worktree_id", wt.ID),
+				zap.Error(err))
+			lastErr = err
+		}
+	}
+
+	m.mu.Lock()
+	for _, wt := range worktrees {
+		if wt == nil {
+			continue
+		}
+		delete(m.worktrees, wt.TaskID)
+	}
+	m.mu.Unlock()
+
+	return lastErr
+}
+
 // OnTaskDeleted cleans up all worktrees for a task when it is deleted.
 func (m *Manager) OnTaskDeleted(ctx context.Context, taskID string) error {
 	// Get all worktrees for this task
@@ -425,28 +457,7 @@ func (m *Manager) OnTaskDeleted(ctx context.Context, taskID string) error {
 		return err
 	}
 
-	if len(worktrees) == 0 {
-		return nil
-	}
-
-	// Remove each worktree and its branch
-	var lastErr error
-	for _, wt := range worktrees {
-		if err := m.removeWorktree(ctx, wt, true); err != nil {
-			m.logger.Warn("failed to remove worktree on task deletion",
-				zap.String("task_id", taskID),
-				zap.String("worktree_id", wt.ID),
-				zap.Error(err))
-			lastErr = err
-		}
-	}
-
-	// Clear from cache
-	m.mu.Lock()
-	delete(m.worktrees, taskID)
-	m.mu.Unlock()
-
-	return lastErr
+	return m.CleanupWorktrees(ctx, worktrees)
 }
 
 // Reconcile syncs worktree state with active tasks on startup.

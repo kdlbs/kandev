@@ -166,6 +166,13 @@ const (
 	ActionShellInput         = "shell.input"          // Send input to shell
 	ActionSessionShellOutput = "session.shell.output" // Shell output notification (also used for exit with type: "exit")
 
+	// Session git status
+	ActionSessionGitStatus = "session.git.status"
+
+	// Process runner actions
+	ActionSessionProcessOutput = "session.process.output"
+	ActionSessionProcessStatus = "session.process.status"
+
 	// Git worktree actions
 	ActionWorktreePull     = "worktree.pull"      // Pull from remote
 	ActionWorktreePush     = "worktree.push"      // Push to remote

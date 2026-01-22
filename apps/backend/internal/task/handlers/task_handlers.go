@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -163,7 +164,8 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		})
 	}
 
-	resp, err := h.controller.CreateTask(c.Request.Context(), dto.CreateTaskRequest{
+	reqCtx := c.Request.Context()
+	resp, err := h.controller.CreateTask(reqCtx, dto.CreateTaskRequest{
 		WorkspaceID:  body.WorkspaceID,
 		BoardID:      body.BoardID,
 		ColumnID:     body.ColumnID,
@@ -182,8 +184,10 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 
 	response := createTaskResponse{TaskDTO: resp}
 	if body.StartAgent && body.AgentProfileID != "" && h.orchestrator != nil {
+		startCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
 		// Use task description as the initial prompt
-		execution, err := h.orchestrator.StartTask(c.Request.Context(), resp.ID, body.AgentProfileID, body.Priority, resp.Description)
+		execution, err := h.orchestrator.StartTask(startCtx, resp.ID, body.AgentProfileID, body.Priority, resp.Description)
 		if err != nil {
 			h.logger.Error("failed to start agent for task", zap.Error(err))
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to start agent for task"})
@@ -274,7 +278,9 @@ func (h *TaskHandlers) httpMoveTask(c *gin.Context) {
 }
 
 func (h *TaskHandlers) httpDeleteTask(c *gin.Context) {
-	resp, err := h.controller.DeleteTask(c.Request.Context(), dto.DeleteTaskRequest{ID: c.Param("id")})
+	deleteCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	resp, err := h.controller.DeleteTask(deleteCtx, dto.DeleteTaskRequest{ID: c.Param("id")})
 	if err != nil {
 		handleNotFound(c, h.logger, err, "task not deleted")
 		return

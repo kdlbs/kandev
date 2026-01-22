@@ -45,6 +45,7 @@ import { useGitOperations } from '@/hooks/use-git-operations';
 import { formatUserHomePath } from '@/lib/utils';
 import { EditorsMenu } from '@/components/task/editors-menu';
 import { useToast } from '@/components/toast-provider';
+import { PreviewControls } from '@/components/task/preview/preview-controls';
 
 type TaskTopBarProps = {
   taskId?: string | null;
@@ -60,6 +61,7 @@ type TaskTopBarProps = {
   worktreeBranch?: string | null;
   repositoryPath?: string | null;
   repositoryName?: string | null;
+  hasDevScript?: boolean;
 };
 
 const TaskTopBar = memo(function TaskTopBar({
@@ -70,6 +72,7 @@ const TaskTopBar = memo(function TaskTopBar({
   worktreeBranch,
   repositoryPath,
   repositoryName,
+  hasDevScript = false,
 }: TaskTopBarProps) {
   const [copiedBranch, setCopiedBranch] = useState(false);
   const [popoverOpen, setPopoverOpen] = useState(false);
@@ -210,6 +213,8 @@ const TaskTopBar = memo(function TaskTopBar({
       setTimeout(() => setCopiedBranch(false), 500);
     }
   };
+
+  // Preview controls are handled by a dedicated component.
 
   const handleCopyRepo = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -366,6 +371,7 @@ const TaskTopBar = memo(function TaskTopBar({
 
       </div>
       <div className="flex items-center gap-2">
+        <PreviewControls activeSessionId={activeSessionId ?? null} hasDevScript={hasDevScript} />
         <EditorsMenu activeSessionId={activeSessionId ?? null} />
 
         {/* Commit Split Button */}
