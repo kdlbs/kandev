@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/kandev/kandev/internal/common/httpmw"
 	"go.uber.org/zap"
 
 	// Common packages
@@ -648,6 +649,7 @@ func main() {
 		gin.SetMode(gin.ReleaseMode)
 	}
 	router := gin.New()
+	router.Use(httpmw.RequestLogger(log, "kandev"))
 	router.Use(gin.Recovery())
 	router.Use(corsMiddleware())
 
