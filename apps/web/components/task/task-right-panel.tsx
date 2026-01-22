@@ -1,12 +1,11 @@
 'use client';
 
 import type { ReactNode, MouseEvent } from 'react';
-import { memo, useEffect, useState, useCallback } from 'react';
-import { IconChevronDown, IconChevronUp, IconX } from '@tabler/icons-react';
+import { memo, useEffect, useState, useCallback, useMemo } from 'react';
 import { Badge } from '@kandev/ui/badge';
 import { SessionPanel, SessionPanelContent } from '@kandev/ui/pannel-session';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@kandev/ui/resizable';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@kandev/ui/tabs';
+import { TabsContent } from '@kandev/ui/tabs';
 import { getLocalStorage, setLocalStorage } from '@/lib/local-storage';
 import { COMMANDS } from '@/components/task/task-data';
 import { ShellTerminal } from '@/components/task/shell-terminal';
@@ -14,6 +13,7 @@ import { useAppStore } from '@/components/state-provider';
 import { useLayoutStore } from '@/lib/state/layout-store';
 import { stopProcess } from '@/lib/api';
 import type { Layout } from 'react-resizable-panels';
+import { SessionTabs, type SessionTab } from '@/components/session-tabs';
 
 type TerminalType = 'commands' | 'dev-server' | 'shell';
 
@@ -37,7 +37,9 @@ const TaskRightPanel = memo(function TaskRightPanel({ topPanel, sessionId = null
   const [terminals, setTerminals] = useState<Terminal[]>([
     { id: 'shell-1', type: 'shell', label: 'Terminal' },
   ]);
-  const [isBottomCollapsed, setIsBottomCollapsed] = useState(false);
+  const [isBottomCollapsed, setIsBottomCollapsed] = useState<boolean>(() =>
+    getLocalStorage('task-right-panel-collapsed', false)
+  );
   const [isStoppingDev, setIsStoppingDev] = useState(false);
   const activeTab = useAppStore((state) =>
     sessionId ? state.rightPanel.activeTabBySessionId[sessionId] : undefined
@@ -135,6 +137,11 @@ const TaskRightPanel = memo(function TaskRightPanel({ topPanel, sessionId = null
     }
   }, [activeTab, sessionId, terminals, setRightPanelActiveTab]);
 
+  // Save collapse state to local storage
+  useEffect(() => {
+    setLocalStorage('task-right-panel-collapsed', isBottomCollapsed);
+  }, [isBottomCollapsed]);
+
   const handleCloseDevTab = useCallback(
     async (event: MouseEvent) => {
       event.preventDefault();
@@ -159,6 +166,34 @@ const TaskRightPanel = memo(function TaskRightPanel({ topPanel, sessionId = null
     [sessionId, devProcessId, terminals, setRightPanelActiveTab, setPreviewOpen, setPreviewStage, closeLayoutPreview]
   );
 
+  const tabs: SessionTab[] = useMemo(() => {
+    const commandsTab: SessionTab = { id: 'commands', label: 'Commands' };
+
+    const terminalTabs: SessionTab[] = terminals.map((terminal) => {
+      const shellCount = terminals.filter((t) => t.type === 'shell').length;
+      return {
+        id: terminal.id,
+        label: terminal.label,
+        className:
+          terminal.type === 'dev-server' || (terminal.type === 'shell' && shellCount > 1)
+            ? 'group flex items-center gap-1 pr-1 cursor-pointer'
+            : 'cursor-pointer',
+        closable:
+          terminal.type === 'dev-server' || (terminal.type === 'shell' && shellCount > 1),
+        onClose:
+          terminal.type === 'dev-server'
+            ? handleCloseDevTab
+            : (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                removeTerminal(terminal.id);
+              },
+      };
+    });
+
+    return [commandsTab, ...terminalTabs];
+  }, [terminals, handleCloseDevTab, removeTerminal]);
+
   if (isBottomCollapsed) {
     return (
       <div className="h-full min-h-0 flex flex-col gap-1">
@@ -167,54 +202,21 @@ const TaskRightPanel = memo(function TaskRightPanel({ topPanel, sessionId = null
           borderSide="left"
           className="!h-12 !p-0 px-3 mt-[2px] justify-between items-center flex-row"
         >
-          <Tabs
-            value={terminalTabValue}
-            onValueChange={(value) => {
+          <SessionTabs
+            tabs={tabs}
+            activeTab={terminalTabValue}
+            onTabChange={(value) => {
               if (sessionId) {
                 setRightPanelActiveTab(sessionId, value);
               }
             }}
+            showAddButton
+            onAddTab={addTerminal}
+            collapsible
+            isCollapsed={isBottomCollapsed}
+            onToggleCollapse={() => setIsBottomCollapsed(false)}
             className="flex-1 min-h-0"
-          >
-            <TabsList>
-              <TabsTrigger value="commands" className="cursor-pointer">
-                Commands
-              </TabsTrigger>
-              {terminals.map((terminal) => (
-                <TabsTrigger
-                  key={terminal.id}
-                  value={terminal.id}
-                  className={
-                    terminal.type === 'dev-server'
-                      ? 'group flex items-center gap-1 pr-1 cursor-pointer'
-                      : 'cursor-pointer'
-                  }
-                >
-                  {terminal.label}
-                  {terminal.type === 'dev-server' && (
-                    <span
-                      role="button"
-                      tabIndex={-1}
-                      className="text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground"
-                      onClick={handleCloseDevTab}
-                    >
-                      <IconX className="h-3.5 w-3.5" />
-                    </span>
-                  )}
-                </TabsTrigger>
-              ))}
-              <TabsTrigger value="add" onClick={addTerminal} className="cursor-pointer">
-                +
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
-          <button
-            type="button"
-            className="text-muted-foreground hover:text-foreground cursor-pointer"
-            onClick={() => setIsBottomCollapsed(false)}
-          >
-            <IconChevronUp className="h-4 w-4" />
-          </button>
+          />
         </SessionPanel>
       </div>
     );
@@ -237,65 +239,22 @@ const TaskRightPanel = memo(function TaskRightPanel({ topPanel, sessionId = null
       <ResizableHandle className="h-px" />
       <ResizablePanel id="bottom" defaultSize={rightLayout.bottom} minSize={20}>
         <SessionPanel borderSide="left" margin="top">
-          <Tabs
-            value={terminalTabValue}
-            onValueChange={(value) => {
+          <SessionTabs
+            tabs={tabs}
+            activeTab={terminalTabValue}
+            onTabChange={(value) => {
               if (sessionId) {
                 setRightPanelActiveTab(sessionId, value);
               }
             }}
+            showAddButton
+            onAddTab={addTerminal}
+            collapsible
+            isCollapsed={isBottomCollapsed}
+            onToggleCollapse={() => setIsBottomCollapsed(true)}
             className="flex-1 min-h-0"
           >
-            <div className="flex items-center justify-between mb-3">
-              <TabsList>
-                <TabsTrigger value="commands" className="cursor-pointer">
-                  Commands
-                </TabsTrigger>
-                {terminals.map((terminal) => (
-                  <TabsTrigger
-                    key={terminal.id}
-                    value={terminal.id}
-                    className="group flex items-center gap-1 pr-1 cursor-pointer"
-                  >
-                    {terminal.label}
-                    {terminal.type === 'dev-server' ? (
-                      <span
-                        role="button"
-                        tabIndex={-1}
-                        className="text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground"
-                        onClick={handleCloseDevTab}
-                      >
-                        <IconX className="h-3.5 w-3.5" />
-                      </span>
-                    ) : terminal.type === 'shell' && terminals.filter((t) => t.type === 'shell').length > 1 ? (
-                      <span
-                        role="button"
-                        tabIndex={-1}
-                        className="text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground"
-                        onClick={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          removeTerminal(terminal.id);
-                        }}
-                      >
-                        <IconX className="h-3.5 w-3.5" />
-                      </span>
-                    ) : null}
-                  </TabsTrigger>
-                ))}
-                <TabsTrigger value="add" onClick={addTerminal} className="cursor-pointer">
-                  +
-                </TabsTrigger>
-              </TabsList>
-              <button
-                type="button"
-                className="text-muted-foreground hover:text-foreground cursor-pointer"
-                onClick={() => setIsBottomCollapsed(true)}
-              >
-                <IconChevronDown className="h-4 w-4" />
-              </button>
-            </div>
-            <TabsContent value="commands" className="flex-1 min-h-0">
+              <TabsContent value="commands" className="flex-1 min-h-0">
               <SessionPanelContent>
                 <div className="grid gap-2">
                   {COMMANDS.map((command) => (
@@ -326,7 +285,7 @@ const TaskRightPanel = memo(function TaskRightPanel({ topPanel, sessionId = null
                 </SessionPanelContent>
               </TabsContent>
             ))}
-          </Tabs>
+          </SessionTabs>
         </SessionPanel>
       </ResizablePanel>
     </ResizablePanelGroup>

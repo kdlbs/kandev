@@ -10,7 +10,7 @@ import {
   IconCheck,
 } from '@tabler/icons-react';
 
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@kandev/ui/tabs';
+import { TabsContent } from '@kandev/ui/tabs';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
 import { SessionPanel, SessionPanelContent } from '@kandev/ui/pannel-session';
 import { LineStat } from '@/components/diff-stat';
@@ -20,6 +20,7 @@ import { useSessionGitStatus } from '@/hooks/domains/session/use-session-git-sta
 import { useGitOperations } from '@/hooks/use-git-operations';
 import type { FileInfo } from '@/lib/state/store';
 import { FileBrowser } from '@/components/task/file-browser';
+import { SessionTabs, type SessionTab } from '@/components/session-tabs';
 
 type OpenFileTab = {
   path: string;
@@ -101,17 +102,25 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiffPath, onOpenFi
     }));
   }, [gitStatus]);
 
+  const tabs: SessionTab[] = [
+    {
+      id: 'diff',
+      label: `Diff files${changedFiles.length > 0 ? ` (${changedFiles.length})` : ''}`,
+    },
+    {
+      id: 'files',
+      label: 'All files',
+    },
+  ];
+
   return (
     <SessionPanel borderSide="left">
-      <Tabs value={topTab} onValueChange={(value) => setTopTab(value as 'diff' | 'files')} className="flex-1 min-h-0">
-        <TabsList>
-          <TabsTrigger value="diff" className="cursor-pointer">
-            Diff files {changedFiles.length > 0 && `(${changedFiles.length})`}
-          </TabsTrigger>
-          <TabsTrigger value="files" className="cursor-pointer">
-            All files
-          </TabsTrigger>
-        </TabsList>
+      <SessionTabs
+        tabs={tabs}
+        activeTab={topTab}
+        onTabChange={(value) => setTopTab(value as 'diff' | 'files')}
+        className="flex-1 min-h-0"
+      >
         <TabsContent value="diff" className="mt-3 flex-1 min-h-0">
           <SessionPanelContent>
             {changedFiles.length === 0 ? (
@@ -222,7 +231,7 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiffPath, onOpenFi
             )}
           </SessionPanelContent>
         </TabsContent>
-      </Tabs>
+      </SessionTabs>
     </SessionPanel>
   );
 });
