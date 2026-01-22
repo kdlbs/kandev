@@ -5,9 +5,10 @@ import { IconChevronDown, IconCode, IconLoader2 } from '@tabler/icons-react';
 import { Button } from '@kandev/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@kandev/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
-import { useEditors } from '@/hooks/use-editors';
+import { useEditors } from '@/hooks/domains/settings/use-editors';
 import { useOpenSessionInEditor } from '@/hooks/use-open-session-in-editor';
 import { useAppStore } from '@/components/state-provider';
+import type { EditorOption } from '@/lib/types/http';
 
 type EditorsMenuProps = {
   activeSessionId: string | null;
@@ -20,7 +21,7 @@ export function EditorsMenu({ activeSessionId }: EditorsMenuProps) {
 
   const enabledEditors = useMemo(
     () =>
-      editors.filter((editor) => {
+      editors.filter((editor: EditorOption) => {
         if (!editor.enabled) return false;
         if (editor.kind === 'built_in') return editor.installed;
         return true;
@@ -29,7 +30,7 @@ export function EditorsMenu({ activeSessionId }: EditorsMenuProps) {
   );
 
   const resolvedEditorId = useMemo(() => {
-    if (defaultEditorId && enabledEditors.some((editor) => editor.id === defaultEditorId)) {
+    if (defaultEditorId && enabledEditors.some((editor: EditorOption) => editor.id === defaultEditorId)) {
       return defaultEditorId;
     }
     return enabledEditors[0]?.id ?? '';
@@ -75,7 +76,7 @@ export function EditorsMenu({ activeSessionId }: EditorsMenuProps) {
           {enabledEditors.length === 0 ? (
             <DropdownMenuItem disabled>No editors available</DropdownMenuItem>
           ) : (
-            enabledEditors.map((editor) => (
+            enabledEditors.map((editor: EditorOption) => (
               <DropdownMenuItem
                 key={editor.id}
                 className="cursor-pointer"

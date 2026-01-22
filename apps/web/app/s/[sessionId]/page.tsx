@@ -9,7 +9,7 @@ import {
   listRepositories,
   listTaskSessionMessages,
   listTaskSessions,
-} from '@/lib/http';
+} from '@/lib/api';
 import type { ListMessagesResponse, Task } from '@/lib/types/http';
 import { snapshotToState, taskToState } from '@/lib/ssr/mapper';
 import TaskPageClient from '@/app/task/[id]/page-client';

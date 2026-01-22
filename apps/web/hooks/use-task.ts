@@ -1,10 +1,11 @@
 import { useEffect } from 'react';
 import { useAppStore } from '@/components/state-provider';
 import { getWebSocketClient } from '@/lib/ws/connection';
+import type { KanbanState } from '@/lib/state/slices';
 
 export function useTask(taskId: string | null) {
   const task = useAppStore((state) =>
-    taskId ? state.kanban.tasks.find((item) => item.id === taskId) ?? null : null
+    taskId ? state.kanban.tasks.find((item: KanbanState['tasks'][number]) => item.id === taskId) ?? null : null
   );
 
   useEffect(() => {

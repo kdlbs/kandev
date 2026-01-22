@@ -7,13 +7,14 @@ import { TaskTopBar } from '@/components/task/task-top-bar';
 import { TaskLayout } from '@/components/task/task-layout';
 import { DebugOverlay } from '@/components/debug-overlay';
 import type { Repository, Task } from '@/lib/types/http';
+import type { KanbanState } from '@/lib/state/slices';
 import { DEBUG_UI } from '@/lib/config';
-import { useRepositories } from '@/hooks/use-repositories';
-import { useSessionAgent } from '@/hooks/use-session-agent';
-import { useSessionResumption } from '@/hooks/use-session-resumption';
-import { useSessionAgentctl } from '@/hooks/use-session-agentctl';
+import { useRepositories } from '@/hooks/domains/workspace/use-repositories';
+import { useSessionAgent } from '@/hooks/domains/session/use-session-agent';
+import { useSessionResumption } from '@/hooks/domains/session/use-session-resumption';
+import { useSessionAgentctl } from '@/hooks/domains/session/use-session-agentctl';
 import { useAppStore } from '@/components/state-provider';
-import { fetchTask } from '@/lib/http';
+import { fetchTask } from '@/lib/api';
 import { useTasks } from '@/hooks/use-tasks';
 import type { Layout } from 'react-resizable-panels';
 
@@ -38,7 +39,7 @@ export default function TaskPage({
   const setActiveTask = useAppStore((state) => state.setActiveTask);
   const effectiveTaskId = activeTaskId ?? initialTask?.id ?? null;
   const kanbanTask = useAppStore((state) =>
-    effectiveTaskId ? state.kanban.tasks.find((item) => item.id === effectiveTaskId) ?? null : null
+    effectiveTaskId ? state.kanban.tasks.find((item: KanbanState['tasks'][number]) => item.id === effectiveTaskId) ?? null : null
   );
   const task = useMemo(() => {
     const baseTask = taskDetails ?? initialTask;
@@ -140,7 +141,7 @@ export default function TaskPage({
   const { repositories } = useRepositories(task?.workspace_id ?? null, Boolean(task?.workspace_id));
   const effectiveRepositories = repositories.length ? repositories : initialRepositories;
   const repository = useMemo(
-    () => effectiveRepositories.find((item) => item.id === task?.repositories?.[0]?.repository_id) ?? null,
+    () => effectiveRepositories.find((item: Repository) => item.id === task?.repositories?.[0]?.repository_id) ?? null,
     [effectiveRepositories, task?.repositories]
   );
 

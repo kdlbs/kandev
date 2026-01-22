@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useAppStore } from '@/components/state-provider';
 import type { Repository } from '@/lib/types/http';
-import { listRepositories } from '@/lib/http';
+import { listRepositories } from '@/lib/api';
 
 const EMPTY_REPOSITORIES: Repository[] = [];
 

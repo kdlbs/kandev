@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
-import { listPrompts } from '@/lib/http';
+import { listPrompts } from '@/lib/api';
 import { useAppStore } from '@/components/state-provider';
 export function useCustomPrompts() {
   const prompts = useAppStore((state) => state.prompts.items);

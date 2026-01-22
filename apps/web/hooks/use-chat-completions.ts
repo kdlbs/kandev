@@ -1,7 +1,8 @@
 import { useMemo } from 'react';
 import { EditorView } from '@codemirror/view';
 import type { CompletionContext } from '@codemirror/autocomplete';
-import { useCustomPrompts } from '@/hooks/use-custom-prompts';
+import { useCustomPrompts } from '@/hooks/domains/settings/use-custom-prompts';
+import type { CustomPrompt } from '@/lib/types/http';
 
 const truncatePreview = (text: string, max = 140) => {
   if (text.length <= max) return text;
@@ -12,7 +13,7 @@ export function useChatCompletions() {
   const { prompts } = useCustomPrompts();
 
   const promptOptions = useMemo(() => {
-    return prompts.map((prompt) => ({
+    return prompts.map((prompt: CustomPrompt) => ({
       id: prompt.id,
       name: prompt.name,
       content: prompt.content,
@@ -43,8 +44,8 @@ export function useChatCompletions() {
         const trimmed = mentionMatch.text.trim();
         const query = trimmed.startsWith('@') ? trimmed.slice(1).toLowerCase() : trimmed.toLowerCase();
         const promptMatches = promptOptions
-          .filter((prompt) => prompt.name.toLowerCase().startsWith(query))
-          .map((prompt) => ({
+          .filter((prompt: { id: string; name: string; content: string }) => prompt.name.toLowerCase().startsWith(query))
+          .map((prompt: { id: string; name: string; content: string }) => ({
             label: `@${prompt.name}`,
             type: 'prompt',
             detail: 'Prompt',

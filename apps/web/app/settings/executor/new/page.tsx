@@ -57,7 +57,7 @@ function ExecutorCreatePageContent() {
       const created = client
         ? await client.request<Executor>('executor.create', payload)
         : await createExecutorAction(payload);
-      setExecutors([...executors.filter((item) => item.id !== created.id), created]);
+      setExecutors([...executors.filter((item: Executor) => item.id !== created.id), created]);
       router.push('/settings/executors');
     } finally {
       setIsCreating(false);

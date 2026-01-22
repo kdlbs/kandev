@@ -8,8 +8,8 @@ import { Input } from '@kandev/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@kandev/ui/select';
 import { SettingsSection } from '@/components/settings/settings-section';
 import { useAppStore, useAppStoreApi } from '@/components/state-provider';
-import { useShellSettings } from '@/hooks/use-shell-settings';
-import { updateUserSettings } from '@/lib/http';
+import { useShellSettings } from '@/hooks/domains/settings/use-shell-settings';
+import { updateUserSettings } from '@/lib/api';
 import { useRequest } from '@/lib/http/use-request';
 
 const AUTO_SHELL = 'auto';

@@ -10,8 +10,8 @@ import { SettingsPageTemplate } from '@/components/settings/settings-page-templa
 import { Combobox, type ComboboxOption } from '@/components/combobox';
 import { useAppStore } from '@/components/state-provider';
 import { EditableCard } from '@/components/settings/editable-card';
-import { useEditors } from '@/hooks/use-editors';
-import { createEditor, deleteEditor, updateEditor, updateUserSettings } from '@/lib/http';
+import { useEditors } from '@/hooks/domains/settings/use-editors';
+import { createEditor, deleteEditor, updateEditor, updateUserSettings } from '@/lib/api';
 import { useRequest } from '@/lib/http/use-request';
 import type { EditorOption } from '@/lib/types/http';
 

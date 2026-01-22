@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { useAppStore } from '@/components/state-provider';
+import type { AgentProfile } from '@/lib/types/http';
 
 export function useSessionModel(
   resolvedSessionId: string | null,
@@ -10,7 +11,7 @@ export function useSessionModel(
   const sessionProfile = useMemo(() => {
     if (!agentProfileId) return null;
     for (const agent of settingsAgents) {
-      const profile = agent.profiles.find((p) => p.id === agentProfileId);
+      const profile = agent.profiles.find((p: AgentProfile) => p.id === agentProfileId);
       if (profile) return profile;
     }
     return null;

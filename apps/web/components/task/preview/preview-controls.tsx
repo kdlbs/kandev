@@ -8,7 +8,7 @@ import {
 } from '@tabler/icons-react';
 import { Button } from '@kandev/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
-import { startProcess } from '@/lib/http';
+import { startProcess } from '@/lib/api';
 import { useAppStore } from '@/components/state-provider';
 import { useLayoutStore } from '@/lib/state/layout-store';
 

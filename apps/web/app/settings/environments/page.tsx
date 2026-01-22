@@ -6,6 +6,7 @@ import { Button } from '@kandev/ui/button';
 import { Separator } from '@kandev/ui/separator';
 import { EnvironmentCard } from '@/components/settings/environment-card';
 import { useAppStore } from '@/components/state-provider';
+import type { Environment } from '@/lib/types/http';
 
 export default function EnvironmentsSettingsPage() {
   const environments = useAppStore((state) => state.environments.items);
@@ -30,7 +31,7 @@ export default function EnvironmentsSettingsPage() {
       <Separator />
 
       <div className="grid gap-3">
-        {environments.map((env) => (
+        {environments.map((env: Environment) => (
           <EnvironmentCard key={env.id} environment={env} />
         ))}
       </div>

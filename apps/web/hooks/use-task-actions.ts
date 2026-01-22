@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { deleteTask, moveTask } from '@/lib/http';
+import { deleteTask, moveTask } from '@/lib/api';
 
 type MovePayload = { board_id: string; column_id: string; position: number };
 

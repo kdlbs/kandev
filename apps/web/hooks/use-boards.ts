@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useAppStore } from '@/components/state-provider';
-import { listBoards } from '@/lib/http';
+import { listBoards } from '@/lib/api';
 
 export function useBoards(workspaceId: string | null, enabled = true) {
   const boards = useAppStore((state) => state.boards.items);

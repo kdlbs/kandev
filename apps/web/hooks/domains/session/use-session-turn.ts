@@ -46,11 +46,11 @@ export function useSessionTurn(sessionId: string | null) {
   const lastCompletedTurn = useMemo<Turn | null>(() => {
     if (!turns || turns.length === 0) return null;
 
-    const completedTurns = turns.filter((t) => t.completed_at);
+    const completedTurns = turns.filter((t: Turn) => t.completed_at);
     if (completedTurns.length === 0) return null;
 
     // Sort by completed_at descending and return the most recent
-    return completedTurns.sort((a, b) => {
+    return completedTurns.sort((a: Turn, b: Turn) => {
       const aTime = new Date(a.completed_at!).getTime();
       const bTime = new Date(b.completed_at!).getTime();
       return bTime - aTime;

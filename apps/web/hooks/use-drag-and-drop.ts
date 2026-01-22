@@ -5,6 +5,7 @@ import { DragStartEvent, DragEndEvent } from '@dnd-kit/core';
 import { useAppStore, useAppStoreApi } from '@/components/state-provider';
 import { useTaskActions } from '@/hooks/use-task-actions';
 import type { Task } from '@/components/kanban-card';
+import type { KanbanState } from '@/lib/state/slices';
 
 /**
  * Custom hook that extracts drag-and-drop logic from the KanbanBoard component.
@@ -39,15 +40,15 @@ export function useDragAndDrop(visibleTasks: Task[]) {
       }
 
       const targetTasks = kanban.tasks
-        .filter((task) => task.columnId === newStatus && task.id !== taskId)
-        .sort((a, b) => a.position - b.position);
+        .filter((task: KanbanState['tasks'][number]) => task.columnId === newStatus && task.id !== taskId)
+        .sort((a: KanbanState['tasks'][number], b: KanbanState['tasks'][number]) => a.position - b.position);
       const nextPosition = targetTasks.length;
 
       // Optimistic update
       store.getState().hydrate({
         kanban: {
           ...kanban,
-          tasks: kanban.tasks.map((task) =>
+          tasks: kanban.tasks.map((task: KanbanState['tasks'][number]) =>
             task.id === taskId
               ? { ...task, columnId: newStatus, position: nextPosition }
               : task

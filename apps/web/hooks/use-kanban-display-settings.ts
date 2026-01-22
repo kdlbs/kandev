@@ -4,6 +4,7 @@ import { useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAppStore } from '@/components/state-provider';
 import { useUserDisplaySettings } from '@/hooks/use-user-display-settings';
+import type { BoardState } from '@/lib/state/slices';
 
 /**
  * Custom hook that consolidates all kanban display settings and eliminates prop drilling.
@@ -58,7 +59,7 @@ export function useKanbanDisplaySettings() {
     (nextBoardId: string | null) => {
       setActiveBoard(nextBoardId);
       if (nextBoardId) {
-        const workspaceId = boards.find((board) => board.id === nextBoardId)?.workspaceId;
+        const workspaceId = boards.find((board: BoardState['items'][number]) => board.id === nextBoardId)?.workspaceId;
         const workspaceParam = workspaceId ? `&workspaceId=${workspaceId}` : '';
         router.push(`/?boardId=${nextBoardId}${workspaceParam}`);
       }

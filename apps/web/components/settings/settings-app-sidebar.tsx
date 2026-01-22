@@ -28,7 +28,8 @@ import {
 } from '@kandev/ui/sidebar';
 import { ScrollArea } from '@kandev/ui/scroll-area';
 import { useAppStore } from '@/components/state-provider';
-import { useAvailableAgents } from '@/hooks/use-available-agents';
+import { useAvailableAgents } from '@/hooks/domains/settings/use-available-agents';
+import type { Workspace, Agent, AgentProfile, Environment, Executor } from '@/lib/types/http';
 
 export function SettingsAppSidebar() {
   const pathname = usePathname();
@@ -109,7 +110,7 @@ export function SettingsAppSidebar() {
                 </SidebarMenuButton>
                 {workspaces.length > 0 && (
                   <SidebarMenuSub className="ml-3 mt-1">
-                    {workspaces.map((workspace) => {
+                    {workspaces.map((workspace: Workspace) => {
                       const workspacePath = `/settings/workspace/${workspace.id}`;
                       const boardsPath = `${workspacePath}/boards`;
                       const repositoriesPath = `${workspacePath}/repositories`;
@@ -165,8 +166,8 @@ export function SettingsAppSidebar() {
                 </SidebarMenuButton>
                 {agents.length > 0 && (
                   <SidebarMenuSub className="ml-3 mt-1">
-                    {agents.flatMap((agent) =>
-                      agent.profiles.map((profile) => {
+                    {agents.flatMap((agent: Agent) =>
+                      agent.profiles.map((profile: AgentProfile) => {
                         const encodedAgent = encodeURIComponent(agent.name);
                         const profilePath = `/settings/agents/${encodedAgent}/profiles/${profile.id}`;
                         const agentLabel = profile.agent_display_name || agent.name;
@@ -207,7 +208,7 @@ export function SettingsAppSidebar() {
                 </SidebarMenuButton>
                 {environments.length > 0 && (
                   <SidebarMenuSub className="ml-3 mt-1">
-                    {environments.map((env) => (
+                    {environments.map((env: Environment) => (
                       <SidebarMenuSubItem key={env.id}>
                         <SidebarMenuSubButton
                           asChild
@@ -231,11 +232,11 @@ export function SettingsAppSidebar() {
                     <span>Executors</span>
                   </Link>
                 </SidebarMenuButton>
-                {executors.filter((executor) => executor.type !== 'remote_docker').length > 0 && (
+                {executors.filter((executor: Executor) => executor.type !== 'remote_docker').length > 0 && (
                   <SidebarMenuSub className="ml-3 mt-1">
                     {executors
-                      .filter((executor) => executor.type !== 'remote_docker')
-                      .map((executor) => (
+                      .filter((executor: Executor) => executor.type !== 'remote_docker')
+                      .map((executor: Executor) => (
                         <SidebarMenuSubItem key={executor.id}>
                           <SidebarMenuSubButton
                             asChild

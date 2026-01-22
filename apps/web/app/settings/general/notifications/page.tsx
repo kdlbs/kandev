@@ -1,6 +1,6 @@
 import { NotificationsSettings } from '@/components/settings/notifications-settings';
 import { StateProvider } from '@/components/state-provider';
-import { listNotificationProviders } from '@/lib/http';
+import { listNotificationProviders } from '@/lib/api';
 
 export default async function GeneralNotificationsPage() {
   let initialState = {};

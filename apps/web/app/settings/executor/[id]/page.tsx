@@ -25,7 +25,7 @@ import type { Executor } from '@/lib/types/http';
 export default function ExecutorEditPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
-  const executor = useAppStore((state) => state.executors.items.find((item) => item.id === id) ?? null);
+  const executor = useAppStore((state) => state.executors.items.find((item: Executor) => item.id === id) ?? null);
 
   if (!executor) {
     return (
@@ -108,7 +108,7 @@ function ExecutorEditForm({ executor }: ExecutorEditFormProps) {
       setDraft(updated);
       setSavedExecutor(updated);
       setExecutors(
-        executors.map((item) => (item.id === updated.id ? { ...item, ...updated } : item))
+        executors.map((item: Executor) => (item.id === updated.id ? { ...item, ...updated } : item))
       );
       // Stay on the executor page after saving so the user can continue editing.
     } finally {
@@ -126,7 +126,7 @@ function ExecutorEditForm({ executor }: ExecutorEditFormProps) {
       } else {
         await deleteExecutorAction(draft.id);
       }
-      setExecutors(executors.filter((item) => item.id !== draft.id));
+      setExecutors(executors.filter((item: Executor) => item.id !== draft.id));
       router.push('/settings/executors');
     } finally {
       setIsDeleting(false);

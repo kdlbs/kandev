@@ -1,6 +1,6 @@
 import { GeneralSettings } from '@/components/settings/general-settings';
 import { StateProvider } from '@/components/state-provider';
-import { fetchUserSettings } from '@/lib/http';
+import { fetchUserSettings } from '@/lib/api';
 
 export default async function GeneralSettingsPage() {
   let initialState = {};

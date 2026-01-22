@@ -7,7 +7,7 @@ import {
   listEnvironments,
   listExecutors,
   listWorkspaces,
-} from '@/lib/http';
+} from '@/lib/api';
 
 export default function SettingsLayout({
   children,

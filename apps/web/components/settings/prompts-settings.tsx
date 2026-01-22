@@ -14,9 +14,9 @@ import {
 import { Input } from '@kandev/ui/input';
 import { Textarea } from '@kandev/ui/textarea';
 import { SettingsPageTemplate } from '@/components/settings/settings-page-template';
-import { useCustomPrompts } from '@/hooks/use-custom-prompts';
+import { useCustomPrompts } from '@/hooks/domains/settings/use-custom-prompts';
 import { useAppStore } from '@/components/state-provider';
-import { createPrompt, deletePrompt, updatePrompt } from '@/lib/http';
+import { createPrompt, deletePrompt, updatePrompt } from '@/lib/api';
 import { useRequest } from '@/lib/http/use-request';
 import type { CustomPrompt } from '@/lib/types/http';
 
@@ -68,13 +68,13 @@ export function PromptsSettings() {
       content: state.content.trim(),
     };
     const updated = await updatePrompt(id, payload, { cache: 'no-store' });
-    applyPrompts(prompts.map((prompt) => (prompt.id === id ? updated : prompt)));
+    applyPrompts(prompts.map((prompt: CustomPrompt) => (prompt.id === id ? updated : prompt)));
     resetForm();
   });
 
   const deleteRequest = useRequest(async (id: string) => {
     await deletePrompt(id, { cache: 'no-store' });
-    applyPrompts(prompts.filter((prompt) => prompt.id !== id));
+    applyPrompts(prompts.filter((prompt: CustomPrompt) => prompt.id !== id));
     if (editingId === id) {
       resetForm();
     }
@@ -188,7 +188,7 @@ export function PromptsSettings() {
               No prompts yet. Add your first prompt to get started.
             </div>
           ) : (
-            prompts.map((prompt) => (
+            prompts.map((prompt: CustomPrompt) => (
               <div
                 key={prompt.id}
                 className="rounded-lg border border-border/70 bg-background p-4 flex flex-col gap-3"

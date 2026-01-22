@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useAppStore } from '@/components/state-provider';
-import { listAvailableAgents } from '@/lib/http';
+import { listAvailableAgents } from '@/lib/api';
 
 export function useAvailableAgents(enabled = true) {
   const availableAgents = useAppStore((state) => state.availableAgents);
