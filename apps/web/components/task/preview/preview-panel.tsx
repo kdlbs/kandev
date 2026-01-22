@@ -4,11 +4,11 @@ import { useState, useEffect } from 'react';
 import { IconRefresh, IconExternalLink, IconLoader2 } from '@tabler/icons-react';
 import { Button } from '@kandev/ui/button';
 import { Input } from '@kandev/ui/input';
-import { SessionPanel } from '@kandev/ui/pannel-session';
+import { SessionPanel, SessionPanelContent } from '@kandev/ui/pannel-session';
 import { usePreviewPanel } from '@/hooks/use-preview-panel';
 import { useAppStore, useAppStoreApi } from '@/components/state-provider';
 import { useLayoutStore } from '@/lib/state/layout-store';
-import { ProcessOutputTerminal } from '@/components/task/process-output-terminal';
+import { ShellTerminal } from '@/components/task/shell-terminal';
 import { getLocalStorage } from '@/lib/local-storage';
 
 type PreviewPanelProps = {
@@ -184,105 +184,103 @@ export function PreviewPanel({ sessionId, hasDevScript }: PreviewPanelProps) {
 
   return (
     <SessionPanel margin="right">
-      <div className="flex flex-wrap items-center gap-2">
-        <Input
-          value={previewUrlDraft}
-          onChange={(event) => setPreviewUrlDraft(sessionId, event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') {
-              event.preventDefault();
-              handleUrlSubmit();
+      <div className="h-full flex flex-col gap-2 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <Input
+            value={previewUrlDraft}
+            onChange={(event) => setPreviewUrlDraft(sessionId, event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                handleUrlSubmit();
+              }
+            }}
+            placeholder={detectedUrl || "http://localhost:3000"}
+            className="h-6 flex-1 min-w-[240px]"
+          />
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleOpenInTab}
+            disabled={!previewUrl}
+            className="cursor-pointer"
+            title="Open in browser tab"
+          >
+            <IconExternalLink className="h-4 w-4" />
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setRefreshKey((value) => value + 1)}
+            disabled={!previewUrl}
+            className="cursor-pointer"
+            title="Refresh preview"
+          >
+            <IconRefresh className="h-4 w-4" />
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleStopClick}
+            disabled={isStopping}
+            className="cursor-pointer"
+          >
+            {isStopping ? 'Stopping…' : (isProcessFailed || isProcessExited) ? 'Close' : 'Stop'}
+          </Button>
+          <Button
+            size="sm"
+            variant={previewView === 'output' ? 'default' : 'outline'}
+            className="cursor-pointer"
+            onClick={() =>
+              setPreviewView(sessionId, previewView === 'output' ? 'preview' : 'output')
             }
-          }}
-          placeholder={detectedUrl || "http://localhost:3000"}
-          className="h-6 flex-1 min-w-[240px]"
-        />
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={handleOpenInTab}
-          disabled={!previewUrl}
-          className="cursor-pointer"
-          title="Open in browser tab"
-        >
-          <IconExternalLink className="h-4 w-4" />
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => setRefreshKey((value) => value + 1)}
-          disabled={!previewUrl}
-          className="cursor-pointer"
-          title="Refresh preview"
-        >
-          <IconRefresh className="h-4 w-4" />
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={handleStopClick}
-          disabled={isStopping}
-          className="cursor-pointer"
-        >
-          {isStopping ? 'Stopping…' : (isProcessFailed || isProcessExited) ? 'Close' : 'Stop'}
-        </Button>
-        <Button
-          size="sm"
-          variant={previewView === 'output' ? 'default' : 'outline'}
-          className="cursor-pointer"
-          onClick={() =>
-            setPreviewView(sessionId, previewView === 'output' ? 'preview' : 'output')
-          }
-        >
-          {isWaitingForUrl && (
-            <IconLoader2 className="h-4 w-4 mr-1 animate-spin" />
-          )}
-          {previewView === 'output' ? 'Preview' : 'Logs'}
-        </Button>
-      </div>
-
-      <div className="flex-1 min-h-0 mt-3">
-        {previewView === 'output' ? (
-          <div className="h-full w-full">
-            <ProcessOutputTerminal output={devOutput} processId={devProcessId ?? null} />
-          </div>
-        ) : showIframe && previewUrl ? (
-          <div className="h-full w-full flex items-center justify-center overflow-hidden">
-            <div className="h-full w-full bg-background border border-border rounded-md overflow-hidden">
-              <iframe
-                key={refreshKey}
-                src={previewUrl}
-                title="Preview"
-                className="h-full w-full border-0"
-                sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
-                referrerPolicy="no-referrer"
-              />
-            </div>
-          </div>
-        ) : previewUrl && !showIframe ? (
-          <div className="h-full w-full flex flex-col items-center justify-center text-muted-foreground gap-2">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
-            <p className="text-sm">Loading preview...</p>
-          </div>
-        ) : isRunning && showLoadingSpinner ? (
-          <div className="h-full w-full flex flex-col items-center justify-center text-muted-foreground gap-2">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
-            <p className="text-sm">Waiting for preview URL...</p>
-          </div>
-        ) : isRunning ? (
-          <div className="h-full w-full flex flex-col items-center justify-center text-muted-foreground gap-2">
-            <p className="text-sm">No preview URL detected</p>
-            {allowManualUrl && !detectedUrl && (
-              <p className="text-sm text-muted-foreground/70 mt-2 max-w-md text-center">
-                You can manually enter a URL in the input above and press Enter.
-              </p>
+          >
+            {isWaitingForUrl && (
+              <IconLoader2 className="h-4 w-4 mr-1 animate-spin" />
             )}
-          </div>
-        ) : (
-          <div className="h-full w-full flex items-center justify-center text-muted-foreground">
-            Start the dev server to enable preview.
-          </div>
-        )}
+            {previewView === 'output' ? 'Preview' : 'Logs'}
+          </Button>
+        </div>
+
+        <SessionPanelContent className={previewView === 'output' || (showIframe && previewUrl) ? 'p-0' : ''}>
+          {previewView === 'output' ? (
+            <ShellTerminal processOutput={devOutput} processId={devProcessId ?? null} />
+          ) : showIframe && previewUrl ? (
+            <iframe
+              key={refreshKey}
+              src={previewUrl}
+              title="Preview"
+              className="h-full w-full border-0"
+              sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+              referrerPolicy="no-referrer"
+            />
+          ) : previewUrl && !showIframe ? (
+            <div className="h-full w-full flex flex-col items-center justify-center text-muted-foreground gap-2">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+              <p className="text-sm">Loading preview...</p>
+            </div>
+          ) : isRunning && showLoadingSpinner ? (
+            <div className="h-full w-full flex flex-col items-center justify-center text-muted-foreground gap-2">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+              <p className="text-sm">Waiting for preview URL...</p>
+            </div>
+          ) : isRunning ? (
+            <div className="h-full w-full flex flex-col items-center justify-center text-muted-foreground gap-2">
+              <p className="text-sm">No preview URL detected</p>
+              {allowManualUrl && !detectedUrl && (
+                <p className="text-sm text-muted-foreground/70 mt-2 max-w-md text-center">
+                  You can manually enter a URL in the input above and press Enter.
+                </p>
+              )}
+            </div>
+          ) : (
+            <div className="h-full w-full flex items-center justify-center text-muted-foreground">
+              Start the dev server to enable preview.
+            </div>
+          )}
+        </SessionPanelContent>
+
+
       </div>
     </SessionPanel>
   );

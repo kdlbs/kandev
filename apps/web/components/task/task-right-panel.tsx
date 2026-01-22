@@ -1,7 +1,7 @@
 'use client';
 
 import type { ReactNode, MouseEvent } from 'react';
-import { memo, useEffect, useState } from 'react';
+import { memo, useEffect, useState, useCallback } from 'react';
 import { IconChevronDown, IconChevronUp, IconX } from '@tabler/icons-react';
 import { Badge } from '@kandev/ui/badge';
 import { SessionPanel, SessionPanelContent } from '@kandev/ui/pannel-session';
@@ -10,11 +10,18 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@kandev/ui/tabs';
 import { getLocalStorage, setLocalStorage } from '@/lib/local-storage';
 import { COMMANDS } from '@/components/task/task-data';
 import { ShellTerminal } from '@/components/task/shell-terminal';
-import { ProcessOutputTerminal } from '@/components/task/process-output-terminal';
 import { useAppStore } from '@/components/state-provider';
 import { useLayoutStore } from '@/lib/state/layout-store';
 import { stopProcess } from '@/lib/api';
 import type { Layout } from 'react-resizable-panels';
+
+type TerminalType = 'commands' | 'dev-server' | 'shell';
+
+type Terminal = {
+  id: string;
+  type: TerminalType;
+  label: string;
+};
 
 type TaskRightPanelProps = {
   topPanel: ReactNode;
@@ -27,8 +34,9 @@ const TaskRightPanel = memo(function TaskRightPanel({ topPanel, sessionId = null
   const [rightLayout, setRightLayout] = useState<Layout>(() =>
     getLocalStorage('task-layout-right', DEFAULT_RIGHT_LAYOUT)
   );
-  const [activeTerminalId, setActiveTerminalId] = useState(1);
-  const [terminalIds, setTerminalIds] = useState([1]);
+  const [terminals, setTerminals] = useState<Terminal[]>([
+    { id: 'shell-1', type: 'shell', label: 'Terminal' },
+  ]);
   const [isBottomCollapsed, setIsBottomCollapsed] = useState(false);
   const [isStoppingDev, setIsStoppingDev] = useState(false);
   const activeTab = useAppStore((state) =>
@@ -47,83 +55,109 @@ const TaskRightPanel = memo(function TaskRightPanel({ topPanel, sessionId = null
   const previewOpen = useAppStore((state) =>
     sessionId ? state.previewPanel.openBySessionId[sessionId] ?? false : false
   );
-  const showDevTab = Boolean(sessionId && previewOpen);
 
-  const addTerminal = () => {
-    setTerminalIds((ids) => {
-      const nextId = Math.max(0, ...ids) + 1;
-      setActiveTerminalId(nextId);
-      if (sessionId) {
-        setRightPanelActiveTab(sessionId, `terminal-${nextId}`);
-      }
-      return [...ids, nextId];
-    });
-  };
-
-  const removeTerminal = (id: number) => {
-    setTerminalIds((ids) => {
-      const nextIds = ids.filter((terminalId) => terminalId !== id);
-      if (activeTerminalId === id) {
-        const fallback = nextIds[0] ?? 1;
-        setActiveTerminalId(fallback);
-        if (sessionId) {
-          setRightPanelActiveTab(sessionId, `terminal-${fallback}`);
-        }
-      }
-      return nextIds.length ? nextIds : [1];
-    });
-  };
-
-  const terminalTabValue =
-    activeTab ?? (activeTerminalId === 0 ? 'commands' : `terminal-${activeTerminalId}`);
-
+  // Sync dev server terminal with preview state
   useEffect(() => {
     if (!sessionId) return;
-    if (activeTab && activeTab.startsWith('terminal-')) {
-      const parsed = Number(activeTab.replace('terminal-', ''));
-      if (!Number.isNaN(parsed) && parsed !== activeTerminalId) {
-        setActiveTerminalId(parsed);
-      }
-    }
-  }, [activeTab, activeTerminalId, sessionId]);
 
+    setTerminals((prev) => {
+      const hasDevTerminal = prev.some((t) => t.type === 'dev-server');
+
+      if (previewOpen && !hasDevTerminal) {
+        // Add dev server terminal at the beginning
+        return [{ id: 'dev-server', type: 'dev-server', label: 'Dev Server' }, ...prev];
+      }
+
+      if (!previewOpen && hasDevTerminal) {
+        // Remove dev server terminal
+        return prev.filter((t) => t.type !== 'dev-server');
+      }
+
+      return prev;
+    });
+  }, [previewOpen, sessionId]);
+
+  const addTerminal = useCallback(() => {
+    setTerminals((prev) => {
+      const shellTerminals = prev.filter((t) => t.type === 'shell');
+      const nextNum = shellTerminals.length + 1;
+      const newTerminal: Terminal = {
+        id: `shell-${nextNum}`,
+        type: 'shell',
+        label: nextNum === 1 ? 'Terminal' : `Terminal ${nextNum}`,
+      };
+      if (sessionId) {
+        setRightPanelActiveTab(sessionId, newTerminal.id);
+      }
+      return [...prev, newTerminal];
+    });
+  }, [sessionId, setRightPanelActiveTab]);
+
+  const removeTerminal = useCallback(
+    (id: string) => {
+      setTerminals((prev) => {
+        const shellTerminals = prev.filter((t) => t.type === 'shell');
+        if (shellTerminals.length <= 1) {
+          return prev; // Keep at least one shell terminal
+        }
+
+        const nextTerminals = prev.filter((t) => t.id !== id);
+
+        // If removing active tab, switch to first available shell terminal
+        if (activeTab === id) {
+          const fallbackShell = nextTerminals.find((t) => t.type === 'shell');
+          if (fallbackShell && sessionId) {
+            setRightPanelActiveTab(sessionId, fallbackShell.id);
+          }
+        }
+
+        return nextTerminals;
+      });
+    },
+    [activeTab, sessionId, setRightPanelActiveTab]
+  );
+
+  const terminalTabValue = activeTab ?? terminals.find((t) => t.type === 'shell')?.id ?? 'commands';
+
+  // Validate active tab exists in terminals
   useEffect(() => {
     if (!sessionId || !activeTab) return;
-    if (activeTab.startsWith('terminal-')) {
-      const parsed = Number(activeTab.replace('terminal-', ''));
-      if (Number.isNaN(parsed) || !terminalIds.includes(parsed)) {
-        const fallback = terminalIds[0] ?? 1;
-        setActiveTerminalId(fallback);
-        setRightPanelActiveTab(sessionId, `terminal-${fallback}`);
+
+    const tabExists =
+      activeTab === 'commands' ||
+      terminals.some((t) => t.id === activeTab);
+
+    if (!tabExists) {
+      const fallbackShell = terminals.find((t) => t.type === 'shell');
+      if (fallbackShell) {
+        setRightPanelActiveTab(sessionId, fallbackShell.id);
       }
     }
-  }, [activeTab, sessionId, terminalIds, setRightPanelActiveTab]);
+  }, [activeTab, sessionId, terminals, setRightPanelActiveTab]);
 
-  useEffect(() => {
-    if (!sessionId) return;
-    if (!showDevTab && terminalTabValue === 'dev-server') {
-      const fallback = `terminal-${terminalIds[0] ?? 1}`;
-      setRightPanelActiveTab(sessionId, fallback);
-    }
-  }, [showDevTab, sessionId, terminalTabValue, terminalIds, setRightPanelActiveTab]);
-
-  const handleCloseDevTab = async (event: MouseEvent) => {
-    event.preventDefault();
-    event.stopPropagation();
-    if (!sessionId) return;
-    if (devProcessId) {
-      setIsStoppingDev(true);
-      try {
-        await stopProcess(sessionId, { process_id: devProcessId });
-      } finally {
-        setIsStoppingDev(false);
+  const handleCloseDevTab = useCallback(
+    async (event: MouseEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!sessionId) return;
+      if (devProcessId) {
+        setIsStoppingDev(true);
+        try {
+          await stopProcess(sessionId, { process_id: devProcessId });
+        } finally {
+          setIsStoppingDev(false);
+        }
       }
-    }
-    setRightPanelActiveTab(sessionId, `terminal-${terminalIds[0] ?? 1}`);
-    setPreviewOpen(sessionId, false);
-    setPreviewStage(sessionId, 'closed');
-    closeLayoutPreview(sessionId);
-  };
+      const fallbackShell = terminals.find((t) => t.type === 'shell');
+      if (fallbackShell) {
+        setRightPanelActiveTab(sessionId, fallbackShell.id);
+      }
+      setPreviewOpen(sessionId, false);
+      setPreviewStage(sessionId, 'closed');
+      closeLayoutPreview(sessionId);
+    },
+    [sessionId, devProcessId, terminals, setRightPanelActiveTab, setPreviewOpen, setPreviewStage, closeLayoutPreview]
+  );
 
   if (isBottomCollapsed) {
     return (
@@ -136,19 +170,8 @@ const TaskRightPanel = memo(function TaskRightPanel({ topPanel, sessionId = null
           <Tabs
             value={terminalTabValue}
             onValueChange={(value) => {
-              if (value === 'commands') {
-                setActiveTerminalId(0);
-                if (sessionId) setRightPanelActiveTab(sessionId, value);
-                return;
-              }
-              if (value === 'dev-server') {
-                if (sessionId) setRightPanelActiveTab(sessionId, value);
-                return;
-              }
-              const parsed = Number(value.replace('terminal-', ''));
-              if (!Number.isNaN(parsed)) {
-                setActiveTerminalId(parsed);
-                if (sessionId) setRightPanelActiveTab(sessionId, value);
+              if (sessionId) {
+                setRightPanelActiveTab(sessionId, value);
               }
             }}
             className="flex-1 min-h-0"
@@ -157,22 +180,27 @@ const TaskRightPanel = memo(function TaskRightPanel({ topPanel, sessionId = null
               <TabsTrigger value="commands" className="cursor-pointer">
                 Commands
               </TabsTrigger>
-              {showDevTab ? (
-                <TabsTrigger value="dev-server" className="group flex items-center gap-1 pr-1 cursor-pointer">
-                  Dev Server
-                  <span
-                    role="button"
-                    tabIndex={-1}
-                    className="text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground"
-                    onClick={handleCloseDevTab}
-                  >
-                    <IconX className="h-3.5 w-3.5" />
-                  </span>
-                </TabsTrigger>
-              ) : null}
-              {terminalIds.map((id) => (
-                <TabsTrigger key={id} value={`terminal-${id}`} className="cursor-pointer">
-                  {id === 1 ? 'Terminal' : `Terminal ${id}`}
+              {terminals.map((terminal) => (
+                <TabsTrigger
+                  key={terminal.id}
+                  value={terminal.id}
+                  className={
+                    terminal.type === 'dev-server'
+                      ? 'group flex items-center gap-1 pr-1 cursor-pointer'
+                      : 'cursor-pointer'
+                  }
+                >
+                  {terminal.label}
+                  {terminal.type === 'dev-server' && (
+                    <span
+                      role="button"
+                      tabIndex={-1}
+                      className="text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground"
+                      onClick={handleCloseDevTab}
+                    >
+                      <IconX className="h-3.5 w-3.5" />
+                    </span>
+                  )}
                 </TabsTrigger>
               ))}
               <TabsTrigger value="add" onClick={addTerminal} className="cursor-pointer">
@@ -212,19 +240,8 @@ const TaskRightPanel = memo(function TaskRightPanel({ topPanel, sessionId = null
           <Tabs
             value={terminalTabValue}
             onValueChange={(value) => {
-              if (value === 'commands') {
-                setActiveTerminalId(0);
-                if (sessionId) setRightPanelActiveTab(sessionId, value);
-                return;
-              }
-              if (value === 'dev-server') {
-                if (sessionId) setRightPanelActiveTab(sessionId, value);
-                return;
-              }
-              const parsed = Number(value.replace('terminal-', ''));
-              if (!Number.isNaN(parsed)) {
-                setActiveTerminalId(parsed);
-                if (sessionId) setRightPanelActiveTab(sessionId, value);
+              if (sessionId) {
+                setRightPanelActiveTab(sessionId, value);
               }
             }}
             className="flex-1 min-h-0"
@@ -234,27 +251,23 @@ const TaskRightPanel = memo(function TaskRightPanel({ topPanel, sessionId = null
                 <TabsTrigger value="commands" className="cursor-pointer">
                   Commands
                 </TabsTrigger>
-                {showDevTab ? (
-                  <TabsTrigger value="dev-server" className="group flex items-center gap-1 pr-1 cursor-pointer">
-                    Dev Server
-                    <span
-                      role="button"
-                      tabIndex={-1}
-                      className="text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground"
-                      onClick={handleCloseDevTab}
-                    >
-                      <IconX className="h-3.5 w-3.5" />
-                    </span>
-                  </TabsTrigger>
-                ) : null}
-                {terminalIds.map((id) => (
+                {terminals.map((terminal) => (
                   <TabsTrigger
-                    key={id}
-                    value={`terminal-${id}`}
+                    key={terminal.id}
+                    value={terminal.id}
                     className="group flex items-center gap-1 pr-1 cursor-pointer"
                   >
-                    {id === 1 ? 'Terminal' : `Terminal ${id}`}
-                    {terminalIds.length > 1 && (
+                    {terminal.label}
+                    {terminal.type === 'dev-server' ? (
+                      <span
+                        role="button"
+                        tabIndex={-1}
+                        className="text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground"
+                        onClick={handleCloseDevTab}
+                      >
+                        <IconX className="h-3.5 w-3.5" />
+                      </span>
+                    ) : terminal.type === 'shell' && terminals.filter((t) => t.type === 'shell').length > 1 ? (
                       <span
                         role="button"
                         tabIndex={-1}
@@ -262,12 +275,12 @@ const TaskRightPanel = memo(function TaskRightPanel({ topPanel, sessionId = null
                         onClick={(event) => {
                           event.preventDefault();
                           event.stopPropagation();
-                          removeTerminal(id);
+                          removeTerminal(terminal.id);
                         }}
                       >
                         <IconX className="h-3.5 w-3.5" />
                       </span>
-                    )}
+                    ) : null}
                   </TabsTrigger>
                 ))}
                 <TabsTrigger value="add" onClick={addTerminal} className="cursor-pointer">
@@ -298,21 +311,18 @@ const TaskRightPanel = memo(function TaskRightPanel({ topPanel, sessionId = null
                 </div>
               </SessionPanelContent>
             </TabsContent>
-            {showDevTab ? (
-              <TabsContent value="dev-server" className="flex-1 min-h-0">
-                <SessionPanelContent>
-                  <ProcessOutputTerminal
-                    output={devOutput}
-                    processId={devProcessId ?? null}
-                    isStopping={isStoppingDev}
-                  />
-                </SessionPanelContent>
-              </TabsContent>
-            ) : null}
-            {terminalIds.map((id) => (
-              <TabsContent key={id} value={`terminal-${id}`} className="flex-1 min-h-0">
+            {terminals.map((terminal) => (
+              <TabsContent key={terminal.id} value={terminal.id} className="flex-1 min-h-0">
                 <SessionPanelContent className="p-0">
-                  <ShellTerminal />
+                  {terminal.type === 'dev-server' ? (
+                    <ShellTerminal
+                      processOutput={devOutput}
+                      processId={devProcessId ?? null}
+                      isStopping={isStoppingDev}
+                    />
+                  ) : (
+                    <ShellTerminal sessionId={sessionId ?? undefined} />
+                  )}
                 </SessionPanelContent>
               </TabsContent>
             ))}
