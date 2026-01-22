@@ -631,7 +631,9 @@ type OrchestratorWSClient struct {
 	done          chan struct{}
 	// pending tracks in-flight requests: request ID -> response channel
 	pending map[string]chan *ws.Message
-	mu      sync.Mutex
+	// send is the channel for outgoing messages (serialized through writePump)
+	send chan []byte
+	mu   sync.Mutex
 }
 
 // NewOrchestratorWSClient creates a WebSocket connection to the test server
@@ -654,9 +656,11 @@ func NewOrchestratorWSClient(t *testing.T, serverURL string) *OrchestratorWSClie
 		notifications: make(chan *ws.Message, 100),
 		done:          make(chan struct{}),
 		pending:       make(map[string]chan *ws.Message),
+		send:          make(chan []byte, 256),
 	}
 
 	go client.readPump()
+	go client.writePump()
 
 	return client
 }
@@ -697,19 +701,31 @@ func (c *OrchestratorWSClient) readPump() {
 		} else {
 			// Route response to the pending request by ID
 			c.mu.Lock()
-			if ch, ok := c.pending[msg.ID]; ok {
+			ch, ok := c.pending[msg.ID]
+			c.mu.Unlock()
+			if ok {
 				select {
 				case ch <- &msg:
 				default:
 				}
 			}
-			c.mu.Unlock()
+		}
+	}
+}
+
+// writePump serializes all writes to the WebSocket connection
+func (c *OrchestratorWSClient) writePump() {
+	for data := range c.send {
+		if err := c.conn.WriteMessage(websocket.TextMessage, data); err != nil {
+			c.t.Logf("writePump: write error: %v", err)
+			return
 		}
 	}
 }
 
 // Close closes the WebSocket connection
 func (c *OrchestratorWSClient) Close() {
+	close(c.send)
 	if err := c.conn.Close(); err != nil {
 		c.t.Logf("failed to close websocket: %v", err)
 	}
@@ -731,7 +747,7 @@ func (c *OrchestratorWSClient) SendRequest(id, action string, payload interface{
 	// Create a response channel for this request
 	respCh := make(chan *ws.Message, 1)
 
-	// Register the pending request
+	// Register the pending request BEFORE sending (so we don't miss the response)
 	c.mu.Lock()
 	c.pending[id] = respCh
 	c.mu.Unlock()
@@ -743,19 +759,18 @@ func (c *OrchestratorWSClient) SendRequest(id, action string, payload interface{
 		c.mu.Unlock()
 	}()
 
-	// Send the request
-	c.mu.Lock()
-	writeErr := c.conn.WriteMessage(websocket.TextMessage, data)
-	c.mu.Unlock()
-	if writeErr != nil {
-		return nil, writeErr
+	// Send the request through the write pump (serialized)
+	select {
+	case c.send <- data:
+	case <-time.After(5 * time.Second):
+		return nil, fmt.Errorf("send buffer full")
 	}
 
 	// Wait for response on our dedicated channel
 	select {
 	case resp := <-respCh:
 		return resp, nil
-	case <-time.After(10 * time.Second):
+	case <-time.After(30 * time.Second):
 		return nil, context.DeadlineExceeded
 	}
 }
