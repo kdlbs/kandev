@@ -48,8 +48,102 @@ export function ChatMessage({ comment, label, className, showRichBlocks }: ChatM
       {isUser ? (
         <p className="whitespace-pre-wrap">{comment.content || '(empty)'}</p>
       ) : (
-        <div className="prose prose-sm dark:prose-invert max-w-none prose-p:my-2 prose-p:leading-relaxed prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-pre:my-3 prose-code:px-1.5 prose-code:py-0.5 prose-code:bg-background/50 prose-code:rounded prose-code:text-xs prose-code:before:content-none prose-code:after:content-none prose-pre:bg-background/80 prose-pre:text-xs prose-strong:text-foreground prose-headings:text-foreground">
-          <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>
+        <div className="prose prose-sm dark:prose-invert max-w-none prose-p:my-4 prose-p:leading-relaxed prose-ul:my-4 prose-ul:list-disc prose-ul:pl-6 prose-ol:my-4 prose-ol:list-decimal prose-ol:pl-6 prose-li:my-1.5 prose-pre:my-5 prose-strong:text-foreground prose-strong:font-bold prose-headings:text-foreground prose-headings:font-bold">
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm, remarkBreaks]}
+            components={{
+              code: ({ node, className, children, ...props }) => {
+                // Check if it's inline code (no className means inline, className with language-* means code block)
+                const isInline = !className || !className.startsWith('language-');
+
+                // Inline code (backticks)
+                if (isInline) {
+                  return (
+                    <code
+                      style={{
+                        padding: '2px 6px',
+                        backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                        color: 'rgb(96, 165, 250)',
+                        borderRadius: '4px',
+                        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                        fontSize: '0.9em',
+                      }}
+                      {...props}
+                    >
+                      {children}
+                    </code>
+                  );
+                }
+                // Code blocks (triple backticks)
+                return (
+                  <code
+                    className={className}
+                    style={{
+                      display: 'block',
+                      padding: '12px',
+                      backgroundColor: 'rgba(0, 0, 0, 0.3)',
+                      borderRadius: '6px',
+                      overflowX: 'auto',
+                      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                      fontSize: '0.85em',
+                    }}
+                    {...props}
+                  >
+                    {children}
+                  </code>
+                );
+              },
+              ol: ({ node, children, ...props }) => (
+                <ol
+                  style={{
+                    listStyleType: 'decimal',
+                    paddingLeft: '1.5rem',
+                    marginTop: '1rem',
+                    marginBottom: '1rem',
+                  }}
+                  {...props}
+                >
+                  {children}
+                </ol>
+              ),
+              ul: ({ node, children, ...props }) => (
+                <ul
+                  style={{
+                    listStyleType: 'disc',
+                    paddingLeft: '1.5rem',
+                    marginTop: '1rem',
+                    marginBottom: '1rem',
+                  }}
+                  {...props}
+                >
+                  {children}
+                </ul>
+              ),
+              li: ({ node, children, ...props }) => (
+                <li
+                  style={{
+                    marginTop: '0.375rem',
+                    marginBottom: '0.375rem',
+                  }}
+                  {...props}
+                >
+                  {children}
+                </li>
+              ),
+              p: ({ node, children, ...props }) => (
+                <p
+                  style={{
+                    marginTop: '1rem',
+                    marginBottom: '1rem',
+                    lineHeight: '1.625',
+                  }}
+                  {...props}
+                >
+                  {children}
+                </p>
+              ),
+            }}
+          >
             {comment.content || '(empty)'}
           </ReactMarkdown>
           {showRichBlocks ? <RichBlocks comment={comment} /> : null}
