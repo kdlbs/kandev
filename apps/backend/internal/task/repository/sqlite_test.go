@@ -9,10 +9,11 @@ import (
 	"github.com/kandev/kandev/internal/worktree"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/sqlite"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
-func createTestSQLiteRepo(t *testing.T) (*sqliteRepository, func()) {
+func createTestSQLiteRepo(t *testing.T) (*sqlite.Repository, func()) {
 	t.Helper()
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
@@ -21,7 +22,7 @@ func createTestSQLiteRepo(t *testing.T) (*sqliteRepository, func()) {
 	if err != nil {
 		t.Fatalf("failed to open SQLite database: %v", err)
 	}
-	repo, err := newSQLiteRepositoryWithDB(dbConn)
+	repo, err := sqlite.NewWithDB(dbConn)
 	if err != nil {
 		t.Fatalf("failed to create SQLite repository: %v", err)
 	}
@@ -48,7 +49,7 @@ func TestNewSQLiteRepositoryWithDB(t *testing.T) {
 	if repo == nil {
 		t.Fatal("expected non-nil repository")
 	}
-	if repo.db == nil {
+	if repo.DB() == nil {
 		t.Error("expected db to be initialized")
 	}
 }
@@ -527,7 +528,7 @@ func TestSQLiteRepository_Persistence(t *testing.T) {
 
 // Message CRUD tests
 
-func setupSQLiteTestSession(ctx context.Context, repo *sqliteRepository, taskID, sessionID string) string {
+func setupSQLiteTestSession(ctx context.Context, repo *sqlite.Repository, taskID, sessionID string) string {
 	session := &models.TaskSession{
 		ID:             sessionID,
 		TaskID:         taskID,
@@ -538,7 +539,7 @@ func setupSQLiteTestSession(ctx context.Context, repo *sqliteRepository, taskID,
 	return session.ID
 }
 
-func setupSQLiteTestTurn(ctx context.Context, repo *sqliteRepository, sessionID, taskID, turnID string) string {
+func setupSQLiteTestTurn(ctx context.Context, repo *sqlite.Repository, sessionID, taskID, turnID string) string {
 	now := time.Now()
 	turn := &models.Turn{
 		ID:            turnID,
@@ -705,7 +706,7 @@ func TestSQLiteRepository_ListMessagesPagination(t *testing.T) {
 		CreatedAt:     baseTime,
 	})
 
-	comments, hasMore, err := repo.ListMessagesPaginated(ctx, sessionID, ListMessagesOptions{
+	comments, hasMore, err := repo.ListMessagesPaginated(ctx, sessionID, models.ListMessagesOptions{
 		Limit: 2,
 		Sort:  "desc",
 	})

@@ -6,6 +6,14 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
+// ListMessagesOptions defines pagination options for listing messages
+type ListMessagesOptions struct {
+	Limit  int
+	Before string
+	After  string
+	Sort   string
+}
+
 // Task represents a task in the database
 type Task struct {
 	ID           string                 `json:"id"`
