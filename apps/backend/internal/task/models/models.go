@@ -106,6 +106,8 @@ const (
 	MessageTypeStatus MessageType = "status"
 	// MessageTypePermissionRequest is for agent permission requests
 	MessageTypePermissionRequest MessageType = "permission_request"
+	// MessageTypeScriptExecution is for setup/cleanup script execution messages
+	MessageTypeScriptExecution MessageType = "script_execution"
 )
 
 // Message represents a message in a task session

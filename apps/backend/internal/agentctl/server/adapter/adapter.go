@@ -39,6 +39,14 @@ const (
 	EventTypeContextWindow     = streams.EventTypeContextWindow
 )
 
+// StderrProvider provides access to recent stderr output for error context.
+// This is used by adapters to include stderr in error events when the agent
+// reports an error without a detailed message (e.g., rate limit errors).
+type StderrProvider interface {
+	// GetRecentStderr returns the most recent stderr lines from the agent process.
+	GetRecentStderr() []string
+}
+
 // AgentInfo contains information about the connected agent.
 type AgentInfo struct {
 	Name    string `json:"name"`

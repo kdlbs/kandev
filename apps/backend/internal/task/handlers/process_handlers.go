@@ -364,8 +364,15 @@ func (h *ProcessHandlers) httpListProcesses(c *gin.Context) {
 		procs, err := h.lifecycleMgr.ListProcesses(listCtx, sessionID)
 		if err != nil {
 			var netErr net.Error
-			if errors.Is(err, context.DeadlineExceeded) || errors.As(err, &netErr) || strings.Contains(err.Error(), "connection refused") {
-				h.logger.Warn("process list unavailable", zap.String("session_id", sessionID), zap.Error(err))
+			// Handle expected "no processes" conditions gracefully:
+			// - no execution found: agent hasn't started yet (async launch)
+			// - connection refused: agent not running
+			// - deadline exceeded: agent not responding
+			if errors.Is(err, context.DeadlineExceeded) ||
+				errors.As(err, &netErr) ||
+				strings.Contains(err.Error(), "connection refused") ||
+				strings.Contains(err.Error(), "no execution found") {
+				h.logger.Debug("process list unavailable (agent not ready)", zap.String("session_id", sessionID), zap.Error(err))
 				c.JSON(http.StatusOK, []agentctlclient.ProcessInfo{})
 				return
 			}

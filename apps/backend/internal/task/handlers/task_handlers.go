@@ -3,10 +3,10 @@ package handlers
 import (
 	"context"
 	"net/http"
-	"time"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/controller"
@@ -184,17 +184,24 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 
 	response := createTaskResponse{TaskDTO: resp}
 	if body.StartAgent && body.AgentProfileID != "" && h.orchestrator != nil {
-		startCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		// Use task description as the initial prompt
-		execution, err := h.orchestrator.StartTask(startCtx, resp.ID, body.AgentProfileID, body.Priority, resp.Description)
-		if err != nil {
-			h.logger.Error("failed to start agent for task", zap.Error(err))
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to start agent for task"})
-			return
-		}
-		response.TaskSessionID = execution.SessionID
-		response.AgentExecutionID = execution.AgentExecutionID
+		// Launch agent asynchronously so the HTTP request can return immediately.
+		// The frontend will receive WebSocket updates when the agent actually starts.
+		// This allows the "new task" dialog to close right away while setup scripts run.
+		go func() {
+			// Use a longer timeout to accommodate setup scripts (which can take minutes for npm install, etc.)
+			startCtx, cancel := context.WithTimeout(context.Background(), constants.AgentLaunchTimeout)
+			defer cancel()
+			// Use task description as the initial prompt
+			execution, err := h.orchestrator.StartTask(startCtx, resp.ID, body.AgentProfileID, body.Priority, resp.Description)
+			if err != nil {
+				h.logger.Error("failed to start agent for task (async)", zap.Error(err), zap.String("task_id", resp.ID))
+				return
+			}
+			h.logger.Info("agent started for task (async)",
+				zap.String("task_id", resp.ID),
+				zap.String("session_id", execution.SessionID),
+				zap.String("execution_id", execution.AgentExecutionID))
+		}()
 	}
 
 	c.JSON(http.StatusOK, response)
@@ -278,7 +285,7 @@ func (h *TaskHandlers) httpMoveTask(c *gin.Context) {
 }
 
 func (h *TaskHandlers) httpDeleteTask(c *gin.Context) {
-	deleteCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	deleteCtx, cancel := context.WithTimeout(context.Background(), constants.TaskDeleteTimeout)
 	defer cancel()
 	resp, err := h.controller.DeleteTask(deleteCtx, dto.DeleteTaskRequest{ID: c.Param("id")})
 	if err != nil {

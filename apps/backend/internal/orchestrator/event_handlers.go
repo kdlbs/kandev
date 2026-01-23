@@ -150,18 +150,36 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 
 	case "error":
 		// Handle error events
+		// Note: Agent-specific error parsing is done in the adapter layer.
+		// The adapter provides a user-friendly message in the Text field,
+		// with raw details in the Data field for debugging.
 		if sessionID != "" && s.messageCreator != nil {
+			// Build error message - adapters should provide parsed message in Text field
+			errorMsg := payload.Data.Error
+			if errorMsg == "" {
+				errorMsg = payload.Data.Text
+			}
+			if errorMsg == "" {
+				errorMsg = "An error occurred while processing your request"
+			}
+
+			// Build metadata with all available error context
+			metadata := map[string]interface{}{
+				"provider":       "agent",
+				"provider_agent": payload.AgentID,
+			}
+			if payload.Data.Data != nil {
+				metadata["error_data"] = payload.Data.Data
+			}
+
 			if err := s.messageCreator.CreateSessionMessage(
 				ctx,
 				taskID,
-				payload.Data.Error,
+				errorMsg,
 				sessionID,
 				string(v1.MessageTypeError),
 				s.getActiveTurnID(sessionID),
-				map[string]interface{}{
-					"provider":       "agent",
-					"provider_agent": payload.AgentID,
-				},
+				metadata,
 				false,
 			); err != nil {
 				s.logger.Error("failed to create error message",
