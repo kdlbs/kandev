@@ -80,10 +80,10 @@ export function ShellTerminal({
       fontSize: isReadOnlyMode ? 12 : 13,
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
       theme: {
-        background: '#1e1e1e',
+        background: 'transparent',
         foreground: '#d4d4d4',
         cursor: '#d4d4d4',
-        cursorAccent: '#1e1e1e',
+        cursorAccent: 'transparent',
         selectionBackground: '#264f78',
         black: '#1e1e1e',
         red: '#f44747',
@@ -111,6 +111,16 @@ export function ShellTerminal({
 
     xtermRef.current = terminal;
     fitAddonRef.current = fitAddon;
+
+    // Force transparent background on all xterm elements to inherit from parent
+    const xtermElement = terminalRef.current.querySelector('.xterm');
+    const xtermViewport = terminalRef.current.querySelector('.xterm-viewport');
+    const xtermScreen = terminalRef.current.querySelector('.xterm-screen');
+    const xtermScrollable = terminalRef.current.querySelector('.xterm-scrollable-element');
+    if (xtermElement) (xtermElement as HTMLElement).style.background = 'transparent';
+    if (xtermViewport) (xtermViewport as HTMLElement).style.background = 'transparent';
+    if (xtermScreen) (xtermScreen as HTMLElement).style.background = 'transparent';
+    if (xtermScrollable) (xtermScrollable as HTMLElement).style.backgroundColor = 'transparent';
 
     // For read-only mode, write initial output
     if (isReadOnlyMode && outputRef.current) {
@@ -279,7 +289,7 @@ export function ShellTerminal({
 
   if (isReadOnlyMode) {
     return (
-      <div className="h-full w-full rounded-md bg-[#1e1e1e] relative">
+      <div className="h-full w-full rounded-md bg-background relative">
         <div ref={terminalRef} className="p-1 absolute inset-0" />
         {isStopping ? (
           <div className="absolute right-3 top-2 text-xs text-muted-foreground">
@@ -293,7 +303,7 @@ export function ShellTerminal({
   return (
     <div
       ref={terminalRef}
-      className="h-full p-1 w-full overflow-hidden rounded-md bg-[#1e1e1e]"
+      className="h-full p-1 w-full overflow-hidden rounded-md bg-background"
     />
   );
 }
