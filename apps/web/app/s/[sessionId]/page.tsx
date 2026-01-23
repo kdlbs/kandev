@@ -46,9 +46,10 @@ export default async function SessionPage({
     const availableAgents = availableAgentsResponse.agents ?? [];
     let messagesResponse: ListMessagesResponse | null = null;
     try {
+      // Load most recent messages in descending order, then reverse to show oldest-to-newest
       messagesResponse = await listTaskSessionMessages(
         sessionId,
-        { limit: 50, sort: 'asc' },
+        { limit: 50, sort: 'desc' },
         { cache: 'no-store' }
       );
     } catch (error) {
@@ -58,11 +59,12 @@ export default async function SessionPage({
       );
     }
 
-    const messages = messagesResponse?.messages ?? [];
+    const messages = messagesResponse?.messages ? [...messagesResponse.messages].reverse() : [];
     const taskState = taskToState(task, sessionId, {
       items: messages,
       hasMore: messagesResponse?.has_more ?? false,
-      oldestCursor: messagesResponse?.cursor ?? (messages[0]?.id ?? null),
+      // oldestCursor should be the first (oldest) message ID for lazy loading older messages
+      oldestCursor: messages[0]?.id ?? null,
     });
 
     initialState = {

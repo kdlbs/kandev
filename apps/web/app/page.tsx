@@ -114,18 +114,21 @@ export default async function Page({ searchParams }: PageProps) {
     // Load messages for selected task session if provided (SSR optimization)
     if (taskId && sessionId) {
       try {
-        const messagesResponse = await listTaskSessionMessages(sessionId, { limit: 50, sort: 'asc' }, { cache: 'no-store' });
+        // Load most recent messages in descending order, then reverse to show oldest-to-newest
+        const messagesResponse = await listTaskSessionMessages(sessionId, { limit: 50, sort: 'desc' }, { cache: 'no-store' });
+        const messages = [...(messagesResponse.messages ?? [])].reverse();
         initialState = {
           ...initialState,
           messages: {
             bySession: {
-              [sessionId]: messagesResponse.messages ?? [],
+              [sessionId]: messages,
             },
             metaBySession: {
               [sessionId]: {
                 isLoading: false,
                 hasMore: messagesResponse.has_more ?? false,
-                oldestCursor: messagesResponse.cursor ?? (messagesResponse.messages?.[0]?.id ?? null),
+                // oldestCursor should be the first (oldest) message ID for lazy loading older messages
+                oldestCursor: messages[0]?.id ?? null,
               },
             },
           },

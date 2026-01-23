@@ -73,6 +73,8 @@ export const createSessionSlice: StateCreator<
           oldestCursor: null,
         };
       }
+      // Always reset isLoading to false after prepending messages
+      draft.messages.metaBySession[sessionId].isLoading = false;
       if (meta?.hasMore !== undefined) {
         draft.messages.metaBySession[sessionId].hasMore = meta.hasMore;
       }
