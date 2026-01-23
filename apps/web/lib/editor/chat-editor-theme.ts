@@ -3,7 +3,7 @@ import { EditorView } from '@codemirror/view';
 export const chatEditorTheme = EditorView.theme({
   '&': {
     color: 'var(--foreground)',
-    fontSize: '0.875rem',
+    fontSize: '0.8125rem', // 13px
     backgroundColor: 'transparent',
   },
   '.cm-editor': {
@@ -38,21 +38,27 @@ export const chatEditorTheme = EditorView.theme({
     opacity: '0.8',
   },
   '.cm-tooltip-autocomplete, .cm-tooltip-autocomplete li, .cm-completionDetail': {
-    fontSize: '0.875rem',
+    fontSize: '0.8125rem', // 13px
   },
   '.cm-cursor': {
     borderLeftColor: 'var(--foreground)',
   },
   '.cm-selectionBackground': {
-    backgroundColor: 'var(--primary)',
-    opacity: '0.7',
+    backgroundColor: '#6366f1 !important',
   },
   '.cm-selectionMatch': {
-    backgroundColor: 'var(--primary)',
-    opacity: '0.6',
+    backgroundColor: '#818cf8 !important',
   },
   '.cm-selectionLayer .cm-selectionBackground': {
-    backgroundColor: 'var(--primary)',
-    opacity: '0.7',
+    backgroundColor: '#6366f1 !important',
+  },
+  '&.cm-focused .cm-selectionBackground': {
+    backgroundColor: '#6366f1 !important',
+  },
+  '.cm-line ::selection': {
+    backgroundColor: '#6366f1 !important',
+  },
+  '.cm-content ::selection': {
+    backgroundColor: '#6366f1 !important',
   },
 });
