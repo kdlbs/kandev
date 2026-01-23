@@ -8,6 +8,7 @@ import { StatusMessage } from '@/components/task/chat/messages/status-message';
 import { ToolCallMessage } from '@/components/task/chat/messages/tool-call-message';
 import { ThinkingMessage } from '@/components/task/chat/messages/thinking-message';
 import { TodoMessage } from '@/components/task/chat/messages/todo-message';
+import { ScriptExecutionMessage } from '@/components/task/chat/messages/script-execution-message';
 
 type AdapterContext = {
   isTaskDescription: boolean;
@@ -45,6 +46,10 @@ const adapters: MessageAdapter[] = [
     // Standalone permission requests (no matching tool call)
     matches: (comment) => comment.type === 'permission_request',
     render: (comment) => <PermissionRequestMessage comment={comment} />,
+  },
+  {
+    matches: (comment) => comment.type === 'script_execution',
+    render: (comment) => <ScriptExecutionMessage comment={comment} />,
   },
   {
     matches: () => true,

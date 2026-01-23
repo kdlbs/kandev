@@ -358,7 +358,8 @@ export type MessageType =
   | 'status'
   | 'thinking'
   | 'todo'
-  | 'permission_request';
+  | 'permission_request'
+  | 'script_execution';
 
 export type Message = {
   id: string;

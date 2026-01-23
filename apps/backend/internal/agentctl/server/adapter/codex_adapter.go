@@ -47,6 +47,9 @@ type CodexAdapter struct {
 	// Permission handler
 	permissionHandler PermissionHandler
 
+	// Stderr provider for error context
+	stderrProvider StderrProvider
+
 	// Accumulators for streaming content
 	messageBuffer   string
 	reasoningBuffer string
@@ -541,6 +544,15 @@ func (a *CodexAdapter) SetPermissionHandler(handler PermissionHandler) {
 	a.permissionHandler = handler
 }
 
+// SetStderrProvider sets the provider for recent stderr output.
+// This is used to include stderr in error events when the agent
+// reports an error without a detailed message.
+func (a *CodexAdapter) SetStderrProvider(provider StderrProvider) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.stderrProvider = provider
+}
+
 // Close releases resources held by the adapter.
 func (a *CodexAdapter) Close() error {
 	a.mu.Lock()
@@ -656,14 +668,26 @@ func (a *CodexAdapter) handleNotification(method string, params json.RawMessage)
 			}
 		}
 
-		// Send error event if the turn failed (for UI notification)
-		if !p.Success && p.Error != "" {
-			a.sendUpdate(AgentEvent{
-				Type:        EventTypeError,
-				SessionID:   threadID,
-				OperationID: p.TurnID,
-				Error:       p.Error,
-			})
+		// Send error event if the turn failed WITH an explicit error message.
+		// Note: We don't send error events here based on stderr alone, because
+		// NotifyError will handle error notifications (prevents duplicate messages).
+		if !p.Success {
+			a.logger.Debug("turn completed with failure",
+				zap.String("thread_id", threadID),
+				zap.String("turn_id", p.TurnID),
+				zap.Bool("success", p.Success),
+				zap.String("error", p.Error))
+
+			// Only send error event if there's an explicit error message
+			// (NotifyError handles the case when error details come separately)
+			if p.Error != "" {
+				a.sendUpdate(AgentEvent{
+					Type:        EventTypeError,
+					SessionID:   threadID,
+					OperationID: p.TurnID,
+					Error:       p.Error,
+				})
+			}
 		}
 
 	case codex.NotifyTurnDiffUpdated:
@@ -705,10 +729,57 @@ func (a *CodexAdapter) handleNotification(method string, params json.RawMessage)
 			a.logger.Warn("failed to parse error notification", zap.Error(err))
 			return
 		}
+
+		// Get recent stderr for error context
+		var stderrLines []string
+		a.mu.RLock()
+		if a.stderrProvider != nil {
+			stderrLines = a.stderrProvider.GetRecentStderr()
+		}
+		a.mu.RUnlock()
+
+		// Try to parse stderr into structured error info
+		// This handles Codex-specific error formats (e.g., rate limits)
+		parsedError := parseCodexStderrLines(stderrLines)
+
+		var parsedMsg string
+		if parsedError != nil {
+			parsedMsg = parsedError.Message
+		}
+
+		a.logger.Debug("received error notification from agent",
+			zap.String("thread_id", threadID),
+			zap.Int("code", p.Code),
+			zap.String("message", p.Message),
+			zap.String("parsed_message", parsedMsg),
+			zap.Any("data", p.Data),
+			zap.Int("stderr_lines", len(stderrLines)))
+
+		// Build error data with all available context
+		errorData := map[string]interface{}{
+			"code":   p.Code,
+			"data":   p.Data,
+			"stderr": stderrLines,
+		}
+
+		// Include parsed error details if available
+		if parsedError != nil {
+			parsed := map[string]any{
+				"http_error": parsedError.HTTPError,
+			}
+			// Include the full raw JSON (captures all fields from any error type)
+			if parsedError.RawJSON != nil {
+				parsed["error_json"] = parsedError.RawJSON
+			}
+			errorData["parsed"] = parsed
+		}
+
 		a.sendUpdate(AgentEvent{
 			Type:      EventTypeError,
 			SessionID: threadID,
 			Error:     p.Message,
+			Text:      parsedMsg, // User-friendly parsed message
+			Data:      errorData,
 		})
 
 	case codex.NotifyItemStarted:

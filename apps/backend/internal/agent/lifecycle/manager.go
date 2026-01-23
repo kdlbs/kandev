@@ -995,9 +995,12 @@ func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.Age
 		// Flush any accumulated content and clear streaming state on error
 		m.flushMessageBuffer(execution)
 
+		// Log all available error information for debugging
 		m.logger.Error("agent error",
 			zap.String("execution_id", execution.ID),
-			zap.String("error", event.Error))
+			zap.String("error", event.Error),
+			zap.String("text", event.Text),
+			zap.Any("data", event.Data))
 
 	case "complete":
 		m.logger.Info("agent turn complete",

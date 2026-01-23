@@ -1755,6 +1755,21 @@ func (s *Service) DeleteMessage(ctx context.Context, id string) error {
 	return nil
 }
 
+// UpdateMessage updates an existing message and publishes an event.
+func (s *Service) UpdateMessage(ctx context.Context, message *models.Message) error {
+	if err := s.repo.UpdateMessage(ctx, message); err != nil {
+		s.logger.Error("failed to update message",
+			zap.String("message_id", message.ID),
+			zap.Error(err))
+		return err
+	}
+
+	// Publish message.updated event for real-time streaming
+	s.publishMessageEvent(ctx, events.MessageUpdated, message)
+
+	return nil
+}
+
 // AppendMessageContent appends additional content to an existing message.
 // This is used for streaming agent responses where content arrives incrementally.
 func (s *Service) AppendMessageContent(ctx context.Context, messageID, additionalContent string) error {

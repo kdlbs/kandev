@@ -172,6 +172,18 @@ JSON-RPC 2.0 over stdin/stdout between agentctl and agent process.
 
 ## Frontend Architecture
 
+### UI Components
+
+**Shadcn Components:** Import from `@kandev/ui` package:
+```typescript
+import { Badge } from '@kandev/ui/badge';
+import { Button } from '@kandev/ui/button';
+import { Dialog } from '@kandev/ui/dialog';
+// etc...
+```
+
+**Do NOT** import from `@/components/ui/*` - always use `@kandev/ui` package.
+
 ### Data Flow Pattern (Critical)
 
 ```
@@ -222,6 +234,7 @@ lib/api/domains/{kanban,session,workspace,settings,process}-api.ts  # API client
 
 ### Frontend
 - **Data:** SSR fetch → hydrate → read store. Never fetch in components
+- **UI Components:** Import shadcn components from `@kandev/ui`, NOT `@/components/ui/*`
 - **Components:** <200 lines, extract to domain components, composition over props
 - **Hooks:** Domain-organized in `hooks/domains/`, encapsulate subscription + selection
 - **WS:** Use subscription hooks only; client auto-deduplicates

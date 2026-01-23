@@ -50,7 +50,8 @@ export function useProcessedMessages(
         message.type === 'status' ||
         message.type === 'error' ||
         message.type === 'thinking' ||
-        message.type === 'todo'
+        message.type === 'todo' ||
+        message.type === 'script_execution'
       ) {
         return true;
       }

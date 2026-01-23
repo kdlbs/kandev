@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -58,6 +59,9 @@ type PermissionNotification struct {
 	CreatedAt     time.Time                  `json:"created_at"`
 }
 
+// defaultStderrBufferSize is the number of recent stderr lines to keep for error context
+const defaultStderrBufferSize = 50
+
 // Manager manages the agent subprocess
 type Manager struct {
 	cfg    *config.InstanceConfig
@@ -71,6 +75,10 @@ type Manager struct {
 	status   atomic.Value // Status
 	exitCode atomic.Int32
 	exitErr  atomic.Value // error
+
+	// Stderr buffering for error context
+	stderrBuffer []string
+	stderrMu     sync.RWMutex
 
 	// Workspace tracker for git status and file changes
 	workspaceTracker *WorkspaceTracker
@@ -386,7 +394,10 @@ func (m *Manager) createAdapter() error {
 	case agent.ProtocolACP:
 		m.adapter = adapter.NewACPAdapter(m.adapterCfg, m.logger)
 	case agent.ProtocolCodex:
-		m.adapter = adapter.NewCodexAdapter(m.adapterCfg, m.logger)
+		codexAdapter := adapter.NewCodexAdapter(m.adapterCfg, m.logger)
+		// Set stderr provider so errors can include recent stderr output
+		codexAdapter.SetStderrProvider(m)
+		m.adapter = codexAdapter
 	default:
 		return fmt.Errorf("unsupported protocol: %s", protocol)
 	}
@@ -528,11 +539,54 @@ func (m *Manager) readStderr() {
 	for scanner.Scan() {
 		line := scanner.Text()
 		m.logger.Debug("agent stderr", zap.String("line", line))
+
+		// Buffer the line for error context
+		m.appendStderr(line)
 	}
 
 	if err := scanner.Err(); err != nil {
 		m.logger.Debug("stderr reader error", zap.Error(err))
 	}
+}
+
+// ansiEscapeRegex matches ANSI escape sequences
+var ansiEscapeRegex = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+
+// stripANSI removes ANSI escape codes from a string
+func stripANSI(s string) string {
+	return ansiEscapeRegex.ReplaceAllString(s, "")
+}
+
+// appendStderr adds a line to the stderr ring buffer
+func (m *Manager) appendStderr(line string) {
+	m.stderrMu.Lock()
+	defer m.stderrMu.Unlock()
+
+	// Strip ANSI escape codes for cleaner display
+	cleanLine := stripANSI(line)
+
+	if len(m.stderrBuffer) >= defaultStderrBufferSize {
+		// Ring buffer: drop oldest line
+		m.stderrBuffer = m.stderrBuffer[1:]
+	}
+	m.stderrBuffer = append(m.stderrBuffer, cleanLine)
+}
+
+// GetRecentStderr returns a copy of the recent stderr lines
+func (m *Manager) GetRecentStderr() []string {
+	m.stderrMu.RLock()
+	defer m.stderrMu.RUnlock()
+
+	result := make([]string, len(m.stderrBuffer))
+	copy(result, m.stderrBuffer)
+	return result
+}
+
+// ClearStderrBuffer clears the stderr buffer (e.g., after successful operation)
+func (m *Manager) ClearStderrBuffer() {
+	m.stderrMu.Lock()
+	defer m.stderrMu.Unlock()
+	m.stderrBuffer = nil
 }
 
 // waitForExit waits for the process to exit

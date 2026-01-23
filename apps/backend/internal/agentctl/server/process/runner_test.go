@@ -76,3 +76,76 @@ func TestProcessRunnerCapturesOutput(t *testing.T) {
 	}
 	t.Fatal("process output not captured in time")
 }
+
+func TestStripANSI(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "no ANSI codes",
+			input:    "hello world",
+			expected: "hello world",
+		},
+		{
+			name:     "empty string",
+			input:    "",
+			expected: "",
+		},
+		{
+			name:     "simple color code",
+			input:    "\x1b[31mred text\x1b[0m",
+			expected: "red text",
+		},
+		{
+			name:     "bold text",
+			input:    "\x1b[1mbold\x1b[0m",
+			expected: "bold",
+		},
+		{
+			name:     "multiple colors",
+			input:    "\x1b[31mred\x1b[32mgreen\x1b[34mblue\x1b[0m",
+			expected: "redgreenblue",
+		},
+		{
+			name:     "256 color code",
+			input:    "\x1b[38;5;196mcolored\x1b[0m",
+			expected: "colored",
+		},
+		{
+			name:     "RGB color code",
+			input:    "\x1b[38;2;255;0;0mred\x1b[0m",
+			expected: "red",
+		},
+		{
+			name:     "cursor movement",
+			input:    "\x1b[2Amove up\x1b[3Bmove down",
+			expected: "move upmove down",
+		},
+		{
+			name:     "clear line",
+			input:    "text\x1b[2Kcleared",
+			expected: "textcleared",
+		},
+		{
+			name:     "real world npm output",
+			input:    "\x1b[32m✓\x1b[39m \x1b[90mCompiled successfully\x1b[39m",
+			expected: "✓ Compiled successfully",
+		},
+		{
+			name:     "mixed with newlines",
+			input:    "\x1b[31mError:\x1b[0m\nSomething failed\n\x1b[33mWarning:\x1b[0m check logs",
+			expected: "Error:\nSomething failed\nWarning: check logs",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := stripANSI(tt.input)
+			if result != tt.expected {
+				t.Errorf("stripANSI(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
