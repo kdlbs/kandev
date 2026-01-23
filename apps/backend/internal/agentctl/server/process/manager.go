@@ -345,7 +345,7 @@ func lookupEnvValue(env []string, key string) string {
 
 // Configure sets the agent command and optional environment variables.
 // This must be called before Start() if the instance was created without a command.
-func (m *Manager) Configure(command string, env map[string]string) error {
+func (m *Manager) Configure(command string, env map[string]string, approvalPolicy string) error {
 	m.startMu.Lock()
 	defer m.startMu.Unlock()
 
@@ -366,6 +366,11 @@ func (m *Manager) Configure(command string, env map[string]string) error {
 	m.cfg.AgentCommand = command
 	m.cfg.AgentArgs = args
 
+	// Set approval policy if provided (for Codex)
+	if approvalPolicy != "" {
+		m.cfg.ApprovalPolicy = approvalPolicy
+	}
+
 	// Merge additional env vars
 	if len(env) > 0 {
 		for k, v := range env {
@@ -376,6 +381,7 @@ func (m *Manager) Configure(command string, env map[string]string) error {
 	m.logger.Info("agent configured",
 		zap.String("command", command),
 		zap.Strings("args", args),
+		zap.String("approval_policy", m.cfg.ApprovalPolicy),
 		zap.Int("env_count", len(env)))
 
 	return nil

@@ -50,6 +50,7 @@ export async function createAgentAction(payload: {
     model: string;
     auto_approve: boolean;
     dangerously_skip_permissions: boolean;
+    allow_indexing: boolean;
     plan: string;
   }>;
 }): Promise<Agent> {
@@ -80,6 +81,7 @@ export async function createAgentProfileAction(
     model: string;
     auto_approve: boolean;
     dangerously_skip_permissions: boolean;
+    allow_indexing: boolean;
     plan: string;
   }
 ): Promise<AgentProfile> {
@@ -91,7 +93,7 @@ export async function createAgentProfileAction(
 
 export async function updateAgentProfileAction(
   id: string,
-  payload: Partial<Pick<AgentProfile, 'name' | 'model' | 'auto_approve' | 'dangerously_skip_permissions' | 'plan'>>
+  payload: Partial<Pick<AgentProfile, 'name' | 'model' | 'auto_approve' | 'dangerously_skip_permissions' | 'allow_indexing' | 'plan'>>
 ): Promise<AgentProfile> {
   return fetchJson<AgentProfile>(`${apiBaseUrl}/api/v1/agent-profiles/${id}`, {
     method: 'PATCH',

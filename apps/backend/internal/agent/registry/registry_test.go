@@ -127,18 +127,18 @@ func TestRegistry_Get(t *testing.T) {
 	_ = reg.Register(config)
 
 	// Test successful get
-	got, err := reg.Get("test-agent")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	got, ok := reg.Get("test-agent")
+	if !ok {
+		t.Fatal("expected agent to be found")
 	}
 	if got.ID != config.ID {
 		t.Errorf("expected ID %q, got %q", config.ID, got.ID)
 	}
 
 	// Test not found
-	_, err = reg.Get("non-existent")
-	if err == nil {
-		t.Error("expected error for non-existent agent type")
+	_, ok = reg.Get("non-existent")
+	if ok {
+		t.Error("expected agent to not be found")
 	}
 }
 

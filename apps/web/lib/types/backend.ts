@@ -256,6 +256,7 @@ export type AgentProfilePayload = {
   model: string;
   auto_approve: boolean;
   dangerously_skip_permissions: boolean;
+  allow_indexing: boolean;
   plan: string;
   created_at?: string;
   updated_at?: string;

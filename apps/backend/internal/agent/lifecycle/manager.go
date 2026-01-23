@@ -228,9 +228,9 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 
 	executionID := uuid.New().String()
 
-	agentConfig, err := m.registry.Get(info.AgentID)
-	if err != nil {
-		return nil, fmt.Errorf("agent type %q not found in registry: %w", info.AgentID, err)
+	agentConfig, ok := m.registry.Get(info.AgentID)
+	if !ok {
+		return nil, fmt.Errorf("agent type %q not found in registry", info.AgentID)
 	}
 
 	req := &RuntimeCreateRequest{
@@ -387,8 +387,7 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 		if err != nil {
 			return nil, fmt.Errorf("failed to resolve agent profile: %w", err)
 		}
-		// Map agent name to registry ID (e.g., "auggie" -> "auggie-agent")
-		agentTypeName = profileInfo.AgentName + "-agent"
+		agentTypeName = profileInfo.AgentName
 		m.logger.Info("resolved agent profile",
 			zap.String("profile_id", req.AgentProfileID),
 			zap.String("agent_name", profileInfo.AgentName),
@@ -401,9 +400,9 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 	}
 
 	// 2. Get agent config from registry
-	agentConfig, err := m.registry.Get(agentTypeName)
-	if err != nil {
-		return nil, fmt.Errorf("agent type %q not found in registry: %w", agentTypeName, err)
+	agentConfig, ok := m.registry.Get(agentTypeName)
+	if !ok {
+		return nil, fmt.Errorf("agent type %q not found in registry", agentTypeName)
 	}
 
 	if !agentConfig.Enabled {
@@ -475,9 +474,6 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 		if profileInfo.AutoApprove {
 			reqWithWorktree.Env["AGENTCTL_AUTO_APPROVE_PERMISSIONS"] = "true"
 		}
-		if profileInfo.DangerouslySkipPermissions {
-			reqWithWorktree.Env["AGENT_DANGEROUSLY_SKIP_PERMISSIONS"] = "true"
-		}
 		if profileInfo.Plan != "" {
 			reqWithWorktree.Env["AGENT_PLAN"] = profileInfo.Plan
 		}
@@ -544,18 +540,24 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 	// Build agent command string for later use with StartAgentProcess
 	model := ""
 	autoApprove := false
+	permissionValues := make(map[string]bool)
 	if profileInfo != nil {
 		model = profileInfo.Model
 		autoApprove = profileInfo.AutoApprove
+		// Build permission values map from profile info
+		permissionValues["auto_approve"] = profileInfo.AutoApprove
+		permissionValues["allow_indexing"] = profileInfo.AllowIndexing
+		permissionValues["dangerously_skip_permissions"] = profileInfo.DangerouslySkipPermissions
 	}
 	// Allow model override from request (for dynamic model switching)
 	if req.ModelOverride != "" {
 		model = req.ModelOverride
 	}
 	cmdOpts := CommandOptions{
-		Model:       model,
-		SessionID:   req.ACPSessionID,
-		AutoApprove: autoApprove,
+		Model:            model,
+		SessionID:        req.ACPSessionID,
+		AutoApprove:      autoApprove,
+		PermissionValues: permissionValues,
 	}
 	execution.AgentCommand = m.commandBuilder.BuildCommandString(agentConfig, cmdOpts)
 
@@ -619,8 +621,22 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) err
 		env["TASK_DESCRIPTION"] = taskDescription
 	}
 
+	// Determine approval policy for Codex
+	// If auto_approve is true, use "never" (no approval needed)
+	// Otherwise use "untrusted" (request approval for all actions)
+	approvalPolicy := ""
+	if execution.AgentProfileID != "" && m.profileResolver != nil {
+		if profileInfo, err := m.profileResolver.ResolveProfile(ctx, execution.AgentProfileID); err == nil {
+			if profileInfo.AutoApprove {
+				approvalPolicy = "never"
+			} else {
+				approvalPolicy = "untrusted"
+			}
+		}
+	}
+
 	// Configure the agent command
-	if err := execution.agentctl.ConfigureAgent(ctx, execution.AgentCommand, env); err != nil {
+	if err := execution.agentctl.ConfigureAgent(ctx, execution.AgentCommand, env, approvalPolicy); err != nil {
 		return fmt.Errorf("failed to configure agent: %w", err)
 	}
 
@@ -794,10 +810,9 @@ func (m *Manager) getAgentConfigForExecution(execution *AgentExecution) (*regist
 		return nil, fmt.Errorf("failed to resolve profile: %w", err)
 	}
 
-	// Map agent name to registry ID (e.g., "auggie" -> "auggie-agent")
-	agentTypeName := profileInfo.AgentName + "-agent"
-	agentConfig, err := m.registry.Get(agentTypeName)
-	if err != nil {
+	agentTypeName := profileInfo.AgentName
+	agentConfig, ok := m.registry.Get(agentTypeName)
+	if !ok {
 		return nil, fmt.Errorf("agent type not found: %s", agentTypeName)
 	}
 

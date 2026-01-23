@@ -99,14 +99,16 @@ func (c *Client) GetStatus(ctx context.Context) (*StatusResponse, error) {
 	return &status, nil
 }
 
-// ConfigureAgent configures the agent command. Must be called before Start().
-func (c *Client) ConfigureAgent(ctx context.Context, command string, env map[string]string) error {
+// ConfigureAgent configures the agent command and optional approval policy. Must be called before Start().
+func (c *Client) ConfigureAgent(ctx context.Context, command string, env map[string]string, approvalPolicy string) error {
 	payload := struct {
-		Command string            `json:"command"`
-		Env     map[string]string `json:"env,omitempty"`
+		Command        string            `json:"command"`
+		Env            map[string]string `json:"env,omitempty"`
+		ApprovalPolicy string            `json:"approval_policy,omitempty"`
 	}{
-		Command: command,
-		Env:     env,
+		Command:        command,
+		Env:            env,
+		ApprovalPolicy: approvalPolicy,
 	}
 
 	body, err := json.Marshal(payload)

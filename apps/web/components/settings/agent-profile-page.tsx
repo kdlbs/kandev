@@ -16,7 +16,7 @@ import { Textarea } from '@kandev/ui/textarea';
 import { useToast } from '@/components/toast-provider';
 import { UnsavedChangesBadge, UnsavedSaveButton } from '@/components/settings/unsaved-indicator';
 import { deleteAgentProfileAction, updateAgentProfileAction } from '@/app/actions/agents';
-import type { Agent, AgentProfile, ModelConfig } from '@/lib/types/http';
+import type { Agent, AgentProfile, ModelConfig, PermissionSetting } from '@/lib/types/http';
 import { useAppStore } from '@/components/state-provider';
 import { ProfileMcpConfigCard } from '@/app/settings/agents/[agentId]/profile-mcp-config-card';
 import type { AgentProfileMcpConfig } from '@/lib/types/http';
@@ -26,10 +26,11 @@ type ProfileEditorProps = {
   agent: Agent;
   profile: AgentProfile;
   modelConfig: ModelConfig;
+  permissionSettings: Record<string, PermissionSetting>;
   initialMcpConfig?: AgentProfileMcpConfig | null;
 };
 
-function ProfileEditor({ agent, profile, modelConfig, initialMcpConfig }: ProfileEditorProps) {
+function ProfileEditor({ agent, profile, modelConfig, permissionSettings, initialMcpConfig }: ProfileEditorProps) {
   const { toast } = useToast();
   const settingsAgents = useAppStore((state) => state.settingsAgents.items);
   const setSettingsAgents = useAppStore((state) => state.setSettingsAgents);
@@ -56,6 +57,7 @@ function ProfileEditor({ agent, profile, modelConfig, initialMcpConfig }: Profil
       draft.model !== savedProfile.model ||
       draft.auto_approve !== savedProfile.auto_approve ||
       draft.dangerously_skip_permissions !== savedProfile.dangerously_skip_permissions ||
+      draft.allow_indexing !== savedProfile.allow_indexing ||
       draft.plan !== savedProfile.plan
     );
   }, [draft, savedProfile]);
@@ -84,6 +86,7 @@ function ProfileEditor({ agent, profile, modelConfig, initialMcpConfig }: Profil
         model: draft.model,
         auto_approve: draft.auto_approve,
         dangerously_skip_permissions: draft.dangerously_skip_permissions,
+        allow_indexing: draft.allow_indexing,
         plan: draft.plan,
       });
       setSavedProfile(updated);
@@ -211,33 +214,56 @@ function ProfileEditor({ agent, profile, modelConfig, initialMcpConfig }: Profil
           </div>
 
           <div className="grid gap-4 md:grid-cols-2">
-            <div className="flex items-center justify-between rounded-md border p-3">
-              <div className="space-y-1">
-                <Label>Auto-approve</Label>
-                <p className="text-xs text-muted-foreground">Automatically approve tool calls.</p>
+            {permissionSettings.auto_approve?.supported && (
+              <div className="flex items-center justify-between rounded-md border p-3">
+                <div className="space-y-1">
+                  <Label>{permissionSettings.auto_approve.label}</Label>
+                  <p className="text-xs text-muted-foreground">
+                    {permissionSettings.auto_approve.description}
+                  </p>
+                </div>
+                <Switch
+                  checked={draft.auto_approve}
+                  onCheckedChange={(checked) =>
+                    setDraft({ ...draft, auto_approve: checked })
+                  }
+                />
               </div>
-              <Switch
-                checked={draft.auto_approve}
-                onCheckedChange={(checked) =>
-                  setDraft({ ...draft, auto_approve: checked })
-                }
-              />
-            </div>
+            )}
 
-            <div className="flex items-center justify-between rounded-md border p-3">
-              <div className="space-y-1">
-                <Label>Skip permissions</Label>
-                <p className="text-xs text-muted-foreground">
-                  Skip permission checks when running tools.
-                </p>
+            {permissionSettings.dangerously_skip_permissions?.supported && (
+              <div className="flex items-center justify-between rounded-md border p-3">
+                <div className="space-y-1">
+                  <Label>{permissionSettings.dangerously_skip_permissions.label}</Label>
+                  <p className="text-xs text-muted-foreground">
+                    {permissionSettings.dangerously_skip_permissions.description}
+                  </p>
+                </div>
+                <Switch
+                  checked={draft.dangerously_skip_permissions}
+                  onCheckedChange={(checked) =>
+                    setDraft({ ...draft, dangerously_skip_permissions: checked })
+                  }
+                />
               </div>
-              <Switch
-                checked={draft.dangerously_skip_permissions}
-                onCheckedChange={(checked) =>
-                  setDraft({ ...draft, dangerously_skip_permissions: checked })
-                }
-              />
-            </div>
+            )}
+
+            {permissionSettings.allow_indexing?.supported && (
+              <div className="flex items-center justify-between rounded-md border p-3">
+                <div className="space-y-1">
+                  <Label>{permissionSettings.allow_indexing.label}</Label>
+                  <p className="text-xs text-muted-foreground">
+                    {permissionSettings.allow_indexing.description}
+                  </p>
+                </div>
+                <Switch
+                  checked={draft.allow_indexing}
+                  onCheckedChange={(checked) =>
+                    setDraft({ ...draft, allow_indexing: checked })
+                  }
+                />
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -284,7 +310,7 @@ export function AgentProfilePage({ initialMcpConfig }: AgentProfilePageClientPro
   const profileParam = Array.isArray(params.profileId) ? params.profileId[0] : params.profileId;
   const agentKey = decodeURIComponent(agentParam ?? '');
   const profileId = profileParam ?? '';
-  const { agent, profile, modelConfig } = useAgentProfileSettings(agentKey, profileId);
+  const { agent, profile, modelConfig, permissionSettings } = useAgentProfileSettings(agentKey, profileId);
 
   if (!agent || !profile) {
     return (
@@ -305,6 +331,7 @@ export function AgentProfilePage({ initialMcpConfig }: AgentProfilePageClientPro
       agent={agent}
       profile={profile}
       modelConfig={modelConfig}
+      permissionSettings={permissionSettings}
       initialMcpConfig={initialMcpConfig}
     />
   );

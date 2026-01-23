@@ -52,7 +52,7 @@ export function ChatMessage({ comment, label, className, showRichBlocks }: ChatM
           <ReactMarkdown
             remarkPlugins={[remarkGfm, remarkBreaks]}
             components={{
-              code: ({ node, className, children, ...props }) => {
+              code: ({ className, children, ...props }) => {
                 // Check if it's inline code (no className means inline, className with language-* means code block)
                 const isInline = !className || !className.startsWith('language-');
 
@@ -93,7 +93,7 @@ export function ChatMessage({ comment, label, className, showRichBlocks }: ChatM
                   </code>
                 );
               },
-              ol: ({ node, children, ...props }) => (
+              ol: ({ children, ...props }) => (
                 <ol
                   style={{
                     listStyleType: 'decimal',
@@ -106,7 +106,7 @@ export function ChatMessage({ comment, label, className, showRichBlocks }: ChatM
                   {children}
                 </ol>
               ),
-              ul: ({ node, children, ...props }) => (
+              ul: ({ children, ...props }) => (
                 <ul
                   style={{
                     listStyleType: 'disc',
@@ -119,7 +119,7 @@ export function ChatMessage({ comment, label, className, showRichBlocks }: ChatM
                   {children}
                 </ul>
               ),
-              li: ({ node, children, ...props }) => (
+              li: ({ children, ...props }) => (
                 <li
                   style={{
                     marginTop: '0.375rem',
@@ -130,7 +130,7 @@ export function ChatMessage({ comment, label, className, showRichBlocks }: ChatM
                   {children}
                 </li>
               ),
-              p: ({ node, children, ...props }) => (
+              p: ({ children, ...props }) => (
                 <p
                   style={{
                     marginTop: '1rem',

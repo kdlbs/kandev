@@ -10,6 +10,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/discovery"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
+	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agent/settings/store"
@@ -30,6 +31,7 @@ const defaultAgentProfileName = "default"
 type Controller struct {
 	repo           store.Repository
 	discovery      *discovery.Registry
+	agentRegistry  interface{ Get(id string) (*registry.AgentTypeConfig, bool) }
 	sessionChecker SessionChecker
 	mcpService     *mcpconfig.Service
 	logger         *logger.Logger
@@ -39,10 +41,11 @@ type SessionChecker interface {
 	HasActiveTaskSessionsByAgentProfile(ctx context.Context, agentProfileID string) (bool, error)
 }
 
-func NewController(repo store.Repository, discoveryRegistry *discovery.Registry, sessionChecker SessionChecker, log *logger.Logger) *Controller {
+func NewController(repo store.Repository, discoveryRegistry *discovery.Registry, agentRegistry interface{ Get(id string) (*registry.AgentTypeConfig, bool) }, sessionChecker SessionChecker, log *logger.Logger) *Controller {
 	return &Controller{
 		repo:           repo,
 		discovery:      discoveryRegistry,
+		agentRegistry:  agentRegistry,
 		sessionChecker: sessionChecker,
 		mcpService:     mcpconfig.NewService(repo),
 		logger:         log.WithFields(zap.String("component", "agent-settings-controller")),
@@ -106,14 +109,31 @@ func (c *Controller) ListAvailableAgents(ctx context.Context) (*dto.ListAvailabl
 			})
 		}
 
+		// Convert permission settings
+		var permissionSettings map[string]dto.PermissionSettingDTO
+		if agentConfig, ok := c.agentRegistry.Get(def.Name); ok && agentConfig.PermissionSettings != nil {
+			permissionSettings = make(map[string]dto.PermissionSettingDTO, len(agentConfig.PermissionSettings))
+			for key, setting := range agentConfig.PermissionSettings {
+				permissionSettings[key] = dto.PermissionSettingDTO{
+					Supported:    setting.Supported,
+					Default:      setting.Default,
+					Label:        setting.Label,
+					Description:  setting.Description,
+					ApplyMethod:  setting.ApplyMethod,
+					CLIFlag:      setting.CLIFlag,
+					CLIFlagValue: setting.CLIFlagValue,
+				}
+			}
+		}
+
 		payload = append(payload, dto.AvailableAgentDTO{
-			Name:              availability.Name,
-			DisplayName:       displayName,
-			SupportsMCP:       availability.SupportsMCP,
-			MCPConfigPath:     availability.MCPConfigPath,
-			InstallationPaths: availability.InstallationPaths,
-			Available:         availability.Available,
-			MatchedPath:       availability.MatchedPath,
+			Name:               availability.Name,
+			DisplayName:        displayName,
+			SupportsMCP:        availability.SupportsMCP,
+			MCPConfigPath:      availability.MCPConfigPath,
+			InstallationPaths:  availability.InstallationPaths,
+			Available:          availability.Available,
+			MatchedPath:        availability.MatchedPath,
 			Capabilities: dto.AgentCapabilitiesDTO{
 				SupportsSessionResume: def.Capabilities.SupportsSessionResume,
 				SupportsShell:         def.Capabilities.SupportsShell,
@@ -123,7 +143,8 @@ func (c *Controller) ListAvailableAgents(ctx context.Context) (*dto.ListAvailabl
 				DefaultModel:    def.ModelConfig.DefaultModel,
 				AvailableModels: modelEntries,
 			},
-			UpdatedAt: now,
+			PermissionSettings: permissionSettings,
+			UpdatedAt:          now,
 		})
 	}
 	return &dto.ListAvailableAgentsResponse{Agents: payload, Total: len(payload)}, nil
@@ -200,12 +221,29 @@ func (c *Controller) EnsureInitialAgentProfiles(ctx context.Context) error {
 		if len(profiles) > 0 {
 			continue
 		}
+		// Get agent config to read permission settings defaults
+		var autoApprove, allowIndexing, skipPermissions bool
+		if agentConfig, ok := c.agentRegistry.Get(agent.Name); ok && agentConfig.PermissionSettings != nil {
+			if setting, exists := agentConfig.PermissionSettings["auto_approve"]; exists {
+				autoApprove = setting.Default
+			}
+			if setting, exists := agentConfig.PermissionSettings["allow_indexing"]; exists {
+				allowIndexing = setting.Default
+			}
+			if setting, exists := agentConfig.PermissionSettings["dangerously_skip_permissions"]; exists {
+				skipPermissions = setting.Default
+			}
+		}
+
 		defaultProfile := &models.AgentProfile{
-			AgentID:          agent.ID,
-			Name:             defaultAgentProfileName,
-			Model:            defaultModel,
-			Plan:             "",
-			AgentDisplayName: displayName,
+			AgentID:                    agent.ID,
+			Name:                       defaultAgentProfileName,
+			Model:                      defaultModel,
+			Plan:                       "",
+			AgentDisplayName:           displayName,
+			AutoApprove:                autoApprove,
+			AllowIndexing:              allowIndexing,
+			DangerouslySkipPermissions: skipPermissions,
 		}
 		if err := c.repo.CreateAgentProfile(ctx, defaultProfile); err != nil {
 			return err
@@ -401,6 +439,7 @@ type CreateProfileRequest struct {
 	Model                      string
 	AutoApprove                bool
 	DangerouslySkipPermissions bool
+	AllowIndexing              bool
 	Plan                       string
 }
 
@@ -424,6 +463,7 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 		Model:                      req.Model,
 		AutoApprove:                req.AutoApprove,
 		DangerouslySkipPermissions: req.DangerouslySkipPermissions,
+		AllowIndexing:              req.AllowIndexing,
 		Plan:                       req.Plan,
 	}
 	if err := c.repo.CreateAgentProfile(ctx, profile); err != nil {
@@ -439,6 +479,7 @@ type UpdateProfileRequest struct {
 	Model                      *string
 	AutoApprove                *bool
 	DangerouslySkipPermissions *bool
+	AllowIndexing              *bool
 	Plan                       *string
 }
 
@@ -462,6 +503,9 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 	}
 	if req.DangerouslySkipPermissions != nil {
 		profile.DangerouslySkipPermissions = *req.DangerouslySkipPermissions
+	}
+	if req.AllowIndexing != nil {
+		profile.AllowIndexing = *req.AllowIndexing
 	}
 	if req.Plan != nil {
 		profile.Plan = *req.Plan
@@ -526,6 +570,7 @@ func toProfileDTO(profile *models.AgentProfile) dto.AgentProfileDTO {
 		Model:                      profile.Model,
 		AutoApprove:                profile.AutoApprove,
 		DangerouslySkipPermissions: profile.DangerouslySkipPermissions,
+		AllowIndexing:              profile.AllowIndexing,
 		Plan:                       profile.Plan,
 		CreatedAt:                  profile.CreatedAt,
 		UpdatedAt:                  profile.UpdatedAt,

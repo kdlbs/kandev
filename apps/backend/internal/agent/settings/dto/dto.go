@@ -14,6 +14,7 @@ type AgentProfileDTO struct {
 	Model                      string    `json:"model"`
 	AutoApprove                bool      `json:"auto_approve"`
 	DangerouslySkipPermissions bool      `json:"dangerously_skip_permissions"`
+	AllowIndexing              bool      `json:"allow_indexing"`
 	Plan                       string    `json:"plan"`
 	CreatedAt                  time.Time `json:"created_at"`
 	UpdatedAt                  time.Time `json:"updated_at"`
@@ -68,17 +69,28 @@ type ModelConfigDTO struct {
 	AvailableModels []ModelEntryDTO `json:"available_models"`
 }
 
+type PermissionSettingDTO struct {
+	Supported    bool   `json:"supported"`
+	Default      bool   `json:"default"`
+	Label        string `json:"label"`
+	Description  string `json:"description"`
+	ApplyMethod  string `json:"apply_method,omitempty"`
+	CLIFlag      string `json:"cli_flag,omitempty"`
+	CLIFlagValue string `json:"cli_flag_value,omitempty"`
+}
+
 type AvailableAgentDTO struct {
-	Name              string               `json:"name"`
-	DisplayName       string               `json:"display_name"`
-	SupportsMCP       bool                 `json:"supports_mcp"`
-	MCPConfigPath     string               `json:"mcp_config_path,omitempty"`
-	InstallationPaths []string             `json:"installation_paths,omitempty"`
-	Available         bool                 `json:"available"`
-	MatchedPath       string               `json:"matched_path,omitempty"`
-	Capabilities      AgentCapabilitiesDTO `json:"capabilities"`
-	ModelConfig       ModelConfigDTO       `json:"model_config"`
-	UpdatedAt         time.Time            `json:"updated_at"`
+	Name               string                          `json:"name"`
+	DisplayName        string                          `json:"display_name"`
+	SupportsMCP        bool                            `json:"supports_mcp"`
+	MCPConfigPath      string                          `json:"mcp_config_path,omitempty"`
+	InstallationPaths  []string                        `json:"installation_paths,omitempty"`
+	Available          bool                            `json:"available"`
+	MatchedPath        string                          `json:"matched_path,omitempty"`
+	Capabilities       AgentCapabilitiesDTO            `json:"capabilities"`
+	ModelConfig        ModelConfigDTO                  `json:"model_config"`
+	PermissionSettings map[string]PermissionSettingDTO `json:"permission_settings,omitempty"`
+	UpdatedAt          time.Time                       `json:"updated_at"`
 }
 
 type ListAvailableAgentsResponse struct {

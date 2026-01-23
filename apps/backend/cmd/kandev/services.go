@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/kandev/kandev/internal/agent/discovery"
+	"github.com/kandev/kandev/internal/agent/registry"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -17,7 +18,9 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	if err != nil {
 		return nil, nil, err
 	}
-	agentSettingsController := agentsettingscontroller.NewController(repos.AgentSettings, discoveryRegistry, repos.Task, log)
+	agentRegistry := registry.NewRegistry(log)
+	agentRegistry.LoadDefaults()
+	agentSettingsController := agentsettingscontroller.NewController(repos.AgentSettings, discoveryRegistry, agentRegistry, repos.Task, log)
 
 	userSvc := userservice.NewService(repos.User, eventBus, log)
 	editorSvc := editorservice.NewService(repos.Editor, repos.Task, userSvc)

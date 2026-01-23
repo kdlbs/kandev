@@ -394,6 +394,7 @@ export type AgentProfile = {
   model: string;
   auto_approve: boolean;
   dangerously_skip_permissions: boolean;
+  allow_indexing: boolean;
   plan: string;
   created_at: string;
   updated_at: string;
@@ -460,6 +461,16 @@ export type ModelConfig = {
   available_models: ModelEntry[];
 };
 
+export type PermissionSetting = {
+  supported: boolean;
+  default: boolean;
+  label: string;
+  description: string;
+  apply_method?: string;
+  cli_flag?: string;
+  cli_flag_value?: string;
+};
+
 export type AvailableAgent = {
   name: string;
   display_name: string;
@@ -470,6 +481,7 @@ export type AvailableAgent = {
   matched_path?: string | null;
   capabilities: AgentCapabilities;
   model_config: ModelConfig;
+  permission_settings?: Record<string, PermissionSetting>;
   updated_at: string;
 };
 

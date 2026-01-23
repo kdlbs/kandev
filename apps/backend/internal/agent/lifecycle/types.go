@@ -110,6 +110,7 @@ type AgentProfileInfo struct {
 	Model                      string
 	AutoApprove                bool
 	DangerouslySkipPermissions bool
+	AllowIndexing              bool
 	Plan                       string
 }
 
@@ -129,7 +130,7 @@ type WorkspaceInfo struct {
 	SessionID      string // Task session ID (from task_sessions table)
 	WorkspacePath  string // Path to the workspace/repository
 	AgentProfileID string // Optional - agent profile for the task
-	AgentID        string // Agent type ID (e.g., "auggie-agent") - required for runtime creation
+	AgentID        string // Agent type ID (e.g., "auggie", "codex") - required for runtime creation
 	ACPSessionID   string // Agent's session ID for conversation resumption (from session metadata)
 }
 
