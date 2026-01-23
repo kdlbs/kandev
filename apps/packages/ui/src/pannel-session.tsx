@@ -27,7 +27,7 @@ export function SessionPanel({
     <div
       className={cn(
         // Base styles - always applied
-        'h-full min-h-0 bg-card flex flex-col rounded-lg border border-border/70 p-3 outline outline-amber-500',
+        'h-full min-h-0 bg-card flex flex-col rounded-sm border border-border/70 p-2',
         // Border removal
         borderSide === 'left' && 'border-l-0',
         borderSide === 'right' && 'border-r-0',
@@ -49,7 +49,7 @@ export const SessionPanelContent = forwardRef<HTMLDivElement, SessionPanelConten
       <div
         ref={ref}
         className={cn(
-          'flex-1 min-h-0 overflow-y-auto rounded-lg bg-background h-full p-3 outline outline-red-500',
+          'flex-1 min-h-0 overflow-y-auto rounded-lg bg-background h-full p-2',
           className
         )}
       >

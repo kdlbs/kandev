@@ -184,10 +184,10 @@ const TaskRightPanel = memo(function TaskRightPanel({ topPanel, sessionId = null
           terminal.type === 'dev-server'
             ? handleCloseDevTab
             : (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                removeTerminal(terminal.id);
-              },
+              e.preventDefault();
+              e.stopPropagation();
+              removeTerminal(terminal.id);
+            },
       };
     });
 
@@ -200,7 +200,7 @@ const TaskRightPanel = memo(function TaskRightPanel({ topPanel, sessionId = null
         <div className="flex-1 min-h-0">{topPanel}</div>
         <SessionPanel
           borderSide="left"
-          className="!h-12 !p-0 px-3 mt-[2px] justify-between items-center flex-row"
+          className="!h-10 !p-0 mt-[2px] justify-between items-center flex-row"
         >
           <SessionTabs
             tabs={tabs}
@@ -254,7 +254,7 @@ const TaskRightPanel = memo(function TaskRightPanel({ topPanel, sessionId = null
             onToggleCollapse={() => setIsBottomCollapsed(true)}
             className="flex-1 min-h-0"
           >
-              <TabsContent value="commands" className="flex-1 min-h-0">
+            <TabsContent value="commands" className="flex-1 min-h-0">
               <SessionPanelContent>
                 <div className="grid gap-2">
                   {COMMANDS.map((command) => (

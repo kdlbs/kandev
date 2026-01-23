@@ -4,7 +4,6 @@ import { memo, useCallback, useState, useEffect, useMemo } from 'react';
 import { TabsContent } from '@kandev/ui/tabs';
 import { Textarea } from '@kandev/ui/textarea';
 import { SessionPanel } from '@kandev/ui/pannel-session';
-import { IconX } from '@tabler/icons-react';
 import { TaskChatPanel } from './task-chat-panel';
 import { TaskChangesPanel } from './task-changes-panel';
 import { FileViewerContent } from './file-viewer-content';
@@ -106,10 +105,10 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
         activeTab={leftTab}
         onTabChange={setLeftTab}
         separatorAfterIndex={openFileTabs.length > 0 ? 2 : undefined}
-        className="flex-1 min-h-0 flex flex-col"
+        className="flex-1 min-h-0 flex flex-col gap-2"
       >
 
-        <TabsContent value="notes" className="mt-3 flex-1 min-h-0">
+        <TabsContent value="notes" className="flex-1 min-h-0">
           <Textarea
             value={notes}
             onChange={(event) => setNotes(event.target.value)}
@@ -118,14 +117,14 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
           />
         </TabsContent>
 
-        <TabsContent value="changes" className="mt-3 flex-1 min-h-0">
+        <TabsContent value="changes" className="flex-1 min-h-0">
           <TaskChangesPanel
             selectedDiffPath={selectedDiffPath}
             onClearSelected={() => setSelectedDiffPath(null)}
           />
         </TabsContent>
 
-        <TabsContent value="chat" className="mt-3 flex flex-col min-h-0 flex-1">
+        <TabsContent value="chat" className="flex flex-col min-h-0 flex-1">
           {activeTaskId ? (
             <TaskChatPanel sessionId={sessionId} />
           ) : (

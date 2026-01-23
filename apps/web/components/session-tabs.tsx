@@ -1,6 +1,7 @@
 'use client';
 
 import type { ReactNode, MouseEvent } from 'react';
+import { Fragment } from 'react';
 import { Tabs, TabsList, TabsTrigger } from '@kandev/ui/tabs';
 
 export type SessionTab = {
@@ -43,16 +44,15 @@ export function SessionTabs({
   onToggleCollapse,
 }: SessionTabsProps) {
   const tabsList = (
-    <TabsList>
+    <TabsList className="p-0 !h-6 rounded-sm">
       {tabs.map((tab, index) => (
-        <>
+        <Fragment key={tab.id}>
           {separatorAfterIndex !== undefined && index === separatorAfterIndex + 1 && (
-            <div key={`separator-${index}`} className="h-4 w-px bg-border mx-1" />
+            <div className="h-4 w-px bg-border mx-1" />
           )}
           <TabsTrigger
-            key={tab.id}
             value={tab.id}
-            className={tab.className ?? 'cursor-pointer'}
+            className={tab.className + ' py-1 cursor-pointer rounded-sm'}
           >
             {tab.icon}
             <span className={tab.icon ? 'ml-1.5' : undefined}>{tab.label}</span>
@@ -79,7 +79,7 @@ export function SessionTabs({
               </span>
             )}
           </TabsTrigger>
-        </>
+        </Fragment>
       ))}
       {showAddButton && onAddTab && (
         <TabsTrigger value="add" onClick={onAddTab} className="cursor-pointer">
@@ -128,7 +128,7 @@ export function SessionTabs({
   return (
     <Tabs value={activeTab} onValueChange={onTabChange} className={className}>
       {collapsible ? (
-        <div className={`flex items-center justify-between ${children ? 'mb-3' : 'p-3'}`}>
+        <div className={`flex items-center justify-between ${children ? '' : 'p-2'}`}>
           {tabsList}
           {collapseButton}
         </div>
