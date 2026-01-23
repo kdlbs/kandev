@@ -6,6 +6,7 @@ import { IconArrowBackUp, IconCopy, IconLayoutColumns, IconLayoutRows } from '@t
 import { useTheme } from 'next-themes';
 import { Badge } from '@kandev/ui/badge';
 import { Button } from '@kandev/ui/button';
+import { SessionPanelContent } from '@kandev/ui/pannel-session';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { getLocalStorage, setLocalStorage } from '@/lib/local-storage';
@@ -155,7 +156,7 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
           </div>
         </div>
       </div>
-      <div className="flex-1 min-h-0 overflow-y-auto rounded-lg bg-background p-3 h-full">
+      <SessionPanelContent>
         {changedFiles.length === 0 ? (
           <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
             No changes detected
@@ -213,7 +214,7 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
             })}
           </div>
         )}
-      </div>
+      </SessionPanelContent>
     </div>
   );
 });

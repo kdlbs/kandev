@@ -93,7 +93,7 @@ export function TaskChatInput({
           highlightSelectionMatches: true,
           autocompletion: false,
         }}
-        className="text-sm"
+        className="text-xs"
       />
     </div>
   );

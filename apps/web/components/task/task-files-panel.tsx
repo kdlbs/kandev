@@ -10,8 +10,9 @@ import {
   IconCheck,
 } from '@tabler/icons-react';
 
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@kandev/ui/tabs';
+import { TabsContent } from '@kandev/ui/tabs';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
+import { SessionPanel, SessionPanelContent } from '@kandev/ui/pannel-session';
 import { LineStat } from '@/components/diff-stat';
 import { useAppStore } from '@/components/state-provider';
 import { useOpenSessionInEditor } from '@/hooks/use-open-session-in-editor';
@@ -19,6 +20,7 @@ import { useSessionGitStatus } from '@/hooks/domains/session/use-session-git-sta
 import { useGitOperations } from '@/hooks/use-git-operations';
 import type { FileInfo } from '@/lib/state/store';
 import { FileBrowser } from '@/components/task/file-browser';
+import { SessionTabs, type SessionTab } from '@/components/session-tabs';
 
 type OpenFileTab = {
   path: string;
@@ -100,19 +102,27 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiffPath, onOpenFi
     }));
   }, [gitStatus]);
 
+  const tabs: SessionTab[] = [
+    {
+      id: 'diff',
+      label: `Diff files${changedFiles.length > 0 ? ` (${changedFiles.length})` : ''}`,
+    },
+    {
+      id: 'files',
+      label: 'All files',
+    },
+  ];
+
   return (
-    <div className="h-full min-h-0 bg-card p-4 flex flex-col rounded-lg border border-border/70 border-l-0">
-      <Tabs value={topTab} onValueChange={(value) => setTopTab(value as 'diff' | 'files')} className="flex-1 min-h-0">
-        <TabsList>
-          <TabsTrigger value="diff" className="cursor-pointer">
-            Diff files {changedFiles.length > 0 && `(${changedFiles.length})`}
-          </TabsTrigger>
-          <TabsTrigger value="files" className="cursor-pointer">
-            All files
-          </TabsTrigger>
-        </TabsList>
-        <TabsContent value="diff" className="mt-3 flex-1 min-h-0">
-          <div className="flex-1 min-h-0 overflow-y-auto rounded-lg bg-background p-3 h-full">
+    <SessionPanel borderSide="left">
+      <SessionTabs
+        tabs={tabs}
+        activeTab={topTab}
+        onTabChange={(value) => setTopTab(value as 'diff' | 'files')}
+        className="flex-1 min-h-0"
+      >
+        <TabsContent value="diff" className="flex-1 min-h-0">
+          <SessionPanelContent>
             {changedFiles.length === 0 ? (
               <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
                 No changes detected
@@ -208,10 +218,10 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiffPath, onOpenFi
                 })}
               </ul>
             )}
-          </div>
+          </SessionPanelContent>
         </TabsContent>
         <TabsContent value="files" className="mt-3 flex-1 min-h-0">
-          <div className="flex-1 min-h-0 overflow-y-auto rounded-lg bg-background h-full">
+          <SessionPanelContent>
             {activeSessionId ? (
               <FileBrowser sessionId={activeSessionId} onOpenFile={onOpenFile} />
             ) : (
@@ -219,10 +229,10 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiffPath, onOpenFi
                 No task selected
               </div>
             )}
-          </div>
+          </SessionPanelContent>
         </TabsContent>
-      </Tabs>
-    </div>
+      </SessionTabs>
+    </SessionPanel>
   );
 });
 

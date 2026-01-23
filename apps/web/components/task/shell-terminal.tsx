@@ -9,7 +9,21 @@ import { getWebSocketClient } from '@/lib/ws/connection';
 import { useSession } from '@/hooks/domains/session/use-session';
 import { useSessionAgentctl } from '@/hooks/domains/session/use-session-agentctl';
 
-export function ShellTerminal() {
+type ShellTerminalProps = {
+  // Interactive shell mode - requires sessionId
+  sessionId?: string;
+  // Read-only process output mode - requires processOutput
+  processOutput?: string;
+  processId?: string | null;
+  isStopping?: boolean;
+};
+
+export function ShellTerminal({
+  sessionId: propSessionId,
+  processOutput,
+  processId,
+  isStopping = false,
+}: ShellTerminalProps) {
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -17,18 +31,33 @@ export function ShellTerminal() {
   const subscriptionIdRef = useRef(0);
   const onDataDisposableRef = useRef<{ dispose: () => void } | null>(null);
   const retryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const processIdRef = useRef<string | null>(null);
+  const outputRef = useRef(processOutput ?? '');
   const storeApi = useAppStoreApi();
 
-  const sessionId = useAppStore((state) => state.tasks.activeSessionId);
-  const { session, isActive } = useSession(sessionId);
+  // Determine mode: if processOutput is provided, use read-only mode
+  const isReadOnlyMode = processOutput !== undefined;
+
+  // For interactive mode, get sessionId from store if not provided as prop
+  const storeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const sessionId = propSessionId ?? storeSessionId;
+
+  const { session, isActive } = useSession(isReadOnlyMode ? null : sessionId);
   // Hook also subscribes to session channel for real-time updates
-  useSessionAgentctl(sessionId);
+  useSessionAgentctl(isReadOnlyMode ? null : sessionId);
   const taskId = session?.task_id ?? null;
   const shellOutput = useAppStore((state) =>
-    sessionId ? state.shell.outputs[sessionId] || '' : ''
+    sessionId && !isReadOnlyMode ? state.shell.outputs[sessionId] || '' : ''
   );
   // Don't gate on isAgentctlReady - shell works as long as session is active
-  const canSubscribe = Boolean(sessionId && isActive);
+  const canSubscribe = Boolean(sessionId && isActive && !isReadOnlyMode);
+
+  // Update output ref when processOutput changes
+  useEffect(() => {
+    if (isReadOnlyMode) {
+      outputRef.current = processOutput ?? '';
+    }
+  }, [processOutput, isReadOnlyMode]);
 
   const send = useCallback(
     (action: string, payload: Record<string, unknown>) => {
@@ -45,14 +74,16 @@ export function ShellTerminal() {
     if (!terminalRef.current || xtermRef.current) return;
 
     const terminal = new Terminal({
-      cursorBlink: true,
-      fontSize: 13,
+      cursorBlink: !isReadOnlyMode,
+      disableStdin: isReadOnlyMode,
+      convertEol: isReadOnlyMode,
+      fontSize: isReadOnlyMode ? 12 : 13,
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
       theme: {
-        background: '#1e1e1e',
+        background: 'transparent',
         foreground: '#d4d4d4',
         cursor: '#d4d4d4',
-        cursorAccent: '#1e1e1e',
+        cursorAccent: 'transparent',
         selectionBackground: '#264f78',
         black: '#1e1e1e',
         red: '#f44747',
@@ -80,6 +111,22 @@ export function ShellTerminal() {
 
     xtermRef.current = terminal;
     fitAddonRef.current = fitAddon;
+
+    // Force transparent background on all xterm elements to inherit from parent
+    const xtermElement = terminalRef.current.querySelector('.xterm');
+    const xtermViewport = terminalRef.current.querySelector('.xterm-viewport');
+    const xtermScreen = terminalRef.current.querySelector('.xterm-screen');
+    const xtermScrollable = terminalRef.current.querySelector('.xterm-scrollable-element');
+    if (xtermElement) (xtermElement as HTMLElement).style.background = 'transparent';
+    if (xtermViewport) (xtermViewport as HTMLElement).style.background = 'transparent';
+    if (xtermScreen) (xtermScreen as HTMLElement).style.background = 'transparent';
+    if (xtermScrollable) (xtermScrollable as HTMLElement).style.backgroundColor = 'transparent';
+
+    // For read-only mode, write initial output
+    if (isReadOnlyMode && outputRef.current) {
+      terminal.write(outputRef.current);
+      lastOutputLengthRef.current = outputRef.current.length;
+    }
 
     // Ensure terminal is properly sized after initial render
     const initialFitTimeout = setTimeout(() => {
@@ -118,10 +165,11 @@ export function ShellTerminal() {
       xtermRef.current = null;
       fitAddonRef.current = null;
     };
-  }, [taskId, sessionId, send]);
+  }, [taskId, sessionId, send, isReadOnlyMode]);
 
+  // Handle user input (interactive mode only)
   useEffect(() => {
-    if (!xtermRef.current) return;
+    if (!xtermRef.current || isReadOnlyMode) return;
     onDataDisposableRef.current?.dispose();
     onDataDisposableRef.current = null;
 
@@ -141,19 +189,35 @@ export function ShellTerminal() {
       onDataDisposableRef.current?.dispose();
       onDataDisposableRef.current = null;
     };
-  }, [taskId, sessionId, send]);
+  }, [taskId, sessionId, send, isReadOnlyMode]);
+
+  // Handle processId changes in read-only mode (clear terminal and reset output)
+  useEffect(() => {
+    if (!xtermRef.current || !isReadOnlyMode) return;
+    if (processIdRef.current !== processId) {
+      processIdRef.current = processId ?? null;
+      lastOutputLengthRef.current = 0;
+      xtermRef.current.clear();
+      if (outputRef.current) {
+        xtermRef.current.write(outputRef.current);
+        lastOutputLengthRef.current = outputRef.current.length;
+      }
+    }
+  }, [processId, isReadOnlyMode]);
 
   // Write new output to terminal
   useEffect(() => {
     if (!xtermRef.current) return;
 
+    const output = isReadOnlyMode ? (processOutput ?? '') : shellOutput;
+
     // Only write new data since last update
-    const newData = shellOutput.slice(lastOutputLengthRef.current);
+    const newData = output.slice(lastOutputLengthRef.current);
     if (newData) {
       xtermRef.current.write(newData);
-      lastOutputLengthRef.current = shellOutput.length;
+      lastOutputLengthRef.current = output.length;
     }
-  }, [shellOutput]);
+  }, [shellOutput, processOutput, isReadOnlyMode]);
 
   // Subscribe to shell once agentctl is ready.
   useEffect(() => {
@@ -223,10 +287,23 @@ export function ShellTerminal() {
     };
   }, [taskId, sessionId, storeApi, canSubscribe, send]);
 
+  if (isReadOnlyMode) {
+    return (
+      <div className="h-full w-full rounded-md bg-background relative">
+        <div ref={terminalRef} className="p-1 absolute inset-0" />
+        {isStopping ? (
+          <div className="absolute right-3 top-2 text-xs text-muted-foreground">
+            Stopping…
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
   return (
     <div
       ref={terminalRef}
-      className="h-full w-full overflow-hidden rounded-md border border-border bg-[#1e1e1e]"
+      className="h-full p-1 w-full overflow-hidden rounded-md bg-background"
     />
   );
 }

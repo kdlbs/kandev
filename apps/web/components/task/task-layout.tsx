@@ -1,7 +1,7 @@
 'use client';
 
 import { memo, useMemo, useState } from 'react';
-import { Group, Panel, Separator, type Layout } from 'react-resizable-panels';
+import { Group, Panel, type Layout } from 'react-resizable-panels';
 import { useDefaultLayout } from '@/lib/layout/use-default-layout';
 import { TaskCenterPanel } from './task-center-panel';
 import { TaskRightPanel } from './task-right-panel';
@@ -101,7 +101,7 @@ export const TaskLayout = memo(function TaskLayout({
       <PreviewController sessionId={sessionForPreview} hasDevScript={hasDevScript} />
       <Group
         orientation="horizontal"
-        className="h-full min-h-0 min-w-0"
+        className="h-full min-h-0"
         id={horizontalLayoutKey}
         key={horizontalLayoutKey}
         defaultLayout={defaultHorizontalLayout}
@@ -109,15 +109,14 @@ export const TaskLayout = memo(function TaskLayout({
       >
         {layoutState.left ? (
           <>
-            <Panel id="left" minSize={12} className="min-h-0 min-w-0">
+            <Panel id="left" minSize="180px" className="min-h-0">
               <TaskSessionSidebar workspaceId={workspaceId} boardId={boardId} />
             </Panel>
-            <Separator className="w-px" />
           </>
         ) : null}
 
         {layoutState.preview ? (
-          <Panel id="preview" minSize={40} className="min-h-0 min-w-0">
+          <Panel id="preview" className="min-h-0 min-w-0">
             <Group
               orientation="horizontal"
               className="h-full min-h-0 min-w-0"
@@ -126,7 +125,7 @@ export const TaskLayout = memo(function TaskLayout({
               defaultLayout={defaultPreviewLayout}
               onLayoutChanged={onPreviewLayoutChange}
             >
-              <Panel id="chat" minSize={20} className="min-h-0 min-w-0">
+              <Panel id="chat" minSize="400px" className="min-h-0 min-w-0">
                 <TaskCenterPanel
                   selectedDiffPath={selectedDiffPath}
                   openFileRequest={openFileRequest}
@@ -134,14 +133,13 @@ export const TaskLayout = memo(function TaskLayout({
                   onFileOpenHandled={() => setOpenFileRequest(null)}
                 />
               </Panel>
-              <Separator className="w-px" />
-              <Panel id="preview" minSize={20} className="min-h-0 min-w-0">
+              <Panel id="preview" minSize="470px" className="min-h-0 min-w-0">
                 <PreviewPanel sessionId={sessionForPreview} hasDevScript={hasDevScript} />
               </Panel>
             </Group>
           </Panel>
         ) : (
-          <Panel id="chat" minSize={45} className="min-h-0 min-w-0">
+          <Panel id="chat" minSize="400px" className="min-h-0 min-w-0">
             <TaskCenterPanel
               selectedDiffPath={selectedDiffPath}
               openFileRequest={openFileRequest}
@@ -154,8 +152,7 @@ export const TaskLayout = memo(function TaskLayout({
 
         {layoutState.right ? (
           <>
-            <Separator className="w-px" />
-            <Panel id="right" minSize={20} className="min-h-0 min-w-0">
+            <Panel id="right" minSize="310px" className="min-h-0 min-w-0">
               <TaskRightPanel topPanel={topFilesPanel} sessionId={sessionForPreview} />
             </Panel>
           </>

@@ -128,7 +128,7 @@ export function TaskChatPanel({
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="mt-3 flex flex-col gap-2">
+      <form onSubmit={handleSubmit} className="flex flex-col gap-2">
         {todoItems.length > 0 && <TodoSummary todos={todoItems} />}
         <TaskChatInput
           value={messageInput}

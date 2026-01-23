@@ -30,6 +30,7 @@ export * from './label';
 export * from './menubar';
 export * from './navigation-menu';
 export * from './pagination';
+export * from './pannel-session';
 export * from './popover';
 export * from './progress';
 export * from './radio-group';
