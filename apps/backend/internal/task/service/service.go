@@ -1736,7 +1736,7 @@ func (s *Service) ListMessagesPaginated(ctx context.Context, req ListMessagesReq
 	if limit > MaxMessagesPageSize {
 		limit = MaxMessagesPageSize
 	}
-	return s.repo.ListMessagesPaginated(ctx, req.TaskSessionID, repository.ListMessagesOptions{
+	return s.repo.ListMessagesPaginated(ctx, req.TaskSessionID, models.ListMessagesOptions{
 		Limit:  limit,
 		Before: req.Before,
 		After:  req.After,

@@ -20,7 +20,6 @@ import (
 	agentctlclient "github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
-	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -145,7 +144,7 @@ func (m *mockRepository) UpdateMessage(ctx context.Context, message *models.Mess
 func (m *mockRepository) ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error) {
 	return nil, nil
 }
-func (m *mockRepository) ListMessagesPaginated(ctx context.Context, sessionID string, opts repository.ListMessagesOptions) ([]*models.Message, bool, error) {
+func (m *mockRepository) ListMessagesPaginated(ctx context.Context, sessionID string, opts models.ListMessagesOptions) ([]*models.Message, bool, error) {
 	return nil, false, nil
 }
 func (m *mockRepository) DeleteMessage(ctx context.Context, id string) error {

@@ -7,13 +7,6 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
-type ListMessagesOptions struct {
-	Limit  int
-	Before string
-	After  string
-	Sort   string
-}
-
 // Repository defines the interface for task storage operations
 type Repository interface {
 	// Workspace operations
@@ -65,7 +58,7 @@ type Repository interface {
 	GetMessageByPendingID(ctx context.Context, sessionID, pendingID string) (*models.Message, error)
 	UpdateMessage(ctx context.Context, message *models.Message) error
 	ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error)
-	ListMessagesPaginated(ctx context.Context, sessionID string, opts ListMessagesOptions) ([]*models.Message, bool, error)
+	ListMessagesPaginated(ctx context.Context, sessionID string, opts models.ListMessagesOptions) ([]*models.Message, bool, error)
 	DeleteMessage(ctx context.Context, id string) error
 
 	// Turn operations
