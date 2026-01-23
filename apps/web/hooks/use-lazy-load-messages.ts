@@ -17,9 +17,11 @@ export function useLazyLoadMessages(sessionId: string | null) {
 
   const loadMore = useCallback(async () => {
     if (!sessionId || !hasMore || isLoading || !oldestCursor) {
+      console.log('[useLazyLoadMessages] Cannot load more:', { sessionId, hasMore, isLoading, oldestCursor });
       return 0;
     }
 
+    console.log('[useLazyLoadMessages] Loading more messages before:', oldestCursor);
     setMessagesMetadata(sessionId, { isLoading: true });
     try {
       const response = await listTaskSessionMessages(sessionId, {
@@ -27,13 +29,28 @@ export function useLazyLoadMessages(sessionId: string | null) {
         before: oldestCursor,
         sort: 'desc',
       });
+      console.log('[useLazyLoadMessages] Received response:', {
+        count: response.messages?.length,
+        hasMore: response.has_more,
+        cursor: response.cursor,
+      });
       const orderedMessages = [...(response.messages ?? [])].reverse();
+      // After reversing, orderedMessages[0] is the oldest message in this batch
+      const newOldestCursor = orderedMessages[0]?.id ?? null;
+      console.log('[useLazyLoadMessages] Prepending messages:', {
+        count: orderedMessages.length,
+        newOldestCursor,
+        hasMore: response.has_more,
+        firstMsgId: orderedMessages[0]?.id,
+        lastMsgId: orderedMessages[orderedMessages.length - 1]?.id,
+      });
       prependMessages(sessionId, orderedMessages, {
         hasMore: response.has_more,
-        oldestCursor: response.cursor || (orderedMessages[0]?.id ?? null),
+        oldestCursor: newOldestCursor,
       });
       return orderedMessages.length;
-    } catch {
+    } catch (error) {
+      console.error('[useLazyLoadMessages] Error loading messages:', error);
       setMessagesMetadata(sessionId, { isLoading: false });
       return 0;
     }

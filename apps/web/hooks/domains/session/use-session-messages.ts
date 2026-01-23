@@ -89,14 +89,20 @@ export function useSessionMessages(
       }
 
       try {
-        const response = await client.request<{ messages: Message[] }>(
+        // Load most recent messages in descending order, then reverse to show oldest-to-newest
+        const response = await client.request<{ messages: Message[]; has_more?: boolean; cursor?: string }>(
           'message.list',
-          { session_id: taskSessionId },
+          { session_id: taskSessionId, limit: 50, sort: 'desc' },
           10000
         );
-        store.getState().setMessages(taskSessionId, response.messages ?? []);
+        const messages = [...(response.messages ?? [])].reverse();
+        store.getState().setMessages(taskSessionId, messages, {
+          hasMore: response.has_more ?? false,
+          // oldestCursor should be the first (oldest) message ID for lazy loading older messages
+          oldestCursor: messages[0]?.id ?? null,
+        });
         lastFetchedSessionIdRef.current = taskSessionId;
-        if ((response.messages ?? []).length > 0) {
+        if (messages.length > 0) {
           setIsWaitingForInitialMessages(false);
         }
       } catch (error) {
@@ -146,13 +152,19 @@ export function useSessionMessages(
       setIsLoading(true);
       store.getState().setMessagesLoading(taskSessionId, true);
       try {
-        const response = await client.request<{ messages: Message[] }>(
+        // Load most recent messages in descending order, then reverse to show oldest-to-newest
+        const response = await client.request<{ messages: Message[]; has_more?: boolean; cursor?: string }>(
           'message.list',
-          { session_id: taskSessionId },
+          { session_id: taskSessionId, limit: 50, sort: 'desc' },
           10000
         );
-        store.getState().setMessages(taskSessionId, response.messages ?? []);
-        if ((response.messages ?? []).length > 0) {
+        const messages = [...(response.messages ?? [])].reverse();
+        store.getState().setMessages(taskSessionId, messages, {
+          hasMore: response.has_more ?? false,
+          // oldestCursor should be the first (oldest) message ID for lazy loading older messages
+          oldestCursor: messages[0]?.id ?? null,
+        });
+        if (messages.length > 0) {
           setIsWaitingForInitialMessages(false);
         }
       } catch (error) {
