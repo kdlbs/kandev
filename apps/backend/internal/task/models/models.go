@@ -203,7 +203,6 @@ type TaskSession struct {
 	EnvironmentSnapshot  map[string]interface{} `json:"environment_snapshot,omitempty"`
 	RepositorySnapshot   map[string]interface{} `json:"repository_snapshot,omitempty"`
 	State                TaskSessionState       `json:"state"`
-	Progress             int                    `json:"progress"` // 0-100
 	ErrorMessage         string                 `json:"error_message,omitempty"`
 	Metadata             map[string]interface{} `json:"metadata,omitempty"`
 	StartedAt            time.Time              `json:"started_at"`
@@ -226,7 +225,6 @@ func (s *TaskSession) ToAPI() map[string]interface{} {
 		"base_branch":        s.BaseBranch,
 		"worktrees":          s.Worktrees,
 		"state":              string(s.State),
-		"progress":           s.Progress,
 		"started_at":         s.StartedAt,
 		"updated_at":         s.UpdatedAt,
 	}

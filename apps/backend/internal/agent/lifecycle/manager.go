@@ -1510,7 +1510,6 @@ func (m *Manager) MarkCompleted(executionID string, exitCode int, errorMessage s
 
 		if exitCode == 0 && errorMessage == "" {
 			exec.Status = v1.AgentStatusCompleted
-			exec.Progress = 100
 		} else {
 			exec.Status = v1.AgentStatusFailed
 		}

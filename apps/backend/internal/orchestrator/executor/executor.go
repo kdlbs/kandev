@@ -112,7 +112,6 @@ type TaskExecution struct {
 	AgentProfileID   string
 	StartedAt        time.Time
 	SessionState     v1.TaskSessionState
-	Progress         int
 	LastUpdate       time.Time
 	// SessionID is the database ID of the agent session
 	SessionID string
@@ -129,7 +128,6 @@ func FromTaskSession(s *models.TaskSession) *TaskExecution {
 		AgentProfileID:   s.AgentProfileID,
 		StartedAt:        s.StartedAt,
 		SessionState:     agentSessionStateToV1(s.State),
-		Progress:         s.Progress,
 		LastUpdate:       s.UpdatedAt,
 		SessionID:        s.ID,
 	}
@@ -308,7 +306,6 @@ func (e *Executor) ExecuteWithProfile(ctx context.Context, task *v1.Task, agentP
 		RepositoryID:         repositoryID,
 		BaseBranch:           baseBranch,
 		State:                models.TaskSessionStateCreated,
-		Progress:             0,
 		StartedAt:            now,
 		UpdatedAt:            now,
 		AgentProfileSnapshot: agentProfileSnapshot,
@@ -355,7 +352,6 @@ func (e *Executor) ExecuteWithProfile(ctx context.Context, task *v1.Task, agentP
 	session.AgentExecutionID = resp.AgentExecutionID
 	session.ContainerID = resp.ContainerID
 	session.State = models.TaskSessionStateStarting
-	session.Progress = 0
 	session.ErrorMessage = ""
 	session.UpdatedAt = time.Now().UTC()
 
@@ -417,7 +413,6 @@ func (e *Executor) ExecuteWithProfile(ctx context.Context, task *v1.Task, agentP
 		AgentProfileID:   agentProfileID,
 		StartedAt:        now,
 		SessionState:     v1.TaskSessionStateStarting,
-		Progress:         0,
 		LastUpdate:       now,
 		SessionID:        sessionID,
 		WorktreePath:     resp.WorktreePath,
@@ -584,7 +579,6 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 
 	session.AgentExecutionID = resp.AgentExecutionID
 	session.ContainerID = resp.ContainerID
-	session.Progress = 0
 	session.ErrorMessage = ""
 	if startAgent {
 		session.State = models.TaskSessionStateStarting
@@ -665,7 +659,6 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 		AgentProfileID:   session.AgentProfileID,
 		StartedAt:        now,
 		SessionState:     v1.TaskSessionStateStarting,
-		Progress:         0,
 		LastUpdate:       now,
 		SessionID:        session.ID,
 		WorktreePath:     worktreePath,

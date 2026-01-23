@@ -287,7 +287,6 @@ func TestManager_MarkCompleted_Success(t *testing.T) {
 		ContainerID:    "container-123",
 		Status:         v1.AgentStatusRunning,
 		StartedAt:      time.Now(),
-		Progress:       50,
 	}
 
 	mgr.executionStore.Add(execution)
@@ -301,9 +300,6 @@ func TestManager_MarkCompleted_Success(t *testing.T) {
 	got, _ := mgr.GetExecution("test-execution-id")
 	if got.Status != v1.AgentStatusCompleted {
 		t.Errorf("expected status %v, got %v", v1.AgentStatusCompleted, got.Status)
-	}
-	if got.Progress != 100 {
-		t.Errorf("expected progress 100, got %d", got.Progress)
 	}
 	if got.FinishedAt == nil {
 		t.Error("expected FinishedAt to be set")

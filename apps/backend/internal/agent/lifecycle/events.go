@@ -42,7 +42,6 @@ func (p *EventPublisher) PublishAgentEvent(ctx context.Context, eventType string
 		Status:         string(execution.Status),
 		StartedAt:      execution.StartedAt,
 		FinishedAt:     execution.FinishedAt,
-		Progress:       execution.Progress,
 		ErrorMessage:   execution.ErrorMessage,
 		ExitCode:       execution.ExitCode,
 	}
