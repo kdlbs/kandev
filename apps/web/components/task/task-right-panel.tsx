@@ -4,7 +4,7 @@ import type { ReactNode, MouseEvent } from 'react';
 import { memo, useEffect, useState, useCallback, useMemo } from 'react';
 import { Badge } from '@kandev/ui/badge';
 import { SessionPanel, SessionPanelContent } from '@kandev/ui/pannel-session';
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@kandev/ui/resizable';
+import { Group, Panel } from 'react-resizable-panels';
 import { TabsContent } from '@kandev/ui/tabs';
 import { getLocalStorage, setLocalStorage } from '@/lib/local-storage';
 import { COMMANDS } from '@/components/task/task-data';
@@ -12,7 +12,7 @@ import { ShellTerminal } from '@/components/task/shell-terminal';
 import { useAppStore } from '@/components/state-provider';
 import { useLayoutStore } from '@/lib/state/layout-store';
 import { stopProcess } from '@/lib/api';
-import type { Layout } from 'react-resizable-panels';
+import { useDefaultLayout } from '@/lib/layout/use-default-layout';
 import { SessionTabs, type SessionTab } from '@/components/session-tabs';
 
 type TerminalType = 'commands' | 'dev-server' | 'shell';
@@ -28,12 +28,16 @@ type TaskRightPanelProps = {
   sessionId?: string | null;
 };
 
-const DEFAULT_RIGHT_LAYOUT: Layout = { top: 55, bottom: 45 };
+const DEFAULT_RIGHT_LAYOUT: Record<string, number> = { top: 55, bottom: 45 };
 
 const TaskRightPanel = memo(function TaskRightPanel({ topPanel, sessionId = null }: TaskRightPanelProps) {
-  const [rightLayout, setRightLayout] = useState<Layout>(() =>
-    getLocalStorage('task-layout-right', DEFAULT_RIGHT_LAYOUT)
-  );
+  const rightPanelIds = ['top', 'bottom'];
+  const rightLayoutKey = `task-layout-right-v2:${sessionId ?? 'default'}`;
+  const { defaultLayout: rightLayout, onLayoutChanged: onRightLayoutChange } = useDefaultLayout({
+    id: rightLayoutKey,
+    panelIds: rightPanelIds,
+    baseLayout: DEFAULT_RIGHT_LAYOUT,
+  });
   const [terminals, setTerminals] = useState<Terminal[]>([
     { id: 'shell-1', type: 'shell', label: 'Terminal' },
   ]);
@@ -223,21 +227,18 @@ const TaskRightPanel = memo(function TaskRightPanel({ topPanel, sessionId = null
   }
 
   return (
-    <ResizablePanelGroup
+    <Group
       orientation="vertical"
-      className="h-full"
-      id="task-right-panel"
+      className="h-full min-h-0"
+      id={rightLayoutKey}
+      key={rightLayoutKey}
       defaultLayout={rightLayout}
-      onLayoutChanged={(sizes) => {
-        setRightLayout(sizes);
-        setLocalStorage('task-layout-right', sizes);
-      }}
+      onLayoutChanged={onRightLayoutChange}
     >
-      <ResizablePanel id="top" defaultSize={rightLayout.top} minSize={30}>
+      <Panel id="top" minSize={30} className="min-h-0">
         {topPanel}
-      </ResizablePanel>
-      <ResizableHandle className="h-px" />
-      <ResizablePanel id="bottom" defaultSize={rightLayout.bottom} minSize={20}>
+      </Panel>
+      <Panel id="bottom" minSize={20} className="min-h-0">
         <SessionPanel borderSide="left" margin="top">
           <SessionTabs
             tabs={tabs}
@@ -287,8 +288,8 @@ const TaskRightPanel = memo(function TaskRightPanel({ topPanel, sessionId = null
             ))}
           </SessionTabs>
         </SessionPanel>
-      </ResizablePanel>
-    </ResizablePanelGroup>
+      </Panel>
+    </Group>
   );
 });
 
