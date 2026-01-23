@@ -27,6 +27,21 @@ type WorktreeCleanup interface {
 	OnTaskDeleted(ctx context.Context, taskID string) error
 }
 
+// WorktreeProvider extends WorktreeCleanup with query capabilities.
+// Implementations that support this can be type-asserted from WorktreeCleanup.
+type WorktreeProvider interface {
+	WorktreeCleanup
+	// GetAllByTaskID returns all worktrees associated with a task.
+	GetAllByTaskID(ctx context.Context, taskID string) ([]*worktree.Worktree, error)
+}
+
+// WorktreeBatchCleaner extends WorktreeProvider with batch cleanup.
+type WorktreeBatchCleaner interface {
+	WorktreeProvider
+	// CleanupWorktrees removes multiple worktrees in a single operation.
+	CleanupWorktrees(ctx context.Context, worktrees []*worktree.Worktree) error
+}
+
 // TaskExecutionStopper stops active task execution (agent session + instance).
 type TaskExecutionStopper interface {
 	StopTask(ctx context.Context, taskID, reason string, force bool) error
@@ -185,6 +200,7 @@ type CreateRepositoryRequest struct {
 	WorktreeBranchPrefix string `json:"worktree_branch_prefix"`
 	SetupScript          string `json:"setup_script"`
 	CleanupScript        string `json:"cleanup_script"`
+	DevScript            string `json:"dev_script"`
 }
 
 // UpdateRepositoryRequest contains the data for updating a repository
@@ -200,6 +216,7 @@ type UpdateRepositoryRequest struct {
 	WorktreeBranchPrefix *string `json:"worktree_branch_prefix,omitempty"`
 	SetupScript          *string `json:"setup_script,omitempty"`
 	CleanupScript        *string `json:"cleanup_script,omitempty"`
+	DevScript            *string `json:"dev_script,omitempty"`
 }
 
 // CreateExecutorRequest contains the data for creating an executor
@@ -470,27 +487,10 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 
 // DeleteTask deletes a task and publishes a task.deleted event
 func (s *Service) DeleteTask(ctx context.Context, id string) error {
+	start := time.Now()
 	task, err := s.repo.GetTask(ctx, id)
 	if err != nil {
 		return err
-	}
-
-	if s.executionStopper != nil {
-		if err := s.executionStopper.StopTask(ctx, id, "task deleted", true); err != nil {
-			s.logger.Warn("failed to stop task execution on delete",
-				zap.String("task_id", id),
-				zap.Error(err))
-		}
-	}
-
-	// Clean up worktree BEFORE deleting task (CASCADE would delete worktree DB records)
-	// This must happen first so we can find the worktree paths to remove from disk
-	if s.worktreeCleanup != nil {
-		if err := s.worktreeCleanup.OnTaskDeleted(ctx, id); err != nil {
-			s.logger.Warn("failed to cleanup worktree on task deletion",
-				zap.String("task_id", id),
-				zap.Error(err))
-		}
 	}
 
 	sessions, err := s.repo.ListTaskSessions(ctx, id)
@@ -498,27 +498,22 @@ func (s *Service) DeleteTask(ctx context.Context, id string) error {
 		s.logger.Warn("failed to list task sessions for delete",
 			zap.String("task_id", id),
 			zap.Error(err))
-	} else {
-		for _, session := range sessions {
-			if session == nil || session.ID == "" {
-				continue
-			}
-			if err := s.repo.DeleteExecutorRunningBySessionID(ctx, session.ID); err != nil {
-				s.logger.Debug("failed to delete executor runtime for session",
+	}
+
+	var worktrees []*worktree.Worktree
+	if s.worktreeCleanup != nil {
+		if provider, ok := s.worktreeCleanup.(WorktreeProvider); ok {
+			worktrees, err = provider.GetAllByTaskID(ctx, id)
+			if err != nil {
+				s.logger.Warn("failed to list worktrees for delete",
 					zap.String("task_id", id),
-					zap.String("session_id", session.ID),
 					zap.Error(err))
 			}
-			if err := s.repo.DeleteTaskSessionWorktreesBySession(ctx, session.ID); err != nil {
-				s.logger.Warn("failed to delete session worktrees",
+		} else {
+			// Fallback for legacy implementations: cleanup before delete.
+			if err := s.worktreeCleanup.OnTaskDeleted(ctx, id); err != nil {
+				s.logger.Warn("failed to cleanup worktree on task deletion",
 					zap.String("task_id", id),
-					zap.String("session_id", session.ID),
-					zap.Error(err))
-			}
-			if err := s.repo.DeleteTaskSession(ctx, session.ID); err != nil {
-				s.logger.Warn("failed to delete task session",
-					zap.String("task_id", id),
-					zap.String("session_id", session.ID),
 					zap.Error(err))
 			}
 		}
@@ -530,9 +525,81 @@ func (s *Service) DeleteTask(ctx context.Context, id string) error {
 	}
 
 	s.publishTaskEvent(ctx, events.TaskDeleted, task, nil)
-	s.logger.Info("task deleted", zap.String("task_id", id))
+	s.logger.Info("task deleted",
+		zap.String("task_id", id),
+		zap.Duration("duration", time.Since(start)))
+
+	// Perform cleanup synchronously with dedicated timeout
+	// Use background context since the original request may complete
+	if s.executionStopper != nil || s.worktreeCleanup != nil || len(sessions) > 0 {
+		cleanupStart := time.Now()
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		cleanupErrors := s.performTaskCleanup(cleanupCtx, id, sessions, worktrees)
+
+		if len(cleanupErrors) > 0 {
+			s.logger.Warn("task cleanup completed with errors",
+				zap.String("task_id", id),
+				zap.Int("error_count", len(cleanupErrors)),
+				zap.Duration("duration", time.Since(cleanupStart)))
+		} else {
+			s.logger.Info("task cleanup completed",
+				zap.String("task_id", id),
+				zap.Duration("duration", time.Since(cleanupStart)))
+		}
+	}
 
 	return nil
+}
+
+// performTaskCleanup handles post-deletion cleanup operations.
+// Returns a slice of errors encountered (empty if all succeeded).
+func (s *Service) performTaskCleanup(
+	ctx context.Context,
+	taskID string,
+	sessions []*models.TaskSession,
+	worktrees []*worktree.Worktree,
+) []error {
+	var errs []error
+
+	// Stop any running execution
+	if s.executionStopper != nil {
+		if err := s.executionStopper.StopTask(ctx, taskID, "task deleted", true); err != nil {
+			s.logger.Warn("failed to stop task execution on delete",
+				zap.String("task_id", taskID),
+				zap.Error(err))
+			errs = append(errs, fmt.Errorf("stop execution: %w", err))
+		}
+	}
+
+	// Cleanup worktrees
+	if len(worktrees) > 0 {
+		if cleaner, ok := s.worktreeCleanup.(WorktreeBatchCleaner); ok {
+			if err := cleaner.CleanupWorktrees(ctx, worktrees); err != nil {
+				s.logger.Warn("failed to cleanup worktrees after delete",
+					zap.String("task_id", taskID),
+					zap.Error(err))
+				errs = append(errs, fmt.Errorf("cleanup worktrees: %w", err))
+			}
+		}
+	}
+
+	// Delete executor running records for sessions
+	for _, session := range sessions {
+		if session == nil || session.ID == "" {
+			continue
+		}
+		if err := s.repo.DeleteExecutorRunningBySessionID(ctx, session.ID); err != nil {
+			s.logger.Debug("failed to delete executor runtime for session",
+				zap.String("task_id", taskID),
+				zap.String("session_id", session.ID),
+				zap.Error(err))
+			// Don't add to errs - this is a debug-level issue
+		}
+	}
+
+	return errs
 }
 
 // ListTasks returns all tasks for a board
@@ -975,6 +1042,7 @@ func (s *Service) CreateRepository(ctx context.Context, req *CreateRepositoryReq
 		WorktreeBranchPrefix: prefix,
 		SetupScript:          req.SetupScript,
 		CleanupScript:        req.CleanupScript,
+		DevScript:            req.DevScript,
 	}
 
 	if err := s.repo.CreateRepository(ctx, repository); err != nil {
@@ -1032,6 +1100,9 @@ func (s *Service) UpdateRepository(ctx context.Context, id string, req *UpdateRe
 	}
 	if req.CleanupScript != nil {
 		repository.CleanupScript = *req.CleanupScript
+	}
+	if req.DevScript != nil {
+		repository.DevScript = *req.DevScript
 	}
 	repository.UpdatedAt = time.Now().UTC()
 

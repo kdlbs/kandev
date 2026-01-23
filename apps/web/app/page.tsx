@@ -1,6 +1,6 @@
 import { PageClient } from '@/app/page-client';
 import { StateHydrator } from '@/components/state-hydrator';
-import { fetchBoardSnapshot, fetchUserSettings, listBoards, listRepositories, listWorkspaces, listTaskSessionMessages } from '@/lib/http';
+import { fetchBoardSnapshot, fetchUserSettings, listBoards, listRepositories, listWorkspaces, listTaskSessionMessages } from '@/lib/api';
 import { snapshotToState } from '@/lib/ssr/mapper';
 import type { AppState } from '@/lib/state/store';
 

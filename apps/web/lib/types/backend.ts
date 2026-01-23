@@ -39,7 +39,9 @@ export type BackendMessageType =
   | 'agent.profile.updated'
   | 'user.settings.updated'
   | 'session.workspace.file.changes'
-  | 'session.shell.output';
+  | 'session.shell.output'
+  | 'session.process.output'
+  | 'session.process.status';
 
 export type BackendMessage<T extends BackendMessageType, P> = {
   id?: string;
@@ -201,6 +203,27 @@ export type GitStatusPayload = {
   timestamp: string;
 };
 
+export type ProcessOutputPayload = {
+  session_id: string;
+  process_id: string;
+  kind: string;
+  stream: 'stdout' | 'stderr';
+  data: string;
+  timestamp?: string;
+};
+
+export type ProcessStatusPayload = {
+  session_id: string;
+  process_id: string;
+  kind: string;
+  script_name?: string;
+  status: string;
+  command?: string;
+  working_dir?: string;
+  exit_code?: number | null;
+  timestamp?: string;
+};
+
 export type ExecutorPayload = {
   id: string;
   name: string;
@@ -319,6 +342,8 @@ export type BackendMessageMap = {
   'user.settings.updated': BackendMessage<'user.settings.updated', UserSettingsUpdatedPayload>;
   'session.workspace.file.changes': BackendMessage<'session.workspace.file.changes', FileChangeNotificationPayload>;
   'session.shell.output': BackendMessage<'session.shell.output', ShellOutputPayload>;
+  'session.process.output': BackendMessage<'session.process.output', ProcessOutputPayload>;
+  'session.process.status': BackendMessage<'session.process.status', ProcessStatusPayload>;
 };
 
 // Workspace file types

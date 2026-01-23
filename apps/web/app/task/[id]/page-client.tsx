@@ -7,25 +7,29 @@ import { TaskTopBar } from '@/components/task/task-top-bar';
 import { TaskLayout } from '@/components/task/task-layout';
 import { DebugOverlay } from '@/components/debug-overlay';
 import type { Repository, Task } from '@/lib/types/http';
+import type { KanbanState } from '@/lib/state/slices';
 import { DEBUG_UI } from '@/lib/config';
-import { useRepositories } from '@/hooks/use-repositories';
-import { useSessionAgent } from '@/hooks/use-session-agent';
-import { useSessionResumption } from '@/hooks/use-session-resumption';
-import { useSessionAgentctl } from '@/hooks/use-session-agentctl';
+import { useRepositories } from '@/hooks/domains/workspace/use-repositories';
+import { useSessionAgent } from '@/hooks/domains/session/use-session-agent';
+import { useSessionResumption } from '@/hooks/domains/session/use-session-resumption';
+import { useSessionAgentctl } from '@/hooks/domains/session/use-session-agentctl';
 import { useAppStore } from '@/components/state-provider';
-import { fetchTask } from '@/lib/http';
+import { fetchTask } from '@/lib/api';
 import { useTasks } from '@/hooks/use-tasks';
+import type { Layout } from 'react-resizable-panels';
 
 type TaskPageClientProps = {
   task: Task | null;
   sessionId?: string | null;
   initialRepositories?: Repository[];
+  defaultLayouts?: Record<string, Layout>;
 };
 
 export default function TaskPage({
   task: initialTask,
   sessionId = null,
   initialRepositories = [],
+  defaultLayouts = {},
 }: TaskPageClientProps) {
   const [taskDetails, setTaskDetails] = useState<Task | null>(initialTask);
   const [isMounted, setIsMounted] = useState(false);
@@ -35,7 +39,7 @@ export default function TaskPage({
   const setActiveTask = useAppStore((state) => state.setActiveTask);
   const effectiveTaskId = activeTaskId ?? initialTask?.id ?? null;
   const kanbanTask = useAppStore((state) =>
-    effectiveTaskId ? state.kanban.tasks.find((item) => item.id === effectiveTaskId) ?? null : null
+    effectiveTaskId ? state.kanban.tasks.find((item: KanbanState['tasks'][number]) => item.id === effectiveTaskId) ?? null : null
   );
   const task = useMemo(() => {
     const baseTask = taskDetails ?? initialTask;
@@ -72,6 +76,21 @@ export default function TaskPage({
     effectiveSessionId ? state.taskSessions.items[effectiveSessionId]?.state ?? null : null
   );
   const agentctlStatus = useSessionAgentctl(effectiveSessionId);
+  const previewOpen = useAppStore((state) =>
+    effectiveSessionId ? state.previewPanel.openBySessionId[effectiveSessionId] ?? false : false
+  );
+  const previewStage = useAppStore((state) =>
+    effectiveSessionId ? state.previewPanel.stageBySessionId[effectiveSessionId] ?? 'closed' : 'closed'
+  );
+  const previewUrl = useAppStore((state) =>
+    effectiveSessionId ? state.previewPanel.urlBySessionId[effectiveSessionId] ?? '' : ''
+  );
+  const devProcessId = useAppStore((state) =>
+    effectiveSessionId ? state.processes.devProcessBySessionId[effectiveSessionId] : undefined
+  );
+  const devProcessStatus = useAppStore((state) =>
+    devProcessId ? state.processes.processesById[devProcessId]?.status ?? null : null
+  );
 
   // Session resumption hook - handles auto-resume on page reload
   const {
@@ -122,7 +141,7 @@ export default function TaskPage({
   const { repositories } = useRepositories(task?.workspace_id ?? null, Boolean(task?.workspace_id));
   const effectiveRepositories = repositories.length ? repositories : initialRepositories;
   const repository = useMemo(
-    () => effectiveRepositories.find((item) => item.id === task?.repositories?.[0]?.repository_id) ?? null,
+    () => effectiveRepositories.find((item: Repository) => item.id === task?.repositories?.[0]?.repository_id) ?? null,
     [effectiveRepositories, task?.repositories]
   );
 
@@ -150,6 +169,11 @@ export default function TaskPage({
               agentctl_ready: agentctlStatus.isReady,
               agentctl_error: agentctlStatus.errorMessage ?? null,
               agentctl_execution_id: agentctlStatus.agentExecutionId ?? null,
+              preview_open: previewOpen,
+              preview_stage: previewStage,
+              preview_url: previewUrl || null,
+              dev_process_id: devProcessId ?? null,
+              dev_process_status: devProcessStatus ?? null,
             }}
           />
         )}
@@ -167,12 +191,15 @@ export default function TaskPage({
           worktreeBranch={worktreeBranch}
           repositoryPath={repository?.local_path ?? null}
           repositoryName={repository?.name ?? null}
+          hasDevScript={Boolean(repository?.dev_script?.trim())}
         />
 
         <TaskLayout
           workspaceId={task?.workspace_id ?? null}
           boardId={task?.board_id ?? null}
-          sessionId={effectiveSessionId}
+          sessionId={effectiveSessionId ?? null}
+          repository={repository ?? null}
+          defaultLayouts={defaultLayouts}
         />
       </div>
     </TooltipProvider>

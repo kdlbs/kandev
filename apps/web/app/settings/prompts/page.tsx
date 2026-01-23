@@ -1,6 +1,6 @@
 import { PromptsSettings } from '@/components/settings/prompts-settings';
 import { StateProvider } from '@/components/state-provider';
-import { listPrompts } from '@/lib/http';
+import { listPrompts } from '@/lib/api';
 
 export default async function PromptsSettingsPage() {
   let initialState = {};

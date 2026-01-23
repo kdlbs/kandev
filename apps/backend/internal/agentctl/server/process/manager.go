@@ -75,6 +75,9 @@ type Manager struct {
 	// Workspace tracker for git status and file changes
 	workspaceTracker *WorkspaceTracker
 
+	// Script/process runner (dev server, setup, cleanup, custom)
+	processRunner *ProcessRunner
+
 	// Embedded shell session (auto-created when agent starts)
 	shell *shell.Session
 
@@ -94,11 +97,11 @@ type Manager struct {
 	gitOperatorMu sync.Mutex
 
 	// Synchronization
-	mu       sync.RWMutex
-	wg       sync.WaitGroup
-	stopCh   chan struct{}
-	doneCh   chan struct{}
-	startMu  sync.Mutex
+	mu      sync.RWMutex
+	wg      sync.WaitGroup
+	stopCh  chan struct{}
+	doneCh  chan struct{}
+	startMu sync.Mutex
 }
 
 // NewManager creates a new process manager
@@ -110,6 +113,7 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 		updatesCh:          make(chan adapter.AgentEvent, 100),
 		pendingPermissions: make(map[string]*PendingPermission),
 	}
+	m.processRunner = NewProcessRunner(m.workspaceTracker, log, cfg.ProcessBufferMaxBytes)
 	m.status.Store(StatusStopped)
 	m.exitCode.Store(-1)
 	return m
@@ -138,6 +142,38 @@ func (m *Manager) ExitError() error {
 // GetWorkspaceTracker returns the workspace tracker for git status and file monitoring
 func (m *Manager) GetWorkspaceTracker() *WorkspaceTracker {
 	return m.workspaceTracker
+}
+
+// StartProcess runs a script/process with isolated stdout/stderr.
+func (m *Manager) StartProcess(ctx context.Context, req StartProcessRequest) (*ProcessInfo, error) {
+	if m.processRunner == nil {
+		return nil, fmt.Errorf("process runner not available")
+	}
+	return m.processRunner.Start(ctx, req)
+}
+
+// StopProcess stops a running process by ID.
+func (m *Manager) StopProcess(ctx context.Context, req StopProcessRequest) error {
+	if m.processRunner == nil {
+		return fmt.Errorf("process runner not available")
+	}
+	return m.processRunner.Stop(ctx, req)
+}
+
+// GetProcess returns a process by ID.
+func (m *Manager) GetProcess(id string, includeOutput bool) (*ProcessInfo, bool) {
+	if m.processRunner == nil {
+		return nil, false
+	}
+	return m.processRunner.Get(id, includeOutput)
+}
+
+// ListProcesses returns processes for a session (or all if sessionID empty).
+func (m *Manager) ListProcesses(sessionID string) []ProcessInfo {
+	if m.processRunner == nil {
+		return nil
+	}
+	return m.processRunner.List(sessionID)
 }
 
 // GitOperator returns the git operator for git operations.
@@ -429,6 +465,13 @@ func (m *Manager) Stop(ctx context.Context) error {
 		m.shell = nil
 	}
 
+	// Stop all running workspace processes (dev server, setup, cleanup, custom).
+	if m.processRunner != nil {
+		if err := m.processRunner.StopAll(ctx); err != nil {
+			m.logger.Debug("failed to stop workspace processes", zap.Error(err))
+		}
+	}
+
 	// Stop workspace tracker
 	if m.workspaceTracker != nil {
 		m.workspaceTracker.Stop()
@@ -680,8 +723,6 @@ func (m *Manager) RespondToPermission(pendingID string, optionID string, cancell
 		return fmt.Errorf("response channel full for pending permission: %s", pendingID)
 	}
 }
-
-
 
 // Shell returns the embedded shell session, or nil if not available
 func (m *Manager) Shell() *shell.Session {

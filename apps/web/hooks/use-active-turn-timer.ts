@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useAppStore } from '@/components/state-provider';
+import type { Turn } from '@/lib/types/http';
 
 /**
  * Hook to get a live timer for the active turn of a session.
@@ -15,7 +16,7 @@ export function useActiveTurnTimer(sessionId: string | null) {
   // Find the active turn
   const activeTurn = useMemo(() => {
     if (!turns || !activeTurnId) return null;
-    return turns.find((t) => t.id === activeTurnId) ?? null;
+    return turns.find((t: Turn) => t.id === activeTurnId) ?? null;
   }, [turns, activeTurnId]);
 
   const [elapsedSeconds, setElapsedSeconds] = useState(() => {

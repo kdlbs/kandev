@@ -65,6 +65,7 @@ export type Repository = {
   worktree_branch_prefix: string;
   setup_script: string;
   cleanup_script: string;
+  dev_script: string;
   created_at: string;
   updated_at: string;
 };
@@ -77,6 +78,26 @@ export type RepositoryScript = {
   position: number;
   created_at: string;
   updated_at: string;
+};
+
+export type ProcessOutputChunk = {
+  stream: 'stdout' | 'stderr';
+  data: string;
+  timestamp: string;
+};
+
+export type ProcessInfo = {
+  id: string;
+  session_id: string;
+  kind: string;
+  script_name?: string;
+  command: string;
+  working_dir: string;
+  status: string;
+  exit_code?: number | null;
+  started_at: string;
+  updated_at: string;
+  output?: ProcessOutputChunk[];
 };
 
 export type TaskRepository = {

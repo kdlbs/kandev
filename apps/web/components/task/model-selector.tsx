@@ -3,9 +3,10 @@
 import { IconCpu } from '@tabler/icons-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@kandev/ui/select';
 import { useAppStore } from '@/components/state-provider';
-import { useAvailableAgents } from '@/hooks/use-available-agents';
-import { useSettingsData } from '@/hooks/use-settings-data';
+import { useAvailableAgents } from '@/hooks/domains/settings/use-available-agents';
+import { useSettingsData } from '@/hooks/domains/settings/use-settings-data';
 import { cn } from '@/lib/utils';
+import type { Agent, AgentProfile, AvailableAgent } from '@/lib/types/http';
 
 type ModelSelectorProps = {
   sessionId: string | null;
@@ -38,8 +39,8 @@ export function ModelSelector({ sessionId }: ModelSelectorProps) {
   // Resolve the agent profile from settings (for getting available models list)
   let sessionProfile: { profile: (typeof settingsAgents)[0]['profiles'][0]; agent: (typeof settingsAgents)[0] } | null = null;
   if (session?.agent_profile_id) {
-    for (const agent of settingsAgents) {
-      const profile = agent.profiles.find((p) => p.id === session.agent_profile_id);
+    for (const agent of settingsAgents as Agent[]) {
+      const profile = agent.profiles.find((p: AgentProfile) => p.id === session.agent_profile_id);
       if (profile) {
         sessionProfile = { profile, agent };
         break;
@@ -51,7 +52,7 @@ export function ModelSelector({ sessionId }: ModelSelectorProps) {
   let availableModels: { id: string; name: string; provider: string; context_window: number; is_default: boolean }[] = [];
   if (sessionProfile?.agent) {
     const agentName = sessionProfile.agent.name;
-    const availableAgent = availableAgents.find((a) => a.name === agentName);
+    const availableAgent = availableAgents.find((a: AvailableAgent) => a.name === agentName);
     if (availableAgent?.model_config?.available_models) {
       availableModels = availableAgent.model_config.available_models;
     }

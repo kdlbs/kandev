@@ -8,8 +8,9 @@ import { Button } from '@kandev/ui/button';
 import { Card, CardContent } from '@kandev/ui/card';
 import { Separator } from '@kandev/ui/separator';
 import { useAppStore } from '@/components/state-provider';
-import { listAgentDiscovery } from '@/lib/http';
-import { useAvailableAgents } from '@/hooks/use-available-agents';
+import { listAgentDiscovery } from '@/lib/api';
+import { useAvailableAgents } from '@/hooks/domains/settings/use-available-agents';
+import type { AgentDiscovery, Agent, AvailableAgent, AgentProfile } from '@/lib/types/http';
 
 export default function AgentsSettingsPage() {
   const discoveryAgents = useAppStore((state) => state.agentDiscovery.items);
@@ -19,12 +20,12 @@ export default function AgentsSettingsPage() {
   const [rescanning, setRescanning] = useState(false);
 
   const installedAgents = useMemo(
-    () => discoveryAgents.filter((agent) => agent.available),
+    () => discoveryAgents.filter((agent: AgentDiscovery) => agent.available),
     [discoveryAgents]
   );
 
   const savedAgentsByName = useMemo(
-    () => new Map(savedAgents.map((agent) => [agent.name, agent])),
+    () => new Map(savedAgents.map((agent: Agent) => [agent.name, agent])),
     [savedAgents]
   );
 
@@ -75,8 +76,8 @@ export default function AgentsSettingsPage() {
         )}
 
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-          {installedAgents.map((agent) => {
-            const savedAgent = savedAgentsByName.get(agent.name);
+          {installedAgents.map((agent: AgentDiscovery) => {
+            const savedAgent = savedAgentsByName.get(agent.name) as Agent | undefined;
             const configured = Boolean(savedAgent && savedAgent.profiles.length > 0);
             const hasAgentRecord = Boolean(savedAgent);
             return (
@@ -85,7 +86,7 @@ export default function AgentsSettingsPage() {
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
                       <h4 className="font-medium">
-                        {availableAgents.find((item) => item.name === agent.name)?.display_name ?? agent.name}
+                        {availableAgents.find((item: AvailableAgent) => item.name === agent.name)?.display_name ?? agent.name}
                       </h4>
                       {agent.supports_mcp && <Badge variant="secondary">MCP</Badge>}
                       {configured && <Badge variant="outline">Configured</Badge>}
@@ -107,7 +108,7 @@ export default function AgentsSettingsPage() {
         </div>
       </div>
 
-      {savedAgents.some((agent) => agent.profiles.length > 0) && (
+      {savedAgents.some((agent: Agent) => agent.profiles.length > 0) && (
         <div className="space-y-4">
           <Separator />
           <div>
@@ -116,8 +117,8 @@ export default function AgentsSettingsPage() {
           </div>
 
           <div className="space-y-2">
-            {savedAgents.flatMap((agent) =>
-              agent.profiles.map((profile) => {
+            {savedAgents.flatMap((agent: Agent) =>
+              agent.profiles.map((profile: AgentProfile) => {
                 const profilePath = `/settings/agents/${encodeURIComponent(agent.name)}/profiles/${profile.id}`;
                 return (
                   <Link key={profile.id} href={profilePath} className="block">

@@ -35,7 +35,7 @@ export default function EnvironmentEditPage({ params }: { params: Promise<{ id: 
   const { id } = use(params);
   const router = useRouter();
   const environment = useAppStore((state) =>
-    state.environments.items.find((item) => item.id === id) ?? null
+    state.environments.items.find((item: Environment) => item.id === id) ?? null
   );
 
   if (!environment) {

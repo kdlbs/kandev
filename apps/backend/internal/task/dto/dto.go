@@ -54,6 +54,7 @@ type RepositoryDTO struct {
 	WorktreeBranchPrefix string    `json:"worktree_branch_prefix"`
 	SetupScript          string    `json:"setup_script"`
 	CleanupScript        string    `json:"cleanup_script"`
+	DevScript            string    `json:"dev_script"`
 	CreatedAt            time.Time `json:"created_at"`
 	UpdatedAt            time.Time `json:"updated_at"`
 }
@@ -306,6 +307,7 @@ func FromRepository(repository *models.Repository) RepositoryDTO {
 		WorktreeBranchPrefix: repository.WorktreeBranchPrefix,
 		SetupScript:          repository.SetupScript,
 		CleanupScript:        repository.CleanupScript,
+		DevScript:            repository.DevScript,
 		CreatedAt:            repository.CreatedAt,
 		UpdatedAt:            repository.UpdatedAt,
 	}

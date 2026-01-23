@@ -102,6 +102,7 @@ type CreateRepositoryRequest struct {
 	WorktreeBranchPrefix string
 	SetupScript          string
 	CleanupScript        string
+	DevScript            string
 }
 
 type UpdateRepositoryRequest struct {
@@ -117,6 +118,7 @@ type UpdateRepositoryRequest struct {
 	WorktreeBranchPrefix *string
 	SetupScript          *string
 	CleanupScript        *string
+	DevScript            *string
 }
 
 type DeleteRepositoryRequest struct {

@@ -6,6 +6,7 @@ import { KanbanCard, Task } from './kanban-card';
 import { Badge } from '@kandev/ui/badge';
 import { cn, getRepositoryDisplayName } from '@/lib/utils';
 import { useAppStore } from '@/components/state-provider';
+import type { Repository } from '@/lib/types/http';
 
 export interface Column {
   id: string;
@@ -31,7 +32,7 @@ export function KanbanColumn({ column, tasks, onPreviewTask, onOpenTask, onEditT
   // Access repositories from store to pass repository names to cards
   const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
   const repositories = useMemo(
-    () => Object.values(repositoriesByWorkspace).flat(),
+    () => Object.values(repositoriesByWorkspace).flat() as Repository[],
     [repositoriesByWorkspace]
   );
 

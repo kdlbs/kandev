@@ -18,6 +18,8 @@ import {
 } from '@kandev/ui/select';
 import { IconAdjustmentsHorizontal } from '@tabler/icons-react';
 import { useKanbanDisplaySettings } from '@/hooks/use-kanban-display-settings';
+import type { Workspace, Repository } from '@/lib/types/http';
+import type { BoardState } from '@/lib/state/slices';
 
 export function KanbanDisplayDropdown() {
   const {
@@ -58,7 +60,7 @@ export function KanbanDisplayDropdown() {
                 <SelectValue placeholder="Select workspace" />
               </SelectTrigger>
               <SelectContent>
-                {workspaces.map((workspace) => (
+                {workspaces.map((workspace: Workspace) => (
                   <SelectItem key={workspace.id} value={workspace.id}>
                     {workspace.name}
                   </SelectItem>
@@ -77,7 +79,7 @@ export function KanbanDisplayDropdown() {
                 <SelectValue placeholder="Select board" />
               </SelectTrigger>
               <SelectContent>
-                {boards.map((board) => (
+                {boards.map((board: BoardState['items'][number]) => (
                   <SelectItem key={board.id} value={board.id}>
                     {board.name}
                   </SelectItem>
@@ -106,7 +108,7 @@ export function KanbanDisplayDropdown() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All repositories</SelectItem>
-                {repositories.map((repo) => (
+                {repositories.map((repo: Repository) => (
                   <SelectItem key={repo.id} value={repo.id}>
                     {repo.name}
                   </SelectItem>

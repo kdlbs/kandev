@@ -13,6 +13,7 @@ import { useRequest } from '@/lib/http/use-request';
 import { useToast } from '@/components/toast-provider';
 import { RequestIndicator } from '@/components/request-indicator';
 import { useAppStore } from '@/components/state-provider';
+import type { Workspace } from '@/lib/types/http';
 
 export function WorkspacesPageClient() {
   const items = useAppStore((state) => state.workspaces.items);
@@ -39,7 +40,7 @@ export function WorkspacesPageClient() {
           created_at: created.created_at,
           updated_at: created.updated_at,
         },
-        ...items.map((workspace) => ({
+        ...items.map((workspace: Workspace) => ({
           id: workspace.id,
           name: workspace.name,
           description: workspace.description ?? null,
@@ -112,7 +113,7 @@ export function WorkspacesPageClient() {
             </Card>
           )}
 
-          {items.map((workspace) => (
+          {items.map((workspace: Workspace) => (
             <Link key={workspace.id} href={`/settings/workspace/${workspace.id}`}>
               <Card className="hover:bg-accent transition-colors cursor-pointer">
                 <CardContent className="py-4">

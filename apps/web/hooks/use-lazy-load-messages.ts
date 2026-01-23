@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { listTaskSessionMessages } from '@/lib/http';
+import { listTaskSessionMessages } from '@/lib/api';
 import { useAppStore } from '@/components/state-provider';
 
 export function useLazyLoadMessages(sessionId: string | null) {

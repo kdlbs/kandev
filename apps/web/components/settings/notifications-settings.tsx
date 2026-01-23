@@ -14,10 +14,10 @@ import {
   createNotificationProvider,
   deleteNotificationProvider,
   updateNotificationProvider,
-} from '@/lib/http';
+} from '@/lib/api';
 import { useRequest } from '@/lib/http/use-request';
 import { DEFAULT_NOTIFICATION_EVENTS, EVENT_LABELS } from '@/lib/notifications/events';
-import { useNotificationProviders } from '@/hooks/use-notification-providers';
+import { useNotificationProviders } from '@/hooks/domains/settings/use-notification-providers';
 import type { NotificationProvider } from '@/lib/types/http';
 
 type ProviderUpdatePayload = {

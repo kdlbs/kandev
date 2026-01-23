@@ -98,7 +98,8 @@ export function WorkspaceRepositoriesClient({
       repo.default_branch !== saved.default_branch ||
       repo.worktree_branch_prefix !== saved.worktree_branch_prefix ||
       repo.setup_script !== saved.setup_script ||
-      repo.cleanup_script !== saved.cleanup_script
+      repo.cleanup_script !== saved.cleanup_script ||
+      repo.dev_script !== saved.dev_script
     );
   };
 
@@ -200,6 +201,7 @@ export function WorkspaceRepositoriesClient({
       worktree_branch_prefix: 'feature/',
       setup_script: '',
       cleanup_script: '',
+      dev_script: '',
       created_at: '',
       updated_at: '',
       scripts: [],
@@ -272,6 +274,7 @@ export function WorkspaceRepositoriesClient({
         worktree_branch_prefix: repo.worktree_branch_prefix,
         setup_script: repo.setup_script,
         cleanup_script: repo.cleanup_script,
+        dev_script: repo.dev_script,
       });
       const scripts = await Promise.all(
         repo.scripts.map((script, index) =>
@@ -301,6 +304,7 @@ export function WorkspaceRepositoriesClient({
       worktree_branch_prefix: repo.worktree_branch_prefix,
       setup_script: repo.setup_script,
       cleanup_script: repo.cleanup_script,
+      dev_script: repo.dev_script,
     });
 
     const saved = savedRepositoriesById.get(repoId);

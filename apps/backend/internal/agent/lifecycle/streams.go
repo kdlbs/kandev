@@ -12,11 +12,13 @@ import (
 
 // StreamCallbacks defines callbacks for stream events
 type StreamCallbacks struct {
-	OnAgentEvent func(execution *AgentExecution, event agentctl.AgentEvent)
-	OnGitStatus  func(execution *AgentExecution, update *agentctl.GitStatusUpdate)
-	OnFileChange func(execution *AgentExecution, notification *agentctl.FileChangeNotification)
-	OnShellOutput func(execution *AgentExecution, data string)
-	OnShellExit   func(execution *AgentExecution, code int)
+	OnAgentEvent    func(execution *AgentExecution, event agentctl.AgentEvent)
+	OnGitStatus     func(execution *AgentExecution, update *agentctl.GitStatusUpdate)
+	OnFileChange    func(execution *AgentExecution, notification *agentctl.FileChangeNotification)
+	OnShellOutput   func(execution *AgentExecution, data string)
+	OnShellExit     func(execution *AgentExecution, code int)
+	OnProcessOutput func(execution *AgentExecution, output *agentctl.ProcessOutput)
+	OnProcessStatus func(execution *AgentExecution, status *agentctl.ProcessStatusUpdate)
 }
 
 // StreamManager manages WebSocket streams to agent executions
@@ -121,6 +123,16 @@ func (sm *StreamManager) connectWorkspaceStream(execution *AgentExecution) {
 			OnFileChange: func(notification *agentctl.FileChangeNotification) {
 				if sm.callbacks.OnFileChange != nil {
 					sm.callbacks.OnFileChange(execution, notification)
+				}
+			},
+			OnProcessOutput: func(output *agentctl.ProcessOutput) {
+				if sm.callbacks.OnProcessOutput != nil {
+					sm.callbacks.OnProcessOutput(execution, output)
+				}
+			},
+			OnProcessStatus: func(status *agentctl.ProcessStatusUpdate) {
+				if sm.callbacks.OnProcessStatus != nil {
+					sm.callbacks.OnProcessStatus(execution, status)
 				}
 			},
 			OnConnected: func() {

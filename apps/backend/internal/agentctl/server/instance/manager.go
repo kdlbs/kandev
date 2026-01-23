@@ -3,10 +3,13 @@ package instance
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/google/uuid"
@@ -64,10 +67,36 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 		return nil, fmt.Errorf("instance with ID %s already exists", id)
 	}
 
-	// Allocate a port
-	port, err := m.portAlloc.Allocate(id)
-	if err != nil {
-		return nil, fmt.Errorf("failed to allocate port: %w", err)
+	// Allocate a port and bind a listener to avoid races with address reuse.
+	var (
+		port     int
+		listener net.Listener
+	)
+	maxAttempts := m.config.Ports.Max - m.config.Ports.Base + 1
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		allocated, err := m.portAlloc.Allocate(id)
+		if err != nil {
+			return nil, fmt.Errorf("failed to allocate port: %w", err)
+		}
+		addr := fmt.Sprintf(":%d", allocated)
+		ln, err := net.Listen("tcp", addr)
+		if err != nil {
+			if errors.Is(err, syscall.EADDRINUSE) || strings.Contains(err.Error(), "address already in use") {
+				m.portAlloc.MarkUnavailable(allocated)
+				m.logger.Warn("port already in use; retrying",
+					zap.String("instance_id", id),
+					zap.Int("port", allocated))
+				continue
+			}
+			m.portAlloc.Release(allocated)
+			return nil, fmt.Errorf("failed to bind instance port %d: %w", allocated, err)
+		}
+		port = allocated
+		listener = ln
+		break
+	}
+	if listener == nil {
+		return nil, fmt.Errorf("failed to allocate an available port for instance %s", id)
 	}
 
 	// Determine agent command, adding workspace flag if needed
@@ -111,6 +140,10 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 	// Create process manager
 	procMgr := process.NewManager(instanceCfg, m.logger)
 
+	// Start workspace tracker immediately so process output can be streamed
+	// even without an agent running (for dev server, etc.)
+	procMgr.GetWorkspaceTracker().Start(context.Background())
+
 	// Create HTTP handler using factory
 	var handler http.Handler
 	if m.serverFactory != nil {
@@ -133,7 +166,7 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 
 	// Start HTTP server in background
 	go func() {
-		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := httpServer.Serve(listener); err != nil && err != http.ErrServerClosed {
 			m.logger.Error("instance server error", zap.String("instance_id", id), zap.Error(err))
 		}
 	}()

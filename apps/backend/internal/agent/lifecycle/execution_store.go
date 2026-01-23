@@ -3,10 +3,14 @@
 package lifecycle
 
 import (
+	"errors"
 	"sync"
 
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+// ErrExecutionNotFound is returned when an execution doesn't exist in the store.
+var ErrExecutionNotFound = errors.New("execution not found")
 
 // ExecutionStore provides thread-safe storage and retrieval of agent executions.
 // It maintains three indexes for efficient lookup by execution ID, session ID, and container ID.
@@ -141,42 +145,64 @@ func (s *ExecutionStore) UpdateError(executionID string, errorMsg string) {
 }
 
 // UpdateMetadata updates the metadata of an agent execution using the provided function.
+// The function is called outside the lock to prevent deadlocks - it receives a copy of
+// the current metadata and returns the new metadata to set.
 func (s *ExecutionStore) UpdateMetadata(executionID string, updateFn func(metadata map[string]interface{}) map[string]interface{}) {
+	// First, get a copy of current metadata
+	s.mu.RLock()
+	execution, exists := s.executions[executionID]
+	if !exists {
+		s.mu.RUnlock()
+		return
+	}
+
+	// Copy metadata to avoid races
+	currentMetadata := make(map[string]interface{})
+	if execution.Metadata != nil {
+		for k, v := range execution.Metadata {
+			currentMetadata[k] = v
+		}
+	}
+	s.mu.RUnlock()
+
+	// Call update function outside the lock
+	newMetadata := updateFn(currentMetadata)
+
+	// Apply the result
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if execution, exists := s.executions[executionID]; exists {
-		if execution.Metadata == nil {
-			execution.Metadata = make(map[string]interface{})
-		}
-		execution.Metadata = updateFn(execution.Metadata)
+	// Re-check existence (could have been removed)
+	if execution, exists = s.executions[executionID]; exists {
+		execution.Metadata = newMetadata
 	}
 }
 
 // WithLock executes a function with the store lock held, providing access to the execution.
-// Returns false if the execution doesn't exist.
-func (s *ExecutionStore) WithLock(executionID string, fn func(execution *AgentExecution)) bool {
+// Returns ErrExecutionNotFound if the execution doesn't exist.
+// The function should be fast to avoid blocking other operations.
+func (s *ExecutionStore) WithLock(executionID string, fn func(execution *AgentExecution)) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	execution, exists := s.executions[executionID]
 	if !exists {
-		return false
+		return ErrExecutionNotFound
 	}
 	fn(execution)
-	return true
+	return nil
 }
 
 // WithRLock executes a function with the store read lock held, providing access to the execution.
-// Returns false if the execution doesn't exist.
-func (s *ExecutionStore) WithRLock(executionID string, fn func(execution *AgentExecution)) bool {
+// Returns ErrExecutionNotFound if the execution doesn't exist.
+func (s *ExecutionStore) WithRLock(executionID string, fn func(execution *AgentExecution)) error {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	execution, exists := s.executions[executionID]
 	if !exists {
-		return false
+		return ErrExecutionNotFound
 	}
 	fn(execution)
-	return true
+	return nil
 }

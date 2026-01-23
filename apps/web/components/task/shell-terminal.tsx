@@ -6,8 +6,8 @@ import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import { useAppStore, useAppStoreApi } from '@/components/state-provider';
 import { getWebSocketClient } from '@/lib/ws/connection';
-import { useSession } from '@/hooks/use-session';
-import { useSessionAgentctl } from '@/hooks/use-session-agentctl';
+import { useSession } from '@/hooks/domains/session/use-session';
+import { useSessionAgentctl } from '@/hooks/domains/session/use-session-agentctl';
 
 export function ShellTerminal() {
   const terminalRef = useRef<HTMLDivElement>(null);

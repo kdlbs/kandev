@@ -275,6 +275,7 @@ type Repository struct {
 	WorktreeBranchPrefix string     `json:"worktree_branch_prefix"`
 	SetupScript          string     `json:"setup_script"`
 	CleanupScript        string     `json:"cleanup_script"`
+	DevScript            string     `json:"dev_script"`
 	CreatedAt            time.Time  `json:"created_at"`
 	UpdatedAt            time.Time  `json:"updated_at"`
 	DeletedAt            *time.Time `json:"deleted_at,omitempty"`

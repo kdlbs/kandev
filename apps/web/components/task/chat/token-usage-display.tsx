@@ -2,7 +2,7 @@
 
 import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
 import { cn } from '@/lib/utils';
-import { useSessionContextWindow } from '@/hooks/use-session-context-window';
+import { useSessionContextWindow } from '@/hooks/domains/session/use-session-context-window';
 
 type TokenUsageDisplayProps = {
   sessionId: string | null;

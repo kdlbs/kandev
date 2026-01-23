@@ -82,6 +82,11 @@ type GitStatusEventPayload struct {
 	Timestamp    string      `json:"timestamp"`
 }
 
+// GetSessionID returns the session ID for this event (used by event routing).
+func (p GitStatusEventPayload) GetSessionID() string {
+	return p.SessionID
+}
+
 // FileChangeEventPayload is the payload for file change notifications.
 type FileChangeEventPayload struct {
 	TaskID    string `json:"task_id"`
@@ -90,6 +95,11 @@ type FileChangeEventPayload struct {
 	Path      string `json:"path"`
 	Operation string `json:"operation"`
 	Timestamp string `json:"timestamp"`
+}
+
+// GetSessionID returns the session ID for this event (used by event routing).
+func (p FileChangeEventPayload) GetSessionID() string {
+	return p.SessionID
 }
 
 // PermissionOption represents a single permission option in a permission request.
@@ -141,6 +151,40 @@ type ShellExitEventPayload struct {
 
 // GetSessionID returns the session ID for this event (used by event routing).
 func (p ShellExitEventPayload) GetSessionID() string {
+	return p.SessionID
+}
+
+// ProcessOutputEventPayload is the payload for process output events.
+type ProcessOutputEventPayload struct {
+	TaskID    string `json:"task_id"`
+	SessionID string `json:"session_id"`
+	ProcessID string `json:"process_id"`
+	Kind      string `json:"kind"`
+	Stream    string `json:"stream"` // stdout|stderr
+	Data      string `json:"data"`
+	Timestamp string `json:"timestamp"`
+}
+
+// GetSessionID returns the session ID for this event (used by event routing).
+func (p ProcessOutputEventPayload) GetSessionID() string {
+	return p.SessionID
+}
+
+// ProcessStatusEventPayload is the payload for process status events.
+type ProcessStatusEventPayload struct {
+	SessionID  string `json:"session_id"`
+	ProcessID  string `json:"process_id"`
+	Kind       string `json:"kind"`
+	ScriptName string `json:"script_name,omitempty"`
+	Status     string `json:"status"`
+	Command    string `json:"command,omitempty"`
+	WorkingDir string `json:"working_dir,omitempty"`
+	ExitCode   *int   `json:"exit_code,omitempty"`
+	Timestamp  string `json:"timestamp"`
+}
+
+// GetSessionID returns the session ID for this event (used by event routing).
+func (p ProcessStatusEventPayload) GetSessionID() string {
 	return p.SessionID
 }
 

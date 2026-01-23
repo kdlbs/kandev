@@ -19,7 +19,8 @@ import {
   DialogTitle,
 } from '@kandev/ui/dialog';
 import { updateWorkspaceAction, deleteWorkspaceAction } from '@/app/actions/workspaces';
-import type { Workspace } from '@/lib/types/http';
+import type { Workspace, Executor, Environment } from '@/lib/types/http';
+import type { AgentProfileOption } from '@/lib/state/slices';
 import { useRequest } from '@/lib/http/use-request';
 import { useToast } from '@/components/toast-provider';
 import { useAppStore } from '@/components/state-provider';
@@ -31,7 +32,7 @@ type WorkspaceEditClientProps = {
 
 export function WorkspaceEditClient({ workspaceId }: WorkspaceEditClientProps) {
   const workspace = useAppStore((state) =>
-    state.workspaces.items.find((item) => item.id === workspaceId) ?? null
+    state.workspaces.items.find((item: Workspace) => item.id === workspaceId) ?? null
   );
 
   if (!workspace) {
@@ -89,7 +90,7 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
   const deleteWorkspaceRequest = useRequest(deleteWorkspaceAction);
   const workspaces = useAppStore((state) => state.workspaces.items);
   const setWorkspaces = useAppStore((state) => state.setWorkspaces);
-  const activeExecutors = executors.filter((executor) => executor.status === 'active');
+  const activeExecutors = executors.filter((executor: Executor) => executor.status === 'active');
   const isDefaultExecutorDirty = defaultExecutorId !== savedDefaultExecutorId;
   const isDefaultEnvironmentDirty = defaultEnvironmentId !== savedDefaultEnvironmentId;
   const isDefaultAgentProfileDirty = defaultAgentProfileId !== savedDefaultAgentProfileId;
@@ -102,7 +103,7 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
       setCurrentWorkspace((prev) => ({ ...prev, ...updated }));
       setSavedWorkspaceName(updated.name);
       setWorkspaces(
-        workspaces.map((workspaceItem) =>
+        workspaces.map((workspaceItem: Workspace) =>
           workspaceItem.id === updated.id
             ? {
                 ...workspaceItem,
@@ -127,7 +128,7 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
     if (deleteConfirmText !== 'delete') return;
     try {
       await deleteWorkspaceRequest.run(currentWorkspace.id);
-      setWorkspaces(workspaces.filter((workspaceItem) => workspaceItem.id !== currentWorkspace.id));
+      setWorkspaces(workspaces.filter((workspaceItem: Workspace) => workspaceItem.id !== currentWorkspace.id));
       router.push('/settings/workspace');
     } catch (error) {
       toast({
@@ -147,7 +148,7 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
       setCurrentWorkspace((prev) => ({ ...prev, ...updated }));
       setSavedDefaultExecutorId(updated.default_executor_id ?? '');
       setWorkspaces(
-        workspaces.map((workspaceItem) =>
+        workspaces.map((workspaceItem: Workspace) =>
           workspaceItem.id === updated.id
             ? {
                 ...workspaceItem,
@@ -176,7 +177,7 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
       setCurrentWorkspace((prev) => ({ ...prev, ...updated }));
       setSavedDefaultEnvironmentId(updated.default_environment_id ?? '');
       setWorkspaces(
-        workspaces.map((workspaceItem) =>
+        workspaces.map((workspaceItem: Workspace) =>
           workspaceItem.id === updated.id
             ? {
                 ...workspaceItem,
@@ -205,7 +206,7 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
       setCurrentWorkspace((prev) => ({ ...prev, ...updated }));
       setSavedDefaultAgentProfileId(updated.default_agent_profile_id ?? '');
       setWorkspaces(
-        workspaces.map((workspaceItem) =>
+        workspaces.map((workspaceItem: Workspace) =>
           workspaceItem.id === updated.id
             ? {
                 ...workspaceItem,
@@ -277,7 +278,7 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">No default</SelectItem>
-                {activeExecutors.map((executor) => (
+                {activeExecutors.map((executor: Executor) => (
                   <SelectItem key={executor.id} value={executor.id}>
                     {executor.name}
                   </SelectItem>
@@ -317,7 +318,7 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">No default</SelectItem>
-                {environments.map((environment) => (
+                {environments.map((environment: Environment) => (
                   <SelectItem key={environment.id} value={environment.id}>
                     {environment.name}
                   </SelectItem>
@@ -357,7 +358,7 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">No default</SelectItem>
-                {agentProfiles.map((profile) => (
+                {agentProfiles.map((profile: AgentProfileOption) => (
                   <SelectItem key={profile.id} value={profile.id}>
                     {profile.label}
                   </SelectItem>

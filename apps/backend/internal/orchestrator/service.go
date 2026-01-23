@@ -1,4 +1,13 @@
-// Package orchestrator provides the main orchestrator service that ties all components together.
+// Package orchestrator provides the main orchestrator service that coordinates
+// task execution across agents. It manages:
+//
+//   - Task queuing and scheduling via the Scheduler
+//   - Agent lifecycle through the AgentManager
+//   - Event handling and propagation
+//   - Session management and resume
+//
+// The orchestrator acts as the central coordinator between the task service,
+// agent lifecycle manager, and the event bus.
 package orchestrator
 
 import (
@@ -76,7 +85,7 @@ type Service struct {
 	queue     *queue.TaskQueue
 	executor  *executor.Executor
 	scheduler *scheduler.Scheduler
-	watcher *watcher.Watcher
+	watcher   *watcher.Watcher
 
 	// Message creator for saving agent responses
 	messageCreator MessageCreator
@@ -131,15 +140,15 @@ func NewService(
 
 	// Create the service (watcher will be created after we have handlers)
 	s := &Service{
-		config:               cfg,
-		logger:               svcLogger,
-		eventBus:             eventBus,
-		taskRepo:       taskRepo,
-		repo:           repo,
-		agentManager:   agentManager,
-		queue:          taskQueue,
-		executor:  exec,
-		scheduler: sched,
+		config:       cfg,
+		logger:       svcLogger,
+		eventBus:     eventBus,
+		taskRepo:     taskRepo,
+		repo:         repo,
+		agentManager: agentManager,
+		queue:        taskQueue,
+		executor:     exec,
+		scheduler:    sched,
 	}
 
 	// Create the watcher with event handlers that wire everything together
@@ -157,12 +166,41 @@ func NewService(
 	return s
 }
 
-// SetMessageCreator sets the message creator for saving agent responses
+// SetMessageCreator sets the message creator for saving agent responses to the database.
+//
+// This must be called before starting the orchestrator if you want agent messages, tool calls,
+// and streaming content to be persisted to the database. The MessageCreator interface provides
+// methods for creating and updating messages associated with task sessions.
+//
+// The MessageCreator is typically the task service, which owns the message persistence logic.
+// Event handlers in the orchestrator call these methods when agent events occur:
+//   - AgentStreamEvent → CreateAgentMessage, AppendAgentMessage
+//   - Tool calls → CreateToolCallMessage, UpdateToolCallMessage
+//   - Permission requests → CreatePermissionRequestMessage
+//
+// When to call: During orchestrator initialization, after creating the task service.
+//
+// If not set: Agent messages won't be saved to the database (events will still be published).
 func (s *Service) SetMessageCreator(mc MessageCreator) {
 	s.messageCreator = mc
 }
 
-// SetTurnService sets the turn service for the orchestrator.
+// SetTurnService sets the turn service for tracking conversation turns.
+//
+// A "turn" represents a single conversation round-trip: user prompt → agent response.
+// The TurnService tracks turn timing and duration for analytics and UI display (e.g., showing
+// how long each agent response took).
+//
+// The TurnService is typically the task service, which owns turn persistence logic.
+// The orchestrator calls these methods:
+//   - StartTurn: When agent begins processing a prompt
+//   - CompleteTurn: When agent finishes and returns to ready state
+//   - GetActiveTurn: To associate messages with current turn
+//
+// When to call: During orchestrator initialization, after creating the task service.
+//
+// If not set: Turns won't be tracked (orchestrator continues functioning normally, but
+// no timing data is recorded and turn IDs in messages will be empty).
 func (s *Service) SetTurnService(turnService TurnService) {
 	s.turnService = turnService
 }
@@ -300,6 +338,52 @@ func (s *Service) Stop() error {
 	return nil
 }
 
+// resumeExecutorsOnStartup recovers agent sessions that were active before server restart.
+//
+// This critical startup routine handles crash recovery and session persistence. When the server
+// starts, it queries the database for sessions that were "running" when the server stopped,
+// and attempts to restore them by relaunching agentctl and reconnecting to the workspace.
+//
+// Recovery Strategy:
+//
+//  1. Query database for sessions marked as "running" (persisted executor state)
+//  2. For each session, determine recovery action based on previous state:
+//
+//     Terminal States (Completed/Failed/Cancelled):
+//       - Clean up stale executor record from database
+//       - Skip resume (session is already done)
+//
+//     Never-Started State (Created):
+//       - Clean up executor record (session never actually ran)
+//       - Skip resume (nothing to recover)
+//
+//     Active States (Starting/Running/WaitingForInput):
+//       - Validate workspace/worktree still exists
+//       - Launch new agentctl instance
+//       - Restore session via ACP session/load (if resumable)
+//       - Transition to WaitingForInput (ready for next prompt)
+//
+//  3. Handle resume failures gracefully:
+//       - Mark session as Failed in database
+//       - Clean up executor record
+//       - Continue with next session (don't block other recoveries)
+//
+// Agent Resume Behavior:
+//
+//   - startAgent = (ResumeToken != "" && Resumable) determines if agent process starts
+//   - If startAgent=true: Launches agent, loads conversation history via ACP
+//   - If startAgent=false: Only workspace access (shell) is restored, no agent
+//
+// State Transitions:
+//
+//   - Session resume does NOT process any prompt (just loads history)
+//   - No "complete" event is emitted after resume (only after prompt completion)
+//   - Final state is always WaitingForInput (ready for user's next prompt)
+//
+// This runs synchronously during Start() before accepting new requests, ensuring all
+// recoverable sessions are restored before the orchestrator begins processing new tasks.
+//
+// Called by: Start() method during orchestrator initialization.
 func (s *Service) resumeExecutorsOnStartup(ctx context.Context) {
 	runningExecutors, err := s.repo.ListExecutorsRunning(ctx)
 	if err != nil {
@@ -355,26 +439,13 @@ func (s *Service) resumeExecutorsOnStartup(ctx context.Context) {
 			continue
 		}
 
-		// For sessions that were STARTING, RUNNING, or WAITING_FOR_INPUT:
-		// We need a resume token to recover them
-		if running.ResumeToken == "" {
-			s.logger.Warn("no resume token available; marking session as failed",
+		startAgent := running.ResumeToken != "" && running.Resumable
+		if !startAgent {
+			s.logger.Warn("resuming workspace without agent session",
 				zap.String("session_id", sessionID),
-				zap.String("previous_state", string(previousState)))
-			_ = s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateFailed,
-				"backend restarted and session cannot be resumed (no resume token)")
-			_ = s.repo.DeleteExecutorRunningBySessionID(ctx, sessionID)
-			continue
-		}
-
-		// Check if executor supports resume
-		if !running.Resumable {
-			s.logger.Warn("executor not resumable; marking session as failed",
-				zap.String("session_id", sessionID))
-			_ = s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateFailed,
-				"executor does not support session resume")
-			_ = s.repo.DeleteExecutorRunningBySessionID(ctx, sessionID)
-			continue
+				zap.String("previous_state", string(previousState)),
+				zap.Bool("has_resume_token", running.ResumeToken != ""),
+				zap.Bool("resumable", running.Resumable))
 		}
 
 		// Validate worktree exists before resuming
@@ -391,7 +462,8 @@ func (s *Service) resumeExecutorsOnStartup(ctx context.Context) {
 			zap.String("session_id", sessionID),
 			zap.String("task_id", running.TaskID),
 			zap.String("previous_state", string(previousState)),
-			zap.String("resume_token", running.ResumeToken))
+			zap.String("resume_token", running.ResumeToken),
+			zap.Bool("start_agent", startAgent))
 
 		// Resume the session - this will:
 		// 1. Create a new agentctl instance
@@ -404,7 +476,7 @@ func (s *Service) resumeExecutorsOnStartup(ctx context.Context) {
 		// - Session resume just loads conversation history, doesn't process a prompt
 		// - Agents don't send a "complete" event after session load (only after prompt completion)
 		// - The agent is ready for the next user prompt immediately after session loads
-		if _, err := s.executor.ResumeSession(ctx, session, true); err != nil {
+		if _, err := s.executor.ResumeSession(ctx, session, startAgent); err != nil {
 			s.logger.Warn("failed to resume executor on startup",
 				zap.String("session_id", sessionID),
 				zap.Error(err))
@@ -413,16 +485,19 @@ func (s *Service) resumeExecutorsOnStartup(ctx context.Context) {
 			continue
 		}
 
-		// Set state to WAITING_FOR_INPUT - agent is ready for the next prompt
-		if err := s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateWaitingForInput, ""); err != nil {
-			s.logger.Warn("failed to set session state to WAITING_FOR_INPUT after resume",
-				zap.String("session_id", sessionID),
-				zap.Error(err))
+		if startAgent {
+			// Set state to WAITING_FOR_INPUT - agent is ready for the next prompt
+			if err := s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateWaitingForInput, ""); err != nil {
+				s.logger.Warn("failed to set session state to WAITING_FOR_INPUT after resume",
+					zap.String("session_id", sessionID),
+					zap.Error(err))
+			}
 		}
 
 		s.logger.Info("session resumed successfully",
 			zap.String("session_id", sessionID),
 			zap.String("task_id", running.TaskID),
+			zap.Bool("start_agent", startAgent),
 			zap.String("state", string(models.TaskSessionStateWaitingForInput)))
 	}
 }
@@ -458,5 +533,3 @@ func (s *Service) GetStatus() *Status {
 		LastHeartbeat:  time.Now(),
 	}
 }
-
-

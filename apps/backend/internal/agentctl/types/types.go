@@ -42,6 +42,12 @@ type (
 	ShellMessage        = streams.ShellMessage
 	ShellStatusResponse = streams.ShellStatusResponse
 	ShellBufferResponse = streams.ShellBufferResponse
+
+	// Process stream types
+	ProcessKind         = streams.ProcessKind
+	ProcessStatus       = streams.ProcessStatus
+	ProcessOutput       = streams.ProcessOutput
+	ProcessStatusUpdate = streams.ProcessStatusUpdate
 )
 
 // Re-export stream constants for convenience.
@@ -77,6 +83,13 @@ const (
 	ShellMsgTypePing   = streams.ShellMsgTypePing
 	ShellMsgTypePong   = streams.ShellMsgTypePong
 	ShellMsgTypeExit   = streams.ShellMsgTypeExit
+
+	// Process statuses
+	ProcessStatusStarting = streams.ProcessStatusStarting
+	ProcessStatusRunning  = streams.ProcessStatusRunning
+	ProcessStatusExited   = streams.ProcessStatusExited
+	ProcessStatusFailed   = streams.ProcessStatusFailed
+	ProcessStatusStopped  = streams.ProcessStatusStopped
 )
 
 // PermissionRequest represents a permission request from the agent.
@@ -127,17 +140,19 @@ type McpServer struct {
 
 const (
 	// Workspace stream message types
-	WorkspaceMessageTypeShellOutput WorkspaceMessageType = "shell_output"
-	WorkspaceMessageTypeShellInput  WorkspaceMessageType = "shell_input"
-	WorkspaceMessageTypeShellExit   WorkspaceMessageType = "shell_exit"
-	WorkspaceMessageTypePing        WorkspaceMessageType = "ping"
-	WorkspaceMessageTypePong        WorkspaceMessageType = "pong"
-	WorkspaceMessageTypeGitStatus   WorkspaceMessageType = "git_status"
-	WorkspaceMessageTypeFileChange  WorkspaceMessageType = "file_change"
-	WorkspaceMessageTypeFileList    WorkspaceMessageType = "file_list"
-	WorkspaceMessageTypeError       WorkspaceMessageType = "error"
-	WorkspaceMessageTypeConnected   WorkspaceMessageType = "connected"
-	WorkspaceMessageTypeShellResize WorkspaceMessageType = "shell_resize"
+	WorkspaceMessageTypeShellOutput   WorkspaceMessageType = "shell_output"
+	WorkspaceMessageTypeShellInput    WorkspaceMessageType = "shell_input"
+	WorkspaceMessageTypeShellExit     WorkspaceMessageType = "shell_exit"
+	WorkspaceMessageTypePing          WorkspaceMessageType = "ping"
+	WorkspaceMessageTypePong          WorkspaceMessageType = "pong"
+	WorkspaceMessageTypeGitStatus     WorkspaceMessageType = "git_status"
+	WorkspaceMessageTypeFileChange    WorkspaceMessageType = "file_change"
+	WorkspaceMessageTypeFileList      WorkspaceMessageType = "file_list"
+	WorkspaceMessageTypeError         WorkspaceMessageType = "error"
+	WorkspaceMessageTypeConnected     WorkspaceMessageType = "connected"
+	WorkspaceMessageTypeShellResize   WorkspaceMessageType = "shell_resize"
+	WorkspaceMessageTypeProcessOutput WorkspaceMessageType = "process_output"
+	WorkspaceMessageTypeProcessStatus WorkspaceMessageType = "process_status"
 )
 
 // WorkspaceStreamMessage is the unified message format for the workspace stream.
@@ -163,6 +178,10 @@ type WorkspaceStreamMessage struct {
 
 	// File list fields (for file_list)
 	FileList *FileListUpdate `json:"file_list,omitempty"`
+
+	// Process fields (for process_output, process_status)
+	ProcessOutput *ProcessOutput       `json:"process_output,omitempty"`
+	ProcessStatus *ProcessStatusUpdate `json:"process_status,omitempty"`
 
 	// Error fields (for error)
 	Error string `json:"error,omitempty"`
@@ -210,6 +229,24 @@ func NewWorkspaceFileList(update *FileListUpdate) WorkspaceStreamMessage {
 		Type:      WorkspaceMessageTypeFileList,
 		Timestamp: timeNowUnixMilli(),
 		FileList:  update,
+	}
+}
+
+// NewWorkspaceProcessOutput creates a process output message
+func NewWorkspaceProcessOutput(output *ProcessOutput) WorkspaceStreamMessage {
+	return WorkspaceStreamMessage{
+		Type:          WorkspaceMessageTypeProcessOutput,
+		Timestamp:     timeNowUnixMilli(),
+		ProcessOutput: output,
+	}
+}
+
+// NewWorkspaceProcessStatus creates a process status message
+func NewWorkspaceProcessStatus(status *ProcessStatusUpdate) WorkspaceStreamMessage {
+	return WorkspaceStreamMessage{
+		Type:          WorkspaceMessageTypeProcessStatus,
+		Timestamp:     timeNowUnixMilli(),
+		ProcessStatus: status,
 	}
 }
 

@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { getWebSocketClient } from '@/lib/ws/connection';
-import { fetchUserSettings, updateUserSettings } from '@/lib/http';
+import { fetchUserSettings, updateUserSettings } from '@/lib/api';
 import { mapSelectedRepositoryIds } from '@/lib/kanban/filters';
 import { useAppStore } from '@/components/state-provider';
-import { useRepositories } from '@/hooks/use-repositories';
+import { useRepositories } from '@/hooks/domains/workspace/use-repositories';
+import type { Repository } from '@/lib/types/http';
 
 type DisplaySettings = {
   workspaceId: string | null;
@@ -40,6 +41,8 @@ export function useUserDisplaySettings({
   const userSettings = useAppStore((state) => state.userSettings);
   const setUserSettings = useAppStore((state) => state.setUserSettings);
   const { repositories, isLoading: repositoriesLoading } = useRepositories(workspaceId, true);
+  const lastAppliedWorkspaceIdRef = useRef<string | null>(null);
+  const lastAppliedBoardIdRef = useRef<string | null>(null);
 
   const commitSettings = useCallback(
     (next: CommitPayload) => {
@@ -113,7 +116,15 @@ export function useUserDisplaySettings({
   useEffect(() => {
     if (!userSettings.loaded) return;
     if (userSettings.workspaceId && userSettings.workspaceId !== workspaceId) {
+      if (lastAppliedWorkspaceIdRef.current === userSettings.workspaceId) {
+        return;
+      }
+      lastAppliedWorkspaceIdRef.current = userSettings.workspaceId;
       onWorkspaceChange?.(userSettings.workspaceId);
+      return;
+    }
+    if (userSettings.workspaceId === workspaceId) {
+      lastAppliedWorkspaceIdRef.current = null;
     }
   }, [onWorkspaceChange, userSettings.loaded, userSettings.workspaceId, workspaceId]);
 
@@ -133,19 +144,27 @@ export function useUserDisplaySettings({
   useEffect(() => {
     if (!userSettings.loaded) return;
     if (userSettings.boardId && userSettings.boardId !== boardId) {
+      if (lastAppliedBoardIdRef.current === userSettings.boardId) {
+        return;
+      }
+      lastAppliedBoardIdRef.current = userSettings.boardId;
       onBoardChange?.(userSettings.boardId);
+      return;
+    }
+    if (userSettings.boardId === boardId) {
+      lastAppliedBoardIdRef.current = null;
     }
   }, [boardId, onBoardChange, userSettings.boardId, userSettings.loaded]);
 
   useEffect(() => {
     if (!userSettings.loaded) return;
     if (repositories.length === 0) return;
-    const repoIds = repositories.map((repo) => repo.id);
-    const validIds = userSettings.repositoryIds.filter((id) => repoIds.includes(id));
+    const repoIds = repositories.map((repo: Repository) => repo.id);
+    const validIds = userSettings.repositoryIds.filter((id: string) => repoIds.includes(id));
     const nextIds = validIds;
     const isSame =
       nextIds.length === userSettings.repositoryIds.length &&
-      nextIds.every((id, index) => id === userSettings.repositoryIds[index]);
+      nextIds.every((id: string, index: number) => id === userSettings.repositoryIds[index]);
     if (!isSame) {
       queueMicrotask(() => {
         commitSettings({

@@ -40,11 +40,13 @@ import { Popover, PopoverContent, PopoverTrigger } from '@kandev/ui/popover';
 import { Checkbox } from '@kandev/ui/checkbox';
 import { Label } from '@kandev/ui/label';
 import { CommitStatBadge, LineStat } from '@/components/diff-stat';
-import { useSessionGitStatus } from '@/hooks/use-session-git-status';
+import { useSessionGitStatus } from '@/hooks/domains/session/use-session-git-status';
 import { useGitOperations } from '@/hooks/use-git-operations';
+import type { FileInfo } from '@/lib/state/slices';
 import { formatUserHomePath } from '@/lib/utils';
 import { EditorsMenu } from '@/components/task/editors-menu';
 import { useToast } from '@/components/toast-provider';
+import { PreviewControls } from '@/components/task/preview/preview-controls';
 
 type TaskTopBarProps = {
   taskId?: string | null;
@@ -60,6 +62,7 @@ type TaskTopBarProps = {
   worktreeBranch?: string | null;
   repositoryPath?: string | null;
   repositoryName?: string | null;
+  hasDevScript?: boolean;
 };
 
 const TaskTopBar = memo(function TaskTopBar({
@@ -70,6 +73,7 @@ const TaskTopBar = memo(function TaskTopBar({
   worktreeBranch,
   repositoryPath,
   repositoryName,
+  hasDevScript = false,
 }: TaskTopBarProps) {
   const [copiedBranch, setCopiedBranch] = useState(false);
   const [popoverOpen, setPopoverOpen] = useState(false);
@@ -93,7 +97,7 @@ const TaskTopBar = memo(function TaskTopBar({
   let totalAdditions = 0;
   let totalDeletions = 0;
   if (gitStatus?.files && Object.keys(gitStatus.files).length > 0) {
-    for (const file of Object.values(gitStatus.files)) {
+    for (const file of Object.values(gitStatus.files) as FileInfo[]) {
       totalAdditions += file.additions || 0;
       totalDeletions += file.deletions || 0;
     }
@@ -210,6 +214,8 @@ const TaskTopBar = memo(function TaskTopBar({
       setTimeout(() => setCopiedBranch(false), 500);
     }
   };
+
+  // Preview controls are handled by a dedicated component.
 
   const handleCopyRepo = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -366,6 +372,7 @@ const TaskTopBar = memo(function TaskTopBar({
 
       </div>
       <div className="flex items-center gap-2">
+        <PreviewControls activeSessionId={activeSessionId ?? null} hasDevScript={hasDevScript} />
         <EditorsMenu activeSessionId={activeSessionId ?? null} />
 
         {/* Commit Split Button */}

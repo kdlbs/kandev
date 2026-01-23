@@ -1,32 +1,56 @@
 'use client';
 
-import { memo, useState } from 'react';
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@kandev/ui/resizable';
-import { getLocalStorage, setLocalStorage } from '@/lib/local-storage';
+import { memo, useMemo, useState } from 'react';
+import { Group, Panel, Separator, type Layout } from 'react-resizable-panels';
+import { useDefaultLayout } from '@/lib/layout/use-default-layout';
 import { TaskCenterPanel } from './task-center-panel';
 import { TaskRightPanel } from './task-right-panel';
 import { TaskFilesPanel } from './task-files-panel';
 import { TaskSessionSidebar } from './task-session-sidebar';
+import { PreviewPanel } from '@/components/task/preview/preview-panel';
+import { PreviewController } from '@/components/task/preview/preview-controller';
+import { useLayoutStore } from '@/lib/state/layout-store';
 import type { OpenFileTab } from '@/lib/types/backend';
+import type { Repository } from '@/lib/types/http';
+import { useAppStore } from '@/components/state-provider';
 
-const DEFAULT_HORIZONTAL_LAYOUT: [number, number, number] = [18, 57, 25];
+const DEFAULT_HORIZONTAL_LAYOUT: Record<string, number> = {
+  left: 18,
+  chat: 57,
+  preview: 57,
+  right: 25,
+};
+const DEFAULT_PREVIEW_LAYOUT: Record<string, number> = {
+  chat: 60,
+  preview: 40,
+};
+const DEFAULT_LAYOUT_STATE = { left: true, chat: true, right: true, preview: false };
 
 type TaskLayoutProps = {
   workspaceId: string | null;
   boardId: string | null;
   sessionId?: string | null;
+  repository?: Repository | null;
+  defaultLayouts?: Record<string, Layout>;
 };
 
 export const TaskLayout = memo(function TaskLayout({
   workspaceId,
   boardId,
   sessionId = null,
+  repository = null,
+  defaultLayouts = {},
 }: TaskLayoutProps) {
-  const [horizontalLayout, setHorizontalLayout] = useState<[number, number, number]>(
-    getLocalStorage('task-layout-horizontal-v2', DEFAULT_HORIZONTAL_LAYOUT)
-  );
   const [selectedDiffPath, setSelectedDiffPath] = useState<string | null>(null);
   const [openFileRequest, setOpenFileRequest] = useState<OpenFileTab | null>(null);
+  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const layoutBySession = useLayoutStore((state) => state.columnsBySessionId);
+  const sessionKey = activeSessionId ?? sessionId ?? '';
+  const layoutState = useMemo(
+    () => layoutBySession[sessionKey] ?? DEFAULT_LAYOUT_STATE,
+    [layoutBySession, sessionKey]
+  );
+  const hasDevScript = Boolean(repository?.dev_script?.trim());
 
   const handleSelectDiffPath = (path: string) => {
     setSelectedDiffPath(path);
@@ -43,37 +67,100 @@ export const TaskLayout = memo(function TaskLayout({
     />
   );
 
+  const sessionForPreview = activeSessionId ?? sessionId ?? null;
+
+  const horizontalPanelIds = useMemo(() => {
+    const ids: string[] = [];
+    if (layoutState.left) ids.push('left');
+    ids.push(layoutState.preview ? 'preview' : 'chat');
+    if (layoutState.right) ids.push('right');
+    return ids;
+  }, [layoutState.left, layoutState.preview, layoutState.right]);
+
+  const horizontalLayoutKey = `task-layout-horizontal-v3:${horizontalPanelIds.join('|')}`;
+  const { defaultLayout: defaultHorizontalLayout, onLayoutChanged: onHorizontalLayoutChange } =
+    useDefaultLayout({
+      id: horizontalLayoutKey,
+      panelIds: horizontalPanelIds,
+      baseLayout: DEFAULT_HORIZONTAL_LAYOUT,
+      serverDefaultLayout: defaultLayouts[horizontalLayoutKey],
+    });
+
+  const previewPanelIds = ['chat', 'preview'];
+  const previewLayoutKey = `task-layout-preview-v2:${sessionKey}`;
+  const { defaultLayout: defaultPreviewLayout, onLayoutChanged: onPreviewLayoutChange } =
+    useDefaultLayout({
+      id: previewLayoutKey,
+      panelIds: previewPanelIds,
+      baseLayout: DEFAULT_PREVIEW_LAYOUT,
+      serverDefaultLayout: defaultLayouts[previewLayoutKey],
+    });
+
   return (
     <div className="flex-1 min-h-0 px-4 pb-4">
-      <ResizablePanelGroup
-        direction="horizontal"
+      <PreviewController sessionId={sessionForPreview} hasDevScript={hasDevScript} />
+      <Group
+        orientation="horizontal"
         className="h-full min-h-0 min-w-0"
-        onLayout={(sizes) => {
-          setHorizontalLayout(sizes as [number, number, number]);
-          setLocalStorage('task-layout-horizontal-v2', sizes);
-        }}
+        id={horizontalLayoutKey}
+        key={horizontalLayoutKey}
+        defaultLayout={defaultHorizontalLayout}
+        onLayoutChanged={onHorizontalLayoutChange}
       >
-        <ResizablePanel defaultSize={horizontalLayout[0]} minSize={12} className="min-h-0 min-w-0">
-          <TaskSessionSidebar
-            workspaceId={workspaceId}
-            boardId={boardId}
-          />
-        </ResizablePanel>
-        <ResizableHandle className="w-px" />
-        <ResizablePanel defaultSize={horizontalLayout[1]} minSize={45} className="min-h-0 min-w-0">
-          <TaskCenterPanel
-            selectedDiffPath={selectedDiffPath}
-            openFileRequest={openFileRequest}
-            onDiffPathHandled={() => setSelectedDiffPath(null)}
-            onFileOpenHandled={() => setOpenFileRequest(null)}
-            sessionId={sessionId}
-          />
-        </ResizablePanel>
-        <ResizableHandle className="w-px" />
-        <ResizablePanel defaultSize={horizontalLayout[2]} minSize={20} className="min-h-0 min-w-0">
-          <TaskRightPanel topPanel={topFilesPanel} />
-        </ResizablePanel>
-      </ResizablePanelGroup>
+        {layoutState.left ? (
+          <>
+            <Panel id="left" minSize={12} className="min-h-0 min-w-0">
+              <TaskSessionSidebar workspaceId={workspaceId} boardId={boardId} />
+            </Panel>
+            <Separator className="w-px" />
+          </>
+        ) : null}
+
+        {layoutState.preview ? (
+          <Panel id="preview" minSize={40} className="min-h-0 min-w-0">
+            <Group
+              orientation="horizontal"
+              className="h-full min-h-0 min-w-0"
+              id={previewLayoutKey}
+              key={previewLayoutKey}
+              defaultLayout={defaultPreviewLayout}
+              onLayoutChanged={onPreviewLayoutChange}
+            >
+              <Panel id="chat" minSize={20} className="min-h-0 min-w-0">
+                <TaskCenterPanel
+                  selectedDiffPath={selectedDiffPath}
+                  openFileRequest={openFileRequest}
+                  onDiffPathHandled={() => setSelectedDiffPath(null)}
+                  onFileOpenHandled={() => setOpenFileRequest(null)}
+                />
+              </Panel>
+              <Separator className="w-px" />
+              <Panel id="preview" minSize={20} className="min-h-0 min-w-0">
+                <PreviewPanel sessionId={sessionForPreview} hasDevScript={hasDevScript} />
+              </Panel>
+            </Group>
+          </Panel>
+        ) : (
+          <Panel id="chat" minSize={45} className="min-h-0 min-w-0">
+            <TaskCenterPanel
+              selectedDiffPath={selectedDiffPath}
+              openFileRequest={openFileRequest}
+              onDiffPathHandled={() => setSelectedDiffPath(null)}
+              onFileOpenHandled={() => setOpenFileRequest(null)}
+              sessionId={sessionId}
+            />
+          </Panel>
+        )}
+
+        {layoutState.right ? (
+          <>
+            <Separator className="w-px" />
+            <Panel id="right" minSize={20} className="min-h-0 min-w-0">
+              <TaskRightPanel topPanel={topFilesPanel} sessionId={sessionForPreview} />
+            </Panel>
+          </>
+        ) : null}
+      </Group>
     </div>
   );
 });

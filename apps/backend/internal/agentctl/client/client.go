@@ -264,7 +264,51 @@ type (
 	ShellMessage           = types.ShellMessage
 	ShellStatusResponse    = types.ShellStatusResponse
 	ShellBufferResponse    = types.ShellBufferResponse
+	ProcessKind            = types.ProcessKind
+	ProcessStatus          = types.ProcessStatus
+	ProcessOutput          = types.ProcessOutput
+	ProcessStatusUpdate    = types.ProcessStatusUpdate
 )
+
+type StartProcessRequest struct {
+	SessionID      string            `json:"session_id"`
+	Kind           ProcessKind       `json:"kind"`
+	ScriptName     string            `json:"script_name,omitempty"`
+	Command        string            `json:"command"`
+	WorkingDir     string            `json:"working_dir"`
+	Env            map[string]string `json:"env,omitempty"`
+	BufferMaxBytes int64             `json:"buffer_max_bytes,omitempty"`
+}
+
+type ProcessOutputChunk struct {
+	Stream    string    `json:"stream"`
+	Data      string    `json:"data"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
+type ProcessInfo struct {
+	ID         string               `json:"id"`
+	SessionID  string               `json:"session_id"`
+	Kind       ProcessKind          `json:"kind"`
+	ScriptName string               `json:"script_name,omitempty"`
+	Command    string               `json:"command"`
+	WorkingDir string               `json:"working_dir"`
+	Status     ProcessStatus        `json:"status"`
+	ExitCode   *int                 `json:"exit_code,omitempty"`
+	StartedAt  time.Time            `json:"started_at"`
+	UpdatedAt  time.Time            `json:"updated_at"`
+	Output     []ProcessOutputChunk `json:"output,omitempty"`
+}
+
+type startProcessResponse struct {
+	Process *ProcessInfo `json:"process,omitempty"`
+	Error   string       `json:"error,omitempty"`
+}
+
+type stopProcessResponse struct {
+	Success bool   `json:"success"`
+	Error   string `json:"error,omitempty"`
+}
 
 // RequestFileTree requests a file tree via HTTP GET
 func (c *Client) RequestFileTree(ctx context.Context, path string, depth int) (*FileTreeResponse, error) {
@@ -387,15 +431,144 @@ func (c *Client) ShellBuffer(ctx context.Context) (string, error) {
 	return result.Data, nil
 }
 
+func (c *Client) StartProcess(ctx context.Context, req StartProcessRequest) (*ProcessInfo, error) {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/v1/processes/start", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	respBody, err := readResponseBody(resp)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("start process failed with status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var result startProcessResponse
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse start process response: %w", err)
+	}
+	if result.Process == nil {
+		if result.Error != "" {
+			return nil, fmt.Errorf("start process failed: %s", result.Error)
+		}
+		return nil, fmt.Errorf("start process failed: no process returned")
+	}
+	return result.Process, nil
+}
+
+func (c *Client) StopProcess(ctx context.Context, processID string) error {
+	body, err := json.Marshal(map[string]string{"process_id": processID})
+	if err != nil {
+		return err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/v1/processes/stop", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	respBody, err := readResponseBody(resp)
+	if err != nil {
+		return fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("stop process failed with status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var result stopProcessResponse
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return fmt.Errorf("failed to parse stop process response: %w", err)
+	}
+	if !result.Success {
+		return fmt.Errorf("stop process failed: %s", result.Error)
+	}
+	return nil
+}
+
+func (c *Client) ListProcesses(ctx context.Context, sessionID string) ([]ProcessInfo, error) {
+	url := c.baseURL + "/api/v1/processes"
+	if sessionID != "" {
+		url = url + "?session_id=" + sessionID
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("list processes failed with status %d", resp.StatusCode)
+	}
+	var result []ProcessInfo
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (c *Client) GetProcess(ctx context.Context, id string, includeOutput bool) (*ProcessInfo, error) {
+	url := c.baseURL + "/api/v1/processes/" + id
+	if includeOutput {
+		url = url + "?include_output=true"
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("get process failed with status %d", resp.StatusCode)
+	}
+	var result ProcessInfo
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 // WorkspaceStreamCallbacks defines callbacks for workspace stream events
 type WorkspaceStreamCallbacks struct {
-	OnShellOutput func(data string)
-	OnShellExit   func(code int)
-	OnGitStatus   func(update *GitStatusUpdate)
-	OnFileChange  func(notification *FileChangeNotification)
-	OnFileList    func(update *FileListUpdate)
-	OnConnected   func()
-	OnError       func(err string)
+	OnShellOutput   func(data string)
+	OnShellExit     func(code int)
+	OnGitStatus     func(update *GitStatusUpdate)
+	OnFileChange    func(notification *FileChangeNotification)
+	OnFileList      func(update *FileListUpdate)
+	OnProcessOutput func(output *types.ProcessOutput)
+	OnProcessStatus func(status *types.ProcessStatusUpdate)
+	OnConnected     func()
+	OnError         func(err string)
 }
 
 // WorkspaceStream represents an active workspace stream connection
@@ -473,6 +646,14 @@ func (c *Client) StreamWorkspace(ctx context.Context, callbacks WorkspaceStreamC
 			case types.WorkspaceMessageTypeFileList:
 				if callbacks.OnFileList != nil && msg.FileList != nil {
 					callbacks.OnFileList(msg.FileList)
+				}
+			case types.WorkspaceMessageTypeProcessOutput:
+				if callbacks.OnProcessOutput != nil && msg.ProcessOutput != nil {
+					callbacks.OnProcessOutput(msg.ProcessOutput)
+				}
+			case types.WorkspaceMessageTypeProcessStatus:
+				if callbacks.OnProcessStatus != nil && msg.ProcessStatus != nil {
+					callbacks.OnProcessStatus(msg.ProcessStatus)
 				}
 			case types.WorkspaceMessageTypeConnected:
 				if callbacks.OnConnected != nil {

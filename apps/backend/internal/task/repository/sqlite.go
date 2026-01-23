@@ -171,6 +171,7 @@ func (r *sqliteRepository) initSchema() error {
 		worktree_branch_prefix TEXT DEFAULT 'feature/',
 		setup_script TEXT DEFAULT '',
 		cleanup_script TEXT DEFAULT '',
+		dev_script TEXT DEFAULT '',
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL,
 		deleted_at DATETIME,
@@ -312,6 +313,9 @@ func (r *sqliteRepository) initSchema() error {
 		return err
 	}
 	if err := r.ensureColumn("repositories", "worktree_branch_prefix", "TEXT DEFAULT 'feature/'"); err != nil {
+		return err
+	}
+	if err := r.ensureColumn("repositories", "dev_script", "TEXT DEFAULT ''"); err != nil {
 		return err
 	}
 	if err := r.ensureColumn("executors", "deleted_at", "DATETIME"); err != nil {
@@ -1762,11 +1766,11 @@ func (r *sqliteRepository) CreateRepository(ctx context.Context, repository *mod
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO repositories (
 			id, workspace_id, name, source_type, local_path, provider, provider_repo_id, provider_owner,
-			provider_name, default_branch, worktree_branch_prefix, setup_script, cleanup_script, created_at, updated_at, deleted_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			provider_name, default_branch, worktree_branch_prefix, setup_script, cleanup_script, dev_script, created_at, updated_at, deleted_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, repository.ID, repository.WorkspaceID, repository.Name, repository.SourceType, repository.LocalPath, repository.Provider,
 		repository.ProviderRepoID, repository.ProviderOwner, repository.ProviderName, repository.DefaultBranch, repository.WorktreeBranchPrefix,
-		repository.SetupScript, repository.CleanupScript, repository.CreatedAt, repository.UpdatedAt, repository.DeletedAt)
+		repository.SetupScript, repository.CleanupScript, repository.DevScript, repository.CreatedAt, repository.UpdatedAt, repository.DeletedAt)
 
 	return err
 }
@@ -1777,12 +1781,12 @@ func (r *sqliteRepository) GetRepository(ctx context.Context, id string) (*model
 
 	err := r.db.QueryRowContext(ctx, `
 		SELECT id, workspace_id, name, source_type, local_path, provider, provider_repo_id, provider_owner,
-		       provider_name, default_branch, worktree_branch_prefix, setup_script, cleanup_script, created_at, updated_at, deleted_at
+		       provider_name, default_branch, worktree_branch_prefix, setup_script, cleanup_script, dev_script, created_at, updated_at, deleted_at
 		FROM repositories WHERE id = ? AND deleted_at IS NULL
 	`, id).Scan(
 		&repository.ID, &repository.WorkspaceID, &repository.Name, &repository.SourceType, &repository.LocalPath,
 		&repository.Provider, &repository.ProviderRepoID, &repository.ProviderOwner, &repository.ProviderName,
-		&repository.DefaultBranch, &repository.WorktreeBranchPrefix, &repository.SetupScript, &repository.CleanupScript, &repository.CreatedAt, &repository.UpdatedAt, &repository.DeletedAt,
+		&repository.DefaultBranch, &repository.WorktreeBranchPrefix, &repository.SetupScript, &repository.CleanupScript, &repository.DevScript, &repository.CreatedAt, &repository.UpdatedAt, &repository.DeletedAt,
 	)
 
 	if err == sql.ErrNoRows {
@@ -1798,11 +1802,11 @@ func (r *sqliteRepository) UpdateRepository(ctx context.Context, repository *mod
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE repositories SET
 			name = ?, source_type = ?, local_path = ?, provider = ?, provider_repo_id = ?, provider_owner = ?,
-			provider_name = ?, default_branch = ?, worktree_branch_prefix = ?, setup_script = ?, cleanup_script = ?, updated_at = ?
+			provider_name = ?, default_branch = ?, worktree_branch_prefix = ?, setup_script = ?, cleanup_script = ?, dev_script = ?, updated_at = ?
 		WHERE id = ? AND deleted_at IS NULL
 	`, repository.Name, repository.SourceType, repository.LocalPath, repository.Provider, repository.ProviderRepoID,
 		repository.ProviderOwner, repository.ProviderName, repository.DefaultBranch, repository.WorktreeBranchPrefix, repository.SetupScript,
-		repository.CleanupScript, repository.UpdatedAt, repository.ID)
+		repository.CleanupScript, repository.DevScript, repository.UpdatedAt, repository.ID)
 	if err != nil {
 		return err
 	}
@@ -1834,7 +1838,7 @@ func (r *sqliteRepository) DeleteRepository(ctx context.Context, id string) erro
 func (r *sqliteRepository) ListRepositories(ctx context.Context, workspaceID string) ([]*models.Repository, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, workspace_id, name, source_type, local_path, provider, provider_repo_id, provider_owner,
-		       provider_name, default_branch, worktree_branch_prefix, setup_script, cleanup_script, created_at, updated_at, deleted_at
+		       provider_name, default_branch, worktree_branch_prefix, setup_script, cleanup_script, dev_script, created_at, updated_at, deleted_at
 		FROM repositories WHERE workspace_id = ? AND deleted_at IS NULL ORDER BY created_at DESC
 	`, workspaceID)
 	if err != nil {
@@ -1848,7 +1852,7 @@ func (r *sqliteRepository) ListRepositories(ctx context.Context, workspaceID str
 		err := rows.Scan(
 			&repository.ID, &repository.WorkspaceID, &repository.Name, &repository.SourceType, &repository.LocalPath,
 			&repository.Provider, &repository.ProviderRepoID, &repository.ProviderOwner, &repository.ProviderName,
-			&repository.DefaultBranch, &repository.WorktreeBranchPrefix, &repository.SetupScript, &repository.CleanupScript, &repository.CreatedAt, &repository.UpdatedAt, &repository.DeletedAt,
+			&repository.DefaultBranch, &repository.WorktreeBranchPrefix, &repository.SetupScript, &repository.CleanupScript, &repository.DevScript, &repository.CreatedAt, &repository.UpdatedAt, &repository.DeletedAt,
 		)
 		if err != nil {
 			return nil, err
