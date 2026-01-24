@@ -25,8 +25,9 @@ type (
 	PermissionRespondResponse = streams.PermissionRespondResponse
 
 	// Git stream types
-	GitStatusUpdate = streams.GitStatusUpdate
-	FileInfo        = streams.FileInfo
+	GitStatusUpdate       = streams.GitStatusUpdate
+	GitCommitNotification = streams.GitCommitNotification
+	FileInfo              = streams.FileInfo
 
 	// File stream types
 	FileChangeNotification = streams.FileChangeNotification
@@ -153,6 +154,7 @@ const (
 	WorkspaceMessageTypeShellResize   WorkspaceMessageType = "shell_resize"
 	WorkspaceMessageTypeProcessOutput WorkspaceMessageType = "process_output"
 	WorkspaceMessageTypeProcessStatus WorkspaceMessageType = "process_status"
+	WorkspaceMessageTypeGitCommit     WorkspaceMessageType = "git_commit"
 )
 
 // WorkspaceStreamMessage is the unified message format for the workspace stream.
@@ -183,6 +185,9 @@ type WorkspaceStreamMessage struct {
 	ProcessOutput *ProcessOutput       `json:"process_output,omitempty"`
 	ProcessStatus *ProcessStatusUpdate `json:"process_status,omitempty"`
 
+	// Git commit fields (for git_commit)
+	GitCommit *GitCommitNotification `json:"git_commit,omitempty"`
+
 	// Error fields (for error)
 	Error string `json:"error,omitempty"`
 }
@@ -211,6 +216,15 @@ func NewWorkspaceGitStatus(status *GitStatusUpdate) WorkspaceStreamMessage {
 		Type:      WorkspaceMessageTypeGitStatus,
 		Timestamp: timeNowUnixMilli(),
 		GitStatus: status,
+	}
+}
+
+// NewWorkspaceGitCommit creates a git commit notification message
+func NewWorkspaceGitCommit(commit *GitCommitNotification) WorkspaceStreamMessage {
+	return WorkspaceStreamMessage{
+		Type:      WorkspaceMessageTypeGitCommit,
+		Timestamp: timeNowUnixMilli(),
+		GitCommit: commit,
 	}
 }
 

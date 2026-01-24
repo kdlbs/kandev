@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/kandev/kandev/internal/task/dto"
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
 )
 
@@ -144,4 +145,34 @@ func (c *TaskController) UpdateTaskState(ctx context.Context, req dto.UpdateTask
 		return dto.TaskDTO{}, err
 	}
 	return dto.FromTask(task), nil
+}
+
+// GetGitSnapshots retrieves git snapshots for a session
+func (c *TaskController) GetGitSnapshots(ctx context.Context, sessionID string, limit int) ([]*models.GitSnapshot, error) {
+	return c.service.GetGitSnapshots(ctx, sessionID, limit)
+}
+
+// GetLatestGitSnapshot retrieves the latest git snapshot for a session
+func (c *TaskController) GetLatestGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error) {
+	return c.service.GetLatestGitSnapshot(ctx, sessionID)
+}
+
+// GetFirstGitSnapshot retrieves the first git snapshot for a session
+func (c *TaskController) GetFirstGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error) {
+	return c.service.GetFirstGitSnapshot(ctx, sessionID)
+}
+
+// GetSessionCommits retrieves commits for a session
+func (c *TaskController) GetSessionCommits(ctx context.Context, sessionID string) ([]*models.SessionCommit, error) {
+	return c.service.GetSessionCommits(ctx, sessionID)
+}
+
+// GetLatestSessionCommit retrieves the latest commit for a session
+func (c *TaskController) GetLatestSessionCommit(ctx context.Context, sessionID string) (*models.SessionCommit, error) {
+	return c.service.GetLatestSessionCommit(ctx, sessionID)
+}
+
+// GetCumulativeDiff retrieves the cumulative diff from base commit to current HEAD
+func (c *TaskController) GetCumulativeDiff(ctx context.Context, sessionID string) (*models.CumulativeDiff, error) {
+	return c.service.GetCumulativeDiff(ctx, sessionID)
 }

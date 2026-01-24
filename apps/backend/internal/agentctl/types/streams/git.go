@@ -37,6 +37,12 @@ type GitStatusUpdate struct {
 	// RemoteBranch is the tracked remote branch (e.g., "origin/main").
 	RemoteBranch string `json:"remote_branch,omitempty"`
 
+	// HeadCommit is the current HEAD commit SHA.
+	HeadCommit string `json:"head_commit,omitempty"`
+
+	// BaseCommit is the base branch HEAD commit SHA (for comparison/diff).
+	BaseCommit string `json:"base_commit,omitempty"`
+
 	// Files contains detailed information about each changed file.
 	Files map[string]FileInfo `json:"files,omitempty"`
 }
@@ -66,3 +72,35 @@ type FileInfo struct {
 	Diff string `json:"diff,omitempty"`
 }
 
+// GitCommitNotification is sent when a new commit is detected in the workspace.
+type GitCommitNotification struct {
+	// Timestamp is when this notification was created.
+	Timestamp time.Time `json:"timestamp"`
+
+	// CommitSHA is the SHA of the new commit.
+	CommitSHA string `json:"commit_sha"`
+
+	// ParentSHA is the SHA of the parent commit.
+	ParentSHA string `json:"parent_sha"`
+
+	// Message is the commit message.
+	Message string `json:"message"`
+
+	// AuthorName is the name of the commit author.
+	AuthorName string `json:"author_name"`
+
+	// AuthorEmail is the email of the commit author.
+	AuthorEmail string `json:"author_email"`
+
+	// FilesChanged is the number of files changed in the commit.
+	FilesChanged int `json:"files_changed"`
+
+	// Insertions is the number of lines added.
+	Insertions int `json:"insertions"`
+
+	// Deletions is the number of lines deleted.
+	Deletions int `json:"deletions"`
+
+	// CommittedAt is when the commit was made.
+	CommittedAt time.Time `json:"committed_at"`
+}

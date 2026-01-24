@@ -41,6 +41,7 @@ import { Checkbox } from '@kandev/ui/checkbox';
 import { Label } from '@kandev/ui/label';
 import { CommitStatBadge, LineStat } from '@/components/diff-stat';
 import { useSessionGitStatus } from '@/hooks/domains/session/use-session-git-status';
+import { useSessionCommits } from '@/hooks/domains/session/use-session-commits';
 import { useGitOperations } from '@/hooks/use-git-operations';
 import type { FileInfo } from '@/lib/state/slices';
 import { formatUserHomePath } from '@/lib/utils';
@@ -88,20 +89,29 @@ const TaskTopBar = memo(function TaskTopBar({
 
   const { toast } = useToast();
   const gitStatus = useSessionGitStatus(activeSessionId ?? null);
+  const { commits } = useSessionCommits(activeSessionId ?? null);
   const { pull, push, rebase, merge, commit, createPR, isLoading: isGitLoading } = useGitOperations(activeSessionId ?? null);
 
   // Use worktree branch if available, otherwise fall back to base branch
   const displayBranch = worktreeBranch || baseBranch;
 
-  // Calculate total additions and deletions from all files.
-  let totalAdditions = 0;
-  let totalDeletions = 0;
+  // Calculate total additions and deletions from uncommitted files.
+  let uncommittedAdditions = 0;
+  let uncommittedDeletions = 0;
   if (gitStatus?.files && Object.keys(gitStatus.files).length > 0) {
     for (const file of Object.values(gitStatus.files) as FileInfo[]) {
-      totalAdditions += file.additions || 0;
-      totalDeletions += file.deletions || 0;
+      uncommittedAdditions += file.additions || 0;
+      uncommittedDeletions += file.deletions || 0;
     }
   }
+
+  // Calculate cumulative additions and deletions from commits.
+  const commitAdditions = commits.reduce((sum, c) => sum + c.insertions, 0);
+  const commitDeletions = commits.reduce((sum, c) => sum + c.deletions, 0);
+
+  // Combined total (uncommitted + commits)
+  const totalAdditions = uncommittedAdditions + commitAdditions;
+  const totalDeletions = uncommittedDeletions + commitDeletions;
 
   const handleGitOperation = useCallback(async (
     operation: () => Promise<{ success: boolean; output: string; error?: string; conflict_files?: string[] }>,
@@ -121,9 +131,7 @@ const TaskTopBar = memo(function TaskTopBar({
           description: result.error || 'An error occurred',
           variant: 'error',
         });
-        if (result.conflict_files && result.conflict_files.length > 0) {
-          console.log('Conflict files:', result.conflict_files);
-        }
+
       }
     } catch (error) {
       toast({
@@ -358,7 +366,7 @@ const TaskTopBar = memo(function TaskTopBar({
           </div>
         )}
 
-        {/* Git Status: Lines Changed */}
+        {/* Git Status: Total Lines Changed (uncommitted + commits) */}
         {(totalAdditions > 0 || totalDeletions > 0) && (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -366,7 +374,9 @@ const TaskTopBar = memo(function TaskTopBar({
                 <LineStat added={totalAdditions} removed={totalDeletions} />
               </span>
             </TooltipTrigger>
-            <TooltipContent>Lines changed</TooltipContent>
+            <TooltipContent>
+              Total changes{commits.length > 0 ? ` (${commits.length} commit${commits.length !== 1 ? 's' : ''}${uncommittedAdditions > 0 || uncommittedDeletions > 0 ? ' + uncommitted' : ''})` : ''}
+            </TooltipContent>
           </Tooltip>
         )}
 
@@ -494,17 +504,18 @@ const TaskTopBar = memo(function TaskTopBar({
               <IconCopy className="h-4 w-4" />
               Copy workspace path
             </DropdownMenuItem>
+            {/* TODO: Implement open workspace folder
             <DropdownMenuItem
               className="cursor-pointer"
               onClick={() => {
-                // TODO: Implement open workspace folder
-                console.log('Open workspace folder:', worktreePath);
+                // Open workspace folder in system file manager
               }}
               disabled={!worktreePath}
             >
               <IconFolderOpen className="h-4 w-4" />
               Open workspace folder
             </DropdownMenuItem>
+            */}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
@@ -523,11 +534,11 @@ const TaskTopBar = memo(function TaskTopBar({
               {gitStatus?.files && Object.keys(gitStatus.files).length > 0 ? (
                 <span>
                   <span className="font-medium text-foreground">{Object.keys(gitStatus.files).length}</span> file{Object.keys(gitStatus.files).length !== 1 ? 's' : ''} changed
-                  {(totalAdditions > 0 || totalDeletions > 0) && (
+                  {(uncommittedAdditions > 0 || uncommittedDeletions > 0) && (
                     <span className="ml-2">
-                      (<span className="text-green-600">+{totalAdditions}</span>
+                      (<span className="text-green-600">+{uncommittedAdditions}</span>
                       {' / '}
-                      <span className="text-red-600">-{totalDeletions}</span>)
+                      <span className="text-red-600">-{uncommittedDeletions}</span>)
                     </span>
                   )}
                 </span>

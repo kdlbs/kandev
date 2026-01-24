@@ -1,6 +1,7 @@
 import type { StoreApi } from 'zustand';
 import type { AppState } from '@/lib/state/store';
 import type { WsHandlers } from '@/lib/ws/handlers/types';
+import type { GitSnapshot, SessionCommit } from '@/lib/state/slices/session-runtime/types';
 
 export function registerGitStatusHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
@@ -22,6 +23,20 @@ export function registerGitStatusHandlers(store: StoreApi<AppState>): WsHandlers
         files: payload.files,
         timestamp: payload.timestamp,
       });
+    },
+    'session.git.snapshot': (message) => {
+      const payload = message.payload;
+      if (!payload.session_id || !payload.snapshot) {
+        return;
+      }
+      store.getState().addGitSnapshot(payload.session_id, payload.snapshot as GitSnapshot);
+    },
+    'session.git.commit': (message) => {
+      const payload = message.payload;
+      if (!payload.session_id || !payload.commit) {
+        return;
+      }
+      store.getState().addSessionCommit(payload.session_id, payload.commit as SessionCommit);
     },
   };
 }

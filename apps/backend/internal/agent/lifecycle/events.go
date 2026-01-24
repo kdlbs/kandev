@@ -207,6 +207,42 @@ func (p *EventPublisher) PublishGitStatus(execution *AgentExecution, update *age
 	}
 }
 
+// PublishGitCommit publishes a git commit event to the event bus.
+func (p *EventPublisher) PublishGitCommit(execution *AgentExecution, commit *agentctl.GitCommitNotification) {
+	if p.eventBus == nil {
+		return
+	}
+
+	sessionID := execution.SessionID
+
+	payload := GitCommitEventPayload{
+		TaskID:       execution.TaskID,
+		SessionID:    sessionID,
+		AgentID:      execution.ID,
+		CommitSHA:    commit.CommitSHA,
+		ParentSHA:    commit.ParentSHA,
+		Message:      commit.Message,
+		AuthorName:   commit.AuthorName,
+		AuthorEmail:  commit.AuthorEmail,
+		FilesChanged: commit.FilesChanged,
+		Insertions:   commit.Insertions,
+		Deletions:    commit.Deletions,
+		CommittedAt:  commit.CommittedAt.Format(time.RFC3339Nano),
+	}
+
+	event := bus.NewEvent(events.GitCommitCreated, "agent-manager", payload)
+	subject := events.BuildGitCommitSubject(sessionID)
+
+	if err := p.eventBus.Publish(context.Background(), subject, event); err != nil {
+		p.logger.Error("failed to publish git commit event",
+			zap.String("instance_id", execution.ID),
+			zap.String("task_id", execution.TaskID),
+			zap.String("session_id", sessionID),
+			zap.String("commit_sha", commit.CommitSHA),
+			zap.Error(err))
+	}
+}
+
 // PublishFileChange publishes a file change notification to the event bus.
 func (p *EventPublisher) PublishFileChange(execution *AgentExecution, notification *agentctl.FileChangeNotification) {
 	if p.eventBus == nil {

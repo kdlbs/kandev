@@ -26,6 +26,8 @@ func RegisterSessionStreamNotifications(ctx context.Context, eventBus bus.EventB
 	}
 
 	b.subscribe(eventBus, events.BuildGitStatusWildcardSubject(), ws.ActionSessionGitStatus)
+	b.subscribe(eventBus, events.BuildGitSnapshotWildcardSubject(), ws.ActionSessionGitSnapshot)
+	b.subscribe(eventBus, events.BuildGitCommitRecordedWildcardSubject(), ws.ActionSessionGitCommit)
 	b.subscribe(eventBus, events.BuildFileChangeWildcardSubject(), ws.ActionWorkspaceFileChanges)
 	b.subscribe(eventBus, events.BuildShellOutputWildcardSubject(), ws.ActionSessionShellOutput)
 	b.subscribe(eventBus, events.BuildShellExitWildcardSubject(), ws.ActionSessionShellOutput)

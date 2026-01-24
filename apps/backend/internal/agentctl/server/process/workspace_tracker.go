@@ -209,6 +209,31 @@ func (wt *WorkspaceTracker) getGitStatus(ctx context.Context) (types.GitStatusUp
 		update.RemoteBranch = strings.TrimSpace(string(remoteOut))
 	}
 
+	// Get current HEAD commit SHA
+	headCmd := exec.CommandContext(ctx, "git", "rev-parse", "HEAD")
+	headCmd.Dir = wt.workDir
+	if headOut, err := headCmd.Output(); err == nil {
+		update.HeadCommit = strings.TrimSpace(string(headOut))
+	}
+
+	// Get base commit SHA (base branch HEAD)
+	// Use remote branch if available, fall back to main/master
+	baseBranch := update.RemoteBranch
+	if baseBranch == "" {
+		// Try main first, then master
+		baseBranch = "main"
+		checkCmd := exec.CommandContext(ctx, "git", "rev-parse", "--verify", "main")
+		checkCmd.Dir = wt.workDir
+		if err := checkCmd.Run(); err != nil {
+			baseBranch = "master"
+		}
+	}
+	baseCmd := exec.CommandContext(ctx, "git", "rev-parse", baseBranch)
+	baseCmd.Dir = wt.workDir
+	if baseOut, err := baseCmd.Output(); err == nil {
+		update.BaseCommit = strings.TrimSpace(string(baseOut))
+	}
+
 	// Get ahead/behind counts
 	if update.RemoteBranch != "" {
 		countCmd := exec.CommandContext(ctx, "git", "rev-list", "--left-right", "--count", update.Branch+"..."+update.RemoteBranch)
@@ -427,8 +452,12 @@ func (wt *WorkspaceTracker) enrichWithDiffData(ctx context.Context, update *type
 				fileInfo.Additions = len(lines)
 				fileInfo.Deletions = 0
 
-				// Format as a diff
+				// Format as a proper git diff with all required headers
+				// The @git-diff-view/react library requires the full git diff format
 				var diffBuilder strings.Builder
+				diffBuilder.WriteString("diff --git a/" + filePath + " b/" + filePath + "\n")
+				diffBuilder.WriteString("new file mode 100644\n")
+				diffBuilder.WriteString("index 0000000..0000000\n")
 				diffBuilder.WriteString("--- /dev/null\n")
 				diffBuilder.WriteString("+++ b/" + filePath + "\n")
 				diffBuilder.WriteString("@@ -0,0 +1," + strconv.Itoa(len(lines)) + " @@\n")
@@ -555,6 +584,26 @@ func (wt *WorkspaceTracker) notifyWorkspaceStreamGitStatus(update types.GitStatu
 			// Subscriber is slow, skip
 		}
 	}
+}
+
+// notifyWorkspaceStreamGitCommit sends git commit notification to all workspace stream subscribers
+func (wt *WorkspaceTracker) notifyWorkspaceStreamGitCommit(commit *types.GitCommitNotification) {
+	wt.workspaceSubMu.RLock()
+	defer wt.workspaceSubMu.RUnlock()
+
+	msg := types.NewWorkspaceGitCommit(commit)
+	for sub := range wt.workspaceStreamSubscribers {
+		select {
+		case sub <- msg:
+		default:
+			// Subscriber is slow, skip
+		}
+	}
+}
+
+// NotifyGitCommit notifies all subscribers about a new git commit
+func (wt *WorkspaceTracker) NotifyGitCommit(commit *types.GitCommitNotification) {
+	wt.notifyWorkspaceStreamGitCommit(commit)
 }
 
 // notifyWorkspaceStreamFileChange sends file change notification to all workspace stream subscribers

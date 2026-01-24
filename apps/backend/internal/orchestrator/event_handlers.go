@@ -3,6 +3,7 @@ package orchestrator
 
 import (
 	"context"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -405,7 +406,7 @@ func (s *Service) setSessionRunning(ctx context.Context, taskID, sessionID strin
 	}
 }
 
-// handleGitStatusUpdated handles git status updates and persists them to agent session metadata
+// handleGitStatusUpdated handles git status updates by creating git snapshots
 func (s *Service) handleGitStatusUpdated(ctx context.Context, data watcher.GitStatusData) {
 	s.logger.Debug("handling git status update",
 		zap.String("task_id", data.TaskID),
@@ -417,45 +418,97 @@ func (s *Service) handleGitStatusUpdated(ctx context.Context, data watcher.GitSt
 		return
 	}
 
-	session, err := s.repo.GetTaskSession(ctx, data.TaskSessionID)
-	if err != nil {
-		s.logger.Debug("no task session for git status update",
-			zap.String("session_id", data.TaskSessionID),
-			zap.Error(err))
-		return
+	// Create git snapshot instead of storing in session metadata
+	snapshot := &models.GitSnapshot{
+		SessionID:    data.TaskSessionID,
+		SnapshotType: models.SnapshotTypeStatusUpdate,
+		Branch:       data.Branch,
+		RemoteBranch: data.RemoteBranch,
+		HeadCommit:   data.HeadCommit,
+		BaseCommit:   data.BaseCommit,
+		Ahead:        data.Ahead,
+		Behind:       data.Behind,
+		Files:        data.Files,
+		TriggeredBy:  "git_status_event",
+		Metadata: map[string]interface{}{
+			"modified":  data.Modified,
+			"added":     data.Added,
+			"deleted":   data.Deleted,
+			"untracked": data.Untracked,
+			"renamed":   data.Renamed,
+			"timestamp": data.Timestamp,
+		},
 	}
 
-	// Update session metadata with git status
-	if session.Metadata == nil {
-		session.Metadata = make(map[string]interface{})
-	}
-	session.Metadata["git_status"] = map[string]interface{}{
-		"branch":        data.Branch,
-		"remote_branch": data.RemoteBranch,
-		"modified":      data.Modified,
-		"added":         data.Added,
-		"deleted":       data.Deleted,
-		"untracked":     data.Untracked,
-		"renamed":       data.Renamed,
-		"ahead":         data.Ahead,
-		"behind":        data.Behind,
-		"files":         data.Files,
-		"timestamp":     data.Timestamp,
-	}
-
-	// Persist to database asynchronously
+	// Persist snapshot to database asynchronously, but skip if duplicate of latest
 	go func() {
-		if err := s.repo.UpdateTaskSession(context.Background(), session); err != nil {
-			s.logger.Error("failed to update agent session with git status",
+		bgCtx := context.Background()
+
+		// Check if this is a duplicate of the latest snapshot
+		latest, err := s.repo.GetLatestGitSnapshot(bgCtx, data.TaskSessionID)
+		if err == nil && latest != nil {
+			// Compare key fields to detect duplicates
+			if s.isSnapshotDuplicate(latest, snapshot) {
+				s.logger.Debug("skipping duplicate git snapshot",
+					zap.String("task_id", data.TaskID),
+					zap.String("session_id", data.TaskSessionID))
+				return
+			}
+		}
+
+		if err := s.repo.CreateGitSnapshot(bgCtx, snapshot); err != nil {
+			s.logger.Error("failed to create git snapshot",
 				zap.String("task_id", data.TaskID),
-				zap.String("session_id", session.ID),
+				zap.String("session_id", data.TaskSessionID),
 				zap.Error(err))
 		} else {
-			s.logger.Debug("persisted git status to agent session",
+			s.logger.Debug("created git snapshot",
 				zap.String("task_id", data.TaskID),
-				zap.String("session_id", session.ID))
+				zap.String("session_id", data.TaskSessionID),
+				zap.String("snapshot_id", snapshot.ID))
+
+			// Publish event to notify frontend
+			if s.eventBus != nil {
+				event := bus.NewEvent(events.GitSnapshotCreated, "orchestrator", map[string]interface{}{
+					"session_id": data.TaskSessionID,
+					"snapshot":   snapshot,
+				})
+				_ = s.eventBus.Publish(bgCtx, events.BuildGitSnapshotSubject(data.TaskSessionID), event)
+			}
 		}
 	}()
+}
+
+// isSnapshotDuplicate checks if two snapshots have the same content
+func (s *Service) isSnapshotDuplicate(existing, new *models.GitSnapshot) bool {
+	// Different snapshot types are never duplicates
+	if existing.SnapshotType != new.SnapshotType {
+		return false
+	}
+
+	// Compare branch and commit info
+	if existing.Branch != new.Branch ||
+		existing.HeadCommit != new.HeadCommit ||
+		existing.Ahead != new.Ahead ||
+		existing.Behind != new.Behind {
+		return false
+	}
+
+	// Compare file counts first (quick check)
+	existingFileCount := len(existing.Files)
+	newFileCount := len(new.Files)
+	if existingFileCount != newFileCount {
+		return false
+	}
+
+	// Compare file paths (if same count, check if same files)
+	for path := range new.Files {
+		if _, exists := existing.Files[path]; !exists {
+			return false
+		}
+	}
+
+	return true
 }
 
 // handleContextWindowUpdated handles context window updates and persists them to session metadata
@@ -565,4 +618,69 @@ func (s *Service) handlePermissionRequest(ctx context.Context, data watcher.Perm
 				zap.String("pending_id", data.PendingID))
 		}
 	}
+}
+
+// handleGitCommitCreated handles git commit events by creating session commit records
+func (s *Service) handleGitCommitCreated(ctx context.Context, data watcher.GitCommitData) {
+	s.logger.Debug("handling git commit created",
+		zap.String("task_id", data.TaskID),
+		zap.String("commit_sha", data.CommitSHA))
+
+	if data.TaskSessionID == "" {
+		s.logger.Debug("missing session_id for git commit event",
+			zap.String("task_id", data.TaskID))
+		return
+	}
+
+	// Parse committed_at timestamp
+	var committedAt time.Time
+	if data.CommittedAt != "" {
+		if t, err := time.Parse(time.RFC3339Nano, data.CommittedAt); err == nil {
+			committedAt = t
+		} else {
+			committedAt = time.Now().UTC()
+		}
+	} else {
+		committedAt = time.Now().UTC()
+	}
+
+	// Create session commit record
+	commit := &models.SessionCommit{
+		SessionID:     data.TaskSessionID,
+		CommitSHA:     data.CommitSHA,
+		ParentSHA:     data.ParentSHA,
+		AuthorName:    data.AuthorName,
+		AuthorEmail:   data.AuthorEmail,
+		CommitMessage: data.Message,
+		CommittedAt:   committedAt,
+		FilesChanged:  data.FilesChanged,
+		Insertions:    data.Insertions,
+		Deletions:     data.Deletions,
+	}
+
+	// Persist commit record to database asynchronously
+	go func() {
+		bgCtx := context.Background()
+		if err := s.repo.CreateSessionCommit(bgCtx, commit); err != nil {
+			s.logger.Error("failed to create session commit record",
+				zap.String("task_id", data.TaskID),
+				zap.String("session_id", data.TaskSessionID),
+				zap.String("commit_sha", data.CommitSHA),
+				zap.Error(err))
+		} else {
+			s.logger.Debug("created session commit record",
+				zap.String("task_id", data.TaskID),
+				zap.String("session_id", data.TaskSessionID),
+				zap.String("commit_sha", data.CommitSHA))
+
+			// Publish event to notify frontend
+			if s.eventBus != nil {
+				event := bus.NewEvent(events.GitCommitRecorded, "orchestrator", map[string]interface{}{
+					"session_id": data.TaskSessionID,
+					"commit":     commit,
+				})
+				_ = s.eventBus.Publish(bgCtx, events.BuildGitCommitRecordedSubject(data.TaskSessionID), event)
+			}
+		}
+	}()
 }

@@ -197,3 +197,47 @@ func (c *Client) gitOperation(ctx context.Context, path string, payload interfac
 	return &result, nil
 }
 
+// CommitDiffResult represents the result of getting a commit's diff.
+type CommitDiffResult struct {
+	Success      bool                   `json:"success"`
+	CommitSHA    string                 `json:"commit_sha"`
+	Message      string                 `json:"message"`
+	Author       string                 `json:"author"`
+	Date         string                 `json:"date"`
+	Files        map[string]interface{} `json:"files"`
+	FilesChanged int                    `json:"files_changed"`
+	Insertions   int                    `json:"insertions"`
+	Deletions    int                    `json:"deletions"`
+	Error        string                 `json:"error,omitempty"`
+}
+
+// GitShowCommit gets the diff for a specific commit.
+func (c *Client) GitShowCommit(ctx context.Context, commitSHA string) (*CommitDiffResult, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/api/v1/git/commit/"+commitSHA, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	respBody, err := readResponseBody(resp)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	var result CommitDiffResult
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse response (status %d, body: %s): %w",
+			resp.StatusCode, truncateBody(respBody), err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return &result, fmt.Errorf("git show commit failed with status %d: %s", resp.StatusCode, result.Error)
+	}
+
+	return &result, nil
+}

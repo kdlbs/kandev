@@ -61,6 +61,10 @@ func (h *TaskHandlers) registerWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionTaskMove, h.wsMoveTask)
 	dispatcher.RegisterFunc(ws.ActionTaskState, h.wsUpdateTaskState)
 	dispatcher.RegisterFunc(ws.ActionTaskSessionList, h.wsListTaskSessions)
+	// Git snapshot and commit handlers
+	dispatcher.RegisterFunc(ws.ActionSessionGitSnapshots, h.wsGetGitSnapshots)
+	dispatcher.RegisterFunc(ws.ActionSessionGitCommits, h.wsGetSessionCommits)
+	dispatcher.RegisterFunc(ws.ActionSessionCumulativeDiff, h.wsGetCumulativeDiff)
 }
 
 // HTTP handlers
@@ -567,4 +571,81 @@ func (h *TaskHandlers) wsUpdateTaskState(ctx context.Context, msg *ws.Message) (
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update task state", nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, resp)
+}
+
+// Git Snapshot and Commit Handlers
+
+type wsGetGitSnapshotsRequest struct {
+	SessionID string `json:"session_id"`
+	Limit     int    `json:"limit,omitempty"`
+}
+
+func (h *TaskHandlers) wsGetGitSnapshots(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req wsGetGitSnapshotsRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.SessionID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+	}
+
+	snapshots, err := h.controller.GetGitSnapshots(ctx, req.SessionID, req.Limit)
+	if err != nil {
+		h.logger.Error("failed to get git snapshots", zap.Error(err), zap.String("session_id", req.SessionID))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get git snapshots", nil)
+	}
+
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		"session_id": req.SessionID,
+		"snapshots":  snapshots,
+	})
+}
+
+type wsGetSessionCommitsRequest struct {
+	SessionID string `json:"session_id"`
+}
+
+func (h *TaskHandlers) wsGetSessionCommits(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req wsGetSessionCommitsRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.SessionID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+	}
+
+	commits, err := h.controller.GetSessionCommits(ctx, req.SessionID)
+	if err != nil {
+		h.logger.Error("failed to get session commits", zap.Error(err), zap.String("session_id", req.SessionID))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get session commits", nil)
+	}
+
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		"session_id": req.SessionID,
+		"commits":    commits,
+	})
+}
+
+type wsGetCumulativeDiffRequest struct {
+	SessionID string `json:"session_id"`
+}
+
+func (h *TaskHandlers) wsGetCumulativeDiff(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req wsGetCumulativeDiffRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.SessionID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+	}
+
+	diff, err := h.controller.GetCumulativeDiff(ctx, req.SessionID)
+	if err != nil {
+		h.logger.Error("failed to get cumulative diff", zap.Error(err), zap.String("session_id", req.SessionID))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get cumulative diff", nil)
+	}
+
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		"cumulative_diff": diff,
+	})
 }

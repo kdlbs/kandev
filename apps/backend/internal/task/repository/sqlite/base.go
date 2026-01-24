@@ -360,6 +360,54 @@ func (r *Repository) initSchema() error {
 		return err
 	}
 
+	// Git tracking tables
+	gitSchema := `
+	CREATE TABLE IF NOT EXISTS task_session_git_snapshots (
+		id TEXT PRIMARY KEY,
+		session_id TEXT NOT NULL,
+		snapshot_type TEXT NOT NULL,
+		branch TEXT NOT NULL,
+		remote_branch TEXT DEFAULT '',
+		head_commit TEXT DEFAULT '',
+		base_commit TEXT DEFAULT '',
+		ahead INTEGER DEFAULT 0,
+		behind INTEGER DEFAULT 0,
+		files TEXT DEFAULT '{}',
+		triggered_by TEXT DEFAULT '',
+		metadata TEXT DEFAULT '{}',
+		created_at DATETIME NOT NULL,
+		FOREIGN KEY (session_id) REFERENCES task_sessions(id) ON DELETE CASCADE
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_git_snapshots_session ON task_session_git_snapshots(session_id, created_at DESC);
+	CREATE INDEX IF NOT EXISTS idx_git_snapshots_type ON task_session_git_snapshots(session_id, snapshot_type);
+
+	CREATE TABLE IF NOT EXISTS task_session_commits (
+		id TEXT PRIMARY KEY,
+		session_id TEXT NOT NULL,
+		commit_sha TEXT NOT NULL,
+		parent_sha TEXT DEFAULT '',
+		author_name TEXT DEFAULT '',
+		author_email TEXT DEFAULT '',
+		commit_message TEXT DEFAULT '',
+		committed_at DATETIME NOT NULL,
+		pre_commit_snapshot_id TEXT DEFAULT '',
+		post_commit_snapshot_id TEXT DEFAULT '',
+		files_changed INTEGER DEFAULT 0,
+		insertions INTEGER DEFAULT 0,
+		deletions INTEGER DEFAULT 0,
+		created_at DATETIME NOT NULL,
+		FOREIGN KEY (session_id) REFERENCES task_sessions(id) ON DELETE CASCADE
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_session_commits_session ON task_session_commits(session_id, committed_at DESC);
+	CREATE INDEX IF NOT EXISTS idx_session_commits_sha ON task_session_commits(commit_sha);
+	`
+
+	if _, err := r.db.Exec(gitSchema); err != nil {
+		return err
+	}
+
 	// Ensure columns exist for schema migrations
 	if err := r.ensureColumn("boards", "workspace_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err

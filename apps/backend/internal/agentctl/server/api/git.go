@@ -46,6 +46,11 @@ type GitStageRequest struct {
 	Paths []string `json:"paths"` // Empty = stage all
 }
 
+// GitShowCommitRequest for GET /api/v1/git/commit/:sha
+type GitShowCommitRequest struct {
+	CommitSHA string `uri:"sha" binding:"required"`
+}
+
 // GitCreatePRRequest for POST /api/v1/git/create-pr
 type GitCreatePRRequest struct {
 	Title      string `json:"title"`
@@ -276,6 +281,32 @@ func (s *Server) handleGitCreatePR(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, process.PRCreateResult{
 			Success: false,
 			Error:   err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+// handleGitShowCommit handles GET /api/v1/git/commit/:sha
+func (s *Server) handleGitShowCommit(c *gin.Context) {
+	var req GitShowCommitRequest
+	if err := c.ShouldBindUri(&req); err != nil {
+		c.JSON(http.StatusBadRequest, process.CommitDiffResult{
+			Success: false,
+			Error:   "invalid request: " + err.Error(),
+		})
+		return
+	}
+
+	gitOp := s.procMgr.GitOperator()
+	result, err := gitOp.ShowCommit(c.Request.Context(), req.CommitSHA)
+	if err != nil {
+		s.logger.Error("git show commit failed", zap.String("commit_sha", req.CommitSHA), zap.Error(err))
+		c.JSON(http.StatusInternalServerError, process.CommitDiffResult{
+			Success:   false,
+			CommitSHA: req.CommitSHA,
+			Error:     err.Error(),
 		})
 		return
 	}

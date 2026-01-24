@@ -109,6 +109,7 @@ func NewManager(
 	mgr.streamManager = NewStreamManager(log, StreamCallbacks{
 		OnAgentEvent:    mgr.handleAgentEvent,
 		OnGitStatus:     mgr.handleGitStatusUpdate,
+		OnGitCommit:     mgr.handleGitCommitCreated,
 		OnFileChange:    mgr.handleFileChangeNotification,
 		OnShellOutput:   mgr.handleShellOutput,
 		OnShellExit:     mgr.handleShellExit,
@@ -1070,6 +1071,12 @@ func (m *Manager) handleGitStatusUpdate(execution *AgentExecution, update *agent
 
 	// Publish git status update to event bus for WebSocket streaming
 	m.eventPublisher.PublishGitStatus(execution, update)
+}
+
+// handleGitCommitCreated processes git commit events from the workspace tracker
+func (m *Manager) handleGitCommitCreated(execution *AgentExecution, commit *agentctl.GitCommitNotification) {
+	// Publish commit event to event bus for WebSocket streaming and orchestrator handling
+	m.eventPublisher.PublishGitCommit(execution, commit)
 }
 
 // handleFileChangeNotification processes file change notifications from the workspace tracker

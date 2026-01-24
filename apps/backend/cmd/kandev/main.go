@@ -321,25 +321,42 @@ func main() {
 
 		var result []*ws.Message
 
-		// Send git status if available in session metadata
-		if session.Metadata != nil {
-			if gitStatus, ok := session.Metadata["git_status"]; ok {
-				gitStatusData, ok := gitStatus.(map[string]interface{})
-				if !ok {
-					gitStatusData = map[string]interface{}{"data": gitStatus}
-				}
-				// Ensure session_id is included
-				gitStatusData["session_id"] = sessionID
-				if session.TaskID != "" {
-					gitStatusData["task_id"] = session.TaskID
-				}
+		// Send git status from latest snapshot
+		latestSnapshot, err := taskRepo.GetLatestGitSnapshot(ctx, sessionID)
+		if err == nil && latestSnapshot != nil {
+			// Extract file lists from snapshot metadata
+			metadata := latestSnapshot.Metadata
+			modified, _ := metadata["modified"].([]interface{})
+			added, _ := metadata["added"].([]interface{})
+			deleted, _ := metadata["deleted"].([]interface{})
+			untracked, _ := metadata["untracked"].([]interface{})
+			renamed, _ := metadata["renamed"].([]interface{})
+			timestamp, _ := metadata["timestamp"].(string)
 
-				gitStatusNotification, err := ws.NewNotification("session.git.status", gitStatusData)
-				if err == nil {
-					result = append(result, gitStatusNotification)
-				}
+			gitStatusData := map[string]interface{}{
+				"session_id":    sessionID,
+				"task_id":       session.TaskID,
+				"branch":        latestSnapshot.Branch,
+				"remote_branch": latestSnapshot.RemoteBranch,
+				"ahead":         latestSnapshot.Ahead,
+				"behind":        latestSnapshot.Behind,
+				"files":         latestSnapshot.Files,
+				"modified":      modified,
+				"added":         added,
+				"deleted":       deleted,
+				"untracked":     untracked,
+				"renamed":       renamed,
+				"timestamp":     timestamp,
 			}
 
+			gitStatusNotification, err := ws.NewNotification("session.git.status", gitStatusData)
+			if err == nil {
+				result = append(result, gitStatusNotification)
+			}
+		}
+
+		// Send context window if available in session metadata
+		if session.Metadata != nil {
 			if contextWindow, ok := session.Metadata["context_window"]; ok {
 				notification, err := ws.NewNotification(ws.ActionSessionStateChanged, map[string]interface{}{
 					"session_id": sessionID,
@@ -357,7 +374,7 @@ func main() {
 
 		return result, nil
 	})
-	log.Info("Session data provider configured for session subscriptions (git status)")
+	log.Info("Session data provider configured for session subscriptions (git status from snapshots)")
 
 	waitForAgentctlControlHealthy(ctx, cfg, log)
 	if err := orchestratorSvc.Start(ctx); err != nil {

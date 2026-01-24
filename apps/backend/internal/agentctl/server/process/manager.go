@@ -183,7 +183,7 @@ func (m *Manager) GitOperator() *GitOperator {
 	defer m.gitOperatorMu.Unlock()
 
 	if m.gitOperator == nil {
-		m.gitOperator = NewGitOperator(m.cfg.WorkDir, m.logger)
+		m.gitOperator = NewGitOperator(m.cfg.WorkDir, m.logger, m.workspaceTracker)
 	}
 	return m.gitOperator
 }

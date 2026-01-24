@@ -2106,3 +2106,58 @@ func (s *Service) publishRepositoryScriptEvent(ctx context.Context, eventType st
 			zap.Error(err))
 	}
 }
+
+// GetGitSnapshots retrieves git snapshots for a session
+func (s *Service) GetGitSnapshots(ctx context.Context, sessionID string, limit int) ([]*models.GitSnapshot, error) {
+	return s.repo.GetGitSnapshotsBySession(ctx, sessionID, limit)
+}
+
+// GetLatestGitSnapshot retrieves the latest git snapshot for a session
+func (s *Service) GetLatestGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error) {
+	return s.repo.GetLatestGitSnapshot(ctx, sessionID)
+}
+
+// GetFirstGitSnapshot retrieves the first git snapshot for a session (oldest)
+func (s *Service) GetFirstGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error) {
+	return s.repo.GetFirstGitSnapshot(ctx, sessionID)
+}
+
+// GetSessionCommits retrieves commits for a session
+func (s *Service) GetSessionCommits(ctx context.Context, sessionID string) ([]*models.SessionCommit, error) {
+	return s.repo.GetSessionCommits(ctx, sessionID)
+}
+
+// GetLatestSessionCommit retrieves the latest commit for a session
+func (s *Service) GetLatestSessionCommit(ctx context.Context, sessionID string) (*models.SessionCommit, error) {
+	return s.repo.GetLatestSessionCommit(ctx, sessionID)
+}
+
+// GetCumulativeDiff computes the cumulative diff from base commit to current HEAD
+// by using the first snapshot's base_commit and the latest snapshot's files
+func (s *Service) GetCumulativeDiff(ctx context.Context, sessionID string) (*models.CumulativeDiff, error) {
+	// Get the first snapshot to find the base commit
+	firstSnapshot, err := s.repo.GetFirstGitSnapshot(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get first git snapshot: %w", err)
+	}
+
+	// Get the latest snapshot for current state
+	latestSnapshot, err := s.repo.GetLatestGitSnapshot(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get latest git snapshot: %w", err)
+	}
+
+	// Count total commits for this session
+	commits, err := s.repo.GetSessionCommits(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get session commits: %w", err)
+	}
+
+	return &models.CumulativeDiff{
+		SessionID:    sessionID,
+		BaseCommit:   firstSnapshot.BaseCommit,
+		HeadCommit:   latestSnapshot.HeadCommit,
+		TotalCommits: len(commits),
+		Files:        latestSnapshot.Files,
+	}, nil
+}
