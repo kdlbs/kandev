@@ -17,10 +17,7 @@ func NewWithDB(dbConn *sql.DB) (*Repository, error) {
 	return newRepository(dbConn, false)
 }
 
-// New creates a new SQLite repository with a database connection (takes ownership).
-func New(dbConn *sql.DB) (*Repository, error) {
-	return newRepository(dbConn, true)
-}
+
 
 func newRepository(dbConn *sql.DB, ownsDB bool) (*Repository, error) {
 	repo := &Repository{db: dbConn, ownsDB: ownsDB}
