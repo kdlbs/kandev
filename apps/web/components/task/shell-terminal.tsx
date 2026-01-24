@@ -1,9 +1,8 @@
 'use client';
 
 import { useEffect, useRef, useCallback } from 'react';
-import { Terminal } from '@xterm/xterm';
-import { FitAddon } from '@xterm/addon-fit';
-import '@xterm/xterm/css/xterm.css';
+import type { Terminal as TerminalType } from 'ghostty-web';
+import { loadGhostty } from '@/lib/terminal/ghostty-loader';
 import { useAppStore, useAppStoreApi } from '@/components/state-provider';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import { useSession } from '@/hooks/domains/session/use-session';
@@ -25,8 +24,8 @@ export function ShellTerminal({
   isStopping = false,
 }: ShellTerminalProps) {
   const terminalRef = useRef<HTMLDivElement>(null);
-  const xtermRef = useRef<Terminal | null>(null);
-  const fitAddonRef = useRef<FitAddon | null>(null);
+  const xtermRef = useRef<TerminalType | null>(null);
+  const fitAddonRef = useRef<{ fit: () => void; dispose: () => void } | null>(null);
   const lastOutputLengthRef = useRef(0);
   const subscriptionIdRef = useRef(0);
   const onDataDisposableRef = useRef<{ dispose: () => void } | null>(null);
@@ -73,99 +72,132 @@ export function ShellTerminal({
   useEffect(() => {
     if (!terminalRef.current || xtermRef.current) return;
 
-    const terminal = new Terminal({
-      cursorBlink: !isReadOnlyMode,
-      disableStdin: isReadOnlyMode,
-      convertEol: isReadOnlyMode,
-      fontSize: isReadOnlyMode ? 12 : 13,
-      fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-      theme: {
-        background: 'transparent',
-        foreground: '#d4d4d4',
-        cursor: '#d4d4d4',
-        cursorAccent: 'transparent',
-        selectionBackground: '#264f78',
-        black: '#1e1e1e',
-        red: '#f44747',
-        green: '#6a9955',
-        yellow: '#dcdcaa',
-        blue: '#569cd6',
-        magenta: '#c586c0',
-        cyan: '#4ec9b0',
-        white: '#d4d4d4',
-        brightBlack: '#808080',
-        brightRed: '#f44747',
-        brightGreen: '#6a9955',
-        brightYellow: '#dcdcaa',
-        brightBlue: '#569cd6',
-        brightMagenta: '#c586c0',
-        brightCyan: '#4ec9b0',
-        brightWhite: '#ffffff',
-      },
-    });
+    let cancelled = false;
+    let resizeObserver: ResizeObserver | null = null;
+    let intersectionObserver: IntersectionObserver | null = null;
+    let initialFitTimeout: ReturnType<typeof setTimeout> | null = null;
 
-    const fitAddon = new FitAddon();
-    terminal.loadAddon(fitAddon);
-    terminal.open(terminalRef.current);
-    fitAddon.fit();
+    const initTerminal = async () => {
+      const [mod, ghostty] = await Promise.all([
+        import('ghostty-web'),
+        loadGhostty(),
+      ]);
+      if (cancelled || !terminalRef.current) return;
 
-    xtermRef.current = terminal;
-    fitAddonRef.current = fitAddon;
+      // Note: ghostty option is supported at runtime but not in published types
+      const terminal = new mod.Terminal({
+        ghostty,
+        allowTransparency: true,
+        cursorBlink: !isReadOnlyMode,
+        disableStdin: isReadOnlyMode,
+        convertEol: isReadOnlyMode,
+        fontSize: isReadOnlyMode ? 12 : 13,
+        fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+        theme: {
+          background: 'transparent',
+          foreground: '#d4d4d4',
+          cursor: '#d4d4d4',
+          selectionBackground: '#264f78',
+          black: '#1e1e1e',
+          red: '#f44747',
+          green: '#6a9955',
+          yellow: '#dcdcaa',
+          blue: '#569cd6',
+          magenta: '#c586c0',
+          cyan: '#4ec9b0',
+          white: '#d4d4d4',
+          brightBlack: '#808080',
+          brightRed: '#f44747',
+          brightGreen: '#6a9955',
+          brightYellow: '#dcdcaa',
+          brightBlue: '#569cd6',
+          brightMagenta: '#c586c0',
+          brightCyan: '#4ec9b0',
+          brightWhite: '#ffffff',
+        },
+      } as Parameters<typeof mod.Terminal>[0]);
 
-    // Force transparent background on all xterm elements to inherit from parent
-    const xtermElement = terminalRef.current.querySelector('.xterm');
-    const xtermViewport = terminalRef.current.querySelector('.xterm-viewport');
-    const xtermScreen = terminalRef.current.querySelector('.xterm-screen');
-    const xtermScrollable = terminalRef.current.querySelector('.xterm-scrollable-element');
-    if (xtermElement) (xtermElement as HTMLElement).style.background = 'transparent';
-    if (xtermViewport) (xtermViewport as HTMLElement).style.background = 'transparent';
-    if (xtermScreen) (xtermScreen as HTMLElement).style.background = 'transparent';
-    if (xtermScrollable) (xtermScrollable as HTMLElement).style.backgroundColor = 'transparent';
-
-    // For read-only mode, write initial output
-    if (isReadOnlyMode && outputRef.current) {
-      terminal.write(outputRef.current);
-      lastOutputLengthRef.current = outputRef.current.length;
-    }
-
-    // Ensure terminal is properly sized after initial render
-    const initialFitTimeout = setTimeout(() => {
+      const fitAddon = new mod.FitAddon();
+      terminal.loadAddon(fitAddon);
+      await terminal.open(terminalRef.current);
+      if (cancelled) {
+        terminal.dispose();
+        return;
+      }
       fitAddon.fit();
-    }, 100);
 
-    // Handle resize
-    const resizeObserver = new ResizeObserver(() => {
-      fitAddon.fit();
-    });
-    resizeObserver.observe(terminalRef.current);
+      xtermRef.current = terminal;
+      fitAddonRef.current = fitAddon;
 
-    // Handle visibility changes (e.g., when tab becomes visible)
-    const intersectionObserver = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          if (entry.isIntersecting && fitAddonRef.current) {
-            requestAnimationFrame(() => {
-              fitAddonRef.current?.fit();
-            });
-          }
-        });
-      },
-      { threshold: 0.1 }
-    );
-    intersectionObserver.observe(terminalRef.current);
+      // For read-only mode, write initial output
+      if (isReadOnlyMode && outputRef.current) {
+        terminal.write(outputRef.current);
+        lastOutputLengthRef.current = outputRef.current.length;
+      }
 
-    // Reset output tracking when session changes
-    lastOutputLengthRef.current = 0;
+      // For interactive mode, write any existing shell output that arrived before terminal was ready
+      if (!isReadOnlyMode && sessionId) {
+        const existingOutput = storeApi.getState().shell.outputs[sessionId] || '';
+        if (existingOutput && existingOutput.length > lastOutputLengthRef.current) {
+          const newData = existingOutput.slice(lastOutputLengthRef.current);
+          terminal.write(newData);
+          lastOutputLengthRef.current = existingOutput.length;
+        }
+
+        // Attach onData handler immediately since the effect may have already run
+        if (taskId) {
+          onDataDisposableRef.current?.dispose();
+          onDataDisposableRef.current = terminal.onData((data) => {
+            if (/^\x1b\[\d+;\d+R$/.test(data) || /^\x1b\[\d+R$/.test(data)) {
+              return;
+            }
+            send('shell.input', { session_id: sessionId, data });
+          });
+        }
+      }
+
+      // Ensure terminal is properly sized after initial render
+      initialFitTimeout = setTimeout(() => {
+        fitAddon.fit();
+      }, 100);
+
+      // Handle resize
+      resizeObserver = new ResizeObserver(() => {
+        fitAddon.fit();
+      });
+      resizeObserver.observe(terminalRef.current);
+
+      // Handle visibility changes (e.g., when tab becomes visible)
+      intersectionObserver = new IntersectionObserver(
+        (entries) => {
+          entries.forEach((entry) => {
+            if (entry.isIntersecting && fitAddonRef.current) {
+              requestAnimationFrame(() => {
+                fitAddonRef.current?.fit();
+              });
+            }
+          });
+        },
+        { threshold: 0.1 }
+      );
+      intersectionObserver.observe(terminalRef.current);
+
+      // Reset output tracking when session changes
+      lastOutputLengthRef.current = 0;
+    };
+
+    initTerminal();
 
     return () => {
-      clearTimeout(initialFitTimeout);
-      resizeObserver.disconnect();
-      intersectionObserver.disconnect();
-      terminal.dispose();
+      cancelled = true;
+      if (initialFitTimeout) clearTimeout(initialFitTimeout);
+      resizeObserver?.disconnect();
+      intersectionObserver?.disconnect();
+      xtermRef.current?.dispose();
       xtermRef.current = null;
       fitAddonRef.current = null;
     };
-  }, [taskId, sessionId, send, isReadOnlyMode]);
+  }, [taskId, sessionId, send, isReadOnlyMode, storeApi]);
 
   // Handle user input (interactive mode only)
   useEffect(() => {
@@ -289,8 +321,8 @@ export function ShellTerminal({
 
   if (isReadOnlyMode) {
     return (
-      <div className="h-full w-full rounded-md bg-background relative">
-        <div ref={terminalRef} className="p-1 absolute inset-0" />
+      <div className="h-full w-full bg-background relative">
+        <div ref={terminalRef} className="px-3 py-2 absolute inset-0" />
         {isStopping ? (
           <div className="absolute right-3 top-2 text-xs text-muted-foreground">
             Stopping…
@@ -303,7 +335,7 @@ export function ShellTerminal({
   return (
     <div
       ref={terminalRef}
-      className="h-full p-1 w-full overflow-hidden rounded-md bg-background"
+      className="h-full w-full overflow-hidden px-3 py-2 bg-background"
     />
   );
 }

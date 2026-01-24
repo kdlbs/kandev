@@ -36,6 +36,9 @@ yarn-error.log*
 # vercel
 .vercel
 
+# generated wasm files (copied from node_modules during postinstall)
+/public/wasm/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
