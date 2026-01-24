@@ -237,14 +237,27 @@ func (s *Service) StopSession(ctx context.Context, sessionID string, reason stri
 	return s.executor.Stop(ctx, sessionID, reason, force)
 }
 
+// PlanModePrefix is prepended to prompts when plan mode is enabled.
+// This instructs agents to analyze and plan before making changes.
+const PlanModePrefix = "[PLAN MODE: Analyze and plan before making changes. Do not execute yet.]\n\n"
+
 // PromptTask sends a follow-up prompt to a running agent for a task session.
-func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prompt string, model string) (*PromptResult, error) {
-	s.logger.Debug("sending prompt to task agent",
+// If planMode is true, a plan mode prefix is prepended to the prompt.
+func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prompt string, model string, planMode bool) (*PromptResult, error) {
+	s.logger.Debug("PromptTask called",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID),
-		zap.Int("prompt_length", len(prompt)))
+		zap.Int("prompt_length", len(prompt)),
+		zap.String("requested_model", model),
+		zap.Bool("plan_mode", planMode))
 	if sessionID == "" {
 		return nil, fmt.Errorf("session_id is required")
+	}
+
+	// Apply plan mode prefix if enabled
+	effectivePrompt := prompt
+	if planMode {
+		effectivePrompt = PlanModePrefix + prompt
 	}
 
 	// Check if model switching is requested
@@ -255,30 +268,34 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 			return nil, fmt.Errorf("failed to get session for model switch: %w", err)
 		}
 
-		// Get current model - handle nil snapshot and missing key safely
-		currentModel := ""
+		// Get current model from agent profile snapshot
+		var currentModel string
 		if session.AgentProfileSnapshot != nil {
 			if m, ok := session.AgentProfileSnapshot["model"].(string); ok {
 				currentModel = m
 			}
 		}
 
-		// Trigger switch if models differ OR if current model is unknown (empty string)
+		// Trigger switch if models differ
 		if currentModel != model {
-			s.logger.Info("model switch requested",
+			s.logger.Info("switching model",
 				zap.String("task_id", taskID),
 				zap.String("session_id", sessionID),
-				zap.String("current_model", currentModel),
-				zap.String("new_model", model))
+				zap.String("from", currentModel),
+				zap.String("to", model))
 
 			// Start a new turn for this prompt (model switch case)
 			s.startTurnForSession(ctx, sessionID)
 
 			// SwitchModel will stop agent, rebuild with new model, restart, and send prompt
-			switchResult, err := s.executor.SwitchModel(ctx, taskID, sessionID, model, prompt)
+			switchResult, err := s.executor.SwitchModel(ctx, taskID, sessionID, model, effectivePrompt)
 			if err != nil {
 				return nil, fmt.Errorf("model switch failed: %w", err)
 			}
+
+			// Update session state to RUNNING and publish event so frontend knows agent is active
+			s.setSessionRunning(ctx, taskID, sessionID)
+
 			return &PromptResult{
 				StopReason:   switchResult.StopReason,
 				AgentMessage: switchResult.AgentMessage,
@@ -288,10 +305,13 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 	}
 
 	s.setSessionRunning(ctx, taskID, sessionID)
-	// Start a new turn for this prompt
 	s.startTurnForSession(ctx, sessionID)
-	result, err := s.executor.Prompt(ctx, taskID, sessionID, prompt)
+	result, err := s.executor.Prompt(ctx, taskID, sessionID, effectivePrompt)
 	if err != nil {
+		s.logger.Error("prompt failed",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
 		return nil, err
 	}
 	return &PromptResult{

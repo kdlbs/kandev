@@ -5,8 +5,10 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agent/settings/store"
+	"github.com/kandev/kandev/internal/common/logger"
 )
 
 // MockRepository implements store.Repository for testing
@@ -94,7 +96,7 @@ func (m *MockRepository) Close() error {
 func TestNewStoreProfileResolver(t *testing.T) {
 	mockRepo := &MockRepository{}
 
-	resolver := NewStoreProfileResolver(mockRepo)
+	resolver := NewStoreProfileResolver(mockRepo, nil)
 
 	if resolver == nil {
 		t.Fatal("expected non-nil resolver")
@@ -125,7 +127,7 @@ func TestStoreProfileResolver_ResolveProfile_Success(t *testing.T) {
 		},
 	}
 
-	resolver := NewStoreProfileResolver(mockRepo)
+	resolver := NewStoreProfileResolver(mockRepo, nil)
 	ctx := context.Background()
 
 	info, err := resolver.ResolveProfile(ctx, "profile-123")
@@ -169,7 +171,7 @@ func TestStoreProfileResolver_ResolveProfile_ProfileNotFound(t *testing.T) {
 		},
 	}
 
-	resolver := NewStoreProfileResolver(mockRepo)
+	resolver := NewStoreProfileResolver(mockRepo, nil)
 	ctx := context.Background()
 
 	info, err := resolver.ResolveProfile(ctx, "non-existent-profile")
@@ -205,7 +207,7 @@ func TestStoreProfileResolver_ResolveProfile_AgentNotFound(t *testing.T) {
 		},
 	}
 
-	resolver := NewStoreProfileResolver(mockRepo)
+	resolver := NewStoreProfileResolver(mockRepo, nil)
 	ctx := context.Background()
 
 	info, err := resolver.ResolveProfile(ctx, "profile-123")
@@ -220,5 +222,97 @@ func TestStoreProfileResolver_ResolveProfile_AgentNotFound(t *testing.T) {
 	expectedMsg := "agent not found for profile"
 	if err.Error()[:len(expectedMsg)] != expectedMsg {
 		t.Errorf("expected error message to start with '%s', got '%s'", expectedMsg, err.Error())
+	}
+}
+
+func TestStoreProfileResolver_ResolveProfile_FallbackToRegistryDefaultModel(t *testing.T) {
+	mockRepo := &MockRepository{
+		GetAgentProfileFn: func(ctx context.Context, id string) (*models.AgentProfile, error) {
+			return &models.AgentProfile{
+				ID:          "profile-123",
+				AgentID:     "agent-456",
+				Name:        "Default Profile",
+				Model:       "", // Empty model - should fallback to registry
+				AutoApprove: false,
+			}, nil
+		},
+		GetAgentFn: func(ctx context.Context, id string) (*models.Agent, error) {
+			return &models.Agent{
+				ID:   "agent-456",
+				Name: "claude-code", // Agent name matches registry key
+			}, nil
+		},
+	}
+
+	// Create a registry with a default model for claude-code
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
+	reg := registry.NewRegistry(log)
+	err := reg.Register(&registry.AgentTypeConfig{
+		ID:   "claude-code",
+		Name: "claude-code",
+		Cmd:  []string{"claude"}, // Standalone agent uses Cmd
+		ResourceLimits: registry.ResourceLimits{
+			MemoryMB:       1024,
+			CPUCores:       1,
+			TimeoutSeconds: 3600,
+		},
+		ModelConfig: registry.ModelConfig{
+			DefaultModel: "claude-sonnet-4-20250514",
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to register agent: %v", err)
+	}
+
+	resolver := NewStoreProfileResolver(mockRepo, reg)
+	ctx := context.Background()
+
+	info, err := resolver.ResolveProfile(ctx, "profile-123")
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if info == nil {
+		t.Fatal("expected non-nil profile info")
+	}
+	// Should have fallback to registry's default model
+	if info.Model != "claude-sonnet-4-20250514" {
+		t.Errorf("expected Model 'claude-sonnet-4-20250514' (from registry), got '%s'", info.Model)
+	}
+}
+
+func TestStoreProfileResolver_ResolveProfile_EmptyModelNoRegistry(t *testing.T) {
+	mockRepo := &MockRepository{
+		GetAgentProfileFn: func(ctx context.Context, id string) (*models.AgentProfile, error) {
+			return &models.AgentProfile{
+				ID:      "profile-123",
+				AgentID: "agent-456",
+				Name:    "Default Profile",
+				Model:   "", // Empty model
+			}, nil
+		},
+		GetAgentFn: func(ctx context.Context, id string) (*models.Agent, error) {
+			return &models.Agent{
+				ID:   "agent-456",
+				Name: "custom-agent",
+			}, nil
+		},
+	}
+
+	// No registry provided
+	resolver := NewStoreProfileResolver(mockRepo, nil)
+	ctx := context.Background()
+
+	info, err := resolver.ResolveProfile(ctx, "profile-123")
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if info == nil {
+		t.Fatal("expected non-nil profile info")
+	}
+	// Model should remain empty since no registry fallback available
+	if info.Model != "" {
+		t.Errorf("expected empty Model when no registry fallback, got '%s'", info.Model)
 	}
 }

@@ -5,7 +5,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useAppStore } from '@/components/state-provider';
 import { useAvailableAgents } from '@/hooks/domains/settings/use-available-agents';
 import { useSettingsData } from '@/hooks/domains/settings/use-settings-data';
-import { cn } from '@/lib/utils';
 import type { Agent, AgentProfile, AvailableAgent } from '@/lib/types/http';
 
 type ModelSelectorProps = {
@@ -18,9 +17,8 @@ export function ModelSelector({ sessionId }: ModelSelectorProps) {
 
   const settingsAgents = useAppStore((state) => state.settingsAgents.items);
   const taskSessions = useAppStore((state) => state.taskSessions.items);
-  const pendingModels = useAppStore((state) => state.pendingModel.bySessionId);
   const activeModels = useAppStore((state) => state.activeModel.bySessionId);
-  const setPendingModel = useAppStore((state) => state.setPendingModel);
+  const setActiveModel = useAppStore((state) => state.setActiveModel);
 
   // Ensure available agents are loaded (contains model_config)
   // Note: We don't block on this loading - it only affects the dropdown options
@@ -49,6 +47,7 @@ export function ModelSelector({ sessionId }: ModelSelectorProps) {
   }
 
   // Get available models from the agent discovery data
+  // Agent.name is the registry ID (e.g., "claude-code") which matches AvailableAgent.name
   let availableModels: { id: string; name: string; provider: string; context_window: number; is_default: boolean }[] = [];
   if (sessionProfile?.agent) {
     const agentName = sessionProfile.agent.name;
@@ -58,13 +57,9 @@ export function ModelSelector({ sessionId }: ModelSelectorProps) {
     }
   }
 
-  // Priority: activeModel (after switch) > snapshot model
-  // Profile model fallback removed - all profiles now have models
+  // Priority: activeModel (user selection) > snapshot model (from backend)
   const activeModel = sessionId ? (activeModels[sessionId] || null) : null;
   const currentModel = activeModel || snapshotModelStr;
-  const pendingModel = sessionId ? (pendingModels[sessionId] || null) : null;
-  const displayedModel = pendingModel || currentModel || '';
-  const hasPendingChange = pendingModel && pendingModel !== currentModel;
 
   // Ensure current model is included in the list (even if not in available models)
   const modelOptions = [...availableModels];
@@ -80,7 +75,8 @@ export function ModelSelector({ sessionId }: ModelSelectorProps) {
 
   const handleModelChange = (modelId: string) => {
     if (!sessionId) return;
-    setPendingModel(sessionId, modelId);
+    // Immediately update the active model - the actual switch happens on next message
+    setActiveModel(sessionId, modelId);
   };
 
   // If no session or no model available, show disabled placeholder
@@ -95,19 +91,11 @@ export function ModelSelector({ sessionId }: ModelSelectorProps) {
   }
 
   return (
-    <Select value={displayedModel} onValueChange={handleModelChange}>
-      <SelectTrigger
-        className={cn(
-          'w-[180px] cursor-pointer',
-          hasPendingChange && 'border-primary/60 bg-primary/5'
-        )}
-      >
+    <Select value={currentModel} onValueChange={handleModelChange}>
+      <SelectTrigger className="w-[180px] cursor-pointer">
         <div className="flex items-center gap-1.5">
           <IconCpu className="h-3.5 w-3.5 text-muted-foreground" />
           <SelectValue placeholder="Select model" />
-          {hasPendingChange && (
-            <span className="ml-auto text-[10px] font-medium text-primary">pending</span>
-          )}
         </div>
       </SelectTrigger>
       <SelectContent>

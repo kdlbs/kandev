@@ -5,9 +5,8 @@ export function useMessageHandler(
   resolvedSessionId: string | null,
   taskId: string | null,
   sessionModel: string | null,
-  pendingModel: string | null,
-  setActiveModel: (sessionId: string, modelId: string) => void,
-  clearPendingModel: (sessionId: string) => void
+  activeModel: string | null,
+  planMode: boolean = false
 ) {
   const handleSendMessage = useCallback(
     async (message: string) => {
@@ -18,8 +17,8 @@ export function useMessageHandler(
       const client = getWebSocketClient();
       if (!client) return;
 
-      // Include pending model in the request if one is selected
-      const modelToSend = pendingModel && pendingModel !== sessionModel ? pendingModel : undefined;
+      // Include active model in the request if it differs from the session model
+      const modelToSend = activeModel && activeModel !== sessionModel ? activeModel : undefined;
 
       await client.request(
         'message.add',
@@ -28,17 +27,12 @@ export function useMessageHandler(
           session_id: resolvedSessionId,
           content: message,
           ...(modelToSend && { model: modelToSend }),
+          ...(planMode && { plan_mode: true }),
         },
         10000
       );
-
-      // Move pending model to active model after sending (it's now the model in use)
-      if (modelToSend && resolvedSessionId) {
-        setActiveModel(resolvedSessionId, modelToSend);
-        clearPendingModel(resolvedSessionId);
-      }
     },
-    [resolvedSessionId, taskId, pendingModel, sessionModel, setActiveModel, clearPendingModel]
+    [resolvedSessionId, taskId, activeModel, sessionModel, planMode]
   );
 
   return { handleSendMessage };
