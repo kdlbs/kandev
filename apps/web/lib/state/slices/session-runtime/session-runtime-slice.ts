@@ -21,6 +21,8 @@ export const defaultSessionRuntimeState: SessionRuntimeSliceState = {
     devProcessBySessionId: {},
   },
   gitStatus: { bySessionId: {} },
+  gitSnapshots: { bySessionId: {}, latestBySessionId: {}, loading: {} },
+  sessionCommits: { bySessionId: {}, loading: {} },
   contextWindow: { bySessionId: {} },
   agents: { agents: [] },
 };
@@ -89,5 +91,37 @@ export const createSessionRuntimeSlice: StateCreator<
   setContextWindow: (sessionId, contextWindow) =>
     set((draft) => {
       draft.contextWindow.bySessionId[sessionId] = contextWindow;
+    }),
+  // Git snapshot actions
+  setGitSnapshots: (sessionId, snapshots) =>
+    set((draft) => {
+      draft.gitSnapshots.bySessionId[sessionId] = snapshots;
+      draft.gitSnapshots.latestBySessionId[sessionId] = snapshots.length > 0 ? snapshots[0] : null;
+    }),
+  setGitSnapshotsLoading: (sessionId, loading) =>
+    set((draft) => {
+      draft.gitSnapshots.loading[sessionId] = loading;
+    }),
+  addGitSnapshot: (sessionId, snapshot) =>
+    set((draft) => {
+      const existing = draft.gitSnapshots.bySessionId[sessionId] || [];
+      // Add to front (newest first)
+      draft.gitSnapshots.bySessionId[sessionId] = [snapshot, ...existing];
+      draft.gitSnapshots.latestBySessionId[sessionId] = snapshot;
+    }),
+  // Session commit actions
+  setSessionCommits: (sessionId, commits) =>
+    set((draft) => {
+      draft.sessionCommits.bySessionId[sessionId] = commits;
+    }),
+  setSessionCommitsLoading: (sessionId, loading) =>
+    set((draft) => {
+      draft.sessionCommits.loading[sessionId] = loading;
+    }),
+  addSessionCommit: (sessionId, commit) =>
+    set((draft) => {
+      const existing = draft.sessionCommits.bySessionId[sessionId] || [];
+      // Add to front (newest first)
+      draft.sessionCommits.bySessionId[sessionId] = [commit, ...existing];
     }),
 });

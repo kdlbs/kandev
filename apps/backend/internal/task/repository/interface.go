@@ -91,6 +91,17 @@ type Repository interface {
 	DeleteTaskSessionWorktree(ctx context.Context, id string) error
 	DeleteTaskSessionWorktreesBySession(ctx context.Context, sessionID string) error
 
+	// Git Snapshot operations
+	CreateGitSnapshot(ctx context.Context, snapshot *models.GitSnapshot) error
+	GetLatestGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error)
+	GetFirstGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error)
+	GetGitSnapshotsBySession(ctx context.Context, sessionID string, limit int) ([]*models.GitSnapshot, error)
+
+	// Session Commit operations
+	CreateSessionCommit(ctx context.Context, commit *models.SessionCommit) error
+	GetSessionCommits(ctx context.Context, sessionID string) ([]*models.SessionCommit, error)
+	GetLatestSessionCommit(ctx context.Context, sessionID string) (*models.SessionCommit, error)
+
 	// Repository operations
 	CreateRepository(ctx context.Context, repository *models.Repository) error
 	GetRepository(ctx context.Context, id string) (*models.Repository, error)

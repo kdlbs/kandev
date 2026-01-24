@@ -14,6 +14,7 @@ import (
 type StreamCallbacks struct {
 	OnAgentEvent    func(execution *AgentExecution, event agentctl.AgentEvent)
 	OnGitStatus     func(execution *AgentExecution, update *agentctl.GitStatusUpdate)
+	OnGitCommit     func(execution *AgentExecution, commit *agentctl.GitCommitNotification)
 	OnFileChange    func(execution *AgentExecution, notification *agentctl.FileChangeNotification)
 	OnShellOutput   func(execution *AgentExecution, data string)
 	OnShellExit     func(execution *AgentExecution, code int)
@@ -118,6 +119,11 @@ func (sm *StreamManager) connectWorkspaceStream(execution *AgentExecution) {
 			OnGitStatus: func(update *agentctl.GitStatusUpdate) {
 				if sm.callbacks.OnGitStatus != nil {
 					sm.callbacks.OnGitStatus(execution, update)
+				}
+			},
+			OnGitCommit: func(commit *agentctl.GitCommitNotification) {
+				if sm.callbacks.OnGitCommit != nil {
+					sm.callbacks.OnGitCommit(execution, commit)
 				}
 			},
 			OnFileChange: func(notification *agentctl.FileChangeNotification) {

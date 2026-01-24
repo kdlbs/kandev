@@ -159,6 +159,7 @@ func NewService(
 		OnACPSessionCreated:    s.handleACPSessionCreated,
 		OnPermissionRequest:    s.handlePermissionRequest,
 		OnGitStatusUpdated:     s.handleGitStatusUpdated,
+		OnGitCommitCreated:     s.handleGitCommitCreated,
 		OnContextWindowUpdated: s.handleContextWindowUpdated,
 	}
 	s.watcher = watcher.NewWatcher(eventBus, handlers, log)

@@ -311,6 +311,31 @@ func (m *mockRepository) Close() error {
 	return nil
 }
 
+// Git Snapshot operations
+func (m *mockRepository) CreateGitSnapshot(ctx context.Context, snapshot *models.GitSnapshot) error {
+	return nil
+}
+func (m *mockRepository) GetLatestGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error) {
+	return nil, nil
+}
+func (m *mockRepository) GetFirstGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error) {
+	return nil, nil
+}
+func (m *mockRepository) GetGitSnapshotsBySession(ctx context.Context, sessionID string, limit int) ([]*models.GitSnapshot, error) {
+	return nil, nil
+}
+
+// Session Commit operations
+func (m *mockRepository) CreateSessionCommit(ctx context.Context, commit *models.SessionCommit) error {
+	return nil
+}
+func (m *mockRepository) GetSessionCommits(ctx context.Context, sessionID string) ([]*models.SessionCommit, error) {
+	return nil, nil
+}
+func (m *mockRepository) GetLatestSessionCommit(ctx context.Context, sessionID string) (*models.SessionCommit, error) {
+	return nil, nil
+}
+
 func newTestService(t *testing.T, scripts map[string][]*models.RepositoryScript) *service.Service {
 	log, err := logger.NewLogger(logger.LoggingConfig{
 		Level:  "error",

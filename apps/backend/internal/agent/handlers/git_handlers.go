@@ -37,6 +37,7 @@ func (h *GitHandlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionWorktreeCommit, h.wsCommit)
 	d.RegisterFunc(ws.ActionWorktreeStage, h.wsStage)
 	d.RegisterFunc(ws.ActionWorktreeCreatePR, h.wsCreatePR)
+	d.RegisterFunc(ws.ActionSessionCommitDiff, h.wsCommitDiff)
 }
 
 // GitPullRequest for worktree.pull action
@@ -89,6 +90,12 @@ type GitCreatePRRequest struct {
 	Title      string `json:"title"`
 	Body       string `json:"body"`
 	BaseBranch string `json:"base_branch"`
+}
+
+// GitShowCommitRequest for session.commit_diff action
+type GitShowCommitRequest struct {
+	SessionID string `json:"session_id"`
+	CommitSHA string `json:"commit_sha"`
 }
 
 // wsPull handles worktree.pull action
@@ -293,6 +300,33 @@ func (h *GitHandlers) wsCreatePR(ctx context.Context, msg *ws.Message) (*ws.Mess
 	result, err := client.GitCreatePR(ctx, req.Title, req.Body, req.BaseBranch)
 	if err != nil {
 		return nil, fmt.Errorf("create PR failed: %w", err)
+	}
+
+	return ws.NewResponse(msg.ID, msg.Action, result)
+}
+
+// wsCommitDiff handles session.commit_diff action
+func (h *GitHandlers) wsCommitDiff(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req GitShowCommitRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return nil, fmt.Errorf("invalid payload: %w", err)
+	}
+
+	if req.SessionID == "" {
+		return nil, fmt.Errorf("session_id is required")
+	}
+	if req.CommitSHA == "" {
+		return nil, fmt.Errorf("commit_sha is required")
+	}
+
+	client, err := h.getAgentCtlClient(req.SessionID)
+	if err != nil {
+		return nil, err
+	}
+
+	result, err := client.GitShowCommit(ctx, req.CommitSHA)
+	if err != nil {
+		return nil, fmt.Errorf("show commit failed: %w", err)
 	}
 
 	return ws.NewResponse(msg.ID, msg.Action, result)

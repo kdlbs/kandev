@@ -109,6 +109,7 @@ func NewManager(
 	mgr.streamManager = NewStreamManager(log, StreamCallbacks{
 		OnAgentEvent:    mgr.handleAgentEvent,
 		OnGitStatus:     mgr.handleGitStatusUpdate,
+		OnGitCommit:     mgr.handleGitCommitCreated,
 		OnFileChange:    mgr.handleFileChangeNotification,
 		OnShellOutput:   mgr.handleShellOutput,
 		OnShellExit:     mgr.handleShellExit,
@@ -1069,25 +1070,14 @@ func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.Age
 
 // handleGitStatusUpdate processes git status updates from the workspace tracker
 func (m *Manager) handleGitStatusUpdate(execution *AgentExecution, update *agentctl.GitStatusUpdate) {
-	// Store git status in execution metadata
-	m.executionStore.UpdateMetadata(execution.ID, func(metadata map[string]interface{}) map[string]interface{} {
-		metadata["git_status"] = map[string]interface{}{
-			"branch":        update.Branch,
-			"remote_branch": update.RemoteBranch,
-			"modified":      update.Modified,
-			"added":         update.Added,
-			"deleted":       update.Deleted,
-			"untracked":     update.Untracked,
-			"renamed":       update.Renamed,
-			"ahead":         update.Ahead,
-			"behind":        update.Behind,
-			"timestamp":     update.Timestamp,
-		}
-		return metadata
-	})
-
-	// Publish git status update to event bus for WebSocket streaming
+	// Publish git status update to event bus for WebSocket streaming and persistence
 	m.eventPublisher.PublishGitStatus(execution, update)
+}
+
+// handleGitCommitCreated processes git commit events from the workspace tracker
+func (m *Manager) handleGitCommitCreated(execution *AgentExecution, commit *agentctl.GitCommitNotification) {
+	// Publish commit event to event bus for WebSocket streaming and orchestrator handling
+	m.eventPublisher.PublishGitCommit(execution, commit)
 }
 
 // handleFileChangeNotification processes file change notifications from the workspace tracker

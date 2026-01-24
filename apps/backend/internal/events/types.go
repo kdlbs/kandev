@@ -108,6 +108,9 @@ const (
 const (
 	GitStatusUpdated   = "git.status.updated"   // Git status changed in workspace
 	FileChangeNotified = "file.change.notified" // File changed in workspace
+	GitCommitCreated   = "git.commit.created"   // New commit created in workspace
+	GitSnapshotCreated = "git.snapshot.created" // New git snapshot created
+	GitCommitRecorded  = "git.commit.recorded"  // New session commit recorded to database
 )
 
 // Event types for shell I/O
@@ -185,6 +188,36 @@ func BuildGitStatusSubject(sessionID string) string {
 // BuildGitStatusWildcardSubject creates a wildcard subscription for all git status updates
 func BuildGitStatusWildcardSubject() string {
 	return GitStatusUpdated + ".*"
+}
+
+// BuildGitCommitSubject returns the event subject for git commit events for a session.
+func BuildGitCommitSubject(sessionID string) string {
+	return GitCommitCreated + "." + sessionID
+}
+
+// BuildGitCommitWildcardSubject creates a wildcard subscription for all git commit events
+func BuildGitCommitWildcardSubject() string {
+	return GitCommitCreated + ".*"
+}
+
+// BuildGitSnapshotSubject creates a git snapshot subject for a specific session
+func BuildGitSnapshotSubject(sessionID string) string {
+	return GitSnapshotCreated + "." + sessionID
+}
+
+// BuildGitSnapshotWildcardSubject creates a wildcard subscription for all git snapshot events
+func BuildGitSnapshotWildcardSubject() string {
+	return GitSnapshotCreated + ".*"
+}
+
+// BuildGitCommitRecordedSubject creates a git commit recorded subject for a specific session
+func BuildGitCommitRecordedSubject(sessionID string) string {
+	return GitCommitRecorded + "." + sessionID
+}
+
+// BuildGitCommitRecordedWildcardSubject creates a wildcard subscription for all git commit recorded events
+func BuildGitCommitRecordedWildcardSubject() string {
+	return GitCommitRecorded + ".*"
 }
 
 // BuildFileChangeSubject creates a file change subject for a specific session

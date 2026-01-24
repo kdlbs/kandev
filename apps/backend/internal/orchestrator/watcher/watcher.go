@@ -60,6 +60,8 @@ type GitStatusData struct {
 	AgentID       string                 `json:"agent_id"`
 	Branch        string                 `json:"branch"`
 	RemoteBranch  string                 `json:"remote_branch"`
+	HeadCommit    string                 `json:"head_commit"`
+	BaseCommit    string                 `json:"base_commit"`
 	Modified      []string               `json:"modified"`
 	Added         []string               `json:"added"`
 	Deleted       []string               `json:"deleted"`
@@ -69,6 +71,22 @@ type GitStatusData struct {
 	Behind        int                    `json:"behind"`
 	Files         map[string]interface{} `json:"files"`
 	Timestamp     string                 `json:"timestamp"`
+}
+
+// GitCommitData contains data from git commit events
+type GitCommitData struct {
+	TaskID        string `json:"task_id"`
+	TaskSessionID string `json:"session_id"`
+	AgentID       string `json:"agent_id"`
+	CommitSHA     string `json:"commit_sha"`
+	ParentSHA     string `json:"parent_sha"`
+	Message       string `json:"message"`
+	AuthorName    string `json:"author_name"`
+	AuthorEmail   string `json:"author_email"`
+	FilesChanged  int    `json:"files_changed"`
+	Insertions    int    `json:"insertions"`
+	Deletions     int    `json:"deletions"`
+	CommittedAt   string `json:"committed_at"`
 }
 
 // ContextWindowData contains data from context window events
@@ -107,6 +125,9 @@ type EventHandlers struct {
 
 	// Git status events
 	OnGitStatusUpdated func(ctx context.Context, data GitStatusData)
+
+	// Git commit events
+	OnGitCommitCreated func(ctx context.Context, data GitCommitData)
 
 	// Context window events
 	OnContextWindowUpdated func(ctx context.Context, data ContextWindowData)
@@ -178,6 +199,12 @@ func (w *Watcher) Start(ctx context.Context) error {
 
 	// Subscribe to git status events
 	if err := w.subscribeToGitStatusEvents(); err != nil {
+		w.unsubscribeAll()
+		return err
+	}
+
+	// Subscribe to git commit events
+	if err := w.subscribeToGitCommitEvents(); err != nil {
 		w.unsubscribeAll()
 		return err
 	}
@@ -502,6 +529,50 @@ func (w *Watcher) createGitStatusHandler() bus.EventHandler {
 			zap.Int("modified", len(data.Modified)))
 
 		w.handlers.OnGitStatusUpdated(ctx, data)
+		return nil
+	}
+}
+
+// subscribeToGitCommitEvents subscribes to git commit events
+func (w *Watcher) subscribeToGitCommitEvents() error {
+	if w.handlers.OnGitCommitCreated == nil {
+		return nil
+	}
+
+	// Use wildcard to subscribe to all git commit events (git.commit.created.{session_id})
+	subject := events.BuildGitCommitWildcardSubject()
+
+	// Use regular subscription (each instance needs all messages)
+	sub, err := w.eventBus.Subscribe(subject, w.createGitCommitHandler())
+	if err != nil {
+		w.logger.Error("Failed to subscribe to git commit events",
+			zap.String("subject", subject),
+			zap.Error(err))
+		return err
+	}
+	w.subscriptions = append(w.subscriptions, sub)
+	return nil
+}
+
+// createGitCommitHandler creates a bus.EventHandler for git commit events
+func (w *Watcher) createGitCommitHandler() bus.EventHandler {
+	return func(ctx context.Context, event *bus.Event) error {
+		var data GitCommitData
+		if err := w.parseEventData(event.Data, &data); err != nil {
+			w.logger.Error("Failed to parse git commit event data",
+				zap.String("event_type", event.Type),
+				zap.String("event_id", event.ID),
+				zap.Error(err))
+			return nil // Don't return error to continue processing other events
+		}
+
+		w.logger.Debug("Handling git commit event",
+			zap.String("task_id", data.TaskID),
+			zap.String("commit_sha", data.CommitSHA))
+
+		if w.handlers.OnGitCommitCreated != nil {
+			w.handlers.OnGitCommitCreated(ctx, data)
+		}
 		return nil
 	}
 }

@@ -12,37 +12,39 @@ import { FILE_EXTENSION_COLORS } from '@/lib/types/backend';
 import { useAppStore } from '@/components/state-provider';
 import { SessionTabs, type SessionTab } from '@/components/session-tabs';
 
+import type { SelectedDiff } from './task-layout';
+
 type TaskCenterPanelProps = {
-  selectedDiffPath: string | null;
+  selectedDiff: SelectedDiff | null;
   openFileRequest: OpenFileTab | null;
-  onDiffPathHandled: () => void;
+  onDiffHandled: () => void;
   onFileOpenHandled: () => void;
   sessionId?: string | null;
 };
 
 export const TaskCenterPanel = memo(function TaskCenterPanel({
-  selectedDiffPath: externalSelectedDiffPath,
+  selectedDiff: externalSelectedDiff,
   openFileRequest,
-  onDiffPathHandled,
+  onDiffHandled,
   onFileOpenHandled,
   sessionId = null,
 }: TaskCenterPanelProps) {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const [leftTab, setLeftTab] = useState('chat');
-  const [selectedDiffPath, setSelectedDiffPath] = useState<string | null>(null);
+  const [selectedDiff, setSelectedDiff] = useState<SelectedDiff | null>(null);
   const [notes, setNotes] = useState('');
   const [openFileTabs, setOpenFileTabs] = useState<OpenFileTab[]>([]);
 
-  // Handle external diff path selection
+  // Handle external diff selection
   useEffect(() => {
-    if (externalSelectedDiffPath) {
+    if (externalSelectedDiff) {
       queueMicrotask(() => {
-        setSelectedDiffPath(externalSelectedDiffPath);
+        setSelectedDiff(externalSelectedDiff);
         setLeftTab('changes');
-        onDiffPathHandled();
+        onDiffHandled();
       });
     }
-  }, [externalSelectedDiffPath, onDiffPathHandled]);
+  }, [externalSelectedDiff, onDiffHandled]);
 
   // Handle external file open request
   useEffect(() => {
@@ -119,8 +121,8 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
 
         <TabsContent value="changes" className="flex-1 min-h-0">
           <TaskChangesPanel
-            selectedDiffPath={selectedDiffPath}
-            onClearSelected={() => setSelectedDiffPath(null)}
+            selectedDiff={selectedDiff}
+            onClearSelected={() => setSelectedDiff(null)}
           />
         </TabsContent>
 

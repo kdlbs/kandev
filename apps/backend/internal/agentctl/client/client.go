@@ -254,6 +254,7 @@ func (c *Client) BaseURL() string {
 // These types are defined in the streams subpackage and re-exported through types.
 type (
 	GitStatusUpdate        = types.GitStatusUpdate
+	GitCommitNotification  = types.GitCommitNotification
 	FileInfo               = types.FileInfo
 	FileListUpdate         = types.FileListUpdate
 	FileEntry              = types.FileEntry
@@ -565,6 +566,7 @@ type WorkspaceStreamCallbacks struct {
 	OnShellOutput   func(data string)
 	OnShellExit     func(code int)
 	OnGitStatus     func(update *GitStatusUpdate)
+	OnGitCommit     func(notification *GitCommitNotification)
 	OnFileChange    func(notification *FileChangeNotification)
 	OnFileList      func(update *FileListUpdate)
 	OnProcessOutput func(output *types.ProcessOutput)
@@ -640,6 +642,10 @@ func (c *Client) StreamWorkspace(ctx context.Context, callbacks WorkspaceStreamC
 			case types.WorkspaceMessageTypeGitStatus:
 				if callbacks.OnGitStatus != nil && msg.GitStatus != nil {
 					callbacks.OnGitStatus(msg.GitStatus)
+				}
+			case types.WorkspaceMessageTypeGitCommit:
+				if callbacks.OnGitCommit != nil && msg.GitCommit != nil {
+					callbacks.OnGitCommit(msg.GitCommit)
 				}
 			case types.WorkspaceMessageTypeFileChange:
 				if callbacks.OnFileChange != nil && msg.FileChange != nil {

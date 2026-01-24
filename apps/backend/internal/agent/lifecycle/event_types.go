@@ -71,6 +71,8 @@ type GitStatusEventPayload struct {
 	AgentID      string      `json:"agent_id"`
 	Branch       string      `json:"branch"`
 	RemoteBranch string      `json:"remote_branch,omitempty"`
+	HeadCommit   string      `json:"head_commit,omitempty"`
+	BaseCommit   string      `json:"base_commit,omitempty"`
 	Modified     []string    `json:"modified"`
 	Added        []string    `json:"added"`
 	Deleted      []string    `json:"deleted"`
@@ -84,6 +86,27 @@ type GitStatusEventPayload struct {
 
 // GetSessionID returns the session ID for this event (used by event routing).
 func (p GitStatusEventPayload) GetSessionID() string {
+	return p.SessionID
+}
+
+// GitCommitEventPayload is the payload for git commit events.
+type GitCommitEventPayload struct {
+	TaskID       string `json:"task_id"`
+	SessionID    string `json:"session_id"`
+	AgentID      string `json:"agent_id"`
+	CommitSHA    string `json:"commit_sha"`
+	ParentSHA    string `json:"parent_sha"`
+	Message      string `json:"message"`
+	AuthorName   string `json:"author_name"`
+	AuthorEmail  string `json:"author_email"`
+	FilesChanged int    `json:"files_changed"`
+	Insertions   int    `json:"insertions"`
+	Deletions    int    `json:"deletions"`
+	CommittedAt  string `json:"committed_at"`
+}
+
+// GetSessionID returns the session ID for this event (used by event routing).
+func (p GitCommitEventPayload) GetSessionID() string {
 	return p.SessionID
 }
 

@@ -12,7 +12,9 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/zap"
 )
@@ -55,8 +57,9 @@ type GitOperationResult struct {
 
 // GitOperator executes git operations in a workspace directory.
 type GitOperator struct {
-	workDir string
-	logger  *logger.Logger
+	workDir          string
+	logger           *logger.Logger
+	workspaceTracker *WorkspaceTracker
 
 	mu         sync.Mutex // Prevents concurrent git operations
 	inProgress bool
@@ -64,10 +67,11 @@ type GitOperator struct {
 }
 
 // NewGitOperator creates a new GitOperator for the given workspace directory.
-func NewGitOperator(workDir string, log *logger.Logger) *GitOperator {
+func NewGitOperator(workDir string, log *logger.Logger, workspaceTracker *WorkspaceTracker) *GitOperator {
 	return &GitOperator{
-		workDir: workDir,
-		logger:  log.WithFields(zap.String("component", "git-operator")),
+		workDir:          workDir,
+		logger:           log.WithFields(zap.String("component", "git-operator")),
+		workspaceTracker: workspaceTracker,
 	}
 }
 
@@ -394,6 +398,41 @@ func (g *GitOperator) Commit(ctx context.Context, message string, stageAll bool)
 
 	result.Success = true
 	g.logger.Info("commit completed", zap.String("message", message))
+
+	// Publish commit notification if we have a workspace tracker
+	if g.workspaceTracker != nil {
+		// Get commit details
+		commitSHA, _ := g.runGitCommand(ctx, "rev-parse", "HEAD")
+		parentSHA, _ := g.runGitCommand(ctx, "rev-parse", "HEAD~1")
+
+		// Get commit info (author name|author email)
+		authorInfo, _ := g.runGitCommand(ctx, "show", "-s", "--format=%an|%ae", "HEAD")
+		authorParts := strings.Split(strings.TrimSpace(authorInfo), "|")
+		authorName := ""
+		authorEmail := ""
+		if len(authorParts) >= 2 {
+			authorName = authorParts[0]
+			authorEmail = authorParts[1]
+		}
+
+		// Get commit stats
+		filesChanged, insertions, deletions := g.getCommitStats(ctx, strings.TrimSpace(commitSHA))
+
+		commit := &streams.GitCommitNotification{
+			CommitSHA:    strings.TrimSpace(commitSHA),
+			ParentSHA:    strings.TrimSpace(parentSHA),
+			Message:      message,
+			AuthorName:   authorName,
+			AuthorEmail:  authorEmail,
+			FilesChanged: filesChanged,
+			Insertions:   insertions,
+			Deletions:    deletions,
+			CommittedAt:  time.Now().UTC(),
+		}
+
+		g.workspaceTracker.NotifyGitCommit(commit)
+	}
+
 	return result, nil
 }
 
@@ -466,7 +505,151 @@ func (g *GitOperator) Abort(ctx context.Context, operation string) (*GitOperatio
 	return result, nil
 }
 
+// CommitDiffResult represents the result of getting a commit's diff.
+type CommitDiffResult struct {
+	Success      bool                   `json:"success"`
+	CommitSHA    string                 `json:"commit_sha"`
+	Message      string                 `json:"message"`
+	Author       string                 `json:"author"`
+	Date         string                 `json:"date"`
+	Files        map[string]interface{} `json:"files"` // FileInfo objects with diff content
+	FilesChanged int                    `json:"files_changed"`
+	Insertions   int                    `json:"insertions"`
+	Deletions    int                    `json:"deletions"`
+	Error        string                 `json:"error,omitempty"`
+}
 
+// ShowCommit gets the diff for a specific commit using git show.
+func (g *GitOperator) ShowCommit(ctx context.Context, commitSHA string) (*CommitDiffResult, error) {
+	result := &CommitDiffResult{
+		CommitSHA: commitSHA,
+	}
+
+	// Validate commit SHA (basic validation - alphanumeric only)
+	if commitSHA == "" || len(commitSHA) > 64 {
+		result.Error = "invalid commit SHA"
+		return result, nil
+	}
+	for _, c := range commitSHA {
+		isDigit := c >= '0' && c <= '9'
+		isLowerHex := c >= 'a' && c <= 'f'
+		isUpperHex := c >= 'A' && c <= 'F'
+		if !isDigit && !isLowerHex && !isUpperHex {
+			result.Error = "invalid commit SHA: must be hexadecimal"
+			return result, nil
+		}
+	}
+
+	// Get commit metadata
+	formatOutput, err := g.runGitCommand(ctx, "show", "--no-patch", "--format=%H%n%s%n%an <%ae>%n%aI", commitSHA)
+	if err != nil {
+		result.Error = fmt.Sprintf("failed to get commit info: %s", err.Error())
+		return result, nil
+	}
+
+	lines := strings.Split(strings.TrimSpace(formatOutput), "\n")
+	if len(lines) >= 4 {
+		result.CommitSHA = lines[0]
+		result.Message = lines[1]
+		result.Author = lines[2]
+		result.Date = lines[3]
+	}
+
+	// Get the diff with stats
+	diffOutput, err := g.runGitCommand(ctx, "show", "--format=", "--stat", "--numstat", "-p", commitSHA)
+	if err != nil {
+		result.Error = fmt.Sprintf("failed to get commit diff: %s", err.Error())
+		return result, nil
+	}
+
+	// Parse the diff output into files
+	result.Files = g.parseCommitDiff(diffOutput)
+	result.FilesChanged = len(result.Files)
+
+	// Calculate total insertions/deletions
+	for _, fileInfo := range result.Files {
+		if fi, ok := fileInfo.(map[string]interface{}); ok {
+			if additions, ok := fi["additions"].(int); ok {
+				result.Insertions += additions
+			}
+			if deletions, ok := fi["deletions"].(int); ok {
+				result.Deletions += deletions
+			}
+		}
+	}
+
+	result.Success = true
+	return result, nil
+}
+
+// parseCommitDiff parses git show output into file info map
+func (g *GitOperator) parseCommitDiff(output string) map[string]interface{} {
+	files := make(map[string]interface{})
+
+	// Split by "diff --git" to get individual file diffs
+	parts := strings.Split(output, "diff --git ")
+	if len(parts) <= 1 {
+		return files
+	}
+
+	for _, part := range parts[1:] {
+		if part == "" {
+			continue
+		}
+
+		// Re-add the "diff --git " prefix
+		diffContent := "diff --git " + part
+
+		// Extract file path from the diff header
+		// Format: diff --git a/path/to/file b/path/to/file
+		lines := strings.SplitN(diffContent, "\n", 2)
+		if len(lines) == 0 {
+			continue
+		}
+
+		header := lines[0]
+		// Extract path from "diff --git a/path b/path"
+		headerParts := strings.Split(header, " ")
+		if len(headerParts) < 4 {
+			continue
+		}
+
+		// Get the b/path part and remove the "b/" prefix
+		bPath := headerParts[len(headerParts)-1]
+		filePath := strings.TrimPrefix(bPath, "b/")
+
+		// Determine file status from diff content
+		status := "modified"
+		if strings.Contains(diffContent, "new file mode") {
+			status = "added"
+		} else if strings.Contains(diffContent, "deleted file mode") {
+			status = "deleted"
+		} else if strings.Contains(diffContent, "rename from") {
+			status = "renamed"
+		}
+
+		// Count additions and deletions
+		additions := 0
+		deletions := 0
+		for _, line := range strings.Split(diffContent, "\n") {
+			if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
+				additions++
+			} else if strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---") {
+				deletions++
+			}
+		}
+
+		files[filePath] = map[string]interface{}{
+			"status":    status,
+			"staged":    false,
+			"additions": additions,
+			"deletions": deletions,
+			"diff":      diffContent,
+		}
+	}
+
+	return files
+}
 
 // tryLock attempts to acquire the operation lock without blocking.
 // Returns true if the lock was acquired, false if an operation is in progress.
@@ -575,4 +758,54 @@ func (g *GitOperator) CreatePR(ctx context.Context, title, body, baseBranch stri
 	result.Success = true
 	g.logger.Info("PR created", zap.String("url", result.PRURL))
 	return result, nil
+}
+
+// getCommitStats returns the number of files changed, insertions, and deletions for a commit
+func (g *GitOperator) getCommitStats(ctx context.Context, commitSHA string) (filesChanged, insertions, deletions int) {
+	// git show --stat --format="" HEAD gives us the stat summary
+	output, err := g.runGitCommand(ctx, "show", "--stat", "--format=", commitSHA)
+	if err != nil {
+		return 0, 0, 0
+	}
+
+	// The last non-empty line contains the summary like:
+	// " 3 files changed, 10 insertions(+), 5 deletions(-)"
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	if len(lines) == 0 {
+		return 0, 0, 0
+	}
+
+	summary := lines[len(lines)-1]
+	// Parse: "N files changed, M insertions(+), K deletions(-)"
+	// Some variants may be missing insertions or deletions
+
+	// Match files changed
+	if idx := strings.Index(summary, " file"); idx > 0 {
+		part := strings.TrimSpace(summary[:idx])
+		// Get just the number
+		parts := strings.Fields(part)
+		if len(parts) > 0 {
+			_, _ = fmt.Sscanf(parts[len(parts)-1], "%d", &filesChanged)
+		}
+	}
+
+	// Match insertions
+	if idx := strings.Index(summary, " insertion"); idx > 0 {
+		// Find the number before " insertion"
+		start := strings.LastIndex(summary[:idx], " ") + 1
+		if start > 0 && start < idx {
+			_, _ = fmt.Sscanf(summary[start:idx], "%d", &insertions)
+		}
+	}
+
+	// Match deletions
+	if idx := strings.Index(summary, " deletion"); idx > 0 {
+		// Find the number before " deletion"
+		start := strings.LastIndex(summary[:idx], " ") + 1
+		if start > 0 && start < idx {
+			_, _ = fmt.Sscanf(summary[start:idx], "%d", &deletions)
+		}
+	}
+
+	return filesChanged, insertions, deletions
 }

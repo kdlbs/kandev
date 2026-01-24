@@ -34,6 +34,11 @@ type TaskLayoutProps = {
   defaultLayouts?: Record<string, Layout>;
 };
 
+export type SelectedDiff = {
+  path: string;
+  content?: string; // Optional: if provided, use this instead of looking up from git status
+};
+
 export const TaskLayout = memo(function TaskLayout({
   workspaceId,
   boardId,
@@ -41,7 +46,7 @@ export const TaskLayout = memo(function TaskLayout({
   repository = null,
   defaultLayouts = {},
 }: TaskLayoutProps) {
-  const [selectedDiffPath, setSelectedDiffPath] = useState<string | null>(null);
+  const [selectedDiff, setSelectedDiff] = useState<SelectedDiff | null>(null);
   const [openFileRequest, setOpenFileRequest] = useState<OpenFileTab | null>(null);
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const layoutBySession = useLayoutStore((state) => state.columnsBySessionId);
@@ -52,8 +57,8 @@ export const TaskLayout = memo(function TaskLayout({
   );
   const hasDevScript = Boolean(repository?.dev_script?.trim());
 
-  const handleSelectDiffPath = (path: string) => {
-    setSelectedDiffPath(path);
+  const handleSelectDiff = (path: string, content?: string) => {
+    setSelectedDiff({ path, content });
   };
 
   const handleOpenFile = (file: OpenFileTab) => {
@@ -62,7 +67,7 @@ export const TaskLayout = memo(function TaskLayout({
 
   const topFilesPanel = (
     <TaskFilesPanel
-      onSelectDiffPath={handleSelectDiffPath}
+      onSelectDiff={handleSelectDiff}
       onOpenFile={handleOpenFile}
     />
   );
@@ -127,9 +132,9 @@ export const TaskLayout = memo(function TaskLayout({
             >
               <Panel id="chat" minSize="400px" className="min-h-0 min-w-0">
                 <TaskCenterPanel
-                  selectedDiffPath={selectedDiffPath}
+                  selectedDiff={selectedDiff}
                   openFileRequest={openFileRequest}
-                  onDiffPathHandled={() => setSelectedDiffPath(null)}
+                  onDiffHandled={() => setSelectedDiff(null)}
                   onFileOpenHandled={() => setOpenFileRequest(null)}
                 />
               </Panel>
@@ -141,9 +146,9 @@ export const TaskLayout = memo(function TaskLayout({
         ) : (
           <Panel id="chat" minSize="400px" className="min-h-0 min-w-0">
             <TaskCenterPanel
-              selectedDiffPath={selectedDiffPath}
+              selectedDiff={selectedDiff}
               openFileRequest={openFileRequest}
-              onDiffPathHandled={() => setSelectedDiffPath(null)}
+              onDiffHandled={() => setSelectedDiff(null)}
               onFileOpenHandled={() => setOpenFileRequest(null)}
               sessionId={sessionId}
             />
