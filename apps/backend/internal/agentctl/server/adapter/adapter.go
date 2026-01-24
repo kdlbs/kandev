@@ -70,8 +70,10 @@ type AgentAdapter interface {
 	// PrepareEnvironment performs protocol-specific setup before the agent process starts.
 	// For Codex, this writes MCP servers to ~/.codex/config.toml.
 	// For ACP, this is a no-op (MCP servers are passed through the protocol).
+	// For OpenCode, this returns environment variables for server authentication.
 	// Must be called before the agent subprocess is started.
-	PrepareEnvironment() error
+	// Returns a map of environment variables to add to the subprocess environment.
+	PrepareEnvironment() (map[string]string, error)
 
 	// Connect wires up the stdin/stdout pipes from the running agent subprocess.
 	// Must be called after the subprocess is started and before Initialize.

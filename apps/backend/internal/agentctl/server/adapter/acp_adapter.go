@@ -32,13 +32,18 @@ type ACPAdapter struct {
 	sessionID string
 
 	// Agent info (populated after Initialize)
-	agentInfo *AgentInfo
+	agentInfo    *AgentInfo
+	capabilities acp.AgentCapabilities
 
 	// Update channel
 	updatesCh chan AgentEvent
 
 	// Permission handler
 	permissionHandler PermissionHandler
+
+	// Context injection for fork_session pattern (ACP agents that don't support session/load)
+	// When set, this context will be prepended to the first prompt sent to the session.
+	pendingContext string
 
 	// Synchronization
 	mu     sync.RWMutex
@@ -57,8 +62,8 @@ func NewACPAdapter(cfg *Config, log *logger.Logger) *ACPAdapter {
 
 // PrepareEnvironment is a no-op for ACP.
 // ACP passes MCP servers through the protocol during session creation.
-func (a *ACPAdapter) PrepareEnvironment() error {
-	return nil
+func (a *ACPAdapter) PrepareEnvironment() (map[string]string, error) {
+	return nil, nil
 }
 
 // Connect wires up the stdin/stdout pipes from the running agent subprocess.
@@ -105,7 +110,7 @@ func (a *ACPAdapter) Initialize(ctx context.Context) error {
 		return fmt.Errorf("ACP initialize handshake failed: %w", err)
 	}
 
-	// Store agent info
+	// Store agent info and capabilities
 	a.agentInfo = &AgentInfo{
 		Name:    "unknown",
 		Version: "unknown",
@@ -114,9 +119,11 @@ func (a *ACPAdapter) Initialize(ctx context.Context) error {
 		a.agentInfo.Name = resp.AgentInfo.Name
 		a.agentInfo.Version = resp.AgentInfo.Version
 	}
+	a.capabilities = resp.AgentCapabilities
 	a.logger.Info("ACP adapter initialized",
 		zap.String("agent_name", a.agentInfo.Name),
-		zap.String("agent_version", a.agentInfo.Version))
+		zap.String("agent_version", a.agentInfo.Version),
+		zap.Bool("supports_load_session", a.capabilities.LoadSession))
 
 	return nil
 }
@@ -179,12 +186,18 @@ func toACPMcpServers(servers []types.McpServer) []acp.McpServer {
 }
 
 // LoadSession resumes an existing session.
+// Returns an error if the agent does not support session loading (LoadSession capability).
 func (a *ACPAdapter) LoadSession(ctx context.Context, sessionID string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
 	if a.acpConn == nil {
 		return fmt.Errorf("adapter not initialized")
+	}
+
+	// Check if the agent supports session loading
+	if !a.capabilities.LoadSession {
+		return fmt.Errorf("agent does not support session loading (LoadSession capability is false)")
 	}
 
 	_, err := a.acpConn.LoadSession(ctx, acp.LoadSessionRequest{
@@ -201,23 +214,44 @@ func (a *ACPAdapter) LoadSession(ctx context.Context, sessionID string) error {
 }
 
 // Prompt sends a prompt to the agent.
+// If pending context is set (from SetPendingContext), it will be prepended to the message.
 func (a *ACPAdapter) Prompt(ctx context.Context, message string) error {
-	a.mu.RLock()
+	a.mu.Lock()
 	conn := a.acpConn
 	sessionID := a.sessionID
-	a.mu.RUnlock()
+	pendingContext := a.pendingContext
+	a.pendingContext = "" // Clear after use
+	a.mu.Unlock()
 
 	if conn == nil {
 		return fmt.Errorf("adapter not initialized")
+	}
+
+	// Inject pending context if available (fork_session pattern)
+	finalMessage := message
+	if pendingContext != "" {
+		finalMessage = pendingContext
+		a.logger.Info("injecting resume context into prompt",
+			zap.String("session_id", sessionID),
+			zap.Int("context_length", len(pendingContext)))
 	}
 
 	a.logger.Info("sending prompt", zap.String("session_id", sessionID))
 
 	_, err := conn.Prompt(ctx, acp.PromptRequest{
 		SessionId: acp.SessionId(sessionID),
-		Prompt:    []acp.ContentBlock{acp.TextBlock(message)},
+		Prompt:    []acp.ContentBlock{acp.TextBlock(finalMessage)},
 	})
 	return err
+}
+
+// SetPendingContext sets the context to be injected into the next prompt.
+// This is used by the fork_session pattern for ACP agents that don't support session/load.
+// The context will be prepended to the first prompt sent to this session.
+func (a *ACPAdapter) SetPendingContext(context string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.pendingContext = context
 }
 
 // Cancel cancels the current operation.
@@ -423,7 +457,40 @@ func (a *ACPAdapter) convertNotification(n acp.SessionNotification) *AgentEvent 
 func (a *ACPAdapter) handlePermissionRequest(ctx context.Context, req *PermissionRequest) (*PermissionResponse, error) {
 	a.mu.RLock()
 	handler := a.permissionHandler
+	sessionID := a.sessionID
 	a.mu.RUnlock()
+
+	// Emit a tool_call event so a message is created in the database.
+	// This is needed because permission requests bypass the normal ToolCall notification flow.
+	// Without this, when the tool completes (ToolCallUpdate), there's no message to update.
+	toolCallEvent := AgentEvent{
+		Type:       EventTypeToolCall,
+		SessionID:  sessionID,
+		ToolCallID: req.ToolCallID,
+		ToolName:   req.ActionType, // Use action type as tool name (e.g., "run_shell_command")
+		ToolTitle:  req.Title,
+		ToolStatus: "pending_permission", // Mark as pending permission
+		ToolArgs: map[string]interface{}{
+			"permission_request": true,
+			"action_type":        req.ActionType,
+		},
+	}
+
+	// Add action details if available
+	if req.ActionDetails != nil {
+		for k, v := range req.ActionDetails {
+			toolCallEvent.ToolArgs[k] = v
+		}
+	}
+
+	// Emit the tool_call event
+	select {
+	case a.updatesCh <- toolCallEvent:
+		a.logger.Debug("emitted tool_call event for permission request",
+			zap.String("tool_call_id", req.ToolCallID))
+	default:
+		a.logger.Warn("updates channel full, could not emit tool_call event for permission")
+	}
 
 	if handler == nil {
 		// Auto-approve if no handler

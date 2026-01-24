@@ -400,6 +400,250 @@
           }
         ]
       }
+    },
+    {
+      "id": "gemini",
+      "name": "Google Gemini CLI Agent",
+      "display_name": "Gemini",
+      "description": "Google Gemini CLI-powered autonomous coding agent using ACP protocol.",
+      "enabled": true,
+      "image": "",
+      "tag": "",
+      "cmd": [
+        "npx",
+        "-y",
+        "@google/gemini-cli@0.23.0",
+        "--experimental-acp"
+      ],
+      "working_dir": "{workspace}",
+      "required_env": [],
+      "env": {},
+      "mounts": [],
+      "resource_limits": {
+        "memory_mb": 4096,
+        "cpu_cores": 2.0,
+        "timeout_seconds": 3600
+      },
+      "capabilities": [
+        "code_generation",
+        "code_review",
+        "refactoring",
+        "testing",
+        "shell_execution"
+      ],
+      "protocol": "acp",
+      "protocol_config": {},
+      "model_flag": "--model {model}",
+      "workspace_flag": "",
+      "session_config": {
+        "resume_via_acp": false,
+        "resume_flag": "",
+        "can_recover": false,
+        "session_dir_template": "{home}/.gemini",
+        "session_dir_target": "",
+        "reports_status_via_stream": false
+      },
+      "permission_config": {
+        "permission_flag": "",
+        "tools_requiring_permission": [
+          "run_shell_command",
+          "write_file",
+          "edit_file"
+        ]
+      },
+      "permission_settings": {
+        "auto_approve": {
+          "supported": true,
+          "default": true,
+          "label": "Auto-approve (YOLO mode)",
+          "description": "Automatically approve all tool calls",
+          "apply_method": "cli_flag",
+          "cli_flag": "--yolo --allowed-tools run_shell_command"
+        }
+      },
+      "discovery": {
+        "supports_mcp": true,
+        "mcp_config_path": {
+          "linux": [
+            "~/.gemini/settings.json"
+          ],
+          "windows": [],
+          "macos": [
+            "~/.gemini/settings.json"
+          ]
+        },
+        "installation_path": {
+          "linux": [
+            "~/.gemini/oauth_creds.json",
+            "~/.gemini/installation_id"
+          ],
+          "windows": [],
+          "macos": [
+            "~/.gemini/oauth_creds.json",
+            "~/.gemini/installation_id"
+          ]
+        },
+        "discovery_capabilities": {
+          "supports_session_resume": true,
+          "supports_shell": false,
+          "supports_workspace_only": false
+        }
+      },
+      "model_config": {
+        "default_model": "gemini-3-flash-preview",
+        "available_models": [
+          {
+            "id": "gemini-3-flash-preview",
+            "name": "Gemini 3 Flash",
+            "description": "Fast and efficient model",
+            "provider": "google",
+            "context_window": 1000000,
+            "is_default": true
+          },
+          {
+            "id": "gemini-3-pro-preview",
+            "name": "Gemini 3 Pro",
+            "description": "Most capable model with 2M context",
+            "provider": "google",
+            "context_window": 2000000,
+            "is_default": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "opencode",
+      "name": "OpenCode AI Agent",
+      "display_name": "OpenCode",
+      "description": "OpenCode CLI-powered autonomous coding agent using REST/SSE protocol.",
+      "enabled": true,
+      "image": "",
+      "tag": "",
+      "cmd": [
+        "npx",
+        "-y",
+        "opencode-ai@1.1.25",
+        "serve",
+        "--hostname",
+        "127.0.0.1",
+        "--port",
+        "0"
+      ],
+      "working_dir": "{workspace}",
+      "required_env": [],
+      "env": {},
+      "mounts": [],
+      "resource_limits": {
+        "memory_mb": 4096,
+        "cpu_cores": 2.0,
+        "timeout_seconds": 3600
+      },
+      "capabilities": [
+        "code_generation",
+        "code_review",
+        "refactoring",
+        "testing",
+        "shell_execution"
+      ],
+      "protocol": "opencode",
+      "protocol_config": {},
+      "model_flag": "",
+      "workspace_flag": "",
+      "session_config": {
+        "resume_via_acp": true,
+        "resume_flag": "",
+        "can_recover": true,
+        "session_dir_template": "{home}/.opencode",
+        "session_dir_target": "",
+        "reports_status_via_stream": true
+      },
+      "permission_config": {
+        "permission_flag": "",
+        "tools_requiring_permission": [
+          "edit",
+          "bash",
+          "webfetch"
+        ]
+      },
+      "permission_settings": {
+        "auto_approve": {
+          "supported": true,
+          "default": true,
+          "label": "Auto-approve",
+          "description": "Automatically approve tool calls",
+          "apply_method": "env",
+          "cli_flag": ""
+        }
+      },
+      "discovery": {
+        "supports_mcp": true,
+        "mcp_config_path": {
+          "linux": [
+            "~/.config/opencode/opencode.json",
+            "~/.config/opencode/opencode.jsonc"
+          ],
+          "windows": [],
+          "macos": [
+            "~/.config/opencode/opencode.json",
+            "~/.config/opencode/opencode.jsonc",
+            "~/Library/Application Support/opencode/opencode.json"
+          ]
+        },
+        "installation_path": {
+          "linux": [
+            "~/.opencode",
+            "~/.config/opencode"
+          ],
+          "windows": [],
+          "macos": [
+            "~/.opencode",
+            "~/.config/opencode",
+            "~/Library/Application Support/ai.opencode.desktop"
+          ]
+        },
+        "discovery_capabilities": {
+          "supports_session_resume": true,
+          "supports_shell": false,
+          "supports_workspace_only": false
+        }
+      },
+      "model_config": {
+        "default_model": "anthropic/claude-sonnet-4-20250514",
+        "available_models": [
+          {
+            "id": "anthropic/claude-sonnet-4-20250514",
+            "name": "Claude Sonnet 4",
+            "description": "Anthropic Claude Sonnet 4",
+            "provider": "anthropic",
+            "context_window": 200000,
+            "is_default": true
+          },
+          {
+            "id": "anthropic/claude-opus-4-20250514",
+            "name": "Claude Opus 4",
+            "description": "Anthropic Claude Opus 4",
+            "provider": "anthropic",
+            "context_window": 200000,
+            "is_default": false
+          },
+          {
+            "id": "openai/gpt-4.1",
+            "name": "GPT-4.1",
+            "description": "OpenAI GPT-4.1",
+            "provider": "openai",
+            "context_window": 200000,
+            "is_default": false
+          },
+          {
+            "id": "google/gemini-2.5-pro",
+            "name": "Gemini 2.5 Pro",
+            "description": "Google Gemini 2.5 Pro",
+            "provider": "google",
+            "context_window": 2000000,
+            "is_default": false
+          }
+        ]
+      }
     }
   ]
 }

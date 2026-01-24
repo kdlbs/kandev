@@ -138,16 +138,47 @@ func (c *Client) forwardPermissionRequest(ctx context.Context, handler Permissio
 		}
 	}
 
+	// Extract title - prefer Kind as the title, use Title as description
 	title := ""
+	description := ""
 	if p.ToolCall.Title != nil {
-		title = *p.ToolCall.Title
+		description = *p.ToolCall.Title
+	}
+
+	// Use Kind as the action type (e.g., "run_shell_command", "write_file")
+	actionType := ""
+	if p.ToolCall.Kind != nil {
+		actionType = string(*p.ToolCall.Kind)
+		title = actionType // Use kind as the title for cleaner display
+	}
+
+	// If no Kind, try to extract a short title from the verbose title
+	// Gemini format: "pwd [current working directory /path] (Print the current working directory.)"
+	if title == "" && description != "" {
+		// Use the first word/command as the title
+		if idx := strings.Index(description, " "); idx > 0 {
+			title = description[:idx]
+		} else {
+			title = description
+		}
+	}
+
+	// Build action details from raw input if available
+	actionDetails := make(map[string]any)
+	if p.ToolCall.RawInput != nil {
+		actionDetails["raw_input"] = p.ToolCall.RawInput
+	}
+	if description != "" && description != title {
+		actionDetails["description"] = description
 	}
 
 	req := &types.PermissionRequest{
-		SessionID:  string(p.SessionId),
-		ToolCallID: string(p.ToolCall.ToolCallId),
-		Title:      title,
-		Options:    options,
+		SessionID:     string(p.SessionId),
+		ToolCallID:    string(p.ToolCall.ToolCallId),
+		Title:         title,
+		ActionType:    actionType,
+		ActionDetails: actionDetails,
+		Options:       options,
 	}
 
 	c.logger.Info("forwarding permission request to handler",

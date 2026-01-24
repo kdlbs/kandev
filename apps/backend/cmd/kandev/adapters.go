@@ -286,9 +286,9 @@ func (a *messageCreatorAdapter) CreateToolCallMessage(ctx context.Context, taskI
 	return err
 }
 
-// UpdateToolCallMessage updates a tool call message's status
-func (a *messageCreatorAdapter) UpdateToolCallMessage(ctx context.Context, taskID, toolCallID, status, result, agentSessionID string) error {
-	return a.svc.UpdateToolCallMessage(ctx, agentSessionID, toolCallID, status, result)
+// UpdateToolCallMessage updates a tool call message's status and optionally updates title/args
+func (a *messageCreatorAdapter) UpdateToolCallMessage(ctx context.Context, taskID, toolCallID, status, result, agentSessionID, title string, args map[string]interface{}) error {
+	return a.svc.UpdateToolCallMessage(ctx, agentSessionID, toolCallID, status, result, title, args)
 }
 
 // CreateSessionMessage creates a message for non-chat session updates (status/progress/error/etc).

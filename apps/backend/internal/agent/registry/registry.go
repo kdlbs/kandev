@@ -445,6 +445,8 @@ func parseProtocol(p string) agent.Protocol {
 		return agent.ProtocolCodex
 	case "claude-code":
 		return agent.ProtocolClaudeCode
+	case "opencode":
+		return agent.ProtocolOpenCode
 	default:
 		return agent.ProtocolACP // Default to ACP
 	}

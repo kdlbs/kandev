@@ -42,12 +42,13 @@ type Manager struct {
 	runtime Runtime
 
 	// Refactored components for separation of concerns
-	executionStore   *ExecutionStore   // Thread-safe execution tracking
-	commandBuilder   *CommandBuilder   // Builds agent commands from registry config
-	sessionManager   *SessionManager   // Handles ACP session initialization
-	streamManager    *StreamManager    // Manages WebSocket streams
-	eventPublisher   *EventPublisher   // Publishes lifecycle events
-	containerManager *ContainerManager // Manages Docker containers (optional, nil for non-Docker runtimes)
+	executionStore   *ExecutionStore          // Thread-safe execution tracking
+	commandBuilder   *CommandBuilder          // Builds agent commands from registry config
+	sessionManager   *SessionManager          // Handles ACP session initialization
+	streamManager    *StreamManager           // Manages WebSocket streams
+	eventPublisher   *EventPublisher          // Publishes lifecycle events
+	containerManager *ContainerManager        // Manages Docker containers (optional, nil for non-Docker runtimes)
+	historyManager   *SessionHistoryManager   // Stores session history for context injection (fork_session pattern)
 
 	// Workspace info provider for on-demand instance creation
 	workspaceInfoProvider WorkspaceInfoProvider
@@ -88,6 +89,12 @@ func NewManager(
 	// Initialize execution store
 	executionStore := NewExecutionStore()
 
+	// Initialize session history manager for fork_session pattern (context injection)
+	historyManager, err := NewSessionHistoryManager("", log)
+	if err != nil {
+		log.Warn("failed to create session history manager, context injection disabled", zap.Error(err))
+	}
+
 	mgr := &Manager{
 		registry:         reg,
 		eventBus:         eventBus,
@@ -101,6 +108,7 @@ func NewManager(
 		sessionManager:   sessionManager,
 		eventPublisher:   eventPublisher,
 		containerManager: containerManager,
+		historyManager:   historyManager,
 		cleanupInterval:  30 * time.Second,
 		stopCh:           stopCh,
 	}
@@ -118,7 +126,7 @@ func NewManager(
 	})
 
 	// Set session manager dependencies for full orchestration
-	sessionManager.SetDependencies(eventPublisher, mgr.streamManager, executionStore)
+	sessionManager.SetDependencies(eventPublisher, mgr.streamManager, executionStore, historyManager)
 
 	if runtime != nil {
 		mgr.logger.Info("initialized with runtime", zap.String("runtime", string(runtime.Name())))
@@ -999,6 +1007,19 @@ func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.Age
 		// Include the flushed text in the event for the orchestrator to save
 		if flushedText := m.flushMessageBuffer(execution); flushedText != "" {
 			event.Text = flushedText
+			// Store flushed agent message to session history for context injection
+			if m.historyManager != nil && execution.SessionID != "" {
+				if err := m.historyManager.AppendAgentMessage(execution.SessionID, flushedText); err != nil {
+					m.logger.Warn("failed to store agent message to history", zap.Error(err))
+				}
+			}
+		}
+
+		// Store tool call to session history for context injection
+		if m.historyManager != nil && execution.SessionID != "" {
+			if err := m.historyManager.AppendToolCall(execution.SessionID, event); err != nil {
+				m.logger.Warn("failed to store tool call to history", zap.Error(err))
+			}
 		}
 
 		m.logger.Debug("tool call started",
@@ -1008,6 +1029,12 @@ func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.Age
 		// Tool call message creation is handled by orchestrator via AgentStreamEvent
 
 	case "tool_update":
+		// Store tool result to session history when complete
+		if m.historyManager != nil && execution.SessionID != "" && event.ToolStatus == "complete" {
+			if err := m.historyManager.AppendToolResult(execution.SessionID, event); err != nil {
+				m.logger.Warn("failed to store tool result to history", zap.Error(err))
+			}
+		}
 		// Tool update handled by orchestrator via AgentStreamEvent
 
 	case "plan":
@@ -1034,6 +1061,12 @@ func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.Age
 		// The orchestrator will save this as an agent message
 		if flushedText := m.flushMessageBuffer(execution); flushedText != "" {
 			event.Text = flushedText
+			// Store agent message to session history for context injection
+			if m.historyManager != nil && execution.SessionID != "" {
+				if err := m.historyManager.AppendAgentMessage(execution.SessionID, flushedText); err != nil {
+					m.logger.Warn("failed to store agent message to history", zap.Error(err))
+				}
+			}
 		}
 
 		// Mark agent as READY for follow-up prompts

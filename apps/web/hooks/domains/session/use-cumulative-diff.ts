@@ -1,5 +1,4 @@
 import { useEffect, useCallback, useState } from 'react';
-import { useAppStore } from '@/components/state-provider';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import type { CumulativeDiff } from '@/lib/state/slices/session-runtime/types';
 
