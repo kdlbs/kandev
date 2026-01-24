@@ -531,7 +531,10 @@ func (g *GitOperator) ShowCommit(ctx context.Context, commitSHA string) (*Commit
 		return result, nil
 	}
 	for _, c := range commitSHA {
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+		isDigit := c >= '0' && c <= '9'
+		isLowerHex := c >= 'a' && c <= 'f'
+		isUpperHex := c >= 'A' && c <= 'F'
+		if !isDigit && !isLowerHex && !isUpperHex {
 			result.Error = "invalid commit SHA: must be hexadecimal"
 			return result, nil
 		}
