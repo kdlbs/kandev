@@ -144,39 +144,7 @@ func (s *ExecutionStore) UpdateError(executionID string, errorMsg string) {
 	}
 }
 
-// UpdateMetadata updates the metadata of an agent execution using the provided function.
-// The function is called outside the lock to prevent deadlocks - it receives a copy of
-// the current metadata and returns the new metadata to set.
-func (s *ExecutionStore) UpdateMetadata(executionID string, updateFn func(metadata map[string]interface{}) map[string]interface{}) {
-	// First, get a copy of current metadata
-	s.mu.RLock()
-	execution, exists := s.executions[executionID]
-	if !exists {
-		s.mu.RUnlock()
-		return
-	}
 
-	// Copy metadata to avoid races
-	currentMetadata := make(map[string]interface{})
-	if execution.Metadata != nil {
-		for k, v := range execution.Metadata {
-			currentMetadata[k] = v
-		}
-	}
-	s.mu.RUnlock()
-
-	// Call update function outside the lock
-	newMetadata := updateFn(currentMetadata)
-
-	// Apply the result
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	// Re-check existence (could have been removed)
-	if execution, exists = s.executions[executionID]; exists {
-		execution.Metadata = newMetadata
-	}
-}
 
 // WithLock executes a function with the store lock held, providing access to the execution.
 // Returns ErrExecutionNotFound if the execution doesn't exist.
