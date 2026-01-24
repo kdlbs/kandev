@@ -335,6 +335,9 @@ func (m *mockRepository) GetSessionCommits(ctx context.Context, sessionID string
 func (m *mockRepository) GetLatestSessionCommit(ctx context.Context, sessionID string) (*models.SessionCommit, error) {
 	return nil, nil
 }
+func (m *mockRepository) DeleteSessionCommit(ctx context.Context, id string) error {
+	return nil
+}
 
 func newTestService(t *testing.T, scripts map[string][]*models.RepositoryScript) *service.Service {
 	log, err := logger.NewLogger(logger.LoggingConfig{

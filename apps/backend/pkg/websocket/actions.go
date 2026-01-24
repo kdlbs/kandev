@@ -166,14 +166,14 @@ const (
 	ActionShellInput         = "shell.input"          // Send input to shell
 	ActionSessionShellOutput = "session.shell.output" // Shell output notification (also used for exit with type: "exit")
 
-	// Session git status
-	ActionSessionGitStatus      = "session.git.status"
+	// Session git actions (requests)
 	ActionSessionGitSnapshots   = "session.git.snapshots"   // Get git snapshots for a session
 	ActionSessionGitCommits     = "session.git.commits"     // Get commits for a session
 	ActionSessionCumulativeDiff = "session.cumulative_diff" // Get cumulative diff from base branch
 	ActionSessionCommitDiff     = "session.commit_diff"     // Get diff for a specific commit
-	ActionSessionGitSnapshot    = "session.git.snapshot"    // Notification: new git snapshot created
-	ActionSessionGitCommit      = "session.git.commit"      // Notification: new session commit recorded
+
+	// Session git event (unified notification)
+	ActionSessionGitEvent = "session.git.event" // Notification: unified git event
 
 	// Process runner actions
 	ActionSessionProcessOutput = "session.process.output"

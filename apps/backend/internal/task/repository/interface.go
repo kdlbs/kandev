@@ -101,6 +101,7 @@ type Repository interface {
 	CreateSessionCommit(ctx context.Context, commit *models.SessionCommit) error
 	GetSessionCommits(ctx context.Context, sessionID string) ([]*models.SessionCommit, error)
 	GetLatestSessionCommit(ctx context.Context, sessionID string) (*models.SessionCommit, error)
+	DeleteSessionCommit(ctx context.Context, id string) error
 
 	// Repository operations
 	CreateRepository(ctx context.Context, repository *models.Repository) error

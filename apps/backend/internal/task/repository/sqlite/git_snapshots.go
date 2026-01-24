@@ -273,3 +273,8 @@ func (r *Repository) GetLatestSessionCommit(ctx context.Context, sessionID strin
 	return commit, nil
 }
 
+// DeleteSessionCommit removes a commit record from the database.
+func (r *Repository) DeleteSessionCommit(ctx context.Context, id string) error {
+	_, err := r.db.ExecContext(ctx, `DELETE FROM task_session_commits WHERE id = ?`, id)
+	return err
+}

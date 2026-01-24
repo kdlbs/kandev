@@ -64,11 +64,44 @@ type AgentStreamEventPayload struct {
 	Data      *AgentStreamEventData `json:"data"`
 }
 
-// GitStatusEventPayload is the payload for git status updates.
-type GitStatusEventPayload struct {
-	TaskID       string      `json:"task_id"`
-	SessionID    string      `json:"session_id"`
-	AgentID      string      `json:"agent_id"`
+// GitEventType discriminates the type of git event
+type GitEventType string
+
+const (
+	GitEventTypeStatusUpdate    GitEventType = "status_update"
+	GitEventTypeCommitCreated   GitEventType = "commit_created"
+	GitEventTypeCommitsReset    GitEventType = "commits_reset"
+	GitEventTypeSnapshotCreated GitEventType = "snapshot_created"
+)
+
+// GitEventPayload is a unified payload for all git-related WebSocket events.
+// Uses discriminated union pattern with Type field.
+type GitEventPayload struct {
+	Type      GitEventType `json:"type"`
+	TaskID    string       `json:"task_id,omitempty"`
+	SessionID string       `json:"session_id"`
+	AgentID   string       `json:"agent_id,omitempty"`
+	Timestamp string       `json:"timestamp"`
+
+	// For status_update
+	Status *GitStatusData `json:"status,omitempty"`
+
+	// For commit_created
+	Commit *GitCommitData `json:"commit,omitempty"`
+
+	// For commits_reset
+	Reset *GitResetData `json:"reset,omitempty"`
+
+	// For snapshot_created
+	Snapshot *GitSnapshotData `json:"snapshot,omitempty"`
+}
+
+// GetSessionID returns the session ID for this event (used by event routing).
+func (p GitEventPayload) GetSessionID() string {
+	return p.SessionID
+}
+
+type GitStatusData struct {
 	Branch       string      `json:"branch"`
 	RemoteBranch string      `json:"remote_branch,omitempty"`
 	HeadCommit   string      `json:"head_commit,omitempty"`
@@ -80,34 +113,42 @@ type GitStatusEventPayload struct {
 	Renamed      []string    `json:"renamed"`
 	Ahead        int         `json:"ahead"`
 	Behind       int         `json:"behind"`
-	Files        interface{} `json:"files,omitempty"` // map[string]FileInfo from agentctl
-	Timestamp    string      `json:"timestamp"`
+	Files        interface{} `json:"files,omitempty"`
 }
 
-// GetSessionID returns the session ID for this event (used by event routing).
-func (p GitStatusEventPayload) GetSessionID() string {
-	return p.SessionID
-}
-
-// GitCommitEventPayload is the payload for git commit events.
-type GitCommitEventPayload struct {
-	TaskID       string `json:"task_id"`
-	SessionID    string `json:"session_id"`
-	AgentID      string `json:"agent_id"`
+type GitCommitData struct {
+	ID           string `json:"id,omitempty"`
 	CommitSHA    string `json:"commit_sha"`
 	ParentSHA    string `json:"parent_sha"`
-	Message      string `json:"message"`
+	Message      string `json:"commit_message"`
 	AuthorName   string `json:"author_name"`
 	AuthorEmail  string `json:"author_email"`
 	FilesChanged int    `json:"files_changed"`
 	Insertions   int    `json:"insertions"`
 	Deletions    int    `json:"deletions"`
 	CommittedAt  string `json:"committed_at"`
+	CreatedAt    string `json:"created_at,omitempty"`
 }
 
-// GetSessionID returns the session ID for this event (used by event routing).
-func (p GitCommitEventPayload) GetSessionID() string {
-	return p.SessionID
+type GitResetData struct {
+	PreviousHead string `json:"previous_head"`
+	CurrentHead  string `json:"current_head"`
+	DeletedCount int    `json:"deleted_count"`
+}
+
+type GitSnapshotData struct {
+	ID           string      `json:"id"`
+	SessionID    string      `json:"session_id"`
+	SnapshotType string      `json:"snapshot_type"`
+	Branch       string      `json:"branch"`
+	RemoteBranch string      `json:"remote_branch"`
+	HeadCommit   string      `json:"head_commit"`
+	BaseCommit   string      `json:"base_commit"`
+	Ahead        int         `json:"ahead"`
+	Behind       int         `json:"behind"`
+	Files        interface{} `json:"files,omitempty"`
+	TriggeredBy  string      `json:"triggered_by"`
+	CreatedAt    string      `json:"created_at"`
 }
 
 // FileChangeEventPayload is the payload for file change notifications.

@@ -53,40 +53,66 @@ type PermissionRequestData struct {
 	ActionDetails map[string]interface{}   `json:"action_details"`
 }
 
-// GitStatusData contains data from git status events
-type GitStatusData struct {
-	TaskID        string                 `json:"task_id"`
-	TaskSessionID string                 `json:"session_id"`
-	AgentID       string                 `json:"agent_id"`
-	Branch        string                 `json:"branch"`
-	RemoteBranch  string                 `json:"remote_branch"`
-	HeadCommit    string                 `json:"head_commit"`
-	BaseCommit    string                 `json:"base_commit"`
-	Modified      []string               `json:"modified"`
-	Added         []string               `json:"added"`
-	Deleted       []string               `json:"deleted"`
-	Untracked     []string               `json:"untracked"`
-	Renamed       []string               `json:"renamed"`
-	Ahead         int                    `json:"ahead"`
-	Behind        int                    `json:"behind"`
-	Files         map[string]interface{} `json:"files"`
-	Timestamp     string                 `json:"timestamp"`
-}
-
-// GitCommitData contains data from git commit events
-type GitCommitData struct {
+// GitEventData contains unified data from git events
+type GitEventData struct {
+	Type          string `json:"type"`
 	TaskID        string `json:"task_id"`
 	TaskSessionID string `json:"session_id"`
 	AgentID       string `json:"agent_id"`
-	CommitSHA     string `json:"commit_sha"`
-	ParentSHA     string `json:"parent_sha"`
-	Message       string `json:"message"`
-	AuthorName    string `json:"author_name"`
-	AuthorEmail   string `json:"author_email"`
-	FilesChanged  int    `json:"files_changed"`
-	Insertions    int    `json:"insertions"`
-	Deletions     int    `json:"deletions"`
-	CommittedAt   string `json:"committed_at"`
+	Timestamp     string `json:"timestamp"`
+
+	// For status_update
+	Status *struct {
+		Branch       string                 `json:"branch"`
+		RemoteBranch string                 `json:"remote_branch,omitempty"`
+		HeadCommit   string                 `json:"head_commit,omitempty"`
+		BaseCommit   string                 `json:"base_commit,omitempty"`
+		Modified     []string               `json:"modified"`
+		Added        []string               `json:"added"`
+		Deleted      []string               `json:"deleted"`
+		Untracked    []string               `json:"untracked"`
+		Renamed      []string               `json:"renamed"`
+		Ahead        int                    `json:"ahead"`
+		Behind       int                    `json:"behind"`
+		Files        map[string]interface{} `json:"files,omitempty"`
+	} `json:"status,omitempty"`
+
+	// For commit_created
+	Commit *struct {
+		ID           string `json:"id,omitempty"`
+		CommitSHA    string `json:"commit_sha"`
+		ParentSHA    string `json:"parent_sha"`
+		Message      string `json:"commit_message"`
+		AuthorName   string `json:"author_name"`
+		AuthorEmail  string `json:"author_email"`
+		FilesChanged int    `json:"files_changed"`
+		Insertions   int    `json:"insertions"`
+		Deletions    int    `json:"deletions"`
+		CommittedAt  string `json:"committed_at"`
+	} `json:"commit,omitempty"`
+
+	// For commits_reset
+	Reset *struct {
+		PreviousHead string `json:"previous_head"`
+		CurrentHead  string `json:"current_head"`
+		DeletedCount int    `json:"deleted_count"`
+	} `json:"reset,omitempty"`
+
+	// For snapshot_created
+	Snapshot *struct {
+		ID           string                 `json:"id"`
+		SessionID    string                 `json:"session_id"`
+		SnapshotType string                 `json:"snapshot_type"`
+		Branch       string                 `json:"branch"`
+		RemoteBranch string                 `json:"remote_branch"`
+		HeadCommit   string                 `json:"head_commit"`
+		BaseCommit   string                 `json:"base_commit"`
+		Ahead        int                    `json:"ahead"`
+		Behind       int                    `json:"behind"`
+		Files        map[string]interface{} `json:"files,omitempty"`
+		TriggeredBy  string                 `json:"triggered_by"`
+		CreatedAt    string                 `json:"created_at"`
+	} `json:"snapshot,omitempty"`
 }
 
 // ContextWindowData contains data from context window events
@@ -123,11 +149,8 @@ type EventHandlers struct {
 	// Permission request events
 	OnPermissionRequest func(ctx context.Context, data PermissionRequestData)
 
-	// Git status events
-	OnGitStatusUpdated func(ctx context.Context, data GitStatusData)
-
-	// Git commit events
-	OnGitCommitCreated func(ctx context.Context, data GitCommitData)
+	// Unified git events (status, commit, reset, snapshot)
+	OnGitEvent func(ctx context.Context, data GitEventData)
 
 	// Context window events
 	OnContextWindowUpdated func(ctx context.Context, data ContextWindowData)
@@ -197,14 +220,8 @@ func (w *Watcher) Start(ctx context.Context) error {
 		return err
 	}
 
-	// Subscribe to git status events
-	if err := w.subscribeToGitStatusEvents(); err != nil {
-		w.unsubscribeAll()
-		return err
-	}
-
-	// Subscribe to git commit events
-	if err := w.subscribeToGitCommitEvents(); err != nil {
+	// Subscribe to unified git events
+	if err := w.subscribeToGitEvents(); err != nil {
 		w.unsubscribeAll()
 		return err
 	}
@@ -490,19 +507,17 @@ func (w *Watcher) createPermissionRequestHandler() bus.EventHandler {
 	}
 }
 
-// subscribeToGitStatusEvents subscribes to git status events
-func (w *Watcher) subscribeToGitStatusEvents() error {
-	if w.handlers.OnGitStatusUpdated == nil {
+// subscribeToGitEvents subscribes to unified git events
+func (w *Watcher) subscribeToGitEvents() error {
+	if w.handlers.OnGitEvent == nil {
 		return nil
 	}
 
-	// Use wildcard to subscribe to all git status events (git.status.updated.{session_id})
-	subject := events.BuildGitStatusWildcardSubject()
+	subject := events.BuildGitEventWildcardSubject()
 
-	// Use regular subscription (each instance needs all messages)
-	sub, err := w.eventBus.Subscribe(subject, w.createGitStatusHandler())
+	sub, err := w.eventBus.Subscribe(subject, w.createGitEventHandler())
 	if err != nil {
-		w.logger.Error("Failed to subscribe to git status events",
+		w.logger.Error("Failed to subscribe to git events",
 			zap.String("subject", subject),
 			zap.Error(err))
 		return err
@@ -511,68 +526,24 @@ func (w *Watcher) subscribeToGitStatusEvents() error {
 	return nil
 }
 
-// createGitStatusHandler creates a bus.EventHandler for git status events
-func (w *Watcher) createGitStatusHandler() bus.EventHandler {
+// createGitEventHandler creates a bus.EventHandler for unified git events
+func (w *Watcher) createGitEventHandler() bus.EventHandler {
 	return func(ctx context.Context, event *bus.Event) error {
-		var data GitStatusData
+		var data GitEventData
 		if err := w.parseEventData(event.Data, &data); err != nil {
-			w.logger.Error("Failed to parse git status event data",
+			w.logger.Error("Failed to parse git event data",
 				zap.String("event_type", event.Type),
 				zap.String("event_id", event.ID),
 				zap.Error(err))
-			return nil // Don't return error to continue processing other events
+			return nil
 		}
 
-		w.logger.Debug("Handling git status event",
+		w.logger.Debug("Handling git event",
+			zap.String("type", data.Type),
 			zap.String("task_id", data.TaskID),
-			zap.String("branch", data.Branch),
-			zap.Int("modified", len(data.Modified)))
+			zap.String("session_id", data.TaskSessionID))
 
-		w.handlers.OnGitStatusUpdated(ctx, data)
-		return nil
-	}
-}
-
-// subscribeToGitCommitEvents subscribes to git commit events
-func (w *Watcher) subscribeToGitCommitEvents() error {
-	if w.handlers.OnGitCommitCreated == nil {
-		return nil
-	}
-
-	// Use wildcard to subscribe to all git commit events (git.commit.created.{session_id})
-	subject := events.BuildGitCommitWildcardSubject()
-
-	// Use regular subscription (each instance needs all messages)
-	sub, err := w.eventBus.Subscribe(subject, w.createGitCommitHandler())
-	if err != nil {
-		w.logger.Error("Failed to subscribe to git commit events",
-			zap.String("subject", subject),
-			zap.Error(err))
-		return err
-	}
-	w.subscriptions = append(w.subscriptions, sub)
-	return nil
-}
-
-// createGitCommitHandler creates a bus.EventHandler for git commit events
-func (w *Watcher) createGitCommitHandler() bus.EventHandler {
-	return func(ctx context.Context, event *bus.Event) error {
-		var data GitCommitData
-		if err := w.parseEventData(event.Data, &data); err != nil {
-			w.logger.Error("Failed to parse git commit event data",
-				zap.String("event_type", event.Type),
-				zap.String("event_id", event.ID),
-				zap.Error(err))
-			return nil // Don't return error to continue processing other events
-		}
-
-		w.logger.Debug("Handling git commit event",
-			zap.String("task_id", data.TaskID),
-			zap.String("commit_sha", data.CommitSHA))
-
-		if w.handlers.OnGitCommitCreated != nil {
-			w.handlers.OnGitCommitCreated(ctx, data)
-		}
+		w.handlers.OnGitEvent(ctx, data)
 		return nil
 	}
 }

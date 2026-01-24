@@ -106,11 +106,9 @@ const (
 
 // Event types for workspace/git status
 const (
-	GitStatusUpdated   = "git.status.updated"   // Git status changed in workspace
+	GitEvent           = "git.event"            // Internal git events (agentctl -> orchestrator)
+	GitWSEvent         = "git.ws"               // WebSocket git events (orchestrator -> frontend)
 	FileChangeNotified = "file.change.notified" // File changed in workspace
-	GitCommitCreated   = "git.commit.created"   // New commit created in workspace
-	GitSnapshotCreated = "git.snapshot.created" // New git snapshot created
-	GitCommitRecorded  = "git.commit.recorded"  // New session commit recorded to database
 )
 
 // Event types for shell I/O
@@ -180,44 +178,25 @@ func BuildAgentStreamWildcardSubject() string {
 	return AgentStream + ".*"
 }
 
-// BuildGitStatusSubject creates a git status subject for a specific session
-func BuildGitStatusSubject(sessionID string) string {
-	return GitStatusUpdated + "." + sessionID
+// BuildGitEventSubject creates a git event subject for a specific session
+func BuildGitEventSubject(sessionID string) string {
+	return GitEvent + "." + sessionID
 }
 
-// BuildGitStatusWildcardSubject creates a wildcard subscription for all git status updates
-func BuildGitStatusWildcardSubject() string {
-	return GitStatusUpdated + ".*"
+// BuildGitEventWildcardSubject creates a wildcard subscription for all internal git events
+func BuildGitEventWildcardSubject() string {
+	return GitEvent + ".*"
 }
 
-// BuildGitCommitSubject returns the event subject for git commit events for a session.
-func BuildGitCommitSubject(sessionID string) string {
-	return GitCommitCreated + "." + sessionID
+// BuildGitWSEventSubject creates a git WebSocket event subject for a specific session
+// These events are sent from orchestrator to frontend via WebSocket gateway
+func BuildGitWSEventSubject(sessionID string) string {
+	return GitWSEvent + "." + sessionID
 }
 
-// BuildGitCommitWildcardSubject creates a wildcard subscription for all git commit events
-func BuildGitCommitWildcardSubject() string {
-	return GitCommitCreated + ".*"
-}
-
-// BuildGitSnapshotSubject creates a git snapshot subject for a specific session
-func BuildGitSnapshotSubject(sessionID string) string {
-	return GitSnapshotCreated + "." + sessionID
-}
-
-// BuildGitSnapshotWildcardSubject creates a wildcard subscription for all git snapshot events
-func BuildGitSnapshotWildcardSubject() string {
-	return GitSnapshotCreated + ".*"
-}
-
-// BuildGitCommitRecordedSubject creates a git commit recorded subject for a specific session
-func BuildGitCommitRecordedSubject(sessionID string) string {
-	return GitCommitRecorded + "." + sessionID
-}
-
-// BuildGitCommitRecordedWildcardSubject creates a wildcard subscription for all git commit recorded events
-func BuildGitCommitRecordedWildcardSubject() string {
-	return GitCommitRecorded + ".*"
+// BuildGitWSEventWildcardSubject creates a wildcard subscription for all git WebSocket events
+func BuildGitWSEventWildcardSubject() string {
+	return GitWSEvent + ".*"
 }
 
 // BuildFileChangeSubject creates a file change subject for a specific session
@@ -249,3 +228,4 @@ func BuildContextWindowSubject(sessionID string) string {
 func BuildContextWindowWildcardSubject() string {
 	return ContextWindowUpdated + ".*"
 }
+

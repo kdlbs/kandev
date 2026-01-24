@@ -170,77 +170,87 @@ func (p *EventPublisher) PublishAgentStreamEventPayload(payload *AgentStreamEven
 	}
 }
 
-// PublishGitStatus publishes a git status update to the event bus.
-func (p *EventPublisher) PublishGitStatus(execution *AgentExecution, update *agentctl.GitStatusUpdate) {
+// PublishGitEvent publishes a unified git event to the event bus.
+func (p *EventPublisher) PublishGitEvent(payload *GitEventPayload) {
 	if p.eventBus == nil {
 		return
 	}
 
-	sessionID := execution.SessionID
-
-	payload := GitStatusEventPayload{
-		TaskID:       execution.TaskID,
-		SessionID:    sessionID,
-		AgentID:      execution.ID,
-		Branch:       update.Branch,
-		RemoteBranch: update.RemoteBranch,
-		Modified:     update.Modified,
-		Added:        update.Added,
-		Deleted:      update.Deleted,
-		Untracked:    update.Untracked,
-		Renamed:      update.Renamed,
-		Ahead:        update.Ahead,
-		Behind:       update.Behind,
-		Files:        update.Files,
-		Timestamp:    update.Timestamp.Format(time.RFC3339Nano),
+	if payload.Timestamp == "" {
+		payload.Timestamp = time.Now().Format(time.RFC3339Nano)
 	}
 
-	event := bus.NewEvent(events.GitStatusUpdated, "agent-manager", payload)
-	subject := events.BuildGitStatusSubject(sessionID)
+	event := bus.NewEvent(events.GitEvent, "lifecycle", payload)
+	subject := events.BuildGitEventSubject(payload.SessionID)
 
 	if err := p.eventBus.Publish(context.Background(), subject, event); err != nil {
-		p.logger.Error("failed to publish git status event",
-			zap.String("instance_id", execution.ID),
-			zap.String("task_id", execution.TaskID),
-			zap.String("session_id", sessionID),
+		p.logger.Error("failed to publish git event",
+			zap.String("session_id", payload.SessionID),
+			zap.String("type", string(payload.Type)),
 			zap.Error(err))
 	}
 }
 
-// PublishGitCommit publishes a git commit event to the event bus.
+// PublishGitStatus publishes a git status update event.
+func (p *EventPublisher) PublishGitStatus(execution *AgentExecution, update *agentctl.GitStatusUpdate) {
+	p.PublishGitEvent(&GitEventPayload{
+		Type:      GitEventTypeStatusUpdate,
+		TaskID:    execution.TaskID,
+		SessionID: execution.SessionID,
+		AgentID:   execution.ID,
+		Timestamp: update.Timestamp.Format(time.RFC3339Nano),
+		Status: &GitStatusData{
+			Branch:       update.Branch,
+			RemoteBranch: update.RemoteBranch,
+			HeadCommit:   update.HeadCommit,
+			BaseCommit:   update.BaseCommit,
+			Modified:     update.Modified,
+			Added:        update.Added,
+			Deleted:      update.Deleted,
+			Untracked:    update.Untracked,
+			Renamed:      update.Renamed,
+			Ahead:        update.Ahead,
+			Behind:       update.Behind,
+			Files:        update.Files,
+		},
+	})
+}
+
+// PublishGitCommit publishes a git commit created event.
 func (p *EventPublisher) PublishGitCommit(execution *AgentExecution, commit *agentctl.GitCommitNotification) {
-	if p.eventBus == nil {
-		return
-	}
+	p.PublishGitEvent(&GitEventPayload{
+		Type:      GitEventTypeCommitCreated,
+		TaskID:    execution.TaskID,
+		SessionID: execution.SessionID,
+		AgentID:   execution.ID,
+		Timestamp: time.Now().Format(time.RFC3339Nano),
+		Commit: &GitCommitData{
+			CommitSHA:    commit.CommitSHA,
+			ParentSHA:    commit.ParentSHA,
+			Message:      commit.Message,
+			AuthorName:   commit.AuthorName,
+			AuthorEmail:  commit.AuthorEmail,
+			FilesChanged: commit.FilesChanged,
+			Insertions:   commit.Insertions,
+			Deletions:    commit.Deletions,
+			CommittedAt:  commit.CommittedAt.Format(time.RFC3339),
+		},
+	})
+}
 
-	sessionID := execution.SessionID
-
-	payload := GitCommitEventPayload{
-		TaskID:       execution.TaskID,
-		SessionID:    sessionID,
-		AgentID:      execution.ID,
-		CommitSHA:    commit.CommitSHA,
-		ParentSHA:    commit.ParentSHA,
-		Message:      commit.Message,
-		AuthorName:   commit.AuthorName,
-		AuthorEmail:  commit.AuthorEmail,
-		FilesChanged: commit.FilesChanged,
-		Insertions:   commit.Insertions,
-		Deletions:    commit.Deletions,
-		CommittedAt:  commit.CommittedAt.Format(time.RFC3339Nano),
-	}
-
-	event := bus.NewEvent(events.GitCommitCreated, "agent-manager", payload)
-	subject := events.BuildGitCommitSubject(sessionID)
-
-	if err := p.eventBus.Publish(context.Background(), subject, event); err != nil {
-		p.logger.Error("failed to publish git commit event",
-			zap.String("instance_id", execution.ID),
-			zap.String("task_id", execution.TaskID),
-			zap.String("session_id", sessionID),
-			zap.String("commit_sha", commit.CommitSHA),
-			zap.Error(err))
-	}
+// PublishGitReset publishes a git reset event (HEAD moved backward).
+func (p *EventPublisher) PublishGitReset(execution *AgentExecution, reset *agentctl.GitResetNotification) {
+	p.PublishGitEvent(&GitEventPayload{
+		Type:      GitEventTypeCommitsReset,
+		TaskID:    execution.TaskID,
+		SessionID: execution.SessionID,
+		AgentID:   execution.ID,
+		Timestamp: reset.Timestamp.Format(time.RFC3339Nano),
+		Reset: &GitResetData{
+			PreviousHead: reset.PreviousHead,
+			CurrentHead:  reset.CurrentHead,
+		},
+	})
 }
 
 // PublishFileChange publishes a file change notification to the event bus.
