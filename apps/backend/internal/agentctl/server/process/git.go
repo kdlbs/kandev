@@ -782,7 +782,7 @@ func (g *GitOperator) getCommitStats(ctx context.Context, commitSHA string) (fil
 		// Get just the number
 		parts := strings.Fields(part)
 		if len(parts) > 0 {
-			fmt.Sscanf(parts[len(parts)-1], "%d", &filesChanged)
+			_, _ = fmt.Sscanf(parts[len(parts)-1], "%d", &filesChanged)
 		}
 	}
 
@@ -791,7 +791,7 @@ func (g *GitOperator) getCommitStats(ctx context.Context, commitSHA string) (fil
 		// Find the number before " insertion"
 		start := strings.LastIndex(summary[:idx], " ") + 1
 		if start > 0 && start < idx {
-			fmt.Sscanf(summary[start:idx], "%d", &insertions)
+			_, _ = fmt.Sscanf(summary[start:idx], "%d", &insertions)
 		}
 	}
 
@@ -800,7 +800,7 @@ func (g *GitOperator) getCommitStats(ctx context.Context, commitSHA string) (fil
 		// Find the number before " deletion"
 		start := strings.LastIndex(summary[:idx], " ") + 1
 		if start > 0 && start < idx {
-			fmt.Sscanf(summary[start:idx], "%d", &deletions)
+			_, _ = fmt.Sscanf(summary[start:idx], "%d", &deletions)
 		}
 	}
 
