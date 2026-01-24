@@ -21,12 +21,18 @@ func (s *Service) handleACPSessionCreated(ctx context.Context, data watcher.ACPS
 	if data.SessionID == "" || data.ACPSessionID == "" {
 		return
 	}
+	s.storeResumeToken(ctx, data.TaskID, data.SessionID, data.ACPSessionID)
+}
 
-	session, err := s.repo.GetTaskSession(ctx, data.SessionID)
+// storeResumeToken stores an agent's session ID as the resume token for session recovery.
+// This is called both from handleACPSessionCreated (for ACP-based agents) and from
+// handleAgentStreamEvent (for stream-based agents like Claude Code).
+func (s *Service) storeResumeToken(ctx context.Context, taskID, sessionID, acpSessionID string) {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
-		s.logger.Warn("failed to load task session for ACP session update",
-			zap.String("task_id", data.TaskID),
-			zap.String("session_id", data.SessionID),
+		s.logger.Warn("failed to load task session for resume token storage",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
 			zap.Error(err))
 		return
 	}
@@ -45,7 +51,7 @@ func (s *Service) handleACPSessionCreated(ctx context.Context, data watcher.ACPS
 		ExecutorID:       session.ExecutorID,
 		Status:           "ready",
 		Resumable:        resumable,
-		ResumeToken:      data.ACPSessionID,
+		ResumeToken:      acpSessionID,
 		AgentExecutionID: session.AgentExecutionID,
 		ContainerID:      session.ContainerID,
 	}
@@ -57,16 +63,16 @@ func (s *Service) handleACPSessionCreated(ctx context.Context, data watcher.ACPS
 
 	if err := s.repo.UpsertExecutorRunning(ctx, running); err != nil {
 		s.logger.Warn("failed to persist resume token for session",
-			zap.String("task_id", data.TaskID),
-			zap.String("session_id", data.SessionID),
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
 			zap.Error(err))
 		return
 	}
 
-	s.logger.Debug("stored resume token for task session",
-		zap.String("task_id", data.TaskID),
-		zap.String("session_id", data.SessionID),
-		zap.String("resume_token", data.ACPSessionID))
+	s.logger.Debug("stored resume token for session",
+		zap.String("task_id", taskID),
+		zap.String("session_id", sessionID),
+		zap.String("resume_token", acpSessionID))
 }
 
 // handleAgentCompleted handles agent completion events
@@ -193,6 +199,11 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 
 	case "session_status":
 		// Handle session status events (resumed vs new session)
+		// Also store the agent's session ID as resume token for session recovery
+		if sessionID != "" && payload.Data.ACPSessionID != "" {
+			s.storeResumeToken(ctx, taskID, sessionID, payload.Data.ACPSessionID)
+		}
+
 		if sessionID != "" && s.messageCreator != nil {
 			var statusMsg string
 			if payload.Data.SessionStatus == "resumed" {

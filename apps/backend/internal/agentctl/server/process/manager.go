@@ -395,17 +395,19 @@ func (m *Manager) createAdapter() error {
 		protocol = agent.ProtocolACP // Default to ACP
 	}
 
-	// Use the adapter config built in Start()
-	switch protocol {
-	case agent.ProtocolACP:
-		m.adapter = adapter.NewACPAdapter(m.adapterCfg, m.logger)
-	case agent.ProtocolCodex:
-		codexAdapter := adapter.NewCodexAdapter(m.adapterCfg, m.logger)
-		// Set stderr provider so errors can include recent stderr output
-		codexAdapter.SetStderrProvider(m)
-		m.adapter = codexAdapter
-	default:
-		return fmt.Errorf("unsupported protocol: %s", protocol)
+	// Use the adapter factory to create the appropriate adapter
+	adpt, err := adapter.NewAdapter(protocol, m.adapterCfg, m.logger)
+	if err != nil {
+		return fmt.Errorf("failed to create adapter: %w", err)
+	}
+	m.adapter = adpt
+
+	// Set stderr provider for adapters that support it
+	switch a := m.adapter.(type) {
+	case *adapter.CodexAdapter:
+		a.SetStderrProvider(m)
+	case *adapter.ClaudeCodeAdapter:
+		a.SetStderrProvider(m)
 	}
 
 	// Set the permission handler

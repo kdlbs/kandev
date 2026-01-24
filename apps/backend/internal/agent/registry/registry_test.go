@@ -86,9 +86,9 @@ func TestRegistry_RegisterValidation(t *testing.T) {
 			errMsg: "agent type name is required",
 		},
 		{
-			name:   "empty image",
+			name:   "empty image and cmd",
 			config: &AgentTypeConfig{ID: "test", Name: "test", ResourceLimits: ResourceLimits{MemoryMB: 1, CPUCores: 1, TimeoutSeconds: 1}},
-			errMsg: "agent type image is required",
+			errMsg: "agent type requires either image (Docker) or cmd (standalone)",
 		},
 		{
 			name:   "zero memory",
@@ -327,7 +327,7 @@ func TestAgentTypeConfig_ToAPIType(t *testing.T) {
 }
 
 func TestValidateConfig(t *testing.T) {
-	// Valid config with default tag
+	// Valid config with default tag (Docker-based agent)
 	config := &AgentTypeConfig{
 		ID:    "test",
 		Name:  "test",
@@ -347,6 +347,28 @@ func TestValidateConfig(t *testing.T) {
 	// Tag should be set to default
 	if config.Tag != "latest" {
 		t.Errorf("expected default tag 'latest', got %q", config.Tag)
+	}
+
+	// Valid standalone agent with cmd but no image (like Claude Code)
+	standaloneConfig := &AgentTypeConfig{
+		ID:   "standalone-test",
+		Name: "Standalone Test",
+		Cmd:  []string{"npx", "-y", "some-cli"},
+		ResourceLimits: ResourceLimits{
+			MemoryMB:       1024,
+			CPUCores:       1.0,
+			TimeoutSeconds: 3600,
+		},
+	}
+
+	err = ValidateConfig(standaloneConfig)
+	if err != nil {
+		t.Fatalf("standalone agent should be valid: %v", err)
+	}
+
+	// Tag should NOT be set when image is empty
+	if standaloneConfig.Tag != "" {
+		t.Errorf("expected no tag for standalone agent, got %q", standaloneConfig.Tag)
 	}
 }
 
