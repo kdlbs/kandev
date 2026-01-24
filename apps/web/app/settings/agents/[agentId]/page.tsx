@@ -28,13 +28,14 @@ import {
   updateAgentProfileAction,
   updateAgentProfileMcpConfigAction,
 } from '@/app/actions/agents';
-import type { Agent, AgentDiscovery, AgentProfile, McpServerDef, AvailableAgent } from '@/lib/types/http';
+import type { Agent, AgentDiscovery, AgentProfile, McpServerDef, AvailableAgent, PermissionSetting } from '@/lib/types/http';
 import { generateUUID } from '@/lib/utils';
 import { useAppStore } from '@/components/state-provider';
 import { useAvailableAgents } from '@/hooks/domains/settings/use-available-agents';
 import { ProfileMcpConfigCard } from './profile-mcp-config-card';
 
-type DraftProfile = AgentProfile & {
+type DraftProfile = Omit<AgentProfile, 'allow_indexing'> & {
+  allow_indexing?: boolean;
   isNew?: boolean;
   mcp_config?: {
     enabled: boolean;
@@ -59,14 +60,20 @@ type AgentSetupFormProps = {
   onToastError: (error: unknown) => void;
 };
 
-const createDraftProfile = (agentId: string, agentDisplayName: string, defaultModel: string): DraftProfile => ({
+const createDraftProfile = (
+  agentId: string,
+  agentDisplayName: string,
+  defaultModel: string,
+  permissionSettings?: Record<string, PermissionSetting>
+): DraftProfile => ({
   id: `draft-${generateUUID()}`,
   agent_id: agentId,
   name: '',
   agent_display_name: agentDisplayName,
   model: defaultModel,
-  auto_approve: false,
-  dangerously_skip_permissions: false,
+  auto_approve: permissionSettings?.auto_approve?.default ?? false,
+  dangerously_skip_permissions: permissionSettings?.dangerously_skip_permissions?.default ?? false,
+  allow_indexing: permissionSettings?.allow_indexing?.default ?? false,
   plan: '',
   created_at: new Date().toISOString(),
   updated_at: new Date().toISOString(),
@@ -81,13 +88,18 @@ const cloneAgent = (agent: Agent): DraftAgent => ({
   profiles: agent.profiles.map((profile) => ({ ...profile })) as DraftProfile[],
 });
 
-const ensureProfiles = (agent: DraftAgent, agentDisplayName: string, defaultModel: string): DraftAgent => {
+const ensureProfiles = (
+  agent: DraftAgent,
+  agentDisplayName: string,
+  defaultModel: string,
+  permissionSettings?: Record<string, PermissionSetting>
+): DraftAgent => {
   if (agent.profiles.length > 0) {
     return agent;
   }
   return {
     ...agent,
-    profiles: [createDraftProfile(agent.id, agentDisplayName, defaultModel)],
+    profiles: [createDraftProfile(agent.id, agentDisplayName, defaultModel, permissionSettings)],
   };
 };
 
@@ -111,11 +123,18 @@ function AgentSetupForm({
     return draftAgent.profiles.some((profile) => Boolean(profile.mcp_config?.error));
   }, [draftAgent.profiles]);
 
-  // Get model config for the current agent
-  const currentAgentModelConfig = useMemo(() => {
-    const agent = availableAgents.find((item: AvailableAgent) => item.name === draftAgent.name);
-    return agent?.model_config ?? { default_model: '', available_models: [] };
+  // Get model config and permission settings for the current agent
+  const currentAvailableAgent = useMemo(() => {
+    return availableAgents.find((item: AvailableAgent) => item.name === draftAgent.name) ?? null;
   }, [availableAgents, draftAgent.name]);
+
+  const currentAgentModelConfig = useMemo(() => {
+    return currentAvailableAgent?.model_config ?? { default_model: '', available_models: [] };
+  }, [currentAvailableAgent]);
+
+  const permissionSettings = useMemo(() => {
+    return currentAvailableAgent?.permission_settings ?? {};
+  }, [currentAvailableAgent]);
 
   const isProfileDirty = (draft: DraftProfile, saved?: AgentProfile) => {
     if (!saved) return true;
@@ -124,6 +143,7 @@ function AgentSetupForm({
       draft.model !== saved.model ||
       draft.auto_approve !== saved.auto_approve ||
       draft.dangerously_skip_permissions !== saved.dangerously_skip_permissions ||
+      draft.allow_indexing !== saved.allow_indexing ||
       draft.plan !== saved.plan
     );
   };
@@ -169,7 +189,7 @@ function AgentSetupForm({
       ...current,
       profiles: [
         ...current.profiles,
-        { ...createDraftProfile(current.id, resolveDisplayName(current.name), currentAgentModelConfig.default_model), id: draftId },
+        { ...createDraftProfile(current.id, resolveDisplayName(current.name), currentAgentModelConfig.default_model, permissionSettings), id: draftId },
       ],
     }));
     setNewProfileId(draftId);
@@ -183,7 +203,7 @@ function AgentSetupForm({
         profiles:
           remaining.length > 0
             ? remaining
-            : [createDraftProfile(current.id, resolveDisplayName(current.name), currentAgentModelConfig.default_model)],
+            : [createDraftProfile(current.id, resolveDisplayName(current.name), currentAgentModelConfig.default_model, permissionSettings)],
       };
     });
     if (newProfileId === profileId) {
@@ -263,6 +283,7 @@ function AgentSetupForm({
             model: profile.model,
             auto_approve: profile.auto_approve,
             dangerously_skip_permissions: profile.dangerously_skip_permissions,
+            allow_indexing: profile.allow_indexing ?? false,
             plan: profile.plan,
           })),
         });
@@ -316,7 +337,7 @@ function AgentSetupForm({
           });
         }
         upsertAgent(created);
-        setDraftAgent(ensureProfiles(cloneAgent(created), resolveDisplayName(created.name), currentAgentModelConfig.default_model));
+        setDraftAgent(ensureProfiles(cloneAgent(created), resolveDisplayName(created.name), currentAgentModelConfig.default_model, permissionSettings));
         router.replace(`/settings/agents/${encodeURIComponent(created.name)}`);
       } else {
         const agentPatch: { workspace_id?: string | null; mcp_config_path?: string | null } = {};
@@ -340,6 +361,7 @@ function AgentSetupForm({
               model: profile.model,
               auto_approve: profile.auto_approve,
               dangerously_skip_permissions: profile.dangerously_skip_permissions,
+              allow_indexing: profile.allow_indexing ?? false,
               plan: profile.plan,
             });
             if (profile.mcp_config && profile.mcp_config.dirty && profile.mcp_config.servers.trim()) {
@@ -362,6 +384,7 @@ function AgentSetupForm({
               model: profile.model,
               auto_approve: profile.auto_approve,
               dangerously_skip_permissions: profile.dangerously_skip_permissions,
+              allow_indexing: profile.allow_indexing ?? false,
               plan: profile.plan,
             });
             nextProfiles.push(updatedProfile);
@@ -383,7 +406,7 @@ function AgentSetupForm({
           profiles: nextProfiles,
         };
         upsertAgent(nextAgent);
-        setDraftAgent(ensureProfiles(cloneAgent(nextAgent), resolveDisplayName(nextAgent.name), currentAgentModelConfig.default_model));
+        setDraftAgent(ensureProfiles(cloneAgent(nextAgent), resolveDisplayName(nextAgent.name), currentAgentModelConfig.default_model, permissionSettings));
       }
       setSaveStatus('success');
     } catch (error) {
@@ -444,9 +467,11 @@ function AgentSetupForm({
                       placeholder="Default profile"
                     />
                   </div>
-                  <Button size="sm" variant="ghost" onClick={() => handleRemoveProfile(profile.id)}>
-                    Remove
-                  </Button>
+                  {draftAgent.profiles.length > 1 && (
+                    <Button size="sm" variant="ghost" onClick={() => handleRemoveProfile(profile.id)}>
+                      Remove
+                    </Button>
+                  )}
                 </div>
 
                 <div className="space-y-2">
@@ -493,35 +518,56 @@ function AgentSetupForm({
                 </div>
 
                 <div className="grid gap-4 md:grid-cols-2">
-                  <div className="flex items-center justify-between rounded-md border p-3">
-                    <div className="space-y-1">
-                      <Label>Auto-approve</Label>
-                      <p className="text-xs text-muted-foreground">
-                        Automatically approve tool calls.
-                      </p>
+                  {permissionSettings.auto_approve?.supported && (
+                    <div className="flex items-center justify-between rounded-md border p-3">
+                      <div className="space-y-1">
+                        <Label>{permissionSettings.auto_approve.label}</Label>
+                        <p className="text-xs text-muted-foreground">
+                          {permissionSettings.auto_approve.description}
+                        </p>
+                      </div>
+                      <Switch
+                        checked={profile.auto_approve}
+                        onCheckedChange={(checked) =>
+                          handleProfileChange(profile.id, { auto_approve: checked })
+                        }
+                      />
                     </div>
-                    <Switch
-                      checked={profile.auto_approve}
-                      onCheckedChange={(checked) =>
-                        handleProfileChange(profile.id, { auto_approve: checked })
-                      }
-                    />
-                  </div>
+                  )}
 
-                  <div className="flex items-center justify-between rounded-md border p-3">
-                    <div className="space-y-1">
-                      <Label>Skip permissions</Label>
-                      <p className="text-xs text-muted-foreground">
-                        Skip permission checks when running tools.
-                      </p>
+                  {permissionSettings.dangerously_skip_permissions?.supported && (
+                    <div className="flex items-center justify-between rounded-md border p-3">
+                      <div className="space-y-1">
+                        <Label>{permissionSettings.dangerously_skip_permissions.label}</Label>
+                        <p className="text-xs text-muted-foreground">
+                          {permissionSettings.dangerously_skip_permissions.description}
+                        </p>
+                      </div>
+                      <Switch
+                        checked={profile.dangerously_skip_permissions}
+                        onCheckedChange={(checked) =>
+                          handleProfileChange(profile.id, { dangerously_skip_permissions: checked })
+                        }
+                      />
                     </div>
-                    <Switch
-                      checked={profile.dangerously_skip_permissions}
-                      onCheckedChange={(checked) =>
-                        handleProfileChange(profile.id, { dangerously_skip_permissions: checked })
-                      }
-                    />
-                  </div>
+                  )}
+
+                  {permissionSettings.allow_indexing?.supported && (
+                    <div className="flex items-center justify-between rounded-md border p-3">
+                      <div className="space-y-1">
+                        <Label>{permissionSettings.allow_indexing.label}</Label>
+                        <p className="text-xs text-muted-foreground">
+                          {permissionSettings.allow_indexing.description}
+                        </p>
+                      </div>
+                      <Switch
+                        checked={profile.allow_indexing ?? false}
+                        onCheckedChange={(checked) =>
+                          handleProfileChange(profile.id, { allow_indexing: checked })
+                        }
+                      />
+                    </div>
+                  )}
                 </div>
 
                 <ProfileMcpConfigCard
@@ -570,12 +616,16 @@ export default function AgentSetupPage() {
 
   const initialAgent = useMemo(() => {
     if (!decodedKey) return null;
+    const resolveAvailableAgent = (name: string) =>
+      availableAgents.find((item: AvailableAgent) => item.name === name);
     const resolveDisplayName = (name: string) =>
-      availableAgents.find((item: AvailableAgent) => item.name === name)?.display_name ?? '';
+      resolveAvailableAgent(name)?.display_name ?? '';
     const resolveDefaultModel = (name: string) =>
-      availableAgents.find((item: AvailableAgent) => item.name === name)?.model_config?.default_model ?? '';
+      resolveAvailableAgent(name)?.model_config?.default_model ?? '';
+    const resolvePermissionSettings = (name: string) =>
+      resolveAvailableAgent(name)?.permission_settings;
     if (savedAgent) {
-      return ensureProfiles(cloneAgent(savedAgent), resolveDisplayName(savedAgent.name), resolveDefaultModel(savedAgent.name));
+      return ensureProfiles(cloneAgent(savedAgent), resolveDisplayName(savedAgent.name), resolveDefaultModel(savedAgent.name), resolvePermissionSettings(savedAgent.name));
     }
     if (discoveryAgent) {
       const draft: DraftAgent = {
@@ -589,7 +639,7 @@ export default function AgentSetupPage() {
         updated_at: new Date().toISOString(),
         isNew: true,
       };
-      return ensureProfiles(draft, resolveDisplayName(draft.name), resolveDefaultModel(draft.name));
+      return ensureProfiles(draft, resolveDisplayName(draft.name), resolveDefaultModel(draft.name), resolvePermissionSettings(draft.name));
     }
     return null;
   }, [decodedKey, discoveryAgent, savedAgent, availableAgents]);

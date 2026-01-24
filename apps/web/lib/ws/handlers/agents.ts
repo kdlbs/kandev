@@ -47,6 +47,7 @@ export function registerAgentsHandlers(store: StoreApi<AppState>): WsHandlers {
                     model: message.payload.profile.model,
                     auto_approve: message.payload.profile.auto_approve,
                     dangerously_skip_permissions: message.payload.profile.dangerously_skip_permissions,
+                    allow_indexing: message.payload.profile.allow_indexing,
                     plan: message.payload.profile.plan,
                     created_at: message.payload.profile.created_at ?? '',
                     updated_at: message.payload.profile.updated_at ?? '',
@@ -83,6 +84,7 @@ export function registerAgentsHandlers(store: StoreApi<AppState>): WsHandlers {
                         model: message.payload.profile.model,
                         auto_approve: message.payload.profile.auto_approve,
                         dangerously_skip_permissions: message.payload.profile.dangerously_skip_permissions,
+                        allow_indexing: message.payload.profile.allow_indexing,
                         plan: message.payload.profile.plan,
                         updated_at: message.payload.profile.updated_at ?? profile.updated_at,
                       }

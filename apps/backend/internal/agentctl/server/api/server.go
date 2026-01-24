@@ -180,8 +180,9 @@ func (s *Server) handleStart(c *gin.Context) {
 
 // AgentConfigure request/response - configures the agent command before starting
 type AgentConfigureRequest struct {
-	Command string            `json:"command"`
-	Env     map[string]string `json:"env,omitempty"`
+	Command        string            `json:"command"`
+	Env            map[string]string `json:"env,omitempty"`
+	ApprovalPolicy string            `json:"approval_policy,omitempty"` // For Codex: "untrusted", "on-failure", "on-request", "never"
 }
 
 type AgentConfigureResponse struct {
@@ -208,7 +209,7 @@ func (s *Server) handleAgentConfigure(c *gin.Context) {
 		return
 	}
 
-	if err := s.procMgr.Configure(req.Command, req.Env); err != nil {
+	if err := s.procMgr.Configure(req.Command, req.Env, req.ApprovalPolicy); err != nil {
 		s.logger.Error("failed to configure agent", zap.Error(err), zap.String("command", req.Command))
 		c.JSON(http.StatusInternalServerError, AgentConfigureResponse{
 			Success: false,
@@ -217,7 +218,7 @@ func (s *Server) handleAgentConfigure(c *gin.Context) {
 		return
 	}
 
-	s.logger.Info("agent configured", zap.String("command", req.Command))
+	s.logger.Info("agent configured", zap.String("command", req.Command), zap.String("approval_policy", req.ApprovalPolicy))
 	c.JSON(http.StatusOK, AgentConfigureResponse{
 		Success: true,
 		Message: "agent configured",

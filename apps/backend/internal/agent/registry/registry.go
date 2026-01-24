@@ -54,6 +54,9 @@ type AgentTypeConfig struct {
 	// Permission configuration
 	PermissionConfig PermissionConfig `json:"permission_config,omitempty"` // How to handle tool permissions
 
+	// Permission settings metadata (what settings are supported for this agent)
+	PermissionSettings map[string]PermissionSetting `json:"permission_settings,omitempty"` // Supported permission settings
+
 	// Discovery configuration (for detecting agent installation)
 	Discovery DiscoveryConfig `json:"discovery,omitempty"` // Discovery metadata for agent detection
 
@@ -110,6 +113,33 @@ type PermissionConfig struct {
 	// When AutoApprove is false, these tools will be configured to ask for permission.
 	// Example: ["launch-process", "save-file", "str-replace-editor", "remove-files"]
 	ToolsRequiringPermission []string `json:"tools_requiring_permission,omitempty"`
+}
+
+// PermissionSetting defines metadata for a permission setting option
+type PermissionSetting struct {
+	// Supported indicates whether this setting is available for the agent
+	Supported bool `json:"supported"`
+
+	// Default is the default value for this setting when creating new profiles
+	Default bool `json:"default"`
+
+	// Label is the display label for the UI
+	Label string `json:"label"`
+
+	// Description explains what the setting does
+	Description string `json:"description"`
+
+	// ApplyMethod defines how this setting is applied: "cli_flag", "acp", "config", or empty (none)
+	ApplyMethod string `json:"apply_method,omitempty"`
+
+	// CLIFlag is the CLI flag to use when ApplyMethod is "cli_flag"
+	// Example: "--allow-indexing" for auggie
+	CLIFlag string `json:"cli_flag,omitempty"`
+
+	// CLIFlagValue is an optional value template for the CLI flag
+	// If empty and the setting is true, just appends the flag
+	// If set, appends "flag value" (e.g., "--approval-policy never")
+	CLIFlagValue string `json:"cli_flag_value,omitempty"`
 }
 
 // MountTemplate defines a mount with template support
@@ -253,26 +283,22 @@ func (r *Registry) Unregister(id string) error {
 }
 
 // Get returns an agent type configuration
-func (r *Registry) Get(id string) (*AgentTypeConfig, error) {
+func (r *Registry) Get(id string) (*AgentTypeConfig, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	config, exists := r.agents[id]
-	if !exists {
-		return nil, fmt.Errorf("agent type %q not found", id)
-	}
-
-	return config, nil
+	return config, exists
 }
 
 // GetDefault returns the default agent type configuration.
-// It tries "augment-agent" first, then falls back to the first enabled agent.
+// It tries "auggie" first, then falls back to the first enabled agent.
 func (r *Registry) GetDefault() (*AgentTypeConfig, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	// Try augment-agent first
-	if config, exists := r.agents["augment-agent"]; exists && config.Enabled {
+	// Try auggie first
+	if config, exists := r.agents["auggie"]; exists && config.Enabled {
 		return config, nil
 	}
 

@@ -22,6 +22,11 @@ type CommandOptions struct {
 	Model       string // Model to use (appended via ModelFlag if set)
 	SessionID   string // Session ID to resume (appended via SessionConfig.ResumeFlag if not ResumeViaACP)
 	AutoApprove bool   // If true, skip permission flags (auto-approve all tool calls)
+
+	// PermissionValues contains the values for each permission setting
+	// Keys are setting names (e.g., "allow_indexing", "auto_approve")
+	// Values are the boolean state of each setting
+	PermissionValues map[string]bool
 }
 
 // BuildCommand builds a command slice from agent config and options
@@ -55,6 +60,34 @@ func (cb *CommandBuilder) BuildCommand(agentConfig *registry.AgentTypeConfig, op
 	if !opts.AutoApprove && permConfig.PermissionFlag != "" && len(permConfig.ToolsRequiringPermission) > 0 {
 		for _, tool := range permConfig.ToolsRequiringPermission {
 			cmd = append(cmd, permConfig.PermissionFlag, tool+":ask-user")
+		}
+	}
+
+	// Apply permission settings that use CLI flags
+	// Each permission setting can define its own CLI flag via ApplyMethod="cli_flag"
+	if permSettings := agentConfig.PermissionSettings; permSettings != nil {
+		for settingName, setting := range permSettings {
+			// Skip if not supported or not a CLI flag setting
+			if !setting.Supported || setting.ApplyMethod != "cli_flag" || setting.CLIFlag == "" {
+				continue
+			}
+
+			// Get the value for this setting from options
+			value, exists := opts.PermissionValues[settingName]
+			if !exists {
+				continue
+			}
+
+			// Only apply if the setting value is true
+			if value {
+				if setting.CLIFlagValue != "" {
+					// Flag with value: "--flag value"
+					cmd = append(cmd, setting.CLIFlag, setting.CLIFlagValue)
+				} else {
+					// Boolean flag: "--flag"
+					cmd = append(cmd, setting.CLIFlag)
+				}
+			}
 		}
 	}
 

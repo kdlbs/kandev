@@ -180,8 +180,16 @@ func (cm *ContainerManager) buildContainerConfig(config ContainerConfig) (docker
 
 	// Build command using CommandBuilder
 	cmdOpts := CommandOptions{
-		Model:     config.Model,
-		SessionID: config.SessionID,
+		Model:            config.Model,
+		SessionID:        config.SessionID,
+		PermissionValues: make(map[string]bool),
+	}
+	// Get profile settings if available
+	if config.ProfileInfo != nil {
+		cmdOpts.AutoApprove = config.ProfileInfo.AutoApprove
+		cmdOpts.PermissionValues["auto_approve"] = config.ProfileInfo.AutoApprove
+		cmdOpts.PermissionValues["allow_indexing"] = config.ProfileInfo.AllowIndexing
+		cmdOpts.PermissionValues["dangerously_skip_permissions"] = config.ProfileInfo.DangerouslySkipPermissions
 	}
 	cmd := cm.commandBuilder.BuildCommand(agentConfig, cmdOpts)
 

@@ -20,6 +20,7 @@ type AgentProfile struct {
 	Model                      string     `json:"model"`
 	AutoApprove                bool       `json:"auto_approve"`
 	DangerouslySkipPermissions bool       `json:"dangerously_skip_permissions"`
+	AllowIndexing              bool       `json:"allow_indexing"`
 	Plan                       string     `json:"plan"`
 	CreatedAt                  time.Time  `json:"created_at"`
 	UpdatedAt                  time.Time  `json:"updated_at"`

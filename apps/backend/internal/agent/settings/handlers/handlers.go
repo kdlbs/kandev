@@ -282,6 +282,7 @@ type createProfileRequest struct {
 	Model                      string `json:"model"`
 	AutoApprove                bool   `json:"auto_approve"`
 	DangerouslySkipPermissions bool   `json:"dangerously_skip_permissions"`
+	AllowIndexing              bool   `json:"allow_indexing"`
 	Plan                       string `json:"plan"`
 }
 
@@ -301,6 +302,7 @@ func (h *Handlers) httpCreateProfile(c *gin.Context) {
 		Model:                      body.Model,
 		AutoApprove:                body.AutoApprove,
 		DangerouslySkipPermissions: body.DangerouslySkipPermissions,
+		AllowIndexing:              body.AllowIndexing,
 		Plan:                       body.Plan,
 	})
 	if err != nil {
@@ -322,6 +324,7 @@ type updateProfileRequest struct {
 	Model                      *string `json:"model,omitempty"`
 	AutoApprove                *bool   `json:"auto_approve,omitempty"`
 	DangerouslySkipPermissions *bool   `json:"dangerously_skip_permissions,omitempty"`
+	AllowIndexing              *bool   `json:"allow_indexing,omitempty"`
 	Plan                       *string `json:"plan,omitempty"`
 }
 
@@ -341,6 +344,7 @@ func (h *Handlers) httpUpdateProfile(c *gin.Context) {
 		Model:                      body.Model,
 		AutoApprove:                body.AutoApprove,
 		DangerouslySkipPermissions: body.DangerouslySkipPermissions,
+		AllowIndexing:              body.AllowIndexing,
 		Plan:                       body.Plan,
 	})
 	if err != nil {

@@ -88,7 +88,7 @@ func LoadRegistry() (*Registry, error) {
 	for _, agentCfg := range agentConfigs {
 		// Convert registry.AgentTypeConfig to discovery.KnownAgent
 		knownAgent := KnownAgent{
-			Name:             extractAgentName(agentCfg.ID),
+			Name:             agentCfg.ID, // Use ID directly as the short name (e.g., "auggie", "codex")
 			DisplayName:      agentCfg.DisplayName,
 			SupportsMCP:      agentCfg.Discovery.SupportsMCP,
 			MCPConfigPath:    agentCfg.Discovery.MCPConfigPath,
@@ -104,12 +104,6 @@ func LoadRegistry() (*Registry, error) {
 	}
 
 	return &Registry{adapters: adapters, definitions: definitions}, nil
-}
-
-// extractAgentName extracts the short name from an agent ID (e.g., "auggie-agent" -> "auggie")
-func extractAgentName(id string) string {
-	name := strings.TrimSuffix(id, "-agent")
-	return name
 }
 
 func (r *Registry) Definitions() []KnownAgent {

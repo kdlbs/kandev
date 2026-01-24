@@ -56,6 +56,7 @@ func (r *sqliteRepository) initSchema() error {
 		model TEXT NOT NULL CHECK(model != ''),
 		auto_approve INTEGER NOT NULL DEFAULT 0,
 		dangerously_skip_permissions INTEGER NOT NULL DEFAULT 0,
+		allow_indexing INTEGER NOT NULL DEFAULT 1,
 		plan TEXT DEFAULT '',
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL,
@@ -247,10 +248,10 @@ func (r *sqliteRepository) CreateAgentProfile(ctx context.Context, profile *mode
 	profile.CreatedAt = now
 	profile.UpdatedAt = now
 	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO agent_profiles (id, agent_id, name, agent_display_name, model, auto_approve, dangerously_skip_permissions, plan, created_at, updated_at, deleted_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO agent_profiles (id, agent_id, name, agent_display_name, model, auto_approve, dangerously_skip_permissions, allow_indexing, plan, created_at, updated_at, deleted_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, profile.ID, profile.AgentID, profile.Name, profile.AgentDisplayName, profile.Model, boolToInt(profile.AutoApprove),
-		boolToInt(profile.DangerouslySkipPermissions), profile.Plan, profile.CreatedAt, profile.UpdatedAt, profile.DeletedAt)
+		boolToInt(profile.DangerouslySkipPermissions), boolToInt(profile.AllowIndexing), profile.Plan, profile.CreatedAt, profile.UpdatedAt, profile.DeletedAt)
 	return err
 }
 
@@ -258,10 +259,10 @@ func (r *sqliteRepository) UpdateAgentProfile(ctx context.Context, profile *mode
 	profile.UpdatedAt = time.Now().UTC()
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE agent_profiles
-		SET name = ?, agent_display_name = ?, model = ?, auto_approve = ?, dangerously_skip_permissions = ?, plan = ?, updated_at = ?
+		SET name = ?, agent_display_name = ?, model = ?, auto_approve = ?, dangerously_skip_permissions = ?, allow_indexing = ?, plan = ?, updated_at = ?
 		WHERE id = ? AND deleted_at IS NULL
 	`, profile.Name, profile.AgentDisplayName, profile.Model, boolToInt(profile.AutoApprove),
-		boolToInt(profile.DangerouslySkipPermissions), profile.Plan, profile.UpdatedAt, profile.ID)
+		boolToInt(profile.DangerouslySkipPermissions), boolToInt(profile.AllowIndexing), profile.Plan, profile.UpdatedAt, profile.ID)
 	if err != nil {
 		return err
 	}
@@ -289,7 +290,7 @@ func (r *sqliteRepository) DeleteAgentProfile(ctx context.Context, id string) er
 
 func (r *sqliteRepository) GetAgentProfile(ctx context.Context, id string) (*models.AgentProfile, error) {
 	row := r.db.QueryRowContext(ctx, `
-		SELECT id, agent_id, name, agent_display_name, model, auto_approve, dangerously_skip_permissions, plan, created_at, updated_at, deleted_at
+		SELECT id, agent_id, name, agent_display_name, model, auto_approve, dangerously_skip_permissions, allow_indexing, plan, created_at, updated_at, deleted_at
 		FROM agent_profiles WHERE id = ? AND deleted_at IS NULL
 	`, id)
 	return scanAgentProfile(row)
@@ -297,7 +298,7 @@ func (r *sqliteRepository) GetAgentProfile(ctx context.Context, id string) (*mod
 
 func (r *sqliteRepository) ListAgentProfiles(ctx context.Context, agentID string) ([]*models.AgentProfile, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, agent_id, name, agent_display_name, model, auto_approve, dangerously_skip_permissions, plan, created_at, updated_at, deleted_at
+		SELECT id, agent_id, name, agent_display_name, model, auto_approve, dangerously_skip_permissions, allow_indexing, plan, created_at, updated_at, deleted_at
 		FROM agent_profiles WHERE agent_id = ? AND deleted_at IS NULL ORDER BY created_at DESC
 	`, agentID)
 	if err != nil {
@@ -348,6 +349,7 @@ func scanAgentProfile(scanner interface {
 	profile := &models.AgentProfile{}
 	var autoApprove int
 	var skipPermissions int
+	var allowIndexing int
 	if err := scanner.Scan(
 		&profile.ID,
 		&profile.AgentID,
@@ -356,6 +358,7 @@ func scanAgentProfile(scanner interface {
 		&profile.Model,
 		&autoApprove,
 		&skipPermissions,
+		&allowIndexing,
 		&profile.Plan,
 		&profile.CreatedAt,
 		&profile.UpdatedAt,
@@ -365,6 +368,7 @@ func scanAgentProfile(scanner interface {
 	}
 	profile.AutoApprove = autoApprove == 1
 	profile.DangerouslySkipPermissions = skipPermissions == 1
+	profile.AllowIndexing = allowIndexing == 1
 	return profile, nil
 }
 
