@@ -342,30 +342,38 @@ func (s *Service) handleToolUpdateEvent(ctx context.Context, payload *lifecycle.
 		return
 	}
 
-	// Only update message when tool call completes or errors
-	switch payload.Data.ToolStatus {
-	case "complete", "completed", "error", "failed":
-		if s.messageCreator != nil {
-			result := ""
-			if payload.Data.ToolResult != nil {
-				if str, ok := payload.Data.ToolResult.(string); ok {
-					result = str
-				}
-			}
-			if err := s.messageCreator.UpdateToolCallMessage(
-				ctx,
-				payload.TaskID,
-				payload.Data.ToolCallID,
-				payload.Data.ToolStatus,
-				result,
-				payload.SessionID,
-			); err != nil {
-				s.logger.Warn("failed to update tool call message",
-					zap.String("task_id", payload.TaskID),
-					zap.String("tool_call_id", payload.Data.ToolCallID),
-					zap.Error(err))
-			}
+	if s.messageCreator == nil {
+		return
+	}
 
+	// Handle all status updates (running, complete, error)
+	switch payload.Data.ToolStatus {
+	case "running", "complete", "completed", "success", "error", "failed":
+		result := ""
+		if payload.Data.ToolResult != nil {
+			if str, ok := payload.Data.ToolResult.(string); ok {
+				result = str
+			}
+		}
+		if err := s.messageCreator.UpdateToolCallMessage(
+			ctx,
+			payload.TaskID,
+			payload.Data.ToolCallID,
+			payload.Data.ToolStatus,
+			result,
+			payload.SessionID,
+			payload.Data.ToolTitle, // Include title from update event
+			payload.Data.ToolArgs,  // Include args from update event
+		); err != nil {
+			s.logger.Warn("failed to update tool call message",
+				zap.String("task_id", payload.TaskID),
+				zap.String("tool_call_id", payload.Data.ToolCallID),
+				zap.Error(err))
+		}
+
+		// Update session state for completion events
+		if payload.Data.ToolStatus == "complete" || payload.Data.ToolStatus == "completed" ||
+			payload.Data.ToolStatus == "success" || payload.Data.ToolStatus == "error" || payload.Data.ToolStatus == "failed" {
 			s.updateTaskSessionState(ctx, payload.TaskID, payload.SessionID, models.TaskSessionStateRunning, "", false)
 		}
 	}

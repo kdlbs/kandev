@@ -271,8 +271,14 @@ func (m *Manager) Start(ctx context.Context) error {
 	}
 
 	// Prepare protocol-specific environment before starting the process
-	if err := m.adapter.PrepareEnvironment(); err != nil {
+	// This may return additional environment variables that need to be passed to the subprocess
+	adapterEnv, err := m.adapter.PrepareEnvironment()
+	if err != nil {
 		m.logger.Warn("failed to prepare protocol environment", zap.Error(err))
+	}
+	// Merge adapter-provided env vars into the subprocess environment
+	for k, v := range adapterEnv {
+		m.cfg.AgentEnv = append(m.cfg.AgentEnv, fmt.Sprintf("%s=%s", k, v))
 	}
 
 	// Start the process

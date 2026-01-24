@@ -1802,10 +1802,10 @@ func (s *Service) AppendMessageContent(ctx context.Context, messageID, additiona
 	return nil
 }
 
-// UpdateToolCallMessage updates a tool call message's status.
+// UpdateToolCallMessage updates a tool call message's status, and optionally title/args.
 // It includes retry logic to handle race conditions where the complete event
 // may arrive before the message has been created by the start event.
-func (s *Service) UpdateToolCallMessage(ctx context.Context, sessionID, toolCallID, status, result string) error {
+func (s *Service) UpdateToolCallMessage(ctx context.Context, sessionID, toolCallID, status, result, title string, args map[string]interface{}) error {
 	const maxRetries = 5
 	const retryDelay = 100 * time.Millisecond
 
@@ -1851,6 +1851,24 @@ func (s *Service) UpdateToolCallMessage(ctx context.Context, sessionID, toolCall
 	message.Metadata["status"] = status
 	if result != "" {
 		message.Metadata["result"] = result
+	}
+
+	// Update title if provided and current title is just the tool name (not yet filled)
+	// This handles the case where the first event only had the tool name
+	if title != "" {
+		currentTitle, _ := message.Metadata["title"].(string)
+		if currentTitle == "" || currentTitle == message.Metadata["tool_name"] {
+			message.Content = title
+			message.Metadata["title"] = title
+		}
+	}
+
+	// Update args if provided and current args are empty
+	if len(args) > 0 {
+		currentArgs, _ := message.Metadata["args"].(map[string]interface{})
+		if len(currentArgs) == 0 {
+			message.Metadata["args"] = args
+		}
 	}
 
 	if err := s.repo.UpdateMessage(ctx, message); err != nil {

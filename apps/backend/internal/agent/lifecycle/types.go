@@ -54,6 +54,12 @@ type AgentExecution struct {
 	// Streaming message tracking - ID of the current in-progress message being streamed
 	// This is set when we create a streaming message and cleared on tool_call/complete
 	currentMessageID string
+
+	// Resume context tracking for fork_session pattern (ACP agents that don't support session/load)
+	// needsResumeContext is set to true when the session has history that should be injected
+	// resumeContextInjected is set to true after context has been injected into a prompt
+	needsResumeContext    bool
+	resumeContextInjected bool
 }
 
 // GetAgentCtlClient returns the agentctl client for this execution

@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/common/appctx"
 	"github.com/kandev/kandev/internal/common/logger"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+	"github.com/kandev/kandev/pkg/agent"
 )
 
 // SessionManager handles ACP session initialization and management
@@ -23,6 +24,7 @@ type SessionManager struct {
 	eventPublisher *EventPublisher
 	streamManager  *StreamManager
 	executionStore *ExecutionStore
+	historyManager *SessionHistoryManager
 	stopCh         <-chan struct{} // For graceful shutdown coordination
 }
 
@@ -36,10 +38,11 @@ func NewSessionManager(log *logger.Logger, stopCh <-chan struct{}) *SessionManag
 
 // SetDependencies sets the optional dependencies for full session orchestration.
 // These are set after construction to avoid circular dependencies.
-func (sm *SessionManager) SetDependencies(ep *EventPublisher, strm *StreamManager, store *ExecutionStore) {
+func (sm *SessionManager) SetDependencies(ep *EventPublisher, strm *StreamManager, store *ExecutionStore, history *SessionHistoryManager) {
 	sm.eventPublisher = ep
 	sm.streamManager = strm
 	sm.executionStore = store
+	sm.historyManager = history
 }
 
 // InitializeResult contains the result of session initialization
@@ -116,9 +119,66 @@ func (sm *SessionManager) createOrLoadSession(
 	mcpServers []agentctltypes.McpServer,
 ) (string, error) {
 	if agentConfig.SessionConfig.ResumeViaACP && existingSessionID != "" {
-		return sm.loadSession(ctx, client, agentConfig, existingSessionID)
+		sessionID, err := sm.loadSession(ctx, client, agentConfig, existingSessionID)
+		if err != nil {
+			// If session/load fails with "Method not found" or "LoadSession capability is false",
+			// fall back to creating a new session. This handles agents that don't support session/load.
+			if strings.Contains(err.Error(), "Method not found") ||
+				strings.Contains(err.Error(), "LoadSession capability is false") {
+				sm.logger.Warn("agent does not support session loading, falling back to session/new",
+					zap.String("agent_type", agentConfig.ID),
+					zap.String("existing_session_id", existingSessionID),
+					zap.String("reason", err.Error()))
+				return sm.createNewSession(ctx, client, agentConfig, workspacePath, mcpServers)
+			}
+			return "", err
+		}
+		return sessionID, nil
 	}
 	return sm.createNewSession(ctx, client, agentConfig, workspacePath, mcpServers)
+}
+
+// shouldInjectResumeContext determines if we should inject resume context for this session.
+// Returns true if:
+// 1. The agent uses ACP protocol
+// 2. The agent doesn't support session/load (ResumeViaACP is false)
+// 3. We have a task session ID (for history lookup)
+// 4. There's existing history for this session
+func (sm *SessionManager) shouldInjectResumeContext(agentConfig *registry.AgentTypeConfig, taskSessionID string) bool {
+	if sm.historyManager == nil {
+		return false
+	}
+
+	// Only inject for ACP agents that don't support session/load
+	if agentConfig.Protocol != agent.ProtocolACP {
+		return false
+	}
+
+	// If agent supports session/load via ACP, don't inject (it will restore context natively)
+	if agentConfig.SessionConfig.ResumeViaACP {
+		return false
+	}
+
+	// Check if we have history for this session
+	return sm.historyManager.HasHistory(taskSessionID)
+}
+
+// getResumeContextPrompt generates a prompt with resume context if available.
+// If there's no history or context injection is disabled, returns the original prompt.
+func (sm *SessionManager) getResumeContextPrompt(agentConfig *registry.AgentTypeConfig, taskSessionID, originalPrompt string) string {
+	if !sm.shouldInjectResumeContext(agentConfig, taskSessionID) {
+		return originalPrompt
+	}
+
+	resumePrompt, err := sm.historyManager.GenerateResumeContext(taskSessionID, originalPrompt)
+	if err != nil {
+		sm.logger.Warn("failed to generate resume context, using original prompt",
+			zap.String("session_id", taskSessionID),
+			zap.Error(err))
+		return originalPrompt
+	}
+
+	return resumePrompt
 }
 
 // loadSession loads an existing session via ACP session/load
@@ -244,21 +304,47 @@ func (sm *SessionManager) InitializeAndPrompt(
 
 	// Send the task prompt if provided - run asynchronously so orchestrator.start returns quickly.
 	// The agent will process the prompt and emit events via the WebSocket stream.
+	//
+	// For resumed sessions (fork_session pattern): If we have session history but no new task description,
+	// we still need to send a resume context prompt so the agent knows about the prior conversation.
 	if taskDescription != "" {
+		// Check if we need to inject resume context (fork_session pattern for ACP agents)
+		effectivePrompt := sm.getResumeContextPrompt(agentConfig, execution.SessionID, taskDescription)
+		if effectivePrompt != taskDescription {
+			sm.logger.Info("injecting resume context into initial prompt",
+				zap.String("execution_id", execution.ID),
+				zap.String("session_id", execution.SessionID),
+				zap.Int("original_length", len(taskDescription)),
+				zap.Int("effective_length", len(effectivePrompt)))
+		}
+
 		go func() {
 			// Use detached context that respects stopCh for graceful shutdown
 			promptCtx, cancel := appctx.Detached(ctx, sm.stopCh, 10*time.Minute)
 			defer cancel()
 
-			_, err := sm.SendPrompt(promptCtx, execution, taskDescription, false, markReady)
+			_, err := sm.SendPrompt(promptCtx, execution, effectivePrompt, false, markReady)
 			if err != nil {
 				sm.logger.Error("initial prompt failed",
 					zap.String("execution_id", execution.ID),
 					zap.Error(err))
 			}
 		}()
+	} else if sm.shouldInjectResumeContext(agentConfig, execution.SessionID) {
+		// No task description, but we have session history (resumed session)
+		// Don't send a prompt now - we'll inject context when the user sends their first message.
+		// This avoids triggering IN_PROGRESS state until the user actually interacts.
+		execution.needsResumeContext = true
+		sm.logger.Info("session has history for context injection, will inject on first user prompt",
+			zap.String("execution_id", execution.ID),
+			zap.String("session_id", execution.SessionID))
+		if err := markReady(execution.ID); err != nil {
+			sm.logger.Error("failed to mark execution as ready",
+				zap.String("execution_id", execution.ID),
+				zap.Error(err))
+		}
 	} else {
-		sm.logger.Warn("no task description provided, marking as ready",
+		sm.logger.Debug("no task description and no resume context needed, marking as ready",
 			zap.String("execution_id", execution.ID))
 		if err := markReady(execution.ID); err != nil {
 			sm.logger.Error("failed to mark execution as ready",
@@ -303,12 +389,45 @@ func (sm *SessionManager) SendPrompt(
 	execution.currentMessageID = "" // Clear streaming message ID for new turn
 	execution.messageMu.Unlock()
 
+	// Check if we need to inject resume context (fork_session pattern)
+	// This happens on the first user prompt after resuming a session
+	effectivePrompt := prompt
+	if execution.needsResumeContext && !execution.resumeContextInjected {
+		if sm.historyManager != nil {
+			resumePrompt, err := sm.historyManager.GenerateResumeContext(execution.SessionID, prompt)
+			if err != nil {
+				sm.logger.Warn("failed to generate resume context for follow-up prompt",
+					zap.String("execution_id", execution.ID),
+					zap.Error(err))
+			} else if resumePrompt != prompt {
+				effectivePrompt = resumePrompt
+				execution.resumeContextInjected = true
+				sm.logger.Info("injecting resume context into follow-up prompt",
+					zap.String("execution_id", execution.ID),
+					zap.String("session_id", execution.SessionID),
+					zap.Int("original_length", len(prompt)),
+					zap.Int("effective_length", len(effectivePrompt)))
+				// Log the full resume context for debugging (use Info for now so user can inspect)
+				sm.logger.Info("resume context prompt content",
+					zap.String("execution_id", execution.ID),
+					zap.String("resume_prompt", effectivePrompt))
+			}
+		}
+	}
+
 	sm.logger.Info("sending prompt to agent",
 		zap.String("execution_id", execution.ID),
-		zap.Int("prompt_length", len(prompt)))
+		zap.Int("prompt_length", len(effectivePrompt)))
+
+	// Store user prompt to session history for context injection (store original, not with injected context)
+	if sm.historyManager != nil && execution.SessionID != "" {
+		if err := sm.historyManager.AppendUserMessage(execution.SessionID, prompt); err != nil {
+			sm.logger.Warn("failed to store user message to history", zap.Error(err))
+		}
+	}
 
 	// Prompt is synchronous - blocks until agent completes
-	resp, err := execution.agentctl.Prompt(ctx, prompt)
+	resp, err := execution.agentctl.Prompt(ctx, effectivePrompt)
 	if err != nil {
 		sm.logger.Error("ACP prompt failed",
 			zap.String("execution_id", execution.ID),

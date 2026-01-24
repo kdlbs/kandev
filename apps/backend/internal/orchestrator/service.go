@@ -55,7 +55,7 @@ type MessageCreator interface {
 	CreateAgentMessage(ctx context.Context, taskID, content, agentSessionID, turnID string) error
 	CreateUserMessage(ctx context.Context, taskID, content, agentSessionID, turnID string) error
 	CreateToolCallMessage(ctx context.Context, taskID, toolCallID, title, status, agentSessionID, turnID string, args map[string]interface{}) error
-	UpdateToolCallMessage(ctx context.Context, taskID, toolCallID, status, result, agentSessionID string) error
+	UpdateToolCallMessage(ctx context.Context, taskID, toolCallID, status, result, agentSessionID, title string, args map[string]interface{}) error
 	CreateSessionMessage(ctx context.Context, taskID, content, agentSessionID, messageType, turnID string, metadata map[string]interface{}, requestsInput bool) error
 	CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}) (string, error)
 	UpdatePermissionMessage(ctx context.Context, sessionID, pendingID, status string) error

@@ -84,7 +84,7 @@ func NewCodexAdapter(cfg *Config, log *logger.Logger) *CodexAdapter {
 
 // PrepareEnvironment writes MCP servers to the Codex config file.
 // Codex reads MCP configuration from ~/.codex/config.toml at startup time.
-func (a *CodexAdapter) PrepareEnvironment() error {
+func (a *CodexAdapter) PrepareEnvironment() (map[string]string, error) {
 	a.logger.Info("PrepareEnvironment called",
 		zap.Int("mcp_server_count", len(a.cfg.McpServers)))
 	for i, srv := range a.cfg.McpServers {
@@ -95,7 +95,7 @@ func (a *CodexAdapter) PrepareEnvironment() error {
 			zap.String("type", srv.Type),
 			zap.String("command", srv.Command))
 	}
-	return WriteCodexMcpConfig(a.cfg.McpServers, "", a.logger)
+	return nil, WriteCodexMcpConfig(a.cfg.McpServers, "", a.logger)
 }
 
 // Connect wires up the stdin/stdout pipes from the running agent subprocess.

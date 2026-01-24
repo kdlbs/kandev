@@ -92,11 +92,8 @@ func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID s
 		}
 	}
 
-	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateInProgress); err != nil {
-		s.logger.Warn("failed to update task state to IN_PROGRESS",
-			zap.String("task_id", taskID),
-			zap.Error(err))
-	}
+	// Note: Task stays in SCHEDULING state until the agent is fully initialized.
+	// The executor will transition to IN_PROGRESS after StartAgentProcess() succeeds.
 
 	return execution, nil
 }
@@ -258,30 +255,36 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 			return nil, fmt.Errorf("failed to get session for model switch: %w", err)
 		}
 
-		// Get current model from agent profile snapshot
+		// Get current model - handle nil snapshot and missing key safely
+		currentModel := ""
 		if session.AgentProfileSnapshot != nil {
-			if currentModel, ok := session.AgentProfileSnapshot["model"].(string); ok && currentModel != model {
-				// Model switch needed - delegate to executor
-				s.logger.Debug("model switch requested",
-					zap.String("task_id", taskID),
-					zap.String("session_id", sessionID),
-					zap.String("current_model", currentModel),
-					zap.String("new_model", model))
-
-				// Start a new turn for this prompt (model switch case)
-				s.startTurnForSession(ctx, sessionID)
-
-				// SwitchModel will stop agent, rebuild with new model, restart, and send prompt
-				switchResult, err := s.executor.SwitchModel(ctx, taskID, sessionID, model, prompt)
-				if err != nil {
-					return nil, err
-				}
-				return &PromptResult{
-					StopReason:   switchResult.StopReason,
-					AgentMessage: switchResult.AgentMessage,
-				}, nil
+			if m, ok := session.AgentProfileSnapshot["model"].(string); ok {
+				currentModel = m
 			}
 		}
+
+		// Trigger switch if models differ OR if current model is unknown (empty string)
+		if currentModel != model {
+			s.logger.Info("model switch requested",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.String("current_model", currentModel),
+				zap.String("new_model", model))
+
+			// Start a new turn for this prompt (model switch case)
+			s.startTurnForSession(ctx, sessionID)
+
+			// SwitchModel will stop agent, rebuild with new model, restart, and send prompt
+			switchResult, err := s.executor.SwitchModel(ctx, taskID, sessionID, model, prompt)
+			if err != nil {
+				return nil, fmt.Errorf("model switch failed: %w", err)
+			}
+			return &PromptResult{
+				StopReason:   switchResult.StopReason,
+				AgentMessage: switchResult.AgentMessage,
+			}, nil
+		}
+		// Model is the same, fall through to regular prompt
 	}
 
 	s.setSessionRunning(ctx, taskID, sessionID)

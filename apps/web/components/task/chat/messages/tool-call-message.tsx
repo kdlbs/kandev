@@ -9,6 +9,7 @@ import {
   IconEdit,
   IconEye,
   IconFile,
+  IconLoader2,
   IconSearch,
   IconTerminal2,
   IconX,
@@ -73,6 +74,8 @@ function getStatusIcon(status?: string, permissionStatus?: string) {
     case 'error':
       return <IconX className="h-3.5 w-3.5 text-red-500" />;
     case 'running':
+    case 'in_progress':
+      return <IconLoader2 className="h-3.5 w-3.5 text-blue-500 animate-spin" />;
     default:
       return null;
   }

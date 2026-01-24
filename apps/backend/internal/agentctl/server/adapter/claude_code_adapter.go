@@ -31,8 +31,12 @@ type ClaudeCodeAdapter struct {
 	cancel context.CancelFunc
 
 	// Session state
-	sessionID   string
-	operationID string // Current prompt operation
+	sessionID         string
+	operationID       string // Current prompt operation
+	sessionStatusSent bool   // Whether we've sent the session status event
+
+	// Track pending tool calls to auto-complete on result
+	pendingToolCalls map[string]bool
 
 	// Agent info
 	agentInfo *AgentInfo
@@ -79,17 +83,18 @@ func NewClaudeCodeAdapter(cfg *Config, log *logger.Logger) *ClaudeCodeAdapter {
 		cancel:                 cancel,
 		updatesCh:              make(chan AgentEvent, 100),
 		mainModelContextWindow: defaultContextWindow,
+		pendingToolCalls:       make(map[string]bool),
 	}
 }
 
 // PrepareEnvironment performs protocol-specific setup before the agent process starts.
 // Claude Code reads MCP configuration from settings files, but we handle MCP via kandev's
 // built-in MCP server, so this is a no-op.
-func (a *ClaudeCodeAdapter) PrepareEnvironment() error {
+func (a *ClaudeCodeAdapter) PrepareEnvironment() (map[string]string, error) {
 	a.logger.Info("PrepareEnvironment called",
 		zap.Int("mcp_server_count", len(a.cfg.McpServers)))
 	// Claude Code MCP configuration is handled externally or via CLI flags
-	return nil
+	return nil, nil
 }
 
 // Connect wires up the stdin/stdout pipes from the running agent subprocess.
@@ -495,10 +500,19 @@ func (a *ClaudeCodeAdapter) handleSystemMessage(msg *claudecode.CLIMessage) {
 		zap.String("status", msg.SessionStatus))
 
 	// Update session ID if provided
+	a.mu.Lock()
 	if msg.SessionID != "" {
-		a.mu.Lock()
 		a.sessionID = msg.SessionID
-		a.mu.Unlock()
+	}
+	alreadySent := a.sessionStatusSent
+	a.sessionStatusSent = true
+	a.mu.Unlock()
+
+	// Only send session status event once per session (on first prompt)
+	// Claude Code sends system messages on every prompt, but we only want to
+	// show "New session started" or "Session resumed" once
+	if alreadySent {
+		return
 	}
 
 	// Send session status event (NOT complete - that's only for result messages)
@@ -517,6 +531,15 @@ func (a *ClaudeCodeAdapter) handleAssistantMessage(msg *claudecode.CLIMessage, s
 	if msg.Message == nil {
 		return
 	}
+
+	// Log content block types for debugging
+	blockTypes := make([]string, 0, len(msg.Message.Content))
+	for _, block := range msg.Message.Content {
+		blockTypes = append(blockTypes, block.Type)
+	}
+	a.logger.Info("processing assistant message",
+		zap.Int("num_blocks", len(msg.Message.Content)),
+		zap.Strings("block_types", blockTypes))
 
 	// Update agent version and track main model name from model info
 	if msg.Message.Model != "" && a.agentInfo != nil {
@@ -563,6 +586,16 @@ func (a *ClaudeCodeAdapter) handleAssistantMessage(msg *claudecode.CLIMessage, s
 			} else if path, ok := block.Input["file_path"].(string); ok {
 				toolTitle = fmt.Sprintf("%s: %s", block.Name, path)
 			}
+			a.logger.Info("tool_use block received",
+				zap.String("tool_call_id", block.ID),
+				zap.String("tool_name", block.Name),
+				zap.String("title", toolTitle))
+
+			// Track this tool call as pending
+			a.mu.Lock()
+			a.pendingToolCalls[block.ID] = true
+			a.mu.Unlock()
+
 			a.sendUpdate(AgentEvent{
 				Type:        EventTypeToolCall,
 				SessionID:   sessionID,
@@ -579,6 +612,15 @@ func (a *ClaudeCodeAdapter) handleAssistantMessage(msg *claudecode.CLIMessage, s
 			if block.IsError {
 				status = "error"
 			}
+			a.logger.Info("tool_result block received",
+				zap.String("tool_call_id", block.ToolUseID),
+				zap.String("status", status))
+
+			// Remove from pending
+			a.mu.Lock()
+			delete(a.pendingToolCalls, block.ToolUseID)
+			a.mu.Unlock()
+
 			a.sendUpdate(AgentEvent{
 				Type:        EventTypeToolUpdate,
 				SessionID:   sessionID,
@@ -633,6 +675,28 @@ func (a *ClaudeCodeAdapter) handleResultMessage(msg *claudecode.CLIMessage, sess
 		a.sessionID = resultData.SessionID
 		sessionID = resultData.SessionID
 		a.mu.Unlock()
+	}
+
+	// Auto-complete any pending tool calls that didn't receive explicit tool_result
+	// This can happen if the tool result is not sent as a separate assistant message
+	a.mu.Lock()
+	pendingTools := make([]string, 0, len(a.pendingToolCalls))
+	for toolID := range a.pendingToolCalls {
+		pendingTools = append(pendingTools, toolID)
+	}
+	a.pendingToolCalls = make(map[string]bool) // Clear pending
+	a.mu.Unlock()
+
+	for _, toolID := range pendingTools {
+		a.logger.Info("auto-completing pending tool call on result",
+			zap.String("tool_call_id", toolID))
+		a.sendUpdate(AgentEvent{
+			Type:        EventTypeToolUpdate,
+			SessionID:   sessionID,
+			OperationID: operationID,
+			ToolCallID:  toolID,
+			ToolStatus:  "complete",
+		})
 	}
 
 	// Extract actual context window from model_usage if available

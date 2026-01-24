@@ -6,7 +6,6 @@ import {
   IconArrowLeft,
   IconCopy,
   IconDots,
-  IconFolderOpen,
   IconGitBranch,
   IconGitMerge,
   IconGitPullRequest,

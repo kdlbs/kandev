@@ -84,8 +84,10 @@ func (cb *CommandBuilder) BuildCommand(agentConfig *registry.AgentTypeConfig, op
 					// Flag with value: "--flag value"
 					cmd = append(cmd, setting.CLIFlag, setting.CLIFlagValue)
 				} else {
-					// Boolean flag: "--flag"
-					cmd = append(cmd, setting.CLIFlag)
+					// Boolean flag or multiple flags: "--flag" or "--flag1 --flag2 arg"
+					// Split on spaces to handle multiple flags in one setting
+					parts := strings.Fields(setting.CLIFlag)
+					cmd = append(cmd, parts...)
 				}
 			}
 		}

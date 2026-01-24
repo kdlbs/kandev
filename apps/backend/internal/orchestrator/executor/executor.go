@@ -278,22 +278,27 @@ func (e *Executor) ExecuteWithProfile(ctx context.Context, task *v1.Task, agentP
 	var agentProfileSnapshot map[string]interface{}
 	if profileInfo, err := e.agentManager.ResolveAgentProfile(ctx, agentProfileID); err == nil && profileInfo != nil {
 		agentProfileSnapshot = map[string]interface{}{
-			"id":                          profileInfo.ProfileID,
-			"name":                        profileInfo.ProfileName,
-			"agent_id":                    profileInfo.AgentID,
-			"agent_name":                  profileInfo.AgentName,
-			"model":                       profileInfo.Model,
-			"auto_approve":                profileInfo.AutoApprove,
+			"id":                           profileInfo.ProfileID,
+			"name":                         profileInfo.ProfileName,
+			"agent_id":                     profileInfo.AgentID,
+			"agent_name":                   profileInfo.AgentName,
+			"model":                        profileInfo.Model,
+			"auto_approve":                 profileInfo.AutoApprove,
 			"dangerously_skip_permissions": profileInfo.DangerouslySkipPermissions,
-			"plan":                        profileInfo.Plan,
+			"plan":                         profileInfo.Plan,
 		}
 		e.logger.Debug("resolved agent profile for snapshot",
 			zap.String("profile_id", profileInfo.ProfileID),
 			zap.String("model", profileInfo.Model))
-	} else if err != nil {
-		e.logger.Warn("failed to resolve agent profile for snapshot, session will have empty snapshot",
+	} else {
+		// Create minimal snapshot even on failure - ensures model switching works
+		e.logger.Warn("failed to resolve agent profile, using minimal snapshot",
 			zap.String("agent_profile_id", agentProfileID),
 			zap.Error(err))
+		agentProfileSnapshot = map[string]interface{}{
+			"id":    agentProfileID,
+			"model": "", // Empty model allows any model switch
+		}
 	}
 
 	// Create agent session in database before launch so worktree associations can persist.
@@ -437,6 +442,18 @@ func (e *Executor) ExecuteWithProfile(ctx context.Context, task *v1.Task, agentP
 					zap.String("session_id", sessionID),
 					zap.Error(updateErr))
 			}
+			return
+		}
+
+		// Agent started successfully - transition task from SCHEDULING to IN_PROGRESS
+		if updateErr := e.repo.UpdateTaskState(context.Background(), task.ID, v1.TaskStateInProgress); updateErr != nil {
+			e.logger.Warn("failed to update task state to IN_PROGRESS after agent start",
+				zap.String("task_id", task.ID),
+				zap.Error(updateErr))
+		} else {
+			e.logger.Debug("task transitioned to IN_PROGRESS after agent started",
+				zap.String("task_id", task.ID),
+				zap.String("session_id", sessionID))
 		}
 	}()
 
@@ -684,6 +701,27 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 						zap.String("session_id", session.ID),
 						zap.Error(updateErr))
 				}
+				return
+			}
+
+			// Agent resumed successfully - sync task state with session state.
+			// If the session is waiting for input, the task should be in REVIEW state.
+			// This ensures the task state reflects the actual agent status.
+			if session.State == models.TaskSessionStateWaitingForInput {
+				if updateErr := e.repo.UpdateTaskState(context.Background(), task.ID, v1.TaskStateReview); updateErr != nil {
+					e.logger.Warn("failed to update task state to REVIEW after resume",
+						zap.String("task_id", task.ID),
+						zap.Error(updateErr))
+				} else {
+					e.logger.Debug("task state synced to REVIEW after resume (session waiting for input)",
+						zap.String("task_id", task.ID),
+						zap.String("session_id", session.ID))
+				}
+			} else {
+				e.logger.Debug("agent resumed successfully, task state unchanged",
+					zap.String("task_id", task.ID),
+					zap.String("session_id", session.ID),
+					zap.String("session_state", string(session.State)))
 			}
 		}()
 	}

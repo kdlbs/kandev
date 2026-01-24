@@ -17,6 +17,8 @@ func NewAdapter(protocol agent.Protocol, cfg *Config, log *logger.Logger) (Agent
 		return NewCodexAdapter(cfg, log), nil
 	case agent.ProtocolClaudeCode:
 		return NewClaudeCodeAdapter(cfg, log), nil
+	case agent.ProtocolOpenCode:
+		return NewOpenCodeAdapter(cfg, log), nil
 	default:
 		return nil, fmt.Errorf("unsupported protocol: %s", protocol)
 	}
