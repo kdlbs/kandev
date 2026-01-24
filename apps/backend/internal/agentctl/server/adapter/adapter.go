@@ -37,6 +37,7 @@ const (
 	EventTypeError             = streams.EventTypeError
 	EventTypePermissionRequest = streams.EventTypePermissionRequest
 	EventTypeContextWindow     = streams.EventTypeContextWindow
+	EventTypeSessionStatus     = streams.EventTypeSessionStatus
 )
 
 // StderrProvider provides access to recent stderr output for error context.

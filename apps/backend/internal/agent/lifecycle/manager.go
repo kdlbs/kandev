@@ -917,6 +917,13 @@ func (m *Manager) initializeACPSession(ctx context.Context, execution *AgentExec
 // providedACPSessionID is the ACP session ID that was provided BEFORE initialization (for resumption).
 // This must be captured before initializeACPSession runs, as that overwrites execution.ACPSessionID.
 func (m *Manager) emitSessionStatusEvent(execution *AgentExecution, agentConfig *registry.AgentTypeConfig, providedACPSessionID string) {
+	// Skip emitting for agents that report their session status via the stream protocol.
+	// These agents emit session_status events from their adapter when the real session info arrives,
+	// so emitting here would create duplicate "New session started" messages.
+	if agentConfig.SessionConfig.ReportsStatusViaStream {
+		return
+	}
+
 	wasResumed := false
 	if providedACPSessionID != "" {
 		if agentConfig.SessionConfig.ResumeViaACP {

@@ -91,6 +91,13 @@ type SessionConfig struct {
 	// SessionDirTarget is the container path where the session directory is mounted.
 	// Example: "/root/.augment/sessions" for auggie.
 	SessionDirTarget string `json:"session_dir_target,omitempty"`
+
+	// ReportsStatusViaStream indicates that the agent reports its session status
+	// via the stream protocol (e.g., system message in stream-json).
+	// When true, the lifecycle manager will NOT emit a session_status event,
+	// since the agent's adapter will emit it when the real session info arrives.
+	// This prevents duplicate "New session started" messages.
+	ReportsStatusViaStream bool `json:"reports_status_via_stream,omitempty"`
 }
 
 // SupportsRecovery returns whether the agent supports session recovery after backend restart.
@@ -375,10 +382,12 @@ func ValidateConfig(config *AgentTypeConfig) error {
 	if config.Name == "" {
 		return fmt.Errorf("agent type name is required")
 	}
-	if config.Image == "" {
-		return fmt.Errorf("agent type image is required")
+	// Standalone agents (like Claude Code) don't need a Docker image - they use Cmd directly
+	// Docker-based agents need an image
+	if config.Image == "" && len(config.Cmd) == 0 {
+		return fmt.Errorf("agent type requires either image (Docker) or cmd (standalone)")
 	}
-	if config.Tag == "" {
+	if config.Image != "" && config.Tag == "" {
 		config.Tag = "latest" // Default to latest if not specified
 	}
 	if config.ResourceLimits.MemoryMB <= 0 {
@@ -434,6 +443,8 @@ func parseProtocol(p string) agent.Protocol {
 		return agent.ProtocolMCP
 	case "codex":
 		return agent.ProtocolCodex
+	case "claude-code":
+		return agent.ProtocolClaudeCode
 	default:
 		return agent.ProtocolACP // Default to ACP
 	}

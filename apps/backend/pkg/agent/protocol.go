@@ -15,6 +15,10 @@ const (
 	// Codex uses a similar structure to ACP but with different message formats and
 	// a Thread/Turn model instead of Session/Prompt.
 	ProtocolCodex Protocol = "codex"
+	// ProtocolClaudeCode is the Claude Code CLI protocol (stream-json over stdin/stdout).
+	// Claude Code uses a streaming JSON format with control requests for permissions
+	// and user messages for prompts.
+	ProtocolClaudeCode Protocol = "claude-code"
 )
 
 // String returns the string representation of the protocol.
@@ -25,7 +29,7 @@ func (p Protocol) String() string {
 // IsValid returns true if the protocol is a known valid protocol.
 func (p Protocol) IsValid() bool {
 	switch p {
-	case ProtocolACP, ProtocolREST, ProtocolMCP, ProtocolCodex:
+	case ProtocolACP, ProtocolREST, ProtocolMCP, ProtocolCodex, ProtocolClaudeCode:
 		return true
 	default:
 		return false
