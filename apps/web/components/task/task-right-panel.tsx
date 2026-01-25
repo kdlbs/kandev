@@ -281,7 +281,7 @@ const TaskRightPanel = memo(function TaskRightPanel({ topPanel, sessionId = null
                       isStopping={isStoppingDev}
                     />
                   ) : (
-                    <ShellTerminal sessionId={sessionId ?? undefined} />
+                    <ShellTerminal key={sessionId} sessionId={sessionId ?? undefined} />
                   )}
                 </SessionPanelContent>
               </TabsContent>

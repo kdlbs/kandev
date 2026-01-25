@@ -394,3 +394,211 @@ func TestManager_StartStop(t *testing.T) {
 		t.Fatalf("unexpected error stopping manager: %v", err)
 	}
 }
+
+func TestManager_BuildPassthroughResumeCommand(t *testing.T) {
+	mgr := newTestManager()
+
+	tests := []struct {
+		name        string
+		agentConfig *registry.AgentTypeConfig
+		profileInfo *AgentProfileInfo
+		wantCmd     []string
+	}{
+		{
+			name: "basic command without profile",
+			agentConfig: &registry.AgentTypeConfig{
+				ID: "test-agent",
+				PassthroughConfig: registry.PassthroughConfig{
+					Supported:      true,
+					PassthroughCmd: []string{"test-cli", "--verbose"},
+				},
+			},
+			profileInfo: nil,
+			wantCmd:     []string{"test-cli", "--verbose"},
+		},
+		{
+			name: "command with model flag",
+			agentConfig: &registry.AgentTypeConfig{
+				ID: "test-agent",
+				PassthroughConfig: registry.PassthroughConfig{
+					Supported:      true,
+					PassthroughCmd: []string{"test-cli"},
+					ModelFlag:      "--model {model}",
+				},
+			},
+			profileInfo: &AgentProfileInfo{
+				Model: "gpt-4",
+			},
+			wantCmd: []string{"test-cli", "--model", "gpt-4"},
+		},
+		{
+			name: "command with resume flag",
+			agentConfig: &registry.AgentTypeConfig{
+				ID: "test-agent",
+				PassthroughConfig: registry.PassthroughConfig{
+					Supported:      true,
+					PassthroughCmd: []string{"test-cli"},
+					ResumeFlag:     "-c",
+				},
+			},
+			profileInfo: nil,
+			wantCmd:     []string{"test-cli", "-c"},
+		},
+		{
+			name: "command with multi-word resume flag",
+			agentConfig: &registry.AgentTypeConfig{
+				ID: "gemini-agent",
+				PassthroughConfig: registry.PassthroughConfig{
+					Supported:      true,
+					PassthroughCmd: []string{"gemini"},
+					ResumeFlag:     "--resume latest",
+				},
+			},
+			profileInfo: nil,
+			wantCmd:     []string{"gemini", "--resume", "latest"},
+		},
+		{
+			name: "command with permission settings",
+			agentConfig: &registry.AgentTypeConfig{
+				ID: "test-agent",
+				PassthroughConfig: registry.PassthroughConfig{
+					Supported:      true,
+					PassthroughCmd: []string{"test-cli"},
+				},
+				PermissionSettings: map[string]registry.PermissionSetting{
+					"dangerously_skip_permissions": {
+						Supported:   true,
+						ApplyMethod: "cli_flag",
+						CLIFlag:     "--dangerous",
+					},
+					"auto_approve": {
+						Supported:   true,
+						ApplyMethod: "cli_flag",
+						CLIFlag:     "--yes",
+					},
+				},
+			},
+			profileInfo: &AgentProfileInfo{
+				DangerouslySkipPermissions: true,
+				AutoApprove:                true,
+			},
+			wantCmd: []string{"test-cli", "--dangerous", "--yes"},
+		},
+		{
+			name: "full command with all options",
+			agentConfig: &registry.AgentTypeConfig{
+				ID: "claude-code",
+				PassthroughConfig: registry.PassthroughConfig{
+					Supported:      true,
+					PassthroughCmd: []string{"npx", "-y", "@anthropic-ai/claude-code"},
+					ModelFlag:      "--model {model}",
+					ResumeFlag:     "-c",
+				},
+				PermissionSettings: map[string]registry.PermissionSetting{
+					"dangerously_skip_permissions": {
+						Supported:   true,
+						ApplyMethod: "cli_flag",
+						CLIFlag:     "--dangerously-skip-permissions",
+					},
+				},
+			},
+			profileInfo: &AgentProfileInfo{
+				Model:                      "claude-sonnet-4",
+				DangerouslySkipPermissions: true,
+			},
+			wantCmd: []string{"npx", "-y", "@anthropic-ai/claude-code", "--model", "claude-sonnet-4", "--dangerously-skip-permissions", "-c"},
+		},
+		{
+			name: "permission setting with cli_flag_value",
+			agentConfig: &registry.AgentTypeConfig{
+				ID: "test-agent",
+				PassthroughConfig: registry.PassthroughConfig{
+					Supported:      true,
+					PassthroughCmd: []string{"test-cli"},
+				},
+				PermissionSettings: map[string]registry.PermissionSetting{
+					"auto_approve": {
+						Supported:    true,
+						ApplyMethod:  "cli_flag",
+						CLIFlag:      "--approve-level",
+						CLIFlagValue: "all",
+					},
+				},
+			},
+			profileInfo: &AgentProfileInfo{
+				AutoApprove: true,
+			},
+			wantCmd: []string{"test-cli", "--approve-level", "all"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := mgr.buildPassthroughResumeCommand(tt.agentConfig, tt.profileInfo)
+
+			if len(got) != len(tt.wantCmd) {
+				t.Errorf("buildPassthroughResumeCommand() = %v, want %v", got, tt.wantCmd)
+				return
+			}
+
+			for i, arg := range got {
+				if arg != tt.wantCmd[i] {
+					t.Errorf("buildPassthroughResumeCommand()[%d] = %q, want %q", i, arg, tt.wantCmd[i])
+				}
+			}
+		})
+	}
+}
+
+func TestManager_VerifyPassthroughEnabled(t *testing.T) {
+	tests := []struct {
+		name      string
+		profileID string
+		wantErr   bool
+	}{
+		{
+			name:      "valid profile with passthrough enabled",
+			profileID: "test-profile",
+			wantErr:   false,
+		},
+		{
+			name:      "empty profile ID",
+			profileID: "",
+			wantErr:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mgr := newTestManager()
+
+			// Override profile resolver for this test
+			if tt.profileID != "" {
+				mgr.profileResolver = &mockPassthroughProfileResolver{
+					cliPassthrough: true,
+				}
+			}
+
+			err := mgr.verifyPassthroughEnabled(context.Background(), "test-session", tt.profileID)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("verifyPassthroughEnabled() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// mockPassthroughProfileResolver is a mock for testing passthrough verification
+type mockPassthroughProfileResolver struct {
+	cliPassthrough bool
+	err            error
+}
+
+func (m *mockPassthroughProfileResolver) ResolveProfile(ctx context.Context, profileID string) (*AgentProfileInfo, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return &AgentProfileInfo{
+		ProfileID:      profileID,
+		CLIPassthrough: m.cliPassthrough,
+	}, nil
+}

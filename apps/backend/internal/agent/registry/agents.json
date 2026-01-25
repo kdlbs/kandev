@@ -27,7 +27,8 @@
         ],
         "model_flag": "--model {model}",
         "idle_timeout_ms": 3000,
-        "buffer_max_bytes": 2097152
+        "buffer_max_bytes": 2097152,
+        "resume_flag": "-c"
       },
       "working_dir": "/workspace",
       "required_env": [
@@ -189,7 +190,8 @@
         ],
         "model_flag": "--model {model}",
         "idle_timeout_ms": 3000,
-        "buffer_max_bytes": 2097152
+        "buffer_max_bytes": 2097152,
+        "resume_flag": ""
       },
       "working_dir": "/workspace",
       "required_env": [],
@@ -336,7 +338,8 @@
         ],
         "model_flag": "--model {model}",
         "idle_timeout_ms": 3000,
-        "buffer_max_bytes": 2097152
+        "buffer_max_bytes": 2097152,
+        "resume_flag": "-c"
       },
       "working_dir": "{workspace}",
       "required_env": [
@@ -511,7 +514,8 @@
         "model_flag": "--model {model}",
         "prompt_flag": "--prompt-interactive {prompt}",
         "idle_timeout_ms": 3000,
-        "buffer_max_bytes": 2097152
+        "buffer_max_bytes": 2097152,
+        "resume_flag": "--resume latest"
       },
       "permission_settings": {
         "auto_approve": {
@@ -601,7 +605,8 @@
         "model_flag": "--model {model}",
         "prompt_flag": "--prompt {prompt}",
         "idle_timeout_ms": 3000,
-        "buffer_max_bytes": 2097152
+        "buffer_max_bytes": 2097152,
+        "resume_flag": "-c"
       },
       "working_dir": "{workspace}",
       "required_env": [],

@@ -128,42 +128,23 @@ export function TaskPageContent({
   }, []);
 
   useEffect(() => {
-    console.log('[TaskPageContent] Active session setup effect', {
-      initialTaskId: initialTask?.id,
-      activeTaskId,
-      initialSessionId,
-      sessionIdProp: sessionId,
-      taskSessionId,
-    });
     if (!initialTask?.id) return;
-    // Always sync active task/session when SSR provides data.
-    // This ensures navigation to a new task/session updates the store.
+    // Sync SSR data to store on mount or when SSR props change.
+    // Don't include activeTaskId in deps - we only want to sync FROM SSR, not react to store changes.
     if (initialSessionId) {
-      console.log('[TaskPageContent] Setting active session', initialTask.id, initialSessionId);
       setActiveSession(initialTask.id, initialSessionId);
-    } else if (activeTaskId !== initialTask.id) {
-      console.log('[TaskPageContent] Setting active task', initialTask.id);
+    } else {
       setActiveTask(initialTask.id);
     }
-  }, [activeTaskId, initialSessionId, initialTask?.id, sessionId, taskSessionId, setActiveSession, setActiveTask]);
+  }, [initialTask?.id, initialSessionId, setActiveSession, setActiveTask]);
 
   useEffect(() => {
-    console.log('[TaskPageContent] Task fetch effect', {
-      activeTaskId,
-      initialTaskId: initialTask?.id,
-      taskDetailsId: taskDetails?.id,
-      shouldFetch: activeTaskId && taskDetails?.id !== activeTaskId,
-    });
     if (!activeTaskId) return;
     if (taskDetails?.id === activeTaskId) return;
-    console.log('[TaskPageContent] Fetching task details for', activeTaskId);
     fetchTask(activeTaskId, { cache: 'no-store' })
-      .then((response) => {
-        console.log('[TaskPageContent] Fetched task details', response?.id);
-        setTaskDetails(response);
-      })
+      .then((response) => setTaskDetails(response))
       .catch((error) => console.error('[TaskPageContent] Failed to load task details:', error));
-  }, [activeTaskId, initialTask?.id, taskDetails?.id]);
+  }, [activeTaskId, taskDetails?.id]);
   const { repositories } = useRepositories(task?.workspace_id ?? null, Boolean(task?.workspace_id));
   const effectiveRepositories = repositories.length ? repositories : initialRepositories;
   const repository = useMemo(
