@@ -482,7 +482,8 @@ func TestManager_BuildPassthroughResumeCommand(t *testing.T) {
 				DangerouslySkipPermissions: true,
 				AutoApprove:                true,
 			},
-			wantCmd: []string{"test-cli", "--dangerous", "--yes"},
+			// Order is alphabetical by setting name: auto_approve, dangerously_skip_permissions
+			wantCmd: []string{"test-cli", "--yes", "--dangerous"},
 		},
 		{
 			name: "full command with all options",
