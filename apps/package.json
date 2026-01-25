@@ -15,5 +15,11 @@
   "devDependencies": {
     "@types/node": "^20",
     "typescript": "^5"
+  },
+  "pnpm": {
+    "overrides": {
+      "@codemirror/state": "6.5.3",
+      "@codemirror/view": "6.39.10"
+    }
   }
 }

@@ -6,7 +6,7 @@ toolchain go1.24.11
 
 require (
 	github.com/coder/acp-go-sdk v0.6.3
-	github.com/creack/pty v1.1.18
+	github.com/creack/pty v1.1.21
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/fsnotify/fsnotify v1.6.0
 	github.com/gin-gonic/gin v1.9.1
@@ -15,8 +15,10 @@ require (
 	github.com/mark3labs/mcp-go v0.43.2
 	github.com/mattn/go-sqlite3 v1.14.33
 	github.com/nats-io/nats.go v1.31.0
+	github.com/pelletier/go-toml/v2 v2.0.8
 	github.com/spf13/viper v1.16.0
 	github.com/stretchr/testify v1.11.1
+	github.com/tuzig/vt10x v0.0.0-20231206072048-370e51642bf7
 	go.uber.org/zap v1.26.0
 )
 
@@ -63,7 +65,6 @@ require (
 	github.com/nats-io/nuid v1.0.1 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
-	github.com/pelletier/go-toml/v2 v2.0.8 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/spf13/afero v1.9.5 // indirect

@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/runtime"
 	agentctl "github.com/kandev/kandev/internal/agentctl/client"
+	"github.com/kandev/kandev/internal/agentctl/server/process"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/appctx"
@@ -407,6 +408,28 @@ func (m *Manager) Start(ctx context.Context) error {
 		m.logger.Info("cleanup loop started")
 	}
 
+	// Set up callbacks for passthrough mode (using standalone runtime)
+	if standaloneRT, err := m.runtimeRegistry.GetRuntime(runtime.NameStandalone); err == nil {
+		if interactiveRunner := standaloneRT.GetInteractiveRunner(); interactiveRunner != nil {
+			// Turn complete callback
+			interactiveRunner.SetTurnCompleteCallback(func(sessionID string) {
+				m.handlePassthroughTurnComplete(sessionID)
+			})
+
+			// Output callback for standalone passthrough (no WorkspaceTracker)
+			interactiveRunner.SetOutputCallback(func(output *agentctltypes.ProcessOutput) {
+				m.handlePassthroughOutput(output)
+			})
+
+			// Status callback for standalone passthrough (no WorkspaceTracker)
+			interactiveRunner.SetStatusCallback(func(status *agentctltypes.ProcessStatusUpdate) {
+				m.handlePassthroughStatus(status)
+			})
+
+			m.logger.Info("passthrough callbacks configured")
+		}
+	}
+
 	return nil
 }
 
@@ -690,6 +713,14 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) err
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
 		return fmt.Errorf("execution %q not found", executionID)
+	}
+
+	// Check if this execution should use passthrough mode
+	if execution.AgentProfileID != "" && m.profileResolver != nil {
+		profileInfo, err := m.profileResolver.ResolveProfile(ctx, execution.AgentProfileID)
+		if err == nil && profileInfo.CLIPassthrough {
+			return m.startPassthroughSession(ctx, execution, profileInfo)
+		}
 	}
 
 	if execution.agentctl == nil {
@@ -1456,6 +1487,22 @@ func (m *Manager) StopAgent(ctx context.Context, executionID string, force bool)
 				zap.String("runtime", execution.RuntimeName),
 				zap.Error(err))
 		} else {
+			// Stop passthrough process if in passthrough mode
+			if execution.PassthroughProcessID != "" {
+				if interactiveRunner := rt.GetInteractiveRunner(); interactiveRunner != nil {
+					if err := interactiveRunner.Stop(ctx, execution.PassthroughProcessID); err != nil {
+						m.logger.Warn("failed to stop passthrough process",
+							zap.String("execution_id", executionID),
+							zap.String("process_id", execution.PassthroughProcessID),
+							zap.Error(err))
+					} else {
+						m.logger.Info("passthrough process stopped",
+							zap.String("execution_id", executionID),
+							zap.String("process_id", execution.PassthroughProcessID))
+					}
+				}
+			}
+
 			runtimeInstance := &RuntimeInstance{
 				InstanceID:           execution.ID,
 				TaskID:               execution.TaskID,
@@ -1880,4 +1927,361 @@ func (m *Manager) RespondToPermissionBySessionID(sessionID, pendingID, optionID 
 	}
 
 	return m.RespondToPermission(execution.ID, pendingID, optionID, cancelled)
+}
+
+// WritePassthroughStdin writes data to the agent process stdin in passthrough mode.
+// Returns an error if the session is not in passthrough mode or if writing fails.
+func (m *Manager) WritePassthroughStdin(ctx context.Context, sessionID string, data string) error {
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
+	if !exists {
+		return fmt.Errorf("no agent execution found for session: %s", sessionID)
+	}
+
+	if execution.PassthroughProcessID == "" {
+		return fmt.Errorf("session %s is not in passthrough mode", sessionID)
+	}
+
+	// Get the interactive runner from runtime
+	interactiveRunner := m.GetInteractiveRunner()
+	if interactiveRunner == nil {
+		return fmt.Errorf("interactive runner not available")
+	}
+
+	return interactiveRunner.WriteStdin(execution.PassthroughProcessID, data)
+}
+
+// ResizePassthroughPTY resizes the PTY for a passthrough process.
+// Returns an error if the session is not in passthrough mode or if resizing fails.
+func (m *Manager) ResizePassthroughPTY(ctx context.Context, sessionID string, cols, rows uint16) error {
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
+	if !exists {
+		return fmt.Errorf("no agent execution found for session: %s", sessionID)
+	}
+
+	if execution.PassthroughProcessID == "" {
+		return fmt.Errorf("session %s is not in passthrough mode", sessionID)
+	}
+
+	// Get the interactive runner from runtime
+	interactiveRunner := m.GetInteractiveRunner()
+	if interactiveRunner == nil {
+		return fmt.Errorf("interactive runner not available")
+	}
+
+	return interactiveRunner.ResizeBySession(sessionID, cols, rows)
+}
+
+// GetPassthroughBuffer returns the buffered output from the passthrough process.
+// This is used for new subscribers to catch up on output.
+func (m *Manager) GetPassthroughBuffer(ctx context.Context, sessionID string) (string, error) {
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
+	if !exists {
+		return "", fmt.Errorf("no agent execution found for session: %s", sessionID)
+	}
+
+	if execution.PassthroughProcessID == "" {
+		return "", fmt.Errorf("session %s is not in passthrough mode", sessionID)
+	}
+
+	// Get the interactive runner from runtime
+	interactiveRunner := m.GetInteractiveRunner()
+	if interactiveRunner == nil {
+		return "", fmt.Errorf("interactive runner not available")
+	}
+
+	chunks, ok := interactiveRunner.GetBuffer(execution.PassthroughProcessID)
+	if !ok {
+		return "", fmt.Errorf("passthrough process not found")
+	}
+
+	// Concatenate all chunks into a single string
+	var buffer strings.Builder
+	for _, chunk := range chunks {
+		buffer.WriteString(chunk.Data)
+	}
+
+	return buffer.String(), nil
+}
+
+// startPassthroughSession starts an agent in passthrough mode (direct terminal interaction).
+// Instead of using ACP protocol, the agent's stdin/stdout is passed through directly.
+func (m *Manager) startPassthroughSession(ctx context.Context, execution *AgentExecution, profileInfo *AgentProfileInfo) error {
+	// Get agent config for passthrough command
+	agentConfig, err := m.getAgentConfigForExecution(execution)
+	if err != nil {
+		return fmt.Errorf("failed to get agent config: %w", err)
+	}
+
+	// Validate passthrough support
+	if !agentConfig.PassthroughConfig.Supported {
+		return fmt.Errorf("agent %s does not support passthrough mode", agentConfig.ID)
+	}
+
+	// Get task description from metadata for initial prompt
+	taskDescription := ""
+	if execution.Metadata != nil {
+		if desc, ok := execution.Metadata["task_description"].(string); ok {
+			taskDescription = desc
+		}
+	}
+
+	// Build passthrough command with initial prompt and profile settings
+	cmd := m.buildPassthroughCommand(agentConfig, execution.ACPSessionID, taskDescription, profileInfo)
+	if len(cmd) == 0 {
+		return fmt.Errorf("passthrough command is empty for agent %s", agentConfig.ID)
+	}
+
+	m.logger.Info("passthrough command built",
+		zap.String("session_id", execution.SessionID),
+		zap.Strings("full_command", cmd))
+
+	// Get the interactive runner from runtime
+	interactiveRunner := m.GetInteractiveRunner()
+	if interactiveRunner == nil {
+		return fmt.Errorf("interactive runner not available for passthrough mode")
+	}
+
+	// Build environment variables
+	env := make(map[string]string)
+	env["KANDEV_TASK_ID"] = execution.TaskID
+	env["KANDEV_SESSION_ID"] = execution.SessionID
+	env["KANDEV_AGENT_PROFILE_ID"] = execution.AgentProfileID
+
+	// Add required credentials from agent config
+	if m.credsMgr != nil {
+		for _, credKey := range agentConfig.RequiredEnv {
+			if value, err := m.credsMgr.GetCredentialValue(ctx, credKey); err == nil && value != "" {
+				env[credKey] = value
+			}
+		}
+	}
+
+	// Start the interactive process immediately with default dimensions
+	// This allows the agent to start working before the user opens the terminal
+	startReq := process.InteractiveStartRequest{
+		SessionID:         execution.SessionID,
+		Command:           cmd,
+		WorkingDir:        execution.WorkspacePath,
+		Env:               env,
+		PromptPattern:     agentConfig.PassthroughConfig.PromptPattern,
+		IdleTimeoutMs:     agentConfig.PassthroughConfig.IdleTimeoutMs,
+		BufferMaxBytes:    agentConfig.PassthroughConfig.BufferMaxBytes,
+		StatusDetector:    agentConfig.PassthroughConfig.StatusDetector,
+		CheckIntervalMs:   agentConfig.PassthroughConfig.CheckIntervalMs,
+		StabilityWindowMs: agentConfig.PassthroughConfig.StabilityWindowMs,
+		ImmediateStart:    true, // Start immediately, don't wait for terminal resize
+		DefaultCols:       120,
+		DefaultRows:       40,
+	}
+
+	processInfo, err := interactiveRunner.Start(ctx, startReq)
+	if err != nil {
+		m.updateExecutionError(execution.ID, "failed to start passthrough session: "+err.Error())
+		return fmt.Errorf("failed to start passthrough session: %w", err)
+	}
+
+	// Store the passthrough process ID
+	execution.PassthroughProcessID = processInfo.ID
+
+	m.logger.Info("passthrough session started",
+		zap.String("execution_id", execution.ID),
+		zap.String("task_id", execution.TaskID),
+		zap.String("session_id", execution.SessionID),
+		zap.String("process_id", processInfo.ID),
+		zap.Strings("command", cmd))
+
+	// Emit agentctl ready event to indicate session is available
+	m.eventPublisher.PublishAgentctlEvent(ctx, events.AgentctlReady, execution, "")
+
+	// Start shell session for workspace shell access.
+	// In passthrough mode, the agent runs via InteractiveRunner, so the agentctl
+	// process manager never starts and the shell isn't auto-created.
+	// We need to start it explicitly so the right panel terminal works.
+	if execution.agentctl != nil {
+		if err := execution.agentctl.StartShell(ctx); err != nil {
+			m.logger.Warn("failed to start shell for passthrough session",
+				zap.String("execution_id", execution.ID),
+				zap.Error(err))
+			// Non-fatal: continue without shell
+		} else {
+			m.logger.Info("shell session started for passthrough mode",
+				zap.String("execution_id", execution.ID))
+		}
+	}
+
+	// Connect to workspace stream for shell/git/file features even in passthrough mode.
+	// The passthrough terminal handles agent interaction (center panel), while the
+	// workspace stream provides shell I/O (right panel) - they work independently.
+	if m.streamManager != nil && execution.agentctl != nil {
+		go m.streamManager.connectWorkspaceStream(execution)
+	}
+
+	return nil
+}
+
+// buildPassthroughCommand builds the command for passthrough mode.
+// It uses the passthrough_cmd from config, applies profile settings as CLI flags,
+// and appends resume flag if resuming or initial prompt for new sessions.
+func (m *Manager) buildPassthroughCommand(agentConfig *registry.AgentTypeConfig, acpSessionID string, initialPrompt string, profileInfo *AgentProfileInfo) []string {
+	// Start with passthrough_cmd
+	cmd := make([]string, len(agentConfig.PassthroughConfig.PassthroughCmd))
+	copy(cmd, agentConfig.PassthroughConfig.PassthroughCmd)
+
+	// Apply model flag if configured and profile has a model
+	if profileInfo != nil && profileInfo.Model != "" && agentConfig.PassthroughConfig.ModelFlag != "" {
+		expanded := strings.ReplaceAll(agentConfig.PassthroughConfig.ModelFlag, "{model}", profileInfo.Model)
+		// Split on first space to separate flag from value (if combined)
+		parts := strings.SplitN(expanded, " ", 2)
+		cmd = append(cmd, parts...)
+	}
+
+	// Apply permission settings that use CLI flags
+	// Build a map of permission values from profile info
+	if profileInfo != nil && agentConfig.PermissionSettings != nil {
+		permissionValues := map[string]bool{
+			"auto_approve":                 profileInfo.AutoApprove,
+			"dangerously_skip_permissions": profileInfo.DangerouslySkipPermissions,
+			"allow_indexing":               profileInfo.AllowIndexing,
+		}
+
+		for settingName, setting := range agentConfig.PermissionSettings {
+			// Skip if not supported or not a CLI flag setting
+			if !setting.Supported || setting.ApplyMethod != "cli_flag" || setting.CLIFlag == "" {
+				continue
+			}
+
+			// Get the value for this setting
+			value, exists := permissionValues[settingName]
+			if !exists || !value {
+				continue
+			}
+
+			// Apply the CLI flag
+			if setting.CLIFlagValue != "" {
+				// Flag with value: "--flag value"
+				cmd = append(cmd, setting.CLIFlag, setting.CLIFlagValue)
+			} else {
+				// Boolean flag or multiple flags: "--flag" or "--flag1 --flag2 arg"
+				// Split on spaces to handle multiple flags in one setting
+				parts := strings.Fields(setting.CLIFlag)
+				cmd = append(cmd, parts...)
+			}
+		}
+	}
+
+	// Add resume flag if:
+	// 1. Session ID is provided (resuming existing session)
+	// 2. Agent uses CLI-based resume (not ACP)
+	// 3. Agent has a ResumeFlag configured
+	if acpSessionID != "" &&
+		!agentConfig.SessionConfig.ResumeViaACP &&
+		agentConfig.SessionConfig.ResumeFlag != "" {
+		cmd = append(cmd, agentConfig.SessionConfig.ResumeFlag, acpSessionID)
+	} else if initialPrompt != "" {
+		// For new sessions, add the initial prompt
+		// Use PromptFlag if configured (e.g., "--prompt {prompt}"), otherwise append directly
+		if agentConfig.PassthroughConfig.PromptFlag != "" {
+			expanded := strings.ReplaceAll(agentConfig.PassthroughConfig.PromptFlag, "{prompt}", initialPrompt)
+			parts := strings.SplitN(expanded, " ", 2)
+			cmd = append(cmd, parts...)
+		} else {
+			// Default: append prompt as a positional argument
+			cmd = append(cmd, initialPrompt)
+		}
+	}
+
+	return cmd
+}
+
+// handlePassthroughTurnComplete is called when turn detection fires for a passthrough session.
+// This marks the execution as ready for follow-up prompts when the agent finishes processing.
+func (m *Manager) handlePassthroughTurnComplete(sessionID string) {
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
+	if !exists {
+		m.logger.Debug("turn complete for unknown session (may have ended)",
+			zap.String("session_id", sessionID))
+		return
+	}
+
+	m.logger.Info("passthrough turn complete",
+		zap.String("session_id", sessionID),
+		zap.String("execution_id", execution.ID))
+
+	// Mark execution as ready for follow-up prompts
+	// This publishes AgentReady event to notify subscribers
+	if err := m.MarkReady(execution.ID); err != nil {
+		m.logger.Error("failed to mark execution as ready after passthrough turn complete",
+			zap.String("execution_id", execution.ID),
+			zap.Error(err))
+	}
+}
+
+// handlePassthroughOutput handles output from a passthrough process and publishes it to the event bus.
+// This is called when running in standalone mode without a WorkspaceTracker.
+func (m *Manager) handlePassthroughOutput(output *agentctltypes.ProcessOutput) {
+	if output == nil {
+		return
+	}
+
+	execution, exists := m.executionStore.GetBySessionID(output.SessionID)
+	if !exists {
+		m.logger.Debug("passthrough output for unknown session",
+			zap.String("session_id", output.SessionID))
+		return
+	}
+
+	// Convert to agentctl client type for event publisher
+	clientOutput := &agentctl.ProcessOutput{
+		SessionID: output.SessionID,
+		ProcessID: output.ProcessID,
+		Kind:      streams.ProcessKind(output.Kind),
+		Stream:    output.Stream,
+		Data:      output.Data,
+		Timestamp: output.Timestamp,
+	}
+
+	m.eventPublisher.PublishProcessOutput(execution, clientOutput)
+}
+
+// handlePassthroughStatus handles status updates from a passthrough process and publishes to the event bus.
+// This is called when running in standalone mode without a WorkspaceTracker.
+func (m *Manager) handlePassthroughStatus(status *agentctltypes.ProcessStatusUpdate) {
+	if status == nil {
+		return
+	}
+
+	execution, exists := m.executionStore.GetBySessionID(status.SessionID)
+	if !exists {
+		m.logger.Debug("passthrough status for unknown session",
+			zap.String("session_id", status.SessionID))
+		return
+	}
+
+	// Convert to agentctl client type for event publisher
+	clientStatus := &agentctl.ProcessStatusUpdate{
+		SessionID:  status.SessionID,
+		ProcessID:  status.ProcessID,
+		Kind:       streams.ProcessKind(status.Kind),
+		Command:    status.Command,
+		ScriptName: status.ScriptName,
+		WorkingDir: status.WorkingDir,
+		Status:     streams.ProcessStatus(status.Status),
+		ExitCode:   status.ExitCode,
+		Timestamp:  status.Timestamp,
+	}
+
+	m.eventPublisher.PublishProcessStatus(execution, clientStatus)
+}
+
+// GetInteractiveRunner returns the interactive runner for passthrough mode.
+// Returns nil if the runtime is not available or doesn't support passthrough.
+func (m *Manager) GetInteractiveRunner() *process.InteractiveRunner {
+	if m.runtimeRegistry == nil {
+		return nil
+	}
+	standaloneRT, err := m.runtimeRegistry.GetRuntime(runtime.NameStandalone)
+	if err != nil {
+		return nil
+	}
+	return standaloneRT.GetInteractiveRunner()
 }

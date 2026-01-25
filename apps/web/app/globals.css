@@ -164,6 +164,28 @@
   background-clip: padding-box;
 }
 
+/* xterm.js custom scrollbar styling to match global scrollbars */
+.xterm .xterm-scrollable-element {
+  background: var(--background) !important;
+}
+
+.xterm .xterm-scrollable-element > .scrollbar {
+  width: 10px !important;
+  right: 0 !important;
+  background: transparent !important;
+}
+
+.xterm .xterm-scrollable-element > .scrollbar > .slider {
+  background: var(--scrollbar-thumb) !important;
+  border-radius: 999px !important;
+  width: 6px !important;
+  left: 2px !important;
+}
+
+.xterm .xterm-scrollable-element > .scrollbar:hover > .slider {
+  background: var(--scrollbar-thumb-hover) !important;
+}
+
 @layer utilities {
   .kanban-task-pulse {
     animation: kanban-task-pulse 5s ease-in-out infinite;

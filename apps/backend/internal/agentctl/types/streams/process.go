@@ -6,10 +6,11 @@ import "time"
 type ProcessKind string
 
 const (
-	ProcessKindSetup   ProcessKind = "setup"
-	ProcessKindCleanup ProcessKind = "cleanup"
-	ProcessKindDev     ProcessKind = "dev"
-	ProcessKindCustom  ProcessKind = "custom"
+	ProcessKindSetup            ProcessKind = "setup"
+	ProcessKindCleanup          ProcessKind = "cleanup"
+	ProcessKindDev              ProcessKind = "dev"
+	ProcessKindCustom           ProcessKind = "custom"
+	ProcessKindAgentPassthrough ProcessKind = "agent_passthrough"
 )
 
 // ProcessStatus represents the lifecycle status of a process.

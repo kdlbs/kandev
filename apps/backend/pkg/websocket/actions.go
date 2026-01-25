@@ -78,6 +78,11 @@ const (
 	ActionTaskSession = "task.session"
 	ActionAgentTypes  = "agent.types"
 
+	// Agent passthrough actions
+	ActionAgentStdin  = "agent.stdin"  // Send input to agent process stdin (passthrough mode)
+	ActionAgentStdout = "agent.stdout" // Agent stdout notification (passthrough mode)
+	ActionAgentResize = "agent.resize" // Resize agent PTY (passthrough mode)
+
 	// Orchestrator actions
 	ActionOrchestratorStatus   = "orchestrator.status"
 	ActionOrchestratorQueue    = "orchestrator.queue"

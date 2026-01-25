@@ -74,6 +74,7 @@ const createDraftProfile = (
   auto_approve: permissionSettings?.auto_approve?.default ?? false,
   dangerously_skip_permissions: permissionSettings?.dangerously_skip_permissions?.default ?? false,
   allow_indexing: permissionSettings?.allow_indexing?.default ?? false,
+  cli_passthrough: false,
   plan: '',
   created_at: new Date().toISOString(),
   updated_at: new Date().toISOString(),
@@ -362,6 +363,7 @@ function AgentSetupForm({
               auto_approve: profile.auto_approve,
               dangerously_skip_permissions: profile.dangerously_skip_permissions,
               allow_indexing: profile.allow_indexing ?? false,
+              cli_passthrough: profile.cli_passthrough ?? false,
               plan: profile.plan,
             });
             if (profile.mcp_config && profile.mcp_config.dirty && profile.mcp_config.servers.trim()) {

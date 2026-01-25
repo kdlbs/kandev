@@ -3,13 +3,14 @@
 import { useMemo } from 'react';
 import { useAvailableAgents } from '@/hooks/domains/settings/use-available-agents';
 import { useAppStore } from '@/components/state-provider';
-import type { Agent, AgentProfile, ModelConfig, AvailableAgent, PermissionSetting } from '@/lib/types/http';
+import type { Agent, AgentProfile, ModelConfig, AvailableAgent, PermissionSetting, PassthroughConfig } from '@/lib/types/http';
 
 type AgentProfileSettingsResult = {
   agent: Agent | null;
   profile: AgentProfile | null;
   modelConfig: ModelConfig;
   permissionSettings: Record<string, PermissionSetting>;
+  passthroughConfig: PassthroughConfig | null;
 };
 
 export function useAgentProfileSettings(
@@ -39,5 +40,9 @@ export function useAgentProfileSettings(
     return availableAgent?.permission_settings ?? {};
   }, [availableAgent]);
 
-  return { agent, profile, modelConfig, permissionSettings };
+  const passthroughConfig = useMemo(() => {
+    return availableAgent?.passthrough_config ?? null;
+  }, [availableAgent]);
+
+  return { agent, profile, modelConfig, permissionSettings, passthroughConfig };
 }

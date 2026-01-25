@@ -42,6 +42,11 @@ func provideGateway(
 	}
 	_ = cleanup
 
+	// Enable dedicated terminal WebSocket for passthrough mode
+	if lifecycleMgr != nil {
+		gateway.SetLifecycleManager(lifecycleMgr)
+	}
+
 	orchestratorCtrl := orchestratorcontroller.NewController(orchestratorSvc)
 	orchestratorHandlers := orchestratorhandlers.NewHandlers(orchestratorCtrl, log)
 	orchestratorHandlers.RegisterHandlers(gateway.Dispatcher)
@@ -59,6 +64,9 @@ func provideGateway(
 
 		gitHandlers := agenthandlers.NewGitHandlers(lifecycleMgr, log)
 		gitHandlers.RegisterHandlers(gateway.Dispatcher)
+
+		passthroughHandlers := agenthandlers.NewPassthroughHandlers(lifecycleMgr, log)
+		passthroughHandlers.RegisterHandlers(gateway.Dispatcher)
 	}
 
 	go gateway.Hub.Run(ctx)

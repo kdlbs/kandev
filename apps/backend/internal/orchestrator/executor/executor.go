@@ -70,6 +70,7 @@ type AgentProfileInfo struct {
 	AutoApprove                bool
 	DangerouslySkipPermissions bool
 	Plan                       string
+	CLIPassthrough             bool
 }
 
 // LaunchAgentRequest contains parameters for launching an agent
@@ -289,10 +290,12 @@ func (e *Executor) ExecuteWithProfile(ctx context.Context, task *v1.Task, agentP
 			"auto_approve":                 profileInfo.AutoApprove,
 			"dangerously_skip_permissions": profileInfo.DangerouslySkipPermissions,
 			"plan":                         profileInfo.Plan,
+			"cli_passthrough":              profileInfo.CLIPassthrough,
 		}
-		e.logger.Debug("resolved agent profile for snapshot",
+		e.logger.Info("resolved agent profile for snapshot",
 			zap.String("profile_id", profileInfo.ProfileID),
-			zap.String("model", profileInfo.Model))
+			zap.String("model", profileInfo.Model),
+			zap.Bool("cli_passthrough", profileInfo.CLIPassthrough))
 	} else {
 		// Create minimal snapshot even on failure - ensures model switching works
 		e.logger.Warn("failed to resolve agent profile, using minimal snapshot",

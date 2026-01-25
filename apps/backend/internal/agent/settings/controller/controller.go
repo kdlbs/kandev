@@ -29,9 +29,11 @@ var (
 const defaultAgentProfileName = "default"
 
 type Controller struct {
-	repo           store.Repository
-	discovery      *discovery.Registry
-	agentRegistry  interface{ Get(id string) (*registry.AgentTypeConfig, bool) }
+	repo          store.Repository
+	discovery     *discovery.Registry
+	agentRegistry interface {
+		Get(id string) (*registry.AgentTypeConfig, bool)
+	}
 	sessionChecker SessionChecker
 	mcpService     *mcpconfig.Service
 	logger         *logger.Logger
@@ -41,7 +43,10 @@ type SessionChecker interface {
 	HasActiveTaskSessionsByAgentProfile(ctx context.Context, agentProfileID string) (bool, error)
 }
 
-func NewController(repo store.Repository, discoveryRegistry *discovery.Registry, agentRegistry interface{ Get(id string) (*registry.AgentTypeConfig, bool) }, sessionChecker SessionChecker, log *logger.Logger) *Controller {
+func NewController(repo store.Repository, discoveryRegistry *discovery.Registry, agentRegistry interface {
+	Get(id string) (*registry.AgentTypeConfig, bool)
+}, sessionChecker SessionChecker, log *logger.Logger,
+) *Controller {
 	return &Controller{
 		repo:           repo,
 		discovery:      discoveryRegistry,
@@ -111,29 +116,40 @@ func (c *Controller) ListAvailableAgents(ctx context.Context) (*dto.ListAvailabl
 
 		// Convert permission settings
 		var permissionSettings map[string]dto.PermissionSettingDTO
-		if agentConfig, ok := c.agentRegistry.Get(def.Name); ok && agentConfig.PermissionSettings != nil {
-			permissionSettings = make(map[string]dto.PermissionSettingDTO, len(agentConfig.PermissionSettings))
-			for key, setting := range agentConfig.PermissionSettings {
-				permissionSettings[key] = dto.PermissionSettingDTO{
-					Supported:    setting.Supported,
-					Default:      setting.Default,
-					Label:        setting.Label,
-					Description:  setting.Description,
-					ApplyMethod:  setting.ApplyMethod,
-					CLIFlag:      setting.CLIFlag,
-					CLIFlagValue: setting.CLIFlagValue,
+		var passthroughConfig *dto.PassthroughConfigDTO
+		if agentConfig, ok := c.agentRegistry.Get(def.Name); ok {
+			if agentConfig.PermissionSettings != nil {
+				permissionSettings = make(map[string]dto.PermissionSettingDTO, len(agentConfig.PermissionSettings))
+				for key, setting := range agentConfig.PermissionSettings {
+					permissionSettings[key] = dto.PermissionSettingDTO{
+						Supported:    setting.Supported,
+						Default:      setting.Default,
+						Label:        setting.Label,
+						Description:  setting.Description,
+						ApplyMethod:  setting.ApplyMethod,
+						CLIFlag:      setting.CLIFlag,
+						CLIFlagValue: setting.CLIFlagValue,
+					}
+				}
+			}
+			// Convert passthrough config
+			if agentConfig.PassthroughConfig.Supported {
+				passthroughConfig = &dto.PassthroughConfigDTO{
+					Supported:   agentConfig.PassthroughConfig.Supported,
+					Label:       agentConfig.PassthroughConfig.Label,
+					Description: agentConfig.PassthroughConfig.Description,
 				}
 			}
 		}
 
 		payload = append(payload, dto.AvailableAgentDTO{
-			Name:               availability.Name,
-			DisplayName:        displayName,
-			SupportsMCP:        availability.SupportsMCP,
-			MCPConfigPath:      availability.MCPConfigPath,
-			InstallationPaths:  availability.InstallationPaths,
-			Available:          availability.Available,
-			MatchedPath:        availability.MatchedPath,
+			Name:              availability.Name,
+			DisplayName:       displayName,
+			SupportsMCP:       availability.SupportsMCP,
+			MCPConfigPath:     availability.MCPConfigPath,
+			InstallationPaths: availability.InstallationPaths,
+			Available:         availability.Available,
+			MatchedPath:       availability.MatchedPath,
 			Capabilities: dto.AgentCapabilitiesDTO{
 				SupportsSessionResume: def.Capabilities.SupportsSessionResume,
 				SupportsShell:         def.Capabilities.SupportsShell,
@@ -144,6 +160,7 @@ func (c *Controller) ListAvailableAgents(ctx context.Context) (*dto.ListAvailabl
 				AvailableModels: modelEntries,
 			},
 			PermissionSettings: permissionSettings,
+			PassthroughConfig:  passthroughConfig,
 			UpdatedAt:          now,
 		})
 	}
@@ -440,6 +457,7 @@ type CreateProfileRequest struct {
 	AutoApprove                bool
 	DangerouslySkipPermissions bool
 	AllowIndexing              bool
+	CLIPassthrough             bool
 	Plan                       string
 }
 
@@ -464,6 +482,7 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 		AutoApprove:                req.AutoApprove,
 		DangerouslySkipPermissions: req.DangerouslySkipPermissions,
 		AllowIndexing:              req.AllowIndexing,
+		CLIPassthrough:             req.CLIPassthrough,
 		Plan:                       req.Plan,
 	}
 	if err := c.repo.CreateAgentProfile(ctx, profile); err != nil {
@@ -480,6 +499,7 @@ type UpdateProfileRequest struct {
 	AutoApprove                *bool
 	DangerouslySkipPermissions *bool
 	AllowIndexing              *bool
+	CLIPassthrough             *bool
 	Plan                       *string
 }
 
@@ -506,6 +526,9 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 	}
 	if req.AllowIndexing != nil {
 		profile.AllowIndexing = *req.AllowIndexing
+	}
+	if req.CLIPassthrough != nil {
+		profile.CLIPassthrough = *req.CLIPassthrough
 	}
 	if req.Plan != nil {
 		profile.Plan = *req.Plan
@@ -571,6 +594,7 @@ func toProfileDTO(profile *models.AgentProfile) dto.AgentProfileDTO {
 		AutoApprove:                profile.AutoApprove,
 		DangerouslySkipPermissions: profile.DangerouslySkipPermissions,
 		AllowIndexing:              profile.AllowIndexing,
+		CLIPassthrough:             profile.CLIPassthrough,
 		Plan:                       profile.Plan,
 		CreatedAt:                  profile.CreatedAt,
 		UpdatedAt:                  profile.UpdatedAt,
@@ -612,4 +636,144 @@ func (c *Controller) defaultModelByAgent() map[string]string {
 		mapped[def.Name] = def.ModelConfig.DefaultModel
 	}
 	return mapped
+}
+
+// CommandPreviewRequest contains the draft settings for command preview
+type CommandPreviewRequest struct {
+	Model              string
+	PermissionSettings map[string]bool
+	CLIPassthrough     bool
+}
+
+// PreviewAgentCommand generates a preview of the CLI command that will be executed
+func (c *Controller) PreviewAgentCommand(ctx context.Context, agentName string, req CommandPreviewRequest) (*dto.CommandPreviewResponse, error) {
+	// Get agent config from registry
+	agentConfig, ok := c.agentRegistry.Get(agentName)
+	if !ok {
+		return nil, fmt.Errorf("agent type %q not found in registry", agentName)
+	}
+
+	// Build the command based on whether passthrough is supported AND enabled
+	var cmd []string
+	if agentConfig.PassthroughConfig.Supported && req.CLIPassthrough {
+		cmd = c.buildPassthroughCommandPreview(agentConfig, req)
+	} else {
+		cmd = c.buildStandardCommandPreview(agentConfig, req)
+	}
+
+	// Build the command string with proper quoting for display
+	cmdString := c.buildCommandString(cmd)
+
+	return &dto.CommandPreviewResponse{
+		Supported:     true,
+		Command:       cmd,
+		CommandString: cmdString,
+	}, nil
+}
+
+// buildStandardCommandPreview builds the standard command (non-passthrough) for preview purposes
+func (c *Controller) buildStandardCommandPreview(agentConfig *registry.AgentTypeConfig, req CommandPreviewRequest) []string {
+	// Start with base command from config
+	cmd := make([]string, len(agentConfig.Cmd))
+	copy(cmd, agentConfig.Cmd)
+
+	// Apply model flag if configured and model is set
+	if req.Model != "" && agentConfig.ModelFlag != "" {
+		expanded := strings.ReplaceAll(agentConfig.ModelFlag, "{model}", req.Model)
+		parts := strings.SplitN(expanded, " ", 2)
+		cmd = append(cmd, parts...)
+	}
+
+	// Apply permission settings that use CLI flags
+	cmd = c.applyPermissionFlags(cmd, agentConfig, req.PermissionSettings)
+
+	return cmd
+}
+
+// buildPassthroughCommandPreview builds the passthrough command for preview purposes
+func (c *Controller) buildPassthroughCommandPreview(agentConfig *registry.AgentTypeConfig, req CommandPreviewRequest) []string {
+	// Start with passthrough_cmd
+	cmd := make([]string, len(agentConfig.PassthroughConfig.PassthroughCmd))
+	copy(cmd, agentConfig.PassthroughConfig.PassthroughCmd)
+
+	// Apply model flag if configured and model is set
+	if req.Model != "" && agentConfig.PassthroughConfig.ModelFlag != "" {
+		expanded := strings.ReplaceAll(agentConfig.PassthroughConfig.ModelFlag, "{model}", req.Model)
+		// Split on first space to separate flag from value (if combined)
+		parts := strings.SplitN(expanded, " ", 2)
+		cmd = append(cmd, parts...)
+	}
+
+	// Apply permission settings that use CLI flags
+	cmd = c.applyPermissionFlags(cmd, agentConfig, req.PermissionSettings)
+
+	// Add prompt - use PromptFlag if configured, otherwise append directly
+	cmd = c.appendPromptPlaceholder(cmd, agentConfig.PassthroughConfig.PromptFlag)
+
+	return cmd
+}
+
+// appendPromptPlaceholder adds the {prompt} placeholder to the command
+// If promptFlag is set (e.g., "--prompt {prompt}"), it uses that format
+// Otherwise, it appends {prompt} directly at the end
+func (c *Controller) appendPromptPlaceholder(cmd []string, promptFlag string) []string {
+	if promptFlag != "" {
+		// Use the configured prompt flag format, e.g., "--prompt {prompt}"
+		parts := strings.SplitN(promptFlag, " ", 2)
+		return append(cmd, parts...)
+	}
+	// Default: append prompt directly at the end
+	return append(cmd, "{prompt}")
+}
+
+// applyPermissionFlags applies CLI flags for permission settings that are enabled
+func (c *Controller) applyPermissionFlags(cmd []string, agentConfig *registry.AgentTypeConfig, permissionValues map[string]bool) []string {
+	if agentConfig.PermissionSettings == nil || permissionValues == nil {
+		return cmd
+	}
+
+	for settingName, setting := range agentConfig.PermissionSettings {
+		// Skip if not supported or not a CLI flag setting
+		if !setting.Supported || setting.ApplyMethod != "cli_flag" || setting.CLIFlag == "" {
+			continue
+		}
+
+		// Get the value for this setting from the request
+		value, exists := permissionValues[settingName]
+		if !exists || !value {
+			continue
+		}
+
+		// Apply the CLI flag
+		if setting.CLIFlagValue != "" {
+			// Flag with value: "--flag value"
+			cmd = append(cmd, setting.CLIFlag, setting.CLIFlagValue)
+		} else {
+			// Boolean flag or multiple flags: "--flag" or "--flag1 --flag2 arg"
+			// Split on spaces to handle multiple flags in one setting
+			parts := strings.Fields(setting.CLIFlag)
+			cmd = append(cmd, parts...)
+		}
+	}
+
+	return cmd
+}
+
+// buildCommandString builds a display-friendly command string with proper quoting.
+// Note: We intentionally don't use strconv.Quote here because it produces Go string
+// syntax (e.g., "\t" becomes "\\t") which is not ideal for shell command display.
+// The manual quoting approach produces more readable shell-style output.
+func (c *Controller) buildCommandString(cmd []string) string {
+	var parts []string
+	for _, arg := range cmd {
+		// Quote arguments that contain spaces or special characters
+		if strings.ContainsAny(arg, " \t\n\"'`$\\") {
+			// Use double quotes and escape internal double quotes
+			escaped := strings.ReplaceAll(arg, "\"", "\\\"")
+			parts = append(parts, "\""+escaped+"\"")
+		} else {
+			parts = append(parts, arg)
+		}
+	}
+	return strings.Join(parts, " ")
 }
