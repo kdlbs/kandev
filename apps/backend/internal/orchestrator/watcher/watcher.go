@@ -26,6 +26,7 @@ type TaskEventData struct {
 // AgentEventData contains data from agent events
 type AgentEventData struct {
 	TaskID           string `json:"task_id"`
+	SessionID        string `json:"session_id"`
 	AgentExecutionID string `json:"agent_execution_id"`
 	AgentProfileID   string `json:"agent_profile_id"`
 	ExitCode         *int   `json:"exit_code,omitempty"`
@@ -79,6 +80,7 @@ type EventHandlers struct {
 
 	// Agent events
 	OnAgentStarted      func(ctx context.Context, data AgentEventData)
+	OnAgentRunning      func(ctx context.Context, data AgentEventData)
 	OnAgentReady        func(ctx context.Context, data AgentEventData)
 	OnAgentCompleted    func(ctx context.Context, data AgentEventData)
 	OnAgentFailed       func(ctx context.Context, data AgentEventData)
@@ -248,6 +250,7 @@ func (w *Watcher) subscribeToAgentEvents() error {
 		handler func(ctx context.Context, data AgentEventData)
 	}{
 		{events.AgentStarted, w.handlers.OnAgentStarted},
+		{events.AgentRunning, w.handlers.OnAgentRunning},
 		{events.AgentReady, w.handlers.OnAgentReady},
 		{events.AgentCompleted, w.handlers.OnAgentCompleted},
 		{events.AgentFailed, w.handlers.OnAgentFailed},

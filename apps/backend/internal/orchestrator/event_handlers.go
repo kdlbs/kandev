@@ -75,6 +75,35 @@ func (s *Service) storeResumeToken(ctx context.Context, taskID, sessionID, acpSe
 		zap.String("resume_token", acpSessionID))
 }
 
+// handleAgentRunning handles agent running events (user sent input in passthrough mode)
+// This is called when the user sends input to the agent, indicating a new turn started.
+func (s *Service) handleAgentRunning(ctx context.Context, data watcher.AgentEventData) {
+	if data.SessionID == "" {
+		s.logger.Warn("missing session_id for agent running event",
+			zap.String("task_id", data.TaskID))
+		return
+	}
+
+	// Move session to running and task to in progress
+	s.setSessionRunning(ctx, data.TaskID, data.SessionID)
+}
+
+// handleAgentReady handles agent ready events (turn complete in passthrough mode)
+// This is called when the agent finishes processing and is waiting for input.
+func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventData) {
+	if data.SessionID == "" {
+		s.logger.Warn("missing session_id for agent ready event",
+			zap.String("task_id", data.TaskID))
+		return
+	}
+
+	// Complete the current turn
+	s.completeTurnForSession(ctx, data.SessionID)
+
+	// Move session to waiting for input and task to review
+	s.setSessionWaitingForInput(ctx, data.TaskID, data.SessionID)
+}
+
 // handleAgentCompleted handles agent completion events
 func (s *Service) handleAgentCompleted(ctx context.Context, data watcher.AgentEventData) {
 	s.logger.Info("handling agent completed",

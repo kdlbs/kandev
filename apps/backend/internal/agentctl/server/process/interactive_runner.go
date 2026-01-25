@@ -158,15 +158,9 @@ func (r *InteractiveRunner) SetStateCallback(cb AgentStateCallback) {
 }
 
 // createStatusDetector creates the appropriate detector based on the detector type.
+// The idle detector is the default - it relies on the idle timer mechanism for turn detection.
 func createStatusDetector(detectorType string) StatusDetector {
-	switch detectorType {
-	case "claude_code":
-		return NewClaudeCodeDetector()
-	case "codex":
-		return NewCodexDetector()
-	default:
-		return &NoOpDetector{}
-	}
+	return NewIdleDetector()
 }
 
 // Start creates an interactive process entry and defers PTY creation until first resize.

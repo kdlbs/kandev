@@ -1662,6 +1662,11 @@ func (m *Manager) MarkReady(executionID string) error {
 		return fmt.Errorf("execution %q not found", executionID)
 	}
 
+	// Skip if already ready (prevents duplicate events)
+	if execution.Status == v1.AgentStatusReady {
+		return nil
+	}
+
 	m.executionStore.UpdateStatus(executionID, v1.AgentStatusReady)
 
 	m.logger.Info("execution ready for follow-up prompts",
@@ -1929,8 +1934,32 @@ func (m *Manager) RespondToPermissionBySessionID(sessionID, pendingID, optionID 
 	return m.RespondToPermission(execution.ID, pendingID, optionID, cancelled)
 }
 
+// MarkPassthroughRunning marks a passthrough execution as running when user submits input.
+// This is called when Enter key is detected in the terminal handler.
+// It updates the execution status and publishes an AgentRunning event.
+func (m *Manager) MarkPassthroughRunning(sessionID string) error {
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
+	if !exists {
+		return fmt.Errorf("no agent execution found for session: %s", sessionID)
+	}
+
+	if execution.PassthroughProcessID == "" {
+		return fmt.Errorf("session %s is not in passthrough mode", sessionID)
+	}
+
+	// Only publish if not already running (prevents duplicate events)
+	if execution.Status != v1.AgentStatusRunning {
+		m.executionStore.UpdateStatus(execution.ID, v1.AgentStatusRunning)
+		m.eventPublisher.PublishAgentEvent(context.Background(), events.AgentRunning, execution)
+	}
+
+	return nil
+}
+
 // WritePassthroughStdin writes data to the agent process stdin in passthrough mode.
 // Returns an error if the session is not in passthrough mode or if writing fails.
+// Note: For terminal handler input, use MarkPassthroughRunning directly since
+// the terminal handler writes to PTY directly for performance.
 func (m *Manager) WritePassthroughStdin(ctx context.Context, sessionID string, data string) error {
 	execution, exists := m.executionStore.GetBySessionID(sessionID)
 	if !exists {
@@ -1947,7 +1976,12 @@ func (m *Manager) WritePassthroughStdin(ctx context.Context, sessionID string, d
 		return fmt.Errorf("interactive runner not available")
 	}
 
-	return interactiveRunner.WriteStdin(execution.PassthroughProcessID, data)
+	// Write to stdin
+	if err := interactiveRunner.WriteStdin(execution.PassthroughProcessID, data); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // ResizePassthroughPTY resizes the PTY for a passthrough process.
