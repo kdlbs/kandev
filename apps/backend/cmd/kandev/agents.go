@@ -82,6 +82,7 @@ func provideLifecycleManager(
 		credsMgr,
 		profileResolver,
 		mcpService,
+		lifecycle.RuntimeFallbackWarn,
 		log,
 	)
 	if err := lifecycleMgr.Start(ctx); err != nil {

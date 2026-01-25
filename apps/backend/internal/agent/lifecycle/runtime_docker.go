@@ -13,6 +13,17 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
+// getMetadataString retrieves a string value from metadata map.
+func getMetadataString(metadata map[string]interface{}, key string) string {
+	if metadata == nil {
+		return ""
+	}
+	if v, ok := metadata[key].(string); ok {
+		return v
+	}
+	return ""
+}
+
 // DockerRuntime implements Runtime for Docker-based agent execution.
 type DockerRuntime struct {
 	containerMgr *ContainerManager
@@ -43,6 +54,11 @@ func (r *DockerRuntime) HealthCheck(ctx context.Context) error {
 }
 
 func (r *DockerRuntime) CreateInstance(ctx context.Context, req *RuntimeCreateRequest) (*RuntimeInstance, error) {
+	// Extract runtime-specific values from metadata
+	mainRepoGitDir := getMetadataString(req.Metadata, MetadataKeyMainRepoGitDir)
+	worktreeID := getMetadataString(req.Metadata, MetadataKeyWorktreeID)
+	worktreeBranch := getMetadataString(req.Metadata, MetadataKeyWorktreeBranch)
+
 	// Convert RuntimeCreateRequest to ContainerConfig
 	containerCfg := ContainerConfig{
 		AgentConfig:    req.AgentConfig,
@@ -50,7 +66,7 @@ func (r *DockerRuntime) CreateInstance(ctx context.Context, req *RuntimeCreateRe
 		TaskID:         req.TaskID,
 		SessionID:      req.SessionID,
 		InstanceID:     req.InstanceID,
-		MainRepoGitDir: req.MainRepoGitDir,
+		MainRepoGitDir: mainRepoGitDir,
 		Credentials:    req.Env, // Env contains credentials from the caller
 		McpServers:     req.McpServers,
 	}
@@ -66,10 +82,10 @@ func (r *DockerRuntime) CreateInstance(ctx context.Context, req *RuntimeCreateRe
 
 	// Build metadata
 	metadata := make(map[string]interface{})
-	if req.WorktreeID != "" {
-		metadata["worktree_id"] = req.WorktreeID
+	if worktreeID != "" {
+		metadata["worktree_id"] = worktreeID
 		metadata["worktree_path"] = req.WorkspacePath
-		metadata["worktree_branch"] = req.WorktreeBranch
+		metadata["worktree_branch"] = worktreeBranch
 	}
 
 	r.logger.Info("docker instance created",

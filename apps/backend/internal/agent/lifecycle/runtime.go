@@ -43,6 +43,13 @@ type McpServerConfig struct {
 	Args    []string `json:"args,omitempty"`
 }
 
+// Metadata keys for runtime-specific configuration
+const (
+	MetadataKeyMainRepoGitDir = "main_repo_git_dir"
+	MetadataKeyWorktreeID     = "worktree_id"
+	MetadataKeyWorktreeBranch = "worktree_branch"
+)
+
 // RuntimeCreateRequest contains parameters for creating an agentctl instance.
 type RuntimeCreateRequest struct {
 	InstanceID     string
@@ -54,11 +61,7 @@ type RuntimeCreateRequest struct {
 	Env            map[string]string
 	Metadata       map[string]interface{}
 	McpServers     []McpServerConfig
-	// Docker-specific
-	AgentConfig    *registry.AgentTypeConfig
-	MainRepoGitDir string
-	WorktreeID     string
-	WorktreeBranch string
+	AgentConfig    *registry.AgentTypeConfig // Agent type info needed by runtimes
 }
 
 // RuntimeInstance represents an agentctl instance created by a runtime.

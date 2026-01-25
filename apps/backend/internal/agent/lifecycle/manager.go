@@ -29,6 +29,18 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
+// RuntimeFallbackPolicy controls behavior when a requested runtime is unavailable.
+type RuntimeFallbackPolicy string
+
+const (
+	// RuntimeFallbackAllow silently falls back to the default runtime (current behavior).
+	RuntimeFallbackAllow RuntimeFallbackPolicy = "allow"
+	// RuntimeFallbackWarn falls back but logs a warning (current behavior, explicit).
+	RuntimeFallbackWarn RuntimeFallbackPolicy = "warn"
+	// RuntimeFallbackDeny returns an error if the requested runtime is unavailable.
+	RuntimeFallbackDeny RuntimeFallbackPolicy = "deny"
+)
+
 // Manager manages agent instance lifecycles
 type Manager struct {
 	registry        *registry.Registry
@@ -42,6 +54,9 @@ type Manager struct {
 	// RuntimeRegistry manages multiple runtimes (Docker, Standalone, etc.)
 	// Each task can select its runtime based on executor type.
 	runtimeRegistry *RuntimeRegistry
+
+	// runtimeFallbackPolicy controls behavior when a requested runtime is unavailable.
+	runtimeFallbackPolicy RuntimeFallbackPolicy
 
 	// Refactored components for separation of concerns
 	executionStore   *ExecutionStore        // Thread-safe execution tracking
@@ -64,6 +79,7 @@ type Manager struct {
 // NewManager creates a new lifecycle manager.
 // The runtimeRegistry manages multiple runtimes (Docker, Standalone, etc.) for task-specific execution.
 // The containerManager parameter is optional and used for Docker cleanup (pass nil for non-Docker runtimes).
+// The fallbackPolicy controls behavior when a requested runtime is unavailable.
 func NewManager(
 	reg *registry.Registry,
 	eventBus bus.EventBus,
@@ -72,6 +88,7 @@ func NewManager(
 	credsMgr CredentialsManager,
 	profileResolver ProfileResolver,
 	mcpProvider McpConfigProvider,
+	fallbackPolicy RuntimeFallbackPolicy,
 	log *logger.Logger,
 ) *Manager {
 	componentLogger := log.WithFields(zap.String("component", "lifecycle-manager"))
@@ -98,21 +115,22 @@ func NewManager(
 	}
 
 	mgr := &Manager{
-		registry:         reg,
-		eventBus:         eventBus,
-		runtimeRegistry:  runtimeRegistry,
-		credsMgr:         credsMgr,
-		profileResolver:  profileResolver,
-		mcpProvider:      mcpProvider,
-		logger:           componentLogger,
-		executionStore:   executionStore,
-		commandBuilder:   commandBuilder,
-		sessionManager:   sessionManager,
-		eventPublisher:   eventPublisher,
-		containerManager: containerManager,
-		historyManager:   historyManager,
-		cleanupInterval:  30 * time.Second,
-		stopCh:           stopCh,
+		registry:              reg,
+		eventBus:              eventBus,
+		runtimeRegistry:       runtimeRegistry,
+		runtimeFallbackPolicy: fallbackPolicy,
+		credsMgr:              credsMgr,
+		profileResolver:       profileResolver,
+		mcpProvider:           mcpProvider,
+		logger:                componentLogger,
+		executionStore:        executionStore,
+		commandBuilder:        commandBuilder,
+		sessionManager:        sessionManager,
+		eventPublisher:        eventPublisher,
+		containerManager:      containerManager,
+		historyManager:        historyManager,
+		cleanupInterval:       30 * time.Second,
+		stopCh:                stopCh,
 	}
 
 	// Initialize stream manager with callbacks that delegate to manager methods
@@ -168,28 +186,41 @@ func (m *Manager) SetWorkspaceInfoProvider(provider WorkspaceInfoProvider) {
 }
 
 // getRuntimeForExecutorType returns the appropriate runtime for the given executor type.
-// If the executor type is empty or the runtime is not available, it falls back to the default runtime.
+// If the executor type is empty or the runtime is not available, behavior depends on runtimeFallbackPolicy.
 func (m *Manager) getRuntimeForExecutorType(executorType string) (Runtime, error) {
 	if m.runtimeRegistry == nil {
 		return nil, fmt.Errorf("no runtime registry configured")
 	}
 
-	// If executor type is specified, map it to a runtime
 	if executorType != "" {
-		// Import the models package for ExecutorType constants
 		runtimeName := runtime.ExecutorTypeToRuntime(models.ExecutorType(executorType))
 		rt, err := m.runtimeRegistry.GetRuntime(runtimeName)
 		if err == nil {
 			return rt, nil
 		}
-		// Fall through to default if the specific runtime is not available
-		m.logger.Warn("requested runtime not available, falling back to default",
-			zap.String("executor_type", executorType),
-			zap.String("runtime", string(runtimeName)),
-			zap.Error(err))
+
+		// Handle fallback based on policy
+		switch m.runtimeFallbackPolicy {
+		case RuntimeFallbackDeny:
+			return nil, fmt.Errorf("runtime %s not available and fallback is denied: %w", runtimeName, err)
+		case RuntimeFallbackWarn:
+			m.logger.Warn("requested runtime not available, falling back to default",
+				zap.String("executor_type", executorType),
+				zap.String("runtime", string(runtimeName)),
+				zap.Error(err))
+		case RuntimeFallbackAllow:
+			m.logger.Debug("requested runtime not available, falling back to default",
+				zap.String("executor_type", executorType),
+				zap.String("runtime", string(runtimeName)))
+		default:
+			// Default to warn behavior for backwards compatibility
+			m.logger.Warn("requested runtime not available, falling back to default",
+				zap.String("executor_type", executorType),
+				zap.String("runtime", string(runtimeName)),
+				zap.Error(err))
+		}
 	}
 
-	// Default to standalone runtime (always available)
 	return m.runtimeRegistry.GetRuntime(runtime.NameStandalone)
 }
 
@@ -564,6 +595,23 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 		})
 	}
 
+	// Build metadata with runtime-specific fields
+	metadata := make(map[string]interface{})
+	if reqWithWorktree.Metadata != nil {
+		for k, v := range reqWithWorktree.Metadata {
+			metadata[k] = v
+		}
+	}
+	if mainRepoGitDir != "" {
+		metadata[MetadataKeyMainRepoGitDir] = mainRepoGitDir
+	}
+	if worktreeID != "" {
+		metadata[MetadataKeyWorktreeID] = worktreeID
+	}
+	if worktreeBranch != "" {
+		metadata[MetadataKeyWorktreeBranch] = worktreeBranch
+	}
+
 	// Create runtime request (agent command not included - started explicitly later)
 	runtimeReq := &RuntimeCreateRequest{
 		InstanceID:     executionID,
@@ -573,10 +621,7 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 		WorkspacePath:  reqWithWorktree.WorkspacePath,
 		Protocol:       string(agentConfig.Protocol),
 		Env:            env,
-		Metadata:       reqWithWorktree.Metadata,
-		WorktreeID:     worktreeID,
-		WorktreeBranch: worktreeBranch,
-		MainRepoGitDir: mainRepoGitDir,
+		Metadata:       metadata,
 		AgentConfig:    agentConfig,
 		McpServers:     mcpServers,
 	}
