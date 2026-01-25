@@ -423,13 +423,13 @@ func (wt *WorkspaceTracker) getCommitStats(ctx context.Context, sha string) (fil
 	parts := strings.Fields(summary)
 	for i, part := range parts {
 		if strings.Contains(part, "file") && i > 0 {
-			fmt.Sscanf(parts[i-1], "%d", &filesChanged)
+			_, _ = fmt.Sscanf(parts[i-1], "%d", &filesChanged)
 		}
 		if strings.Contains(part, "insertion") && i > 0 {
-			fmt.Sscanf(parts[i-1], "%d", &insertions)
+			_, _ = fmt.Sscanf(parts[i-1], "%d", &insertions)
 		}
 		if strings.Contains(part, "deletion") && i > 0 {
-			fmt.Sscanf(parts[i-1], "%d", &deletions)
+			_, _ = fmt.Sscanf(parts[i-1], "%d", &deletions)
 		}
 	}
 

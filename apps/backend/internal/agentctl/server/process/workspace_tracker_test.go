@@ -25,13 +25,13 @@ func setupTestRepo(t *testing.T) (string, func()) {
 	// Create temp directory for the local repo
 	localDir, err := os.MkdirTemp("", "test-local-*")
 	if err != nil {
-		os.RemoveAll(remoteDir)
+		_ = os.RemoveAll(remoteDir)
 		t.Fatalf("failed to create local dir: %v", err)
 	}
 
 	cleanup := func() {
-		os.RemoveAll(remoteDir)
-		os.RemoveAll(localDir)
+		_ = os.RemoveAll(remoteDir)
+		_ = os.RemoveAll(localDir)
 	}
 
 	// Initialize bare remote repo
@@ -208,20 +208,20 @@ func TestFilterLocalCommits_PullAndResetScenario(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create remote dir: %v", err)
 	}
-	defer os.RemoveAll(remoteDir)
+	defer func() { _ = os.RemoveAll(remoteDir) }()
 
 	localDir, err := os.MkdirTemp("", "test-local-*")
 	if err != nil {
 		t.Fatalf("failed to create local dir: %v", err)
 	}
-	defer os.RemoveAll(localDir)
+	defer func() { _ = os.RemoveAll(localDir) }()
 
 	// Another clone to simulate upstream changes
 	upstreamClone, err := os.MkdirTemp("", "test-upstream-*")
 	if err != nil {
 		t.Fatalf("failed to create upstream clone dir: %v", err)
 	}
-	defer os.RemoveAll(upstreamClone)
+	defer func() { _ = os.RemoveAll(upstreamClone) }()
 
 	// Initialize bare remote repo
 	runGit(t, remoteDir, "init", "--bare")
