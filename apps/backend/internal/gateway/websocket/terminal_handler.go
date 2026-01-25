@@ -314,6 +314,8 @@ func (h *TerminalHandler) runTerminalBridge(
 					zap.Error(err))
 				return
 			}
+			// Detect Enter key (user submitted input) - notify lifecycle manager
+			h.detectInputSubmission(sessionID, data)
 		} else {
 			// PTY not ready yet - try to set it up
 			if h.setupPtyAccess(sessionID, processID, interactiveRunner, wsw, &ptyWriter) {
@@ -331,11 +333,36 @@ func (h *TerminalHandler) runTerminalBridge(
 						zap.Error(err))
 					return
 				}
+				// Detect Enter key (user submitted input) - notify lifecycle manager
+				h.detectInputSubmission(sessionID, data)
 			} else {
 				h.logger.Debug("PTY not ready, dropping input",
 					zap.String("session_id", sessionID),
 					zap.Int("bytes", len(data)))
 			}
+		}
+	}
+}
+
+// detectInputSubmission checks if the input contains Enter key and notifies
+// the lifecycle manager to update the execution state to Running.
+func (h *TerminalHandler) detectInputSubmission(sessionID string, data []byte) {
+	// Check for Enter key (CR or LF)
+	hasEnter := false
+	for _, b := range data {
+		if b == '\n' || b == '\r' {
+			hasEnter = true
+			break
+		}
+	}
+
+	if hasEnter {
+		// Notify lifecycle manager that user submitted input
+		if err := h.lifecycleMgr.MarkPassthroughRunning(sessionID); err != nil {
+			// Log at debug level - may fail if session ended or not in passthrough mode
+			h.logger.Debug("failed to mark passthrough as running",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
 		}
 	}
 }

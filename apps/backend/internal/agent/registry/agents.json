@@ -26,8 +26,7 @@
           "@augmentcode/auggie"
         ],
         "model_flag": "--model {model}",
-        "prompt_pattern": "^>\\s*$",
-        "idle_timeout_ms": 5000,
+        "idle_timeout_ms": 3000,
         "buffer_max_bytes": 2097152
       },
       "working_dir": "/workspace",
@@ -189,12 +188,8 @@
           "--full-auto"
         ],
         "model_flag": "--model {model}",
-        "prompt_pattern": "^>\\s*$",
-        "idle_timeout_ms": 5000,
-        "buffer_max_bytes": 2097152,
-        "status_detector": "codex",
-        "check_interval_ms": 100,
-        "stability_window_ms": 1000
+        "idle_timeout_ms": 3000,
+        "buffer_max_bytes": 2097152
       },
       "working_dir": "/workspace",
       "required_env": [],
@@ -340,12 +335,8 @@
           "--verbose"
         ],
         "model_flag": "--model {model}",
-        "prompt_pattern": "^>\\s*$",
-        "idle_timeout_ms": 5000,
-        "buffer_max_bytes": 2097152,
-        "status_detector": "claude_code",
-        "check_interval_ms": 100,
-        "stability_window_ms": 0
+        "idle_timeout_ms": 3000,
+        "buffer_max_bytes": 2097152
       },
       "working_dir": "{workspace}",
       "required_env": [
@@ -519,12 +510,8 @@
         ],
         "model_flag": "--model {model}",
         "prompt_flag": "--prompt-interactive {prompt}",
-        "prompt_pattern": "^>\\s*$",
-        "idle_timeout_ms": 5000,
-        "buffer_max_bytes": 2097152,
-        "status_detector": "",
-        "check_interval_ms": 100,
-        "stability_window_ms": 0
+        "idle_timeout_ms": 3000,
+        "buffer_max_bytes": 2097152
       },
       "permission_settings": {
         "auto_approve": {
@@ -613,12 +600,8 @@
         ],
         "model_flag": "--model {model}",
         "prompt_flag": "--prompt {prompt}",
-        "prompt_pattern": "^>\\s*$",
-        "idle_timeout_ms": 5000,
-        "buffer_max_bytes": 2097152,
-        "status_detector": "",
-        "check_interval_ms": 100,
-        "stability_window_ms": 0
+        "idle_timeout_ms": 3000,
+        "buffer_max_bytes": 2097152
       },
       "working_dir": "{workspace}",
       "required_env": [],

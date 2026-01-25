@@ -153,6 +153,8 @@ func NewService(
 
 	// Create the watcher with event handlers that wire everything together
 	handlers := watcher.EventHandlers{
+		OnAgentRunning:         s.handleAgentRunning,
+		OnAgentReady:           s.handleAgentReady,
 		OnAgentCompleted:       s.handleAgentCompleted,
 		OnAgentFailed:          s.handleAgentFailed,
 		OnAgentStreamEvent:     s.handleAgentStreamEvent,

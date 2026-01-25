@@ -37,6 +37,7 @@ func (p *EventPublisher) PublishAgentEvent(ctx context.Context, eventType string
 	payload := AgentEventPayload{
 		InstanceID:     execution.ID,
 		TaskID:         execution.TaskID,
+		SessionID:      execution.SessionID,
 		AgentProfileID: execution.AgentProfileID,
 		ContainerID:    execution.ContainerID,
 		Status:         string(execution.Status),
