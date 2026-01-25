@@ -150,14 +150,16 @@ const TaskTopBar = memo(function TaskTopBar({
   }, [handleGitOperation, push]);
 
   const handleRebase = useCallback(() => {
-    // Rebase onto the base branch (e.g., origin/main)
-    const targetBranch = baseBranch || 'origin/main';
+    // Rebase onto the base branch (e.g., main)
+    // Backend expects just the branch name without 'origin/' prefix
+    const targetBranch = baseBranch?.replace(/^origin\//, '') || 'main';
     handleGitOperation(() => rebase(targetBranch), 'Rebase');
   }, [handleGitOperation, rebase, baseBranch]);
 
   const handleMerge = useCallback(() => {
-    // Merge from the base branch (e.g., origin/main)
-    const targetBranch = baseBranch || 'origin/main';
+    // Merge from the base branch (e.g., main)
+    // Backend expects just the branch name without 'origin/' prefix
+    const targetBranch = baseBranch?.replace(/^origin\//, '') || 'main';
     handleGitOperation(() => merge(targetBranch), 'Merge');
   }, [handleGitOperation, merge, baseBranch]);
 
