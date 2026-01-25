@@ -374,7 +374,7 @@ func getExecutionStore(t *testing.T, mgr *lifecycle.Manager) *lifecycle.Executio
 func newLifecycleManager(t *testing.T, log *logger.Logger) *lifecycle.Manager {
 	t.Helper()
 	reg := registry.NewRegistry(log)
-	return lifecycle.NewManager(reg, nil, nil, nil, nil, nil, nil, log)
+	return lifecycle.NewManager(reg, nil, nil, nil, nil, nil, nil, lifecycle.RuntimeFallbackWarn, log)
 }
 
 func newAgentctlClient(t *testing.T, serverURL string, log *logger.Logger) *agentctlclient.Client {
