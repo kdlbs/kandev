@@ -18,14 +18,13 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
       if (sessionId) {
         const existingSession = store.getState().taskSessions.items[sessionId];
         const agentProfileId = payload.agent_profile_id;
-        const agentProfileSnapshot = payload.agent_profile_snapshot;
+        const agentProfileSnapshot = payload.agent_profile_snapshot as Record<string, unknown> | undefined;
 
         if (existingSession) {
           // Update existing session - preserve all existing fields, but update snapshot if provided
           store.getState().setTaskSession({
             ...existingSession,
             state: newState,
-            // Update snapshot if provided in the event
             ...(agentProfileSnapshot ? { agent_profile_snapshot: agentProfileSnapshot } : {}),
           });
         } else {
@@ -57,11 +56,9 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
             }]);
           } else {
             const nextSessions = sessionsByTask.map((session) =>
-              session.id === sessionId ? {
-                ...session,
-                state: newState,
-                ...(agentProfileSnapshot ? { agent_profile_snapshot: agentProfileSnapshot } : {}),
-              } : session
+              session.id === sessionId
+                ? { ...session, state: newState, ...(agentProfileSnapshot ? { agent_profile_snapshot: agentProfileSnapshot } : {}) }
+                : session
             );
             store.getState().setTaskSessionsForTask(taskId, nextSessions);
           }

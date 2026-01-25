@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/runtime"
+	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
@@ -30,6 +31,9 @@ func (m *MockRuntime) StopInstance(ctx context.Context, instance *RuntimeInstanc
 }
 func (m *MockRuntime) RecoverInstances(ctx context.Context) ([]*RuntimeInstance, error) {
 	return m.recoverInstances, m.recoverErr
+}
+func (m *MockRuntime) GetInteractiveRunner() *process.InteractiveRunner {
+	return nil
 }
 
 func newTestRegistryLogger() *logger.Logger {

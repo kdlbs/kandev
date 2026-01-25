@@ -11,9 +11,24 @@
       "image": "kandev/multi-agent",
       "tag": "latest",
       "cmd": [
-        "auggie",
+        "npx",
+        "-y",
+        "@augmentcode/auggie@0.14.0",
         "--acp"
       ],
+      "passthrough_config": {
+        "supported": true,
+        "label": "CLI Passthrough",
+        "description": "Show terminal directly instead of chat interface",
+        "passthrough_cmd": [
+          "npx",
+          "-y",
+          "@augmentcode/auggie"
+        ],
+        "model_flag": "--model {model}",
+        "idle_timeout_ms": 3000,
+        "buffer_max_bytes": 2097152
+      },
       "working_dir": "/workspace",
       "required_env": [
         "AUGMENT_SESSION_AUTH"
@@ -157,9 +172,25 @@
       "image": "kandev/multi-agent",
       "tag": "latest",
       "cmd": [
-        "codex",
+        "npx",
+        "-y",
+        "@openai/codex@0.88.0",
         "app-server"
       ],
+      "passthrough_config": {
+        "supported": true,
+        "label": "CLI Passthrough",
+        "description": "Show terminal directly instead of chat interface",
+        "passthrough_cmd": [
+          "npx",
+          "-y",
+          "@openai/codex",
+          "--full-auto"
+        ],
+        "model_flag": "--model {model}",
+        "idle_timeout_ms": 3000,
+        "buffer_max_bytes": 2097152
+      },
       "working_dir": "/workspace",
       "required_env": [],
       "env": {},
@@ -209,7 +240,7 @@
           "label": "Auto-approve",
           "description": "Skip approval requests from Codex",
           "apply_method": "acp",
-          "cli_flag": ""
+          "cli_flag": "--full-auto"
         }
       },
       "discovery": {
@@ -285,7 +316,7 @@
       "cmd": [
         "npx",
         "-y",
-        "@anthropic-ai/claude-code@2.1.12",
+        "@anthropic-ai/claude-code@2.1.19",
         "-p",
         "--output-format=stream-json",
         "--input-format=stream-json",
@@ -293,6 +324,20 @@
         "--disallowedTools=AskUserQuestion",
         "--verbose"
       ],
+      "passthrough_config": {
+        "supported": true,
+        "label": "CLI Passthrough",
+        "description": "Show terminal directly instead of chat interface",
+        "passthrough_cmd": [
+          "npx",
+          "-y",
+          "@anthropic-ai/claude-code@2.1.19",
+          "--verbose"
+        ],
+        "model_flag": "--model {model}",
+        "idle_timeout_ms": 3000,
+        "buffer_max_bytes": 2097152
+      },
       "working_dir": "{workspace}",
       "required_env": [
         "ANTHROPIC_API_KEY"
@@ -335,7 +380,7 @@
       "permission_settings": {
         "auto_approve": {
           "supported": true,
-          "default": false,
+          "default": true,
           "label": "Auto-approve",
           "description": "Automatically approve tool calls via stdio protocol",
           "apply_method": "stdio",
@@ -417,7 +462,7 @@
       "cmd": [
         "npx",
         "-y",
-        "@google/gemini-cli@0.23.0",
+        "@google/gemini-cli@0.25.2",
         "--experimental-acp"
       ],
       "working_dir": "{workspace}",
@@ -455,6 +500,18 @@
           "write_file",
           "edit_file"
         ]
+      },
+      "passthrough_config": {
+        "supported": true,
+        "label": "CLI Passthrough",
+        "description": "Show terminal directly instead of chat interface",
+        "passthrough_cmd": [
+          "npx @google/gemini-cli"
+        ],
+        "model_flag": "--model {model}",
+        "prompt_flag": "--prompt-interactive {prompt}",
+        "idle_timeout_ms": 3000,
+        "buffer_max_bytes": 2097152
       },
       "permission_settings": {
         "auto_approve": {
@@ -534,6 +591,18 @@
         "--port",
         "0"
       ],
+      "passthrough_config": {
+        "supported": true,
+        "label": "CLI Passthrough",
+        "description": "Show terminal directly instead of chat interface",
+        "passthrough_cmd": [
+          "opencode"
+        ],
+        "model_flag": "--model {model}",
+        "prompt_flag": "--prompt {prompt}",
+        "idle_timeout_ms": 3000,
+        "buffer_max_bytes": 2097152
+      },
       "working_dir": "{workspace}",
       "required_env": [],
       "env": {},

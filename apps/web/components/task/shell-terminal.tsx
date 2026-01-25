@@ -8,6 +8,7 @@ import { useAppStore, useAppStoreApi } from '@/components/state-provider';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import { useSession } from '@/hooks/domains/session/use-session';
 import { useSessionAgentctl } from '@/hooks/domains/session/use-session-agentctl';
+import { terminalTheme, applyTransparentBackground } from '@/lib/terminal-theme';
 
 type ShellTerminalProps = {
   // Interactive shell mode - requires sessionId
@@ -79,29 +80,7 @@ export function ShellTerminal({
       convertEol: isReadOnlyMode,
       fontSize: isReadOnlyMode ? 12 : 13,
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-      theme: {
-        background: 'transparent',
-        foreground: '#d4d4d4',
-        cursor: '#d4d4d4',
-        cursorAccent: 'transparent',
-        selectionBackground: '#264f78',
-        black: '#1e1e1e',
-        red: '#f44747',
-        green: '#6a9955',
-        yellow: '#dcdcaa',
-        blue: '#569cd6',
-        magenta: '#c586c0',
-        cyan: '#4ec9b0',
-        white: '#d4d4d4',
-        brightBlack: '#808080',
-        brightRed: '#f44747',
-        brightGreen: '#6a9955',
-        brightYellow: '#dcdcaa',
-        brightBlue: '#569cd6',
-        brightMagenta: '#c586c0',
-        brightCyan: '#4ec9b0',
-        brightWhite: '#ffffff',
-      },
+      theme: terminalTheme,
     });
 
     const fitAddon = new FitAddon();
@@ -113,14 +92,7 @@ export function ShellTerminal({
     fitAddonRef.current = fitAddon;
 
     // Force transparent background on all xterm elements to inherit from parent
-    const xtermElement = terminalRef.current.querySelector('.xterm');
-    const xtermViewport = terminalRef.current.querySelector('.xterm-viewport');
-    const xtermScreen = terminalRef.current.querySelector('.xterm-screen');
-    const xtermScrollable = terminalRef.current.querySelector('.xterm-scrollable-element');
-    if (xtermElement) (xtermElement as HTMLElement).style.background = 'transparent';
-    if (xtermViewport) (xtermViewport as HTMLElement).style.background = 'transparent';
-    if (xtermScreen) (xtermScreen as HTMLElement).style.background = 'transparent';
-    if (xtermScrollable) (xtermScrollable as HTMLElement).style.backgroundColor = 'transparent';
+    applyTransparentBackground(terminalRef.current);
 
     // For read-only mode, write initial output
     if (isReadOnlyMode && outputRef.current) {

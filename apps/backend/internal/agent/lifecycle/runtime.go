@@ -8,6 +8,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/runtime"
 	agentctl "github.com/kandev/kandev/internal/agentctl/client"
+	"github.com/kandev/kandev/internal/agentctl/server/process"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -32,6 +33,10 @@ type Runtime interface {
 	// RecoverInstances discovers and recovers instances that were running before a restart.
 	// Returns recovered instances that can be re-tracked by the manager.
 	RecoverInstances(ctx context.Context) ([]*RuntimeInstance, error)
+
+	// GetInteractiveRunner returns the interactive runner for passthrough mode.
+	// May return nil if the runtime doesn't support passthrough mode.
+	GetInteractiveRunner() *process.InteractiveRunner
 }
 
 // McpServerConfig holds configuration for an MCP server.

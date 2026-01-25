@@ -82,6 +82,7 @@ export async function createAgentProfileAction(
     auto_approve: boolean;
     dangerously_skip_permissions: boolean;
     allow_indexing: boolean;
+    cli_passthrough: boolean;
     plan: string;
   }
 ): Promise<AgentProfile> {
@@ -93,7 +94,7 @@ export async function createAgentProfileAction(
 
 export async function updateAgentProfileAction(
   id: string,
-  payload: Partial<Pick<AgentProfile, 'name' | 'model' | 'auto_approve' | 'dangerously_skip_permissions' | 'allow_indexing' | 'plan'>>
+  payload: Partial<Pick<AgentProfile, 'name' | 'model' | 'auto_approve' | 'dangerously_skip_permissions' | 'allow_indexing' | 'cli_passthrough' | 'plan'>>
 ): Promise<AgentProfile> {
   return fetchJson<AgentProfile>(`${apiBaseUrl}/api/v1/agent-profiles/${id}`, {
     method: 'PATCH',
@@ -114,6 +115,28 @@ export async function updateAgentProfileMcpConfigAction(
   payload: { enabled: boolean; mcpServers: Record<string, McpServerDef>; meta?: Record<string, unknown> }
 ): Promise<AgentProfileMcpConfig> {
   return fetchJson<AgentProfileMcpConfig>(`${apiBaseUrl}/api/v1/agent-profiles/${profileId}/mcp-config`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export type CommandPreviewRequest = {
+  model: string;
+  permission_settings: Record<string, boolean>;
+  cli_passthrough: boolean;
+};
+
+export type CommandPreviewResponse = {
+  supported: boolean;
+  command: string[];
+  command_string: string;
+};
+
+export async function previewAgentCommandAction(
+  agentName: string,
+  payload: CommandPreviewRequest
+): Promise<CommandPreviewResponse> {
+  return fetchJson<CommandPreviewResponse>(`${apiBaseUrl}/api/v1/agent-command-preview/${agentName}`, {
     method: 'POST',
     body: JSON.stringify(payload),
   });

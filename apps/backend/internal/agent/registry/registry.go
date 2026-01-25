@@ -63,6 +63,9 @@ type AgentTypeConfig struct {
 	// Model configuration
 	ModelConfig ModelConfig `json:"model_config,omitempty"` // Available models and default model
 
+	// Passthrough configuration (for CLI passthrough mode)
+	PassthroughConfig PassthroughConfig `json:"passthrough_config,omitempty"` // CLI passthrough mode settings
+
 	// Display name for UI (shorter than Name)
 	DisplayName string `json:"display_name,omitempty"`
 }
@@ -198,6 +201,50 @@ type DiscoveryConfig struct {
 	MCPConfigPath          OSPaths               `json:"mcp_config_path"`
 	InstallationPath       OSPaths               `json:"installation_path"`
 	DiscoveryCapabilities  DiscoveryCapabilities `json:"discovery_capabilities"`
+}
+
+// PassthroughConfig defines configuration for CLI passthrough mode
+type PassthroughConfig struct {
+	// Supported indicates whether passthrough mode is available for this agent
+	Supported bool `json:"supported"`
+
+	// Label is the display label for the UI toggle
+	Label string `json:"label"`
+
+	// Description explains what passthrough mode does
+	Description string `json:"description"`
+
+	// PassthroughCmd is the command to run in passthrough mode (without ACP/protocol flags)
+	PassthroughCmd []string `json:"passthrough_cmd,omitempty"`
+
+	// ModelFlag is the CLI flag template for specifying the model, e.g. "--model {model}"
+	// The {model} placeholder will be replaced with the model ID from the profile
+	ModelFlag string `json:"model_flag,omitempty"`
+
+	// PromptFlag is the CLI flag template for specifying the prompt, e.g. "--prompt {prompt}"
+	// The {prompt} placeholder will be replaced with the actual prompt.
+	// If not set, the prompt is appended directly at the end of the command.
+	PromptFlag string `json:"prompt_flag,omitempty"`
+
+	// PromptPattern is the regex pattern to detect agent prompts (for turn detection)
+	PromptPattern string `json:"prompt_pattern,omitempty"`
+
+	// IdleTimeoutMs is the idle timeout in milliseconds for turn detection
+	IdleTimeoutMs int `json:"idle_timeout_ms,omitempty"`
+
+	// BufferMaxBytes is the max size of the output ring buffer (default 2MB)
+	BufferMaxBytes int64 `json:"buffer_max_bytes,omitempty"`
+
+	// StatusDetector specifies which detector to use for TUI state detection
+	// Valid values: "claude_code", "codex", "" (no detection)
+	StatusDetector string `json:"status_detector,omitempty"`
+
+	// CheckIntervalMs is how often to check agent state (default 100ms)
+	CheckIntervalMs int `json:"check_interval_ms,omitempty"`
+
+	// StabilityWindowMs is how long state must be stable before reporting (default 0)
+	// Codex uses 1000ms to prevent false exits from working state
+	StabilityWindowMs int `json:"stability_window_ms,omitempty"`
 }
 
 // Registry manages agent type configurations

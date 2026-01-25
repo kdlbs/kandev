@@ -7,6 +7,7 @@ import "time"
 type AgentEventPayload struct {
 	InstanceID     string     `json:"instance_id"`
 	TaskID         string     `json:"task_id"`
+	SessionID      string     `json:"session_id,omitempty"`
 	AgentProfileID string     `json:"agent_profile_id"`
 	ContainerID    string     `json:"container_id,omitempty"`
 	Status         string     `json:"status"`

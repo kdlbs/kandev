@@ -46,6 +46,9 @@ type AgentExecution struct {
 	standaloneInstanceID string // Instance ID in standalone agentctl
 	standalonePort       int    // Port of the standalone execution
 
+	// Passthrough mode info (CLI passthrough without ACP)
+	PassthroughProcessID string // Process ID in the interactive runner (empty if not in passthrough mode)
+
 	// Buffers for accumulating agent response during a prompt
 	messageBuffer   strings.Builder
 	reasoningBuffer strings.Builder
@@ -121,6 +124,7 @@ type AgentProfileInfo struct {
 	AutoApprove                bool
 	DangerouslySkipPermissions bool
 	AllowIndexing              bool
+	CLIPassthrough             bool
 	Plan                       string
 }
 

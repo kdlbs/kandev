@@ -140,11 +140,17 @@ export const createSessionSlice: StateCreator<
     }),
   setTaskSession: (session) =>
     set((draft) => {
-      // Merge with existing session data to preserve fields like agent_profile_id
+      // Merge with existing session data to preserve fields like agent_profile_id and agent_profile_snapshot
       const existingSession = draft.taskSessions.items[session.id];
-      draft.taskSessions.items[session.id] = existingSession
-        ? { ...existingSession, ...session }
-        : session;
+      if (existingSession) {
+        draft.taskSessions.items[session.id] = {
+          ...existingSession,
+          ...session,
+          agent_profile_snapshot: session.agent_profile_snapshot ?? existingSession.agent_profile_snapshot,
+        };
+      } else {
+        draft.taskSessions.items[session.id] = session;
+      }
     }),
   setTaskSessionsForTask: (taskId, sessions) =>
     set((draft) => {
@@ -158,6 +164,22 @@ export const createSessionSlice: StateCreator<
       draft.taskSessionsByTask.itemsByTaskId[taskId] = sessions;
       draft.taskSessionsByTask.loadingByTaskId[taskId] = false;
       draft.taskSessionsByTask.loadedByTaskId[taskId] = true;
+      // Also populate taskSessions.items for individual session lookups
+      // This ensures agent_profile_snapshot is available when accessed by session ID
+      for (const session of sessions) {
+        const existing = draft.taskSessions.items[session.id];
+        if (existing) {
+          // Merge new data with existing, preserving agent_profile_snapshot if not provided
+          draft.taskSessions.items[session.id] = {
+            ...existing,
+            ...session,
+            // Preserve existing snapshot if new session doesn't have one
+            agent_profile_snapshot: session.agent_profile_snapshot ?? existing.agent_profile_snapshot,
+          };
+        } else {
+          draft.taskSessions.items[session.id] = session;
+        }
+      }
     }),
   setTaskSessionsLoading: (taskId, loading) =>
     set((draft) => {

@@ -10,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/docker"
 	"github.com/kandev/kandev/internal/agent/runtime"
 	agentctl "github.com/kandev/kandev/internal/agentctl/client"
+	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
@@ -206,4 +207,10 @@ func (r *DockerRuntime) RecoverInstances(ctx context.Context) ([]*RuntimeInstanc
 	}
 
 	return recovered, nil
+}
+
+// GetInteractiveRunner returns nil for Docker runtime.
+// Passthrough mode is not supported in Docker-based execution.
+func (r *DockerRuntime) GetInteractiveRunner() *process.InteractiveRunner {
+	return nil
 }

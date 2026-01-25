@@ -7,6 +7,7 @@ import { SessionPanel } from '@kandev/ui/pannel-session';
 import { TaskChatPanel } from './task-chat-panel';
 import { TaskChangesPanel } from './task-changes-panel';
 import { FileViewerContent } from './file-viewer-content';
+import { PassthroughTerminal } from './passthrough-terminal';
 import type { OpenFileTab } from '@/lib/types/backend';
 import { FILE_EXTENSION_COLORS } from '@/lib/types/backend';
 import { useAppStore } from '@/components/state-provider';
@@ -30,6 +31,18 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
   sessionId = null,
 }: TaskCenterPanelProps) {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
+  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const activeSession = useAppStore((state) =>
+    activeSessionId ? state.taskSessions.items[activeSessionId] ?? null : null
+  );
+
+  // Check if session is in passthrough mode by looking at the profile snapshot
+  const isPassthroughMode = useMemo(() => {
+    if (!activeSession?.agent_profile_snapshot) return false;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const snapshot = activeSession.agent_profile_snapshot as any;
+    return snapshot?.cli_passthrough === true;
+  }, [activeSession?.agent_profile_snapshot]);
   const [leftTab, setLeftTab] = useState('chat');
   const [selectedDiff, setSelectedDiff] = useState<SelectedDiff | null>(null);
   const [notes, setNotes] = useState('');
@@ -126,9 +139,15 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
           />
         </TabsContent>
 
-        <TabsContent value="chat" className="flex flex-col min-h-0 flex-1">
+        <TabsContent value="chat" className="flex flex-col min-h-0 flex-1" style={{ minHeight: '200px' }}>
           {activeTaskId ? (
-            <TaskChatPanel sessionId={sessionId} />
+            isPassthroughMode ? (
+              <div className="flex-1 min-h-0 h-full" style={{ minHeight: '150px' }}>
+                <PassthroughTerminal sessionId={sessionId} />
+              </div>
+            ) : (
+              <TaskChatPanel sessionId={sessionId} />
+            )
           ) : (
             <div className="flex items-center justify-center h-full text-muted-foreground">
               No task selected

@@ -18,19 +18,25 @@ import { fetchTask } from '@/lib/api';
 import { useTasks } from '@/hooks/use-tasks';
 import type { Layout } from 'react-resizable-panels';
 
-type TaskPageClientProps = {
+type TaskPageContentProps = {
   task: Task | null;
   sessionId?: string | null;
   initialRepositories?: Repository[];
   defaultLayouts?: Record<string, Layout>;
 };
 
-export default function TaskPage({
+/**
+ * TaskPageContent is the main content component for the task/session page.
+ * It handles task state, agent management, and renders the task layout.
+ *
+ * This is a shared component used by the session page (/s/[sessionId]).
+ */
+export function TaskPageContent({
   task: initialTask,
   sessionId = null,
   initialRepositories = [],
   defaultLayouts = {},
-}: TaskPageClientProps) {
+}: TaskPageContentProps) {
   const [taskDetails, setTaskDetails] = useState<Task | null>(initialTask);
   const [isMounted, setIsMounted] = useState(false);
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
@@ -122,7 +128,7 @@ export default function TaskPage({
   }, []);
 
   useEffect(() => {
-    console.log('[TaskPage] Active session setup effect', {
+    console.log('[TaskPageContent] Active session setup effect', {
       initialTaskId: initialTask?.id,
       activeTaskId,
       initialSessionId,
@@ -130,21 +136,19 @@ export default function TaskPage({
       taskSessionId,
     });
     if (!initialTask?.id) return;
-    if (activeTaskId && activeTaskId !== initialTask.id) {
-      console.log('[TaskPage] Skipping - different activeTaskId already set');
-      return;
-    }
+    // Always sync active task/session when SSR provides data.
+    // This ensures navigation to a new task/session updates the store.
     if (initialSessionId) {
-      console.log('[TaskPage] Setting active session', initialTask.id, initialSessionId);
+      console.log('[TaskPageContent] Setting active session', initialTask.id, initialSessionId);
       setActiveSession(initialTask.id, initialSessionId);
-    } else {
-      console.log('[TaskPage] Setting active task', initialTask.id);
+    } else if (activeTaskId !== initialTask.id) {
+      console.log('[TaskPageContent] Setting active task', initialTask.id);
       setActiveTask(initialTask.id);
     }
   }, [activeTaskId, initialSessionId, initialTask?.id, sessionId, taskSessionId, setActiveSession, setActiveTask]);
 
   useEffect(() => {
-    console.log('[TaskPage] Task fetch effect', {
+    console.log('[TaskPageContent] Task fetch effect', {
       activeTaskId,
       initialTaskId: initialTask?.id,
       taskDetailsId: taskDetails?.id,
@@ -152,13 +156,13 @@ export default function TaskPage({
     });
     if (!activeTaskId) return;
     if (taskDetails?.id === activeTaskId) return;
-    console.log('[TaskPage] Fetching task details for', activeTaskId);
+    console.log('[TaskPageContent] Fetching task details for', activeTaskId);
     fetchTask(activeTaskId, { cache: 'no-store' })
       .then((response) => {
-        console.log('[TaskPage] Fetched task details', response?.id);
+        console.log('[TaskPageContent] Fetched task details', response?.id);
         setTaskDetails(response);
       })
-      .catch((error) => console.error('[TaskPage] Failed to load task details:', error));
+      .catch((error) => console.error('[TaskPageContent] Failed to load task details:', error));
   }, [activeTaskId, initialTask?.id, taskDetails?.id]);
   const { repositories } = useRepositories(task?.workspace_id ?? null, Boolean(task?.workspace_id));
   const effectiveRepositories = repositories.length ? repositories : initialRepositories;

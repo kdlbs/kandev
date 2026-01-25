@@ -71,6 +71,29 @@ export async function getAgentProfileMcpConfig(
   return fetchJson<AgentProfileMcpConfig>(`/api/v1/agent-profiles/${profileId}/mcp-config`, options);
 }
 
+export type CommandPreviewRequest = {
+  model: string;
+  permission_settings: Record<string, boolean>;
+  cli_passthrough: boolean;
+};
+
+export type CommandPreviewResponse = {
+  supported: boolean;
+  command: string[];
+  command_string: string;
+};
+
+export async function previewAgentCommand(
+  agentName: string,
+  payload: CommandPreviewRequest,
+  options?: ApiRequestOptions
+): Promise<CommandPreviewResponse> {
+  return fetchJson<CommandPreviewResponse>(`/api/v1/agent-command-preview/${agentName}`, {
+    ...options,
+    init: { method: 'POST', body: JSON.stringify(payload), ...(options?.init ?? {}) },
+  });
+}
+
 // Editors
 export async function listEditors(options?: ApiRequestOptions) {
   return fetchJson<EditorsResponse>('/api/v1/editors', options);

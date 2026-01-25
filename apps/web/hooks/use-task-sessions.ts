@@ -24,6 +24,12 @@ export function useTaskSessions(taskId: string | null) {
     setTaskSessionsLoading(taskId, true);
     try {
       const response = await listTaskSessions(taskId, { cache: 'no-store' });
+      // Debug: log the fetched sessions to see if they have agent_profile_snapshot
+      console.log('[useTaskSessions] fetched sessions:', response.sessions?.map(s => ({
+        id: s.id,
+        hasSnapshot: !!s.agent_profile_snapshot,
+        cli_passthrough: s.agent_profile_snapshot?.cli_passthrough,
+      })));
       setTaskSessionsForTask(taskId, response.sessions ?? []);
     } catch {
       setTaskSessionsForTask(taskId, []);
