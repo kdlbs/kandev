@@ -19,16 +19,12 @@ export function useSessionModel(
 
   const sessionModel = sessionProfile?.model ?? null;
 
-  // Get pending model state for this session
-  const pendingModels = useAppStore((state) => state.pendingModel.bySessionId);
-  const clearPendingModel = useAppStore((state) => state.clearPendingModel);
-  const setActiveModel = useAppStore((state) => state.setActiveModel);
-  const pendingModel = resolvedSessionId ? pendingModels[resolvedSessionId] : null;
+  // Get active model state for this session (user's selected model)
+  const activeModels = useAppStore((state) => state.activeModel.bySessionId);
+  const activeModel = resolvedSessionId ? activeModels[resolvedSessionId] ?? null : null;
 
   return {
     sessionModel,
-    pendingModel,
-    clearPendingModel,
-    setActiveModel,
+    activeModel,
   };
 }

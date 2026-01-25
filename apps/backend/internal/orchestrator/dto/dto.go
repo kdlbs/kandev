@@ -123,7 +123,8 @@ type PromptTaskRequest struct {
 	TaskID        string `json:"task_id"`
 	TaskSessionID string `json:"session_id"`
 	Prompt        string `json:"prompt"`
-	Model         string `json:"model,omitempty"` // Optional: switch to this model before processing prompt
+	Model         string `json:"model,omitempty"`     // Optional: switch to this model before processing prompt
+	PlanMode      bool   `json:"plan_mode,omitempty"` // Optional: enable plan mode (analyze before executing)
 }
 
 // PromptTaskResponse is the response for orchestrator.prompt

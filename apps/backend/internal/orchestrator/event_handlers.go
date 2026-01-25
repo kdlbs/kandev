@@ -408,11 +408,12 @@ func (s *Service) updateTaskSessionState(ctx context.Context, taskID, sessionID 
 		zap.String("new_state", string(nextState)))
 	if s.eventBus != nil {
 		_ = s.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(events.TaskSessionStateChanged, "task-session", map[string]interface{}{
-			"task_id":          taskID,
-			"session_id":       sessionID,
-			"old_state":        string(oldState),
-			"new_state":        string(nextState),
-			"agent_profile_id": session.AgentProfileID,
+			"task_id":                taskID,
+			"session_id":             sessionID,
+			"old_state":              string(oldState),
+			"new_state":              string(nextState),
+			"agent_profile_id":       session.AgentProfileID,
+			"agent_profile_snapshot": session.AgentProfileSnapshot,
 		}))
 	}
 }
@@ -603,10 +604,11 @@ func (s *Service) handleContextWindowUpdated(ctx context.Context, data watcher.C
 			events.TaskSessionStateChanged,
 			"orchestrator",
 			map[string]interface{}{
-				"task_id":          data.TaskID,
-				"session_id":       session.ID,
-				"new_state":        string(session.State),
-				"agent_profile_id": session.AgentProfileID,
+				"task_id":                data.TaskID,
+				"session_id":             session.ID,
+				"new_state":              string(session.State),
+				"agent_profile_id":       session.AgentProfileID,
+				"agent_profile_snapshot": session.AgentProfileSnapshot,
 				"metadata": map[string]interface{}{
 					"context_window": contextWindowData,
 				},

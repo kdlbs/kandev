@@ -214,8 +214,8 @@ type orchestratorAdapter struct {
 }
 
 // PromptTask forwards to the orchestrator service and converts the result type
-func (a *orchestratorAdapter) PromptTask(ctx context.Context, taskID, taskSessionID, prompt, model string) (*taskhandlers.PromptResult, error) {
-	result, err := a.svc.PromptTask(ctx, taskID, taskSessionID, prompt, model)
+func (a *orchestratorAdapter) PromptTask(ctx context.Context, taskID, taskSessionID, prompt, model string, planMode bool) (*taskhandlers.PromptResult, error) {
+	result, err := a.svc.PromptTask(ctx, taskID, taskSessionID, prompt, model, planMode)
 	if err != nil {
 		return nil, err
 	}

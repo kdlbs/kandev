@@ -47,7 +47,7 @@ func provideLifecycleManager(
 		credsMgr.AddProvider(credentials.NewFileProvider(credsFile))
 	}
 
-	profileResolver := lifecycle.NewStoreProfileResolver(agentSettingsRepo)
+	profileResolver := lifecycle.NewStoreProfileResolver(agentSettingsRepo, agentRegistry)
 
 	var agentRuntime lifecycle.Runtime
 	var containerMgr *lifecycle.ContainerManager
