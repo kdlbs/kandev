@@ -52,11 +52,10 @@ import (
 
 // Command-line flags
 var (
-	flagAgentRuntime = flag.String("agent-runtime", "", "Agent runtime mode: 'docker' or 'standalone'")
-	flagPort         = flag.Int("port", 0, "HTTP server port (default: 8080)")
-	flagLogLevel     = flag.String("log-level", "", "Log level: debug, info, warn, error")
-	flagHelp         = flag.Bool("help", false, "Show help message")
-	flagVersion      = flag.Bool("version", false, "Show version information")
+	flagPort     = flag.Int("port", 0, "HTTP server port (default: 8080)")
+	flagLogLevel = flag.String("log-level", "", "Log level: debug, info, warn, error")
+	flagHelp     = flag.Bool("help", false, "Show help message")
+	flagVersion  = flag.Bool("version", false, "Show version information")
 )
 
 func init() {
@@ -66,8 +65,7 @@ func init() {
 		fmt.Fprintf(os.Stderr, "Options:\n")
 		flag.PrintDefaults()
 		fmt.Fprintf(os.Stderr, "\nExamples:\n")
-		fmt.Fprintf(os.Stderr, "  kandev                              # Start with Docker runtime (default)\n")
-		fmt.Fprintf(os.Stderr, "  kandev -agent-runtime=standalone    # Start with standalone agentctl\n")
+		fmt.Fprintf(os.Stderr, "  kandev                              # Start with default settings\n")
 		fmt.Fprintf(os.Stderr, "  kandev -port=9000 -log-level=debug  # Custom port and log level\n")
 	}
 }
@@ -93,9 +91,6 @@ func main() {
 	}
 
 	// Apply command-line flag overrides (flags take precedence over config/env)
-	if *flagAgentRuntime != "" {
-		cfg.Agent.Runtime = *flagAgentRuntime
-	}
 	if *flagPort > 0 {
 		cfg.Server.Port = *flagPort
 	}

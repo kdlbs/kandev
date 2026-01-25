@@ -26,14 +26,38 @@ func provideLifecycleManager(
 	dockerClient *docker.Client,
 	agentSettingsRepo settingsstore.Repository,
 ) (*lifecycle.Manager, *registry.Registry, error) {
-	agentManagerEnabled := (cfg.Agent.Runtime == "docker" && dockerClient != nil) ||
-		cfg.Agent.Runtime == "standalone"
-	if !agentManagerEnabled {
-		log.Info("Agent Manager disabled (no Docker and not in standalone mode)")
-		return nil, nil, nil
-	}
+	log.Info("Initializing Agent Manager...")
 
-	log.Info("Initializing Agent Manager...", zap.String("runtime", cfg.Agent.Runtime))
+	// Create runtime registry to manage multiple runtimes
+	runtimeRegistry := lifecycle.NewRuntimeRegistry(log)
+
+	// Standalone runtime is always available (agentctl is a core service)
+	controlClient := agentctl.NewControlClient(
+		cfg.Agent.StandaloneHost,
+		cfg.Agent.StandalonePort,
+		log,
+	)
+	standaloneRuntime := lifecycle.NewStandaloneRuntime(
+		controlClient,
+		cfg.Agent.StandaloneHost,
+		cfg.Agent.StandalonePort,
+		log,
+	)
+	runtimeRegistry.Register(standaloneRuntime)
+	log.Info("Standalone runtime registered",
+		zap.String("host", cfg.Agent.StandaloneHost),
+		zap.Int("port", cfg.Agent.StandalonePort))
+
+	// Register Docker runtime if enabled and Docker client is available
+	var containerMgr *lifecycle.ContainerManager
+	if cfg.Docker.Enabled && dockerClient != nil {
+		containerMgr = lifecycle.NewContainerManager(dockerClient, "", log)
+		dockerRuntime := lifecycle.NewDockerRuntime(dockerClient, log)
+		runtimeRegistry.Register(dockerRuntime)
+		log.Info("Docker runtime registered")
+	} else if cfg.Docker.Enabled && dockerClient == nil {
+		log.Warn("Docker runtime enabled but Docker client not available")
+	}
 
 	agentRegistry, _, err := registry.Provide(log)
 	if err != nil {
@@ -48,41 +72,24 @@ func provideLifecycleManager(
 	}
 
 	profileResolver := lifecycle.NewStoreProfileResolver(agentSettingsRepo, agentRegistry)
-
-	var agentRuntime lifecycle.Runtime
-	var containerMgr *lifecycle.ContainerManager
-	switch cfg.Agent.Runtime {
-	case "standalone":
-		controlClient := agentctl.NewControlClient(
-			cfg.Agent.StandaloneHost,
-			cfg.Agent.StandalonePort,
-			log,
-		)
-		agentRuntime = lifecycle.NewStandaloneRuntime(
-			controlClient,
-			cfg.Agent.StandaloneHost,
-			cfg.Agent.StandalonePort,
-			log,
-		)
-		log.Info("Using standalone runtime",
-			zap.String("host", cfg.Agent.StandaloneHost),
-			zap.Int("port", cfg.Agent.StandalonePort))
-	default:
-		if dockerClient != nil {
-			containerMgr = lifecycle.NewContainerManager(dockerClient, "", log)
-			agentRuntime = lifecycle.NewDockerRuntime(dockerClient, log)
-			log.Info("Using Docker runtime")
-		}
-	}
-
 	mcpService := mcpconfig.NewService(agentSettingsRepo)
-	lifecycleMgr := lifecycle.NewManager(agentRegistry, eventBus, agentRuntime, containerMgr, credsMgr, profileResolver, mcpService, log)
+
+	lifecycleMgr := lifecycle.NewManager(
+		agentRegistry,
+		eventBus,
+		runtimeRegistry,
+		containerMgr,
+		credsMgr,
+		profileResolver,
+		mcpService,
+		log,
+	)
 	if err := lifecycleMgr.Start(ctx); err != nil {
 		return nil, nil, err
 	}
 
 	log.Info("Agent Manager initialized",
-		zap.String("runtime", cfg.Agent.Runtime),
+		zap.Int("runtimes", len(runtimeRegistry.List())),
 		zap.Int("agent_types", len(agentRegistry.List())))
 	return lifecycleMgr, agentRegistry, nil
 }

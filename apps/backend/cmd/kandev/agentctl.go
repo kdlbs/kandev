@@ -11,10 +11,10 @@ import (
 	"go.uber.org/zap"
 )
 
+// provideAgentctlLauncher starts the agentctl launcher for standalone runtime.
+// agentctl is a core service that always runs - it's used by the Standalone runtime
+// for agent execution on the host machine.
 func provideAgentctlLauncher(ctx context.Context, cfg *config.Config, log *logger.Logger) (func() error, error) {
-	if cfg.Agent.Runtime != "standalone" {
-		return nil, nil
-	}
 	_, cleanup, err := launcher.Provide(ctx, launcher.Config{
 		Host: cfg.Agent.StandaloneHost,
 		Port: cfg.Agent.StandalonePort,
@@ -25,10 +25,9 @@ func provideAgentctlLauncher(ctx context.Context, cfg *config.Config, log *logge
 	return cleanup, nil
 }
 
+// waitForAgentctlControlHealthy waits for the agentctl control server to be healthy.
+// This is called during startup to ensure agentctl is ready before accepting requests.
 func waitForAgentctlControlHealthy(ctx context.Context, cfg *config.Config, log *logger.Logger) {
-	if cfg.Agent.Runtime != "standalone" {
-		return
-	}
 	client := agentctlclient.NewControlClient(cfg.Agent.StandaloneHost, cfg.Agent.StandalonePort, log)
 	healthCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()

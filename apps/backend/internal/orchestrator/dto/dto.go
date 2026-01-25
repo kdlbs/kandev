@@ -43,6 +43,7 @@ type TriggerTaskResponse struct {
 type StartTaskRequest struct {
 	TaskID         string `json:"task_id"`
 	AgentProfileID string `json:"agent_profile_id,omitempty"`
+	ExecutorID     string `json:"executor_id,omitempty"` // Executor to use (determines runtime: local_pc, local_docker, etc.)
 	Priority       int    `json:"priority,omitempty"`
 	Prompt         string `json:"prompt,omitempty"` // Initial prompt to send to the agent
 }

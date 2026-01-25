@@ -84,6 +84,7 @@ func (h *Handlers) wsTriggerTask(ctx context.Context, msg *ws.Message) (*ws.Mess
 type wsStartTaskRequest struct {
 	TaskID         string `json:"task_id"`
 	AgentProfileID string `json:"agent_profile_id,omitempty"`
+	ExecutorID     string `json:"executor_id,omitempty"`
 	Priority       int    `json:"priority,omitempty"`
 	Prompt         string `json:"prompt,omitempty"`
 }
@@ -103,6 +104,7 @@ func (h *Handlers) wsStartTask(ctx context.Context, msg *ws.Message) (*ws.Messag
 	resp, err := h.controller.StartTask(ctx, dto.StartTaskRequest{
 		TaskID:         req.TaskID,
 		AgentProfileID: req.AgentProfileID,
+		ExecutorID:     req.ExecutorID,
 		Priority:       req.Priority,
 		Prompt:         req.Prompt,
 	})

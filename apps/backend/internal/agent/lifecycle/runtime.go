@@ -69,6 +69,9 @@ type RuntimeInstance struct {
 	TaskID     string
 	SessionID  string
 
+	// Runtime name (e.g., "docker", "standalone") - set by the runtime that created this instance
+	RuntimeName string
+
 	// Agentctl client for communicating with this instance
 	Client *agentctl.Client
 
@@ -107,6 +110,7 @@ func (ri *RuntimeInstance) ToAgentExecution(req *RuntimeCreateRequest) *AgentExe
 		ContainerID:          ri.ContainerID,
 		ContainerIP:          ri.ContainerIP,
 		WorkspacePath:        workspacePath,
+		RuntimeName:          ri.RuntimeName,
 		Status:               v1.AgentStatusRunning,
 		StartedAt:            time.Now(),
 		Metadata:             metadata,

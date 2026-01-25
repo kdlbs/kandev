@@ -129,6 +129,7 @@ func (r *StandaloneRuntime) CreateInstance(ctx context.Context, req *RuntimeCrea
 		InstanceID:           req.InstanceID,
 		TaskID:               req.TaskID,
 		SessionID:            req.SessionID,
+		RuntimeName:          string(r.Name()),
 		Client:               client,
 		StandaloneInstanceID: resp.ID,
 		StandalonePort:       resp.Port,

@@ -23,7 +23,7 @@ type TaskHandlers struct {
 }
 
 type OrchestratorStarter interface {
-	StartTask(ctx context.Context, taskID string, agentProfileID string, priority int, prompt string) (*executor.TaskExecution, error)
+	StartTask(ctx context.Context, taskID string, agentProfileID string, executorID string, priority int, prompt string) (*executor.TaskExecution, error)
 }
 
 func NewTaskHandlers(ctrl *controller.TaskController, orchestrator OrchestratorStarter, log *logger.Logger) *TaskHandlers {
@@ -129,6 +129,7 @@ type httpCreateTaskRequest struct {
 	Metadata       map[string]interface{}    `json:"metadata,omitempty"`
 	StartAgent     bool                      `json:"start_agent,omitempty"`
 	AgentProfileID string                    `json:"agent_profile_id,omitempty"`
+	ExecutorID     string                    `json:"executor_id,omitempty"`
 }
 
 type createTaskResponse struct {
@@ -191,12 +192,13 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		// Launch agent asynchronously so the HTTP request can return immediately.
 		// The frontend will receive WebSocket updates when the agent actually starts.
 		// This allows the "new task" dialog to close right away while setup scripts run.
+		executorID := body.ExecutorID // Capture for goroutine
 		go func() {
 			// Use a longer timeout to accommodate setup scripts (which can take minutes for npm install, etc.)
 			startCtx, cancel := context.WithTimeout(context.Background(), constants.AgentLaunchTimeout)
 			defer cancel()
 			// Use task description as the initial prompt
-			execution, err := h.orchestrator.StartTask(startCtx, resp.ID, body.AgentProfileID, body.Priority, resp.Description)
+			execution, err := h.orchestrator.StartTask(startCtx, resp.ID, body.AgentProfileID, executorID, body.Priority, resp.Description)
 			if err != nil {
 				h.logger.Error("failed to start agent for task (async)", zap.Error(err), zap.String("task_id", resp.ID))
 				return
@@ -204,6 +206,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 			h.logger.Info("agent started for task (async)",
 				zap.String("task_id", resp.ID),
 				zap.String("session_id", execution.SessionID),
+				zap.String("executor_id", executorID),
 				zap.String("execution_id", execution.AgentExecutionID))
 		}()
 	}
@@ -356,6 +359,7 @@ type wsCreateTaskRequest struct {
 	Metadata       map[string]interface{}    `json:"metadata,omitempty"`
 	StartAgent     bool                      `json:"start_agent,omitempty"`
 	AgentProfileID string                    `json:"agent_profile_id,omitempty"`
+	ExecutorID     string                    `json:"executor_id,omitempty"`
 }
 
 func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -414,11 +418,15 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	response := createTaskResponse{TaskDTO: resp}
 	if req.StartAgent && req.AgentProfileID != "" && h.orchestrator != nil {
 		// Use task description as the initial prompt
-		execution, err := h.orchestrator.StartTask(ctx, resp.ID, req.AgentProfileID, req.Priority, resp.Description)
+		execution, err := h.orchestrator.StartTask(ctx, resp.ID, req.AgentProfileID, req.ExecutorID, req.Priority, resp.Description)
 		if err != nil {
 			h.logger.Error("failed to start agent for task", zap.Error(err))
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to start agent for task", nil)
 		}
+		h.logger.Info("wsCreateTask started agent",
+			zap.String("task_id", resp.ID),
+			zap.String("executor_id", req.ExecutorID),
+			zap.String("session_id", execution.SessionID))
 		response.TaskSessionID = execution.SessionID
 		response.AgentExecutionID = execution.AgentExecutionID
 	}

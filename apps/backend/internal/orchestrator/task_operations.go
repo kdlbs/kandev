@@ -42,10 +42,11 @@ func (s *Service) EnqueueTask(ctx context.Context, task *v1.Task) error {
 }
 
 // StartTask manually starts agent execution for a task
-func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID string, priority int, prompt string) (*executor.TaskExecution, error) {
+func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID string, executorID string, priority int, prompt string) (*executor.TaskExecution, error) {
 	s.logger.Debug("manually starting task",
 		zap.String("task_id", taskID),
 		zap.String("agent_profile_id", agentProfileID),
+		zap.String("executor_id", executorID),
 		zap.Int("priority", priority),
 		zap.Int("prompt_length", len(prompt)))
 
@@ -75,7 +76,7 @@ func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID s
 		effectivePrompt = task.Description
 	}
 
-	execution, err := s.executor.ExecuteWithProfile(ctx, task, agentProfileID, effectivePrompt)
+	execution, err := s.executor.ExecuteWithProfile(ctx, task, agentProfileID, executorID, effectivePrompt)
 	if err != nil {
 		return nil, err
 	}

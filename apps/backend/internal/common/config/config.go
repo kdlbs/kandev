@@ -53,6 +53,10 @@ type NATSConfig struct {
 
 // DockerConfig holds Docker client configuration.
 type DockerConfig struct {
+	// Enabled controls whether the Docker runtime is available for task execution.
+	// When true and Docker is accessible, tasks can use Docker-based executors.
+	// Default: true (Docker runtime is enabled if Docker is available)
+	Enabled        bool   `mapstructure:"enabled"`
 	Host           string `mapstructure:"host"`
 	APIVersion     string `mapstructure:"apiVersion"`
 	TLSVerify      bool   `mapstructure:"tlsVerify"`
@@ -89,19 +93,17 @@ type WorktreeConfig struct {
 }
 
 // AgentConfig holds agent runtime configuration.
+// Note: Runtime selection is now per-task based on executor type, not global.
+// The Standalone runtime (agentctl) always runs as a core service.
+// Docker runtime is available when docker.enabled=true.
 type AgentConfig struct {
-	// Runtime specifies the agent runtime mode: "docker" or "standalone"
-	// - "standalone": Agents run via standalone agentctl on the host machine (default)
-	// - "docker": Agents run in Docker containers
-	Runtime string `mapstructure:"runtime"`
-
 	// StandaloneHost is the host where standalone agentctl is running (default: localhost)
 	StandaloneHost string `mapstructure:"standaloneHost"`
 
 	// StandalonePort is the control port for standalone agentctl (default: 9999)
 	StandalonePort int `mapstructure:"standalonePort"`
 
-	// McpServerEnabled enables the embedded MCP server (default: true in standalone mode)
+	// McpServerEnabled enables the embedded MCP server (default: true)
 	McpServerEnabled bool `mapstructure:"mcpServerEnabled"`
 
 	// McpServerPort is the port for the embedded MCP server (default: 9090)
@@ -153,14 +155,14 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("nats.maxReconnects", 10)
 
 	// Docker defaults
+	v.SetDefault("docker.enabled", true) // Docker runtime enabled by default if Docker is available
 	v.SetDefault("docker.host", "unix:///var/run/docker.sock")
 	v.SetDefault("docker.apiVersion", "1.41")
 	v.SetDefault("docker.tlsVerify", false)
 	v.SetDefault("docker.defaultNetwork", "kandev-network")
 	v.SetDefault("docker.volumeBasePath", "/var/lib/kandev/volumes")
 
-	// Agent defaults
-	v.SetDefault("agent.runtime", "standalone")
+	// Agent defaults (runtime selection is now per-task based on executor type)
 	v.SetDefault("agent.standaloneHost", "localhost")
 	v.SetDefault("agent.standalonePort", 9999)
 	v.SetDefault("agent.mcpServerEnabled", true)

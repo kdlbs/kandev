@@ -576,11 +576,13 @@ export function TaskCreateDialog({
         state: targetState,
         start_agent: Boolean(startAgent && !isEditMode && agentProfileId),
         agent_profile_id: startAgent ? agentProfileId || undefined : undefined,
+        executor_id: startAgent ? executorId || undefined : undefined,
       });
       console.log('[TaskCreateDialog] task created', {
         taskId: taskResponse.id,
         startAgent,
         agentProfileId,
+        executorId,
       });
       onSuccess?.(taskResponse, 'create', {
         taskSessionId: taskResponse.session_id ?? null,
