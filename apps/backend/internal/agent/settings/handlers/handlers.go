@@ -46,6 +46,7 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api.PATCH("/agents/:id", h.httpUpdateAgent)
 	api.DELETE("/agents/:id", h.httpDeleteAgent)
 	api.POST("/agents/:id/profiles", h.httpCreateProfile)
+	api.GET("/agent-models/:agentName", h.httpGetAgentModels)
 	api.POST("/agent-command-preview/:agentName", h.httpPreviewAgentCommand)
 	api.PATCH("/agent-profiles/:id", h.httpUpdateProfile)
 	api.DELETE("/agent-profiles/:id", h.httpDeleteProfile)
@@ -420,6 +421,30 @@ func (h *Handlers) httpPreviewAgentCommand(c *gin.Context) {
 	})
 	if err != nil {
 		h.logger.Error("failed to preview agent command", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, resp)
+}
+
+func (h *Handlers) httpGetAgentModels(c *gin.Context) {
+	agentName := c.Param("agentName")
+	if agentName == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "agent name is required"})
+		return
+	}
+
+	// Check for refresh query parameter
+	refresh := c.Query("refresh") == "true"
+
+	resp, err := h.controller.FetchDynamicModels(c.Request.Context(), agentName, refresh)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			c.JSON(http.StatusNotFound, gin.H{"error": "agent not found"})
+			return
+		}
+		h.logger.Error("failed to fetch agent models", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

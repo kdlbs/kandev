@@ -168,8 +168,10 @@ type ResourceLimits struct {
 
 // ModelConfig defines the model configuration for an agent
 type ModelConfig struct {
-	DefaultModel    string       `json:"default_model"`
-	AvailableModels []ModelEntry `json:"available_models"`
+	DefaultModel           string       `json:"default_model"`
+	AvailableModels        []ModelEntry `json:"available_models"`
+	DynamicModelsCmd       []string     `json:"dynamic_models_cmd,omitempty"`
+	DynamicModelsTimeoutMs int          `json:"dynamic_models_timeout_ms,omitempty"`
 }
 
 // ModelEntry defines a single model available for an agent
@@ -179,6 +181,7 @@ type ModelEntry struct {
 	Provider      string `json:"provider"`
 	ContextWindow int    `json:"context_window"`
 	IsDefault     bool   `json:"is_default"`
+	Source        string `json:"source,omitempty"` // "static" or "dynamic"
 }
 
 // OSPaths defines OS-specific paths for discovery

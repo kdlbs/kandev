@@ -33,7 +33,7 @@ export function useAgentProfileSettings(
   }, [availableAgents, agent?.name]);
 
   const modelConfig = useMemo(() => {
-    return availableAgent?.model_config ?? { default_model: '', available_models: [] };
+    return availableAgent?.model_config ?? { default_model: '', available_models: [], supports_dynamic_models: false };
   }, [availableAgent]);
 
   const permissionSettings = useMemo(() => {

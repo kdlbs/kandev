@@ -9,23 +9,18 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
-// mockAgentRegistry implements the agent registry interface for testing
-type mockAgentRegistry struct {
-	agents map[string]*registry.AgentTypeConfig
-}
-
-func (m *mockAgentRegistry) Get(id string) (*registry.AgentTypeConfig, bool) {
-	agent, ok := m.agents[id]
-	return agent, ok
-}
-
 func newTestController(agents map[string]*registry.AgentTypeConfig) *Controller {
 	log, _ := logger.NewLogger(logger.LoggingConfig{
 		Level:  "error",
 		Format: "json",
 	})
+	// Create a real registry and register the agents
+	reg := registry.NewRegistry(log)
+	for _, agent := range agents {
+		_ = reg.Register(agent)
+	}
 	return &Controller{
-		agentRegistry: &mockAgentRegistry{agents: agents},
+		agentRegistry: reg,
 		logger:        log,
 	}
 }
@@ -33,9 +28,15 @@ func newTestController(agents map[string]*registry.AgentTypeConfig) *Controller 
 func TestController_PreviewAgentCommand_StandardCommand(t *testing.T) {
 	agents := map[string]*registry.AgentTypeConfig{
 		"test-agent": {
+			ID:        "test-agent",
 			Name:      "test-agent",
 			Cmd:       []string{"test-cli", "--verbose"},
 			ModelFlag: "--model {model}",
+			ResourceLimits: registry.ResourceLimits{
+				MemoryMB:       1024,
+				CPUCores:       1.0,
+				TimeoutSeconds: 3600,
+			},
 			PermissionSettings: map[string]registry.PermissionSetting{
 				"auto_approve": {
 					Supported:   true,
@@ -85,9 +86,15 @@ func TestController_PreviewAgentCommand_StandardCommand(t *testing.T) {
 func TestController_PreviewAgentCommand_PassthroughCommand(t *testing.T) {
 	agents := map[string]*registry.AgentTypeConfig{
 		"claude-code": {
+			ID:        "claude-code",
 			Name:      "claude-code",
 			Cmd:       []string{"claude"},
 			ModelFlag: "--model {model}",
+			ResourceLimits: registry.ResourceLimits{
+				MemoryMB:       1024,
+				CPUCores:       1.0,
+				TimeoutSeconds: 3600,
+			},
 			PassthroughConfig: registry.PassthroughConfig{
 				Supported:      true,
 				PassthroughCmd: []string{"npx", "-y", "@anthropic-ai/claude-code"},
@@ -171,8 +178,14 @@ func TestController_PreviewAgentCommand_AgentNotFound(t *testing.T) {
 func TestController_PreviewAgentCommand_PassthroughDisabled(t *testing.T) {
 	agents := map[string]*registry.AgentTypeConfig{
 		"test-agent": {
+			ID:   "test-agent",
 			Name: "test-agent",
 			Cmd:  []string{"test-cli"},
+			ResourceLimits: registry.ResourceLimits{
+				MemoryMB:       1024,
+				CPUCores:       1.0,
+				TimeoutSeconds: 3600,
+			},
 			PassthroughConfig: registry.PassthroughConfig{
 				Supported:      true,
 				PassthroughCmd: []string{"passthrough-cli"},

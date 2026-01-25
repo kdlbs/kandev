@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
+	"github.com/kandev/kandev/internal/agent/settings/modelfetcher"
 	"github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -29,13 +30,12 @@ var (
 const defaultAgentProfileName = "default"
 
 type Controller struct {
-	repo          store.Repository
-	discovery     *discovery.Registry
-	agentRegistry interface {
-		Get(id string) (*registry.AgentTypeConfig, bool)
-	}
+	repo           store.Repository
+	discovery      *discovery.Registry
+	agentRegistry  *registry.Registry
 	sessionChecker SessionChecker
 	mcpService     *mcpconfig.Service
+	modelFetcher   *modelfetcher.Fetcher
 	logger         *logger.Logger
 }
 
@@ -43,9 +43,7 @@ type SessionChecker interface {
 	HasActiveTaskSessionsByAgentProfile(ctx context.Context, agentProfileID string) (bool, error)
 }
 
-func NewController(repo store.Repository, discoveryRegistry *discovery.Registry, agentRegistry interface {
-	Get(id string) (*registry.AgentTypeConfig, bool)
-}, sessionChecker SessionChecker, log *logger.Logger,
+func NewController(repo store.Repository, discoveryRegistry *discovery.Registry, agentRegistry *registry.Registry, sessionChecker SessionChecker, log *logger.Logger,
 ) *Controller {
 	return &Controller{
 		repo:           repo,
@@ -53,6 +51,7 @@ func NewController(repo store.Repository, discoveryRegistry *discovery.Registry,
 		agentRegistry:  agentRegistry,
 		sessionChecker: sessionChecker,
 		mcpService:     mcpconfig.NewService(repo),
+		modelFetcher:   modelfetcher.NewFetcher(agentRegistry, log),
 		logger:         log.WithFields(zap.String("component", "agent-settings-controller")),
 	}
 }
@@ -156,8 +155,9 @@ func (c *Controller) ListAvailableAgents(ctx context.Context) (*dto.ListAvailabl
 				SupportsWorkspaceOnly: def.Capabilities.SupportsWorkspaceOnly,
 			},
 			ModelConfig: dto.ModelConfigDTO{
-				DefaultModel:    def.ModelConfig.DefaultModel,
-				AvailableModels: modelEntries,
+				DefaultModel:          def.ModelConfig.DefaultModel,
+				AvailableModels:       modelEntries,
+				SupportsDynamicModels: len(def.ModelConfig.DynamicModelsCmd) > 0,
 			},
 			PermissionSettings: permissionSettings,
 			PassthroughConfig:  passthroughConfig,
@@ -776,4 +776,40 @@ func (c *Controller) buildCommandString(cmd []string) string {
 		}
 	}
 	return strings.Join(parts, " ")
+}
+
+// FetchDynamicModels fetches models for an agent, optionally refreshing the cache
+func (c *Controller) FetchDynamicModels(ctx context.Context, agentName string, refresh bool) (*dto.DynamicModelsResponse, error) {
+	result, err := c.modelFetcher.Fetch(ctx, agentName, refresh)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert to DTOs
+	modelDTOs := make([]dto.ModelEntryDTO, 0, len(result.Models))
+	for _, m := range result.Models {
+		modelDTOs = append(modelDTOs, dto.ModelEntryDTO{
+			ID:            m.ID,
+			Name:          m.Name,
+			Provider:      m.Provider,
+			ContextWindow: m.ContextWindow,
+			IsDefault:     m.IsDefault,
+			Source:        m.Source,
+		})
+	}
+
+	// Convert error to string pointer
+	var errStr *string
+	if result.Error != nil {
+		s := result.Error.Error()
+		errStr = &s
+	}
+
+	return &dto.DynamicModelsResponse{
+		AgentName: result.AgentName,
+		Models:    modelDTOs,
+		Cached:    result.Cached,
+		CachedAt:  result.CachedAt,
+		Error:     errStr,
+	}, nil
 }
