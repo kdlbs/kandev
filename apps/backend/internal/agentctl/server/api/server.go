@@ -67,16 +67,14 @@ func (s *Server) setupRoutes() {
 		api.POST("/start", s.handleStart)
 		api.POST("/stop", s.handleStop)
 
-		// ACP high-level methods (using acp-go-sdk)
-		api.POST("/acp/initialize", s.handleACPInitialize)
-		api.POST("/acp/session/new", s.handleACPNewSession)
-		api.POST("/acp/session/load", s.handleACPLoadSession)
-		api.POST("/acp/prompt", s.handleACPPrompt)
-		api.POST("/acp/cancel", s.handleACPCancel)
-		api.GET("/acp/stream", s.handleACPStreamWS)
-
-		// Permission request handling
-		api.POST("/acp/permissions/respond", s.handlePermissionRespond)
+		// Agent session/prompt methods (works with all adapters: ACP, Codex, ClaudeCode, OpenCode)
+		api.POST("/agent/initialize", s.handleAgentInitialize)
+		api.POST("/agent/session/new", s.handleAgentNewSession)
+		api.POST("/agent/session/load", s.handleAgentLoadSession)
+		api.POST("/agent/prompt", s.handleAgentPrompt)
+		api.POST("/agent/cancel", s.handleAgentCancel)
+		api.GET("/agent/stream", s.handleAgentStreamWS)
+		api.POST("/agent/permissions/respond", s.handlePermissionRespond)
 
 		// Unified workspace stream (git status, files, shell)
 		api.GET("/workspace/stream", s.handleWorkspaceStreamWS)

@@ -18,4 +18,9 @@ const (
 	// TaskDeleteTimeout is the maximum time to wait for task deletion,
 	// including cleanup scripts and worktree removal.
 	TaskDeleteTimeout = 2 * time.Minute
+
+	// PromptTimeout is the maximum time to wait for an agent to complete a prompt.
+	// Agent tasks can take a long time (complex code generation, large refactors),
+	// so this is set to a generous value.
+	PromptTimeout = 60 * time.Minute
 )

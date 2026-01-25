@@ -6,12 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/coder/acp-go-sdk"
 	"github.com/gorilla/websocket"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/common/constants"
 	"go.uber.org/zap"
 )
 
@@ -52,7 +52,7 @@ func (c *Client) Initialize(ctx context.Context, clientName, clientVersion strin
 		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/v1/acp/initialize", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/v1/agent/initialize", bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -106,7 +106,7 @@ func (c *Client) NewSession(ctx context.Context, cwd string, mcpServers []types.
 		return "", err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/v1/acp/session/new", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/v1/agent/session/new", bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
@@ -152,7 +152,7 @@ func (c *Client) LoadSession(ctx context.Context, sessionID string) error {
 		return err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/v1/acp/session/load", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/v1/agent/session/load", bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -211,10 +211,10 @@ func (c *Client) Prompt(ctx context.Context, text string) (*PromptResponse, erro
 
 	// Use a longer timeout for prompt - agent may take time
 	client := &http.Client{
-		Timeout: 10 * time.Minute,
+		Timeout: constants.PromptTimeout,
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/v1/acp/prompt", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/v1/agent/prompt", bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -255,7 +255,7 @@ func (c *Client) Prompt(ctx context.Context, text string) (*PromptResponse, erro
 // StreamUpdates opens a WebSocket connection for streaming agent events.
 // Events include message chunks, reasoning, tool calls, plan updates, and completion/error.
 func (c *Client) StreamUpdates(ctx context.Context, handler func(AgentEvent)) error {
-	wsURL := "ws" + c.baseURL[4:] + "/api/v1/acp/stream"
+	wsURL := "ws" + c.baseURL[4:] + "/api/v1/agent/stream"
 
 	conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, nil)
 	if err != nil {
@@ -324,7 +324,7 @@ type CancelResponse struct {
 
 // Cancel interrupts the current agent turn.
 func (c *Client) Cancel(ctx context.Context) error {
-	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/v1/acp/cancel", nil)
+	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/v1/agent/cancel", nil)
 	if err != nil {
 		return err
 	}
@@ -371,7 +371,7 @@ func (c *Client) RespondToPermission(ctx context.Context, pendingID, optionID st
 		return err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/v1/acp/permissions/respond", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/v1/agent/permissions/respond", bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
