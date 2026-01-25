@@ -245,11 +245,14 @@ func (wt *WorkspaceTracker) checkGitChanges(ctx context.Context) {
 	wt.cachedHeadSHA = currentHead
 	wt.gitStateMu.Unlock()
 
-	// Check if HEAD moved backward (reset, rebase, etc.)
-	// This happens when currentHead is an ancestor of previousHead
+	// Check if history was rewritten (reset, rebase, amend, etc.)
+	// There are three cases:
+	// 1. HEAD moved backward: currentHead is an ancestor of previousHead (e.g., git reset HEAD~1)
+	// 2. History rewritten: previousHead is NOT reachable from currentHead (e.g., git rebase -i, git commit --amend)
+	// 3. HEAD moved forward: previousHead IS an ancestor of currentHead (normal commits)
 	if previousHead != "" {
 		if wt.isAncestor(ctx, currentHead, previousHead) {
-			// HEAD moved backward - emit reset notification
+			// Case 1: HEAD moved backward - emit reset notification
 			wt.logger.Info("detected git reset (HEAD moved backward)",
 				zap.String("previous", previousHead),
 				zap.String("current", currentHead))
@@ -258,8 +261,19 @@ func (wt *WorkspaceTracker) checkGitChanges(ctx context.Context) {
 				PreviousHead: previousHead,
 				CurrentHead:  currentHead,
 			})
+		} else if !wt.isAncestor(ctx, previousHead, currentHead) {
+			// Case 2: History was rewritten - previousHead is not reachable from currentHead
+			// This happens with interactive rebase, commit amend, etc.
+			wt.logger.Info("detected git history rewrite (previous HEAD not reachable)",
+				zap.String("previous", previousHead),
+				zap.String("current", currentHead))
+			wt.notifyWorkspaceStreamGitReset(&types.GitResetNotification{
+				Timestamp:    time.Now(),
+				PreviousHead: previousHead,
+				CurrentHead:  currentHead,
+			})
 		} else {
-			// HEAD moved forward - get new commits
+			// Case 3: HEAD moved forward normally - get new commits
 			commits := wt.getCommitsSince(ctx, previousHead)
 
 			// Filter out commits that are already on remote branches.

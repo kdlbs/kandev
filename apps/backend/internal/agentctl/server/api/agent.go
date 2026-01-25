@@ -9,10 +9,11 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/common/constants"
 	"go.uber.org/zap"
 )
 
-// InitializeRequest is a request to initialize the ACP session
+// InitializeRequest is a request to initialize the agent session.
 type InitializeRequest struct {
 	ClientName    string `json:"client_name"`
 	ClientVersion string `json:"client_version"`
@@ -31,7 +32,7 @@ type InitializeResponse struct {
 	Error     string             `json:"error,omitempty"`
 }
 
-func (s *Server) handleACPInitialize(c *gin.Context) {
+func (s *Server) handleAgentInitialize(c *gin.Context) {
 	var req InitializeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, InitializeResponse{
@@ -91,7 +92,7 @@ type NewSessionResponse struct {
 	Error     string `json:"error,omitempty"`
 }
 
-func (s *Server) handleACPNewSession(c *gin.Context) {
+func (s *Server) handleAgentNewSession(c *gin.Context) {
 	var req NewSessionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, NewSessionResponse{
@@ -142,7 +143,7 @@ type LoadSessionResponse struct {
 	Error     string `json:"error,omitempty"`
 }
 
-func (s *Server) handleACPLoadSession(c *gin.Context) {
+func (s *Server) handleAgentLoadSession(c *gin.Context) {
 	var req LoadSessionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, LoadSessionResponse{
@@ -198,7 +199,7 @@ type PromptResponse struct {
 	Error      string `json:"error,omitempty"`
 }
 
-func (s *Server) handleACPPrompt(c *gin.Context) {
+func (s *Server) handleAgentPrompt(c *gin.Context) {
 	var req PromptRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, PromptResponse{
@@ -227,7 +228,7 @@ func (s *Server) handleACPPrompt(c *gin.Context) {
 	}
 
 	// Use a long timeout for prompt - agent may take time to complete
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Minute)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), constants.PromptTimeout)
 	defer cancel()
 
 	err := adapter.Prompt(ctx, req.Text)
@@ -247,8 +248,8 @@ func (s *Server) handleACPPrompt(c *gin.Context) {
 	})
 }
 
-// handleACPStreamWS streams ACP session notifications via WebSocket
-func (s *Server) handleACPStreamWS(c *gin.Context) {
+// handleAgentStreamWS streams agent session notifications via WebSocket.
+func (s *Server) handleAgentStreamWS(c *gin.Context) {
 	conn, err := s.upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		s.logger.Error("WebSocket upgrade failed", zap.Error(err))
@@ -260,7 +261,7 @@ func (s *Server) handleACPStreamWS(c *gin.Context) {
 		}
 	}()
 
-	s.logger.Info("ACP stream WebSocket connected")
+	s.logger.Info("agent stream WebSocket connected")
 
 	// Get the session updates channel
 	updatesCh := s.procMgr.GetUpdates()
@@ -326,8 +327,8 @@ type CancelResponse struct {
 	Error   string `json:"error,omitempty"`
 }
 
-// handleACPCancel interrupts the current agent turn.
-func (s *Server) handleACPCancel(c *gin.Context) {
+// handleAgentCancel interrupts the current agent turn.
+func (s *Server) handleAgentCancel(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
 	defer cancel()
 

@@ -208,9 +208,36 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 						}
 					}
 				}
-				h.logger.Warn("failed to forward message as prompt to agent",
-					zap.String("task_id", taskID),
-					zap.Error(err))
+				// If prompt still failed after retries, create an error message for the user
+				if err != nil {
+					h.logger.Warn("failed to forward message as prompt to agent",
+						zap.String("task_id", taskID),
+						zap.Error(err))
+
+					// Create an error message so the user sees feedback
+					errorMsg := "Failed to send message to agent"
+					if strings.Contains(err.Error(), "context deadline exceeded") || strings.Contains(err.Error(), "timeout") {
+						errorMsg = "Request timed out. The agent may be processing a complex task. Please try again."
+					} else if errors.Is(err, executor.ErrExecutionNotFound) {
+						errorMsg = "Agent is not running. Please restart the session."
+					}
+
+					if _, createErr := h.messageController.CreateMessage(promptCtx, dto.CreateMessageRequest{
+						TaskSessionID: sessionID,
+						TaskID:        taskID,
+						Content:       errorMsg,
+						AuthorType:    "agent",
+						Type:          string(v1.MessageTypeError),
+						Metadata: map[string]interface{}{
+							"error": err.Error(),
+						},
+					}); createErr != nil {
+						h.logger.Error("failed to create error message for prompt failure",
+							zap.String("task_id", taskID),
+							zap.String("session_id", sessionID),
+							zap.Error(createErr))
+					}
+				}
 			}
 		}()
 	}
