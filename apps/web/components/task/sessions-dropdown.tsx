@@ -164,6 +164,7 @@ export function SessionsDropdown({
         {
           task_id: taskId,
           agent_profile_id: data.agentProfileId,
+          executor_id: data.executorId,
           prompt: data.prompt.trim(),
         },
         15000

@@ -111,13 +111,17 @@ func (r *StandaloneRuntime) CreateInstance(ctx context.Context, req *RuntimeCrea
 	// Create agentctl client pointing to the instance port
 	client := agentctl.NewClient(r.host, resp.Port, r.logger)
 
+	// Extract runtime-specific values from metadata
+	worktreeID := getMetadataString(req.Metadata, MetadataKeyWorktreeID)
+	worktreeBranch := getMetadataString(req.Metadata, MetadataKeyWorktreeBranch)
+
 	// Build metadata
 	metadata := make(map[string]interface{})
 	metadata["standalone_port"] = resp.Port
-	if req.WorktreeID != "" {
-		metadata["worktree_id"] = req.WorktreeID
+	if worktreeID != "" {
+		metadata["worktree_id"] = worktreeID
 		metadata["worktree_path"] = req.WorkspacePath
-		metadata["worktree_branch"] = req.WorktreeBranch
+		metadata["worktree_branch"] = worktreeBranch
 	}
 
 	r.logger.Info("standalone instance created",
@@ -129,6 +133,7 @@ func (r *StandaloneRuntime) CreateInstance(ctx context.Context, req *RuntimeCrea
 		InstanceID:           req.InstanceID,
 		TaskID:               req.TaskID,
 		SessionID:            req.SessionID,
+		RuntimeName:          string(r.Name()),
 		Client:               client,
 		StandaloneInstanceID: resp.ID,
 		StandalonePort:       resp.Port,

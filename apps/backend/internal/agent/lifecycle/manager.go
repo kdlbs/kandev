@@ -17,7 +17,6 @@ import (
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/runtime"
-	"github.com/kandev/kandev/internal/worktree"
 	agentctl "github.com/kandev/kandev/internal/agentctl/client"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -25,7 +24,21 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+)
+
+// RuntimeFallbackPolicy controls behavior when a requested runtime is unavailable.
+type RuntimeFallbackPolicy string
+
+const (
+	// RuntimeFallbackAllow silently falls back to the default runtime (current behavior).
+	RuntimeFallbackAllow RuntimeFallbackPolicy = "allow"
+	// RuntimeFallbackWarn falls back but logs a warning (current behavior, explicit).
+	RuntimeFallbackWarn RuntimeFallbackPolicy = "warn"
+	// RuntimeFallbackDeny returns an error if the requested runtime is unavailable.
+	RuntimeFallbackDeny RuntimeFallbackPolicy = "deny"
 )
 
 // Manager manages agent instance lifecycles
@@ -38,17 +51,21 @@ type Manager struct {
 	mcpProvider     McpConfigProvider
 	logger          *logger.Logger
 
-	// Agent runtime abstraction (Docker, Standalone, K8s, SSH, etc.)
-	runtime Runtime
+	// RuntimeRegistry manages multiple runtimes (Docker, Standalone, etc.)
+	// Each task can select its runtime based on executor type.
+	runtimeRegistry *RuntimeRegistry
+
+	// runtimeFallbackPolicy controls behavior when a requested runtime is unavailable.
+	runtimeFallbackPolicy RuntimeFallbackPolicy
 
 	// Refactored components for separation of concerns
-	executionStore   *ExecutionStore          // Thread-safe execution tracking
-	commandBuilder   *CommandBuilder          // Builds agent commands from registry config
-	sessionManager   *SessionManager          // Handles ACP session initialization
-	streamManager    *StreamManager           // Manages WebSocket streams
-	eventPublisher   *EventPublisher          // Publishes lifecycle events
-	containerManager *ContainerManager        // Manages Docker containers (optional, nil for non-Docker runtimes)
-	historyManager   *SessionHistoryManager   // Stores session history for context injection (fork_session pattern)
+	executionStore   *ExecutionStore        // Thread-safe execution tracking
+	commandBuilder   *CommandBuilder        // Builds agent commands from registry config
+	sessionManager   *SessionManager        // Handles ACP session initialization
+	streamManager    *StreamManager         // Manages WebSocket streams
+	eventPublisher   *EventPublisher        // Publishes lifecycle events
+	containerManager *ContainerManager      // Manages Docker containers (optional, nil for non-Docker runtimes)
+	historyManager   *SessionHistoryManager // Stores session history for context injection (fork_session pattern)
 
 	// Workspace info provider for on-demand instance creation
 	workspaceInfoProvider WorkspaceInfoProvider
@@ -60,16 +77,18 @@ type Manager struct {
 }
 
 // NewManager creates a new lifecycle manager.
-// The runtime parameter is the agent execution runtime (Docker, Standalone, etc.).
+// The runtimeRegistry manages multiple runtimes (Docker, Standalone, etc.) for task-specific execution.
 // The containerManager parameter is optional and used for Docker cleanup (pass nil for non-Docker runtimes).
+// The fallbackPolicy controls behavior when a requested runtime is unavailable.
 func NewManager(
 	reg *registry.Registry,
 	eventBus bus.EventBus,
-	runtime Runtime,
+	runtimeRegistry *RuntimeRegistry,
 	containerManager *ContainerManager,
 	credsMgr CredentialsManager,
 	profileResolver ProfileResolver,
 	mcpProvider McpConfigProvider,
+	fallbackPolicy RuntimeFallbackPolicy,
 	log *logger.Logger,
 ) *Manager {
 	componentLogger := log.WithFields(zap.String("component", "lifecycle-manager"))
@@ -96,21 +115,22 @@ func NewManager(
 	}
 
 	mgr := &Manager{
-		registry:         reg,
-		eventBus:         eventBus,
-		runtime:          runtime,
-		credsMgr:         credsMgr,
-		profileResolver:  profileResolver,
-		mcpProvider:      mcpProvider,
-		logger:           componentLogger,
-		executionStore:   executionStore,
-		commandBuilder:   commandBuilder,
-		sessionManager:   sessionManager,
-		eventPublisher:   eventPublisher,
-		containerManager: containerManager,
-		historyManager:   historyManager,
-		cleanupInterval:  30 * time.Second,
-		stopCh:           stopCh,
+		registry:              reg,
+		eventBus:              eventBus,
+		runtimeRegistry:       runtimeRegistry,
+		runtimeFallbackPolicy: fallbackPolicy,
+		credsMgr:              credsMgr,
+		profileResolver:       profileResolver,
+		mcpProvider:           mcpProvider,
+		logger:                componentLogger,
+		executionStore:        executionStore,
+		commandBuilder:        commandBuilder,
+		sessionManager:        sessionManager,
+		eventPublisher:        eventPublisher,
+		containerManager:      containerManager,
+		historyManager:        historyManager,
+		cleanupInterval:       30 * time.Second,
+		stopCh:                stopCh,
 	}
 
 	// Initialize stream manager with callbacks that delegate to manager methods
@@ -129,8 +149,8 @@ func NewManager(
 	// Set session manager dependencies for full orchestration
 	sessionManager.SetDependencies(eventPublisher, mgr.streamManager, executionStore, historyManager)
 
-	if runtime != nil {
-		mgr.logger.Info("initialized with runtime", zap.String("runtime", string(runtime.Name())))
+	if runtimeRegistry != nil {
+		mgr.logger.Info("initialized with runtimes", zap.Int("count", len(runtimeRegistry.List())))
 	}
 
 	return mgr
@@ -163,6 +183,54 @@ func (m *Manager) SetWorktreeManager(worktreeMgr *worktree.Manager) {
 // Without this, EnsureWorkspaceExecutionForSession will fail.
 func (m *Manager) SetWorkspaceInfoProvider(provider WorkspaceInfoProvider) {
 	m.workspaceInfoProvider = provider
+}
+
+// getRuntimeForExecutorType returns the appropriate runtime for the given executor type.
+// If the executor type is empty or the runtime is not available, behavior depends on runtimeFallbackPolicy.
+func (m *Manager) getRuntimeForExecutorType(executorType string) (Runtime, error) {
+	if m.runtimeRegistry == nil {
+		return nil, fmt.Errorf("no runtime registry configured")
+	}
+
+	if executorType != "" {
+		runtimeName := runtime.ExecutorTypeToRuntime(models.ExecutorType(executorType))
+		rt, err := m.runtimeRegistry.GetRuntime(runtimeName)
+		if err == nil {
+			return rt, nil
+		}
+
+		// Handle fallback based on policy
+		switch m.runtimeFallbackPolicy {
+		case RuntimeFallbackDeny:
+			return nil, fmt.Errorf("runtime %s not available and fallback is denied: %w", runtimeName, err)
+		case RuntimeFallbackWarn:
+			m.logger.Warn("requested runtime not available, falling back to default",
+				zap.String("executor_type", executorType),
+				zap.String("runtime", string(runtimeName)),
+				zap.Error(err))
+		case RuntimeFallbackAllow:
+			m.logger.Debug("requested runtime not available, falling back to default",
+				zap.String("executor_type", executorType),
+				zap.String("runtime", string(runtimeName)))
+		default:
+			// Default to warn behavior for backwards compatibility
+			m.logger.Warn("requested runtime not available, falling back to default",
+				zap.String("executor_type", executorType),
+				zap.String("runtime", string(runtimeName)),
+				zap.Error(err))
+		}
+	}
+
+	return m.runtimeRegistry.GetRuntime(runtime.NameStandalone)
+}
+
+// getDefaultRuntime returns the default runtime (standalone).
+// This is used when no executor type is specified.
+func (m *Manager) getDefaultRuntime() (Runtime, error) {
+	if m.runtimeRegistry == nil {
+		return nil, fmt.Errorf("no runtime registry configured")
+	}
+	return m.runtimeRegistry.GetRuntime(runtime.NameStandalone)
 }
 
 // EnsureWorkspaceExecutionForSession ensures an agentctl execution exists for a specific task session.
@@ -228,8 +296,10 @@ func (m *Manager) EnsureWorkspaceExecutionForSession(ctx context.Context, taskID
 // createExecution creates an agentctl execution.
 // The agent subprocess is NOT started - call ConfigureAgent + Start explicitly.
 func (m *Manager) createExecution(ctx context.Context, taskID string, info *WorkspaceInfo) (*AgentExecution, error) {
-	if m.runtime == nil {
-		return nil, fmt.Errorf("no runtime configured")
+	// Get the default runtime for on-demand execution creation
+	rt, err := m.getDefaultRuntime()
+	if err != nil {
+		return nil, fmt.Errorf("no runtime configured: %w", err)
 	}
 
 	if info.AgentID == "" {
@@ -252,12 +322,13 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 		Protocol:       string(agentConfig.Protocol),
 	}
 
-	runtimeInstance, err := m.runtime.CreateInstance(ctx, req)
+	runtimeInstance, err := rt.CreateInstance(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create execution: %w", err)
 	}
 
 	execution := runtimeInstance.ToAgentExecution(req)
+	execution.RuntimeName = string(rt.Name())
 
 	// Set the ACP session ID for session resumption
 	if info.ACPSessionID != "" {
@@ -272,38 +343,38 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 		zap.String("execution_id", executionID),
 		zap.String("task_id", taskID),
 		zap.String("workspace_path", info.WorkspacePath),
-		zap.String("runtime", string(m.runtime.Name())))
+		zap.String("runtime", execution.RuntimeName))
 
 	return execution, nil
 }
 // Start starts the lifecycle manager background tasks
 func (m *Manager) Start(ctx context.Context) error {
-	runtimeName := "none"
-	if m.runtime != nil {
-		runtimeName = string(m.runtime.Name())
-	}
-	m.logger.Info("starting lifecycle manager", zap.String("runtime", runtimeName))
-
-	if m.runtime == nil {
-		m.logger.Warn("no runtime configured")
+	if m.runtimeRegistry == nil {
+		m.logger.Warn("no runtime registry configured")
 		return nil
 	}
 
-	// Check runtime health
-	if err := m.runtime.HealthCheck(ctx); err != nil {
-		m.logger.Warn("runtime health check failed",
-			zap.String("runtime", runtimeName),
-			zap.Error(err))
-		// Continue anyway - it might come up later
-	} else {
-		m.logger.Info("runtime is healthy", zap.String("runtime", runtimeName))
+	runtimeNames := m.runtimeRegistry.List()
+	m.logger.Info("starting lifecycle manager", zap.Int("runtimes", len(runtimeNames)))
+
+	// Check health of all registered runtimes
+	healthResults := m.runtimeRegistry.HealthCheckAll(ctx)
+	for name, err := range healthResults {
+		if err != nil {
+			m.logger.Warn("runtime health check failed",
+				zap.String("runtime", string(name)),
+				zap.Error(err))
+		} else {
+			m.logger.Info("runtime is healthy", zap.String("runtime", string(name)))
+		}
 	}
 
-	// Try to recover executions from previous runs
-	recovered, err := m.runtime.RecoverInstances(ctx)
+	// Try to recover executions from all runtimes
+	recovered, err := m.runtimeRegistry.RecoverAll(ctx)
 	if err != nil {
-		m.logger.Warn("failed to recover executions", zap.Error(err))
-	} else if len(recovered) > 0 {
+		m.logger.Warn("failed to recover executions from some runtimes", zap.Error(err))
+	}
+	if len(recovered) > 0 {
 		for _, ri := range recovered {
 			execution := &AgentExecution{
 				ID:                   ri.InstanceID,
@@ -312,6 +383,7 @@ func (m *Manager) Start(ctx context.Context) error {
 				ContainerID:          ri.ContainerID,
 				ContainerIP:          ri.ContainerIP,
 				WorkspacePath:        ri.WorkspacePath,
+				RuntimeName:          ri.RuntimeName,
 				Status:               v1.AgentStatusRunning,
 				StartedAt:            time.Now(),
 				Metadata:             ri.Metadata,
@@ -320,6 +392,10 @@ func (m *Manager) Start(ctx context.Context) error {
 				standalonePort:       ri.StandalonePort,
 			}
 			m.executionStore.Add(execution)
+
+			// Reconnect to workspace streams (shell, git, file changes) in background
+			// This is needed so shell.input, git status, etc. work after backend restart
+			go m.streamManager.ReconnectAll(execution)
 		}
 		m.logger.Info("recovered executions", zap.Int("count", len(recovered)))
 	}
@@ -491,8 +567,10 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 
 	// 7. Launch via runtime - creates agentctl instance with workspace access only
 	// Agent subprocess is NOT started - call StartAgentProcess() explicitly
-	if m.runtime == nil {
-		return nil, fmt.Errorf("no runtime configured")
+	// Select runtime based on executor type from request
+	rt, err := m.getRuntimeForExecutorType(req.ExecutorType)
+	if err != nil {
+		return nil, fmt.Errorf("no runtime configured: %w", err)
 	}
 
 	// Build environment variables
@@ -517,6 +595,23 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 		})
 	}
 
+	// Build metadata with runtime-specific fields
+	metadata := make(map[string]interface{})
+	if reqWithWorktree.Metadata != nil {
+		for k, v := range reqWithWorktree.Metadata {
+			metadata[k] = v
+		}
+	}
+	if mainRepoGitDir != "" {
+		metadata[MetadataKeyMainRepoGitDir] = mainRepoGitDir
+	}
+	if worktreeID != "" {
+		metadata[MetadataKeyWorktreeID] = worktreeID
+	}
+	if worktreeBranch != "" {
+		metadata[MetadataKeyWorktreeBranch] = worktreeBranch
+	}
+
 	// Create runtime request (agent command not included - started explicitly later)
 	runtimeReq := &RuntimeCreateRequest{
 		InstanceID:     executionID,
@@ -526,21 +621,19 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 		WorkspacePath:  reqWithWorktree.WorkspacePath,
 		Protocol:       string(agentConfig.Protocol),
 		Env:            env,
-		Metadata:       reqWithWorktree.Metadata,
-		WorktreeID:     worktreeID,
-		WorktreeBranch: worktreeBranch,
-		MainRepoGitDir: mainRepoGitDir,
+		Metadata:       metadata,
 		AgentConfig:    agentConfig,
 		McpServers:     mcpServers,
 	}
 
-	runtimeInstance, err := m.runtime.CreateInstance(ctx, runtimeReq)
+	runtimeInstance, err := rt.CreateInstance(ctx, runtimeReq)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create execution: %w", err)
 	}
 
-	// Convert to AgentExecution
+	// Convert to AgentExecution and set the runtime name
 	execution := runtimeInstance.ToAgentExecution(runtimeReq)
+	execution.RuntimeName = string(rt.Name())
 
 	// Set ACP session ID for session resumption (used by InitializeSession)
 	if req.ACPSessionID != "" {
@@ -582,14 +675,10 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 	// NOTE: This does NOT start the agent process - call StartAgentProcess() explicitly
 	go m.waitForAgentctlReady(execution)
 
-	runtimeName := "unknown"
-	if m.runtime != nil {
-		runtimeName = string(m.runtime.Name())
-	}
 	m.logger.Info("agentctl execution created (agent not started)",
 		zap.String("execution_id", executionID),
 		zap.String("task_id", req.TaskID),
-		zap.String("runtime", runtimeName))
+		zap.String("runtime", execution.RuntimeName))
 
 	return execution, nil
 }
@@ -876,7 +965,9 @@ func (m *Manager) resolveMcpServersWithParams(ctx context.Context, profileID str
 		return nil, nil
 	}
 
-	policy := mcpconfig.DefaultPolicyForRuntime(runtimeName(m.runtime))
+	// Get default runtime for MCP policy (used before execution exists)
+	defaultRT, _ := m.getDefaultRuntime()
+	policy := mcpconfig.DefaultPolicyForRuntime(runtimeName(defaultRT))
 	executorID := ""
 	if metadata != nil {
 		if value, ok := metadata["executor_id"].(string); ok {
@@ -1341,14 +1432,10 @@ func (m *Manager) StopAgent(ctx context.Context, executionID string, force bool)
 		return fmt.Errorf("execution %q not found", executionID)
 	}
 
-	runtimeName := "unknown"
-	if m.runtime != nil {
-		runtimeName = string(m.runtime.Name())
-	}
 	m.logger.Info("stopping agent",
 		zap.String("execution_id", executionID),
 		zap.Bool("force", force),
-		zap.String("runtime", runtimeName))
+		zap.String("runtime", execution.RuntimeName))
 
 	// Try to gracefully stop via agentctl first
 	if execution.agentctl != nil && !force {
@@ -1360,17 +1447,25 @@ func (m *Manager) StopAgent(ctx context.Context, executionID string, force bool)
 		execution.agentctl.Close()
 	}
 
-	// Stop the agent execution via runtime
-	if m.runtime != nil {
-		runtimeInstance := &RuntimeInstance{
-			InstanceID:           execution.ID,
-			TaskID:               execution.TaskID,
-			ContainerID:          execution.ContainerID,
-			StandaloneInstanceID: execution.standaloneInstanceID,
-			StandalonePort:       execution.standalonePort,
-		}
-		if err := m.runtime.StopInstance(ctx, runtimeInstance, force); err != nil {
-			return err
+	// Stop the agent execution via the runtime that created it
+	if execution.RuntimeName != "" && m.runtimeRegistry != nil {
+		rt, err := m.runtimeRegistry.GetRuntime(runtime.Name(execution.RuntimeName))
+		if err != nil {
+			m.logger.Warn("failed to get runtime for stopping execution",
+				zap.String("execution_id", executionID),
+				zap.String("runtime", execution.RuntimeName),
+				zap.Error(err))
+		} else {
+			runtimeInstance := &RuntimeInstance{
+				InstanceID:           execution.ID,
+				TaskID:               execution.TaskID,
+				ContainerID:          execution.ContainerID,
+				StandaloneInstanceID: execution.standaloneInstanceID,
+				StandalonePort:       execution.standalonePort,
+			}
+			if err := rt.StopInstance(ctx, runtimeInstance, force); err != nil {
+				return err
+			}
 		}
 	}
 

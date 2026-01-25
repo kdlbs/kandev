@@ -5,6 +5,7 @@ package lifecycle
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -277,6 +278,16 @@ func (cm *ContainerManager) expandMounts(templates []registry.MountTemplate, wor
 func (cm *ContainerManager) expandMountSource(source, workspacePath string) string {
 	result := source
 	result = strings.ReplaceAll(result, "{workspace}", workspacePath)
+
+	// Expand {home} to user's home directory
+	if strings.Contains(result, "{home}") {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			homeDir = "/tmp"
+		}
+		result = strings.ReplaceAll(result, "{home}", homeDir)
+	}
+
 	return result
 }
 

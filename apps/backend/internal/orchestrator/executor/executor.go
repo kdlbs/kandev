@@ -86,6 +86,7 @@ type LaunchAgentRequest struct {
 	Env             map[string]string
 	ACPSessionID    string // ACP session ID to resume, if available
 	ModelOverride   string // If set, use this model instead of the profile's model
+	ExecutorType    string // Executor type (e.g., "local_pc", "local_docker") - determines runtime
 
 	// Worktree configuration for concurrent agent execution
 	UseWorktree          bool   // Whether to use a Git worktree for isolation
@@ -201,12 +202,14 @@ func (e *Executor) applyPreferredShellEnv(ctx context.Context, env map[string]st
 
 // Execute starts agent execution for a task
 func (e *Executor) Execute(ctx context.Context, task *v1.Task) (*TaskExecution, error) {
-	return e.ExecuteWithProfile(ctx, task, "", task.Description)
+	return e.ExecuteWithProfile(ctx, task, "", "", task.Description)
 }
 
 // ExecuteWithProfile starts agent execution for a task using an explicit agent profile.
+// The executorID parameter specifies which executor to use (determines runtime: local_pc, local_docker, etc.).
+// If executorID is empty, falls back to workspace's default executor.
 // The prompt parameter is the initial prompt to send to the agent.
-func (e *Executor) ExecuteWithProfile(ctx context.Context, task *v1.Task, agentProfileID string, prompt string) (*TaskExecution, error) {
+func (e *Executor) ExecuteWithProfile(ctx context.Context, task *v1.Task, agentProfileID string, executorID string, prompt string) (*TaskExecution, error) {
 	if agentProfileID == "" {
 		e.logger.Error("task has no agent_profile_id configured", zap.String("task_id", task.ID))
 		return nil, ErrNoAgentProfileID
@@ -315,9 +318,16 @@ func (e *Executor) ExecuteWithProfile(ctx context.Context, task *v1.Task, agentP
 		UpdatedAt:            now,
 		AgentProfileSnapshot: agentProfileSnapshot,
 	}
-	if executorID := e.defaultExecutorID(ctx, task.WorkspaceID); executorID != "" {
-		session.ExecutorID = executorID
-		metadata = e.applyExecutorMetadata(ctx, metadata, executorID)
+	// Resolve executor configuration
+	execConfig := e.resolveExecutorConfig(ctx, executorID, task.WorkspaceID, metadata)
+	if execConfig.ExecutorID != "" {
+		session.ExecutorID = execConfig.ExecutorID
+		metadata = execConfig.Metadata
+		req.ExecutorType = execConfig.ExecutorType
+		e.logger.Debug("resolved executor for task",
+			zap.String("task_id", task.ID),
+			zap.String("executor_id", execConfig.ExecutorID),
+			zap.String("executor_type", execConfig.ExecutorType))
 	}
 
 	if err := e.repo.CreateTaskSession(ctx, session); err != nil {
@@ -335,6 +345,7 @@ func (e *Executor) ExecuteWithProfile(ctx context.Context, task *v1.Task, agentP
 	e.logger.Info("launching agent for task",
 		zap.String("task_id", task.ID),
 		zap.String("agent_profile_id", agentProfileID),
+		zap.String("executor_type", req.ExecutorType),
 		zap.Bool("use_worktree", req.UseWorktree))
 
 	req.Env = e.applyPreferredShellEnv(ctx, req.Env)
@@ -518,12 +529,24 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 	if len(session.Worktrees) > 0 && session.Worktrees[0].WorktreeID != "" {
 		metadata["worktree_id"] = session.Worktrees[0].WorktreeID
 	}
-	if session.ExecutorID == "" {
-		if executorID := e.defaultExecutorID(ctx, task.WorkspaceID); executorID != "" {
-			session.ExecutorID = executorID
+	// Resolve executor configuration
+	executorWasEmpty := session.ExecutorID == ""
+	execConfig := e.resolveExecutorConfig(ctx, session.ExecutorID, task.WorkspaceID, metadata)
+	session.ExecutorID = execConfig.ExecutorID
+	metadata = execConfig.Metadata
+	req.ExecutorType = execConfig.ExecutorType
+
+	// Persist executor assignment if it was resolved from workspace default
+	if executorWasEmpty && session.ExecutorID != "" {
+		session.UpdatedAt = time.Now().UTC()
+		if err := e.repo.UpdateTaskSession(ctx, session); err != nil {
+			e.logger.Warn("failed to persist executor assignment for session",
+				zap.String("session_id", session.ID),
+				zap.String("executor_id", session.ExecutorID),
+				zap.Error(err))
+			// Continue anyway - this is not fatal
 		}
 	}
-	metadata = e.applyExecutorMetadata(ctx, metadata, session.ExecutorID)
 	if len(metadata) > 0 {
 		req.Metadata = metadata
 	}
@@ -580,6 +603,7 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 		zap.String("task_id", session.TaskID),
 		zap.String("session_id", session.ID),
 		zap.String("agent_profile_id", session.AgentProfileID),
+		zap.String("executor_type", req.ExecutorType),
 		zap.String("resume_token", req.ACPSessionID),
 		zap.Bool("use_worktree", req.UseWorktree))
 
@@ -869,6 +893,9 @@ func (e *Executor) SwitchModel(ctx context.Context, taskID, sessionID, newModel,
 			zap.String("agent_execution_id", oldAgentExecutionID))
 	}
 
+	// Resolve executor configuration
+	execConfig := e.resolveExecutorConfig(ctx, session.ExecutorID, task.WorkspaceID, nil)
+
 	// Build a new launch request with the model override
 	req := &LaunchAgentRequest{
 		TaskID:          task.ID,
@@ -878,18 +905,41 @@ func (e *Executor) SwitchModel(ctx context.Context, taskID, sessionID, newModel,
 		TaskDescription: prompt,
 		ModelOverride:   newModel, // This is the key - use the new model
 		ACPSessionID:    acpSessionID,
+		ExecutorType:    execConfig.ExecutorType,
+		Metadata:        execConfig.Metadata,
 	}
 
 	// Get repository info if available
+	var repositoryPath string
 	if session.RepositoryID != "" {
 		repository, err := e.repo.GetRepository(ctx, session.RepositoryID)
 		if err == nil && repository != nil {
+			repositoryPath = repository.LocalPath
 			req.RepositoryURL = repository.LocalPath
 			req.Branch = session.BaseBranch
 		}
 	}
 
-	// Get worktree info from running state
+	// Configure worktree if enabled - reuse existing worktree from session
+	if e.worktreeEnabled && repositoryPath != "" {
+		req.UseWorktree = true
+		req.RepositoryPath = repositoryPath
+		req.RepositoryID = session.RepositoryID
+		if session.BaseBranch != "" {
+			req.BaseBranch = session.BaseBranch
+		} else {
+			req.BaseBranch = "main"
+		}
+		// Pass existing worktree ID in metadata for reuse
+		if len(session.Worktrees) > 0 && session.Worktrees[0].WorktreeID != "" {
+			if req.Metadata == nil {
+				req.Metadata = make(map[string]interface{})
+			}
+			req.Metadata["worktree_id"] = session.Worktrees[0].WorktreeID
+		}
+	}
+
+	// Get worktree info from running state (for workspace path)
 	if running, err := e.repo.GetExecutorRunningBySessionID(ctx, sessionID); err == nil && running != nil {
 		if running.WorktreePath != "" {
 			req.RepositoryURL = running.WorktreePath
@@ -902,7 +952,10 @@ func (e *Executor) SwitchModel(ctx context.Context, taskID, sessionID, newModel,
 		zap.String("task_id", task.ID),
 		zap.String("session_id", sessionID),
 		zap.String("model", newModel),
-		zap.String("acp_session_id", acpSessionID))
+		zap.String("executor_type", req.ExecutorType),
+		zap.String("acp_session_id", acpSessionID),
+		zap.Bool("use_worktree", req.UseWorktree),
+		zap.String("repository_path", req.RepositoryPath))
 
 	// Launch the new agent
 	resp, err := e.agentManager.LaunchAgent(ctx, req)
@@ -1079,6 +1132,51 @@ func (e *Executor) applyExecutorMetadata(ctx context.Context, metadata map[strin
 		metadata["executor_mcp_policy"] = policyJSON
 	}
 	return metadata
+}
+
+// getExecutorType resolves an executor ID to its type string.
+// Returns empty string if executor not found or on error.
+func (e *Executor) getExecutorType(ctx context.Context, executorID string) string {
+	if executorID == "" {
+		return ""
+	}
+	executor, err := e.repo.GetExecutor(ctx, executorID)
+	if err != nil || executor == nil {
+		return ""
+	}
+	return string(executor.Type)
+}
+
+// executorConfig holds resolved executor configuration.
+type executorConfig struct {
+	ExecutorID   string
+	ExecutorType string
+	Metadata     map[string]interface{}
+}
+
+// resolveExecutorConfig resolves executor configuration from an executor ID.
+// If executorID is empty, it falls back to the workspace default.
+// Returns the resolved config with executor ID, type, and metadata.
+func (e *Executor) resolveExecutorConfig(ctx context.Context, executorID, workspaceID string, existingMetadata map[string]interface{}) executorConfig {
+	resolved := executorID
+	if resolved == "" {
+		resolved = e.defaultExecutorID(ctx, workspaceID)
+	}
+
+	metadata := existingMetadata
+	if metadata == nil {
+		metadata = make(map[string]interface{})
+	}
+
+	if resolved != "" {
+		metadata = e.applyExecutorMetadata(ctx, metadata, resolved)
+	}
+
+	return executorConfig{
+		ExecutorID:   resolved,
+		ExecutorType: e.getExecutorType(ctx, resolved),
+		Metadata:     metadata,
+	}
 }
 
 func cloneMetadata(src map[string]interface{}) map[string]interface{} {

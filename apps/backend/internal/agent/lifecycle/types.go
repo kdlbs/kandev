@@ -27,6 +27,7 @@ type AgentExecution struct {
 	WorkspacePath  string // Path to the workspace (worktree or repository path)
 	ACPSessionID   string // ACP session ID to resume, if available
 	AgentCommand   string // Command to start the agent subprocess
+	RuntimeName    string // Name of the runtime used (e.g., "docker", "standalone")
 	Status       v1.AgentStatus
 	StartedAt    time.Time
 	FinishedAt   *time.Time
@@ -93,6 +94,9 @@ type LaunchRequest struct {
 	ACPSessionID    string            // ACP session ID to resume, if available
 	Metadata        map[string]interface{}
 	ModelOverride   string // If set, use this model instead of the profile's model
+
+	// Executor configuration - determines which runtime to use
+	ExecutorType string // Executor type (e.g., "local_pc", "local_docker") - determines runtime
 
 	// Worktree configuration
 	UseWorktree          bool   // Whether to use a Git worktree for isolation

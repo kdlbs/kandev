@@ -519,6 +519,17 @@ func (s *Service) DeleteTask(ctx context.Context, id string) error {
 		}
 	}
 
+	// Stop any running execution BEFORE deleting from database
+	// This must happen first because StopTask queries the database for active sessions
+	if s.executionStopper != nil {
+		if err := s.executionStopper.StopTask(ctx, id, "task deleted", true); err != nil {
+			s.logger.Warn("failed to stop task execution on delete",
+				zap.String("task_id", id),
+				zap.Error(err))
+			// Continue with deletion even if stop fails
+		}
+	}
+
 	if err := s.repo.DeleteTask(ctx, id); err != nil {
 		s.logger.Error("failed to delete task", zap.String("task_id", id), zap.Error(err))
 		return err
@@ -529,9 +540,9 @@ func (s *Service) DeleteTask(ctx context.Context, id string) error {
 		zap.String("task_id", id),
 		zap.Duration("duration", time.Since(start)))
 
-	// Perform cleanup synchronously with dedicated timeout
+	// Perform remaining cleanup synchronously with dedicated timeout
 	// Use background context since the original request may complete
-	if s.executionStopper != nil || s.worktreeCleanup != nil || len(sessions) > 0 {
+	if s.worktreeCleanup != nil || len(sessions) > 0 {
 		cleanupStart := time.Now()
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
@@ -554,6 +565,8 @@ func (s *Service) DeleteTask(ctx context.Context, id string) error {
 }
 
 // performTaskCleanup handles post-deletion cleanup operations.
+// Note: Execution stopping is done BEFORE database deletion in DeleteTask,
+// so this function only handles worktree cleanup and executor_running records.
 // Returns a slice of errors encountered (empty if all succeeded).
 func (s *Service) performTaskCleanup(
 	ctx context.Context,
@@ -562,16 +575,6 @@ func (s *Service) performTaskCleanup(
 	worktrees []*worktree.Worktree,
 ) []error {
 	var errs []error
-
-	// Stop any running execution
-	if s.executionStopper != nil {
-		if err := s.executionStopper.StopTask(ctx, taskID, "task deleted", true); err != nil {
-			s.logger.Warn("failed to stop task execution on delete",
-				zap.String("task_id", taskID),
-				zap.Error(err))
-			errs = append(errs, fmt.Errorf("stop execution: %w", err))
-		}
-	}
 
 	// Cleanup worktrees
 	if len(worktrees) > 0 {

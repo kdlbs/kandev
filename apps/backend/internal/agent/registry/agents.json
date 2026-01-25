@@ -8,7 +8,7 @@
       "display_name": "Auggie",
       "description": "Auggie CLI-powered autonomous coding agent.",
       "enabled": true,
-      "image": "kandev/augment-agent",
+      "image": "kandev/multi-agent",
       "tag": "latest",
       "cmd": [
         "auggie",
@@ -154,7 +154,7 @@
       "display_name": "Codex",
       "description": "OpenAI Codex CLI-powered autonomous coding agent using the Codex app-server protocol.",
       "enabled": true,
-      "image": "kandev/codex-agent",
+      "image": "kandev/multi-agent",
       "tag": "latest",
       "cmd": [
         "codex",
@@ -167,6 +167,11 @@
         {
           "source": "{workspace}",
           "target": "/workspace",
+          "read_only": false
+        },
+        {
+          "source": "{home}/.codex",
+          "target": "/root/.codex",
           "read_only": false
         }
       ],
@@ -190,8 +195,8 @@
         "resume_via_acp": true,
         "resume_flag": "",
         "can_recover": true,
-        "session_dir_template": "{home}/.codex/sessions",
-        "session_dir_target": "/root/.codex/sessions"
+        "session_dir_template": "",
+        "session_dir_target": ""
       },
       "permission_config": {
         "permission_flag": "",
