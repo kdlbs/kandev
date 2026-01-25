@@ -53,67 +53,9 @@ type PermissionRequestData struct {
 	ActionDetails map[string]interface{}   `json:"action_details"`
 }
 
-// GitEventData contains unified data from git events
-type GitEventData struct {
-	Type          string `json:"type"`
-	TaskID        string `json:"task_id"`
-	TaskSessionID string `json:"session_id"`
-	AgentID       string `json:"agent_id"`
-	Timestamp     string `json:"timestamp"`
-
-	// For status_update
-	Status *struct {
-		Branch       string                 `json:"branch"`
-		RemoteBranch string                 `json:"remote_branch,omitempty"`
-		HeadCommit   string                 `json:"head_commit,omitempty"`
-		BaseCommit   string                 `json:"base_commit,omitempty"`
-		Modified     []string               `json:"modified"`
-		Added        []string               `json:"added"`
-		Deleted      []string               `json:"deleted"`
-		Untracked    []string               `json:"untracked"`
-		Renamed      []string               `json:"renamed"`
-		Ahead        int                    `json:"ahead"`
-		Behind       int                    `json:"behind"`
-		Files        map[string]interface{} `json:"files,omitempty"`
-	} `json:"status,omitempty"`
-
-	// For commit_created
-	Commit *struct {
-		ID           string `json:"id,omitempty"`
-		CommitSHA    string `json:"commit_sha"`
-		ParentSHA    string `json:"parent_sha"`
-		Message      string `json:"commit_message"`
-		AuthorName   string `json:"author_name"`
-		AuthorEmail  string `json:"author_email"`
-		FilesChanged int    `json:"files_changed"`
-		Insertions   int    `json:"insertions"`
-		Deletions    int    `json:"deletions"`
-		CommittedAt  string `json:"committed_at"`
-	} `json:"commit,omitempty"`
-
-	// For commits_reset
-	Reset *struct {
-		PreviousHead string `json:"previous_head"`
-		CurrentHead  string `json:"current_head"`
-		DeletedCount int    `json:"deleted_count"`
-	} `json:"reset,omitempty"`
-
-	// For snapshot_created
-	Snapshot *struct {
-		ID           string                 `json:"id"`
-		SessionID    string                 `json:"session_id"`
-		SnapshotType string                 `json:"snapshot_type"`
-		Branch       string                 `json:"branch"`
-		RemoteBranch string                 `json:"remote_branch"`
-		HeadCommit   string                 `json:"head_commit"`
-		BaseCommit   string                 `json:"base_commit"`
-		Ahead        int                    `json:"ahead"`
-		Behind       int                    `json:"behind"`
-		Files        map[string]interface{} `json:"files,omitempty"`
-		TriggeredBy  string                 `json:"triggered_by"`
-		CreatedAt    string                 `json:"created_at"`
-	} `json:"snapshot,omitempty"`
-}
+// GitEventData is an alias for lifecycle.GitEventPayload.
+// Kept for backwards compatibility with existing handler signatures.
+type GitEventData = lifecycle.GitEventPayload
 
 // ContextWindowData contains data from context window events
 type ContextWindowData struct {
@@ -539,9 +481,9 @@ func (w *Watcher) createGitEventHandler() bus.EventHandler {
 		}
 
 		w.logger.Debug("Handling git event",
-			zap.String("type", data.Type),
+			zap.String("type", string(data.Type)),
 			zap.String("task_id", data.TaskID),
-			zap.String("session_id", data.TaskSessionID))
+			zap.String("session_id", data.SessionID))
 
 		w.handlers.OnGitEvent(ctx, data)
 		return nil

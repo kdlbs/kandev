@@ -446,32 +446,32 @@ func (s *Service) setSessionRunning(ctx context.Context, taskID, sessionID strin
 // handleGitEvent handles unified git events and dispatches to appropriate handler
 func (s *Service) handleGitEvent(ctx context.Context, data watcher.GitEventData) {
 	s.logger.Debug("handling git event",
-		zap.String("type", data.Type),
+		zap.String("type", string(data.Type)),
 		zap.String("task_id", data.TaskID),
-		zap.String("session_id", data.TaskSessionID))
+		zap.String("session_id", data.SessionID))
 
-	if data.TaskSessionID == "" {
+	if data.SessionID == "" {
 		s.logger.Debug("missing session_id for git event",
 			zap.String("task_id", data.TaskID),
-			zap.String("type", data.Type))
+			zap.String("type", string(data.Type)))
 		return
 	}
 
 	switch data.Type {
-	case "status_update":
+	case lifecycle.GitEventTypeStatusUpdate:
 		s.handleGitStatusUpdate(ctx, data)
-	case "commit_created":
+	case lifecycle.GitEventTypeCommitCreated:
 		s.handleGitCommitCreated(ctx, data)
-	case "commits_reset":
+	case lifecycle.GitEventTypeCommitsReset:
 		s.handleGitCommitsReset(ctx, data)
-	case "snapshot_created":
+	case lifecycle.GitEventTypeSnapshotCreated:
 		// Snapshot events are published from orchestrator, no need to handle here
 		s.logger.Debug("received snapshot_created event, no action needed",
-			zap.String("session_id", data.TaskSessionID))
+			zap.String("session_id", data.SessionID))
 	default:
 		s.logger.Warn("unknown git event type",
-			zap.String("type", data.Type),
-			zap.String("session_id", data.TaskSessionID))
+			zap.String("type", string(data.Type)),
+			zap.String("session_id", data.SessionID))
 	}
 }
 
@@ -484,34 +484,23 @@ func (s *Service) handleGitStatusUpdate(ctx context.Context, data watcher.GitEve
 	}
 
 	// Forward status_update event to WebSocket subject for frontend
+	// Since data is already lifecycle.GitEventPayload, we can forward it directly
 	if s.eventBus != nil {
-		event := bus.NewEvent(events.GitWSEvent, "orchestrator", &lifecycle.GitEventPayload{
-			Type:      lifecycle.GitEventTypeStatusUpdate,
-			SessionID: data.TaskSessionID,
-			TaskID:    data.TaskID,
-			AgentID:   data.AgentID,
-			Timestamp: data.Timestamp,
-			Status: &lifecycle.GitStatusData{
-				Branch:       data.Status.Branch,
-				RemoteBranch: data.Status.RemoteBranch,
-				HeadCommit:   data.Status.HeadCommit,
-				BaseCommit:   data.Status.BaseCommit,
-				Modified:     data.Status.Modified,
-				Added:        data.Status.Added,
-				Deleted:      data.Status.Deleted,
-				Untracked:    data.Status.Untracked,
-				Renamed:      data.Status.Renamed,
-				Ahead:        data.Status.Ahead,
-				Behind:       data.Status.Behind,
-				Files:        data.Status.Files,
-			},
-		})
-		_ = s.eventBus.Publish(ctx, events.BuildGitWSEventSubject(data.TaskSessionID), event)
+		event := bus.NewEvent(events.GitWSEvent, "orchestrator", &data)
+		_ = s.eventBus.Publish(ctx, events.BuildGitWSEventSubject(data.SessionID), event)
+	}
+
+	// Convert Files from interface{} to map[string]interface{}
+	var files map[string]interface{}
+	if data.Status.Files != nil {
+		if f, ok := data.Status.Files.(map[string]interface{}); ok {
+			files = f
+		}
 	}
 
 	// Create git snapshot instead of storing in session metadata
 	snapshot := &models.GitSnapshot{
-		SessionID:    data.TaskSessionID,
+		SessionID:    data.SessionID,
 		SnapshotType: models.SnapshotTypeStatusUpdate,
 		Branch:       data.Status.Branch,
 		RemoteBranch: data.Status.RemoteBranch,
@@ -519,7 +508,7 @@ func (s *Service) handleGitStatusUpdate(ctx context.Context, data watcher.GitEve
 		BaseCommit:   data.Status.BaseCommit,
 		Ahead:        data.Status.Ahead,
 		Behind:       data.Status.Behind,
-		Files:        data.Status.Files,
+		Files:        files,
 		TriggeredBy:  "git_status_event",
 		Metadata: map[string]interface{}{
 			"modified":  data.Status.Modified,
@@ -531,39 +520,42 @@ func (s *Service) handleGitStatusUpdate(ctx context.Context, data watcher.GitEve
 		},
 	}
 
+	sessionID := data.SessionID
+	taskID := data.TaskID
+
 	// Persist snapshot to database asynchronously, but skip if duplicate of latest
 	go func() {
 		bgCtx := context.Background()
 
 		// Check if this is a duplicate of the latest snapshot
-		latest, err := s.repo.GetLatestGitSnapshot(bgCtx, data.TaskSessionID)
+		latest, err := s.repo.GetLatestGitSnapshot(bgCtx, sessionID)
 		if err == nil && latest != nil {
 			// Compare key fields to detect duplicates
 			if s.isSnapshotDuplicate(latest, snapshot) {
 				s.logger.Debug("skipping duplicate git snapshot",
-					zap.String("task_id", data.TaskID),
-					zap.String("session_id", data.TaskSessionID))
+					zap.String("task_id", taskID),
+					zap.String("session_id", sessionID))
 				return
 			}
 		}
 
 		if err := s.repo.CreateGitSnapshot(bgCtx, snapshot); err != nil {
 			s.logger.Error("failed to create git snapshot",
-				zap.String("task_id", data.TaskID),
-				zap.String("session_id", data.TaskSessionID),
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
 				zap.Error(err))
 		} else {
 			s.logger.Debug("created git snapshot",
-				zap.String("task_id", data.TaskID),
-				zap.String("session_id", data.TaskSessionID),
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
 				zap.String("snapshot_id", snapshot.ID))
 
 			// Publish event to notify frontend
 			if s.eventBus != nil {
 				event := bus.NewEvent(events.GitEvent, "orchestrator", &lifecycle.GitEventPayload{
 					Type:      lifecycle.GitEventTypeSnapshotCreated,
-					SessionID: data.TaskSessionID,
-					TaskID:    data.TaskID,
+					SessionID: sessionID,
+					TaskID:    taskID,
 					Timestamp: snapshot.CreatedAt.Format("2006-01-02T15:04:05.000000000Z07:00"),
 					Snapshot: &lifecycle.GitSnapshotData{
 						ID:           snapshot.ID,
@@ -580,7 +572,7 @@ func (s *Service) handleGitStatusUpdate(ctx context.Context, data watcher.GitEve
 						CreatedAt:    snapshot.CreatedAt.Format("2006-01-02T15:04:05.000000000Z07:00"),
 					},
 				})
-				_ = s.eventBus.Publish(bgCtx, events.BuildGitWSEventSubject(data.TaskSessionID), event)
+				_ = s.eventBus.Publish(bgCtx, events.BuildGitWSEventSubject(sessionID), event)
 			}
 		}
 	}()
@@ -751,9 +743,13 @@ func (s *Service) handleGitCommitCreated(ctx context.Context, data watcher.GitEv
 		committedAt = time.Now().UTC()
 	}
 
+	sessionID := data.SessionID
+	taskID := data.TaskID
+	commitSHA := data.Commit.CommitSHA
+
 	// Create session commit record
 	commit := &models.SessionCommit{
-		SessionID:     data.TaskSessionID,
+		SessionID:     sessionID,
 		CommitSHA:     data.Commit.CommitSHA,
 		ParentSHA:     data.Commit.ParentSHA,
 		AuthorName:    data.Commit.AuthorName,
@@ -770,22 +766,22 @@ func (s *Service) handleGitCommitCreated(ctx context.Context, data watcher.GitEv
 		bgCtx := context.Background()
 		if err := s.repo.CreateSessionCommit(bgCtx, commit); err != nil {
 			s.logger.Error("failed to create session commit record",
-				zap.String("task_id", data.TaskID),
-				zap.String("session_id", data.TaskSessionID),
-				zap.String("commit_sha", data.Commit.CommitSHA),
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.String("commit_sha", commitSHA),
 				zap.Error(err))
 		} else {
 			s.logger.Debug("created session commit record",
-				zap.String("task_id", data.TaskID),
-				zap.String("session_id", data.TaskSessionID),
-				zap.String("commit_sha", data.Commit.CommitSHA))
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.String("commit_sha", commitSHA))
 
 			// Publish event to notify frontend using unified format
 			if s.eventBus != nil {
 				event := bus.NewEvent(events.GitEvent, "orchestrator", &lifecycle.GitEventPayload{
 					Type:      lifecycle.GitEventTypeCommitCreated,
-					SessionID: data.TaskSessionID,
-					TaskID:    data.TaskID,
+					SessionID: sessionID,
+					TaskID:    taskID,
 					Timestamp: time.Now().Format("2006-01-02T15:04:05.000000000Z07:00"),
 					Commit: &lifecycle.GitCommitData{
 						ID:           commit.ID,
@@ -801,7 +797,7 @@ func (s *Service) handleGitCommitCreated(ctx context.Context, data watcher.GitEv
 						CreatedAt:    commit.CreatedAt.Format("2006-01-02T15:04:05.000000000Z07:00"),
 					},
 				})
-				_ = s.eventBus.Publish(bgCtx, events.BuildGitWSEventSubject(data.TaskSessionID), event)
+				_ = s.eventBus.Publish(bgCtx, events.BuildGitWSEventSubject(sessionID), event)
 			}
 		}
 	}()
@@ -815,21 +811,26 @@ func (s *Service) handleGitCommitsReset(ctx context.Context, data watcher.GitEve
 		return
 	}
 
+	sessionID := data.SessionID
+	taskID := data.TaskID
+	previousHead := data.Reset.PreviousHead
+	currentHead := data.Reset.CurrentHead
+
 	s.logger.Info("handling git commits reset",
-		zap.String("task_id", data.TaskID),
-		zap.String("session_id", data.TaskSessionID),
-		zap.String("previous_head", data.Reset.PreviousHead),
-		zap.String("current_head", data.Reset.CurrentHead))
+		zap.String("task_id", taskID),
+		zap.String("session_id", sessionID),
+		zap.String("previous_head", previousHead),
+		zap.String("current_head", currentHead))
 
 	// Remove orphaned commits asynchronously
 	go func() {
 		bgCtx := context.Background()
 
 		// Get all stored commits for this session
-		commits, err := s.repo.GetSessionCommits(bgCtx, data.TaskSessionID)
+		commits, err := s.repo.GetSessionCommits(bgCtx, sessionID)
 		if err != nil {
 			s.logger.Error("failed to get session commits for reset handling",
-				zap.String("session_id", data.TaskSessionID),
+				zap.String("session_id", sessionID),
 				zap.Error(err))
 			return
 		}
@@ -846,7 +847,7 @@ func (s *Service) handleGitCommitsReset(ctx context.Context, data watcher.GitEve
 
 		// Walk the parent chain from currentHead to find reachable commits
 		reachable := make(map[string]bool)
-		current := data.Reset.CurrentHead
+		current := currentHead
 		for current != "" {
 			reachable[current] = true
 			if c, exists := commitBySHA[current]; exists {
@@ -863,13 +864,13 @@ func (s *Service) handleGitCommitsReset(ctx context.Context, data watcher.GitEve
 			if !reachable[c.CommitSHA] {
 				if err := s.repo.DeleteSessionCommit(bgCtx, c.ID); err != nil {
 					s.logger.Error("failed to delete orphaned commit",
-						zap.String("session_id", data.TaskSessionID),
+						zap.String("session_id", sessionID),
 						zap.String("commit_sha", c.CommitSHA),
 						zap.Error(err))
 				} else {
 					deleted++
 					s.logger.Debug("deleted orphaned commit after reset",
-						zap.String("session_id", data.TaskSessionID),
+						zap.String("session_id", sessionID),
 						zap.String("commit_sha", c.CommitSHA))
 				}
 			}
@@ -877,24 +878,24 @@ func (s *Service) handleGitCommitsReset(ctx context.Context, data watcher.GitEve
 
 		if deleted > 0 {
 			s.logger.Info("removed orphaned commits after git reset",
-				zap.String("session_id", data.TaskSessionID),
+				zap.String("session_id", sessionID),
 				zap.Int("deleted_count", deleted),
-				zap.String("new_head", data.Reset.CurrentHead))
+				zap.String("new_head", currentHead))
 
 			// Publish event to notify frontend that commits changed
 			if s.eventBus != nil {
 				event := bus.NewEvent(events.GitEvent, "orchestrator", &lifecycle.GitEventPayload{
 					Type:      lifecycle.GitEventTypeCommitsReset,
-					SessionID: data.TaskSessionID,
-					TaskID:    data.TaskID,
+					SessionID: sessionID,
+					TaskID:    taskID,
 					Timestamp: time.Now().Format("2006-01-02T15:04:05.000000000Z07:00"),
 					Reset: &lifecycle.GitResetData{
-						PreviousHead: data.Reset.PreviousHead,
-						CurrentHead:  data.Reset.CurrentHead,
+						PreviousHead: previousHead,
+						CurrentHead:  currentHead,
 						DeletedCount: deleted,
 					},
 				})
-				_ = s.eventBus.Publish(bgCtx, events.BuildGitWSEventSubject(data.TaskSessionID), event)
+				_ = s.eventBus.Publish(bgCtx, events.BuildGitWSEventSubject(sessionID), event)
 			}
 		}
 	}()
