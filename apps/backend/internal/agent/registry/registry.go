@@ -245,6 +245,19 @@ type PassthroughConfig struct {
 	// StabilityWindowMs is how long state must be stable before reporting (default 0)
 	// Codex uses 1000ms to prevent false exits from working state
 	StabilityWindowMs int `json:"stability_window_ms,omitempty"`
+
+	// ResumeFlag is the CLI flag to continue the last conversation in the workspace.
+	// This is used when the backend restarts and user reconnects to an existing session.
+	// Examples: "-c" for auggie/claude-code/opencode, "--resume latest" for gemini
+	// If empty, the agent doesn't support resume and starts a fresh session.
+	ResumeFlag string `json:"resume_flag,omitempty"`
+
+	// WaitForTerminal indicates that the agent requires a terminal to be connected
+	// before starting. Some agents (like Codex) query the terminal for cursor position
+	// on startup and will fail if no terminal is connected to respond.
+	// When true, the process waits for the terminal WebSocket to connect and send
+	// dimensions before starting. When false (default), starts immediately.
+	WaitForTerminal bool `json:"wait_for_terminal,omitempty"`
 }
 
 // Registry manages agent type configurations

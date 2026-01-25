@@ -13,12 +13,13 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
 
-	"github.com/kandev/kandev/internal/worktree"
+	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
+	"github.com/kandev/kandev/internal/worktree"
 )
 
 // WorktreeCleanup provides worktree cleanup on task deletion.
@@ -2195,5 +2196,61 @@ func (s *Service) GetCumulativeDiff(ctx context.Context, sessionID string) (*mod
 		HeadCommit:   latestSnapshot.HeadCommit,
 		TotalCommits: len(commits),
 		Files:        latestSnapshot.Files,
+	}, nil
+}
+
+// GetWorkspaceInfoForSession returns workspace information for a task session.
+// This implements the lifecycle.WorkspaceInfoProvider interface.
+// The taskID parameter is optional - if empty, it will be looked up from the session.
+func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessionID string) (*lifecycle.WorkspaceInfo, error) {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get session %s: %w", sessionID, err)
+	}
+	if session == nil {
+		return nil, fmt.Errorf("session %s not found", sessionID)
+	}
+
+	// Use session's TaskID if not provided
+	if taskID == "" {
+		taskID = session.TaskID
+	}
+
+	// Get workspace path from the session's worktree
+	var workspacePath string
+	if len(session.Worktrees) > 0 {
+		workspacePath = session.Worktrees[0].WorktreePath
+	}
+
+	// If no worktree, try to get from repository snapshot
+	if workspacePath == "" && session.RepositorySnapshot != nil {
+		if path, ok := session.RepositorySnapshot["path"].(string); ok {
+			workspacePath = path
+		}
+	}
+
+	// Get agent ID from profile snapshot
+	var agentID string
+	if session.AgentProfileSnapshot != nil {
+		if id, ok := session.AgentProfileSnapshot["agent_id"].(string); ok {
+			agentID = id
+		}
+	}
+
+	// Get ACP session ID from metadata
+	var acpSessionID string
+	if session.Metadata != nil {
+		if id, ok := session.Metadata["acp_session_id"].(string); ok {
+			acpSessionID = id
+		}
+	}
+
+	return &lifecycle.WorkspaceInfo{
+		TaskID:         taskID,
+		SessionID:      sessionID,
+		WorkspacePath:  workspacePath,
+		AgentProfileID: session.AgentProfileID,
+		AgentID:        agentID,
+		ACPSessionID:   acpSessionID,
 	}, nil
 }

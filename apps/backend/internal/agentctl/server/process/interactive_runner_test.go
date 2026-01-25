@@ -495,3 +495,195 @@ func TestInteractiveRunner_NotFound(t *testing.T) {
 		t.Error("GetPtyWriter() should fail for nonexistent process")
 	}
 }
+
+func TestInteractiveRunner_IsProcessRunning(t *testing.T) {
+	log := newTestLogger(t)
+	runner := NewInteractiveRunner(nil, log, 2*1024*1024)
+
+	// Non-existent process
+	if runner.IsProcessRunning("nonexistent") {
+		t.Error("IsProcessRunning() should return false for nonexistent process")
+	}
+
+	// Start a process
+	req := InteractiveStartRequest{
+		SessionID:      "running-test",
+		Command:        []string{"sleep", "10"},
+		ImmediateStart: true,
+		DefaultCols:    80,
+		DefaultRows:    24,
+	}
+
+	info, err := runner.Start(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+
+	// Give process time to start
+	time.Sleep(100 * time.Millisecond)
+
+	// Process should be running
+	if !runner.IsProcessRunning(info.ID) {
+		t.Error("IsProcessRunning() should return true for running process")
+	}
+
+	// Stop the process
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = runner.Stop(ctx, info.ID)
+
+	// Give it time to clean up
+	time.Sleep(200 * time.Millisecond)
+
+	// Process should no longer be running
+	if runner.IsProcessRunning(info.ID) {
+		t.Error("IsProcessRunning() should return false after stop")
+	}
+}
+
+func TestInteractiveRunner_IsProcessReadyOrPending(t *testing.T) {
+	log := newTestLogger(t)
+	runner := NewInteractiveRunner(nil, log, 2*1024*1024)
+
+	// Non-existent process
+	if runner.IsProcessReadyOrPending("nonexistent") {
+		t.Error("IsProcessReadyOrPending() should return false for nonexistent process")
+	}
+
+	// Start a deferred process (not started yet)
+	req := InteractiveStartRequest{
+		SessionID: "pending-test",
+		Command:   []string{"cat"},
+		// ImmediateStart: false (deferred)
+	}
+
+	info, err := runner.Start(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+
+	// Deferred process should be "ready or pending"
+	if !runner.IsProcessReadyOrPending(info.ID) {
+		t.Error("IsProcessReadyOrPending() should return true for pending process")
+	}
+
+	// But not "running" yet
+	if runner.IsProcessRunning(info.ID) {
+		t.Error("IsProcessRunning() should return false for pending process")
+	}
+
+	// Trigger start via resize
+	err = runner.ResizeBySession("pending-test", 80, 24)
+	if err != nil {
+		t.Fatalf("ResizeBySession() error = %v", err)
+	}
+
+	// Give process time to start
+	time.Sleep(100 * time.Millisecond)
+
+	// Now it should be both "running" and "ready or pending"
+	if !runner.IsProcessRunning(info.ID) {
+		t.Error("IsProcessRunning() should return true after start")
+	}
+	if !runner.IsProcessReadyOrPending(info.ID) {
+		t.Error("IsProcessReadyOrPending() should return true for running process")
+	}
+
+	// Stop the process
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = runner.Stop(ctx, info.ID)
+}
+
+func TestCursorPositionQueryDetection(t *testing.T) {
+	tests := []struct {
+		name     string
+		data     []byte
+		wantDSR  bool // Device Status Report (cursor position query)
+		wantDA   bool // Device Attributes query
+	}{
+		{
+			name:    "cursor position query ESC[6n",
+			data:    []byte("\x1b[6n"),
+			wantDSR: true,
+			wantDA:  false,
+		},
+		{
+			name:    "cursor position query ESC[?6n",
+			data:    []byte("\x1b[?6n"),
+			wantDSR: true,
+			wantDA:  false,
+		},
+		{
+			name:    "device attributes query ESC[c",
+			data:    []byte("\x1b[c"),
+			wantDSR: false,
+			wantDA:  true,
+		},
+		{
+			name:    "device attributes query ESC[0c",
+			data:    []byte("\x1b[0c"),
+			wantDSR: false,
+			wantDA:  true,
+		},
+		{
+			name:    "no escape sequence",
+			data:    []byte("hello world"),
+			wantDSR: false,
+			wantDA:  false,
+		},
+		{
+			name:    "mixed content with DSR",
+			data:    []byte("some text\x1b[6nmore text"),
+			wantDSR: true,
+			wantDA:  false,
+		},
+		{
+			name:    "both DSR and DA",
+			data:    []byte("\x1b[6n\x1b[c"),
+			wantDSR: true,
+			wantDA:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotDSR := containsCursorPositionQuery(tt.data)
+			gotDA := containsDeviceAttributesQuery(tt.data)
+
+			if gotDSR != tt.wantDSR {
+				t.Errorf("containsCursorPositionQuery() = %v, want %v", gotDSR, tt.wantDSR)
+			}
+			if gotDA != tt.wantDA {
+				t.Errorf("containsDeviceAttributesQuery() = %v, want %v", gotDA, tt.wantDA)
+			}
+		})
+	}
+}
+
+// containsCursorPositionQuery checks for DSR cursor position query (CSI 6 n)
+func containsCursorPositionQuery(data []byte) bool {
+	return bytesContains(data, []byte("\x1b[6n")) || bytesContains(data, []byte("\x1b[?6n"))
+}
+
+// containsDeviceAttributesQuery checks for DA query (CSI c or CSI 0 c)
+func containsDeviceAttributesQuery(data []byte) bool {
+	return bytesContains(data, []byte("\x1b[c")) || bytesContains(data, []byte("\x1b[0c"))
+}
+
+// bytesContains is a simple contains check (bytes.Contains equivalent for tests)
+func bytesContains(data, substr []byte) bool {
+	for i := 0; i <= len(data)-len(substr); i++ {
+		match := true
+		for j := 0; j < len(substr); j++ {
+			if data[i+j] != substr[j] {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
+}

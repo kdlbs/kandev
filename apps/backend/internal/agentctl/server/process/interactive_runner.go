@@ -7,6 +7,7 @@
 package process
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -455,6 +456,53 @@ func (r *InteractiveRunner) GetBySession(sessionID string) (*InteractiveProcessI
 	return nil, false
 }
 
+// isProcessAlive checks if the underlying OS process is still running.
+// Must be called with proc.mu held.
+func (r *InteractiveRunner) isProcessAlive(proc *interactiveProcess) bool {
+	if proc.cmd != nil && proc.cmd.Process != nil {
+		// Signal 0 checks if process exists without sending a signal
+		err := proc.cmd.Process.Signal(syscall.Signal(0))
+		return err == nil
+	}
+	return false
+}
+
+// IsProcessRunning checks if a process with the given ID exists and is running.
+// This is used to detect if a process was killed (e.g., after backend restart).
+func (r *InteractiveRunner) IsProcessRunning(processID string) bool {
+	proc, ok := r.get(processID)
+	if !ok {
+		return false
+	}
+
+	proc.mu.Lock()
+	defer proc.mu.Unlock()
+
+	// Process must be started and alive
+	return proc.started && r.isProcessAlive(proc)
+}
+
+// IsProcessReadyOrPending checks if a process exists and is either running or pending start.
+// This is used by the terminal handler to allow connections to deferred-start processes
+// that will start when the terminal sends dimensions.
+func (r *InteractiveRunner) IsProcessReadyOrPending(processID string) bool {
+	proc, ok := r.get(processID)
+	if !ok {
+		return false
+	}
+
+	proc.mu.Lock()
+	defer proc.mu.Unlock()
+
+	// Process exists but hasn't started yet (deferred start) - this is OK
+	if !proc.started {
+		return true
+	}
+
+	// Process started - check if still alive
+	return r.isProcessAlive(proc)
+}
+
 // GetBuffer returns the buffered output for a process.
 func (r *InteractiveRunner) GetBuffer(processID string) ([]ProcessOutputChunk, bool) {
 	proc, ok := r.get(processID)
@@ -565,6 +613,40 @@ func (r *InteractiveRunner) readOutput(proc *interactiveProcess) {
 		if n > 0 {
 			data := buf[:n]
 			dataStr := string(data)
+
+			// Respond to cursor position queries (DSR) if no terminal is connected yet.
+			// Some CLI tools (like Codex) query cursor position on startup with \e[6n
+			// and expect a response \e[row;colR. Without this, they timeout and exit.
+			// Only respond if no direct output writer is connected (no real terminal yet).
+			proc.directOutputMu.RLock()
+			hasDirectWriter := proc.directOutput != nil
+			proc.directOutputMu.RUnlock()
+
+			if !hasDirectWriter {
+				// Check for cursor position query (DSR): ESC [ 6 n or ESC [ ? 6 n
+				if containsDSRQuery(data) {
+					// Respond with cursor at position 1,1 (top-left)
+					response := "\x1b[1;1R"
+					if _, err := ptyInstance.Write([]byte(response)); err != nil {
+						r.logger.Debug("failed to respond to cursor position query",
+							zap.String("process_id", proc.info.ID),
+							zap.Error(err))
+					} else {
+						r.logger.Debug("responded to cursor position query",
+							zap.String("process_id", proc.info.ID))
+					}
+				}
+				// Check for primary device attributes query (DA1): ESC [ c or ESC [ 0 c
+				if containsDA1Query(data) {
+					// Respond as VT100 terminal with advanced video option
+					response := "\x1b[?1;2c"
+					if _, err := ptyInstance.Write([]byte(response)); err != nil {
+						r.logger.Debug("failed to respond to device attributes query",
+							zap.String("process_id", proc.info.ID),
+							zap.Error(err))
+					}
+				}
+			}
 
 			// Feed to status tracker for TUI state detection
 			if proc.statusTracker != nil {
@@ -723,6 +805,27 @@ func (r *InteractiveRunner) wait(proc *interactiveProcess) {
 		zap.Error(err),
 	)
 
+	// Log buffer contents if process exited with error (helps debug startup failures)
+	if status == types.ProcessStatusFailed && proc.buffer != nil {
+		chunks := proc.buffer.snapshot()
+		if len(chunks) > 0 {
+			var combinedOutput string
+			for _, chunk := range chunks {
+				combinedOutput += chunk.Data
+			}
+			// Truncate for logging (max 2000 chars)
+			if len(combinedOutput) > 2000 {
+				combinedOutput = combinedOutput[:2000] + "...(truncated)"
+			}
+			r.logger.Error("interactive process output before exit",
+				zap.String("process_id", proc.info.ID),
+				zap.String("session_id", proc.info.SessionID),
+				zap.Int("exit_code", exitCode),
+				zap.String("output", combinedOutput),
+			)
+		}
+	}
+
 	// Stop idle timer
 	proc.idleTimerMu.Lock()
 	if proc.idleTimer != nil {
@@ -876,5 +979,35 @@ func (r *InteractiveRunner) GetPtyWriter(processID string) (io.Writer, error) {
 	}
 
 	return proc.ptmx, nil
+}
+
+// containsDSRQuery checks if data contains a Device Status Report (cursor position) query.
+// DSR query is: ESC [ 6 n or ESC [ ? 6 n
+func containsDSRQuery(data []byte) bool {
+	return bytes.Contains(data, []byte("\x1b[6n")) || bytes.Contains(data, []byte("\x1b[?6n"))
+}
+
+// containsDA1Query checks if data contains a Primary Device Attributes query.
+// DA1 query is: ESC [ c or ESC [ 0 c (but NOT ESC [ <digit> c which is cursor forward)
+func containsDA1Query(data []byte) bool {
+	// Check for exact ESC [ c sequence
+	csiC := []byte("\x1b[c")
+	for i := 0; i <= len(data)-len(csiC); i++ {
+		if data[i] == '\x1b' && i+2 < len(data) && data[i+1] == '[' && data[i+2] == 'c' {
+			// Make sure it's not preceded by a digit (which would make it cursor forward)
+			// ESC [ c is valid, ESC [ 0 c is valid, but ESC [ 1 c is cursor forward
+			if i+2 == len(data)-1 {
+				// ESC [ c at end
+				return true
+			}
+			// Check what's before 'c' - if it's just '[' or '[0' it's DA1
+			// We already matched ESC [ c, so this is valid
+			return true
+		}
+	}
+
+	// Check for ESC [ 0 c
+	csi0C := []byte("\x1b[0c")
+	return bytes.Contains(data, csi0C)
 }
 

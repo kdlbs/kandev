@@ -251,6 +251,12 @@ func main() {
 		zap.Bool("enabled", cfg.Worktree.Enabled),
 		zap.String("base_path", cfg.Worktree.BasePath))
 
+	// Set task service as workspace info provider for session recovery
+	if lifecycleMgr != nil {
+		lifecycleMgr.SetWorkspaceInfoProvider(taskSvc)
+		log.Info("Workspace info provider configured for session recovery")
+	}
+
 	// ============================================
 	// ORCHESTRATOR
 	// ============================================

@@ -2,6 +2,7 @@
 package websocket
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -140,23 +141,7 @@ func (h *TerminalHandler) HandleTerminalWS(c *gin.Context) {
 		zap.String("session_id", sessionID),
 		zap.String("remote_addr", c.Request.RemoteAddr))
 
-	// Validate session exists and is in passthrough mode
-	execution, exists := h.lifecycleMgr.GetExecutionBySessionID(sessionID)
-	if !exists {
-		h.logger.Warn("no execution found for session",
-			zap.String("session_id", sessionID))
-		c.JSON(http.StatusNotFound, gin.H{"error": "no agent execution for session"})
-		return
-	}
-
-	if execution.PassthroughProcessID == "" {
-		h.logger.Warn("session is not in passthrough mode",
-			zap.String("session_id", sessionID))
-		c.JSON(http.StatusBadRequest, gin.H{"error": "session is not in passthrough mode"})
-		return
-	}
-
-	// Get the interactive runner
+	// Get the interactive runner first
 	interactiveRunner := h.lifecycleMgr.GetInteractiveRunner()
 	if interactiveRunner == nil {
 		h.logger.Error("interactive runner not available")
@@ -164,9 +149,38 @@ func (h *TerminalHandler) HandleTerminalWS(c *gin.Context) {
 		return
 	}
 
-	processID := execution.PassthroughProcessID
+	// Ensure passthrough execution exists and is running.
+	// This handles:
+	// 1. Normal case: execution exists with running process
+	// 2. Backend restart: no execution, need to create and start
+	// 3. Process died: execution exists but process not running, need to restart
+	execution, err := h.lifecycleMgr.EnsurePassthroughExecution(c.Request.Context(), sessionID)
+	if err != nil {
+		h.logger.Warn("failed to ensure passthrough execution",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 
-	// Upgrade to WebSocket first - we'll get PTY access after the first resize
+	processID := execution.PassthroughProcessID
+	if processID == "" {
+		h.logger.Error("passthrough process ID is empty after ensure",
+			zap.String("session_id", sessionID))
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "passthrough process not started"})
+		return
+	}
+
+	// Verify the process exists (either running or pending start for deferred-start processes)
+	if !interactiveRunner.IsProcessReadyOrPending(processID) {
+		h.logger.Error("passthrough process not found or exited",
+			zap.String("session_id", sessionID),
+			zap.String("process_id", processID))
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "passthrough process failed to start"})
+		return
+	}
+
+	// Upgrade to WebSocket - we'll get PTY access after the first resize
 	// triggers the lazy process start
 	conn, err := terminalUpgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
@@ -383,6 +397,29 @@ func (h *TerminalHandler) setupPtyAccess(
 			zap.String("session_id", sessionID),
 			zap.String("process_id", processID))
 		return false
+	}
+
+	// Send buffered output to the terminal before switching to direct mode.
+	// This provides scrollback history when reconnecting to an existing session.
+	// We batch all chunks into a single write for efficiency.
+	if chunks, ok := interactiveRunner.GetBuffer(processID); ok && len(chunks) > 0 {
+		var combined bytes.Buffer
+		for _, chunk := range chunks {
+			combined.WriteString(chunk.Data)
+		}
+
+		if combined.Len() > 0 {
+			h.logger.Debug("sending buffered output to terminal",
+				zap.String("session_id", sessionID),
+				zap.Int("chunks", len(chunks)),
+				zap.Int("total_bytes", combined.Len()))
+
+			if _, writeErr := wsw.Write(combined.Bytes()); writeErr != nil {
+				h.logger.Warn("failed to send buffered output",
+					zap.String("session_id", sessionID),
+					zap.Error(writeErr))
+			}
+		}
 	}
 
 	// Set up direct output

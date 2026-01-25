@@ -294,6 +294,125 @@ func (m *Manager) EnsureWorkspaceExecutionForSession(ctx context.Context, taskID
 	return execution, nil
 }
 
+// EnsurePassthroughExecution ensures an execution exists for a passthrough session
+// and starts the passthrough process if needed. This is called when the terminal
+// handler receives a connection for a session that might need recovery after backend restart.
+//
+// The sessionID is required. If taskID is empty, it will be looked up from:
+// 1. The existing execution (if any)
+// 2. The workspace info provider
+//
+// Returns the execution with a running passthrough process, or an error.
+func (m *Manager) EnsurePassthroughExecution(ctx context.Context, sessionID string) (*AgentExecution, error) {
+	// Check if execution already exists with a running passthrough process
+	if execution, exists := m.executionStore.GetBySessionID(sessionID); exists {
+		if execution.PassthroughProcessID != "" {
+			return execution, nil
+		}
+		// Execution exists but no passthrough process - will try to start it
+		return m.resumeExistingExecution(ctx, sessionID, execution)
+	}
+
+	// No execution exists - need to create one from session info
+	return m.createExecutionFromSessionInfo(ctx, sessionID)
+}
+
+// resumeExistingExecution starts the passthrough process for an existing execution
+// that has no running process (e.g., after backend restart).
+func (m *Manager) resumeExistingExecution(ctx context.Context, sessionID string, execution *AgentExecution) (*AgentExecution, error) {
+	m.logger.Info("execution exists but passthrough process not running, starting",
+		zap.String("session_id", sessionID),
+		zap.String("execution_id", execution.ID))
+
+	if err := m.ResumePassthroughSession(ctx, sessionID); err != nil {
+		return nil, fmt.Errorf("resume passthrough session %s: %w", sessionID, err)
+	}
+
+	// Get updated execution with process ID
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
+	if !exists {
+		return nil, fmt.Errorf("execution disappeared after resuming passthrough session %s", sessionID)
+	}
+	return execution, nil
+}
+
+// createExecutionFromSessionInfo creates a new execution for a passthrough session
+// when no execution exists (e.g., backend restarted and execution store was cleared).
+func (m *Manager) createExecutionFromSessionInfo(ctx context.Context, sessionID string) (*AgentExecution, error) {
+	if m.workspaceInfoProvider == nil {
+		return nil, fmt.Errorf("cannot restore session %s: workspace info provider not configured", sessionID)
+	}
+
+	// Get workspace info from the provider (looks up session to get taskID, workspace path, etc.)
+	info, err := m.workspaceInfoProvider.GetWorkspaceInfoForSession(ctx, "", sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("get workspace info for session %s: %w", sessionID, err)
+	}
+
+	if info.WorkspacePath == "" {
+		return nil, fmt.Errorf("session %s has no workspace path configured", sessionID)
+	}
+
+	if info.TaskID == "" {
+		return nil, fmt.Errorf("session %s has no associated task ID", sessionID)
+	}
+
+	// Verify this session should use passthrough mode
+	if err := m.verifyPassthroughEnabled(ctx, sessionID, info.AgentProfileID); err != nil {
+		return nil, err
+	}
+
+	// Create the execution
+	m.logger.Info("creating execution for passthrough session",
+		zap.String("task_id", info.TaskID),
+		zap.String("session_id", sessionID),
+		zap.String("workspace_path", info.WorkspacePath))
+
+	execution, err := m.createExecution(ctx, info.TaskID, info)
+	if err != nil {
+		return nil, fmt.Errorf("create execution for session %s: %w", sessionID, err)
+	}
+
+	// Start the passthrough process using resume command (recovery after restart)
+	m.logger.Info("starting passthrough process for session",
+		zap.String("session_id", sessionID),
+		zap.String("execution_id", execution.ID))
+
+	if err := m.ResumePassthroughSession(ctx, sessionID); err != nil {
+		return nil, fmt.Errorf("start passthrough process for session %s: %w", sessionID, err)
+	}
+
+	// Get updated execution with process ID
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
+	if !exists {
+		return nil, fmt.Errorf("execution disappeared after starting passthrough session %s", sessionID)
+	}
+
+	return execution, nil
+}
+
+// verifyPassthroughEnabled checks if the session's profile has CLI passthrough enabled.
+func (m *Manager) verifyPassthroughEnabled(ctx context.Context, sessionID, profileID string) error {
+	if m.profileResolver == nil || profileID == "" {
+		return fmt.Errorf("session %s has no profile configured for passthrough mode", sessionID)
+	}
+
+	profileInfo, err := m.profileResolver.ResolveProfile(ctx, profileID)
+	if err != nil {
+		m.logger.Warn("failed to resolve profile for passthrough check",
+			zap.String("session_id", sessionID),
+			zap.String("profile_id", profileID),
+			zap.Error(err))
+		return fmt.Errorf("session %s: failed to resolve profile %s: %w", sessionID, profileID, err)
+	}
+
+	if profileInfo == nil || !profileInfo.CLIPassthrough {
+		return fmt.Errorf("session %s is not configured for CLI passthrough mode", sessionID)
+	}
+
+	return nil
+}
+
 // createExecution creates an agentctl execution.
 // The agent subprocess is NOT started - call ConfigureAgent + Start explicitly.
 func (m *Manager) createExecution(ctx context.Context, taskID string, info *WorkspaceInfo) (*AgentExecution, error) {
@@ -2091,7 +2210,9 @@ func (m *Manager) startPassthroughSession(ctx context.Context, execution *AgentE
 	}
 
 	// Start the interactive process immediately with default dimensions
-	// This allows the agent to start working before the user opens the terminal
+	// Start process - either immediately (default) or wait for terminal connection
+	// Some agents (like Codex) require the terminal to be connected first because
+	// they query the terminal for cursor position on startup
 	startReq := process.InteractiveStartRequest{
 		SessionID:         execution.SessionID,
 		Command:           cmd,
@@ -2103,7 +2224,7 @@ func (m *Manager) startPassthroughSession(ctx context.Context, execution *AgentE
 		StatusDetector:    agentConfig.PassthroughConfig.StatusDetector,
 		CheckIntervalMs:   agentConfig.PassthroughConfig.CheckIntervalMs,
 		StabilityWindowMs: agentConfig.PassthroughConfig.StabilityWindowMs,
-		ImmediateStart:    true, // Start immediately, don't wait for terminal resize
+		ImmediateStart:    !agentConfig.PassthroughConfig.WaitForTerminal,
 		DefaultCols:       120,
 		DefaultRows:       40,
 	}
@@ -2222,6 +2343,168 @@ func (m *Manager) buildPassthroughCommand(agentConfig *registry.AgentTypeConfig,
 			// Default: append prompt as a positional argument
 			cmd = append(cmd, initialPrompt)
 		}
+	}
+
+	return cmd
+}
+
+// ResumePassthroughSession restarts a passthrough session after backend restart.
+// This is called when user reconnects to a terminal but the PTY process is no longer running.
+// If the agent supports resume, it uses the resume flag to continue the last conversation.
+// Otherwise, it starts a fresh CLI session with the same profile settings.
+func (m *Manager) ResumePassthroughSession(ctx context.Context, sessionID string) error {
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
+	if !exists {
+		return fmt.Errorf("no execution found for session: %s", sessionID)
+	}
+
+	// Get agent config
+	agentConfig, err := m.getAgentConfigForExecution(execution)
+	if err != nil {
+		return fmt.Errorf("failed to get agent config: %w", err)
+	}
+
+	if !agentConfig.PassthroughConfig.Supported {
+		return fmt.Errorf("agent %s does not support passthrough mode", agentConfig.ID)
+	}
+
+	// Get profile info for permission settings
+	var profileInfo *AgentProfileInfo
+	if m.profileResolver != nil && execution.AgentProfileID != "" {
+		profileInfo, _ = m.profileResolver.ResolveProfile(ctx, execution.AgentProfileID)
+	}
+
+	// Build the resume command
+	cmd := m.buildPassthroughResumeCommand(agentConfig, profileInfo)
+	if len(cmd) == 0 {
+		return fmt.Errorf("passthrough resume command is empty for agent %s", agentConfig.ID)
+	}
+
+	m.logger.Info("resuming passthrough session",
+		zap.String("session_id", sessionID),
+		zap.String("execution_id", execution.ID),
+		zap.Strings("command", cmd),
+		zap.Bool("has_resume_flag", agentConfig.PassthroughConfig.ResumeFlag != ""))
+
+	// Get the interactive runner
+	interactiveRunner := m.GetInteractiveRunner()
+	if interactiveRunner == nil {
+		return fmt.Errorf("interactive runner not available")
+	}
+
+	// Build environment variables
+	env := make(map[string]string)
+	env["KANDEV_TASK_ID"] = execution.TaskID
+	env["KANDEV_SESSION_ID"] = execution.SessionID
+	env["KANDEV_AGENT_PROFILE_ID"] = execution.AgentProfileID
+
+	// Add required credentials
+	if m.credsMgr != nil {
+		for _, credKey := range agentConfig.RequiredEnv {
+			if value, err := m.credsMgr.GetCredentialValue(ctx, credKey); err == nil && value != "" {
+				env[credKey] = value
+			}
+		}
+	}
+
+	// Start the interactive process
+	// Use the same settings as initial start (including wait_for_terminal)
+	startReq := process.InteractiveStartRequest{
+		SessionID:         sessionID,
+		Command:           cmd,
+		WorkingDir:        execution.WorkspacePath,
+		Env:               env,
+		IdleTimeoutMs:     agentConfig.PassthroughConfig.IdleTimeoutMs,
+		BufferMaxBytes:    agentConfig.PassthroughConfig.BufferMaxBytes,
+		StatusDetector:    agentConfig.PassthroughConfig.StatusDetector,
+		CheckIntervalMs:   agentConfig.PassthroughConfig.CheckIntervalMs,
+		StabilityWindowMs: agentConfig.PassthroughConfig.StabilityWindowMs,
+		ImmediateStart:    !agentConfig.PassthroughConfig.WaitForTerminal,
+		DefaultCols:       120,
+		DefaultRows:       40,
+	}
+
+	processInfo, err := interactiveRunner.Start(ctx, startReq)
+	if err != nil {
+		return fmt.Errorf("failed to start passthrough session: %w", err)
+	}
+
+	// Update the execution with new process ID
+	execution.PassthroughProcessID = processInfo.ID
+
+	m.logger.Info("passthrough session resumed",
+		zap.String("session_id", sessionID),
+		zap.String("execution_id", execution.ID),
+		zap.String("process_id", processInfo.ID))
+
+	// Start shell session for workspace shell access (right panel terminal).
+	// This needs to be done after resume since the shell process was killed on backend restart.
+	if execution.agentctl != nil {
+		if err := execution.agentctl.StartShell(ctx); err != nil {
+			m.logger.Warn("failed to start shell for resumed passthrough session",
+				zap.String("execution_id", execution.ID),
+				zap.Error(err))
+			// Non-fatal: continue without shell
+		} else {
+			m.logger.Info("shell session started for resumed passthrough session",
+				zap.String("execution_id", execution.ID))
+		}
+	}
+
+	// Connect to workspace stream for shell/git/file features.
+	// This re-establishes the connection that was lost on backend restart.
+	if m.streamManager != nil && execution.agentctl != nil {
+		go m.streamManager.connectWorkspaceStream(execution)
+	}
+
+	return nil
+}
+
+// buildPassthroughResumeCommand builds the command for resuming a passthrough session.
+// If the agent supports resume (has ResumeFlag), it adds the resume flag.
+// Otherwise, it starts a fresh session with profile settings but no initial prompt.
+func (m *Manager) buildPassthroughResumeCommand(agentConfig *registry.AgentTypeConfig, profileInfo *AgentProfileInfo) []string {
+	// Start with passthrough_cmd
+	cmd := make([]string, len(agentConfig.PassthroughConfig.PassthroughCmd))
+	copy(cmd, agentConfig.PassthroughConfig.PassthroughCmd)
+
+	// Apply model flag if configured
+	if profileInfo != nil && profileInfo.Model != "" && agentConfig.PassthroughConfig.ModelFlag != "" {
+		expanded := strings.ReplaceAll(agentConfig.PassthroughConfig.ModelFlag, "{model}", profileInfo.Model)
+		parts := strings.SplitN(expanded, " ", 2)
+		cmd = append(cmd, parts...)
+	}
+
+	// Apply permission settings that use CLI flags
+	if profileInfo != nil && agentConfig.PermissionSettings != nil {
+		permissionValues := map[string]bool{
+			"auto_approve":                 profileInfo.AutoApprove,
+			"dangerously_skip_permissions": profileInfo.DangerouslySkipPermissions,
+			"allow_indexing":               profileInfo.AllowIndexing,
+		}
+
+		for settingName, setting := range agentConfig.PermissionSettings {
+			if !setting.Supported || setting.ApplyMethod != "cli_flag" || setting.CLIFlag == "" {
+				continue
+			}
+			value, exists := permissionValues[settingName]
+			if !exists || !value {
+				continue
+			}
+			if setting.CLIFlagValue != "" {
+				cmd = append(cmd, setting.CLIFlag, setting.CLIFlagValue)
+			} else {
+				parts := strings.Fields(setting.CLIFlag)
+				cmd = append(cmd, parts...)
+			}
+		}
+	}
+
+	// Add resume flag if agent supports it
+	if agentConfig.PassthroughConfig.ResumeFlag != "" {
+		// Split on spaces to handle flags like "--resume latest"
+		parts := strings.Fields(agentConfig.PassthroughConfig.ResumeFlag)
+		cmd = append(cmd, parts...)
 	}
 
 	return cmd
