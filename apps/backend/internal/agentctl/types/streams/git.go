@@ -104,3 +104,16 @@ type GitCommitNotification struct {
 	// CommittedAt is when the commit was made.
 	CommittedAt time.Time `json:"committed_at"`
 }
+
+// GitResetNotification is sent when HEAD moves backward (e.g., git reset, rebase).
+// This signals that commits may have been removed and the backend should sync.
+type GitResetNotification struct {
+	// Timestamp is when this notification was created.
+	Timestamp time.Time `json:"timestamp"`
+
+	// PreviousHead is the SHA HEAD was pointing to before the reset.
+	PreviousHead string `json:"previous_head"`
+
+	// CurrentHead is the SHA HEAD is now pointing to.
+	CurrentHead string `json:"current_head"`
+}

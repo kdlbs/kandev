@@ -19,6 +19,9 @@ import (
 	"go.uber.org/zap"
 )
 
+// DefaultGitPollInterval is the default interval for polling git status
+const DefaultGitPollInterval = 3 * time.Second
+
 // WorkspaceTracker monitors workspace changes and provides real-time updates
 type WorkspaceTracker struct {
 	workDir string
@@ -29,6 +32,10 @@ type WorkspaceTracker struct {
 	currentFiles  types.FileListUpdate
 	mu            sync.RWMutex
 
+	// Cached git state for detecting manual operations
+	cachedHeadSHA string
+	gitStateMu    sync.RWMutex
+
 	// Unified workspace stream subscribers
 	workspaceStreamSubscribers map[types.WorkspaceStreamSubscriber]struct{}
 	workspaceSubMu             sync.RWMutex
@@ -38,6 +45,9 @@ type WorkspaceTracker struct {
 
 	// Debounce channel for filesystem change events
 	fsChangeTrigger chan struct{}
+
+	// Git polling interval
+	gitPollInterval time.Duration
 
 	// Control
 	stopCh  chan struct{}
@@ -59,6 +69,7 @@ func NewWorkspaceTracker(workDir string, log *logger.Logger) *WorkspaceTracker {
 		workspaceStreamSubscribers: make(map[types.WorkspaceStreamSubscriber]struct{}),
 		watcher:                    watcher,
 		fsChangeTrigger:            make(chan struct{}, 1), // Buffered to avoid blocking
+		gitPollInterval:            DefaultGitPollInterval,
 		stopCh:                     make(chan struct{}),
 	}
 }
@@ -76,6 +87,10 @@ func (wt *WorkspaceTracker) Start(ctx context.Context) {
 
 	wt.wg.Add(1)
 	go wt.monitorLoop(ctx)
+
+	// Start git polling for detecting manual git operations
+	wt.wg.Add(1)
+	go wt.pollGitChanges(ctx)
 
 	// Start filesystem watcher if available
 	if wt.watcher != nil {
@@ -166,6 +181,261 @@ func (wt *WorkspaceTracker) monitorLoop(ctx context.Context) {
 	}
 }
 
+// pollGitChanges periodically checks for git changes (commits, branch switches)
+// This catches manual git operations done via shell that file watching might miss
+func (wt *WorkspaceTracker) pollGitChanges(ctx context.Context) {
+	defer wt.wg.Done()
+
+	ticker := time.NewTicker(wt.gitPollInterval)
+	defer ticker.Stop()
+
+	// Initialize cached HEAD SHA
+	wt.gitStateMu.Lock()
+	wt.cachedHeadSHA = wt.getHeadSHA(ctx)
+	wt.gitStateMu.Unlock()
+
+	wt.logger.Info("git polling started",
+		zap.Duration("interval", wt.gitPollInterval),
+		zap.String("initial_head", wt.cachedHeadSHA))
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-wt.stopCh:
+			return
+		case <-ticker.C:
+			wt.checkGitChanges(ctx)
+		}
+	}
+}
+
+// getHeadSHA returns the current HEAD commit SHA
+func (wt *WorkspaceTracker) getHeadSHA(ctx context.Context) string {
+	cmd := exec.CommandContext(ctx, "git", "rev-parse", "HEAD")
+	cmd.Dir = wt.workDir
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// checkGitChanges checks if HEAD has changed and processes new commits
+func (wt *WorkspaceTracker) checkGitChanges(ctx context.Context) {
+	currentHead := wt.getHeadSHA(ctx)
+	if currentHead == "" {
+		return
+	}
+
+	wt.gitStateMu.RLock()
+	previousHead := wt.cachedHeadSHA
+	wt.gitStateMu.RUnlock()
+
+	if currentHead == previousHead {
+		return // No change
+	}
+
+	wt.logger.Info("git HEAD changed, syncing",
+		zap.String("previous", previousHead),
+		zap.String("current", currentHead))
+
+	// Update cached HEAD
+	wt.gitStateMu.Lock()
+	wt.cachedHeadSHA = currentHead
+	wt.gitStateMu.Unlock()
+
+	// Check if HEAD moved backward (reset, rebase, etc.)
+	// This happens when currentHead is an ancestor of previousHead
+	if previousHead != "" {
+		if wt.isAncestor(ctx, currentHead, previousHead) {
+			// HEAD moved backward - emit reset notification
+			wt.logger.Info("detected git reset (HEAD moved backward)",
+				zap.String("previous", previousHead),
+				zap.String("current", currentHead))
+			wt.notifyWorkspaceStreamGitReset(&types.GitResetNotification{
+				Timestamp:    time.Now(),
+				PreviousHead: previousHead,
+				CurrentHead:  currentHead,
+			})
+		} else {
+			// HEAD moved forward - get new commits
+			commits := wt.getCommitsSince(ctx, previousHead)
+
+			// Filter out commits that are already on remote branches.
+			// This prevents recording upstream commits as session commits when
+			// the user pulls/rebases onto a remote branch (e.g., git reset --hard main).
+			localCommits := wt.filterLocalCommits(ctx, commits)
+
+			for _, commit := range localCommits {
+				wt.notifyWorkspaceStreamGitCommit(commit)
+			}
+			if len(localCommits) > 0 {
+				wt.logger.Info("detected new commits via polling",
+					zap.Int("count", len(localCommits)))
+			}
+		}
+	}
+
+	// Update and broadcast git status
+	wt.updateGitStatus(ctx)
+}
+
+// isAncestor checks if commit1 is an ancestor of commit2
+func (wt *WorkspaceTracker) isAncestor(ctx context.Context, commit1, commit2 string) bool {
+	cmd := exec.CommandContext(ctx, "git", "merge-base", "--is-ancestor", commit1, commit2)
+	cmd.Dir = wt.workDir
+	err := cmd.Run()
+	// Exit code 0 means commit1 IS an ancestor of commit2
+	// Exit code 1 means commit1 is NOT an ancestor of commit2
+	return err == nil
+}
+
+// isOnRemote checks if a commit is reachable from any remote tracking branch.
+// This is used to filter out upstream commits that came from a pull/fetch,
+// as opposed to commits made locally in the session.
+func (wt *WorkspaceTracker) isOnRemote(ctx context.Context, commitSHA string) bool {
+	// Use git branch -r --contains to check if commit is on any remote branch
+	cmd := exec.CommandContext(ctx, "git", "branch", "-r", "--contains", commitSHA)
+	cmd.Dir = wt.workDir
+	out, err := cmd.Output()
+	if err != nil {
+		// If the command fails, assume it's not on remote (safer default)
+		return false
+	}
+	// If output is non-empty, commit is reachable from at least one remote branch
+	return strings.TrimSpace(string(out)) != ""
+}
+
+// filterLocalCommits filters out commits that are already on remote branches.
+// This ensures we only report commits made locally in the session, not upstream commits
+// that came from pulling/rebasing onto a remote branch.
+func (wt *WorkspaceTracker) filterLocalCommits(ctx context.Context, commits []*types.GitCommitNotification) []*types.GitCommitNotification {
+	if len(commits) == 0 {
+		return commits
+	}
+
+	localCommits := make([]*types.GitCommitNotification, 0, len(commits))
+	for _, commit := range commits {
+		if !wt.isOnRemote(ctx, commit.CommitSHA) {
+			localCommits = append(localCommits, commit)
+		} else {
+			wt.logger.Debug("skipping upstream commit (already on remote)",
+				zap.String("sha", commit.CommitSHA),
+				zap.String("message", commit.Message))
+		}
+	}
+
+	if skipped := len(commits) - len(localCommits); skipped > 0 {
+		wt.logger.Info("filtered upstream commits",
+			zap.Int("total", len(commits)),
+			zap.Int("skipped", skipped),
+			zap.Int("local", len(localCommits)))
+	}
+
+	return localCommits
+}
+
+// getCommitsSince returns commits from baseCommit (exclusive) to HEAD (inclusive)
+func (wt *WorkspaceTracker) getCommitsSince(ctx context.Context, baseCommit string) []*types.GitCommitNotification {
+	// Get list of commits with metadata
+	// Format: SHA|ParentSHA|AuthorName|AuthorEmail|Subject|AuthorDateISO
+	cmd := exec.CommandContext(ctx, "git", "log",
+		"--format=%H|%P|%an|%ae|%s|%aI",
+		baseCommit+"..HEAD")
+	cmd.Dir = wt.workDir
+	out, err := cmd.Output()
+	if err != nil {
+		wt.logger.Debug("failed to get commits since base",
+			zap.String("base", baseCommit),
+			zap.Error(err))
+		return nil
+	}
+
+	output := strings.TrimSpace(string(out))
+	if output == "" {
+		return nil
+	}
+
+	lines := strings.Split(output, "\n")
+	commits := make([]*types.GitCommitNotification, 0, len(lines))
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		parts := strings.SplitN(line, "|", 6)
+		if len(parts) < 6 {
+			continue
+		}
+
+		sha := parts[0]
+		parentSHA := parts[1]
+		// Handle multiple parents (merge commits) - just take the first
+		if idx := strings.Index(parentSHA, " "); idx > 0 {
+			parentSHA = parentSHA[:idx]
+		}
+
+		committedAt, err := time.Parse(time.RFC3339, parts[5])
+		if err != nil {
+			committedAt = time.Now().UTC()
+		}
+
+		// Get stats for this commit
+		filesChanged, insertions, deletions := wt.getCommitStats(ctx, sha)
+
+		commits = append(commits, &types.GitCommitNotification{
+			Timestamp:    time.Now(),
+			CommitSHA:    sha,
+			ParentSHA:    parentSHA,
+			AuthorName:   parts[2],
+			AuthorEmail:  parts[3],
+			Message:      parts[4],
+			FilesChanged: filesChanged,
+			Insertions:   insertions,
+			Deletions:    deletions,
+			CommittedAt:  committedAt,
+		})
+	}
+
+	return commits
+}
+
+// getCommitStats returns the number of files changed, insertions, and deletions for a commit
+func (wt *WorkspaceTracker) getCommitStats(ctx context.Context, sha string) (filesChanged, insertions, deletions int) {
+	cmd := exec.CommandContext(ctx, "git", "show", "--stat", "--format=", sha)
+	cmd.Dir = wt.workDir
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, 0, 0
+	}
+
+	// Parse the last line which contains summary like "3 files changed, 10 insertions(+), 5 deletions(-)"
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(lines) == 0 {
+		return 0, 0, 0
+	}
+
+	summary := lines[len(lines)-1]
+	// Simple parsing - look for numbers before keywords
+	parts := strings.Fields(summary)
+	for i, part := range parts {
+		if strings.Contains(part, "file") && i > 0 {
+			_, _ = fmt.Sscanf(parts[i-1], "%d", &filesChanged)
+		}
+		if strings.Contains(part, "insertion") && i > 0 {
+			_, _ = fmt.Sscanf(parts[i-1], "%d", &insertions)
+		}
+		if strings.Contains(part, "deletion") && i > 0 {
+			_, _ = fmt.Sscanf(parts[i-1], "%d", &deletions)
+		}
+	}
+
+	return filesChanged, insertions, deletions
+}
+
 // updateGitStatus updates the git status
 func (wt *WorkspaceTracker) updateGitStatus(ctx context.Context) {
 	status, err := wt.getGitStatus(ctx)
@@ -235,8 +505,25 @@ func (wt *WorkspaceTracker) getGitStatus(ctx context.Context) (types.GitStatusUp
 	}
 
 	// Get ahead/behind counts
-	if update.RemoteBranch != "" {
-		countCmd := exec.CommandContext(ctx, "git", "rev-list", "--left-right", "--count", update.Branch+"..."+update.RemoteBranch)
+	// Use remote branch if available, otherwise fall back to origin/main or origin/master
+	// This handles worktree branches that don't have an upstream tracking branch set
+	compareRef := update.RemoteBranch
+	if compareRef == "" {
+		// Try origin/main first, then origin/master
+		checkCmd := exec.CommandContext(ctx, "git", "rev-parse", "--verify", "origin/main")
+		checkCmd.Dir = wt.workDir
+		if err := checkCmd.Run(); err == nil {
+			compareRef = "origin/main"
+		} else {
+			checkCmd2 := exec.CommandContext(ctx, "git", "rev-parse", "--verify", "origin/master")
+			checkCmd2.Dir = wt.workDir
+			if err := checkCmd2.Run(); err == nil {
+				compareRef = "origin/master"
+			}
+		}
+	}
+	if compareRef != "" {
+		countCmd := exec.CommandContext(ctx, "git", "rev-list", "--left-right", "--count", update.Branch+"..."+compareRef)
 		countCmd.Dir = wt.workDir
 		if countOut, err := countCmd.Output(); err == nil {
 			parts := strings.Fields(string(countOut))
@@ -601,9 +888,32 @@ func (wt *WorkspaceTracker) notifyWorkspaceStreamGitCommit(commit *types.GitComm
 	}
 }
 
-// NotifyGitCommit notifies all subscribers about a new git commit
+// NotifyGitCommit notifies all subscribers about a new git commit.
+// It also updates the cached HEAD SHA to prevent polling from re-detecting the same commit.
 func (wt *WorkspaceTracker) NotifyGitCommit(commit *types.GitCommitNotification) {
+	// Update cached HEAD to the new commit SHA so polling doesn't re-detect it
+	if commit.CommitSHA != "" {
+		wt.gitStateMu.Lock()
+		wt.cachedHeadSHA = commit.CommitSHA
+		wt.gitStateMu.Unlock()
+	}
+
 	wt.notifyWorkspaceStreamGitCommit(commit)
+}
+
+// notifyWorkspaceStreamGitReset sends git reset notification to all workspace stream subscribers
+func (wt *WorkspaceTracker) notifyWorkspaceStreamGitReset(reset *types.GitResetNotification) {
+	wt.workspaceSubMu.RLock()
+	defer wt.workspaceSubMu.RUnlock()
+
+	msg := types.NewWorkspaceGitReset(reset)
+	for sub := range wt.workspaceStreamSubscribers {
+		select {
+		case sub <- msg:
+		default:
+			// Subscriber is slow, skip
+		}
+	}
 }
 
 // notifyWorkspaceStreamFileChange sends file change notification to all workspace stream subscribers

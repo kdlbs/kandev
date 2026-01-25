@@ -171,6 +171,7 @@ export type SessionRuntimeSliceActions = {
   setSessionCommits: (sessionId: string, commits: SessionCommit[]) => void;
   setSessionCommitsLoading: (sessionId: string, loading: boolean) => void;
   addSessionCommit: (sessionId: string, commit: SessionCommit) => void;
+  clearSessionCommits: (sessionId: string) => void;
 };
 
 export type SessionRuntimeSlice = SessionRuntimeSliceState & SessionRuntimeSliceActions;

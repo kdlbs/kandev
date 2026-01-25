@@ -124,4 +124,9 @@ export const createSessionRuntimeSlice: StateCreator<
       // Add to front (newest first)
       draft.sessionCommits.bySessionId[sessionId] = [commit, ...existing];
     }),
+  clearSessionCommits: (sessionId) =>
+    set((draft) => {
+      // Delete the entry so hook will refetch (undefined triggers fetch, [] does not)
+      delete draft.sessionCommits.bySessionId[sessionId];
+    }),
 });

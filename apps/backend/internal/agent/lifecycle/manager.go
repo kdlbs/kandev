@@ -118,6 +118,7 @@ func NewManager(
 		OnAgentEvent:    mgr.handleAgentEvent,
 		OnGitStatus:     mgr.handleGitStatusUpdate,
 		OnGitCommit:     mgr.handleGitCommitCreated,
+		OnGitReset:      mgr.handleGitResetDetected,
 		OnFileChange:    mgr.handleFileChangeNotification,
 		OnShellOutput:   mgr.handleShellOutput,
 		OnShellExit:     mgr.handleShellExit,
@@ -1118,6 +1119,12 @@ func (m *Manager) handleGitStatusUpdate(execution *AgentExecution, update *agent
 func (m *Manager) handleGitCommitCreated(execution *AgentExecution, commit *agentctl.GitCommitNotification) {
 	// Publish commit event to event bus for WebSocket streaming and orchestrator handling
 	m.eventPublisher.PublishGitCommit(execution, commit)
+}
+
+// handleGitResetDetected processes git reset events from the workspace tracker
+func (m *Manager) handleGitResetDetected(execution *AgentExecution, reset *agentctl.GitResetNotification) {
+	// Publish reset event to event bus for orchestrator handling (commit sync)
+	m.eventPublisher.PublishGitReset(execution, reset)
 }
 
 // handleFileChangeNotification processes file change notifications from the workspace tracker

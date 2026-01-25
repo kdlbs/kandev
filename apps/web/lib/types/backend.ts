@@ -8,9 +8,7 @@ export type BackendMessageType =
   | 'agent.available.updated'
   | 'terminal.output'
   | 'diff.update'
-  | 'session.git.status'
-  | 'session.git.snapshot'
-  | 'session.git.commit'
+  | 'session.git.event'
   | 'system.error'
   | 'workspace.created'
   | 'workspace.updated'
@@ -54,6 +52,7 @@ export type BackendMessage<T extends BackendMessageType, P> = {
 };
 
 import type { AvailableAgent, TaskState } from '@/lib/types/http';
+import type { GitEventPayload } from '@/lib/types/git-events';
 
 export type KanbanUpdatePayload = {
   boardId: string;
@@ -190,63 +189,6 @@ export type FileInfo = {
   diff?: string;
 };
 
-export type GitStatusPayload = {
-  task_id: string;
-  session_id?: string;
-  branch: string;
-  remote_branch?: string;
-  modified: string[];
-  added: string[];
-  deleted: string[];
-  untracked: string[];
-  renamed: string[];
-  ahead: number;
-  behind: number;
-  files: Record<string, FileInfo>;
-  timestamp: string;
-};
-
-export type GitSnapshotPayload = {
-  task_id: string;
-  session_id: string;
-  snapshot: {
-    id: string;
-    session_id: string;
-    snapshot_type: string;
-    branch: string;
-    remote_branch: string;
-    head_commit: string;
-    base_commit: string;
-    ahead: number;
-    behind: number;
-    files: Record<string, FileInfo>;
-    triggered_by: string;
-    metadata?: Record<string, unknown>;
-    created_at: string;
-  };
-};
-
-export type GitCommitPayload = {
-  task_id: string;
-  session_id: string;
-  commit: {
-    id: string;
-    session_id: string;
-    commit_sha: string;
-    parent_sha: string;
-    author_name: string;
-    author_email: string;
-    commit_message: string;
-    committed_at: string;
-    pre_commit_snapshot_id?: string;
-    post_commit_snapshot_id?: string;
-    files_changed: number;
-    insertions: number;
-    deletions: number;
-    created_at: string;
-  };
-};
-
 export type ProcessOutputPayload = {
   session_id: string;
   process_id: string;
@@ -355,9 +297,7 @@ export type BackendMessageMap = {
   'agent.available.updated': BackendMessage<'agent.available.updated', AgentAvailableUpdatedPayload>;
   'terminal.output': BackendMessage<'terminal.output', TerminalOutputPayload>;
   'diff.update': BackendMessage<'diff.update', DiffUpdatePayload>;
-  'session.git.status': BackendMessage<'session.git.status', GitStatusPayload>;
-  'session.git.snapshot': BackendMessage<'session.git.snapshot', GitSnapshotPayload>;
-  'session.git.commit': BackendMessage<'session.git.commit', GitCommitPayload>;
+  'session.git.event': BackendMessage<'session.git.event', GitEventPayload>;
   'system.error': BackendMessage<'system.error', SystemErrorPayload>;
   'workspace.created': BackendMessage<'workspace.created', WorkspacePayload>;
   'workspace.updated': BackendMessage<'workspace.updated', WorkspacePayload>;

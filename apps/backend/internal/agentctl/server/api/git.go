@@ -332,4 +332,3 @@ func (s *Server) handleGitError(c *gin.Context, operation string, err error) {
 		Error:     err.Error(),
 	})
 }
-

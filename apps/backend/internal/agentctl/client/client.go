@@ -255,6 +255,7 @@ func (c *Client) BaseURL() string {
 type (
 	GitStatusUpdate        = types.GitStatusUpdate
 	GitCommitNotification  = types.GitCommitNotification
+	GitResetNotification   = types.GitResetNotification
 	FileInfo               = types.FileInfo
 	FileListUpdate         = types.FileListUpdate
 	FileEntry              = types.FileEntry
@@ -567,6 +568,7 @@ type WorkspaceStreamCallbacks struct {
 	OnShellExit     func(code int)
 	OnGitStatus     func(update *GitStatusUpdate)
 	OnGitCommit     func(notification *GitCommitNotification)
+	OnGitReset      func(notification *GitResetNotification)
 	OnFileChange    func(notification *FileChangeNotification)
 	OnFileList      func(update *FileListUpdate)
 	OnProcessOutput func(output *types.ProcessOutput)
@@ -646,6 +648,10 @@ func (c *Client) StreamWorkspace(ctx context.Context, callbacks WorkspaceStreamC
 			case types.WorkspaceMessageTypeGitCommit:
 				if callbacks.OnGitCommit != nil && msg.GitCommit != nil {
 					callbacks.OnGitCommit(msg.GitCommit)
+				}
+			case types.WorkspaceMessageTypeGitReset:
+				if callbacks.OnGitReset != nil && msg.GitReset != nil {
+					callbacks.OnGitReset(msg.GitReset)
 				}
 			case types.WorkspaceMessageTypeFileChange:
 				if callbacks.OnFileChange != nil && msg.FileChange != nil {

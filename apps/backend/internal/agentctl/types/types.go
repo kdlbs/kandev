@@ -27,6 +27,7 @@ type (
 	// Git stream types
 	GitStatusUpdate       = streams.GitStatusUpdate
 	GitCommitNotification = streams.GitCommitNotification
+	GitResetNotification  = streams.GitResetNotification
 	FileInfo              = streams.FileInfo
 
 	// File stream types
@@ -155,6 +156,7 @@ const (
 	WorkspaceMessageTypeProcessOutput WorkspaceMessageType = "process_output"
 	WorkspaceMessageTypeProcessStatus WorkspaceMessageType = "process_status"
 	WorkspaceMessageTypeGitCommit     WorkspaceMessageType = "git_commit"
+	WorkspaceMessageTypeGitReset      WorkspaceMessageType = "git_reset"
 )
 
 // WorkspaceStreamMessage is the unified message format for the workspace stream.
@@ -187,6 +189,9 @@ type WorkspaceStreamMessage struct {
 
 	// Git commit fields (for git_commit)
 	GitCommit *GitCommitNotification `json:"git_commit,omitempty"`
+
+	// Git reset fields (for git_reset)
+	GitReset *GitResetNotification `json:"git_reset,omitempty"`
 
 	// Error fields (for error)
 	Error string `json:"error,omitempty"`
@@ -225,6 +230,15 @@ func NewWorkspaceGitCommit(commit *GitCommitNotification) WorkspaceStreamMessage
 		Type:      WorkspaceMessageTypeGitCommit,
 		Timestamp: timeNowUnixMilli(),
 		GitCommit: commit,
+	}
+}
+
+// NewWorkspaceGitReset creates a git reset notification message
+func NewWorkspaceGitReset(reset *GitResetNotification) WorkspaceStreamMessage {
+	return WorkspaceStreamMessage{
+		Type:      WorkspaceMessageTypeGitReset,
+		Timestamp: timeNowUnixMilli(),
+		GitReset:  reset,
 	}
 }
 
