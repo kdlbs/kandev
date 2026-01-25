@@ -187,6 +187,8 @@ function ProfileEditor({ agent, profile, modelConfig, permissionSettings, passth
               models={modelConfig.available_models}
               defaultModel={modelConfig.default_model}
               placeholder="Select or enter model..."
+              agentName={agent.name}
+              supportsDynamicModels={modelConfig.supports_dynamic_models}
             />
           </div>
 

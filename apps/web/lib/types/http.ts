@@ -455,11 +455,21 @@ export type ModelEntry = {
   provider: string;
   context_window: number;
   is_default: boolean;
+  source?: 'static' | 'dynamic';
 };
 
 export type ModelConfig = {
   default_model: string;
   available_models: ModelEntry[];
+  supports_dynamic_models: boolean;
+};
+
+export type DynamicModelsResponse = {
+  agent_name: string;
+  models: ModelEntry[];
+  cached: boolean;
+  cached_at?: string;
+  error: string | null;
 };
 
 export type PermissionSetting = {

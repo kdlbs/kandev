@@ -63,11 +63,13 @@ type ModelEntryDTO struct {
 	Provider      string `json:"provider"`
 	ContextWindow int    `json:"context_window"`
 	IsDefault     bool   `json:"is_default"`
+	Source        string `json:"source,omitempty"`
 }
 
 type ModelConfigDTO struct {
-	DefaultModel    string          `json:"default_model"`
-	AvailableModels []ModelEntryDTO `json:"available_models"`
+	DefaultModel          string          `json:"default_model"`
+	AvailableModels       []ModelEntryDTO `json:"available_models"`
+	SupportsDynamicModels bool            `json:"supports_dynamic_models"`
 }
 
 type PermissionSettingDTO struct {
@@ -125,4 +127,13 @@ type CommandPreviewResponse struct {
 	Supported     bool     `json:"supported"`
 	Command       []string `json:"command"`
 	CommandString string   `json:"command_string"`
+}
+
+// DynamicModelsResponse is the response for the dynamic models endpoint
+type DynamicModelsResponse struct {
+	AgentName string          `json:"agent_name"`
+	Models    []ModelEntryDTO `json:"models"`
+	Cached    bool            `json:"cached"`
+	CachedAt  *time.Time      `json:"cached_at,omitempty"`
+	Error     *string         `json:"error"`
 }

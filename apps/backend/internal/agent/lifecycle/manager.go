@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -2476,6 +2477,7 @@ func (m *Manager) buildPassthroughResumeCommand(agentConfig *registry.AgentTypeC
 	}
 
 	// Apply permission settings that use CLI flags
+	// Sort keys for deterministic output order
 	if profileInfo != nil && agentConfig.PermissionSettings != nil {
 		permissionValues := map[string]bool{
 			"auto_approve":                 profileInfo.AutoApprove,
@@ -2483,7 +2485,15 @@ func (m *Manager) buildPassthroughResumeCommand(agentConfig *registry.AgentTypeC
 			"allow_indexing":               profileInfo.AllowIndexing,
 		}
 
-		for settingName, setting := range agentConfig.PermissionSettings {
+		// Get sorted keys for deterministic iteration
+		settingNames := make([]string, 0, len(agentConfig.PermissionSettings))
+		for name := range agentConfig.PermissionSettings {
+			settingNames = append(settingNames, name)
+		}
+		sort.Strings(settingNames)
+
+		for _, settingName := range settingNames {
+			setting := agentConfig.PermissionSettings[settingName]
 			if !setting.Supported || setting.ApplyMethod != "cli_flag" || setting.CLIFlag == "" {
 				continue
 			}

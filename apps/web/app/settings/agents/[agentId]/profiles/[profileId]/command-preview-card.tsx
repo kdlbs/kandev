@@ -4,6 +4,7 @@ import { useEffect, useState, useMemo } from 'react';
 import { IconCopy, IconCheck, IconTerminal2 } from '@tabler/icons-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@kandev/ui/card';
 import { Button } from '@kandev/ui/button';
+import { Skeleton } from '@kandev/ui/skeleton';
 import { previewAgentCommandAction, type CommandPreviewResponse } from '@/app/actions/agents';
 
 type CommandPreviewCardProps = {
@@ -89,8 +90,9 @@ export function CommandPreviewCard({
         </p>
 
         {loading && (
-          <div className="flex items-center justify-center py-8">
-            <div className="h-6 w-6 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
+          <div className="space-y-2">
+            <Skeleton className="h-16 w-full rounded-md" />
+            <Skeleton className="h-4 w-3/4" />
           </div>
         )}
 

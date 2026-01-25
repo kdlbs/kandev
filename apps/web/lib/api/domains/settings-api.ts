@@ -13,6 +13,7 @@ import type {
   CustomPrompt,
   PromptsResponse,
   UserSettingsResponse,
+  DynamicModelsResponse,
 } from '@/lib/types/http';
 
 // User settings
@@ -92,6 +93,15 @@ export async function previewAgentCommand(
     ...options,
     init: { method: 'POST', body: JSON.stringify(payload), ...(options?.init ?? {}) },
   });
+}
+
+export async function fetchDynamicModels(
+  agentName: string,
+  options?: ApiRequestOptions & { refresh?: boolean }
+): Promise<DynamicModelsResponse> {
+  const refresh = options?.refresh ?? false;
+  const url = `/api/v1/agent-models/${agentName}${refresh ? '?refresh=true' : ''}`;
+  return fetchJson<DynamicModelsResponse>(url, options);
 }
 
 // Editors
