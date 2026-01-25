@@ -17,16 +17,20 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
       // Also update or create the session object if we have the session ID
       if (sessionId) {
         const existingSession = store.getState().taskSessions.items[sessionId];
+        const agentProfileId = payload.agent_profile_id;
+        const agentProfileSnapshot = payload.agent_profile_snapshot;
+
         if (existingSession) {
-          // Update existing session - preserve all existing fields
+          // Update existing session - preserve all existing fields, but update snapshot if provided
           store.getState().setTaskSession({
             ...existingSession,
             state: newState,
+            // Update snapshot if provided in the event
+            ...(agentProfileSnapshot ? { agent_profile_snapshot: agentProfileSnapshot } : {}),
           });
         } else {
           // Create partial session object
-          // Include agent_profile_id from the payload if provided
-          const agentProfileId = payload.agent_profile_id;
+          // Include agent_profile_id and agent_profile_snapshot from the payload if provided
           store.getState().setTaskSession({
             id: sessionId,
             task_id: taskId,
@@ -34,6 +38,7 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
             started_at: '',
             updated_at: '',
             ...(agentProfileId ? { agent_profile_id: agentProfileId } : {}),
+            ...(agentProfileSnapshot ? { agent_profile_snapshot: agentProfileSnapshot } : {}),
           });
         }
 
@@ -41,7 +46,6 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
         if (sessionsByTask) {
           const hasSession = sessionsByTask.some((session) => session.id === sessionId);
           if (!hasSession) {
-            const agentProfileId = payload.agent_profile_id;
             store.getState().setTaskSessionsForTask(taskId, [...sessionsByTask, {
               id: sessionId,
               task_id: taskId,
@@ -49,10 +53,15 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
               started_at: '',
               updated_at: '',
               ...(agentProfileId ? { agent_profile_id: agentProfileId } : {}),
+              ...(agentProfileSnapshot ? { agent_profile_snapshot: agentProfileSnapshot } : {}),
             }]);
           } else {
             const nextSessions = sessionsByTask.map((session) =>
-              session.id === sessionId ? { ...session, state: newState } : session
+              session.id === sessionId ? {
+                ...session,
+                state: newState,
+                ...(agentProfileSnapshot ? { agent_profile_snapshot: agentProfileSnapshot } : {}),
+              } : session
             );
             store.getState().setTaskSessionsForTask(taskId, nextSessions);
           }

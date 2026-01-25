@@ -161,6 +161,7 @@ export type TaskSessionStateChangedPayload = {
   old_state?: string;
   new_state: string;
   agent_profile_id?: string;
+  agent_profile_snapshot?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
 };
 
@@ -355,10 +356,20 @@ export type FileContentResponse = {
   error?: string;
 };
 
-export type FileChangeNotificationPayload = {
+// Single file change event (used within batched notifications)
+export type FileChangeEvent = {
   timestamp: string;
   path: string;
   operation: 'create' | 'write' | 'remove' | 'rename' | 'chmod' | 'refresh';
+  session_id: string;
+  task_id: string;
+  agent_id: string;
+};
+
+// Batched file change notification payload (multiple changes batched for efficiency)
+export type FileChangeNotificationPayload = {
+  session_id: string;
+  changes: FileChangeEvent[];
 };
 
 // Open file tab for file viewer

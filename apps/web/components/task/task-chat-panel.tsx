@@ -56,7 +56,7 @@ export function TaskChatPanel({
   );
 
   // Model management
-  const { sessionModel, pendingModel, clearPendingModel, setActiveModel } = useSessionModel(
+  const { sessionModel, activeModel } = useSessionModel(
     resolvedSessionId,
     session?.agent_profile_id
   );
@@ -66,9 +66,8 @@ export function TaskChatPanel({
     resolvedSessionId,
     taskId,
     sessionModel,
-    pendingModel,
-    setActiveModel,
-    clearPendingModel
+    activeModel,
+    planModeEnabled
   );
 
   // Clear awaiting state when a new agent message arrives
@@ -103,6 +102,10 @@ export function TaskChatPanel({
         await onSend(trimmed);
       } else {
         await handleSendMessage(trimmed);
+      }
+      // Reset plan mode after sending - it's a per-message instruction
+      if (planModeEnabled) {
+        setPlanModeEnabled(false);
       }
     } finally {
       setIsSending(false);

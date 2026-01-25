@@ -140,10 +140,21 @@ export const createSessionSlice: StateCreator<
     }),
   setTaskSession: (session) =>
     set((draft) => {
-      draft.taskSessions.items[session.id] = session;
+      // Merge with existing session data to preserve fields like agent_profile_id
+      const existingSession = draft.taskSessions.items[session.id];
+      draft.taskSessions.items[session.id] = existingSession
+        ? { ...existingSession, ...session }
+        : session;
     }),
   setTaskSessionsForTask: (taskId, sessions) =>
     set((draft) => {
+      // Also update individual session items with merging to preserve existing data
+      sessions.forEach((session) => {
+        const existingSession = draft.taskSessions.items[session.id];
+        draft.taskSessions.items[session.id] = existingSession
+          ? { ...existingSession, ...session }
+          : session;
+      });
       draft.taskSessionsByTask.itemsByTaskId[taskId] = sessions;
       draft.taskSessionsByTask.loadingByTaskId[taskId] = false;
       draft.taskSessionsByTask.loadedByTaskId[taskId] = true;
