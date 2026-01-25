@@ -20,11 +20,15 @@ export function registerTerminalsHandlers(store: StoreApi<AppState>): WsHandlers
       }
     },
     'session.process.output': (message) => {
-      const { process_id, data } = message.payload;
+      const { process_id, session_id, kind, data } = message.payload;
       if (!process_id || !data) {
         return;
       }
       store.getState().appendProcessOutput(process_id, data);
+      // For passthrough mode, also store output under session_id for the PassthroughTerminal
+      if (kind === 'agent_passthrough' && session_id) {
+        store.getState().appendShellOutput(`passthrough:${session_id}`, data);
+      }
     },
     'session.process.status': (message) => {
       const {

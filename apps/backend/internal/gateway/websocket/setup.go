@@ -3,16 +3,18 @@ package websocket
 import (
 	"github.com/gin-gonic/gin"
 
+	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
 // Gateway represents the unified WebSocket gateway
 type Gateway struct {
-	Hub        *Hub
-	Dispatcher *ws.Dispatcher
-	Handler    *Handler
-	logger     *logger.Logger
+	Hub             *Hub
+	Dispatcher      *ws.Dispatcher
+	Handler         *Handler
+	TerminalHandler *TerminalHandler
+	logger          *logger.Logger
 }
 
 // NewGateway creates a new WebSocket gateway with all components initialized
@@ -32,8 +34,19 @@ func NewGateway(log *logger.Logger) *Gateway {
 	}
 }
 
+// SetLifecycleManager enables the dedicated terminal WebSocket handler for passthrough mode.
+// This must be called before SetupRoutes if terminal passthrough is needed.
+func (g *Gateway) SetLifecycleManager(lifecycleMgr *lifecycle.Manager) {
+	g.TerminalHandler = NewTerminalHandler(lifecycleMgr, g.logger)
+}
+
 // SetupRoutes adds the WebSocket routes to the Gin engine
 func (g *Gateway) SetupRoutes(router *gin.Engine) {
 	router.GET("/ws", g.Handler.HandleConnection)
+
+	// Add dedicated terminal WebSocket route if terminal handler is configured
+	if g.TerminalHandler != nil {
+		router.GET("/xterm.js/:sessionId", g.TerminalHandler.HandleTerminalWS)
+	}
 }
 

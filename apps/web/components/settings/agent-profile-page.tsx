@@ -6,19 +6,21 @@ import { useParams } from 'next/navigation';
 import { IconTrash } from '@tabler/icons-react';
 import { Badge } from '@kandev/ui/badge';
 import { Button } from '@kandev/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
 import { Card, CardContent, CardHeader, CardTitle } from '@kandev/ui/card';
-import { Input } from '@kandev/ui/input';
 import { Label } from '@kandev/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@kandev/ui/select';
 import { Separator } from '@kandev/ui/separator';
 import { Switch } from '@kandev/ui/switch';
 import { Textarea } from '@kandev/ui/textarea';
+import { Input } from '@kandev/ui/input';
 import { useToast } from '@/components/toast-provider';
 import { UnsavedChangesBadge, UnsavedSaveButton } from '@/components/settings/unsaved-indicator';
+import { ModelCombobox } from '@/components/settings/model-combobox';
 import { deleteAgentProfileAction, updateAgentProfileAction } from '@/app/actions/agents';
-import type { Agent, AgentProfile, ModelConfig, PermissionSetting } from '@/lib/types/http';
+import type { Agent, AgentProfile, ModelConfig, PermissionSetting, PassthroughConfig } from '@/lib/types/http';
 import { useAppStore } from '@/components/state-provider';
 import { ProfileMcpConfigCard } from '@/app/settings/agents/[agentId]/profile-mcp-config-card';
+import { CommandPreviewCard } from '@/app/settings/agents/[agentId]/profiles/[profileId]/command-preview-card';
 import type { AgentProfileMcpConfig } from '@/lib/types/http';
 import { useAgentProfileSettings } from '@/app/settings/agents/[agentId]/profiles/[profileId]/use-agent-profile-settings';
 
@@ -27,10 +29,11 @@ type ProfileEditorProps = {
   profile: AgentProfile;
   modelConfig: ModelConfig;
   permissionSettings: Record<string, PermissionSetting>;
+  passthroughConfig: PassthroughConfig | null;
   initialMcpConfig?: AgentProfileMcpConfig | null;
 };
 
-function ProfileEditor({ agent, profile, modelConfig, permissionSettings, initialMcpConfig }: ProfileEditorProps) {
+function ProfileEditor({ agent, profile, modelConfig, permissionSettings, passthroughConfig, initialMcpConfig }: ProfileEditorProps) {
   const { toast } = useToast();
   const settingsAgents = useAppStore((state) => state.settingsAgents.items);
   const setSettingsAgents = useAppStore((state) => state.setSettingsAgents);
@@ -58,6 +61,7 @@ function ProfileEditor({ agent, profile, modelConfig, permissionSettings, initia
       draft.auto_approve !== savedProfile.auto_approve ||
       draft.dangerously_skip_permissions !== savedProfile.dangerously_skip_permissions ||
       draft.allow_indexing !== savedProfile.allow_indexing ||
+      draft.cli_passthrough !== savedProfile.cli_passthrough ||
       draft.plan !== savedProfile.plan
     );
   }, [draft, savedProfile]);
@@ -87,6 +91,7 @@ function ProfileEditor({ agent, profile, modelConfig, permissionSettings, initia
         auto_approve: draft.auto_approve,
         dangerously_skip_permissions: draft.dangerously_skip_permissions,
         allow_indexing: draft.allow_indexing,
+        cli_passthrough: draft.cli_passthrough,
         plan: draft.plan,
       });
       setSavedProfile(updated);
@@ -176,32 +181,13 @@ function ProfileEditor({ agent, profile, modelConfig, permissionSettings, initia
 
           <div className="space-y-2">
             <Label>Model</Label>
-            {modelConfig.available_models.length > 0 ? (
-              <Select
-                value={draft.model || modelConfig.default_model}
-                onValueChange={(value) => setDraft({ ...draft, model: value })}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select a model" />
-                </SelectTrigger>
-                <SelectContent>
-                  {modelConfig.available_models.map((model) => (
-                    <SelectItem key={model.id} value={model.id}>
-                      {model.name}
-                      {model.is_default && (
-                        <span className="ml-2 text-muted-foreground">(default)</span>
-                      )}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            ) : (
-              <Input
-                value={draft.model}
-                onChange={(event) => setDraft({ ...draft, model: event.target.value })}
-                placeholder="model-id"
-              />
-            )}
+            <ModelCombobox
+              value={draft.model || modelConfig.default_model}
+              onChange={(value) => setDraft({ ...draft, model: value })}
+              models={modelConfig.available_models}
+              defaultModel={modelConfig.default_model}
+              placeholder="Select or enter model..."
+            />
           </div>
 
           <div className="space-y-2">
@@ -264,9 +250,49 @@ function ProfileEditor({ agent, profile, modelConfig, permissionSettings, initia
                 />
               </div>
             )}
+
+            {passthroughConfig?.supported && (
+              <div className="flex items-center justify-between rounded-md border p-3">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <Label>{passthroughConfig.label}</Label>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Badge variant="outline" className="text-[10px] px-1.5 py-0 cursor-help">
+                          Experimental
+                        </Badge>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p>Currently does not support notifications and session resume</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {passthroughConfig.description}
+                  </p>
+                </div>
+                <Switch
+                  checked={draft.cli_passthrough}
+                  onCheckedChange={(checked) =>
+                    setDraft({ ...draft, cli_passthrough: checked })
+                  }
+                />
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
+
+      <CommandPreviewCard
+        agentName={agent.name}
+        model={draft.model}
+        permissionSettings={{
+          auto_approve: draft.auto_approve,
+          dangerously_skip_permissions: draft.dangerously_skip_permissions,
+          allow_indexing: draft.allow_indexing,
+        }}
+        cliPassthrough={draft.cli_passthrough}
+      />
 
       <ProfileMcpConfigCard
         profileId={profile.id}
@@ -280,6 +306,7 @@ function ProfileEditor({ agent, profile, modelConfig, permissionSettings, initia
           })
         }
       />
+
 
       <Card className="border-destructive">
         <CardHeader>
@@ -310,7 +337,7 @@ export function AgentProfilePage({ initialMcpConfig }: AgentProfilePageClientPro
   const profileParam = Array.isArray(params.profileId) ? params.profileId[0] : params.profileId;
   const agentKey = decodeURIComponent(agentParam ?? '');
   const profileId = profileParam ?? '';
-  const { agent, profile, modelConfig, permissionSettings } = useAgentProfileSettings(agentKey, profileId);
+  const { agent, profile, modelConfig, permissionSettings, passthroughConfig } = useAgentProfileSettings(agentKey, profileId);
 
   if (!agent || !profile) {
     return (
@@ -332,6 +359,7 @@ export function AgentProfilePage({ initialMcpConfig }: AgentProfilePageClientPro
       profile={profile}
       modelConfig={modelConfig}
       permissionSettings={permissionSettings}
+      passthroughConfig={passthroughConfig}
       initialMcpConfig={initialMcpConfig}
     />
   );

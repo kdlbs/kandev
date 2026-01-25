@@ -395,6 +395,7 @@ export type AgentProfile = {
   auto_approve: boolean;
   dangerously_skip_permissions: boolean;
   allow_indexing: boolean;
+  cli_passthrough: boolean;
   plan: string;
   created_at: string;
   updated_at: string;
@@ -471,6 +472,12 @@ export type PermissionSetting = {
   cli_flag_value?: string;
 };
 
+export type PassthroughConfig = {
+  supported: boolean;
+  label: string;
+  description: string;
+};
+
 export type AvailableAgent = {
   name: string;
   display_name: string;
@@ -482,6 +489,7 @@ export type AvailableAgent = {
   capabilities: AgentCapabilities;
   model_config: ModelConfig;
   permission_settings?: Record<string, PermissionSetting>;
+  passthrough_config?: PassthroughConfig;
   updated_at: string;
 };
 

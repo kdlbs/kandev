@@ -34,11 +34,11 @@ func setupTestRepo(t *testing.T) (string, func()) {
 		_ = os.RemoveAll(localDir)
 	}
 
-	// Initialize bare remote repo
-	runGit(t, remoteDir, "init", "--bare")
+	// Initialize bare remote repo with explicit branch name for consistency
+	runGit(t, remoteDir, "init", "--bare", "--initial-branch=main")
 
-	// Initialize local repo
-	runGit(t, localDir, "init")
+	// Initialize local repo with explicit branch name
+	runGit(t, localDir, "init", "--initial-branch=main")
 	runGit(t, localDir, "config", "user.email", "test@test.com")
 	runGit(t, localDir, "config", "user.name", "Test User")
 
@@ -49,7 +49,7 @@ func setupTestRepo(t *testing.T) (string, func()) {
 
 	// Add remote and push
 	runGit(t, localDir, "remote", "add", "origin", remoteDir)
-	runGit(t, localDir, "push", "-u", "origin", "master")
+	runGit(t, localDir, "push", "-u", "origin", "main")
 
 	return localDir, cleanup
 }
@@ -81,7 +81,7 @@ func TestIsOnRemote(t *testing.T) {
 	wt := NewWorkspaceTracker(repoDir, log)
 	ctx := context.Background()
 
-	// Get the initial commit SHA (which is on origin/master)
+	// Get the initial commit SHA (which is on origin/main)
 	initialSHA := runGit(t, repoDir, "rev-parse", "HEAD")
 	initialSHA = initialSHA[:len(initialSHA)-1] // trim newline
 
@@ -175,13 +175,13 @@ func TestGetGitStatus_AheadBehindWithoutUpstream(t *testing.T) {
 	runGit(t, repoDir, "add", ".")
 	runGit(t, repoDir, "commit", "-m", "Feature commit")
 
-	// Get git status - should still calculate ahead/behind against origin/master
+	// Get git status - should still calculate ahead/behind against origin/main
 	status, err := wt.getGitStatus(ctx)
 	if err != nil {
 		t.Fatalf("failed to get git status: %v", err)
 	}
 
-	// Should be 1 ahead of origin/master
+	// Should be 1 ahead of origin/main
 	if status.Ahead != 1 {
 		t.Errorf("expected ahead=1, got %d", status.Ahead)
 	}
@@ -199,8 +199,8 @@ func TestGetGitStatus_AheadBehindWithoutUpstream(t *testing.T) {
 
 // TestFilterLocalCommits_PullAndResetScenario tests the exact scenario where:
 // 1. Session starts at commit X
-// 2. Upstream (origin/master) gets new commits
-// 3. User does git fetch && git reset --hard origin/master
+// 2. Upstream (origin/main) gets new commits
+// 3. User does git fetch && git reset --hard origin/main
 // 4. The upstream commits should be filtered out
 func TestFilterLocalCommits_PullAndResetScenario(t *testing.T) {
 	// Create temp directories
@@ -223,18 +223,18 @@ func TestFilterLocalCommits_PullAndResetScenario(t *testing.T) {
 	}
 	defer func() { _ = os.RemoveAll(upstreamClone) }()
 
-	// Initialize bare remote repo
-	runGit(t, remoteDir, "init", "--bare")
+	// Initialize bare remote repo with explicit branch name
+	runGit(t, remoteDir, "init", "--bare", "--initial-branch=main")
 
-	// Initialize local repo (the "session" repo)
-	runGit(t, localDir, "init")
+	// Initialize local repo (the "session" repo) with explicit branch name
+	runGit(t, localDir, "init", "--initial-branch=main")
 	runGit(t, localDir, "config", "user.email", "test@test.com")
 	runGit(t, localDir, "config", "user.name", "Test User")
 	writeFile(t, localDir, "README.md", "# Test Repo")
 	runGit(t, localDir, "add", ".")
 	runGit(t, localDir, "commit", "-m", "Initial commit (X)")
 	runGit(t, localDir, "remote", "add", "origin", remoteDir)
-	runGit(t, localDir, "push", "-u", "origin", "master")
+	runGit(t, localDir, "push", "-u", "origin", "main")
 
 	// Record the starting point (commit X)
 	startingSHA := runGit(t, localDir, "rev-parse", "HEAD")
@@ -260,9 +260,9 @@ func TestFilterLocalCommits_PullAndResetScenario(t *testing.T) {
 	// Push upstream commits
 	runGit(t, upstreamClone, "push")
 
-	// Now in the local repo (session), fetch and reset to origin/master
+	// Now in the local repo (session), fetch and reset to origin/main
 	runGit(t, localDir, "fetch", "origin")
-	runGit(t, localDir, "reset", "--hard", "origin/master")
+	runGit(t, localDir, "reset", "--hard", "origin/main")
 
 	// Verify HEAD is now at Z
 	currentHead := runGit(t, localDir, "rev-parse", "HEAD")

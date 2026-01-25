@@ -88,6 +88,7 @@ func (s *Server) setupRoutes() {
 		// Shell access (HTTP endpoints only - streaming is via /workspace/stream)
 		api.GET("/shell/status", s.handleShellStatus)
 		api.GET("/shell/buffer", s.handleShellBuffer)
+		api.POST("/shell/start", s.handleShellStart)
 
 		// Process runner
 		api.POST("/processes/start", s.handleStartProcess)
@@ -308,4 +309,14 @@ func (s *Server) handleShellBuffer(c *gin.Context) {
 	c.JSON(http.StatusOK, ShellBufferResponse{
 		Data: string(buffered),
 	})
+}
+
+// handleShellStart starts the shell session without starting the agent process.
+// This is used in passthrough mode where the agent runs directly via InteractiveRunner.
+func (s *Server) handleShellStart(c *gin.Context) {
+	if err := s.procMgr.StartShell(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "shell started"})
 }

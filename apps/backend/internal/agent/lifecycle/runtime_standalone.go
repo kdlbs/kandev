@@ -9,16 +9,18 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime"
 	agentctl "github.com/kandev/kandev/internal/agentctl/client"
+	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
 // StandaloneRuntime implements Runtime for standalone agentctl execution.
 // In this mode, a single agentctl control server manages multiple agent instances.
 type StandaloneRuntime struct {
-	ctl    *agentctl.ControlClient
-	host   string
-	port   int
-	logger *logger.Logger
+	ctl               *agentctl.ControlClient
+	host              string
+	port              int
+	logger            *logger.Logger
+	interactiveRunner *process.InteractiveRunner
 }
 
 // NewStandaloneRuntime creates a new standalone runtime.
@@ -158,4 +160,14 @@ func (r *StandaloneRuntime) RecoverInstances(ctx context.Context) ([]*RuntimeIns
 	// Standalone instances are not persisted - they are transient processes
 	// managed by agentctl. Session resume will restart them as needed.
 	return nil, nil
+}
+
+// SetInteractiveRunner sets the interactive runner for passthrough mode.
+func (r *StandaloneRuntime) SetInteractiveRunner(runner *process.InteractiveRunner) {
+	r.interactiveRunner = runner
+}
+
+// GetInteractiveRunner returns the interactive runner for passthrough mode.
+func (r *StandaloneRuntime) GetInteractiveRunner() *process.InteractiveRunner {
+	return r.interactiveRunner
 }

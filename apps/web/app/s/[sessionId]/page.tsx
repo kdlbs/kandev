@@ -12,7 +12,7 @@ import {
 } from '@/lib/api';
 import type { ListMessagesResponse, Task } from '@/lib/types/http';
 import { snapshotToState, taskToState } from '@/lib/ssr/mapper';
-import TaskPageClient from '@/app/task/[id]/page-client';
+import { TaskPageContent } from '@/components/task/task-page-content';
 
 export default async function SessionPage({
   params,
@@ -155,7 +155,7 @@ export default async function SessionPage({
   return (
     <>
       {initialState ? <StateHydrator initialState={initialState} /> : null}
-      <TaskPageClient
+      <TaskPageContent
         task={task}
         sessionId={sessionId}
         initialRepositories={initialState?.repositories?.itemsByWorkspaceId?.[task?.workspace_id ?? ''] ?? []}

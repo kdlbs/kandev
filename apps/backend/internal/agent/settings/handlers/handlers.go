@@ -46,6 +46,7 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api.PATCH("/agents/:id", h.httpUpdateAgent)
 	api.DELETE("/agents/:id", h.httpDeleteAgent)
 	api.POST("/agents/:id/profiles", h.httpCreateProfile)
+	api.POST("/agent-command-preview/:agentName", h.httpPreviewAgentCommand)
 	api.PATCH("/agent-profiles/:id", h.httpUpdateProfile)
 	api.DELETE("/agent-profiles/:id", h.httpDeleteProfile)
 	api.GET("/agent-profiles/:id/mcp-config", h.httpGetProfileMcpConfig)
@@ -283,6 +284,7 @@ type createProfileRequest struct {
 	AutoApprove                bool   `json:"auto_approve"`
 	DangerouslySkipPermissions bool   `json:"dangerously_skip_permissions"`
 	AllowIndexing              bool   `json:"allow_indexing"`
+	CLIPassthrough             bool   `json:"cli_passthrough"`
 	Plan                       string `json:"plan"`
 }
 
@@ -303,6 +305,7 @@ func (h *Handlers) httpCreateProfile(c *gin.Context) {
 		AutoApprove:                body.AutoApprove,
 		DangerouslySkipPermissions: body.DangerouslySkipPermissions,
 		AllowIndexing:              body.AllowIndexing,
+		CLIPassthrough:             body.CLIPassthrough,
 		Plan:                       body.Plan,
 	})
 	if err != nil {
@@ -325,6 +328,7 @@ type updateProfileRequest struct {
 	AutoApprove                *bool   `json:"auto_approve,omitempty"`
 	DangerouslySkipPermissions *bool   `json:"dangerously_skip_permissions,omitempty"`
 	AllowIndexing              *bool   `json:"allow_indexing,omitempty"`
+	CLIPassthrough             *bool   `json:"cli_passthrough,omitempty"`
 	Plan                       *string `json:"plan,omitempty"`
 }
 
@@ -345,6 +349,7 @@ func (h *Handlers) httpUpdateProfile(c *gin.Context) {
 		AutoApprove:                body.AutoApprove,
 		DangerouslySkipPermissions: body.DangerouslySkipPermissions,
 		AllowIndexing:              body.AllowIndexing,
+		CLIPassthrough:             body.CLIPassthrough,
 		Plan:                       body.Plan,
 	})
 	if err != nil {
@@ -387,4 +392,37 @@ func (h *Handlers) httpDeleteProfile(c *gin.Context) {
 		h.hub.Broadcast(notification)
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+type commandPreviewRequest struct {
+	Model              string          `json:"model"`
+	PermissionSettings map[string]bool `json:"permission_settings"`
+	CLIPassthrough     bool            `json:"cli_passthrough"`
+}
+
+func (h *Handlers) httpPreviewAgentCommand(c *gin.Context) {
+	agentName := c.Param("agentName")
+	if agentName == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "agent name is required"})
+		return
+	}
+
+	var body commandPreviewRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+
+	resp, err := h.controller.PreviewAgentCommand(c.Request.Context(), agentName, controller.CommandPreviewRequest{
+		Model:              body.Model,
+		PermissionSettings: body.PermissionSettings,
+		CLIPassthrough:     body.CLIPassthrough,
+	})
+	if err != nil {
+		h.logger.Error("failed to preview agent command", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, resp)
 }

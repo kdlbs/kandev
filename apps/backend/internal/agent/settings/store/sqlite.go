@@ -88,6 +88,9 @@ func (r *sqliteRepository) initSchema() error {
 	if err := ensureColumn(r.db, "agent_profiles", "agent_display_name", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
+	if err := ensureColumn(r.db, "agent_profiles", "cli_passthrough", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -248,10 +251,10 @@ func (r *sqliteRepository) CreateAgentProfile(ctx context.Context, profile *mode
 	profile.CreatedAt = now
 	profile.UpdatedAt = now
 	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO agent_profiles (id, agent_id, name, agent_display_name, model, auto_approve, dangerously_skip_permissions, allow_indexing, plan, created_at, updated_at, deleted_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO agent_profiles (id, agent_id, name, agent_display_name, model, auto_approve, dangerously_skip_permissions, allow_indexing, cli_passthrough, plan, created_at, updated_at, deleted_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, profile.ID, profile.AgentID, profile.Name, profile.AgentDisplayName, profile.Model, boolToInt(profile.AutoApprove),
-		boolToInt(profile.DangerouslySkipPermissions), boolToInt(profile.AllowIndexing), profile.Plan, profile.CreatedAt, profile.UpdatedAt, profile.DeletedAt)
+		boolToInt(profile.DangerouslySkipPermissions), boolToInt(profile.AllowIndexing), boolToInt(profile.CLIPassthrough), profile.Plan, profile.CreatedAt, profile.UpdatedAt, profile.DeletedAt)
 	return err
 }
 
@@ -259,10 +262,10 @@ func (r *sqliteRepository) UpdateAgentProfile(ctx context.Context, profile *mode
 	profile.UpdatedAt = time.Now().UTC()
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE agent_profiles
-		SET name = ?, agent_display_name = ?, model = ?, auto_approve = ?, dangerously_skip_permissions = ?, allow_indexing = ?, plan = ?, updated_at = ?
+		SET name = ?, agent_display_name = ?, model = ?, auto_approve = ?, dangerously_skip_permissions = ?, allow_indexing = ?, cli_passthrough = ?, plan = ?, updated_at = ?
 		WHERE id = ? AND deleted_at IS NULL
 	`, profile.Name, profile.AgentDisplayName, profile.Model, boolToInt(profile.AutoApprove),
-		boolToInt(profile.DangerouslySkipPermissions), boolToInt(profile.AllowIndexing), profile.Plan, profile.UpdatedAt, profile.ID)
+		boolToInt(profile.DangerouslySkipPermissions), boolToInt(profile.AllowIndexing), boolToInt(profile.CLIPassthrough), profile.Plan, profile.UpdatedAt, profile.ID)
 	if err != nil {
 		return err
 	}
@@ -290,7 +293,7 @@ func (r *sqliteRepository) DeleteAgentProfile(ctx context.Context, id string) er
 
 func (r *sqliteRepository) GetAgentProfile(ctx context.Context, id string) (*models.AgentProfile, error) {
 	row := r.db.QueryRowContext(ctx, `
-		SELECT id, agent_id, name, agent_display_name, model, auto_approve, dangerously_skip_permissions, allow_indexing, plan, created_at, updated_at, deleted_at
+		SELECT id, agent_id, name, agent_display_name, model, auto_approve, dangerously_skip_permissions, allow_indexing, cli_passthrough, plan, created_at, updated_at, deleted_at
 		FROM agent_profiles WHERE id = ? AND deleted_at IS NULL
 	`, id)
 	return scanAgentProfile(row)
@@ -298,7 +301,7 @@ func (r *sqliteRepository) GetAgentProfile(ctx context.Context, id string) (*mod
 
 func (r *sqliteRepository) ListAgentProfiles(ctx context.Context, agentID string) ([]*models.AgentProfile, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, agent_id, name, agent_display_name, model, auto_approve, dangerously_skip_permissions, allow_indexing, plan, created_at, updated_at, deleted_at
+		SELECT id, agent_id, name, agent_display_name, model, auto_approve, dangerously_skip_permissions, allow_indexing, cli_passthrough, plan, created_at, updated_at, deleted_at
 		FROM agent_profiles WHERE agent_id = ? AND deleted_at IS NULL ORDER BY created_at DESC
 	`, agentID)
 	if err != nil {
@@ -350,6 +353,7 @@ func scanAgentProfile(scanner interface {
 	var autoApprove int
 	var skipPermissions int
 	var allowIndexing int
+	var cliPassthrough int
 	if err := scanner.Scan(
 		&profile.ID,
 		&profile.AgentID,
@@ -359,6 +363,7 @@ func scanAgentProfile(scanner interface {
 		&autoApprove,
 		&skipPermissions,
 		&allowIndexing,
+		&cliPassthrough,
 		&profile.Plan,
 		&profile.CreatedAt,
 		&profile.UpdatedAt,
@@ -369,6 +374,7 @@ func scanAgentProfile(scanner interface {
 	profile.AutoApprove = autoApprove == 1
 	profile.DangerouslySkipPermissions = skipPermissions == 1
 	profile.AllowIndexing = allowIndexing == 1
+	profile.CLIPassthrough = cliPassthrough == 1
 	return profile, nil
 }
 

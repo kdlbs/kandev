@@ -15,6 +15,7 @@ type AgentProfileDTO struct {
 	AutoApprove                bool      `json:"auto_approve"`
 	DangerouslySkipPermissions bool      `json:"dangerously_skip_permissions"`
 	AllowIndexing              bool      `json:"allow_indexing"`
+	CLIPassthrough             bool      `json:"cli_passthrough"`
 	Plan                       string    `json:"plan"`
 	CreatedAt                  time.Time `json:"created_at"`
 	UpdatedAt                  time.Time `json:"updated_at"`
@@ -79,6 +80,12 @@ type PermissionSettingDTO struct {
 	CLIFlagValue string `json:"cli_flag_value,omitempty"`
 }
 
+type PassthroughConfigDTO struct {
+	Supported   bool   `json:"supported"`
+	Label       string `json:"label"`
+	Description string `json:"description"`
+}
+
 type AvailableAgentDTO struct {
 	Name               string                          `json:"name"`
 	DisplayName        string                          `json:"display_name"`
@@ -90,6 +97,7 @@ type AvailableAgentDTO struct {
 	Capabilities       AgentCapabilitiesDTO            `json:"capabilities"`
 	ModelConfig        ModelConfigDTO                  `json:"model_config"`
 	PermissionSettings map[string]PermissionSettingDTO `json:"permission_settings,omitempty"`
+	PassthroughConfig  *PassthroughConfigDTO           `json:"passthrough_config,omitempty"`
 	UpdatedAt          time.Time                       `json:"updated_at"`
 }
 
@@ -103,4 +111,18 @@ type AgentProfileMcpConfigDTO struct {
 	Enabled   bool                           `json:"enabled"`
 	Servers   map[string]mcpconfig.ServerDef `json:"servers"`
 	Meta      map[string]any                 `json:"meta,omitempty"`
+}
+
+// CommandPreviewRequest is the request body for previewing the agent CLI command
+type CommandPreviewRequest struct {
+	Model              string          `json:"model"`
+	PermissionSettings map[string]bool `json:"permission_settings"`
+	CLIPassthrough     bool            `json:"cli_passthrough"`
+}
+
+// CommandPreviewResponse is the response for the command preview endpoint
+type CommandPreviewResponse struct {
+	Supported     bool     `json:"supported"`
+	Command       []string `json:"command"`
+	CommandString string   `json:"command_string"`
 }

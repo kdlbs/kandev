@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/registry"
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	agentctl "github.com/kandev/kandev/internal/agentctl/client"
+	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -43,8 +44,13 @@ func provideLifecycleManager(
 		cfg.Agent.StandalonePort,
 		log,
 	)
+
+	// Create InteractiveRunner for passthrough mode (no WorkspaceTracker, uses callbacks)
+	interactiveRunner := process.NewInteractiveRunner(nil, log, 2*1024*1024) // 2MB buffer
+	standaloneRuntime.SetInteractiveRunner(interactiveRunner)
+
 	runtimeRegistry.Register(standaloneRuntime)
-	log.Info("Standalone runtime registered",
+	log.Info("Standalone runtime registered with passthrough support",
 		zap.String("host", cfg.Agent.StandaloneHost),
 		zap.Int("port", cfg.Agent.StandalonePort))
 

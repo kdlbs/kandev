@@ -798,3 +798,33 @@ func (m *Manager) Shell() *shell.Session {
 	defer m.mu.RUnlock()
 	return m.shell
 }
+
+// StartShell creates and starts the shell session independently of the agent process.
+// This is used in passthrough mode where the agent runs directly via InteractiveRunner
+// but we still need shell access for the workspace.
+// Returns nil if shell is already started or if ShellEnabled is false.
+func (m *Manager) StartShell() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Already running
+	if m.shell != nil {
+		return nil
+	}
+
+	// Shell disabled
+	if !m.cfg.ShellEnabled {
+		return nil
+	}
+
+	shellCfg := shell.DefaultConfig(m.cfg.WorkDir)
+	shellCfg.ShellCommand = preferredShellCommand(m.cfg.AgentEnv)
+	shellSession, err := shell.NewSession(shellCfg, m.logger)
+	if err != nil {
+		return fmt.Errorf("failed to create shell session: %w", err)
+	}
+
+	m.shell = shellSession
+	m.logger.Info("shell session started independently")
+	return nil
+}

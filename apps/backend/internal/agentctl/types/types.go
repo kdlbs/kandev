@@ -92,6 +92,9 @@ const (
 	ProcessStatusExited   = streams.ProcessStatusExited
 	ProcessStatusFailed   = streams.ProcessStatusFailed
 	ProcessStatusStopped  = streams.ProcessStatusStopped
+
+	// Process kinds
+	ProcessKindAgentPassthrough = streams.ProcessKindAgentPassthrough
 )
 
 // PermissionRequest represents a permission request from the agent.
