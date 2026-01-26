@@ -342,7 +342,7 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiff, onOpenFile }
 
               {/* Empty state */}
               {changedFiles.length === 0 && commits.length === 0 && (
-                <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+                <div className="flex items-center justify-center h-full text-muted-foreground text-xs">
                   No changes detected
                 </div>
               )}
@@ -354,7 +354,7 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiff, onOpenFile }
             {activeSessionId ? (
               <FileBrowser sessionId={activeSessionId} onOpenFile={onOpenFile} />
             ) : (
-              <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+              <div className="flex items-center justify-center h-full text-muted-foreground text-xs">
                 No task selected
               </div>
             )}

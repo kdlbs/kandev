@@ -100,7 +100,7 @@ export function VirtualizedMessageList({
   return (
     <SessionPanelContent
       ref={messagesContainerRef}
-      className="relative"
+      className="relative p-4"
     >
       {isLoadingMore && hasMore && (
         <div className="absolute top-2 left-1/2 -translate-x-1/2 text-xs text-muted-foreground">
@@ -133,7 +133,7 @@ export function VirtualizedMessageList({
                 className="absolute left-0 top-0 w-full"
                 style={{ transform: `translateY(${virtualRow.start}px)` }}
               >
-                <div className="pb-3">
+                <div className="pb-2">
                   <MessageRenderer
                     comment={message}
                     isTaskDescription={message.id === 'task-description'}
