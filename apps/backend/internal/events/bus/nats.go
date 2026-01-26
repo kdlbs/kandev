@@ -102,7 +102,7 @@ func (b *NATSEventBus) Subscribe(subject string, handler EventHandler) (Subscrip
 		return nil, fmt.Errorf("failed to subscribe to %s: %w", subject, err)
 	}
 
-	b.logger.Info("Subscribed to subject", zap.String("subject", subject))
+	b.logger.Debug("Subscribed to subject", zap.String("subject", subject))
 	return &natsSubscription{sub: sub}, nil
 }
 
@@ -113,7 +113,7 @@ func (b *NATSEventBus) QueueSubscribe(subject, queue string, handler EventHandle
 		return nil, fmt.Errorf("failed to queue subscribe to %s: %w", subject, err)
 	}
 
-	b.logger.Info("Queue subscribed to subject",
+	b.logger.Debug("Queue subscribed to subject",
 		zap.String("subject", subject),
 		zap.String("queue", queue),
 	)
