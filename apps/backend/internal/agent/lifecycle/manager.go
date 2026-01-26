@@ -468,6 +468,7 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 
 	return execution, nil
 }
+
 // Start starts the lifecycle manager background tasks
 func (m *Manager) Start(ctx context.Context) error {
 	if m.runtimeRegistry == nil {
@@ -982,6 +983,7 @@ func (m *Manager) getOrCreateWorktree(ctx context.Context, req *LaunchRequest) (
 		RepositoryPath:       req.RepositoryPath,
 		BaseBranch:           req.BaseBranch,
 		WorktreeBranchPrefix: req.WorktreeBranchPrefix,
+		PullBeforeWorktree:   req.PullBeforeWorktree,
 		WorktreeID:           worktreeID, // If set, will try to reuse this worktree
 	}
 
@@ -1769,9 +1771,10 @@ func (m *Manager) UpdateStatus(executionID string, status v1.AgentStatus) error 
 //   - After cancelling an agent turn (to allow new prompts)
 //
 // State Machine Transitions:
-//   Starting -> Ready (after initialization)
-//   Running  -> Ready (after prompt completion)
-//   Any      -> Ready (after cancel)
+//
+//	Starting -> Ready (after initialization)
+//	Running  -> Ready (after prompt completion)
+//	Any      -> Ready (after cancel)
 //
 // Publishes an AgentReady event to notify subscribers (frontend, orchestrator).
 //
@@ -1812,8 +1815,9 @@ func (m *Manager) MarkReady(executionID string) error {
 //   - errorMessage: Human-readable error description (empty string if no error)
 //
 // State Machine:
-//   This is a terminal state transition - no further state changes are expected after this.
-//   Typical flow: Starting -> Running -> Ready -> ... -> Completed/Failed
+//
+//	This is a terminal state transition - no further state changes are expected after this.
+//	Typical flow: Starting -> Running -> Ready -> ... -> Completed/Failed
 //
 // Publishes either AgentCompleted or AgentFailed event depending on final status.
 //
@@ -1855,9 +1859,9 @@ func (m *Manager) MarkCompleted(executionID string, exitCode int, errorMessage s
 // RemoveExecution removes an execution from tracking.
 //
 // ⚠️  WARNING: This is a potentially dangerous operation that should only be called when:
-//   1. The agent process has been fully stopped (via StopAgent)
-//   2. All cleanup operations have completed (worktree cleanup, container removal)
-//   3. The execution is in a terminal state (Completed, Failed, or Cancelled)
+//  1. The agent process has been fully stopped (via StopAgent)
+//  2. All cleanup operations have completed (worktree cleanup, container removal)
+//  3. The execution is in a terminal state (Completed, Failed, or Cancelled)
 //
 // This method:
 //   - Removes the execution from the in-memory store
@@ -1889,8 +1893,8 @@ func (m *Manager) RemoveExecution(executionID string) {
 //   - When IsAgentRunningForSession returns false but execution exists
 //
 // This method performs cleanup:
-//   1. Closes the agentctl HTTP client connection
-//   2. Removes the execution from the in-memory tracking store
+//  1. Closes the agentctl HTTP client connection
+//  2. Removes the execution from the in-memory tracking store
 //
 // What this does NOT do:
 //   - Stop the agent process (assumed already stopped)
@@ -2005,7 +2009,7 @@ func (m *Manager) performCleanup(ctx context.Context) {
 //   - pendingID: Unique ID of the permission request (from permission request event)
 //   - optionID: The user-selected option ID (from the permission request's options array)
 //   - cancelled: If true, indicates user cancelled/rejected the permission request.
-//                When cancelled=true, optionID is ignored.
+//     When cancelled=true, optionID is ignored.
 //
 // Response Semantics:
 //   - cancelled=false, optionID="approve" → User approved the action

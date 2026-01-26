@@ -175,11 +175,6 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 		return nil, ErrRepoNotGit
 	}
 
-	// Check base branch exists
-	if !m.branchExists(req.RepositoryPath, req.BaseBranch) {
-		return nil, fmt.Errorf("%w: %s", ErrInvalidBaseBranch, req.BaseBranch)
-	}
-
 	// Check worktree limit
 	count, err := m.countWorktreesForRepo(ctx, req.RepositoryID)
 	if err != nil {
@@ -194,11 +189,21 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 	repoLock.Lock()
 	defer repoLock.Unlock()
 
-	return m.createWorktree(ctx, req)
+	baseRef := req.BaseBranch
+	if req.PullBeforeWorktree {
+		baseRef = m.pullBaseBranch(req.RepositoryPath, req.BaseBranch)
+	}
+
+	// Check base branch exists
+	if !m.branchExists(req.RepositoryPath, baseRef) {
+		return nil, fmt.Errorf("%w: %s", ErrInvalidBaseBranch, baseRef)
+	}
+
+	return m.createWorktree(ctx, req, baseRef)
 }
 
 // createWorktree performs the actual git worktree creation.
-func (m *Manager) createWorktree(ctx context.Context, req CreateRequest) (*Worktree, error) {
+func (m *Manager) createWorktree(ctx context.Context, req CreateRequest, baseRef string) (*Worktree, error) {
 	// Generate a unique worktree ID and random suffix
 	worktreeID := uuid.New().String()
 	dirSuffix := worktreeID[:8] // Use first 8 chars of UUID for worktree dir uniqueness
@@ -233,7 +238,7 @@ func (m *Manager) createWorktree(ctx context.Context, req CreateRequest) (*Workt
 	cmd := exec.CommandContext(ctx, "git", "worktree", "add",
 		"-b", branchName,
 		worktreePath,
-		req.BaseBranch)
+		baseRef)
 	cmd.Dir = req.RepositoryPath
 
 	output, err := cmd.CombinedOutput()
@@ -638,6 +643,67 @@ func (m *Manager) branchExists(repoPath, branch string) bool {
 	cmd.Dir = repoPath
 	err := cmd.Run()
 	return err == nil
+}
+
+func (m *Manager) currentBranch(repoPath string) string {
+	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	cmd.Dir = repoPath
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(output))
+}
+
+func (m *Manager) pullBaseBranch(repoPath, baseBranch string) string {
+	baseRef := baseBranch
+	cleanBase := strings.TrimPrefix(baseBranch, "origin/")
+	if cleanBase != baseBranch {
+		baseRef = "origin/" + cleanBase
+	}
+
+	pullCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	fetchArgs := []string{"fetch", "origin"}
+	if cleanBase != "" {
+		fetchArgs = append(fetchArgs, cleanBase)
+	}
+	fetchCmd := exec.CommandContext(pullCtx, "git", fetchArgs...)
+	fetchCmd.Dir = repoPath
+	if output, err := fetchCmd.CombinedOutput(); err != nil {
+		m.logger.Warn("git fetch failed before worktree creation",
+			zap.String("output", string(output)),
+			zap.Error(err))
+		return baseRef
+	}
+
+	if cleanBase == "" {
+		return baseRef
+	}
+
+	if baseRef != baseBranch {
+		return baseRef
+	}
+
+	currentBranch := m.currentBranch(repoPath)
+	if currentBranch == baseBranch {
+		pullCmd := exec.CommandContext(pullCtx, "git", "pull", "--ff-only", "origin", baseBranch)
+		pullCmd.Dir = repoPath
+		if output, err := pullCmd.CombinedOutput(); err != nil {
+			m.logger.Warn("git pull failed before worktree creation",
+				zap.String("output", string(output)),
+				zap.Error(err))
+		}
+		return baseRef
+	}
+
+	remoteRef := "origin/" + baseBranch
+	if m.branchExists(repoPath, remoteRef) {
+		return remoteRef
+	}
+
+	return baseRef
 }
 
 // countWorktreesForRepo counts active worktrees for a repository.

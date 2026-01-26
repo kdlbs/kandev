@@ -23,11 +23,11 @@ func (r *Repository) CreateRepository(ctx context.Context, repository *models.Re
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO repositories (
 			id, workspace_id, name, source_type, local_path, provider, provider_repo_id, provider_owner,
-			provider_name, default_branch, worktree_branch_prefix, setup_script, cleanup_script, dev_script, created_at, updated_at, deleted_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			provider_name, default_branch, worktree_branch_prefix, pull_before_worktree, setup_script, cleanup_script, dev_script, created_at, updated_at, deleted_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, repository.ID, repository.WorkspaceID, repository.Name, repository.SourceType, repository.LocalPath, repository.Provider,
 		repository.ProviderRepoID, repository.ProviderOwner, repository.ProviderName, repository.DefaultBranch, repository.WorktreeBranchPrefix,
-		repository.SetupScript, repository.CleanupScript, repository.DevScript, repository.CreatedAt, repository.UpdatedAt, repository.DeletedAt)
+		boolToInt(repository.PullBeforeWorktree), repository.SetupScript, repository.CleanupScript, repository.DevScript, repository.CreatedAt, repository.UpdatedAt, repository.DeletedAt)
 
 	return err
 }
@@ -38,12 +38,12 @@ func (r *Repository) GetRepository(ctx context.Context, id string) (*models.Repo
 
 	err := r.db.QueryRowContext(ctx, `
 		SELECT id, workspace_id, name, source_type, local_path, provider, provider_repo_id, provider_owner,
-		       provider_name, default_branch, worktree_branch_prefix, setup_script, cleanup_script, dev_script, created_at, updated_at, deleted_at
+		       provider_name, default_branch, worktree_branch_prefix, pull_before_worktree, setup_script, cleanup_script, dev_script, created_at, updated_at, deleted_at
 		FROM repositories WHERE id = ? AND deleted_at IS NULL
 	`, id).Scan(
 		&repository.ID, &repository.WorkspaceID, &repository.Name, &repository.SourceType, &repository.LocalPath,
 		&repository.Provider, &repository.ProviderRepoID, &repository.ProviderOwner, &repository.ProviderName,
-		&repository.DefaultBranch, &repository.WorktreeBranchPrefix, &repository.SetupScript, &repository.CleanupScript, &repository.DevScript, &repository.CreatedAt, &repository.UpdatedAt, &repository.DeletedAt,
+		&repository.DefaultBranch, &repository.WorktreeBranchPrefix, &repository.PullBeforeWorktree, &repository.SetupScript, &repository.CleanupScript, &repository.DevScript, &repository.CreatedAt, &repository.UpdatedAt, &repository.DeletedAt,
 	)
 
 	if err == sql.ErrNoRows {
@@ -59,11 +59,11 @@ func (r *Repository) UpdateRepository(ctx context.Context, repository *models.Re
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE repositories SET
 			name = ?, source_type = ?, local_path = ?, provider = ?, provider_repo_id = ?, provider_owner = ?,
-			provider_name = ?, default_branch = ?, worktree_branch_prefix = ?, setup_script = ?, cleanup_script = ?, dev_script = ?, updated_at = ?
+			provider_name = ?, default_branch = ?, worktree_branch_prefix = ?, pull_before_worktree = ?, setup_script = ?, cleanup_script = ?, dev_script = ?, updated_at = ?
 		WHERE id = ? AND deleted_at IS NULL
 	`, repository.Name, repository.SourceType, repository.LocalPath, repository.Provider, repository.ProviderRepoID,
-		repository.ProviderOwner, repository.ProviderName, repository.DefaultBranch, repository.WorktreeBranchPrefix, repository.SetupScript,
-		repository.CleanupScript, repository.DevScript, repository.UpdatedAt, repository.ID)
+		repository.ProviderOwner, repository.ProviderName, repository.DefaultBranch, repository.WorktreeBranchPrefix, boolToInt(repository.PullBeforeWorktree),
+		repository.SetupScript, repository.CleanupScript, repository.DevScript, repository.UpdatedAt, repository.ID)
 	if err != nil {
 		return err
 	}
@@ -95,7 +95,7 @@ func (r *Repository) DeleteRepository(ctx context.Context, id string) error {
 func (r *Repository) ListRepositories(ctx context.Context, workspaceID string) ([]*models.Repository, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, workspace_id, name, source_type, local_path, provider, provider_repo_id, provider_owner,
-		       provider_name, default_branch, worktree_branch_prefix, setup_script, cleanup_script, dev_script, created_at, updated_at, deleted_at
+		       provider_name, default_branch, worktree_branch_prefix, pull_before_worktree, setup_script, cleanup_script, dev_script, created_at, updated_at, deleted_at
 		FROM repositories WHERE workspace_id = ? AND deleted_at IS NULL ORDER BY created_at DESC
 	`, workspaceID)
 	if err != nil {
@@ -109,7 +109,7 @@ func (r *Repository) ListRepositories(ctx context.Context, workspaceID string) (
 		err := rows.Scan(
 			&repository.ID, &repository.WorkspaceID, &repository.Name, &repository.SourceType, &repository.LocalPath,
 			&repository.Provider, &repository.ProviderRepoID, &repository.ProviderOwner, &repository.ProviderName,
-			&repository.DefaultBranch, &repository.WorktreeBranchPrefix, &repository.SetupScript, &repository.CleanupScript, &repository.DevScript, &repository.CreatedAt, &repository.UpdatedAt, &repository.DeletedAt,
+			&repository.DefaultBranch, &repository.WorktreeBranchPrefix, &repository.PullBeforeWorktree, &repository.SetupScript, &repository.CleanupScript, &repository.DevScript, &repository.CreatedAt, &repository.UpdatedAt, &repository.DeletedAt,
 		)
 		if err != nil {
 			return nil, err
@@ -135,8 +135,6 @@ func (r *Repository) CreateRepositoryScript(ctx context.Context, script *models.
 
 	return err
 }
-
-
 
 // GetRepositoryScript retrieves a repository script by ID
 func (r *Repository) GetRepositoryScript(ctx context.Context, id string) (*models.RepositoryScript, error) {
