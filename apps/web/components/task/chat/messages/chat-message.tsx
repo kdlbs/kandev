@@ -90,7 +90,7 @@ export function ChatMessage({ comment, label, className, showRichBlocks }: ChatM
                 </li>
               ),
               p: ({ children, ...props }) => (
-                <p className="leading-relaxed mt-1" {...props}>
+                <p className="leading-relaxed" {...props}>
                   {children}
                 </p>
               ),

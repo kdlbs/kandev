@@ -365,6 +365,146 @@ Final paragraph (p element) to wrap up.`,
     type: 'message',
     created_at: '2024-01-20T10:14:00Z',
   },
+
+  // Agent message with rich blocks - thinking
+  {
+    id: 'agent-rich-1',
+    session_id: 'demo',
+    task_id: 'demo-task',
+    content: `**[RICH BLOCK - THINKING]** Here's my analysis of the authentication system.`,
+    author_type: 'agent',
+    type: 'message',
+    created_at: '2024-01-20T10:15:00Z',
+    metadata: {
+      thinking: 'I need to carefully consider the security implications here. The current implementation uses JWT tokens, but we should add refresh token rotation to prevent token theft. We also need to implement proper CSRF protection for the authentication endpoints.',
+    },
+  },
+
+  // Agent message with rich blocks - todos
+  {
+    id: 'agent-rich-2',
+    session_id: 'demo',
+    task_id: 'demo-task',
+    content: `**[RICH BLOCK - TODOS]** Here are the next steps we need to take.`,
+    author_type: 'agent',
+    type: 'message',
+    created_at: '2024-01-20T10:16:00Z',
+    metadata: {
+      todos: [
+        { text: 'Update the authentication middleware', done: true },
+        { text: 'Add unit tests for token validation', done: false },
+        { text: 'Implement rate limiting on login endpoint', done: false },
+        'Update documentation for new OAuth flow',
+      ],
+    },
+  },
+
+  // Agent message with rich blocks - diff payload (structured)
+  {
+    id: 'agent-rich-3',
+    session_id: 'demo',
+    task_id: 'demo-task',
+    content: `**[RICH BLOCK - DIFF PAYLOAD]** I've made the following changes to the authentication config:`,
+    author_type: 'agent',
+    type: 'message',
+    created_at: '2024-01-20T10:17:00Z',
+    metadata: {
+      diff: {
+        oldFile: { fileName: 'src/auth/config.ts', fileLang: 'typescript' },
+        newFile: { fileName: 'src/auth/config.ts', fileLang: 'typescript' },
+        hunks: [
+          `diff --git a/src/auth/config.ts b/src/auth/config.ts
+index 1234567..abcdefg 100644
+--- a/src/auth/config.ts
++++ b/src/auth/config.ts
+@@ -1,7 +1,10 @@
+ export const authConfig = {
+   clientId: process.env.OAUTH_CLIENT_ID,
+-  clientSecret: process.env.OAUTH_CLIENT_SECRET,
++  clientSecret: process.env.OAUTH_CLIENT_SECRET || '',
+   redirectUri: process.env.OAUTH_REDIRECT_URI,
++  tokenExpiry: '1h',
++  refreshTokenExpiry: '7d',
++  enableCsrf: true,
+ };
+
+ export function validateToken(token: string) {`,
+        ],
+      },
+    },
+  },
+
+  // Agent message with rich blocks - diff string (plain text)
+  {
+    id: 'agent-rich-4',
+    session_id: 'demo',
+    task_id: 'demo-task',
+    content: `**[RICH BLOCK - DIFF STRING]** Here's the diff for the middleware changes:`,
+    author_type: 'agent',
+    type: 'message',
+    created_at: '2024-01-20T10:18:00Z',
+    metadata: {
+      diff: `--- a/src/middleware/auth.ts
++++ b/src/middleware/auth.ts
+@@ -12,6 +12,11 @@ export async function authMiddleware(req: Request, res: Response, next: NextFun
+   const token = req.headers.authorization?.split(' ')[1];
+
+   if (!token) {
+-    return res.status(401).json({ error: 'No token provided' });
++    return res.status(401).json({
++      error: 'No token provided',
++      code: 'AUTH_TOKEN_MISSING',
++      timestamp: new Date().toISOString()
++    });
+   }
+
+   try {`,
+    },
+  },
+
+  // Agent message with multiple rich blocks
+  {
+    id: 'agent-rich-5',
+    session_id: 'demo',
+    task_id: 'demo-task',
+    content: `**[RICH BLOCK - ALL TYPES]** Here's my complete analysis with all the changes:`,
+    author_type: 'agent',
+    type: 'message',
+    created_at: '2024-01-20T10:19:00Z',
+    metadata: {
+      thinking: 'After reviewing the code, I found several areas that need improvement. The error handling is inconsistent and we need better type safety.',
+      todos: [
+        { text: 'Add TypeScript strict mode', done: true },
+        { text: 'Implement error boundaries', done: false },
+        { text: 'Add logging middleware', done: false },
+      ],
+      diff: {
+        oldFile: { fileName: 'src/types/auth.ts', fileLang: 'typescript' },
+        newFile: { fileName: 'src/types/auth.ts', fileLang: 'typescript' },
+        hunks: [
+          `diff --git a/src/types/auth.ts b/src/types/auth.ts
+index 9876543..fedcba9 100644
+--- a/src/types/auth.ts
++++ b/src/types/auth.ts
+@@ -1,4 +1,12 @@
+-export type AuthToken = string;
++export interface AuthToken {
++  value: string;
++  expiresAt: Date;
++  type: 'access' | 'refresh';
++}
+
+-export type User = {
++export interface User {
+   id: string;
+   email: string;
++  role: 'admin' | 'user';
++  createdAt: Date;
++}`,
+        ],
+      },
+    },
+  },
 ];
 
 export default function MessagesDemoPage() {

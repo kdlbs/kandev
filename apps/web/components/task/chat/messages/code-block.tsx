@@ -90,6 +90,13 @@ export function CodeBlock({ children, className }: CodeBlockProps) {
   const language = className?.replace('language-', '') || '';
   const languageExtension = getLanguageExtension(className);
 
+  // Custom padding theme
+  const paddingTheme = EditorView.theme({
+    '&': {
+      padding: '2px 2px',
+    },
+  });
+
   const handleCopy = async () => {
     try {
       await navigator.clipboard.writeText(code);
@@ -101,7 +108,7 @@ export function CodeBlock({ children, className }: CodeBlockProps) {
   };
 
   return (
-    <div className="relative group my-4">
+    <div className="relative group my-4 w-fit max-w-full min-w-[50%]">
       {/* Copy button */}
       <button
         onClick={handleCopy}
@@ -126,7 +133,7 @@ export function CodeBlock({ children, className }: CodeBlockProps) {
       <CodeMirror
         value={code}
         theme={effectiveTheme === 'dark' ? vscodeDark : vscodeLight}
-        extensions={languageExtension ? [languageExtension, EditorView.lineWrapping] : [EditorView.lineWrapping]}
+        extensions={languageExtension ? [languageExtension, EditorView.lineWrapping, paddingTheme] : [EditorView.lineWrapping, paddingTheme]}
         editable={false}
         basicSetup={{
           lineNumbers: false,
