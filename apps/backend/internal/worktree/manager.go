@@ -655,55 +655,65 @@ func (m *Manager) currentBranch(repoPath string) string {
 	return strings.TrimSpace(string(output))
 }
 
+// pullBaseBranch fetches the latest changes from origin and returns the best ref to use
+// for creating a new worktree. The function handles three scenarios:
+//
+//  1. baseBranch is already a remote ref (e.g., "origin/main"): fetch and use it directly
+//  2. baseBranch is a local branch and we're currently on it: pull --ff-only to update
+//  3. baseBranch is a local branch but we're on a different branch: use origin/<branch> instead
+//
+// On fetch/pull failure, errors are logged but the function continues with the best available ref.
 func (m *Manager) pullBaseBranch(repoPath, baseBranch string) string {
-	baseRef := baseBranch
-	cleanBase := strings.TrimPrefix(baseBranch, "origin/")
-	if cleanBase != baseBranch {
-		baseRef = "origin/" + cleanBase
-	}
+	// Normalize branch name - strip "origin/" prefix if present
+	localBranch := strings.TrimPrefix(baseBranch, "origin/")
+	isRemoteRef := localBranch != baseBranch
 
-	pullCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	// Fetch the branch from origin (30s timeout for fetch + potential pull)
+	fetchCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	fetchArgs := []string{"fetch", "origin"}
-	if cleanBase != "" {
-		fetchArgs = append(fetchArgs, cleanBase)
+	if localBranch != "" {
+		fetchArgs = append(fetchArgs, localBranch)
 	}
-	fetchCmd := exec.CommandContext(pullCtx, "git", fetchArgs...)
+	fetchCmd := exec.CommandContext(fetchCtx, "git", fetchArgs...)
 	fetchCmd.Dir = repoPath
 	if output, err := fetchCmd.CombinedOutput(); err != nil {
-		m.logger.Warn("git fetch failed before worktree creation",
+		m.logger.Error("git fetch failed before worktree creation",
+			zap.String("branch", baseBranch),
 			zap.String("output", string(output)),
 			zap.Error(err))
-		return baseRef
+		return baseBranch
 	}
 
-	if cleanBase == "" {
-		return baseRef
+	// If the original ref was already a remote ref, use it directly
+	if isRemoteRef {
+		return "origin/" + localBranch
 	}
 
-	if baseRef != baseBranch {
-		return baseRef
-	}
-
+	// For local branches: try to update if we're on that branch, otherwise use origin/<branch>
+	remoteRef := "origin/" + localBranch
 	currentBranch := m.currentBranch(repoPath)
+
 	if currentBranch == baseBranch {
-		pullCmd := exec.CommandContext(pullCtx, "git", "pull", "--ff-only", "origin", baseBranch)
+		// We're on the target branch - try to pull (fast-forward only)
+		pullCmd := exec.CommandContext(fetchCtx, "git", "pull", "--ff-only", "origin", baseBranch)
 		pullCmd.Dir = repoPath
 		if output, err := pullCmd.CombinedOutput(); err != nil {
-			m.logger.Warn("git pull failed before worktree creation",
+			m.logger.Error("git pull failed before worktree creation",
+				zap.String("branch", baseBranch),
 				zap.String("output", string(output)),
 				zap.Error(err))
 		}
-		return baseRef
+		return baseBranch
 	}
 
-	remoteRef := "origin/" + baseBranch
+	// Not on the target branch - use the remote ref if it exists
 	if m.branchExists(repoPath, remoteRef) {
 		return remoteRef
 	}
 
-	return baseRef
+	return baseBranch
 }
 
 // countWorktreesForRepo counts active worktrees for a repository.

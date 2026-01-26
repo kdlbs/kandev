@@ -186,6 +186,34 @@ func TestService_CreateRepository_DefaultWorktreeBranchPrefix(t *testing.T) {
 	}
 }
 
+func TestService_CreateRepository_PullBeforeWorktreeFalse(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+
+	pullFalse := false
+	created, err := svc.CreateRepository(ctx, &CreateRepositoryRequest{
+		WorkspaceID:        "ws-1",
+		Name:               "Test Repo",
+		PullBeforeWorktree: &pullFalse,
+	})
+	if err != nil {
+		t.Fatalf("CreateRepository failed: %v", err)
+	}
+	if created.PullBeforeWorktree {
+		t.Fatalf("expected pull_before_worktree to be false when explicitly set")
+	}
+
+	stored, err := repo.GetRepository(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetRepository failed: %v", err)
+	}
+	if stored.PullBeforeWorktree {
+		t.Fatalf("expected stored pull_before_worktree to be false")
+	}
+}
+
 func TestService_GetTask(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
