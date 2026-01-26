@@ -212,7 +212,6 @@ func (h *TerminalHandler) runTerminalBridge(
 ) {
 	var ptyWriter io.Writer
 	var directOutputSet bool
-	var lastCols, lastRows uint16
 
 	// Channel to signal cleanup to any spawned goroutines
 	done := make(chan struct{})
@@ -221,14 +220,8 @@ func (h *TerminalHandler) runTerminalBridge(
 		// Signal any background goroutines to stop
 		close(done)
 
-		// Clean up: clear direct output, close WebSocket writer, close connection
-		if directOutputSet {
-			if err := interactiveRunner.ClearDirectOutput(processID); err != nil {
-				h.logger.Debug("failed to clear direct output",
-					zap.String("session_id", sessionID),
-					zap.Error(err))
-			}
-		}
+		// Clean up: clear direct output at session level (process may have been restarted with new ID)
+		interactiveRunner.ClearDirectOutputBySession(sessionID)
 		_ = wsw.Close()
 		_ = conn.Close()
 
@@ -258,78 +251,52 @@ func (h *TerminalHandler) runTerminalBridge(
 
 		// Check for resize command (first byte 0x01)
 		if data[0] == resizeCommandByte {
-			cols, rows := h.handleResize(data[1:], sessionID, interactiveRunner)
-			if cols > 0 && rows > 0 {
-				lastCols, lastRows = cols, rows
-			}
-
-			// After resize, try to set up PTY access if not already done
+			// Set up PTY access BEFORE handling resize if not already done.
+			// This ensures buffered output is sent to the terminal before the resize
+			// triggers a TUI redraw (which would overwrite the scrollback).
 			if !directOutputSet {
 				if h.setupPtyAccess(sessionID, processID, interactiveRunner, wsw, &ptyWriter) {
 					directOutputSet = true
-
-					// Trigger a resize to force TUI redraw after reconnect
-					// This ensures the TUI app redraws with full colors/styles
-					// We resize to different dimensions then back to force a real redraw
-					// (some TUI apps ignore same-size resizes)
-					if lastCols > 2 && lastRows > 2 {
-						// Delay to ensure direct output is fully set up
-						time.Sleep(50 * time.Millisecond)
-
-						// Resize to smaller dimensions to trigger a real change
-						// Use a more significant change (2 cols/rows) for apps that might ignore small changes
-						if err := interactiveRunner.ResizeBySession(sessionID, lastCols-2, lastRows-2); err != nil {
-							h.logger.Debug("failed to trigger intermediate resize",
-								zap.String("session_id", sessionID),
-								zap.Error(err))
-						}
-
-						// Longer delay then resize back to actual dimensions
-						time.Sleep(100 * time.Millisecond)
-						if err := interactiveRunner.ResizeBySession(sessionID, lastCols, lastRows); err != nil {
-							h.logger.Debug("failed to trigger final resize",
-								zap.String("session_id", sessionID),
-								zap.Error(err))
-						} else {
-							h.logger.Info("triggered TUI redraw via resize",
-								zap.String("session_id", sessionID),
-								zap.Uint16("cols", lastCols),
-								zap.Uint16("rows", lastRows))
-						}
-
-						// Some TUI apps (like opencode) need a second redraw trigger
-						// after a longer delay to fully render
-						go func(sid string, cols, rows uint16, doneCh <-chan struct{}) {
-							select {
-							case <-doneCh:
-								return
-							case <-time.After(300 * time.Millisecond):
-							}
-							if err := interactiveRunner.ResizeBySession(sid, cols-1, rows); err == nil {
-								select {
-								case <-doneCh:
-									return
-								case <-time.After(50 * time.Millisecond):
-								}
-								_ = interactiveRunner.ResizeBySession(sid, cols, rows)
-							}
-						}(sessionID, lastCols, lastRows, done)
-					}
 				}
 			}
+
+			// Now handle the resize - this sends SIGWINCH which triggers TUI redraw
+			h.handleResize(data[1:], sessionID, interactiveRunner)
 			continue
 		}
 
 		// Regular input - write to PTY if available
 		if ptyWriter != nil {
 			if _, err := ptyWriter.Write(data); err != nil {
-				h.logger.Debug("PTY write error",
+				h.logger.Debug("PTY write error, attempting reconnect",
 					zap.String("session_id", sessionID),
 					zap.Error(err))
-				return
+
+				// Try to reconnect to a new process (may have been restarted)
+				newWriter, newProcID := h.attemptReconnect(sessionID, interactiveRunner, wsw, done)
+				if newWriter != nil {
+					ptyWriter = newWriter
+					processID = newProcID
+					directOutputSet = true
+
+					// Retry write with new writer
+					if _, err := ptyWriter.Write(data); err != nil {
+						h.logger.Debug("PTY write error after reconnect",
+							zap.String("session_id", sessionID),
+							zap.Error(err))
+						continue
+					}
+					h.detectInputSubmission(sessionID, data)
+				} else {
+					h.logger.Debug("reconnect failed, PTY unavailable",
+						zap.String("session_id", sessionID))
+					// Don't return - keep trying on subsequent inputs
+					continue
+				}
+			} else {
+				// Detect Enter key (user submitted input) - notify lifecycle manager
+				h.detectInputSubmission(sessionID, data)
 			}
-			// Detect Enter key (user submitted input) - notify lifecycle manager
-			h.detectInputSubmission(sessionID, data)
 		} else {
 			// PTY not ready yet - try to set it up
 			if h.setupPtyAccess(sessionID, processID, interactiveRunner, wsw, &ptyWriter) {
@@ -345,7 +312,7 @@ func (h *TerminalHandler) runTerminalBridge(
 					h.logger.Debug("PTY write error after setup",
 						zap.String("session_id", sessionID),
 						zap.Error(err))
-					return
+					continue
 				}
 				// Detect Enter key (user submitted input) - notify lifecycle manager
 				h.detectInputSubmission(sessionID, data)
@@ -356,6 +323,56 @@ func (h *TerminalHandler) runTerminalBridge(
 			}
 		}
 	}
+}
+
+// attemptReconnect tries to reconnect to a new process after the old one exited.
+// Returns the new PTY writer and process ID if successful, or nil if not.
+func (h *TerminalHandler) attemptReconnect(
+	sessionID string,
+	interactiveRunner *process.InteractiveRunner,
+	wsw *wsWriter,
+	done <-chan struct{},
+) (io.Writer, string) {
+	const maxRetries = 20         // 20 retries
+	const retryInterval = 100 * time.Millisecond // 100ms between retries = 2s total
+
+	for i := 0; i < maxRetries; i++ {
+		select {
+		case <-done:
+			// Bridge is shutting down
+			return nil, ""
+		default:
+		}
+
+		// Try to get the PTY writer for the session (may be a new process)
+		writer, newProcID, err := interactiveRunner.GetPtyWriterBySession(sessionID)
+		if err == nil && writer != nil {
+			// Found a new process - set up direct output
+			if err := interactiveRunner.SetDirectOutput(newProcID, wsw); err != nil {
+				h.logger.Debug("failed to set direct output during reconnect",
+					zap.String("session_id", sessionID),
+					zap.String("process_id", newProcID),
+					zap.Error(err))
+			} else {
+				h.logger.Info("reconnected to new process after restart",
+					zap.String("session_id", sessionID),
+					zap.String("process_id", newProcID))
+				return writer, newProcID
+			}
+		}
+
+		// Wait before retrying
+		select {
+		case <-done:
+			return nil, ""
+		case <-time.After(retryInterval):
+		}
+	}
+
+	h.logger.Debug("reconnect attempts exhausted",
+		zap.String("session_id", sessionID),
+		zap.Int("attempts", maxRetries))
+	return nil, ""
 }
 
 // detectInputSubmission checks if the input contains Enter key and notifies
