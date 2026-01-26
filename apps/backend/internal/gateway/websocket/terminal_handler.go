@@ -221,14 +221,8 @@ func (h *TerminalHandler) runTerminalBridge(
 		// Signal any background goroutines to stop
 		close(done)
 
-		// Clean up: clear direct output, close WebSocket writer, close connection
-		if directOutputSet {
-			if err := interactiveRunner.ClearDirectOutput(processID); err != nil {
-				h.logger.Debug("failed to clear direct output",
-					zap.String("session_id", sessionID),
-					zap.Error(err))
-			}
-		}
+		// Clean up: clear direct output at session level (process may have been restarted with new ID)
+		interactiveRunner.ClearDirectOutputBySession(sessionID)
 		_ = wsw.Close()
 		_ = conn.Close()
 
@@ -323,13 +317,35 @@ func (h *TerminalHandler) runTerminalBridge(
 		// Regular input - write to PTY if available
 		if ptyWriter != nil {
 			if _, err := ptyWriter.Write(data); err != nil {
-				h.logger.Debug("PTY write error",
+				h.logger.Debug("PTY write error, attempting reconnect",
 					zap.String("session_id", sessionID),
 					zap.Error(err))
-				return
+
+				// Try to reconnect to a new process (may have been restarted)
+				newWriter, newProcID := h.attemptReconnect(sessionID, interactiveRunner, wsw, done)
+				if newWriter != nil {
+					ptyWriter = newWriter
+					processID = newProcID
+					directOutputSet = true
+
+					// Retry write with new writer
+					if _, err := ptyWriter.Write(data); err != nil {
+						h.logger.Debug("PTY write error after reconnect",
+							zap.String("session_id", sessionID),
+							zap.Error(err))
+						continue
+					}
+					h.detectInputSubmission(sessionID, data)
+				} else {
+					h.logger.Debug("reconnect failed, PTY unavailable",
+						zap.String("session_id", sessionID))
+					// Don't return - keep trying on subsequent inputs
+					continue
+				}
+			} else {
+				// Detect Enter key (user submitted input) - notify lifecycle manager
+				h.detectInputSubmission(sessionID, data)
 			}
-			// Detect Enter key (user submitted input) - notify lifecycle manager
-			h.detectInputSubmission(sessionID, data)
 		} else {
 			// PTY not ready yet - try to set it up
 			if h.setupPtyAccess(sessionID, processID, interactiveRunner, wsw, &ptyWriter) {
@@ -345,7 +361,7 @@ func (h *TerminalHandler) runTerminalBridge(
 					h.logger.Debug("PTY write error after setup",
 						zap.String("session_id", sessionID),
 						zap.Error(err))
-					return
+					continue
 				}
 				// Detect Enter key (user submitted input) - notify lifecycle manager
 				h.detectInputSubmission(sessionID, data)
@@ -356,6 +372,56 @@ func (h *TerminalHandler) runTerminalBridge(
 			}
 		}
 	}
+}
+
+// attemptReconnect tries to reconnect to a new process after the old one exited.
+// Returns the new PTY writer and process ID if successful, or nil if not.
+func (h *TerminalHandler) attemptReconnect(
+	sessionID string,
+	interactiveRunner *process.InteractiveRunner,
+	wsw *wsWriter,
+	done <-chan struct{},
+) (io.Writer, string) {
+	const maxRetries = 20         // 20 retries
+	const retryInterval = 100 * time.Millisecond // 100ms between retries = 2s total
+
+	for i := 0; i < maxRetries; i++ {
+		select {
+		case <-done:
+			// Bridge is shutting down
+			return nil, ""
+		default:
+		}
+
+		// Try to get the PTY writer for the session (may be a new process)
+		writer, newProcID, err := interactiveRunner.GetPtyWriterBySession(sessionID)
+		if err == nil && writer != nil {
+			// Found a new process - set up direct output
+			if err := interactiveRunner.SetDirectOutput(newProcID, wsw); err != nil {
+				h.logger.Debug("failed to set direct output during reconnect",
+					zap.String("session_id", sessionID),
+					zap.String("process_id", newProcID),
+					zap.Error(err))
+			} else {
+				h.logger.Info("reconnected to new process after restart",
+					zap.String("session_id", sessionID),
+					zap.String("process_id", newProcID))
+				return writer, newProcID
+			}
+		}
+
+		// Wait before retrying
+		select {
+		case <-done:
+			return nil, ""
+		case <-time.After(retryInterval):
+		}
+	}
+
+	h.logger.Debug("reconnect attempts exhausted",
+		zap.String("session_id", sessionID),
+		zap.Int("attempts", maxRetries))
+	return nil, ""
 }
 
 // detectInputSubmission checks if the input contains Enter key and notifies

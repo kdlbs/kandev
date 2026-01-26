@@ -2576,6 +2576,7 @@ func (m *Manager) handlePassthroughOutput(output *agentctltypes.ProcessOutput) {
 
 // handlePassthroughStatus handles status updates from a passthrough process and publishes to the event bus.
 // This is called when running in standalone mode without a WorkspaceTracker.
+// When the process exits while a WebSocket is connected, it attempts auto-restart with rate limiting.
 func (m *Manager) handlePassthroughStatus(status *agentctltypes.ProcessStatusUpdate) {
 	if status == nil {
 		return
@@ -2602,6 +2603,93 @@ func (m *Manager) handlePassthroughStatus(status *agentctltypes.ProcessStatusUpd
 	}
 
 	m.eventPublisher.PublishProcessStatus(execution, clientStatus)
+
+	// Check if process exited and should be auto-restarted
+	// Run asynchronously to allow the old process to be cleaned up first
+	if status.Status == agentctltypes.ProcessStatusExited || status.Status == agentctltypes.ProcessStatusFailed {
+		go m.handlePassthroughExit(execution, status)
+	}
+}
+
+// handlePassthroughExit handles auto-restart logic when a passthrough process exits.
+// This function is called asynchronously to allow the old process to be cleaned up first.
+func (m *Manager) handlePassthroughExit(execution *AgentExecution, status *agentctltypes.ProcessStatusUpdate) {
+	const restartDelay = 500 * time.Millisecond
+	const cleanupDelay = 100 * time.Millisecond // Wait for old process cleanup
+
+	// Wait a bit for the old process to be cleaned up from the process map
+	time.Sleep(cleanupDelay)
+
+	sessionID := execution.SessionID
+
+	interactiveRunner := m.GetInteractiveRunner()
+	if interactiveRunner == nil {
+		m.logger.Debug("no interactive runner available for auto-restart",
+			zap.String("session_id", sessionID))
+		return
+	}
+
+	// Check if WebSocket is still connected (use session-level tracking which survives process deletion)
+	if !interactiveRunner.HasActiveWebSocketBySession(sessionID) {
+		m.logger.Debug("no active WebSocket, skipping auto-restart",
+			zap.String("session_id", sessionID))
+		return
+	}
+
+	exitCode := 0
+	if status.ExitCode != nil {
+		exitCode = *status.ExitCode
+	}
+
+	m.logger.Info("passthrough process exited with active WebSocket, attempting auto-restart",
+		zap.String("session_id", sessionID),
+		zap.Int("exit_code", exitCode))
+
+	// Send restart notification to terminal (use session-level to survive process deletion)
+	restartMsg := "\r\n\x1b[33m[Agent exited. Restarting...]\x1b[0m\r\n"
+	if err := interactiveRunner.WriteToDirectOutputBySession(sessionID, []byte(restartMsg)); err != nil {
+		m.logger.Debug("failed to write restart message to terminal",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
+
+	// Delay before restart
+	time.Sleep(restartDelay)
+
+	// Check WebSocket is still connected after delay (use session-level tracking)
+	if !interactiveRunner.HasActiveWebSocketBySession(sessionID) {
+		m.logger.Debug("WebSocket disconnected during restart delay, aborting",
+			zap.String("session_id", sessionID))
+		return
+	}
+
+	// Attempt restart
+	ctx := context.Background()
+	if err := m.ResumePassthroughSession(ctx, sessionID); err != nil {
+		m.logger.Error("failed to auto-restart passthrough session",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+
+		// Send error message to terminal
+		errorMsg := fmt.Sprintf("\r\n\x1b[31m[Restart failed: %s]\x1b[0m\r\n", err.Error())
+		if writeErr := interactiveRunner.WriteToDirectOutputBySession(sessionID, []byte(errorMsg)); writeErr != nil {
+			m.logger.Debug("failed to write restart error message to terminal",
+				zap.String("session_id", sessionID),
+				zap.Error(writeErr))
+		}
+		return
+	}
+
+	// Connect the session's existing WebSocket to the new process
+	if interactiveRunner.ConnectSessionWebSocket(execution.PassthroughProcessID) {
+		m.logger.Info("passthrough session auto-restarted and reconnected WebSocket",
+			zap.String("session_id", sessionID),
+			zap.String("new_process_id", execution.PassthroughProcessID))
+	} else {
+		m.logger.Warn("passthrough session restarted but failed to reconnect WebSocket",
+			zap.String("session_id", sessionID),
+			zap.String("new_process_id", execution.PassthroughProcessID))
+	}
 }
 
 // GetInteractiveRunner returns the interactive runner for passthrough mode.
