@@ -188,6 +188,41 @@ console.log(data);
     },
   },
 
+  // Tool call - Edit with complex metadata (complete)
+  {
+    id: 'tool-3b',
+    session_id: 'demo',
+    task_id: 'demo-task',
+    type: 'tool_call',
+    content: 'Auggie Read `drizzle.config.ts`',
+    author_type: 'agent',
+    created_at: '2024-01-20T10:08:30Z',
+    metadata: {
+      tool_call_id: 'toolu_vrtx_01W75yrLi1WLgLCz8P3D8jjh',
+      tool_name: 'edit',
+      title: 'Edit drizzle.config.ts',
+      status: 'complete',
+      args: {
+        kind: 'edit',
+        locations: [
+          {
+            path: '/Users/cfl/.kandev/worktrees/1_c28de20d/drizzle.config.ts',
+          },
+        ],
+        path: '/Users/cfl/.kandev/worktrees/1_c28de20d/drizzle.config.ts',
+        raw_input: {
+          command: 'str_replace',
+          instruction_reminder: 'ALWAYS BREAK DOWN EDITS INTO SMALLER CHUNKS OF AT MOST 150 LINES EACH.',
+          new_str_1: 'export default defineConfig({\n  schema: "./src/main/lib/db/schema/index.ts",\n  dialect: "sqlite",\n})',
+          old_str_1: 'export default defineConfig({\n  schema: "./src/main/lib/db/schema/index.ts",\n  out: "./drizzle",\n  dialect: "sqlite",\n})',
+          old_str_end_line_number_1: 7,
+          old_str_start_line_number_1: 3,
+          path: 'drizzle.config.ts',
+        },
+      },
+    },
+  },
+
   // Tool call - Search (pending, with permission)
   {
     id: 'tool-4',
