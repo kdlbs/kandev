@@ -128,7 +128,7 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 		existing, err := m.GetBySessionID(ctx, req.SessionID)
 		if err == nil && existing != nil {
 			if m.IsValid(existing.Path) {
-				m.logger.Info("reusing existing worktree by session ID",
+				m.logger.Debug("reusing existing worktree by session ID",
 					zap.String("worktree_id", existing.ID),
 					zap.String("session_id", req.SessionID),
 					zap.String("task_id", req.TaskID),

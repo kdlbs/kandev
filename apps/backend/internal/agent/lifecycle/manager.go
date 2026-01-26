@@ -603,7 +603,7 @@ func (m *Manager) StopAllAgents(ctx context.Context) error {
 
 // Launch launches a new agent for a task
 func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecution, error) {
-	m.logger.Info("launching agent",
+	m.logger.Debug("launching agent",
 		zap.String("task_id", req.TaskID),
 		zap.String("agent_profile_id", req.AgentProfileID),
 		zap.Bool("use_worktree", req.UseWorktree))
@@ -618,7 +618,7 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 			return nil, fmt.Errorf("failed to resolve agent profile: %w", err)
 		}
 		agentTypeName = profileInfo.AgentName
-		m.logger.Info("resolved agent profile",
+		m.logger.Debug("resolved agent profile",
 			zap.String("profile_id", req.AgentProfileID),
 			zap.String("agent_name", profileInfo.AgentName),
 			zap.String("agent_type", agentTypeName))
@@ -819,7 +819,7 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 	// NOTE: This does NOT start the agent process - call StartAgentProcess() explicitly
 	go m.waitForAgentctlReady(execution)
 
-	m.logger.Info("agentctl execution created (agent not started)",
+	m.logger.Debug("agentctl execution created (agent not started)",
 		zap.String("execution_id", executionID),
 		zap.String("task_id", req.TaskID),
 		zap.String("runtime", execution.RuntimeName))
@@ -993,7 +993,7 @@ func (m *Manager) getOrCreateWorktree(ctx context.Context, req *LaunchRequest) (
 	}
 
 	if worktreeID != "" && wt.ID == worktreeID {
-		m.logger.Info("reusing existing worktree for session resumption",
+		m.logger.Debug("reusing existing worktree for session resumption",
 			zap.String("task_id", req.TaskID),
 			zap.String("worktree_id", wt.ID),
 			zap.String("worktree_path", wt.Path),
@@ -1017,7 +1017,7 @@ func (m *Manager) waitForAgentctlReady(execution *AgentExecution) {
 	ctx, cancel := appctx.Detached(context.Background(), m.stopCh, 60*time.Second)
 	defer cancel()
 
-	m.logger.Info("waiting for agentctl to be ready",
+	m.logger.Debug("waiting for agentctl to be ready",
 		zap.String("execution_id", execution.ID),
 		zap.String("url", execution.agentctl.BaseURL()))
 
@@ -1038,7 +1038,7 @@ func (m *Manager) waitForAgentctlReady(execution *AgentExecution) {
 			zap.String("execution_id", execution.ID),
 			zap.Duration("duration", elapsed))
 	} else {
-		m.logger.Info("agentctl ready - shell/workspace access available",
+		m.logger.Debug("agentctl ready - shell/workspace access available",
 			zap.String("execution_id", execution.ID),
 			zap.Duration("duration", elapsed))
 	}

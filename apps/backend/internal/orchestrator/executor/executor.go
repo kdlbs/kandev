@@ -612,7 +612,7 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 		}
 	}
 
-	e.logger.Info("resuming agent session",
+	e.logger.Debug("resuming agent session",
 		zap.String("task_id", session.TaskID),
 		zap.String("session_id", session.ID),
 		zap.String("agent_profile_id", session.AgentProfileID),
