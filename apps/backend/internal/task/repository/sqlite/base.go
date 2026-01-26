@@ -17,8 +17,6 @@ func NewWithDB(dbConn *sql.DB) (*Repository, error) {
 	return newRepository(dbConn, false)
 }
 
-
-
 func newRepository(dbConn *sql.DB, ownsDB bool) (*Repository, error) {
 	repo := &Repository{db: dbConn, ownsDB: ownsDB}
 	if err := repo.initSchema(); err != nil {
@@ -100,8 +98,6 @@ func (r *Repository) ensureWorkspaceIndexes() error {
 	}
 	return nil
 }
-
-
 
 // initSchema creates the database tables if they don't exist
 func (r *Repository) initSchema() error {
@@ -232,6 +228,7 @@ func (r *Repository) initSchema() error {
 		provider_name TEXT DEFAULT '',
 		default_branch TEXT DEFAULT '',
 		worktree_branch_prefix TEXT DEFAULT 'feature/',
+		pull_before_worktree INTEGER NOT NULL DEFAULT 1,
 		setup_script TEXT DEFAULT '',
 		cleanup_script TEXT DEFAULT '',
 		dev_script TEXT DEFAULT '',
@@ -431,6 +428,9 @@ func (r *Repository) initSchema() error {
 		return err
 	}
 	if err := r.ensureColumn("repositories", "worktree_branch_prefix", "TEXT DEFAULT 'feature/'"); err != nil {
+		return err
+	}
+	if err := r.ensureColumn("repositories", "pull_before_worktree", "INTEGER NOT NULL DEFAULT 1"); err != nil {
 		return err
 	}
 	if err := r.ensureColumn("repositories", "dev_script", "TEXT DEFAULT ''"); err != nil {

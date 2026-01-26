@@ -184,6 +184,7 @@ export async function createRepositoryAction(payload: {
   provider_name: string;
   default_branch: string;
   worktree_branch_prefix: string;
+  pull_before_worktree: boolean;
   setup_script: string;
   cleanup_script: string;
   dev_script: string;
@@ -200,6 +201,7 @@ export async function createRepositoryAction(payload: {
       provider_name: payload.provider_name,
       default_branch: payload.default_branch,
       worktree_branch_prefix: payload.worktree_branch_prefix,
+      pull_before_worktree: payload.pull_before_worktree,
       setup_script: payload.setup_script,
       cleanup_script: payload.cleanup_script,
       dev_script: payload.dev_script,

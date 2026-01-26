@@ -79,6 +79,7 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 		RepositoryPath:       req.RepositoryPath,
 		BaseBranch:           req.BaseBranch,
 		WorktreeBranchPrefix: req.WorktreeBranchPrefix,
+		PullBeforeWorktree:   req.PullBeforeWorktree,
 	}
 
 	// Create the agentctl execution (does NOT start agent process)
