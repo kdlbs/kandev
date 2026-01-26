@@ -1,12 +1,14 @@
 'use client';
 
-import { useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
+import { IconRobot } from '@tabler/icons-react';
 import { cn } from '@/lib/utils';
 import type { Message } from '@/lib/types/http';
 import { RichBlocks } from '@/components/task/chat/messages/rich-blocks';
+import { InlineCode } from '@/components/task/chat/messages/inline-code';
+import { CodeBlock } from '@/components/task/chat/messages/code-block';
 
 type ChatMessageProps = {
   comment: Message;
@@ -15,39 +17,47 @@ type ChatMessageProps = {
   showRichBlocks?: boolean;
 };
 
-function formatMessageTime(dateString: string): string {
-  if (!dateString) return '';
-  try {
-    const date = new Date(dateString);
-    if (isNaN(date.getTime())) return '';
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  } catch {
-    return '';
-  }
-}
-
 export function ChatMessage({ comment, label, className, showRichBlocks }: ChatMessageProps) {
   const isUser = comment.author_type === 'user';
-  const formattedTime = useMemo(() => formatMessageTime(comment.created_at), [comment.created_at]);
+  const isTaskDescription = label === 'Task';
 
-  return (
-    <div className={cn('w-full rounded-lg border px-4 py-3 text-sm', className)}>
-      <div className="flex items-center justify-between mb-2">
-        <p className="text-[11px] uppercase tracking-wide opacity-70">
-          {label}
-          {comment.requests_input ? (
-            <span className="ml-2 rounded-full bg-amber-500/20 px-2 py-0.5 text-[10px] text-amber-300">
-              Needs input
-            </span>
-          ) : null}
-        </p>
-        {formattedTime && (
-          <span className="text-[10px] text-muted-foreground/60">{formattedTime}</span>
-        )}
-      </div>
-      {isUser ? (
+  // Keep the old card-based layout for task descriptions (amber banner)
+  if (isTaskDescription) {
+    return (
+      <div className={cn('w-full rounded-lg  px-4 py-3 text-xs', className)}>
+        <div className="flex items-center">
+          <p className="text-[11px] uppercase tracking-wide opacity-70">
+            {comment.requests_input ? (
+              <span className="ml-2 rounded-full bg-amber-500/20 px-2 py-0.5 text-[10px] text-amber-300">
+                Needs input
+              </span>
+            ) : null}
+          </p>
+        </div>
         <p className="whitespace-pre-wrap">{comment.content || '(empty)'}</p>
-      ) : (
+      </div>
+    );
+  }
+
+  // User message: right-aligned bubble
+  if (isUser) {
+    return (
+      <div className="flex justify-end w-full">
+        <div className="max-w-[85%] sm:max-w-[75%] md:max-w-2xl">
+          <div className="rounded-2xl  border-primary/30 bg-primary/10 px-4 py-2.5 text-xs">
+            <p className="whitespace-pre-wrap">{comment.content || '(empty)'}</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Agent message: icon on left, no card background
+  return (
+    <div className="flex items-start gap-2 sm:gap-3 w-full">
+
+      {/* Content */}
+      <div className="flex-1 min-w-0 text-xs">
         <div className="prose prose-sm dark:prose-invert max-w-none prose-p:my-4 prose-p:leading-relaxed prose-ul:my-4 prose-ul:list-disc prose-ul:pl-6 prose-ol:my-4 prose-ol:list-decimal prose-ol:pl-6 prose-li:my-1.5 prose-pre:my-5 prose-strong:text-foreground prose-strong:font-bold prose-headings:text-foreground prose-headings:font-bold">
           <ReactMarkdown
             remarkPlugins={[remarkGfm, remarkBreaks]}
@@ -56,89 +66,56 @@ export function ChatMessage({ comment, label, className, showRichBlocks }: ChatM
                 // Check if it's inline code (no className means inline, className with language-* means code block)
                 const isInline = !className || !className.startsWith('language-');
 
-                // Inline code (backticks)
+                // Inline code (backticks) - with copy on click
                 if (isInline) {
-                  return (
-                    <code
-                      style={{
-                        padding: '2px 6px',
-                        backgroundColor: 'rgba(59, 130, 246, 0.2)',
-                        color: 'rgb(96, 165, 250)',
-                        borderRadius: '4px',
-                        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-                        fontSize: '0.9em',
-                      }}
-                      {...props}
-                    >
-                      {children}
-                    </code>
-                  );
+                  return <InlineCode>{children}</InlineCode>;
                 }
-                // Code blocks (triple backticks)
-                return (
-                  <code
-                    className={className}
-                    style={{
-                      display: 'block',
-                      padding: '12px',
-                      backgroundColor: 'rgba(0, 0, 0, 0.3)',
-                      borderRadius: '6px',
-                      overflowX: 'auto',
-                      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-                      fontSize: '0.85em',
-                    }}
-                    {...props}
-                  >
-                    {children}
-                  </code>
-                );
+
+                // Code blocks (triple backticks) - with syntax highlighting and copy button
+                return <CodeBlock className={className}>{children}</CodeBlock>;
               },
               ol: ({ children, ...props }) => (
-                <ol
-                  style={{
-                    listStyleType: 'decimal',
-                    paddingLeft: '1.5rem',
-                    marginTop: '1rem',
-                    marginBottom: '1rem',
-                  }}
-                  {...props}
-                >
+                <ol className="list-decimal pl-6" {...props}>
                   {children}
                 </ol>
               ),
               ul: ({ children, ...props }) => (
-                <ul
-                  style={{
-                    listStyleType: 'disc',
-                    paddingLeft: '1.5rem',
-                    marginTop: '1rem',
-                    marginBottom: '1rem',
-                  }}
-                  {...props}
-                >
+                <ul className="list-disc pl-6" {...props}>
                   {children}
                 </ul>
               ),
               li: ({ children, ...props }) => (
-                <li
-                  style={{
-                    marginTop: '0.375rem',
-                    marginBottom: '0.375rem',
-                  }}
-                  {...props}
-                >
+                <li className="my-1" {...props}>
                   {children}
                 </li>
               ),
               p: ({ children, ...props }) => (
-                <p
-                  style={{
-                    marginTop: '1rem',
-                    marginBottom: '1rem',
-                    lineHeight: '1.625',
-                  }}
-                  {...props}
-                >
+                <p className="leading-relaxed mt-1" {...props}>
+                  {children}
+                </p>
+              ),
+              h1: ({ children, ...props }) => (
+                <p className="my-1 font-bold" {...props}>
+                  {children}
+                </p>
+              ),
+              h2: ({ children, ...props }) => (
+                <p className="my-1 font-bold" {...props}>
+                  {children}
+                </p>
+              ),
+              h3: ({ children, ...props }) => (
+                <p className="my-1 font-bold" {...props}>
+                  {children}
+                </p>
+              ),
+              h4: ({ children, ...props }) => (
+                <p className="my-1 font-bold" {...props}>
+                  {children}
+                </p>
+              ),
+              h5: ({ children, ...props }) => (
+                <p className="my-1 font-bold" {...props}>
                   {children}
                 </p>
               ),
@@ -148,7 +125,7 @@ export function ChatMessage({ comment, label, className, showRichBlocks }: ChatM
           </ReactMarkdown>
           {showRichBlocks ? <RichBlocks comment={comment} /> : null}
         </div>
-      )}
+      </div>
     </div>
   );
 }

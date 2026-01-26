@@ -1,6 +1,7 @@
 'use client';
 
-import { IconCheck, IconX, IconLoader2, IconTerminal } from '@tabler/icons-react';
+import { useState } from 'react';
+import { IconCheck, IconX, IconLoader2, IconTerminal, IconChevronDown, IconChevronRight } from '@tabler/icons-react';
 import { cn } from '@/lib/utils';
 import type { Message } from '@/lib/types/http';
 import { Badge } from '@kandev/ui/badge';
@@ -17,21 +18,49 @@ interface ScriptExecutionMetadata {
 }
 
 export function ScriptExecutionMessage({ comment }: { comment: Message }) {
+  const [isExpanded, setIsExpanded] = useState(false);
   const metadata = comment.metadata as ScriptExecutionMetadata | undefined;
 
   // Show fallback if metadata is missing or incomplete
   if (!metadata || !metadata.script_type) {
+    const hasContent = !!comment.content;
+
     return (
-      <div className="w-full rounded-lg border border-yellow-500/40 bg-yellow-500/5 px-4 py-3 text-sm">
-        <div className="flex items-center gap-2 text-yellow-600 dark:text-yellow-400">
-          <IconTerminal className="h-4 w-4" />
-          <span>Script Execution (metadata unavailable)</span>
+      <div className="w-full">
+        <div className="flex items-start gap-3 w-full">
+          <div className="flex-shrink-0 mt-0.5">
+            <IconTerminal className="h-4 w-4 text-yellow-600 dark:text-yellow-400" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <button
+              type="button"
+              onClick={() => hasContent && setIsExpanded(!isExpanded)}
+              className={cn(
+                'inline-flex items-center gap-1.5 text-left',
+                hasContent && 'cursor-pointer hover:opacity-70 transition-opacity'
+              )}
+              disabled={!hasContent}
+            >
+              <span className="text-xs font-mono text-yellow-600 dark:text-yellow-400">
+                Script Execution (metadata unavailable)
+              </span>
+              {hasContent && (
+                isExpanded ? (
+                  <IconChevronDown className="h-3.5 w-3.5 text-muted-foreground/50 flex-shrink-0" />
+                ) : (
+                  <IconChevronRight className="h-3.5 w-3.5 text-muted-foreground/50 flex-shrink-0" />
+                )
+              )}
+            </button>
+            {isExpanded && comment.content && (
+              <div className="mt-2 pl-4 border-l-2 border-border/30">
+                <pre className="font-mono text-xs bg-muted/30 rounded px-3 py-2 overflow-x-auto max-h-[300px] overflow-y-auto whitespace-pre-wrap break-words">
+                  {comment.content}
+                </pre>
+              </div>
+            )}
+          </div>
         </div>
-        {comment.content && (
-          <pre className="mt-2 font-mono text-xs bg-black/5 dark:bg-white/5 rounded px-3 py-2 border border-border/40 overflow-x-auto max-h-[300px] overflow-y-auto whitespace-pre-wrap break-words">
-            {comment.content}
-          </pre>
-        )}
       </div>
     );
   }
@@ -45,90 +74,106 @@ export function ScriptExecutionMessage({ comment }: { comment: Message }) {
   const StatusIcon = isRunning
     ? IconLoader2
     : isSuccess
-    ? IconCheck
-    : IconX;
+      ? IconCheck
+      : IconX;
 
   const statusText = isRunning
     ? 'Running...'
     : isSuccess
-    ? 'Completed'
-    : 'Failed';
+      ? 'Completed'
+      : 'Failed';
 
   const statusColor = isRunning
     ? 'text-blue-500'
     : isSuccess
-    ? 'text-green-500'
-    : 'text-red-500';
+      ? 'text-green-500'
+      : 'text-red-500';
 
-  const borderColor = isRunning
-    ? 'border-blue-500/40'
-    : isSuccess
-    ? 'border-green-500/40'
-    : 'border-red-500/40';
-
-  const bgColor = isRunning
-    ? 'bg-blue-500/5'
-    : isSuccess
-    ? 'bg-green-500/5'
-    : 'bg-red-500/5';
+  const hasDetails = comment.content || error || exit_code !== undefined;
 
   return (
-    <div
-      className={cn(
-        'w-full rounded-lg border px-4 py-3 text-sm',
-        borderColor,
-        bgColor
-      )}
-    >
-      {/* Header */}
-      <div className="flex items-center justify-between gap-2 mb-2">
-        <div className="flex items-center gap-2">
+    <div className="w-full">
+      {/* Icon + Summary Row */}
+      <div className="flex items-start gap-3 w-full">
+        {/* Icon */}
+        <div className="flex-shrink-0 mt-0.5">
           <IconTerminal className="h-4 w-4 text-muted-foreground" />
-          <Badge variant={isSetup ? 'default' : 'secondary'} className="text-xs">
-            {isSetup ? 'Setup Script' : 'Cleanup Script'}
-          </Badge>
-          <div className={cn('flex items-center gap-1.5 text-xs', statusColor)}>
-            <StatusIcon className={cn('h-3.5 w-3.5', isRunning && 'animate-spin')} />
-            <span>{statusText}</span>
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 text-xs">
+            <button
+              type="button"
+              onClick={() => hasDetails && setIsExpanded(!isExpanded)}
+              className={cn(
+                'inline-flex items-center gap-1.5 text-left',
+                hasDetails && 'cursor-pointer hover:opacity-70 transition-opacity'
+              )}
+              disabled={!hasDetails}
+            >
+              <Badge variant={isSetup ? 'default' : 'secondary'} className="text-xs">
+                {isSetup ? 'Setup' : 'Cleanup'}
+              </Badge>
+              <span className="font-mono text-xs text-muted-foreground">
+                {command}
+              </span>
+              {/* Status indicator - only show if not success */}
+              {!isSuccess && (
+                <StatusIcon className={cn('h-3.5 w-3.5', statusColor, isRunning && 'animate-spin')} />
+              )}
+              {hasDetails && (
+                isExpanded ? (
+                  <IconChevronDown className="h-3.5 w-3.5 text-muted-foreground/50 flex-shrink-0" />
+                ) : (
+                  <IconChevronRight className="h-3.5 w-3.5 text-muted-foreground/50 flex-shrink-0" />
+                )
+              )}
+            </button>
           </div>
-        </div>
-      </div>
 
-      {/* Command */}
-      <div className="mb-2 font-mono text-xs bg-muted/50 rounded px-2 py-1.5 border border-border/40">
-        <span className="text-muted-foreground">$</span> {command}
-      </div>
+          {/* Expanded Details */}
+          {isExpanded && hasDetails && (
+            <div className="mt-2 pl-4 border-l-2 border-border/30 space-y-2">
+              {/* Output */}
+              {comment.content && comment.content.trim() !== '' && (
+                <div>
+                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground/60 mb-1">
+                    Output
+                  </div>
+                  <pre className="font-mono text-xs bg-muted/30 rounded px-3 py-2 overflow-x-auto max-h-[300px] overflow-y-auto whitespace-pre-wrap break-words">
+                    {comment.content}
+                  </pre>
+                </div>
+              )}
 
-      {/* Output */}
-      {comment.content && comment.content.trim() !== '' && (
-        <div className="mb-2">
-          <div className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">
-            Output
-          </div>
-          <pre className="font-mono text-xs bg-black/5 dark:bg-white/5 rounded px-3 py-2 border border-border/40 overflow-x-auto max-h-[300px] overflow-y-auto whitespace-pre-wrap break-words">
-            {comment.content}
-          </pre>
-        </div>
-      )}
+              {/* Error message */}
+              {error && (
+                <div>
+                  <div className="text-[10px] uppercase tracking-wide text-red-600/70 dark:text-red-400/70 mb-1">
+                    Error
+                  </div>
+                  <div className="text-xs text-red-600 dark:text-red-400 bg-red-500/10 rounded px-2 py-1.5">
+                    {error}
+                  </div>
+                </div>
+              )}
 
-      {/* Error message */}
-      {error && (
-        <div className="mb-2 text-xs text-red-600 dark:text-red-400 bg-red-500/10 rounded px-2 py-1.5 border border-red-500/20">
-          {error}
-        </div>
-      )}
-
-      {/* Footer with exit code */}
-      {!isRunning && exit_code !== undefined && (
-        <div className="flex items-center justify-between text-[11px] text-muted-foreground pt-2 border-t border-border/40">
-          <span>Exit code: {exit_code}</span>
-          {metadata.started_at && metadata.completed_at && (
-            <span>
-              Duration: {calculateDuration(metadata.started_at, metadata.completed_at)}
-            </span>
+              {/* Footer with exit code */}
+              {!isRunning && exit_code !== undefined && (
+                <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-2 border-t border-border/30">
+                  <span>Exit code: {exit_code}</span>
+                  {metadata.started_at && metadata.completed_at && (
+                    <span>
+                      Duration: {calculateDuration(metadata.started_at, metadata.completed_at)}
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
           )}
         </div>
-      )}
+      </div>
     </div>
   );
 }

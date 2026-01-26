@@ -33,30 +33,31 @@ export function StatusMessage({ comment }: { comment: Message }) {
 
   if (isSimpleStatus) {
     return (
-      <div className="flex items-center justify-center py-1">
-        <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary/10 border border-primary/20 text-xs text-primary">
-          <IconPointFilled className="h-2 w-2" />
-          <span>{message}</span>
-        </div>
+      <div className="flex items-center gap-3 w-full py-2">
+        <div className="flex-1 h-px bg-border" />
+        <span className="text-xs text-muted-foreground/60 whitespace-nowrap">{message}</span>
+        <div className="flex-1 h-px bg-border" />
       </div>
     );
   }
 
-  // Cancelled turn gets a special compact warning style
+  // Cancelled turn gets a special separator style
   if (metadata?.cancelled) {
     return (
-      <div className="flex items-center justify-center py-1">
-        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-xs text-amber-600 dark:text-amber-400">
+      <div className="flex items-center gap-3 w-full py-2">
+        <div className="flex-1 h-px bg-amber-500/30" />
+        <div className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
           <IconHandStop className="h-3 w-3" />
           <span>{message}</span>
         </div>
+        <div className="flex-1 h-px bg-amber-500/30" />
       </div>
     );
   }
 
   const Icon = isError ? IconAlertTriangle : isWarning ? IconAlertTriangle : IconInfoCircle;
   const iconClass = isError ? 'text-red-500' : isWarning ? 'text-amber-500' : 'text-muted-foreground';
-  const label = isError ? 'Error' : isWarning ? 'Warning' : 'Status';
+  const textClass = isError ? 'text-red-600 dark:text-red-400' : isWarning ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground';
 
   // Format error details for display
   const formatErrorDetails = () => {
@@ -86,68 +87,71 @@ export function StatusMessage({ comment }: { comment: Message }) {
   const errorDetails = hasErrorDetails ? formatErrorDetails() : [];
 
   return (
-    <div
-      className={cn(
-        'w-full rounded-lg border px-4 py-3 text-sm',
-        isError
-          ? 'border-red-500/40 bg-red-500/10 text-foreground'
-          : isWarning
-          ? 'border-amber-500/40 bg-amber-500/10 text-foreground'
-          : 'border-border/60 bg-muted/30 text-foreground'
-      )}
-    >
-      <div className="flex items-center gap-2 mb-2 text-[11px] uppercase tracking-wide opacity-70">
-        <Icon className={cn('h-3.5 w-3.5', iconClass)} />
-        <span>{label}</span>
-      </div>
-      <div className="whitespace-pre-wrap">{message || 'An error occurred'}</div>
+    <div className="w-full">
+      {/* Icon + Content Row */}
+      <div className="flex items-start gap-3 w-full">
+        {/* Icon */}
+        <div className="flex-shrink-0 mt-0.5">
+          <Icon className={cn('h-4 w-4', iconClass)} />
+        </div>
 
-      {/* Expandable error details */}
-      {hasErrorDetails && errorDetails.length > 0 && (
-        <div className="mt-3 border-t border-red-500/20 pt-2">
-          <button
-            onClick={() => setIsExpanded(!isExpanded)}
-            className="flex items-center gap-1 text-xs text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 transition-colors"
-          >
-            {isExpanded ? (
-              <IconChevronDown className="h-3.5 w-3.5" />
-            ) : (
-              <IconChevronRight className="h-3.5 w-3.5" />
-            )}
-            <span>{isExpanded ? 'Hide details' : 'Show details'}</span>
-          </button>
+        {/* Content */}
+        <div className="flex-1 min-w-0 pt-0.5">
+          <div className={cn('text-xs font-mono', textClass)}>
+            {message || 'An error occurred'}
+          </div>
 
-          {isExpanded && (
-            <div className="mt-2 space-y-2">
-              {errorDetails.map((detail, index) => (
-                <div key={index}>
-                  <div className="text-[10px] uppercase tracking-wide text-red-600/70 dark:text-red-400/70 mb-0.5">
-                    {detail.label}
-                  </div>
-                  <pre className="text-xs bg-red-500/5 rounded p-2 overflow-x-auto whitespace-pre-wrap break-all font-mono">
-                    {detail.value}
-                  </pre>
+          {/* Expandable error details */}
+          {hasErrorDetails && errorDetails.length > 0 && (
+            <div className="mt-2">
+              <button
+                onClick={() => setIsExpanded(!isExpanded)}
+                className="inline-flex items-center gap-1.5 text-left cursor-pointer hover:opacity-70 transition-opacity"
+              >
+                <span className="font-mono text-xs text-muted-foreground">
+                  {isExpanded ? 'Hide details' : 'Show details'}
+                </span>
+                {isExpanded ? (
+                  <IconChevronDown className="h-3.5 w-3.5 text-muted-foreground/50 flex-shrink-0" />
+                ) : (
+                  <IconChevronRight className="h-3.5 w-3.5 text-muted-foreground/50 flex-shrink-0" />
+                )}
+              </button>
+
+              {isExpanded && (
+                <div className="mt-2 pl-4 border-l-2 border-border/30 space-y-2">
+                  {errorDetails.map((detail, index) => (
+                    <div key={index}>
+                      <div className="text-[10px] uppercase tracking-wide text-muted-foreground/60 mb-0.5">
+                        {detail.label}
+                      </div>
+                      <pre className="text-xs bg-muted/30 rounded p-2 overflow-x-auto whitespace-pre-wrap break-all font-mono">
+                        {detail.value}
+                      </pre>
+                    </div>
+                  ))}
                 </div>
-              ))}
+              )}
+            </div>
+          )}
+
+          {/* Progress bar */}
+          {progress !== null && (
+            <div className="mt-2">
+              <div className="flex items-center justify-between text-[10px] text-muted-foreground mb-1">
+                <span>{statusLine ?? 'Progress'}</span>
+                <span>{Math.round(progress)}%</span>
+              </div>
+              <div className="h-1.5 rounded-full bg-muted/70">
+                <div
+                  className="h-full rounded-full bg-primary/80 transition-[width]"
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
             </div>
           )}
         </div>
-      )}
-
-      {progress !== null && (
-        <div className="mt-2">
-          <div className="flex items-center justify-between text-[11px] text-muted-foreground mb-1">
-            <span>{statusLine ?? 'Progress'}</span>
-            <span>{Math.round(progress)}%</span>
-          </div>
-          <div className="h-1.5 rounded-full bg-muted/70">
-            <div
-              className="h-full rounded-full bg-primary/80 transition-[width]"
-              style={{ width: `${progress}%` }}
-            />
-          </div>
-        </div>
-      )}
+      </div>
     </div>
   );
 }

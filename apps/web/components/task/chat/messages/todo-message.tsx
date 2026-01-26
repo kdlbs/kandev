@@ -20,7 +20,7 @@ export function TodoMessage({ comment }: { comment: Message }) {
   const progress = Math.round((completed / todoItems.length) * 100);
 
   return (
-    <div className="w-full rounded-lg border border-border/60 bg-background/60 px-4 py-3 text-sm">
+    <div className="w-full rounded-lg border border-border/60 bg-background/60 px-4 py-3 text-xs">
       <div className="flex items-center gap-2 text-muted-foreground mb-2 uppercase tracking-wide text-[11px]">
         <IconListCheck className="h-3.5 w-3.5" />
         <span>Todos</span>
