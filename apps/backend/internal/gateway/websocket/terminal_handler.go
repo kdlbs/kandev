@@ -212,7 +212,6 @@ func (h *TerminalHandler) runTerminalBridge(
 ) {
 	var ptyWriter io.Writer
 	var directOutputSet bool
-	var lastCols, lastRows uint16
 
 	// Channel to signal cleanup to any spawned goroutines
 	done := make(chan struct{})
@@ -252,65 +251,17 @@ func (h *TerminalHandler) runTerminalBridge(
 
 		// Check for resize command (first byte 0x01)
 		if data[0] == resizeCommandByte {
-			cols, rows := h.handleResize(data[1:], sessionID, interactiveRunner)
-			if cols > 0 && rows > 0 {
-				lastCols, lastRows = cols, rows
-			}
-
-			// After resize, try to set up PTY access if not already done
+			// Set up PTY access BEFORE handling resize if not already done.
+			// This ensures buffered output is sent to the terminal before the resize
+			// triggers a TUI redraw (which would overwrite the scrollback).
 			if !directOutputSet {
 				if h.setupPtyAccess(sessionID, processID, interactiveRunner, wsw, &ptyWriter) {
 					directOutputSet = true
-
-					// Trigger a resize to force TUI redraw after reconnect
-					// This ensures the TUI app redraws with full colors/styles
-					// We resize to different dimensions then back to force a real redraw
-					// (some TUI apps ignore same-size resizes)
-					if lastCols > 2 && lastRows > 2 {
-						// Delay to ensure direct output is fully set up
-						time.Sleep(50 * time.Millisecond)
-
-						// Resize to smaller dimensions to trigger a real change
-						// Use a more significant change (2 cols/rows) for apps that might ignore small changes
-						if err := interactiveRunner.ResizeBySession(sessionID, lastCols-2, lastRows-2); err != nil {
-							h.logger.Debug("failed to trigger intermediate resize",
-								zap.String("session_id", sessionID),
-								zap.Error(err))
-						}
-
-						// Longer delay then resize back to actual dimensions
-						time.Sleep(100 * time.Millisecond)
-						if err := interactiveRunner.ResizeBySession(sessionID, lastCols, lastRows); err != nil {
-							h.logger.Debug("failed to trigger final resize",
-								zap.String("session_id", sessionID),
-								zap.Error(err))
-						} else {
-							h.logger.Info("triggered TUI redraw via resize",
-								zap.String("session_id", sessionID),
-								zap.Uint16("cols", lastCols),
-								zap.Uint16("rows", lastRows))
-						}
-
-						// Some TUI apps (like opencode) need a second redraw trigger
-						// after a longer delay to fully render
-						go func(sid string, cols, rows uint16, doneCh <-chan struct{}) {
-							select {
-							case <-doneCh:
-								return
-							case <-time.After(300 * time.Millisecond):
-							}
-							if err := interactiveRunner.ResizeBySession(sid, cols-1, rows); err == nil {
-								select {
-								case <-doneCh:
-									return
-								case <-time.After(50 * time.Millisecond):
-								}
-								_ = interactiveRunner.ResizeBySession(sid, cols, rows)
-							}
-						}(sessionID, lastCols, lastRows, done)
-					}
 				}
 			}
+
+			// Now handle the resize - this sends SIGWINCH which triggers TUI redraw
+			h.handleResize(data[1:], sessionID, interactiveRunner)
 			continue
 		}
 

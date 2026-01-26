@@ -677,13 +677,21 @@ func (r *InteractiveRunner) readOutput(proc *interactiveProcess) {
 				}
 			}
 
+			// Always buffer output for scrollback restoration on reconnect
+			chunk := ProcessOutputChunk{
+				Stream:    "stdout",
+				Data:      dataStr,
+				Timestamp: time.Now().UTC(),
+			}
+			proc.buffer.append(chunk)
+
 			// Check if we have a direct output writer (binary WebSocket mode)
 			proc.directOutputMu.RLock()
 			directWriter := proc.directOutput
 			proc.directOutputMu.RUnlock()
 
 			if directWriter != nil {
-				// Direct mode: write raw bytes to the WebSocket, skip event bus
+				// Direct mode: write raw bytes to the WebSocket
 				if _, writeErr := directWriter.Write(data); writeErr != nil {
 					r.logger.Debug("direct output write error",
 						zap.String("process_id", proc.info.ID),
@@ -691,13 +699,7 @@ func (r *InteractiveRunner) readOutput(proc *interactiveProcess) {
 					// Don't return - the writer might have closed but process continues
 				}
 			} else {
-				// Normal mode: buffer and stream output via event bus
-				chunk := ProcessOutputChunk{
-					Stream:    "stdout",
-					Data:      dataStr,
-					Timestamp: time.Now().UTC(),
-				}
-				proc.buffer.append(chunk)
+				// No WebSocket connected: also publish via event bus
 				r.publishOutput(proc, chunk)
 			}
 
