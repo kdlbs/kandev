@@ -19,13 +19,6 @@ const (
 	ActionWorkspaceUpdate = "workspace.update"
 	ActionWorkspaceDelete = "workspace.delete"
 
-	// Column actions
-	ActionColumnList   = "column.list"
-	ActionColumnCreate = "column.create"
-	ActionColumnGet    = "column.get"
-	ActionColumnUpdate = "column.update"
-	ActionColumnDelete = "column.delete"
-
 	// Repository actions
 	ActionRepositoryList   = "repository.list"
 	ActionRepositoryCreate = "repository.create"
@@ -94,6 +87,14 @@ const (
 	ActionOrchestratorPrompt   = "orchestrator.prompt"
 	ActionOrchestratorComplete = "orchestrator.complete"
 
+	// Workflow actions
+	ActionWorkflowTemplateList   = "workflow.template.list"
+	ActionWorkflowTemplateGet    = "workflow.template.get"
+	ActionWorkflowStepList       = "workflow.step.list"
+	ActionWorkflowStepGet        = "workflow.step.get"
+	ActionWorkflowStepCreate  = "workflow.step.create"
+	ActionWorkflowHistoryList = "workflow.history.list"
+
 	// Subscription actions
 	ActionTaskSubscribe      = "task.subscribe"
 	ActionTaskUnsubscribe    = "task.unsubscribe"
@@ -126,9 +127,6 @@ const (
 	ActionBoardCreated            = "board.created"
 	ActionBoardUpdated            = "board.updated"
 	ActionBoardDeleted            = "board.deleted"
-	ActionColumnCreated           = "column.created"
-	ActionColumnUpdated           = "column.updated"
-	ActionColumnDeleted           = "column.deleted"
 	ActionSessionMessageAdded     = "session.message.added"
 	ActionSessionMessageUpdated   = "session.message.updated"
 	ActionSessionStateChanged     = "session.state_changed"

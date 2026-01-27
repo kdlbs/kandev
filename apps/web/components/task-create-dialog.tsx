@@ -53,8 +53,8 @@ interface TaskCreateDialogProps {
   workspaceId: string | null;
   boardId: string | null;
   defaultColumnId: string | null;
-  columns: Array<{ id: string; title: string }>;
-  editingTask?: { id: string; title: string; description?: string; columnId: string; state?: Task['state']; repositoryId?: string } | null;
+  columns: Array<{ id: string; title: string; autoStartAgent?: boolean }>;
+  editingTask?: { id: string; title: string; description?: string; workflowStepId: string; state?: Task['state']; repositoryId?: string } | null;
   onSuccess?: (task: Task, mode: 'create' | 'edit', meta?: { taskSessionId?: string | null }) => void;
   onCreateSession?: (data: {
     prompt: string;
@@ -538,22 +538,21 @@ export function TaskCreateDialog({
     }
     if (!workspaceId || !boardId) return;
     if (!repositoryId && !selectedLocalRepo) return;
-    const columnId = editingTask?.columnId ?? defaultColumnId;
+    const columnId = editingTask?.workflowStepId ?? defaultColumnId;
     if (!columnId) return;
     let targetColumnId = columnId;
     let targetState: Task['state'] = 'CREATED';
     if (startAgent && !isEditMode) {
-      const progressColumn = columns.find((column) =>
-        column.title.toLowerCase().includes('progress')
-      );
-      targetColumnId = progressColumn?.id ?? columnId;
+      // Find the first step that has auto_start_agent enabled
+      const autoStartStep = columns.find((column) => column.autoStartAgent);
+      targetColumnId = autoStartStep?.id ?? columnId;
       targetState = 'IN_PROGRESS';
     }
     try {
       const taskResponse = await createTask({
         workspace_id: workspaceId,
         board_id: boardId,
-        column_id: targetColumnId,
+        workflow_step_id: targetColumnId,
         title: trimmedTitle,
         description: description.trim(),
         repositories: repositoryId

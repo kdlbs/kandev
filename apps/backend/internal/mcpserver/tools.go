@@ -34,16 +34,16 @@ func registerTools(s *server.MCPServer, cfg Config, log *logger.Logger) {
 		listBoardsHandler(cfg, log),
 	)
 
-	// List Columns tool
+	// List Workflow Steps tool
 	s.AddTool(
-		mcp.NewTool("list_columns",
-			mcp.WithDescription("List all columns in a board. Use this to get column IDs for creating tasks."),
+		mcp.NewTool("list_workflow_steps",
+			mcp.WithDescription("List all workflow steps in a board. Use this to get workflow step IDs for creating tasks."),
 			mcp.WithString("board_id",
 				mcp.Required(),
-				mcp.Description("The board ID to list columns from"),
+				mcp.Description("The board ID to list workflow steps from"),
 			),
 		),
-		listColumnsHandler(cfg, log),
+		listWorkflowStepsHandler(cfg, log),
 	)
 
 	// List Tasks tool
@@ -70,9 +70,9 @@ func registerTools(s *server.MCPServer, cfg Config, log *logger.Logger) {
 				mcp.Required(),
 				mcp.Description("The board ID"),
 			),
-			mcp.WithString("column_id",
+			mcp.WithString("workflow_step_id",
 				mcp.Required(),
-				mcp.Description("The column ID to place the task in"),
+				mcp.Description("The workflow step ID to place the task in"),
 			),
 			mcp.WithString("title",
 				mcp.Required(),
@@ -154,18 +154,18 @@ func listBoardsHandler(cfg Config, log *logger.Logger) server.ToolHandlerFunc {
 	}
 }
 
-func listColumnsHandler(cfg Config, log *logger.Logger) server.ToolHandlerFunc {
+func listWorkflowStepsHandler(cfg Config, log *logger.Logger) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		boardID, err := req.RequireString("board_id")
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 
-		url := fmt.Sprintf("%s/api/v1/boards/%s/columns", cfg.KandevURL, boardID)
+		url := fmt.Sprintf("%s/api/v1/boards/%s/workflow/steps", cfg.KandevURL, boardID)
 		resp, err := http.Get(url)
 		if err != nil {
-			log.Error("failed to fetch columns", zap.Error(err))
-			return mcp.NewToolResultError(fmt.Sprintf("Failed to fetch columns: %v", err)), nil
+			log.Error("failed to fetch workflow steps", zap.Error(err))
+			return mcp.NewToolResultError(fmt.Sprintf("Failed to fetch workflow steps: %v", err)), nil
 		}
 		defer func() { _ = resp.Body.Close() }()
 
@@ -214,7 +214,7 @@ func createTaskHandler(cfg Config, log *logger.Logger) server.ToolHandlerFunc {
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
-		columnID, err := req.RequireString("column_id")
+		workflowStepID, err := req.RequireString("workflow_step_id")
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
@@ -224,10 +224,10 @@ func createTaskHandler(cfg Config, log *logger.Logger) server.ToolHandlerFunc {
 		}
 
 		payload := map[string]interface{}{
-			"workspace_id": workspaceID,
-			"board_id":     boardID,
-			"column_id":    columnID,
-			"title":        title,
+			"workspace_id":     workspaceID,
+			"board_id":         boardID,
+			"workflow_step_id": workflowStepID,
+			"title":            title,
 		}
 		if desc := req.GetString("description", ""); desc != "" {
 			payload["description"] = desc

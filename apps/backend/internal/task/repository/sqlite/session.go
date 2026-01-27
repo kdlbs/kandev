@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -197,19 +198,20 @@ func (r *Repository) CreateTaskSession(ctx context.Context, session *models.Task
 	if err != nil {
 		return fmt.Errorf("failed to serialize repository snapshot: %w", err)
 	}
-
 	_, err = r.db.ExecContext(ctx, `
 		INSERT INTO task_sessions (
 			id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, environment_id,
 			repository_id, base_branch,
 			agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
-			state, error_message, metadata, started_at, completed_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			state, error_message, metadata, started_at, completed_at, updated_at,
+			is_primary, workflow_step_id, review_status
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, session.ID, session.TaskID, session.AgentExecutionID, session.ContainerID, session.AgentProfileID,
 		session.ExecutorID, session.EnvironmentID, session.RepositoryID, session.BaseBranch,
 		string(agentProfileSnapshotJSON), string(executorSnapshotJSON), string(environmentSnapshotJSON), string(repositorySnapshotJSON),
 		string(session.State), session.ErrorMessage, string(metadataJSON),
-		session.StartedAt, session.CompletedAt, session.UpdatedAt)
+		session.StartedAt, session.CompletedAt, session.UpdatedAt,
+		boolToInt(session.IsPrimary), session.WorkflowStepID, session.ReviewStatus)
 
 	return err
 }
@@ -224,12 +226,16 @@ func (r *Repository) GetTaskSession(ctx context.Context, id string) (*models.Tas
 	var environmentSnapshotJSON string
 	var repositorySnapshotJSON string
 	var completedAt sql.NullTime
+	var isPrimary int
+	var workflowStepID sql.NullString
+	var reviewStatus sql.NullString
 
 	err := r.db.QueryRowContext(ctx, `
 		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, environment_id,
 		       repository_id, base_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
-		       state, error_message, metadata, started_at, completed_at, updated_at
+		       state, error_message, metadata, started_at, completed_at, updated_at,
+		       is_primary, workflow_step_id, review_status
 		FROM task_sessions WHERE id = ?
 	`, id).Scan(
 		&session.ID, &session.TaskID, &session.AgentExecutionID, &session.ContainerID, &session.AgentProfileID,
@@ -237,6 +243,7 @@ func (r *Repository) GetTaskSession(ctx context.Context, id string) (*models.Tas
 		&session.RepositoryID, &session.BaseBranch,
 		&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
 		&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
+		&isPrimary, &workflowStepID, &reviewStatus,
 	)
 
 	if err == sql.ErrNoRows {
@@ -247,6 +254,13 @@ func (r *Repository) GetTaskSession(ctx context.Context, id string) (*models.Tas
 	}
 
 	session.State = models.TaskSessionState(state)
+	session.IsPrimary = isPrimary == 1
+	if workflowStepID.Valid {
+		session.WorkflowStepID = &workflowStepID.String
+	}
+	if reviewStatus.Valid {
+		session.ReviewStatus = &reviewStatus.String
+	}
 	if completedAt.Valid {
 		session.CompletedAt = &completedAt.Time
 	}
@@ -295,12 +309,16 @@ func (r *Repository) GetTaskSessionByTaskID(ctx context.Context, taskID string) 
 	var environmentSnapshotJSON string
 	var repositorySnapshotJSON string
 	var completedAt sql.NullTime
+	var isPrimary int
+	var workflowStepID sql.NullString
+	var reviewStatus sql.NullString
 
 	err := r.db.QueryRowContext(ctx, `
 		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, environment_id,
 		       repository_id, base_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
-		       state, error_message, metadata, started_at, completed_at, updated_at
+		       state, error_message, metadata, started_at, completed_at, updated_at,
+		       is_primary, workflow_step_id, review_status
 		FROM task_sessions WHERE task_id = ? ORDER BY started_at DESC LIMIT 1
 	`, taskID).Scan(
 		&session.ID, &session.TaskID, &session.AgentExecutionID, &session.ContainerID, &session.AgentProfileID,
@@ -308,6 +326,7 @@ func (r *Repository) GetTaskSessionByTaskID(ctx context.Context, taskID string) 
 		&session.RepositoryID, &session.BaseBranch,
 		&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
 		&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
+		&isPrimary, &workflowStepID, &reviewStatus,
 	)
 
 	if err == sql.ErrNoRows {
@@ -318,6 +337,13 @@ func (r *Repository) GetTaskSessionByTaskID(ctx context.Context, taskID string) 
 	}
 
 	session.State = models.TaskSessionState(state)
+	session.IsPrimary = isPrimary == 1
+	if workflowStepID.Valid {
+		session.WorkflowStepID = &workflowStepID.String
+	}
+	if reviewStatus.Valid {
+		session.ReviewStatus = &reviewStatus.String
+	}
 	if completedAt.Valid {
 		session.CompletedAt = &completedAt.Time
 	}
@@ -366,12 +392,16 @@ func (r *Repository) GetActiveTaskSessionByTaskID(ctx context.Context, taskID st
 	var environmentSnapshotJSON string
 	var repositorySnapshotJSON string
 	var completedAt sql.NullTime
+	var isPrimary int
+	var workflowStepID sql.NullString
+	var reviewStatus sql.NullString
 
 	err := r.db.QueryRowContext(ctx, `
 		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, environment_id,
 		       repository_id, base_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
-		       state, error_message, metadata, started_at, completed_at, updated_at
+		       state, error_message, metadata, started_at, completed_at, updated_at,
+		       is_primary, workflow_step_id, review_status
 		FROM task_sessions
 		WHERE task_id = ? AND state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
 		ORDER BY started_at DESC LIMIT 1
@@ -381,6 +411,7 @@ func (r *Repository) GetActiveTaskSessionByTaskID(ctx context.Context, taskID st
 		&session.RepositoryID, &session.BaseBranch,
 		&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
 		&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
+		&isPrimary, &workflowStepID, &reviewStatus,
 	)
 
 	if err == sql.ErrNoRows {
@@ -391,6 +422,13 @@ func (r *Repository) GetActiveTaskSessionByTaskID(ctx context.Context, taskID st
 	}
 
 	session.State = models.TaskSessionState(state)
+	session.IsPrimary = isPrimary == 1
+	if workflowStepID.Valid {
+		session.WorkflowStepID = &workflowStepID.String
+	}
+	if reviewStatus.Valid {
+		session.ReviewStatus = &reviewStatus.String
+	}
 	if completedAt.Valid {
 		session.CompletedAt = &completedAt.Time
 	}
@@ -459,13 +497,15 @@ func (r *Repository) UpdateTaskSession(ctx context.Context, session *models.Task
 			agent_execution_id = ?, container_id = ?, agent_profile_id = ?, executor_id = ?, environment_id = ?,
 			repository_id = ?, base_branch = ?,
 			agent_profile_snapshot = ?, executor_snapshot = ?, environment_snapshot = ?, repository_snapshot = ?,
-			state = ?, error_message = ?, metadata = ?, completed_at = ?, updated_at = ?
+			state = ?, error_message = ?, metadata = ?, completed_at = ?, updated_at = ?,
+			is_primary = ?, workflow_step_id = ?, review_status = ?
 		WHERE id = ?
 	`, session.AgentExecutionID, session.ContainerID, session.AgentProfileID, session.ExecutorID, session.EnvironmentID,
 		session.RepositoryID, session.BaseBranch,
 		string(agentProfileSnapshotJSON), string(executorSnapshotJSON), string(environmentSnapshotJSON), string(repositorySnapshotJSON),
-		string(session.State), session.ErrorMessage, string(metadataJSON), session.CompletedAt,
-		session.UpdatedAt, session.ID)
+		string(session.State), session.ErrorMessage, string(metadataJSON), session.CompletedAt, session.UpdatedAt,
+		boolToInt(session.IsPrimary), session.WorkflowStepID, session.ReviewStatus,
+		session.ID)
 	if err != nil {
 		return err
 	}
@@ -506,7 +546,8 @@ func (r *Repository) ListTaskSessions(ctx context.Context, taskID string) ([]*mo
 		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, environment_id,
 		       repository_id, base_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
-		       state, error_message, metadata, started_at, completed_at, updated_at
+		       state, error_message, metadata, started_at, completed_at, updated_at,
+		       is_primary, workflow_step_id, review_status
 		FROM task_sessions WHERE task_id = ? ORDER BY started_at DESC
 	`, taskID)
 	if err != nil {
@@ -534,7 +575,8 @@ func (r *Repository) ListActiveTaskSessions(ctx context.Context) ([]*models.Task
 		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, environment_id,
 		       repository_id, base_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
-		       state, error_message, metadata, started_at, completed_at, updated_at
+		       state, error_message, metadata, started_at, completed_at, updated_at,
+		       is_primary, workflow_step_id, review_status
 		FROM task_sessions WHERE state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT') ORDER BY started_at DESC
 	`)
 	if err != nil {
@@ -562,7 +604,8 @@ func (r *Repository) ListActiveTaskSessionsByTaskID(ctx context.Context, taskID 
 		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, environment_id,
 		       repository_id, base_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
-		       state, error_message, metadata, started_at, completed_at, updated_at
+		       state, error_message, metadata, started_at, completed_at, updated_at,
+		       is_primary, workflow_step_id, review_status
 		FROM task_sessions WHERE task_id = ? AND state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT') ORDER BY started_at DESC
 	`, taskID)
 	if err != nil {
@@ -638,6 +681,9 @@ func (r *Repository) scanTaskSessions(ctx context.Context, rows *sql.Rows) ([]*m
 		var environmentSnapshotJSON string
 		var repositorySnapshotJSON string
 		var completedAt sql.NullTime
+		var isPrimary int
+		var workflowStepID sql.NullString
+		var reviewStatus sql.NullString
 
 		err := rows.Scan(
 			&session.ID, &session.TaskID, &session.AgentExecutionID, &session.ContainerID, &session.AgentProfileID,
@@ -645,12 +691,20 @@ func (r *Repository) scanTaskSessions(ctx context.Context, rows *sql.Rows) ([]*m
 			&session.RepositoryID, &session.BaseBranch,
 			&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
 			&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
+			&isPrimary, &workflowStepID, &reviewStatus,
 		)
 		if err != nil {
 			return nil, err
 		}
 
 		session.State = models.TaskSessionState(state)
+		session.IsPrimary = isPrimary == 1
+		if workflowStepID.Valid {
+			session.WorkflowStepID = &workflowStepID.String
+		}
+		if reviewStatus.Valid {
+			session.ReviewStatus = &reviewStatus.String
+		}
 		if completedAt.Valid {
 			session.CompletedAt = &completedAt.Time
 		}
@@ -787,3 +841,195 @@ func (r *Repository) DeleteTaskSessionWorktreesBySession(ctx context.Context, se
 	return err
 }
 
+// GetPrimarySessionByTaskID retrieves the primary session for a task
+func (r *Repository) GetPrimarySessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error) {
+	session := &models.TaskSession{}
+	var state string
+	var metadataJSON string
+	var agentProfileSnapshotJSON string
+	var executorSnapshotJSON string
+	var environmentSnapshotJSON string
+	var repositorySnapshotJSON string
+	var completedAt sql.NullTime
+	var isPrimary int
+	var workflowStepID sql.NullString
+	var reviewStatus sql.NullString
+
+	err := r.db.QueryRowContext(ctx, `
+		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, environment_id,
+		       repository_id, base_branch,
+		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
+		       state, error_message, metadata, started_at, completed_at, updated_at,
+		       is_primary, workflow_step_id, review_status
+		FROM task_sessions WHERE task_id = ? AND is_primary = 1 LIMIT 1
+	`, taskID).Scan(
+		&session.ID, &session.TaskID, &session.AgentExecutionID, &session.ContainerID, &session.AgentProfileID,
+		&session.ExecutorID, &session.EnvironmentID,
+		&session.RepositoryID, &session.BaseBranch,
+		&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
+		&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
+		&isPrimary, &workflowStepID, &reviewStatus,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("no primary session found for task: %s", taskID)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	session.State = models.TaskSessionState(state)
+	session.IsPrimary = isPrimary == 1
+	if workflowStepID.Valid {
+		session.WorkflowStepID = &workflowStepID.String
+	}
+	if reviewStatus.Valid {
+		session.ReviewStatus = &reviewStatus.String
+	}
+	if completedAt.Valid {
+		session.CompletedAt = &completedAt.Time
+	}
+	if metadataJSON != "" && metadataJSON != "{}" {
+		if err := json.Unmarshal([]byte(metadataJSON), &session.Metadata); err != nil {
+			return nil, fmt.Errorf("failed to deserialize agent session metadata: %w", err)
+		}
+	}
+	if agentProfileSnapshotJSON != "" && agentProfileSnapshotJSON != "{}" {
+		if err := json.Unmarshal([]byte(agentProfileSnapshotJSON), &session.AgentProfileSnapshot); err != nil {
+			return nil, fmt.Errorf("failed to deserialize agent profile snapshot: %w", err)
+		}
+	}
+	if executorSnapshotJSON != "" && executorSnapshotJSON != "{}" {
+		if err := json.Unmarshal([]byte(executorSnapshotJSON), &session.ExecutorSnapshot); err != nil {
+			return nil, fmt.Errorf("failed to deserialize executor snapshot: %w", err)
+		}
+	}
+	if environmentSnapshotJSON != "" && environmentSnapshotJSON != "{}" {
+		if err := json.Unmarshal([]byte(environmentSnapshotJSON), &session.EnvironmentSnapshot); err != nil {
+			return nil, fmt.Errorf("failed to deserialize environment snapshot: %w", err)
+		}
+	}
+	if repositorySnapshotJSON != "" && repositorySnapshotJSON != "{}" {
+		if err := json.Unmarshal([]byte(repositorySnapshotJSON), &session.RepositorySnapshot); err != nil {
+			return nil, fmt.Errorf("failed to deserialize repository snapshot: %w", err)
+		}
+	}
+
+	worktrees, err := r.ListTaskSessionWorktrees(ctx, session.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load session worktrees: %w", err)
+	}
+	session.Worktrees = worktrees
+
+	return session, nil
+}
+
+// GetPrimarySessionIDsByTaskIDs returns a map of task ID to primary session ID for the given task IDs.
+// Tasks without a primary session are not included in the result.
+func (r *Repository) GetPrimarySessionIDsByTaskIDs(ctx context.Context, taskIDs []string) (map[string]string, error) {
+	if len(taskIDs) == 0 {
+		return make(map[string]string), nil
+	}
+
+	// Build placeholders for IN clause
+	placeholders := make([]string, len(taskIDs))
+	args := make([]interface{}, len(taskIDs))
+	for i, id := range taskIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	query := fmt.Sprintf(`
+		SELECT id, task_id FROM task_sessions
+		WHERE task_id IN (%s) AND is_primary = 1
+	`, strings.Join(placeholders, ","))
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make(map[string]string)
+	for rows.Next() {
+		var sessionID, taskID string
+		if err := rows.Scan(&sessionID, &taskID); err != nil {
+			return nil, err
+		}
+		result[taskID] = sessionID
+	}
+	return result, rows.Err()
+}
+
+// SetSessionPrimary marks a session as primary and clears primary flag on other sessions for the same task
+func (r *Repository) SetSessionPrimary(ctx context.Context, sessionID string) error {
+	now := time.Now().UTC()
+
+	// First, get the task_id for this session
+	var taskID string
+	err := r.db.QueryRowContext(ctx, `SELECT task_id FROM task_sessions WHERE id = ?`, sessionID).Scan(&taskID)
+	if err == sql.ErrNoRows {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+	if err != nil {
+		return err
+	}
+
+	// Clear primary flag on all sessions for this task
+	_, err = r.db.ExecContext(ctx, `
+		UPDATE task_sessions SET is_primary = 0, updated_at = ? WHERE task_id = ?
+	`, now, taskID)
+	if err != nil {
+		return err
+	}
+
+	// Set primary flag on the specified session
+	result, err := r.db.ExecContext(ctx, `
+		UPDATE task_sessions SET is_primary = 1, updated_at = ? WHERE id = ?
+	`, now, sessionID)
+	if err != nil {
+		return err
+	}
+
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+	return nil
+}
+
+// UpdateSessionWorkflowStep updates the workflow step for a session
+func (r *Repository) UpdateSessionWorkflowStep(ctx context.Context, sessionID string, stepID string) error {
+	now := time.Now().UTC()
+
+	result, err := r.db.ExecContext(ctx, `
+		UPDATE task_sessions SET workflow_step_id = ?, updated_at = ? WHERE id = ?
+	`, stepID, now, sessionID)
+	if err != nil {
+		return err
+	}
+
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+	return nil
+}
+
+// UpdateSessionReviewStatus updates the review status of a session
+func (r *Repository) UpdateSessionReviewStatus(ctx context.Context, sessionID string, status string) error {
+	now := time.Now().UTC()
+
+	result, err := r.db.ExecContext(ctx, `
+		UPDATE task_sessions SET review_status = ?, updated_at = ? WHERE id = ?
+	`, status, now, sessionID)
+	if err != nil {
+		return err
+	}
+
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+	return nil
+}

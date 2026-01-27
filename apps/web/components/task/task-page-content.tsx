@@ -55,7 +55,7 @@ export function TaskPageContent({
       ...baseTask,
       title: kanbanTask.title ?? baseTask.title,
       description: kanbanTask.description ?? baseTask.description,
-      column_id: (kanbanTask.columnId as string | undefined) ?? baseTask.column_id,
+      workflow_step_id: (kanbanTask.workflowStepId as string | undefined) ?? baseTask.workflow_step_id,
       position: kanbanTask.position ?? baseTask.position,
       state: (kanbanTask.state as Task['state'] | undefined) ?? baseTask.state,
       repositories: baseTask.repositories,

@@ -19,7 +19,7 @@ type TaskSwitcherItem = {
   title: string;
   state?: TaskState;
   description?: string;
-  columnId?: string;
+  workflowStepId?: string;
   repositoryPath?: string;
 };
 
@@ -47,7 +47,7 @@ export function TaskSwitcher({
   const tasksByColumn = useMemo(() => {
     const grouped: Record<string, TaskSwitcherItem[]> = {};
     for (const task of sortedTasks) {
-      const key = task.columnId ?? 'unknown';
+      const key = task.workflowStepId ?? 'unknown';
       if (!grouped[key]) grouped[key] = [];
       grouped[key].push(task);
     }

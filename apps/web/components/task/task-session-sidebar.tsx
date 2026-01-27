@@ -23,7 +23,7 @@ export function TaskSessionSidebar({ workspaceId, boardId }: TaskSessionSidebarP
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const sessionsById = useAppStore((state) => state.taskSessions.items);
   const { tasks } = useTasks(boardId);
-  const columns = useAppStore((state) => state.kanban.columns);
+  const columns = useAppStore((state) => state.kanban.steps);
   const workspaces = useAppStore((state) => state.workspaces.items);
   const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
   const setActiveTask = useAppStore((state) => state.setActiveTask);
@@ -52,7 +52,7 @@ export function TaskSessionSidebar({ workspaceId, boardId }: TaskSessionSidebarP
       title: task.title,
       state: task.state as TaskState | undefined,
       description: task.description,
-      columnId: task.columnId,
+      workflowStepId: task.workflowStepId,
       repositoryPath: task.repositoryId ? repositoryPathsById.get(task.repositoryId) : undefined,
     }));
   }, [repositoriesByWorkspace, tasks, workspaceId]);
@@ -121,7 +121,7 @@ export function TaskSessionSidebar({ workspaceId, boardId }: TaskSessionSidebarP
         <div className="flex-1 min-h-0 overflow-y-auto space-y-4 pt-3">
           <TaskSwitcher
             tasks={tasksWithRepositories}
-            columns={columns.map((column: KanbanState['columns'][number]) => ({ id: column.id, title: column.title }))}
+            columns={columns.map((step: KanbanState['steps'][number]) => ({ id: step.id, title: step.title }))}
             activeTaskId={activeTaskId}
             selectedTaskId={selectedTaskId}
             onSelectTask={(taskId) => {
@@ -137,13 +137,13 @@ export function TaskSessionSidebar({ workspaceId, boardId }: TaskSessionSidebarP
         workspaceId={workspaceId}
         boardId={boardId}
         defaultColumnId={columns[0]?.id ?? null}
-        columns={columns.map((column: KanbanState['columns'][number]) => ({ id: column.id, title: column.title }))}
+        columns={columns.map((step: KanbanState['steps'][number]) => ({ id: step.id, title: step.title }))}
         onSuccess={(task, _mode, meta) => {
           store.setState((state) => {
             if (state.kanban.boardId !== task.board_id) return state;
             const nextTask = {
               id: task.id,
-              columnId: task.column_id,
+              workflowStepId: task.workflow_step_id,
               title: task.title,
               description: task.description,
               position: task.position ?? 0,

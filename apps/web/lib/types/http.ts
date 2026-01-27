@@ -10,6 +10,94 @@ export type TaskState =
   | 'FAILED'
   | 'CANCELLED';
 
+// Workflow Step Types
+export type WorkflowStepType =
+  | 'backlog'
+  | 'planning'
+  | 'implementation'
+  | 'review'
+  | 'verification'
+  | 'done'
+  | 'blocked';
+
+// Workflow Review Status
+export type WorkflowReviewStatus =
+  | 'pending'
+  | 'approved'
+  | 'changes_requested'
+  | 'rejected';
+
+// Step Behaviors - controls auto-start and other step-specific behaviors
+export type StepBehaviors = {
+  autoStartAgent?: boolean;
+  planMode?: boolean;
+  requireApproval?: boolean;
+  promptPrefix?: string;
+  promptSuffix?: string;
+};
+
+// Workflow Template - pre-defined workflow configurations
+export type WorkflowTemplate = {
+  id: string;
+  name: string;
+  description?: string | null;
+  is_system: boolean;
+  default_steps?: StepDefinition[];
+  created_at: string;
+  updated_at: string;
+};
+
+// Step Definition - template step configuration
+export type StepDefinition = {
+  name: string;
+  step_type: WorkflowStepType;
+  position: number;
+  color?: string;
+  behaviors?: StepBehaviors;
+};
+
+// Workflow Step - instance of a step on a board
+export type WorkflowStep = {
+  id: string;
+  board_id: string;
+  name: string;
+  step_type: WorkflowStepType;
+  position: number;
+  color: string;
+  behaviors?: StepBehaviors;
+  created_at: string;
+  updated_at: string;
+};
+
+// Session Step History - audit trail
+export type SessionStepHistory = {
+  id: string;
+  session_id: string;
+  from_step_id?: string;
+  to_step_id: string;
+  trigger: string;
+  actor_id?: string;
+  notes?: string;
+  metadata?: Record<string, unknown>;
+  created_at: string;
+};
+
+// Response types for workflow APIs
+export type ListWorkflowTemplatesResponse = {
+  templates: WorkflowTemplate[];
+  total: number;
+};
+
+export type ListWorkflowStepsResponse = {
+  steps: WorkflowStep[];
+  total: number;
+};
+
+export type ListSessionStepHistoryResponse = {
+  history: SessionStepHistory[];
+  total: number;
+};
+
 export type TaskSessionState =
   | 'CREATED'
   | 'STARTING'
@@ -24,6 +112,7 @@ export type Board = {
   workspace_id: string;
   name: string;
   description?: string | null;
+  workflow_template_id?: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -36,17 +125,6 @@ export type Workspace = {
   default_executor_id?: string | null;
   default_environment_id?: string | null;
   default_agent_profile_id?: string | null;
-  created_at: string;
-  updated_at: string;
-};
-
-export type Column = {
-  id: string;
-  board_id: string;
-  name: string;
-  position: number;
-  state: TaskState;
-  color: string;
   created_at: string;
   updated_at: string;
 };
@@ -115,13 +193,14 @@ export type Task = {
   id: string;
   workspace_id: string;
   board_id: string;
-  column_id: string;
+  workflow_step_id: string;
   position: number;
   title: string;
   description: string;
   state: TaskState;
   priority: number;
   repositories?: TaskRepository[];
+  primary_session_id?: string | null;
   created_at: string;
   updated_at: string;
   metadata?: Record<string, unknown> | null;
@@ -130,6 +209,28 @@ export type Task = {
 export type CreateTaskResponse = Task & {
   session_id?: string;
   agent_execution_id?: string;
+};
+
+// Backend workflow step DTO (flat fields, as returned from API)
+export type WorkflowStepDTO = {
+  id: string;
+  board_id: string;
+  name: string;
+  step_type: string;
+  position: number;
+  color: string;
+  auto_start_agent: boolean;
+  plan_mode: boolean;
+  require_approval: boolean;
+  prompt_prefix?: string;
+  prompt_suffix?: string;
+  allow_manual_move: boolean;
+};
+
+// Response from moving a task - includes workflow step info for automation
+export type MoveTaskResponse = {
+  task: Task;
+  workflow_step: WorkflowStepDTO;
 };
 
 export type TaskSession = {
@@ -155,6 +256,10 @@ export type TaskSession = {
   started_at: string;
   completed_at?: string | null;
   updated_at: string;
+  // Workflow fields
+  is_primary?: boolean;
+  workflow_step_id?: string;
+  review_status?: WorkflowReviewStatus;
 };
 
 export type TaskSessionsResponse = {
@@ -164,6 +269,12 @@ export type TaskSessionsResponse = {
 
 export type TaskSessionResponse = {
   session: TaskSession;
+};
+
+export type ApproveSessionResponse = {
+  success: boolean;
+  session: TaskSession;
+  workflow_step?: WorkflowStepDTO;
 };
 
 export type NotificationProviderType = 'local' | 'apprise' | 'system';
@@ -246,17 +357,12 @@ export type UserResponse = {
 
 export type BoardSnapshot = {
   board: Board;
-  columns: Column[];
+  steps: WorkflowStepDTO[];
   tasks: Task[];
 };
 
 export type ListBoardsResponse = {
   boards: Board[];
-  total: number;
-};
-
-export type ListColumnsResponse = {
-  columns: Column[];
   total: number;
 };
 

@@ -19,7 +19,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/kandev/kandev/internal/worktree"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -28,6 +27,10 @@ import (
 	taskhandlers "github.com/kandev/kandev/internal/task/handlers"
 	"github.com/kandev/kandev/internal/task/repository"
 	taskservice "github.com/kandev/kandev/internal/task/service"
+	"github.com/kandev/kandev/internal/workflow"
+	workflowcontroller "github.com/kandev/kandev/internal/workflow/controller"
+	workflowhandlers "github.com/kandev/kandev/internal/workflow/handlers"
+	"github.com/kandev/kandev/internal/worktree"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -79,8 +82,13 @@ func NewTestServer(t *testing.T) *TestServer {
 		t.Fatalf("failed to init worktree store: %v", err)
 	}
 
-	// Initialize task service
+	// Initialize workflow service
+	_, workflowSvc, _, err := workflow.Provide(dbConn, log)
+	require.NoError(t, err)
+
+	// Initialize task service and wire workflow step creator
 	taskSvc := taskservice.NewService(taskRepo, eventBus, log, taskservice.RepositoryDiscoveryConfig{})
+	taskSvc.SetWorkflowStepCreator(workflowSvc)
 
 	// Create WebSocket gateway
 	gateway := gateways.NewGateway(log)
@@ -96,16 +104,19 @@ func NewTestServer(t *testing.T) *TestServer {
 	// Register handlers (HTTP + WS)
 	workspaceController := taskcontroller.NewWorkspaceController(taskSvc)
 	boardController := taskcontroller.NewBoardController(taskSvc)
+	boardController.SetWorkflowStepLister(workflowSvc)
 	taskController := taskcontroller.NewTaskController(taskSvc)
 	executorController := taskcontroller.NewExecutorController(taskSvc)
 	environmentController := taskcontroller.NewEnvironmentController(taskSvc)
 	repositoryController := taskcontroller.NewRepositoryController(taskSvc)
+	workflowCtrl := workflowcontroller.NewController(workflowSvc)
 	taskhandlers.RegisterWorkspaceRoutes(router, gateway.Dispatcher, workspaceController, log)
 	taskhandlers.RegisterBoardRoutes(router, gateway.Dispatcher, boardController, log)
 	taskhandlers.RegisterTaskRoutes(router, gateway.Dispatcher, taskController, nil, log)
 	taskhandlers.RegisterRepositoryRoutes(router, gateway.Dispatcher, repositoryController, log)
 	taskhandlers.RegisterExecutorRoutes(router, gateway.Dispatcher, executorController, log)
 	taskhandlers.RegisterEnvironmentRoutes(router, gateway.Dispatcher, environmentController, log)
+	workflowhandlers.RegisterRoutes(router, gateway.Dispatcher, workflowCtrl, log)
 
 	// Create test server
 	server := httptest.NewServer(router)
@@ -342,9 +353,10 @@ func TestBoardCRUD(t *testing.T) {
 	// Create board
 	t.Run("CreateBoard", func(t *testing.T) {
 		resp, err := client.SendRequest("board-create-1", ws.ActionBoardCreate, map[string]interface{}{
-			"workspace_id": workspaceID,
-			"name":         "Test Board",
-			"description":  "A test board for integration testing",
+			"workspace_id":         workspaceID,
+			"name":                 "Test Board",
+			"description":          "A test board for integration testing",
+			"workflow_template_id": "simple",
 		})
 		require.NoError(t, err)
 		assert.Equal(t, ws.MessageTypeResponse, resp.Type)
@@ -375,10 +387,10 @@ func TestBoardCRUD(t *testing.T) {
 }
 
 // ============================================
-// COLUMN TESTS
+// WORKFLOW STEP TESTS
 // ============================================
 
-func TestColumnCRUD(t *testing.T) {
+func TestWorkflowStepList(t *testing.T) {
 	ts := NewTestServer(t)
 	defer ts.Close()
 
@@ -387,10 +399,11 @@ func TestColumnCRUD(t *testing.T) {
 
 	workspaceID := createWorkspace(t, client)
 
-	// First create a board
+	// Create a board (workflow steps are created automatically with default template)
 	boardResp, err := client.SendRequest("board-1", ws.ActionBoardCreate, map[string]interface{}{
-		"workspace_id": workspaceID,
-		"name":         "Column Test Board",
+		"workspace_id":         workspaceID,
+		"name":                 "Workflow Step Test Board",
+		"workflow_template_id": "simple",
 	})
 	require.NoError(t, err)
 
@@ -399,43 +412,9 @@ func TestColumnCRUD(t *testing.T) {
 	require.NoError(t, err)
 	boardID := boardPayload["id"].(string)
 
-	// Create column
-	t.Run("CreateColumn", func(t *testing.T) {
-		resp, err := client.SendRequest("col-create-1", ws.ActionColumnCreate, map[string]interface{}{
-			"board_id": boardID,
-			"name":     "To Do",
-			"position": 0,
-		})
-		require.NoError(t, err)
-		assert.Equal(t, ws.MessageTypeResponse, resp.Type)
-
-		var payload map[string]interface{}
-		err = resp.ParsePayload(&payload)
-		require.NoError(t, err)
-
-		assert.NotEmpty(t, payload["id"])
-		assert.Equal(t, "To Do", payload["name"])
-	})
-
-	// Create second column
-	t.Run("CreateSecondColumn", func(t *testing.T) {
-		resp, err := client.SendRequest("col-create-2", ws.ActionColumnCreate, map[string]interface{}{
-			"board_id": boardID,
-			"name":     "In Progress",
-			"position": 1,
-		})
-		require.NoError(t, err)
-
-		var payload map[string]interface{}
-		err = resp.ParsePayload(&payload)
-		require.NoError(t, err)
-
-		assert.Equal(t, "In Progress", payload["name"])
-	})
-
-	// List columns
-	t.Run("ListColumns", func(t *testing.T) {
-		resp, err := client.SendRequest("col-list-1", ws.ActionColumnList, map[string]interface{}{
+	// List workflow steps
+	t.Run("ListWorkflowSteps", func(t *testing.T) {
+		resp, err := client.SendRequest("step-list-1", ws.ActionWorkflowStepList, map[string]interface{}{
 			"board_id": boardID,
 		})
 		require.NoError(t, err)
@@ -444,9 +423,15 @@ func TestColumnCRUD(t *testing.T) {
 		err = resp.ParsePayload(&payload)
 		require.NoError(t, err)
 
-		columns, ok := payload["columns"].([]interface{})
+		steps, ok := payload["steps"].([]interface{})
 		require.True(t, ok)
-		assert.Len(t, columns, 2)
+		// Default workflow template creates 4 steps: Todo, In Progress, Review, Done
+		assert.GreaterOrEqual(t, len(steps), 1)
+
+		// Verify first step has expected fields
+		firstStep := steps[0].(map[string]interface{})
+		assert.NotEmpty(t, firstStep["id"])
+		assert.NotEmpty(t, firstStep["name"])
 	})
 }
 
@@ -464,10 +449,11 @@ func TestTaskCRUD(t *testing.T) {
 	workspaceID := createWorkspace(t, client)
 	repositoryID := createRepository(t, client, workspaceID)
 
-	// Create board and column first
+	// Create board (workflow steps are created automatically)
 	boardResp, err := client.SendRequest("board-1", ws.ActionBoardCreate, map[string]interface{}{
-		"workspace_id": workspaceID,
-		"name":         "Task Test Board",
+		"workspace_id":         workspaceID,
+		"name":                 "Task Test Board",
+		"workflow_template_id": "simple",
 	})
 	require.NoError(t, err)
 
@@ -476,31 +462,32 @@ func TestTaskCRUD(t *testing.T) {
 	require.NoError(t, err)
 	boardID := boardPayload["id"].(string)
 
-	colResp, err := client.SendRequest("col-1", ws.ActionColumnCreate, map[string]interface{}{
+	// Get first workflow step
+	stepResp, err := client.SendRequest("step-list-1", ws.ActionWorkflowStepList, map[string]interface{}{
 		"board_id": boardID,
-		"name":     "To Do",
-		"position": 0,
 	})
 	require.NoError(t, err)
 
-	var colPayload map[string]interface{}
-	err = colResp.ParsePayload(&colPayload)
+	var stepListPayload map[string]interface{}
+	err = stepResp.ParsePayload(&stepListPayload)
 	require.NoError(t, err)
-	columnID := colPayload["id"].(string)
+	steps := stepListPayload["steps"].([]interface{})
+	require.NotEmpty(t, steps)
+	workflowStepID := steps[0].(map[string]interface{})["id"].(string)
 
 	var taskID string
 
 	// Create task
 	t.Run("CreateTask", func(t *testing.T) {
 		resp, err := client.SendRequest("task-create-1", ws.ActionTaskCreate, map[string]interface{}{
-			"workspace_id":  workspaceID,
-			"board_id":      boardID,
-			"column_id":     columnID,
-			"title":         "Test Task",
-			"description":   "A test task for integration testing",
-			"priority":      3, // HIGH priority (1=LOW, 2=MEDIUM, 3=HIGH)
-			"repository_id": repositoryID,
-			"base_branch":   "main",
+			"workspace_id":     workspaceID,
+			"board_id":         boardID,
+			"workflow_step_id": workflowStepID,
+			"title":            "Test Task",
+			"description":      "A test task for integration testing",
+			"priority":         3, // HIGH priority (1=LOW, 2=MEDIUM, 3=HIGH)
+			"repository_id":    repositoryID,
+			"base_branch":      "main",
 		})
 		require.NoError(t, err)
 
@@ -614,10 +601,11 @@ func TestTaskStateTransitions(t *testing.T) {
 	workspaceID := createWorkspace(t, client)
 	repositoryID := createRepository(t, client, workspaceID)
 
-	// Create board, column, and task
+	// Create board and task (workflow steps are created automatically)
 	boardResp, _ := client.SendRequest("board-1", ws.ActionBoardCreate, map[string]interface{}{
-		"workspace_id": workspaceID,
-		"name":         "State Test Board",
+		"workspace_id":         workspaceID,
+		"name":                 "State Test Board",
+		"workflow_template_id": "simple",
 	})
 	var boardPayload map[string]interface{}
 	if err := boardResp.ParsePayload(&boardPayload); err != nil {
@@ -625,25 +613,25 @@ func TestTaskStateTransitions(t *testing.T) {
 	}
 	boardID := boardPayload["id"].(string)
 
-	colResp, _ := client.SendRequest("col-1", ws.ActionColumnCreate, map[string]interface{}{
+	// Get first workflow step
+	stepResp, _ := client.SendRequest("step-list-1", ws.ActionWorkflowStepList, map[string]interface{}{
 		"board_id": boardID,
-		"name":     "To Do",
-		"position": 0,
 	})
-	var colPayload map[string]interface{}
-	if err := colResp.ParsePayload(&colPayload); err != nil {
-		t.Fatalf("failed to parse column payload: %v", err)
+	var stepListPayload map[string]interface{}
+	if err := stepResp.ParsePayload(&stepListPayload); err != nil {
+		t.Fatalf("failed to parse step list payload: %v", err)
 	}
-	columnID := colPayload["id"].(string)
+	steps := stepListPayload["steps"].([]interface{})
+	workflowStepID := steps[0].(map[string]interface{})["id"].(string)
 
 	taskResp, _ := client.SendRequest("task-1", ws.ActionTaskCreate, map[string]interface{}{
-		"workspace_id":  workspaceID,
-		"board_id":      boardID,
-		"column_id":     columnID,
-		"title":         "State Test Task",
-		"description":   "Test state transitions",
-		"repository_id": repositoryID,
-		"base_branch":   "main",
+		"workspace_id":     workspaceID,
+		"board_id":         boardID,
+		"workflow_step_id": workflowStepID,
+		"title":            "State Test Task",
+		"description":      "Test state transitions",
+		"repository_id":    repositoryID,
+		"base_branch":      "main",
 	})
 	var taskPayload map[string]interface{}
 	if err := taskResp.ParsePayload(&taskPayload); err != nil {
@@ -698,10 +686,11 @@ func TestTaskMove(t *testing.T) {
 	workspaceID := createWorkspace(t, client)
 	repositoryID := createRepository(t, client, workspaceID)
 
-	// Create board with two columns
+	// Create board (workflow steps are created automatically)
 	boardResp, _ := client.SendRequest("board-1", ws.ActionBoardCreate, map[string]interface{}{
-		"workspace_id": workspaceID,
-		"name":         "Move Test Board",
+		"workspace_id":         workspaceID,
+		"name":                 "Move Test Board",
+		"workflow_template_id": "simple",
 	})
 	var boardPayload map[string]interface{}
 	if err := boardResp.ParsePayload(&boardPayload); err != nil {
@@ -709,36 +698,27 @@ func TestTaskMove(t *testing.T) {
 	}
 	boardID := boardPayload["id"].(string)
 
-	col1Resp, _ := client.SendRequest("col-1", ws.ActionColumnCreate, map[string]interface{}{
+	// Get workflow steps (at least 2 should exist from default template)
+	stepResp, _ := client.SendRequest("step-list-1", ws.ActionWorkflowStepList, map[string]interface{}{
 		"board_id": boardID,
-		"name":     "To Do",
-		"position": 0,
 	})
-	var col1Payload map[string]interface{}
-	if err := col1Resp.ParsePayload(&col1Payload); err != nil {
-		t.Fatalf("failed to parse column payload: %v", err)
+	var stepListPayload map[string]interface{}
+	if err := stepResp.ParsePayload(&stepListPayload); err != nil {
+		t.Fatalf("failed to parse step list payload: %v", err)
 	}
-	col1ID := col1Payload["id"].(string)
+	steps := stepListPayload["steps"].([]interface{})
+	require.GreaterOrEqual(t, len(steps), 2, "Expected at least 2 workflow steps")
+	step1ID := steps[0].(map[string]interface{})["id"].(string)
+	step2ID := steps[1].(map[string]interface{})["id"].(string)
 
-	col2Resp, _ := client.SendRequest("col-2", ws.ActionColumnCreate, map[string]interface{}{
-		"board_id": boardID,
-		"name":     "Done",
-		"position": 1,
-	})
-	var col2Payload map[string]interface{}
-	if err := col2Resp.ParsePayload(&col2Payload); err != nil {
-		t.Fatalf("failed to parse column payload: %v", err)
-	}
-	col2ID := col2Payload["id"].(string)
-
-	// Create task in first column
+	// Create task in first step
 	taskResp, _ := client.SendRequest("task-1", ws.ActionTaskCreate, map[string]interface{}{
-		"workspace_id":  workspaceID,
-		"board_id":      boardID,
-		"column_id":     col1ID,
-		"title":         "Movable Task",
-		"repository_id": repositoryID,
-		"base_branch":   "main",
+		"workspace_id":     workspaceID,
+		"board_id":         boardID,
+		"workflow_step_id": step1ID,
+		"title":            "Movable Task",
+		"repository_id":    repositoryID,
+		"base_branch":      "main",
 	})
 	var taskPayload map[string]interface{}
 	if err := taskResp.ParsePayload(&taskPayload); err != nil {
@@ -746,13 +726,13 @@ func TestTaskMove(t *testing.T) {
 	}
 	taskID := taskPayload["id"].(string)
 
-	// Move task to second column
-	t.Run("MoveToColumn2", func(t *testing.T) {
+	// Move task to second step
+	t.Run("MoveToStep2", func(t *testing.T) {
 		resp, err := client.SendRequest("move-1", ws.ActionTaskMove, map[string]interface{}{
-			"id":        taskID,
-			"board_id":  boardID,
-			"column_id": col2ID,
-			"position":  0,
+			"id":               taskID,
+			"board_id":         boardID,
+			"workflow_step_id": step2ID,
+			"position":         0,
 		})
 		require.NoError(t, err)
 
@@ -760,10 +740,12 @@ func TestTaskMove(t *testing.T) {
 		err = resp.ParsePayload(&payload)
 		require.NoError(t, err)
 
-		assert.Equal(t, col2ID, payload["column_id"])
+		// Response is {"task": {...}, "workflow_step": {...}}
+		taskData := payload["task"].(map[string]interface{})
+		assert.Equal(t, step2ID, taskData["workflow_step_id"])
 	})
 
-	// Verify task is now in column 2
+	// Verify task is now in step 2
 	t.Run("VerifyMove", func(t *testing.T) {
 		resp, err := client.SendRequest("get-1", ws.ActionTaskGet, map[string]interface{}{
 			"id": taskID,
@@ -774,7 +756,7 @@ func TestTaskMove(t *testing.T) {
 		err = resp.ParsePayload(&payload)
 		require.NoError(t, err)
 
-		assert.Equal(t, col2ID, payload["column_id"])
+		assert.Equal(t, step2ID, payload["workflow_step_id"])
 	})
 }
 
@@ -797,8 +779,9 @@ func TestMultipleClients(t *testing.T) {
 
 	// Client 1 creates a board
 	boardResp, err := client1.SendRequest("c1-board-1", ws.ActionBoardCreate, map[string]interface{}{
-		"workspace_id": workspaceID,
-		"name":         "Shared Board",
+		"workspace_id":         workspaceID,
+		"name":                 "Shared Board",
+		"workflow_template_id": "simple",
 	})
 	require.NoError(t, err)
 
@@ -821,41 +804,41 @@ func TestMultipleClients(t *testing.T) {
 	require.True(t, ok)
 	assert.Len(t, boards, 1)
 
-	// Client 2 creates a column
-	colResp, err := client2.SendRequest("c2-col-1", ws.ActionColumnCreate, map[string]interface{}{
-		"board_id": boardID,
-		"name":     "Column by Client 2",
-		"position": 0,
-	})
-	require.NoError(t, err)
-
-	var colPayload map[string]interface{}
-	err = colResp.ParsePayload(&colPayload)
-	require.NoError(t, err)
-	columnID := colPayload["id"].(string)
-
-	// Client 1 can see the column
-	colListResp, err := client1.SendRequest("c1-col-list-1", ws.ActionColumnList, map[string]interface{}{
+	// Client 2 lists workflow steps (created automatically with board)
+	stepResp, err := client2.SendRequest("c2-step-list-1", ws.ActionWorkflowStepList, map[string]interface{}{
 		"board_id": boardID,
 	})
 	require.NoError(t, err)
 
-	var colListPayload map[string]interface{}
-	err = colListResp.ParsePayload(&colListPayload)
+	var stepPayload map[string]interface{}
+	err = stepResp.ParsePayload(&stepPayload)
+	require.NoError(t, err)
+	steps := stepPayload["steps"].([]interface{})
+	require.NotEmpty(t, steps)
+	workflowStepID := steps[0].(map[string]interface{})["id"].(string)
+
+	// Client 1 can also see the workflow steps
+	stepListResp, err := client1.SendRequest("c1-step-list-1", ws.ActionWorkflowStepList, map[string]interface{}{
+		"board_id": boardID,
+	})
 	require.NoError(t, err)
 
-	columns, ok := colListPayload["columns"].([]interface{})
+	var stepListPayload map[string]interface{}
+	err = stepListResp.ParsePayload(&stepListPayload)
+	require.NoError(t, err)
+
+	stepsList, ok := stepListPayload["steps"].([]interface{})
 	require.True(t, ok)
-	assert.Len(t, columns, 1)
+	assert.GreaterOrEqual(t, len(stepsList), 1)
 
-	// Client 1 creates a task in the column
+	// Client 1 creates a task in the workflow step
 	taskResp, err := client1.SendRequest("c1-task-1", ws.ActionTaskCreate, map[string]interface{}{
-		"workspace_id":  workspaceID,
-		"board_id":      boardID,
-		"column_id":     columnID,
-		"title":         "Task by Client 1",
-		"repository_id": repositoryID,
-		"base_branch":   "main",
+		"workspace_id":     workspaceID,
+		"board_id":         boardID,
+		"workflow_step_id": workflowStepID,
+		"title":            "Task by Client 1",
+		"repository_id":    repositoryID,
+		"base_branch":      "main",
 	})
 	require.NoError(t, err)
 
@@ -929,11 +912,8 @@ func TestErrorHandling(t *testing.T) {
 		assert.Equal(t, ws.MessageTypeError, resp.Type)
 	})
 
-	t.Run("CreateColumnWithoutBoard", func(t *testing.T) {
-		resp, err := client.SendRequest("err-5", ws.ActionColumnCreate, map[string]interface{}{
-			"name":     "Orphan Column",
-			"position": 0,
-		})
+	t.Run("ListWorkflowStepsWithoutBoard", func(t *testing.T) {
+		resp, err := client.SendRequest("err-5", ws.ActionWorkflowStepList, map[string]interface{}{})
 		require.NoError(t, err)
 
 		assert.Equal(t, ws.MessageTypeError, resp.Type)
@@ -954,10 +934,11 @@ func TestTaskSubscription(t *testing.T) {
 	workspaceID := createWorkspace(t, client)
 	repositoryID := createRepository(t, client, workspaceID)
 
-	// Create a task first
+	// Create a task first (workflow steps are created automatically with board)
 	boardResp, _ := client.SendRequest("board-1", ws.ActionBoardCreate, map[string]interface{}{
-		"workspace_id": workspaceID,
-		"name":         "Sub Test Board",
+		"workspace_id":         workspaceID,
+		"name":                 "Sub Test Board",
+		"workflow_template_id": "simple",
 	})
 	var boardPayload map[string]interface{}
 	if err := boardResp.ParsePayload(&boardPayload); err != nil {
@@ -965,24 +946,24 @@ func TestTaskSubscription(t *testing.T) {
 	}
 	boardID := boardPayload["id"].(string)
 
-	colResp, _ := client.SendRequest("col-1", ws.ActionColumnCreate, map[string]interface{}{
+	// Get first workflow step
+	stepResp, _ := client.SendRequest("step-list-1", ws.ActionWorkflowStepList, map[string]interface{}{
 		"board_id": boardID,
-		"name":     "To Do",
-		"position": 0,
 	})
-	var colPayload map[string]interface{}
-	if err := colResp.ParsePayload(&colPayload); err != nil {
-		t.Fatalf("failed to parse column payload: %v", err)
+	var stepListPayload map[string]interface{}
+	if err := stepResp.ParsePayload(&stepListPayload); err != nil {
+		t.Fatalf("failed to parse step list payload: %v", err)
 	}
-	columnID := colPayload["id"].(string)
+	steps := stepListPayload["steps"].([]interface{})
+	workflowStepID := steps[0].(map[string]interface{})["id"].(string)
 
 	taskResp, _ := client.SendRequest("task-1", ws.ActionTaskCreate, map[string]interface{}{
-		"workspace_id":  workspaceID,
-		"board_id":      boardID,
-		"column_id":     columnID,
-		"title":         "Subscribable Task",
-		"repository_id": repositoryID,
-		"base_branch":   "main",
+		"workspace_id":     workspaceID,
+		"board_id":         boardID,
+		"workflow_step_id": workflowStepID,
+		"title":            "Subscribable Task",
+		"repository_id":    repositoryID,
+		"base_branch":      "main",
 	})
 	var taskPayload map[string]interface{}
 	if err := taskResp.ParsePayload(&taskPayload); err != nil {
@@ -1036,10 +1017,11 @@ func TestConcurrentRequests(t *testing.T) {
 	workspaceID := createWorkspace(t, client)
 	repositoryID := createRepository(t, client, workspaceID)
 
-	// Create board and column
+	// Create board (workflow steps are created automatically)
 	boardResp, _ := client.SendRequest("board-1", ws.ActionBoardCreate, map[string]interface{}{
-		"workspace_id": workspaceID,
-		"name":         "Concurrent Test Board",
+		"workspace_id":         workspaceID,
+		"name":                 "Concurrent Test Board",
+		"workflow_template_id": "simple",
 	})
 	var boardPayload map[string]interface{}
 	if err := boardResp.ParsePayload(&boardPayload); err != nil {
@@ -1047,16 +1029,16 @@ func TestConcurrentRequests(t *testing.T) {
 	}
 	boardID := boardPayload["id"].(string)
 
-	colResp, _ := client.SendRequest("col-1", ws.ActionColumnCreate, map[string]interface{}{
+	// Get first workflow step
+	stepResp, _ := client.SendRequest("step-list-1", ws.ActionWorkflowStepList, map[string]interface{}{
 		"board_id": boardID,
-		"name":     "To Do",
-		"position": 0,
 	})
-	var colPayload map[string]interface{}
-	if err := colResp.ParsePayload(&colPayload); err != nil {
-		t.Fatalf("failed to parse column payload: %v", err)
+	var stepListPayload map[string]interface{}
+	if err := stepResp.ParsePayload(&stepListPayload); err != nil {
+		t.Fatalf("failed to parse step list payload: %v", err)
 	}
-	columnID := colPayload["id"].(string)
+	steps := stepListPayload["steps"].([]interface{})
+	workflowStepID := steps[0].(map[string]interface{})["id"].(string)
 
 	// Create multiple tasks concurrently
 	numTasks := 10
@@ -1076,12 +1058,12 @@ func TestConcurrentRequests(t *testing.T) {
 				"task-"+string(rune('0'+idx)),
 				ws.ActionTaskCreate,
 				map[string]interface{}{
-					"workspace_id":  workspaceID,
-					"board_id":      boardID,
-					"column_id":     columnID,
-					"title":         "Concurrent Task " + string(rune('0'+idx)),
-					"repository_id": repositoryID,
-					"base_branch":   "main",
+					"workspace_id":     workspaceID,
+					"board_id":         boardID,
+					"workflow_step_id": workflowStepID,
+					"title":            "Concurrent Task " + string(rune('0'+idx)),
+					"repository_id":    repositoryID,
+					"base_branch":      "main",
 				},
 			)
 			results <- err

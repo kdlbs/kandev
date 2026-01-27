@@ -59,9 +59,26 @@ func (c *Controller) TriggerTask(ctx context.Context, req dto.TriggerTaskRequest
 	}, nil
 }
 
-// StartTask starts task execution
+// StartTask starts task execution.
+// If SessionID is provided, resumes the existing session and sends a prompt with workflow step config.
+// If SessionID is not provided, creates a new session (requires AgentProfileID).
 func (c *Controller) StartTask(ctx context.Context, req dto.StartTaskRequest) (dto.StartTaskResponse, error) {
-	execution, err := c.service.StartTask(ctx, req.TaskID, req.AgentProfileID, req.ExecutorID, req.Priority, req.Prompt)
+	// If session_id is provided, resume existing session with workflow step config
+	if req.SessionID != "" {
+		err := c.service.StartSessionForWorkflowStep(ctx, req.TaskID, req.SessionID, req.WorkflowStepID)
+		if err != nil {
+			return dto.StartTaskResponse{}, err
+		}
+		return dto.StartTaskResponse{
+			Success:       true,
+			TaskID:        req.TaskID,
+			TaskSessionID: req.SessionID,
+			State:         "RUNNING",
+		}, nil
+	}
+
+	// Otherwise, create a new session
+	execution, err := c.service.StartTask(ctx, req.TaskID, req.AgentProfileID, req.ExecutorID, req.Priority, req.Prompt, req.WorkflowStepID)
 	if err != nil {
 		return dto.StartTaskResponse{}, err
 	}

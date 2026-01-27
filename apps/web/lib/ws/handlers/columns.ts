@@ -9,20 +9,21 @@ export function registerColumnsHandlers(store: StoreApi<AppState>): WsHandlers {
         if (state.kanban.boardId !== message.payload.board_id) {
           return state;
         }
-        const nextColumns = [
-          ...state.kanban.columns,
+        const nextSteps = [
+          ...state.kanban.steps,
           {
             id: message.payload.id,
             title: message.payload.name,
             color: message.payload.color,
             position: message.payload.position,
+            autoStartAgent: message.payload.auto_start_agent ?? false,
           },
         ].sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
         return {
           ...state,
           kanban: {
             ...state.kanban,
-            columns: nextColumns,
+            steps: nextSteps,
           },
         };
       });
@@ -32,33 +33,35 @@ export function registerColumnsHandlers(store: StoreApi<AppState>): WsHandlers {
         if (state.kanban.boardId !== message.payload.board_id) {
           return state;
         }
-        const exists = state.kanban.columns.some((column) => column.id === message.payload.id);
-        const updatedColumns = exists
-          ? state.kanban.columns.map((column) =>
-              column.id === message.payload.id
+        const exists = state.kanban.steps.some((step) => step.id === message.payload.id);
+        const updatedSteps = exists
+          ? state.kanban.steps.map((step) =>
+              step.id === message.payload.id
                 ? {
-                    ...column,
+                    ...step,
                     title: message.payload.name,
                     color: message.payload.color,
                     position: message.payload.position,
+                    autoStartAgent: message.payload.auto_start_agent ?? step.autoStartAgent,
                   }
-                : column
+                : step
             )
           : [
-              ...state.kanban.columns,
+              ...state.kanban.steps,
               {
                 id: message.payload.id,
                 title: message.payload.name,
                 color: message.payload.color,
                 position: message.payload.position,
+                autoStartAgent: message.payload.auto_start_agent ?? false,
               },
             ];
-        const nextColumns = updatedColumns.sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
+        const nextSteps = updatedSteps.sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
         return {
           ...state,
           kanban: {
             ...state.kanban,
-            columns: nextColumns,
+            steps: nextSteps,
           },
         };
       });
@@ -68,12 +71,12 @@ export function registerColumnsHandlers(store: StoreApi<AppState>): WsHandlers {
         if (state.kanban.boardId !== message.payload.board_id) {
           return state;
         }
-        const nextColumns = state.kanban.columns.filter((column) => column.id !== message.payload.id);
+        const nextSteps = state.kanban.steps.filter((step) => step.id !== message.payload.id);
         return {
           ...state,
           kanban: {
             ...state.kanban,
-            columns: nextColumns,
+            steps: nextSteps,
           },
         };
       });

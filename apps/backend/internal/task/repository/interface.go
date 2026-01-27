@@ -24,7 +24,7 @@ type Repository interface {
 	ListTasks(ctx context.Context, boardID string) ([]*models.Task, error)
 	ListTasksByColumn(ctx context.Context, columnID string) ([]*models.Task, error)
 	UpdateTaskState(ctx context.Context, id string, state v1.TaskState) error
-	AddTaskToBoard(ctx context.Context, taskID, boardID, columnID string, position int) error
+	AddTaskToBoard(ctx context.Context, taskID, boardID, workflowStepID string, position int) error
 	RemoveTaskFromBoard(ctx context.Context, taskID, boardID string) error
 
 	// TaskRepository operations
@@ -42,14 +42,6 @@ type Repository interface {
 	UpdateBoard(ctx context.Context, board *models.Board) error
 	DeleteBoard(ctx context.Context, id string) error
 	ListBoards(ctx context.Context, workspaceID string) ([]*models.Board, error)
-
-	// Column operations
-	CreateColumn(ctx context.Context, column *models.Column) error
-	GetColumn(ctx context.Context, id string) (*models.Column, error)
-	GetColumnByState(ctx context.Context, boardID string, state v1.TaskState) (*models.Column, error)
-	UpdateColumn(ctx context.Context, column *models.Column) error
-	DeleteColumn(ctx context.Context, id string) error
-	ListColumns(ctx context.Context, boardID string) ([]*models.Column, error)
 
 	// Message operations
 	CreateMessage(ctx context.Context, message *models.Message) error
@@ -84,6 +76,13 @@ type Repository interface {
 	HasActiveTaskSessionsByEnvironment(ctx context.Context, environmentID string) (bool, error)
 	HasActiveTaskSessionsByRepository(ctx context.Context, repositoryID string) (bool, error)
 	DeleteTaskSession(ctx context.Context, id string) error
+
+	// Workflow-related session operations
+	GetPrimarySessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error)
+	GetPrimarySessionIDsByTaskIDs(ctx context.Context, taskIDs []string) (map[string]string, error)
+	SetSessionPrimary(ctx context.Context, sessionID string) error
+	UpdateSessionWorkflowStep(ctx context.Context, sessionID string, stepID string) error
+	UpdateSessionReviewStatus(ctx context.Context, sessionID string, status string) error
 
 	// Task Session Worktree operations
 	CreateTaskSessionWorktree(ctx context.Context, sessionWorktree *models.TaskSessionWorktree) error

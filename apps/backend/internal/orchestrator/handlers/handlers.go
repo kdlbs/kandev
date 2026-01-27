@@ -83,10 +83,12 @@ func (h *Handlers) wsTriggerTask(ctx context.Context, msg *ws.Message) (*ws.Mess
 
 type wsStartTaskRequest struct {
 	TaskID         string `json:"task_id"`
+	SessionID      string `json:"session_id,omitempty"`
 	AgentProfileID string `json:"agent_profile_id,omitempty"`
 	ExecutorID     string `json:"executor_id,omitempty"`
 	Priority       int    `json:"priority,omitempty"`
 	Prompt         string `json:"prompt,omitempty"`
+	WorkflowStepID string `json:"workflow_step_id,omitempty"`
 }
 
 func (h *Handlers) wsStartTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -97,16 +99,19 @@ func (h *Handlers) wsStartTask(ctx context.Context, msg *ws.Message) (*ws.Messag
 	if req.TaskID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 	}
-	if req.AgentProfileID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "agent_profile_id is required", nil)
+	// agent_profile_id is only required when creating a new session (no session_id provided)
+	if req.SessionID == "" && req.AgentProfileID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "agent_profile_id is required when creating a new session", nil)
 	}
 
 	resp, err := h.controller.StartTask(ctx, dto.StartTaskRequest{
 		TaskID:         req.TaskID,
+		SessionID:      req.SessionID,
 		AgentProfileID: req.AgentProfileID,
 		ExecutorID:     req.ExecutorID,
 		Priority:       req.Priority,
 		Prompt:         req.Prompt,
+		WorkflowStepID: req.WorkflowStepID,
 	})
 	if err != nil {
 		h.logger.Error("failed to start task", zap.String("task_id", req.TaskID), zap.Error(err))

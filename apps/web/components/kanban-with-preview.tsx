@@ -55,7 +55,7 @@ export function KanbanWithPreview({ initialTaskId }: KanbanWithPreviewProps) {
     return {
       id: task.id,
       title: task.title,
-      columnId: task.columnId,
+      workflowStepId: task.workflowStepId,
       state: task.state,
       description: task.description,
       position: task.position,

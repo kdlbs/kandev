@@ -42,9 +42,10 @@ type GetBoardRequest struct {
 }
 
 type CreateBoardRequest struct {
-	WorkspaceID string
-	Name        string
-	Description string
+	WorkspaceID        string
+	Name               string
+	Description        string
+	WorkflowTemplateID *string
 }
 
 type UpdateBoardRequest struct {
@@ -55,30 +56,6 @@ type UpdateBoardRequest struct {
 
 type DeleteBoardRequest struct {
 	ID string
-}
-
-type ListColumnsRequest struct {
-	BoardID string
-}
-
-type GetColumnRequest struct {
-	ID string
-}
-
-type CreateColumnRequest struct {
-	BoardID  string
-	Name     string
-	Position int
-	State    v1.TaskState
-	Color    string
-}
-
-type UpdateColumnRequest struct {
-	ID       string
-	Name     *string
-	Position *int
-	State    *v1.TaskState
-	Color    *string
 }
 
 type ListRepositoriesRequest struct {
@@ -261,14 +238,14 @@ type TaskRepositoryInput struct {
 }
 
 type CreateTaskRequest struct {
-	WorkspaceID  string
-	BoardID      string
-	ColumnID     string
-	Title        string
-	Description  string
-	Priority     int
-	State        *v1.TaskState
-	Repositories []TaskRepositoryInput
+	WorkspaceID    string
+	BoardID        string
+	WorkflowStepID string
+	Title          string
+	Description    string
+	Priority       int
+	State          *v1.TaskState
+	Repositories   []TaskRepositoryInput
 	Position     int
 	Metadata     map[string]interface{}
 }
@@ -308,10 +285,10 @@ type CreateMessageRequest struct {
 }
 
 type MoveTaskRequest struct {
-	ID       string
-	BoardID  string
-	ColumnID string
-	Position int
+	ID             string
+	BoardID        string
+	WorkflowStepID string
+	Position       int
 }
 
 type UpdateTaskStateRequest struct {

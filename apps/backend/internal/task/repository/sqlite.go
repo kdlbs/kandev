@@ -114,23 +114,11 @@ func (r *sqliteRepository) initSchema() error {
 		updated_at DATETIME NOT NULL
 	);
 
-	CREATE TABLE IF NOT EXISTS columns (
-		id TEXT PRIMARY KEY,
-		board_id TEXT NOT NULL,
-		name TEXT NOT NULL,
-		position INTEGER DEFAULT 0,
-		state TEXT DEFAULT 'TODO',
-		color TEXT NOT NULL DEFAULT '',
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL,
-		FOREIGN KEY (board_id) REFERENCES boards(id) ON DELETE CASCADE
-	);
-
 	CREATE TABLE IF NOT EXISTS tasks (
 		id TEXT PRIMARY KEY,
 		workspace_id TEXT NOT NULL DEFAULT '',
 		board_id TEXT NOT NULL,
-		column_id TEXT NOT NULL,
+		workflow_step_id TEXT NOT NULL DEFAULT '',
 		title TEXT NOT NULL,
 		description TEXT DEFAULT '',
 		state TEXT DEFAULT 'TODO',
@@ -139,8 +127,7 @@ func (r *sqliteRepository) initSchema() error {
 		metadata TEXT DEFAULT '{}',
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL,
-		FOREIGN KEY (board_id) REFERENCES boards(id) ON DELETE CASCADE,
-		FOREIGN KEY (column_id) REFERENCES columns(id) ON DELETE CASCADE
+		FOREIGN KEY (board_id) REFERENCES boards(id) ON DELETE CASCADE
 	);
 
 	CREATE TABLE IF NOT EXISTS task_repositories (
@@ -190,10 +177,9 @@ func (r *sqliteRepository) initSchema() error {
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_tasks_board_id ON tasks(board_id);
-	CREATE INDEX IF NOT EXISTS idx_tasks_column_id ON tasks(column_id);
+	CREATE INDEX IF NOT EXISTS idx_tasks_workflow_step_id ON tasks(workflow_step_id);
 	CREATE INDEX IF NOT EXISTS idx_task_repositories_task_id ON task_repositories(task_id);
 	CREATE INDEX IF NOT EXISTS idx_task_repositories_repository_id ON task_repositories(repository_id);
-	CREATE INDEX IF NOT EXISTS idx_columns_board_id ON columns(board_id);
 	CREATE INDEX IF NOT EXISTS idx_repositories_workspace_id ON repositories(workspace_id);
 	CREATE INDEX IF NOT EXISTS idx_repository_scripts_repo_id ON repository_scripts(repository_id);
 
@@ -301,9 +287,6 @@ func (r *sqliteRepository) initSchema() error {
 		return err
 	}
 	if err := r.ensureColumn("workspaces", "default_agent_profile_id", "TEXT DEFAULT ''"); err != nil {
-		return err
-	}
-	if err := r.ensureColumn("columns", "color", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
 	if err := r.ensureColumn("environments", "is_system", "INTEGER NOT NULL DEFAULT 0"); err != nil {
@@ -453,27 +436,7 @@ func (r *sqliteRepository) ensureDefaultWorkspace() error {
 			`, boardID, defaultID, "Dev", "Default development board", now, now); err != nil {
 				return err
 			}
-
-			type columnSeed struct {
-				name     string
-				position int
-				state    string
-				color    string
-			}
-			columns := []columnSeed{
-				{name: "Todo", position: 0, state: string(v1.TaskStateTODO), color: "bg-neutral-400"},
-				{name: "In Progress", position: 1, state: string(v1.TaskStateInProgress), color: "bg-blue-500"},
-				{name: "Review", position: 2, state: string(v1.TaskStateReview), color: "bg-yellow-500"},
-				{name: "Done", position: 3, state: string(v1.TaskStateCompleted), color: "bg-green-500"},
-			}
-			for _, column := range columns {
-				if _, err := r.db.ExecContext(ctx, `
-					INSERT INTO columns (id, board_id, name, position, state, color, created_at, updated_at)
-					VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-				`, uuid.New().String(), boardID, column.name, column.position, column.state, column.color, now, now); err != nil {
-					return err
-				}
-			}
+			// Note: Workflow steps will be created by the workflow repository after it initializes
 		}
 	}
 
@@ -820,9 +783,9 @@ func (r *sqliteRepository) CreateTask(ctx context.Context, task *models.Task) er
 	}
 
 	_, err = tx.ExecContext(ctx, `
-		INSERT INTO tasks (id, workspace_id, board_id, column_id, title, description, state, priority, position, metadata, created_at, updated_at)
+		INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, description, state, priority, position, metadata, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, task.ID, task.WorkspaceID, task.BoardID, task.ColumnID, task.Title, task.Description, task.State, task.Priority, task.Position, string(metadata), task.CreatedAt, task.UpdatedAt)
+	`, task.ID, task.WorkspaceID, task.BoardID, task.WorkflowStepID, task.Title, task.Description, task.State, task.Priority, task.Position, string(metadata), task.CreatedAt, task.UpdatedAt)
 	if err != nil {
 		if rollbackErr := tx.Rollback(); rollbackErr != nil {
 			return fmt.Errorf("failed to rollback task insert: %w", rollbackErr)
@@ -838,9 +801,9 @@ func (r *sqliteRepository) GetTask(ctx context.Context, id string) (*models.Task
 	task := &models.Task{}
 	var metadata string
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, workspace_id, board_id, column_id, title, description, state, priority, position, metadata, created_at, updated_at
+		SELECT id, workspace_id, board_id, workflow_step_id, title, description, state, priority, position, metadata, created_at, updated_at
 		FROM tasks WHERE id = ?
-	`, id).Scan(&task.ID, &task.WorkspaceID, &task.BoardID, &task.ColumnID, &task.Title, &task.Description, &task.State, &task.Priority, &task.Position, &metadata, &task.CreatedAt, &task.UpdatedAt)
+	`, id).Scan(&task.ID, &task.WorkspaceID, &task.BoardID, &task.WorkflowStepID, &task.Title, &task.Description, &task.State, &task.Priority, &task.Position, &metadata, &task.CreatedAt, &task.UpdatedAt)
 
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("task not found: %s", id)
@@ -863,9 +826,9 @@ func (r *sqliteRepository) UpdateTask(ctx context.Context, task *models.Task) er
 	}
 
 	result, err := r.db.ExecContext(ctx, `
-		UPDATE tasks SET workspace_id = ?, board_id = ?, column_id = ?, title = ?, description = ?, state = ?, priority = ?, position = ?, metadata = ?, updated_at = ?
+		UPDATE tasks SET workspace_id = ?, board_id = ?, workflow_step_id = ?, title = ?, description = ?, state = ?, priority = ?, position = ?, metadata = ?, updated_at = ?
 		WHERE id = ?
-	`, task.WorkspaceID, task.BoardID, task.ColumnID, task.Title, task.Description, task.State, task.Priority, task.Position, string(metadata), task.UpdatedAt, task.ID)
+	`, task.WorkspaceID, task.BoardID, task.WorkflowStepID, task.Title, task.Description, task.State, task.Priority, task.Position, string(metadata), task.UpdatedAt, task.ID)
 	if err != nil {
 		return err
 	}
@@ -894,7 +857,7 @@ func (r *sqliteRepository) DeleteTask(ctx context.Context, id string) error {
 // ListTasks returns all tasks for a board
 func (r *sqliteRepository) ListTasks(ctx context.Context, boardID string) ([]*models.Task, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, workspace_id, board_id, column_id, title, description, state, priority, position, metadata, created_at, updated_at
+		SELECT id, workspace_id, board_id, workflow_step_id, title, description, state, priority, position, metadata, created_at, updated_at
 		FROM tasks
 		WHERE board_id = ?
 		ORDER BY position
@@ -907,13 +870,13 @@ func (r *sqliteRepository) ListTasks(ctx context.Context, boardID string) ([]*mo
 	return r.scanTasks(rows)
 }
 
-// ListTasksByColumn returns all tasks in a column
-func (r *sqliteRepository) ListTasksByColumn(ctx context.Context, columnID string) ([]*models.Task, error) {
+// ListTasksByColumn returns all tasks in a workflow step
+func (r *sqliteRepository) ListTasksByColumn(ctx context.Context, workflowStepID string) ([]*models.Task, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, workspace_id, board_id, column_id, title, description, state, priority, position, metadata, created_at, updated_at
+		SELECT id, workspace_id, board_id, workflow_step_id, title, description, state, priority, position, metadata, created_at, updated_at
 		FROM tasks
-		WHERE column_id = ? ORDER BY position
-	`, columnID)
+		WHERE workflow_step_id = ? ORDER BY position
+	`, workflowStepID)
 	if err != nil {
 		return nil, err
 	}
@@ -931,7 +894,7 @@ func (r *sqliteRepository) scanTasks(rows *sql.Rows) ([]*models.Task, error) {
 			&task.ID,
 			&task.WorkspaceID,
 			&task.BoardID,
-			&task.ColumnID,
+			&task.WorkflowStepID,
 			&task.Title,
 			&task.Description,
 			&task.State,
@@ -1108,17 +1071,17 @@ func (r *sqliteRepository) GetPrimaryTaskRepository(ctx context.Context, taskID 
 }
 
 // AddTaskToBoard adds a task to a board with placement
-func (r *sqliteRepository) AddTaskToBoard(ctx context.Context, taskID, boardID, columnID string, position int) error {
+func (r *sqliteRepository) AddTaskToBoard(ctx context.Context, taskID, boardID, workflowStepID string, position int) error {
 	_, err := r.db.ExecContext(ctx, `
-		UPDATE tasks SET board_id = ?, column_id = ?, position = ?, updated_at = ? WHERE id = ?
-	`, boardID, columnID, position, time.Now().UTC(), taskID)
+		UPDATE tasks SET board_id = ?, workflow_step_id = ?, position = ?, updated_at = ? WHERE id = ?
+	`, boardID, workflowStepID, position, time.Now().UTC(), taskID)
 	return err
 }
 
 // RemoveTaskFromBoard removes a task from a board
 func (r *sqliteRepository) RemoveTaskFromBoard(ctx context.Context, taskID, boardID string) error {
 	_, err := r.db.ExecContext(ctx, `
-		UPDATE tasks SET board_id = '', column_id = '', position = 0, updated_at = ? WHERE id = ? AND board_id = ?
+		UPDATE tasks SET board_id = '', workflow_step_id = '', position = 0, updated_at = ? WHERE id = ? AND board_id = ?
 	`, time.Now().UTC(), taskID, boardID)
 	return err
 }
@@ -1215,110 +1178,6 @@ func (r *sqliteRepository) ListBoards(ctx context.Context, workspaceID string) (
 			return nil, err
 		}
 		result = append(result, board)
-	}
-	return result, rows.Err()
-}
-
-// Column operations
-
-// CreateColumn creates a new column
-func (r *sqliteRepository) CreateColumn(ctx context.Context, column *models.Column) error {
-	if column.ID == "" {
-		column.ID = uuid.New().String()
-	}
-	now := time.Now().UTC()
-	column.CreatedAt = now
-	column.UpdatedAt = now
-
-	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO columns (id, board_id, name, position, state, color, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`, column.ID, column.BoardID, column.Name, column.Position, column.State, column.Color, column.CreatedAt, column.UpdatedAt)
-
-	return err
-}
-
-// GetColumn retrieves a column by ID
-func (r *sqliteRepository) GetColumn(ctx context.Context, id string) (*models.Column, error) {
-	column := &models.Column{}
-
-	err := r.db.QueryRowContext(ctx, `
-		SELECT id, board_id, name, position, state, color, created_at, updated_at
-		FROM columns WHERE id = ?
-	`, id).Scan(&column.ID, &column.BoardID, &column.Name, &column.Position, &column.State, &column.Color, &column.CreatedAt, &column.UpdatedAt)
-
-	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("column not found: %s", id)
-	}
-	return column, err
-}
-
-// GetColumnByState retrieves a column by board ID and state
-func (r *sqliteRepository) GetColumnByState(ctx context.Context, boardID string, state v1.TaskState) (*models.Column, error) {
-	column := &models.Column{}
-
-	err := r.db.QueryRowContext(ctx, `
-		SELECT id, board_id, name, position, state, color, created_at, updated_at
-		FROM columns WHERE board_id = ? AND state = ?
-	`, boardID, state).Scan(&column.ID, &column.BoardID, &column.Name, &column.Position, &column.State, &column.Color, &column.CreatedAt, &column.UpdatedAt)
-
-	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("column not found for board %s with state %s", boardID, state)
-	}
-	return column, err
-}
-
-// UpdateColumn updates an existing column
-func (r *sqliteRepository) UpdateColumn(ctx context.Context, column *models.Column) error {
-	column.UpdatedAt = time.Now().UTC()
-
-	result, err := r.db.ExecContext(ctx, `
-		UPDATE columns SET name = ?, position = ?, state = ?, color = ?, updated_at = ? WHERE id = ?
-	`, column.Name, column.Position, column.State, column.Color, column.UpdatedAt, column.ID)
-	if err != nil {
-		return err
-	}
-
-	rows, _ := result.RowsAffected()
-	if rows == 0 {
-		return fmt.Errorf("column not found: %s", column.ID)
-	}
-	return nil
-}
-
-// DeleteColumn deletes a column by ID
-func (r *sqliteRepository) DeleteColumn(ctx context.Context, id string) error {
-	result, err := r.db.ExecContext(ctx, `DELETE FROM columns WHERE id = ?`, id)
-	if err != nil {
-		return err
-	}
-
-	rows, _ := result.RowsAffected()
-	if rows == 0 {
-		return fmt.Errorf("column not found: %s", id)
-	}
-	return nil
-}
-
-// ListColumns returns all columns for a board
-func (r *sqliteRepository) ListColumns(ctx context.Context, boardID string) ([]*models.Column, error) {
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, board_id, name, position, state, color, created_at, updated_at
-		FROM columns WHERE board_id = ? ORDER BY position
-	`, boardID)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-
-	var result []*models.Column
-	for rows.Next() {
-		column := &models.Column{}
-		err := rows.Scan(&column.ID, &column.BoardID, &column.Name, &column.Position, &column.State, &column.Color, &column.CreatedAt, &column.UpdatedAt)
-		if err != nil {
-			return nil, err
-		}
-		result = append(result, column)
 	}
 	return result, rows.Err()
 }

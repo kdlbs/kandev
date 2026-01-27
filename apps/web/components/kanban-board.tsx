@@ -1,15 +1,29 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Task } from './kanban-card';
 import { TaskCreateDialog } from './task-create-dialog';
 import { useAppStore, useAppStoreApi } from '@/components/state-provider';
 import type { Task as BackendTask } from '@/lib/types/http';
 import type { BoardState } from '@/lib/state/slices';
-import { useDragAndDrop } from '@/hooks/use-drag-and-drop';
+import { useDragAndDrop, type WorkflowAutomation, type MoveTaskError } from '@/hooks/use-drag-and-drop';
 import { KanbanBoardGrid } from './kanban-board-grid';
 import { KanbanHeader } from './kanban/kanban-header';
 import { useKanbanData, useKanbanActions, useKanbanNavigation } from '@/hooks/domains/kanban';
+import { getWebSocketClient } from '@/lib/ws/connection';
+import { linkToSession } from '@/lib/links';
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from '@kandev/ui/alert-dialog';
+import { IconAlertTriangle } from '@tabler/icons-react';
 
 interface KanbanBoardProps {
   onPreviewTask?: (task: Task) => void;
@@ -19,6 +33,7 @@ interface KanbanBoardProps {
 export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}) {
   // Store access
   const store = useAppStoreApi();
+  const router = useRouter();
 
   // Get initial state for actions hook
   const kanban = useAppStore((state) => state.kanban);
@@ -66,8 +81,69 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
     setTaskSessionAvailability,
   });
 
-  // Drag and drop
-  const { activeTask, handleDragStart, handleDragEnd, handleDragCancel } = useDragAndDrop(visibleTasksWithSessions);
+  // Workflow automation state for session creation dialog
+  const [workflowAutomation, setWorkflowAutomation] = useState<WorkflowAutomation | null>(null);
+  const [isWorkflowDialogOpen, setIsWorkflowDialogOpen] = useState(false);
+
+  // Move error state for approval warning modal
+  const [moveError, setMoveError] = useState<MoveTaskError | null>(null);
+
+  // Handle workflow automation when task is moved to auto-start step
+  const handleWorkflowAutomation = useCallback((automation: WorkflowAutomation) => {
+    setWorkflowAutomation(automation);
+    setIsWorkflowDialogOpen(true);
+  }, []);
+
+  // Handle move error - show approval warning modal
+  const handleMoveError = useCallback((error: MoveTaskError) => {
+    setMoveError(error);
+  }, []);
+
+  // Handle navigation to task session from approval warning modal
+  const handleGoToTask = useCallback(() => {
+    if (moveError?.sessionId) {
+      router.push(linkToSession(moveError.sessionId));
+    }
+    setMoveError(null);
+  }, [moveError, router]);
+
+  // Handle session creation from workflow automation dialog
+  const handleWorkflowSessionCreate = useCallback(
+    async (data: { prompt: string; agentProfileId: string; executorId: string; environmentId: string }) => {
+      if (!workflowAutomation) return;
+
+      const client = getWebSocketClient();
+      if (!client) return;
+
+      try {
+        // Start the task with workflow step configuration
+        await client.request(
+          'orchestrator.start',
+          {
+            task_id: workflowAutomation.taskId,
+            agent_profile_id: data.agentProfileId,
+            executor_id: data.executorId,
+            prompt: data.prompt.trim(),
+            workflow_step_id: workflowAutomation.workflowStep.id,
+          },
+          15000
+        );
+      } catch (err) {
+        console.error('Failed to start session for workflow step:', err);
+      } finally {
+        setWorkflowAutomation(null);
+        setIsWorkflowDialogOpen(false);
+      }
+    },
+    [workflowAutomation]
+  );
+
+  // Drag and drop with workflow automation callback
+  const { activeTask, handleDragStart, handleDragEnd, handleDragCancel } = useDragAndDrop({
+    visibleTasks: visibleTasksWithSessions,
+    onWorkflowAutomation: handleWorkflowAutomation,
+    onMoveError: handleMoveError,
+  });
 
   // Board selection effect
   useEffect(() => {
@@ -94,7 +170,7 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
     }
     if (!desiredBoardId) {
       store.getState().hydrate({
-        kanban: { boardId: null, columns: [], tasks: [] },
+        kanban: { boardId: null, steps: [], tasks: [] },
       });
     }
   }, [
@@ -126,14 +202,14 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
         workspaceId={workspaceState.activeId}
         boardId={kanban.boardId}
         defaultColumnId={activeColumns[0]?.id ?? null}
-        columns={activeColumns.map((column) => ({ id: column.id, title: column.title }))}
+        columns={activeColumns.map((column) => ({ id: column.id, title: column.title, autoStartAgent: column.autoStartAgent }))}
         editingTask={
           editingTask
             ? {
                 id: editingTask.id,
                 title: editingTask.title,
                 description: editingTask.description,
-                columnId: editingTask.columnId,
+                workflowStepId: editingTask.workflowStepId,
                 state: editingTask.state as BackendTask['state'],
                 repositoryId: editingTask.repositoryId,
               }
@@ -152,6 +228,49 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
         }
         submitLabel={editingTask ? 'Update' : 'Create'}
       />
+      {/* Workflow automation session creation dialog */}
+      <TaskCreateDialog
+        key={isWorkflowDialogOpen ? 'workflow-open' : 'workflow-closed'}
+        open={isWorkflowDialogOpen}
+        onOpenChange={(open) => {
+          setIsWorkflowDialogOpen(open);
+          if (!open) setWorkflowAutomation(null);
+        }}
+        mode="session"
+        workspaceId={workspaceState.activeId}
+        boardId={kanban.boardId}
+        defaultColumnId={workflowAutomation?.workflowStep.id ?? null}
+        columns={activeColumns.map((column) => ({ id: column.id, title: column.title, autoStartAgent: column.autoStartAgent }))}
+        editingTask={null}
+        onCreateSession={handleWorkflowSessionCreate}
+        initialValues={{
+          title: '',
+          description: workflowAutomation?.taskDescription ?? '',
+        }}
+        submitLabel="Start Agent"
+      />
+      {/* Approval warning modal */}
+      <AlertDialog open={!!moveError} onOpenChange={(open) => !open && setMoveError(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <IconAlertTriangle className="h-5 w-5 text-amber-500" />
+              Approval Required
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {moveError?.message}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Dismiss</AlertDialogCancel>
+            {moveError?.sessionId && (
+              <AlertDialogAction onClick={handleGoToTask}>
+                Go to Task
+              </AlertDialogAction>
+            )}
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <KanbanBoardGrid
         columns={activeColumns}
         tasks={visibleTasksWithSessions}

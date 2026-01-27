@@ -5,6 +5,7 @@ import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 import { IconDots, IconArrowsMaximize } from '@tabler/icons-react';
 import { Card, CardContent } from '@kandev/ui/card';
+import { Badge } from '@kandev/ui/badge';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -19,12 +20,16 @@ import { useAppStore } from '@/components/state-provider';
 export interface Task {
   id: string;
   title: string;
-  columnId: string;
+  workflowStepId: string;
   state?: TaskState;
   description?: string;
   position?: number;
   repositoryId?: string;
   hasSession?: boolean;
+  // Workflow fields
+  sessionCount?: number;
+  primarySessionId?: string | null;
+  reviewStatus?: 'pending' | 'approved' | 'changes_requested' | 'rejected' | null;
 }
 
 interface KanbanCardProps {
@@ -61,6 +66,20 @@ function KanbanCardBody({
         <p className="text-xs text-muted-foreground mt-1 leading-tight line-clamp-3">
           {task.description}
         </p>
+      )}
+      {(task.sessionCount && task.sessionCount > 1 || task.reviewStatus === 'changes_requested') && (
+        <div className="flex items-center justify-between gap-2 mt-1">
+          {task.sessionCount && task.sessionCount > 1 && (
+            <Badge variant="secondary" className="text-xs h-5">
+              {task.sessionCount} sessions
+            </Badge>
+          )}
+          {task.reviewStatus === 'changes_requested' && (
+            <Badge variant="outline" className="border-amber-500 text-amber-600 bg-amber-50 dark:bg-amber-950/50 text-xs h-5">
+              Changes Requested
+            </Badge>
+          )}
+        </div>
       )}
     </>
   );

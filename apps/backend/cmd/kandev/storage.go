@@ -7,6 +7,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/persistence"
 	"github.com/kandev/kandev/internal/task/repository"
+	workflowrepository "github.com/kandev/kandev/internal/workflow/repository"
 
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	editorstore "github.com/kandev/kandev/internal/editors/store"
@@ -59,6 +60,11 @@ func provideRepositories(cfg *config.Config, log *logger.Logger) (*sql.DB, *Repo
 	}
 	cleanups = append(cleanups, cleanup)
 
+	workflowRepo, err := workflowrepository.NewWithDB(dbConn)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
 	repos := &Repositories{
 		Task:          taskRepoImpl,
 		AgentSettings: agentSettingsRepo,
@@ -66,6 +72,7 @@ func provideRepositories(cfg *config.Config, log *logger.Logger) (*sql.DB, *Repo
 		Notification:  notificationRepo,
 		Editor:        editorRepo,
 		Prompts:       promptRepo,
+		Workflow:      workflowRepo,
 	}
 	return dbConn, repos, cleanups, nil
 }

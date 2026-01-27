@@ -68,7 +68,7 @@ export function registerWorkspacesHandlers(store: StoreApi<AppState>): WsHandler
             activeId,
           },
           boards: clearBoards ? { items: [], activeId: null } : state.boards,
-          kanban: clearBoards ? { boardId: null, columns: [], tasks: [] } : state.kanban,
+          kanban: clearBoards ? { boardId: null, steps: [], tasks: [] } : state.kanban,
         };
       });
     },

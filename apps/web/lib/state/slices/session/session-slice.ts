@@ -65,7 +65,10 @@ export const createSessionSlice: StateCreator<
   prependMessages: (sessionId, messages, meta) =>
     set((draft) => {
       const existing = draft.messages.bySession[sessionId] || [];
-      draft.messages.bySession[sessionId] = [...messages, ...existing];
+      // Deduplicate - only add messages that don't already exist
+      const existingIds = new Set(existing.map((m) => m.id));
+      const newMessages = messages.filter((m) => !existingIds.has(m.id));
+      draft.messages.bySession[sessionId] = [...newMessages, ...existing];
       if (!draft.messages.metaBySession[sessionId]) {
         draft.messages.metaBySession[sessionId] = {
           isLoading: false,
@@ -142,14 +145,24 @@ export const createSessionSlice: StateCreator<
     set((draft) => {
       // Merge with existing session data to preserve fields like agent_profile_id and agent_profile_snapshot
       const existingSession = draft.taskSessions.items[session.id];
-      if (existingSession) {
-        draft.taskSessions.items[session.id] = {
-          ...existingSession,
-          ...session,
-          agent_profile_snapshot: session.agent_profile_snapshot ?? existingSession.agent_profile_snapshot,
-        };
-      } else {
-        draft.taskSessions.items[session.id] = session;
+      const mergedSession = existingSession
+        ? {
+            ...existingSession,
+            ...session,
+            agent_profile_snapshot: session.agent_profile_snapshot ?? existingSession.agent_profile_snapshot,
+          }
+        : session;
+
+      draft.taskSessions.items[session.id] = mergedSession;
+
+      // Also update taskSessionsByTask to keep both stores in sync
+      const taskId = session.task_id;
+      const sessionsByTask = draft.taskSessionsByTask.itemsByTaskId[taskId];
+      if (sessionsByTask) {
+        const sessionIndex = sessionsByTask.findIndex((s) => s.id === session.id);
+        if (sessionIndex >= 0) {
+          sessionsByTask[sessionIndex] = mergedSession;
+        }
       }
     }),
   setTaskSessionsForTask: (taskId, sessions) =>

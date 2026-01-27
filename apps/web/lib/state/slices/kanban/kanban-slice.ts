@@ -2,7 +2,7 @@ import type { StateCreator } from 'zustand';
 import type { KanbanSlice, KanbanSliceState } from './types';
 
 export const defaultKanbanState: KanbanSliceState = {
-  kanban: { boardId: null, columns: [], tasks: [] },
+  kanban: { boardId: null, steps: [], tasks: [] },
   boards: { items: [], activeId: null },
   tasks: { activeTaskId: null, activeSessionId: null },
 };

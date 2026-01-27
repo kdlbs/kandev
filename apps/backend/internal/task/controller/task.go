@@ -79,16 +79,16 @@ func (c *TaskController) CreateTask(ctx context.Context, req dto.CreateTaskReque
 	}
 
 	task, err := c.service.CreateTask(ctx, &service.CreateTaskRequest{
-		WorkspaceID:  req.WorkspaceID,
-		BoardID:      req.BoardID,
-		ColumnID:     req.ColumnID,
-		Title:        req.Title,
-		Description:  req.Description,
-		Priority:     req.Priority,
-		State:        req.State,
-		Repositories: repos,
-		Position:     req.Position,
-		Metadata:     req.Metadata,
+		WorkspaceID:    req.WorkspaceID,
+		BoardID:        req.BoardID,
+		WorkflowStepID: req.WorkflowStepID,
+		Title:          req.Title,
+		Description:    req.Description,
+		Priority:       req.Priority,
+		State:          req.State,
+		Repositories:   repos,
+		Position:       req.Position,
+		Metadata:       req.Metadata,
 	})
 	if err != nil {
 		return dto.TaskDTO{}, err
@@ -131,12 +131,35 @@ func (c *TaskController) DeleteTask(ctx context.Context, req dto.DeleteTaskReque
 	return dto.SuccessResponse{Success: true}, nil
 }
 
-func (c *TaskController) MoveTask(ctx context.Context, req dto.MoveTaskRequest) (dto.TaskDTO, error) {
-	task, err := c.service.MoveTask(ctx, req.ID, req.BoardID, req.ColumnID, req.Position)
+func (c *TaskController) MoveTask(ctx context.Context, req dto.MoveTaskRequest) (dto.MoveTaskResponse, error) {
+	result, err := c.service.MoveTask(ctx, req.ID, req.BoardID, req.WorkflowStepID, req.Position)
 	if err != nil {
-		return dto.TaskDTO{}, err
+		return dto.MoveTaskResponse{}, err
 	}
-	return dto.FromTask(task), nil
+
+	response := dto.MoveTaskResponse{
+		Task: dto.FromTask(result.Task),
+	}
+
+	// Include workflow step info if available
+	if result.WorkflowStep != nil {
+		response.WorkflowStep = dto.WorkflowStepDTO{
+			ID:              result.WorkflowStep.ID,
+			BoardID:         result.WorkflowStep.BoardID,
+			Name:            result.WorkflowStep.Name,
+			StepType:        result.WorkflowStep.StepType,
+			Position:        result.WorkflowStep.Position,
+			Color:           result.WorkflowStep.Color,
+			AutoStartAgent:  result.WorkflowStep.AutoStartAgent,
+			PlanMode:        result.WorkflowStep.PlanMode,
+			RequireApproval: result.WorkflowStep.RequireApproval,
+			PromptPrefix:    result.WorkflowStep.PromptPrefix,
+			PromptSuffix:    result.WorkflowStep.PromptSuffix,
+			AllowManualMove: result.WorkflowStep.AllowManualMove,
+		}
+	}
+
+	return response, nil
 }
 
 func (c *TaskController) UpdateTaskState(ctx context.Context, req dto.UpdateTaskStateRequest) (dto.TaskDTO, error) {
@@ -160,4 +183,37 @@ func (c *TaskController) GetSessionCommits(ctx context.Context, sessionID string
 // GetCumulativeDiff retrieves the cumulative diff from base commit to current HEAD
 func (c *TaskController) GetCumulativeDiff(ctx context.Context, sessionID string) (*models.CumulativeDiff, error) {
 	return c.service.GetCumulativeDiff(ctx, sessionID)
+}
+
+// ApproveSession approves a session's current step and moves it to the on_approval_step_id
+func (c *TaskController) ApproveSession(ctx context.Context, req dto.ApproveSessionRequest) (dto.ApproveSessionResponse, error) {
+	result, err := c.service.ApproveSession(ctx, req.SessionID)
+	if err != nil {
+		return dto.ApproveSessionResponse{}, err
+	}
+
+	resp := dto.ApproveSessionResponse{
+		Success: true,
+		Session: dto.FromTaskSession(result.Session),
+	}
+
+	// Include the new workflow step if present
+	if result.WorkflowStep != nil {
+		resp.WorkflowStep = dto.WorkflowStepDTO{
+			ID:              result.WorkflowStep.ID,
+			BoardID:         result.WorkflowStep.BoardID,
+			Name:            result.WorkflowStep.Name,
+			StepType:        result.WorkflowStep.StepType,
+			Position:        result.WorkflowStep.Position,
+			Color:           result.WorkflowStep.Color,
+			AutoStartAgent:  result.WorkflowStep.AutoStartAgent,
+			PlanMode:        result.WorkflowStep.PlanMode,
+			RequireApproval: result.WorkflowStep.RequireApproval,
+			PromptPrefix:    result.WorkflowStep.PromptPrefix,
+			PromptSuffix:    result.WorkflowStep.PromptSuffix,
+			AllowManualMove: result.WorkflowStep.AllowManualMove,
+		}
+	}
+
+	return resp, nil
 }

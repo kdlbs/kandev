@@ -49,19 +49,19 @@ func TestTaskStructInitialization(t *testing.T) {
 		},
 	}
 	task := Task{
-		ID:           "task-123",
-		WorkspaceID:  "workspace-001",
-		BoardID:      "board-456",
-		ColumnID:     "column-789",
-		Title:        "Test Task",
-		Description:  "A test task description",
-		State:        v1.TaskStateTODO,
-		Priority:     5,
-		Position:     1,
-		Metadata:     map[string]interface{}{"key": "value"},
-		Repositories: repos,
-		CreatedAt:    now,
-		UpdatedAt:    now,
+		ID:             "task-123",
+		WorkspaceID:    "workspace-001",
+		BoardID:        "board-456",
+		WorkflowStepID: "workflow-step-789",
+		Title:          "Test Task",
+		Description:    "A test task description",
+		State:          v1.TaskStateTODO,
+		Priority:       5,
+		Position:       1,
+		Metadata:       map[string]interface{}{"key": "value"},
+		Repositories:   repos,
+		CreatedAt:      now,
+		UpdatedAt:      now,
 	}
 
 	if task.ID != "task-123" {
@@ -73,8 +73,8 @@ func TestTaskStructInitialization(t *testing.T) {
 	if task.BoardID != "board-456" {
 		t.Errorf("expected BoardID board-456, got %s", task.BoardID)
 	}
-	if task.ColumnID != "column-789" {
-		t.Errorf("expected ColumnID column-789, got %s", task.ColumnID)
+	if task.WorkflowStepID != "workflow-step-789" {
+		t.Errorf("expected WorkflowStepID workflow-step-789, got %s", task.WorkflowStepID)
 	}
 	if task.Title != "Test Task" {
 		t.Errorf("expected Title 'Test Task', got %s", task.Title)
@@ -130,42 +130,13 @@ func TestBoardStructInitialization(t *testing.T) {
 	}
 }
 
-func TestColumnStructInitialization(t *testing.T) {
-	now := time.Now().UTC()
-	column := Column{
-		ID:        "column-123",
-		BoardID:   "board-456",
-		Name:      "To Do",
-		Position:  0,
-		State:     v1.TaskStateTODO,
-		CreatedAt: now,
-		UpdatedAt: now,
-	}
-
-	if column.ID != "column-123" {
-		t.Errorf("expected ID column-123, got %s", column.ID)
-	}
-	if column.BoardID != "board-456" {
-		t.Errorf("expected BoardID board-456, got %s", column.BoardID)
-	}
-	if column.Name != "To Do" {
-		t.Errorf("expected Name 'To Do', got %s", column.Name)
-	}
-	if column.Position != 0 {
-		t.Errorf("expected Position 0, got %d", column.Position)
-	}
-	if column.State != v1.TaskStateTODO {
-		t.Errorf("expected State TODO, got %s", column.State)
-	}
-}
-
 func TestTaskToAPI(t *testing.T) {
 	now := time.Now().UTC()
 	task := &Task{
-		ID:          "task-123",
-		WorkspaceID: "workspace-001",
-		BoardID:     "board-456",
-		ColumnID:    "column-789",
+		ID:             "task-123",
+		WorkspaceID:    "workspace-001",
+		BoardID:        "board-456",
+		WorkflowStepID: "step-789",
 		Title:       "Test Task",
 		Description: "A test task description",
 		State:       v1.TaskStateInProgress,
@@ -228,10 +199,10 @@ func TestTaskToAPI(t *testing.T) {
 func TestTaskToAPIWithEmptyOptionalFields(t *testing.T) {
 	now := time.Now().UTC()
 	task := &Task{
-		ID:          "task-123",
-		WorkspaceID: "workspace-001",
-		BoardID:     "board-456",
-		ColumnID:    "column-789",
+		ID:             "task-123",
+		WorkspaceID:    "workspace-001",
+		BoardID:        "board-456",
+		WorkflowStepID: "step-789",
 		Title:       "Test Task",
 		Description: "A test task description",
 		State:       v1.TaskStateTODO,

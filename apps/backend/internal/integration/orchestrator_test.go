@@ -22,7 +22,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
-	"github.com/kandev/kandev/internal/worktree"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events"
@@ -36,6 +35,11 @@ import (
 	taskhandlers "github.com/kandev/kandev/internal/task/handlers"
 	"github.com/kandev/kandev/internal/task/repository"
 	taskservice "github.com/kandev/kandev/internal/task/service"
+	"github.com/kandev/kandev/internal/workflow"
+	workflowcontroller "github.com/kandev/kandev/internal/workflow/controller"
+	workflowhandlers "github.com/kandev/kandev/internal/workflow/handlers"
+	workflowservice "github.com/kandev/kandev/internal/workflow/service"
+	"github.com/kandev/kandev/internal/worktree"
 	"github.com/kandev/kandev/pkg/acp/protocol"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -425,6 +429,7 @@ type OrchestratorTestServer struct {
 	Gateway         *gateways.Gateway
 	TaskRepo        repository.Repository
 	TaskSvc         *taskservice.Service
+	WorkflowSvc     *workflowservice.Service
 	EventBus        bus.EventBus
 	OrchestratorSvc *orchestrator.Service
 	AgentManager    *SimulatedAgentManagerClient
@@ -489,8 +494,13 @@ func NewOrchestratorTestServer(t *testing.T) *OrchestratorTestServer {
 		t.Fatalf("failed to init worktree store: %v", err)
 	}
 
-	// Initialize task service
+	// Initialize workflow service
+	_, workflowSvc, _, err := workflow.Provide(dbConn, log)
+	require.NoError(t, err)
+
+	// Initialize task service and wire workflow step creator
 	taskSvc := taskservice.NewService(taskRepo, eventBus, log, taskservice.RepositoryDiscoveryConfig{})
+	taskSvc.SetWorkflowStepCreator(workflowSvc)
 
 	// Create simulated agent manager
 	agentManager := NewSimulatedAgentManager(eventBus, log)
@@ -528,16 +538,19 @@ func NewOrchestratorTestServer(t *testing.T) *OrchestratorTestServer {
 	// Register handlers (HTTP + WS)
 	workspaceController := taskcontroller.NewWorkspaceController(taskSvc)
 	boardController := taskcontroller.NewBoardController(taskSvc)
+	boardController.SetWorkflowStepLister(workflowSvc)
 	taskController := taskcontroller.NewTaskController(taskSvc)
 	executorController := taskcontroller.NewExecutorController(taskSvc)
 	environmentController := taskcontroller.NewEnvironmentController(taskSvc)
 	repositoryController := taskcontroller.NewRepositoryController(taskSvc)
+	workflowCtrl := workflowcontroller.NewController(workflowSvc)
 	taskhandlers.RegisterWorkspaceRoutes(router, gateway.Dispatcher, workspaceController, log)
 	taskhandlers.RegisterBoardRoutes(router, gateway.Dispatcher, boardController, log)
 	taskhandlers.RegisterTaskRoutes(router, gateway.Dispatcher, taskController, nil, log)
 	taskhandlers.RegisterRepositoryRoutes(router, gateway.Dispatcher, repositoryController, log)
 	taskhandlers.RegisterExecutorRoutes(router, gateway.Dispatcher, executorController, log)
 	taskhandlers.RegisterEnvironmentRoutes(router, gateway.Dispatcher, environmentController, log)
+	workflowhandlers.RegisterRoutes(router, gateway.Dispatcher, workflowCtrl, log)
 
 	// Create test server
 	server := httptest.NewServer(router)
@@ -547,6 +560,7 @@ func NewOrchestratorTestServer(t *testing.T) *OrchestratorTestServer {
 		Gateway:         gateway,
 		TaskRepo:        taskRepo,
 		TaskSvc:         taskSvc,
+		WorkflowSvc:     workflowSvc,
 		EventBus:        eventBus,
 		OrchestratorSvc: orchestratorSvc,
 		AgentManager:    agentManager,
@@ -579,22 +593,21 @@ func (ts *OrchestratorTestServer) CreateTestTask(t *testing.T, agentProfileID st
 	})
 	require.NoError(t, err)
 
-	// Create board first
+	// Create board first (workflow steps are created automatically via default template)
+	defaultTemplateID := "simple"
 	board, err := ts.TaskSvc.CreateBoard(context.Background(), &taskservice.CreateBoardRequest{
-		WorkspaceID: workspace.ID,
-		Name:        "Test Board",
-		Description: "Test board for orchestrator",
+		WorkspaceID:        workspace.ID,
+		Name:               "Test Board",
+		Description:        "Test board for orchestrator",
+		WorkflowTemplateID: &defaultTemplateID,
 	})
 	require.NoError(t, err)
 
-	// Create column
-	col, err := ts.TaskSvc.CreateColumn(context.Background(), &taskservice.CreateColumnRequest{
-		BoardID:  board.ID,
-		Name:     "TODO",
-		Position: 0,
-		State:    v1.TaskStateTODO,
-	})
+	// Get first workflow step from board
+	steps, err := ts.WorkflowSvc.ListStepsByBoard(context.Background(), board.ID)
 	require.NoError(t, err)
+	require.NotEmpty(t, steps, "board should have workflow steps")
+	workflowStepID := steps[0].ID
 
 	// Create task with agent profile ID
 	repository, err := ts.TaskSvc.CreateRepository(context.Background(), &taskservice.CreateRepositoryRequest{
@@ -605,12 +618,12 @@ func (ts *OrchestratorTestServer) CreateTestTask(t *testing.T, agentProfileID st
 	require.NoError(t, err)
 
 	task, err := ts.TaskSvc.CreateTask(context.Background(), &taskservice.CreateTaskRequest{
-		WorkspaceID: workspace.ID,
-		BoardID:     board.ID,
-		ColumnID:    col.ID,
-		Title:       "Test Task",
-		Description: "This is a test task for the orchestrator",
-		Priority:    priority,
+		WorkspaceID:    workspace.ID,
+		BoardID:        board.ID,
+		WorkflowStepID: workflowStepID,
+		Title:          "Test Task",
+		Description:    "This is a test task for the orchestrator",
+		Priority:       priority,
 		Repositories: []taskservice.TaskRepositoryInput{
 			{
 				RepositoryID: repository.ID,
@@ -1406,11 +1419,12 @@ func TestOrchestratorEndToEndWorkflow(t *testing.T) {
 
 	workspaceID := createOrchestratorWorkspace(t, client)
 
-	// 1. Create board
+	// 1. Create board with workflow template
 	boardResp, err := client.SendRequest("board-1", ws.ActionBoardCreate, map[string]interface{}{
-		"workspace_id": workspaceID,
-		"name":         "E2E Test Board",
-		"description":  "End-to-end test board",
+		"workspace_id":         workspaceID,
+		"name":                 "E2E Test Board",
+		"description":          "End-to-end test board",
+		"workflow_template_id": "simple",
 	})
 	require.NoError(t, err)
 
@@ -1418,20 +1432,19 @@ func TestOrchestratorEndToEndWorkflow(t *testing.T) {
 	require.NoError(t, boardResp.ParsePayload(&boardPayload))
 	boardID := boardPayload["id"].(string)
 
-	// 2. Create column
-	colResp, err := client.SendRequest("col-1", ws.ActionColumnCreate, map[string]interface{}{
+	// 2. Get first workflow step from board
+	stepResp, err := client.SendRequest("step-list-1", ws.ActionWorkflowStepList, map[string]interface{}{
 		"board_id": boardID,
-		"name":     "TODO",
-		"position": 0,
-		"state":    "TODO",
 	})
 	require.NoError(t, err)
 
-	var colPayload map[string]interface{}
-	require.NoError(t, colResp.ParsePayload(&colPayload))
-	colID := colPayload["id"].(string)
+	var stepListPayload map[string]interface{}
+	require.NoError(t, stepResp.ParsePayload(&stepListPayload))
+	steps := stepListPayload["steps"].([]interface{})
+	require.NotEmpty(t, steps, "board should have workflow steps")
+	workflowStepID := steps[0].(map[string]interface{})["id"].(string)
 
-	// 3. Create task with agent_profile_id
+	// 3. Create task with workflow step
 	repoResp, err := client.SendRequest("repo-1", ws.ActionRepositoryCreate, map[string]interface{}{
 		"workspace_id": workspaceID,
 		"name":         "Test Repo",
@@ -1445,14 +1458,14 @@ func TestOrchestratorEndToEndWorkflow(t *testing.T) {
 	repositoryID := repoPayload["id"].(string)
 
 	taskResp, err := client.SendRequest("task-1", ws.ActionTaskCreate, map[string]interface{}{
-		"workspace_id":  workspaceID,
-		"board_id":      boardID,
-		"column_id":     colID,
-		"title":         "Implement feature X",
-		"description":   "Create a new feature with tests",
-		"priority":      2,
-		"repository_id": repositoryID,
-		"base_branch":   "main",
+		"workspace_id":     workspaceID,
+		"board_id":         boardID,
+		"workflow_step_id": workflowStepID,
+		"title":            "Implement feature X",
+		"description":      "Create a new feature with tests",
+		"priority":         2,
+		"repository_id":    repositoryID,
+		"base_branch":      "main",
 	})
 	require.NoError(t, err)
 

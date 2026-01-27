@@ -3,6 +3,7 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { getWebSocketClient } from '@/lib/ws/connection';
+import { useAppStore } from '@/components/state-provider';
 import { useSessionMessages } from '@/hooks/domains/session/use-session-messages';
 import { useSettingsData } from '@/hooks/domains/settings/use-settings-data';
 import { useSessionState } from '@/hooks/domains/session/use-session-state';
@@ -14,6 +15,7 @@ import { RunningIndicator } from '@/components/task/chat/messages/running-indica
 import { TodoSummary } from '@/components/task/chat/todo-summary';
 import { VirtualizedMessageList } from '@/components/task/chat/virtualized-message-list';
 import { ChatToolbar } from '@/components/task/chat/chat-toolbar';
+import { approveSessionAction } from '@/app/actions/workspaces';
 
 type TaskChatPanelProps = {
   onSend?: (message: string) => void;
@@ -89,6 +91,48 @@ export function TaskChatPanel({
     }
   }, [resolvedSessionId]);
 
+  // Get store action for updating session
+  const setTaskSession = useAppStore((state) => state.setTaskSession);
+
+  // Review panel handlers
+  const handleApprove = useCallback(async () => {
+    if (!resolvedSessionId || !taskId) return;
+    try {
+      const response = await approveSessionAction(resolvedSessionId);
+
+      // Update the session in the store so the review panel closes
+      if (response?.session) {
+        setTaskSession(response.session);
+      }
+
+      // Check if the new step has auto_start_agent enabled
+      // Use fire-and-forget (send) instead of request since resuming session + sending prompt
+      // can take a long time. Session state updates will come via WebSocket events anyway.
+      if (response?.workflow_step?.auto_start_agent) {
+        const client = getWebSocketClient();
+        if (client) {
+          client.send({
+            type: 'request',
+            action: 'orchestrator.start',
+            payload: {
+              task_id: taskId,
+              session_id: resolvedSessionId,
+              workflow_step_id: response.workflow_step.id,
+            },
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Failed to approve session:', error);
+    }
+  }, [resolvedSessionId, taskId, setTaskSession]);
+
+
+
+  // Check if we should show the approve button
+  // Show when session has a review_status that is not approved (meaning it's in a review step)
+  const showApproveButton = session?.review_status != null && session.review_status !== 'approved';
+
   const handleSubmit = async (event?: FormEvent) => {
     event?.preventDefault();
     const trimmed = messageInput.trim();
@@ -155,6 +199,8 @@ export function TaskChatPanel({
           isStarting={isStarting}
           isSending={isSending}
           onCancel={handleCancelTurn}
+          showApproveButton={showApproveButton}
+          onApprove={handleApprove}
         />
       </form>
     </>

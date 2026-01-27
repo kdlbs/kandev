@@ -1,7 +1,7 @@
 import { useCallback } from 'react';
 import { deleteTask, moveTask } from '@/lib/api';
 
-type MovePayload = { board_id: string; column_id: string; position: number };
+type MovePayload = { board_id: string; workflow_step_id: string; position: number };
 
 export function useTaskActions() {
   const moveTaskById = useCallback(async (taskId: string, payload: MovePayload) => {

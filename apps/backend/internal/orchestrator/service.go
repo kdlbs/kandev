@@ -72,6 +72,28 @@ type TurnService interface {
 	GetActiveTurn(ctx context.Context, sessionID string) (*models.Turn, error)
 }
 
+// WorkflowStep contains workflow step data needed for prompt construction and transitions.
+type WorkflowStep struct {
+	ID               string
+	Name             string
+	StepType         string
+	AutoStartAgent   bool
+	PlanMode         bool
+	RequireApproval  bool
+	PromptPrefix     string
+	PromptSuffix     string
+	OnCompleteStepID string // Step to transition to when agent completes
+	OnApprovalStepID string // Step to transition to when user approves
+}
+
+// WorkflowStepGetter retrieves workflow step information for prompt building.
+type WorkflowStepGetter interface {
+	GetStep(ctx context.Context, stepID string) (*WorkflowStep, error)
+	// GetSourceStep finds the step that has on_complete_step_id pointing to the given step.
+	// Used to find the "previous" step when moving back from a review step.
+	GetSourceStep(ctx context.Context, boardID, targetStepID string) (*WorkflowStep, error)
+}
+
 // Service is the main orchestrator service
 type Service struct {
 	config       ServiceConfig
@@ -92,6 +114,9 @@ type Service struct {
 
 	// Turn service for managing session turns
 	turnService TurnService
+
+	// Workflow step getter for prompt building
+	workflowStepGetter WorkflowStepGetter
 
 	// Active turns map: sessionID -> turnID
 	activeTurns sync.Map
@@ -205,6 +230,17 @@ func (s *Service) SetMessageCreator(mc MessageCreator) {
 // no timing data is recorded and turn IDs in messages will be empty).
 func (s *Service) SetTurnService(turnService TurnService) {
 	s.turnService = turnService
+}
+
+// SetWorkflowStepGetter sets the workflow step getter for prompt building.
+//
+// When workflow_step_id is provided to StartTask, the orchestrator uses this getter
+// to retrieve the step's prompt_prefix, prompt_suffix, and plan_mode settings to
+// build the effective prompt.
+//
+// If not set: workflow_step_id in StartTask is ignored and the prompt is used as-is.
+func (s *Service) SetWorkflowStepGetter(getter WorkflowStepGetter) {
+	s.workflowStepGetter = getter
 }
 
 // startTurnForSession starts a new turn for the session and stores it.

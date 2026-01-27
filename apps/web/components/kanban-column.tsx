@@ -8,14 +8,15 @@ import { cn, getRepositoryDisplayName } from '@/lib/utils';
 import { useAppStore } from '@/components/state-provider';
 import type { Repository } from '@/lib/types/http';
 
-export interface Column {
+export interface WorkflowStep {
   id: string;
   title: string;
   color: string;
+  autoStartAgent?: boolean;
 }
 
 interface KanbanColumnProps {
-  column: Column;
+  column: WorkflowStep;
   tasks: Task[];
   onPreviewTask: (task: Task) => void;
   onOpenTask: (task: Task) => void;

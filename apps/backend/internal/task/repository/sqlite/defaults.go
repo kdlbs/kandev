@@ -9,7 +9,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/kandev/kandev/internal/task/models"
-	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // ensureDefaultWorkspace creates a default workspace if none exists
@@ -63,27 +62,7 @@ func (r *Repository) ensureDefaultWorkspace() error {
 			`, boardID, defaultID, "Dev", "Default development board", now, now); err != nil {
 				return err
 			}
-
-			type columnSeed struct {
-				name     string
-				position int
-				state    string
-				color    string
-			}
-			columns := []columnSeed{
-				{name: "Todo", position: 0, state: string(v1.TaskStateTODO), color: "bg-neutral-400"},
-				{name: "In Progress", position: 1, state: string(v1.TaskStateInProgress), color: "bg-blue-500"},
-				{name: "Review", position: 2, state: string(v1.TaskStateReview), color: "bg-yellow-500"},
-				{name: "Done", position: 3, state: string(v1.TaskStateCompleted), color: "bg-green-500"},
-			}
-			for _, column := range columns {
-				if _, err := r.db.ExecContext(ctx, `
-					INSERT INTO columns (id, board_id, name, position, state, color, created_at, updated_at)
-					VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-				`, uuid.New().String(), boardID, column.name, column.position, column.state, column.color, now, now); err != nil {
-					return err
-				}
-			}
+			// Note: Workflow steps will be created by the workflow repository after it initializes
 		}
 	}
 

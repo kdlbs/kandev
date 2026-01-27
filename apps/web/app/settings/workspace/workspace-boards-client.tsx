@@ -3,127 +3,87 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { IconLayoutColumns, IconPlus } from '@tabler/icons-react';
+import { IconLayoutColumns, IconPlus, IconRobot, IconCheck, IconArrowRight } from '@tabler/icons-react';
 import { Button } from '@kandev/ui/button';
 import { Card, CardContent } from '@kandev/ui/card';
 import { Separator } from '@kandev/ui/separator';
+import { Label } from '@kandev/ui/label';
+import { Input } from '@kandev/ui/input';
+import { RadioGroup, RadioGroupItem } from '@kandev/ui/radio-group';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@kandev/ui/dialog';
 import { SettingsSection } from '@/components/settings/settings-section';
 import { BoardCard } from '@/components/settings/board-card';
 import { generateUUID } from '@/lib/utils';
+import { cn } from '@kandev/ui/lib/utils';
 import {
   createBoardAction,
-  createColumnAction,
   deleteBoardAction,
-  deleteColumnAction,
   updateBoardAction,
-  updateColumnAction,
 } from '@/app/actions/workspaces';
-import type { Board, Column, Workspace } from '@/lib/types/http';
-
-type BoardWithColumns = Board & { columns: Column[] };
+import type { Board, Workspace, WorkflowTemplate } from '@/lib/types/http';
 
 type WorkspaceBoardsClientProps = {
   workspace: Workspace | null;
-  boards: BoardWithColumns[];
+  boards: Board[];
+  workflowTemplates: WorkflowTemplate[];
 };
 
-export function WorkspaceBoardsClient({ workspace, boards }: WorkspaceBoardsClientProps) {
+export function WorkspaceBoardsClient({
+  workspace,
+  boards,
+  workflowTemplates,
+}: WorkspaceBoardsClientProps) {
   const router = useRouter();
-  const [boardItems, setBoardItems] = useState<BoardWithColumns[]>(boards);
-  const [savedBoardItems, setSavedBoardItems] = useState<BoardWithColumns[]>(boards);
+  const [boardItems, setBoardItems] = useState<Board[]>(boards);
+  const [savedBoardItems, setSavedBoardItems] = useState<Board[]>(boards);
 
-  const cloneBoard = (board: BoardWithColumns): BoardWithColumns => ({
-    ...board,
-    columns: board.columns.map((column) => ({ ...column })),
-  });
+  // Dialog state for creating a new board
+  const [isAddBoardDialogOpen, setIsAddBoardDialogOpen] = useState(false);
+  const [newBoardName, setNewBoardName] = useState('');
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
+
+  // Get selected template steps for preview
+  const selectedTemplate = workflowTemplates.find((t) => t.id === selectedTemplateId);
+  const previewSteps = selectedTemplate?.default_steps ?? [];
 
   const savedBoardsById = useMemo(() => {
     return new Map(savedBoardItems.map((board) => [board.id, board]));
   }, [savedBoardItems]);
 
-  const isBoardNameDirty = (board: BoardWithColumns) => {
+  const isBoardDirty = (board: Board) => {
     const saved = savedBoardsById.get(board.id);
     if (!saved) return true;
     if (board.name !== saved.name || board.description !== saved.description) return true;
     return false;
   };
 
-  const areColumnsDirty = (board: BoardWithColumns) => {
-    const saved = savedBoardsById.get(board.id);
-    if (!saved) {
-      return board.columns.length > 0;
-    }
-    if (board.columns.length !== saved.columns.length) return true;
-    const savedColumns = new Map(saved.columns.map((column) => [column.id, column]));
-    for (const column of board.columns) {
-      const savedColumn = savedColumns.get(column.id);
-      if (!savedColumn) return true;
-      if (
-        column.name !== savedColumn.name ||
-        column.color !== savedColumn.color ||
-        column.position !== savedColumn.position ||
-        column.state !== savedColumn.state
-      ) {
-        return true;
-      }
-    }
-    return false;
+  const handleOpenAddBoardDialog = () => {
+    setNewBoardName('');
+    setSelectedTemplateId(workflowTemplates.length > 0 ? workflowTemplates[0].id : null);
+    setIsAddBoardDialogOpen(true);
   };
 
-  const handleAddBoard = () => {
+  const handleCreateBoard = () => {
     if (!workspace) return;
-    const draftBoardId = `temp-${generateUUID()}`;
-    const draftBoard: BoardWithColumns = {
-      id: draftBoardId,
+
+    const draftBoard: Board = {
+      id: `temp-${generateUUID()}`,
       workspace_id: workspace.id,
-      name: 'New Board',
+      name: newBoardName.trim() || 'New Board',
       description: '',
+      workflow_template_id: selectedTemplateId,
       created_at: '',
       updated_at: '',
-      columns: [
-        {
-          id: `temp-col-${generateUUID()}`,
-          board_id: draftBoardId,
-          name: 'Todo',
-          position: 0,
-          state: 'TODO',
-          color: 'bg-cyan-500',
-          created_at: '',
-          updated_at: '',
-        },
-        {
-          id: `temp-col-${generateUUID()}`,
-          board_id: draftBoardId,
-          name: 'In Progress',
-          position: 1,
-          state: 'IN_PROGRESS',
-          color: 'bg-yellow-500',
-          created_at: '',
-          updated_at: '',
-        },
-        {
-          id: `temp-col-${generateUUID()}`,
-          board_id: draftBoardId,
-          name: 'To Review',
-          position: 2,
-          state: 'REVIEW',
-          color: 'bg-green-500',
-          created_at: '',
-          updated_at: '',
-        },
-        {
-          id: `temp-col-${generateUUID()}`,
-          board_id: draftBoardId,
-          name: 'Done',
-          position: 3,
-          state: 'COMPLETED',
-          color: 'bg-indigo-500',
-          created_at: '',
-          updated_at: '',
-        },
-      ],
     };
+
     setBoardItems((prev) => [draftBoard, ...prev]);
+    setIsAddBoardDialogOpen(false);
   };
 
   const handleUpdateBoard = (boardId: string, updates: { name?: string; description?: string }) => {
@@ -142,69 +102,6 @@ export function WorkspaceBoardsClient({ workspace, boards }: WorkspaceBoardsClie
     setSavedBoardItems((prev) => prev.filter((board) => board.id !== boardId));
   };
 
-  const handleCreateColumn = (
-    boardId: string,
-    column: Omit<Column, 'id' | 'board_id' | 'created_at' | 'updated_at'>
-  ) => {
-    const draftColumn: Column = {
-      id: `temp-col-${generateUUID()}`,
-      board_id: boardId,
-      name: column.name,
-      position: column.position,
-      state: column.state,
-      color: column.color,
-      created_at: '',
-      updated_at: '',
-    };
-    setBoardItems((prev) =>
-      prev.map((board) =>
-        board.id === boardId ? { ...board, columns: [...board.columns, draftColumn] } : board
-      )
-    );
-  };
-
-  const handleUpdateColumn = (boardId: string, columnId: string, updates: Partial<Column>) => {
-    setBoardItems((prev) =>
-      prev.map((board) =>
-        board.id === boardId
-          ? {
-              ...board,
-              columns: board.columns.map((column) =>
-                column.id === columnId ? { ...column, ...updates } : column
-              ),
-            }
-          : board
-      )
-    );
-  };
-
-  const handleDeleteColumn = async (boardId: string, columnId: string) => {
-    if (boardId.startsWith('temp-')) {
-      setBoardItems((prev) =>
-        prev.map((board) =>
-          board.id === boardId
-            ? { ...board, columns: board.columns.filter((column) => column.id !== columnId) }
-            : board
-        )
-      );
-      return;
-    }
-    await deleteColumnAction(columnId);
-    setBoardItems((prev) =>
-      prev.map((board) =>
-        board.id === boardId
-          ? { ...board, columns: board.columns.filter((column) => column.id !== columnId) }
-          : board
-      )
-    );
-  };
-
-  const handleReorderColumns = (boardId: string, columns: Column[]) => {
-    setBoardItems((prev) =>
-      prev.map((board) => (board.id === boardId ? { ...board, columns } : board))
-    );
-  };
-
   const handleSaveBoard = async (boardId: string) => {
     const board = boardItems.find((item) => item.id === boardId);
     if (!board) return;
@@ -213,26 +110,16 @@ export function WorkspaceBoardsClient({ workspace, boards }: WorkspaceBoardsClie
       const createdBoard = await createBoardAction({
         workspace_id: workspace?.id ?? board.workspace_id,
         name,
+        workflow_template_id: board.workflow_template_id ?? undefined,
       });
-      const createdColumns = await Promise.all(
-        board.columns.map((column, index) =>
-          createColumnAction({
-            board_id: createdBoard.id,
-            name: column.name.trim() || 'New Column',
-            position: column.position ?? index,
-            state: column.state,
-            color: column.color,
-          })
-        )
-      );
-      const nextBoard = {
-        ...createdBoard,
-        columns: createdColumns,
-      };
-      setBoardItems((prev) => prev.map((item) => (item.id === boardId ? nextBoard : item)));
-      setSavedBoardItems((prev) => [cloneBoard(nextBoard), ...prev]);
+      // Backend creates workflow steps automatically from the template
+      setBoardItems((prev) => prev.map((item) => (item.id === boardId ? createdBoard : item)));
+      setSavedBoardItems((prev) => [{ ...createdBoard }, ...prev]);
+      // Refresh the page to load the workflow steps created by the backend
+      router.refresh();
       return;
     }
+    // For existing boards, only update board name/description
     const updates: { name?: string; description?: string } = {};
     if (board.name.trim()) {
       updates.name = board.name.trim();
@@ -240,34 +127,15 @@ export function WorkspaceBoardsClient({ workspace, boards }: WorkspaceBoardsClie
     if (Object.keys(updates).length) {
       await updateBoardAction(boardId, updates);
     }
-    const nextColumns = await Promise.all(
-      board.columns.map((column, index) => {
-        if (column.id.startsWith('temp-col-')) {
-          return createColumnAction({
-            board_id: boardId,
-            name: column.name.trim() || 'New Column',
-            position: column.position ?? index,
-            state: column.state,
-            color: column.color,
-          });
-        }
-        return updateColumnAction(column.id, {
-          name: column.name,
-          color: column.color,
-          position: column.position ?? index,
-          state: column.state,
-        });
-      })
-    );
     setBoardItems((prev) =>
-      prev.map((item) => (item.id === boardId ? { ...item, columns: nextColumns } : item))
+      prev.map((item) => (item.id === boardId ? { ...item, ...updates } : item))
     );
     setSavedBoardItems((prev) =>
       prev.some((item) => item.id === boardId)
         ? prev.map((item) =>
-            item.id === boardId ? cloneBoard({ ...board, columns: nextColumns }) : item
+            item.id === boardId ? { ...board, ...updates } : item
           )
-        : [...prev, cloneBoard({ ...board, columns: nextColumns })]
+        : [...prev, { ...board, ...updates }]
     );
   };
 
@@ -292,7 +160,7 @@ export function WorkspaceBoardsClient({ workspace, boards }: WorkspaceBoardsClie
         <div>
           <h2 className="text-2xl font-bold">{workspace.name}</h2>
           <p className="text-sm text-muted-foreground mt-1">
-            Manage boards and columns for this workspace.
+            Manage boards for this workspace.
           </p>
         </div>
         <Button asChild variant="outline" size="sm">
@@ -305,9 +173,9 @@ export function WorkspaceBoardsClient({ workspace, boards }: WorkspaceBoardsClie
       <SettingsSection
         icon={<IconLayoutColumns className="h-5 w-5" />}
         title="Boards"
-        description="Boards and columns in this workspace"
+        description="Boards in this workspace"
         action={
-          <Button size="sm" onClick={handleAddBoard}>
+          <Button size="sm" onClick={handleOpenAddBoardDialog}>
             <IconPlus className="h-4 w-4 mr-2" />
             Add Board
           </Button>
@@ -318,22 +186,108 @@ export function WorkspaceBoardsClient({ workspace, boards }: WorkspaceBoardsClie
             <BoardCard
               key={board.id}
               board={board}
-              columns={board.columns}
-              isBoardDirty={isBoardNameDirty(board)}
-              areColumnsDirty={areColumnsDirty(board)}
+              isBoardDirty={isBoardDirty(board)}
               onUpdateBoard={(updates) => handleUpdateBoard(board.id, updates)}
               onDeleteBoard={() => handleDeleteBoard(board.id)}
-              onCreateColumn={(column) => handleCreateColumn(board.id, column)}
-              onUpdateColumn={(columnId, updates) =>
-                handleUpdateColumn(board.id, columnId, updates)
-              }
-              onDeleteColumn={(columnId) => handleDeleteColumn(board.id, columnId)}
-              onReorderColumns={(columns) => handleReorderColumns(board.id, columns)}
               onSaveBoard={() => handleSaveBoard(board.id)}
             />
           ))}
         </div>
       </SettingsSection>
+
+      {/* Create Board Dialog */}
+      <Dialog open={isAddBoardDialogOpen} onOpenChange={setIsAddBoardDialogOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Create Board</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-6">
+            <div className="space-y-2">
+              <Label htmlFor="boardName">Board Name</Label>
+              <Input
+                id="boardName"
+                placeholder="My Project Board"
+                value={newBoardName}
+                onChange={(e) => setNewBoardName(e.target.value)}
+              />
+            </div>
+
+            {workflowTemplates.length > 0 && (
+              <div className="space-y-2">
+                <Label>Workflow Template</Label>
+                <RadioGroup
+                  value={selectedTemplateId ?? 'custom'}
+                  onValueChange={(value) =>
+                    setSelectedTemplateId(value === 'custom' ? null : value)
+                  }
+                >
+                  {workflowTemplates.map((template) => (
+                    <div key={template.id} className="flex items-start space-x-3">
+                      <RadioGroupItem value={template.id} id={template.id} className="mt-1" />
+                      <label htmlFor={template.id} className="flex flex-col cursor-pointer">
+                        <span className="font-medium">{template.name}</span>
+                        {template.description && (
+                          <span className="text-sm text-muted-foreground">
+                            {template.description}
+                          </span>
+                        )}
+                      </label>
+                    </div>
+                  ))}
+                  <div className="flex items-start space-x-3">
+                    <RadioGroupItem value="custom" id="custom" className="mt-1" />
+                    <label htmlFor="custom" className="flex flex-col cursor-pointer">
+                      <span className="font-medium">Custom</span>
+                      <span className="text-sm text-muted-foreground">
+                        Start with basic columns (Todo, In Progress, Review, Done)
+                      </span>
+                    </label>
+                  </div>
+                </RadioGroup>
+              </div>
+            )}
+
+            {/* Workflow Preview */}
+            {previewSteps.length > 0 && (
+              <div className="border rounded-lg p-4 bg-muted/50">
+                <Label className="text-sm">Workflow Preview</Label>
+                <div className="flex items-center gap-2 mt-2 overflow-x-auto pb-2">
+                  {previewSteps.map((step, i) => (
+                    <div key={`step-${i}`} className="flex items-center gap-2">
+                      <div
+                        className={cn(
+                          'px-3 py-1.5 rounded text-sm whitespace-nowrap flex items-center gap-1',
+                          step.color || 'bg-slate-500',
+                          'text-white'
+                        )}
+                      >
+                        {step.name}
+                        {step.behaviors?.autoStartAgent && (
+                          <IconRobot className="h-3 w-3" />
+                        )}
+                        {step.behaviors?.requireApproval && (
+                          <IconCheck className="h-3 w-3" />
+                        )}
+                      </div>
+                      {i < previewSteps.length - 1 && (
+                        <IconArrowRight className="h-4 w-4 text-muted-foreground shrink-0" />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsAddBoardDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleCreateBoard}>Create Board</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

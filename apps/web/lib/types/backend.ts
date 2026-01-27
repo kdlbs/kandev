@@ -56,10 +56,10 @@ import type { GitEventPayload } from '@/lib/types/git-events';
 
 export type KanbanUpdatePayload = {
   boardId: string;
-  columns: Array<{ id: string; title: string; color?: string; position?: number }>;
+  steps: Array<{ id: string; title: string; color?: string; position?: number; autoStartAgent?: boolean }>;
   tasks: Array<{
     id: string;
-    columnId: string;
+    workflowStepId: string;
     title: string;
     position?: number;
     description?: string;
@@ -70,7 +70,7 @@ export type KanbanUpdatePayload = {
 export type TaskEventPayload = {
   task_id: string;
   board_id: string;
-  column_id: string;
+  workflow_step_id: string;
   title: string;
   description?: string;
   state?: TaskState;
@@ -138,6 +138,7 @@ export type ColumnPayload = {
   position: number;
   state: string;
   color: string;
+  auto_start_agent?: boolean;
   created_at?: string;
   updated_at?: string;
 };
@@ -159,10 +160,13 @@ export type TaskSessionStateChangedPayload = {
   task_id: string;
   session_id: string;
   old_state?: string;
-  new_state: string;
+  new_state?: string;
   agent_profile_id?: string;
   agent_profile_snapshot?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
+  // Workflow-related fields (sent during workflow transitions)
+  review_status?: string;
+  workflow_step_id?: string;
 };
 
 export type TaskSessionWaitingForInputPayload = {

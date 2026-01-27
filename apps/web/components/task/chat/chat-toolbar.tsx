@@ -1,6 +1,6 @@
 'use client';
 
-import { IconBrain, IconListCheck, IconLoader2, IconPaperclip } from '@tabler/icons-react';
+import { IconBrain, IconCheck, IconListCheck, IconLoader2, IconPaperclip } from '@tabler/icons-react';
 import { Button } from '@kandev/ui/button';
 import {
   DropdownMenu,
@@ -27,6 +27,8 @@ type ChatToolbarProps = {
   isStarting: boolean;
   isSending: boolean;
   onCancel: () => void;
+  showApproveButton?: boolean;
+  onApprove?: () => void;
 };
 
 export function ChatToolbar({
@@ -40,6 +42,8 @@ export function ChatToolbar({
   isStarting,
   isSending,
   onCancel,
+  showApproveButton,
+  onApprove,
 }: ChatToolbarProps) {
   return (
     <div className="flex items-center justify-between gap-2">
@@ -102,6 +106,22 @@ export function ChatToolbar({
           </TooltipTrigger>
           <TooltipContent>Add attachments</TooltipContent>
         </Tooltip>
+        {showApproveButton && onApprove && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-7 gap-1 border-green-300 text-green-700 hover:bg-green-50 hover:text-green-800"
+                onClick={onApprove}
+              >
+                <IconCheck className="h-3.5 w-3.5" />
+                Approve
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Approve and move to next step</TooltipContent>
+          </Tooltip>
+        )}
         <KeyboardShortcutTooltip shortcut={SHORTCUTS.SUBMIT} enabled={!isAgentBusy && !isStarting}>
           <Button
             type={isAgentBusy ? 'button' : 'submit'}
