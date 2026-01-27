@@ -41,6 +41,7 @@ func setupTestRepo(t *testing.T) (string, func()) {
 	runGit(t, localDir, "init", "--initial-branch=main")
 	runGit(t, localDir, "config", "user.email", "test@test.com")
 	runGit(t, localDir, "config", "user.name", "Test User")
+	runGit(t, localDir, "config", "core.hooksPath", "/dev/null") // Disable hooks in test repo
 
 	// Create initial commit
 	writeFile(t, localDir, "README.md", "# Test Repo")
@@ -56,8 +57,11 @@ func setupTestRepo(t *testing.T) (string, func()) {
 
 func runGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
+	// Use git -C flag to ensure we're in the right directory
+	// This is more reliable than cmd.Dir as it prevents git from
+	// walking up to find a parent .git directory
+	fullArgs := append([]string{"-C", dir}, args...)
+	cmd := exec.Command("git", fullArgs...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %v failed: %v\nOutput: %s", args, err, out)
@@ -68,7 +72,7 @@ func runGit(t *testing.T, dir string, args ...string) string {
 func writeFile(t *testing.T, dir, name, content string) {
 	t.Helper()
 	path := filepath.Join(dir, name)
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("failed to write file %s: %v", name, err)
 	}
 }
@@ -230,6 +234,7 @@ func TestFilterLocalCommits_PullAndResetScenario(t *testing.T) {
 	runGit(t, localDir, "init", "--initial-branch=main")
 	runGit(t, localDir, "config", "user.email", "test@test.com")
 	runGit(t, localDir, "config", "user.name", "Test User")
+	runGit(t, localDir, "config", "core.hooksPath", "/dev/null") // Disable hooks in test repo
 	writeFile(t, localDir, "README.md", "# Test Repo")
 	runGit(t, localDir, "add", ".")
 	runGit(t, localDir, "commit", "-m", "Initial commit (X)")
@@ -244,6 +249,7 @@ func TestFilterLocalCommits_PullAndResetScenario(t *testing.T) {
 	runGit(t, upstreamClone, "clone", remoteDir, ".")
 	runGit(t, upstreamClone, "config", "user.email", "upstream@test.com")
 	runGit(t, upstreamClone, "config", "user.name", "Upstream User")
+	runGit(t, upstreamClone, "config", "core.hooksPath", "/dev/null") // Disable hooks in test repo
 
 	// Make upstream commits Y and Z
 	writeFile(t, upstreamClone, "upstream1.txt", "upstream content 1")
@@ -295,4 +301,3 @@ func TestFilterLocalCommits_PullAndResetScenario(t *testing.T) {
 		}
 	}
 }
-
