@@ -130,14 +130,12 @@ func (b *MemoryEventBus) Publish(ctx context.Context, subject string, event *Eve
 				continue
 			}
 
-			// Regular subscription - deliver to all
-			go func(s *memorySubscription, e *Event) {
-				if err := s.handler(ctx, e); err != nil {
-					b.logger.Error("Event handler error",
-						zap.String("subject", subject),
-						zap.Error(err))
-				}
-			}(sub, event)
+			// Regular subscription - deliver to all synchronously to preserve ordering
+			if err := sub.handler(ctx, event); err != nil {
+				b.logger.Error("Event handler error",
+					zap.String("subject", subject),
+					zap.Error(err))
+			}
 		}
 	}
 
@@ -367,14 +365,13 @@ func (b *MemoryEventBus) publishToQueue(ctx context.Context, queueKey, subject s
 		if active {
 			qg.nextIndex = (idx + 1) % len(qg.subscribers)
 
-			go func(s *memorySubscription, e *Event) {
-				if err := s.handler(ctx, e); err != nil {
-					b.logger.Error("Queue event handler error",
-						zap.String("subject", subject),
-						zap.String("queue", queueKey),
-						zap.Error(err))
-				}
-			}(sub, event)
+			// Deliver synchronously to preserve ordering
+			if err := sub.handler(ctx, event); err != nil {
+				b.logger.Error("Queue event handler error",
+					zap.String("subject", subject),
+					zap.String("queue", queueKey),
+					zap.Error(err))
+			}
 			return
 		}
 	}

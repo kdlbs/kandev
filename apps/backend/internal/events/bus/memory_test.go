@@ -519,3 +519,201 @@ func TestNewEvent(t *testing.T) {
 		t.Error("Expected timestamp to be set correctly")
 	}
 }
+
+// TestMemoryEventBus_MessageOrdering is a regression test for the race condition
+// where async handler dispatch caused messages to be processed out of order.
+// This test verifies that events are delivered to handlers in the exact order
+// they are published, which is critical for streaming message content.
+//
+// The fix (commit 18cafe8) changed from:
+//
+//	go func(s *memorySubscription, e *Event) { s.handler(ctx, e) }(sub, event)
+//
+// to synchronous dispatch:
+//
+//	sub.handler(ctx, event)
+//
+// With async dispatch, this test fails because goroutines can run out of order.
+// With synchronous dispatch, this test passes reliably.
+func TestMemoryEventBus_MessageOrdering(t *testing.T) {
+	log := newTestLogger(t)
+	bus := NewMemoryEventBus(log)
+	defer bus.Close()
+
+	ctx := context.Background()
+	const numEvents = 100
+
+	// Track the order in which events are received
+	var mu sync.Mutex
+	receivedOrder := make([]int, 0, numEvents)
+
+	sub, err := bus.Subscribe("test.ordering", func(ctx context.Context, event *Event) error {
+		data := event.Data.(map[string]interface{})
+		seq := int(data["seq"].(float64))
+		mu.Lock()
+		receivedOrder = append(receivedOrder, seq)
+		mu.Unlock()
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Subscribe failed: %v", err)
+	}
+	defer func() {
+		_ = sub.Unsubscribe()
+	}()
+
+	// Publish events in order from 0 to numEvents-1
+	for i := 0; i < numEvents; i++ {
+		event := NewEvent("test.type", "test-source", map[string]interface{}{
+			"seq": float64(i), // Use float64 to match JSON unmarshaling
+		})
+		if err := bus.Publish(ctx, "test.ordering", event); err != nil {
+			t.Fatalf("Publish failed at seq %d: %v", i, err)
+		}
+	}
+
+	// With synchronous dispatch, all handlers should have completed by now
+	// No need to wait - this is part of the test!
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if len(receivedOrder) != numEvents {
+		t.Fatalf("Expected %d events, got %d", numEvents, len(receivedOrder))
+	}
+
+	// Verify events were received in the exact order they were published
+	outOfOrder := 0
+	for i, seq := range receivedOrder {
+		if seq != i {
+			outOfOrder++
+		}
+	}
+
+	if outOfOrder > 0 {
+		t.Errorf("Message ordering violation: %d of %d events received out of order", outOfOrder, numEvents)
+		// Show first few out-of-order events for debugging
+		for i := 0; i < len(receivedOrder) && i < 10; i++ {
+			if receivedOrder[i] != i {
+				t.Logf("  Position %d: expected seq %d, got %d", i, i, receivedOrder[i])
+			}
+		}
+	}
+}
+
+// TestMemoryEventBus_MessageOrderingWithSlowHandler verifies ordering is preserved
+// even when handlers have variable execution times. This is important because
+// with async dispatch, faster handlers could "overtake" slower ones.
+func TestMemoryEventBus_MessageOrderingWithSlowHandler(t *testing.T) {
+	log := newTestLogger(t)
+	bus := NewMemoryEventBus(log)
+	defer bus.Close()
+
+	ctx := context.Background()
+	const numEvents = 50
+
+	var mu sync.Mutex
+	receivedOrder := make([]int, 0, numEvents)
+
+	sub, err := bus.Subscribe("test.ordering.slow", func(ctx context.Context, event *Event) error {
+		data := event.Data.(map[string]interface{})
+		seq := int(data["seq"].(float64))
+
+		// Simulate variable processing time - earlier events take longer
+		// This would cause out-of-order completion with async dispatch
+		delay := time.Duration(numEvents-seq) * 100 * time.Microsecond
+		time.Sleep(delay)
+
+		mu.Lock()
+		receivedOrder = append(receivedOrder, seq)
+		mu.Unlock()
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Subscribe failed: %v", err)
+	}
+	defer func() {
+		_ = sub.Unsubscribe()
+	}()
+
+	// Publish events in order
+	for i := 0; i < numEvents; i++ {
+		event := NewEvent("test.type", "test-source", map[string]interface{}{
+			"seq": float64(i),
+		})
+		if err := bus.Publish(ctx, "test.ordering.slow", event); err != nil {
+			t.Fatalf("Publish failed at seq %d: %v", i, err)
+		}
+	}
+
+	// With synchronous dispatch, all handlers complete in order regardless of their duration
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if len(receivedOrder) != numEvents {
+		t.Fatalf("Expected %d events, got %d", numEvents, len(receivedOrder))
+	}
+
+	// Verify strict ordering
+	for i, seq := range receivedOrder {
+		if seq != i {
+			t.Errorf("Message ordering violation at position %d: expected seq %d, got %d", i, i, seq)
+		}
+	}
+}
+
+// TestMemoryEventBus_QueueMessageOrdering verifies ordering is preserved for queue subscriptions.
+// Queue subscriptions use round-robin delivery, but each event should still be delivered
+// in order (just to different subscribers).
+func TestMemoryEventBus_QueueMessageOrdering(t *testing.T) {
+	log := newTestLogger(t)
+	bus := NewMemoryEventBus(log)
+	defer bus.Close()
+
+	ctx := context.Background()
+	const numEvents = 100
+
+	var mu sync.Mutex
+	receivedOrder := make([]int, 0, numEvents)
+
+	// Create a single queue subscriber (to test ordering within one handler)
+	sub, err := bus.QueueSubscribe("test.queue.ordering", "workers", func(ctx context.Context, event *Event) error {
+		data := event.Data.(map[string]interface{})
+		seq := int(data["seq"].(float64))
+		mu.Lock()
+		receivedOrder = append(receivedOrder, seq)
+		mu.Unlock()
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("QueueSubscribe failed: %v", err)
+	}
+	defer func() {
+		_ = sub.Unsubscribe()
+	}()
+
+	// Publish events in order
+	for i := 0; i < numEvents; i++ {
+		event := NewEvent("test.type", "test-source", map[string]interface{}{
+			"seq": float64(i),
+		})
+		if err := bus.Publish(ctx, "test.queue.ordering", event); err != nil {
+			t.Fatalf("Publish failed at seq %d: %v", i, err)
+		}
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if len(receivedOrder) != numEvents {
+		t.Fatalf("Expected %d events, got %d", numEvents, len(receivedOrder))
+	}
+
+	// Verify strict ordering
+	for i, seq := range receivedOrder {
+		if seq != i {
+			t.Errorf("Queue message ordering violation at position %d: expected seq %d, got %d", i, i, seq)
+		}
+	}
+}
