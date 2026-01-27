@@ -427,6 +427,35 @@ func (s *Service) handleAgentFailed(ctx context.Context, data watcher.AgentEvent
 	}
 }
 
+// handleAgentStopped handles agent stopped events (manual stop or cancellation)
+func (s *Service) handleAgentStopped(ctx context.Context, data watcher.AgentEventData) {
+	s.logger.Info("handling agent stopped",
+		zap.String("task_id", data.TaskID),
+		zap.String("session_id", data.SessionID),
+		zap.String("agent_execution_id", data.AgentExecutionID))
+
+	// Complete the current turn if there is one
+	s.completeTurnForSession(ctx, data.SessionID)
+
+	// Update session state to cancelled
+	s.updateTaskSessionState(ctx, data.TaskID, data.SessionID, models.TaskSessionStateCancelled, "", false)
+
+	// Check for workflow transition
+	transitioned := s.handleWorkflowTransition(ctx, data.TaskID, data.SessionID)
+
+	// If no workflow transition occurred, move task to REVIEW state for user review
+	if !transitioned {
+		if err := s.taskRepo.UpdateTaskState(ctx, data.TaskID, v1.TaskStateReview); err != nil {
+			s.logger.Error("failed to update task state to REVIEW after stop",
+				zap.String("task_id", data.TaskID),
+				zap.Error(err))
+		} else {
+			s.logger.Info("task moved to REVIEW state after agent stopped",
+				zap.String("task_id", data.TaskID))
+		}
+	}
+}
+
 // handleAgentStreamEvent handles agent stream events (tool calls, message chunks, etc.)
 func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
 	if payload == nil || payload.Data == nil {

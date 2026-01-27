@@ -35,16 +35,16 @@ func (p *EventPublisher) PublishAgentEvent(ctx context.Context, eventType string
 	}
 
 	payload := AgentEventPayload{
-		InstanceID:     execution.ID,
-		TaskID:         execution.TaskID,
-		SessionID:      execution.SessionID,
-		AgentProfileID: execution.AgentProfileID,
-		ContainerID:    execution.ContainerID,
-		Status:         string(execution.Status),
-		StartedAt:      execution.StartedAt,
-		FinishedAt:     execution.FinishedAt,
-		ErrorMessage:   execution.ErrorMessage,
-		ExitCode:       execution.ExitCode,
+		AgentExecutionID: execution.ID,
+		TaskID:           execution.TaskID,
+		SessionID:        execution.SessionID,
+		AgentProfileID:   execution.AgentProfileID,
+		ContainerID:      execution.ContainerID,
+		Status:           string(execution.Status),
+		StartedAt:        execution.StartedAt,
+		FinishedAt:       execution.FinishedAt,
+		ErrorMessage:     execution.ErrorMessage,
+		ExitCode:         execution.ExitCode,
 	}
 
 	event := bus.NewEvent(eventType, "agent-manager", payload)
