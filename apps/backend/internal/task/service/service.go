@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -112,11 +111,6 @@ type Service struct {
 	executionStopper    TaskExecutionStopper
 	workflowStepCreator WorkflowStepCreator
 	workflowStepGetter  WorkflowStepGetter
-
-	// messageMutexes provides per-message locking for concurrent append operations.
-	// This prevents race conditions when multiple goroutines try to append content
-	// to the same streaming message simultaneously.
-	messageMutexes sync.Map // map[messageID]*sync.Mutex
 }
 
 // NewService creates a new task service
@@ -1896,50 +1890,11 @@ func (s *Service) UpdateMessage(ctx context.Context, message *models.Message) er
 
 // AppendMessageContent appends additional content to an existing message.
 // This is used for streaming agent responses where content arrives incrementally.
-// It uses per-message locking to prevent race conditions when multiple goroutines
-// try to append content to the same message simultaneously.
-// It also includes retry logic to handle the case where an append event arrives
-// before the create event has finished writing the message to the database.
 func (s *Service) AppendMessageContent(ctx context.Context, messageID, additionalContent string) error {
-	const maxRetries = 5
-	const retryDelay = 50 * time.Millisecond
-
-	// Get or create a mutex for this specific message to serialize appends
-	mutexI, _ := s.messageMutexes.LoadOrStore(messageID, &sync.Mutex{})
-	mu := mutexI.(*sync.Mutex)
-	mu.Lock()
-	defer mu.Unlock()
-
-	var message *models.Message
-	var err error
-
-	// Retry loop to handle race condition where append event arrives before
-	// the create event has finished writing the message to the database
-	for attempt := 0; attempt < maxRetries; attempt++ {
-		message, err = s.repo.GetMessage(ctx, messageID)
-		if err == nil {
-			break // Found the message, proceed with append
-		}
-
-		// If context is cancelled, don't retry
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-
-		// Log retry attempt (only warn on final failure)
-		if attempt < maxRetries-1 {
-			s.logger.Debug("message not found for append, retrying",
-				zap.String("message_id", messageID),
-				zap.Int("attempt", attempt+1),
-				zap.Int("max_retries", maxRetries))
-			time.Sleep(retryDelay)
-		}
-	}
-
+	message, err := s.repo.GetMessage(ctx, messageID)
 	if err != nil {
-		s.logger.Warn("message not found for append after retries",
+		s.logger.Warn("message not found for append",
 			zap.String("message_id", messageID),
-			zap.Int("retries", maxRetries),
 			zap.Error(err))
 		return err
 	}
@@ -1963,12 +1918,6 @@ func (s *Service) AppendMessageContent(ctx context.Context, messageID, additiona
 		zap.Int("total_length", len(message.Content)))
 
 	return nil
-}
-
-// CleanupMessageMutex removes the mutex for a message after streaming is complete.
-// This should be called when a streaming message is finalized to prevent memory leaks.
-func (s *Service) CleanupMessageMutex(messageID string) {
-	s.messageMutexes.Delete(messageID)
 }
 
 // UpdateToolCallMessage updates a tool call message's status, and optionally title/args.
