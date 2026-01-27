@@ -34,6 +34,7 @@ export function useSessionMessages(
   const initialFetchStartRef = useRef<number | null>(null);
   const lastFetchedSessionIdRef = useRef<string | null>(null);
   const lastFetchStateKeyRef = useRef<string | null>(null);
+  const prevSessionIdRef = useRef<string | null>(null);
   const hasAgentMessage = messages.some((message: Message) => message.author_type === 'agent');
 
   useEffect(() => {
@@ -64,8 +65,21 @@ export function useSessionMessages(
       return;
     }
 
+    // Detect session change to force refetch
+    const sessionChanged = prevSessionIdRef.current !== null &&
+                           prevSessionIdRef.current !== taskSessionId;
+
+    // Update previous session ref
+    prevSessionIdRef.current = taskSessionId;
+
+    // If session changed, reset fetch guard to force refetch
+    if (sessionChanged) {
+      lastFetchedSessionIdRef.current = null;
+    }
+
     // Check if messages are already loaded (from SSR or previous fetch)
-    if (messages.length > 0) {
+    // BUT: if session just changed, we want to refetch anyway
+    if (messages.length > 0 && !sessionChanged) {
       lastFetchedSessionIdRef.current = taskSessionId;
       setIsWaitingForInitialMessages(false);
       return;
