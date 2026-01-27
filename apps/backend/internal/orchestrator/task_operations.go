@@ -414,7 +414,24 @@ func (s *Service) StopTask(ctx context.Context, taskID string, reason string, fo
 		zap.String("task_id", taskID),
 		zap.String("reason", reason),
 		zap.Bool("force", force))
-	return s.executor.StopByTaskID(ctx, taskID, reason, force)
+
+	// Stop all agents for this task
+	if err := s.executor.StopByTaskID(ctx, taskID, reason, force); err != nil {
+		return err
+	}
+
+	// Move task to REVIEW state for user review
+	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateReview); err != nil {
+		s.logger.Error("failed to update task state to REVIEW after stop",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		// Don't return error - the stop was successful
+	} else {
+		s.logger.Info("task moved to REVIEW state after stop",
+			zap.String("task_id", taskID))
+	}
+
+	return nil
 }
 
 // StopSession stops agent execution for a specific session

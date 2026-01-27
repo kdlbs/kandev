@@ -437,23 +437,16 @@ func (s *Service) handleAgentStopped(ctx context.Context, data watcher.AgentEven
 	// Complete the current turn if there is one
 	s.completeTurnForSession(ctx, data.SessionID)
 
-	// Update session state to cancelled
+	// Update session state to cancelled (already done by executor, but ensure consistency)
 	s.updateTaskSessionState(ctx, data.TaskID, data.SessionID, models.TaskSessionStateCancelled, "", false)
 
-	// Check for workflow transition
-	transitioned := s.handleWorkflowTransition(ctx, data.TaskID, data.SessionID)
-
-	// If no workflow transition occurred, move task to REVIEW state for user review
-	if !transitioned {
-		if err := s.taskRepo.UpdateTaskState(ctx, data.TaskID, v1.TaskStateReview); err != nil {
-			s.logger.Error("failed to update task state to REVIEW after stop",
-				zap.String("task_id", data.TaskID),
-				zap.Error(err))
-		} else {
-			s.logger.Info("task moved to REVIEW state after agent stopped",
-				zap.String("task_id", data.TaskID))
-		}
-	}
+	// NOTE: We do NOT update task state here because:
+	// 1. If this is from CompleteTask(), the task state will be set to COMPLETED by the caller
+	// 2. If this is from StopTask(), the task state should be set to REVIEW by the caller
+	// 3. Updating here would create a race condition with the caller's state update
+	//
+	// The task state management is the responsibility of the operation that triggered the stop,
+	// not the event handler. This handler only manages session-level cleanup.
 }
 
 // handleAgentStreamEvent handles agent stream events (tool calls, message chunks, etc.)
