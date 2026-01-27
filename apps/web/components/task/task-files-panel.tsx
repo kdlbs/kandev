@@ -194,11 +194,19 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiff, onOpenFile }
                             {file.staged ? (
                               <Tooltip>
                                 <TooltipTrigger asChild>
-                                  <div className="flex items-center justify-center h-4 w-4 rounded bg-emerald-500/20 text-emerald-600">
-                                    <IconCheck className="h-3 w-3" />
-                                  </div>
+                                  <button
+                                    type="button"
+                                    className="group/unstage flex items-center justify-center h-4 w-4 rounded bg-emerald-500/20 text-emerald-600 hover:bg-rose-500/20 hover:text-rose-600"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      void gitOps.unstage([file.path]);
+                                    }}
+                                  >
+                                    <IconCheck className="h-3 w-3 group-hover/unstage:hidden" />
+                                    <IconMinus className="h-2.5 w-2.5 hidden group-hover/unstage:block" />
+                                  </button>
                                 </TooltipTrigger>
-                                <TooltipContent>Staged for commit</TooltipContent>
+                                <TooltipContent>Click to unstage</TooltipContent>
                               </Tooltip>
                             ) : (
                               <Tooltip>
@@ -214,7 +222,7 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiff, onOpenFile }
                                     <IconPlus className="h-2.5 w-2.5" />
                                   </button>
                                 </TooltipTrigger>
-                                <TooltipContent>Stage file</TooltipContent>
+                                <TooltipContent>Click to stage</TooltipContent>
                               </Tooltip>
                             )}
                             <button type="button" className="min-w-0 text-left cursor-pointer">

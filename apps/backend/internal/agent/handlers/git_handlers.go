@@ -36,6 +36,7 @@ func (h *GitHandlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionWorktreeAbort, h.wsAbort)
 	d.RegisterFunc(ws.ActionWorktreeCommit, h.wsCommit)
 	d.RegisterFunc(ws.ActionWorktreeStage, h.wsStage)
+	d.RegisterFunc(ws.ActionWorktreeUnstage, h.wsUnstage)
 	d.RegisterFunc(ws.ActionWorktreeCreatePR, h.wsCreatePR)
 	d.RegisterFunc(ws.ActionSessionCommitDiff, h.wsCommitDiff)
 }
@@ -82,6 +83,12 @@ type GitCommitRequest struct {
 type GitStageRequest struct {
 	SessionID string   `json:"session_id"`
 	Paths     []string `json:"paths"` // Empty = stage all
+}
+
+// GitUnstageRequest for worktree.unstage action
+type GitUnstageRequest struct {
+	SessionID string   `json:"session_id"`
+	Paths     []string `json:"paths"` // Empty = unstage all
 }
 
 // GitCreatePRRequest for worktree.create_pr action
@@ -273,6 +280,30 @@ func (h *GitHandlers) wsStage(ctx context.Context, msg *ws.Message) (*ws.Message
 	result, err := client.GitStage(ctx, req.Paths)
 	if err != nil {
 		return nil, fmt.Errorf("stage failed: %w", err)
+	}
+
+	return ws.NewResponse(msg.ID, msg.Action, result)
+}
+
+// wsUnstage handles worktree.unstage action
+func (h *GitHandlers) wsUnstage(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req GitUnstageRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return nil, fmt.Errorf("invalid payload: %w", err)
+	}
+
+	if req.SessionID == "" {
+		return nil, fmt.Errorf("session_id is required")
+	}
+
+	client, err := h.getAgentCtlClient(req.SessionID)
+	if err != nil {
+		return nil, err
+	}
+
+	result, err := client.GitUnstage(ctx, req.Paths)
+	if err != nil {
+		return nil, fmt.Errorf("unstage failed: %w", err)
 	}
 
 	return ws.NewResponse(msg.ID, msg.Action, result)

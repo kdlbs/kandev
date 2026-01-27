@@ -109,6 +109,17 @@ func (c *Client) GitStage(ctx context.Context, paths []string) (*GitOperationRes
 	return c.gitOperation(ctx, "/api/v1/git/stage", payload)
 }
 
+// GitUnstage unstages files from the index.
+// If paths is empty, unstages all changes (git reset HEAD).
+func (c *Client) GitUnstage(ctx context.Context, paths []string) (*GitOperationResult, error) {
+	payload := struct {
+		Paths []string `json:"paths"`
+	}{
+		Paths: paths,
+	}
+	return c.gitOperation(ctx, "/api/v1/git/unstage", payload)
+}
+
 // GitCreatePR creates a pull request using the gh CLI.
 func (c *Client) GitCreatePR(ctx context.Context, title, body, baseBranch string) (*PRCreateResult, error) {
 	payload := struct {

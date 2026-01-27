@@ -190,6 +190,7 @@ const (
 	ActionWorktreeAbort    = "worktree.abort"     // Abort in-progress merge or rebase
 	ActionWorktreeCommit   = "worktree.commit"    // Commit changes
 	ActionWorktreeStage    = "worktree.stage"     // Stage files for commit
+	ActionWorktreeUnstage  = "worktree.unstage"   // Unstage files from index
 	ActionWorktreeCreatePR = "worktree.create_pr" // Create a pull request
 
 	// User actions

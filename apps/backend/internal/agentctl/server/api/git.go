@@ -46,6 +46,11 @@ type GitStageRequest struct {
 	Paths []string `json:"paths"` // Empty = stage all
 }
 
+// GitUnstageRequest for POST /api/v1/git/unstage
+type GitUnstageRequest struct {
+	Paths []string `json:"paths"` // Empty = unstage all
+}
+
 // GitShowCommitRequest for GET /api/v1/git/commit/:sha
 type GitShowCommitRequest struct {
 	CommitSHA string `uri:"sha" binding:"required"`
@@ -242,6 +247,28 @@ func (s *Server) handleGitStage(c *gin.Context) {
 	result, err := gitOp.Stage(c.Request.Context(), req.Paths)
 	if err != nil {
 		s.handleGitError(c, "stage", err)
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+// handleGitUnstage handles POST /api/v1/git/unstage
+func (s *Server) handleGitUnstage(c *gin.Context) {
+	var req GitUnstageRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, process.GitOperationResult{
+			Success:   false,
+			Operation: "unstage",
+			Error:     "invalid request: " + err.Error(),
+		})
+		return
+	}
+
+	gitOp := s.procMgr.GitOperator()
+	result, err := gitOp.Unstage(c.Request.Context(), req.Paths)
+	if err != nil {
+		s.handleGitError(c, "unstage", err)
 		return
 	}
 

@@ -470,6 +470,40 @@ func (g *GitOperator) Stage(ctx context.Context, paths []string) (*GitOperationR
 	return result, nil
 }
 
+// Unstage unstages files from the index using git reset.
+// If paths is empty, unstages all changes (git reset HEAD).
+func (g *GitOperator) Unstage(ctx context.Context, paths []string) (*GitOperationResult, error) {
+	if !g.tryLock("unstage") {
+		return nil, ErrOperationInProgress
+	}
+	defer g.unlock()
+
+	result := &GitOperationResult{
+		Operation: "unstage",
+	}
+
+	var args []string
+	if len(paths) == 0 {
+		// Unstage all changes
+		args = []string{"reset", "HEAD"}
+	} else {
+		// Unstage specific files
+		args = append([]string{"reset", "HEAD", "--"}, paths...)
+	}
+
+	output, err := g.runGitCommand(ctx, args...)
+	result.Output = output
+
+	if err != nil {
+		result.Error = err.Error()
+		return result, nil
+	}
+
+	result.Success = true
+	g.logger.Info("unstage completed", zap.Int("files", len(paths)))
+	return result, nil
+}
+
 // Abort aborts an in-progress merge or rebase operation.
 func (g *GitOperator) Abort(ctx context.Context, operation string) (*GitOperationResult, error) {
 	if !g.tryLock("abort") {
