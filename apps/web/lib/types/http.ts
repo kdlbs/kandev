@@ -141,6 +141,7 @@ export type Repository = {
   provider_name: string;
   default_branch: string;
   worktree_branch_prefix: string;
+  pull_before_worktree: boolean;
   setup_script: string;
   cleanup_script: string;
   dev_script: string;

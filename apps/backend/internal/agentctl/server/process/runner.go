@@ -640,10 +640,16 @@ func (p *commandProcess) snapshot(includeOutput bool) ProcessInfo {
 func mergeEnv(env map[string]string) []string {
 	base := make(map[string]string, len(os.Environ())+len(env))
 
-	// Parse parent environment into map
+	// Parse parent environment into map, filtering out npm config variables
+	// that cause warnings when passed to npx commands
 	for _, entry := range os.Environ() {
 		if eq := strings.IndexByte(entry, '='); eq >= 0 {
-			base[entry[:eq]] = entry[eq+1:]
+			key := entry[:eq]
+			// Filter out npm-related environment variables that cause warnings
+			if isNpmEnvVar(key) {
+				continue
+			}
+			base[key] = entry[eq+1:]
 		}
 	}
 
@@ -658,4 +664,22 @@ func mergeEnv(env map[string]string) []string {
 		merged = append(merged, fmt.Sprintf("%s=%s", k, v))
 	}
 	return merged
+}
+
+// isNpmEnvVar returns true if the key is an npm-related environment variable
+// that should be filtered out to prevent warnings in npx commands.
+func isNpmEnvVar(key string) bool {
+	npmPrefixes := []string{
+		"npm_config_",
+		"npm_package_",
+		"npm_lifecycle_",
+		"npm_execpath",
+		"npm_node_execpath",
+	}
+	for _, prefix := range npmPrefixes {
+		if strings.HasPrefix(key, prefix) {
+			return true
+		}
+	}
+	return false
 }

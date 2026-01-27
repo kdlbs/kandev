@@ -95,6 +95,7 @@ type LaunchAgentRequest struct {
 	RepositoryPath       string // Path to the main repository (for worktree creation)
 	BaseBranch           string // Base branch for the worktree (e.g., "main")
 	WorktreeBranchPrefix string // Branch prefix for worktree branches
+	PullBeforeWorktree   bool   // Whether to pull from remote before creating the worktree
 }
 
 // LaunchAgentResponse contains the result of launching an agent
@@ -231,6 +232,7 @@ func (e *Executor) ExecuteWithProfile(ctx context.Context, task *v1.Task, agentP
 	var repositoryID string
 	var baseBranch string
 	var worktreeBranchPrefix string
+	var pullBeforeWorktree bool
 
 	// Get the primary repository for this task
 	primaryTaskRepo, err := e.repo.GetPrimaryTaskRepository(ctx, task.ID)
@@ -255,6 +257,7 @@ func (e *Executor) ExecuteWithProfile(ctx context.Context, task *v1.Task, agentP
 		}
 		repositoryPath = repository.LocalPath
 		worktreeBranchPrefix = repository.WorktreeBranchPrefix
+		pullBeforeWorktree = repository.PullBeforeWorktree
 		if repositoryPath != "" {
 			req.RepositoryURL = repositoryPath
 		}
@@ -277,6 +280,7 @@ func (e *Executor) ExecuteWithProfile(ctx context.Context, task *v1.Task, agentP
 			req.BaseBranch = "main"
 		}
 		req.WorktreeBranchPrefix = worktreeBranchPrefix
+		req.PullBeforeWorktree = pullBeforeWorktree
 	}
 
 	// Resolve agent profile to get model and other settings for snapshot
@@ -572,6 +576,8 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 
 	repositoryID := session.RepositoryID
 	var repositoryPath string
+	var worktreeBranchPrefix string
+	var pullBeforeWorktree bool
 	if repositoryID == "" && len(task.Repositories) > 0 {
 		repositoryID = task.Repositories[0].RepositoryID
 	}
@@ -585,6 +591,8 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 			return nil, err
 		}
 		repositoryPath = repository.LocalPath
+		worktreeBranchPrefix = repository.WorktreeBranchPrefix
+		pullBeforeWorktree = repository.PullBeforeWorktree
 		if repositoryPath != "" {
 			req.RepositoryURL = repositoryPath
 		}
@@ -607,6 +615,8 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 		} else {
 			req.BaseBranch = "main"
 		}
+		req.WorktreeBranchPrefix = worktreeBranchPrefix
+		req.PullBeforeWorktree = pullBeforeWorktree
 	}
 
 	if running, err := e.repo.GetExecutorRunningBySessionID(ctx, session.ID); err == nil && running != nil {
@@ -618,7 +628,7 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 		}
 	}
 
-	e.logger.Info("resuming agent session",
+	e.logger.Debug("resuming agent session",
 		zap.String("task_id", session.TaskID),
 		zap.String("session_id", session.ID),
 		zap.String("agent_profile_id", session.AgentProfileID),

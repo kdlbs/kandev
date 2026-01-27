@@ -301,7 +301,7 @@ func (r *Registry) LoadFromFile(path string) error {
 			continue
 		}
 		r.agents[config.ID] = config
-		r.logger.Info("loaded agent type", zap.String("id", config.ID))
+		r.logger.Debug("loaded agent type", zap.String("id", config.ID))
 	}
 
 	return nil
@@ -316,7 +316,7 @@ func (r *Registry) LoadDefaults() {
 
 	for _, config := range defaults {
 		r.agents[config.ID] = config
-		r.logger.Info("loaded default agent type", zap.String("id", config.ID))
+		r.logger.Debug("loaded default agent type", zap.String("id", config.ID))
 	}
 }
 

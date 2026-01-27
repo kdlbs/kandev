@@ -479,7 +479,7 @@ func (s *Service) resumeExecutorsOnStartup(ctx context.Context) {
 
 		startAgent := running.ResumeToken != "" && running.Resumable
 		if !startAgent {
-			s.logger.Warn("resuming workspace without agent session",
+			s.logger.Debug("resuming workspace without agent session",
 				zap.String("session_id", sessionID),
 				zap.String("previous_state", string(previousState)),
 				zap.Bool("has_resume_token", running.ResumeToken != ""),
@@ -496,7 +496,7 @@ func (s *Service) resumeExecutorsOnStartup(ctx context.Context) {
 			continue
 		}
 
-		s.logger.Info("resuming session on startup",
+		s.logger.Debug("resuming session on startup",
 			zap.String("session_id", sessionID),
 			zap.String("task_id", running.TaskID),
 			zap.String("previous_state", string(previousState)),
@@ -532,7 +532,7 @@ func (s *Service) resumeExecutorsOnStartup(ctx context.Context) {
 			}
 		}
 
-		s.logger.Info("session resumed successfully",
+		s.logger.Debug("session resumed successfully",
 			zap.String("session_id", sessionID),
 			zap.String("task_id", running.TaskID),
 			zap.Bool("start_agent", startAgent),

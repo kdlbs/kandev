@@ -77,6 +77,7 @@ type CreateRepositoryRequest struct {
 	ProviderName         string
 	DefaultBranch        string
 	WorktreeBranchPrefix string
+	PullBeforeWorktree   *bool
 	SetupScript          string
 	CleanupScript        string
 	DevScript            string
@@ -93,6 +94,7 @@ type UpdateRepositoryRequest struct {
 	ProviderName         *string
 	DefaultBranch        *string
 	WorktreeBranchPrefix *string
+	PullBeforeWorktree   *bool
 	SetupScript          *string
 	CleanupScript        *string
 	DevScript            *string

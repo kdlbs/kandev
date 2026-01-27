@@ -224,6 +224,7 @@ type CreateRepositoryRequest struct {
 	ProviderName         string `json:"provider_name"`
 	DefaultBranch        string `json:"default_branch"`
 	WorktreeBranchPrefix string `json:"worktree_branch_prefix"`
+	PullBeforeWorktree   *bool  `json:"pull_before_worktree"`
 	SetupScript          string `json:"setup_script"`
 	CleanupScript        string `json:"cleanup_script"`
 	DevScript            string `json:"dev_script"`
@@ -240,6 +241,7 @@ type UpdateRepositoryRequest struct {
 	ProviderName         *string `json:"provider_name,omitempty"`
 	DefaultBranch        *string `json:"default_branch,omitempty"`
 	WorktreeBranchPrefix *string `json:"worktree_branch_prefix,omitempty"`
+	PullBeforeWorktree   *bool   `json:"pull_before_worktree,omitempty"`
 	SetupScript          *string `json:"setup_script,omitempty"`
 	CleanupScript        *string `json:"cleanup_script,omitempty"`
 	DevScript            *string `json:"dev_script,omitempty"`
@@ -1112,6 +1114,10 @@ func (s *Service) CreateRepository(ctx context.Context, req *CreateRepositoryReq
 	if prefix == "" {
 		prefix = worktree.DefaultBranchPrefix
 	}
+	pullBeforeWorktree := true
+	if req.PullBeforeWorktree != nil {
+		pullBeforeWorktree = *req.PullBeforeWorktree
+	}
 	repository := &models.Repository{
 		ID:                   uuid.New().String(),
 		WorkspaceID:          req.WorkspaceID,
@@ -1124,6 +1130,7 @@ func (s *Service) CreateRepository(ctx context.Context, req *CreateRepositoryReq
 		ProviderName:         req.ProviderName,
 		DefaultBranch:        req.DefaultBranch,
 		WorktreeBranchPrefix: prefix,
+		PullBeforeWorktree:   pullBeforeWorktree,
 		SetupScript:          req.SetupScript,
 		CleanupScript:        req.CleanupScript,
 		DevScript:            req.DevScript,
@@ -1178,6 +1185,9 @@ func (s *Service) UpdateRepository(ctx context.Context, id string, req *UpdateRe
 			return nil, fmt.Errorf("%w: %s", ErrInvalidRepositorySettings, err)
 		}
 		repository.WorktreeBranchPrefix = prefix
+	}
+	if req.PullBeforeWorktree != nil {
+		repository.PullBeforeWorktree = *req.PullBeforeWorktree
 	}
 	if req.SetupScript != nil {
 		repository.SetupScript = *req.SetupScript
@@ -2157,6 +2167,7 @@ func (s *Service) publishRepositoryEvent(ctx context.Context, eventType string, 
 		"provider_name":          repository.ProviderName,
 		"default_branch":         repository.DefaultBranch,
 		"worktree_branch_prefix": repository.WorktreeBranchPrefix,
+		"pull_before_worktree":   repository.PullBeforeWorktree,
 		"setup_script":           repository.SetupScript,
 		"cleanup_script":         repository.CleanupScript,
 		"created_at":             repository.CreatedAt.Format(time.RFC3339),

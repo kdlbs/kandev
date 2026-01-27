@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   IconCheck,
   IconChevronDown,
@@ -87,8 +87,6 @@ type ToolCallMessageProps = {
 };
 
 export function ToolCallMessage({ comment, permissionMessage }: ToolCallMessageProps) {
-  const [isExpanded, setIsExpanded] = useState(false);
-  const [isResponding, setIsResponding] = useState(false);
   const metadata = comment.metadata as ToolCallMetadata | undefined;
   const permissionMetadata = permissionMessage?.metadata as PermissionRequestMetadata | undefined;
 
@@ -102,6 +100,31 @@ export function ToolCallMessage({ comment, permissionMessage }: ToolCallMessageP
   const hasPermission = !!permissionMessage;
   const permissionStatus = permissionMetadata?.status;
   const isPermissionPending = hasPermission && permissionStatus !== 'approved' && permissionStatus !== 'rejected';
+
+  // Initialize isExpanded based on status - auto-expand if running
+  const [isExpanded, setIsExpanded] = useState(() => {
+    return status === 'running';
+  });
+  const [isManuallyToggled, setIsManuallyToggled] = useState(false);
+  const [isResponding, setIsResponding] = useState(false);
+
+  // Auto-collapse when complete (unless manually overridden)
+  useEffect(() => {
+    // Permission requests always stay expanded
+    if (isPermissionPending) {
+      setIsExpanded(true);
+      return;
+    }
+
+    // Only auto-collapse if user hasn't manually toggled
+    if (!isManuallyToggled) {
+      if (status === 'running') {
+        setIsExpanded(true);
+      } else if (status === 'complete' || status === 'error') {
+        setIsExpanded(false);
+      }
+    }
+  }, [status, isManuallyToggled, isPermissionPending]);
 
   const handleRespond = useCallback(
     async (optionId: string, cancelled: boolean = false) => {
@@ -150,10 +173,6 @@ export function ToolCallMessage({ comment, permissionMessage }: ToolCallMessageP
     }
   }, [permissionMetadata, handleRespond]);
 
-  const toolIcon = getToolIcon(toolName, cn(
-    'h-4 w-4 flex-shrink-0',
-    isPermissionPending ? 'text-amber-600 dark:text-amber-400' : 'text-amber-600 dark:text-amber-400'
-  ));
   const hasDetails = args && Object.keys(args).length > 0;
 
   let filePath: string | undefined;
@@ -168,75 +187,99 @@ export function ToolCallMessage({ comment, permissionMessage }: ToolCallMessageP
     }
   }
 
+  const isSuccess = status === 'complete' && !permissionStatus;
+
   return (
-    <div className={cn(
-      'w-full rounded-md border overflow-hidden',
-      isPermissionPending ? 'border-amber-500/50 bg-amber-500/5' : 'border-border/50 bg-muted/20'
-    )}>
-      <button
-        type="button"
-        onClick={() => hasDetails && setIsExpanded(!isExpanded)}
-        className={cn(
-          'w-full flex items-center gap-2 px-3 py-2 text-sm text-left',
-          hasDetails && 'cursor-pointer hover:bg-muted/40 transition-colors'
-        )}
-        disabled={!hasDetails}
-      >
-        {toolIcon}
-        <span className="flex-1 font-mono text-xs text-muted-foreground truncate">
-          {title}
-        </span>
-        {filePath && (
-          <span className="text-xs text-muted-foreground/60 truncate max-w-[200px]">
-            {filePath}
-          </span>
-        )}
-        {getStatusIcon(status, permissionStatus)}
-        {hasDetails && (
-          isExpanded
-            ? <IconChevronDown className="h-4 w-4 text-muted-foreground/50" />
-            : <IconChevronRight className="h-4 w-4 text-muted-foreground/50" />
-        )}
-      </button>
+    <div className="w-full">
+      {/* Icon + Summary Row */}
+      <div className="flex items-start gap-3 w-full">
+        {/* Icon */}
+        <div className="flex-shrink-0 mt-0.5">
+          {getToolIcon(toolName, cn(
+            'h-4 w-4',
+            isPermissionPending ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'
+          ))}
+        </div>
 
-      {isExpanded && hasDetails && (
-        <div className="border-t border-border/30 bg-background/50 p-3 space-y-2">
-          {args && Object.entries(args).map(([key, value]) => {
-            const strValue = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
-            const isLongValue = strValue.length > 100 || strValue.includes('\n');
+        {/* Content */}
+        <div className="flex-1 min-w-0 pt-0.5">
+          <div className="flex items-center gap-2 text-xs">
+            <button
+              type="button"
+              onClick={() => {
+                if (hasDetails) {
+                  setIsExpanded(!isExpanded);
+                  setIsManuallyToggled(true);
+                }
+              }}
+              className={cn(
+                'inline-flex items-center gap-1.5 text-left',
+                hasDetails && 'cursor-pointer hover:opacity-70 transition-opacity',
+                isPermissionPending && 'text-amber-600 dark:text-amber-400'
+              )}
+              disabled={!hasDetails}
+            >
+              <span className="font-mono text-xs">
+                {title}
+              </span>
+              {/* Status indicator - only show if not success */}
+              {!isSuccess && getStatusIcon(status, permissionStatus)}
+              {hasDetails && (
+                isExpanded
+                  ? <IconChevronDown className="h-3.5 w-3.5 text-muted-foreground/50 flex-shrink-0" />
+                  : <IconChevronRight className="h-3.5 w-3.5 text-muted-foreground/50 flex-shrink-0" />
+              )}
+            </button>
+            {filePath && (
+              <span className="text-xs text-muted-foreground/60 truncate">
+                {filePath}
+              </span>
+            )}
+          </div>
 
-            return (
-              <div key={key} className="text-xs">
-                <span className="font-medium text-muted-foreground">{key}:</span>
-                {isLongValue ? (
-                  <pre className="mt-1 p-2 bg-muted/50 rounded text-[11px] overflow-x-auto max-h-[200px] overflow-y-auto whitespace-pre-wrap break-all">
-                    {strValue}
+          {/* Expanded Details */}
+          {isExpanded && hasDetails && (
+            <div className="mt-2 pl-4 border-l-2 border-border/30 space-y-2">
+              {args && Object.entries(args).map(([key, value]) => {
+                const strValue = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+                const isLongValue = strValue.length > 100 || strValue.includes('\n');
+
+                return (
+                  <div key={key} className="text-xs">
+                    <span className="font-medium text-muted-foreground">{key}:</span>
+                    {isLongValue ? (
+                      <pre className="mt-1 p-2 bg-muted/30 rounded text-[11px] overflow-x-auto max-h-[200px] overflow-y-auto whitespace-pre-wrap break-all">
+                        {strValue}
+                      </pre>
+                    ) : (
+                      <span className="ml-2 font-mono text-foreground/80">{strValue}</span>
+                    )}
+                  </div>
+                );
+              })}
+              {result && (
+                <div className="text-xs pt-2 mt-2 border-t border-border/30">
+                  <span className="font-medium text-muted-foreground">Result:</span>
+                  <pre className="mt-1 p-2 bg-muted/30 rounded text-[11px] overflow-x-auto max-h-[150px] overflow-y-auto whitespace-pre-wrap">
+                    {result}
                   </pre>
-                ) : (
-                  <span className="ml-2 font-mono text-foreground/80">{strValue}</span>
-                )}
-              </div>
-            );
-          })}
-          {result && (
-            <div className="text-xs border-t border-border/30 pt-2 mt-2">
-              <span className="font-medium text-muted-foreground">Result:</span>
-              <pre className="mt-1 p-2 bg-muted/50 rounded text-[11px] overflow-x-auto max-h-[150px] overflow-y-auto whitespace-pre-wrap">
-                {result}
-              </pre>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Inline permission approval UI */}
+          {isPermissionPending && (
+            <div className="mt-2">
+              <PermissionActionRow
+                onApprove={handleApprove}
+                onReject={handleReject}
+                isResponding={isResponding}
+              />
             </div>
           )}
         </div>
-      )}
-
-      {/* Inline permission approval UI */}
-      {isPermissionPending && (
-        <PermissionActionRow
-          onApprove={handleApprove}
-          onReject={handleReject}
-          isResponding={isResponding}
-        />
-      )}
+      </div>
     </div>
   );
 }

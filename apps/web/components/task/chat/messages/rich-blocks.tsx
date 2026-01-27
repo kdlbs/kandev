@@ -53,7 +53,7 @@ export function RichBlocks({ comment }: { comment: Message }) {
         </div>
       )}
       {todoItems.length > 0 && (
-        <div className="mt-3 rounded-md border border-border/50 bg-background/60 px-3 py-2 text-xs">
+        <div className="mt-3 rounded-md border border-border/49 bg-background/60 px-3 py-2 text-xs">
           <div className="flex items-center gap-2 text-muted-foreground mb-1 uppercase tracking-wide">
             <IconListCheck className="h-3.5 w-3.5" />
             <span>Todos</span>

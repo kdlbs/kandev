@@ -149,3 +149,80 @@ func TestStripANSI(t *testing.T) {
 		})
 	}
 }
+
+func TestIsNpmEnvVar(t *testing.T) {
+	tests := []struct {
+		key      string
+		expected bool
+	}{
+		// Should filter
+		{"npm_config_registry", true},
+		{"npm_config_npm-globalconfig", true},
+		{"npm_config__jsr-registry", true},
+		{"npm_config_verify-deps-before-run", true},
+		{"npm_config_dir", true},
+		{"npm_package_name", true},
+		{"npm_package_version", true},
+		{"npm_lifecycle_event", true},
+		{"npm_execpath", true},
+		{"npm_node_execpath", true},
+
+		// Should keep
+		{"PATH", false},
+		{"HOME", false},
+		{"USER", false},
+		{"SHELL", false},
+		{"ANTHROPIC_API_KEY", false},
+		{"NPM_TOKEN", false},        // Uppercase, different format
+		{"NPMRC", false},            // Not npm_ prefix
+		{"npm_not_a_config", false}, // Doesn't match any prefix
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.key, func(t *testing.T) {
+			result := isNpmEnvVar(tt.key)
+			if result != tt.expected {
+				t.Errorf("isNpmEnvVar(%q) = %v, want %v", tt.key, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestMergeEnv_FiltersNpmVars(t *testing.T) {
+	// Set some test npm env vars that should be filtered
+	t.Setenv("npm_config_test_var", "should_be_filtered")
+	t.Setenv("npm_package_name", "test-package")
+
+	// Set a normal var that should be kept
+	t.Setenv("TEST_NORMAL_VAR", "should_be_kept")
+
+	result := mergeEnv(map[string]string{
+		"CUSTOM_VAR": "custom_value",
+	})
+
+	// Convert to map for easier checking
+	resultMap := make(map[string]string)
+	for _, entry := range result {
+		if eq := strings.IndexByte(entry, '='); eq >= 0 {
+			resultMap[entry[:eq]] = entry[eq+1:]
+		}
+	}
+
+	// Check that npm vars are filtered
+	if _, exists := resultMap["npm_config_test_var"]; exists {
+		t.Error("npm_config_test_var should have been filtered")
+	}
+	if _, exists := resultMap["npm_package_name"]; exists {
+		t.Error("npm_package_name should have been filtered")
+	}
+
+	// Check that normal vars are kept
+	if resultMap["TEST_NORMAL_VAR"] != "should_be_kept" {
+		t.Error("TEST_NORMAL_VAR should have been kept")
+	}
+
+	// Check that custom vars are added
+	if resultMap["CUSTOM_VAR"] != "custom_value" {
+		t.Error("CUSTOM_VAR should have been added")
+	}
+}

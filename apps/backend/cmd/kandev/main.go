@@ -424,7 +424,7 @@ func main() {
 	if err != nil {
 		log.Error("Failed to subscribe to message.added events", zap.Error(err))
 	} else {
-		log.Info("Subscribed to message.added events for WebSocket broadcasting")
+		log.Debug("Subscribed to message.added events for WebSocket broadcasting")
 	}
 
 	// Subscribe to message.updated events and broadcast to WebSocket subscribers
@@ -464,7 +464,7 @@ func main() {
 	if err != nil {
 		log.Error("Failed to subscribe to message.updated events", zap.Error(err))
 	} else {
-		log.Info("Subscribed to message.updated events for WebSocket broadcasting")
+		log.Debug("Subscribed to message.updated events for WebSocket broadcasting")
 	}
 
 	// Subscribe to task_session.state_changed events and broadcast to task subscribers
@@ -488,7 +488,7 @@ func main() {
 	if err != nil {
 		log.Error("Failed to subscribe to task_session.state_changed events", zap.Error(err))
 	} else {
-		log.Info("Subscribed to task_session.state_changed events for WebSocket broadcasting")
+		log.Debug("Subscribed to task_session.state_changed events for WebSocket broadcasting")
 	}
 
 	// ============================================
@@ -531,25 +531,25 @@ func main() {
 		log,
 	)
 	taskhandlers.RegisterProcessRoutes(router, taskSvc, lifecycleMgr, log)
-	log.Info("Registered Task Service handlers (HTTP + WebSocket)")
+	log.Debug("Registered Task Service handlers (HTTP + WebSocket)")
 
 	workflowhandlers.RegisterRoutes(router, gateway.Dispatcher, workflowCtrl, log)
 	log.Info("Registered Workflow handlers (HTTP + WebSocket)")
 
 	agentsettingshandlers.RegisterRoutes(router, agentSettingsController, gateway.Hub, log)
-	log.Info("Registered Agent Settings handlers (HTTP)")
+	log.Debug("Registered Agent Settings handlers (HTTP)")
 
 	userhandlers.RegisterRoutes(router, gateway.Dispatcher, userCtrl, log)
-	log.Info("Registered User handlers (HTTP + WebSocket)")
+	log.Debug("Registered User handlers (HTTP + WebSocket)")
 
 	notificationhandlers.RegisterRoutes(router, notificationCtrl, log)
-	log.Info("Registered Notification handlers (HTTP)")
+	log.Debug("Registered Notification handlers (HTTP)")
 
 	editorhandlers.RegisterRoutes(router, editorCtrl, log)
-	log.Info("Registered Editors handlers (HTTP)")
+	log.Debug("Registered Editors handlers (HTTP)")
 
 	prompthandlers.RegisterRoutes(router, promptCtrl, log)
-	log.Info("Registered Prompts handlers (HTTP)")
+	log.Debug("Registered Prompts handlers (HTTP)")
 
 	// Health check (simple HTTP for load balancers/monitoring)
 	router.GET("/health", func(c *gin.Context) {

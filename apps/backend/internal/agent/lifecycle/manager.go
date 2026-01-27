@@ -468,6 +468,7 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 
 	return execution, nil
 }
+
 // Start starts the lifecycle manager background tasks
 func (m *Manager) Start(ctx context.Context) error {
 	if m.runtimeRegistry == nil {
@@ -602,7 +603,7 @@ func (m *Manager) StopAllAgents(ctx context.Context) error {
 
 // Launch launches a new agent for a task
 func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecution, error) {
-	m.logger.Info("launching agent",
+	m.logger.Debug("launching agent",
 		zap.String("task_id", req.TaskID),
 		zap.String("agent_profile_id", req.AgentProfileID),
 		zap.Bool("use_worktree", req.UseWorktree))
@@ -617,7 +618,7 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 			return nil, fmt.Errorf("failed to resolve agent profile: %w", err)
 		}
 		agentTypeName = profileInfo.AgentName
-		m.logger.Info("resolved agent profile",
+		m.logger.Debug("resolved agent profile",
 			zap.String("profile_id", req.AgentProfileID),
 			zap.String("agent_name", profileInfo.AgentName),
 			zap.String("agent_type", agentTypeName))
@@ -818,7 +819,7 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 	// NOTE: This does NOT start the agent process - call StartAgentProcess() explicitly
 	go m.waitForAgentctlReady(execution)
 
-	m.logger.Info("agentctl execution created (agent not started)",
+	m.logger.Debug("agentctl execution created (agent not started)",
 		zap.String("execution_id", executionID),
 		zap.String("task_id", req.TaskID),
 		zap.String("runtime", execution.RuntimeName))
@@ -982,6 +983,7 @@ func (m *Manager) getOrCreateWorktree(ctx context.Context, req *LaunchRequest) (
 		RepositoryPath:       req.RepositoryPath,
 		BaseBranch:           req.BaseBranch,
 		WorktreeBranchPrefix: req.WorktreeBranchPrefix,
+		PullBeforeWorktree:   req.PullBeforeWorktree,
 		WorktreeID:           worktreeID, // If set, will try to reuse this worktree
 	}
 
@@ -991,7 +993,7 @@ func (m *Manager) getOrCreateWorktree(ctx context.Context, req *LaunchRequest) (
 	}
 
 	if worktreeID != "" && wt.ID == worktreeID {
-		m.logger.Info("reusing existing worktree for session resumption",
+		m.logger.Debug("reusing existing worktree for session resumption",
 			zap.String("task_id", req.TaskID),
 			zap.String("worktree_id", wt.ID),
 			zap.String("worktree_path", wt.Path),
@@ -1015,7 +1017,7 @@ func (m *Manager) waitForAgentctlReady(execution *AgentExecution) {
 	ctx, cancel := appctx.Detached(context.Background(), m.stopCh, 60*time.Second)
 	defer cancel()
 
-	m.logger.Info("waiting for agentctl to be ready",
+	m.logger.Debug("waiting for agentctl to be ready",
 		zap.String("execution_id", execution.ID),
 		zap.String("url", execution.agentctl.BaseURL()))
 
@@ -1036,7 +1038,7 @@ func (m *Manager) waitForAgentctlReady(execution *AgentExecution) {
 			zap.String("execution_id", execution.ID),
 			zap.Duration("duration", elapsed))
 	} else {
-		m.logger.Info("agentctl ready - shell/workspace access available",
+		m.logger.Debug("agentctl ready - shell/workspace access available",
 			zap.String("execution_id", execution.ID),
 			zap.Duration("duration", elapsed))
 	}
@@ -1769,9 +1771,10 @@ func (m *Manager) UpdateStatus(executionID string, status v1.AgentStatus) error 
 //   - After cancelling an agent turn (to allow new prompts)
 //
 // State Machine Transitions:
-//   Starting -> Ready (after initialization)
-//   Running  -> Ready (after prompt completion)
-//   Any      -> Ready (after cancel)
+//
+//	Starting -> Ready (after initialization)
+//	Running  -> Ready (after prompt completion)
+//	Any      -> Ready (after cancel)
 //
 // Publishes an AgentReady event to notify subscribers (frontend, orchestrator).
 //
@@ -1812,8 +1815,9 @@ func (m *Manager) MarkReady(executionID string) error {
 //   - errorMessage: Human-readable error description (empty string if no error)
 //
 // State Machine:
-//   This is a terminal state transition - no further state changes are expected after this.
-//   Typical flow: Starting -> Running -> Ready -> ... -> Completed/Failed
+//
+//	This is a terminal state transition - no further state changes are expected after this.
+//	Typical flow: Starting -> Running -> Ready -> ... -> Completed/Failed
 //
 // Publishes either AgentCompleted or AgentFailed event depending on final status.
 //
@@ -1855,9 +1859,9 @@ func (m *Manager) MarkCompleted(executionID string, exitCode int, errorMessage s
 // RemoveExecution removes an execution from tracking.
 //
 // ⚠️  WARNING: This is a potentially dangerous operation that should only be called when:
-//   1. The agent process has been fully stopped (via StopAgent)
-//   2. All cleanup operations have completed (worktree cleanup, container removal)
-//   3. The execution is in a terminal state (Completed, Failed, or Cancelled)
+//  1. The agent process has been fully stopped (via StopAgent)
+//  2. All cleanup operations have completed (worktree cleanup, container removal)
+//  3. The execution is in a terminal state (Completed, Failed, or Cancelled)
 //
 // This method:
 //   - Removes the execution from the in-memory store
@@ -1889,8 +1893,8 @@ func (m *Manager) RemoveExecution(executionID string) {
 //   - When IsAgentRunningForSession returns false but execution exists
 //
 // This method performs cleanup:
-//   1. Closes the agentctl HTTP client connection
-//   2. Removes the execution from the in-memory tracking store
+//  1. Closes the agentctl HTTP client connection
+//  2. Removes the execution from the in-memory tracking store
 //
 // What this does NOT do:
 //   - Stop the agent process (assumed already stopped)
@@ -2005,7 +2009,7 @@ func (m *Manager) performCleanup(ctx context.Context) {
 //   - pendingID: Unique ID of the permission request (from permission request event)
 //   - optionID: The user-selected option ID (from the permission request's options array)
 //   - cancelled: If true, indicates user cancelled/rejected the permission request.
-//                When cancelled=true, optionID is ignored.
+//     When cancelled=true, optionID is ignored.
 //
 // Response Semantics:
 //   - cancelled=false, optionID="approve" → User approved the action
@@ -2572,6 +2576,7 @@ func (m *Manager) handlePassthroughOutput(output *agentctltypes.ProcessOutput) {
 
 // handlePassthroughStatus handles status updates from a passthrough process and publishes to the event bus.
 // This is called when running in standalone mode without a WorkspaceTracker.
+// When the process exits while a WebSocket is connected, it attempts auto-restart with rate limiting.
 func (m *Manager) handlePassthroughStatus(status *agentctltypes.ProcessStatusUpdate) {
 	if status == nil {
 		return
@@ -2598,6 +2603,93 @@ func (m *Manager) handlePassthroughStatus(status *agentctltypes.ProcessStatusUpd
 	}
 
 	m.eventPublisher.PublishProcessStatus(execution, clientStatus)
+
+	// Check if process exited and should be auto-restarted
+	// Run asynchronously to allow the old process to be cleaned up first
+	if status.Status == agentctltypes.ProcessStatusExited || status.Status == agentctltypes.ProcessStatusFailed {
+		go m.handlePassthroughExit(execution, status)
+	}
+}
+
+// handlePassthroughExit handles auto-restart logic when a passthrough process exits.
+// This function is called asynchronously to allow the old process to be cleaned up first.
+func (m *Manager) handlePassthroughExit(execution *AgentExecution, status *agentctltypes.ProcessStatusUpdate) {
+	const restartDelay = 500 * time.Millisecond
+	const cleanupDelay = 100 * time.Millisecond // Wait for old process cleanup
+
+	// Wait a bit for the old process to be cleaned up from the process map
+	time.Sleep(cleanupDelay)
+
+	sessionID := execution.SessionID
+
+	interactiveRunner := m.GetInteractiveRunner()
+	if interactiveRunner == nil {
+		m.logger.Debug("no interactive runner available for auto-restart",
+			zap.String("session_id", sessionID))
+		return
+	}
+
+	// Check if WebSocket is still connected (use session-level tracking which survives process deletion)
+	if !interactiveRunner.HasActiveWebSocketBySession(sessionID) {
+		m.logger.Debug("no active WebSocket, skipping auto-restart",
+			zap.String("session_id", sessionID))
+		return
+	}
+
+	exitCode := 0
+	if status.ExitCode != nil {
+		exitCode = *status.ExitCode
+	}
+
+	m.logger.Info("passthrough process exited with active WebSocket, attempting auto-restart",
+		zap.String("session_id", sessionID),
+		zap.Int("exit_code", exitCode))
+
+	// Send restart notification to terminal (use session-level to survive process deletion)
+	restartMsg := "\r\n\x1b[33m[Agent exited. Restarting...]\x1b[0m\r\n"
+	if err := interactiveRunner.WriteToDirectOutputBySession(sessionID, []byte(restartMsg)); err != nil {
+		m.logger.Debug("failed to write restart message to terminal",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
+
+	// Delay before restart
+	time.Sleep(restartDelay)
+
+	// Check WebSocket is still connected after delay (use session-level tracking)
+	if !interactiveRunner.HasActiveWebSocketBySession(sessionID) {
+		m.logger.Debug("WebSocket disconnected during restart delay, aborting",
+			zap.String("session_id", sessionID))
+		return
+	}
+
+	// Attempt restart
+	ctx := context.Background()
+	if err := m.ResumePassthroughSession(ctx, sessionID); err != nil {
+		m.logger.Error("failed to auto-restart passthrough session",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+
+		// Send error message to terminal
+		errorMsg := fmt.Sprintf("\r\n\x1b[31m[Restart failed: %s]\x1b[0m\r\n", err.Error())
+		if writeErr := interactiveRunner.WriteToDirectOutputBySession(sessionID, []byte(errorMsg)); writeErr != nil {
+			m.logger.Debug("failed to write restart error message to terminal",
+				zap.String("session_id", sessionID),
+				zap.Error(writeErr))
+		}
+		return
+	}
+
+	// Connect the session's existing WebSocket to the new process
+	if interactiveRunner.ConnectSessionWebSocket(execution.PassthroughProcessID) {
+		m.logger.Info("passthrough session auto-restarted and reconnected WebSocket",
+			zap.String("session_id", sessionID),
+			zap.String("new_process_id", execution.PassthroughProcessID))
+	} else {
+		m.logger.Warn("passthrough session restarted but failed to reconnect WebSocket",
+			zap.String("session_id", sessionID),
+			zap.String("new_process_id", execution.PassthroughProcessID))
+	}
 }
 
 // GetInteractiveRunner returns the interactive runner for passthrough mode.

@@ -107,34 +107,43 @@ export function PermissionRequestMessage({ comment }: PermissionRequestMessagePr
   };
 
   return (
-    <div
-      className={cn(
-        'w-full rounded-md border overflow-hidden',
-        isPending ? 'border-amber-500/50 bg-amber-500/5' : 'border-border/50 bg-muted/20'
-      )}
-    >
-      {/* Header */}
-      <div className="flex items-center gap-2 px-3 py-2 text-sm">
-        <IconAlertTriangle
-          className={cn(
-            'h-4 w-4 flex-shrink-0',
-            isPending ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'
-          )}
-        />
-        <span className="flex-1 font-medium text-foreground truncate">
-          {comment.content || 'Permission Required'}
-        </span>
-        {getStatusBadge()}
-      </div>
+    <div className="w-full">
+      {/* Icon + Content Row */}
+      <div className="flex items-start gap-3 w-full">
+        {/* Icon */}
+        <div className="flex-shrink-0 mt-0.5">
+          <IconAlertTriangle
+            className={cn(
+              'h-4 w-4',
+              isPending ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'
+            )}
+          />
+        </div>
 
-      {/* Approval buttons - only show when pending */}
-      {isPending && (
-        <PermissionActionRow
-          onApprove={handleApprove}
-          onReject={handleReject}
-          isResponding={isResponding}
-        />
-      )}
+        {/* Content */}
+        <div className="flex-1 min-w-0 pt-0.5">
+          <div className="flex items-center gap-2 text-xs">
+            <span className={cn(
+              'font-mono text-xs',
+              isPending ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'
+            )}>
+              {comment.content || 'Permission Required'}
+            </span>
+            {getStatusBadge()}
+          </div>
+
+          {/* Approval buttons - only show when pending */}
+          {isPending && (
+            <div className="mt-2">
+              <PermissionActionRow
+                onApprove={handleApprove}
+                onReject={handleReject}
+                isResponding={isResponding}
+              />
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

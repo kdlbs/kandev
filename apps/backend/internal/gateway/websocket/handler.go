@@ -56,7 +56,7 @@ func (h *Handler) HandleConnection(c *gin.Context) {
 	// Create a unique client ID
 	clientID := uuid.New().String()
 
-	h.logger.Info("WebSocket connection established",
+	h.logger.Debug("WebSocket connection established",
 		zap.String("client_id", clientID),
 		zap.String("remote_addr", c.Request.RemoteAddr),
 	)

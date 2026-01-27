@@ -28,12 +28,12 @@ type AgentExecution struct {
 	ACPSessionID   string // ACP session ID to resume, if available
 	AgentCommand   string // Command to start the agent subprocess
 	RuntimeName    string // Name of the runtime used (e.g., "docker", "standalone")
-	Status       v1.AgentStatus
-	StartedAt    time.Time
-	FinishedAt   *time.Time
-	ExitCode     *int
-	ErrorMessage string
-	Metadata     map[string]interface{}
+	Status         v1.AgentStatus
+	StartedAt      time.Time
+	FinishedAt     *time.Time
+	ExitCode       *int
+	ErrorMessage   string
+	Metadata       map[string]interface{}
 
 	// agentctl client for this execution
 	agentctl *agentctl.Client
@@ -107,6 +107,7 @@ type LaunchRequest struct {
 	RepositoryPath       string // Path to the main repository (for worktree creation)
 	BaseBranch           string // Base branch for the worktree (e.g., "main")
 	WorktreeBranchPrefix string // Branch prefix for worktree branches
+	PullBeforeWorktree   bool   // Whether to pull from remote before creating the worktree
 }
 
 // CredentialsManager interface for credential retrieval

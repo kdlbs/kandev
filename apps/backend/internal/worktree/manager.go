@@ -128,7 +128,7 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 		existing, err := m.GetBySessionID(ctx, req.SessionID)
 		if err == nil && existing != nil {
 			if m.IsValid(existing.Path) {
-				m.logger.Info("reusing existing worktree by session ID",
+				m.logger.Debug("reusing existing worktree by session ID",
 					zap.String("worktree_id", existing.ID),
 					zap.String("session_id", req.SessionID),
 					zap.String("task_id", req.TaskID),
@@ -175,11 +175,6 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 		return nil, ErrRepoNotGit
 	}
 
-	// Check base branch exists
-	if !m.branchExists(req.RepositoryPath, req.BaseBranch) {
-		return nil, fmt.Errorf("%w: %s", ErrInvalidBaseBranch, req.BaseBranch)
-	}
-
 	// Check worktree limit
 	count, err := m.countWorktreesForRepo(ctx, req.RepositoryID)
 	if err != nil {
@@ -194,11 +189,21 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 	repoLock.Lock()
 	defer repoLock.Unlock()
 
-	return m.createWorktree(ctx, req)
+	baseRef := req.BaseBranch
+	if req.PullBeforeWorktree {
+		baseRef = m.pullBaseBranch(req.RepositoryPath, req.BaseBranch)
+	}
+
+	// Check base branch exists
+	if !m.branchExists(req.RepositoryPath, baseRef) {
+		return nil, fmt.Errorf("%w: %s", ErrInvalidBaseBranch, baseRef)
+	}
+
+	return m.createWorktree(ctx, req, baseRef)
 }
 
 // createWorktree performs the actual git worktree creation.
-func (m *Manager) createWorktree(ctx context.Context, req CreateRequest) (*Worktree, error) {
+func (m *Manager) createWorktree(ctx context.Context, req CreateRequest, baseRef string) (*Worktree, error) {
 	// Generate a unique worktree ID and random suffix
 	worktreeID := uuid.New().String()
 	dirSuffix := worktreeID[:8] // Use first 8 chars of UUID for worktree dir uniqueness
@@ -233,7 +238,7 @@ func (m *Manager) createWorktree(ctx context.Context, req CreateRequest) (*Workt
 	cmd := exec.CommandContext(ctx, "git", "worktree", "add",
 		"-b", branchName,
 		worktreePath,
-		req.BaseBranch)
+		baseRef)
 	cmd.Dir = req.RepositoryPath
 
 	output, err := cmd.CombinedOutput()
@@ -638,6 +643,77 @@ func (m *Manager) branchExists(repoPath, branch string) bool {
 	cmd.Dir = repoPath
 	err := cmd.Run()
 	return err == nil
+}
+
+func (m *Manager) currentBranch(repoPath string) string {
+	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	cmd.Dir = repoPath
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(output))
+}
+
+// pullBaseBranch fetches the latest changes from origin and returns the best ref to use
+// for creating a new worktree. The function handles three scenarios:
+//
+//  1. baseBranch is already a remote ref (e.g., "origin/main"): fetch and use it directly
+//  2. baseBranch is a local branch and we're currently on it: pull --ff-only to update
+//  3. baseBranch is a local branch but we're on a different branch: use origin/<branch> instead
+//
+// On fetch/pull failure, errors are logged but the function continues with the best available ref.
+func (m *Manager) pullBaseBranch(repoPath, baseBranch string) string {
+	// Normalize branch name - strip "origin/" prefix if present
+	localBranch := strings.TrimPrefix(baseBranch, "origin/")
+	isRemoteRef := localBranch != baseBranch
+
+	// Fetch the branch from origin (30s timeout for fetch + potential pull)
+	fetchCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	fetchArgs := []string{"fetch", "origin"}
+	if localBranch != "" {
+		fetchArgs = append(fetchArgs, localBranch)
+	}
+	fetchCmd := exec.CommandContext(fetchCtx, "git", fetchArgs...)
+	fetchCmd.Dir = repoPath
+	if output, err := fetchCmd.CombinedOutput(); err != nil {
+		m.logger.Error("git fetch failed before worktree creation",
+			zap.String("branch", baseBranch),
+			zap.String("output", string(output)),
+			zap.Error(err))
+		return baseBranch
+	}
+
+	// If the original ref was already a remote ref, use it directly
+	if isRemoteRef {
+		return "origin/" + localBranch
+	}
+
+	// For local branches: try to update if we're on that branch, otherwise use origin/<branch>
+	remoteRef := "origin/" + localBranch
+	currentBranch := m.currentBranch(repoPath)
+
+	if currentBranch == baseBranch {
+		// We're on the target branch - try to pull (fast-forward only)
+		pullCmd := exec.CommandContext(fetchCtx, "git", "pull", "--ff-only", "origin", baseBranch)
+		pullCmd.Dir = repoPath
+		if output, err := pullCmd.CombinedOutput(); err != nil {
+			m.logger.Error("git pull failed before worktree creation",
+				zap.String("branch", baseBranch),
+				zap.String("output", string(output)),
+				zap.Error(err))
+		}
+		return baseBranch
+	}
+
+	// Not on the target branch - use the remote ref if it exists
+	if m.branchExists(repoPath, remoteRef) {
+		return remoteRef
+	}
+
+	return baseBranch
 }
 
 // countWorktreesForRepo counts active worktrees for a repository.

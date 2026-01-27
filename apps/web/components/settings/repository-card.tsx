@@ -5,6 +5,7 @@ import { IconEdit, IconGitBranch, IconPlus, IconTrash, IconX } from '@tabler/ico
 import { Badge } from '@kandev/ui/badge';
 import { Card, CardContent } from '@kandev/ui/card';
 import { Button } from '@kandev/ui/button';
+import { Checkbox } from '@kandev/ui/checkbox';
 import { Input } from '@kandev/ui/input';
 import { Label } from '@kandev/ui/label';
 import { Textarea } from '@kandev/ui/textarea';
@@ -57,6 +58,7 @@ export function RepositoryCard({
   const repositoryName = repository.name ?? '';
   const repositoryLocalPath = repository.local_path ?? '';
   const worktreeBranchPrefix = repository.worktree_branch_prefix ?? '';
+  const pullBeforeWorktree = repository.pull_before_worktree ?? true;
   const setupScript = repository.setup_script ?? '';
   const cleanupScript = repository.cleanup_script ?? '';
   const devScript = repository.dev_script ?? '';
@@ -166,6 +168,29 @@ export function RepositoryCard({
                       Used for new worktree branches. Leave empty to use the default.
                       Branches are generated as {'{prefix}{sanitized-title}-{rand}'}.
                     </p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor={`repo-pull-before-${repository.id}`}>Worktree Sync</Label>
+                    <div className="flex items-start gap-2 pt-2">
+                      <Checkbox
+                        id={`repo-pull-before-${repository.id}`}
+                        checked={pullBeforeWorktree}
+                        onCheckedChange={(checked) =>
+                          onUpdate(repository.id, { pull_before_worktree: checked === true })
+                        }
+                      />
+                      <div className="space-y-1">
+                        <Label
+                          htmlFor={`repo-pull-before-${repository.id}`}
+                          className="text-sm text-muted-foreground cursor-pointer"
+                        >
+                          Always pull before creating a new worktree
+                        </Label>
+                        <p className="text-xs text-muted-foreground">
+                          Keeps the base branch up to date with the remote before spawning new sessions.
+                        </p>
+                      </div>
+                    </div>
                   </div>
                 </div>
 

@@ -7,12 +7,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kandev/kandev/internal/worktree"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
+	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -168,6 +168,9 @@ func TestService_CreateRepository_DefaultWorktreeBranchPrefix(t *testing.T) {
 	if created.WorktreeBranchPrefix != worktree.DefaultBranchPrefix {
 		t.Fatalf("expected default prefix %q, got %q", worktree.DefaultBranchPrefix, created.WorktreeBranchPrefix)
 	}
+	if !created.PullBeforeWorktree {
+		t.Fatalf("expected pull_before_worktree to default to true")
+	}
 
 	stored, err := repo.GetRepository(ctx, created.ID)
 	if err != nil {
@@ -175,6 +178,37 @@ func TestService_CreateRepository_DefaultWorktreeBranchPrefix(t *testing.T) {
 	}
 	if stored.WorktreeBranchPrefix != worktree.DefaultBranchPrefix {
 		t.Fatalf("expected stored prefix %q, got %q", worktree.DefaultBranchPrefix, stored.WorktreeBranchPrefix)
+	}
+	if !stored.PullBeforeWorktree {
+		t.Fatalf("expected stored pull_before_worktree to default to true")
+	}
+}
+
+func TestService_CreateRepository_PullBeforeWorktreeFalse(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+
+	pullFalse := false
+	created, err := svc.CreateRepository(ctx, &CreateRepositoryRequest{
+		WorkspaceID:        "ws-1",
+		Name:               "Test Repo",
+		PullBeforeWorktree: &pullFalse,
+	})
+	if err != nil {
+		t.Fatalf("CreateRepository failed: %v", err)
+	}
+	if created.PullBeforeWorktree {
+		t.Fatalf("expected pull_before_worktree to be false when explicitly set")
+	}
+
+	stored, err := repo.GetRepository(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetRepository failed: %v", err)
+	}
+	if stored.PullBeforeWorktree {
+		t.Fatalf("expected stored pull_before_worktree to be false")
 	}
 }
 

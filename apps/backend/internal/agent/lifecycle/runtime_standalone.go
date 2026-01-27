@@ -126,7 +126,7 @@ func (r *StandaloneRuntime) CreateInstance(ctx context.Context, req *RuntimeCrea
 		metadata["worktree_branch"] = worktreeBranch
 	}
 
-	r.logger.Info("standalone instance created",
+	r.logger.Debug("standalone instance created",
 		zap.String("instance_id", req.InstanceID),
 		zap.Int("port", resp.Port),
 		zap.String("workspace", req.WorkspacePath))

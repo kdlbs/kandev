@@ -4,6 +4,7 @@ package config
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -130,6 +131,24 @@ func (a *AuthConfig) TokenDurationTime() time.Duration {
 	return time.Duration(a.TokenDuration) * time.Second
 }
 
+// detectDefaultLogFormat returns the appropriate log format based on environment.
+// Returns "json" if running in Kubernetes or other production environments.
+// Returns "text" for terminal/development use (human-readable console format).
+func detectDefaultLogFormat() string {
+	// Check if running in Kubernetes
+	if os.Getenv("KUBERNETES_SERVICE_HOST") != "" {
+		return "json"
+	}
+
+	// Check for explicit production environment
+	if env := os.Getenv("KANDEV_ENV"); env == "production" || env == "prod" {
+		return "json"
+	}
+
+	// Default to text format for terminal use (more readable than JSON)
+	return "text"
+}
+
 // setDefaults configures default values for all configuration options.
 func setDefaults(v *viper.Viper) {
 	// Server defaults
@@ -175,7 +194,7 @@ func setDefaults(v *viper.Viper) {
 
 	// Logging defaults
 	v.SetDefault("logging.level", "info")
-	v.SetDefault("logging.format", "json")
+	v.SetDefault("logging.format", detectDefaultLogFormat())
 	v.SetDefault("logging.outputPath", "stdout")
 
 	// Repository discovery defaults

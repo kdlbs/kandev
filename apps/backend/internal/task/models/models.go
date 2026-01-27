@@ -290,6 +290,7 @@ type Repository struct {
 	ProviderName         string     `json:"provider_name"`
 	DefaultBranch        string     `json:"default_branch"`
 	WorktreeBranchPrefix string     `json:"worktree_branch_prefix"`
+	PullBeforeWorktree   bool       `json:"pull_before_worktree"`
 	SetupScript          string     `json:"setup_script"`
 	CleanupScript        string     `json:"cleanup_script"`
 	DevScript            string     `json:"dev_script"`
