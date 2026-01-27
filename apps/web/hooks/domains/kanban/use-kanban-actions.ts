@@ -40,7 +40,7 @@ export function useKanbanActions({ kanban, workspaceState, boardsState }: UseKan
               ...kanban.tasks,
               {
                 id: task.id,
-                columnId: task.column_id,
+                workflowStepId: task.workflow_step_id,
                 title: task.title,
                 description: task.description ?? undefined,
                 position: task.position ?? 0,
@@ -61,7 +61,7 @@ export function useKanbanActions({ kanban, workspaceState, boardsState }: UseKan
                   ...item,
                   title: task.title,
                   description: task.description ?? undefined,
-                  columnId: task.column_id ?? item.columnId,
+                  workflowStepId: task.workflow_step_id ?? item.workflowStepId,
                   position: task.position ?? item.position,
                   state: task.state ?? item.state,
                   repositoryId: task.repositories?.[0]?.repository_id ?? item.repositoryId,

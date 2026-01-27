@@ -1,10 +1,21 @@
 package models
 
 import (
+	"regexp"
 	"time"
 
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+// systemTagRegex matches <kandev-system>...</kandev-system> content including the tags.
+// This is used to strip system-injected content from messages before displaying to users.
+var systemTagRegex = regexp.MustCompile(`<kandev-system>[\s\S]*?</kandev-system>\s*`)
+
+// StripSystemContent removes all <kandev-system>...</kandev-system> blocks from text.
+// This is used to hide workflow step prompt modifications (prefix/suffix) from the frontend UI.
+func StripSystemContent(text string) string {
+	return systemTagRegex.ReplaceAllString(text, "")
+}
 
 // ListMessagesOptions defines pagination options for listing messages
 type ListMessagesOptions struct {
@@ -16,29 +27,30 @@ type ListMessagesOptions struct {
 
 // Task represents a task in the database
 type Task struct {
-	ID           string                 `json:"id"`
-	WorkspaceID  string                 `json:"workspace_id"`
-	BoardID      string                 `json:"board_id"`
-	ColumnID     string                 `json:"column_id"`
-	Title        string                 `json:"title"`
-	Description  string                 `json:"description"`
-	State        v1.TaskState           `json:"state"`
-	Priority     int                    `json:"priority"`
-	Position     int                    `json:"position"` // Order within column
-	Metadata     map[string]interface{} `json:"metadata,omitempty"`
-	Repositories []*TaskRepository      `json:"repositories,omitempty"`
-	CreatedAt    time.Time              `json:"created_at"`
-	UpdatedAt    time.Time              `json:"updated_at"`
+	ID             string                 `json:"id"`
+	WorkspaceID    string                 `json:"workspace_id"`
+	BoardID        string                 `json:"board_id"`
+	WorkflowStepID string                 `json:"workflow_step_id"`
+	Title          string                 `json:"title"`
+	Description    string                 `json:"description"`
+	State          v1.TaskState           `json:"state"`
+	Priority       int                    `json:"priority"`
+	Position       int                    `json:"position"` // Order within workflow step
+	Metadata       map[string]interface{} `json:"metadata,omitempty"`
+	Repositories   []*TaskRepository      `json:"repositories,omitempty"`
+	CreatedAt      time.Time              `json:"created_at"`
+	UpdatedAt      time.Time              `json:"updated_at"`
 }
 
 // Board represents a Kanban board
 type Board struct {
-	ID          string    `json:"id"`
-	WorkspaceID string    `json:"workspace_id"`
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID                 string    `json:"id"`
+	WorkspaceID        string    `json:"workspace_id"`
+	Name               string    `json:"name"`
+	Description        string    `json:"description"`
+	WorkflowTemplateID *string   `json:"workflow_template_id,omitempty"` // Optional workflow template
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
 }
 
 // Workspace represents a workspace
@@ -52,18 +64,6 @@ type Workspace struct {
 	DefaultAgentProfileID *string   `json:"default_agent_profile_id,omitempty"`
 	CreatedAt             time.Time `json:"created_at"`
 	UpdatedAt             time.Time `json:"updated_at"`
-}
-
-// Column represents a column in a board
-type Column struct {
-	ID        string       `json:"id"`
-	BoardID   string       `json:"board_id"`
-	Name      string       `json:"name"`
-	Position  int          `json:"position"`
-	State     v1.TaskState `json:"state"` // Maps column to task state
-	Color     string       `json:"color"`
-	CreatedAt time.Time    `json:"created_at"`
-	UpdatedAt time.Time    `json:"updated_at"`
 }
 
 // TaskRepository represents a repository associated with a task
@@ -125,7 +125,9 @@ type Message struct {
 	CreatedAt     time.Time              `json:"created_at"`
 }
 
-// ToAPI converts internal Message to API type
+// ToAPI converts internal Message to API type.
+// System-injected content (wrapped in <kandev-system> tags) is stripped from the content
+// so users don't see workflow step prompt modifications in the UI.
 func (m *Message) ToAPI() *v1.Message {
 	messageType := string(m.Type)
 	if messageType == "" {
@@ -138,7 +140,7 @@ func (m *Message) ToAPI() *v1.Message {
 		TurnID:        m.TurnID,
 		AuthorType:    string(m.AuthorType),
 		AuthorID:      m.AuthorID,
-		Content:       m.Content,
+		Content:       StripSystemContent(m.Content),
 		Type:          messageType,
 		Metadata:      m.Metadata,
 		RequestsInput: m.RequestsInput,
@@ -218,6 +220,11 @@ type TaskSession struct {
 	StartedAt            time.Time              `json:"started_at"`
 	CompletedAt          *time.Time             `json:"completed_at,omitempty"`
 	UpdatedAt            time.Time              `json:"updated_at"`
+
+	// Workflow-related fields
+	IsPrimary      bool    `json:"is_primary"`                 // Whether this is the primary session for the task
+	WorkflowStepID *string `json:"workflow_step_id,omitempty"` // Current workflow step ID
+	ReviewStatus   *string `json:"review_status,omitempty"`    // pending, approved
 }
 
 // ToAPI converts internal TaskSession to API type

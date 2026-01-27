@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { IconStack2, IconPlus } from '@tabler/icons-react';
+import { IconStack2, IconPlus, IconStar } from '@tabler/icons-react';
 import { Button } from '@kandev/ui/button';
 import {
   DropdownMenu,
@@ -88,6 +88,8 @@ type SessionsDropdownProps = {
   activeSessionId?: string | null;
   taskTitle?: string;
   taskDescription?: string;
+  primarySessionId?: string | null;
+  onSetPrimary?: (sessionId: string) => void;
 };
 
 export function SessionsDropdown({
@@ -95,6 +97,8 @@ export function SessionsDropdown({
   activeSessionId = null,
   taskTitle = '',
   taskDescription = '',
+  primarySessionId = null,
+  onSetPrimary,
 }: SessionsDropdownProps) {
   const [currentTime, setCurrentTime] = useState(() => Date.now());
   const [showNewSessionDialog, setShowNewSessionDialog] = useState(false);
@@ -242,6 +246,8 @@ export function SessionsDropdown({
                   const showDuration = duration !== '0s';
                   const number = sortedSessions.length - index;
 
+                  const isPrimary = session.id === primarySessionId;
+
                   return (
                     <div
                       key={session.id}
@@ -253,8 +259,11 @@ export function SessionsDropdown({
                         #{number}
                       </span>
 
-                      <span className="text-xs text-foreground flex-1 text-left">
+                      <span className="text-xs text-foreground flex-1 text-left flex items-center gap-1.5">
                         {resolveAgentLabel(session)}
+                        {isPrimary && (
+                          <IconStar className="h-3.5 w-3.5 text-amber-500 fill-amber-500" />
+                        )}
                       </span>
 
                       {showDuration ?
@@ -262,6 +271,24 @@ export function SessionsDropdown({
                           {duration}
                         </span>
                         : ''}
+
+                      {!isPrimary && onSetPrimary && (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onSetPrimary(session.id);
+                              }}
+                              className="w-5 shrink-0 flex items-center justify-center text-muted-foreground hover:text-amber-500 transition-colors"
+                            >
+                              <IconStar className="h-3.5 w-3.5" />
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent side="left">Set as Primary</TooltipContent>
+                        </Tooltip>
+                      )}
 
                       <div className="w-5 shrink-0 flex items-center justify-center">
                         <Tooltip>

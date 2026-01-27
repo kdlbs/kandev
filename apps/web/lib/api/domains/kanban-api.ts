@@ -5,6 +5,7 @@ import type {
   ListBoardsResponse,
   CreateTaskResponse,
   Task,
+  MoveTaskResponse,
 } from '@/lib/types/http';
 
 // Board operations
@@ -24,7 +25,7 @@ export async function createTask(
   payload: {
     workspace_id: string;
     board_id: string;
-    column_id: string;
+    workflow_step_id: string;
     title: string;
     description?: string;
     position?: number;
@@ -77,10 +78,10 @@ export async function deleteTask(taskId: string, options?: ApiRequestOptions) {
 
 export async function moveTask(
   taskId: string,
-  payload: { board_id: string; column_id: string; position: number },
+  payload: { board_id: string; workflow_step_id: string; position: number },
   options?: ApiRequestOptions
 ) {
-  return fetchJson<Task>(`/api/v1/tasks/${taskId}/move`, {
+  return fetchJson<MoveTaskResponse>(`/api/v1/tasks/${taskId}/move`, {
     ...options,
     init: { method: 'POST', body: JSON.stringify(payload), ...(options?.init ?? {}) },
   });

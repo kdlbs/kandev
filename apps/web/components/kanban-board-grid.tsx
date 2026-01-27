@@ -9,11 +9,11 @@ import {
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
-import { KanbanColumn, Column } from './kanban-column';
+import { KanbanColumn, WorkflowStep } from './kanban-column';
 import { KanbanCardPreview, Task } from './kanban-card';
 
 export type KanbanBoardGridProps = {
-  columns: Column[];
+  columns: WorkflowStep[];
   tasks: Task[];
   onPreviewTask: (task: Task) => void;
   onOpenTask: (task: Task) => void;
@@ -49,7 +49,7 @@ export function KanbanBoardGrid({
 
   const getTasksForColumn = (columnId: string) => {
     return tasks
-      .filter((task) => task.columnId === columnId)
+      .filter((task) => task.workflowStepId === columnId)
       .map((task) => ({ ...task, position: task.position ?? 0 }))
       .sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
   };

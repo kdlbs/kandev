@@ -2,10 +2,10 @@
 
 import { getBackendConfig } from '@/lib/config';
 import type {
+  ApproveSessionResponse,
   Board,
-  Column,
   ListBoardsResponse,
-  ListColumnsResponse,
+  ListWorkflowStepsResponse,
   RepositoryDiscoveryResponse,
   ListRepositoriesResponse,
   RepositoryBranchesResponse,
@@ -14,7 +14,11 @@ import type {
   RepositoryPathValidationResponse,
   Repository,
   RepositoryScript,
+  StepBehaviors,
   Workspace,
+  WorkflowStep,
+  WorkflowStepType,
+  ListWorkflowTemplatesResponse,
 } from '@/lib/types/http';
 
 const { apiBaseUrl } = getBackendConfig();
@@ -88,7 +92,12 @@ export async function listBoardsAction(workspaceId: string): Promise<ListBoardsR
   return fetchJson<ListBoardsResponse>(url.toString());
 }
 
-export async function createBoardAction(payload: { workspace_id: string; name: string; description?: string }) {
+export async function createBoardAction(payload: {
+  workspace_id: string;
+  name: string;
+  description?: string;
+  workflow_template_id?: string;
+}) {
   return fetchJson<Board>(`${apiBaseUrl}/api/v1/boards`, {
     method: 'POST',
     body: JSON.stringify(payload),
@@ -104,39 +113,6 @@ export async function updateBoardAction(id: string, payload: { name?: string; de
 
 export async function deleteBoardAction(id: string) {
   await fetchJson<void>(`${apiBaseUrl}/api/v1/boards/${id}`, { method: 'DELETE' });
-}
-
-export async function listColumnsAction(boardId: string): Promise<ListColumnsResponse> {
-  return fetchJson<ListColumnsResponse>(`${apiBaseUrl}/api/v1/boards/${boardId}/columns`);
-}
-
-export async function createColumnAction(payload: {
-  board_id: string;
-  name: string;
-  position: number;
-  state: string;
-  color: string;
-}) {
-  return fetchJson<Column>(`${apiBaseUrl}/api/v1/boards/${payload.board_id}/columns`, {
-    method: 'POST',
-    body: JSON.stringify({
-      name: payload.name,
-      position: payload.position,
-      state: payload.state,
-      color: payload.color,
-    }),
-  });
-}
-
-export async function updateColumnAction(id: string, payload: Partial<Pick<Column, 'name' | 'position' | 'state' | 'color'>>) {
-  return fetchJson<Column>(`${apiBaseUrl}/api/v1/columns/${id}`, {
-    method: 'PUT',
-    body: JSON.stringify(payload),
-  });
-}
-
-export async function deleteColumnAction(id: string) {
-  await fetchJson<void>(`${apiBaseUrl}/api/v1/columns/${id}`, { method: 'DELETE' });
 }
 
 export async function listRepositoriesAction(workspaceId: string): Promise<ListRepositoriesResponse> {
@@ -249,4 +225,155 @@ export async function updateRepositoryScriptAction(id: string, payload: Partial<
 
 export async function deleteRepositoryScriptAction(id: string) {
   await fetchJson<void>(`${apiBaseUrl}/api/v1/scripts/${id}`, { method: 'DELETE' });
+}
+
+// Workflow Templates
+export async function listWorkflowTemplatesAction(): Promise<ListWorkflowTemplatesResponse> {
+  return fetchJson<ListWorkflowTemplatesResponse>(`${apiBaseUrl}/api/v1/workflow/templates`);
+}
+
+// Helper to transform backend workflow step (flat fields) to frontend format (nested behaviors)
+type BackendWorkflowStep = {
+  id: string;
+  board_id: string;
+  name: string;
+  step_type: WorkflowStepType;
+  position: number;
+  color: string;
+  task_state?: string;
+  auto_start_agent?: boolean;
+  plan_mode?: boolean;
+  require_approval?: boolean;
+  prompt_prefix?: string;
+  prompt_suffix?: string;
+  on_complete_step_id?: string;
+  on_approval_step_id?: string;
+  allow_manual_move?: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+function transformWorkflowStep(step: BackendWorkflowStep): WorkflowStep {
+  return {
+    id: step.id,
+    board_id: step.board_id,
+    name: step.name,
+    step_type: step.step_type,
+    position: step.position,
+    color: step.color,
+    behaviors: {
+      autoStartAgent: step.auto_start_agent ?? false,
+      planMode: step.plan_mode ?? false,
+      requireApproval: step.require_approval ?? false,
+      promptPrefix: step.prompt_prefix ?? '',
+      promptSuffix: step.prompt_suffix ?? '',
+    },
+    created_at: step.created_at,
+    updated_at: step.updated_at,
+  };
+}
+
+// Workflow Steps
+export async function listWorkflowStepsAction(boardId: string): Promise<ListWorkflowStepsResponse> {
+  const response = await fetchJson<{ steps: BackendWorkflowStep[] | null }>(
+    `${apiBaseUrl}/api/v1/boards/${boardId}/workflow/steps`
+  );
+  return {
+    steps: (response.steps ?? []).map(transformWorkflowStep),
+    total: response.steps?.length ?? 0,
+  };
+}
+
+export async function createWorkflowStepAction(payload: {
+  board_id: string;
+  name: string;
+  step_type: WorkflowStepType;
+  position: number;
+  color: string;
+  behaviors?: StepBehaviors;
+}): Promise<WorkflowStep> {
+  // Flatten behaviors into top-level fields for the backend
+  const body = {
+    board_id: payload.board_id,
+    name: payload.name,
+    step_type: payload.step_type,
+    position: payload.position,
+    color: payload.color,
+    auto_start_agent: payload.behaviors?.autoStartAgent ?? false,
+    plan_mode: payload.behaviors?.planMode ?? false,
+    require_approval: payload.behaviors?.requireApproval ?? false,
+    prompt_prefix: payload.behaviors?.promptPrefix ?? '',
+    prompt_suffix: payload.behaviors?.promptSuffix ?? '',
+    allow_manual_move: true,
+  };
+  const response = await fetchJson<BackendWorkflowStep>(`${apiBaseUrl}/api/v1/workflow/steps`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+  return transformWorkflowStep(response);
+}
+
+export async function updateWorkflowStepAction(
+  stepId: string,
+  payload: Partial<Pick<WorkflowStep, 'name' | 'step_type' | 'position' | 'color' | 'behaviors'>>
+): Promise<WorkflowStep> {
+  // Flatten behaviors into top-level fields for the backend
+  const body: Record<string, unknown> = {};
+  if (payload.name !== undefined) body.name = payload.name;
+  if (payload.step_type !== undefined) body.step_type = payload.step_type;
+  if (payload.position !== undefined) body.position = payload.position;
+  if (payload.color !== undefined) body.color = payload.color;
+  if (payload.behaviors !== undefined) {
+    if (payload.behaviors.autoStartAgent !== undefined) body.auto_start_agent = payload.behaviors.autoStartAgent;
+    if (payload.behaviors.planMode !== undefined) body.plan_mode = payload.behaviors.planMode;
+    if (payload.behaviors.requireApproval !== undefined) body.require_approval = payload.behaviors.requireApproval;
+    if (payload.behaviors.promptPrefix !== undefined) body.prompt_prefix = payload.behaviors.promptPrefix;
+    if (payload.behaviors.promptSuffix !== undefined) body.prompt_suffix = payload.behaviors.promptSuffix;
+  }
+  const response = await fetchJson<BackendWorkflowStep>(`${apiBaseUrl}/api/v1/workflow/steps/${stepId}`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+  return transformWorkflowStep(response);
+}
+
+export async function deleteWorkflowStepAction(stepId: string) {
+  await fetchJson<void>(`${apiBaseUrl}/api/v1/workflow/steps/${stepId}`, { method: 'DELETE' });
+}
+
+export async function reorderWorkflowStepsAction(boardId: string, stepIds: string[]): Promise<ListWorkflowStepsResponse> {
+  const response = await fetchJson<{ steps: BackendWorkflowStep[] | null }>(
+    `${apiBaseUrl}/api/v1/boards/${boardId}/workflow/steps/reorder`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({ step_ids: stepIds }),
+    }
+  );
+  return {
+    steps: (response.steps ?? []).map(transformWorkflowStep),
+    total: response.steps?.length ?? 0,
+  };
+}
+
+// Session Workflow Actions
+export async function setPrimarySessionAction(taskId: string, sessionId: string) {
+  return fetchJson(`${apiBaseUrl}/api/v1/tasks/${taskId}/primary-session`, {
+    method: 'PUT',
+    body: JSON.stringify({ session_id: sessionId }),
+  });
+}
+
+export async function approveSessionAction(sessionId: string): Promise<ApproveSessionResponse> {
+  return fetchJson<ApproveSessionResponse>(`${apiBaseUrl}/api/v1/sessions/${sessionId}/approve`, {
+    method: 'POST',
+  });
+}
+
+
+
+export async function moveSessionToStepAction(sessionId: string, stepId: string) {
+  return fetchJson(`${apiBaseUrl}/api/v1/sessions/${sessionId}/workflow-step`, {
+    method: 'PUT',
+    body: JSON.stringify({ step_id: stepId }),
+  });
 }

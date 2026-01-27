@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { IconAlertTriangle, IconInfoCircle, IconPointFilled, IconHandStop, IconChevronDown, IconChevronRight } from '@tabler/icons-react';
+import { IconAlertTriangle, IconInfoCircle, IconHandStop, IconChevronDown, IconChevronRight } from '@tabler/icons-react';
 import { cn } from '@/lib/utils';
 import type { Message } from '@/lib/types/http';
 import type { StatusMetadata } from '@/components/task/chat/types';

@@ -33,9 +33,9 @@ func (r *Repository) CreateTask(ctx context.Context, task *models.Task) error {
 	}
 
 	_, err = tx.ExecContext(ctx, `
-		INSERT INTO tasks (id, workspace_id, board_id, column_id, title, description, state, priority, position, metadata, created_at, updated_at)
+		INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, description, state, priority, position, metadata, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, task.ID, task.WorkspaceID, task.BoardID, task.ColumnID, task.Title, task.Description, task.State, task.Priority, task.Position, string(metadata), task.CreatedAt, task.UpdatedAt)
+	`, task.ID, task.WorkspaceID, task.BoardID, task.WorkflowStepID, task.Title, task.Description, task.State, task.Priority, task.Position, string(metadata), task.CreatedAt, task.UpdatedAt)
 	if err != nil {
 		if rollbackErr := tx.Rollback(); rollbackErr != nil {
 			return fmt.Errorf("failed to rollback task insert: %w", rollbackErr)
@@ -51,9 +51,9 @@ func (r *Repository) GetTask(ctx context.Context, id string) (*models.Task, erro
 	task := &models.Task{}
 	var metadata string
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, workspace_id, board_id, column_id, title, description, state, priority, position, metadata, created_at, updated_at
+		SELECT id, workspace_id, board_id, workflow_step_id, title, description, state, priority, position, metadata, created_at, updated_at
 		FROM tasks WHERE id = ?
-	`, id).Scan(&task.ID, &task.WorkspaceID, &task.BoardID, &task.ColumnID, &task.Title, &task.Description, &task.State, &task.Priority, &task.Position, &metadata, &task.CreatedAt, &task.UpdatedAt)
+	`, id).Scan(&task.ID, &task.WorkspaceID, &task.BoardID, &task.WorkflowStepID, &task.Title, &task.Description, &task.State, &task.Priority, &task.Position, &metadata, &task.CreatedAt, &task.UpdatedAt)
 
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("task not found: %s", id)
@@ -76,9 +76,9 @@ func (r *Repository) UpdateTask(ctx context.Context, task *models.Task) error {
 	}
 
 	result, err := r.db.ExecContext(ctx, `
-		UPDATE tasks SET workspace_id = ?, board_id = ?, column_id = ?, title = ?, description = ?, state = ?, priority = ?, position = ?, metadata = ?, updated_at = ?
+		UPDATE tasks SET workspace_id = ?, board_id = ?, workflow_step_id = ?, title = ?, description = ?, state = ?, priority = ?, position = ?, metadata = ?, updated_at = ?
 		WHERE id = ?
-	`, task.WorkspaceID, task.BoardID, task.ColumnID, task.Title, task.Description, task.State, task.Priority, task.Position, string(metadata), task.UpdatedAt, task.ID)
+	`, task.WorkspaceID, task.BoardID, task.WorkflowStepID, task.Title, task.Description, task.State, task.Priority, task.Position, string(metadata), task.UpdatedAt, task.ID)
 	if err != nil {
 		return err
 	}
@@ -107,7 +107,7 @@ func (r *Repository) DeleteTask(ctx context.Context, id string) error {
 // ListTasks returns all tasks for a board
 func (r *Repository) ListTasks(ctx context.Context, boardID string) ([]*models.Task, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, workspace_id, board_id, column_id, title, description, state, priority, position, metadata, created_at, updated_at
+		SELECT id, workspace_id, board_id, workflow_step_id, title, description, state, priority, position, metadata, created_at, updated_at
 		FROM tasks
 		WHERE board_id = ?
 		ORDER BY position
@@ -120,13 +120,13 @@ func (r *Repository) ListTasks(ctx context.Context, boardID string) ([]*models.T
 	return r.scanTasks(rows)
 }
 
-// ListTasksByColumn returns all tasks in a column
-func (r *Repository) ListTasksByColumn(ctx context.Context, columnID string) ([]*models.Task, error) {
+// ListTasksByWorkflowStep returns all tasks in a workflow step
+func (r *Repository) ListTasksByWorkflowStep(ctx context.Context, workflowStepID string) ([]*models.Task, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, workspace_id, board_id, column_id, title, description, state, priority, position, metadata, created_at, updated_at
+		SELECT id, workspace_id, board_id, workflow_step_id, title, description, state, priority, position, metadata, created_at, updated_at
 		FROM tasks
-		WHERE column_id = ? ORDER BY position
-	`, columnID)
+		WHERE workflow_step_id = ? ORDER BY position
+	`, workflowStepID)
 	if err != nil {
 		return nil, err
 	}
@@ -145,7 +145,7 @@ func (r *Repository) scanTasks(rows *sql.Rows) ([]*models.Task, error) {
 			&task.ID,
 			&task.WorkspaceID,
 			&task.BoardID,
-			&task.ColumnID,
+			&task.WorkflowStepID,
 			&task.Title,
 			&task.Description,
 			&task.State,

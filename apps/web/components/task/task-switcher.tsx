@@ -19,13 +19,13 @@ type TaskSwitcherItem = {
   title: string;
   state?: TaskState;
   description?: string;
-  columnId?: string;
+  workflowStepId?: string;
   repositoryPath?: string;
 };
 
 type TaskSwitcherProps = {
   tasks: TaskSwitcherItem[];
-  columns: Array<{ id: string; title: string }>;
+  columns: Array<{ id: string; title: string; color?: string }>;
   activeTaskId: string | null;
   selectedTaskId: string | null;
   onSelectTask: (taskId: string) => void;
@@ -47,7 +47,7 @@ export function TaskSwitcher({
   const tasksByColumn = useMemo(() => {
     const grouped: Record<string, TaskSwitcherItem[]> = {};
     for (const task of sortedTasks) {
-      const key = task.columnId ?? 'unknown';
+      const key = task.workflowStepId ?? 'unknown';
       if (!grouped[key]) grouped[key] = [];
       grouped[key].push(task);
     }
@@ -56,9 +56,9 @@ export function TaskSwitcher({
 
   const columnsWithFallback = useMemo(() => {
     const seen = new Set(columns.map((column) => column.id));
-    const extra: Array<{ id: string; title: string }> = [];
+    const extra: Array<{ id: string; title: string; color?: string }> = [];
     if (tasksByColumn.unknown?.length) {
-      extra.push({ id: 'unknown', title: 'Other' });
+      extra.push({ id: 'unknown', title: 'Other', color: 'bg-neutral-400' });
     }
     return [...columns, ...extra].filter((column) => {
       if (seen.has(column.id)) return true;
@@ -95,7 +95,10 @@ export function TaskSwitcher({
                   className="group flex w-full items-center justify-between cursor-pointer"
                   aria-label="Toggle column"
                 >
-                  <span className="truncate text-sm font-medium text-muted-foreground">{column.title}</span>
+                  <span className="flex items-center gap-2 truncate text-sm font-medium text-muted-foreground">
+                    <span className={`w-2 h-2 rounded-full shrink-0 ${column.color ?? 'bg-neutral-400'}`} />
+                    {column.title}
+                  </span>
                   <IconChevronRight className={`h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity ${isColumnOpen ? 'rotate-90' : ''}`} />
                 </button>
                 {isColumnOpen && (

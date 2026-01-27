@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/kandev/kandev/internal/common/sqlite"
 	"github.com/kandev/kandev/internal/notifications/models"
 )
 
@@ -103,7 +104,7 @@ func (r *sqliteRepository) CreateProvider(ctx context.Context, provider *models.
 	_, err = r.db.ExecContext(ctx, `
 		INSERT INTO notification_providers (id, user_id, name, type, config, enabled, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`, provider.ID, provider.UserID, provider.Name, provider.Type, string(configJSON), boolToInt(provider.Enabled), provider.CreatedAt, provider.UpdatedAt)
+	`, provider.ID, provider.UserID, provider.Name, provider.Type, string(configJSON), sqlite.BoolToInt(provider.Enabled), provider.CreatedAt, provider.UpdatedAt)
 	return err
 }
 
@@ -120,7 +121,7 @@ func (r *sqliteRepository) UpdateProvider(ctx context.Context, provider *models.
 		UPDATE notification_providers
 		SET name = ?, type = ?, config = ?, enabled = ?, updated_at = ?
 		WHERE id = ?
-	`, provider.Name, provider.Type, string(configJSON), boolToInt(provider.Enabled), provider.UpdatedAt, provider.ID)
+	`, provider.Name, provider.Type, string(configJSON), sqlite.BoolToInt(provider.Enabled), provider.UpdatedAt, provider.ID)
 	return err
 }
 
@@ -210,7 +211,7 @@ func (r *sqliteRepository) ReplaceSubscriptions(ctx context.Context, providerID,
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO notification_subscriptions (id, user_id, provider_id, event_type, enabled, created_at, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?)
-		`, subID, userID, providerID, eventType, boolToInt(true), now, now); err != nil {
+		`, subID, userID, providerID, eventType, sqlite.BoolToInt(true), now, now); err != nil {
 			_ = tx.Rollback()
 			return err
 		}
@@ -289,11 +290,4 @@ func scanSubscription(scanner interface{ Scan(dest ...any) error }) (*models.Sub
 	}
 	sub.Enabled = enabledInt == 1
 	return sub, nil
-}
-
-func boolToInt(value bool) int {
-	if value {
-		return 1
-	}
-	return 0
 }

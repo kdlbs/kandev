@@ -25,7 +25,17 @@ export async function fetchJson<T>(pathOrUrl: string, options?: ApiRequestOption
     },
   });
   if (!response.ok) {
-    throw new Error(`Request failed: ${response.status} ${response.statusText} (${url})`);
+    // Try to extract error message from response body
+    let errorMessage = `Request failed: ${response.status} ${response.statusText}`;
+    try {
+      const errorBody = await response.json();
+      if (errorBody?.error) {
+        errorMessage = errorBody.error;
+      }
+    } catch {
+      // Ignore JSON parse errors, use default message
+    }
+    throw new Error(errorMessage);
   }
   if (response.status === 204) {
     return undefined as T;

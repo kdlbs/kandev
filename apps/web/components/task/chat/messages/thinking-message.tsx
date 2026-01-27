@@ -2,7 +2,6 @@
 
 import { useState } from 'react';
 import { IconBrain, IconChevronDown, IconChevronRight } from '@tabler/icons-react';
-import { cn } from '@/lib/utils';
 import type { Message } from '@/lib/types/http';
 import type { RichMetadata } from '@/components/task/chat/types';
 

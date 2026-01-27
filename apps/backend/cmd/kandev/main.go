@@ -46,6 +46,10 @@ import (
 	usercontroller "github.com/kandev/kandev/internal/user/controller"
 	userhandlers "github.com/kandev/kandev/internal/user/handlers"
 
+	// Workflow packages
+	workflowcontroller "github.com/kandev/kandev/internal/workflow/controller"
+	workflowhandlers "github.com/kandev/kandev/internal/workflow/handlers"
+
 	// API types
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -262,7 +266,7 @@ func main() {
 	// ============================================
 	log.Info("Initializing Orchestrator...")
 
-	orchestratorSvc, err := provideOrchestrator(log, eventBus, taskRepo, taskSvc, userSvc, lifecycleMgr, agentRegistry)
+	orchestratorSvc, err := provideOrchestrator(log, eventBus, taskRepo, taskSvc, userSvc, lifecycleMgr, agentRegistry, services.Workflow)
 	if err != nil {
 		log.Fatal("Failed to initialize orchestrator", zap.Error(err))
 	}
@@ -500,11 +504,13 @@ func main() {
 
 	workspaceController := taskcontroller.NewWorkspaceController(taskSvc)
 	boardController := taskcontroller.NewBoardController(taskSvc)
+	boardController.SetWorkflowStepLister(services.Workflow)
 	taskController := taskcontroller.NewTaskController(taskSvc)
 	messageController := taskcontroller.NewMessageController(taskSvc)
 	repositoryController := taskcontroller.NewRepositoryController(taskSvc)
 	executorController := taskcontroller.NewExecutorController(taskSvc)
 	environmentController := taskcontroller.NewEnvironmentController(taskSvc)
+	workflowCtrl := workflowcontroller.NewController(services.Workflow)
 
 	// WebSocket endpoint - primary realtime transport
 	gateway.SetupRoutes(router)
@@ -526,6 +532,9 @@ func main() {
 	)
 	taskhandlers.RegisterProcessRoutes(router, taskSvc, lifecycleMgr, log)
 	log.Debug("Registered Task Service handlers (HTTP + WebSocket)")
+
+	workflowhandlers.RegisterRoutes(router, gateway.Dispatcher, workflowCtrl, log)
+	log.Info("Registered Workflow handlers (HTTP + WebSocket)")
 
 	agentsettingshandlers.RegisterRoutes(router, agentSettingsController, gateway.Hub, log)
 	log.Debug("Registered Agent Settings handlers (HTTP)")

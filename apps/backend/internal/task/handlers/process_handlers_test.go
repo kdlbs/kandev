@@ -60,7 +60,7 @@ func (m *mockRepository) DeleteTask(ctx context.Context, id string) error {
 func (m *mockRepository) ListTasks(ctx context.Context, boardID string) ([]*models.Task, error) {
 	return nil, nil
 }
-func (m *mockRepository) ListTasksByColumn(ctx context.Context, columnID string) ([]*models.Task, error) {
+func (m *mockRepository) ListTasksByWorkflowStep(ctx context.Context, workflowStepID string) ([]*models.Task, error) {
 	return nil, nil
 }
 func (m *mockRepository) UpdateTaskState(ctx context.Context, id string, state v1.TaskState) error {
@@ -106,24 +106,6 @@ func (m *mockRepository) DeleteBoard(ctx context.Context, id string) error {
 	return nil
 }
 func (m *mockRepository) ListBoards(ctx context.Context, workspaceID string) ([]*models.Board, error) {
-	return nil, nil
-}
-func (m *mockRepository) CreateColumn(ctx context.Context, column *models.Column) error {
-	return nil
-}
-func (m *mockRepository) GetColumn(ctx context.Context, id string) (*models.Column, error) {
-	return nil, nil
-}
-func (m *mockRepository) GetColumnByState(ctx context.Context, boardID string, state v1.TaskState) (*models.Column, error) {
-	return nil, nil
-}
-func (m *mockRepository) UpdateColumn(ctx context.Context, column *models.Column) error {
-	return nil
-}
-func (m *mockRepository) DeleteColumn(ctx context.Context, id string) error {
-	return nil
-}
-func (m *mockRepository) ListColumns(ctx context.Context, boardID string) ([]*models.Column, error) {
 	return nil, nil
 }
 func (m *mockRepository) CreateMessage(ctx context.Context, message *models.Message) error {
@@ -336,6 +318,21 @@ func (m *mockRepository) GetLatestSessionCommit(ctx context.Context, sessionID s
 	return nil, nil
 }
 func (m *mockRepository) DeleteSessionCommit(ctx context.Context, id string) error {
+	return nil
+}
+func (m *mockRepository) GetPrimarySessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error) {
+	return nil, nil
+}
+func (m *mockRepository) GetPrimarySessionIDsByTaskIDs(ctx context.Context, taskIDs []string) (map[string]string, error) {
+	return make(map[string]string), nil
+}
+func (m *mockRepository) SetSessionPrimary(ctx context.Context, sessionID string) error {
+	return nil
+}
+func (m *mockRepository) UpdateSessionWorkflowStep(ctx context.Context, sessionID string, stepID string) error {
+	return nil
+}
+func (m *mockRepository) UpdateSessionReviewStatus(ctx context.Context, sessionID string, status string) error {
 	return nil
 }
 

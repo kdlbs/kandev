@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	commonsqlite "github.com/kandev/kandev/internal/common/sqlite"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -30,7 +31,7 @@ func (r *Repository) CreateExecutor(ctx context.Context, executor *models.Execut
 	_, err = r.db.ExecContext(ctx, `
 		INSERT INTO executors (id, name, type, status, is_system, resumable, config, created_at, updated_at, deleted_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, executor.ID, executor.Name, executor.Type, executor.Status, boolToInt(executor.IsSystem), boolToInt(executor.Resumable), string(configJSON), executor.CreatedAt, executor.UpdatedAt, executor.DeletedAt)
+	`, executor.ID, executor.Name, executor.Type, executor.Status, commonsqlite.BoolToInt(executor.IsSystem), commonsqlite.BoolToInt(executor.Resumable), string(configJSON), executor.CreatedAt, executor.UpdatedAt, executor.DeletedAt)
 	return err
 }
 
@@ -75,7 +76,7 @@ func (r *Repository) UpdateExecutor(ctx context.Context, executor *models.Execut
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE executors SET name = ?, type = ?, status = ?, is_system = ?, resumable = ?, config = ?, updated_at = ?
 		WHERE id = ? AND deleted_at IS NULL
-	`, executor.Name, executor.Type, executor.Status, boolToInt(executor.IsSystem), boolToInt(executor.Resumable), string(configJSON), executor.UpdatedAt, executor.ID)
+	`, executor.Name, executor.Type, executor.Status, commonsqlite.BoolToInt(executor.IsSystem), commonsqlite.BoolToInt(executor.Resumable), string(configJSON), executor.UpdatedAt, executor.ID)
 	if err != nil {
 		return err
 	}
@@ -184,7 +185,7 @@ func (r *Repository) UpsertExecutorRunning(ctx context.Context, running *models.
 		running.ExecutorID,
 		running.Runtime,
 		running.Status,
-		boolToInt(running.Resumable),
+		commonsqlite.BoolToInt(running.Resumable),
 		running.ResumeToken,
 		running.AgentExecutionID,
 		running.ContainerID,

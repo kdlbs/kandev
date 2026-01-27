@@ -6,16 +6,17 @@ type KanbanTask = KanbanState['tasks'][number];
 export function snapshotToState(snapshot: BoardSnapshot): Partial<AppState> {
   const tasks = snapshot.tasks
     .map((task) => {
-      const columnId = task.column_id;
-      if (!columnId) return null;
+      const workflowStepId = task.workflow_step_id;
+      if (!workflowStepId) return null;
       return {
         id: task.id,
-        columnId,
+        workflowStepId,
         title: task.title,
         description: task.description ?? undefined,
         position: task.position ?? 0,
         state: task.state,
         repositoryId: task.repositories?.[0]?.repository_id ?? undefined,
+        primarySessionId: task.primary_session_id ?? undefined,
       } as KanbanTask;
     })
     .filter((task): task is KanbanTask => task !== null);
@@ -23,11 +24,12 @@ export function snapshotToState(snapshot: BoardSnapshot): Partial<AppState> {
   return {
     kanban: {
       boardId: snapshot.board.id,
-      columns: snapshot.columns.map((column) => ({
-        id: column.id,
-        title: column.name,
-        color: column.color ?? 'bg-neutral-400',
-        position: column.position,
+      steps: snapshot.steps.map((step) => ({
+        id: step.id,
+        title: step.name,
+        color: step.color ?? 'bg-neutral-400',
+        position: step.position,
+        autoStartAgent: step.auto_start_agent ?? false,
       })),
       tasks,
     },

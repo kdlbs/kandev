@@ -3,7 +3,6 @@
 import ReactMarkdown from 'react-markdown';
 import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
-import { IconRobot } from '@tabler/icons-react';
 import { cn } from '@/lib/utils';
 import type { Message } from '@/lib/types/http';
 import { RichBlocks } from '@/components/task/chat/messages/rich-blocks';
@@ -62,7 +61,7 @@ export function ChatMessage({ comment, label, className, showRichBlocks }: ChatM
           <ReactMarkdown
             remarkPlugins={[remarkGfm, remarkBreaks]}
             components={{
-              code: ({ className, children, ...props }) => {
+              code: ({ className, children }) => {
                 // Check if it's inline code (no className means inline, className with language-* means code block)
                 const isInline = !className || !className.startsWith('language-');
 

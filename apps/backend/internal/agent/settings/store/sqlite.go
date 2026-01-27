@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/kandev/kandev/internal/agent/settings/models"
+	"github.com/kandev/kandev/internal/common/sqlite"
 )
 
 type sqliteRepository struct {
@@ -82,13 +83,13 @@ func (r *sqliteRepository) initSchema() error {
 	if err != nil {
 		return err
 	}
-	if err := ensureColumn(r.db, "agent_profiles", "deleted_at", "DATETIME"); err != nil {
+	if err := sqlite.EnsureColumn(r.db, "agent_profiles", "deleted_at", "DATETIME"); err != nil {
 		return err
 	}
-	if err := ensureColumn(r.db, "agent_profiles", "agent_display_name", "TEXT NOT NULL DEFAULT ''"); err != nil {
+	if err := sqlite.EnsureColumn(r.db, "agent_profiles", "agent_display_name", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
-	if err := ensureColumn(r.db, "agent_profiles", "cli_passthrough", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+	if err := sqlite.EnsureColumn(r.db, "agent_profiles", "cli_passthrough", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
 	return nil
@@ -111,7 +112,7 @@ func (r *sqliteRepository) CreateAgent(ctx context.Context, agent *models.Agent)
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO agents (id, name, workspace_id, supports_mcp, mcp_config_path, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, agent.ID, agent.Name, agent.WorkspaceID, boolToInt(agent.SupportsMCP), agent.MCPConfigPath, agent.CreatedAt, agent.UpdatedAt)
+	`, agent.ID, agent.Name, agent.WorkspaceID, sqlite.BoolToInt(agent.SupportsMCP), agent.MCPConfigPath, agent.CreatedAt, agent.UpdatedAt)
 	return err
 }
 
@@ -136,7 +137,7 @@ func (r *sqliteRepository) UpdateAgent(ctx context.Context, agent *models.Agent)
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE agents SET workspace_id = ?, supports_mcp = ?, mcp_config_path = ?, updated_at = ?
 		WHERE id = ?
-	`, agent.WorkspaceID, boolToInt(agent.SupportsMCP), agent.MCPConfigPath, agent.UpdatedAt, agent.ID)
+	`, agent.WorkspaceID, sqlite.BoolToInt(agent.SupportsMCP), agent.MCPConfigPath, agent.UpdatedAt, agent.ID)
 	if err != nil {
 		return err
 	}
@@ -239,7 +240,7 @@ func (r *sqliteRepository) UpsertAgentProfileMcpConfig(ctx context.Context, conf
 			servers_json = excluded.servers_json,
 			meta_json = excluded.meta_json,
 			updated_at = excluded.updated_at
-	`, config.ProfileID, boolToInt(config.Enabled), string(serversJSON), string(metaJSON), config.CreatedAt, config.UpdatedAt)
+	`, config.ProfileID, sqlite.BoolToInt(config.Enabled), string(serversJSON), string(metaJSON), config.CreatedAt, config.UpdatedAt)
 	return err
 }
 
@@ -253,8 +254,8 @@ func (r *sqliteRepository) CreateAgentProfile(ctx context.Context, profile *mode
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO agent_profiles (id, agent_id, name, agent_display_name, model, auto_approve, dangerously_skip_permissions, allow_indexing, cli_passthrough, plan, created_at, updated_at, deleted_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, profile.ID, profile.AgentID, profile.Name, profile.AgentDisplayName, profile.Model, boolToInt(profile.AutoApprove),
-		boolToInt(profile.DangerouslySkipPermissions), boolToInt(profile.AllowIndexing), boolToInt(profile.CLIPassthrough), profile.Plan, profile.CreatedAt, profile.UpdatedAt, profile.DeletedAt)
+	`, profile.ID, profile.AgentID, profile.Name, profile.AgentDisplayName, profile.Model, sqlite.BoolToInt(profile.AutoApprove),
+		sqlite.BoolToInt(profile.DangerouslySkipPermissions), sqlite.BoolToInt(profile.AllowIndexing), sqlite.BoolToInt(profile.CLIPassthrough), profile.Plan, profile.CreatedAt, profile.UpdatedAt, profile.DeletedAt)
 	return err
 }
 
@@ -264,8 +265,8 @@ func (r *sqliteRepository) UpdateAgentProfile(ctx context.Context, profile *mode
 		UPDATE agent_profiles
 		SET name = ?, agent_display_name = ?, model = ?, auto_approve = ?, dangerously_skip_permissions = ?, allow_indexing = ?, cli_passthrough = ?, plan = ?, updated_at = ?
 		WHERE id = ? AND deleted_at IS NULL
-	`, profile.Name, profile.AgentDisplayName, profile.Model, boolToInt(profile.AutoApprove),
-		boolToInt(profile.DangerouslySkipPermissions), boolToInt(profile.AllowIndexing), boolToInt(profile.CLIPassthrough), profile.Plan, profile.UpdatedAt, profile.ID)
+	`, profile.Name, profile.AgentDisplayName, profile.Model, sqlite.BoolToInt(profile.AutoApprove),
+		sqlite.BoolToInt(profile.DangerouslySkipPermissions), sqlite.BoolToInt(profile.AllowIndexing), sqlite.BoolToInt(profile.CLIPassthrough), profile.Plan, profile.UpdatedAt, profile.ID)
 	if err != nil {
 		return err
 	}
@@ -376,47 +377,4 @@ func scanAgentProfile(scanner interface {
 	profile.AllowIndexing = allowIndexing == 1
 	profile.CLIPassthrough = cliPassthrough == 1
 	return profile, nil
-}
-
-func ensureColumn(db *sql.DB, table, column, definition string) error {
-	exists, err := columnExists(db, table, column)
-	if err != nil {
-		return err
-	}
-	if exists {
-		return nil
-	}
-	query := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, definition)
-	_, err = db.Exec(query)
-	return err
-}
-
-func columnExists(db *sql.DB, table, column string) (bool, error) {
-	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
-	if err != nil {
-		return false, err
-	}
-	defer func() {
-		_ = rows.Close()
-	}()
-	for rows.Next() {
-		var cid int
-		var name, ctype string
-		var notnull, pk int
-		var dflt sql.NullString
-		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
-			return false, err
-		}
-		if name == column {
-			return true, nil
-		}
-	}
-	return false, rows.Err()
-}
-
-func boolToInt(value bool) int {
-	if value {
-		return 1
-	}
-	return 0
 }

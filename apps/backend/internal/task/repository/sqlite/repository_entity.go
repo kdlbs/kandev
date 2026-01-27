@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	commonsqlite "github.com/kandev/kandev/internal/common/sqlite"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -27,7 +28,7 @@ func (r *Repository) CreateRepository(ctx context.Context, repository *models.Re
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, repository.ID, repository.WorkspaceID, repository.Name, repository.SourceType, repository.LocalPath, repository.Provider,
 		repository.ProviderRepoID, repository.ProviderOwner, repository.ProviderName, repository.DefaultBranch, repository.WorktreeBranchPrefix,
-		boolToInt(repository.PullBeforeWorktree), repository.SetupScript, repository.CleanupScript, repository.DevScript, repository.CreatedAt, repository.UpdatedAt, repository.DeletedAt)
+		commonsqlite.BoolToInt(repository.PullBeforeWorktree), repository.SetupScript, repository.CleanupScript, repository.DevScript, repository.CreatedAt, repository.UpdatedAt, repository.DeletedAt)
 
 	return err
 }
@@ -62,7 +63,7 @@ func (r *Repository) UpdateRepository(ctx context.Context, repository *models.Re
 			provider_name = ?, default_branch = ?, worktree_branch_prefix = ?, pull_before_worktree = ?, setup_script = ?, cleanup_script = ?, dev_script = ?, updated_at = ?
 		WHERE id = ? AND deleted_at IS NULL
 	`, repository.Name, repository.SourceType, repository.LocalPath, repository.Provider, repository.ProviderRepoID,
-		repository.ProviderOwner, repository.ProviderName, repository.DefaultBranch, repository.WorktreeBranchPrefix, boolToInt(repository.PullBeforeWorktree),
+		repository.ProviderOwner, repository.ProviderName, repository.DefaultBranch, repository.WorktreeBranchPrefix, commonsqlite.BoolToInt(repository.PullBeforeWorktree),
 		repository.SetupScript, repository.CleanupScript, repository.DevScript, repository.UpdatedAt, repository.ID)
 	if err != nil {
 		return err

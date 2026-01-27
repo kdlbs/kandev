@@ -9,15 +9,16 @@ export function registerKanbanHandlers(store: StoreApi<AppState>): WsHandlers {
         ...state,
         kanban: {
           boardId: message.payload.boardId,
-          columns: message.payload.columns.map((column, index) => ({
-            id: column.id,
-            title: column.title,
-            color: column.color ?? 'bg-neutral-400',
-            position: column.position ?? index,
+          steps: message.payload.steps.map((step, index) => ({
+            id: step.id,
+            title: step.title,
+            color: step.color ?? 'bg-neutral-400',
+            position: step.position ?? index,
+            autoStartAgent: step.autoStartAgent ?? false,
           })),
           tasks: message.payload.tasks.map((task) => ({
             id: task.id,
-            columnId: task.columnId,
+            workflowStepId: task.workflowStepId,
             title: task.title,
             description: task.description,
             position: task.position ?? 0,

@@ -6,7 +6,7 @@ import { useBoards } from '@/hooks/use-boards';
 import { useBoardSnapshot } from '@/hooks/use-board-snapshot';
 import { useUserDisplaySettings } from '@/hooks/use-user-display-settings';
 import { filterTasksByRepositories } from '@/lib/kanban/filters';
-import type { Column } from '@/components/kanban-column';
+import type { WorkflowStep } from '@/components/kanban-column';
 
 type KanbanDataOptions = {
   onWorkspaceChange: (workspaceId: string | null) => void;
@@ -46,26 +46,28 @@ export function useKanbanData({ onWorkspaceChange, onBoardChange }: KanbanDataOp
   );
 
   // Derived data
-  const columns = useMemo<Column[]>(
+  const columns = useMemo<WorkflowStep[]>(
     () =>
-      [...kanban.columns]
+      [...kanban.steps]
         .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
-        .map((column) => ({
-          id: column.id,
-          title: column.title,
-          color: column.color || 'bg-neutral-400',
+        .map((step) => ({
+          id: step.id,
+          title: step.title,
+          color: step.color || 'bg-neutral-400',
+          autoStartAgent: step.autoStartAgent,
         })),
-    [kanban.columns]
+    [kanban.steps]
   );
 
   const tasks = kanban.tasks.map((task: typeof kanban.tasks[number]) => ({
     id: task.id,
     title: task.title,
-    columnId: task.columnId,
+    workflowStepId: task.workflowStepId,
     state: task.state,
     description: task.description,
     position: task.position,
     repositoryId: task.repositoryId,
+    primarySessionId: task.primarySessionId,
   }));
 
   const activeColumns = kanban.boardId ? columns : [];

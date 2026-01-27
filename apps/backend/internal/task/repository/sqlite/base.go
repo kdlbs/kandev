@@ -4,6 +4,8 @@ package sqlite
 import (
 	"database/sql"
 	"fmt"
+
+	commonsqlite "github.com/kandev/kandev/internal/common/sqlite"
 )
 
 // Repository provides SQLite-based task storage operations.
@@ -45,47 +47,7 @@ func (r *Repository) DB() *sql.DB {
 
 // ensureColumn adds a column to a table if it doesn't exist
 func (r *Repository) ensureColumn(table, column, definition string) error {
-	exists, err := r.columnExists(table, column)
-	if err != nil {
-		return err
-	}
-	if exists {
-		return nil
-	}
-	_, err = r.db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, definition))
-	return err
-}
-
-// columnExists checks if a column exists in a table
-func (r *Repository) columnExists(table, column string) (bool, error) {
-	rows, err := r.db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
-	if err != nil {
-		return false, err
-	}
-	defer func() { _ = rows.Close() }()
-
-	for rows.Next() {
-		var cid int
-		var name, colType string
-		var notNull int
-		var defaultValue *string
-		var pk int
-		if err := rows.Scan(&cid, &name, &colType, &notNull, &defaultValue, &pk); err != nil {
-			return false, err
-		}
-		if name == column {
-			return true, nil
-		}
-	}
-	return false, rows.Err()
-}
-
-// boolToInt converts a boolean to an integer (for SQLite)
-func boolToInt(value bool) int {
-	if value {
-		return 1
-	}
-	return 0
+	return commonsqlite.EnsureColumn(r.db, table, column, definition)
 }
 
 // ensureWorkspaceIndexes creates workspace-related indexes
@@ -173,23 +135,11 @@ func (r *Repository) initSchema() error {
 		updated_at DATETIME NOT NULL
 	);
 
-	CREATE TABLE IF NOT EXISTS columns (
-		id TEXT PRIMARY KEY,
-		board_id TEXT NOT NULL,
-		name TEXT NOT NULL,
-		position INTEGER DEFAULT 0,
-		state TEXT DEFAULT 'TODO',
-		color TEXT NOT NULL DEFAULT '',
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL,
-		FOREIGN KEY (board_id) REFERENCES boards(id) ON DELETE CASCADE
-	);
-
 	CREATE TABLE IF NOT EXISTS tasks (
 		id TEXT PRIMARY KEY,
 		workspace_id TEXT NOT NULL DEFAULT '',
 		board_id TEXT NOT NULL,
-		column_id TEXT NOT NULL,
+		workflow_step_id TEXT NOT NULL DEFAULT '',
 		title TEXT NOT NULL,
 		description TEXT DEFAULT '',
 		state TEXT DEFAULT 'TODO',
@@ -198,8 +148,7 @@ func (r *Repository) initSchema() error {
 		metadata TEXT DEFAULT '{}',
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL,
-		FOREIGN KEY (board_id) REFERENCES boards(id) ON DELETE CASCADE,
-		FOREIGN KEY (column_id) REFERENCES columns(id) ON DELETE CASCADE
+		FOREIGN KEY (board_id) REFERENCES boards(id) ON DELETE CASCADE
 	);
 
 	CREATE TABLE IF NOT EXISTS task_repositories (
@@ -250,10 +199,9 @@ func (r *Repository) initSchema() error {
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_tasks_board_id ON tasks(board_id);
-	CREATE INDEX IF NOT EXISTS idx_tasks_column_id ON tasks(column_id);
+	CREATE INDEX IF NOT EXISTS idx_tasks_workflow_step_id ON tasks(workflow_step_id);
 	CREATE INDEX IF NOT EXISTS idx_task_repositories_task_id ON task_repositories(task_id);
 	CREATE INDEX IF NOT EXISTS idx_task_repositories_repository_id ON task_repositories(repository_id);
-	CREATE INDEX IF NOT EXISTS idx_columns_board_id ON columns(board_id);
 	CREATE INDEX IF NOT EXISTS idx_repositories_workspace_id ON repositories(workspace_id);
 	CREATE INDEX IF NOT EXISTS idx_repository_scripts_repo_id ON repository_scripts(repository_id);
 	`
@@ -320,6 +268,9 @@ func (r *Repository) initSchema() error {
 		started_at DATETIME NOT NULL,
 		completed_at DATETIME,
 		updated_at DATETIME NOT NULL,
+		is_primary INTEGER DEFAULT 0,
+		workflow_step_id TEXT DEFAULT '',
+		review_status TEXT DEFAULT '',
 		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 	);
 
@@ -406,6 +357,9 @@ func (r *Repository) initSchema() error {
 	if err := r.ensureColumn("boards", "workspace_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
+	if err := r.ensureColumn("boards", "workflow_template_id", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
 	if err := r.ensureColumn("tasks", "workspace_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
@@ -418,9 +372,7 @@ func (r *Repository) initSchema() error {
 	if err := r.ensureColumn("workspaces", "default_agent_profile_id", "TEXT DEFAULT ''"); err != nil {
 		return err
 	}
-	if err := r.ensureColumn("columns", "color", "TEXT NOT NULL DEFAULT ''"); err != nil {
-		return err
-	}
+
 	if err := r.ensureColumn("environments", "is_system", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
@@ -468,6 +420,15 @@ func (r *Repository) initSchema() error {
 		return err
 	}
 	if err := r.ensureColumn("task_sessions", "state", "TEXT NOT NULL DEFAULT 'CREATED'"); err != nil {
+		return err
+	}
+	if err := r.ensureColumn("task_sessions", "is_primary", "INTEGER DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := r.ensureColumn("task_sessions", "workflow_step_id", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := r.ensureColumn("task_sessions", "review_status", "TEXT DEFAULT ''"); err != nil {
 		return err
 	}
 

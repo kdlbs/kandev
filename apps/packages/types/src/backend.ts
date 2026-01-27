@@ -32,7 +32,7 @@ export type KanbanUpdatePayload = {
   columns: Array<{ id: string; title: string; color?: string; position?: number }>;
   tasks: Array<{
     id: string;
-    columnId: string;
+    workflowStepId: string;
     title: string;
     position?: number;
     description?: string;
@@ -43,7 +43,7 @@ export type KanbanUpdatePayload = {
 export type TaskEventPayload = {
   task_id: string;
   board_id: string;
-  column_id: string;
+  workflow_step_id: string;
   title: string;
   description?: string;
   state?: string;

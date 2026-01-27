@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"go.uber.org/zap"
 
@@ -41,14 +42,18 @@ func (s *Service) EnqueueTask(ctx context.Context, task *v1.Task) error {
 	return s.scheduler.EnqueueTask(task)
 }
 
-// StartTask manually starts agent execution for a task
-func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID string, executorID string, priority int, prompt string) (*executor.TaskExecution, error) {
+// StartTask manually starts agent execution for a task.
+// If workflowStepID is provided and workflowStepGetter is set, the prompt will be built
+// using the step's prompt_prefix + base prompt + prompt_suffix, and plan mode will be
+// applied if the step has plan_mode enabled.
+func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID string, executorID string, priority int, prompt string, workflowStepID string) (*executor.TaskExecution, error) {
 	s.logger.Debug("manually starting task",
 		zap.String("task_id", taskID),
 		zap.String("agent_profile_id", agentProfileID),
 		zap.String("executor_id", executorID),
 		zap.Int("priority", priority),
-		zap.Int("prompt_length", len(prompt)))
+		zap.Int("prompt_length", len(prompt)),
+		zap.String("workflow_step_id", workflowStepID))
 
 	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateScheduling); err != nil {
 		s.logger.Warn("failed to update task state to SCHEDULING",
@@ -76,7 +81,27 @@ func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID s
 		effectivePrompt = task.Description
 	}
 
-	execution, err := s.executor.ExecuteWithProfile(ctx, task, agentProfileID, executorID, effectivePrompt)
+	// Apply workflow step configuration if provided
+	if workflowStepID != "" && s.workflowStepGetter != nil {
+		step, err := s.workflowStepGetter.GetStep(ctx, workflowStepID)
+		if err != nil {
+			s.logger.Warn("failed to get workflow step for prompt building",
+				zap.String("workflow_step_id", workflowStepID),
+				zap.Error(err))
+			// Continue without step config rather than failing
+		} else {
+			// Build prompt with prefix and suffix
+			effectivePrompt = s.buildWorkflowPrompt(effectivePrompt, step, task.ID)
+
+			s.logger.Debug("applied workflow step prompt config",
+				zap.String("workflow_step_id", workflowStepID),
+				zap.String("step_name", step.Name),
+				zap.Bool("plan_mode", step.PlanMode),
+				zap.Int("effective_prompt_length", len(effectivePrompt)))
+		}
+	}
+
+	execution, err := s.executor.ExecuteWithProfile(ctx, task, agentProfileID, executorID, effectivePrompt, workflowStepID)
 	if err != nil {
 		return nil, err
 	}
@@ -97,6 +122,56 @@ func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID s
 	// The executor will transition to IN_PROGRESS after StartAgentProcess() succeeds.
 
 	return execution, nil
+}
+
+// SystemTagStart marks the beginning of system-injected content that should be hidden from the UI.
+const SystemTagStart = "<kandev-system>"
+
+// SystemTagEnd marks the end of system-injected content that should be hidden from the UI.
+const SystemTagEnd = "</kandev-system>"
+
+// buildWorkflowPrompt constructs the effective prompt using workflow step configuration.
+// It combines: step.PromptPrefix + basePrompt + step.PromptSuffix
+// If step.PlanMode is true, it also prepends the plan mode prefix.
+// Placeholders like {task_id} are interpolated with actual values.
+// System-injected content (prefix, suffix, plan mode) is wrapped in <kandev-system> tags
+// so it can be stripped when displaying to users.
+func (s *Service) buildWorkflowPrompt(basePrompt string, step *WorkflowStep, taskID string) string {
+	var parts []string
+
+	// Apply plan mode prefix if enabled (wrapped in system tags)
+	if step.PlanMode {
+		parts = append(parts, wrapSystemContent(PlanModePrefix))
+	}
+
+	// Add prompt prefix if set (with interpolation, wrapped in system tags)
+	if step.PromptPrefix != "" {
+		parts = append(parts, wrapSystemContent(interpolatePrompt(step.PromptPrefix, taskID)))
+	}
+
+	// Add base prompt (user's actual message - not wrapped)
+	parts = append(parts, basePrompt)
+
+	// Add prompt suffix if set (with interpolation, wrapped in system tags)
+	if step.PromptSuffix != "" {
+		parts = append(parts, wrapSystemContent(interpolatePrompt(step.PromptSuffix, taskID)))
+	}
+
+	return strings.Join(parts, "\n\n")
+}
+
+// wrapSystemContent wraps content in <kandev-system> tags to mark it as system-injected.
+func wrapSystemContent(content string) string {
+	return SystemTagStart + content + SystemTagEnd
+}
+
+// interpolatePrompt replaces placeholders in prompt templates with actual values.
+// Supported placeholders:
+//   - {task_id} - the task ID
+func interpolatePrompt(template string, taskID string) string {
+	result := template
+	result = strings.ReplaceAll(result, "{task_id}", taskID)
+	return result
 }
 
 // ResumeTaskSession restarts a specific task session using its stored worktree.
@@ -133,6 +208,119 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 		zap.String("session_id", sessionID))
 
 	return execution, nil
+}
+
+// StartSessionForWorkflowStep starts an existing session with a workflow step's prompt configuration.
+// If the session is not running, it will be resumed first. Then a prompt is sent using the
+// step's prompt_prefix, prompt_suffix, and plan_mode settings combined with the task description.
+func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessionID, workflowStepID string) error {
+	s.logger.Debug("starting session for workflow step",
+		zap.String("task_id", taskID),
+		zap.String("session_id", sessionID),
+		zap.String("workflow_step_id", workflowStepID))
+
+	if workflowStepID == "" {
+		return fmt.Errorf("workflow_step_id is required")
+	}
+	if s.workflowStepGetter == nil {
+		return fmt.Errorf("workflow step getter not configured")
+	}
+
+	// Get the workflow step
+	step, err := s.workflowStepGetter.GetStep(ctx, workflowStepID)
+	if err != nil {
+		return fmt.Errorf("failed to get workflow step: %w", err)
+	}
+
+	// Get the session
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to get session: %w", err)
+	}
+	if session.TaskID != taskID {
+		return fmt.Errorf("session does not belong to task")
+	}
+
+	// Get the task to use its description as the base prompt
+	task, err := s.scheduler.GetTask(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("failed to get task: %w", err)
+	}
+
+	// Check if session is in a review step with pending approval
+	// If so, reject the request - user must use Approve button or send a chat message
+	if session.ReviewStatus != nil && *session.ReviewStatus == "pending" {
+		if session.WorkflowStepID != nil && *session.WorkflowStepID != "" {
+			currentStep, err := s.workflowStepGetter.GetStep(ctx, *session.WorkflowStepID)
+			if err == nil && currentStep.RequireApproval {
+				return fmt.Errorf("session is pending approval - use Approve button to proceed or send a message to request changes")
+			}
+		}
+	}
+
+	// Update session's workflow step to the new step
+	if session.WorkflowStepID == nil || *session.WorkflowStepID != workflowStepID {
+		if err := s.repo.UpdateSessionWorkflowStep(ctx, sessionID, workflowStepID); err != nil {
+			s.logger.Warn("failed to update session workflow step",
+				zap.String("session_id", sessionID),
+				zap.String("workflow_step_id", workflowStepID),
+				zap.Error(err))
+		}
+		// Clear review status when moving to a new step
+		if session.ReviewStatus != nil && *session.ReviewStatus != "" {
+			if err := s.repo.UpdateSessionReviewStatus(ctx, sessionID, ""); err != nil {
+				s.logger.Warn("failed to clear session review status",
+					zap.String("session_id", sessionID),
+					zap.Error(err))
+			}
+		}
+	}
+
+	// Build prompt from workflow step configuration
+	effectivePrompt := s.buildWorkflowPrompt(task.Description, step, taskID)
+
+	// Check if session needs to be resumed first
+	// A session in "running" or "waiting_for_input" state can receive prompts directly
+	// Other states (created, starting, completed, failed, cancelled) need resume
+	sessionState := session.State
+	if sessionState != models.TaskSessionStateRunning && sessionState != models.TaskSessionStateWaitingForInput {
+		// Try to resume the session
+		s.logger.Debug("session not running, attempting resume",
+			zap.String("session_id", sessionID),
+			zap.String("session_state", string(session.State)))
+
+		running, err := s.repo.GetExecutorRunningBySessionID(ctx, sessionID)
+		if err != nil || running == nil || running.ResumeToken == "" || !running.Resumable {
+			return fmt.Errorf("session is not resumable (state: %s)", session.State)
+		}
+
+		if err := validateSessionWorktrees(session); err != nil {
+			return err
+		}
+
+		_, err = s.executor.ResumeSession(ctx, session, true)
+		if err != nil {
+			_ = s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateFailed, err.Error())
+			return fmt.Errorf("failed to resume session: %w", err)
+		}
+
+		s.logger.Debug("session resumed, now sending prompt")
+	}
+
+	// Send the prompt using PromptTask (with planMode from step)
+	_, err = s.PromptTask(ctx, taskID, sessionID, effectivePrompt, "", step.PlanMode)
+	if err != nil {
+		return fmt.Errorf("failed to prompt session: %w", err)
+	}
+
+	s.logger.Info("session started for workflow step",
+		zap.String("task_id", taskID),
+		zap.String("session_id", sessionID),
+		zap.String("workflow_step_id", workflowStepID),
+		zap.String("step_name", step.Name),
+		zap.Bool("plan_mode", step.PlanMode))
+
+	return nil
 }
 
 // GetTaskSessionStatus returns the status of a task session including whether it's resumable
@@ -260,6 +448,10 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 	if planMode {
 		effectivePrompt = PlanModePrefix + prompt
 	}
+
+	// Check if session is in a review step - if so, move back to the previous step
+	// This handles the case where the user sends a message to iterate on the work
+	s.handleReviewStepRollback(ctx, taskID, sessionID)
 
 	// Check if model switching is requested
 	if model != "" {

@@ -48,6 +48,35 @@ type TaskExecutionStopper interface {
 	StopTask(ctx context.Context, taskID, reason string, force bool) error
 }
 
+// WorkflowStepCreator creates workflow steps from a template for a board.
+type WorkflowStepCreator interface {
+	CreateStepsFromTemplate(ctx context.Context, boardID, templateID string) error
+}
+
+// WorkflowStepGetter retrieves workflow step information.
+type WorkflowStepGetter interface {
+	GetStep(ctx context.Context, stepID string) (*WorkflowStep, error)
+}
+
+// WorkflowStep represents a workflow step (mirrors workflow/models.WorkflowStep).
+// Defined here to avoid circular dependency with workflow package.
+type WorkflowStep struct {
+	ID               string
+	BoardID          string
+	Name             string
+	StepType         string
+	Position         int
+	Color            string
+	AutoStartAgent   bool
+	PlanMode         bool
+	RequireApproval  bool
+	PromptPrefix     string
+	PromptSuffix     string
+	AllowManualMove  bool
+	OnCompleteStepID *string
+	OnApprovalStepID *string
+}
+
 var (
 	ErrActiveTaskSessions        = errors.New("active agent sessions exist")
 	ErrInvalidRepositorySettings = errors.New("invalid repository settings")
@@ -74,12 +103,14 @@ func validateExecutorConfig(config map[string]string) error {
 
 // Service provides task business logic
 type Service struct {
-	repo             repository.Repository
-	eventBus         bus.EventBus
-	logger           *logger.Logger
-	discoveryConfig  RepositoryDiscoveryConfig
-	worktreeCleanup  WorktreeCleanup
-	executionStopper TaskExecutionStopper
+	repo                repository.Repository
+	eventBus            bus.EventBus
+	logger              *logger.Logger
+	discoveryConfig     RepositoryDiscoveryConfig
+	worktreeCleanup     WorktreeCleanup
+	executionStopper    TaskExecutionStopper
+	workflowStepCreator WorkflowStepCreator
+	workflowStepGetter  WorkflowStepGetter
 }
 
 // NewService creates a new task service
@@ -102,6 +133,16 @@ func (s *Service) SetExecutionStopper(stopper TaskExecutionStopper) {
 	s.executionStopper = stopper
 }
 
+// SetWorkflowStepCreator wires the workflow step creator for board creation.
+func (s *Service) SetWorkflowStepCreator(creator WorkflowStepCreator) {
+	s.workflowStepCreator = creator
+}
+
+// SetWorkflowStepGetter wires the workflow step getter for MoveTask.
+func (s *Service) SetWorkflowStepGetter(getter WorkflowStepGetter) {
+	s.workflowStepGetter = getter
+}
+
 // Request types
 
 // TaskRepositoryInput for creating/updating task repositories
@@ -115,16 +156,16 @@ type TaskRepositoryInput struct {
 
 // CreateTaskRequest contains the data for creating a new task
 type CreateTaskRequest struct {
-	WorkspaceID  string                 `json:"workspace_id"`
-	BoardID      string                 `json:"board_id"`
-	ColumnID     string                 `json:"column_id"`
-	Title        string                 `json:"title"`
-	Description  string                 `json:"description"`
-	Priority     int                    `json:"priority"`
-	State        *v1.TaskState          `json:"state,omitempty"`
-	Repositories []TaskRepositoryInput  `json:"repositories,omitempty"`
-	Position     int                    `json:"position"`
-	Metadata     map[string]interface{} `json:"metadata,omitempty"`
+	WorkspaceID    string                 `json:"workspace_id"`
+	BoardID        string                 `json:"board_id"`
+	WorkflowStepID string                 `json:"workflow_step_id"`
+	Title          string                 `json:"title"`
+	Description    string                 `json:"description"`
+	Priority       int                    `json:"priority"`
+	State          *v1.TaskState          `json:"state,omitempty"`
+	Repositories   []TaskRepositoryInput  `json:"repositories,omitempty"`
+	Position       int                    `json:"position"`
+	Metadata       map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // UpdateTaskRequest contains the data for updating a task
@@ -140,9 +181,10 @@ type UpdateTaskRequest struct {
 
 // CreateBoardRequest contains the data for creating a new board
 type CreateBoardRequest struct {
-	WorkspaceID string `json:"workspace_id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
+	WorkspaceID        string  `json:"workspace_id"`
+	Name               string  `json:"name"`
+	Description        string  `json:"description"`
+	WorkflowTemplateID *string `json:"workflow_template_id,omitempty"`
 }
 
 // UpdateBoardRequest contains the data for updating a board
@@ -168,23 +210,6 @@ type UpdateWorkspaceRequest struct {
 	DefaultExecutorID     *string `json:"default_executor_id,omitempty"`
 	DefaultEnvironmentID  *string `json:"default_environment_id,omitempty"`
 	DefaultAgentProfileID *string `json:"default_agent_profile_id,omitempty"`
-}
-
-// CreateColumnRequest contains the data for creating a new column
-type CreateColumnRequest struct {
-	BoardID  string       `json:"board_id"`
-	Name     string       `json:"name"`
-	Position int          `json:"position"`
-	State    v1.TaskState `json:"state"`
-	Color    string       `json:"color"`
-}
-
-// UpdateColumnRequest contains the data for updating a column
-type UpdateColumnRequest struct {
-	Name     *string       `json:"name,omitempty"`
-	Position *int          `json:"position,omitempty"`
-	State    *v1.TaskState `json:"state,omitempty"`
-	Color    *string       `json:"color,omitempty"`
 }
 
 // CreateRepositoryRequest contains the data for creating a new repository
@@ -293,16 +318,16 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*mode
 		state = *req.State
 	}
 	task := &models.Task{
-		ID:          uuid.New().String(),
-		WorkspaceID: req.WorkspaceID,
-		BoardID:     req.BoardID,
-		ColumnID:    req.ColumnID,
-		Title:       req.Title,
-		Description: req.Description,
-		State:       state,
-		Priority:    req.Priority,
-		Position:    req.Position,
-		Metadata:    req.Metadata,
+		ID:             uuid.New().String(),
+		WorkspaceID:    req.WorkspaceID,
+		BoardID:        req.BoardID,
+		WorkflowStepID: req.WorkflowStepID,
+		Title:          req.Title,
+		Description:    req.Description,
+		State:          state,
+		Priority:       req.Priority,
+		Position:       req.Position,
+		Metadata:       req.Metadata,
 	}
 
 	if err := s.repo.CreateTask(ctx, task); err != nil {
@@ -638,6 +663,133 @@ func (s *Service) GetTaskSession(ctx context.Context, sessionID string) (*models
 	return s.repo.GetTaskSession(ctx, sessionID)
 }
 
+// GetPrimarySession returns the primary session for a task.
+func (s *Service) GetPrimarySession(ctx context.Context, taskID string) (*models.TaskSession, error) {
+	return s.repo.GetPrimarySessionByTaskID(ctx, taskID)
+}
+
+// GetPrimarySessionIDsForTasks returns a map of task ID to primary session ID for the given task IDs.
+// Tasks without a primary session are not included in the result.
+func (s *Service) GetPrimarySessionIDsForTasks(ctx context.Context, taskIDs []string) (map[string]string, error) {
+	return s.repo.GetPrimarySessionIDsByTaskIDs(ctx, taskIDs)
+}
+
+// SetPrimarySession sets a session as the primary session for its task.
+// This will unset any existing primary session for the same task.
+func (s *Service) SetPrimarySession(ctx context.Context, sessionID string) error {
+	if err := s.repo.SetSessionPrimary(ctx, sessionID); err != nil {
+		s.logger.Error("failed to set primary session",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+// MoveSessionToStep moves a session to a different workflow step.
+func (s *Service) MoveSessionToStep(ctx context.Context, sessionID string, stepID string) error {
+	if err := s.repo.UpdateSessionWorkflowStep(ctx, sessionID, stepID); err != nil {
+		s.logger.Error("failed to move session to step",
+			zap.String("session_id", sessionID),
+			zap.String("step_id", stepID),
+			zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+// UpdateSessionReviewStatus updates the review status of a session.
+func (s *Service) UpdateSessionReviewStatus(ctx context.Context, sessionID string, status string) error {
+	if err := s.repo.UpdateSessionReviewStatus(ctx, sessionID, status); err != nil {
+		s.logger.Error("failed to update session review status",
+			zap.String("session_id", sessionID),
+			zap.String("status", status),
+			zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+// ApproveSessionResult contains the result of approving a session
+type ApproveSessionResult struct {
+	Session      *models.TaskSession
+	Task         *models.Task
+	WorkflowStep *WorkflowStep
+}
+
+// ApproveSession approves a session's current step and moves it to the on_approval_step_id
+func (s *Service) ApproveSession(ctx context.Context, sessionID string) (*ApproveSessionResult, error) {
+	// Update review status to approved
+	if err := s.repo.UpdateSessionReviewStatus(ctx, sessionID, "approved"); err != nil {
+		return nil, fmt.Errorf("failed to update review status: %w", err)
+	}
+
+	result := &ApproveSessionResult{}
+
+	// Reload session to get updated review status
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to reload session: %w", err)
+	}
+	result.Session = session
+
+	// Get the current workflow step to check for on_approval_step_id
+	if session.WorkflowStepID != nil && s.workflowStepGetter != nil {
+		step, err := s.workflowStepGetter.GetStep(ctx, *session.WorkflowStepID)
+		if err != nil {
+			s.logger.Warn("failed to get workflow step for approval transition",
+				zap.String("workflow_step_id", *session.WorkflowStepID),
+				zap.Error(err))
+		} else if step.OnApprovalStepID != nil && *step.OnApprovalStepID != "" {
+			// Move session and task to the on_approval_step_id
+			newStepID := *step.OnApprovalStepID
+			if err := s.repo.UpdateSessionWorkflowStep(ctx, sessionID, newStepID); err != nil {
+				s.logger.Error("failed to move session to approval step",
+					zap.String("session_id", sessionID),
+					zap.String("step_id", newStepID),
+					zap.Error(err))
+			} else {
+				// Also move the task to the new step
+				task, err := s.repo.GetTask(ctx, session.TaskID)
+				if err != nil {
+					s.logger.Error("failed to get task for approval transition",
+						zap.String("task_id", session.TaskID),
+						zap.Error(err))
+				} else {
+					task.WorkflowStepID = newStepID
+					task.UpdatedAt = time.Now().UTC()
+					if err := s.repo.UpdateTask(ctx, task); err != nil {
+						s.logger.Error("failed to move task to approval step",
+							zap.String("task_id", session.TaskID),
+							zap.String("step_id", newStepID),
+							zap.Error(err))
+					} else {
+						s.publishTaskEvent(ctx, events.TaskUpdated, task, nil)
+						result.Task = task
+					}
+				}
+
+				// Reload session with new step
+				session, _ = s.repo.GetTaskSession(ctx, sessionID)
+				result.Session = session
+
+				// Get the new workflow step for the response
+				newStep, err := s.workflowStepGetter.GetStep(ctx, newStepID)
+				if err == nil {
+					result.WorkflowStep = newStep
+				}
+
+				s.logger.Info("session approved and moved to next step",
+					zap.String("session_id", sessionID),
+					zap.String("from_step", *session.WorkflowStepID),
+					zap.String("to_step", newStepID))
+			}
+		}
+	}
+
+	return result, nil
+}
+
 // UpdateTaskState updates the state of a task, moves it to the matching column,
 // and publishes a task.state_changed event
 func (s *Service) UpdateTaskState(ctx context.Context, id string, state v1.TaskState) (*models.Task, error) {
@@ -653,41 +805,15 @@ func (s *Service) UpdateTaskState(ctx context.Context, id string, state v1.TaskS
 		return nil, err
 	}
 
-	// Find the column that maps to the new state and move the task there
-	// This ensures the Kanban board stays in sync with task state
-	if task.BoardID != "" {
-		column, err := s.repo.GetColumnByState(ctx, task.BoardID, state)
-		if err != nil {
-			s.logger.Warn("no column found for state, task will stay in current column",
-				zap.String("task_id", id),
-				zap.String("state", string(state)),
-				zap.Error(err))
-		} else if column.ID != task.ColumnID {
-			// Move task to the new column (keep it at position 0 - top of the column)
-			if err := s.repo.AddTaskToBoard(ctx, id, task.BoardID, column.ID, 0); err != nil {
-				s.logger.Error("failed to move task to new column",
-					zap.String("task_id", id),
-					zap.String("column_id", column.ID),
-					zap.Error(err))
-			} else {
-				s.logger.Info("task moved to column matching new state",
-					zap.String("task_id", id),
-					zap.String("column_id", column.ID),
-					zap.String("column_name", column.Name),
-					zap.String("state", string(state)))
-			}
-		}
-	}
-
-	// Reload task to get updated state and column
+	// Reload task to get updated state
 	task, err = s.repo.GetTask(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 
-	s.logger.Info("task reloaded after column move",
+	s.logger.Info("task state updated",
 		zap.String("task_id", id),
-		zap.String("column_id", task.ColumnID),
+		zap.String("workflow_step_id", task.WorkflowStepID),
 		zap.String("state", string(task.State)))
 
 	s.publishTaskEvent(ctx, events.TaskStateChanged, task, &oldState)
@@ -724,24 +850,40 @@ func (s *Service) UpdateTaskMetadata(ctx context.Context, id string, metadata ma
 	return task, nil
 }
 
-// MoveTask moves a task to a different column and position
-func (s *Service) MoveTask(ctx context.Context, id string, boardID string, columnID string, position int) (*models.Task, error) {
+// MoveTaskResult contains the result of a MoveTask operation.
+type MoveTaskResult struct {
+	Task         *models.Task
+	WorkflowStep *WorkflowStep
+}
+
+// MoveTask moves a task to a different workflow step and position
+func (s *Service) MoveTask(ctx context.Context, id string, boardID string, workflowStepID string, position int) (*MoveTaskResult, error) {
 	task, err := s.repo.GetTask(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 
-	// Get the column to determine the new state
-	column, err := s.repo.GetColumn(ctx, columnID)
-	if err != nil {
-		return nil, err
+	// Check if task's primary session is in a review step with pending approval
+	// If so, prevent moving forward - user must use Approve button or send a message
+	if task.WorkflowStepID != workflowStepID {
+		primarySession, err := s.repo.GetPrimarySessionByTaskID(ctx, id)
+		if err == nil && primarySession != nil {
+			if primarySession.ReviewStatus != nil && *primarySession.ReviewStatus == "pending" {
+				// Check if current step requires approval
+				if s.workflowStepGetter != nil && primarySession.WorkflowStepID != nil {
+					currentStep, err := s.workflowStepGetter.GetStep(ctx, *primarySession.WorkflowStepID)
+					if err == nil && currentStep.RequireApproval {
+						return nil, fmt.Errorf("task is pending approval - use Approve button to proceed or send a message to request changes")
+					}
+				}
+			}
+		}
 	}
 
 	oldState := task.State
 	task.BoardID = boardID
-	task.ColumnID = columnID
+	task.WorkflowStepID = workflowStepID
 	task.Position = position
-	task.State = column.State
 	task.UpdatedAt = time.Now().UTC()
 
 	if err := s.repo.UpdateTask(ctx, task); err != nil {
@@ -759,10 +901,25 @@ func (s *Service) MoveTask(ctx context.Context, id string, boardID string, colum
 	s.logger.Info("task moved",
 		zap.String("task_id", id),
 		zap.String("board_id", boardID),
-		zap.String("column_id", columnID),
+		zap.String("workflow_step_id", workflowStepID),
 		zap.Int("position", position))
 
-	return task, nil
+	result := &MoveTaskResult{Task: task}
+
+	// Fetch the workflow step info if getter is available
+	if s.workflowStepGetter != nil {
+		step, err := s.workflowStepGetter.GetStep(ctx, workflowStepID)
+		if err != nil {
+			s.logger.Warn("failed to get workflow step for MoveTask response",
+				zap.String("workflow_step_id", workflowStepID),
+				zap.Error(err))
+			// Don't fail the operation, just log and continue
+		} else {
+			result.WorkflowStep = step
+		}
+	}
+
+	return result, nil
 }
 
 // Workspace operations
@@ -864,15 +1021,27 @@ func (s *Service) ListWorkspaces(ctx context.Context) ([]*models.Workspace, erro
 // CreateBoard creates a new board
 func (s *Service) CreateBoard(ctx context.Context, req *CreateBoardRequest) (*models.Board, error) {
 	board := &models.Board{
-		ID:          uuid.New().String(),
-		WorkspaceID: req.WorkspaceID,
-		Name:        req.Name,
-		Description: req.Description,
+		ID:                 uuid.New().String(),
+		WorkspaceID:        req.WorkspaceID,
+		Name:               req.Name,
+		Description:        req.Description,
+		WorkflowTemplateID: req.WorkflowTemplateID,
 	}
 
 	if err := s.repo.CreateBoard(ctx, board); err != nil {
 		s.logger.Error("failed to create board", zap.Error(err))
 		return nil, err
+	}
+
+	// Create workflow steps from template if specified
+	if req.WorkflowTemplateID != nil && *req.WorkflowTemplateID != "" && s.workflowStepCreator != nil {
+		if err := s.workflowStepCreator.CreateStepsFromTemplate(ctx, board.ID, *req.WorkflowTemplateID); err != nil {
+			s.logger.Error("failed to create workflow steps from template",
+				zap.String("board_id", board.ID),
+				zap.String("template_id", *req.WorkflowTemplateID),
+				zap.Error(err))
+			// Don't fail board creation, just log the error
+		}
 	}
 
 	s.publishBoardEvent(ctx, events.BoardCreated, board)
@@ -929,95 +1098,6 @@ func (s *Service) DeleteBoard(ctx context.Context, id string) error {
 // ListBoards returns all boards for a workspace (or all if empty)
 func (s *Service) ListBoards(ctx context.Context, workspaceID string) ([]*models.Board, error) {
 	return s.repo.ListBoards(ctx, workspaceID)
-}
-
-// Column operations
-
-// CreateColumn creates a new column
-func (s *Service) CreateColumn(ctx context.Context, req *CreateColumnRequest) (*models.Column, error) {
-	color := req.Color
-	if color == "" {
-		color = "bg-neutral-400"
-	}
-	column := &models.Column{
-		ID:       uuid.New().String(),
-		BoardID:  req.BoardID,
-		Name:     req.Name,
-		Position: req.Position,
-		State:    req.State,
-		Color:    color,
-	}
-
-	if err := s.repo.CreateColumn(ctx, column); err != nil {
-		s.logger.Error("failed to create column", zap.Error(err))
-		return nil, err
-	}
-
-	s.publishColumnEvent(ctx, events.ColumnCreated, column)
-	s.logger.Info("column created",
-		zap.String("column_id", column.ID),
-		zap.String("board_id", column.BoardID),
-		zap.String("name", column.Name))
-	return column, nil
-}
-
-// GetColumn retrieves a column by ID
-func (s *Service) GetColumn(ctx context.Context, id string) (*models.Column, error) {
-	return s.repo.GetColumn(ctx, id)
-}
-
-// ListColumns returns all columns for a board
-func (s *Service) ListColumns(ctx context.Context, boardID string) ([]*models.Column, error) {
-	return s.repo.ListColumns(ctx, boardID)
-}
-
-// UpdateColumn updates an existing column
-func (s *Service) UpdateColumn(ctx context.Context, id string, req *UpdateColumnRequest) (*models.Column, error) {
-	column, err := s.repo.GetColumn(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-
-	if req.Name != nil {
-		column.Name = *req.Name
-	}
-	if req.Position != nil {
-		column.Position = *req.Position
-	}
-	if req.State != nil {
-		column.State = *req.State
-	}
-	if req.Color != nil {
-		column.Color = *req.Color
-	}
-	column.UpdatedAt = time.Now().UTC()
-
-	if err := s.repo.UpdateColumn(ctx, column); err != nil {
-		s.logger.Error("failed to update column", zap.Error(err))
-		return nil, err
-	}
-
-	s.publishColumnEvent(ctx, events.ColumnUpdated, column)
-	s.logger.Info("column updated",
-		zap.String("column_id", column.ID),
-		zap.String("board_id", column.BoardID),
-		zap.String("name", column.Name))
-	return column, nil
-}
-
-// DeleteColumn deletes an existing column
-func (s *Service) DeleteColumn(ctx context.Context, id string) error {
-	column, err := s.repo.GetColumn(ctx, id)
-	if err != nil {
-		return err
-	}
-	if err := s.repo.DeleteColumn(ctx, id); err != nil {
-		s.logger.Error("failed to delete column", zap.Error(err))
-		return err
-	}
-	s.publishColumnEvent(ctx, events.ColumnDeleted, column)
-	s.logger.Info("column deleted", zap.String("column_id", id))
-	return nil
 }
 
 // Repository operations
@@ -1417,16 +1497,16 @@ func (s *Service) publishTaskEvent(ctx context.Context, eventType string, task *
 	}
 
 	data := map[string]interface{}{
-		"task_id":     task.ID,
-		"board_id":    task.BoardID,
-		"column_id":   task.ColumnID,
-		"title":       task.Title,
-		"description": task.Description,
-		"state":       string(task.State),
-		"priority":    task.Priority,
-		"position":    task.Position,
-		"created_at":  task.CreatedAt.Format(time.RFC3339),
-		"updated_at":  task.UpdatedAt.Format(time.RFC3339),
+		"task_id":          task.ID,
+		"board_id":         task.BoardID,
+		"workflow_step_id": task.WorkflowStepID,
+		"title":            task.Title,
+		"description":      task.Description,
+		"state":            string(task.State),
+		"priority":         task.Priority,
+		"position":         task.Position,
+		"created_at":       task.CreatedAt.Format(time.RFC3339),
+		"updated_at":       task.UpdatedAt.Format(time.RFC3339),
 	}
 
 	if task.Metadata != nil {
@@ -1439,14 +1519,6 @@ func (s *Service) publishTaskEvent(ctx context.Context, eventType string, task *
 	}
 
 	event := bus.NewEvent(eventType, "task-service", data)
-
-	// Debug logging for state changes
-	s.logger.Info("publishing task event",
-		zap.String("event_type", eventType),
-		zap.String("task_id", task.ID),
-		zap.String("board_id", task.BoardID),
-		zap.String("column_id", task.ColumnID),
-		zap.String("state", string(task.State)))
 
 	if err := s.eventBus.Publish(ctx, eventType, event); err != nil {
 		s.logger.Error("failed to publish task event",
@@ -1501,31 +1573,6 @@ func (s *Service) publishBoardEvent(ctx context.Context, eventType string, board
 		s.logger.Error("failed to publish board event",
 			zap.String("event_type", eventType),
 			zap.String("board_id", board.ID),
-			zap.Error(err))
-	}
-}
-
-func (s *Service) publishColumnEvent(ctx context.Context, eventType string, column *models.Column) {
-	if s.eventBus == nil || column == nil {
-		return
-	}
-
-	data := map[string]interface{}{
-		"id":         column.ID,
-		"board_id":   column.BoardID,
-		"name":       column.Name,
-		"position":   column.Position,
-		"state":      string(column.State),
-		"color":      column.Color,
-		"created_at": column.CreatedAt.Format(time.RFC3339),
-		"updated_at": column.UpdatedAt.Format(time.RFC3339),
-	}
-
-	event := bus.NewEvent(eventType, "task-service", data)
-	if err := s.eventBus.Publish(ctx, eventType, event); err != nil {
-		s.logger.Error("failed to publish column event",
-			zap.String("event_type", eventType),
-			zap.String("column_id", column.ID),
 			zap.Error(err))
 	}
 }
@@ -2064,7 +2111,9 @@ func (s *Service) publishTurnEvent(eventType string, turn *models.Turn) {
 	}))
 }
 
-// publishMessageEvent publishes message events to the event bus
+// publishMessageEvent publishes message events to the event bus.
+// System-injected content (wrapped in <kandev-system> tags) is stripped from the content
+// so users don't see workflow step prompt modifications in the UI.
 func (s *Service) publishMessageEvent(ctx context.Context, eventType string, message *models.Message) {
 	if s.eventBus == nil {
 		s.logger.Warn("publishMessageEvent: eventBus is nil, skipping")
@@ -2082,7 +2131,7 @@ func (s *Service) publishMessageEvent(ctx context.Context, eventType string, mes
 		"task_id":        message.TaskID,
 		"author_type":    string(message.AuthorType),
 		"author_id":      message.AuthorID,
-		"content":        message.Content,
+		"content":        models.StripSystemContent(message.Content),
 		"type":           messageType,
 		"requests_input": message.RequestsInput,
 		"created_at":     message.CreatedAt.Format(time.RFC3339),

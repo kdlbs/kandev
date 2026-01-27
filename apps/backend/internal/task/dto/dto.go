@@ -29,17 +29,6 @@ type WorkspaceDTO struct {
 	UpdatedAt             time.Time `json:"updated_at"`
 }
 
-type ColumnDTO struct {
-	ID        string       `json:"id"`
-	BoardID   string       `json:"board_id"`
-	Name      string       `json:"name"`
-	Position  int          `json:"position"`
-	State     v1.TaskState `json:"state"`
-	Color     string       `json:"color"`
-	CreatedAt time.Time    `json:"created_at"`
-	UpdatedAt time.Time    `json:"updated_at"`
-}
-
 type RepositoryDTO struct {
 	ID                   string    `json:"id"`
 	WorkspaceID          string    `json:"workspace_id"`
@@ -96,19 +85,20 @@ type EnvironmentDTO struct {
 }
 
 type TaskDTO struct {
-	ID           string                 `json:"id"`
-	WorkspaceID  string                 `json:"workspace_id"`
-	BoardID      string                 `json:"board_id"`
-	ColumnID     string                 `json:"column_id"`
-	Title        string                 `json:"title"`
-	Description  string                 `json:"description"`
-	State        v1.TaskState           `json:"state"`
-	Priority     int                    `json:"priority"`
-	Repositories []TaskRepositoryDTO    `json:"repositories,omitempty"`
-	Position     int                    `json:"position"`
-	CreatedAt    time.Time              `json:"created_at"`
-	UpdatedAt    time.Time              `json:"updated_at"`
-	Metadata     map[string]interface{} `json:"metadata,omitempty"`
+	ID               string                 `json:"id"`
+	WorkspaceID      string                 `json:"workspace_id"`
+	BoardID          string                 `json:"board_id"`
+	WorkflowStepID   string                 `json:"workflow_step_id"`
+	Title            string                 `json:"title"`
+	Description      string                 `json:"description"`
+	State            v1.TaskState           `json:"state"`
+	Priority         int                    `json:"priority"`
+	Repositories     []TaskRepositoryDTO    `json:"repositories,omitempty"`
+	Position         int                    `json:"position"`
+	PrimarySessionID *string                `json:"primary_session_id,omitempty"`
+	CreatedAt        time.Time              `json:"created_at"`
+	UpdatedAt        time.Time              `json:"updated_at"`
+	Metadata         map[string]interface{} `json:"metadata,omitempty"`
 }
 
 type TaskRepositoryDTO struct {
@@ -145,6 +135,10 @@ type TaskSessionDTO struct {
 	StartedAt            time.Time               `json:"started_at"`
 	CompletedAt          *time.Time              `json:"completed_at,omitempty"`
 	UpdatedAt            time.Time               `json:"updated_at"`
+	// Workflow fields
+	IsPrimary      bool    `json:"is_primary"`
+	WorkflowStepID *string `json:"workflow_step_id,omitempty"`
+	ReviewStatus   *string `json:"review_status,omitempty"`
 }
 
 type GetTaskSessionResponse struct {
@@ -157,9 +151,9 @@ type ListTaskSessionsResponse struct {
 }
 
 type BoardSnapshotDTO struct {
-	Board   BoardDTO    `json:"board"`
-	Columns []ColumnDTO `json:"columns"`
-	Tasks   []TaskDTO   `json:"tasks"`
+	Board BoardDTO          `json:"board"`
+	Steps []WorkflowStepDTO `json:"steps"`
+	Tasks []TaskDTO         `json:"tasks"`
 }
 
 type ListMessagesResponse struct {
@@ -177,11 +171,6 @@ type ListBoardsResponse struct {
 type ListWorkspacesResponse struct {
 	Workspaces []WorkspaceDTO `json:"workspaces"`
 	Total      int            `json:"total"`
-}
-
-type ListColumnsResponse struct {
-	Columns []ColumnDTO `json:"columns"`
-	Total   int         `json:"total"`
 }
 
 type ListRepositoriesResponse struct {
@@ -280,19 +269,6 @@ func FromWorkspace(workspace *models.Workspace) WorkspaceDTO {
 	}
 }
 
-func FromColumn(column *models.Column) ColumnDTO {
-	return ColumnDTO{
-		ID:        column.ID,
-		BoardID:   column.BoardID,
-		Name:      column.Name,
-		Position:  column.Position,
-		State:     column.State,
-		Color:     column.Color,
-		CreatedAt: column.CreatedAt,
-		UpdatedAt: column.UpdatedAt,
-	}
-}
-
 func FromRepository(repository *models.Repository) RepositoryDTO {
 	return RepositoryDTO{
 		ID:                   repository.ID,
@@ -365,6 +341,11 @@ func FromLocalRepository(repo service.LocalRepository) LocalRepositoryDTO {
 }
 
 func FromTask(task *models.Task) TaskDTO {
+	return FromTaskWithPrimarySession(task, nil)
+}
+
+// FromTaskWithPrimarySession converts a task model to a TaskDTO, including the primary session ID.
+func FromTaskWithPrimarySession(task *models.Task, primarySessionID *string) TaskDTO {
 	// Convert repositories
 	var repositories []TaskRepositoryDTO
 	for _, repo := range task.Repositories {
@@ -381,19 +362,20 @@ func FromTask(task *models.Task) TaskDTO {
 	}
 
 	return TaskDTO{
-		ID:           task.ID,
-		WorkspaceID:  task.WorkspaceID,
-		BoardID:      task.BoardID,
-		ColumnID:     task.ColumnID,
-		Title:        task.Title,
-		Description:  task.Description,
-		State:        task.State,
-		Priority:     task.Priority,
-		Repositories: repositories,
-		Position:     task.Position,
-		CreatedAt:    task.CreatedAt,
-		UpdatedAt:    task.UpdatedAt,
-		Metadata:     task.Metadata,
+		ID:               task.ID,
+		WorkspaceID:      task.WorkspaceID,
+		BoardID:          task.BoardID,
+		WorkflowStepID:   task.WorkflowStepID,
+		Title:            task.Title,
+		Description:      task.Description,
+		State:            task.State,
+		Priority:         task.Priority,
+		Repositories:     repositories,
+		Position:         task.Position,
+		PrimarySessionID: primarySessionID,
+		CreatedAt:        task.CreatedAt,
+		UpdatedAt:        task.UpdatedAt,
+		Metadata:         task.Metadata,
 	}
 }
 
@@ -418,6 +400,10 @@ func FromTaskSession(session *models.TaskSession) TaskSessionDTO {
 		StartedAt:            session.StartedAt,
 		CompletedAt:          session.CompletedAt,
 		UpdatedAt:            session.UpdatedAt,
+		// Workflow fields
+		IsPrimary:      session.IsPrimary,
+		WorkflowStepID: session.WorkflowStepID,
+		ReviewStatus:   session.ReviewStatus,
 	}
 	if len(session.Worktrees) > 0 {
 		result.WorktreeID = session.Worktrees[0].WorktreeID
@@ -425,4 +411,43 @@ func FromTaskSession(session *models.TaskSession) TaskSessionDTO {
 		result.WorktreeBranch = session.Worktrees[0].WorktreeBranch
 	}
 	return result
+}
+
+// WorkflowStepDTO represents a workflow step for API responses
+type WorkflowStepDTO struct {
+	ID              string       `json:"id"`
+	BoardID         string       `json:"board_id"`
+	Name            string       `json:"name"`
+	StepType        string       `json:"step_type"`
+	Position        int          `json:"position"`
+	State           v1.TaskState `json:"state"`
+	Color           string       `json:"color"`
+	AutoStartAgent  bool         `json:"auto_start_agent"`
+	PlanMode        bool         `json:"plan_mode"`
+	RequireApproval bool         `json:"require_approval"`
+	PromptPrefix    string       `json:"prompt_prefix,omitempty"`
+	PromptSuffix    string       `json:"prompt_suffix,omitempty"`
+	AllowManualMove bool         `json:"allow_manual_move"`
+	CreatedAt       time.Time    `json:"created_at"`
+	UpdatedAt       time.Time    `json:"updated_at"`
+}
+
+// MoveTaskResponse includes the task and the target workflow step info
+type MoveTaskResponse struct {
+	Task         TaskDTO         `json:"task"`
+	WorkflowStep WorkflowStepDTO `json:"workflow_step"`
+}
+
+// Session Workflow Review DTOs
+
+// ApproveSessionRequest is the request to approve a session's current step
+type ApproveSessionRequest struct {
+	SessionID string `json:"-"` // From URL path
+}
+
+// ApproveSessionResponse is the response after approving a session
+type ApproveSessionResponse struct {
+	Success      bool            `json:"success"`
+	Session      TaskSessionDTO  `json:"session"`
+	WorkflowStep WorkflowStepDTO `json:"workflow_step,omitempty"` // New step after approval
 }

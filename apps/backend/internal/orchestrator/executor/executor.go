@@ -204,14 +204,15 @@ func (e *Executor) applyPreferredShellEnv(ctx context.Context, env map[string]st
 
 // Execute starts agent execution for a task
 func (e *Executor) Execute(ctx context.Context, task *v1.Task) (*TaskExecution, error) {
-	return e.ExecuteWithProfile(ctx, task, "", "", task.Description)
+	return e.ExecuteWithProfile(ctx, task, "", "", task.Description, "")
 }
 
 // ExecuteWithProfile starts agent execution for a task using an explicit agent profile.
 // The executorID parameter specifies which executor to use (determines runtime: local_pc, local_docker, etc.).
 // If executorID is empty, falls back to workspace's default executor.
 // The prompt parameter is the initial prompt to send to the agent.
-func (e *Executor) ExecuteWithProfile(ctx context.Context, task *v1.Task, agentProfileID string, executorID string, prompt string) (*TaskExecution, error) {
+// The workflowStepID parameter associates the session with a workflow step for transitions.
+func (e *Executor) ExecuteWithProfile(ctx context.Context, task *v1.Task, agentProfileID string, executorID string, prompt string, workflowStepID string) (*TaskExecution, error) {
 	if agentProfileID == "" {
 		e.logger.Error("task has no agent_profile_id configured", zap.String("task_id", task.ID))
 		return nil, ErrNoAgentProfileID
@@ -324,6 +325,11 @@ func (e *Executor) ExecuteWithProfile(ctx context.Context, task *v1.Task, agentP
 		StartedAt:            now,
 		UpdatedAt:            now,
 		AgentProfileSnapshot: agentProfileSnapshot,
+		IsPrimary:            true, // Set as primary when creating
+	}
+	// Set workflow step ID if provided (for workflow transitions)
+	if workflowStepID != "" {
+		session.WorkflowStepID = &workflowStepID
 	}
 	// Resolve executor configuration
 	execConfig := e.resolveExecutorConfig(ctx, executorID, task.WorkspaceID, metadata)
@@ -342,6 +348,16 @@ func (e *Executor) ExecuteWithProfile(ctx context.Context, task *v1.Task, agentP
 			zap.String("task_id", task.ID),
 			zap.Error(err))
 		return nil, err
+	}
+
+	// Clear primary flag on any other sessions for this task
+	// (the new session was created with IsPrimary=true)
+	if err := e.repo.SetSessionPrimary(ctx, sessionID); err != nil {
+		e.logger.Warn("failed to update primary session flag",
+			zap.String("task_id", task.ID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		// Continue anyway - the session was already created with is_primary=true
 	}
 
 	req.SessionID = sessionID

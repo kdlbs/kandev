@@ -23,13 +23,6 @@ const (
 	BoardDeleted = "board.deleted"
 )
 
-// Event types for columns
-const (
-	ColumnCreated = "column.created"
-	ColumnUpdated = "column.updated"
-	ColumnDeleted = "column.deleted"
-)
-
 // Event types for comments
 const (
 	MessageAdded   = "message.added"

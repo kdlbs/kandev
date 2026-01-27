@@ -53,7 +53,7 @@ export function registerBoardsHandlers(store: StoreApi<AppState>): WsHandlers {
           },
           kanban:
             state.kanban.boardId === message.payload.id
-              ? { boardId: nextActiveId, columns: [], tasks: [] }
+              ? { boardId: nextActiveId, steps: [], tasks: [] }
               : state.kanban,
         };
       });

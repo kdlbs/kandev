@@ -13,7 +13,7 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
         const existingTask = state.kanban.tasks.find((task) => task.id === message.payload.task_id);
         const nextTask = {
           id: message.payload.task_id,
-          columnId: message.payload.column_id,
+          workflowStepId: message.payload.workflow_step_id,
           title: message.payload.title,
           description: message.payload.description,
           position: message.payload.position ?? 0,
@@ -39,7 +39,7 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
         const existingTask = state.kanban.tasks.find((task) => task.id === message.payload.task_id);
         const nextTask = {
           id: message.payload.task_id,
-          columnId: message.payload.column_id,
+          workflowStepId: message.payload.workflow_step_id,
           title: message.payload.title,
           description: message.payload.description,
           position: message.payload.position ?? 0,
@@ -74,7 +74,7 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
         const existingTask = state.kanban.tasks.find((t) => t.id === message.payload.task_id);
         const nextTask = {
           id: message.payload.task_id,
-          columnId: message.payload.column_id,
+          workflowStepId: message.payload.workflow_step_id,
           title: message.payload.title,
           description: message.payload.description,
           position: message.payload.position ?? 0,

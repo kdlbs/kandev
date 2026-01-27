@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/kandev/kandev/internal/common/sqlite"
 	"github.com/kandev/kandev/internal/editors/discovery"
 	"github.com/kandev/kandev/internal/editors/models"
 )
@@ -232,8 +233,8 @@ func (r *sqliteRepository) UpsertEditors(ctx context.Context, editors []*models.
 			editor.Command,
 			editor.Scheme,
 			configValue,
-			boolToInt(editor.Installed),
-			boolToInt(editor.Enabled),
+			sqlite.BoolToInt(editor.Installed),
+			sqlite.BoolToInt(editor.Enabled),
 			editor.CreatedAt,
 			editor.UpdatedAt,
 		)
@@ -264,7 +265,7 @@ func (r *sqliteRepository) CreateEditor(ctx context.Context, editor *models.Edit
 	_, err = r.db.ExecContext(ctx, `
 		INSERT INTO editors (id, type, name, kind, command, scheme, config, installed, enabled, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, editor.ID, editor.Type, editor.Name, editor.Kind, editor.Command, editor.Scheme, configValue, boolToInt(editor.Installed), boolToInt(editor.Enabled), editor.CreatedAt, editor.UpdatedAt)
+	`, editor.ID, editor.Type, editor.Name, editor.Kind, editor.Command, editor.Scheme, configValue, sqlite.BoolToInt(editor.Installed), sqlite.BoolToInt(editor.Enabled), editor.CreatedAt, editor.UpdatedAt)
 	return err
 }
 
@@ -281,7 +282,7 @@ func (r *sqliteRepository) UpdateEditor(ctx context.Context, editor *models.Edit
 		UPDATE editors
 		SET name = ?, kind = ?, command = ?, scheme = ?, config = ?, installed = ?, enabled = ?, updated_at = ?
 		WHERE id = ?
-	`, editor.Name, editor.Kind, editor.Command, editor.Scheme, configValue, boolToInt(editor.Installed), boolToInt(editor.Enabled), editor.UpdatedAt, editor.ID)
+	`, editor.Name, editor.Kind, editor.Command, editor.Scheme, configValue, sqlite.BoolToInt(editor.Installed), sqlite.BoolToInt(editor.Enabled), editor.UpdatedAt, editor.ID)
 	return err
 }
 
@@ -316,13 +317,6 @@ func scanEditor(scanner interface{ Scan(dest ...any) error }) (*models.Editor, e
 	editor.Installed = installed == 1
 	editor.Enabled = enabled == 1
 	return editor, nil
-}
-
-func boolToInt(value bool) int {
-	if value {
-		return 1
-	}
-	return 0
 }
 
 type columnDef struct {
