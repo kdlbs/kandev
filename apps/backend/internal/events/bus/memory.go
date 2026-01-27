@@ -168,7 +168,7 @@ func (b *MemoryEventBus) Subscribe(subject string, handler EventHandler) (Subscr
 
 	b.subscriptions[subject] = append(b.subscriptions[subject], sub)
 
-	b.logger.Info("Subscribed to subject", zap.String("subject", subject))
+	b.logger.Debug("Subscribed to subject", zap.String("subject", subject))
 	return sub, nil
 }
 
@@ -202,7 +202,7 @@ func (b *MemoryEventBus) QueueSubscribe(subject, queue string, handler EventHand
 	}
 	b.queues[queueKey].subscribers = append(b.queues[queueKey].subscribers, sub)
 
-	b.logger.Info("Queue subscribed to subject",
+	b.logger.Debug("Queue subscribed to subject",
 		zap.String("subject", subject),
 		zap.String("queue", queue))
 	return sub, nil

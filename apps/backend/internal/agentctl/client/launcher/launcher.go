@@ -278,8 +278,7 @@ func (l *Launcher) waitForHealthy(ctx context.Context) error {
 func (l *Launcher) pipeOutput(name string, scanner *bufio.Scanner) {
 	for scanner.Scan() {
 		line := scanner.Text()
-		// Log at info level with agentctl prefix
-		l.logger.Info(line, zap.String("stream", name))
+		l.logger.Debug(line, zap.String("stream", name))
 	}
 }
 

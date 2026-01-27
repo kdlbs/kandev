@@ -38,13 +38,13 @@ var (
 )
 
 // Default returns the global default logger.
-// This logger is initialized with default settings (info level, json format, stdout).
+// This logger is initialized with default settings (info level, text format for terminals, stdout).
 func Default() *Logger {
 	defaultLoggerOnce.Do(func() {
 		var err error
 		defaultLogger, err = NewLogger(LoggingConfig{
 			Level:      "info",
-			Format:     "json",
+			Format:     detectLogFormat(),
 			OutputPath: "stdout",
 		})
 		if err != nil {
@@ -77,7 +77,8 @@ func NewLogger(cfg LoggingConfig) (*Logger, error) {
 	encoderConfig.EncodeLevel = zapcore.LowercaseLevelEncoder
 
 	var encoder zapcore.Encoder
-	if cfg.Format == "console" {
+	// Accept both "console" and "text" as aliases for human-readable format
+	if cfg.Format == "console" || cfg.Format == "text" {
 		encoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder
 		encoder = zapcore.NewConsoleEncoder(encoderConfig)
 	} else {
@@ -111,6 +112,24 @@ func parseLevel(level string) (zapcore.Level, error) {
 	var l zapcore.Level
 	err := l.UnmarshalText([]byte(level))
 	return l, err
+}
+
+// detectLogFormat returns the appropriate log format based on environment.
+// Returns "json" if running in Kubernetes or other production environments.
+// Returns "text" for terminal/development use (human-readable console format).
+func detectLogFormat() string {
+	// Check if running in Kubernetes
+	if os.Getenv("KUBERNETES_SERVICE_HOST") != "" {
+		return "json"
+	}
+
+	// Check for explicit production environment
+	if env := os.Getenv("KANDEV_ENV"); env == "production" || env == "prod" {
+		return "json"
+	}
+
+	// Default to text format for terminal use (more readable than JSON)
+	return "text"
 }
 
 // Sync flushes any buffered log entries.
