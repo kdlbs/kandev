@@ -195,7 +195,10 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 		return nil, err
 	}
 
-	execution, err := s.executor.ResumeSession(ctx, session, true)
+	// Use context.WithoutCancel to prevent WebSocket request timeout from canceling the resume.
+	// Session resume can take time and shouldn't be tied to the WS request lifecycle.
+	resumeCtx := context.WithoutCancel(ctx)
+	execution, err := s.executor.ResumeSession(resumeCtx, session, true)
 	if err != nil {
 		_ = s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateFailed, err.Error())
 		return nil, err
@@ -298,7 +301,10 @@ func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessi
 			return err
 		}
 
-		_, err = s.executor.ResumeSession(ctx, session, true)
+		// Use context.WithoutCancel to prevent WebSocket request timeout from canceling the resume.
+		// Session resume can take time and shouldn't be tied to the WS request lifecycle.
+		resumeCtx := context.WithoutCancel(ctx)
+		_, err = s.executor.ResumeSession(resumeCtx, session, true)
 		if err != nil {
 			_ = s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateFailed, err.Error())
 			return fmt.Errorf("failed to resume session: %w", err)
@@ -308,6 +314,7 @@ func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessi
 	}
 
 	// Send the prompt using PromptTask (with planMode from step)
+	// Note: PromptTask internally uses context.WithoutCancel for the executor call
 	_, err = s.PromptTask(ctx, taskID, sessionID, effectivePrompt, "", step.PlanMode)
 	if err != nil {
 		return fmt.Errorf("failed to prompt session: %w", err)
@@ -480,8 +487,11 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 			// Start a new turn for this prompt (model switch case)
 			s.startTurnForSession(ctx, sessionID)
 
+			// Use context.WithoutCancel to prevent WebSocket request timeout from canceling the operation.
+			switchCtx := context.WithoutCancel(ctx)
+
 			// SwitchModel will stop agent, rebuild with new model, restart, and send prompt
-			switchResult, err := s.executor.SwitchModel(ctx, taskID, sessionID, model, effectivePrompt)
+			switchResult, err := s.executor.SwitchModel(switchCtx, taskID, sessionID, model, effectivePrompt)
 			if err != nil {
 				return nil, fmt.Errorf("model switch failed: %w", err)
 			}
@@ -499,7 +509,12 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 
 	s.setSessionRunning(ctx, taskID, sessionID)
 	s.startTurnForSession(ctx, sessionID)
-	result, err := s.executor.Prompt(ctx, taskID, sessionID, effectivePrompt)
+
+	// Use context.WithoutCancel to prevent WebSocket request timeout from canceling the prompt.
+	// Prompts can take a long time (minutes) while the WS request may timeout in 15 seconds.
+	// We still want to log and respond, but the prompt should continue regardless.
+	promptCtx := context.WithoutCancel(ctx)
+	result, err := s.executor.Prompt(promptCtx, taskID, sessionID, effectivePrompt)
 	if err != nil {
 		s.logger.Error("prompt failed",
 			zap.String("task_id", taskID),
