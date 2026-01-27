@@ -548,8 +548,9 @@ func (wt *WorkspaceTracker) getGitStatus(ctx context.Context) (types.GitStatusUp
 		}
 	}
 
-	// Get file status using git status --porcelain
-	statusCmd := exec.CommandContext(ctx, "git", "status", "--porcelain")
+	// Get file status using git status --porcelain --untracked-files=all
+	// --untracked-files=all shows all files in untracked directories, not just the directory name
+	statusCmd := exec.CommandContext(ctx, "git", "status", "--porcelain", "--untracked-files=all")
 	statusCmd.Dir = wt.workDir
 	statusOut, err := statusCmd.Output()
 	if err != nil {

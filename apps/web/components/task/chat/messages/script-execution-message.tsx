@@ -77,12 +77,6 @@ export function ScriptExecutionMessage({ comment }: { comment: Message }) {
       ? IconCheck
       : IconX;
 
-  const statusText = isRunning
-    ? 'Running...'
-    : isSuccess
-      ? 'Completed'
-      : 'Failed';
-
   const statusColor = isRunning
     ? 'text-blue-500'
     : isSuccess

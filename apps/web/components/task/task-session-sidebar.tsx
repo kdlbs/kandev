@@ -121,7 +121,7 @@ export function TaskSessionSidebar({ workspaceId, boardId }: TaskSessionSidebarP
         <div className="flex-1 min-h-0 overflow-y-auto space-y-4 pt-3">
           <TaskSwitcher
             tasks={tasksWithRepositories}
-            columns={columns.map((step: KanbanState['steps'][number]) => ({ id: step.id, title: step.title }))}
+            columns={columns.map((step: KanbanState['steps'][number]) => ({ id: step.id, title: step.title, color: step.color }))}
             activeTaskId={activeTaskId}
             selectedTaskId={selectedTaskId}
             onSelectTask={(taskId) => {
@@ -137,7 +137,7 @@ export function TaskSessionSidebar({ workspaceId, boardId }: TaskSessionSidebarP
         workspaceId={workspaceId}
         boardId={boardId}
         defaultColumnId={columns[0]?.id ?? null}
-        columns={columns.map((step: KanbanState['steps'][number]) => ({ id: step.id, title: step.title }))}
+        columns={columns.map((step: KanbanState['steps'][number]) => ({ id: step.id, title: step.title, color: step.color }))}
         onSuccess={(task, _mode, meta) => {
           store.setState((state) => {
             if (state.kanban.boardId !== task.board_id) return state;

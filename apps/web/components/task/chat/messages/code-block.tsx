@@ -87,7 +87,6 @@ export function CodeBlock({ children, className }: CodeBlockProps) {
   const effectiveTheme = theme === 'system' ? systemTheme : theme;
 
   const code = String(children).replace(/\n$/, '');
-  const language = className?.replace('language-', '') || '';
   const languageExtension = getLanguageExtension(className);
 
   // Custom padding theme

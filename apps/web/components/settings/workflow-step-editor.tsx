@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import {
   DndContext,
   closestCenter,
@@ -38,24 +38,22 @@ import {
 import type { WorkflowStep, WorkflowStepType, StepBehaviors } from '@/lib/types/http';
 
 // Debounce hook for text inputs
-function useDebouncedCallback<T extends (...args: Parameters<T>) => void>(
-  callback: T,
+function useDebouncedCallback(
+  callback: (value: string) => void,
   delay: number
-): T {
+): (value: string) => void {
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const callbackRef = useRef(callback);
-  callbackRef.current = callback;
 
   return useCallback(
-    ((...args: Parameters<T>) => {
+    function debouncedFn(value: string) {
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current);
       }
       timeoutRef.current = setTimeout(() => {
-        callbackRef.current(...args);
+        callback(value);
       }, delay);
-    }) as T,
-    [delay]
+    },
+    [callback, delay]
   );
 }
 
@@ -95,23 +93,13 @@ type SortableStepCardProps = {
   onRemove: () => void;
 };
 
-function SortableStepCard({ step, onUpdate, onRemove }: SortableStepCardProps) {
+// Inner component that uses step values directly - reset via key prop from parent
+function SortableStepCardInner({ step, onUpdate, onRemove }: SortableStepCardProps) {
   const [expanded, setExpanded] = useState(false);
   // Local state for text inputs to avoid API calls on every keystroke
   const [localName, setLocalName] = useState(step.name);
   const [localPromptPrefix, setLocalPromptPrefix] = useState(step.behaviors?.promptPrefix ?? '');
   const [localPromptSuffix, setLocalPromptSuffix] = useState(step.behaviors?.promptSuffix ?? '');
-
-  // Sync local state when step prop changes (e.g., after reorder)
-  useEffect(() => {
-    setLocalName(step.name);
-  }, [step.name]);
-  useEffect(() => {
-    setLocalPromptPrefix(step.behaviors?.promptPrefix ?? '');
-  }, [step.behaviors?.promptPrefix]);
-  useEffect(() => {
-    setLocalPromptSuffix(step.behaviors?.promptSuffix ?? '');
-  }, [step.behaviors?.promptSuffix]);
 
   const { attributes, listeners, setNodeRef, transform, transition } = useSortable({
     id: step.id,
@@ -285,6 +273,14 @@ function SortableStepCard({ step, onUpdate, onRemove }: SortableStepCardProps) {
       </CardContent>
     </Card>
   );
+}
+
+// Wrapper component that uses key to reset local state when step data changes externally
+function SortableStepCard({ step, onUpdate, onRemove }: SortableStepCardProps) {
+  // Generate a stable key based on step values that should trigger a reset
+  // This resets local state when the step is reordered or updated externally
+  const resetKey = `${step.id}-${step.name}-${step.behaviors?.promptPrefix ?? ''}-${step.behaviors?.promptSuffix ?? ''}`;
+  return <SortableStepCardInner key={resetKey} step={step} onUpdate={onUpdate} onRemove={onRemove} />;
 }
 
 export function WorkflowStepEditor({
