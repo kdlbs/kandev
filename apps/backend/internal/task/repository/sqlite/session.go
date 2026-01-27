@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
+	commonsqlite "github.com/kandev/kandev/internal/common/sqlite"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -211,7 +212,7 @@ func (r *Repository) CreateTaskSession(ctx context.Context, session *models.Task
 		string(agentProfileSnapshotJSON), string(executorSnapshotJSON), string(environmentSnapshotJSON), string(repositorySnapshotJSON),
 		string(session.State), session.ErrorMessage, string(metadataJSON),
 		session.StartedAt, session.CompletedAt, session.UpdatedAt,
-		boolToInt(session.IsPrimary), session.WorkflowStepID, session.ReviewStatus)
+		commonsqlite.BoolToInt(session.IsPrimary), session.WorkflowStepID, session.ReviewStatus)
 
 	return err
 }
@@ -504,7 +505,7 @@ func (r *Repository) UpdateTaskSession(ctx context.Context, session *models.Task
 		session.RepositoryID, session.BaseBranch,
 		string(agentProfileSnapshotJSON), string(executorSnapshotJSON), string(environmentSnapshotJSON), string(repositorySnapshotJSON),
 		string(session.State), session.ErrorMessage, string(metadataJSON), session.CompletedAt, session.UpdatedAt,
-		boolToInt(session.IsPrimary), session.WorkflowStepID, session.ReviewStatus,
+		commonsqlite.BoolToInt(session.IsPrimary), session.WorkflowStepID, session.ReviewStatus,
 		session.ID)
 	if err != nil {
 		return err
@@ -948,7 +949,7 @@ func (r *Repository) GetPrimarySessionIDsByTaskIDs(ctx context.Context, taskIDs 
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	result := make(map[string]string)
 	for rows.Next() {

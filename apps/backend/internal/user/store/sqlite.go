@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/kandev/kandev/internal/common/sqlite"
 	"github.com/kandev/kandev/internal/user/models"
 )
 
@@ -60,40 +61,7 @@ func (r *sqliteRepository) initSchema() error {
 }
 
 func (r *sqliteRepository) ensureUserSettingsColumn() error {
-	exists, err := r.columnExists("users", "settings")
-	if err != nil {
-		return err
-	}
-	if exists {
-		return nil
-	}
-	_, err = r.db.Exec(`ALTER TABLE users ADD COLUMN settings TEXT NOT NULL DEFAULT '{}'`)
-	return err
-}
-
-func (r *sqliteRepository) columnExists(table, column string) (bool, error) {
-	rows, err := r.db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
-	if err != nil {
-		return false, err
-	}
-	defer func() {
-		_ = rows.Close()
-	}()
-
-	for rows.Next() {
-		var cid int
-		var name, colType string
-		var notNull int
-		var defaultValue *string
-		var pk int
-		if err := rows.Scan(&cid, &name, &colType, &notNull, &defaultValue, &pk); err != nil {
-			return false, err
-		}
-		if name == column {
-			return true, nil
-		}
-	}
-	return false, rows.Err()
+	return sqlite.EnsureColumn(r.db, "users", "settings", "TEXT NOT NULL DEFAULT '{}'")
 }
 
 func (r *sqliteRepository) ensureDefaultUser() error {

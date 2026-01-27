@@ -325,7 +325,7 @@ func TestSQLiteRepository_ListTasks(t *testing.T) {
 	}
 }
 
-func TestSQLiteRepository_ListTasksByColumn(t *testing.T) {
+func TestSQLiteRepository_ListTasksByWorkflowStep(t *testing.T) {
 	repo, cleanup := createTestSQLiteRepo(t)
 	defer cleanup()
 	ctx := context.Background()
@@ -340,7 +340,7 @@ func TestSQLiteRepository_ListTasksByColumn(t *testing.T) {
 	_ = repo.CreateTask(ctx, &models.Task{ID: "task-2", WorkspaceID: "ws-1", BoardID: "board-123", WorkflowStepID: "step-1", Title: "Task 2"})
 	_ = repo.CreateTask(ctx, &models.Task{ID: "task-3", WorkspaceID: "ws-1", BoardID: "board-123", WorkflowStepID: "step-2", Title: "Task 3"})
 
-	tasks, err := repo.ListTasksByColumn(ctx, "step-1")
+	tasks, err := repo.ListTasksByWorkflowStep(ctx, "step-1")
 	if err != nil {
 		t.Fatalf("failed to list tasks by workflow step: %v", err)
 	}
@@ -359,7 +359,7 @@ func TestSQLiteRepository_Persistence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open SQLite database: %v", err)
 	}
-	repo1, err := newSQLiteRepositoryWithDB(dbConn1)
+	repo1, err := sqlite.NewWithDB(dbConn1)
 	if err != nil {
 		t.Fatalf("failed to create first repository: %v", err)
 	}
@@ -379,7 +379,7 @@ func TestSQLiteRepository_Persistence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open SQLite database: %v", err)
 	}
-	repo2, err := newSQLiteRepositoryWithDB(dbConn2)
+	repo2, err := sqlite.NewWithDB(dbConn2)
 	if err != nil {
 		t.Fatalf("failed to create second repository: %v", err)
 	}

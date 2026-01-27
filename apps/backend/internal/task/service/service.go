@@ -717,12 +717,6 @@ type ApproveSessionResult struct {
 
 // ApproveSession approves a session's current step and moves it to the on_approval_step_id
 func (s *Service) ApproveSession(ctx context.Context, sessionID string) (*ApproveSessionResult, error) {
-	// Get the session
-	session, err := s.repo.GetTaskSession(ctx, sessionID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get session: %w", err)
-	}
-
 	// Update review status to approved
 	if err := s.repo.UpdateSessionReviewStatus(ctx, sessionID, "approved"); err != nil {
 		return nil, fmt.Errorf("failed to update review status: %w", err)
@@ -731,7 +725,7 @@ func (s *Service) ApproveSession(ctx context.Context, sessionID string) (*Approv
 	result := &ApproveSessionResult{}
 
 	// Reload session to get updated review status
-	session, err = s.repo.GetTaskSession(ctx, sessionID)
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to reload session: %w", err)
 	}
@@ -877,7 +871,7 @@ func (s *Service) MoveTask(ctx context.Context, id string, boardID string, workf
 				if s.workflowStepGetter != nil && primarySession.WorkflowStepID != nil {
 					currentStep, err := s.workflowStepGetter.GetStep(ctx, *primarySession.WorkflowStepID)
 					if err == nil && currentStep.RequireApproval {
-						return nil, fmt.Errorf("Task is pending approval - use Approve button to proceed or send a message to request changes")
+						return nil, fmt.Errorf("task is pending approval - use Approve button to proceed or send a message to request changes")
 					}
 				}
 			}

@@ -65,7 +65,7 @@ export function ProfileMcpConfigCard({
   const currentError = isDraft ? draftState?.error ?? null : mcpError;
   const currentDirty = isDraft ? draftState?.dirty ?? false : mcpDirty;
   const { mcpServerUrl } = getBackendConfig();
-  const kandevTools = 'Tools: list_workspaces, list_boards, list_columns, list_tasks, create_task, update_task';
+  const kandevTools = 'Tools: list_workspaces, list_boards, list_workflow_steps, list_tasks, create_task, update_task';
 
   const popularServers: Record<string, Record<string, unknown>> = {
     kandev: {

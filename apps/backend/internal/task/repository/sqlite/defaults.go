@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	commonsqlite "github.com/kandev/kandev/internal/common/sqlite"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -140,7 +141,7 @@ func (r *Repository) ensureDefaultExecutorsAndEnvironments() error {
 			if _, err := r.db.ExecContext(ctx, `
 				INSERT INTO executors (id, name, type, status, is_system, resumable, config, created_at, updated_at)
 				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-			`, executor.id, executor.name, executor.execType, executor.status, boolToInt(executor.isSystem), boolToInt(executor.resumable), string(configJSON), now, now); err != nil {
+			`, executor.id, executor.name, executor.execType, executor.status, commonsqlite.BoolToInt(executor.isSystem), commonsqlite.BoolToInt(executor.resumable), string(configJSON), now, now); err != nil {
 				return err
 			}
 		}
@@ -161,7 +162,7 @@ func (r *Repository) ensureDefaultExecutorsAndEnvironments() error {
 		if _, err := r.db.ExecContext(ctx, `
 			INSERT INTO environments (id, name, kind, is_system, worktree_root, image_tag, dockerfile, build_config, created_at, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, models.EnvironmentIDLocal, "Local", models.EnvironmentKindLocalPC, boolToInt(true), "~/kandev", "", "", "{}", now, now); err != nil {
+		`, models.EnvironmentIDLocal, "Local", models.EnvironmentKindLocalPC, commonsqlite.BoolToInt(true), "~/kandev", "", "", "{}", now, now); err != nil {
 			return err
 		}
 	} else {
@@ -174,7 +175,7 @@ func (r *Repository) ensureDefaultExecutorsAndEnvironments() error {
 			if _, err := r.db.ExecContext(ctx, `
 				INSERT INTO environments (id, name, kind, is_system, worktree_root, image_tag, dockerfile, build_config, created_at, updated_at)
 				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			`, models.EnvironmentIDLocal, "Local", models.EnvironmentKindLocalPC, boolToInt(true), "~/kandev", "", "", "{}", now, now); err != nil {
+			`, models.EnvironmentIDLocal, "Local", models.EnvironmentKindLocalPC, commonsqlite.BoolToInt(true), "~/kandev", "", "", "{}", now, now); err != nil {
 				return err
 			}
 		}

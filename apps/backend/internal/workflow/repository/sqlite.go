@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/kandev/kandev/internal/common/sqlite"
 	"github.com/kandev/kandev/internal/workflow/models"
 )
 
@@ -34,47 +35,7 @@ func (r *Repository) DB() *sql.DB {
 
 // ensureColumn adds a column to a table if it doesn't exist.
 func (r *Repository) ensureColumn(table, column, definition string) error {
-	exists, err := r.columnExists(table, column)
-	if err != nil {
-		return err
-	}
-	if exists {
-		return nil
-	}
-	_, err = r.db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, definition))
-	return err
-}
-
-// columnExists checks if a column exists in a table.
-func (r *Repository) columnExists(table, column string) (bool, error) {
-	rows, err := r.db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
-	if err != nil {
-		return false, err
-	}
-	defer func() { _ = rows.Close() }()
-
-	for rows.Next() {
-		var cid int
-		var name, colType string
-		var notNull int
-		var defaultValue *string
-		var pk int
-		if err := rows.Scan(&cid, &name, &colType, &notNull, &defaultValue, &pk); err != nil {
-			return false, err
-		}
-		if name == column {
-			return true, nil
-		}
-	}
-	return false, rows.Err()
-}
-
-// boolToInt converts a boolean to an integer (for SQLite).
-func boolToInt(value bool) int {
-	if value {
-		return 1
-	}
-	return 0
+	return sqlite.EnsureColumn(r.db, table, column, definition)
 }
 
 // initSchema creates the database tables if they don't exist.
@@ -191,7 +152,7 @@ func (r *Repository) seedDefaultWorkflowSteps() error {
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var boardIDs []string
 	for rows.Next() {
@@ -257,7 +218,7 @@ func (r *Repository) seedSystemTemplates() error {
 		_, err = r.db.Exec(`
 			INSERT INTO workflow_templates (id, name, description, is_system, steps, created_at, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?)
-		`, tmpl.ID, tmpl.Name, tmpl.Description, boolToInt(tmpl.IsSystem), string(stepsJSON), tmpl.CreatedAt, tmpl.UpdatedAt)
+		`, tmpl.ID, tmpl.Name, tmpl.Description, sqlite.BoolToInt(tmpl.IsSystem), string(stepsJSON), tmpl.CreatedAt, tmpl.UpdatedAt)
 		if err != nil {
 			return fmt.Errorf("failed to insert template %s: %w", tmpl.ID, err)
 		}
@@ -485,7 +446,7 @@ func (r *Repository) CreateTemplate(ctx context.Context, template *models.Workfl
 	_, err = r.db.ExecContext(ctx, `
 		INSERT INTO workflow_templates (id, name, description, is_system, steps, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, template.ID, template.Name, template.Description, boolToInt(template.IsSystem), string(stepsJSON), template.CreatedAt, template.UpdatedAt)
+	`, template.ID, template.Name, template.Description, sqlite.BoolToInt(template.IsSystem), string(stepsJSON), template.CreatedAt, template.UpdatedAt)
 
 	return err
 }
@@ -639,9 +600,9 @@ func (r *Repository) CreateStep(ctx context.Context, step *models.WorkflowStep) 
 			allow_manual_move, created_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, step.ID, step.BoardID, step.Name, step.StepType, step.Position, step.Color,
-		boolToInt(step.AutoStartAgent), boolToInt(step.PlanMode), boolToInt(step.RequireApproval),
+		sqlite.BoolToInt(step.AutoStartAgent), sqlite.BoolToInt(step.PlanMode), sqlite.BoolToInt(step.RequireApproval),
 		step.PromptPrefix, step.PromptSuffix, step.OnCompleteStepID, step.OnApprovalStepID,
-		boolToInt(step.AllowManualMove), step.CreatedAt, step.UpdatedAt)
+		sqlite.BoolToInt(step.AllowManualMove), step.CreatedAt, step.UpdatedAt)
 
 	return err
 }
@@ -705,9 +666,9 @@ func (r *Repository) UpdateStep(ctx context.Context, step *models.WorkflowStep) 
 			allow_manual_move = ?, updated_at = ?
 		WHERE id = ?
 	`, step.Name, step.StepType, step.Position, step.Color,
-		boolToInt(step.AutoStartAgent), boolToInt(step.PlanMode), boolToInt(step.RequireApproval),
+		sqlite.BoolToInt(step.AutoStartAgent), sqlite.BoolToInt(step.PlanMode), sqlite.BoolToInt(step.RequireApproval),
 		step.PromptPrefix, step.PromptSuffix, step.OnCompleteStepID, step.OnApprovalStepID,
-		boolToInt(step.AllowManualMove), step.UpdatedAt, step.ID)
+		sqlite.BoolToInt(step.AllowManualMove), step.UpdatedAt, step.ID)
 	if err != nil {
 		return err
 	}

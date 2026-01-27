@@ -120,8 +120,8 @@ func (r *Repository) ListTasks(ctx context.Context, boardID string) ([]*models.T
 	return r.scanTasks(rows)
 }
 
-// ListTasksByColumn returns all tasks in a workflow step
-func (r *Repository) ListTasksByColumn(ctx context.Context, workflowStepID string) ([]*models.Task, error) {
+// ListTasksByWorkflowStep returns all tasks in a workflow step
+func (r *Repository) ListTasksByWorkflowStep(ctx context.Context, workflowStepID string) ([]*models.Task, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, workspace_id, board_id, workflow_step_id, title, description, state, priority, position, metadata, created_at, updated_at
 		FROM tasks

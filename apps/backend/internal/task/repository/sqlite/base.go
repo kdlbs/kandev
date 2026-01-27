@@ -4,6 +4,8 @@ package sqlite
 import (
 	"database/sql"
 	"fmt"
+
+	commonsqlite "github.com/kandev/kandev/internal/common/sqlite"
 )
 
 // Repository provides SQLite-based task storage operations.
@@ -47,47 +49,7 @@ func (r *Repository) DB() *sql.DB {
 
 // ensureColumn adds a column to a table if it doesn't exist
 func (r *Repository) ensureColumn(table, column, definition string) error {
-	exists, err := r.columnExists(table, column)
-	if err != nil {
-		return err
-	}
-	if exists {
-		return nil
-	}
-	_, err = r.db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, definition))
-	return err
-}
-
-// columnExists checks if a column exists in a table
-func (r *Repository) columnExists(table, column string) (bool, error) {
-	rows, err := r.db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
-	if err != nil {
-		return false, err
-	}
-	defer func() { _ = rows.Close() }()
-
-	for rows.Next() {
-		var cid int
-		var name, colType string
-		var notNull int
-		var defaultValue *string
-		var pk int
-		if err := rows.Scan(&cid, &name, &colType, &notNull, &defaultValue, &pk); err != nil {
-			return false, err
-		}
-		if name == column {
-			return true, nil
-		}
-	}
-	return false, rows.Err()
-}
-
-// boolToInt converts a boolean to an integer (for SQLite)
-func boolToInt(value bool) int {
-	if value {
-		return 1
-	}
-	return 0
+	return commonsqlite.EnsureColumn(r.db, table, column, definition)
 }
 
 // ensureWorkspaceIndexes creates workspace-related indexes

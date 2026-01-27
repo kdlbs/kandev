@@ -60,7 +60,7 @@ func (m *mockRepository) DeleteTask(ctx context.Context, id string) error {
 func (m *mockRepository) ListTasks(ctx context.Context, boardID string) ([]*models.Task, error) {
 	return nil, nil
 }
-func (m *mockRepository) ListTasksByColumn(ctx context.Context, columnID string) ([]*models.Task, error) {
+func (m *mockRepository) ListTasksByWorkflowStep(ctx context.Context, workflowStepID string) ([]*models.Task, error) {
 	return nil, nil
 }
 func (m *mockRepository) UpdateTaskState(ctx context.Context, id string, state v1.TaskState) error {

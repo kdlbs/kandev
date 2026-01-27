@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	commonsqlite "github.com/kandev/kandev/internal/common/sqlite"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -29,7 +30,7 @@ func (r *Repository) CreateEnvironment(ctx context.Context, environment *models.
 	_, err = r.db.ExecContext(ctx, `
 		INSERT INTO environments (id, name, kind, is_system, worktree_root, image_tag, dockerfile, build_config, created_at, updated_at, deleted_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, environment.ID, environment.Name, environment.Kind, boolToInt(environment.IsSystem), environment.WorktreeRoot, environment.ImageTag, environment.Dockerfile, string(buildConfigJSON), environment.CreatedAt, environment.UpdatedAt, environment.DeletedAt)
+	`, environment.ID, environment.Name, environment.Kind, commonsqlite.BoolToInt(environment.IsSystem), environment.WorktreeRoot, environment.ImageTag, environment.Dockerfile, string(buildConfigJSON), environment.CreatedAt, environment.UpdatedAt, environment.DeletedAt)
 	return err
 }
 
@@ -74,7 +75,7 @@ func (r *Repository) UpdateEnvironment(ctx context.Context, environment *models.
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE environments SET name = ?, kind = ?, is_system = ?, worktree_root = ?, image_tag = ?, dockerfile = ?, build_config = ?, updated_at = ?
 		WHERE id = ? AND deleted_at IS NULL
-	`, environment.Name, environment.Kind, boolToInt(environment.IsSystem), environment.WorktreeRoot, environment.ImageTag, environment.Dockerfile, string(buildConfigJSON), environment.UpdatedAt, environment.ID)
+	`, environment.Name, environment.Kind, commonsqlite.BoolToInt(environment.IsSystem), environment.WorktreeRoot, environment.ImageTag, environment.Dockerfile, string(buildConfigJSON), environment.UpdatedAt, environment.ID)
 	if err != nil {
 		return err
 	}
