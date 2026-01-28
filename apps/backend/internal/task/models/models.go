@@ -100,6 +100,8 @@ const (
 	MessageTypeToolCall MessageType = "tool_call"
 	// MessageTypeProgress is for progress updates
 	MessageTypeProgress MessageType = "progress"
+	// MessageTypeLog is for agent log messages (info, debug, warning, etc.)
+	MessageTypeLog MessageType = "log"
 	// MessageTypeError is for error messages
 	MessageTypeError MessageType = "error"
 	// MessageTypeStatus is for status changes: started, completed, failed

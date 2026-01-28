@@ -56,6 +56,9 @@ type WorkflowStepCreator interface {
 // WorkflowStepGetter retrieves workflow step information.
 type WorkflowStepGetter interface {
 	GetStep(ctx context.Context, stepID string) (*WorkflowStep, error)
+	// GetNextStepByPosition returns the next step after the given position for a board.
+	// Returns nil if there is no next step (i.e., current step is the last one).
+	GetNextStepByPosition(ctx context.Context, boardID string, currentPosition int) (*WorkflowStep, error)
 }
 
 // WorkflowStep represents a workflow step (mirrors workflow/models.WorkflowStep).
@@ -717,7 +720,10 @@ type ApproveSessionResult struct {
 	WorkflowStep *WorkflowStep
 }
 
-// ApproveSession approves a session's current step and moves it to the on_approval_step_id
+// ApproveSession approves a session's current step and moves it to the next step.
+// It checks OnApprovalStepID first, then OnCompleteStepID, then falls back to the next step by position.
+// This handles both dedicated review steps (with explicit transition IDs) and simple linear workflows
+// where steps have AutoStartAgent and RequireApproval enabled without explicit transition configuration.
 func (s *Service) ApproveSession(ctx context.Context, sessionID string) (*ApproveSessionResult, error) {
 	// Update review status to approved
 	if err := s.repo.UpdateSessionReviewStatus(ctx, sessionID, "approved"); err != nil {
@@ -733,56 +739,88 @@ func (s *Service) ApproveSession(ctx context.Context, sessionID string) (*Approv
 	}
 	result.Session = session
 
-	// Get the current workflow step to check for on_approval_step_id
+	// Get the current workflow step to check for transition targets
 	if session.WorkflowStepID != nil && s.workflowStepGetter != nil {
 		step, err := s.workflowStepGetter.GetStep(ctx, *session.WorkflowStepID)
 		if err != nil {
 			s.logger.Warn("failed to get workflow step for approval transition",
 				zap.String("workflow_step_id", *session.WorkflowStepID),
 				zap.Error(err))
-		} else if step.OnApprovalStepID != nil && *step.OnApprovalStepID != "" {
-			// Move session and task to the on_approval_step_id
-			newStepID := *step.OnApprovalStepID
-			if err := s.repo.UpdateSessionWorkflowStep(ctx, sessionID, newStepID); err != nil {
-				s.logger.Error("failed to move session to approval step",
-					zap.String("session_id", sessionID),
-					zap.String("step_id", newStepID),
-					zap.Error(err))
+		} else {
+			// Determine the target step:
+			// 1. Prefer OnApprovalStepID (explicit approval transition)
+			// 2. Fall back to OnCompleteStepID (explicit completion transition)
+			// 3. Fall back to next step by position (for simple linear workflows)
+			var newStepID string
+			if step.OnApprovalStepID != nil && *step.OnApprovalStepID != "" {
+				newStepID = *step.OnApprovalStepID
+			} else if step.OnCompleteStepID != nil && *step.OnCompleteStepID != "" {
+				newStepID = *step.OnCompleteStepID
 			} else {
-				// Also move the task to the new step
-				task, err := s.repo.GetTask(ctx, session.TaskID)
+				// Try to find the next step by position
+				nextStep, err := s.workflowStepGetter.GetNextStepByPosition(ctx, step.BoardID, step.Position)
 				if err != nil {
-					s.logger.Error("failed to get task for approval transition",
-						zap.String("task_id", session.TaskID),
+					s.logger.Warn("failed to get next step by position",
+						zap.String("board_id", step.BoardID),
+						zap.Int("current_position", step.Position),
+						zap.Error(err))
+				} else if nextStep != nil {
+					newStepID = nextStep.ID
+					s.logger.Info("using next step by position for approval transition",
+						zap.String("current_step", step.Name),
+						zap.String("next_step", nextStep.Name),
+						zap.Int("current_position", step.Position),
+						zap.Int("next_position", nextStep.Position))
+				}
+			}
+
+			if newStepID != "" {
+				if err := s.repo.UpdateSessionWorkflowStep(ctx, sessionID, newStepID); err != nil {
+					s.logger.Error("failed to move session to next step after approval",
+						zap.String("session_id", sessionID),
+						zap.String("step_id", newStepID),
 						zap.Error(err))
 				} else {
-					task.WorkflowStepID = newStepID
-					task.UpdatedAt = time.Now().UTC()
-					if err := s.repo.UpdateTask(ctx, task); err != nil {
-						s.logger.Error("failed to move task to approval step",
+					// Also move the task to the new step
+					task, err := s.repo.GetTask(ctx, session.TaskID)
+					if err != nil {
+						s.logger.Error("failed to get task for approval transition",
 							zap.String("task_id", session.TaskID),
-							zap.String("step_id", newStepID),
 							zap.Error(err))
 					} else {
-						s.publishTaskEvent(ctx, events.TaskUpdated, task, nil)
-						result.Task = task
+						task.WorkflowStepID = newStepID
+						task.UpdatedAt = time.Now().UTC()
+						if err := s.repo.UpdateTask(ctx, task); err != nil {
+							s.logger.Error("failed to move task to next step after approval",
+								zap.String("task_id", session.TaskID),
+								zap.String("step_id", newStepID),
+								zap.Error(err))
+						} else {
+							s.publishTaskEvent(ctx, events.TaskUpdated, task, nil)
+							result.Task = task
+						}
 					}
+
+					// Reload session with new step
+					session, _ = s.repo.GetTaskSession(ctx, sessionID)
+					result.Session = session
+
+					// Get the new workflow step for the response
+					newStep, err := s.workflowStepGetter.GetStep(ctx, newStepID)
+					if err == nil {
+						result.WorkflowStep = newStep
+					}
+
+					s.logger.Info("session approved and moved to next step",
+						zap.String("session_id", sessionID),
+						zap.String("from_step", step.ID),
+						zap.String("to_step", newStepID))
 				}
-
-				// Reload session with new step
-				session, _ = s.repo.GetTaskSession(ctx, sessionID)
-				result.Session = session
-
-				// Get the new workflow step for the response
-				newStep, err := s.workflowStepGetter.GetStep(ctx, newStepID)
-				if err == nil {
-					result.WorkflowStep = newStep
-				}
-
-				s.logger.Info("session approved and moved to next step",
+			} else {
+				s.logger.Info("session approved but no next step found (may be at final step)",
 					zap.String("session_id", sessionID),
-					zap.String("from_step", *session.WorkflowStepID),
-					zap.String("to_step", newStepID))
+					zap.String("current_step", step.ID),
+					zap.String("current_step_name", step.Name))
 			}
 		}
 	}

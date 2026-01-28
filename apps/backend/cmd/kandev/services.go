@@ -13,6 +13,7 @@ import (
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	userservice "github.com/kandev/kandev/internal/user/service"
+	workflowmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowservice "github.com/kandev/kandev/internal/workflow/service"
 )
 
@@ -67,6 +68,23 @@ func (a *workflowStepGetterAdapter) GetStep(ctx context.Context, stepID string) 
 	if err != nil {
 		return nil, err
 	}
+	return a.toTaskServiceStep(step), nil
+}
+
+// GetNextStepByPosition implements taskservice.WorkflowStepGetter.
+func (a *workflowStepGetterAdapter) GetNextStepByPosition(ctx context.Context, boardID string, currentPosition int) (*taskservice.WorkflowStep, error) {
+	step, err := a.svc.GetNextStepByPosition(ctx, boardID, currentPosition)
+	if err != nil {
+		return nil, err
+	}
+	if step == nil {
+		return nil, nil
+	}
+	return a.toTaskServiceStep(step), nil
+}
+
+// toTaskServiceStep converts a workflow step to a task service step.
+func (a *workflowStepGetterAdapter) toTaskServiceStep(step *workflowmodels.WorkflowStep) *taskservice.WorkflowStep {
 	return &taskservice.WorkflowStep{
 		ID:               step.ID,
 		BoardID:          step.BoardID,
@@ -82,5 +100,5 @@ func (a *workflowStepGetterAdapter) GetStep(ctx context.Context, stepID string) 
 		AllowManualMove:  step.AllowManualMove,
 		OnCompleteStepID: step.OnCompleteStepID,
 		OnApprovalStepID: step.OnApprovalStepID,
-	}, nil
+	}
 }
