@@ -50,14 +50,14 @@ type AgentExecution struct {
 	PassthroughProcessID string // Process ID in the interactive runner (empty if not in passthrough mode)
 
 	// Buffers for accumulating agent response during a prompt
-	messageBuffer   strings.Builder
-	reasoningBuffer strings.Builder
-	summaryBuffer   strings.Builder
-	messageMu       sync.Mutex
+	messageBuffer  strings.Builder
+	thinkingBuffer strings.Builder
+	messageMu      sync.Mutex
 
-	// Streaming message tracking - ID of the current in-progress message being streamed
-	// This is set when we create a streaming message and cleared on tool_call/complete
-	currentMessageID string
+	// Streaming message tracking - IDs of the current in-progress messages being streamed
+	// These are set when we create a streaming message and cleared on tool_call/complete
+	currentMessageID  string
+	currentThinkingID string
 
 	// Resume context tracking for fork_session pattern (ACP agents that don't support session/load)
 	// needsResumeContext is set to true when the session has history that should be injected

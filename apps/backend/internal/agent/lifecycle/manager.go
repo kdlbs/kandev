@@ -1236,15 +1236,33 @@ func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.Age
 		}
 
 	case "reasoning":
-		// Accumulate reasoning/thinking content
-		execution.messageMu.Lock()
+		// Stream thinking content like message chunks for real-time feedback
+		// All adapters normalize reasoning to ReasoningText field
 		if event.ReasoningText != "" {
-			execution.reasoningBuffer.WriteString(event.ReasoningText)
+			execution.messageMu.Lock()
+			execution.thinkingBuffer.WriteString(event.ReasoningText)
+
+			// Check if buffer contains newlines - if so, flush up to the last newline
+			bufContent := execution.thinkingBuffer.String()
+			lastNewline := strings.LastIndex(bufContent, "\n")
+			if lastNewline != -1 {
+				// Extract content up to and including the last newline
+				toFlush := bufContent[:lastNewline+1]
+				remainder := bufContent[lastNewline+1:]
+
+				// Reset buffer with remainder
+				execution.thinkingBuffer.Reset()
+				execution.thinkingBuffer.WriteString(remainder)
+				execution.messageMu.Unlock()
+
+				// Publish streaming thinking event if there's content to flush
+				if strings.TrimSpace(toFlush) != "" {
+					m.publishStreamingThinking(execution, toFlush)
+				}
+			} else {
+				execution.messageMu.Unlock()
+			}
 		}
-		if event.ReasoningSummary != "" {
-			execution.summaryBuffer.WriteString(event.ReasoningSummary)
-		}
-		execution.messageMu.Unlock()
 
 	case "tool_call":
 		// Tool call starting marks a step boundary - flush the accumulated message
@@ -1459,16 +1477,32 @@ func (m *Manager) publishStreamingMessage(execution *AgentExecution, content str
 // flushMessageBuffer extracts any accumulated message from the buffer and returns it.
 // This is called when a tool use starts or on complete to get the agent's response.
 // It also clears the currentMessageID to start fresh for the next message segment.
+// Additionally flushes any accumulated thinking content.
 func (m *Manager) flushMessageBuffer(execution *AgentExecution) string {
 	execution.messageMu.Lock()
 	agentMessage := execution.messageBuffer.String()
+	thinkingContent := execution.thinkingBuffer.String()
 	execution.messageBuffer.Reset()
-	execution.reasoningBuffer.Reset()
-	execution.summaryBuffer.Reset()
-	// Clear the streaming message ID so next segment starts fresh
+	execution.thinkingBuffer.Reset()
+	// Clear the streaming message IDs so next segment starts fresh
 	currentMsgID := execution.currentMessageID
+	currentThinkingID := execution.currentThinkingID
 	execution.currentMessageID = ""
+	execution.currentThinkingID = ""
 	execution.messageMu.Unlock()
+
+	// If we have remaining thinking content, publish it
+	trimmedThinking := strings.TrimSpace(thinkingContent)
+	if trimmedThinking != "" {
+		if currentThinkingID != "" {
+			// Append to existing streaming thinking message
+			m.publishStreamingThinkingFinal(execution, currentThinkingID, trimmedThinking)
+		} else {
+			// No streaming thinking message exists yet - create one with all the content
+			// This happens when thinking content has no newlines (never triggered streaming)
+			m.publishStreamingThinking(execution, trimmedThinking)
+		}
+	}
 
 	// If we have remaining content and an active streaming message, append it
 	trimmedMessage := strings.TrimSpace(agentMessage)
@@ -1504,6 +1538,71 @@ func (m *Manager) publishStreamingMessageFinal(execution *AgentExecution, messag
 	m.logger.Debug("publishing final streaming message chunk",
 		zap.String("execution_id", execution.ID),
 		zap.String("message_id", messageID),
+		zap.Int("content_length", len(content)))
+
+	m.eventPublisher.PublishAgentStreamEventPayload(payload)
+}
+
+// publishStreamingThinking publishes a streaming thinking event for real-time thinking updates.
+// It creates a new thinking message on first call (currentThinkingID empty) or appends to existing.
+// The message ID is generated and set synchronously to avoid race conditions.
+func (m *Manager) publishStreamingThinking(execution *AgentExecution, content string) {
+	execution.messageMu.Lock()
+	isAppend := execution.currentThinkingID != ""
+	thinkingID := execution.currentThinkingID
+
+	// If this is the first chunk of a new thinking segment, generate the ID now
+	if !isAppend {
+		thinkingID = uuid.New().String()
+		execution.currentThinkingID = thinkingID
+	}
+	execution.messageMu.Unlock()
+
+	event := AgentStreamEventData{
+		Type:        "thinking_streaming",
+		Text:        content,
+		MessageID:   thinkingID,
+		IsAppend:    isAppend,
+		MessageType: "thinking",
+	}
+
+	// Create payload manually to include streaming-specific fields
+	payload := &AgentStreamEventPayload{
+		Type:      "agent/event",
+		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
+		AgentID:   execution.ID,
+		TaskID:    execution.TaskID,
+		SessionID: execution.SessionID,
+		Data:      &event,
+	}
+
+	// Publish the streaming event - orchestrator will handle create/append logic
+	m.eventPublisher.PublishAgentStreamEventPayload(payload)
+}
+
+// publishStreamingThinkingFinal publishes the final chunk of a streaming thinking message.
+// This is called during flush to append any remaining buffered thinking content.
+func (m *Manager) publishStreamingThinkingFinal(execution *AgentExecution, thinkingID, content string) {
+	event := AgentStreamEventData{
+		Type:        "thinking_streaming",
+		Text:        content,
+		MessageID:   thinkingID,
+		IsAppend:    true,
+		MessageType: "thinking",
+	}
+
+	payload := &AgentStreamEventPayload{
+		Type:      "agent/event",
+		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
+		AgentID:   execution.ID,
+		TaskID:    execution.TaskID,
+		SessionID: execution.SessionID,
+		Data:      &event,
+	}
+
+	m.logger.Debug("publishing final streaming thinking chunk",
+		zap.String("execution_id", execution.ID),
+		zap.String("thinking_id", thinkingID),
 		zap.Int("content_length", len(content)))
 
 	m.eventPublisher.PublishAgentStreamEventPayload(payload)
@@ -1550,9 +1649,9 @@ func (m *Manager) CancelAgent(ctx context.Context, executionID string) error {
 	// Clear streaming state after cancel to ensure clean state for next prompt
 	execution.messageMu.Lock()
 	execution.messageBuffer.Reset()
-	execution.reasoningBuffer.Reset()
-	execution.summaryBuffer.Reset()
+	execution.thinkingBuffer.Reset()
 	execution.currentMessageID = ""
+	execution.currentThinkingID = ""
 	execution.messageMu.Unlock()
 
 	// Mark as ready for follow-up prompts after successful cancel

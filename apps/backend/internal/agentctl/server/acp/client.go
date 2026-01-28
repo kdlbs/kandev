@@ -253,26 +253,6 @@ func (c *Client) SessionUpdate(ctx context.Context, n acp.SessionNotification) e
 	handler := c.updateHandler
 	c.mu.RUnlock()
 
-	// Log the update type
-	u := n.Update
-	switch {
-	case u.AgentMessageChunk != nil:
-		if u.AgentMessageChunk.Content.Text != nil {
-			c.logger.Debug("agent message chunk",
-				zap.String("text", u.AgentMessageChunk.Content.Text.Text[:min(50, len(u.AgentMessageChunk.Content.Text.Text))]))
-		}
-	case u.ToolCall != nil:
-		c.logger.Info("tool call",
-			zap.String("tool_call_id", string(u.ToolCall.ToolCallId)),
-			zap.String("title", u.ToolCall.Title),
-			zap.String("status", string(u.ToolCall.Status)))
-	case u.ToolCallUpdate != nil:
-		c.logger.Debug("tool call update",
-			zap.String("tool_call_id", string(u.ToolCallUpdate.ToolCallId)))
-	case u.Plan != nil:
-		c.logger.Info("plan update", zap.Int("entries", len(u.Plan.Entries)))
-	}
-
 	// Forward to handler if set
 	if handler != nil {
 		handler(n)

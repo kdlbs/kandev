@@ -1958,6 +1958,46 @@ func (s *Service) AppendMessageContent(ctx context.Context, messageID, additiona
 	return nil
 }
 
+// AppendThinkingContent appends additional thinking content to an existing thinking message.
+// This updates the metadata.thinking field for streaming agent reasoning.
+func (s *Service) AppendThinkingContent(ctx context.Context, messageID, additionalContent string) error {
+	message, err := s.repo.GetMessage(ctx, messageID)
+	if err != nil {
+		s.logger.Warn("thinking message not found for append",
+			zap.String("message_id", messageID),
+			zap.Error(err))
+		return err
+	}
+
+	// Initialize metadata if nil
+	if message.Metadata == nil {
+		message.Metadata = make(map[string]interface{})
+	}
+
+	// Get existing thinking content and append
+	existingThinking := ""
+	if existing, ok := message.Metadata["thinking"].(string); ok {
+		existingThinking = existing
+	}
+	message.Metadata["thinking"] = existingThinking + additionalContent
+
+	if err := s.repo.UpdateMessage(ctx, message); err != nil {
+		s.logger.Error("failed to append thinking content",
+			zap.String("message_id", messageID),
+			zap.Error(err))
+		return err
+	}
+
+	// Publish message.updated event for real-time streaming
+	s.publishMessageEvent(ctx, events.MessageUpdated, message)
+
+	s.logger.Debug("thinking content appended",
+		zap.String("message_id", messageID),
+		zap.Int("appended_length", len(additionalContent)))
+
+	return nil
+}
+
 // UpdateToolCallMessage updates a tool call message's status, and optionally title/args.
 // It includes retry logic to handle race conditions where the complete event
 // may arrive before the message has been created by the start event.

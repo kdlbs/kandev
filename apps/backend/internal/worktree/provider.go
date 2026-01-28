@@ -16,7 +16,6 @@ func Provide(db *sql.DB, cfg *config.Config, log *logger.Logger) (*Manager, func
 	manager, err := NewManager(Config{
 		Enabled:      cfg.Worktree.Enabled,
 		BasePath:     cfg.Worktree.BasePath,
-		MaxPerRepo:   cfg.Worktree.MaxPerRepo,
 		BranchPrefix: "kandev/",
 	}, store, log)
 	if err != nil {

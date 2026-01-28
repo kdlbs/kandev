@@ -48,11 +48,13 @@ type AgentStreamEventData struct {
 	SessionStatus string                 `json:"session_status,omitempty"` // "resumed" or "new" for session_status events
 	Data          interface{}            `json:"data,omitempty"`
 
-	// Streaming message fields (for "message_streaming" type)
+	// Streaming message fields (for "message_streaming" and "thinking_streaming" types)
 	// MessageID is the ID of the message being streamed (empty for first chunk, set for appends)
 	MessageID string `json:"message_id,omitempty"`
 	// IsAppend indicates whether this is an append to an existing message (true) or a new message (false)
 	IsAppend bool `json:"is_append,omitempty"`
+	// MessageType distinguishes between "message" and "thinking" content types
+	MessageType string `json:"message_type,omitempty"`
 }
 
 // AgentStreamEventPayload is the payload for agent stream events (WebSocket streaming).

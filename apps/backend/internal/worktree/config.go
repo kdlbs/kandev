@@ -20,10 +20,6 @@ type Config struct {
 	// Default: ~/.kandev/worktrees
 	BasePath string `mapstructure:"base_path"`
 
-	// MaxPerRepo is the maximum number of concurrent worktrees per repository.
-	// Default: 10
-	MaxPerRepo int `mapstructure:"max_per_repo"`
-
 	// BranchPrefix is the prefix used for worktree branch names.
 	// Default: feature/
 	BranchPrefix string `mapstructure:"branch_prefix"`
@@ -34,9 +30,6 @@ const DefaultBranchPrefix = "feature/"
 
 // Validate validates the configuration and returns an error if invalid.
 func (c *Config) Validate() error {
-	if c.MaxPerRepo <= 0 {
-		c.MaxPerRepo = 10
-	}
 	if c.BranchPrefix == "" {
 		c.BranchPrefix = DefaultBranchPrefix
 	}

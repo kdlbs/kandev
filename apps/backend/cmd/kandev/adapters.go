@@ -357,6 +357,28 @@ func (a *messageCreatorAdapter) AppendAgentMessage(ctx context.Context, messageI
 	return a.svc.AppendMessageContent(ctx, messageID, additionalContent)
 }
 
+// CreateThinkingMessageStreaming creates a new thinking message with a pre-generated ID.
+// This is used for real-time streaming of agent thinking/reasoning content.
+func (a *messageCreatorAdapter) CreateThinkingMessageStreaming(ctx context.Context, messageID, taskID, content, agentSessionID, turnID string) error {
+	_, err := a.svc.CreateMessageWithID(ctx, messageID, &taskservice.CreateMessageRequest{
+		TaskSessionID: agentSessionID,
+		TaskID:        taskID,
+		TurnID:        turnID,
+		Content:       "",
+		AuthorType:    "agent",
+		Type:          "thinking",
+		Metadata: map[string]interface{}{
+			"thinking": content,
+		},
+	})
+	return err
+}
+
+// AppendThinkingMessage appends additional content to an existing streaming thinking message.
+func (a *messageCreatorAdapter) AppendThinkingMessage(ctx context.Context, messageID, additionalContent string) error {
+	return a.svc.AppendThinkingContent(ctx, messageID, additionalContent)
+}
+
 // turnServiceAdapter adapts the task service to the orchestrator.TurnService interface
 type turnServiceAdapter struct {
 	svc *taskservice.Service
