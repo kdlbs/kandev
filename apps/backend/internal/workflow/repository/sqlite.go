@@ -680,6 +680,31 @@ func (r *Repository) UpdateStep(ctx context.Context, step *models.WorkflowStep) 
 	return nil
 }
 
+// ClearStepReferences clears any OnCompleteStepID or OnApprovalStepID references
+// to the given step ID within the specified board. This should be called before
+// deleting a step to prevent dangling references.
+func (r *Repository) ClearStepReferences(ctx context.Context, boardID, stepID string) error {
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE workflow_steps
+		SET on_complete_step_id = NULL, updated_at = ?
+		WHERE board_id = ? AND on_complete_step_id = ?
+	`, time.Now().UTC(), boardID, stepID)
+	if err != nil {
+		return fmt.Errorf("failed to clear on_complete_step_id references: %w", err)
+	}
+
+	_, err = r.db.ExecContext(ctx, `
+		UPDATE workflow_steps
+		SET on_approval_step_id = NULL, updated_at = ?
+		WHERE board_id = ? AND on_approval_step_id = ?
+	`, time.Now().UTC(), boardID, stepID)
+	if err != nil {
+		return fmt.Errorf("failed to clear on_approval_step_id references: %w", err)
+	}
+
+	return nil
+}
+
 // DeleteStep deletes a workflow step by ID.
 func (r *Repository) DeleteStep(ctx context.Context, id string) error {
 	result, err := r.db.ExecContext(ctx, `DELETE FROM workflow_steps WHERE id = ?`, id)

@@ -170,6 +170,52 @@ func (s *Service) handleWorkflowTransition(ctx context.Context, taskID, sessionI
 		return false
 	}
 
+	// If the CURRENT step requires approval, don't transition - stay here and wait for approval
+	// This handles the case where a step has both AutoStartAgent and RequireApproval enabled
+	if currentStep.RequireApproval {
+		s.logger.Info("current step requires approval, staying on step",
+			zap.String("session_id", sessionID),
+			zap.String("step_id", currentStep.ID),
+			zap.String("step_name", currentStep.Name))
+
+		// Set review status to pending
+		if err := s.repo.UpdateSessionReviewStatus(ctx, sessionID, "pending"); err != nil {
+			s.logger.Warn("failed to set session review status to pending",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		} else {
+			s.logger.Info("session review status set to pending",
+				zap.String("session_id", sessionID),
+				zap.String("current_step", currentStep.Name))
+		}
+
+		// Update session state to WAITING_FOR_INPUT
+		if err := s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateWaitingForInput, ""); err != nil {
+			s.logger.Error("failed to update session state to WAITING_FOR_INPUT",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
+
+		// Publish session updated event with review status
+		if s.eventBus != nil {
+			eventData := map[string]interface{}{
+				"task_id":          taskID,
+				"session_id":       sessionID,
+				"workflow_step_id": currentStep.ID,
+				"new_state":        string(models.TaskSessionStateWaitingForInput),
+				"review_status":    "pending",
+			}
+			_ = s.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(
+				events.TaskSessionStateChanged,
+				"orchestrator",
+				eventData,
+			))
+		}
+
+		// Return true to indicate we handled the completion (no further transition needed)
+		return true
+	}
+
 	// Check if there's an on_complete transition
 	if currentStep.OnCompleteStepID == "" {
 		s.logger.Debug("workflow step has no on_complete transition",
@@ -551,6 +597,66 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 					zap.String("task_id", taskID),
 					zap.String("session_id", sessionID),
 					zap.Error(err))
+			}
+		}
+
+	case "log":
+		// Handle log events - store agent log messages to the database
+		if sessionID != "" && s.messageCreator != nil {
+			// Try to extract data as map
+			dataMap, _ := payload.Data.Data.(map[string]interface{})
+
+			// Extract log message content
+			logMsg := payload.Data.Text
+			if logMsg == "" && dataMap != nil {
+				if msg, ok := dataMap["message"].(string); ok {
+					logMsg = msg
+				}
+			}
+			if logMsg == "" {
+				return // No message content to store
+			}
+
+			// Build metadata with log level and other context
+			metadata := map[string]interface{}{
+				"provider":       "agent",
+				"provider_agent": payload.AgentID,
+			}
+			if dataMap != nil {
+				if level, ok := dataMap["level"].(string); ok {
+					metadata["level"] = level
+				}
+				// Include any additional data from the log event
+				for k, v := range dataMap {
+					if k != "message" && k != "level" {
+						metadata[k] = v
+					}
+				}
+			}
+
+			if err := s.messageCreator.CreateSessionMessage(
+				ctx,
+				taskID,
+				logMsg,
+				sessionID,
+				string(v1.MessageTypeLog),
+				s.getActiveTurnID(sessionID),
+				metadata,
+				false,
+			); err != nil {
+				s.logger.Error("failed to create log message",
+					zap.String("task_id", taskID),
+					zap.String("session_id", sessionID),
+					zap.Error(err))
+			} else {
+				level := "unknown"
+				if l, ok := metadata["level"].(string); ok {
+					level = l
+				}
+				s.logger.Debug("created log message",
+					zap.String("task_id", taskID),
+					zap.String("session_id", sessionID),
+					zap.String("level", level))
 			}
 		}
 	}

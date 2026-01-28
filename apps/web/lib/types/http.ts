@@ -461,6 +461,7 @@ export type MessageType =
   | 'content'
   | 'tool_call'
   | 'progress'
+  | 'log'
   | 'error'
   | 'status'
   | 'thinking'
