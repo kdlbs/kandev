@@ -167,31 +167,16 @@ export const createSessionSlice: StateCreator<
     }),
   setTaskSessionsForTask: (taskId, sessions) =>
     set((draft) => {
-      // Also update individual session items with merging to preserve existing data
-      sessions.forEach((session) => {
-        const existingSession = draft.taskSessions.items[session.id];
-        draft.taskSessions.items[session.id] = existingSession
-          ? { ...existingSession, ...session }
-          : session;
-      });
+      // Update taskSessionsByTask with the new sessions list
       draft.taskSessionsByTask.itemsByTaskId[taskId] = sessions;
       draft.taskSessionsByTask.loadingByTaskId[taskId] = false;
       draft.taskSessionsByTask.loadedByTaskId[taskId] = true;
+
       // Also populate taskSessions.items for individual session lookups
-      // This ensures agent_profile_snapshot is available when accessed by session ID
+      // When loading from API, we get complete session data, so we can replace entirely
+      // This ensures all fields including review_status and workflow_step_id are properly set
       for (const session of sessions) {
-        const existing = draft.taskSessions.items[session.id];
-        if (existing) {
-          // Merge new data with existing, preserving agent_profile_snapshot if not provided
-          draft.taskSessions.items[session.id] = {
-            ...existing,
-            ...session,
-            // Preserve existing snapshot if new session doesn't have one
-            agent_profile_snapshot: session.agent_profile_snapshot ?? existing.agent_profile_snapshot,
-          };
-        } else {
-          draft.taskSessions.items[session.id] = session;
-        }
+        draft.taskSessions.items[session.id] = session;
       }
     }),
   setTaskSessionsLoading: (taskId, loading) =>
