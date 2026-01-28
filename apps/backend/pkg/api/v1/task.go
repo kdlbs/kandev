@@ -39,6 +39,7 @@ const (
 	MessageTypeContent  MessageType = "content"
 	MessageTypeToolCall MessageType = "tool_call"
 	MessageTypeProgress MessageType = "progress"
+	MessageTypeLog      MessageType = "log"
 	MessageTypeError    MessageType = "error"
 	MessageTypeStatus   MessageType = "status"
 	MessageTypeThinking MessageType = "thinking"

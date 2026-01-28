@@ -130,6 +130,29 @@ func (s *Service) GetSourceStep(ctx context.Context, boardID, targetStepID strin
 	return nil, nil // No source step found
 }
 
+// GetNextStepByPosition returns the next step after the given position for a board.
+// This is used as a fallback when no explicit transition (OnApprovalStepID, OnCompleteStepID) is configured.
+// Steps are ordered by position, so this finds the step with the next higher position.
+// Returns nil if there is no next step (i.e., current step is the last one).
+func (s *Service) GetNextStepByPosition(ctx context.Context, boardID string, currentPosition int) (*models.WorkflowStep, error) {
+	steps, err := s.repo.ListStepsByBoard(ctx, boardID)
+	if err != nil {
+		s.logger.Error("failed to list steps for next step lookup",
+			zap.String("board_id", boardID),
+			zap.Error(err))
+		return nil, err
+	}
+
+	// Steps are already ordered by position from ListStepsByBoard
+	for _, step := range steps {
+		if step.Position > currentPosition {
+			return step, nil
+		}
+	}
+
+	return nil, nil // No next step found (current step is the last one)
+}
+
 // CreateStepsFromTemplate creates workflow steps for a board from a template.
 func (s *Service) CreateStepsFromTemplate(ctx context.Context, boardID, templateID string) error {
 	template, err := s.repo.GetTemplate(ctx, templateID)
@@ -215,13 +238,33 @@ func (s *Service) UpdateStep(ctx context.Context, step *models.WorkflowStep) err
 	return nil
 }
 
-// DeleteStep deletes a workflow step.
+// DeleteStep deletes a workflow step and clears any references to it from other steps.
 func (s *Service) DeleteStep(ctx context.Context, stepID string) error {
+	// First, get the step to find its board ID
+	step, err := s.repo.GetStep(ctx, stepID)
+	if err != nil {
+		s.logger.Error("failed to get step for deletion", zap.String("step_id", stepID), zap.Error(err))
+		return err
+	}
+
+	// Clear any OnCompleteStepID or OnApprovalStepID references to this step
+	if err := s.repo.ClearStepReferences(ctx, step.BoardID, stepID); err != nil {
+		s.logger.Error("failed to clear step references",
+			zap.String("step_id", stepID),
+			zap.String("board_id", step.BoardID),
+			zap.Error(err))
+		return err
+	}
+
+	// Now delete the step
 	if err := s.repo.DeleteStep(ctx, stepID); err != nil {
 		s.logger.Error("failed to delete step", zap.String("step_id", stepID), zap.Error(err))
 		return err
 	}
-	s.logger.Info("deleted workflow step", zap.String("step_id", stepID))
+
+	s.logger.Info("deleted workflow step and cleared references",
+		zap.String("step_id", stepID),
+		zap.String("board_id", step.BoardID))
 	return nil
 }
 
