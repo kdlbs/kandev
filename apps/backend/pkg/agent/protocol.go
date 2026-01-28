@@ -23,6 +23,13 @@ const (
 	// OpenCode spawns an HTTP server and communicates via REST API calls
 	// with Server-Sent Events (SSE) for streaming responses.
 	ProtocolOpenCode Protocol = "opencode"
+	// ProtocolCopilot is the GitHub Copilot SDK protocol.
+	// Uses the official Go SDK which internally communicates via JSON-RPC with the Copilot CLI.
+	ProtocolCopilot Protocol = "copilot"
+	// ProtocolAmp is the Sourcegraph Amp protocol (stream-json over stdin/stdout).
+	// Amp uses a streaming JSON format similar to Claude Code, with thread-based
+	// session management for multi-turn conversations.
+	ProtocolAmp Protocol = "amp"
 )
 
 // String returns the string representation of the protocol.
@@ -33,7 +40,7 @@ func (p Protocol) String() string {
 // IsValid returns true if the protocol is a known valid protocol.
 func (p Protocol) IsValid() bool {
 	switch p {
-	case ProtocolACP, ProtocolREST, ProtocolMCP, ProtocolCodex, ProtocolClaudeCode, ProtocolOpenCode:
+	case ProtocolACP, ProtocolREST, ProtocolMCP, ProtocolCodex, ProtocolClaudeCode, ProtocolOpenCode, ProtocolCopilot, ProtocolAmp:
 		return true
 	default:
 		return false

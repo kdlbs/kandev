@@ -125,6 +125,10 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 		})
 	}
 
+	m.logger.Info("CreateInstance: received request",
+		zap.String("req_protocol", req.Protocol),
+		zap.String("workspace_path", req.WorkspacePath))
+
 	overrides := &config.InstanceOverrides{
 		Protocol:     agent.Protocol(req.Protocol),
 		AgentCommand: agentCmd,
@@ -136,8 +140,14 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 		SessionID:    req.SessionID,
 	}
 
+	m.logger.Info("CreateInstance: applying overrides",
+		zap.String("override_protocol", string(overrides.Protocol)))
+
 	// Create instance config using the unified method
 	instanceCfg := m.config.NewInstanceConfig(port, overrides)
+
+	m.logger.Info("CreateInstance: instance config created",
+		zap.String("config_protocol", string(instanceCfg.Protocol)))
 
 	// Create process manager
 	procMgr := process.NewManager(instanceCfg, m.logger)
@@ -220,17 +230,20 @@ func (m *Manager) ListInstances() []*InstanceInfo {
 
 // StopInstance stops and removes an instance by ID.
 func (m *Manager) StopInstance(ctx context.Context, id string) error {
+	// Get instance and remove from map under lock (quick operation)
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	inst, ok := m.instances[id]
 	if !ok {
+		m.mu.Unlock()
 		return fmt.Errorf("instance %s not found", id)
 	}
+	// Remove from map immediately so new instances aren't blocked
+	delete(m.instances, id)
+	m.mu.Unlock()
 
 	m.logger.Debug("stopping instance", zap.String("instance_id", id))
 
-	// Stop the process manager
+	// Stop the process manager (potentially slow, done without lock)
 	if inst.manager != nil {
 		if err := inst.manager.Stop(ctx); err != nil {
 			m.logger.Warn("error stopping process manager",
@@ -243,7 +256,7 @@ func (m *Manager) StopInstance(ctx context.Context, id string) error {
 		zap.String("instance_id", id),
 		zap.Int("port", inst.Port))
 
-	// Shutdown HTTP server
+	// Shutdown HTTP server (potentially slow, done without lock)
 	if inst.server != nil {
 		if err := inst.server.Shutdown(ctx); err != nil {
 			m.logger.Warn("error shutting down HTTP server",
@@ -256,11 +269,10 @@ func (m *Manager) StopInstance(ctx context.Context, id string) error {
 		zap.String("instance_id", id),
 		zap.Int("port", inst.Port))
 
-	// Release port
+	// Release port (quick operation, re-acquire lock)
+	m.mu.Lock()
 	m.portAlloc.Release(inst.Port)
-
-	// Remove from instances map
-	delete(m.instances, id)
+	m.mu.Unlock()
 
 	m.logger.Info("StopInstance completed",
 		zap.String("instance_id", id),

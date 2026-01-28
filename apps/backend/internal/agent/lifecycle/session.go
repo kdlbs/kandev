@@ -57,8 +57,8 @@ type InitializeResult struct {
 // It handles the initialize handshake and session creation/loading based on config.
 //
 // Session behavior:
-//   - If agentConfig.SessionConfig.ResumeViaACP is true AND existingSessionID is provided: use session/load
-//   - If agentConfig.SessionConfig.ResumeViaACP is false (CLI handles resume): always use session/new
+//   - If agentConfig.SessionConfig.NativeSessionResume is true AND existingSessionID is provided: use session/load
+//   - If agentConfig.SessionConfig.NativeSessionResume is false (CLI handles resume): always use session/new
 //   - Otherwise: use session/new
 func (sm *SessionManager) InitializeSession(
 	ctx context.Context,
@@ -71,7 +71,7 @@ func (sm *SessionManager) InitializeSession(
 	sm.logger.Info("initializing ACP session",
 		zap.String("agent_type", agentConfig.ID),
 		zap.String("workspace_path", workspacePath),
-		zap.Bool("resume_via_acp", agentConfig.SessionConfig.ResumeViaACP),
+		zap.Bool("native_session_resume", agentConfig.SessionConfig.NativeSessionResume),
 		zap.String("existing_session_id", existingSessionID))
 
 	// Step 1: Send initialize request
@@ -119,7 +119,7 @@ func (sm *SessionManager) createOrLoadSession(
 	workspacePath string,
 	mcpServers []agentctltypes.McpServer,
 ) (string, error) {
-	if agentConfig.SessionConfig.ResumeViaACP && existingSessionID != "" {
+	if agentConfig.SessionConfig.NativeSessionResume && existingSessionID != "" {
 		sessionID, err := sm.loadSession(ctx, client, agentConfig, existingSessionID)
 		if err != nil {
 			// If session/load fails with "Method not found" or "LoadSession capability is false",
@@ -142,7 +142,7 @@ func (sm *SessionManager) createOrLoadSession(
 // shouldInjectResumeContext determines if we should inject resume context for this session.
 // Returns true if:
 // 1. The agent uses ACP protocol
-// 2. The agent doesn't support session/load (ResumeViaACP is false)
+// 2. The agent doesn't support native session loading (NativeSessionResume is false)
 // 3. We have a task session ID (for history lookup)
 // 4. There's existing history for this session
 func (sm *SessionManager) shouldInjectResumeContext(agentConfig *registry.AgentTypeConfig, taskSessionID string) bool {
@@ -155,8 +155,8 @@ func (sm *SessionManager) shouldInjectResumeContext(agentConfig *registry.AgentT
 		return false
 	}
 
-	// If agent supports session/load via ACP, don't inject (it will restore context natively)
-	if agentConfig.SessionConfig.ResumeViaACP {
+	// If agent supports native session loading, don't inject (it will restore context natively)
+	if agentConfig.SessionConfig.NativeSessionResume {
 		return false
 	}
 
@@ -267,7 +267,7 @@ func (sm *SessionManager) InitializeAndPrompt(
 		zap.String("agentctl_url", execution.agentctl.BaseURL()),
 		zap.String("agent_type", agentConfig.ID),
 		zap.String("existing_acp_session_id", execution.ACPSessionID),
-		zap.Bool("resume_via_acp", agentConfig.SessionConfig.ResumeViaACP))
+		zap.Bool("native_session_resume", agentConfig.SessionConfig.NativeSessionResume))
 
 	// Use InitializeSession for configuration-driven session initialization
 	result, err := sm.InitializeSession(
@@ -450,58 +450,81 @@ func (sm *SessionManager) SendPrompt(
 	}
 
 	// Extract accumulated content from buffers and handle streaming message completion
-	execution.messageMu.Lock()
-	agentMessage := execution.messageBuffer.String()
-	execution.messageBuffer.Reset()
-	execution.thinkingBuffer.Reset()
-	currentMsgID := execution.currentMessageID
-	execution.currentMessageID = ""  // Clear for next turn
-	execution.currentThinkingID = "" // Clear for next turn
-	execution.messageMu.Unlock()
-
+	// NOTE: When ReportsStatusViaStream is true, the adapter's complete event (via handleAgentEvent)
+	// will handle the buffer content. We should NOT clear the buffer here to avoid a race condition
+	// where the buffer is cleared before handleAgentEvent processes the complete event.
 	stopReason := ""
 	if resp != nil {
 		stopReason = string(resp.StopReason)
 	}
 
-	trimmedMessage := strings.TrimSpace(agentMessage)
+	var agentMessage string
 
-	sm.logger.Info("ACP prompt completed",
-		zap.String("execution_id", execution.ID),
-		zap.String("stop_reason", stopReason),
-		zap.Int("message_length", len(trimmedMessage)),
-		zap.Bool("has_streaming_msg", currentMsgID != ""))
+	if execution.ReportsStatusViaStream {
+		// Agent adapter handles completion via stream - let handleAgentEvent deal with the buffer
+		// Just log for debugging. The buffer content will be handled by handleAgentEvent when
+		// the complete event arrives from the adapter.
+		execution.messageMu.Lock()
+		bufLen := execution.messageBuffer.Len()
+		// Peek at the message for the return value, but don't clear the buffer
+		agentMessage = execution.messageBuffer.String()
+		execution.messageMu.Unlock()
 
-	// Handle remaining content from the buffer
-	if sm.eventPublisher != nil {
-		// If there's remaining content and an active streaming message,
-		// append it to the streaming message instead of creating a new one
-		if trimmedMessage != "" && currentMsgID != "" {
-			// Publish streaming append with the remaining content
-			sm.eventPublisher.PublishAgentStreamEventPayload(&AgentStreamEventPayload{
-				Type:      "agent/event",
-				Timestamp: time.Now().UTC().Format(time.RFC3339),
-				AgentID:   execution.AgentProfileID,
-				TaskID:    execution.TaskID,
-				SessionID: execution.SessionID,
-				Data: &AgentStreamEventData{
-					Type:      "message_streaming",
-					MessageID: currentMsgID,
-					IsAppend:  true,
-					Text:      trimmedMessage,
-				},
-			})
-			// Content was handled via streaming, publish complete with empty text
-			trimmedMessage = ""
+		sm.logger.Info("ACP prompt completed (stream-based completion)",
+			zap.String("execution_id", execution.ID),
+			zap.String("stop_reason", stopReason),
+			zap.Int("buffer_length", bufLen),
+			zap.Bool("reports_status_via_stream", true))
+	} else {
+		// Agent adapter does NOT handle completion via stream - we need to handle the buffer here
+		execution.messageMu.Lock()
+		agentMessage = execution.messageBuffer.String()
+		execution.messageBuffer.Reset()
+		execution.thinkingBuffer.Reset()
+		currentMsgID := execution.currentMessageID
+		execution.currentMessageID = ""  // Clear for next turn
+		execution.currentThinkingID = "" // Clear for next turn
+		execution.messageMu.Unlock()
+
+		trimmedMessage := strings.TrimSpace(agentMessage)
+
+		sm.logger.Info("ACP prompt completed",
+			zap.String("execution_id", execution.ID),
+			zap.String("stop_reason", stopReason),
+			zap.Int("message_length", len(trimmedMessage)),
+			zap.Bool("has_streaming_msg", currentMsgID != ""))
+
+		// Handle remaining content from the buffer
+		if sm.eventPublisher != nil {
+			// If there's remaining content and an active streaming message,
+			// append it to the streaming message instead of creating a new one
+			if trimmedMessage != "" && currentMsgID != "" {
+				// Publish streaming append with the remaining content
+				sm.eventPublisher.PublishAgentStreamEventPayload(&AgentStreamEventPayload{
+					Type:      "agent/event",
+					Timestamp: time.Now().UTC().Format(time.RFC3339),
+					AgentID:   execution.AgentProfileID,
+					TaskID:    execution.TaskID,
+					SessionID: execution.SessionID,
+					Data: &AgentStreamEventData{
+						Type:      "message_streaming",
+						MessageID: currentMsgID,
+						IsAppend:  true,
+						Text:      trimmedMessage,
+					},
+				})
+				// Content was handled via streaming, publish complete with empty text
+				trimmedMessage = ""
+			}
+
+			// Publish complete event (with remaining text only if no streaming message was active)
+			completeEvent := streams.AgentEvent{
+				Type:      streams.EventTypeComplete,
+				SessionID: execution.ACPSessionID,
+				Text:      trimmedMessage,
+			}
+			sm.eventPublisher.PublishAgentStreamEvent(execution, completeEvent)
 		}
-
-		// Publish complete event (with remaining text only if no streaming message was active)
-		completeEvent := streams.AgentEvent{
-			Type:      streams.EventTypeComplete,
-			SessionID: execution.ACPSessionID,
-			Text:      trimmedMessage,
-		}
-		sm.eventPublisher.PublishAgentStreamEvent(execution, completeEvent)
 	}
 
 	// Mark as READY for next prompt

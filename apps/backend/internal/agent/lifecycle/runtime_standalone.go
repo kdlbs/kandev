@@ -111,6 +111,11 @@ func (r *StandaloneRuntime) CreateInstance(ctx context.Context, req *RuntimeCrea
 		SessionID:     req.SessionID,
 	}
 
+	r.logger.Info("CreateInstance: sending request to agentctl",
+		zap.String("instance_id", req.InstanceID),
+		zap.String("req_protocol", req.Protocol),
+		zap.String("createReq_protocol", createReq.Protocol))
+
 	resp, err := r.ctl.CreateInstance(ctx, createReq)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create standalone instance: %w", err)

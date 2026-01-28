@@ -1,10 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useState, memo } from 'react';
+import { useCallback, useState, useRef, memo } from 'react';
 import {
   IconCheck,
-  IconChevronDown,
-  IconChevronRight,
   IconCode,
   IconEdit,
   IconEye,
@@ -14,11 +12,12 @@ import {
   IconX,
 } from '@tabler/icons-react';
 import { GridSpinner } from '@/components/grid-spinner';
-import { cn, toRelativePath, transformPathsInText } from '@/lib/utils';
+import { cn, transformPathsInText } from '@/lib/utils';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import type { Message } from '@/lib/types/http';
 import type { ToolCallMetadata } from '@/components/task/chat/types';
 import { PermissionActionRow } from './permission-action-row';
+import { ExpandableRow } from './expandable-row';
 
 type PermissionOption = {
   option_id: string;
@@ -59,28 +58,6 @@ function getToolIcon(toolName: string | undefined, className: string) {
   return <IconCode className={className} />;
 }
 
-function getStatusIcon(status?: string, permissionStatus?: string) {
-  // If there's a permission status, show that instead
-  if (permissionStatus === 'approved') {
-    return <IconCheck className="h-3.5 w-3.5 text-green-500" />;
-  }
-  if (permissionStatus === 'rejected') {
-    return <IconX className="h-3.5 w-3.5 text-red-500" />;
-  }
-
-  switch (status) {
-    case 'complete':
-      return <IconCheck className="h-3.5 w-3.5 text-green-500" />;
-    case 'error':
-      return <IconX className="h-3.5 w-3.5 text-red-500" />;
-    case 'running':
-    case 'in_progress':
-      return <GridSpinner className="text-muted-foreground" />;
-    default:
-      return null;
-  }
-}
-
 type ToolCallMessageProps = {
   comment: Message;
   permissionMessage?: Message;
@@ -95,38 +72,40 @@ export const ToolCallMessage = memo(function ToolCallMessage({ comment, permissi
   const rawTitle = metadata?.title ?? comment.content ?? 'Tool call';
   const title = transformPathsInText(rawTitle, worktreePath);
   const status = metadata?.status;
-  const args = metadata?.args;
-  const result = metadata?.result;
+
+  // Get output from normalized payload (generic tools)
+  const normalizedGeneric = metadata?.normalized?.generic;
+  const output = normalizedGeneric?.output ?? metadata?.result;
 
   // Permission state
   const hasPermission = !!permissionMessage;
   const permissionStatus = permissionMetadata?.status;
   const isPermissionPending = hasPermission && permissionStatus !== 'approved' && permissionStatus !== 'rejected';
 
-  // Initialize isExpanded based on status - auto-expand if running
-  const [isExpanded, setIsExpanded] = useState(() => {
-    return status === 'running';
-  });
-  const [isManuallyToggled, setIsManuallyToggled] = useState(false);
+  // Expand state management
+  const [manualExpandState, setManualExpandState] = useState<boolean | null>(null);
+  const prevStatusRef = useRef(status);
   const [isResponding, setIsResponding] = useState(false);
 
-  // Auto-collapse when complete (unless manually overridden)
-  useEffect(() => {
-    // Permission requests always stay expanded
-    if (isPermissionPending) {
-      setIsExpanded(true);
-      return;
+  // Reset manual state when status changes
+  if (prevStatusRef.current !== status) {
+    prevStatusRef.current = status;
+    if (manualExpandState !== null) {
+      setManualExpandState(null);
     }
+  }
 
-    // Only auto-collapse if user hasn't manually toggled
-    if (!isManuallyToggled) {
-      if (status === 'running') {
-        setIsExpanded(true);
-      } else if (status === 'complete' || status === 'error') {
-        setIsExpanded(false);
-      }
-    }
-  }, [status, isManuallyToggled, isPermissionPending]);
+  // Auto-expand when running or permission pending
+  const autoExpanded = status === 'running' || isPermissionPending;
+  const isExpanded = manualExpandState ?? autoExpanded;
+
+  // Determine if we have expandable content
+  const hasOutput = output && (typeof output === 'string' ? output.length > 0 : Object.keys(output).length > 0);
+  const hasExpandableContent = hasOutput || isPermissionPending;
+
+  const handleToggle = useCallback(() => {
+    setManualExpandState((prev) => !(prev ?? autoExpanded));
+  }, [autoExpanded]);
 
   const handleRespond = useCallback(
     async (optionId: string, cancelled: boolean = false) => {
@@ -175,123 +154,88 @@ export const ToolCallMessage = memo(function ToolCallMessage({ comment, permissi
     }
   }, [permissionMetadata, handleRespond]);
 
-  const hasDetails = args && Object.keys(args).length > 0;
-
-  let filePath: string | undefined;
-  const rawPath = args?.path ?? args?.file ?? args?.file_path;
-  if (typeof rawPath === 'string') {
-    filePath = rawPath;
-  }
-  if (!filePath && Array.isArray(args?.locations) && args.locations.length > 0) {
-    const firstLoc = args.locations[0] as { path?: string } | undefined;
-    if (firstLoc?.path) {
-      filePath = firstLoc.path;
-    }
-  }
-
   const isSuccess = status === 'complete' && !permissionStatus;
 
-  const handleToggleExpand = () => {
-    if (hasDetails) {
-      setIsExpanded(!isExpanded);
-      setIsManuallyToggled(true);
+  const getStatusIcon = () => {
+    // If there's a permission status, show that instead
+    if (permissionStatus === 'approved') {
+      return <IconCheck className="h-3.5 w-3.5 text-green-500" />;
+    }
+    if (permissionStatus === 'rejected') {
+      return <IconX className="h-3.5 w-3.5 text-red-500" />;
+    }
+
+    switch (status) {
+      case 'complete':
+        return <IconCheck className="h-3.5 w-3.5 text-green-500" />;
+      case 'error':
+        return <IconX className="h-3.5 w-3.5 text-red-500" />;
+      case 'running':
+        return <GridSpinner className="text-muted-foreground" />;
+      default:
+        return null;
     }
   };
 
+  // Format output for display - beautify JSON if detected
+  const formatOutput = (value: unknown): { content: string; isJson: boolean } => {
+    if (typeof value === 'string') {
+      // Try to parse as JSON and beautify
+      try {
+        const parsed = JSON.parse(value);
+        return { content: JSON.stringify(parsed, null, 2), isJson: true };
+      } catch {
+        // Not valid JSON, return as-is
+        return { content: value, isJson: false };
+      }
+    }
+    // Already an object, stringify with formatting
+    return { content: JSON.stringify(value, null, 2), isJson: true };
+  };
+
+  const formattedOutput = hasOutput ? formatOutput(output) : null;
+
   return (
-    <div className="w-full group">
-      <div
-        className={cn(
-          'flex items-start gap-3 w-full rounded px-2 py-1 -mx-2 transition-colors',
-          hasDetails && 'hover:bg-muted/50 cursor-pointer'
-        )}
-        onClick={handleToggleExpand}
-      >
-        {/* Icon with hover-to-show chevron */}
-        <div className={cn(
-          'flex-shrink-0 mt-0.5 relative w-4 h-4',
-          hasDetails && 'cursor-pointer'
-        )}>
-          {/* Show tool icon by default, chevron on hover if expandable */}
-          <div className={cn(
-            'absolute inset-0 transition-opacity',
-            hasDetails && 'group-hover:opacity-0'
+    <ExpandableRow
+      icon={getToolIcon(toolName, cn(
+        'h-4 w-4',
+        isPermissionPending ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'
+      ))}
+      header={
+        <div className="flex items-center gap-2 text-xs">
+          <span className={cn(
+            'inline-flex items-center gap-1.5',
+            isPermissionPending && 'text-amber-600 dark:text-amber-400'
           )}>
-            {getToolIcon(toolName, cn(
-              'h-4 w-4',
-              isPermissionPending ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'
-            ))}
-          </div>
-          {hasDetails && (
-            isExpanded
-              ? <IconChevronDown className="h-4 w-4 text-muted-foreground absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity" />
-              : <IconChevronRight className="h-4 w-4 text-muted-foreground absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity" />
-          )}
+            <span className="font-mono text-xs text-muted-foreground">{title}</span>
+            {!isSuccess && getStatusIcon()}
+          </span>
         </div>
+      }
+      hasExpandableContent={!!hasExpandableContent}
+      isExpanded={isExpanded}
+      onToggle={handleToggle}
+    >
+      <div className="pl-4 border-l-2 border-border/30 space-y-2">
+        {/* Output display */}
+        {formattedOutput && (
+          <pre className={cn(
+            "text-xs rounded p-2 overflow-x-auto whitespace-pre-wrap max-h-[200px] overflow-y-auto",
+            formattedOutput.isJson ? "bg-muted/30 font-mono text-[11px]" : "bg-muted/30"
+          )}>
+            {formattedOutput.content}
+          </pre>
+        )}
 
-        {/* Content */}
-        <div className="flex-1 min-w-0 pt-0.5">
-          <div className="flex items-center gap-2 text-xs">
-            <span className={cn(
-              'inline-flex items-center gap-1.5',
-              isPermissionPending && 'text-amber-600 dark:text-amber-400'
-            )}>
-              <span className="font-mono text-xs">
-                {title}
-              </span>
-              {/* Status indicator - only show if not success */}
-              {!isSuccess && getStatusIcon(status, permissionStatus)}
-            </span>
-            {filePath && (
-              <span className="text-xs text-muted-foreground/60 truncate">
-                {toRelativePath(filePath, worktreePath)}
-              </span>
-            )}
-          </div>
-
-          {/* Expanded Details */}
-          {isExpanded && hasDetails && (
-            <div className="mt-2 pl-4 border-l-2 border-border/30 space-y-2">
-              {args && Object.entries(args).map(([key, value]) => {
-                const strValue = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
-                const isLongValue = strValue.length > 100 || strValue.includes('\n');
-
-                return (
-                  <div key={key} className="text-xs">
-                    <span className="font-medium text-muted-foreground">{key}:</span>
-                    {isLongValue ? (
-                      <pre className="mt-1 p-2 bg-muted/30 rounded text-[11px] overflow-x-auto max-h-[200px] overflow-y-auto whitespace-pre-wrap break-all">
-                        {strValue}
-                      </pre>
-                    ) : (
-                      <span className="ml-2 font-mono text-foreground/80">{strValue}</span>
-                    )}
-                  </div>
-                );
-              })}
-              {result && (
-                <div className="text-xs pt-2 mt-2 border-t border-border/30">
-                  <span className="font-medium text-muted-foreground">Result:</span>
-                  <pre className="mt-1 p-2 bg-muted/30 rounded text-[11px] overflow-x-auto max-h-[150px] overflow-y-auto whitespace-pre-wrap">
-                    {result}
-                  </pre>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Inline permission approval UI */}
-          {isPermissionPending && (
-            <div className="mt-2">
-              <PermissionActionRow
-                onApprove={handleApprove}
-                onReject={handleReject}
-                isResponding={isResponding}
-              />
-            </div>
-          )}
-        </div>
+        {/* Inline permission approval UI */}
+        {isPermissionPending && (
+          <PermissionActionRow
+            onApprove={handleApprove}
+            onReject={handleReject}
+            isResponding={isResponding}
+          />
+        )}
       </div>
-    </div>
+    </ExpandableRow>
   );
 });

@@ -32,6 +32,10 @@ func NewAdapter(protocol agent.Protocol, cfg *Config, log *logger.Logger) (Agent
 		return newCodexAdapterWrapper(codex.NewAdapter(sharedCfg, log)), nil
 	case agent.ProtocolOpenCode:
 		return newOpenCodeAdapterWrapper(opencode.NewAdapter(sharedCfg, log)), nil
+	case agent.ProtocolCopilot:
+		return NewCopilotAdapter(cfg, log), nil
+	case agent.ProtocolAmp:
+		return NewAmpAdapter(cfg, log), nil
 	default:
 		return nil, fmt.Errorf("unsupported protocol: %s", protocol)
 	}

@@ -72,12 +72,14 @@ type AgentTypeConfig struct {
 
 // SessionConfig defines how session resumption is handled for an agent type
 type SessionConfig struct {
-	// ResumeViaACP indicates whether session resumption should use the ACP session/load method.
-	// If false, session resumption is handled via CLI flags (ResumeFlag).
-	ResumeViaACP bool `json:"resume_via_acp"`
+	// NativeSessionResume indicates whether session resumption should use the adapter's
+	// native session loading mechanism (e.g., LoadSession method). This works across
+	// different protocols (ACP, Copilot SDK, Codex, OpenCode, etc.).
+	// If false, session resumption is handled via CLI flags (ResumeFlag) or context injection.
+	NativeSessionResume bool `json:"native_session_resume"`
 
-	// ResumeFlag is the CLI flag used for session resumption when ResumeViaACP is false.
-	// Example: "--resume" for auggie, empty for agents that use ACP session/load.
+	// ResumeFlag is the CLI flag used for session resumption when NativeSessionResume is false.
+	// Example: "--resume" for auggie, empty for agents that use native session loading.
 	ResumeFlag string `json:"resume_flag,omitempty"`
 
 	// CanRecover indicates whether this agent supports session recovery after a backend restart.
@@ -510,6 +512,10 @@ func parseProtocol(p string) agent.Protocol {
 		return agent.ProtocolClaudeCode
 	case "opencode":
 		return agent.ProtocolOpenCode
+	case "copilot":
+		return agent.ProtocolCopilot
+	case "amp":
+		return agent.ProtocolAmp
 	default:
 		return agent.ProtocolACP // Default to ACP
 	}

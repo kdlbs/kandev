@@ -2105,8 +2105,21 @@ func (s *Service) UpdateToolCallMessageWithCreate(ctx context.Context, sessionID
 	}
 
 	// Add normalized tool data to metadata for frontend consumption
+	// and update message type if the normalized kind changed (e.g., read_file -> code_search for directories)
 	if normalized != nil {
 		message.Metadata["normalized"] = normalized
+
+		// Update message type if the normalized kind changed
+		// This handles cases like Read on a directory converting to code_search
+		newMsgType := models.MessageType(normalized.Kind().ToMessageType())
+		if newMsgType != message.Type {
+			s.logger.Debug("updating message type based on normalized kind",
+				zap.String("message_id", message.ID),
+				zap.String("old_type", string(message.Type)),
+				zap.String("new_type", string(newMsgType)),
+				zap.String("normalized_kind", string(normalized.Kind())))
+			message.Type = newMsgType
+		}
 	}
 
 	// Update title/content if provided and different from current
@@ -2315,7 +2328,8 @@ func (s *Service) CompleteTurn(ctx context.Context, turnID string) error {
 	turn, err := s.repo.GetTurn(ctx, turnID)
 	if err != nil {
 		s.logger.Warn("failed to refetch completed turn", zap.String("turn_id", turnID), zap.Error(err))
-		// Still publish with the old turn data
+		// Turn was likely deleted (task deletion race), skip publishing
+		return nil
 	}
 
 	s.publishTurnEvent(events.TurnCompleted, turn)
@@ -2349,6 +2363,10 @@ func (s *Service) getOrStartTurn(ctx context.Context, sessionID string) (*models
 // publishTurnEvent publishes a turn event to the event bus.
 func (s *Service) publishTurnEvent(eventType string, turn *models.Turn) {
 	if s.eventBus == nil {
+		return
+	}
+	if turn == nil {
+		s.logger.Warn("publishTurnEvent: turn is nil, skipping", zap.String("event_type", eventType))
 		return
 	}
 	_ = s.eventBus.Publish(context.Background(), eventType, bus.NewEvent(eventType, "task-service", map[string]interface{}{

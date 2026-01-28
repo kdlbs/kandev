@@ -100,7 +100,7 @@ export const TaskLayout = memo(function TaskLayout({
     });
 
   const previewPanelIds = ['chat', 'preview'];
-  const previewLayoutKey = `task-layout-preview-v2:${sessionKey}`;
+  const previewLayoutKey = 'task-layout-preview-v2';
   const { defaultLayout: defaultPreviewLayout, onLayoutChanged: onPreviewLayoutChange } =
     useDefaultLayout({
       id: previewLayoutKey,

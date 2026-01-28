@@ -34,6 +34,8 @@ const (
 	ProtocolStreamJSON = "streamjson"
 	ProtocolCodex      = "codex"
 	ProtocolOpenCode   = "opencode"
+	ProtocolAmp        = "amp"
+	ProtocolCopilot    = "copilot"
 )
 
 func resolveDebugLogDir() string {

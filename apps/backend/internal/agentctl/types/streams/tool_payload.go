@@ -19,6 +19,25 @@ const (
 	ToolKindMisc         ToolKind = "misc"
 )
 
+// ToMessageType maps the ToolKind to a frontend message type.
+// This allows the frontend to use specialized renderers for different tool categories.
+func (k ToolKind) ToMessageType() string {
+	switch k {
+	case ToolKindReadFile:
+		return "tool_read"
+	case ToolKindCodeSearch:
+		return "tool_search"
+	case ToolKindModifyFile:
+		return "tool_edit"
+	case ToolKindShellExec:
+		return "tool_execute"
+	case ToolKindManageTodos:
+		return "todo"
+	default:
+		return "tool_call"
+	}
+}
+
 // NormalizedPayload is the normalized tool data (discriminated union).
 // Exactly one of the kind-specific fields will be set based on Kind.
 // Fields are unexported to enforce use of factory functions (NewReadFile, NewShellExec, etc.)

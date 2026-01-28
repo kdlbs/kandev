@@ -20,7 +20,7 @@ func NewCommandBuilder() *CommandBuilder {
 // CommandOptions contains options for building a command
 type CommandOptions struct {
 	Model       string // Model to use (appended via ModelFlag if set)
-	SessionID   string // Session ID to resume (appended via SessionConfig.ResumeFlag if not ResumeViaACP)
+	SessionID   string // Session ID to resume (appended via SessionConfig.ResumeFlag if not NativeSessionResume)
 	AutoApprove bool   // If true, skip permission flags (auto-approve all tool calls)
 
 	// PermissionValues contains the values for each permission setting
@@ -47,10 +47,10 @@ func (cb *CommandBuilder) BuildCommand(agentConfig *registry.AgentTypeConfig, op
 
 	// Append session resume flag if:
 	// 1. Session ID is provided
-	// 2. Agent does NOT use ACP for session resumption (uses CLI flag instead)
+	// 2. Agent does NOT use native session loading (uses CLI flag instead)
 	// 3. Agent has a ResumeFlag configured
 	// 4. Agent supports session recovery (CanRecover is not false)
-	if opts.SessionID != "" && !agentConfig.SessionConfig.ResumeViaACP && agentConfig.SessionConfig.ResumeFlag != "" && agentConfig.SessionConfig.SupportsRecovery() {
+	if opts.SessionID != "" && !agentConfig.SessionConfig.NativeSessionResume && agentConfig.SessionConfig.ResumeFlag != "" && agentConfig.SessionConfig.SupportsRecovery() {
 		cmd = append(cmd, agentConfig.SessionConfig.ResumeFlag, opts.SessionID)
 	}
 
