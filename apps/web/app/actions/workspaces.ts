@@ -19,6 +19,8 @@ import type {
   WorkflowStep,
   WorkflowStepType,
   ListWorkflowTemplatesResponse,
+  WorkflowTemplate,
+  StepDefinition,
 } from '@/lib/types/http';
 
 const { apiBaseUrl } = getBackendConfig();
@@ -227,9 +229,69 @@ export async function deleteRepositoryScriptAction(id: string) {
   await fetchJson<void>(`${apiBaseUrl}/api/v1/scripts/${id}`, { method: 'DELETE' });
 }
 
+type BackendWorkflowTemplateStep = {
+  name: string;
+  step_type: WorkflowStepType;
+  position: number;
+  color?: string;
+  auto_start_agent?: boolean;
+  plan_mode?: boolean;
+  require_approval?: boolean;
+  prompt_prefix?: string;
+  prompt_suffix?: string;
+};
+
+type BackendWorkflowTemplate = Omit<WorkflowTemplate, 'default_steps'> & {
+  steps?: BackendWorkflowTemplateStep[];
+  default_steps?: BackendWorkflowTemplateStep[];
+};
+
+const toStepBehaviors = (step: BackendWorkflowTemplateStep): StepBehaviors | undefined => {
+  const behaviors: StepBehaviors = {};
+  if (step.auto_start_agent !== undefined) {
+    behaviors.autoStartAgent = step.auto_start_agent;
+  }
+  if (step.plan_mode !== undefined) {
+    behaviors.planMode = step.plan_mode;
+  }
+  if (step.require_approval !== undefined) {
+    behaviors.requireApproval = step.require_approval;
+  }
+  if (step.prompt_prefix) {
+    behaviors.promptPrefix = step.prompt_prefix;
+  }
+  if (step.prompt_suffix) {
+    behaviors.promptSuffix = step.prompt_suffix;
+  }
+  return Object.keys(behaviors).length ? behaviors : undefined;
+};
+
+const normalizeWorkflowTemplate = (template: BackendWorkflowTemplate): WorkflowTemplate => {
+  const steps = template.default_steps ?? template.steps ?? [];
+  const default_steps: StepDefinition[] = steps.map((step) => ({
+    name: step.name,
+    step_type: step.step_type,
+    position: step.position,
+    color: step.color,
+    behaviors: toStepBehaviors(step),
+  }));
+  return {
+    ...template,
+    default_steps,
+  };
+};
+
 // Workflow Templates
 export async function listWorkflowTemplatesAction(): Promise<ListWorkflowTemplatesResponse> {
-  return fetchJson<ListWorkflowTemplatesResponse>(`${apiBaseUrl}/api/v1/workflow/templates`);
+  const response = await fetchJson<ListWorkflowTemplatesResponse>(
+    `${apiBaseUrl}/api/v1/workflow/templates`
+  );
+  return {
+    ...response,
+    templates: (response.templates ?? []).map((template) =>
+      normalizeWorkflowTemplate(template as BackendWorkflowTemplate)
+    ),
+  };
 }
 
 // Helper to transform backend workflow step (flat fields) to frontend format (nested behaviors)

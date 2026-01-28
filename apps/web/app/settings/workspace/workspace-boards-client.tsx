@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { IconLayoutColumns, IconPlus, IconRobot, IconCheck, IconArrowRight } from '@tabler/icons-react';
+import { IconLayoutColumns, IconPlus } from '@tabler/icons-react';
 import { Button } from '@kandev/ui/button';
 import { Card, CardContent } from '@kandev/ui/card';
 import { Separator } from '@kandev/ui/separator';
@@ -20,13 +20,12 @@ import {
 import { SettingsSection } from '@/components/settings/settings-section';
 import { BoardCard } from '@/components/settings/board-card';
 import { generateUUID } from '@/lib/utils';
-import { cn } from '@kandev/ui/lib/utils';
 import {
   createBoardAction,
   deleteBoardAction,
   updateBoardAction,
 } from '@/app/actions/workspaces';
-import type { Board, Workspace, WorkflowTemplate } from '@/lib/types/http';
+import type { Board, StepDefinition, WorkflowStep, Workspace, WorkflowTemplate } from '@/lib/types/http';
 
 type WorkspaceBoardsClientProps = {
   workspace: Workspace | null;
@@ -48,9 +47,34 @@ export function WorkspaceBoardsClient({
   const [newBoardName, setNewBoardName] = useState('');
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
 
-  // Get selected template steps for preview
-  const selectedTemplate = workflowTemplates.find((t) => t.id === selectedTemplateId);
-  const previewSteps = selectedTemplate?.default_steps ?? [];
+  const templateStepsById = useMemo(() => {
+    return new Map(
+      workflowTemplates.map((template) => [template.id, template.default_steps ?? []])
+    );
+  }, [workflowTemplates]);
+
+  const defaultCustomSteps = useMemo<StepDefinition[]>(
+    () => [
+      { name: 'Todo', step_type: 'backlog', position: 0, color: 'bg-slate-500' },
+      { name: 'In Progress', step_type: 'implementation', position: 1, color: 'bg-blue-500' },
+      { name: 'Review', step_type: 'review', position: 2, color: 'bg-purple-500' },
+      { name: 'Done', step_type: 'done', position: 3, color: 'bg-green-500' },
+    ],
+    []
+  );
+
+  const buildWorkflowSteps = (board: Board, definitions: StepDefinition[]): WorkflowStep[] =>
+    definitions.map((step, index) => ({
+      id: `temp-step-${board.id}-${index}`,
+      board_id: board.id,
+      name: step.name,
+      step_type: step.step_type,
+      position: step.position ?? index,
+      color: step.color ?? 'bg-slate-500',
+      behaviors: step.behaviors,
+      created_at: '',
+      updated_at: '',
+    }));
 
   const savedBoardsById = useMemo(() => {
     return new Map(savedBoardItems.map((board) => [board.id, board]));
@@ -182,16 +206,28 @@ export function WorkspaceBoardsClient({
         }
       >
         <div className="grid gap-3">
-          {boardItems.map((board) => (
-            <BoardCard
-              key={board.id}
-              board={board}
-              isBoardDirty={isBoardDirty(board)}
-              onUpdateBoard={(updates) => handleUpdateBoard(board.id, updates)}
-              onDeleteBoard={() => handleDeleteBoard(board.id)}
-              onSaveBoard={() => handleSaveBoard(board.id)}
-            />
-          ))}
+          {boardItems.map((board) => {
+            const isTempBoard = board.id.startsWith('temp-');
+            const templateSteps =
+              isTempBoard && board.workflow_template_id
+                ? templateStepsById.get(board.workflow_template_id) ?? []
+                : defaultCustomSteps;
+            const initialWorkflowSteps =
+              isTempBoard && templateSteps.length
+                ? buildWorkflowSteps(board, templateSteps)
+                : undefined;
+            return (
+              <BoardCard
+                key={board.id}
+                board={board}
+                isBoardDirty={isBoardDirty(board)}
+                initialWorkflowSteps={initialWorkflowSteps}
+                onUpdateBoard={(updates) => handleUpdateBoard(board.id, updates)}
+                onDeleteBoard={() => handleDeleteBoard(board.id)}
+                onSaveBoard={() => handleSaveBoard(board.id)}
+              />
+            );
+          })}
         </div>
       </SettingsSection>
 
@@ -248,36 +284,7 @@ export function WorkspaceBoardsClient({
               </div>
             )}
 
-            {/* Workflow Preview */}
-            {previewSteps.length > 0 && (
-              <div className="border rounded-lg p-4 bg-muted/50">
-                <Label className="text-sm">Workflow Preview</Label>
-                <div className="flex items-center gap-2 mt-2 overflow-x-auto pb-2">
-                  {previewSteps.map((step, i) => (
-                    <div key={`step-${i}`} className="flex items-center gap-2">
-                      <div
-                        className={cn(
-                          'px-3 py-1.5 rounded text-sm whitespace-nowrap flex items-center gap-1',
-                          step.color || 'bg-slate-500',
-                          'text-white'
-                        )}
-                      >
-                        {step.name}
-                        {step.behaviors?.autoStartAgent && (
-                          <IconRobot className="h-3 w-3" />
-                        )}
-                        {step.behaviors?.requireApproval && (
-                          <IconCheck className="h-3 w-3" />
-                        )}
-                      </div>
-                      {i < previewSteps.length - 1 && (
-                        <IconArrowRight className="h-4 w-4 text-muted-foreground shrink-0" />
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+            {/* Workflow preview intentionally omitted from the modal */}
           </div>
 
           <DialogFooter>

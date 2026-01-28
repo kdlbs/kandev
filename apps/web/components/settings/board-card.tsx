@@ -30,6 +30,7 @@ import {
 type BoardCardProps = {
   board: Board;
   isBoardDirty: boolean;
+  initialWorkflowSteps?: WorkflowStep[];
   onUpdateBoard: (updates: { name?: string; description?: string }) => void;
   onDeleteBoard: () => Promise<unknown>;
   onSaveBoard: () => Promise<unknown>;
@@ -38,6 +39,7 @@ type BoardCardProps = {
 export function BoardCard({
   board,
   isBoardDirty,
+  initialWorkflowSteps,
   onUpdateBoard,
   onDeleteBoard,
   onSaveBoard,
@@ -49,14 +51,18 @@ export function BoardCard({
   const deleteBoardRequest = useRequest(onDeleteBoard);
 
   // Workflow state
-  const [workflowSteps, setWorkflowSteps] = useState<WorkflowStep[]>([]);
+  const [workflowSteps, setWorkflowSteps] = useState<WorkflowStep[]>(initialWorkflowSteps ?? []);
   const [workflowLoading, setWorkflowLoading] = useState(false);
 
   const isNewBoard = board.id.startsWith('temp-');
 
   // Load workflow steps on mount (only for saved boards)
   useEffect(() => {
-    if (isNewBoard) return;
+    if (isNewBoard) {
+      setWorkflowSteps(initialWorkflowSteps ?? []);
+      setWorkflowLoading(false);
+      return;
+    }
 
     let cancelled = false;
     const load = async () => {
@@ -84,7 +90,7 @@ export function BoardCard({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [board.id, isNewBoard]);
+  }, [board.id, initialWorkflowSteps, isNewBoard, toast]);
 
   const refreshWorkflowSteps = async () => {
     try {
@@ -96,6 +102,7 @@ export function BoardCard({
   };
 
   const handleUpdateWorkflowStep = async (stepId: string, updates: Partial<WorkflowStep>) => {
+    if (isNewBoard) return;
     try {
       await updateWorkflowStepAction(stepId, updates);
       await refreshWorkflowSteps();
@@ -109,6 +116,7 @@ export function BoardCard({
   };
 
   const handleAddWorkflowStep = async () => {
+    if (isNewBoard) return;
     try {
       await createWorkflowStepAction({
         board_id: board.id,
@@ -128,6 +136,7 @@ export function BoardCard({
   };
 
   const handleRemoveWorkflowStep = async (stepId: string) => {
+    if (isNewBoard) return;
     try {
       await deleteWorkflowStepAction(stepId);
       await refreshWorkflowSteps();
@@ -141,6 +150,7 @@ export function BoardCard({
   };
 
   const handleReorderWorkflowSteps = async (reorderedSteps: WorkflowStep[]) => {
+    if (isNewBoard) return;
     // Optimistically update the UI
     setWorkflowSteps(reorderedSteps);
     try {
@@ -208,22 +218,26 @@ export function BoardCard({
           </div>
 
           {/* Workflow Steps Section - only show for saved boards */}
-          {!isNewBoard && (
-            <div className="space-y-2">
-              <Label>Workflow Steps</Label>
-              {workflowLoading ? (
-                <div className="text-sm text-muted-foreground">Loading workflow steps...</div>
-              ) : (
-                <WorkflowStepEditor
-                  steps={workflowSteps}
-                  onUpdateStep={handleUpdateWorkflowStep}
-                  onAddStep={handleAddWorkflowStep}
-                  onRemoveStep={handleRemoveWorkflowStep}
-                  onReorderSteps={handleReorderWorkflowSteps}
-                />
-              )}
-            </div>
-          )}
+          <div className="space-y-2">
+            <Label>Workflow Steps</Label>
+            {isNewBoard && (
+              <p className="text-xs text-muted-foreground">
+                Steps will be created when you save the board.
+              </p>
+            )}
+            {workflowLoading ? (
+              <div className="text-sm text-muted-foreground">Loading workflow steps...</div>
+            ) : (
+              <WorkflowStepEditor
+                steps={workflowSteps}
+                onUpdateStep={handleUpdateWorkflowStep}
+                onAddStep={handleAddWorkflowStep}
+                onRemoveStep={handleRemoveWorkflowStep}
+                onReorderSteps={handleReorderWorkflowSteps}
+                readOnly={isNewBoard}
+              />
+            )}
+          </div>
 
           <div className="flex justify-end">
             <Button
