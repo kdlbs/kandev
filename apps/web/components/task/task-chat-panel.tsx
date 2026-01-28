@@ -135,10 +135,18 @@ export function TaskChatPanel({
   const showApproveButton =
     session?.review_status != null && session.review_status !== 'approved' && !isWorking;
 
-  const handleSubmit = async (event?: FormEvent) => {
+  // Use ref to access latest state without recreating the callback
+  const messageInputRef = useRef(messageInput);
+  messageInputRef.current = messageInput;
+  const isSendingRef = useRef(isSending);
+  isSendingRef.current = isSending;
+  const planModeEnabledRef = useRef(planModeEnabled);
+  planModeEnabledRef.current = planModeEnabled;
+
+  const handleSubmit = useCallback(async (event?: FormEvent) => {
     event?.preventDefault();
-    const trimmed = messageInput.trim();
-    if (!trimmed || isSending) return;
+    const trimmed = messageInputRef.current.trim();
+    if (!trimmed || isSendingRef.current) return;
     setIsSending(true);
     flushSync(() => {
       setMessageInput('');
@@ -150,13 +158,13 @@ export function TaskChatPanel({
         await handleSendMessage(trimmed);
       }
       // Reset plan mode after sending - it's a per-message instruction
-      if (planModeEnabled) {
+      if (planModeEnabledRef.current) {
         setPlanModeEnabled(false);
       }
     } finally {
       setIsSending(false);
     }
-  };
+  }, [onSend, handleSendMessage]);
 
 
   return (
@@ -182,7 +190,7 @@ export function TaskChatPanel({
         <TaskChatInput
           value={messageInput}
           onChange={setMessageInput}
-          onSubmit={() => handleSubmit()}
+          onSubmit={handleSubmit}
           placeholder={
             agentMessageCount > 0
               ? 'Continue working on this task...'

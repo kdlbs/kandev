@@ -16,6 +16,7 @@ export function useSessionCommits(sessionId: string | null) {
   );
   const setSessionCommits = useAppStore((state) => state.setSessionCommits);
   const setSessionCommitsLoading = useAppStore((state) => state.setSessionCommitsLoading);
+  const connectionStatus = useAppStore((state) => state.connection.status);
 
   const fetchCommits = useCallback(async () => {
     if (!sessionId) return;
@@ -42,10 +43,11 @@ export function useSessionCommits(sessionId: string | null) {
 
   // Fetch commits on mount
   useEffect(() => {
+    if (connectionStatus !== 'connected') return;
     if (sessionId && !commits) {
       fetchCommits();
     }
-  }, [sessionId, commits, fetchCommits]);
+  }, [sessionId, commits, fetchCommits, connectionStatus]);
 
   return {
     commits: commits ?? [],

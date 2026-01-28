@@ -134,13 +134,14 @@ export function useSessionMessages(
 
   useEffect(() => {
     if (!taskSessionId) return;
+    if (connectionStatus !== 'connected') return;
     const client = getWebSocketClient();
     if (!client) return;
     const unsubscribe = client.subscribeSession(taskSessionId);
     return () => {
       unsubscribe();
     };
-  }, [taskSessionId]);
+  }, [taskSessionId, connectionStatus]);
 
   useEffect(() => {
     if (!taskSessionId || !taskSessionState) return;

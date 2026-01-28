@@ -1,5 +1,6 @@
 'use client';
 
+import { useMemo, useRef, useCallback } from 'react';
 import CodeMirror from '@uiw/react-codemirror';
 import { markdown } from '@codemirror/lang-markdown';
 import { EditorView, keymap, placeholder as cmPlaceholder } from '@codemirror/view';
@@ -37,40 +38,48 @@ export function TaskChatInput({
   const submitKey = shortcutToCodeMirrorKeybinding(SHORTCUTS.SUBMIT);
   const completionSource = useChatCompletions(sessionId);
 
-  const handleSubmitKey = () => {
-    onSubmit();
+  // Use ref to access latest onSubmit without recreating extensions
+  const onSubmitRef = useRef(onSubmit);
+  onSubmitRef.current = onSubmit;
+
+  const handleSubmitKey = useCallback(() => {
+    onSubmitRef.current();
     return true;
-  };
+  }, []);
 
-  const submitKeymap = Prec.highest(
-    keymap.of([
-      { key: submitKey, run: handleSubmitKey, preventDefault: true },
-      { key: 'Mod-Enter', run: handleSubmitKey, preventDefault: true },
-    ])
-  );
+  // Memoize extensions to prevent CodeMirror reconfiguration on every render
+  // Only recreate when placeholder or completionSource changes
+  const extensions = useMemo<Extension[]>(() => {
+    const submitKeymap = Prec.highest(
+      keymap.of([
+        { key: submitKey, run: handleSubmitKey, preventDefault: true },
+        { key: 'Mod-Enter', run: handleSubmitKey, preventDefault: true },
+      ])
+    );
 
-  const extensions: Extension[] = [
-    EditorView.lineWrapping,
-    chatEditorTheme,
-    EditorView.domEventHandlers({
-      keydown: (event) => {
-        if (matchesShortcut(event, SHORTCUTS.SUBMIT)) {
-          event.preventDefault();
-          event.stopPropagation();
-          onSubmit();
-          return true;
-        }
-        return false;
-      },
-    }),
-    history(),
-    closeBrackets(),
-    markdown(),
-    cmPlaceholder(placeholder ?? ''),
-    autocompletion({ override: [completionSource], aboveCursor: true }),
-    submitKeymap,
-    keymap.of([...defaultKeymap, ...historyKeymap, ...closeBracketsKeymap]),
-  ];
+    return [
+      EditorView.lineWrapping,
+      chatEditorTheme,
+      EditorView.domEventHandlers({
+        keydown: (event) => {
+          if (matchesShortcut(event, SHORTCUTS.SUBMIT)) {
+            event.preventDefault();
+            event.stopPropagation();
+            onSubmitRef.current();
+            return true;
+          }
+          return false;
+        },
+      }),
+      history(),
+      closeBrackets(),
+      markdown(),
+      cmPlaceholder(placeholder ?? ''),
+      autocompletion({ override: [completionSource], aboveCursor: true }),
+      submitKeymap,
+      keymap.of([...defaultKeymap, ...historyKeymap, ...closeBracketsKeymap]),
+    ];
+  }, [placeholder, completionSource, submitKey, handleSubmitKey]);
 
   return (
     <div
