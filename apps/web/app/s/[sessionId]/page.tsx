@@ -154,7 +154,7 @@ export default async function SessionPage({
 
   return (
     <>
-      {initialState ? <StateHydrator initialState={initialState} /> : null}
+      {initialState ? <StateHydrator initialState={initialState} sessionId={sessionId ?? undefined} /> : null}
       <TaskPageContent
         task={task}
         sessionId={sessionId}

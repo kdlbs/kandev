@@ -1,6 +1,6 @@
 import { createStore } from 'zustand/vanilla';
 import { immer } from 'zustand/middleware/immer';
-import { hydrateState } from './hydration/hydrator';
+import { hydrateState, type HydrationOptions } from './hydration/hydrator';
 import type { Repository, Branch, Message, Turn, TaskSession } from '@/lib/types/http';
 import {
   createKanbanSlice,
@@ -144,7 +144,7 @@ export type AppState = {
   connection: typeof defaultUIState['connection'];
 
   // Actions from all slices
-  hydrate: (state: Partial<AppState>) => void;
+  hydrate: (state: Partial<AppState>, options?: HydrationOptions) => void;
   setActiveWorkspace: (workspaceId: string | null) => void;
   setWorkspaces: (workspaces: WorkspaceState['items']) => void;
   setActiveBoard: (boardId: string | null) => void;
@@ -382,7 +382,7 @@ export function createAppStore(initialState?: Partial<AppState>) {
       connection: merged.connection,
       // Add hydrate method
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      hydrate: (state) => set((draft) => hydrateState(draft as any, state)),
+      hydrate: (state, options) => set((draft) => hydrateState(draft as any, state, options)),
     }))
   );
 }

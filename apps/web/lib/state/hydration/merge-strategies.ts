@@ -37,20 +37,25 @@ export function deepMerge<T extends Record<string, any>>(target: Draft<T>, sourc
 /**
  * Merge strategy for sessionId-keyed maps
  * Only merges sessions that don't exist or are not currently active
+ * @param forceMergeSessionId - If provided, this session will be merged even if it's active
  */
 export function mergeSessionMap<T>(
   target: Draft<Record<string, T>>,
   source: Record<string, T> | undefined,
-  activeSessionId: string | null
+  activeSessionId: string | null,
+  forceMergeSessionId?: string | null
 ): void {
   if (!source) return;
 
   for (const sessionId in source) {
-    // Skip if this is the active session to avoid overwriting live data
-    if (sessionId === activeSessionId) continue;
+    // Force merge if this is the forceMergeSessionId (for navigation refresh)
+    const shouldForceMerge = forceMergeSessionId && sessionId === forceMergeSessionId;
 
-    // Only set if not present
-    if (!(sessionId in target)) {
+    // Skip if this is the active session to avoid overwriting live data (unless force merge)
+    if (!shouldForceMerge && sessionId === activeSessionId) continue;
+
+    // Merge the session data
+    if (shouldForceMerge || !(sessionId in target)) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (target as any)[sessionId] = source[sessionId];
     }
