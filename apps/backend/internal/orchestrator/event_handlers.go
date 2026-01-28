@@ -892,14 +892,22 @@ func (s *Service) updateTaskSessionState(ctx context.Context, taskID, sessionID 
 		zap.String("old_state", string(oldState)),
 		zap.String("new_state", string(nextState)))
 	if s.eventBus != nil {
-		_ = s.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(events.TaskSessionStateChanged, "task-session", map[string]interface{}{
+		eventData := map[string]interface{}{
 			"task_id":                taskID,
 			"session_id":             sessionID,
 			"old_state":              string(oldState),
 			"new_state":              string(nextState),
 			"agent_profile_id":       session.AgentProfileID,
 			"agent_profile_snapshot": session.AgentProfileSnapshot,
-		}))
+		}
+		// Include review_status and workflow_step_id if present to ensure frontend state consistency
+		if session.ReviewStatus != nil {
+			eventData["review_status"] = *session.ReviewStatus
+		}
+		if session.WorkflowStepID != nil {
+			eventData["workflow_step_id"] = *session.WorkflowStepID
+		}
+		_ = s.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(events.TaskSessionStateChanged, "task-session", eventData))
 	}
 }
 
