@@ -88,7 +88,6 @@ type RepositoryDiscoveryConfig struct {
 type WorktreeConfig struct {
 	Enabled         bool   `mapstructure:"enabled"`         // Enable worktree mode
 	BasePath        string `mapstructure:"basePath"`        // Base directory for worktrees (default: ~/.kandev/worktrees)
-	MaxPerRepo      int    `mapstructure:"maxPerRepo"`      // Max worktrees per repository (default: 10)
 	DefaultBranch   string `mapstructure:"defaultBranch"`   // Default base branch (default: main)
 	CleanupOnRemove bool   `mapstructure:"cleanupOnRemove"` // Remove worktree directory on task deletion
 }
@@ -204,7 +203,6 @@ func setDefaults(v *viper.Viper) {
 	// Worktree defaults
 	v.SetDefault("worktree.enabled", true)
 	v.SetDefault("worktree.basePath", "~/.kandev/worktrees")
-	v.SetDefault("worktree.maxPerRepo", 10)
 	v.SetDefault("worktree.defaultBranch", "main")
 	v.SetDefault("worktree.cleanupOnRemove", true)
 }

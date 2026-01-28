@@ -23,7 +23,6 @@ func newTestConfig(t *testing.T) Config {
 	return Config{
 		Enabled:      true,
 		BasePath:     tmpDir,
-		MaxPerRepo:   10,
 		BranchPrefix: "kandev/",
 	}
 }

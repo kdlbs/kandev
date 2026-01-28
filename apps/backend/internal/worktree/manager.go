@@ -175,15 +175,6 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 		return nil, ErrRepoNotGit
 	}
 
-	// Check worktree limit
-	count, err := m.countWorktreesForRepo(ctx, req.RepositoryID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to count worktrees: %w", err)
-	}
-	if count >= m.config.MaxPerRepo {
-		return nil, fmt.Errorf("%w: %d", ErrMaxWorktrees, m.config.MaxPerRepo)
-	}
-
 	// Get repository lock for safe concurrent access
 	repoLock := m.getRepoLock(req.RepositoryPath)
 	repoLock.Lock()
@@ -714,35 +705,6 @@ func (m *Manager) pullBaseBranch(repoPath, baseBranch string) string {
 	}
 
 	return baseBranch
-}
-
-// countWorktreesForRepo counts active worktrees for a repository.
-func (m *Manager) countWorktreesForRepo(ctx context.Context, repoID string) (int, error) {
-	if m.store == nil {
-		// Count from cache if no store
-		m.mu.RLock()
-		defer m.mu.RUnlock()
-		count := 0
-		for _, wt := range m.worktrees {
-			if wt.RepositoryID == repoID && wt.Status == StatusActive {
-				count++
-			}
-		}
-		return count, nil
-	}
-
-	worktrees, err := m.store.GetWorktreesByRepositoryID(ctx, repoID)
-	if err != nil {
-		return 0, err
-	}
-
-	count := 0
-	for _, wt := range worktrees {
-		if wt.Status == StatusActive {
-			count++
-		}
-	}
-	return count, nil
 }
 
 // removeWorktreeDir removes a worktree directory using git worktree remove.

@@ -16,9 +16,6 @@ var (
 	// ErrBranchExists is returned when the branch name already exists in the repository.
 	ErrBranchExists = errors.New("branch already exists")
 
-	// ErrMaxWorktrees is returned when the maximum number of worktrees per repository is reached.
-	ErrMaxWorktrees = errors.New("maximum worktrees reached for repository")
-
 	// ErrWorktreeLocked is returned when the worktree is locked by another process.
 	ErrWorktreeLocked = errors.New("worktree is locked by another process")
 
