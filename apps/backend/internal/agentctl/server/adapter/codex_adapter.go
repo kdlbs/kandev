@@ -53,7 +53,6 @@ type CodexAdapter struct {
 	// Accumulators for streaming content
 	messageBuffer   string
 	reasoningBuffer string
-	summaryBuffer   string
 
 	// Turn completion signaling
 	turnCompleteCh chan turnCompleteResult
@@ -423,7 +422,6 @@ func (a *CodexAdapter) Prompt(ctx context.Context, message string) error {
 	// Reset accumulators for new turn
 	a.messageBuffer = ""
 	a.reasoningBuffer = ""
-	a.summaryBuffer = ""
 	// Create channel to wait for turn completion
 	a.turnCompleteCh = make(chan turnCompleteResult, 1)
 	a.mu.Unlock()
@@ -632,19 +630,21 @@ func (a *CodexAdapter) handleNotification(method string, params json.RawMessage)
 		})
 
 	case codex.NotifyItemReasoningSummaryDelta:
+		// Codex sends reasoning via summaryTextDelta - normalize to ReasoningText
+		// so the lifecycle manager doesn't need to know about protocol differences
 		var p codex.ReasoningDeltaParams
 		if err := json.Unmarshal(params, &p); err != nil {
 			a.logger.Warn("failed to parse reasoning summary delta", zap.Error(err))
 			return
 		}
 		a.mu.Lock()
-		a.summaryBuffer += p.Delta
+		a.reasoningBuffer += p.Delta
 		a.mu.Unlock()
 		a.sendUpdate(AgentEvent{
-			Type:             EventTypeReasoning,
-			SessionID:        threadID,
-			OperationID:      turnID,
-			ReasoningSummary: p.Delta,
+			Type:          EventTypeReasoning,
+			SessionID:     threadID,
+			OperationID:   turnID,
+			ReasoningText: p.Delta,
 		})
 
 	case codex.NotifyTurnCompleted:

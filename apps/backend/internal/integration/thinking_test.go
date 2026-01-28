@@ -183,3 +183,68 @@ func TestThinkingEventAppend(t *testing.T) {
 	assert.True(t, foundThinking, "should find thinking message with both chunks")
 }
 
+// TestCodexReasoningSummaryEvents verifies that Codex-style reasoning events
+// (which use ReasoningSummary instead of ReasoningText) are properly handled.
+// Codex sends item/reasoning/summaryTextDelta which sets ReasoningSummary.
+func TestCodexReasoningSummaryEvents(t *testing.T) {
+	ts := NewOrchestratorTestServer(t)
+	defer ts.Close()
+
+	ctx := context.Background()
+
+	// Create a task with session
+	taskID := ts.CreateTestTask(t, "test-agent", 1)
+
+	sessionID := uuid.New().String()
+	session := &models.TaskSession{
+		ID:             sessionID,
+		TaskID:         taskID,
+		AgentProfileID: "test-agent",
+		State:          models.TaskSessionStateRunning,
+		StartedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+	}
+	err := ts.TaskRepo.CreateTaskSession(ctx, session)
+	require.NoError(t, err)
+
+	thinkingID := uuid.New().String()
+	// Codex sends reasoning summaries like this
+	summaryContent := "**Processing simple calculation**\nUser asks for a calculator response."
+
+	// Simulate a thinking_streaming event with content from ReasoningSummary
+	// This is what would happen after lifecycle manager processes Codex's reasoning
+	eventData := &lifecycle.AgentStreamEventPayload{
+		Type:      "agent/event",
+		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
+		TaskID:    taskID,
+		SessionID: sessionID,
+		Data: &lifecycle.AgentStreamEventData{
+			Type:        "thinking_streaming",
+			Text:        summaryContent,
+			MessageID:   thinkingID,
+			IsAppend:    false,
+			MessageType: "thinking",
+		},
+	}
+
+	subject := events.BuildAgentStreamSubject(taskID)
+	err = ts.EventBus.Publish(ctx, subject, bus.NewEvent(events.AgentStream, "test", eventData))
+	require.NoError(t, err)
+
+	time.Sleep(200 * time.Millisecond)
+
+	messages, err := ts.TaskSvc.ListMessages(ctx, sessionID)
+	require.NoError(t, err)
+
+	var foundThinking bool
+	for _, msg := range messages {
+		if msg.Type == "thinking" && msg.ID == thinkingID {
+			foundThinking = true
+			thinking := msg.Metadata["thinking"].(string)
+			assert.Equal(t, summaryContent, thinking, "thinking content should match Codex summary")
+			break
+		}
+	}
+
+	assert.True(t, foundThinking, "should find thinking message from Codex-style event")
+}

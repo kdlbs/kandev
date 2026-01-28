@@ -1237,7 +1237,7 @@ func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.Age
 
 	case "reasoning":
 		// Stream thinking content like message chunks for real-time feedback
-		// Note: Only models with extended thinking (e.g., Opus 4.5) send reasoning events
+		// All adapters normalize reasoning to ReasoningText field
 		if event.ReasoningText != "" {
 			execution.messageMu.Lock()
 			execution.thinkingBuffer.WriteString(event.ReasoningText)
