@@ -384,9 +384,9 @@ func (sm *SessionManager) SendPrompt(
 	// This ensures each prompt starts fresh and doesn't append to previous message
 	execution.messageMu.Lock()
 	execution.messageBuffer.Reset()
-	execution.reasoningBuffer.Reset()
-	execution.summaryBuffer.Reset()
-	execution.currentMessageID = "" // Clear streaming message ID for new turn
+	execution.thinkingBuffer.Reset()
+	execution.currentMessageID = ""  // Clear streaming message ID for new turn
+	execution.currentThinkingID = "" // Clear streaming thinking ID for new turn
 	execution.messageMu.Unlock()
 
 	// Check if we need to inject resume context (fork_session pattern)
@@ -439,10 +439,10 @@ func (sm *SessionManager) SendPrompt(
 	execution.messageMu.Lock()
 	agentMessage := execution.messageBuffer.String()
 	execution.messageBuffer.Reset()
-	execution.reasoningBuffer.Reset()
-	execution.summaryBuffer.Reset()
+	execution.thinkingBuffer.Reset()
 	currentMsgID := execution.currentMessageID
-	execution.currentMessageID = "" // Clear for next turn
+	execution.currentMessageID = ""  // Clear for next turn
+	execution.currentThinkingID = "" // Clear for next turn
 	execution.messageMu.Unlock()
 
 	stopReason := ""

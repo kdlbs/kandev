@@ -110,6 +110,8 @@ const (
 	MessageTypePermissionRequest MessageType = "permission_request"
 	// MessageTypeScriptExecution is for setup/cleanup script execution messages
 	MessageTypeScriptExecution MessageType = "script_execution"
+	// MessageTypeThinking is for agent thinking/reasoning content
+	MessageTypeThinking MessageType = "thinking"
 )
 
 // Message represents a message in a task session

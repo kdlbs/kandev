@@ -570,6 +570,25 @@ func (a *testMessageCreatorAdapter) AppendAgentMessage(ctx context.Context, mess
 	return a.svc.AppendMessageContent(ctx, messageID, additionalContent)
 }
 
+func (a *testMessageCreatorAdapter) CreateThinkingMessageStreaming(ctx context.Context, messageID, taskID, content, agentSessionID, turnID string) error {
+	_, err := a.svc.CreateMessageWithID(ctx, messageID, &taskservice.CreateMessageRequest{
+		TaskSessionID: agentSessionID,
+		TaskID:        taskID,
+		TurnID:        turnID,
+		Content:       "",
+		AuthorType:    "agent",
+		Type:          "thinking",
+		Metadata: map[string]interface{}{
+			"thinking": content,
+		},
+	})
+	return err
+}
+
+func (a *testMessageCreatorAdapter) AppendThinkingMessage(ctx context.Context, messageID, additionalContent string) error {
+	return a.svc.AppendThinkingContent(ctx, messageID, additionalContent)
+}
+
 // testTurnServiceAdapter adapts the task service to the orchestrator.TurnService interface for tests
 type testTurnServiceAdapter struct {
 	svc *taskservice.Service

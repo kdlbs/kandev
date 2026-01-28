@@ -63,6 +63,10 @@ type MessageCreator interface {
 	CreateAgentMessageStreaming(ctx context.Context, messageID, taskID, content, agentSessionID, turnID string) error
 	// AppendAgentMessage appends additional content to an existing streaming message
 	AppendAgentMessage(ctx context.Context, messageID, additionalContent string) error
+	// CreateThinkingMessageStreaming creates a new thinking message with a pre-generated ID for streaming updates
+	CreateThinkingMessageStreaming(ctx context.Context, messageID, taskID, content, agentSessionID, turnID string) error
+	// AppendThinkingMessage appends additional content to an existing streaming thinking message
+	AppendThinkingMessage(ctx context.Context, messageID, additionalContent string) error
 }
 
 // TurnService is an interface for managing session turns

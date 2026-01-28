@@ -342,14 +342,6 @@ func (a *ACPAdapter) handleACPUpdate(n acp.SessionNotification) {
 func (a *ACPAdapter) convertNotification(n acp.SessionNotification) *AgentEvent {
 	u := n.Update
 
-	// Log what update types we're receiving
-	a.logger.Debug("ACP notification received",
-		zap.Bool("has_tool_call", u.ToolCall != nil),
-		zap.Bool("has_tool_call_update", u.ToolCallUpdate != nil),
-		zap.Bool("has_message_chunk", u.AgentMessageChunk != nil),
-		zap.Bool("has_thought_chunk", u.AgentThoughtChunk != nil),
-		zap.Bool("has_plan", u.Plan != nil))
-
 	switch {
 	case u.AgentMessageChunk != nil:
 		if u.AgentMessageChunk.Content.Text != nil {
@@ -361,7 +353,8 @@ func (a *ACPAdapter) convertNotification(n acp.SessionNotification) *AgentEvent 
 		}
 
 	case u.AgentThoughtChunk != nil:
-		// Agent thinking/reasoning - map to the new reasoning type
+		// Agent thinking/reasoning - map to the reasoning type
+		// Note: Only models with extended thinking (e.g., Opus 4.5) send agent_thought_chunk
 		if u.AgentThoughtChunk.Content.Text != nil {
 			return &AgentEvent{
 				Type:          EventTypeReasoning,
