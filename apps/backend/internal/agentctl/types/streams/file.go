@@ -128,3 +128,23 @@ type FileContentResponse struct {
 	Error string `json:"error,omitempty"`
 }
 
+// FileSearchRequest represents a request to search for files.
+//
+// HTTP endpoint: GET /api/v1/workspace/search
+type FileSearchRequest struct {
+	// Query is the search query (partial filename or path).
+	Query string `json:"query"`
+
+	// Limit is the maximum number of results to return.
+	Limit int `json:"limit"`
+}
+
+// FileSearchResponse represents a response with matching files.
+type FileSearchResponse struct {
+	// Files is the list of matching file paths.
+	Files []string `json:"files"`
+
+	// Error contains error message if the request failed.
+	Error string `json:"error,omitempty"`
+}
+

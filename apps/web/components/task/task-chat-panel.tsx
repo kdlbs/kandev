@@ -189,6 +189,7 @@ export function TaskChatPanel({
               : 'Write to submit work to the agent...'
           }
           planModeEnabled={planModeEnabled}
+          sessionId={resolvedSessionId}
         />
         <ChatToolbar
           sessionId={resolvedSessionId}

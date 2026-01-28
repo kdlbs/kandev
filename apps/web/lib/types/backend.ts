@@ -361,6 +361,11 @@ export type FileContentResponse = {
   error?: string;
 };
 
+export type FileSearchResponse = {
+  files: string[];
+  error?: string;
+};
+
 // Single file change event (used within batched notifications)
 export type FileChangeEvent = {
   timestamp: string;

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -1182,4 +1183,66 @@ func (wt *WorkspaceTracker) GetFileContent(reqPath string) (string, int64, error
 	}
 
 	return string(content), info.Size(), nil
+}
+
+// scoredMatch holds a file path and its match score for sorting
+type scoredMatch struct {
+	path  string
+	score int
+}
+
+// SearchFiles searches for files matching the query string.
+// It uses fuzzy matching with scoring based on how well the query matches.
+func (wt *WorkspaceTracker) SearchFiles(query string, limit int) []string {
+	if query == "" {
+		return []string{}
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+
+	query = strings.ToLower(query)
+	var matches []scoredMatch
+
+	wt.mu.RLock()
+	files := wt.currentFiles.Files
+	wt.mu.RUnlock()
+
+	for _, file := range files {
+		path := file.Path
+		lowerPath := strings.ToLower(path)
+		name := filepath.Base(lowerPath)
+
+		score := 0
+		if name == query {
+			score = 100 // Exact filename match
+		} else if strings.HasPrefix(name, query) {
+			score = 75 // Filename starts with query
+		} else if strings.Contains(name, query) {
+			score = 50 // Filename contains query
+		} else if strings.Contains(lowerPath, query) {
+			score = 25 // Path contains query
+		}
+
+		if score > 0 {
+			matches = append(matches, scoredMatch{path: path, score: score})
+		}
+	}
+
+	// Sort by score descending
+	sort.Slice(matches, func(i, j int) bool {
+		if matches[i].score != matches[j].score {
+			return matches[i].score > matches[j].score
+		}
+		// Secondary sort by path length (shorter paths first)
+		return len(matches[i].path) < len(matches[j].path)
+	})
+
+	// Return top limit results
+	result := make([]string, 0, limit)
+	for i := 0; i < len(matches) && i < limit; i++ {
+		result = append(result, matches[i].path)
+	}
+
+	return result
 }

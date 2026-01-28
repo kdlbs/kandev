@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
@@ -314,6 +315,12 @@ type stopProcessResponse struct {
 	Error   string `json:"error,omitempty"`
 }
 
+// FileSearchResponse represents a response with matching files
+type FileSearchResponse struct {
+	Files []string `json:"files"`
+	Error string   `json:"error,omitempty"`
+}
+
 // RequestFileTree requests a file tree via HTTP GET
 func (c *Client) RequestFileTree(ctx context.Context, path string, depth int) (*FileTreeResponse, error) {
 	url := fmt.Sprintf("%s/api/v1/workspace/tree?path=%s&depth=%d", c.baseURL, path, depth)
@@ -345,11 +352,42 @@ func (c *Client) RequestFileTree(ctx context.Context, path string, depth int) (*
 	return &response, nil
 }
 
+// SearchFiles searches for files matching the query via HTTP GET
+func (c *Client) SearchFiles(ctx context.Context, query string, limit int) (*FileSearchResponse, error) {
+	reqURL := fmt.Sprintf("%s/api/v1/workspace/search?q=%s&limit=%d", c.baseURL, url.QueryEscape(query), limit)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search files: %w", err)
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			c.logger.Debug("failed to close file search response body", zap.Error(err))
+		}
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("file search failed with status %d", resp.StatusCode)
+	}
+
+	var result FileSearchResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return &result, nil
+}
+
 // RequestFileContent requests file content via HTTP GET
 func (c *Client) RequestFileContent(ctx context.Context, path string) (*FileContentResponse, error) {
-	url := fmt.Sprintf("%s/api/v1/workspace/file/content?path=%s", c.baseURL, path)
+	reqURL := fmt.Sprintf("%s/api/v1/workspace/file/content?path=%s", c.baseURL, path)
 
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}

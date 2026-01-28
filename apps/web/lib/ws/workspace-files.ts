@@ -1,5 +1,5 @@
 import type { WebSocketClient } from './client';
-import type { FileTreeResponse, FileContentResponse } from '@/lib/types/backend';
+import type { FileTreeResponse, FileContentResponse, FileSearchResponse } from '@/lib/types/backend';
 
 /**
  * Request file tree from the backend
@@ -28,5 +28,21 @@ export async function requestFileContent(
   return client.request<FileContentResponse>('workspace.file.get', {
     session_id: sessionId,
     path,
+  });
+}
+
+/**
+ * Search for files in the workspace matching a query
+ */
+export async function searchWorkspaceFiles(
+  client: WebSocketClient,
+  sessionId: string,
+  query: string,
+  limit: number = 20
+): Promise<FileSearchResponse> {
+  return client.request<FileSearchResponse>('workspace.files.search', {
+    session_id: sessionId,
+    query,
+    limit,
   });
 }
