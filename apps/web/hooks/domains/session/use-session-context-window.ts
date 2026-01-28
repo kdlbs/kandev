@@ -31,6 +31,7 @@ export function useSessionContextWindow(sessionId: string | null): ContextWindow
     sessionId ? state.taskSessions.items[sessionId] : undefined
   );
   const setContextWindow = useAppStore((state) => state.setContextWindow);
+  const connectionStatus = useAppStore((state) => state.connection.status);
 
   // Populate context window from session metadata if not already in store
   useEffect(() => {
@@ -59,6 +60,7 @@ export function useSessionContextWindow(sessionId: string | null): ContextWindow
   // Subscribe to session updates via WebSocket
   useEffect(() => {
     if (!sessionId) return;
+    if (connectionStatus !== 'connected') return;
     const client = getWebSocketClient();
     if (client) {
       const unsubscribe = client.subscribeSession(sessionId);
@@ -67,7 +69,7 @@ export function useSessionContextWindow(sessionId: string | null): ContextWindow
         // Don't clear context window on cleanup - keep it cached
       };
     }
-  }, [sessionId]);
+  }, [sessionId, connectionStatus]);
 
   return contextWindow;
 }

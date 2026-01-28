@@ -1,5 +1,6 @@
 'use client';
 
+import { useMemo, useCallback } from 'react';
 import CodeMirror from '@uiw/react-codemirror';
 import { markdown } from '@codemirror/lang-markdown';
 import { EditorView, keymap, placeholder as cmPlaceholder } from '@codemirror/view';
@@ -37,40 +38,47 @@ export function TaskChatInput({
   const submitKey = shortcutToCodeMirrorKeybinding(SHORTCUTS.SUBMIT);
   const completionSource = useChatCompletions(sessionId);
 
-  const handleSubmitKey = () => {
+  // Memoize the submit handler - include onSubmit in deps since it's now stable from parent
+  const handleSubmitKey = useCallback(() => {
     onSubmit();
     return true;
-  };
+  }, [onSubmit]);
 
-  const submitKeymap = Prec.highest(
-    keymap.of([
-      { key: submitKey, run: handleSubmitKey, preventDefault: true },
-      { key: 'Mod-Enter', run: handleSubmitKey, preventDefault: true },
-    ])
-  );
+  const handleKeydown = useCallback((event: KeyboardEvent) => {
+    if (matchesShortcut(event, SHORTCUTS.SUBMIT)) {
+      event.preventDefault();
+      event.stopPropagation();
+      onSubmit();
+      return true;
+    }
+    return false;
+  }, [onSubmit]);
 
-  const extensions: Extension[] = [
-    EditorView.lineWrapping,
-    chatEditorTheme,
-    EditorView.domEventHandlers({
-      keydown: (event) => {
-        if (matchesShortcut(event, SHORTCUTS.SUBMIT)) {
-          event.preventDefault();
-          event.stopPropagation();
-          onSubmit();
-          return true;
-        }
-        return false;
-      },
-    }),
-    history(),
-    closeBrackets(),
-    markdown(),
-    cmPlaceholder(placeholder ?? ''),
-    autocompletion({ override: [completionSource], aboveCursor: true }),
-    submitKeymap,
-    keymap.of([...defaultKeymap, ...historyKeymap, ...closeBracketsKeymap]),
-  ];
+  // Memoize extensions to prevent CodeMirror reconfiguration on every render
+  // Only recreate when dependencies actually change
+  const extensions = useMemo<Extension[]>(() => {
+    const submitKeymap = Prec.highest(
+      keymap.of([
+        { key: submitKey, run: handleSubmitKey, preventDefault: true },
+        { key: 'Mod-Enter', run: handleSubmitKey, preventDefault: true },
+      ])
+    );
+
+    return [
+      EditorView.lineWrapping,
+      chatEditorTheme,
+      EditorView.domEventHandlers({
+        keydown: handleKeydown,
+      }),
+      history(),
+      closeBrackets(),
+      markdown(),
+      cmPlaceholder(placeholder ?? ''),
+      autocompletion({ override: [completionSource], aboveCursor: true }),
+      submitKeymap,
+      keymap.of([...defaultKeymap, ...historyKeymap, ...closeBracketsKeymap]),
+    ];
+  }, [placeholder, completionSource, submitKey, handleSubmitKey, handleKeydown]);
 
   return (
     <div

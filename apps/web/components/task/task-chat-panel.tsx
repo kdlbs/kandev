@@ -135,7 +135,7 @@ export function TaskChatPanel({
   const showApproveButton =
     session?.review_status != null && session.review_status !== 'approved' && !isWorking;
 
-  const handleSubmit = async (event?: FormEvent) => {
+  const handleSubmit = useCallback(async (event?: FormEvent) => {
     event?.preventDefault();
     const trimmed = messageInput.trim();
     if (!trimmed || isSending) return;
@@ -156,7 +156,7 @@ export function TaskChatPanel({
     } finally {
       setIsSending(false);
     }
-  };
+  }, [messageInput, isSending, planModeEnabled, onSend, handleSendMessage]);
 
 
   return (
@@ -182,7 +182,7 @@ export function TaskChatPanel({
         <TaskChatInput
           value={messageInput}
           onChange={setMessageInput}
-          onSubmit={() => handleSubmit()}
+          onSubmit={handleSubmit}
           placeholder={
             agentMessageCount > 0
               ? 'Continue working on this task...'

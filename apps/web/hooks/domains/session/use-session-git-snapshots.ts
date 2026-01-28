@@ -19,6 +19,7 @@ export function useSessionGitSnapshots(sessionId: string | null, options?: { lim
   );
   const setGitSnapshots = useAppStore((state) => state.setGitSnapshots);
   const setGitSnapshotsLoading = useAppStore((state) => state.setGitSnapshotsLoading);
+  const connectionStatus = useAppStore((state) => state.connection.status);
 
   const fetchSnapshots = useCallback(async () => {
     if (!sessionId) return;
@@ -48,10 +49,11 @@ export function useSessionGitSnapshots(sessionId: string | null, options?: { lim
 
   // Fetch snapshots on mount
   useEffect(() => {
+    if (connectionStatus !== 'connected') return;
     if (sessionId && !snapshots) {
       fetchSnapshots();
     }
-  }, [sessionId, snapshots, fetchSnapshots]);
+  }, [sessionId, snapshots, fetchSnapshots, connectionStatus]);
 
   return {
     snapshots: snapshots ?? [],

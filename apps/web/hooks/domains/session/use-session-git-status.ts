@@ -14,12 +14,16 @@ export function useSessionGitStatus(sessionId: string | null) {
     sessionId ? state.gitStatus.bySessionId[sessionId] : undefined
   );
   const setGitStatus = useAppStore((state) => state.setGitStatus);
+  const connectionStatus = useAppStore((state) => state.connection.status);
   const prevSessionIdRef = useRef<string | null>(null);
 
   // Fetch initial status on mount if not already loaded
-  // Also refetch when switching to a different session
+  // Also refetch when switching to a different session or when WebSocket connects
   useEffect(() => {
     if (!sessionId) return;
+
+    // Wait for WebSocket to be connected before fetching
+    if (connectionStatus !== 'connected') return;
 
     // Detect session change to force refetch
     const sessionChanged = prevSessionIdRef.current !== null &&
@@ -87,11 +91,15 @@ export function useSessionGitStatus(sessionId: string | null) {
     };
 
     fetchSnapshot();
-  }, [sessionId, gitStatus, setGitStatus]);
+  }, [sessionId, gitStatus, setGitStatus, connectionStatus]);
 
   // Subscribe to session updates to receive git status via WebSocket
   useEffect(() => {
     if (!sessionId) return;
+
+    // Wait for WebSocket to be connected before subscribing
+    if (connectionStatus !== 'connected') return;
+
     const client = getWebSocketClient();
     if (client) {
       const unsubscribe = client.subscribeSession(sessionId);
@@ -100,7 +108,7 @@ export function useSessionGitStatus(sessionId: string | null) {
         // Don't clear git status on cleanup - keep it cached for when user switches back
       };
     }
-  }, [sessionId]);
+  }, [sessionId, connectionStatus]);
 
   return gitStatus;
 }

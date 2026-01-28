@@ -12,6 +12,7 @@ export function useSession(sessionId: string | null): UseSessionResult {
   const session = useAppStore((state) =>
     sessionId ? state.taskSessions.items[sessionId] ?? null : null
   );
+  const connectionStatus = useAppStore((state) => state.connection.status);
 
   const isActive = useMemo(() => {
     if (!session?.state) return false;
@@ -19,6 +20,7 @@ export function useSession(sessionId: string | null): UseSessionResult {
   }, [session?.state]);
 
   useEffect(() => {
+    if (connectionStatus !== 'connected') return;
     if (!session?.id) return;
     const client = getWebSocketClient();
     if (!client) return;
@@ -26,7 +28,7 @@ export function useSession(sessionId: string | null): UseSessionResult {
     return () => {
       unsubscribe();
     };
-  }, [session?.id]);
+  }, [session?.id, connectionStatus]);
 
   return { session, isActive };
 }

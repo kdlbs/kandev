@@ -9,13 +9,15 @@ export function useSessionAgentctl(sessionId: string | null) {
   const status = useAppStore((state) =>
     sessionId ? state.sessionAgentctl.itemsBySessionId[sessionId] : undefined
   );
+  const connectionStatus = useAppStore((state) => state.connection.status);
 
   useEffect(() => {
     if (!session?.id) return;
+    if (connectionStatus !== 'connected') return;
     const client = getWebSocketClient();
     if (!client) return;
     return client.subscribeSession(session.id);
-  }, [session?.id]);
+  }, [session?.id, connectionStatus]);
 
   return {
     status: status?.status ?? 'starting',
