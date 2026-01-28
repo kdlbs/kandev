@@ -151,6 +151,21 @@ func (s *Server) handleFileContent(c *gin.Context) {
 	c.JSON(200, types.FileContentResponse{Path: path, Content: content, Size: size})
 }
 
+// handleFileSearch handles file search requests via HTTP GET
+func (s *Server) handleFileSearch(c *gin.Context) {
+	query := c.Query("q")
+	limit := 20
+	if l := c.Query("limit"); l != "" {
+		if parsed := mustParseInt(l); parsed > 0 {
+			limit = parsed
+		}
+	}
+
+	files := s.procMgr.GetWorkspaceTracker().SearchFiles(query, limit)
+
+	c.JSON(200, types.FileSearchResponse{Files: files})
+}
+
 // mustParseInt parses a string to int, returns 0 on error
 func mustParseInt(s string) int {
 	var n int

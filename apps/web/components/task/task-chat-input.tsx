@@ -21,6 +21,7 @@ type TaskChatInputProps = {
   disabled?: boolean;
   className?: string;
   planModeEnabled?: boolean;
+  sessionId?: string | null;
 };
 
 export function TaskChatInput({
@@ -31,9 +32,10 @@ export function TaskChatInput({
   disabled,
   className,
   planModeEnabled,
+  sessionId,
 }: TaskChatInputProps) {
   const submitKey = shortcutToCodeMirrorKeybinding(SHORTCUTS.SUBMIT);
-  const completionSource = useChatCompletions();
+  const completionSource = useChatCompletions(sessionId);
 
   const handleSubmitKey = () => {
     onSubmit();

@@ -161,6 +161,7 @@ const (
 	// Workspace file operations
 	ActionWorkspaceFileTreeGet    = "workspace.tree.get"
 	ActionWorkspaceFileContentGet = "workspace.file.get"
+	ActionWorkspaceFilesSearch    = "workspace.files.search"
 	ActionWorkspaceFileChanges    = "session.workspace.file.changes" // Notification
 
 	// Shell actions

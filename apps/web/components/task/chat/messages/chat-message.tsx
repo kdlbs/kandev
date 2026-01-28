@@ -16,6 +16,48 @@ type ChatMessageProps = {
   showRichBlocks?: boolean;
 };
 
+// Regex to match @file references (file paths after @)
+// Matches @path/to/file.ext or @file.ext patterns
+const FILE_REF_REGEX = /@([\w./-]+\.[\w]+|[\w/-]+)/g;
+
+/**
+ * Renders content with file references highlighted in code style
+ */
+function renderContentWithFileRefs(content: string): React.ReactNode[] {
+  const parts: React.ReactNode[] = [];
+  let lastIndex = 0;
+  let match;
+  let keyIndex = 0;
+
+  FILE_REF_REGEX.lastIndex = 0; // Reset regex state
+  while ((match = FILE_REF_REGEX.exec(content)) !== null) {
+    // Add text before the match
+    if (match.index > lastIndex) {
+      parts.push(content.slice(lastIndex, match.index));
+    }
+
+    // Add the file reference with code styling
+    const filePath = match[1];
+    parts.push(
+      <code
+        key={`file-ref-${keyIndex++}`}
+        className="px-1 py-0.5 bg-emerald-500/20 text-emerald-400 rounded font-mono text-[0.9em]"
+      >
+        @{filePath}
+      </code>
+    );
+
+    lastIndex = match.index + match[0].length;
+  }
+
+  // Add remaining text after last match
+  if (lastIndex < content.length) {
+    parts.push(content.slice(lastIndex));
+  }
+
+  return parts.length > 0 ? parts : [content];
+}
+
 export function ChatMessage({ comment, label, className, showRichBlocks }: ChatMessageProps) {
   const isUser = comment.author_type === 'user';
   const isTaskDescription = label === 'Task';
@@ -33,7 +75,9 @@ export function ChatMessage({ comment, label, className, showRichBlocks }: ChatM
             ) : null}
           </p>
         </div>
-        <p className="whitespace-pre-wrap">{comment.content || '(empty)'}</p>
+        <p className="whitespace-pre-wrap">
+          {comment.content ? renderContentWithFileRefs(comment.content) : '(empty)'}
+        </p>
       </div>
     );
   }
@@ -44,7 +88,9 @@ export function ChatMessage({ comment, label, className, showRichBlocks }: ChatM
       <div className="flex justify-end w-full">
         <div className="max-w-[85%] sm:max-w-[75%] md:max-w-2xl">
           <div className="rounded-2xl  border-primary/30 bg-primary/10 px-4 py-2.5 text-xs">
-            <p className="whitespace-pre-wrap">{comment.content || '(empty)'}</p>
+            <p className="whitespace-pre-wrap">
+              {comment.content ? renderContentWithFileRefs(comment.content) : '(empty)'}
+            </p>
           </div>
         </div>
       </div>

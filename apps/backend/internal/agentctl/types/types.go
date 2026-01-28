@@ -39,6 +39,8 @@ type (
 	FileTreeResponse       = streams.FileTreeResponse
 	FileContentRequest     = streams.FileContentRequest
 	FileContentResponse    = streams.FileContentResponse
+	FileSearchRequest      = streams.FileSearchRequest
+	FileSearchResponse     = streams.FileSearchResponse
 
 	// Shell stream types
 	ShellMessage        = streams.ShellMessage
