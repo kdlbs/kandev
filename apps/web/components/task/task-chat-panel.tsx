@@ -131,7 +131,9 @@ export function TaskChatPanel({
 
   // Check if we should show the approve button
   // Show when session has a review_status that is not approved (meaning it's in a review step)
-  const showApproveButton = session?.review_status != null && session.review_status !== 'approved';
+  // Also hide while agent is working to prevent premature approval
+  const showApproveButton =
+    session?.review_status != null && session.review_status !== 'approved' && !isWorking;
 
   const handleSubmit = async (event?: FormEvent) => {
     event?.preventDefault();
