@@ -10,6 +10,8 @@ export type HydrationOptions = {
   activeSessionId?: string | null;
   /** Whether to skip hydrating session runtime state (shell, processes, git) */
   skipSessionRuntime?: boolean;
+  /** Force merge this session even if it's active (for navigation refresh) */
+  forceMergeSessionId?: string | null;
 };
 
 /**
@@ -26,7 +28,7 @@ export function hydrateState(
   state: Partial<AppState>,
   options: HydrationOptions = {}
 ): void {
-  const { activeSessionId = null, skipSessionRuntime = false } = options;
+  const { activeSessionId = null, skipSessionRuntime = false, forceMergeSessionId = null } = options;
 
   // Kanban slice - always safe to hydrate
   if (state.kanban) deepMerge(draft.kanban, state.kanban);
@@ -66,24 +68,24 @@ export function hydrateState(
   // Session slice - careful with active sessions
   if (state.messages) {
     if (state.messages.bySession) {
-      mergeSessionMap(draft.messages.bySession, state.messages.bySession, activeSessionId);
+      mergeSessionMap(draft.messages.bySession, state.messages.bySession, activeSessionId, forceMergeSessionId);
     }
     if (state.messages.metaBySession) {
-      mergeSessionMap(draft.messages.metaBySession, state.messages.metaBySession, activeSessionId);
+      mergeSessionMap(draft.messages.metaBySession, state.messages.metaBySession, activeSessionId, forceMergeSessionId);
     }
   }
   if (state.turns) {
     if (state.turns.bySession) {
-      mergeSessionMap(draft.turns.bySession, state.turns.bySession, activeSessionId);
+      mergeSessionMap(draft.turns.bySession, state.turns.bySession, activeSessionId, forceMergeSessionId);
     }
     if (state.turns.activeBySession) {
-      mergeSessionMap(draft.turns.activeBySession, state.turns.activeBySession, activeSessionId);
+      mergeSessionMap(draft.turns.activeBySession, state.turns.activeBySession, activeSessionId, forceMergeSessionId);
     }
   }
   if (state.taskSessions) deepMerge(draft.taskSessions, state.taskSessions);
   if (state.taskSessionsByTask) deepMerge(draft.taskSessionsByTask, state.taskSessionsByTask);
   if (state.sessionAgentctl) {
-    mergeSessionMap(draft.sessionAgentctl.itemsBySessionId, state.sessionAgentctl?.itemsBySessionId, activeSessionId);
+    mergeSessionMap(draft.sessionAgentctl.itemsBySessionId, state.sessionAgentctl?.itemsBySessionId, activeSessionId, forceMergeSessionId);
   }
   if (state.worktrees) deepMerge(draft.worktrees, state.worktrees);
   if (state.sessionWorktreesBySessionId) {
@@ -96,15 +98,15 @@ export function hydrateState(
   if (!skipSessionRuntime) {
     if (state.terminal) deepMerge(draft.terminal, state.terminal);
     if (state.shell) {
-      mergeSessionMap(draft.shell.outputs, state.shell?.outputs, activeSessionId);
-      mergeSessionMap(draft.shell.statuses, state.shell?.statuses, activeSessionId);
+      mergeSessionMap(draft.shell.outputs, state.shell?.outputs, activeSessionId, forceMergeSessionId);
+      mergeSessionMap(draft.shell.statuses, state.shell?.statuses, activeSessionId, forceMergeSessionId);
     }
     if (state.processes) deepMerge(draft.processes, state.processes);
     if (state.gitStatus) {
-      mergeSessionMap(draft.gitStatus.bySessionId, state.gitStatus?.bySessionId, activeSessionId);
+      mergeSessionMap(draft.gitStatus.bySessionId, state.gitStatus?.bySessionId, activeSessionId, forceMergeSessionId);
     }
     if (state.contextWindow) {
-      mergeSessionMap(draft.contextWindow.bySessionId, state.contextWindow?.bySessionId, activeSessionId);
+      mergeSessionMap(draft.contextWindow.bySessionId, state.contextWindow?.bySessionId, activeSessionId, forceMergeSessionId);
     }
     if (state.agents) deepMerge(draft.agents, state.agents);
   }
