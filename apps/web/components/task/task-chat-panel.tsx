@@ -135,18 +135,10 @@ export function TaskChatPanel({
   const showApproveButton =
     session?.review_status != null && session.review_status !== 'approved' && !isWorking;
 
-  // Use ref to access latest state without recreating the callback
-  const messageInputRef = useRef(messageInput);
-  messageInputRef.current = messageInput;
-  const isSendingRef = useRef(isSending);
-  isSendingRef.current = isSending;
-  const planModeEnabledRef = useRef(planModeEnabled);
-  planModeEnabledRef.current = planModeEnabled;
-
   const handleSubmit = useCallback(async (event?: FormEvent) => {
     event?.preventDefault();
-    const trimmed = messageInputRef.current.trim();
-    if (!trimmed || isSendingRef.current) return;
+    const trimmed = messageInput.trim();
+    if (!trimmed || isSending) return;
     setIsSending(true);
     flushSync(() => {
       setMessageInput('');
@@ -158,13 +150,13 @@ export function TaskChatPanel({
         await handleSendMessage(trimmed);
       }
       // Reset plan mode after sending - it's a per-message instruction
-      if (planModeEnabledRef.current) {
+      if (planModeEnabled) {
         setPlanModeEnabled(false);
       }
     } finally {
       setIsSending(false);
     }
-  }, [onSend, handleSendMessage]);
+  }, [messageInput, isSending, planModeEnabled, onSend, handleSendMessage]);
 
 
   return (

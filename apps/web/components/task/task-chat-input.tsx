@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useRef, useCallback } from 'react';
+import { useMemo, useCallback } from 'react';
 import CodeMirror from '@uiw/react-codemirror';
 import { markdown } from '@codemirror/lang-markdown';
 import { EditorView, keymap, placeholder as cmPlaceholder } from '@codemirror/view';
@@ -38,17 +38,24 @@ export function TaskChatInput({
   const submitKey = shortcutToCodeMirrorKeybinding(SHORTCUTS.SUBMIT);
   const completionSource = useChatCompletions(sessionId);
 
-  // Use ref to access latest onSubmit without recreating extensions
-  const onSubmitRef = useRef(onSubmit);
-  onSubmitRef.current = onSubmit;
-
+  // Memoize the submit handler - include onSubmit in deps since it's now stable from parent
   const handleSubmitKey = useCallback(() => {
-    onSubmitRef.current();
+    onSubmit();
     return true;
-  }, []);
+  }, [onSubmit]);
+
+  const handleKeydown = useCallback((event: KeyboardEvent) => {
+    if (matchesShortcut(event, SHORTCUTS.SUBMIT)) {
+      event.preventDefault();
+      event.stopPropagation();
+      onSubmit();
+      return true;
+    }
+    return false;
+  }, [onSubmit]);
 
   // Memoize extensions to prevent CodeMirror reconfiguration on every render
-  // Only recreate when placeholder or completionSource changes
+  // Only recreate when dependencies actually change
   const extensions = useMemo<Extension[]>(() => {
     const submitKeymap = Prec.highest(
       keymap.of([
@@ -61,15 +68,7 @@ export function TaskChatInput({
       EditorView.lineWrapping,
       chatEditorTheme,
       EditorView.domEventHandlers({
-        keydown: (event) => {
-          if (matchesShortcut(event, SHORTCUTS.SUBMIT)) {
-            event.preventDefault();
-            event.stopPropagation();
-            onSubmitRef.current();
-            return true;
-          }
-          return false;
-        },
+        keydown: handleKeydown,
       }),
       history(),
       closeBrackets(),
@@ -79,7 +78,7 @@ export function TaskChatInput({
       submitKeymap,
       keymap.of([...defaultKeymap, ...historyKeymap, ...closeBracketsKeymap]),
     ];
-  }, [placeholder, completionSource, submitKey, handleSubmitKey]);
+  }, [placeholder, completionSource, submitKey, handleSubmitKey, handleKeydown]);
 
   return (
     <div
