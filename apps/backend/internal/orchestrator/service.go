@@ -182,6 +182,7 @@ func NewService(
 		OnAgentReady:           s.handleAgentReady,
 		OnAgentCompleted:       s.handleAgentCompleted,
 		OnAgentFailed:          s.handleAgentFailed,
+		OnAgentStopped:         s.handleAgentStopped,
 		OnAgentStreamEvent:     s.handleAgentStreamEvent,
 		OnACPSessionCreated:    s.handleACPSessionCreated,
 		OnPermissionRequest:    s.handlePermissionRequest,

@@ -5,16 +5,16 @@ import "time"
 
 // AgentEventPayload is the payload for agent lifecycle events (started, stopped, ready, completed, failed).
 type AgentEventPayload struct {
-	InstanceID     string     `json:"instance_id"`
-	TaskID         string     `json:"task_id"`
-	SessionID      string     `json:"session_id,omitempty"`
-	AgentProfileID string     `json:"agent_profile_id"`
-	ContainerID    string     `json:"container_id,omitempty"`
-	Status         string     `json:"status"`
-	StartedAt      time.Time  `json:"started_at"`
-	FinishedAt     *time.Time `json:"finished_at,omitempty"`
-	ErrorMessage   string     `json:"error_message,omitempty"`
-	ExitCode       *int       `json:"exit_code,omitempty"`
+	AgentExecutionID string     `json:"agent_execution_id"`
+	TaskID           string     `json:"task_id"`
+	SessionID        string     `json:"session_id,omitempty"`
+	AgentProfileID   string     `json:"agent_profile_id"`
+	ContainerID      string     `json:"container_id,omitempty"`
+	Status           string     `json:"status"`
+	StartedAt        time.Time  `json:"started_at"`
+	FinishedAt       *time.Time `json:"finished_at,omitempty"`
+	ErrorMessage     string     `json:"error_message,omitempty"`
+	ExitCode         *int       `json:"exit_code,omitempty"`
 }
 
 // AgentctlEventPayload is the payload for agentctl lifecycle events (starting, ready, error).

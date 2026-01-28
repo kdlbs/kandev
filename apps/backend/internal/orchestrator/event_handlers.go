@@ -427,6 +427,28 @@ func (s *Service) handleAgentFailed(ctx context.Context, data watcher.AgentEvent
 	}
 }
 
+// handleAgentStopped handles agent stopped events (manual stop or cancellation)
+func (s *Service) handleAgentStopped(ctx context.Context, data watcher.AgentEventData) {
+	s.logger.Info("handling agent stopped",
+		zap.String("task_id", data.TaskID),
+		zap.String("session_id", data.SessionID),
+		zap.String("agent_execution_id", data.AgentExecutionID))
+
+	// Complete the current turn if there is one
+	s.completeTurnForSession(ctx, data.SessionID)
+
+	// Update session state to cancelled (already done by executor, but ensure consistency)
+	s.updateTaskSessionState(ctx, data.TaskID, data.SessionID, models.TaskSessionStateCancelled, "", false)
+
+	// NOTE: We do NOT update task state here because:
+	// 1. If this is from CompleteTask(), the task state will be set to COMPLETED by the caller
+	// 2. If this is from StopTask(), the task state should be set to REVIEW by the caller
+	// 3. Updating here would create a race condition with the caller's state update
+	//
+	// The task state management is the responsibility of the operation that triggered the stop,
+	// not the event handler. This handler only manages session-level cleanup.
+}
+
 // handleAgentStreamEvent handles agent stream events (tool calls, message chunks, etc.)
 func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
 	if payload == nil || payload.Data == nil {
