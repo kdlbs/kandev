@@ -85,16 +85,18 @@ type WorkflowStepEditorProps = {
   onAddStep: () => void;
   onRemoveStep: (stepId: string) => void;
   onReorderSteps: (steps: WorkflowStep[]) => void;
+  readOnly?: boolean;
 };
 
 type SortableStepCardProps = {
   step: WorkflowStep;
   onUpdate: (updates: Partial<WorkflowStep>) => void;
   onRemove: () => void;
+  readOnly?: boolean;
 };
 
 // Inner component that uses step values directly - reset via key prop from parent
-function SortableStepCardInner({ step, onUpdate, onRemove }: SortableStepCardProps) {
+function SortableStepCardInner({ step, onUpdate, onRemove, readOnly = false }: SortableStepCardProps) {
   const [expanded, setExpanded] = useState(false);
   // Local state for text inputs to avoid API calls on every keystroke
   const [localName, setLocalName] = useState(step.name);
@@ -132,33 +134,40 @@ function SortableStepCardInner({ step, onUpdate, onRemove }: SortableStepCardPro
   return (
     <Card ref={setNodeRef} style={style} className="mb-2">
       <CardContent className="p-3">
-        <div className="flex items-center gap-2">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-[auto_auto_1fr_160px_72px_32px_32px] sm:items-center min-w-0">
           <button
             type="button"
-            className="p-1 rounded-md text-muted-foreground hover:text-foreground cursor-grab"
-            {...attributes}
-            {...listeners}
+            className={`p-1 rounded-md text-muted-foreground hover:text-foreground ${readOnly ? 'cursor-default' : 'cursor-grab'}`}
+            {...(readOnly ? {} : attributes)}
+            {...(readOnly ? {} : listeners)}
+            aria-disabled={readOnly}
           >
             <IconGripVertical className="h-4 w-4" />
           </button>
 
-          <div className={`w-4 h-4 rounded ${step.color}`} />
+          <div className={`w-4 h-4 rounded shrink-0 ${step.color}`} />
 
           <Input
             value={localName}
             onChange={(e) => {
+              if (readOnly) return;
               setLocalName(e.target.value);
               debouncedUpdateName(e.target.value);
             }}
-            className="flex-1"
+            className="w-full min-w-0"
             placeholder="Step name"
+            disabled={readOnly}
           />
 
           <Select
             value={step.step_type}
-            onValueChange={(value: WorkflowStepType) => onUpdate({ step_type: value })}
+            onValueChange={(value: WorkflowStepType) => {
+              if (readOnly) return;
+              onUpdate({ step_type: value });
+            }}
+            disabled={readOnly}
           >
-            <SelectTrigger className="w-[140px]">
+            <SelectTrigger className="w-full sm:w-[160px] shrink-0">
               <SelectValue placeholder="Type" />
             </SelectTrigger>
             <SelectContent>
@@ -170,7 +179,7 @@ function SortableStepCardInner({ step, onUpdate, onRemove }: SortableStepCardPro
             </SelectContent>
           </Select>
 
-          <div className="flex items-center gap-1 text-muted-foreground">
+          <div className="flex items-center gap-1 text-muted-foreground w-[72px] shrink-0">
             {behaviors.autoStartAgent && <IconRobot className="h-4 w-4" title="Auto-start agent" />}
             {behaviors.requireApproval && <IconCheck className="h-4 w-4" title="Require approval" />}
             {behaviors.planMode && <IconClipboard className="h-4 w-4" title="Plan mode" />}
@@ -181,11 +190,19 @@ function SortableStepCardInner({ step, onUpdate, onRemove }: SortableStepCardPro
             variant="ghost"
             size="icon-sm"
             onClick={() => setExpanded(!expanded)}
+            className="shrink-0"
           >
             {expanded ? <IconChevronUp className="h-4 w-4" /> : <IconChevronDown className="h-4 w-4" />}
           </Button>
 
-          <Button type="button" variant="ghost" size="icon-sm" onClick={onRemove}>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            onClick={onRemove}
+            disabled={readOnly}
+            className="shrink-0"
+          >
             <IconTrash className="h-4 w-4" />
           </Button>
         </div>
@@ -197,7 +214,11 @@ function SortableStepCardInner({ step, onUpdate, onRemove }: SortableStepCardPro
                 <Checkbox
                   id={`${step.id}-auto-start`}
                   checked={behaviors.autoStartAgent ?? false}
-                  onCheckedChange={(checked) => updateBehaviors({ autoStartAgent: checked === true })}
+                  onCheckedChange={(checked) => {
+                    if (readOnly) return;
+                    updateBehaviors({ autoStartAgent: checked === true });
+                  }}
+                  disabled={readOnly}
                 />
                 <Label htmlFor={`${step.id}-auto-start`}>Auto-start agent</Label>
               </div>
@@ -205,7 +226,11 @@ function SortableStepCardInner({ step, onUpdate, onRemove }: SortableStepCardPro
                 <Checkbox
                   id={`${step.id}-plan-mode`}
                   checked={behaviors.planMode ?? false}
-                  onCheckedChange={(checked) => updateBehaviors({ planMode: checked === true })}
+                  onCheckedChange={(checked) => {
+                    if (readOnly) return;
+                    updateBehaviors({ planMode: checked === true });
+                  }}
+                  disabled={readOnly}
                 />
                 <Label htmlFor={`${step.id}-plan-mode`}>Plan mode</Label>
               </div>
@@ -213,7 +238,11 @@ function SortableStepCardInner({ step, onUpdate, onRemove }: SortableStepCardPro
                 <Checkbox
                   id={`${step.id}-require-approval`}
                   checked={behaviors.requireApproval ?? false}
-                  onCheckedChange={(checked) => updateBehaviors({ requireApproval: checked === true })}
+                  onCheckedChange={(checked) => {
+                    if (readOnly) return;
+                    updateBehaviors({ requireApproval: checked === true });
+                  }}
+                  disabled={readOnly}
                 />
                 <Label htmlFor={`${step.id}-require-approval`}>Require approval</Label>
               </div>
@@ -225,11 +254,13 @@ function SortableStepCardInner({ step, onUpdate, onRemove }: SortableStepCardPro
                 id={`${step.id}-prompt-prefix`}
                 value={localPromptPrefix}
                 onChange={(e) => {
+                  if (readOnly) return;
                   setLocalPromptPrefix(e.target.value);
                   debouncedUpdatePromptPrefix(e.target.value);
                 }}
                 placeholder="Text prepended to the task description when agent starts..."
                 rows={3}
+                disabled={readOnly}
               />
             </div>
 
@@ -239,17 +270,26 @@ function SortableStepCardInner({ step, onUpdate, onRemove }: SortableStepCardPro
                 id={`${step.id}-prompt-suffix`}
                 value={localPromptSuffix}
                 onChange={(e) => {
+                  if (readOnly) return;
                   setLocalPromptSuffix(e.target.value);
                   debouncedUpdatePromptSuffix(e.target.value);
                 }}
                 placeholder="Text appended to the task description when agent starts..."
                 rows={3}
+                disabled={readOnly}
               />
             </div>
 
             <div className="space-y-2">
               <Label htmlFor={`${step.id}-color`}>Color</Label>
-              <Select value={step.color} onValueChange={(value) => onUpdate({ color: value })}>
+              <Select
+                value={step.color}
+                onValueChange={(value) => {
+                  if (readOnly) return;
+                  onUpdate({ color: value });
+                }}
+                disabled={readOnly}
+              >
                 <SelectTrigger className="w-[180px]">
                   <div className="flex items-center gap-2">
                     <div className={`w-3 h-3 rounded ${step.color}`} />
@@ -276,11 +316,11 @@ function SortableStepCardInner({ step, onUpdate, onRemove }: SortableStepCardPro
 }
 
 // Wrapper component that uses key to reset local state when step data changes externally
-function SortableStepCard({ step, onUpdate, onRemove }: SortableStepCardProps) {
+function SortableStepCard({ step, onUpdate, onRemove, readOnly = false }: SortableStepCardProps) {
   // Generate a stable key based on step values that should trigger a reset
   // This resets local state when the step is reordered or updated externally
   const resetKey = `${step.id}-${step.name}-${step.behaviors?.promptPrefix ?? ''}-${step.behaviors?.promptSuffix ?? ''}`;
-  return <SortableStepCardInner key={resetKey} step={step} onUpdate={onUpdate} onRemove={onRemove} />;
+  return <SortableStepCardInner key={resetKey} step={step} onUpdate={onUpdate} onRemove={onRemove} readOnly={readOnly} />;
 }
 
 export function WorkflowStepEditor({
@@ -289,6 +329,7 @@ export function WorkflowStepEditor({
   onAddStep,
   onRemoveStep,
   onReorderSteps,
+  readOnly = false,
 }: WorkflowStepEditorProps) {
   const stepItems = useMemo(() => steps.map((step) => step.id), [steps]);
   const isMounted = useSyncExternalStore(
@@ -298,6 +339,7 @@ export function WorkflowStepEditor({
   );
 
   const handleDragEnd = (event: DragEndEvent) => {
+    if (readOnly) return;
     const { active, over } = event;
     if (!over || active.id === over.id) return;
     const oldIndex = steps.findIndex((step) => step.id === active.id);
@@ -314,7 +356,7 @@ export function WorkflowStepEditor({
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-medium">Workflow Steps</h3>
-        <Button variant="outline" size="sm" onClick={onAddStep}>
+        <Button variant="outline" size="sm" onClick={onAddStep} disabled={readOnly}>
           <IconPlus className="mr-2 h-4 w-4" />
           Add Step
         </Button>
@@ -328,8 +370,15 @@ export function WorkflowStepEditor({
                 <SortableStepCard
                   key={step.id}
                   step={step}
-                  onUpdate={(updates) => onUpdateStep(step.id, updates)}
-                  onRemove={() => onRemoveStep(step.id)}
+                  onUpdate={(updates) => {
+                    if (readOnly) return;
+                    onUpdateStep(step.id, updates);
+                  }}
+                  onRemove={() => {
+                    if (readOnly) return;
+                    onRemoveStep(step.id);
+                  }}
+                  readOnly={readOnly}
                 />
               ))}
             </SortableContext>
@@ -339,8 +388,15 @@ export function WorkflowStepEditor({
             <SortableStepCard
               key={step.id}
               step={step}
-              onUpdate={(updates) => onUpdateStep(step.id, updates)}
-              onRemove={() => onRemoveStep(step.id)}
+              onUpdate={(updates) => {
+                if (readOnly) return;
+                onUpdateStep(step.id, updates);
+              }}
+              onRemove={() => {
+                if (readOnly) return;
+                onRemoveStep(step.id);
+              }}
+              readOnly={readOnly}
             />
           ))
         )}
@@ -348,4 +404,3 @@ export function WorkflowStepEditor({
     </div>
   );
 }
-
