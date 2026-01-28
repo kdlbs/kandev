@@ -1660,15 +1660,6 @@ func TestOrchestratorAgentMessagePersistence(t *testing.T) {
 	ts := NewOrchestratorTestServer(t)
 	defer ts.Close()
 
-	// Track expected messages with their order and content
-	type expectedMessage struct {
-		Type     string
-		Content  string
-		Metadata map[string]interface{}
-	}
-	var expectedMessages []expectedMessage
-	var messageTimestamps []time.Time
-
 	// This test verifies that message_streaming and log events ARE correctly persisted.
 	// Progress messages (protocol.MessageTypeProgress) are NOT persisted - only broadcast via WebSocket.
 	// Log messages (protocol.MessageTypeLog) ARE now persisted to the database.
@@ -1742,24 +1733,6 @@ func TestOrchestratorAgentMessagePersistence(t *testing.T) {
 		{"info", "Found 10 files to process"},
 		{"debug", "Processing file: main.go"},
 		{"warning", "Deprecated API usage detected"},
-	}
-
-	// Record expected messages for verification
-	for i, content := range expectedContents {
-		expectedMessages = append(expectedMessages, expectedMessage{
-			Type:    "content",
-			Content: content,
-		})
-		messageTimestamps = append(messageTimestamps, time.Now().Add(time.Duration(i*50)*time.Millisecond))
-	}
-	for _, logMsg := range logMessages {
-		expectedMessages = append(expectedMessages, expectedMessage{
-			Type:    "log",
-			Content: logMsg.Message,
-			Metadata: map[string]interface{}{
-				"level": logMsg.Level,
-			},
-		})
 	}
 
 	// Publish message_streaming events - these ARE persisted
