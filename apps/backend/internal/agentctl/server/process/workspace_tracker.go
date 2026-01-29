@@ -697,8 +697,12 @@ func (wt *WorkspaceTracker) enrichWithDiffData(ctx context.Context, update *type
 		// uncommitted changes in the "files changed" count.
 	}
 
-	// Also check for staged changes
-	stagedCmd := exec.CommandContext(ctx, "git", "diff", "--cached", "--numstat")
+	// For staged files that don't have unstaged changes, we need to get the diff from the index.
+	// The first diff (git diff baseRef) shows worktree vs baseRef, but if a file is staged
+	// and has no additional unstaged changes, its diff won't appear there.
+	// We use git diff --cached baseRef to get the staged diff content for such files,
+	// using the same baseRef for consistency.
+	stagedCmd := exec.CommandContext(ctx, "git", "diff", "--cached", "--numstat", baseRef)
 	stagedCmd.Dir = wt.workDir
 	stagedOut, err := stagedCmd.Output()
 	if err != nil {
@@ -723,18 +727,19 @@ func (wt *WorkspaceTracker) enrichWithDiffData(ctx context.Context, update *type
 
 		// Update existing file info if it exists
 		if fileInfo, exists := update.Files[filePath]; exists {
-			// Add staged changes to the counts
-			fileInfo.Additions += additions
-			fileInfo.Deletions += deletions
+			// Only set additions/deletions if they weren't already set by the first diff.
+			// This prevents double-counting when changes appear in both diffs.
+			if fileInfo.Additions == 0 && fileInfo.Deletions == 0 {
+				fileInfo.Additions = additions
+				fileInfo.Deletions = deletions
+			}
 
-			// Get the staged diff content
-			diffCmd := exec.CommandContext(ctx, "git", "diff", "--cached", "--", filePath)
-			diffCmd.Dir = wt.workDir
-			if diffOut, err := diffCmd.Output(); err == nil {
-				// Append staged diff to existing diff
-				if fileInfo.Diff != "" {
-					fileInfo.Diff += "\n\n--- Staged changes ---\n" + string(diffOut)
-				} else {
+			// Get the staged diff content if we don't have diff content yet
+			// Use the same baseRef for consistency with unstaged files
+			if fileInfo.Diff == "" {
+				diffCmd := exec.CommandContext(ctx, "git", "diff", "--cached", baseRef, "--", filePath)
+				diffCmd.Dir = wt.workDir
+				if diffOut, err := diffCmd.Output(); err == nil {
 					fileInfo.Diff = string(diffOut)
 				}
 			}
@@ -1115,12 +1120,9 @@ func (wt *WorkspaceTracker) buildFileTreeNode(fullPath, relPath string, info os.
 	// Build children
 	node.Children = make([]*types.FileTreeNode, 0, len(entries))
 	for _, entry := range entries {
-		// Skip hidden files and common ignore patterns
+		// Skip specific directories that should be ignored
 		name := entry.Name()
-		if strings.HasPrefix(name, ".") && name != "." && name != ".." {
-			continue
-		}
-		if name == "node_modules" || name == ".next" || name == "dist" || name == "build" {
+		if name == ".git" || name == "node_modules" || name == ".next" || name == "dist" || name == "build" {
 			continue
 		}
 

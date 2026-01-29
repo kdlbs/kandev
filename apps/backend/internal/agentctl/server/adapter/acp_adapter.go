@@ -319,6 +319,11 @@ func (a *ACPAdapter) Close() error {
 	return nil
 }
 
+// RequiresProcessKill returns false because ACP agents exit when stdin is closed.
+func (a *ACPAdapter) RequiresProcessKill() bool {
+	return false
+}
+
 // GetACPConnection returns the underlying ACP connection for advanced usage.
 func (a *ACPAdapter) GetACPConnection() *acp.ClientSideConnection {
 	a.mu.RLock()

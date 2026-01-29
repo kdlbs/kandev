@@ -137,7 +137,7 @@ export function TaskSessionSidebar({ workspaceId, boardId }: TaskSessionSidebarP
         workspaceId={workspaceId}
         boardId={boardId}
         defaultColumnId={columns[0]?.id ?? null}
-        columns={columns.map((step: KanbanState['steps'][number]) => ({ id: step.id, title: step.title, color: step.color }))}
+        columns={columns.map((step: KanbanState['steps'][number]) => ({ id: step.id, title: step.title, color: step.color, autoStartAgent: step.autoStartAgent }))}
         onSuccess={(task, _mode, meta) => {
           store.setState((state) => {
             if (state.kanban.boardId !== task.board_id) return state;

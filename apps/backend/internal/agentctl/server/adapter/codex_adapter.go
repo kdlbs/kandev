@@ -579,6 +579,11 @@ func (a *CodexAdapter) Close() error {
 	return nil
 }
 
+// RequiresProcessKill returns false because Codex agents exit when stdin is closed.
+func (a *CodexAdapter) RequiresProcessKill() bool {
+	return false
+}
+
 // sendUpdate safely sends an event to the updates channel.
 func (a *CodexAdapter) sendUpdate(update AgentEvent) {
 	select {

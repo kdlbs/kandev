@@ -108,6 +108,34 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body io.Rea
 	return c.httpClient.Do(req)
 }
 
+// doPromptRequest performs an HTTP request with a longer timeout suitable for prompts.
+// Prompts can take minutes to complete, so we use a 60-minute timeout.
+func (c *Client) doPromptRequest(ctx context.Context, method, path string, body io.Reader) (*http.Response, error) {
+	url := c.baseURL + path
+	if strings.Contains(path, "?") {
+		url += "&directory=" + c.directory
+	} else {
+		url += "?directory=" + c.directory
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, url, body)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	req.Header.Set("Authorization", c.buildAuthHeader())
+	req.Header.Set("X-OpenCode-Directory", c.directory)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+
+	// Use a client with extended timeout for prompts
+	promptClient := &http.Client{
+		Timeout: 60 * time.Minute,
+	}
+	return promptClient.Do(req)
+}
+
 // WaitForHealth waits for the OpenCode server to be healthy
 func (c *Client) WaitForHealth(ctx context.Context) error {
 	deadline := time.Now().Add(20 * time.Second)
@@ -230,7 +258,8 @@ func (c *Client) SendPrompt(ctx context.Context, sessionID, prompt string, model
 	}
 
 	path := fmt.Sprintf("/session/%s/message", sessionID)
-	resp, err := c.doRequest(ctx, http.MethodPost, path, strings.NewReader(string(body)))
+	// Use a dedicated client with long timeout for prompts - they can take minutes
+	resp, err := c.doPromptRequest(ctx, http.MethodPost, path, strings.NewReader(string(body)))
 	if err != nil {
 		return fmt.Errorf("send prompt request: %w", err)
 	}
@@ -422,10 +451,15 @@ func (c *Client) processEventStream(ctx context.Context, sessionID string, body 
 		c.logger.Error("event stream error", zap.Error(err))
 	}
 
-	// Notify disconnection
-	select {
-	case c.controlCh <- ControlEvent{Type: "disconnected"}:
-	default:
+	// Notify disconnection (check if closed first to avoid panic)
+	c.mu.RLock()
+	closed := c.closed
+	c.mu.RUnlock()
+	if !closed {
+		select {
+		case c.controlCh <- ControlEvent{Type: "disconnected"}:
+		default:
+		}
 	}
 }
 
@@ -470,6 +504,14 @@ func (c *Client) eventMatchesSession(event *SDKEventEnvelope, sessionID string) 
 
 // processControlEvent handles control flow events
 func (c *Client) processControlEvent(event *SDKEventEnvelope, sessionID string) {
+	// Check if closed first to avoid panic on closed channel
+	c.mu.RLock()
+	closed := c.closed
+	c.mu.RUnlock()
+	if closed {
+		return
+	}
+
 	switch event.Type {
 	case SDKEventSessionIdle:
 		select {

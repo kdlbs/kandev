@@ -304,6 +304,11 @@ func (a *ClaudeCodeAdapter) Close() error {
 	return nil
 }
 
+// RequiresProcessKill returns false because Claude Code agents exit when stdin is closed.
+func (a *ClaudeCodeAdapter) RequiresProcessKill() bool {
+	return false
+}
+
 // sendUpdate safely sends an event to the updates channel.
 func (a *ClaudeCodeAdapter) sendUpdate(update AgentEvent) {
 	select {

@@ -288,7 +288,7 @@ func (m *Manager) EnsureWorkspaceExecutionForSession(ctx context.Context, taskID
 		if m.streamManager != nil {
 			m.logger.Info("connecting workspace stream for workspace-only execution",
 				zap.String("execution_id", execution.ID))
-			go m.streamManager.connectWorkspaceStream(execution)
+			go m.streamManager.connectWorkspaceStream(execution, nil)
 		}
 	}()
 
@@ -1732,7 +1732,12 @@ func (m *Manager) StopAgent(ctx context.Context, executionID string, force bool)
 				StandalonePort:       execution.standalonePort,
 			}
 			if err := rt.StopInstance(ctx, runtimeInstance, force); err != nil {
-				return err
+				// Log the error but don't return - we still need to clean up the execution store.
+				// This ensures that even if the runtime is unavailable (e.g., process crashed),
+				// the execution is removed from tracking so new executions can be launched.
+				m.logger.Warn("failed to stop runtime instance, continuing with cleanup",
+					zap.String("execution_id", executionID),
+					zap.Error(err))
 			}
 		}
 	}
@@ -2372,7 +2377,7 @@ func (m *Manager) startPassthroughSession(ctx context.Context, execution *AgentE
 	// The passthrough terminal handles agent interaction (center panel), while the
 	// workspace stream provides shell I/O (right panel) - they work independently.
 	if m.streamManager != nil && execution.agentctl != nil {
-		go m.streamManager.connectWorkspaceStream(execution)
+		go m.streamManager.connectWorkspaceStream(execution, nil)
 	}
 
 	return nil
@@ -2558,7 +2563,7 @@ func (m *Manager) ResumePassthroughSession(ctx context.Context, sessionID string
 	// Connect to workspace stream for shell/git/file features.
 	// This re-establishes the connection that was lost on backend restart.
 	if m.streamManager != nil && execution.agentctl != nil {
-		go m.streamManager.connectWorkspaceStream(execution)
+		go m.streamManager.connectWorkspaceStream(execution, nil)
 	}
 
 	return nil

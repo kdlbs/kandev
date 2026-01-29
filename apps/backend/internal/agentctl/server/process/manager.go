@@ -225,6 +225,10 @@ func (m *Manager) Start(ctx context.Context) error {
 	m.cmd = exec.Command(m.cfg.AgentArgs[0], m.cfg.AgentArgs[1:]...)
 	m.cmd.Dir = m.cfg.WorkDir
 	m.cmd.Env = m.cfg.AgentEnv
+	// Create a new process group so we can kill all child processes together.
+	// This is important for adapters like OpenCode that spawn child processes
+	// (npx -> sh -> node -> opencode binary).
+	setProcGroup(m.cmd)
 
 	// Set up pipes
 	var err error
@@ -476,52 +480,85 @@ func (m *Manager) Stop(ctx context.Context) error {
 
 	status := m.Status()
 	if status == StatusStopped || status == StatusStopping {
+		m.logger.Info("Stop called but already stopped/stopping", zap.String("status", string(status)))
 		return nil
 	}
 
-	m.logger.Info("stopping agent process")
+	m.logger.Info("stopping agent process - START")
 	m.status.Store(StatusStopping)
 
 	// Stop shell session
+	m.logger.Debug("stopping shell session")
 	if m.shell != nil {
 		if err := m.shell.Stop(); err != nil {
 			m.logger.Debug("failed to stop shell session", zap.Error(err))
 		}
 		m.shell = nil
 	}
+	m.logger.Debug("shell session stopped")
 
 	// Stop all running workspace processes (dev server, setup, cleanup, custom).
+	m.logger.Debug("stopping workspace processes")
 	if m.processRunner != nil {
 		if err := m.processRunner.StopAll(ctx); err != nil {
 			m.logger.Debug("failed to stop workspace processes", zap.Error(err))
 		}
 	}
+	m.logger.Debug("workspace processes stopped")
 
 	// Stop workspace tracker
+	m.logger.Debug("stopping workspace tracker")
 	if m.workspaceTracker != nil {
 		m.workspaceTracker.Stop()
 	}
+	m.logger.Debug("workspace tracker stopped")
 
 	// Close the adapter
+	m.logger.Debug("closing adapter")
 	if m.adapter != nil {
 		if err := m.adapter.Close(); err != nil {
 			m.logger.Debug("failed to close adapter", zap.Error(err))
 		}
 	}
+	m.logger.Debug("adapter closed")
 
 	// Close stop channel to signal readers
+	m.logger.Debug("closing stop channel")
 	if m.stopCh != nil {
 		close(m.stopCh)
 	}
+	m.logger.Debug("stop channel closed")
 
 	// Close stdin to signal EOF to agent
+	m.logger.Debug("closing stdin")
 	if m.stdin != nil {
 		if err := m.stdin.Close(); err != nil {
 			m.logger.Debug("failed to close stdin", zap.Error(err))
 		}
 	}
+	m.logger.Debug("stdin closed")
+
+	// Some adapters (like OpenCode) run as HTTP servers and don't exit on stdin close.
+	// For these, we need to kill the process group immediately.
+	// We kill the process group to ensure all child processes are killed too.
+	// This is important because OpenCode spawns: npx -> sh -> node -> opencode binary
+	if m.adapter != nil && m.adapter.RequiresProcessKill() {
+		if m.cmd != nil && m.cmd.Process != nil {
+			pid := m.cmd.Process.Pid
+			m.logger.Debug("killing process group", zap.Int("pgid", pid))
+			// Kill the entire process group (platform-specific implementation)
+			if err := killProcessGroup(pid); err != nil {
+				m.logger.Debug("failed to kill process group, trying single process", zap.Error(err))
+				// Fallback to killing just the process
+				if err := m.cmd.Process.Kill(); err != nil {
+					m.logger.Warn("failed to kill process", zap.Error(err))
+				}
+			}
+		}
+	}
 
 	// Wait for process to exit with timeout
+	m.logger.Debug("waiting for process to exit")
 	done := make(chan struct{})
 	go func() {
 		m.wg.Wait()
@@ -542,6 +579,7 @@ func (m *Manager) Stop(ctx context.Context) error {
 	}
 
 	m.status.Store(StatusStopped)
+	m.logger.Info("stopping agent process - COMPLETE")
 	return nil
 }
 

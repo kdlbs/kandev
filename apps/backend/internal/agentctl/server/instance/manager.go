@@ -226,6 +226,8 @@ func (m *Manager) StopInstance(ctx context.Context, id string) error {
 		return fmt.Errorf("instance %s not found", id)
 	}
 
+	m.logger.Debug("stopping instance", zap.String("instance_id", id))
+
 	// Stop the process manager
 	if inst.manager != nil {
 		if err := inst.manager.Stop(ctx); err != nil {
@@ -234,6 +236,10 @@ func (m *Manager) StopInstance(ctx context.Context, id string) error {
 				zap.Error(err))
 		}
 	}
+
+	m.logger.Debug("StopInstance: shutting down HTTP server",
+		zap.String("instance_id", id),
+		zap.Int("port", inst.Port))
 
 	// Shutdown HTTP server
 	if inst.server != nil {
@@ -244,13 +250,17 @@ func (m *Manager) StopInstance(ctx context.Context, id string) error {
 		}
 	}
 
+	m.logger.Debug("StopInstance: releasing port",
+		zap.String("instance_id", id),
+		zap.Int("port", inst.Port))
+
 	// Release port
 	m.portAlloc.Release(inst.Port)
 
 	// Remove from instances map
 	delete(m.instances, id)
 
-	m.logger.Info("stopped instance",
+	m.logger.Info("StopInstance completed",
 		zap.String("instance_id", id),
 		zap.Int("port", inst.Port))
 

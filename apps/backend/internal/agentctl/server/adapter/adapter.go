@@ -118,6 +118,13 @@ type AgentAdapter interface {
 
 	// Close releases resources held by the adapter.
 	Close() error
+
+	// RequiresProcessKill returns true if the adapter's subprocess needs to be
+	// explicitly killed during shutdown. Adapters that communicate via stdin/stdout
+	// (ACP, Codex, Claude Code) return false because closing stdin causes the
+	// subprocess to exit. HTTP-server-based adapters (OpenCode) return true because
+	// they don't exit on stdin close.
+	RequiresProcessKill() bool
 }
 
 // McpServerConfig holds configuration for an MCP server.
