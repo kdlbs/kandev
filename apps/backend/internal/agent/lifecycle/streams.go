@@ -38,10 +38,23 @@ func NewStreamManager(log *logger.Logger, callbacks StreamCallbacks) *StreamMana
 }
 
 // ConnectAll connects to all streams for an execution.
-// If ready is non-nil, it will be closed when the updates stream is connected.
+// If ready is non-nil, it will be closed when both streams are connected.
 func (sm *StreamManager) ConnectAll(execution *AgentExecution, ready chan<- struct{}) {
-	go sm.connectUpdatesStream(execution, ready)
-	go sm.connectWorkspaceStream(execution)
+	// Create channels to track when each stream is connected
+	updatesReady := make(chan struct{})
+	workspaceReady := make(chan struct{})
+
+	go sm.connectUpdatesStream(execution, updatesReady)
+	go sm.connectWorkspaceStream(execution, workspaceReady)
+
+	// If caller wants to know when streams are ready, wait for both
+	if ready != nil {
+		go func() {
+			<-updatesReady
+			<-workspaceReady
+			close(ready)
+		}()
+	}
 }
 
 // ReconnectAll reconnects to all streams (used after backend restart).
@@ -98,12 +111,24 @@ func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready c
 }
 
 // connectWorkspaceStream handles the unified workspace stream with retry logic
-func (sm *StreamManager) connectWorkspaceStream(execution *AgentExecution) {
+func (sm *StreamManager) connectWorkspaceStream(execution *AgentExecution, ready chan<- struct{}) {
 	ctx := context.Background()
 
 	// Retry connection with exponential backoff
 	maxRetries := 5
 	backoff := 1 * time.Second
+	signaled := false
+
+	// Helper to signal ready (only once)
+	signalReady := func() {
+		if !signaled && ready != nil {
+			close(ready)
+			signaled = true
+		}
+	}
+
+	// Ensure we signal ready even on failure (so callers don't hang)
+	defer signalReady()
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		callbacks := agentctl.WorkspaceStreamCallbacks{
@@ -177,6 +202,9 @@ func (sm *StreamManager) connectWorkspaceStream(execution *AgentExecution) {
 		execution.SetWorkspaceStream(ws)
 		sm.logger.Debug("connected to unified workspace stream",
 			zap.String("instance_id", execution.ID))
+
+		// Signal that workspace stream is ready
+		signalReady()
 
 		// Wait for the stream to close (it stays open until disconnected)
 		<-ws.Done()
