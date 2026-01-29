@@ -1,7 +1,6 @@
 'use client';
 
-import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
-import { flushSync } from 'react-dom';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import { useAppStore } from '@/components/state-provider';
 import { useSessionMessages } from '@/hooks/domains/session/use-session-messages';
@@ -10,11 +9,9 @@ import { useSessionState } from '@/hooks/domains/session/use-session-state';
 import { useProcessedMessages } from '@/hooks/use-processed-messages';
 import { useSessionModel } from '@/hooks/domains/session/use-session-model';
 import { useMessageHandler } from '@/hooks/use-message-handler';
-import { TaskChatInput } from '@/components/task/task-chat-input';
-import { RunningIndicator } from '@/components/task/chat/messages/running-indicator';
 import { TodoSummary } from '@/components/task/chat/todo-summary';
 import { VirtualizedMessageList } from '@/components/task/chat/virtualized-message-list';
-import { ChatToolbar } from '@/components/task/chat/chat-toolbar';
+import { ChatInputContainer } from '@/components/task/chat/chat-input-container';
 import { approveSessionAction } from '@/app/actions/workspaces';
 
 type TaskChatPanelProps = {
@@ -26,7 +23,6 @@ export function TaskChatPanel({
   onSend,
   sessionId = null,
 }: TaskChatPanelProps) {
-  const [messageInput, setMessageInput] = useState('');
   const [planModeEnabled, setPlanModeEnabled] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const lastAgentMessageCountRef = useRef(0);
@@ -135,19 +131,14 @@ export function TaskChatPanel({
   const showApproveButton =
     session?.review_status != null && session.review_status !== 'approved' && !isWorking;
 
-  const handleSubmit = useCallback(async (event?: FormEvent) => {
-    event?.preventDefault();
-    const trimmed = messageInput.trim();
-    if (!trimmed || isSending) return;
+  const handleSubmit = useCallback(async (message: string) => {
+    if (isSending) return;
     setIsSending(true);
-    flushSync(() => {
-      setMessageInput('');
-    });
     try {
       if (onSend) {
-        await onSend(trimmed);
+        await onSend(message);
       } else {
-        await handleSendMessage(trimmed);
+        await handleSendMessage(message);
       }
       // Reset plan mode after sending - it's a per-message instruction
       if (planModeEnabled) {
@@ -156,7 +147,7 @@ export function TaskChatPanel({
     } finally {
       setIsSending(false);
     }
-  }, [messageInput, isSending, planModeEnabled, onSend, handleSendMessage]);
+  }, [isSending, planModeEnabled, onSend, handleSendMessage]);
 
 
   return (
@@ -168,30 +159,13 @@ export function TaskChatPanel({
         sessionId={resolvedSessionId}
         messagesLoading={messagesLoading}
         isWorking={isWorking}
+        sessionState={session?.state}
       />
 
-      {/* Session info - shows agent state */}
-      {session?.state && (
-        <div className="mt-2 flex flex-wrap items-center gap-2">
-          <RunningIndicator state={session.state} sessionId={resolvedSessionId} />
-        </div>
-      )}
-
-      <form onSubmit={handleSubmit} className="flex flex-col gap-2">
+      <div className="flex flex-col gap-2 mt-2">
         {todoItems.length > 0 && <TodoSummary todos={todoItems} />}
-        <TaskChatInput
-          value={messageInput}
-          onChange={setMessageInput}
+        <ChatInputContainer
           onSubmit={handleSubmit}
-          placeholder={
-            agentMessageCount > 0
-              ? 'Continue working on this task...'
-              : 'Write to submit work to the agent...'
-          }
-          planModeEnabled={planModeEnabled}
-          sessionId={resolvedSessionId}
-        />
-        <ChatToolbar
           sessionId={resolvedSessionId}
           taskId={taskId}
           taskTitle={task?.title}
@@ -204,8 +178,13 @@ export function TaskChatPanel({
           onCancel={handleCancelTurn}
           showApproveButton={showApproveButton}
           onApprove={handleApprove}
+          placeholder={
+            agentMessageCount > 0
+              ? 'Continue working on this task...'
+              : 'Write to submit work to the agent...'
+          }
         />
-      </form>
+      </div>
     </>
   );
 }

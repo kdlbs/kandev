@@ -85,10 +85,10 @@ export function ChatMessage({ comment, label, className, showRichBlocks }: ChatM
   // User message: right-aligned bubble
   if (isUser) {
     return (
-      <div className="flex justify-end w-full">
-        <div className="max-w-[85%] sm:max-w-[75%] md:max-w-2xl">
-          <div className="rounded-2xl  border-primary/30 bg-primary/10 px-4 py-2.5 text-xs">
-            <p className="whitespace-pre-wrap">
+      <div className="flex justify-end w-full overflow-hidden">
+        <div className="max-w-[85%] sm:max-w-[75%] md:max-w-2xl overflow-hidden">
+          <div className="rounded-2xl border-primary/30 bg-primary/10 px-4 py-2.5 text-xs overflow-hidden">
+            <p className="whitespace-pre-wrap break-words overflow-wrap-anywhere">
               {comment.content ? renderContentWithFileRefs(comment.content) : '(empty)'}
             </p>
           </div>

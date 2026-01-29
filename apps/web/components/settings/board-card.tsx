@@ -89,7 +89,6 @@ export function BoardCard({
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [board.id, initialWorkflowSteps, isNewBoard, toast]);
 
   const refreshWorkflowSteps = async () => {

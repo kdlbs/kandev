@@ -4,9 +4,9 @@ import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { IconLoader2 } from '@tabler/icons-react';
 import { SessionPanelContent } from '@kandev/ui/pannel-session';
-import type { Message } from '@/lib/types/http';
+import type { Message, TaskSessionState } from '@/lib/types/http';
 import { MessageRenderer } from '@/components/task/chat/message-renderer';
-import { TurnSummary } from '@/components/task/chat/messages/turn-summary';
+import { AgentStatus } from '@/components/task/chat/messages/agent-status';
 import { useLazyLoadMessages } from '@/hooks/use-lazy-load-messages';
 
 type VirtualizedMessageListProps = {
@@ -16,6 +16,7 @@ type VirtualizedMessageListProps = {
   sessionId: string | null;
   messagesLoading: boolean;
   isWorking: boolean;
+  sessionState?: TaskSessionState;
 };
 
 export function VirtualizedMessageList({
@@ -25,6 +26,7 @@ export function VirtualizedMessageList({
   sessionId,
   messagesLoading,
   isWorking,
+  sessionState,
 }: VirtualizedMessageListProps) {
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const wasAtBottomRef = useRef(true);
@@ -72,6 +74,18 @@ export function VirtualizedMessageList({
     }
   }, [itemCount, lastMessageContent, virtualizer]);
 
+  // Scroll to bottom when agent starts running (running indicator appears)
+  const isRunning = sessionState === 'CREATED' || sessionState === 'STARTING' || sessionState === 'RUNNING';
+  useEffect(() => {
+    if (!isRunning) return;
+    const element = messagesContainerRef.current;
+    if (!element) return;
+    // Scroll to absolute bottom to show the running indicator
+    requestAnimationFrame(() => {
+      element.scrollTop = element.scrollHeight;
+    });
+  }, [isRunning]);
+
   const virtualItems = virtualizer.getVirtualItems();
 
   // Lazy load older messages when scrolling to top
@@ -98,10 +112,11 @@ export function VirtualizedMessageList({
   }, [virtualItems, hasMore, isLoadingMore, loadMore]);
 
   return (
-    <SessionPanelContent
-      ref={messagesContainerRef}
-      className="relative p-4"
-    >
+      <SessionPanelContent
+        ref={messagesContainerRef}
+        className="relative p-4"
+        wrapperClassName={isRunning ? 'border-flash-animation' : undefined}
+      >
       {isLoadingMore && hasMore && (
         <div className="absolute top-2 left-1/2 -translate-x-1/2 text-xs text-muted-foreground">
           Loading older messages...
@@ -146,8 +161,12 @@ export function VirtualizedMessageList({
           })}
         </div>
       )}
-      {/* Turn summary - shows duration and model after last message */}
-      <TurnSummary sessionId={sessionId} />
+      {/* Agent status - running indicator or completed turn summary */}
+      <AgentStatus
+        sessionState={sessionState}
+        sessionId={sessionId}
+        messages={messages}
+      />
     </SessionPanelContent>
   );
 }

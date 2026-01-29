@@ -15,6 +15,7 @@ interface SessionPanelProps {
 interface SessionPanelContentProps {
   children: ReactNode;
   className?: string;
+  wrapperClassName?: string;
 }
 
 export function SessionPanel({
@@ -44,16 +45,18 @@ export function SessionPanel({
 }
 
 export const SessionPanelContent = forwardRef<HTMLDivElement, SessionPanelContentProps>(
-  function SessionPanelContent({ children, className }, ref) {
+  function SessionPanelContent({ children, className, wrapperClassName }, ref) {
     return (
-      <div
-        ref={ref}
-        className={cn(
-          'flex-1 min-h-0 overflow-y-auto rounded-lg bg-background h-full p-2',
-          className
-        )}
-      >
-        {children}
+      <div className={cn('flex-1 min-h-0 rounded-lg bg-background h-full overflow-hidden', wrapperClassName)}>
+        <div
+          ref={ref}
+          className={cn(
+            'h-full overflow-y-auto overflow-x-hidden p-2',
+            className
+          )}
+        >
+          {children}
+        </div>
       </div>
     );
   }
