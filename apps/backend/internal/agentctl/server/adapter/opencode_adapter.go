@@ -421,24 +421,36 @@ func (a *OpenCodeAdapter) SetPermissionHandler(handler PermissionHandler) {
 
 // Close releases resources held by the adapter.
 func (a *OpenCodeAdapter) Close() error {
+	a.logger.Info("OpenCode adapter Close() called")
+
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
 	if a.closed {
+		a.logger.Debug("OpenCode adapter already closed")
 		return nil
 	}
 	a.closed = true
 
+	a.logger.Debug("OpenCode adapter: cancelling context")
 	a.cancel()
 
+	a.logger.Debug("OpenCode adapter: closing HTTP client")
 	if a.client != nil {
 		a.client.Close()
 	}
 
+	a.logger.Debug("OpenCode adapter: closing updates channel")
 	close(a.updatesCh)
 
-	a.logger.Info("OpenCode adapter closed")
+	a.logger.Info("OpenCode adapter closed successfully")
 	return nil
+}
+
+// RequiresProcessKill returns true because OpenCode runs as an HTTP server
+// and does not exit when stdin is closed.
+func (a *OpenCodeAdapter) RequiresProcessKill() bool {
+	return true
 }
 
 // clearSessionState clears session-specific tracking state.
