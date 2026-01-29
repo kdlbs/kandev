@@ -208,7 +208,7 @@ export function SessionsDropdown({
           <Button
             variant="ghost"
             size="sm"
-            className="h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40 border border-border"
+            className="h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40"
           >
             <IconStack2 className="h-4 w-4 text-muted-foreground" />
             <Badge variant="secondary" className="h-5 px-1.5 text-xs font-normal">

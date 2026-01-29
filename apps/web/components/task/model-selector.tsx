@@ -1,7 +1,13 @@
 'use client';
 
-import { IconCpu } from '@tabler/icons-react';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@kandev/ui/select';
+import { IconChevronDown } from '@tabler/icons-react';
+import { Button } from '@kandev/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@kandev/ui/dropdown-menu';
 import { useAppStore } from '@/components/state-provider';
 import { useAvailableAgents } from '@/hooks/domains/settings/use-available-agents';
 import { useSettingsData } from '@/hooks/domains/settings/use-settings-data';
@@ -82,30 +88,46 @@ export function ModelSelector({ sessionId }: ModelSelectorProps) {
   // If no session or no model available, show disabled placeholder
   if (!sessionId || !currentModel) {
     return (
-      <Select disabled>
-        <SelectTrigger className="w-[180px] cursor-not-allowed opacity-50">
-          <SelectValue placeholder="No model" />
-        </SelectTrigger>
-      </Select>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-7 gap-1 px-2 cursor-not-allowed opacity-50 whitespace-nowrap"
+        disabled
+      >
+        <span className="text-xs">No model</span>
+        <IconChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />
+      </Button>
     );
   }
 
+  // Get display name from modelOptions (uses backend name)
+  const currentModelOption = modelOptions.find((m) => m.id === currentModel);
+  const displayName = currentModelOption?.name || currentModel;
+
   return (
-    <Select value={currentModel} onValueChange={handleModelChange}>
-      <SelectTrigger className="w-[180px] cursor-pointer">
-        <div className="flex items-center gap-1.5">
-          <IconCpu className="h-3.5 w-3.5 text-muted-foreground" />
-          <SelectValue placeholder="Select model" />
-        </div>
-      </SelectTrigger>
-      <SelectContent>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 gap-1 px-2 cursor-pointer hover:bg-muted/40 whitespace-nowrap"
+        >
+          <span className="text-xs">{displayName}</span>
+          <IconChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" side="top">
         {modelOptions.map((model) => (
-          <SelectItem key={model.id} value={model.id}>
+          <DropdownMenuItem
+            key={model.id}
+            onClick={() => handleModelChange(model.id)}
+            className={model.id === currentModel ? 'bg-accent' : ''}
+          >
             {model.name}
-          </SelectItem>
+          </DropdownMenuItem>
         ))}
-      </SelectContent>
-    </Select>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
