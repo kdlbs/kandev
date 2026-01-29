@@ -4,6 +4,7 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -150,10 +151,23 @@ func (h *ShellHandlers) wsShellInput(ctx context.Context, msg *ws.Message) (*ws.
 		return nil, fmt.Errorf("no agent running for session %s", req.SessionID)
 	}
 
-	// Use the workspace stream from AgentExecution (managed by lifecycle)
-	workspaceStream := execution.GetWorkspaceStream()
+	// Wait for the workspace stream to be ready with a timeout.
+	// This handles the race condition where client sends shell.input before
+	// the workspace stream is fully connected (e.g., joining a task too fast).
+	var workspaceStream = execution.GetWorkspaceStream()
 	if workspaceStream == nil {
-		return nil, fmt.Errorf("no workspace stream for session %s", req.SessionID)
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			time.Sleep(100 * time.Millisecond)
+			workspaceStream = execution.GetWorkspaceStream()
+			if workspaceStream != nil {
+				break
+			}
+		}
+	}
+
+	if workspaceStream == nil {
+		return nil, fmt.Errorf("workspace stream not ready for session %s", req.SessionID)
 	}
 
 	if err := workspaceStream.WriteShellInput(req.Data); err != nil {
