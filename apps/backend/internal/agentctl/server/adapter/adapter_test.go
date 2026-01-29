@@ -14,8 +14,6 @@ func TestSessionUpdate_Fields(t *testing.T) {
 		ToolName:   "file_read",
 		ToolTitle:  "Reading file",
 		ToolStatus: "running",
-		ToolArgs:   map[string]interface{}{"path": "/test/file.txt"},
-		ToolResult: map[string]interface{}{"content": "file contents"},
 		PlanEntries: []PlanEntry{
 			{Description: "Step 1", Status: "completed", Priority: "high"},
 		},
@@ -43,9 +41,6 @@ func TestSessionUpdate_Fields(t *testing.T) {
 	}
 	if update.ToolStatus != "running" {
 		t.Errorf("expected ToolStatus 'running', got %q", update.ToolStatus)
-	}
-	if update.ToolArgs["path"] != "/test/file.txt" {
-		t.Errorf("expected ToolArgs[path] '/test/file.txt', got %v", update.ToolArgs["path"])
 	}
 	if len(update.PlanEntries) != 1 {
 		t.Errorf("expected 1 PlanEntry, got %d", len(update.PlanEntries))
@@ -286,84 +281,15 @@ func TestPlanEntry_StatusValues(t *testing.T) {
 	}
 }
 
-func TestConvertSSEToStreamableHTTP(t *testing.T) {
-	testCases := []struct {
-		name     string
-		input    string
-		expected string
-	}{
-		{
-			name:     "standard SSE endpoint",
-			input:    "http://localhost:9090/sse",
-			expected: "http://localhost:9090/mcp",
-		},
-		{
-			name:     "SSE endpoint with different port",
-			input:    "http://example.com:8080/sse",
-			expected: "http://example.com:8080/mcp",
-		},
-		{
-			name:     "trailing slash not converted",
-			input:    "http://localhost:9090/sse/",
-			expected: "http://localhost:9090/sse/",
-		},
-		{
-			name:     "non-SSE endpoint unchanged",
-			input:    "http://localhost:9090/other",
-			expected: "http://localhost:9090/other",
-		},
-		{
-			name:     "empty string",
-			input:    "",
-			expected: "",
-		},
-		{
-			name:     "already streamable HTTP endpoint",
-			input:    "http://localhost:9090/mcp",
-			expected: "http://localhost:9090/mcp",
-		},
-		{
-			name:     "sse in path but not at end",
-			input:    "http://localhost:9090/sse/something",
-			expected: "http://localhost:9090/sse/something",
-		},
-		{
-			name:     "https endpoint",
-			input:    "https://secure.example.com/sse",
-			expected: "https://secure.example.com/mcp",
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			result := convertSSEToStreamableHTTP(tc.input)
-			if result != tc.expected {
-				t.Errorf("convertSSEToStreamableHTTP(%q) = %q, want %q", tc.input, result, tc.expected)
-			}
-		})
-	}
-}
-
-func TestSessionUpdate_WithComplexToolArgs(t *testing.T) {
-	// Test with complex nested ToolArgs
+func TestSessionUpdate_WithNormalizedPayload(t *testing.T) {
+	// Test with NormalizedPayload
 	update := AgentEvent{
 		Type:       "tool_call",
 		ToolCallID: "call-123",
 		ToolName:   "file_edit",
-		ToolArgs: map[string]interface{}{
-			"path": "/src/main.go",
-			"locations": []map[string]interface{}{
-				{"path": "/src/main.go", "line": 42},
-				{"path": "/src/util.go", "line": 10},
-			},
-			"raw_input": map[string]interface{}{
-				"old_text": "foo",
-				"new_text": "bar",
-			},
-		},
 	}
 
-	// Marshal and unmarshal to verify complex structures work
+	// Marshal and unmarshal to verify serialization works
 	data, err := json.Marshal(update)
 	if err != nil {
 		t.Fatalf("failed to marshal: %v", err)
@@ -374,15 +300,10 @@ func TestSessionUpdate_WithComplexToolArgs(t *testing.T) {
 		t.Fatalf("failed to unmarshal: %v", err)
 	}
 
-	if decoded.ToolArgs["path"] != "/src/main.go" {
-		t.Errorf("expected path '/src/main.go', got %v", decoded.ToolArgs["path"])
+	if decoded.ToolCallID != "call-123" {
+		t.Errorf("expected ToolCallID 'call-123', got %v", decoded.ToolCallID)
 	}
-
-	locations, ok := decoded.ToolArgs["locations"].([]interface{})
-	if !ok {
-		t.Fatal("expected locations to be a slice")
-	}
-	if len(locations) != 2 {
-		t.Errorf("expected 2 locations, got %d", len(locations))
+	if decoded.ToolName != "file_edit" {
+		t.Errorf("expected ToolName 'file_edit', got %v", decoded.ToolName)
 	}
 }

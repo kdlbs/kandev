@@ -9,6 +9,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/agent/registry"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/clarification"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator"
@@ -263,19 +264,16 @@ func (a *messageCreatorAdapter) CreateUserMessage(ctx context.Context, taskID, c
 	return err
 }
 
-// CreateToolCallMessage creates a message for a tool call with type="tool_call"
-func (a *messageCreatorAdapter) CreateToolCallMessage(ctx context.Context, taskID, toolCallID, title, status, agentSessionID, turnID string, args map[string]interface{}) error {
+// CreateToolCallMessage creates a message for a tool call
+func (a *messageCreatorAdapter) CreateToolCallMessage(ctx context.Context, taskID, toolCallID, title, status, agentSessionID, turnID string, normalized *streams.NormalizedPayload) error {
 	metadata := map[string]interface{}{
 		"tool_call_id": toolCallID,
 		"title":        title,
 		"status":       status,
 	}
-
-	if len(args) > 0 {
-		metadata["args"] = args
-		if kind, ok := args["kind"].(string); ok && kind != "" {
-			metadata["tool_name"] = kind
-		}
+	// Add normalized tool data to metadata for frontend consumption
+	if normalized != nil {
+		metadata["normalized"] = normalized
 	}
 
 	_, err := a.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
@@ -290,9 +288,9 @@ func (a *messageCreatorAdapter) CreateToolCallMessage(ctx context.Context, taskI
 	return err
 }
 
-// UpdateToolCallMessage updates a tool call message's status and optionally updates title/args
-func (a *messageCreatorAdapter) UpdateToolCallMessage(ctx context.Context, taskID, toolCallID, status, result, agentSessionID, title string, args map[string]interface{}) error {
-	return a.svc.UpdateToolCallMessage(ctx, agentSessionID, toolCallID, status, result, title, args)
+// UpdateToolCallMessage updates a tool call message's status
+func (a *messageCreatorAdapter) UpdateToolCallMessage(ctx context.Context, taskID, toolCallID, status, result, agentSessionID, title string, normalized *streams.NormalizedPayload) error {
+	return a.svc.UpdateToolCallMessage(ctx, agentSessionID, toolCallID, status, result, title, normalized)
 }
 
 // CreateSessionMessage creates a message for non-chat session updates (status/progress/error/etc).

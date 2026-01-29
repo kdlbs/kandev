@@ -1,23 +1,54 @@
-package adapter
+// Package streamjson implements the stream-json transport adapter.
+// This is the protocol used by Claude Code CLI (--output-format stream-json).
+package streamjson
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"sync"
 
 	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/pkg/claudecode"
 	"go.uber.org/zap"
 )
 
-// ClaudeCodeAdapter implements AgentAdapter for Claude Code CLI using stream-json protocol.
+// Re-export types needed by external packages
+type (
+	PermissionRequest  = types.PermissionRequest
+	PermissionResponse = types.PermissionResponse
+	PermissionOption   = streams.PermissionOption
+	PermissionHandler  = types.PermissionHandler
+	AgentEvent         = streams.AgentEvent
+)
+
+// AgentInfo contains information about the connected agent.
+type AgentInfo struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+}
+
+// StderrProvider provides access to recent stderr output for error context.
+type StderrProvider interface {
+	GetRecentStderr() []string
+}
+
+// Adapter implements the transport adapter for agents using the stream-json protocol.
 // Claude Code uses a streaming JSON format over stdin/stdout with control requests for permissions.
-type ClaudeCodeAdapter struct {
-	cfg    *Config
+type Adapter struct {
+	cfg    *shared.Config
 	logger *logger.Logger
+
+	// Agent identity (from config, for logging)
+	agentID string
+
+	// Normalizer for converting tool data to NormalizedPayload
+	normalizer *Normalizer
 
 	// Subprocess stdin/stdout (set via Connect)
 	stdin  io.Writer
@@ -72,13 +103,16 @@ type resultComplete struct {
 	err     string
 }
 
-// NewClaudeCodeAdapter creates a new Claude Code protocol adapter.
+// NewAdapter creates a new stream-json protocol adapter.
 // Call Connect() after starting the subprocess to wire up stdin/stdout.
-func NewClaudeCodeAdapter(cfg *Config, log *logger.Logger) *ClaudeCodeAdapter {
+// cfg.AgentID is required for debug file naming.
+func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &ClaudeCodeAdapter{
+	return &Adapter{
 		cfg:                    cfg,
-		logger:                 log.WithFields(zap.String("adapter", "claude-code")),
+		logger:                 log.WithFields(zap.String("adapter", "stream-json"), zap.String("agent_id", cfg.AgentID)),
+		agentID:                cfg.AgentID,
+		normalizer:             NewNormalizer(),
 		ctx:                    ctx,
 		cancel:                 cancel,
 		updatesCh:              make(chan AgentEvent, 100),
@@ -88,17 +122,17 @@ func NewClaudeCodeAdapter(cfg *Config, log *logger.Logger) *ClaudeCodeAdapter {
 }
 
 // PrepareEnvironment performs protocol-specific setup before the agent process starts.
-// Claude Code reads MCP configuration from settings files, but we handle MCP via kandev's
+// Stream-json protocol reads MCP configuration from settings files, but we handle MCP via kandev's
 // built-in MCP server, so this is a no-op.
-func (a *ClaudeCodeAdapter) PrepareEnvironment() (map[string]string, error) {
+func (a *Adapter) PrepareEnvironment() (map[string]string, error) {
 	a.logger.Info("PrepareEnvironment called",
 		zap.Int("mcp_server_count", len(a.cfg.McpServers)))
-	// Claude Code MCP configuration is handled externally or via CLI flags
+	// MCP configuration is handled externally or via CLI flags
 	return nil, nil
 }
 
 // Connect wires up the stdin/stdout pipes from the running agent subprocess.
-func (a *ClaudeCodeAdapter) Connect(stdin io.Writer, stdout io.Reader) error {
+func (a *Adapter) Connect(stdin io.Writer, stdout io.Reader) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -111,9 +145,9 @@ func (a *ClaudeCodeAdapter) Connect(stdin io.Writer, stdout io.Reader) error {
 	return nil
 }
 
-// Initialize establishes the Claude Code connection with the agent subprocess.
-func (a *ClaudeCodeAdapter) Initialize(ctx context.Context) error {
-	a.logger.Info("initializing Claude Code adapter",
+// Initialize establishes the stream-json connection with the agent subprocess.
+func (a *Adapter) Initialize(ctx context.Context) error {
+	a.logger.Info("initializing stream-json adapter",
 		zap.String("workdir", a.cfg.WorkDir))
 
 	// Create Claude Code client
@@ -126,28 +160,28 @@ func (a *ClaudeCodeAdapter) Initialize(ctx context.Context) error {
 
 	// Store agent info (version will be populated from first message)
 	a.agentInfo = &AgentInfo{
-		Name:    "claude-code",
+		Name:    a.agentID,
 		Version: "unknown",
 	}
 
-	a.logger.Info("Claude Code adapter initialized")
+	a.logger.Info("stream-json adapter initialized")
 
 	return nil
 }
 
 // GetAgentInfo returns information about the connected agent.
-func (a *ClaudeCodeAdapter) GetAgentInfo() *AgentInfo {
+func (a *Adapter) GetAgentInfo() *AgentInfo {
 	return a.agentInfo
 }
 
-// NewSession creates a new Claude Code session.
-// Note: Claude Code sessions are created implicitly with the first prompt.
-// The mcpServers parameter is ignored as Claude Code handles MCP separately.
-func (a *ClaudeCodeAdapter) NewSession(ctx context.Context, _ []types.McpServer) (string, error) {
+// NewSession creates a new stream-json session.
+// Note: Sessions are created implicitly with the first prompt.
+// The mcpServers parameter is ignored as this protocol handles MCP separately.
+func (a *Adapter) NewSession(ctx context.Context, _ []types.McpServer) (string, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	// Generate a session ID - Claude Code will return its own session ID
+	// Generate a session ID - the agent will return its own session ID
 	// which we'll update when we receive the system message
 	sessionID := uuid.New().String()
 	a.sessionID = sessionID
@@ -157,9 +191,9 @@ func (a *ClaudeCodeAdapter) NewSession(ctx context.Context, _ []types.McpServer)
 	return sessionID, nil
 }
 
-// LoadSession resumes an existing Claude Code session.
-// The session ID will be passed to Claude Code via --resume flag (handled by process manager).
-func (a *ClaudeCodeAdapter) LoadSession(ctx context.Context, sessionID string) error {
+// LoadSession resumes an existing stream-json session.
+// The session ID will be passed to the agent via --resume flag (handled by process manager).
+func (a *Adapter) LoadSession(ctx context.Context, sessionID string) error {
 	a.mu.Lock()
 	a.sessionID = sessionID
 	a.mu.Unlock()
@@ -169,8 +203,8 @@ func (a *ClaudeCodeAdapter) LoadSession(ctx context.Context, sessionID string) e
 	return nil
 }
 
-// Prompt sends a prompt to Claude Code and waits for completion.
-func (a *ClaudeCodeAdapter) Prompt(ctx context.Context, message string) error {
+// Prompt sends a prompt and waits for completion.
+func (a *Adapter) Prompt(ctx context.Context, message string) error {
 	a.mu.Lock()
 	client := a.client
 	sessionID := a.sessionID
@@ -222,7 +256,7 @@ func (a *ClaudeCodeAdapter) Prompt(ctx context.Context, message string) error {
 }
 
 // Cancel interrupts the current operation.
-func (a *ClaudeCodeAdapter) Cancel(ctx context.Context) error {
+func (a *Adapter) Cancel(ctx context.Context) error {
 	a.mu.RLock()
 	client := a.client
 	a.mu.RUnlock()
@@ -244,40 +278,40 @@ func (a *ClaudeCodeAdapter) Cancel(ctx context.Context) error {
 }
 
 // Updates returns the channel for agent events.
-func (a *ClaudeCodeAdapter) Updates() <-chan AgentEvent {
+func (a *Adapter) Updates() <-chan AgentEvent {
 	return a.updatesCh
 }
 
 // GetSessionID returns the current session ID.
-func (a *ClaudeCodeAdapter) GetSessionID() string {
+func (a *Adapter) GetSessionID() string {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	return a.sessionID
 }
 
 // GetOperationID returns the current operation ID.
-func (a *ClaudeCodeAdapter) GetOperationID() string {
+func (a *Adapter) GetOperationID() string {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	return a.operationID
 }
 
 // SetPermissionHandler sets the handler for permission requests.
-func (a *ClaudeCodeAdapter) SetPermissionHandler(handler PermissionHandler) {
+func (a *Adapter) SetPermissionHandler(handler PermissionHandler) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.permissionHandler = handler
 }
 
 // SetStderrProvider sets the provider for recent stderr output.
-func (a *ClaudeCodeAdapter) SetStderrProvider(provider StderrProvider) {
+func (a *Adapter) SetStderrProvider(provider StderrProvider) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.stderrProvider = provider
 }
 
 // Close releases resources held by the adapter.
-func (a *ClaudeCodeAdapter) Close() error {
+func (a *Adapter) Close() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -286,7 +320,7 @@ func (a *ClaudeCodeAdapter) Close() error {
 	}
 	a.closed = true
 
-	a.logger.Info("closing Claude Code adapter")
+	a.logger.Info("closing stream-json adapter")
 
 	// Cancel the context to stop the read loop
 	if a.cancel != nil {
@@ -305,12 +339,13 @@ func (a *ClaudeCodeAdapter) Close() error {
 }
 
 // RequiresProcessKill returns false because Claude Code agents exit when stdin is closed.
-func (a *ClaudeCodeAdapter) RequiresProcessKill() bool {
+func (a *Adapter) RequiresProcessKill() bool {
 	return false
 }
 
 // sendUpdate safely sends an event to the updates channel.
-func (a *ClaudeCodeAdapter) sendUpdate(update AgentEvent) {
+func (a *Adapter) sendUpdate(update AgentEvent) {
+	shared.LogNormalizedEvent(shared.ProtocolStreamJSON, a.agentID, &update)
 	select {
 	case a.updatesCh <- update:
 	default:
@@ -318,8 +353,8 @@ func (a *ClaudeCodeAdapter) sendUpdate(update AgentEvent) {
 	}
 }
 
-// handleControlRequest processes control requests (permission requests) from Claude Code.
-func (a *ClaudeCodeAdapter) handleControlRequest(requestID string, req *claudecode.ControlRequest) {
+// handleControlRequest processes control requests (permission requests) from the agent.
+func (a *Adapter) handleControlRequest(requestID string, req *claudecode.ControlRequest) {
 	a.logger.Info("received control request",
 		zap.String("request_id", requestID),
 		zap.String("subtype", req.Subtype),
@@ -348,7 +383,7 @@ func (a *ClaudeCodeAdapter) handleControlRequest(requestID string, req *claudeco
 }
 
 // handleToolPermission processes can_use_tool permission requests.
-func (a *ClaudeCodeAdapter) handleToolPermission(requestID string, req *claudecode.ControlRequest) {
+func (a *Adapter) handleToolPermission(requestID string, req *claudecode.ControlRequest) {
 	a.mu.RLock()
 	handler := a.permissionHandler
 	sessionID := a.sessionID
@@ -402,7 +437,7 @@ func (a *ClaudeCodeAdapter) handleToolPermission(requestID string, req *claudeco
 
 	// Send permission notification through updates channel
 	a.sendUpdate(AgentEvent{
-		Type:              EventTypePermissionRequest,
+		Type:              streams.EventTypePermissionRequest,
 		SessionID:         sessionID,
 		OperationID:       operationID,
 		ToolCallID:        req.ToolUseID,
@@ -438,8 +473,8 @@ func (a *ClaudeCodeAdapter) handleToolPermission(requestID string, req *claudeco
 	a.sendPermissionResponse(requestID, behavior)
 }
 
-// sendPermissionResponse sends a permission response to Claude Code.
-func (a *ClaudeCodeAdapter) sendPermissionResponse(requestID string, behavior string) {
+// sendPermissionResponse sends a permission response to the agent.
+func (a *Adapter) sendPermissionResponse(requestID string, behavior string) {
 	resp := &claudecode.ControlResponseMessage{
 		Type:      claudecode.MessageTypeControlResponse,
 		RequestID: requestID,
@@ -457,7 +492,7 @@ func (a *ClaudeCodeAdapter) sendPermissionResponse(requestID string, behavior st
 }
 
 // handleHookCallback processes hook callback requests.
-func (a *ClaudeCodeAdapter) handleHookCallback(requestID string, req *claudecode.ControlRequest) {
+func (a *Adapter) handleHookCallback(requestID string, req *claudecode.ControlRequest) {
 	a.logger.Info("received hook callback",
 		zap.String("request_id", requestID),
 		zap.String("hook_name", req.HookName))
@@ -474,8 +509,13 @@ func (a *ClaudeCodeAdapter) handleHookCallback(requestID string, req *claudecode
 	}
 }
 
-// handleMessage processes streaming messages from Claude Code.
-func (a *ClaudeCodeAdapter) handleMessage(msg *claudecode.CLIMessage) {
+// handleMessage processes streaming messages from the agent.
+func (a *Adapter) handleMessage(msg *claudecode.CLIMessage) {
+	// Log raw event for debugging
+	if rawData, err := json.Marshal(msg); err == nil {
+		shared.LogRawEvent(shared.ProtocolStreamJSON, a.agentID, msg.Type, rawData)
+	}
+
 	a.mu.RLock()
 	sessionID := a.sessionID
 	operationID := a.operationID
@@ -499,7 +539,7 @@ func (a *ClaudeCodeAdapter) handleMessage(msg *claudecode.CLIMessage) {
 // handleSystemMessage processes system init messages.
 // Note: System messages are session initialization, NOT turn completion.
 // Turn completion is signaled by result messages.
-func (a *ClaudeCodeAdapter) handleSystemMessage(msg *claudecode.CLIMessage) {
+func (a *Adapter) handleSystemMessage(msg *claudecode.CLIMessage) {
 	a.logger.Info("received system message",
 		zap.String("session_id", msg.SessionID),
 		zap.String("status", msg.SessionStatus))
@@ -514,7 +554,7 @@ func (a *ClaudeCodeAdapter) handleSystemMessage(msg *claudecode.CLIMessage) {
 	a.mu.Unlock()
 
 	// Only send session status event once per session (on first prompt)
-	// Claude Code sends system messages on every prompt, but we only want to
+	// The agent sends system messages on every prompt, but we only want to
 	// show "New session started" or "Session resumed" once
 	if alreadySent {
 		return
@@ -522,7 +562,7 @@ func (a *ClaudeCodeAdapter) handleSystemMessage(msg *claudecode.CLIMessage) {
 
 	// Send session status event (NOT complete - that's only for result messages)
 	a.sendUpdate(AgentEvent{
-		Type:      EventTypeSessionStatus,
+		Type:      streams.EventTypeSessionStatus,
 		SessionID: msg.SessionID,
 		Data: map[string]any{
 			"session_status": msg.SessionStatus,
@@ -532,7 +572,7 @@ func (a *ClaudeCodeAdapter) handleSystemMessage(msg *claudecode.CLIMessage) {
 }
 
 // handleAssistantMessage processes assistant messages (text, thinking, tool calls).
-func (a *ClaudeCodeAdapter) handleAssistantMessage(msg *claudecode.CLIMessage, sessionID, operationID string) {
+func (a *Adapter) handleAssistantMessage(msg *claudecode.CLIMessage, sessionID, operationID string) {
 	if msg.Message == nil {
 		return
 	}
@@ -566,7 +606,7 @@ func (a *ClaudeCodeAdapter) handleAssistantMessage(msg *claudecode.CLIMessage, s
 		case "text":
 			if block.Text != "" {
 				a.sendUpdate(AgentEvent{
-					Type:        EventTypeMessageChunk,
+					Type:        streams.EventTypeMessageChunk,
 					SessionID:   sessionID,
 					OperationID: operationID,
 					Text:        block.Text,
@@ -576,7 +616,7 @@ func (a *ClaudeCodeAdapter) handleAssistantMessage(msg *claudecode.CLIMessage, s
 		case "thinking":
 			if block.Thinking != "" {
 				a.sendUpdate(AgentEvent{
-					Type:          EventTypeReasoning,
+					Type:          streams.EventTypeReasoning,
 					SessionID:     sessionID,
 					OperationID:   operationID,
 					ReasoningText: block.Thinking,
@@ -584,6 +624,12 @@ func (a *ClaudeCodeAdapter) handleAssistantMessage(msg *claudecode.CLIMessage, s
 			}
 
 		case "tool_use":
+			// Generate normalized payload using the normalizer
+			normalizedPayload := a.normalizer.NormalizeToolCall(block.Name, block.Input)
+
+			// Detect specific tool operation type for logging
+			toolType := DetectStreamJSONToolType(block.Name)
+
 			// Build a human-readable title for the tool call
 			toolTitle := block.Name
 			if cmd, ok := block.Input["command"].(string); ok && block.Name == claudecode.ToolBash {
@@ -594,6 +640,7 @@ func (a *ClaudeCodeAdapter) handleAssistantMessage(msg *claudecode.CLIMessage, s
 			a.logger.Info("tool_use block received",
 				zap.String("tool_call_id", block.ID),
 				zap.String("tool_name", block.Name),
+				zap.String("tool_type", toolType),
 				zap.String("title", toolTitle))
 
 			// Track this tool call as pending
@@ -602,14 +649,14 @@ func (a *ClaudeCodeAdapter) handleAssistantMessage(msg *claudecode.CLIMessage, s
 			a.mu.Unlock()
 
 			a.sendUpdate(AgentEvent{
-				Type:        EventTypeToolCall,
-				SessionID:   sessionID,
-				OperationID: operationID,
-				ToolCallID:  block.ID,
-				ToolName:    block.Name,
-				ToolTitle:   toolTitle,
-				ToolArgs:    block.Input,
-				ToolStatus:  "running",
+				Type:              streams.EventTypeToolCall,
+				SessionID:         sessionID,
+				OperationID:       operationID,
+				ToolCallID:        block.ID,
+				ToolName:          block.Name,
+				ToolTitle:         toolTitle,
+				ToolStatus:        "running",
+				NormalizedPayload: normalizedPayload,
 			})
 
 		case "tool_result":
@@ -627,11 +674,10 @@ func (a *ClaudeCodeAdapter) handleAssistantMessage(msg *claudecode.CLIMessage, s
 			a.mu.Unlock()
 
 			a.sendUpdate(AgentEvent{
-				Type:        EventTypeToolUpdate,
+				Type:        streams.EventTypeToolUpdate,
 				SessionID:   sessionID,
 				OperationID: operationID,
 				ToolCallID:  block.ToolUseID,
-				ToolResult:  block.Content,
 				ToolStatus:  status,
 			})
 		}
@@ -657,7 +703,7 @@ func (a *ClaudeCodeAdapter) handleAssistantMessage(msg *claudecode.CLIMessage, s
 		}
 
 		a.sendUpdate(AgentEvent{
-			Type:                   EventTypeContextWindow,
+			Type:                   streams.EventTypeContextWindow,
 			SessionID:              sessionID,
 			OperationID:            operationID,
 			ContextWindowSize:      contextSize,
@@ -669,7 +715,7 @@ func (a *ClaudeCodeAdapter) handleAssistantMessage(msg *claudecode.CLIMessage, s
 }
 
 // handleResultMessage processes result (completion) messages.
-func (a *ClaudeCodeAdapter) handleResultMessage(msg *claudecode.CLIMessage, sessionID, operationID string) {
+func (a *Adapter) handleResultMessage(msg *claudecode.CLIMessage, sessionID, operationID string) {
 	a.logger.Info("received result message",
 		zap.Bool("is_error", msg.IsError),
 		zap.Int("num_turns", msg.NumTurns))
@@ -696,7 +742,7 @@ func (a *ClaudeCodeAdapter) handleResultMessage(msg *claudecode.CLIMessage, sess
 		a.logger.Info("auto-completing pending tool call on result",
 			zap.String("tool_call_id", toolID))
 		a.sendUpdate(AgentEvent{
-			Type:        EventTypeToolUpdate,
+			Type:        streams.EventTypeToolUpdate,
 			SessionID:   sessionID,
 			OperationID: operationID,
 			ToolCallID:  toolID,
@@ -727,7 +773,7 @@ func (a *ClaudeCodeAdapter) handleResultMessage(msg *claudecode.CLIMessage, sess
 			remaining = 0
 		}
 		a.sendUpdate(AgentEvent{
-			Type:                   EventTypeContextWindow,
+			Type:                   streams.EventTypeContextWindow,
 			SessionID:              sessionID,
 			OperationID:            operationID,
 			ContextWindowSize:      contextSize,
@@ -739,16 +785,16 @@ func (a *ClaudeCodeAdapter) handleResultMessage(msg *claudecode.CLIMessage, sess
 
 	// Send completion event
 	a.sendUpdate(AgentEvent{
-		Type:        EventTypeComplete,
+		Type:        streams.EventTypeComplete,
 		SessionID:   sessionID,
 		OperationID: operationID,
 		Data: map[string]any{
-			"cost_usd":       msg.CostUSD,
-			"duration_ms":    msg.DurationMS,
-			"num_turns":      msg.NumTurns,
-			"input_tokens":   msg.TotalInputTokens,
-			"output_tokens":  msg.TotalOutputTokens,
-			"is_error":       msg.IsError,
+			"cost_usd":      msg.CostUSD,
+			"duration_ms":   msg.DurationMS,
+			"num_turns":     msg.NumTurns,
+			"input_tokens":  msg.TotalInputTokens,
+			"output_tokens": msg.TotalOutputTokens,
+			"is_error":      msg.IsError,
 		},
 	})
 
@@ -756,7 +802,7 @@ func (a *ClaudeCodeAdapter) handleResultMessage(msg *claudecode.CLIMessage, sess
 	// Result can be either a ResultData object or an error string
 	if resultData := msg.GetResultData(); resultData != nil && resultData.Text != "" {
 		a.sendUpdate(AgentEvent{
-			Type:        EventTypeMessageChunk,
+			Type:        streams.EventTypeMessageChunk,
 			SessionID:   sessionID,
 			OperationID: operationID,
 			Text:        resultData.Text,
@@ -787,13 +833,10 @@ func (a *ClaudeCodeAdapter) handleResultMessage(msg *claudecode.CLIMessage, sess
 			errorMsg = resultData.Text
 		}
 		a.sendUpdate(AgentEvent{
-			Type:        EventTypeError,
+			Type:        streams.EventTypeError,
 			SessionID:   sessionID,
 			OperationID: operationID,
 			Error:       errorMsg,
 		})
 	}
 }
-
-// Verify interface implementation
-var _ AgentAdapter = (*ClaudeCodeAdapter)(nil)

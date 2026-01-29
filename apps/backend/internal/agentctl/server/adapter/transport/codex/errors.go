@@ -1,4 +1,4 @@
-package adapter
+package codex
 
 import (
 	"encoding/json"
@@ -26,13 +26,13 @@ type CodexParsedError struct {
 	ResetsInSeconds int64
 }
 
-// parseCodexStderrError attempts to parse a Codex stderr error line and extract
+// ParseCodexStderrError attempts to parse a Codex stderr error line and extract
 // error information. Returns nil if parsing fails.
 //
 // Example input:
 //
 //	2026-01-23T22:57:08.953223Z ERROR codex_api::endpoint::responses: error=http 429 Too Many Requests: Some("{\"error\":{...}}")
-func parseCodexStderrError(line string) *CodexParsedError {
+func ParseCodexStderrError(line string) *CodexParsedError {
 	matches := codexErrorRegex.FindStringSubmatch(line)
 	if len(matches) < 3 {
 		return nil
@@ -122,12 +122,12 @@ func parseCodexStderrError(line string) *CodexParsedError {
 	return result
 }
 
-// parseCodexStderrLines attempts to parse Codex stderr lines and extract
+// ParseCodexStderrLines attempts to parse Codex stderr lines and extract
 // error information. Searches from the end (most recent) first.
 // Returns nil if no parseable error is found.
-func parseCodexStderrLines(lines []string) *CodexParsedError {
+func ParseCodexStderrLines(lines []string) *CodexParsedError {
 	for i := len(lines) - 1; i >= 0; i-- {
-		if parsed := parseCodexStderrError(lines[i]); parsed != nil {
+		if parsed := ParseCodexStderrError(lines[i]); parsed != nil {
 			return parsed
 		}
 	}

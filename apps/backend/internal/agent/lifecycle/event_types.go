@@ -1,7 +1,11 @@
 // Package lifecycle provides event payload types for agent lifecycle events.
 package lifecycle
 
-import "time"
+import (
+	"time"
+
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
+)
 
 // AgentEventPayload is the payload for agent lifecycle events (started, stopped, ready, completed, failed).
 type AgentEventPayload struct {
@@ -35,18 +39,20 @@ type ACPSessionCreatedPayload struct {
 
 // AgentStreamEventData contains the nested event data within AgentStreamEventPayload.
 type AgentStreamEventData struct {
-	Type          string                 `json:"type"`
-	ACPSessionID  string                 `json:"acp_session_id,omitempty"`
-	Text          string                 `json:"text,omitempty"`
-	ToolCallID    string                 `json:"tool_call_id,omitempty"`
-	ToolName      string                 `json:"tool_name,omitempty"`
-	ToolTitle     string                 `json:"tool_title,omitempty"`
-	ToolStatus    string                 `json:"tool_status,omitempty"`
-	ToolArgs      map[string]interface{} `json:"tool_args,omitempty"`
-	ToolResult    interface{}            `json:"tool_result,omitempty"`
-	Error         string                 `json:"error,omitempty"`
-	SessionStatus string                 `json:"session_status,omitempty"` // "resumed" or "new" for session_status events
-	Data          interface{}            `json:"data,omitempty"`
+	Type          string      `json:"type"`
+	ACPSessionID  string      `json:"acp_session_id,omitempty"`
+	Text          string      `json:"text,omitempty"`
+	ToolCallID    string      `json:"tool_call_id,omitempty"`
+	ToolName      string      `json:"tool_name,omitempty"`
+	ToolTitle     string      `json:"tool_title,omitempty"`
+	ToolStatus    string      `json:"tool_status,omitempty"`
+	Error         string      `json:"error,omitempty"`
+	SessionStatus string      `json:"session_status,omitempty"` // "resumed" or "new" for session_status events
+	Data          interface{} `json:"data,omitempty"`
+
+	// Normalized contains the typed tool payload data.
+	// This is used to populate message metadata with structured tool information.
+	Normalized *streams.NormalizedPayload `json:"normalized,omitempty"`
 
 	// Streaming message fields (for "message_streaming" and "thinking_streaming" types)
 	// MessageID is the ID of the message being streamed (empty for first chunk, set for appends)
