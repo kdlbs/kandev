@@ -1,0 +1,221 @@
+package mcp
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+
+	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/mark3labs/mcp-go/server"
+)
+
+// MCP action constants for backend WS requests
+const (
+	ActionMCPListWorkspaces    = "mcp.list_workspaces"
+	ActionMCPListBoards        = "mcp.list_boards"
+	ActionMCPListWorkflowSteps = "mcp.list_workflow_steps"
+	ActionMCPListTasks         = "mcp.list_tasks"
+	ActionMCPCreateTask        = "mcp.create_task"
+	ActionMCPUpdateTask        = "mcp.update_task"
+	ActionMCPAskUserQuestion   = "mcp.ask_user_question"
+)
+
+func (s *Server) listWorkspacesHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		var result []map[string]interface{}
+		if err := s.wsClient.RequestPayload(ctx, ActionMCPListWorkspaces, nil, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+func (s *Server) listBoardsHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		workspaceID, err := req.RequireString("workspace_id")
+		if err != nil {
+			return mcp.NewToolResultError("workspace_id is required"), nil
+		}
+		payload := map[string]string{"workspace_id": workspaceID}
+		var result []map[string]interface{}
+		if err := s.wsClient.RequestPayload(ctx, ActionMCPListBoards, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+func (s *Server) listWorkflowStepsHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		boardID, err := req.RequireString("board_id")
+		if err != nil {
+			return mcp.NewToolResultError("board_id is required"), nil
+		}
+		payload := map[string]string{"board_id": boardID}
+		var result []map[string]interface{}
+		if err := s.wsClient.RequestPayload(ctx, ActionMCPListWorkflowSteps, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+func (s *Server) listTasksHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		boardID, err := req.RequireString("board_id")
+		if err != nil {
+			return mcp.NewToolResultError("board_id is required"), nil
+		}
+		payload := map[string]string{"board_id": boardID}
+		var result []map[string]interface{}
+		if err := s.wsClient.RequestPayload(ctx, ActionMCPListTasks, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+func (s *Server) createTaskHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		workspaceID, err := req.RequireString("workspace_id")
+		if err != nil {
+			return mcp.NewToolResultError("workspace_id is required"), nil
+		}
+		boardID, err := req.RequireString("board_id")
+		if err != nil {
+			return mcp.NewToolResultError("board_id is required"), nil
+		}
+		workflowStepID, err := req.RequireString("workflow_step_id")
+		if err != nil {
+			return mcp.NewToolResultError("workflow_step_id is required"), nil
+		}
+		title, err := req.RequireString("title")
+		if err != nil {
+			return mcp.NewToolResultError("title is required"), nil
+		}
+		description := req.GetString("description", "")
+
+		payload := map[string]string{
+			"workspace_id":     workspaceID,
+			"board_id":         boardID,
+			"workflow_step_id": workflowStepID,
+			"title":            title,
+			"description":      description,
+		}
+		var result map[string]interface{}
+		if err := s.wsClient.RequestPayload(ctx, ActionMCPCreateTask, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+func (s *Server) updateTaskHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		taskID, err := req.RequireString("task_id")
+		if err != nil {
+			return mcp.NewToolResultError("task_id is required"), nil
+		}
+		payload := map[string]interface{}{"task_id": taskID}
+		if title := req.GetString("title", ""); title != "" {
+			payload["title"] = title
+		}
+		if desc := req.GetString("description", ""); desc != "" {
+			payload["description"] = desc
+		}
+		if state := req.GetString("state", ""); state != "" {
+			payload["state"] = state
+		}
+		var result map[string]interface{}
+		if err := s.wsClient.RequestPayload(ctx, ActionMCPUpdateTask, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+func (s *Server) askUserQuestionHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		prompt, err := req.RequireString("prompt")
+		if err != nil {
+			return mcp.NewToolResultError("prompt is required"), nil
+		}
+		args := req.GetArguments()
+		optionsRaw, ok := args["options"]
+		if !ok {
+			return mcp.NewToolResultError("options is required"), nil
+		}
+
+		// Parse options - can be array of strings or array of objects
+		optionsJSON, err := json.Marshal(optionsRaw)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to parse options: %v", err)), nil
+		}
+
+		// Try to parse as array of strings first (simple format from agents)
+		var stringOptions []string
+		if err := json.Unmarshal(optionsJSON, &stringOptions); err == nil {
+			// Convert string options to the expected format
+			formattedOptions := make([]map[string]interface{}, len(stringOptions))
+			for i, opt := range stringOptions {
+				formattedOptions[i] = map[string]interface{}{
+					"option_id":   fmt.Sprintf("opt_%d", i+1),
+					"label":       opt,
+					"description": opt,
+				}
+			}
+			optionsJSON, _ = json.Marshal(formattedOptions)
+		}
+
+		var options []map[string]interface{}
+		if err := json.Unmarshal(optionsJSON, &options); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to parse options: %v", err)), nil
+		}
+
+		questionCtx := req.GetString("context", "")
+
+		// Build the question object in the format expected by the backend
+		question := map[string]interface{}{
+			"id":      "q1",
+			"title":   "Question",
+			"prompt":  prompt,
+			"options": options,
+		}
+
+		payload := map[string]interface{}{
+			"session_id": s.sessionID,
+			"question":   question,
+			"context":    questionCtx,
+		}
+		var result map[string]interface{}
+		if err := s.wsClient.RequestPayload(ctx, ActionMCPAskUserQuestion, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		// Extract the answer from the response
+		if answer, ok := result["answer"]; ok {
+			if answerMap, ok := answer.(map[string]interface{}); ok {
+				if selectedOptions, ok := answerMap["selected_options"].([]interface{}); ok && len(selectedOptions) > 0 {
+					return mcp.NewToolResultText(fmt.Sprintf("User selected: %v", selectedOptions[0])), nil
+				}
+				if customText, ok := answerMap["custom_text"].(string); ok && customText != "" {
+					return mcp.NewToolResultText(fmt.Sprintf("User answered: %s", customText)), nil
+				}
+			}
+		}
+		if rejected, ok := result["rejected"].(bool); ok && rejected {
+			reason, _ := result["reject_reason"].(string)
+			return mcp.NewToolResultText(fmt.Sprintf("User rejected the question: %s", reason)), nil
+		}
+
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+

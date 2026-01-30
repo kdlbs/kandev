@@ -148,7 +148,7 @@ export function ChatInputContainer({
 
       {/* Clarification inline (replaces input area when pending) */}
       {hasPendingClarification ? (
-        <div style={{ height: '88px', overflow: 'auto' }}>
+        <div style={{ overflow: 'auto' }}>
           <ClarificationInputOverlay
             message={pendingClarification}
             onResolved={onClarificationResolved}

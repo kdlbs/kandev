@@ -132,6 +132,8 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 		AutoStart:    &autoStart,
 		Env:          config.CollectAgentEnv(req.Env),
 		McpServers:   mcpServers,
+		BackendWsURL: req.BackendWsURL,
+		SessionID:    req.SessionID,
 	}
 
 	// Create instance config using the unified method

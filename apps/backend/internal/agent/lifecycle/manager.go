@@ -72,6 +72,10 @@ type Manager struct {
 	// Workspace info provider for on-demand instance creation
 	workspaceInfoProvider WorkspaceInfoProvider
 
+	// backendWsURL is the WebSocket URL to the Kandev backend for MCP tunneling
+	// This is passed to agentctl instances so they can forward MCP tool calls
+	backendWsURL string
+
 	// Background cleanup
 	cleanupInterval time.Duration
 	stopCh          chan struct{}
@@ -168,6 +172,15 @@ func NewManager(
 // If not set, agents will work directly in the repository's main working directory.
 func (m *Manager) SetWorktreeManager(worktreeMgr *worktree.Manager) {
 	m.worktreeMgr = worktreeMgr
+}
+
+// SetBackendWsURL sets the WebSocket URL to the Kandev backend for MCP tunneling.
+//
+// This URL is passed to agentctl instances so they can establish a WebSocket connection
+// back to the backend and forward MCP tool calls through the tunnel.
+// Format: ws://host:port/ws (e.g., ws://localhost:8080/ws)
+func (m *Manager) SetBackendWsURL(url string) {
+	m.backendWsURL = url
 }
 
 // SetWorkspaceInfoProvider sets the provider for workspace information.
@@ -441,6 +454,8 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 		AgentProfileID: info.AgentProfileID,
 		WorkspacePath:  info.WorkspacePath,
 		Protocol:       string(agentConfig.Protocol),
+		AgentConfig:    agentConfig,
+		BackendWsURL:   m.backendWsURL,
 	}
 
 	runtimeInstance, err := rt.CreateInstance(ctx, req)
@@ -768,6 +783,7 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 		Metadata:       metadata,
 		AgentConfig:    agentConfig,
 		McpServers:     mcpServers,
+		BackendWsURL:   m.backendWsURL,
 	}
 
 	runtimeInstance, err := rt.CreateInstance(ctx, runtimeReq)

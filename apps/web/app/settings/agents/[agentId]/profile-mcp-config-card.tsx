@@ -6,7 +6,6 @@ import { Switch } from '@kandev/ui/switch';
 import { Textarea } from '@kandev/ui/textarea';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
 import { UnsavedChangesBadge, UnsavedSaveButton } from '@/components/settings/unsaved-indicator';
-import { getBackendConfig } from '@/lib/config';
 import { useProfileMcpConfig } from './use-profile-mcp-config';
 import type { AgentProfileMcpConfig } from '@/lib/types/http';
 
@@ -64,14 +63,11 @@ export function ProfileMcpConfigCard({
   const currentServers = isDraft ? draftState?.servers ?? '' : mcpServers;
   const currentError = isDraft ? draftState?.error ?? null : mcpError;
   const currentDirty = isDraft ? draftState?.dirty ?? false : mcpDirty;
-  const { mcpServerUrl } = getBackendConfig();
   const kandevTools = 'Tools: list_workspaces, list_boards, list_workflow_steps, list_tasks, create_task, update_task';
 
+  // Note: kandev MCP server is automatically injected by agentctl at session creation time.
+  // Users only need to configure external MCP servers here.
   const popularServers: Record<string, Record<string, unknown>> = {
-    kandev: {
-      type: 'sse',
-      url: mcpServerUrl,
-    },
     playwright: {
       type: 'stdio',
       command: 'npx',
@@ -204,22 +200,24 @@ export function ProfileMcpConfigCard({
           />
           <p className="text-xs text-muted-foreground">
             MCP definitions are stored in the database and resolved per executor at runtime. This does not override your local agent config.</p>
-          <p className="text-xs font-medium text-muted-foreground">Popular servers</p>
-          <div className="flex flex-wrap gap-2">
+          <p className="text-xs font-medium text-muted-foreground">Built-in</p>
+          <div className="flex flex-wrap gap-2 mb-2">
             <Tooltip>
               <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  className="text-xs rounded-full border border-muted-foreground/30 px-2 py-1 hover:bg-muted cursor-pointer"
-                  onClick={() => applyPopularServer('kandev')}
+                <span
+                  className="text-xs rounded-full border border-primary/50 bg-primary/10 px-2 py-1 text-primary"
                 >
-                  + Kandev MCP
-                </button>
+                  ✓ Kandev MCP
+                </span>
               </TooltipTrigger>
               <TooltipContent side="bottom" className="max-w-[320px] text-xs">
-                {kandevTools}
+                <p className="font-medium mb-1">Automatically available</p>
+                <p>{kandevTools}</p>
               </TooltipContent>
             </Tooltip>
+          </div>
+          <p className="text-xs font-medium text-muted-foreground">Popular servers</p>
+          <div className="flex flex-wrap gap-2">
             <button
               type="button"
               className="text-xs rounded-full border border-muted-foreground/30 px-2 py-1 hover:bg-muted cursor-pointer"

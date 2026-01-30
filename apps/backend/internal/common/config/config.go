@@ -103,15 +103,17 @@ type AgentConfig struct {
 	// StandalonePort is the control port for standalone agentctl (default: 9999)
 	StandalonePort int `mapstructure:"standalonePort"`
 
-	// McpServerEnabled enables the embedded MCP server (default: true)
+	// McpServerEnabled enables the standalone MCP server (default: false)
+	// Note: MCP is now embedded in agentctl and tunnels to backend via WebSocket.
+	// This setting is only for running a separate standalone MCP server process.
 	McpServerEnabled bool `mapstructure:"mcpServerEnabled"`
 
-	// McpServerPort is the port for the embedded MCP server (default: 9090)
+	// McpServerPort is the port for the standalone MCP server (default: 9090)
 	McpServerPort int `mapstructure:"mcpServerPort"`
 
 	// McpServerURL is the URL of the Kandev MCP server for task management
 	// If set, agents with supports_mcp=true will be configured with this MCP server
-	// If McpServerEnabled is true and this is empty, it will be auto-set to http://localhost:{McpServerPort}/sse
+	// Note: With the new architecture, MCP is embedded in agentctl and this is typically not needed.
 	McpServerURL string `mapstructure:"mcpServerUrl"`
 }
 
@@ -183,9 +185,9 @@ func setDefaults(v *viper.Viper) {
 	// Agent defaults (runtime selection is now per-task based on executor type)
 	v.SetDefault("agent.standaloneHost", "localhost")
 	v.SetDefault("agent.standalonePort", 9999)
-	v.SetDefault("agent.mcpServerEnabled", true)
+	v.SetDefault("agent.mcpServerEnabled", false) // MCP is now embedded in agentctl
 	v.SetDefault("agent.mcpServerPort", 9090)
-	v.SetDefault("agent.mcpServerUrl", "") // Empty means auto-set when mcpServerEnabled is true
+	v.SetDefault("agent.mcpServerUrl", "")
 
 	// Auth defaults
 	v.SetDefault("auth.jwtSecret", "")

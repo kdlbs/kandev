@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -114,7 +115,31 @@ func (s *Server) handleAgentNewSession(c *gin.Context) {
 		return
 	}
 
-	sessionID, err := adapter.NewSession(ctx, req.McpServers)
+	// If MCP server is enabled, prepend the local kandev MCP server to the list.
+	// This replaces the old external MCP server URL (http://localhost:9090/sse) with
+	// the local agentctl MCP server (http://localhost:{port}/sse).
+	mcpServers := req.McpServers
+	if s.mcpServer != nil {
+		localKandevMcp := types.McpServer{
+			Name: "kandev",
+			Type: "sse",
+			URL:  fmt.Sprintf("http://localhost:%d/sse", s.cfg.Port),
+		}
+		// Filter out any existing kandev server from the list (to avoid duplicates)
+		filtered := make([]types.McpServer, 0, len(mcpServers)+1)
+		filtered = append(filtered, localKandevMcp)
+		for _, srv := range mcpServers {
+			if srv.Name != "kandev" {
+				filtered = append(filtered, srv)
+			}
+		}
+		mcpServers = filtered
+		s.logger.Debug("injected local kandev MCP server",
+			zap.String("url", localKandevMcp.URL),
+			zap.Int("total_servers", len(mcpServers)))
+	}
+
+	sessionID, err := adapter.NewSession(ctx, mcpServers)
 	if err != nil {
 		s.logger.Error("new session failed", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, NewSessionResponse{

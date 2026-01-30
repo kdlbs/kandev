@@ -37,7 +37,6 @@ type Controller struct {
 	mcpService     *mcpconfig.Service
 	modelFetcher   *modelfetcher.Fetcher
 	logger         *logger.Logger
-	mcpServerURL   string // URL of the embedded Kandev MCP server
 }
 
 type SessionChecker interface {
@@ -57,20 +56,11 @@ func NewController(repo store.Repository, discoveryRegistry *discovery.Registry,
 	}
 }
 
-// SetMcpServerURL sets the URL of the embedded Kandev MCP server.
-// This should be called after the MCP server is started.
-func (c *Controller) SetMcpServerURL(url string) {
-	c.mcpServerURL = url
-}
-
-// EnsureDefaultMcpConfig ensures all agent profiles that support MCP have the
-// Kandev MCP server configured and enabled by default.
+// EnsureDefaultMcpConfig ensures all agent profiles that support MCP have
+// MCP enabled by default. The kandev MCP server is automatically injected
+// by agentctl at session creation time, so profiles don't need to explicitly
+// configure it.
 func (c *Controller) EnsureDefaultMcpConfig(ctx context.Context) error {
-	if c.mcpServerURL == "" {
-		c.logger.Debug("MCP server URL not set, skipping default MCP config")
-		return nil
-	}
-
 	agents, err := c.repo.ListAgents(ctx)
 	if err != nil {
 		return err
@@ -98,16 +88,13 @@ func (c *Controller) EnsureDefaultMcpConfig(ctx context.Context) error {
 				continue
 			}
 
-			// Create default MCP config with Kandev server enabled
+			// Create default MCP config with MCP enabled but no servers configured.
+			// The kandev MCP server is automatically injected by agentctl when
+			// creating a new session. Users can add additional external MCP servers.
 			config := &models.AgentProfileMcpConfig{
 				ProfileID: profile.ID,
 				Enabled:   true,
-				Servers: map[string]interface{}{
-					"kandev": map[string]interface{}{
-						"type": "sse",
-						"url":  c.mcpServerURL,
-					},
-				},
+				Servers:   map[string]interface{}{},
 				Meta:      map[string]interface{}{},
 				CreatedAt: time.Now().UTC(),
 				UpdatedAt: time.Now().UTC(),
@@ -123,8 +110,7 @@ func (c *Controller) EnsureDefaultMcpConfig(ctx context.Context) error {
 
 			c.logger.Info("created default MCP config for profile",
 				zap.String("profile_id", profile.ID),
-				zap.String("profile_name", profile.Name),
-				zap.String("mcp_server_url", c.mcpServerURL))
+				zap.String("profile_name", profile.Name))
 		}
 	}
 
