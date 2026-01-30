@@ -152,30 +152,38 @@ func (s *Server) askUserQuestionHandler() server.ToolHandlerFunc {
 			return mcp.NewToolResultError("options is required"), nil
 		}
 
-		// Parse options - can be array of strings or array of objects
+		// Parse options - must be array of objects with label and description
 		optionsJSON, err := json.Marshal(optionsRaw)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to parse options: %v", err)), nil
 		}
 
-		// Try to parse as array of strings first (simple format from agents)
-		var stringOptions []string
-		if err := json.Unmarshal(optionsJSON, &stringOptions); err == nil {
-			// Convert string options to the expected format
-			formattedOptions := make([]map[string]interface{}, len(stringOptions))
-			for i, opt := range stringOptions {
-				formattedOptions[i] = map[string]interface{}{
-					"option_id":   fmt.Sprintf("opt_%d", i+1),
-					"label":       opt,
-					"description": opt,
-				}
-			}
-			optionsJSON, _ = json.Marshal(formattedOptions)
-		}
-
 		var options []map[string]interface{}
 		if err := json.Unmarshal(optionsJSON, &options); err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to parse options: %v", err)), nil
+			return mcp.NewToolResultError("options must be an array of objects with 'label' and 'description' fields. Example: [{\"label\": \"Option A\", \"description\": \"Description of option A\"}]"), nil
+		}
+
+		// Validate options
+		if len(options) < 2 {
+			return mcp.NewToolResultError("options must contain at least 2 choices"), nil
+		}
+		if len(options) > 6 {
+			return mcp.NewToolResultError("options must contain at most 6 choices"), nil
+		}
+
+		for i, opt := range options {
+			label, hasLabel := opt["label"].(string)
+			if !hasLabel || label == "" {
+				return mcp.NewToolResultError(fmt.Sprintf("option %d is missing required 'label' field (1-5 words describing the choice)", i+1)), nil
+			}
+			description, hasDesc := opt["description"].(string)
+			if !hasDesc || description == "" {
+				return mcp.NewToolResultError(fmt.Sprintf("option %d is missing required 'description' field (explanation of what this option means)", i+1)), nil
+			}
+			// Generate option_id if not provided
+			if _, hasID := opt["option_id"].(string); !hasID {
+				opt["option_id"] = fmt.Sprintf("opt_%d", i+1)
+			}
 		}
 
 		questionCtx := req.GetString("context", "")
