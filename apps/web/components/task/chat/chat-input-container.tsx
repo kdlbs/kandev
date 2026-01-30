@@ -26,8 +26,10 @@ import { ModelSelector } from '@/components/task/model-selector';
 import { RichTextInput, type RichTextInputHandle } from './rich-text-input';
 import { MentionMenu } from './mention-menu';
 import { SlashCommandMenu } from './slash-command-menu';
+import { ClarificationInputOverlay } from './clarification-input-overlay';
 import { useInlineMention } from '@/hooks/use-inline-mention';
 import { useInlineSlash } from '@/hooks/use-inline-slash';
+import type { Message } from '@/lib/types/http';
 
 type ChatInputContainerProps = {
   onSubmit: (message: string) => void;
@@ -44,6 +46,8 @@ type ChatInputContainerProps = {
   showApproveButton?: boolean;
   onApprove?: () => void;
   placeholder?: string;
+  pendingClarification?: Message | null;
+  onClarificationResolved?: () => void;
 };
 
 export function ChatInputContainer({
@@ -61,6 +65,8 @@ export function ChatInputContainer({
   showApproveButton,
   onApprove,
   placeholder,
+  pendingClarification,
+  onClarificationResolved,
 }: ChatInputContainerProps) {
   // Keep input state local to avoid re-rendering parent on every keystroke
   const [value, setValue] = useState('');
@@ -108,12 +114,14 @@ export function ChatInputContainer({
   }, [mention.isOpen, slash.isOpen, value, onSubmit]);
 
   const isDisabled = isStarting || isSending;
+  const hasPendingClarification = pendingClarification && onClarificationResolved;
 
   return (
     <div
       className={cn(
         'rounded-2xl border border-border bg-background shadow-md overflow-hidden',
-        planModeEnabled && 'border-primary border-dashed'
+        planModeEnabled && 'border-primary border-dashed',
+        hasPendingClarification && 'border-blue-500/50'
       )}
     >
       {/* Popup menus */}
@@ -138,17 +146,27 @@ export function ChatInputContainer({
         setSelectedIndex={slash.setSelectedIndex}
       />
 
-      {/* Input area */}
-      <RichTextInput
-        ref={inputRef}
-        value={value}
-        onChange={handleChange}
-        onKeyDown={handleKeyDown}
-        onSubmit={handleSubmit}
-        placeholder={placeholder}
-        disabled={isDisabled}
-        planModeEnabled={planModeEnabled}
-      />
+      {/* Clarification inline (replaces input area when pending) */}
+      {hasPendingClarification ? (
+        <div style={{ height: '88px', overflow: 'auto' }}>
+          <ClarificationInputOverlay
+            message={pendingClarification}
+            onResolved={onClarificationResolved}
+          />
+        </div>
+      ) : (
+        /* Normal input area */
+        <RichTextInput
+          ref={inputRef}
+          value={value}
+          onChange={handleChange}
+          onKeyDown={handleKeyDown}
+          onSubmit={handleSubmit}
+          placeholder={placeholder}
+          disabled={isDisabled}
+          planModeEnabled={planModeEnabled}
+        />
+      )}
 
       {/* Integrated toolbar */}
       <div className="flex items-center gap-1 px-2 py-2 border-t border-border">

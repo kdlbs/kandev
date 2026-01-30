@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import type { Message } from '@/lib/types/http';
+import type { Message, ClarificationRequestMetadata } from '@/lib/types/http';
 
 export function useProcessedMessages(
   messages: Message[],
@@ -35,11 +35,36 @@ export function useProcessedMessages(
     return map;
   }, [messages]);
 
+  // Find pending clarification request (the most recent one that is still pending)
+  // This will be rendered in the input area, not in the message list
+  const pendingClarification = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const message = messages[i];
+      if (message.type === 'clarification_request') {
+        const metadata = message.metadata as ClarificationRequestMetadata | undefined;
+        // A clarification is pending if it has no status or status is 'pending'
+        if (!metadata?.status || metadata.status === 'pending') {
+          return message;
+        }
+      }
+    }
+    return null;
+  }, [messages]);
+
   // Filter to only show chat-relevant types.
   // Permission requests are only hidden if they have a matching tool_call in the messages
   // (so they can be displayed inline). Standalone permissions are shown as separate messages.
+  // Pending clarification requests are also hidden (shown in input area instead).
   const visibleMessages = useMemo(() => {
     return messages.filter((message) => {
+      // Hide pending clarification request (it's shown in input area)
+      if (message.type === 'clarification_request') {
+        const metadata = message.metadata as ClarificationRequestMetadata | undefined;
+        const isPending = !metadata?.status || metadata.status === 'pending';
+        // Only show clarification requests that are resolved (not pending)
+        return !isPending;
+      }
+
       // Standard visible types
       if (
         !message.type ||
@@ -112,5 +137,6 @@ export function useProcessedMessages(
     permissionsByToolCallId,
     todoItems,
     agentMessageCount,
+    pendingClarification,
   };
 }

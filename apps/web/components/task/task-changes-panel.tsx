@@ -246,7 +246,8 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
       <SessionPanelContent>
         {isSingleDiffSelected && selectedDiffContent ? (
           // Render single file diff (from commit, snapshot, or uncommitted)
-          <div className="space-y-4">
+          // Key includes content length to force re-render when diff updates
+          <div key={`selected-${selectedDiffPath}-${selectedDiffContent.length}`} className="space-y-4">
             <DiffView
               data={{
                 hunks: parseDiffIntoHunks(selectedDiffContent, selectedDiffPath!),
@@ -276,8 +277,10 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
                 {uncommittedFiles.map((file) => {
                   if (!file.diff) return null;
                   const fileLang = getFileLang(file.path);
+                  // Include diff length in key to force re-render when content changes
+                  const diffKey = `uncommitted-${file.path}-${file.diff.length}`;
                   return (
-                    <div key={`uncommitted-${file.path}`} className="space-y-2">
+                    <div key={diffKey} className="space-y-2">
                       <div className="flex items-center justify-between">
                         <Badge variant="secondary" className="rounded-full text-xs">
                           {file.path}
@@ -312,8 +315,10 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
                 {committedFiles.map((file) => {
                   if (!file.diff) return null;
                   const fileLang = getFileLang(file.path);
+                  // Include diff length in key to force re-render when content changes
+                  const diffKey = `committed-${file.path}-${file.diff.length}`;
                   return (
-                    <div key={`committed-${file.path}`} className="space-y-2">
+                    <div key={diffKey} className="space-y-2">
                       <div className="flex items-center justify-between">
                         <Badge variant="secondary" className="rounded-full text-xs">
                           {file.path}

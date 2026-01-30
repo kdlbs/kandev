@@ -37,6 +37,7 @@ type Controller struct {
 	mcpService     *mcpconfig.Service
 	modelFetcher   *modelfetcher.Fetcher
 	logger         *logger.Logger
+	mcpServerURL   string // URL of the embedded Kandev MCP server
 }
 
 type SessionChecker interface {
@@ -54,6 +55,80 @@ func NewController(repo store.Repository, discoveryRegistry *discovery.Registry,
 		modelFetcher:   modelfetcher.NewFetcher(agentRegistry, log),
 		logger:         log.WithFields(zap.String("component", "agent-settings-controller")),
 	}
+}
+
+// SetMcpServerURL sets the URL of the embedded Kandev MCP server.
+// This should be called after the MCP server is started.
+func (c *Controller) SetMcpServerURL(url string) {
+	c.mcpServerURL = url
+}
+
+// EnsureDefaultMcpConfig ensures all agent profiles that support MCP have the
+// Kandev MCP server configured and enabled by default.
+func (c *Controller) EnsureDefaultMcpConfig(ctx context.Context) error {
+	if c.mcpServerURL == "" {
+		c.logger.Debug("MCP server URL not set, skipping default MCP config")
+		return nil
+	}
+
+	agents, err := c.repo.ListAgents(ctx)
+	if err != nil {
+		return err
+	}
+
+	for _, agent := range agents {
+		if !agent.SupportsMCP {
+			continue
+		}
+
+		profiles, err := c.repo.ListAgentProfiles(ctx, agent.ID)
+		if err != nil {
+			return err
+		}
+
+		for _, profile := range profiles {
+			// Check if MCP config already exists
+			existingConfig, err := c.repo.GetAgentProfileMcpConfig(ctx, profile.ID)
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+
+			// Skip if config already exists (don't overwrite user settings)
+			if existingConfig != nil {
+				continue
+			}
+
+			// Create default MCP config with Kandev server enabled
+			config := &models.AgentProfileMcpConfig{
+				ProfileID: profile.ID,
+				Enabled:   true,
+				Servers: map[string]interface{}{
+					"kandev": map[string]interface{}{
+						"type": "sse",
+						"url":  c.mcpServerURL,
+					},
+				},
+				Meta:      map[string]interface{}{},
+				CreatedAt: time.Now().UTC(),
+				UpdatedAt: time.Now().UTC(),
+			}
+
+			if err := c.repo.UpsertAgentProfileMcpConfig(ctx, config); err != nil {
+				c.logger.Warn("failed to create default MCP config for profile",
+					zap.String("profile_id", profile.ID),
+					zap.String("profile_name", profile.Name),
+					zap.Error(err))
+				continue
+			}
+
+			c.logger.Info("created default MCP config for profile",
+				zap.String("profile_id", profile.ID),
+				zap.String("profile_name", profile.Name),
+				zap.String("mcp_server_url", c.mcpServerURL))
+		}
+	}
+
+	return nil
 }
 
 func (c *Controller) ListDiscovery(ctx context.Context) (*dto.ListDiscoveryResponse, error) {

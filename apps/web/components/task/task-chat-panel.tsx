@@ -46,12 +46,19 @@ export function TaskChatPanel({
   const { messages, isLoading: messagesLoading } = useSessionMessages(resolvedSessionId);
 
   // Process messages (filtering, todos, etc.)
-  const { allMessages, permissionsByToolCallId, todoItems, agentMessageCount } = useProcessedMessages(
+  const { allMessages, permissionsByToolCallId, todoItems, agentMessageCount, pendingClarification } = useProcessedMessages(
     messages,
     taskId,
     resolvedSessionId,
     taskDescription
   );
+
+  // Track clarification resolved state to trigger re-render after submit
+  const [clarificationKey, setClarificationKey] = useState(0);
+  const handleClarificationResolved = useCallback(() => {
+    // Force re-render which will update messages from backend
+    setClarificationKey((k) => k + 1);
+  }, []);
 
   // Model management
   const { sessionModel, activeModel } = useSessionModel(
@@ -165,6 +172,7 @@ export function TaskChatPanel({
       <div className="flex flex-col gap-2 mt-2">
         {todoItems.length > 0 && <TodoSummary todos={todoItems} />}
         <ChatInputContainer
+          key={clarificationKey}
           onSubmit={handleSubmit}
           sessionId={resolvedSessionId}
           taskId={taskId}
@@ -183,6 +191,8 @@ export function TaskChatPanel({
               ? 'Continue working on this task...'
               : 'Write to submit work to the agent...'
           }
+          pendingClarification={pendingClarification}
+          onClarificationResolved={handleClarificationResolved}
         />
       </div>
     </>

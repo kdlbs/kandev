@@ -9,6 +9,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/agent/registry"
+	"github.com/kandev/kandev/internal/clarification"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
@@ -337,6 +338,53 @@ func (a *messageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Conte
 // UpdatePermissionMessage updates a permission message's status
 func (a *messageCreatorAdapter) UpdatePermissionMessage(ctx context.Context, sessionID, pendingID, status string) error {
 	return a.svc.UpdatePermissionMessage(ctx, sessionID, pendingID, status)
+}
+
+// CreateClarificationRequestMessage creates a message for a clarification request.
+// This allows clarification requests to appear in the chat as messages.
+func (a *messageCreatorAdapter) CreateClarificationRequestMessage(ctx context.Context, taskID, sessionID, pendingID string, question clarification.Question, clarificationContext string) (string, error) {
+	// Convert question options to interface{} for metadata storage
+	options := make([]interface{}, len(question.Options))
+	for j, opt := range question.Options {
+		options[j] = map[string]interface{}{
+			"option_id":   opt.ID,
+			"label":       opt.Label,
+			"description": opt.Description,
+		}
+	}
+
+	questionData := map[string]interface{}{
+		"id":      question.ID,
+		"title":   question.Title,
+		"prompt":  question.Prompt,
+		"options": options,
+	}
+
+	metadata := map[string]interface{}{
+		"pending_id": pendingID,
+		"question":   questionData,
+		"context":    clarificationContext,
+		"status":     "pending",
+	}
+
+	msg, err := a.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
+		TaskSessionID: sessionID,
+		TaskID:        taskID,
+		Content:       question.Prompt,
+		AuthorType:    "agent",
+		Type:          "clarification_request",
+		Metadata:      metadata,
+		RequestsInput: true, // This marks the session as waiting for input
+	})
+	if err != nil {
+		return "", err
+	}
+	return msg.ID, nil
+}
+
+// UpdateClarificationMessage updates a clarification message's status and response
+func (a *messageCreatorAdapter) UpdateClarificationMessage(ctx context.Context, sessionID, pendingID, status string, answer *clarification.Answer) error {
+	return a.svc.UpdateClarificationMessage(ctx, sessionID, pendingID, status, answer)
 }
 
 // CreateAgentMessageStreaming creates a new agent message with a pre-generated ID.
