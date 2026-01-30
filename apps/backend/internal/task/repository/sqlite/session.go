@@ -541,6 +541,23 @@ func (r *Repository) UpdateTaskSessionState(ctx context.Context, id string, stat
 	return nil
 }
 
+// ClearSessionExecutionID clears the agent_execution_id for a session.
+// This is used when a stale execution ID needs to be removed (e.g., after a failed resume on startup).
+func (r *Repository) ClearSessionExecutionID(ctx context.Context, id string) error {
+	now := time.Now().UTC()
+	result, err := r.db.ExecContext(ctx, `
+		UPDATE task_sessions SET agent_execution_id = '', container_id = '', updated_at = ? WHERE id = ?
+	`, now, id)
+	if err != nil {
+		return err
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("agent session not found: %s", id)
+	}
+	return nil
+}
+
 // ListTaskSessions returns all agent sessions for a task
 func (r *Repository) ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
 	rows, err := r.db.QueryContext(ctx, `

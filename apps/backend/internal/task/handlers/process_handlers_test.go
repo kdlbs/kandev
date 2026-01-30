@@ -173,6 +173,9 @@ func (m *mockRepository) UpdateTaskSession(ctx context.Context, session *models.
 func (m *mockRepository) UpdateTaskSessionState(ctx context.Context, id string, state models.TaskSessionState, errorMessage string) error {
 	return nil
 }
+func (m *mockRepository) ClearSessionExecutionID(ctx context.Context, id string) error {
+	return nil
+}
 func (m *mockRepository) ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
 	return nil, nil
 }

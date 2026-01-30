@@ -13,6 +13,7 @@ import (
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/appctx"
+	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/common/logger"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"github.com/kandev/kandev/pkg/agent"
@@ -332,7 +333,8 @@ func (sm *SessionManager) InitializeAndPrompt(
 
 		go func() {
 			// Use detached context that respects stopCh for graceful shutdown
-			promptCtx, cancel := appctx.Detached(ctx, sm.stopCh, 10*time.Minute)
+			// Use PromptTimeout (60 min) to match the HTTP client/server timeouts
+			promptCtx, cancel := appctx.Detached(ctx, sm.stopCh, constants.PromptTimeout)
 			defer cancel()
 
 			_, err := sm.SendPrompt(promptCtx, execution, effectivePrompt, false, markReady)
