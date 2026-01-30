@@ -298,58 +298,6 @@ func (r *Repository) GetExecutorRunningBySessionID(ctx context.Context, sessionI
 	return running, nil
 }
 
-func (r *Repository) GetExecutorRunningByTaskID(ctx context.Context, taskID string) (*models.ExecutorRunning, error) {
-	if taskID == "" {
-		return nil, fmt.Errorf("task_id is required")
-	}
-	running := &models.ExecutorRunning{}
-	var resumable int
-	var lastSeen sql.NullTime
-
-	err := r.db.QueryRowContext(ctx, `
-		SELECT id, session_id, task_id, executor_id, runtime, status, resumable, resume_token,
-		       agent_execution_id, container_id, agentctl_url, agentctl_port, pid,
-		       worktree_id, worktree_path, worktree_branch, last_seen_at, error_message,
-		       created_at, updated_at
-		FROM executors_running
-		WHERE task_id = ?
-		ORDER BY updated_at DESC
-		LIMIT 1
-	`, taskID).Scan(
-		&running.ID,
-		&running.SessionID,
-		&running.TaskID,
-		&running.ExecutorID,
-		&running.Runtime,
-		&running.Status,
-		&resumable,
-		&running.ResumeToken,
-		&running.AgentExecutionID,
-		&running.ContainerID,
-		&running.AgentctlURL,
-		&running.AgentctlPort,
-		&running.PID,
-		&running.WorktreeID,
-		&running.WorktreePath,
-		&running.WorktreeBranch,
-		&lastSeen,
-		&running.ErrorMessage,
-		&running.CreatedAt,
-		&running.UpdatedAt,
-	)
-	if err == sql.ErrNoRows {
-		return nil, nil // Not found is not an error - return nil to allow fallback
-	}
-	if err != nil {
-		return nil, err
-	}
-	running.Resumable = resumable == 1
-	if lastSeen.Valid {
-		running.LastSeenAt = &lastSeen.Time
-	}
-	return running, nil
-}
-
 func (r *Repository) DeleteExecutorRunningBySessionID(ctx context.Context, sessionID string) error {
 	if sessionID == "" {
 		return fmt.Errorf("session_id is required")
