@@ -18,7 +18,6 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/shell"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
-	"github.com/kandev/kandev/pkg/agent"
 	"go.uber.org/zap"
 )
 
@@ -266,6 +265,7 @@ func (m *Manager) Start(ctx context.Context) error {
 		AutoApprove:    m.cfg.AutoApprovePermissions,
 		ApprovalPolicy: m.cfg.ApprovalPolicy,
 		McpServers:     mcpServers,
+		AgentID:        m.cfg.AgentType, // From registry (e.g., "auggie", "amp", "claude-code")
 	}
 
 	// Create adapter before starting the process so we can call PrepareEnvironment
@@ -402,7 +402,7 @@ func (m *Manager) Configure(command string, env map[string]string, approvalPolic
 func (m *Manager) createAdapter() error {
 	protocol := m.cfg.Protocol
 	if protocol == "" {
-		protocol = agent.ProtocolACP // Default to ACP
+		return fmt.Errorf("protocol not specified in configuration")
 	}
 
 	// Use the adapter factory to create the appropriate adapter
@@ -412,12 +412,9 @@ func (m *Manager) createAdapter() error {
 	}
 	m.adapter = adpt
 
-	// Set stderr provider for adapters that support it
-	switch a := m.adapter.(type) {
-	case *adapter.CodexAdapter:
-		a.SetStderrProvider(m)
-	case *adapter.ClaudeCodeAdapter:
-		a.SetStderrProvider(m)
+	// Set stderr provider for adapters that support it (Codex, StreamJSON)
+	if setter, ok := m.adapter.(adapter.StderrProviderSetter); ok {
+		setter.SetStderrProvider(m)
 	}
 
 	// Set the permission handler

@@ -98,6 +98,12 @@ const (
 	MessageTypeContent MessageType = "content"
 	// MessageTypeToolCall is when agent uses a tool
 	MessageTypeToolCall MessageType = "tool_call"
+	// MessageTypeToolEdit is for file edit operations with diff visualization
+	MessageTypeToolEdit MessageType = "tool_edit"
+	// MessageTypeToolRead is for file read operations
+	MessageTypeToolRead MessageType = "tool_read"
+	// MessageTypeToolExecute is for command execution operations
+	MessageTypeToolExecute MessageType = "tool_execute"
 	// MessageTypeProgress is for progress updates
 	MessageTypeProgress MessageType = "progress"
 	// MessageTypeLog is for agent log messages (info, debug, warning, etc.)

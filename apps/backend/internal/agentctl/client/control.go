@@ -38,6 +38,7 @@ type CreateInstanceRequest struct {
 	WorkspacePath string            `json:"workspace_path"`
 	AgentCommand  string            `json:"agent_command,omitempty"`
 	Protocol      string            `json:"protocol,omitempty"`       // Protocol adapter to use (acp, rest, mcp, codex)
+	AgentType     string            `json:"agent_type,omitempty"`     // Agent type ID for debug file naming (e.g., "codex", "auggie")
 	WorkspaceFlag string            `json:"workspace_flag,omitempty"` // CLI flag for workspace path (e.g., "--workspace-root")
 	Env           map[string]string `json:"env,omitempty"`
 	AutoStart     bool              `json:"auto_start,omitempty"`

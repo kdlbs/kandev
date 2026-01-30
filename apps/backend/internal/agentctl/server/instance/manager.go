@@ -131,6 +131,7 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 		WorkDir:      req.WorkspacePath,
 		AutoStart:    &autoStart,
 		Env:          config.CollectAgentEnv(req.Env),
+		AgentType:    req.AgentType,
 		McpServers:   mcpServers,
 		BackendWsURL: req.BackendWsURL,
 		SessionID:    req.SessionID,

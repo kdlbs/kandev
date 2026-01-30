@@ -6,6 +6,9 @@ import { ChatMessage } from '@/components/task/chat/messages/chat-message';
 import { PermissionRequestMessage } from '@/components/task/chat/messages/permission-request-message';
 import { StatusMessage } from '@/components/task/chat/messages/status-message';
 import { ToolCallMessage } from '@/components/task/chat/messages/tool-call-message';
+import { ToolEditMessage } from '@/components/task/chat/messages/tool-edit-message';
+import { ToolReadMessage } from '@/components/task/chat/messages/tool-read-message';
+import { ToolExecuteMessage } from '@/components/task/chat/messages/tool-execute-message';
 import { ThinkingMessage } from '@/components/task/chat/messages/thinking-message';
 import { TodoMessage } from '@/components/task/chat/messages/todo-message';
 import { ScriptExecutionMessage } from '@/components/task/chat/messages/script-execution-message';
@@ -30,6 +33,18 @@ const adapters: MessageAdapter[] = [
   {
     matches: (comment) => comment.type === 'todo',
     render: (comment) => <TodoMessage comment={comment} />,
+  },
+  {
+    matches: (comment) => comment.type === 'tool_edit',
+    render: (comment) => <ToolEditMessage comment={comment} />,
+  },
+  {
+    matches: (comment) => comment.type === 'tool_read',
+    render: (comment) => <ToolReadMessage comment={comment} />,
+  },
+  {
+    matches: (comment) => comment.type === 'tool_execute',
+    render: (comment) => <ToolExecuteMessage comment={comment} />,
   },
   {
     matches: (comment) => comment.type === 'tool_call',

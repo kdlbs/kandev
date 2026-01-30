@@ -64,6 +64,10 @@ type CreateRequest struct {
 	// Protocol is the protocol adapter to use (acp, codex, auggie). If empty, default is used.
 	Protocol string `json:"protocol,omitempty"`
 
+	// AgentType identifies the agent (e.g., "auggie", "codex", "claude-code").
+	// Required for debug file naming. Typically matches the agent ID from the registry.
+	AgentType string `json:"agent_type,omitempty"`
+
 	// WorkspaceFlag is the CLI flag for workspace path (e.g., "--workspace-root").
 	// If empty, only cwd is used for workspace path.
 	WorkspaceFlag string `json:"workspace_flag,omitempty"`

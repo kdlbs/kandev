@@ -342,27 +342,27 @@ export function TaskCreateDialog({
       value: repo.id,
       label: repo.name,
       renderLabel: () => (
-        <span className="flex min-w-0 flex-1 items-center gap-2">
+        <span className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
           <span className="shrink-0">{repo.name}</span>
           <Badge
             variant="secondary"
-            className="text-xs text-muted-foreground max-w-[220px] min-w-0 truncate ml-auto"
+            className="text-xs text-muted-foreground max-w-[140px] min-w-0 truncate ml-auto"
             title={formatUserHomePath(repo.local_path)}
           >
-            {truncateRepoPath(repo.local_path)}
+            {truncateRepoPath(repo.local_path, 24)}
           </Badge>
         </span>
       ),
     })),
     ...localRepoOptions.map((repo: LocalRepository) => ({
       value: repo.path,
-      label: formatUserHomePath(repo.path),
+      label: truncateRepoPath(repo.path, 24),
       renderLabel: () => (
         <span
-          className="flex min-w-0 flex-1 items-center truncate"
+          className="flex min-w-0 flex-1 items-center overflow-hidden"
           title={formatUserHomePath(repo.path)}
         >
-          {truncateRepoPath(repo.path)}
+          <span className="truncate">{truncateRepoPath(repo.path, 28)}</span>
         </span>
       ),
     })),

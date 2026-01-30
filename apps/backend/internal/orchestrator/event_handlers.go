@@ -683,7 +683,7 @@ func (s *Service) handleToolCallEvent(ctx context.Context, payload *lifecycle.Ag
 			payload.Data.ToolStatus,
 			payload.SessionID,
 			s.getActiveTurnID(payload.SessionID),
-			payload.Data.ToolArgs,
+			payload.Data.Normalized, // Pass normalized tool data for message metadata
 		); err != nil {
 			s.logger.Error("failed to create tool call message",
 				zap.String("task_id", payload.TaskID),
@@ -834,21 +834,15 @@ func (s *Service) handleToolUpdateEvent(ctx context.Context, payload *lifecycle.
 	// Handle all status updates (running, complete, error)
 	switch payload.Data.ToolStatus {
 	case "running", "complete", "completed", "success", "error", "failed":
-		result := ""
-		if payload.Data.ToolResult != nil {
-			if str, ok := payload.Data.ToolResult.(string); ok {
-				result = str
-			}
-		}
 		if err := s.messageCreator.UpdateToolCallMessage(
 			ctx,
 			payload.TaskID,
 			payload.Data.ToolCallID,
 			payload.Data.ToolStatus,
-			result,
+			"", // result - no longer used, tool results in NormalizedPayload
 			payload.SessionID,
-			payload.Data.ToolTitle, // Include title from update event
-			payload.Data.ToolArgs,  // Include args from update event
+			payload.Data.ToolTitle,    // Include title from update event
+			payload.Data.Normalized,   // Pass normalized tool data for message metadata
 		); err != nil {
 			s.logger.Warn("failed to update tool call message",
 				zap.String("task_id", payload.TaskID),

@@ -122,11 +122,10 @@ func (p *EventPublisher) PublishAgentStreamEvent(execution *AgentExecution, even
 		ToolName:      event.ToolName,
 		ToolTitle:     event.ToolTitle,
 		ToolStatus:    event.ToolStatus,
-		ToolArgs:      event.ToolArgs,
-		ToolResult:    event.ToolResult,
 		Error:         event.Error,
 		SessionStatus: event.SessionStatus,
 		Data:          event.Data,
+		Normalized:    event.NormalizedPayload,
 	}
 
 	// Build agent event message payload
@@ -475,3 +474,4 @@ func (p *EventPublisher) PublishContextWindow(execution *AgentExecution, size, u
 			zap.Error(err))
 	}
 }
+

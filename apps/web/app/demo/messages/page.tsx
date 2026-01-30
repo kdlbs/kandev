@@ -540,6 +540,199 @@ index 9876543..fedcba9 100644
       },
     },
   },
+
+  // === Normalized Tool Messages (tool_edit, tool_read, tool_execute) ===
+
+  // Tool Edit - complete with diff
+  {
+    id: 'tool-edit-1',
+    session_id: 'demo',
+    task_id: 'demo-task',
+    type: 'tool_edit',
+    content: 'Edit src/auth/config.ts',
+    author_type: 'agent',
+    created_at: '2024-01-20T10:20:00Z',
+    metadata: {
+      tool_call_id: 'tool-edit-1',
+      status: 'complete',
+      file_path: 'src/auth/config.ts',
+      old_content: "  clientSecret: process.env.OAUTH_CLIENT_SECRET,",
+      new_content: "  clientSecret: process.env.OAUTH_CLIENT_SECRET || '',\n  tokenExpiry: '1h',",
+      diff: {
+        hunks: [
+          `diff --git a/src/auth/config.ts b/src/auth/config.ts
+index 1234567..abcdefg 100644
+--- a/src/auth/config.ts
++++ b/src/auth/config.ts
+@@ -2,3 +2,4 @@
+   clientId: process.env.OAUTH_CLIENT_ID,
+-  clientSecret: process.env.OAUTH_CLIENT_SECRET,
++  clientSecret: process.env.OAUTH_CLIENT_SECRET || '',
++  tokenExpiry: '1h',
+   redirectUri: process.env.OAUTH_REDIRECT_URI,`,
+        ],
+        oldFile: { fileName: 'src/auth/config.ts', fileLang: 'typescript' },
+        newFile: { fileName: 'src/auth/config.ts', fileLang: 'typescript' },
+      },
+      result: 'File edited successfully.',
+    },
+  },
+
+  // Tool Edit - running (expanded)
+  {
+    id: 'tool-edit-2',
+    session_id: 'demo',
+    task_id: 'demo-task',
+    type: 'tool_edit',
+    content: 'Edit src/middleware/auth.ts',
+    author_type: 'agent',
+    created_at: '2024-01-20T10:20:30Z',
+    metadata: {
+      tool_call_id: 'tool-edit-2',
+      status: 'running',
+      file_path: 'src/middleware/auth.ts',
+      old_content: "return res.status(401).json({ error: 'No token' });",
+      new_content: "return res.status(401).json({\n  error: 'No token',\n  code: 'AUTH_MISSING'\n});",
+      diff: {
+        hunks: [
+          `diff --git a/src/middleware/auth.ts b/src/middleware/auth.ts
+--- a/src/middleware/auth.ts
++++ b/src/middleware/auth.ts
+@@ -12,1 +12,4 @@
+-return res.status(401).json({ error: 'No token' });
++return res.status(401).json({
++  error: 'No token',
++  code: 'AUTH_MISSING'
++});`,
+        ],
+        oldFile: { fileName: 'src/middleware/auth.ts', fileLang: 'typescript' },
+        newFile: { fileName: 'src/middleware/auth.ts', fileLang: 'typescript' },
+      },
+    },
+  },
+
+  // Tool Edit - error
+  {
+    id: 'tool-edit-3',
+    session_id: 'demo',
+    task_id: 'demo-task',
+    type: 'tool_edit',
+    content: 'Edit src/utils/format.ts',
+    author_type: 'agent',
+    created_at: '2024-01-20T10:21:00Z',
+    metadata: {
+      tool_call_id: 'tool-edit-3',
+      status: 'error',
+      file_path: 'src/utils/format.ts',
+      result: 'Error: old_string not found in file.',
+    },
+  },
+
+  // Tool Read - complete
+  {
+    id: 'tool-read-1',
+    session_id: 'demo',
+    task_id: 'demo-task',
+    type: 'tool_read',
+    content: 'Read src/auth/config.ts',
+    author_type: 'agent',
+    created_at: '2024-01-20T10:22:00Z',
+    metadata: {
+      tool_call_id: 'tool-read-1',
+      status: 'complete',
+      file_path: 'src/auth/config.ts',
+      line_count: 50,
+    },
+  },
+
+  // Tool Read - running
+  {
+    id: 'tool-read-2',
+    session_id: 'demo',
+    task_id: 'demo-task',
+    type: 'tool_read',
+    content: 'Read package.json',
+    author_type: 'agent',
+    created_at: '2024-01-20T10:22:30Z',
+    metadata: {
+      tool_call_id: 'tool-read-2',
+      status: 'running',
+      file_path: 'package.json',
+    },
+  },
+
+  // Tool Read - error
+  {
+    id: 'tool-read-3',
+    session_id: 'demo',
+    task_id: 'demo-task',
+    type: 'tool_read',
+    content: 'Read /nonexistent/file.ts',
+    author_type: 'agent',
+    created_at: '2024-01-20T10:22:45Z',
+    metadata: {
+      tool_call_id: 'tool-read-3',
+      status: 'error',
+      file_path: '/nonexistent/file.ts',
+    },
+  },
+
+  // Tool Execute - complete (success)
+  {
+    id: 'tool-exec-1',
+    session_id: 'demo',
+    task_id: 'demo-task',
+    type: 'tool_execute',
+    content: 'Run `npm test -- --coverage`',
+    author_type: 'agent',
+    created_at: '2024-01-20T10:23:00Z',
+    metadata: {
+      tool_call_id: 'tool-exec-1',
+      status: 'complete',
+      command: 'npm test -- --coverage',
+      cwd: '/workspace',
+      exit_code: 0,
+      stdout: 'PASS  src/auth/config.test.ts\nPASS  src/middleware/auth.test.ts\n\nTest Suites:  2 passed, 2 total\nTests:        12 passed, 12 total\nCoverage:     87.5%',
+      result: 'Tests passed successfully.',
+    },
+  },
+
+  // Tool Execute - running
+  {
+    id: 'tool-exec-2',
+    session_id: 'demo',
+    task_id: 'demo-task',
+    type: 'tool_execute',
+    content: 'Run `go build ./...`',
+    author_type: 'agent',
+    created_at: '2024-01-20T10:23:30Z',
+    metadata: {
+      tool_call_id: 'tool-exec-2',
+      status: 'running',
+      command: 'go build ./...',
+      cwd: '/workspace',
+    },
+  },
+
+  // Tool Execute - error with stderr
+  {
+    id: 'tool-exec-3',
+    session_id: 'demo',
+    task_id: 'demo-task',
+    type: 'tool_execute',
+    content: 'Run `npm run lint`',
+    author_type: 'agent',
+    created_at: '2024-01-20T10:24:00Z',
+    metadata: {
+      tool_call_id: 'tool-exec-3',
+      status: 'complete',
+      command: 'npm run lint',
+      exit_code: 1,
+      stdout: '',
+      stderr: 'Error: src/auth/config.ts(5,1): Missing semicolon.\nError: src/middleware/auth.ts(12,3): Unexpected token.',
+      result: 'Lint failed with 2 errors.',
+    },
+  },
 ];
 
 export default function MessagesDemoPage() {

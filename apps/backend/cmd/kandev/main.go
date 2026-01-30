@@ -42,6 +42,9 @@ import (
 
 	"github.com/kandev/kandev/internal/clarification"
 
+	// Debug handlers
+	debughandlers "github.com/kandev/kandev/internal/debug"
+
 	// MCP handlers
 	mcphandlers "github.com/kandev/kandev/internal/mcp/handlers"
 
@@ -560,6 +563,9 @@ func main() {
 	)
 	mcpHandlers.RegisterHandlers(gateway.Dispatcher)
 	log.Debug("Registered MCP handlers (WebSocket)")
+
+	debughandlers.RegisterRoutes(router, log)
+	log.Debug("Registered Debug handlers (HTTP)")
 
 	// Health check (simple HTTP for load balancers/monitoring)
 	router.GET("/health", func(c *gin.Context) {

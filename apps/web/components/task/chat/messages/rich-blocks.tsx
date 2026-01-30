@@ -1,11 +1,10 @@
 'use client';
 
 import { IconBrain, IconCode, IconListCheck } from '@tabler/icons-react';
-import { DiffModeEnum, DiffView } from '@git-diff-view/react';
-import { useTheme } from 'next-themes';
 import { cn } from '@/lib/utils';
 import type { Message } from '@/lib/types/http';
 import type { DiffPayload, RichMetadata } from '@/components/task/chat/types';
+import { DiffViewBlock } from '@/components/task/chat/messages/diff-view-block';
 
 function resolveDiffPayload(diff: unknown): DiffPayload | null {
   if (!diff) return null;
@@ -30,7 +29,6 @@ function resolveDiffPayload(diff: unknown): DiffPayload | null {
 
 export function RichBlocks({ comment }: { comment: Message }) {
   const metadata = comment.metadata as RichMetadata | undefined;
-  const { resolvedTheme } = useTheme();
   if (!metadata) return null;
 
   const todos = metadata.todos ?? [];
@@ -39,7 +37,6 @@ export function RichBlocks({ comment }: { comment: Message }) {
     .filter((item) => item.text);
   const diffPayload = resolveDiffPayload(metadata.diff);
   const diffText = typeof metadata.diff === 'string' ? metadata.diff : null;
-  const diffTheme = resolvedTheme === 'dark' ? 'dark' : 'light';
 
   return (
     <>
@@ -76,21 +73,7 @@ export function RichBlocks({ comment }: { comment: Message }) {
         </div>
       )}
       {diffPayload && (
-        <div className="mt-3 rounded-md border border-border/50 bg-background/60 px-3 py-2 text-xs">
-          <div className="flex items-center gap-2 text-muted-foreground mb-1 uppercase tracking-wide">
-            <IconCode className="h-3.5 w-3.5" />
-            <span>Diff</span>
-          </div>
-          <DiffView
-            data={{
-              hunks: diffPayload.hunks,
-              oldFile: diffPayload.oldFile ?? { fileName: 'before', fileLang: 'plaintext' },
-              newFile: diffPayload.newFile ?? { fileName: 'after', fileLang: 'plaintext' },
-            }}
-            diffViewMode={DiffModeEnum.Unified}
-            diffViewTheme={diffTheme}
-          />
-        </div>
+        <DiffViewBlock diff={diffPayload} />
       )}
       {!diffPayload && diffText && (
         <div className="mt-3 rounded-md border border-border/50 bg-background/60 px-3 py-2 text-xs">

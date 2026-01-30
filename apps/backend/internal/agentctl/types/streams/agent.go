@@ -84,11 +84,9 @@ type AgentEvent struct {
 	// ToolStatus indicates the current status: "started", "running", "completed", "error".
 	ToolStatus string `json:"tool_status,omitempty"`
 
-	// ToolArgs contains the arguments passed to the tool.
-	ToolArgs map[string]interface{} `json:"tool_args,omitempty"`
-
-	// ToolResult contains the result from the tool execution.
-	ToolResult interface{} `json:"tool_result,omitempty"`
+	// NormalizedPayload contains the normalized tool data as a typed discriminated union.
+	// Provides typed access to tool parameters based on the Kind field.
+	NormalizedPayload *NormalizedPayload `json:"normalized,omitempty"`
 
 	// Diff contains unified diff content for file changes.
 	// Populated when tools modify files, providing the aggregated diff.
@@ -120,7 +118,7 @@ type AgentEvent struct {
 	ActionType string `json:"action_type,omitempty"`
 
 	// ActionDetails contains structured details about the action.
-	ActionDetails map[string]interface{} `json:"action_details,omitempty"`
+	ActionDetails map[string]any `json:"action_details,omitempty"`
 
 	// --- Session status fields (for "session_status" type) ---
 
@@ -131,7 +129,7 @@ type AgentEvent struct {
 	// --- Extension fields ---
 
 	// Data contains raw protocol-specific extensions.
-	Data map[string]interface{} `json:"data,omitempty"`
+	Data map[string]any `json:"data,omitempty"`
 
 	// --- Context window fields ---
 

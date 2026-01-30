@@ -32,15 +32,14 @@ type SessionHistoryManager struct {
 // HistoryEntry represents a single entry in the session history.
 type HistoryEntry struct {
 	Timestamp   time.Time              `json:"timestamp"`
-	Type        string                 `json:"type"` // "user_message", "agent_message", "tool_call", "tool_result"
-	Role        string                 `json:"role,omitempty"`
-	Content     string                 `json:"content,omitempty"`
-	ToolName    string                 `json:"tool_name,omitempty"`
-	ToolCallID  string                 `json:"tool_call_id,omitempty"`
-	ToolArgs    map[string]any `json:"tool_args,omitempty"`
-	ToolStatus  string                 `json:"tool_status,omitempty"`
-	SessionID   string                 `json:"session_id,omitempty"`
-	OperationID string                 `json:"operation_id,omitempty"`
+	Type        string `json:"type"` // "user_message", "agent_message", "tool_call", "tool_result"
+	Role        string `json:"role,omitempty"`
+	Content     string `json:"content,omitempty"`
+	ToolName    string `json:"tool_name,omitempty"`
+	ToolCallID  string `json:"tool_call_id,omitempty"`
+	ToolStatus  string `json:"tool_status,omitempty"`
+	SessionID   string `json:"session_id,omitempty"`
+	OperationID string `json:"operation_id,omitempty"`
 }
 
 // NewSessionHistoryManager creates a new SessionHistoryManager.
@@ -136,28 +135,17 @@ func (m *SessionHistoryManager) AppendToolCall(sessionID string, event agentctl.
 		Type:       "tool_call",
 		ToolCallID: event.ToolCallID,
 		ToolName:   event.ToolName,
-		ToolArgs:   event.ToolArgs,
 		ToolStatus: event.ToolStatus,
 	})
 }
 
 // AppendToolResult appends a tool result to the session history.
 func (m *SessionHistoryManager) AppendToolResult(sessionID string, event agentctl.AgentEvent) error {
-	resultStr := ""
-	if event.ToolResult != nil {
-		if s, ok := event.ToolResult.(string); ok {
-			resultStr = s
-		} else if data, err := json.Marshal(event.ToolResult); err == nil {
-			resultStr = string(data)
-		}
-	}
-
 	return m.AppendEntry(sessionID, HistoryEntry{
 		Type:       "tool_result",
 		ToolCallID: event.ToolCallID,
 		ToolName:   event.ToolName,
 		ToolStatus: event.ToolStatus,
-		Content:    resultStr,
 	})
 }
 
@@ -230,13 +218,7 @@ func (m *SessionHistoryManager) GenerateResumeContext(sessionID, newPrompt strin
 		case "agent_message":
 			fmt.Fprintf(&historyBuilder, "\n[ASSISTANT]: %s\n", truncateForContext(entry.Content, 2000))
 		case "tool_call":
-			argsStr := ""
-			if entry.ToolArgs != nil {
-				if data, err := json.Marshal(entry.ToolArgs); err == nil {
-					argsStr = truncateForContext(string(data), 500)
-				}
-			}
-			fmt.Fprintf(&historyBuilder, "\n[TOOL CALL: %s] Args: %s\n", entry.ToolName, argsStr)
+			fmt.Fprintf(&historyBuilder, "\n[TOOL CALL: %s]\n", entry.ToolName)
 		case "tool_result":
 			fmt.Fprintf(&historyBuilder, "\n[TOOL RESULT: %s] %s\n", entry.ToolName, truncateForContext(entry.Content, 500))
 		}

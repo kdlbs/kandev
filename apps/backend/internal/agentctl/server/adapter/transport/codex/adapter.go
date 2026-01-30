@@ -1,4 +1,6 @@
-package adapter
+// Package codex implements the Codex transport adapter.
+// Codex uses a JSON-RPC 2.0 variant over stdio (omitting the jsonrpc field).
+package codex
 
 import (
 	"context"
@@ -10,18 +12,47 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/pkg/codex"
 	"github.com/pelletier/go-toml/v2"
 	"go.uber.org/zap"
 )
 
-// CodexAdapter implements AgentAdapter for agents using the OpenAI Codex app-server protocol.
+// Re-export types needed by external packages
+type (
+	PermissionRequest  = types.PermissionRequest
+	PermissionResponse = types.PermissionResponse
+	PermissionOption   = streams.PermissionOption
+	PermissionHandler  = types.PermissionHandler
+	AgentEvent         = streams.AgentEvent
+	PlanEntry          = streams.PlanEntry
+)
+
+// AgentInfo contains information about the connected agent.
+type AgentInfo struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+}
+
+// StderrProvider provides access to recent stderr output for error context.
+type StderrProvider interface {
+	GetRecentStderr() []string
+}
+
+// Adapter implements the transport adapter for agents using the Codex protocol.
 // Codex uses a JSON-RPC 2.0 variant over stdio (omitting the jsonrpc field).
-type CodexAdapter struct {
-	cfg    *Config
+type Adapter struct {
+	cfg    *shared.Config
 	logger *logger.Logger
+
+	// Agent identity (from config, for logging)
+	agentID string
+
+	// Normalizer for converting tool data to NormalizedPayload
+	normalizer *Normalizer
 
 	// Subprocess stdin/stdout (set via Connect)
 	stdin  io.Writer
@@ -68,22 +99,24 @@ type turnCompleteResult struct {
 	err     string
 }
 
-// NewCodexAdapter creates a new Codex protocol adapter.
+// NewAdapter creates a new Codex protocol adapter.
 // Call Connect() after starting the subprocess to wire up stdin/stdout.
-func NewCodexAdapter(cfg *Config, log *logger.Logger) *CodexAdapter {
+func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &CodexAdapter{
-		cfg:       cfg,
-		logger:    log.WithFields(zap.String("adapter", "codex")),
-		ctx:       ctx,
-		cancel:    cancel,
-		updatesCh: make(chan AgentEvent, 100),
+	return &Adapter{
+		cfg:        cfg,
+		logger:     log.WithFields(zap.String("adapter", "codex"), zap.String("agent_id", cfg.AgentID)),
+		agentID:    cfg.AgentID,
+		normalizer: NewNormalizer(),
+		ctx:        ctx,
+		cancel:     cancel,
+		updatesCh:  make(chan AgentEvent, 100),
 	}
 }
 
 // PrepareEnvironment writes MCP servers to the Codex config file.
 // Codex reads MCP configuration from ~/.codex/config.toml at startup time.
-func (a *CodexAdapter) PrepareEnvironment() (map[string]string, error) {
+func (a *Adapter) PrepareEnvironment() (map[string]string, error) {
 	a.logger.Info("PrepareEnvironment called",
 		zap.Int("mcp_server_count", len(a.cfg.McpServers)))
 	for i, srv := range a.cfg.McpServers {
@@ -98,7 +131,7 @@ func (a *CodexAdapter) PrepareEnvironment() (map[string]string, error) {
 }
 
 // Connect wires up the stdin/stdout pipes from the running agent subprocess.
-func (a *CodexAdapter) Connect(stdin io.Writer, stdout io.Reader) error {
+func (a *Adapter) Connect(stdin io.Writer, stdout io.Reader) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -116,7 +149,7 @@ func (a *CodexAdapter) Connect(stdin io.Writer, stdout io.Reader) error {
 // Codex reads MCP servers from ~/.codex/config.toml at startup time, not through the protocol.
 // This function should be called before starting the Codex process.
 // If homeDir is empty, it uses os.UserHomeDir().
-func WriteCodexMcpConfig(mcpServers []McpServerConfig, homeDir string, log *logger.Logger) error {
+func WriteCodexMcpConfig(mcpServers []shared.McpServerConfig, homeDir string, log *logger.Logger) error {
 	if len(mcpServers) == 0 {
 		return nil // Nothing to configure
 	}
@@ -133,7 +166,7 @@ func WriteCodexMcpConfig(mcpServers []McpServerConfig, homeDir string, log *logg
 	configPath := filepath.Join(configDir, "config.toml")
 
 	// Create config directory if it doesn't exist
-	if err := os.MkdirAll(configDir, 0755); err != nil {
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create codex config directory: %w", err)
 	}
 
@@ -144,7 +177,7 @@ func WriteCodexMcpConfig(mcpServers []McpServerConfig, homeDir string, log *logg
 	}
 
 	// Parse existing config into a generic map to preserve all fields
-	var rawConfig map[string]interface{}
+	var rawConfig map[string]any
 	if len(existingData) > 0 {
 		if err := toml.Unmarshal(existingData, &rawConfig); err != nil {
 			if log != nil {
@@ -152,22 +185,22 @@ func WriteCodexMcpConfig(mcpServers []McpServerConfig, homeDir string, log *logg
 					zap.String("path", configPath),
 					zap.Error(err))
 			}
-			rawConfig = make(map[string]interface{})
+			rawConfig = make(map[string]any)
 		}
 	} else {
-		rawConfig = make(map[string]interface{})
+		rawConfig = make(map[string]any)
 	}
 
 	// Get or create mcp_servers section
-	mcpServersSection, ok := rawConfig["mcp_servers"].(map[string]interface{})
+	mcpServersSection, ok := rawConfig["mcp_servers"].(map[string]any)
 	if !ok {
-		mcpServersSection = make(map[string]interface{})
+		mcpServersSection = make(map[string]any)
 	}
 
 	// Add/update our MCP servers
 	for _, server := range mcpServers {
 		safeName := sanitizeCodexServerName(server.Name)
-		serverConfig := make(map[string]interface{})
+		serverConfig := make(map[string]any)
 
 		if server.Type == "sse" || server.Type == "http" {
 			// HTTP/SSE transport - use url field
@@ -201,7 +234,7 @@ func WriteCodexMcpConfig(mcpServers []McpServerConfig, homeDir string, log *logg
 	}
 
 	// Write config file
-	if err := os.WriteFile(configPath, output, 0644); err != nil {
+	if err := os.WriteFile(configPath, output, 0o644); err != nil {
 		return fmt.Errorf("failed to write codex config: %w", err)
 	}
 
@@ -245,7 +278,7 @@ func convertSSEToStreamableHTTP(url string) string {
 }
 
 // Initialize establishes the Codex connection with the agent subprocess.
-func (a *CodexAdapter) Initialize(ctx context.Context) error {
+func (a *Adapter) Initialize(ctx context.Context) error {
 	a.logger.Info("initializing Codex adapter",
 		zap.String("workdir", a.cfg.WorkDir))
 
@@ -289,7 +322,7 @@ func (a *CodexAdapter) Initialize(ctx context.Context) error {
 
 	// Store agent info
 	a.agentInfo = &AgentInfo{
-		Name:    "codex",
+		Name:    a.agentID,
 		Version: initResult.UserAgent,
 	}
 
@@ -300,7 +333,7 @@ func (a *CodexAdapter) Initialize(ctx context.Context) error {
 }
 
 // GetAgentInfo returns information about the connected agent.
-func (a *CodexAdapter) GetAgentInfo() *AgentInfo {
+func (a *Adapter) GetAgentInfo() *AgentInfo {
 	return a.agentInfo
 }
 
@@ -308,7 +341,7 @@ func (a *CodexAdapter) GetAgentInfo() *AgentInfo {
 // Note: The mcpServers parameter is ignored because Codex reads MCP configuration from
 // ~/.codex/config.toml at startup time, not through the protocol. MCP servers are written
 // to the config file by PrepareEnvironment() before the Codex process starts.
-func (a *CodexAdapter) NewSession(ctx context.Context, _ []types.McpServer) (string, error) {
+func (a *Adapter) NewSession(ctx context.Context, _ []types.McpServer) (string, error) {
 	// Check client under lock, but don't hold lock during Call() to avoid deadlock
 	// with handleNotification which also needs the lock
 	a.mu.RLock()
@@ -364,7 +397,7 @@ func (a *CodexAdapter) NewSession(ctx context.Context, _ []types.McpServer) (str
 // LoadSession resumes an existing Codex thread.
 // It passes the same approval policy and sandbox settings as NewSession to ensure
 // permission requirements are preserved across resume (see openai/codex#5322).
-func (a *CodexAdapter) LoadSession(ctx context.Context, sessionID string) error {
+func (a *Adapter) LoadSession(ctx context.Context, sessionID string) error {
 	// Check client under lock, but don't hold lock during Call() to avoid deadlock
 	// with handleNotification which also needs the lock
 	a.mu.RLock()
@@ -415,7 +448,7 @@ func (a *CodexAdapter) LoadSession(ctx context.Context, sessionID string) error 
 
 // Prompt sends a prompt to the agent, starting a new turn.
 // This method blocks until the turn completes (turn/completed notification received).
-func (a *CodexAdapter) Prompt(ctx context.Context, message string) error {
+func (a *Adapter) Prompt(ctx context.Context, message string) error {
 	a.mu.Lock()
 	client := a.client
 	threadID := a.threadID
@@ -495,7 +528,7 @@ func (a *CodexAdapter) Prompt(ctx context.Context, message string) error {
 }
 
 // Cancel interrupts the current turn.
-func (a *CodexAdapter) Cancel(ctx context.Context) error {
+func (a *Adapter) Cancel(ctx context.Context) error {
 	a.mu.RLock()
 	client := a.client
 	threadID := a.threadID
@@ -517,26 +550,26 @@ func (a *CodexAdapter) Cancel(ctx context.Context) error {
 }
 
 // Updates returns the channel for agent events.
-func (a *CodexAdapter) Updates() <-chan AgentEvent {
+func (a *Adapter) Updates() <-chan AgentEvent {
 	return a.updatesCh
 }
 
 // GetSessionID returns the current thread ID (session).
-func (a *CodexAdapter) GetSessionID() string {
+func (a *Adapter) GetSessionID() string {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	return a.threadID
 }
 
 // GetOperationID returns the current turn ID (operation).
-func (a *CodexAdapter) GetOperationID() string {
+func (a *Adapter) GetOperationID() string {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	return a.turnID
 }
 
 // SetPermissionHandler sets the handler for permission requests.
-func (a *CodexAdapter) SetPermissionHandler(handler PermissionHandler) {
+func (a *Adapter) SetPermissionHandler(handler PermissionHandler) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.permissionHandler = handler
@@ -545,14 +578,14 @@ func (a *CodexAdapter) SetPermissionHandler(handler PermissionHandler) {
 // SetStderrProvider sets the provider for recent stderr output.
 // This is used to include stderr in error events when the agent
 // reports an error without a detailed message.
-func (a *CodexAdapter) SetStderrProvider(provider StderrProvider) {
+func (a *Adapter) SetStderrProvider(provider StderrProvider) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.stderrProvider = provider
 }
 
 // Close releases resources held by the adapter.
-func (a *CodexAdapter) Close() error {
+func (a *Adapter) Close() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -580,12 +613,13 @@ func (a *CodexAdapter) Close() error {
 }
 
 // RequiresProcessKill returns false because Codex agents exit when stdin is closed.
-func (a *CodexAdapter) RequiresProcessKill() bool {
+func (a *Adapter) RequiresProcessKill() bool {
 	return false
 }
 
 // sendUpdate safely sends an event to the updates channel.
-func (a *CodexAdapter) sendUpdate(update AgentEvent) {
+func (a *Adapter) sendUpdate(update AgentEvent) {
+	shared.LogNormalizedEvent(shared.ProtocolCodex, a.agentID, &update)
 	select {
 	case a.updatesCh <- update:
 	default:
@@ -594,7 +628,10 @@ func (a *CodexAdapter) sendUpdate(update AgentEvent) {
 }
 
 // handleNotification processes Codex notifications and emits AgentEvents.
-func (a *CodexAdapter) handleNotification(method string, params json.RawMessage) {
+func (a *Adapter) handleNotification(method string, params json.RawMessage) {
+	// Log raw event for debugging
+	shared.LogRawEvent(shared.ProtocolCodex, a.agentID, method, params)
+
 	a.mu.RLock()
 	threadID := a.threadID
 	turnID := a.turnID
@@ -612,7 +649,7 @@ func (a *CodexAdapter) handleNotification(method string, params json.RawMessage)
 		a.messageBuffer += p.Delta
 		a.mu.Unlock()
 		a.sendUpdate(AgentEvent{
-			Type:        EventTypeMessageChunk,
+			Type:        streams.EventTypeMessageChunk,
 			SessionID:   threadID,
 			OperationID: turnID,
 			Text:        p.Delta,
@@ -628,7 +665,7 @@ func (a *CodexAdapter) handleNotification(method string, params json.RawMessage)
 		a.reasoningBuffer += p.Delta
 		a.mu.Unlock()
 		a.sendUpdate(AgentEvent{
-			Type:          EventTypeReasoning,
+			Type:          streams.EventTypeReasoning,
 			SessionID:     threadID,
 			OperationID:   turnID,
 			ReasoningText: p.Delta,
@@ -646,7 +683,7 @@ func (a *CodexAdapter) handleNotification(method string, params json.RawMessage)
 		a.reasoningBuffer += p.Delta
 		a.mu.Unlock()
 		a.sendUpdate(AgentEvent{
-			Type:          EventTypeReasoning,
+			Type:          streams.EventTypeReasoning,
 			SessionID:     threadID,
 			OperationID:   turnID,
 			ReasoningText: p.Delta,
@@ -687,7 +724,7 @@ func (a *CodexAdapter) handleNotification(method string, params json.RawMessage)
 			// (NotifyError handles the case when error details come separately)
 			if p.Error != "" {
 				a.sendUpdate(AgentEvent{
-					Type:        EventTypeError,
+					Type:        streams.EventTypeError,
 					SessionID:   threadID,
 					OperationID: p.TurnID,
 					Error:       p.Error,
@@ -702,7 +739,7 @@ func (a *CodexAdapter) handleNotification(method string, params json.RawMessage)
 			return
 		}
 		a.sendUpdate(AgentEvent{
-			Type:        EventTypeMessageChunk,
+			Type:        streams.EventTypeMessageChunk,
 			SessionID:   threadID,
 			OperationID: p.TurnID,
 			Diff:        p.Diff,
@@ -722,7 +759,7 @@ func (a *CodexAdapter) handleNotification(method string, params json.RawMessage)
 			}
 		}
 		a.sendUpdate(AgentEvent{
-			Type:        EventTypePlan,
+			Type:        streams.EventTypePlan,
 			SessionID:   threadID,
 			OperationID: p.TurnID,
 			PlanEntries: entries,
@@ -745,7 +782,7 @@ func (a *CodexAdapter) handleNotification(method string, params json.RawMessage)
 
 		// Try to parse stderr into structured error info
 		// This handles Codex-specific error formats (e.g., rate limits)
-		parsedError := parseCodexStderrLines(stderrLines)
+		parsedError := ParseCodexStderrLines(stderrLines)
 
 		var parsedMsg string
 		if parsedError != nil {
@@ -761,7 +798,7 @@ func (a *CodexAdapter) handleNotification(method string, params json.RawMessage)
 			zap.Int("stderr_lines", len(stderrLines)))
 
 		// Build error data with all available context
-		errorData := map[string]interface{}{
+		errorData := map[string]any{
 			"code":   p.Code,
 			"data":   p.Data,
 			"stderr": stderrLines,
@@ -780,7 +817,7 @@ func (a *CodexAdapter) handleNotification(method string, params json.RawMessage)
 		}
 
 		a.sendUpdate(AgentEvent{
-			Type:      EventTypeError,
+			Type:      streams.EventTypeError,
 			SessionID: threadID,
 			Error:     p.Message,
 			Text:      parsedMsg, // User-friendly parsed message
@@ -800,18 +837,20 @@ func (a *CodexAdapter) handleNotification(method string, params json.RawMessage)
 		// Item types: "userMessage", "agentMessage", "commandExecution", "fileChange", "reasoning"
 		switch p.Item.Type {
 		case "commandExecution":
+			args := map[string]any{
+				"command": p.Item.Command,
+				"cwd":     p.Item.Cwd,
+			}
+			normalizedPayload := a.normalizer.NormalizeToolCall("commandExecution", args)
 			a.sendUpdate(AgentEvent{
-				Type:        EventTypeToolCall,
-				SessionID:   threadID,
-				OperationID: turnID,
-				ToolCallID:  p.Item.ID,
-				ToolName:    "commandExecution",
-				ToolTitle:   p.Item.Command,
-				ToolStatus:  "running",
-				ToolArgs: map[string]interface{}{
-					"command": p.Item.Command,
-					"cwd":     p.Item.Cwd,
-				},
+				Type:              streams.EventTypeToolCall,
+				SessionID:         threadID,
+				OperationID:       turnID,
+				ToolCallID:        p.Item.ID,
+				ToolName:          "commandExecution",
+				ToolTitle:         p.Item.Command,
+				ToolStatus:        "running",
+				NormalizedPayload: normalizedPayload,
 			})
 		case "fileChange":
 			// Build title from file paths
@@ -822,14 +861,27 @@ func (a *CodexAdapter) handleNotification(method string, params json.RawMessage)
 					title += fmt.Sprintf(" (+%d more)", len(p.Item.Changes)-1)
 				}
 			}
+			// Build args with changes info
+			changesArgs := make([]any, 0, len(p.Item.Changes))
+			for _, c := range p.Item.Changes {
+				changesArgs = append(changesArgs, map[string]any{
+					"path": c.Path,
+					"diff": c.Diff,
+				})
+			}
+			args := map[string]any{
+				"changes": changesArgs,
+			}
+			normalizedPayload := a.normalizer.NormalizeToolCall("fileChange", args)
 			a.sendUpdate(AgentEvent{
-				Type:        EventTypeToolCall,
-				SessionID:   threadID,
-				OperationID: turnID,
-				ToolCallID:  p.Item.ID,
-				ToolName:    "fileChange",
-				ToolTitle:   title,
-				ToolStatus:  "running",
+				Type:              streams.EventTypeToolCall,
+				SessionID:         threadID,
+				OperationID:       turnID,
+				ToolCallID:        p.Item.ID,
+				ToolName:          "fileChange",
+				ToolTitle:         title,
+				ToolStatus:        "running",
+				NormalizedPayload: normalizedPayload,
 			})
 		}
 
@@ -849,15 +901,11 @@ func (a *CodexAdapter) handleNotification(method string, params json.RawMessage)
 				status = "error"
 			}
 			update := AgentEvent{
-				Type:        EventTypeToolUpdate,
+				Type:        streams.EventTypeToolUpdate,
 				SessionID:   threadID,
 				OperationID: turnID,
 				ToolCallID:  p.Item.ID,
 				ToolStatus:  status,
-			}
-			// Include output for commands
-			if p.Item.Type == "commandExecution" && p.Item.AggregatedOutput != "" {
-				update.ToolResult = p.Item.AggregatedOutput
 			}
 			// Include diff for file changes
 			if p.Item.Type == "fileChange" && len(p.Item.Changes) > 0 {
@@ -881,11 +929,10 @@ func (a *CodexAdapter) handleNotification(method string, params json.RawMessage)
 			return
 		}
 		a.sendUpdate(AgentEvent{
-			Type:        EventTypeToolUpdate,
+			Type:        streams.EventTypeToolUpdate,
 			SessionID:   threadID,
 			OperationID: turnID,
 			ToolCallID:  p.ItemID,
-			ToolResult:  p.Delta,
 		})
 
 	case codex.NotifyThreadTokenUsageUpdated:
@@ -912,7 +959,7 @@ func (a *CodexAdapter) handleNotification(method string, params json.RawMessage)
 				zap.Float64("efficiency", efficiency))
 
 			a.sendUpdate(AgentEvent{
-				Type:                   EventTypeContextWindow,
+				Type:                   streams.EventTypeContextWindow,
 				SessionID:              threadID,
 				OperationID:            turnID,
 				ContextWindowSize:      contextWindowSize,
@@ -944,7 +991,7 @@ func (a *CodexAdapter) handleNotification(method string, params json.RawMessage)
 }
 
 // handleRequest processes Codex requests (approval requests) and calls permissionHandler.
-func (a *CodexAdapter) handleRequest(id interface{}, method string, params json.RawMessage) {
+func (a *Adapter) handleRequest(id any, method string, params json.RawMessage) {
 	a.logger.Debug("codex: received request",
 		zap.Any("id", id),
 		zap.String("method", method))
@@ -963,7 +1010,7 @@ func (a *CodexAdapter) handleRequest(id interface{}, method string, params json.
 			}
 			return
 		}
-		a.handleApprovalRequest(id, handler, p.ThreadID, p.ItemID, types.ActionTypeCommand, p.Command, map[string]interface{}{
+		a.handleApprovalRequest(id, handler, p.ThreadID, p.ItemID, types.ActionTypeCommand, p.Command, map[string]any{
 			"command":   p.Command,
 			"cwd":       p.Cwd,
 			"reasoning": p.Reasoning,
@@ -978,7 +1025,7 @@ func (a *CodexAdapter) handleRequest(id interface{}, method string, params json.
 			}
 			return
 		}
-		a.handleApprovalRequest(id, handler, p.ThreadID, p.ItemID, types.ActionTypeFileWrite, p.Path, map[string]interface{}{
+		a.handleApprovalRequest(id, handler, p.ThreadID, p.ItemID, types.ActionTypeFileWrite, p.Path, map[string]any{
 			"path":      p.Path,
 			"diff":      p.Diff,
 			"reasoning": p.Reasoning,
@@ -993,14 +1040,14 @@ func (a *CodexAdapter) handleRequest(id interface{}, method string, params json.
 }
 
 // handleApprovalRequest handles permission request logic for both command and file change approvals.
-func (a *CodexAdapter) handleApprovalRequest(
-	id interface{},
+func (a *Adapter) handleApprovalRequest(
+	id any,
 	handler PermissionHandler,
 	threadID string,
 	itemID string,
 	actionType string,
 	title string,
-	details map[string]interface{},
+	details map[string]any,
 	optionStrings []string,
 ) {
 	// Build permission options from Codex options
@@ -1087,6 +1134,3 @@ func (a *CodexAdapter) handleApprovalRequest(
 		a.logger.Warn("failed to send approval response", zap.Error(err))
 	}
 }
-
-// Verify interface implementation
-var _ AgentAdapter = (*CodexAdapter)(nil)
