@@ -114,8 +114,9 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 	}
 }
 
-// PrepareEnvironment writes MCP servers to the Codex config file.
-// Codex reads MCP configuration from ~/.codex/config.toml at startup time.
+// PrepareEnvironment writes sandbox settings and MCP servers to the Codex config file.
+// Codex reads configuration from ~/.codex/config.toml at startup time.
+// This sets sandbox_mode to workspace-write to enable file editing.
 func (a *Adapter) PrepareEnvironment() (map[string]string, error) {
 	a.logger.Info("PrepareEnvironment called",
 		zap.Int("mcp_server_count", len(a.cfg.McpServers)))
@@ -144,16 +145,12 @@ func (a *Adapter) Connect(stdin io.Writer, stdout io.Reader) error {
 	return nil
 }
 
-// WriteCodexMcpConfig writes MCP server configuration to Codex's config.toml.
+// WriteCodexMcpConfig writes MCP server configuration and sandbox settings to Codex's config.toml.
 // It merges with existing config, preserving other settings and existing MCP servers.
-// Codex reads MCP servers from ~/.codex/config.toml at startup time, not through the protocol.
+// Codex reads configuration from ~/.codex/config.toml at startup time, not through the protocol.
 // This function should be called before starting the Codex process.
 // If homeDir is empty, it uses os.UserHomeDir().
 func WriteCodexMcpConfig(mcpServers []shared.McpServerConfig, homeDir string, log *logger.Logger) error {
-	if len(mcpServers) == 0 {
-		return nil // Nothing to configure
-	}
-
 	// Determine config directory
 	if homeDir == "" {
 		var err error
@@ -191,6 +188,19 @@ func WriteCodexMcpConfig(mcpServers []shared.McpServerConfig, homeDir string, lo
 		rawConfig = make(map[string]any)
 	}
 
+	// CRITICAL: Set sandbox_mode to workspace-write to enable file editing.
+	// This MUST be set in config.toml as it takes precedence over protocol settings.
+	// Without this, Codex defaults to read-only mode and cannot edit files.
+	rawConfig["sandbox_mode"] = "workspace-write"
+
+	// Configure sandbox workspace-write settings
+	sandboxConfig, ok := rawConfig["sandbox_workspace_write"].(map[string]any)
+	if !ok {
+		sandboxConfig = make(map[string]any)
+	}
+	sandboxConfig["network_access"] = true
+	rawConfig["sandbox_workspace_write"] = sandboxConfig
+
 	// Get or create mcp_servers section
 	mcpServersSection, ok := rawConfig["mcp_servers"].(map[string]any)
 	if !ok {
@@ -225,7 +235,9 @@ func WriteCodexMcpConfig(mcpServers []shared.McpServerConfig, homeDir string, lo
 	}
 
 	// Update the mcp_servers section in the config
-	rawConfig["mcp_servers"] = mcpServersSection
+	if len(mcpServersSection) > 0 {
+		rawConfig["mcp_servers"] = mcpServersSection
+	}
 
 	// Marshal back to TOML
 	output, err := toml.Marshal(rawConfig)
@@ -239,10 +251,10 @@ func WriteCodexMcpConfig(mcpServers []shared.McpServerConfig, homeDir string, lo
 	}
 
 	if log != nil {
-		log.Info("wrote Codex MCP config",
+		log.Info("wrote Codex config",
 			zap.String("path", configPath),
-			zap.Int("server_count", len(mcpServers)),
-			zap.Int("total_mcp_servers", len(mcpServersSection)))
+			zap.String("sandbox_mode", "workspace-write"),
+			zap.Int("mcp_server_count", len(mcpServers)))
 	}
 
 	return nil
@@ -368,7 +380,7 @@ func (a *Adapter) NewSession(ctx context.Context, _ []types.McpServer) (string, 
 		Cwd:            a.cfg.WorkDir,
 		ApprovalPolicy: approvalPolicy, // "untrusted", "on-failure", "on-request", "never"
 		SandboxPolicy: &codex.SandboxPolicy{
-			Type:          "workspaceWrite",        // Sandbox to workspace only
+			Type:          "workspace-write",       // Sandbox to workspace only (kebab-case per Codex docs)
 			WritableRoots: []string{a.cfg.WorkDir}, // Allow writing to workspace
 			NetworkAccess: true,
 		},
@@ -425,7 +437,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string) error {
 		Cwd:            a.cfg.WorkDir,
 		ApprovalPolicy: approvalPolicy,
 		SandboxPolicy: &codex.SandboxPolicy{
-			Type:          "workspaceWrite",
+			Type:          "workspace-write", // kebab-case per Codex docs
 			WritableRoots: []string{a.cfg.WorkDir},
 			NetworkAccess: true,
 		},
