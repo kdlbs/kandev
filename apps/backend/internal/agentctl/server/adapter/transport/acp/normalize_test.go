@@ -169,9 +169,9 @@ func TestDetectLanguage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.path, func(t *testing.T) {
-			got := detectLanguage(tt.path)
+			got := shared.DetectLanguage(tt.path)
 			if got != tt.want {
-				t.Errorf("detectLanguage(%q) = %q, want %q", tt.path, got, tt.want)
+				t.Errorf("DetectLanguage(%q) = %q, want %q", tt.path, got, tt.want)
 			}
 		})
 	}
@@ -180,21 +180,21 @@ func TestDetectLanguage(t *testing.T) {
 // TestGenerateUnifiedDiff tests the unified diff generation.
 func TestGenerateUnifiedDiff(t *testing.T) {
 	t.Run("returns empty when old is empty", func(t *testing.T) {
-		result := generateUnifiedDiff("", "new content", "file.ts", 1, 1)
+		result := shared.GenerateUnifiedDiff("", "new content", "file.ts", 1)
 		if result != "" {
 			t.Errorf("expected empty string for empty old string, got %q", result)
 		}
 	})
 
 	t.Run("returns empty when new is empty", func(t *testing.T) {
-		result := generateUnifiedDiff("old content", "", "file.ts", 1, 1)
+		result := shared.GenerateUnifiedDiff("old content", "", "file.ts", 1)
 		if result != "" {
 			t.Errorf("expected empty string for empty new string, got %q", result)
 		}
 	})
 
 	t.Run("generates diff with header and hunks", func(t *testing.T) {
-		result := generateUnifiedDiff("const x = 1;", "const x = 2;", "file.ts", 5, 5)
+		result := shared.GenerateUnifiedDiff("const x = 1;", "const x = 2;", "file.ts", 5)
 		if result == "" {
 			t.Fatal("expected non-empty diff")
 		}
@@ -218,7 +218,7 @@ func TestGenerateUnifiedDiff(t *testing.T) {
 	})
 
 	t.Run("defaults startLine to 1 when 0", func(t *testing.T) {
-		result := generateUnifiedDiff("a", "b", "file.go", 0, 0)
+		result := shared.GenerateUnifiedDiff("a", "b", "file.go", 0)
 		if result == "" {
 			t.Fatal("expected non-empty diff")
 		}
@@ -396,9 +396,9 @@ func TestSplitLines(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := splitLines(tt.input)
+			got := shared.SplitLines(tt.input)
 			if len(got) != tt.want {
-				t.Errorf("splitLines(%q) returned %d lines, want %d", tt.input, len(got), tt.want)
+				t.Errorf("SplitLines(%q) returned %d lines, want %d", tt.input, len(got), tt.want)
 			}
 		})
 	}

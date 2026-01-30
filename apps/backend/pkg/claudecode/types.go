@@ -278,7 +278,7 @@ type ToolApprovalOptions struct {
 	Deny        bool `json:"deny"`
 }
 
-// Common tool names that require permission
+// Common tool names used by Claude Code
 const (
 	ToolBash         = "Bash"
 	ToolWrite        = "Write"
@@ -288,6 +288,11 @@ const (
 	ToolGlob         = "Glob"
 	ToolGrep         = "Grep"
 	ToolTask         = "Task"
+	ToolTaskCreate   = "TaskCreate"
+	ToolTaskUpdate   = "TaskUpdate"
+	ToolTaskList     = "TaskList"
+	ToolTaskGet      = "TaskGet"
+	ToolTodoWrite    = "TodoWrite"
 	ToolWebFetch     = "WebFetch"
 	ToolWebSearch    = "WebSearch"
 )
