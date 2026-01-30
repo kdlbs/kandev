@@ -151,28 +151,71 @@ func (s *Server) askUserQuestionHandler() server.ToolHandlerFunc {
 		if !ok {
 			return mcp.NewToolResultError("options is required"), nil
 		}
+
+		// Parse options - can be array of strings or array of objects
 		optionsJSON, err := json.Marshal(optionsRaw)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to parse options: %v", err)), nil
 		}
+
+		// Try to parse as array of strings first (simple format from agents)
+		var stringOptions []string
+		if err := json.Unmarshal(optionsJSON, &stringOptions); err == nil {
+			// Convert string options to the expected format
+			formattedOptions := make([]map[string]interface{}, len(stringOptions))
+			for i, opt := range stringOptions {
+				formattedOptions[i] = map[string]interface{}{
+					"option_id":   fmt.Sprintf("opt_%d", i+1),
+					"label":       opt,
+					"description": opt,
+				}
+			}
+			optionsJSON, _ = json.Marshal(formattedOptions)
+		}
+
 		var options []map[string]interface{}
 		if err := json.Unmarshal(optionsJSON, &options); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to parse options: %v", err)), nil
 		}
+
 		questionCtx := req.GetString("context", "")
+
+		// Build the question object in the format expected by the backend
+		question := map[string]interface{}{
+			"id":      "q1",
+			"title":   "Question",
+			"prompt":  prompt,
+			"options": options,
+		}
 
 		payload := map[string]interface{}{
 			"session_id": s.sessionID,
-			"prompt":     prompt,
-			"options":    options,
+			"question":   question,
 			"context":    questionCtx,
 		}
 		var result map[string]interface{}
 		if err := s.wsClient.RequestPayload(ctx, ActionMCPAskUserQuestion, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
-		answer, _ := result["answer"].(string)
-		return mcp.NewToolResultText(fmt.Sprintf("User answered: %s", answer)), nil
+
+		// Extract the answer from the response
+		if answer, ok := result["answer"]; ok {
+			if answerMap, ok := answer.(map[string]interface{}); ok {
+				if selectedOptions, ok := answerMap["selected_options"].([]interface{}); ok && len(selectedOptions) > 0 {
+					return mcp.NewToolResultText(fmt.Sprintf("User selected: %v", selectedOptions[0])), nil
+				}
+				if customText, ok := answerMap["custom_text"].(string); ok && customText != "" {
+					return mcp.NewToolResultText(fmt.Sprintf("User answered: %s", customText)), nil
+				}
+			}
+		}
+		if rejected, ok := result["rejected"].(bool); ok && rejected {
+			reason, _ := result["reject_reason"].(string)
+			return mcp.NewToolResultText(fmt.Sprintf("User rejected the question: %s", reason)), nil
+		}
+
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
 	}
 }
 

@@ -454,6 +454,8 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 		AgentProfileID: info.AgentProfileID,
 		WorkspacePath:  info.WorkspacePath,
 		Protocol:       string(agentConfig.Protocol),
+		AgentConfig:    agentConfig,
+		BackendWsURL:   m.backendWsURL,
 	}
 
 	runtimeInstance, err := rt.CreateInstance(ctx, req)
