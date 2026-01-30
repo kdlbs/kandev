@@ -110,8 +110,9 @@ flowchart TB
 sequenceDiagram
     participant Agent as Agent Process
     participant MCP as MCP Server<br/>(in agentctl)
-    participant Tunnel as WS Tunnel
-    participant Backend as Kandev Backend
+    participant Tunnel as WS Tunnel<br/>(in agentctl)
+    participant WSServer as WS Server<br/>(in Backend)
+    participant API as REST API<br/>(in Backend)
     participant DB as Database
 
     Note over Agent,DB: Agent wants to create a task
@@ -120,10 +121,12 @@ sequenceDiagram
     MCP->>MCP: Parse MCP request
 
     MCP->>Tunnel: Forward API call<br/>POST /api/v1/tasks
-    Tunnel->>Backend: WS message<br/>{type: "api_proxy", ...}
-    Backend->>DB: Insert task
-    DB-->>Backend: Task created
-    Backend-->>Tunnel: WS response<br/>{task_id: "..."}
+    Tunnel->>WSServer: WS message<br/>{type: "api_proxy_request", ...}
+    WSServer->>API: HTTP POST /api/v1/tasks
+    API->>DB: Insert task
+    DB-->>API: Task created
+    API-->>WSServer: HTTP 201 {task_id: "..."}
+    WSServer-->>Tunnel: WS message<br/>{type: "api_proxy_response", ...}
     Tunnel-->>MCP: API response
 
     MCP-->>Agent: MCP tool result<br/>{task_id: "..."}
