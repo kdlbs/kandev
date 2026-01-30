@@ -109,9 +109,13 @@ type ThreadStartParams struct {
 	SandboxPolicy  *SandboxPolicy `json:"sandboxPolicy,omitempty"`
 }
 
-// SandboxPolicy configures sandbox behavior
+// SandboxPolicy configures sandbox behavior.
+// Type must use kebab-case values per Codex documentation:
+// - "read-only": prevents edits, command execution, and network access
+// - "workspace-write": allows reads, edits, and commands within the active workspace
+// - "danger-full-access": removes all sandbox constraints (not recommended)
 type SandboxPolicy struct {
-	Type          string   `json:"type"` // "workspaceWrite", "readOnly", "dangerFullAccess", "externalSandbox"
+	Type          string   `json:"type"` // "workspace-write", "read-only", "danger-full-access"
 	WritableRoots []string `json:"writableRoots,omitempty"`
 	NetworkAccess bool     `json:"networkAccess,omitempty"`
 }
