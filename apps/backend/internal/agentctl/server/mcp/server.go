@@ -150,10 +150,39 @@ func (s *Server) registerTools() {
 
 	s.mcpServer.AddTool(
 		mcp.NewTool("ask_user_question",
-			mcp.WithDescription("Ask the user a clarifying question."),
-			mcp.WithString("prompt", mcp.Required(), mcp.Description("The question to ask")),
-			mcp.WithArray("options", mcp.Required(), mcp.Description("Options for the user")),
-			mcp.WithString("context", mcp.Description("Context for the question")),
+			mcp.WithDescription(`Ask the user a clarifying question with multiple choice options.
+
+Use this tool when you need user input to proceed. The user will see the prompt and can select one of the options or provide a custom text response.
+
+IMPORTANT: Each option must be a concrete, actionable choice - NOT meta-text like "Answer questions below".
+
+Options format - array of objects with:
+- "label": Short text (1-5 words) shown as the clickable option
+- "description": Brief explanation of what this option means
+
+Example usage:
+{
+  "prompt": "Which database should I use for this project?",
+  "options": [
+    {"label": "PostgreSQL", "description": "Relational database, good for complex queries"},
+    {"label": "MongoDB", "description": "Document database, flexible schema"},
+    {"label": "SQLite", "description": "Embedded database, simple setup"}
+  ],
+  "context": "The project requires storing user profiles and relationships between entities."
+}
+
+Another example:
+{
+  "prompt": "How should I handle the existing user data during migration?",
+  "options": [
+    {"label": "Migrate all", "description": "Keep all existing records"},
+    {"label": "Archive old", "description": "Archive records older than 1 year"},
+    {"label": "Fresh start", "description": "Delete existing data and start fresh"}
+  ]
+}`),
+			mcp.WithString("prompt", mcp.Required(), mcp.Description("The question to ask the user. Be specific and clear.")),
+			mcp.WithArray("options", mcp.Required(), mcp.Description(`Array of option objects. Each option must have: "label" (1-5 words, the clickable choice) and "description" (explanation of the option). Provide 2-4 concrete, actionable options.`)),
+			mcp.WithString("context", mcp.Description("Optional background information to help the user understand why you're asking this question.")),
 		),
 		s.askUserQuestionHandler(),
 	)
