@@ -271,6 +271,9 @@ func (m *mockRepository) UpsertExecutorRunning(ctx context.Context, running *mod
 func (m *mockRepository) GetExecutorRunningBySessionID(ctx context.Context, sessionID string) (*models.ExecutorRunning, error) {
 	return nil, nil
 }
+func (m *mockRepository) GetExecutorRunningByTaskID(ctx context.Context, taskID string) (*models.ExecutorRunning, error) {
+	return nil, nil
+}
 func (m *mockRepository) DeleteExecutorRunningBySessionID(ctx context.Context, sessionID string) error {
 	return nil
 }
