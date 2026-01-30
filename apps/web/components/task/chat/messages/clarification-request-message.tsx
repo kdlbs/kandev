@@ -1,7 +1,6 @@
 'use client';
 
 import { IconMessageQuestion, IconCheck, IconX } from '@tabler/icons-react';
-import { cn } from '@/lib/utils';
 import type { Message, ClarificationRequestMetadata } from '@/lib/types/http';
 
 type ClarificationRequestMessageProps = {

@@ -13,6 +13,7 @@ export type KanbanState = {
     repositoryId?: string;
     primarySessionId?: string | null;
   }>;
+  isLoading?: boolean;
 };
 
 export type BoardState = {
