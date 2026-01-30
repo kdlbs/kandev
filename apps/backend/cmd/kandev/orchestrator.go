@@ -24,9 +24,9 @@ func provideOrchestrator(
 	lifecycleMgr *lifecycle.Manager,
 	agentRegistry *registry.Registry,
 	workflowSvc *workflowservice.Service,
-) (*orchestrator.Service, error) {
+) (*orchestrator.Service, *messageCreatorAdapter, error) {
 	if lifecycleMgr == nil {
-		return nil, errors.New("lifecycle manager is required: configure agent runtime (docker or standalone)")
+		return nil, nil, errors.New("lifecycle manager is required: configure agent runtime (docker or standalone)")
 	}
 
 	taskRepoAdapter := &taskRepositoryAdapter{repo: taskRepo, svc: taskSvc}
@@ -46,7 +46,7 @@ func provideOrchestrator(
 		orchestratorSvc.SetWorkflowStepGetter(&orchestratorWorkflowStepGetterAdapter{svc: workflowSvc})
 	}
 
-	return orchestratorSvc, nil
+	return orchestratorSvc, msgCreator, nil
 }
 
 // orchestratorWorkflowStepGetterAdapter adapts workflow service to orchestrator's WorkflowStepGetter interface.

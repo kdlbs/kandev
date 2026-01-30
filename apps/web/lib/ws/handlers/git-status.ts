@@ -8,6 +8,7 @@ import type {
   GitCommitsResetEvent,
   GitSnapshotCreatedEvent,
 } from '@/lib/types/git-events';
+import { invalidateCumulativeDiffCache } from '@/hooks/domains/session/use-cumulative-diff';
 
 // Handler functions for each event type
 type GitEventHandlers = {
@@ -32,6 +33,8 @@ const gitEventHandlers: GitEventHandlers = {
       files: event.status.files,
       timestamp: event.timestamp,
     });
+    // Invalidate cumulative diff cache when files change
+    invalidateCumulativeDiffCache(event.session_id);
   },
 
   commit_created: (store, event) => {
@@ -49,11 +52,15 @@ const gitEventHandlers: GitEventHandlers = {
       committed_at: event.commit.committed_at,
       created_at: event.commit.created_at ?? event.timestamp,
     });
+    // Invalidate cumulative diff cache when new commit is created
+    invalidateCumulativeDiffCache(event.session_id);
   },
 
   commits_reset: (store, event) => {
     // Clear commits to trigger refetch in useSessionCommits hook
     store.getState().clearSessionCommits(event.session_id);
+    // Invalidate cumulative diff cache when commits are reset
+    invalidateCumulativeDiffCache(event.session_id);
   },
 
   snapshot_created: (store, event) => {
@@ -71,6 +78,8 @@ const gitEventHandlers: GitEventHandlers = {
       triggered_by: event.snapshot.triggered_by,
       created_at: event.snapshot.created_at,
     });
+    // Invalidate cumulative diff cache when snapshot is created
+    invalidateCumulativeDiffCache(event.session_id);
   },
 };
 

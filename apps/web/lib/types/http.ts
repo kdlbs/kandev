@@ -467,6 +467,7 @@ export type MessageType =
   | 'thinking'
   | 'todo'
   | 'permission_request'
+  | 'clarification_request'
   | 'script_execution';
 
 export type Message = {
@@ -624,4 +625,41 @@ export type ListAgentDiscoveryResponse = {
 export type ListAvailableAgentsResponse = {
   agents: AvailableAgent[];
   total: number;
+};
+
+// Clarification request types (for ask_user_question feature)
+export type ClarificationOption = {
+  option_id: string;
+  label: string;
+  description: string;
+};
+
+export type ClarificationQuestion = {
+  id: string;
+  title: string;
+  prompt: string;
+  options: ClarificationOption[];
+};
+
+export type ClarificationRequestMetadata = {
+  pending_id: string;
+  session_id: string;
+  task_id?: string;
+  question: ClarificationQuestion;
+  context?: string;
+  status?: 'pending' | 'answered' | 'rejected' | 'expired';
+  response?: ClarificationAnswer;
+};
+
+export type ClarificationAnswer = {
+  question_id: string;
+  selected_options?: string[];
+  custom_text?: string;
+};
+
+export type ClarificationResponse = {
+  pending_id: string;
+  answers: ClarificationAnswer[];
+  rejected?: boolean;
+  reject_reason?: string;
 };

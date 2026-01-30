@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -106,10 +108,25 @@ func NewOpenCodeAdapter(cfg *Config, log *logger.Logger) *OpenCodeAdapter {
 }
 
 // PrepareEnvironment performs protocol-specific setup before the agent process starts.
-// For OpenCode, we return environment variables for server authentication.
+// For OpenCode, we write MCP servers to ~/.config/opencode/opencode.json and return
+// environment variables for server authentication.
 func (a *OpenCodeAdapter) PrepareEnvironment() (map[string]string, error) {
 	a.logger.Info("PrepareEnvironment called",
 		zap.Int("mcp_server_count", len(a.cfg.McpServers)))
+	for i, srv := range a.cfg.McpServers {
+		a.logger.Info("MCP server config",
+			zap.Int("index", i),
+			zap.String("name", srv.Name),
+			zap.String("url", srv.URL),
+			zap.String("type", srv.Type),
+			zap.String("command", srv.Command))
+	}
+
+	// Write MCP servers to OpenCode config file
+	if err := WriteOpenCodeMcpConfig(a.cfg.McpServers, "", a.logger); err != nil {
+		a.logger.Warn("failed to write OpenCode MCP config", zap.Error(err))
+		// Continue - MCP servers are optional
+	}
 
 	env := map[string]string{
 		"OPENCODE_SERVER_PASSWORD": a.password,
@@ -854,5 +871,108 @@ func (a *OpenCodeAdapter) RespondToPermission(ctx context.Context, requestID str
 	}
 
 	return a.client.ReplyPermission(ctx, requestID, reply, msg)
+}
+
+// WriteOpenCodeMcpConfig writes MCP server configuration to OpenCode's config file.
+// It merges with existing config, preserving other settings and existing MCP servers.
+// OpenCode reads MCP servers from ~/.config/opencode/opencode.json at startup time.
+// This function should be called before starting the OpenCode process.
+// If homeDir is empty, it uses os.UserHomeDir().
+func WriteOpenCodeMcpConfig(mcpServers []McpServerConfig, homeDir string, log *logger.Logger) error {
+	if len(mcpServers) == 0 {
+		return nil // Nothing to configure
+	}
+
+	// Determine config directory
+	if homeDir == "" {
+		var err error
+		homeDir, err = os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("failed to get user home directory: %w", err)
+		}
+	}
+	configDir := filepath.Join(homeDir, ".config", "opencode")
+	configPath := filepath.Join(configDir, "opencode.json")
+
+	// Create config directory if it doesn't exist
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		return fmt.Errorf("failed to create opencode config directory: %w", err)
+	}
+
+	// Read existing config if it exists
+	existingData, err := os.ReadFile(configPath)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to read existing opencode config: %w", err)
+	}
+
+	// Parse existing config into a generic map to preserve all fields
+	var rawConfig map[string]interface{}
+	if len(existingData) > 0 {
+		if err := json.Unmarshal(existingData, &rawConfig); err != nil {
+			if log != nil {
+				log.Warn("failed to parse existing opencode config, will create new",
+					zap.String("path", configPath),
+					zap.Error(err))
+			}
+			rawConfig = make(map[string]interface{})
+		}
+	} else {
+		rawConfig = make(map[string]interface{})
+	}
+
+	// Get or create mcp section
+	mcpSection, ok := rawConfig["mcp"].(map[string]interface{})
+	if !ok {
+		mcpSection = make(map[string]interface{})
+	}
+
+	// Add/update our MCP servers
+	for _, server := range mcpServers {
+		serverConfig := make(map[string]interface{})
+
+		if server.Type == "sse" || server.Type == "http" || server.Type == "remote" {
+			// Remote transport - use url field
+			serverConfig["type"] = "remote"
+			if server.URL != "" {
+				serverConfig["url"] = server.URL
+			}
+		} else {
+			// Local/stdio transport - use command and args
+			serverConfig["type"] = "local"
+			if server.Command != "" {
+				// OpenCode expects command as an array: ["command", "arg1", "arg2"]
+				cmdArray := []string{server.Command}
+				cmdArray = append(cmdArray, server.Args...)
+				serverConfig["command"] = cmdArray
+			}
+		}
+
+		// Always enable the server
+		serverConfig["enabled"] = true
+
+		mcpSection[server.Name] = serverConfig
+	}
+
+	// Update the mcp section in the config
+	rawConfig["mcp"] = mcpSection
+
+	// Marshal back to JSON with indentation
+	output, err := json.MarshalIndent(rawConfig, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal opencode config: %w", err)
+	}
+
+	// Write config file
+	if err := os.WriteFile(configPath, output, 0644); err != nil {
+		return fmt.Errorf("failed to write opencode config: %w", err)
+	}
+
+	if log != nil {
+		log.Info("wrote opencode MCP config",
+			zap.String("path", configPath),
+			zap.Int("server_count", len(mcpServers)))
+	}
+
+	return nil
 }
 

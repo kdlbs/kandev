@@ -40,6 +40,8 @@ import (
 	promptcontroller "github.com/kandev/kandev/internal/prompts/controller"
 	prompthandlers "github.com/kandev/kandev/internal/prompts/handlers"
 
+	"github.com/kandev/kandev/internal/clarification"
+
 	// Task Service packages
 	taskcontroller "github.com/kandev/kandev/internal/task/controller"
 	taskhandlers "github.com/kandev/kandev/internal/task/handlers"
@@ -230,6 +232,11 @@ func main() {
 		if cfg.Agent.McpServerURL == "" {
 			cfg.Agent.McpServerURL = mcpServerURL
 		}
+		// Set MCP server URL on controller and ensure default MCP config for all profiles
+		agentSettingsController.SetMcpServerURL(mcpServerURL)
+		if err := agentSettingsController.EnsureDefaultMcpConfig(ctx); err != nil {
+			log.Warn("Failed to ensure default MCP config", zap.Error(err))
+		}
 	}
 
 	// ============================================
@@ -266,7 +273,7 @@ func main() {
 	// ============================================
 	log.Info("Initializing Orchestrator...")
 
-	orchestratorSvc, err := provideOrchestrator(log, eventBus, taskRepo, taskSvc, userSvc, lifecycleMgr, agentRegistry, services.Workflow)
+	orchestratorSvc, msgCreator, err := provideOrchestrator(log, eventBus, taskRepo, taskSvc, userSvc, lifecycleMgr, agentRegistry, services.Workflow)
 	if err != nil {
 		log.Fatal("Failed to initialize orchestrator", zap.Error(err))
 	}
@@ -550,6 +557,11 @@ func main() {
 
 	prompthandlers.RegisterRoutes(router, promptCtrl, log)
 	log.Debug("Registered Prompts handlers (HTTP)")
+
+	// Clarification routes for agent questions
+	clarificationStore := clarification.NewStore(10 * time.Minute)
+	clarification.RegisterRoutes(router, clarificationStore, gateway.Hub, msgCreator, taskRepo, log)
+	log.Debug("Registered Clarification handlers (HTTP)")
 
 	// Health check (simple HTTP for load balancers/monitoring)
 	router.GET("/health", func(c *gin.Context) {
