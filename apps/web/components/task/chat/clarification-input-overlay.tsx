@@ -2,7 +2,6 @@
 
 import { useCallback, useState } from 'react';
 import { IconX, IconMessageQuestion } from '@tabler/icons-react';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { getBackendConfig } from '@/lib/config';
 import type { Message, ClarificationRequestMetadata, ClarificationAnswer } from '@/lib/types/http';
@@ -119,37 +118,25 @@ export function ClarificationInputOverlay({ message, onResolved }: Clarification
 
         {/* Options with bullets - indented to align with question text */}
         <div className="space-y-0.5 mb-1.5 ml-6">
-          {question.options.map((option) => {
-            const button = (
-              <button
-                key={option.option_id}
-                type="button"
-                onClick={() => handleSubmitOption(option.option_id)}
-                disabled={isSubmitting}
-                className={cn(
-                  'flex items-start gap-2 w-full text-left text-xs rounded px-1.5 py-0.5 -ml-1.5 transition-colors',
-                  'hover:bg-blue-500/15 hover:text-blue-600 dark:hover:text-blue-400',
-                  isSubmitting ? 'opacity-50 cursor-not-allowed' : 'text-foreground/80'
-                )}
-              >
-                <span className="text-muted-foreground flex-shrink-0">•</span>
-                <span>{option.label}</span>
-              </button>
-            );
-
-            if (option.description) {
-              return (
-                <Tooltip key={option.option_id}>
-                  <TooltipTrigger asChild>{button}</TooltipTrigger>
-                  <TooltipContent side="right" className="max-w-xs">
-                    {option.description}
-                  </TooltipContent>
-                </Tooltip>
-              );
-            }
-
-            return button;
-          })}
+          {question.options.map((option) => (
+            <button
+              key={option.option_id}
+              type="button"
+              onClick={() => handleSubmitOption(option.option_id)}
+              disabled={isSubmitting}
+              className={cn(
+                'flex items-start gap-2 w-full text-left text-xs rounded px-1.5 py-0.5 -ml-1.5 transition-colors',
+                'hover:bg-blue-500/15 hover:text-blue-600 dark:hover:text-blue-400',
+                isSubmitting ? 'opacity-50 cursor-not-allowed' : 'text-foreground/80'
+              )}
+            >
+              <span className="text-muted-foreground flex-shrink-0">•</span>
+              <span>{option.label}</span>
+              {option.description && (
+                <span className="text-muted-foreground/60">— {option.description}</span>
+              )}
+            </button>
+          ))}
         </div>
 
         {/* Custom input row - indented to align with options */}
