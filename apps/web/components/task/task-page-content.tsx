@@ -39,6 +39,7 @@ export function TaskPageContent({
 }: TaskPageContentProps) {
   const [taskDetails, setTaskDetails] = useState<Task | null>(initialTask);
   const [isMounted, setIsMounted] = useState(false);
+  const [showDebugOverlay, setShowDebugOverlay] = useState(false);
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const setActiveSession = useAppStore((state) => state.setActiveSession);
@@ -160,7 +161,7 @@ export function TaskPageContent({
   return (
     <TooltipProvider>
       <div className="h-screen w-full flex flex-col bg-background">
-        {DEBUG_UI && (
+        {DEBUG_UI && showDebugOverlay && (
           <DebugOverlay
             title="Task Debug"
             entries={{
@@ -199,6 +200,8 @@ export function TaskPageContent({
           repositoryPath={repository?.local_path ?? null}
           repositoryName={repository?.name ?? null}
           hasDevScript={Boolean(repository?.dev_script?.trim())}
+          showDebugOverlay={showDebugOverlay}
+          onToggleDebugOverlay={() => setShowDebugOverlay((prev) => !prev)}
         />
 
         <TaskLayout
