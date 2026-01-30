@@ -16,6 +16,12 @@ func Resolve(config *ProfileConfig, policy Policy) ([]ResolvedServer, []string, 
 	resolved := make([]ResolvedServer, 0, len(config.Servers))
 
 	for name, server := range config.Servers {
+		// Skip kandev server - it's automatically injected by agentctl with the correct local URL.
+		// This handles existing profiles that still have the old kandev config in the database.
+		if name == "kandev" {
+			continue
+		}
+
 		if !policyAllowsServerName(policy, name) {
 			warnings = append(warnings, fmt.Sprintf("mcp server %q skipped: server not allowed by policy", name))
 			continue
