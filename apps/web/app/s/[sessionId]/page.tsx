@@ -6,9 +6,11 @@ import {
   fetchTask,
   listAgents,
   listAvailableAgents,
+  listBoards,
   listRepositories,
   listTaskSessionMessages,
   listTaskSessions,
+  listWorkspaces,
 } from '@/lib/api';
 import type { ListMessagesResponse, Task } from '@/lib/types/http';
 import { snapshotToState, taskToState } from '@/lib/ssr/mapper';
@@ -35,15 +37,19 @@ export default async function SessionPage({
     }
 
     task = await fetchTask(session.task_id, { cache: 'no-store' });
-    const [snapshot, agents, repositories, allSessionsResponse, availableAgentsResponse] = await Promise.all([
+    const [snapshot, agents, repositories, allSessionsResponse, availableAgentsResponse, workspacesResponse, boardsResponse] = await Promise.all([
       fetchBoardSnapshot(task.board_id, { cache: 'no-store' }),
       listAgents({ cache: 'no-store' }),
       listRepositories(task.workspace_id, { cache: 'no-store' }),
       listTaskSessions(session.task_id, { cache: 'no-store' }),
       listAvailableAgents({ cache: 'no-store' }).catch(() => ({ agents: [] })),
+      listWorkspaces({ cache: 'no-store' }).catch(() => ({ workspaces: [] })),
+      listBoards(task.workspace_id, { cache: 'no-store' }).catch(() => ({ boards: [] })),
     ]);
     const allSessions = allSessionsResponse.sessions ?? [session];
     const availableAgents = availableAgentsResponse.agents ?? [];
+    const workspaces = workspacesResponse.workspaces ?? [];
+    const boards = boardsResponse.boards ?? [];
     let messagesResponse: ListMessagesResponse | null = null;
     try {
       // Load most recent messages in descending order, then reverse to show oldest-to-newest
@@ -70,6 +76,28 @@ export default async function SessionPage({
     initialState = {
       ...snapshotToState(snapshot),
       ...taskState,
+      workspaces: {
+        items: workspaces.map((workspace) => ({
+          id: workspace.id,
+          name: workspace.name,
+          description: workspace.description ?? null,
+          owner_id: workspace.owner_id,
+          default_executor_id: workspace.default_executor_id ?? null,
+          default_environment_id: workspace.default_environment_id ?? null,
+          default_agent_profile_id: workspace.default_agent_profile_id ?? null,
+          created_at: workspace.created_at,
+          updated_at: workspace.updated_at,
+        })),
+        activeId: task.workspace_id,
+      },
+      boards: {
+        items: boards.map((board) => ({
+          id: board.id,
+          workspaceId: board.workspace_id,
+          name: board.name,
+        })),
+        activeId: task.board_id,
+      },
       repositories: {
         itemsByWorkspaceId: {
           [task.workspace_id]: repositories.repositories,
