@@ -524,6 +524,9 @@ func (s *Service) resumeExecutorsOnStartup(ctx context.Context) {
 				zap.String("session_id", sessionID),
 				zap.Error(err))
 			_ = s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateFailed, err.Error())
+			// Clear the stale execution ID to prevent "execution not found" errors
+			// when the user tries to prompt after the failed resume
+			_ = s.repo.ClearSessionExecutionID(ctx, sessionID)
 			_ = s.repo.DeleteExecutorRunningBySessionID(ctx, sessionID)
 			continue
 		}
