@@ -1,13 +1,13 @@
 'use client';
 
-import { useRef, useCallback, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useRef, useCallback, useState, useEffect, memo, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import {
   IconArrowUp,
   IconBrain,
   IconListCheck,
-  IconLoader2,
   IconPlayerStopFilled,
 } from '@tabler/icons-react';
+import { GridSpinner } from '@/components/grid-spinner';
 import { Button } from '@kandev/ui/button';
 import {
   DropdownMenu,
@@ -29,6 +29,138 @@ import { ClarificationInputOverlay } from './clarification-input-overlay';
 import { useInlineMention } from '@/hooks/use-inline-mention';
 import { useInlineSlash } from '@/hooks/use-inline-slash';
 import type { Message } from '@/lib/types/http';
+
+// Memoized toolbar to prevent re-renders on input value changes
+type ChatInputToolbarProps = {
+  planModeEnabled: boolean;
+  onPlanModeChange: (enabled: boolean) => void;
+  sessionId: string | null;
+  taskId: string | null;
+  taskTitle?: string;
+  taskDescription: string;
+  isAgentBusy: boolean;
+  isDisabled: boolean;
+  isSending: boolean;
+  onCancel: () => void;
+  onSubmit: () => void;
+};
+
+const ChatInputToolbar = memo(function ChatInputToolbar({
+  planModeEnabled,
+  onPlanModeChange,
+  sessionId,
+  taskId,
+  taskTitle,
+  taskDescription,
+  isAgentBusy,
+  isDisabled,
+  isSending,
+  onCancel,
+  onSubmit,
+}: ChatInputToolbarProps) {
+  return (
+    <div className="flex items-center gap-1 px-2 py-2 border-t border-border">
+      {/* Left: Plan, Thinking, Context */}
+      <div className="flex items-center gap-0.5">
+        {/* Plan mode toggle */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className={cn(
+                'h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40',
+                planModeEnabled && 'bg-primary/15 text-primary'
+              )}
+              onClick={() => onPlanModeChange(!planModeEnabled)}
+            >
+              <IconListCheck className="h-4 w-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Toggle plan mode</TooltipContent>
+        </Tooltip>
+
+        {/* Thinking level dropdown */}
+        <DropdownMenu>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40"
+                >
+                  <IconBrain className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+            </TooltipTrigger>
+            <TooltipContent>Thinking level</TooltipContent>
+          </Tooltip>
+          <DropdownMenuContent align="start" side="top">
+            <DropdownMenuItem>High</DropdownMenuItem>
+            <DropdownMenuItem>Medium</DropdownMenuItem>
+            <DropdownMenuItem>Low</DropdownMenuItem>
+            <DropdownMenuItem>Off</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+      </div>
+
+      {/* Spacer */}
+      <div className="flex-1" />
+
+      {/* Right: Sessions, Model, Submit */}
+      <div className="flex items-center gap-0.5 shrink-0">
+        <SessionsDropdown
+          taskId={taskId}
+          activeSessionId={sessionId}
+          taskTitle={taskTitle}
+          taskDescription={taskDescription}
+        />
+
+        {/* Token usage display */}
+        <TokenUsageDisplay sessionId={sessionId} />
+
+        <ModelSelector sessionId={sessionId} />
+
+        {/* Submit/Stop button */}
+        <div className="ml-1">
+          <KeyboardShortcutTooltip shortcut={SHORTCUTS.SUBMIT} enabled={!isAgentBusy && !isDisabled}>
+            {isAgentBusy ? (
+              <Button
+                type="button"
+                variant="secondary"
+                size="icon"
+                className="h-7 w-7 rounded-full cursor-pointer bg-destructive/10 text-destructive hover:bg-destructive/20"
+                disabled={isDisabled}
+                onClick={onCancel}
+              >
+                <IconPlayerStopFilled className="h-3.5 w-3.5" />
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                variant="default"
+                size="icon"
+                className="h-7 w-7 rounded-full cursor-pointer"
+                disabled={isDisabled}
+                onClick={onSubmit}
+              >
+                {isSending ? (
+                  <GridSpinner className="text-primary-foreground" />
+                ) : (
+                  <IconArrowUp className="h-4 w-4" />
+                )}
+              </Button>
+            )}
+          </KeyboardShortcutTooltip>
+        </div>
+      </div>
+    </div>
+  );
+});
 
 type ChatInputContainerProps = {
   onSubmit: (message: string) => void;
@@ -67,11 +199,23 @@ export function ChatInputContainer({
   const [value, setValue] = useState('');
   const inputRef = useRef<RichTextInputHandle>(null);
 
+  // Use ref for value to keep handleSubmit stable (doesn't change on every keystroke)
+  const valueRef = useRef(value);
+  useEffect(() => {
+    valueRef.current = value;
+  }, [value]);
+
   // Mention menu hook
   const mention = useInlineMention(inputRef, value, setValue, sessionId);
 
   // Slash command menu hook
   const slash = useInlineSlash(inputRef, value, setValue, onPlanModeChange);
+
+  // Use refs for menu state to keep handleSubmit stable
+  const menuStateRef = useRef({ mentionOpen: mention.isOpen, slashOpen: slash.isOpen });
+  useEffect(() => {
+    menuStateRef.current = { mentionOpen: mention.isOpen, slashOpen: slash.isOpen };
+  }, [mention.isOpen, slash.isOpen]);
 
   // Combined change handler
   const handleChange = useCallback(
@@ -98,15 +242,15 @@ export function ChatInputContainer({
     [mention, slash]
   );
 
-  // Handle form submission
+  // Stable submit handler using refs - doesn't change on value/menu state changes
   const handleSubmit = useCallback(() => {
     // Don't submit if a menu is open
-    if (mention.isOpen || slash.isOpen) return;
-    const trimmed = value.trim();
+    if (menuStateRef.current.mentionOpen || menuStateRef.current.slashOpen) return;
+    const trimmed = valueRef.current.trim();
     if (!trimmed) return;
     onSubmit(trimmed);
     setValue('');
-  }, [mention.isOpen, slash.isOpen, value, onSubmit]);
+  }, [onSubmit]);
 
   const isDisabled = isStarting || isSending;
   const hasPendingClarification = pendingClarification && onClarificationResolved;
@@ -163,107 +307,20 @@ export function ChatInputContainer({
         />
       )}
 
-      {/* Integrated toolbar */}
-      <div className="flex items-center gap-1 px-2 py-2 border-t border-border">
-        {/* Left: Plan, Thinking, Context */}
-        <div className="flex items-center gap-0.5">
-          {/* Plan mode toggle */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className={cn(
-                  'h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40',
-                  planModeEnabled && 'bg-primary/15 text-primary'
-                )}
-                onClick={() => onPlanModeChange(!planModeEnabled)}
-              >
-                <IconListCheck className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Toggle plan mode</TooltipContent>
-          </Tooltip>
-
-          {/* Thinking level dropdown */}
-          <DropdownMenu>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40"
-                  >
-                    <IconBrain className="h-4 w-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-              </TooltipTrigger>
-              <TooltipContent>Thinking level</TooltipContent>
-            </Tooltip>
-            <DropdownMenuContent align="start" side="top">
-              <DropdownMenuItem>High</DropdownMenuItem>
-              <DropdownMenuItem>Medium</DropdownMenuItem>
-              <DropdownMenuItem>Low</DropdownMenuItem>
-              <DropdownMenuItem>Off</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-
-        </div>
-
-        {/* Spacer */}
-        <div className="flex-1" />
-
-        {/* Right: Sessions, Model, Submit */}
-        <div className="flex items-center gap-0.5 shrink-0">
-          <SessionsDropdown
-            taskId={taskId}
-            activeSessionId={sessionId}
-            taskTitle={taskTitle}
-            taskDescription={taskDescription}
-          />
-
-          {/* Token usage display */}
-          <TokenUsageDisplay sessionId={sessionId} />
-
-          <ModelSelector sessionId={sessionId} />
-
-          {/* Submit/Stop button */}
-          <div className="ml-1">
-            <KeyboardShortcutTooltip shortcut={SHORTCUTS.SUBMIT} enabled={!isAgentBusy && !isStarting}>
-              {isAgentBusy ? (
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="icon"
-                  className="h-7 w-7 rounded-full cursor-pointer bg-destructive/10 text-destructive hover:bg-destructive/20"
-                  disabled={isDisabled}
-                  onClick={onCancel}
-                >
-                  <IconPlayerStopFilled className="h-3.5 w-3.5" />
-                </Button>
-              ) : (
-                <Button
-                  type="button"
-                  variant="default"
-                  size="icon"
-                  className="h-7 w-7 rounded-full cursor-pointer"
-                  disabled={isDisabled}
-                  onClick={handleSubmit}
-                >
-                  {isSending ? (
-                    <IconLoader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <IconArrowUp className="h-4 w-4" />
-                  )}
-                </Button>
-              )}
-            </KeyboardShortcutTooltip>
-          </div>
-        </div>
-      </div>
+      {/* Integrated toolbar - memoized to prevent re-renders on input changes */}
+      <ChatInputToolbar
+        planModeEnabled={planModeEnabled}
+        onPlanModeChange={onPlanModeChange}
+        sessionId={sessionId}
+        taskId={taskId}
+        taskTitle={taskTitle}
+        taskDescription={taskDescription}
+        isAgentBusy={isAgentBusy}
+        isDisabled={isDisabled}
+        isSending={isSending}
+        onCancel={onCancel}
+        onSubmit={handleSubmit}
+      />
     </div>
   );
 }

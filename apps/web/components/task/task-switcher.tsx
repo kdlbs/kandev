@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import type { TaskState } from '@/lib/types/http';
 import { truncateRepoPath } from '@/lib/utils';
 import { SidebarButton } from './sidebar-button';
@@ -53,7 +53,7 @@ function TaskSwitcherSkeleton() {
   );
 }
 
-export function TaskSwitcher({
+export const TaskSwitcher = memo(function TaskSwitcher({
   tasks,
   columns,
   activeTaskId,
@@ -161,4 +161,4 @@ export function TaskSwitcher({
       )}
     </div>
   );
-}
+});

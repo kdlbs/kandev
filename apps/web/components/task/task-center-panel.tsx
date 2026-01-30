@@ -9,12 +9,13 @@ import { TaskChangesPanel } from './task-changes-panel';
 import { TaskPlanPanel } from './task-plan-panel';
 import { FileViewerContent } from './file-viewer-content';
 import { PassthroughTerminal } from './passthrough-terminal';
-import type { OpenFileTab } from '@/lib/types/backend';
+import type { OpenFileTab, FileContentResponse } from '@/lib/types/backend';
 import { FILE_EXTENSION_COLORS } from '@/lib/types/backend';
 import { useAppStore } from '@/components/state-provider';
 import { SessionTabs, type SessionTab } from '@/components/session-tabs';
 import { approveSessionAction } from '@/app/actions/workspaces';
 import { getWebSocketClient } from '@/lib/ws/connection';
+import { requestFileContent } from '@/lib/ws/workspace-files';
 
 import type { SelectedDiff } from './task-layout';
 
@@ -160,6 +161,37 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
     }
   }, [leftTab, handleTabChange]);
 
+  // Handler for opening files from chat (tool read messages)
+  const handleOpenFileFromChat = useCallback(async (filePath: string) => {
+    const client = getWebSocketClient();
+    const currentSessionId = activeSessionId;
+    if (!client || !currentSessionId) return;
+
+    try {
+      const response: FileContentResponse = await requestFileContent(client, currentSessionId, filePath);
+      const fileName = filePath.split('/').pop() || filePath;
+
+      setOpenFileTabs((prev) => {
+        // If file is already open, just switch to it
+        if (prev.some((t) => t.path === filePath)) {
+          return prev;
+        }
+        // Add new tab (LRU eviction at max 4)
+        const maxTabs = 4;
+        const newTab: OpenFileTab = {
+          path: filePath,
+          name: fileName,
+          content: response.content,
+        };
+        const newTabs = prev.length >= maxTabs ? [...prev.slice(1), newTab] : [...prev, newTab];
+        return newTabs;
+      });
+      setLeftTab(`file:${filePath}`);
+    } catch (error) {
+      console.error('Failed to open file from chat:', error);
+    }
+  }, [activeSessionId]);
+
   const tabs: SessionTab[] = useMemo(() => {
     const staticTabs: SessionTab[] = [
       {
@@ -235,7 +267,7 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
                 <PassthroughTerminal key={activeSessionId} sessionId={sessionId} />
               </div>
             ) : (
-              <TaskChatPanel sessionId={sessionId} />
+              <TaskChatPanel sessionId={sessionId} onOpenFile={handleOpenFileFromChat} />
             )
           ) : (
             <div className="flex items-center justify-center h-full text-muted-foreground">

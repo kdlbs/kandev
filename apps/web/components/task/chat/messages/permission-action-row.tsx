@@ -1,6 +1,8 @@
 'use client';
 
-import { IconCheck, IconLoader2, IconX } from '@tabler/icons-react';
+import { memo } from 'react';
+import { IconCheck, IconX } from '@tabler/icons-react';
+import { GridSpinner } from '@/components/grid-spinner';
 import { Button } from '@kandev/ui/button';
 
 type PermissionActionRowProps = {
@@ -9,7 +11,7 @@ type PermissionActionRowProps = {
   isResponding?: boolean;
 };
 
-export function PermissionActionRow({
+export const PermissionActionRow = memo(function PermissionActionRow({
   onApprove,
   onReject,
   isResponding = false,
@@ -37,7 +39,7 @@ export function PermissionActionRow({
         className="h-6 px-3 text-foreground border-border bg-background hover:bg-muted hover:border-foreground/40 transition-colors cursor-pointer"
       >
         {isResponding ? (
-          <IconLoader2 className="h-4 w-4 mr-1 animate-spin" />
+          <GridSpinner className="text-foreground mr-1" />
         ) : (
           <IconCheck className="h-4 w-4 mr-1 text-green-500" />
         )}
@@ -45,4 +47,4 @@ export function PermissionActionRow({
       </Button>
     </div>
   );
-}
+});

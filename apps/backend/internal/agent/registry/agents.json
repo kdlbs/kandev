@@ -13,7 +13,7 @@
       "cmd": [
         "npx",
         "-y",
-        "@augmentcode/auggie@0.14.0",
+        "@augmentcode/auggie@0.15.0",
         "--acp"
       ],
       "passthrough_config": {
@@ -688,7 +688,10 @@
       },
       "model_config": {
         "default_model": "anthropic/claude-sonnet-4-20250514",
-        "dynamic_models_cmd": ["opencode", "models"],
+        "dynamic_models_cmd": [
+          "opencode",
+          "models"
+        ],
         "dynamic_models_timeout_ms": 30000,
         "available_models": [
           {

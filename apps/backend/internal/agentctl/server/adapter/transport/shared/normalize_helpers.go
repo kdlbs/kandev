@@ -75,6 +75,72 @@ func NormalizeShellResult(payload *streams.ShellExecPayload, result any) {
 	}
 }
 
+// MaxContentLength is the maximum length for tool output content before truncation.
+const MaxContentLength = 50000
+
+// MaxFileCount is the maximum number of files to include in code search results.
+const MaxFileCount = 500
+
+// TruncateIfNeeded truncates a string if it exceeds maxLen.
+func TruncateIfNeeded(s string, maxLen int) (string, bool) {
+	if len(s) <= maxLen {
+		return s, false
+	}
+	return s[:maxLen], true
+}
+
+// NormalizeReadResult populates ReadFilePayload.Output with result content.
+func NormalizeReadResult(payload *streams.ReadFilePayload, result string) {
+	lines := SplitLines(result)
+	content, truncated := TruncateIfNeeded(result, MaxContentLength)
+
+	payload.Output = &streams.ReadFileOutput{
+		Content:   content,
+		LineCount: len(lines),
+		Truncated: truncated,
+		Language:  DetectLanguage(payload.FilePath),
+	}
+}
+
+// NormalizeCodeSearchResult populates CodeSearchPayload.Output with result content.
+func NormalizeCodeSearchResult(payload *streams.CodeSearchPayload, result string) {
+	result = strings.TrimSpace(result)
+	if result == "" {
+		payload.Output = &streams.CodeSearchOutput{
+			Files:     []string{},
+			FileCount: 0,
+		}
+		return
+	}
+
+	files := strings.Split(result, "\n")
+	truncated := false
+	if len(files) > MaxFileCount {
+		files = files[:MaxFileCount]
+		truncated = true
+	}
+
+	payload.Output = &streams.CodeSearchOutput{
+		Files:     files,
+		FileCount: len(files),
+		Truncated: truncated,
+	}
+}
+
+// NormalizeModifyResult updates ModifyFilePayload with result content for Write operations.
+func NormalizeModifyResult(payload *streams.ModifyFilePayload, result string) {
+	// For Write tool, store the written content confirmation
+	// The tool result confirms what was written
+	if len(payload.Mutations) > 0 {
+		mut := &payload.Mutations[0]
+		// If Content not already set from input args (for create), use result
+		if mut.Content == "" && mut.NewContent == "" && result != "" {
+			content, _ := TruncateIfNeeded(result, MaxContentLength)
+			mut.Content = content
+		}
+	}
+}
+
 // DetectLanguage maps file extension to language identifier.
 // Used for syntax highlighting in diffs.
 func DetectLanguage(path string) string {

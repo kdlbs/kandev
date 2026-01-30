@@ -67,7 +67,8 @@ type Adapter struct {
 	sessionStatusSent bool   // Whether we've sent the session status event
 
 	// Track pending tool calls to auto-complete on result
-	pendingToolCalls map[string]bool
+	// Maps tool_use_id to the NormalizedPayload for enrichment with results
+	pendingToolCalls map[string]*streams.NormalizedPayload
 
 	// Agent info
 	agentInfo *AgentInfo
@@ -117,7 +118,7 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 		cancel:                 cancel,
 		updatesCh:              make(chan AgentEvent, 100),
 		mainModelContextWindow: defaultContextWindow,
-		pendingToolCalls:       make(map[string]bool),
+		pendingToolCalls:       make(map[string]*streams.NormalizedPayload),
 	}
 }
 
@@ -534,6 +535,9 @@ func (a *Adapter) handleMessage(msg *claudecode.CLIMessage) {
 	case claudecode.MessageTypeAssistant:
 		a.handleAssistantMessage(msg, sessionID, operationID)
 
+	case claudecode.MessageTypeUser:
+		a.handleUserMessage(msg, sessionID, operationID)
+
 	case claudecode.MessageTypeResult:
 		a.handleResultMessage(msg, sessionID, operationID)
 
@@ -583,6 +587,9 @@ func (a *Adapter) handleAssistantMessage(msg *claudecode.CLIMessage, sessionID, 
 		return
 	}
 
+	// Extract parent tool use ID for subagent nesting
+	parentToolUseID := msg.ParentToolUseID
+
 	// Log content block types for debugging
 	blockTypes := make([]string, 0, len(msg.Message.Content))
 	for _, block := range msg.Message.Content {
@@ -590,7 +597,8 @@ func (a *Adapter) handleAssistantMessage(msg *claudecode.CLIMessage, sessionID, 
 	}
 	a.logger.Info("processing assistant message",
 		zap.Int("num_blocks", len(msg.Message.Content)),
-		zap.Strings("block_types", blockTypes))
+		zap.Strings("block_types", blockTypes),
+		zap.String("parent_tool_use_id", parentToolUseID))
 
 	// Update agent version and track main model name from model info
 	if msg.Message.Model != "" && a.agentInfo != nil {
@@ -649,9 +657,9 @@ func (a *Adapter) handleAssistantMessage(msg *claudecode.CLIMessage, sessionID, 
 				zap.String("tool_type", toolType),
 				zap.String("title", toolTitle))
 
-			// Track this tool call as pending
+			// Track this tool call as pending with its payload for result enrichment
 			a.mu.Lock()
-			a.pendingToolCalls[block.ID] = true
+			a.pendingToolCalls[block.ID] = normalizedPayload
 			a.mu.Unlock()
 
 			a.sendUpdate(AgentEvent{
@@ -659,33 +667,13 @@ func (a *Adapter) handleAssistantMessage(msg *claudecode.CLIMessage, sessionID, 
 				SessionID:         sessionID,
 				OperationID:       operationID,
 				ToolCallID:        block.ID,
+				ParentToolCallID:  parentToolUseID,
 				ToolName:          block.Name,
 				ToolTitle:         toolTitle,
 				ToolStatus:        "running",
 				NormalizedPayload: normalizedPayload,
 			})
 
-		case "tool_result":
-			status := "complete"
-			if block.IsError {
-				status = "error"
-			}
-			a.logger.Info("tool_result block received",
-				zap.String("tool_call_id", block.ToolUseID),
-				zap.String("status", status))
-
-			// Remove from pending
-			a.mu.Lock()
-			delete(a.pendingToolCalls, block.ToolUseID)
-			a.mu.Unlock()
-
-			a.sendUpdate(AgentEvent{
-				Type:        streams.EventTypeToolUpdate,
-				SessionID:   sessionID,
-				OperationID: operationID,
-				ToolCallID:  block.ToolUseID,
-				ToolStatus:  status,
-			})
 		}
 	}
 
@@ -720,6 +708,47 @@ func (a *Adapter) handleAssistantMessage(msg *claudecode.CLIMessage, sessionID, 
 	}
 }
 
+// handleUserMessage processes user messages containing tool results.
+// Claude Code sends tool results back as user messages with tool_result content blocks.
+func (a *Adapter) handleUserMessage(msg *claudecode.CLIMessage, sessionID, operationID string) {
+	if msg.Message == nil {
+		return
+	}
+
+	// Process content blocks looking for tool_result
+	for _, block := range msg.Message.Content {
+		if block.Type != "tool_result" {
+			continue
+		}
+
+		// Get and enrich the pending payload with result content
+		a.mu.Lock()
+		payload := a.pendingToolCalls[block.ToolUseID]
+		delete(a.pendingToolCalls, block.ToolUseID)
+		a.mu.Unlock()
+
+		// Enrich payload with result content
+		if payload != nil && block.Content != "" {
+			a.normalizer.NormalizeToolResult(payload, block.Content)
+		}
+
+		// Determine status
+		status := "complete"
+		if block.IsError {
+			status = "error"
+		}
+
+		a.sendUpdate(AgentEvent{
+			Type:              streams.EventTypeToolUpdate,
+			SessionID:         sessionID,
+			OperationID:       operationID,
+			ToolCallID:        block.ToolUseID,
+			ToolStatus:        status,
+			NormalizedPayload: payload,
+		})
+	}
+}
+
 // handleResultMessage processes result (completion) messages.
 func (a *Adapter) handleResultMessage(msg *claudecode.CLIMessage, sessionID, operationID string) {
 	a.logger.Info("received result message",
@@ -741,7 +770,7 @@ func (a *Adapter) handleResultMessage(msg *claudecode.CLIMessage, sessionID, ope
 	for toolID := range a.pendingToolCalls {
 		pendingTools = append(pendingTools, toolID)
 	}
-	a.pendingToolCalls = make(map[string]bool) // Clear pending
+	a.pendingToolCalls = make(map[string]*streams.NormalizedPayload) // Clear pending
 	a.mu.Unlock()
 
 	for _, toolID := range pendingTools {

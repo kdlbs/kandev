@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, memo } from 'react';
 import {
   IconCheck,
   IconChevronDown,
@@ -9,12 +9,12 @@ import {
   IconEdit,
   IconEye,
   IconFile,
-  IconLoader2,
   IconSearch,
   IconTerminal2,
   IconX,
 } from '@tabler/icons-react';
-import { cn } from '@/lib/utils';
+import { GridSpinner } from '@/components/grid-spinner';
+import { cn, toRelativePath, transformPathsInText } from '@/lib/utils';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import type { Message } from '@/lib/types/http';
 import type { ToolCallMetadata } from '@/components/task/chat/types';
@@ -75,7 +75,7 @@ function getStatusIcon(status?: string, permissionStatus?: string) {
       return <IconX className="h-3.5 w-3.5 text-red-500" />;
     case 'running':
     case 'in_progress':
-      return <IconLoader2 className="h-3.5 w-3.5 text-blue-500 animate-spin" />;
+      return <GridSpinner className="text-muted-foreground" />;
     default:
       return null;
   }
@@ -84,14 +84,16 @@ function getStatusIcon(status?: string, permissionStatus?: string) {
 type ToolCallMessageProps = {
   comment: Message;
   permissionMessage?: Message;
+  worktreePath?: string;
 };
 
-export function ToolCallMessage({ comment, permissionMessage }: ToolCallMessageProps) {
+export const ToolCallMessage = memo(function ToolCallMessage({ comment, permissionMessage, worktreePath }: ToolCallMessageProps) {
   const metadata = comment.metadata as ToolCallMetadata | undefined;
   const permissionMetadata = permissionMessage?.metadata as PermissionRequestMetadata | undefined;
 
   const toolName = metadata?.tool_name ?? '';
-  const title = metadata?.title ?? comment.content ?? 'Tool call';
+  const rawTitle = metadata?.title ?? comment.content ?? 'Tool call';
+  const title = transformPathsInText(rawTitle, worktreePath);
   const status = metadata?.status;
   const args = metadata?.args;
   const result = metadata?.result;
@@ -189,50 +191,60 @@ export function ToolCallMessage({ comment, permissionMessage }: ToolCallMessageP
 
   const isSuccess = status === 'complete' && !permissionStatus;
 
+  const handleToggleExpand = () => {
+    if (hasDetails) {
+      setIsExpanded(!isExpanded);
+      setIsManuallyToggled(true);
+    }
+  };
+
   return (
-    <div className="w-full">
-      {/* Icon + Summary Row */}
-      <div className="flex items-start gap-3 w-full">
-        {/* Icon */}
-        <div className="flex-shrink-0 mt-0.5">
-          {getToolIcon(toolName, cn(
-            'h-4 w-4',
-            isPermissionPending ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'
-          ))}
+    <div className="w-full group">
+      <div
+        className={cn(
+          'flex items-start gap-3 w-full rounded px-2 py-1 -mx-2 transition-colors',
+          hasDetails && 'hover:bg-muted/50 cursor-pointer'
+        )}
+        onClick={handleToggleExpand}
+      >
+        {/* Icon with hover-to-show chevron */}
+        <div className={cn(
+          'flex-shrink-0 mt-0.5 relative w-4 h-4',
+          hasDetails && 'cursor-pointer'
+        )}>
+          {/* Show tool icon by default, chevron on hover if expandable */}
+          <div className={cn(
+            'absolute inset-0 transition-opacity',
+            hasDetails && 'group-hover:opacity-0'
+          )}>
+            {getToolIcon(toolName, cn(
+              'h-4 w-4',
+              isPermissionPending ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'
+            ))}
+          </div>
+          {hasDetails && (
+            isExpanded
+              ? <IconChevronDown className="h-4 w-4 text-muted-foreground absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+              : <IconChevronRight className="h-4 w-4 text-muted-foreground absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+          )}
         </div>
 
         {/* Content */}
         <div className="flex-1 min-w-0 pt-0.5">
           <div className="flex items-center gap-2 text-xs">
-            <button
-              type="button"
-              onClick={() => {
-                if (hasDetails) {
-                  setIsExpanded(!isExpanded);
-                  setIsManuallyToggled(true);
-                }
-              }}
-              className={cn(
-                'inline-flex items-center gap-1.5 text-left',
-                hasDetails && 'cursor-pointer hover:opacity-70 transition-opacity',
-                isPermissionPending && 'text-amber-600 dark:text-amber-400'
-              )}
-              disabled={!hasDetails}
-            >
+            <span className={cn(
+              'inline-flex items-center gap-1.5',
+              isPermissionPending && 'text-amber-600 dark:text-amber-400'
+            )}>
               <span className="font-mono text-xs">
                 {title}
               </span>
               {/* Status indicator - only show if not success */}
               {!isSuccess && getStatusIcon(status, permissionStatus)}
-              {hasDetails && (
-                isExpanded
-                  ? <IconChevronDown className="h-3.5 w-3.5 text-muted-foreground/50 flex-shrink-0" />
-                  : <IconChevronRight className="h-3.5 w-3.5 text-muted-foreground/50 flex-shrink-0" />
-              )}
-            </button>
+            </span>
             {filePath && (
               <span className="text-xs text-muted-foreground/60 truncate">
-                {filePath}
+                {toRelativePath(filePath, worktreePath)}
               </span>
             )}
           </div>
@@ -282,4 +294,4 @@ export function ToolCallMessage({ comment, permissionMessage }: ToolCallMessageP
       </div>
     </div>
   );
-}
+});

@@ -714,18 +714,32 @@ func (a *Adapter) handleMessagePartUpdated(props json.RawMessage, sessionID, ope
 			status = state.Status
 		}
 
-		title := state.Title
-		if title == "" {
-			title = toolName
+		// Build ToolState for normalization (do this first so we can use input for title)
+		toolState := &ToolState{
+			Output: state.Output,
+			Title:  state.Title,
 		}
-
-		var args map[string]any
 		if state.Input != nil {
-			_ = json.Unmarshal(state.Input, &args) // Ignore error - args are optional
+			toolState.Input = make(map[string]any)
+			_ = json.Unmarshal(state.Input, &toolState.Input) // Ignore error - input is optional
+		}
+		if state.Metadata != nil {
+			toolState.Metadata = make(map[string]any)
+			_ = json.Unmarshal(state.Metadata, &toolState.Metadata) // Ignore error - metadata is optional
 		}
 
 		// Generate normalized payload
-		normalizedPayload := a.normalizer.NormalizeToolCall(toolName, args)
+		normalizedPayload := a.normalizer.NormalizeToolCall(toolName, toolState)
+
+		// Determine title: prefer derived title (command/path), then state.Title, fallback to toolName
+		// For tools like bash, the command is more useful than the description
+		title := deriveToolTitle(toolName, toolState.Input)
+		if title == "" {
+			title = state.Title
+		}
+		if title == "" {
+			title = toolName
+		}
 
 		// Track if we've seen this tool call before
 		a.mu.Lock()
@@ -764,6 +778,37 @@ func (a *Adapter) handleMessagePartUpdated(props json.RawMessage, sessionID, ope
 			})
 		}
 	}
+}
+
+// deriveToolTitle derives a user-friendly title from tool input.
+// Returns the most relevant field for display (e.g., command for bash, path for read).
+func deriveToolTitle(toolName string, input map[string]any) string {
+	if input == nil {
+		return ""
+	}
+
+	switch toolName {
+	case OpenCodeToolBash:
+		// For bash, use the command
+		if cmd, ok := input["command"].(string); ok && cmd != "" {
+			return cmd
+		}
+	case OpenCodeToolGlob, OpenCodeToolGrep:
+		// For search tools, use the pattern
+		if pattern, ok := input["pattern"].(string); ok && pattern != "" {
+			return pattern
+		}
+	case OpenCodeToolRead, OpenCodeToolEdit:
+		// For file tools, use the path
+		if path, ok := input["path"].(string); ok && path != "" {
+			return path
+		}
+		if path, ok := input["file_path"].(string); ok && path != "" {
+			return path
+		}
+	}
+
+	return ""
 }
 
 // handleMessageUpdated processes message.updated events (for token tracking)

@@ -462,6 +462,7 @@ export type MessageType =
   | 'tool_call'
   | 'tool_edit'
   | 'tool_read'
+  | 'tool_search'
   | 'tool_execute'
   | 'progress'
   | 'log'

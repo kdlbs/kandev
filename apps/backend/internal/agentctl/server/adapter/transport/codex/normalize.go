@@ -38,21 +38,21 @@ func (n *Normalizer) NormalizeToolCall(toolName string, args map[string]any) *st
 
 // NormalizeToolResult updates the payload with tool result data.
 func (n *Normalizer) NormalizeToolResult(payload *streams.NormalizedPayload, result any) {
-	switch payload.Kind {
+	switch payload.Kind() {
 	case streams.ToolKindShellExec:
-		if payload.ShellExec != nil {
-			n.normalizeCommandResult(payload.ShellExec, result)
+		if payload.ShellExec() != nil {
+			n.normalizeCommandResult(payload.ShellExec(), result)
 		}
 	case streams.ToolKindModifyFile:
 		// File changes are typically completed with a diff in the update
-		if payload.ModifyFile != nil && len(payload.ModifyFile.Mutations) > 0 {
+		if payload.ModifyFile() != nil && len(payload.ModifyFile().Mutations) > 0 {
 			if diffStr, ok := result.(string); ok && diffStr != "" {
-				payload.ModifyFile.Mutations[0].Diff = diffStr
+				payload.ModifyFile().Mutations[0].Diff = diffStr
 			}
 		}
 	case streams.ToolKindGeneric:
-		if payload.Generic != nil {
-			payload.Generic.Output = result
+		if payload.Generic() != nil {
+			payload.Generic().Output = result
 		}
 	}
 }
@@ -62,13 +62,8 @@ func (n *Normalizer) normalizeCommand(args map[string]any) *streams.NormalizedPa
 	command := shared.GetString(args, "command")
 	workDir := shared.GetString(args, "cwd")
 
-	return &streams.NormalizedPayload{
-		Kind: streams.ToolKindShellExec,
-		ShellExec: &streams.ShellExecPayload{
-			Command: command,
-			WorkDir: workDir,
-		},
-	}
+	// Use factory function
+	return streams.NewShellExec(command, workDir, "", 0, false)
 }
 
 // normalizeFileChange converts Codex fileChange item data.
@@ -76,9 +71,8 @@ func (n *Normalizer) normalizeFileChange(args map[string]any) *streams.Normalize
 	// Codex sends changes as an array in the item
 	changes, _ := args["changes"].([]any)
 
-	payload := &streams.ModifyFilePayload{
-		Mutations: []streams.FileMutation{},
-	}
+	var filePath string
+	var mutations []streams.FileMutation
 
 	for _, change := range changes {
 		changeMap, ok := change.(map[string]any)
@@ -87,8 +81,8 @@ func (n *Normalizer) normalizeFileChange(args map[string]any) *streams.Normalize
 		}
 
 		path := shared.GetString(changeMap, "path")
-		if payload.FilePath == "" {
-			payload.FilePath = path
+		if filePath == "" {
+			filePath = path
 		}
 
 		mutation := streams.FileMutation{
@@ -100,33 +94,25 @@ func (n *Normalizer) normalizeFileChange(args map[string]any) *streams.Normalize
 			mutation.Diff = diff
 		}
 
-		payload.Mutations = append(payload.Mutations, mutation)
+		mutations = append(mutations, mutation)
 	}
 
 	// If no changes array, try single file fields
-	if len(payload.Mutations) == 0 {
-		path := shared.GetString(args, "path")
-		payload.FilePath = path
-		payload.Mutations = append(payload.Mutations, streams.FileMutation{
+	if len(mutations) == 0 {
+		filePath = shared.GetString(args, "path")
+		mutations = append(mutations, streams.FileMutation{
 			Type: streams.MutationPatch,
 		})
 	}
 
-	return &streams.NormalizedPayload{
-		Kind:       streams.ToolKindModifyFile,
-		ModifyFile: payload,
-	}
+	// Use factory function
+	return streams.NewModifyFile(filePath, mutations)
 }
 
 // normalizeGeneric wraps unknown items as generic.
 func (n *Normalizer) normalizeGeneric(toolName string, args map[string]any) *streams.NormalizedPayload {
-	return &streams.NormalizedPayload{
-		Kind: streams.ToolKindGeneric,
-		Generic: &streams.GenericPayload{
-			Name:  toolName,
-			Input: args,
-		},
-	}
+	// Use factory function
+	return streams.NewGeneric(toolName, args)
 }
 
 // normalizeCommandResult updates command payload with result data.

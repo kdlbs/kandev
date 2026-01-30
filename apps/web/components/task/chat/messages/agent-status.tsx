@@ -4,6 +4,7 @@ import { useCallback, useMemo, useState, useEffect, useRef } from 'react';
 import { IconAlertCircle, IconAlertTriangle, IconCopy, IconCheck } from '@tabler/icons-react';
 import type { Message, TaskSessionState } from '@/lib/types/http';
 import { useSessionTurn } from '@/hooks/domains/session/use-session-turn';
+import { GridSpinner } from '@/components/grid-spinner';
 
 type AgentStatusProps = {
   sessionState?: TaskSessionState;
@@ -103,22 +104,6 @@ function useRunningTimer(isRunning: boolean) {
   return { elapsedSeconds: displaySeconds, formatted };
 }
 
-function GridSpinner({ className }: { className?: string }) {
-  return (
-    <span className={`spinner-grid ${className ?? ''}`} role="status" aria-label="Loading">
-      <span className="spinner-grid-cube" />
-      <span className="spinner-grid-cube" />
-      <span className="spinner-grid-cube" />
-      <span className="spinner-grid-cube" />
-      <span className="spinner-grid-cube" />
-      <span className="spinner-grid-cube" />
-      <span className="spinner-grid-cube" />
-      <span className="spinner-grid-cube" />
-      <span className="spinner-grid-cube" />
-    </span>
-  );
-}
-
 function CopyButton({ content }: { content: string }) {
   const [copied, setCopied] = useState(false);
 
@@ -208,9 +193,9 @@ export function AgentStatus({ sessionState, sessionId, messages = [] }: AgentSta
   if (isRunning && config) {
     return (
       <div className="py-2" role="status" aria-label={config.label}>
-        <span className="inline-flex items-center gap-2 text-xs">
-          <GridSpinner className="text-primary" />
-          <span className="text-muted-foreground">{config.label}</span>
+        <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+          {config.label}
+          <GridSpinner className="text-muted-foreground" />
           {elapsedSeconds > 0 && (
             <span className="text-muted-foreground/60 tabular-nums">
               {runningDuration}

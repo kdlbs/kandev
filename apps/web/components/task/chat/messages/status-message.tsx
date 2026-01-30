@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, memo, useCallback } from 'react';
 import { IconAlertTriangle, IconInfoCircle, IconHandStop, IconChevronDown, IconChevronRight } from '@tabler/icons-react';
 import { cn } from '@/lib/utils';
 import type { Message } from '@/lib/types/http';
@@ -15,7 +15,7 @@ interface ErrorMetadata extends StatusMetadata {
   provider_agent?: string;
 }
 
-export function StatusMessage({ comment }: { comment: Message }) {
+export const StatusMessage = memo(function StatusMessage({ comment }: { comment: Message }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const metadata = comment.metadata as ErrorMetadata | undefined;
   const progress =
@@ -27,6 +27,39 @@ export function StatusMessage({ comment }: { comment: Message }) {
 
   // Check if there are error details to show
   const hasErrorDetails = isError && (metadata?.error_data || metadata?.error || metadata?.text || metadata?.stderr);
+
+  // Format error details for display
+  const formatErrorDetails = () => {
+    const details: { label: string; value: string }[] = [];
+
+    if (metadata?.stderr && metadata.stderr.length > 0) {
+      details.push({ label: 'Agent Output', value: metadata.stderr.join('\n') });
+    }
+    if (metadata?.error) {
+      details.push({ label: 'Error', value: metadata.error });
+    }
+    if (metadata?.text) {
+      details.push({ label: 'Details', value: metadata.text });
+    }
+    if (metadata?.error_data) {
+      // Don't show stderr again in error_data since we already show it above
+      const filteredData = { ...metadata.error_data };
+      delete filteredData.stderr;
+      if (Object.keys(filteredData).length > 0) {
+        details.push({ label: 'Error Data', value: JSON.stringify(filteredData, null, 2) });
+      }
+    }
+
+    return details;
+  };
+
+  const errorDetails = hasErrorDetails ? formatErrorDetails() : [];
+  const hasExpandableContent = hasErrorDetails && errorDetails.length > 0;
+
+  // useCallback must be called before any early returns (React hooks rules)
+  const handleToggle = useCallback(() => {
+    if (hasExpandableContent) setIsExpanded((prev) => !prev);
+  }, [hasExpandableContent]);
 
   // Simple system message: no metadata, no progress, just a short message
   const isSimpleStatus = !isError && !isWarning && progress === null && !statusLine && !metadata?.message;
@@ -59,40 +92,30 @@ export function StatusMessage({ comment }: { comment: Message }) {
   const iconClass = isError ? 'text-red-500' : isWarning ? 'text-amber-500' : 'text-muted-foreground';
   const textClass = isError ? 'text-red-600 dark:text-red-400' : isWarning ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground';
 
-  // Format error details for display
-  const formatErrorDetails = () => {
-    const details: { label: string; value: string }[] = [];
-
-    if (metadata?.stderr && metadata.stderr.length > 0) {
-      details.push({ label: 'Agent Output', value: metadata.stderr.join('\n') });
-    }
-    if (metadata?.error) {
-      details.push({ label: 'Error', value: metadata.error });
-    }
-    if (metadata?.text) {
-      details.push({ label: 'Details', value: metadata.text });
-    }
-    if (metadata?.error_data) {
-      // Don't show stderr again in error_data since we already show it above
-      const filteredData = { ...metadata.error_data };
-      delete filteredData.stderr;
-      if (Object.keys(filteredData).length > 0) {
-        details.push({ label: 'Error Data', value: JSON.stringify(filteredData, null, 2) });
-      }
-    }
-
-    return details;
-  };
-
-  const errorDetails = hasErrorDetails ? formatErrorDetails() : [];
-
   return (
-    <div className="w-full">
-      {/* Icon + Content Row */}
-      <div className="flex items-start gap-3 w-full">
-        {/* Icon */}
-        <div className="flex-shrink-0 mt-0.5">
-          <Icon className={cn('h-4 w-4', iconClass)} />
+    <div className="w-full group">
+      <div
+        className={cn(
+          'flex items-start gap-3 w-full rounded px-2 py-1 -mx-2 transition-colors',
+          hasExpandableContent && 'hover:bg-muted/50 cursor-pointer'
+        )}
+        onClick={handleToggle}
+      >
+        {/* Icon with hover-to-show chevron */}
+        <div className={cn(
+          'flex-shrink-0 mt-0.5 relative w-4 h-4',
+          hasExpandableContent && 'cursor-pointer'
+        )}>
+          <Icon className={cn(
+            'h-4 w-4 absolute inset-0 transition-opacity',
+            iconClass,
+            hasExpandableContent && 'group-hover:opacity-0'
+          )} />
+          {hasExpandableContent && (
+            isExpanded
+              ? <IconChevronDown className="h-4 w-4 text-muted-foreground absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+              : <IconChevronRight className="h-4 w-4 text-muted-foreground absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+          )}
         </div>
 
         {/* Content */}
@@ -101,37 +124,19 @@ export function StatusMessage({ comment }: { comment: Message }) {
             {message || 'An error occurred'}
           </div>
 
-          {/* Expandable error details */}
-          {hasErrorDetails && errorDetails.length > 0 && (
-            <div className="mt-2">
-              <button
-                onClick={() => setIsExpanded(!isExpanded)}
-                className="inline-flex items-center gap-1.5 text-left cursor-pointer hover:opacity-70 transition-opacity"
-              >
-                <span className="font-mono text-xs text-muted-foreground">
-                  {isExpanded ? 'Hide details' : 'Show details'}
-                </span>
-                {isExpanded ? (
-                  <IconChevronDown className="h-3.5 w-3.5 text-muted-foreground/50 flex-shrink-0" />
-                ) : (
-                  <IconChevronRight className="h-3.5 w-3.5 text-muted-foreground/50 flex-shrink-0" />
-                )}
-              </button>
-
-              {isExpanded && (
-                <div className="mt-2 pl-4 border-l-2 border-border/30 space-y-2">
-                  {errorDetails.map((detail, index) => (
-                    <div key={index}>
-                      <div className="text-[10px] uppercase tracking-wide text-muted-foreground/60 mb-0.5">
-                        {detail.label}
-                      </div>
-                      <pre className="text-xs bg-muted/30 rounded p-2 overflow-x-auto whitespace-pre-wrap break-all font-mono">
-                        {detail.value}
-                      </pre>
-                    </div>
-                  ))}
+          {/* Expanded error details */}
+          {isExpanded && hasExpandableContent && (
+            <div className="mt-2 pl-4 border-l-2 border-border/30 space-y-2">
+              {errorDetails.map((detail) => (
+                <div key={detail.label}>
+                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground/60 mb-0.5">
+                    {detail.label}
+                  </div>
+                  <pre className="text-xs bg-muted/30 rounded p-2 overflow-x-auto whitespace-pre-wrap break-all font-mono">
+                    {detail.value}
+                  </pre>
                 </div>
-              )}
+              ))}
             </div>
           )}
 
@@ -154,4 +159,4 @@ export function StatusMessage({ comment }: { comment: Message }) {
       </div>
     </div>
   );
-}
+});

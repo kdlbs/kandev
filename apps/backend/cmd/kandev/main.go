@@ -36,7 +36,6 @@ import (
 	editorhandlers "github.com/kandev/kandev/internal/editors/handlers"
 	notificationcontroller "github.com/kandev/kandev/internal/notifications/controller"
 	notificationhandlers "github.com/kandev/kandev/internal/notifications/handlers"
-	notificationservice "github.com/kandev/kandev/internal/notifications/service"
 	promptcontroller "github.com/kandev/kandev/internal/prompts/controller"
 	prompthandlers "github.com/kandev/kandev/internal/prompts/handlers"
 
@@ -199,7 +198,7 @@ func main() {
 	log.Info("Task Service initialized")
 
 	userCtrl := usercontroller.NewController(userSvc)
-	var notificationSvc *notificationservice.Service
+	var gateway *gateways.Gateway
 	var notificationCtrl *notificationcontroller.Controller
 	editorCtrl := editorcontroller.NewController(editorSvc)
 	promptCtrl := promptcontroller.NewController(promptSvc)
@@ -278,7 +277,7 @@ func main() {
 	// WEBSOCKET GATEWAY (All communication via WebSocket)
 	// ============================================
 	log.Info("Initializing WebSocket Gateway...")
-	gateway, _, _, err := provideGateway(
+	gateway, _, notificationCtrl, err = provideGateway(
 		ctx,
 		log,
 		eventBus,
@@ -294,30 +293,10 @@ func main() {
 		log.Fatal("Failed to initialize WebSocket gateway", zap.Error(err))
 	}
 
-	// Start the WebSocket hub
-	go gateway.Hub.Run(ctx)
-	gateways.RegisterTaskNotifications(ctx, eventBus, gateway.Hub, log)
-	gateways.RegisterUserNotifications(ctx, eventBus, gateway.Hub, log)
+	// Note: Hub is started and TaskNotifications/UserNotifications/TaskSessionStateChanged
+	// are already registered by provideGateway.
+	// Only register SessionStreamNotifications here as it's not part of provideGateway
 	gateways.RegisterSessionStreamNotifications(ctx, eventBus, gateway.Hub, log)
-
-	notificationSvc = notificationservice.NewService(notificationRepo, taskRepo, gateway.Hub, log)
-	notificationCtrl = notificationcontroller.NewController(notificationSvc)
-	if eventBus != nil {
-		_, err = eventBus.Subscribe(events.TaskSessionStateChanged, func(ctx context.Context, event *bus.Event) error {
-			data, ok := event.Data.(map[string]interface{})
-			if !ok {
-				return nil
-			}
-			taskID, _ := data["task_id"].(string)
-			sessionID, _ := data["session_id"].(string)
-			newState, _ := data["new_state"].(string)
-			notificationSvc.HandleTaskSessionStateChanged(ctx, taskID, sessionID, newState)
-			return nil
-		})
-		if err != nil {
-			log.Error("Failed to subscribe to task session notifications", zap.Error(err))
-		}
-	}
 
 	// Set up session data provider for session subscriptions
 	// Sends initial git status when a client subscribes to a session

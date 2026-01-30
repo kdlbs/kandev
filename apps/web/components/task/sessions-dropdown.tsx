@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { IconStack2, IconPlus, IconStar } from '@tabler/icons-react';
 import { Button } from '@kandev/ui/button';
 import {
@@ -92,7 +92,7 @@ type SessionsDropdownProps = {
   onSetPrimary?: (sessionId: string) => void;
 };
 
-export function SessionsDropdown({
+export const SessionsDropdown = memo(function SessionsDropdown({
   taskId,
   activeSessionId = null,
   taskTitle = '',
@@ -323,4 +323,4 @@ export function SessionsDropdown({
       />
     </>
   );
-}
+});

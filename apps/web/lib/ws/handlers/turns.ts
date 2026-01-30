@@ -19,6 +19,8 @@ export function registerTurnsHandlers(store: StoreApi<AppState>): WsHandlers {
         created_at: payload.created_at,
         updated_at: payload.updated_at,
       });
+      // Track this as the active turn for the session
+      store.getState().setActiveTurn(payload.session_id, payload.id);
     },
     'session.turn.completed': (message) => {
       const payload = message.payload;
@@ -30,6 +32,8 @@ export function registerTurnsHandlers(store: StoreApi<AppState>): WsHandlers {
         payload.id,
         payload.completed_at || new Date().toISOString()
       );
+      // Clear the active turn when it completes
+      store.getState().setActiveTurn(payload.session_id, null);
     },
   };
 }

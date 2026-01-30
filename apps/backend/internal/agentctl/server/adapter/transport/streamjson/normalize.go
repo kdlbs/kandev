@@ -57,20 +57,34 @@ func (n *Normalizer) NormalizeToolCall(toolName string, args map[string]any) *st
 
 // NormalizeToolResult updates the payload with tool result data.
 func (n *Normalizer) NormalizeToolResult(payload *streams.NormalizedPayload, result any) {
-	switch payload.Kind {
+	resultStr, _ := result.(string)
+
+	switch payload.Kind() {
+	case streams.ToolKindReadFile:
+		if payload.ReadFile() != nil && resultStr != "" {
+			shared.NormalizeReadResult(payload.ReadFile(), resultStr)
+		}
+	case streams.ToolKindCodeSearch:
+		if payload.CodeSearch() != nil && resultStr != "" {
+			shared.NormalizeCodeSearchResult(payload.CodeSearch(), resultStr)
+		}
+	case streams.ToolKindModifyFile:
+		if payload.ModifyFile() != nil && resultStr != "" {
+			shared.NormalizeModifyResult(payload.ModifyFile(), resultStr)
+		}
 	case streams.ToolKindShellExec:
-		if payload.ShellExec != nil {
-			shared.NormalizeShellResult(payload.ShellExec, result)
+		if payload.ShellExec() != nil {
+			shared.NormalizeShellResult(payload.ShellExec(), result)
 		}
 	case streams.ToolKindHttpRequest:
-		if payload.HttpRequest != nil {
+		if payload.HttpRequest() != nil {
 			if r, ok := result.(string); ok {
-				payload.HttpRequest.Response = r
+				payload.HttpRequest().Response = r
 			}
 		}
 	case streams.ToolKindGeneric:
-		if payload.Generic != nil {
-			payload.Generic.Output = result
+		if payload.Generic() != nil {
+			payload.Generic().Output = result
 		}
 	}
 }
@@ -82,14 +96,11 @@ func (n *Normalizer) normalizeEdit(toolName string, args map[string]any) *stream
 	newString := shared.GetString(args, "new_string")
 	content := shared.GetString(args, "content")
 
-	payload := &streams.ModifyFilePayload{
-		FilePath:  filePath,
-		Mutations: []streams.FileMutation{},
-	}
+	var mutations []streams.FileMutation
 
 	if toolName == claudecode.ToolWrite {
 		// Write is a full file creation/replacement
-		payload.Mutations = append(payload.Mutations, streams.FileMutation{
+		mutations = append(mutations, streams.FileMutation{
 			Type:    streams.MutationCreate,
 			Content: content,
 		})
@@ -106,13 +117,11 @@ func (n *Normalizer) normalizeEdit(toolName string, args map[string]any) *stream
 			mutation.Diff = shared.GenerateUnifiedDiff(oldString, newString, filePath, 0)
 		}
 
-		payload.Mutations = append(payload.Mutations, mutation)
+		mutations = append(mutations, mutation)
 	}
 
-	return &streams.NormalizedPayload{
-		Kind:       streams.ToolKindModifyFile,
-		ModifyFile: payload,
-	}
+	// Use factory function
+	return streams.NewModifyFile(filePath, mutations)
 }
 
 // normalizeRead converts stream-json Read tool data.
@@ -192,15 +201,12 @@ func (n *Normalizer) normalizeManageTodos(toolName string, args map[string]any) 
 		operation = "write"
 	}
 
-	payload := &streams.ManageTodosPayload{
-		Operation: operation,
-	}
-
 	// Extract items if present
-	if items, ok := args["items"].([]any); ok {
-		for _, item := range items {
+	var items []streams.TodoItem
+	if rawItems, ok := args["items"].([]any); ok {
+		for _, item := range rawItems {
 			if itemMap, ok := item.(map[string]any); ok {
-				payload.Items = append(payload.Items, streams.TodoItem{
+				items = append(items, streams.TodoItem{
 					ID:          shared.GetString(itemMap, "id"),
 					Description: shared.GetString(itemMap, "description"),
 					Status:      shared.GetString(itemMap, "status"),
@@ -209,10 +215,8 @@ func (n *Normalizer) normalizeManageTodos(toolName string, args map[string]any) 
 		}
 	}
 
-	return &streams.NormalizedPayload{
-		Kind:        streams.ToolKindManageTodos,
-		ManageTodos: payload,
-	}
+	// Use factory function
+	return streams.NewManageTodos(operation, items)
 }
 
 // normalizeGeneric wraps unknown tools as generic.

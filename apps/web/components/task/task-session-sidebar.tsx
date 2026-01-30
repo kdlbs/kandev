@@ -1,7 +1,7 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
-import type { TaskState, Workspace, Repository, TaskSession, BoardSnapshot } from '@/lib/types/http';
+import { useCallback, useMemo, useState, memo } from 'react';
+import type { TaskState, Workspace, Repository, TaskSession, BoardSnapshot, Task } from '@/lib/types/http';
 import type { KanbanState } from '@/lib/state/slices';
 import { TaskSwitcher } from './task-switcher';
 import { BoardSwitcher } from './board-switcher';
@@ -14,6 +14,47 @@ import { useAppStore, useAppStoreApi } from '@/components/state-provider';
 import { linkToSession } from '@/lib/links';
 import { listTaskSessions, fetchBoardSnapshot, listBoards } from '@/lib/api';
 import { useTasks } from '@/hooks/use-tasks';
+
+// Extracted component to isolate dialog state from sidebar
+type NewTaskButtonProps = {
+  workspaceId: string | null;
+  boardId: string | null;
+  columns: Array<{ id: string; title: string; color?: string; autoStartAgent?: boolean }>;
+  onSuccess: (task: Task, mode: 'create' | 'edit', meta?: { taskSessionId?: string | null }) => void;
+};
+
+const NewTaskButton = memo(function NewTaskButton({
+  workspaceId,
+  boardId,
+  columns,
+  onSuccess,
+}: NewTaskButtonProps) {
+  const [dialogOpen, setDialogOpen] = useState(false);
+
+  return (
+    <>
+      <Button
+        size="sm"
+        variant="outline"
+        className="h-6 gap-1 cursor-pointer"
+        onClick={() => setDialogOpen(true)}
+      >
+        <IconPlus className="h-4 w-4" />
+        Task
+      </Button>
+      <TaskCreateDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        mode="task"
+        workspaceId={workspaceId}
+        boardId={boardId}
+        defaultColumnId={columns[0]?.id ?? null}
+        columns={columns}
+        onSuccess={onSuccess}
+      />
+    </>
+  );
+});
 
 type TaskSessionSidebarProps = {
   workspaceId: string | null;
@@ -54,7 +95,7 @@ function sortByUpdatedAtDesc<T extends { updated_at?: string | null }>(items: T[
   });
 }
 
-export function TaskSessionSidebar({ workspaceId, boardId }: TaskSessionSidebarProps) {
+export const TaskSessionSidebar = memo(function TaskSessionSidebar({ workspaceId, boardId }: TaskSessionSidebarProps) {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const sessionsById = useAppStore((state) => state.taskSessions.items);
@@ -75,7 +116,6 @@ export function TaskSessionSidebar({ workspaceId, boardId }: TaskSessionSidebarP
     }
     return activeTaskId;
   }, [activeSessionId, activeTaskId, sessionsById]);
-  const [taskDialogOpen, setTaskDialogOpen] = useState(false);
   const kanbanBoardId = useAppStore((state) => state.kanban.boardId);
   const kanbanIsLoading = useAppStore((state) => state.kanban.isLoading ?? false);
   // Consider loading if explicitly loading OR if board IDs mismatch (mid-switch)
@@ -228,6 +268,50 @@ export function TaskSessionSidebar({ workspaceId, boardId }: TaskSessionSidebarP
   );
 
   // Handle workspace change - find first board and navigate to most recent task's session
+  // Memoized columns for NewTaskButton to prevent re-renders
+  const dialogColumns = useMemo(
+    () => columns.map((step: KanbanState['steps'][number]) => ({
+      id: step.id,
+      title: step.title,
+      color: step.color,
+      autoStartAgent: step.autoStartAgent,
+    })),
+    [columns]
+  );
+
+  // Memoized success handler for NewTaskButton
+  const handleTaskCreated = useCallback(
+    (task: Task, _mode: 'create' | 'edit', meta?: { taskSessionId?: string | null }) => {
+      store.setState((state) => {
+        if (state.kanban.boardId !== task.board_id) return state;
+        const nextTask = {
+          id: task.id,
+          workflowStepId: task.workflow_step_id,
+          title: task.title,
+          description: task.description,
+          position: task.position ?? 0,
+          state: task.state,
+          repositoryId: task.repositories?.[0]?.repository_id ?? undefined,
+        };
+        return {
+          ...state,
+          kanban: {
+            ...state.kanban,
+            tasks: state.kanban.tasks.some((item: KanbanState['tasks'][number]) => item.id === task.id)
+              ? state.kanban.tasks.map((item: KanbanState['tasks'][number]) => (item.id === task.id ? nextTask : item))
+              : [...state.kanban.tasks, nextTask],
+          },
+        };
+      });
+      setActiveTask(task.id);
+      if (meta?.taskSessionId) {
+        setActiveSession(task.id, meta.taskSessionId);
+        updateUrl(meta.taskSessionId);
+      }
+    },
+    [store, setActiveTask, setActiveSession, updateUrl]
+  );
+
   const handleWorkspaceChange = useCallback(
     async (newWorkspaceId: string) => {
       if (newWorkspaceId === workspaceId) return;
@@ -303,15 +387,12 @@ export function TaskSessionSidebar({ workspaceId, boardId }: TaskSessionSidebarP
               onSelect={handleWorkspaceChange}
             />
           </div>
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-6 gap-1 cursor-pointer"
-            onClick={() => setTaskDialogOpen(true)}
-          >
-            <IconPlus className="h-4 w-4" />
-            Task
-          </Button>
+          <NewTaskButton
+            workspaceId={workspaceId}
+            boardId={boardId}
+            columns={dialogColumns}
+            onSuccess={handleTaskCreated}
+          />
         </div>
         <div className="flex-1 min-h-0 overflow-y-auto space-y-4 pt-3">
           <TaskSwitcher
@@ -336,43 +417,6 @@ export function TaskSessionSidebar({ workspaceId, boardId }: TaskSessionSidebarP
           </div>
         )}
       </SessionPanel>
-      <TaskCreateDialog
-        open={taskDialogOpen}
-        onOpenChange={setTaskDialogOpen}
-        mode="task"
-        workspaceId={workspaceId}
-        boardId={boardId}
-        defaultColumnId={columns[0]?.id ?? null}
-        columns={columns.map((step: KanbanState['steps'][number]) => ({ id: step.id, title: step.title, color: step.color, autoStartAgent: step.autoStartAgent }))}
-        onSuccess={(task, _mode, meta) => {
-          store.setState((state) => {
-            if (state.kanban.boardId !== task.board_id) return state;
-            const nextTask = {
-              id: task.id,
-              workflowStepId: task.workflow_step_id,
-              title: task.title,
-              description: task.description,
-              position: task.position ?? 0,
-              state: task.state,
-              repositoryId: task.repositories?.[0]?.repository_id ?? undefined,
-            };
-            return {
-              ...state,
-              kanban: {
-                ...state.kanban,
-                tasks: state.kanban.tasks.some((item: KanbanState['tasks'][number]) => item.id === task.id)
-                  ? state.kanban.tasks.map((item: KanbanState['tasks'][number]) => (item.id === task.id ? nextTask : item))
-                  : [...state.kanban.tasks, nextTask],
-              },
-            };
-          });
-          setActiveTask(task.id);
-          if (meta?.taskSessionId) {
-            setActiveSession(task.id, meta.taskSessionId);
-            updateUrl(meta.taskSessionId);
-          }
-        }}
-      />
     </>
   );
-}
+});

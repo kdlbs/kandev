@@ -2,13 +2,13 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import '@git-diff-view/react/styles/diff-view.css';
-import { TooltipProvider } from '@kandev/ui/tooltip';
 import { TaskTopBar } from '@/components/task/task-top-bar';
 import { TaskLayout } from '@/components/task/task-layout';
 import { DebugOverlay } from '@/components/debug-overlay';
 import type { Repository, Task } from '@/lib/types/http';
 import type { KanbanState } from '@/lib/state/slices';
 import { DEBUG_UI } from '@/lib/config';
+import { TooltipProvider } from '@kandev/ui/tooltip';
 import { useRepositories } from '@/hooks/domains/workspace/use-repositories';
 import { useSessionAgent } from '@/hooks/domains/session/use-session-agent';
 import { useSessionResumption } from '@/hooks/domains/session/use-session-resumption';

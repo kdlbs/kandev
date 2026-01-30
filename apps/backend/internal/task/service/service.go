@@ -2002,8 +2002,16 @@ func (s *Service) AppendThinkingContent(ctx context.Context, messageID, addition
 // UpdateToolCallMessage updates a tool call message's status, optionally title and normalized data.
 // It includes retry logic to handle race conditions where the complete event
 // may arrive before the message has been created by the start event.
+// If the message is not found after retries and taskID/turnID/msgType are provided, it creates the message.
 // The normalized parameter contains typed tool payload data that gets added to metadata.
 func (s *Service) UpdateToolCallMessage(ctx context.Context, sessionID, toolCallID, status, result, title string, normalized *streams.NormalizedPayload) error {
+	return s.UpdateToolCallMessageWithCreate(ctx, sessionID, toolCallID, "", status, result, title, normalized, "", "", "")
+}
+
+// UpdateToolCallMessageWithCreate is like UpdateToolCallMessage but can create the message if not found.
+// If taskID, turnID, and msgType are provided, the message will be created if it doesn't exist.
+// parentToolCallID is used for subagent nesting (empty for top-level).
+func (s *Service) UpdateToolCallMessageWithCreate(ctx context.Context, sessionID, toolCallID, parentToolCallID, status, result, title string, normalized *streams.NormalizedPayload, taskID, turnID, msgType string) error {
 	const maxRetries = 5
 	const retryDelay = 100 * time.Millisecond
 
@@ -2034,6 +2042,51 @@ func (s *Service) UpdateToolCallMessage(ctx context.Context, sessionID, toolCall
 		}
 	}
 
+	// If message not found and we have enough info to create it, do so
+	if err != nil && taskID != "" && msgType != "" {
+		s.logger.Info("tool call message not found, creating it",
+			zap.String("session_id", sessionID),
+			zap.String("tool_call_id", toolCallID),
+			zap.String("task_id", taskID),
+			zap.String("msg_type", msgType))
+
+		metadata := map[string]interface{}{
+			"tool_call_id": toolCallID,
+			"title":        title,
+			"status":       status,
+		}
+		// Add parent tool call ID for subagent nesting (if present)
+		if parentToolCallID != "" {
+			metadata["parent_tool_call_id"] = parentToolCallID
+		}
+		if normalized != nil {
+			metadata["normalized"] = normalized
+		}
+
+		msg, createErr := s.CreateMessage(ctx, &CreateMessageRequest{
+			TaskSessionID: sessionID,
+			TaskID:        taskID,
+			TurnID:        turnID,
+			Content:       title,
+			AuthorType:    "agent",
+			Type:          msgType,
+			Metadata:      metadata,
+		})
+		if createErr != nil {
+			s.logger.Error("failed to create tool call message as fallback",
+				zap.String("session_id", sessionID),
+				zap.String("tool_call_id", toolCallID),
+				zap.Error(createErr))
+			return createErr
+		}
+
+		s.logger.Info("created tool call message as fallback",
+			zap.String("message_id", msg.ID),
+			zap.String("tool_call_id", toolCallID),
+			zap.String("status", status))
+		return nil
+	}
+
 	if err != nil {
 		s.logger.Warn("tool call message not found for update after retries",
 			zap.String("session_id", sessionID),
@@ -2056,14 +2109,12 @@ func (s *Service) UpdateToolCallMessage(ctx context.Context, sessionID, toolCall
 		message.Metadata["normalized"] = normalized
 	}
 
-	// Update title if provided and current title is just the tool name (not yet filled)
-	// This handles the case where the first event only had the tool name
-	if title != "" {
-		currentTitle, _ := message.Metadata["title"].(string)
-		if currentTitle == "" || currentTitle == message.Metadata["tool_name"] {
-			message.Content = title
-			message.Metadata["title"] = title
-		}
+	// Update title/content if provided and different from current
+	// This handles the case where the first event only had the tool name (e.g., "bash")
+	// and subsequent events have the actual command/path (e.g., "ls" or "/path/to/file")
+	if title != "" && title != message.Content {
+		message.Content = title
+		message.Metadata["title"] = title
 	}
 
 	if err := s.repo.UpdateMessage(ctx, message); err != nil {
@@ -2330,6 +2381,7 @@ func (s *Service) publishMessageEvent(ctx context.Context, eventType string, mes
 		"message_id":     message.ID,
 		"session_id":     message.TaskSessionID,
 		"task_id":        message.TaskID,
+		"turn_id":        message.TurnID,
 		"author_type":    string(message.AuthorType),
 		"author_id":      message.AuthorID,
 		"content":        models.StripSystemContent(message.Content),

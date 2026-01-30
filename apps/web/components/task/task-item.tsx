@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import { IconArchive, IconLoader2 } from '@tabler/icons-react';
 import { cn } from '@/lib/utils';
 import type { TaskState } from '@/lib/types/http';
@@ -43,7 +43,7 @@ function formatRelativeTime(dateString: string): string {
   return date.toLocaleDateString();
 }
 
-export function TaskItem({
+export const TaskItem = memo(function TaskItem({
   title,
   description,
   state,
@@ -167,4 +167,4 @@ export function TaskItem({
       </div>
     </div>
   );
-}
+});

@@ -1,8 +1,9 @@
-import { useCallback } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { listTaskSessionMessages } from '@/lib/api';
 import { useAppStore } from '@/components/state-provider';
 
 export function useLazyLoadMessages(sessionId: string | null) {
+  // Use refs for values that should not trigger callback recreation
   const hasMore = useAppStore((state) =>
     sessionId ? state.messages.metaBySession[sessionId]?.hasMore ?? false : false
   );
@@ -12,16 +13,24 @@ export function useLazyLoadMessages(sessionId: string | null) {
   const isLoading = useAppStore((state) =>
     sessionId ? state.messages.metaBySession[sessionId]?.isLoading ?? false : false
   );
+
+  // Store current values in refs to avoid recreating loadMore on every state change
+  const stateRef = useRef({ hasMore, oldestCursor, isLoading });
+  useEffect(() => {
+    stateRef.current = { hasMore, oldestCursor, isLoading };
+  }, [hasMore, oldestCursor, isLoading]);
+
   const prependMessages = useAppStore((state) => state.prependMessages);
   const setMessagesMetadata = useAppStore((state) => state.setMessagesMetadata);
 
+  // Stable loadMore - only depends on sessionId and store actions
   const loadMore = useCallback(async () => {
+    const { hasMore, isLoading, oldestCursor } = stateRef.current;
+
     if (!sessionId || !hasMore || isLoading || !oldestCursor) {
-      console.log('[useLazyLoadMessages] Cannot load more:', { sessionId, hasMore, isLoading, oldestCursor });
       return 0;
     }
 
-    console.log('[useLazyLoadMessages] Loading more messages before:', oldestCursor);
     setMessagesMetadata(sessionId, { isLoading: true });
     try {
       const response = await listTaskSessionMessages(sessionId, {
@@ -29,21 +38,9 @@ export function useLazyLoadMessages(sessionId: string | null) {
         before: oldestCursor,
         sort: 'desc',
       });
-      console.log('[useLazyLoadMessages] Received response:', {
-        count: response.messages?.length,
-        hasMore: response.has_more,
-        cursor: response.cursor,
-      });
       const orderedMessages = [...(response.messages ?? [])].reverse();
       // After reversing, orderedMessages[0] is the oldest message in this batch
       const newOldestCursor = orderedMessages[0]?.id ?? null;
-      console.log('[useLazyLoadMessages] Prepending messages:', {
-        count: orderedMessages.length,
-        newOldestCursor,
-        hasMore: response.has_more,
-        firstMsgId: orderedMessages[0]?.id,
-        lastMsgId: orderedMessages[orderedMessages.length - 1]?.id,
-      });
       prependMessages(sessionId, orderedMessages, {
         hasMore: response.has_more,
         oldestCursor: newOldestCursor,
@@ -54,7 +51,7 @@ export function useLazyLoadMessages(sessionId: string | null) {
       setMessagesMetadata(sessionId, { isLoading: false });
       return 0;
     }
-  }, [sessionId, hasMore, isLoading, oldestCursor, prependMessages, setMessagesMetadata]);
+  }, [sessionId, prependMessages, setMessagesMetadata]);
 
   return { loadMore, hasMore, isLoading };
 }

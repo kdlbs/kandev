@@ -33,16 +33,16 @@ func TestStreamJSONNormalization(t *testing.T) {
 			// Verify the Kind is set correctly based on tool type
 			switch toolType {
 			case "tool_edit":
-				if payload.Kind != streams.ToolKindModifyFile {
-					t.Errorf("expected Kind %q, got %q", streams.ToolKindModifyFile, payload.Kind)
+				if payload.Kind() != streams.ToolKindModifyFile {
+					t.Errorf("expected Kind %q, got %q", streams.ToolKindModifyFile, payload.Kind())
 				}
 			case "tool_read":
-				if payload.Kind != streams.ToolKindReadFile && payload.Kind != streams.ToolKindCodeSearch {
-					t.Errorf("expected Kind %q or %q, got %q", streams.ToolKindReadFile, streams.ToolKindCodeSearch, payload.Kind)
+				if payload.Kind() != streams.ToolKindReadFile && payload.Kind() != streams.ToolKindCodeSearch {
+					t.Errorf("expected Kind %q or %q, got %q", streams.ToolKindReadFile, streams.ToolKindCodeSearch, payload.Kind())
 				}
 			case "tool_execute":
-				if payload.Kind != streams.ToolKindShellExec {
-					t.Errorf("expected Kind %q, got %q", streams.ToolKindShellExec, payload.Kind)
+				if payload.Kind() != streams.ToolKindShellExec {
+					t.Errorf("expected Kind %q, got %q", streams.ToolKindShellExec, payload.Kind())
 				}
 			}
 		})
@@ -183,19 +183,19 @@ func TestNormalizerEdit(t *testing.T) {
 			"new_string": "const x = 2;",
 		}
 		result := normalizer.NormalizeToolCall(claudecode.ToolEdit, args)
-		if result.Kind != streams.ToolKindModifyFile {
-			t.Errorf("expected Kind %q, got %q", streams.ToolKindModifyFile, result.Kind)
+		if result.Kind() != streams.ToolKindModifyFile {
+			t.Errorf("expected Kind %q, got %q", streams.ToolKindModifyFile, result.Kind())
 		}
-		if result.ModifyFile == nil {
+		if result.ModifyFile() == nil {
 			t.Fatal("expected ModifyFile to be set")
 		}
-		if result.ModifyFile.FilePath != "/workspace/app.ts" {
-			t.Errorf("expected FilePath '/workspace/app.ts', got %q", result.ModifyFile.FilePath)
+		if result.ModifyFile().FilePath != "/workspace/app.ts" {
+			t.Errorf("expected FilePath '/workspace/app.ts', got %q", result.ModifyFile().FilePath)
 		}
-		if len(result.ModifyFile.Mutations) != 1 {
-			t.Fatalf("expected 1 mutation, got %d", len(result.ModifyFile.Mutations))
+		if len(result.ModifyFile().Mutations) != 1 {
+			t.Fatalf("expected 1 mutation, got %d", len(result.ModifyFile().Mutations))
 		}
-		mutation := result.ModifyFile.Mutations[0]
+		mutation := result.ModifyFile().Mutations[0]
 		if mutation.OldContent != "const x = 1;" {
 			t.Errorf("expected OldContent 'const x = 1;', got %q", mutation.OldContent)
 		}
@@ -211,10 +211,10 @@ func TestNormalizerEdit(t *testing.T) {
 			"new_string": "const x = 2;",
 		}
 		result := normalizer.NormalizeToolCall(claudecode.ToolEdit, args)
-		if result.ModifyFile == nil || len(result.ModifyFile.Mutations) == 0 {
+		if result.ModifyFile() == nil || len(result.ModifyFile().Mutations) == 0 {
 			t.Fatal("expected mutation")
 		}
-		if result.ModifyFile.Mutations[0].Diff == "" {
+		if result.ModifyFile().Mutations[0].Diff == "" {
 			t.Error("expected diff to be generated")
 		}
 	})
@@ -226,10 +226,10 @@ func TestNormalizerEdit(t *testing.T) {
 			"new_string": "new content",
 		}
 		result := normalizer.NormalizeToolCall(claudecode.ToolEdit, args)
-		if result.ModifyFile == nil || len(result.ModifyFile.Mutations) == 0 {
+		if result.ModifyFile() == nil || len(result.ModifyFile().Mutations) == 0 {
 			t.Fatal("expected mutation")
 		}
-		if result.ModifyFile.Mutations[0].Diff != "" {
+		if result.ModifyFile().Mutations[0].Diff != "" {
 			t.Error("expected no diff when old_string is empty")
 		}
 	})
@@ -240,19 +240,19 @@ func TestNormalizerEdit(t *testing.T) {
 			"content":   "# Contributing\n\nThank you for your interest!",
 		}
 		result := normalizer.NormalizeToolCall(claudecode.ToolWrite, args)
-		if result.Kind != streams.ToolKindModifyFile {
-			t.Errorf("expected Kind %q, got %q", streams.ToolKindModifyFile, result.Kind)
+		if result.Kind() != streams.ToolKindModifyFile {
+			t.Errorf("expected Kind %q, got %q", streams.ToolKindModifyFile, result.Kind())
 		}
-		if result.ModifyFile == nil {
+		if result.ModifyFile() == nil {
 			t.Fatal("expected ModifyFile to be set")
 		}
-		if result.ModifyFile.FilePath != "/workspace/CONTRIBUTING.md" {
-			t.Errorf("expected FilePath '/workspace/CONTRIBUTING.md', got %q", result.ModifyFile.FilePath)
+		if result.ModifyFile().FilePath != "/workspace/CONTRIBUTING.md" {
+			t.Errorf("expected FilePath '/workspace/CONTRIBUTING.md', got %q", result.ModifyFile().FilePath)
 		}
-		if len(result.ModifyFile.Mutations) != 1 {
-			t.Fatalf("expected 1 mutation, got %d", len(result.ModifyFile.Mutations))
+		if len(result.ModifyFile().Mutations) != 1 {
+			t.Fatalf("expected 1 mutation, got %d", len(result.ModifyFile().Mutations))
 		}
-		mutation := result.ModifyFile.Mutations[0]
+		mutation := result.ModifyFile().Mutations[0]
 		if mutation.Type != streams.MutationCreate {
 			t.Errorf("expected MutationType %q, got %q", streams.MutationCreate, mutation.Type)
 		}
@@ -273,20 +273,20 @@ func TestNormalizerRead(t *testing.T) {
 			"limit":     float64(50),
 		}
 		result := normalizer.NormalizeToolCall(claudecode.ToolRead, args)
-		if result.Kind != streams.ToolKindReadFile {
-			t.Errorf("expected Kind %q, got %q", streams.ToolKindReadFile, result.Kind)
+		if result.Kind() != streams.ToolKindReadFile {
+			t.Errorf("expected Kind %q, got %q", streams.ToolKindReadFile, result.Kind())
 		}
-		if result.ReadFile == nil {
+		if result.ReadFile() == nil {
 			t.Fatal("expected ReadFile to be set")
 		}
-		if result.ReadFile.FilePath != "/workspace/config.json" {
-			t.Errorf("expected FilePath '/workspace/config.json', got %q", result.ReadFile.FilePath)
+		if result.ReadFile().FilePath != "/workspace/config.json" {
+			t.Errorf("expected FilePath '/workspace/config.json', got %q", result.ReadFile().FilePath)
 		}
-		if result.ReadFile.Offset != 10 {
-			t.Errorf("expected Offset 10, got %d", result.ReadFile.Offset)
+		if result.ReadFile().Offset != 10 {
+			t.Errorf("expected Offset 10, got %d", result.ReadFile().Offset)
 		}
-		if result.ReadFile.Limit != 50 {
-			t.Errorf("expected Limit 50, got %d", result.ReadFile.Limit)
+		if result.ReadFile().Limit != 50 {
+			t.Errorf("expected Limit 50, got %d", result.ReadFile().Limit)
 		}
 	})
 }
@@ -301,17 +301,17 @@ func TestNormalizerExecute(t *testing.T) {
 			"description": "List files",
 		}
 		result := normalizer.NormalizeToolCall(claudecode.ToolBash, args)
-		if result.Kind != streams.ToolKindShellExec {
-			t.Errorf("expected Kind %q, got %q", streams.ToolKindShellExec, result.Kind)
+		if result.Kind() != streams.ToolKindShellExec {
+			t.Errorf("expected Kind %q, got %q", streams.ToolKindShellExec, result.Kind())
 		}
-		if result.ShellExec == nil {
+		if result.ShellExec() == nil {
 			t.Fatal("expected ShellExec to be set")
 		}
-		if result.ShellExec.Command != "ls -la" {
-			t.Errorf("expected Command 'ls -la', got %q", result.ShellExec.Command)
+		if result.ShellExec().Command != "ls -la" {
+			t.Errorf("expected Command 'ls -la', got %q", result.ShellExec().Command)
 		}
-		if result.ShellExec.Description != "List files" {
-			t.Errorf("expected Description 'List files', got %q", result.ShellExec.Description)
+		if result.ShellExec().Description != "List files" {
+			t.Errorf("expected Description 'List files', got %q", result.ShellExec().Description)
 		}
 	})
 
@@ -321,11 +321,11 @@ func TestNormalizerExecute(t *testing.T) {
 			"timeout": float64(30000),
 		}
 		result := normalizer.NormalizeToolCall(claudecode.ToolBash, args)
-		if result.ShellExec == nil {
+		if result.ShellExec() == nil {
 			t.Fatal("expected ShellExec to be set")
 		}
-		if result.ShellExec.Timeout != 30000 {
-			t.Errorf("expected Timeout 30000, got %d", result.ShellExec.Timeout)
+		if result.ShellExec().Timeout != 30000 {
+			t.Errorf("expected Timeout 30000, got %d", result.ShellExec().Timeout)
 		}
 	})
 
@@ -335,10 +335,10 @@ func TestNormalizerExecute(t *testing.T) {
 			"run_in_background": true,
 		}
 		result := normalizer.NormalizeToolCall(claudecode.ToolBash, args)
-		if result.ShellExec == nil {
+		if result.ShellExec() == nil {
 			t.Fatal("expected ShellExec to be set")
 		}
-		if !result.ShellExec.Background {
+		if !result.ShellExec().Background {
 			t.Error("expected Background to be true")
 		}
 	})
@@ -354,17 +354,17 @@ func TestNormalizerCodeSearch(t *testing.T) {
 			"path":    "/workspace",
 		}
 		result := normalizer.NormalizeToolCall(claudecode.ToolGlob, args)
-		if result.Kind != streams.ToolKindCodeSearch {
-			t.Errorf("expected Kind %q, got %q", streams.ToolKindCodeSearch, result.Kind)
+		if result.Kind() != streams.ToolKindCodeSearch {
+			t.Errorf("expected Kind %q, got %q", streams.ToolKindCodeSearch, result.Kind())
 		}
-		if result.CodeSearch == nil {
+		if result.CodeSearch() == nil {
 			t.Fatal("expected CodeSearch to be set")
 		}
-		if result.CodeSearch.Glob != "**/*.ts" {
-			t.Errorf("expected Glob '**/*.ts', got %q", result.CodeSearch.Glob)
+		if result.CodeSearch().Glob != "**/*.ts" {
+			t.Errorf("expected Glob '**/*.ts', got %q", result.CodeSearch().Glob)
 		}
-		if result.CodeSearch.Path != "/workspace" {
-			t.Errorf("expected Path '/workspace', got %q", result.CodeSearch.Path)
+		if result.CodeSearch().Path != "/workspace" {
+			t.Errorf("expected Path '/workspace', got %q", result.CodeSearch().Path)
 		}
 	})
 
@@ -374,14 +374,14 @@ func TestNormalizerCodeSearch(t *testing.T) {
 			"path":    "/workspace",
 		}
 		result := normalizer.NormalizeToolCall(claudecode.ToolGrep, args)
-		if result.Kind != streams.ToolKindCodeSearch {
-			t.Errorf("expected Kind %q, got %q", streams.ToolKindCodeSearch, result.Kind)
+		if result.Kind() != streams.ToolKindCodeSearch {
+			t.Errorf("expected Kind %q, got %q", streams.ToolKindCodeSearch, result.Kind())
 		}
-		if result.CodeSearch == nil {
+		if result.CodeSearch() == nil {
 			t.Fatal("expected CodeSearch to be set")
 		}
-		if result.CodeSearch.Pattern != "func.*Error" {
-			t.Errorf("expected Pattern 'func.*Error', got %q", result.CodeSearch.Pattern)
+		if result.CodeSearch().Pattern != "func.*Error" {
+			t.Errorf("expected Pattern 'func.*Error', got %q", result.CodeSearch().Pattern)
 		}
 	})
 }
@@ -395,17 +395,17 @@ func TestNormalizerHttpRequest(t *testing.T) {
 			"url": "https://example.com/api",
 		}
 		result := normalizer.NormalizeToolCall(claudecode.ToolWebFetch, args)
-		if result.Kind != streams.ToolKindHttpRequest {
-			t.Errorf("expected Kind %q, got %q", streams.ToolKindHttpRequest, result.Kind)
+		if result.Kind() != streams.ToolKindHttpRequest {
+			t.Errorf("expected Kind %q, got %q", streams.ToolKindHttpRequest, result.Kind())
 		}
-		if result.HttpRequest == nil {
+		if result.HttpRequest() == nil {
 			t.Fatal("expected HttpRequest to be set")
 		}
-		if result.HttpRequest.URL != "https://example.com/api" {
-			t.Errorf("expected URL 'https://example.com/api', got %q", result.HttpRequest.URL)
+		if result.HttpRequest().URL != "https://example.com/api" {
+			t.Errorf("expected URL 'https://example.com/api', got %q", result.HttpRequest().URL)
 		}
-		if result.HttpRequest.Method != "GET" {
-			t.Errorf("expected Method 'GET', got %q", result.HttpRequest.Method)
+		if result.HttpRequest().Method != "GET" {
+			t.Errorf("expected Method 'GET', got %q", result.HttpRequest().Method)
 		}
 	})
 
@@ -414,17 +414,17 @@ func TestNormalizerHttpRequest(t *testing.T) {
 			"query": "golang testing best practices",
 		}
 		result := normalizer.NormalizeToolCall(claudecode.ToolWebSearch, args)
-		if result.Kind != streams.ToolKindHttpRequest {
-			t.Errorf("expected Kind %q, got %q", streams.ToolKindHttpRequest, result.Kind)
+		if result.Kind() != streams.ToolKindHttpRequest {
+			t.Errorf("expected Kind %q, got %q", streams.ToolKindHttpRequest, result.Kind())
 		}
-		if result.HttpRequest == nil {
+		if result.HttpRequest() == nil {
 			t.Fatal("expected HttpRequest to be set")
 		}
-		if result.HttpRequest.URL != "golang testing best practices" {
-			t.Errorf("expected URL 'golang testing best practices', got %q", result.HttpRequest.URL)
+		if result.HttpRequest().URL != "golang testing best practices" {
+			t.Errorf("expected URL 'golang testing best practices', got %q", result.HttpRequest().URL)
 		}
-		if result.HttpRequest.Method != "SEARCH" {
-			t.Errorf("expected Method 'SEARCH', got %q", result.HttpRequest.Method)
+		if result.HttpRequest().Method != "SEARCH" {
+			t.Errorf("expected Method 'SEARCH', got %q", result.HttpRequest().Method)
 		}
 	})
 }
@@ -439,20 +439,20 @@ func TestNormalizerSubagentTask(t *testing.T) {
 		"subagent_type": "Explore",
 	}
 	result := normalizer.NormalizeToolCall(claudecode.ToolTask, args)
-	if result.Kind != streams.ToolKindSubagentTask {
-		t.Errorf("expected Kind %q, got %q", streams.ToolKindSubagentTask, result.Kind)
+	if result.Kind() != streams.ToolKindSubagentTask {
+		t.Errorf("expected Kind %q, got %q", streams.ToolKindSubagentTask, result.Kind())
 	}
-	if result.SubagentTask == nil {
+	if result.SubagentTask() == nil {
 		t.Fatal("expected SubagentTask to be set")
 	}
-	if result.SubagentTask.Description != "Find all test files" {
-		t.Errorf("expected Description 'Find all test files', got %q", result.SubagentTask.Description)
+	if result.SubagentTask().Description != "Find all test files" {
+		t.Errorf("expected Description 'Find all test files', got %q", result.SubagentTask().Description)
 	}
-	if result.SubagentTask.Prompt != "Search for test files in the codebase" {
-		t.Errorf("expected Prompt 'Search for test files in the codebase', got %q", result.SubagentTask.Prompt)
+	if result.SubagentTask().Prompt != "Search for test files in the codebase" {
+		t.Errorf("expected Prompt 'Search for test files in the codebase', got %q", result.SubagentTask().Prompt)
 	}
-	if result.SubagentTask.SubagentType != "Explore" {
-		t.Errorf("expected SubagentType 'Explore', got %q", result.SubagentTask.SubagentType)
+	if result.SubagentTask().SubagentType != "Explore" {
+		t.Errorf("expected SubagentType 'Explore', got %q", result.SubagentTask().SubagentType)
 	}
 }
 
@@ -465,17 +465,17 @@ func TestNormalizerCreateTask(t *testing.T) {
 		"description": "The login flow fails when...",
 	}
 	result := normalizer.NormalizeToolCall(claudecode.ToolTaskCreate, args)
-	if result.Kind != streams.ToolKindCreateTask {
-		t.Errorf("expected Kind %q, got %q", streams.ToolKindCreateTask, result.Kind)
+	if result.Kind() != streams.ToolKindCreateTask {
+		t.Errorf("expected Kind %q, got %q", streams.ToolKindCreateTask, result.Kind())
 	}
-	if result.CreateTask == nil {
+	if result.CreateTask() == nil {
 		t.Fatal("expected CreateTask to be set")
 	}
-	if result.CreateTask.Title != "Fix authentication bug" {
-		t.Errorf("expected Title 'Fix authentication bug', got %q", result.CreateTask.Title)
+	if result.CreateTask().Title != "Fix authentication bug" {
+		t.Errorf("expected Title 'Fix authentication bug', got %q", result.CreateTask().Title)
 	}
-	if result.CreateTask.Description != "The login flow fails when..." {
-		t.Errorf("expected Description 'The login flow fails when...', got %q", result.CreateTask.Description)
+	if result.CreateTask().Description != "The login flow fails when..." {
+		t.Errorf("expected Description 'The login flow fails when...', got %q", result.CreateTask().Description)
 	}
 }
 
@@ -489,28 +489,28 @@ func TestNormalizerManageTodos(t *testing.T) {
 			"status": "completed",
 		}
 		result := normalizer.NormalizeToolCall(claudecode.ToolTaskUpdate, args)
-		if result.Kind != streams.ToolKindManageTodos {
-			t.Errorf("expected Kind %q, got %q", streams.ToolKindManageTodos, result.Kind)
+		if result.Kind() != streams.ToolKindManageTodos {
+			t.Errorf("expected Kind %q, got %q", streams.ToolKindManageTodos, result.Kind())
 		}
-		if result.ManageTodos == nil {
+		if result.ManageTodos() == nil {
 			t.Fatal("expected ManageTodos to be set")
 		}
-		if result.ManageTodos.Operation != "update" {
-			t.Errorf("expected Operation 'update', got %q", result.ManageTodos.Operation)
+		if result.ManageTodos().Operation != "update" {
+			t.Errorf("expected Operation 'update', got %q", result.ManageTodos().Operation)
 		}
 	})
 
 	t.Run("TaskList operation", func(t *testing.T) {
 		args := map[string]any{}
 		result := normalizer.NormalizeToolCall(claudecode.ToolTaskList, args)
-		if result.Kind != streams.ToolKindManageTodos {
-			t.Errorf("expected Kind %q, got %q", streams.ToolKindManageTodos, result.Kind)
+		if result.Kind() != streams.ToolKindManageTodos {
+			t.Errorf("expected Kind %q, got %q", streams.ToolKindManageTodos, result.Kind())
 		}
-		if result.ManageTodos == nil {
+		if result.ManageTodos() == nil {
 			t.Fatal("expected ManageTodos to be set")
 		}
-		if result.ManageTodos.Operation != "list" {
-			t.Errorf("expected Operation 'list', got %q", result.ManageTodos.Operation)
+		if result.ManageTodos().Operation != "list" {
+			t.Errorf("expected Operation 'list', got %q", result.ManageTodos().Operation)
 		}
 	})
 
@@ -525,20 +525,20 @@ func TestNormalizerManageTodos(t *testing.T) {
 			},
 		}
 		result := normalizer.NormalizeToolCall(claudecode.ToolTodoWrite, args)
-		if result.Kind != streams.ToolKindManageTodos {
-			t.Errorf("expected Kind %q, got %q", streams.ToolKindManageTodos, result.Kind)
+		if result.Kind() != streams.ToolKindManageTodos {
+			t.Errorf("expected Kind %q, got %q", streams.ToolKindManageTodos, result.Kind())
 		}
-		if result.ManageTodos == nil {
+		if result.ManageTodos() == nil {
 			t.Fatal("expected ManageTodos to be set")
 		}
-		if result.ManageTodos.Operation != "write" {
-			t.Errorf("expected Operation 'write', got %q", result.ManageTodos.Operation)
+		if result.ManageTodos().Operation != "write" {
+			t.Errorf("expected Operation 'write', got %q", result.ManageTodos().Operation)
 		}
-		if len(result.ManageTodos.Items) != 1 {
-			t.Fatalf("expected 1 item, got %d", len(result.ManageTodos.Items))
+		if len(result.ManageTodos().Items) != 1 {
+			t.Fatalf("expected 1 item, got %d", len(result.ManageTodos().Items))
 		}
-		if result.ManageTodos.Items[0].ID != "todo-1" {
-			t.Errorf("expected item ID 'todo-1', got %q", result.ManageTodos.Items[0].ID)
+		if result.ManageTodos().Items[0].ID != "todo-1" {
+			t.Errorf("expected item ID 'todo-1', got %q", result.ManageTodos().Items[0].ID)
 		}
 	})
 }
@@ -551,14 +551,14 @@ func TestNormalizerGeneric(t *testing.T) {
 		"custom_field": "custom_value",
 	}
 	result := normalizer.NormalizeToolCall("UnknownTool", args)
-	if result.Kind != streams.ToolKindGeneric {
-		t.Errorf("expected Kind %q, got %q", streams.ToolKindGeneric, result.Kind)
+	if result.Kind() != streams.ToolKindGeneric {
+		t.Errorf("expected Kind %q, got %q", streams.ToolKindGeneric, result.Kind())
 	}
-	if result.Generic == nil {
+	if result.Generic() == nil {
 		t.Fatal("expected Generic to be set")
 	}
-	if result.Generic.Name != "UnknownTool" {
-		t.Errorf("expected Name 'UnknownTool', got %q", result.Generic.Name)
+	if result.Generic().Name != "UnknownTool" {
+		t.Errorf("expected Name 'UnknownTool', got %q", result.Generic().Name)
 	}
 }
 
@@ -567,58 +567,50 @@ func TestNormalizerToolResult(t *testing.T) {
 	normalizer := NewNormalizer()
 
 	t.Run("shell exec result from string", func(t *testing.T) {
-		payload := &streams.NormalizedPayload{
-			Kind:      streams.ToolKindShellExec,
-			ShellExec: &streams.ShellExecPayload{Command: "ls"},
-		}
+		// Use factory function to create payload
+		payload := streams.NewShellExec("ls", "", "", 0, false)
 		normalizer.NormalizeToolResult(payload, "file1.txt\nfile2.txt")
-		if payload.ShellExec.Output == nil {
+		if payload.ShellExec().Output == nil {
 			t.Fatal("expected Output to be set")
 		}
-		if payload.ShellExec.Output.Stdout != "file1.txt\nfile2.txt" {
-			t.Errorf("expected Stdout 'file1.txt\\nfile2.txt', got %q", payload.ShellExec.Output.Stdout)
+		if payload.ShellExec().Output.Stdout != "file1.txt\nfile2.txt" {
+			t.Errorf("expected Stdout 'file1.txt\\nfile2.txt', got %q", payload.ShellExec().Output.Stdout)
 		}
 	})
 
 	t.Run("shell exec result from map", func(t *testing.T) {
-		payload := &streams.NormalizedPayload{
-			Kind:      streams.ToolKindShellExec,
-			ShellExec: &streams.ShellExecPayload{Command: "npm test"},
-		}
+		// Use factory function to create payload
+		payload := streams.NewShellExec("npm test", "", "", 0, false)
 		normalizer.NormalizeToolResult(payload, map[string]any{
 			"stdout":    "All tests passed",
 			"stderr":    "",
 			"exit_code": float64(0),
 		})
-		if payload.ShellExec.Output == nil {
+		if payload.ShellExec().Output == nil {
 			t.Fatal("expected Output to be set")
 		}
-		if payload.ShellExec.Output.Stdout != "All tests passed" {
-			t.Errorf("expected Stdout 'All tests passed', got %q", payload.ShellExec.Output.Stdout)
+		if payload.ShellExec().Output.Stdout != "All tests passed" {
+			t.Errorf("expected Stdout 'All tests passed', got %q", payload.ShellExec().Output.Stdout)
 		}
-		if payload.ShellExec.Output.ExitCode != 0 {
-			t.Errorf("expected ExitCode 0, got %d", payload.ShellExec.Output.ExitCode)
+		if payload.ShellExec().Output.ExitCode != 0 {
+			t.Errorf("expected ExitCode 0, got %d", payload.ShellExec().Output.ExitCode)
 		}
 	})
 
 	t.Run("http request result", func(t *testing.T) {
-		payload := &streams.NormalizedPayload{
-			Kind:        streams.ToolKindHttpRequest,
-			HttpRequest: &streams.HttpRequestPayload{URL: "https://example.com"},
-		}
+		// Use factory function to create payload
+		payload := streams.NewHttpRequest("https://example.com", "GET")
 		normalizer.NormalizeToolResult(payload, "Response body here")
-		if payload.HttpRequest.Response != "Response body here" {
-			t.Errorf("expected Response 'Response body here', got %q", payload.HttpRequest.Response)
+		if payload.HttpRequest().Response != "Response body here" {
+			t.Errorf("expected Response 'Response body here', got %q", payload.HttpRequest().Response)
 		}
 	})
 
 	t.Run("generic result", func(t *testing.T) {
-		payload := &streams.NormalizedPayload{
-			Kind:    streams.ToolKindGeneric,
-			Generic: &streams.GenericPayload{Name: "CustomTool"},
-		}
+		// Use factory function to create payload
+		payload := streams.NewGeneric("CustomTool", nil)
 		normalizer.NormalizeToolResult(payload, map[string]any{"data": "value"})
-		if payload.Generic.Output == nil {
+		if payload.Generic().Output == nil {
 			t.Fatal("expected Output to be set")
 		}
 	})

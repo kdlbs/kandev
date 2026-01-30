@@ -50,6 +50,10 @@ type AgentStreamEventData struct {
 	SessionStatus string      `json:"session_status,omitempty"` // "resumed" or "new" for session_status events
 	Data          interface{} `json:"data,omitempty"`
 
+	// ParentToolCallID identifies the parent Task tool call when this event
+	// comes from a subagent. Used for visual nesting in the UI.
+	ParentToolCallID string `json:"parent_tool_call_id,omitempty"`
+
 	// Normalized contains the typed tool payload data.
 	// This is used to populate message metadata with structured tool information.
 	Normalized *streams.NormalizedPayload `json:"normalized,omitempty"`

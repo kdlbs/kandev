@@ -47,9 +47,19 @@ export const createSessionSlice: StateCreator<
       if (!draft.messages.bySession[sessionId]) {
         draft.messages.bySession[sessionId] = [];
       }
-      const existing = draft.messages.bySession[sessionId].find((m) => m.id === message.id);
-      if (!existing) {
+      const existingIndex = draft.messages.bySession[sessionId].findIndex((m) => m.id === message.id);
+      if (existingIndex === -1) {
+        // New message - add it
         draft.messages.bySession[sessionId].push(message);
+      } else {
+        // Message exists - merge, but don't overwrite defined values with undefined
+        // This handles duplicate events from multiple sources
+        const existing = draft.messages.bySession[sessionId][existingIndex];
+        for (const key of Object.keys(message) as Array<keyof typeof message>) {
+          if (message[key] !== undefined) {
+            (existing as Record<string, unknown>)[key] = message[key];
+          }
+        }
       }
     }),
   updateMessage: (message) =>
@@ -59,7 +69,16 @@ export const createSessionSlice: StateCreator<
       if (messages) {
         const index = messages.findIndex((m) => m.id === message.id);
         if (index !== -1) {
-          messages[index] = message;
+          // Merge update with existing message, but don't overwrite defined values with undefined
+          // This handles the case where some event sources don't include turn_id
+          const existing = messages[index];
+          const merged = { ...existing };
+          for (const key of Object.keys(message) as Array<keyof typeof message>) {
+            if (message[key] !== undefined) {
+              (merged as Record<string, unknown>)[key] = message[key];
+            }
+          }
+          messages[index] = merged;
         }
       }
     }),
@@ -144,13 +163,19 @@ export const createSessionSlice: StateCreator<
     }),
   setTaskSession: (session) =>
     set((draft) => {
-      // Merge with existing session data to preserve fields like agent_profile_id and agent_profile_snapshot
+      // Merge with existing session data to preserve fields like agent_profile_id, worktree info, etc.
       const existingSession = draft.taskSessions.items[session.id];
       const mergedSession = existingSession
         ? {
             ...existingSession,
             ...session,
+            // Preserve fields that may not be included in partial updates from WebSocket events
             agent_profile_snapshot: session.agent_profile_snapshot ?? existingSession.agent_profile_snapshot,
+            worktree_id: session.worktree_id ?? existingSession.worktree_id,
+            worktree_path: session.worktree_path ?? existingSession.worktree_path,
+            worktree_branch: session.worktree_branch ?? existingSession.worktree_branch,
+            repository_id: session.repository_id ?? existingSession.repository_id,
+            base_branch: session.base_branch ?? existingSession.base_branch,
           }
         : session;
 

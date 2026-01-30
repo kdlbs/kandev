@@ -1,25 +1,29 @@
 'use client';
 
-import { IconCheck, IconX, IconLoader2, IconEye, IconSearch } from '@tabler/icons-react';
+import { useState, useRef, memo, useCallback } from 'react';
+import { IconCheck, IconX, IconFileCode2 } from '@tabler/icons-react';
+import { GridSpinner } from '@/components/grid-spinner';
+import { FilePathButton } from './file-path-button';
 import type { Message } from '@/lib/types/http';
+import { ExpandableRow } from './expandable-row';
+
+type ReadFileOutput = {
+  content?: string;
+  line_count?: number;
+  truncated?: boolean;
+  language?: string;
+};
 
 type ReadFilePayload = {
   file_path?: string;
   offset?: number;
   limit?: number;
-};
-
-type CodeSearchPayload = {
-  query?: string;
-  pattern?: string;
-  path?: string;
-  glob?: string;
+  output?: ReadFileOutput;
 };
 
 type NormalizedPayload = {
   kind?: string;
   read_file?: ReadFilePayload;
-  code_search?: CodeSearchPayload;
 };
 
 type ToolReadMetadata = {
@@ -28,20 +32,42 @@ type ToolReadMetadata = {
   normalized?: NormalizedPayload;
 };
 
-export function ToolReadMessage({ comment }: { comment: Message }) {
+type ToolReadMessageProps = {
+  comment: Message;
+  worktreePath?: string;
+  sessionId?: string;
+  onOpenFile?: (path: string) => void;
+};
+
+export const ToolReadMessage = memo(function ToolReadMessage({ comment, worktreePath, onOpenFile }: ToolReadMessageProps) {
   const metadata = comment.metadata as ToolReadMetadata | undefined;
+  const [manualExpandState, setManualExpandState] = useState<boolean | null>(null);
+  const prevStatusRef = useRef(metadata?.status);
+
   const status = metadata?.status;
   const normalized = metadata?.normalized;
-  const kind = normalized?.kind;
+  const readFile = normalized?.read_file;
+  const readOutput = readFile?.output;
 
-  // Determine display based on kind
-  const isCodeSearch = kind === 'code_search';
-  const filePath = normalized?.read_file?.file_path;
-  const searchPath = normalized?.code_search?.path;
-  const searchPattern = normalized?.code_search?.glob || normalized?.code_search?.pattern;
-
+  const filePath = readFile?.file_path;
+  const hasOutput = !!readOutput?.content;
   const isSuccess = status === 'complete';
-  const Icon = isCodeSearch ? IconSearch : IconEye;
+
+  // Reset manual state when status changes (allows auto-expand behavior to resume)
+  if (prevStatusRef.current !== status) {
+    prevStatusRef.current = status;
+    if (manualExpandState !== null) {
+      setManualExpandState(null);
+    }
+  }
+
+  // Derive expanded state: manual override takes precedence, otherwise auto-expand when running
+  const autoExpanded = status === 'running';
+  const isExpanded = manualExpandState ?? autoExpanded;
+
+  const handleToggle = useCallback(() => {
+    setManualExpandState((prev) => !(prev ?? autoExpanded));
+  }, [autoExpanded]);
 
   const getStatusIcon = () => {
     switch (status) {
@@ -50,36 +76,54 @@ export function ToolReadMessage({ comment }: { comment: Message }) {
       case 'error':
         return <IconX className="h-3.5 w-3.5 text-red-500" />;
       case 'running':
-        return <IconLoader2 className="h-3.5 w-3.5 text-blue-500 animate-spin" />;
+        return <GridSpinner className="text-muted-foreground" />;
       default:
         return null;
     }
   };
 
-  // Display path - either file path for read or search path for code search
-  const displayPath = isCodeSearch ? searchPath : filePath;
-  const displayPattern = isCodeSearch ? searchPattern : null;
+  // Generate summary text
+  const getSummary = () => {
+    if (readOutput?.line_count) {
+      return `Read ${readOutput.line_count} line${readOutput.line_count !== 1 ? 's' : ''}`;
+    }
+    return 'Read';
+  };
 
   return (
-    <div className="w-full">
-      <div className="flex items-start gap-3 w-full">
-        <div className="flex-shrink-0 mt-0.5">
-          <Icon className="h-4 w-4 text-muted-foreground" />
-        </div>
-
-        <div className="flex-1 min-w-0 pt-0.5">
-          <div className="flex items-center gap-2 text-xs">
-            <span className="font-mono text-xs">{comment.content}</span>
+    <ExpandableRow
+      icon={<IconFileCode2 className="h-4 w-4 text-muted-foreground" />}
+      header={
+        <div className="flex items-center gap-2 text-xs min-w-0">
+          <span className="inline-flex items-center gap-1.5 shrink-0 whitespace-nowrap">
+            <span className="font-mono text-xs text-muted-foreground">{getSummary()}</span>
             {!isSuccess && getStatusIcon()}
-            {displayPattern && (
-              <span className="text-xs text-muted-foreground/60 font-mono truncate">{displayPattern}</span>
-            )}
-            {displayPath && (
-              <span className="text-xs text-muted-foreground/60 truncate">{displayPath}</span>
-            )}
-          </div>
+          </span>
+          {filePath && (
+            <span className="min-w-0">
+              <FilePathButton
+                filePath={filePath}
+                worktreePath={worktreePath}
+                onOpenFile={onOpenFile}
+              />
+            </span>
+          )}
+          {readOutput?.truncated && (
+            <span className="text-xs text-amber-500/80 shrink-0">(truncated)</span>
+          )}
         </div>
-      </div>
-    </div>
+      }
+      hasExpandableContent={hasOutput}
+      isExpanded={isExpanded}
+      onToggle={handleToggle}
+    >
+      {readOutput?.content && (
+        <div className="relative rounded-md border border-border/50 overflow-hidden bg-muted/20">
+          <pre className="text-xs p-3 overflow-x-auto max-h-[200px] overflow-y-auto">
+            <code>{readOutput.content}</code>
+          </pre>
+        </div>
+      )}
+    </ExpandableRow>
   );
-}
+});

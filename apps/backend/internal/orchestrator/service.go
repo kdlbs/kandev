@@ -57,10 +57,13 @@ type MessageCreator interface {
 	CreateUserMessage(ctx context.Context, taskID, content, agentSessionID, turnID string) error
 	// CreateToolCallMessage creates a message for a tool call.
 	// normalized contains the typed tool payload data.
-	CreateToolCallMessage(ctx context.Context, taskID, toolCallID, title, status, agentSessionID, turnID string, normalized *streams.NormalizedPayload) error
+	// parentToolCallID is the parent Task tool call ID for subagent nesting (empty for top-level).
+	CreateToolCallMessage(ctx context.Context, taskID, toolCallID, parentToolCallID, title, status, agentSessionID, turnID string, normalized *streams.NormalizedPayload) error
 	// UpdateToolCallMessage updates a tool call message's status and optionally its normalized data.
+	// If the message doesn't exist, it creates it using taskID, turnID, and msgType.
 	// normalized contains the typed tool payload data.
-	UpdateToolCallMessage(ctx context.Context, taskID, toolCallID, status, result, agentSessionID, title string, normalized *streams.NormalizedPayload) error
+	// parentToolCallID is the parent Task tool call ID for subagent nesting (empty for top-level).
+	UpdateToolCallMessage(ctx context.Context, taskID, toolCallID, parentToolCallID, status, result, agentSessionID, title, turnID, msgType string, normalized *streams.NormalizedPayload) error
 	CreateSessionMessage(ctx context.Context, taskID, content, agentSessionID, messageType, turnID string, metadata map[string]interface{}, requestsInput bool) error
 	CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}) (string, error)
 	UpdatePermissionMessage(ctx context.Context, sessionID, pendingID, status string) error

@@ -14,6 +14,7 @@ import { Button } from '@kandev/ui/button';
 import { SessionPanelContent } from '@kandev/ui/pannel-session';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
 import { cn } from '@/lib/utils';
+import { getLanguageFromPath } from '@/lib/languages';
 import { getLocalStorage, setLocalStorage } from '@/lib/local-storage';
 import { useAppStore } from '@/components/state-provider';
 import { useSessionGitStatus } from '@/hooks/domains/session/use-session-git-status';
@@ -114,18 +115,6 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
   // Use provided content if available, otherwise fall back to git status
   const selectedDiffContent = selectedDiff?.content ?? selectedFile?.diff ?? '';
   const isSingleDiffSelected = Boolean(selectedDiffPath && (hasProvidedContent || selectedFile));
-
-  // Helper to get file language from extension
-  const getFileLang = (path: string) => {
-    const ext = path.split('.').pop() || '';
-    const langMap: Record<string, string> = {
-      ts: 'typescript', tsx: 'tsx', js: 'javascript', jsx: 'jsx',
-      py: 'python', go: 'go', rs: 'rust', java: 'java',
-      cpp: 'cpp', c: 'c', css: 'css', html: 'html',
-      json: 'json', md: 'markdown', yaml: 'yaml', yml: 'yaml',
-    };
-    return langMap[ext] || 'plaintext';
-  };
 
   const hasUncommitted = uncommittedFiles.length > 0;
   const hasCommitted = committedFiles.length > 0;
@@ -251,8 +240,8 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
             <DiffView
               data={{
                 hunks: parseDiffIntoHunks(selectedDiffContent, selectedDiffPath!),
-                oldFile: { fileName: selectedDiffPath!, fileLang: getFileLang(selectedDiffPath!) },
-                newFile: { fileName: selectedDiffPath!, fileLang: getFileLang(selectedDiffPath!) },
+                oldFile: { fileName: selectedDiffPath!, fileLang: getLanguageFromPath(selectedDiffPath!) },
+                newFile: { fileName: selectedDiffPath!, fileLang: getLanguageFromPath(selectedDiffPath!) },
               }}
               diffViewMode={diffModeEnum}
               diffViewTheme={diffTheme}
@@ -276,7 +265,7 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
                 </div>
                 {uncommittedFiles.map((file) => {
                   if (!file.diff) return null;
-                  const fileLang = getFileLang(file.path);
+                  const fileLang = getLanguageFromPath(file.path);
                   // Include diff length in key to force re-render when content changes
                   const diffKey = `uncommitted-${file.path}-${file.diff.length}`;
                   return (
@@ -314,7 +303,7 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
                 </div>
                 {committedFiles.map((file) => {
                   if (!file.diff) return null;
-                  const fileLang = getFileLang(file.path);
+                  const fileLang = getLanguageFromPath(file.path);
                   // Include diff length in key to force re-render when content changes
                   const diffKey = `committed-${file.path}-${file.diff.length}`;
                   return (

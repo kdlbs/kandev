@@ -1,5 +1,6 @@
 'use client';
 
+import { memo } from 'react';
 import { IconChevronDown } from '@tabler/icons-react';
 import { Button } from '@kandev/ui/button';
 import {
@@ -17,7 +18,7 @@ type ModelSelectorProps = {
   sessionId: string | null;
 };
 
-export function ModelSelector({ sessionId }: ModelSelectorProps) {
+export const ModelSelector = memo(function ModelSelector({ sessionId }: ModelSelectorProps) {
   // Ensure settings data (agents with profiles) is loaded
   useSettingsData(true);
 
@@ -129,5 +130,5 @@ export function ModelSelector({ sessionId }: ModelSelectorProps) {
       </DropdownMenuContent>
     </DropdownMenu>
   );
-}
+});
 

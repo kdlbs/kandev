@@ -56,6 +56,9 @@ type CLIMessage struct {
 	SessionID     string `json:"session_id,omitempty"`
 	SessionStatus string `json:"session_status,omitempty"`
 
+	// For subagent context (when running inside a Task tool call)
+	ParentToolUseID string `json:"parent_tool_use_id,omitempty"`
+
 	// For assistant messages
 	Message *AssistantMessage `json:"message,omitempty"`
 

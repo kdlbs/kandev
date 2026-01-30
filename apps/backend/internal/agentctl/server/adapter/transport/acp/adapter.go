@@ -72,6 +72,10 @@ type Adapter struct {
 	// When set, this context will be prepended to the first prompt sent to the session.
 	pendingContext string
 
+	// Tool call tracking for result normalization
+	// Maps toolCallId -> NormalizedPayload so we can update with results
+	activeToolCalls map[string]*streams.NormalizedPayload
+
 	// Synchronization
 	mu     sync.RWMutex
 	closed bool
@@ -82,11 +86,12 @@ type Adapter struct {
 // cfg.AgentID is required for debug file naming.
 func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 	return &Adapter{
-		cfg:        cfg,
-		logger:     log.WithFields(zap.String("adapter", "acp"), zap.String("agent_id", cfg.AgentID)),
-		agentID:    cfg.AgentID,
-		normalizer: NewNormalizer(),
-		updatesCh:  make(chan AgentEvent, 100),
+		cfg:             cfg,
+		logger:          log.WithFields(zap.String("adapter", "acp"), zap.String("agent_id", cfg.AgentID)),
+		agentID:         cfg.AgentID,
+		normalizer:      NewNormalizer(),
+		updatesCh:       make(chan AgentEvent, 100),
+		activeToolCalls: make(map[string]*streams.NormalizedPayload),
 	}
 }
 
@@ -446,6 +451,12 @@ func (a *Adapter) convertNotification(n acp.SessionNotification) *AgentEvent {
 		toolKind := string(u.ToolCall.Kind)
 		normalizedPayload := a.normalizer.NormalizeToolCall(toolKind, args)
 
+		// Store the payload for later result updates
+		toolCallID := string(u.ToolCall.ToolCallId)
+		a.mu.Lock()
+		a.activeToolCalls[toolCallID] = normalizedPayload
+		a.mu.Unlock()
+
 		// Detect tool type for logging
 		toolType := DetectToolOperationType(toolKind, args)
 		_ = toolType // Used for normalization
@@ -459,7 +470,7 @@ func (a *Adapter) convertNotification(n acp.SessionNotification) *AgentEvent {
 		return &AgentEvent{
 			Type:              streams.EventTypeToolCall,
 			SessionID:         string(n.SessionId),
-			ToolCallID:        string(u.ToolCall.ToolCallId),
+			ToolCallID:        toolCallID,
 			ToolName:          string(u.ToolCall.Kind), // Kind is effectively the tool name
 			ToolTitle:         u.ToolCall.Title,
 			ToolStatus:        status,
@@ -467,6 +478,7 @@ func (a *Adapter) convertNotification(n acp.SessionNotification) *AgentEvent {
 		}
 
 	case u.ToolCallUpdate != nil:
+		toolCallID := string(u.ToolCallUpdate.ToolCallId)
 		status := ""
 		if u.ToolCallUpdate.Status != nil {
 			status = string(*u.ToolCallUpdate.Status)
@@ -475,11 +487,35 @@ func (a *Adapter) convertNotification(n acp.SessionNotification) *AgentEvent {
 		if status == "completed" {
 			status = "complete"
 		}
+
+		// Look up the stored payload and update with result if we have rawOutput
+		var normalizedPayload *streams.NormalizedPayload
+		if u.ToolCallUpdate.RawOutput != nil {
+			a.mu.Lock()
+			if payload, ok := a.activeToolCalls[toolCallID]; ok {
+				// Update the payload with the result
+				a.normalizer.NormalizeToolResult(payload, u.ToolCallUpdate.RawOutput)
+				normalizedPayload = payload
+				// Clean up if completed
+				if status == "complete" || status == "error" {
+					delete(a.activeToolCalls, toolCallID)
+				}
+			}
+			a.mu.Unlock()
+		} else if status == "complete" || status == "error" {
+			// Clean up even without output
+			a.mu.Lock()
+			normalizedPayload = a.activeToolCalls[toolCallID]
+			delete(a.activeToolCalls, toolCallID)
+			a.mu.Unlock()
+		}
+
 		return &AgentEvent{
-			Type:       streams.EventTypeToolUpdate,
-			SessionID:  string(n.SessionId),
-			ToolCallID: string(u.ToolCallUpdate.ToolCallId),
-			ToolStatus: status,
+			Type:              streams.EventTypeToolUpdate,
+			SessionID:         string(n.SessionId),
+			ToolCallID:        toolCallID,
+			ToolStatus:        status,
+			NormalizedPayload: normalizedPayload,
 		}
 
 	case u.Plan != nil:

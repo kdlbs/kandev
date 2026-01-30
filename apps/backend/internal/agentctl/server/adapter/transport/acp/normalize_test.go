@@ -32,16 +32,24 @@ func TestACPNormalization(t *testing.T) {
 			// Verify the Kind is set correctly based on tool type
 			switch toolType {
 			case "tool_edit":
-				if payload.Kind != streams.ToolKindModifyFile {
-					t.Errorf("expected Kind %q, got %q", streams.ToolKindModifyFile, payload.Kind)
+				if payload.Kind() != streams.ToolKindModifyFile {
+					t.Errorf("expected Kind %q, got %q", streams.ToolKindModifyFile, payload.Kind())
 				}
 			case "tool_read":
-				if payload.Kind != streams.ToolKindReadFile {
-					t.Errorf("expected Kind %q, got %q", streams.ToolKindReadFile, payload.Kind)
+				if payload.Kind() != streams.ToolKindReadFile {
+					t.Errorf("expected Kind %q, got %q", streams.ToolKindReadFile, payload.Kind())
 				}
 			case "tool_execute":
-				if payload.Kind != streams.ToolKindShellExec {
-					t.Errorf("expected Kind %q, got %q", streams.ToolKindShellExec, payload.Kind)
+				if payload.Kind() != streams.ToolKindShellExec {
+					t.Errorf("expected Kind %q, got %q", streams.ToolKindShellExec, payload.Kind())
+				}
+			case "tool_search":
+				if payload.Kind() != streams.ToolKindCodeSearch {
+					t.Errorf("expected Kind %q, got %q", streams.ToolKindCodeSearch, payload.Kind())
+				}
+			case "tool_call":
+				if payload.Kind() != streams.ToolKindGeneric {
+					t.Errorf("expected Kind %q, got %q", streams.ToolKindGeneric, payload.Kind())
 				}
 			}
 		})
@@ -105,9 +113,15 @@ func TestDetectToolOperationType(t *testing.T) {
 			want:     "tool_execute",
 		},
 		{
-			name:     "unknown kind falls back to tool_call",
+			name:     "search kind returns tool_search",
 			toolKind: "search",
 			args:     map[string]any{"kind": "search"},
+			want:     "tool_search",
+		},
+		{
+			name:     "unknown kind falls back to tool_call",
+			toolKind: "custom_tool",
+			args:     map[string]any{"kind": "custom_tool"},
 			want:     "tool_call",
 		},
 		{
@@ -121,6 +135,17 @@ func TestDetectToolOperationType(t *testing.T) {
 			toolKind: "read",
 			args:     map[string]any{"kind": "edit"},
 			want:     "tool_edit",
+		},
+		{
+			name:     "read with directory type returns tool_search",
+			toolKind: "read",
+			args: map[string]any{
+				"kind": "read",
+				"raw_input": map[string]any{
+					"type": "directory",
+				},
+			},
+			want: "tool_search",
 		},
 	}
 
@@ -246,19 +271,19 @@ func TestNormalizerEdit(t *testing.T) {
 		}
 
 		result := normalizer.NormalizeToolCall("edit", args)
-		if result.Kind != streams.ToolKindModifyFile {
-			t.Errorf("expected Kind %q, got %q", streams.ToolKindModifyFile, result.Kind)
+		if result.Kind() != streams.ToolKindModifyFile {
+			t.Errorf("expected Kind %q, got %q", streams.ToolKindModifyFile, result.Kind())
 		}
-		if result.ModifyFile == nil {
+		if result.ModifyFile() == nil {
 			t.Fatal("expected ModifyFile to be set")
 		}
-		if result.ModifyFile.FilePath != "file.ts" {
-			t.Errorf("expected FilePath 'file.ts', got %q", result.ModifyFile.FilePath)
+		if result.ModifyFile().FilePath != "file.ts" {
+			t.Errorf("expected FilePath 'file.ts', got %q", result.ModifyFile().FilePath)
 		}
-		if len(result.ModifyFile.Mutations) != 1 {
-			t.Fatalf("expected 1 mutation, got %d", len(result.ModifyFile.Mutations))
+		if len(result.ModifyFile().Mutations) != 1 {
+			t.Fatalf("expected 1 mutation, got %d", len(result.ModifyFile().Mutations))
 		}
-		mutation := result.ModifyFile.Mutations[0]
+		mutation := result.ModifyFile().Mutations[0]
 		if mutation.OldContent != "old code" {
 			t.Errorf("expected OldContent 'old code', got %q", mutation.OldContent)
 		}
@@ -287,8 +312,8 @@ func TestNormalizerEdit(t *testing.T) {
 		}
 
 		result := normalizer.NormalizeToolCall("edit", args)
-		if result.ModifyFile.FilePath != "/workspace/fallback.ts" {
-			t.Errorf("expected FilePath '/workspace/fallback.ts', got %q", result.ModifyFile.FilePath)
+		if result.ModifyFile().FilePath != "/workspace/fallback.ts" {
+			t.Errorf("expected FilePath '/workspace/fallback.ts', got %q", result.ModifyFile().FilePath)
 		}
 	})
 }
@@ -305,14 +330,14 @@ func TestNormalizerRead(t *testing.T) {
 			},
 		}
 		result := normalizer.NormalizeToolCall("read", args)
-		if result.Kind != streams.ToolKindReadFile {
-			t.Errorf("expected Kind %q, got %q", streams.ToolKindReadFile, result.Kind)
+		if result.Kind() != streams.ToolKindReadFile {
+			t.Errorf("expected Kind %q, got %q", streams.ToolKindReadFile, result.Kind())
 		}
-		if result.ReadFile == nil {
+		if result.ReadFile() == nil {
 			t.Fatal("expected ReadFile to be set")
 		}
-		if result.ReadFile.FilePath != "config.json" {
-			t.Errorf("expected FilePath 'config.json', got %q", result.ReadFile.FilePath)
+		if result.ReadFile().FilePath != "config.json" {
+			t.Errorf("expected FilePath 'config.json', got %q", result.ReadFile().FilePath)
 		}
 	})
 
@@ -327,8 +352,133 @@ func TestNormalizerRead(t *testing.T) {
 			},
 		}
 		result := normalizer.NormalizeToolCall("read", args)
-		if result.ReadFile.FilePath != "/workspace/README.md" {
-			t.Errorf("expected FilePath '/workspace/README.md', got %q", result.ReadFile.FilePath)
+		if result.ReadFile().FilePath != "/workspace/README.md" {
+			t.Errorf("expected FilePath '/workspace/README.md', got %q", result.ReadFile().FilePath)
+		}
+	})
+
+	t.Run("directory type returns code search", func(t *testing.T) {
+		args := map[string]any{
+			"kind": "read",
+			"raw_input": map[string]any{
+				"path": ".",
+				"type": "directory",
+			},
+		}
+		result := normalizer.NormalizeToolCall("read", args)
+		if result.Kind() != streams.ToolKindCodeSearch {
+			t.Errorf("expected Kind %q, got %q", streams.ToolKindCodeSearch, result.Kind())
+		}
+		if result.CodeSearch() == nil {
+			t.Fatal("expected CodeSearch to be set")
+		}
+		if result.CodeSearch().Path != "." {
+			t.Errorf("expected Path '.', got %q", result.CodeSearch().Path)
+		}
+	})
+}
+
+// TestNormalizerResult tests the normalizer's result handling.
+func TestNormalizerResult(t *testing.T) {
+	normalizer := NewNormalizer()
+
+	t.Run("handles read file result", func(t *testing.T) {
+		payload := normalizer.NormalizeToolCall("read", map[string]any{
+			"kind": "read",
+			"raw_input": map[string]any{
+				"path": "file.txt",
+			},
+		})
+
+		normalizer.NormalizeToolResult(payload, map[string]any{
+			"rawOutput": map[string]any{
+				"output": "line 1\nline 2\nline 3",
+			},
+		})
+
+		if payload.ReadFile().Output == nil {
+			t.Fatal("expected Output to be set")
+		}
+		if payload.ReadFile().Output.Content != "line 1\nline 2\nline 3" {
+			t.Errorf("expected Content, got %q", payload.ReadFile().Output.Content)
+		}
+		if payload.ReadFile().Output.LineCount != 3 {
+			t.Errorf("expected LineCount 3, got %d", payload.ReadFile().Output.LineCount)
+		}
+	})
+
+	t.Run("handles directory listing result", func(t *testing.T) {
+		payload := normalizer.NormalizeToolCall("read", map[string]any{
+			"kind": "read",
+			"raw_input": map[string]any{
+				"path": ".",
+				"type": "directory",
+			},
+		})
+
+		normalizer.NormalizeToolResult(payload, map[string]any{
+			"rawOutput": map[string]any{
+				"output": "Here's the files:\n./file1.ts\n./file2.go\n./src/main.ts",
+			},
+		})
+
+		if payload.CodeSearch().Output == nil {
+			t.Fatal("expected Output to be set")
+		}
+		// Should skip "Here's the files:" header
+		if payload.CodeSearch().Output.FileCount != 3 {
+			t.Errorf("expected FileCount 3, got %d", payload.CodeSearch().Output.FileCount)
+		}
+	})
+
+	t.Run("handles shell execution result", func(t *testing.T) {
+		payload := normalizer.NormalizeToolCall("execute", map[string]any{
+			"kind": "execute",
+			"raw_input": map[string]any{
+				"command": "pwd",
+				"cwd":     ".",
+			},
+		})
+
+		normalizer.NormalizeToolResult(payload, map[string]any{
+			"rawOutput": map[string]any{
+				"output": "Here are the results from executing the command.\n<return-code>\n0\n</return-code>\n<output>\n/Users/cfl/project\n\n</output>",
+			},
+		})
+
+		if payload.ShellExec().Output == nil {
+			t.Fatal("expected Output to be set")
+		}
+		if payload.ShellExec().Output.ExitCode != 0 {
+			t.Errorf("expected ExitCode 0, got %d", payload.ShellExec().Output.ExitCode)
+		}
+		if payload.ShellExec().Output.Stdout != "/Users/cfl/project" {
+			t.Errorf("expected Stdout '/Users/cfl/project', got %q", payload.ShellExec().Output.Stdout)
+		}
+	})
+
+	t.Run("handles shell execution with stderr", func(t *testing.T) {
+		payload := normalizer.NormalizeToolCall("execute", map[string]any{
+			"kind": "execute",
+			"raw_input": map[string]any{
+				"command": "cat nonexistent",
+			},
+		})
+
+		normalizer.NormalizeToolResult(payload, map[string]any{
+			"rawOutput": map[string]any{
+				"output": "<return-code>\n1\n</return-code>\n<output>\n</output>\n<stderr>\ncat: nonexistent: No such file or directory\n</stderr>",
+			},
+		})
+
+		if payload.ShellExec().Output == nil {
+			t.Fatal("expected Output to be set")
+		}
+		if payload.ShellExec().Output.ExitCode != 1 {
+			t.Errorf("expected ExitCode 1, got %d", payload.ShellExec().Output.ExitCode)
+		}
+		if payload.ShellExec().Output.Stderr != "cat: nonexistent: No such file or directory" {
+			t.Errorf("expected Stderr, got %q", payload.ShellExec().Output.Stderr)
 		}
 	})
 }
@@ -347,20 +497,20 @@ func TestNormalizerExecute(t *testing.T) {
 			},
 		}
 		result := normalizer.NormalizeToolCall("execute", args)
-		if result.Kind != streams.ToolKindShellExec {
-			t.Errorf("expected Kind %q, got %q", streams.ToolKindShellExec, result.Kind)
+		if result.Kind() != streams.ToolKindShellExec {
+			t.Errorf("expected Kind %q, got %q", streams.ToolKindShellExec, result.Kind())
 		}
-		if result.ShellExec == nil {
+		if result.ShellExec() == nil {
 			t.Fatal("expected ShellExec to be set")
 		}
-		if result.ShellExec.Command != "npm test" {
-			t.Errorf("expected Command 'npm test', got %q", result.ShellExec.Command)
+		if result.ShellExec().Command != "npm test" {
+			t.Errorf("expected Command 'npm test', got %q", result.ShellExec().Command)
 		}
-		if result.ShellExec.WorkDir != "/workspace" {
-			t.Errorf("expected WorkDir '/workspace', got %q", result.ShellExec.WorkDir)
+		if result.ShellExec().WorkDir != "/workspace" {
+			t.Errorf("expected WorkDir '/workspace', got %q", result.ShellExec().WorkDir)
 		}
-		if result.ShellExec.Timeout != 30 {
-			t.Errorf("expected Timeout 30, got %d", result.ShellExec.Timeout)
+		if result.ShellExec().Timeout != 30 {
+			t.Errorf("expected Timeout 30, got %d", result.ShellExec().Timeout)
 		}
 	})
 
@@ -373,7 +523,7 @@ func TestNormalizerExecute(t *testing.T) {
 			},
 		}
 		result := normalizer.NormalizeToolCall("execute", args)
-		if !result.ShellExec.Background {
+		if !result.ShellExec().Background {
 			t.Error("expected Background to be true when wait is false")
 		}
 	})

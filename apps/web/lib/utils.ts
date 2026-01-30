@@ -165,3 +165,40 @@ export function formatRelativeTime(dateString: string): string {
     if (diffDay < 7) return `${diffDay}d ago`;
     return date.toLocaleDateString();
 }
+
+/**
+ * Convert an absolute file path to a relative path based on a workspace root.
+ * If the path is within the workspace, returns the relative portion.
+ * Otherwise, returns the original path (with home directory formatting applied).
+ */
+export function toRelativePath(absolutePath: string, workspaceRoot?: string | null): string {
+    if (!absolutePath) return absolutePath;
+    if (!workspaceRoot) return formatUserHomePath(absolutePath);
+
+    // Normalize paths for comparison
+    const normalizedPath = absolutePath.replace(/\\/g, '/');
+    const normalizedRoot = workspaceRoot.replace(/\\/g, '/').replace(/\/$/, '');
+
+    // Check if path is within the workspace
+    if (normalizedPath.startsWith(normalizedRoot + '/')) {
+        // Return the relative portion (strip workspace root)
+        return normalizedPath.slice(normalizedRoot.length + 1);
+    }
+
+    // Path is outside workspace, use home path formatting
+    return formatUserHomePath(absolutePath);
+}
+
+/**
+ * Transform any absolute paths in a string to relative paths based on workspace root.
+ * Useful for titles/descriptions that may contain embedded file paths.
+ */
+export function transformPathsInText(text: string, workspaceRoot?: string | null): string {
+    if (!text || !workspaceRoot) return text;
+
+    const normalizedRoot = workspaceRoot.replace(/\\/g, '/').replace(/\/$/, '');
+    // Match the workspace root followed by a path (non-whitespace characters)
+    const pattern = new RegExp(normalizedRoot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/([^\\s]+)', 'g');
+
+    return text.replace(pattern, (_, relativePart) => relativePart);
+}

@@ -1,5 +1,6 @@
 'use client';
 
+import { memo, isValidElement, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
@@ -8,6 +9,34 @@ import type { Message } from '@/lib/types/http';
 import { RichBlocks } from '@/components/task/chat/messages/rich-blocks';
 import { InlineCode } from '@/components/task/chat/messages/inline-code';
 import { CodeBlock } from '@/components/task/chat/messages/code-block';
+
+/**
+ * Recursively extracts text content from React children.
+ * Optimized with fast paths for common cases (string/number).
+ */
+function getTextContent(children: ReactNode): string {
+  // Fast path: most common cases first
+  if (typeof children === 'string') return children;
+  if (typeof children === 'number') return String(children);
+  if (children == null) return '';
+
+  // Use loop instead of map().join() to avoid intermediate array allocation
+  if (Array.isArray(children)) {
+    let result = '';
+    for (let i = 0; i < children.length; i++) {
+      result += getTextContent(children[i]);
+    }
+    return result;
+  }
+
+  if (isValidElement(children)) {
+    const props = children.props as { children?: ReactNode };
+    if (props.children) {
+      return getTextContent(props.children);
+    }
+  }
+  return '';
+}
 
 type ChatMessageProps = {
   comment: Message;
@@ -58,7 +87,7 @@ function renderContentWithFileRefs(content: string): React.ReactNode[] {
   return parts.length > 0 ? parts : [content];
 }
 
-export function ChatMessage({ comment, label, className, showRichBlocks }: ChatMessageProps) {
+export const ChatMessage = memo(function ChatMessage({ comment, label, className, showRichBlocks }: ChatMessageProps) {
   const isUser = comment.author_type === 'user';
   const isTaskDescription = label === 'Task';
 
@@ -87,7 +116,7 @@ export function ChatMessage({ comment, label, className, showRichBlocks }: ChatM
     return (
       <div className="flex justify-end w-full overflow-hidden">
         <div className="max-w-[85%] sm:max-w-[75%] md:max-w-2xl overflow-hidden">
-          <div className="rounded-2xl border-primary/30 bg-primary/10 px-4 py-2.5 text-xs overflow-hidden">
+          <div className="rounded-2xl bg-primary/30 px-4 py-2.5 text-xs overflow-hidden">
             <p className="whitespace-pre-wrap break-words overflow-wrap-anywhere">
               {comment.content ? renderContentWithFileRefs(comment.content) : '(empty)'}
             </p>
@@ -108,59 +137,60 @@ export function ChatMessage({ comment, label, className, showRichBlocks }: ChatM
             remarkPlugins={[remarkGfm, remarkBreaks]}
             components={{
               code: ({ className, children }) => {
-                // Check if it's inline code (no className means inline, className with language-* means code block)
-                const isInline = !className || !className.startsWith('language-');
+                const content = getTextContent(children).replace(/\n$/, '');
+                const hasLanguage = className?.startsWith('language-');
+                const hasNewlines = content.includes('\n');
 
-                // Inline code (backticks) - with copy on click
-                if (isInline) {
-                  return <InlineCode>{children}</InlineCode>;
+                // Code block if it has a language specifier OR has multiple lines
+                if (hasLanguage || hasNewlines) {
+                  return <CodeBlock className={className}>{content}</CodeBlock>;
                 }
 
-                // Code blocks (triple backticks) - with syntax highlighting and copy button
-                return <CodeBlock className={className}>{children}</CodeBlock>;
+                // Inline code (single backticks, single line)
+                return <InlineCode>{content}</InlineCode>;
               },
-              ol: ({ children, ...props }) => (
-                <ol className="list-decimal pl-6" {...props}>
+              ol: ({ children }) => (
+                <ol className="list-decimal pl-6 my-2">
                   {children}
                 </ol>
               ),
-              ul: ({ children, ...props }) => (
-                <ul className="list-disc pl-6" {...props}>
+              ul: ({ children }) => (
+                <ul className="list-disc pl-6 my-1">
                   {children}
                 </ul>
               ),
-              li: ({ children, ...props }) => (
-                <li className="my-1" {...props}>
+              li: ({ children }) => (
+                <li className="my-0.5">
                   {children}
                 </li>
               ),
-              p: ({ children, ...props }) => (
-                <p className="leading-relaxed" {...props}>
+              p: ({ children }) => (
+                <p className="leading-relaxed my-0.5">
                   {children}
                 </p>
               ),
-              h1: ({ children, ...props }) => (
-                <p className="my-1 font-bold" {...props}>
+              h1: ({ children }) => (
+                <p className="my-3 font-bold text-[13px]">
                   {children}
                 </p>
               ),
-              h2: ({ children, ...props }) => (
-                <p className="my-1 font-bold" {...props}>
+              h2: ({ children }) => (
+                <p className="my-2 font-bold text-[13px]">
                   {children}
                 </p>
               ),
-              h3: ({ children, ...props }) => (
-                <p className="my-1 font-bold" {...props}>
+              h3: ({ children }) => (
+                <p className="my-2 font-bold">
                   {children}
                 </p>
               ),
-              h4: ({ children, ...props }) => (
-                <p className="my-1 font-bold" {...props}>
+              h4: ({ children }) => (
+                <p className="my-2 font-bold">
                   {children}
                 </p>
               ),
-              h5: ({ children, ...props }) => (
-                <p className="my-1 font-bold" {...props}>
+              h5: ({ children }) => (
+                <p className="my-2 font-bold">
                   {children}
                 </p>
               ),
@@ -173,4 +203,4 @@ export function ChatMessage({ comment, label, className, showRichBlocks }: ChatM
       </div>
     </div>
   );
-}
+});
