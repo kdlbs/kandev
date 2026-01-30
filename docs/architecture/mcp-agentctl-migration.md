@@ -66,11 +66,18 @@ flowchart TB
             Orchestrator["Orchestrator"]
             Lifecycle["Lifecycle Manager"]
             Runtime["Runtime<br/>(Docker/Standalone)"]
-            API["REST API :8080<br/>/api/v1/tasks<br/>/api/v1/boards"]
-            WSServer["WebSocket Server"]
+
+            subgraph WSGateway["WS Gateway :8080"]
+                Dispatcher["Dispatcher"]
+                MCPHandlers["MCP Handlers"]
+            end
+
+            Services["Service Layer<br/>(Task, Board, Workspace)"]
 
             Orchestrator --> Lifecycle
             Lifecycle --> Runtime
+            Dispatcher --> MCPHandlers
+            MCPHandlers --> Services
         end
     end
 
@@ -84,22 +91,22 @@ flowchart TB
                 Tools["Tools:<br/>list_workspaces<br/>list_tasks<br/>create_task<br/>update_task"]
             end
 
-            WSTunnel["WS Tunnel Client<br/>(API Proxy)"]
+            WSTunnel["WS Client<br/>(connects to backend)"]
 
             Agent["Agent Process<br/>(Claude, Codex, etc)<br/>stdin/stdout ACP"]
 
             InstanceMgr --> Agent
-            MCPServer -->|"API calls"| WSTunnel
+            MCPServer -->|"forward requests"| WSTunnel
             Agent -->|"✅ localhost"| MCPServer
         end
     end
 
     Runtime <-->|"WS connection"| Agentctl
-    WSTunnel <-->|"Tunneled API requests"| WSServer
-    WSServer --> API
+    WSTunnel <-->|"mcp.* actions"| Dispatcher
 
     style MCPServer fill:#ccffcc,stroke:#00cc00
     style WSTunnel fill:#cce5ff,stroke:#0066cc
+    style MCPHandlers fill:#ccffcc,stroke:#00cc00
 ```
 
 ---
@@ -111,7 +118,8 @@ sequenceDiagram
     participant Agent as Agent Process
     participant MCP as MCP Server<br/>(in agentctl)
     participant Tunnel as WS Tunnel<br/>(in agentctl)
-    participant WSHandler as WS Handler<br/>(in Backend)
+    participant Dispatcher as WS Dispatcher<br/>(in Backend)
+    participant Handler as MCP Handler<br/>(in Backend)
     participant Service as Service Layer<br/>(in Backend)
     participant DB as Database
 
@@ -121,17 +129,19 @@ sequenceDiagram
     MCP->>MCP: Parse MCP request
 
     MCP->>Tunnel: Forward request
-    Tunnel->>WSHandler: WS message<br/>{type: "mcp_request", tool: "create_task", ...}
-    WSHandler->>Service: taskService.Create(...)
+    Tunnel->>Dispatcher: WS message<br/>{action: "mcp.create_task", ...}
+    Dispatcher->>Handler: Dispatch to registered handler
+    Handler->>Service: taskService.Create(...)
     Service->>DB: Insert task
     DB-->>Service: Task created
-    Service-->>WSHandler: Task entity
-    WSHandler-->>Tunnel: WS message<br/>{type: "mcp_response", result: {...}}
+    Service-->>Handler: Task entity
+    Handler-->>Dispatcher: Response message
+    Dispatcher-->>Tunnel: WS message<br/>{action: "mcp.create_task", result: {...}}
     Tunnel-->>MCP: Response
 
     MCP-->>Agent: MCP tool result<br/>{task_id: "..."}
 
-    Note over Agent,DB: ✅ Direct service calls, no HTTP overhead
+    Note over Agent,DB: ✅ Uses existing WS Dispatcher pattern
 ```
 
 ---
@@ -190,26 +200,83 @@ flowchart LR
 
 ### Changes Required
 
-1. **agentctl**: Add embedded MCP server (reuse `internal/mcpserver` package)
-2. **agentctl**: Add WS tunnel client for forwarding MCP tool calls to backend
-3. **Backend**: Add WS handler for `mcp_request` messages that calls services directly
-4. **Backend**: Remove embedded MCP server from `cmd/kandev`
-5. **Lifecycle Manager**: Pass backend WS URL to agentctl during instance creation
+**agentctl:**
+1. Add embedded MCP server (adapt `internal/mcpserver` package)
+2. Add WS client that connects back to Kandev backend
+3. MCP tool handlers forward requests via WS client instead of HTTP
 
-### WS Tunnel Protocol
+**Backend:**
+1. Add MCP handlers package (`internal/mcp/handlers/`)
+2. Register `mcp.*` actions with WS Dispatcher
+3. Handlers call existing services (TaskService, BoardService, etc.)
+4. Remove embedded MCP server from `cmd/kandev`
 
-The tunnel uses the existing WebSocket connection with MCP-specific message types. The backend WS handler calls services directly (no HTTP overhead):
+**Lifecycle Manager:**
+1. Pass backend WS URL to agentctl during instance creation
+2. agentctl connects back to backend on startup
+
+### Backend Internal Architecture
+
+The backend uses the existing **WS Dispatcher pattern** (not the event bus) for MCP requests. This is consistent with how other WS handlers work (tasks, messages, workflows, etc.):
+
+```mermaid
+flowchart TB
+    subgraph Backend["KANDEV BACKEND"]
+        subgraph Gateway["WS Gateway"]
+            Hub["Hub<br/>(client connections)"]
+            Dispatcher["Dispatcher<br/>(action routing)"]
+        end
+
+        subgraph Handlers["Registered Handlers"]
+            TaskH["Task Handlers<br/>task.list, task.create..."]
+            MsgH["Message Handlers<br/>message.add, message.list..."]
+            MCPH["MCP Handlers ⭐ NEW<br/>mcp.create_task, mcp.list_tasks..."]
+        end
+
+        subgraph Services["Service Layer"]
+            TaskSvc["TaskService"]
+            BoardSvc["BoardService"]
+            WorkspaceSvc["WorkspaceService"]
+        end
+
+        Hub --> Dispatcher
+        Dispatcher --> TaskH
+        Dispatcher --> MsgH
+        Dispatcher --> MCPH
+
+        TaskH --> TaskSvc
+        MsgH --> TaskSvc
+        MCPH --> TaskSvc
+        MCPH --> BoardSvc
+        MCPH --> WorkspaceSvc
+    end
+
+    style MCPH fill:#ccffcc,stroke:#00cc00
+```
+
+**Why WS Dispatcher instead of Event Bus?**
+
+| Aspect | WS Dispatcher | Event Bus |
+|--------|---------------|-----------|
+| **Pattern** | Request/Response | Pub/Sub (fire-and-forget) |
+| **Use case** | Synchronous operations | Async notifications |
+| **Existing usage** | All WS handlers (tasks, messages, etc.) | Agent lifecycle events, notifications |
+| **MCP fit** | ✅ MCP tools need responses | ❌ Would need request-reply wrapper |
+
+### WS Message Format
+
+MCP requests use the standard Kandev WS message format with `mcp.*` action prefix:
 
 ```json
 {
-  "type": "mcp_request",
   "id": "req-123",
-  "tool": "create_task",
-  "arguments": {
+  "action": "mcp.create_task",
+  "payload": {
     "workspace_id": "ws-1",
     "board_id": "board-1",
     "title": "New task"
-  }
+  },
+  "timestamp": "2024-01-15T10:30:00Z"
 }
 ```
 
@@ -217,12 +284,13 @@ Response:
 
 ```json
 {
-  "type": "mcp_response",
   "id": "req-123",
-  "result": {
+  "action": "mcp.create_task",
+  "payload": {
     "task_id": "task-456",
     "title": "New task"
-  }
+  },
+  "timestamp": "2024-01-15T10:30:01Z"
 }
 ```
 
@@ -230,12 +298,13 @@ Error response:
 
 ```json
 {
-  "type": "mcp_response",
   "id": "req-123",
+  "action": "mcp.create_task",
   "error": {
     "code": "NOT_FOUND",
     "message": "Board not found"
-  }
+  },
+  "timestamp": "2024-01-15T10:30:01Z"
 }
 ```
 
