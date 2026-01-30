@@ -111,8 +111,8 @@ sequenceDiagram
     participant Agent as Agent Process
     participant MCP as MCP Server<br/>(in agentctl)
     participant Tunnel as WS Tunnel<br/>(in agentctl)
-    participant WSServer as WS Server<br/>(in Backend)
-    participant API as REST API<br/>(in Backend)
+    participant WSHandler as WS Handler<br/>(in Backend)
+    participant Service as Service Layer<br/>(in Backend)
     participant DB as Database
 
     Note over Agent,DB: Agent wants to create a task
@@ -120,18 +120,18 @@ sequenceDiagram
     Agent->>MCP: POST /mcp<br/>tool: create_task
     MCP->>MCP: Parse MCP request
 
-    MCP->>Tunnel: Forward API call<br/>POST /api/v1/tasks
-    Tunnel->>WSServer: WS message<br/>{type: "api_proxy_request", ...}
-    WSServer->>API: HTTP POST /api/v1/tasks
-    API->>DB: Insert task
-    DB-->>API: Task created
-    API-->>WSServer: HTTP 201 {task_id: "..."}
-    WSServer-->>Tunnel: WS message<br/>{type: "api_proxy_response", ...}
-    Tunnel-->>MCP: API response
+    MCP->>Tunnel: Forward request
+    Tunnel->>WSHandler: WS message<br/>{type: "mcp_request", tool: "create_task", ...}
+    WSHandler->>Service: taskService.Create(...)
+    Service->>DB: Insert task
+    DB-->>Service: Task created
+    Service-->>WSHandler: Task entity
+    WSHandler-->>Tunnel: WS message<br/>{type: "mcp_response", result: {...}}
+    Tunnel-->>MCP: Response
 
     MCP-->>Agent: MCP tool result<br/>{task_id: "..."}
 
-    Note over Agent,DB: ✅ Works regardless of network topology
+    Note over Agent,DB: ✅ Direct service calls, no HTTP overhead
 ```
 
 ---
@@ -191,24 +191,24 @@ flowchart LR
 ### Changes Required
 
 1. **agentctl**: Add embedded MCP server (reuse `internal/mcpserver` package)
-2. **agentctl**: Add WS tunnel client for proxying API calls back to backend
-3. **Backend**: Add WS tunnel server to handle proxied API requests
+2. **agentctl**: Add WS tunnel client for forwarding MCP tool calls to backend
+3. **Backend**: Add WS handler for `mcp_request` messages that calls services directly
 4. **Backend**: Remove embedded MCP server from `cmd/kandev`
 5. **Lifecycle Manager**: Pass backend WS URL to agentctl during instance creation
 
 ### WS Tunnel Protocol
 
-The tunnel uses the existing WebSocket connection with a new message type:
+The tunnel uses the existing WebSocket connection with MCP-specific message types. The backend WS handler calls services directly (no HTTP overhead):
 
 ```json
 {
-  "type": "api_proxy_request",
+  "type": "mcp_request",
   "id": "req-123",
-  "payload": {
-    "method": "POST",
-    "path": "/api/v1/tasks",
-    "headers": {"Content-Type": "application/json"},
-    "body": "{\"title\": \"New task\"}"
+  "tool": "create_task",
+  "arguments": {
+    "workspace_id": "ws-1",
+    "board_id": "board-1",
+    "title": "New task"
   }
 }
 ```
@@ -217,12 +217,24 @@ Response:
 
 ```json
 {
-  "type": "api_proxy_response",
+  "type": "mcp_response",
   "id": "req-123",
-  "payload": {
-    "status": 201,
-    "headers": {"Content-Type": "application/json"},
-    "body": "{\"id\": \"task-456\", \"title\": \"New task\"}"
+  "result": {
+    "task_id": "task-456",
+    "title": "New task"
+  }
+}
+```
+
+Error response:
+
+```json
+{
+  "type": "mcp_response",
+  "id": "req-123",
+  "error": {
+    "code": "NOT_FOUND",
+    "message": "Board not found"
   }
 }
 ```
