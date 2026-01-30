@@ -42,6 +42,9 @@ import (
 
 	"github.com/kandev/kandev/internal/clarification"
 
+	// MCP handlers
+	mcphandlers "github.com/kandev/kandev/internal/mcp/handlers"
+
 	// Task Service packages
 	taskcontroller "github.com/kandev/kandev/internal/task/controller"
 	taskhandlers "github.com/kandev/kandev/internal/task/handlers"
@@ -219,29 +222,10 @@ func main() {
 	}
 
 	// ============================================
-	// MCP SERVER (embedded)
-	// ============================================
-	mcpServerURL, mcpCleanup, err := provideMcpServer(ctx, cfg, log)
-	if err != nil {
-		log.Fatal("Failed to start MCP server", zap.Error(err))
-	}
-	if mcpCleanup != nil {
-		cleanups = append(cleanups, mcpCleanup)
-		log.Info("MCP server started", zap.String("url", mcpServerURL))
-		// Auto-set the MCP server URL if not explicitly configured
-		if cfg.Agent.McpServerURL == "" {
-			cfg.Agent.McpServerURL = mcpServerURL
-		}
-		// Set MCP server URL on controller and ensure default MCP config for all profiles
-		agentSettingsController.SetMcpServerURL(mcpServerURL)
-		if err := agentSettingsController.EnsureDefaultMcpConfig(ctx); err != nil {
-			log.Warn("Failed to ensure default MCP config", zap.Error(err))
-		}
-	}
-
-	// ============================================
 	// AGENT MANAGER
 	// ============================================
+	// Note: MCP server is now embedded in agentctl (co-located with agents)
+	// and tunnels tool calls back to the backend via WebSocket.
 	lifecycleMgr, agentRegistry, err := provideLifecycleManager(ctx, cfg, log, eventBus, dockerClient, agentSettingsRepo)
 	if err != nil {
 		log.Fatal("Failed to initialize agent manager", zap.Error(err))
@@ -562,6 +546,20 @@ func main() {
 	clarificationStore := clarification.NewStore(10 * time.Minute)
 	clarification.RegisterRoutes(router, clarificationStore, gateway.Hub, msgCreator, taskRepo, log)
 	log.Debug("Registered Clarification handlers (HTTP)")
+
+	// MCP handlers for agentctl WS tunnel (agentctl -> backend)
+	mcpHandlers := mcphandlers.NewHandlers(
+		workspaceController,
+		boardController,
+		taskController,
+		workflowCtrl,
+		clarificationStore,
+		msgCreator,
+		taskRepo,
+		log,
+	)
+	mcpHandlers.RegisterHandlers(gateway.Dispatcher)
+	log.Debug("Registered MCP handlers (WebSocket)")
 
 	// Health check (simple HTTP for load balancers/monitoring)
 	router.GET("/health", func(c *gin.Context) {

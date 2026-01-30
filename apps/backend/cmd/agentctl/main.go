@@ -20,7 +20,9 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/api"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/instance"
+	mcpserver "github.com/kandev/kandev/internal/agentctl/server/mcp"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
+	"github.com/kandev/kandev/internal/agentctl/server/wsclient"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/pkg/agent"
 	"go.uber.org/zap"
@@ -82,7 +84,24 @@ func run(cfg *config.Config, log *logger.Logger) {
 
 	// Set the server factory to create API servers for each instance
 	instMgr.SetServerFactory(func(instCfg *config.InstanceConfig, procMgr *process.Manager, instLog *logger.Logger) http.Handler {
-		return api.NewServer(instCfg, procMgr, instLog).Router()
+		var mcpSrv *mcpserver.Server
+
+		// Create MCP server if backend WS URL is configured
+		if instCfg.BackendWsURL != "" {
+			wsClient := wsclient.New(instCfg.BackendWsURL, instLog)
+			if err := wsClient.Connect(context.Background()); err != nil {
+				instLog.Error("failed to connect MCP WS client to backend",
+					zap.Error(err),
+					zap.String("backend_ws_url", instCfg.BackendWsURL))
+			} else {
+				mcpSrv = mcpserver.New(wsClient, instCfg.SessionID, instLog)
+				instLog.Info("MCP server enabled",
+					zap.String("backend_ws_url", instCfg.BackendWsURL),
+					zap.String("session_id", instCfg.SessionID))
+			}
+		}
+
+		return api.NewServer(instCfg, procMgr, mcpSrv, instLog).Router()
 	})
 
 	// Create control server

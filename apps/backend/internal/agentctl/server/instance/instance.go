@@ -76,6 +76,13 @@ type CreateRequest struct {
 
 	// McpServers is a list of MCP servers to configure for the agent.
 	McpServers []McpServerConfig `json:"mcp_servers,omitempty"`
+
+	// BackendWsURL is the WebSocket URL to the Kandev backend for MCP tunneling.
+	// If set, the MCP server will be enabled and forward tool calls to the backend.
+	BackendWsURL string `json:"backend_ws_url,omitempty"`
+
+	// SessionID is the task session ID for MCP tool calls (used by ask_user_question).
+	SessionID string `json:"session_id,omitempty"`
 }
 
 // CreateResponse contains the result of creating a new agent instance.

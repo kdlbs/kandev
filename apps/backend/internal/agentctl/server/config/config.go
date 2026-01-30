@@ -136,6 +136,13 @@ type InstanceConfig struct {
 
 	// ProcessBufferMaxBytes caps per-process output buffer size
 	ProcessBufferMaxBytes int64
+
+	// BackendWsURL is the WebSocket URL to connect back to the Kandev backend
+	// for MCP tool requests (e.g., ws://localhost:8080/ws)
+	BackendWsURL string
+
+	// SessionID is the session ID for this agent instance (used in MCP tool calls)
+	SessionID string
 }
 
 // Load loads the configuration from environment variables.
@@ -203,6 +210,12 @@ func (c *Config) NewInstanceConfig(port int, overrides *InstanceOverrides) *Inst
 		if len(overrides.McpServers) > 0 {
 			cfg.McpServers = overrides.McpServers
 		}
+		if overrides.BackendWsURL != "" {
+			cfg.BackendWsURL = overrides.BackendWsURL
+		}
+		if overrides.SessionID != "" {
+			cfg.SessionID = overrides.SessionID
+		}
 	}
 
 	// Parse agent command into args
@@ -226,6 +239,8 @@ type InstanceOverrides struct {
 	ApprovalPolicy string
 	AgentType      string
 	McpServers     []McpServerConfig
+	BackendWsURL   string
+	SessionID      string
 }
 
 // ParseCommand splits a command string into arguments

@@ -198,6 +198,15 @@ const (
 	ActionUserGet             = "user.get"
 	ActionUserSettingsUpdate  = "user.settings.update"
 	ActionUserSettingsUpdated = "user.settings.updated"
+
+	// MCP tool actions (agentctl -> backend via WS tunnel)
+	ActionMCPListWorkspaces    = "mcp.list_workspaces"
+	ActionMCPListBoards        = "mcp.list_boards"
+	ActionMCPListWorkflowSteps = "mcp.list_workflow_steps"
+	ActionMCPListTasks         = "mcp.list_tasks"
+	ActionMCPCreateTask        = "mcp.create_task"
+	ActionMCPUpdateTask        = "mcp.update_task"
+	ActionMCPAskUserQuestion   = "mcp.ask_user_question"
 )
 
 // Error codes

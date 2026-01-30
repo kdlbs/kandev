@@ -67,6 +67,7 @@ type RuntimeCreateRequest struct {
 	Metadata       map[string]interface{}
 	McpServers     []McpServerConfig
 	AgentConfig    *registry.AgentTypeConfig // Agent type info needed by runtimes
+	BackendWsURL   string                    // WebSocket URL to Kandev backend for MCP tunneling
 }
 
 // RuntimeInstance represents an agentctl instance created by a runtime.

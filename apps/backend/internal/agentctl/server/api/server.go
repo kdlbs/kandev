@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
+	"github.com/kandev/kandev/internal/agentctl/server/mcp"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/httpmw"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -16,23 +17,26 @@ import (
 
 // Server is the HTTP API server for a single agent instance.
 type Server struct {
-	cfg     *config.InstanceConfig
-	procMgr *process.Manager
-	logger  *logger.Logger
-	router  *gin.Engine
+	cfg       *config.InstanceConfig
+	procMgr   *process.Manager
+	mcpServer *mcp.Server
+	logger    *logger.Logger
+	router    *gin.Engine
 
 	upgrader websocket.Upgrader
 }
 
 // NewServer creates a new API server for an agent instance.
-func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, log *logger.Logger) *Server {
+// If mcpServer is provided, MCP routes will be registered.
+func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, mcpServer *mcp.Server, log *logger.Logger) *Server {
 	gin.SetMode(gin.ReleaseMode)
 
 	s := &Server{
-		cfg:     cfg,
-		procMgr: procMgr,
-		logger:  log.WithFields(zap.String("component", "api-server")),
-		router:  gin.New(),
+		cfg:       cfg,
+		procMgr:   procMgr,
+		mcpServer: mcpServer,
+		logger:    log.WithFields(zap.String("component", "api-server")),
+		router:    gin.New(),
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
 				return true // Allow all origins for container-local communication
@@ -106,6 +110,11 @@ func (s *Server) setupRoutes() {
 		api.POST("/git/unstage", s.handleGitUnstage)
 		api.POST("/git/create-pr", s.handleGitCreatePR)
 		api.GET("/git/commit/:sha", s.handleGitShowCommit)
+	}
+
+	// MCP routes (if MCP server is configured)
+	if s.mcpServer != nil {
+		s.mcpServer.RegisterRoutes(s.router)
 	}
 }
 
