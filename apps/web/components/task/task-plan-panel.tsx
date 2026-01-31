@@ -8,6 +8,9 @@ import { useAppStore } from '@/components/state-provider';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import { TaskPlanToolbar } from './task-plan-toolbar';
 import { TaskPlanDialogs } from './task-plan-dialogs';
+import { PlanSelectionPopover } from './plan-selection-popover';
+import type { PlanComment } from './plan-comments';
+import type { TextSelection, CommentHighlight } from './markdown-editor';
 
 // Dynamic import to avoid SSR issues with Milkdown
 const MarkdownEditor = dynamic(
@@ -29,14 +32,23 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({ taskId, showApproveBu
     activeSessionId ? state.taskSessions.items[activeSessionId] ?? null : null
   );
   const isAgentBusy = activeSession?.state === 'STARTING' || activeSession?.state === 'RUNNING';
-  const [draftContent, setDraftContent] = useState('');
+  const [draftContent, setDraftContent] = useState(plan?.content ?? '');
   const [showDiscardDialog, setShowDiscardDialog] = useState(false);
   const [showClearDialog, setShowClearDialog] = useState(false);
   const [isReanalyzing, setIsReanalyzing] = useState(false);
   // Key to force editor remount on external content changes
   const [editorKey, setEditorKey] = useState(0);
   // Track the last known plan content to detect external updates
-  const lastPlanContentRef = useRef<string | undefined>(plan?.content);
+  // Initialize to undefined so the first useEffect run always syncs if plan is already loaded
+  const lastPlanContentRef = useRef<string | undefined>(undefined);
+  // Text selection state for the selection popover
+  const [textSelection, setTextSelection] = useState<TextSelection | null>(null);
+  // Plan comments state
+  const [comments, setComments] = useState<PlanComment[]>([]);
+  const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
+  const [isSubmittingComments, setIsSubmittingComments] = useState(false);
+  // Ref to the editor wrapper for positioning gutter markers
+  const editorWrapperRef = useRef<HTMLDivElement>(null);
 
   // Sync draft with plan content and force editor remount when plan changes externally
   useEffect(() => {
@@ -109,6 +121,93 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({ taskId, showApproveBu
     }
   }, [deletePlan]);
 
+  // Handle adding a comment (from selection popover)
+  const handleAddComment = useCallback((comment: string, selectedText: string) => {
+    if (editingCommentId) {
+      // Update existing comment
+      setComments(prev => prev.map(c =>
+        c.id === editingCommentId
+          ? { ...c, comment, selectedText }
+          : c
+      ));
+      setEditingCommentId(null);
+    } else {
+      // Add new comment
+      const newComment: PlanComment = {
+        id: crypto.randomUUID(),
+        selectedText,
+        comment,
+      };
+      setComments(prev => [...prev, newComment]);
+    }
+  }, [editingCommentId]);
+
+  const handleSelectionClose = useCallback(() => {
+    setTextSelection(null);
+    setEditingCommentId(null);
+    // Clear the browser selection
+    window.getSelection()?.removeAllRanges();
+  }, []);
+
+  // Handle clicking on a highlighted comment in the editor (opens edit popover)
+  const handleCommentHighlightClick = useCallback(
+    (id: string, position: { x: number; y: number }) => {
+      const comment = comments.find((c) => c.id === id);
+      if (comment) {
+        setEditingCommentId(id);
+        setTextSelection({
+          text: comment.selectedText,
+          position,
+        });
+      }
+    },
+    [comments]
+  );
+
+  // Handle clearing all comments
+  const handleClearComments = useCallback(() => {
+    setComments([]);
+  }, []);
+
+  // Handle submitting all comments to the agent
+  const handleSubmitComments = useCallback(async () => {
+    if (!taskId || !activeSessionId || comments.length === 0) return;
+    const client = getWebSocketClient();
+    if (!client) return;
+
+    setIsSubmittingComments(true);
+    try {
+      // Format comments for display (short version)
+      const commentsList = comments.map((c, i) =>
+        `${i + 1}. "${c.selectedText.slice(0, 50)}${c.selectedText.length > 50 ? '...' : ''}" → ${c.comment}`
+      ).join('\n');
+
+      // Format full details inside system tags (not rendered in UI)
+      const fullDetails = comments.map((c, i) =>
+        `Comment ${i + 1}:\n- User comment: ${c.comment}\n- Selected text: "${c.selectedText}"`
+      ).join('\n\n');
+
+      const message = `I have feedback on the plan:\n${commentsList}\n\n<kandev-system>\nFull comment details for plan modifications:\n\n${fullDetails}\n\nCurrent plan content:\n${draftContent}\n</kandev-system>`;
+
+      await client.request(
+        'message.add',
+        {
+          task_id: taskId,
+          session_id: activeSessionId,
+          content: message,
+        },
+        10000
+      );
+
+      // Clear comments after successful submission
+      setComments([]);
+    } catch (err) {
+      console.error('Failed to submit comments:', err);
+    } finally {
+      setIsSubmittingComments(false);
+    }
+  }, [taskId, activeSessionId, comments, draftContent]);
+
   // Ctrl+S to save
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -140,15 +239,25 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({ taskId, showApproveBu
     );
   }
 
+  // Convert PlanComment to CommentHighlight for the editor
+  const commentHighlights: CommentHighlight[] = comments.map((c) => ({
+    id: c.id,
+    selectedText: c.selectedText,
+    comment: c.comment,
+  }));
+
   return (
     <div className="flex flex-col h-full">
-      {/* Content - Markdown Editor */}
-      <div className="flex-1 min-h-0">
+      {/* Content - Markdown Editor with inline comment highlights */}
+      <div className="flex-1 min-h-0 relative" ref={editorWrapperRef}>
         <MarkdownEditor
           key={`${taskId}-${editorKey}`}
           value={draftContent}
           onChange={setDraftContent}
           placeholder="Start typing your plan..."
+          onSelectionChange={activeSessionId ? setTextSelection : undefined}
+          comments={commentHighlights}
+          onCommentClick={handleCommentHighlightClick}
         />
       </div>
 
@@ -162,6 +271,10 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({ taskId, showApproveBu
         isReanalyzing={isReanalyzing}
         hasActiveSession={!!activeSessionId}
         showApproveButton={showApproveButton}
+        commentCount={comments.length}
+        isSubmittingComments={isSubmittingComments}
+        onSubmitComments={handleSubmitComments}
+        onClearComments={handleClearComments}
         onSave={handleSave}
         onDiscard={() => setShowDiscardDialog(true)}
         onCopy={handleCopy}
@@ -179,6 +292,17 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({ taskId, showApproveBu
         onDiscard={handleDiscard}
         onClear={handleClear}
       />
+
+      {/* Selection popover for adding comments */}
+      {textSelection && activeSessionId && (
+        <PlanSelectionPopover
+          selectedText={textSelection.text}
+          position={textSelection.position}
+          onAdd={handleAddComment}
+          onClose={handleSelectionClose}
+          editingComment={editingCommentId ? comments.find(c => c.id === editingCommentId)?.comment : undefined}
+        />
+      )}
     </div>
   );
 });

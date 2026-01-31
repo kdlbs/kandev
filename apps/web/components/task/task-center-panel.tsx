@@ -194,6 +194,9 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
 
   const tabs: SessionTab[] = useMemo(() => {
     const staticTabs: SessionTab[] = [
+      { id: 'notes', label: 'Notes' },
+      { id: 'changes', label: 'All changes' },
+      { id: 'chat', label: 'Chat' },
       {
         id: 'plan',
         label: 'Plan',
@@ -201,9 +204,6 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
           <span className="h-2 w-2 rounded-full bg-primary animate-pulse" />
         ) : undefined,
       },
-      { id: 'notes', label: 'Notes' },
-      { id: 'changes', label: 'All changes' },
-      { id: 'chat', label: 'Chat' },
     ];
 
     const fileTabs: SessionTab[] = openFileTabs.map((tab) => {
