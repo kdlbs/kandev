@@ -121,7 +121,12 @@ func main() {
 		os.Exit(1)
 	}
 	cleanups := make([]func() error, 0)
-	defer func() {
+	cleanupsRan := false
+	runCleanups := func() {
+		if cleanupsRan {
+			return
+		}
+		cleanupsRan = true
 		for i := len(cleanups) - 1; i >= 0; i-- {
 			if cleanups[i] == nil {
 				continue
@@ -130,6 +135,9 @@ func main() {
 				log.Warn("cleanup failed", zap.Error(err))
 			}
 		}
+	}
+	defer func() {
+		runCleanups()
 		_ = log.Sync()
 	}()
 	logger.SetDefault(log)
@@ -621,6 +629,7 @@ func main() {
 	go func() {
 		second := <-quit
 		log.Warn("Received second shutdown signal, forcing exit", zap.String("signal", second.String()))
+		_ = log.Sync()
 		os.Exit(1)
 	}()
 
@@ -653,5 +662,9 @@ func main() {
 		}
 	}
 
+	// Run all cleanups before exiting so logs appear before the shell prompt
+	runCleanups()
+
 	log.Info("Kandev stopped")
+	_ = log.Sync()
 }

@@ -50,7 +50,7 @@ run: build
 ## Run in development mode
 dev: build
 	@echo "Running $(BINARY_NAME) in development mode..."
-	./$(BUILD_DIR)/$(BINARY_NAME)
+	@exec ./$(BUILD_DIR)/$(BINARY_NAME)
 
 ## Run tests
 test:

@@ -210,7 +210,7 @@ func (l *Launcher) Stop(ctx context.Context) error {
 		select {
 		case <-l.exited:
 			return nil
-		case <-time.After(2 * time.Second):
+		case <-time.After(1 * time.Second):
 			return fmt.Errorf("agentctl did not exit after SIGKILL")
 		}
 	}

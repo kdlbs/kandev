@@ -19,7 +19,7 @@ func Provide(ctx context.Context, cfg Config, log *logger.Logger) (*Launcher, fu
 	cleanup := func() error {
 		var stopErr error
 		stopOnce.Do(func() {
-			stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			stopCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
 			stopErr = launcher.Stop(stopCtx)
 		})

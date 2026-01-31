@@ -601,23 +601,36 @@ func (m *Manager) Stop() error {
 	return nil
 }
 
-// StopAllAgents attempts a graceful shutdown of all active agents.
+// StopAllAgents attempts a graceful shutdown of all active agents concurrently.
 func (m *Manager) StopAllAgents(ctx context.Context) error {
 	executions := m.executionStore.List()
 	if len(executions) == 0 {
 		return nil
 	}
 
-	var errs []error
+	var wg sync.WaitGroup
+	errCh := make(chan error, len(executions))
+
 	for _, exec := range executions {
-		if err := m.StopAgent(ctx, exec.ID, false); err != nil {
-			errs = append(errs, err)
-			m.logger.Warn("failed to stop agent during shutdown",
-				zap.String("execution_id", exec.ID),
-				zap.Error(err))
-		}
+		wg.Add(1)
+		go func(e *AgentExecution) {
+			defer wg.Done()
+			if err := m.StopAgent(ctx, e.ID, false); err != nil {
+				errCh <- err
+				m.logger.Warn("failed to stop agent during shutdown",
+					zap.String("execution_id", e.ID),
+					zap.Error(err))
+			}
+		}(exec)
 	}
 
+	wg.Wait()
+	close(errCh)
+
+	var errs []error
+	for err := range errCh {
+		errs = append(errs, err)
+	}
 	return errors.Join(errs...)
 }
 
