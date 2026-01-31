@@ -96,6 +96,12 @@ func (a *Adapter) PrepareEnvironment() (map[string]string, error) {
 	return nil, nil
 }
 
+// PrepareCommandArgs returns extra command-line arguments for the agent process.
+// For ACP, no extra args are needed - MCP servers are passed through the protocol.
+func (a *Adapter) PrepareCommandArgs() []string {
+	return nil
+}
+
 // Connect wires up the stdin/stdout pipes from the running agent subprocess.
 func (a *Adapter) Connect(stdin io.Writer, stdout io.Reader) error {
 	a.mu.Lock()

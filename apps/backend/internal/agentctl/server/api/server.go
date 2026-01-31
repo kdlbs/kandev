@@ -17,26 +17,29 @@ import (
 
 // Server is the HTTP API server for a single agent instance.
 type Server struct {
-	cfg       *config.InstanceConfig
-	procMgr   *process.Manager
-	mcpServer *mcp.Server
-	logger    *logger.Logger
-	router    *gin.Engine
+	cfg              *config.InstanceConfig
+	procMgr          *process.Manager
+	mcpServer        *mcp.Server
+	mcpBackendClient *mcp.ChannelBackendClient
+	logger           *logger.Logger
+	router           *gin.Engine
 
 	upgrader websocket.Upgrader
 }
 
 // NewServer creates a new API server for an agent instance.
 // If mcpServer is provided, MCP routes will be registered.
-func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, mcpServer *mcp.Server, log *logger.Logger) *Server {
+// If mcpBackendClient is provided, the agent stream becomes bidirectional for MCP.
+func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, mcpServer *mcp.Server, mcpBackendClient *mcp.ChannelBackendClient, log *logger.Logger) *Server {
 	gin.SetMode(gin.ReleaseMode)
 
 	s := &Server{
-		cfg:       cfg,
-		procMgr:   procMgr,
-		mcpServer: mcpServer,
-		logger:    log.WithFields(zap.String("component", "api-server")),
-		router:    gin.New(),
+		cfg:              cfg,
+		procMgr:          procMgr,
+		mcpServer:        mcpServer,
+		mcpBackendClient: mcpBackendClient,
+		logger:           log.WithFields(zap.String("component", "api-server")),
+		router:           gin.New(),
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
 				return true // Allow all origins for container-local communication

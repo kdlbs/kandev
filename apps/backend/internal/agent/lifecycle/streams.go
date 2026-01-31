@@ -25,15 +25,17 @@ type StreamCallbacks struct {
 
 // StreamManager manages WebSocket streams to agent executions
 type StreamManager struct {
-	logger    *logger.Logger
-	callbacks StreamCallbacks
+	logger     *logger.Logger
+	callbacks  StreamCallbacks
+	mcpHandler agentctl.MCPHandler
 }
 
 // NewStreamManager creates a new StreamManager
-func NewStreamManager(log *logger.Logger, callbacks StreamCallbacks) *StreamManager {
+func NewStreamManager(log *logger.Logger, callbacks StreamCallbacks, mcpHandler agentctl.MCPHandler) *StreamManager {
 	return &StreamManager{
-		logger:    log.WithFields(zap.String("component", "stream-manager")),
-		callbacks: callbacks,
+		logger:     log.WithFields(zap.String("component", "stream-manager")),
+		callbacks:  callbacks,
+		mcpHandler: mcpHandler,
 	}
 }
 
@@ -94,7 +96,7 @@ func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready c
 		if sm.callbacks.OnAgentEvent != nil {
 			sm.callbacks.OnAgentEvent(execution, event)
 		}
-	})
+	}, sm.mcpHandler)
 
 	// Signal that the stream connection attempt is complete (success or failure)
 	// StreamUpdates returns immediately after establishing the WebSocket connection

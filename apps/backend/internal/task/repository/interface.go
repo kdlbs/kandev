@@ -137,6 +137,12 @@ type Repository interface {
 	DeleteEnvironment(ctx context.Context, id string) error
 	ListEnvironments(ctx context.Context) ([]*models.Environment, error)
 
+	// Task Plan operations
+	CreateTaskPlan(ctx context.Context, plan *models.TaskPlan) error
+	GetTaskPlan(ctx context.Context, taskID string) (*models.TaskPlan, error)
+	UpdateTaskPlan(ctx context.Context, plan *models.TaskPlan) error
+	DeleteTaskPlan(ctx context.Context, taskID string) error
+
 	// Close closes the repository (for database connections)
 	Close() error
 }

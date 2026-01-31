@@ -54,6 +54,7 @@ export type {
   SessionWorktreesState,
   PendingModelState,
   ActiveModelState,
+  TaskPlansState,
 } from './session/types';
 export type {
   TerminalState,

@@ -108,7 +108,6 @@ func (r *StandaloneRuntime) CreateInstance(ctx context.Context, req *RuntimeCrea
 		Env:           env,
 		AutoStart:     false,
 		McpServers:    mcpServers,
-		BackendWsURL:  req.BackendWsURL,
 		SessionID:     req.SessionID,
 	}
 

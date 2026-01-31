@@ -72,9 +72,9 @@ type Manager struct {
 	// Workspace info provider for on-demand instance creation
 	workspaceInfoProvider WorkspaceInfoProvider
 
-	// backendWsURL is the WebSocket URL to the Kandev backend for MCP tunneling
-	// This is passed to agentctl instances so they can forward MCP tool calls
-	backendWsURL string
+	// mcpHandler is the MCP request dispatcher for handling MCP requests
+	// from agentctl instances through the agent stream.
+	mcpHandler agentctl.MCPHandler
 
 	// Background cleanup
 	cleanupInterval time.Duration
@@ -140,6 +140,7 @@ func NewManager(
 	}
 
 	// Initialize stream manager with callbacks that delegate to manager methods
+	// mcpHandler will be set later via SetMCPHandler
 	mgr.streamManager = NewStreamManager(log, StreamCallbacks{
 		OnAgentEvent:    mgr.handleAgentEvent,
 		OnGitStatus:     mgr.handleGitStatusUpdate,
@@ -150,7 +151,7 @@ func NewManager(
 		OnShellExit:     mgr.handleShellExit,
 		OnProcessOutput: mgr.handleProcessOutput,
 		OnProcessStatus: mgr.handleProcessStatus,
-	})
+	}, nil)
 
 	// Set session manager dependencies for full orchestration
 	sessionManager.SetDependencies(eventPublisher, mgr.streamManager, executionStore, historyManager)
@@ -174,13 +175,18 @@ func (m *Manager) SetWorktreeManager(worktreeMgr *worktree.Manager) {
 	m.worktreeMgr = worktreeMgr
 }
 
-// SetBackendWsURL sets the WebSocket URL to the Kandev backend for MCP tunneling.
+// SetMCPHandler sets the MCP request handler for dispatching MCP tool calls.
 //
-// This URL is passed to agentctl instances so they can establish a WebSocket connection
-// back to the backend and forward MCP tool calls through the tunnel.
-// Format: ws://host:port/ws (e.g., ws://localhost:8080/ws)
-func (m *Manager) SetBackendWsURL(url string) {
-	m.backendWsURL = url
+// MCP requests from agents flow through the agent stream (WebSocket) to the backend,
+// where they are dispatched to this handler. This enables agents to use MCP tools
+// like listing workspaces, boards, tasks, and asking user questions.
+//
+// This must be called before agents start making MCP calls. Typically set during
+// initialization after the MCP handlers are created.
+func (m *Manager) SetMCPHandler(handler agentctl.MCPHandler) {
+	m.mcpHandler = handler
+	// Update the stream manager with the handler
+	m.streamManager.mcpHandler = handler
 }
 
 // SetWorkspaceInfoProvider sets the provider for workspace information.
@@ -455,7 +461,6 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 		WorkspacePath:  info.WorkspacePath,
 		Protocol:       string(agentConfig.Protocol),
 		AgentConfig:    agentConfig,
-		BackendWsURL:   m.backendWsURL,
 	}
 
 	runtimeInstance, err := rt.CreateInstance(ctx, req)
@@ -783,7 +788,6 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 		Metadata:       metadata,
 		AgentConfig:    agentConfig,
 		McpServers:     mcpServers,
-		BackendWsURL:   m.backendWsURL,
 	}
 
 	runtimeInstance, err := rt.CreateInstance(ctx, runtimeReq)

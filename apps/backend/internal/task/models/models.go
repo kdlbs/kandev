@@ -412,6 +412,17 @@ type Environment struct {
 	DeletedAt    *time.Time        `json:"deleted_at,omitempty"`
 }
 
+// TaskPlan represents a plan associated with a task
+type TaskPlan struct {
+	ID        string    `json:"id"`
+	TaskID    string    `json:"task_id"`
+	Title     string    `json:"title"`
+	Content   string    `json:"content"`
+	CreatedBy string    `json:"created_by"` // "agent" or "user"
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 // ToAPI converts internal Task to API type
 func (t *Task) ToAPI() *v1.Task {
 	// Convert TaskRepository models to API types

@@ -30,7 +30,6 @@ type ContainerConfig struct {
 	InstanceID      string
 	MainRepoGitDir  string // Path to main repo's .git directory (for worktrees)
 	McpServers      []McpServerConfig
-	BackendWsURL    string // WebSocket URL to Kandev backend for MCP tunneling
 }
 
 // ContainerManager handles Docker container lifecycle operations
@@ -115,7 +114,6 @@ func (cm *ContainerManager) LaunchContainer(ctx context.Context, config Containe
 		Env:           config.Credentials,
 		AutoStart:     false,
 		McpServers:    mcpServers,
-		BackendWsURL:  config.BackendWsURL,
 		SessionID:     config.SessionID,
 	}
 

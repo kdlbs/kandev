@@ -76,19 +76,25 @@ type AgentInfo struct {
 // Lifecycle:
 //  1. Create adapter with New*Adapter(cfg, logger)
 //  2. Call PrepareEnvironment() before starting the agent process
-//  3. Start the agent process and obtain stdin/stdout pipes
-//  4. Call Connect(stdin, stdout) to wire up communication
-//  5. Call Initialize() to establish protocol handshake
-//  6. Use NewSession/LoadSession/Prompt/Cancel for agent interactions
-//  7. Call Close() when done
+//  3. Call PrepareCommandArgs() to get extra command-line args
+//  4. Start the agent process and obtain stdin/stdout pipes
+//  5. Call Connect(stdin, stdout) to wire up communication
+//  6. Call Initialize() to establish protocol handshake
+//  7. Use NewSession/LoadSession/Prompt/Cancel for agent interactions
+//  8. Call Close() when done
 type AgentAdapter interface {
 	// PrepareEnvironment performs protocol-specific setup before the agent process starts.
-	// For Codex, this writes MCP servers to ~/.codex/config.toml.
 	// For ACP, this is a no-op (MCP servers are passed through the protocol).
 	// For OpenCode, this returns environment variables for server authentication.
 	// Must be called before the agent subprocess is started.
 	// Returns a map of environment variables to add to the subprocess environment.
 	PrepareEnvironment() (map[string]string, error)
+
+	// PrepareCommandArgs returns extra command-line arguments for the agent process.
+	// For Codex, this returns -c flags for MCP servers and sandbox config.
+	// For other protocols, this returns nil (no extra args needed).
+	// Must be called after PrepareEnvironment and before starting the subprocess.
+	PrepareCommandArgs() []string
 
 	// Connect wires up the stdin/stdout pipes from the running agent subprocess.
 	// Must be called after the subprocess is started and before Initialize.

@@ -4,6 +4,9 @@ export type BackendMessageType =
   | 'task.updated'
   | 'task.deleted'
   | 'task.state_changed'
+  | 'task.plan.created'
+  | 'task.plan.updated'
+  | 'task.plan.deleted'
   | 'agent.updated'
   | 'agent.available.updated'
   | 'terminal.output'
@@ -292,12 +295,25 @@ export type TurnEventPayload = {
   updated_at: string;
 };
 
+export type TaskPlanEventPayload = {
+  id: string;
+  task_id: string;
+  title: string;
+  content: string;
+  created_by: 'agent' | 'user';
+  created_at: string;
+  updated_at: string;
+};
+
 export type BackendMessageMap = {
   'kanban.update': BackendMessage<'kanban.update', KanbanUpdatePayload>;
   'task.created': BackendMessage<'task.created', TaskEventPayload>;
   'task.updated': BackendMessage<'task.updated', TaskEventPayload>;
   'task.deleted': BackendMessage<'task.deleted', TaskEventPayload>;
   'task.state_changed': BackendMessage<'task.state_changed', TaskEventPayload>;
+  'task.plan.created': BackendMessage<'task.plan.created', TaskPlanEventPayload>;
+  'task.plan.updated': BackendMessage<'task.plan.updated', TaskPlanEventPayload>;
+  'task.plan.deleted': BackendMessage<'task.plan.deleted', TaskPlanEventPayload>;
   'agent.updated': BackendMessage<'agent.updated', AgentUpdatePayload>;
   'agent.available.updated': BackendMessage<'agent.available.updated', AgentAvailableUpdatedPayload>;
   'terminal.output': BackendMessage<'terminal.output', TerminalOutputPayload>;

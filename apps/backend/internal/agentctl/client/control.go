@@ -43,8 +43,7 @@ type CreateInstanceRequest struct {
 	Env           map[string]string `json:"env,omitempty"`
 	AutoStart     bool              `json:"auto_start,omitempty"`
 	McpServers    []McpServerConfig `json:"mcp_servers,omitempty"`
-	BackendWsURL  string            `json:"backend_ws_url,omitempty"` // WebSocket URL to Kandev backend for MCP tunneling
-	SessionID     string            `json:"session_id,omitempty"`     // Task session ID for MCP tool calls
+	SessionID     string            `json:"session_id,omitempty"` // Task session ID for MCP tool calls
 }
 
 // CreateInstanceResponse contains the result of creating a new agent instance.

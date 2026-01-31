@@ -451,3 +451,30 @@ type ApproveSessionResponse struct {
 	Session      TaskSessionDTO  `json:"session"`
 	WorkflowStep WorkflowStepDTO `json:"workflow_step,omitempty"` // New step after approval
 }
+
+// TaskPlanDTO represents a task plan for API responses
+type TaskPlanDTO struct {
+	ID        string    `json:"id"`
+	TaskID    string    `json:"task_id"`
+	Title     string    `json:"title"`
+	Content   string    `json:"content"`
+	CreatedBy string    `json:"created_by"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// TaskPlanFromModel converts a TaskPlan model to a TaskPlanDTO.
+func TaskPlanFromModel(plan *models.TaskPlan) *TaskPlanDTO {
+	if plan == nil {
+		return nil
+	}
+	return &TaskPlanDTO{
+		ID:        plan.ID,
+		TaskID:    plan.TaskID,
+		Title:     plan.Title,
+		Content:   plan.Content,
+		CreatedBy: plan.CreatedBy,
+		CreatedAt: plan.CreatedAt,
+		UpdatedAt: plan.UpdatedAt,
+	}
+}

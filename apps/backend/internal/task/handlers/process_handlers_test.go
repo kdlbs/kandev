@@ -339,6 +339,20 @@ func (m *mockRepository) UpdateSessionReviewStatus(ctx context.Context, sessionI
 	return nil
 }
 
+// Task Plan operations
+func (m *mockRepository) CreateTaskPlan(ctx context.Context, plan *models.TaskPlan) error {
+	return nil
+}
+func (m *mockRepository) GetTaskPlan(ctx context.Context, taskID string) (*models.TaskPlan, error) {
+	return nil, nil
+}
+func (m *mockRepository) UpdateTaskPlan(ctx context.Context, plan *models.TaskPlan) error {
+	return nil
+}
+func (m *mockRepository) DeleteTaskPlan(ctx context.Context, taskID string) error {
+	return nil
+}
+
 func newTestService(t *testing.T, scripts map[string][]*models.RepositoryScript) *service.Service {
 	log, err := logger.NewLogger(logger.LoggingConfig{
 		Level:  "error",

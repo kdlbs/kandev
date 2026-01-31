@@ -180,6 +180,12 @@ func (a *Adapter) PrepareEnvironment() (map[string]string, error) {
 	return env, nil
 }
 
+// PrepareCommandArgs returns extra command-line arguments for the agent process.
+// For OpenCode, no extra args are needed - MCP is configured via config file.
+func (a *Adapter) PrepareCommandArgs() []string {
+	return nil
+}
+
 // Connect wires up the stdout pipe from the running agent subprocess.
 // For OpenCode, we only need stdout to parse the server URL.
 func (a *Adapter) Connect(stdin io.Writer, stdout io.Reader) error {

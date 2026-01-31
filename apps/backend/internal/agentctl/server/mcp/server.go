@@ -1,23 +1,28 @@
 // Package mcp provides MCP server functionality for agentctl.
-// It exposes MCP tools that forward requests to the Kandev backend via WebSocket.
+// It exposes MCP tools that forward requests to the Kandev backend via the agent stream.
 package mcp
 
 import (
 	"context"
-	"net/http"
 	"sync"
 
 	"github.com/gin-gonic/gin"
-	"github.com/kandev/kandev/internal/agentctl/server/wsclient"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"go.uber.org/zap"
 )
 
-// Server wraps the MCP server with WebSocket client for backend communication.
+// BackendClient is the interface for communicating with the Kandev backend.
+// MCP tool handlers use this to forward requests to the backend.
+type BackendClient interface {
+	// RequestPayload sends a request to the backend and unmarshals the response.
+	RequestPayload(ctx context.Context, action string, payload, result interface{}) error
+}
+
+// Server wraps the MCP server with backend client for communication.
 type Server struct {
-	wsClient   *wsclient.Client
+	backend    BackendClient
 	sessionID  string
 	mcpServer  *server.MCPServer
 	sseServer  *server.SSEServer
@@ -28,9 +33,9 @@ type Server struct {
 }
 
 // New creates a new MCP server for agentctl.
-func New(wsClient *wsclient.Client, sessionID string, log *logger.Logger) *Server {
+func New(backend BackendClient, sessionID string, log *logger.Logger) *Server {
 	s := &Server{
-		wsClient:  wsClient,
+		backend:   backend,
 		sessionID: sessionID,
 		logger:    log.WithFields(zap.String("component", "mcp-server")),
 	}
@@ -187,13 +192,41 @@ Another example:
 		s.askUserQuestionHandler(),
 	)
 
-	s.logger.Info("registered MCP tools", zap.Int("count", 7))
-}
+	s.mcpServer.AddTool(
+		mcp.NewTool("create_task_plan",
+			mcp.WithDescription("Create or save a task plan. Use this to save your implementation plan for the current task."),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to create a plan for")),
+			mcp.WithString("content", mcp.Required(), mcp.Description("The plan content in markdown format")),
+			mcp.WithString("title", mcp.Description("Optional title for the plan (default: 'Plan')")),
+		),
+		s.createTaskPlanHandler(),
+	)
 
-// WrapHandler wraps a handler function with error handling for gin.
-func WrapHandler(h http.Handler) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		h.ServeHTTP(c.Writer, c.Request)
-	}
-}
+	s.mcpServer.AddTool(
+		mcp.NewTool("get_task_plan",
+			mcp.WithDescription("Get the current plan for a task. Use this to retrieve an existing plan, including any user edits."),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to get the plan for")),
+		),
+		s.getTaskPlanHandler(),
+	)
 
+	s.mcpServer.AddTool(
+		mcp.NewTool("update_task_plan",
+			mcp.WithDescription("Update an existing task plan. Use this to modify the plan during implementation."),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to update the plan for")),
+			mcp.WithString("content", mcp.Required(), mcp.Description("The updated plan content in markdown format")),
+			mcp.WithString("title", mcp.Description("Optional new title for the plan")),
+		),
+		s.updateTaskPlanHandler(),
+	)
+
+	s.mcpServer.AddTool(
+		mcp.NewTool("delete_task_plan",
+			mcp.WithDescription("Delete a task plan."),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to delete the plan for")),
+		),
+		s.deleteTaskPlanHandler(),
+	)
+
+	s.logger.Info("registered MCP tools", zap.Int("count", 11))
+}

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"os"
 
 	"go.uber.org/zap"
@@ -93,11 +92,8 @@ func provideLifecycleManager(
 		log,
 	)
 
-	// Set backend WS URL for MCP tunneling
-	// agentctl instances will connect back to this URL to forward MCP tool calls
-	backendWsURL := fmt.Sprintf("ws://%s:%d/ws", cfg.Server.Host, cfg.Server.Port)
-	lifecycleMgr.SetBackendWsURL(backendWsURL)
-	log.Info("Backend WS URL configured for MCP tunneling", zap.String("url", backendWsURL))
+	// MCP handler is set later in main.go after MCP handlers are registered
+	// via lifecycleMgr.SetMCPHandler(gateway.Dispatcher)
 
 	if err := lifecycleMgr.Start(ctx); err != nil {
 		return nil, nil, err

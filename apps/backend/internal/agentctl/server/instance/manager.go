@@ -133,7 +133,6 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 		Env:          config.CollectAgentEnv(req.Env),
 		AgentType:    req.AgentType,
 		McpServers:   mcpServers,
-		BackendWsURL: req.BackendWsURL,
 		SessionID:    req.SessionID,
 	}
 

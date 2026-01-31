@@ -22,7 +22,6 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/instance"
 	mcpserver "github.com/kandev/kandev/internal/agentctl/server/mcp"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
-	"github.com/kandev/kandev/internal/agentctl/server/wsclient"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/pkg/agent"
 	"go.uber.org/zap"
@@ -84,24 +83,16 @@ func run(cfg *config.Config, log *logger.Logger) {
 
 	// Set the server factory to create API servers for each instance
 	instMgr.SetServerFactory(func(instCfg *config.InstanceConfig, procMgr *process.Manager, instLog *logger.Logger) http.Handler {
-		var mcpSrv *mcpserver.Server
+		// Create MCP backend client for bidirectional communication through agent stream
+		// MCP requests from agents are sent through the agent stream WebSocket to the backend
+		mcpBackendClient := mcpserver.NewChannelBackendClient()
 
-		// Create MCP server if backend WS URL is configured
-		if instCfg.BackendWsURL != "" {
-			wsClient := wsclient.New(instCfg.BackendWsURL, instLog)
-			if err := wsClient.Connect(context.Background()); err != nil {
-				instLog.Error("failed to connect MCP WS client to backend",
-					zap.Error(err),
-					zap.String("backend_ws_url", instCfg.BackendWsURL))
-			} else {
-				mcpSrv = mcpserver.New(wsClient, instCfg.SessionID, instLog)
-				instLog.Info("MCP server enabled",
-					zap.String("backend_ws_url", instCfg.BackendWsURL),
-					zap.String("session_id", instCfg.SessionID))
-			}
-		}
+		// Create MCP server using the channel-based backend client
+		mcpSrv := mcpserver.New(mcpBackendClient, instCfg.SessionID, instLog)
+		instLog.Info("MCP server enabled (channel-based)",
+			zap.String("session_id", instCfg.SessionID))
 
-		return api.NewServer(instCfg, procMgr, mcpSrv, instLog).Router()
+		return api.NewServer(instCfg, procMgr, mcpSrv, mcpBackendClient, instLog).Router()
 	})
 
 	// Create control server

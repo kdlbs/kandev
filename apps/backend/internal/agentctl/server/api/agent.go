@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/constants"
+	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
 
@@ -274,35 +276,118 @@ func (s *Server) handleAgentPrompt(c *gin.Context) {
 }
 
 // handleAgentStreamWS streams agent session notifications via WebSocket.
+// This is a bidirectional stream:
+// - agentctl -> backend: agent events, MCP requests
+// - backend -> agentctl: MCP responses
 func (s *Server) handleAgentStreamWS(c *gin.Context) {
 	conn, err := s.upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		s.logger.Error("WebSocket upgrade failed", zap.Error(err))
 		return
 	}
-	defer func() {
-		if err := conn.Close(); err != nil {
-			s.logger.Debug("failed to close ACP stream websocket", zap.Error(err))
-		}
-	}()
 
 	s.logger.Info("agent stream WebSocket connected")
+
+	ctx, cancel := context.WithCancel(c.Request.Context())
+	defer cancel()
+
+	// Use a mutex for writing to the WebSocket
+	var writeMu sync.Mutex
+	writeMessage := func(data []byte) error {
+		writeMu.Lock()
+		defer writeMu.Unlock()
+		return conn.WriteMessage(websocket.TextMessage, data)
+	}
 
 	// Get the session updates channel
 	updatesCh := s.procMgr.GetUpdates()
 
-	// Stream session notifications to WebSocket
-	for notification := range updatesCh {
-		data, err := json.Marshal(notification)
-		if err != nil {
-			s.logger.Error("failed to marshal notification", zap.Error(err))
-			continue
-		}
-
-		if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
-			return
-		}
+	// Get MCP request channel (if MCP is enabled)
+	var mcpRequestCh <-chan *ws.Message
+	if s.mcpBackendClient != nil {
+		mcpRequestCh = s.mcpBackendClient.GetRequestChannel()
 	}
+
+	// WaitGroup for cleanup
+	var wg sync.WaitGroup
+
+	// Read goroutine: reads MCP responses from the backend
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		defer cancel()
+		for {
+			_, message, err := conn.ReadMessage()
+			if err != nil {
+				if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+					s.logger.Info("agent stream closed normally")
+				} else {
+					s.logger.Debug("agent stream read error", zap.Error(err))
+				}
+				return
+			}
+
+			// Parse as WebSocket message (MCP response)
+			var msg ws.Message
+			if err := json.Unmarshal(message, &msg); err != nil {
+				s.logger.Warn("failed to parse message", zap.Error(err))
+				continue
+			}
+
+			// Forward MCP response to the backend client
+			if s.mcpBackendClient != nil && (msg.Type == ws.MessageTypeResponse || msg.Type == ws.MessageTypeError) {
+				s.mcpBackendClient.HandleResponse(&msg)
+			}
+		}
+	}()
+
+	// Write goroutine: sends agent events and MCP requests to the backend
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		defer func() {
+			if err := conn.Close(); err != nil {
+				s.logger.Debug("failed to close agent stream websocket", zap.Error(err))
+			}
+		}()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case notification, ok := <-updatesCh:
+				if !ok {
+					return
+				}
+				data, err := json.Marshal(notification)
+				if err != nil {
+					s.logger.Error("failed to marshal notification", zap.Error(err))
+					continue
+				}
+				if err := writeMessage(data); err != nil {
+					s.logger.Debug("failed to write notification", zap.Error(err))
+					return
+				}
+			case mcpReq, ok := <-mcpRequestCh:
+				if !ok {
+					// MCP channel closed, continue without MCP
+					mcpRequestCh = nil
+					continue
+				}
+				data, err := json.Marshal(mcpReq)
+				if err != nil {
+					s.logger.Error("failed to marshal MCP request", zap.Error(err))
+					continue
+				}
+				if err := writeMessage(data); err != nil {
+					s.logger.Debug("failed to write MCP request", zap.Error(err))
+					return
+				}
+			}
+		}
+	}()
+
+	wg.Wait()
 }
 
 // PermissionRespondRequest is a request to respond to a permission request

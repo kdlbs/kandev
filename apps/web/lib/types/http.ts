@@ -666,3 +666,18 @@ export type ClarificationResponse = {
   rejected?: boolean;
   reject_reason?: string;
 };
+
+// Task Plan types (for session artifacts)
+export type TaskPlan = {
+  id: string;
+  task_id: string;
+  title: string;
+  content: string;
+  created_by: 'agent' | 'user';
+  created_at: string;
+  updated_at: string;
+};
+
+export type TaskPlanResponse = {
+  plan: TaskPlan | null;
+};

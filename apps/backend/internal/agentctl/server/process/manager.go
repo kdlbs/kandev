@@ -213,40 +213,10 @@ func (m *Manager) Start(ctx context.Context) error {
 	m.exitCode.Store(-1)
 	m.exitErr.Store(errorWrapper{err: nil})
 
-	// Create command
+	// Validate command
 	if len(m.cfg.AgentArgs) == 0 {
 		m.status.Store(StatusError)
 		return fmt.Errorf("no agent command configured")
-	}
-
-	// NOTE: We intentionally don't use exec.CommandContext here because we don't want
-	// the HTTP request context to kill the agent process when the request completes.
-	m.cmd = exec.Command(m.cfg.AgentArgs[0], m.cfg.AgentArgs[1:]...)
-	m.cmd.Dir = m.cfg.WorkDir
-	m.cmd.Env = m.cfg.AgentEnv
-	// Create a new process group so we can kill all child processes together.
-	// This is important for adapters like OpenCode that spawn child processes
-	// (npx -> sh -> node -> opencode binary).
-	setProcGroup(m.cmd)
-
-	// Set up pipes
-	var err error
-	m.stdin, err = m.cmd.StdinPipe()
-	if err != nil {
-		m.status.Store(StatusError)
-		return fmt.Errorf("failed to create stdin pipe: %w", err)
-	}
-
-	m.stdout, err = m.cmd.StdoutPipe()
-	if err != nil {
-		m.status.Store(StatusError)
-		return fmt.Errorf("failed to create stdout pipe: %w", err)
-	}
-
-	m.stderr, err = m.cmd.StderrPipe()
-	if err != nil {
-		m.status.Store(StatusError)
-		return fmt.Errorf("failed to create stderr pipe: %w", err)
 	}
 
 	// Build adapter config
@@ -268,7 +238,7 @@ func (m *Manager) Start(ctx context.Context) error {
 		AgentID:        m.cfg.AgentType, // From registry (e.g., "auggie", "amp", "claude-code")
 	}
 
-	// Create adapter before starting the process so we can call PrepareEnvironment
+	// Create adapter before starting the process so we can call PrepareEnvironment and PrepareCommandArgs
 	if err := m.createAdapter(); err != nil {
 		m.status.Store(StatusError)
 		return fmt.Errorf("failed to create adapter: %w", err)
@@ -285,9 +255,45 @@ func (m *Manager) Start(ctx context.Context) error {
 		m.cfg.AgentEnv = append(m.cfg.AgentEnv, fmt.Sprintf("%s=%s", k, v))
 	}
 
+	// Get extra command args from the adapter (e.g., -c flags for Codex MCP config)
+	extraArgs := m.adapter.PrepareCommandArgs()
+
+	// Build final command args
+	cmdArgs := append(m.cfg.AgentArgs[1:], extraArgs...)
+
+	// NOTE: We intentionally don't use exec.CommandContext here because we don't want
+	// the HTTP request context to kill the agent process when the request completes.
+	m.cmd = exec.Command(m.cfg.AgentArgs[0], cmdArgs...)
+	m.cmd.Dir = m.cfg.WorkDir
+	m.cmd.Env = m.cfg.AgentEnv
+	// Create a new process group so we can kill all child processes together.
+	// This is important for adapters like OpenCode that spawn child processes
+	// (npx -> sh -> node -> opencode binary).
+	setProcGroup(m.cmd)
+
+	// Set up pipes
+	m.stdin, err = m.cmd.StdinPipe()
+	if err != nil {
+		m.status.Store(StatusError)
+		return fmt.Errorf("failed to create stdin pipe: %w", err)
+	}
+
+	m.stdout, err = m.cmd.StdoutPipe()
+	if err != nil {
+		m.status.Store(StatusError)
+		return fmt.Errorf("failed to create stdout pipe: %w", err)
+	}
+
+	m.stderr, err = m.cmd.StderrPipe()
+	if err != nil {
+		m.status.Store(StatusError)
+		return fmt.Errorf("failed to create stderr pipe: %w", err)
+	}
+
 	// Start the process
 	m.logger.Info("starting agent process",
 		zap.Strings("args", m.cfg.AgentArgs),
+		zap.Strings("extra_args", extraArgs),
 		zap.String("workdir", m.cfg.WorkDir),
 		zap.Int("env_count", len(m.cfg.AgentEnv)))
 	if err := m.cmd.Start(); err != nil {

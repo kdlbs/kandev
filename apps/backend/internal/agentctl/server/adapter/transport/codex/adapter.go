@@ -7,8 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 
@@ -17,7 +15,6 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/pkg/codex"
-	"github.com/pelletier/go-toml/v2"
 	"go.uber.org/zap"
 )
 
@@ -114,21 +111,58 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 	}
 }
 
-// PrepareEnvironment writes sandbox settings and MCP servers to the Codex config file.
-// Codex reads configuration from ~/.codex/config.toml at startup time.
-// This sets sandbox_mode to workspace-write to enable file editing.
+// PrepareEnvironment is a no-op for Codex. MCP servers and sandbox settings
+// are now passed via command-line -c flags through PrepareCommandArgs().
 func (a *Adapter) PrepareEnvironment() (map[string]string, error) {
-	a.logger.Info("PrepareEnvironment called",
-		zap.Int("mcp_server_count", len(a.cfg.McpServers)))
-	for i, srv := range a.cfg.McpServers {
-		a.logger.Info("MCP server config",
-			zap.Int("index", i),
-			zap.String("name", srv.Name),
-			zap.String("url", srv.URL),
-			zap.String("type", srv.Type),
-			zap.String("command", srv.Command))
+	a.logger.Info("PrepareEnvironment called (no-op for Codex)")
+	return nil, nil
+}
+
+// PrepareCommandArgs returns extra command-line arguments for the Codex process.
+// This includes -c flags for MCP servers and sandbox configuration.
+// Codex uses -c key=value flags to override config at runtime.
+func (a *Adapter) PrepareCommandArgs() []string {
+	var args []string
+
+	// Set sandbox_mode to workspace-write to enable file editing
+	args = append(args, "-c", "sandbox_mode=\"workspace-write\"")
+
+	// Enable network access in sandbox
+	args = append(args, "-c", "sandbox_workspace_write.network_access=true")
+
+	// Add MCP servers as -c flags
+	for _, server := range a.cfg.McpServers {
+		safeName := sanitizeCodexServerName(server.Name)
+
+		if server.Type == "sse" || server.Type == "http" {
+			// HTTP/SSE transport - use url field
+			// Convert SSE URLs (/sse) to streamable HTTP URLs (/mcp) for Codex compatibility
+			url := server.URL
+			if url != "" {
+				url = convertSSEToStreamableHTTP(url)
+				args = append(args, "-c", fmt.Sprintf("mcp_servers.%s.url=\"%s\"", safeName, url))
+			}
+		} else if server.Command != "" {
+			// STDIO transport - use command field
+			args = append(args, "-c", fmt.Sprintf("mcp_servers.%s.command=\"%s\"", safeName, server.Command))
+			// Add args if present
+			if len(server.Args) > 0 {
+				// TOML array format: ["arg1", "arg2"]
+				quotedArgs := make([]string, len(server.Args))
+				for i, arg := range server.Args {
+					quotedArgs[i] = fmt.Sprintf("\"%s\"", arg)
+				}
+				argsStr := "[" + strings.Join(quotedArgs, ", ") + "]"
+				args = append(args, "-c", fmt.Sprintf("mcp_servers.%s.args=%s", safeName, argsStr))
+			}
+		}
 	}
-	return nil, WriteCodexMcpConfig(a.cfg.McpServers, "", a.logger)
+
+	a.logger.Info("PrepareCommandArgs",
+		zap.Int("mcp_server_count", len(a.cfg.McpServers)),
+		zap.Strings("extra_args", args))
+
+	return args
 }
 
 // Connect wires up the stdin/stdout pipes from the running agent subprocess.
@@ -145,120 +179,7 @@ func (a *Adapter) Connect(stdin io.Writer, stdout io.Reader) error {
 	return nil
 }
 
-// WriteCodexMcpConfig writes MCP server configuration and sandbox settings to Codex's config.toml.
-// It merges with existing config, preserving other settings and existing MCP servers.
-// Codex reads configuration from ~/.codex/config.toml at startup time, not through the protocol.
-// This function should be called before starting the Codex process.
-// If homeDir is empty, it uses os.UserHomeDir().
-func WriteCodexMcpConfig(mcpServers []shared.McpServerConfig, homeDir string, log *logger.Logger) error {
-	// Determine config directory
-	if homeDir == "" {
-		var err error
-		homeDir, err = os.UserHomeDir()
-		if err != nil {
-			return fmt.Errorf("failed to get user home directory: %w", err)
-		}
-	}
-	configDir := filepath.Join(homeDir, ".codex")
-	configPath := filepath.Join(configDir, "config.toml")
 
-	// Create config directory if it doesn't exist
-	if err := os.MkdirAll(configDir, 0o755); err != nil {
-		return fmt.Errorf("failed to create codex config directory: %w", err)
-	}
-
-	// Read existing config if it exists
-	existingData, err := os.ReadFile(configPath)
-	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("failed to read existing codex config: %w", err)
-	}
-
-	// Parse existing config into a generic map to preserve all fields
-	var rawConfig map[string]any
-	if len(existingData) > 0 {
-		if err := toml.Unmarshal(existingData, &rawConfig); err != nil {
-			if log != nil {
-				log.Warn("failed to parse existing codex config, will create new",
-					zap.String("path", configPath),
-					zap.Error(err))
-			}
-			rawConfig = make(map[string]any)
-		}
-	} else {
-		rawConfig = make(map[string]any)
-	}
-
-	// CRITICAL: Set sandbox_mode to workspace-write to enable file editing.
-	// This MUST be set in config.toml as it takes precedence over protocol settings.
-	// Without this, Codex defaults to read-only mode and cannot edit files.
-	rawConfig["sandbox_mode"] = "workspace-write"
-
-	// Configure sandbox workspace-write settings
-	sandboxConfig, ok := rawConfig["sandbox_workspace_write"].(map[string]any)
-	if !ok {
-		sandboxConfig = make(map[string]any)
-	}
-	sandboxConfig["network_access"] = true
-	rawConfig["sandbox_workspace_write"] = sandboxConfig
-
-	// Get or create mcp_servers section
-	mcpServersSection, ok := rawConfig["mcp_servers"].(map[string]any)
-	if !ok {
-		mcpServersSection = make(map[string]any)
-	}
-
-	// Add/update our MCP servers
-	for _, server := range mcpServers {
-		safeName := sanitizeCodexServerName(server.Name)
-		serverConfig := make(map[string]any)
-
-		if server.Type == "sse" || server.Type == "http" {
-			// HTTP/SSE transport - use url field
-			// Codex doesn't support SSE transport - it uses streamable HTTP which requires POST requests.
-			// Convert SSE URLs (/sse) to streamable HTTP URLs (/mcp) for Codex compatibility.
-			url := server.URL
-			if url != "" {
-				url = convertSSEToStreamableHTTP(url)
-				serverConfig["url"] = url
-			}
-		} else {
-			// STDIO transport - use command and args
-			if server.Command != "" {
-				serverConfig["command"] = server.Command
-			}
-			if len(server.Args) > 0 {
-				serverConfig["args"] = server.Args
-			}
-		}
-
-		mcpServersSection[safeName] = serverConfig
-	}
-
-	// Update the mcp_servers section in the config
-	if len(mcpServersSection) > 0 {
-		rawConfig["mcp_servers"] = mcpServersSection
-	}
-
-	// Marshal back to TOML
-	output, err := toml.Marshal(rawConfig)
-	if err != nil {
-		return fmt.Errorf("failed to marshal codex config: %w", err)
-	}
-
-	// Write config file
-	if err := os.WriteFile(configPath, output, 0o644); err != nil {
-		return fmt.Errorf("failed to write codex config: %w", err)
-	}
-
-	if log != nil {
-		log.Info("wrote Codex config",
-			zap.String("path", configPath),
-			zap.String("sandbox_mode", "workspace-write"),
-			zap.Int("mcp_server_count", len(mcpServers)))
-	}
-
-	return nil
-}
 
 // sanitizeCodexServerName converts a server name to a valid TOML table name.
 // Replaces spaces and special characters with underscores.
