@@ -111,7 +111,7 @@ export const ChatMessage = memo(function ChatMessage({ comment, label, className
     );
   }
 
-  // User message: right-aligned bubble
+  // User message: right-aligned bubble with markdown support
   if (isUser) {
     return (
       <div className="flex justify-end w-full overflow-hidden">

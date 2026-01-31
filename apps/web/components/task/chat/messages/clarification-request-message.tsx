@@ -68,19 +68,24 @@ export function ClarificationRequestMessage({ comment }: ClarificationRequestMes
 
         {/* Content */}
         <div className="flex-1 min-w-0">
-          {/* Header with question and answer */}
-          <div className="flex items-center gap-2 text-xs">
-            <span className="font-medium text-muted-foreground">
-              {question.prompt}
-            </span>
-            {getStatusIndicator()}
-            {isAnswered && (
-              <span className="text-foreground/80">{getAnswerSummary()}</span>
-            )}
-            {isSkipped && (
-              <span className="text-muted-foreground">Skipped</span>
-            )}
+          {/* Question */}
+          <div className="text-xs font-medium text-muted-foreground">
+            {question.prompt}
           </div>
+
+          {/* Answer - indented below question */}
+          {isAnswered && (
+            <div className="mt-1 ml-3 flex items-center gap-1.5 text-xs text-foreground/80">
+              {getStatusIndicator()}
+              {getAnswerSummary()}
+            </div>
+          )}
+          {isSkipped && (
+            <div className="mt-1 ml-3 flex items-center gap-1.5 text-xs text-muted-foreground">
+              {getStatusIndicator()}
+              Skipped
+            </div>
+          )}
         </div>
       </div>
     </div>

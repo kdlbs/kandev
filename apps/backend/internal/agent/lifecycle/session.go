@@ -182,13 +182,19 @@ func (sm *SessionManager) getResumeContextPrompt(agentConfig *registry.AgentType
 	return resumePrompt
 }
 
-// injectSessionContext prepends session context information to the prompt.
-// This allows the agent to know which session ID and task ID to use when calling MCP tools.
-func (sm *SessionManager) injectSessionContext(taskID, sessionID, prompt string) string {
-	if sessionID == "" && taskID == "" {
-		return prompt
-	}
-	return fmt.Sprintf("<session_context>\nKandev Task ID: %s\nKandev Session ID: %s\nUse these IDs when calling Kandev MCP tools that require task_id or session_id parameters.\n</session_context>\n\n%s", taskID, sessionID, prompt)
+// injectKandevContext prepends the Kandev system prompt and session context to the user's prompt.
+// This provides consistent guidance to the agent about using Kandev tools and the current session IDs.
+func (sm *SessionManager) injectKandevContext(taskID, sessionID, prompt string) string {
+	return fmt.Sprintf(`<kandev-system>
+IMPORTANT KANDEV INSTRUCTIONS:
+- When you have questions for the user, use the ask_user_question_kandev MCP tool to ask them directly.
+- When you need to create or update a plan for a task, use the Kandev MCP plan tools (plan_get, plan_update, etc.).
+- Kandev Task ID: %s
+- Kandev Session ID: %s
+- Always use these IDs when calling Kandev MCP tools that require task_id or session_id parameters.
+</kandev-system>
+
+%s`, taskID, sessionID, prompt)
 }
 
 // loadSession loads an existing session via ACP session/load
@@ -318,11 +324,11 @@ func (sm *SessionManager) InitializeAndPrompt(
 	// For resumed sessions (fork_session pattern): If we have session history but no new task description,
 	// we still need to send a resume context prompt so the agent knows about the prior conversation.
 	if taskDescription != "" {
-		// Inject task and session ID context so the agent knows which IDs to use for MCP tools
-		promptWithSessionContext := sm.injectSessionContext(execution.TaskID, execution.SessionID, taskDescription)
+		// Inject Kandev system prompt and session context
+		promptWithContext := sm.injectKandevContext(execution.TaskID, execution.SessionID, taskDescription)
 
 		// Check if we need to inject resume context (fork_session pattern for ACP agents)
-		effectivePrompt := sm.getResumeContextPrompt(agentConfig, execution.SessionID, promptWithSessionContext)
+		effectivePrompt := sm.getResumeContextPrompt(agentConfig, execution.SessionID, promptWithContext)
 		if effectivePrompt != taskDescription {
 			sm.logger.Info("injecting resume context into initial prompt",
 				zap.String("execution_id", execution.ID),
@@ -405,17 +411,20 @@ func (sm *SessionManager) SendPrompt(
 
 	// Check if we need to inject resume context (fork_session pattern)
 	// This happens on the first user prompt after resuming a session
+	// For resumed sessions, we also inject the Kandev context since it's the first prompt in this execution
 	effectivePrompt := prompt
 	if execution.needsResumeContext && !execution.resumeContextInjected {
+		// Inject Kandev context for resumed sessions (first prompt in this execution)
+		promptWithContext := sm.injectKandevContext(execution.TaskID, execution.SessionID, prompt)
 		if sm.historyManager != nil {
-			resumePrompt, err := sm.historyManager.GenerateResumeContext(execution.SessionID, prompt)
+			resumePrompt, err := sm.historyManager.GenerateResumeContext(execution.SessionID, promptWithContext)
 			if err != nil {
 				sm.logger.Warn("failed to generate resume context for follow-up prompt",
 					zap.String("execution_id", execution.ID),
 					zap.Error(err))
-			} else if resumePrompt != prompt {
+				effectivePrompt = promptWithContext
+			} else if resumePrompt != promptWithContext {
 				effectivePrompt = resumePrompt
-				execution.resumeContextInjected = true
 				sm.logger.Info("injecting resume context into follow-up prompt",
 					zap.String("execution_id", execution.ID),
 					zap.String("session_id", execution.SessionID),
@@ -425,8 +434,13 @@ func (sm *SessionManager) SendPrompt(
 				sm.logger.Info("resume context prompt content",
 					zap.String("execution_id", execution.ID),
 					zap.String("resume_prompt", effectivePrompt))
+			} else {
+				effectivePrompt = promptWithContext
 			}
+		} else {
+			effectivePrompt = promptWithContext
 		}
+		execution.resumeContextInjected = true
 	}
 
 	sm.logger.Info("sending prompt to agent",

@@ -142,6 +142,7 @@ func (r *Repository) runMigrations() error {
 }
 
 // seedDefaultWorkflowSteps creates default workflow steps for boards that don't have any.
+// Uses the standard template as the default workflow.
 func (r *Repository) seedDefaultWorkflowSteps() error {
 	// Find boards without workflow steps
 	rows, err := r.db.Query(`
@@ -166,27 +167,41 @@ func (r *Repository) seedDefaultWorkflowSteps() error {
 		return err
 	}
 
-	// Create default workflow steps for each board
+	// Use the standard template for default workflow steps
 	now := time.Now()
-	type stepSeed struct {
-		name     string
-		position int
-		stepType string
-		color    string
-	}
-	defaultSteps := []stepSeed{
-		{name: "Todo", position: 0, stepType: "backlog", color: "bg-neutral-400"},
-		{name: "In Progress", position: 1, stepType: "implementation", color: "bg-blue-500"},
-		{name: "Review", position: 2, stepType: "review", color: "bg-yellow-500"},
-		{name: "Done", position: 3, stepType: "done", color: "bg-green-500"},
-	}
+	standardTemplate := r.getStandardTemplate(now)
 
 	for _, boardID := range boardIDs {
-		for _, step := range defaultSteps {
+		// Map template step IDs to generated UUIDs for linking
+		idMap := make(map[string]string)
+		for _, stepDef := range standardTemplate.Steps {
+			idMap[stepDef.ID] = uuid.New().String()
+		}
+
+		for _, stepDef := range standardTemplate.Steps {
+			stepID := idMap[stepDef.ID]
+
+			// Map OnCompleteStepID if set
+			var onCompleteStepID *string
+			if stepDef.OnCompleteStepID != "" {
+				if mappedID, ok := idMap[stepDef.OnCompleteStepID]; ok {
+					onCompleteStepID = &mappedID
+				}
+			}
+
 			if _, err := r.db.Exec(`
-				INSERT INTO workflow_steps (id, board_id, name, step_type, position, color, created_at, updated_at)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-			`, uuid.New().String(), boardID, step.name, step.stepType, step.position, step.color, now, now); err != nil {
+				INSERT INTO workflow_steps (
+					id, board_id, name, step_type, position, color,
+					auto_start_agent, plan_mode, require_approval,
+					prompt_prefix, prompt_suffix, on_complete_step_id,
+					allow_manual_move, created_at, updated_at
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			`,
+				stepID, boardID, stepDef.Name, string(stepDef.StepType), stepDef.Position, stepDef.Color,
+				stepDef.AutoStartAgent, stepDef.PlanMode, stepDef.RequireApproval,
+				stepDef.PromptPrefix, stepDef.PromptSuffix, onCompleteStepID,
+				stepDef.AllowManualMove, now, now,
+			); err != nil {
 				return err
 			}
 		}
@@ -231,9 +246,72 @@ func (r *Repository) seedSystemTemplates() error {
 func (r *Repository) getSystemTemplates() []*models.WorkflowTemplate {
 	now := time.Now().UTC()
 	return []*models.WorkflowTemplate{
+		r.getStandardTemplate(now),
 		r.getDevTemplate(now),
 		r.getArchitectureTemplate(now),
 		r.getSimpleTemplate(now),
+	}
+}
+
+// getStandardTemplate returns the standard 4-step workflow template (default).
+// Steps: Todo → Plan → Implementation → Done
+func (r *Repository) getStandardTemplate(now time.Time) *models.WorkflowTemplate {
+	return &models.WorkflowTemplate{
+		ID:          "standard",
+		Name:        "Standard",
+		Description: "Standard workflow with planning and implementation phases",
+		IsSystem:    true,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+		Steps: []models.StepDefinition{
+			{
+				ID:              "todo",
+				Name:            "Todo",
+				StepType:        models.StepTypeBacklog,
+				Position:        0,
+				Color:           "bg-neutral-400",
+				TaskState:       "TODO",
+				AutoStartAgent:  false,
+				AllowManualMove: true,
+			},
+			{
+				ID:               "plan",
+				Name:             "Plan",
+				StepType:         models.StepTypePlanning,
+				Position:         1,
+				Color:            "bg-purple-500",
+				TaskState:        "IN_PROGRESS",
+				AutoStartAgent:   true,
+				PlanMode:         true,
+				RequireApproval:  true,
+				PromptPrefix:     "[PLANNING PHASE]\nAnalyze this task and create a detailed implementation plan.\nDo NOT make any code changes yet - only analyze and plan.\n\nBefore creating the plan, ask the user clarifying questions if anything is unclear or ambiguous about the requirements. Use the ask_user_question_kandev tool to get answers before proceeding.\n\nCreate a plan that includes:\n1. Understanding of the requirements\n2. Files that need to be modified or created\n3. Step-by-step implementation approach\n4. Potential risks or considerations\n\nWhen including diagrams in your plan (architecture, sequence, flowcharts, etc.), always use mermaid syntax in code blocks.\n\nIMPORTANT: Save your plan using the create_task_plan_kandev MCP tool with the task_id provided in the session context.\nAfter saving the plan, STOP and wait for user review. The user will review your plan in the UI and may edit it.\nDo not create any other files during this phase - only use the MCP tool to save the plan.",
+				OnCompleteStepID: "implementation",
+				AllowManualMove:  true,
+			},
+			{
+				ID:               "implementation",
+				Name:             "Implementation",
+				StepType:         models.StepTypeImplementation,
+				Position:         2,
+				Color:            "bg-blue-500",
+				TaskState:        "IN_PROGRESS",
+				AutoStartAgent:   true,
+				RequireApproval:  true,
+				PromptPrefix:     "[IMPLEMENTATION PHASE]\nBefore starting implementation, retrieve the task plan using get_task_plan_kandev with the task_id from the session context.\nReview the plan carefully, including any edits the user may have made.\nAcknowledge the plan and any user modifications before proceeding.\n\nThen implement the task following the plan step-by-step.\nYou can update the plan during implementation using update_task_plan_kandev if needed.",
+				OnCompleteStepID: "done",
+				AllowManualMove:  true,
+			},
+			{
+				ID:              "done",
+				Name:            "Done",
+				StepType:        models.StepTypeDone,
+				Position:        3,
+				Color:           "bg-green-500",
+				TaskState:       "COMPLETED",
+				AutoStartAgent:  false,
+				AllowManualMove: true,
+			},
+		},
 	}
 }
 
@@ -266,7 +344,7 @@ func (r *Repository) getDevTemplate(now time.Time) *models.WorkflowTemplate {
 				TaskState:        "IN_PROGRESS",
 				AutoStartAgent:   true,
 				PlanMode:         true,
-				PromptPrefix:     "[PLANNING PHASE]\nAnalyze this task and create a detailed implementation plan.\nDo NOT make any code changes yet - only analyze and plan.\n\nBefore creating the plan, ask the user clarifying questions if anything is unclear or ambiguous about the requirements. Use the ask_user_question_kandev tool to get answers before proceeding.\n\nCreate a plan that includes:\n1. Understanding of the requirements\n2. Files that need to be modified or created\n3. Step-by-step implementation approach\n4. Potential risks or considerations\n\nIMPORTANT: Save your plan using the create_task_plan_kandev MCP tool with the task_id provided in the session context.\nAfter saving the plan, STOP and wait for user review. The user will review your plan in the UI and may edit it.\nDo not create any other files during this phase - only use the MCP tool to save the plan.",
+				PromptPrefix:     "[PLANNING PHASE]\nAnalyze this task and create a detailed implementation plan.\nDo NOT make any code changes yet - only analyze and plan.\n\nBefore creating the plan, ask the user clarifying questions if anything is unclear or ambiguous about the requirements. Use the ask_user_question_kandev tool to get answers before proceeding.\n\nCreate a plan that includes:\n1. Understanding of the requirements\n2. Files that need to be modified or created\n3. Step-by-step implementation approach\n4. Potential risks or considerations\n\nWhen including diagrams in your plan (architecture, sequence, flowcharts, etc.), always use mermaid syntax in code blocks.\n\nIMPORTANT: Save your plan using the create_task_plan_kandev MCP tool with the task_id provided in the session context.\nAfter saving the plan, STOP and wait for user review. The user will review your plan in the UI and may edit it.\nDo not create any other files during this phase - only use the MCP tool to save the plan.",
 				OnCompleteStepID: "review-plan",
 				AllowManualMove:  true,
 			},
@@ -349,7 +427,7 @@ func (r *Repository) getArchitectureTemplate(now time.Time) *models.WorkflowTemp
 				TaskState:        "IN_PROGRESS",
 				AutoStartAgent:   true,
 				PlanMode:         true,
-				PromptPrefix:     "[ARCHITECTURE PHASE]\nAnalyze and design the architecture for this task.\n\nBefore creating the design, ask the user clarifying questions if anything is unclear or ambiguous about the requirements. Use the ask_user_question_kandev tool to get answers before proceeding.\n\nIMPORTANT: Save your design using the create_task_plan_kandev MCP tool with the task_id provided in the session context.\nAfter saving the plan, STOP and wait for user review. The user will review your design in the UI and may edit it.\nDo not create any other files during this phase - only use the MCP tool to save the plan.",
+				PromptPrefix:     "[ARCHITECTURE PHASE]\nAnalyze and design the architecture for this task.\n\nBefore creating the design, ask the user clarifying questions if anything is unclear or ambiguous about the requirements. Use the ask_user_question_kandev tool to get answers before proceeding.\n\nWhen including diagrams in your design (architecture, sequence, flowcharts, etc.), always use mermaid syntax in code blocks.\n\nIMPORTANT: Save your design using the create_task_plan_kandev MCP tool with the task_id provided in the session context.\nAfter saving the plan, STOP and wait for user review. The user will review your design in the UI and may edit it.\nDo not create any other files during this phase - only use the MCP tool to save the plan.",
 				OnCompleteStepID: "review",
 				AllowManualMove:  true,
 			},

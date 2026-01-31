@@ -485,7 +485,7 @@
 
 /* Base text styling - match chat text-xs */
 .milkdown-wrapper .editor,
-.milkdown-wrapper .editor * {
+.milkdown-wrapper .editor *:not(.mermaid-container):not(.mermaid-container *) {
   font-size: 0.75rem !important;
   line-height: 1.625;
   color: var(--foreground);
@@ -611,4 +611,38 @@
   border: none !important;
   border-top: 1px solid var(--border) !important;
   margin: 1rem 0 !important;
+}
+
+/* Comment highlights in plan editor - inline */
+.milkdown-wrapper .comment-highlight {
+  background-color: rgba(59, 130, 246, 0.45);
+  border-radius: 3px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+  padding: 2px 1px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+.milkdown-wrapper .comment-highlight:hover {
+  background-color: rgba(59, 130, 246, 0.6);
+}
+
+/* Mermaid diagram styles */
+.milkdown-wrapper .mermaid-container {
+  margin: 0.75rem 0 !important;
+  padding: 0.5rem !important;
+  overflow-x: auto !important;
+}
+
+.milkdown-wrapper .mermaid-container svg {
+  max-width: 100% !important;
+  height: auto !important;
+}
+
+.milkdown-wrapper .mermaid-error {
+  color: #ef4444 !important;
+  font-size: 0.75rem !important;
+  padding: 0.5rem !important;
+  white-space: pre-wrap !important;
 }

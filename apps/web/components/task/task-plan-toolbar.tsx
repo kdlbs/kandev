@@ -11,6 +11,7 @@ import {
   IconCopy,
   IconRefresh,
   IconTrash,
+  IconSend,
 } from '@tabler/icons-react';
 import { Button } from '@kandev/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
@@ -26,6 +27,12 @@ type TaskPlanToolbarProps = {
   isReanalyzing: boolean;
   hasActiveSession: boolean;
   showApproveButton?: boolean;
+  // Comments props
+  commentCount?: number;
+  isSubmittingComments?: boolean;
+  onSubmitComments?: () => void;
+  onClearComments?: () => void;
+  // Existing handlers
   onSave: () => void;
   onDiscard: () => void;
   onCopy: () => void;
@@ -43,6 +50,10 @@ export const TaskPlanToolbar = memo(function TaskPlanToolbar({
   isReanalyzing,
   hasActiveSession,
   showApproveButton,
+  commentCount = 0,
+  isSubmittingComments = false,
+  onSubmitComments,
+  onClearComments,
   onSave,
   onDiscard,
   onCopy,
@@ -50,6 +61,7 @@ export const TaskPlanToolbar = memo(function TaskPlanToolbar({
   onClear,
   onApprove,
 }: TaskPlanToolbarProps) {
+  const hasComments = commentCount > 0;
   return (
     <div className="mt-2">
       <div
@@ -187,6 +199,56 @@ export const TaskPlanToolbar = memo(function TaskPlanToolbar({
               </TooltipTrigger>
               <TooltipContent>Clear plan</TooltipContent>
             </Tooltip>
+
+            {/* Separator before comments */}
+            {hasComments && <div className="h-4 w-px bg-border mx-1" />}
+
+            {/* Comments section */}
+            {hasComments && (
+              <div className="flex items-center gap-1">
+                {/* Clear comments */}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 w-7 p-0 cursor-pointer hover:bg-muted/40 text-muted-foreground hover:text-destructive"
+                      onClick={onClearComments}
+                      disabled={isSubmittingComments}
+                    >
+                      <IconX className="h-3.5 w-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Clear all comments</TooltipContent>
+                </Tooltip>
+
+                {/* Submit comments button - round with count inside */}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      size="icon"
+                      className="h-7 w-7 rounded-full cursor-pointer bg-primary hover:bg-primary/90 text-primary-foreground relative"
+                      onClick={onSubmitComments}
+                      disabled={isSubmittingComments || isAgentBusy}
+                    >
+                      {isSubmittingComments ? (
+                        <IconLoader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <>
+                          <IconSend className="h-3.5 w-3.5" />
+                          <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-primary-foreground text-primary text-[10px] font-semibold">
+                            {commentCount}
+                          </span>
+                        </>
+                      )}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Send {commentCount} comment{commentCount !== 1 ? 's' : ''} to agent</TooltipContent>
+                </Tooltip>
+              </div>
+            )}
 
             {/* Separator before approve button */}
             {showApproveButton && onApprove && (
