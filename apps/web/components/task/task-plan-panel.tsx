@@ -32,14 +32,15 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({ taskId, showApproveBu
     activeSessionId ? state.taskSessions.items[activeSessionId] ?? null : null
   );
   const isAgentBusy = activeSession?.state === 'STARTING' || activeSession?.state === 'RUNNING';
-  const [draftContent, setDraftContent] = useState('');
+  const [draftContent, setDraftContent] = useState(plan?.content ?? '');
   const [showDiscardDialog, setShowDiscardDialog] = useState(false);
   const [showClearDialog, setShowClearDialog] = useState(false);
   const [isReanalyzing, setIsReanalyzing] = useState(false);
   // Key to force editor remount on external content changes
   const [editorKey, setEditorKey] = useState(0);
   // Track the last known plan content to detect external updates
-  const lastPlanContentRef = useRef<string | undefined>(plan?.content);
+  // Initialize to undefined so the first useEffect run always syncs if plan is already loaded
+  const lastPlanContentRef = useRef<string | undefined>(undefined);
   // Text selection state for the selection popover
   const [textSelection, setTextSelection] = useState<TextSelection | null>(null);
   // Plan comments state
