@@ -25,6 +25,7 @@ export const defaultSessionRuntimeState: SessionRuntimeSliceState = {
   sessionCommits: { bySessionId: {}, loading: {} },
   contextWindow: { bySessionId: {} },
   agents: { agents: [] },
+  availableCommands: { bySessionId: {} },
 };
 
 export const createSessionRuntimeSlice: StateCreator<
@@ -128,5 +129,14 @@ export const createSessionRuntimeSlice: StateCreator<
     set((draft) => {
       // Delete the entry so hook will refetch (undefined triggers fetch, [] does not)
       delete draft.sessionCommits.bySessionId[sessionId];
+    }),
+  // Available commands actions
+  setAvailableCommands: (sessionId, commands) =>
+    set((draft) => {
+      draft.availableCommands.bySessionId[sessionId] = commands;
+    }),
+  clearAvailableCommands: (sessionId) =>
+    set((draft) => {
+      delete draft.availableCommands.bySessionId[sessionId];
     }),
 });

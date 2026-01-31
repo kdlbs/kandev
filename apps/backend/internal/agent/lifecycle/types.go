@@ -10,6 +10,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentctl "github.com/kandev/kandev/internal/agentctl/client"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -74,6 +75,10 @@ type AgentExecution struct {
 	// via the stream protocol. When true, the session manager should NOT emit a complete
 	// event after prompt returns, as the adapter already sent one via the stream.
 	ReportsStatusViaStream bool
+
+	// Available commands from the agent (for slash command menu)
+	availableCommands   []streams.AvailableCommand
+	availableCommandsMu sync.RWMutex
 }
 
 // GetAgentCtlClient returns the agentctl client for this execution
@@ -93,6 +98,20 @@ func (ae *AgentExecution) GetWorkspaceStream() *agentctl.WorkspaceStream {
 	ae.workspaceStreamMu.RLock()
 	defer ae.workspaceStreamMu.RUnlock()
 	return ae.workspaceStream
+}
+
+// SetAvailableCommands sets the available commands for this execution
+func (ae *AgentExecution) SetAvailableCommands(commands []streams.AvailableCommand) {
+	ae.availableCommandsMu.Lock()
+	defer ae.availableCommandsMu.Unlock()
+	ae.availableCommands = commands
+}
+
+// GetAvailableCommands returns the available commands for this execution
+func (ae *AgentExecution) GetAvailableCommands() []streams.AvailableCommand {
+	ae.availableCommandsMu.RLock()
+	defer ae.availableCommandsMu.RUnlock()
+	return ae.availableCommands
 }
 
 // LaunchRequest contains parameters for launching an agent

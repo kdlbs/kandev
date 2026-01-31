@@ -31,6 +31,9 @@ const (
 
 	// EventTypeContextWindow indicates a context window update.
 	EventTypeContextWindow = "context_window"
+
+	// EventTypeAvailableCommands indicates available slash commands from the agent.
+	EventTypeAvailableCommands = "available_commands"
 )
 
 // Session status constants for EventTypeSessionStatus events.
@@ -148,6 +151,11 @@ type AgentEvent struct {
 
 	// ContextEfficiency is the percentage utilization (0-100).
 	ContextEfficiency float64 `json:"context_efficiency,omitempty"`
+
+	// --- Available commands fields (for "available_commands" type) ---
+
+	// AvailableCommands contains the slash commands available from the agent.
+	AvailableCommands []AvailableCommand `json:"available_commands,omitempty"`
 }
 
 // PlanEntry represents an entry in the agent's execution plan.
@@ -160,4 +168,13 @@ type PlanEntry struct {
 
 	// Priority indicates relative importance.
 	Priority string `json:"priority,omitempty"`
+}
+
+// AvailableCommand represents a slash command available from the agent.
+type AvailableCommand struct {
+	// Name is the command name (e.g., "draftpr", "commit").
+	Name string `json:"name"`
+
+	// Description is a human-readable description of the command.
+	Description string `json:"description,omitempty"`
 }

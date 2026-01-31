@@ -137,6 +137,15 @@ export type AgentState = {
   agents: Array<{ id: string; status: 'idle' | 'running' | 'error' }>;
 };
 
+export type AvailableCommand = {
+  name: string;
+  description?: string;
+};
+
+export type AvailableCommandsState = {
+  bySessionId: Record<string, AvailableCommand[]>;
+};
+
 export type SessionRuntimeSliceState = {
   terminal: TerminalState;
   shell: ShellState;
@@ -146,6 +155,7 @@ export type SessionRuntimeSliceState = {
   sessionCommits: SessionCommitsState;
   contextWindow: ContextWindowState;
   agents: AgentState;
+  availableCommands: AvailableCommandsState;
 };
 
 export type SessionRuntimeSliceActions = {
@@ -172,6 +182,9 @@ export type SessionRuntimeSliceActions = {
   setSessionCommitsLoading: (sessionId: string, loading: boolean) => void;
   addSessionCommit: (sessionId: string, commit: SessionCommit) => void;
   clearSessionCommits: (sessionId: string) => void;
+  // Available commands actions
+  setAvailableCommands: (sessionId: string, commands: AvailableCommand[]) => void;
+  clearAvailableCommands: (sessionId: string) => void;
 };
 
 export type SessionRuntimeSlice = SessionRuntimeSliceState & SessionRuntimeSliceActions;

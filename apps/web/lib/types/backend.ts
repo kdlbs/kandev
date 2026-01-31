@@ -31,6 +31,7 @@ export type BackendMessageType =
   | 'session.agentctl_error'
   | 'session.turn.started'
   | 'session.turn.completed'
+  | 'session.available_commands'
   | 'executor.created'
   | 'executor.updated'
   | 'executor.deleted'
@@ -297,6 +298,19 @@ export type TurnEventPayload = {
   updated_at: string;
 };
 
+export type AvailableCommandPayload = {
+  name: string;
+  description?: string;
+};
+
+export type AvailableCommandsPayload = {
+  task_id: string;
+  session_id: string;
+  agent_id: string;
+  available_commands: AvailableCommandPayload[];
+  timestamp: string;
+};
+
 export type TaskPlanEventPayload = {
   id: string;
   task_id: string;
@@ -340,6 +354,7 @@ export type BackendMessageMap = {
   'session.agentctl_error': BackendMessage<'session.agentctl_error', TaskSessionAgentctlPayload>;
   'session.turn.started': BackendMessage<'session.turn.started', TurnEventPayload>;
   'session.turn.completed': BackendMessage<'session.turn.completed', TurnEventPayload>;
+  'session.available_commands': BackendMessage<'session.available_commands', AvailableCommandsPayload>;
   'executor.created': BackendMessage<'executor.created', ExecutorPayload>;
   'executor.updated': BackendMessage<'executor.updated', ExecutorPayload>;
   'executor.deleted': BackendMessage<'executor.deleted', ExecutorPayload>;

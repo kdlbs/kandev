@@ -128,6 +128,11 @@ const (
 	ContextWindowUpdated = "context_window.updated" // Context window usage updated
 )
 
+// Event types for available commands
+const (
+	AvailableCommandsUpdated = "available_commands.updated" // Available slash commands updated
+)
+
 // BuildShellOutputSubject creates a shell output subject for a specific session
 func BuildShellOutputSubject(sessionID string) string {
 	return ShellOutput + "." + sessionID
@@ -227,5 +232,15 @@ func BuildContextWindowSubject(sessionID string) string {
 // BuildContextWindowWildcardSubject creates a wildcard subscription for all context window events
 func BuildContextWindowWildcardSubject() string {
 	return ContextWindowUpdated + ".*"
+}
+
+// BuildAvailableCommandsSubject creates an available commands subject for a specific session
+func BuildAvailableCommandsSubject(sessionID string) string {
+	return AvailableCommandsUpdated + "." + sessionID
+}
+
+// BuildAvailableCommandsWildcardSubject creates a wildcard subscription for all available commands events
+func BuildAvailableCommandsWildcardSubject() string {
+	return AvailableCommandsUpdated + ".*"
 }
 

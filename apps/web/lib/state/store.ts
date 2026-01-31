@@ -137,6 +137,7 @@ export type AppState = {
   sessionCommits: typeof defaultSessionRuntimeState['sessionCommits'];
   contextWindow: typeof defaultSessionRuntimeState['contextWindow'];
   agents: typeof defaultSessionRuntimeState['agents'];
+  availableCommands: typeof defaultSessionRuntimeState['availableCommands'];
 
   // UI slice
   previewPanel: typeof defaultUIState['previewPanel'];
@@ -237,6 +238,9 @@ export type AppState = {
   setTaskPlanLoading: (taskId: string, loading: boolean) => void;
   setTaskPlanSaving: (taskId: string, saving: boolean) => void;
   clearTaskPlan: (taskId: string) => void;
+  // Available commands actions
+  setAvailableCommands: (sessionId: string, commands: import('./slices/session-runtime/types').AvailableCommand[]) => void;
+  clearAvailableCommands: (sessionId: string) => void;
 };
 
 export type AppStore = ReturnType<typeof createAppStore>;
@@ -277,6 +281,7 @@ const defaultState = {
   sessionCommits: defaultSessionRuntimeState.sessionCommits,
   contextWindow: defaultSessionRuntimeState.contextWindow,
   agents: defaultSessionRuntimeState.agents,
+  availableCommands: defaultSessionRuntimeState.availableCommands,
   previewPanel: defaultUIState.previewPanel,
   rightPanel: defaultUIState.rightPanel,
   diffs: defaultUIState.diffs,

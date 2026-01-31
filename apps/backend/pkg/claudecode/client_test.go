@@ -278,3 +278,63 @@ func TestClient_InvalidJSON(t *testing.T) {
 		t.Errorf("count = %d, want 1", count)
 	}
 }
+
+func TestClient_HandleControlResponse(t *testing.T) {
+	// Simulate a control response coming back from Claude Code CLI
+	responseJSON := `{"type":"control_response","response":{"subtype":"success","request_id":"test-req-123","response":{"commands":[{"name":"cost","description":"Show cost"}],"agents":["Bash"]}}}` + "\n"
+
+	var buf bytes.Buffer
+	client := NewClient(&buf, strings.NewReader(responseJSON), newTestLogger())
+
+	// Register a pending request
+	pending := &pendingRequest{
+		ch: make(chan *IncomingControlResponse, 1),
+	}
+	client.pendingRequestsMu.Lock()
+	client.pendingRequests["test-req-123"] = pending
+	client.pendingRequestsMu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	client.Start(ctx)
+
+	// Wait for the response
+	select {
+	case resp := <-pending.ch:
+		if resp.Subtype != "success" {
+			t.Errorf("Subtype = %q, want %q", resp.Subtype, "success")
+		}
+		if resp.RequestID != "test-req-123" {
+			t.Errorf("RequestID = %q, want %q", resp.RequestID, "test-req-123")
+		}
+		if resp.Response == nil {
+			t.Fatal("Response is nil")
+		}
+		if len(resp.Response.Commands) != 1 {
+			t.Errorf("Commands count = %d, want %d", len(resp.Response.Commands), 1)
+		}
+		if resp.Response.Commands[0].Name != "cost" {
+			t.Errorf("Commands[0].Name = %q, want %q", resp.Response.Commands[0].Name, "cost")
+		}
+	case <-time.After(50 * time.Millisecond):
+		t.Error("timeout waiting for control response")
+	}
+}
+
+func TestClient_HandleControlResponse_UnknownRequest(t *testing.T) {
+	// Simulate a control response for an unknown request ID (should be ignored)
+	responseJSON := `{"type":"control_response","response":{"subtype":"success","request_id":"unknown-req","response":{"commands":[]}}}` + "\n"
+
+	var buf bytes.Buffer
+	client := NewClient(&buf, strings.NewReader(responseJSON), newTestLogger())
+
+	// Don't register any pending request - response should be ignored
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	client.Start(ctx)
+	time.Sleep(50 * time.Millisecond)
+
+	// Test passes if no panic occurs - the unknown response is just logged and ignored
+}

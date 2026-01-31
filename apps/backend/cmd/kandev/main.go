@@ -359,6 +359,21 @@ func main() {
 			}
 		}
 
+		// Send available commands from the execution (for slash command menu after page refresh)
+		if lifecycleMgr != nil {
+			commands := lifecycleMgr.GetAvailableCommandsForSession(sessionID)
+			if len(commands) > 0 {
+				notification, err := ws.NewNotification(ws.ActionSessionAvailableCommands, map[string]interface{}{
+					"session_id":         sessionID,
+					"task_id":            session.TaskID,
+					"available_commands": commands,
+				})
+				if err == nil {
+					result = append(result, notification)
+				}
+			}
+		}
+
 		return result, nil
 	})
 	log.Info("Session data provider configured for session subscriptions (git status from snapshots)")

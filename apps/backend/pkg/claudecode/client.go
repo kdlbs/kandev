@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/zap"
 )
@@ -18,6 +20,11 @@ type RequestHandler func(requestID string, req *ControlRequest)
 
 // MessageHandler handles streaming messages from Claude Code CLI.
 type MessageHandler func(msg *CLIMessage)
+
+// pendingRequest tracks a control request waiting for a response.
+type pendingRequest struct {
+	ch chan *IncomingControlResponse
+}
 
 // Client handles Claude Code CLI communication over stdin/stdout streams.
 // It reads streaming JSON from stdout and writes control messages to stdin.
@@ -30,6 +37,10 @@ type Client struct {
 	requestHandler RequestHandler
 	messageHandler MessageHandler
 
+	// Pending control requests (requests we sent, waiting for responses)
+	pendingRequests   map[string]*pendingRequest
+	pendingRequestsMu sync.Mutex
+
 	// Synchronization
 	mu   sync.RWMutex
 	done chan struct{}
@@ -38,10 +49,11 @@ type Client struct {
 // NewClient creates a new Claude Code CLI client.
 func NewClient(stdin io.Writer, stdout io.Reader, log *logger.Logger) *Client {
 	return &Client{
-		stdin:  stdin,
-		stdout: stdout,
-		logger: log.WithFields(zap.String("component", "claudecode-client")),
-		done:   make(chan struct{}),
+		stdin:           stdin,
+		stdout:          stdout,
+		logger:          log.WithFields(zap.String("component", "claudecode-client")),
+		done:            make(chan struct{}),
+		pendingRequests: make(map[string]*pendingRequest),
 	}
 }
 
@@ -60,8 +72,11 @@ func (c *Client) SetMessageHandler(handler MessageHandler) {
 }
 
 // Start begins reading from stdout in a goroutine.
-func (c *Client) Start(ctx context.Context) {
-	go c.readLoop(ctx)
+// Returns a channel that is closed when the read loop is ready.
+func (c *Client) Start(ctx context.Context) <-chan struct{} {
+	ready := make(chan struct{})
+	go c.readLoop(ctx, ready)
+	return ready
 }
 
 // Stop stops the client and closes the done channel.
@@ -74,6 +89,62 @@ func (c *Client) Stop() {
 		// Already closed
 	default:
 		close(c.done)
+	}
+}
+
+// Initialize sends the initialize control request to Claude Code CLI and waits for the response.
+// This must be called in streaming mode (input-format=stream-json) to get slash commands.
+func (c *Client) Initialize(ctx context.Context, timeout time.Duration) (*InitializeResponseData, error) {
+	requestID := uuid.New().String()
+
+	// Create pending request channel
+	pending := &pendingRequest{
+		ch: make(chan *IncomingControlResponse, 1),
+	}
+
+	c.pendingRequestsMu.Lock()
+	c.pendingRequests[requestID] = pending
+	c.pendingRequestsMu.Unlock()
+
+	defer func() {
+		c.pendingRequestsMu.Lock()
+		delete(c.pendingRequests, requestID)
+		c.pendingRequestsMu.Unlock()
+	}()
+
+	// Send initialize control request
+	req := &SDKControlRequest{
+		Type:      MessageTypeControlRequest,
+		RequestID: requestID,
+		Request: SDKControlRequestBody{
+			Subtype: SubtypeInitialize,
+			Hooks:   nil, // We don't use SDK hooks
+		},
+	}
+
+	c.logger.Info("sending initialize control request", zap.String("request_id", requestID))
+
+	if err := c.send(req); err != nil {
+		return nil, fmt.Errorf("failed to send initialize request: %w", err)
+	}
+
+	// Wait for response with timeout
+	c.logger.Info("waiting for initialize response", zap.Duration("timeout", timeout))
+	select {
+	case <-ctx.Done():
+		c.logger.Warn("initialize cancelled by context")
+		return nil, ctx.Err()
+	case <-time.After(timeout):
+		c.logger.Warn("initialize request timed out", zap.Duration("timeout", timeout))
+		return nil, fmt.Errorf("initialize request timed out after %v", timeout)
+	case resp := <-pending.ch:
+		if resp.Subtype == "error" {
+			return nil, fmt.Errorf("initialize failed: %s", resp.Error)
+		}
+		c.logger.Info("initialize response received",
+			zap.Int("commands", len(resp.Response.Commands)),
+			zap.Int("agents", len(resp.Response.Agents)))
+		return resp.Response, nil
 	}
 }
 
@@ -113,11 +184,15 @@ func (c *Client) send(msg any) error {
 	return nil
 }
 
-func (c *Client) readLoop(ctx context.Context) {
+func (c *Client) readLoop(ctx context.Context, ready chan<- struct{}) {
 	scanner := bufio.NewScanner(c.stdout)
 	// Allow for large JSON messages (up to 10MB)
 	buf := make([]byte, 0, 64*1024)
 	scanner.Buffer(buf, 10*1024*1024)
+
+	// Signal that we're ready to read
+	c.logger.Info("claudecode: read loop starting")
+	close(ready)
 
 	for scanner.Scan() {
 		select {
@@ -142,6 +217,10 @@ func (c *Client) readLoop(ctx context.Context) {
 }
 
 func (c *Client) handleLine(line []byte) {
+	// Log all incoming lines for debugging
+	c.logger.Debug("claudecode: received raw line",
+		zap.String("line", string(line)))
+
 	// First, parse the basic structure to determine message type
 	var msg CLIMessage
 	if err := json.Unmarshal(line, &msg); err != nil {
@@ -149,13 +228,21 @@ func (c *Client) handleLine(line []byte) {
 		return
 	}
 
-	c.logger.Debug("claudecode: received message",
+	c.logger.Debug("claudecode: parsed message",
 		zap.String("type", msg.Type),
-		zap.String("request_id", msg.RequestID))
+		zap.String("request_id", msg.RequestID),
+		zap.Bool("has_response", msg.Response != nil))
 
-	// Handle control requests specially - they need immediate response
+	// Handle control requests (from Claude to us, e.g., permission requests)
 	if msg.Type == MessageTypeControlRequest && msg.Request != nil {
 		c.handleControlRequest(msg.RequestID, msg.Request)
+		return
+	}
+
+	// Handle control responses (from Claude back to us, e.g., initialize response)
+	// Note: request_id is inside the response object, not at the message level
+	if msg.Type == MessageTypeControlResponse && msg.Response != nil {
+		c.handleControlResponse(msg.Response)
 		return
 	}
 
@@ -193,5 +280,31 @@ func (c *Client) handleControlRequest(requestID string, req *ControlRequest) {
 		}); err != nil {
 			c.logger.Warn("failed to send error response", zap.Error(err))
 		}
+	}
+}
+
+func (c *Client) handleControlResponse(resp *IncomingControlResponse) {
+	requestID := resp.RequestID
+
+	c.pendingRequestsMu.Lock()
+	pending, ok := c.pendingRequests[requestID]
+	c.pendingRequestsMu.Unlock()
+
+	if !ok {
+		c.logger.Warn("received control response for unknown request",
+			zap.String("request_id", requestID),
+			zap.String("subtype", resp.Subtype))
+		return
+	}
+
+	c.logger.Info("received control response",
+		zap.String("request_id", requestID),
+		zap.String("subtype", resp.Subtype))
+
+	// Send response to waiting goroutine
+	select {
+	case pending.ch <- resp:
+	default:
+		c.logger.Warn("pending request channel full", zap.String("request_id", requestID))
 	}
 }

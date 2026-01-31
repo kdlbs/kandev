@@ -45,16 +45,20 @@ const (
 // CLIMessage represents messages from Claude Code CLI stdout.
 // The message type determines which fields are populated.
 type CLIMessage struct {
-	// Type is the message type (system, assistant, result, control_request, etc.)
+	// Type is the message type (system, assistant, result, control_request, control_response, etc.)
 	Type string `json:"type"`
 
-	// For control_request messages
+	// For control_request messages (from Claude to us)
 	RequestID string          `json:"request_id,omitempty"`
 	Request   *ControlRequest `json:"request,omitempty"`
 
+	// For control_response messages (from Claude back to us after we send a control_request)
+	Response *IncomingControlResponse `json:"response,omitempty"`
+
 	// For system messages
-	SessionID     string `json:"session_id,omitempty"`
-	SessionStatus string `json:"session_status,omitempty"`
+	SessionID     string   `json:"session_id,omitempty"`
+	SessionStatus string   `json:"session_status,omitempty"`
+	SlashCommands []string `json:"slash_commands,omitempty"` // System message uses string array
 
 	// For subagent context (when running inside a Task tool call)
 	ParentToolUseID string `json:"parent_tool_use_id,omitempty"`
@@ -80,12 +84,40 @@ type CLIMessage struct {
 }
 
 // AssistantMessage contains the assistant's response content.
+// Note: For user messages (type="user"), Content may be a plain string instead of []ContentBlock.
+// Use RawContent and GetContentBlocks()/GetContentString() for flexible parsing.
 type AssistantMessage struct {
-	Role    string         `json:"role"`
-	Content []ContentBlock `json:"content,omitempty"`
-	Model   string         `json:"model,omitempty"`
-	StopReason string      `json:"stop_reason,omitempty"`
-	Usage   *Usage         `json:"usage,omitempty"`
+	Role       string          `json:"role"`
+	Content    json.RawMessage `json:"content,omitempty"` // Can be string or []ContentBlock
+	Model      string          `json:"model,omitempty"`
+	StopReason string          `json:"stop_reason,omitempty"`
+	Usage      *Usage          `json:"usage,omitempty"`
+}
+
+// GetContentBlocks attempts to parse Content as []ContentBlock.
+// Returns nil if Content is a string or cannot be parsed.
+func (m *AssistantMessage) GetContentBlocks() []ContentBlock {
+	if len(m.Content) == 0 {
+		return nil
+	}
+	var blocks []ContentBlock
+	if err := json.Unmarshal(m.Content, &blocks); err != nil {
+		return nil
+	}
+	return blocks
+}
+
+// GetContentString attempts to parse Content as a plain string.
+// Returns empty string if Content is []ContentBlock or cannot be parsed.
+func (m *AssistantMessage) GetContentString() string {
+	if len(m.Content) == 0 {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal(m.Content, &s); err != nil {
+		return ""
+	}
+	return s
 }
 
 // ContentBlock represents a block of content in an assistant message.
@@ -188,6 +220,38 @@ type ControlResponseMessage struct {
 	Type      string           `json:"type"` // "control_response"
 	RequestID string           `json:"request_id"`
 	Response  *ControlResponse `json:"response"`
+}
+
+// IncomingControlResponse represents a control_response message from Claude Code CLI
+// (response to a control_request we sent, like initialize).
+type IncomingControlResponse struct {
+	// Subtype is the response type (success, error)
+	Subtype string `json:"subtype"`
+
+	// RequestID is the ID of the control_request this responds to
+	RequestID string `json:"request_id"`
+
+	// Response contains the response data (e.g., slash_commands for initialize)
+	Response *InitializeResponseData `json:"response,omitempty"`
+
+	// Error message if subtype is "error"
+	Error string `json:"error,omitempty"`
+}
+
+// InitializeResponseData contains the response data from an initialize control request.
+type InitializeResponseData struct {
+	// Commands are the available commands (Claude Code uses "commands" not "slash_commands")
+	Commands []Command `json:"commands,omitempty"`
+
+	// Agents are the available agent names
+	Agents []string `json:"agents,omitempty"`
+}
+
+// Command represents an available command from the initialize response.
+type Command struct {
+	Name         string `json:"name"`
+	Description  string `json:"description,omitempty"`
+	ArgumentHint string `json:"argumentHint,omitempty"`
 }
 
 // ControlResponse is the response to a control request.

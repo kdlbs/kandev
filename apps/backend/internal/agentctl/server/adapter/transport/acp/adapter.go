@@ -532,6 +532,20 @@ func (a *Adapter) convertNotification(n acp.SessionNotification) *AgentEvent {
 			SessionID:   string(n.SessionId),
 			PlanEntries: entries,
 		}
+
+	case u.AvailableCommandsUpdate != nil:
+		commands := make([]streams.AvailableCommand, len(u.AvailableCommandsUpdate.AvailableCommands))
+		for i, cmd := range u.AvailableCommandsUpdate.AvailableCommands {
+			commands[i] = streams.AvailableCommand{
+				Name:        cmd.Name,
+				Description: cmd.Description,
+			}
+		}
+		return &AgentEvent{
+			Type:              streams.EventTypeAvailableCommands,
+			SessionID:         string(n.SessionId),
+			AvailableCommands: commands,
+		}
 	}
 
 	return nil
