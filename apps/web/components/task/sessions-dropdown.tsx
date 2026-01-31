@@ -13,7 +13,6 @@ import { Badge } from '@kandev/ui/badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
 import { TaskCreateDialog } from '../task-create-dialog';
 import { useAppStore } from '@/components/state-provider';
-import { getWebSocketClient } from '@/lib/ws/connection';
 import { linkToSession } from '@/lib/links';
 import { useTaskSessions } from '@/hooks/use-task-sessions';
 import type { TaskSession, TaskSessionState } from '@/lib/types/http';
@@ -146,45 +145,6 @@ export const SessionsDropdown = memo(function SessionsDropdown({
     setOpen(false);
   };
 
-  const handleCreateSession = async (data: {
-    prompt: string;
-    agentProfileId: string;
-    executorId: string;
-    environmentId: string;
-  }) => {
-    if (!taskId) return;
-    const client = getWebSocketClient();
-    if (!client) return;
-
-    try {
-      const response = await client.request<{
-        success: boolean;
-        task_id: string;
-        agent_instance_id: string;
-        session_id?: string;
-        state: string;
-      }>(
-        'orchestrator.start',
-        {
-          task_id: taskId,
-          agent_profile_id: data.agentProfileId,
-          executor_id: data.executorId,
-          prompt: data.prompt.trim(),
-        },
-        15000
-      );
-
-      await loadSessions(true);
-
-      if (response?.session_id) {
-        setActiveSession(taskId, response.session_id);
-        updateUrl(response.session_id);
-      }
-    } catch (error) {
-      console.error('Failed to create task session:', error);
-    }
-  };
-
   const sortedSessions = useMemo(() => {
     const visibleSessions = taskId ? sessions : [];
     return [...visibleSessions].sort((a: TaskSession, b: TaskSession) => {
@@ -315,7 +275,7 @@ export const SessionsDropdown = memo(function SessionsDropdown({
         boardId={null}
         defaultColumnId={null}
         columns={[]}
-        onCreateSession={handleCreateSession}
+        taskId={taskId}
         initialValues={{
           title: taskTitle,
           description: taskDescription,

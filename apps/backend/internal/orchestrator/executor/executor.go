@@ -213,20 +213,127 @@ func (e *Executor) Execute(ctx context.Context, task *v1.Task) (*TaskExecution, 
 // The prompt parameter is the initial prompt to send to the agent.
 // The workflowStepID parameter associates the session with a workflow step for transitions.
 func (e *Executor) ExecuteWithProfile(ctx context.Context, task *v1.Task, agentProfileID string, executorID string, prompt string, workflowStepID string) (*TaskExecution, error) {
-	if agentProfileID == "" {
-		e.logger.Error("task has no agent_profile_id configured", zap.String("task_id", task.ID))
-		return nil, ErrNoAgentProfileID
+	// Create session entry in database first
+	sessionID, err := e.PrepareSession(ctx, task, agentProfileID, executorID, workflowStepID)
+	if err != nil {
+		return nil, err
 	}
 
-	// Create a LaunchAgentRequest from the task
-	// Use the provided prompt instead of task.Description
-	req := &LaunchAgentRequest{
-		TaskID:          task.ID,
-		TaskTitle:       task.Title,
-		AgentProfileID:  agentProfileID,
-		TaskDescription: prompt, // Use the provided prompt
-		Priority:        task.Priority,
+	// Launch the agent for the prepared session
+	return e.LaunchPreparedSession(ctx, task, sessionID, agentProfileID, executorID, prompt, workflowStepID)
+}
+
+// PrepareSession creates a session entry in the database without launching the agent.
+// This allows the caller to get the session ID immediately and launch the agent later.
+// Returns the session ID.
+func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfileID string, executorID string, workflowStepID string) (string, error) {
+	if agentProfileID == "" {
+		e.logger.Error("task has no agent_profile_id configured", zap.String("task_id", task.ID))
+		return "", ErrNoAgentProfileID
 	}
+
+	metadata := cloneMetadata(task.Metadata)
+	var repositoryID string
+	var baseBranch string
+
+	// Get the primary repository for this task
+	primaryTaskRepo, err := e.repo.GetPrimaryTaskRepository(ctx, task.ID)
+	if err != nil {
+		e.logger.Error("failed to get primary task repository",
+			zap.String("task_id", task.ID),
+			zap.Error(err))
+		return "", err
+	}
+
+	if primaryTaskRepo != nil {
+		repositoryID = primaryTaskRepo.RepositoryID
+		baseBranch = primaryTaskRepo.BaseBranch
+	}
+
+	// Resolve agent profile to get model and other settings for snapshot
+	var agentProfileSnapshot map[string]interface{}
+	if profileInfo, err := e.agentManager.ResolveAgentProfile(ctx, agentProfileID); err == nil && profileInfo != nil {
+		agentProfileSnapshot = map[string]interface{}{
+			"id":                           profileInfo.ProfileID,
+			"name":                         profileInfo.ProfileName,
+			"agent_id":                     profileInfo.AgentID,
+			"agent_name":                   profileInfo.AgentName,
+			"model":                        profileInfo.Model,
+			"auto_approve":                 profileInfo.AutoApprove,
+			"dangerously_skip_permissions": profileInfo.DangerouslySkipPermissions,
+			"plan":                         profileInfo.Plan,
+			"cli_passthrough":              profileInfo.CLIPassthrough,
+		}
+	} else {
+		agentProfileSnapshot = map[string]interface{}{
+			"id":    agentProfileID,
+			"model": "",
+		}
+	}
+
+	// Create agent session in database
+	sessionID := uuid.New().String()
+	now := time.Now().UTC()
+	session := &models.TaskSession{
+		ID:                   sessionID,
+		TaskID:               task.ID,
+		AgentProfileID:       agentProfileID,
+		RepositoryID:         repositoryID,
+		BaseBranch:           baseBranch,
+		State:                models.TaskSessionStateCreated,
+		StartedAt:            now,
+		UpdatedAt:            now,
+		AgentProfileSnapshot: agentProfileSnapshot,
+		IsPrimary:            true,
+	}
+	if workflowStepID != "" {
+		session.WorkflowStepID = &workflowStepID
+	}
+
+	// Resolve executor configuration
+	execConfig := e.resolveExecutorConfig(ctx, executorID, task.WorkspaceID, metadata)
+	if execConfig.ExecutorID != "" {
+		session.ExecutorID = execConfig.ExecutorID
+	}
+
+	if err := e.repo.CreateTaskSession(ctx, session); err != nil {
+		e.logger.Error("failed to persist agent session",
+			zap.String("task_id", task.ID),
+			zap.Error(err))
+		return "", err
+	}
+
+	// Clear primary flag on any other sessions for this task
+	if err := e.repo.SetSessionPrimary(ctx, sessionID); err != nil {
+		e.logger.Warn("failed to update primary session flag",
+			zap.String("task_id", task.ID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
+
+	e.logger.Info("session entry created",
+		zap.String("task_id", task.ID),
+		zap.String("session_id", sessionID))
+
+	return sessionID, nil
+}
+
+// LaunchPreparedSession launches the agent for a pre-created session.
+// The session must have been created using PrepareSession.
+func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, sessionID string, agentProfileID string, executorID string, prompt string, workflowStepID string) (*TaskExecution, error) {
+	// Fetch the session to get its configuration
+	session, err := e.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		e.logger.Error("failed to get session for launch",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return nil, err
+	}
+
+	if session.TaskID != task.ID {
+		return nil, fmt.Errorf("session does not belong to task")
+	}
+
 	metadata := cloneMetadata(task.Metadata)
 	var repositoryPath string
 	var repositoryID string
@@ -247,126 +354,54 @@ func (e *Executor) ExecuteWithProfile(ctx context.Context, task *v1.Task, agentP
 		repositoryID = primaryTaskRepo.RepositoryID
 		baseBranch = primaryTaskRepo.BaseBranch
 
-		repository, err := e.repo.GetRepository(ctx, repositoryID)
-		if err != nil {
-			e.logger.Error("failed to load repository for task",
-				zap.String("task_id", task.ID),
-				zap.String("repository_id", repositoryID),
-				zap.Error(err))
-			return nil, err
-		}
-		repositoryPath = repository.LocalPath
-		worktreeBranchPrefix = repository.WorktreeBranchPrefix
-		pullBeforeWorktree = repository.PullBeforeWorktree
-		if repositoryPath != "" {
-			req.RepositoryURL = repositoryPath
-		}
-		if baseBranch == "" && repository.DefaultBranch != "" {
-			baseBranch = repository.DefaultBranch
-		}
-		if baseBranch != "" {
-			req.Branch = baseBranch
+		if repositoryID != "" {
+			repository, err := e.repo.GetRepository(ctx, repositoryID)
+			if err != nil {
+				e.logger.Error("failed to get repository",
+					zap.String("repository_id", repositoryID),
+					zap.Error(err))
+				return nil, err
+			}
+			repositoryPath = repository.LocalPath
+			worktreeBranchPrefix = repository.WorktreeBranchPrefix
+			pullBeforeWorktree = repository.PullBeforeWorktree
+			if baseBranch == "" && repository.DefaultBranch != "" {
+				baseBranch = repository.DefaultBranch
+			}
 		}
 	}
 
-	// Configure worktree if enabled and repository path is available
-	if e.worktreeEnabled && repositoryPath != "" {
-		req.UseWorktree = true
+	req := &LaunchAgentRequest{
+		TaskID:          task.ID,
+		TaskTitle:       task.Title,
+		AgentProfileID:  agentProfileID,
+		TaskDescription: prompt,
+		Priority:        task.Priority,
+		SessionID:       sessionID,
+	}
+
+	if repositoryPath != "" {
+		req.UseWorktree = e.worktreeEnabled
 		req.RepositoryPath = repositoryPath
-		req.RepositoryID = repositoryID
-		if baseBranch != "" {
-			req.BaseBranch = baseBranch
-		} else {
-			req.BaseBranch = "main"
-		}
+		req.BaseBranch = baseBranch
 		req.WorktreeBranchPrefix = worktreeBranchPrefix
 		req.PullBeforeWorktree = pullBeforeWorktree
 	}
 
-	// Resolve agent profile to get model and other settings for snapshot
-	var agentProfileSnapshot map[string]interface{}
-	if profileInfo, err := e.agentManager.ResolveAgentProfile(ctx, agentProfileID); err == nil && profileInfo != nil {
-		agentProfileSnapshot = map[string]interface{}{
-			"id":                           profileInfo.ProfileID,
-			"name":                         profileInfo.ProfileName,
-			"agent_id":                     profileInfo.AgentID,
-			"agent_name":                   profileInfo.AgentName,
-			"model":                        profileInfo.Model,
-			"auto_approve":                 profileInfo.AutoApprove,
-			"dangerously_skip_permissions": profileInfo.DangerouslySkipPermissions,
-			"plan":                         profileInfo.Plan,
-			"cli_passthrough":              profileInfo.CLIPassthrough,
-		}
-		e.logger.Info("resolved agent profile for snapshot",
-			zap.String("profile_id", profileInfo.ProfileID),
-			zap.String("model", profileInfo.Model),
-			zap.Bool("cli_passthrough", profileInfo.CLIPassthrough))
-	} else {
-		// Create minimal snapshot even on failure - ensures model switching works
-		e.logger.Warn("failed to resolve agent profile, using minimal snapshot",
-			zap.String("agent_profile_id", agentProfileID),
-			zap.Error(err))
-		agentProfileSnapshot = map[string]interface{}{
-			"id":    agentProfileID,
-			"model": "", // Empty model allows any model switch
-		}
-	}
-
-	// Create agent session in database before launch so worktree associations can persist.
-	sessionID := uuid.New().String()
-	now := time.Now().UTC()
-	session := &models.TaskSession{
-		ID:                   sessionID,
-		TaskID:               task.ID,
-		AgentProfileID:       agentProfileID,
-		RepositoryID:         repositoryID,
-		BaseBranch:           baseBranch,
-		State:                models.TaskSessionStateCreated,
-		StartedAt:            now,
-		UpdatedAt:            now,
-		AgentProfileSnapshot: agentProfileSnapshot,
-		IsPrimary:            true, // Set as primary when creating
-	}
-	// Set workflow step ID if provided (for workflow transitions)
-	if workflowStepID != "" {
-		session.WorkflowStepID = &workflowStepID
-	}
 	// Resolve executor configuration
 	execConfig := e.resolveExecutorConfig(ctx, executorID, task.WorkspaceID, metadata)
 	if execConfig.ExecutorID != "" {
-		session.ExecutorID = execConfig.ExecutorID
 		metadata = execConfig.Metadata
 		req.ExecutorType = execConfig.ExecutorType
-		e.logger.Debug("resolved executor for task",
-			zap.String("task_id", task.ID),
-			zap.String("executor_id", execConfig.ExecutorID),
-			zap.String("executor_type", execConfig.ExecutorType))
 	}
 
-	if err := e.repo.CreateTaskSession(ctx, session); err != nil {
-		e.logger.Error("failed to persist agent session before launch",
-			zap.String("task_id", task.ID),
-			zap.Error(err))
-		return nil, err
-	}
-
-	// Clear primary flag on any other sessions for this task
-	// (the new session was created with IsPrimary=true)
-	if err := e.repo.SetSessionPrimary(ctx, sessionID); err != nil {
-		e.logger.Warn("failed to update primary session flag",
-			zap.String("task_id", task.ID),
-			zap.String("session_id", sessionID),
-			zap.Error(err))
-		// Continue anyway - the session was already created with is_primary=true
-	}
-
-	req.SessionID = sessionID
 	if len(metadata) > 0 {
 		req.Metadata = metadata
 	}
 
-	e.logger.Info("launching agent for task",
+	e.logger.Info("launching agent for prepared session",
 		zap.String("task_id", task.ID),
+		zap.String("session_id", sessionID),
 		zap.String("agent_profile_id", agentProfileID),
 		zap.String("executor_type", req.ExecutorType),
 		zap.Bool("use_worktree", req.UseWorktree))
@@ -381,18 +416,18 @@ func (e *Executor) ExecuteWithProfile(ctx context.Context, task *v1.Task, agentP
 			zap.Error(err))
 		if updateErr := e.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateFailed, err.Error()); updateErr != nil {
 			e.logger.Warn("failed to mark session as failed after launch error",
-				zap.String("task_id", task.ID),
 				zap.String("session_id", sessionID),
 				zap.Error(updateErr))
 		}
 		return nil, err
 	}
 
+	now := time.Now().UTC()
 	session.AgentExecutionID = resp.AgentExecutionID
 	session.ContainerID = resp.ContainerID
 	session.State = models.TaskSessionStateStarting
 	session.ErrorMessage = ""
-	session.UpdatedAt = time.Now().UTC()
+	session.UpdatedAt = now
 
 	if err := e.repo.UpdateTaskSession(ctx, session); err != nil {
 		e.logger.Error("failed to update agent session after launch",
@@ -445,12 +480,11 @@ func (e *Executor) ExecuteWithProfile(ctx context.Context, task *v1.Task, agentP
 		}
 	}
 
-	// Build result from stored session
 	execution := &TaskExecution{
 		TaskID:           task.ID,
 		AgentExecutionID: resp.AgentExecutionID,
 		AgentProfileID:   agentProfileID,
-		StartedAt:        now,
+		StartedAt:        session.StartedAt,
 		SessionState:     v1.TaskSessionStateStarting,
 		LastUpdate:       now,
 		SessionID:        sessionID,
@@ -458,8 +492,7 @@ func (e *Executor) ExecuteWithProfile(ctx context.Context, task *v1.Task, agentP
 		WorktreeBranch:   resp.WorktreeBranch,
 	}
 
-	// Start the agent process asynchronously.
-	// The initial prompt is sent as part of InitializeAndPrompt in the goroutine.
+	// Start the agent process asynchronously
 	go func() {
 		startCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
@@ -469,35 +502,25 @@ func (e *Executor) ExecuteWithProfile(ctx context.Context, task *v1.Task, agentP
 				zap.String("task_id", task.ID),
 				zap.String("agent_execution_id", resp.AgentExecutionID),
 				zap.Error(err))
-			// Update session state to failed
 			if updateErr := e.repo.UpdateTaskSessionState(context.Background(), sessionID, models.TaskSessionStateFailed, err.Error()); updateErr != nil {
 				e.logger.Warn("failed to mark session as failed after start error",
-					zap.String("task_id", task.ID),
 					zap.String("session_id", sessionID),
 					zap.Error(updateErr))
 			}
 			return
 		}
 
-		// Agent started successfully - transition task from SCHEDULING to IN_PROGRESS
 		if updateErr := e.repo.UpdateTaskState(context.Background(), task.ID, v1.TaskStateInProgress); updateErr != nil {
 			e.logger.Warn("failed to update task state to IN_PROGRESS after agent start",
 				zap.String("task_id", task.ID),
 				zap.Error(updateErr))
-		} else {
-			e.logger.Debug("task transitioned to IN_PROGRESS after agent started",
-				zap.String("task_id", task.ID),
-				zap.String("session_id", sessionID))
 		}
 	}()
 
-	e.logger.Info("agent launched",
+	e.logger.Info("agent launched for prepared session",
 		zap.String("task_id", task.ID),
 		zap.String("session_id", sessionID),
-		zap.String("agent_execution_id", resp.AgentExecutionID),
-		zap.String("container_id", resp.ContainerID),
-		zap.String("worktree_path", resp.WorktreePath),
-		zap.String("worktree_branch", resp.WorktreeBranch))
+		zap.String("agent_execution_id", resp.AgentExecutionID))
 
 	return execution, nil
 }

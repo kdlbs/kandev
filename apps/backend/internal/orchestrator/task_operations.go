@@ -42,6 +42,100 @@ func (s *Service) EnqueueTask(ctx context.Context, task *v1.Task) error {
 	return s.scheduler.EnqueueTask(task)
 }
 
+// PrepareTaskSession creates a session entry without launching the agent.
+// This allows the HTTP handler to return the session ID immediately while the agent setup
+// continues in the background. Use StartTaskWithSession to continue with agent launch.
+func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentProfileID string, executorID string, workflowStepID string) (string, error) {
+	s.logger.Debug("preparing task session",
+		zap.String("task_id", taskID),
+		zap.String("agent_profile_id", agentProfileID),
+		zap.String("executor_id", executorID),
+		zap.String("workflow_step_id", workflowStepID))
+
+	// Fetch the task to get workspace info
+	task, err := s.scheduler.GetTask(ctx, taskID)
+	if err != nil {
+		s.logger.Error("failed to fetch task for session preparation",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return "", err
+	}
+
+	// Create session entry in database
+	sessionID, err := s.executor.PrepareSession(ctx, task, agentProfileID, executorID, workflowStepID)
+	if err != nil {
+		s.logger.Error("failed to prepare session",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return "", err
+	}
+
+	s.logger.Info("task session prepared",
+		zap.String("task_id", taskID),
+		zap.String("session_id", sessionID))
+
+	return sessionID, nil
+}
+
+// StartTaskWithSession starts agent execution for a task using a pre-created session.
+// This is used after PrepareTaskSession to continue with the agent launch.
+func (s *Service) StartTaskWithSession(ctx context.Context, taskID string, sessionID string, agentProfileID string, executorID string, priority int, prompt string, workflowStepID string) (*executor.TaskExecution, error) {
+	s.logger.Debug("starting task with existing session",
+		zap.String("task_id", taskID),
+		zap.String("session_id", sessionID),
+		zap.String("agent_profile_id", agentProfileID))
+
+	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateScheduling); err != nil {
+		s.logger.Warn("failed to update task state to SCHEDULING",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+	}
+
+	task, err := s.scheduler.GetTask(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+
+	if priority > 0 {
+		task.Priority = priority
+	}
+
+	effectivePrompt := prompt
+	if effectivePrompt == "" {
+		effectivePrompt = task.Description
+	}
+
+	// Apply workflow step configuration if provided
+	if workflowStepID != "" && s.workflowStepGetter != nil {
+		step, err := s.workflowStepGetter.GetStep(ctx, workflowStepID)
+		if err != nil {
+			s.logger.Warn("failed to get workflow step for prompt building",
+				zap.String("workflow_step_id", workflowStepID),
+				zap.Error(err))
+		} else {
+			effectivePrompt = s.buildWorkflowPrompt(effectivePrompt, step, task.ID)
+		}
+	}
+
+	execution, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, agentProfileID, executorID, effectivePrompt, workflowStepID)
+	if err != nil {
+		return nil, err
+	}
+
+	if execution.SessionID != "" {
+		s.updateTaskSessionState(ctx, taskID, execution.SessionID, models.TaskSessionStateRunning, "", true)
+		if s.messageCreator != nil && effectivePrompt != "" {
+			if err := s.messageCreator.CreateUserMessage(ctx, taskID, effectivePrompt, execution.SessionID, s.getActiveTurnID(execution.SessionID)); err != nil {
+				s.logger.Error("failed to create initial user message",
+					zap.String("task_id", taskID),
+					zap.Error(err))
+			}
+		}
+	}
+
+	return execution, nil
+}
+
 // StartTask manually starts agent execution for a task.
 // If workflowStepID is provided and workflowStepGetter is set, the prompt will be built
 // using the step's prompt_prefix + base prompt + prompt_suffix, and plan mode will be

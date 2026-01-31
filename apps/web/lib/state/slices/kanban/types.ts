@@ -12,6 +12,7 @@ export type KanbanState = {
     state?: TaskStatus;
     repositoryId?: string;
     primarySessionId?: string | null;
+    updatedAt?: string;
   }>;
   isLoading?: boolean;
 };
