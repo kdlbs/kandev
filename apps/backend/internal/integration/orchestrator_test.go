@@ -22,6 +22,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events"
@@ -485,17 +486,14 @@ func (a *testMessageCreatorAdapter) CreateUserMessage(ctx context.Context, taskI
 	return err
 }
 
-func (a *testMessageCreatorAdapter) CreateToolCallMessage(ctx context.Context, taskID, toolCallID, title, status, agentSessionID, turnID string, args map[string]interface{}) error {
+func (a *testMessageCreatorAdapter) CreateToolCallMessage(ctx context.Context, taskID, toolCallID, title, status, agentSessionID, turnID string, normalized *streams.NormalizedPayload) error {
 	metadata := map[string]interface{}{
 		"tool_call_id": toolCallID,
 		"title":        title,
 		"status":       status,
 	}
-	if len(args) > 0 {
-		metadata["args"] = args
-		if kind, ok := args["kind"].(string); ok && kind != "" {
-			metadata["tool_name"] = kind
-		}
+	if normalized != nil {
+		metadata["normalized"] = normalized
 	}
 	_, err := a.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
 		TaskSessionID: agentSessionID,
@@ -509,8 +507,8 @@ func (a *testMessageCreatorAdapter) CreateToolCallMessage(ctx context.Context, t
 	return err
 }
 
-func (a *testMessageCreatorAdapter) UpdateToolCallMessage(ctx context.Context, taskID, toolCallID, status, result, agentSessionID, title string, args map[string]interface{}) error {
-	return a.svc.UpdateToolCallMessage(ctx, agentSessionID, toolCallID, status, result, title, args)
+func (a *testMessageCreatorAdapter) UpdateToolCallMessage(ctx context.Context, taskID, toolCallID, status, result, agentSessionID, title string, normalized *streams.NormalizedPayload) error {
+	return a.svc.UpdateToolCallMessage(ctx, agentSessionID, toolCallID, status, result, title, normalized)
 }
 
 func (a *testMessageCreatorAdapter) CreateSessionMessage(ctx context.Context, taskID, content, agentSessionID, messageType, turnID string, metadata map[string]interface{}, requestsInput bool) error {
@@ -700,7 +698,8 @@ func NewOrchestratorTestServer(t *testing.T) *OrchestratorTestServer {
 	workflowCtrl := workflowcontroller.NewController(workflowSvc)
 	taskhandlers.RegisterWorkspaceRoutes(router, gateway.Dispatcher, workspaceController, log)
 	taskhandlers.RegisterBoardRoutes(router, gateway.Dispatcher, boardController, log)
-	taskhandlers.RegisterTaskRoutes(router, gateway.Dispatcher, taskController, nil, log)
+	planService := taskservice.NewPlanService(taskRepo, eventBus, log)
+	taskhandlers.RegisterTaskRoutes(router, gateway.Dispatcher, taskController, nil, taskRepo, planService, log)
 	taskhandlers.RegisterRepositoryRoutes(router, gateway.Dispatcher, repositoryController, log)
 	taskhandlers.RegisterExecutorRoutes(router, gateway.Dispatcher, executorController, log)
 	taskhandlers.RegisterEnvironmentRoutes(router, gateway.Dispatcher, environmentController, log)

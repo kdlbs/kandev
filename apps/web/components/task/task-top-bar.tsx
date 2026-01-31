@@ -4,6 +4,7 @@ import { memo, useState, useCallback } from 'react';
 import Link from 'next/link';
 import {
   IconArrowLeft,
+  IconBug,
   IconCopy,
   IconDots,
   IconGitBranch,
@@ -47,6 +48,7 @@ import { formatUserHomePath } from '@/lib/utils';
 import { EditorsMenu } from '@/components/task/editors-menu';
 import { useToast } from '@/components/toast-provider';
 import { PreviewControls } from '@/components/task/preview/preview-controls';
+import { DEBUG_UI } from '@/lib/config';
 
 type TaskTopBarProps = {
   taskId?: string | null;
@@ -63,6 +65,8 @@ type TaskTopBarProps = {
   repositoryPath?: string | null;
   repositoryName?: string | null;
   hasDevScript?: boolean;
+  showDebugOverlay?: boolean;
+  onToggleDebugOverlay?: () => void;
 };
 
 const TaskTopBar = memo(function TaskTopBar({
@@ -74,6 +78,8 @@ const TaskTopBar = memo(function TaskTopBar({
   repositoryPath,
   repositoryName,
   hasDevScript = false,
+  showDebugOverlay,
+  onToggleDebugOverlay,
 }: TaskTopBarProps) {
   const [copiedBranch, setCopiedBranch] = useState(false);
   const [popoverOpen, setPopoverOpen] = useState(false);
@@ -383,6 +389,23 @@ const TaskTopBar = memo(function TaskTopBar({
 
       </div>
       <div className="flex items-center gap-2">
+        {DEBUG_UI && onToggleDebugOverlay && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="sm"
+                variant={showDebugOverlay ? "default" : "outline"}
+                className="cursor-pointer px-2"
+                onClick={onToggleDebugOverlay}
+              >
+                <IconBug className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {showDebugOverlay ? 'Hide Debug Info' : 'Show Debug Info'}
+            </TooltipContent>
+          </Tooltip>
+        )}
         <PreviewControls activeSessionId={activeSessionId ?? null} hasDevScript={hasDevScript} />
         <EditorsMenu activeSessionId={activeSessionId ?? null} />
 

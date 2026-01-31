@@ -70,7 +70,6 @@ func (r *DockerRuntime) CreateInstance(ctx context.Context, req *RuntimeCreateRe
 		MainRepoGitDir: mainRepoGitDir,
 		Credentials:    req.Env, // Env contains credentials from the caller
 		McpServers:     req.McpServers,
-		BackendWsURL:   req.BackendWsURL,
 	}
 
 	// Use ContainerManager to launch container

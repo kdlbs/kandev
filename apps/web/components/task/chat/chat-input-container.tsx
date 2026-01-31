@@ -4,7 +4,6 @@ import { useRef, useCallback, useState, type KeyboardEvent as ReactKeyboardEvent
 import {
   IconArrowUp,
   IconBrain,
-  IconCheck,
   IconListCheck,
   IconLoader2,
   IconPlayerStopFilled,
@@ -43,8 +42,6 @@ type ChatInputContainerProps = {
   isStarting: boolean;
   isSending: boolean;
   onCancel: () => void;
-  showApproveButton?: boolean;
-  onApprove?: () => void;
   placeholder?: string;
   pendingClarification?: Message | null;
   onClarificationResolved?: () => void;
@@ -62,8 +59,6 @@ export function ChatInputContainer({
   isStarting,
   isSending,
   onCancel,
-  showApproveButton,
-  onApprove,
   placeholder,
   pendingClarification,
   onClarificationResolved,
@@ -234,24 +229,6 @@ export function ChatInputContainer({
           <TokenUsageDisplay sessionId={sessionId} />
 
           <ModelSelector sessionId={sessionId} />
-
-          {/* Approve button */}
-          {showApproveButton && onApprove && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  type="button"
-                  size="sm"
-                  className="h-7 cursor-pointer gap-1.5 px-3 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/25 hover:border-emerald-500/50"
-                  onClick={onApprove}
-                >
-                  <IconCheck className="h-3.5 w-3.5" />
-                  <span className="font-medium">Approve</span>
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Approve and move to next step</TooltipContent>
-            </Tooltip>
-          )}
 
           {/* Submit/Stop button */}
           <div className="ml-1">

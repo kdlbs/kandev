@@ -14,6 +14,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/lifecycle"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -1998,10 +1999,11 @@ func (s *Service) AppendThinkingContent(ctx context.Context, messageID, addition
 	return nil
 }
 
-// UpdateToolCallMessage updates a tool call message's status, and optionally title/args.
+// UpdateToolCallMessage updates a tool call message's status, optionally title and normalized data.
 // It includes retry logic to handle race conditions where the complete event
 // may arrive before the message has been created by the start event.
-func (s *Service) UpdateToolCallMessage(ctx context.Context, sessionID, toolCallID, status, result, title string, args map[string]interface{}) error {
+// The normalized parameter contains typed tool payload data that gets added to metadata.
+func (s *Service) UpdateToolCallMessage(ctx context.Context, sessionID, toolCallID, status, result, title string, normalized *streams.NormalizedPayload) error {
 	const maxRetries = 5
 	const retryDelay = 100 * time.Millisecond
 
@@ -2049,6 +2051,11 @@ func (s *Service) UpdateToolCallMessage(ctx context.Context, sessionID, toolCall
 		message.Metadata["result"] = result
 	}
 
+	// Add normalized tool data to metadata for frontend consumption
+	if normalized != nil {
+		message.Metadata["normalized"] = normalized
+	}
+
 	// Update title if provided and current title is just the tool name (not yet filled)
 	// This handles the case where the first event only had the tool name
 	if title != "" {
@@ -2056,14 +2063,6 @@ func (s *Service) UpdateToolCallMessage(ctx context.Context, sessionID, toolCall
 		if currentTitle == "" || currentTitle == message.Metadata["tool_name"] {
 			message.Content = title
 			message.Metadata["title"] = title
-		}
-	}
-
-	// Update args if provided and current args are empty
-	if len(args) > 0 {
-		currentArgs, _ := message.Metadata["args"].(map[string]interface{})
-		if len(currentArgs) == 0 {
-			message.Metadata["args"] = args
 		}
 	}
 

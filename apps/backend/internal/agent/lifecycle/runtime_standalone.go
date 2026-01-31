@@ -95,15 +95,19 @@ func (r *StandaloneRuntime) CreateInstance(ctx context.Context, req *RuntimeCrea
 
 	// Create instance via control API
 	// Agent command is NOT set - workspace access only. Agent is started explicitly via agentctl client.
+	agentType := ""
+	if req.AgentConfig != nil {
+		agentType = req.AgentConfig.ID
+	}
 	createReq := &agentctl.CreateInstanceRequest{
 		ID:            req.InstanceID,
 		WorkspacePath: req.WorkspacePath,
 		AgentCommand:  "", // Agent command set via Configure endpoint
 		Protocol:      req.Protocol,
+		AgentType:     agentType,
 		Env:           env,
 		AutoStart:     false,
 		McpServers:    mcpServers,
-		BackendWsURL:  req.BackendWsURL,
 		SessionID:     req.SessionID,
 	}
 

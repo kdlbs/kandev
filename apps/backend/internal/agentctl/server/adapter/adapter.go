@@ -1,11 +1,19 @@
 // Package adapter provides protocol adapters for different agent communication protocols.
 // This abstraction allows agentctl to work with agents using ACP, REST, MCP, or custom protocols.
+//
+// Architecture:
+//   - Transport layer (transport/*): Handles protocol-level communication (ACP, stream-json, codex, opencode)
+//   - Factory: Creates the appropriate transport adapter based on agent's protocol
+//
+// Agent configuration (commands, discovery, models) is handled by the agent/registry package
+// using agents.json as the source of truth. This package only handles protocol communication.
 package adapter
 
 import (
 	"context"
 	"io"
 
+	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
@@ -48,6 +56,13 @@ type StderrProvider interface {
 	GetRecentStderr() []string
 }
 
+// StderrProviderSetter is an optional interface implemented by adapters that can use
+// stderr output for error context. The process manager checks for this interface
+// and calls SetStderrProvider if available.
+type StderrProviderSetter interface {
+	SetStderrProvider(provider StderrProvider)
+}
+
 // AgentInfo contains information about the connected agent.
 type AgentInfo struct {
 	Name    string `json:"name"`
@@ -61,19 +76,25 @@ type AgentInfo struct {
 // Lifecycle:
 //  1. Create adapter with New*Adapter(cfg, logger)
 //  2. Call PrepareEnvironment() before starting the agent process
-//  3. Start the agent process and obtain stdin/stdout pipes
-//  4. Call Connect(stdin, stdout) to wire up communication
-//  5. Call Initialize() to establish protocol handshake
-//  6. Use NewSession/LoadSession/Prompt/Cancel for agent interactions
-//  7. Call Close() when done
+//  3. Call PrepareCommandArgs() to get extra command-line args
+//  4. Start the agent process and obtain stdin/stdout pipes
+//  5. Call Connect(stdin, stdout) to wire up communication
+//  6. Call Initialize() to establish protocol handshake
+//  7. Use NewSession/LoadSession/Prompt/Cancel for agent interactions
+//  8. Call Close() when done
 type AgentAdapter interface {
 	// PrepareEnvironment performs protocol-specific setup before the agent process starts.
-	// For Codex, this writes MCP servers to ~/.codex/config.toml.
 	// For ACP, this is a no-op (MCP servers are passed through the protocol).
 	// For OpenCode, this returns environment variables for server authentication.
 	// Must be called before the agent subprocess is started.
 	// Returns a map of environment variables to add to the subprocess environment.
 	PrepareEnvironment() (map[string]string, error)
+
+	// PrepareCommandArgs returns extra command-line arguments for the agent process.
+	// For Codex, this returns -c flags for MCP servers and sandbox config.
+	// For other protocols, this returns nil (no extra args needed).
+	// Must be called after PrepareEnvironment and before starting the subprocess.
+	PrepareCommandArgs() []string
 
 	// Connect wires up the stdin/stdout pipes from the running agent subprocess.
 	// Must be called after the subprocess is started and before Initialize.
@@ -157,6 +178,14 @@ type Config struct {
 	// McpServers is a list of MCP servers to configure for the agent
 	McpServers []McpServerConfig
 
+	// AgentID is the agent identifier from the registry (e.g., "auggie", "amp", "claude-code").
+	// Used for logging and debug capture. Adapters should use this instead of hardcoded names.
+	AgentID string
+
+	// AgentName is the human-readable agent name (e.g., "Auggie", "AMP", "Claude Code").
+	// Used for display purposes.
+	AgentName string
+
 	// For HTTP-based adapters (REST)
 	BaseURL    string            // Base URL of the agent's HTTP API
 	AuthHeader string            // Optional auth header name
@@ -165,4 +194,31 @@ type Config struct {
 
 	// Protocol-specific configuration
 	Extra map[string]string
+}
+
+// ToSharedConfig converts this Config to the shared.Config used by transport adapters.
+func (c *Config) ToSharedConfig() *shared.Config {
+	mcpServers := make([]shared.McpServerConfig, len(c.McpServers))
+	for i, srv := range c.McpServers {
+		mcpServers[i] = shared.McpServerConfig{
+			Name:    srv.Name,
+			URL:     srv.URL,
+			Type:    srv.Type,
+			Command: srv.Command,
+			Args:    srv.Args,
+		}
+	}
+	return &shared.Config{
+		WorkDir:        c.WorkDir,
+		AutoApprove:    c.AutoApprove,
+		ApprovalPolicy: c.ApprovalPolicy,
+		McpServers:     mcpServers,
+		AgentID:        c.AgentID,
+		AgentName:      c.AgentName,
+		BaseURL:        c.BaseURL,
+		AuthHeader:     c.AuthHeader,
+		AuthValue:      c.AuthValue,
+		Headers:        c.Headers,
+		Extra:          c.Extra,
+	}
 }

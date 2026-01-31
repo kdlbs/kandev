@@ -55,6 +55,10 @@ const (
 	ActionTaskDelete        = "task.delete"
 	ActionTaskMove          = "task.move"
 	ActionTaskState         = "task.state"
+	ActionTaskPlanCreate    = "task.plan.create"
+	ActionTaskPlanGet       = "task.plan.get"
+	ActionTaskPlanUpdate    = "task.plan.update"
+	ActionTaskPlanDelete    = "task.plan.delete"
 
 	ActionTaskSessionList   = "task.session.list"
 	ActionTaskSessionResume = "task.session.resume"
@@ -119,6 +123,9 @@ const (
 	ActionTaskUpdated             = "task.updated"
 	ActionTaskDeleted             = "task.deleted"
 	ActionTaskStateChanged        = "task.state_changed"
+	ActionTaskPlanCreated         = "task.plan.created"
+	ActionTaskPlanUpdated         = "task.plan.updated"
+	ActionTaskPlanDeleted         = "task.plan.deleted"
 	ActionAgentUpdated            = "agent.updated"
 	ActionAgentAvailableUpdated   = "agent.available.updated"
 	ActionWorkspaceCreated        = "workspace.created"
@@ -207,6 +214,10 @@ const (
 	ActionMCPCreateTask        = "mcp.create_task"
 	ActionMCPUpdateTask        = "mcp.update_task"
 	ActionMCPAskUserQuestion   = "mcp.ask_user_question"
+	ActionMCPCreateTaskPlan    = "mcp.create_task_plan"
+	ActionMCPGetTaskPlan       = "mcp.get_task_plan"
+	ActionMCPUpdateTaskPlan    = "mcp.update_task_plan"
+	ActionMCPDeleteTaskPlan    = "mcp.delete_task_plan"
 )
 
 // Error codes

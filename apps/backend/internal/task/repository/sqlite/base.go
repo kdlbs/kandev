@@ -209,6 +209,25 @@ func (r *Repository) initSchema() error {
 	if _, err := r.db.Exec(schema); err != nil {
 		return err
 	}
+
+	// Task plans table
+	plansSchema := `
+	CREATE TABLE IF NOT EXISTS task_plans (
+		id TEXT PRIMARY KEY,
+		task_id TEXT NOT NULL UNIQUE,
+		title TEXT NOT NULL DEFAULT 'Plan',
+		content TEXT NOT NULL DEFAULT '',
+		created_by TEXT NOT NULL DEFAULT 'agent',
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL,
+		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+	);
+	CREATE INDEX IF NOT EXISTS idx_task_plans_task_id ON task_plans(task_id);
+	`
+	if _, err := r.db.Exec(plansSchema); err != nil {
+		return err
+	}
+
 	// Session and message tables
 	sessionSchema := `
 	CREATE TABLE IF NOT EXISTS task_session_messages (

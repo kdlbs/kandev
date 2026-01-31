@@ -14,6 +14,7 @@ export const defaultSessionState: SessionSliceState = {
   sessionWorktreesBySessionId: { itemsBySessionId: {} },
   pendingModel: { bySessionId: {} },
   activeModel: { bySessionId: {} },
+  taskPlans: { byTaskId: {}, loadingByTaskId: {}, loadedByTaskId: {}, savingByTaskId: {} },
 };
 
 export const createSessionSlice: StateCreator<
@@ -206,5 +207,26 @@ export const createSessionSlice: StateCreator<
   setActiveModel: (sessionId, modelId) =>
     set((draft) => {
       draft.activeModel.bySessionId[sessionId] = modelId;
+    }),
+  setTaskPlan: (taskId, plan) =>
+    set((draft) => {
+      draft.taskPlans.byTaskId[taskId] = plan;
+      draft.taskPlans.loadingByTaskId[taskId] = false;
+      draft.taskPlans.loadedByTaskId[taskId] = true;
+    }),
+  setTaskPlanLoading: (taskId, loading) =>
+    set((draft) => {
+      draft.taskPlans.loadingByTaskId[taskId] = loading;
+    }),
+  setTaskPlanSaving: (taskId, saving) =>
+    set((draft) => {
+      draft.taskPlans.savingByTaskId[taskId] = saving;
+    }),
+  clearTaskPlan: (taskId) =>
+    set((draft) => {
+      delete draft.taskPlans.byTaskId[taskId];
+      delete draft.taskPlans.loadingByTaskId[taskId];
+      delete draft.taskPlans.loadedByTaskId[taskId];
+      delete draft.taskPlans.savingByTaskId[taskId];
     }),
 });

@@ -1,4 +1,4 @@
-import type { Message, TaskSession, Turn } from '@/lib/types/http';
+import type { Message, TaskSession, Turn, TaskPlan } from '@/lib/types/http';
 
 export type MessagesState = {
   bySession: Record<string, Message[]>;
@@ -62,6 +62,13 @@ export type ActiveModelState = {
   bySessionId: Record<string, string>;
 };
 
+export type TaskPlansState = {
+  byTaskId: Record<string, TaskPlan | null>;
+  loadingByTaskId: Record<string, boolean>;
+  loadedByTaskId: Record<string, boolean>;
+  savingByTaskId: Record<string, boolean>;
+};
+
 export type SessionSliceState = {
   messages: MessagesState;
   turns: TurnsState;
@@ -72,6 +79,7 @@ export type SessionSliceState = {
   sessionWorktreesBySessionId: SessionWorktreesState;
   pendingModel: PendingModelState;
   activeModel: ActiveModelState;
+  taskPlans: TaskPlansState;
 };
 
 export type SessionSliceActions = {
@@ -104,6 +112,11 @@ export type SessionSliceActions = {
   setPendingModel: (sessionId: string, modelId: string) => void;
   clearPendingModel: (sessionId: string) => void;
   setActiveModel: (sessionId: string, modelId: string) => void;
+  // Task plan actions
+  setTaskPlan: (taskId: string, plan: TaskPlan | null) => void;
+  setTaskPlanLoading: (taskId: string, loading: boolean) => void;
+  setTaskPlanSaving: (taskId: string, saving: boolean) => void;
+  clearTaskPlan: (taskId: string) => void;
 };
 
 export type SessionSlice = SessionSliceState & SessionSliceActions;

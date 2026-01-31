@@ -18,12 +18,16 @@ const (
 	ActionMCPCreateTask        = "mcp.create_task"
 	ActionMCPUpdateTask        = "mcp.update_task"
 	ActionMCPAskUserQuestion   = "mcp.ask_user_question"
+	ActionMCPCreateTaskPlan    = "mcp.create_task_plan"
+	ActionMCPGetTaskPlan       = "mcp.get_task_plan"
+	ActionMCPUpdateTaskPlan    = "mcp.update_task_plan"
+	ActionMCPDeleteTaskPlan    = "mcp.delete_task_plan"
 )
 
 func (s *Server) listWorkspacesHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		var result []map[string]interface{}
-		if err := s.wsClient.RequestPayload(ctx, ActionMCPListWorkspaces, nil, &result); err != nil {
+		if err := s.backend.RequestPayload(ctx, ActionMCPListWorkspaces, nil, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
@@ -39,7 +43,7 @@ func (s *Server) listBoardsHandler() server.ToolHandlerFunc {
 		}
 		payload := map[string]string{"workspace_id": workspaceID}
 		var result []map[string]interface{}
-		if err := s.wsClient.RequestPayload(ctx, ActionMCPListBoards, payload, &result); err != nil {
+		if err := s.backend.RequestPayload(ctx, ActionMCPListBoards, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
@@ -55,7 +59,7 @@ func (s *Server) listWorkflowStepsHandler() server.ToolHandlerFunc {
 		}
 		payload := map[string]string{"board_id": boardID}
 		var result []map[string]interface{}
-		if err := s.wsClient.RequestPayload(ctx, ActionMCPListWorkflowSteps, payload, &result); err != nil {
+		if err := s.backend.RequestPayload(ctx, ActionMCPListWorkflowSteps, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
@@ -71,7 +75,7 @@ func (s *Server) listTasksHandler() server.ToolHandlerFunc {
 		}
 		payload := map[string]string{"board_id": boardID}
 		var result []map[string]interface{}
-		if err := s.wsClient.RequestPayload(ctx, ActionMCPListTasks, payload, &result); err != nil {
+		if err := s.backend.RequestPayload(ctx, ActionMCPListTasks, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
@@ -107,7 +111,7 @@ func (s *Server) createTaskHandler() server.ToolHandlerFunc {
 			"description":      description,
 		}
 		var result map[string]interface{}
-		if err := s.wsClient.RequestPayload(ctx, ActionMCPCreateTask, payload, &result); err != nil {
+		if err := s.backend.RequestPayload(ctx, ActionMCPCreateTask, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
@@ -132,7 +136,7 @@ func (s *Server) updateTaskHandler() server.ToolHandlerFunc {
 			payload["state"] = state
 		}
 		var result map[string]interface{}
-		if err := s.wsClient.RequestPayload(ctx, ActionMCPUpdateTask, payload, &result); err != nil {
+		if err := s.backend.RequestPayload(ctx, ActionMCPUpdateTask, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
@@ -152,30 +156,38 @@ func (s *Server) askUserQuestionHandler() server.ToolHandlerFunc {
 			return mcp.NewToolResultError("options is required"), nil
 		}
 
-		// Parse options - can be array of strings or array of objects
+		// Parse options - must be array of objects with label and description
 		optionsJSON, err := json.Marshal(optionsRaw)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to parse options: %v", err)), nil
 		}
 
-		// Try to parse as array of strings first (simple format from agents)
-		var stringOptions []string
-		if err := json.Unmarshal(optionsJSON, &stringOptions); err == nil {
-			// Convert string options to the expected format
-			formattedOptions := make([]map[string]interface{}, len(stringOptions))
-			for i, opt := range stringOptions {
-				formattedOptions[i] = map[string]interface{}{
-					"option_id":   fmt.Sprintf("opt_%d", i+1),
-					"label":       opt,
-					"description": opt,
-				}
-			}
-			optionsJSON, _ = json.Marshal(formattedOptions)
-		}
-
 		var options []map[string]interface{}
 		if err := json.Unmarshal(optionsJSON, &options); err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to parse options: %v", err)), nil
+			return mcp.NewToolResultError("options must be an array of objects with 'label' and 'description' fields. Example: [{\"label\": \"Option A\", \"description\": \"Description of option A\"}]"), nil
+		}
+
+		// Validate options
+		if len(options) < 2 {
+			return mcp.NewToolResultError("options must contain at least 2 choices"), nil
+		}
+		if len(options) > 6 {
+			return mcp.NewToolResultError("options must contain at most 6 choices"), nil
+		}
+
+		for i, opt := range options {
+			label, hasLabel := opt["label"].(string)
+			if !hasLabel || label == "" {
+				return mcp.NewToolResultError(fmt.Sprintf("option %d is missing required 'label' field (1-5 words describing the choice)", i+1)), nil
+			}
+			description, hasDesc := opt["description"].(string)
+			if !hasDesc || description == "" {
+				return mcp.NewToolResultError(fmt.Sprintf("option %d is missing required 'description' field (explanation of what this option means)", i+1)), nil
+			}
+			// Generate option_id if not provided
+			if _, hasID := opt["option_id"].(string); !hasID {
+				opt["option_id"] = fmt.Sprintf("opt_%d", i+1)
+			}
 		}
 
 		questionCtx := req.GetString("context", "")
@@ -194,7 +206,7 @@ func (s *Server) askUserQuestionHandler() server.ToolHandlerFunc {
 			"context":    questionCtx,
 		}
 		var result map[string]interface{}
-		if err := s.wsClient.RequestPayload(ctx, ActionMCPAskUserQuestion, payload, &result); err != nil {
+		if err := s.backend.RequestPayload(ctx, ActionMCPAskUserQuestion, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 
@@ -216,6 +228,107 @@ func (s *Server) askUserQuestionHandler() server.ToolHandlerFunc {
 
 		data, _ := json.MarshalIndent(result, "", "  ")
 		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+func (s *Server) createTaskPlanHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		taskID, err := req.RequireString("task_id")
+		if err != nil {
+			return mcp.NewToolResultError("task_id is required"), nil
+		}
+		content, err := req.RequireString("content")
+		if err != nil {
+			return mcp.NewToolResultError("content is required"), nil
+		}
+		title := req.GetString("title", "Plan")
+
+		payload := map[string]interface{}{
+			"task_id":    taskID,
+			"content":    content,
+			"title":      title,
+			"created_by": "agent",
+		}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ActionMCPCreateTaskPlan, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(fmt.Sprintf("Plan created successfully:\n%s", string(data))), nil
+	}
+}
+
+func (s *Server) getTaskPlanHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		taskID, err := req.RequireString("task_id")
+		if err != nil {
+			return mcp.NewToolResultError("task_id is required"), nil
+		}
+
+		payload := map[string]string{"task_id": taskID}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ActionMCPGetTaskPlan, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		// Check if plan exists
+		if len(result) == 0 {
+			return mcp.NewToolResultText("No plan exists for this task yet."), nil
+		}
+
+		// Return the plan content for easy reading
+		if content, ok := result["content"].(string); ok {
+			return mcp.NewToolResultText(fmt.Sprintf("# Task Plan\n\n%s", content)), nil
+		}
+
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+func (s *Server) updateTaskPlanHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		taskID, err := req.RequireString("task_id")
+		if err != nil {
+			return mcp.NewToolResultError("task_id is required"), nil
+		}
+		content, err := req.RequireString("content")
+		if err != nil {
+			return mcp.NewToolResultError("content is required"), nil
+		}
+		title := req.GetString("title", "")
+
+		payload := map[string]interface{}{
+			"task_id":    taskID,
+			"content":    content,
+			"created_by": "agent",
+		}
+		if title != "" {
+			payload["title"] = title
+		}
+
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ActionMCPUpdateTaskPlan, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(fmt.Sprintf("Plan updated successfully:\n%s", string(data))), nil
+	}
+}
+
+func (s *Server) deleteTaskPlanHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		taskID, err := req.RequireString("task_id")
+		if err != nil {
+			return mcp.NewToolResultError("task_id is required"), nil
+		}
+
+		payload := map[string]string{"task_id": taskID}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ActionMCPDeleteTaskPlan, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return mcp.NewToolResultText("Plan deleted successfully."), nil
 	}
 }
 

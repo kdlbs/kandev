@@ -34,6 +34,13 @@ const (
 	TaskSessionStateChanged = "task_session.state_changed"
 )
 
+// Event types for task plans
+const (
+	TaskPlanCreated = "task_plan.created"
+	TaskPlanUpdated = "task_plan.updated"
+	TaskPlanDeleted = "task_plan.deleted"
+)
+
 // Event types for session turns
 const (
 	TurnStarted   = "turn.started"

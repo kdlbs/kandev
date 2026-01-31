@@ -1,7 +1,10 @@
-package adapter
+// Package acp implements the ACP (Agent Communication Protocol) transport adapter.
+// ACP uses JSON-RPC 2.0 over stdin/stdout for agent communication.
+package acp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -9,18 +12,42 @@ import (
 
 	"github.com/coder/acp-go-sdk"
 	acpclient "github.com/kandev/kandev/internal/agentctl/server/acp"
+	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/zap"
 )
 
-// ACPAdapter implements AgentAdapter for agents using the ACP protocol.
+// Re-export types needed by external packages
+type (
+	PermissionRequest  = types.PermissionRequest
+	PermissionResponse = types.PermissionResponse
+	PermissionOption   = streams.PermissionOption
+	PermissionHandler  = types.PermissionHandler
+	AgentEvent         = streams.AgentEvent
+	PlanEntry          = streams.PlanEntry
+)
+
+// AgentInfo contains information about the connected agent.
+type AgentInfo struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+}
+
+// Adapter implements the transport adapter for agents using the ACP protocol.
 // ACP (Agent Communication Protocol) uses JSON-RPC 2.0 over stdin/stdout.
 // The subprocess is managed externally (by process.Manager) and stdin/stdout
 // are connected via the Connect method after the process starts.
-type ACPAdapter struct {
-	cfg    *Config
+type Adapter struct {
+	cfg    *shared.Config
 	logger *logger.Logger
+
+	// Agent identity (from config, for logging)
+	agentID string
+
+	// Normalizer for converting tool data to NormalizedPayload
+	normalizer *Normalizer
 
 	// Subprocess stdin/stdout (set via Connect)
 	stdin  io.Writer
@@ -50,24 +77,33 @@ type ACPAdapter struct {
 	closed bool
 }
 
-// NewACPAdapter creates a new ACP protocol adapter.
+// NewAdapter creates a new ACP protocol adapter.
 // Call Connect() after starting the subprocess to wire up stdin/stdout.
-func NewACPAdapter(cfg *Config, log *logger.Logger) *ACPAdapter {
-	return &ACPAdapter{
-		cfg:       cfg,
-		logger:    log.WithFields(zap.String("adapter", "acp")),
-		updatesCh: make(chan AgentEvent, 100),
+// cfg.AgentID is required for debug file naming.
+func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
+	return &Adapter{
+		cfg:        cfg,
+		logger:     log.WithFields(zap.String("adapter", "acp"), zap.String("agent_id", cfg.AgentID)),
+		agentID:    cfg.AgentID,
+		normalizer: NewNormalizer(),
+		updatesCh:  make(chan AgentEvent, 100),
 	}
 }
 
 // PrepareEnvironment is a no-op for ACP.
 // ACP passes MCP servers through the protocol during session creation.
-func (a *ACPAdapter) PrepareEnvironment() (map[string]string, error) {
+func (a *Adapter) PrepareEnvironment() (map[string]string, error) {
 	return nil, nil
 }
 
+// PrepareCommandArgs returns extra command-line arguments for the agent process.
+// For ACP, no extra args are needed - MCP servers are passed through the protocol.
+func (a *Adapter) PrepareCommandArgs() []string {
+	return nil
+}
+
 // Connect wires up the stdin/stdout pipes from the running agent subprocess.
-func (a *ACPAdapter) Connect(stdin io.Writer, stdout io.Reader) error {
+func (a *Adapter) Connect(stdin io.Writer, stdout io.Reader) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -82,7 +118,7 @@ func (a *ACPAdapter) Connect(stdin io.Writer, stdout io.Reader) error {
 
 // Initialize establishes the ACP connection with the agent subprocess.
 // The subprocess should already be running (started by process.Manager).
-func (a *ACPAdapter) Initialize(ctx context.Context) error {
+func (a *Adapter) Initialize(ctx context.Context) error {
 	a.logger.Info("initializing ACP adapter",
 		zap.String("workdir", a.cfg.WorkDir))
 
@@ -129,12 +165,12 @@ func (a *ACPAdapter) Initialize(ctx context.Context) error {
 }
 
 // GetAgentInfo returns information about the connected agent.
-func (a *ACPAdapter) GetAgentInfo() *AgentInfo {
+func (a *Adapter) GetAgentInfo() *AgentInfo {
 	return a.agentInfo
 }
 
 // NewSession creates a new agent session.
-func (a *ACPAdapter) NewSession(ctx context.Context, mcpServers []types.McpServer) (string, error) {
+func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) (string, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -187,7 +223,7 @@ func toACPMcpServers(servers []types.McpServer) []acp.McpServer {
 
 // LoadSession resumes an existing session.
 // Returns an error if the agent does not support session loading (LoadSession capability).
-func (a *ACPAdapter) LoadSession(ctx context.Context, sessionID string) error {
+func (a *Adapter) LoadSession(ctx context.Context, sessionID string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -215,7 +251,7 @@ func (a *ACPAdapter) LoadSession(ctx context.Context, sessionID string) error {
 
 // Prompt sends a prompt to the agent.
 // If pending context is set (from SetPendingContext), it will be prepended to the message.
-func (a *ACPAdapter) Prompt(ctx context.Context, message string) error {
+func (a *Adapter) Prompt(ctx context.Context, message string) error {
 	a.mu.Lock()
 	conn := a.acpConn
 	sessionID := a.sessionID
@@ -248,14 +284,14 @@ func (a *ACPAdapter) Prompt(ctx context.Context, message string) error {
 // SetPendingContext sets the context to be injected into the next prompt.
 // This is used by the fork_session pattern for ACP agents that don't support session/load.
 // The context will be prepended to the first prompt sent to this session.
-func (a *ACPAdapter) SetPendingContext(context string) {
+func (a *Adapter) SetPendingContext(context string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.pendingContext = context
 }
 
 // Cancel cancels the current operation.
-func (a *ACPAdapter) Cancel(ctx context.Context) error {
+func (a *Adapter) Cancel(ctx context.Context) error {
 	a.mu.RLock()
 	conn := a.acpConn
 	sessionID := a.sessionID
@@ -273,12 +309,12 @@ func (a *ACPAdapter) Cancel(ctx context.Context) error {
 }
 
 // Updates returns the channel for agent events.
-func (a *ACPAdapter) Updates() <-chan AgentEvent {
+func (a *Adapter) Updates() <-chan AgentEvent {
 	return a.updatesCh
 }
 
 // GetSessionID returns the current session ID.
-func (a *ACPAdapter) GetSessionID() string {
+func (a *Adapter) GetSessionID() string {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	return a.sessionID
@@ -286,20 +322,20 @@ func (a *ACPAdapter) GetSessionID() string {
 
 // GetOperationID returns the current operation/turn ID.
 // ACP protocol doesn't have explicit turn/operation IDs, so this returns empty string.
-func (a *ACPAdapter) GetOperationID() string {
+func (a *Adapter) GetOperationID() string {
 	// ACP doesn't have explicit operation/turn IDs
 	return ""
 }
 
 // SetPermissionHandler sets the handler for permission requests.
-func (a *ACPAdapter) SetPermissionHandler(handler PermissionHandler) {
+func (a *Adapter) SetPermissionHandler(handler PermissionHandler) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.permissionHandler = handler
 }
 
 // Close releases resources held by the adapter.
-func (a *ACPAdapter) Close() error {
+func (a *Adapter) Close() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -320,21 +356,27 @@ func (a *ACPAdapter) Close() error {
 }
 
 // RequiresProcessKill returns false because ACP agents exit when stdin is closed.
-func (a *ACPAdapter) RequiresProcessKill() bool {
+func (a *Adapter) RequiresProcessKill() bool {
 	return false
 }
 
 // GetACPConnection returns the underlying ACP connection for advanced usage.
-func (a *ACPAdapter) GetACPConnection() *acp.ClientSideConnection {
+func (a *Adapter) GetACPConnection() *acp.ClientSideConnection {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	return a.acpConn
 }
 
 // handleACPUpdate converts ACP SessionNotification to protocol-agnostic AgentEvent.
-func (a *ACPAdapter) handleACPUpdate(n acp.SessionNotification) {
+func (a *Adapter) handleACPUpdate(n acp.SessionNotification) {
+	// Log raw event for debugging
+	if rawData, err := json.Marshal(n); err == nil {
+		shared.LogRawEvent(shared.ProtocolACP, a.agentID, "session_notification", rawData)
+	}
+
 	event := a.convertNotification(n)
 	if event != nil {
+		shared.LogNormalizedEvent(shared.ProtocolACP, a.agentID, event)
 		select {
 		case a.updatesCh <- *event:
 		default:
@@ -344,16 +386,17 @@ func (a *ACPAdapter) handleACPUpdate(n acp.SessionNotification) {
 }
 
 // convertNotification converts an ACP SessionNotification to an AgentEvent.
-func (a *ACPAdapter) convertNotification(n acp.SessionNotification) *AgentEvent {
+func (a *Adapter) convertNotification(n acp.SessionNotification) *AgentEvent {
 	u := n.Update
 
 	switch {
 	case u.AgentMessageChunk != nil:
 		if u.AgentMessageChunk.Content.Text != nil {
+			text := u.AgentMessageChunk.Content.Text.Text
 			return &AgentEvent{
-				Type:      EventTypeMessageChunk,
+				Type:      streams.EventTypeMessageChunk,
 				SessionID: string(n.SessionId),
-				Text:      u.AgentMessageChunk.Content.Text.Text,
+				Text:      text,
 			}
 		}
 
@@ -361,16 +404,17 @@ func (a *ACPAdapter) convertNotification(n acp.SessionNotification) *AgentEvent 
 		// Agent thinking/reasoning - map to the reasoning type
 		// Note: Only models with extended thinking (e.g., Opus 4.5) send agent_thought_chunk
 		if u.AgentThoughtChunk.Content.Text != nil {
+			text := u.AgentThoughtChunk.Content.Text.Text
 			return &AgentEvent{
-				Type:          EventTypeReasoning,
+				Type:          streams.EventTypeReasoning,
 				SessionID:     string(n.SessionId),
-				ReasoningText: u.AgentThoughtChunk.Content.Text.Text,
+				ReasoningText: text,
 			}
 		}
 
 	case u.ToolCall != nil:
 		// Extract rich tool call information
-		args := map[string]interface{}{}
+		args := map[string]any{}
 
 		// Add tool kind
 		if u.ToolCall.Kind != "" {
@@ -379,9 +423,9 @@ func (a *ACPAdapter) convertNotification(n acp.SessionNotification) *AgentEvent 
 
 		// Add locations (file paths with line numbers)
 		if len(u.ToolCall.Locations) > 0 {
-			locations := make([]map[string]interface{}, len(u.ToolCall.Locations))
+			locations := make([]map[string]any, len(u.ToolCall.Locations))
 			for i, loc := range u.ToolCall.Locations {
-				locMap := map[string]interface{}{"path": loc.Path}
+				locMap := map[string]any{"path": loc.Path}
 				if loc.Line != nil {
 					locMap["line"] = *loc.Line
 				}
@@ -398,6 +442,14 @@ func (a *ACPAdapter) convertNotification(n acp.SessionNotification) *AgentEvent 
 			args["raw_input"] = u.ToolCall.RawInput
 		}
 
+		// Generate normalized payload using the normalizer
+		toolKind := string(u.ToolCall.Kind)
+		normalizedPayload := a.normalizer.NormalizeToolCall(toolKind, args)
+
+		// Detect tool type for logging
+		toolType := DetectToolOperationType(toolKind, args)
+		_ = toolType // Used for normalization
+
 		// Normalize status - if empty, default to "running" for tool_call start
 		status := string(u.ToolCall.Status)
 		if status == "" {
@@ -405,13 +457,13 @@ func (a *ACPAdapter) convertNotification(n acp.SessionNotification) *AgentEvent 
 		}
 
 		return &AgentEvent{
-			Type:       EventTypeToolCall,
-			SessionID:  string(n.SessionId),
-			ToolCallID: string(u.ToolCall.ToolCallId),
-			ToolName:   string(u.ToolCall.Kind), // Kind is effectively the tool name
-			ToolTitle:  u.ToolCall.Title,
-			ToolStatus: status,
-			ToolArgs:   args,
+			Type:              streams.EventTypeToolCall,
+			SessionID:         string(n.SessionId),
+			ToolCallID:        string(u.ToolCall.ToolCallId),
+			ToolName:          string(u.ToolCall.Kind), // Kind is effectively the tool name
+			ToolTitle:         u.ToolCall.Title,
+			ToolStatus:        status,
+			NormalizedPayload: normalizedPayload,
 		}
 
 	case u.ToolCallUpdate != nil:
@@ -419,12 +471,12 @@ func (a *ACPAdapter) convertNotification(n acp.SessionNotification) *AgentEvent 
 		if u.ToolCallUpdate.Status != nil {
 			status = string(*u.ToolCallUpdate.Status)
 		}
-		// Normalize status - "completed" → "complete" for frontend consistency
+		// Normalize status - "completed" -> "complete" for frontend consistency
 		if status == "completed" {
 			status = "complete"
 		}
 		return &AgentEvent{
-			Type:       EventTypeToolUpdate,
+			Type:       streams.EventTypeToolUpdate,
 			SessionID:  string(n.SessionId),
 			ToolCallID: string(u.ToolCallUpdate.ToolCallId),
 			ToolStatus: status,
@@ -440,7 +492,7 @@ func (a *ACPAdapter) convertNotification(n acp.SessionNotification) *AgentEvent 
 			}
 		}
 		return &AgentEvent{
-			Type:        EventTypePlan,
+			Type:        streams.EventTypePlan,
 			SessionID:   string(n.SessionId),
 			PlanEntries: entries,
 		}
@@ -452,7 +504,7 @@ func (a *ACPAdapter) convertNotification(n acp.SessionNotification) *AgentEvent 
 // handlePermissionRequest handles permission requests from the agent.
 // Since both acpclient and adapter now use the shared types package,
 // no conversion is needed - we just forward to the handler.
-func (a *ACPAdapter) handlePermissionRequest(ctx context.Context, req *PermissionRequest) (*PermissionResponse, error) {
+func (a *Adapter) handlePermissionRequest(ctx context.Context, req *PermissionRequest) (*PermissionResponse, error) {
 	a.mu.RLock()
 	handler := a.permissionHandler
 	sessionID := a.sessionID
@@ -462,23 +514,12 @@ func (a *ACPAdapter) handlePermissionRequest(ctx context.Context, req *Permissio
 	// This is needed because permission requests bypass the normal ToolCall notification flow.
 	// Without this, when the tool completes (ToolCallUpdate), there's no message to update.
 	toolCallEvent := AgentEvent{
-		Type:       EventTypeToolCall,
+		Type:       streams.EventTypeToolCall,
 		SessionID:  sessionID,
 		ToolCallID: req.ToolCallID,
 		ToolName:   req.ActionType, // Use action type as tool name (e.g., "run_shell_command")
 		ToolTitle:  req.Title,
 		ToolStatus: "pending_permission", // Mark as pending permission
-		ToolArgs: map[string]interface{}{
-			"permission_request": true,
-			"action_type":        req.ActionType,
-		},
-	}
-
-	// Add action details if available
-	if req.ActionDetails != nil {
-		for k, v := range req.ActionDetails {
-			toolCallEvent.ToolArgs[k] = v
-		}
 	}
 
 	// Emit the tool_call event
@@ -501,6 +542,3 @@ func (a *ACPAdapter) handlePermissionRequest(ctx context.Context, req *Permissio
 	// Forward directly to handler - types are already compatible
 	return handler(ctx, req)
 }
-
-// Verify interface implementation
-var _ AgentAdapter = (*ACPAdapter)(nil)

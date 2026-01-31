@@ -6,26 +6,16 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	"github.com/kandev/kandev/internal/clarification"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/controller"
 	"github.com/kandev/kandev/internal/task/dto"
-	"github.com/kandev/kandev/internal/task/repository"
+	"github.com/kandev/kandev/internal/task/service"
 	workflowctrl "github.com/kandev/kandev/internal/workflow/controller"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
-)
-
-// Action constants for MCP WebSocket messages
-const (
-	ActionMCPListWorkspaces    = "mcp.list_workspaces"
-	ActionMCPListBoards        = "mcp.list_boards"
-	ActionMCPListWorkflowSteps = "mcp.list_workflow_steps"
-	ActionMCPListTasks         = "mcp.list_tasks"
-	ActionMCPCreateTask        = "mcp.create_task"
-	ActionMCPUpdateTask        = "mcp.update_task"
-	ActionMCPAskUserQuestion   = "mcp.ask_user_question"
 )
 
 // ClarificationService defines the interface for clarification operations.
@@ -47,7 +37,7 @@ type Handlers struct {
 	workflowCtrl     *workflowctrl.Controller
 	clarificationSvc ClarificationService
 	messageCreator   MessageCreator
-	repo             repository.Repository
+	planService      *service.PlanService
 	logger           *logger.Logger
 }
 
@@ -59,7 +49,7 @@ func NewHandlers(
 	workflowCtrl *workflowctrl.Controller,
 	clarificationSvc ClarificationService,
 	messageCreator MessageCreator,
-	repo repository.Repository,
+	planService *service.PlanService,
 	log *logger.Logger,
 ) *Handlers {
 	return &Handlers{
@@ -69,22 +59,26 @@ func NewHandlers(
 		workflowCtrl:     workflowCtrl,
 		clarificationSvc: clarificationSvc,
 		messageCreator:   messageCreator,
-		repo:             repo,
+		planService:      planService,
 		logger:           log.WithFields(zap.String("component", "mcp-handlers")),
 	}
 }
 
 // RegisterHandlers registers all MCP handlers with the dispatcher.
 func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
-	d.RegisterFunc(ActionMCPListWorkspaces, h.handleListWorkspaces)
-	d.RegisterFunc(ActionMCPListBoards, h.handleListBoards)
-	d.RegisterFunc(ActionMCPListWorkflowSteps, h.handleListWorkflowSteps)
-	d.RegisterFunc(ActionMCPListTasks, h.handleListTasks)
-	d.RegisterFunc(ActionMCPCreateTask, h.handleCreateTask)
-	d.RegisterFunc(ActionMCPUpdateTask, h.handleUpdateTask)
-	d.RegisterFunc(ActionMCPAskUserQuestion, h.handleAskUserQuestion)
+	d.RegisterFunc(ws.ActionMCPListWorkspaces, h.handleListWorkspaces)
+	d.RegisterFunc(ws.ActionMCPListBoards, h.handleListBoards)
+	d.RegisterFunc(ws.ActionMCPListWorkflowSteps, h.handleListWorkflowSteps)
+	d.RegisterFunc(ws.ActionMCPListTasks, h.handleListTasks)
+	d.RegisterFunc(ws.ActionMCPCreateTask, h.handleCreateTask)
+	d.RegisterFunc(ws.ActionMCPUpdateTask, h.handleUpdateTask)
+	d.RegisterFunc(ws.ActionMCPAskUserQuestion, h.handleAskUserQuestion)
+	d.RegisterFunc(ws.ActionMCPCreateTaskPlan, h.handleCreateTaskPlan)
+	d.RegisterFunc(ws.ActionMCPGetTaskPlan, h.handleGetTaskPlan)
+	d.RegisterFunc(ws.ActionMCPUpdateTaskPlan, h.handleUpdateTaskPlan)
+	d.RegisterFunc(ws.ActionMCPDeleteTaskPlan, h.handleDeleteTaskPlan)
 
-	h.logger.Info("registered MCP handlers", zap.Int("count", 7))
+	h.logger.Info("registered MCP handlers", zap.Int("count", 11))
 }
 
 // handleListWorkspaces lists all workspaces.
@@ -237,18 +231,8 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 		}
 	}
 
-	// Look up task ID from session if not provided
+	// Use provided task ID (session -> task lookup is done by caller)
 	taskID := req.TaskID
-	if taskID == "" && h.repo != nil {
-		session, err := h.repo.GetTaskSession(ctx, req.SessionID)
-		if err != nil {
-			h.logger.Warn("failed to look up session for task ID",
-				zap.String("session_id", req.SessionID),
-				zap.Error(err))
-		} else {
-			taskID = session.TaskID
-		}
-	}
 
 	// Create the clarification request
 	clarificationReq := &clarification.Request{
@@ -294,3 +278,124 @@ func generateOptionID(questionIndex, optionIndex int) string {
 	return "q" + string(rune('1'+questionIndex)) + "_opt" + string(rune('1'+optionIndex))
 }
 
+// handleCreateTaskPlan creates a new task plan.
+func (h *Handlers) handleCreateTaskPlan(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req struct {
+		TaskID    string `json:"task_id"`
+		Title     string `json:"title"`
+		Content   string `json:"content"`
+		CreatedBy string `json:"created_by"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.Content == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "content is required", nil)
+	}
+
+	createdBy := req.CreatedBy
+	if createdBy == "" {
+		createdBy = "agent"
+	}
+
+	plan, err := h.planService.CreatePlan(ctx, service.CreatePlanRequest{
+		TaskID:    req.TaskID,
+		Title:     req.Title,
+		Content:   req.Content,
+		CreatedBy: createdBy,
+	})
+	if err != nil {
+		if errors.Is(err, service.ErrTaskIDRequired) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+		}
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create task plan: "+err.Error(), nil)
+	}
+
+	return ws.NewResponse(msg.ID, msg.Action, dto.TaskPlanFromModel(plan))
+}
+
+// handleGetTaskPlan retrieves a task plan.
+func (h *Handlers) handleGetTaskPlan(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req struct {
+		TaskID string `json:"task_id"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+
+	plan, err := h.planService.GetPlan(ctx, req.TaskID)
+	if err != nil {
+		if errors.Is(err, service.ErrTaskIDRequired) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+		}
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get task plan", nil)
+	}
+	if plan == nil {
+		// Return empty object if no plan exists
+		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{})
+	}
+
+	return ws.NewResponse(msg.ID, msg.Action, dto.TaskPlanFromModel(plan))
+}
+
+// handleUpdateTaskPlan updates an existing task plan.
+func (h *Handlers) handleUpdateTaskPlan(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req struct {
+		TaskID    string `json:"task_id"`
+		Title     string `json:"title"`
+		Content   string `json:"content"`
+		CreatedBy string `json:"created_by"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.Content == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "content is required", nil)
+	}
+
+	createdBy := req.CreatedBy
+	if createdBy == "" {
+		createdBy = "agent"
+	}
+
+	plan, err := h.planService.UpdatePlan(ctx, service.UpdatePlanRequest{
+		TaskID:    req.TaskID,
+		Title:     req.Title,
+		Content:   req.Content,
+		CreatedBy: createdBy,
+	})
+	if err != nil {
+		if errors.Is(err, service.ErrTaskIDRequired) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+		}
+		if errors.Is(err, service.ErrTaskPlanNotFound) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Task plan not found", nil)
+		}
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update task plan: "+err.Error(), nil)
+	}
+
+	return ws.NewResponse(msg.ID, msg.Action, dto.TaskPlanFromModel(plan))
+}
+
+// handleDeleteTaskPlan deletes a task plan.
+func (h *Handlers) handleDeleteTaskPlan(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req struct {
+		TaskID string `json:"task_id"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+
+	err := h.planService.DeletePlan(ctx, req.TaskID)
+	if err != nil {
+		if errors.Is(err, service.ErrTaskIDRequired) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+		}
+		if errors.Is(err, service.ErrTaskPlanNotFound) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Task plan not found", nil)
+		}
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to delete task plan: "+err.Error(), nil)
+	}
+
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"success": true})
+}

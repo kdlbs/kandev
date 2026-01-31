@@ -64,6 +64,10 @@ type CreateRequest struct {
 	// Protocol is the protocol adapter to use (acp, codex, auggie). If empty, default is used.
 	Protocol string `json:"protocol,omitempty"`
 
+	// AgentType identifies the agent (e.g., "auggie", "codex", "claude-code").
+	// Required for debug file naming. Typically matches the agent ID from the registry.
+	AgentType string `json:"agent_type,omitempty"`
+
 	// WorkspaceFlag is the CLI flag for workspace path (e.g., "--workspace-root").
 	// If empty, only cwd is used for workspace path.
 	WorkspaceFlag string `json:"workspace_flag,omitempty"`
@@ -76,10 +80,6 @@ type CreateRequest struct {
 
 	// McpServers is a list of MCP servers to configure for the agent.
 	McpServers []McpServerConfig `json:"mcp_servers,omitempty"`
-
-	// BackendWsURL is the WebSocket URL to the Kandev backend for MCP tunneling.
-	// If set, the MCP server will be enabled and forward tool calls to the backend.
-	BackendWsURL string `json:"backend_ws_url,omitempty"`
 
 	// SessionID is the task session ID for MCP tool calls (used by ask_user_question).
 	SessionID string `json:"session_id,omitempty"`

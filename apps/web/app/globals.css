@@ -440,3 +440,175 @@
 .task-chat-editor .cm-content ::selection {
   background: color-mix(in oklab, var(--primary) 30%, var(--background));
 }
+
+/* Milkdown Editor Styles */
+.milkdown-wrapper {
+  height: 100%;
+  overflow: auto;
+  background: #000000; /* Black background like chat */
+  border-radius: 0.5rem; /* rounded-lg like chat */
+}
+
+.milkdown-wrapper:not(.dark) {
+  background: #ffffff; /* White background for light mode */
+}
+
+.milkdown-wrapper .milkdown {
+  height: 100%;
+  background: transparent;
+}
+
+.milkdown-wrapper .editor {
+  padding: 0.75rem;
+  min-height: 100%;
+  outline: none;
+  background: transparent;
+}
+
+.milkdown-wrapper .editor:focus {
+  outline: none;
+}
+
+/* Override nord theme colors to match app theme */
+.milkdown-wrapper .milkdown {
+  --nord-background: transparent;
+  --nord-foreground: var(--foreground);
+  --nord-outline: var(--border);
+  --nord-primary: var(--primary);
+  --nord-secondary: var(--muted);
+  --nord-neutral: var(--muted-foreground);
+  --nord-solid: var(--card);
+  --nord-line: var(--border);
+  --nord-surface: var(--muted);
+  --nord-shadow: var(--border);
+}
+
+/* Base text styling - match chat text-xs */
+.milkdown-wrapper .editor,
+.milkdown-wrapper .editor * {
+  font-size: 0.75rem !important;
+  line-height: 1.625;
+  color: var(--foreground);
+}
+
+/* Typography - headings */
+.milkdown-wrapper .editor h1,
+.milkdown-wrapper .editor h2,
+.milkdown-wrapper .editor h3,
+.milkdown-wrapper .editor h4,
+.milkdown-wrapper .editor h5,
+.milkdown-wrapper .editor h6 {
+  font-weight: 700 !important;
+  color: var(--foreground) !important;
+  margin-top: 0.5rem !important;
+  margin-bottom: 0.25rem !important;
+  line-height: 1.3 !important;
+}
+
+.milkdown-wrapper .editor h1 { font-size: 0.875rem !important; }
+.milkdown-wrapper .editor h2 { font-size: 0.8125rem !important; }
+.milkdown-wrapper .editor h3 { font-size: 0.75rem !important; }
+
+/* Paragraphs */
+.milkdown-wrapper .editor p {
+  margin-top: 0.5rem !important;
+  margin-bottom: 0.5rem !important;
+  line-height: 1.625 !important;
+  font-size: 0.75rem !important;
+}
+
+/* Lists */
+.milkdown-wrapper .editor ul {
+  list-style-type: disc !important;
+  padding-left: 1.25rem !important;
+  margin-top: 0.375rem !important;
+  margin-bottom: 0.375rem !important;
+  font-size: 0.75rem !important;
+}
+
+.milkdown-wrapper .editor ol {
+  list-style-type: decimal !important;
+  padding-left: 1.25rem !important;
+  margin-top: 0.375rem !important;
+  margin-bottom: 0.375rem !important;
+  font-size: 0.75rem !important;
+}
+
+.milkdown-wrapper .editor li {
+  margin-top: 0.125rem !important;
+  margin-bottom: 0.125rem !important;
+  font-size: 0.75rem !important;
+  line-height: 1.5 !important;
+}
+
+/* Inline code - matching chat InlineCode component */
+.milkdown-wrapper .editor code {
+  background: rgb(59 130 246 / 0.2) !important;
+  color: rgb(96 165 250) !important;
+  padding: 0.125rem 0.375rem !important;
+  border-radius: 0.25rem !important;
+  font-size: 0.675rem !important;
+  font-family: var(--font-mono) !important;
+}
+
+/* Code blocks */
+.milkdown-wrapper .editor pre {
+  background: #000000 !important;
+  padding: 0.5rem 0.75rem !important;
+  border-radius: 0.375rem !important;
+  overflow-x: auto !important;
+  margin-top: 0.5rem !important;
+  margin-bottom: 0.5rem !important;
+}
+
+.milkdown-wrapper:not(.dark) .editor pre {
+  background: #f5f5f5 !important;
+}
+
+.milkdown-wrapper .editor pre code {
+  background: transparent !important;
+  color: #d4d4d4 !important;
+  padding: 0 !important;
+  font-size: 0.625rem !important;
+  font-family: var(--font-mono) !important;
+}
+
+.milkdown-wrapper:not(.dark) .editor pre code {
+  color: #1e1e1e !important;
+}
+
+/* Blockquote */
+.milkdown-wrapper .editor blockquote {
+  border-left: 3px solid var(--primary) !important;
+  padding-left: 0.75rem !important;
+  margin-left: 0 !important;
+  margin-top: 0.5rem !important;
+  margin-bottom: 0.5rem !important;
+  color: var(--muted-foreground) !important;
+  font-style: italic !important;
+}
+
+/* Links */
+.milkdown-wrapper .editor a {
+  color: var(--primary) !important;
+  text-decoration: underline !important;
+  text-underline-offset: 2px !important;
+}
+
+/* Strong/Bold */
+.milkdown-wrapper .editor strong {
+  font-weight: 700;
+  color: var(--foreground);
+}
+
+/* Emphasis */
+.milkdown-wrapper .editor em {
+  font-style: italic;
+}
+
+/* Horizontal rule */
+.milkdown-wrapper .editor hr {
+  border: none !important;
+  border-top: 1px solid var(--border) !important;
+  margin: 1rem 0 !important;
+}

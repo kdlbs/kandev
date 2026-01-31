@@ -30,7 +30,6 @@ type ContainerConfig struct {
 	InstanceID      string
 	MainRepoGitDir  string // Path to main repo's .git directory (for worktrees)
 	McpServers      []McpServerConfig
-	BackendWsURL    string // WebSocket URL to Kandev backend for MCP tunneling
 }
 
 // ContainerManager handles Docker container lifecycle operations
@@ -103,14 +102,18 @@ func (cm *ContainerManager) LaunchContainer(ctx context.Context, config Containe
 	}
 
 	// Create an instance via the control API (same flow as standalone mode)
+	agentType := ""
+	if config.AgentConfig != nil {
+		agentType = config.AgentConfig.ID
+	}
 	createReq := &agentctl.CreateInstanceRequest{
 		ID:            config.InstanceID,
 		WorkspacePath: "/workspace",
 		AgentCommand:  "", // Agent command set via Configure endpoint later
+		AgentType:     agentType,
 		Env:           config.Credentials,
 		AutoStart:     false,
 		McpServers:    mcpServers,
-		BackendWsURL:  config.BackendWsURL,
 		SessionID:     config.SessionID,
 	}
 

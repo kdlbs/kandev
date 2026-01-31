@@ -98,6 +98,12 @@ const (
 	MessageTypeContent MessageType = "content"
 	// MessageTypeToolCall is when agent uses a tool
 	MessageTypeToolCall MessageType = "tool_call"
+	// MessageTypeToolEdit is for file edit operations with diff visualization
+	MessageTypeToolEdit MessageType = "tool_edit"
+	// MessageTypeToolRead is for file read operations
+	MessageTypeToolRead MessageType = "tool_read"
+	// MessageTypeToolExecute is for command execution operations
+	MessageTypeToolExecute MessageType = "tool_execute"
 	// MessageTypeProgress is for progress updates
 	MessageTypeProgress MessageType = "progress"
 	// MessageTypeLog is for agent log messages (info, debug, warning, etc.)
@@ -404,6 +410,17 @@ type Environment struct {
 	CreatedAt    time.Time         `json:"created_at"`
 	UpdatedAt    time.Time         `json:"updated_at"`
 	DeletedAt    *time.Time        `json:"deleted_at,omitempty"`
+}
+
+// TaskPlan represents a plan associated with a task
+type TaskPlan struct {
+	ID        string    `json:"id"`
+	TaskID    string    `json:"task_id"`
+	Title     string    `json:"title"`
+	Content   string    `json:"content"`
+	CreatedBy string    `json:"created_by"` // "agent" or "user"
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // ToAPI converts internal Task to API type

@@ -6,12 +6,15 @@ import { Textarea } from '@kandev/ui/textarea';
 import { SessionPanel } from '@kandev/ui/pannel-session';
 import { TaskChatPanel } from './task-chat-panel';
 import { TaskChangesPanel } from './task-changes-panel';
+import { TaskPlanPanel } from './task-plan-panel';
 import { FileViewerContent } from './file-viewer-content';
 import { PassthroughTerminal } from './passthrough-terminal';
 import type { OpenFileTab } from '@/lib/types/backend';
 import { FILE_EXTENSION_COLORS } from '@/lib/types/backend';
 import { useAppStore } from '@/components/state-provider';
 import { SessionTabs, type SessionTab } from '@/components/session-tabs';
+import { approveSessionAction } from '@/app/actions/workspaces';
+import { getWebSocketClient } from '@/lib/ws/connection';
 
 import type { SelectedDiff } from './task-layout';
 
@@ -35,6 +38,10 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
   const activeSession = useAppStore((state) =>
     activeSessionId ? state.taskSessions.items[activeSessionId] ?? null : null
   );
+  const setTaskSession = useAppStore((state) => state.setTaskSession);
+
+  // Check if agent is currently working
+  const isAgentWorking = activeSession?.state === 'STARTING' || activeSession?.state === 'RUNNING';
 
   // Check if session is in passthrough mode by looking at the profile snapshot
   const isPassthroughMode = useMemo(() => {
@@ -43,10 +50,76 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
     const snapshot = activeSession.agent_profile_snapshot as any;
     return snapshot?.cli_passthrough === true;
   }, [activeSession?.agent_profile_snapshot]);
+
+  // Check if we should show the approve button
+  // Show when session has a review_status that is not approved (meaning it's in a review step)
+  // Also hide while agent is working to prevent premature approval
+  const showApproveButton =
+    activeSession?.review_status != null && activeSession.review_status !== 'approved' && !isAgentWorking;
+
+  // Approve handler - moves session to next workflow step
+  const handleApprove = useCallback(async () => {
+    if (!activeSessionId || !activeTaskId) return;
+    try {
+      const response = await approveSessionAction(activeSessionId);
+
+      // Update the session in the store so the review panel closes
+      if (response?.session) {
+        setTaskSession(response.session);
+      }
+
+      // Check if the new step has auto_start_agent enabled
+      if (response?.workflow_step?.auto_start_agent) {
+        const client = getWebSocketClient();
+        if (client) {
+          client.send({
+            type: 'request',
+            action: 'orchestrator.start',
+            payload: {
+              task_id: activeTaskId,
+              session_id: activeSessionId,
+              workflow_step_id: response.workflow_step.id,
+            },
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Failed to approve session:', error);
+    }
+  }, [activeSessionId, activeTaskId, setTaskSession]);
+
   const [leftTab, setLeftTab] = useState('chat');
   const [selectedDiff, setSelectedDiff] = useState<SelectedDiff | null>(null);
   const [notes, setNotes] = useState('');
   const [openFileTabs, setOpenFileTabs] = useState<OpenFileTab[]>([]);
+
+  // Track plan updates for notification dot
+  const plan = useAppStore((state) =>
+    activeTaskId ? state.taskPlans.byTaskId[activeTaskId] : null
+  );
+  // Track the last plan update timestamp the user has seen (when they viewed the Plan tab)
+  // Key is taskId to handle task switching
+  const [lastSeenPlanUpdateByTask, setLastSeenPlanUpdateByTask] = useState<Record<string, string | null>>({});
+
+  // Derive notification state: show dot if plan was updated by agent and we haven't seen it
+  const hasUnseenPlanUpdate = useMemo(() => {
+    if (!activeTaskId || !plan || leftTab === 'plan') return false;
+    if (plan.created_by !== 'agent') return false;
+    const lastSeen = lastSeenPlanUpdateByTask[activeTaskId];
+    return plan.updated_at !== lastSeen;
+  }, [activeTaskId, plan, leftTab, lastSeenPlanUpdateByTask]);
+
+  // Handle tab change - mark plan as seen when switching to plan tab
+  const handleTabChange = useCallback((tab: string) => {
+    // If switching to plan tab, mark current plan as seen
+    if (tab === 'plan' && activeTaskId && plan?.updated_at) {
+      setLastSeenPlanUpdateByTask(prev => ({
+        ...prev,
+        [activeTaskId]: plan.updated_at
+      }));
+    }
+    setLeftTab(tab);
+  }, [activeTaskId, plan]);
 
   // Handle external diff selection
   useEffect(() => {
@@ -83,12 +156,19 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
     setOpenFileTabs((prev) => prev.filter((t) => t.path !== path));
     // If closing the active tab, switch to chat
     if (leftTab === `file:${path}`) {
-      setLeftTab('chat');
+      handleTabChange('chat');
     }
-  }, [leftTab]);
+  }, [leftTab, handleTabChange]);
 
   const tabs: SessionTab[] = useMemo(() => {
     const staticTabs: SessionTab[] = [
+      {
+        id: 'plan',
+        label: 'Plan',
+        icon: hasUnseenPlanUpdate ? (
+          <span className="h-2 w-2 rounded-full bg-primary animate-pulse" />
+        ) : undefined,
+      },
       { id: 'notes', label: 'Notes' },
       { id: 'changes', label: 'All changes' },
       { id: 'chat', label: 'Chat' },
@@ -111,17 +191,26 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
     });
 
     return [...staticTabs, ...fileTabs];
-  }, [openFileTabs, handleCloseFileTab]);
+  }, [openFileTabs, handleCloseFileTab, hasUnseenPlanUpdate]);
 
   return (
     <SessionPanel borderSide="right" margin="right">
       <SessionTabs
         tabs={tabs}
         activeTab={leftTab}
-        onTabChange={setLeftTab}
-        separatorAfterIndex={openFileTabs.length > 0 ? 2 : undefined}
+        onTabChange={handleTabChange}
+        separatorAfterIndex={openFileTabs.length > 0 ? 3 : undefined}
         className="flex-1 min-h-0 flex flex-col gap-2"
       >
+
+        <TabsContent value="plan" className="flex-1 min-h-0" forceMount style={{ display: leftTab === 'plan' ? undefined : 'none' }}>
+          <TaskPlanPanel
+            taskId={activeTaskId}
+            showApproveButton={showApproveButton}
+            onApprove={handleApprove}
+            visible={leftTab === 'plan'}
+          />
+        </TabsContent>
 
         <TabsContent value="notes" className="flex-1 min-h-0">
           <Textarea

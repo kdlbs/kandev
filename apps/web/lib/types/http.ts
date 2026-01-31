@@ -460,6 +460,9 @@ export type MessageType =
   | 'message'
   | 'content'
   | 'tool_call'
+  | 'tool_edit'
+  | 'tool_read'
+  | 'tool_execute'
   | 'progress'
   | 'log'
   | 'error'
@@ -662,4 +665,19 @@ export type ClarificationResponse = {
   answers: ClarificationAnswer[];
   rejected?: boolean;
   reject_reason?: string;
+};
+
+// Task Plan types (for session artifacts)
+export type TaskPlan = {
+  id: string;
+  task_id: string;
+  title: string;
+  content: string;
+  created_by: 'agent' | 'user';
+  created_at: string;
+  updated_at: string;
+};
+
+export type TaskPlanResponse = {
+  plan: TaskPlan | null;
 };

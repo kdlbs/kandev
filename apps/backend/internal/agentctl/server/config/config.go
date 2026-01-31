@@ -137,10 +137,6 @@ type InstanceConfig struct {
 	// ProcessBufferMaxBytes caps per-process output buffer size
 	ProcessBufferMaxBytes int64
 
-	// BackendWsURL is the WebSocket URL to connect back to the Kandev backend
-	// for MCP tool requests (e.g., ws://localhost:8080/ws)
-	BackendWsURL string
-
 	// SessionID is the session ID for this agent instance (used in MCP tool calls)
 	SessionID string
 }
@@ -210,12 +206,17 @@ func (c *Config) NewInstanceConfig(port int, overrides *InstanceOverrides) *Inst
 		if len(overrides.McpServers) > 0 {
 			cfg.McpServers = overrides.McpServers
 		}
-		if overrides.BackendWsURL != "" {
-			cfg.BackendWsURL = overrides.BackendWsURL
-		}
 		if overrides.SessionID != "" {
 			cfg.SessionID = overrides.SessionID
 		}
+	}
+
+	// Inject local kandev MCP server for MCP tunneling through the agent stream
+	// This ensures the kandev MCP server is available for protocols that read MCP config
+	// at startup time (e.g., Codex via -c flags). The MCP server uses the agent stream
+	// WebSocket connection (bidirectional) to forward tool calls to the backend.
+	if port > 0 {
+		cfg.McpServers = injectKandevMcpServer(cfg.McpServers, port)
 	}
 
 	// Parse agent command into args
@@ -239,7 +240,6 @@ type InstanceOverrides struct {
 	ApprovalPolicy string
 	AgentType      string
 	McpServers     []McpServerConfig
-	BackendWsURL   string
 	SessionID      string
 }
 
@@ -306,4 +306,25 @@ func getEnvBool(key string, defaultValue bool) bool {
 		return strings.ToLower(value) == "true" || value == "1"
 	}
 	return defaultValue
+}
+
+// injectKandevMcpServer prepends the local kandev MCP server to the list of MCP servers.
+// This replaces any existing kandev server to avoid duplicates.
+// The kandev MCP server provides tools like ask_user_question to the agent.
+func injectKandevMcpServer(servers []McpServerConfig, port int) []McpServerConfig {
+	localKandevMcp := McpServerConfig{
+		Name: "kandev",
+		Type: "sse",
+		URL:  "http://localhost:" + strconv.Itoa(port) + "/sse",
+	}
+
+	// Filter out any existing kandev server and prepend the local one
+	result := make([]McpServerConfig, 0, len(servers)+1)
+	result = append(result, localKandevMcp)
+	for _, srv := range servers {
+		if srv.Name != "kandev" {
+			result = append(result, srv)
+		}
+	}
+	return result
 }

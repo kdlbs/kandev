@@ -1,23 +1,28 @@
 // Package mcp provides MCP server functionality for agentctl.
-// It exposes MCP tools that forward requests to the Kandev backend via WebSocket.
+// It exposes MCP tools that forward requests to the Kandev backend via the agent stream.
 package mcp
 
 import (
 	"context"
-	"net/http"
 	"sync"
 
 	"github.com/gin-gonic/gin"
-	"github.com/kandev/kandev/internal/agentctl/server/wsclient"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"go.uber.org/zap"
 )
 
-// Server wraps the MCP server with WebSocket client for backend communication.
+// BackendClient is the interface for communicating with the Kandev backend.
+// MCP tool handlers use this to forward requests to the backend.
+type BackendClient interface {
+	// RequestPayload sends a request to the backend and unmarshals the response.
+	RequestPayload(ctx context.Context, action string, payload, result interface{}) error
+}
+
+// Server wraps the MCP server with backend client for communication.
 type Server struct {
-	wsClient   *wsclient.Client
+	backend    BackendClient
 	sessionID  string
 	mcpServer  *server.MCPServer
 	sseServer  *server.SSEServer
@@ -28,9 +33,9 @@ type Server struct {
 }
 
 // New creates a new MCP server for agentctl.
-func New(wsClient *wsclient.Client, sessionID string, log *logger.Logger) *Server {
+func New(backend BackendClient, sessionID string, log *logger.Logger) *Server {
 	s := &Server{
-		wsClient:  wsClient,
+		backend:   backend,
 		sessionID: sessionID,
 		logger:    log.WithFields(zap.String("component", "mcp-server")),
 	}
@@ -150,21 +155,78 @@ func (s *Server) registerTools() {
 
 	s.mcpServer.AddTool(
 		mcp.NewTool("ask_user_question",
-			mcp.WithDescription("Ask the user a clarifying question."),
-			mcp.WithString("prompt", mcp.Required(), mcp.Description("The question to ask")),
-			mcp.WithArray("options", mcp.Required(), mcp.Description("Options for the user")),
-			mcp.WithString("context", mcp.Description("Context for the question")),
+			mcp.WithDescription(`Ask the user a clarifying question with multiple choice options.
+
+Use this tool when you need user input to proceed. The user will see the prompt and can select one of the options or provide a custom text response.
+
+IMPORTANT: Each option must be a concrete, actionable choice - NOT meta-text like "Answer questions below".
+
+Options format - array of objects with:
+- "label": Short text (1-5 words) shown as the clickable option
+- "description": Brief explanation of what this option means
+
+Example usage:
+{
+  "prompt": "Which database should I use for this project?",
+  "options": [
+    {"label": "PostgreSQL", "description": "Relational database, good for complex queries"},
+    {"label": "MongoDB", "description": "Document database, flexible schema"},
+    {"label": "SQLite", "description": "Embedded database, simple setup"}
+  ],
+  "context": "The project requires storing user profiles and relationships between entities."
+}
+
+Another example:
+{
+  "prompt": "How should I handle the existing user data during migration?",
+  "options": [
+    {"label": "Migrate all", "description": "Keep all existing records"},
+    {"label": "Archive old", "description": "Archive records older than 1 year"},
+    {"label": "Fresh start", "description": "Delete existing data and start fresh"}
+  ]
+}`),
+			mcp.WithString("prompt", mcp.Required(), mcp.Description("The question to ask the user. Be specific and clear.")),
+			mcp.WithArray("options", mcp.Required(), mcp.Description(`Array of option objects. Each option must have: "label" (1-5 words, the clickable choice) and "description" (explanation of the option). Provide 2-4 concrete, actionable options.`)),
+			mcp.WithString("context", mcp.Description("Optional background information to help the user understand why you're asking this question.")),
 		),
 		s.askUserQuestionHandler(),
 	)
 
-	s.logger.Info("registered MCP tools", zap.Int("count", 7))
-}
+	s.mcpServer.AddTool(
+		mcp.NewTool("create_task_plan",
+			mcp.WithDescription("Create or save a task plan. Use this to save your implementation plan for the current task."),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to create a plan for")),
+			mcp.WithString("content", mcp.Required(), mcp.Description("The plan content in markdown format")),
+			mcp.WithString("title", mcp.Description("Optional title for the plan (default: 'Plan')")),
+		),
+		s.createTaskPlanHandler(),
+	)
 
-// WrapHandler wraps a handler function with error handling for gin.
-func WrapHandler(h http.Handler) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		h.ServeHTTP(c.Writer, c.Request)
-	}
-}
+	s.mcpServer.AddTool(
+		mcp.NewTool("get_task_plan",
+			mcp.WithDescription("Get the current plan for a task. Use this to retrieve an existing plan, including any user edits."),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to get the plan for")),
+		),
+		s.getTaskPlanHandler(),
+	)
 
+	s.mcpServer.AddTool(
+		mcp.NewTool("update_task_plan",
+			mcp.WithDescription("Update an existing task plan. Use this to modify the plan during implementation."),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to update the plan for")),
+			mcp.WithString("content", mcp.Required(), mcp.Description("The updated plan content in markdown format")),
+			mcp.WithString("title", mcp.Description("Optional new title for the plan")),
+		),
+		s.updateTaskPlanHandler(),
+	)
+
+	s.mcpServer.AddTool(
+		mcp.NewTool("delete_task_plan",
+			mcp.WithDescription("Delete a task plan."),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to delete the plan for")),
+		),
+		s.deleteTaskPlanHandler(),
+	)
+
+	s.logger.Info("registered MCP tools", zap.Int("count", 11))
+}

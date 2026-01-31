@@ -1,18 +1,15 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { IconChevronRight } from '@tabler/icons-react';
 import type { TaskState } from '@/lib/types/http';
-import {
-  Item,
-  ItemActions,
-  ItemContent,
-  ItemDescription,
-  ItemGroup,
-  ItemTitle,
-} from '@kandev/ui/item';
 import { truncateRepoPath } from '@/lib/utils';
-import { TaskStateActions } from './task-state-actions';
+import { SidebarButton } from './sidebar-button';
+import { TaskItem } from './task-item';
+
+type DiffStats = {
+  additions: number;
+  deletions: number;
+};
 
 type TaskSwitcherItem = {
   id: string;
@@ -21,6 +18,8 @@ type TaskSwitcherItem = {
   description?: string;
   workflowStepId?: string;
   repositoryPath?: string;
+  diffStats?: DiffStats;
+  updatedAt?: string;
 };
 
 type TaskSwitcherProps = {
@@ -29,7 +28,30 @@ type TaskSwitcherProps = {
   activeTaskId: string | null;
   selectedTaskId: string | null;
   onSelectTask: (taskId: string) => void;
+  isLoading?: boolean;
 };
+
+function TaskSwitcherSkeleton() {
+  return (
+    <div className="space-y-3 animate-pulse">
+      {/* Column skeleton */}
+      <div className="space-y-1">
+        <div className="h-7 bg-foreground/5 rounded-md" />
+        <div className="space-y-1 pl-0">
+          <div className="h-14 bg-foreground/5 rounded-lg" />
+          <div className="h-14 bg-foreground/5 rounded-lg" />
+        </div>
+      </div>
+      {/* Another column skeleton */}
+      <div className="space-y-1">
+        <div className="h-7 bg-foreground/5 rounded-md" />
+        <div className="space-y-1 pl-0">
+          <div className="h-14 bg-foreground/5 rounded-lg" />
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export function TaskSwitcher({
   tasks,
@@ -37,6 +59,7 @@ export function TaskSwitcher({
   activeTaskId,
   selectedTaskId,
   onSelectTask,
+  isLoading = false,
 }: TaskSwitcherProps) {
   const [collapsedColumnIds, setCollapsedColumnIds] = useState<Set<string>>(() => new Set());
 
@@ -76,75 +99,61 @@ export function TaskSwitcher({
     });
   };
 
+  if (isLoading) {
+    return <TaskSwitcherSkeleton />;
+  }
+
   return (
-    <div className="space-y-2">
-      <span className="text-xs uppercase tracking-wide text-muted-foreground">Tasks</span>
+    <div className="space-y-1">
       {sortedTasks.length === 0 ? (
-        <div className="text-xs text-muted-foreground">No tasks on this board.</div>
+        <div className="px-2 text-xs text-muted-foreground">No tasks on this board.</div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-1">
           {columnsWithFallback.map((column) => {
             const columnTasks = tasksByColumn[column.id] ?? [];
             if (columnTasks.length === 0) return null;
             const isColumnOpen = !collapsedColumnIds.has(column.id);
             return (
-              <div key={column.id} className="space-y-2">
-                <button
-                  type="button"
-                  onClick={() => handleToggleColumn(column.id)}
-                  className="group flex w-full items-center justify-between cursor-pointer"
-                  aria-label="Toggle column"
+              <div key={column.id}>
+                <SidebarButton
+                  label={column.title}
+                  count={columnTasks.length}
+                  isExpanded={isColumnOpen}
+                  onToggle={() => handleToggleColumn(column.id)}
+                />
+                {/* Expanded content with CSS transition */}
+                <div
+                  className={`overflow-hidden transition-[opacity,grid-template-rows] duration-200 ease-in-out ${isColumnOpen
+                      ? 'grid grid-rows-[1fr] opacity-100'
+                      : 'grid grid-rows-[0fr] opacity-0'
+                    }`}
                 >
-                  <span className="flex items-center gap-2 truncate text-sm font-medium text-muted-foreground">
-                    <span className={`w-2 h-2 rounded-full shrink-0 ${column.color ?? 'bg-neutral-400'}`} />
-                    {column.title}
-                  </span>
-                  <IconChevronRight className={`h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity ${isColumnOpen ? 'rotate-90' : ''}`} />
-                </button>
-                {isColumnOpen && (
-                  <div className="flex w-full max-w-md flex-col gap-6">
-                    <ItemGroup className="gap-2">
-                      {columnTasks.map((task) => {
-                        const isActive = task.id === activeTaskId;
-                        const isSelected = task.id === selectedTaskId || isActive;
-                        const repoLabel = task.repositoryPath ? truncateRepoPath(task.repositoryPath) : 'No repository';
-                        return (
-                          <Item
-                            key={task.id}
-                            role="listitem"
-                            variant="outline"
-                            asChild
-                            size="xs"
-                            className={isSelected ? 'bg-primary/10 border-primary/30 hover:bg-transparent' : ''}
-                          >
-                            <a
-                              href="#"
-                              onClick={(event) => {
-                                event.preventDefault();
-                                onSelectTask(task.id);
-                              }}
-                              onKeyDown={(event) => {
-                                if (event.key === 'Enter' || event.key === ' ') {
-                                  event.preventDefault();
-                                  onSelectTask(task.id);
-                                }
-                              }}
-                              className="flex w-full items-center gap-2"
-                            >
-                              <ItemContent className="min-w-0">
-                                <ItemTitle className="text-sm text-foreground">{task.title}</ItemTitle>
-                                <ItemDescription className="truncate">{repoLabel}</ItemDescription>
-                              </ItemContent>
-                              <ItemActions>
-                                <TaskStateActions state={task.state} />
-                              </ItemActions>
-                            </a>
-                          </Item>
-                        );
-                      })}
-                    </ItemGroup>
+                  <div className="min-h-0">
+                    <div className="pt-1">
+                      <div className="flex flex-col gap-1">
+                        {columnTasks.map((task) => {
+                          const isActive = task.id === activeTaskId;
+                          const isSelected = task.id === selectedTaskId || isActive;
+                          const repoLabel = task.repositoryPath
+                            ? truncateRepoPath(task.repositoryPath)
+                            : undefined;
+                          return (
+                            <TaskItem
+                              key={task.id}
+                              title={task.title}
+                              description={repoLabel}
+                              state={task.state}
+                              isSelected={isSelected}
+                              diffStats={task.diffStats}
+                              updatedAt={task.updatedAt}
+                              onClick={() => onSelectTask(task.id)}
+                            />
+                          );
+                        })}
+                      </div>
+                    </div>
                   </div>
-                )}
+                </div>
               </div>
             );
           })}

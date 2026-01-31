@@ -1,4 +1,4 @@
-package adapter
+package codex
 
 import (
 	"strings"
@@ -118,7 +118,7 @@ func TestParseCodexStderrError(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := parseCodexStderrError(tt.input)
+			result := ParseCodexStderrError(tt.input)
 
 			if tt.wantNil {
 				if result != nil {
@@ -210,7 +210,7 @@ func TestParseCodexStderrLines(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := parseCodexStderrLines(tt.lines)
+			result := ParseCodexStderrLines(tt.lines)
 
 			if tt.wantNil {
 				if result != nil {
@@ -234,7 +234,7 @@ func TestParseCodexStderrError_ResetsInSeconds(t *testing.T) {
 	// Test that ResetsInSeconds is correctly extracted
 	input := `error=http 429 Too Many Requests: Some("{\"error\":{\"type\":\"usage_limit_reached\",\"resets_in_seconds\":3600}}")`
 
-	result := parseCodexStderrError(input)
+	result := ParseCodexStderrError(input)
 	if result == nil {
 		t.Fatal("expected non-nil result")
 	}

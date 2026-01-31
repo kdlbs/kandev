@@ -1,5 +1,23 @@
 'use client';
 
+export type SubagentTaskPayload = {
+  description?: string;
+  prompt?: string;
+  subagent_type?: string;
+};
+
+export type GenericPayload = {
+  name?: string;
+  input?: unknown;
+  output?: unknown;
+};
+
+export type NormalizedPayload = {
+  kind?: string;
+  subagent_task?: SubagentTaskPayload;
+  generic?: GenericPayload;
+};
+
 export type ToolCallMetadata = {
   tool_call_id?: string;
   tool_name?: string;
@@ -7,6 +25,7 @@ export type ToolCallMetadata = {
   status?: 'pending' | 'running' | 'complete' | 'error';
   args?: Record<string, unknown>;
   result?: string;
+  normalized?: NormalizedPayload;
 };
 
 export type StatusMetadata = {

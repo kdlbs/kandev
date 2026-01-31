@@ -6,12 +6,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync"
 
 	"github.com/coder/acp-go-sdk"
 	"github.com/gorilla/websocket"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/constants"
+	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
 
@@ -252,9 +254,16 @@ func (c *Client) Prompt(ctx context.Context, text string) (*PromptResponse, erro
 // Note: AgentEvent, PermissionNotification, PermissionOption, and
 // PermissionRespondRequest are re-exported from streams package at the top of this file.
 
+// MCPHandler is the interface for handling MCP requests from agentctl.
+type MCPHandler interface {
+	// Dispatch handles an MCP request and returns a response.
+	Dispatch(ctx context.Context, msg *ws.Message) (*ws.Message, error)
+}
+
 // StreamUpdates opens a WebSocket connection for streaming agent events.
 // Events include message chunks, reasoning, tool calls, plan updates, and completion/error.
-func (c *Client) StreamUpdates(ctx context.Context, handler func(AgentEvent)) error {
+// If mcpHandler is provided, MCP requests from agentctl will be dispatched to it and responses sent back.
+func (c *Client) StreamUpdates(ctx context.Context, handler func(AgentEvent), mcpHandler MCPHandler) error {
 	wsURL := "ws" + c.baseURL[4:] + "/api/v1/agent/stream"
 
 	conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, nil)
@@ -267,6 +276,14 @@ func (c *Client) StreamUpdates(ctx context.Context, handler func(AgentEvent)) er
 	c.mu.Unlock()
 
 	c.logger.Info("connected to updates stream", zap.String("url", wsURL))
+
+	// Use mutex for writing responses
+	var writeMu sync.Mutex
+	writeMessage := func(data []byte) error {
+		writeMu.Lock()
+		defer writeMu.Unlock()
+		return conn.WriteMessage(websocket.TextMessage, data)
+	}
 
 	// Read messages in a goroutine
 	go func() {
@@ -290,6 +307,33 @@ func (c *Client) StreamUpdates(ctx context.Context, handler func(AgentEvent)) er
 				return
 			}
 
+			// Try to parse as ws.Message to check if it's an MCP request
+			var wsMsg ws.Message
+			if err := json.Unmarshal(message, &wsMsg); err == nil && wsMsg.Type == ws.MessageTypeRequest {
+				// This is an MCP request - dispatch it
+				if mcpHandler != nil {
+					go func(msg ws.Message) {
+						resp, err := mcpHandler.Dispatch(ctx, &msg)
+						if err != nil {
+							c.logger.Error("MCP dispatch error", zap.Error(err))
+							resp, _ = ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+						}
+						if resp != nil {
+							data, err := json.Marshal(resp)
+							if err != nil {
+								c.logger.Error("failed to marshal MCP response", zap.Error(err))
+								return
+							}
+							if err := writeMessage(data); err != nil {
+								c.logger.Debug("failed to write MCP response", zap.Error(err))
+							}
+						}
+					}(wsMsg)
+				}
+				continue
+			}
+
+			// Not an MCP request, parse as agent event
 			var event AgentEvent
 			if err := json.Unmarshal(message, &event); err != nil {
 				c.logger.Warn("failed to parse agent event", zap.Error(err))

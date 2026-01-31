@@ -142,3 +142,26 @@ export function selectPreferredBranch(
 
 export const DEFAULT_LOCAL_ENVIRONMENT_KIND = 'local_pc';
 export const DEFAULT_LOCAL_EXECUTOR_TYPE = 'local_pc';
+
+/**
+ * Format a date string as a human-readable relative time (e.g., "2m ago", "1h ago", "yesterday").
+ * @param dateString - ISO date string
+ * @returns Formatted relative time string
+ */
+export function formatRelativeTime(dateString: string): string {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffSec = Math.floor(diffMs / 1000);
+    const diffMin = Math.floor(diffSec / 60);
+    const diffHour = Math.floor(diffMin / 60);
+    const diffDay = Math.floor(diffHour / 24);
+
+    if (diffSec < 10) return 'just now';
+    if (diffSec < 60) return `${diffSec}s ago`;
+    if (diffMin < 60) return `${diffMin}m ago`;
+    if (diffHour < 24) return `${diffHour}h ago`;
+    if (diffDay === 1) return 'yesterday';
+    if (diffDay < 7) return `${diffDay}d ago`;
+    return date.toLocaleDateString();
+}

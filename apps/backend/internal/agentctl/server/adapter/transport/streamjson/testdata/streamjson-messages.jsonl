@@ -1,0 +1,12 @@
+{"key":"Edit","input":{"tool_name":"Edit","args":{"file_path":"/workspace/app.ts","old_string":"const x = 1;","new_string":"const x = 2;","replace_all":false}},"expected":{"tool_type":"tool_edit","file_path":"/workspace/app.ts","old_content":"const x = 1;","new_content":"const x = 2;"}}
+{"key":"Edit:2","input":{"tool_name":"Edit","args":{"file_path":"/workspace/src/main.go","old_string":"func main() {\n\tfmt.Println(\"hello\")\n}","new_string":"func main() {\n\tfmt.Println(\"hello world\")\n}","replace_all":false}},"expected":{"tool_type":"tool_edit","file_path":"/workspace/src/main.go","old_content":"func main() {\n\tfmt.Println(\"hello\")\n}","new_content":"func main() {\n\tfmt.Println(\"hello world\")\n}"}}
+{"key":"Edit:3","input":{"tool_name":"Edit","args":{"file_path":"","old_string":"a","new_string":"b"}},"expected":{"tool_type":"tool_edit","file_path":"","old_content":"a","new_content":"b"}}
+{"key":"Read","input":{"tool_name":"Read","args":{"file_path":"/workspace/config.json"}},"expected":{"tool_type":"tool_read","file_path":"/workspace/config.json"}}
+{"key":"Read:2","input":{"tool_name":"Read","args":{"file_path":"/workspace/src/index.ts","offset":10,"limit":50}},"expected":{"tool_type":"tool_read","file_path":"/workspace/src/index.ts"}}
+{"key":"Read:3","input":{"tool_name":"Read","args":{"file_path":""}},"expected":{"tool_type":"tool_read","file_path":""}}
+{"key":"Bash","input":{"tool_name":"Bash","args":{"command":"ls -la","description":"List all files and directories"}},"expected":{"tool_type":"tool_execute","command":"ls -la","description":"List all files and directories"}}
+{"key":"Bash:2","input":{"tool_name":"Bash","args":{"command":"npm test -- --coverage","description":""}},"expected":{"tool_type":"tool_execute","command":"npm test -- --coverage"}}
+{"key":"Bash:3","input":{"tool_name":"Bash","args":{"command":"go build ./..."}},"expected":{"tool_type":"tool_execute","command":"go build ./..."}}
+{"key":"Glob","input":{"tool_name":"Glob","args":{"pattern":"**/*.ts"}},"expected":{"tool_type":"tool_read"}}
+{"key":"Grep","input":{"tool_name":"Grep","args":{"pattern":"TODO","path":"/workspace"}},"expected":{"tool_type":"tool_read"}}
+{"key":"WebSearch","input":{"tool_name":"WebSearch","args":{"query":"golang testing"}},"expected":{"tool_type":"tool_call"}}

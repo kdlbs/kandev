@@ -42,12 +42,16 @@ import (
 
 	"github.com/kandev/kandev/internal/clarification"
 
+	// Debug handlers
+	debughandlers "github.com/kandev/kandev/internal/debug"
+
 	// MCP handlers
 	mcphandlers "github.com/kandev/kandev/internal/mcp/handlers"
 
 	// Task Service packages
 	taskcontroller "github.com/kandev/kandev/internal/task/controller"
 	taskhandlers "github.com/kandev/kandev/internal/task/handlers"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 	usercontroller "github.com/kandev/kandev/internal/user/controller"
 	userhandlers "github.com/kandev/kandev/internal/user/handlers"
 
@@ -509,7 +513,8 @@ func main() {
 	// Task Service handlers (HTTP + WebSocket)
 	taskhandlers.RegisterWorkspaceRoutes(router, gateway.Dispatcher, workspaceController, log)
 	taskhandlers.RegisterBoardRoutes(router, gateway.Dispatcher, boardController, log)
-	taskhandlers.RegisterTaskRoutes(router, gateway.Dispatcher, taskController, orchestratorSvc, log)
+	planService := taskservice.NewPlanService(taskRepo, eventBus, log)
+	taskhandlers.RegisterTaskRoutes(router, gateway.Dispatcher, taskController, orchestratorSvc, taskRepo, planService, log)
 	taskhandlers.RegisterRepositoryRoutes(router, gateway.Dispatcher, repositoryController, log)
 	taskhandlers.RegisterExecutorRoutes(router, gateway.Dispatcher, executorController, log)
 	taskhandlers.RegisterEnvironmentRoutes(router, gateway.Dispatcher, environmentController, log)
@@ -555,11 +560,19 @@ func main() {
 		workflowCtrl,
 		clarificationStore,
 		msgCreator,
-		taskRepo,
+		planService,
 		log,
 	)
 	mcpHandlers.RegisterHandlers(gateway.Dispatcher)
 	log.Debug("Registered MCP handlers (WebSocket)")
+
+	// Set MCP handler for lifecycle manager to dispatch MCP requests from agents
+	// MCP requests flow: agent -> agentctl -> agent stream (WS) -> backend -> dispatcher
+	lifecycleMgr.SetMCPHandler(gateway.Dispatcher)
+	log.Debug("MCP handler configured for agent lifecycle manager")
+
+	debughandlers.RegisterRoutes(router, log)
+	log.Debug("Registered Debug handlers (HTTP)")
 
 	// Health check (simple HTTP for load balancers/monitoring)
 	router.GET("/health", func(c *gin.Context) {

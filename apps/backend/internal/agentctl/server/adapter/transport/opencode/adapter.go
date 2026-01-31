@@ -1,4 +1,6 @@
-package adapter
+// Package opencode implements the OpenCode transport adapter.
+// OpenCode uses a REST/SSE protocol over HTTP, spawning its own HTTP server.
+package opencode
 
 import (
 	"bufio"
@@ -13,17 +15,40 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/pkg/opencode"
 	"go.uber.org/zap"
 )
 
-// OpenCodeAdapter implements AgentAdapter for OpenCode CLI using REST/SSE protocol.
+// Re-export types needed by external packages
+type (
+	PermissionRequest  = types.PermissionRequest
+	PermissionResponse = types.PermissionResponse
+	PermissionOption   = streams.PermissionOption
+	PermissionHandler  = types.PermissionHandler
+	AgentEvent         = streams.AgentEvent
+)
+
+// AgentInfo contains information about the connected agent.
+type AgentInfo struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+}
+
+// Adapter implements the transport adapter for OpenCode.
 // OpenCode spawns an HTTP server and communicates via REST API calls and SSE for events.
-type OpenCodeAdapter struct {
-	cfg    *Config
+type Adapter struct {
+	cfg    *shared.Config
 	logger *logger.Logger
+
+	// Agent identity (from config, for logging)
+	agentID string
+
+	// Normalizer for converting tool data to NormalizedPayload
+	normalizer *Normalizer
 
 	// Subprocess stdout (for parsing server URL)
 	stdout io.Reader
@@ -32,9 +57,9 @@ type OpenCodeAdapter struct {
 	client *opencode.Client
 
 	// Server configuration
-	serverURL  string
-	password   string
-	directory  string
+	serverURL string
+	password  string
+	directory string
 
 	// Context for managing goroutine lifecycle
 	ctx    context.Context
@@ -90,12 +115,25 @@ type permissionRequest struct {
 	toolName   string
 }
 
-// NewOpenCodeAdapter creates a new OpenCode protocol adapter.
-func NewOpenCodeAdapter(cfg *Config, log *logger.Logger) *OpenCodeAdapter {
+// resultComplete holds the result of a completed prompt
+// Note: Fields are currently unused but kept for future implementation
+type resultComplete struct {
+	_ bool   // success placeholder
+	_ string // err placeholder
+}
+
+// NewAdapter creates a new OpenCode protocol adapter.
+func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &OpenCodeAdapter{
+	agentID := cfg.AgentID
+	if agentID == "" {
+		agentID = "opencode" // Fallback for unknown agents using this protocol
+	}
+	return &Adapter{
 		cfg:                cfg,
-		logger:             log.WithFields(zap.String("adapter", "opencode")),
+		logger:             log.WithFields(zap.String("adapter", "opencode"), zap.String("agent_id", agentID)),
+		agentID:            agentID,
+		normalizer:         NewNormalizer(),
 		ctx:                ctx,
 		cancel:             cancel,
 		updatesCh:          make(chan AgentEvent, 100),
@@ -110,7 +148,7 @@ func NewOpenCodeAdapter(cfg *Config, log *logger.Logger) *OpenCodeAdapter {
 // PrepareEnvironment performs protocol-specific setup before the agent process starts.
 // For OpenCode, we write MCP servers to ~/.config/opencode/opencode.json and return
 // environment variables for server authentication.
-func (a *OpenCodeAdapter) PrepareEnvironment() (map[string]string, error) {
+func (a *Adapter) PrepareEnvironment() (map[string]string, error) {
 	a.logger.Info("PrepareEnvironment called",
 		zap.Int("mcp_server_count", len(a.cfg.McpServers)))
 	for i, srv := range a.cfg.McpServers {
@@ -142,9 +180,15 @@ func (a *OpenCodeAdapter) PrepareEnvironment() (map[string]string, error) {
 	return env, nil
 }
 
+// PrepareCommandArgs returns extra command-line arguments for the agent process.
+// For OpenCode, no extra args are needed - MCP is configured via config file.
+func (a *Adapter) PrepareCommandArgs() []string {
+	return nil
+}
+
 // Connect wires up the stdout pipe from the running agent subprocess.
 // For OpenCode, we only need stdout to parse the server URL.
-func (a *OpenCodeAdapter) Connect(stdin io.Writer, stdout io.Reader) error {
+func (a *Adapter) Connect(stdin io.Writer, stdout io.Reader) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -157,7 +201,7 @@ func (a *OpenCodeAdapter) Connect(stdin io.Writer, stdout io.Reader) error {
 }
 
 // Initialize establishes the OpenCode connection by waiting for the server URL.
-func (a *OpenCodeAdapter) Initialize(ctx context.Context) error {
+func (a *Adapter) Initialize(ctx context.Context) error {
 	a.logger.Info("initializing OpenCode adapter",
 		zap.String("workdir", a.cfg.WorkDir))
 
@@ -189,7 +233,7 @@ func (a *OpenCodeAdapter) Initialize(ctx context.Context) error {
 
 	// Store agent info
 	a.agentInfo = &AgentInfo{
-		Name:    "opencode",
+		Name:    a.agentID,
 		Version: "unknown",
 	}
 
@@ -199,7 +243,7 @@ func (a *OpenCodeAdapter) Initialize(ctx context.Context) error {
 }
 
 // waitForServerURL reads stdout until we find the server URL
-func (a *OpenCodeAdapter) waitForServerURL(ctx context.Context) (string, error) {
+func (a *Adapter) waitForServerURL(ctx context.Context) (string, error) {
 	deadline := time.Now().Add(180 * time.Second)
 
 	scanner := bufio.NewScanner(a.stdout)
@@ -250,12 +294,12 @@ func (a *OpenCodeAdapter) waitForServerURL(ctx context.Context) (string, error) 
 }
 
 // GetAgentInfo returns information about the connected agent.
-func (a *OpenCodeAdapter) GetAgentInfo() *AgentInfo {
+func (a *Adapter) GetAgentInfo() *AgentInfo {
 	return a.agentInfo
 }
 
 // NewSession creates a new OpenCode session.
-func (a *OpenCodeAdapter) NewSession(ctx context.Context, _ []types.McpServer) (string, error) {
+func (a *Adapter) NewSession(ctx context.Context, _ []types.McpServer) (string, error) {
 	// Clear any stale state from previous sessions
 	a.clearSessionState()
 
@@ -272,7 +316,7 @@ func (a *OpenCodeAdapter) NewSession(ctx context.Context, _ []types.McpServer) (
 
 	// Emit session status event for resume token storage
 	a.sendUpdate(AgentEvent{
-		Type:      EventTypeSessionStatus,
+		Type:      streams.EventTypeSessionStatus,
 		SessionID: sessionID,
 		Data: map[string]any{
 			"session_status": "active",
@@ -284,7 +328,7 @@ func (a *OpenCodeAdapter) NewSession(ctx context.Context, _ []types.McpServer) (
 }
 
 // LoadSession resumes an existing OpenCode session by forking it.
-func (a *OpenCodeAdapter) LoadSession(ctx context.Context, sessionID string) error {
+func (a *Adapter) LoadSession(ctx context.Context, sessionID string) error {
 	// Clear any stale state from previous sessions
 	a.clearSessionState()
 
@@ -306,7 +350,7 @@ func (a *OpenCodeAdapter) LoadSession(ctx context.Context, sessionID string) err
 }
 
 // Prompt sends a prompt to OpenCode and waits for completion.
-func (a *OpenCodeAdapter) Prompt(ctx context.Context, message string) error {
+func (a *Adapter) Prompt(ctx context.Context, message string) error {
 	a.mu.Lock()
 	client := a.client
 	sessionID := a.sessionID
@@ -352,7 +396,7 @@ func (a *OpenCodeAdapter) Prompt(ctx context.Context, message string) error {
 			if !ok {
 				// Channel closed
 				a.sendUpdate(AgentEvent{
-					Type:      EventTypeComplete,
+					Type:      streams.EventTypeComplete,
 					SessionID: sessionID,
 				})
 				return nil
@@ -362,14 +406,14 @@ func (a *OpenCodeAdapter) Prompt(ctx context.Context, message string) error {
 			case "idle":
 				a.logger.Info("session idle, prompt complete")
 				a.sendUpdate(AgentEvent{
-					Type:      EventTypeComplete,
+					Type:      streams.EventTypeComplete,
 					SessionID: sessionID,
 				})
 				return nil
 
 			case "auth_required":
 				a.sendUpdate(AgentEvent{
-					Type:      EventTypeError,
+					Type:      streams.EventTypeError,
 					SessionID: sessionID,
 					Error:     fmt.Sprintf("Authentication required: %s", control.Message),
 				})
@@ -377,7 +421,7 @@ func (a *OpenCodeAdapter) Prompt(ctx context.Context, message string) error {
 
 			case "session_error":
 				a.sendUpdate(AgentEvent{
-					Type:      EventTypeError,
+					Type:      streams.EventTypeError,
 					SessionID: sessionID,
 					Error:     control.Message,
 				})
@@ -385,7 +429,7 @@ func (a *OpenCodeAdapter) Prompt(ctx context.Context, message string) error {
 
 			case "disconnected":
 				a.sendUpdate(AgentEvent{
-					Type:      EventTypeComplete,
+					Type:      streams.EventTypeComplete,
 					SessionID: sessionID,
 				})
 				return nil
@@ -395,7 +439,7 @@ func (a *OpenCodeAdapter) Prompt(ctx context.Context, message string) error {
 }
 
 // Cancel cancels the current operation.
-func (a *OpenCodeAdapter) Cancel(ctx context.Context) error {
+func (a *Adapter) Cancel(ctx context.Context) error {
 	a.mu.RLock()
 	client := a.client
 	sessionID := a.sessionID
@@ -411,33 +455,33 @@ func (a *OpenCodeAdapter) Cancel(ctx context.Context) error {
 }
 
 // Updates returns a channel that receives agent events.
-func (a *OpenCodeAdapter) Updates() <-chan AgentEvent {
+func (a *Adapter) Updates() <-chan AgentEvent {
 	return a.updatesCh
 }
 
 // GetSessionID returns the current session ID.
-func (a *OpenCodeAdapter) GetSessionID() string {
+func (a *Adapter) GetSessionID() string {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	return a.sessionID
 }
 
 // GetOperationID returns the current operation/turn ID.
-func (a *OpenCodeAdapter) GetOperationID() string {
+func (a *Adapter) GetOperationID() string {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	return a.operationID
 }
 
 // SetPermissionHandler sets the handler for permission requests.
-func (a *OpenCodeAdapter) SetPermissionHandler(handler PermissionHandler) {
+func (a *Adapter) SetPermissionHandler(handler PermissionHandler) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.permissionHandler = handler
 }
 
 // Close releases resources held by the adapter.
-func (a *OpenCodeAdapter) Close() error {
+func (a *Adapter) Close() error {
 	a.logger.Info("OpenCode adapter Close() called")
 
 	a.mu.Lock()
@@ -466,14 +510,14 @@ func (a *OpenCodeAdapter) Close() error {
 
 // RequiresProcessKill returns true because OpenCode runs as an HTTP server
 // and does not exit when stdin is closed.
-func (a *OpenCodeAdapter) RequiresProcessKill() bool {
+func (a *Adapter) RequiresProcessKill() bool {
 	return true
 }
 
 // clearSessionState clears session-specific tracking state.
 // This should be called when starting a new session to prevent memory leaks
 // and stale data from previous sessions.
-func (a *OpenCodeAdapter) clearSessionState() {
+func (a *Adapter) clearSessionState() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -483,7 +527,7 @@ func (a *OpenCodeAdapter) clearSessionState() {
 }
 
 // sendUpdate sends an event to the updates channel
-func (a *OpenCodeAdapter) sendUpdate(event AgentEvent) {
+func (a *Adapter) sendUpdate(event AgentEvent) {
 	a.mu.RLock()
 	closed := a.closed
 	a.mu.RUnlock()
@@ -492,6 +536,7 @@ func (a *OpenCodeAdapter) sendUpdate(event AgentEvent) {
 		return
 	}
 
+	shared.LogNormalizedEvent(shared.ProtocolOpenCode, a.agentID, &event)
 	select {
 	case a.updatesCh <- event:
 	default:
@@ -501,7 +546,10 @@ func (a *OpenCodeAdapter) sendUpdate(event AgentEvent) {
 }
 
 // handleSDKEvent processes events from the OpenCode SSE stream
-func (a *OpenCodeAdapter) handleSDKEvent(event *opencode.SDKEventEnvelope) {
+func (a *Adapter) handleSDKEvent(event *opencode.SDKEventEnvelope) {
+	// Log raw event for debugging
+	shared.LogRawEvent(shared.ProtocolOpenCode, a.agentID, event.Type, event.Properties)
+
 	a.mu.RLock()
 	sessionID := a.sessionID
 	operationID := a.operationID
@@ -524,7 +572,7 @@ func (a *OpenCodeAdapter) handleSDKEvent(event *opencode.SDKEventEnvelope) {
 		}
 		if props.Error != nil {
 			a.sendUpdate(AgentEvent{
-				Type:      EventTypeError,
+				Type:      streams.EventTypeError,
 				SessionID: sessionID,
 				Error:     props.Error.GetMessage(),
 			})
@@ -533,7 +581,7 @@ func (a *OpenCodeAdapter) handleSDKEvent(event *opencode.SDKEventEnvelope) {
 }
 
 // handleMessagePartUpdated processes message.part.updated events
-func (a *OpenCodeAdapter) handleMessagePartUpdated(props json.RawMessage, sessionID, operationID string) {
+func (a *Adapter) handleMessagePartUpdated(props json.RawMessage, sessionID, operationID string) {
 	parsed, err := opencode.ParseMessagePartUpdated(props)
 	if err != nil {
 		a.logger.Warn("failed to parse message.part.updated", zap.Error(err))
@@ -592,7 +640,7 @@ func (a *OpenCodeAdapter) handleMessagePartUpdated(props json.RawMessage, sessio
 
 		if textToSend != "" {
 			a.sendUpdate(AgentEvent{
-				Type:        EventTypeMessageChunk,
+				Type:        streams.EventTypeMessageChunk,
 				SessionID:   sessionID,
 				OperationID: operationID,
 				Text:        textToSend,
@@ -634,7 +682,7 @@ func (a *OpenCodeAdapter) handleMessagePartUpdated(props json.RawMessage, sessio
 
 		if textToSend != "" {
 			a.sendUpdate(AgentEvent{
-				Type:          EventTypeReasoning,
+				Type:          streams.EventTypeReasoning,
 				SessionID:     sessionID,
 				OperationID:   operationID,
 				ReasoningText: textToSend,
@@ -676,6 +724,9 @@ func (a *OpenCodeAdapter) handleMessagePartUpdated(props json.RawMessage, sessio
 			_ = json.Unmarshal(state.Input, &args) // Ignore error - args are optional
 		}
 
+		// Generate normalized payload
+		normalizedPayload := a.normalizer.NormalizeToolCall(toolName, args)
+
 		// Track if we've seen this tool call before
 		a.mu.Lock()
 		if a.seenToolCalls == nil {
@@ -689,35 +740,34 @@ func (a *OpenCodeAdapter) handleMessagePartUpdated(props json.RawMessage, sessio
 		// This creates the message in the database
 		if isFirstEvent {
 			a.sendUpdate(AgentEvent{
-				Type:        EventTypeToolCall,
-				SessionID:   sessionID,
-				OperationID: operationID,
-				ToolCallID:  toolCallID,
-				ToolName:    toolName,
-				ToolTitle:   title,
-				ToolArgs:    args,
-				ToolStatus:  status,
+				Type:              streams.EventTypeToolCall,
+				SessionID:         sessionID,
+				OperationID:       operationID,
+				ToolCallID:        toolCallID,
+				ToolName:          toolName,
+				ToolTitle:         title,
+				ToolStatus:        status,
+				NormalizedPayload: normalizedPayload,
 			})
 		} else {
 			// For subsequent events, emit tool_update to update the existing message
 			a.sendUpdate(AgentEvent{
-				Type:        EventTypeToolUpdate,
-				SessionID:   sessionID,
-				OperationID: operationID,
-				ToolCallID:  toolCallID,
-				ToolName:    toolName,
-				ToolTitle:   title,
-				ToolArgs:    args,
-				ToolResult:  state.Output,
-				ToolStatus:  status,
-				Error:       state.Error,
+				Type:              streams.EventTypeToolUpdate,
+				SessionID:         sessionID,
+				OperationID:       operationID,
+				ToolCallID:        toolCallID,
+				ToolName:          toolName,
+				ToolTitle:         title,
+				ToolStatus:        status,
+				Error:             state.Error,
+				NormalizedPayload: normalizedPayload,
 			})
 		}
 	}
 }
 
 // handleMessageUpdated processes message.updated events (for token tracking)
-func (a *OpenCodeAdapter) handleMessageUpdated(props json.RawMessage, sessionID string) {
+func (a *Adapter) handleMessageUpdated(props json.RawMessage, sessionID string) {
 	parsed, err := opencode.ParseMessageUpdated(props)
 	if err != nil {
 		return
@@ -751,7 +801,7 @@ func (a *OpenCodeAdapter) handleMessageUpdated(props json.RawMessage, sessionID 
 
 	// Emit context window event
 	a.sendUpdate(AgentEvent{
-		Type:              EventTypeContextWindow,
+		Type:              streams.EventTypeContextWindow,
 		SessionID:         sessionID,
 		ContextWindowUsed: int64(totalTokens),
 		ContextWindowSize: int64(a.modelContextWindow),
@@ -759,7 +809,7 @@ func (a *OpenCodeAdapter) handleMessageUpdated(props json.RawMessage, sessionID 
 }
 
 // handlePermissionAsked processes permission.asked events
-func (a *OpenCodeAdapter) handlePermissionAsked(props json.RawMessage, sessionID string) {
+func (a *Adapter) handlePermissionAsked(props json.RawMessage, sessionID string) {
 	parsed, err := opencode.ParsePermissionAsked(props)
 	if err != nil {
 		a.logger.Warn("failed to parse permission.asked", zap.Error(err))
@@ -809,7 +859,7 @@ func (a *OpenCodeAdapter) handlePermissionAsked(props json.RawMessage, sessionID
 
 	// Emit permission request event
 	a.sendUpdate(AgentEvent{
-		Type:            EventTypePermissionRequest,
+		Type:            streams.EventTypePermissionRequest,
 		SessionID:       sessionID,
 		PendingID:       requestID,
 		ToolCallID:      toolCallID,
@@ -855,7 +905,7 @@ func (a *OpenCodeAdapter) handlePermissionAsked(props json.RawMessage, sessionID
 }
 
 // RespondToPermission responds to a permission request (called via handler)
-func (a *OpenCodeAdapter) RespondToPermission(ctx context.Context, requestID string, approved bool, message string) error {
+func (a *Adapter) RespondToPermission(ctx context.Context, requestID string, approved bool, message string) error {
 	a.mu.Lock()
 	delete(a.pendingPermissions, requestID)
 	a.mu.Unlock()
@@ -878,7 +928,7 @@ func (a *OpenCodeAdapter) RespondToPermission(ctx context.Context, requestID str
 // OpenCode reads MCP servers from ~/.config/opencode/opencode.json at startup time.
 // This function should be called before starting the OpenCode process.
 // If homeDir is empty, it uses os.UserHomeDir().
-func WriteOpenCodeMcpConfig(mcpServers []McpServerConfig, homeDir string, log *logger.Logger) error {
+func WriteOpenCodeMcpConfig(mcpServers []shared.McpServerConfig, homeDir string, log *logger.Logger) error {
 	if len(mcpServers) == 0 {
 		return nil // Nothing to configure
 	}
@@ -975,4 +1025,3 @@ func WriteOpenCodeMcpConfig(mcpServers []McpServerConfig, homeDir string, log *l
 
 	return nil
 }
-

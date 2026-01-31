@@ -13,6 +13,7 @@ import (
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/appctx"
+	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/common/logger"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"github.com/kandev/kandev/pkg/agent"
@@ -182,12 +183,12 @@ func (sm *SessionManager) getResumeContextPrompt(agentConfig *registry.AgentType
 }
 
 // injectSessionContext prepends session context information to the prompt.
-// This allows the agent to know which session ID to use when calling MCP tools like ask_user_question.
-func (sm *SessionManager) injectSessionContext(sessionID, prompt string) string {
-	if sessionID == "" {
+// This allows the agent to know which session ID and task ID to use when calling MCP tools.
+func (sm *SessionManager) injectSessionContext(taskID, sessionID, prompt string) string {
+	if sessionID == "" && taskID == "" {
 		return prompt
 	}
-	return fmt.Sprintf("<session_context>\nKandev Session ID: %s\nUse this session ID when calling Kandev MCP tools that require a session_id parameter.\n</session_context>\n\n%s", sessionID, prompt)
+	return fmt.Sprintf("<session_context>\nKandev Task ID: %s\nKandev Session ID: %s\nUse these IDs when calling Kandev MCP tools that require task_id or session_id parameters.\n</session_context>\n\n%s", taskID, sessionID, prompt)
 }
 
 // loadSession loads an existing session via ACP session/load
@@ -317,8 +318,8 @@ func (sm *SessionManager) InitializeAndPrompt(
 	// For resumed sessions (fork_session pattern): If we have session history but no new task description,
 	// we still need to send a resume context prompt so the agent knows about the prior conversation.
 	if taskDescription != "" {
-		// Inject session ID context so the agent knows which session to use for MCP tools
-		promptWithSessionContext := sm.injectSessionContext(execution.SessionID, taskDescription)
+		// Inject task and session ID context so the agent knows which IDs to use for MCP tools
+		promptWithSessionContext := sm.injectSessionContext(execution.TaskID, execution.SessionID, taskDescription)
 
 		// Check if we need to inject resume context (fork_session pattern for ACP agents)
 		effectivePrompt := sm.getResumeContextPrompt(agentConfig, execution.SessionID, promptWithSessionContext)
@@ -332,7 +333,8 @@ func (sm *SessionManager) InitializeAndPrompt(
 
 		go func() {
 			// Use detached context that respects stopCh for graceful shutdown
-			promptCtx, cancel := appctx.Detached(ctx, sm.stopCh, 10*time.Minute)
+			// Use PromptTimeout (60 min) to match the HTTP client/server timeouts
+			promptCtx, cancel := appctx.Detached(ctx, sm.stopCh, constants.PromptTimeout)
 			defer cancel()
 
 			_, err := sm.SendPrompt(promptCtx, execution, effectivePrompt, false, markReady)

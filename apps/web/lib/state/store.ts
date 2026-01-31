@@ -126,6 +126,7 @@ export type AppState = {
   sessionWorktreesBySessionId: typeof defaultSessionState['sessionWorktreesBySessionId'];
   pendingModel: typeof defaultSessionState['pendingModel'];
   activeModel: typeof defaultSessionState['activeModel'];
+  taskPlans: typeof defaultSessionState['taskPlans'];
 
   // Session Runtime slice
   terminal: typeof defaultSessionRuntimeState['terminal'];
@@ -231,6 +232,11 @@ export type AppState = {
   setPendingModel: (sessionId: string, modelId: string) => void;
   clearPendingModel: (sessionId: string) => void;
   setActiveModel: (sessionId: string, modelId: string) => void;
+  // Task plan actions
+  setTaskPlan: (taskId: string, plan: import('@/lib/types/http').TaskPlan | null) => void;
+  setTaskPlanLoading: (taskId: string, loading: boolean) => void;
+  setTaskPlanSaving: (taskId: string, saving: boolean) => void;
+  clearTaskPlan: (taskId: string) => void;
 };
 
 export type AppStore = ReturnType<typeof createAppStore>;
@@ -262,6 +268,7 @@ const defaultState = {
   sessionWorktreesBySessionId: defaultSessionState.sessionWorktreesBySessionId,
   pendingModel: defaultSessionState.pendingModel,
   activeModel: defaultSessionState.activeModel,
+  taskPlans: defaultSessionState.taskPlans,
   terminal: defaultSessionRuntimeState.terminal,
   shell: defaultSessionRuntimeState.shell,
   processes: defaultSessionRuntimeState.processes,
@@ -309,6 +316,7 @@ function mergeInitialState(initialState?: Partial<AppState>): typeof defaultStat
     sessionWorktreesBySessionId: { ...defaultState.sessionWorktreesBySessionId, ...initialState.sessionWorktreesBySessionId },
     pendingModel: { ...defaultState.pendingModel, ...initialState.pendingModel },
     activeModel: { ...defaultState.activeModel, ...initialState.activeModel },
+    taskPlans: { ...defaultState.taskPlans, ...initialState.taskPlans },
     terminal: { ...defaultState.terminal, ...initialState.terminal },
     shell: { ...defaultState.shell, ...initialState.shell },
     processes: { ...defaultState.processes, ...initialState.processes },

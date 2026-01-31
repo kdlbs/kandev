@@ -53,8 +53,8 @@ temp/
 dist/
 build/
 
-# Debug files
-debug
+# Debug files (at root level only)
+/debug
 *.pprof
 
 # Air live reload (if used)

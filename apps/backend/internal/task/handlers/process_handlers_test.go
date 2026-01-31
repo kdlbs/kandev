@@ -173,6 +173,9 @@ func (m *mockRepository) UpdateTaskSession(ctx context.Context, session *models.
 func (m *mockRepository) UpdateTaskSessionState(ctx context.Context, id string, state models.TaskSessionState, errorMessage string) error {
 	return nil
 }
+func (m *mockRepository) ClearSessionExecutionID(ctx context.Context, id string) error {
+	return nil
+}
 func (m *mockRepository) ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
 	return nil, nil
 }
@@ -333,6 +336,20 @@ func (m *mockRepository) UpdateSessionWorkflowStep(ctx context.Context, sessionI
 	return nil
 }
 func (m *mockRepository) UpdateSessionReviewStatus(ctx context.Context, sessionID string, status string) error {
+	return nil
+}
+
+// Task Plan operations
+func (m *mockRepository) CreateTaskPlan(ctx context.Context, plan *models.TaskPlan) error {
+	return nil
+}
+func (m *mockRepository) GetTaskPlan(ctx context.Context, taskID string) (*models.TaskPlan, error) {
+	return nil, nil
+}
+func (m *mockRepository) UpdateTaskPlan(ctx context.Context, plan *models.TaskPlan) error {
+	return nil
+}
+func (m *mockRepository) DeleteTaskPlan(ctx context.Context, taskID string) error {
 	return nil
 }
 
