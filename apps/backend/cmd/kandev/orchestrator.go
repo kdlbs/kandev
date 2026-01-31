@@ -36,7 +36,7 @@ func provideOrchestrator(
 	orchestratorSvc := orchestrator.NewService(serviceCfg, eventBus, agentManagerClient, taskRepoAdapter, taskRepo, userSvc, log)
 	taskSvc.SetExecutionStopper(orchestratorSvc)
 
-	msgCreator := &messageCreatorAdapter{svc: taskSvc}
+	msgCreator := &messageCreatorAdapter{svc: taskSvc, logger: log}
 	orchestratorSvc.SetMessageCreator(msgCreator)
 
 	orchestratorSvc.SetTurnService(newTurnServiceAdapter(taskSvc))

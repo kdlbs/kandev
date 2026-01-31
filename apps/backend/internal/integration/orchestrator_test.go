@@ -486,11 +486,14 @@ func (a *testMessageCreatorAdapter) CreateUserMessage(ctx context.Context, taskI
 	return err
 }
 
-func (a *testMessageCreatorAdapter) CreateToolCallMessage(ctx context.Context, taskID, toolCallID, title, status, agentSessionID, turnID string, normalized *streams.NormalizedPayload) error {
+func (a *testMessageCreatorAdapter) CreateToolCallMessage(ctx context.Context, taskID, toolCallID, parentToolCallID, title, status, agentSessionID, turnID string, normalized *streams.NormalizedPayload) error {
 	metadata := map[string]interface{}{
 		"tool_call_id": toolCallID,
 		"title":        title,
 		"status":       status,
+	}
+	if parentToolCallID != "" {
+		metadata["parent_tool_call_id"] = parentToolCallID
 	}
 	if normalized != nil {
 		metadata["normalized"] = normalized
@@ -507,8 +510,8 @@ func (a *testMessageCreatorAdapter) CreateToolCallMessage(ctx context.Context, t
 	return err
 }
 
-func (a *testMessageCreatorAdapter) UpdateToolCallMessage(ctx context.Context, taskID, toolCallID, status, result, agentSessionID, title string, normalized *streams.NormalizedPayload) error {
-	return a.svc.UpdateToolCallMessage(ctx, agentSessionID, toolCallID, status, result, title, normalized)
+func (a *testMessageCreatorAdapter) UpdateToolCallMessage(ctx context.Context, taskID, toolCallID, parentToolCallID, status, result, agentSessionID, title, turnID, msgType string, normalized *streams.NormalizedPayload) error {
+	return a.svc.UpdateToolCallMessageWithCreate(ctx, agentSessionID, toolCallID, parentToolCallID, status, result, title, normalized, taskID, turnID, msgType)
 }
 
 func (a *testMessageCreatorAdapter) CreateSessionMessage(ctx context.Context, taskID, content, agentSessionID, messageType, turnID string, metadata map[string]interface{}, requestsInput bool) error {

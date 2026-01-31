@@ -1,9 +1,11 @@
 'use client';
 
-import { useState, useRef } from 'react';
-import { IconCheck, IconX, IconLoader2, IconTerminal, IconChevronDown, IconChevronRight } from '@tabler/icons-react';
-import { cn } from '@/lib/utils';
+import { useState, useRef, memo, useCallback } from 'react';
+import { IconCheck, IconX, IconTerminal } from '@tabler/icons-react';
+import { GridSpinner } from '@/components/grid-spinner';
+import { transformPathsInText } from '@/lib/utils';
 import type { Message } from '@/lib/types/http';
+import { ExpandableRow } from './expandable-row';
 
 type ShellExecOutput = {
   exit_code?: number;
@@ -31,14 +33,22 @@ type ToolExecuteMetadata = {
   normalized?: NormalizedPayload;
 };
 
-export function ToolExecuteMessage({ comment }: { comment: Message }) {
+type ToolExecuteMessageProps = {
+  comment: Message;
+  worktreePath?: string;
+};
+
+export const ToolExecuteMessage = memo(function ToolExecuteMessage({ comment, worktreePath }: ToolExecuteMessageProps) {
   const metadata = comment.metadata as ToolExecuteMetadata | undefined;
   const [manualExpandState, setManualExpandState] = useState<boolean | null>(null);
   const prevStatusRef = useRef(metadata?.status);
 
   const status = metadata?.status;
-  const output = metadata?.normalized?.shell_exec?.output;
+  const shellExec = metadata?.normalized?.shell_exec;
+  const output = shellExec?.output;
+  const workDir = shellExec?.work_dir;
   const hasOutput = output?.stdout || output?.stderr;
+  const hasExpandableContent = hasOutput || workDir;
   const isSuccess = status === 'complete' && (output?.exit_code === 0 || output?.exit_code === undefined);
 
   // Reset manual state when status changes (allows auto-expand behavior to resume)
@@ -50,7 +60,12 @@ export function ToolExecuteMessage({ comment }: { comment: Message }) {
   }
 
   // Derive expanded state: manual override takes precedence, otherwise auto-expand when running
-  const isExpanded = manualExpandState ?? (status === 'running');
+  const autoExpanded = status === 'running';
+  const isExpanded = manualExpandState ?? autoExpanded;
+
+  const handleToggle = useCallback(() => {
+    setManualExpandState((prev) => !(prev ?? autoExpanded));
+  }, [autoExpanded]);
 
   const getStatusIcon = () => {
     switch (status) {
@@ -59,56 +74,49 @@ export function ToolExecuteMessage({ comment }: { comment: Message }) {
       case 'error':
         return <IconX className="h-3.5 w-3.5 text-red-500" />;
       case 'running':
-        return <IconLoader2 className="h-3.5 w-3.5 text-blue-500 animate-spin" />;
+        return <GridSpinner className="text-muted-foreground" />;
       default:
         return null;
     }
   };
 
+  // Format work_dir for display (make relative if possible)
+  const displayWorkDir = workDir ? transformPathsInText(workDir, worktreePath) : null;
+
   return (
-    <div className="w-full">
-      <div className="flex items-start gap-3 w-full">
-        <div className="flex-shrink-0 mt-0.5">
-          <IconTerminal className="h-4 w-4 text-muted-foreground" />
+    <ExpandableRow
+      icon={<IconTerminal className="h-4 w-4 text-muted-foreground" />}
+      header={
+        <div className="flex items-center gap-2 text-xs">
+          <span className="inline-flex items-center gap-1.5">
+            <span className="font-mono text-xs text-muted-foreground">{transformPathsInText(comment.content, worktreePath)}</span>
+            {!isSuccess && getStatusIcon()}
+          </span>
         </div>
-
-        <div className="flex-1 min-w-0 pt-0.5">
-          <div className="flex items-center gap-2 text-xs">
-            <button
-              type="button"
-              onClick={() => {
-                if (hasOutput) {
-                  setManualExpandState(!isExpanded);
-                }
-              }}
-              className={cn(
-                'inline-flex items-center gap-1.5 text-left',
-                hasOutput && 'cursor-pointer hover:opacity-70 transition-opacity'
-              )}
-              disabled={!hasOutput}
-            >
-              <span className="font-mono text-xs">{comment.content}</span>
-              {!isSuccess && getStatusIcon()}
-              {hasOutput && (isExpanded ? <IconChevronDown className="h-3.5 w-3.5 text-muted-foreground/50" /> : <IconChevronRight className="h-3.5 w-3.5 text-muted-foreground/50" />)}
-            </button>
+      }
+      hasExpandableContent={!!hasExpandableContent}
+      isExpanded={isExpanded}
+      onToggle={handleToggle}
+    >
+      <div className="pl-4 border-l-2 border-border/30 space-y-2">
+        {/* Only show cwd when there's no output */}
+        {displayWorkDir && !hasOutput && (
+          <div className="text-xs text-muted-foreground">
+            <span className="opacity-60">cwd:</span>{' '}
+            <span className="font-mono" title={workDir}>{displayWorkDir}</span>
           </div>
-
-          {isExpanded && hasOutput && (
-            <div className="mt-2 pl-4 border-l-2 border-border/30">
-              {output?.stdout && (
-                <pre className="text-xs bg-muted/30 rounded p-2 overflow-x-auto whitespace-pre-wrap">
-                  {output.stdout}
-                </pre>
-              )}
-              {output?.stderr && (
-                <pre className="mt-2 text-xs bg-red-500/10 text-red-600 dark:text-red-400 rounded p-2 overflow-x-auto whitespace-pre-wrap">
-                  {output.stderr}
-                </pre>
-              )}
-            </div>
-          )}
-        </div>
+        )}
+        {output?.stdout && (
+          <pre className="text-xs bg-muted/30 rounded p-2 overflow-x-auto whitespace-pre-wrap max-h-[200px]">
+            {output.stdout}
+          </pre>
+        )}
+        {output?.stderr && (
+          <pre className="text-xs bg-red-500/10 text-red-600 dark:text-red-400 rounded max-h-[200px] p-2 overflow-x-auto whitespace-pre-wrap">
+            {output.stderr}
+          </pre>
+        )}
       </div>
-    </div>
+    </ExpandableRow>
   );
-}
+});

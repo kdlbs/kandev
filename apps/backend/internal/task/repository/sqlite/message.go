@@ -220,7 +220,8 @@ func (r *Repository) DeleteMessage(ctx context.Context, id string) error {
 	return nil
 }
 
-// GetMessageByToolCallID retrieves a tool_call message by session ID and tool_call_id in metadata
+// GetMessageByToolCallID retrieves a tool message by session ID and tool_call_id in metadata
+// Searches all tool types: tool_call, tool_read, tool_edit, tool_execute, tool_search
 func (r *Repository) GetMessageByToolCallID(ctx context.Context, sessionID, toolCallID string) (*models.Message, error) {
 	message := &models.Message{}
 	var requestsInput int
@@ -228,7 +229,8 @@ func (r *Repository) GetMessageByToolCallID(ctx context.Context, sessionID, tool
 	var metadataJSON string
 	err := r.db.QueryRowContext(ctx, `
 		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at
-		FROM task_session_messages WHERE task_session_id = ? AND type = 'tool_call' AND json_extract(metadata, '$.tool_call_id') = ?
+		FROM task_session_messages WHERE task_session_id = ? AND type LIKE 'tool_%' AND json_extract(metadata, '$.tool_call_id') = ?
+		ORDER BY created_at ASC LIMIT 1
 	`, sessionID, toolCallID).Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.TurnID, &message.AuthorType, &message.AuthorID,
 		&message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt)
 	if err != nil {

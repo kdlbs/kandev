@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, FormEvent } from 'react';
+import { useEffect, useRef, useState, FormEvent, memo, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import { IconSettings } from '@tabler/icons-react';
 import {
@@ -88,7 +88,7 @@ type RepositorySelectorProps = {
   emptyMessage: string;
 };
 
-function RepositorySelector({
+const RepositorySelector = memo(function RepositorySelector({
   options,
   value,
   onValueChange,
@@ -110,7 +110,7 @@ function RepositorySelector({
       className={disabled ? undefined : 'cursor-pointer'}
     />
   );
-}
+});
 
 type BranchOption = {
   value: string;
@@ -128,7 +128,7 @@ type BranchSelectorProps = {
   emptyMessage: string;
 };
 
-function BranchSelector({
+const BranchSelector = memo(function BranchSelector({
   options,
   value,
   onValueChange,
@@ -150,7 +150,7 @@ function BranchSelector({
       className={disabled ? undefined : 'cursor-pointer'}
     />
   );
-}
+});
 
 type AgentSelectorProps = {
   options: Array<{ value: string; label: string; renderLabel: () => React.ReactNode }>;
@@ -161,7 +161,7 @@ type AgentSelectorProps = {
   triggerClassName?: string;
 };
 
-function AgentSelector({
+const AgentSelector = memo(function AgentSelector({
   options,
   value,
   onValueChange,
@@ -183,7 +183,122 @@ function AgentSelector({
       triggerClassName={triggerClassName}
     />
   );
-}
+});
+
+// Memoized text inputs to prevent re-rendering the entire dialog on every keystroke
+type TaskFormInputsProps = {
+  isSessionMode: boolean;
+  initialTitle: string;
+  initialDescription: string;
+  onTitleChange: (hasContent: boolean) => void;
+  onDescriptionChange: (hasContent: boolean) => void;
+  onKeyDown: (e: React.KeyboardEvent) => void;
+  titleValueRef: React.RefObject<{ getValue: () => string } | null>;
+  descriptionValueRef: React.RefObject<{ getValue: () => string } | null>;
+};
+
+const TaskFormInputs = memo(function TaskFormInputs({
+  isSessionMode,
+  initialTitle,
+  initialDescription,
+  onTitleChange,
+  onDescriptionChange,
+  onKeyDown,
+  titleValueRef,
+  descriptionValueRef,
+}: TaskFormInputsProps) {
+  const [title, setTitle] = useState(initialTitle);
+  const [description, setDescription] = useState(initialDescription);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Expose getValue methods via refs passed from parent
+  // This is an imperative handle pattern - refs are intentionally mutated
+  useEffect(() => {
+    const ref = titleValueRef as React.MutableRefObject<{ getValue: () => string } | null>;
+    if (ref) {
+      ref.current = { getValue: () => title };
+    }
+  }, [title, titleValueRef]);
+
+  useEffect(() => {
+    const ref = descriptionValueRef as React.MutableRefObject<{ getValue: () => string } | null>;
+    if (ref) {
+      // eslint-disable-next-line react-hooks/immutability
+      ref.current = { getValue: () => description };
+    }
+  }, [description, descriptionValueRef]);
+
+  // Auto-resize textarea
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    textarea.style.height = 'auto';
+    textarea.style.height = `${textarea.scrollHeight}px`;
+  }, [description]);
+
+  const handleTitleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const newValue = e.target.value;
+    const hadContent = title.trim().length > 0;
+    const hasContent = newValue.trim().length > 0;
+    setTitle(newValue);
+    if (hadContent !== hasContent) {
+      onTitleChange(hasContent);
+    }
+  }, [title, onTitleChange]);
+
+  const handleDescriptionChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const newValue = e.target.value;
+    const hadContent = description.trim().length > 0;
+    const hasContent = newValue.trim().length > 0;
+    setDescription(newValue);
+    if (hadContent !== hasContent) {
+      onDescriptionChange(hasContent);
+    }
+  }, [description, onDescriptionChange]);
+
+  return (
+    <>
+      {!isSessionMode && (
+        <div>
+          <Input
+            autoFocus
+            required
+            placeholder="Enter task title..."
+            value={title}
+            onChange={handleTitleChange}
+            disabled={isSessionMode}
+          />
+        </div>
+      )}
+      {isSessionMode && (
+        <div>
+          <Label htmlFor="task-title">Task</Label>
+          <Input
+            id="task-title"
+            value={title}
+            disabled
+            placeholder="Task"
+            className="bg-muted cursor-not-allowed mt-1.5"
+          />
+        </div>
+      )}
+      <div>
+        {isSessionMode && <Label htmlFor="prompt">Prompt</Label>}
+        <Textarea
+          id={isSessionMode ? 'prompt' : undefined}
+          ref={textareaRef}
+          placeholder={isSessionMode ? 'Describe what you want the agent to do...' : 'Write a prompt for the agent...'}
+          value={description}
+          onChange={handleDescriptionChange}
+          onKeyDown={onKeyDown}
+          rows={2}
+          className={isSessionMode ? 'min-h-[120px] resize-none mt-1.5' : 'min-h-[96px] max-h-[240px] resize-y overflow-auto'}
+          required={isSessionMode}
+        />
+      </div>
+    </>
+  );
+});
 
 export function TaskCreateDialog({
   open,
@@ -201,8 +316,12 @@ export function TaskCreateDialog({
 }: TaskCreateDialogProps) {
   const isSessionMode = mode === 'session';
   const isEditMode = submitLabel !== 'Create';
-  const [title, setTitle] = useState(initialValues?.title ?? '');
-  const [description, setDescription] = useState(initialValues?.description ?? '');
+  // Track only whether inputs have content (not the actual values) to minimize re-renders
+  const [hasTitle, setHasTitle] = useState(Boolean(initialValues?.title?.trim()));
+  const [hasDescription, setHasDescription] = useState(Boolean(initialValues?.description?.trim()));
+  // Refs to get actual values when needed
+  const titleInputRef = useRef<{ getValue: () => string } | null>(null);
+  const descriptionInputRef = useRef<{ getValue: () => string } | null>(null);
   const [repositoryId, setRepositoryId] = useState(initialValues?.repositoryId ?? '');
   const [branch, setBranch] = useState(initialValues?.branch ?? '');
   const [startAgent, setStartAgent] = useState(!isEditMode);
@@ -222,7 +341,6 @@ export function TaskCreateDialog({
   const executors = useAppStore((state) => state.executors.items);
   const environments = useAppStore((state) => state.environments.items);
   const settingsData = useAppStore((state) => state.settingsData);
-  const descriptionRef = useRef<HTMLTextAreaElement | null>(null);
   const { toast } = useToast();
   useSettingsData(open);
   const { repositories, isLoading: repositoriesLoading } = useRepositories(workspaceId, open);
@@ -236,8 +354,8 @@ export function TaskCreateDialog({
 
   useEffect(() => {
     if (!open) return;
-    setTitle(initialValues?.title ?? '');
-    setDescription(initialValues?.description ?? '');
+    setHasTitle(Boolean(initialValues?.title?.trim()));
+    setHasDescription(Boolean(initialValues?.description?.trim()));
     setRepositoryId(initialValues?.repositoryId ?? '');
     setBranch(initialValues?.branch ?? '');
     setStartAgent(!isEditMode);
@@ -314,59 +432,124 @@ export function TaskCreateDialog({
     }
   }, [branch, branches, repositoryId]);
 
-  const handleSelectLocalRepository = (path: string) => {
+  const handleSelectLocalRepository = useCallback((path: string) => {
     const selected = discoveredRepositories.find((repo) => repo.path === path) ?? null;
     setDiscoveredRepoPath(path);
     setSelectedLocalRepo(selected);
     setRepositoryId('');
     setBranch('');
     setLocalBranches([]);
-  };
+  }, [discoveredRepositories]);
+
+  // Memoized callback for RepositorySelector to prevent re-renders when typing
+  const handleRepositoryChange = useCallback((value: string) => {
+    const workspaceRepo = repositories.find((repo: Repository) => repo.id === value);
+    if (workspaceRepo) {
+      setRepositoryId(value);
+      setDiscoveredRepoPath('');
+      setSelectedLocalRepo(null);
+      setLocalBranches([]);
+      setBranch('');
+      return;
+    }
+    handleSelectLocalRepository(value);
+  }, [repositories, handleSelectLocalRepository]);
 
   const hasRepositorySelection = Boolean(repositoryId || selectedLocalRepo);
-  const branchOptions = repositoryId
+  const branchOptionsRaw = repositoryId
     ? branches
     : localBranches;
-  const normalizeRepoPath = (path: string) => path.replace(/\\/g, '/').replace(/\/+$/g, '');
-  const workspaceRepoPaths = new Set(
-    repositories
-      .map((repo: Repository) => repo.local_path)
-      .filter(Boolean)
-      .map((path: string) => normalizeRepoPath(path))
-  );
-  const localRepoOptions = discoveredRepositories.filter(
-    (repo: LocalRepository) => !workspaceRepoPaths.has(normalizeRepoPath(repo.path))
-  );
-  const repositoryOptions: RepositoryOption[] = [
-    ...repositories.map((repo: Repository) => ({
-      value: repo.id,
-      label: repo.name,
-      renderLabel: () => (
-        <span className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
-          <span className="shrink-0">{repo.name}</span>
-          <Badge
-            variant="secondary"
-            className="text-xs text-muted-foreground max-w-[140px] min-w-0 truncate ml-auto"
-            title={formatUserHomePath(repo.local_path)}
+
+  // Memoize repository options to prevent re-renders when typing
+  const repositoryOptions = useMemo(() => {
+    const normalizeRepoPath = (path: string) => path.replace(/\\/g, '/').replace(/\/+$/g, '');
+    const workspaceRepoPaths = new Set(
+      repositories
+        .map((repo: Repository) => repo.local_path)
+        .filter(Boolean)
+        .map((path: string) => normalizeRepoPath(path))
+    );
+    const localRepoOptions = discoveredRepositories.filter(
+      (repo: LocalRepository) => !workspaceRepoPaths.has(normalizeRepoPath(repo.path))
+    );
+    return [
+      ...repositories.map((repo: Repository) => ({
+        value: repo.id,
+        label: repo.name,
+        renderLabel: () => (
+          <span className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+            <span className="shrink-0">{repo.name}</span>
+            <Badge
+              variant="secondary"
+              className="text-xs text-muted-foreground max-w-[140px] min-w-0 truncate ml-auto"
+              title={formatUserHomePath(repo.local_path)}
+            >
+              {truncateRepoPath(repo.local_path, 24)}
+            </Badge>
+          </span>
+        ),
+      })),
+      ...localRepoOptions.map((repo: LocalRepository) => ({
+        value: repo.path,
+        label: truncateRepoPath(repo.path, 24),
+        renderLabel: () => (
+          <span
+            className="flex min-w-0 flex-1 items-center overflow-hidden"
+            title={formatUserHomePath(repo.path)}
           >
-            {truncateRepoPath(repo.local_path, 24)}
-          </Badge>
-        </span>
-      ),
-    })),
-    ...localRepoOptions.map((repo: LocalRepository) => ({
-      value: repo.path,
-      label: truncateRepoPath(repo.path, 24),
-      renderLabel: () => (
-        <span
-          className="flex min-w-0 flex-1 items-center overflow-hidden"
-          title={formatUserHomePath(repo.path)}
-        >
-          <span className="truncate">{truncateRepoPath(repo.path, 28)}</span>
-        </span>
-      ),
-    })),
-  ];
+            <span className="truncate">{truncateRepoPath(repo.path, 28)}</span>
+          </span>
+        ),
+      })),
+    ];
+  }, [repositories, discoveredRepositories]);
+
+  // Memoize branch options to prevent re-renders when typing
+  const branchOptions = useMemo(() => {
+    return branchOptionsRaw.map((branchObj: Branch) => {
+      const displayName =
+        branchObj.type === 'remote' && branchObj.remote
+          ? `${branchObj.remote}/${branchObj.name}`
+          : branchObj.name;
+      return {
+        value: displayName,
+        label: displayName,
+        renderLabel: () => (
+          <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
+            <span className="truncate" title={displayName}>
+              {displayName}
+            </span>
+            <Badge variant={branchObj.type === 'local' ? 'default' : 'secondary'} className="text-xs">
+              {branchObj.type === 'local' ? 'local' : branchObj.remote || 'remote'}
+            </Badge>
+          </span>
+        ),
+      };
+    });
+  }, [branchOptionsRaw]);
+
+  // Memoize agent profile options to prevent re-renders when typing
+  const agentProfileOptions = useMemo(() => {
+    return agentProfiles.map((profile: AgentProfileOption) => {
+      const parts = profile.label.split(' • ');
+      const agentLabel = parts[0] ?? profile.label;
+      const profileLabel = parts[1] ?? '';
+      return {
+        value: profile.id,
+        label: profile.label,
+        renderLabel: () => (
+          <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
+            <span className="truncate">{agentLabel}</span>
+            {profileLabel ? (
+              <Badge variant="secondary" className="text-xs">
+                {profileLabel}
+              </Badge>
+            ) : null}
+          </span>
+        ),
+      };
+    });
+  }, [agentProfiles]);
 
   useEffect(() => {
     if (!open || !workspaceId || !selectedLocalRepo) return;
@@ -440,13 +623,6 @@ export function TaskCreateDialog({
     setExecutorId(localExecutor?.id ?? executors[0].id);
   }, [open, isEditMode, executorId, executors, workspaceDefaults, isSessionMode, startAgent]);
 
-  useEffect(() => {
-    const textarea = descriptionRef.current;
-    if (!textarea) return;
-    textarea.style.height = 'auto';
-    textarea.style.height = `${textarea.scrollHeight}px`;
-  }, [description]);
-
   // Use keyboard shortcut hook for Cmd+Enter / Ctrl+Enter
   const handleKeyDown = useKeyboardShortcutHandler(SHORTCUTS.SUBMIT, (event) => {
     handleSubmit(event as unknown as FormEvent);
@@ -454,6 +630,10 @@ export function TaskCreateDialog({
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
+
+    // Get values from refs
+    const title = titleInputRef.current?.getValue() ?? '';
+    const description = descriptionInputRef.current?.getValue() ?? '';
 
     // Session mode - create a new session
     if (isSessionMode) {
@@ -468,7 +648,7 @@ export function TaskCreateDialog({
       });
 
       // Reset form
-      setDescription('');
+      setHasDescription(false);
       setAgentProfileId('');
       setExecutorId('');
       setEnvironmentId('');
@@ -526,8 +706,8 @@ export function TaskCreateDialog({
 
         onSuccess?.(updatedTask, 'edit', { taskSessionId });
       } finally {
-        setTitle('');
-        setDescription('');
+        setHasTitle(false);
+        setHasDescription(false);
         setRepositoryId('');
         setBranch('');
         setStartAgent(false);
@@ -587,8 +767,8 @@ export function TaskCreateDialog({
         taskSessionId: taskResponse.session_id ?? null,
       });
     } finally {
-      setTitle('');
-      setDescription('');
+      setHasTitle(false);
+      setHasDescription(false);
       setRepositoryId('');
       setBranch('');
       setStartAgent(!isEditMode);
@@ -600,8 +780,8 @@ export function TaskCreateDialog({
   };
 
   const handleCancel = () => {
-    setTitle('');
-    setDescription('');
+    setHasTitle(false);
+    setHasDescription(false);
     setRepositoryId('');
     setBranch('');
     setStartAgent(!isEditMode);
@@ -621,62 +801,24 @@ export function TaskCreateDialog({
         </DialogHeader>
         <form onSubmit={handleSubmit} className="flex flex-col gap-4 overflow-hidden">
           <div className="flex-1 space-y-4 overflow-y-auto pr-1">
-            {!isSessionMode && (
-              <div>
-                <Input
-                  autoFocus
-                  required
-                  placeholder="Enter task title..."
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  disabled={isSessionMode}
-                />
-              </div>
-            )}
-            {isSessionMode && (
-              <div>
-                <Label htmlFor="task-title">Task</Label>
-                <Input
-                  id="task-title"
-                  value={title}
-                  disabled
-                  placeholder="Task"
-                  className="bg-muted cursor-not-allowed mt-1.5"
-                />
-              </div>
-            )}
-            <div>
-              {isSessionMode && <Label htmlFor="prompt">Prompt</Label>}
-              <Textarea
-                id={isSessionMode ? 'prompt' : undefined}
-                ref={descriptionRef}
-                placeholder={isSessionMode ? 'Describe what you want the agent to do...' : 'Write a prompt for the agent...'}
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                onKeyDown={handleKeyDown}
-                rows={2}
-                className={isSessionMode ? 'min-h-[120px] resize-none mt-1.5' : 'min-h-[96px] max-h-[240px] resize-y overflow-auto'}
-                required={isSessionMode}
-              />
-            </div>
+            <TaskFormInputs
+              key={`${open}-${initialValues?.title ?? ''}-${initialValues?.description ?? ''}`}
+              isSessionMode={isSessionMode}
+              initialTitle={initialValues?.title ?? ''}
+              initialDescription={initialValues?.description ?? ''}
+              onTitleChange={setHasTitle}
+              onDescriptionChange={setHasDescription}
+              onKeyDown={handleKeyDown}
+              titleValueRef={titleInputRef}
+              descriptionValueRef={descriptionInputRef}
+            />
             {!isSessionMode && (
               <div className="grid gap-4 md:grid-cols-3">
                 <div>
                   <RepositorySelector
                     options={repositoryOptions}
                     value={repositoryId || discoveredRepoPath}
-                    onValueChange={(value) => {
-                      const workspaceRepo = repositories.find((repo: Repository) => repo.id === value);
-                      if (workspaceRepo) {
-                        setRepositoryId(value);
-                        setDiscoveredRepoPath('');
-                        setSelectedLocalRepo(null);
-                        setLocalBranches([]);
-                        setBranch('');
-                        return;
-                      }
-                      handleSelectLocalRepository(value);
-                    }}
+                    onValueChange={handleRepositoryChange}
                     placeholder={
                       !workspaceId
                         ? 'Select workspace first'
@@ -695,32 +837,9 @@ export function TaskCreateDialog({
                 </div>
               <div>
                 <BranchSelector
-                  options={branchOptions.map((branchObj: Branch) => {
-                    const displayName =
-                      branchObj.type === 'remote' && branchObj.remote
-                        ? `${branchObj.remote}/${branchObj.name}`
-                        : branchObj.name;
-                    // Use display name as unique value since it includes remote prefix
-                    return {
-                      value: displayName,
-                      label: displayName,
-                      renderLabel: () => (
-                        <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
-                          <span className="truncate" title={displayName}>
-                            {displayName}
-                          </span>
-                          <Badge variant={branchObj.type === 'local' ? 'default' : 'secondary'} className="text-xs">
-                            {branchObj.type === 'local' ? 'local' : branchObj.remote || 'remote'}
-                          </Badge>
-                        </span>
-                      ),
-                    };
-                  })}
+                  options={branchOptions}
                   value={branch}
-                  onValueChange={(displayName) => {
-                    // Store the full display name (e.g., "origin/master" or "master")
-                    setBranch(displayName);
-                  }}
+                  onValueChange={setBranch}
                   placeholder={
                     !hasRepositorySelection
                       ? 'Select repository first'
@@ -755,25 +874,7 @@ export function TaskCreateDialog({
                       </div>
                     ) : (
                     <AgentSelector
-                      options={agentProfiles.map((profile: AgentProfileOption) => ({
-                        value: profile.id,
-                        label: profile.label,
-                        renderLabel: () => {
-                          const parts = profile.label.split(' • ');
-                          const agentLabel = parts[0] ?? profile.label;
-                          const profileLabel = parts[1] ?? '';
-                          return (
-                            <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
-                              <span className="truncate">{agentLabel}</span>
-                              {profileLabel ? (
-                                <Badge variant="secondary" className="text-xs">
-                                  {profileLabel}
-                                </Badge>
-                              ) : null}
-                            </span>
-                          );
-                        },
-                      }))}
+                      options={agentProfileOptions}
                       value={agentProfileId}
                       onValueChange={setAgentProfileId}
                       placeholder={
@@ -796,25 +897,7 @@ export function TaskCreateDialog({
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
                   <AgentSelector
-                    options={agentProfiles.map((profile: AgentProfileOption) => ({
-                      value: profile.id,
-                      label: profile.label,
-                      renderLabel: () => {
-                        const parts = profile.label.split(' • ');
-                        const agentLabel = parts[0] ?? profile.label;
-                        const profileLabel = parts[1] ?? '';
-                        return (
-                          <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
-                            <span className="truncate">{agentLabel}</span>
-                            {profileLabel ? (
-                              <Badge variant="secondary" className="text-xs">
-                                {profileLabel}
-                              </Badge>
-                            ) : null}
-                          </span>
-                        );
-                      },
-                    }))}
+                    options={agentProfileOptions}
                     value={agentProfileId}
                     onValueChange={setAgentProfileId}
                     placeholder={agentProfilesLoading ? 'Loading agent profiles...' : 'Select agent profile'}
@@ -983,9 +1066,9 @@ export function TaskCreateDialog({
                 type="submit"
                 disabled={
                   isSessionMode
-                    ? !description.trim() || !agentProfileId
-                    : !title.trim() ||
-                    !description.trim() ||
+                    ? !hasDescription || !agentProfileId
+                    : !hasTitle ||
+                    !hasDescription ||
                     (!isEditMode && !repositoryId && !selectedLocalRepo) ||
                     (startAgent && !agentProfileId) ||
                     (isEditMode && startAgent && !editingTask?.repositoryId && !repositoryId)

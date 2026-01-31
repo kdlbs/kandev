@@ -1147,9 +1147,18 @@ func (wt *WorkspaceTracker) buildFileTreeNode(fullPath, relPath string, info os.
 
 // GetFileContent returns the content of a file
 func (wt *WorkspaceTracker) GetFileContent(reqPath string) (string, int64, error) {
-	// Resolve the full path with path traversal protection
-	fullPath := filepath.Join(wt.workDir, filepath.Clean(reqPath))
 	cleanWorkDir := filepath.Clean(wt.workDir)
+	cleanReqPath := filepath.Clean(reqPath)
+
+	// Resolve the full path - if already absolute and within workDir, use directly
+	var fullPath string
+	if filepath.IsAbs(cleanReqPath) && strings.HasPrefix(cleanReqPath, cleanWorkDir+string(os.PathSeparator)) {
+		fullPath = cleanReqPath
+	} else {
+		fullPath = filepath.Join(wt.workDir, cleanReqPath)
+	}
+
+	// Path traversal protection
 	if !strings.HasPrefix(fullPath, cleanWorkDir+string(os.PathSeparator)) && fullPath != cleanWorkDir {
 		return "", 0, fmt.Errorf("path traversal detected")
 	}

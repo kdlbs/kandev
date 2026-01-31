@@ -8,12 +8,34 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/lifecycle"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+// toolKindToMessageType maps the normalized tool kind to a frontend message type.
+func toolKindToMessageType(normalized *streams.NormalizedPayload) string {
+	if normalized == nil {
+		return "tool_call"
+	}
+	switch normalized.Kind() {
+	case streams.ToolKindReadFile:
+		return "tool_read"
+	case streams.ToolKindCodeSearch:
+		return "tool_search"
+	case streams.ToolKindModifyFile:
+		return "tool_edit"
+	case streams.ToolKindShellExec:
+		return "tool_execute"
+	case streams.ToolKindManageTodos:
+		return "todo"
+	default:
+		return "tool_call"
+	}
+}
 
 // Event handlers
 
@@ -679,6 +701,7 @@ func (s *Service) handleToolCallEvent(ctx context.Context, payload *lifecycle.Ag
 			ctx,
 			payload.TaskID,
 			payload.Data.ToolCallID,
+			payload.Data.ParentToolCallID, // Pass parent for subagent nesting
 			payload.Data.ToolTitle,
 			payload.Data.ToolStatus,
 			payload.SessionID,
@@ -831,6 +854,9 @@ func (s *Service) handleToolUpdateEvent(ctx context.Context, payload *lifecycle.
 		return
 	}
 
+	// Determine message type from normalized payload for fallback creation
+	msgType := toolKindToMessageType(payload.Data.Normalized)
+
 	// Handle all status updates (running, complete, error)
 	switch payload.Data.ToolStatus {
 	case "running", "complete", "completed", "success", "error", "failed":
@@ -838,11 +864,14 @@ func (s *Service) handleToolUpdateEvent(ctx context.Context, payload *lifecycle.
 			ctx,
 			payload.TaskID,
 			payload.Data.ToolCallID,
+			payload.Data.ParentToolCallID, // Pass parent for subagent nesting
 			payload.Data.ToolStatus,
 			"", // result - no longer used, tool results in NormalizedPayload
 			payload.SessionID,
-			payload.Data.ToolTitle,    // Include title from update event
-			payload.Data.Normalized,   // Pass normalized tool data for message metadata
+			payload.Data.ToolTitle,                // Include title from update event
+			s.getActiveTurnID(payload.SessionID), // Turn ID for fallback creation
+			msgType,                               // Message type for fallback creation
+			payload.Data.Normalized,               // Pass normalized tool data for message metadata
 		); err != nil {
 			s.logger.Warn("failed to update tool call message",
 				zap.String("task_id", payload.TaskID),

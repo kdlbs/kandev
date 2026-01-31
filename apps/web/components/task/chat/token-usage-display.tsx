@@ -1,5 +1,6 @@
 'use client';
 
+import { memo } from 'react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { useSessionContextWindow } from '@/hooks/domains/session/use-session-context-window';
@@ -26,7 +27,7 @@ function getCircleColor(efficiency: number): string {
   return 'text-blue-300';
 }
 
-export function TokenUsageDisplay({ sessionId, className }: TokenUsageDisplayProps) {
+export const TokenUsageDisplay = memo(function TokenUsageDisplay({ sessionId, className }: TokenUsageDisplayProps) {
   const contextWindow = useSessionContextWindow(sessionId);
 
   if (!contextWindow || contextWindow.size === 0) return null;
@@ -89,5 +90,5 @@ export function TokenUsageDisplay({ sessionId, className }: TokenUsageDisplayPro
       </TooltipContent>
     </Tooltip>
   );
-}
+});
 

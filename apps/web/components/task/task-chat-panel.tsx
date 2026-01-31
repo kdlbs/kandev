@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, memo } from 'react';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import { useSessionMessages } from '@/hooks/domains/session/use-session-messages';
 import { useSettingsData } from '@/hooks/domains/settings/use-settings-data';
@@ -15,11 +15,13 @@ import { ChatInputContainer } from '@/components/task/chat/chat-input-container'
 type TaskChatPanelProps = {
   onSend?: (message: string) => void;
   sessionId?: string | null;
+  onOpenFile?: (path: string) => void;
 };
 
-export function TaskChatPanel({
+export const TaskChatPanel = memo(function TaskChatPanel({
   onSend,
   sessionId = null,
+  onOpenFile,
 }: TaskChatPanelProps) {
   const [planModeEnabled, setPlanModeEnabled] = useState(false);
   const [isSending, setIsSending] = useState(false);
@@ -44,7 +46,7 @@ export function TaskChatPanel({
   const { messages, isLoading: messagesLoading } = useSessionMessages(resolvedSessionId);
 
   // Process messages (filtering, todos, etc.)
-  const { allMessages, permissionsByToolCallId, todoItems, agentMessageCount, pendingClarification } = useProcessedMessages(
+  const { allMessages, groupedItems, permissionsByToolCallId, childrenByParentToolCallId, todoItems, agentMessageCount, pendingClarification } = useProcessedMessages(
     messages,
     taskId,
     resolvedSessionId,
@@ -114,13 +116,17 @@ export function TaskChatPanel({
   return (
     <>
       <VirtualizedMessageList
+        items={groupedItems}
         messages={allMessages}
         permissionsByToolCallId={permissionsByToolCallId}
+        childrenByParentToolCallId={childrenByParentToolCallId}
         taskId={taskId ?? undefined}
         sessionId={resolvedSessionId}
         messagesLoading={messagesLoading}
         isWorking={isWorking}
         sessionState={session?.state}
+        worktreePath={session?.worktree_path}
+        onOpenFile={onOpenFile}
       />
 
       <div className="flex flex-col gap-2 mt-2">
@@ -149,4 +155,4 @@ export function TaskChatPanel({
       </div>
     </>
   );
-}
+});

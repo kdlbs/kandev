@@ -75,6 +75,10 @@ type AgentEvent struct {
 	// ToolCallID uniquely identifies the tool invocation.
 	ToolCallID string `json:"tool_call_id,omitempty"`
 
+	// ParentToolCallID identifies the parent Task tool call when this event
+	// comes from a subagent. Used for visual nesting in the UI.
+	ParentToolCallID string `json:"parent_tool_call_id,omitempty"`
+
 	// ToolName is the name of the tool being invoked.
 	ToolName string `json:"tool_name,omitempty"`
 

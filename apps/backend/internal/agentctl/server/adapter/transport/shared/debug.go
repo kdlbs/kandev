@@ -24,6 +24,10 @@ var debugLogDir = resolveDebugLogDir()
 // debugLogMu protects concurrent writes to debug log files.
 var debugLogMu sync.Mutex
 
+// initializedFiles tracks which log files have been truncated in this session.
+// First write to a file truncates it; subsequent writes append.
+var initializedFiles = make(map[string]bool)
+
 // Protocol constants for debug file naming
 const (
 	ProtocolACP        = "acp"
@@ -78,6 +82,7 @@ func LogNormalizedEvent(protocol, agentID string, event *streams.AgentEvent) {
 }
 
 // writeJSONLine writes a JSON entry as a line to the specified file.
+// On first write to a file in this session, the file is truncated.
 func writeJSONLine(logFile string, entry any) {
 	entryJSON, err := json.Marshal(entry)
 	if err != nil {
@@ -88,7 +93,16 @@ func writeJSONLine(logFile string, entry any) {
 	debugLogMu.Lock()
 	defer debugLogMu.Unlock()
 
-	f, err := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	// Determine open flags: truncate on first write, append on subsequent
+	flags := os.O_CREATE | os.O_WRONLY
+	if initializedFiles[logFile] {
+		flags |= os.O_APPEND
+	} else {
+		flags |= os.O_TRUNC
+		initializedFiles[logFile] = true
+	}
+
+	f, err := os.OpenFile(logFile, flags, 0644)
 	if err != nil {
 		log.Printf("[DEBUG] Failed to open log file %s: %v", logFile, err)
 		return

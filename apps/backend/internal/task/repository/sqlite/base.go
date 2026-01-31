@@ -427,6 +427,9 @@ func (r *Repository) initSchema() error {
 	if err := r.ensureColumn("task_session_messages", "task_session_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
+	if err := r.ensureColumn("task_session_messages", "turn_id", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
 
 	// Ensure container_id column exists for existing databases
 	if err := r.ensureColumn("task_sessions", "container_id", "TEXT NOT NULL DEFAULT ''"); err != nil {

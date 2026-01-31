@@ -1,6 +1,6 @@
 "use client"
 
-import * as React from "react"
+import { memo, useState } from "react"
 import { IconCheck, IconSelector } from "@tabler/icons-react"
 
 import { cn } from "@/lib/utils"
@@ -39,7 +39,7 @@ interface ComboboxProps {
   triggerClassName?: string
 }
 
-export function Combobox({
+export const Combobox = memo(function Combobox({
   options,
   value,
   onValueChange,
@@ -51,7 +51,7 @@ export function Combobox({
   className,
   triggerClassName,
 }: ComboboxProps) {
-  const [open, setOpen] = React.useState(false)
+  const [open, setOpen] = useState(false)
 
   const selectedOption = options.find((option) => option.value === value)
 
@@ -113,4 +113,4 @@ export function Combobox({
       </PopoverContent>
     </Popover>
   )
-}
+});

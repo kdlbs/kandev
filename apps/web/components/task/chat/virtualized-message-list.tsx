@@ -1,32 +1,42 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, memo } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { IconLoader2 } from '@tabler/icons-react';
+import { GridSpinner } from '@/components/grid-spinner';
 import { SessionPanelContent } from '@kandev/ui/pannel-session';
 import type { Message, TaskSessionState } from '@/lib/types/http';
+import type { RenderItem } from '@/hooks/use-processed-messages';
 import { MessageRenderer } from '@/components/task/chat/message-renderer';
+import { TurnGroupMessage } from '@/components/task/chat/messages/turn-group-message';
 import { AgentStatus } from '@/components/task/chat/messages/agent-status';
 import { useLazyLoadMessages } from '@/hooks/use-lazy-load-messages';
 
 type VirtualizedMessageListProps = {
+  items: RenderItem[];
   messages: Message[];
   permissionsByToolCallId: Map<string, Message>;
+  childrenByParentToolCallId: Map<string, Message[]>;
   taskId?: string;
   sessionId: string | null;
   messagesLoading: boolean;
   isWorking: boolean;
   sessionState?: TaskSessionState;
+  worktreePath?: string;
+  onOpenFile?: (path: string) => void;
 };
 
-export function VirtualizedMessageList({
+export const VirtualizedMessageList = memo(function VirtualizedMessageList({
+  items,
   messages,
   permissionsByToolCallId,
+  childrenByParentToolCallId,
   taskId,
   sessionId,
   messagesLoading,
   isWorking,
   sessionState,
+  worktreePath,
+  onOpenFile,
 }: VirtualizedMessageListProps) {
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const wasAtBottomRef = useRef(true);
@@ -35,7 +45,7 @@ export function VirtualizedMessageList({
   const showLoadingState = (messagesLoading || isInitialLoading) && !isWorking;
   const { loadMore, hasMore, isLoading: isLoadingMore } = useLazyLoadMessages(sessionId);
 
-  const itemCount = messages.length;
+  const itemCount = items.length;
 
   // eslint-disable-next-line react-hooks/incompatible-library
   const virtualizer = useVirtualizer({
@@ -45,26 +55,51 @@ export function VirtualizedMessageList({
     overscan: 6,
   });
 
-  const checkAtBottom = useCallback(() => {
+  // Use ref to track loading state to avoid recreating the scroll handler
+  const loadingRef = useRef({ hasMore, isLoadingMore });
+  loadingRef.current = { hasMore, isLoadingMore };
+
+  // Combined scroll handler: check if at bottom AND trigger lazy loading at top
+  const handleScroll = useCallback(() => {
     const element = messagesContainerRef.current;
     if (!element) return;
+
     const { scrollTop, scrollHeight, clientHeight } = element;
+
+    // Track if we're at the bottom for auto-scroll behavior
     wasAtBottomRef.current = scrollHeight - scrollTop - clientHeight < 48;
-  }, []);
+
+    // Trigger lazy load when scrolled near top
+    if (scrollTop < 40 && loadingRef.current.hasMore && !loadingRef.current.isLoadingMore) {
+      const prevScrollHeight = scrollHeight;
+      const prevScrollTop = scrollTop;
+      loadMore().then((added) => {
+        if (!added) return;
+        requestAnimationFrame(() => {
+          const nextScrollHeight = element.scrollHeight;
+          element.scrollTop = prevScrollTop + (nextScrollHeight - prevScrollHeight);
+        });
+      });
+    }
+  }, [loadMore]);
 
   useEffect(() => {
     const element = messagesContainerRef.current;
     if (!element) return;
-    element.addEventListener('scroll', checkAtBottom);
-    return () => element.removeEventListener('scroll', checkAtBottom);
-  }, [checkAtBottom]);
+    element.addEventListener('scroll', handleScroll);
+    return () => element.removeEventListener('scroll', handleScroll);
+  }, [handleScroll]);
 
   // Track last message content to detect streaming updates
   const lastMessageContent = useMemo(() => {
-    if (messages.length === 0) return '';
-    const lastMsg = messages[messages.length - 1];
-    return lastMsg?.content ?? '';
-  }, [messages]);
+    if (items.length === 0) return '';
+    const lastItem = items[items.length - 1];
+    if (lastItem.type === 'turn_group') {
+      const lastMsg = lastItem.messages[lastItem.messages.length - 1];
+      return lastMsg?.content ?? '';
+    }
+    return lastItem.message?.content ?? '';
+  }, [items]);
 
   // Scroll to bottom when new messages arrive or when last message content changes (streaming)
   useEffect(() => {
@@ -76,6 +111,17 @@ export function VirtualizedMessageList({
 
   // Scroll to bottom when agent starts running (running indicator appears)
   const isRunning = sessionState === 'CREATED' || sessionState === 'STARTING' || sessionState === 'RUNNING';
+
+  // Find the last turn_group ID to keep it expanded while turn is active
+  const lastTurnGroupId = useMemo(() => {
+    for (let i = items.length - 1; i >= 0; i--) {
+      const item = items[i];
+      if (item.type === 'turn_group') {
+        return item.id;
+      }
+    }
+    return null;
+  }, [items]);
   useEffect(() => {
     if (!isRunning) return;
     const element = messagesContainerRef.current;
@@ -85,31 +131,6 @@ export function VirtualizedMessageList({
       element.scrollTop = element.scrollHeight;
     });
   }, [isRunning]);
-
-  const virtualItems = virtualizer.getVirtualItems();
-
-  // Lazy load older messages when scrolling to top
-  useEffect(() => {
-    const [firstItem] = virtualItems;
-    if (!firstItem) return;
-    const element = messagesContainerRef.current;
-    if (!element) return;
-    if (firstItem.index !== 0 || element.scrollTop > 40) {
-      return;
-    }
-    if (!hasMore || isLoadingMore) {
-      return;
-    }
-    const prevScrollHeight = element.scrollHeight;
-    const prevScrollTop = element.scrollTop;
-    loadMore().then((added) => {
-      if (!added) return;
-      requestAnimationFrame(() => {
-        const nextScrollHeight = element.scrollHeight;
-        element.scrollTop = prevScrollTop + (nextScrollHeight - prevScrollHeight);
-      });
-    });
-  }, [virtualItems, hasMore, isLoadingMore, loadMore]);
 
   return (
       <SessionPanelContent
@@ -125,7 +146,7 @@ export function VirtualizedMessageList({
       {/* Show loading messages spinner when initially loading */}
       {showLoadingState && (
         <div className="flex items-center justify-center py-8 text-muted-foreground">
-          <IconLoader2 className="h-5 w-5 animate-spin mr-2" />
+          <GridSpinner className="text-primary mr-2" />
           <span>Loading messages...</span>
         </div>
       )}
@@ -139,7 +160,8 @@ export function VirtualizedMessageList({
       {!isInitialLoading && itemCount > 0 && (
         <div className="relative w-full" style={{ height: `${virtualizer.getTotalSize()}px` }}>
           {virtualizer.getVirtualItems().map((virtualRow) => {
-            const message = messages[virtualRow.index];
+            const item = items[virtualRow.index];
+
             return (
               <div
                 key={virtualRow.key}
@@ -149,12 +171,30 @@ export function VirtualizedMessageList({
                 style={{ transform: `translateY(${virtualRow.start}px)` }}
               >
                 <div className="pb-2">
-                  <MessageRenderer
-                    comment={message}
-                    isTaskDescription={message.id === 'task-description'}
-                    taskId={taskId}
-                    permissionsByToolCallId={permissionsByToolCallId}
-                  />
+                  {item.type === 'turn_group' ? (
+                    <TurnGroupMessage
+                      group={item}
+                      sessionId={sessionId}
+                      permissionsByToolCallId={permissionsByToolCallId}
+                      childrenByParentToolCallId={childrenByParentToolCallId}
+                      taskId={taskId}
+                      worktreePath={worktreePath}
+                      onOpenFile={onOpenFile}
+                      isLastGroup={item.id === lastTurnGroupId}
+                      isTurnActive={isRunning}
+                    />
+                  ) : (
+                    <MessageRenderer
+                      comment={item.message}
+                      isTaskDescription={item.message.id === 'task-description'}
+                      taskId={taskId}
+                      permissionsByToolCallId={permissionsByToolCallId}
+                      childrenByParentToolCallId={childrenByParentToolCallId}
+                      worktreePath={worktreePath}
+                      sessionId={sessionId ?? undefined}
+                      onOpenFile={onOpenFile}
+                    />
+                  )}
                 </div>
               </div>
             );
@@ -169,4 +209,4 @@ export function VirtualizedMessageList({
       />
     </SessionPanelContent>
   );
-}
+});

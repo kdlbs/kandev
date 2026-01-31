@@ -7,4 +7,6 @@
 {"key":"execute","input":{"tool_name":"execute","args":{"kind":"execute","raw_input":{"command":"npm test","cwd":"/workspace","max_wait_seconds":30}}},"expected":{"tool_type":"tool_execute","command":"npm test","cwd":"/workspace","timeout":30}}
 {"key":"execute:2","input":{"tool_name":"execute","args":{"kind":"execute","raw_input":{"command":"go build ./...","cwd":"","max_wait_seconds":0}}},"expected":{"tool_type":"tool_execute","command":"go build ./..."}}
 {"key":"execute:3","input":{"tool_name":"execute","args":{"kind":"execute","raw_input":{"command":"ls -la","cwd":"/tmp","max_wait_seconds":10}}},"expected":{"tool_type":"tool_execute","command":"ls -la","cwd":"/tmp","timeout":10}}
-{"key":"search","input":{"tool_name":"search","args":{"kind":"search","raw_input":{"query":"TODO"}}},"expected":{"tool_type":"tool_call"}}
+{"key":"search","input":{"tool_name":"search","args":{"kind":"search","raw_input":{"query":"TODO"}}},"expected":{"tool_type":"tool_search"}}
+{"key":"read:directory","input":{"tool_name":"read","args":{"kind":"read","raw_input":{"path":".","type":"directory"}}},"expected":{"tool_type":"tool_search","file_path":"."}}
+{"key":"unknown","input":{"tool_name":"custom_tool","args":{"kind":"custom_tool","raw_input":{"foo":"bar"}}},"expected":{"tool_type":"tool_call"}}

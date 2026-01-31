@@ -79,3 +79,7 @@ node_modules/
 # TypeScript
 *.tsbuildinfo
 apps/landing/next-env.d.ts
+
+# agent message logs
+raw-*.jsonl
+normalized-*.jsonl

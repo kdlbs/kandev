@@ -79,8 +79,9 @@ type Adapter struct {
 	stderrProvider StderrProvider
 
 	// Accumulators for streaming content
-	messageBuffer   string
-	reasoningBuffer string
+	messageBuffer          string
+	reasoningBuffer        string
+	currentReasoningItemID string // track current reasoning item for separator insertion
 
 	// Turn completion signaling
 	turnCompleteCh chan turnCompleteResult
@@ -388,6 +389,7 @@ func (a *Adapter) Prompt(ctx context.Context, message string) error {
 	// Reset accumulators for new turn
 	a.messageBuffer = ""
 	a.reasoningBuffer = ""
+	a.currentReasoningItemID = ""
 	// Create channel to wait for turn completion
 	a.turnCompleteCh = make(chan turnCompleteResult, 1)
 	a.mu.Unlock()
@@ -595,6 +597,11 @@ func (a *Adapter) handleNotification(method string, params json.RawMessage) {
 			return
 		}
 		a.mu.Lock()
+		// Add separator when switching to a new reasoning item
+		if p.ItemID != a.currentReasoningItemID && a.reasoningBuffer != "" {
+			a.reasoningBuffer += "\n\n"
+		}
+		a.currentReasoningItemID = p.ItemID
 		a.reasoningBuffer += p.Delta
 		a.mu.Unlock()
 		a.sendUpdate(AgentEvent{
@@ -613,6 +620,11 @@ func (a *Adapter) handleNotification(method string, params json.RawMessage) {
 			return
 		}
 		a.mu.Lock()
+		// Add separator when switching to a new reasoning item
+		if p.ItemID != a.currentReasoningItemID && a.reasoningBuffer != "" {
+			a.reasoningBuffer += "\n\n"
+		}
+		a.currentReasoningItemID = p.ItemID
 		a.reasoningBuffer += p.Delta
 		a.mu.Unlock()
 		a.sendUpdate(AgentEvent{
@@ -840,6 +852,30 @@ func (a *Adapter) handleNotification(method string, params json.RawMessage) {
 				ToolCallID:  p.Item.ID,
 				ToolStatus:  status,
 			}
+
+			// Include normalized payload for fallback message creation
+			// This ensures the correct message type is used if the message doesn't exist yet
+			switch p.Item.Type {
+			case "commandExecution":
+				args := map[string]any{
+					"command": p.Item.Command,
+					"cwd":     p.Item.Cwd,
+				}
+				update.NormalizedPayload = a.normalizer.NormalizeToolCall("commandExecution", args)
+			case "fileChange":
+				changesArgs := make([]any, 0, len(p.Item.Changes))
+				for _, c := range p.Item.Changes {
+					changesArgs = append(changesArgs, map[string]any{
+						"path": c.Path,
+						"diff": c.Diff,
+					})
+				}
+				args := map[string]any{
+					"changes": changesArgs,
+				}
+				update.NormalizedPayload = a.normalizer.NormalizeToolCall("fileChange", args)
+			}
+
 			// Include diff for file changes
 			if p.Item.Type == "fileChange" && len(p.Item.Changes) > 0 {
 				var diffs []string

@@ -150,6 +150,7 @@ export type MessageAddedPayload = {
   task_id: string;
   message_id: string;
   session_id: string;
+  turn_id?: string;
   author_type: 'user' | 'agent';
   author_id?: string;
   content: string;

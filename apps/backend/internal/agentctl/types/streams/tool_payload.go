@@ -1,5 +1,7 @@
 package streams
 
+import "encoding/json"
+
 // ToolKind categorizes the normalized tool operation
 type ToolKind string
 
@@ -19,50 +21,121 @@ const (
 
 // NormalizedPayload is the normalized tool data (discriminated union).
 // Exactly one of the kind-specific fields will be set based on Kind.
+// Fields are unexported to enforce use of factory functions (NewReadFile, NewShellExec, etc.)
 type NormalizedPayload struct {
-	Kind ToolKind `json:"kind"`
+	kind         ToolKind
+	readFile     *ReadFilePayload
+	modifyFile   *ModifyFilePayload
+	shellExec    *ShellExecPayload
+	codeSearch   *CodeSearchPayload
+	httpRequest  *HttpRequestPayload
+	generic      *GenericPayload
+	createTask   *CreateTaskPayload
+	subagentTask *SubagentTaskPayload
+	showPlan     *ShowPlanPayload
+	manageTodos  *ManageTodosPayload
+	misc         *MiscPayload
+}
 
-	// read_file
-	ReadFile *ReadFilePayload `json:"read_file,omitempty"`
+// --- Getters for NormalizedPayload ---
 
-	// modify_file
-	ModifyFile *ModifyFilePayload `json:"modify_file,omitempty"`
+func (p *NormalizedPayload) Kind() ToolKind                  { return p.kind }
+func (p *NormalizedPayload) ReadFile() *ReadFilePayload      { return p.readFile }
+func (p *NormalizedPayload) ModifyFile() *ModifyFilePayload  { return p.modifyFile }
+func (p *NormalizedPayload) ShellExec() *ShellExecPayload    { return p.shellExec }
+func (p *NormalizedPayload) CodeSearch() *CodeSearchPayload  { return p.codeSearch }
+func (p *NormalizedPayload) HttpRequest() *HttpRequestPayload { return p.httpRequest }
+func (p *NormalizedPayload) Generic() *GenericPayload        { return p.generic }
+func (p *NormalizedPayload) CreateTask() *CreateTaskPayload  { return p.createTask }
+func (p *NormalizedPayload) SubagentTask() *SubagentTaskPayload { return p.subagentTask }
+func (p *NormalizedPayload) ShowPlan() *ShowPlanPayload      { return p.showPlan }
+func (p *NormalizedPayload) ManageTodos() *ManageTodosPayload { return p.manageTodos }
+func (p *NormalizedPayload) Misc() *MiscPayload              { return p.misc }
 
-	// shell_exec
-	ShellExec *ShellExecPayload `json:"shell_exec,omitempty"`
+// MarshalJSON implements custom JSON marshaling for NormalizedPayload.
+func (p *NormalizedPayload) MarshalJSON() ([]byte, error) {
+	type jsonPayload struct {
+		Kind         ToolKind             `json:"kind"`
+		ReadFile     *ReadFilePayload     `json:"read_file,omitempty"`
+		ModifyFile   *ModifyFilePayload   `json:"modify_file,omitempty"`
+		ShellExec    *ShellExecPayload    `json:"shell_exec,omitempty"`
+		CodeSearch   *CodeSearchPayload   `json:"code_search,omitempty"`
+		HttpRequest  *HttpRequestPayload  `json:"http_request,omitempty"`
+		Generic      *GenericPayload      `json:"generic,omitempty"`
+		CreateTask   *CreateTaskPayload   `json:"create_task,omitempty"`
+		SubagentTask *SubagentTaskPayload `json:"subagent_task,omitempty"`
+		ShowPlan     *ShowPlanPayload     `json:"show_plan,omitempty"`
+		ManageTodos  *ManageTodosPayload  `json:"manage_todos,omitempty"`
+		Misc         *MiscPayload         `json:"misc,omitempty"`
+	}
+	return json.Marshal(jsonPayload{
+		Kind:         p.kind,
+		ReadFile:     p.readFile,
+		ModifyFile:   p.modifyFile,
+		ShellExec:    p.shellExec,
+		CodeSearch:   p.codeSearch,
+		HttpRequest:  p.httpRequest,
+		Generic:      p.generic,
+		CreateTask:   p.createTask,
+		SubagentTask: p.subagentTask,
+		ShowPlan:     p.showPlan,
+		ManageTodos:  p.manageTodos,
+		Misc:         p.misc,
+	})
+}
 
-	// code_search
-	CodeSearch *CodeSearchPayload `json:"code_search,omitempty"`
-
-	// http_request
-	HttpRequest *HttpRequestPayload `json:"http_request,omitempty"`
-
-	// generic (fallback)
-	Generic *GenericPayload `json:"generic,omitempty"`
-
-	// create_task
-	CreateTask *CreateTaskPayload `json:"create_task,omitempty"`
-
-	// subagent_task
-	SubagentTask *SubagentTaskPayload `json:"subagent_task,omitempty"`
-
-	// show_plan
-	ShowPlan *ShowPlanPayload `json:"show_plan,omitempty"`
-
-	// manage_todos
-	ManageTodos *ManageTodosPayload `json:"manage_todos,omitempty"`
-
-	// misc
-	Misc *MiscPayload `json:"misc,omitempty"`
+// UnmarshalJSON implements custom JSON unmarshaling for NormalizedPayload.
+// This is required because the struct has unexported fields.
+func (p *NormalizedPayload) UnmarshalJSON(data []byte) error {
+	type jsonPayload struct {
+		Kind         ToolKind             `json:"kind"`
+		ReadFile     *ReadFilePayload     `json:"read_file,omitempty"`
+		ModifyFile   *ModifyFilePayload   `json:"modify_file,omitempty"`
+		ShellExec    *ShellExecPayload    `json:"shell_exec,omitempty"`
+		CodeSearch   *CodeSearchPayload   `json:"code_search,omitempty"`
+		HttpRequest  *HttpRequestPayload  `json:"http_request,omitempty"`
+		Generic      *GenericPayload      `json:"generic,omitempty"`
+		CreateTask   *CreateTaskPayload   `json:"create_task,omitempty"`
+		SubagentTask *SubagentTaskPayload `json:"subagent_task,omitempty"`
+		ShowPlan     *ShowPlanPayload     `json:"show_plan,omitempty"`
+		ManageTodos  *ManageTodosPayload  `json:"manage_todos,omitempty"`
+		Misc         *MiscPayload         `json:"misc,omitempty"`
+	}
+	var jp jsonPayload
+	if err := json.Unmarshal(data, &jp); err != nil {
+		return err
+	}
+	p.kind = jp.Kind
+	p.readFile = jp.ReadFile
+	p.modifyFile = jp.ModifyFile
+	p.shellExec = jp.ShellExec
+	p.codeSearch = jp.CodeSearch
+	p.httpRequest = jp.HttpRequest
+	p.generic = jp.Generic
+	p.createTask = jp.CreateTask
+	p.subagentTask = jp.SubagentTask
+	p.showPlan = jp.ShowPlan
+	p.manageTodos = jp.ManageTodos
+	p.misc = jp.Misc
+	return nil
 }
 
 // --- Kind-specific payloads ---
 
+// ReadFileOutput contains the result of a file read operation.
+type ReadFileOutput struct {
+	Content   string `json:"content,omitempty"`
+	LineCount int    `json:"line_count,omitempty"`
+	Truncated bool   `json:"truncated,omitempty"`
+	Language  string `json:"language,omitempty"`
+}
+
 // ReadFilePayload contains normalized data for file read operations.
 type ReadFilePayload struct {
-	FilePath string `json:"file_path"`
-	Offset   int    `json:"offset,omitempty"`
-	Limit    int    `json:"limit,omitempty"`
+	FilePath string          `json:"file_path"`
+	Offset   int             `json:"offset,omitempty"`
+	Limit    int             `json:"limit,omitempty"`
+	Output   *ReadFileOutput `json:"output,omitempty"`
 }
 
 // ModifyFilePayload contains normalized data for file modification operations.
@@ -111,12 +184,20 @@ type ShellExecOutput struct {
 	Stderr   string `json:"stderr,omitempty"`
 }
 
+// CodeSearchOutput contains the result of a code search operation.
+type CodeSearchOutput struct {
+	Files     []string `json:"files,omitempty"`
+	FileCount int      `json:"file_count,omitempty"`
+	Truncated bool     `json:"truncated,omitempty"`
+}
+
 // CodeSearchPayload contains normalized data for code search operations.
 type CodeSearchPayload struct {
-	Query   string `json:"query,omitempty"`
-	Pattern string `json:"pattern,omitempty"`
-	Path    string `json:"path,omitempty"`
-	Glob    string `json:"glob,omitempty"`
+	Query   string            `json:"query,omitempty"`
+	Pattern string            `json:"pattern,omitempty"`
+	Path    string            `json:"path,omitempty"`
+	Glob    string            `json:"glob,omitempty"`
+	Output  *CodeSearchOutput `json:"output,omitempty"`
 }
 
 // HttpRequestPayload contains normalized data for HTTP request operations.
@@ -171,13 +252,14 @@ type MiscPayload struct {
 	Details any    `json:"details,omitempty"`
 }
 
-// --- Constructor functions for NormalizedPayload ---
+// --- Factory functions for NormalizedPayload ---
+// These are the ONLY way to create NormalizedPayload instances.
 
 // NewReadFile creates a NormalizedPayload for file read operations.
 func NewReadFile(filePath string, offset, limit int) *NormalizedPayload {
 	return &NormalizedPayload{
-		Kind: ToolKindReadFile,
-		ReadFile: &ReadFilePayload{
+		kind: ToolKindReadFile,
+		readFile: &ReadFilePayload{
 			FilePath: filePath,
 			Offset:   offset,
 			Limit:    limit,
@@ -188,8 +270,8 @@ func NewReadFile(filePath string, offset, limit int) *NormalizedPayload {
 // NewModifyFile creates a NormalizedPayload for file modification operations.
 func NewModifyFile(filePath string, mutations []FileMutation) *NormalizedPayload {
 	return &NormalizedPayload{
-		Kind: ToolKindModifyFile,
-		ModifyFile: &ModifyFilePayload{
+		kind: ToolKindModifyFile,
+		modifyFile: &ModifyFilePayload{
 			FilePath:  filePath,
 			Mutations: mutations,
 		},
@@ -199,8 +281,8 @@ func NewModifyFile(filePath string, mutations []FileMutation) *NormalizedPayload
 // NewShellExec creates a NormalizedPayload for shell command execution.
 func NewShellExec(command, workDir, description string, timeout int, background bool) *NormalizedPayload {
 	return &NormalizedPayload{
-		Kind: ToolKindShellExec,
-		ShellExec: &ShellExecPayload{
+		kind: ToolKindShellExec,
+		shellExec: &ShellExecPayload{
 			Command:     command,
 			WorkDir:     workDir,
 			Description: description,
@@ -213,8 +295,8 @@ func NewShellExec(command, workDir, description string, timeout int, background 
 // NewCodeSearch creates a NormalizedPayload for code search operations.
 func NewCodeSearch(query, pattern, path, glob string) *NormalizedPayload {
 	return &NormalizedPayload{
-		Kind: ToolKindCodeSearch,
-		CodeSearch: &CodeSearchPayload{
+		kind: ToolKindCodeSearch,
+		codeSearch: &CodeSearchPayload{
 			Query:   query,
 			Pattern: pattern,
 			Path:    path,
@@ -226,8 +308,8 @@ func NewCodeSearch(query, pattern, path, glob string) *NormalizedPayload {
 // NewHttpRequest creates a NormalizedPayload for HTTP request operations.
 func NewHttpRequest(url, method string) *NormalizedPayload {
 	return &NormalizedPayload{
-		Kind: ToolKindHttpRequest,
-		HttpRequest: &HttpRequestPayload{
+		kind: ToolKindHttpRequest,
+		httpRequest: &HttpRequestPayload{
 			URL:    url,
 			Method: method,
 		},
@@ -237,8 +319,8 @@ func NewHttpRequest(url, method string) *NormalizedPayload {
 // NewGeneric creates a NormalizedPayload for unrecognized tools.
 func NewGeneric(name string, input any) *NormalizedPayload {
 	return &NormalizedPayload{
-		Kind: ToolKindGeneric,
-		Generic: &GenericPayload{
+		kind: ToolKindGeneric,
+		generic: &GenericPayload{
 			Name:  name,
 			Input: input,
 		},
@@ -248,8 +330,8 @@ func NewGeneric(name string, input any) *NormalizedPayload {
 // NewCreateTask creates a NormalizedPayload for task creation operations.
 func NewCreateTask(title, description string) *NormalizedPayload {
 	return &NormalizedPayload{
-		Kind: ToolKindCreateTask,
-		CreateTask: &CreateTaskPayload{
+		kind: ToolKindCreateTask,
+		createTask: &CreateTaskPayload{
 			Title:       title,
 			Description: description,
 		},
@@ -259,8 +341,8 @@ func NewCreateTask(title, description string) *NormalizedPayload {
 // NewSubagentTask creates a NormalizedPayload for subagent task invocations.
 func NewSubagentTask(description, prompt, subagentType string) *NormalizedPayload {
 	return &NormalizedPayload{
-		Kind: ToolKindSubagentTask,
-		SubagentTask: &SubagentTaskPayload{
+		kind: ToolKindSubagentTask,
+		subagentTask: &SubagentTaskPayload{
 			Description:  description,
 			Prompt:       prompt,
 			SubagentType: subagentType,
@@ -271,8 +353,8 @@ func NewSubagentTask(description, prompt, subagentType string) *NormalizedPayloa
 // NewShowPlan creates a NormalizedPayload for plan display operations.
 func NewShowPlan(summary string, steps []string) *NormalizedPayload {
 	return &NormalizedPayload{
-		Kind: ToolKindShowPlan,
-		ShowPlan: &ShowPlanPayload{
+		kind: ToolKindShowPlan,
+		showPlan: &ShowPlanPayload{
 			Summary: summary,
 			Steps:   steps,
 		},
@@ -282,8 +364,8 @@ func NewShowPlan(summary string, steps []string) *NormalizedPayload {
 // NewManageTodos creates a NormalizedPayload for todo management operations.
 func NewManageTodos(operation string, items []TodoItem) *NormalizedPayload {
 	return &NormalizedPayload{
-		Kind: ToolKindManageTodos,
-		ManageTodos: &ManageTodosPayload{
+		kind: ToolKindManageTodos,
+		manageTodos: &ManageTodosPayload{
 			Operation: operation,
 			Items:     items,
 		},
@@ -293,8 +375,8 @@ func NewManageTodos(operation string, items []TodoItem) *NormalizedPayload {
 // NewMisc creates a NormalizedPayload for miscellaneous operations.
 func NewMisc(label string, details any) *NormalizedPayload {
 	return &NormalizedPayload{
-		Kind: ToolKindMisc,
-		Misc: &MiscPayload{
+		kind: ToolKindMisc,
+		misc: &MiscPayload{
 			Label:   label,
 			Details: details,
 		},

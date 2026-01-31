@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useMemo, useState } from 'react';
+import { memo, useMemo, useState, useCallback } from 'react';
 import { Group, Panel, type Layout } from 'react-resizable-panels';
 import { useDefaultLayout } from '@/lib/layout/use-default-layout';
 import { TaskCenterPanel } from './task-center-panel';
@@ -57,13 +57,21 @@ export const TaskLayout = memo(function TaskLayout({
   );
   const hasDevScript = Boolean(repository?.dev_script?.trim());
 
-  const handleSelectDiff = (path: string, content?: string) => {
+  const handleSelectDiff = useCallback((path: string, content?: string) => {
     setSelectedDiff({ path, content });
-  };
+  }, []);
 
-  const handleOpenFile = (file: OpenFileTab) => {
+  const handleOpenFile = useCallback((file: OpenFileTab) => {
     setOpenFileRequest(file);
-  };
+  }, []);
+
+  const handleDiffHandled = useCallback(() => {
+    setSelectedDiff(null);
+  }, []);
+
+  const handleFileOpenHandled = useCallback(() => {
+    setOpenFileRequest(null);
+  }, []);
 
   const topFilesPanel = (
     <TaskFilesPanel
@@ -134,8 +142,8 @@ export const TaskLayout = memo(function TaskLayout({
                 <TaskCenterPanel
                   selectedDiff={selectedDiff}
                   openFileRequest={openFileRequest}
-                  onDiffHandled={() => setSelectedDiff(null)}
-                  onFileOpenHandled={() => setOpenFileRequest(null)}
+                  onDiffHandled={handleDiffHandled}
+                  onFileOpenHandled={handleFileOpenHandled}
                 />
               </Panel>
               <Panel id="preview" minSize="470px" className="min-h-0 min-w-0">
@@ -148,8 +156,8 @@ export const TaskLayout = memo(function TaskLayout({
             <TaskCenterPanel
               selectedDiff={selectedDiff}
               openFileRequest={openFileRequest}
-              onDiffHandled={() => setSelectedDiff(null)}
-              onFileOpenHandled={() => setOpenFileRequest(null)}
+              onDiffHandled={handleDiffHandled}
+              onFileOpenHandled={handleFileOpenHandled}
               sessionId={sessionId}
             />
           </Panel>

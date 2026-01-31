@@ -237,7 +237,8 @@ func (a *orchestratorAdapter) ResumeTaskSession(ctx context.Context, taskID, tas
 
 // messageCreatorAdapter adapts the task service to the orchestrator.MessageCreator interface
 type messageCreatorAdapter struct {
-	svc *taskservice.Service
+	svc    *taskservice.Service
+	logger *logger.Logger
 }
 
 // CreateAgentMessage creates a message with author_type="agent"
@@ -264,16 +265,66 @@ func (a *messageCreatorAdapter) CreateUserMessage(ctx context.Context, taskID, c
 	return err
 }
 
+// toolKindToMessageType maps the normalized tool kind to a frontend message type.
+// This allows the frontend to use specialized renderers for different tool categories.
+// Returns the message type and whether a warning should be logged (for unknown kinds).
+func toolKindToMessageType(kind streams.ToolKind) (string, bool) {
+	switch kind {
+	case streams.ToolKindReadFile:
+		return "tool_read", false
+	case streams.ToolKindCodeSearch:
+		return "tool_search", false
+	case streams.ToolKindModifyFile:
+		return "tool_edit", false
+	case streams.ToolKindShellExec:
+		return "tool_execute", false
+	case streams.ToolKindHttpRequest:
+		return "tool_call", false
+	case streams.ToolKindGeneric:
+		return "tool_call", false
+	case streams.ToolKindCreateTask:
+		return "tool_call", false
+	case streams.ToolKindSubagentTask:
+		return "tool_call", false
+	case streams.ToolKindShowPlan:
+		return "tool_call", false
+	case streams.ToolKindManageTodos:
+		return "todo", false
+	case streams.ToolKindMisc:
+		return "tool_call", false
+	default:
+		// Unknown kind - this shouldn't happen, log a warning
+		return "tool_call", true
+	}
+}
+
 // CreateToolCallMessage creates a message for a tool call
-func (a *messageCreatorAdapter) CreateToolCallMessage(ctx context.Context, taskID, toolCallID, title, status, agentSessionID, turnID string, normalized *streams.NormalizedPayload) error {
+func (a *messageCreatorAdapter) CreateToolCallMessage(ctx context.Context, taskID, toolCallID, parentToolCallID, title, status, agentSessionID, turnID string, normalized *streams.NormalizedPayload) error {
 	metadata := map[string]interface{}{
 		"tool_call_id": toolCallID,
 		"title":        title,
 		"status":       status,
 	}
+	// Add parent tool call ID for subagent nesting (if present)
+	if parentToolCallID != "" {
+		metadata["parent_tool_call_id"] = parentToolCallID
+	}
 	// Add normalized tool data to metadata for frontend consumption
 	if normalized != nil {
 		metadata["normalized"] = normalized
+	}
+
+	// Determine message type from the normalized tool kind
+	msgType := "tool_call"
+	if normalized != nil {
+		var warn bool
+		msgType, warn = toolKindToMessageType(normalized.Kind())
+		if warn {
+			a.logger.Warn("unknown tool kind falling back to tool_call",
+				zap.String("kind", string(normalized.Kind())),
+				zap.String("tool_call_id", toolCallID),
+				zap.String("title", title))
+		}
 	}
 
 	_, err := a.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
@@ -282,15 +333,16 @@ func (a *messageCreatorAdapter) CreateToolCallMessage(ctx context.Context, taskI
 		TurnID:        turnID,
 		Content:       title,
 		AuthorType:    "agent",
-		Type:          "tool_call",
+		Type:          msgType,
 		Metadata:      metadata,
 	})
 	return err
 }
 
-// UpdateToolCallMessage updates a tool call message's status
-func (a *messageCreatorAdapter) UpdateToolCallMessage(ctx context.Context, taskID, toolCallID, status, result, agentSessionID, title string, normalized *streams.NormalizedPayload) error {
-	return a.svc.UpdateToolCallMessage(ctx, agentSessionID, toolCallID, status, result, title, normalized)
+// UpdateToolCallMessage updates a tool call message's status.
+// If the message doesn't exist, it creates it using taskID, turnID, and msgType.
+func (a *messageCreatorAdapter) UpdateToolCallMessage(ctx context.Context, taskID, toolCallID, parentToolCallID, status, result, agentSessionID, title, turnID, msgType string, normalized *streams.NormalizedPayload) error {
+	return a.svc.UpdateToolCallMessageWithCreate(ctx, agentSessionID, toolCallID, parentToolCallID, status, result, title, normalized, taskID, turnID, msgType)
 }
 
 // CreateSessionMessage creates a message for non-chat session updates (status/progress/error/etc).
