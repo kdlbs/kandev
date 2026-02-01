@@ -19,7 +19,6 @@ import (
 	"github.com/fsnotify/fsnotify"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/logger"
-	"github.com/sourcegraph/go-diff/diff"
 	"go.uber.org/zap"
 )
 
@@ -1200,6 +1199,7 @@ func (wt *WorkspaceTracker) GetFileContent(reqPath string) (string, int64, error
 }
 
 // ApplyFileDiff applies a unified diff to a file with conflict detection
+// Uses git apply for reliable, battle-tested patch application
 func (wt *WorkspaceTracker) ApplyFileDiff(reqPath string, unifiedDiff string, originalHash string) (string, error) {
 	cleanWorkDir := filepath.Clean(wt.workDir)
 	cleanReqPath := filepath.Clean(reqPath)
@@ -1229,46 +1229,32 @@ func (wt *WorkspaceTracker) ApplyFileDiff(reqPath string, unifiedDiff string, or
 		return "", fmt.Errorf("conflict detected: file has been modified (expected hash %s, got %s)", originalHash, currentHash)
 	}
 
-	// Parse the unified diff
-	fileDiffs, err := diff.ParseMultiFileDiff([]byte(unifiedDiff))
+	// Write diff to a temporary patch file
+	patchFile := filepath.Join(wt.workDir, ".kandev-patch.tmp")
+	err = os.WriteFile(patchFile, []byte(unifiedDiff), 0644)
 	if err != nil {
-		return "", fmt.Errorf("failed to parse diff: %w", err)
+		return "", fmt.Errorf("failed to write patch file: %w", err)
 	}
+	defer os.Remove(patchFile)
 
-	if len(fileDiffs) == 0 {
-		return "", fmt.Errorf("no diffs found in input")
-	}
+	// Use git apply to apply the patch directly to the file
+	// This is much more reliable than custom diff application
+	cmd := exec.Command("git", "apply", "--unidiff-zero", "--whitespace=nowarn", patchFile)
+	cmd.Dir = wt.workDir
 
-	// We expect a single file diff
-	if len(fileDiffs) > 1 {
-		return "", fmt.Errorf("multiple file diffs not supported")
-	}
-
-	fileDiff := fileDiffs[0]
-
-	// Apply the diff to the current content
-	updatedContent, err := applyDiffToContent(currentContent, fileDiff)
+	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("failed to apply diff: %w", err)
+		return "", fmt.Errorf("git apply failed: %w\nOutput: %s", err, string(output))
 	}
 
-	// Write updated content atomically (write to temp file, then rename)
-	tempFile := fullPath + ".tmp"
-	err = os.WriteFile(tempFile, []byte(updatedContent), 0644)
+	// Read the updated content
+	updatedContent, err := os.ReadFile(fullPath)
 	if err != nil {
-		return "", fmt.Errorf("failed to write temp file: %w", err)
-	}
-
-	// Atomic rename
-	err = os.Rename(tempFile, fullPath)
-	if err != nil {
-		// Clean up temp file on error
-		_ = os.Remove(tempFile)
-		return "", fmt.Errorf("failed to rename temp file: %w", err)
+		return "", fmt.Errorf("failed to read updated file: %w", err)
 	}
 
 	// Calculate new hash
-	newHash := calculateSHA256(updatedContent)
+	newHash := calculateSHA256(string(updatedContent))
 
 	// Trigger filesystem change notification
 	select {
@@ -1277,7 +1263,7 @@ func (wt *WorkspaceTracker) ApplyFileDiff(reqPath string, unifiedDiff string, or
 		// Channel already has a pending trigger, skip
 	}
 
-	wt.logger.Debug("applied file diff",
+	wt.logger.Debug("applied file diff using git apply",
 		zap.String("path", reqPath),
 		zap.String("old_hash", currentHash),
 		zap.String("new_hash", newHash),
@@ -1290,102 +1276,6 @@ func (wt *WorkspaceTracker) ApplyFileDiff(reqPath string, unifiedDiff string, or
 func calculateSHA256(content string) string {
 	hash := sha256.Sum256([]byte(content))
 	return hex.EncodeToString(hash[:])
-}
-
-// applyDiffToContent applies a parsed diff to content
-// This implementation correctly handles multiple hunks by processing them in order
-// and tracking line number shifts as changes are applied.
-func applyDiffToContent(content string, fileDiff *diff.FileDiff) (string, error) {
-	lines := strings.Split(content, "\n")
-
-	// Sort hunks by starting line to ensure correct order
-	hunks := fileDiff.Hunks
-	if len(hunks) == 0 {
-		return content, nil
-	}
-
-	result := make([]string, 0, len(lines))
-	currentLine := 0 // Current position in original file (0-based)
-
-	for _, hunk := range hunks {
-		// Get hunk start position (convert to 0-based)
-		hunkStart := int(hunk.OrigStartLine)
-		if hunkStart > 0 {
-			hunkStart-- // Convert to 0-based index
-		}
-
-		// Add unchanged lines before this hunk
-		if hunkStart > currentLine {
-			result = append(result, lines[currentLine:hunkStart]...)
-			currentLine = hunkStart
-		}
-
-		// Apply the hunk starting from the correct position
-		newLines, linesConsumed, err := applyHunk(lines, hunkStart, hunk)
-		if err != nil {
-			return "", err
-		}
-		result = append(result, newLines...)
-		currentLine = hunkStart + linesConsumed
-	}
-
-	// Add any remaining lines after the last hunk
-	if currentLine < len(lines) {
-		result = append(result, lines[currentLine:]...)
-	}
-
-	return strings.Join(result, "\n"), nil
-}
-
-// applyHunk applies a single hunk and returns the new lines and number of original lines consumed
-func applyHunk(lines []string, startIdx int, hunk *diff.Hunk) ([]string, int, error) {
-	result := make([]string, 0)
-	hunkLines := strings.Split(string(hunk.Body), "\n")
-	linesConsumed := 0
-
-	for _, hunkLine := range hunkLines {
-		if len(hunkLine) == 0 {
-			continue
-		}
-
-		switch hunkLine[0] {
-		case ' ': // Context line - verify and keep it
-			lineIdx := startIdx + linesConsumed
-			if lineIdx >= len(lines) {
-				return nil, 0, fmt.Errorf("hunk context line beyond file end at line %d", lineIdx+1)
-			}
-			// Verify context matches (optional but recommended for safety)
-			expectedLine := hunkLine[1:]
-			if lines[lineIdx] != expectedLine {
-				// Context mismatch - this could indicate the file has changed
-				// For now, we'll be lenient and just use the original line
-				// In production, you might want to fail here
-			}
-			result = append(result, lines[lineIdx])
-			linesConsumed++
-
-		case '-': // Deleted line - verify and skip it
-			lineIdx := startIdx + linesConsumed
-			if lineIdx >= len(lines) {
-				return nil, 0, fmt.Errorf("hunk deletion beyond file end at line %d", lineIdx+1)
-			}
-			// Skip this line (it's being deleted)
-			linesConsumed++
-
-		case '+': // Added line - insert it
-			result = append(result, hunkLine[1:])
-			// Don't increment linesConsumed - this is a new line
-
-		case '\\': // "\ No newline at end of file" - ignore
-			continue
-
-		default:
-			// Unknown hunk line type - skip it
-			continue
-		}
-	}
-
-	return result, linesConsumed, nil
 }
 
 // scoredMatch holds a file path and its match score for sorting
