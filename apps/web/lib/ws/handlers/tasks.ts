@@ -19,6 +19,7 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
           position: message.payload.position ?? 0,
           state: message.payload.state,
           repositoryId: message.payload.repository_id ?? existingTask?.repositoryId,
+          updatedAt: message.payload.updated_at ?? existingTask?.updatedAt,
         };
         return {
           ...state,
@@ -45,6 +46,7 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
           position: message.payload.position ?? 0,
           state: message.payload.state,
           repositoryId: message.payload.repository_id ?? existingTask?.repositoryId,
+          updatedAt: message.payload.updated_at ?? existingTask?.updatedAt,
         };
         return {
           ...state,
@@ -80,6 +82,7 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
           position: message.payload.position ?? 0,
           state: message.payload.state,
           repositoryId: message.payload.repository_id ?? existingTask?.repositoryId,
+          updatedAt: message.payload.updated_at ?? existingTask?.updatedAt,
         };
         return {
           ...state,

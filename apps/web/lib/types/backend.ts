@@ -80,6 +80,7 @@ export type TaskEventPayload = {
   priority?: number;
   position?: number;
   repository_id?: string;
+  updated_at?: string;
 };
 
 export type AgentUpdatePayload = {

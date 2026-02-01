@@ -82,6 +82,7 @@ function mapSnapshotToKanban(snapshot: BoardSnapshot, newBoardId: string) {
       state: task.state,
       repositoryId: task.repositories?.[0]?.repository_id ?? undefined,
       primarySessionId: task.primary_session_id ?? undefined,
+      updatedAt: task.updated_at,
     })),
   };
 }
@@ -173,7 +174,8 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({ workspaceId
         workflowStepId: task.workflowStepId,
         repositoryPath: task.repositoryId ? repositoryPathsById.get(task.repositoryId) : undefined,
         diffStats: sessionInfo.diffStats,
-        updatedAt: sessionInfo.updatedAt,
+        // Use session's updatedAt if available, otherwise fall back to task's updatedAt
+        updatedAt: sessionInfo.updatedAt ?? task.updatedAt,
       };
     });
   }, [repositoriesByWorkspace, tasks, workspaceId, getSessionInfoForTask]);
@@ -210,17 +212,32 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({ workspaceId
 
 
   const handleSelectTask = useCallback(
-    async (taskId: string) => {
-      const sessions = await loadTaskSessionsForTask(taskId);
-      const sessionId = sessions[0]?.id ?? null;
-      if (!sessionId) {
-        setActiveTask(taskId);
+    (taskId: string) => {
+      // Get task from kanban state to check for primarySessionId
+      const kanbanTasks = store.getState().kanban.tasks;
+      const task = kanbanTasks.find((t) => t.id === taskId);
+
+      // If task has primarySessionId, switch immediately (instant UX)
+      if (task?.primarySessionId) {
+        setActiveSession(taskId, task.primarySessionId);
+        updateUrl(task.primarySessionId);
+        // Load sessions in background to update cache (non-blocking)
+        loadTaskSessionsForTask(taskId);
         return;
       }
-      setActiveSession(taskId, sessionId);
-      updateUrl(sessionId);
+
+      // Fallback: load sessions first if no primarySessionId
+      loadTaskSessionsForTask(taskId).then((sessions) => {
+        const sessionId = sessions[0]?.id ?? null;
+        if (!sessionId) {
+          setActiveTask(taskId);
+          return;
+        }
+        setActiveSession(taskId, sessionId);
+        updateUrl(sessionId);
+      });
     },
-    [loadTaskSessionsForTask, setActiveSession, setActiveTask, updateUrl]
+    [loadTaskSessionsForTask, setActiveSession, setActiveTask, updateUrl, store]
   );
 
   // Handle board change - fetch new board data and navigate to most recent task's session
@@ -292,6 +309,7 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({ workspaceId
           position: task.position ?? 0,
           state: task.state,
           repositoryId: task.repositories?.[0]?.repository_id ?? undefined,
+          updatedAt: task.updated_at,
         };
         return {
           ...state,

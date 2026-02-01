@@ -49,19 +49,51 @@ export function TaskPageContent({
     effectiveTaskId ? state.kanban.tasks.find((item: KanbanState['tasks'][number]) => item.id === effectiveTaskId) ?? null : null
   );
   const task = useMemo(() => {
-    const baseTask = taskDetails ?? initialTask;
-    if (!baseTask) return null;
-    if (!kanbanTask) return baseTask;
-    return {
-      ...baseTask,
-      title: kanbanTask.title ?? baseTask.title,
-      description: kanbanTask.description ?? baseTask.description,
-      workflow_step_id: (kanbanTask.workflowStepId as string | undefined) ?? baseTask.workflow_step_id,
-      position: kanbanTask.position ?? baseTask.position,
-      state: (kanbanTask.state as Task['state'] | undefined) ?? baseTask.state,
-      repositories: baseTask.repositories,
-    };
-  }, [taskDetails, initialTask, kanbanTask]);
+    // Only use taskDetails if it matches the current task ID (avoid mixing old/new data)
+    const matchingTaskDetails = taskDetails?.id === effectiveTaskId ? taskDetails : null;
+    const matchingInitialTask = initialTask?.id === effectiveTaskId ? initialTask : null;
+    const baseTask = matchingTaskDetails ?? matchingInitialTask;
+
+    if (!baseTask && !kanbanTask) return null;
+
+    // If we have full task details, merge with kanban updates
+    if (baseTask) {
+      if (!kanbanTask) return baseTask;
+      return {
+        ...baseTask,
+        title: kanbanTask.title ?? baseTask.title,
+        description: kanbanTask.description ?? baseTask.description,
+        workflow_step_id: (kanbanTask.workflowStepId as string | undefined) ?? baseTask.workflow_step_id,
+        position: kanbanTask.position ?? baseTask.position,
+        state: (kanbanTask.state as Task['state'] | undefined) ?? baseTask.state,
+        repositories: baseTask.repositories,
+      };
+    }
+
+    // Fallback: construct minimal task from kanban data while full details load
+    // This allows immediate UI response when switching tasks
+    if (kanbanTask) {
+      // Reuse workspace/board from previous task context (same board)
+      const prevWorkspaceId = taskDetails?.workspace_id ?? initialTask?.workspace_id;
+      const prevBoardId = taskDetails?.board_id ?? initialTask?.board_id;
+      return {
+        id: kanbanTask.id,
+        title: kanbanTask.title,
+        description: kanbanTask.description ?? '',
+        workflow_step_id: kanbanTask.workflowStepId,
+        position: kanbanTask.position,
+        state: kanbanTask.state ?? 'CREATED',
+        workspace_id: prevWorkspaceId ?? '',
+        board_id: prevBoardId ?? '',
+        priority: 0,
+        repositories: [],
+        created_at: '',
+        updated_at: kanbanTask.updatedAt ?? '',
+      } as Task;
+    }
+
+    return null;
+  }, [taskDetails, initialTask, kanbanTask, effectiveTaskId]);
   useTasks(task?.board_id ?? null);
   const connectionStatus = useAppStore((state) => state.connection.status);
 
@@ -142,10 +174,22 @@ export function TaskPageContent({
   useEffect(() => {
     if (!activeTaskId) return;
     if (taskDetails?.id === activeTaskId) return;
+    // Skip fetch if we already have task in kanban state (same board) and we have essential data
+    // The kanban state already has title, description, state which covers most UI needs
+    // Only fetch for additional details like repositories, metadata, etc.
+    if (kanbanTask && taskDetails?.workspace_id && taskDetails?.board_id) {
+      // We have kanban data and can reuse workspace/board from current context
+      // Fetch in background without blocking (low priority)
+      fetchTask(activeTaskId, { cache: 'no-store' })
+        .then((response) => setTaskDetails(response))
+        .catch((error) => console.error('[TaskPageContent] Failed to load task details:', error));
+      return;
+    }
+    // Full fetch needed for first load or cross-board navigation
     fetchTask(activeTaskId, { cache: 'no-store' })
       .then((response) => setTaskDetails(response))
       .catch((error) => console.error('[TaskPageContent] Failed to load task details:', error));
-  }, [activeTaskId, taskDetails?.id]);
+  }, [activeTaskId, taskDetails?.id, taskDetails?.workspace_id, taskDetails?.board_id, kanbanTask]);
   const { repositories } = useRepositories(task?.workspace_id ?? null, Boolean(task?.workspace_id));
   const effectiveRepositories = repositories.length ? repositories : initialRepositories;
   const repository = useMemo(

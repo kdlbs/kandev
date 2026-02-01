@@ -32,6 +32,11 @@ type OrchestratorStarter interface {
 	// StartTask starts agent execution for a task.
 	// If workflowStepID is provided, prompt prefix/suffix and plan mode from the step are applied.
 	StartTask(ctx context.Context, taskID string, agentProfileID string, executorID string, priority int, prompt string, workflowStepID string) (*executor.TaskExecution, error)
+	// PrepareTaskSession creates a session entry without launching the agent.
+	// Returns the session ID immediately so it can be returned in the HTTP response.
+	PrepareTaskSession(ctx context.Context, taskID string, agentProfileID string, executorID string, workflowStepID string) (string, error)
+	// StartTaskWithSession starts agent execution for a task using a pre-created session.
+	StartTaskWithSession(ctx context.Context, taskID string, sessionID string, agentProfileID string, executorID string, priority int, prompt string, workflowStepID string) (*executor.TaskExecution, error)
 }
 
 func NewTaskHandlers(ctrl *controller.TaskController, orchestrator OrchestratorStarter, repo repository.Repository, planService *service.PlanService, log *logger.Logger) *TaskHandlers {
@@ -220,28 +225,36 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 
 	response := createTaskResponse{TaskDTO: resp}
 	if body.StartAgent && body.AgentProfileID != "" && h.orchestrator != nil {
-		// Launch agent asynchronously so the HTTP request can return immediately.
-		// The frontend will receive WebSocket updates when the agent actually starts.
-		// This allows the "new task" dialog to close right away while setup scripts run.
-		executorID := body.ExecutorID       // Capture for goroutine
-		workflowStepID := body.WorkflowStepID // Capture for goroutine
-		go func() {
-			// Use a longer timeout to accommodate setup scripts (which can take minutes for npm install, etc.)
-			startCtx, cancel := context.WithTimeout(context.Background(), constants.AgentLaunchTimeout)
-			defer cancel()
-			// Use task description as the initial prompt with workflow step config (prompt prefix/suffix, plan mode)
-			execution, err := h.orchestrator.StartTask(startCtx, resp.ID, body.AgentProfileID, executorID, body.Priority, resp.Description, workflowStepID)
-			if err != nil {
-				h.logger.Error("failed to start agent for task (async)", zap.Error(err), zap.String("task_id", resp.ID))
-				return
-			}
-			h.logger.Info("agent started for task (async)",
-				zap.String("task_id", resp.ID),
-				zap.String("session_id", execution.SessionID),
-				zap.String("executor_id", executorID),
-				zap.String("workflow_step_id", workflowStepID),
-				zap.String("execution_id", execution.AgentExecutionID))
-		}()
+		// Create session entry synchronously so we can return the session ID immediately
+		sessionID, err := h.orchestrator.PrepareTaskSession(reqCtx, resp.ID, body.AgentProfileID, body.ExecutorID, body.WorkflowStepID)
+		if err != nil {
+			h.logger.Error("failed to prepare session for task", zap.Error(err), zap.String("task_id", resp.ID))
+			// Continue without session - task was created successfully
+		} else {
+			response.TaskSessionID = sessionID
+
+			// Launch agent asynchronously so the HTTP request can return immediately.
+			// The frontend will receive WebSocket updates when the agent actually starts.
+			executorID := body.ExecutorID         // Capture for goroutine
+			workflowStepID := body.WorkflowStepID // Capture for goroutine
+			go func() {
+				// Use a longer timeout to accommodate setup scripts (which can take minutes for npm install, etc.)
+				startCtx, cancel := context.WithTimeout(context.Background(), constants.AgentLaunchTimeout)
+				defer cancel()
+				// Use task description as the initial prompt with workflow step config (prompt prefix/suffix, plan mode)
+				execution, err := h.orchestrator.StartTaskWithSession(startCtx, resp.ID, sessionID, body.AgentProfileID, executorID, body.Priority, resp.Description, workflowStepID)
+				if err != nil {
+					h.logger.Error("failed to start agent for task (async)", zap.Error(err), zap.String("task_id", resp.ID), zap.String("session_id", sessionID))
+					return
+				}
+				h.logger.Info("agent started for task (async)",
+					zap.String("task_id", resp.ID),
+					zap.String("session_id", execution.SessionID),
+					zap.String("executor_id", executorID),
+					zap.String("workflow_step_id", workflowStepID),
+					zap.String("execution_id", execution.AgentExecutionID))
+			}()
+		}
 	}
 
 	c.JSON(http.StatusOK, response)

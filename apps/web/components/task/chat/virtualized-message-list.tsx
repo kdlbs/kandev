@@ -133,17 +133,17 @@ export const VirtualizedMessageList = memo(function VirtualizedMessageList({
   }, [isRunning]);
 
   return (
-      <SessionPanelContent
-        ref={messagesContainerRef}
-        className="relative p-4"
-        wrapperClassName={isRunning ? 'border-flash-animation' : undefined}
-      >
+    <SessionPanelContent
+      ref={messagesContainerRef}
+      className="relative p-4"
+      wrapperClassName={isRunning ? 'border-flash-animation' : undefined}
+    >
       {isLoadingMore && hasMore && (
         <div className="absolute top-2 left-1/2 -translate-x-1/2 text-xs text-muted-foreground">
           Loading older messages...
         </div>
       )}
-      {/* Show loading messages spinner when initially loading */}
+      {/* Show loading messages spinner when initially loading, hide while agent is being created */}
       {showLoadingState && (
         <div className="flex items-center justify-center py-8 text-muted-foreground">
           <GridSpinner className="text-primary mr-2" />

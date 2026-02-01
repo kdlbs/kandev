@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState, FormEvent, memo, useMemo, useCallback } from 'react';
 import Link from 'next/link';
-import { IconSettings } from '@tabler/icons-react';
+import { useRouter } from 'next/navigation';
+import { IconSettings, IconLoader2 } from '@tabler/icons-react';
 import {
   Dialog,
   DialogContent,
@@ -45,6 +46,9 @@ import { useKeyboardShortcutHandler } from '@/hooks/use-keyboard-shortcut';
 import { KeyboardShortcutTooltip } from '@/components/keyboard-shortcut-tooltip';
 import { useToast } from '@/components/toast-provider';
 import { discoverRepositoriesAction, listLocalRepositoryBranchesAction } from '@/app/actions/workspaces';
+import { getLocalStorage, setLocalStorage } from '@/lib/local-storage';
+import { STORAGE_KEYS } from '@/lib/settings/constants';
+import { linkToSession } from '@/lib/links';
 
 interface TaskCreateDialogProps {
   open: boolean;
@@ -70,6 +74,7 @@ interface TaskCreateDialogProps {
     state?: Task['state'];
   };
   submitLabel?: string;
+  taskId?: string | null;
 }
 
 type RepositoryOption = {
@@ -313,9 +318,13 @@ export function TaskCreateDialog({
   onCreateSession,
   initialValues,
   submitLabel = 'Create',
+  taskId = null,
 }: TaskCreateDialogProps) {
+  const router = useRouter();
   const isSessionMode = mode === 'session';
   const isEditMode = submitLabel !== 'Create';
+  const [isCreatingSession, setIsCreatingSession] = useState(false);
+  const [isCreatingTask, setIsCreatingTask] = useState(false);
   // Track only whether inputs have content (not the actual values) to minimize re-renders
   const [hasTitle, setHasTitle] = useState(Boolean(initialValues?.title?.trim()));
   const [hasDescription, setHasDescription] = useState(Boolean(initialValues?.description?.trim()));
@@ -455,6 +464,12 @@ export function TaskCreateDialog({
     handleSelectLocalRepository(value);
   }, [repositories, handleSelectLocalRepository]);
 
+  // Memoized callback for AgentSelector to save selection to localStorage
+  const handleAgentProfileChange = useCallback((value: string) => {
+    setAgentProfileId(value);
+    setLocalStorage(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, value);
+  }, []);
+
   const hasRepositorySelection = Boolean(repositoryId || selectedLocalRepo);
   const branchOptionsRaw = repositoryId
     ? branches
@@ -584,6 +599,14 @@ export function TaskCreateDialog({
     if (!open || agentProfileId || agentProfiles.length === 0) return;
     if (!isSessionMode && !startAgent) return;
     if (isEditMode && agentProfiles.length > 1) return;
+
+    // Priority: last used → workspace default → first available
+    const lastUsedProfileId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, null);
+    if (lastUsedProfileId && agentProfiles.some((profile: AgentProfileOption) => profile.id === lastUsedProfileId)) {
+      setAgentProfileId(lastUsedProfileId);
+      return;
+    }
+
     const defaultProfileId = workspaceDefaults?.default_agent_profile_id ?? null;
     if (defaultProfileId && agentProfiles.some((profile: AgentProfileOption) => profile.id === defaultProfileId)) {
       setAgentProfileId(defaultProfileId);
@@ -640,20 +663,77 @@ export function TaskCreateDialog({
       const trimmedDescription = description.trim();
       if (!trimmedDescription || !agentProfileId) return;
 
-      onCreateSession?.({
-        prompt: trimmedDescription,
-        agentProfileId,
-        executorId,
-        environmentId,
-      });
+      // If onCreateSession is provided (legacy mode), delegate to parent
+      if (onCreateSession) {
+        onCreateSession({
+          prompt: trimmedDescription,
+          agentProfileId,
+          executorId,
+          environmentId,
+        });
+        // Reset form
+        setHasDescription(false);
+        setAgentProfileId('');
+        setExecutorId('');
+        setEnvironmentId('');
+        setShowAdvancedSettings(false);
+        onOpenChange(false);
+        return;
+      }
 
-      // Reset form
-      setHasDescription(false);
-      setAgentProfileId('');
-      setExecutorId('');
-      setEnvironmentId('');
-      setShowAdvancedSettings(false);
-      onOpenChange(false);
+      // Handle session creation directly with spinner and navigation
+      if (!taskId) return;
+
+      setIsCreatingSession(true);
+      try {
+        const client = getWebSocketClient();
+        if (!client) {
+          throw new Error('WebSocket client not available');
+        }
+
+        interface StartResponse {
+          success: boolean;
+          task_id: string;
+          agent_instance_id: string;
+          session_id?: string;
+          state: string;
+        }
+
+        const response = await client.request<StartResponse>(
+          'orchestrator.start',
+          {
+            task_id: taskId,
+            agent_profile_id: agentProfileId,
+            executor_id: executorId,
+            prompt: trimmedDescription,
+          },
+          15000
+        );
+
+        const newSessionId = response?.session_id;
+
+        // Reset form
+        setHasDescription(false);
+        setAgentProfileId('');
+        setExecutorId('');
+        setEnvironmentId('');
+        setShowAdvancedSettings(false);
+
+        // Navigate to the new session (this will unmount the dialog)
+        if (newSessionId) {
+          router.push(linkToSession(newSessionId));
+        } else {
+          onOpenChange(false);
+        }
+      } catch (error) {
+        toast({
+          title: 'Failed to create session',
+          description: error instanceof Error ? error.message : 'An error occurred while creating the session',
+          variant: 'error',
+        });
+      } finally {
+        setIsCreatingSession(false);
+      }
       return;
     }
 
@@ -728,6 +808,8 @@ export function TaskCreateDialog({
       targetColumnId = autoStartStep?.id ?? columnId;
       targetState = 'IN_PROGRESS';
     }
+
+    setIsCreatingTask(true);
     try {
       const taskResponse = await createTask({
         workspace_id: workspaceId,
@@ -757,16 +839,13 @@ export function TaskCreateDialog({
         agent_profile_id: startAgent ? agentProfileId || undefined : undefined,
         executor_id: startAgent ? executorId || undefined : undefined,
       });
-      console.log('[TaskCreateDialog] task created', {
-        taskId: taskResponse.id,
-        startAgent,
-        agentProfileId,
-        executorId,
-      });
+      // Try session_id first, then primary_session_id as fallback
+      const newSessionId = taskResponse.session_id ?? taskResponse.primary_session_id ?? null;
       onSuccess?.(taskResponse, 'create', {
-        taskSessionId: taskResponse.session_id ?? null,
+        taskSessionId: newSessionId,
       });
-    } finally {
+
+      // Reset form and close dialog
       setHasTitle(false);
       setHasDescription(false);
       setRepositoryId('');
@@ -775,7 +854,21 @@ export function TaskCreateDialog({
       setAgentProfileId('');
       setEnvironmentId('');
       setExecutorId('');
-      onOpenChange(false);
+
+      // Navigate to the new session if one was created (this will unmount the dialog)
+      if (newSessionId) {
+        router.push(linkToSession(newSessionId));
+      } else {
+        onOpenChange(false);
+      }
+    } catch (error) {
+      toast({
+        title: 'Failed to create task',
+        description: error instanceof Error ? error.message : 'An error occurred while creating the task',
+        variant: 'error',
+      });
+    } finally {
+      setIsCreatingTask(false);
     }
   };
 
@@ -876,7 +969,7 @@ export function TaskCreateDialog({
                     <AgentSelector
                       options={agentProfileOptions}
                       value={agentProfileId}
-                      onValueChange={setAgentProfileId}
+                      onValueChange={handleAgentProfileChange}
                       placeholder={
                         agentProfilesLoading
                           ? 'Loading agents...'
@@ -884,7 +977,7 @@ export function TaskCreateDialog({
                             ? 'No agents available'
                             : 'Select agent'
                       }
-                      disabled={agentProfilesLoading}
+                      disabled={agentProfilesLoading || isCreatingSession}
                     />
                     )}
                   </div>
@@ -899,9 +992,9 @@ export function TaskCreateDialog({
                   <AgentSelector
                     options={agentProfileOptions}
                     value={agentProfileId}
-                    onValueChange={setAgentProfileId}
+                    onValueChange={handleAgentProfileChange}
                     placeholder={agentProfilesLoading ? 'Loading agent profiles...' : 'Select agent profile'}
-                    disabled={agentProfilesLoading}
+                    disabled={agentProfilesLoading || isCreatingSession}
                     triggerClassName="w-[280px]"
                   />
                 </div>
@@ -1057,7 +1150,7 @@ export function TaskCreateDialog({
               </div>
             )}
             <DialogClose asChild>
-              <Button type="button" variant="outline" onClick={handleCancel}>
+              <Button type="button" variant="outline" onClick={handleCancel} disabled={isCreatingSession || isCreatingTask}>
                 Cancel
               </Button>
             </DialogClose>
@@ -1065,16 +1158,27 @@ export function TaskCreateDialog({
               <Button
                 type="submit"
                 disabled={
-                  isSessionMode
+                  isCreatingSession ||
+                  isCreatingTask ||
+                  (isSessionMode
                     ? !hasDescription || !agentProfileId
                     : !hasTitle ||
                     !hasDescription ||
                     (!isEditMode && !repositoryId && !selectedLocalRepo) ||
                     (startAgent && !agentProfileId) ||
-                    (isEditMode && startAgent && !editingTask?.repositoryId && !repositoryId)
+                    (isEditMode && startAgent && !editingTask?.repositoryId && !repositoryId))
                 }
               >
-                {isSessionMode ? 'Create Session' : submitLabel}
+                {isCreatingSession || isCreatingTask ? (
+                  <>
+                    <IconLoader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Creating...
+                  </>
+                ) : isSessionMode ? (
+                  'Create Session'
+                ) : (
+                  submitLabel
+                )}
               </Button>
             </KeyboardShortcutTooltip>
           </DialogFooter>

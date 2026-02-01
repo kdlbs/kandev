@@ -99,10 +99,11 @@ export const TaskItem = memo(function TaskItem({
         }
       }}
       className={cn(
-        'group relative flex w-full items-start gap-2 rounded-md border border-border/50 bg-card/50 p-2 text-left text-sm outline-none cursor-pointer',
-        'transition-colors duration-75',
-        'hover:bg-card/80 hover:border-border/70',
-        isSelected && 'bg-card border-border/70'
+        'group relative flex w-full items-start gap-2 rounded-md border p-2 text-left text-sm outline-none cursor-pointer',
+        'transition-all duration-100',
+        isSelected
+          ? 'bg-primary/10 border-primary/50'
+          : 'bg-card/50 border-border/50 hover:bg-card/80 hover:border-border/70'
       )}
     >
       {/* Content */}
