@@ -504,6 +504,46 @@ func (g *GitOperator) Unstage(ctx context.Context, paths []string) (*GitOperatio
 	return result, nil
 }
 
+// Discard discards changes to files, reverting them to HEAD state.
+// This removes both staged and unstaged changes.
+// If paths is empty, returns an error (discarding all files requires explicit confirmation).
+func (g *GitOperator) Discard(ctx context.Context, paths []string) (*GitOperationResult, error) {
+	if !g.tryLock("discard") {
+		return nil, ErrOperationInProgress
+	}
+	defer g.unlock()
+
+	result := &GitOperationResult{
+		Operation: "discard",
+	}
+
+	// Require explicit paths for safety
+	if len(paths) == 0 {
+		result.Error = "no files specified to discard"
+		return result, nil
+	}
+
+	// Use git restore to discard changes (Git 2.23+)
+	// --source=HEAD: restore from HEAD
+	// --staged: remove from index
+	// --worktree: remove from working tree
+	// --: separator between options and paths
+	args := append([]string{"restore", "--source=HEAD", "--staged", "--worktree", "--"}, paths...)
+
+	output, err := g.runGitCommand(ctx, args...)
+	result.Output = output
+
+	if err != nil {
+		result.Error = err.Error()
+		return result, nil
+	}
+
+	result.Success = true
+	g.triggerFsNotify()
+	g.logger.Info("discard completed", zap.Int("files", len(paths)))
+	return result, nil
+}
+
 // Abort aborts an in-progress merge or rebase operation.
 func (g *GitOperator) Abort(ctx context.Context, operation string) (*GitOperationResult, error) {
 	if !g.tryLock("abort") {

@@ -120,6 +120,17 @@ func (c *Client) GitUnstage(ctx context.Context, paths []string) (*GitOperationR
 	return c.gitOperation(ctx, "/api/v1/git/unstage", payload)
 }
 
+// GitDiscard discards changes to files, reverting them to HEAD.
+// Paths must not be empty - at least one file must be specified.
+func (c *Client) GitDiscard(ctx context.Context, paths []string) (*GitOperationResult, error) {
+	payload := struct {
+		Paths []string `json:"paths"`
+	}{
+		Paths: paths,
+	}
+	return c.gitOperation(ctx, "/api/v1/git/discard", payload)
+}
+
 // GitCreatePR creates a pull request using the gh CLI.
 func (c *Client) GitCreatePR(ctx context.Context, title, body, baseBranch string) (*PRCreateResult, error) {
 	payload := struct {

@@ -16,6 +16,16 @@ import {
 import { TabsContent } from '@kandev/ui/tabs';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
 import { SessionPanel, SessionPanelContent } from '@kandev/ui/pannel-session';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@kandev/ui/alert-dialog';
 import { LineStat } from '@/components/diff-stat';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/components/state-provider';
@@ -89,6 +99,8 @@ const splitPath = (path: string) => {
 
 const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiff, onOpenFile }: TaskFilesPanelProps) {
   const [topTab, setTopTab] = useState<'diff' | 'files'>('diff');
+  const [showDiscardDialog, setShowDiscardDialog] = useState(false);
+  const [fileToDiscard, setFileToDiscard] = useState<string | null>(null);
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const gitStatus = useSessionGitStatus(activeSessionId);
   const { commits } = useSessionCommits(activeSessionId ?? null);
@@ -137,6 +149,42 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiff, onOpenFile }
       void fetchCommitDiff(commitSha);
     }
   }, [expandedCommit, fetchCommitDiff]);
+
+  // Handle discard changes
+  const handleDiscardClick = useCallback((filePath: string) => {
+    setFileToDiscard(filePath);
+    setShowDiscardDialog(true);
+  }, []);
+
+  const handleDiscardConfirm = useCallback(async () => {
+    if (!fileToDiscard) return;
+
+    try {
+      const result = await gitOps.discard([fileToDiscard]);
+      if (result.success) {
+        toast({
+          title: 'Changes discarded',
+          description: `Successfully discarded changes to ${fileToDiscard}`,
+          variant: 'success',
+        });
+      } else {
+        toast({
+          title: 'Failed to discard changes',
+          description: result.error || 'An unknown error occurred',
+          variant: 'error',
+        });
+      }
+    } catch (error) {
+      toast({
+        title: 'Failed to discard changes',
+        description: error instanceof Error ? error.message : 'An unknown error occurred',
+        variant: 'error',
+      });
+    } finally {
+      setShowDiscardDialog(false);
+      setFileToDiscard(null);
+    }
+  }, [fileToDiscard, gitOps, toast]);
 
   // Convert git status files to array for display
   const changedFiles = useMemo(() => {
@@ -238,9 +286,10 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiff, onOpenFile }
                                 <TooltipTrigger asChild>
                                   <button
                                     type="button"
-                                    className="text-muted-foreground hover:text-foreground"
+                                    className="text-muted-foreground hover:text-foreground cursor-pointer"
                                     onClick={(event) => {
                                       event.stopPropagation();
+                                      handleDiscardClick(file.path);
                                     }}
                                   >
                                     <IconArrowBackUp className="h-3.5 w-3.5" />
@@ -369,6 +418,25 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiff, onOpenFile }
           </SessionPanelContent>
         </TabsContent>
       </SessionTabs>
+
+      {/* Discard confirmation dialog */}
+      <AlertDialog open={showDiscardDialog} onOpenChange={setShowDiscardDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Discard changes?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently discard all changes to{' '}
+              <span className="font-semibold">{fileToDiscard}</span>. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDiscardConfirm} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Discard
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </SessionPanel>
   );
 });

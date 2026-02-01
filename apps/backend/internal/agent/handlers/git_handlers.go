@@ -37,6 +37,7 @@ func (h *GitHandlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionWorktreeCommit, h.wsCommit)
 	d.RegisterFunc(ws.ActionWorktreeStage, h.wsStage)
 	d.RegisterFunc(ws.ActionWorktreeUnstage, h.wsUnstage)
+	d.RegisterFunc(ws.ActionWorktreeDiscard, h.wsDiscard)
 	d.RegisterFunc(ws.ActionWorktreeCreatePR, h.wsCreatePR)
 	d.RegisterFunc(ws.ActionSessionCommitDiff, h.wsCommitDiff)
 }
@@ -89,6 +90,12 @@ type GitStageRequest struct {
 type GitUnstageRequest struct {
 	SessionID string   `json:"session_id"`
 	Paths     []string `json:"paths"` // Empty = unstage all
+}
+
+// GitDiscardRequest for worktree.discard action
+type GitDiscardRequest struct {
+	SessionID string   `json:"session_id"`
+	Paths     []string `json:"paths"` // Required - files to discard
 }
 
 // GitCreatePRRequest for worktree.create_pr action
@@ -304,6 +311,34 @@ func (h *GitHandlers) wsUnstage(ctx context.Context, msg *ws.Message) (*ws.Messa
 	result, err := client.GitUnstage(ctx, req.Paths)
 	if err != nil {
 		return nil, fmt.Errorf("unstage failed: %w", err)
+	}
+
+	return ws.NewResponse(msg.ID, msg.Action, result)
+}
+
+// wsDiscard handles worktree.discard action
+func (h *GitHandlers) wsDiscard(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req GitDiscardRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return nil, fmt.Errorf("invalid payload: %w", err)
+	}
+
+	if req.SessionID == "" {
+		return nil, fmt.Errorf("session_id is required")
+	}
+
+	if len(req.Paths) == 0 {
+		return nil, fmt.Errorf("paths are required")
+	}
+
+	client, err := h.getAgentCtlClient(req.SessionID)
+	if err != nil {
+		return nil, err
+	}
+
+	result, err := client.GitDiscard(ctx, req.Paths)
+	if err != nil {
+		return nil, fmt.Errorf("discard failed: %w", err)
 	}
 
 	return ws.NewResponse(msg.ID, msg.Action, result)

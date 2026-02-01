@@ -200,6 +200,7 @@ const (
 	ActionWorktreeCommit   = "worktree.commit"    // Commit changes
 	ActionWorktreeStage    = "worktree.stage"     // Stage files for commit
 	ActionWorktreeUnstage  = "worktree.unstage"   // Unstage files from index
+	ActionWorktreeDiscard  = "worktree.discard"   // Discard changes to files
 	ActionWorktreeCreatePR = "worktree.create_pr" // Create a pull request
 
 	// User actions

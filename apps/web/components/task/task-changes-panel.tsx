@@ -13,12 +13,24 @@ import { Badge } from '@kandev/ui/badge';
 import { Button } from '@kandev/ui/button';
 import { SessionPanelContent } from '@kandev/ui/pannel-session';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@kandev/ui/alert-dialog';
 import { cn } from '@/lib/utils';
+import { useToast } from '@/components/toast-provider';
 import { getLanguageFromPath } from '@/lib/languages';
 import { getLocalStorage, setLocalStorage } from '@/lib/local-storage';
 import { useAppStore } from '@/components/state-provider';
 import { useSessionGitStatus } from '@/hooks/domains/session/use-session-git-status';
 import { useCumulativeDiff } from '@/hooks/domains/session/use-cumulative-diff';
+import { useGitOperations } from '@/hooks/use-git-operations';
 import type { FileInfo } from '@/lib/state/slices';
 import type { SelectedDiff } from './task-layout';
 
@@ -73,10 +85,13 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
   const [diffViewMode, setDiffViewMode] = useState<'unified' | 'split'>(() =>
     getLocalStorage('task-diff-view-mode', DEFAULT_DIFF_MODE)
   );
+  const [showDiscardDialog, setShowDiscardDialog] = useState(false);
 
   const { resolvedTheme } = useTheme();
+  const { toast } = useToast();
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const gitStatus = useSessionGitStatus(activeSessionId);
+  const { discard, isLoading: isDiscarding } = useGitOperations(activeSessionId);
   // Fetch cumulative diff (all commits combined) when no specific file is selected
   const { diff: cumulativeDiff, loading: cumulativeLoading } = useCumulativeDiff(
     selectedDiff ? null : activeSessionId
@@ -115,10 +130,53 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
   // Use provided content if available, otherwise fall back to git status
   const selectedDiffContent = selectedDiff?.content ?? selectedFile?.diff ?? '';
   const isSingleDiffSelected = Boolean(selectedDiffPath && (hasProvidedContent || selectedFile));
+  // Discard only works for uncommitted changes (not committed/historical diffs)
+  const canDiscard = Boolean(selectedDiffPath && selectedFile && !hasProvidedContent);
 
   const hasUncommitted = uncommittedFiles.length > 0;
   const hasCommitted = committedFiles.length > 0;
   const hasAnyChanges = hasUncommitted || hasCommitted;
+
+  const handleDiscardClick = () => {
+    console.log('Discard button clicked', { selectedDiffPath, canDiscard });
+    setShowDiscardDialog(true);
+  };
+
+  const handleDiscardConfirm = async () => {
+    if (!selectedDiffPath) {
+      console.error('No selectedDiffPath');
+      return;
+    }
+
+    console.log('Discarding changes for:', selectedDiffPath);
+    try {
+      const result = await discard([selectedDiffPath]);
+      console.log('Discard result:', result);
+      if (result.success) {
+        toast({
+          title: 'Changes discarded',
+          description: `Successfully discarded changes to ${selectedDiffPath}`,
+          variant: 'success',
+        });
+        onClearSelected();
+      } else {
+        toast({
+          title: 'Failed to discard changes',
+          description: result.error || 'An unknown error occurred',
+          variant: 'error',
+        });
+      }
+    } catch (error) {
+      console.error('Discard error:', error);
+      toast({
+        title: 'Failed to discard changes',
+        description: error instanceof Error ? error.message : 'An unknown error occurred',
+        variant: 'error',
+      });
+    } finally {
+      setShowDiscardDialog(false);
+    }
+  };
 
   return (
     <div className="flex flex-col gap-2 h-full">
@@ -174,13 +232,16 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
                   variant="ghost"
                   size="sm"
                   className="h-7 px-2 text-xs cursor-pointer"
-                  disabled={!isSingleDiffSelected}
+                  disabled={!canDiscard || isDiscarding}
+                  onClick={handleDiscardClick}
                 >
                   <IconArrowBackUp className="h-3.5 w-3.5" />
                 </Button>
               </span>
             </TooltipTrigger>
-            <TooltipContent>Discard changes</TooltipContent>
+            <TooltipContent>
+              {canDiscard ? 'Discard changes' : hasProvidedContent ? 'Cannot discard committed changes' : 'Select an uncommitted file'}
+            </TooltipContent>
           </Tooltip>
           <div className="inline-flex rounded-md border border-border overflow-hidden">
             <Tooltip>
@@ -335,6 +396,25 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
           </div>
         )}
       </SessionPanelContent>
+
+      {/* Discard confirmation dialog */}
+      <AlertDialog open={showDiscardDialog} onOpenChange={setShowDiscardDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Discard changes?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently discard all changes to{' '}
+              <span className="font-semibold">{selectedDiffPath}</span>. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDiscardConfirm} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Discard
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 });
