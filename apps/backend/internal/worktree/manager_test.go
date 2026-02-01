@@ -338,3 +338,261 @@ func TestSemanticBranchName(t *testing.T) {
 		t.Fatalf("SemanticBranchName() = %q, want %q", got, want)
 	}
 }
+
+// TestWorktreeCache_SessionIDKeying tests that cache uses sessionID consistently
+func TestWorktreeCache_SessionIDKeying(t *testing.T) {
+	cfg := newTestConfig(t)
+	log := newTestLogger()
+	store := newMockStore()
+
+	mgr, err := NewManager(cfg, store, log)
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	// Create a test worktree entry
+	sessionID := "test-session-123"
+	taskID := "test-task-456"
+	wt := &Worktree{
+		ID:        "wt-001",
+		SessionID: sessionID,
+		TaskID:    taskID,
+		Path:      "/test/path",
+	}
+
+	// Add to cache using sessionID
+	mgr.mu.Lock()
+	mgr.worktrees[sessionID] = wt
+	mgr.mu.Unlock()
+
+	// Verify cache contains entry with sessionID key
+	mgr.mu.RLock()
+	cached, exists := mgr.worktrees[sessionID]
+	mgr.mu.RUnlock()
+
+	if !exists {
+		t.Fatal("expected worktree to be in cache with sessionID key")
+	}
+	if cached.ID != wt.ID {
+		t.Errorf("cached worktree ID = %q, want %q", cached.ID, wt.ID)
+	}
+
+	// Verify cache does NOT contain entry with taskID key
+	mgr.mu.RLock()
+	_, existsByTaskID := mgr.worktrees[taskID]
+	mgr.mu.RUnlock()
+
+	if existsByTaskID {
+		t.Error("cache should not contain entry with taskID key")
+	}
+
+	// Simulate cache deletion (as done in removeWorktree)
+	mgr.mu.Lock()
+	if wt.SessionID != "" {
+		delete(mgr.worktrees, wt.SessionID)
+	}
+	mgr.mu.Unlock()
+
+	// Verify cache no longer contains entry
+	mgr.mu.RLock()
+	_, stillExists := mgr.worktrees[sessionID]
+	mgr.mu.RUnlock()
+
+	if stillExists {
+		t.Error("expected worktree to be removed from cache")
+	}
+}
+
+// TestWorktreeCache_EmptySessionID tests cache deletion with empty sessionID
+func TestWorktreeCache_EmptySessionID(t *testing.T) {
+	cfg := newTestConfig(t)
+	log := newTestLogger()
+	store := newMockStore()
+
+	mgr, err := NewManager(cfg, store, log)
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	// Create a worktree with empty sessionID
+	wt := &Worktree{
+		ID:        "wt-002",
+		SessionID: "",
+		TaskID:    "test-task-789",
+		Path:      "/test/path2",
+	}
+
+	// Add to cache with a key
+	mgr.mu.Lock()
+	mgr.worktrees["some-key"] = wt
+	mgr.mu.Unlock()
+
+	// Attempt deletion with empty sessionID (should not panic)
+	mgr.mu.Lock()
+	if wt.SessionID != "" {
+		delete(mgr.worktrees, wt.SessionID)
+	}
+	mgr.mu.Unlock()
+
+	// Verify original entry still exists (wasn't deleted)
+	mgr.mu.RLock()
+	_, exists := mgr.worktrees["some-key"]
+	mgr.mu.RUnlock()
+
+	if !exists {
+		t.Error("entry should still exist when sessionID is empty")
+	}
+}
+
+// TestRepoLocks_ReferenceCountingCleanup tests lock cleanup with reference counting
+func TestRepoLocks_ReferenceCountingCleanup(t *testing.T) {
+	cfg := newTestConfig(t)
+	log := newTestLogger()
+	store := newMockStore()
+
+	mgr, err := NewManager(cfg, store, log)
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	repoPath := "/test/repo"
+
+	// Acquire lock for the first time
+	lock1 := mgr.getRepoLock(repoPath)
+	if lock1 == nil {
+		t.Fatal("expected non-nil lock")
+	}
+
+	// Verify lock exists in map with refCount = 1
+	mgr.repoLockMu.Lock()
+	entry, exists := mgr.repoLocks[repoPath]
+	mgr.repoLockMu.Unlock()
+
+	if !exists {
+		t.Fatal("expected lock entry to exist in map")
+	}
+	if entry.refCount != 1 {
+		t.Errorf("expected refCount = 1, got %d", entry.refCount)
+	}
+
+	// Acquire same lock again
+	lock2 := mgr.getRepoLock(repoPath)
+	if lock2 != lock1 {
+		t.Error("expected same lock instance")
+	}
+
+	// Verify refCount increased to 2
+	mgr.repoLockMu.Lock()
+	entry, exists = mgr.repoLocks[repoPath]
+	mgr.repoLockMu.Unlock()
+
+	if !exists {
+		t.Fatal("expected lock entry to exist in map")
+	}
+	if entry.refCount != 2 {
+		t.Errorf("expected refCount = 2, got %d", entry.refCount)
+	}
+
+	// Release lock once
+	mgr.releaseRepoLock(repoPath)
+
+	// Verify refCount decreased to 1
+	mgr.repoLockMu.Lock()
+	entry, exists = mgr.repoLocks[repoPath]
+	mgr.repoLockMu.Unlock()
+
+	if !exists {
+		t.Fatal("expected lock entry to still exist in map")
+	}
+	if entry.refCount != 1 {
+		t.Errorf("expected refCount = 1, got %d", entry.refCount)
+	}
+
+	// Release lock again
+	mgr.releaseRepoLock(repoPath)
+
+	// Verify lock removed from map when refCount reaches 0
+	mgr.repoLockMu.Lock()
+	_, exists = mgr.repoLocks[repoPath]
+	mgr.repoLockMu.Unlock()
+
+	if exists {
+		t.Error("expected lock entry to be removed from map when refCount reaches 0")
+	}
+}
+
+// TestRepoLocks_MultipleRepositories tests lock isolation between repositories
+func TestRepoLocks_MultipleRepositories(t *testing.T) {
+	cfg := newTestConfig(t)
+	log := newTestLogger()
+	store := newMockStore()
+
+	mgr, err := NewManager(cfg, store, log)
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	repo1 := "/test/repo1"
+	repo2 := "/test/repo2"
+
+	// Acquire locks for different repositories
+	lock1 := mgr.getRepoLock(repo1)
+	lock2 := mgr.getRepoLock(repo2)
+
+	if lock1 == lock2 {
+		t.Error("expected different lock instances for different repositories")
+	}
+
+	// Verify both locks exist
+	mgr.repoLockMu.Lock()
+	entry1, exists1 := mgr.repoLocks[repo1]
+	entry2, exists2 := mgr.repoLocks[repo2]
+	mgr.repoLockMu.Unlock()
+
+	if !exists1 || !exists2 {
+		t.Fatal("expected both lock entries to exist")
+	}
+	if entry1.refCount != 1 || entry2.refCount != 1 {
+		t.Error("expected both locks to have refCount = 1")
+	}
+
+	// Release lock for repo1
+	mgr.releaseRepoLock(repo1)
+
+	// Verify repo1 lock removed, repo2 lock still exists
+	mgr.repoLockMu.Lock()
+	_, exists1 = mgr.repoLocks[repo1]
+	_, exists2 = mgr.repoLocks[repo2]
+	mgr.repoLockMu.Unlock()
+
+	if exists1 {
+		t.Error("expected repo1 lock to be removed")
+	}
+	if !exists2 {
+		t.Error("expected repo2 lock to still exist")
+	}
+}
+
+// TestRepoLocks_ReleaseNonexistent tests releasing a lock that doesn't exist
+func TestRepoLocks_ReleaseNonexistent(t *testing.T) {
+	cfg := newTestConfig(t)
+	log := newTestLogger()
+	store := newMockStore()
+
+	mgr, err := NewManager(cfg, store, log)
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	// Release a lock that was never acquired (should not panic)
+	mgr.releaseRepoLock("/nonexistent/repo")
+
+	// Verify no locks in map
+	mgr.repoLockMu.Lock()
+	count := len(mgr.repoLocks)
+	mgr.repoLockMu.Unlock()
+
+	if count != 0 {
+		t.Errorf("expected 0 locks in map, got %d", count)
+	}
+}
