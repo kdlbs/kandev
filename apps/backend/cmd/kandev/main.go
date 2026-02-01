@@ -562,6 +562,9 @@ func main() {
 		workflowCtrl,
 		clarificationStore,
 		msgCreator,
+		taskRepo,  // SessionRepository
+		taskRepo,  // TaskRepository (same instance)
+		eventBus,  // EventBus
 		planService,
 		log,
 	)

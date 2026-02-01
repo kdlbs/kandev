@@ -10,10 +10,14 @@ import (
 
 	"github.com/kandev/kandev/internal/clarification"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/controller"
 	"github.com/kandev/kandev/internal/task/dto"
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
 	workflowctrl "github.com/kandev/kandev/internal/workflow/controller"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
@@ -29,6 +33,21 @@ type MessageCreator interface {
 	CreateClarificationRequestMessage(ctx context.Context, taskID, sessionID, pendingID string, question clarification.Question, clarificationContext string) (string, error)
 }
 
+// SessionRepository interface for updating session state.
+type SessionRepository interface {
+	UpdateTaskSessionState(ctx context.Context, sessionID string, state models.TaskSessionState, errorMessage string) error
+}
+
+// TaskRepository interface for updating task state.
+type TaskRepository interface {
+	UpdateTaskState(ctx context.Context, taskID string, state v1.TaskState) error
+}
+
+// EventBus interface for publishing events.
+type EventBus interface {
+	Publish(ctx context.Context, topic string, event *bus.Event) error
+}
+
 // Handlers provides MCP WebSocket handlers.
 type Handlers struct {
 	workspaceCtrl    *controller.WorkspaceController
@@ -37,6 +56,9 @@ type Handlers struct {
 	workflowCtrl     *workflowctrl.Controller
 	clarificationSvc ClarificationService
 	messageCreator   MessageCreator
+	sessionRepo      SessionRepository
+	taskRepo         TaskRepository
+	eventBus         EventBus
 	planService      *service.PlanService
 	logger           *logger.Logger
 }
@@ -49,6 +71,9 @@ func NewHandlers(
 	workflowCtrl *workflowctrl.Controller,
 	clarificationSvc ClarificationService,
 	messageCreator MessageCreator,
+	sessionRepo SessionRepository,
+	taskRepo TaskRepository,
+	eventBus EventBus,
 	planService *service.PlanService,
 	log *logger.Logger,
 ) *Handlers {
@@ -59,6 +84,9 @@ func NewHandlers(
 		workflowCtrl:     workflowCtrl,
 		clarificationSvc: clarificationSvc,
 		messageCreator:   messageCreator,
+		sessionRepo:      sessionRepo,
+		taskRepo:         taskRepo,
+		eventBus:         eventBus,
 		planService:      planService,
 		logger:           log.WithFields(zap.String("component", "mcp-handlers")),
 	}
@@ -261,6 +289,9 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 		}
 	}
 
+	// Update session and task states to waiting for input
+	h.setSessionWaitingForInput(ctx, taskID, req.SessionID)
+
 	// Wait for user response
 	resp, err := h.clarificationSvc.WaitForResponse(ctx, pendingID)
 	if err != nil {
@@ -270,7 +301,66 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get user response: "+err.Error(), nil)
 	}
 
+	// Restore session to RUNNING state after user responds
+	if err := h.sessionRepo.UpdateTaskSessionState(ctx, req.SessionID, models.TaskSessionStateRunning, ""); err != nil {
+		h.logger.Warn("failed to restore session state to RUNNING",
+			zap.String("session_id", req.SessionID),
+			zap.Error(err))
+	}
+
+	// Update task state to IN_PROGRESS
+	if err := h.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateInProgress); err != nil {
+		h.logger.Warn("failed to restore task state to IN_PROGRESS",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+	}
+
+	// Publish session state changed event
+	if h.eventBus != nil {
+		eventData := map[string]interface{}{
+			"task_id":    taskID,
+			"session_id": req.SessionID,
+			"new_state":  string(models.TaskSessionStateRunning),
+		}
+		_ = h.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(
+			events.TaskSessionStateChanged,
+			"mcp-handlers",
+			eventData,
+		))
+	}
+
 	return ws.NewResponse(msg.ID, msg.Action, resp)
+}
+
+// setSessionWaitingForInput updates the session and task states to waiting for input
+func (h *Handlers) setSessionWaitingForInput(ctx context.Context, taskID, sessionID string) {
+	// Update session state to WAITING_FOR_INPUT
+	if err := h.sessionRepo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateWaitingForInput, ""); err != nil {
+		h.logger.Warn("failed to update session state to WAITING_FOR_INPUT",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
+
+	// Update task state to REVIEW
+	if err := h.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateReview); err != nil {
+		h.logger.Warn("failed to update task state to REVIEW",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+	}
+
+	// Publish session state changed event
+	if h.eventBus != nil {
+		eventData := map[string]interface{}{
+			"task_id":    taskID,
+			"session_id": sessionID,
+			"new_state":  string(models.TaskSessionStateWaitingForInput),
+		}
+		_ = h.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(
+			events.TaskSessionStateChanged,
+			"mcp-handlers",
+			eventData,
+		))
+	}
 }
 
 // generateOptionID generates an option ID for a question.
