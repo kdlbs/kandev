@@ -75,7 +75,7 @@ function KanbanCardBody({
               {task.sessionCount} sessions
             </Badge>
           )}
-          {task.reviewStatus === 'pending' && (
+          {task.reviewStatus === 'pending' && task.state !== 'IN_PROGRESS' && (
             <div className="flex items-center gap-1 text-amber-700 dark:text-amber-600">
               <IconAlertCircle className="h-3.5 w-3.5" />
               <span className="text-[10px] font-medium">Approval Required</span>
