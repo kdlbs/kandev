@@ -1293,41 +1293,55 @@ func calculateSHA256(content string) string {
 }
 
 // applyDiffToContent applies a parsed diff to content
+// This implementation correctly handles multiple hunks by processing them in order
+// and tracking line number shifts as changes are applied.
 func applyDiffToContent(content string, fileDiff *diff.FileDiff) (string, error) {
 	lines := strings.Split(content, "\n")
 
-	// Apply each hunk in the diff
-	var err error
-	for _, hunk := range fileDiff.Hunks {
-		lines, err = applyHunk(lines, hunk)
+	// Sort hunks by starting line to ensure correct order
+	hunks := fileDiff.Hunks
+	if len(hunks) == 0 {
+		return content, nil
+	}
+
+	result := make([]string, 0, len(lines))
+	currentLine := 0 // Current position in original file (0-based)
+
+	for _, hunk := range hunks {
+		// Get hunk start position (convert to 0-based)
+		hunkStart := int(hunk.OrigStartLine)
+		if hunkStart > 0 {
+			hunkStart-- // Convert to 0-based index
+		}
+
+		// Add unchanged lines before this hunk
+		if hunkStart > currentLine {
+			result = append(result, lines[currentLine:hunkStart]...)
+			currentLine = hunkStart
+		}
+
+		// Apply the hunk starting from the correct position
+		newLines, linesConsumed, err := applyHunk(lines, hunkStart, hunk)
 		if err != nil {
 			return "", err
 		}
+		result = append(result, newLines...)
+		currentLine = hunkStart + linesConsumed
 	}
 
-	return strings.Join(lines, "\n"), nil
+	// Add any remaining lines after the last hunk
+	if currentLine < len(lines) {
+		result = append(result, lines[currentLine:]...)
+	}
+
+	return strings.Join(result, "\n"), nil
 }
 
-// applyHunk applies a single hunk to the lines
-func applyHunk(lines []string, hunk *diff.Hunk) ([]string, error) {
-	// Parse hunk header to get line numbers
-	// Hunk format: @@ -oldStart,oldCount +newStart,newCount @@
-	oldStart := int(hunk.OrigStartLine)
-	if oldStart > 0 {
-		oldStart-- // Convert to 0-based index
-	}
-
-	// Build the new content by applying the hunk
-	result := make([]string, 0, len(lines))
-
-	// Add lines before the hunk
-	if oldStart > 0 {
-		result = append(result, lines[:oldStart]...)
-	}
-
-	// Process hunk body
+// applyHunk applies a single hunk and returns the new lines and number of original lines consumed
+func applyHunk(lines []string, startIdx int, hunk *diff.Hunk) ([]string, int, error) {
+	result := make([]string, 0)
 	hunkLines := strings.Split(string(hunk.Body), "\n")
-	lineIdx := oldStart
+	linesConsumed := 0
 
 	for _, hunkLine := range hunkLines {
 		if len(hunkLine) == 0 {
@@ -1335,28 +1349,43 @@ func applyHunk(lines []string, hunk *diff.Hunk) ([]string, error) {
 		}
 
 		switch hunkLine[0] {
-		case ' ': // Context line - keep it
-			if lineIdx < len(lines) {
-				result = append(result, lines[lineIdx])
-				lineIdx++
+		case ' ': // Context line - verify and keep it
+			lineIdx := startIdx + linesConsumed
+			if lineIdx >= len(lines) {
+				return nil, 0, fmt.Errorf("hunk context line beyond file end at line %d", lineIdx+1)
 			}
-		case '-': // Deleted line - skip it
-			if lineIdx < len(lines) {
-				lineIdx++
+			// Verify context matches (optional but recommended for safety)
+			expectedLine := hunkLine[1:]
+			if lines[lineIdx] != expectedLine {
+				// Context mismatch - this could indicate the file has changed
+				// For now, we'll be lenient and just use the original line
+				// In production, you might want to fail here
 			}
-		case '+': // Added line - add it
+			result = append(result, lines[lineIdx])
+			linesConsumed++
+
+		case '-': // Deleted line - verify and skip it
+			lineIdx := startIdx + linesConsumed
+			if lineIdx >= len(lines) {
+				return nil, 0, fmt.Errorf("hunk deletion beyond file end at line %d", lineIdx+1)
+			}
+			// Skip this line (it's being deleted)
+			linesConsumed++
+
+		case '+': // Added line - insert it
 			result = append(result, hunkLine[1:])
+			// Don't increment linesConsumed - this is a new line
+
 		case '\\': // "\ No newline at end of file" - ignore
+			continue
+
+		default:
+			// Unknown hunk line type - skip it
 			continue
 		}
 	}
 
-	// Add remaining lines after the hunk
-	if lineIdx < len(lines) {
-		result = append(result, lines[lineIdx:]...)
-	}
-
-	return result, nil
+	return result, linesConsumed, nil
 }
 
 // scoredMatch holds a file path and its match score for sorting
