@@ -305,6 +305,17 @@ func (s *Service) handleWorkflowTransition(ctx context.Context, taskID, sessionI
 				zap.String("session_id", sessionID),
 				zap.String("target_step", targetStep.Name))
 		}
+	} else {
+		// Target step does not require approval - clear any existing review status
+		if err := s.repo.UpdateSessionReviewStatus(ctx, sessionID, ""); err != nil {
+			s.logger.Warn("failed to clear session review status",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		} else {
+			s.logger.Debug("session review status cleared for non-review step",
+				zap.String("session_id", sessionID),
+				zap.String("target_step", targetStep.Name))
+		}
 	}
 
 	// Update session state to WAITING_FOR_INPUT since the agent completed this step
@@ -380,8 +391,10 @@ func (s *Service) handleReviewStepRollback(ctx context.Context, taskID, sessionI
 		return
 	}
 
-	// Only proceed if the current step requires approval (is a review step)
-	if !currentStep.RequireApproval {
+	// Only proceed if the current step is a pure review step (StepType == "review")
+	// Work steps like Planning or Implementation with RequireApproval should NOT rollback
+	// because the agent is actively working on them, not just waiting for approval
+	if currentStep.StepType != "review" {
 		return
 	}
 
