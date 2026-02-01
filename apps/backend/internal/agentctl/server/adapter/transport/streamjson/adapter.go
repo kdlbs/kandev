@@ -394,7 +394,6 @@ func (a *Adapter) handleToolPermission(requestID string, req *claudecode.Control
 	a.mu.RLock()
 	handler := a.permissionHandler
 	sessionID := a.sessionID
-	operationID := a.operationID
 	a.mu.RUnlock()
 
 	// Determine action type based on tool name
@@ -425,6 +424,14 @@ func (a *Adapter) handleToolPermission(requestID string, req *claudecode.Control
 		{OptionID: "deny", Name: "Deny", Kind: "reject_once"},
 	}
 
+	// Build permission request with Claude Code's requestID.
+	// The handler (process manager's handlePermissionRequest) will:
+	// 1. Send the permission_request notification to the frontend
+	// 2. Block waiting for user response
+	// 3. Return the response
+	// We pass PendingID so the handler uses Claude Code's requestID
+	// instead of generating a new one - this ensures the frontend and backend
+	// use the same ID for response lookup.
 	permReq := &PermissionRequest{
 		SessionID:     sessionID,
 		ToolCallID:    req.ToolUseID,
@@ -432,6 +439,7 @@ func (a *Adapter) handleToolPermission(requestID string, req *claudecode.Control
 		Options:       options,
 		ActionType:    actionType,
 		ActionDetails: req.Input,
+		PendingID:     requestID, // Use Claude Code's requestID so response lookup works
 	}
 
 	// If no handler, auto-allow
@@ -442,20 +450,7 @@ func (a *Adapter) handleToolPermission(requestID string, req *claudecode.Control
 		return
 	}
 
-	// Send permission notification through updates channel
-	a.sendUpdate(AgentEvent{
-		Type:              streams.EventTypePermissionRequest,
-		SessionID:         sessionID,
-		OperationID:       operationID,
-		ToolCallID:        req.ToolUseID,
-		PendingID:         requestID,
-		PermissionTitle:   title,
-		PermissionOptions: options,
-		ActionType:        actionType,
-		ActionDetails:     req.Input,
-	})
-
-	// Call permission handler (blocking)
+	// Call permission handler (blocking) - it will send the notification
 	ctx := context.Background()
 	resp, err := handler(ctx, permReq)
 	if err != nil {

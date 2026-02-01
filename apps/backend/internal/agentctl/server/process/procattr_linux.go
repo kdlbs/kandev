@@ -1,4 +1,4 @@
-//go:build unix && !linux
+//go:build linux
 
 package process
 
@@ -9,10 +9,13 @@ import (
 
 // setProcGroup configures the command to run in its own process group.
 // This allows us to kill all child processes together.
-// Note: Pdeathsig is Linux-specific and not available on macOS/BSD.
-// On these platforms, orphan cleanup relies on explicit Stop() calls.
+// On Linux, we also set Pdeathsig to ensure the child is killed if the parent dies
+// unexpectedly (SIGKILL, crash, etc.) without calling Stop().
 func setProcGroup(cmd *exec.Cmd) {
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Setpgid:   true,
+		Pdeathsig: syscall.SIGTERM,
+	}
 }
 
 // killProcessGroup kills the entire process group for the given PID.

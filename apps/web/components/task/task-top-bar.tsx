@@ -100,6 +100,12 @@ const TaskTopBar = memo(function TaskTopBar({
   // Use worktree branch if available, otherwise fall back to base branch
   const displayBranch = worktreeBranch || baseBranch;
 
+  // Check if the remote branch actually tracks the current branch (not just origin/main as base)
+  // Pull/Push badges should only show when remote_branch is origin/<current_branch>
+  const currentBranch = gitStatus?.branch;
+  const remoteBranch = gitStatus?.remote_branch;
+  const hasMatchingUpstream = remoteBranch && currentBranch && remoteBranch === `origin/${currentBranch}`;
+
   // Calculate total additions and deletions from uncommitted files.
   let uncommittedAdditions = 0;
   let uncommittedDeletions = 0;
@@ -466,7 +472,8 @@ const TaskTopBar = memo(function TaskTopBar({
               >
                 <IconCloudDownload className="h-4 w-4 text-blue-500" />
                 <span className="flex-1">Pull</span>
-                {(gitStatus?.behind ?? 0) > 0 && (
+                {/* Only show pull count when upstream matches current branch (origin/<branch>) */}
+                {hasMatchingUpstream && (gitStatus?.behind ?? 0) > 0 && (
                   <span className="rounded-full bg-blue-500/10 px-2 py-0.5 text-xs font-medium text-blue-600 dark:text-blue-400">
                     ↓{gitStatus?.behind}
                   </span>
@@ -479,7 +486,8 @@ const TaskTopBar = memo(function TaskTopBar({
               >
                 <IconCloudUpload className="h-4 w-4 text-green-500" />
                 <span className="flex-1">Push</span>
-                {(gitStatus?.ahead ?? 0) > 0 && (
+                {/* Only show push count when upstream matches current branch (origin/<branch>) */}
+                {hasMatchingUpstream && (gitStatus?.ahead ?? 0) > 0 && (
                   <span className="rounded-full bg-green-500/10 px-2 py-0.5 text-xs font-medium text-green-600 dark:text-green-400">
                     ↑{gitStatus?.ahead}
                   </span>

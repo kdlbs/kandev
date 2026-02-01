@@ -26,6 +26,11 @@ const (
 	// EventTypePermissionRequest indicates the agent is requesting permission.
 	EventTypePermissionRequest = "permission_request"
 
+	// EventTypePermissionCancelled indicates a permission request was cancelled.
+	// This happens when the agent completes or the context is cancelled before
+	// the user responds to the permission request.
+	EventTypePermissionCancelled = "permission_cancelled"
+
 	// EventTypeSessionStatus indicates a session status update (resumed or new).
 	EventTypeSessionStatus = "session_status"
 

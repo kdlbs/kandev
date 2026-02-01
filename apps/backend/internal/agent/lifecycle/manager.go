@@ -1235,11 +1235,6 @@ func (m *Manager) emitSessionStatusEvent(execution *AgentExecution, agentConfig 
 	})
 }
 
-// handlePermissionRequestEvent processes permission requests from the unified agent event stream
-func (m *Manager) handlePermissionRequestEvent(execution *AgentExecution, event agentctl.AgentEvent) {
-	m.eventPublisher.PublishPermissionRequest(execution, event)
-}
-
 // handleAgentEvent processes incoming agent events from the agent
 func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.AgentEvent) {
 	// Log all incoming events for debugging
@@ -1284,6 +1279,8 @@ func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.Age
 				execution.messageMu.Unlock()
 			}
 		}
+		// Return early - message_chunk is transformed to message_streaming, no need to publish raw event
+		return
 
 	case "reasoning":
 		// Stream thinking content like message chunks for real-time feedback
@@ -1313,6 +1310,8 @@ func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.Age
 				execution.messageMu.Unlock()
 			}
 		}
+		// Return early - reasoning is transformed to thinking_streaming, no need to publish raw event
+		return
 
 	case "tool_call":
 		// Tool call starting marks a step boundary - flush the accumulated message
@@ -1443,8 +1442,10 @@ func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.Age
 			zap.String("pending_id", event.PendingID),
 			zap.String("title", event.PermissionTitle))
 
-		// Handle permission request inline
-		m.handlePermissionRequestEvent(execution, event)
+		// Publish permission request to dedicated subject for orchestrator to handle
+		m.eventPublisher.PublishPermissionRequest(execution, event)
+		// Return early - permission requests don't need to be published as stream events
+		return
 
 	case "context_window":
 		m.logger.Debug("context window update received",
