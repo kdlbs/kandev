@@ -27,7 +27,7 @@ export interface Task {
   repositoryId?: string;
   hasSession?: boolean;
   // Workflow fields
-  sessionCount?: number;
+  sessionCount?: number | null;
   primarySessionId?: string | null;
   reviewStatus?: 'pending' | 'approved' | 'changes_requested' | 'rejected' | null;
 }
