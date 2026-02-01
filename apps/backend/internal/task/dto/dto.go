@@ -96,6 +96,8 @@ type TaskDTO struct {
 	Repositories     []TaskRepositoryDTO    `json:"repositories,omitempty"`
 	Position         int                    `json:"position"`
 	PrimarySessionID *string                `json:"primary_session_id,omitempty"`
+	SessionCount     *int                   `json:"session_count,omitempty"`
+	ReviewStatus     *string                `json:"review_status,omitempty"`
 	CreatedAt        time.Time              `json:"created_at"`
 	UpdatedAt        time.Time              `json:"updated_at"`
 	Metadata         map[string]interface{} `json:"metadata,omitempty"`
@@ -346,6 +348,11 @@ func FromTask(task *models.Task) TaskDTO {
 
 // FromTaskWithPrimarySession converts a task model to a TaskDTO, including the primary session ID.
 func FromTaskWithPrimarySession(task *models.Task, primarySessionID *string) TaskDTO {
+	return FromTaskWithSessionInfo(task, primarySessionID, nil, nil)
+}
+
+// FromTaskWithSessionInfo converts a task model to a TaskDTO, including session information.
+func FromTaskWithSessionInfo(task *models.Task, primarySessionID *string, sessionCount *int, reviewStatus *string) TaskDTO {
 	// Convert repositories
 	var repositories []TaskRepositoryDTO
 	for _, repo := range task.Repositories {
@@ -373,6 +380,8 @@ func FromTaskWithPrimarySession(task *models.Task, primarySessionID *string) Tas
 		Repositories:     repositories,
 		Position:         task.Position,
 		PrimarySessionID: primarySessionID,
+		SessionCount:     sessionCount,
+		ReviewStatus:     reviewStatus,
 		CreatedAt:        task.CreatedAt,
 		UpdatedAt:        task.UpdatedAt,
 		Metadata:         task.Metadata,
