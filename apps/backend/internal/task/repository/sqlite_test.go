@@ -349,6 +349,135 @@ func TestSQLiteRepository_ListTasksByWorkflowStep(t *testing.T) {
 	}
 }
 
+func TestSQLiteRepository_ListTasksByWorkspace(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// Create workspaces and board
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace 1"})
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-2", Name: "Workspace 2"})
+	board := &models.Board{ID: "board-123", WorkspaceID: "ws-1", Name: "Test Board"}
+	_ = repo.CreateBoard(ctx, board)
+
+	// Create tasks in workspace 1
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-1", WorkspaceID: "ws-1", BoardID: "board-123", WorkflowStepID: "step-1", Title: "Task One"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-2", WorkspaceID: "ws-1", BoardID: "board-123", WorkflowStepID: "step-1", Title: "Task Two"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-3", WorkspaceID: "ws-1", BoardID: "board-123", WorkflowStepID: "step-1", Title: "Task Three"})
+	// Create task in workspace 2
+	board2 := &models.Board{ID: "board-456", WorkspaceID: "ws-2", Name: "Test Board 2"}
+	_ = repo.CreateBoard(ctx, board2)
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-4", WorkspaceID: "ws-2", BoardID: "board-456", WorkflowStepID: "step-2", Title: "Task Four"})
+
+	// Test basic listing without search
+	tasks, total, err := repo.ListTasksByWorkspace(ctx, "ws-1", "", 1, 10)
+	if err != nil {
+		t.Fatalf("failed to list tasks by workspace: %v", err)
+	}
+	if total != 3 {
+		t.Errorf("expected total 3 tasks for ws-1, got %d", total)
+	}
+	if len(tasks) != 3 {
+		t.Errorf("expected 3 tasks returned, got %d", len(tasks))
+	}
+
+	// Test pagination
+	tasks, total, err = repo.ListTasksByWorkspace(ctx, "ws-1", "", 1, 2)
+	if err != nil {
+		t.Fatalf("failed to list tasks with pagination: %v", err)
+	}
+	if total != 3 {
+		t.Errorf("expected total 3 tasks, got %d", total)
+	}
+	if len(tasks) != 2 {
+		t.Errorf("expected 2 tasks per page, got %d", len(tasks))
+	}
+
+	// Test page 2
+	tasksPage2, _, err := repo.ListTasksByWorkspace(ctx, "ws-1", "", 2, 2)
+	if err != nil {
+		t.Fatalf("failed to list tasks page 2: %v", err)
+	}
+	if len(tasksPage2) != 1 {
+		t.Errorf("expected 1 task on page 2, got %d", len(tasksPage2))
+	}
+}
+
+func TestSQLiteRepository_ListTasksByWorkspaceWithSearch(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// Create workspace, board, and repository
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace 1"})
+	board := &models.Board{ID: "board-123", WorkspaceID: "ws-1", Name: "Test Board"}
+	_ = repo.CreateBoard(ctx, board)
+	repository := &models.Repository{ID: "repo-1", WorkspaceID: "ws-1", Name: "MyProject", LocalPath: "/home/user/projects/myproject"}
+	_ = repo.CreateRepository(ctx, repository)
+
+	// Create tasks with different titles and descriptions
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-1", WorkspaceID: "ws-1", BoardID: "board-123", WorkflowStepID: "step-1", Title: "Fix authentication bug", Description: "Users cannot login"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-2", WorkspaceID: "ws-1", BoardID: "board-123", WorkflowStepID: "step-1", Title: "Add new feature", Description: "Implement dark mode"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-3", WorkspaceID: "ws-1", BoardID: "board-123", WorkflowStepID: "step-1", Title: "Refactor codebase", Description: "Clean up authentication module"})
+
+	// Link task-1 to the repository
+	_ = repo.CreateTaskRepository(ctx, &models.TaskRepository{ID: "tr-1", TaskID: "task-1", RepositoryID: "repo-1", BaseBranch: "main"})
+
+	// Test search by title
+	_, totalAuth, err := repo.ListTasksByWorkspace(ctx, "ws-1", "authentication", 1, 10)
+	if err != nil {
+		t.Fatalf("failed to search tasks by title: %v", err)
+	}
+	if totalAuth != 2 {
+		t.Errorf("expected 2 tasks matching 'authentication', got %d", totalAuth)
+	}
+
+	// Test search by description
+	tasksDarkMode, totalDarkMode, err := repo.ListTasksByWorkspace(ctx, "ws-1", "dark mode", 1, 10)
+	if err != nil {
+		t.Fatalf("failed to search tasks by description: %v", err)
+	}
+	if totalDarkMode != 1 {
+		t.Errorf("expected 1 task matching 'dark mode', got %d", totalDarkMode)
+	}
+	if len(tasksDarkMode) != 1 || tasksDarkMode[0].ID != "task-2" {
+		t.Errorf("expected task-2 to be returned")
+	}
+
+	// Test search by repository name
+	tasksRepo, totalRepo, err := repo.ListTasksByWorkspace(ctx, "ws-1", "MyProject", 1, 10)
+	if err != nil {
+		t.Fatalf("failed to search tasks by repository name: %v", err)
+	}
+	if totalRepo != 1 {
+		t.Errorf("expected 1 task matching repository 'MyProject', got %d", totalRepo)
+	}
+	if len(tasksRepo) != 1 || tasksRepo[0].ID != "task-1" {
+		t.Errorf("expected task-1 to be returned")
+	}
+
+	// Test search by repository local_path
+	_, totalPath, err := repo.ListTasksByWorkspace(ctx, "ws-1", "myproject", 1, 10)
+	if err != nil {
+		t.Fatalf("failed to search tasks by repository path: %v", err)
+	}
+	if totalPath != 1 {
+		t.Errorf("expected 1 task matching repository path 'myproject', got %d", totalPath)
+	}
+
+	// Test search with no results
+	tasksNone, totalNone, err := repo.ListTasksByWorkspace(ctx, "ws-1", "nonexistent", 1, 10)
+	if err != nil {
+		t.Fatalf("failed to search tasks with no results: %v", err)
+	}
+	if totalNone != 0 {
+		t.Errorf("expected 0 tasks matching 'nonexistent', got %d", totalNone)
+	}
+	if len(tasksNone) != 0 {
+		t.Errorf("expected empty tasks slice, got %d tasks", len(tasksNone))
+	}
+}
+
 func TestSQLiteRepository_Persistence(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "persistence_test.db")

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useMemo, useState, useSyncExternalStore } from 'react';
 import {
   DndContext,
   closestCenter,
@@ -36,26 +36,7 @@ import {
   SelectValue,
 } from '@kandev/ui/select';
 import type { WorkflowStep, WorkflowStepType, StepBehaviors } from '@/lib/types/http';
-
-// Debounce hook for text inputs
-function useDebouncedCallback(
-  callback: (value: string) => void,
-  delay: number
-): (value: string) => void {
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  return useCallback(
-    function debouncedFn(value: string) {
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-      }
-      timeoutRef.current = setTimeout(() => {
-        callback(value);
-      }, delay);
-    },
-    [callback, delay]
-  );
-}
+import { useDebouncedCallback } from '@/hooks/use-debounce';
 
 const STEP_COLORS = [
   { value: 'bg-slate-500', label: 'Gray' },

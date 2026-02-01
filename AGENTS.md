@@ -234,11 +234,20 @@ lib/api/domains/{kanban,session,workspace,settings,process}-api.ts  # API client
 
 ### Frontend
 - **Data:** SSR fetch → hydrate → read store. Never fetch in components
-- **UI Components:** Import shadcn components from `@kandev/ui`, NOT `@/components/ui/*`
+- **UI Components:**
+  - Import shadcn components from `@kandev/ui`, NOT `@/components/ui/*`
+  - **Always prefer native shadcn components** over custom implementations
+  - Check `apps/packages/ui/src/` for available components (pagination, table, dialog, etc.)
+  - For data tables, use `@kandev/ui/table` with TanStack Table; use shadcn Pagination components
+  - Only create custom components when shadcn doesn't provide what's needed
 - **Components:** <200 lines, extract to domain components, composition over props
 - **Hooks:** Domain-organized in `hooks/domains/`, encapsulate subscription + selection
 - **WS:** Use subscription hooks only; client auto-deduplicates
+- **Interactivity:** All buttons and links with actions must have `cursor-pointer` class
+
+### Plan Implementation
+- After implementing a plan, run `make typecheck test lint` to verify the changes
 
 ---
 
-**Last Updated**: 2026-01-22
+**Last Updated**: 2026-02-01

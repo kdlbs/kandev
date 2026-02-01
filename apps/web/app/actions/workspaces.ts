@@ -5,6 +5,7 @@ import type {
   ApproveSessionResponse,
   Board,
   ListBoardsResponse,
+  ListTasksResponse,
   ListWorkflowStepsResponse,
   RepositoryDiscoveryResponse,
   ListRepositoriesResponse,
@@ -92,6 +93,19 @@ export async function listBoardsAction(workspaceId: string): Promise<ListBoardsR
   const url = new URL(`${apiBaseUrl}/api/v1/boards`);
   url.searchParams.set('workspace_id', workspaceId);
   return fetchJson<ListBoardsResponse>(url.toString());
+}
+
+export async function listTasksByWorkspaceAction(
+  workspaceId: string,
+  page = 1,
+  pageSize = 50,
+  query = ''
+): Promise<ListTasksResponse> {
+  const url = new URL(`${apiBaseUrl}/api/v1/workspaces/${workspaceId}/tasks`);
+  url.searchParams.set('page', String(page));
+  url.searchParams.set('page_size', String(pageSize));
+  if (query) url.searchParams.set('query', query);
+  return fetchJson<ListTasksResponse>(url.toString());
 }
 
 export async function createBoardAction(payload: {
