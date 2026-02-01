@@ -7,7 +7,6 @@ import {
   IconLoader2,
   IconRobot,
   IconUser,
-  IconArrowRight,
   IconCopy,
   IconRefresh,
   IconTrash,

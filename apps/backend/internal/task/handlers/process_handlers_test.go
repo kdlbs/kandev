@@ -329,6 +329,12 @@ func (m *mockRepository) GetPrimarySessionByTaskID(ctx context.Context, taskID s
 func (m *mockRepository) GetPrimarySessionIDsByTaskIDs(ctx context.Context, taskIDs []string) (map[string]string, error) {
 	return make(map[string]string), nil
 }
+func (m *mockRepository) GetSessionCountsByTaskIDs(ctx context.Context, taskIDs []string) (map[string]int, error) {
+	return make(map[string]int), nil
+}
+func (m *mockRepository) GetPrimarySessionInfoByTaskIDs(ctx context.Context, taskIDs []string) (map[string]*models.TaskSession, error) {
+	return make(map[string]*models.TaskSession), nil
+}
 func (m *mockRepository) SetSessionPrimary(ctx context.Context, sessionID string) error {
 	return nil
 }

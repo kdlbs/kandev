@@ -16,16 +16,12 @@ type TaskChatPanelProps = {
   onSend?: (message: string) => void;
   sessionId?: string | null;
   onOpenFile?: (path: string) => void;
-  showApproveButton?: boolean;
-  onApprove?: () => void;
 };
 
 export const TaskChatPanel = memo(function TaskChatPanel({
   onSend,
   sessionId = null,
   onOpenFile,
-  showApproveButton,
-  onApprove,
 }: TaskChatPanelProps) {
   const [planModeEnabled, setPlanModeEnabled] = useState(false);
   const [isSending, setIsSending] = useState(false);

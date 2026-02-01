@@ -4,7 +4,6 @@ import { memo, useCallback, useState, useEffect, useMemo } from 'react';
 import { IconSparkles, IconCheck, IconChevronDown, IconX } from '@tabler/icons-react';
 import { TabsContent } from '@kandev/ui/tabs';
 import { Button } from '@kandev/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -107,6 +106,8 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
     }
   }, [activeSessionId, activeTaskId, setTaskSession]);
 
+  const [leftTab, setLeftTab] = useState('chat');
+
   // Request changes modal state
   const [showRequestChangesDialog, setShowRequestChangesDialog] = useState(false);
   const [requestChangesMessage, setRequestChangesMessage] = useState('');
@@ -139,9 +140,7 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
     } catch (error) {
       console.error('Failed to send changes request:', error);
     }
-  }, [activeSessionId, activeTaskId, requestChangesMessage]);
-
-  const [leftTab, setLeftTab] = useState('chat');
+  }, [activeSessionId, activeTaskId, requestChangesMessage, setLeftTab]);
   const [selectedDiff, setSelectedDiff] = useState<SelectedDiff | null>(null);
   const [openFileTabs, setOpenFileTabs] = useState<OpenFileTab[]>([]);
 
@@ -371,7 +370,7 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
           <DialogHeader>
             <DialogTitle>Request Changes</DialogTitle>
             <DialogDescription>
-              Describe the changes you'd like the agent to make. This will be sent as a message to continue the conversation.
+              Describe the changes you&apos;d like the agent to make. This will be sent as a message to continue the conversation.
             </DialogDescription>
           </DialogHeader>
           <div className="py-4">
