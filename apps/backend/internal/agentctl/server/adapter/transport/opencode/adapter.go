@@ -902,22 +902,14 @@ func (a *Adapter) handlePermissionAsked(props json.RawMessage, sessionID string)
 		}
 	}
 
-	// Emit permission request event
-	a.sendUpdate(AgentEvent{
-		Type:            streams.EventTypePermissionRequest,
-		SessionID:       sessionID,
-		PendingID:       requestID,
-		ToolCallID:      toolCallID,
-		PermissionTitle: title,
-		PermissionOptions: []PermissionOption{
-			{OptionID: "allow", Name: "Allow", Kind: "allow_once"},
-			{OptionID: "deny", Name: "Deny", Kind: "reject_once"},
-		},
-		ActionType:    permission,
-		ActionDetails: parsed.Metadata,
-	})
-
-	// If we have a handler, call it
+	// If we have a handler, call it to get user approval.
+	// The handler (process manager's handlePermissionRequest) will:
+	// 1. Send the permission_request notification to the frontend
+	// 2. Block waiting for user response
+	// 3. Return the response
+	// We pass PendingID so the handler uses OpenCode's ID (e.g., "per_xxx")
+	// instead of generating a new one - this ensures the frontend and backend
+	// use the same ID for response lookup.
 	if handler != nil {
 		go func() {
 			req := &PermissionRequest{
@@ -926,6 +918,7 @@ func (a *Adapter) handlePermissionAsked(props json.RawMessage, sessionID string)
 				Title:         title,
 				ActionType:    permission,
 				ActionDetails: parsed.Metadata,
+				PendingID:     requestID, // Use OpenCode's ID so response lookup works
 				Options: []PermissionOption{
 					{OptionID: "allow", Name: "Allow", Kind: "allow_once"},
 					{OptionID: "deny", Name: "Deny", Kind: "reject_once"},

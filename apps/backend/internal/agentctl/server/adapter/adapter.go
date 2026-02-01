@@ -36,16 +36,17 @@ type (
 
 // Re-export agent event type constants from streams package.
 const (
-	EventTypeMessageChunk      = streams.EventTypeMessageChunk
-	EventTypeReasoning         = streams.EventTypeReasoning
-	EventTypeToolCall          = streams.EventTypeToolCall
-	EventTypeToolUpdate        = streams.EventTypeToolUpdate
-	EventTypePlan              = streams.EventTypePlan
-	EventTypeComplete          = streams.EventTypeComplete
-	EventTypeError             = streams.EventTypeError
-	EventTypePermissionRequest = streams.EventTypePermissionRequest
-	EventTypeContextWindow     = streams.EventTypeContextWindow
-	EventTypeSessionStatus     = streams.EventTypeSessionStatus
+	EventTypeMessageChunk        = streams.EventTypeMessageChunk
+	EventTypeReasoning           = streams.EventTypeReasoning
+	EventTypeToolCall            = streams.EventTypeToolCall
+	EventTypeToolUpdate          = streams.EventTypeToolUpdate
+	EventTypePlan                = streams.EventTypePlan
+	EventTypeComplete            = streams.EventTypeComplete
+	EventTypeError               = streams.EventTypeError
+	EventTypePermissionRequest   = streams.EventTypePermissionRequest
+	EventTypePermissionCancelled = streams.EventTypePermissionCancelled
+	EventTypeContextWindow       = streams.EventTypeContextWindow
+	EventTypeSessionStatus       = streams.EventTypeSessionStatus
 )
 
 // StderrProvider provides access to recent stderr output for error context.

@@ -686,8 +686,14 @@ func (m *Manager) GetProcessInfo() map[string]interface{} {
 // handlePermissionRequest handles permission requests from the agent
 // It stores the pending request and waits for a response from the backend
 func (m *Manager) handlePermissionRequest(ctx context.Context, req *adapter.PermissionRequest) (*adapter.PermissionResponse, error) {
-	// Generate a unique ID for this permission request
-	pendingID := fmt.Sprintf("%s-%s-%d", req.SessionID, req.ToolCallID, time.Now().UnixNano())
+	// Use the adapter-provided pending ID if available, otherwise generate one.
+	// This ensures the ID sent to the frontend matches the one used for response lookup.
+	// For OpenCode (per_xxx) and Claude Code (requestID), the adapter passes its ID
+	// so we use the same ID throughout the permission flow.
+	pendingID := req.PendingID
+	if pendingID == "" {
+		pendingID = fmt.Sprintf("%s-%s-%d", req.SessionID, req.ToolCallID, time.Now().UnixNano())
+	}
 
 	m.logger.Info("handling permission request",
 		zap.String("pending_id", pendingID),
@@ -722,7 +728,6 @@ func (m *Manager) handlePermissionRequest(ctx context.Context, req *adapter.Perm
 	}()
 
 	// Send notification to backend via updates channel
-	// We use a custom notification type that the backend will recognize
 	m.sendPermissionNotification(pending)
 
 	// Wait for response indefinitely - user may close and reopen the page
@@ -736,6 +741,8 @@ func (m *Manager) handlePermissionRequest(ctx context.Context, req *adapter.Perm
 	case <-ctx.Done():
 		m.logger.Warn("permission request context cancelled",
 			zap.String("pending_id", pendingID))
+		// Send cancellation notification so the backend can update the permission message status
+		m.sendPermissionCancelledNotification(pending)
 		return &adapter.PermissionResponse{Cancelled: true}, nil
 	}
 }
@@ -802,6 +809,29 @@ func (m *Manager) sendPermissionNotification(pending *PendingPermission) {
 		// Sent successfully
 	default:
 		m.logger.Warn("updates channel full, dropping permission notification",
+			zap.String("pending_id", pending.ID))
+	}
+}
+
+// sendPermissionCancelledNotification sends a notification that a permission request was cancelled.
+// This happens when the context is cancelled (e.g., agent completes or user stops the task)
+// before the user responds to the permission request.
+func (m *Manager) sendPermissionCancelledNotification(pending *PendingPermission) {
+	event := adapter.AgentEvent{
+		Type:      adapter.EventTypePermissionCancelled,
+		SessionID: pending.Request.SessionID,
+		PendingID: pending.ID,
+	}
+
+	m.logger.Info("sending permission cancelled notification",
+		zap.String("pending_id", pending.ID),
+		zap.String("session_id", pending.Request.SessionID))
+
+	select {
+	case m.updatesCh <- event:
+		// Sent successfully
+	default:
+		m.logger.Warn("updates channel full, dropping permission cancelled notification",
 			zap.String("pending_id", pending.ID))
 	}
 }

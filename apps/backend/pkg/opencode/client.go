@@ -30,6 +30,10 @@ type Client struct {
 	eventHandler EventHandler
 	controlCh    chan ControlEvent
 
+	// SSE connection tracking - prevents multiple concurrent connections
+	sseCancel context.CancelFunc
+	sseActive bool
+
 	mu     sync.RWMutex
 	closed bool
 }
@@ -355,12 +359,38 @@ func (c *Client) ReplyPermission(ctx context.Context, requestID, reply string, m
 	return nil
 }
 
-// StartEventStream starts the SSE event stream and processes events
+// StartEventStream starts the SSE event stream and processes events.
+// It ensures only one SSE connection is active at a time to prevent duplicate events.
 func (c *Client) StartEventStream(ctx context.Context, sessionID string) error {
+	c.mu.Lock()
+	// Check if already connected - prevent multiple concurrent SSE connections
+	// which would cause duplicate event processing
+	if c.sseActive {
+		c.mu.Unlock()
+		c.logger.Debug("SSE stream already active, skipping duplicate connection",
+			zap.String("session_id", sessionID))
+		return nil
+	}
+	c.sseActive = true
+	c.mu.Unlock()
+
 	url := c.baseURL + "/event?directory=" + c.directory
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	// Create a cancellable context for this SSE connection
+	sseCtx, sseCancel := context.WithCancel(ctx)
+
+	// Store the cancel function so we can close this connection later if needed
+	c.mu.Lock()
+	c.sseCancel = sseCancel
+	c.mu.Unlock()
+
+	req, err := http.NewRequestWithContext(sseCtx, http.MethodGet, url, nil)
 	if err != nil {
+		c.mu.Lock()
+		c.sseActive = false
+		c.sseCancel = nil
+		c.mu.Unlock()
+		sseCancel()
 		return fmt.Errorf("create event stream request: %w", err)
 	}
 
@@ -372,24 +402,45 @@ func (c *Client) StartEventStream(ctx context.Context, sessionID string) error {
 	sseClient := &http.Client{}
 	resp, err := sseClient.Do(req)
 	if err != nil {
+		c.mu.Lock()
+		c.sseActive = false
+		c.sseCancel = nil
+		c.mu.Unlock()
+		sseCancel()
 		return fmt.Errorf("connect event stream: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
+		c.mu.Lock()
+		c.sseActive = false
+		c.sseCancel = nil
+		c.mu.Unlock()
+		sseCancel()
 		return fmt.Errorf("event stream failed: HTTP %d: %s", resp.StatusCode, string(body))
 	}
 
+	c.logger.Debug("SSE stream connected",
+		zap.String("session_id", sessionID))
+
 	// Process events in background
-	go c.processEventStream(ctx, sessionID, resp.Body)
+	go c.processEventStream(sseCtx, sessionID, resp.Body)
 
 	return nil
 }
 
 // processEventStream reads and processes SSE events
 func (c *Client) processEventStream(ctx context.Context, sessionID string, body io.ReadCloser) {
-	defer func() { _ = body.Close() }()
+	defer func() {
+		_ = body.Close()
+		// Mark SSE as inactive when stream ends
+		c.mu.Lock()
+		c.sseActive = false
+		c.sseCancel = nil
+		c.mu.Unlock()
+		c.logger.Debug("SSE stream ended", zap.String("session_id", sessionID))
+	}()
 
 	scanner := bufio.NewScanner(body)
 	// Increase buffer size for potentially large events
@@ -544,7 +595,7 @@ func (c *Client) processControlEvent(event *SDKEventEnvelope, sessionID string) 
 	}
 }
 
-// Close closes the client
+// Close closes the client and terminates any active SSE connection
 func (c *Client) Close() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -553,6 +604,13 @@ func (c *Client) Close() {
 		return
 	}
 	c.closed = true
+
+	// Cancel any active SSE connection
+	if c.sseCancel != nil {
+		c.sseCancel()
+		c.sseCancel = nil
+	}
+	c.sseActive = false
 
 	close(c.controlCh)
 }

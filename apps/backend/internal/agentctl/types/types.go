@@ -107,6 +107,13 @@ type PermissionRequest struct {
 	Title      string             `json:"title"`
 	Options    []PermissionOption `json:"options"`
 
+	// PendingID is the unique identifier for this permission request.
+	// If set by the adapter (e.g., OpenCode's "per_xxx" ID or Claude Code's requestID),
+	// the process manager will use this ID instead of generating a new one.
+	// This ensures the frontend and backend use the same ID for permission response lookups.
+	// If empty, the process manager will generate a unique ID.
+	PendingID string `json:"pending_id,omitempty"`
+
 	// ActionType categorizes the action requiring approval.
 	// Use ActionType* constants: "command", "file_write", "network", "mcp_tool", etc.
 	ActionType string `json:"action_type,omitempty"`
