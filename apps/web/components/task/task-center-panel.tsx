@@ -1,7 +1,25 @@
 'use client';
 
 import { memo, useCallback, useState, useEffect, useMemo } from 'react';
+import { IconSparkles, IconCheck, IconChevronDown, IconX } from '@tabler/icons-react';
 import { TabsContent } from '@kandev/ui/tabs';
+import { Button } from '@kandev/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuSeparator,
+} from '@kandev/ui/dropdown-menu';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@kandev/ui/dialog';
 import { Textarea } from '@kandev/ui/textarea';
 import { SessionPanel } from '@kandev/ui/pannel-session';
 import { TaskChatPanel } from './task-chat-panel';
@@ -89,9 +107,42 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
     }
   }, [activeSessionId, activeTaskId, setTaskSession]);
 
+  // Request changes modal state
+  const [showRequestChangesDialog, setShowRequestChangesDialog] = useState(false);
+  const [requestChangesMessage, setRequestChangesMessage] = useState('');
+
+  // Request changes handler - sends message to agent
+  const handleRequestChanges = useCallback(async () => {
+    if (!activeSessionId || !activeTaskId || !requestChangesMessage.trim()) return;
+
+    try {
+      const client = getWebSocketClient();
+      if (client) {
+        // Send the changes request as a message to the chat
+        await client.request(
+          'message.add',
+          {
+            task_id: activeTaskId,
+            session_id: activeSessionId,
+            content: requestChangesMessage.trim(),
+          },
+          10000
+        );
+
+        // Close dialog and reset
+        setShowRequestChangesDialog(false);
+        setRequestChangesMessage('');
+
+        // Switch to chat tab to show the message
+        setLeftTab('chat');
+      }
+    } catch (error) {
+      console.error('Failed to send changes request:', error);
+    }
+  }, [activeSessionId, activeTaskId, requestChangesMessage]);
+
   const [leftTab, setLeftTab] = useState('chat');
   const [selectedDiff, setSelectedDiff] = useState<SelectedDiff | null>(null);
-  const [notes, setNotes] = useState('');
   const [openFileTabs, setOpenFileTabs] = useState<OpenFileTab[]>([]);
 
   // Track plan updates for notification dot
@@ -194,14 +245,16 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
 
   const tabs: SessionTab[] = useMemo(() => {
     const staticTabs: SessionTab[] = [
-      { id: 'notes', label: 'Notes' },
       { id: 'changes', label: 'All changes' },
       { id: 'chat', label: 'Chat' },
       {
         id: 'plan',
         label: 'Plan',
         icon: hasUnseenPlanUpdate ? (
-          <span className="h-2 w-2 rounded-full bg-primary animate-pulse" />
+          <div className="relative">
+            <IconSparkles className="h-3.5 w-3.5 text-amber-500 dark:text-amber-400 animate-pulse" />
+            <span className="absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-amber-500 dark:bg-amber-400 animate-ping" />
+          </div>
         ) : undefined,
       },
     ];
@@ -231,25 +284,54 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
         tabs={tabs}
         activeTab={leftTab}
         onTabChange={handleTabChange}
-        separatorAfterIndex={openFileTabs.length > 0 ? 3 : undefined}
+        separatorAfterIndex={openFileTabs.length > 0 ? 2 : undefined}
         className="flex-1 min-h-0 flex flex-col gap-2"
+        rightContent={
+          showApproveButton ? (
+            <div className="flex items-center gap-0.5">
+              <Button
+                type="button"
+                size="sm"
+                className="h-6 gap-1.5 px-2.5 cursor-pointer bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium rounded-r-none border-r border-emerald-700/30"
+                onClick={handleApprove}
+              >
+                <IconCheck className="h-3.5 w-3.5" />
+                Approve
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="h-6 w-6 p-0 cursor-pointer bg-emerald-600 hover:bg-emerald-700 text-white rounded-l-none"
+                  >
+                    <IconChevronDown className="h-3 w-3" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-48">
+                  <DropdownMenuItem onClick={handleApprove} className="cursor-pointer">
+                    <IconCheck className="h-4 w-4 mr-2" />
+                    Approve and continue
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onClick={() => setShowRequestChangesDialog(true)}
+                    className="cursor-pointer text-amber-600 dark:text-amber-500"
+                  >
+                    <IconX className="h-4 w-4 mr-2" />
+                    Request changes
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          ) : undefined
+        }
       >
 
         <TabsContent value="plan" className="flex-1 min-h-0" forceMount style={{ display: leftTab === 'plan' ? undefined : 'none' }}>
           <TaskPlanPanel
             taskId={activeTaskId}
-            showApproveButton={showApproveButton}
-            onApprove={handleApprove}
             visible={leftTab === 'plan'}
-          />
-        </TabsContent>
-
-        <TabsContent value="notes" className="flex-1 min-h-0">
-          <Textarea
-            value={notes}
-            onChange={(event) => setNotes(event.target.value)}
-            placeholder="Add task notes here..."
-            className="min-h-0 h-full resize-none"
           />
         </TabsContent>
 
@@ -282,6 +364,48 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
           </TabsContent>
         ))}
       </SessionTabs>
+
+      {/* Request Changes Dialog */}
+      <Dialog open={showRequestChangesDialog} onOpenChange={setShowRequestChangesDialog}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Request Changes</DialogTitle>
+            <DialogDescription>
+              Describe the changes you'd like the agent to make. This will be sent as a message to continue the conversation.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <Textarea
+              placeholder="Please make the following changes..."
+              value={requestChangesMessage}
+              onChange={(e) => setRequestChangesMessage(e.target.value)}
+              rows={6}
+              className="resize-none"
+              autoFocus
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setShowRequestChangesDialog(false);
+                setRequestChangesMessage('');
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={handleRequestChanges}
+              disabled={!requestChangesMessage.trim()}
+              className="bg-amber-600 hover:bg-amber-700 text-white"
+            >
+              Send Changes Request
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </SessionPanel>
   );
 });

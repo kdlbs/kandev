@@ -27,6 +27,8 @@ type SessionTabsProps = {
   collapsible?: boolean;
   isCollapsed?: boolean;
   onToggleCollapse?: () => void;
+  // Right content (e.g., approve button)
+  rightContent?: ReactNode;
 };
 
 export function SessionTabs({
@@ -42,6 +44,7 @@ export function SessionTabs({
   collapsible = false,
   isCollapsed = false,
   onToggleCollapse,
+  rightContent,
 }: SessionTabsProps) {
   const tabsList = (
     <TabsList className="p-0 !h-6 rounded-sm">
@@ -130,7 +133,15 @@ export function SessionTabs({
       {collapsible ? (
         <div className={`flex items-center justify-between ${children ? '' : 'p-2'}`}>
           {tabsList}
-          {collapseButton}
+          <div className="flex items-center gap-2">
+            {rightContent}
+            {collapseButton}
+          </div>
+        </div>
+      ) : rightContent ? (
+        <div className="flex items-center justify-between">
+          {tabsList}
+          {rightContent}
         </div>
       ) : (
         tabsList
