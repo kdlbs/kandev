@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 
@@ -58,6 +59,7 @@ func RegisterTaskRoutes(router *gin.Engine, dispatcher *ws.Dispatcher, ctrl *con
 func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api := router.Group("/api/v1")
 	api.GET("/boards/:id/tasks", h.httpListTasks)
+	api.GET("/workspaces/:id/tasks", h.httpListTasksByWorkspace)
 	api.GET("/tasks/:id", h.httpGetTask)
 	api.GET("/task-sessions/:id", h.httpGetTaskSession)
 	api.GET("/tasks/:id/sessions", h.httpListTaskSessions)
@@ -94,6 +96,36 @@ func (h *TaskHandlers) registerWS(dispatcher *ws.Dispatcher) {
 
 func (h *TaskHandlers) httpListTasks(c *gin.Context) {
 	resp, err := h.controller.ListTasks(c.Request.Context(), dto.ListTasksRequest{BoardID: c.Param("id")})
+	if err != nil {
+		handleNotFound(c, h.logger, err, "tasks not found")
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+func (h *TaskHandlers) httpListTasksByWorkspace(c *gin.Context) {
+	page := 1
+	pageSize := 50
+
+	if p := c.Query("page"); p != "" {
+		if parsed, err := strconv.Atoi(p); err == nil && parsed > 0 {
+			page = parsed
+		}
+	}
+	if ps := c.Query("page_size"); ps != "" {
+		if parsed, err := strconv.Atoi(ps); err == nil && parsed > 0 && parsed <= 100 {
+			pageSize = parsed
+		}
+	}
+
+	query := c.Query("query")
+
+	resp, err := h.controller.ListTasksByWorkspace(c.Request.Context(), dto.ListTasksByWorkspaceRequest{
+		WorkspaceID: c.Param("id"),
+		Query:       query,
+		Page:        page,
+		PageSize:    pageSize,
+	})
 	if err != nil {
 		handleNotFound(c, h.logger, err, "tasks not found")
 		return

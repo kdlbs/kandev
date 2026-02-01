@@ -135,6 +135,83 @@ func (r *Repository) ListTasksByWorkflowStep(ctx context.Context, workflowStepID
 	return r.scanTasks(rows)
 }
 
+// ListTasksByWorkspace returns paginated tasks for a workspace with total count
+// If query is non-empty, filters by task title, description, repository name, or repository path
+func (r *Repository) ListTasksByWorkspace(ctx context.Context, workspaceID string, query string, page, pageSize int) ([]*models.Task, int, error) {
+	// Calculate offset
+	offset := (page - 1) * pageSize
+	if offset < 0 {
+		offset = 0
+	}
+
+	var total int
+	var rows *sql.Rows
+	var err error
+
+	if query == "" {
+		// No search query - use simple query
+		err = r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM tasks WHERE workspace_id = ?`, workspaceID).Scan(&total)
+		if err != nil {
+			return nil, 0, err
+		}
+
+		rows, err = r.db.QueryContext(ctx, `
+			SELECT id, workspace_id, board_id, workflow_step_id, title, description, state, priority, position, metadata, created_at, updated_at
+			FROM tasks
+			WHERE workspace_id = ?
+			ORDER BY updated_at DESC
+			LIMIT ? OFFSET ?
+		`, workspaceID, pageSize, offset)
+	} else {
+		// Search query - use JOIN with repositories
+		searchPattern := "%" + query + "%"
+
+		err = r.db.QueryRowContext(ctx, `
+			SELECT COUNT(DISTINCT t.id) FROM tasks t
+			LEFT JOIN task_repositories tr ON t.id = tr.task_id
+			LEFT JOIN repositories r ON tr.repository_id = r.id
+			WHERE t.workspace_id = ?
+			AND (
+				t.title LIKE ? OR
+				t.description LIKE ? OR
+				r.name LIKE ? OR
+				r.local_path LIKE ?
+			)
+		`, workspaceID, searchPattern, searchPattern, searchPattern, searchPattern).Scan(&total)
+		if err != nil {
+			return nil, 0, err
+		}
+
+		rows, err = r.db.QueryContext(ctx, `
+			SELECT DISTINCT t.id, t.workspace_id, t.board_id, t.workflow_step_id, t.title, t.description, t.state, t.priority, t.position, t.metadata, t.created_at, t.updated_at
+			FROM tasks t
+			LEFT JOIN task_repositories tr ON t.id = tr.task_id
+			LEFT JOIN repositories r ON tr.repository_id = r.id
+			WHERE t.workspace_id = ?
+			AND (
+				t.title LIKE ? OR
+				t.description LIKE ? OR
+				r.name LIKE ? OR
+				r.local_path LIKE ?
+			)
+			ORDER BY t.updated_at DESC
+			LIMIT ? OFFSET ?
+		`, workspaceID, searchPattern, searchPattern, searchPattern, searchPattern, pageSize, offset)
+	}
+
+	if err != nil {
+		return nil, 0, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	tasks, err := r.scanTasks(rows)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	return tasks, total, nil
+}
+
 // scanTasks is a helper to scan task rows
 func (r *Repository) scanTasks(rows *sql.Rows) ([]*models.Task, error) {
 	var result []*models.Task

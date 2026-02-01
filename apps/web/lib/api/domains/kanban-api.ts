@@ -3,6 +3,7 @@ import { getBackendConfig } from '@/lib/config';
 import type {
   BoardSnapshot,
   ListBoardsResponse,
+  ListTasksResponse,
   CreateTaskResponse,
   Task,
   MoveTaskResponse,
@@ -89,4 +90,17 @@ export async function moveTask(
 
 export async function fetchTask(taskId: string, options?: ApiRequestOptions) {
   return fetchJson<Task>(`/api/v1/tasks/${taskId}`, options);
+}
+
+export async function listTasksByWorkspace(
+  workspaceId: string,
+  params: { page?: number; pageSize?: number; query?: string } = {},
+  options?: ApiRequestOptions
+) {
+  const baseUrl = options?.baseUrl ?? getBackendConfig().apiBaseUrl;
+  const url = new URL(`${baseUrl}/api/v1/workspaces/${workspaceId}/tasks`);
+  if (params.page) url.searchParams.set('page', String(params.page));
+  if (params.pageSize) url.searchParams.set('page_size', String(params.pageSize));
+  if (params.query) url.searchParams.set('query', params.query);
+  return fetchJson<ListTasksResponse>(url.toString(), options);
 }

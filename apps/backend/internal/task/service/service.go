@@ -685,6 +685,27 @@ func (s *Service) ListTasks(ctx context.Context, boardID string) ([]*models.Task
 	return tasks, nil
 }
 
+// ListTasksByWorkspace returns paginated tasks for a workspace with task repositories loaded.
+// If query is non-empty, filters by task title, description, repository name, or repository path.
+func (s *Service) ListTasksByWorkspace(ctx context.Context, workspaceID string, query string, page, pageSize int) ([]*models.Task, int, error) {
+	tasks, total, err := s.repo.ListTasksByWorkspace(ctx, workspaceID, query, page, pageSize)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	// Load repositories for each task
+	for _, task := range tasks {
+		repos, err := s.repo.ListTaskRepositories(ctx, task.ID)
+		if err != nil {
+			s.logger.Error("failed to list task repositories", zap.String("task_id", task.ID), zap.Error(err))
+		} else {
+			task.Repositories = repos
+		}
+	}
+
+	return tasks, total, nil
+}
+
 // ListTaskSessions returns all sessions for a task.
 func (s *Service) ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
 	return s.repo.ListTaskSessions(ctx, taskID)

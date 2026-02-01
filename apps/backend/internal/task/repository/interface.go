@@ -22,6 +22,7 @@ type Repository interface {
 	UpdateTask(ctx context.Context, task *models.Task) error
 	DeleteTask(ctx context.Context, id string) error
 	ListTasks(ctx context.Context, boardID string) ([]*models.Task, error)
+	ListTasksByWorkspace(ctx context.Context, workspaceID string, query string, page, pageSize int) ([]*models.Task, int, error)
 	ListTasksByWorkflowStep(ctx context.Context, workflowStepID string) ([]*models.Task, error)
 	UpdateTaskState(ctx context.Context, id string, state v1.TaskState) error
 	AddTaskToBoard(ctx context.Context, taskID, boardID, workflowStepID string, position int) error

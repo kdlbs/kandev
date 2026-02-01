@@ -367,6 +367,11 @@ export type ListBoardsResponse = {
   total: number;
 };
 
+export type ListTasksResponse = {
+  tasks: Task[];
+  total: number;
+};
+
 export type ListRepositoriesResponse = {
   repositories: Repository[];
   total: number;
