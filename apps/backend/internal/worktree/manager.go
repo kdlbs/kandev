@@ -16,6 +16,12 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
+// repoLockEntry tracks a repository lock and its reference count.
+type repoLockEntry struct {
+	mu       *sync.Mutex
+	refCount int
+}
+
 // Manager handles Git worktree operations for concurrent agent execution.
 type Manager struct {
 	config     Config
@@ -23,7 +29,7 @@ type Manager struct {
 	store      Store
 	worktrees  map[string]*Worktree // sessionID -> worktree (in-memory cache)
 	mu         sync.RWMutex         // Protects worktrees map
-	repoLocks  map[string]*sync.Mutex
+	repoLocks  map[string]*repoLockEntry
 	repoLockMu sync.Mutex
 
 	// Optional dependencies for script execution
@@ -81,7 +87,7 @@ func NewManager(cfg Config, store Store, log *logger.Logger) (*Manager, error) {
 		logger:    log.WithFields(zap.String("component", "worktree-manager")),
 		store:     store,
 		worktrees: make(map[string]*Worktree),
-		repoLocks: make(map[string]*sync.Mutex),
+		repoLocks: make(map[string]*repoLockEntry),
 	}, nil
 }
 
@@ -95,18 +101,41 @@ func (m *Manager) SetScriptMessageHandler(handler ScriptMessageHandler) {
 	m.scriptMsgHandler = handler
 }
 
-// getRepoLock returns a mutex for the given repository path.
+// getRepoLock returns a mutex for the given repository path and increments its reference count.
 func (m *Manager) getRepoLock(repoPath string) *sync.Mutex {
 	m.repoLockMu.Lock()
 	defer m.repoLockMu.Unlock()
 
-	if lock, exists := m.repoLocks[repoPath]; exists {
-		return lock
+	if entry, exists := m.repoLocks[repoPath]; exists {
+		entry.refCount++
+		return entry.mu
 	}
 
-	lock := &sync.Mutex{}
-	m.repoLocks[repoPath] = lock
-	return lock
+	entry := &repoLockEntry{
+		mu:       &sync.Mutex{},
+		refCount: 1,
+	}
+	m.repoLocks[repoPath] = entry
+	return entry.mu
+}
+
+// releaseRepoLock decrements the reference count for a repository lock.
+// If the count reaches zero, the lock is removed from the map to prevent memory leaks.
+func (m *Manager) releaseRepoLock(repoPath string) {
+	m.repoLockMu.Lock()
+	defer m.repoLockMu.Unlock()
+
+	entry, exists := m.repoLocks[repoPath]
+	if !exists {
+		return
+	}
+
+	entry.refCount--
+	if entry.refCount <= 0 {
+		delete(m.repoLocks, repoPath)
+		m.logger.Debug("released repository lock",
+			zap.String("repository_path", repoPath))
+	}
 }
 
 // IsEnabled returns whether worktree mode is enabled.
@@ -178,7 +207,10 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 	// Get repository lock for safe concurrent access
 	repoLock := m.getRepoLock(req.RepositoryPath)
 	repoLock.Lock()
-	defer repoLock.Unlock()
+	defer func() {
+		repoLock.Unlock()
+		m.releaseRepoLock(req.RepositoryPath)
+	}()
 
 	baseRef := req.BaseBranch
 	if req.PullBeforeWorktree {
@@ -437,7 +469,10 @@ func (m *Manager) removeWorktree(ctx context.Context, wt *Worktree, removeBranch
 	// Get repository lock
 	repoLock := m.getRepoLock(wt.RepositoryPath)
 	repoLock.Lock()
-	defer repoLock.Unlock()
+	defer func() {
+		repoLock.Unlock()
+		m.releaseRepoLock(wt.RepositoryPath)
+	}()
 
 	// Execute cleanup script BEFORE removing directory
 	if m.scriptMsgHandler != nil && m.repoProvider != nil {
@@ -514,7 +549,9 @@ func (m *Manager) removeWorktree(ctx context.Context, wt *Worktree, removeBranch
 
 	// Update cache
 	m.mu.Lock()
-	delete(m.worktrees, wt.TaskID)
+	if wt.SessionID != "" {
+		delete(m.worktrees, wt.SessionID)
+	}
 	m.mu.Unlock()
 
 	m.logger.Info("removed worktree",
@@ -551,7 +588,9 @@ func (m *Manager) CleanupWorktrees(ctx context.Context, worktrees []*Worktree) e
 		if wt == nil {
 			continue
 		}
-		delete(m.worktrees, wt.TaskID)
+		if wt.SessionID != "" {
+			delete(m.worktrees, wt.SessionID)
+		}
 	}
 	m.mu.Unlock()
 
@@ -751,7 +790,10 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 	// Get repository lock
 	repoLock := m.getRepoLock(req.RepositoryPath)
 	repoLock.Lock()
-	defer repoLock.Unlock()
+	defer func() {
+		repoLock.Unlock()
+		m.releaseRepoLock(req.RepositoryPath)
+	}()
 
 	worktreePath, err := m.config.WorktreePath(req.TaskID)
 	if err != nil {
