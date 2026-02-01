@@ -179,10 +179,12 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
         if (event.defaultPrevented) return;
       }
 
-      // Submit only on Cmd/Ctrl+Enter
+      // Submit only on Cmd/Ctrl+Enter, and only if not disabled
       if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
         event.preventDefault();
-        onSubmit?.();
+        if (!disabled) {
+          onSubmit?.();
+        }
       }
     };
 
