@@ -2,7 +2,7 @@
 
 import { memo, useState, useCallback, useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
-import { IconLoader2 } from '@tabler/icons-react';
+import { IconLoader2, IconEdit } from '@tabler/icons-react';
 import { useTaskPlan } from '@/hooks/domains/session/use-task-plan';
 import { useAppStore } from '@/components/state-provider';
 import { getWebSocketClient } from '@/lib/ws/connection';
@@ -20,12 +20,10 @@ const MarkdownEditor = dynamic(
 
 type TaskPlanPanelProps = {
   taskId: string | null;
-  showApproveButton?: boolean;
-  onApprove?: () => void;
   visible?: boolean;
 };
 
-export const TaskPlanPanel = memo(function TaskPlanPanel({ taskId, showApproveButton, onApprove, visible = true }: TaskPlanPanelProps) {
+export const TaskPlanPanel = memo(function TaskPlanPanel({ taskId, visible = true }: TaskPlanPanelProps) {
   const { plan, isLoading, isSaving, savePlan, deletePlan } = useTaskPlan(taskId, { visible });
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const activeSession = useAppStore((state) =>
@@ -49,6 +47,15 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({ taskId, showApproveBu
   const [isSubmittingComments, setIsSubmittingComments] = useState(false);
   // Ref to the editor wrapper for positioning gutter markers
   const editorWrapperRef = useRef<HTMLDivElement>(null);
+
+  // Handler to focus the editor when clicking the empty state
+  const handleEmptyStateClick = useCallback(() => {
+    // Find the ProseMirror editor element and focus it
+    const editorElement = editorWrapperRef.current?.querySelector('.ProseMirror');
+    if (editorElement) {
+      (editorElement as HTMLElement).focus();
+    }
+  }, []);
 
   // Sync draft with plan content and force editor remount when plan changes externally
   useEffect(() => {
@@ -259,6 +266,18 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({ taskId, showApproveBu
           comments={commentHighlights}
           onCommentClick={handleCommentHighlightClick}
         />
+        {/* Empty state overlay - clickable to focus editor */}
+        {!isLoading && draftContent.trim() === '' && (
+          <div
+            className="absolute inset-0 flex items-center justify-center cursor-text bg-background"
+            onClick={handleEmptyStateClick}
+          >
+            <div className="flex flex-col items-center gap-2 text-muted-foreground pointer-events-none">
+              <IconEdit className="h-8 w-8 opacity-50" />
+              <span className="text-sm">Start writing your plan here</span>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Bottom toolbar */}
@@ -270,7 +289,6 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({ taskId, showApproveBu
         isAgentBusy={isAgentBusy}
         isReanalyzing={isReanalyzing}
         hasActiveSession={!!activeSessionId}
-        showApproveButton={showApproveButton}
         commentCount={comments.length}
         isSubmittingComments={isSubmittingComments}
         onSubmitComments={handleSubmitComments}
@@ -280,7 +298,6 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({ taskId, showApproveBu
         onCopy={handleCopy}
         onReanalyze={handleReanalyze}
         onClear={() => setShowClearDialog(true)}
-        onApprove={onApprove}
       />
 
       {/* Confirmation dialogs */}
