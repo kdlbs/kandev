@@ -15,6 +15,7 @@ import type { KanbanState } from '@/lib/state/slices';
 export function useTaskCRUD() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
   const { deleteTaskById } = useTaskActions();
   const kanban = useAppStore((state) => state.kanban);
   const store = useAppStoreApi();
@@ -33,21 +34,24 @@ export function useTaskCRUD() {
     async (task: Task) => {
       if (!kanban.boardId) return;
 
-      // Optimistic update
-      store.getState().hydrate({
-        kanban: {
-          ...kanban,
-          tasks: kanban.tasks.filter((item: KanbanState['tasks'][number]) => item.id !== task.id),
-        },
-      });
-
+      setDeletingTaskId(task.id);
       try {
         await deleteTaskById(task.id);
-      } catch {
-        // Ignore delete errors for now.
+
+        // Update UI AFTER successful delete
+        store.getState().hydrate({
+          kanban: {
+            ...store.getState().kanban,
+            tasks: store.getState().kanban.tasks.filter(
+              (item: KanbanState['tasks'][number]) => item.id !== task.id
+            ),
+          },
+        });
+      } finally {
+        setDeletingTaskId(null);
       }
     },
-    [deleteTaskById, kanban, store]
+    [deleteTaskById, kanban.boardId, store]
   );
 
   const handleDialogOpenChange = useCallback((open: boolean) => {
@@ -66,5 +70,6 @@ export function useTaskCRUD() {
     handleEdit,
     handleDelete,
     handleDialogOpenChange,
+    deletingTaskId,
   };
 }

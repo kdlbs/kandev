@@ -1,9 +1,9 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
-import { IconDots, IconArrowsMaximize } from '@tabler/icons-react';
+import { IconDots, IconArrowsMaximize, IconLoader } from '@tabler/icons-react';
 import { Card, CardContent } from '@kandev/ui/card';
 import { Badge } from '@kandev/ui/badge';
 import {
@@ -40,6 +40,7 @@ interface KanbanCardProps {
   onDelete?: (task: Task) => void;
   onOpenFullPage?: (task: Task) => void;
   showMaximizeButton?: boolean;
+  isDeleting?: boolean;
 }
 
 function KanbanCardBody({
@@ -95,10 +96,14 @@ function KanbanCardLayout({ task, repositoryName, className }: KanbanCardProps &
   );
 }
 
-export function KanbanCard({ task, repositoryName, onClick, onEdit, onDelete, onOpenFullPage, showMaximizeButton = true }: KanbanCardProps) {
+export function KanbanCard({ task, repositoryName, onClick, onEdit, onDelete, onOpenFullPage, showMaximizeButton = true, isDeleting }: KanbanCardProps) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: task.id,
   });
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  // Effective open state: keep menu open while deleting
+  const effectiveMenuOpen = menuOpen || isDeleting;
 
   const statusIcon = getTaskStateIcon(task.state, 'h-4 w-4');
 
@@ -144,7 +149,11 @@ export function KanbanCard({ task, repositoryName, onClick, onEdit, onDelete, on
                   <IconArrowsMaximize className="h-4 w-4" />
                 </button>
               )}
-              <DropdownMenu>
+              <DropdownMenu open={effectiveMenuOpen} onOpenChange={(open) => {
+                // Prevent closing while deleting
+                if (!open && isDeleting) return;
+                setMenuOpen(open);
+              }}>
                 <DropdownMenuTrigger asChild>
                   <button
                     type="button"
@@ -158,6 +167,7 @@ export function KanbanCard({ task, repositoryName, onClick, onEdit, onDelete, on
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
                   <DropdownMenuItem
+                    disabled={isDeleting}
                     onClick={(event) => {
                       event.stopPropagation();
                       onEdit?.(task);
@@ -166,11 +176,13 @@ export function KanbanCard({ task, repositoryName, onClick, onEdit, onDelete, on
                     Edit
                   </DropdownMenuItem>
                   <DropdownMenuItem
+                    disabled={isDeleting}
                     onClick={(event) => {
                       event.stopPropagation();
                       onDelete?.(task);
                     }}
                   >
+                    {isDeleting ? <IconLoader className="mr-2 h-4 w-4 animate-spin" /> : null}
                     Delete
                   </DropdownMenuItem>
                 </DropdownMenuContent>

@@ -47,6 +47,7 @@ type WorktreeBatchCleaner interface {
 // TaskExecutionStopper stops active task execution (agent session + instance).
 type TaskExecutionStopper interface {
 	StopTask(ctx context.Context, taskID, reason string, force bool) error
+	StopSession(ctx context.Context, sessionID, reason string, force bool) error
 }
 
 // WorkflowStepCreator creates workflow steps from a template for a board.
@@ -517,14 +518,19 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 	return task, nil
 }
 
-// DeleteTask deletes a task and publishes a task.deleted event
+// DeleteTask deletes a task and publishes a task.deleted event.
+// For fast UI response, the DB delete and event publish happen synchronously,
+// while agent stopping and worktree cleanup happen asynchronously.
 func (s *Service) DeleteTask(ctx context.Context, id string) error {
 	start := time.Now()
+
+	// 1. Get task (sync, fast)
 	task, err := s.repo.GetTask(ctx, id)
 	if err != nil {
 		return err
 	}
 
+	// 2. Gather data needed for cleanup BEFORE delete (sync, fast)
 	sessions, err := s.repo.ListTaskSessions(ctx, id)
 	if err != nil {
 		s.logger.Warn("failed to list task sessions for delete",
@@ -551,54 +557,76 @@ func (s *Service) DeleteTask(ctx context.Context, id string) error {
 		}
 	}
 
-	// Stop any running execution BEFORE deleting from database
-	// This must happen first because StopTask queries the database for active sessions
+	// 3. Get active session IDs for stopping agents (sync, fast)
+	// Must query before delete since DB records will be gone
+	var activeSessionIDs []string
 	if s.executionStopper != nil {
-		if err := s.executionStopper.StopTask(ctx, id, "task deleted", true); err != nil {
-			s.logger.Warn("failed to stop task execution on delete",
+		activeSessions, err := s.repo.ListActiveTaskSessionsByTaskID(ctx, id)
+		if err != nil {
+			s.logger.Warn("failed to list active sessions for delete",
 				zap.String("task_id", id),
 				zap.Error(err))
-			// Continue with deletion even if stop fails
+		}
+		for _, sess := range activeSessions {
+			activeSessionIDs = append(activeSessionIDs, sess.ID)
 		}
 	}
 
+	// 4. Delete from DB (sync, fast)
 	if err := s.repo.DeleteTask(ctx, id); err != nil {
 		s.logger.Error("failed to delete task", zap.String("task_id", id), zap.Error(err))
 		return err
 	}
 
+	// 5. Publish event (sync, fast) - frontend removes task immediately
 	s.publishTaskEvent(ctx, events.TaskDeleted, task, nil)
 	s.logger.Info("task deleted",
 		zap.String("task_id", id),
 		zap.Duration("duration", time.Since(start)))
 
-	// Perform remaining cleanup synchronously with dedicated timeout
-	// Use background context since the original request may complete
-	if s.worktreeCleanup != nil || len(sessions) > 0 {
-		cleanupStart := time.Now()
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
+	// 6. Return immediately - all remaining cleanup is async
 
-		cleanupErrors := s.performTaskCleanup(cleanupCtx, id, sessions, worktrees)
+	// 7. Background: Stop agents and cleanup worktrees
+	if len(activeSessionIDs) > 0 || s.worktreeCleanup != nil || len(sessions) > 0 {
+		go func() {
+			cleanupStart := time.Now()
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
 
-		if len(cleanupErrors) > 0 {
-			s.logger.Warn("task cleanup completed with errors",
-				zap.String("task_id", id),
-				zap.Int("error_count", len(cleanupErrors)),
-				zap.Duration("duration", time.Since(cleanupStart)))
-		} else {
-			s.logger.Info("task cleanup completed",
-				zap.String("task_id", id),
-				zap.Duration("duration", time.Since(cleanupStart)))
-		}
+			// Stop running agents using pre-fetched session IDs
+			if s.executionStopper != nil && len(activeSessionIDs) > 0 {
+				for _, sessionID := range activeSessionIDs {
+					if err := s.executionStopper.StopSession(cleanupCtx, sessionID, "task deleted", true); err != nil {
+						s.logger.Warn("failed to stop session on task delete",
+							zap.String("task_id", id),
+							zap.String("session_id", sessionID),
+							zap.Error(err))
+					}
+				}
+			}
+
+			// Cleanup worktrees and other resources
+			cleanupErrors := s.performTaskCleanup(cleanupCtx, id, sessions, worktrees)
+
+			if len(cleanupErrors) > 0 {
+				s.logger.Warn("task cleanup completed with errors",
+					zap.String("task_id", id),
+					zap.Int("error_count", len(cleanupErrors)),
+					zap.Duration("duration", time.Since(cleanupStart)))
+			} else {
+				s.logger.Info("task cleanup completed",
+					zap.String("task_id", id),
+					zap.Duration("duration", time.Since(cleanupStart)))
+			}
+		}()
 	}
 
 	return nil
 }
 
 // performTaskCleanup handles post-deletion cleanup operations.
-// Note: Execution stopping is done BEFORE database deletion in DeleteTask,
-// so this function only handles worktree cleanup and executor_running records.
+// Handles worktree cleanup and executor_running records.
+// Agent stopping is handled separately in the DeleteTask background goroutine.
 // Returns a slice of errors encountered (empty if all succeeded).
 func (s *Service) performTaskCleanup(
 	ctx context.Context,

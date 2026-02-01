@@ -24,6 +24,7 @@ type TaskItemProps = {
   onDuplicate?: () => void;
   onReview?: () => void;
   onDelete?: () => void;
+  isDeleting?: boolean;
 };
 
 // Helper to format relative time
@@ -56,8 +57,12 @@ export const TaskItem = memo(function TaskItem({
   onDuplicate,
   onReview,
   onDelete,
+  isDeleting,
 }: TaskItemProps) {
   const [menuOpen, setMenuOpen] = useState(false);
+
+  // Effective open state: keep menu open while deleting
+  const effectiveMenuOpen = menuOpen || isDeleting;
 
   const isInProgress = state === 'IN_PROGRESS' || state === 'SCHEDULING' || state === 'CREATED';
   const hasDiffStats = diffStats && (diffStats.additions > 0 || diffStats.deletions > 0);
@@ -124,7 +129,7 @@ export const TaskItem = memo(function TaskItem({
         <div
           className={cn(
             'transition-opacity duration-150',
-            !menuOpen && 'group-hover:opacity-0'
+            !effectiveMenuOpen && 'group-hover:opacity-0'
           )}
         >
           {renderRightContent()}
@@ -135,17 +140,22 @@ export const TaskItem = memo(function TaskItem({
           className={cn(
             'absolute right-0 top-0 bottom-0 flex flex-col justify-center gap-0.5',
             'transition-opacity duration-150',
-            menuOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+            effectiveMenuOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
           )}
         >
           {/* 3-dot menu button */}
           <TaskItemMenu
-            open={menuOpen}
-            onOpenChange={setMenuOpen}
+            open={effectiveMenuOpen}
+            onOpenChange={(open) => {
+              // Prevent closing while deleting
+              if (!open && isDeleting) return;
+              setMenuOpen(open);
+            }}
             onRename={onRename}
             onDuplicate={onDuplicate}
             onReview={onReview}
             onDelete={onDelete}
+            isDeleting={isDeleting}
           />
 
           {/* Archive button */}

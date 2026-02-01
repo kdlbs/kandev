@@ -1,6 +1,6 @@
 'use client';
 
-import { IconDots, IconTrash, IconCopy, IconEye, IconPencil } from '@tabler/icons-react';
+import { IconDots, IconTrash, IconCopy, IconEye, IconPencil, IconLoader } from '@tabler/icons-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -17,6 +17,7 @@ type TaskItemMenuProps = {
   onDuplicate?: () => void;
   onReview?: () => void;
   onDelete?: () => void;
+  isDeleting?: boolean;
 };
 
 export function TaskItemMenu({
@@ -26,6 +27,7 @@ export function TaskItemMenu({
   onDuplicate,
   onReview,
   onDelete,
+  isDeleting,
 }: TaskItemMenuProps) {
   return (
     <DropdownMenu open={open} onOpenChange={onOpenChange}>
@@ -75,12 +77,13 @@ export function TaskItemMenu({
         <DropdownMenuSeparator />
         <DropdownMenuItem
           variant="destructive"
+          disabled={isDeleting}
           onClick={(e) => {
             e.stopPropagation();
             onDelete?.();
           }}
         >
-          <IconTrash className="mr-2 h-4 w-4" />
+          {isDeleting ? <IconLoader className="mr-2 h-4 w-4 animate-spin" /> : <IconTrash className="mr-2 h-4 w-4" />}
           Delete
         </DropdownMenuItem>
       </DropdownMenuContent>

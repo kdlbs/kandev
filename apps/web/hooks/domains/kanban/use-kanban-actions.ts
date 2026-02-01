@@ -27,6 +27,7 @@ export function useKanbanActions({ kanban, workspaceState, boardsState }: UseKan
     handleDialogOpenChange,
     setIsDialogOpen,
     setEditingTask,
+    deletingTaskId,
   } = useTaskCRUD();
 
   // Handle task dialog success (create/update)
@@ -112,6 +113,7 @@ export function useKanbanActions({ kanban, workspaceState, boardsState }: UseKan
     editingTask,
     setIsDialogOpen,
     setEditingTask,
+    deletingTaskId,
 
     // CRUD actions
     handleCreate,
