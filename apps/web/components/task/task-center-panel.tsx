@@ -11,15 +11,6 @@ import {
   DropdownMenuTrigger,
   DropdownMenuSeparator,
 } from '@kandev/ui/dropdown-menu';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@kandev/ui/dialog';
-import { Textarea } from '@kandev/ui/textarea';
 import { SessionPanel } from '@kandev/ui/pannel-session';
 import { TaskChatPanel } from './task-chat-panel';
 import { TaskChangesPanel } from './task-changes-panel';
@@ -108,39 +99,18 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
 
   const [leftTab, setLeftTab] = useState('chat');
 
-  // Request changes modal state
-  const [showRequestChangesDialog, setShowRequestChangesDialog] = useState(false);
-  const [requestChangesMessage, setRequestChangesMessage] = useState('');
+  // Request changes state - triggers focus and tooltip on chat input
+  const [showRequestChangesTooltip, setShowRequestChangesTooltip] = useState(false);
 
-  // Request changes handler - sends message to agent
-  const handleRequestChanges = useCallback(async () => {
-    if (!activeSessionId || !activeTaskId || !requestChangesMessage.trim()) return;
-
-    try {
-      const client = getWebSocketClient();
-      if (client) {
-        // Send the changes request as a message to the chat
-        await client.request(
-          'message.add',
-          {
-            task_id: activeTaskId,
-            session_id: activeSessionId,
-            content: requestChangesMessage.trim(),
-          },
-          10000
-        );
-
-        // Close dialog and reset
-        setShowRequestChangesDialog(false);
-        setRequestChangesMessage('');
-
-        // Switch to chat tab to show the message
-        setLeftTab('chat');
-      }
-    } catch (error) {
-      console.error('Failed to send changes request:', error);
-    }
-  }, [activeSessionId, activeTaskId, requestChangesMessage, setLeftTab]);
+  // Request changes handler - switches to chat and focuses input
+  const handleRequestChanges = useCallback(() => {
+    // Switch to chat tab
+    setLeftTab('chat');
+    // Show tooltip on input
+    setShowRequestChangesTooltip(true);
+    // Auto-hide tooltip after 5 seconds
+    setTimeout(() => setShowRequestChangesTooltip(false), 5000);
+  }, []);
   const [selectedDiff, setSelectedDiff] = useState<SelectedDiff | null>(null);
   const [openFileTabs, setOpenFileTabs] = useState<OpenFileTab[]>([]);
 
@@ -314,7 +284,7 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
-                    onClick={() => setShowRequestChangesDialog(true)}
+                    onClick={handleRequestChanges}
                     className="cursor-pointer text-amber-600 dark:text-amber-500"
                   >
                     <IconX className="h-4 w-4 mr-2" />
@@ -348,7 +318,12 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
                 <PassthroughTerminal key={activeSessionId} sessionId={sessionId} />
               </div>
             ) : (
-              <TaskChatPanel sessionId={sessionId} onOpenFile={handleOpenFileFromChat} />
+              <TaskChatPanel
+                sessionId={sessionId}
+                onOpenFile={handleOpenFileFromChat}
+                showRequestChangesTooltip={showRequestChangesTooltip}
+                onRequestChangesTooltipDismiss={() => setShowRequestChangesTooltip(false)}
+              />
             )
           ) : (
             <div className="flex items-center justify-center h-full text-muted-foreground">
@@ -363,48 +338,6 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
           </TabsContent>
         ))}
       </SessionTabs>
-
-      {/* Request Changes Dialog */}
-      <Dialog open={showRequestChangesDialog} onOpenChange={setShowRequestChangesDialog}>
-        <DialogContent className="sm:max-w-[500px]">
-          <DialogHeader>
-            <DialogTitle>Request Changes</DialogTitle>
-            <DialogDescription>
-              Describe the changes you&apos;d like the agent to make. This will be sent as a message to continue the conversation.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="py-4">
-            <Textarea
-              placeholder="Please make the following changes..."
-              value={requestChangesMessage}
-              onChange={(e) => setRequestChangesMessage(e.target.value)}
-              rows={6}
-              className="resize-none"
-              autoFocus
-            />
-          </div>
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => {
-                setShowRequestChangesDialog(false);
-                setRequestChangesMessage('');
-              }}
-            >
-              Cancel
-            </Button>
-            <Button
-              type="button"
-              onClick={handleRequestChanges}
-              disabled={!requestChangesMessage.trim()}
-              className="bg-amber-600 hover:bg-amber-700 text-white"
-            >
-              Send Changes Request
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </SessionPanel>
   );
 });
