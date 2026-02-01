@@ -32,6 +32,39 @@ func (c *TaskController) ListTasks(ctx context.Context, req dto.ListTasksRequest
 	return resp, nil
 }
 
+func (c *TaskController) ListTasksByWorkspace(ctx context.Context, req dto.ListTasksByWorkspaceRequest) (dto.ListTasksResponse, error) {
+	tasks, total, err := c.service.ListTasksByWorkspace(ctx, req.WorkspaceID, req.Query, req.Page, req.PageSize)
+	if err != nil {
+		return dto.ListTasksResponse{}, err
+	}
+
+	// Get primary session IDs for all tasks
+	taskIDs := make([]string, 0, len(tasks))
+	for _, task := range tasks {
+		taskIDs = append(taskIDs, task.ID)
+	}
+
+	primarySessionMap, err := c.service.GetPrimarySessionIDsForTasks(ctx, taskIDs)
+	if err != nil {
+		// Log error but continue without primary session IDs
+		primarySessionMap = make(map[string]string)
+	}
+
+	resp := dto.ListTasksResponse{
+		Tasks: make([]dto.TaskDTO, 0, len(tasks)),
+		Total: total,
+	}
+	for _, task := range tasks {
+		var primarySessionID *string
+		if id, ok := primarySessionMap[task.ID]; ok {
+			primarySessionID = &id
+		}
+		taskDTO := dto.FromTaskWithPrimarySession(task, primarySessionID)
+		resp.Tasks = append(resp.Tasks, taskDTO)
+	}
+	return resp, nil
+}
+
 func (c *TaskController) ListTaskSessions(ctx context.Context, req dto.ListTaskSessionsRequest) (dto.ListTaskSessionsResponse, error) {
 	sessions, err := c.service.ListTaskSessions(ctx, req.TaskID)
 	if err != nil {

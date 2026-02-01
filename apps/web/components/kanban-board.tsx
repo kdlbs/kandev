@@ -35,6 +35,9 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
   const store = useAppStoreApi();
   const router = useRouter();
 
+  // Search state
+  const [searchQuery, setSearchQuery] = useState('');
+
   // Get initial state for actions hook
   const kanban = useAppStore((state) => state.kanban);
   const workspaceState = useAppStore((state) => state.workspaces);
@@ -70,6 +73,7 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
   } = useKanbanData({
     onWorkspaceChange: handleWorkspaceChange,
     onBoardChange: handleBoardChange,
+    searchQuery,
   });
 
   // Navigation hook
@@ -195,7 +199,12 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
 
   return (
     <div className="h-screen w-full flex flex-col bg-background">
-      <KanbanHeader onCreateTask={handleCreate} />
+      <KanbanHeader
+        onCreateTask={handleCreate}
+        workspaceId={workspaceState.activeId ?? undefined}
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+      />
       <TaskCreateDialog
         key={isDialogOpen ? 'open' : 'closed'}
         open={isDialogOpen}
@@ -217,6 +226,7 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
             : null
         }
         onSuccess={handleDialogSuccess}
+        navigateOnSessionCreate={false}
         initialValues={
           editingTask
             ? {

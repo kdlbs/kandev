@@ -75,6 +75,8 @@ interface TaskCreateDialogProps {
   };
   submitLabel?: string;
   taskId?: string | null;
+  /** Whether to navigate to the new session after task creation. Defaults to true. */
+  navigateOnSessionCreate?: boolean;
 }
 
 type RepositoryOption = {
@@ -319,6 +321,7 @@ export function TaskCreateDialog({
   initialValues,
   submitLabel = 'Create',
   taskId = null,
+  navigateOnSessionCreate = true,
 }: TaskCreateDialogProps) {
   const router = useRouter();
   const isSessionMode = mode === 'session';
@@ -855,8 +858,8 @@ export function TaskCreateDialog({
       setEnvironmentId('');
       setExecutorId('');
 
-      // Navigate to the new session if one was created (this will unmount the dialog)
-      if (newSessionId) {
+      // Navigate to the new session if one was created and navigation is enabled
+      if (newSessionId && navigateOnSessionCreate) {
         router.push(linkToSession(newSessionId));
       } else {
         onOpenChange(false);

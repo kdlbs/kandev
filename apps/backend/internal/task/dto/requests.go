@@ -219,6 +219,13 @@ type ListTasksRequest struct {
 	BoardID string
 }
 
+type ListTasksByWorkspaceRequest struct {
+	WorkspaceID string
+	Query       string
+	Page        int
+	PageSize    int
+}
+
 type ListTaskSessionsRequest struct {
 	TaskID string
 }

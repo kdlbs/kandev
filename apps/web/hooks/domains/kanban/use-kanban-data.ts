@@ -11,9 +11,10 @@ import type { WorkflowStep } from '@/components/kanban-column';
 type KanbanDataOptions = {
   onWorkspaceChange: (workspaceId: string | null) => void;
   onBoardChange: (boardId: string | null) => void;
+  searchQuery?: string;
 };
 
-export function useKanbanData({ onWorkspaceChange, onBoardChange }: KanbanDataOptions) {
+export function useKanbanData({ onWorkspaceChange, onBoardChange, searchQuery = '' }: KanbanDataOptions) {
   const [taskSessionAvailability, setTaskSessionAvailability] = useState<Record<string, boolean>>({});
 
   // Store selectors
@@ -21,6 +22,7 @@ export function useKanbanData({ onWorkspaceChange, onBoardChange }: KanbanDataOp
   const workspaceState = useAppStore((state) => state.workspaces);
   const boardsState = useAppStore((state) => state.boards);
   const enablePreviewOnClick = useAppStore((state) => state.userSettings.enablePreviewOnClick);
+  const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
 
   // Data fetching hooks
   useBoards(workspaceState.activeId, true);
@@ -79,13 +81,39 @@ export function useKanbanData({ onWorkspaceChange, onBoardChange }: KanbanDataOp
     [tasks, selectedRepositoryIds]
   );
 
+  // Apply search filtering
+  const filteredTasks = useMemo(() => {
+    if (!searchQuery) return visibleTasks;
+
+    // Get repositories for the current workspace for search filtering
+    const repositories = workspaceState.activeId
+      ? repositoriesByWorkspace[workspaceState.activeId] ?? []
+      : [];
+
+    const query = searchQuery.toLowerCase();
+    return visibleTasks.filter((task) => {
+      // Match task title or description
+      if (task.title.toLowerCase().includes(query)) return true;
+      if (task.description?.toLowerCase().includes(query)) return true;
+
+      // Match repository name/path
+      if (task.repositoryId) {
+        const repo = repositories.find((r) => r.id === task.repositoryId);
+        if (repo?.name?.toLowerCase().includes(query)) return true;
+        if (repo?.local_path?.toLowerCase().includes(query)) return true;
+      }
+
+      return false;
+    });
+  }, [visibleTasks, searchQuery, workspaceState.activeId, repositoriesByWorkspace]);
+
   const visibleTasksWithSessions = useMemo(
     () =>
-      visibleTasks.map((task) => ({
+      filteredTasks.map((task) => ({
         ...task,
         hasSession: taskSessionAvailability[task.id],
       })),
-    [visibleTasks, taskSessionAvailability]
+    [filteredTasks, taskSessionAvailability]
   );
 
   return {

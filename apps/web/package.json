@@ -45,6 +45,7 @@
     "@milkdown/theme-nord": "^7.18.0",
     "@milkdown/utils": "^7.18.0",
     "@tabler/icons-react": "^3.36.1",
+    "@tanstack/react-table": "^8.21.3",
     "@tanstack/react-virtual": "^3.13.18",
     "@uiw/codemirror-theme-vscode": "^4.25.4",
     "@uiw/react-codemirror": "^4.25.4",
