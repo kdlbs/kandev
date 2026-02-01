@@ -55,6 +55,7 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
     handleDialogSuccess,
     handleWorkspaceChange,
     handleBoardChange,
+    deletingTaskId,
   } = useKanbanActions({ kanban, workspaceState, boardsState });
 
   // Data fetching and derived state
@@ -283,6 +284,7 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
         onDragCancel={handleDragCancel}
         activeTask={activeTask}
         showMaximizeButton={enablePreviewOnClick}
+        deletingTaskId={deletingTaskId}
       />
     </div>
   );

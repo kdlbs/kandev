@@ -28,6 +28,8 @@ type TaskSwitcherProps = {
   activeTaskId: string | null;
   selectedTaskId: string | null;
   onSelectTask: (taskId: string) => void;
+  onDeleteTask?: (taskId: string) => void;
+  deletingTaskId?: string | null;
   isLoading?: boolean;
 };
 
@@ -59,6 +61,8 @@ export const TaskSwitcher = memo(function TaskSwitcher({
   activeTaskId,
   selectedTaskId,
   onSelectTask,
+  onDeleteTask,
+  deletingTaskId,
   isLoading = false,
 }: TaskSwitcherProps) {
   const [collapsedColumnIds, setCollapsedColumnIds] = useState<Set<string>>(() => new Set());
@@ -147,6 +151,8 @@ export const TaskSwitcher = memo(function TaskSwitcher({
                               diffStats={task.diffStats}
                               updatedAt={task.updatedAt}
                               onClick={() => onSelectTask(task.id)}
+                              onDelete={onDeleteTask ? () => onDeleteTask(task.id) : undefined}
+                              isDeleting={deletingTaskId === task.id}
                             />
                           );
                         })}

@@ -14,6 +14,7 @@ import { useAppStore, useAppStoreApi } from '@/components/state-provider';
 import { linkToSession } from '@/lib/links';
 import { listTaskSessions, fetchBoardSnapshot, listBoards } from '@/lib/api';
 import { useTasks } from '@/hooks/use-tasks';
+import { useTaskActions } from '@/hooks/use-task-actions';
 
 // Extracted component to isolate dialog state from sidebar
 type NewTaskButtonProps = {
@@ -123,6 +124,10 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({ workspaceId
   const isLoadingBoard = kanbanIsLoading || (boardId !== null && kanbanBoardId !== boardId);
   const store = useAppStoreApi();
 
+  // Task deletion state and handler
+  const { deleteTaskById } = useTaskActions();
+  const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
+
   // Helper to get session info for a task (diff stats and updatedAt)
   const getSessionInfoForTask = useCallback(
     (taskId: string) => {
@@ -210,6 +215,59 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({ workspaceId
     [setTaskSessionsForTask, setTaskSessionsLoading, store]
   );
 
+  const handleDeleteTask = useCallback(
+    async (taskId: string) => {
+      setDeletingTaskId(taskId);
+      try {
+        await deleteTaskById(taskId);
+
+        // Get remaining tasks after filtering out deleted one
+        const currentTasks = store.getState().kanban.tasks;
+        const remainingTasks = currentTasks.filter(
+          (item: KanbanState['tasks'][number]) => item.id !== taskId
+        );
+
+        // Update UI after successful delete
+        store.setState((state) => ({
+          ...state,
+          kanban: {
+            ...state.kanban,
+            tasks: remainingTasks,
+          },
+        }));
+
+        // If deleted task was active, switch to another task or go home
+        const currentActiveTaskId = store.getState().tasks.activeTaskId;
+        if (currentActiveTaskId === taskId) {
+          if (remainingTasks.length > 0) {
+            // Switch to the first remaining task
+            const nextTask = remainingTasks[0];
+            // Use handleSelectTask pattern - check for primarySessionId first
+            if (nextTask.primarySessionId) {
+              setActiveSession(nextTask.id, nextTask.primarySessionId);
+              window.history.replaceState({}, '', linkToSession(nextTask.primarySessionId));
+            } else {
+              // Load sessions to find one to navigate to
+              const sessions = await loadTaskSessionsForTask(nextTask.id);
+              const sessionId = sessions[0]?.id ?? null;
+              if (sessionId) {
+                setActiveSession(nextTask.id, sessionId);
+                window.history.replaceState({}, '', linkToSession(sessionId));
+              } else {
+                setActiveTask(nextTask.id);
+              }
+            }
+          } else {
+            // No tasks left, go to homepage
+            window.location.href = '/';
+          }
+        }
+      } finally {
+        setDeletingTaskId(null);
+      }
+    },
+    [deleteTaskById, store, setActiveSession, setActiveTask, loadTaskSessionsForTask]
+  );
 
   const handleSelectTask = useCallback(
     (taskId: string) => {
@@ -421,6 +479,8 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({ workspaceId
             onSelectTask={(taskId) => {
               handleSelectTask(taskId);
             }}
+            onDeleteTask={handleDeleteTask}
+            deletingTaskId={deletingTaskId}
             isLoading={isLoadingBoard}
           />
         </div>
