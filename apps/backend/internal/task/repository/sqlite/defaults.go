@@ -58,9 +58,9 @@ func (r *Repository) ensureDefaultWorkspace() error {
 		if boardCount == 0 && taskCount == 0 {
 			boardID := uuid.New().String()
 			if _, err := r.db.ExecContext(ctx, `
-				INSERT INTO boards (id, workspace_id, name, description, created_at, updated_at)
-				VALUES (?, ?, ?, ?, ?, ?)
-			`, boardID, defaultID, "Dev", "Default development board", now, now); err != nil {
+				INSERT INTO boards (id, workspace_id, name, description, workflow_template_id, created_at, updated_at)
+				VALUES (?, ?, ?, ?, ?, ?, ?)
+			`, boardID, defaultID, "Dev", "Default development board", "simple", now, now); err != nil {
 				return err
 			}
 			// Note: Workflow steps will be created by the workflow repository after it initializes
