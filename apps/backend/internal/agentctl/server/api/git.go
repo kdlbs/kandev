@@ -51,6 +51,11 @@ type GitUnstageRequest struct {
 	Paths []string `json:"paths"` // Empty = unstage all
 }
 
+// GitDiscardRequest for POST /api/v1/git/discard
+type GitDiscardRequest struct {
+	Paths []string `json:"paths"` // Required - files to discard
+}
+
 // GitShowCommitRequest for GET /api/v1/git/commit/:sha
 type GitShowCommitRequest struct {
 	CommitSHA string `uri:"sha" binding:"required"`
@@ -269,6 +274,37 @@ func (s *Server) handleGitUnstage(c *gin.Context) {
 	result, err := gitOp.Unstage(c.Request.Context(), req.Paths)
 	if err != nil {
 		s.handleGitError(c, "unstage", err)
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+// handleGitDiscard handles POST /api/v1/git/discard
+func (s *Server) handleGitDiscard(c *gin.Context) {
+	var req GitDiscardRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, process.GitOperationResult{
+			Success:   false,
+			Operation: "discard",
+			Error:     "invalid request: " + err.Error(),
+		})
+		return
+	}
+
+	if len(req.Paths) == 0 {
+		c.JSON(http.StatusBadRequest, process.GitOperationResult{
+			Success:   false,
+			Operation: "discard",
+			Error:     "paths are required",
+		})
+		return
+	}
+
+	gitOp := s.procMgr.GitOperator()
+	result, err := gitOp.Discard(c.Request.Context(), req.Paths)
+	if err != nil {
+		s.handleGitError(c, "discard", err)
 		return
 	}
 

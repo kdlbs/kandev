@@ -30,6 +30,7 @@ interface UseGitOperationsReturn {
   commit: (message: string, stageAll?: boolean) => Promise<GitOperationResult>;
   stage: (paths?: string[]) => Promise<GitOperationResult>;
   unstage: (paths?: string[]) => Promise<GitOperationResult>;
+  discard: (paths?: string[]) => Promise<GitOperationResult>;
   createPR: (title: string, body: string, baseBranch?: string) => Promise<PRCreateResult>;
 
   // State
@@ -114,6 +115,10 @@ export function useGitOperations(sessionId: string | null): UseGitOperationsRetu
     return executeOperation<GitOperationResult>('worktree.unstage', { paths: paths ?? [] });
   }, [executeOperation]);
 
+  const discard = useCallback(async (paths?: string[]) => {
+    return executeOperation<GitOperationResult>('worktree.discard', { paths: paths ?? [] });
+  }, [executeOperation]);
+
   const createPR = useCallback(async (title: string, body: string, baseBranch?: string): Promise<PRCreateResult> => {
     if (!sessionId) {
       throw new Error('No session ID provided');
@@ -157,6 +162,7 @@ export function useGitOperations(sessionId: string | null): UseGitOperationsRetu
     commit,
     stage,
     unstage,
+    discard,
     createPR,
     isLoading,
     error,
