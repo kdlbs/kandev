@@ -12,6 +12,8 @@ export type KanbanState = {
     state?: TaskStatus;
     repositoryId?: string;
     primarySessionId?: string | null;
+    sessionCount?: number | null;
+    reviewStatus?: 'pending' | 'approved' | 'changes_requested' | 'rejected' | null;
     updatedAt?: string;
   }>;
   isLoading?: boolean;

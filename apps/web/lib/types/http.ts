@@ -202,6 +202,8 @@ export type Task = {
   priority: number;
   repositories?: TaskRepository[];
   primary_session_id?: string | null;
+  session_count?: number | null;
+  review_status?: 'pending' | 'approved' | 'changes_requested' | 'rejected' | null;
   created_at: string;
   updated_at: string;
   metadata?: Record<string, unknown> | null;

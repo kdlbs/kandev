@@ -19,6 +19,9 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
           position: message.payload.position ?? 0,
           state: message.payload.state,
           repositoryId: message.payload.repository_id ?? existingTask?.repositoryId,
+          primarySessionId: message.payload.primary_session_id ?? existingTask?.primarySessionId,
+          sessionCount: message.payload.session_count ?? existingTask?.sessionCount,
+          reviewStatus: message.payload.review_status ?? existingTask?.reviewStatus,
           updatedAt: message.payload.updated_at ?? existingTask?.updatedAt,
         };
         return {
@@ -46,6 +49,9 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
           position: message.payload.position ?? 0,
           state: message.payload.state,
           repositoryId: message.payload.repository_id ?? existingTask?.repositoryId,
+          primarySessionId: message.payload.primary_session_id ?? existingTask?.primarySessionId,
+          sessionCount: message.payload.session_count ?? existingTask?.sessionCount,
+          reviewStatus: message.payload.review_status ?? existingTask?.reviewStatus,
           updatedAt: message.payload.updated_at ?? existingTask?.updatedAt,
         };
         return {
@@ -82,6 +88,9 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
           position: message.payload.position ?? 0,
           state: message.payload.state,
           repositoryId: message.payload.repository_id ?? existingTask?.repositoryId,
+          primarySessionId: message.payload.primary_session_id ?? existingTask?.primarySessionId,
+          sessionCount: message.payload.session_count ?? existingTask?.sessionCount,
+          reviewStatus: message.payload.review_status ?? existingTask?.reviewStatus,
           updatedAt: message.payload.updated_at ?? existingTask?.updatedAt,
         };
         return {
