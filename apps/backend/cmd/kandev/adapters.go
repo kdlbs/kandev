@@ -265,39 +265,6 @@ func (a *messageCreatorAdapter) CreateUserMessage(ctx context.Context, taskID, c
 	return err
 }
 
-// toolKindToMessageType maps the normalized tool kind to a frontend message type.
-// This allows the frontend to use specialized renderers for different tool categories.
-// Returns the message type and whether a warning should be logged (for unknown kinds).
-func toolKindToMessageType(kind streams.ToolKind) (string, bool) {
-	switch kind {
-	case streams.ToolKindReadFile:
-		return "tool_read", false
-	case streams.ToolKindCodeSearch:
-		return "tool_search", false
-	case streams.ToolKindModifyFile:
-		return "tool_edit", false
-	case streams.ToolKindShellExec:
-		return "tool_execute", false
-	case streams.ToolKindHttpRequest:
-		return "tool_call", false
-	case streams.ToolKindGeneric:
-		return "tool_call", false
-	case streams.ToolKindCreateTask:
-		return "tool_call", false
-	case streams.ToolKindSubagentTask:
-		return "tool_call", false
-	case streams.ToolKindShowPlan:
-		return "tool_call", false
-	case streams.ToolKindManageTodos:
-		return "todo", false
-	case streams.ToolKindMisc:
-		return "tool_call", false
-	default:
-		// Unknown kind - this shouldn't happen, log a warning
-		return "tool_call", true
-	}
-}
-
 // CreateToolCallMessage creates a message for a tool call
 func (a *messageCreatorAdapter) CreateToolCallMessage(ctx context.Context, taskID, toolCallID, parentToolCallID, title, status, agentSessionID, turnID string, normalized *streams.NormalizedPayload) error {
 	metadata := map[string]interface{}{
@@ -317,14 +284,7 @@ func (a *messageCreatorAdapter) CreateToolCallMessage(ctx context.Context, taskI
 	// Determine message type from the normalized tool kind
 	msgType := "tool_call"
 	if normalized != nil {
-		var warn bool
-		msgType, warn = toolKindToMessageType(normalized.Kind())
-		if warn {
-			a.logger.Warn("unknown tool kind falling back to tool_call",
-				zap.String("kind", string(normalized.Kind())),
-				zap.String("tool_call_id", toolCallID),
-				zap.String("title", title))
-		}
+		msgType = normalized.Kind().ToMessageType()
 	}
 
 	_, err := a.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{

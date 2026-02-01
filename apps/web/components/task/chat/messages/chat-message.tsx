@@ -194,6 +194,38 @@ export const ChatMessage = memo(function ChatMessage({ comment, label, className
                   {children}
                 </p>
               ),
+              table: ({ children }) => (
+                <div className="my-3 overflow-x-auto">
+                  <table className="border-collapse border border-border rounded-lg overflow-hidden">
+                    {children}
+                  </table>
+                </div>
+              ),
+              thead: ({ children }) => (
+                <thead className="bg-muted/50">
+                  {children}
+                </thead>
+              ),
+              tbody: ({ children }) => (
+                <tbody className="divide-y divide-border">
+                  {children}
+                </tbody>
+              ),
+              tr: ({ children }) => (
+                <tr className="border-b border-border last:border-b-0 hover:bg-muted/50">
+                  {children}
+                </tr>
+              ),
+              th: ({ children }) => (
+                <th className="px-3 py-2 text-left text-xs font-semibold text-foreground border-r border-border last:border-r-0">
+                  {children}
+                </th>
+              ),
+              td: ({ children }) => (
+                <td className="px-3 py-2 text-xs text-muted-foreground border-r border-border last:border-r-0">
+                  {children}
+                </td>
+              ),
             }}
           >
             {comment.content || '(empty)'}

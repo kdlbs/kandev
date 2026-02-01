@@ -514,7 +514,7 @@ Add these entries to the `agents` array:
   "model_flag": "",
   "workspace_flag": "",
   "session_config": {
-    "resume_via_acp": false,
+    "native_session_resume": false,
     "resume_flag": "",
     "can_recover": true,
     "session_dir_template": "{home}/.opencode",
@@ -626,7 +626,7 @@ Add these entries to the `agents` array:
   "model_flag": "--model {model}",
   "workspace_flag": "",
   "session_config": {
-    "resume_via_acp": true,
+    "native_session_resume": true,
     "resume_flag": "",
     "can_recover": true,
     "session_dir_template": "{home}/.gemini",

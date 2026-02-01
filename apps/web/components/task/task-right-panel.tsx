@@ -32,7 +32,7 @@ const DEFAULT_RIGHT_LAYOUT: Record<string, number> = { top: 55, bottom: 45 };
 
 const TaskRightPanel = memo(function TaskRightPanel({ topPanel, sessionId = null }: TaskRightPanelProps) {
   const rightPanelIds = ['top', 'bottom'];
-  const rightLayoutKey = `task-layout-right-v2:${sessionId ?? 'default'}`;
+  const rightLayoutKey = 'task-layout-right-v2';
   const { defaultLayout: rightLayout, onLayoutChanged: onRightLayoutChange } = useDefaultLayout({
     id: rightLayoutKey,
     panelIds: rightPanelIds,

@@ -817,6 +817,10 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 		execution.ACPSessionID = req.ACPSessionID
 	}
 
+	// Set flag indicating if agent adapter reports completion via stream
+	// When true, session manager should NOT emit a complete event after prompt returns
+	execution.ReportsStatusViaStream = agentConfig.SessionConfig.ReportsStatusViaStream
+
 	// Build agent command string for later use with StartAgentProcess
 	model := ""
 	autoApprove := false
@@ -1212,7 +1216,7 @@ func (m *Manager) emitSessionStatusEvent(execution *AgentExecution, agentConfig 
 
 	wasResumed := false
 	if providedACPSessionID != "" {
-		if agentConfig.SessionConfig.ResumeViaACP {
+		if agentConfig.SessionConfig.NativeSessionResume {
 			wasResumed = true
 		} else if agentConfig.SessionConfig.ResumeFlag != "" && agentConfig.SessionConfig.SupportsRecovery() {
 			wasResumed = true
@@ -1238,6 +1242,13 @@ func (m *Manager) handlePermissionRequestEvent(execution *AgentExecution, event 
 
 // handleAgentEvent processes incoming agent events from the agent
 func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.AgentEvent) {
+	// Log all incoming events for debugging
+	m.logger.Debug("handleAgentEvent entry",
+		zap.String("execution_id", execution.ID),
+		zap.String("event_type", event.Type),
+		zap.String("operation_id", event.OperationID),
+		zap.Int("text_length", len(event.Text)))
+
 	// Handle different event types based on the Type field
 	switch event.Type {
 	case "message_chunk":
@@ -1245,6 +1256,12 @@ func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.Age
 		if event.Text != "" {
 			execution.messageMu.Lock()
 			execution.messageBuffer.WriteString(event.Text)
+			bufferLenAfterWrite := execution.messageBuffer.Len()
+			m.logger.Debug("message_chunk written to buffer",
+				zap.String("execution_id", execution.ID),
+				zap.String("operation_id", event.OperationID),
+				zap.Int("text_length", len(event.Text)),
+				zap.Int("buffer_length_after", bufferLenAfterWrite))
 
 			// Check if buffer contains newlines - if so, flush up to the last newline
 			bufContent := execution.messageBuffer.String()
@@ -1349,17 +1366,65 @@ func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.Age
 			zap.Any("data", event.Data))
 
 	case "complete":
+		// Check buffer content BEFORE any processing
+		execution.messageMu.Lock()
+		bufferContentBeforeFlush := execution.messageBuffer.String()
+		streamingWasUsed := execution.streamingUsedThisTurn
+		currentMsgID := execution.currentMessageID
+		execution.messageMu.Unlock()
+
+		// Log preview of buffer content for debugging (first 100 chars)
+		bufferPreview := bufferContentBeforeFlush
+		if len(bufferPreview) > 100 {
+			bufferPreview = bufferPreview[:100] + "..."
+		}
+
 		m.logger.Info("agent turn complete",
 			zap.String("execution_id", execution.ID),
-			zap.String("session_id", event.SessionID))
+			zap.String("operation_id", event.OperationID),
+			zap.String("session_id", event.SessionID),
+			zap.Bool("streaming_was_used", streamingWasUsed),
+			zap.String("current_msg_id", currentMsgID),
+			zap.String("event_text", event.Text),
+			zap.Int("buffer_length", len(bufferContentBeforeFlush)),
+			zap.String("buffer_preview", bufferPreview))
 
-		// Flush accumulated message buffer and include in the event
-		// The orchestrator will save this as an agent message
-		if flushedText := m.flushMessageBuffer(execution); flushedText != "" {
-			event.Text = flushedText
+		// Get the agent message text:
+		// 1. If streaming was used, flush the buffer (which publishes final chunk) and ignore event.Text
+		// 2. Otherwise, prefer text from event (adapter-provided, e.g., Amp) or flush buffer
+		var agentText string
+		if streamingWasUsed {
+			// Streaming messages were created - flush buffer to publish final chunk
+			// and return empty so we don't create duplicate messages
+			m.flushMessageBuffer(execution)
+			agentText = ""
+		} else if event.Text != "" {
+			// No streaming used, use adapter-provided text
+			agentText = event.Text
+			// Still clear the buffer to avoid stale data
+			m.flushMessageBuffer(execution)
+		} else {
+			// No streaming used, no adapter text - flush buffer for content
+			agentText = m.flushMessageBuffer(execution)
+		}
+
+		m.logger.Info("complete event text resolution",
+			zap.String("execution_id", execution.ID),
+			zap.String("operation_id", event.OperationID),
+			zap.Int("agent_text_length", len(agentText)),
+			zap.Bool("will_save_message", agentText != ""))
+
+		// Reset the streaming flag for next turn
+		execution.messageMu.Lock()
+		execution.streamingUsedThisTurn = false
+		execution.messageMu.Unlock()
+
+		// Include agent text in the event for the orchestrator to save as an agent message
+		if agentText != "" {
+			event.Text = agentText
 			// Store agent message to session history for context injection
 			if m.historyManager != nil && execution.SessionID != "" {
-				if err := m.historyManager.AppendAgentMessage(execution.SessionID, flushedText); err != nil {
+				if err := m.historyManager.AppendAgentMessage(execution.SessionID, agentText); err != nil {
 					m.logger.Warn("failed to store agent message to history", zap.Error(err))
 				}
 			}
@@ -1478,6 +1543,9 @@ func (m *Manager) publishStreamingMessage(execution *AgentExecution, content str
 		messageID = uuid.New().String()
 		execution.currentMessageID = messageID
 	}
+
+	// Mark that streaming was used this turn (for duplicate prevention on complete)
+	execution.streamingUsedThisTurn = true
 	execution.messageMu.Unlock()
 
 	event := AgentStreamEventData{
@@ -2471,7 +2539,7 @@ func (m *Manager) buildPassthroughCommand(agentConfig *registry.AgentTypeConfig,
 	// 2. Agent uses CLI-based resume (not ACP)
 	// 3. Agent has a ResumeFlag configured
 	if acpSessionID != "" &&
-		!agentConfig.SessionConfig.ResumeViaACP &&
+		!agentConfig.SessionConfig.NativeSessionResume &&
 		agentConfig.SessionConfig.ResumeFlag != "" {
 		cmd = append(cmd, agentConfig.SessionConfig.ResumeFlag, acpSessionID)
 	} else if initialPrompt != "" {

@@ -59,11 +59,21 @@ type AgentExecution struct {
 	currentMessageID  string
 	currentThinkingID string
 
+	// Track whether streaming messages were created during this turn
+	// This is set true when publishStreamingMessage is called and cleared on complete
+	// Used to avoid duplicate messages when both streaming and complete event have text
+	streamingUsedThisTurn bool
+
 	// Resume context tracking for fork_session pattern (ACP agents that don't support session/load)
 	// needsResumeContext is set to true when the session has history that should be injected
 	// resumeContextInjected is set to true after context has been injected into a prompt
 	needsResumeContext    bool
 	resumeContextInjected bool
+
+	// ReportsStatusViaStream indicates whether the agent adapter handles completion events
+	// via the stream protocol. When true, the session manager should NOT emit a complete
+	// event after prompt returns, as the adapter already sent one via the stream.
+	ReportsStatusViaStream bool
 }
 
 // GetAgentCtlClient returns the agentctl client for this execution

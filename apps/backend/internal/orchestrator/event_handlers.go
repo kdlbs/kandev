@@ -21,20 +21,7 @@ func toolKindToMessageType(normalized *streams.NormalizedPayload) string {
 	if normalized == nil {
 		return "tool_call"
 	}
-	switch normalized.Kind() {
-	case streams.ToolKindReadFile:
-		return "tool_read"
-	case streams.ToolKindCodeSearch:
-		return "tool_search"
-	case streams.ToolKindModifyFile:
-		return "tool_edit"
-	case streams.ToolKindShellExec:
-		return "tool_execute"
-	case streams.ToolKindManageTodos:
-		return "todo"
-	default:
-		return "tool_call"
-	}
+	return normalized.Kind().ToMessageType()
 }
 
 // Event handlers
@@ -548,6 +535,11 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		s.handleToolUpdateEvent(ctx, payload)
 
 	case "complete":
+		s.logger.Debug("orchestrator received complete event",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Int("text_length", len(payload.Data.Text)),
+			zap.Bool("has_text", payload.Data.Text != ""))
 		s.saveAgentTextIfPresent(ctx, payload)
 		s.completeTurnForSession(ctx, sessionID)
 		s.setSessionWaitingForInput(ctx, taskID, sessionID)

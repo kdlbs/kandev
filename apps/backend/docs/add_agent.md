@@ -215,7 +215,7 @@ Add the agent definition:
   "model_flag": "--model {model}",
   "workspace_flag": "--workspace",
   "session_config": {
-    "resume_via_acp": false,
+    "native_session_resume": false,
     "resume_flag": "--resume",
     "can_recover": true,
     "session_dir_template": "{home}/.gemini/sessions",
@@ -352,7 +352,7 @@ a.sendUpdate(AgentEvent{
 
 Configure session handling in `session_config`:
 
-- `resume_via_acp`: If true, sessions resume via ACP protocol. If false, use CLI flag.
+- `native_session_resume`: If true, sessions resume via the adapter's native session loading (works across protocols). If false, use CLI flag or context injection.
 - `resume_flag`: CLI flag for resuming (e.g., `--resume`)
 - `can_recover`: Whether sessions can survive backend restarts
 - `session_dir_template`: Where session data is stored on host
@@ -493,6 +493,6 @@ Before releasing a new agent integration:
 ### Session resume not working
 - For stream-based protocols: ensure adapter emits `session_status` event with agent's native session ID
 - Check that `resume_flag` is set in agent config (e.g., `"--resume"`)
-- Verify `resume_via_acp` is `false` for CLI-based resume
+- Verify `native_session_resume` is `false` for CLI-based resume
 - Check `executor_running` table has the correct `resume_token` value
 - For Claude Code: the session ID from `system` message should be stored as resume token

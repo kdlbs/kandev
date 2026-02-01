@@ -411,7 +411,7 @@ func (m *Manager) createAdapter() error {
 		return fmt.Errorf("protocol not specified in configuration")
 	}
 
-	// Use the adapter factory to create the appropriate adapter
+	m.logger.Debug("creating adapter", zap.String("protocol", string(protocol)))
 	adpt, err := adapter.NewAdapter(protocol, m.adapterCfg, m.logger)
 	if err != nil {
 		return fmt.Errorf("failed to create adapter: %w", err)
@@ -653,10 +653,35 @@ func (m *Manager) waitForExit() {
 
 	if err != nil {
 		m.exitErr.Store(errorWrapper{err: err})
+		exitCode := -1
 		if exitErr, ok := err.(*exec.ExitError); ok {
-			m.exitCode.Store(int32(exitErr.ExitCode()))
+			exitCode = exitErr.ExitCode()
+			m.exitCode.Store(int32(exitCode))
 		}
-		m.logger.Info("agent process exited with error", zap.Error(err))
+		// Include recent stderr for better error diagnostics
+		recentStderr := m.GetRecentStderr()
+		m.logger.Error("agent process exited with error",
+			zap.Error(err),
+			zap.Int("exit_code", exitCode),
+			zap.Strings("recent_stderr", recentStderr))
+
+		// Send error event to the updates channel so UI can display it
+		errorMsg := fmt.Sprintf("Agent process exited with code %d", exitCode)
+		if len(recentStderr) > 0 {
+			errorMsg = fmt.Sprintf("%s: %s", errorMsg, strings.Join(recentStderr, "; "))
+		}
+		select {
+		case m.updatesCh <- adapter.AgentEvent{
+			Type:  adapter.EventTypeError,
+			Error: errorMsg,
+			Data: map[string]any{
+				"exit_code":     exitCode,
+				"recent_stderr": recentStderr,
+			},
+		}:
+		default:
+			m.logger.Warn("updates channel full, could not send exit error event")
+		}
 	} else {
 		m.exitCode.Store(0)
 		m.logger.Info("agent process exited successfully")
