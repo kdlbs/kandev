@@ -1162,11 +1162,11 @@ When creating a new board, users select a workflow template that determines the 
       <div>
         <Label>Workflow Template</Label>
         <RadioGroup value={selectedTemplate} onValueChange={setSelectedTemplate}>
-          <RadioGroupItem value="dev">
+          <RadioGroupItem value="standard">
             <div className="flex flex-col">
-              <span className="font-medium">Development</span>
+              <span className="font-medium">Standard</span>
               <span className="text-sm text-muted-foreground">
-                Backlog → Planning → Review Plan → Implementation → Code Review → Done
+                Todo → Plan → Implementation → Done
               </span>
             </div>
           </RadioGroupItem>
