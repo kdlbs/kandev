@@ -1,8 +1,16 @@
 'use client';
 
 import { memo, useCallback, useState, useEffect, useMemo } from 'react';
+import { IconSparkles, IconCheck, IconChevronDown, IconX } from '@tabler/icons-react';
 import { TabsContent } from '@kandev/ui/tabs';
-import { Textarea } from '@kandev/ui/textarea';
+import { Button } from '@kandev/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuSeparator,
+} from '@kandev/ui/dropdown-menu';
 import { SessionPanel } from '@kandev/ui/pannel-session';
 import { TaskChatPanel } from './task-chat-panel';
 import { TaskChangesPanel } from './task-changes-panel';
@@ -90,8 +98,20 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
   }, [activeSessionId, activeTaskId, setTaskSession]);
 
   const [leftTab, setLeftTab] = useState('chat');
+
+  // Request changes state - triggers focus and tooltip on chat input
+  const [showRequestChangesTooltip, setShowRequestChangesTooltip] = useState(false);
+
+  // Request changes handler - switches to chat and focuses input
+  const handleRequestChanges = useCallback(() => {
+    // Switch to chat tab
+    setLeftTab('chat');
+    // Show tooltip on input
+    setShowRequestChangesTooltip(true);
+    // Auto-hide tooltip after 5 seconds
+    setTimeout(() => setShowRequestChangesTooltip(false), 5000);
+  }, []);
   const [selectedDiff, setSelectedDiff] = useState<SelectedDiff | null>(null);
-  const [notes, setNotes] = useState('');
   const [openFileTabs, setOpenFileTabs] = useState<OpenFileTab[]>([]);
 
   // Track plan updates for notification dot
@@ -194,14 +214,16 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
 
   const tabs: SessionTab[] = useMemo(() => {
     const staticTabs: SessionTab[] = [
-      { id: 'notes', label: 'Notes' },
       { id: 'changes', label: 'All changes' },
       { id: 'chat', label: 'Chat' },
       {
         id: 'plan',
         label: 'Plan',
         icon: hasUnseenPlanUpdate ? (
-          <span className="h-2 w-2 rounded-full bg-primary animate-pulse" />
+          <div className="relative">
+            <IconSparkles className="h-3.5 w-3.5 text-amber-500 dark:text-amber-400 animate-pulse" />
+            <span className="absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-amber-500 dark:bg-amber-400 animate-ping" />
+          </div>
         ) : undefined,
       },
     ];
@@ -231,25 +253,54 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
         tabs={tabs}
         activeTab={leftTab}
         onTabChange={handleTabChange}
-        separatorAfterIndex={openFileTabs.length > 0 ? 3 : undefined}
+        separatorAfterIndex={openFileTabs.length > 0 ? 2 : undefined}
         className="flex-1 min-h-0 flex flex-col gap-2"
+        rightContent={
+          showApproveButton ? (
+            <div className="flex items-center gap-0.5">
+              <Button
+                type="button"
+                size="sm"
+                className="h-6 gap-1.5 px-2.5 cursor-pointer bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium rounded-r-none border-r border-emerald-700/30"
+                onClick={handleApprove}
+              >
+                <IconCheck className="h-3.5 w-3.5" />
+                Approve
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="h-6 w-6 p-0 cursor-pointer bg-emerald-600 hover:bg-emerald-700 text-white rounded-l-none"
+                  >
+                    <IconChevronDown className="h-3 w-3" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-48">
+                  <DropdownMenuItem onClick={handleApprove} className="cursor-pointer">
+                    <IconCheck className="h-4 w-4 mr-2" />
+                    Approve and continue
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onClick={handleRequestChanges}
+                    className="cursor-pointer text-amber-600 dark:text-amber-500"
+                  >
+                    <IconX className="h-4 w-4 mr-2" />
+                    Request changes
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          ) : undefined
+        }
       >
 
         <TabsContent value="plan" className="flex-1 min-h-0" forceMount style={{ display: leftTab === 'plan' ? undefined : 'none' }}>
           <TaskPlanPanel
             taskId={activeTaskId}
-            showApproveButton={showApproveButton}
-            onApprove={handleApprove}
             visible={leftTab === 'plan'}
-          />
-        </TabsContent>
-
-        <TabsContent value="notes" className="flex-1 min-h-0">
-          <Textarea
-            value={notes}
-            onChange={(event) => setNotes(event.target.value)}
-            placeholder="Add task notes here..."
-            className="min-h-0 h-full resize-none"
           />
         </TabsContent>
 
@@ -267,7 +318,12 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
                 <PassthroughTerminal key={activeSessionId} sessionId={sessionId} />
               </div>
             ) : (
-              <TaskChatPanel sessionId={sessionId} onOpenFile={handleOpenFileFromChat} />
+              <TaskChatPanel
+                sessionId={sessionId}
+                onOpenFile={handleOpenFileFromChat}
+                showRequestChangesTooltip={showRequestChangesTooltip}
+                onRequestChangesTooltipDismiss={() => setShowRequestChangesTooltip(false)}
+              />
             )
           ) : (
             <div className="flex items-center justify-center h-full text-muted-foreground">

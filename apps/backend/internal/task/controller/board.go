@@ -209,14 +209,37 @@ func (c *BoardController) convertTasksWithPrimarySessions(ctx context.Context, t
 		return nil, err
 	}
 
-	// Convert tasks to DTOs with primary session IDs
+	// Fetch session counts in bulk
+	sessionCountMap, err := c.service.GetSessionCountsForTasks(ctx, taskIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	// Fetch primary session info (review status) in bulk
+	primarySessionInfoMap, err := c.service.GetPrimarySessionInfoForTasks(ctx, taskIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert tasks to DTOs with session information
 	result := make([]dto.TaskDTO, 0, len(tasks))
 	for _, task := range tasks {
 		var primarySessionID *string
 		if sid, ok := primarySessionMap[task.ID]; ok {
 			primarySessionID = &sid
 		}
-		result = append(result, dto.FromTaskWithPrimarySession(task, primarySessionID))
+
+		var sessionCount *int
+		if count, ok := sessionCountMap[task.ID]; ok {
+			sessionCount = &count
+		}
+
+		var reviewStatus *string
+		if sessionInfo, ok := primarySessionInfoMap[task.ID]; ok && sessionInfo.ReviewStatus != nil {
+			reviewStatus = sessionInfo.ReviewStatus
+		}
+
+		result = append(result, dto.FromTaskWithSessionInfo(task, primarySessionID, sessionCount, reviewStatus))
 	}
 	return result, nil
 }

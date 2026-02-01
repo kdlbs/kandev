@@ -7,7 +7,6 @@ import {
   IconLoader2,
   IconRobot,
   IconUser,
-  IconArrowRight,
   IconCopy,
   IconRefresh,
   IconTrash,
@@ -26,7 +25,6 @@ type TaskPlanToolbarProps = {
   isAgentBusy: boolean;
   isReanalyzing: boolean;
   hasActiveSession: boolean;
-  showApproveButton?: boolean;
   // Comments props
   commentCount?: number;
   isSubmittingComments?: boolean;
@@ -38,7 +36,6 @@ type TaskPlanToolbarProps = {
   onCopy: () => void;
   onReanalyze: () => void;
   onClear: () => void;
-  onApprove?: () => void;
 };
 
 export const TaskPlanToolbar = memo(function TaskPlanToolbar({
@@ -49,7 +46,6 @@ export const TaskPlanToolbar = memo(function TaskPlanToolbar({
   isAgentBusy,
   isReanalyzing,
   hasActiveSession,
-  showApproveButton,
   commentCount = 0,
   isSubmittingComments = false,
   onSubmitComments,
@@ -59,7 +55,6 @@ export const TaskPlanToolbar = memo(function TaskPlanToolbar({
   onCopy,
   onReanalyze,
   onClear,
-  onApprove,
 }: TaskPlanToolbarProps) {
   const hasComments = commentCount > 0;
   return (
@@ -246,30 +241,6 @@ export const TaskPlanToolbar = memo(function TaskPlanToolbar({
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent>Send {commentCount} comment{commentCount !== 1 ? 's' : ''} to agent</TooltipContent>
-                </Tooltip>
-              </div>
-            )}
-
-            {/* Separator before approve button */}
-            {showApproveButton && onApprove && (
-              <div className="h-4 w-px bg-border mx-1" />
-            )}
-
-            {/* Approve button - styled like submit button */}
-            {showApproveButton && onApprove && (
-              <div className="ml-1">
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      type="button"
-                      size="icon"
-                      className="h-7 w-7 rounded-full cursor-pointer bg-emerald-500 hover:bg-emerald-600 text-white"
-                      onClick={onApprove}
-                    >
-                      <IconArrowRight className="h-4 w-4" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Approve plan and continue</TooltipContent>
                 </Tooltip>
               </div>
             )}

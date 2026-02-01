@@ -727,6 +727,16 @@ func (s *Service) GetPrimarySessionIDsForTasks(ctx context.Context, taskIDs []st
 	return s.repo.GetPrimarySessionIDsByTaskIDs(ctx, taskIDs)
 }
 
+// GetSessionCountsForTasks returns a map of task ID to session count for the given task IDs.
+func (s *Service) GetSessionCountsForTasks(ctx context.Context, taskIDs []string) (map[string]int, error) {
+	return s.repo.GetSessionCountsByTaskIDs(ctx, taskIDs)
+}
+
+// GetPrimarySessionInfoForTasks returns a map of task ID to primary session info for the given task IDs.
+func (s *Service) GetPrimarySessionInfoForTasks(ctx context.Context, taskIDs []string) (map[string]*models.TaskSession, error) {
+	return s.repo.GetPrimarySessionInfoByTaskIDs(ctx, taskIDs)
+}
+
 // SetPrimarySession sets a session as the primary session for its task.
 // This will unset any existing primary session for the same task.
 func (s *Service) SetPrimarySession(ctx context.Context, sessionID string) error {
@@ -1595,6 +1605,24 @@ func (s *Service) publishTaskEvent(ctx context.Context, eventType string, task *
 		"position":         task.Position,
 		"created_at":       task.CreatedAt.Format(time.RFC3339),
 		"updated_at":       task.UpdatedAt.Format(time.RFC3339),
+	}
+
+	// Fetch session count and primary session info for the task
+	sessionCountMap, err := s.GetSessionCountsForTasks(ctx, []string{task.ID})
+	if err == nil {
+		if count, ok := sessionCountMap[task.ID]; ok {
+			data["session_count"] = count
+		}
+	}
+
+	primarySessionInfoMap, err := s.GetPrimarySessionInfoForTasks(ctx, []string{task.ID})
+	if err == nil {
+		if sessionInfo, ok := primarySessionInfoMap[task.ID]; ok && sessionInfo != nil {
+			data["primary_session_id"] = sessionInfo.ID
+			if sessionInfo.ReviewStatus != nil {
+				data["review_status"] = *sessionInfo.ReviewStatus
+			}
+		}
 	}
 
 	if task.Metadata != nil {

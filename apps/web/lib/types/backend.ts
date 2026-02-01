@@ -81,6 +81,9 @@ export type TaskEventPayload = {
   priority?: number;
   position?: number;
   repository_id?: string;
+  primary_session_id?: string | null;
+  session_count?: number | null;
+  review_status?: 'pending' | 'approved' | 'changes_requested' | 'rejected' | null;
   updated_at?: string;
 };
 

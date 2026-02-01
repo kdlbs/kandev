@@ -142,7 +142,7 @@ func (r *Repository) runMigrations() error {
 }
 
 // seedDefaultWorkflowSteps creates default workflow steps for boards that don't have any.
-// Uses the standard template as the default workflow.
+// Uses the simple template as the default workflow.
 func (r *Repository) seedDefaultWorkflowSteps() error {
 	// Find boards without workflow steps
 	rows, err := r.db.Query(`
@@ -167,18 +167,18 @@ func (r *Repository) seedDefaultWorkflowSteps() error {
 		return err
 	}
 
-	// Use the standard template for default workflow steps
+	// Use the simple template for default workflow steps
 	now := time.Now()
-	standardTemplate := r.getStandardTemplate(now)
+	simpleTemplate := r.getSimpleTemplate(now)
 
 	for _, boardID := range boardIDs {
 		// Map template step IDs to generated UUIDs for linking
 		idMap := make(map[string]string)
-		for _, stepDef := range standardTemplate.Steps {
+		for _, stepDef := range simpleTemplate.Steps {
 			idMap[stepDef.ID] = uuid.New().String()
 		}
 
-		for _, stepDef := range standardTemplate.Steps {
+		for _, stepDef := range simpleTemplate.Steps {
 			stepID := idMap[stepDef.ID]
 
 			// Map OnCompleteStepID if set
@@ -246,20 +246,19 @@ func (r *Repository) seedSystemTemplates() error {
 func (r *Repository) getSystemTemplates() []*models.WorkflowTemplate {
 	now := time.Now().UTC()
 	return []*models.WorkflowTemplate{
-		r.getStandardTemplate(now),
-		r.getDevTemplate(now),
-		r.getArchitectureTemplate(now),
 		r.getSimpleTemplate(now),
+		r.getStandardTemplate(now),
+		r.getArchitectureTemplate(now),
 	}
 }
 
-// getStandardTemplate returns the standard 4-step workflow template (default).
+// getStandardTemplate returns the standard 4-step workflow template with planning phase.
 // Steps: Todo → Plan → Implementation → Done
 func (r *Repository) getStandardTemplate(now time.Time) *models.WorkflowTemplate {
 	return &models.WorkflowTemplate{
 		ID:          "standard",
-		Name:        "Standard",
-		Description: "Standard workflow with planning and implementation phases",
+		Name:        "Plan & Build",
+		Description: "Plan first, then build: Todo → Plan → Implementation → Done",
 		IsSystem:    true,
 		CreatedAt:   now,
 		UpdatedAt:   now,
@@ -315,95 +314,12 @@ func (r *Repository) getStandardTemplate(now time.Time) *models.WorkflowTemplate
 	}
 }
 
-// getDevTemplate returns the full development workflow template.
-func (r *Repository) getDevTemplate(now time.Time) *models.WorkflowTemplate {
-	return &models.WorkflowTemplate{
-		ID:          "dev",
-		Name:        "Development",
-		Description: "Standard software development workflow with planning phase",
-		IsSystem:    true,
-		CreatedAt:   now,
-		UpdatedAt:   now,
-		Steps: []models.StepDefinition{
-			{
-				ID:              "backlog",
-				Name:            "Backlog",
-				StepType:        models.StepTypeBacklog,
-				Position:        0,
-				Color:           "bg-neutral-400",
-				TaskState:       "TODO",
-				AutoStartAgent:  false,
-				AllowManualMove: true,
-			},
-			{
-				ID:               "planning",
-				Name:             "Planning",
-				StepType:         models.StepTypePlanning,
-				Position:         1,
-				Color:            "bg-purple-500",
-				TaskState:        "IN_PROGRESS",
-				AutoStartAgent:   true,
-				PlanMode:         true,
-				PromptPrefix:     "[PLANNING PHASE]\nAnalyze this task and create a detailed implementation plan.\nDo NOT make any code changes yet - only analyze and plan.\n\nBefore creating the plan, ask the user clarifying questions if anything is unclear or ambiguous about the requirements. Use the ask_user_question_kandev tool to get answers before proceeding.\n\nCreate a plan that includes:\n1. Understanding of the requirements\n2. Files that need to be modified or created\n3. Step-by-step implementation approach\n4. Potential risks or considerations\n\nWhen including diagrams in your plan (architecture, sequence, flowcharts, etc.), always use mermaid syntax in code blocks.\n\nIMPORTANT: Save your plan using the create_task_plan_kandev MCP tool with the task_id provided in the session context.\nAfter saving the plan, STOP and wait for user review. The user will review your plan in the UI and may edit it.\nDo not create any other files during this phase - only use the MCP tool to save the plan.",
-				OnCompleteStepID: "review-plan",
-				AllowManualMove:  true,
-			},
-			{
-				ID:               "review-plan",
-				Name:             "Review Plan",
-				StepType:         models.StepTypeReview,
-				Position:         2,
-				Color:            "bg-yellow-500",
-				TaskState:        "REVIEW",
-				AutoStartAgent:   false,
-				RequireApproval:  true,
-				OnApprovalStepID: "implementation",
-				AllowManualMove:  true,
-			},
-			{
-				ID:               "implementation",
-				Name:             "Implementation",
-				StepType:         models.StepTypeImplementation,
-				Position:         3,
-				Color:            "bg-blue-500",
-				TaskState:        "IN_PROGRESS",
-				AutoStartAgent:   true,
-				PromptPrefix:     "[IMPLEMENTATION PHASE]\nBefore starting implementation, retrieve the task plan using get_task_plan_kandev with the task_id from the session context.\nReview the plan carefully, including any edits the user may have made.\nAcknowledge the plan and any user modifications before proceeding.\n\nThen implement the task following the plan step-by-step.\nYou can update the plan during implementation using update_task_plan_kandev if needed.",
-				OnCompleteStepID: "review-code",
-				AllowManualMove:  true,
-			},
-			{
-				ID:               "review-code",
-				Name:             "Code Review",
-				StepType:         models.StepTypeReview,
-				Position:         4,
-				Color:            "bg-orange-500",
-				TaskState:        "REVIEW",
-				AutoStartAgent:   false,
-				RequireApproval:  true,
-				OnApprovalStepID: "done",
-				AllowManualMove:  true,
-			},
-			{
-				ID:              "done",
-				Name:            "Done",
-				StepType:        models.StepTypeDone,
-				Position:        5,
-				Color:           "bg-green-500",
-				TaskState:       "COMPLETED",
-				AutoStartAgent:  false,
-				AllowManualMove: true,
-			},
-		},
-	}
-}
-
 // getArchitectureTemplate returns the architecture workflow template.
 func (r *Repository) getArchitectureTemplate(now time.Time) *models.WorkflowTemplate {
 	return &models.WorkflowTemplate{
 		ID:          "architecture",
 		Name:        "Architecture",
-		Description: "Architecture focused: Backlog → Planning → Review → Done",
+		Description: "Design and review: Ideas → Planning → Review → Approved",
 		IsSystem:    true,
 		CreatedAt:   now,
 		UpdatedAt:   now,
@@ -462,7 +378,7 @@ func (r *Repository) getSimpleTemplate(now time.Time) *models.WorkflowTemplate {
 	return &models.WorkflowTemplate{
 		ID:          "simple",
 		Name:        "Simple",
-		Description: "Minimal workflow: Backlog → In Progress → Done",
+		Description: "Quick start: Backlog → In Progress → Review → Done",
 		IsSystem:    true,
 		CreatedAt:   now,
 		UpdatedAt:   now,
@@ -485,14 +401,26 @@ func (r *Repository) getSimpleTemplate(now time.Time) *models.WorkflowTemplate {
 				Color:            "bg-blue-500",
 				TaskState:        "IN_PROGRESS",
 				AutoStartAgent:   true,
-				OnCompleteStepID: "done",
+				OnCompleteStepID: "review",
+				AllowManualMove:  true,
+			},
+			{
+				ID:               "review",
+				Name:             "Review",
+				StepType:         models.StepTypeReview,
+				Position:         2,
+				Color:            "bg-yellow-500",
+				TaskState:        "REVIEW",
+				AutoStartAgent:   false,
+				RequireApproval:  true,
+				OnApprovalStepID: "done",
 				AllowManualMove:  true,
 			},
 			{
 				ID:              "done",
 				Name:            "Done",
 				StepType:        models.StepTypeDone,
-				Position:        2,
+				Position:        3,
 				Color:           "bg-green-500",
 				TaskState:       "COMPLETED",
 				AutoStartAgent:  false,
@@ -597,7 +525,15 @@ func (r *Repository) DeleteTemplate(ctx context.Context, id string) error {
 func (r *Repository) ListTemplates(ctx context.Context) ([]*models.WorkflowTemplate, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, name, description, is_system, steps, created_at, updated_at
-		FROM workflow_templates ORDER BY is_system DESC, name ASC
+		FROM workflow_templates
+		ORDER BY is_system DESC,
+		CASE
+			WHEN id = 'simple' THEN 1
+			WHEN id = 'standard' THEN 2
+			WHEN id = 'architecture' THEN 3
+			ELSE 999
+		END,
+		name ASC
 	`)
 	if err != nil {
 		return nil, err

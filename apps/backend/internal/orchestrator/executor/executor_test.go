@@ -232,6 +232,8 @@ func (m *mockRepository) DeleteTaskSession(ctx context.Context, id string) error
 // Workflow-related session operations
 func (m *mockRepository) GetPrimarySessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error) { return nil, nil }
 func (m *mockRepository) GetPrimarySessionIDsByTaskIDs(ctx context.Context, taskIDs []string) (map[string]string, error) { return nil, nil }
+func (m *mockRepository) GetSessionCountsByTaskIDs(ctx context.Context, taskIDs []string) (map[string]int, error) { return nil, nil }
+func (m *mockRepository) GetPrimarySessionInfoByTaskIDs(ctx context.Context, taskIDs []string) (map[string]*models.TaskSession, error) { return nil, nil }
 func (m *mockRepository) UpdateSessionWorkflowStep(ctx context.Context, sessionID string, stepID string) error { return nil }
 func (m *mockRepository) UpdateSessionReviewStatus(ctx context.Context, sessionID string, status string) error { return nil }
 

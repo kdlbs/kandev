@@ -16,12 +16,16 @@ type TaskChatPanelProps = {
   onSend?: (message: string) => void;
   sessionId?: string | null;
   onOpenFile?: (path: string) => void;
+  showRequestChangesTooltip?: boolean;
+  onRequestChangesTooltipDismiss?: () => void;
 };
 
 export const TaskChatPanel = memo(function TaskChatPanel({
   onSend,
   sessionId = null,
   onOpenFile,
+  showRequestChangesTooltip = false,
+  onRequestChangesTooltipDismiss,
 }: TaskChatPanelProps) {
   const [planModeEnabled, setPlanModeEnabled] = useState(false);
   const [isSending, setIsSending] = useState(false);
@@ -151,6 +155,8 @@ export const TaskChatPanel = memo(function TaskChatPanel({
           }
           pendingClarification={pendingClarification}
           onClarificationResolved={handleClarificationResolved}
+          showRequestChangesTooltip={showRequestChangesTooltip}
+          onRequestChangesTooltipDismiss={onRequestChangesTooltipDismiss}
         />
       </div>
     </>

@@ -979,6 +979,88 @@ func (r *Repository) GetPrimarySessionIDsByTaskIDs(ctx context.Context, taskIDs 
 	return result, rows.Err()
 }
 
+// GetSessionCountsByTaskIDs returns a map of task ID to session count for the given task IDs.
+func (r *Repository) GetSessionCountsByTaskIDs(ctx context.Context, taskIDs []string) (map[string]int, error) {
+	if len(taskIDs) == 0 {
+		return make(map[string]int), nil
+	}
+
+	// Build placeholders for IN clause
+	placeholders := make([]string, len(taskIDs))
+	args := make([]interface{}, len(taskIDs))
+	for i, id := range taskIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	query := fmt.Sprintf(`
+		SELECT task_id, COUNT(*) as count FROM task_sessions
+		WHERE task_id IN (%s)
+		GROUP BY task_id
+	`, strings.Join(placeholders, ","))
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	result := make(map[string]int)
+	for rows.Next() {
+		var taskID string
+		var count int
+		if err := rows.Scan(&taskID, &count); err != nil {
+			return nil, err
+		}
+		result[taskID] = count
+	}
+	return result, rows.Err()
+}
+
+// GetPrimarySessionInfoByTaskIDs returns a map of task ID to primary session for the given task IDs.
+// Only returns the review_status field from the session.
+func (r *Repository) GetPrimarySessionInfoByTaskIDs(ctx context.Context, taskIDs []string) (map[string]*models.TaskSession, error) {
+	if len(taskIDs) == 0 {
+		return make(map[string]*models.TaskSession), nil
+	}
+
+	// Build placeholders for IN clause
+	placeholders := make([]string, len(taskIDs))
+	args := make([]interface{}, len(taskIDs))
+	for i, id := range taskIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	query := fmt.Sprintf(`
+		SELECT task_id, review_status FROM task_sessions
+		WHERE task_id IN (%s) AND is_primary = 1
+	`, strings.Join(placeholders, ","))
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	result := make(map[string]*models.TaskSession)
+	for rows.Next() {
+		var taskID string
+		var reviewStatus sql.NullString
+		if err := rows.Scan(&taskID, &reviewStatus); err != nil {
+			return nil, err
+		}
+		session := &models.TaskSession{
+			TaskID: taskID,
+		}
+		if reviewStatus.Valid {
+			session.ReviewStatus = &reviewStatus.String
+		}
+		result[taskID] = session
+	}
+	return result, rows.Err()
+}
+
 // SetSessionPrimary marks a session as primary and clears primary flag on other sessions for the same task
 func (r *Repository) SetSessionPrimary(ctx context.Context, sessionID string) error {
 	now := time.Now().UTC()

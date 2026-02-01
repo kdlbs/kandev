@@ -177,6 +177,8 @@ type ChatInputContainerProps = {
   placeholder?: string;
   pendingClarification?: Message | null;
   onClarificationResolved?: () => void;
+  showRequestChangesTooltip?: boolean;
+  onRequestChangesTooltipDismiss?: () => void;
 };
 
 export function ChatInputContainer({
@@ -194,10 +196,18 @@ export function ChatInputContainer({
   placeholder,
   pendingClarification,
   onClarificationResolved,
+  showRequestChangesTooltip = false,
 }: ChatInputContainerProps) {
   // Keep input state local to avoid re-rendering parent on every keystroke
   const [value, setValue] = useState('');
   const inputRef = useRef<RichTextInputHandle>(null);
+
+  // Focus input when request changes tooltip is shown
+  useEffect(() => {
+    if (showRequestChangesTooltip && inputRef.current) {
+      inputRef.current.focus();
+    }
+  }, [showRequestChangesTooltip]);
 
   // Use ref for value to keep handleSubmit stable (doesn't change on every keystroke)
   const valueRef = useRef(value);
@@ -271,7 +281,8 @@ export function ChatInputContainer({
       className={cn(
         'rounded-2xl border border-border bg-background shadow-md overflow-hidden',
         planModeEnabled && 'border-primary border-dashed',
-        hasPendingClarification && 'border-blue-500/50'
+        hasPendingClarification && 'border-blue-500/50',
+        showRequestChangesTooltip && 'animate-pulse border-orange-500'
       )}
     >
       {/* Popup menus */}
@@ -306,16 +317,25 @@ export function ChatInputContainer({
         </div>
       ) : (
         /* Normal input area */
-        <RichTextInput
-          ref={inputRef}
-          value={value}
-          onChange={handleChange}
-          onKeyDown={handleKeyDown}
-          onSubmit={handleSubmit}
-          placeholder={placeholder}
-          disabled={isDisabled}
-          planModeEnabled={planModeEnabled}
-        />
+        <Tooltip open={showRequestChangesTooltip}>
+          <TooltipTrigger asChild>
+            <div>
+              <RichTextInput
+                ref={inputRef}
+                value={value}
+                onChange={handleChange}
+                onKeyDown={handleKeyDown}
+                onSubmit={handleSubmit}
+                placeholder={placeholder}
+                disabled={isDisabled}
+                planModeEnabled={planModeEnabled}
+              />
+            </div>
+          </TooltipTrigger>
+          <TooltipContent side="top" className="bg-orange-600 text-white border-orange-700">
+            <p className="font-medium">Write your changes here</p>
+          </TooltipContent>
+        </Tooltip>
       )}
 
       {/* Integrated toolbar - memoized to prevent re-renders on input changes */}

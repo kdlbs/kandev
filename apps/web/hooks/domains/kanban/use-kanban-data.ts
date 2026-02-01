@@ -70,6 +70,8 @@ export function useKanbanData({ onWorkspaceChange, onBoardChange, searchQuery = 
     position: task.position,
     repositoryId: task.repositoryId,
     primarySessionId: task.primarySessionId,
+    sessionCount: task.sessionCount,
+    reviewStatus: task.reviewStatus,
   }));
 
   const activeColumns = kanban.boardId ? columns : [];
