@@ -282,7 +282,7 @@ export function ChatInputContainer({
         'rounded-2xl border border-border bg-background shadow-md overflow-hidden',
         planModeEnabled && 'border-primary border-dashed',
         hasPendingClarification && 'border-blue-500/50',
-        showRequestChangesTooltip && 'animate-pulse border-amber-500'
+        showRequestChangesTooltip && 'animate-pulse border-purple-500'
       )}
     >
       {/* Popup menus */}
