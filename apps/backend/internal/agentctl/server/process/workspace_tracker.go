@@ -1235,7 +1235,9 @@ func (wt *WorkspaceTracker) ApplyFileDiff(reqPath string, unifiedDiff string, or
 	if err != nil {
 		return "", fmt.Errorf("failed to write patch file: %w", err)
 	}
-	defer os.Remove(patchFile)
+	defer func() {
+		_ = os.Remove(patchFile) // Best effort cleanup
+	}()
 
 	// Use git apply to apply the patch directly to the file
 	// This is much more reliable than custom diff application
