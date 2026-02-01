@@ -197,7 +197,6 @@ export function ChatInputContainer({
   pendingClarification,
   onClarificationResolved,
   showRequestChangesTooltip = false,
-  onRequestChangesTooltipDismiss,
 }: ChatInputContainerProps) {
   // Keep input state local to avoid re-rendering parent on every keystroke
   const [value, setValue] = useState('');
@@ -282,7 +281,8 @@ export function ChatInputContainer({
       className={cn(
         'rounded-2xl border border-border bg-background shadow-md overflow-hidden',
         planModeEnabled && 'border-primary border-dashed',
-        hasPendingClarification && 'border-blue-500/50'
+        hasPendingClarification && 'border-blue-500/50',
+        showRequestChangesTooltip && 'animate-pulse border-amber-500'
       )}
     >
       {/* Popup menus */}
@@ -317,25 +317,16 @@ export function ChatInputContainer({
         </div>
       ) : (
         /* Normal input area */
-        <Tooltip open={showRequestChangesTooltip} onOpenChange={(open) => !open && onRequestChangesTooltipDismiss?.()}>
-          <TooltipTrigger asChild>
-            <div>
-              <RichTextInput
-                ref={inputRef}
-                value={value}
-                onChange={handleChange}
-                onKeyDown={handleKeyDown}
-                onSubmit={handleSubmit}
-                placeholder={placeholder}
-                disabled={isDisabled}
-                planModeEnabled={planModeEnabled}
-              />
-            </div>
-          </TooltipTrigger>
-          <TooltipContent side="top" className="bg-amber-600 text-white border-amber-700">
-            <p className="font-medium">Write your changes here</p>
-          </TooltipContent>
-        </Tooltip>
+        <RichTextInput
+          ref={inputRef}
+          value={value}
+          onChange={handleChange}
+          onKeyDown={handleKeyDown}
+          onSubmit={handleSubmit}
+          placeholder={placeholder}
+          disabled={isDisabled}
+          planModeEnabled={planModeEnabled}
+        />
       )}
 
       {/* Integrated toolbar - memoized to prevent re-renders on input changes */}
