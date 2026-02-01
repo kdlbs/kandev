@@ -2,6 +2,8 @@ package process
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"io/fs"
@@ -17,6 +19,7 @@ import (
 	"github.com/fsnotify/fsnotify"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/sourcegraph/go-diff/diff"
 	"go.uber.org/zap"
 )
 
@@ -1194,6 +1197,166 @@ func (wt *WorkspaceTracker) GetFileContent(reqPath string) (string, int64, error
 	}
 
 	return string(content), info.Size(), nil
+}
+
+// ApplyFileDiff applies a unified diff to a file with conflict detection
+func (wt *WorkspaceTracker) ApplyFileDiff(reqPath string, unifiedDiff string, originalHash string) (string, error) {
+	cleanWorkDir := filepath.Clean(wt.workDir)
+	cleanReqPath := filepath.Clean(reqPath)
+
+	// Resolve the full path - if already absolute and within workDir, use directly
+	var fullPath string
+	if filepath.IsAbs(cleanReqPath) && strings.HasPrefix(cleanReqPath, cleanWorkDir+string(os.PathSeparator)) {
+		fullPath = cleanReqPath
+	} else {
+		fullPath = filepath.Join(wt.workDir, cleanReqPath)
+	}
+
+	// Path traversal protection
+	if !strings.HasPrefix(fullPath, cleanWorkDir+string(os.PathSeparator)) && fullPath != cleanWorkDir {
+		return "", fmt.Errorf("path traversal detected")
+	}
+
+	// Read current file content
+	currentContent, _, err := wt.GetFileContent(reqPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read current file: %w", err)
+	}
+
+	// Calculate hash of current content for conflict detection
+	currentHash := calculateSHA256(currentContent)
+	if originalHash != "" && currentHash != originalHash {
+		return "", fmt.Errorf("conflict detected: file has been modified (expected hash %s, got %s)", originalHash, currentHash)
+	}
+
+	// Parse the unified diff
+	fileDiffs, err := diff.ParseMultiFileDiff([]byte(unifiedDiff))
+	if err != nil {
+		return "", fmt.Errorf("failed to parse diff: %w", err)
+	}
+
+	if len(fileDiffs) == 0 {
+		return "", fmt.Errorf("no diffs found in input")
+	}
+
+	// We expect a single file diff
+	if len(fileDiffs) > 1 {
+		return "", fmt.Errorf("multiple file diffs not supported")
+	}
+
+	fileDiff := fileDiffs[0]
+
+	// Apply the diff to the current content
+	updatedContent, err := applyDiffToContent(currentContent, fileDiff)
+	if err != nil {
+		return "", fmt.Errorf("failed to apply diff: %w", err)
+	}
+
+	// Write updated content atomically (write to temp file, then rename)
+	tempFile := fullPath + ".tmp"
+	err = os.WriteFile(tempFile, []byte(updatedContent), 0644)
+	if err != nil {
+		return "", fmt.Errorf("failed to write temp file: %w", err)
+	}
+
+	// Atomic rename
+	err = os.Rename(tempFile, fullPath)
+	if err != nil {
+		// Clean up temp file on error
+		_ = os.Remove(tempFile)
+		return "", fmt.Errorf("failed to rename temp file: %w", err)
+	}
+
+	// Calculate new hash
+	newHash := calculateSHA256(updatedContent)
+
+	// Trigger filesystem change notification
+	select {
+	case wt.fsChangeTrigger <- struct{}{}:
+	default:
+		// Channel already has a pending trigger, skip
+	}
+
+	wt.logger.Debug("applied file diff",
+		zap.String("path", reqPath),
+		zap.String("old_hash", currentHash),
+		zap.String("new_hash", newHash),
+	)
+
+	return newHash, nil
+}
+
+// calculateSHA256 calculates the SHA256 hash of a string
+func calculateSHA256(content string) string {
+	hash := sha256.Sum256([]byte(content))
+	return hex.EncodeToString(hash[:])
+}
+
+// applyDiffToContent applies a parsed diff to content
+func applyDiffToContent(content string, fileDiff *diff.FileDiff) (string, error) {
+	lines := strings.Split(content, "\n")
+
+	// Apply each hunk in the diff
+	var err error
+	for _, hunk := range fileDiff.Hunks {
+		lines, err = applyHunk(lines, hunk)
+		if err != nil {
+			return "", err
+		}
+	}
+
+	return strings.Join(lines, "\n"), nil
+}
+
+// applyHunk applies a single hunk to the lines
+func applyHunk(lines []string, hunk *diff.Hunk) ([]string, error) {
+	// Parse hunk header to get line numbers
+	// Hunk format: @@ -oldStart,oldCount +newStart,newCount @@
+	oldStart := int(hunk.OrigStartLine)
+	if oldStart > 0 {
+		oldStart-- // Convert to 0-based index
+	}
+
+	// Build the new content by applying the hunk
+	result := make([]string, 0, len(lines))
+
+	// Add lines before the hunk
+	if oldStart > 0 {
+		result = append(result, lines[:oldStart]...)
+	}
+
+	// Process hunk body
+	hunkLines := strings.Split(string(hunk.Body), "\n")
+	lineIdx := oldStart
+
+	for _, hunkLine := range hunkLines {
+		if len(hunkLine) == 0 {
+			continue
+		}
+
+		switch hunkLine[0] {
+		case ' ': // Context line - keep it
+			if lineIdx < len(lines) {
+				result = append(result, lines[lineIdx])
+				lineIdx++
+			}
+		case '-': // Deleted line - skip it
+			if lineIdx < len(lines) {
+				lineIdx++
+			}
+		case '+': // Added line - add it
+			result = append(result, hunkLine[1:])
+		case '\\': // "\ No newline at end of file" - ignore
+			continue
+		}
+	}
+
+	// Add remaining lines after the hunk
+	if lineIdx < len(lines) {
+		result = append(result, lines[lineIdx:]...)
+	}
+
+	return result, nil
 }
 
 // scoredMatch holds a file path and its match score for sorting

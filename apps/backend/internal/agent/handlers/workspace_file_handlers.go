@@ -28,6 +28,7 @@ func NewWorkspaceFileHandlers(lm *lifecycle.Manager, log *logger.Logger) *Worksp
 func (h *WorkspaceFileHandlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionWorkspaceFileTreeGet, h.wsGetFileTree)
 	d.RegisterFunc(ws.ActionWorkspaceFileContentGet, h.wsGetFileContent)
+	d.RegisterFunc(ws.ActionWorkspaceFileContentUpdate, h.wsUpdateFileContent)
 	d.RegisterFunc(ws.ActionWorkspaceFilesSearch, h.wsSearchFiles)
 }
 
@@ -103,6 +104,51 @@ func (h *WorkspaceFileHandlers) wsGetFileContent(ctx context.Context, msg *ws.Me
 	if err != nil {
 		h.logger.Error("failed to get file content", zap.Error(err), zap.String("session_id", req.SessionID), zap.String("path", req.Path))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, fmt.Sprintf("Failed to get file content: %v", err), nil)
+	}
+
+	return ws.NewResponse(msg.ID, msg.Action, response)
+}
+
+// wsUpdateFileContent handles workspace.file.update action
+func (h *WorkspaceFileHandlers) wsUpdateFileContent(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req struct {
+		SessionID    string `json:"session_id"`
+		Path         string `json:"path"`
+		Diff         string `json:"diff"`
+		OriginalHash string `json:"original_hash"`
+	}
+
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+
+	if req.SessionID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+	}
+	if req.Path == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "path is required", nil)
+	}
+	if req.Diff == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "diff is required", nil)
+	}
+
+	// Get agent execution for this session
+	execution, found := h.lifecycle.GetExecutionBySessionID(req.SessionID)
+	if !found {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "No agent found for session", nil)
+	}
+
+	// Get agentctl client
+	client := execution.GetAgentCtlClient()
+	if client == nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Agent client not available", nil)
+	}
+
+	// Apply file diff via agentctl
+	response, err := client.ApplyFileDiff(ctx, req.Path, req.Diff, req.OriginalHash)
+	if err != nil {
+		h.logger.Error("failed to apply file diff", zap.Error(err), zap.String("session_id", req.SessionID), zap.String("path", req.Path))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, fmt.Sprintf("Failed to apply file diff: %v", err), nil)
 	}
 
 	return ws.NewResponse(msg.ID, msg.Action, response)

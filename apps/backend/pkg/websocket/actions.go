@@ -167,10 +167,11 @@ const (
 	ActionPermissionRespond   = "permission.respond"   // User responding to permission request
 
 	// Workspace file operations
-	ActionWorkspaceFileTreeGet    = "workspace.tree.get"
-	ActionWorkspaceFileContentGet = "workspace.file.get"
-	ActionWorkspaceFilesSearch    = "workspace.files.search"
-	ActionWorkspaceFileChanges    = "session.workspace.file.changes" // Notification
+	ActionWorkspaceFileTreeGet       = "workspace.tree.get"
+	ActionWorkspaceFileContentGet    = "workspace.file.get"
+	ActionWorkspaceFileContentUpdate = "workspace.file.update"
+	ActionWorkspaceFilesSearch       = "workspace.files.search"
+	ActionWorkspaceFileChanges       = "session.workspace.file.changes" // Notification
 
 	// Shell actions
 	ActionShellStatus        = "session.shell.status" // Get shell status

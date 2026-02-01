@@ -420,6 +420,9 @@ export type OpenFileTab = {
   path: string;
   name: string;
   content: string;
+  originalContent: string; // For diff generation
+  originalHash: string;    // SHA256 for conflict detection
+  isDirty: boolean;        // Has unsaved changes
 };
 
 // File extension to color mapping for file type indicators

@@ -28,12 +28,7 @@ import type { FileInfo } from '@/lib/state/store';
 import { FileBrowser } from '@/components/task/file-browser';
 import { SessionTabs, type SessionTab } from '@/components/session-tabs';
 import { useToast } from '@/components/toast-provider';
-
-type OpenFileTab = {
-  path: string;
-  name: string;
-  content: string;
-};
+import type { OpenFileTab } from '@/lib/types/backend';
 
 type TaskFilesPanelProps = {
   onSelectDiff: (path: string, content?: string) => void;
