@@ -282,7 +282,7 @@ export function ChatInputContainer({
         'rounded-2xl border border-border bg-background shadow-md overflow-hidden',
         planModeEnabled && 'border-primary border-dashed',
         hasPendingClarification && 'border-blue-500/50',
-        showRequestChangesTooltip && 'animate-pulse border-purple-500'
+        showRequestChangesTooltip && 'animate-pulse border-orange-500'
       )}
     >
       {/* Popup menus */}
@@ -317,16 +317,25 @@ export function ChatInputContainer({
         </div>
       ) : (
         /* Normal input area */
-        <RichTextInput
-          ref={inputRef}
-          value={value}
-          onChange={handleChange}
-          onKeyDown={handleKeyDown}
-          onSubmit={handleSubmit}
-          placeholder={placeholder}
-          disabled={isDisabled}
-          planModeEnabled={planModeEnabled}
-        />
+        <Tooltip open={showRequestChangesTooltip}>
+          <TooltipTrigger asChild>
+            <div>
+              <RichTextInput
+                ref={inputRef}
+                value={value}
+                onChange={handleChange}
+                onKeyDown={handleKeyDown}
+                onSubmit={handleSubmit}
+                placeholder={placeholder}
+                disabled={isDisabled}
+                planModeEnabled={planModeEnabled}
+              />
+            </div>
+          </TooltipTrigger>
+          <TooltipContent side="top" className="bg-orange-600 text-white border-orange-700">
+            <p className="font-medium">Write your changes here</p>
+          </TooltipContent>
+        </Tooltip>
       )}
 
       {/* Integrated toolbar - memoized to prevent re-renders on input changes */}
