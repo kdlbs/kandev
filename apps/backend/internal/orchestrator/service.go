@@ -27,6 +27,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // Common errors
@@ -464,16 +465,32 @@ func (s *Service) resumeExecutorsOnStartup(ctx context.Context) {
 
 		previousState := session.State
 
-		// Handle sessions in terminal states - clean up executor record
+		// Handle sessions in terminal states - clean up executor record and fix task state
 		switch previousState {
 		case models.TaskSessionStateCompleted, models.TaskSessionStateFailed, models.TaskSessionStateCancelled:
 			s.logger.Info("session in terminal state; cleaning up executor record",
 				zap.String("session_id", sessionID),
+				zap.String("task_id", session.TaskID),
 				zap.String("state", string(previousState)))
 			if err := s.repo.DeleteExecutorRunningBySessionID(ctx, sessionID); err != nil {
 				s.logger.Warn("failed to remove executor record for terminal session",
 					zap.String("session_id", sessionID),
 					zap.Error(err))
+			}
+
+			// If session failed, ensure task is in REVIEW state (not stuck IN_PROGRESS)
+			if previousState == models.TaskSessionStateFailed && session.TaskID != "" {
+				task, taskErr := s.taskRepo.GetTask(ctx, session.TaskID)
+				if taskErr == nil && task.State == v1.TaskStateInProgress {
+					s.logger.Info("fixing task state: session failed but task still IN_PROGRESS",
+						zap.String("task_id", session.TaskID),
+						zap.String("session_id", sessionID))
+					if updateErr := s.taskRepo.UpdateTaskState(ctx, session.TaskID, v1.TaskStateReview); updateErr != nil {
+						s.logger.Warn("failed to update task state to REVIEW",
+							zap.String("task_id", session.TaskID),
+							zap.Error(updateErr))
+					}
+				}
 			}
 			continue
 		}

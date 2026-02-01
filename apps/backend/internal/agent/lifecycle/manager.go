@@ -1378,6 +1378,14 @@ func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.Age
 			bufferPreview = bufferPreview[:100] + "..."
 		}
 
+		// Check if this is an error completion (agent failed to process the prompt)
+		isError := false
+		if event.Data != nil {
+			if v, ok := event.Data["is_error"].(bool); ok {
+				isError = v
+			}
+		}
+
 		m.logger.Info("agent turn complete",
 			zap.String("execution_id", execution.ID),
 			zap.String("operation_id", event.OperationID),
@@ -1386,7 +1394,8 @@ func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.Age
 			zap.String("current_msg_id", currentMsgID),
 			zap.String("event_text", event.Text),
 			zap.Int("buffer_length", len(bufferContentBeforeFlush)),
-			zap.String("buffer_preview", bufferPreview))
+			zap.String("buffer_preview", bufferPreview),
+			zap.Bool("is_error", isError))
 
 		// Get the agent message text:
 		// 1. If streaming was used, flush the buffer (which publishes final chunk) and ignore event.Text
@@ -1429,11 +1438,33 @@ func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.Age
 			}
 		}
 
-		// Mark agent as READY for follow-up prompts
-		if err := m.MarkReady(execution.ID); err != nil {
-			m.logger.Error("failed to mark execution as ready after complete",
+		// If this was an error completion, mark the execution as failed
+		// The agent process will likely exit soon after sending an error result
+		if isError {
+			errorMsg := "agent error completion"
+			if event.Error != "" {
+				errorMsg = event.Error
+			}
+			m.logger.Warn("error completion received, marking execution as failed",
 				zap.String("execution_id", execution.ID),
-				zap.Error(err))
+				zap.String("error", errorMsg))
+
+			if err := m.MarkCompleted(execution.ID, 1, errorMsg); err != nil {
+				m.logger.Error("failed to mark execution as failed after error completion",
+					zap.String("execution_id", execution.ID),
+					zap.Error(err))
+			}
+
+			// Remove the execution from the store so a new one can be created
+			// The AgentFailed event has already been published by MarkCompleted
+			m.RemoveExecution(execution.ID)
+		} else {
+			// Mark agent as READY for follow-up prompts
+			if err := m.MarkReady(execution.ID); err != nil {
+				m.logger.Error("failed to mark execution as ready after complete",
+					zap.String("execution_id", execution.ID),
+					zap.Error(err))
+			}
 		}
 
 	case "permission_request":
@@ -1463,6 +1494,21 @@ func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.Age
 			event.ContextEfficiency,
 		)
 		// Return early - context window events don't need to be published as stream events
+		return
+
+	case "available_commands":
+		// Store available commands in the execution for later retrieval (e.g., after page refresh)
+		if len(event.AvailableCommands) > 0 {
+			execution.SetAvailableCommands(event.AvailableCommands)
+			m.logger.Debug("stored available commands",
+				zap.String("execution_id", execution.ID),
+				zap.String("session_id", execution.SessionID),
+				zap.Int("command_count", len(event.AvailableCommands)))
+
+			// Also publish to event bus for WebSocket broadcast
+			m.eventPublisher.PublishAvailableCommands(execution, event.AvailableCommands)
+		}
+		// Return early - we handle broadcasting ourselves
 		return
 	}
 
@@ -1892,6 +1938,18 @@ func (m *Manager) GetExecution(executionID string) (*AgentExecution, bool) {
 // Thread-safe: Can be called concurrently from multiple goroutines.
 func (m *Manager) GetExecutionBySessionID(sessionID string) (*AgentExecution, bool) {
 	return m.executionStore.GetBySessionID(sessionID)
+}
+
+// GetAvailableCommandsForSession returns the available slash commands for a session.
+// Returns nil if the session doesn't exist or has no commands stored.
+//
+// Thread-safe: Can be called concurrently from multiple goroutines.
+func (m *Manager) GetAvailableCommandsForSession(sessionID string) []streams.AvailableCommand {
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
+	if !exists {
+		return nil
+	}
+	return execution.GetAvailableCommands()
 }
 
 // ListExecutions returns all currently tracked agent executions.

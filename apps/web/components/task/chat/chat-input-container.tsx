@@ -208,8 +208,19 @@ export function ChatInputContainer({
   // Mention menu hook
   const mention = useInlineMention(inputRef, value, setValue, sessionId);
 
+  // Handler for agent slash commands - sends /{commandName} as a message
+  const handleAgentCommand = useCallback(
+    (commandName: string) => {
+      onSubmit(`/${commandName}`);
+    },
+    [onSubmit]
+  );
+
   // Slash command menu hook
-  const slash = useInlineSlash(inputRef, value, setValue, onPlanModeChange);
+  const slash = useInlineSlash(inputRef, value, setValue, {
+    sessionId,
+    onAgentCommand: handleAgentCommand,
+  });
 
   // Use refs for menu state to keep handleSubmit stable
   const menuStateRef = useRef({ mentionOpen: mention.isOpen, slashOpen: slash.isOpen });

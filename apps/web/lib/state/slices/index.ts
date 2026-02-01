@@ -73,6 +73,8 @@ export type {
   ContextWindowEntry,
   ContextWindowState,
   AgentState,
+  AvailableCommand,
+  AvailableCommandsState,
 } from './session-runtime/types';
 export type {
   PreviewStage,

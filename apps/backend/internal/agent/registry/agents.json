@@ -318,12 +318,13 @@
       "cmd": [
         "npx",
         "-y",
-        "@anthropic-ai/claude-code@2.1.19",
+        "@anthropic-ai/claude-code@2.1.29",
         "-p",
         "--output-format=stream-json",
         "--input-format=stream-json",
         "--permission-prompt-tool=stdio",
         "--disallowedTools=AskUserQuestion",
+        "--setting-sources=user,project",
         "--verbose"
       ],
       "passthrough_config": {
@@ -333,7 +334,7 @@
         "passthrough_cmd": [
           "npx",
           "-y",
-          "@anthropic-ai/claude-code@2.1.19",
+          "@anthropic-ai/claude-code",
           "--verbose"
         ],
         "model_flag": "--model {model}",

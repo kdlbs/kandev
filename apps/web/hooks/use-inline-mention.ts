@@ -22,6 +22,9 @@ type Position = {
 // Debounce delay for file search (ms)
 const FILE_SEARCH_DEBOUNCE = 300;
 
+// Close menu if no results after this many characters
+const NO_RESULTS_CLOSE_THRESHOLD = 3;
+
 function isValidMentionTrigger(text: string, pos: number): boolean {
   if (pos === 0) return true;
   const charBefore = text[pos - 1];
@@ -178,6 +181,20 @@ export function useInlineMention(
   useEffect(() => {
     setSelectedIndex(0);
   }, [filteredItems.length]);
+  /* eslint-enable react-hooks/set-state-in-effect */
+
+  // Auto-close menu when no results and query is long enough
+  // This prevents showing "No results found" when user is just typing normally
+  /* eslint-disable react-hooks/set-state-in-effect -- auto-close logic is intentional */
+  useEffect(() => {
+    if (!isOpen || isLoading) return;
+
+    if (filteredItems.length === 0 && query.length >= NO_RESULTS_CLOSE_THRESHOLD) {
+      setIsOpen(false);
+      setTriggerStart(-1);
+      setQuery('');
+    }
+  }, [isOpen, isLoading, filteredItems.length, query.length]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   // Handle text changes to detect @ trigger

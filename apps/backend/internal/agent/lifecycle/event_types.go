@@ -65,6 +65,10 @@ type AgentStreamEventData struct {
 	IsAppend bool `json:"is_append,omitempty"`
 	// MessageType distinguishes between "message" and "thinking" content types
 	MessageType string `json:"message_type,omitempty"`
+
+	// AvailableCommands contains the slash commands available from the agent.
+	// Populated when Type is "available_commands".
+	AvailableCommands []streams.AvailableCommand `json:"available_commands,omitempty"`
 }
 
 // AgentStreamEventPayload is the payload for agent stream events (WebSocket streaming).
@@ -279,5 +283,19 @@ type ContextWindowEventPayload struct {
 
 // GetSessionID returns the session ID for this event (used by event routing).
 func (p ContextWindowEventPayload) GetSessionID() string {
+	return p.SessionID
+}
+
+// AvailableCommandsEventPayload is the payload for available commands update events.
+type AvailableCommandsEventPayload struct {
+	TaskID            string                    `json:"task_id"`
+	SessionID         string                    `json:"session_id"`
+	AgentID           string                    `json:"agent_id"`
+	AvailableCommands []streams.AvailableCommand `json:"available_commands"`
+	Timestamp         string                    `json:"timestamp"`
+}
+
+// GetSessionID returns the session ID for this event (used by event routing).
+func (p AvailableCommandsEventPayload) GetSessionID() string {
 	return p.SessionID
 }

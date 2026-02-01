@@ -460,8 +460,14 @@ func (s *Service) handleReviewStepRollback(ctx context.Context, taskID, sessionI
 func (s *Service) handleAgentFailed(ctx context.Context, data watcher.AgentEventData) {
 	s.logger.Warn("handling agent failed",
 		zap.String("task_id", data.TaskID),
+		zap.String("session_id", data.SessionID),
 		zap.String("agent_execution_id", data.AgentExecutionID),
 		zap.String("error_message", data.ErrorMessage))
+
+	// Update session state to FAILED
+	if data.SessionID != "" {
+		s.updateTaskSessionState(ctx, data.TaskID, data.SessionID, models.TaskSessionStateFailed, data.ErrorMessage, false)
+	}
 
 	// Trigger retry logic
 	s.scheduler.HandleTaskCompleted(data.TaskID, false)
@@ -478,6 +484,14 @@ func (s *Service) handleAgentFailed(ctx context.Context, data watcher.AgentEvent
 		} else {
 			s.logger.Info("task moved to REVIEW state after failure (for user review)",
 				zap.String("task_id", data.TaskID))
+		}
+	} else {
+		// If retry is triggered, also move task to REVIEW state
+		// The retry will start a new agent when the task is re-launched
+		if err := s.taskRepo.UpdateTaskState(ctx, data.TaskID, v1.TaskStateReview); err != nil {
+			s.logger.Error("failed to update task state to REVIEW after failure (with retry pending)",
+				zap.String("task_id", data.TaskID),
+				zap.Error(err))
 		}
 	}
 }
@@ -615,6 +629,19 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 					zap.String("session_id", sessionID),
 					zap.Error(err))
 			}
+		}
+
+	case "available_commands":
+		// Handle available commands events - broadcast to WebSocket for frontend
+		if sessionID != "" && s.eventBus != nil && len(payload.Data.AvailableCommands) > 0 {
+			eventPayload := lifecycle.AvailableCommandsEventPayload{
+				TaskID:            taskID,
+				SessionID:         sessionID,
+				AgentID:           payload.AgentID,
+				AvailableCommands: payload.Data.AvailableCommands,
+			}
+			subject := events.BuildAvailableCommandsSubject(sessionID)
+			_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.AvailableCommandsUpdated, "orchestrator", eventPayload))
 		}
 
 	case "log":

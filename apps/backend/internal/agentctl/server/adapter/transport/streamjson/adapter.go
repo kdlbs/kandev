@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
@@ -90,6 +92,9 @@ type Adapter struct {
 	mainModelContextWindow int64  // Context window size (updated from result's model_usage)
 	contextTokensUsed      int64  // Total tokens used (input + output + cache)
 
+	// Available commands from initialize response (stored until session is created)
+	pendingAvailableCommands []streams.AvailableCommand
+
 	// Synchronization
 	mu     sync.RWMutex
 	closed bool
@@ -163,12 +168,43 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 	a.client.SetMessageHandler(a.handleMessage)
 
 	// Start reading from stdout with the adapter's context
-	a.client.Start(a.ctx)
+	// Wait for the read loop to be ready before sending initialize
+	readyC := a.client.Start(a.ctx)
+	select {
+	case <-readyC:
+		a.logger.Info("read loop is ready")
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(5 * time.Second):
+		a.logger.Warn("timeout waiting for read loop to start")
+	}
 
 	// Store agent info (version will be populated from first message)
 	a.agentInfo = &AgentInfo{
 		Name:    a.agentID,
 		Version: "unknown",
+	}
+
+	// Send initialize control request to get slash commands
+	// This is required for streaming mode (input-format=stream-json)
+	initResp, err := a.client.Initialize(ctx, 30*time.Second)
+	if err != nil {
+		a.logger.Warn("failed to initialize (continuing anyway)", zap.Error(err))
+	} else if initResp != nil && len(initResp.Commands) > 0 {
+		// Store available commands to emit after session is created
+		commands := make([]streams.AvailableCommand, len(initResp.Commands))
+		for i, cmd := range initResp.Commands {
+			commands[i] = streams.AvailableCommand{
+				Name:        cmd.Name,
+				Description: cmd.Description,
+			}
+		}
+		a.mu.Lock()
+		a.pendingAvailableCommands = commands
+		a.mu.Unlock()
+
+		a.logger.Info("received slash commands from initialize",
+			zap.Int("count", len(commands)))
 	}
 
 	a.logger.Info("stream-json adapter initialized")
@@ -181,19 +217,42 @@ func (a *Adapter) GetAgentInfo() *AgentInfo {
 	return a.agentInfo
 }
 
+// emitPendingCommands emits any pending available commands for the given session.
+// Must be called after the mutex is unlocked.
+func (a *Adapter) emitPendingCommands(sessionID string, commands []streams.AvailableCommand) {
+	if len(commands) == 0 {
+		return
+	}
+	a.sendUpdate(AgentEvent{
+		Type:              streams.EventTypeAvailableCommands,
+		SessionID:         sessionID,
+		AvailableCommands: commands,
+	})
+	a.logger.Debug("emitted pending slash commands",
+		zap.String("session_id", sessionID),
+		zap.Int("count", len(commands)))
+}
+
+// takePendingCommands atomically takes and clears pending commands.
+// Must be called with the mutex held.
+func (a *Adapter) takePendingCommands() []streams.AvailableCommand {
+	commands := a.pendingAvailableCommands
+	a.pendingAvailableCommands = nil
+	return commands
+}
+
 // NewSession creates a new stream-json session.
 // Note: Sessions are created implicitly with the first prompt.
 // The mcpServers parameter is ignored as this protocol handles MCP separately.
 func (a *Adapter) NewSession(ctx context.Context, _ []types.McpServer) (string, error) {
 	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	// Generate a session ID - the agent will return its own session ID
-	// which we'll update when we receive the system message
 	sessionID := uuid.New().String()
 	a.sessionID = sessionID
+	pendingCommands := a.takePendingCommands()
+	a.mu.Unlock()
 
 	a.logger.Info("created new session placeholder", zap.String("session_id", sessionID))
+	a.emitPendingCommands(sessionID, pendingCommands)
 
 	return sessionID, nil
 }
@@ -203,9 +262,11 @@ func (a *Adapter) NewSession(ctx context.Context, _ []types.McpServer) (string, 
 func (a *Adapter) LoadSession(ctx context.Context, sessionID string) error {
 	a.mu.Lock()
 	a.sessionID = sessionID
+	pendingCommands := a.takePendingCommands()
 	a.mu.Unlock()
 
 	a.logger.Info("loaded session", zap.String("session_id", sessionID))
+	a.emitPendingCommands(sessionID, pendingCommands)
 
 	return nil
 }
@@ -444,7 +505,7 @@ func (a *Adapter) handleToolPermission(requestID string, req *claudecode.Control
 
 	// If no handler, auto-allow
 	if handler == nil {
-		a.logger.Info("auto-allowing tool (no handler)",
+		a.logger.Debug("auto-allowing tool (no handler)",
 			zap.String("tool", req.ToolName))
 		a.sendPermissionResponse(requestID, claudecode.BehaviorAllow)
 		return
@@ -547,7 +608,8 @@ func (a *Adapter) handleMessage(msg *claudecode.CLIMessage) {
 func (a *Adapter) handleSystemMessage(msg *claudecode.CLIMessage) {
 	a.logger.Info("received system message",
 		zap.String("session_id", msg.SessionID),
-		zap.String("status", msg.SessionStatus))
+		zap.String("status", msg.SessionStatus),
+		zap.Int("slash_commands_count", len(msg.SlashCommands)))
 
 	// Update session ID if provided
 	a.mu.Lock()
@@ -557,6 +619,25 @@ func (a *Adapter) handleSystemMessage(msg *claudecode.CLIMessage) {
 	alreadySent := a.sessionStatusSent
 	a.sessionStatusSent = true
 	a.mu.Unlock()
+
+	// Emit available commands if present (do this on every system message,
+	// not just the first, in case commands change)
+	// Note: System message slash_commands is just an array of names (strings),
+	// so we only have the name, not description. The initialize response has full details.
+	if len(msg.SlashCommands) > 0 {
+		commands := make([]streams.AvailableCommand, len(msg.SlashCommands))
+		for i, name := range msg.SlashCommands {
+			commands[i] = streams.AvailableCommand{
+				Name:        name,
+				Description: "", // System message only has names, not descriptions
+			}
+		}
+		a.sendUpdate(AgentEvent{
+			Type:              streams.EventTypeAvailableCommands,
+			SessionID:         msg.SessionID,
+			AvailableCommands: commands,
+		})
+	}
 
 	// Only send session status event once per session (on first prompt)
 	// The agent sends system messages on every prompt, but we only want to
@@ -585,13 +666,16 @@ func (a *Adapter) handleAssistantMessage(msg *claudecode.CLIMessage, sessionID, 
 	// Extract parent tool use ID for subagent nesting
 	parentToolUseID := msg.ParentToolUseID
 
+	// Get content blocks (may be nil if content is a string)
+	contentBlocks := msg.Message.GetContentBlocks()
+
 	// Log content block types for debugging
-	blockTypes := make([]string, 0, len(msg.Message.Content))
-	for _, block := range msg.Message.Content {
+	blockTypes := make([]string, 0, len(contentBlocks))
+	for _, block := range contentBlocks {
 		blockTypes = append(blockTypes, block.Type)
 	}
-	a.logger.Info("processing assistant message",
-		zap.Int("num_blocks", len(msg.Message.Content)),
+	a.logger.Debug("processing assistant message",
+		zap.Int("num_blocks", len(contentBlocks)),
 		zap.Strings("block_types", blockTypes),
 		zap.String("parent_tool_use_id", parentToolUseID))
 
@@ -610,7 +694,7 @@ func (a *Adapter) handleAssistantMessage(msg *claudecode.CLIMessage, sessionID, 
 	}
 
 	// Process content blocks
-	for _, block := range msg.Message.Content {
+	for _, block := range contentBlocks {
 		switch block.Type {
 		case "text":
 			if block.Text != "" {
@@ -646,7 +730,7 @@ func (a *Adapter) handleAssistantMessage(msg *claudecode.CLIMessage, sessionID, 
 			} else if path, ok := block.Input["file_path"].(string); ok {
 				toolTitle = fmt.Sprintf("%s: %s", block.Name, path)
 			}
-			a.logger.Info("tool_use block received",
+			a.logger.Debug("tool_use block received",
 				zap.String("tool_call_id", block.ID),
 				zap.String("tool_name", block.Name),
 				zap.String("tool_type", toolType),
@@ -703,15 +787,41 @@ func (a *Adapter) handleAssistantMessage(msg *claudecode.CLIMessage, sessionID, 
 	}
 }
 
-// handleUserMessage processes user messages containing tool results.
+// handleUserMessage processes user messages containing tool results or slash command output.
 // Claude Code sends tool results back as user messages with tool_result content blocks.
+// For slash commands, content may be a plain string wrapped in <local-command-stdout> tags.
 func (a *Adapter) handleUserMessage(msg *claudecode.CLIMessage, sessionID, operationID string) {
 	if msg.Message == nil {
 		return
 	}
 
+	// Check if content is a string (slash command output)
+	if contentStr := msg.Message.GetContentString(); contentStr != "" {
+		// Extract text from <local-command-stdout> tags if present
+		text := contentStr
+		if strings.HasPrefix(text, "<local-command-stdout>") && strings.HasSuffix(text, "</local-command-stdout>") {
+			text = strings.TrimPrefix(text, "<local-command-stdout>")
+			text = strings.TrimSuffix(text, "</local-command-stdout>")
+		}
+
+		if text != "" {
+			a.logger.Info("received user message with string content (slash command output)",
+				zap.String("session_id", sessionID),
+				zap.Int("content_length", len(text)))
+
+			a.sendUpdate(AgentEvent{
+				Type:        streams.EventTypeMessageChunk,
+				SessionID:   sessionID,
+				OperationID: operationID,
+				Text:        text,
+			})
+		}
+		return
+	}
+
 	// Process content blocks looking for tool_result
-	for _, block := range msg.Message.Content {
+	contentBlocks := msg.Message.GetContentBlocks()
+	for _, block := range contentBlocks {
 		if block.Type != "tool_result" {
 			continue
 		}
@@ -769,7 +879,7 @@ func (a *Adapter) handleResultMessage(msg *claudecode.CLIMessage, sessionID, ope
 	a.mu.Unlock()
 
 	for _, toolID := range pendingTools {
-		a.logger.Info("auto-completing pending tool call on result",
+		a.logger.Debug("auto-completing pending tool call on result",
 			zap.String("tool_call_id", toolID))
 		a.sendUpdate(AgentEvent{
 			Type:        streams.EventTypeToolUpdate,
@@ -829,13 +939,19 @@ func (a *Adapter) handleResultMessage(msg *claudecode.CLIMessage, sessionID, ope
 	})
 
 	// If there's result text, send it as a message chunk
-	// Result can be either a ResultData object or an error string
+	// Result can be either a ResultData object or a plain string
+	var resultText string
 	if resultData := msg.GetResultData(); resultData != nil && resultData.Text != "" {
+		resultText = resultData.Text
+	} else if resultStr := msg.GetResultString(); resultStr != "" {
+		resultText = resultStr
+	}
+	if resultText != "" {
 		a.sendUpdate(AgentEvent{
 			Type:        streams.EventTypeMessageChunk,
 			SessionID:   sessionID,
 			OperationID: operationID,
-			Text:        resultData.Text,
+			Text:        resultText,
 		})
 	}
 

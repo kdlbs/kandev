@@ -86,9 +86,9 @@ const mermaidCodeBlockView = $view(codeBlockSchema.node, () => {
 
     // Render the mermaid diagram
     const id = `mermaid-${++mermaidIdCounter}`;
-    mermaid.render(id, currentContent).then(({ svg }) => {
+    mermaid.render(id, currentContent).then(({ svg }: { svg: string }) => {
       dom.innerHTML = svg;
-    }).catch((err) => {
+    }).catch((err: Error) => {
       dom.innerHTML = `<pre class="mermaid-error">Error rendering diagram: ${err.message}</pre>`;
     });
 
@@ -103,9 +103,9 @@ const mermaidCodeBlockView = $view(codeBlockSchema.node, () => {
         if (newContent !== currentContent) {
           currentContent = newContent; // Update tracked content
           const newId = `mermaid-${++mermaidIdCounter}`;
-          mermaid.render(newId, newContent).then(({ svg }) => {
+          mermaid.render(newId, newContent).then(({ svg }: { svg: string }) => {
             dom.innerHTML = svg;
-          }).catch((err) => {
+          }).catch((err: Error) => {
             dom.innerHTML = `<pre class="mermaid-error">Error rendering diagram: ${err.message}</pre>`;
           });
         }

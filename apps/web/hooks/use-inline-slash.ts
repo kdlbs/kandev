@@ -2,12 +2,17 @@
 
 import { useState, useCallback, useMemo, useEffect } from 'react';
 import type { RichTextInputHandle } from '@/components/task/chat/rich-text-input';
+import { useAppStore } from '@/components/state-provider';
+
+export type SlashCommandAction = 'agent';
 
 export type SlashCommand = {
   id: string;
   label: string;
   description: string;
-  action: 'plan' | 'todo' | 'review' | 'summarize';
+  action: SlashCommandAction;
+  // For agent commands
+  agentCommandName?: string;
 };
 
 type Position = {
@@ -15,70 +20,79 @@ type Position = {
   y: number;
 };
 
-const SLASH_COMMANDS: SlashCommand[] = [
-  {
-    id: 'plan',
-    label: '/plan',
-    description: 'Start a planning response',
-    action: 'plan',
-  },
-  {
-    id: 'todo',
-    label: '/todo',
-    description: 'Add a todo list',
-    action: 'todo',
-  },
-  {
-    id: 'review',
-    label: '/review',
-    description: 'Request a review',
-    action: 'review',
-  },
-  {
-    id: 'summarize',
-    label: '/summarize',
-    description: 'Summarize the task',
-    action: 'summarize',
-  },
-];
-
 function isValidSlashTrigger(text: string, pos: number): boolean {
   if (pos === 0) return true;
   const charBefore = text[pos - 1];
   return charBefore === ' ' || charBefore === '\n' || charBefore === '\t';
 }
 
-function filterCommands(query: string): SlashCommand[] {
-  if (!query) return SLASH_COMMANDS;
+function filterCommands(query: string, allCommands: SlashCommand[]): SlashCommand[] {
+  if (!query) return allCommands;
   const lowerQuery = query.toLowerCase();
 
-  return SLASH_COMMANDS.filter((cmd) => {
+  return allCommands.filter((cmd) => {
     const label = cmd.label.toLowerCase();
-    return label.startsWith('/' + lowerQuery) || cmd.action.startsWith(lowerQuery);
+    const cmdName = cmd.agentCommandName?.toLowerCase();
+    return label.startsWith('/' + lowerQuery) || cmdName?.startsWith(lowerQuery);
   }).sort((a, b) => {
     // Prefer exact prefix matches
-    const aStartsWithQuery = a.action.toLowerCase().startsWith(lowerQuery);
-    const bStartsWithQuery = b.action.toLowerCase().startsWith(lowerQuery);
+    const aName = a.agentCommandName?.toLowerCase();
+    const bName = b.agentCommandName?.toLowerCase();
+    const aStartsWithQuery = aName?.startsWith(lowerQuery) ?? false;
+    const bStartsWithQuery = bName?.startsWith(lowerQuery) ?? false;
     if (aStartsWithQuery && !bStartsWithQuery) return -1;
     if (!aStartsWithQuery && bStartsWithQuery) return 1;
     return 0;
   });
 }
 
+type UseInlineSlashOptions = {
+  sessionId?: string | null;
+  onAgentCommand?: (commandName: string) => void;
+};
+
 export function useInlineSlash(
   inputRef: React.RefObject<RichTextInputHandle | null>,
   value: string,
   onChange: (value: string) => void,
-  onPlanModeChange?: (enabled: boolean) => void
+  options?: UseInlineSlashOptions
 ) {
+  const { sessionId, onAgentCommand } = options ?? {};
   const [isOpen, setIsOpen] = useState(false);
   const [position, setPosition] = useState<Position | null>(null);
   const [triggerStart, setTriggerStart] = useState<number>(-1);
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
 
+  // Get agent commands from store
+  const agentCommands = useAppStore((state) =>
+    sessionId ? state.availableCommands.bySessionId[sessionId] : undefined
+  );
+
+  // Convert agent commands to slash commands
+  // Filter out "bundled" commands (skills) that don't produce visible output
+  const allCommands = useMemo(() => {
+    if (!agentCommands || agentCommands.length === 0) {
+      return [];
+    }
+
+    return agentCommands
+      .filter((cmd) => {
+        // Skip bundled skills - they don't produce <local-command-stdout> output
+        const desc = cmd.description || '';
+        return !desc.includes('(bundled)');
+      })
+      .map((cmd) => ({
+        id: `agent-${cmd.name}`,
+        label: `/${cmd.name}`,
+        description: cmd.description || `Run /${cmd.name} command`,
+        action: 'agent' as const,
+        agentCommandName: cmd.name,
+      }));
+  }, [agentCommands]);
+
   // Filter commands based on query
-  const filteredCommands = useMemo(() => filterCommands(query), [query]);
+  const filteredCommands = useMemo(() => filterCommands(query, allCommands), [query, allCommands]);
 
   // Reset selected index when commands change
   /* eslint-disable react-hooks/set-state-in-effect -- resetting selection on items change is intentional */
@@ -143,45 +157,9 @@ export function useInlineSlash(
       const newValue = value.substring(0, triggerStart) + value.substring(cursorPos);
       onChange(newValue);
 
-      // Execute the command action
-      switch (command.action) {
-        case 'plan':
-          onPlanModeChange?.(true);
-          break;
-        case 'todo':
-          // Insert todo template
-          const todoText = '## TODO\n- [ ] ';
-          const todoValue = value.substring(0, triggerStart) + todoText + value.substring(cursorPos);
-          onChange(todoValue);
-          requestAnimationFrame(() => {
-            const newPos = triggerStart + todoText.length;
-            input.setSelectionRange(newPos, newPos);
-            input.focus();
-          });
-          break;
-        case 'review':
-          // Insert review request
-          const reviewText = 'Please review ';
-          const reviewValue = value.substring(0, triggerStart) + reviewText + value.substring(cursorPos);
-          onChange(reviewValue);
-          requestAnimationFrame(() => {
-            const newPos = triggerStart + reviewText.length;
-            input.setSelectionRange(newPos, newPos);
-            input.focus();
-          });
-          break;
-        case 'summarize':
-          // Insert summarize request
-          const summaryText = 'Please summarize ';
-          const summaryValue =
-            value.substring(0, triggerStart) + summaryText + value.substring(cursorPos);
-          onChange(summaryValue);
-          requestAnimationFrame(() => {
-            const newPos = triggerStart + summaryText.length;
-            input.setSelectionRange(newPos, newPos);
-            input.focus();
-          });
-          break;
+      // Execute the command action - only agent commands are supported now
+      if (command.agentCommandName && onAgentCommand) {
+        onAgentCommand(command.agentCommandName);
       }
 
       setIsOpen(false);
@@ -193,7 +171,7 @@ export function useInlineSlash(
         input.focus();
       });
     },
-    [inputRef, triggerStart, value, onChange, onPlanModeChange]
+    [inputRef, triggerStart, value, onChange, onAgentCommand]
   );
 
   // Handle keyboard navigation

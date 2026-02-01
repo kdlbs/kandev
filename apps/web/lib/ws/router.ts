@@ -2,6 +2,7 @@ import type { StoreApi } from 'zustand';
 import type { AppState } from '@/lib/state/store';
 import { registerAgentsHandlers } from '@/lib/ws/handlers/agents';
 import { registerTaskSessionHandlers } from '@/lib/ws/handlers/agent-session';
+import { registerAvailableCommandsHandlers } from '@/lib/ws/handlers/available-commands';
 import { registerBoardsHandlers } from '@/lib/ws/handlers/boards';
 
 import { registerMessagesHandlers } from '@/lib/ws/handlers/messages';
@@ -31,6 +32,7 @@ export function registerWsHandlers(store: StoreApi<AppState>) {
     ...registerEnvironmentsHandlers(store),
     ...registerAgentsHandlers(store),
     ...registerTaskSessionHandlers(store),
+    ...registerAvailableCommandsHandlers(store),
     ...registerUsersHandlers(store),
     ...registerTerminalsHandlers(store),
     ...registerDiffsHandlers(store),

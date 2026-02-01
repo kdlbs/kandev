@@ -289,3 +289,154 @@ func TestModelUsageStats_ContextWindow(t *testing.T) {
 		t.Errorf("ContextWindow = %v, want nil", stats2.ContextWindow)
 	}
 }
+
+func TestAssistantMessage_GetContentBlocks(t *testing.T) {
+	tests := []struct {
+		name      string
+		content   string
+		wantCount int
+		wantType  string
+	}{
+		{
+			name:      "array of content blocks",
+			content:   `[{"type":"text","text":"Hello"},{"type":"text","text":"World"}]`,
+			wantCount: 2,
+			wantType:  "text",
+		},
+		{
+			name:      "single content block",
+			content:   `[{"type":"thinking","thinking":"Let me think..."}]`,
+			wantCount: 1,
+			wantType:  "thinking",
+		},
+		{
+			name:      "empty array",
+			content:   `[]`,
+			wantCount: 0,
+			wantType:  "",
+		},
+		{
+			name:      "string content (not blocks)",
+			content:   `"This is a string"`,
+			wantCount: 0,
+			wantType:  "",
+		},
+		{
+			name:      "empty content",
+			content:   ``,
+			wantCount: 0,
+			wantType:  "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := &AssistantMessage{
+				Content: json.RawMessage(tt.content),
+			}
+			blocks := msg.GetContentBlocks()
+			if len(blocks) != tt.wantCount {
+				t.Errorf("GetContentBlocks() returned %d blocks, want %d", len(blocks), tt.wantCount)
+			}
+			if tt.wantCount > 0 && blocks[0].Type != tt.wantType {
+				t.Errorf("GetContentBlocks()[0].Type = %q, want %q", blocks[0].Type, tt.wantType)
+			}
+		})
+	}
+}
+
+func TestAssistantMessage_GetContentString(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{
+			name:    "plain string content",
+			content: `"Hello, World!"`,
+			want:    "Hello, World!",
+		},
+		{
+			name:    "string with local-command-stdout tags",
+			content: `"<local-command-stdout>Command output here</local-command-stdout>"`,
+			want:    "<local-command-stdout>Command output here</local-command-stdout>",
+		},
+		{
+			name:    "empty string",
+			content: `""`,
+			want:    "",
+		},
+		{
+			name:    "array content (not string)",
+			content: `[{"type":"text","text":"Hello"}]`,
+			want:    "",
+		},
+		{
+			name:    "empty content",
+			content: ``,
+			want:    "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := &AssistantMessage{
+				Content: json.RawMessage(tt.content),
+			}
+			got := msg.GetContentString()
+			if got != tt.want {
+				t.Errorf("GetContentString() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIncomingControlResponse_JSONParsing(t *testing.T) {
+	// Test successful initialize response
+	jsonStr := `{
+		"subtype": "success",
+		"request_id": "req-123",
+		"response": {
+			"commands": [
+				{"name": "cost", "description": "Show cost"},
+				{"name": "context", "description": "Show context"}
+			],
+			"agents": ["Bash", "Explore"]
+		}
+	}`
+	var resp IncomingControlResponse
+	if err := json.Unmarshal([]byte(jsonStr), &resp); err != nil {
+		t.Fatalf("failed to parse: %v", err)
+	}
+	if resp.Subtype != "success" {
+		t.Errorf("Subtype = %q, want %q", resp.Subtype, "success")
+	}
+	if resp.RequestID != "req-123" {
+		t.Errorf("RequestID = %q, want %q", resp.RequestID, "req-123")
+	}
+	if resp.Response == nil {
+		t.Fatal("Response is nil")
+	}
+	if len(resp.Response.Commands) != 2 {
+		t.Errorf("Commands count = %d, want %d", len(resp.Response.Commands), 2)
+	}
+	if resp.Response.Commands[0].Name != "cost" {
+		t.Errorf("Commands[0].Name = %q, want %q", resp.Response.Commands[0].Name, "cost")
+	}
+	if len(resp.Response.Agents) != 2 {
+		t.Errorf("Agents count = %d, want %d", len(resp.Response.Agents), 2)
+	}
+
+	// Test error response
+	errorJSON := `{"subtype": "error", "request_id": "req-456", "error": "Something went wrong"}`
+	var errorResp IncomingControlResponse
+	if err := json.Unmarshal([]byte(errorJSON), &errorResp); err != nil {
+		t.Fatalf("failed to parse error response: %v", err)
+	}
+	if errorResp.Subtype != "error" {
+		t.Errorf("Subtype = %q, want %q", errorResp.Subtype, "error")
+	}
+	if errorResp.Error != "Something went wrong" {
+		t.Errorf("Error = %q, want %q", errorResp.Error, "Something went wrong")
+	}
+}
