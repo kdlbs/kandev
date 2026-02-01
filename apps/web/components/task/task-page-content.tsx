@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import '@git-diff-view/react/styles/diff-view.css';
 import { TaskTopBar } from '@/components/task/task-top-bar';
 import { TaskLayout } from '@/components/task/task-layout';
 import { DebugOverlay } from '@/components/debug-overlay';

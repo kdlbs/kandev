@@ -3,27 +3,65 @@
 import { IconBrain, IconCode, IconListCheck } from '@tabler/icons-react';
 import { cn } from '@/lib/utils';
 import type { Message } from '@/lib/types/http';
-import type { DiffPayload, RichMetadata } from '@/components/task/chat/types';
+import type { RichMetadata } from '@/components/task/chat/types';
 import { DiffViewBlock } from '@/components/task/chat/messages/diff-view-block';
+import { normalizeDiffString } from '@/lib/diff';
+import type { FileDiffData } from '@/lib/diff/types';
 
-function resolveDiffPayload(diff: unknown): DiffPayload | null {
+/**
+ * Resolve old diff payload format to new FileDiffData format
+ */
+function resolveDiffPayload(diff: unknown): FileDiffData | null {
   if (!diff) return null;
+
+  // Handle string diff
   if (typeof diff === 'string') {
-    return null;
+    const normalized = normalizeDiffString(diff, 'file');
+    if (!normalized) return null;
+    return {
+      filePath: 'file',
+      oldContent: '',
+      newContent: '',
+      diff: normalized,
+      additions: 0,
+      deletions: 0,
+    };
   }
+
+  // Handle array of hunks (legacy format)
   if (Array.isArray(diff)) {
-    return { hunks: diff.map((hunk) => String(hunk)) };
+    const hunkStrings = diff.map((hunk) => String(hunk)).join('\n');
+    const normalized = normalizeDiffString(hunkStrings, 'file');
+    if (!normalized) return null;
+    return {
+      filePath: 'file',
+      oldContent: '',
+      newContent: '',
+      diff: normalized,
+      additions: 0,
+      deletions: 0,
+    };
   }
+
+  // Handle object with hunks array (legacy format)
   if (typeof diff === 'object' && diff !== null) {
-    const candidate = diff as Partial<DiffPayload>;
+    const candidate = diff as { hunks?: unknown[]; oldFile?: { fileName?: string }; newFile?: { fileName?: string } };
     if (Array.isArray(candidate.hunks)) {
+      const hunkStrings = candidate.hunks.map((hunk) => String(hunk)).join('\n');
+      const filePath = candidate.newFile?.fileName || candidate.oldFile?.fileName || 'file';
+      const normalized = normalizeDiffString(hunkStrings, filePath);
+      if (!normalized) return null;
       return {
-        hunks: candidate.hunks.map((hunk) => String(hunk)),
-        oldFile: candidate.oldFile,
-        newFile: candidate.newFile,
+        filePath,
+        oldContent: '',
+        newContent: '',
+        diff: normalized,
+        additions: 0,
+        deletions: 0,
       };
     }
   }
+
   return null;
 }
 
@@ -35,7 +73,7 @@ export function RichBlocks({ comment }: { comment: Message }) {
   const todoItems = todos
     .map((item) => (typeof item === 'string' ? { text: item, done: false } : item))
     .filter((item) => item.text);
-  const diffPayload = resolveDiffPayload(metadata.diff);
+  const diffData = resolveDiffPayload(metadata.diff);
   const diffText = typeof metadata.diff === 'string' ? metadata.diff : null;
 
   return (
@@ -72,10 +110,10 @@ export function RichBlocks({ comment }: { comment: Message }) {
           </div>
         </div>
       )}
-      {diffPayload && (
-        <DiffViewBlock diff={diffPayload} />
+      {diffData && (
+        <DiffViewBlock data={diffData} />
       )}
-      {!diffPayload && diffText && (
+      {!diffData && diffText && (
         <div className="mt-3 rounded-md border border-border/50 bg-background/60 px-3 py-2 text-xs">
           <div className="flex items-center gap-2 text-muted-foreground mb-1 uppercase tracking-wide">
             <IconCode className="h-3.5 w-3.5" />

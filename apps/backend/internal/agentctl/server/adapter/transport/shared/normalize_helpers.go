@@ -9,7 +9,11 @@ import (
 
 // GenerateUnifiedDiff creates a unified diff string from old and new content.
 func GenerateUnifiedDiff(oldStr, newStr, path string, startLine int) string {
-	if oldStr == "" || newStr == "" {
+	// If both empty or identical, no diff needed
+	if oldStr == "" && newStr == "" {
+		return ""
+	}
+	if oldStr == newStr {
 		return ""
 	}
 

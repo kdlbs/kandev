@@ -1,27 +1,27 @@
 'use client';
 
-import { DiffModeEnum, DiffView } from '@git-diff-view/react';
-import { useTheme } from 'next-themes';
 import { IconCode } from '@tabler/icons-react';
 import { cn } from '@/lib/utils';
-import type { DiffPayload } from '@/components/task/chat/types';
+import { DiffViewInline } from '@/components/diff';
+import type { FileDiffData } from '@/lib/diff/types';
 
 type DiffViewBlockProps = {
-  diff: DiffPayload;
+  /** Diff data in the new format */
+  data: FileDiffData;
+  /** Title to display */
   title?: string;
+  /** Whether to show the title */
   showTitle?: boolean;
+  /** Additional class name */
   className?: string;
 };
 
 export function DiffViewBlock({
-  diff,
+  data,
   title = 'Diff',
   showTitle = true,
   className
 }: DiffViewBlockProps) {
-  const { resolvedTheme } = useTheme();
-  const diffTheme = resolvedTheme === 'dark' ? 'dark' : 'light';
-
   return (
     <div className={cn("mt-3 rounded-md border border-border/50 bg-background/60 px-3 py-2 text-xs", className)}>
       {showTitle && (
@@ -30,15 +30,7 @@ export function DiffViewBlock({
           <span>{title}</span>
         </div>
       )}
-      <DiffView
-        data={{
-          hunks: diff.hunks,
-          oldFile: diff.oldFile ?? { fileName: 'before', fileLang: 'plaintext' },
-          newFile: diff.newFile ?? { fileName: 'after', fileLang: 'plaintext' },
-        }}
-        diffViewMode={DiffModeEnum.Unified}
-        diffViewTheme={diffTheme}
-      />
+      <DiffViewInline data={data} />
     </div>
   );
 }

@@ -26,9 +26,11 @@ import { RichTextInput, type RichTextInputHandle } from './rich-text-input';
 import { MentionMenu } from './mention-menu';
 import { SlashCommandMenu } from './slash-command-menu';
 import { ClarificationInputOverlay } from './clarification-input-overlay';
+import { CommentBlocksContainer } from './comment-block';
 import { useInlineMention } from '@/hooks/use-inline-mention';
 import { useInlineSlash } from '@/hooks/use-inline-slash';
 import type { Message } from '@/lib/types/http';
+import type { DiffComment } from '@/lib/diff/types';
 
 // Memoized toolbar to prevent re-renders on input value changes
 type ChatInputToolbarProps = {
@@ -163,7 +165,7 @@ const ChatInputToolbar = memo(function ChatInputToolbar({
 });
 
 type ChatInputContainerProps = {
-  onSubmit: (message: string) => void;
+  onSubmit: (message: string, reviewComments?: DiffComment[]) => void;
   sessionId: string | null;
   taskId: string | null;
   taskTitle?: string;
@@ -179,6 +181,14 @@ type ChatInputContainerProps = {
   onClarificationResolved?: () => void;
   showRequestChangesTooltip?: boolean;
   onRequestChangesTooltipDismiss?: () => void;
+  /** Pending review comments grouped by file */
+  pendingCommentsByFile?: Record<string, DiffComment[]>;
+  /** Callback to remove comments for a file */
+  onRemoveCommentFile?: (filePath: string) => void;
+  /** Callback to remove a specific comment */
+  onRemoveComment?: (sessionId: string, filePath: string, commentId: string) => void;
+  /** Callback when a comment is clicked (for jump-to-line) */
+  onCommentClick?: (comment: DiffComment) => void;
 };
 
 export function ChatInputContainer({
@@ -197,6 +207,11 @@ export function ChatInputContainer({
   pendingClarification,
   onClarificationResolved,
   showRequestChangesTooltip = false,
+  onRequestChangesTooltipDismiss,
+  pendingCommentsByFile,
+  onRemoveCommentFile,
+  onRemoveComment,
+  onCommentClick,
 }: ChatInputContainerProps) {
   // Keep input state local to avoid re-rendering parent on every keystroke
   const [value, setValue] = useState('');
@@ -238,13 +253,23 @@ export function ChatInputContainer({
     menuStateRef.current = { mentionOpen: mention.isOpen, slashOpen: slash.isOpen };
   }, [mention.isOpen, slash.isOpen]);
 
+  // Ref for pending comments
+  const pendingCommentsRef = useRef(pendingCommentsByFile);
+  useEffect(() => {
+    pendingCommentsRef.current = pendingCommentsByFile;
+  }, [pendingCommentsByFile]);
+
   // Combined change handler
   const handleChange = useCallback(
     (newValue: string) => {
       mention.handleChange(newValue);
       slash.handleChange(newValue);
+      // Dismiss the request changes tooltip when user starts typing
+      if (showRequestChangesTooltip && onRequestChangesTooltipDismiss) {
+        onRequestChangesTooltipDismiss();
+      }
     },
-    [mention, slash]
+    [mention, slash, showRequestChangesTooltip, onRequestChangesTooltipDismiss]
   );
 
   // Combined keydown handler
@@ -267,14 +292,28 @@ export function ChatInputContainer({
   const handleSubmit = useCallback(() => {
     // Don't submit if a menu is open
     if (menuStateRef.current.mentionOpen || menuStateRef.current.slashOpen) return;
+
     const trimmed = valueRef.current.trim();
-    if (!trimmed) return;
-    onSubmit(trimmed);
+    const comments = pendingCommentsRef.current;
+
+    // Collect all pending comments
+    const allComments: DiffComment[] = [];
+    if (comments) {
+      for (const filePath of Object.keys(comments)) {
+        allComments.push(...comments[filePath]);
+      }
+    }
+
+    // Allow submission if there's text OR comments
+    if (!trimmed && allComments.length === 0) return;
+
+    onSubmit(trimmed, allComments.length > 0 ? allComments : undefined);
     setValue('');
   }, [onSubmit]);
 
   const isDisabled = isStarting || isSending;
   const hasPendingClarification = pendingClarification && onClarificationResolved;
+  const hasPendingComments = pendingCommentsByFile && Object.keys(pendingCommentsByFile).length > 0;
 
   return (
     <div
@@ -282,7 +321,8 @@ export function ChatInputContainer({
         'rounded-2xl border border-border bg-background shadow-md overflow-hidden',
         planModeEnabled && 'border-primary border-dashed',
         hasPendingClarification && 'border-blue-500/50',
-        showRequestChangesTooltip && 'animate-pulse border-orange-500'
+        showRequestChangesTooltip && 'animate-pulse border-orange-500',
+        hasPendingComments && 'border-amber-500/50'
       )}
     >
       {/* Popup menus */}
@@ -306,6 +346,19 @@ export function ChatInputContainer({
         onClose={slash.closeMenu}
         setSelectedIndex={slash.setSelectedIndex}
       />
+
+      {/* Pending comment blocks */}
+      {hasPendingComments && sessionId && onRemoveCommentFile && onRemoveComment && (
+        <div className="px-3 pt-3">
+          <CommentBlocksContainer
+            commentsByFile={pendingCommentsByFile}
+            sessionId={sessionId}
+            onRemoveFile={onRemoveCommentFile}
+            onRemoveComment={onRemoveComment}
+            onCommentClick={onCommentClick}
+          />
+        </div>
+      )}
 
       {/* Clarification inline (replaces input area when pending) */}
       {hasPendingClarification ? (

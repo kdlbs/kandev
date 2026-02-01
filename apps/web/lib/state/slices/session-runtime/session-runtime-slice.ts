@@ -3,6 +3,17 @@ import type { SessionRuntimeSlice, SessionRuntimeSliceState } from './types';
 
 const maxProcessOutputBytes = 2 * 1024 * 1024;
 
+/** Helper to compare two string arrays for equality */
+function arraysEqual(a: string[] | undefined, b: string[] | undefined): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
 function trimProcessOutput(value: string) {
   if (value.length <= maxProcessOutputBytes) {
     return value;
@@ -83,6 +94,23 @@ export const createSessionRuntimeSlice: StateCreator<
     }),
   setGitStatus: (sessionId, gitStatus) =>
     set((draft) => {
+      const existing = draft.gitStatus.bySessionId[sessionId];
+      // Skip update if git status content hasn't meaningfully changed
+      // Compare branch, file counts, and modified/added/deleted arrays
+      if (existing) {
+        const sameContent =
+          existing.branch === gitStatus.branch &&
+          existing.ahead === gitStatus.ahead &&
+          existing.behind === gitStatus.behind &&
+          arraysEqual(existing.modified, gitStatus.modified) &&
+          arraysEqual(existing.added, gitStatus.added) &&
+          arraysEqual(existing.deleted, gitStatus.deleted) &&
+          arraysEqual(existing.untracked, gitStatus.untracked) &&
+          arraysEqual(existing.renamed, gitStatus.renamed);
+        if (sameContent) {
+          return; // Skip update - no meaningful changes
+        }
+      }
       draft.gitStatus.bySessionId[sessionId] = gitStatus;
     }),
   clearGitStatus: (sessionId) =>

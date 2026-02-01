@@ -8,14 +8,7 @@ import { FilePathButton } from './file-path-button';
 import type { Message } from '@/lib/types/http';
 import { DiffViewBlock } from './diff-view-block';
 import { ExpandableRow } from './expandable-row';
-
-type FileMutation = {
-  type?: string;
-  content?: string;
-  old_content?: string;
-  new_content?: string;
-  diff?: string;
-};
+import { transformFileMutation, type FileMutation } from '@/lib/diff';
 
 type ModifyFilePayload = {
   file_path?: string;
@@ -33,14 +26,6 @@ type ToolEditMetadata = {
   normalized?: NormalizedPayload;
 };
 
-// Parse unified diff string into hunks array for DiffViewBlock
-function parseDiffToHunks(diffString: string): string[] {
-  if (!diffString) return [];
-  // Split on hunk headers (@@ ... @@) but keep them
-  const hunks = diffString.split(/(?=^@@)/m).filter(h => h.trim());
-  return hunks;
-}
-
 type ToolEditMessageProps = {
   comment: Message;
   worktreePath?: string;
@@ -56,17 +41,15 @@ export const ToolEditMessage = memo(function ToolEditMessage({ comment, worktree
   const normalized = metadata?.normalized;
   const filePath = normalized?.modify_file?.file_path;
   const mutation = normalized?.modify_file?.mutations?.[0];
-  const diffString = mutation?.diff;
   const writeContent = mutation?.content; // For Write tool (create operations)
   const isWriteOperation = mutation?.type === 'create';
 
-  const diff = diffString ? {
-    hunks: parseDiffToHunks(diffString),
-    oldFile: { fileName: filePath },
-    newFile: { fileName: filePath },
-  } : undefined;
+  // Transform mutation to FileDiffData using the new adapter
+  const diffData = filePath && mutation
+    ? transformFileMutation(filePath, mutation)
+    : null;
 
-  const hasExpandableContent = !!(diff || writeContent);
+  const hasExpandableContent = !!(diffData?.diff || writeContent);
   const isSuccess = status === 'complete';
   const Icon = isWriteOperation ? IconFilePlus : IconEdit;
 
@@ -132,8 +115,8 @@ export const ToolEditMessage = memo(function ToolEditMessage({ comment, worktree
       isExpanded={isExpanded}
       onToggle={handleToggle}
     >
-      {diff ? (
-        <DiffViewBlock diff={diff} showTitle={false} className="mt-0 border-0 px-0" />
+      {diffData?.diff ? (
+        <DiffViewBlock data={diffData} showTitle={false} className="mt-0 border-0 px-0" />
       ) : writeContent ? (
         <div className="pl-4 border-l-2 border-border/30">
           <pre className="text-xs bg-muted/30 rounded p-2 overflow-x-auto max-h-[300px] overflow-y-auto whitespace-pre-wrap">
