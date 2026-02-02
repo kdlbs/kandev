@@ -99,8 +99,9 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
   }, [cumulativeDiff]);
 
   const selectedFile = selectedDiffPath && gitStatus?.files ? gitStatus.files[selectedDiffPath] : null;
-  // Use provided content if available, otherwise fall back to git status
-  const selectedDiffContent = selectedDiff?.content ?? selectedFile?.diff ?? '';
+  // Prioritize current git status for uncommitted files, use provided content only for historical diffs
+  // This ensures that when a file is modified by the agent, we show the latest diff
+  const selectedDiffContent = selectedFile?.diff ?? selectedDiff?.content ?? '';
   const isSingleDiffSelected = Boolean(selectedDiffPath && (hasProvidedContent || selectedFile));
   // Discard only works for uncommitted changes (not committed/historical diffs)
   const canDiscard = Boolean(selectedDiffPath && selectedFile && !hasProvidedContent);
@@ -192,7 +193,8 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
       <SessionPanelContent>
         {isSingleDiffSelected && selectedDiffContent ? (
           // Render single file diff (from commit, snapshot, or uncommitted)
-          <div key={`selected-${selectedDiffPath}-${selectedDiffContent.length}`} className="space-y-4">
+          // Use timestamp from git status to ensure re-render when file changes
+          <div key={`selected-${selectedDiffPath}-${gitStatus?.timestamp ?? ''}-${selectedDiffContent.length}`} className="space-y-4">
             <FileDiffViewer
               filePath={selectedDiffPath!}
               diff={normalizeDiffContent(selectedDiffContent)}

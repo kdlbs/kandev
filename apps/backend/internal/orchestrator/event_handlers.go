@@ -1149,7 +1149,7 @@ func (s *Service) isSnapshotDuplicate(existing, new *models.GitSnapshot) bool {
 		return false
 	}
 
-	// Compare file paths, staged status, and line counts
+	// Compare file paths, staged status, line counts, and diff content
 	for path, newFileData := range new.Files {
 		existingFileData, exists := existing.Files[path]
 		if !exists {
@@ -1162,7 +1162,8 @@ func (s *Service) isSnapshotDuplicate(existing, new *models.GitSnapshot) bool {
 
 		if newInfo.staged != existingInfo.staged ||
 			newInfo.additions != existingInfo.additions ||
-			newInfo.deletions != existingInfo.deletions {
+			newInfo.deletions != existingInfo.deletions ||
+			newInfo.diff != existingInfo.diff {
 			return false
 		}
 	}
@@ -1175,6 +1176,7 @@ type fileInfoCompare struct {
 	staged    bool
 	additions int
 	deletions int
+	diff      string
 }
 
 // extractFileInfo extracts comparable fields from a file info interface
@@ -1197,6 +1199,10 @@ func extractFileInfo(fileData interface{}) fileInfoCompare {
 			info.deletions = int(deletions)
 		} else if deletions, ok := fileMap["deletions"].(int); ok {
 			info.deletions = deletions
+		}
+		// Extract diff content for comparison
+		if diff, ok := fileMap["diff"].(string); ok {
+			info.diff = diff
 		}
 	}
 	return info
