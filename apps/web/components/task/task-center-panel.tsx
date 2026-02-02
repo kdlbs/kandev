@@ -24,6 +24,7 @@ import { SessionTabs, type SessionTab } from '@/components/session-tabs';
 import { approveSessionAction } from '@/app/actions/workspaces';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import { requestFileContent } from '@/lib/ws/workspace-files';
+import { getPlanLastSeen, setPlanLastSeen } from '@/lib/local-storage';
 
 import type { SelectedDiff } from './task-layout';
 
@@ -118,26 +119,21 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
   const plan = useAppStore((state) =>
     activeTaskId ? state.taskPlans.byTaskId[activeTaskId] : null
   );
-  // Track the last plan update timestamp the user has seen (when they viewed the Plan tab)
-  // Key is taskId to handle task switching
-  const [lastSeenPlanUpdateByTask, setLastSeenPlanUpdateByTask] = useState<Record<string, string | null>>({});
 
   // Derive notification state: show dot if plan was updated by agent and we haven't seen it
   const hasUnseenPlanUpdate = useMemo(() => {
     if (!activeTaskId || !plan || leftTab === 'plan') return false;
     if (plan.created_by !== 'agent') return false;
-    const lastSeen = lastSeenPlanUpdateByTask[activeTaskId];
+    // Get last seen timestamp from localStorage
+    const lastSeen = getPlanLastSeen(activeTaskId);
     return plan.updated_at !== lastSeen;
-  }, [activeTaskId, plan, leftTab, lastSeenPlanUpdateByTask]);
+  }, [activeTaskId, plan, leftTab]);
 
   // Handle tab change - mark plan as seen when switching to plan tab
   const handleTabChange = useCallback((tab: string) => {
-    // If switching to plan tab, mark current plan as seen
+    // If switching to plan tab, mark current plan as seen in localStorage
     if (tab === 'plan' && activeTaskId && plan?.updated_at) {
-      setLastSeenPlanUpdateByTask(prev => ({
-        ...prev,
-        [activeTaskId]: plan.updated_at
-      }));
+      setPlanLastSeen(activeTaskId, plan.updated_at);
     }
     setLeftTab(tab);
   }, [activeTaskId, plan]);
