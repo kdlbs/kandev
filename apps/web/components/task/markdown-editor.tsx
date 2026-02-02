@@ -121,6 +121,35 @@ const commentHighlightPluginKey = new PluginKey<{
   comments: CommentHighlight[];
 }>('comment-highlight');
 
+// Plugin key for placeholder
+const placeholderPluginKey = new PluginKey<DecorationSet>('placeholder');
+
+// Create placeholder plugin that shows text when editor is empty
+function createPlaceholderPlugin(placeholder: string) {
+  return $prose(() => {
+    return new Plugin({
+      key: placeholderPluginKey,
+      props: {
+        decorations(state) {
+          const doc = state.doc;
+          // Check if document is empty (only has one empty paragraph)
+          if (doc.childCount === 1 && doc.firstChild?.type.name === 'paragraph' && doc.firstChild.content.size === 0) {
+            return DecorationSet.create(doc, [
+              Decoration.widget(1, () => {
+                const span = document.createElement('span');
+                span.className = 'editor-placeholder';
+                span.textContent = placeholder;
+                return span;
+              }, { side: 0 }),
+            ]);
+          }
+          return DecorationSet.empty;
+        },
+      },
+    });
+  });
+}
+
 // Helper to get plain text content and position mapping from a document range
 function getTextWithPositions(doc: Parameters<typeof DecorationSet.create>[0]): { text: string; positions: number[] } {
   let text = '';
@@ -318,6 +347,7 @@ function createCommentHighlightPlugin(initialComments: CommentHighlight[]) {
 function MilkdownEditorInner({
   value,
   onChange,
+  placeholder = 'Start typing...',
   onSelectionChange,
   comments = [],
   onCommentClick,
@@ -326,6 +356,7 @@ function MilkdownEditorInner({
   const wrapperRef = useRef<HTMLDivElement>(null);
   // Capture initial value at mount - editor manages its own state after that
   const initialValueRef = useRef(value);
+  const placeholderRef = useRef(placeholder);
   const onChangeRef = useRef(onChange);
   const onSelectionChangeRef = useRef(onSelectionChange);
   const commentsRef = useRef(comments);
@@ -396,17 +427,36 @@ function MilkdownEditorInner({
           return;
         }
 
-        // Get position from selection range
-        const range = selection.getRangeAt(0);
-        const rect = range.getBoundingClientRect();
+        // Get position from the focus point (end of selection where cursor is)
+        const focusNode = selection.focusNode;
+        const focusOffset = selection.focusOffset;
 
-        onSelectionChangeRef.current({
-          text: selectedText,
-          position: {
-            x: rect.left + rect.width / 2,
-            y: rect.bottom,
-          },
-        });
+        if (focusNode) {
+          // Create a range at the focus point to get its position
+          const focusRange = document.createRange();
+          focusRange.setStart(focusNode, focusOffset);
+          focusRange.setEnd(focusNode, focusOffset);
+          const focusRect = focusRange.getBoundingClientRect();
+
+          // If focusRect has no width (collapsed), use its position
+          // Otherwise fall back to the selection's last rect
+          let x = focusRect.right || focusRect.left;
+          let y = focusRect.bottom || focusRect.top;
+
+          // If position is 0,0 (can happen), fall back to last rect of selection
+          if (x === 0 && y === 0) {
+            const range = selection.getRangeAt(0);
+            const rects = range.getClientRects();
+            const lastRect = rects.length > 0 ? rects[rects.length - 1] : range.getBoundingClientRect();
+            x = lastRect.right;
+            y = lastRect.bottom;
+          }
+
+          onSelectionChangeRef.current({
+            text: selectedText,
+            position: { x, y },
+          });
+        }
       }
     };
 
@@ -418,6 +468,12 @@ function MilkdownEditorInner({
   // Create the highlight plugin once with initial comments
   const highlightPlugin = useCallback(
     () => createCommentHighlightPlugin(commentsRef.current),
+    []
+  );
+
+  // Create the placeholder plugin once
+  const placeholderPlugin = useCallback(
+    () => createPlaceholderPlugin(placeholderRef.current),
     []
   );
 
@@ -436,6 +492,7 @@ function MilkdownEditorInner({
       .use(mermaidCodeBlockView)
       .use(listener)
       .use(highlightPlugin())
+      .use(placeholderPlugin())
   );
 
   // Update decorations when comments change

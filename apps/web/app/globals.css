@@ -282,6 +282,32 @@
   }
 }
 
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes shimmer-vertical {
+  0% {
+    transform: translateY(-100%);
+  }
+  100% {
+    transform: translateY(100%);
+  }
+}
+
+.animate-shimmer {
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+.animate-shimmer-vertical {
+  animation: shimmer-vertical 1.5s ease-in-out infinite;
+}
+
 @layer components {
   .border-flash-animation {
     position: relative;
@@ -456,13 +482,23 @@
 .milkdown-wrapper .milkdown {
   height: 100%;
   background: transparent;
+  display: flex;
+  flex-direction: column;
+}
+
+.milkdown-wrapper .milkdown [data-milkdown-root] {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
 }
 
 .milkdown-wrapper .editor {
   padding: 0.75rem;
+  flex: 1;
   min-height: 100%;
   outline: none;
   background: transparent;
+  cursor: text;
 }
 
 .milkdown-wrapper .editor:focus {
@@ -645,4 +681,13 @@
   font-size: 0.75rem !important;
   padding: 0.5rem !important;
   white-space: pre-wrap !important;
+}
+
+/* Placeholder for empty editor - shows at cursor position like a real editor */
+.milkdown-wrapper .editor-placeholder {
+  color: var(--muted-foreground);
+  opacity: 0.5;
+  pointer-events: none;
+  font-size: 0.75rem;
+  user-select: none;
 }

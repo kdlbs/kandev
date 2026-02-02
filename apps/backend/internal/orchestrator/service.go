@@ -563,6 +563,12 @@ func (s *Service) resumeExecutorsOnStartup(ctx context.Context) {
 					zap.String("session_id", sessionID),
 					zap.Error(err))
 			}
+			// Also update task state to REVIEW since we're waiting for user input
+			if err := s.taskRepo.UpdateTaskState(ctx, running.TaskID, v1.TaskStateReview); err != nil {
+				s.logger.Warn("failed to set task state to REVIEW after resume",
+					zap.String("task_id", running.TaskID),
+					zap.Error(err))
+			}
 		}
 
 		s.logger.Debug("session resumed successfully",

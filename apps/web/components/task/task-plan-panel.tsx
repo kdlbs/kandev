@@ -2,7 +2,8 @@
 
 import { memo, useState, useCallback, useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
-import { IconLoader2, IconEdit } from '@tabler/icons-react';
+import { IconLoader2, IconFileText, IconRobot, IconMessage, IconClick } from '@tabler/icons-react';
+import { cn } from '@/lib/utils';
 import { useTaskPlan } from '@/hooks/domains/session/use-task-plan';
 import { useAppStore } from '@/components/state-provider';
 import { getWebSocketClient } from '@/lib/ws/connection';
@@ -47,14 +48,33 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({ taskId, visible = tru
   const [isSubmittingComments, setIsSubmittingComments] = useState(false);
   // Ref to the editor wrapper for positioning gutter markers
   const editorWrapperRef = useRef<HTMLDivElement>(null);
+  // Track editor focus state to show/hide placeholder
+  const [isEditorFocused, setIsEditorFocused] = useState(false);
 
   // Handler to focus the editor when clicking the empty state
   const handleEmptyStateClick = useCallback(() => {
-    // Find the ProseMirror editor element and focus it
     const editorElement = editorWrapperRef.current?.querySelector('.ProseMirror');
     if (editorElement) {
       (editorElement as HTMLElement).focus();
     }
+  }, []);
+
+  // Track focus state using document-level listener
+  useEffect(() => {
+    const checkFocus = () => {
+      const wrapper = editorWrapperRef.current;
+      if (!wrapper) return;
+      setIsEditorFocused(wrapper.contains(document.activeElement));
+    };
+
+    document.addEventListener('focusin', checkFocus);
+    document.addEventListener('focusout', checkFocus);
+    checkFocus();
+
+    return () => {
+      document.removeEventListener('focusin', checkFocus);
+      document.removeEventListener('focusout', checkFocus);
+    };
   }, []);
 
   // Sync draft with plan content and force editor remount when plan changes externally
@@ -256,7 +276,16 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({ taskId, visible = tru
   return (
     <div className="flex flex-col h-full">
       {/* Content - Markdown Editor with inline comment highlights */}
-      <div className="flex-1 min-h-0 relative" ref={editorWrapperRef}>
+      <div
+        className={cn(
+          "flex-1 min-h-0 relative rounded-lg border transition-colors cursor-text",
+          isEditorFocused
+            ? "border-primary/50"
+            : "border-transparent"
+        )}
+        ref={editorWrapperRef}
+        onClick={handleEmptyStateClick}
+      >
         <MarkdownEditor
           key={`${taskId}-${editorKey}`}
           value={draftContent}
@@ -266,15 +295,47 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({ taskId, visible = tru
           comments={commentHighlights}
           onCommentClick={handleCommentHighlightClick}
         />
-        {/* Empty state overlay - clickable to focus editor */}
-        {!isLoading && draftContent.trim() === '' && (
+        {/* Rich empty state - shows when no content and editor not focused */}
+        {!isLoading && draftContent.trim() === '' && !isEditorFocused && (
           <div
-            className="absolute inset-0 flex items-center justify-center cursor-text bg-background"
+            className="absolute inset-0 flex items-center justify-center pointer-events-none"
             onClick={handleEmptyStateClick}
           >
-            <div className="flex flex-col items-center gap-2 text-muted-foreground pointer-events-none">
-              <IconEdit className="h-8 w-8 opacity-50" />
-              <span className="text-sm">Start writing your plan here</span>
+            <div className="flex flex-col items-center gap-6 max-w-md px-6">
+              {/* Main icon */}
+              <div className="flex items-center justify-center w-12 h-12 rounded-xl bg-muted/50">
+                <IconFileText className="h-6 w-6 text-muted-foreground" />
+              </div>
+
+              {/* Title */}
+              <div className="text-center">
+                <h3 className="text-sm font-medium text-foreground mb-1">Plan your implementation</h3>
+                <p className="text-xs text-muted-foreground">
+                  A shared document for you and the agent to collaborate on the approach
+                </p>
+              </div>
+
+              {/* Feature list */}
+              <div className="flex flex-col gap-3 w-full">
+                <div className="flex items-start gap-3">
+                  <IconRobot className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+                  <p className="text-xs text-muted-foreground">
+                    The agent can write and update the plan as it works
+                  </p>
+                </div>
+                <div className="flex items-start gap-3">
+                  <IconMessage className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+                  <p className="text-xs text-muted-foreground">
+                    Select text and press <kbd className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-mono text-[10px]">&#8984;I</kbd> to request changes
+                  </p>
+                </div>
+              </div>
+
+              {/* Call to action */}
+              <div className="flex items-center gap-2 text-xs text-muted-foreground/70">
+                <IconClick className="h-3.5 w-3.5" />
+                <span>Click anywhere to start writing</span>
+              </div>
             </div>
           </div>
         )}

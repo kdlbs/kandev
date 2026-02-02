@@ -12,6 +12,7 @@ import {
   IconTrash,
   IconSend,
 } from '@tabler/icons-react';
+import { GridSpinner } from '@/components/grid-spinner';
 import { Button } from '@kandev/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
 import { cn, formatRelativeTime } from '@/lib/utils';
@@ -61,10 +62,16 @@ export const TaskPlanToolbar = memo(function TaskPlanToolbar({
     <div className="mt-2">
       <div
         className={cn(
-          'rounded-2xl border border-border bg-background shadow-sm overflow-hidden',
+          'rounded-2xl border border-border bg-background shadow-sm overflow-hidden relative',
           hasUnsavedChanges && 'border-amber-500/50 border-dashed'
         )}
       >
+        {/* Animated progress bar when agent is working */}
+        {isAgentBusy && (
+          <div className="absolute bottom-0 left-0 right-0 h-0.5 overflow-hidden">
+            <div className="h-full w-full bg-gradient-to-r from-transparent via-primary/60 to-transparent animate-shimmer" />
+          </div>
+        )}
         <div className="flex items-center gap-1 px-2 py-2">
           {/* Left: Status info */}
           <div className="flex items-center gap-1 flex-1">
@@ -83,7 +90,12 @@ export const TaskPlanToolbar = memo(function TaskPlanToolbar({
                 <TooltipContent>Created by {plan.created_by}</TooltipContent>
               </Tooltip>
             )}
-            {hasUnsavedChanges ? (
+            {isAgentBusy ? (
+              <span className="flex items-center gap-2 text-xs text-muted-foreground px-2">
+                <span>Agent is working</span>
+                <GridSpinner className="h-3 w-3" />
+              </span>
+            ) : hasUnsavedChanges ? (
               <span className="text-xs text-amber-500 px-2">
                 Unsaved changes <span className="text-amber-500/60">· ⌘S to save</span>
               </span>

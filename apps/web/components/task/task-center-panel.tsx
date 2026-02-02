@@ -15,7 +15,6 @@ import { SessionPanel } from '@kandev/ui/pannel-session';
 import { TaskChatPanel } from './task-chat-panel';
 import { TaskChangesPanel } from './task-changes-panel';
 import { TaskPlanPanel } from './task-plan-panel';
-import { FileViewerContent } from './file-viewer-content';
 import { FileEditorContent } from './file-editor-content';
 import { PassthroughTerminal } from './passthrough-terminal';
 import type { OpenFileTab, FileContentResponse } from '@/lib/types/backend';
@@ -25,7 +24,9 @@ import { SessionTabs, type SessionTab } from '@/components/session-tabs';
 import { approveSessionAction } from '@/app/actions/workspaces';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import { requestFileContent, updateFileContent } from '@/lib/ws/workspace-files';
-import { getPlanLastSeen, setPlanLastSeen } from '@/lib/local-storage';
+import { getPlanLastSeen, setPlanLastSeen, getCenterPanelTab, setCenterPanelTab } from '@/lib/local-storage';
+import { useSessionGitStatus } from '@/hooks/domains/session/use-session-git-status';
+import { useSessionCommits } from '@/hooks/domains/session/use-session-commits';
 import { generateUnifiedDiff, calculateHash } from '@/lib/utils/file-diff';
 import { useToast } from '@/components/toast-provider';
 
@@ -67,8 +68,11 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
   // Check if we should show the approve button
   // Show when session has a review_status that is not approved (meaning it's in a review step)
   // Also hide while agent is working to prevent premature approval
+  // Use truthy check to handle null, undefined, and empty string (backend may send "" when clearing)
   const showApproveButton =
-    activeSession?.review_status != null && activeSession.review_status !== 'approved' && !isAgentWorking;
+    !!activeSession?.review_status &&
+    activeSession.review_status !== 'approved' &&
+    !isAgentWorking;
 
   // Approve handler - moves session to next workflow step
   const handleApprove = useCallback(async () => {
@@ -101,7 +105,28 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
     }
   }, [activeSessionId, activeTaskId, setTaskSession]);
 
-  const [leftTab, setLeftTab] = useState('chat');
+  // Get git status and commits to determine if there are changes
+  const gitStatus = useSessionGitStatus(activeSessionId);
+  const { commits } = useSessionCommits(activeSessionId);
+  const hasChanges = useMemo(() => {
+    const hasUncommittedChanges = gitStatus?.files && Object.keys(gitStatus.files).length > 0;
+    const hasCommits = commits && commits.length > 0;
+    return hasUncommittedChanges || hasCommits;
+  }, [gitStatus, commits]);
+
+  // Initialize tab from localStorage, defaulting to 'chat'
+  // If saved tab is 'changes' but there are no changes, fall back to 'chat'
+  const [leftTab, setLeftTab] = useState(() => {
+    const savedTab = getCenterPanelTab('chat');
+    return savedTab;
+  });
+
+  // If current tab is 'changes' but there are no changes, switch to 'chat'
+  useEffect(() => {
+    if (leftTab === 'changes' && !hasChanges) {
+      setLeftTab('chat');
+    }
+  }, [leftTab, hasChanges]);
 
   // Request changes state - triggers focus and tooltip on chat input
   const [showRequestChangesTooltip, setShowRequestChangesTooltip] = useState(false);
@@ -140,6 +165,10 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
       setPlanLastSeen(activeTaskId, plan.updated_at);
     }
     setLeftTab(tab);
+    // Persist tab selection (only for main tabs, not file tabs)
+    if (tab === 'plan' || tab === 'changes' || tab === 'chat') {
+      setCenterPanelTab(tab);
+    }
   }, [activeTaskId, plan]);
 
   // Handle external diff selection
@@ -287,8 +316,6 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
 
   const tabs: SessionTab[] = useMemo(() => {
     const staticTabs: SessionTab[] = [
-      { id: 'changes', label: 'All changes' },
-      { id: 'chat', label: 'Chat' },
       {
         id: 'plan',
         label: 'Plan',
@@ -299,6 +326,9 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
           </div>
         ) : undefined,
       },
+      // Only show "All changes" tab if there are changes
+      ...(hasChanges ? [{ id: 'changes', label: 'All changes' }] : []),
+      { id: 'chat', label: 'Chat' },
     ];
 
     const fileTabs: SessionTab[] = openFileTabs.map((tab) => {
@@ -318,7 +348,7 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
     });
 
     return [...staticTabs, ...fileTabs];
-  }, [openFileTabs, handleCloseFileTab, hasUnseenPlanUpdate]);
+  }, [openFileTabs, handleCloseFileTab, hasUnseenPlanUpdate, hasChanges]);
 
   return (
     <SessionPanel borderSide="right" margin="right">
@@ -326,7 +356,7 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
         tabs={tabs}
         activeTab={leftTab}
         onTabChange={handleTabChange}
-        separatorAfterIndex={openFileTabs.length > 0 ? 2 : undefined}
+        separatorAfterIndex={openFileTabs.length > 0 ? (hasChanges ? 2 : 1) : undefined}
         className="flex-1 min-h-0 flex flex-col gap-2"
         rightContent={
           showApproveButton ? (
