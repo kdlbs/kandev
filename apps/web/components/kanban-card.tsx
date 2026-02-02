@@ -64,7 +64,7 @@ function KanbanCardBody({
         {actions}
       </div>
       {task.description && (
-        <p className="text-xs text-muted-foreground mt-1 leading-tight line-clamp-3">
+        <p className="text-xs text-muted-foreground mt-1 leading-tight line-clamp-1">
           {task.description}
         </p>
       )}

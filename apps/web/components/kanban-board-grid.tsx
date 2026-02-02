@@ -70,7 +70,7 @@ export function KanbanBoardGrid({
           </div>
         ) : (
           <div
-            className="grid gap-2 rounded-lg overflow-hidden h-full"
+            className="grid gap-2 rounded-lg h-full"
             style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(0, 1fr))` }}
           >
             {columns.map((column) => (

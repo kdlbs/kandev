@@ -20,6 +20,7 @@ import { IconAdjustmentsHorizontal } from '@tabler/icons-react';
 import { useKanbanDisplaySettings } from '@/hooks/use-kanban-display-settings';
 import type { Workspace, Repository } from '@/lib/types/http';
 import type { BoardState } from '@/lib/state/slices';
+import { Badge } from '@kandev/ui/badge';
 
 export function KanbanDisplayDropdown() {
   const {
@@ -126,7 +127,10 @@ export function KanbanDisplayDropdown() {
                   onTogglePreviewOnClick?.(!!checked);
                 }}
               />
-              <span className="text-sm">Open preview on click</span>
+              <span className="text-sm">
+                Open preview on click {" "}
+                <Badge variant="secondary" className="mr-1">beta</Badge>
+              </span>
             </label>
             <p className="text-xs text-muted-foreground pl-6">
               When enabled, clicking a task opens the preview panel. When disabled, clicking navigates directly to the session.
