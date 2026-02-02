@@ -1,8 +1,9 @@
 'use client';
 
 import { useCallback, useMemo, useRef, useState, useEffect } from 'react';
-import { IconEdit, IconTrash } from '@tabler/icons-react';
+import { IconEdit, IconTrash, IconLock } from '@tabler/icons-react';
 import { Button } from '@kandev/ui/button';
+import { Badge } from '@kandev/ui/badge';
 import {
   Dialog,
   DialogContent,
@@ -195,8 +196,14 @@ export function PromptsSettings() {
                 ref={editingId === prompt.id ? editingRef : null}
               >
                 <div className="flex items-center justify-between gap-2">
-                  <div>
+                  <div className="flex items-center gap-2">
                     <div className="text-sm font-medium text-foreground">@{prompt.name}</div>
+                    {prompt.builtin && (
+                      <Badge variant="secondary" className="text-xs">
+                        <IconLock className="h-3 w-3 mr-1" />
+                        Built-in
+                      </Badge>
+                    )}
                   </div>
                   <div className="flex items-center gap-2">
                     <Button
@@ -247,8 +254,8 @@ export function PromptsSettings() {
                     </div>
                   </div>
                 ) : (
-                  <div className="text-xs text-muted-foreground truncate">
-                    {getPromptPreview(prompt.content)}
+                  <div className="text-xs text-muted-foreground whitespace-pre-wrap">
+                    <div className="truncate">{getPromptPreview(prompt.content)}</div>
                   </div>
                 )}
               </div>

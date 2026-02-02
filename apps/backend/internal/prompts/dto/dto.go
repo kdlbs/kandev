@@ -10,6 +10,7 @@ type PromptDTO struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
 	Content   string `json:"content"`
+	Builtin   bool   `json:"builtin"`
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
 }
@@ -33,6 +34,7 @@ func FromPrompt(prompt *models.Prompt) PromptDTO {
 		ID:        prompt.ID,
 		Name:      prompt.Name,
 		Content:   prompt.Content,
+		Builtin:   prompt.Builtin,
 		CreatedAt: prompt.CreatedAt.UTC().Format(time.RFC3339),
 		UpdatedAt: prompt.UpdatedAt.UTC().Format(time.RFC3339),
 	}
