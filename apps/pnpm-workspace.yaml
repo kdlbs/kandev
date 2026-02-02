@@ -1,5 +1,4 @@
 packages:
   - 'cli'
   - 'web'
-  - 'landing'
   - 'packages/*'
