@@ -129,7 +129,6 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
   const hasUnseenPlanUpdate = useMemo(() => {
     if (!activeTaskId || !plan || leftTab === 'plan') return false;
     if (plan.created_by !== 'agent') return false;
-    // Get last seen timestamp from localStorage
     const lastSeen = getPlanLastSeen(activeTaskId);
     return plan.updated_at !== lastSeen;
   }, [activeTaskId, plan, leftTab]);
