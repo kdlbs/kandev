@@ -148,3 +148,35 @@ type FileSearchResponse struct {
 	Error string `json:"error,omitempty"`
 }
 
+// FileUpdateRequest represents a request to update file content using a diff.
+//
+// HTTP endpoint: POST /api/v1/workspace/file/content
+type FileUpdateRequest struct {
+	// Path is the file path (relative to workspace root).
+	Path string `json:"path"`
+
+	// Diff is the unified diff to apply to the file.
+	Diff string `json:"diff"`
+
+	// OriginalHash is the SHA256 hash of the original file content.
+	// Used for conflict detection.
+	OriginalHash string `json:"original_hash"`
+}
+
+// FileUpdateResponse represents a response to a file update request.
+type FileUpdateResponse struct {
+	// RequestID identifies the request.
+	RequestID string `json:"request_id"`
+
+	// Path is the file path.
+	Path string `json:"path"`
+
+	// Success indicates if the update was successful.
+	Success bool `json:"success"`
+
+	// NewHash is the SHA256 hash of the updated file content.
+	NewHash string `json:"new_hash,omitempty"`
+
+	// Error contains error message if the request failed.
+	Error string `json:"error,omitempty"`
+}

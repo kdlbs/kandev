@@ -16,6 +16,7 @@ import { TaskChatPanel } from './task-chat-panel';
 import { TaskChangesPanel } from './task-changes-panel';
 import { TaskPlanPanel } from './task-plan-panel';
 import { FileViewerContent } from './file-viewer-content';
+import { FileEditorContent } from './file-editor-content';
 import { PassthroughTerminal } from './passthrough-terminal';
 import type { OpenFileTab, FileContentResponse } from '@/lib/types/backend';
 import { FILE_EXTENSION_COLORS } from '@/lib/types/backend';
@@ -23,7 +24,9 @@ import { useAppStore } from '@/components/state-provider';
 import { SessionTabs, type SessionTab } from '@/components/session-tabs';
 import { approveSessionAction } from '@/app/actions/workspaces';
 import { getWebSocketClient } from '@/lib/ws/connection';
-import { requestFileContent } from '@/lib/ws/workspace-files';
+import { requestFileContent, updateFileContent } from '@/lib/ws/workspace-files';
+import { generateUnifiedDiff, calculateHash } from '@/lib/utils/file-diff';
+import { useToast } from '@/components/toast-provider';
 
 import type { SelectedDiff } from './task-layout';
 
@@ -113,6 +116,8 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
   }, []);
   const [selectedDiff, setSelectedDiff] = useState<SelectedDiff | null>(null);
   const [openFileTabs, setOpenFileTabs] = useState<OpenFileTab[]>([]);
+  const [savingFiles, setSavingFiles] = useState<Set<string>>(new Set());
+  const { toast } = useToast();
 
   // Track plan updates for notification dot
   const plan = useAppStore((state) =>
@@ -156,18 +161,27 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
   // Handle external file open request
   useEffect(() => {
     if (openFileRequest) {
-      queueMicrotask(() => {
+      queueMicrotask(async () => {
+        // Calculate hash for the file if not already present
+        const hash = openFileRequest.originalHash || await calculateHash(openFileRequest.content);
+        const fileWithHash: OpenFileTab = {
+          ...openFileRequest,
+          originalContent: openFileRequest.originalContent || openFileRequest.content,
+          originalHash: hash,
+          isDirty: openFileRequest.isDirty ?? false,
+        };
+
         setOpenFileTabs((prev) => {
           // If file is already open, just switch to it
-          if (prev.some((t) => t.path === openFileRequest.path)) {
+          if (prev.some((t) => t.path === fileWithHash.path)) {
             return prev;
           }
           // Add new tab (LRU eviction at max 4)
           const maxTabs = 4;
-          const newTabs = prev.length >= maxTabs ? [...prev.slice(1), openFileRequest] : [...prev, openFileRequest];
+          const newTabs = prev.length >= maxTabs ? [...prev.slice(1), fileWithHash] : [...prev, fileWithHash];
           return newTabs;
         });
-        setLeftTab(`file:${openFileRequest.path}`);
+        setLeftTab(`file:${fileWithHash.path}`);
         onFileOpenHandled();
       });
     }
@@ -190,6 +204,7 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
     try {
       const response: FileContentResponse = await requestFileContent(client, currentSessionId, filePath);
       const fileName = filePath.split('/').pop() || filePath;
+      const hash = await calculateHash(response.content);
 
       setOpenFileTabs((prev) => {
         // If file is already open, just switch to it
@@ -202,6 +217,9 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
           path: filePath,
           name: fileName,
           content: response.content,
+          originalContent: response.content,
+          originalHash: hash,
+          isDirty: false,
         };
         const newTabs = prev.length >= maxTabs ? [...prev.slice(1), newTab] : [...prev, newTab];
         return newTabs;
@@ -211,6 +229,66 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
       console.error('Failed to open file from chat:', error);
     }
   }, [activeSessionId]);
+
+  // Handler for file content changes
+  const handleFileChange = useCallback((path: string, newContent: string) => {
+    setOpenFileTabs((prev) =>
+      prev.map((tab) =>
+        tab.path === path
+          ? { ...tab, content: newContent, isDirty: newContent !== tab.originalContent }
+          : tab
+      )
+    );
+  }, []);
+
+  // Handler for saving file
+  const handleFileSave = useCallback(async (path: string) => {
+    const tab = openFileTabs.find((t) => t.path === path);
+    if (!tab || !tab.isDirty) return;
+
+    const client = getWebSocketClient();
+    if (!client || !activeSessionId) return;
+
+    setSavingFiles((prev) => new Set(prev).add(path));
+
+    try {
+      const diff = generateUnifiedDiff(tab.originalContent, tab.content, tab.name);
+      const response = await updateFileContent(client, activeSessionId, path, diff, tab.originalHash);
+
+      if (response.success && response.new_hash) {
+        setOpenFileTabs((prev) =>
+          prev.map((t) =>
+            t.path === path
+              ? { ...t, originalContent: t.content, originalHash: response.new_hash!, isDirty: false }
+              : t
+          )
+        );
+        toast({
+          title: 'File saved',
+          description: `${tab.name} has been saved successfully.`,
+        });
+      } else {
+        toast({
+          title: 'Save failed',
+          description: response.error || 'Failed to save file',
+          variant: 'error',
+        });
+      }
+    } catch (error) {
+      console.error('Failed to save file:', error);
+      toast({
+        title: 'Save failed',
+        description: error instanceof Error ? error.message : 'An error occurred while saving the file',
+        variant: 'error',
+      });
+    } finally {
+      setSavingFiles((prev) => {
+        const next = new Set(prev);
+        next.delete(path);
+        return next;
+      });
+    }
+  }, [openFileTabs, activeSessionId, toast]);
 
   const tabs: SessionTab[] = useMemo(() => {
     const staticTabs: SessionTab[] = [
@@ -230,10 +308,10 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
 
     const fileTabs: SessionTab[] = openFileTabs.map((tab) => {
       const ext = tab.name.split('.').pop()?.toLowerCase() || '';
-      const dotColor = FILE_EXTENSION_COLORS[ext] || 'bg-muted-foreground';
+      const dotColor = tab.isDirty ? 'bg-yellow-500' : (FILE_EXTENSION_COLORS[ext] || 'bg-muted-foreground');
       return {
         id: `file:${tab.path}`,
-        label: tab.name,
+        label: tab.isDirty ? `${tab.name} *` : tab.name,
         icon: <span className={`h-2 w-2 rounded-full ${dotColor}`} />,
         closable: true,
         onClose: (e) => {
@@ -339,7 +417,15 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
 
         {openFileTabs.map((tab) => (
           <TabsContent key={tab.path} value={`file:${tab.path}`} className="mt-3 flex-1 min-h-0">
-            <FileViewerContent path={tab.path} content={tab.content} />
+            <FileEditorContent
+              path={tab.path}
+              content={tab.content}
+              originalContent={tab.originalContent}
+              isDirty={tab.isDirty}
+              isSaving={savingFiles.has(tab.path)}
+              onChange={(newContent) => handleFileChange(tab.path, newContent)}
+              onSave={() => handleFileSave(tab.path)}
+            />
           </TabsContent>
         ))}
       </SessionTabs>
