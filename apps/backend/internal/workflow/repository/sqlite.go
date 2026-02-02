@@ -405,15 +405,14 @@ func (r *Repository) getSimpleTemplate(now time.Time) *models.WorkflowTemplate {
 				AllowManualMove:  true,
 			},
 			{
-				ID:               "review",
+				ID:              "review",
 				Name:             "Review",
 				StepType:         models.StepTypeReview,
 				Position:         2,
 				Color:            "bg-yellow-500",
 				TaskState:        "REVIEW",
-				AutoStartAgent:   false,
-				RequireApproval:  true,
-				OnApprovalStepID: "done",
+				AutoStartAgent:  false,
+				RequireApproval: false,
 				AllowManualMove:  true,
 			},
 			{
