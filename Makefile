@@ -4,7 +4,6 @@
 # Directories
 BACKEND_DIR := apps/backend
 WEB_DIR := apps/web
-LANDING_DIR := apps/landing
 APPS_DIR := apps
 
 # Tools
@@ -46,20 +45,18 @@ help:
 	@echo "  dev              Run backend + web via CLI (auto ports)"
 	@echo "  dev-backend      Run backend in development mode (port 8080)"
 	@echo "  dev-web          Run web app in development mode (port 3000)"
-	@echo "  dev-landing      Run landing page in development mode (port 3001)"
 	@echo "  dev              Note: Uses apps/cli launcher (auto ports)"
 	@echo ""
 	@echo "Production Commands:"
 	@echo "  start            Install deps, build, and start backend + web in production mode"
 	@echo ""
 	@echo "Build Commands:"
-	@echo "  build            Build backend, web app, and landing page"
+	@echo "  build            Build backend and web app"
 	@echo "  build-backend    Build backend binary"
 	@echo "  build-web        Build web app for production"
-	@echo "  build-landing    Build landing page for production"
 	@echo ""
 	@echo "Installation:"
-	@echo "  install          Install all dependencies (backend + web + landing)"
+	@echo "  install          Install all dependencies (backend + web)"
 	@echo "  install-backend  Install backend dependencies"
 	@echo "  install-web      Install web dependencies (uses pnpm workspace)"
 	@echo ""
@@ -103,17 +100,12 @@ dev-web:
 	@echo "Starting web app on http://localhost:3000"
 	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web dev
 
-.PHONY: dev-landing
-dev-landing:
-	@echo "Starting landing page on http://localhost:3001"
-	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/landing dev
-
 #
 # Build
 #
 
 .PHONY: build
-build: build-backend build-web build-landing
+build: build-backend build-web
 	@printf "\n$(GREEN)$(BOLD)✓ Build complete!$(RESET)\n"
 
 #
@@ -153,16 +145,6 @@ build-web-quiet:
 	@printf "  $(DIM)Web app$(RESET)\n"
 	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web build 2>&1 | grep -v "Warning:" | grep -v "parseLineType" | grep -v "^$$" || true
 
-.PHONY: build-landing
-build-landing:
-	@printf "$(CYAN)Building landing page...$(RESET)\n"
-	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/landing build
-
-.PHONY: build-landing-quiet
-build-landing-quiet:
-	@printf "  $(DIM)Landing page$(RESET)\n"
-	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/landing build 2>&1 | grep -v "Warning:" | grep -v "parseLineType" | grep -v "^$$" || true
-
 #
 # Installation
 #
@@ -178,7 +160,7 @@ install-backend:
 
 .PHONY: install-web
 install-web:
-	@printf "$(CYAN)Installing web and landing dependencies...$(RESET)\n"
+	@printf "$(CYAN)Installing web dependencies...$(RESET)\n"
 	@cd $(APPS_DIR) && $(PNPM) install --silent 2>/dev/null || cd $(APPS_DIR) && $(PNPM) install
 
 #
@@ -256,8 +238,8 @@ clean-backend:
 
 .PHONY: clean-web
 clean-web:
-	@printf "$(CYAN)Cleaning web and landing artifacts...$(RESET)\n"
-	@rm -rf $(WEB_DIR)/.next $(LANDING_DIR)/.next $(APPS_DIR)/node_modules
+	@printf "$(CYAN)Cleaning web artifacts...$(RESET)\n"
+	@rm -rf $(WEB_DIR)/.next $(APPS_DIR)/node_modules
 	@rm -rf $(APPS_DIR)/packages/*/node_modules
 
 .PHONY: clean-db
