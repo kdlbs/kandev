@@ -1,16 +1,16 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 
-import {
-  DEFAULT_AGENTCTL_PORT,
-  DEFAULT_BACKEND_PORT,
-  DEFAULT_MCP_PORT,
-  DEFAULT_WEB_PORT,
-  HEALTH_TIMEOUT_MS,
-} from "./constants";
-import { waitForHealth } from "./health";
-import { pickAvailablePort } from "./ports";
+import { HEALTH_TIMEOUT_MS_DEV } from "./constants";
+import { resolveHealthTimeoutMs, waitForHealth } from "./health";
 import { createProcessSupervisor } from "./process";
+import {
+  attachBackendExitHandler,
+  buildBackendEnv,
+  buildWebEnv,
+  logPortConfig,
+  pickPorts,
+} from "./shared";
 import { launchWebApp } from "./web";
 
 export type DevOptions = {
@@ -20,35 +20,12 @@ export type DevOptions = {
 };
 
 export async function runDev({ repoRoot, backendPort, webPort }: DevOptions): Promise<void> {
-  const actualBackendPort = backendPort ?? (await pickAvailablePort(DEFAULT_BACKEND_PORT));
-  const actualWebPort = webPort ?? (await pickAvailablePort(DEFAULT_WEB_PORT));
-  const agentctlPort = await pickAvailablePort(DEFAULT_AGENTCTL_PORT);
-  const mcpPort = await pickAvailablePort(DEFAULT_MCP_PORT);
-  const backendUrl = `http://localhost:${actualBackendPort}`;
-  const mcpUrl = `http://localhost:${mcpPort}/sse`;
+  const ports = await pickPorts(backendPort, webPort);
 
-  const backendEnv = {
-    ...process.env,
-    KANDEV_SERVER_PORT: String(actualBackendPort),
-    KANDEV_AGENT_STANDALONE_PORT: String(agentctlPort),
-    KANDEV_AGENT_MCP_SERVER_PORT: String(mcpPort),
-  };
-  const webEnv = {
-    ...process.env,
-    KANDEV_API_BASE_URL: backendUrl,
-    NEXT_PUBLIC_KANDEV_API_BASE_URL: backendUrl,
-    KANDEV_MCP_SERVER_URL: mcpUrl,
-    NEXT_PUBLIC_KANDEV_MCP_SERVER_URL: mcpUrl,
-    PORT: String(actualWebPort),
-    NEXT_PUBLIC_KANDEV_DEBUG: "true",
-  };
+  const backendEnv = buildBackendEnv({ ports });
+  const webEnv = buildWebEnv({ ports, includeMcp: true, debug: true });
 
-  console.log("[kandev] dev mode: using local repo");
-  console.log("[kandev] backend port:", actualBackendPort);
-  console.log("[kandev] web port:", actualWebPort);
-  console.log("[kandev] agentctl port:", agentctlPort);
-  console.log("[kandev] mcp port:", mcpPort);
-  console.log("[kandev] mcp url:", mcpUrl);
+  logPortConfig("dev", "using local repo", ports, true);
 
   const supervisor = createProcessSupervisor();
   supervisor.attachSignalHandlers();
@@ -60,16 +37,13 @@ export async function runDev({ repoRoot, backendPort, webPort }: DevOptions): Pr
   );
   supervisor.children.push(backendProc);
 
-  backendProc.on("exit", (code, signal) => {
-    console.error(`[kandev] backend exited (code=${code}, signal=${signal})`);
-    const exitCode = signal ? 0 : code ?? 1;
-    void supervisor.shutdown("backend exit").then(() => process.exit(exitCode));
-  });
+  attachBackendExitHandler(backendProc, supervisor);
 
-  await waitForHealth(backendUrl, backendProc, HEALTH_TIMEOUT_MS);
-  console.log(`[kandev] backend ready at ${backendUrl}`);
+  const healthTimeoutMs = resolveHealthTimeoutMs(HEALTH_TIMEOUT_MS_DEV);
+  await waitForHealth(ports.backendUrl, backendProc, healthTimeoutMs);
+  console.log(`[kandev] backend ready at ${ports.backendUrl}`);
 
-  const webUrl = `http://localhost:${actualWebPort}`;
+  const webUrl = `http://localhost:${ports.webPort}`;
   launchWebApp({
     command: "pnpm",
     args: ["-C", "apps", "--filter", "@kandev/web", "dev"],

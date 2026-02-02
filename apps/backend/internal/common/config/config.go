@@ -235,6 +235,7 @@ func LoadWithPath(configPath string) (*Config, error) {
 	_ = v.BindEnv("agent.standaloneHost", "KANDEV_AGENT_STANDALONE_HOST")
 	_ = v.BindEnv("agent.mcpServerPort", "KANDEV_AGENT_MCP_SERVER_PORT")
 	_ = v.BindEnv("agent.mcpServerUrl", "KANDEV_AGENT_MCP_SERVER_URL")
+	_ = v.BindEnv("logging.level", "KANDEV_LOG_LEVEL")
 
 	// Configure config file
 	v.SetConfigName("config")

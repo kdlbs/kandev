@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess, type StdioOptions } from "node:child_process";
 
 import { createProcessSupervisor } from "./process";
 
@@ -10,6 +10,8 @@ export type WebLaunchOptions = {
   url: string;
   supervisor: ReturnType<typeof createProcessSupervisor>;
   label: string;
+  /** Suppress stdout/stderr output */
+  quiet?: boolean;
 };
 
 export function openBrowser(url: string) {
@@ -42,9 +44,16 @@ export function launchWebApp({
   url,
   supervisor,
   label,
-}: WebLaunchOptions) {
-  const proc = spawn(command, args, { cwd, env, stdio: "inherit" });
+  quiet = false,
+}: WebLaunchOptions): ChildProcess {
+  const stdio: StdioOptions = quiet ? ["ignore", "pipe", "pipe"] : "inherit";
+  const proc = spawn(command, args, { cwd, env, stdio });
   supervisor.children.push(proc);
+
+  // In quiet mode, only forward stderr
+  if (quiet && proc.stderr) {
+    proc.stderr.pipe(process.stderr);
+  }
 
   proc.on("exit", (code, signal) => {
     console.error(`[kandev] ${label} exited (code=${code}, signal=${signal})`);

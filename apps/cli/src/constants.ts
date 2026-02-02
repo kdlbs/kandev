@@ -13,7 +13,8 @@ export const RANDOM_PORT_MAX = 60000;
 export const RANDOM_PORT_RETRIES = 10;
 
 // Backend healthcheck timeout during startup.
-export const HEALTH_TIMEOUT_MS = 15000;
+export const HEALTH_TIMEOUT_MS_RELEASE = 15000;
+export const HEALTH_TIMEOUT_MS_DEV = 60000;
 
 // Local user cache/data directories for release bundles and DB.
 export const CACHE_DIR = path.join(os.homedir(), ".kandev", "bin");

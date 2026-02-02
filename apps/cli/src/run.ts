@@ -8,14 +8,15 @@ import {
   DEFAULT_AGENTCTL_PORT,
   DEFAULT_BACKEND_PORT,
   DEFAULT_WEB_PORT,
-  HEALTH_TIMEOUT_MS,
+  HEALTH_TIMEOUT_MS_RELEASE,
 } from "./constants";
 import { ensureAsset, getRelease } from "./github";
 import { CACHE_DIR } from "./constants";
-import { waitForHealth } from "./health";
+import { resolveHealthTimeoutMs, waitForHealth } from "./health";
 import { getBinaryName, getPlatformDir } from "./platform";
 import { pickAvailablePort } from "./ports";
 import { createProcessSupervisor } from "./process";
+import { attachBackendExitHandler } from "./shared";
 import { launchWebApp } from "./web";
 
 export type RunOptions = {
@@ -74,20 +75,24 @@ async function prepareReleaseBundle({
   fs.mkdirSync(DATA_DIR, { recursive: true });
   const dbPath = path.join(DATA_DIR, "kandev.db");
 
+  // Note: Release mode doesn't configure MCP server ports as it uses
+  // the bundled configuration. Only backend and agentctl ports are set.
+  // Log level is set to warn for clean production output.
   const backendEnv = {
     ...process.env,
     KANDEV_SERVER_PORT: String(actualBackendPort),
     KANDEV_AGENT_STANDALONE_PORT: String(agentctlPort),
     KANDEV_DB_PATH: dbPath,
+    KANDEV_LOG_LEVEL: "warn",
   };
 
-  const webEnv = {
+  const webEnv: NodeJS.ProcessEnv = {
     ...process.env,
     KANDEV_API_BASE_URL: backendUrl,
     NEXT_PUBLIC_KANDEV_API_BASE_URL: backendUrl,
     PORT: String(actualWebPort),
-    NODE_ENV: "production",
   };
+  (webEnv as Record<string, string>).NODE_ENV = "production";
 
   return {
     bundleDir,
@@ -119,10 +124,7 @@ function launchReleaseApps(prepared: PreparedRelease): {
   });
   supervisor.children.push(backendProc);
 
-  backendProc.on("exit", (code, signal) => {
-    console.error(`[kandev] backend exited (code=${code}, signal=${signal})`);
-    void supervisor.shutdown("backend exit").then(() => process.exit(code || 1));
-  });
+  attachBackendExitHandler(backendProc, supervisor);
 
   const webServerPath = resolveWebServerPath(prepared.bundleDir);
   if (!webServerPath) {
@@ -130,7 +132,7 @@ function launchReleaseApps(prepared: PreparedRelease): {
   }
 
   const webUrl = `http://localhost:${prepared.webPort}`;
-  const webProc = launchWebApp({
+  launchWebApp({
     command: "node",
     args: [webServerPath],
     cwd: path.dirname(webServerPath),
@@ -143,11 +145,12 @@ function launchReleaseApps(prepared: PreparedRelease): {
   return { supervisor, backendProc, webServerPath };
 }
 
-export async function runRelease({ version, backendPort, webPort }: RunOptions) {
+export async function runRelease({ version, backendPort, webPort }: RunOptions): Promise<void> {
   const prepared = await prepareReleaseBundle({ version, backendPort, webPort });
   const { backendProc } = launchReleaseApps(prepared);
   // Wait for backend before announcing the web URL.
-  await waitForHealth(prepared.backendUrl, backendProc, HEALTH_TIMEOUT_MS);
+  const healthTimeoutMs = resolveHealthTimeoutMs(HEALTH_TIMEOUT_MS_RELEASE);
+  await waitForHealth(prepared.backendUrl, backendProc, healthTimeoutMs);
   console.log(`[kandev] backend ready at ${prepared.backendUrl}`);
   console.log(`[kandev] web ready at http://localhost:${prepared.webPort}`);
 }
