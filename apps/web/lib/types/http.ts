@@ -345,6 +345,7 @@ export type CustomPrompt = {
   id: string;
   name: string;
   content: string;
+  builtin: boolean;
   created_at: string;
   updated_at: string;
 };

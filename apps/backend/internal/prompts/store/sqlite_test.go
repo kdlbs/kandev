@@ -70,11 +70,20 @@ func TestSQLiteRepository_CRUD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list prompts: %v", err)
 	}
-	if len(list) != 1 {
-		t.Fatalf("expected 1 prompt, got %d", len(list))
+	// Should have 1 custom prompt + 3 built-in prompts
+	if len(list) < 1 {
+		t.Fatalf("expected at least 1 prompt, got %d", len(list))
 	}
-	if list[0].Name != "Standup" {
-		t.Fatalf("expected updated name, got %q", list[0].Name)
+	// Find our custom prompt (built-in prompts come first due to ORDER BY)
+	var found bool
+	for _, p := range list {
+		if p.ID == prompt.ID && p.Name == "Standup" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected to find updated prompt with name 'Standup'")
 	}
 
 	if err := repo.DeletePrompt(ctx, prompt.ID); err != nil {
@@ -85,7 +94,41 @@ func TestSQLiteRepository_CRUD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list prompts after delete: %v", err)
 	}
-	if len(list) != 0 {
-		t.Fatalf("expected no prompts after delete, got %d", len(list))
+	// Should only have built-in prompts left (3)
+	builtinCount := 0
+	for _, p := range list {
+		if p.Builtin {
+			builtinCount++
+		}
+		if p.ID == prompt.ID {
+			t.Fatalf("expected custom prompt to be deleted, but it still exists")
+		}
+	}
+	if builtinCount != 3 {
+		t.Fatalf("expected 3 built-in prompts, got %d", builtinCount)
+	}
+}
+
+func TestSQLiteRepository_BuiltinPrompts(t *testing.T) {
+	repo, cleanup := createTestRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// List prompts should include built-in prompts
+	list, err := repo.ListPrompts(ctx)
+	if err != nil {
+		t.Fatalf("list prompts: %v", err)
+	}
+
+	// Should have 3 built-in prompts
+	builtinCount := 0
+	for _, p := range list {
+		if p.Builtin {
+			builtinCount++
+		}
+	}
+
+	if builtinCount != 3 {
+		t.Fatalf("expected 3 built-in prompts, got %d", builtinCount)
 	}
 }
