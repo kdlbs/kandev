@@ -12,6 +12,7 @@ const (
 	CodexItemReasoning        = "reasoning"
 	CodexItemUserMessage      = "userMessage"
 	CodexItemAgentMessage     = "agentMessage"
+	CodexItemMcpToolCall      = "mcpToolCall"
 )
 
 // Normalizer converts Codex protocol tool data to NormalizedPayload.
@@ -31,6 +32,8 @@ func (n *Normalizer) NormalizeToolCall(toolName string, args map[string]any) *st
 		return n.normalizeCommand(args)
 	case CodexItemFileChange:
 		return n.normalizeFileChange(args)
+	case CodexItemMcpToolCall:
+		return n.normalizeMcpToolCall(args)
 	default:
 		return n.normalizeGeneric(toolName, args)
 	}
@@ -107,6 +110,37 @@ func (n *Normalizer) normalizeFileChange(args map[string]any) *streams.Normalize
 
 	// Use factory function
 	return streams.NewModifyFile(filePath, mutations)
+}
+
+// normalizeMcpToolCall converts Codex mcpToolCall item data.
+// MCP tool calls have server, tool, arguments, result, and error fields.
+func (n *Normalizer) normalizeMcpToolCall(args map[string]any) *streams.NormalizedPayload {
+	server := shared.GetString(args, "server")
+	tool := shared.GetString(args, "tool")
+
+	// Create a generic payload with the MCP tool info
+	// The tool name is formatted as "server/tool" for display
+	toolName := tool
+	if server != "" {
+		toolName = server + "/" + tool
+	}
+
+	// Include the arguments in the payload for display
+	displayArgs := map[string]any{
+		"server": server,
+		"tool":   tool,
+	}
+	if arguments, ok := args["arguments"]; ok {
+		displayArgs["arguments"] = arguments
+	}
+	if result, ok := args["result"]; ok {
+		displayArgs["result"] = result
+	}
+	if toolError, ok := args["error"]; ok {
+		displayArgs["error"] = toolError
+	}
+
+	return streams.NewGeneric(toolName, displayArgs)
 }
 
 // normalizeGeneric wraps unknown items as generic.

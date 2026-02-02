@@ -779,25 +779,25 @@ func (a *Adapter) handleNotification(method string, params json.RawMessage) {
 			return
 		}
 		// Map Codex item types to tool call updates
-		// Item types: "userMessage", "agentMessage", "commandExecution", "fileChange", "reasoning"
+		// Item types: "userMessage", "agentMessage", "commandExecution", "fileChange", "reasoning", "mcpToolCall"
 		switch p.Item.Type {
-		case "commandExecution":
+		case CodexItemCommandExecution:
 			args := map[string]any{
 				"command": p.Item.Command,
 				"cwd":     p.Item.Cwd,
 			}
-			normalizedPayload := a.normalizer.NormalizeToolCall("commandExecution", args)
+			normalizedPayload := a.normalizer.NormalizeToolCall(CodexItemCommandExecution, args)
 			a.sendUpdate(AgentEvent{
 				Type:              streams.EventTypeToolCall,
 				SessionID:         threadID,
 				OperationID:       turnID,
 				ToolCallID:        p.Item.ID,
-				ToolName:          "commandExecution",
+				ToolName:          CodexItemCommandExecution,
 				ToolTitle:         p.Item.Command,
 				ToolStatus:        "running",
 				NormalizedPayload: normalizedPayload,
 			})
-		case "fileChange":
+		case CodexItemFileChange:
 			// Build title from file paths
 			var title string
 			if len(p.Item.Changes) > 0 {
@@ -817,13 +817,41 @@ func (a *Adapter) handleNotification(method string, params json.RawMessage) {
 			args := map[string]any{
 				"changes": changesArgs,
 			}
-			normalizedPayload := a.normalizer.NormalizeToolCall("fileChange", args)
+			normalizedPayload := a.normalizer.NormalizeToolCall(CodexItemFileChange, args)
 			a.sendUpdate(AgentEvent{
 				Type:              streams.EventTypeToolCall,
 				SessionID:         threadID,
 				OperationID:       turnID,
 				ToolCallID:        p.Item.ID,
-				ToolName:          "fileChange",
+				ToolName:          CodexItemFileChange,
+				ToolTitle:         title,
+				ToolStatus:        "running",
+				NormalizedPayload: normalizedPayload,
+			})
+		case CodexItemMcpToolCall:
+			// Handle MCP tool calls (e.g., create_task_plan_kandev)
+			// Build title from server/tool
+			title := p.Item.Tool
+			if p.Item.Server != "" {
+				title = p.Item.Server + "/" + p.Item.Tool
+			}
+			// Parse arguments as map for normalization
+			var argsMap map[string]any
+			if len(p.Item.Arguments) > 0 {
+				_ = json.Unmarshal(p.Item.Arguments, &argsMap)
+			}
+			args := map[string]any{
+				"server":    p.Item.Server,
+				"tool":      p.Item.Tool,
+				"arguments": argsMap,
+			}
+			normalizedPayload := a.normalizer.NormalizeToolCall(CodexItemMcpToolCall, args)
+			a.sendUpdate(AgentEvent{
+				Type:              streams.EventTypeToolCall,
+				SessionID:         threadID,
+				OperationID:       turnID,
+				ToolCallID:        p.Item.ID,
+				ToolName:          p.Item.Tool, // Use the actual MCP tool name for frontend display
 				ToolTitle:         title,
 				ToolStatus:        "running",
 				NormalizedPayload: normalizedPayload,
@@ -840,7 +868,7 @@ func (a *Adapter) handleNotification(method string, params json.RawMessage) {
 			return
 		}
 		// Only send updates for tool-like items
-		if p.Item.Type == "commandExecution" || p.Item.Type == "fileChange" {
+		if p.Item.Type == CodexItemCommandExecution || p.Item.Type == CodexItemFileChange || p.Item.Type == CodexItemMcpToolCall {
 			status := "complete"
 			if p.Item.Status == "failed" {
 				status = "error"
@@ -856,13 +884,13 @@ func (a *Adapter) handleNotification(method string, params json.RawMessage) {
 			// Include normalized payload for fallback message creation
 			// This ensures the correct message type is used if the message doesn't exist yet
 			switch p.Item.Type {
-			case "commandExecution":
+			case CodexItemCommandExecution:
 				args := map[string]any{
 					"command": p.Item.Command,
 					"cwd":     p.Item.Cwd,
 				}
-				update.NormalizedPayload = a.normalizer.NormalizeToolCall("commandExecution", args)
-			case "fileChange":
+				update.NormalizedPayload = a.normalizer.NormalizeToolCall(CodexItemCommandExecution, args)
+			case CodexItemFileChange:
 				changesArgs := make([]any, 0, len(p.Item.Changes))
 				for _, c := range p.Item.Changes {
 					changesArgs = append(changesArgs, map[string]any{
@@ -873,11 +901,32 @@ func (a *Adapter) handleNotification(method string, params json.RawMessage) {
 				args := map[string]any{
 					"changes": changesArgs,
 				}
-				update.NormalizedPayload = a.normalizer.NormalizeToolCall("fileChange", args)
+				update.NormalizedPayload = a.normalizer.NormalizeToolCall(CodexItemFileChange, args)
+			case CodexItemMcpToolCall:
+				// Parse arguments and result for normalization
+				var argsMap map[string]any
+				if len(p.Item.Arguments) > 0 {
+					_ = json.Unmarshal(p.Item.Arguments, &argsMap)
+				}
+				var resultMap any
+				if len(p.Item.Result) > 0 {
+					_ = json.Unmarshal(p.Item.Result, &resultMap)
+				}
+				args := map[string]any{
+					"server":    p.Item.Server,
+					"tool":      p.Item.Tool,
+					"arguments": argsMap,
+					"result":    resultMap,
+				}
+				if p.Item.ToolError != "" {
+					args["error"] = p.Item.ToolError
+				}
+				update.NormalizedPayload = a.normalizer.NormalizeToolCall(CodexItemMcpToolCall, args)
+				update.ToolName = p.Item.Tool // Use the actual MCP tool name
 			}
 
 			// Include diff for file changes
-			if p.Item.Type == "fileChange" && len(p.Item.Changes) > 0 {
+			if p.Item.Type == CodexItemFileChange && len(p.Item.Changes) > 0 {
 				var diffs []string
 				for _, c := range p.Item.Changes {
 					if c.Diff != "" {
