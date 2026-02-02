@@ -117,10 +117,17 @@ export function FileBrowser({ sessionId, onOpenFile }: FileBrowserProps) {
 
       const response: FileContentResponse = await requestFileContent(client, sessionId, node.path);
 
+      // Calculate hash for the file content
+      const { calculateHash } = await import('@/lib/utils/file-diff');
+      const hash = await calculateHash(response.content);
+
       onOpenFile({
         path: node.path,
         name: node.name,
         content: response.content,
+        originalContent: response.content,
+        originalHash: hash,
+        isDirty: false,
       });
     } catch (error) {
       console.error('Failed to load file content:', error);

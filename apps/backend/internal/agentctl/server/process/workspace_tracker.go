@@ -2,6 +2,8 @@ package process
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"io/fs"
@@ -34,8 +36,9 @@ type WorkspaceTracker struct {
 	mu            sync.RWMutex
 
 	// Cached git state for detecting manual operations
-	cachedHeadSHA string
-	gitStateMu    sync.RWMutex
+	cachedHeadSHA   string
+	cachedIndexHash string // Hash of git status porcelain output to detect staging changes
+	gitStateMu      sync.RWMutex
 
 	// Unified workspace stream subscribers
 	workspaceStreamSubscribers map[types.WorkspaceStreamSubscriber]struct{}
@@ -182,7 +185,7 @@ func (wt *WorkspaceTracker) monitorLoop(ctx context.Context) {
 	}
 }
 
-// pollGitChanges periodically checks for git changes (commits, branch switches)
+// pollGitChanges periodically checks for git changes (commits, branch switches, staging)
 // This catches manual git operations done via shell that file watching might miss
 func (wt *WorkspaceTracker) pollGitChanges(ctx context.Context) {
 	defer wt.wg.Done()
@@ -190,9 +193,10 @@ func (wt *WorkspaceTracker) pollGitChanges(ctx context.Context) {
 	ticker := time.NewTicker(wt.gitPollInterval)
 	defer ticker.Stop()
 
-	// Initialize cached HEAD SHA
+	// Initialize cached HEAD SHA and index hash
 	wt.gitStateMu.Lock()
 	wt.cachedHeadSHA = wt.getHeadSHA(ctx)
+	wt.cachedIndexHash = wt.getGitStatusHash(ctx)
 	wt.gitStateMu.Unlock()
 
 	wt.logger.Info("git polling started",
@@ -222,28 +226,62 @@ func (wt *WorkspaceTracker) getHeadSHA(ctx context.Context) string {
 	return strings.TrimSpace(string(out))
 }
 
-// checkGitChanges checks if HEAD has changed and processes new commits
+// getGitStatusHash returns a hash of the git status porcelain output.
+// This is used to detect changes to the git index (staging/unstaging) that don't
+// change HEAD. The hash includes both the status codes and file paths.
+func (wt *WorkspaceTracker) getGitStatusHash(ctx context.Context) string {
+	cmd := exec.CommandContext(ctx, "git", "status", "--porcelain", "--untracked-files=all")
+	cmd.Dir = wt.workDir
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	hash := sha256.Sum256(out)
+	return hex.EncodeToString(hash[:])
+}
+
+// checkGitChanges checks if HEAD or git index has changed and processes changes
 func (wt *WorkspaceTracker) checkGitChanges(ctx context.Context) {
 	currentHead := wt.getHeadSHA(ctx)
-	if currentHead == "" {
-		return
-	}
+	currentIndexHash := wt.getGitStatusHash(ctx)
 
 	wt.gitStateMu.RLock()
 	previousHead := wt.cachedHeadSHA
+	previousIndexHash := wt.cachedIndexHash
 	wt.gitStateMu.RUnlock()
 
-	if currentHead == previousHead {
-		return // No change
+	headChanged := currentHead != "" && currentHead != previousHead
+	indexChanged := currentIndexHash != "" && currentIndexHash != previousIndexHash
+
+	// If neither HEAD nor index changed, nothing to do
+	if !headChanged && !indexChanged {
+		return
+	}
+
+	// Update cached index hash (HEAD will be updated below if it changed)
+	if indexChanged && !headChanged {
+		wt.gitStateMu.Lock()
+		wt.cachedIndexHash = currentIndexHash
+		wt.gitStateMu.Unlock()
+
+		wt.logger.Debug("git index changed (staging/unstaging detected)")
+		wt.updateGitStatus(ctx)
+		return
+	}
+
+	// HEAD changed - handle normally
+	if !headChanged {
+		return
 	}
 
 	wt.logger.Info("git HEAD changed, syncing",
 		zap.String("previous", previousHead),
 		zap.String("current", currentHead))
 
-	// Update cached HEAD
+	// Update cached HEAD and index hash
 	wt.gitStateMu.Lock()
 	wt.cachedHeadSHA = currentHead
+	wt.cachedIndexHash = currentIndexHash
 	wt.gitStateMu.Unlock()
 
 	// Check if history was rewritten (reset, rebase, amend, etc.)
@@ -1194,6 +1232,88 @@ func (wt *WorkspaceTracker) GetFileContent(reqPath string) (string, int64, error
 	}
 
 	return string(content), info.Size(), nil
+}
+
+// ApplyFileDiff applies a unified diff to a file with conflict detection
+// Uses git apply for reliable, battle-tested patch application
+func (wt *WorkspaceTracker) ApplyFileDiff(reqPath string, unifiedDiff string, originalHash string) (string, error) {
+	cleanWorkDir := filepath.Clean(wt.workDir)
+	cleanReqPath := filepath.Clean(reqPath)
+
+	// Resolve the full path - if already absolute and within workDir, use directly
+	var fullPath string
+	if filepath.IsAbs(cleanReqPath) && strings.HasPrefix(cleanReqPath, cleanWorkDir+string(os.PathSeparator)) {
+		fullPath = cleanReqPath
+	} else {
+		fullPath = filepath.Join(wt.workDir, cleanReqPath)
+	}
+
+	// Path traversal protection
+	if !strings.HasPrefix(fullPath, cleanWorkDir+string(os.PathSeparator)) && fullPath != cleanWorkDir {
+		return "", fmt.Errorf("path traversal detected")
+	}
+
+	// Read current file content
+	currentContent, _, err := wt.GetFileContent(reqPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read current file: %w", err)
+	}
+
+	// Calculate hash of current content for conflict detection
+	currentHash := calculateSHA256(currentContent)
+	if originalHash != "" && currentHash != originalHash {
+		return "", fmt.Errorf("conflict detected: file has been modified (expected hash %s, got %s)", originalHash, currentHash)
+	}
+
+	// Write diff to a temporary patch file
+	patchFile := filepath.Join(wt.workDir, ".kandev-patch.tmp")
+	err = os.WriteFile(patchFile, []byte(unifiedDiff), 0644)
+	if err != nil {
+		return "", fmt.Errorf("failed to write patch file: %w", err)
+	}
+	defer func() {
+		_ = os.Remove(patchFile) // Best effort cleanup
+	}()
+
+	// Use git apply to apply the patch directly to the file
+	// This is much more reliable than custom diff application
+	cmd := exec.Command("git", "apply", "--unidiff-zero", "--whitespace=nowarn", patchFile)
+	cmd.Dir = wt.workDir
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("git apply failed: %w\nOutput: %s", err, string(output))
+	}
+
+	// Read the updated content
+	updatedContent, err := os.ReadFile(fullPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read updated file: %w", err)
+	}
+
+	// Calculate new hash
+	newHash := calculateSHA256(string(updatedContent))
+
+	// Trigger filesystem change notification
+	select {
+	case wt.fsChangeTrigger <- struct{}{}:
+	default:
+		// Channel already has a pending trigger, skip
+	}
+
+	wt.logger.Debug("applied file diff using git apply",
+		zap.String("path", reqPath),
+		zap.String("old_hash", currentHash),
+		zap.String("new_hash", newHash),
+	)
+
+	return newHash, nil
+}
+
+// calculateSHA256 calculates the SHA256 hash of a string
+func calculateSHA256(content string) string {
+	hash := sha256.Sum256([]byte(content))
+	return hex.EncodeToString(hash[:])
 }
 
 // scoredMatch holds a file path and its match score for sorting

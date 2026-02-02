@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"go.uber.org/zap"
 )
 
@@ -149,6 +150,42 @@ func (s *Server) handleFileContent(c *gin.Context) {
 	}
 
 	c.JSON(200, types.FileContentResponse{Path: path, Content: content, Size: size})
+}
+
+// handleFileUpdate handles file update requests via HTTP POST
+func (s *Server) handleFileUpdate(c *gin.Context) {
+	var req streams.FileUpdateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, streams.FileUpdateResponse{Error: "invalid request: " + err.Error()})
+		return
+	}
+
+	if req.Path == "" {
+		c.JSON(400, streams.FileUpdateResponse{Error: "path is required"})
+		return
+	}
+
+	if req.Diff == "" {
+		c.JSON(400, streams.FileUpdateResponse{Error: "diff is required"})
+		return
+	}
+
+	// Apply the diff
+	newHash, err := s.procMgr.GetWorkspaceTracker().ApplyFileDiff(req.Path, req.Diff, req.OriginalHash)
+	if err != nil {
+		c.JSON(400, streams.FileUpdateResponse{
+			Path:    req.Path,
+			Success: false,
+			Error:   err.Error(),
+		})
+		return
+	}
+
+	c.JSON(200, streams.FileUpdateResponse{
+		Path:    req.Path,
+		Success: true,
+		NewHash: newHash,
+	})
 }
 
 // handleFileSearch handles file search requests via HTTP GET
