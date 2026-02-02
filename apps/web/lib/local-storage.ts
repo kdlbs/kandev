@@ -117,3 +117,35 @@ export function getPlanLastSeen(taskId: string): string | null {
   const state = getPlanNotificationState();
   return state[taskId] ?? null;
 }
+
+// Internal storage key for center panel tab (uses sessionStorage)
+const CENTER_PANEL_TAB_KEY = 'kandev.centerPanel.tab';
+
+/**
+ * Get the saved center panel tab from sessionStorage
+ * @param fallback - Default tab if not found
+ * @returns The saved tab id
+ */
+export function getCenterPanelTab(fallback: string): string {
+  if (typeof window === 'undefined') return fallback;
+  try {
+    const raw = window.sessionStorage.getItem(CENTER_PANEL_TAB_KEY);
+    if (!raw) return fallback;
+    return JSON.parse(raw) as string;
+  } catch {
+    return fallback;
+  }
+}
+
+/**
+ * Save the center panel tab to sessionStorage
+ * @param tab - The tab id to save
+ */
+export function setCenterPanelTab(tab: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.sessionStorage.setItem(CENTER_PANEL_TAB_KEY, JSON.stringify(tab));
+  } catch {
+    // Ignore write failures
+  }
+}

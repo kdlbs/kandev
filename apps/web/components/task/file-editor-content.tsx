@@ -8,7 +8,7 @@ import type { Extension } from '@codemirror/state';
 import { getCodeMirrorExtensionFromPath } from '@/lib/languages';
 import { Button } from '@kandev/ui/button';
 import { IconDeviceFloppy, IconLoader2 } from '@tabler/icons-react';
-import { formatDiffStats, calculateDiffStats } from '@/lib/utils/file-diff';
+import { formatDiffStats } from '@/lib/utils/file-diff';
 
 type FileEditorContentProps = {
   path: string;

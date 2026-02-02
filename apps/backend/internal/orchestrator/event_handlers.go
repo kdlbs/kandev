@@ -198,12 +198,8 @@ func (s *Service) handleWorkflowTransition(ctx context.Context, taskID, sessionI
 				zap.String("current_step", currentStep.Name))
 		}
 
-		// Update session state to WAITING_FOR_INPUT
-		if err := s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateWaitingForInput, ""); err != nil {
-			s.logger.Error("failed to update session state to WAITING_FOR_INPUT",
-				zap.String("session_id", sessionID),
-				zap.Error(err))
-		}
+		// Update session state to WAITING_FOR_INPUT and task state to REVIEW
+		s.setSessionWaitingForInput(ctx, taskID, sessionID)
 
 		// Publish session updated event with review status
 		if s.eventBus != nil {
@@ -318,13 +314,9 @@ func (s *Service) handleWorkflowTransition(ctx context.Context, taskID, sessionI
 		}
 	}
 
-	// Update session state to WAITING_FOR_INPUT since the agent completed this step
+	// Update session state to WAITING_FOR_INPUT and task state to REVIEW since the agent completed this step
 	// This must happen before publishing the event so the frontend gets the correct state
-	if err := s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateWaitingForInput, ""); err != nil {
-		s.logger.Error("failed to update session state to WAITING_FOR_INPUT during workflow transition",
-			zap.String("session_id", sessionID),
-			zap.Error(err))
-	}
+	s.setSessionWaitingForInput(ctx, taskID, sessionID)
 
 	// Publish session updated event with workflow step and review status changes
 	// This allows the frontend to update the session state without a full refresh

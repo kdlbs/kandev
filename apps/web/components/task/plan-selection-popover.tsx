@@ -86,13 +86,24 @@ export function PlanSelectionPopover({
     ? selectedText.slice(0, 80).trim() + '…'
     : selectedText;
 
-  // Calculate position - flip above if would overflow bottom
+  // Calculate position - anchor at bottom-right of selection, adjust if would overflow
+  const popoverWidth = 384; // w-96 = 24rem = 384px
   const popoverHeight = 200; // approximate height of popover
-  const gap = 10;
-  const wouldOverflowBottom = position.y + gap + popoverHeight > window.innerHeight;
-  const top = wouldOverflowBottom
-    ? position.y - popoverHeight - gap // Position above selection
-    : position.y + gap; // Position below selection
+  const gap = 8;
+
+  // Start at bottom-right of selection
+  let left = position.x + gap;
+  let top = position.y + gap;
+
+  // If would overflow right, shift left
+  if (left + popoverWidth > window.innerWidth - 16) {
+    left = Math.max(16, window.innerWidth - popoverWidth - 16);
+  }
+
+  // If would overflow bottom, position above the selection instead
+  if (top + popoverHeight > window.innerHeight - 16) {
+    top = Math.max(16, position.y - popoverHeight - gap);
+  }
 
   return (
     <div
@@ -102,8 +113,8 @@ export function PlanSelectionPopover({
         'animate-in fade-in-0 zoom-in-95 duration-150'
       )}
       style={{
-        left: Math.min(position.x - 192, window.innerWidth - 400),
-        top: Math.max(10, top), // Ensure at least 10px from top
+        left,
+        top,
       }}
     >
       {/* Text preview */}
