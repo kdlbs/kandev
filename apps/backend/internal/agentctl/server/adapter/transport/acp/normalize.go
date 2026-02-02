@@ -224,13 +224,12 @@ func (n *Normalizer) normalizeEdit(args map[string]any) *streams.NormalizedPaylo
 		})
 	} else {
 		// str_replace operation
+		// Only include the diff (not old/new content) to reduce payload size
 		oldStr, _ := rawInput["old_str_1"].(string)
 		newStr, _ := rawInput["new_str_1"].(string)
 
 		mutation := streams.FileMutation{
-			Type:       streams.MutationPatch,
-			OldContent: oldStr,
-			NewContent: newStr,
+			Type: streams.MutationPatch,
 		}
 
 		// Add line numbers if available
@@ -241,8 +240,8 @@ func (n *Normalizer) normalizeEdit(args map[string]any) *streams.NormalizedPaylo
 			mutation.EndLine = int(endLine)
 		}
 
-		// Generate unified diff
-		if oldStr != "" && newStr != "" {
+		// Generate unified diff when at least one string is provided
+		if oldStr != "" || newStr != "" {
 			mutation.Diff = shared.GenerateUnifiedDiff(oldStr, newStr, path, mutation.StartLine)
 		}
 

@@ -11,6 +11,12 @@ import { useMessageHandler } from '@/hooks/use-message-handler';
 import { TodoSummary } from '@/components/task/chat/todo-summary';
 import { VirtualizedMessageList } from '@/components/task/chat/virtualized-message-list';
 import { ChatInputContainer } from '@/components/task/chat/chat-input-container';
+import { formatReviewCommentsAsMarkdown } from '@/components/task/chat/messages/review-comments-attachment';
+import {
+  useDiffCommentsStore,
+  usePendingCommentsByFile,
+} from '@/lib/state/slices/diff-comments';
+import type { DiffComment } from '@/lib/diff/types';
 
 type TaskChatPanelProps = {
   onSend?: (message: string) => void;
@@ -18,6 +24,8 @@ type TaskChatPanelProps = {
   onOpenFile?: (path: string) => void;
   showRequestChangesTooltip?: boolean;
   onRequestChangesTooltipDismiss?: () => void;
+  /** Callback to select a file in the changes panel (for jump-to-line) */
+  onSelectDiff?: (path: string) => void;
 };
 
 export const TaskChatPanel = memo(function TaskChatPanel({
@@ -26,6 +34,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   onOpenFile,
   showRequestChangesTooltip = false,
   onRequestChangesTooltipDismiss,
+  onSelectDiff,
 }: TaskChatPanelProps) {
   const [planModeEnabled, setPlanModeEnabled] = useState(false);
   const [isSending, setIsSending] = useState(false);
@@ -79,6 +88,31 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     planModeEnabled
   );
 
+  // Diff comments management
+  const pendingCommentsByFile = usePendingCommentsByFile();
+  const markCommentsSent = useDiffCommentsStore((state) => state.markCommentsSent);
+  const removeComment = useDiffCommentsStore((state) => state.removeComment);
+
+  // Handle removing all comments for a file
+  const handleRemoveCommentFile = useCallback(
+    (filePath: string) => {
+      if (!resolvedSessionId) return;
+      const comments = pendingCommentsByFile[filePath] || [];
+      for (const comment of comments) {
+        removeComment(resolvedSessionId, filePath, comment.id);
+      }
+    },
+    [resolvedSessionId, pendingCommentsByFile, removeComment]
+  );
+
+  // Handle removing a single comment
+  const handleRemoveComment = useCallback(
+    (sessionId: string, filePath: string, commentId: string) => {
+      removeComment(sessionId, filePath, commentId);
+    },
+    [removeComment]
+  );
+
   // Clear awaiting state when a new agent message arrives
   useEffect(() => {
     lastAgentMessageCountRef.current = agentMessageCount;
@@ -98,15 +132,28 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     }
   }, [resolvedSessionId]);
 
-  const handleSubmit = useCallback(async (message: string) => {
+  const handleSubmit = useCallback(async (message: string, reviewComments?: DiffComment[]) => {
     if (isSending) return;
     setIsSending(true);
     try {
-      if (onSend) {
-        await onSend(message);
-      } else {
-        await handleSendMessage(message);
+      // Build final message with review comments
+      let finalMessage = message;
+      if (reviewComments && reviewComments.length > 0) {
+        const reviewMarkdown = formatReviewCommentsAsMarkdown(reviewComments);
+        finalMessage = reviewMarkdown + (message ? message : '');
       }
+
+      if (onSend) {
+        await onSend(finalMessage);
+      } else {
+        await handleSendMessage(finalMessage);
+      }
+
+      // Mark comments as sent and clear pending
+      if (reviewComments && reviewComments.length > 0) {
+        markCommentsSent(reviewComments.map((c) => c.id));
+      }
+
       // Reset plan mode after sending - it's a per-message instruction
       if (planModeEnabled) {
         setPlanModeEnabled(false);
@@ -114,7 +161,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     } finally {
       setIsSending(false);
     }
-  }, [isSending, planModeEnabled, onSend, handleSendMessage]);
+  }, [isSending, planModeEnabled, onSend, handleSendMessage, markCommentsSent]);
 
 
   return (
@@ -157,6 +204,10 @@ export const TaskChatPanel = memo(function TaskChatPanel({
           onClarificationResolved={handleClarificationResolved}
           showRequestChangesTooltip={showRequestChangesTooltip}
           onRequestChangesTooltipDismiss={onRequestChangesTooltipDismiss}
+          pendingCommentsByFile={pendingCommentsByFile}
+          onRemoveCommentFile={handleRemoveCommentFile}
+          onRemoveComment={handleRemoveComment}
+          onCommentClick={onSelectDiff ? (comment) => onSelectDiff(comment.filePath) : undefined}
         />
       </div>
     </>

@@ -308,6 +308,7 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
           <TaskChangesPanel
             selectedDiff={selectedDiff}
             onClearSelected={() => setSelectedDiff(null)}
+            onOpenFile={handleOpenFileFromChat}
           />
         </TabsContent>
 
@@ -323,6 +324,10 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
                 onOpenFile={handleOpenFileFromChat}
                 showRequestChangesTooltip={showRequestChangesTooltip}
                 onRequestChangesTooltipDismiss={() => setShowRequestChangesTooltip(false)}
+                onSelectDiff={(path) => {
+                  setSelectedDiff({ path });
+                  setLeftTab('changes');
+                }}
               />
             )
           ) : (

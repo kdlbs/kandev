@@ -106,14 +106,13 @@ func (n *Normalizer) normalizeEdit(toolName string, args map[string]any) *stream
 		})
 	} else {
 		// Edit is a patch operation
+		// Only include the diff (not old/new content) to reduce payload size
 		mutation := streams.FileMutation{
-			Type:       streams.MutationPatch,
-			OldContent: oldString,
-			NewContent: newString,
+			Type: streams.MutationPatch,
 		}
 
-		// Generate unified diff
-		if oldString != "" && newString != "" {
+		// Generate unified diff when at least one string is provided
+		if oldString != "" || newString != "" {
 			mutation.Diff = shared.GenerateUnifiedDiff(oldString, newString, filePath, 0)
 		}
 

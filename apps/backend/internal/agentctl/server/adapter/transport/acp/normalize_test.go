@@ -204,17 +204,37 @@ func TestDetectLanguage(t *testing.T) {
 
 // TestGenerateUnifiedDiff tests the unified diff generation.
 func TestGenerateUnifiedDiff(t *testing.T) {
-	t.Run("returns empty when old is empty", func(t *testing.T) {
-		result := shared.GenerateUnifiedDiff("", "new content", "file.ts", 1)
+	t.Run("returns empty when both are empty", func(t *testing.T) {
+		result := shared.GenerateUnifiedDiff("", "", "file.ts", 1)
 		if result != "" {
-			t.Errorf("expected empty string for empty old string, got %q", result)
+			t.Errorf("expected empty string when both old and new are empty, got %q", result)
 		}
 	})
 
-	t.Run("returns empty when new is empty", func(t *testing.T) {
-		result := shared.GenerateUnifiedDiff("old content", "", "file.ts", 1)
+	t.Run("returns empty when old equals new", func(t *testing.T) {
+		result := shared.GenerateUnifiedDiff("same content", "same content", "file.ts", 1)
 		if result != "" {
-			t.Errorf("expected empty string for empty new string, got %q", result)
+			t.Errorf("expected empty string when old equals new, got %q", result)
+		}
+	})
+
+	t.Run("generates all-additions diff when old is empty", func(t *testing.T) {
+		result := shared.GenerateUnifiedDiff("", "new content", "file.ts", 1)
+		if result == "" {
+			t.Fatal("expected non-empty diff for create operation")
+		}
+		if !strings.Contains(result, "+new content") {
+			t.Error("expected added line in diff")
+		}
+	})
+
+	t.Run("generates all-deletions diff when new is empty", func(t *testing.T) {
+		result := shared.GenerateUnifiedDiff("old content", "", "file.ts", 1)
+		if result == "" {
+			t.Fatal("expected non-empty diff for delete operation")
+		}
+		if !strings.Contains(result, "-old content") {
+			t.Error("expected removed line in diff")
 		}
 	})
 
@@ -284,11 +304,9 @@ func TestNormalizerEdit(t *testing.T) {
 			t.Fatalf("expected 1 mutation, got %d", len(result.ModifyFile().Mutations))
 		}
 		mutation := result.ModifyFile().Mutations[0]
-		if mutation.OldContent != "old code" {
-			t.Errorf("expected OldContent 'old code', got %q", mutation.OldContent)
-		}
-		if mutation.NewContent != "new code" {
-			t.Errorf("expected NewContent 'new code', got %q", mutation.NewContent)
+		// OldContent and NewContent are no longer set (only Diff is generated)
+		if mutation.Diff == "" {
+			t.Error("expected Diff to be generated")
 		}
 		if mutation.StartLine != 10 {
 			t.Errorf("expected StartLine 10, got %d", mutation.StartLine)
