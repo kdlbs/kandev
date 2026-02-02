@@ -49,15 +49,15 @@ export function KanbanColumn({ column, tasks, onPreviewTask, onOpenTask, onEditT
     <div
       ref={setNodeRef}
       className={cn(
-        'flex flex-col h-full min-w-0  p-4 min-h-[600px] rounded-sm border border-border',
+        'flex flex-col h-full min-w-0  p-3 min-h-[300px] rounded-sm border border-border',
         isOver && 'ring-2 ring-primary'
       )}
     >
       {/* Column Header */}
       <div className="flex items-center justify-between border-b border-border/70 pb-3 mb-4 px-1">
         <div className="flex items-center gap-2">
-          <div className={cn('w-3 h-3 rounded-full', column.color)} />
-          <h2 className="font-semibold text-base">{column.title}</h2>
+          <div className={cn('w-2 h-2 rounded-full', column.color)} />
+          <h2 className="font-semibold text-sm">{column.title}</h2>
           <Badge variant="secondary" className="text-xs">
             {tasks.length}
           </Badge>
@@ -65,24 +65,21 @@ export function KanbanColumn({ column, tasks, onPreviewTask, onOpenTask, onEditT
       </div>
 
       {/* Tasks */}
-      <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden space-y-2 px-1 pt-4">
-        {tasks.length === 0 ? (
-          <p className="text-sm text-muted-foreground text-center mt-8">No tasks yet</p>
-        ) : (
-          tasks.map((task) => (
-            <KanbanCard
-              key={task.id}
-              task={task}
-              repositoryName={getRepositoryName(task.repositoryId)}
-              onClick={onPreviewTask}
-              onOpenFullPage={onOpenTask}
-              onEdit={onEditTask}
-              onDelete={onDeleteTask}
-              showMaximizeButton={showMaximizeButton}
-              isDeleting={deletingTaskId === task.id}
-            />
-          ))
-        )}
+      <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden space-y-2 px-1">
+        {tasks.map((task) => (
+          <KanbanCard
+            key={task.id}
+            task={task}
+            repositoryName={getRepositoryName(task.repositoryId)}
+            onClick={onPreviewTask}
+            onOpenFullPage={onOpenTask}
+            onEdit={onEditTask}
+            onDelete={onDeleteTask}
+            showMaximizeButton={showMaximizeButton}
+            isDeleting={deletingTaskId === task.id}
+          />
+        ))
+        }
       </div>
     </div>
   );

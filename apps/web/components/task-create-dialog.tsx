@@ -398,7 +398,17 @@ export function TaskCreateDialog({
 
   useEffect(() => {
     if (!open || !workspaceId) return;
-    if (!repositoryId && !selectedLocalRepo && repositories.length === 1) {
+    if (repositoryId || selectedLocalRepo) return;
+
+    // Priority 1: Last used repository
+    const lastUsedRepoId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_REPOSITORY_ID, null);
+    if (lastUsedRepoId && repositories.some((repo: Repository) => repo.id === lastUsedRepoId)) {
+      setRepositoryId(lastUsedRepoId);
+      return;
+    }
+
+    // Priority 2: Auto-select if only one repository
+    if (repositories.length === 1) {
       setRepositoryId(repositories[0].id);
     }
   }, [open, repositories, repositoryId, selectedLocalRepo, workspaceId]);
@@ -436,11 +446,22 @@ export function TaskCreateDialog({
 
   useEffect(() => {
     if (!repositoryId) return;
-    if (!branch) {
-      const preferredBranch = selectPreferredBranch(branches);
-      if (preferredBranch) {
-        setBranch(preferredBranch);
-      }
+    if (branch) return;
+
+    // Priority 1: Last used branch
+    const lastUsedBranch = getLocalStorage<string | null>(STORAGE_KEYS.LAST_BRANCH, null);
+    if (lastUsedBranch && branches.some((b: Branch) => {
+      const displayName = b.type === 'remote' && b.remote ? `${b.remote}/${b.name}` : b.name;
+      return displayName === lastUsedBranch;
+    })) {
+      setBranch(lastUsedBranch);
+      return;
+    }
+
+    // Priority 2: Preferred branch (main/master)
+    const preferredBranch = selectPreferredBranch(branches);
+    if (preferredBranch) {
+      setBranch(preferredBranch);
     }
   }, [branch, branches, repositoryId]);
 
@@ -458,6 +479,7 @@ export function TaskCreateDialog({
     const workspaceRepo = repositories.find((repo: Repository) => repo.id === value);
     if (workspaceRepo) {
       setRepositoryId(value);
+      setLocalStorage(STORAGE_KEYS.LAST_REPOSITORY_ID, value);
       setDiscoveredRepoPath('');
       setSelectedLocalRepo(null);
       setLocalBranches([]);
@@ -471,6 +493,12 @@ export function TaskCreateDialog({
   const handleAgentProfileChange = useCallback((value: string) => {
     setAgentProfileId(value);
     setLocalStorage(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, value);
+  }, []);
+
+  // Memoized callback for BranchSelector to save selection to localStorage
+  const handleBranchChange = useCallback((value: string) => {
+    setBranch(value);
+    setLocalStorage(STORAGE_KEYS.LAST_BRANCH, value);
   }, []);
 
   const hasRepositorySelection = Boolean(repositoryId || selectedLocalRepo);
@@ -592,6 +620,18 @@ export function TaskCreateDialog({
   useEffect(() => {
     if (repositoryId || localBranches.length === 0) return;
     if (branch) return;
+
+    // Priority 1: Last used branch
+    const lastUsedBranch = getLocalStorage<string | null>(STORAGE_KEYS.LAST_BRANCH, null);
+    if (lastUsedBranch && localBranches.some((b: Branch) => {
+      const displayName = b.type === 'remote' && b.remote ? `${b.remote}/${b.name}` : b.name;
+      return displayName === lastUsedBranch;
+    })) {
+      setBranch(lastUsedBranch);
+      return;
+    }
+
+    // Priority 2: Preferred branch (main/master)
     const preferredBranch = selectPreferredBranch(localBranches);
     if (preferredBranch) {
       setBranch(preferredBranch);
@@ -931,34 +971,34 @@ export function TaskCreateDialog({
                     disabled={!workspaceId || repositoriesLoading || discoverReposLoading || isEditMode}
                   />
                 </div>
-              <div>
-                <BranchSelector
-                  options={branchOptions}
-                  value={branch}
-                  onValueChange={setBranch}
-                  placeholder={
-                    !hasRepositorySelection
-                      ? 'Select repository first'
-                      : repositoryId
-                        ? branchesLoading
-                          ? 'Loading branches...'
-                          : 'Select branch'
-                        : localBranchesLoading
-                          ? 'Loading branches...'
-                          : branchOptions.length > 0
-                            ? 'Select branch'
-                            : 'No branches found'
-                  }
-                  searchPlaceholder="Search branches..."
-                  emptyMessage="No branch found."
-                  disabled={
-                    isEditMode ||
-                    !hasRepositorySelection ||
-                    (repositoryId && branchesLoading) ||
-                    (!repositoryId && (localBranchesLoading || branchOptions.length === 0))
-                  }
-                />
-              </div>
+                <div>
+                  <BranchSelector
+                    options={branchOptions}
+                    value={branch}
+                    onValueChange={handleBranchChange}
+                    placeholder={
+                      !hasRepositorySelection
+                        ? 'Select repository first'
+                        : repositoryId
+                          ? branchesLoading
+                            ? 'Loading branches...'
+                            : 'Select branch'
+                          : localBranchesLoading
+                            ? 'Loading branches...'
+                            : branchOptions.length > 0
+                              ? 'Select branch'
+                              : 'No branches found'
+                    }
+                    searchPlaceholder="Search branches..."
+                    emptyMessage="No branch found."
+                    disabled={
+                      isEditMode ||
+                      !hasRepositorySelection ||
+                      (repositoryId && branchesLoading) ||
+                      (!repositoryId && (localBranchesLoading || branchOptions.length === 0))
+                    }
+                  />
+                </div>
                 {startAgent && (
                   <div>
                     {agentProfiles.length === 0 && !agentProfilesLoading ? (
@@ -969,19 +1009,19 @@ export function TaskCreateDialog({
                         </Link>
                       </div>
                     ) : (
-                    <AgentSelector
-                      options={agentProfileOptions}
-                      value={agentProfileId}
-                      onValueChange={handleAgentProfileChange}
-                      placeholder={
-                        agentProfilesLoading
-                          ? 'Loading agents...'
-                          : agentProfiles.length === 0
-                            ? 'No agents available'
-                            : 'Select agent'
-                      }
-                      disabled={agentProfilesLoading || isCreatingSession}
-                    />
+                      <AgentSelector
+                        options={agentProfileOptions}
+                        value={agentProfileId}
+                        onValueChange={handleAgentProfileChange}
+                        placeholder={
+                          agentProfilesLoading
+                            ? 'Loading agents...'
+                            : agentProfiles.length === 0
+                              ? 'No agents available'
+                              : 'Select agent'
+                        }
+                        disabled={agentProfilesLoading || isCreatingSession}
+                      />
                     )}
                   </div>
                 )}
