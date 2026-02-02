@@ -6,7 +6,6 @@ import { Button } from '@kandev/ui/button';
 import { ToggleGroup, ToggleGroupItem } from '@kandev/ui/toggle-group';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@kandev/ui/tooltip';
 import { IconPlus, IconSettings, IconList, IconLayoutKanban } from '@tabler/icons-react';
-import { ConnectionStatus } from '../connection-status';
 import { KanbanDisplayDropdown } from '../kanban-display-dropdown';
 import { TaskSearchInput } from './task-search-input';
 import { linkToTasks } from '@/lib/links';
@@ -35,9 +34,8 @@ export function KanbanHeader({ onCreateTask, workspaceId, currentPage = 'kanban'
     <header className="relative flex items-center justify-between p-4 pb-3">
       <div className="flex items-center gap-3">
         <Link href="/" className="text-2xl font-bold hover:opacity-80">
-          KanDev.ai
+          KanDev
         </Link>
-        <ConnectionStatus />
       </div>
       {onSearchChange && (
         <div className="absolute left-1/2 -translate-x-1/2">

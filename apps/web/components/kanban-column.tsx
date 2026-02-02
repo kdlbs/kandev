@@ -57,7 +57,7 @@ export function KanbanColumn({ column, tasks, onPreviewTask, onOpenTask, onEditT
       <div className="flex items-center justify-between border-b border-border/70 pb-3 mb-4 px-1">
         <div className="flex items-center gap-2">
           <div className={cn('w-3 h-3 rounded-full', column.color)} />
-          <h2 className="font-semibold text-base">{column.title}</h2>
+          <h2 className="font-semibold text-sm">{column.title}</h2>
           <Badge variant="secondary" className="text-xs">
             {tasks.length}
           </Badge>
