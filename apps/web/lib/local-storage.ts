@@ -75,3 +75,45 @@ export function setKanbanPreviewState(state: Partial<KanbanPreviewState>): void 
     }
   }
 }
+
+// Internal storage key for plan notifications (not exported - encapsulated)
+const PLAN_NOTIFICATION_KEY = 'kandev.plan.lastSeenByTask';
+
+/**
+ * Plan notification state - tracks when user last viewed each task's plan
+ * Key is taskId, value is the plan's updated_at timestamp when last viewed
+ */
+export type PlanNotificationState = Record<string, string | null>;
+
+/**
+ * Get the plan notification state from localStorage
+ * @returns Record of taskId -> last seen plan update timestamp
+ */
+export function getPlanNotificationState(): PlanNotificationState {
+  return getLocalStorage(PLAN_NOTIFICATION_KEY, {} as PlanNotificationState);
+}
+
+/**
+ * Set the last seen timestamp for a specific task's plan
+ * @param taskId - The task ID
+ * @param timestamp - The plan's updated_at timestamp when viewed (or null to clear)
+ */
+export function setPlanLastSeen(taskId: string, timestamp: string | null): void {
+  const state = getPlanNotificationState();
+  if (timestamp === null) {
+    delete state[taskId];
+  } else {
+    state[taskId] = timestamp;
+  }
+  setLocalStorage(PLAN_NOTIFICATION_KEY, state);
+}
+
+/**
+ * Get the last seen timestamp for a specific task's plan
+ * @param taskId - The task ID
+ * @returns The last seen timestamp, or null if never viewed
+ */
+export function getPlanLastSeen(taskId: string): string | null {
+  const state = getPlanNotificationState();
+  return state[taskId] ?? null;
+}
