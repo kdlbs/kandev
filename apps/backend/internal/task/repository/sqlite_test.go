@@ -85,8 +85,8 @@ func TestSQLiteRepository_SeedsDefaultWorkspace(t *testing.T) {
 	if len(boards) != 1 {
 		t.Fatalf("expected 1 board, got %d", len(boards))
 	}
-	if boards[0].Name != "Dev" {
-		t.Errorf("expected Dev board, got %s", boards[0].Name)
+	if boards[0].Name != "Development" {
+		t.Errorf("expected Development board, got %s", boards[0].Name)
 	}
 	// Note: workflow steps are now managed by the workflow repository, not the task repository
 }
