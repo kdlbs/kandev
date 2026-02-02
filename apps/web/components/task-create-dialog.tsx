@@ -929,7 +929,7 @@ export function TaskCreateDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-none w-[900px] sm:!max-w-none max-h-[85vh] flex flex-col bg-card">
+      <DialogContent className="w-full h-full max-w-full max-h-full rounded-none sm:w-[900px] sm:h-auto sm:max-w-none sm:max-h-[85vh] sm:rounded-lg flex flex-col bg-card">
         <DialogHeader>
           <DialogTitle>
             {isSessionMode ? 'Create New Session' : submitLabel === 'Create' ? 'Create Task' : 'Edit Task'}
@@ -949,7 +949,7 @@ export function TaskCreateDialog({
               descriptionValueRef={descriptionInputRef}
             />
             {!isSessionMode && (
-              <div className="grid gap-4 md:grid-cols-3">
+              <div className="grid gap-4 grid-cols-1 sm:grid-cols-3">
                 <div>
                   <RepositorySelector
                     options={repositoryOptions}
@@ -1159,7 +1159,7 @@ export function TaskCreateDialog({
               </div>
             )}
           </div>
-          <DialogFooter className="border-t border-border pt-3">
+          <DialogFooter className="border-t border-border pt-3 flex-col gap-3 sm:flex-row sm:gap-2">
             {!isSessionMode && (
               <div className="flex flex-1 items-center gap-3 text-sm text-muted-foreground">
                 <div className="flex items-center gap-2">
@@ -1193,13 +1193,14 @@ export function TaskCreateDialog({
               </div>
             )}
             <DialogClose asChild>
-              <Button type="button" variant="outline" onClick={handleCancel} disabled={isCreatingSession || isCreatingTask}>
+              <Button type="button" variant="outline" onClick={handleCancel} disabled={isCreatingSession || isCreatingTask} className="w-full h-10 border-0 sm:w-auto sm:h-7 sm:border">
                 Cancel
               </Button>
             </DialogClose>
             <KeyboardShortcutTooltip shortcut={SHORTCUTS.SUBMIT}>
               <Button
                 type="submit"
+                className="w-full h-10 sm:w-auto sm:h-7"
                 disabled={
                   isCreatingSession ||
                   isCreatingTask ||

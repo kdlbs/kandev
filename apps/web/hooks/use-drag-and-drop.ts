@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { DragStartEvent, DragEndEvent } from '@dnd-kit/core';
 import { useAppStore, useAppStoreApi } from '@/components/state-provider';
 import { useTaskActions } from '@/hooks/use-task-actions';
@@ -46,59 +46,53 @@ export function useDragAndDrop({
   const kanban = useAppStore((state) => state.kanban);
   const store = useAppStoreApi();
 
-  const handleDragStart = useCallback((event: DragStartEvent) => {
-    setActiveTaskId(event.active.id as string);
-  }, []);
+  // Use refs for callbacks to avoid stale closures in performTaskMove
+  const onWorkflowAutomationRef = useRef(onWorkflowAutomation);
+  const onMoveErrorRef = useRef(onMoveError);
+  onWorkflowAutomationRef.current = onWorkflowAutomation;
+  onMoveErrorRef.current = onMoveError;
 
-  const handleDragEnd = useCallback(
-    async (event: DragEndEvent) => {
-      const { active, over } = event;
+  /**
+   * Core move logic shared by both drag-and-drop and menu-based moves.
+   * Handles optimistic updates, API calls, workflow automation, and error rollback.
+   */
+  const performTaskMove = useCallback(
+    async (task: Task, targetColumnId: string) => {
+      const currentKanban = store.getState().kanban;
+      if (!currentKanban.boardId) return;
 
-      setActiveTaskId(null);
-      if (!over) return;
-
-      const taskId = active.id as string;
-      const newStatus = over.id as string;
-
-      if (!kanban.boardId || isMovingTask) {
-        return;
-      }
-
-      // Find the task being moved from visibleTasks (which has session info)
-      const movedTask = visibleTasks.find((t) => t.id === taskId);
-      if (!movedTask) return;
-
-      const targetTasks = kanban.tasks
-        .filter((task: KanbanState['tasks'][number]) => task.workflowStepId === newStatus && task.id !== taskId)
+      // Calculate position in target column
+      const targetTasks = currentKanban.tasks
+        .filter((t: KanbanState['tasks'][number]) => t.workflowStepId === targetColumnId && t.id !== task.id)
         .sort((a: KanbanState['tasks'][number], b: KanbanState['tasks'][number]) => a.position - b.position);
       const nextPosition = targetTasks.length;
 
       // Save original state for rollback
-      const originalTasks = kanban.tasks;
+      const originalTasks = currentKanban.tasks;
 
       // Optimistic update
       store.getState().hydrate({
         kanban: {
-          ...kanban,
-          tasks: kanban.tasks.map((task: KanbanState['tasks'][number]) =>
-            task.id === taskId
-              ? { ...task, workflowStepId: newStatus, position: nextPosition }
-              : task
+          ...currentKanban,
+          tasks: currentKanban.tasks.map((t: KanbanState['tasks'][number]) =>
+            t.id === task.id
+              ? { ...t, workflowStepId: targetColumnId, position: nextPosition }
+              : t
           ),
         },
       });
 
       try {
         setIsMovingTask(true);
-        const response = await moveTaskById(taskId, {
-          board_id: kanban.boardId,
-          workflow_step_id: newStatus,
+        const response = await moveTaskById(task.id, {
+          board_id: currentKanban.boardId,
+          workflow_step_id: targetColumnId,
           position: nextPosition,
         });
 
-        // Check if target step has auto_start_agent enabled
+        // Handle workflow automation if target step has auto_start_agent enabled
         if (response?.workflow_step?.auto_start_agent) {
-          const sessionId = movedTask.primarySessionId ?? null;
+          const sessionId = task.primarySessionId ?? null;
 
           if (sessionId) {
             // Task has a session - auto-start with workflow step config
@@ -108,7 +102,7 @@ export function useDragAndDrop({
                 await client.request(
                   'orchestrator.start',
                   {
-                    task_id: taskId,
+                    task_id: task.id,
                     session_id: sessionId,
                     workflow_step_id: response.workflow_step.id,
                   },
@@ -120,11 +114,11 @@ export function useDragAndDrop({
             }
           } else {
             // No session - notify parent to show session creation dialog
-            onWorkflowAutomation?.({
-              taskId,
+            onWorkflowAutomationRef.current?.({
+              taskId: task.id,
               sessionId: null,
               workflowStep: response.workflow_step,
-              taskDescription: movedTask.description ?? '',
+              taskDescription: task.description ?? '',
             });
           }
         }
@@ -138,21 +132,61 @@ export function useDragAndDrop({
         });
         // Show error to user with task context
         const message = error instanceof Error ? error.message : 'Failed to move task';
-        onMoveError?.({
+        onMoveErrorRef.current?.({
           message,
-          taskId,
-          sessionId: movedTask.primarySessionId ?? null,
+          taskId: task.id,
+          sessionId: task.primarySessionId ?? null,
         });
       } finally {
         setIsMovingTask(false);
       }
     },
-    [kanban, isMovingTask, moveTaskById, store, onWorkflowAutomation, onMoveError, visibleTasks]
+    [moveTaskById, store]
+  );
+
+  const handleDragStart = useCallback((event: DragStartEvent) => {
+    setActiveTaskId(event.active.id as string);
+  }, []);
+
+  const handleDragEnd = useCallback(
+    async (event: DragEndEvent) => {
+      const { active, over } = event;
+
+      setActiveTaskId(null);
+      if (!over) return;
+
+      const taskId = active.id as string;
+      const targetColumnId = over.id as string;
+
+      if (!kanban.boardId || isMovingTask) return;
+
+      // Find the task being moved from visibleTasks (which has session info)
+      const movedTask = visibleTasks.find((t) => t.id === taskId);
+      if (!movedTask) return;
+
+      await performTaskMove(movedTask, targetColumnId);
+    },
+    [kanban.boardId, isMovingTask, visibleTasks, performTaskMove]
   );
 
   const handleDragCancel = useCallback(() => {
     setActiveTaskId(null);
   }, []);
+
+  /**
+   * Move a task to a specific column via menu action (alternative to drag and drop).
+   */
+  const moveTaskToColumn = useCallback(
+    async (task: Task, targetColumnId: string) => {
+      if (!kanban.boardId || isMovingTask) return;
+
+      // Don't move if already in target column
+      if (task.workflowStepId === targetColumnId) return;
+
+      await performTaskMove(task, targetColumnId);
+    },
+    [kanban.boardId, isMovingTask, performTaskMove]
+  );
 
   const activeTask = useMemo(
     () => visibleTasks.find((task) => task.id === activeTaskId) ?? null,
@@ -166,5 +200,6 @@ export function useDragAndDrop({
     handleDragStart,
     handleDragEnd,
     handleDragCancel,
+    moveTaskToColumn,
   };
 }

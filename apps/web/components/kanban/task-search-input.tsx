@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Input } from '@kandev/ui/input';
 import { IconSearch, IconX, IconLoader2 } from '@tabler/icons-react';
+import { cn } from '@/lib/utils';
 
 interface TaskSearchInputProps {
   value: string;
@@ -10,6 +11,7 @@ interface TaskSearchInputProps {
   placeholder?: string;
   debounceMs?: number;
   isLoading?: boolean;
+  className?: string;
 }
 
 export function TaskSearchInput({
@@ -18,6 +20,7 @@ export function TaskSearchInput({
   placeholder = 'Search tasks...',
   debounceMs = 300,
   isLoading = false,
+  className,
 }: TaskSearchInputProps) {
   const [localValue, setLocalValue] = useState(value);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -63,7 +66,7 @@ export function TaskSearchInput({
   }, []);
 
   return (
-    <div className="relative">
+    <div className={cn('relative', className)}>
       {isLoading ? (
         <IconLoader2 className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none animate-spin" />
       ) : (

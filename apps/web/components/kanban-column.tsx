@@ -2,7 +2,7 @@
 
 import { useMemo } from 'react';
 import { useDroppable } from '@dnd-kit/core';
-import { KanbanCard, Task } from './kanban-card';
+import { KanbanCard, Task, WorkflowColumn } from './kanban-card';
 import { Badge } from '@kandev/ui/badge';
 import { cn, getRepositoryDisplayName } from '@/lib/utils';
 import { useAppStore } from '@/components/state-provider';
@@ -22,11 +22,14 @@ interface KanbanColumnProps {
   onOpenTask: (task: Task) => void;
   onEditTask: (task: Task) => void;
   onDeleteTask: (task: Task) => void;
+  onMoveTask?: (task: Task, targetColumnId: string) => void;
+  columns?: WorkflowColumn[];
   showMaximizeButton?: boolean;
   deletingTaskId?: string | null;
+  hideHeader?: boolean;
 }
 
-export function KanbanColumn({ column, tasks, onPreviewTask, onOpenTask, onEditTask, onDeleteTask, showMaximizeButton, deletingTaskId }: KanbanColumnProps) {
+export function KanbanColumn({ column, tasks, onPreviewTask, onOpenTask, onEditTask, onDeleteTask, onMoveTask, columns, showMaximizeButton, deletingTaskId, hideHeader = false }: KanbanColumnProps) {
   const { setNodeRef, isOver } = useDroppable({
     id: column.id,
   });
@@ -54,15 +57,17 @@ export function KanbanColumn({ column, tasks, onPreviewTask, onOpenTask, onEditT
       )}
     >
       {/* Column Header */}
-      <div className="flex items-center justify-between border-b border-border/70 pb-3 mb-4 px-1">
-        <div className="flex items-center gap-2">
-          <div className={cn('w-2 h-2 rounded-full', column.color)} />
-          <h2 className="font-semibold text-sm">{column.title}</h2>
-          <Badge variant="secondary" className="text-xs">
-            {tasks.length}
-          </Badge>
+      {!hideHeader && (
+        <div className="flex items-center justify-between border-b border-border/70 pb-3 mb-4 px-1">
+          <div className="flex items-center gap-2">
+            <div className={cn('w-2 h-2 rounded-full', column.color)} />
+            <h2 className="font-semibold text-sm">{column.title}</h2>
+            <Badge variant="secondary" className="text-xs">
+              {tasks.length}
+            </Badge>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Tasks */}
       <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden space-y-2 px-1">
@@ -75,6 +80,8 @@ export function KanbanColumn({ column, tasks, onPreviewTask, onOpenTask, onEditT
             onOpenFullPage={onOpenTask}
             onEdit={onEditTask}
             onDelete={onDeleteTask}
+            onMove={onMoveTask}
+            columns={columns}
             showMaximizeButton={showMaximizeButton}
             isDeleting={deletingTaskId === task.id}
           />
