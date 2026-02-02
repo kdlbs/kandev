@@ -2,6 +2,28 @@ export function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * Resolves the health check timeout, allowing override via environment variable.
+ *
+ * The KANDEV_HEALTH_TIMEOUT_MS environment variable can override the default
+ * timeout for waiting on backend health checks. This is useful for slower
+ * machines or debugging scenarios where the backend takes longer to start.
+ *
+ * @param defaultMs - Default timeout in milliseconds if env var is not set
+ * @returns The resolved timeout in milliseconds
+ */
+export function resolveHealthTimeoutMs(defaultMs: number): number {
+  const raw = process.env.KANDEV_HEALTH_TIMEOUT_MS;
+  if (!raw) {
+    return defaultMs;
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return defaultMs;
+  }
+  return Math.floor(parsed);
+}
+
 export async function waitForHealth(
   baseUrl: string,
   proc: { exitCode: number | null },

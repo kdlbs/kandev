@@ -11,6 +11,26 @@ APPS_DIR := apps
 PNPM := pnpm
 MAKE := make
 
+# Colors for terminal output
+RESET := \033[0m
+BOLD := \033[1m
+DIM := \033[2m
+GREEN := \033[32m
+BLUE := \033[34m
+CYAN := \033[36m
+YELLOW := \033[33m
+MAGENTA := \033[35m
+
+# Phase headers
+define phase
+	@printf "\n$(BOLD)$(BLUE)━━━ $(1) ━━━$(RESET)\n\n"
+endef
+
+# Success message
+define success
+	@printf "$(GREEN)✓$(RESET) $(1)\n"
+endef
+
 # Default target
 .DEFAULT_GOAL := help
 
@@ -28,6 +48,9 @@ help:
 	@echo "  dev-web          Run web app in development mode (port 3000)"
 	@echo "  dev-landing      Run landing page in development mode (port 3001)"
 	@echo "  dev              Note: Uses apps/cli launcher (auto ports)"
+	@echo ""
+	@echo "Production Commands:"
+	@echo "  start            Install deps, build, and start backend + web in production mode"
 	@echo ""
 	@echo "Build Commands:"
 	@echo "  build            Build backend, web app, and landing page"
@@ -91,26 +114,54 @@ dev-landing:
 
 .PHONY: build
 build: build-backend build-web build-landing
-	@echo ""
-	@echo "✓ Build complete!"
-	@echo "  Backend binary: $(BACKEND_DIR)/bin/kandev"
-	@echo "  Web app: $(WEB_DIR)/.next"
-	@echo "  Landing page: $(LANDING_DIR)/.next"
+	@printf "\n$(GREEN)$(BOLD)✓ Build complete!$(RESET)\n"
+
+#
+# Production Start
+#
+
+.PHONY: start
+start:
+	$(call phase,Installing Dependencies)
+	@$(MAKE) -s install-backend
+	@$(MAKE) -s install-web
+	$(call success,Dependencies installed)
+	$(call phase,Building)
+	@$(MAKE) -s build-backend-quiet
+	@$(MAKE) -s build-web-quiet
+	$(call success,Build complete)
+	$(call phase,Starting Server)
+	@cd $(APPS_DIR) && $(PNPM) -C cli dev -- start
 
 .PHONY: build-backend
 build-backend:
-	@echo "Building backend..."
+	@printf "$(CYAN)Building backend...$(RESET)\n"
 	@$(MAKE) -C $(BACKEND_DIR) build
+
+.PHONY: build-backend-quiet
+build-backend-quiet:
+	@printf "  $(DIM)Backend$(RESET)\n"
+	@$(MAKE) -s -C $(BACKEND_DIR) build >/dev/null 2>&1
 
 .PHONY: build-web
 build-web:
-	@echo "Building web app..."
+	@printf "$(CYAN)Building web app...$(RESET)\n"
 	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web build
+
+.PHONY: build-web-quiet
+build-web-quiet:
+	@printf "  $(DIM)Web app$(RESET)\n"
+	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web build 2>&1 | grep -v "Warning:" | grep -v "parseLineType" | grep -v "^$$" || true
 
 .PHONY: build-landing
 build-landing:
-	@echo "Building landing page..."
+	@printf "$(CYAN)Building landing page...$(RESET)\n"
 	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/landing build
+
+.PHONY: build-landing-quiet
+build-landing-quiet:
+	@printf "  $(DIM)Landing page$(RESET)\n"
+	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/landing build 2>&1 | grep -v "Warning:" | grep -v "parseLineType" | grep -v "^$$" || true
 
 #
 # Installation
@@ -118,18 +169,17 @@ build-landing:
 
 .PHONY: install
 install: install-backend install-web
-	@echo ""
-	@echo "✓ All dependencies installed!"
+	@printf "\n$(GREEN)$(BOLD)✓ All dependencies installed!$(RESET)\n"
 
 .PHONY: install-backend
 install-backend:
-	@echo "Installing backend dependencies..."
-	@$(MAKE) -C $(BACKEND_DIR) deps
+	@printf "$(CYAN)Installing backend dependencies...$(RESET)\n"
+	@$(MAKE) -s -C $(BACKEND_DIR) deps
 
 .PHONY: install-web
 install-web:
-	@echo "Installing web and landing dependencies..."
-	@cd $(APPS_DIR) && $(PNPM) install
+	@printf "$(CYAN)Installing web and landing dependencies...$(RESET)\n"
+	@cd $(APPS_DIR) && $(PNPM) install --silent 2>/dev/null || cd $(APPS_DIR) && $(PNPM) install
 
 #
 # Testing
@@ -137,17 +187,16 @@ install-web:
 
 .PHONY: test
 test: test-backend test-web
-	@echo ""
-	@echo "✓ All tests complete!"
+	@printf "\n$(GREEN)$(BOLD)✓ All tests complete!$(RESET)\n"
 
 .PHONY: test-backend
 test-backend:
-	@echo "Running backend tests..."
+	@printf "$(CYAN)Running backend tests...$(RESET)\n"
 	@$(MAKE) -C $(BACKEND_DIR) test
 
 .PHONY: test-web
 test-web:
-	@echo "Running web app tests..."
+	@printf "$(CYAN)Running web app tests...$(RESET)\n"
 	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web test
 
 #
@@ -156,42 +205,40 @@ test-web:
 
 .PHONY: lint
 lint: lint-backend lint-web
-	@echo ""
-	@echo "✓ Linting complete!"
+	@printf "\n$(GREEN)$(BOLD)✓ Linting complete!$(RESET)\n"
 
 .PHONY: lint-backend
 lint-backend:
-	@echo "Linting backend..."
+	@printf "$(CYAN)Linting backend...$(RESET)\n"
 	@$(MAKE) -C $(BACKEND_DIR) lint
 
 .PHONY: lint-web
 lint-web:
-	@echo "Linting web app..."
+	@printf "$(CYAN)Linting web app...$(RESET)\n"
 	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web lint
 
 .PHONY: fmt
 fmt: fmt-backend fmt-web
-	@echo ""
-	@echo "✓ Code formatting complete!"
+	@printf "\n$(GREEN)$(BOLD)✓ Code formatting complete!$(RESET)\n"
 
 .PHONY: fmt-backend
 fmt-backend:
-	@echo "Formatting backend code..."
+	@printf "$(CYAN)Formatting backend code...$(RESET)\n"
 	@$(MAKE) -C $(BACKEND_DIR) fmt
 
 .PHONY: fmt-web
 fmt-web:
-	@echo "Formatting web code..."
+	@printf "$(CYAN)Formatting web code...$(RESET)\n"
 	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web lint -- --fix || true
 
 .PHONY: typecheck-web
 typecheck-web:
-	@echo "Type-checking web app..."
+	@printf "$(CYAN)Type-checking web app...$(RESET)\n"
 	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web exec tsc -p tsconfig.json --noEmit
 
 .PHONY: typecheck
 typecheck:
-	@echo "Type-checking all apps..."
+	@printf "$(CYAN)Type-checking all apps...$(RESET)\n"
 	@cd $(APPS_DIR) && $(PNPM) -r exec tsc -p tsconfig.json --noEmit
 
 #
@@ -200,22 +247,21 @@ typecheck:
 
 .PHONY: clean
 clean: clean-backend clean-web
-	@echo ""
-	@echo "✓ Cleanup complete!"
+	@printf "\n$(GREEN)$(BOLD)✓ Cleanup complete!$(RESET)\n"
 
 .PHONY: clean-backend
 clean-backend:
-	@echo "Cleaning backend artifacts..."
+	@printf "$(CYAN)Cleaning backend artifacts...$(RESET)\n"
 	@$(MAKE) -C $(BACKEND_DIR) clean
 
 .PHONY: clean-web
 clean-web:
-	@echo "Cleaning web and landing artifacts..."
+	@printf "$(CYAN)Cleaning web and landing artifacts...$(RESET)\n"
 	@rm -rf $(WEB_DIR)/.next $(LANDING_DIR)/.next $(APPS_DIR)/node_modules
 	@rm -rf $(APPS_DIR)/packages/*/node_modules
 
 .PHONY: clean-db
 clean-db:
-	@echo "Removing local SQLite database..."
+	@printf "$(CYAN)Removing local SQLite database...$(RESET)\n"
 	@rm -f kandev.db kandev.db-wal kandev.db-shm \
 		$(BACKEND_DIR)/kandev.db $(BACKEND_DIR)/kandev.db-wal $(BACKEND_DIR)/kandev.db-shm

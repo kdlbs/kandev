@@ -4,10 +4,11 @@ import fs from "node:fs";
 import pkg from "../package.json";
 import { runDev } from "./dev";
 import { runRelease } from "./run";
+import { runStart } from "./start";
 import { ensureValidPort } from "./ports";
 import { maybePromptForUpdate } from "./update";
 
-type Command = "run" | "dev";
+type Command = "run" | "dev" | "start";
 
 type CliOptions = {
   command: Command;
@@ -22,6 +23,7 @@ function printHelp() {
 Usage:
   kandev run [--version <tag>] [--backend-port <port>] [--web-port <port>]
   kandev dev [--backend-port <port>] [--web-port <port>]
+  kandev start [--backend-port <port>] [--web-port <port>]
   kandev [--version <tag>] [--backend-port <port>] [--web-port <port>]
   kandev --dev [--backend-port <port>] [--web-port <port>]
 
@@ -30,11 +32,13 @@ Examples:
   kandev run
   kandev --dev
   kandev dev
+  kandev start
   kandev --version v0.1.0
   kandev --backend-port 18080 --web-port 13000
 
 Options:
   dev             Use local repo for dev (make dev + next dev) if available.
+  start           Use local production build (make build + next start).
   run             Use release bundles (default).
   --dev            Alias for "dev".
   --version        Release tag to install (default: latest).
@@ -52,7 +56,7 @@ function parseArgs(argv: string[]): CliOptions {
       printHelp();
       process.exit(0);
     }
-    if (arg === "dev" || arg === "run") {
+    if (arg === "dev" || arg === "run" || arg === "start") {
       opts.command = arg;
       continue;
     }
@@ -125,6 +129,15 @@ async function main(): Promise<void> {
       throw new Error("Unable to locate repo root for dev. Run from the repo.");
     }
     await runDev({ repoRoot, backendPort, webPort });
+    return;
+  }
+
+  if (raw.command === "start") {
+    const repoRoot = findRepoRoot(process.cwd());
+    if (!repoRoot) {
+      throw new Error("Unable to locate repo root for start. Run from the repo.");
+    }
+    await runStart({ repoRoot, backendPort, webPort });
     return;
   }
 
