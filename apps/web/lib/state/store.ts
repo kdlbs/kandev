@@ -89,6 +89,7 @@ export type {
   RightPanelState,
   DiffState,
   ConnectionState,
+  MobileKanbanState,
 } from './slices';
 
 // Combined AppState type
@@ -144,6 +145,7 @@ export type AppState = {
   rightPanel: typeof defaultUIState['rightPanel'];
   diffs: typeof defaultUIState['diffs'];
   connection: typeof defaultUIState['connection'];
+  mobileKanban: typeof defaultUIState['mobileKanban'];
 
   // Actions from all slices
   hydrate: (state: Partial<AppState>, options?: HydrationOptions) => void;
@@ -190,6 +192,8 @@ export type AppState = {
   setPreviewUrlDraft: (sessionId: string, url: string) => void;
   setRightPanelActiveTab: (sessionId: string, tab: string) => void;
   setConnectionStatus: (status: ConnectionState['status'], error?: string | null) => void;
+  setMobileKanbanColumnIndex: (index: number) => void;
+  setMobileKanbanMenuOpen: (open: boolean) => void;
   setMessages: (
     sessionId: string,
     messages: Message[],
@@ -286,6 +290,7 @@ const defaultState = {
   rightPanel: defaultUIState.rightPanel,
   diffs: defaultUIState.diffs,
   connection: defaultUIState.connection,
+  mobileKanban: defaultUIState.mobileKanban,
 };
 
 function mergeInitialState(initialState?: Partial<AppState>): typeof defaultState {
@@ -334,6 +339,7 @@ function mergeInitialState(initialState?: Partial<AppState>): typeof defaultStat
     rightPanel: { ...defaultState.rightPanel, ...initialState.rightPanel },
     diffs: { ...defaultState.diffs, ...initialState.diffs },
     connection: { ...defaultState.connection, ...initialState.connection },
+    mobileKanban: { ...defaultState.mobileKanban, ...initialState.mobileKanban },
   };
 }
 
@@ -393,6 +399,7 @@ export function createAppStore(initialState?: Partial<AppState>) {
       rightPanel: merged.rightPanel,
       diffs: merged.diffs,
       connection: merged.connection,
+      mobileKanban: merged.mobileKanban,
       // Add hydrate method
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       hydrate: (state, options) => set((draft) => hydrateState(draft as any, state, options)),

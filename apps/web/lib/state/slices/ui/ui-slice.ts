@@ -14,6 +14,7 @@ export const defaultUIState: UISliceState = {
   rightPanel: { activeTabBySessionId: {} },
   diffs: { files: [] },
   connection: { status: 'disconnected', error: null },
+  mobileKanban: { activeColumnIndex: 0, isMenuOpen: false },
 };
 
 export const createUISlice: StateCreator<UISlice, [['zustand/immer', never]], [], UISlice> = (
@@ -63,5 +64,13 @@ export const createUISlice: StateCreator<UISlice, [['zustand/immer', never]], []
     set((draft) => {
       draft.connection.status = status;
       draft.connection.error = error ?? null;
+    }),
+  setMobileKanbanColumnIndex: (index) =>
+    set((draft) => {
+      draft.mobileKanban.activeColumnIndex = index;
+    }),
+  setMobileKanbanMenuOpen: (open) =>
+    set((draft) => {
+      draft.mobileKanban.isMenuOpen = open;
     }),
 });

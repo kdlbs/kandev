@@ -84,5 +84,6 @@ export type {
   RightPanelState,
   DiffState,
   ConnectionState,
+  MobileKanbanState,
 } from './ui/types';
 export type { Repository, Branch } from '@/lib/types/http';

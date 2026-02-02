@@ -24,11 +24,17 @@ export type ConnectionState = {
   error: string | null;
 };
 
+export type MobileKanbanState = {
+  activeColumnIndex: number;
+  isMenuOpen: boolean;
+};
+
 export type UISliceState = {
   previewPanel: PreviewPanelState;
   rightPanel: RightPanelState;
   diffs: DiffState;
   connection: ConnectionState;
+  mobileKanban: MobileKanbanState;
 };
 
 export type UISliceActions = {
@@ -41,6 +47,8 @@ export type UISliceActions = {
   setPreviewUrlDraft: (sessionId: string, url: string) => void;
   setRightPanelActiveTab: (sessionId: string, tab: string) => void;
   setConnectionStatus: (status: ConnectionState['status'], error?: string | null) => void;
+  setMobileKanbanColumnIndex: (index: number) => void;
+  setMobileKanbanMenuOpen: (open: boolean) => void;
 };
 
 export type UISlice = UISliceState & UISliceActions;

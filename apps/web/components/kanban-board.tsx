@@ -144,7 +144,7 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
   );
 
   // Drag and drop with workflow automation callback
-  const { activeTask, handleDragStart, handleDragEnd, handleDragCancel } = useDragAndDrop({
+  const { activeTask, handleDragStart, handleDragEnd, handleDragCancel, moveTaskToColumn } = useDragAndDrop({
     visibleTasks: visibleTasksWithSessions,
     onWorkflowAutomation: handleWorkflowAutomation,
     onMoveError: handleMoveError,
@@ -289,12 +289,14 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
         onOpenTask={handleOpenTask}
         onEditTask={handleEdit}
         onDeleteTask={handleDelete}
+        onMoveTask={moveTaskToColumn}
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
         onDragCancel={handleDragCancel}
         activeTask={activeTask}
         showMaximizeButton={enablePreviewOnClick}
         deletingTaskId={deletingTaskId}
+        onCreateTask={handleCreate}
       />
     </div>
   );

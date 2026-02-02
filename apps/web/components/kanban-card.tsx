@@ -11,6 +11,10 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
+  DropdownMenuPortal,
 } from '@kandev/ui/dropdown-menu';
 import type { TaskState, Repository } from '@/lib/types/http';
 import { cn, getRepositoryDisplayName } from '@/lib/utils';
@@ -32,6 +36,12 @@ export interface Task {
   reviewStatus?: 'pending' | 'approved' | 'changes_requested' | 'rejected' | null;
 }
 
+export interface WorkflowColumn {
+  id: string;
+  title: string;
+  color: string;
+}
+
 interface KanbanCardProps {
   task: Task;
   repositoryName?: string | null;
@@ -39,6 +49,8 @@ interface KanbanCardProps {
   onEdit?: (task: Task) => void;
   onDelete?: (task: Task) => void;
   onOpenFullPage?: (task: Task) => void;
+  onMove?: (task: Task, targetColumnId: string) => void;
+  columns?: WorkflowColumn[];
   showMaximizeButton?: boolean;
   isDeleting?: boolean;
 }
@@ -102,7 +114,7 @@ function KanbanCardLayout({ task, repositoryName, className }: KanbanCardProps &
   );
 }
 
-export function KanbanCard({ task, repositoryName, onClick, onEdit, onDelete, onOpenFullPage, showMaximizeButton = true, isDeleting }: KanbanCardProps) {
+export function KanbanCard({ task, repositoryName, onClick, onEdit, onDelete, onOpenFullPage, onMove, columns, showMaximizeButton = true, isDeleting }: KanbanCardProps) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: task.id,
   });
@@ -181,6 +193,35 @@ export function KanbanCard({ task, repositoryName, onClick, onEdit, onDelete, on
                   >
                     Edit
                   </DropdownMenuItem>
+                  {columns && columns.length > 1 && onMove && (
+                    <DropdownMenuSub>
+                      <DropdownMenuSubTrigger
+                        disabled={isDeleting}
+                        onClick={(event) => event.stopPropagation()}
+                        onPointerDown={(event) => event.stopPropagation()}
+                      >
+                        Move to
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuPortal>
+                        <DropdownMenuSubContent>
+                          {columns
+                            .filter((col) => col.id !== task.workflowStepId)
+                            .map((col) => (
+                              <DropdownMenuItem
+                                key={col.id}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  onMove(task, col.id);
+                                }}
+                              >
+                                <div className={cn('w-2 h-2 rounded-full mr-2', col.color)} />
+                                {col.title}
+                              </DropdownMenuItem>
+                            ))}
+                        </DropdownMenuSubContent>
+                      </DropdownMenuPortal>
+                    </DropdownMenuSub>
+                  )}
                   <DropdownMenuItem
                     disabled={isDeleting}
                     onClick={(event) => {

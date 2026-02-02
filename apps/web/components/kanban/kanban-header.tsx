@@ -5,10 +5,14 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@kandev/ui/button';
 import { ToggleGroup, ToggleGroupItem } from '@kandev/ui/toggle-group';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@kandev/ui/tooltip';
-import { IconPlus, IconSettings, IconList, IconLayoutKanban } from '@tabler/icons-react';
+import { IconPlus, IconSettings, IconList, IconLayoutKanban, IconMenu2 } from '@tabler/icons-react';
 import { KanbanDisplayDropdown } from '../kanban-display-dropdown';
 import { TaskSearchInput } from './task-search-input';
+import { KanbanHeaderMobile } from './kanban-header-mobile';
+import { MobileMenuSheet } from './mobile-menu-sheet';
 import { linkToTasks } from '@/lib/links';
+import { useResponsiveBreakpoint } from '@/hooks/use-responsive-breakpoint';
+import { useAppStore } from '@/components/state-provider';
 
 type KanbanHeaderProps = {
   onCreateTask: () => void;
@@ -21,6 +25,9 @@ type KanbanHeaderProps = {
 
 export function KanbanHeader({ onCreateTask, workspaceId, currentPage = 'kanban', searchQuery = '', onSearchChange, isSearchLoading = false }: KanbanHeaderProps) {
   const router = useRouter();
+  const { isMobile, isTablet } = useResponsiveBreakpoint();
+  const isMenuOpen = useAppStore((state) => state.mobileKanban.isMenuOpen);
+  const setMenuOpen = useAppStore((state) => state.setMobileKanbanMenuOpen);
 
   const handleViewChange = (value: string) => {
     if (value === 'list' && currentPage !== 'tasks') {
@@ -30,6 +37,102 @@ export function KanbanHeader({ onCreateTask, workspaceId, currentPage = 'kanban'
     }
   };
 
+  // Mobile header: Logo and Hamburger menu (Add task is a FAB)
+  if (isMobile) {
+    return (
+      <KanbanHeaderMobile
+        workspaceId={workspaceId}
+        currentPage={currentPage}
+        searchQuery={searchQuery}
+        onSearchChange={onSearchChange}
+        isSearchLoading={isSearchLoading}
+      />
+    );
+  }
+
+  // Tablet header: Compact with overflow menu
+  if (isTablet) {
+    return (
+      <>
+        <header className="flex items-center justify-between p-4 pb-3 gap-3">
+          <Link href="/" className="text-xl font-bold hover:opacity-80 flex-shrink-0">
+            KanDev
+          </Link>
+          {onSearchChange && (
+            <TaskSearchInput
+              value={searchQuery}
+              onChange={onSearchChange}
+              placeholder="Search..."
+              isLoading={isSearchLoading}
+              className="flex-1 max-w-[200px]"
+            />
+          )}
+          <div className="flex items-center gap-2">
+            <Button onClick={onCreateTask} size="lg" className="cursor-pointer">
+              <IconPlus className="h-4 w-4" />
+              <span className="hidden sm:inline ml-1">Add task</span>
+            </Button>
+            <TooltipProvider>
+              <ToggleGroup
+                type="single"
+                value={currentPage === 'tasks' ? 'list' : 'kanban'}
+                onValueChange={handleViewChange}
+                variant="outline"
+                className="h-8"
+              >
+                <ToggleGroupItem
+                  value="kanban"
+                  className="cursor-pointer h-8 w-8 data-[state=on]:bg-muted data-[state=on]:text-foreground"
+                >
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="flex items-center justify-center">
+                        <IconLayoutKanban className="h-4 w-4" />
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>Kanban</TooltipContent>
+                  </Tooltip>
+                </ToggleGroupItem>
+                <ToggleGroupItem
+                  value="list"
+                  className="cursor-pointer h-8 w-8 data-[state=on]:bg-muted data-[state=on]:text-foreground"
+                >
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="flex items-center justify-center">
+                        <IconList className="h-4 w-4" />
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>List</TooltipContent>
+                  </Tooltip>
+                </ToggleGroupItem>
+              </ToggleGroup>
+            </TooltipProvider>
+            <Button
+              variant="outline"
+              size="icon-lg"
+              onClick={() => setMenuOpen(true)}
+              className="cursor-pointer"
+            >
+              <IconMenu2 className="h-4 w-4" />
+              <span className="sr-only">Open menu</span>
+            </Button>
+          </div>
+        </header>
+        <MobileMenuSheet
+          open={isMenuOpen}
+          onOpenChange={setMenuOpen}
+          workspaceId={workspaceId}
+          currentPage={currentPage}
+          searchQuery={searchQuery}
+          onSearchChange={onSearchChange}
+          isSearchLoading={isSearchLoading}
+        />
+      </>
+    );
+  }
+
+  // Desktop header: Full layout
   return (
     <header className="relative flex items-center justify-between p-4 pb-3">
       <div className="flex items-center gap-3">

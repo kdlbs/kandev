@@ -8,7 +8,7 @@ import {
   BreadcrumbLink,
   BreadcrumbList,
 } from '@kandev/ui/breadcrumb';
-import { SidebarInset, SidebarProvider } from '@kandev/ui/sidebar';
+import { SidebarInset, SidebarProvider, SidebarTrigger } from '@kandev/ui/sidebar';
 import { SettingsAppSidebar } from '@/components/settings/settings-app-sidebar';
 import { TooltipProvider } from '@kandev/ui/tooltip';
 
@@ -24,7 +24,8 @@ export function SettingsLayoutClient({ children }: { children: React.ReactNode }
         <SettingsAppSidebar />
         <SidebarInset>
           <header className="flex h-16 shrink-0 items-center gap-2">
-            <div className="flex items-center gap-2 px-4">
+            <div className="flex items-center gap-2 px-0 sm:px-4">
+              <SidebarTrigger size="lg" className="md:hidden h-10 w-10 cursor-pointer" />
               <Breadcrumb>
                 <BreadcrumbList>
                   <BreadcrumbItem>
