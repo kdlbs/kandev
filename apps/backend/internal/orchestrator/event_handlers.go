@@ -1149,14 +1149,57 @@ func (s *Service) isSnapshotDuplicate(existing, new *models.GitSnapshot) bool {
 		return false
 	}
 
-	// Compare file paths (if same count, check if same files)
-	for path := range new.Files {
-		if _, exists := existing.Files[path]; !exists {
+	// Compare file paths, staged status, and line counts
+	for path, newFileData := range new.Files {
+		existingFileData, exists := existing.Files[path]
+		if !exists {
+			return false
+		}
+
+		// Compare file details - extract from interface{}
+		newInfo := extractFileInfo(newFileData)
+		existingInfo := extractFileInfo(existingFileData)
+
+		if newInfo.staged != existingInfo.staged ||
+			newInfo.additions != existingInfo.additions ||
+			newInfo.deletions != existingInfo.deletions {
 			return false
 		}
 	}
 
 	return true
+}
+
+// fileInfoCompare holds extracted file info fields for comparison
+type fileInfoCompare struct {
+	staged    bool
+	additions int
+	deletions int
+}
+
+// extractFileInfo extracts comparable fields from a file info interface
+func extractFileInfo(fileData interface{}) fileInfoCompare {
+	info := fileInfoCompare{}
+	if fileData == nil {
+		return info
+	}
+	if fileMap, ok := fileData.(map[string]interface{}); ok {
+		if staged, ok := fileMap["staged"].(bool); ok {
+			info.staged = staged
+		}
+		// Handle both int and float64 (JSON numbers are float64)
+		if additions, ok := fileMap["additions"].(float64); ok {
+			info.additions = int(additions)
+		} else if additions, ok := fileMap["additions"].(int); ok {
+			info.additions = additions
+		}
+		if deletions, ok := fileMap["deletions"].(float64); ok {
+			info.deletions = int(deletions)
+		} else if deletions, ok := fileMap["deletions"].(int); ok {
+			info.deletions = deletions
+		}
+	}
+	return info
 }
 
 // handleContextWindowUpdated handles context window updates and persists them to session metadata

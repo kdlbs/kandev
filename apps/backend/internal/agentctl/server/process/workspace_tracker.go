@@ -2,6 +2,8 @@ package process
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"io/fs"
@@ -34,8 +36,9 @@ type WorkspaceTracker struct {
 	mu            sync.RWMutex
 
 	// Cached git state for detecting manual operations
-	cachedHeadSHA string
-	gitStateMu    sync.RWMutex
+	cachedHeadSHA   string
+	cachedIndexHash string // Hash of git status porcelain output to detect staging changes
+	gitStateMu      sync.RWMutex
 
 	// Unified workspace stream subscribers
 	workspaceStreamSubscribers map[types.WorkspaceStreamSubscriber]struct{}
@@ -182,7 +185,7 @@ func (wt *WorkspaceTracker) monitorLoop(ctx context.Context) {
 	}
 }
 
-// pollGitChanges periodically checks for git changes (commits, branch switches)
+// pollGitChanges periodically checks for git changes (commits, branch switches, staging)
 // This catches manual git operations done via shell that file watching might miss
 func (wt *WorkspaceTracker) pollGitChanges(ctx context.Context) {
 	defer wt.wg.Done()
@@ -190,9 +193,10 @@ func (wt *WorkspaceTracker) pollGitChanges(ctx context.Context) {
 	ticker := time.NewTicker(wt.gitPollInterval)
 	defer ticker.Stop()
 
-	// Initialize cached HEAD SHA
+	// Initialize cached HEAD SHA and index hash
 	wt.gitStateMu.Lock()
 	wt.cachedHeadSHA = wt.getHeadSHA(ctx)
+	wt.cachedIndexHash = wt.getGitStatusHash(ctx)
 	wt.gitStateMu.Unlock()
 
 	wt.logger.Info("git polling started",
@@ -222,28 +226,62 @@ func (wt *WorkspaceTracker) getHeadSHA(ctx context.Context) string {
 	return strings.TrimSpace(string(out))
 }
 
-// checkGitChanges checks if HEAD has changed and processes new commits
+// getGitStatusHash returns a hash of the git status porcelain output.
+// This is used to detect changes to the git index (staging/unstaging) that don't
+// change HEAD. The hash includes both the status codes and file paths.
+func (wt *WorkspaceTracker) getGitStatusHash(ctx context.Context) string {
+	cmd := exec.CommandContext(ctx, "git", "status", "--porcelain", "--untracked-files=all")
+	cmd.Dir = wt.workDir
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	hash := sha256.Sum256(out)
+	return hex.EncodeToString(hash[:])
+}
+
+// checkGitChanges checks if HEAD or git index has changed and processes changes
 func (wt *WorkspaceTracker) checkGitChanges(ctx context.Context) {
 	currentHead := wt.getHeadSHA(ctx)
-	if currentHead == "" {
-		return
-	}
+	currentIndexHash := wt.getGitStatusHash(ctx)
 
 	wt.gitStateMu.RLock()
 	previousHead := wt.cachedHeadSHA
+	previousIndexHash := wt.cachedIndexHash
 	wt.gitStateMu.RUnlock()
 
-	if currentHead == previousHead {
-		return // No change
+	headChanged := currentHead != "" && currentHead != previousHead
+	indexChanged := currentIndexHash != "" && currentIndexHash != previousIndexHash
+
+	// If neither HEAD nor index changed, nothing to do
+	if !headChanged && !indexChanged {
+		return
+	}
+
+	// Update cached index hash (HEAD will be updated below if it changed)
+	if indexChanged && !headChanged {
+		wt.gitStateMu.Lock()
+		wt.cachedIndexHash = currentIndexHash
+		wt.gitStateMu.Unlock()
+
+		wt.logger.Debug("git index changed (staging/unstaging detected)")
+		wt.updateGitStatus(ctx)
+		return
+	}
+
+	// HEAD changed - handle normally
+	if !headChanged {
+		return
 	}
 
 	wt.logger.Info("git HEAD changed, syncing",
 		zap.String("previous", previousHead),
 		zap.String("current", currentHead))
 
-	// Update cached HEAD
+	// Update cached HEAD and index hash
 	wt.gitStateMu.Lock()
 	wt.cachedHeadSHA = currentHead
+	wt.cachedIndexHash = currentIndexHash
 	wt.gitStateMu.Unlock()
 
 	// Check if history was rewritten (reset, rebase, amend, etc.)
