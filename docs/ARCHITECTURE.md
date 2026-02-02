@@ -26,34 +26,24 @@ Kandev uses an event-driven architecture with **Agent Communication Protocol (AC
 
 ## Current Architecture (Unified Binary)
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                    Kandev Binary                         │
-│                    (Port 8080)                           │
-│  ┌─────────────┐ ┌─────────────┐ ┌─────────────────┐   │
-│  │ Task        │ │ Agent       │ │ Orchestrator    │   │
-│  │ Service     │ │ Manager     │ │ Service         │   │
-│  └──────┬──────┘ └──────┬──────┘ └────────┬────────┘   │
-│         │               │                  │            │
-│         └───────────────┴──────────────────┘            │
-│                         │                               │
-│              ┌──────────┴──────────┐                   │
-│              │  In-Memory Event Bus │                   │
-│              └──────────┬──────────┘                   │
-│                         │                               │
-│              ┌──────────┴──────────┐                   │
-│              │   SQLite Database    │                   │
-│              │   (kandev.db)        │                   │
-│              └─────────────────────┘                   │
-└─────────────────────────────────────────────────────────┘
-                          │
-               Docker Engine (Agent Containers)
-                          │
-              ┌───────────┴───────────┐
-              │   Augment Agent       │
-              │   Container           │
-              │   (ACP via stdout)    │
-              └───────────────────────┘
+```mermaid
+flowchart TB
+    subgraph Binary["Kandev Binary (Port 8080)"]
+        Task["Task Service"]
+        Agent["Agent Manager"]
+        Orch["Orchestrator Service"]
+
+        Task & Agent & Orch --> EventBus["In-Memory Event Bus"]
+        EventBus --> DB["SQLite Database (kandev.db)"]
+    end
+
+    Binary --> Docker["Docker Engine"]
+
+    subgraph Container["Augment Agent Container"]
+        ACP["ACP via stdout"]
+    end
+
+    Docker --> Container
 ```
 
 ---
@@ -498,38 +488,26 @@ The backend implements full ACP support with:
 
 ### ACP Flow Through System (Current Implementation)
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                     Kandev Backend                               │
-│                                                                  │
-│  ┌──────────────┐    ┌──────────────┐    ┌─────────────────┐   │
-│  │ Orchestrator │───▶│ ACP Session  │───▶│ JSON-RPC Client │   │
-│  │              │    │ Manager      │    │                 │   │
-│  │ Execute(task)│    │              │    │ - Send requests │   │
-│  └──────────────┘    │ - Create     │    │ - Handle resp   │   │
-│                      │ - Prompt     │    │ - Handle notif  │   │
-│                      │ - Permission │    │ - Handle req    │   │
-│                      └──────────────┘    └────────┬────────┘   │
-│                                                   │             │
-└───────────────────────────────────────────────────┼─────────────┘
-                                                    │
-                                          Docker attach (stdin/stdout)
-                                                    │
-┌───────────────────────────────────────────────────┼─────────────┐
-│                     Agent Container               ▼             │
-│                                                                  │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │                    Auggie CLI (--acp)                     │   │
-│  │                                                           │   │
-│  │  stdin ◀────── JSON-RPC requests from client              │   │
-│  │  stdout ─────▶ JSON-RPC responses/notifications/requests  │   │
-│  │                                                           │   │
-│  │  Notifications: session/update (progress, results)        │   │
-│  │  Requests: session/request_permission                     │   │
-│  └──────────────────────────────────────────────────────────┘   │
-│                                                                  │
-│  /workspace ◀──── Mounted from host (repository_url)            │
-└──────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph Backend["Kandev Backend"]
+        Orch["Orchestrator<br/>Execute(task)"]
+        ACP["ACP Session Manager<br/>Create / Prompt / Permission"]
+        RPC["JSON-RPC Client<br/>Send requests / Handle responses"]
+        Orch --> ACP --> RPC
+    end
+
+    RPC <-->|"Docker attach (stdin/stdout)"| Agent
+
+    subgraph Agent["Agent Container"]
+        CLI["Auggie CLI (--acp)"]
+        stdin["stdin ← JSON-RPC requests"]
+        stdout["stdout → responses/notifications"]
+        CLI --- stdin
+        CLI --- stdout
+    end
+
+    Workspace["/workspace<br/>Mounted from host"] --> Agent
 ```
 
 ### Initial Agent Types
@@ -596,36 +574,33 @@ The backend implements full ACP support with:
 The system is designed for deployment on **client machines** (developer workstations, local servers) with direct access to user credentials.
 
 **Architecture:**
-```
-┌─────────────────────────────────────────────────────┐
-│           User's Local Machine                      │
-│                                                     │
-│  ┌──────────────┐  ┌──────────────┐                │
-│  │ PostgreSQL   │  │ NATS Server  │                │
-│  │ (Docker)     │  │ (Docker)     │                │
-│  └──────────────┘  └──────────────┘                │
-│                                                     │
-│  ┌──────────────────────────────────────────────┐  │
-│  │         Kandev Backend Services              │  │
-│  │  (Native binaries or Docker)                 │  │
-│  │                                              │  │
-│  │  API Gateway | Task Service | Orchestrator  │  │
-│  │  Agent Manager                               │  │
-│  └──────────────────────────────────────────────┘  │
-│                                                     │
-│  ┌──────────────────────────────────────────────┐  │
-│  │      Docker Engine (Agent Containers)        │  │
-│  │  ┌──────────┐  ┌──────────┐                 │  │
-│  │  │ Auggie   │  │ Gemini   │  ...            │  │
-│  │  │ Agent    │  │ Agent    │                 │  │
-│  │  └──────────┘  └──────────┘                 │  │
-│  └──────────────────────────────────────────────┘  │
-│                                                     │
-│  ┌──────────────────────────────────────────────┐  │
-│  │      Host Credentials (Mounted Read-Only)    │  │
-│  │  ~/.ssh/  ~/.gitconfig  ~/.git-credentials   │  │
-│  └──────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────┘
+
+```mermaid
+flowchart TB
+    subgraph Machine["User's Local Machine"]
+        subgraph Infra["Infrastructure (Docker)"]
+            PG["PostgreSQL"]
+            NATS["NATS Server"]
+        end
+
+        subgraph Services["Kandev Backend Services"]
+            Gateway["API Gateway"]
+            TaskSvc["Task Service"]
+            OrchSvc["Orchestrator"]
+            AgentMgr["Agent Manager"]
+        end
+
+        subgraph Docker["Docker Engine"]
+            Auggie["Auggie Agent"]
+            Gemini["Gemini Agent"]
+            More["..."]
+        end
+
+        Creds["Host Credentials (Read-Only)<br/>~/.ssh/ ~/.gitconfig ~/.git-credentials"]
+    end
+
+    Services --> Docker
+    Creds -.-> Docker
 ```
 
 **Deployment Methods:**

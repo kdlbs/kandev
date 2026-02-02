@@ -22,14 +22,14 @@ Hydration:
 
 ## Client Composition
 
-```
-TaskSessionPage (SSR)
-  └─ TaskPageClient
-      ├─ TaskTopBar
-      └─ TaskLayout
-          ├─ TaskSessionSidebar (left)
-          ├─ TaskCenterPanel (chat/changes/notes)
-          └─ TaskRightPanel (files + terminal)
+```mermaid
+flowchart TD
+    A["TaskSessionPage (SSR)"] --> B["TaskPageClient"]
+    B --> C["TaskTopBar"]
+    B --> D["TaskLayout"]
+    D --> E["TaskSessionSidebar (left)"]
+    D --> F["TaskCenterPanel (chat/changes/notes)"]
+    D --> G["TaskRightPanel (files + terminal)"]
 ```
 
 ## Active Selection (Store)
@@ -116,37 +116,46 @@ Handlers (global router):
   - `gitStatus` keyed by active task
 - No direct WS subscriptions.
 
-## ASCII Diagram (Current)
+## Data Flow Diagram
 
-```
-SSR
-┌──────────────────────────────────────────────────────────────┐
-│ /task/:id/:sessionId                                          │
-│  fetchTask + snapshot + agents + repos + sessions + messages  │
-│  StateHydrator -> store (activeTaskId + activeSessionId)      │
-└──────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph SSR["SSR: /task/:id/:sessionId"]
+        fetch["fetchTask + snapshot + agents + repos + sessions + messages"]
+        hydrate["StateHydrator → store"]
+    end
 
-Client
-┌─────────────────────────────── TaskPageClient ──────────────────────────────┐
-│ setActiveSession(taskId, sessionId)                                          │
-│ subscribe(board tasks)  + listen task_session.state_changed                  │
-│                                                                              │
-│  ┌─ TaskSessionSidebar (sessions + tasks)                                    │
-│  ├─ TaskCenterPanel                                                         │
-│  │   └─ TaskChatPanel                                                       │
-│  │       ├─ useTaskSession(sessionId)                                       │
-│  │       ├─ useTaskMessages(taskId, sessionId)                              │
-│  │       └─ useLazyLoadMessages(sessionId)                                  │
-│  └─ TaskRightPanel                                                          │
-│      └─ ShellTerminal (shell.output + session state)                         │
-└──────────────────────────────────────────────────────────────────────────────┘
+    subgraph Client["TaskPageClient"]
+        setActive["setActiveSession(taskId, sessionId)"]
+        subscribe["subscribe(board tasks)"]
 
-WS
-  task.subscribe -> deduped in client
-  message.added/updated -> messages.bySession
-  task_session.state_changed -> taskSessions + taskSessionStatesByTaskId
-  git.status -> gitStatus (task)
-  shell.output -> shell.outputs[task]
+        subgraph Components
+            sidebar["TaskSessionSidebar"]
+            center["TaskCenterPanel"]
+            right["TaskRightPanel"]
+        end
+
+        subgraph ChatPanel["TaskChatPanel"]
+            useSession["useTaskSession(sessionId)"]
+            useMessages["useTaskMessages(taskId, sessionId)"]
+            useLazy["useLazyLoadMessages(sessionId)"]
+        end
+
+        shell["ShellTerminal"]
+    end
+
+    subgraph WS["WebSocket Events"]
+        ws1["task.subscribe → deduped"]
+        ws2["message.added/updated → messages.bySession"]
+        ws3["task_session.state_changed → taskSessions"]
+        ws4["git.status → gitStatus"]
+        ws5["shell.output → shell.outputs"]
+    end
+
+    SSR --> Client
+    center --> ChatPanel
+    right --> shell
+    WS --> Client
 ```
 
 ## Hooks Review (Granularity + Reuse)

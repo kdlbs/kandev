@@ -20,56 +20,36 @@ Git operations are executed **in agentctl**, not in the backend. This ensures co
 
 ### Request Flow
 
-```
-Frontend UI (Git Actions Dropdown)
-    │
-    ▼
-WebSocket Client
-    │ worktree.pull / worktree.push / worktree.rebase / worktree.merge
-    ▼
-Backend WebSocket Gateway
-    │
-    ▼
-Git Handlers (internal/agent/handlers/git_handlers.go)
-    │ GetExecutionBySessionID(sessionID)
-    ▼
-Lifecycle Manager → AgentExecution → agentctl.Client
-    │
-    │ HTTP POST /api/v1/git/<operation>
-    ▼
-agentctl HTTP API (server/api/git.go)
-    │
-    ▼
-Git Command Execution (server/process/git.go)
-    │ exec.Command("git", ...) in worktree directory
-    ▼
-HTTP Response → Backend Handler → WebSocket Response → Frontend
+```mermaid
+flowchart TD
+    A["Frontend UI (Git Actions Dropdown)"] --> B["WebSocket Client"]
+    B -->|"worktree.pull/push/rebase/merge"| C["Backend WebSocket Gateway"]
+    C --> D["Git Handlers"]
+    D -->|"GetExecutionBySessionID"| E["Lifecycle Manager"]
+    E --> F["AgentExecution"]
+    F --> G["agentctl.Client"]
+    G -->|"HTTP POST /api/v1/git/op"| H["agentctl HTTP API"]
+    H --> I["Git Command Execution"]
+    I -->|"exec.Command git"| J["Worktree Directory"]
+    J --> K["HTTP Response"]
+    K --> L["Backend Handler"]
+    L --> M["WebSocket Response"]
+    M --> N["Frontend"]
 ```
 
 ### Notification Flow (Git Status Updates)
 
 After any git operation, the workspace state changes. Updates flow through the event bus:
 
-```
-agentctl WorkspaceTracker (detects git status change)
-    │ workspace stream: git_status message
-    ▼
-Backend StreamManager (OnGitStatus callback)
-    │
-    ▼
-EventPublisher.PublishGitStatus()
-    │
-    ▼
-Event Bus
-    │
-    ▼
-TaskNotificationBridge
-    │
-    ▼
-Hub.BroadcastToSession(sessionID)
-    │
-    ▼
-Frontend WebSocket → Zustand Store update
+```mermaid
+flowchart TD
+    A["agentctl WorkspaceTracker"] -->|"git_status message"| B["Backend StreamManager"]
+    B -->|"OnGitStatus callback"| C["EventPublisher.PublishGitStatus"]
+    C --> D["Event Bus"]
+    D --> E["TaskNotificationBridge"]
+    E --> F["Hub.BroadcastToSession"]
+    F --> G["Frontend WebSocket"]
+    G --> H["Zustand Store update"]
 ```
 
 ## agentctl API
