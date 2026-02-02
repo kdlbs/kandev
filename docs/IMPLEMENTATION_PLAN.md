@@ -11,59 +11,34 @@
 ## 1. System Architecture Overview
 
 ### High-Level Architecture
-```
-┌─────────────────┐
-│   Frontend UI   │ (Out of scope - connects via WebSocket)
-└────────┬────────┘
-         │ Single WebSocket Connection
-         │ ws://localhost:8080/ws
-         ▼
-┌─────────────────────────────────────────┐
-│         API Gateway Service             │
-│  - WebSocket connection management      │
-│  - Message routing & dispatching        │
-│  - Authentication & Authorization       │
-│  - Rate limiting                        │
-└────────┬────────────────────────────────┘
-         │ WebSocket Messages
-    ┌────┴────┬──────────────┬─────────────┐
-    ▼         ▼              ▼             ▼
-┌────────┐ ┌──────────┐ ┌─────────┐ ┌──────────┐
-│ Task   │ │Orchestr- │ │ Agent   │ │ Event    │
-│Service │ │ator      │ │ Manager │ │ Bus      │
-│        │ │ Service  │ │ Service │ │ (NATS)   │
-│        │ │+ ACP     │ │+ ACP    │ │          │
-└───┬────┘ └────┬─────┘ └────┬────┘ └────┬─────┘
-    │           │            │           │
-    └───────────┴────────────┴───────────┘
-                     │
-              ┌──────┴──────┐
-              ▼             ▼
-         ┌─────────┐   ┌──────────────┐
-         │PostgreSQL│   │Docker Engine │
-         │Database  │   │              │
-         └──────────┘   └──────┬───────┘
-                               │
-                    ┌──────────┴──────────┐
-                    ▼                     ▼
-              ┌──────────┐          ┌──────────┐
-              │AI Agent  │          │AI Agent  │
-              │Container │   ...    │Container │
-              │(ACP      │          │(ACP      │
-              │Streaming)│          │Streaming)│
-              └──────────┘          └──────────┘
-                    │                     │
-                    └──────────┬──────────┘
-                               │
-                    ACP Protocol (Streaming)
-                               │
-                    ┌──────────┴──────────┐
-                    ▼                     ▼
-              ┌──────────┐          ┌──────────┐
-              │Host Git  │          │Host SSH  │
-              │Credentials│         │Keys      │
-              │(Mounted) │          │(Mounted) │
-              └──────────┘          └──────────┘
+
+```mermaid
+flowchart TB
+    Frontend["Frontend UI"] -->|"WebSocket ws://localhost:8080/ws"| Gateway
+
+    subgraph Gateway["API Gateway Service"]
+        gw1["WebSocket management"]
+        gw2["Message routing"]
+        gw3["Auth & Rate limiting"]
+    end
+
+    Gateway --> Task["Task Service"]
+    Gateway --> Orch["Orchestrator + ACP"]
+    Gateway --> Agent["Agent Manager + ACP"]
+    Gateway --> NATS["Event Bus (NATS)"]
+
+    Task & Orch & Agent & NATS --> DB["PostgreSQL"]
+    Agent --> Docker["Docker Engine"]
+
+    Docker --> Container1["AI Agent Container<br/>(ACP Streaming)"]
+    Docker --> Container2["AI Agent Container<br/>(ACP Streaming)"]
+
+    Container1 & Container2 -->|"ACP Protocol"| Creds
+
+    subgraph Creds["Host Credentials (Mounted)"]
+        Git["Git Credentials"]
+        SSH["SSH Keys"]
+    end
 ```
 
 ### Agent Communication Protocol (ACP)

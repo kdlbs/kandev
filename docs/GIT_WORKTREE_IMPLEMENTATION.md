@@ -101,58 +101,36 @@ KANDEV_WORKTREE_ENABLED=true
 
 ### Lifecycle Diagram
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         WORKTREE LIFECYCLE                                   │
-│                    (Tied to Task Lifetime)                                   │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│  TASK CREATED                                                                │
-│       │                                                                      │
-│       ▼                                                                      │
-│  ┌─────────────────────────────────────────────────────────────────────────┐│
-│  │ FIRST AGENT LAUNCH                                                       ││
-│  │                                                                           ││
-│  │   ┌─────────────┐     ┌─────────────┐     ┌─────────────┐               ││
-│  │   │ Check if    │────▶│ Create new  │────▶│ Mount into  │               ││
-│  │   │ worktree    │ No  │ worktree &  │     │ container   │               ││
-│  │   │ exists      │     │ branch      │     │             │               ││
-│  │   └─────────────┘     └─────────────┘     └─────────────┘               ││
-│  │         │ Yes                                    │                       ││
-│  │         ▼                                        ▼                       ││
-│  │   ┌─────────────┐                         ┌─────────────┐               ││
-│  │   │ Reuse       │────────────────────────▶│ Agent       │               ││
-│  │   │ existing    │                         │ Running     │               ││
-│  │   │ worktree    │                         └─────────────┘               ││
-│  │   └─────────────┘                                │                       ││
-│  │                                                  ▼                       ││
-│  │                                           ┌─────────────┐               ││
-│  │                                           │ Agent       │               ││
-│  │                                           │ Completes   │               ││
-│  │                                           └─────────────┘               ││
-│  │                                                  │                       ││
-│  │                                    ┌─────────────┴─────────────┐        ││
-│  │                                    ▼                           ▼        ││
-│  │                             ┌─────────────┐             ┌─────────────┐ ││
-│  │                             │ Worktree    │             │ User sends  │ ││
-│  │                             │ PERSISTS    │◀────────────│ follow-up   │ ││
-│  │                             │ (changes    │  Relaunch   │ prompt      │ ││
-│  │                             │ preserved)  │             └─────────────┘ ││
-│  │                             └─────────────┘                              ││
-│  └─────────────────────────────────────────────────────────────────────────┘│
-│                                      │                                       │
-│                                      ▼                                       │
-│  ┌─────────────────────────────────────────────────────────────────────────┐│
-│  │ TASK CLOSED/DELETED BY USER                                              ││
-│  │                                                                           ││
-│  │   User chooses one of:                                                   ││
-│  │     ├── Merge → merge worktree branch to base, then cleanup              ││
-│  │     ├── Discard → cleanup worktree and branch without merging            ││
-│  │     └── Keep Branch → cleanup worktree, keep branch for manual merge     ││
-│  │                                                                           ││
-│  │   OR: Task deleted directly → cleanup worktree and branch                ││
-│  └─────────────────────────────────────────────────────────────────────────┘│
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph Lifecycle["WORKTREE LIFECYCLE (Tied to Task Lifetime)"]
+
+        TaskCreated["Task Created"] --> AgentLaunch
+
+        subgraph AgentLaunch["First Agent Launch"]
+            Check{"Worktree exists?"}
+            Check -->|No| Create["Create new worktree & branch"]
+            Check -->|Yes| Reuse["Reuse existing worktree"]
+            Create --> Mount["Mount into container"]
+            Reuse --> Mount
+            Mount --> Running["Agent Running"]
+            Running --> Completes["Agent Completes"]
+        end
+
+        Completes --> Persists["Worktree PERSISTS<br/>(changes preserved)"]
+        Completes --> Followup["User sends follow-up"]
+        Followup -->|Relaunch| Mount
+
+        Persists --> TaskClosed
+
+        subgraph TaskClosed["Task Closed/Deleted"]
+            Options["User chooses:"]
+            Merge["Merge → merge branch to base, cleanup"]
+            Discard["Discard → cleanup without merging"]
+            Keep["Keep Branch → cleanup worktree, keep branch"]
+            Delete["Task deleted → cleanup worktree and branch"]
+        end
+    end
 ```
 
 ### 2.1 Creation Timing
@@ -956,29 +934,26 @@ git worktree unlock /tmp/kandev/worktrees/task-123
 
 ## Appendix B: Sequence Diagram - Agent Launch with Worktree
 
-```
-Client          Orchestrator       Executor        LifecycleManager    WorktreeManager    Docker
-  │                 │                  │                  │                  │               │
-  │ orchestrator.start                 │                  │                  │               │
-  ├────────────────►│                  │                  │                  │               │
-  │                 │ ExecuteTask      │                  │                  │               │
-  │                 ├─────────────────►│                  │                  │               │
-  │                 │                  │ LaunchAgent      │                  │               │
-  │                 │                  ├─────────────────►│                  │               │
-  │                 │                  │                  │ Create()         │               │
-  │                 │                  │                  ├─────────────────►│               │
-  │                 │                  │                  │                  │ git worktree add
-  │                 │                  │                  │                  ├──────────────►│
-  │                 │                  │                  │                  │◄──────────────┤
-  │                 │                  │                  │◄─────────────────┤               │
-  │                 │                  │                  │ worktree.Path    │               │
-  │                 │                  │                  │                  │               │
-  │                 │                  │                  │ CreateContainer (mount worktree)│
-  │                 │                  │                  ├──────────────────────────────────►
-  │                 │                  │                  │◄──────────────────────────────────
-  │                 │                  │◄─────────────────┤                  │               │
-  │                 │◄─────────────────┤                  │                  │               │
-  │◄────────────────┤                  │                  │                  │               │
-  │  response       │                  │                  │                  │               │
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Orchestrator
+    participant Executor
+    participant LifecycleManager
+    participant WorktreeManager
+    participant Docker
+
+    Client->>Orchestrator: orchestrator.start
+    Orchestrator->>Executor: ExecuteTask
+    Executor->>LifecycleManager: LaunchAgent
+    LifecycleManager->>WorktreeManager: Create()
+    WorktreeManager->>Docker: git worktree add
+    Docker-->>WorktreeManager: done
+    WorktreeManager-->>LifecycleManager: worktree.Path
+    LifecycleManager->>Docker: CreateContainer (mount worktree)
+    Docker-->>LifecycleManager: container created
+    LifecycleManager-->>Executor: agent launched
+    Executor-->>Orchestrator: task executing
+    Orchestrator-->>Client: response
 ```
 

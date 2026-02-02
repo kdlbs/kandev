@@ -56,20 +56,16 @@ All messages follow this JSON envelope format:
 
 ## System Flow
 
-```
-┌─────────────┐     WebSocket      ┌─────────────────────────────────────────────┐
-│   Client    │◄──────────────────►│               Kandev Server                 │
-│  (Browser)  │  Single Connection │                                             │
-└─────────────┘                    │  ┌─────────┐ ┌─────────┐ ┌──────────────┐   │
-                                   │  │  Task   │ │  Agent  │ │ Orchestrator │   │
-                                   │  │ Service │ │ Manager │ │   Service    │   │
-                                   │  └─────────┘ └─────────┘ └──────────────┘   │
-                                   │                   │                          │
-                                   │            ┌──────▼──────┐                   │
-                                   │            │   Docker    │                   │
-                                   │            │  Containers │                   │
-                                   │            └─────────────┘                   │
-                                   └─────────────────────────────────────────────┘
+```mermaid
+flowchart LR
+    Client["Client (Browser)"] <-->|"WebSocket"| Server
+
+    subgraph Server["Kandev Server"]
+        Task["Task Service"]
+        Agent["Agent Manager"]
+        Orch["Orchestrator Service"]
+        Agent --> Docker["Docker Containers"]
+    end
 ```
 
 ### Typical Workflow
