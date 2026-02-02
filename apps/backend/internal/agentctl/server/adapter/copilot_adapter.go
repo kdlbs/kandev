@@ -164,6 +164,9 @@ func (a *CopilotAdapter) Initialize(ctx context.Context) error {
 	// Set event handler before starting
 	a.client.SetEventHandler(a.handleEvent)
 
+	// Set permission handler before starting
+	a.client.SetPermissionHandler(a.handlePermissionRequest)
+
 	// Start the SDK client (connects to external server via TCP)
 	if err := a.client.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start Copilot SDK client: %w", err)
@@ -793,6 +796,74 @@ func (a *CopilotAdapter) signalCompletion(success bool, errMsg string) {
 		default:
 		}
 	}
+}
+
+// handlePermissionRequest handles permission requests from the Copilot SDK.
+// This is called by the SDK when the agent needs permission for an action.
+func (a *CopilotAdapter) handlePermissionRequest(
+	request copilot.PermissionRequest,
+	invocation copilot.PermissionInvocation,
+) (copilot.PermissionRequestResult, error) {
+	a.mu.RLock()
+	handler := a.permissionHandler
+	sessionID := a.sessionID
+	a.mu.RUnlock()
+
+	// If no handler is set, auto-approve
+	if handler == nil {
+		a.logger.Debug("auto-approving permission (no handler)",
+			zap.String("kind", request.Kind),
+			zap.String("tool_call_id", request.ToolCallID))
+		return copilot.PermissionRequestResult{Kind: "approved"}, nil
+	}
+
+	// Build title from permission kind
+	title := fmt.Sprintf("Permission: %s", request.Kind)
+	if request.ToolCallID != "" {
+		title = fmt.Sprintf("Permission for tool %s: %s", request.ToolCallID, request.Kind)
+	}
+
+	// Convert Copilot permission request to kandev format
+	permReq := &PermissionRequest{
+		SessionID:     sessionID,
+		ToolCallID:    request.ToolCallID,
+		Title:         title,
+		ActionType:    request.Kind,
+		ActionDetails: request.Extra,
+		// Use tool_call_id as PendingID if available, otherwise generate one
+		PendingID: request.ToolCallID,
+		Options: []PermissionOption{
+			{OptionID: "allow", Name: "Allow", Kind: "allow_once"},
+			{OptionID: "deny", Name: "Deny", Kind: "reject_once"},
+		},
+	}
+
+	a.logger.Info("requesting permission from user",
+		zap.String("kind", request.Kind),
+		zap.String("tool_call_id", request.ToolCallID),
+		zap.String("session_id", sessionID))
+
+	// Call the permission handler (blocking - waits for user response)
+	ctx := context.Background()
+	resp, err := handler(ctx, permReq)
+	if err != nil {
+		a.logger.Warn("permission handler error", zap.Error(err))
+		return copilot.PermissionRequestResult{Kind: "denied-interactively-by-user"}, nil
+	}
+
+	if resp == nil || resp.Cancelled {
+		a.logger.Info("permission denied (cancelled)")
+		return copilot.PermissionRequestResult{Kind: "denied-interactively-by-user"}, nil
+	}
+
+	// Convert response
+	if resp.OptionID == "allow" {
+		a.logger.Info("permission approved")
+		return copilot.PermissionRequestResult{Kind: "approved"}, nil
+	}
+
+	a.logger.Info("permission denied")
+	return copilot.PermissionRequestResult{Kind: "denied-interactively-by-user"}, nil
 }
 
 // RequiresProcessKill returns true because the Copilot CLI server doesn't exit on stdin close.
