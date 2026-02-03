@@ -46,9 +46,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
 import { Popover, PopoverContent, PopoverTrigger } from '@kandev/ui/popover';
 import { Checkbox } from '@kandev/ui/checkbox';
 import { Label } from '@kandev/ui/label';
-import { CommitStatBadge, LineStat } from '@/components/diff-stat';
+import { CommitStatBadge } from '@/components/diff-stat';
 import { useSessionGitStatus } from '@/hooks/domains/session/use-session-git-status';
-import { useSessionCommits } from '@/hooks/domains/session/use-session-commits';
 import { useGitOperations } from '@/hooks/use-git-operations';
 import type { FileInfo } from '@/lib/state/slices';
 import { formatUserHomePath } from '@/lib/utils';
@@ -105,7 +104,6 @@ const TaskTopBar = memo(function TaskTopBar({
   const router = useRouter();
   const { toast } = useToast();
   const gitStatus = useSessionGitStatus(activeSessionId ?? null);
-  const { commits } = useSessionCommits(activeSessionId ?? null);
   const { pull, push, rebase, merge, commit, createPR, isLoading: isGitLoading } = useGitOperations(activeSessionId ?? null);
   const { open: openFolder, isLoading: isOpenFolderLoading } = useOpenSessionFolder(activeSessionId);
 
@@ -127,14 +125,6 @@ const TaskTopBar = memo(function TaskTopBar({
       uncommittedDeletions += file.deletions || 0;
     }
   }
-
-  // Calculate cumulative additions and deletions from commits.
-  const commitAdditions = commits.reduce((sum, c) => sum + c.insertions, 0);
-  const commitDeletions = commits.reduce((sum, c) => sum + c.deletions, 0);
-
-  // Combined total (uncommitted + commits)
-  const totalAdditions = uncommittedAdditions + commitAdditions;
-  const totalDeletions = uncommittedDeletions + commitDeletions;
 
   const handleGitOperation = useCallback(async (
     operation: () => Promise<{ success: boolean; output: string; error?: string; conflict_files?: string[] }>,
@@ -389,20 +379,6 @@ const TaskTopBar = memo(function TaskTopBar({
               </Tooltip>
             )}
           </div>
-        )}
-
-        {/* Git Status: Total Lines Changed (uncommitted + commits) */}
-        {(totalAdditions > 0 || totalDeletions > 0) && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span className="cursor-default">
-                <LineStat added={totalAdditions} removed={totalDeletions} />
-              </span>
-            </TooltipTrigger>
-            <TooltipContent>
-              Total changes{commits.length > 0 ? ` (${commits.length} commit${commits.length !== 1 ? 's' : ''}${uncommittedAdditions > 0 || uncommittedDeletions > 0 ? ' + uncommitted' : ''})` : ''}
-            </TooltipContent>
-          </Tooltip>
         )}
 
       </div>

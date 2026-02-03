@@ -430,6 +430,22 @@ export const DiffViewer = memo(function DiffViewer({
       disableFileHeader: !showHeader,
       lineDiffType: 'word',
       overflow: wordWrap ? 'wrap' : 'scroll',
+      unsafeCSS: `
+        * {
+          background: transparent !important;
+        }
+
+        /* Reduce icon size */
+        [data-change-icon] {
+          width: 12px !important;
+          height: 12px !important;
+        }
+
+        /* Adjust header padding */
+        [data-diffs-header] {
+          padding-inline: 12px !important;
+        }
+      `,
     }),
     [globalViewMode, resolvedTheme, enableComments, showHeader, handleLineSelectionEnd, wordWrap]
   );
@@ -476,6 +492,11 @@ export const DiffViewer = memo(function DiffViewer({
         renderAnnotation={renderAnnotation}
         renderHeaderMetadata={showHeader ? renderHeaderMetadata : undefined}
         renderHoverUtility={renderHoverUtility}
+        style={{
+          '--diffs-addition-color-override': 'rgb(var(--git-addition))',
+          '--diffs-deletion-color-override': 'rgb(var(--git-deletion))',
+          '--diffs-font-size': '12px',
+        } as React.CSSProperties}
         className={cn(
           'rounded-md border border-border/50',
           compact && 'text-xs'

@@ -92,6 +92,10 @@
   --scrollbar-thumb-hover: oklch(0.66 0 0);
   --scrollbar-track: var(--background);
   --sidebar-ring: oklch(0.708 0 0);
+
+  /* Git diff colors - centralized for easy maintenance */
+  --git-addition: 16 185 129; /* emerald-500 */
+  --git-deletion: 244 63 94;  /* rose-500 */
 }
 
 .dark {
@@ -129,6 +133,10 @@
   --scrollbar-thumb-hover: oklch(0.62 0 0 / 0.8);
   --scrollbar-track: var(--background);
   --sidebar-ring: oklch(0.556 0 0);
+
+  /* Git diff colors - same as light mode for consistency */
+  --git-addition: 16 185 129; /* emerald-500 */
+  --git-deletion: 244 63 94;  /* rose-500 */
 }
 
 @layer base {

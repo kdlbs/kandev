@@ -24,6 +24,7 @@ import { useGitOperations } from '@/hooks/use-git-operations';
 import { FileDiffViewer } from '@/components/diff';
 import type { FileInfo } from '@/lib/state/slices';
 import type { SelectedDiff } from './task-layout';
+import { FileStatusIcon } from './file-status-icon';
 
 type TaskChangesPanelProps = {
   selectedDiff: SelectedDiff | null;
@@ -88,15 +89,18 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
     if (!cumulativeDiff?.files || Object.keys(cumulativeDiff.files).length === 0) {
       return [];
     }
+    // Create a Set of uncommitted file paths for efficient lookup
+    const uncommittedPaths = new Set(uncommittedFiles.map(f => f.path));
+
     return Object.entries(cumulativeDiff.files)
-      .filter(([, file]) => file.diff) // Only include files with diffs
+      .filter(([path, file]) => file.diff && !uncommittedPaths.has(path)) // Exclude uncommitted files
       .map(([path, file]) => ({
         path,
         diff: file.diff!,
         additions: file.additions ?? 0,
         deletions: file.deletions ?? 0,
       }));
-  }, [cumulativeDiff]);
+  }, [cumulativeDiff, uncommittedFiles]);
 
   const selectedFile = selectedDiffPath && gitStatus?.files ? gitStatus.files[selectedDiffPath] : null;
   // Prioritize current git status for uncommitted files, use provided content only for historical diffs
@@ -253,9 +257,12 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
                   return (
                     <div key={diffKey} className="space-y-2">
                       <div className="flex items-center justify-between">
-                        <Badge variant="secondary" className="rounded-full text-xs">
-                          {file.path}
-                        </Badge>
+                        <div className="flex items-center gap-2">
+                          <FileStatusIcon status="modified" />
+                          <Badge variant="secondary" className="rounded-full text-xs">
+                            {file.path}
+                          </Badge>
+                        </div>
                         <span className="text-xs text-muted-foreground">
                           <span className="text-emerald-500">+{file.additions}</span>
                           {' / '}
