@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/worktree"
@@ -2479,7 +2480,7 @@ func (s *Service) publishMessageEvent(ctx context.Context, eventType string, mes
 		"turn_id":        message.TurnID,
 		"author_type":    string(message.AuthorType),
 		"author_id":      message.AuthorID,
-		"content":        models.StripSystemContent(message.Content),
+		"content":        sysprompt.StripSystemContent(message.Content),
 		"type":           messageType,
 		"requests_input": message.RequestsInput,
 		"created_at":     message.CreatedAt.Format(time.RFC3339),
