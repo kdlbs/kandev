@@ -15,6 +15,7 @@ type CliOptions = {
   version?: string;
   backendPort?: number;
   webPort?: number;
+  verbose?: boolean;
 };
 
 function printHelp() {
@@ -23,7 +24,7 @@ function printHelp() {
 Usage:
   kandev run [--version <tag>] [--backend-port <port>] [--web-port <port>]
   kandev dev [--backend-port <port>] [--web-port <port>]
-  kandev start [--backend-port <port>] [--web-port <port>]
+  kandev start [--backend-port <port>] [--web-port <port>] [--verbose]
   kandev [--version <tag>] [--backend-port <port>] [--web-port <port>]
   kandev --dev [--backend-port <port>] [--web-port <port>]
 
@@ -44,6 +45,7 @@ Options:
   --version        Release tag to install (default: latest).
   --backend-port   Override backend port.
   --web-port       Override web port.
+  --verbose, -v    Show info logs from backend + web (start mode only).
   --help, -h       Show help.
 `);
 }
@@ -89,6 +91,10 @@ function parseArgs(argv: string[]): CliOptions {
     }
     if (arg.startsWith("--web-port=")) {
       opts.webPort = Number(arg.split("=")[1]);
+      continue;
+    }
+    if (arg === "--verbose" || arg === "-v") {
+      opts.verbose = true;
       continue;
     }
   }
@@ -137,7 +143,7 @@ async function main(): Promise<void> {
     if (!repoRoot) {
       throw new Error("Unable to locate repo root for start. Run from the repo.");
     }
-    await runStart({ repoRoot, backendPort, webPort });
+    await runStart({ repoRoot, backendPort, webPort, verbose: raw.verbose });
     return;
   }
 

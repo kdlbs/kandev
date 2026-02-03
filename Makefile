@@ -20,6 +20,8 @@ CYAN := \033[36m
 YELLOW := \033[33m
 MAGENTA := \033[35m
 
+VERBOSE ?= 0
+
 # Phase headers
 define phase
 	@printf "\n$(BOLD)$(BLUE)━━━ $(1) ━━━$(RESET)\n\n"
@@ -49,6 +51,8 @@ help:
 	@echo ""
 	@echo "Production Commands:"
 	@echo "  start            Install deps, build, and start backend + web in production mode"
+	@echo "  start-verbose    Start in production mode with info logs from backend + web"
+	@echo "  start VERBOSE=1  Same as start-verbose"
 	@echo ""
 	@echo "Build Commands:"
 	@echo "  build            Build backend and web app"
@@ -123,7 +127,11 @@ start:
 	@$(MAKE) -s build-web-quiet
 	$(call success,Build complete)
 	$(call phase,Starting Server)
-	@cd $(APPS_DIR) && $(PNPM) -C cli dev -- start
+	@cd $(APPS_DIR) && $(PNPM) -C cli dev -- start $(if $(filter 1 true yes,$(VERBOSE)),--verbose,)
+
+.PHONY: start-verbose
+start-verbose:
+	@$(MAKE) start VERBOSE=1
 
 .PHONY: build-backend
 build-backend:
