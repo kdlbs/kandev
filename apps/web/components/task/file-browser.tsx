@@ -8,6 +8,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import { requestFileTree, requestFileContent, searchWorkspaceFiles } from '@/lib/ws/workspace-files';
 import type { FileTreeNode, FileContentResponse, OpenFileTab } from '@/lib/types/backend';
+import { useSessionAgentctl } from '@/hooks/domains/session/use-session-agentctl';
 import {
   getFilesPanelExpandedPaths,
   setFilesPanelExpandedPaths,
@@ -29,6 +30,9 @@ export function FileBrowser({ sessionId, onOpenFile, onDeleteFile, isSearchOpen 
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const [loadingPaths, setLoadingPaths] = useState<Set<string>>(new Set());
   const [isLoadingTree, setIsLoadingTree] = useState(true);
+  const [loadState, setLoadState] = useState<'loading' | 'waiting' | 'loaded' | 'manual' | 'error'>('loading');
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const agentctlStatus = useSessionAgentctl(sessionId);
 
   // Search state
   const [localSearchQuery, setLocalSearchQuery] = useState('');
@@ -42,6 +46,12 @@ export function FileBrowser({ sessionId, onOpenFile, onDeleteFile, isSearchOpen 
   const scrollSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const hasRestoredScrollRef = useRef<string | null>(null);
   const hasInitializedExpandedRef = useRef<string | null>(null);
+  const retryAttemptRef = useRef(0);
+  const retryTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const loadInFlightRef = useRef(false);
+
+  const MAX_RETRY_ATTEMPTS = 4;
+  const RETRY_DELAYS_MS = [1000, 2000, 5000, 10000];
 
   // Focus search input when search opens
   useEffect(() => {
@@ -62,11 +72,66 @@ export function FileBrowser({ sessionId, onOpenFile, onDeleteFile, isSearchOpen 
     }
   }, [isSearchOpen]);
 
+  const clearRetryTimer = useCallback(() => {
+    if (retryTimerRef.current) {
+      clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = null;
+    }
+  }, []);
+
+  const loadTree = useCallback(async (options?: { resetRetry?: boolean }) => {
+    if (loadInFlightRef.current) return;
+    loadInFlightRef.current = true;
+    setIsLoadingTree(true);
+    setLoadState('loading');
+    setLoadError(null);
+
+    if (options?.resetRetry) {
+      retryAttemptRef.current = 0;
+      clearRetryTimer();
+    }
+
+    try {
+      const client = getWebSocketClient();
+      if (!client) {
+        throw new Error('WebSocket client not available');
+      }
+
+      const response = await requestFileTree(client, sessionId, '', 1);
+      setTree(response.root ?? null);
+      setLoadState('loaded');
+      retryAttemptRef.current = 0;
+      clearRetryTimer();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to load file tree';
+      setLoadError(message);
+
+      if (retryAttemptRef.current < MAX_RETRY_ATTEMPTS) {
+        const delay = RETRY_DELAYS_MS[Math.min(retryAttemptRef.current, RETRY_DELAYS_MS.length - 1)];
+        retryAttemptRef.current += 1;
+        setLoadState('waiting');
+        clearRetryTimer();
+        retryTimerRef.current = setTimeout(() => {
+          void loadTree();
+        }, delay);
+      } else {
+        setLoadState('manual');
+      }
+    } finally {
+      setIsLoadingTree(false);
+      loadInFlightRef.current = false;
+    }
+  }, [clearRetryTimer, sessionId]);
+
   // Load initial tree - always try to load, don't wait for agentctl ready status
   useEffect(() => {
     setTree(null);
     setLoadingPaths(new Set());
     setIsLoadingTree(true);
+    setLoadState('loading');
+    setLoadError(null);
+    retryAttemptRef.current = 0;
+    clearRetryTimer();
     // Reset the auto-expand ref so it will run for the new session
     hasInitializedExpandedRef.current = null;
 
@@ -81,22 +146,15 @@ export function FileBrowser({ sessionId, onOpenFile, onDeleteFile, isSearchOpen 
       // Leave hasInitializedExpandedRef.current as null so auto-expand will run
     }
 
-    const loadTree = async () => {
-      try {
-        const client = getWebSocketClient();
-        if (!client) return;
+    void loadTree({ resetRetry: true });
+  }, [clearRetryTimer, loadTree, sessionId]);
 
-        const response = await requestFileTree(client, sessionId, '', 1);
-        setTree(response.root);
-      } catch (error) {
-        console.error('Failed to load file tree:', error);
-      } finally {
-        setIsLoadingTree(false);
-      }
-    };
-
-    loadTree();
-  }, [sessionId]);
+  // When agentctl becomes ready, retry loading the tree
+  useEffect(() => {
+    if (!agentctlStatus.isReady) return;
+    if (loadState === 'loaded') return;
+    void loadTree({ resetRetry: true });
+  }, [agentctlStatus.isReady, loadState, loadTree]);
 
   // Auto-expand first level folders and load their children
   // Note: We intentionally use tree?.children?.length instead of tree to avoid re-running when tree updates
@@ -152,7 +210,8 @@ export function FileBrowser({ sessionId, onOpenFile, onDeleteFile, isSearchOpen 
       // Refresh the root tree when any file changes
       try {
         const response = await requestFileTree(client, sessionId, '', 1);
-        setTree(response.root);
+        setTree(response.root ?? null);
+        setLoadState('loaded');
       } catch (error) {
         console.error('Failed to refresh file tree:', error);
       }
@@ -243,6 +302,12 @@ export function FileBrowser({ sessionId, onOpenFile, onDeleteFile, isSearchOpen 
       }
     };
   }, []);
+
+  useEffect(() => {
+    return () => {
+      clearRetryTimer();
+    };
+  }, [clearRetryTimer]);
 
   const toggleExpand = useCallback(async (node: FileTreeNode) => {
     if (!node.is_dir) return;
@@ -482,8 +547,24 @@ export function FileBrowser({ sessionId, onOpenFile, onDeleteFile, isSearchOpen 
       <ScrollArea className="flex-1" ref={scrollAreaRef}>
         {isSearchOpen && searchResults !== null ? (
           renderSearchResults()
-        ) : isLoadingTree ? (
+        ) : loadState === 'loading' || isLoadingTree ? (
           <div className="p-4 text-sm text-muted-foreground">Loading files...</div>
+        ) : loadState === 'waiting' ? (
+          <div className="p-4 text-sm text-muted-foreground flex items-center gap-2">
+            <IconLoader2 className="h-3.5 w-3.5 animate-spin" />
+            Preparing workspace...
+          </div>
+        ) : loadState === 'manual' ? (
+          <div className="p-4 text-sm text-muted-foreground space-y-2">
+            <div>{loadError ?? 'Workspace is still starting.'}</div>
+            <button
+              type="button"
+              className="text-xs text-foreground underline cursor-pointer"
+              onClick={() => void loadTree({ resetRetry: true })}
+            >
+              Retry
+            </button>
+          </div>
         ) : tree ? (
           <div className="pb-2">{renderTreeNode(tree)}</div>
         ) : (

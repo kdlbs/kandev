@@ -27,6 +27,9 @@ type AgentctlEventPayload struct {
 	SessionID        string `json:"session_id"`
 	AgentExecutionID string `json:"agent_execution_id"`
 	ErrorMessage     string `json:"error_message,omitempty"`
+	WorktreeID       string `json:"worktree_id,omitempty"`
+	WorktreePath     string `json:"worktree_path,omitempty"`
+	WorktreeBranch   string `json:"worktree_branch,omitempty"`
 }
 
 // ACPSessionCreatedPayload is the payload when an ACP session is created.

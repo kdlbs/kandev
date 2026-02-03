@@ -68,11 +68,25 @@ func (p *EventPublisher) PublishAgentctlEvent(ctx context.Context, eventType str
 		return
 	}
 
+	var worktreeID string
+	var worktreeBranch string
+	if execution.Metadata != nil {
+		if id, ok := execution.Metadata[MetadataKeyWorktreeID].(string); ok {
+			worktreeID = id
+		}
+		if branch, ok := execution.Metadata[MetadataKeyWorktreeBranch].(string); ok {
+			worktreeBranch = branch
+		}
+	}
+
 	payload := AgentctlEventPayload{
 		TaskID:           execution.TaskID,
 		SessionID:        execution.SessionID,
 		AgentExecutionID: execution.ID,
 		ErrorMessage:     errMsg,
+		WorktreeID:       worktreeID,
+		WorktreePath:     execution.WorkspacePath,
+		WorktreeBranch:   worktreeBranch,
 	}
 
 	event := bus.NewEvent(eventType, "agent-manager", payload)
@@ -505,4 +519,3 @@ func (p *EventPublisher) PublishAvailableCommands(execution *AgentExecution, com
 			zap.Error(err))
 	}
 }
-
