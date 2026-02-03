@@ -16,6 +16,7 @@ export const defaultUIState: UISliceState = {
   connection: { status: 'disconnected', error: null },
   mobileKanban: { activeColumnIndex: 0, isMenuOpen: false },
   mobileSession: { activePanelBySessionId: {}, isTaskSwitcherOpen: false },
+  chatInput: { planModeBySessionId: {} },
 };
 
 export const createUISlice: StateCreator<UISlice, [['zustand/immer', never]], [], UISlice> = (
@@ -81,5 +82,10 @@ export const createUISlice: StateCreator<UISlice, [['zustand/immer', never]], []
   setMobileSessionTaskSwitcherOpen: (open) =>
     set((draft) => {
       draft.mobileSession.isTaskSwitcherOpen = open;
+    }),
+  setPlanMode: (sessionId, enabled) =>
+    set((draft) => {
+      draft.chatInput.planModeBySessionId[sessionId] = enabled;
+      setLocalStorage(`plan-mode-${sessionId}`, enabled);
     }),
 });

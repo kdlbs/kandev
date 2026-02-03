@@ -36,6 +36,10 @@ export type MobileSessionState = {
   isTaskSwitcherOpen: boolean;
 };
 
+export type ChatInputState = {
+  planModeBySessionId: Record<string, boolean>;
+};
+
 export type UISliceState = {
   previewPanel: PreviewPanelState;
   rightPanel: RightPanelState;
@@ -43,6 +47,7 @@ export type UISliceState = {
   connection: ConnectionState;
   mobileKanban: MobileKanbanState;
   mobileSession: MobileSessionState;
+  chatInput: ChatInputState;
 };
 
 export type UISliceActions = {
@@ -59,6 +64,7 @@ export type UISliceActions = {
   setMobileKanbanMenuOpen: (open: boolean) => void;
   setMobileSessionPanel: (sessionId: string, panel: MobileSessionPanel) => void;
   setMobileSessionTaskSwitcherOpen: (open: boolean) => void;
+  setPlanMode: (sessionId: string, enabled: boolean) => void;
 };
 
 export type UISlice = UISliceState & UISliceActions;

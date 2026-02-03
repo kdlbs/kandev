@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState, memo } from 'react';
 import { getWebSocketClient } from '@/lib/ws/connection';
+import { useAppStore } from '@/components/state-provider';
+import { getLocalStorage } from '@/lib/local-storage';
 import { useSessionMessages } from '@/hooks/domains/session/use-session-messages';
 import { useSettingsData } from '@/hooks/domains/settings/use-settings-data';
 import { useSessionState } from '@/hooks/domains/session/use-session-state';
@@ -36,7 +38,6 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   onRequestChangesTooltipDismiss,
   onOpenFileAtLine,
 }: TaskChatPanelProps) {
-  const [planModeEnabled, setPlanModeEnabled] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const lastAgentMessageCountRef = useRef(0);
 
@@ -54,6 +55,30 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     isWorking,
     isAgentBusy,
   } = useSessionState(sessionId);
+
+  // Plan mode state from store (persisted per session)
+  const planModeEnabled = useAppStore((state) =>
+    resolvedSessionId ? (state.chatInput.planModeBySessionId[resolvedSessionId] ?? false) : false
+  );
+  const setPlanMode = useAppStore((state) => state.setPlanMode);
+  const handlePlanModeChange = useCallback(
+    (enabled: boolean) => {
+      if (resolvedSessionId) {
+        setPlanMode(resolvedSessionId, enabled);
+      }
+    },
+    [resolvedSessionId, setPlanMode]
+  );
+
+  // Initialize plan mode from localStorage on mount
+  useEffect(() => {
+    if (resolvedSessionId) {
+      const stored = getLocalStorage(`plan-mode-${resolvedSessionId}`, false);
+      if (stored) {
+        setPlanMode(resolvedSessionId, stored);
+      }
+    }
+  }, [resolvedSessionId, setPlanMode]);
 
   // Fetch messages for this session
   const { messages, isLoading: messagesLoading } = useSessionMessages(resolvedSessionId);
@@ -153,15 +178,10 @@ export const TaskChatPanel = memo(function TaskChatPanel({
       if (reviewComments && reviewComments.length > 0) {
         markCommentsSent(reviewComments.map((c) => c.id));
       }
-
-      // Reset plan mode after sending - it's a per-message instruction
-      if (planModeEnabled) {
-        setPlanModeEnabled(false);
-      }
     } finally {
       setIsSending(false);
     }
-  }, [isSending, planModeEnabled, onSend, handleSendMessage, markCommentsSent]);
+  }, [isSending, onSend, handleSendMessage, markCommentsSent]);
 
 
   return (
@@ -194,7 +214,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
           taskTitle={task?.title}
           taskDescription={taskDescription ?? ''}
           planModeEnabled={planModeEnabled}
-          onPlanModeChange={setPlanModeEnabled}
+          onPlanModeChange={handlePlanModeChange}
           isAgentBusy={isAgentBusy}
           isStarting={isStarting}
           isSending={isSending}
