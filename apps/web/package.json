@@ -46,6 +46,7 @@
     "@tabler/icons-react": "^3.36.1",
     "@tanstack/react-table": "^8.21.3",
     "@tanstack/react-virtual": "^3.13.18",
+    "@uiw/codemirror-theme-github": "^4.25.4",
     "@uiw/codemirror-theme-vscode": "^4.25.4",
     "@uiw/react-codemirror": "^4.25.4",
     "@xterm/addon-attach": "^0.12.0",

@@ -461,6 +461,48 @@ func (c *Client) ApplyFileDiff(ctx context.Context, path string, diff string, or
 	return &response, nil
 }
 
+// FileDeleteResponse represents a file delete response
+type FileDeleteResponse struct {
+	Path    string `json:"path"`
+	Success bool   `json:"success"`
+	Error   string `json:"error,omitempty"`
+}
+
+// DeleteFile deletes a file via HTTP DELETE
+func (c *Client) DeleteFile(ctx context.Context, path string) (*FileDeleteResponse, error) {
+	reqURL := fmt.Sprintf("%s/api/v1/workspace/file?path=%s", c.baseURL, path)
+
+	req, err := http.NewRequestWithContext(ctx, "DELETE", reqURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to delete file: %w", err)
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			c.logger.Debug("failed to close file delete response body", zap.Error(err))
+		}
+	}()
+
+	var response FileDeleteResponse
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	if response.Error != "" {
+		return nil, fmt.Errorf("file delete error: %s", response.Error)
+	}
+
+	if !response.Success {
+		return nil, fmt.Errorf("file delete failed")
+	}
+
+	return &response, nil
+}
+
 // Close closes all connections
 func (c *Client) Close() {
 	c.CloseUpdatesStream()

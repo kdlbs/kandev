@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useMemo, useState, useCallback } from 'react';
+import { memo, useMemo, useState, useCallback, useEffect, useRef } from 'react';
 import {
   IconArrowBackUp,
   IconExternalLink,
@@ -11,6 +11,7 @@ import {
   IconChevronRight,
   IconGitCommit,
   IconLoader2,
+  IconSearch,
 } from '@tabler/icons-react';
 
 import { TabsContent } from '@kandev/ui/tabs';
@@ -34,15 +35,23 @@ import { useSessionGitStatus } from '@/hooks/domains/session/use-session-git-sta
 import { useSessionCommits } from '@/hooks/domains/session/use-session-commits';
 import { useGitOperations } from '@/hooks/use-git-operations';
 import { getWebSocketClient } from '@/lib/ws/connection';
+import { deleteFile } from '@/lib/ws/workspace-files';
 import type { FileInfo } from '@/lib/state/store';
 import { FileBrowser } from '@/components/task/file-browser';
 import { SessionTabs, type SessionTab } from '@/components/session-tabs';
 import { useToast } from '@/components/toast-provider';
 import type { OpenFileTab } from '@/lib/types/backend';
+import {
+  getFilesPanelTab,
+  setFilesPanelTab,
+  hasUserSelectedFilesPanelTab,
+  setUserSelectedFilesPanelTab,
+} from '@/lib/local-storage';
 
 type TaskFilesPanelProps = {
   onSelectDiff: (path: string, content?: string) => void;
   onOpenFile: (file: OpenFileTab) => void;
+  activeFilePath?: string | null;
 };
 
 
@@ -92,16 +101,25 @@ const splitPath = (path: string) => {
   };
 };
 
-const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiff, onOpenFile }: TaskFilesPanelProps) {
+const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiff, onOpenFile, activeFilePath }: TaskFilesPanelProps) {
   const [topTab, setTopTab] = useState<'diff' | 'files'>('diff');
   const [showDiscardDialog, setShowDiscardDialog] = useState(false);
   const [fileToDiscard, setFileToDiscard] = useState<string | null>(null);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const gitStatus = useSessionGitStatus(activeSessionId);
   const { commits } = useSessionCommits(activeSessionId ?? null);
   const openEditor = useOpenSessionInEditor(activeSessionId ?? null);
   const gitOps = useGitOperations(activeSessionId ?? null);
   const { toast } = useToast();
+
+  // Track if we've initialized the tab for this session
+  const hasInitializedTabRef = useRef<string | null>(null);
+
+  // Close search when switching tabs
+  useEffect(() => {
+    setIsSearchOpen(false);
+  }, [topTab]);
 
   // State for commit diffs
   const [expandedCommit, setExpandedCommit] = useState<string | null>(null);
@@ -156,13 +174,7 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiff, onOpenFile }
 
     try {
       const result = await gitOps.discard([fileToDiscard]);
-      if (result.success) {
-        toast({
-          title: 'Changes discarded',
-          description: `Successfully discarded changes to ${fileToDiscard}`,
-          variant: 'success',
-        });
-      } else {
+      if (!result.success) {
         toast({
           title: 'Failed to discard changes',
           description: result.error || 'An unknown error occurred',
@@ -181,6 +193,29 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiff, onOpenFile }
     }
   }, [fileToDiscard, gitOps, toast]);
 
+  // Handle delete file
+  const handleDeleteFile = useCallback(async (path: string) => {
+    const client = getWebSocketClient();
+    if (!client || !activeSessionId) return;
+
+    try {
+      const response = await deleteFile(client, activeSessionId, path);
+      if (!response.success) {
+        toast({
+          title: 'Failed to delete file',
+          description: response.error || 'An unknown error occurred',
+          variant: 'error',
+        });
+      }
+    } catch (error) {
+      toast({
+        title: 'Failed to delete file',
+        description: error instanceof Error ? error.message : 'An unknown error occurred',
+        variant: 'error',
+      });
+    }
+  }, [activeSessionId, toast]);
+
   // Convert git status files to array for display
   const changedFiles = useMemo(() => {
     if (!gitStatus?.files || Object.keys(gitStatus.files).length === 0) {
@@ -196,6 +231,36 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiff, onOpenFile }
     }));
   }, [gitStatus]);
 
+  // Smart tab selection: restore user preference or auto-select based on changes
+  useEffect(() => {
+    if (!activeSessionId) return;
+
+    // Only initialize once per session
+    if (hasInitializedTabRef.current === activeSessionId) return;
+    hasInitializedTabRef.current = activeSessionId;
+
+    // If user has previously selected a tab for this session, restore it
+    if (hasUserSelectedFilesPanelTab(activeSessionId)) {
+      const savedTab = getFilesPanelTab(activeSessionId, 'diff');
+      setTopTab(savedTab);
+      return;
+    }
+
+    // Auto-select based on whether there are changes
+    const hasChanges = changedFiles.length > 0 || commits.length > 0;
+    const defaultTab = hasChanges ? 'diff' : 'files';
+    setTopTab(defaultTab);
+  }, [activeSessionId, changedFiles.length, commits.length]);
+
+  // Handle tab change - save preference and mark as user-selected
+  const handleTabChange = useCallback((tab: 'diff' | 'files') => {
+    setTopTab(tab);
+    if (activeSessionId) {
+      setFilesPanelTab(activeSessionId, tab);
+      setUserSelectedFilesPanelTab(activeSessionId);
+    }
+  }, [activeSessionId]);
+
   const tabs: SessionTab[] = [
     {
       id: 'diff',
@@ -207,13 +272,36 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiff, onOpenFile }
     },
   ];
 
+  // Contextual buttons based on active tab
+  const tabRightContent = useMemo(() => {
+    if (topTab === 'files') {
+      return (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              className="text-muted-foreground hover:text-foreground cursor-pointer"
+              onClick={() => setIsSearchOpen(true)}
+            >
+              <IconSearch className="h-3.5 w-3.5" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>Search files</TooltipContent>
+        </Tooltip>
+      );
+    }
+    // No contextual buttons for diff tab (for now)
+    return null;
+  }, [topTab]);
+
   return (
     <SessionPanel borderSide="left">
       <SessionTabs
         tabs={tabs}
         activeTab={topTab}
-        onTabChange={(value) => setTopTab(value as 'diff' | 'files')}
+        onTabChange={(value) => handleTabChange(value as 'diff' | 'files')}
         className="flex-1 min-h-0"
+        rightContent={tabRightContent}
       >
         <TabsContent value="diff" className="flex-1 min-h-0">
           <SessionPanelContent>
@@ -401,10 +489,17 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiff, onOpenFile }
             </div>
           </SessionPanelContent>
         </TabsContent>
-        <TabsContent value="files" className="mt-3 flex-1 min-h-0">
+        <TabsContent value="files" className="flex-1 min-h-0">
           <SessionPanelContent>
             {activeSessionId ? (
-              <FileBrowser sessionId={activeSessionId} onOpenFile={onOpenFile} />
+              <FileBrowser
+                sessionId={activeSessionId}
+                onOpenFile={onOpenFile}
+                onDeleteFile={handleDeleteFile}
+                isSearchOpen={isSearchOpen}
+                onCloseSearch={() => setIsSearchOpen(false)}
+                activeFilePath={activeFilePath}
+              />
             ) : (
               <div className="flex items-center justify-center h-full text-muted-foreground text-xs">
                 No task selected

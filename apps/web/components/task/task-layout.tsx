@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useMemo } from 'react';
+import { memo, useMemo, useState, useCallback } from 'react';
 import { Group, Panel, type Layout } from 'react-resizable-panels';
 import { useDefaultLayout } from '@/lib/layout/use-default-layout';
 import { useResponsiveBreakpoint } from '@/hooks/use-responsive-breakpoint';
@@ -66,6 +66,13 @@ export const TaskLayout = memo(function TaskLayout({
     handleOpenFile,
     handleFileOpenHandled,
   } = useSessionLayoutState({ sessionId });
+
+  // Track active file path for highlighting in file tree
+  const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
+
+  const handleActiveFileChange = useCallback((filePath: string | null) => {
+    setActiveFilePath(filePath);
+  }, []);
 
   const layoutBySession = useLayoutStore((state) => state.columnsBySessionId);
   const layoutState = useMemo(
@@ -134,6 +141,7 @@ export const TaskLayout = memo(function TaskLayout({
     <TaskFilesPanel
       onSelectDiff={handleSelectDiff}
       onOpenFile={handleOpenFile}
+      activeFilePath={activeFilePath}
     />
   );
 
@@ -172,6 +180,7 @@ export const TaskLayout = memo(function TaskLayout({
                   openFileRequest={openFileRequest}
                   onDiffHandled={handleClearSelectedDiff}
                   onFileOpenHandled={handleFileOpenHandled}
+                  onActiveFileChange={handleActiveFileChange}
                 />
               </Panel>
               <Panel id="preview" minSize="470px" className="min-h-0 min-w-0">
@@ -186,6 +195,7 @@ export const TaskLayout = memo(function TaskLayout({
               openFileRequest={openFileRequest}
               onDiffHandled={handleClearSelectedDiff}
               onFileOpenHandled={handleFileOpenHandled}
+              onActiveFileChange={handleActiveFileChange}
               sessionId={sessionId}
             />
           </Panel>

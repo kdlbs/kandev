@@ -1,34 +1,27 @@
 'use client';
 
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { IconPlus, IconTrash } from '@tabler/icons-react';
+import { IconPlus } from '@tabler/icons-react';
 import { Button } from '@kandev/ui/button';
 import { Textarea } from '@kandev/ui/textarea';
 import { cn } from '@/lib/utils';
 
-type SelectionPosition = {
-  x: number;
-  y: number;
-};
-
-type PlanSelectionPopoverProps = {
+type EditorCommentPopoverProps = {
   selectedText: string;
-  position: SelectionPosition;
-  onAdd: (comment: string, selectedText: string) => void;
+  lineRange: { start: number; end: number };
+  position: { x: number; y: number };
+  onSubmit: (comment: string) => void;
   onClose: () => void;
-  editingComment?: string; // Pre-fill if editing existing comment
-  onDelete?: () => void; // Delete callback when editing existing comment
 };
 
-export function PlanSelectionPopover({
+export function EditorCommentPopover({
   selectedText,
+  lineRange,
   position,
-  onAdd,
+  onSubmit,
   onClose,
-  editingComment,
-  onDelete,
-}: PlanSelectionPopoverProps) {
-  const [comment, setComment] = useState(editingComment || '');
+}: EditorCommentPopoverProps) {
+  const [comment, setComment] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
 
@@ -58,18 +51,18 @@ export function PlanSelectionPopover({
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        e.stopPropagation();
         onClose();
       }
     };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
+    document.addEventListener('keydown', handleKeyDown, true);
+    return () => document.removeEventListener('keydown', handleKeyDown, true);
   }, [onClose]);
 
   const handleSubmit = useCallback(() => {
     if (!comment.trim()) return;
-    onAdd(comment.trim(), selectedText);
-    onClose();
-  }, [comment, onAdd, selectedText, onClose]);
+    onSubmit(comment.trim());
+  }, [comment, onSubmit]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -83,14 +76,19 @@ export function PlanSelectionPopover({
 
   const isDisabled = !comment.trim();
 
-  // Truncate text for preview
-  const previewText = selectedText.length > 80
-    ? selectedText.slice(0, 80).trim() + '…'
+  // Truncate code preview
+  const previewText = selectedText.length > 100
+    ? selectedText.slice(0, 100).trim() + '…'
     : selectedText;
+
+  // Format line range
+  const lineRangeText = lineRange.start === lineRange.end
+    ? `Line ${lineRange.start}`
+    : `Lines ${lineRange.start}-${lineRange.end}`;
 
   // Calculate position - anchor at bottom-right of selection, adjust if would overflow
   const popoverWidth = 384; // w-96 = 24rem = 384px
-  const popoverHeight = 200; // approximate height of popover
+  const popoverHeight = 220; // approximate height of popover
   const gap = 8;
 
   // Start at bottom-right of selection
@@ -119,10 +117,17 @@ export function PlanSelectionPopover({
         top,
       }}
     >
-      {/* Text preview */}
-      <p className="mb-3 text-xs text-muted-foreground line-clamp-2 leading-relaxed italic">
-        &ldquo;{previewText}&rdquo;
-      </p>
+      {/* Line range badge */}
+      <div className="flex items-center gap-2 mb-2">
+        <span className="px-2 py-0.5 rounded-md bg-muted text-xs font-mono text-muted-foreground">
+          {lineRangeText}
+        </span>
+      </div>
+
+      {/* Code preview */}
+      <pre className="mb-3 p-2 rounded-md bg-muted/50 text-xs text-muted-foreground font-mono line-clamp-3 overflow-hidden whitespace-pre-wrap">
+        {previewText}
+      </pre>
 
       {/* Comment input */}
       <Textarea
@@ -136,24 +141,9 @@ export function PlanSelectionPopover({
 
       {/* Actions */}
       <div className="mt-3 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground/70">
-            ⌘+Enter to {editingComment ? 'update' : 'add'}
-          </span>
-          {editingComment && onDelete && (
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => {
-                onDelete();
-                onClose();
-              }}
-              className="h-7 px-2 text-muted-foreground hover:text-destructive cursor-pointer"
-            >
-              <IconTrash className="h-3.5 w-3.5" />
-            </Button>
-          )}
-        </div>
+        <span className="text-xs text-muted-foreground/70">
+          ⌘+Enter to add
+        </span>
         <Button
           size="sm"
           onClick={handleSubmit}
@@ -161,10 +151,9 @@ export function PlanSelectionPopover({
           className="gap-1.5 cursor-pointer"
         >
           <IconPlus className="h-3.5 w-3.5" />
-          {editingComment ? 'Update' : 'Add comment'}
+          Add comment
         </Button>
       </div>
     </div>
   );
 }
-

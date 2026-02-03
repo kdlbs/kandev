@@ -29,6 +29,7 @@ func (h *WorkspaceFileHandlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionWorkspaceFileTreeGet, h.wsGetFileTree)
 	d.RegisterFunc(ws.ActionWorkspaceFileContentGet, h.wsGetFileContent)
 	d.RegisterFunc(ws.ActionWorkspaceFileContentUpdate, h.wsUpdateFileContent)
+	d.RegisterFunc(ws.ActionWorkspaceFileDelete, h.wsDeleteFile)
 	d.RegisterFunc(ws.ActionWorkspaceFilesSearch, h.wsSearchFiles)
 }
 
@@ -149,6 +150,46 @@ func (h *WorkspaceFileHandlers) wsUpdateFileContent(ctx context.Context, msg *ws
 	if err != nil {
 		h.logger.Error("failed to apply file diff", zap.Error(err), zap.String("session_id", req.SessionID), zap.String("path", req.Path))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, fmt.Sprintf("Failed to apply file diff: %v", err), nil)
+	}
+
+	return ws.NewResponse(msg.ID, msg.Action, response)
+}
+
+// wsDeleteFile handles workspace.file.delete action
+func (h *WorkspaceFileHandlers) wsDeleteFile(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req struct {
+		SessionID string `json:"session_id"`
+		Path      string `json:"path"`
+	}
+
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+
+	if req.SessionID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+	}
+	if req.Path == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "path is required", nil)
+	}
+
+	// Get agent execution for this session
+	execution, found := h.lifecycle.GetExecutionBySessionID(req.SessionID)
+	if !found {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "No agent found for session", nil)
+	}
+
+	// Get agentctl client
+	client := execution.GetAgentCtlClient()
+	if client == nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Agent client not available", nil)
+	}
+
+	// Delete file via agentctl
+	response, err := client.DeleteFile(ctx, req.Path)
+	if err != nil {
+		h.logger.Error("failed to delete file", zap.Error(err), zap.String("session_id", req.SessionID), zap.String("path", req.Path))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, fmt.Sprintf("Failed to delete file: %v", err), nil)
 	}
 
 	return ws.NewResponse(msg.ID, msg.Action, response)

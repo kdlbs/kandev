@@ -24,8 +24,8 @@ type TaskChatPanelProps = {
   onOpenFile?: (path: string) => void;
   showRequestChangesTooltip?: boolean;
   onRequestChangesTooltipDismiss?: () => void;
-  /** Callback to select a file in the changes panel (for jump-to-line) */
-  onSelectDiff?: (path: string) => void;
+  /** Callback to open a file at a specific line (for comment clicks) */
+  onOpenFileAtLine?: (filePath: string) => void;
 };
 
 export const TaskChatPanel = memo(function TaskChatPanel({
@@ -34,7 +34,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   onOpenFile,
   showRequestChangesTooltip = false,
   onRequestChangesTooltipDismiss,
-  onSelectDiff,
+  onOpenFileAtLine,
 }: TaskChatPanelProps) {
   const [planModeEnabled, setPlanModeEnabled] = useState(false);
   const [isSending, setIsSending] = useState(false);
@@ -211,7 +211,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
           pendingCommentsByFile={pendingCommentsByFile}
           onRemoveCommentFile={handleRemoveCommentFile}
           onRemoveComment={handleRemoveComment}
-          onCommentClick={onSelectDiff ? (comment) => onSelectDiff(comment.filePath) : undefined}
+          onCommentClick={onOpenFileAtLine ? (comment) => onOpenFileAtLine(comment.filePath) : undefined}
         />
       </div>
     </div>
