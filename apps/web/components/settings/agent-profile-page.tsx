@@ -6,16 +6,11 @@ import { useParams } from 'next/navigation';
 import { IconTrash } from '@tabler/icons-react';
 import { Badge } from '@kandev/ui/badge';
 import { Button } from '@kandev/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
 import { Card, CardContent, CardHeader, CardTitle } from '@kandev/ui/card';
-import { Label } from '@kandev/ui/label';
 import { Separator } from '@kandev/ui/separator';
-import { Switch } from '@kandev/ui/switch';
-import { Textarea } from '@kandev/ui/textarea';
-import { Input } from '@kandev/ui/input';
 import { useToast } from '@/components/toast-provider';
 import { UnsavedChangesBadge, UnsavedSaveButton } from '@/components/settings/unsaved-indicator';
-import { ModelCombobox } from '@/components/settings/model-combobox';
+import { ProfileFormFields } from '@/components/settings/profile-form-fields';
 import { deleteAgentProfileAction, updateAgentProfileAction } from '@/app/actions/agents';
 import type { Agent, AgentProfile, ModelConfig, PermissionSetting, PassthroughConfig } from '@/lib/types/http';
 import { useAppStore } from '@/components/state-provider';
@@ -61,8 +56,7 @@ function ProfileEditor({ agent, profile, modelConfig, permissionSettings, passth
       draft.auto_approve !== savedProfile.auto_approve ||
       draft.dangerously_skip_permissions !== savedProfile.dangerously_skip_permissions ||
       draft.allow_indexing !== savedProfile.allow_indexing ||
-      draft.cli_passthrough !== savedProfile.cli_passthrough ||
-      draft.plan !== savedProfile.plan
+      draft.cli_passthrough !== savedProfile.cli_passthrough
     );
   }, [draft, savedProfile]);
 
@@ -92,7 +86,6 @@ function ProfileEditor({ agent, profile, modelConfig, permissionSettings, passth
         dangerously_skip_permissions: draft.dangerously_skip_permissions,
         allow_indexing: draft.allow_indexing,
         cli_passthrough: draft.cli_passthrough,
-        plan: draft.plan,
       });
       setSavedProfile(updated);
       setDraft(updated);
@@ -170,118 +163,21 @@ function ProfileEditor({ agent, profile, modelConfig, permissionSettings, passth
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label>Profile name</Label>
-            <Input
-              value={draft.name}
-              onChange={(event) => setDraft({ ...draft, name: event.target.value })}
-              placeholder="Default profile"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label>Model</Label>
-            <ModelCombobox
-              value={draft.model || modelConfig.default_model}
-              onChange={(value) => setDraft({ ...draft, model: value })}
-              models={modelConfig.available_models}
-              defaultModel={modelConfig.default_model}
-              placeholder="Select or enter model..."
-              agentName={agent.name}
-              supportsDynamicModels={modelConfig.supports_dynamic_models}
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label>Append Prompt</Label>
-            <Textarea
-              value={draft.plan}
-              onChange={(event) => setDraft({ ...draft, plan: event.target.value })}
-              placeholder="Extra text appended to the agent prompt"
-            />
-          </div>
-
-          <div className="grid gap-4 md:grid-cols-2">
-            {permissionSettings.auto_approve?.supported && (
-              <div className="flex items-center justify-between rounded-md border p-3">
-                <div className="space-y-1">
-                  <Label>{permissionSettings.auto_approve.label}</Label>
-                  <p className="text-xs text-muted-foreground">
-                    {permissionSettings.auto_approve.description}
-                  </p>
-                </div>
-                <Switch
-                  checked={draft.auto_approve}
-                  onCheckedChange={(checked) =>
-                    setDraft({ ...draft, auto_approve: checked })
-                  }
-                />
-              </div>
-            )}
-
-            {permissionSettings.dangerously_skip_permissions?.supported && (
-              <div className="flex items-center justify-between rounded-md border p-3">
-                <div className="space-y-1">
-                  <Label>{permissionSettings.dangerously_skip_permissions.label}</Label>
-                  <p className="text-xs text-muted-foreground">
-                    {permissionSettings.dangerously_skip_permissions.description}
-                  </p>
-                </div>
-                <Switch
-                  checked={draft.dangerously_skip_permissions}
-                  onCheckedChange={(checked) =>
-                    setDraft({ ...draft, dangerously_skip_permissions: checked })
-                  }
-                />
-              </div>
-            )}
-
-            {permissionSettings.allow_indexing?.supported && (
-              <div className="flex items-center justify-between rounded-md border p-3">
-                <div className="space-y-1">
-                  <Label>{permissionSettings.allow_indexing.label}</Label>
-                  <p className="text-xs text-muted-foreground">
-                    {permissionSettings.allow_indexing.description}
-                  </p>
-                </div>
-                <Switch
-                  checked={draft.allow_indexing}
-                  onCheckedChange={(checked) =>
-                    setDraft({ ...draft, allow_indexing: checked })
-                  }
-                />
-              </div>
-            )}
-
-            {passthroughConfig?.supported && (
-              <div className="flex items-center justify-between rounded-md border p-3">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <Label>{passthroughConfig.label}</Label>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Badge variant="outline" className="text-[10px] px-1.5 py-0 cursor-help">
-                          Experimental
-                        </Badge>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <p>Currently does not support notifications and session resume</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    {passthroughConfig.description}
-                  </p>
-                </div>
-                <Switch
-                  checked={draft.cli_passthrough}
-                  onCheckedChange={(checked) =>
-                    setDraft({ ...draft, cli_passthrough: checked })
-                  }
-                />
-              </div>
-            )}
-          </div>
+          <ProfileFormFields
+            profile={{
+              name: draft.name,
+              model: draft.model,
+              auto_approve: draft.auto_approve,
+              dangerously_skip_permissions: draft.dangerously_skip_permissions,
+              allow_indexing: draft.allow_indexing,
+              cli_passthrough: draft.cli_passthrough,
+            }}
+            onChange={(patch) => setDraft({ ...draft, ...patch })}
+            modelConfig={modelConfig}
+            permissionSettings={permissionSettings}
+            passthroughConfig={passthroughConfig}
+            agentName={agent.name}
+          />
         </CardContent>
       </Card>
 

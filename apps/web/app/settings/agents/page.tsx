@@ -96,7 +96,7 @@ export default function AgentsSettingsPage() {
                     )}
                   </div>
                   <Button size="sm" className="cursor-pointer" asChild>
-                    <Link href={`/settings/agents/${encodeURIComponent(agent.name)}`}>
+                    <Link href={hasAgentRecord ? `/settings/agents/${encodeURIComponent(agent.name)}?mode=create` : `/settings/agents/${encodeURIComponent(agent.name)}`}>
                       <IconSettings className="h-4 w-4 mr-2" />
                       {hasAgentRecord ? 'Create new profile' : 'Setup Profile'}
                     </Link>

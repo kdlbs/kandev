@@ -2,24 +2,14 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { IconPlus } from '@tabler/icons-react';
 import { Button } from '@kandev/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@kandev/ui/card';
-import { Input } from '@kandev/ui/input';
-import { Label } from '@kandev/ui/label';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@kandev/ui/select';
 import { Separator } from '@kandev/ui/separator';
-import { Switch } from '@kandev/ui/switch';
-import { Textarea } from '@kandev/ui/textarea';
 import { useToast } from '@/components/toast-provider';
 import { UnsavedChangesBadge, UnsavedSaveButton } from '@/components/settings/unsaved-indicator';
+import { ProfileFormFields } from '@/components/settings/profile-form-fields';
 import {
   createAgentAction,
   createAgentProfileAction,
@@ -58,6 +48,7 @@ type AgentSetupFormProps = {
   savedAgent: Agent | null;
   discoveryAgent: AgentDiscovery | undefined;
   onToastError: (error: unknown) => void;
+  isCreateMode?: boolean;
 };
 
 const createDraftProfile = (
@@ -75,7 +66,6 @@ const createDraftProfile = (
   dangerously_skip_permissions: permissionSettings?.dangerously_skip_permissions?.default ?? false,
   allow_indexing: permissionSettings?.allow_indexing?.default ?? false,
   cli_passthrough: false,
-  plan: '',
   created_at: new Date().toISOString(),
   updated_at: new Date().toISOString(),
   isNew: true,
@@ -109,6 +99,7 @@ function AgentSetupForm({
   savedAgent,
   discoveryAgent,
   onToastError,
+  isCreateMode = false,
 }: AgentSetupFormProps) {
   const router = useRouter();
   const settingsAgents = useAppStore((state) => state.settingsAgents.items);
@@ -130,11 +121,15 @@ function AgentSetupForm({
   }, [availableAgents, draftAgent.name]);
 
   const currentAgentModelConfig = useMemo(() => {
-    return currentAvailableAgent?.model_config ?? { default_model: '', available_models: [] };
+    return currentAvailableAgent?.model_config ?? { default_model: '', available_models: [], supports_dynamic_models: false };
   }, [currentAvailableAgent]);
 
   const permissionSettings = useMemo(() => {
     return currentAvailableAgent?.permission_settings ?? {};
+  }, [currentAvailableAgent]);
+
+  const passthroughConfig = useMemo(() => {
+    return currentAvailableAgent?.passthrough_config ?? null;
   }, [currentAvailableAgent]);
 
   const isProfileDirty = (draft: DraftProfile, saved?: AgentProfile) => {
@@ -145,7 +140,7 @@ function AgentSetupForm({
       draft.auto_approve !== saved.auto_approve ||
       draft.dangerously_skip_permissions !== saved.dangerously_skip_permissions ||
       draft.allow_indexing !== saved.allow_indexing ||
-      draft.plan !== saved.plan
+      draft.cli_passthrough !== saved.cli_passthrough
     );
   };
 
@@ -285,7 +280,7 @@ function AgentSetupForm({
             auto_approve: profile.auto_approve,
             dangerously_skip_permissions: profile.dangerously_skip_permissions,
             allow_indexing: profile.allow_indexing ?? false,
-            plan: profile.plan,
+            cli_passthrough: profile.cli_passthrough ?? false,
           })),
         });
         if (created.profiles.length === draftAgent.profiles.length) {
@@ -353,7 +348,8 @@ function AgentSetupForm({
         }
 
         const savedProfilesById = new Map(savedAgent.profiles.map((profile) => [profile.id, profile]));
-        const nextProfiles: AgentProfile[] = [];
+        // In create mode, preserve existing profiles; otherwise start fresh
+        const nextProfiles: AgentProfile[] = isCreateMode ? [...savedAgent.profiles] : [];
         for (const profile of draftAgent.profiles) {
           const savedProfile = savedProfilesById.get(profile.id);
           if (!savedProfile) {
@@ -364,7 +360,6 @@ function AgentSetupForm({
               dangerously_skip_permissions: profile.dangerously_skip_permissions,
               allow_indexing: profile.allow_indexing ?? false,
               cli_passthrough: profile.cli_passthrough ?? false,
-              plan: profile.plan,
             });
             if (profile.mcp_config && profile.mcp_config.dirty && profile.mcp_config.servers.trim()) {
               try {
@@ -387,17 +382,19 @@ function AgentSetupForm({
               auto_approve: profile.auto_approve,
               dangerously_skip_permissions: profile.dangerously_skip_permissions,
               allow_indexing: profile.allow_indexing ?? false,
-              plan: profile.plan,
             });
             nextProfiles.push(updatedProfile);
             continue;
           }
           nextProfiles.push(savedProfile);
         }
-        for (const savedProfile of savedAgent.profiles) {
-          const stillExists = draftAgent.profiles.some((profile) => profile.id === savedProfile.id);
-          if (!stillExists) {
-            await deleteAgentProfileAction(savedProfile.id);
+        // In create mode, don't delete existing profiles - we're only adding new ones
+        if (!isCreateMode) {
+          for (const savedProfile of savedAgent.profiles) {
+            const stillExists = draftAgent.profiles.some((profile) => profile.id === savedProfile.id);
+            if (!stillExists) {
+              await deleteAgentProfileAction(savedProfile.id);
+            }
           }
         }
 
@@ -409,6 +406,10 @@ function AgentSetupForm({
         };
         upsertAgent(nextAgent);
         setDraftAgent(ensureProfiles(cloneAgent(nextAgent), resolveDisplayName(nextAgent.name), currentAgentModelConfig.default_model, permissionSettings));
+        // In create mode, redirect to manage mode after successful save
+        if (isCreateMode) {
+          router.replace(`/settings/agents/${encodeURIComponent(savedAgent.name)}`);
+        }
       }
       setSaveStatus('success');
     } catch (error) {
@@ -430,7 +431,7 @@ function AgentSetupForm({
             </span>
           </div>
           <p className="text-sm text-muted-foreground mt-1">
-            Configure profiles and defaults for this agent.
+            {isCreateMode ? 'Create a new profile for this agent.' : 'Configure profiles and defaults for this agent.'}
           </p>
         </div>
       </div>
@@ -440,7 +441,11 @@ function AgentSetupForm({
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <div className="flex items-center gap-2">
-            <CardTitle>{draftAgent.profiles[0]?.agent_display_name ?? draftAgent.name} Profiles</CardTitle>
+            <CardTitle>
+              {isCreateMode
+                ? `Create ${draftAgent.profiles[0]?.agent_display_name ?? draftAgent.name} Profile`
+                : `${draftAgent.profiles[0]?.agent_display_name ?? draftAgent.name} Profiles`}
+            </CardTitle>
             {isAgentDirty && <UnsavedChangesBadge />}
           </div>
           <Button size="sm" variant="outline" onClick={handleAddProfile} className="cursor-pointer">
@@ -458,119 +463,23 @@ function AgentSetupForm({
               className={isNew ? 'border-amber-400/70 shadow-sm' : 'border-muted'}
             >
               <CardContent className="pt-6 space-y-4">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex-1 space-y-2">
-                    <Label>Profile name</Label>
-                    <Input
-                      value={profile.name}
-                      onChange={(event) =>
-                        handleProfileChange(profile.id, { name: event.target.value })
-                      }
-                      placeholder="Default profile"
-                    />
-                  </div>
-                  {draftAgent.profiles.length > 1 && (
-                    <Button size="sm" variant="ghost" onClick={() => handleRemoveProfile(profile.id)}>
-                      Remove
-                    </Button>
-                  )}
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Model</Label>
-                  {currentAgentModelConfig.available_models.length > 0 ? (
-                    <Select
-                      value={profile.model || currentAgentModelConfig.default_model}
-                      onValueChange={(value) => handleProfileChange(profile.id, { model: value })}
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Select a model" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {currentAgentModelConfig.available_models.map((model: { id: string; name: string; is_default?: boolean }) => (
-                          <SelectItem key={model.id} value={model.id}>
-                            {model.name}
-                            {model.is_default && (
-                              <span className="ml-2 text-muted-foreground">(default)</span>
-                            )}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  ) : (
-                    <Input
-                      value={profile.model}
-                      onChange={(event) =>
-                        handleProfileChange(profile.id, { model: event.target.value })
-                      }
-                      placeholder="model-id"
-                    />
-                  )}
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Append Prompt</Label>
-                  <Textarea
-                    value={profile.plan}
-                    onChange={(event) =>
-                      handleProfileChange(profile.id, { plan: event.target.value })
-                    }
-                    placeholder="Extra text appended to the agent prompt"
-                  />
-                </div>
-
-                <div className="grid gap-4 md:grid-cols-2">
-                  {permissionSettings.auto_approve?.supported && (
-                    <div className="flex items-center justify-between rounded-md border p-3">
-                      <div className="space-y-1">
-                        <Label>{permissionSettings.auto_approve.label}</Label>
-                        <p className="text-xs text-muted-foreground">
-                          {permissionSettings.auto_approve.description}
-                        </p>
-                      </div>
-                      <Switch
-                        checked={profile.auto_approve}
-                        onCheckedChange={(checked) =>
-                          handleProfileChange(profile.id, { auto_approve: checked })
-                        }
-                      />
-                    </div>
-                  )}
-
-                  {permissionSettings.dangerously_skip_permissions?.supported && (
-                    <div className="flex items-center justify-between rounded-md border p-3">
-                      <div className="space-y-1">
-                        <Label>{permissionSettings.dangerously_skip_permissions.label}</Label>
-                        <p className="text-xs text-muted-foreground">
-                          {permissionSettings.dangerously_skip_permissions.description}
-                        </p>
-                      </div>
-                      <Switch
-                        checked={profile.dangerously_skip_permissions}
-                        onCheckedChange={(checked) =>
-                          handleProfileChange(profile.id, { dangerously_skip_permissions: checked })
-                        }
-                      />
-                    </div>
-                  )}
-
-                  {permissionSettings.allow_indexing?.supported && (
-                    <div className="flex items-center justify-between rounded-md border p-3">
-                      <div className="space-y-1">
-                        <Label>{permissionSettings.allow_indexing.label}</Label>
-                        <p className="text-xs text-muted-foreground">
-                          {permissionSettings.allow_indexing.description}
-                        </p>
-                      </div>
-                      <Switch
-                        checked={profile.allow_indexing ?? false}
-                        onCheckedChange={(checked) =>
-                          handleProfileChange(profile.id, { allow_indexing: checked })
-                        }
-                      />
-                    </div>
-                  )}
-                </div>
+                <ProfileFormFields
+                  profile={{
+                    name: profile.name,
+                    model: profile.model,
+                    auto_approve: profile.auto_approve,
+                    dangerously_skip_permissions: profile.dangerously_skip_permissions,
+                    allow_indexing: profile.allow_indexing,
+                    cli_passthrough: profile.cli_passthrough,
+                  }}
+                  onChange={(patch) => handleProfileChange(profile.id, patch)}
+                  modelConfig={currentAgentModelConfig}
+                  permissionSettings={permissionSettings}
+                  passthroughConfig={passthroughConfig}
+                  agentName={draftAgent.name}
+                  onRemove={() => handleRemoveProfile(profile.id)}
+                  canRemove={draftAgent.profiles.length > 1}
+                />
 
                 <ProfileMcpConfigCard
                   profileId={profile.id}
@@ -602,6 +511,8 @@ function AgentSetupForm({
 export default function AgentSetupPage() {
   const { toast } = useToast();
   const params = useParams();
+  const searchParams = useSearchParams();
+  const isCreateMode = searchParams.get('mode') === 'create';
   const agentKey = Array.isArray(params.agentId) ? params.agentId[0] : params.agentId;
   const decodedKey = decodeURIComponent(agentKey ?? '');
   const discoveryAgents = useAppStore((state) => state.agentDiscovery.items);
@@ -627,6 +538,17 @@ export default function AgentSetupPage() {
     const resolvePermissionSettings = (name: string) =>
       resolveAvailableAgent(name)?.permission_settings;
     if (savedAgent) {
+      // In create mode, start with a blank profile instead of loading existing profiles
+      if (isCreateMode) {
+        const draft: DraftAgent = {
+          ...savedAgent,
+          workspace_id: savedAgent.workspace_id ?? null,
+          mcp_config_path: savedAgent.mcp_config_path ?? '',
+          profiles: [],
+          isNew: false,
+        };
+        return ensureProfiles(draft, resolveDisplayName(savedAgent.name), resolveDefaultModel(savedAgent.name), resolvePermissionSettings(savedAgent.name));
+      }
       return ensureProfiles(cloneAgent(savedAgent), resolveDisplayName(savedAgent.name), resolveDefaultModel(savedAgent.name), resolvePermissionSettings(savedAgent.name));
     }
     if (discoveryAgent) {
@@ -644,7 +566,7 @@ export default function AgentSetupPage() {
       return ensureProfiles(draft, resolveDisplayName(draft.name), resolveDefaultModel(draft.name), resolvePermissionSettings(draft.name));
     }
     return null;
-  }, [decodedKey, discoveryAgent, savedAgent, availableAgents]);
+  }, [decodedKey, discoveryAgent, savedAgent, availableAgents, isCreateMode]);
 
   if (!initialAgent && discoveryAgents.length > 0) {
     return (
@@ -673,11 +595,12 @@ export default function AgentSetupPage() {
 
   return (
     <AgentSetupForm
-      key={initialAgent.id}
+      key={isCreateMode ? `create-${initialAgent.id}` : initialAgent.id}
       initialAgent={initialAgent}
       savedAgent={savedAgent}
       discoveryAgent={discoveryAgent}
       onToastError={handleToastError}
+      isCreateMode={isCreateMode}
     />
   );
 }

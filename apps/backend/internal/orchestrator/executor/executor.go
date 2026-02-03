@@ -69,7 +69,6 @@ type AgentProfileInfo struct {
 	Model                      string
 	AutoApprove                bool
 	DangerouslySkipPermissions bool
-	Plan                       string
 	CLIPassthrough             bool
 }
 
@@ -261,7 +260,6 @@ func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfi
 			"model":                        profileInfo.Model,
 			"auto_approve":                 profileInfo.AutoApprove,
 			"dangerously_skip_permissions": profileInfo.DangerouslySkipPermissions,
-			"plan":                         profileInfo.Plan,
 			"cli_passthrough":              profileInfo.CLIPassthrough,
 		}
 	} else {

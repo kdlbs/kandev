@@ -737,9 +737,6 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 		if profileInfo.AutoApprove {
 			reqWithWorktree.Env["AGENTCTL_AUTO_APPROVE_PERMISSIONS"] = "true"
 		}
-		if profileInfo.Plan != "" {
-			reqWithWorktree.Env["AGENT_PLAN"] = profileInfo.Plan
-		}
 	}
 
 	// 7. Launch via runtime - creates agentctl instance with workspace access only

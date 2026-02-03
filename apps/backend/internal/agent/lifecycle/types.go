@@ -155,7 +155,6 @@ type AgentProfileInfo struct {
 	DangerouslySkipPermissions bool
 	AllowIndexing              bool
 	CLIPassthrough             bool
-	Plan                       string
 }
 
 // ProfileResolver resolves agent profile IDs to profile information

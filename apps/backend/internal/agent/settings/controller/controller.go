@@ -317,7 +317,6 @@ func (c *Controller) EnsureInitialAgentProfiles(ctx context.Context) error {
 			AgentID:                    agent.ID,
 			Name:                       defaultAgentProfileName,
 			Model:                      defaultModel,
-			Plan:                       "",
 			AgentDisplayName:           displayName,
 			AutoApprove:                autoApprove,
 			AllowIndexing:              allowIndexing,
@@ -405,7 +404,6 @@ type CreateAgentProfileRequest struct {
 	Model                      string
 	AutoApprove                bool
 	DangerouslySkipPermissions bool
-	Plan                       string
 }
 
 func (c *Controller) CreateAgent(ctx context.Context, req CreateAgentRequest) (*dto.AgentDTO, error) {
@@ -458,7 +456,6 @@ func (c *Controller) CreateAgent(ctx context.Context, req CreateAgentRequest) (*
 			Model:                      profileReq.Model,
 			AutoApprove:                profileReq.AutoApprove,
 			DangerouslySkipPermissions: profileReq.DangerouslySkipPermissions,
-			Plan:                       profileReq.Plan,
 		}
 		if err := c.repo.CreateAgentProfile(ctx, profile); err != nil {
 			return nil, err
@@ -519,7 +516,6 @@ type CreateProfileRequest struct {
 	DangerouslySkipPermissions bool
 	AllowIndexing              bool
 	CLIPassthrough             bool
-	Plan                       string
 }
 
 func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest) (*dto.AgentProfileDTO, error) {
@@ -544,7 +540,6 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 		DangerouslySkipPermissions: req.DangerouslySkipPermissions,
 		AllowIndexing:              req.AllowIndexing,
 		CLIPassthrough:             req.CLIPassthrough,
-		Plan:                       req.Plan,
 	}
 	if err := c.repo.CreateAgentProfile(ctx, profile); err != nil {
 		return nil, err
@@ -561,7 +556,6 @@ type UpdateProfileRequest struct {
 	DangerouslySkipPermissions *bool
 	AllowIndexing              *bool
 	CLIPassthrough             *bool
-	Plan                       *string
 }
 
 func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest) (*dto.AgentProfileDTO, error) {
@@ -590,9 +584,6 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 	}
 	if req.CLIPassthrough != nil {
 		profile.CLIPassthrough = *req.CLIPassthrough
-	}
-	if req.Plan != nil {
-		profile.Plan = *req.Plan
 	}
 	if err := c.repo.UpdateAgentProfile(ctx, profile); err != nil {
 		return nil, err
@@ -656,7 +647,6 @@ func toProfileDTO(profile *models.AgentProfile) dto.AgentProfileDTO {
 		DangerouslySkipPermissions: profile.DangerouslySkipPermissions,
 		AllowIndexing:              profile.AllowIndexing,
 		CLIPassthrough:             profile.CLIPassthrough,
-		Plan:                       profile.Plan,
 		CreatedAt:                  profile.CreatedAt,
 		UpdatedAt:                  profile.UpdatedAt,
 	}

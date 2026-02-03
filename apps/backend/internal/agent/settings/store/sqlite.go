@@ -253,9 +253,9 @@ func (r *sqliteRepository) CreateAgentProfile(ctx context.Context, profile *mode
 	profile.UpdatedAt = now
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO agent_profiles (id, agent_id, name, agent_display_name, model, auto_approve, dangerously_skip_permissions, allow_indexing, cli_passthrough, plan, created_at, updated_at, deleted_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?)
 	`, profile.ID, profile.AgentID, profile.Name, profile.AgentDisplayName, profile.Model, sqlite.BoolToInt(profile.AutoApprove),
-		sqlite.BoolToInt(profile.DangerouslySkipPermissions), sqlite.BoolToInt(profile.AllowIndexing), sqlite.BoolToInt(profile.CLIPassthrough), profile.Plan, profile.CreatedAt, profile.UpdatedAt, profile.DeletedAt)
+		sqlite.BoolToInt(profile.DangerouslySkipPermissions), sqlite.BoolToInt(profile.AllowIndexing), sqlite.BoolToInt(profile.CLIPassthrough), profile.CreatedAt, profile.UpdatedAt, profile.DeletedAt)
 	return err
 }
 
@@ -263,10 +263,10 @@ func (r *sqliteRepository) UpdateAgentProfile(ctx context.Context, profile *mode
 	profile.UpdatedAt = time.Now().UTC()
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE agent_profiles
-		SET name = ?, agent_display_name = ?, model = ?, auto_approve = ?, dangerously_skip_permissions = ?, allow_indexing = ?, cli_passthrough = ?, plan = ?, updated_at = ?
+		SET name = ?, agent_display_name = ?, model = ?, auto_approve = ?, dangerously_skip_permissions = ?, allow_indexing = ?, cli_passthrough = ?, updated_at = ?
 		WHERE id = ? AND deleted_at IS NULL
 	`, profile.Name, profile.AgentDisplayName, profile.Model, sqlite.BoolToInt(profile.AutoApprove),
-		sqlite.BoolToInt(profile.DangerouslySkipPermissions), sqlite.BoolToInt(profile.AllowIndexing), sqlite.BoolToInt(profile.CLIPassthrough), profile.Plan, profile.UpdatedAt, profile.ID)
+		sqlite.BoolToInt(profile.DangerouslySkipPermissions), sqlite.BoolToInt(profile.AllowIndexing), sqlite.BoolToInt(profile.CLIPassthrough), profile.UpdatedAt, profile.ID)
 	if err != nil {
 		return err
 	}
@@ -355,6 +355,7 @@ func scanAgentProfile(scanner interface {
 	var skipPermissions int
 	var allowIndexing int
 	var cliPassthrough int
+	var plan string // unused, kept for backwards compatibility
 	if err := scanner.Scan(
 		&profile.ID,
 		&profile.AgentID,
@@ -365,7 +366,7 @@ func scanAgentProfile(scanner interface {
 		&skipPermissions,
 		&allowIndexing,
 		&cliPassthrough,
-		&profile.Plan,
+		&plan,
 		&profile.CreatedAt,
 		&profile.UpdatedAt,
 		&profile.DeletedAt,
