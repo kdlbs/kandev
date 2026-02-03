@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/dto"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/queue"
+	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -218,12 +219,6 @@ func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID s
 	return execution, nil
 }
 
-// SystemTagStart marks the beginning of system-injected content that should be hidden from the UI.
-const SystemTagStart = "<kandev-system>"
-
-// SystemTagEnd marks the end of system-injected content that should be hidden from the UI.
-const SystemTagEnd = "</kandev-system>"
-
 // buildWorkflowPrompt constructs the effective prompt using workflow step configuration.
 // It combines: step.PromptPrefix + basePrompt + step.PromptSuffix
 // If step.PlanMode is true, it also prepends the plan mode prefix.
@@ -235,12 +230,12 @@ func (s *Service) buildWorkflowPrompt(basePrompt string, step *WorkflowStep, tas
 
 	// Apply plan mode prefix if enabled (wrapped in system tags)
 	if step.PlanMode {
-		parts = append(parts, wrapSystemContent(PlanModePrefix))
+		parts = append(parts, sysprompt.Wrap(sysprompt.PlanMode))
 	}
 
 	// Add prompt prefix if set (with interpolation, wrapped in system tags)
 	if step.PromptPrefix != "" {
-		parts = append(parts, wrapSystemContent(interpolatePrompt(step.PromptPrefix, taskID)))
+		parts = append(parts, sysprompt.Wrap(sysprompt.InterpolatePlaceholders(step.PromptPrefix, taskID)))
 	}
 
 	// Add base prompt (user's actual message - not wrapped)
@@ -248,24 +243,10 @@ func (s *Service) buildWorkflowPrompt(basePrompt string, step *WorkflowStep, tas
 
 	// Add prompt suffix if set (with interpolation, wrapped in system tags)
 	if step.PromptSuffix != "" {
-		parts = append(parts, wrapSystemContent(interpolatePrompt(step.PromptSuffix, taskID)))
+		parts = append(parts, sysprompt.Wrap(sysprompt.InterpolatePlaceholders(step.PromptSuffix, taskID)))
 	}
 
 	return strings.Join(parts, "\n\n")
-}
-
-// wrapSystemContent wraps content in <kandev-system> tags to mark it as system-injected.
-func wrapSystemContent(content string) string {
-	return SystemTagStart + content + SystemTagEnd
-}
-
-// interpolatePrompt replaces placeholders in prompt templates with actual values.
-// Supported placeholders:
-//   - {task_id} - the task ID
-func interpolatePrompt(template string, taskID string) string {
-	result := template
-	result = strings.ReplaceAll(result, "{task_id}", taskID)
-	return result
 }
 
 // ResumeTaskSession restarts a specific task session using its stored worktree.
@@ -544,10 +525,6 @@ func (s *Service) StopSession(ctx context.Context, sessionID string, reason stri
 	return s.executor.Stop(ctx, sessionID, reason, force)
 }
 
-// PlanModePrefix is prepended to prompts when plan mode is enabled.
-// This instructs agents to analyze and plan before making changes.
-const PlanModePrefix = "[PLAN MODE: Analyze and plan before making changes. Do not execute yet.]\n\n"
-
 // PromptTask sends a follow-up prompt to a running agent for a task session.
 // If planMode is true, a plan mode prefix is prepended to the prompt.
 func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prompt string, model string, planMode bool) (*PromptResult, error) {
@@ -564,7 +541,7 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 	// Apply plan mode prefix if enabled
 	effectivePrompt := prompt
 	if planMode {
-		effectivePrompt = PlanModePrefix + prompt
+		effectivePrompt = sysprompt.InjectPlanMode(prompt)
 	}
 
 	// Check if session is in a review step - if so, move back to the previous step

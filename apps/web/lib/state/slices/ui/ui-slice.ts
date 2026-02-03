@@ -15,6 +15,7 @@ export const defaultUIState: UISliceState = {
   diffs: { files: [] },
   connection: { status: 'disconnected', error: null },
   mobileKanban: { activeColumnIndex: 0, isMenuOpen: false },
+  chatInput: { planModeBySessionId: {} },
 };
 
 export const createUISlice: StateCreator<UISlice, [['zustand/immer', never]], [], UISlice> = (
@@ -72,5 +73,10 @@ export const createUISlice: StateCreator<UISlice, [['zustand/immer', never]], []
   setMobileKanbanMenuOpen: (open) =>
     set((draft) => {
       draft.mobileKanban.isMenuOpen = open;
+    }),
+  setPlanMode: (sessionId, enabled) =>
+    set((draft) => {
+      draft.chatInput.planModeBySessionId[sessionId] = enabled;
+      setLocalStorage(`plan-mode-${sessionId}`, enabled);
     }),
 });

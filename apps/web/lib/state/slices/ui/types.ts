@@ -29,12 +29,17 @@ export type MobileKanbanState = {
   isMenuOpen: boolean;
 };
 
+export type ChatInputState = {
+  planModeBySessionId: Record<string, boolean>;
+};
+
 export type UISliceState = {
   previewPanel: PreviewPanelState;
   rightPanel: RightPanelState;
   diffs: DiffState;
   connection: ConnectionState;
   mobileKanban: MobileKanbanState;
+  chatInput: ChatInputState;
 };
 
 export type UISliceActions = {
@@ -49,6 +54,7 @@ export type UISliceActions = {
   setConnectionStatus: (status: ConnectionState['status'], error?: string | null) => void;
   setMobileKanbanColumnIndex: (index: number) => void;
   setMobileKanbanMenuOpen: (open: boolean) => void;
+  setPlanMode: (sessionId: string, enabled: boolean) => void;
 };
 
 export type UISlice = UISliceState & UISliceActions;

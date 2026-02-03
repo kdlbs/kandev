@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/common/appctx"
 	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/sysprompt"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"github.com/kandev/kandev/pkg/agent"
 )
@@ -185,16 +186,7 @@ func (sm *SessionManager) getResumeContextPrompt(agentConfig *registry.AgentType
 // injectKandevContext prepends the Kandev system prompt and session context to the user's prompt.
 // This provides consistent guidance to the agent about using Kandev tools and the current session IDs.
 func (sm *SessionManager) injectKandevContext(taskID, sessionID, prompt string) string {
-	return fmt.Sprintf(`<kandev-system>
-IMPORTANT KANDEV INSTRUCTIONS:
-- When you have questions for the user, use the ask_user_question_kandev MCP tool to ask them directly.
-- When you need to create or update a plan for a task, use the Kandev MCP plan tools (plan_get, plan_update, etc.).
-- Kandev Task ID: %s
-- Kandev Session ID: %s
-- Always use these IDs when calling Kandev MCP tools that require task_id or session_id parameters.
-</kandev-system>
-
-%s`, taskID, sessionID, prompt)
+	return sysprompt.InjectKandevContext(taskID, sessionID, prompt)
 }
 
 // loadSession loads an existing session via ACP session/load

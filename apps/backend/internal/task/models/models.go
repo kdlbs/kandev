@@ -1,21 +1,11 @@
 package models
 
 import (
-	"regexp"
 	"time"
 
+	"github.com/kandev/kandev/internal/sysprompt"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
-
-// systemTagRegex matches <kandev-system>...</kandev-system> content including the tags.
-// This is used to strip system-injected content from messages before displaying to users.
-var systemTagRegex = regexp.MustCompile(`<kandev-system>[\s\S]*?</kandev-system>\s*`)
-
-// StripSystemContent removes all <kandev-system>...</kandev-system> blocks from text.
-// This is used to hide workflow step prompt modifications (prefix/suffix) from the frontend UI.
-func StripSystemContent(text string) string {
-	return systemTagRegex.ReplaceAllString(text, "")
-}
 
 // ListMessagesOptions defines pagination options for listing messages
 type ListMessagesOptions struct {
@@ -152,7 +142,7 @@ func (m *Message) ToAPI() *v1.Message {
 		TurnID:        m.TurnID,
 		AuthorType:    string(m.AuthorType),
 		AuthorID:      m.AuthorID,
-		Content:       StripSystemContent(m.Content),
+		Content:       sysprompt.StripSystemContent(m.Content),
 		Type:          messageType,
 		Metadata:      m.Metadata,
 		RequestsInput: m.RequestsInput,
