@@ -11,6 +11,7 @@ import { useDragAndDrop, type WorkflowAutomation, type MoveTaskError } from '@/h
 import { KanbanBoardGrid } from './kanban-board-grid';
 import { KanbanHeader } from './kanban/kanban-header';
 import { useKanbanData, useKanbanActions, useKanbanNavigation } from '@/hooks/domains/kanban';
+import { useResponsiveBreakpoint } from '@/hooks/use-responsive-breakpoint';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import { linkToSession } from '@/lib/links';
 import {
@@ -34,6 +35,7 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
   // Store access
   const store = useAppStoreApi();
   const router = useRouter();
+  const { isMobile } = useResponsiveBreakpoint();
 
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
@@ -79,6 +81,7 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
   // Navigation hook
   const { handleOpenTask, handleCardClick } = useKanbanNavigation({
     enablePreviewOnClick,
+    isMobile,
     onPreviewTask,
     onOpenTask,
     setEditingTask,
@@ -194,11 +197,11 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
 
 
   if (!isMounted) {
-    return <div className="h-screen w-full bg-background" />;
+    return <div className="h-dvh w-full bg-background" />;
   }
 
   return (
-    <div className="h-screen w-full flex flex-col bg-background">
+    <div className="h-dvh w-full flex flex-col bg-background">
       <KanbanHeader
         onCreateTask={handleCreate}
         workspaceId={workspaceState.activeId ?? undefined}
@@ -297,6 +300,7 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
         showMaximizeButton={enablePreviewOnClick}
         deletingTaskId={deletingTaskId}
         onCreateTask={handleCreate}
+        isLoading={kanban.isLoading}
       />
     </div>
   );
