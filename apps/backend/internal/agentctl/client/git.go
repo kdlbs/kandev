@@ -132,15 +132,17 @@ func (c *Client) GitDiscard(ctx context.Context, paths []string) (*GitOperationR
 }
 
 // GitCreatePR creates a pull request using the gh CLI.
-func (c *Client) GitCreatePR(ctx context.Context, title, body, baseBranch string) (*PRCreateResult, error) {
+func (c *Client) GitCreatePR(ctx context.Context, title, body, baseBranch string, draft bool) (*PRCreateResult, error) {
 	payload := struct {
 		Title      string `json:"title"`
 		Body       string `json:"body"`
 		BaseBranch string `json:"base_branch"`
+		Draft      bool   `json:"draft"`
 	}{
 		Title:      title,
 		Body:       body,
 		BaseBranch: baseBranch,
+		Draft:      draft,
 	}
 
 	reqBody, err := json.Marshal(payload)
