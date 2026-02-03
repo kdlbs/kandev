@@ -518,7 +518,6 @@ export type AgentProfile = {
   dangerously_skip_permissions: boolean;
   allow_indexing: boolean;
   cli_passthrough: boolean;
-  plan: string;
   created_at: string;
   updated_at: string;
 };

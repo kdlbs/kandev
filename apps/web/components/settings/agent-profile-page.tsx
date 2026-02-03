@@ -56,8 +56,7 @@ function ProfileEditor({ agent, profile, modelConfig, permissionSettings, passth
       draft.auto_approve !== savedProfile.auto_approve ||
       draft.dangerously_skip_permissions !== savedProfile.dangerously_skip_permissions ||
       draft.allow_indexing !== savedProfile.allow_indexing ||
-      draft.cli_passthrough !== savedProfile.cli_passthrough ||
-      draft.plan !== savedProfile.plan
+      draft.cli_passthrough !== savedProfile.cli_passthrough
     );
   }, [draft, savedProfile]);
 
@@ -87,7 +86,6 @@ function ProfileEditor({ agent, profile, modelConfig, permissionSettings, passth
         dangerously_skip_permissions: draft.dangerously_skip_permissions,
         allow_indexing: draft.allow_indexing,
         cli_passthrough: draft.cli_passthrough,
-        plan: draft.plan,
       });
       setSavedProfile(updated);
       setDraft(updated);
@@ -169,7 +167,6 @@ function ProfileEditor({ agent, profile, modelConfig, permissionSettings, passth
             profile={{
               name: draft.name,
               model: draft.model,
-              plan: draft.plan,
               auto_approve: draft.auto_approve,
               dangerously_skip_permissions: draft.dangerously_skip_permissions,
               allow_indexing: draft.allow_indexing,

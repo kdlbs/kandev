@@ -106,7 +106,6 @@ type createAgentProfileRequest struct {
 	Model                      string `json:"model"`
 	AutoApprove                bool   `json:"auto_approve"`
 	DangerouslySkipPermissions bool   `json:"dangerously_skip_permissions"`
-	Plan                       string `json:"plan"`
 }
 
 func (h *Handlers) httpCreateAgent(c *gin.Context) {
@@ -130,7 +129,6 @@ func (h *Handlers) httpCreateAgent(c *gin.Context) {
 			Model:                      profile.Model,
 			AutoApprove:                profile.AutoApprove,
 			DangerouslySkipPermissions: profile.DangerouslySkipPermissions,
-			Plan:                       profile.Plan,
 		})
 	}
 	resp, err := h.controller.CreateAgent(c.Request.Context(), controller.CreateAgentRequest{
@@ -286,7 +284,6 @@ type createProfileRequest struct {
 	DangerouslySkipPermissions bool   `json:"dangerously_skip_permissions"`
 	AllowIndexing              bool   `json:"allow_indexing"`
 	CLIPassthrough             bool   `json:"cli_passthrough"`
-	Plan                       string `json:"plan"`
 }
 
 func (h *Handlers) httpCreateProfile(c *gin.Context) {
@@ -307,7 +304,6 @@ func (h *Handlers) httpCreateProfile(c *gin.Context) {
 		DangerouslySkipPermissions: body.DangerouslySkipPermissions,
 		AllowIndexing:              body.AllowIndexing,
 		CLIPassthrough:             body.CLIPassthrough,
-		Plan:                       body.Plan,
 	})
 	if err != nil {
 		h.logger.Error("failed to create profile", zap.Error(err))
@@ -330,7 +326,6 @@ type updateProfileRequest struct {
 	DangerouslySkipPermissions *bool   `json:"dangerously_skip_permissions,omitempty"`
 	AllowIndexing              *bool   `json:"allow_indexing,omitempty"`
 	CLIPassthrough             *bool   `json:"cli_passthrough,omitempty"`
-	Plan                       *string `json:"plan,omitempty"`
 }
 
 func (h *Handlers) httpUpdateProfile(c *gin.Context) {
@@ -351,7 +346,6 @@ func (h *Handlers) httpUpdateProfile(c *gin.Context) {
 		DangerouslySkipPermissions: body.DangerouslySkipPermissions,
 		AllowIndexing:              body.AllowIndexing,
 		CLIPassthrough:             body.CLIPassthrough,
-		Plan:                       body.Plan,
 	})
 	if err != nil {
 		if err == controller.ErrAgentProfileNotFound {

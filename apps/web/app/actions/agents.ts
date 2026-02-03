@@ -52,7 +52,6 @@ export async function createAgentAction(payload: {
     dangerously_skip_permissions: boolean;
     allow_indexing: boolean;
     cli_passthrough: boolean;
-    plan: string;
   }>;
 }): Promise<Agent> {
   return fetchJson<Agent>(`${apiBaseUrl}/api/v1/agents`, {
@@ -84,7 +83,6 @@ export async function createAgentProfileAction(
     dangerously_skip_permissions: boolean;
     allow_indexing: boolean;
     cli_passthrough: boolean;
-    plan: string;
   }
 ): Promise<AgentProfile> {
   return fetchJson<AgentProfile>(`${apiBaseUrl}/api/v1/agents/${agentId}/profiles`, {
@@ -95,7 +93,7 @@ export async function createAgentProfileAction(
 
 export async function updateAgentProfileAction(
   id: string,
-  payload: Partial<Pick<AgentProfile, 'name' | 'model' | 'auto_approve' | 'dangerously_skip_permissions' | 'allow_indexing' | 'cli_passthrough' | 'plan'>>
+  payload: Partial<Pick<AgentProfile, 'name' | 'model' | 'auto_approve' | 'dangerously_skip_permissions' | 'allow_indexing' | 'cli_passthrough'>>
 ): Promise<AgentProfile> {
   return fetchJson<AgentProfile>(`${apiBaseUrl}/api/v1/agent-profiles/${id}`, {
     method: 'PATCH',

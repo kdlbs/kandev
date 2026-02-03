@@ -5,7 +5,6 @@ import { Button } from '@kandev/ui/button';
 import { Input } from '@kandev/ui/input';
 import { Label } from '@kandev/ui/label';
 import { Switch } from '@kandev/ui/switch';
-import { Textarea } from '@kandev/ui/textarea';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
 import { ModelCombobox } from '@/components/settings/model-combobox';
 import type { ModelConfig, PermissionSetting, PassthroughConfig } from '@/lib/types/http';
@@ -13,7 +12,6 @@ import type { ModelConfig, PermissionSetting, PassthroughConfig } from '@/lib/ty
 export type ProfileFormData = {
   name: string;
   model: string;
-  plan: string;
   auto_approve: boolean;
   dangerously_skip_permissions: boolean;
   allow_indexing?: boolean;
@@ -69,15 +67,6 @@ export function ProfileFormFields({
           placeholder="Select or enter model..."
           agentName={agentName}
           supportsDynamicModels={modelConfig.supports_dynamic_models}
-        />
-      </div>
-
-      <div className="space-y-2">
-        <Label>Append Prompt</Label>
-        <Textarea
-          value={profile.plan}
-          onChange={(event) => onChange({ plan: event.target.value })}
-          placeholder="Extra text appended to the agent prompt"
         />
       </div>
 

@@ -116,7 +116,6 @@ func TestStoreProfileResolver_ResolveProfile_Success(t *testing.T) {
 				Model:                      "claude-3.5-sonnet",
 				AutoApprove:                true,
 				DangerouslySkipPermissions: false,
-				Plan:                       "pro",
 			}, nil
 		},
 		GetAgentFn: func(ctx context.Context, id string) (*models.Agent, error) {
@@ -158,9 +157,6 @@ func TestStoreProfileResolver_ResolveProfile_Success(t *testing.T) {
 	}
 	if info.DangerouslySkipPermissions != false {
 		t.Error("expected DangerouslySkipPermissions to be false")
-	}
-	if info.Plan != "pro" {
-		t.Errorf("expected Plan 'pro', got '%s'", info.Plan)
 	}
 }
 

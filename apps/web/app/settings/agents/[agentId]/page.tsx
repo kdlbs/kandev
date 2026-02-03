@@ -66,7 +66,6 @@ const createDraftProfile = (
   dangerously_skip_permissions: permissionSettings?.dangerously_skip_permissions?.default ?? false,
   allow_indexing: permissionSettings?.allow_indexing?.default ?? false,
   cli_passthrough: false,
-  plan: '',
   created_at: new Date().toISOString(),
   updated_at: new Date().toISOString(),
   isNew: true,
@@ -141,8 +140,7 @@ function AgentSetupForm({
       draft.auto_approve !== saved.auto_approve ||
       draft.dangerously_skip_permissions !== saved.dangerously_skip_permissions ||
       draft.allow_indexing !== saved.allow_indexing ||
-      draft.cli_passthrough !== saved.cli_passthrough ||
-      draft.plan !== saved.plan
+      draft.cli_passthrough !== saved.cli_passthrough
     );
   };
 
@@ -283,7 +281,6 @@ function AgentSetupForm({
             dangerously_skip_permissions: profile.dangerously_skip_permissions,
             allow_indexing: profile.allow_indexing ?? false,
             cli_passthrough: profile.cli_passthrough ?? false,
-            plan: profile.plan,
           })),
         });
         if (created.profiles.length === draftAgent.profiles.length) {
@@ -363,7 +360,6 @@ function AgentSetupForm({
               dangerously_skip_permissions: profile.dangerously_skip_permissions,
               allow_indexing: profile.allow_indexing ?? false,
               cli_passthrough: profile.cli_passthrough ?? false,
-              plan: profile.plan,
             });
             if (profile.mcp_config && profile.mcp_config.dirty && profile.mcp_config.servers.trim()) {
               try {
@@ -386,7 +382,6 @@ function AgentSetupForm({
               auto_approve: profile.auto_approve,
               dangerously_skip_permissions: profile.dangerously_skip_permissions,
               allow_indexing: profile.allow_indexing ?? false,
-              plan: profile.plan,
             });
             nextProfiles.push(updatedProfile);
             continue;
@@ -472,7 +467,6 @@ function AgentSetupForm({
                   profile={{
                     name: profile.name,
                     model: profile.model,
-                    plan: profile.plan,
                     auto_approve: profile.auto_approve,
                     dangerously_skip_permissions: profile.dangerously_skip_permissions,
                     allow_indexing: profile.allow_indexing,

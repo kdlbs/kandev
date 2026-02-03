@@ -208,7 +208,6 @@ func (a *lifecycleAdapter) ResolveAgentProfile(ctx context.Context, profileID st
 		Model:                      info.Model,
 		AutoApprove:                info.AutoApprove,
 		DangerouslySkipPermissions: info.DangerouslySkipPermissions,
-		Plan:                       info.Plan,
 		CLIPassthrough:             info.CLIPassthrough,
 	}, nil
 }
