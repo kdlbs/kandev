@@ -27,7 +27,7 @@ export type { UISlice, UISliceState, UISliceActions } from './ui/types';
 
 // Re-export commonly used types from each domain
 export type { KanbanState, BoardState, TaskState } from './kanban/types';
-export type { WorkspaceState, RepositoriesState, RepositoryBranchesState } from './workspace/types';
+export type { WorkspaceState, RepositoriesState, RepositoryBranchesState, RepositoryScriptsState } from './workspace/types';
 export type {
   ExecutorsState,
   EnvironmentsState,
@@ -85,5 +85,7 @@ export type {
   DiffState,
   ConnectionState,
   MobileKanbanState,
+  MobileSessionPanel,
+  MobileSessionState,
 } from './ui/types';
 export type { Repository, Branch } from '@/lib/types/http';

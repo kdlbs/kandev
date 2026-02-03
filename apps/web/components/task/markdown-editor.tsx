@@ -30,6 +30,8 @@ type MilkdownEditorProps = {
   onChange: (value: string) => void;
   placeholder?: string;
   onSelectionChange?: (selection: TextSelection | null) => void;
+  /** Called when selection ends (mouseup) with selected text - for showing floating button */
+  onSelectionEnd?: (selection: TextSelection | null) => void;
   comments?: CommentHighlight[];
   onCommentClick?: (id: string, position: { x: number; y: number }) => void;
 };
@@ -349,6 +351,7 @@ function MilkdownEditorInner({
   onChange,
   placeholder = 'Start typing...',
   onSelectionChange,
+  onSelectionEnd,
   comments = [],
   onCommentClick,
 }: MilkdownEditorProps) {
@@ -359,6 +362,7 @@ function MilkdownEditorInner({
   const placeholderRef = useRef(placeholder);
   const onChangeRef = useRef(onChange);
   const onSelectionChangeRef = useRef(onSelectionChange);
+  const onSelectionEndRef = useRef(onSelectionEnd);
   const commentsRef = useRef(comments);
   const onCommentClickRef = useRef(onCommentClick);
 
@@ -370,6 +374,10 @@ function MilkdownEditorInner({
   useEffect(() => {
     onSelectionChangeRef.current = onSelectionChange;
   }, [onSelectionChange]);
+
+  useEffect(() => {
+    onSelectionEndRef.current = onSelectionEnd;
+  }, [onSelectionEnd]);
 
   useEffect(() => {
     commentsRef.current = comments;
@@ -397,6 +405,57 @@ function MilkdownEditorInner({
 
     wrapper.addEventListener('click', handleClick);
     return () => wrapper.removeEventListener('click', handleClick);
+  }, []);
+
+  // Handle mouseup to show floating button when selection ends
+  useEffect(() => {
+    const wrapper = wrapperRef.current;
+    if (!wrapper) return;
+
+    const handleMouseUp = (e: MouseEvent) => {
+      if (!onSelectionEndRef.current) return;
+
+      // Capture mouse position immediately
+      const mouseX = e.clientX;
+      const mouseY = e.clientY;
+
+      // Small delay to let selection finalize
+      setTimeout(() => {
+        const selection = window.getSelection();
+        if (!selection || selection.isCollapsed || !selection.toString().trim()) {
+          onSelectionEndRef.current?.(null);
+          return;
+        }
+
+        const selectedText = selection.toString().trim();
+        if (selectedText.length < MIN_COMMENT_TEXT_LENGTH) {
+          onSelectionEndRef.current?.(null);
+          return;
+        }
+
+        // Use mouse position (where cursor is) instead of selection end
+        onSelectionEndRef.current?.({
+          text: selectedText,
+          position: { x: mouseX, y: mouseY },
+        });
+      }, 10);
+    };
+
+    const handleMouseDown = (e: MouseEvent) => {
+      // Don't clear if clicking on the floating button
+      if ((e.target as HTMLElement).closest('.floating-comment-btn')) {
+        return;
+      }
+      // Clear selection state when starting new selection
+      onSelectionEndRef.current?.(null);
+    };
+
+    wrapper.addEventListener('mouseup', handleMouseUp);
+    wrapper.addEventListener('mousedown', handleMouseDown);
+    return () => {
+      wrapper.removeEventListener('mouseup', handleMouseUp);
+      wrapper.removeEventListener('mousedown', handleMouseDown);
+    };
   }, []);
 
   // Handle Cmd+I to trigger selection popover (overrides italic formatting)

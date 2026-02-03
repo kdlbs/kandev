@@ -190,6 +190,9 @@ export type TaskSessionAgentctlPayload = {
   session_id: string;
   agent_execution_id?: string;
   error_message?: string;
+  worktree_id?: string;
+  worktree_path?: string;
+  worktree_branch?: string;
 };
 
 export type FileInfo = {

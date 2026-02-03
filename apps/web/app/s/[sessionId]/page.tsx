@@ -37,19 +37,26 @@ export default async function SessionPage({
     }
 
     task = await fetchTask(session.task_id, { cache: 'no-store' });
-    const [snapshot, agents, repositories, allSessionsResponse, availableAgentsResponse, workspacesResponse, boardsResponse] = await Promise.all([
+    const [snapshot, agents, repositoriesResponse, allSessionsResponse, availableAgentsResponse, workspacesResponse, boardsResponse] = await Promise.all([
       fetchBoardSnapshot(task.board_id, { cache: 'no-store' }),
       listAgents({ cache: 'no-store' }),
-      listRepositories(task.workspace_id, { cache: 'no-store' }),
+      listRepositories(task.workspace_id, { includeScripts: true }, { cache: 'no-store' }),
       listTaskSessions(session.task_id, { cache: 'no-store' }),
       listAvailableAgents({ cache: 'no-store' }).catch(() => ({ agents: [] })),
       listWorkspaces({ cache: 'no-store' }).catch(() => ({ workspaces: [] })),
       listBoards(task.workspace_id, { cache: 'no-store' }).catch(() => ({ boards: [] })),
     ]);
+    const repositories = repositoriesResponse.repositories ?? [];
     const allSessions = allSessionsResponse.sessions ?? [session];
     const availableAgents = availableAgentsResponse.agents ?? [];
     const workspaces = workspacesResponse.workspaces ?? [];
     const boards = boardsResponse.boards ?? [];
+
+    // Get repository scripts from the repository (already fetched with includeScripts)
+    const repositoryId = task.repositories?.[0]?.repository_id;
+    const repository = repositories.find(r => r.id === repositoryId);
+    const scripts = repository?.scripts ?? [];
+
     let messagesResponse: ListMessagesResponse | null = null;
     try {
       // Load most recent messages in descending order, then reverse to show oldest-to-newest
@@ -100,7 +107,7 @@ export default async function SessionPage({
       },
       repositories: {
         itemsByWorkspaceId: {
-          [task.workspace_id]: repositories.repositories,
+          [task.workspace_id]: repositories,
         },
         loadingByWorkspaceId: {
           [task.workspace_id]: false,
@@ -108,6 +115,21 @@ export default async function SessionPage({
         loadedByWorkspaceId: {
           [task.workspace_id]: true,
         },
+      },
+      repositoryScripts: repositoryId ? {
+        itemsByRepositoryId: {
+          [repositoryId]: scripts,
+        },
+        loadingByRepositoryId: {
+          [repositoryId]: false,
+        },
+        loadedByRepositoryId: {
+          [repositoryId]: true,
+        },
+      } : {
+        itemsByRepositoryId: {},
+        loadingByRepositoryId: {},
+        loadedByRepositoryId: {},
       },
       agentProfiles: {
         items: agents.agents.flatMap((agent) =>
@@ -187,6 +209,7 @@ export default async function SessionPage({
         task={task}
         sessionId={sessionId}
         initialRepositories={initialState?.repositories?.itemsByWorkspaceId?.[task?.workspace_id ?? ''] ?? []}
+        initialScripts={initialState?.repositoryScripts?.itemsByRepositoryId?.[task?.repositories?.[0]?.repository_id ?? ''] ?? []}
         defaultLayouts={defaultLayouts}
       />
     </>

@@ -23,8 +23,18 @@ export async function listWorkspaces(options?: ApiRequestOptions) {
 }
 
 // Repository operations
-export async function listRepositories(workspaceId: string, options?: ApiRequestOptions) {
-  return fetchJson<ListRepositoriesResponse>(`/api/v1/workspaces/${workspaceId}/repositories`, options);
+export async function listRepositories(
+  workspaceId: string,
+  params?: { includeScripts?: boolean },
+  options?: ApiRequestOptions
+) {
+  const searchParams = new URLSearchParams();
+  if (params?.includeScripts) {
+    searchParams.set('include_scripts', 'true');
+  }
+  const queryString = searchParams.toString();
+  const url = `/api/v1/workspaces/${workspaceId}/repositories${queryString ? `?${queryString}` : ''}`;
+  return fetchJson<ListRepositoriesResponse>(url, options);
 }
 
 export async function listRepositoryBranches(repositoryId: string, options?: ApiRequestOptions) {

@@ -177,7 +177,7 @@ type TurnStartResult struct {
 // Item represents a Codex item (message, command, file change, etc.)
 type Item struct {
 	ID     string `json:"id"`
-	Type   string `json:"type"`   // "userMessage", "agentMessage", "commandExecution", "fileChange", "reasoning"
+	Type   string `json:"type"`   // "userMessage", "agentMessage", "commandExecution", "fileChange", "reasoning", "mcpToolCall"
 	Status string `json:"status"` // "inProgress", "completed", "failed"
 
 	// For commandExecution type
@@ -194,6 +194,13 @@ type Item struct {
 	// or plain strings. FlexibleContent handles both formats.
 	Summary FlexibleContent `json:"summary,omitempty"`
 	Content FlexibleContent `json:"content,omitempty"`
+
+	// For mcpToolCall type
+	Server       string          `json:"server,omitempty"`
+	Tool         string          `json:"tool,omitempty"`
+	Arguments    json.RawMessage `json:"arguments,omitempty"`
+	Result       json.RawMessage `json:"result,omitempty"`
+	ToolError    string          `json:"error,omitempty"` // Named ToolError to avoid conflict with Error type
 }
 
 // ContentPart represents a content part in a Codex item.

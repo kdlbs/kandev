@@ -66,6 +66,7 @@ type GitCreatePRRequest struct {
 	Title      string `json:"title"`
 	Body       string `json:"body"`
 	BaseBranch string `json:"base_branch"`
+	Draft      bool   `json:"draft"`
 }
 
 // handleGitPull handles POST /api/v1/git/pull
@@ -331,7 +332,7 @@ func (s *Server) handleGitCreatePR(c *gin.Context) {
 	}
 
 	gitOp := s.procMgr.GitOperator()
-	result, err := gitOp.CreatePR(c.Request.Context(), req.Title, req.Body, req.BaseBranch)
+	result, err := gitOp.CreatePR(c.Request.Context(), req.Title, req.Body, req.BaseBranch, req.Draft)
 	if err != nil {
 		if errors.Is(err, process.ErrOperationInProgress) {
 			c.JSON(http.StatusConflict, process.PRCreateResult{

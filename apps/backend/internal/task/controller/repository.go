@@ -26,7 +26,17 @@ func (c *RepositoryController) ListRepositories(ctx context.Context, req dto.Lis
 		Total:        len(repositories),
 	}
 	for _, repository := range repositories {
-		resp.Repositories = append(resp.Repositories, dto.FromRepository(repository))
+		repoDTO := dto.FromRepository(repository)
+		if req.IncludeScripts {
+			scripts, err := c.service.ListRepositoryScripts(ctx, repository.ID)
+			if err == nil {
+				repoDTO.Scripts = make([]dto.RepositoryScriptDTO, 0, len(scripts))
+				for _, script := range scripts {
+					repoDTO.Scripts = append(repoDTO.Scripts, dto.FromRepositoryScript(script))
+				}
+			}
+		}
+		resp.Repositories = append(resp.Repositories, repoDTO)
 	}
 	return resp, nil
 }

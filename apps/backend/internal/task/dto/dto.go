@@ -30,23 +30,24 @@ type WorkspaceDTO struct {
 }
 
 type RepositoryDTO struct {
-	ID                   string    `json:"id"`
-	WorkspaceID          string    `json:"workspace_id"`
-	Name                 string    `json:"name"`
-	SourceType           string    `json:"source_type"`
-	LocalPath            string    `json:"local_path"`
-	Provider             string    `json:"provider"`
-	ProviderRepoID       string    `json:"provider_repo_id"`
-	ProviderOwner        string    `json:"provider_owner"`
-	ProviderName         string    `json:"provider_name"`
-	DefaultBranch        string    `json:"default_branch"`
-	WorktreeBranchPrefix string    `json:"worktree_branch_prefix"`
-	PullBeforeWorktree   bool      `json:"pull_before_worktree"`
-	SetupScript          string    `json:"setup_script"`
-	CleanupScript        string    `json:"cleanup_script"`
-	DevScript            string    `json:"dev_script"`
-	CreatedAt            time.Time `json:"created_at"`
-	UpdatedAt            time.Time `json:"updated_at"`
+	ID                   string                 `json:"id"`
+	WorkspaceID          string                 `json:"workspace_id"`
+	Name                 string                 `json:"name"`
+	SourceType           string                 `json:"source_type"`
+	LocalPath            string                 `json:"local_path"`
+	Provider             string                 `json:"provider"`
+	ProviderRepoID       string                 `json:"provider_repo_id"`
+	ProviderOwner        string                 `json:"provider_owner"`
+	ProviderName         string                 `json:"provider_name"`
+	DefaultBranch        string                 `json:"default_branch"`
+	WorktreeBranchPrefix string                 `json:"worktree_branch_prefix"`
+	PullBeforeWorktree   bool                   `json:"pull_before_worktree"`
+	SetupScript          string                 `json:"setup_script"`
+	CleanupScript        string                 `json:"cleanup_script"`
+	DevScript            string                 `json:"dev_script"`
+	CreatedAt            time.Time              `json:"created_at"`
+	UpdatedAt            time.Time              `json:"updated_at"`
+	Scripts              []RepositoryScriptDTO  `json:"scripts,omitempty"`
 }
 
 type RepositoryScriptDTO struct {

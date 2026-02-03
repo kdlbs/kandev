@@ -9,6 +9,7 @@ export type SessionTab = {
   label: string;
   icon?: ReactNode;
   closable?: boolean;
+  alwaysShowClose?: boolean;
   onClose?: (event: MouseEvent) => void;
   className?: string;
 };
@@ -63,7 +64,7 @@ export function SessionTabs({
               <span
                 role="button"
                 tabIndex={-1}
-                className="ml-0.5 opacity-0 group-hover:opacity-100 transition-opacity hover:text-foreground text-muted-foreground"
+                className={`ml-0.5 transition-opacity hover:text-foreground text-muted-foreground ${tab.alwaysShowClose ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
                 onClick={tab.onClose}
               >
                 <svg

@@ -34,6 +34,8 @@ export type StartOptions = {
   backendPort?: number;
   /** Optional preferred web port (finds available port if not specified) */
   webPort?: number;
+  /** Show info logs from backend + web */
+  verbose?: boolean;
 };
 
 /**
@@ -49,7 +51,12 @@ export type StartOptions = {
  * @param options - Configuration for the start command
  * @throws Error if backend binary or web build is not found
  */
-export async function runStart({ repoRoot, backendPort, webPort }: StartOptions): Promise<void> {
+export async function runStart({
+  repoRoot,
+  backendPort,
+  webPort,
+  verbose = false,
+}: StartOptions): Promise<void> {
   const ports = await pickPorts(backendPort, webPort);
 
   const backendBin = path.join(repoRoot, "apps", "backend", "bin", getBinaryName("kandev"));
@@ -62,24 +69,39 @@ export async function runStart({ repoRoot, backendPort, webPort }: StartOptions)
   if (!fs.existsSync(webServerPath)) {
     throw new Error("Web standalone build not found. Run `make build` first.");
   }
+  const webStandaloneDir = path.dirname(webServerPath);
+  const webStaticDir = path.join(repoRoot, "apps", "web", ".next", "static");
+  const standaloneStaticDir = path.join(webStandaloneDir, ".next", "static");
+  if (fs.existsSync(webStaticDir) && !fs.existsSync(standaloneStaticDir)) {
+    fs.mkdirSync(path.dirname(standaloneStaticDir), { recursive: true });
+    try {
+      fs.symlinkSync(webStaticDir, standaloneStaticDir, "junction");
+    } catch (err) {
+      console.warn(
+        `[kandev] failed to link Next.js static assets: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
 
-  // Production mode: use warn log level for clean output
-  const backendEnv = buildBackendEnv({ ports, logLevel: "warn" });
+  // Production mode: use warn log level for clean output unless verbose
+  const backendEnv = buildBackendEnv({ ports, logLevel: verbose ? "info" : "warn" });
   const webEnv = buildWebEnv({ ports, includeMcp: true, production: true });
 
   const supervisor = createProcessSupervisor();
   supervisor.attachSignalHandlers();
 
-  // Start backend with piped stdio (quiet mode)
+  // Start backend with piped stdio (quiet mode unless verbose)
   const backendProc = spawn(backendBin, [], {
     cwd: path.dirname(backendBin),
     env: backendEnv,
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: verbose ? ["ignore", "inherit", "inherit"] : ["ignore", "pipe", "pipe"],
   });
   supervisor.children.push(backendProc);
 
-  // Forward stderr only (warnings/errors)
-  backendProc.stderr?.pipe(process.stderr);
+  // Forward stderr only (warnings/errors) when quiet
+  if (!verbose) {
+    backendProc.stderr?.pipe(process.stderr);
+  }
 
   attachBackendExitHandler(backendProc, supervisor);
 
@@ -88,12 +110,12 @@ export async function runStart({ repoRoot, backendPort, webPort }: StartOptions)
   launchWebApp({
     command: "node",
     args: [webServerPath],
-    cwd: path.dirname(webServerPath),
+    cwd: webStandaloneDir,
     env: webEnv,
     url: webUrl,
     supervisor,
     label: "web",
-    quiet: true,
+    quiet: !verbose,
   });
 
   const healthTimeoutMs = resolveHealthTimeoutMs(HEALTH_TIMEOUT_MS_RELEASE);

@@ -1310,6 +1310,57 @@ func (wt *WorkspaceTracker) ApplyFileDiff(reqPath string, unifiedDiff string, or
 	return newHash, nil
 }
 
+// DeleteFile deletes a file from the workspace
+func (wt *WorkspaceTracker) DeleteFile(reqPath string) error {
+	cleanWorkDir := filepath.Clean(wt.workDir)
+	cleanReqPath := filepath.Clean(reqPath)
+
+	// Resolve the full path - if already absolute and within workDir, use directly
+	var fullPath string
+	if filepath.IsAbs(cleanReqPath) && strings.HasPrefix(cleanReqPath, cleanWorkDir+string(os.PathSeparator)) {
+		fullPath = cleanReqPath
+	} else {
+		fullPath = filepath.Join(wt.workDir, cleanReqPath)
+	}
+
+	// Path traversal protection
+	if !strings.HasPrefix(fullPath, cleanWorkDir+string(os.PathSeparator)) && fullPath != cleanWorkDir {
+		return fmt.Errorf("path traversal detected")
+	}
+
+	// Check if file exists
+	info, err := os.Stat(fullPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("file does not exist: %s", reqPath)
+		}
+		return fmt.Errorf("failed to stat file: %w", err)
+	}
+
+	// Don't allow deleting directories
+	if info.IsDir() {
+		return fmt.Errorf("cannot delete directory: %s", reqPath)
+	}
+
+	// Delete the file
+	if err := os.Remove(fullPath); err != nil {
+		return fmt.Errorf("failed to delete file: %w", err)
+	}
+
+	// Trigger filesystem change notification
+	select {
+	case wt.fsChangeTrigger <- struct{}{}:
+	default:
+		// Channel already has a pending trigger, skip
+	}
+
+	wt.logger.Debug("deleted file",
+		zap.String("path", reqPath),
+	)
+
+	return nil
+}
+
 // calculateSHA256 calculates the SHA256 hash of a string
 func calculateSHA256(content string) string {
 	hash := sha256.Sum256([]byte(content))

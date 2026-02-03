@@ -1,7 +1,7 @@
 import { createStore } from 'zustand/vanilla';
 import { immer } from 'zustand/middleware/immer';
 import { hydrateState, type HydrationOptions } from './hydration/hydrator';
-import type { Repository, Branch, Message, Turn, TaskSession } from '@/lib/types/http';
+import type { Repository, Branch, RepositoryScript, Message, Turn, TaskSession } from '@/lib/types/http';
 import {
   createKanbanSlice,
   createWorkspaceSlice,
@@ -49,6 +49,7 @@ export type {
   WorkspaceState,
   RepositoriesState,
   RepositoryBranchesState,
+  RepositoryScriptsState,
   ExecutorsState,
   EnvironmentsState,
   SettingsAgentsState,
@@ -103,6 +104,7 @@ export type AppState = {
   workspaces: typeof defaultWorkspaceState['workspaces'];
   repositories: typeof defaultWorkspaceState['repositories'];
   repositoryBranches: typeof defaultWorkspaceState['repositoryBranches'];
+  repositoryScripts: typeof defaultWorkspaceState['repositoryScripts'];
 
   // Settings slice
   executors: typeof defaultSettingsState['executors'];
@@ -146,6 +148,7 @@ export type AppState = {
   diffs: typeof defaultUIState['diffs'];
   connection: typeof defaultUIState['connection'];
   mobileKanban: typeof defaultUIState['mobileKanban'];
+  mobileSession: typeof defaultUIState['mobileSession'];
   chatInput: typeof defaultUIState['chatInput'];
 
   // Actions from all slices
@@ -165,6 +168,8 @@ export type AppState = {
   setRepositoriesLoading: (workspaceId: string, loading: boolean) => void;
   setRepositoryBranches: (repositoryId: string, branches: Branch[]) => void;
   setRepositoryBranchesLoading: (repositoryId: string, loading: boolean) => void;
+  setRepositoryScripts: (repositoryId: string, scripts: RepositoryScript[]) => void;
+  setRepositoryScriptsLoading: (repositoryId: string, loading: boolean) => void;
   setSettingsData: (next: Partial<SettingsDataState>) => void;
   setEditors: (editors: EditorsState['items']) => void;
   setEditorsLoading: (loading: boolean) => void;
@@ -195,6 +200,8 @@ export type AppState = {
   setConnectionStatus: (status: ConnectionState['status'], error?: string | null) => void;
   setMobileKanbanColumnIndex: (index: number) => void;
   setMobileKanbanMenuOpen: (open: boolean) => void;
+  setMobileSessionPanel: (sessionId: string, panel: import('./slices/ui/types').MobileSessionPanel) => void;
+  setMobileSessionTaskSwitcherOpen: (open: boolean) => void;
   setPlanMode: (sessionId: string, enabled: boolean) => void;
   setMessages: (
     sessionId: string,
@@ -258,6 +265,7 @@ const defaultState = {
   workspaces: defaultWorkspaceState.workspaces,
   repositories: defaultWorkspaceState.repositories,
   repositoryBranches: defaultWorkspaceState.repositoryBranches,
+  repositoryScripts: defaultWorkspaceState.repositoryScripts,
   executors: defaultSettingsState.executors,
   environments: defaultSettingsState.environments,
   settingsAgents: defaultSettingsState.settingsAgents,
@@ -293,6 +301,7 @@ const defaultState = {
   diffs: defaultUIState.diffs,
   connection: defaultUIState.connection,
   mobileKanban: defaultUIState.mobileKanban,
+  mobileSession: defaultUIState.mobileSession,
   chatInput: defaultUIState.chatInput,
 };
 
@@ -309,6 +318,7 @@ function mergeInitialState(initialState?: Partial<AppState>): typeof defaultStat
     workspaces: { ...defaultState.workspaces, ...initialState.workspaces },
     repositories: { ...defaultState.repositories, ...initialState.repositories },
     repositoryBranches: { ...defaultState.repositoryBranches, ...initialState.repositoryBranches },
+    repositoryScripts: { ...defaultState.repositoryScripts, ...initialState.repositoryScripts },
     executors: { ...defaultState.executors, ...initialState.executors },
     environments: { ...defaultState.environments, ...initialState.environments },
     settingsAgents: { ...defaultState.settingsAgents, ...initialState.settingsAgents },
@@ -343,6 +353,7 @@ function mergeInitialState(initialState?: Partial<AppState>): typeof defaultStat
     diffs: { ...defaultState.diffs, ...initialState.diffs },
     connection: { ...defaultState.connection, ...initialState.connection },
     mobileKanban: { ...defaultState.mobileKanban, ...initialState.mobileKanban },
+    mobileSession: { ...defaultState.mobileSession, ...initialState.mobileSession },
     chatInput: { ...defaultState.chatInput, ...initialState.chatInput },
   };
 }
@@ -373,6 +384,7 @@ export function createAppStore(initialState?: Partial<AppState>) {
       workspaces: merged.workspaces,
       repositories: merged.repositories,
       repositoryBranches: merged.repositoryBranches,
+      repositoryScripts: merged.repositoryScripts,
       executors: merged.executors,
       environments: merged.environments,
       settingsAgents: merged.settingsAgents,
@@ -404,6 +416,7 @@ export function createAppStore(initialState?: Partial<AppState>) {
       diffs: merged.diffs,
       connection: merged.connection,
       mobileKanban: merged.mobileKanban,
+      mobileSession: merged.mobileSession,
       chatInput: merged.chatInput,
       // Add hydrate method
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

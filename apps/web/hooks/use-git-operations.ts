@@ -31,7 +31,7 @@ interface UseGitOperationsReturn {
   stage: (paths?: string[]) => Promise<GitOperationResult>;
   unstage: (paths?: string[]) => Promise<GitOperationResult>;
   discard: (paths?: string[]) => Promise<GitOperationResult>;
-  createPR: (title: string, body: string, baseBranch?: string) => Promise<PRCreateResult>;
+  createPR: (title: string, body: string, baseBranch?: string, draft?: boolean) => Promise<PRCreateResult>;
 
   // State
   isLoading: boolean;
@@ -119,7 +119,7 @@ export function useGitOperations(sessionId: string | null): UseGitOperationsRetu
     return executeOperation<GitOperationResult>('worktree.discard', { paths: paths ?? [] });
   }, [executeOperation]);
 
-  const createPR = useCallback(async (title: string, body: string, baseBranch?: string): Promise<PRCreateResult> => {
+  const createPR = useCallback(async (title: string, body: string, baseBranch?: string, draft?: boolean): Promise<PRCreateResult> => {
     if (!sessionId) {
       throw new Error('No session ID provided');
     }
@@ -138,6 +138,7 @@ export function useGitOperations(sessionId: string | null): UseGitOperationsRetu
         title,
         body,
         base_branch: baseBranch ?? '',
+        draft: draft ?? true,
       }, 120000); // 2 min timeout for PR creation (gh cli can be slow)
 
       if (!result.success && result.error) {

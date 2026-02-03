@@ -760,7 +760,7 @@ type PRCreateResult struct {
 
 // CreatePR creates a pull request using the gh CLI.
 // It first pushes the current branch to the remote, then creates the PR.
-func (g *GitOperator) CreatePR(ctx context.Context, title, body, baseBranch string) (*PRCreateResult, error) {
+func (g *GitOperator) CreatePR(ctx context.Context, title, body, baseBranch string, draft bool) (*PRCreateResult, error) {
 	if !g.tryLock("create-pr") {
 		return nil, ErrOperationInProgress
 	}
@@ -793,6 +793,10 @@ func (g *GitOperator) CreatePR(ctx context.Context, title, body, baseBranch stri
 	cleanBaseBranch := strings.TrimPrefix(baseBranch, "origin/")
 	if cleanBaseBranch != "" {
 		args = append(args, "--base", cleanBaseBranch)
+	}
+
+	if draft {
+		args = append(args, "--draft")
 	}
 
 	cmd := exec.CommandContext(ctx, "gh", args...)

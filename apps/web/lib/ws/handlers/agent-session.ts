@@ -109,6 +109,37 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
         agentExecutionId: payload.agent_execution_id,
         updatedAt: message.timestamp,
       });
+
+      const existingSession = store.getState().taskSessions.items[payload.session_id];
+      if (!existingSession) {
+        return;
+      }
+
+      const sessionUpdate: Record<string, unknown> = {};
+      if (payload.worktree_id) sessionUpdate.worktree_id = payload.worktree_id;
+      if (payload.worktree_path) sessionUpdate.worktree_path = payload.worktree_path;
+      if (payload.worktree_branch) sessionUpdate.worktree_branch = payload.worktree_branch;
+
+      if (Object.keys(sessionUpdate).length > 0) {
+        store.getState().setTaskSession({
+          ...existingSession,
+          ...sessionUpdate,
+        });
+      }
+
+      if (payload.worktree_id) {
+        store.getState().setWorktree({
+          id: payload.worktree_id,
+          sessionId: payload.session_id,
+          repositoryId: existingSession.repository_id ?? undefined,
+          path: payload.worktree_path ?? existingSession.worktree_path ?? undefined,
+          branch: payload.worktree_branch ?? existingSession.worktree_branch ?? undefined,
+        });
+        const existing = store.getState().sessionWorktreesBySessionId.itemsBySessionId[payload.session_id] ?? [];
+        if (!existing.includes(payload.worktree_id)) {
+          store.getState().setSessionWorktrees(payload.session_id, [...existing, payload.worktree_id]);
+        }
+      }
     },
     'session.agentctl_error': (message) => {
       const payload = message.payload;

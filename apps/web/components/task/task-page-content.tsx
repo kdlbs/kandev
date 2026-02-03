@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { TaskTopBar } from '@/components/task/task-top-bar';
 import { TaskLayout } from '@/components/task/task-layout';
 import { DebugOverlay } from '@/components/debug-overlay';
-import type { Repository, Task } from '@/lib/types/http';
+import type { Repository, RepositoryScript, Task } from '@/lib/types/http';
 import type { KanbanState } from '@/lib/state/slices';
 import { DEBUG_UI } from '@/lib/config';
 import { TooltipProvider } from '@kandev/ui/tooltip';
@@ -15,12 +15,14 @@ import { useSessionAgentctl } from '@/hooks/domains/session/use-session-agentctl
 import { useAppStore } from '@/components/state-provider';
 import { fetchTask } from '@/lib/api';
 import { useTasks } from '@/hooks/use-tasks';
+import { useResponsiveBreakpoint } from '@/hooks/use-responsive-breakpoint';
 import type { Layout } from 'react-resizable-panels';
 
 type TaskPageContentProps = {
   task: Task | null;
   sessionId?: string | null;
   initialRepositories?: Repository[];
+  initialScripts?: RepositoryScript[];
   defaultLayouts?: Record<string, Layout>;
 };
 
@@ -34,11 +36,13 @@ export function TaskPageContent({
   task: initialTask,
   sessionId = null,
   initialRepositories = [],
+  initialScripts = [],
   defaultLayouts = {},
 }: TaskPageContentProps) {
   const [taskDetails, setTaskDetails] = useState<Task | null>(initialTask);
   const [isMounted, setIsMounted] = useState(false);
   const [showDebugOverlay, setShowDebugOverlay] = useState(false);
+  const { isMobile } = useResponsiveBreakpoint();
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const setActiveSession = useAppStore((state) => state.setActiveSession);
@@ -228,31 +232,38 @@ export function TaskPageContent({
             }}
           />
         )}
-        <TaskTopBar
-          taskId={task?.id ?? null}
-          activeSessionId={effectiveSessionId ?? null}
-          taskTitle={task?.title}
-          taskDescription={task?.description}
-          baseBranch={task?.repositories?.[0]?.base_branch ?? undefined}
-          onStartAgent={handleStartAgent}
-          onStopAgent={handleStopAgent}
-          isAgentRunning={isAgentRunning || isResumed}
-          isAgentLoading={isAgentLoading || isResuming}
-          worktreePath={worktreePath}
-          worktreeBranch={worktreeBranch}
-          repositoryPath={repository?.local_path ?? null}
-          repositoryName={repository?.name ?? null}
-          hasDevScript={Boolean(repository?.dev_script?.trim())}
-          showDebugOverlay={showDebugOverlay}
-          onToggleDebugOverlay={() => setShowDebugOverlay((prev) => !prev)}
-        />
+        {/* TaskTopBar is hidden on mobile - mobile layout has its own top bar */}
+        {!isMobile && (
+          <TaskTopBar
+            taskId={task?.id ?? null}
+            activeSessionId={effectiveSessionId ?? null}
+            taskTitle={task?.title}
+            taskDescription={task?.description}
+            baseBranch={task?.repositories?.[0]?.base_branch ?? undefined}
+            onStartAgent={handleStartAgent}
+            onStopAgent={handleStopAgent}
+            isAgentRunning={isAgentRunning || isResumed}
+            isAgentLoading={isAgentLoading || isResuming}
+            worktreePath={worktreePath}
+            worktreeBranch={worktreeBranch}
+            repositoryPath={repository?.local_path ?? null}
+            repositoryName={repository?.name ?? null}
+            hasDevScript={Boolean(repository?.dev_script?.trim())}
+            showDebugOverlay={showDebugOverlay}
+            onToggleDebugOverlay={() => setShowDebugOverlay((prev) => !prev)}
+          />
+        )}
 
         <TaskLayout
           workspaceId={task?.workspace_id ?? null}
           boardId={task?.board_id ?? null}
           sessionId={effectiveSessionId ?? null}
           repository={repository ?? null}
+          initialScripts={initialScripts}
           defaultLayouts={defaultLayouts}
+          taskTitle={task?.title}
+          baseBranch={task?.repositories?.[0]?.base_branch}
+          worktreeBranch={worktreeBranch}
         />
       </div>
     </TooltipProvider>

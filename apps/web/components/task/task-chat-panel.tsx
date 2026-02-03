@@ -26,8 +26,8 @@ type TaskChatPanelProps = {
   onOpenFile?: (path: string) => void;
   showRequestChangesTooltip?: boolean;
   onRequestChangesTooltipDismiss?: () => void;
-  /** Callback to select a file in the changes panel (for jump-to-line) */
-  onSelectDiff?: (path: string) => void;
+  /** Callback to open a file at a specific line (for comment clicks) */
+  onOpenFileAtLine?: (filePath: string) => void;
 };
 
 export const TaskChatPanel = memo(function TaskChatPanel({
@@ -36,7 +36,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   onOpenFile,
   showRequestChangesTooltip = false,
   onRequestChangesTooltipDismiss,
-  onSelectDiff,
+  onOpenFileAtLine,
 }: TaskChatPanelProps) {
   const [isSending, setIsSending] = useState(false);
   const lastAgentMessageCountRef = useRef(0);
@@ -185,22 +185,26 @@ export const TaskChatPanel = memo(function TaskChatPanel({
 
 
   return (
-    <>
-      <VirtualizedMessageList
-        items={groupedItems}
-        messages={allMessages}
-        permissionsByToolCallId={permissionsByToolCallId}
-        childrenByParentToolCallId={childrenByParentToolCallId}
-        taskId={taskId ?? undefined}
-        sessionId={resolvedSessionId}
-        messagesLoading={messagesLoading}
-        isWorking={isWorking}
-        sessionState={session?.state}
-        worktreePath={session?.worktree_path}
-        onOpenFile={onOpenFile}
-      />
+    <div className="flex flex-col h-full min-h-0">
+      {/* Scrollable messages area */}
+      <div className="flex-1 min-h-0 overflow-auto">
+        <VirtualizedMessageList
+          items={groupedItems}
+          messages={allMessages}
+          permissionsByToolCallId={permissionsByToolCallId}
+          childrenByParentToolCallId={childrenByParentToolCallId}
+          taskId={taskId ?? undefined}
+          sessionId={resolvedSessionId}
+          messagesLoading={messagesLoading}
+          isWorking={isWorking}
+          sessionState={session?.state}
+          worktreePath={session?.worktree_path}
+          onOpenFile={onOpenFile}
+        />
+      </div>
 
-      <div className="flex flex-col gap-2 mt-2">
+      {/* Sticky input at bottom */}
+      <div className="flex-shrink-0 flex flex-col gap-2 mt-2">
         {todoItems.length > 0 && <TodoSummary todos={todoItems} />}
         <ChatInputContainer
           key={clarificationKey}
@@ -227,9 +231,9 @@ export const TaskChatPanel = memo(function TaskChatPanel({
           pendingCommentsByFile={pendingCommentsByFile}
           onRemoveCommentFile={handleRemoveCommentFile}
           onRemoveComment={handleRemoveComment}
-          onCommentClick={onSelectDiff ? (comment) => onSelectDiff(comment.filePath) : undefined}
+          onCommentClick={onOpenFileAtLine ? (comment) => onOpenFileAtLine(comment.filePath) : undefined}
         />
       </div>
-    </>
+    </div>
   );
 });

@@ -91,6 +91,7 @@ const TaskTopBar = memo(function TaskTopBar({
   const [prDialogOpen, setPrDialogOpen] = useState(false);
   const [prTitle, setPrTitle] = useState('');
   const [prBody, setPrBody] = useState('');
+  const [prDraft, setPrDraft] = useState(true);
 
   const { toast } = useToast();
   const gitStatus = useSessionGitStatus(activeSessionId ?? null);
@@ -198,10 +199,10 @@ const TaskTopBar = memo(function TaskTopBar({
     if (!prTitle.trim()) return;
     setPrDialogOpen(false);
     try {
-      const result = await createPR(prTitle.trim(), prBody.trim(), baseBranch);
+      const result = await createPR(prTitle.trim(), prBody.trim(), baseBranch, prDraft);
       if (result.success) {
         toast({
-          title: 'Pull Request created',
+          title: prDraft ? 'Draft Pull Request created' : 'Pull Request created',
           description: result.pr_url || 'PR created successfully',
           variant: 'success',
         });
@@ -225,7 +226,7 @@ const TaskTopBar = memo(function TaskTopBar({
     }
     setPrTitle('');
     setPrBody('');
-  }, [prTitle, prBody, baseBranch, createPR, toast]);
+  }, [prTitle, prBody, baseBranch, prDraft, createPR, toast]);
 
   const handleBranchClick = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -666,6 +667,16 @@ const TaskTopBar = memo(function TaskTopBar({
                 rows={6}
                 className="resize-none"
               />
+            </div>
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="pr-draft"
+                checked={prDraft}
+                onCheckedChange={(checked) => setPrDraft(checked === true)}
+              />
+              <Label htmlFor="pr-draft" className="text-sm cursor-pointer">
+                Create as draft
+              </Label>
             </div>
           </div>
           <DialogFooter>

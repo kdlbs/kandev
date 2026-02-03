@@ -34,7 +34,7 @@ export function useRepositories(workspaceId: string | null, enabled = true) {
     let cancelled = false;
     inFlightRef.current = true;
     setRepositoriesLoading(workspaceId, true);
-    listRepositories(workspaceId, { cache: 'no-store' })
+    listRepositories(workspaceId, undefined, { cache: 'no-store' })
       .then((response) => {
         if (cancelled) return;
         setRepositories(workspaceId, response.repositories);
