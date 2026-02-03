@@ -29,12 +29,20 @@ export type MobileKanbanState = {
   isMenuOpen: boolean;
 };
 
+export type MobileSessionPanel = 'chat' | 'plan' | 'changes' | 'files' | 'terminal';
+
+export type MobileSessionState = {
+  activePanelBySessionId: Record<string, MobileSessionPanel>;
+  isTaskSwitcherOpen: boolean;
+};
+
 export type UISliceState = {
   previewPanel: PreviewPanelState;
   rightPanel: RightPanelState;
   diffs: DiffState;
   connection: ConnectionState;
   mobileKanban: MobileKanbanState;
+  mobileSession: MobileSessionState;
 };
 
 export type UISliceActions = {
@@ -49,6 +57,8 @@ export type UISliceActions = {
   setConnectionStatus: (status: ConnectionState['status'], error?: string | null) => void;
   setMobileKanbanColumnIndex: (index: number) => void;
   setMobileKanbanMenuOpen: (open: boolean) => void;
+  setMobileSessionPanel: (sessionId: string, panel: MobileSessionPanel) => void;
+  setMobileSessionTaskSwitcherOpen: (open: boolean) => void;
 };
 
 export type UISlice = UISliceState & UISliceActions;

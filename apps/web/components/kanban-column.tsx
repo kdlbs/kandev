@@ -52,7 +52,7 @@ export function KanbanColumn({ column, tasks, onPreviewTask, onOpenTask, onEditT
     <div
       ref={setNodeRef}
       className={cn(
-        'flex flex-col h-full min-w-0  p-3 min-h-[300px] rounded-sm border border-border',
+        'flex flex-col flex-1 h-full min-w-0 p-3 sm:min-h-[300px] rounded-sm border border-border',
         isOver && 'ring-2 ring-primary'
       )}
     >

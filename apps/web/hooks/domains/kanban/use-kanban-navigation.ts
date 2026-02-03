@@ -8,6 +8,7 @@ import type { Task } from '@/components/kanban-card';
 
 type NavigationOptions = {
   enablePreviewOnClick?: boolean;
+  isMobile?: boolean;
   onPreviewTask?: (task: Task) => void;
   onOpenTask?: (task: Task, sessionId: string) => void;
   setEditingTask: (task: Task) => void;
@@ -17,6 +18,7 @@ type NavigationOptions = {
 
 export function useKanbanNavigation({
   enablePreviewOnClick,
+  isMobile,
   onPreviewTask,
   onOpenTask,
   setEditingTask,
@@ -70,7 +72,24 @@ export function useKanbanNavigation({
   // Handle card click (preview or navigate based on settings)
   const handleCardClick = useCallback(
     async (task: Task) => {
-      // Capture the current mode at the start to avoid race conditions
+      // On mobile, always navigate to task (no preview panel)
+      if (isMobile) {
+        const latestSessionId = await fetchLatestSessionId(task.id);
+        if (!latestSessionId) {
+          setEditingTask(task);
+          setIsDialogOpen(true);
+          return;
+        }
+
+        if (onOpenTask) {
+          onOpenTask(task, latestSessionId);
+        } else {
+          router.push(linkToSession(latestSessionId));
+        }
+        return;
+      }
+
+      // Desktop/tablet: preview or navigate based on settings
       const shouldOpenPreview = enablePreviewOnClick;
 
       if (shouldOpenPreview) {
@@ -94,7 +113,7 @@ export function useKanbanNavigation({
         }
       }
     },
-    [enablePreviewOnClick, onPreviewTask, fetchLatestSessionId, onOpenTask, router, setEditingTask, setIsDialogOpen]
+    [isMobile, enablePreviewOnClick, onPreviewTask, fetchLatestSessionId, onOpenTask, router, setEditingTask, setIsDialogOpen]
   );
 
   return {

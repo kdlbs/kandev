@@ -298,7 +298,7 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({ taskId, visible = tru
         {/* Rich empty state - shows when no content and editor not focused */}
         {!isLoading && draftContent.trim() === '' && !isEditorFocused && (
           <div
-            className="absolute inset-0 flex items-center justify-center pointer-events-none"
+            className="absolute inset-0 flex items-center justify-center pointer-events-none bg-background"
             onClick={handleEmptyStateClick}
           >
             <div className="flex flex-col items-center gap-6 max-w-md px-6">

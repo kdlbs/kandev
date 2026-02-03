@@ -148,6 +148,7 @@ export type AppState = {
   diffs: typeof defaultUIState['diffs'];
   connection: typeof defaultUIState['connection'];
   mobileKanban: typeof defaultUIState['mobileKanban'];
+  mobileSession: typeof defaultUIState['mobileSession'];
 
   // Actions from all slices
   hydrate: (state: Partial<AppState>, options?: HydrationOptions) => void;
@@ -198,6 +199,8 @@ export type AppState = {
   setConnectionStatus: (status: ConnectionState['status'], error?: string | null) => void;
   setMobileKanbanColumnIndex: (index: number) => void;
   setMobileKanbanMenuOpen: (open: boolean) => void;
+  setMobileSessionPanel: (sessionId: string, panel: import('./slices/ui/types').MobileSessionPanel) => void;
+  setMobileSessionTaskSwitcherOpen: (open: boolean) => void;
   setMessages: (
     sessionId: string,
     messages: Message[],
@@ -296,6 +299,7 @@ const defaultState = {
   diffs: defaultUIState.diffs,
   connection: defaultUIState.connection,
   mobileKanban: defaultUIState.mobileKanban,
+  mobileSession: defaultUIState.mobileSession,
 };
 
 function mergeInitialState(initialState?: Partial<AppState>): typeof defaultState {
@@ -346,6 +350,7 @@ function mergeInitialState(initialState?: Partial<AppState>): typeof defaultStat
     diffs: { ...defaultState.diffs, ...initialState.diffs },
     connection: { ...defaultState.connection, ...initialState.connection },
     mobileKanban: { ...defaultState.mobileKanban, ...initialState.mobileKanban },
+    mobileSession: { ...defaultState.mobileSession, ...initialState.mobileSession },
   };
 }
 
@@ -407,6 +412,7 @@ export function createAppStore(initialState?: Partial<AppState>) {
       diffs: merged.diffs,
       connection: merged.connection,
       mobileKanban: merged.mobileKanban,
+      mobileSession: merged.mobileSession,
       // Add hydrate method
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       hydrate: (state, options) => set((draft) => hydrateState(draft as any, state, options)),

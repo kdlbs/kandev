@@ -1,18 +1,22 @@
 'use client';
 
-import { memo, useMemo, useState, useCallback } from 'react';
+import { memo, useMemo } from 'react';
 import { Group, Panel, type Layout } from 'react-resizable-panels';
 import { useDefaultLayout } from '@/lib/layout/use-default-layout';
+import { useResponsiveBreakpoint } from '@/hooks/use-responsive-breakpoint';
+import { useSessionLayoutState } from '@/hooks/use-session-layout-state';
 import { TaskCenterPanel } from './task-center-panel';
 import { TaskRightPanel } from './task-right-panel';
 import { TaskFilesPanel } from './task-files-panel';
 import { TaskSessionSidebar } from './task-session-sidebar';
+import { SessionMobileLayout, SessionTabletLayout } from './mobile';
 import { PreviewPanel } from '@/components/task/preview/preview-panel';
 import { PreviewController } from '@/components/task/preview/preview-controller';
 import { useLayoutStore } from '@/lib/state/layout-store';
-import type { OpenFileTab } from '@/lib/types/backend';
 import type { Repository, RepositoryScript } from '@/lib/types/http';
-import { useAppStore } from '@/components/state-provider';
+
+// Re-export for backwards compatibility
+export type { SelectedDiff } from '@/hooks/use-session-layout-state';
 
 const DEFAULT_HORIZONTAL_LAYOUT: Record<string, number> = {
   left: 18,
@@ -33,11 +37,9 @@ type TaskLayoutProps = {
   repository?: Repository | null;
   initialScripts?: RepositoryScript[];
   defaultLayouts?: Record<string, Layout>;
-};
-
-export type SelectedDiff = {
-  path: string;
-  content?: string; // Optional: if provided, use this instead of looking up from git status
+  taskTitle?: string;
+  baseBranch?: string;
+  worktreeBranch?: string | null;
 };
 
 export const TaskLayout = memo(function TaskLayout({
@@ -47,42 +49,31 @@ export const TaskLayout = memo(function TaskLayout({
   repository = null,
   initialScripts = [],
   defaultLayouts = {},
+  taskTitle,
+  baseBranch,
+  worktreeBranch,
 }: TaskLayoutProps) {
-  const [selectedDiff, setSelectedDiff] = useState<SelectedDiff | null>(null);
-  const [openFileRequest, setOpenFileRequest] = useState<OpenFileTab | null>(null);
-  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const { isMobile, isTablet } = useResponsiveBreakpoint();
+
+  // Use shared layout state hook
+  const {
+    effectiveSessionId,
+    sessionKey,
+    selectedDiff,
+    handleSelectDiff,
+    handleClearSelectedDiff,
+    openFileRequest,
+    handleOpenFile,
+    handleFileOpenHandled,
+  } = useSessionLayoutState({ sessionId });
+
   const layoutBySession = useLayoutStore((state) => state.columnsBySessionId);
-  const sessionKey = activeSessionId ?? sessionId ?? '';
   const layoutState = useMemo(
     () => layoutBySession[sessionKey] ?? DEFAULT_LAYOUT_STATE,
     [layoutBySession, sessionKey]
   );
   const hasDevScript = Boolean(repository?.dev_script?.trim());
-
-  const handleSelectDiff = useCallback((path: string, content?: string) => {
-    setSelectedDiff({ path, content });
-  }, []);
-
-  const handleOpenFile = useCallback((file: OpenFileTab) => {
-    setOpenFileRequest(file);
-  }, []);
-
-  const handleDiffHandled = useCallback(() => {
-    setSelectedDiff(null);
-  }, []);
-
-  const handleFileOpenHandled = useCallback(() => {
-    setOpenFileRequest(null);
-  }, []);
-
-  const topFilesPanel = (
-    <TaskFilesPanel
-      onSelectDiff={handleSelectDiff}
-      onOpenFile={handleOpenFile}
-    />
-  );
-
-  const sessionForPreview = activeSessionId ?? sessionId ?? null;
+  const sessionForPreview = effectiveSessionId;
 
   const horizontalPanelIds = useMemo(() => {
     const ids: string[] = [];
@@ -110,6 +101,41 @@ export const TaskLayout = memo(function TaskLayout({
       baseLayout: DEFAULT_PREVIEW_LAYOUT,
       serverDefaultLayout: defaultLayouts[previewLayoutKey],
     });
+
+  // Mobile layout
+  if (isMobile) {
+    return (
+      <SessionMobileLayout
+        workspaceId={workspaceId}
+        boardId={boardId}
+        sessionId={sessionId}
+        baseBranch={baseBranch}
+        worktreeBranch={worktreeBranch}
+        taskTitle={taskTitle}
+      />
+    );
+  }
+
+  // Tablet layout
+  if (isTablet) {
+    return (
+      <SessionTabletLayout
+        workspaceId={workspaceId}
+        boardId={boardId}
+        sessionId={sessionId}
+        repository={repository}
+        defaultLayouts={defaultLayouts}
+      />
+    );
+  }
+
+  // Desktop layout
+  const topFilesPanel = (
+    <TaskFilesPanel
+      onSelectDiff={handleSelectDiff}
+      onOpenFile={handleOpenFile}
+    />
+  );
 
   return (
     <div className="flex-1 min-h-0 px-4 pb-4">
@@ -144,7 +170,7 @@ export const TaskLayout = memo(function TaskLayout({
                 <TaskCenterPanel
                   selectedDiff={selectedDiff}
                   openFileRequest={openFileRequest}
-                  onDiffHandled={handleDiffHandled}
+                  onDiffHandled={handleClearSelectedDiff}
                   onFileOpenHandled={handleFileOpenHandled}
                 />
               </Panel>
@@ -158,7 +184,7 @@ export const TaskLayout = memo(function TaskLayout({
             <TaskCenterPanel
               selectedDiff={selectedDiff}
               openFileRequest={openFileRequest}
-              onDiffHandled={handleDiffHandled}
+              onDiffHandled={handleClearSelectedDiff}
               onFileOpenHandled={handleFileOpenHandled}
               sessionId={sessionId}
             />

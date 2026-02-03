@@ -96,16 +96,21 @@ export type WebEnvOptions = {
 export function buildWebEnv(options: WebEnvOptions): NodeJS.ProcessEnv {
   const { ports, includeMcp = false, production = false, debug = false } = options;
 
+  // Server-side env vars use localhost (SSR runs on same machine as backend)
+  // Client-side uses NEXT_PUBLIC_*_PORT to build URLs dynamically from window.location.hostname
+  // This allows accessing the app from any device (iPhone, Tailscale, etc.)
   const env: NodeJS.ProcessEnv = {
     ...process.env,
+    // Server-side: full localhost URL for SSR
     KANDEV_API_BASE_URL: ports.backendUrl,
-    NEXT_PUBLIC_KANDEV_API_BASE_URL: ports.backendUrl,
+    // Client-side: only pass ports, client builds URL from current hostname
+    NEXT_PUBLIC_KANDEV_API_PORT: String(ports.backendPort),
     PORT: String(ports.webPort),
   };
 
   if (includeMcp) {
     env.KANDEV_MCP_SERVER_URL = ports.mcpUrl;
-    env.NEXT_PUBLIC_KANDEV_MCP_SERVER_URL = ports.mcpUrl;
+    env.NEXT_PUBLIC_KANDEV_MCP_PORT = String(ports.mcpPort);
   }
 
   if (production) {

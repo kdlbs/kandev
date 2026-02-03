@@ -165,22 +165,26 @@ export const TaskChatPanel = memo(function TaskChatPanel({
 
 
   return (
-    <>
-      <VirtualizedMessageList
-        items={groupedItems}
-        messages={allMessages}
-        permissionsByToolCallId={permissionsByToolCallId}
-        childrenByParentToolCallId={childrenByParentToolCallId}
-        taskId={taskId ?? undefined}
-        sessionId={resolvedSessionId}
-        messagesLoading={messagesLoading}
-        isWorking={isWorking}
-        sessionState={session?.state}
-        worktreePath={session?.worktree_path}
-        onOpenFile={onOpenFile}
-      />
+    <div className="flex flex-col h-full min-h-0">
+      {/* Scrollable messages area */}
+      <div className="flex-1 min-h-0 overflow-auto">
+        <VirtualizedMessageList
+          items={groupedItems}
+          messages={allMessages}
+          permissionsByToolCallId={permissionsByToolCallId}
+          childrenByParentToolCallId={childrenByParentToolCallId}
+          taskId={taskId ?? undefined}
+          sessionId={resolvedSessionId}
+          messagesLoading={messagesLoading}
+          isWorking={isWorking}
+          sessionState={session?.state}
+          worktreePath={session?.worktree_path}
+          onOpenFile={onOpenFile}
+        />
+      </div>
 
-      <div className="flex flex-col gap-2 mt-2">
+      {/* Sticky input at bottom */}
+      <div className="flex-shrink-0 flex flex-col gap-2 mt-2">
         {todoItems.length > 0 && <TodoSummary todos={todoItems} />}
         <ChatInputContainer
           key={clarificationKey}
@@ -210,6 +214,6 @@ export const TaskChatPanel = memo(function TaskChatPanel({
           onCommentClick={onSelectDiff ? (comment) => onSelectDiff(comment.filePath) : undefined}
         />
       </div>
-    </>
+    </div>
   );
 });

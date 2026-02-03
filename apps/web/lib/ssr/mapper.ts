@@ -27,6 +27,7 @@ export function snapshotToState(snapshot: BoardSnapshot): Partial<AppState> {
   return {
     kanban: {
       boardId: snapshot.board.id,
+      isLoading: false,
       steps: snapshot.steps.map((step) => ({
         id: step.id,
         title: step.name,

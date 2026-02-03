@@ -35,6 +35,7 @@ export type KanbanBoardGridProps = {
   showMaximizeButton?: boolean;
   deletingTaskId?: string | null;
   onCreateTask?: () => void;
+  isLoading?: boolean;
 };
 
 export function KanbanBoardGrid({
@@ -52,6 +53,7 @@ export function KanbanBoardGrid({
   showMaximizeButton,
   deletingTaskId,
   onCreateTask,
+  isLoading,
 }: KanbanBoardGridProps) {
   const { isMobile, isTablet } = useResponsiveBreakpoint();
   const activeColumnIndex = useAppStore((state) => state.mobileKanban.activeColumnIndex);
@@ -106,9 +108,24 @@ export function KanbanBoardGrid({
   // Get current column ID for mobile drop targets
   const currentColumnId = columns[activeColumnIndex]?.id ?? null;
 
+  // Check if we have a board selected (from SSR or client)
+  const boardsActiveId = useAppStore((state) => state.boards.activeId);
+  const kanbanBoardId = useAppStore((state) => state.kanban.boardId);
+
+  // Show loading state when:
+  // 1. isLoading is explicitly true, or
+  // 2. We have an active board selected but the kanban data hasn't been hydrated yet
+  //    (boards.activeId is set but kanban.boardId is null - waiting for snapshot)
+  // 3. isLoading is undefined AND no columns AND no board selected
+  //    (still initializing before any SSR data)
+  const showLoading =
+    isLoading === true ||
+    (boardsActiveId && !kanbanBoardId) ||
+    (isLoading === undefined && columns.length === 0 && !boardsActiveId);
+
   const renderEmptyState = () => (
     <div className="h-full rounded-lg border border-dashed border-border/60 flex items-center justify-center text-sm text-muted-foreground mx-4">
-      No boards available yet.
+      {showLoading ? 'Loading...' : 'No boards available yet.'}
     </div>
   );
 
@@ -122,7 +139,7 @@ export function KanbanBoardGrid({
         onDragCancel={onDragCancel}
       >
         <div className="flex-1 min-h-0 flex flex-col">
-          {columns.length === 0 ? (
+          {showLoading || columns.length === 0 ? (
             renderEmptyState()
           ) : (
             <>
@@ -152,6 +169,8 @@ export function KanbanBoardGrid({
               />
             </>
           )}
+          {/* Safe area spacer for iOS bottom bar */}
+          <div className="flex-shrink-0 h-safe" />
         </div>
         {onCreateTask && (
           <MobileFab onClick={onCreateTask} isDragging={!!activeTask} />
@@ -173,7 +192,7 @@ export function KanbanBoardGrid({
         onDragCancel={onDragCancel}
       >
         <div className="flex-1 min-h-0 px-4 pb-4">
-          {columns.length === 0 ? (
+          {showLoading || columns.length === 0 ? (
             renderEmptyState()
           ) : (
             <div className="flex overflow-x-auto snap-x snap-mandatory gap-2 h-full scrollbar-hide">
@@ -215,7 +234,7 @@ export function KanbanBoardGrid({
       onDragCancel={onDragCancel}
     >
       <div className="flex-1 min-h-0 px-4 pb-4">
-        {columns.length === 0 ? (
+        {showLoading || columns.length === 0 ? (
           renderEmptyState()
         ) : (
           <div
