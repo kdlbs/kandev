@@ -67,6 +67,7 @@ export const SessionMobileTopBar = memo(function SessionMobileTopBar({
   const [prDialogOpen, setPrDialogOpen] = useState(false);
   const [prTitle, setPrTitle] = useState('');
   const [prBody, setPrBody] = useState('');
+  const [prDraft, setPrDraft] = useState(true);
 
   const { toast } = useToast();
   const gitStatus = useSessionGitStatus(sessionId ?? null);
@@ -160,10 +161,10 @@ export const SessionMobileTopBar = memo(function SessionMobileTopBar({
     if (!prTitle.trim()) return;
     setPrDialogOpen(false);
     try {
-      const result = await createPR(prTitle.trim(), prBody.trim(), baseBranch);
+      const result = await createPR(prTitle.trim(), prBody.trim(), baseBranch, prDraft);
       if (result.success) {
         toast({
-          title: 'Pull Request created',
+          title: prDraft ? 'Draft Pull Request created' : 'Pull Request created',
           description: result.pr_url || 'PR created successfully',
           variant: 'success',
         });
@@ -186,7 +187,7 @@ export const SessionMobileTopBar = memo(function SessionMobileTopBar({
     }
     setPrTitle('');
     setPrBody('');
-  }, [prTitle, prBody, baseBranch, createPR, toast]);
+  }, [prTitle, prBody, baseBranch, prDraft, createPR, toast]);
 
   return (
     <header className="flex items-center justify-between px-2 py-2 bg-background">
@@ -414,6 +415,16 @@ export const SessionMobileTopBar = memo(function SessionMobileTopBar({
                 rows={4}
                 className="resize-none"
               />
+            </div>
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="pr-draft-mobile"
+                checked={prDraft}
+                onCheckedChange={(checked) => setPrDraft(checked === true)}
+              />
+              <Label htmlFor="pr-draft-mobile" className="text-sm cursor-pointer">
+                Create as draft
+              </Label>
             </div>
           </div>
           <DialogFooter>

@@ -104,6 +104,7 @@ type GitCreatePRRequest struct {
 	Title      string `json:"title"`
 	Body       string `json:"body"`
 	BaseBranch string `json:"base_branch"`
+	Draft      bool   `json:"draft"`
 }
 
 // GitShowCommitRequest for session.commit_diff action
@@ -363,7 +364,7 @@ func (h *GitHandlers) wsCreatePR(ctx context.Context, msg *ws.Message) (*ws.Mess
 		return nil, err
 	}
 
-	result, err := client.GitCreatePR(ctx, req.Title, req.Body, req.BaseBranch)
+	result, err := client.GitCreatePR(ctx, req.Title, req.Body, req.BaseBranch, req.Draft)
 	if err != nil {
 		return nil, fmt.Errorf("create PR failed: %w", err)
 	}
