@@ -74,3 +74,27 @@ export async function updateFileContent(
     original_hash: originalHash,
   });
 }
+
+/**
+ * File delete response from backend
+ */
+export type FileDeleteResponse = {
+  path: string;
+  success: boolean;
+  error?: string;
+};
+
+/**
+ * Delete a file from the workspace
+ */
+export async function deleteFile(
+  client: WebSocketClient,
+  sessionId: string,
+  path: string
+): Promise<FileDeleteResponse> {
+  return client.request<FileDeleteResponse>('workspace.file.delete', {
+    session_id: sessionId,
+    path,
+  });
+}
+

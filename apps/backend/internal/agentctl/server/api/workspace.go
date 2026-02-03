@@ -203,6 +203,30 @@ func (s *Server) handleFileSearch(c *gin.Context) {
 	c.JSON(200, types.FileSearchResponse{Files: files})
 }
 
+// handleFileDelete handles file delete requests via HTTP DELETE
+func (s *Server) handleFileDelete(c *gin.Context) {
+	path := c.Query("path")
+	if path == "" {
+		c.JSON(400, streams.FileDeleteResponse{Error: "path is required"})
+		return
+	}
+
+	err := s.procMgr.GetWorkspaceTracker().DeleteFile(path)
+	if err != nil {
+		c.JSON(400, streams.FileDeleteResponse{
+			Path:    path,
+			Success: false,
+			Error:   err.Error(),
+		})
+		return
+	}
+
+	c.JSON(200, streams.FileDeleteResponse{
+		Path:    path,
+		Success: true,
+	})
+}
+
 // mustParseInt parses a string to int, returns 0 on error
 func mustParseInt(s string) int {
 	var n int

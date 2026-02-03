@@ -180,3 +180,26 @@ type FileUpdateResponse struct {
 	// Error contains error message if the request failed.
 	Error string `json:"error,omitempty"`
 }
+
+// FileDeleteRequest represents a request to delete a file.
+//
+// HTTP endpoint: DELETE /api/v1/workspace/file
+type FileDeleteRequest struct {
+	// Path is the file path (relative to workspace root).
+	Path string `json:"path"`
+}
+
+// FileDeleteResponse represents a response to a file delete request.
+type FileDeleteResponse struct {
+	// RequestID identifies the request.
+	RequestID string `json:"request_id"`
+
+	// Path is the file path.
+	Path string `json:"path"`
+
+	// Success indicates if the deletion was successful.
+	Success bool `json:"success"`
+
+	// Error contains error message if the request failed.
+	Error string `json:"error,omitempty"`
+}

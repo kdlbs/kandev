@@ -34,7 +34,7 @@ export function FileViewerContent({ path, content }: FileViewerContentProps) {
         highlightActiveLine: false,
         highlightSelectionMatches: true,
       }}
-      className="h-full overflow-auto text-sm"
+      className="h-full overflow-auto text-xs"
     />
   );
 }

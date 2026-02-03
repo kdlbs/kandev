@@ -107,7 +107,6 @@ export const SessionMobileLayout = memo(function SessionMobileLayout({
                 <TaskChatPanel
                   sessionId={sessionId}
                   onOpenFile={handleOpenFileFromChat}
-                  onSelectDiff={handleSelectDiffAndSwitchPanel}
                 />
               )
             ) : (

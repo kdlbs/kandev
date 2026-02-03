@@ -423,6 +423,7 @@ export const DiffViewer = memo(function DiffViewer({
         light: 'github-light',
       },
       enableLineSelection: enableComments,
+      hunkSeparators: 'simple',
       enableHoverUtility: enableComments,
       diffIndicators: 'none',
       onLineSelectionEnd: handleLineSelectionEnd,

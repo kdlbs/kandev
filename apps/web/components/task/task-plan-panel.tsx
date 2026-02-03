@@ -2,8 +2,9 @@
 
 import { memo, useState, useCallback, useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
-import { IconLoader2, IconFileText, IconRobot, IconMessage, IconClick } from '@tabler/icons-react';
+import { IconLoader2, IconFileText, IconRobot, IconMessage, IconClick, IconMessagePlus } from '@tabler/icons-react';
 import { cn } from '@/lib/utils';
+import { Button } from '@kandev/ui/button';
 import { useTaskPlan } from '@/hooks/domains/session/use-task-plan';
 import { useAppStore } from '@/components/state-provider';
 import { getWebSocketClient } from '@/lib/ws/connection';
@@ -42,6 +43,9 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({ taskId, visible = tru
   const lastPlanContentRef = useRef<string | undefined>(undefined);
   // Text selection state for the selection popover
   const [textSelection, setTextSelection] = useState<TextSelection | null>(null);
+  // Floating button position (shown after selection ends)
+  const [floatingButtonPos, setFloatingButtonPos] = useState<{ x: number; y: number } | null>(null);
+  const [currentSelectionText, setCurrentSelectionText] = useState<string | null>(null);
   // Plan comments state
   const [comments, setComments] = useState<PlanComment[]>([]);
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
@@ -172,9 +176,34 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({ taskId, visible = tru
   const handleSelectionClose = useCallback(() => {
     setTextSelection(null);
     setEditingCommentId(null);
+    setFloatingButtonPos(null);
+    setCurrentSelectionText(null);
     // Clear the browser selection
     window.getSelection()?.removeAllRanges();
   }, []);
+
+  // Handle selection end (mouseup) - show floating button
+  const handleSelectionEnd = useCallback((selection: TextSelection | null) => {
+    if (!activeSessionId) return;
+    if (selection) {
+      setFloatingButtonPos(selection.position);
+      setCurrentSelectionText(selection.text);
+    } else {
+      setFloatingButtonPos(null);
+      setCurrentSelectionText(null);
+    }
+  }, [activeSessionId]);
+
+  // Handle floating button click - open the popover
+  const handleFloatingButtonClick = useCallback(() => {
+    if (!floatingButtonPos || !currentSelectionText) return;
+    setTextSelection({
+      text: currentSelectionText,
+      position: floatingButtonPos,
+    });
+    setFloatingButtonPos(null);
+    setCurrentSelectionText(null);
+  }, [floatingButtonPos, currentSelectionText]);
 
   // Handle clicking on a highlighted comment in the editor (opens edit popover)
   const handleCommentHighlightClick = useCallback(
@@ -194,6 +223,11 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({ taskId, visible = tru
   // Handle clearing all comments
   const handleClearComments = useCallback(() => {
     setComments([]);
+  }, []);
+
+  // Handle deleting a single comment
+  const handleDeleteComment = useCallback((commentId: string) => {
+    setComments(prev => prev.filter(c => c.id !== commentId));
   }, []);
 
   // Handle submitting all comments to the agent
@@ -292,9 +326,28 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({ taskId, visible = tru
           onChange={setDraftContent}
           placeholder="Start typing your plan..."
           onSelectionChange={activeSessionId ? setTextSelection : undefined}
+          onSelectionEnd={activeSessionId ? handleSelectionEnd : undefined}
           comments={commentHighlights}
           onCommentClick={handleCommentHighlightClick}
         />
+
+        {/* Floating "Comment" button when text is selected */}
+        {floatingButtonPos && !textSelection && activeSessionId && (
+          <Button
+            size="sm"
+            variant="secondary"
+            className="floating-comment-btn fixed z-50 gap-1.5 shadow-lg animate-in fade-in-0 zoom-in-95 duration-100 cursor-pointer"
+            style={{
+              left: floatingButtonPos.x + 8,
+              top: floatingButtonPos.y + 8,
+            }}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={handleFloatingButtonClick}
+          >
+            <IconMessagePlus className="h-3.5 w-3.5" />
+            Comment
+          </Button>
+        )}
         {/* Rich empty state - shows when no content and editor not focused */}
         {!isLoading && draftContent.trim() === '' && !isEditorFocused && (
           <div
@@ -379,6 +432,7 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({ taskId, visible = tru
           onAdd={handleAddComment}
           onClose={handleSelectionClose}
           editingComment={editingCommentId ? comments.find(c => c.id === editingCommentId)?.comment : undefined}
+          onDelete={editingCommentId ? () => handleDeleteComment(editingCommentId) : undefined}
         />
       )}
     </div>

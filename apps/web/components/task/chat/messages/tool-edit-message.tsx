@@ -101,7 +101,7 @@ export const ToolEditMessage = memo(function ToolEditMessage({ comment, worktree
             {!isSuccess && getStatusIcon()}
           </span>
           {filePath && (
-            <span className="min-w-0 flex-1">
+            <span className="min-w-0">
               <FilePathButton
                 filePath={filePath}
                 worktreePath={worktreePath}

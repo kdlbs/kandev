@@ -170,6 +170,7 @@ const (
 	ActionWorkspaceFileTreeGet       = "workspace.tree.get"
 	ActionWorkspaceFileContentGet    = "workspace.file.get"
 	ActionWorkspaceFileContentUpdate = "workspace.file.update"
+	ActionWorkspaceFileDelete        = "workspace.file.delete"
 	ActionWorkspaceFilesSearch       = "workspace.files.search"
 	ActionWorkspaceFileChanges       = "session.workspace.file.changes" // Notification
 
