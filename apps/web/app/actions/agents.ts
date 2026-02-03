@@ -51,6 +51,7 @@ export async function createAgentAction(payload: {
     auto_approve: boolean;
     dangerously_skip_permissions: boolean;
     allow_indexing: boolean;
+    cli_passthrough: boolean;
     plan: string;
   }>;
 }): Promise<Agent> {
