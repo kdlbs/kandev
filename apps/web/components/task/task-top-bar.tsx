@@ -2,11 +2,13 @@
 
 import { memo, useState, useCallback } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import {
   IconArrowLeft,
   IconBug,
   IconCopy,
   IconDots,
+  IconFolderOpen,
   IconGitBranch,
   IconGitMerge,
   IconGitPullRequest,
@@ -18,6 +20,7 @@ import {
   IconGitCherryPick,
   IconGitCommit,
   IconAlertTriangle,
+  IconSettings,
 } from '@tabler/icons-react';
 import { Button } from '@kandev/ui/button';
 import {
@@ -53,6 +56,7 @@ import { EditorsMenu } from '@/components/task/editors-menu';
 import { useToast } from '@/components/toast-provider';
 import { PreviewControls } from '@/components/task/preview/preview-controls';
 import { DEBUG_UI } from '@/lib/config';
+import { useOpenSessionFolder } from '@/hooks/use-open-session-folder';
 
 type TaskTopBarProps = {
   taskId?: string | null;
@@ -96,11 +100,14 @@ const TaskTopBar = memo(function TaskTopBar({
   const [prTitle, setPrTitle] = useState('');
   const [prBody, setPrBody] = useState('');
   const [prDraft, setPrDraft] = useState(true);
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
 
+  const router = useRouter();
   const { toast } = useToast();
   const gitStatus = useSessionGitStatus(activeSessionId ?? null);
   const { commits } = useSessionCommits(activeSessionId ?? null);
   const { pull, push, rebase, merge, commit, createPR, isLoading: isGitLoading } = useGitOperations(activeSessionId ?? null);
+  const { open: openFolder, isLoading: isOpenFolderLoading } = useOpenSessionFolder(activeSessionId);
 
   // Use worktree branch if available, otherwise fall back to base branch
   const displayBranch = worktreeBranch || baseBranch;
@@ -541,9 +548,9 @@ const TaskTopBar = memo(function TaskTopBar({
         </div>
 
         {/* More Options (3-dot) Dropdown */}
-        <DropdownMenu>
+        <DropdownMenu open={moreMenuOpen} onOpenChange={setMoreMenuOpen}>
           <DropdownMenuTrigger asChild>
-            <Button size="sm" variant="outline" className="cursor-pointer px-2">
+            <Button size="sm" variant={moreMenuOpen ? "default" : "outline"} className="cursor-pointer px-2">
               <IconDots className="h-4 w-4" />
             </Button>
           </DropdownMenuTrigger>
@@ -560,18 +567,22 @@ const TaskTopBar = memo(function TaskTopBar({
               <IconCopy className="h-4 w-4" />
               Copy workspace path
             </DropdownMenuItem>
-            {/* TODO: Implement open workspace folder
             <DropdownMenuItem
               className="cursor-pointer"
-              onClick={() => {
-                // Open workspace folder in system file manager
-              }}
-              disabled={!worktreePath}
+              onClick={() => openFolder()}
+              disabled={!activeSessionId || isOpenFolderLoading}
             >
               <IconFolderOpen className="h-4 w-4" />
               Open workspace folder
             </DropdownMenuItem>
-            */}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              className="cursor-pointer"
+              onClick={() => router.push('/settings/general')}
+            >
+              <IconSettings className="h-4 w-4" />
+              Open Settings
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

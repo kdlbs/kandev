@@ -70,6 +70,13 @@ func (c *Controller) OpenSessionEditor(ctx context.Context, sessionID string, re
 	return dto.OpenEditorResponse{URL: url}, nil
 }
 
+func (c *Controller) OpenFolder(ctx context.Context, sessionID string) (dto.OpenFolderResponse, error) {
+	if err := c.service.OpenFolder(ctx, sessionID); err != nil {
+		return dto.OpenFolderResponse{Success: false}, err
+	}
+	return dto.OpenFolderResponse{Success: true}, nil
+}
+
 func (c *Controller) CreateEditor(ctx context.Context, req dto.CreateEditorRequest) (dto.EditorDTO, error) {
 	editor, err := c.service.CreateEditor(ctx, service.CreateEditorInput{
 		Name:    req.Name,

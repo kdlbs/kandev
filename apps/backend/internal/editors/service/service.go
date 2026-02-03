@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -127,6 +128,37 @@ func (s *Service) OpenEditor(ctx context.Context, input OpenEditorInput) (string
 		}
 		return "", nil
 	}
+}
+
+func (s *Service) OpenFolder(ctx context.Context, sessionID string) error {
+	if sessionID == "" {
+		return ErrEditorConfigInvalid
+	}
+	session, err := s.taskRepo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	worktreePath, err := s.resolveSessionPath(ctx, session)
+	if err != nil {
+		return err
+	}
+
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", worktreePath)
+	case "linux":
+		cmd = exec.Command("xdg-open", worktreePath)
+	case "windows":
+		cmd = exec.Command("explorer", worktreePath)
+	default:
+		return fmt.Errorf("unsupported platform: %s", runtime.GOOS)
+	}
+
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("failed to open folder: %w", err)
+	}
+	return nil
 }
 
 func (s *Service) resolveEditor(ctx context.Context, editorID, editorType, fallbackID string) (*models.Editor, error) {
