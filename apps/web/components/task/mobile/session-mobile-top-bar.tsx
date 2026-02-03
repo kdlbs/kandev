@@ -15,6 +15,7 @@ import {
   IconDots,
   IconCheck,
   IconLoader2,
+  IconAlertTriangle,
 } from '@tabler/icons-react';
 import { Button } from '@kandev/ui/button';
 import {
@@ -31,6 +32,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
 } from '@kandev/ui/dropdown-menu';
 import { Textarea } from '@kandev/ui/textarea';
 import { Checkbox } from '@kandev/ui/checkbox';
@@ -124,8 +128,8 @@ export const SessionMobileTopBar = memo(function SessionMobileTopBar({
     handleGitOperation(() => pull(), 'Pull');
   }, [handleGitOperation, pull]);
 
-  const handlePush = useCallback(() => {
-    handleGitOperation(() => push(), 'Push');
+  const handlePush = useCallback((force = false) => {
+    handleGitOperation(() => push({ force }), force ? 'Force Push' : 'Push');
   }, [handleGitOperation, push]);
 
   const handleRebase = useCallback(() => {
@@ -265,14 +269,33 @@ export const SessionMobileTopBar = memo(function SessionMobileTopBar({
               <IconCloudDownload className="h-4 w-4 text-blue-500" />
               <span className="flex-1">Pull</span>
             </DropdownMenuItem>
-            <DropdownMenuItem
-              className="cursor-pointer gap-3"
-              onClick={handlePush}
-              disabled={isGitLoading || !sessionId}
-            >
-              <IconCloudUpload className="h-4 w-4 text-green-500" />
-              <span className="flex-1">Push</span>
-            </DropdownMenuItem>
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger
+                className="cursor-pointer gap-3"
+                disabled={isGitLoading || !sessionId}
+              >
+                <IconCloudUpload className="h-4 w-4 text-green-500" />
+                <span className="flex-1">Push</span>
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent>
+                <DropdownMenuItem
+                  className="cursor-pointer gap-3"
+                  onClick={() => handlePush(false)}
+                  disabled={isGitLoading || !sessionId}
+                >
+                  <IconCloudUpload className="h-4 w-4 text-green-500" />
+                  <span>Push</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="cursor-pointer gap-3"
+                  onClick={() => handlePush(true)}
+                  disabled={isGitLoading || !sessionId}
+                >
+                  <IconAlertTriangle className="h-4 w-4 text-orange-500" />
+                  <span>Force Push</span>
+                </DropdownMenuItem>
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
             <DropdownMenuSeparator />
             <DropdownMenuItem
               className="cursor-pointer gap-3"

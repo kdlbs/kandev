@@ -17,6 +17,7 @@ import {
   IconCloudUpload,
   IconGitCherryPick,
   IconGitCommit,
+  IconAlertTriangle,
 } from '@tabler/icons-react';
 import { Button } from '@kandev/ui/button';
 import {
@@ -33,6 +34,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
 } from '@kandev/ui/dropdown-menu';
 import { Textarea } from '@kandev/ui/textarea';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
@@ -158,8 +162,8 @@ const TaskTopBar = memo(function TaskTopBar({
     handleGitOperation(() => pull(), 'Pull');
   }, [handleGitOperation, pull]);
 
-  const handlePush = useCallback(() => {
-    handleGitOperation(() => push(), 'Push');
+  const handlePush = useCallback((force = false) => {
+    handleGitOperation(() => push({ force }), force ? 'Force Push' : 'Push');
   }, [handleGitOperation, push]);
 
   const handleRebase = useCallback(() => {
@@ -480,20 +484,39 @@ const TaskTopBar = memo(function TaskTopBar({
                   </span>
                 )}
               </DropdownMenuItem>
-              <DropdownMenuItem
-                className="cursor-pointer gap-3"
-                onClick={handlePush}
-                disabled={isGitLoading || !activeSessionId}
-              >
-                <IconCloudUpload className="h-4 w-4 text-green-500" />
-                <span className="flex-1">Push</span>
-                {/* Only show push count when upstream matches current branch (origin/<branch>) */}
-                {hasMatchingUpstream && (gitStatus?.ahead ?? 0) > 0 && (
-                  <span className="rounded-full bg-green-500/10 px-2 py-0.5 text-xs font-medium text-green-600 dark:text-green-400">
-                    ↑{gitStatus?.ahead}
-                  </span>
-                )}
-              </DropdownMenuItem>
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger
+                  className="cursor-pointer gap-3"
+                  disabled={isGitLoading || !activeSessionId}
+                >
+                  <IconCloudUpload className="h-4 w-4 text-green-500" />
+                  <span className="flex-1">Push</span>
+                  {/* Only show push count when upstream matches current branch (origin/<branch>) */}
+                  {hasMatchingUpstream && (gitStatus?.ahead ?? 0) > 0 && (
+                    <span className="rounded-full bg-green-500/10 px-2 py-0.5 text-xs font-medium text-green-600 dark:text-green-400">
+                      ↑{gitStatus?.ahead}
+                    </span>
+                  )}
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent>
+                  <DropdownMenuItem
+                    className="cursor-pointer gap-3"
+                    onClick={() => handlePush(false)}
+                    disabled={isGitLoading || !activeSessionId}
+                  >
+                    <IconCloudUpload className="h-4 w-4 text-green-500" />
+                    <span>Push</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className="cursor-pointer gap-3"
+                    onClick={() => handlePush(true)}
+                    disabled={isGitLoading || !activeSessionId}
+                  >
+                    <IconAlertTriangle className="h-4 w-4 text-orange-500" />
+                    <span>Force Push</span>
+                  </DropdownMenuItem>
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 className="cursor-pointer gap-3"
