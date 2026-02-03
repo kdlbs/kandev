@@ -59,7 +59,8 @@ type DeleteBoardRequest struct {
 }
 
 type ListRepositoriesRequest struct {
-	WorkspaceID string
+	WorkspaceID    string
+	IncludeScripts bool
 }
 
 type GetRepositoryRequest struct {

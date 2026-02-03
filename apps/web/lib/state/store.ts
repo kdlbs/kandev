@@ -1,7 +1,7 @@
 import { createStore } from 'zustand/vanilla';
 import { immer } from 'zustand/middleware/immer';
 import { hydrateState, type HydrationOptions } from './hydration/hydrator';
-import type { Repository, Branch, Message, Turn, TaskSession } from '@/lib/types/http';
+import type { Repository, Branch, RepositoryScript, Message, Turn, TaskSession } from '@/lib/types/http';
 import {
   createKanbanSlice,
   createWorkspaceSlice,
@@ -49,6 +49,7 @@ export type {
   WorkspaceState,
   RepositoriesState,
   RepositoryBranchesState,
+  RepositoryScriptsState,
   ExecutorsState,
   EnvironmentsState,
   SettingsAgentsState,
@@ -103,6 +104,7 @@ export type AppState = {
   workspaces: typeof defaultWorkspaceState['workspaces'];
   repositories: typeof defaultWorkspaceState['repositories'];
   repositoryBranches: typeof defaultWorkspaceState['repositoryBranches'];
+  repositoryScripts: typeof defaultWorkspaceState['repositoryScripts'];
 
   // Settings slice
   executors: typeof defaultSettingsState['executors'];
@@ -164,6 +166,8 @@ export type AppState = {
   setRepositoriesLoading: (workspaceId: string, loading: boolean) => void;
   setRepositoryBranches: (repositoryId: string, branches: Branch[]) => void;
   setRepositoryBranchesLoading: (repositoryId: string, loading: boolean) => void;
+  setRepositoryScripts: (repositoryId: string, scripts: RepositoryScript[]) => void;
+  setRepositoryScriptsLoading: (repositoryId: string, loading: boolean) => void;
   setSettingsData: (next: Partial<SettingsDataState>) => void;
   setEditors: (editors: EditorsState['items']) => void;
   setEditorsLoading: (loading: boolean) => void;
@@ -256,6 +260,7 @@ const defaultState = {
   workspaces: defaultWorkspaceState.workspaces,
   repositories: defaultWorkspaceState.repositories,
   repositoryBranches: defaultWorkspaceState.repositoryBranches,
+  repositoryScripts: defaultWorkspaceState.repositoryScripts,
   executors: defaultSettingsState.executors,
   environments: defaultSettingsState.environments,
   settingsAgents: defaultSettingsState.settingsAgents,
@@ -306,6 +311,7 @@ function mergeInitialState(initialState?: Partial<AppState>): typeof defaultStat
     workspaces: { ...defaultState.workspaces, ...initialState.workspaces },
     repositories: { ...defaultState.repositories, ...initialState.repositories },
     repositoryBranches: { ...defaultState.repositoryBranches, ...initialState.repositoryBranches },
+    repositoryScripts: { ...defaultState.repositoryScripts, ...initialState.repositoryScripts },
     executors: { ...defaultState.executors, ...initialState.executors },
     environments: { ...defaultState.environments, ...initialState.environments },
     settingsAgents: { ...defaultState.settingsAgents, ...initialState.settingsAgents },
@@ -369,6 +375,7 @@ export function createAppStore(initialState?: Partial<AppState>) {
       workspaces: merged.workspaces,
       repositories: merged.repositories,
       repositoryBranches: merged.repositoryBranches,
+      repositoryScripts: merged.repositoryScripts,
       executors: merged.executors,
       environments: merged.environments,
       settingsAgents: merged.settingsAgents,

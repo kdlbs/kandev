@@ -1,5 +1,27 @@
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
+// Session Storage helpers (cleared when browser tab closes)
+export function getSessionStorage<T extends JsonValue>(key: string, fallback: T): T {
+  if (typeof window === 'undefined') return fallback;
+  try {
+    const raw = window.sessionStorage.getItem(key);
+    if (!raw) return fallback;
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+export function setSessionStorage<T extends JsonValue>(key: string, value: T): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.sessionStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Ignore write failures (storage full, blocked, etc.)
+  }
+}
+
+// Local Storage helpers (persists across browser sessions)
 export function getLocalStorage<T extends JsonValue>(key: string, fallback: T): T {
   if (typeof window === 'undefined') return fallback;
   try {
