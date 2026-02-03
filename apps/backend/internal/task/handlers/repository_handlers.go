@@ -67,7 +67,11 @@ func (h *RepositoryHandlers) registerWS(dispatcher *ws.Dispatcher) {
 // HTTP handlers
 
 func (h *RepositoryHandlers) httpListRepositories(c *gin.Context) {
-	resp, err := h.controller.ListRepositories(c.Request.Context(), dto.ListRepositoriesRequest{WorkspaceID: c.Param("id")})
+	includeScripts := c.Query("include_scripts") == "true"
+	resp, err := h.controller.ListRepositories(c.Request.Context(), dto.ListRepositoriesRequest{
+		WorkspaceID:    c.Param("id"),
+		IncludeScripts: includeScripts,
+	})
 	if err != nil {
 		h.logger.Error("failed to list repositories", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list repositories"})

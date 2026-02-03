@@ -73,7 +73,7 @@ export default async function Page({ searchParams }: PageProps) {
 
     const [boardList, repositoriesResponse] = await Promise.all([
       listBoards(activeWorkspaceId, { cache: 'no-store' }),
-      listRepositories(activeWorkspaceId, { cache: 'no-store' }).catch(() => ({ repositories: [] })),
+      listRepositories(activeWorkspaceId, undefined, { cache: 'no-store' }).catch(() => ({ repositories: [] })),
     ]);
 
     // Use boardIdParam if it exists in this workspace, otherwise fall back

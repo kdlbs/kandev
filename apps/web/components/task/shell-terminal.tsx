@@ -126,8 +126,11 @@ export function ShellTerminal({
     );
     intersectionObserver.observe(terminalRef.current);
 
-    // Reset output tracking when session changes
-    lastOutputLengthRef.current = 0;
+    // Reset output tracking when session changes (interactive mode only)
+    // For read-only mode, we preserve the length set by the initial write above
+    if (!isReadOnlyMode) {
+      lastOutputLengthRef.current = 0;
+    }
 
     return () => {
       clearTimeout(initialFitTimeout);
@@ -164,8 +167,14 @@ export function ShellTerminal({
   }, [taskId, sessionId, send, isReadOnlyMode]);
 
   // Handle processId changes in read-only mode (clear terminal and reset output)
+  // Skip on initial mount (processIdRef.current === null) since initialization effect handles it
   useEffect(() => {
     if (!xtermRef.current || !isReadOnlyMode) return;
+    if (processIdRef.current === null) {
+      // Initial mount - just track the processId, don't write (initialization effect handles it)
+      processIdRef.current = processId ?? null;
+      return;
+    }
     if (processIdRef.current !== processId) {
       processIdRef.current = processId ?? null;
       lastOutputLengthRef.current = 0;

@@ -5,6 +5,7 @@ export const defaultWorkspaceState: WorkspaceSliceState = {
   workspaces: { items: [], activeId: null },
   repositories: { itemsByWorkspaceId: {}, loadingByWorkspaceId: {}, loadedByWorkspaceId: {} },
   repositoryBranches: { itemsByRepositoryId: {}, loadingByRepositoryId: {}, loadedByRepositoryId: {} },
+  repositoryScripts: { itemsByRepositoryId: {}, loadingByRepositoryId: {}, loadedByRepositoryId: {} },
 };
 
 export const createWorkspaceSlice: StateCreator<
@@ -48,5 +49,15 @@ export const createWorkspaceSlice: StateCreator<
   setRepositoryBranchesLoading: (repositoryId, loading) =>
     set((draft) => {
       draft.repositoryBranches.loadingByRepositoryId[repositoryId] = loading;
+    }),
+  setRepositoryScripts: (repositoryId, scripts) =>
+    set((draft) => {
+      draft.repositoryScripts.itemsByRepositoryId[repositoryId] = scripts;
+      draft.repositoryScripts.loadingByRepositoryId[repositoryId] = false;
+      draft.repositoryScripts.loadedByRepositoryId[repositoryId] = true;
+    }),
+  setRepositoryScriptsLoading: (repositoryId, loading) =>
+    set((draft) => {
+      draft.repositoryScripts.loadingByRepositoryId[repositoryId] = loading;
     }),
 });

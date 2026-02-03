@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { TaskTopBar } from '@/components/task/task-top-bar';
 import { TaskLayout } from '@/components/task/task-layout';
 import { DebugOverlay } from '@/components/debug-overlay';
-import type { Repository, Task } from '@/lib/types/http';
+import type { Repository, RepositoryScript, Task } from '@/lib/types/http';
 import type { KanbanState } from '@/lib/state/slices';
 import { DEBUG_UI } from '@/lib/config';
 import { TooltipProvider } from '@kandev/ui/tooltip';
@@ -21,6 +21,7 @@ type TaskPageContentProps = {
   task: Task | null;
   sessionId?: string | null;
   initialRepositories?: Repository[];
+  initialScripts?: RepositoryScript[];
   defaultLayouts?: Record<string, Layout>;
 };
 
@@ -34,6 +35,7 @@ export function TaskPageContent({
   task: initialTask,
   sessionId = null,
   initialRepositories = [],
+  initialScripts = [],
   defaultLayouts = {},
 }: TaskPageContentProps) {
   const [taskDetails, setTaskDetails] = useState<Task | null>(initialTask);
@@ -252,6 +254,7 @@ export function TaskPageContent({
           boardId={task?.board_id ?? null}
           sessionId={effectiveSessionId ?? null}
           repository={repository ?? null}
+          initialScripts={initialScripts}
           defaultLayouts={defaultLayouts}
         />
       </div>

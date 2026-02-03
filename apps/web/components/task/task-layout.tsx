@@ -11,7 +11,7 @@ import { PreviewPanel } from '@/components/task/preview/preview-panel';
 import { PreviewController } from '@/components/task/preview/preview-controller';
 import { useLayoutStore } from '@/lib/state/layout-store';
 import type { OpenFileTab } from '@/lib/types/backend';
-import type { Repository } from '@/lib/types/http';
+import type { Repository, RepositoryScript } from '@/lib/types/http';
 import { useAppStore } from '@/components/state-provider';
 
 const DEFAULT_HORIZONTAL_LAYOUT: Record<string, number> = {
@@ -31,6 +31,7 @@ type TaskLayoutProps = {
   boardId: string | null;
   sessionId?: string | null;
   repository?: Repository | null;
+  initialScripts?: RepositoryScript[];
   defaultLayouts?: Record<string, Layout>;
 };
 
@@ -44,6 +45,7 @@ export const TaskLayout = memo(function TaskLayout({
   boardId,
   sessionId = null,
   repository = null,
+  initialScripts = [],
   defaultLayouts = {},
 }: TaskLayoutProps) {
   const [selectedDiff, setSelectedDiff] = useState<SelectedDiff | null>(null);
@@ -166,7 +168,7 @@ export const TaskLayout = memo(function TaskLayout({
         {layoutState.right ? (
           <>
             <Panel id="right" minSize="310px" className="min-h-0 min-w-0">
-              <TaskRightPanel topPanel={topFilesPanel} sessionId={sessionForPreview} />
+              <TaskRightPanel topPanel={topFilesPanel} sessionId={sessionForPreview} repositoryId={repository?.id ?? null} initialScripts={initialScripts} />
             </Panel>
           </>
         ) : null}
