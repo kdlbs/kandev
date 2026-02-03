@@ -523,24 +523,97 @@ func (g *GitOperator) Discard(ctx context.Context, paths []string) (*GitOperatio
 		return result, nil
 	}
 
-	// Use git restore to discard changes (Git 2.23+)
-	// --source=HEAD: restore from HEAD
-	// --staged: remove from index
-	// --worktree: remove from working tree
-	// --: separator between options and paths
-	args := append([]string{"restore", "--source=HEAD", "--staged", "--worktree", "--"}, paths...)
+	// Separate files into categories based on their git status
+	// We need to handle untracked/new files differently from tracked files
+	untrackedFiles := []string{}
+	trackedFiles := []string{}
 
-	output, err := g.runGitCommand(ctx, args...)
-	result.Output = output
+	// Get status for each file to determine how to discard it
+	for _, path := range paths {
+		statusArgs := []string{"status", "--porcelain", "--", path}
+		statusOutput, err := g.runGitCommand(ctx, statusArgs...)
+		if err != nil {
+			// If we can't get status, assume it's tracked and try to restore it
+			trackedFiles = append(trackedFiles, path)
+			continue
+		}
 
-	if err != nil {
-		result.Error = err.Error()
-		return result, nil
+		statusLine := strings.TrimSpace(statusOutput)
+		if len(statusLine) >= 2 {
+			indexStatus := statusLine[0]
+			workTreeStatus := statusLine[1]
+
+			// Untracked files (??), or added files (A ) that don't exist in HEAD
+			if (indexStatus == '?' && workTreeStatus == '?') || indexStatus == 'A' {
+				untrackedFiles = append(untrackedFiles, path)
+			} else {
+				trackedFiles = append(trackedFiles, path)
+			}
+		} else if statusLine == "" {
+			// Empty status means file is not modified - nothing to discard
+			continue
+		}
 	}
 
-	result.Success = true
+	var outputs []string
+	var errors []string
+
+	// Handle untracked/new files - remove them from filesystem and index
+	if len(untrackedFiles) > 0 {
+		for _, path := range untrackedFiles {
+			// First, remove from index if staged
+			resetArgs := []string{"rm", "--cached", "--force", "--", path}
+			resetOutput, resetErr := g.runGitCommand(ctx, resetArgs...)
+			if resetErr != nil && !strings.Contains(resetErr.Error(), "did not match any files") {
+				// Ignore "did not match" errors as file might not be in index
+				errors = append(errors, fmt.Sprintf("failed to unstage %s: %s", path, resetErr.Error()))
+			}
+			if resetOutput != "" {
+				outputs = append(outputs, resetOutput)
+			}
+
+			// Then remove from working tree
+			fullPath := filepath.Join(g.workDir, path)
+			if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
+				errors = append(errors, fmt.Sprintf("failed to remove %s: %s", path, err.Error()))
+			}
+		}
+	}
+
+	// Handle tracked files - restore from HEAD
+	if len(trackedFiles) > 0 {
+		// Use git restore to discard changes (Git 2.23+)
+		// --source=HEAD: restore from HEAD
+		// --staged: remove from index
+		// --worktree: remove from working tree
+		// --: separator between options and paths
+		args := append([]string{"restore", "--source=HEAD", "--staged", "--worktree", "--"}, trackedFiles...)
+
+		output, err := g.runGitCommand(ctx, args...)
+		if output != "" {
+			outputs = append(outputs, output)
+		}
+
+		if err != nil {
+			errors = append(errors, err.Error())
+		}
+	}
+
+	// Combine outputs and errors
+	result.Output = strings.Join(outputs, "\n")
+	if len(errors) > 0 {
+		result.Error = strings.Join(errors, "; ")
+		result.Success = false
+	} else {
+		result.Success = true
+	}
+
 	g.triggerFsNotify()
-	g.logger.Info("discard completed", zap.Int("files", len(paths)))
+	g.logger.Info("discard completed",
+		zap.Int("total_files", len(paths)),
+		zap.Int("untracked_files", len(untrackedFiles)),
+		zap.Int("tracked_files", len(trackedFiles)),
+		zap.Bool("success", result.Success))
 	return result, nil
 }
 
