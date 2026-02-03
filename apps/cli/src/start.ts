@@ -84,7 +84,12 @@ export async function runStart({
   }
 
   // Production mode: use warn log level for clean output unless verbose
-  const backendEnv = buildBackendEnv({ ports, logLevel: verbose ? "info" : "warn" });
+  const dbPath = path.join(DATA_DIR, "kandev.db");
+  const backendEnv = buildBackendEnv({
+    ports,
+    logLevel: verbose ? "info" : "warn",
+    extra: { KANDEV_DB_PATH: dbPath },
+  });
   const webEnv = buildWebEnv({ ports, includeMcp: true, production: true });
 
   const supervisor = createProcessSupervisor();
@@ -122,7 +127,6 @@ export async function runStart({
   await waitForHealth(ports.backendUrl, backendProc, healthTimeoutMs);
 
   // Print clean summary
-  const dbPath = path.join(DATA_DIR, "kandev.db");
   console.log("");
   console.log("[kandev] Server started successfully");
   console.log("");

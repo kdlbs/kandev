@@ -28,10 +28,7 @@ export function SessionPanel({
     <div
       className={cn(
         // Base styles - always applied
-        'h-full min-h-0 bg-card flex flex-col rounded-sm border border-border/70 p-2',
-        // Border removal
-        borderSide === 'left' && 'border-l-0',
-        borderSide === 'right' && 'border-r-0',
+        'h-full min-h-0 bg-card flex flex-col rounded-sm border border-border/50 p-2',
         // Margins
         margin === 'right' && 'mr-[5px]',
         margin === 'top' && 'mt-[5px]',
@@ -47,7 +44,7 @@ export function SessionPanel({
 export const SessionPanelContent = forwardRef<HTMLDivElement, SessionPanelContentProps>(
   function SessionPanelContent({ children, className, wrapperClassName }, ref) {
     return (
-      <div className={cn('flex-1 min-h-0 rounded-lg bg-background h-full overflow-hidden', wrapperClassName)}>
+      <div className={cn('flex-1 min-h-0 rounded-lg bg-background h-full shadow-inner overflow-hidden', wrapperClassName)}>
         <div
           ref={ref}
           className={cn(

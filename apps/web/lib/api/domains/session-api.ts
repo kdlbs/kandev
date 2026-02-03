@@ -39,3 +39,10 @@ export async function openSessionInEditor(
     init: { method: 'POST', body: JSON.stringify(payload), ...(options?.init ?? {}) },
   });
 }
+
+export async function openSessionFolder(sessionId: string, options?: ApiRequestOptions) {
+  return fetchJson<{ success: boolean }>(`/api/v1/task-sessions/${sessionId}/open-folder`, {
+    ...options,
+    init: { method: 'POST', ...(options?.init ?? {}) },
+  });
+}

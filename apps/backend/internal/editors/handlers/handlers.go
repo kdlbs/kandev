@@ -31,6 +31,7 @@ func RegisterRoutes(router *gin.Engine, ctrl *controller.Controller, log *logger
 	api.PATCH("/editors/:id", handlers.httpUpdateEditor)
 	api.DELETE("/editors/:id", handlers.httpDeleteEditor)
 	api.POST("/task-sessions/:id/open-editor", handlers.httpOpenSessionEditor)
+	api.POST("/task-sessions/:id/open-folder", handlers.httpOpenFolder)
 }
 
 func (h *Handlers) httpListEditors(c *gin.Context) {
@@ -95,4 +96,14 @@ func (h *Handlers) httpDeleteEditor(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+func (h *Handlers) httpOpenFolder(c *gin.Context) {
+	resp, err := h.controller.OpenFolder(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		h.logger.Error("failed to open folder", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to open folder"})
+		return
+	}
+	c.JSON(http.StatusOK, resp)
 }

@@ -69,3 +69,7 @@ type UpdateEditorRequest struct {
 	Config  json.RawMessage `json:"config,omitempty"`
 	Enabled *bool           `json:"enabled,omitempty"`
 }
+
+type OpenFolderResponse struct {
+	Success bool `json:"success"`
+}
