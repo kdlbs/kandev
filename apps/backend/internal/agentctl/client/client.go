@@ -25,7 +25,7 @@ type Client struct {
 	logger     *logger.Logger
 
 	// WebSocket connections for streaming
-	acpConn             *websocket.Conn
+	agentStreamConn     *websocket.Conn
 	workspaceStreamConn *websocket.Conn
 	mu                  sync.RWMutex
 }
