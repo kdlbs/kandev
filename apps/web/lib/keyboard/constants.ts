@@ -60,6 +60,8 @@ export const KEYS = {
   SEVEN: '7',
   EIGHT: '8',
   NINE: '9',
+  // Symbols
+  SLASH: '/',
 } as const;
 
 // Platform types
@@ -94,6 +96,9 @@ export const SHORTCUTS = {
     key: KEYS.ENTER,
     modifiers: { ctrlOrCmd: true },
   },
+  SUBMIT_ENTER: {
+    key: KEYS.ENTER,
+  },
   SAVE: {
     key: KEYS.S,
     modifiers: { ctrlOrCmd: true },
@@ -112,6 +117,9 @@ export const SHORTCUTS = {
   TOGGLE_SIDEBAR: {
     key: KEYS.B,
     modifiers: { ctrlOrCmd: true },
+  },
+  FOCUS_INPUT: {
+    key: KEYS.SLASH,
   },
 } as const;
 

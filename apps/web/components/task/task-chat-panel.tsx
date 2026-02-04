@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState, memo } from 'react';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import { useAppStore } from '@/components/state-provider';
 import { getLocalStorage } from '@/lib/local-storage';
+import { useKeyboardShortcut } from '@/hooks/use-keyboard-shortcut';
+import { SHORTCUTS } from '@/lib/keyboard/constants';
 import { useSessionMessages } from '@/hooks/domains/session/use-session-messages';
 import { useSettingsData } from '@/hooks/domains/settings/use-settings-data';
 import { useSessionState } from '@/hooks/domains/session/use-session-state';
@@ -12,7 +14,7 @@ import { useSessionModel } from '@/hooks/domains/session/use-session-model';
 import { useMessageHandler } from '@/hooks/use-message-handler';
 import { TodoSummary } from '@/components/task/chat/todo-summary';
 import { VirtualizedMessageList } from '@/components/task/chat/virtualized-message-list';
-import { ChatInputContainer } from '@/components/task/chat/chat-input-container';
+import { ChatInputContainer, type ChatInputContainerHandle } from '@/components/task/chat/chat-input-container';
 import { formatReviewCommentsAsMarkdown } from '@/components/task/chat/messages/review-comments-attachment';
 import {
   useDiffCommentsStore,
@@ -40,6 +42,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
 }: TaskChatPanelProps) {
   const [isSending, setIsSending] = useState(false);
   const lastAgentMessageCountRef = useRef(0);
+  const chatInputRef = useRef<ChatInputContainerHandle>(null);
 
   // Ensure agent profile data is loaded (may not be hydrated from SSR in all navigation paths)
   useSettingsData(true);
@@ -103,6 +106,13 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     resolvedSessionId,
     session?.agent_profile_id
   );
+
+  // User settings
+  const chatSubmitKey = useAppStore((state) => state.userSettings.chatSubmitKey);
+  const agentCommands = useAppStore((state) =>
+    resolvedSessionId ? state.availableCommands.bySessionId[resolvedSessionId] : undefined
+  );
+  const hasAgentCommands = agentCommands && agentCommands.length > 0;
 
   // Message sending
   const { handleSendMessage } = useMessageHandler(
@@ -183,6 +193,42 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     }
   }, [isSending, onSend, handleSendMessage, markCommentsSent]);
 
+  // Focus input with / shortcut (only when input is NOT focused)
+  useKeyboardShortcut(
+    SHORTCUTS.FOCUS_INPUT,
+    useCallback((event: KeyboardEvent) => {
+      // Only handle if we're not already in an input/textarea
+      const activeElement = document.activeElement;
+      const isTyping =
+        activeElement instanceof HTMLInputElement ||
+        activeElement instanceof HTMLTextAreaElement;
+
+      if (isTyping) {
+        // Don't intercept - let the "/" be typed normally for slash commands
+        return;
+      }
+
+      // Not typing anywhere, so focus the chat input
+      const inputHandle = chatInputRef.current;
+      if (inputHandle) {
+        event.preventDefault(); // Prevent the "/" from being typed when we focus
+        inputHandle.focusInput();
+      }
+    }, []),
+    { enabled: true, preventDefault: false }
+  );
+
+  // Cancel agent turn with ESC shortcut
+  useKeyboardShortcut(
+    SHORTCUTS.CANCEL,
+    useCallback(() => {
+      if (isAgentBusy) {
+        handleCancelTurn();
+      }
+    }, [isAgentBusy, handleCancelTurn]),
+    { enabled: isAgentBusy }
+  );
+
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -207,6 +253,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
       <div className="flex-shrink-0 flex flex-col gap-2 mt-2">
         {todoItems.length > 0 && <TodoSummary todos={todoItems} />}
         <ChatInputContainer
+          ref={chatInputRef}
           key={clarificationKey}
           onSubmit={handleSubmit}
           sessionId={resolvedSessionId}
@@ -232,6 +279,8 @@ export const TaskChatPanel = memo(function TaskChatPanel({
           onRemoveCommentFile={handleRemoveCommentFile}
           onRemoveComment={handleRemoveComment}
           onCommentClick={onOpenFileAtLine ? (comment) => onOpenFileAtLine(comment.filePath) : undefined}
+          submitKey={chatSubmitKey}
+          hasAgentCommands={hasAgentCommands}
         />
       </div>
     </div>

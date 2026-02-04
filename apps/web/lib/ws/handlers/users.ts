@@ -16,6 +16,7 @@ export function registerUsersHandlers(store: StoreApi<AppState>): WsHandlers {
           shellOptions: state.userSettings.shellOptions ?? [],
           defaultEditorId: message.payload.default_editor_id || null,
           enablePreviewOnClick: message.payload.enable_preview_on_click ?? false,
+          chatSubmitKey: (message.payload.chat_submit_key as 'enter' | 'cmd_enter') ?? 'cmd_enter',
           loaded: true,
         },
       }));

@@ -282,6 +282,7 @@ export type UserSettingsUpdatedPayload = {
   preferred_shell?: string;
   default_editor_id?: string;
   enable_preview_on_click?: boolean;
+  chat_submit_key?: string;
   updated_at?: string;
 };
 

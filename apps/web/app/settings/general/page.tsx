@@ -16,6 +16,8 @@ export default async function GeneralSettingsPage() {
             preferredShell: settings.preferred_shell ?? null,
             shellOptions: response.shell_options ?? [],
             defaultEditorId: settings.default_editor_id ?? null,
+            enablePreviewOnClick: settings.enable_preview_on_click ?? false,
+            chatSubmitKey: settings.chat_submit_key ?? 'cmd_enter',
             loaded: true,
           }
         : undefined,

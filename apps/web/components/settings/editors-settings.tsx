@@ -370,6 +370,7 @@ export function EditorsSettings() {
         shellOptions: currentUserSettings.shellOptions ?? [],
         defaultEditorId: response.settings.default_editor_id || null,
         enablePreviewOnClick: response.settings.enable_preview_on_click ?? false,
+        chatSubmitKey: response.settings.chat_submit_key ?? 'cmd_enter',
         loaded: true,
       });
     }

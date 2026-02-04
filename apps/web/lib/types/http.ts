@@ -316,6 +316,7 @@ export type UserSettings = {
   preferred_shell?: string;
   default_editor_id?: string;
   enable_preview_on_click?: boolean;
+  chat_submit_key?: 'enter' | 'cmd_enter';
   updated_at: string;
 };
 

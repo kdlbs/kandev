@@ -71,6 +71,7 @@ type httpUpdateUserSettingsRequest struct {
 	PreferredShell       *string   `json:"preferred_shell,omitempty"`
 	DefaultEditorID      *string   `json:"default_editor_id,omitempty"`
 	EnablePreviewOnClick *bool     `json:"enable_preview_on_click,omitempty"`
+	ChatSubmitKey        *string   `json:"chat_submit_key,omitempty"`
 }
 
 func (h *Handlers) httpUpdateUserSettings(c *gin.Context) {
@@ -87,6 +88,7 @@ func (h *Handlers) httpUpdateUserSettings(c *gin.Context) {
 		PreferredShell:       body.PreferredShell,
 		DefaultEditorID:      body.DefaultEditorID,
 		EnablePreviewOnClick: body.EnablePreviewOnClick,
+		ChatSubmitKey:        body.ChatSubmitKey,
 	})
 	if err != nil {
 		h.logger.Error("failed to update user settings", zap.Error(err))
@@ -112,6 +114,7 @@ type wsUpdateUserSettingsRequest struct {
 	PreferredShell       *string   `json:"preferred_shell,omitempty"`
 	DefaultEditorID      *string   `json:"default_editor_id,omitempty"`
 	EnablePreviewOnClick *bool     `json:"enable_preview_on_click,omitempty"`
+	ChatSubmitKey        *string   `json:"chat_submit_key,omitempty"`
 }
 
 func (h *Handlers) wsUpdateUserSettings(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -127,6 +130,7 @@ func (h *Handlers) wsUpdateUserSettings(ctx context.Context, msg *ws.Message) (*
 		PreferredShell:       req.PreferredShell,
 		DefaultEditorID:      req.DefaultEditorID,
 		EnablePreviewOnClick: req.EnablePreviewOnClick,
+		ChatSubmitKey:        req.ChatSubmitKey,
 	})
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update user settings", nil)

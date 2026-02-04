@@ -23,12 +23,13 @@ export async function fetchUserSettings(options?: ApiRequestOptions) {
 
 export async function updateUserSettings(
   payload: {
-    workspace_id: string;
-    board_id: string;
-    repository_ids: string[];
+    workspace_id?: string;
+    board_id?: string;
+    repository_ids?: string[];
     preferred_shell?: string;
     default_editor_id?: string;
     enable_preview_on_click?: boolean;
+    chat_submit_key?: 'enter' | 'cmd_enter';
   },
   options?: ApiRequestOptions
 ) {

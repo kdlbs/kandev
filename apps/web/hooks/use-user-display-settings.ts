@@ -14,6 +14,7 @@ type DisplaySettings = {
   shellOptions: Array<{ value: string; label: string }>;
   defaultEditorId: string | null;
   enablePreviewOnClick: boolean;
+  chatSubmitKey: 'enter' | 'cmd_enter';
   loaded: boolean;
 };
 
@@ -56,6 +57,7 @@ export function useUserDisplaySettings({
         shellOptions: userSettings.shellOptions ?? [],
         defaultEditorId: userSettings.defaultEditorId ?? null,
         enablePreviewOnClick,
+        chatSubmitKey: userSettings.chatSubmitKey ?? 'cmd_enter',
         loaded: true,
       };
       const sameWorkspace = normalized.workspaceId === userSettings.workspaceId;
@@ -105,6 +107,7 @@ export function useUserDisplaySettings({
           shellOptions: data.shell_options ?? [],
           defaultEditorId: data.settings.default_editor_id || null,
           enablePreviewOnClick: data.settings.enable_preview_on_click ?? false,
+          chatSubmitKey: data.settings.chat_submit_key ?? 'cmd_enter',
           loaded: true,
         });
       })

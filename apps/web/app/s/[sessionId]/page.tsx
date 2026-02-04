@@ -4,6 +4,7 @@ import {
   fetchBoardSnapshot,
   fetchTaskSession,
   fetchTask,
+  fetchUserSettings,
   listAgents,
   listAvailableAgents,
   listBoards,
@@ -38,7 +39,7 @@ export default async function SessionPage({
     }
 
     task = await fetchTask(session.task_id, { cache: 'no-store' });
-    const [snapshot, agents, repositoriesResponse, allSessionsResponse, availableAgentsResponse, workspacesResponse, boardsResponse, turnsResponse] = await Promise.all([
+    const [snapshot, agents, repositoriesResponse, allSessionsResponse, availableAgentsResponse, workspacesResponse, boardsResponse, turnsResponse, userSettingsResponse] = await Promise.all([
       fetchBoardSnapshot(task.board_id, { cache: 'no-store' }),
       listAgents({ cache: 'no-store' }),
       listRepositories(task.workspace_id, { includeScripts: true }, { cache: 'no-store' }),
@@ -47,6 +48,7 @@ export default async function SessionPage({
       listWorkspaces({ cache: 'no-store' }).catch(() => ({ workspaces: [] })),
       listBoards(task.workspace_id, { cache: 'no-store' }).catch(() => ({ boards: [] })),
       listSessionTurns(sessionId, { cache: 'no-store' }).catch(() => ({ turns: [], total: 0 })),
+      fetchUserSettings({ cache: 'no-store' }).catch(() => null),
     ]);
     const repositories = repositoriesResponse.repositories ?? [];
     const allSessions = allSessionsResponse.sessions ?? [session];
@@ -54,6 +56,7 @@ export default async function SessionPage({
     const workspaces = workspacesResponse.workspaces ?? [];
     const boards = boardsResponse.boards ?? [];
     const turns = turnsResponse.turns ?? [];
+    const userSettings = userSettingsResponse?.settings;
 
     // Get repository scripts from the repository (already fetched with includeScripts)
     const repositoryId = task.repositories?.[0]?.repository_id;
@@ -202,6 +205,17 @@ export default async function SessionPage({
         items: availableAgents,
         loaded: true,
         loading: false,
+      },
+      userSettings: {
+        workspaceId: userSettings?.workspace_id || null,
+        boardId: userSettings?.board_id || null,
+        repositoryIds: Array.from(new Set(userSettings?.repository_ids ?? [])).sort(),
+        preferredShell: userSettings?.preferred_shell || null,
+        shellOptions: userSettingsResponse?.shell_options ?? [],
+        defaultEditorId: userSettings?.default_editor_id || null,
+        enablePreviewOnClick: userSettings?.enable_preview_on_click ?? false,
+        chatSubmitKey: userSettings?.chat_submit_key ?? 'cmd_enter',
+        loaded: Boolean(userSettings),
       },
     };
   } catch (error) {
