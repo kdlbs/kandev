@@ -5,7 +5,6 @@ import {
   IconArrowBackUp,
   IconExternalLink,
   IconPlus,
-  IconCircleFilled,
   IconMinus,
   IconCheck,
   IconChevronRight,
@@ -47,6 +46,7 @@ import {
   hasUserSelectedFilesPanelTab,
   setUserSelectedFilesPanelTab,
 } from '@/lib/local-storage';
+import { FileStatusIcon } from './file-status-icon';
 
 type TaskFilesPanelProps = {
   onSelectDiff: (path: string, content?: string) => void;
@@ -55,42 +55,6 @@ type TaskFilesPanelProps = {
 };
 
 
-
-const StatusIcon = ({ status }: { status: FileInfo['status'] }) => {
-  switch (status) {
-    case 'added':
-    case 'untracked':
-      return (
-        <div className="flex items-center justify-center h-3 w-3 rounded border border-emerald-600">
-          <IconPlus className="h-2 w-2 text-emerald-600" />
-        </div>
-      );
-    case 'modified':
-      return (
-        <div className="flex items-center justify-center h-3 w-3 rounded border border-yellow-600">
-          <IconCircleFilled className="h-1 w-1 text-yellow-600" />
-        </div>
-      );
-    case 'deleted':
-      return (
-        <div className="flex items-center justify-center h-3 w-3 rounded border border-rose-600">
-          <IconMinus className="h-2 w-2 text-rose-600" />
-        </div>
-      );
-    case 'renamed':
-      return (
-        <div className="flex items-center justify-center h-3 w-3 rounded border border-purple-600">
-          <IconCircleFilled className="h-1 w-1 text-purple-600" />
-        </div>
-      );
-    default:
-      return (
-        <div className="flex items-center justify-center h-3 w-3 rounded border border-muted-foreground">
-          <IconCircleFilled className="h-1 w-1 text-muted-foreground" />
-        </div>
-      );
-  }
-};
 
 const splitPath = (path: string) => {
   const lastSlash = path.lastIndexOf('/');
@@ -398,7 +362,7 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiff, onOpenFile, 
                               </Tooltip>
                             </div>
                             <LineStat added={file.plus} removed={file.minus} />
-                            <StatusIcon status={file.status} />
+                            <FileStatusIcon status={file.status} />
                           </div>
                         </li>
                       );
@@ -458,7 +422,7 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiff, onOpenFile, 
                                     className="flex items-center gap-2 text-xs rounded px-1 py-0.5 hover:bg-muted/50 cursor-pointer"
                                     onClick={() => onSelectDiff(path, file.diff)}
                                   >
-                                    <StatusIcon status={file.status} />
+                                    <FileStatusIcon status={file.status} />
                                     <span className="truncate flex-1">
                                       <span className="text-foreground/60">{folder}/</span>
                                       <span className="text-foreground">{fileName}</span>
