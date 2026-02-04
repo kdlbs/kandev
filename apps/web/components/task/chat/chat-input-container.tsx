@@ -3,18 +3,11 @@
 import { useRef, useCallback, useState, useEffect, memo, forwardRef, useImperativeHandle, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import {
   IconArrowUp,
-  IconBrain,
   IconListCheck,
   IconPlayerStopFilled,
 } from '@tabler/icons-react';
 import { GridSpinner } from '@/components/grid-spinner';
 import { Button } from '@kandev/ui/button';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@kandev/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { SHORTCUTS } from '@/lib/keyboard/constants';
@@ -104,31 +97,6 @@ const ChatInputToolbar = memo(function ChatInputToolbar({
           </TooltipTrigger>
           <TooltipContent>Toggle plan mode</TooltipContent>
         </Tooltip>
-
-        {/* Thinking level dropdown */}
-        <DropdownMenu>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40"
-                >
-                  <IconBrain className="h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-            </TooltipTrigger>
-            <TooltipContent>Thinking level</TooltipContent>
-          </Tooltip>
-          <DropdownMenuContent align="start" side="top">
-            <DropdownMenuItem>High</DropdownMenuItem>
-            <DropdownMenuItem>Medium</DropdownMenuItem>
-            <DropdownMenuItem>Low</DropdownMenuItem>
-            <DropdownMenuItem>Off</DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
 
       </div>
 
