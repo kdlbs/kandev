@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"github.com/kandev/kandev/pkg/codex"
 	"go.uber.org/zap"
 )
@@ -382,7 +383,8 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string) error {
 
 // Prompt sends a prompt to the agent, starting a new turn.
 // This method blocks until the turn completes (turn/completed notification received).
-func (a *Adapter) Prompt(ctx context.Context, message string) error {
+// Note: attachments are not yet supported in Codex protocol - they are ignored.
+func (a *Adapter) Prompt(ctx context.Context, message string, _ []v1.MessageAttachment) error {
 	a.mu.Lock()
 	client := a.client
 	threadID := a.threadID

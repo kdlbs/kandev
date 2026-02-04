@@ -16,6 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // Re-export permission types from the shared types package for convenience.
@@ -118,7 +119,8 @@ type AgentAdapter interface {
 
 	// Prompt sends a prompt to the agent.
 	// The agent's responses are streamed via the Updates channel.
-	Prompt(ctx context.Context, message string) error
+	// Attachments (images) are passed to the agent if provided.
+	Prompt(ctx context.Context, message string, attachments []v1.MessageAttachment) error
 
 	// Cancel cancels the current operation.
 	Cancel(ctx context.Context) error

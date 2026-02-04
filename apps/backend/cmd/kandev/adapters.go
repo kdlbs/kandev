@@ -166,8 +166,9 @@ func (a *lifecycleAdapter) ListAgentTypes(ctx context.Context) ([]*v1.AgentType,
 }
 
 // PromptAgent sends a follow-up prompt to a running agent
-func (a *lifecycleAdapter) PromptAgent(ctx context.Context, agentInstanceID string, prompt string) (*executor.PromptResult, error) {
-	result, err := a.mgr.PromptAgent(ctx, agentInstanceID, prompt)
+// Attachments (images) are passed to the agent if provided
+func (a *lifecycleAdapter) PromptAgent(ctx context.Context, agentInstanceID string, prompt string, attachments []v1.MessageAttachment) (*executor.PromptResult, error) {
+	result, err := a.mgr.PromptAgent(ctx, agentInstanceID, prompt, attachments)
 	if err != nil {
 		return nil, err
 	}
@@ -218,8 +219,9 @@ type orchestratorWrapper struct {
 }
 
 // PromptTask forwards directly to the orchestrator service.
-func (w *orchestratorWrapper) PromptTask(ctx context.Context, taskID, taskSessionID, prompt, model string, planMode bool) (*orchestrator.PromptResult, error) {
-	return w.svc.PromptTask(ctx, taskID, taskSessionID, prompt, model, planMode)
+// Attachments (images) are passed through to the agent.
+func (w *orchestratorWrapper) PromptTask(ctx context.Context, taskID, taskSessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment) (*orchestrator.PromptResult, error) {
+	return w.svc.PromptTask(ctx, taskID, taskSessionID, prompt, model, planMode, attachments)
 }
 
 // ResumeTaskSession forwards to the orchestrator service, discarding the TaskExecution result.

@@ -113,13 +113,44 @@ export const ChatMessage = memo(function ChatMessage({ comment, label, className
 
   // User message: right-aligned bubble with markdown support
   if (isUser) {
+    // Extract image attachments from metadata
+    const metadata = comment.metadata as { attachments?: Array<{ type: string; data: string; mime_type: string }> } | undefined;
+    const imageAttachments = (metadata?.attachments || []).filter(att => att.type === 'image');
+    const hasContent = comment.content && comment.content.trim() !== '';
+    const hasAttachments = imageAttachments.length > 0;
+
     return (
       <div className="flex justify-end w-full overflow-hidden">
         <div className="max-w-[85%] sm:max-w-[75%] md:max-w-2xl overflow-hidden">
           <div className="rounded-2xl bg-primary/30 px-4 py-2.5 text-xs overflow-hidden">
-            <p className="whitespace-pre-wrap break-words overflow-wrap-anywhere">
-              {comment.content ? renderContentWithFileRefs(comment.content) : '(empty)'}
-            </p>
+            {/* Display image attachments */}
+            {hasAttachments && (
+              <div className={cn('flex flex-wrap gap-2', hasContent && 'mb-2')}>
+                {imageAttachments.map((att, index) => (
+                  <img
+                    key={index}
+                    src={`data:${att.mime_type};base64,${att.data}`}
+                    alt={`Attachment ${index + 1}`}
+                    className="max-h-48 max-w-full rounded-lg object-contain cursor-pointer hover:opacity-90 transition-opacity"
+                    onClick={() => {
+                      // Open image in new tab for full view
+                      const win = window.open();
+                      if (win) {
+                        win.document.write(`<img src="data:${att.mime_type};base64,${att.data}" style="max-width:100%;height:auto;" />`);
+                      }
+                    }}
+                  />
+                ))}
+              </div>
+            )}
+            {/* Display text content */}
+            {hasContent ? (
+              <p className="whitespace-pre-wrap break-words overflow-wrap-anywhere">
+                {renderContentWithFileRefs(comment.content)}
+              </p>
+            ) : !hasAttachments ? (
+              <p className="whitespace-pre-wrap break-words overflow-wrap-anywhere">(empty)</p>
+            ) : null}
           </div>
         </div>
       </div>

@@ -14,7 +14,7 @@ import { useSessionModel } from '@/hooks/domains/session/use-session-model';
 import { useMessageHandler } from '@/hooks/use-message-handler';
 import { TodoSummary } from '@/components/task/chat/todo-summary';
 import { VirtualizedMessageList } from '@/components/task/chat/virtualized-message-list';
-import { ChatInputContainer, type ChatInputContainerHandle } from '@/components/task/chat/chat-input-container';
+import { ChatInputContainer, type ChatInputContainerHandle, type MessageAttachment } from '@/components/task/chat/chat-input-container';
 import { formatReviewCommentsAsMarkdown } from '@/components/task/chat/messages/review-comments-attachment';
 import {
   useDiffCommentsStore,
@@ -167,7 +167,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     }
   }, [resolvedSessionId]);
 
-  const handleSubmit = useCallback(async (message: string, reviewComments?: DiffComment[]) => {
+  const handleSubmit = useCallback(async (message: string, reviewComments?: DiffComment[], attachments?: MessageAttachment[]) => {
     if (isSending) return;
     setIsSending(true);
     try {
@@ -181,7 +181,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
       if (onSend) {
         await onSend(finalMessage);
       } else {
-        await handleSendMessage(finalMessage);
+        await handleSendMessage(finalMessage, attachments);
       }
 
       // Mark comments as sent and clear pending

@@ -299,7 +299,8 @@ func (s *SimulatedAgentManagerClient) StopAgent(ctx context.Context, agentExecut
 }
 
 // PromptAgent sends a follow-up prompt to a running agent
-func (s *SimulatedAgentManagerClient) PromptAgent(ctx context.Context, agentExecutionID string, prompt string) (*executor.PromptResult, error) {
+// Note: attachments parameter is accepted but not used in simulation
+func (s *SimulatedAgentManagerClient) PromptAgent(ctx context.Context, agentExecutionID string, prompt string, _ []v1.MessageAttachment) (*executor.PromptResult, error) {
 	s.mu.Lock()
 	execution, exists := s.instances[agentExecutionID]
 	s.mu.Unlock()
