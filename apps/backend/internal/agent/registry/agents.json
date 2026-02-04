@@ -369,8 +369,7 @@
         "resume_flag": "--resume",
         "can_recover": true,
         "session_dir_template": "{home}/.claude",
-        "session_dir_target": "",
-        "reports_status_via_stream": true
+        "session_dir_target": ""
       },
       "permission_config": {
         "permission_flag": "",
@@ -494,8 +493,7 @@
         "resume_flag": "",
         "can_recover": false,
         "session_dir_template": "{home}/.gemini",
-        "session_dir_target": "",
-        "reports_status_via_stream": false
+        "session_dir_target": ""
       },
       "permission_config": {
         "permission_flag": "",
@@ -634,8 +632,7 @@
         "resume_flag": "",
         "can_recover": true,
         "session_dir_template": "{home}/.opencode",
-        "session_dir_target": "",
-        "reports_status_via_stream": true
+        "session_dir_target": ""
       },
       "permission_config": {
         "permission_flag": "",
@@ -785,8 +782,7 @@
         "resume_flag": "--resume",
         "can_recover": true,
         "session_dir_template": "{home}/.copilot",
-        "session_dir_target": "",
-        "reports_status_via_stream": true
+        "session_dir_target": ""
       },
       "permission_config": {
         "permission_flag": "",
@@ -990,7 +986,6 @@
         "can_recover": true,
         "session_dir_template": "{home}/.config/amp",
         "session_dir_target": "",
-        "reports_status_via_stream": true,
         "fork_session_cmd": [
           "npx",
           "-y",

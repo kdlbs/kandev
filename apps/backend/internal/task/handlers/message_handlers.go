@@ -12,6 +12,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/controller"
 	"github.com/kandev/kandev/internal/task/dto"
@@ -20,15 +21,9 @@ import (
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
-// PromptResult represents the result of prompting an agent
-type PromptResult struct {
-	StopReason   string `json:"stop_reason"`
-	AgentMessage string `json:"agent_message"`
-}
-
 // OrchestratorService defines the interface for orchestrator operations
 type OrchestratorService interface {
-	PromptTask(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool) (*PromptResult, error)
+	PromptTask(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool) (*orchestrator.PromptResult, error)
 	ResumeTaskSession(ctx context.Context, taskID, taskSessionID string) error
 }
 

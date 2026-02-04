@@ -14,7 +14,6 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
-	taskhandlers "github.com/kandev/kandev/internal/task/handlers"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	taskservice "github.com/kandev/kandev/internal/task/service"
@@ -212,25 +211,20 @@ func (a *lifecycleAdapter) ResolveAgentProfile(ctx context.Context, profileID st
 	}, nil
 }
 
-// orchestratorAdapter adapts the orchestrator.Service to the taskhandlers.OrchestratorService interface
-type orchestratorAdapter struct {
+// orchestratorWrapper wraps orchestrator.Service to implement taskhandlers.OrchestratorService.
+// The wrapper only adapts ResumeTaskSession which returns *executor.TaskExecution that we don't need.
+type orchestratorWrapper struct {
 	svc *orchestrator.Service
 }
 
-// PromptTask forwards to the orchestrator service and converts the result type
-func (a *orchestratorAdapter) PromptTask(ctx context.Context, taskID, taskSessionID, prompt, model string, planMode bool) (*taskhandlers.PromptResult, error) {
-	result, err := a.svc.PromptTask(ctx, taskID, taskSessionID, prompt, model, planMode)
-	if err != nil {
-		return nil, err
-	}
-	return &taskhandlers.PromptResult{
-		StopReason:   result.StopReason,
-		AgentMessage: result.AgentMessage,
-	}, nil
+// PromptTask forwards directly to the orchestrator service.
+func (w *orchestratorWrapper) PromptTask(ctx context.Context, taskID, taskSessionID, prompt, model string, planMode bool) (*orchestrator.PromptResult, error) {
+	return w.svc.PromptTask(ctx, taskID, taskSessionID, prompt, model, planMode)
 }
 
-func (a *orchestratorAdapter) ResumeTaskSession(ctx context.Context, taskID, taskSessionID string) error {
-	_, err := a.svc.ResumeTaskSession(ctx, taskID, taskSessionID)
+// ResumeTaskSession forwards to the orchestrator service, discarding the TaskExecution result.
+func (w *orchestratorWrapper) ResumeTaskSession(ctx context.Context, taskID, taskSessionID string) error {
+	_, err := w.svc.ResumeTaskSession(ctx, taskID, taskSessionID)
 	return err
 }
 

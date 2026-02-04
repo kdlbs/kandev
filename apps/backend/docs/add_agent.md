@@ -357,7 +357,6 @@ Configure session handling in `session_config`:
 - `can_recover`: Whether sessions can survive backend restarts
 - `session_dir_template`: Where session data is stored on host
 - `session_dir_target`: Mount path inside container (if Docker-based)
-- `reports_status_via_stream`: If true, agent reports session status via stream protocol (prevents duplicate status messages)
 
 **Session ID Tracking for Stream-Based Protocols:**
 

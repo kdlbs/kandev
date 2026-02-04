@@ -194,6 +194,22 @@ func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) 
 	a.sessionID = string(resp.SessionId)
 	a.logger.Info("created new session", zap.String("session_id", a.sessionID))
 
+	// Emit session status event to normalize with other adapters.
+	// This eliminates the need for ReportsStatusViaStream flag.
+	select {
+	case a.updatesCh <- AgentEvent{
+		Type:          streams.EventTypeSessionStatus,
+		SessionID:     a.sessionID,
+		SessionStatus: streams.SessionStatusNew,
+		Data: map[string]any{
+			"session_status": streams.SessionStatusNew,
+			"init":           true,
+		},
+	}:
+	default:
+		a.logger.Warn("updates channel full, could not emit session_status event")
+	}
+
 	return a.sessionID, nil
 }
 
@@ -251,11 +267,28 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string) error {
 	a.sessionID = sessionID
 	a.logger.Info("loaded session", zap.String("session_id", a.sessionID))
 
+	// Emit session status event to normalize with other adapters.
+	// This eliminates the need for ReportsStatusViaStream flag.
+	select {
+	case a.updatesCh <- AgentEvent{
+		Type:          streams.EventTypeSessionStatus,
+		SessionID:     a.sessionID,
+		SessionStatus: streams.SessionStatusResumed,
+		Data: map[string]any{
+			"session_status": streams.SessionStatusResumed,
+			"init":           true,
+		},
+	}:
+	default:
+		a.logger.Warn("updates channel full, could not emit session_status event")
+	}
+
 	return nil
 }
 
 // Prompt sends a prompt to the agent.
 // If pending context is set (from SetPendingContext), it will be prepended to the message.
+// When the prompt completes, a complete event is emitted via the updates channel.
 func (a *Adapter) Prompt(ctx context.Context, message string) error {
 	a.mu.Lock()
 	conn := a.acpConn
@@ -283,7 +316,24 @@ func (a *Adapter) Prompt(ctx context.Context, message string) error {
 		SessionId: acp.SessionId(sessionID),
 		Prompt:    []acp.ContentBlock{acp.TextBlock(finalMessage)},
 	})
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Emit complete event via the stream.
+	// This normalizes ACP behavior to match other adapters (stream-json, amp, copilot, opencode).
+	// All adapters now emit complete events, eliminating the need for ReportsStatusViaStream flag.
+	a.logger.Debug("emitting complete event after prompt", zap.String("session_id", sessionID))
+	select {
+	case a.updatesCh <- AgentEvent{
+		Type:      streams.EventTypeComplete,
+		SessionID: sessionID,
+	}:
+	default:
+		a.logger.Warn("updates channel full, could not emit complete event")
+	}
+
+	return nil
 }
 
 // SetPendingContext sets the context to be injected into the next prompt.

@@ -272,7 +272,7 @@ func (c *Client) StreamUpdates(ctx context.Context, handler func(AgentEvent), mc
 	}
 
 	c.mu.Lock()
-	c.acpConn = conn
+	c.agentStreamConn = conn
 	c.mu.Unlock()
 
 	c.logger.Info("connected to updates stream", zap.String("url", wsURL))
@@ -289,7 +289,7 @@ func (c *Client) StreamUpdates(ctx context.Context, handler func(AgentEvent), mc
 	go func() {
 		defer func() {
 			c.mu.Lock()
-			c.acpConn = nil
+			c.agentStreamConn = nil
 			c.mu.Unlock()
 			if err := conn.Close(); err != nil {
 				c.logger.Debug("failed to close updates websocket", zap.Error(err))
@@ -352,11 +352,11 @@ func (c *Client) CloseUpdatesStream() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if c.acpConn != nil {
-		if err := c.acpConn.Close(); err != nil {
+	if c.agentStreamConn != nil {
+		if err := c.agentStreamConn.Close(); err != nil {
 			c.logger.Debug("failed to close agent events stream", zap.Error(err))
 		}
-		c.acpConn = nil
+		c.agentStreamConn = nil
 	}
 }
 

@@ -525,7 +525,7 @@ func main() {
 		gateway.Dispatcher,
 		messageController,
 		taskController,
-		&orchestratorAdapter{svc: orchestratorSvc},
+		&orchestratorWrapper{svc: orchestratorSvc},
 		log,
 	)
 	taskhandlers.RegisterProcessRoutes(router, taskSvc, lifecycleMgr, log)
