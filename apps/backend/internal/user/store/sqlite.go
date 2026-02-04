@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/kandev/kandev/internal/common/sqlite"
 	"github.com/kandev/kandev/internal/user/models"
 )
 
@@ -53,15 +52,8 @@ func (r *sqliteRepository) initSchema() error {
 	if _, err := r.db.Exec(schema); err != nil {
 		return err
 	}
-	if err := r.ensureUserSettingsColumn(); err != nil {
-		return err
-	}
 
 	return r.ensureDefaultUser()
-}
-
-func (r *sqliteRepository) ensureUserSettingsColumn() error {
-	return sqlite.EnsureColumn(r.db, "users", "settings", "TEXT NOT NULL DEFAULT '{}'")
 }
 
 func (r *sqliteRepository) ensureDefaultUser() error {

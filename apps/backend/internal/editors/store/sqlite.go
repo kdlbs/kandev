@@ -72,21 +72,7 @@ func (r *sqliteRepository) initSchema() error {
 	);
 	`
 	_, err := r.db.Exec(schema)
-	if err != nil {
-		return err
-	}
-	columns := []columnDef{
-		{name: "name", typ: "TEXT", defaultValue: "''"},
-		{name: "kind", typ: "TEXT", defaultValue: "'built_in'"},
-		{name: "config", typ: "TEXT", defaultValue: "NULL"},
-		{name: "installed", typ: "INTEGER", defaultValue: "0"},
-	}
-	for _, column := range columns {
-		if err := ensureColumn(r.db, "editors", column); err != nil {
-			return err
-		}
-	}
-	return nil
+	return err
 }
 
 func (r *sqliteRepository) ensureDefaults(ctx context.Context) error {
@@ -317,47 +303,6 @@ func scanEditor(scanner interface{ Scan(dest ...any) error }) (*models.Editor, e
 	editor.Installed = installed == 1
 	editor.Enabled = enabled == 1
 	return editor, nil
-}
-
-type columnDef struct {
-	name         string
-	typ          string
-	defaultValue string
-}
-
-func ensureColumn(db *sql.DB, table string, column columnDef) error {
-	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
-	if err != nil {
-		return err
-	}
-	defer func() {
-		_ = rows.Close()
-	}()
-	for rows.Next() {
-		var (
-			cid        int
-			name       string
-			typ        string
-			notNull    int
-			defaultVal sql.NullString
-			pk         int
-		)
-		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultVal, &pk); err != nil {
-			return err
-		}
-		if name == column.name {
-			return nil
-		}
-	}
-	alter := fmt.Sprintf(
-		"ALTER TABLE %s ADD COLUMN %s %s DEFAULT %s",
-		table,
-		column.name,
-		column.typ,
-		column.defaultValue,
-	)
-	_, err = db.Exec(alter)
-	return err
 }
 
 func marshalConfig(config json.RawMessage) (string, error) {
