@@ -58,6 +58,7 @@ func (r *sqliteRepository) initSchema() error {
 		auto_approve INTEGER NOT NULL DEFAULT 0,
 		dangerously_skip_permissions INTEGER NOT NULL DEFAULT 0,
 		allow_indexing INTEGER NOT NULL DEFAULT 1,
+		cli_passthrough INTEGER NOT NULL DEFAULT 0,
 		plan TEXT DEFAULT '',
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL,
@@ -80,19 +81,7 @@ func (r *sqliteRepository) initSchema() error {
 	CREATE INDEX IF NOT EXISTS idx_agent_profiles_agent_id ON agent_profiles(agent_id);
 	`
 	_, err := r.db.Exec(schema)
-	if err != nil {
-		return err
-	}
-	if err := sqlite.EnsureColumn(r.db, "agent_profiles", "deleted_at", "DATETIME"); err != nil {
-		return err
-	}
-	if err := sqlite.EnsureColumn(r.db, "agent_profiles", "agent_display_name", "TEXT NOT NULL DEFAULT ''"); err != nil {
-		return err
-	}
-	if err := sqlite.EnsureColumn(r.db, "agent_profiles", "cli_passthrough", "INTEGER NOT NULL DEFAULT 0"); err != nil {
-		return err
-	}
-	return nil
+	return err
 }
 
 func (r *sqliteRepository) Close() error {

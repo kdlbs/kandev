@@ -188,7 +188,6 @@ kandev/
 │   │   └── Makefile
 │   └── web/                  # Frontend application
 ├── docs/                     # Architecture and planning docs
-├── migrations/               # Database migrations (future)
 ├── deployments/              # Deployment configs
 └── scripts/                  # Utility scripts (including e2e-test.sh)
 ```

@@ -4,8 +4,6 @@ package sqlite
 import (
 	"database/sql"
 	"fmt"
-
-	commonsqlite "github.com/kandev/kandev/internal/common/sqlite"
 )
 
 // Repository provides SQLite-based task storage operations.
@@ -43,11 +41,6 @@ func (r *Repository) Close() error {
 // DB returns the underlying sql.DB instance for shared access
 func (r *Repository) DB() *sql.DB {
 	return r.db
-}
-
-// ensureColumn adds a column to a table if it doesn't exist
-func (r *Repository) ensureColumn(table, column, definition string) error {
-	return commonsqlite.EnsureColumn(r.db, table, column, definition)
 }
 
 // ensureWorkspaceIndexes creates workspace-related indexes
@@ -129,6 +122,7 @@ func (r *Repository) initSchema() error {
 	CREATE TABLE IF NOT EXISTS boards (
 		id TEXT PRIMARY KEY,
 		workspace_id TEXT NOT NULL DEFAULT '',
+		workflow_template_id TEXT DEFAULT '',
 		name TEXT NOT NULL,
 		description TEXT DEFAULT '',
 		created_at DATETIME NOT NULL,
@@ -369,88 +363,6 @@ func (r *Repository) initSchema() error {
 	`
 
 	if _, err := r.db.Exec(gitSchema); err != nil {
-		return err
-	}
-
-	// Ensure columns exist for schema migrations
-	if err := r.ensureColumn("boards", "workspace_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
-		return err
-	}
-	if err := r.ensureColumn("boards", "workflow_template_id", "TEXT DEFAULT ''"); err != nil {
-		return err
-	}
-	if err := r.ensureColumn("tasks", "workspace_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
-		return err
-	}
-	if err := r.ensureColumn("workspaces", "default_executor_id", "TEXT DEFAULT ''"); err != nil {
-		return err
-	}
-	if err := r.ensureColumn("workspaces", "default_environment_id", "TEXT DEFAULT ''"); err != nil {
-		return err
-	}
-	if err := r.ensureColumn("workspaces", "default_agent_profile_id", "TEXT DEFAULT ''"); err != nil {
-		return err
-	}
-
-	if err := r.ensureColumn("environments", "is_system", "INTEGER NOT NULL DEFAULT 0"); err != nil {
-		return err
-	}
-	if err := r.ensureColumn("repositories", "deleted_at", "DATETIME"); err != nil {
-		return err
-	}
-	if err := r.ensureColumn("repositories", "worktree_branch_prefix", "TEXT DEFAULT 'feature/'"); err != nil {
-		return err
-	}
-	if err := r.ensureColumn("repositories", "pull_before_worktree", "INTEGER NOT NULL DEFAULT 1"); err != nil {
-		return err
-	}
-	if err := r.ensureColumn("repositories", "dev_script", "TEXT DEFAULT ''"); err != nil {
-		return err
-	}
-	if err := r.ensureColumn("executors", "deleted_at", "DATETIME"); err != nil {
-		return err
-	}
-	if err := r.ensureColumn("executors", "resumable", "INTEGER NOT NULL DEFAULT 1"); err != nil {
-		return err
-	}
-	if err := r.ensureColumn("environments", "deleted_at", "DATETIME"); err != nil {
-		return err
-	}
-
-	// Ensure new message columns exist for existing databases
-	if err := r.ensureColumn("task_session_messages", "type", "TEXT NOT NULL DEFAULT 'message'"); err != nil {
-		return err
-	}
-	if err := r.ensureColumn("task_session_messages", "metadata", "TEXT DEFAULT '{}'"); err != nil {
-		return err
-	}
-	if err := r.ensureColumn("task_session_messages", "task_session_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
-		return err
-	}
-	if err := r.ensureColumn("task_session_messages", "turn_id", "TEXT DEFAULT ''"); err != nil {
-		return err
-	}
-
-	// Ensure container_id column exists for existing databases
-	if err := r.ensureColumn("task_sessions", "container_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
-		return err
-	}
-	if err := r.ensureColumn("task_sessions", "executor_id", "TEXT DEFAULT ''"); err != nil {
-		return err
-	}
-	if err := r.ensureColumn("task_sessions", "environment_id", "TEXT DEFAULT ''"); err != nil {
-		return err
-	}
-	if err := r.ensureColumn("task_sessions", "state", "TEXT NOT NULL DEFAULT 'CREATED'"); err != nil {
-		return err
-	}
-	if err := r.ensureColumn("task_sessions", "is_primary", "INTEGER DEFAULT 0"); err != nil {
-		return err
-	}
-	if err := r.ensureColumn("task_sessions", "workflow_step_id", "TEXT DEFAULT ''"); err != nil {
-		return err
-	}
-	if err := r.ensureColumn("task_sessions", "review_status", "TEXT DEFAULT ''"); err != nil {
 		return err
 	}
 

@@ -33,11 +33,6 @@ func (r *Repository) DB() *sql.DB {
 	return r.db
 }
 
-// ensureColumn adds a column to a table if it doesn't exist.
-func (r *Repository) ensureColumn(table, column, definition string) error {
-	return sqlite.EnsureColumn(r.db, table, column, definition)
-}
-
 // initSchema creates the database tables if they don't exist.
 func (r *Repository) initSchema() error {
 	// Create workflow_templates table
@@ -102,11 +97,6 @@ func (r *Repository) initSchema() error {
 		return fmt.Errorf("failed to create session_step_history table: %w", err)
 	}
 
-	// Run migrations for existing tables
-	if err := r.runMigrations(); err != nil {
-		return fmt.Errorf("failed to run migrations: %w", err)
-	}
-
 	// Seed system templates
 	if err := r.seedSystemTemplates(); err != nil {
 		return fmt.Errorf("failed to seed system templates: %w", err)
@@ -115,27 +105,6 @@ func (r *Repository) initSchema() error {
 	// Seed default workflow steps for boards that don't have any
 	if err := r.seedDefaultWorkflowSteps(); err != nil {
 		return fmt.Errorf("failed to seed default workflow steps: %w", err)
-	}
-
-	return nil
-}
-
-// runMigrations adds columns to existing tables.
-func (r *Repository) runMigrations() error {
-	// Add workflow_template_id to boards table
-	if err := r.ensureColumn("boards", "workflow_template_id", "TEXT"); err != nil {
-		return fmt.Errorf("failed to add workflow_template_id to boards: %w", err)
-	}
-
-	// Add workflow-related columns to task_sessions table
-	if err := r.ensureColumn("task_sessions", "is_primary", "INTEGER DEFAULT 0"); err != nil {
-		return fmt.Errorf("failed to add is_primary to task_sessions: %w", err)
-	}
-	if err := r.ensureColumn("task_sessions", "workflow_step_id", "TEXT"); err != nil {
-		return fmt.Errorf("failed to add workflow_step_id to task_sessions: %w", err)
-	}
-	if err := r.ensureColumn("task_sessions", "review_status", "TEXT"); err != nil {
-		return fmt.Errorf("failed to add review_status to task_sessions: %w", err)
 	}
 
 	return nil
