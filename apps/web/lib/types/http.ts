@@ -508,6 +508,11 @@ export type Turn = {
   updated_at: string;
 };
 
+export type ListTurnsResponse = {
+  turns: Turn[];
+  total: number;
+};
+
 export type AgentProfile = {
   id: string;
   agent_id: string;

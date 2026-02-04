@@ -30,24 +30,24 @@ type WorkspaceDTO struct {
 }
 
 type RepositoryDTO struct {
-	ID                   string                 `json:"id"`
-	WorkspaceID          string                 `json:"workspace_id"`
-	Name                 string                 `json:"name"`
-	SourceType           string                 `json:"source_type"`
-	LocalPath            string                 `json:"local_path"`
-	Provider             string                 `json:"provider"`
-	ProviderRepoID       string                 `json:"provider_repo_id"`
-	ProviderOwner        string                 `json:"provider_owner"`
-	ProviderName         string                 `json:"provider_name"`
-	DefaultBranch        string                 `json:"default_branch"`
-	WorktreeBranchPrefix string                 `json:"worktree_branch_prefix"`
-	PullBeforeWorktree   bool                   `json:"pull_before_worktree"`
-	SetupScript          string                 `json:"setup_script"`
-	CleanupScript        string                 `json:"cleanup_script"`
-	DevScript            string                 `json:"dev_script"`
-	CreatedAt            time.Time              `json:"created_at"`
-	UpdatedAt            time.Time              `json:"updated_at"`
-	Scripts              []RepositoryScriptDTO  `json:"scripts,omitempty"`
+	ID                   string                `json:"id"`
+	WorkspaceID          string                `json:"workspace_id"`
+	Name                 string                `json:"name"`
+	SourceType           string                `json:"source_type"`
+	LocalPath            string                `json:"local_path"`
+	Provider             string                `json:"provider"`
+	ProviderRepoID       string                `json:"provider_repo_id"`
+	ProviderOwner        string                `json:"provider_owner"`
+	ProviderName         string                `json:"provider_name"`
+	DefaultBranch        string                `json:"default_branch"`
+	WorktreeBranchPrefix string                `json:"worktree_branch_prefix"`
+	PullBeforeWorktree   bool                  `json:"pull_before_worktree"`
+	SetupScript          string                `json:"setup_script"`
+	CleanupScript        string                `json:"cleanup_script"`
+	DevScript            string                `json:"dev_script"`
+	CreatedAt            time.Time             `json:"created_at"`
+	UpdatedAt            time.Time             `json:"updated_at"`
+	Scripts              []RepositoryScriptDTO `json:"scripts,omitempty"`
 }
 
 type RepositoryScriptDTO struct {
@@ -164,6 +164,22 @@ type ListMessagesResponse struct {
 	Total    int           `json:"total"`
 	HasMore  bool          `json:"has_more"`
 	Cursor   string        `json:"cursor"`
+}
+
+type TurnDTO struct {
+	ID          string                 `json:"id"`
+	SessionID   string                 `json:"session_id"`
+	TaskID      string                 `json:"task_id"`
+	StartedAt   string                 `json:"started_at"`
+	CompletedAt *string                `json:"completed_at,omitempty"`
+	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt   string                 `json:"created_at"`
+	UpdatedAt   string                 `json:"updated_at"`
+}
+
+type ListTurnsResponse struct {
+	Turns []TurnDTO `json:"turns"`
+	Total int       `json:"total"`
 }
 
 type ListBoardsResponse struct {
@@ -486,5 +502,25 @@ func TaskPlanFromModel(plan *models.TaskPlan) *TaskPlanDTO {
 		CreatedBy: plan.CreatedBy,
 		CreatedAt: plan.CreatedAt,
 		UpdatedAt: plan.UpdatedAt,
+	}
+}
+
+// FromTurn converts a Turn model to a TurnDTO.
+func FromTurn(turn *models.Turn) TurnDTO {
+	var completedAt *string
+	if turn.CompletedAt != nil {
+		formatted := turn.CompletedAt.UTC().Format(time.RFC3339)
+		completedAt = &formatted
+	}
+
+	return TurnDTO{
+		ID:          turn.ID,
+		SessionID:   turn.TaskSessionID,
+		TaskID:      turn.TaskID,
+		StartedAt:   turn.StartedAt.UTC().Format(time.RFC3339),
+		CompletedAt: completedAt,
+		Metadata:    turn.Metadata,
+		CreatedAt:   turn.CreatedAt.UTC().Format(time.RFC3339),
+		UpdatedAt:   turn.UpdatedAt.UTC().Format(time.RFC3339),
 	}
 }

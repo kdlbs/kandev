@@ -3,6 +3,7 @@ import type {
   TaskSessionsResponse,
   TaskSessionResponse,
   ListMessagesResponse,
+  ListTurnsResponse,
 } from '@/lib/types/http';
 
 // Session operations
@@ -27,6 +28,10 @@ export async function listTaskSessionMessages(
   const suffix = query.toString();
   const url = `/api/v1/task-sessions/${taskSessionId}/messages${suffix ? `?${suffix}` : ''}`;
   return fetchJson<ListMessagesResponse>(url, options);
+}
+
+export async function listSessionTurns(taskSessionId: string, options?: ApiRequestOptions) {
+  return fetchJson<ListTurnsResponse>(`/api/v1/task-sessions/${taskSessionId}/turns`, options);
 }
 
 export async function openSessionInEditor(
