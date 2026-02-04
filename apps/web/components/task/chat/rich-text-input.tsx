@@ -187,21 +187,32 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
         if (event.defaultPrevented) return;
       }
 
+      // Don't allow submission if disabled (includes when agent is busy)
+      if (disabled) {
+        // Prevent default to avoid any action when disabled
+        if (submitKey === 'enter') {
+          if (event.key === 'Enter' && !event.shiftKey && !event.metaKey && !event.ctrlKey) {
+            event.preventDefault();
+          }
+        } else {
+          if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+            event.preventDefault();
+          }
+        }
+        return;
+      }
+
       if (submitKey === 'enter') {
         // Submit on Enter (unless Shift for newline)
         if (event.key === 'Enter' && !event.shiftKey && !event.metaKey && !event.ctrlKey) {
           event.preventDefault();
-          if (!disabled) {
-            onSubmit?.();
-          }
+          onSubmit?.();
         }
       } else {
         // Submit on Cmd/Ctrl+Enter (current behavior)
         if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
           event.preventDefault();
-          if (!disabled) {
-            onSubmit?.();
-          }
+          onSubmit?.();
         }
       }
     };

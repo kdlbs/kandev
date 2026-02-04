@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/controller"
 	"github.com/kandev/kandev/internal/task/dto"
+	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -140,6 +141,20 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	}
 	if req.Content == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "content is required", nil)
+	}
+
+	// Check if session is currently processing a prompt (RUNNING state)
+	// This prevents duplicate/concurrent prompts that can cause race conditions
+	sessionResp, err := h.taskController.GetTaskSession(ctx, dto.GetTaskSessionRequest{TaskSessionID: req.TaskSessionID})
+	if err != nil {
+		h.logger.Error("failed to get task session", zap.String("session_id", req.TaskSessionID), zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get task session", nil)
+	}
+	if sessionResp.Session.State == models.TaskSessionStateRunning {
+		h.logger.Warn("rejected message submission while agent is busy",
+			zap.String("session_id", req.TaskSessionID),
+			zap.String("session_state", string(sessionResp.Session.State)))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Agent is currently processing. Please wait for the current operation to complete.", nil)
 	}
 
 	// Get the current task state to determine if we need to transition

@@ -538,6 +538,20 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 		return nil, fmt.Errorf("session_id is required")
 	}
 
+	// Check if session is already processing a prompt (RUNNING state)
+	// This prevents concurrent prompts that can cause race conditions
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get session: %w", err)
+	}
+	if session.State == models.TaskSessionStateRunning {
+		s.logger.Warn("rejected prompt while agent is already running",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("session_state", string(session.State)))
+		return nil, fmt.Errorf("agent is currently processing a prompt, please wait for completion")
+	}
+
 	// Apply plan mode prefix if enabled
 	effectivePrompt := prompt
 	if planMode {
@@ -550,13 +564,7 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 
 	// Check if model switching is requested
 	if model != "" {
-		// Get the current session to check current model
-		session, err := s.repo.GetTaskSession(ctx, sessionID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get session for model switch: %w", err)
-		}
-
-		// Get current model from agent profile snapshot
+		// Get current model from agent profile snapshot (session already fetched above)
 		var currentModel string
 		if session.AgentProfileSnapshot != nil {
 			if m, ok := session.AgentProfileSnapshot["model"].(string); ok {
