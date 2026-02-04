@@ -14,6 +14,28 @@ import { useDiffComments } from './use-diff-comments';
 import { CommentForm } from './comment-form';
 import { CommentDisplay } from './comment-display';
 
+/**
+ * Check if Go code contains patterns that trigger catastrophic regex backtracking
+ * in shiki's JavaScript regex engine.
+ *
+ * Bug: The Go TextMate grammar has a regex pattern that causes O(2^n) backtracking
+ * when struct fields contain `interface{}` with struct tags like `json:"..."`.
+ *
+ * See: https://github.com/shikijs/textmate-grammars-themes/pull/183
+ */
+function hasProblematicGoPattern(content: string | undefined): boolean {
+  if (!content) return false;
+  const problematicPattern = /interface\{\}\s*`[^`]*`/;
+  return problematicPattern.test(content);
+}
+
+/**
+ * Check if a file is a Go file based on extension
+ */
+function isGoFile(filePath: string): boolean {
+  return filePath.endsWith('.go');
+}
+
 // Local storage key for global diff view mode
 const DIFF_VIEW_MODE_KEY = 'diff-view-mode';
 const DEFAULT_VIEW_MODE = 'unified' as const;
@@ -413,7 +435,6 @@ export const DiffViewer = memo(function DiffViewer({
   // Determine if header/toolbar should be shown
   const showHeader = !hideHeader && !compact;
 
-  // Stable options - only include values that truly need to change the diff render
   const options = useMemo<FileDiffOptions<AnnotationMetadata>>(
     () => ({
       diffStyle: globalViewMode,
@@ -452,18 +473,27 @@ export const DiffViewer = memo(function DiffViewer({
 
   // Compute FileDiffMetadata from either diff string or content
   const fileDiffMetadata = useMemo<FileDiffMetadata | null>(() => {
+    let result: FileDiffMetadata | null = null;
     if (data.diff) {
-      // Has diff string - parse it
       const parsed = parsePatchFiles(data.diff);
-      return parsed[0]?.files[0] ?? null;
+      result = parsed[0]?.files[0] ?? null;
     } else if (data.oldContent || data.newContent) {
-      // Has content - generate diff using library
-      return parseDiffFromFile(
+      result = parseDiffFromFile(
         { name: data.filePath, contents: data.oldContent },
         { name: data.filePath, contents: data.newContent }
       );
     }
-    return null;
+
+    // Fix for shiki Go grammar catastrophic backtracking bug (PR #183)
+    // Disable syntax highlighting for Go files with interface{} + struct tags
+    if (result && isGoFile(data.filePath)) {
+      const contentToCheck = data.newContent || data.oldContent || data.diff;
+      if (hasProblematicGoPattern(contentToCheck)) {
+        result = { ...result, lang: 'text' };
+      }
+    }
+
+    return result;
   }, [data.diff, data.oldContent, data.newContent, data.filePath]);
 
   // Only pass selectedLines when we have a completed selection (form shown)
