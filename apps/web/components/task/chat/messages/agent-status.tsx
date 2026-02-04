@@ -1,9 +1,10 @@
 'use client';
 
-import { useCallback, useMemo, useState, useEffect, useRef } from 'react';
+import { useCallback, useMemo, useState, useEffect } from 'react';
 import { IconAlertCircle, IconAlertTriangle, IconCopy, IconCheck } from '@tabler/icons-react';
 import type { Message, TaskSessionState } from '@/lib/types/http';
 import { useSessionTurn } from '@/hooks/domains/session/use-session-turn';
+import { useAppStore } from '@/components/state-provider';
 import { GridSpinner } from '@/components/grid-spinner';
 
 type AgentStatusProps = {
@@ -68,33 +69,37 @@ function calculateTurnDurationFromMessages(messages: Message[]): string | null {
 
 /**
  * Hook to track elapsed time while agent is running.
- * Starts timer when isRunning becomes true, resets when it becomes false.
+ * Uses the turn's started_at timestamp to calculate elapsed time, so it persists across page refreshes.
  */
-function useRunningTimer(isRunning: boolean) {
+function useRunningTimer(isRunning: boolean, turnStartedAt: string | null) {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const startTimeRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (!isRunning) {
-      // Reset refs when not running (state reset handled below)
-      startTimeRef.current = null;
+    if (!isRunning || !turnStartedAt) {
       return;
     }
 
-    // Start timer
-    if (!startTimeRef.current) {
-      startTimeRef.current = Date.now();
-    }
-    const interval = setInterval(() => {
-      if (startTimeRef.current) {
-        setElapsedSeconds(Math.floor((Date.now() - startTimeRef.current) / 1000));
-      }
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [isRunning]);
+    const startTime = new Date(turnStartedAt).getTime();
 
-  // Reset elapsed seconds when not running (outside effect to avoid lint warning)
-  const displaySeconds = isRunning ? elapsedSeconds : 0;
+    const updateElapsed = () => {
+      const elapsed = Math.floor((Date.now() - startTime) / 1000);
+      setElapsedSeconds(elapsed);
+    };
+
+    // Update in the interval callback (not synchronously in effect)
+    const interval = setInterval(updateElapsed, 1000);
+
+    // Also update once immediately, but in the next tick to avoid sync update
+    const timeoutId = setTimeout(updateElapsed, 0);
+
+    return () => {
+      clearInterval(interval);
+      clearTimeout(timeoutId);
+    };
+  }, [isRunning, turnStartedAt]);
+
+  // Reset to 0 when not running
+  const displaySeconds = isRunning && turnStartedAt ? elapsedSeconds : 0;
 
   // Format as Xs or XmXs
   const formatted = useMemo(() => {
@@ -138,8 +143,16 @@ export function AgentStatus({ sessionState, sessionId, messages = [] }: AgentSta
   const config = sessionState ? STATE_CONFIG[sessionState] : null;
   const isRunning = config?.icon === 'spinner';
 
-  // Use local timer that starts when agent is running
-  const { formatted: runningDuration, elapsedSeconds } = useRunningTimer(isRunning);
+  // Get active turn to use its started_at timestamp for the timer
+  const turns = useAppStore((state) => sessionId ? state.turns.bySession[sessionId] : undefined);
+  const activeTurnId = useAppStore((state) => sessionId ? state.turns.activeBySession[sessionId] : null);
+  const activeTurn = useMemo(() => {
+    if (!turns || !activeTurnId) return null;
+    return turns.find((t) => t.id === activeTurnId) ?? null;
+  }, [turns, activeTurnId]);
+
+  // Use timer that uses the turn's started_at timestamp, so it persists across page refreshes
+  const { formatted: runningDuration, elapsedSeconds } = useRunningTimer(isRunning, activeTurn?.started_at ?? null);
   const isError = config?.icon === 'error';
   const isWarning = config?.icon === 'warning';
 

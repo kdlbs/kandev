@@ -63,6 +63,7 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api.GET("/tasks/:id", h.httpGetTask)
 	api.GET("/task-sessions/:id", h.httpGetTaskSession)
 	api.GET("/tasks/:id/sessions", h.httpListTaskSessions)
+	api.GET("/task-sessions/:id/turns", h.httpListSessionTurns)
 	api.POST("/tasks", h.httpCreateTask)
 	api.PATCH("/tasks/:id", h.httpUpdateTask)
 	api.POST("/tasks/:id/move", h.httpMoveTask)
@@ -161,6 +162,29 @@ func (h *TaskHandlers) httpGetTaskSession(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, resp)
+}
+
+func (h *TaskHandlers) httpListSessionTurns(c *gin.Context) {
+	sessionID := c.Param("id")
+	if sessionID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "session id is required"})
+		return
+	}
+
+	turns, err := h.repo.ListTurnsBySession(c.Request.Context(), sessionID)
+	if err != nil {
+		h.logger.Error("failed to list turns", zap.String("session_id", sessionID), zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list turns"})
+		return
+	}
+
+	// Convert to DTO
+	turnDTOs := make([]dto.TurnDTO, 0, len(turns))
+	for _, turn := range turns {
+		turnDTOs = append(turnDTOs, dto.FromTurn(turn))
+	}
+
+	c.JSON(http.StatusOK, dto.ListTurnsResponse{Turns: turnDTOs, Total: len(turnDTOs)})
 }
 
 func (h *TaskHandlers) httpApproveSession(c *gin.Context) {
