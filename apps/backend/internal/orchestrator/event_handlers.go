@@ -346,16 +346,18 @@ func (s *Service) handleWorkflowTransition(ctx context.Context, taskID, sessionI
 	return true
 }
 
-// handleReviewStepRollback checks if the session is in a review step with pending status.
+// handleReviewStepRollback checks if the session is in a review-type step.
 // If so, it moves the session back to the previous step (the step that led to the review step)
 // and clears the review status. This handles the case where the user sends a message to
 // iterate on the work instead of approving.
+// Note: This works for both "simple" boards (where review steps don't require approval) and
+// "advanced" boards (where review steps have RequireApproval=true).
 func (s *Service) handleReviewStepRollback(ctx context.Context, taskID, sessionID string) {
 	if sessionID == "" || s.workflowStepGetter == nil {
 		return
 	}
 
-	// Get the session to check its current workflow step and review status
+	// Get the session to check its current workflow step
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		s.logger.Warn("failed to get session for review rollback check",
@@ -364,17 +366,14 @@ func (s *Service) handleReviewStepRollback(ctx context.Context, taskID, sessionI
 		return
 	}
 
-	// Only proceed if session has a workflow step and pending review status
+	// Only proceed if session has a workflow step
 	if session.WorkflowStepID == nil || *session.WorkflowStepID == "" {
-		return
-	}
-	if session.ReviewStatus == nil || *session.ReviewStatus != "pending" {
 		return
 	}
 
 	currentStepID := *session.WorkflowStepID
 
-	// Get the current workflow step to check if it requires approval
+	// Get the current workflow step to check if it's a review step
 	currentStep, err := s.workflowStepGetter.GetStep(ctx, currentStepID)
 	if err != nil {
 		s.logger.Warn("failed to get workflow step for review rollback",
