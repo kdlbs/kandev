@@ -95,6 +95,11 @@ type Adapter struct {
 	// Available commands from initialize response (stored until session is created)
 	pendingAvailableCommands []streams.AvailableCommand
 
+	// Track whether text was streamed this turn to prevent duplicates from result.text
+	// This is set to true when we send message_chunk events from assistant messages,
+	// and reset to false at the start of each prompt.
+	streamingTextSentThisTurn bool
+
 	// Synchronization
 	mu     sync.RWMutex
 	closed bool
@@ -698,6 +703,12 @@ func (a *Adapter) handleAssistantMessage(msg *claudecode.CLIMessage, sessionID, 
 		switch block.Type {
 		case "text":
 			if block.Text != "" {
+				// Mark that we've sent streaming text this turn
+				// This prevents duplicate content from result.text
+				a.mu.Lock()
+				a.streamingTextSentThisTurn = true
+				a.mu.Unlock()
+
 				a.sendUpdate(AgentEvent{
 					Type:        streams.EventTypeMessageChunk,
 					SessionID:   sessionID,
@@ -923,7 +934,41 @@ func (a *Adapter) handleResultMessage(msg *claudecode.CLIMessage, sessionID, ope
 		})
 	}
 
-	// Send completion event
+	// Check if text was already streamed this turn via assistant messages
+	a.mu.RLock()
+	textWasStreamed := a.streamingTextSentThisTurn
+	a.mu.RUnlock()
+
+	// Only send result.text if NO text was streamed this turn.
+	// If text was already streamed via assistant messages, result.text is a duplicate.
+	// This prevents the same content from appearing twice in the conversation.
+	if !textWasStreamed {
+		var resultText string
+		if resultData := msg.GetResultData(); resultData != nil && resultData.Text != "" {
+			resultText = resultData.Text
+		} else if resultStr := msg.GetResultString(); resultStr != "" {
+			resultText = resultStr
+		}
+		if resultText != "" {
+			a.logger.Debug("sending result text as message_chunk (no streaming text this turn)",
+				zap.Int("text_length", len(resultText)))
+			a.sendUpdate(AgentEvent{
+				Type:        streams.EventTypeMessageChunk,
+				SessionID:   sessionID,
+				OperationID: operationID,
+				Text:        resultText,
+			})
+		}
+	} else {
+		a.logger.Debug("skipping result text (streaming text already sent this turn)")
+	}
+
+	// Reset the streaming flag for next turn
+	a.mu.Lock()
+	a.streamingTextSentThisTurn = false
+	a.mu.Unlock()
+
+	// Send completion event AFTER any result text chunk
 	a.sendUpdate(AgentEvent{
 		Type:        streams.EventTypeComplete,
 		SessionID:   sessionID,
@@ -937,23 +982,6 @@ func (a *Adapter) handleResultMessage(msg *claudecode.CLIMessage, sessionID, ope
 			"is_error":      msg.IsError,
 		},
 	})
-
-	// If there's result text, send it as a message chunk
-	// Result can be either a ResultData object or a plain string
-	var resultText string
-	if resultData := msg.GetResultData(); resultData != nil && resultData.Text != "" {
-		resultText = resultData.Text
-	} else if resultStr := msg.GetResultString(); resultStr != "" {
-		resultText = resultStr
-	}
-	if resultText != "" {
-		a.sendUpdate(AgentEvent{
-			Type:        streams.EventTypeMessageChunk,
-			SessionID:   sessionID,
-			OperationID: operationID,
-			Text:        resultText,
-		})
-	}
 
 	// Signal completion
 	a.mu.RLock()

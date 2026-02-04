@@ -458,6 +458,16 @@ func (a *Adapter) Prompt(ctx context.Context, message string) error {
 			return fmt.Errorf("turn failed: %s", completeResult.err)
 		}
 		a.logger.Info("turn completed", zap.String("turn_id", turnID), zap.Bool("success", completeResult.success))
+
+		// Emit complete event via the stream.
+		// This normalizes Codex behavior to match other adapters.
+		// All adapters now emit complete events, eliminating the need for protocol-specific flags.
+		a.sendUpdate(AgentEvent{
+			Type:        streams.EventTypeComplete,
+			SessionID:   threadID,
+			OperationID: turnID,
+		})
+
 		return nil
 	}
 }

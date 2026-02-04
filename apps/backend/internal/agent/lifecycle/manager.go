@@ -814,10 +814,6 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 		execution.ACPSessionID = req.ACPSessionID
 	}
 
-	// Set flag indicating if agent adapter reports completion via stream
-	// When true, session manager should NOT emit a complete event after prompt returns
-	execution.ReportsStatusViaStream = agentConfig.SessionConfig.ReportsStatusViaStream
-
 	// Build agent command string for later use with StartAgentProcess
 	model := ""
 	autoApprove := false
@@ -951,17 +947,12 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) err
 		return fmt.Errorf("failed to resolve MCP config: %w", err)
 	}
 
-	// Capture the original ACP session ID before initialization overwrites it.
-	// This is used to determine if we're resuming an existing session or starting a new one.
-	providedACPSessionID := execution.ACPSessionID
-
-	// Initialize ACP session
+	// Initialize ACP session.
+	// Session status events are now emitted by all adapters via the stream.
 	if err := m.initializeACPSession(ctx, execution, agentConfig, taskDescription, mcpServers); err != nil {
 		m.updateExecutionError(executionID, "failed to initialize ACP: "+err.Error())
 		return fmt.Errorf("failed to initialize ACP: %w", err)
 	}
-
-	m.emitSessionStatusEvent(execution, agentConfig, providedACPSessionID)
 
 	return nil
 }
@@ -1200,38 +1191,6 @@ func (m *Manager) initializeACPSession(ctx context.Context, execution *AgentExec
 	return m.sessionManager.InitializeAndPrompt(ctx, execution, agentConfig, taskDescription, mcpServers, m.MarkReady)
 }
 
-// emitSessionStatusEvent emits a session_status event indicating whether the session was resumed or new.
-// providedACPSessionID is the ACP session ID that was provided BEFORE initialization (for resumption).
-// This must be captured before initializeACPSession runs, as that overwrites execution.ACPSessionID.
-func (m *Manager) emitSessionStatusEvent(execution *AgentExecution, agentConfig *registry.AgentTypeConfig, providedACPSessionID string) {
-	// Skip emitting for agents that report their session status via the stream protocol.
-	// These agents emit session_status events from their adapter when the real session info arrives,
-	// so emitting here would create duplicate "New session started" messages.
-	if agentConfig.SessionConfig.ReportsStatusViaStream {
-		return
-	}
-
-	wasResumed := false
-	if providedACPSessionID != "" {
-		if agentConfig.SessionConfig.NativeSessionResume {
-			wasResumed = true
-		} else if agentConfig.SessionConfig.ResumeFlag != "" && agentConfig.SessionConfig.SupportsRecovery() {
-			wasResumed = true
-		}
-	}
-
-	sessionStatus := streams.SessionStatusNew
-	if wasResumed {
-		sessionStatus = streams.SessionStatusResumed
-	}
-
-	m.eventPublisher.PublishAgentStreamEvent(execution, streams.AgentEvent{
-		Type:          streams.EventTypeSessionStatus,
-		SessionID:     execution.ACPSessionID,
-		SessionStatus: sessionStatus,
-	})
-}
-
 // handleAgentEvent processes incoming agent events from the agent
 func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.AgentEvent) {
 	// Log all incoming events for debugging
@@ -1365,7 +1324,6 @@ func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.Age
 		// Check buffer content BEFORE any processing
 		execution.messageMu.Lock()
 		bufferContentBeforeFlush := execution.messageBuffer.String()
-		streamingWasUsed := execution.streamingUsedThisTurn
 		currentMsgID := execution.currentMessageID
 		execution.messageMu.Unlock()
 
@@ -1387,53 +1345,21 @@ func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.Age
 			zap.String("execution_id", execution.ID),
 			zap.String("operation_id", event.OperationID),
 			zap.String("session_id", event.SessionID),
-			zap.Bool("streaming_was_used", streamingWasUsed),
 			zap.String("current_msg_id", currentMsgID),
-			zap.String("event_text", event.Text),
 			zap.Int("buffer_length", len(bufferContentBeforeFlush)),
 			zap.String("buffer_preview", bufferPreview),
 			zap.Bool("is_error", isError))
 
-		// Get the agent message text:
-		// 1. If streaming was used, flush the buffer (which publishes final chunk) and ignore event.Text
-		// 2. Otherwise, prefer text from event (adapter-provided, e.g., Amp) or flush buffer
-		var agentText string
-		if streamingWasUsed {
-			// Streaming messages were created - flush buffer to publish final chunk
-			// and return empty so we don't create duplicate messages
-			m.flushMessageBuffer(execution)
-			agentText = ""
-		} else if event.Text != "" {
-			// No streaming used, use adapter-provided text
-			agentText = event.Text
-			// Still clear the buffer to avoid stale data
-			m.flushMessageBuffer(execution)
-		} else {
-			// No streaming used, no adapter text - flush buffer for content
-			agentText = m.flushMessageBuffer(execution)
-		}
+		// Flush the message buffer to publish any remaining content as a streaming message.
+		// All adapters now handle duplicate prevention at the adapter layer:
+		// - They send text via message_chunk events (which accumulate in the buffer)
+		// - They send complete events WITHOUT text
+		// So we just flush the buffer here - no need to track streamingUsedThisTurn.
+		m.flushMessageBuffer(execution)
 
-		m.logger.Info("complete event text resolution",
+		m.logger.Info("complete event processed",
 			zap.String("execution_id", execution.ID),
-			zap.String("operation_id", event.OperationID),
-			zap.Int("agent_text_length", len(agentText)),
-			zap.Bool("will_save_message", agentText != ""))
-
-		// Reset the streaming flag for next turn
-		execution.messageMu.Lock()
-		execution.streamingUsedThisTurn = false
-		execution.messageMu.Unlock()
-
-		// Include agent text in the event for the orchestrator to save as an agent message
-		if agentText != "" {
-			event.Text = agentText
-			// Store agent message to session history for context injection
-			if m.historyManager != nil && execution.SessionID != "" {
-				if err := m.historyManager.AppendAgentMessage(execution.SessionID, agentText); err != nil {
-					m.logger.Warn("failed to store agent message to history", zap.Error(err))
-				}
-			}
-		}
+			zap.String("operation_id", event.OperationID))
 
 		// If this was an error completion, mark the execution as failed
 		// The agent process will likely exit soon after sending an error result
@@ -1587,9 +1513,6 @@ func (m *Manager) publishStreamingMessage(execution *AgentExecution, content str
 		messageID = uuid.New().String()
 		execution.currentMessageID = messageID
 	}
-
-	// Mark that streaming was used this turn (for duplicate prevention on complete)
-	execution.streamingUsedThisTurn = true
 	execution.messageMu.Unlock()
 
 	event := AgentStreamEventData{

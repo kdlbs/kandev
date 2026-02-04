@@ -96,13 +96,6 @@ type SessionConfig struct {
 	// SessionDirTarget is the container path where the session directory is mounted.
 	// Example: "/root/.augment/sessions" for auggie.
 	SessionDirTarget string `json:"session_dir_target,omitempty"`
-
-	// ReportsStatusViaStream indicates that the agent reports its session status
-	// via the stream protocol (e.g., system message in stream-json).
-	// When true, the lifecycle manager will NOT emit a session_status event,
-	// since the agent's adapter will emit it when the real session info arrives.
-	// This prevents duplicate "New session started" messages.
-	ReportsStatusViaStream bool `json:"reports_status_via_stream,omitempty"`
 }
 
 // SupportsRecovery returns whether the agent supports session recovery after backend restart.

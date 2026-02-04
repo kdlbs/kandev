@@ -11,7 +11,6 @@ import (
 	"github.com/kandev/kandev/internal/agent/registry"
 	agentctl "github.com/kandev/kandev/internal/agentctl/client"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
-	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/appctx"
 	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -455,83 +454,26 @@ func (sm *SessionManager) SendPrompt(
 		return nil, fmt.Errorf("prompt failed: %w", err)
 	}
 
-	// Extract accumulated content from buffers and handle streaming message completion
-	// NOTE: When ReportsStatusViaStream is true, the adapter's complete event (via handleAgentEvent)
-	// will handle the buffer content. We should NOT clear the buffer here to avoid a race condition
-	// where the buffer is cleared before handleAgentEvent processes the complete event.
+	// Extract accumulated content from buffers for the return value.
+	// All adapters now emit complete events via the stream, so handleAgentEvent will
+	// handle the buffer content when the complete event arrives. We just peek at the
+	// buffer here to return the message content to the caller.
 	stopReason := ""
 	if resp != nil {
 		stopReason = string(resp.StopReason)
 	}
 
-	var agentMessage string
+	// Peek at the message for the return value, but don't clear the buffer.
+	// The complete event handler (handleAgentEvent) will clear the buffer.
+	execution.messageMu.Lock()
+	bufLen := execution.messageBuffer.Len()
+	agentMessage := execution.messageBuffer.String()
+	execution.messageMu.Unlock()
 
-	if execution.ReportsStatusViaStream {
-		// Agent adapter handles completion via stream - let handleAgentEvent deal with the buffer
-		// Just log for debugging. The buffer content will be handled by handleAgentEvent when
-		// the complete event arrives from the adapter.
-		execution.messageMu.Lock()
-		bufLen := execution.messageBuffer.Len()
-		// Peek at the message for the return value, but don't clear the buffer
-		agentMessage = execution.messageBuffer.String()
-		execution.messageMu.Unlock()
-
-		sm.logger.Info("ACP prompt completed (stream-based completion)",
-			zap.String("execution_id", execution.ID),
-			zap.String("stop_reason", stopReason),
-			zap.Int("buffer_length", bufLen),
-			zap.Bool("reports_status_via_stream", true))
-	} else {
-		// Agent adapter does NOT handle completion via stream - we need to handle the buffer here
-		execution.messageMu.Lock()
-		agentMessage = execution.messageBuffer.String()
-		execution.messageBuffer.Reset()
-		execution.thinkingBuffer.Reset()
-		currentMsgID := execution.currentMessageID
-		execution.currentMessageID = ""  // Clear for next turn
-		execution.currentThinkingID = "" // Clear for next turn
-		execution.messageMu.Unlock()
-
-		trimmedMessage := strings.TrimSpace(agentMessage)
-
-		sm.logger.Info("ACP prompt completed",
-			zap.String("execution_id", execution.ID),
-			zap.String("stop_reason", stopReason),
-			zap.Int("message_length", len(trimmedMessage)),
-			zap.Bool("has_streaming_msg", currentMsgID != ""))
-
-		// Handle remaining content from the buffer
-		if sm.eventPublisher != nil {
-			// If there's remaining content and an active streaming message,
-			// append it to the streaming message instead of creating a new one
-			if trimmedMessage != "" && currentMsgID != "" {
-				// Publish streaming append with the remaining content
-				sm.eventPublisher.PublishAgentStreamEventPayload(&AgentStreamEventPayload{
-					Type:      "agent/event",
-					Timestamp: time.Now().UTC().Format(time.RFC3339),
-					AgentID:   execution.AgentProfileID,
-					TaskID:    execution.TaskID,
-					SessionID: execution.SessionID,
-					Data: &AgentStreamEventData{
-						Type:      "message_streaming",
-						MessageID: currentMsgID,
-						IsAppend:  true,
-						Text:      trimmedMessage,
-					},
-				})
-				// Content was handled via streaming, publish complete with empty text
-				trimmedMessage = ""
-			}
-
-			// Publish complete event (with remaining text only if no streaming message was active)
-			completeEvent := streams.AgentEvent{
-				Type:      streams.EventTypeComplete,
-				SessionID: execution.ACPSessionID,
-				Text:      trimmedMessage,
-			}
-			sm.eventPublisher.PublishAgentStreamEvent(execution, completeEvent)
-		}
-	}
+	sm.logger.Info("prompt completed",
+		zap.String("execution_id", execution.ID),
+		zap.String("stop_reason", stopReason),
+		zap.Int("buffer_length", bufLen))
 
 	// Mark as READY for next prompt
 	if err := markReady(execution.ID); err != nil {
