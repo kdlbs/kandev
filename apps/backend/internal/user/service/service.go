@@ -31,6 +31,7 @@ type UpdateUserSettingsRequest struct {
 	PreferredShell       *string
 	DefaultEditorID      *string
 	EnablePreviewOnClick *bool
+	ChatSubmitKey        *string
 }
 
 func NewService(repo store.Repository, eventBus bus.EventBus, log *logger.Logger) *Service {
@@ -92,6 +93,14 @@ func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSetting
 	if req.EnablePreviewOnClick != nil {
 		settings.EnablePreviewOnClick = *req.EnablePreviewOnClick
 	}
+	if req.ChatSubmitKey != nil {
+		key := strings.TrimSpace(*req.ChatSubmitKey)
+		if key != "enter" && key != "cmd_enter" {
+			return nil, errors.New("chat_submit_key must be 'enter' or 'cmd_enter'")
+		}
+		s.logger.Info("[Settings] Setting ChatSubmitKey", zap.String("value", key))
+		settings.ChatSubmitKey = key
+	}
 	settings.UpdatedAt = time.Now().UTC()
 	if err := s.repo.UpsertUserSettings(ctx, settings); err != nil {
 		return nil, err
@@ -113,6 +122,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"preferred_shell":        settings.PreferredShell,
 		"default_editor_id":      settings.DefaultEditorID,
 		"enable_preview_on_click": settings.EnablePreviewOnClick,
+		"chat_submit_key":        settings.ChatSubmitKey,
 		"updated_at":             settings.UpdatedAt.Format(time.RFC3339),
 	}
 	if err := s.eventBus.Publish(ctx, events.UserSettingsUpdated, bus.NewEvent(events.UserSettingsUpdated, "user-service", data)); err != nil {

@@ -58,6 +58,7 @@ export default async function Page({ searchParams }: PageProps) {
         shellOptions: userSettingsResponse?.shell_options ?? [],
         defaultEditorId: userSettings?.default_editor_id || null,
         enablePreviewOnClick: settingsEnablePreviewOnClick,
+        chatSubmitKey: userSettings?.chat_submit_key ?? 'cmd_enter',
         loaded: Boolean(userSettings),
       },
     };

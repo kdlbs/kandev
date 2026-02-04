@@ -52,6 +52,7 @@ export function useEditors() {
           shellOptions: data.shell_options ?? [],
           defaultEditorId: data.settings.default_editor_id || null,
           enablePreviewOnClick: data.settings.enable_preview_on_click ?? false,
+          chatSubmitKey: data.settings.chat_submit_key ?? 'cmd_enter',
           loaded: true,
         });
       })

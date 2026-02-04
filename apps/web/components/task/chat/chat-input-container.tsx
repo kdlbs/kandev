@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useCallback, useState, useEffect, memo, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useRef, useCallback, useState, useEffect, memo, forwardRef, useImperativeHandle, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import {
   IconArrowUp,
   IconBrain,
@@ -27,6 +27,7 @@ import { MentionMenu } from './mention-menu';
 import { SlashCommandMenu } from './slash-command-menu';
 import { ClarificationInputOverlay } from './clarification-input-overlay';
 import { CommentBlocksContainer } from './comment-block';
+import { ChatInputFocusHint } from './chat-input-focus-hint';
 import { useInlineMention } from '@/hooks/use-inline-mention';
 import { useInlineSlash } from '@/hooks/use-inline-slash';
 import type { Message } from '@/lib/types/http';
@@ -45,6 +46,7 @@ type ChatInputToolbarProps = {
   isSending: boolean;
   onCancel: () => void;
   onSubmit: () => void;
+  submitKey?: 'enter' | 'cmd_enter';
 };
 
 const ChatInputToolbar = memo(function ChatInputToolbar({
@@ -59,7 +61,10 @@ const ChatInputToolbar = memo(function ChatInputToolbar({
   isSending,
   onCancel,
   onSubmit,
+  submitKey = 'cmd_enter',
 }: ChatInputToolbarProps) {
+  const submitShortcut = submitKey === 'enter' ? SHORTCUTS.SUBMIT_ENTER : SHORTCUTS.SUBMIT;
+
   return (
     <div className="flex items-center gap-1 px-2 py-2 border-t border-border">
       {/* Left: Plan, Thinking, Context */}
@@ -129,7 +134,7 @@ const ChatInputToolbar = memo(function ChatInputToolbar({
 
         {/* Submit/Stop button */}
         <div className="ml-1">
-          <KeyboardShortcutTooltip shortcut={SHORTCUTS.SUBMIT} enabled={!isAgentBusy && !isDisabled}>
+          <KeyboardShortcutTooltip shortcut={submitShortcut} enabled={!isAgentBusy && !isDisabled}>
             {isAgentBusy ? (
               <Button
                 type="button"
@@ -164,6 +169,14 @@ const ChatInputToolbar = memo(function ChatInputToolbar({
   );
 });
 
+export type ChatInputContainerHandle = {
+  focusInput: () => void;
+  getTextareaElement: () => HTMLTextAreaElement | null;
+  getValue: () => string;
+  getSelectionStart: () => number;
+  insertText: (text: string, from: number, to: number) => void;
+};
+
 type ChatInputContainerProps = {
   onSubmit: (message: string, reviewComments?: DiffComment[]) => void;
   sessionId: string | null;
@@ -189,33 +202,59 @@ type ChatInputContainerProps = {
   onRemoveComment?: (sessionId: string, filePath: string, commentId: string) => void;
   /** Callback when a comment is clicked (for jump-to-line) */
   onCommentClick?: (comment: DiffComment) => void;
+  /** Chat submit key preference */
+  submitKey?: 'enter' | 'cmd_enter';
+  /** Whether the current agent has commands (affects placeholder) */
+  hasAgentCommands?: boolean;
 };
 
-export function ChatInputContainer({
-  onSubmit,
-  sessionId,
-  taskId,
-  taskTitle,
-  taskDescription,
-  planModeEnabled,
-  onPlanModeChange,
-  isAgentBusy,
-  isStarting,
-  isSending,
-  onCancel,
-  placeholder,
-  pendingClarification,
-  onClarificationResolved,
-  showRequestChangesTooltip = false,
-  onRequestChangesTooltipDismiss,
-  pendingCommentsByFile,
-  onRemoveCommentFile,
-  onRemoveComment,
-  onCommentClick,
-}: ChatInputContainerProps) {
+export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInputContainerProps>(
+  function ChatInputContainer(
+    {
+      onSubmit,
+      sessionId,
+      taskId,
+      taskTitle,
+      taskDescription,
+      planModeEnabled,
+      onPlanModeChange,
+      isAgentBusy,
+      isStarting,
+      isSending,
+      onCancel,
+      placeholder,
+      pendingClarification,
+      onClarificationResolved,
+      showRequestChangesTooltip = false,
+      onRequestChangesTooltipDismiss,
+      pendingCommentsByFile,
+      onRemoveCommentFile,
+      onRemoveComment,
+      onCommentClick,
+      submitKey = 'cmd_enter',
+      hasAgentCommands = false,
+    },
+    ref
+  ) {
   // Keep input state local to avoid re-rendering parent on every keystroke
   const [value, setValue] = useState('');
+  const [isInputFocused, setIsInputFocused] = useState(false);
   const inputRef = useRef<RichTextInputHandle>(null);
+
+  // Expose imperative handle for parent
+  useImperativeHandle(
+    ref,
+    () => ({
+      focusInput: () => inputRef.current?.focus(),
+      getTextareaElement: () => inputRef.current?.getTextareaElement() ?? null,
+      getValue: () => inputRef.current?.getValue() ?? '',
+      getSelectionStart: () => inputRef.current?.getSelectionStart() ?? 0,
+      insertText: (text: string, from: number, to: number) => {
+        inputRef.current?.insertText(text, from, to);
+      },
+    }),
+    []
+  );
 
   // Focus input when request changes tooltip is shown
   useEffect(() => {
@@ -315,16 +354,28 @@ export function ChatInputContainer({
   const hasPendingClarification = pendingClarification && onClarificationResolved;
   const hasPendingComments = pendingCommentsByFile && Object.keys(pendingCommentsByFile).length > 0;
 
+  // Dynamic placeholder
+  const inputPlaceholder =
+    placeholder ||
+    (hasAgentCommands
+      ? 'Ask to make changes, @mention files, run /commands'
+      : 'Ask to make changes, @mention files');
+
+  // Show focus hint when input not focused, no clarification, and no comments
+  const showFocusHint = !isInputFocused && !hasPendingClarification && !hasPendingComments;
+
   return (
     <div
       className={cn(
-        'rounded-2xl border border-border bg-background shadow-md overflow-hidden',
+        'relative rounded-2xl border border-border bg-background shadow-md overflow-hidden',
         planModeEnabled && 'border-primary border-dashed',
         hasPendingClarification && 'border-blue-500/50',
         showRequestChangesTooltip && 'animate-pulse border-orange-500',
         hasPendingComments && 'border-amber-500/50'
       )}
     >
+      {/* Focus hint */}
+      <ChatInputFocusHint visible={showFocusHint} />
       {/* Popup menus */}
       <MentionMenu
         isOpen={mention.isOpen}
@@ -379,9 +430,12 @@ export function ChatInputContainer({
                 onChange={handleChange}
                 onKeyDown={handleKeyDown}
                 onSubmit={handleSubmit}
-                placeholder={placeholder}
+                placeholder={inputPlaceholder}
                 disabled={isDisabled}
                 planModeEnabled={planModeEnabled}
+                submitKey={submitKey}
+                onFocus={() => setIsInputFocused(true)}
+                onBlur={() => setIsInputFocused(false)}
               />
             </div>
           </TooltipTrigger>
@@ -404,7 +458,8 @@ export function ChatInputContainer({
         isSending={isSending}
         onCancel={onCancel}
         onSubmit={handleSubmit}
+        submitKey={submitKey}
       />
     </div>
   );
-}
+});

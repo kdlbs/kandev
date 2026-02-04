@@ -51,6 +51,7 @@ func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserS
 		PreferredShell:       req.PreferredShell,
 		DefaultEditorID:      req.DefaultEditorID,
 		EnablePreviewOnClick: req.EnablePreviewOnClick,
+		ChatSubmitKey:        req.ChatSubmitKey,
 	})
 	if err != nil {
 		return dto.UserSettingsResponse{}, err

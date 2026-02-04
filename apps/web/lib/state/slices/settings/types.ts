@@ -76,6 +76,7 @@ export type UserSettingsState = {
   shellOptions: Array<{ value: string; label: string }>;
   defaultEditorId: string | null;
   enablePreviewOnClick: boolean;
+  chatSubmitKey: 'enter' | 'cmd_enter';
   loaded: boolean;
 };
 

@@ -21,6 +21,7 @@ export type RichTextInputHandle = {
   getValue: () => string;
   setValue: (value: string) => void;
   insertText: (text: string, from: number, to: number) => void;
+  getTextareaElement: () => HTMLTextAreaElement | null;
 };
 
 type RichTextInputProps = {
@@ -32,6 +33,9 @@ type RichTextInputProps = {
   disabled?: boolean;
   className?: string;
   planModeEnabled?: boolean;
+  submitKey?: 'enter' | 'cmd_enter';
+  onFocus?: () => void;
+  onBlur?: () => void;
 };
 
 export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>(
@@ -45,6 +49,9 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
       disabled = false,
       className,
       planModeEnabled = false,
+      submitKey = 'cmd_enter',
+      onFocus,
+      onBlur,
     },
     ref
   ) {
@@ -164,6 +171,7 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
             textareaRef.current?.setSelectionRange(from + text.length, from + text.length);
           });
         },
+        getTextareaElement: () => textareaRef.current,
       }),
       [getCaretRect, onChange, value]
     );
@@ -179,11 +187,21 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
         if (event.defaultPrevented) return;
       }
 
-      // Submit only on Cmd/Ctrl+Enter, and only if not disabled
-      if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
-        event.preventDefault();
-        if (!disabled) {
-          onSubmit?.();
+      if (submitKey === 'enter') {
+        // Submit on Enter (unless Shift for newline)
+        if (event.key === 'Enter' && !event.shiftKey && !event.metaKey && !event.ctrlKey) {
+          event.preventDefault();
+          if (!disabled) {
+            onSubmit?.();
+          }
+        }
+      } else {
+        // Submit on Cmd/Ctrl+Enter (current behavior)
+        if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+          event.preventDefault();
+          if (!disabled) {
+            onSubmit?.();
+          }
         }
       }
     };
@@ -194,6 +212,8 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
         value={value}
         onChange={handleChange}
         onKeyDown={handleKeyDown}
+        onFocus={onFocus}
+        onBlur={onBlur}
         placeholder={placeholder}
         disabled={disabled}
         className={cn(

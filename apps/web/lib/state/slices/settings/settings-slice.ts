@@ -26,6 +26,7 @@ export const defaultSettingsState: SettingsSliceState = {
     shellOptions: [],
     defaultEditorId: null,
     enablePreviewOnClick: false,
+    chatSubmitKey: 'cmd_enter',
     loaded: false,
   },
 };
