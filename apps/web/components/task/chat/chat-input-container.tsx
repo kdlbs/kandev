@@ -329,6 +329,9 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
 
   // Stable submit handler using refs - doesn't change on value/menu state changes
   const handleSubmit = useCallback(() => {
+    // Don't submit if agent is busy or already sending
+    if (isAgentBusy || isSending) return;
+
     // Don't submit if a menu is open
     if (menuStateRef.current.mentionOpen || menuStateRef.current.slashOpen) return;
 
@@ -348,9 +351,10 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
 
     onSubmit(trimmed, allComments.length > 0 ? allComments : undefined);
     setValue('');
-  }, [onSubmit]);
+  }, [onSubmit, isAgentBusy, isSending]);
 
-  const isDisabled = isStarting || isSending;
+  // Disable input when agent is busy (RUNNING state), starting, or sending a message
+  const isDisabled = isAgentBusy || isStarting || isSending;
   const hasPendingClarification = pendingClarification && onClarificationResolved;
   const hasPendingComments = pendingCommentsByFile && Object.keys(pendingCommentsByFile).length > 0;
 
