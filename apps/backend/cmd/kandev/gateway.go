@@ -17,7 +17,6 @@ import (
 	notificationservice "github.com/kandev/kandev/internal/notifications/service"
 	notificationstore "github.com/kandev/kandev/internal/notifications/store"
 	"github.com/kandev/kandev/internal/orchestrator"
-	orchestratorcontroller "github.com/kandev/kandev/internal/orchestrator/controller"
 	orchestratorhandlers "github.com/kandev/kandev/internal/orchestrator/handlers"
 	"github.com/kandev/kandev/internal/task/repository"
 	taskservice "github.com/kandev/kandev/internal/task/service"
@@ -47,8 +46,7 @@ func provideGateway(
 		gateway.SetLifecycleManager(lifecycleMgr)
 	}
 
-	orchestratorCtrl := orchestratorcontroller.NewController(orchestratorSvc)
-	orchestratorHandlers := orchestratorhandlers.NewHandlers(orchestratorCtrl, log)
+	orchestratorHandlers := orchestratorhandlers.NewHandlers(orchestratorSvc, log)
 	orchestratorHandlers.RegisterHandlers(gateway.Dispatcher)
 
 	if lifecycleMgr != nil && agentRegistry != nil {

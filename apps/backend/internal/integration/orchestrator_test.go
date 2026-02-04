@@ -29,7 +29,6 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
 	"github.com/kandev/kandev/internal/orchestrator"
-	orchestratorcontroller "github.com/kandev/kandev/internal/orchestrator/controller"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	orchestratorhandlers "github.com/kandev/kandev/internal/orchestrator/handlers"
 	taskcontroller "github.com/kandev/kandev/internal/task/controller"
@@ -672,8 +671,7 @@ func NewOrchestratorTestServer(t *testing.T) *OrchestratorTestServer {
 	gateway := gateways.NewGateway(log)
 
 	// Register orchestrator handlers (Pattern A)
-	orchestratorCtrl := orchestratorcontroller.NewController(orchestratorSvc)
-	orchestratorHandlers := orchestratorhandlers.NewHandlers(orchestratorCtrl, log)
+	orchestratorHandlers := orchestratorhandlers.NewHandlers(orchestratorSvc, log)
 	orchestratorHandlers.RegisterHandlers(gateway.Dispatcher)
 
 	// Start hub
