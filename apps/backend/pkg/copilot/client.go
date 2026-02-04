@@ -25,6 +25,11 @@ type (
 	SessionConfig    = copilot.SessionConfig
 	MessageOptions   = copilot.MessageOptions
 	Data             = copilot.Data
+	// Permission types
+	PermissionHandler        = copilot.PermissionHandler
+	PermissionRequest        = copilot.PermissionRequest
+	PermissionInvocation     = copilot.PermissionInvocation
+	PermissionRequestResult  = copilot.PermissionRequestResult
 )
 
 // Re-export event type constants
@@ -62,6 +67,10 @@ type Client struct {
 	unsubscribe    func()
 	handlerMu      sync.RWMutex
 
+	// Permission handler
+	permissionHandler PermissionHandler
+	permissionMu      sync.RWMutex
+
 	// State
 	sessionID string
 	mu        sync.RWMutex
@@ -94,6 +103,13 @@ func (c *Client) SetEventHandler(handler func(SessionEvent)) {
 	c.handlerMu.Lock()
 	defer c.handlerMu.Unlock()
 	c.eventHandler = handler
+}
+
+// SetPermissionHandler sets the handler for permission requests.
+func (c *Client) SetPermissionHandler(handler PermissionHandler) {
+	c.permissionMu.Lock()
+	defer c.permissionMu.Unlock()
+	c.permissionHandler = handler
 }
 
 // Start initializes the Copilot SDK client.
@@ -199,10 +215,16 @@ func (c *Client) CreateSession(ctx context.Context) (string, error) {
 
 	c.logger.Info("creating new session", zap.String("model", c.model))
 
+	// Get permission handler
+	c.permissionMu.RLock()
+	permHandler := c.permissionHandler
+	c.permissionMu.RUnlock()
+
 	// Create session with configuration
 	session, err := c.sdkClient.CreateSession(&copilot.SessionConfig{
-		Model:     c.model,
-		Streaming: true,
+		Model:               c.model,
+		Streaming:           true,
+		OnPermissionRequest: permHandler,
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to create session: %w", err)
@@ -250,9 +272,15 @@ func (c *Client) ResumeSession(ctx context.Context, sessionID string) error {
 
 	c.logger.Info("resuming session", zap.String("session_id", sessionID))
 
+	// Get permission handler
+	c.permissionMu.RLock()
+	permHandler := c.permissionHandler
+	c.permissionMu.RUnlock()
+
 	// Use ResumeSessionWithOptions to enable streaming on resumed sessions
 	session, err := c.sdkClient.ResumeSessionWithOptions(sessionID, &copilot.ResumeSessionConfig{
-		Streaming: true,
+		Streaming:           true,
+		OnPermissionRequest: permHandler,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to resume session: %w", err)
