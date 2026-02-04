@@ -98,3 +98,7 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	gotest.tools/v3 v3.5.2 // indirect
 )
+
+// Fix for ACP notification ordering race condition
+// See: https://github.com/coder/acp-go-sdk/issues/20
+replace github.com/coder/acp-go-sdk => github.com/kdlbs/acp-go-sdk v0.6.3-fix.1
