@@ -452,10 +452,6 @@ export const DiffViewer = memo(function DiffViewer({
       lineDiffType: 'word',
       overflow: wordWrap ? 'wrap' : 'scroll',
       unsafeCSS: `
-        * {
-          background: transparent !important;
-        }
-
         /* Reduce icon size */
         [data-change-icon] {
           width: 12px !important;
