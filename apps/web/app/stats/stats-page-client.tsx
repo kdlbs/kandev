@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { IconArrowLeft, IconGitCommit } from '@tabler/icons-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@kandev/ui/card';
 import { Button } from '@kandev/ui/button';
+import { ToggleGroup, ToggleGroupItem } from '@kandev/ui/toggle-group';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@kandev/ui/tooltip';
 import type {
   StatsResponse,
@@ -803,7 +804,7 @@ export function StatsPageClient({ stats, error, workspaceId, activeRange }: Stat
   return (
     <div className="h-screen w-full flex flex-col bg-background">
       {/* Header matching task session top bar */}
-      <header className="flex items-center gap-3 p-3 shrink-0">
+      <header className="flex items-center gap-3 p-4 pb-3 shrink-0">
         <Button variant="ghost" size="sm" asChild className="cursor-pointer">
           <Link href="/">
             <IconArrowLeft className="h-4 w-4" />
@@ -820,25 +821,30 @@ export function StatsPageClient({ stats, error, workspaceId, activeRange }: Stat
           </span>
         </div>
         <div className="ml-auto flex items-center gap-2">
-          <div className="flex items-center gap-1">
+          <ToggleGroup
+            type="single"
+            value={range}
+            onValueChange={(value) => {
+              if (value) handleRangeChange(value as RangeKey);
+            }}
+            variant="outline"
+            className="h-7"
+          >
             {(['week', 'month'] as RangeKey[]).map((key) => (
-              <Button
+              <ToggleGroupItem
                 key={key}
-                type="button"
-                size="sm"
-                variant={range === key ? 'secondary' : 'outline'}
-                className="h-7 px-2 font-mono text-[11px] cursor-pointer"
-                onClick={() => handleRangeChange(key)}
+                value={key}
+                className="cursor-pointer h-7 px-2 font-mono text-[11px] data-[state=on]:bg-muted data-[state=on]:text-foreground"
               >
                 {getRangeLabel(key)}
-              </Button>
+              </ToggleGroupItem>
             ))}
-          </div>
+          </ToggleGroup>
           <Button
             type="button"
+            variant="outline"
             size="sm"
-            variant="secondary"
-            className="h-7 px-2 text-[11px] font-mono cursor-pointer"
+            className="h-7 px-2 font-mono text-[11px] cursor-pointer"
             onClick={handleCopyStats}
           >
             {copied ? 'Copied' : 'Copy Stats'}
