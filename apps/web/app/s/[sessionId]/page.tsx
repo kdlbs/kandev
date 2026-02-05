@@ -14,7 +14,9 @@ import {
   listWorkspaces,
 } from '@/lib/api';
 import { listSessionTurns } from '@/lib/api/domains/session-api';
+import { fetchTerminals } from '@/lib/api/domains/user-shell-api';
 import type { ListMessagesResponse, Task } from '@/lib/types/http';
+import type { Terminal } from '@/hooks/domains/session/use-terminals';
 import { snapshotToState, taskToState } from '@/lib/ssr/mapper';
 import { TaskPageContent } from '@/components/task/task-page-content';
 
@@ -26,6 +28,7 @@ export default async function SessionPage({
   let initialState: ReturnType<typeof taskToState> | null = null;
   let task: Task | null = null;
   let sessionId: string | null = null;
+  let initialTerminals: Terminal[] = [];
   const defaultLayouts = await readLayoutDefaults();
 
   try {
@@ -39,7 +42,7 @@ export default async function SessionPage({
     }
 
     task = await fetchTask(session.task_id, { cache: 'no-store' });
-    const [snapshot, agents, repositoriesResponse, allSessionsResponse, availableAgentsResponse, workspacesResponse, boardsResponse, turnsResponse, userSettingsResponse] = await Promise.all([
+    const [snapshot, agents, repositoriesResponse, allSessionsResponse, availableAgentsResponse, workspacesResponse, boardsResponse, turnsResponse, userSettingsResponse, terminalsResponse] = await Promise.all([
       fetchBoardSnapshot(task.board_id, { cache: 'no-store' }),
       listAgents({ cache: 'no-store' }),
       listRepositories(task.workspace_id, { includeScripts: true }, { cache: 'no-store' }),
@@ -49,6 +52,7 @@ export default async function SessionPage({
       listBoards(task.workspace_id, { cache: 'no-store' }).catch(() => ({ boards: [] })),
       listSessionTurns(sessionId, { cache: 'no-store' }).catch(() => ({ turns: [], total: 0 })),
       fetchUserSettings({ cache: 'no-store' }).catch(() => null),
+      fetchTerminals(sessionId).catch(() => []),
     ]);
     const repositories = repositoriesResponse.repositories ?? [];
     const allSessions = allSessionsResponse.sessions ?? [session];
@@ -57,6 +61,14 @@ export default async function SessionPage({
     const boards = boardsResponse.boards ?? [];
     const turns = turnsResponse.turns ?? [];
     const userSettings = userSettingsResponse?.settings;
+
+    // Transform terminals to frontend format
+    initialTerminals = terminalsResponse.map((t) => ({
+      id: t.terminal_id,
+      type: t.initial_command ? 'script' as const : 'shell' as const,
+      label: t.label,
+      closable: t.closable,
+    }));
 
     // Get repository scripts from the repository (already fetched with includeScripts)
     const repositoryId = task.repositories?.[0]?.repository_id;
@@ -236,6 +248,7 @@ export default async function SessionPage({
         sessionId={sessionId}
         initialRepositories={initialState?.repositories?.itemsByWorkspaceId?.[task?.workspace_id ?? ''] ?? []}
         initialScripts={initialState?.repositoryScripts?.itemsByRepositoryId?.[task?.repositories?.[0]?.repository_id ?? ''] ?? []}
+        initialTerminals={initialTerminals}
         defaultLayouts={defaultLayouts}
       />
     </>

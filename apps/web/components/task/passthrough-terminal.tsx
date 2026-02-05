@@ -15,6 +15,8 @@ import { terminalTheme, applyTransparentBackground } from '@/lib/terminal-theme'
 
 type PassthroughTerminalProps = {
   sessionId?: string | null;
+  terminalId?: string; // Terminal tab identifier (e.g., "shell-1", "shell-2")
+  label?: string;      // Label for plain shell terminals (sent to backend for persistence)
 };
 
 // Debug flag - set to true to see detailed logs
@@ -37,7 +39,10 @@ const MIN_HEIGHT = 100;
  * - Unicode11Addon enables proper unicode character support
  * - Resize commands sent via binary protocol: [0x01][JSON {cols, rows}]
  */
-export function PassthroughTerminal({ sessionId: propSessionId }: PassthroughTerminalProps) {
+export function PassthroughTerminal({ sessionId: propSessionId, terminalId, label }: PassthroughTerminalProps) {
+  // Debug: log props on every render
+  log('Render - props:', { propSessionId, terminalId, label });
+
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -312,9 +317,10 @@ export function PassthroughTerminal({ sessionId: propSessionId }: PassthroughTer
 
   // Connect WebSocket when ready
   useEffect(() => {
-    log('WebSocket effect:', { taskId, sessionId, canConnect, hasTerminal: !!xtermRef.current });
+    log('WebSocket effect:', { taskId, sessionId, terminalId, canConnect, hasTerminal: !!xtermRef.current });
 
     if (!taskId || !sessionId || !canConnect) {
+      log('WebSocket effect: early return - missing requirements', { taskId, sessionId, canConnect });
       return;
     }
     if (!xtermRef.current || !fitAddonRef.current) {
@@ -341,8 +347,18 @@ export function PassthroughTerminal({ sessionId: propSessionId }: PassthroughTer
         wsRef.current = null;
       }
 
-      const wsUrl = `${wsBaseUrl}/xterm.js/${sessionId}`;
-      log('Connecting to', wsUrl);
+      // Build WebSocket URL - terminalId is required for user shells
+      // If terminalId is not provided, this is an error for user shell terminals
+      if (!terminalId) {
+        log('ERROR: terminalId is required but was not provided!', { sessionId, terminalId });
+        return;
+      }
+      let wsUrl = `${wsBaseUrl}/xterm.js/${sessionId}?terminalId=${encodeURIComponent(terminalId)}`;
+      if (label) {
+        // For plain shell terminals, send the label for persistence
+        wsUrl += `&label=${encodeURIComponent(label)}`;
+      }
+      log('Connecting to', wsUrl, { terminalId, label });
 
       const ws = new WebSocket(wsUrl);
       ws.binaryType = 'arraybuffer';
@@ -415,7 +431,7 @@ export function PassthroughTerminal({ sessionId: propSessionId }: PassthroughTer
         wsRef.current = null;
       }
     };
-  }, [taskId, sessionId, canConnect, fitAndResize, wsBaseUrl]);
+  }, [taskId, sessionId, canConnect, fitAndResize, wsBaseUrl, terminalId, label]);
 
   return (
     <div

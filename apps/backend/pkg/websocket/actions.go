@@ -180,6 +180,11 @@ const (
 	ActionShellInput         = "shell.input"          // Send input to shell
 	ActionSessionShellOutput = "session.shell.output" // Shell output notification (also used for exit with type: "exit")
 
+	// User shell actions (independent terminal tabs)
+	ActionUserShellList   = "user_shell.list"   // List running user shells for a session
+	ActionUserShellCreate = "user_shell.create" // Create a new user shell terminal (assigns ID and label)
+	ActionUserShellStop   = "user_shell.stop"   // Stop a user shell terminal
+
 	// Session git actions (requests)
 	ActionSessionGitSnapshots   = "session.git.snapshots"   // Get git snapshots for a session
 	ActionSessionGitCommits     = "session.git.commits"     // Get commits for a session

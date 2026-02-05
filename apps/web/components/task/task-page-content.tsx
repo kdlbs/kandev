@@ -5,6 +5,7 @@ import { TaskTopBar } from '@/components/task/task-top-bar';
 import { TaskLayout } from '@/components/task/task-layout';
 import { DebugOverlay } from '@/components/debug-overlay';
 import type { Repository, RepositoryScript, Task } from '@/lib/types/http';
+import type { Terminal } from '@/hooks/domains/session/use-terminals';
 import type { KanbanState } from '@/lib/state/slices';
 import { DEBUG_UI } from '@/lib/config';
 import { TooltipProvider } from '@kandev/ui/tooltip';
@@ -23,6 +24,7 @@ type TaskPageContentProps = {
   sessionId?: string | null;
   initialRepositories?: Repository[];
   initialScripts?: RepositoryScript[];
+  initialTerminals?: Terminal[];
   defaultLayouts?: Record<string, Layout>;
 };
 
@@ -37,6 +39,7 @@ export function TaskPageContent({
   sessionId = null,
   initialRepositories = [],
   initialScripts = [],
+  initialTerminals,
   defaultLayouts = {},
 }: TaskPageContentProps) {
   const [taskDetails, setTaskDetails] = useState<Task | null>(initialTask);
@@ -260,6 +263,7 @@ export function TaskPageContent({
           sessionId={effectiveSessionId ?? null}
           repository={repository ?? null}
           initialScripts={initialScripts}
+          initialTerminals={initialTerminals}
           defaultLayouts={defaultLayouts}
           taskTitle={task?.title}
           baseBranch={task?.repositories?.[0]?.base_branch}
