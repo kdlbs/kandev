@@ -48,7 +48,7 @@ export function SessionTabs({
   rightContent,
 }: SessionTabsProps) {
   const tabsList = (
-    <TabsList className="p-0 !h-6 rounded-sm">
+    <TabsList className="p-0 !h-7 rounded-sm overflow-x-auto overflow-y-hidden min-w-0 shrink [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
       {tabs.map((tab, index) => (
         <Fragment key={tab.id}>
           {separatorAfterIndex !== undefined && index === separatorAfterIndex + 1 && (
@@ -56,19 +56,19 @@ export function SessionTabs({
           )}
           <TabsTrigger
             value={tab.id}
-            className={tab.className + ' py-1 cursor-pointer rounded-sm'}
+            className={tab.className + ' group relative py-1 cursor-pointer rounded-sm max-w-[120px]'}
           >
             {tab.icon}
-            <span className={tab.icon ? 'ml-1.5' : undefined}>{tab.label}</span>
+            <span className={`truncate ${tab.icon ? 'ml-1.5' : ''}`} style={{ textOverflow: 'clip' }}>{tab.label}</span>
             {tab.closable && tab.onClose && (
               <span
                 role="button"
                 tabIndex={-1}
-                className={`ml-0.5 transition-opacity hover:text-foreground text-muted-foreground ${tab.alwaysShowClose ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+                className={`absolute right-1 rounded bg-background hover:bg-muted hover:text-foreground text-muted-foreground transition-opacity ${tab.alwaysShowClose ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
                 onClick={tab.onClose}
               >
                 <svg
-                  className="h-3.5 w-3.5"
+                  className="h-3 w-3"
                   xmlns="http://www.w3.org/2000/svg"
                   viewBox="0 0 24 24"
                   fill="none"
@@ -86,9 +86,13 @@ export function SessionTabs({
         </Fragment>
       ))}
       {showAddButton && onAddTab && (
-        <TabsTrigger value="add" onClick={onAddTab} className="cursor-pointer">
+        <button
+          type="button"
+          onClick={onAddTab}
+          className="inline-flex items-center justify-center whitespace-nowrap rounded-sm px-2 py-1 h-6 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 cursor-pointer hover:bg-muted"
+        >
           {addButtonLabel}
-        </TabsTrigger>
+        </button>
       )}
     </TabsList>
   );
@@ -132,17 +136,17 @@ export function SessionTabs({
   return (
     <Tabs value={activeTab} onValueChange={onTabChange} className={className}>
       {collapsible ? (
-        <div className={`flex items-center justify-between ${children ? '' : 'p-2'}`}>
+        <div className={`flex items-center justify-between gap-2 ${children ? '' : 'p-2'}`}>
           {tabsList}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             {rightContent}
             {collapseButton}
           </div>
         </div>
       ) : rightContent ? (
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-2">
           {tabsList}
-          {rightContent}
+          <div className="shrink-0">{rightContent}</div>
         </div>
       ) : (
         tabsList

@@ -10,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/scripts"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
@@ -22,6 +23,23 @@ import (
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	userservice "github.com/kandev/kandev/internal/user/service"
 )
+
+// scriptServiceAdapter adapts the task service to scripts.ScriptService.
+type scriptServiceAdapter struct {
+	taskSvc *taskservice.Service
+}
+
+func (a *scriptServiceAdapter) GetRepositoryScript(ctx context.Context, id string) (*scripts.RepositoryScript, error) {
+	script, err := a.taskSvc.GetRepositoryScript(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return &scripts.RepositoryScript{
+		ID:      script.ID,
+		Name:    script.Name,
+		Command: script.Command,
+	}, nil
+}
 
 func provideGateway(
 	ctx context.Context,
@@ -42,8 +60,9 @@ func provideGateway(
 	_ = cleanup
 
 	// Enable dedicated terminal WebSocket for passthrough mode
+	scriptSvc := &scriptServiceAdapter{taskSvc: taskSvc}
 	if lifecycleMgr != nil {
-		gateway.SetLifecycleManager(lifecycleMgr)
+		gateway.SetLifecycleManager(lifecycleMgr, userSvc, scriptSvc)
 	}
 
 	orchestratorHandlers := orchestratorhandlers.NewHandlers(orchestratorSvc, log)
@@ -57,7 +76,7 @@ func provideGateway(
 		workspaceFileHandlers := agenthandlers.NewWorkspaceFileHandlers(lifecycleMgr, log)
 		workspaceFileHandlers.RegisterHandlers(gateway.Dispatcher)
 
-		shellHandlers := agenthandlers.NewShellHandlers(lifecycleMgr, log)
+		shellHandlers := agenthandlers.NewShellHandlers(lifecycleMgr, scriptSvc, log)
 		shellHandlers.RegisterHandlers(gateway.Dispatcher)
 
 		gitHandlers := agenthandlers.NewGitHandlers(lifecycleMgr, log)

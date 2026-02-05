@@ -334,7 +334,8 @@ func (sm *SessionManager) InitializeAndPrompt(
 			promptCtx, cancel := appctx.Detached(ctx, sm.stopCh, constants.PromptTimeout)
 			defer cancel()
 
-			_, err := sm.SendPrompt(promptCtx, execution, effectivePrompt, false, markReady)
+			// Initial prompt has no attachments
+			_, err := sm.SendPrompt(promptCtx, execution, effectivePrompt, false, nil, markReady)
 			if err != nil {
 				sm.logger.Error("initial prompt failed",
 					zap.String("execution_id", execution.ID),
@@ -369,12 +370,14 @@ func (sm *SessionManager) InitializeAndPrompt(
 
 // SendPrompt sends a prompt to an agent execution and waits for completion.
 // For initial prompts, pass validateStatus=false. For follow-up prompts, pass validateStatus=true.
+// Attachments (images) are passed to the agent if provided.
 // Returns the prompt result containing the stop reason and agent message.
 func (sm *SessionManager) SendPrompt(
 	ctx context.Context,
 	execution *AgentExecution,
 	prompt string,
 	validateStatus bool,
+	attachments []v1.MessageAttachment,
 	markReady func(executionID string) error,
 ) (*PromptResult, error) {
 	if execution.agentctl == nil {
@@ -436,7 +439,8 @@ func (sm *SessionManager) SendPrompt(
 
 	sm.logger.Info("sending prompt to agent",
 		zap.String("execution_id", execution.ID),
-		zap.Int("prompt_length", len(effectivePrompt)))
+		zap.Int("prompt_length", len(effectivePrompt)),
+		zap.Int("attachments_count", len(attachments)))
 
 	// Store user prompt to session history for context injection (store original, not with injected context)
 	if sm.historyManager != nil && execution.SessionID != "" {
@@ -446,7 +450,7 @@ func (sm *SessionManager) SendPrompt(
 	}
 
 	// Prompt is synchronous - blocks until agent completes
-	resp, err := execution.agentctl.Prompt(ctx, effectivePrompt)
+	resp, err := execution.agentctl.Prompt(ctx, effectivePrompt, attachments)
 	if err != nil {
 		sm.logger.Error("ACP prompt failed",
 			zap.String("execution_id", execution.ID),

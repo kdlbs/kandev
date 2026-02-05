@@ -21,10 +21,27 @@ import { SlashCommandMenu } from './slash-command-menu';
 import { ClarificationInputOverlay } from './clarification-input-overlay';
 import { CommentBlocksContainer } from './comment-block';
 import { ChatInputFocusHint } from './chat-input-focus-hint';
+import {
+  ImageAttachmentPreview,
+  processImageFile,
+  MAX_IMAGES,
+  MAX_TOTAL_SIZE,
+  type ImageAttachment,
+} from './image-attachment-preview';
 import { useInlineMention } from '@/hooks/use-inline-mention';
 import { useInlineSlash } from '@/hooks/use-inline-slash';
 import type { Message } from '@/lib/types/http';
 import type { DiffComment } from '@/lib/diff/types';
+
+// Re-export ImageAttachment type for consumers
+export type { ImageAttachment } from './image-attachment-preview';
+
+// Type for message attachments sent to backend
+export type MessageAttachment = {
+  type: 'image';
+  data: string;      // Base64 data
+  mime_type: string; // MIME type
+};
 
 // Memoized toolbar to prevent re-renders on input value changes
 type ChatInputToolbarProps = {
@@ -146,7 +163,7 @@ export type ChatInputContainerHandle = {
 };
 
 type ChatInputContainerProps = {
-  onSubmit: (message: string, reviewComments?: DiffComment[]) => void;
+  onSubmit: (message: string, reviewComments?: DiffComment[], attachments?: MessageAttachment[]) => void;
   sessionId: string | null;
   taskId: string | null;
   taskTitle?: string;
@@ -207,6 +224,7 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
   // Keep input state local to avoid re-rendering parent on every keystroke
   const [value, setValue] = useState('');
   const [isInputFocused, setIsInputFocused] = useState(false);
+  const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
   const inputRef = useRef<RichTextInputHandle>(null);
 
   // Expose imperative handle for parent
@@ -236,6 +254,75 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
   useEffect(() => {
     valueRef.current = value;
   }, [value]);
+
+  // Ref for attachments to keep handleSubmit stable
+  const attachmentsRef = useRef(attachments);
+  useEffect(() => {
+    attachmentsRef.current = attachments;
+  }, [attachments]);
+
+  // Handle image paste
+  const handlePaste = useCallback(async (e: ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    // Check for image items
+    const imageItems: DataTransferItem[] = [];
+    for (const item of items) {
+      if (item.type.startsWith('image/')) {
+        imageItems.push(item);
+      }
+    }
+
+    if (imageItems.length === 0) return;
+
+    // Prevent default paste behavior for images
+    e.preventDefault();
+
+    // Check if we've hit the max images limit
+    if (attachments.length >= MAX_IMAGES) {
+      console.warn(`Maximum ${MAX_IMAGES} images allowed`);
+      return;
+    }
+
+    // Calculate current total size
+    const currentTotalSize = attachments.reduce((sum, att) => sum + att.size, 0);
+
+    // Process each image
+    for (const item of imageItems) {
+      if (attachments.length + imageItems.indexOf(item) >= MAX_IMAGES) break;
+
+      const file = item.getAsFile();
+      if (!file) continue;
+
+      // Check total size limit
+      if (currentTotalSize + file.size > MAX_TOTAL_SIZE) {
+        console.warn('Total attachment size limit exceeded');
+        break;
+      }
+
+      const attachment = await processImageFile(file);
+      if (attachment) {
+        setAttachments(prev => [...prev, attachment]);
+      }
+    }
+  }, [attachments]);
+
+  // Attach paste listener to the container
+  useEffect(() => {
+    const textarea = inputRef.current?.getTextareaElement();
+    if (!textarea) return;
+
+    textarea.addEventListener('paste', handlePaste);
+    return () => {
+      textarea.removeEventListener('paste', handlePaste);
+    };
+  }, [handlePaste]);
+
+  // Remove attachment handler
+  const handleRemoveAttachment = useCallback((id: string) => {
+    setAttachments(prev => prev.filter(att => att.id !== id));
+  }, []);
 
   // Mention menu hook
   const mention = useInlineMention(inputRef, value, setValue, sessionId);
@@ -305,6 +392,7 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
 
     const trimmed = valueRef.current.trim();
     const comments = pendingCommentsRef.current;
+    const currentAttachments = attachmentsRef.current;
 
     // Collect all pending comments
     const allComments: DiffComment[] = [];
@@ -314,11 +402,23 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       }
     }
 
-    // Allow submission if there's text OR comments
-    if (!trimmed && allComments.length === 0) return;
+    // Allow submission if there's text OR comments OR attachments
+    if (!trimmed && allComments.length === 0 && currentAttachments.length === 0) return;
 
-    onSubmit(trimmed, allComments.length > 0 ? allComments : undefined);
+    // Convert attachments to MessageAttachment format for backend
+    const messageAttachments: MessageAttachment[] = currentAttachments.map(att => ({
+      type: 'image' as const,
+      data: att.data,
+      mime_type: att.mimeType,
+    }));
+
+    onSubmit(
+      trimmed,
+      allComments.length > 0 ? allComments : undefined,
+      messageAttachments.length > 0 ? messageAttachments : undefined
+    );
     setValue('');
+    setAttachments([]); // Clear attachments after submit
   }, [onSubmit, isAgentBusy, isSending]);
 
   // Disable input when agent is busy (RUNNING state), starting, or sending a message
@@ -382,6 +482,13 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
           />
         </div>
       )}
+
+      {/* Image attachments preview */}
+      <ImageAttachmentPreview
+        attachments={attachments}
+        onRemove={handleRemoveAttachment}
+        disabled={isDisabled}
+      />
 
       {/* Clarification inline (replaces input area when pending) */}
       {hasPendingClarification ? (

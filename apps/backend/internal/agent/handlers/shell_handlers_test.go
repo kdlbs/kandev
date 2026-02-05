@@ -80,7 +80,7 @@ func TestNewShellHandlers(t *testing.T) {
 	log := newTestLogger()
 
 	// NewShellHandlers accepts *lifecycle.Manager, but we can pass nil for basic construction test
-	handlers := NewShellHandlers(nil, log)
+	handlers := NewShellHandlers(nil, nil, log)
 
 	if handlers == nil {
 		t.Fatal("expected non-nil handlers")
@@ -95,7 +95,7 @@ func TestNewShellHandlers(t *testing.T) {
 
 func TestRegisterHandlers(t *testing.T) {
 	log := newTestLogger()
-	handlers := NewShellHandlers(nil, log)
+	handlers := NewShellHandlers(nil, nil, log)
 
 	dispatcher := ws.NewDispatcher()
 	handlers.RegisterHandlers(dispatcher)
@@ -113,7 +113,7 @@ func TestRegisterHandlers(t *testing.T) {
 
 func TestWsShellStatus_InvalidPayload(t *testing.T) {
 	log := newTestLogger()
-	handlers := NewShellHandlers(nil, log)
+	handlers := NewShellHandlers(nil, nil, log)
 
 	// Create a message with invalid payload
 	msg := &ws.Message{
@@ -130,7 +130,7 @@ func TestWsShellStatus_InvalidPayload(t *testing.T) {
 
 func TestWsShellStatus_MissingTaskID(t *testing.T) {
 	log := newTestLogger()
-	handlers := NewShellHandlers(nil, log)
+	handlers := NewShellHandlers(nil, nil, log)
 
 	// Create a message with empty session_id
 	msg, _ := ws.NewRequest("test-1", ws.ActionShellStatus, ShellStatusRequest{SessionID: ""})
@@ -146,7 +146,7 @@ func TestWsShellStatus_MissingTaskID(t *testing.T) {
 
 func TestWsShellInput_InvalidPayload(t *testing.T) {
 	log := newTestLogger()
-	handlers := NewShellHandlers(nil, log)
+	handlers := NewShellHandlers(nil, nil, log)
 
 	msg := &ws.Message{
 		ID:      "test-1",
@@ -162,7 +162,7 @@ func TestWsShellInput_InvalidPayload(t *testing.T) {
 
 func TestWsShellInput_MissingTaskID(t *testing.T) {
 	log := newTestLogger()
-	handlers := NewShellHandlers(nil, log)
+	handlers := NewShellHandlers(nil, nil, log)
 
 	msg, _ := ws.NewRequest("test-1", ws.ActionShellInput, ShellInputRequest{SessionID: "", Data: "test"})
 
@@ -189,7 +189,7 @@ func newTestManager() *lifecycle.Manager {
 func TestWsShellStatus_NoInstanceFound(t *testing.T) {
 	log := newTestLogger()
 	mgr := newTestManager()
-	handlers := NewShellHandlers(mgr, log)
+	handlers := NewShellHandlers(mgr, nil, log)
 
 	msg, _ := ws.NewRequest("test-1", ws.ActionShellStatus, ShellStatusRequest{SessionID: "session-1"})
 
@@ -215,7 +215,7 @@ func TestWsShellStatus_NoInstanceFound(t *testing.T) {
 func TestWsShellStatus_NoClientAvailable(t *testing.T) {
 	log := newTestLogger()
 	mgr := newTestManager()
-	handlers := NewShellHandlers(mgr, log)
+	handlers := NewShellHandlers(mgr, nil, log)
 
 	// When no instance exists for the task, handler returns "no agent running"
 	// Note: Testing the "agent client not available" path requires injecting an
@@ -242,7 +242,7 @@ func TestWsShellStatus_NoClientAvailable(t *testing.T) {
 func TestWsShellInput_NoInstanceFound(t *testing.T) {
 	log := newTestLogger()
 	mgr := newTestManager()
-	handlers := NewShellHandlers(mgr, log)
+	handlers := NewShellHandlers(mgr, nil, log)
 
 	msg, _ := ws.NewRequest("test-1", ws.ActionShellInput, ShellInputRequest{
 		SessionID: "session-1",
@@ -263,7 +263,7 @@ func TestNewShellHandlers_WithManager(t *testing.T) {
 	log := newTestLogger()
 	mgr := newTestManager()
 
-	handlers := NewShellHandlers(mgr, log)
+	handlers := NewShellHandlers(mgr, nil, log)
 
 	if handlers == nil {
 		t.Fatal("expected non-nil handlers")
@@ -275,7 +275,7 @@ func TestNewShellHandlers_WithManager(t *testing.T) {
 
 func TestRegisterHandlers_DispatcherReceivesMessages(t *testing.T) {
 	log := newTestLogger()
-	handlers := NewShellHandlers(nil, log)
+	handlers := NewShellHandlers(nil, nil, log)
 
 	dispatcher := ws.NewDispatcher()
 	handlers.RegisterHandlers(dispatcher)
@@ -287,5 +287,219 @@ func TestRegisterHandlers_DispatcherReceivesMessages(t *testing.T) {
 	// Should get "session_id is required" error since we passed empty session ID
 	if err == nil {
 		t.Error("expected error from dispatcher")
+	}
+}
+
+// --- User Shell Handler Tests ---
+
+func TestRegisterHandlers_UserShellActions(t *testing.T) {
+	log := newTestLogger()
+	handlers := NewShellHandlers(nil, nil, log)
+
+	dispatcher := ws.NewDispatcher()
+	handlers.RegisterHandlers(dispatcher)
+
+	// Verify user shell actions are registered
+	if !dispatcher.HasHandler(ws.ActionUserShellList) {
+		t.Error("expected user_shell.list handler to be registered")
+	}
+	if !dispatcher.HasHandler(ws.ActionUserShellCreate) {
+		t.Error("expected user_shell.create handler to be registered")
+	}
+	if !dispatcher.HasHandler(ws.ActionUserShellStop) {
+		t.Error("expected user_shell.stop handler to be registered")
+	}
+}
+
+func TestWsUserShellList_InvalidPayload(t *testing.T) {
+	log := newTestLogger()
+	handlers := NewShellHandlers(nil, nil, log)
+
+	msg := &ws.Message{
+		ID:      "test-1",
+		Action:  ws.ActionUserShellList,
+		Payload: json.RawMessage(`{invalid json`),
+	}
+
+	_, err := handlers.wsUserShellList(context.Background(), msg)
+	if err == nil {
+		t.Error("expected error for invalid payload")
+	}
+}
+
+func TestWsUserShellList_MissingSessionID(t *testing.T) {
+	log := newTestLogger()
+	handlers := NewShellHandlers(nil, nil, log)
+
+	msg, _ := ws.NewRequest("test-1", ws.ActionUserShellList, UserShellListRequest{SessionID: ""})
+
+	_, err := handlers.wsUserShellList(context.Background(), msg)
+	if err == nil {
+		t.Error("expected error for missing session_id")
+	}
+	if err.Error() != "session_id is required" {
+		t.Errorf("expected 'session_id is required', got: %v", err)
+	}
+}
+
+func TestWsUserShellList_NoInteractiveRunner(t *testing.T) {
+	log := newTestLogger()
+	mgr := newTestManager()
+	handlers := NewShellHandlers(mgr, nil, log)
+
+	msg, _ := ws.NewRequest("test-1", ws.ActionUserShellList, UserShellListRequest{SessionID: "session-1"})
+
+	resp, err := handlers.wsUserShellList(context.Background(), msg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should return empty shells since interactive runner is not set up
+	var payload map[string]interface{}
+	if err := resp.ParsePayload(&payload); err != nil {
+		t.Fatalf("failed to parse payload: %v", err)
+	}
+
+	shells, ok := payload["shells"]
+	if !ok {
+		t.Error("expected 'shells' in response")
+	}
+	shellList, ok := shells.([]interface{})
+	if !ok {
+		t.Errorf("expected shells to be an array, got %T", shells)
+	}
+	if len(shellList) != 0 {
+		t.Errorf("expected empty shells array, got %d items", len(shellList))
+	}
+}
+
+func TestWsUserShellCreate_InvalidPayload(t *testing.T) {
+	log := newTestLogger()
+	handlers := NewShellHandlers(nil, nil, log)
+
+	msg := &ws.Message{
+		ID:      "test-1",
+		Action:  ws.ActionUserShellCreate,
+		Payload: json.RawMessage(`{invalid json`),
+	}
+
+	_, err := handlers.wsUserShellCreate(context.Background(), msg)
+	if err == nil {
+		t.Error("expected error for invalid payload")
+	}
+}
+
+func TestWsUserShellCreate_MissingSessionID(t *testing.T) {
+	log := newTestLogger()
+	handlers := NewShellHandlers(nil, nil, log)
+
+	msg, _ := ws.NewRequest("test-1", ws.ActionUserShellCreate, UserShellCreateRequest{SessionID: ""})
+
+	_, err := handlers.wsUserShellCreate(context.Background(), msg)
+	if err == nil {
+		t.Error("expected error for missing session_id")
+	}
+	if err.Error() != "session_id is required" {
+		t.Errorf("expected 'session_id is required', got: %v", err)
+	}
+}
+
+func TestWsUserShellCreate_NoInteractiveRunner(t *testing.T) {
+	log := newTestLogger()
+	mgr := newTestManager()
+	handlers := NewShellHandlers(mgr, nil, log)
+
+	msg, _ := ws.NewRequest("test-1", ws.ActionUserShellCreate, UserShellCreateRequest{SessionID: "session-1"})
+
+	_, err := handlers.wsUserShellCreate(context.Background(), msg)
+	if err == nil {
+		t.Error("expected error when interactive runner not available")
+	}
+	if err.Error() != "interactive runner not available" {
+		t.Errorf("expected 'interactive runner not available', got: %v", err)
+	}
+}
+
+func TestWsUserShellCreate_ScriptID_NoScriptService(t *testing.T) {
+	log := newTestLogger()
+	mgr := newTestManager()
+	// Pass nil for script service
+	handlers := NewShellHandlers(mgr, nil, log)
+
+	msg, _ := ws.NewRequest("test-1", ws.ActionUserShellCreate, UserShellCreateRequest{
+		SessionID: "session-1",
+		ScriptID:  "script-123",
+	})
+
+	// This will fail because interactive runner is nil (checked before script service),
+	// so the error is "interactive runner not available"
+	_, err := handlers.wsUserShellCreate(context.Background(), msg)
+	if err == nil {
+		t.Error("expected error")
+	}
+}
+
+func TestWsUserShellStop_InvalidPayload(t *testing.T) {
+	log := newTestLogger()
+	handlers := NewShellHandlers(nil, nil, log)
+
+	msg := &ws.Message{
+		ID:      "test-1",
+		Action:  ws.ActionUserShellStop,
+		Payload: json.RawMessage(`{invalid json`),
+	}
+
+	_, err := handlers.wsUserShellStop(context.Background(), msg)
+	if err == nil {
+		t.Error("expected error for invalid payload")
+	}
+}
+
+func TestWsUserShellStop_MissingSessionID(t *testing.T) {
+	log := newTestLogger()
+	handlers := NewShellHandlers(nil, nil, log)
+
+	msg, _ := ws.NewRequest("test-1", ws.ActionUserShellStop, UserShellStopRequest{SessionID: "", TerminalID: "term-1"})
+
+	_, err := handlers.wsUserShellStop(context.Background(), msg)
+	if err == nil {
+		t.Error("expected error for missing session_id")
+	}
+	if err.Error() != "session_id is required" {
+		t.Errorf("expected 'session_id is required', got: %v", err)
+	}
+}
+
+func TestWsUserShellStop_MissingTerminalID(t *testing.T) {
+	log := newTestLogger()
+	handlers := NewShellHandlers(nil, nil, log)
+
+	msg, _ := ws.NewRequest("test-1", ws.ActionUserShellStop, UserShellStopRequest{SessionID: "session-1", TerminalID: ""})
+
+	_, err := handlers.wsUserShellStop(context.Background(), msg)
+	if err == nil {
+		t.Error("expected error for missing terminal_id")
+	}
+	if err.Error() != "terminal_id is required" {
+		t.Errorf("expected 'terminal_id is required', got: %v", err)
+	}
+}
+
+func TestWsUserShellStop_NoInteractiveRunner(t *testing.T) {
+	log := newTestLogger()
+	mgr := newTestManager()
+	handlers := NewShellHandlers(mgr, nil, log)
+
+	msg, _ := ws.NewRequest("test-1", ws.ActionUserShellStop, UserShellStopRequest{
+		SessionID:  "session-1",
+		TerminalID: "term-1",
+	})
+
+	_, err := handlers.wsUserShellStop(context.Background(), msg)
+	if err == nil {
+		t.Error("expected error when interactive runner not available")
+	}
+	if err.Error() != "interactive runner not available" {
+		t.Errorf("expected 'interactive runner not available', got: %v", err)
 	}
 }

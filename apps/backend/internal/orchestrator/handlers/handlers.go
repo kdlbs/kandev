@@ -243,7 +243,7 @@ func (h *Handlers) wsPromptTask(ctx context.Context, msg *ws.Message) (*ws.Messa
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "prompt is required", nil)
 	}
 
-	result, err := h.service.PromptTask(ctx, req.TaskID, req.TaskSessionID, req.Prompt, req.Model, false)
+	result, err := h.service.PromptTask(ctx, req.TaskID, req.TaskSessionID, req.Prompt, req.Model, false, nil)
 	if err != nil {
 		h.logger.Error("failed to send prompt", zap.String("task_id", req.TaskID), zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to send prompt: "+err.Error(), nil)

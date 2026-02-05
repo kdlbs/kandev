@@ -452,7 +452,9 @@ export const DiffViewer = memo(function DiffViewer({
       lineDiffType: 'word',
       overflow: wordWrap ? 'wrap' : 'scroll',
       unsafeCSS: `
-        * {
+        /* Make container backgrounds transparent, but NOT diff line backgrounds
+         * Only target the root container and specific UI elements, not the diff content itself */
+        [data-diffs-root] {
           background: transparent !important;
         }
 

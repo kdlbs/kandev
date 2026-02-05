@@ -41,7 +41,8 @@ export function useRepositoryScripts(repositoryId: string | null, enabled = true
         if (cancelled) return;
         setRepositoryScripts(repositoryId, response.scripts ?? []);
       })
-      .catch(() => {
+      .catch((error) => {
+        console.error('[useRepositoryScripts] Fetch error:', { repositoryId, error });
         if (cancelled) return;
         setRepositoryScripts(repositoryId, []);
       })

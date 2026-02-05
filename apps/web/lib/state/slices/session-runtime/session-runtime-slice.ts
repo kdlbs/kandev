@@ -26,6 +26,7 @@ export const defaultSessionRuntimeState: SessionRuntimeSliceState = {
   contextWindow: { bySessionId: {} },
   agents: { agents: [] },
   availableCommands: { bySessionId: {} },
+  userShells: { bySessionId: {}, loading: {}, loaded: {} },
 };
 
 export const createSessionRuntimeSlice: StateCreator<
@@ -140,5 +141,29 @@ export const createSessionRuntimeSlice: StateCreator<
   clearAvailableCommands: (sessionId) =>
     set((draft) => {
       delete draft.availableCommands.bySessionId[sessionId];
+    }),
+  // User shells actions
+  setUserShells: (sessionId, shells) =>
+    set((draft) => {
+      draft.userShells.bySessionId[sessionId] = shells;
+      draft.userShells.loaded[sessionId] = true;
+      draft.userShells.loading[sessionId] = false;
+    }),
+  setUserShellsLoading: (sessionId, loading) =>
+    set((draft) => {
+      draft.userShells.loading[sessionId] = loading;
+    }),
+  addUserShell: (sessionId, shell) =>
+    set((draft) => {
+      const existing = draft.userShells.bySessionId[sessionId] || [];
+      // Don't add if already exists
+      if (!existing.some((s) => s.terminalId === shell.terminalId)) {
+        draft.userShells.bySessionId[sessionId] = [...existing, shell];
+      }
+    }),
+  removeUserShell: (sessionId, terminalId) =>
+    set((draft) => {
+      const existing = draft.userShells.bySessionId[sessionId] || [];
+      draft.userShells.bySessionId[sessionId] = existing.filter((s) => s.terminalId !== terminalId);
     }),
 });

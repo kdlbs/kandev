@@ -3,6 +3,7 @@ package websocket
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -18,20 +19,30 @@ import (
 	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/scripts"
 )
+
+// UserService interface for getting user preferences.
+type UserService interface {
+	PreferredShell(ctx context.Context) (string, error)
+}
 
 // TerminalHandler handles dedicated binary WebSocket connections for terminal I/O.
 // This bypasses JSON encoding for raw PTY communication via xterm.js AttachAddon.
 type TerminalHandler struct {
-	lifecycleMgr *lifecycle.Manager
-	logger       *logger.Logger
+	lifecycleMgr  *lifecycle.Manager
+	userService   UserService
+	scriptService scripts.ScriptService
+	logger        *logger.Logger
 }
 
 // NewTerminalHandler creates a new TerminalHandler instance.
-func NewTerminalHandler(lifecycleMgr *lifecycle.Manager, log *logger.Logger) *TerminalHandler {
+func NewTerminalHandler(lifecycleMgr *lifecycle.Manager, userService UserService, scriptService scripts.ScriptService, log *logger.Logger) *TerminalHandler {
 	return &TerminalHandler{
-		lifecycleMgr: lifecycleMgr,
-		logger:       log.WithFields(zap.String("component", "terminal_handler")),
+		lifecycleMgr:  lifecycleMgr,
+		userService:   userService,
+		scriptService: scriptService,
+		logger:        log.WithFields(zap.String("component", "terminal_handler")),
 	}
 }
 
@@ -130,6 +141,9 @@ func (w *wsWriter) Close() error {
 
 // HandleTerminalWS handles WebSocket connections at /xterm.js/:sessionId
 // This creates a binary WebSocket bridge between xterm.js and the PTY.
+// Query parameter terminalId determines the type of terminal:
+// - "default" or empty: Agent passthrough terminal (CLI passthrough mode)
+// - "shell-1", "shell-2", etc.: Independent user shell terminals
 func (h *TerminalHandler) HandleTerminalWS(c *gin.Context) {
 	sessionID := c.Param("sessionId")
 	if sessionID == "" {
@@ -137,8 +151,23 @@ func (h *TerminalHandler) HandleTerminalWS(c *gin.Context) {
 		return
 	}
 
+	terminalID := c.Query("terminalId")
+	// terminalId is required - "default" is for agent passthrough, anything else is for user shells
+	// Empty terminalId is rejected to prevent accidental fallback behavior
+	if terminalID == "" {
+		h.logger.Warn("terminal WebSocket connection rejected: terminalId query parameter is required (use 'default' for agent passthrough or a unique ID for user shells)",
+			zap.String("session_id", sessionID),
+			zap.String("raw_query", c.Request.URL.RawQuery),
+			zap.String("remote_addr", c.Request.RemoteAddr))
+		c.JSON(http.StatusBadRequest, gin.H{"error": "terminalId query parameter is required"})
+		return
+	}
+
 	h.logger.Info("terminal WebSocket connection request",
 		zap.String("session_id", sessionID),
+		zap.String("terminal_id", terminalID),
+		zap.Bool("is_agent_passthrough", terminalID == "default"),
+		zap.String("raw_query", c.Request.URL.RawQuery),
 		zap.String("remote_addr", c.Request.RemoteAddr))
 
 	// Get the interactive runner first
@@ -149,6 +178,14 @@ func (h *TerminalHandler) HandleTerminalWS(c *gin.Context) {
 		return
 	}
 
+	// Route based on terminal ID
+	if terminalID != "default" {
+		// User shell terminal - create independent shell process
+		h.handleUserShellWS(c, sessionID, terminalID, interactiveRunner)
+		return
+	}
+
+	// Agent passthrough terminal - existing logic
 	// Ensure passthrough execution exists and is running.
 	// This handles:
 	// 1. Normal case: execution exists with running process
@@ -498,4 +535,328 @@ func (h *TerminalHandler) handleResize(
 	time.Sleep(50 * time.Millisecond)
 
 	return resize.Cols, resize.Rows
+}
+
+// handleUserShellWS handles WebSocket connections for user shell terminals.
+// Each terminal tab gets its own independent shell process.
+func (h *TerminalHandler) handleUserShellWS(
+	c *gin.Context,
+	sessionID string,
+	terminalID string,
+	interactiveRunner *process.InteractiveRunner,
+) {
+	// Get optional parameters from query
+	scriptID := c.Query("scriptId") // Repository script ID to run
+	labelParam := c.Query("label")  // Label for plain shell terminals
+
+	var label string
+	var initialCommand string
+
+	// If scriptId is provided, look up the script from the database
+	if scriptID != "" && h.scriptService != nil {
+		script, err := h.scriptService.GetRepositoryScript(c.Request.Context(), scriptID)
+		if err != nil {
+			h.logger.Error("failed to get repository script",
+				zap.String("script_id", scriptID),
+				zap.Error(err))
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid script ID"})
+			return
+		}
+		label = script.Name
+		initialCommand = script.Command
+		h.logger.Info("handleUserShellWS: resolved script",
+			zap.String("script_id", scriptID),
+			zap.String("script_name", script.Name),
+			zap.String("script_command", script.Command))
+	} else if labelParam != "" {
+		// Use label from query param for plain shell terminals
+		label = labelParam
+	}
+
+	h.logger.Info("handleUserShellWS: starting user shell handling",
+		zap.String("session_id", sessionID),
+		zap.String("terminal_id", terminalID),
+		zap.String("script_id", scriptID),
+		zap.String("label", label),
+		zap.String("initial_command", initialCommand))
+
+	// Get preferred shell from user settings
+	var preferredShell string
+	if h.userService != nil {
+		shell, err := h.userService.PreferredShell(c.Request.Context())
+		if err != nil {
+			h.logger.Debug("failed to get preferred shell, using default",
+				zap.Error(err))
+		} else {
+			preferredShell = shell
+		}
+	}
+
+	// Get working directory from execution (workspace path)
+	workingDir := ""
+	if execution, exists := h.lifecycleMgr.GetExecutionBySessionID(sessionID); exists {
+		workingDir = execution.WorkspacePath
+		h.logger.Info("handleUserShellWS: got working directory from execution",
+			zap.String("working_dir", workingDir))
+	} else {
+		h.logger.Info("handleUserShellWS: no execution found, using empty working directory")
+	}
+
+	// Build shell options
+	opts := &process.UserShellOptions{
+		Label:          label,
+		InitialCommand: initialCommand,
+	}
+
+	// Start or get existing user shell for this terminal
+	h.logger.Info("handleUserShellWS: calling StartUserShell",
+		zap.String("session_id", sessionID),
+		zap.String("terminal_id", terminalID),
+		zap.String("working_dir", workingDir),
+		zap.String("preferred_shell", preferredShell),
+		zap.String("label", opts.Label),
+		zap.String("initial_command", opts.InitialCommand))
+
+	info, err := interactiveRunner.StartUserShell(
+		c.Request.Context(),
+		sessionID,
+		terminalID,
+		workingDir,
+		preferredShell,
+		opts,
+	)
+	if err != nil {
+		h.logger.Error("failed to start user shell",
+			zap.String("session_id", sessionID),
+			zap.String("terminal_id", terminalID),
+			zap.Error(err))
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
+		return
+	}
+
+	processID := info.ID
+	h.logger.Info("handleUserShellWS: user shell started successfully",
+		zap.String("session_id", sessionID),
+		zap.String("terminal_id", terminalID),
+		zap.String("process_id", processID))
+
+	// Upgrade to WebSocket
+	conn, err := terminalUpgrader.Upgrade(c.Writer, c.Request, nil)
+	if err != nil {
+		h.logger.Error("failed to upgrade to WebSocket",
+			zap.String("session_id", sessionID),
+			zap.String("terminal_id", terminalID),
+			zap.Error(err))
+		return
+	}
+
+	h.logger.Info("user shell WebSocket connected",
+		zap.String("session_id", sessionID),
+		zap.String("terminal_id", terminalID),
+		zap.String("process_id", processID))
+
+	// Create WebSocket writer for output
+	wsw := newWsWriter(conn)
+
+	// Run the user shell terminal bridge
+	h.runUserShellBridge(conn, sessionID, terminalID, processID, interactiveRunner, wsw)
+}
+
+// runUserShellBridge handles WebSocket I/O for user shell terminals.
+func (h *TerminalHandler) runUserShellBridge(
+	conn *gorillaws.Conn,
+	sessionID string,
+	terminalID string,
+	processID string,
+	interactiveRunner *process.InteractiveRunner,
+	wsw *wsWriter,
+) {
+	var ptyWriter io.Writer
+	var directOutputSet bool
+
+	defer func() {
+		// Clean up WebSocket resources but DON'T stop the process
+		// The process should only be stopped via explicit user_shell.stop message from frontend
+		// This allows reconnection after React remounts or temporary disconnects
+		interactiveRunner.ClearUserShellDirectOutput(sessionID, terminalID)
+
+		_ = wsw.Close()
+		_ = conn.Close()
+
+		h.logger.Info("user shell WebSocket disconnected (process still running for potential reconnect)",
+			zap.String("session_id", sessionID),
+			zap.String("terminal_id", terminalID))
+	}()
+
+	// Read from WebSocket and handle input/resize
+	for {
+		messageType, data, err := conn.ReadMessage()
+		if err != nil {
+			if !gorillaws.IsCloseError(err, gorillaws.CloseNormalClosure, gorillaws.CloseGoingAway) {
+				h.logger.Debug("WebSocket read error",
+					zap.String("session_id", sessionID),
+					zap.String("terminal_id", terminalID),
+					zap.Error(err))
+			}
+			return
+		}
+
+		if messageType != gorillaws.BinaryMessage && messageType != gorillaws.TextMessage {
+			continue
+		}
+
+		if len(data) == 0 {
+			continue
+		}
+
+		// Check for resize command (first byte 0x01)
+		if data[0] == resizeCommandByte {
+			// Set up PTY access BEFORE handling resize if not already done
+			if !directOutputSet {
+				if h.setupUserShellPtyAccess(sessionID, terminalID, processID, interactiveRunner, wsw, &ptyWriter) {
+					directOutputSet = true
+				}
+			}
+
+			// Handle resize for user shell
+			h.handleUserShellResize(data[1:], sessionID, terminalID, interactiveRunner)
+			continue
+		}
+
+		// Regular input - write to PTY if available
+		if ptyWriter != nil {
+			if _, err := ptyWriter.Write(data); err != nil {
+				h.logger.Debug("PTY write error",
+					zap.String("session_id", sessionID),
+					zap.String("terminal_id", terminalID),
+					zap.Error(err))
+				// Try to re-establish PTY access
+				if h.setupUserShellPtyAccess(sessionID, terminalID, processID, interactiveRunner, wsw, &ptyWriter) {
+					directOutputSet = true
+					// Retry write
+					if _, err := ptyWriter.Write(data); err != nil {
+						h.logger.Debug("PTY write error after reconnect",
+							zap.String("session_id", sessionID),
+							zap.String("terminal_id", terminalID),
+							zap.Error(err))
+					}
+				}
+			}
+		} else {
+			// PTY not ready yet - try to set it up
+			if h.setupUserShellPtyAccess(sessionID, terminalID, processID, interactiveRunner, wsw, &ptyWriter) {
+				directOutputSet = true
+				// Retry writing after setup
+				if _, err := ptyWriter.Write(data); err != nil {
+					h.logger.Debug("PTY write error after setup",
+						zap.String("session_id", sessionID),
+						zap.String("terminal_id", terminalID),
+						zap.Error(err))
+				}
+			} else {
+				h.logger.Debug("PTY not ready, dropping input",
+					zap.String("session_id", sessionID),
+					zap.String("terminal_id", terminalID),
+					zap.Int("bytes", len(data)))
+			}
+		}
+	}
+}
+
+// setupUserShellPtyAccess sets up PTY access for a user shell terminal.
+func (h *TerminalHandler) setupUserShellPtyAccess(
+	sessionID string,
+	terminalID string,
+	processID string,
+	interactiveRunner *process.InteractiveRunner,
+	wsw *wsWriter,
+	ptyWriter *io.Writer,
+) bool {
+	// Get PTY writer for the user shell
+	writer, _, err := interactiveRunner.GetUserShellPtyWriter(sessionID, terminalID)
+	if err != nil {
+		h.logger.Debug("user shell PTY writer not ready",
+			zap.String("session_id", sessionID),
+			zap.String("terminal_id", terminalID))
+		return false
+	}
+
+	// Send buffered output
+	if chunks, ok := interactiveRunner.GetBuffer(processID); ok && len(chunks) > 0 {
+		var combined bytes.Buffer
+		for _, chunk := range chunks {
+			combined.WriteString(chunk.Data)
+		}
+		if combined.Len() > 0 {
+			if _, writeErr := wsw.Write(combined.Bytes()); writeErr != nil {
+				h.logger.Warn("failed to send buffered output",
+					zap.String("session_id", sessionID),
+					zap.String("terminal_id", terminalID),
+					zap.Error(writeErr))
+			}
+		}
+	}
+
+	// Set up direct output
+	if err := interactiveRunner.SetDirectOutput(processID, wsw); err != nil {
+		h.logger.Error("failed to set direct output for user shell",
+			zap.String("session_id", sessionID),
+			zap.String("terminal_id", terminalID),
+			zap.Error(err))
+		return false
+	}
+
+	*ptyWriter = writer
+
+	h.logger.Info("user shell PTY access established",
+		zap.String("session_id", sessionID),
+		zap.String("terminal_id", terminalID),
+		zap.String("process_id", processID))
+
+	return true
+}
+
+// handleUserShellResize processes resize commands for user shell terminals.
+func (h *TerminalHandler) handleUserShellResize(
+	data []byte,
+	sessionID string,
+	terminalID string,
+	interactiveRunner *process.InteractiveRunner,
+) {
+	var resize ResizePayload
+	if err := json.Unmarshal(data, &resize); err != nil {
+		h.logger.Warn("failed to parse resize command",
+			zap.String("session_id", sessionID),
+			zap.String("terminal_id", terminalID),
+			zap.Error(err))
+		return
+	}
+
+	if resize.Cols == 0 || resize.Rows == 0 {
+		h.logger.Warn("invalid resize dimensions",
+			zap.String("session_id", sessionID),
+			zap.String("terminal_id", terminalID),
+			zap.Uint16("cols", resize.Cols),
+			zap.Uint16("rows", resize.Rows))
+		return
+	}
+
+	// Resize the user shell PTY
+	if err := interactiveRunner.ResizeUserShell(sessionID, terminalID, resize.Cols, resize.Rows); err != nil {
+		h.logger.Warn("failed to resize user shell PTY",
+			zap.String("session_id", sessionID),
+			zap.String("terminal_id", terminalID),
+			zap.Uint16("cols", resize.Cols),
+			zap.Uint16("rows", resize.Rows),
+			zap.Error(err))
+	} else {
+		h.logger.Debug("user shell PTY resized",
+			zap.String("session_id", sessionID),
+			zap.String("terminal_id", terminalID),
+			zap.Uint16("cols", resize.Cols),
+			zap.Uint16("rows", resize.Rows))
+	}
+
+	// Give the process a moment to start if this was the first resize
+	time.Sleep(50 * time.Millisecond)
 }

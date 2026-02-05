@@ -23,7 +23,7 @@ import (
 
 // OrchestratorService defines the interface for orchestrator operations
 type OrchestratorService interface {
-	PromptTask(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool) (*orchestrator.PromptResult, error)
+	PromptTask(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment) (*orchestrator.PromptResult, error)
 	ResumeTaskSession(ctx context.Context, taskID, taskSessionID string) error
 }
 
@@ -115,12 +115,13 @@ func (h *MessageHandlers) httpListMessages(c *gin.Context) {
 // WS handlers
 
 type wsAddMessageRequest struct {
-	TaskID        string `json:"task_id"`
-	TaskSessionID string `json:"session_id"`
-	Content       string `json:"content"`
-	AuthorID      string `json:"author_id,omitempty"`
-	Model         string `json:"model,omitempty"`
-	PlanMode      bool   `json:"plan_mode,omitempty"`
+	TaskID        string                 `json:"task_id"`
+	TaskSessionID string                 `json:"session_id"`
+	Content       string                 `json:"content"`
+	AuthorID      string                 `json:"author_id,omitempty"`
+	Model         string                 `json:"model,omitempty"`
+	PlanMode      bool                   `json:"plan_mode,omitempty"`
+	Attachments   []v1.MessageAttachment `json:"attachments,omitempty"`
 }
 
 func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -134,8 +135,9 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	if req.TaskID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 	}
-	if req.Content == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "content is required", nil)
+	// Content can be empty if there are attachments (image-only messages)
+	if req.Content == "" && len(req.Attachments) == 0 {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "content or attachments are required", nil)
 	}
 
 	// Check if session is currently processing a prompt (RUNNING state)
@@ -171,12 +173,21 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		}
 	}
 
+	// Build metadata with attachments if present
+	var metadata map[string]interface{}
+	if len(req.Attachments) > 0 {
+		metadata = map[string]interface{}{
+			"attachments": req.Attachments,
+		}
+	}
+
 	message, err := h.messageController.CreateMessage(ctx, dto.CreateMessageRequest{
 		TaskSessionID: req.TaskSessionID,
 		TaskID:        req.TaskID,
 		Content:       req.Content,
 		AuthorType:    "user",
 		AuthorID:      req.AuthorID,
+		Metadata:      metadata,
 	})
 	if err != nil {
 		h.logger.Error("failed to create message", zap.Error(err))
@@ -198,9 +209,10 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		content := req.Content
 		model := req.Model
 		planMode := req.PlanMode
+		attachments := req.Attachments
 		go func() {
 			promptCtx := context.WithoutCancel(ctx)
-			_, err := h.orchestrator.PromptTask(promptCtx, taskID, sessionID, content, model, planMode)
+			_, err := h.orchestrator.PromptTask(promptCtx, taskID, sessionID, content, model, planMode, attachments)
 			if err != nil {
 				if errors.Is(err, executor.ErrExecutionNotFound) {
 					if resumeErr := h.orchestrator.ResumeTaskSession(promptCtx, taskID, sessionID); resumeErr != nil {
@@ -211,7 +223,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 					} else {
 						for attempt := 0; attempt < 3; attempt++ {
 							time.Sleep(500 * time.Millisecond)
-							_, err = h.orchestrator.PromptTask(promptCtx, taskID, sessionID, content, model, planMode)
+							_, err = h.orchestrator.PromptTask(promptCtx, taskID, sessionID, content, model, planMode, attachments)
 							if err == nil {
 								break
 							}

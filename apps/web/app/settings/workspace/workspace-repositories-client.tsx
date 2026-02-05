@@ -33,6 +33,7 @@ import {
 import type { LocalRepository, Repository, RepositoryScript, Workspace } from '@/lib/types/http';
 import { useRequest } from '@/lib/http/use-request';
 import { useToast } from '@/components/toast-provider';
+import { useAppStore } from '@/components/state-provider';
 
 type RepositoryWithScripts = Repository & { scripts: RepositoryScript[] };
 type RepositoryItem = RepositoryWithScripts & { __autoOpen?: boolean };
@@ -48,6 +49,7 @@ export function WorkspaceRepositoriesClient({
 }: WorkspaceRepositoriesClientProps) {
   const router = useRouter();
   const { toast } = useToast();
+  const clearRepositoryScripts = useAppStore((state) => state.clearRepositoryScripts);
   const [repositoryItems, setRepositoryItems] = useState<RepositoryItem[]>(repositories);
   const [savedRepositoryItems, setSavedRepositoryItems] = useState<RepositoryWithScripts[]>(repositories);
   const [discoveredRepositories, setDiscoveredRepositories] = useState<LocalRepository[]>([]);
@@ -346,6 +348,9 @@ export function WorkspaceRepositoriesClient({
         ? prev.map((item) => (item.id === repoId ? cloneRepository(nextRepo) : item))
         : [...prev, cloneRepository(nextRepo)]
     );
+
+    // Clear the scripts cache so task pages will refetch the updated scripts
+    clearRepositoryScripts(repoId);
   };
 
   const handleDeleteRepository = async (repoId: string) => {

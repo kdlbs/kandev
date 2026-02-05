@@ -19,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"github.com/kandev/kandev/pkg/opencode"
 	"go.uber.org/zap"
 )
@@ -350,7 +351,8 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string) error {
 }
 
 // Prompt sends a prompt to OpenCode and waits for completion.
-func (a *Adapter) Prompt(ctx context.Context, message string) error {
+// Note: attachments are not yet supported in OpenCode protocol - they are ignored.
+func (a *Adapter) Prompt(ctx context.Context, message string, _ []v1.MessageAttachment) error {
 	a.mu.Lock()
 	client := a.client
 	sessionID := a.sessionID

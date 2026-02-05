@@ -119,6 +119,13 @@ type TaskEvent struct {
 	CreatedAt time.Time              `json:"created_at"`
 }
 
+// MessageAttachment represents an attachment (image, file, etc.) to a message
+type MessageAttachment struct {
+	Type     string `json:"type"`      // "image"
+	Data     string `json:"data"`      // Base64-encoded data
+	MimeType string `json:"mime_type"` // MIME type (e.g., "image/png")
+}
+
 // Message represents a message in a task session (user or agent)
 type Message struct {
 	ID            string                 `json:"id"`

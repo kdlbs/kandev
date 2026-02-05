@@ -49,6 +49,7 @@ export type WorkspaceSliceActions = {
   setRepositoryBranchesLoading: (repositoryId: string, loading: boolean) => void;
   setRepositoryScripts: (repositoryId: string, scripts: RepositoryScript[]) => void;
   setRepositoryScriptsLoading: (repositoryId: string, loading: boolean) => void;
+  clearRepositoryScripts: (repositoryId: string) => void;
 };
 
 export type WorkspaceSlice = WorkspaceSliceState & WorkspaceSliceActions;

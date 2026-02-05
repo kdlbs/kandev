@@ -12,6 +12,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/constants"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
@@ -216,7 +217,8 @@ func (s *Server) handleAgentLoadSession(c *gin.Context) {
 
 // PromptRequest is a request to send a prompt to the agent
 type PromptRequest struct {
-	Text string `json:"text"` // Simple text prompt
+	Text        string                 `json:"text"`                  // Simple text prompt
+	Attachments []v1.MessageAttachment `json:"attachments,omitempty"` // Optional image attachments
 }
 
 // PromptResponse is the response to a prompt call
@@ -258,7 +260,7 @@ func (s *Server) handleAgentPrompt(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), constants.PromptTimeout)
 	defer cancel()
 
-	err := adapter.Prompt(ctx, req.Text)
+	err := adapter.Prompt(ctx, req.Text, req.Attachments)
 	if err != nil {
 		s.logger.Error("prompt failed", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, PromptResponse{
@@ -268,7 +270,7 @@ func (s *Server) handleAgentPrompt(c *gin.Context) {
 		return
 	}
 
-	s.logger.Info("prompt completed")
+	s.logger.Info("prompt completed", zap.Int("attachments", len(req.Attachments)))
 
 	c.JSON(http.StatusOK, PromptResponse{
 		Success: true,

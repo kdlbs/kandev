@@ -30,6 +30,7 @@ import (
 
 	// Agent Manager packages
 	"github.com/kandev/kandev/internal/agent/docker"
+	agenthandlers "github.com/kandev/kandev/internal/agent/handlers"
 	agentsettingshandlers "github.com/kandev/kandev/internal/agent/settings/handlers"
 
 	editorcontroller "github.com/kandev/kandev/internal/editors/controller"
@@ -536,6 +537,7 @@ func main() {
 	)
 	taskhandlers.RegisterProcessRoutes(router, taskSvc, lifecycleMgr, log)
 	analyticshandlers.RegisterStatsRoutes(router, analyticsRepo, log)
+	agenthandlers.RegisterShellRoutes(router, lifecycleMgr, log)
 	log.Debug("Registered Task Service handlers (HTTP + WebSocket)")
 
 	workflowhandlers.RegisterRoutes(router, gateway.Dispatcher, workflowCtrl, log)

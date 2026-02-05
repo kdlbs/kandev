@@ -44,7 +44,8 @@ type AgentManagerClient interface {
 
 	// PromptAgent sends a prompt to a running agent
 	// Returns PromptResult indicating if the agent needs input
-	PromptAgent(ctx context.Context, agentExecutionID string, prompt string) (*PromptResult, error)
+	// Attachments (images) are passed to the agent if provided
+	PromptAgent(ctx context.Context, agentExecutionID string, prompt string, attachments []v1.MessageAttachment) (*PromptResult, error)
 
 	// CancelAgent interrupts the current agent turn without terminating the process.
 	CancelAgent(ctx context.Context, sessionID string) error
@@ -877,7 +878,8 @@ func (e *Executor) StopByTaskID(ctx context.Context, taskID string, reason strin
 
 // Prompt sends a follow-up prompt to a running agent for a task
 // Returns PromptResult indicating if the agent needs input
-func (e *Executor) Prompt(ctx context.Context, taskID, sessionID string, prompt string) (*PromptResult, error) {
+// Attachments (images) are passed to the agent if provided
+func (e *Executor) Prompt(ctx context.Context, taskID, sessionID string, prompt string, attachments []v1.MessageAttachment) (*PromptResult, error) {
 	session, err := e.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return nil, ErrExecutionNotFound
@@ -893,9 +895,10 @@ func (e *Executor) Prompt(ctx context.Context, taskID, sessionID string, prompt 
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID),
 		zap.String("agent_execution_id", session.AgentExecutionID),
-		zap.Int("prompt_length", len(prompt)))
+		zap.Int("prompt_length", len(prompt)),
+		zap.Int("attachments_count", len(attachments)))
 
-	return e.agentManager.PromptAgent(ctx, session.AgentExecutionID, prompt)
+	return e.agentManager.PromptAgent(ctx, session.AgentExecutionID, prompt, attachments)
 }
 
 // SwitchModel stops the current agent, restarts it with a new model, and sends the prompt.

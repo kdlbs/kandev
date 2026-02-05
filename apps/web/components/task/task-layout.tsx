@@ -14,6 +14,7 @@ import { PreviewPanel } from '@/components/task/preview/preview-panel';
 import { PreviewController } from '@/components/task/preview/preview-controller';
 import { useLayoutStore } from '@/lib/state/layout-store';
 import type { Repository, RepositoryScript } from '@/lib/types/http';
+import type { Terminal } from '@/hooks/domains/session/use-terminals';
 
 // Re-export for backwards compatibility
 export type { SelectedDiff } from '@/hooks/use-session-layout-state';
@@ -36,6 +37,7 @@ type TaskLayoutProps = {
   sessionId?: string | null;
   repository?: Repository | null;
   initialScripts?: RepositoryScript[];
+  initialTerminals?: Terminal[];
   defaultLayouts?: Record<string, Layout>;
   taskTitle?: string;
   baseBranch?: string;
@@ -48,6 +50,7 @@ export const TaskLayout = memo(function TaskLayout({
   sessionId = null,
   repository = null,
   initialScripts = [],
+  initialTerminals,
   defaultLayouts = {},
   taskTitle,
   baseBranch,
@@ -204,7 +207,7 @@ export const TaskLayout = memo(function TaskLayout({
         {layoutState.right ? (
           <>
             <Panel id="right" minSize="310px" className="min-h-0 min-w-0">
-              <TaskRightPanel topPanel={topFilesPanel} sessionId={sessionForPreview} repositoryId={repository?.id ?? null} initialScripts={initialScripts} />
+              <TaskRightPanel topPanel={topFilesPanel} sessionId={sessionForPreview} repositoryId={repository?.id ?? null} initialScripts={initialScripts} initialTerminals={initialTerminals} />
             </Panel>
           </>
         ) : null}

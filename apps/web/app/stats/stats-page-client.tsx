@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { IconGitCommit } from '@tabler/icons-react';
+import { IconArrowLeft, IconGitCommit } from '@tabler/icons-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@kandev/ui/card';
 import { Button } from '@kandev/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@kandev/ui/tooltip';
@@ -775,65 +775,53 @@ export function StatsPageClient({ stats, error, workspaceId, activeRange }: Stat
 
   return (
     <div className="h-screen w-full flex flex-col bg-background">
-      {/* Header matching kanban style */}
-      <header className="flex items-center gap-3 p-4 pb-3 shrink-0">
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          className="h-7 px-2 text-[11px] font-mono cursor-pointer"
-          onClick={() => router.back()}
-        >
-          Back
+      {/* Header matching task session top bar */}
+      <header className="flex items-center gap-3 p-3 shrink-0">
+        <Button variant="ghost" size="sm" asChild className="cursor-pointer">
+          <Link href="/">
+            <IconArrowLeft className="h-4 w-4" />
+            Back
+          </Link>
         </Button>
-        <Link href="/" className="text-2xl font-bold hover:opacity-80 cursor-pointer">KanDev</Link>
-        <span className="text-muted-foreground">/</span>
-        <span className="text-muted-foreground">Statistics</span>
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Link href="/" className="font-semibold text-foreground hover:opacity-80 cursor-pointer">KanDev</Link>
+          <span>›</span>
+          <span>Statistics</span>
+          <span className="text-muted-foreground/60">·</span>
+          <span className="font-mono text-xs">
+            {global.total_tasks} tasks · {global.total_sessions} sessions · {formatDuration(global.total_duration_ms)}
+          </span>
+        </div>
+        <div className="ml-auto flex items-center gap-2">
+          <div className="flex items-center gap-1">
+            {(['week', 'month'] as RangeKey[]).map((key) => (
+              <Button
+                key={key}
+                type="button"
+                size="sm"
+                variant={range === key ? 'secondary' : 'outline'}
+                className="h-7 px-2 font-mono text-[11px] cursor-pointer"
+                onClick={() => handleRangeChange(key)}
+              >
+                {getRangeLabel(key)}
+              </Button>
+            ))}
+          </div>
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            className="h-7 px-2 text-[11px] font-mono cursor-pointer"
+            onClick={handleCopyStats}
+          >
+            {copied ? 'Copied' : 'Copy Stats'}
+          </Button>
+        </div>
       </header>
 
       {/* Scrollable content area */}
       <div className="flex-1 overflow-auto">
         <div className="max-w-7xl mx-auto p-6">
-          <div className="mb-6 rounded-sm border bg-muted/10 px-4 py-3">
-            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-              <div>
-                <div className="text-xs uppercase tracking-wider text-muted-foreground">Stats Console</div>
-                <div className="text-xl font-semibold">Workspace Telemetry</div>
-              </div>
-              <div className="flex flex-col gap-2 md:items-end">
-                <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                  <span className="uppercase tracking-wider text-[10px]">Range</span>
-                  {(['week', 'month'] as RangeKey[]).map((key) => (
-                    <Button
-                      key={key}
-                      type="button"
-                      size="sm"
-                      variant={range === key ? 'secondary' : 'outline'}
-                      className="h-7 px-2 font-mono text-[11px] cursor-pointer"
-                      onClick={() => handleRangeChange(key)}
-                    >
-                      {getRangeLabel(key)}
-                    </Button>
-                  ))}
-                </div>
-                <div className="flex items-center gap-3">
-                  <div className="text-xs text-muted-foreground font-mono">
-                    {global.total_tasks} tasks · {global.total_sessions} sessions · {formatDuration(global.total_duration_ms)}
-                  </div>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="secondary"
-                    className="h-7 px-2 text-[11px] font-mono cursor-pointer"
-                    onClick={handleCopyStats}
-                  >
-                    {copied ? 'Copied' : 'Copy Stats'}
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </div>
-
           <div className="space-y-5">
           {/* Overview Cards */}
           <div id="overview" className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 scroll-mt-24">

@@ -839,6 +839,52 @@ func TestHandleAgentEvent_CompleteWithoutStreaming(t *testing.T) {
 	}
 }
 
+// TestHandleAgentEvent_CompleteWithBufferedText verifies that buffered text
+// without streaming is emitted on complete for persistence.
+func TestHandleAgentEvent_CompleteWithBufferedText(t *testing.T) {
+	mgr, eventBus := createTestManagerWithTracking()
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	mgr.executionStore.Add(execution)
+
+	// Buffer text without newlines (no streaming event should be emitted)
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type: "message_chunk",
+		Text: "Final message without newline",
+	})
+
+	// Complete event should flush buffer into complete text
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type: "complete",
+	})
+
+	events := eventBus.getStreamEvents()
+
+	var completeEvents []AgentStreamEventPayload
+	var streamingEvents []AgentStreamEventPayload
+	for _, e := range events {
+		if e.Data != nil {
+			switch e.Data.Type {
+			case "complete":
+				completeEvents = append(completeEvents, e)
+			case "message_streaming":
+				streamingEvents = append(streamingEvents, e)
+			}
+		}
+	}
+
+	if len(completeEvents) != 1 {
+		t.Errorf("expected 1 complete event, got %d", len(completeEvents))
+	}
+
+	if len(completeEvents) > 0 && completeEvents[0].Data.Text != "Final message without newline" {
+		t.Errorf("expected complete event to carry buffered text, got %q", completeEvents[0].Data.Text)
+	}
+
+	if len(streamingEvents) != 0 {
+		t.Errorf("expected 0 message_streaming events when no newlines, got %d", len(streamingEvents))
+	}
+}
+
 // TestHandleAgentEvent_CompleteThenMessageChunk tests the scenario where
 // message_chunk arrives after complete. This documents the behavior when
 // an adapter incorrectly sends text after the turn has completed.

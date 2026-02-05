@@ -83,6 +83,8 @@ export type {
   ContextWindowEntry,
   ContextWindowState,
   AgentState,
+  UserShellInfo,
+  UserShellsState,
   PreviewStage,
   PreviewViewMode,
   PreviewDevicePreset,
@@ -141,6 +143,7 @@ export type AppState = {
   contextWindow: typeof defaultSessionRuntimeState['contextWindow'];
   agents: typeof defaultSessionRuntimeState['agents'];
   availableCommands: typeof defaultSessionRuntimeState['availableCommands'];
+  userShells: typeof defaultSessionRuntimeState['userShells'];
 
   // UI slice
   previewPanel: typeof defaultUIState['previewPanel'];
@@ -170,6 +173,7 @@ export type AppState = {
   setRepositoryBranchesLoading: (repositoryId: string, loading: boolean) => void;
   setRepositoryScripts: (repositoryId: string, scripts: RepositoryScript[]) => void;
   setRepositoryScriptsLoading: (repositoryId: string, loading: boolean) => void;
+  clearRepositoryScripts: (repositoryId: string) => void;
   setSettingsData: (next: Partial<SettingsDataState>) => void;
   setEditors: (editors: EditorsState['items']) => void;
   setEditorsLoading: (loading: boolean) => void;
@@ -254,6 +258,11 @@ export type AppState = {
   // Available commands actions
   setAvailableCommands: (sessionId: string, commands: import('./slices/session-runtime/types').AvailableCommand[]) => void;
   clearAvailableCommands: (sessionId: string) => void;
+  // User shells actions
+  setUserShells: (sessionId: string, shells: import('./slices/session-runtime/types').UserShellInfo[]) => void;
+  setUserShellsLoading: (sessionId: string, loading: boolean) => void;
+  addUserShell: (sessionId: string, shell: import('./slices/session-runtime/types').UserShellInfo) => void;
+  removeUserShell: (sessionId: string, terminalId: string) => void;
 };
 
 export type AppStore = ReturnType<typeof createAppStore>;
@@ -296,6 +305,7 @@ const defaultState = {
   contextWindow: defaultSessionRuntimeState.contextWindow,
   agents: defaultSessionRuntimeState.agents,
   availableCommands: defaultSessionRuntimeState.availableCommands,
+  userShells: defaultSessionRuntimeState.userShells,
   previewPanel: defaultUIState.previewPanel,
   rightPanel: defaultUIState.rightPanel,
   diffs: defaultUIState.diffs,
@@ -348,6 +358,7 @@ function mergeInitialState(initialState?: Partial<AppState>): typeof defaultStat
     sessionCommits: { ...defaultState.sessionCommits, ...initialState.sessionCommits },
     contextWindow: { ...defaultState.contextWindow, ...initialState.contextWindow },
     agents: { ...defaultState.agents, ...initialState.agents },
+    userShells: { ...defaultState.userShells, ...initialState.userShells },
     previewPanel: { ...defaultState.previewPanel, ...initialState.previewPanel },
     rightPanel: { ...defaultState.rightPanel, ...initialState.rightPanel },
     diffs: { ...defaultState.diffs, ...initialState.diffs },
@@ -411,6 +422,7 @@ export function createAppStore(initialState?: Partial<AppState>) {
       gitStatus: merged.gitStatus,
       contextWindow: merged.contextWindow,
       agents: merged.agents,
+      userShells: merged.userShells,
       previewPanel: merged.previewPanel,
       rightPanel: merged.rightPanel,
       diffs: merged.diffs,

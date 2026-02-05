@@ -75,6 +75,8 @@ export type {
   AgentState,
   AvailableCommand,
   AvailableCommandsState,
+  UserShellInfo,
+  UserShellsState,
 } from './session-runtime/types';
 export type {
   PreviewStage,

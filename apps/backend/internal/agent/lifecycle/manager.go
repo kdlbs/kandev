@@ -1351,11 +1351,17 @@ func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.Age
 			zap.Bool("is_error", isError))
 
 		// Flush the message buffer to publish any remaining content as a streaming message.
-		// All adapters now handle duplicate prevention at the adapter layer:
-		// - They send text via message_chunk events (which accumulate in the buffer)
-		// - They send complete events WITHOUT text
-		// So we just flush the buffer here - no need to track streamingUsedThisTurn.
-		m.flushMessageBuffer(execution)
+		// If the buffer never triggered streaming (no newlines), we emit the text on the
+		// complete event so the orchestrator can persist the final message.
+		flushedText := m.flushMessageBuffer(execution)
+		if flushedText != "" {
+			event.Text = flushedText
+			if m.historyManager != nil && execution.SessionID != "" {
+				if err := m.historyManager.AppendAgentMessage(execution.SessionID, flushedText); err != nil {
+					m.logger.Warn("failed to store final agent message to history", zap.Error(err))
+				}
+			}
+		}
 
 		m.logger.Info("complete event processed",
 			zap.String("execution_id", execution.ID),
@@ -1572,16 +1578,22 @@ func (m *Manager) flushMessageBuffer(execution *AgentExecution) string {
 		}
 	}
 
-	// If we have remaining content and an active streaming message, append it
+	// If we have remaining message content, publish it
 	trimmedMessage := strings.TrimSpace(agentMessage)
-	if trimmedMessage != "" && currentMsgID != "" {
-		// Publish final append to the streaming message
-		m.publishStreamingMessageFinal(execution, currentMsgID, trimmedMessage)
+	if trimmedMessage != "" {
+		if currentMsgID != "" {
+			// Publish final append to the streaming message
+			m.publishStreamingMessageFinal(execution, currentMsgID, trimmedMessage)
+		} else {
+			// No streaming message exists yet - create one with all the content
+			// This happens when message content has no newlines (never triggered streaming)
+			m.publishStreamingMessage(execution, trimmedMessage)
+		}
 		// Return empty since we've already handled it via streaming
 		return ""
 	}
 
-	return trimmedMessage
+	return ""
 }
 
 // publishStreamingMessageFinal publishes the final chunk of a streaming message.
@@ -1682,12 +1694,13 @@ func (m *Manager) updateExecutionError(executionID, errorMsg string) {
 }
 
 // PromptAgent sends a follow-up prompt to a running agent
-func (m *Manager) PromptAgent(ctx context.Context, executionID string, prompt string) (*PromptResult, error) {
+// Attachments (images) are passed to the agent if provided
+func (m *Manager) PromptAgent(ctx context.Context, executionID string, prompt string, attachments []v1.MessageAttachment) (*PromptResult, error) {
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
 		return nil, fmt.Errorf("execution %q not found", executionID)
 	}
-	return m.sessionManager.SendPrompt(ctx, execution, prompt, true, m.MarkReady)
+	return m.sessionManager.SendPrompt(ctx, execution, prompt, true, attachments, m.MarkReady)
 }
 
 // CancelAgent interrupts the current agent turn without terminating the process,
@@ -2789,9 +2802,18 @@ func (m *Manager) handlePassthroughStatus(status *agentctltypes.ProcessStatusUpd
 	m.eventPublisher.PublishProcessStatus(execution, clientStatus)
 
 	// Check if process exited and should be auto-restarted
+	// Only restart if this is the ACTUAL passthrough process, not user shell terminals
 	// Run asynchronously to allow the old process to be cleaned up first
 	if status.Status == agentctltypes.ProcessStatusExited || status.Status == agentctltypes.ProcessStatusFailed {
-		go m.handlePassthroughExit(execution, status)
+		// Only trigger auto-restart for the passthrough process, not for user shell terminals
+		if execution.PassthroughProcessID != "" && status.ProcessID == execution.PassthroughProcessID {
+			go m.handlePassthroughExit(execution, status)
+		} else {
+			m.logger.Debug("process exited but not the passthrough process, skipping auto-restart",
+				zap.String("session_id", status.SessionID),
+				zap.String("exited_process_id", status.ProcessID),
+				zap.String("passthrough_process_id", execution.PassthroughProcessID))
+		}
 	}
 }
 
