@@ -48,6 +48,7 @@ import (
 	mcphandlers "github.com/kandev/kandev/internal/mcp/handlers"
 
 	// Task Service packages
+	analyticshandlers "github.com/kandev/kandev/internal/analytics/handlers"
 	taskcontroller "github.com/kandev/kandev/internal/task/controller"
 	taskhandlers "github.com/kandev/kandev/internal/task/handlers"
 	taskservice "github.com/kandev/kandev/internal/task/service"
@@ -192,6 +193,7 @@ func main() {
 		log.Fatal("Failed to initialize services", zap.Error(err))
 	}
 	taskRepo := repos.Task
+	analyticsRepo := repos.Analytics
 	agentSettingsRepo := repos.AgentSettings
 	notificationRepo := repos.Notification
 	taskSvc := services.Task
@@ -533,7 +535,7 @@ func main() {
 		log,
 	)
 	taskhandlers.RegisterProcessRoutes(router, taskSvc, lifecycleMgr, log)
-	taskhandlers.RegisterStatsRoutes(router, taskRepo, log)
+	analyticshandlers.RegisterStatsRoutes(router, analyticsRepo, log)
 	log.Debug("Registered Task Service handlers (HTTP + WebSocket)")
 
 	workflowhandlers.RegisterRoutes(router, gateway.Dispatcher, workflowCtrl, log)
@@ -567,9 +569,9 @@ func main() {
 		workflowCtrl,
 		clarificationStore,
 		msgCreator,
-		taskRepo,  // SessionRepository
-		taskRepo,  // TaskRepository (same instance)
-		eventBus,  // EventBus
+		taskRepo, // SessionRepository
+		taskRepo, // TaskRepository (same instance)
+		eventBus, // EventBus
 		planService,
 		log,
 	)

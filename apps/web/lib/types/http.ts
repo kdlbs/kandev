@@ -736,12 +736,36 @@ export type DailyActivityDTO = {
   task_count: number;
 };
 
+export type CompletedTaskActivityDTO = {
+  date: string;
+  completed_tasks: number;
+};
+
 export type AgentUsageDTO = {
   agent_profile_id: string;
   agent_profile_name: string;
+  agent_model: string;
   session_count: number;
   turn_count: number;
   total_duration_ms: number;
+};
+
+export type RepositoryStatsDTO = {
+  repository_id: string;
+  repository_name: string;
+  total_tasks: number;
+  completed_tasks: number;
+  in_progress_tasks: number;
+  session_count: number;
+  turn_count: number;
+  message_count: number;
+  user_message_count: number;
+  tool_call_count: number;
+  total_duration_ms: number;
+  total_commits: number;
+  total_files_changed: number;
+  total_insertions: number;
+  total_deletions: number;
 };
 
 export type GitStatsDTO = {
@@ -755,6 +779,8 @@ export type StatsResponse = {
   global: GlobalStatsDTO;
   task_stats: TaskStatsDTO[];
   daily_activity: DailyActivityDTO[];
+  completed_activity: CompletedTaskActivityDTO[];
   agent_usage: AgentUsageDTO[];
+  repository_stats: RepositoryStatsDTO[];
   git_stats: GitStatsDTO;
 };

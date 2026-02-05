@@ -362,23 +362,6 @@ func (m *mockRepository) DeleteTaskPlan(ctx context.Context, taskID string) erro
 	return nil
 }
 
-// Stats operations
-func (m *mockRepository) GetTaskStats(ctx context.Context, workspaceID string) ([]*models.TaskStats, error) {
-	return nil, nil
-}
-func (m *mockRepository) GetGlobalStats(ctx context.Context, workspaceID string) (*models.GlobalStats, error) {
-	return nil, nil
-}
-func (m *mockRepository) GetDailyActivity(ctx context.Context, workspaceID string, days int) ([]*models.DailyActivity, error) {
-	return nil, nil
-}
-func (m *mockRepository) GetAgentUsage(ctx context.Context, workspaceID string, limit int) ([]*models.AgentUsage, error) {
-	return nil, nil
-}
-func (m *mockRepository) GetGitStats(ctx context.Context, workspaceID string) (*models.GitStats, error) {
-	return nil, nil
-}
-
 func newTestService(t *testing.T, scripts map[string][]*models.RepositoryScript) *service.Service {
 	log, err := logger.NewLogger(logger.LoggingConfig{
 		Level:  "error",

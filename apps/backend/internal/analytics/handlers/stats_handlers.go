@@ -6,9 +6,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/kandev/kandev/internal/analytics/dto"
+	"github.com/kandev/kandev/internal/analytics/repository"
 	"github.com/kandev/kandev/internal/common/logger"
-	"github.com/kandev/kandev/internal/task/dto"
-	"github.com/kandev/kandev/internal/task/repository"
 	"go.uber.org/zap"
 )
 
@@ -20,7 +20,7 @@ type StatsHandlers struct {
 func NewStatsHandlers(repo repository.Repository, log *logger.Logger) *StatsHandlers {
 	return &StatsHandlers{
 		repo:   repo,
-		logger: log.WithFields(zap.String("component", "task-stats-handlers")),
+		logger: log.WithFields(zap.String("component", "analytics-stats-handlers")),
 	}
 }
 
@@ -41,24 +41,35 @@ func (h *StatsHandlers) httpGetStats(c *gin.Context) {
 		return
 	}
 
-	globalStats, err := h.repo.GetGlobalStats(c.Request.Context(), workspaceID)
+	rangeKey := c.Query("range")
+	start, days := parseStatsRange(rangeKey)
+
+	globalStats, err := h.repo.GetGlobalStats(c.Request.Context(), workspaceID, start)
 	if err != nil {
 		h.logger.Error("failed to get global stats", zap.String("workspace_id", workspaceID), zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get stats"})
 		return
 	}
 
-	taskStats, err := h.repo.GetTaskStats(c.Request.Context(), workspaceID)
+	taskStats, err := h.repo.GetTaskStats(c.Request.Context(), workspaceID, start)
 	if err != nil {
 		h.logger.Error("failed to get task stats", zap.String("workspace_id", workspaceID), zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get stats"})
 		return
 	}
 
-	// Get daily activity for the last 90 days (rolling window)
-	dailyActivity, err := h.repo.GetDailyActivity(c.Request.Context(), workspaceID, 90)
+	// Get daily activity for the selected range
+	dailyActivity, err := h.repo.GetDailyActivity(c.Request.Context(), workspaceID, days)
 	if err != nil {
 		h.logger.Error("failed to get daily activity", zap.String("workspace_id", workspaceID), zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get stats"})
+		return
+	}
+
+	// Get completed task activity for the selected range
+	completedActivity, err := h.repo.GetCompletedTaskActivity(c.Request.Context(), workspaceID, days)
+	if err != nil {
+		h.logger.Error("failed to get completed task activity", zap.String("workspace_id", workspaceID), zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get stats"})
 		return
 	}
@@ -97,8 +108,16 @@ func (h *StatsHandlers) httpGetStats(c *gin.Context) {
 		})
 	}
 
+	completedActivityDTOs := make([]dto.CompletedTaskActivityDTO, 0, len(completedActivity))
+	for _, ca := range completedActivity {
+		completedActivityDTOs = append(completedActivityDTOs, dto.CompletedTaskActivityDTO{
+			Date:           ca.Date,
+			CompletedTasks: ca.CompletedTasks,
+		})
+	}
+
 	// Get agent usage (top 5)
-	agentUsage, err := h.repo.GetAgentUsage(c.Request.Context(), workspaceID, 5)
+	agentUsage, err := h.repo.GetAgentUsage(c.Request.Context(), workspaceID, 5, start)
 	if err != nil {
 		h.logger.Error("failed to get agent usage", zap.String("workspace_id", workspaceID), zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get stats"})
@@ -110,14 +129,44 @@ func (h *StatsHandlers) httpGetStats(c *gin.Context) {
 		agentUsageDTOs = append(agentUsageDTOs, dto.AgentUsageDTO{
 			AgentProfileID:   au.AgentProfileID,
 			AgentProfileName: au.AgentProfileName,
+			AgentModel:       au.AgentModel,
 			SessionCount:     au.SessionCount,
 			TurnCount:        au.TurnCount,
 			TotalDurationMs:  au.TotalDurationMs,
 		})
 	}
 
+	// Get repository stats
+	repoStats, err := h.repo.GetRepositoryStats(c.Request.Context(), workspaceID, start)
+	if err != nil {
+		h.logger.Error("failed to get repository stats", zap.String("workspace_id", workspaceID), zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get stats"})
+		return
+	}
+
+	repoStatsDTOs := make([]dto.RepositoryStatsDTO, 0, len(repoStats))
+	for _, rs := range repoStats {
+		repoStatsDTOs = append(repoStatsDTOs, dto.RepositoryStatsDTO{
+			RepositoryID:      rs.RepositoryID,
+			RepositoryName:    rs.RepositoryName,
+			TotalTasks:        rs.TotalTasks,
+			CompletedTasks:    rs.CompletedTasks,
+			InProgressTasks:   rs.InProgressTasks,
+			SessionCount:      rs.SessionCount,
+			TurnCount:         rs.TurnCount,
+			MessageCount:      rs.MessageCount,
+			UserMessageCount:  rs.UserMessageCount,
+			ToolCallCount:     rs.ToolCallCount,
+			TotalDurationMs:   rs.TotalDurationMs,
+			TotalCommits:      rs.TotalCommits,
+			TotalFilesChanged: rs.TotalFilesChanged,
+			TotalInsertions:   rs.TotalInsertions,
+			TotalDeletions:    rs.TotalDeletions,
+		})
+	}
+
 	// Get git stats
-	gitStats, err := h.repo.GetGitStats(c.Request.Context(), workspaceID)
+	gitStats, err := h.repo.GetGitStats(c.Request.Context(), workspaceID, start)
 	if err != nil {
 		h.logger.Error("failed to get git stats", zap.String("workspace_id", workspaceID), zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get stats"})
@@ -139,9 +188,11 @@ func (h *StatsHandlers) httpGetStats(c *gin.Context) {
 			AvgMessagesPerTask:   globalStats.AvgMessagesPerTask,
 			AvgDurationMsPerTask: globalStats.AvgDurationMsPerTask,
 		},
-		TaskStats:     taskStatsDTOs,
-		DailyActivity: dailyActivityDTOs,
-		AgentUsage:    agentUsageDTOs,
+		TaskStats:         taskStatsDTOs,
+		DailyActivity:     dailyActivityDTOs,
+		CompletedActivity: completedActivityDTOs,
+		AgentUsage:        agentUsageDTOs,
+		RepositoryStats:   repoStatsDTOs,
 		GitStats: dto.GitStatsDTO{
 			TotalCommits:      gitStats.TotalCommits,
 			TotalFilesChanged: gitStats.TotalFilesChanged,
@@ -153,3 +204,17 @@ func (h *StatsHandlers) httpGetStats(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
+func parseStatsRange(rangeKey string) (*time.Time, int) {
+	now := time.Now().UTC()
+	switch rangeKey {
+	case "week":
+		start := now.AddDate(0, 0, -7)
+		return &start, 7
+	case "month":
+		start := now.AddDate(0, 0, -30)
+		return &start, 30
+	default:
+		start := now.AddDate(0, 0, -30)
+		return &start, 30
+	}
+}

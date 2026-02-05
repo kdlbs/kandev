@@ -3,14 +3,23 @@
 import Link from 'next/link';
 import { IconGitCommit } from '@tabler/icons-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@kandev/ui/card';
+import { Button } from '@kandev/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@kandev/ui/tooltip';
-import type { StatsResponse, DailyActivityDTO, AgentUsageDTO } from '@/lib/types/http';
-import { useMemo } from 'react';
+import type {
+  StatsResponse,
+  DailyActivityDTO,
+  AgentUsageDTO,
+  RepositoryStatsDTO,
+  CompletedTaskActivityDTO,
+} from '@/lib/types/http';
+import { useEffect, useMemo, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 
 interface StatsPageClientProps {
   stats: StatsResponse | null;
   error: string | null;
   workspaceId?: string;
+  activeRange?: RangeKey;
 }
 
 function formatDuration(ms: number): string {
@@ -28,18 +37,29 @@ function formatDuration(ms: number): string {
   return `${seconds}s`;
 }
 
-function getStateBadgeVariant(state: string): 'default' | 'secondary' | 'destructive' | 'outline' {
-  switch (state) {
-    case 'COMPLETED':
-      return 'default';
-    case 'IN_PROGRESS':
-      return 'secondary';
-    case 'FAILED':
-    case 'CANCELLED':
-      return 'destructive';
+function formatPercent(value: number): string {
+  return `${Math.round(value)}%`;
+}
+
+type RangeKey = 'week' | 'month';
+
+function getRangeLabel(range: RangeKey): string {
+  switch (range) {
+    case 'week':
+      return 'Last Week';
+    case 'month':
+      return 'Last Month';
     default:
-      return 'outline';
+      return 'Last Month';
   }
+}
+
+function formatMonthLabel(date: Date): string {
+  return date.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+}
+
+function formatWeekLabel(date: Date): string {
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
 function getHeatmapColor(intensity: number): string {
@@ -65,78 +85,96 @@ interface HeatmapProps {
 }
 
 function ActivityHeatmap({ dailyActivity }: HeatmapProps) {
-  const { weeks, maxActivity } = useMemo(() => {
-    const max = Math.max(...dailyActivity.map(d => d.turn_count + d.message_count), 1);
-    const weeksMap: DailyActivityDTO[][] = [];
-    let currentWeek: DailyActivityDTO[] = [];
-
-    dailyActivity.forEach((day, index) => {
-      const dayOfWeek = getDayOfWeek(day.date);
-
-      if (index === 0) {
-        for (let i = 0; i < dayOfWeek; i++) {
-          currentWeek.push({ date: '', turn_count: 0, message_count: 0, task_count: 0 });
-        }
-      }
-
-      if (dayOfWeek === 0 && currentWeek.length > 0) {
-        weeksMap.push(currentWeek);
-        currentWeek = [];
-      }
-
-      currentWeek.push(day);
-    });
-
-    if (currentWeek.length > 0) {
-      weeksMap.push(currentWeek);
+  const { weeks, maxActivity, monthLabels } = useMemo(() => {
+    if (!dailyActivity || dailyActivity.length === 0) {
+      return { weeks: [] as DailyActivityDTO[][], maxActivity: 1, monthLabels: [] as { index: number; label: string }[] };
     }
 
-    return { weeks: weeksMap, maxActivity: max };
+    const max = Math.max(...dailyActivity.map(d => d.turn_count + d.message_count), 1);
+    const startDate = new Date(`${dailyActivity[0].date}T00:00:00`);
+    const startDay = startDate.getDay();
+    const padded: DailyActivityDTO[] = [];
+
+    for (let i = 0; i < startDay; i++) {
+      padded.push({ date: '', turn_count: 0, message_count: 0, task_count: 0 });
+    }
+    padded.push(...dailyActivity);
+
+    const weeksMap: DailyActivityDTO[][] = [];
+    for (let i = 0; i < padded.length; i += 7) {
+      weeksMap.push(padded.slice(i, i + 7));
+    }
+
+    const monthMarkers: { index: number; label: string }[] = [];
+    let lastMonth = -1;
+    weeksMap.forEach((week, index) => {
+      const firstDay = week.find((d) => d.date)?.date;
+      if (!firstDay) return;
+      const date = new Date(`${firstDay}T00:00:00`);
+      const month = date.getMonth();
+      if (month !== lastMonth) {
+        monthMarkers.push({ index, label: date.toLocaleDateString('en-US', { month: 'short' }) });
+        lastMonth = month;
+      }
+    });
+
+    return { weeks: weeksMap, maxActivity: max, monthLabels: monthMarkers };
   }, [dailyActivity]);
 
   const dayLabels = ['', 'Mon', '', 'Wed', '', 'Fri', ''];
 
   return (
     <div className="overflow-x-auto">
-      <div className="flex gap-[3px]">
-        <div className="flex flex-col gap-[3px] pr-1">
-          {dayLabels.map((label, i) => (
-            <div key={i} className="h-[10px] w-6 text-[10px] text-muted-foreground flex items-center">
-              {label}
+      <div className="min-w-max">
+        <div className="ml-8 h-4 flex items-end gap-3 text-[10px] text-muted-foreground">
+          {monthLabels.map((label) => (
+            <div key={`${label.label}-${label.index}`} style={{ marginLeft: `${label.index * 14}px` }}>
+              {label.label}
             </div>
           ))}
         </div>
 
-        <TooltipProvider delayDuration={100}>
-          <div className="flex gap-[3px]">
-            {weeks.map((week, weekIndex) => (
-              <div key={weekIndex} className="flex flex-col gap-[3px]">
-                {week.map((day, dayIndex) => {
-                  const activity = day.turn_count + day.message_count;
-                  const intensity = activity / maxActivity;
-
-                  if (!day.date) {
-                    return <div key={dayIndex} className="h-[10px] w-[10px]" />;
-                  }
-
-                  return (
-                    <Tooltip key={day.date}>
-                      <TooltipTrigger asChild>
-                        <div className={`h-[10px] w-[10px] rounded-[2px] ${getHeatmapColor(intensity)}`} />
-                      </TooltipTrigger>
-                      <TooltipContent side="top" className="text-xs">
-                        <div className="font-medium">{formatDate(day.date)}</div>
-                        <div className="text-muted-foreground">
-                          {day.turn_count} turns, {day.message_count} messages
-                        </div>
-                      </TooltipContent>
-                    </Tooltip>
-                  );
-                })}
+        <div className="flex gap-[3px]">
+          <div className="flex flex-col gap-[3px] pr-2">
+            {dayLabels.map((label, i) => (
+              <div key={i} className="h-[10px] w-6 text-[10px] text-muted-foreground flex items-center">
+                {label}
               </div>
             ))}
           </div>
-        </TooltipProvider>
+
+          <TooltipProvider delayDuration={100}>
+            <div className="flex gap-[3px]">
+              {weeks.map((week, weekIndex) => (
+                <div key={weekIndex} className="flex flex-col gap-[3px]">
+                  {Array.from({ length: 7 }).map((_, dayIndex) => {
+                    const day = week[dayIndex] ?? { date: '', turn_count: 0, message_count: 0, task_count: 0 };
+                    const activity = day.turn_count + day.message_count;
+                    const intensity = activity / maxActivity;
+
+                    if (!day.date) {
+                      return <div key={dayIndex} className="h-[10px] w-[10px]" />;
+                    }
+
+                    return (
+                      <Tooltip key={day.date}>
+                        <TooltipTrigger asChild>
+                          <div className={`h-[10px] w-[10px] rounded-[2px] ${getHeatmapColor(intensity)}`} />
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="text-xs">
+                          <div className="font-medium">{formatDate(day.date)}</div>
+                          <div className="text-muted-foreground">
+                            {day.turn_count} turns, {day.message_count} messages
+                          </div>
+                        </TooltipContent>
+                      </Tooltip>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+          </TooltipProvider>
+        </div>
       </div>
 
       <div className="flex items-center gap-1 mt-2 text-[10px] text-muted-foreground">
@@ -166,7 +204,14 @@ function AgentUsageList({ agentUsage }: { agentUsage: AgentUsageDTO[] }) {
       {agentUsage.map((agent) => (
         <div key={agent.agent_profile_id}>
           <div className="flex items-center justify-between mb-1">
-            <span className="text-sm truncate">{agent.agent_profile_name}</span>
+            <div className="min-w-0">
+              <div className="text-sm truncate">{agent.agent_profile_name}</div>
+              {agent.agent_model && (
+                <div className="text-[11px] text-muted-foreground font-mono truncate">
+                  {agent.agent_model}
+                </div>
+              )}
+            </div>
             <span className="text-xs text-muted-foreground tabular-nums ml-2">
               {agent.session_count}
             </span>
@@ -183,14 +228,420 @@ function AgentUsageList({ agentUsage }: { agentUsage: AgentUsageDTO[] }) {
   );
 }
 
+function RepositoryStatsGrid({ repositoryStats }: { repositoryStats: RepositoryStatsDTO[] }) {
+  if (!repositoryStats || repositoryStats.length === 0) {
+    return <div className="text-sm text-muted-foreground py-4">No repository stats yet.</div>;
+  }
 
-export function StatsPageClient({ stats, error, workspaceId }: StatsPageClientProps) {
+  return (
+    <div className="grid gap-3 md:grid-cols-2">
+      {repositoryStats.map((repo) => {
+        const completionRate = repo.total_tasks > 0
+          ? (repo.completed_tasks / repo.total_tasks) * 100
+          : 0;
+        const hasGit = repo.total_commits > 0 || repo.total_files_changed > 0;
+
+        return (
+          <div key={repo.repository_id} className="rounded-sm border bg-muted/20 p-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-sm font-medium truncate" title={repo.repository_name}>
+                {repo.repository_name}
+              </div>
+              <div className="text-xs text-muted-foreground tabular-nums font-mono">
+                {formatDuration(repo.total_duration_ms)}
+              </div>
+            </div>
+
+            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground font-mono">
+              <span>{repo.total_tasks} tasks</span>
+              <span>{repo.session_count} sessions</span>
+              <span>{repo.turn_count} turns</span>
+              <span>{repo.message_count} msgs</span>
+            </div>
+
+            <div className="mt-3">
+              <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+                <span>Completion</span>
+                <span className="tabular-nums font-mono">
+                  {formatPercent(completionRate)} · {repo.completed_tasks}/{repo.total_tasks}
+                </span>
+              </div>
+            </div>
+
+            <div className="mt-2 pt-2 border-t text-[11px] text-muted-foreground">
+              {hasGit ? (
+                <div className="flex items-center justify-between">
+                  <span className="font-mono">{repo.total_commits} commits</span>
+                  <span className="font-mono tabular-nums">
+                    <span className="text-emerald-600 dark:text-emerald-400">
+                      +{repo.total_insertions.toLocaleString()}
+                    </span>{' '}
+                    <span className="text-red-600 dark:text-red-400">
+                      −{repo.total_deletions.toLocaleString()}
+                    </span>
+                  </span>
+                </div>
+              ) : (
+                <div className="text-[11px] text-muted-foreground">No git activity yet.</div>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function TopRepositories({ repositoryStats }: { repositoryStats: RepositoryStatsDTO[] }) {
+  if (!repositoryStats || repositoryStats.length === 0) {
+    return <div className="text-sm text-muted-foreground py-4">No repository stats yet.</div>;
+  }
+
+  const topByTurns = [...repositoryStats]
+    .filter((repo) => repo.turn_count > 0)
+    .sort((a, b) => b.turn_count - a.turn_count)
+    .slice(0, 3);
+
+  const topByMessages = [...repositoryStats]
+    .filter((repo) => repo.message_count > 0)
+    .sort((a, b) => b.message_count - a.message_count)
+    .slice(0, 3);
+
+  return (
+    <div className="grid gap-4 md:grid-cols-2">
+      <div>
+        <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2">
+          Top By Turns
+        </div>
+        <div className="space-y-2">
+          {topByTurns.length === 0 && (
+            <div className="text-sm text-muted-foreground">No turn activity yet.</div>
+          )}
+          {topByTurns.map((repo, idx) => (
+            <div key={repo.repository_id} className="flex items-center gap-3">
+              <span className="text-xs text-muted-foreground w-4">{idx + 1}.</span>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium truncate" title={repo.repository_name}>
+                  {repo.repository_name}
+                </div>
+              </div>
+              <div className="text-sm font-medium tabular-nums font-mono">
+                {repo.turn_count}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div>
+        <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2">
+          Top By Messages
+        </div>
+        <div className="space-y-2">
+          {topByMessages.length === 0 && (
+            <div className="text-sm text-muted-foreground">No message activity yet.</div>
+          )}
+          {topByMessages.map((repo, idx) => (
+            <div key={repo.repository_id} className="flex items-center gap-3">
+              <span className="text-xs text-muted-foreground w-4">{idx + 1}.</span>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium truncate" title={repo.repository_name}>
+                  {repo.repository_name}
+                </div>
+              </div>
+              <div className="text-sm font-medium tabular-nums font-mono">
+                {repo.message_count}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RepoLeaders({ repositoryStats }: { repositoryStats: RepositoryStatsDTO[] }) {
+  if (!repositoryStats || repositoryStats.length === 0) {
+    return <div className="text-sm text-muted-foreground py-4">No repository stats yet.</div>;
+  }
+
+  const topByTasks = [...repositoryStats]
+    .filter((repo) => repo.total_tasks > 0)
+    .sort((a, b) => b.total_tasks - a.total_tasks)
+    .slice(0, 3);
+
+  const topByTime = [...repositoryStats]
+    .filter((repo) => repo.total_duration_ms > 0)
+    .sort((a, b) => b.total_duration_ms - a.total_duration_ms)
+    .slice(0, 3);
+
+  const topByCommits = [...repositoryStats]
+    .filter((repo) => repo.total_commits > 0)
+    .sort((a, b) => b.total_commits - a.total_commits)
+    .slice(0, 3);
+
+  return (
+    <div className="grid gap-4 md:grid-cols-3">
+      <div>
+        <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2">
+          Most Tasks
+        </div>
+        <div className="space-y-2">
+          {topByTasks.length === 0 && (
+            <div className="text-sm text-muted-foreground">No tasks yet.</div>
+          )}
+          {topByTasks.map((repo, idx) => (
+            <div key={repo.repository_id} className="flex items-center gap-3">
+              <span className="text-xs text-muted-foreground w-4">{idx + 1}.</span>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium truncate" title={repo.repository_name}>
+                  {repo.repository_name}
+                </div>
+              </div>
+              <div className="text-sm font-medium tabular-nums font-mono">
+                {repo.total_tasks}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2">
+          Most Time
+        </div>
+        <div className="space-y-2">
+          {topByTime.length === 0 && (
+            <div className="text-sm text-muted-foreground">No time logged yet.</div>
+          )}
+          {topByTime.map((repo, idx) => (
+            <div key={repo.repository_id} className="flex items-center gap-3">
+              <span className="text-xs text-muted-foreground w-4">{idx + 1}.</span>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium truncate" title={repo.repository_name}>
+                  {repo.repository_name}
+                </div>
+              </div>
+              <div className="text-sm font-medium tabular-nums font-mono">
+                {formatDuration(repo.total_duration_ms)}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2">
+          Most Commits
+        </div>
+        <div className="space-y-2">
+          {topByCommits.length === 0 && (
+            <div className="text-sm text-muted-foreground">No commits yet.</div>
+          )}
+          {topByCommits.map((repo, idx) => (
+            <div key={repo.repository_id} className="flex items-center gap-3">
+              <span className="text-xs text-muted-foreground w-4">{idx + 1}.</span>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium truncate" title={repo.repository_name}>
+                  {repo.repository_name}
+                </div>
+              </div>
+              <div className="text-sm font-medium tabular-nums font-mono">
+                {repo.total_commits}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type CompletionBucket = 'day' | 'week' | 'month';
+
+function CompletedTasksChart({ completedActivity }: { completedActivity: CompletedTaskActivityDTO[] }) {
+  const [bucket, setBucket] = useState<CompletionBucket>('day');
+
+  if (!completedActivity || completedActivity.length === 0) {
+    return <div className="text-sm text-muted-foreground py-4">No completed task data yet.</div>;
+  }
+
+  const series = useMemo(() => {
+    const toDate = (dateStr: string) => {
+      const [year, month, day] = dateStr.split('-').map(Number);
+      return new Date(Date.UTC(year, month - 1, day));
+    };
+
+    const data = completedActivity
+      .map((item) => ({ date: toDate(item.date), count: item.completed_tasks }))
+      .filter((item) => Number.isFinite(item.date.getTime()));
+
+    const buckets = new Map<string, { label: string; count: number; date: Date }>();
+
+    data.forEach((item) => {
+      if (bucket === 'day') {
+        const key = item.date.toISOString().slice(0, 10);
+        buckets.set(key, { label: formatDate(key), count: item.count, date: item.date });
+        return;
+      }
+
+      if (bucket === 'week') {
+        const d = new Date(item.date);
+        const day = d.getUTCDay();
+        const diff = (day + 6) % 7;
+        d.setUTCDate(d.getUTCDate() - diff);
+        d.setUTCHours(0, 0, 0, 0);
+        const key = d.toISOString().slice(0, 10);
+        const existing = buckets.get(key);
+        const nextCount = (existing?.count ?? 0) + item.count;
+        buckets.set(key, { label: formatWeekLabel(d), count: nextCount, date: d });
+        return;
+      }
+
+      const d = new Date(Date.UTC(item.date.getUTCFullYear(), item.date.getUTCMonth(), 1));
+      const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+      const existing = buckets.get(key);
+      const nextCount = (existing?.count ?? 0) + item.count;
+      buckets.set(key, { label: formatMonthLabel(d), count: nextCount, date: d });
+    });
+
+    return Array.from(buckets.values()).sort((a, b) => a.date.getTime() - b.date.getTime());
+  }, [bucket, completedActivity]);
+
+  const maxCount = Math.max(...series.map((item) => item.count), 1);
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+        <span className="uppercase tracking-wider text-[10px]">Bucket</span>
+        <Button
+          type="button"
+          size="sm"
+          variant={bucket === 'day' ? 'secondary' : 'outline'}
+          className="h-7 px-2 font-mono text-[11px] cursor-pointer"
+          onClick={() => setBucket('day')}
+        >
+          Day
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant={bucket === 'week' ? 'secondary' : 'outline'}
+          className="h-7 px-2 font-mono text-[11px] cursor-pointer"
+          onClick={() => setBucket('week')}
+        >
+          Week
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant={bucket === 'month' ? 'secondary' : 'outline'}
+          className="h-7 px-2 font-mono text-[11px] cursor-pointer"
+          onClick={() => setBucket('month')}
+        >
+          Month
+        </Button>
+      </div>
+
+      <div className="h-32 flex items-end gap-1">
+        <TooltipProvider delayDuration={100}>
+          {series.map((item, index) => {
+            const height = Math.max(6, Math.round((item.count / maxCount) * 100));
+            return (
+              <Tooltip key={`${item.label}-${index}`}>
+                <TooltipTrigger asChild>
+                  <div
+                    className="flex-1 rounded-[2px] bg-emerald-500/70 hover:bg-emerald-500/90 transition-colors"
+                    style={{ height: `${height}%` }}
+                  />
+                </TooltipTrigger>
+                <TooltipContent side="top" className="text-xs">
+                  <div className="font-medium">{item.label}</div>
+                  <div className="text-muted-foreground">{item.count} completed</div>
+                </TooltipContent>
+              </Tooltip>
+            );
+          })}
+        </TooltipProvider>
+      </div>
+
+      <div className="flex items-center justify-between text-[10px] text-muted-foreground font-mono">
+        <span>{series[0]?.label ?? ''}</span>
+        <span>{series[series.length - 1]?.label ?? ''}</span>
+      </div>
+    </div>
+  );
+}
+
+function MostProductiveSummary({ completedActivity }: { completedActivity: CompletedTaskActivityDTO[] }) {
+  if (!completedActivity || completedActivity.length === 0) {
+    return <div className="text-sm text-muted-foreground py-4">No completed task data yet.</div>;
+  }
+
+  const stats = useMemo(() => {
+    const weekdayTotals = Array(7).fill(0);
+    const monthTotals = Array(12).fill(0);
+    const yearTotals = new Map<number, number>();
+
+    completedActivity.forEach((item) => {
+      const [year, month, day] = item.date.split('-').map(Number);
+      const date = new Date(Date.UTC(year, month - 1, day));
+      weekdayTotals[date.getUTCDay()] += item.completed_tasks;
+      monthTotals[date.getUTCMonth()] += item.completed_tasks;
+      yearTotals.set(year, (yearTotals.get(year) ?? 0) + item.completed_tasks);
+    });
+
+    const maxWeekday = weekdayTotals.reduce((best, value, idx) => (
+      value > best.value ? { idx, value } : best
+    ), { idx: 0, value: weekdayTotals[0] ?? 0 });
+
+    const maxMonth = monthTotals.reduce((best, value, idx) => (
+      value > best.value ? { idx, value } : best
+    ), { idx: 0, value: monthTotals[0] ?? 0 });
+
+    let maxYear = { year: 0, value: 0 };
+    yearTotals.forEach((value, year) => {
+      if (value > maxYear.value) {
+        maxYear = { year, value };
+      }
+    });
+
+    return { maxWeekday, maxMonth, maxYear };
+  }, [completedActivity]);
+
+  const weekdayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between text-sm">
+        <span className="text-muted-foreground">Best weekday</span>
+        <span className="font-mono tabular-nums">
+          {weekdayNames[stats.maxWeekday.idx]} · {stats.maxWeekday.value}
+        </span>
+      </div>
+      <div className="flex items-center justify-between text-sm">
+        <span className="text-muted-foreground">Best month</span>
+        <span className="font-mono tabular-nums">
+          {monthNames[stats.maxMonth.idx]} · {stats.maxMonth.value}
+        </span>
+      </div>
+      <div className="flex items-center justify-between text-sm">
+        <span className="text-muted-foreground">Best year</span>
+        <span className="font-mono tabular-nums">
+          {stats.maxYear.year || '—'} · {stats.maxYear.value}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+export function StatsPageClient({ stats, error, workspaceId, activeRange }: StatsPageClientProps) {
   // No workspace selected
   if (!workspaceId) {
     return (
       <div className="h-screen w-full flex flex-col bg-background">
         <header className="flex items-center gap-3 p-4 pb-3">
-          <Link href="/" className="text-2xl font-bold hover:opacity-80">KanDev</Link>
+          <Link href="/" className="text-2xl font-bold hover:opacity-80 cursor-pointer">KanDev</Link>
           <span className="text-muted-foreground">/</span>
           <span className="text-muted-foreground">Statistics</span>
         </header>
@@ -205,7 +656,7 @@ export function StatsPageClient({ stats, error, workspaceId }: StatsPageClientPr
     return (
       <div className="h-screen w-full flex flex-col bg-background">
         <header className="flex items-center gap-3 p-4 pb-3">
-          <Link href="/" className="text-2xl font-bold hover:opacity-80">KanDev</Link>
+          <Link href="/" className="text-2xl font-bold hover:opacity-80 cursor-pointer">KanDev</Link>
           <span className="text-muted-foreground">/</span>
           <span className="text-muted-foreground">Statistics</span>
         </header>
@@ -220,7 +671,7 @@ export function StatsPageClient({ stats, error, workspaceId }: StatsPageClientPr
     return (
       <div className="h-screen w-full flex flex-col bg-background">
         <header className="flex items-center gap-3 p-4 pb-3">
-          <Link href="/" className="text-2xl font-bold hover:opacity-80">KanDev</Link>
+          <Link href="/" className="text-2xl font-bold hover:opacity-80 cursor-pointer">KanDev</Link>
           <span className="text-muted-foreground">/</span>
           <span className="text-muted-foreground">Statistics</span>
         </header>
@@ -231,26 +682,161 @@ export function StatsPageClient({ stats, error, workspaceId }: StatsPageClientPr
     );
   }
 
-  const { global, task_stats, daily_activity, agent_usage, git_stats } = stats;
+  const {
+    global,
+    task_stats,
+    daily_activity,
+    completed_activity,
+    agent_usage,
+    repository_stats,
+    git_stats,
+  } = stats;
   const completionRate = global.total_tasks > 0
     ? Math.round((global.completed_tasks / global.total_tasks) * 100)
     : 0;
   const hasGitStats = git_stats && (git_stats.total_commits > 0 || git_stats.total_files_changed > 0);
+  const toolShare = global.total_messages > 0
+    ? Math.round((global.total_tool_calls / global.total_messages) * 100)
+    : 0;
+  const userShare = global.total_messages > 0
+    ? Math.round((global.total_user_messages / global.total_messages) * 100)
+    : 0;
+  const avgTurnsPerSession = global.total_sessions > 0
+    ? global.total_turns / global.total_sessions
+    : 0;
+  const avgMessagesPerSession = global.total_sessions > 0
+    ? global.total_messages / global.total_sessions
+    : 0;
+  const [copied, setCopied] = useState(false);
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const [range, setRange] = useState<RangeKey>(activeRange ?? 'month');
+  const rangeLabel = getRangeLabel(range);
+
+  const completedInRange = useMemo(() => (
+    (completed_activity ?? []).reduce((sum, item) => sum + item.completed_tasks, 0)
+  ), [completed_activity]);
+
+  const statsSummary = useMemo(() => {
+    const repoCount = repository_stats.length;
+    const completed = global.completed_tasks;
+    const inProgress = global.in_progress_tasks;
+    const total = global.total_tasks;
+    const completion = total > 0 ? `${Math.round((completed / total) * 100)}%` : '—';
+    const time = formatDuration(global.total_duration_ms);
+    const avgTask = formatDuration(global.avg_duration_ms_per_task);
+    const topRepo = repository_stats
+      .filter((repo) => repo.total_tasks > 0)
+      .sort((a, b) => b.total_tasks - a.total_tasks)[0];
+    const topRepoLabel = topRepo ? `${topRepo.repository_name} (${topRepo.total_tasks} tasks)` : '—';
+    const gitLine = hasGitStats
+      ? `${git_stats.total_commits} commits, +${git_stats.total_insertions.toLocaleString()}/-${git_stats.total_deletions.toLocaleString()}`
+      : 'no git activity';
+
+    return [
+      `*KanDev Stats — ${rangeLabel}*`,
+      `- Tasks: ${total} total (${completed} done, ${inProgress} in progress) · ${completion} completion`,
+      `- Completed (${rangeLabel}): ${completedInRange}`,
+      `- Time: ${time} total · ${avgTask} avg/task`,
+      `- Repos: ${repoCount} tracked · Top repo: ${topRepoLabel}`,
+      `- Git: ${gitLine}`,
+    ].join('\n');
+  }, [
+    global,
+    repository_stats,
+    git_stats,
+    hasGitStats,
+    completedInRange,
+    rangeLabel,
+  ]);
+
+  const handleCopyStats = async () => {
+    try {
+      await navigator.clipboard.writeText(statsSummary);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy stats summary', err);
+    }
+  };
+
+  useEffect(() => {
+    if (activeRange && activeRange !== range) {
+      setRange(activeRange);
+    }
+  }, [activeRange, range]);
+
+  const handleRangeChange = (nextRange: RangeKey) => {
+    setRange(nextRange);
+    const params = new URLSearchParams(searchParams?.toString() ?? '');
+    params.set('range', nextRange);
+    router.push(`/stats?${params.toString()}`);
+  };
 
   return (
     <div className="h-screen w-full flex flex-col bg-background">
       {/* Header matching kanban style */}
       <header className="flex items-center gap-3 p-4 pb-3 shrink-0">
-        <Link href="/" className="text-2xl font-bold hover:opacity-80">KanDev</Link>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-7 px-2 text-[11px] font-mono cursor-pointer"
+          onClick={() => router.back()}
+        >
+          Back
+        </Button>
+        <Link href="/" className="text-2xl font-bold hover:opacity-80 cursor-pointer">KanDev</Link>
         <span className="text-muted-foreground">/</span>
         <span className="text-muted-foreground">Statistics</span>
       </header>
 
       {/* Scrollable content area */}
       <div className="flex-1 overflow-auto">
-        <div className="max-w-6xl mx-auto p-6 space-y-6">
+        <div className="max-w-7xl mx-auto p-6">
+          <div className="mb-6 rounded-sm border bg-muted/10 px-4 py-3">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <div className="text-xs uppercase tracking-wider text-muted-foreground">Stats Console</div>
+                <div className="text-xl font-semibold">Workspace Telemetry</div>
+              </div>
+              <div className="flex flex-col gap-2 md:items-end">
+                <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                  <span className="uppercase tracking-wider text-[10px]">Range</span>
+                  {(['week', 'month'] as RangeKey[]).map((key) => (
+                    <Button
+                      key={key}
+                      type="button"
+                      size="sm"
+                      variant={range === key ? 'secondary' : 'outline'}
+                      className="h-7 px-2 font-mono text-[11px] cursor-pointer"
+                      onClick={() => handleRangeChange(key)}
+                    >
+                      {getRangeLabel(key)}
+                    </Button>
+                  ))}
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="text-xs text-muted-foreground font-mono">
+                    {global.total_tasks} tasks · {global.total_sessions} sessions · {formatDuration(global.total_duration_ms)}
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    className="h-7 px-2 text-[11px] font-mono cursor-pointer"
+                    onClick={handleCopyStats}
+                  >
+                    {copied ? 'Copied' : 'Copy Stats'}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-5">
           {/* Overview Cards */}
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          <div id="overview" className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 scroll-mt-24">
         {/* Tasks Overview */}
         <Card className="rounded-sm">
           <CardHeader className="pb-2">
@@ -349,22 +935,89 @@ export function StatsPageClient({ stats, error, workspaceId }: StatsPageClientPr
             </CardContent>
           </Card>
         )}
+
+        {/* Signal */}
+        <Card className="rounded-sm">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">Signal</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold tabular-nums">
+              {global.total_sessions}
+            </div>
+            <div className="mt-2 text-sm text-muted-foreground">
+              {avgTurnsPerSession.toFixed(1)} turns · {avgMessagesPerSession.toFixed(1)} messages per session
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-4 pt-3 border-t text-xs text-muted-foreground">
+              <div className="space-y-1">
+                <div className="flex justify-between">
+                  <span>User msgs</span>
+                  <span className="tabular-nums font-mono">{global.total_user_messages}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>User share</span>
+                  <span className="tabular-nums font-mono">{formatPercent(userShare)}</span>
+                </div>
+              </div>
+              <div className="space-y-1">
+                <div className="flex justify-between">
+                  <span>Tool calls</span>
+                  <span className="tabular-nums font-mono">{global.total_tool_calls}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Tool share</span>
+                  <span className="tabular-nums font-mono">{formatPercent(toolShare)}</span>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div id="telemetry" className="flex items-center gap-3 pt-2 scroll-mt-24">
+        <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Telemetry</div>
+        <div className="h-px flex-1 bg-border/60" />
+      </div>
+
+      <div id="completed" className="scroll-mt-24">
+      {/* Completed Tasks and Productivity */}
+      <div className="grid gap-4 lg:grid-cols-3">
+        <Card className="rounded-sm lg:col-span-2">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Completed Tasks Over Time
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <CompletedTasksChart completedActivity={completed_activity} />
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-sm">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Most Productive
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <MostProductiveSummary completedActivity={completed_activity} />
+          </CardContent>
+        </Card>
+      </div>
       </div>
 
       {/* Activity and Agents Row */}
-      <div className="grid gap-4 lg:grid-cols-2 mb-8">
-        {daily_activity && daily_activity.length > 0 && (
-          <Card className="rounded-sm">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                Activity (last 90 days)
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <ActivityHeatmap dailyActivity={daily_activity} />
-            </CardContent>
-          </Card>
-        )}
+      <div id="activity" className="grid gap-4 lg:grid-cols-2 scroll-mt-24">
+        <Card className="rounded-sm">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Activity ({rangeLabel.toLowerCase()})
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ActivityHeatmap dailyActivity={daily_activity} />
+          </CardContent>
+        </Card>
 
         <Card className="rounded-sm">
           <CardHeader className="pb-2">
@@ -374,6 +1027,39 @@ export function StatsPageClient({ stats, error, workspaceId }: StatsPageClientPr
             <AgentUsageList agentUsage={agent_usage} />
           </CardContent>
         </Card>
+      </div>
+
+      {/* Repositories */}
+      <Card id="repositories" className="rounded-sm scroll-mt-24">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-medium text-muted-foreground">Repository Activity</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <RepositoryStatsGrid repositoryStats={repository_stats} />
+        </CardContent>
+      </Card>
+
+      <Card className="rounded-sm">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-medium text-muted-foreground">Top Repositories</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <TopRepositories repositoryStats={repository_stats} />
+        </CardContent>
+      </Card>
+
+      <Card className="rounded-sm">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-medium text-muted-foreground">Repo Leaders</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <RepoLeaders repositoryStats={repository_stats} />
+        </CardContent>
+      </Card>
+
+      <div id="workload" className="flex items-center gap-3 pt-2 scroll-mt-24">
+        <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Workload</div>
+        <div className="h-px flex-1 bg-border/60" />
       </div>
 
       {/* Top Tasks by Duration */}
@@ -452,6 +1138,7 @@ export function StatsPageClient({ stats, error, workspaceId }: StatsPageClientPr
           </Card>
         </div>
       )}
+          </div>
         </div>
       </div>
     </div>

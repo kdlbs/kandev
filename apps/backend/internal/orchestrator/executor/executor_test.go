@@ -12,8 +12,8 @@ import (
 
 // mockAgentManager implements AgentManagerClient for testing
 type mockAgentManager struct {
-	launchAgentFunc        func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error)
-	startAgentProcessFunc  func(ctx context.Context, agentExecutionID string) error
+	launchAgentFunc         func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error)
+	startAgentProcessFunc   func(ctx context.Context, agentExecutionID string) error
 	resolveAgentProfileFunc func(ctx context.Context, profileID string) (*AgentProfileInfo, error)
 }
 
@@ -76,9 +76,9 @@ type mockRepository struct {
 	executors        map[string]*models.Executor
 
 	// Track calls for verification
-	createTaskSessionCalls   []*models.TaskSession
-	updateTaskSessionCalls   []*models.TaskSession
-	setSessionPrimaryCalls   []string
+	createTaskSessionCalls []*models.TaskSession
+	updateTaskSessionCalls []*models.TaskSession
+	setSessionPrimaryCalls []string
 }
 
 func newMockRepository() *mockRepository {
@@ -167,136 +167,265 @@ func (m *mockRepository) GetWorkspace(ctx context.Context, id string) (*models.W
 // Stub implementations for other repository methods (matching repository.Repository interface)
 
 // Workspace operations
-func (m *mockRepository) CreateWorkspace(ctx context.Context, workspace *models.Workspace) error { return nil }
-func (m *mockRepository) UpdateWorkspace(ctx context.Context, workspace *models.Workspace) error { return nil }
+func (m *mockRepository) CreateWorkspace(ctx context.Context, workspace *models.Workspace) error {
+	return nil
+}
+func (m *mockRepository) UpdateWorkspace(ctx context.Context, workspace *models.Workspace) error {
+	return nil
+}
 func (m *mockRepository) DeleteWorkspace(ctx context.Context, id string) error { return nil }
-func (m *mockRepository) ListWorkspaces(ctx context.Context) ([]*models.Workspace, error) { return nil, nil }
+func (m *mockRepository) ListWorkspaces(ctx context.Context) ([]*models.Workspace, error) {
+	return nil, nil
+}
 
 // Task operations
 func (m *mockRepository) CreateTask(ctx context.Context, task *models.Task) error { return nil }
-func (m *mockRepository) GetTask(ctx context.Context, id string) (*models.Task, error) { return nil, nil }
+func (m *mockRepository) GetTask(ctx context.Context, id string) (*models.Task, error) {
+	return nil, nil
+}
 func (m *mockRepository) UpdateTask(ctx context.Context, task *models.Task) error { return nil }
-func (m *mockRepository) DeleteTask(ctx context.Context, id string) error { return nil }
-func (m *mockRepository) ListTasks(ctx context.Context, boardID string) ([]*models.Task, error) { return nil, nil }
-func (m *mockRepository) ListTasksByWorkspace(ctx context.Context, workspaceID string, query string, page, pageSize int) ([]*models.Task, int, error) { return nil, 0, nil }
-func (m *mockRepository) ListTasksByWorkflowStep(ctx context.Context, workflowStepID string) ([]*models.Task, error) { return nil, nil }
-func (m *mockRepository) AddTaskToBoard(ctx context.Context, taskID, boardID, workflowStepID string, position int) error { return nil }
-func (m *mockRepository) RemoveTaskFromBoard(ctx context.Context, taskID, boardID string) error { return nil }
+func (m *mockRepository) DeleteTask(ctx context.Context, id string) error         { return nil }
+func (m *mockRepository) ListTasks(ctx context.Context, boardID string) ([]*models.Task, error) {
+	return nil, nil
+}
+func (m *mockRepository) ListTasksByWorkspace(ctx context.Context, workspaceID string, query string, page, pageSize int) ([]*models.Task, int, error) {
+	return nil, 0, nil
+}
+func (m *mockRepository) ListTasksByWorkflowStep(ctx context.Context, workflowStepID string) ([]*models.Task, error) {
+	return nil, nil
+}
+func (m *mockRepository) AddTaskToBoard(ctx context.Context, taskID, boardID, workflowStepID string, position int) error {
+	return nil
+}
+func (m *mockRepository) RemoveTaskFromBoard(ctx context.Context, taskID, boardID string) error {
+	return nil
+}
 
 // TaskRepository operations
-func (m *mockRepository) CreateTaskRepository(ctx context.Context, taskRepo *models.TaskRepository) error { return nil }
-func (m *mockRepository) GetTaskRepository(ctx context.Context, id string) (*models.TaskRepository, error) { return nil, nil }
-func (m *mockRepository) ListTaskRepositories(ctx context.Context, taskID string) ([]*models.TaskRepository, error) { return nil, nil }
-func (m *mockRepository) UpdateTaskRepository(ctx context.Context, taskRepo *models.TaskRepository) error { return nil }
+func (m *mockRepository) CreateTaskRepository(ctx context.Context, taskRepo *models.TaskRepository) error {
+	return nil
+}
+func (m *mockRepository) GetTaskRepository(ctx context.Context, id string) (*models.TaskRepository, error) {
+	return nil, nil
+}
+func (m *mockRepository) ListTaskRepositories(ctx context.Context, taskID string) ([]*models.TaskRepository, error) {
+	return nil, nil
+}
+func (m *mockRepository) UpdateTaskRepository(ctx context.Context, taskRepo *models.TaskRepository) error {
+	return nil
+}
 func (m *mockRepository) DeleteTaskRepository(ctx context.Context, id string) error { return nil }
-func (m *mockRepository) DeleteTaskRepositoriesByTask(ctx context.Context, taskID string) error { return nil }
+func (m *mockRepository) DeleteTaskRepositoriesByTask(ctx context.Context, taskID string) error {
+	return nil
+}
 
 // Board operations
 func (m *mockRepository) CreateBoard(ctx context.Context, board *models.Board) error { return nil }
-func (m *mockRepository) GetBoard(ctx context.Context, id string) (*models.Board, error) { return nil, nil }
+func (m *mockRepository) GetBoard(ctx context.Context, id string) (*models.Board, error) {
+	return nil, nil
+}
 func (m *mockRepository) UpdateBoard(ctx context.Context, board *models.Board) error { return nil }
-func (m *mockRepository) DeleteBoard(ctx context.Context, id string) error { return nil }
-func (m *mockRepository) ListBoards(ctx context.Context, workspaceID string) ([]*models.Board, error) { return nil, nil }
+func (m *mockRepository) DeleteBoard(ctx context.Context, id string) error           { return nil }
+func (m *mockRepository) ListBoards(ctx context.Context, workspaceID string) ([]*models.Board, error) {
+	return nil, nil
+}
 
 // Message operations
-func (m *mockRepository) CreateMessage(ctx context.Context, message *models.Message) error { return nil }
-func (m *mockRepository) GetMessage(ctx context.Context, id string) (*models.Message, error) { return nil, nil }
-func (m *mockRepository) GetMessageByToolCallID(ctx context.Context, sessionID, toolCallID string) (*models.Message, error) { return nil, nil }
-func (m *mockRepository) GetMessageByPendingID(ctx context.Context, sessionID, pendingID string) (*models.Message, error) { return nil, nil }
-func (m *mockRepository) UpdateMessage(ctx context.Context, message *models.Message) error { return nil }
-func (m *mockRepository) ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error) { return nil, nil }
-func (m *mockRepository) ListMessagesPaginated(ctx context.Context, sessionID string, opts models.ListMessagesOptions) ([]*models.Message, bool, error) { return nil, false, nil }
+func (m *mockRepository) CreateMessage(ctx context.Context, message *models.Message) error {
+	return nil
+}
+func (m *mockRepository) GetMessage(ctx context.Context, id string) (*models.Message, error) {
+	return nil, nil
+}
+func (m *mockRepository) GetMessageByToolCallID(ctx context.Context, sessionID, toolCallID string) (*models.Message, error) {
+	return nil, nil
+}
+func (m *mockRepository) GetMessageByPendingID(ctx context.Context, sessionID, pendingID string) (*models.Message, error) {
+	return nil, nil
+}
+func (m *mockRepository) UpdateMessage(ctx context.Context, message *models.Message) error {
+	return nil
+}
+func (m *mockRepository) ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error) {
+	return nil, nil
+}
+func (m *mockRepository) ListMessagesPaginated(ctx context.Context, sessionID string, opts models.ListMessagesOptions) ([]*models.Message, bool, error) {
+	return nil, false, nil
+}
 func (m *mockRepository) DeleteMessage(ctx context.Context, id string) error { return nil }
 
 // Turn operations
 func (m *mockRepository) CreateTurn(ctx context.Context, turn *models.Turn) error { return nil }
-func (m *mockRepository) GetTurn(ctx context.Context, id string) (*models.Turn, error) { return nil, nil }
-func (m *mockRepository) GetActiveTurnBySessionID(ctx context.Context, sessionID string) (*models.Turn, error) { return nil, nil }
+func (m *mockRepository) GetTurn(ctx context.Context, id string) (*models.Turn, error) {
+	return nil, nil
+}
+func (m *mockRepository) GetActiveTurnBySessionID(ctx context.Context, sessionID string) (*models.Turn, error) {
+	return nil, nil
+}
 func (m *mockRepository) UpdateTurn(ctx context.Context, turn *models.Turn) error { return nil }
-func (m *mockRepository) CompleteTurn(ctx context.Context, id string) error { return nil }
-func (m *mockRepository) ListTurnsBySession(ctx context.Context, sessionID string) ([]*models.Turn, error) { return nil, nil }
+func (m *mockRepository) CompleteTurn(ctx context.Context, id string) error       { return nil }
+func (m *mockRepository) ListTurnsBySession(ctx context.Context, sessionID string) ([]*models.Turn, error) {
+	return nil, nil
+}
 
 // Task Session operations
-func (m *mockRepository) GetTaskSessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error) { return nil, nil }
-func (m *mockRepository) GetActiveTaskSessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error) { return nil, nil }
+func (m *mockRepository) GetTaskSessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error) {
+	return nil, nil
+}
+func (m *mockRepository) GetActiveTaskSessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error) {
+	return nil, nil
+}
 func (m *mockRepository) ClearSessionExecutionID(ctx context.Context, id string) error { return nil }
-func (m *mockRepository) ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error) { return nil, nil }
-func (m *mockRepository) ListActiveTaskSessions(ctx context.Context) ([]*models.TaskSession, error) { return nil, nil }
-func (m *mockRepository) ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error) { return nil, nil }
-func (m *mockRepository) HasActiveTaskSessionsByAgentProfile(ctx context.Context, agentProfileID string) (bool, error) { return false, nil }
-func (m *mockRepository) HasActiveTaskSessionsByExecutor(ctx context.Context, executorID string) (bool, error) { return false, nil }
-func (m *mockRepository) HasActiveTaskSessionsByEnvironment(ctx context.Context, environmentID string) (bool, error) { return false, nil }
-func (m *mockRepository) HasActiveTaskSessionsByRepository(ctx context.Context, repositoryID string) (bool, error) { return false, nil }
+func (m *mockRepository) ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
+	return nil, nil
+}
+func (m *mockRepository) ListActiveTaskSessions(ctx context.Context) ([]*models.TaskSession, error) {
+	return nil, nil
+}
+func (m *mockRepository) ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
+	return nil, nil
+}
+func (m *mockRepository) HasActiveTaskSessionsByAgentProfile(ctx context.Context, agentProfileID string) (bool, error) {
+	return false, nil
+}
+func (m *mockRepository) HasActiveTaskSessionsByExecutor(ctx context.Context, executorID string) (bool, error) {
+	return false, nil
+}
+func (m *mockRepository) HasActiveTaskSessionsByEnvironment(ctx context.Context, environmentID string) (bool, error) {
+	return false, nil
+}
+func (m *mockRepository) HasActiveTaskSessionsByRepository(ctx context.Context, repositoryID string) (bool, error) {
+	return false, nil
+}
 func (m *mockRepository) DeleteTaskSession(ctx context.Context, id string) error { return nil }
 
 // Workflow-related session operations
-func (m *mockRepository) GetPrimarySessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error) { return nil, nil }
-func (m *mockRepository) GetPrimarySessionIDsByTaskIDs(ctx context.Context, taskIDs []string) (map[string]string, error) { return nil, nil }
-func (m *mockRepository) GetSessionCountsByTaskIDs(ctx context.Context, taskIDs []string) (map[string]int, error) { return nil, nil }
-func (m *mockRepository) GetPrimarySessionInfoByTaskIDs(ctx context.Context, taskIDs []string) (map[string]*models.TaskSession, error) { return nil, nil }
-func (m *mockRepository) UpdateSessionWorkflowStep(ctx context.Context, sessionID string, stepID string) error { return nil }
-func (m *mockRepository) UpdateSessionReviewStatus(ctx context.Context, sessionID string, status string) error { return nil }
+func (m *mockRepository) GetPrimarySessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error) {
+	return nil, nil
+}
+func (m *mockRepository) GetPrimarySessionIDsByTaskIDs(ctx context.Context, taskIDs []string) (map[string]string, error) {
+	return nil, nil
+}
+func (m *mockRepository) GetSessionCountsByTaskIDs(ctx context.Context, taskIDs []string) (map[string]int, error) {
+	return nil, nil
+}
+func (m *mockRepository) GetPrimarySessionInfoByTaskIDs(ctx context.Context, taskIDs []string) (map[string]*models.TaskSession, error) {
+	return nil, nil
+}
+func (m *mockRepository) UpdateSessionWorkflowStep(ctx context.Context, sessionID string, stepID string) error {
+	return nil
+}
+func (m *mockRepository) UpdateSessionReviewStatus(ctx context.Context, sessionID string, status string) error {
+	return nil
+}
 
 // Task Session Worktree operations
-func (m *mockRepository) ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskSessionWorktree, error) { return nil, nil }
+func (m *mockRepository) ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskSessionWorktree, error) {
+	return nil, nil
+}
 func (m *mockRepository) DeleteTaskSessionWorktree(ctx context.Context, id string) error { return nil }
-func (m *mockRepository) DeleteTaskSessionWorktreesBySession(ctx context.Context, sessionID string) error { return nil }
+func (m *mockRepository) DeleteTaskSessionWorktreesBySession(ctx context.Context, sessionID string) error {
+	return nil
+}
 
 // Git Snapshot operations
-func (m *mockRepository) CreateGitSnapshot(ctx context.Context, snapshot *models.GitSnapshot) error { return nil }
-func (m *mockRepository) GetLatestGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error) { return nil, nil }
-func (m *mockRepository) GetFirstGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error) { return nil, nil }
-func (m *mockRepository) GetGitSnapshotsBySession(ctx context.Context, sessionID string, limit int) ([]*models.GitSnapshot, error) { return nil, nil }
+func (m *mockRepository) CreateGitSnapshot(ctx context.Context, snapshot *models.GitSnapshot) error {
+	return nil
+}
+func (m *mockRepository) GetLatestGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error) {
+	return nil, nil
+}
+func (m *mockRepository) GetFirstGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error) {
+	return nil, nil
+}
+func (m *mockRepository) GetGitSnapshotsBySession(ctx context.Context, sessionID string, limit int) ([]*models.GitSnapshot, error) {
+	return nil, nil
+}
 
 // Session Commit operations
-func (m *mockRepository) CreateSessionCommit(ctx context.Context, commit *models.SessionCommit) error { return nil }
-func (m *mockRepository) GetSessionCommits(ctx context.Context, sessionID string) ([]*models.SessionCommit, error) { return nil, nil }
-func (m *mockRepository) GetLatestSessionCommit(ctx context.Context, sessionID string) (*models.SessionCommit, error) { return nil, nil }
+func (m *mockRepository) CreateSessionCommit(ctx context.Context, commit *models.SessionCommit) error {
+	return nil
+}
+func (m *mockRepository) GetSessionCommits(ctx context.Context, sessionID string) ([]*models.SessionCommit, error) {
+	return nil, nil
+}
+func (m *mockRepository) GetLatestSessionCommit(ctx context.Context, sessionID string) (*models.SessionCommit, error) {
+	return nil, nil
+}
 func (m *mockRepository) DeleteSessionCommit(ctx context.Context, id string) error { return nil }
 
 // Repository operations
-func (m *mockRepository) CreateRepository(ctx context.Context, repository *models.Repository) error { return nil }
-func (m *mockRepository) UpdateRepository(ctx context.Context, repository *models.Repository) error { return nil }
+func (m *mockRepository) CreateRepository(ctx context.Context, repository *models.Repository) error {
+	return nil
+}
+func (m *mockRepository) UpdateRepository(ctx context.Context, repository *models.Repository) error {
+	return nil
+}
 func (m *mockRepository) DeleteRepository(ctx context.Context, id string) error { return nil }
-func (m *mockRepository) ListRepositories(ctx context.Context, workspaceID string) ([]*models.Repository, error) { return nil, nil }
+func (m *mockRepository) ListRepositories(ctx context.Context, workspaceID string) ([]*models.Repository, error) {
+	return nil, nil
+}
 
 // Repository script operations
-func (m *mockRepository) CreateRepositoryScript(ctx context.Context, script *models.RepositoryScript) error { return nil }
-func (m *mockRepository) GetRepositoryScript(ctx context.Context, id string) (*models.RepositoryScript, error) { return nil, nil }
-func (m *mockRepository) UpdateRepositoryScript(ctx context.Context, script *models.RepositoryScript) error { return nil }
+func (m *mockRepository) CreateRepositoryScript(ctx context.Context, script *models.RepositoryScript) error {
+	return nil
+}
+func (m *mockRepository) GetRepositoryScript(ctx context.Context, id string) (*models.RepositoryScript, error) {
+	return nil, nil
+}
+func (m *mockRepository) UpdateRepositoryScript(ctx context.Context, script *models.RepositoryScript) error {
+	return nil
+}
 func (m *mockRepository) DeleteRepositoryScript(ctx context.Context, id string) error { return nil }
-func (m *mockRepository) ListRepositoryScripts(ctx context.Context, repositoryID string) ([]*models.RepositoryScript, error) { return nil, nil }
+func (m *mockRepository) ListRepositoryScripts(ctx context.Context, repositoryID string) ([]*models.RepositoryScript, error) {
+	return nil, nil
+}
 
 // Executor operations
-func (m *mockRepository) CreateExecutor(ctx context.Context, executor *models.Executor) error { return nil }
-func (m *mockRepository) UpdateExecutor(ctx context.Context, executor *models.Executor) error { return nil }
+func (m *mockRepository) CreateExecutor(ctx context.Context, executor *models.Executor) error {
+	return nil
+}
+func (m *mockRepository) UpdateExecutor(ctx context.Context, executor *models.Executor) error {
+	return nil
+}
 func (m *mockRepository) DeleteExecutor(ctx context.Context, id string) error { return nil }
-func (m *mockRepository) ListExecutors(ctx context.Context) ([]*models.Executor, error) { return nil, nil }
+func (m *mockRepository) ListExecutors(ctx context.Context) ([]*models.Executor, error) {
+	return nil, nil
+}
 
 // Executor running operations
-func (m *mockRepository) ListExecutorsRunning(ctx context.Context) ([]*models.ExecutorRunning, error) { return nil, nil }
-func (m *mockRepository) GetExecutorRunningBySessionID(ctx context.Context, sessionID string) (*models.ExecutorRunning, error) { return nil, nil }
-func (m *mockRepository) DeleteExecutorRunningBySessionID(ctx context.Context, sessionID string) error { return nil }
+func (m *mockRepository) ListExecutorsRunning(ctx context.Context) ([]*models.ExecutorRunning, error) {
+	return nil, nil
+}
+func (m *mockRepository) GetExecutorRunningBySessionID(ctx context.Context, sessionID string) (*models.ExecutorRunning, error) {
+	return nil, nil
+}
+func (m *mockRepository) DeleteExecutorRunningBySessionID(ctx context.Context, sessionID string) error {
+	return nil
+}
 
 // Environment operations
-func (m *mockRepository) CreateEnvironment(ctx context.Context, environment *models.Environment) error { return nil }
-func (m *mockRepository) GetEnvironment(ctx context.Context, id string) (*models.Environment, error) { return nil, nil }
-func (m *mockRepository) UpdateEnvironment(ctx context.Context, environment *models.Environment) error { return nil }
+func (m *mockRepository) CreateEnvironment(ctx context.Context, environment *models.Environment) error {
+	return nil
+}
+func (m *mockRepository) GetEnvironment(ctx context.Context, id string) (*models.Environment, error) {
+	return nil, nil
+}
+func (m *mockRepository) UpdateEnvironment(ctx context.Context, environment *models.Environment) error {
+	return nil
+}
 func (m *mockRepository) DeleteEnvironment(ctx context.Context, id string) error { return nil }
-func (m *mockRepository) ListEnvironments(ctx context.Context) ([]*models.Environment, error) { return nil, nil }
+func (m *mockRepository) ListEnvironments(ctx context.Context) ([]*models.Environment, error) {
+	return nil, nil
+}
 
 // Task Plan operations
 func (m *mockRepository) CreateTaskPlan(ctx context.Context, plan *models.TaskPlan) error { return nil }
-func (m *mockRepository) GetTaskPlan(ctx context.Context, taskID string) (*models.TaskPlan, error) { return nil, nil }
+func (m *mockRepository) GetTaskPlan(ctx context.Context, taskID string) (*models.TaskPlan, error) {
+	return nil, nil
+}
 func (m *mockRepository) UpdateTaskPlan(ctx context.Context, plan *models.TaskPlan) error { return nil }
-func (m *mockRepository) DeleteTaskPlan(ctx context.Context, taskID string) error { return nil }
-
-// Stats operations
-func (m *mockRepository) GetTaskStats(ctx context.Context, workspaceID string) ([]*models.TaskStats, error) { return nil, nil }
-func (m *mockRepository) GetGlobalStats(ctx context.Context, workspaceID string) (*models.GlobalStats, error) { return nil, nil }
-func (m *mockRepository) GetDailyActivity(ctx context.Context, workspaceID string, days int) ([]*models.DailyActivity, error) { return nil, nil }
-func (m *mockRepository) GetAgentUsage(ctx context.Context, workspaceID string, limit int) ([]*models.AgentUsage, error) { return nil, nil }
-func (m *mockRepository) GetGitStats(ctx context.Context, workspaceID string) (*models.GitStats, error) { return nil, nil }
+func (m *mockRepository) DeleteTaskPlan(ctx context.Context, taskID string) error         { return nil }
 
 // Close operation
 func (m *mockRepository) Close() error { return nil }
