@@ -146,6 +146,13 @@ type Repository interface {
 	UpdateTaskPlan(ctx context.Context, plan *models.TaskPlan) error
 	DeleteTaskPlan(ctx context.Context, taskID string) error
 
+	// Stats operations
+	GetTaskStats(ctx context.Context, workspaceID string) ([]*models.TaskStats, error)
+	GetGlobalStats(ctx context.Context, workspaceID string) (*models.GlobalStats, error)
+	GetDailyActivity(ctx context.Context, workspaceID string, days int) ([]*models.DailyActivity, error)
+	GetAgentUsage(ctx context.Context, workspaceID string, limit int) ([]*models.AgentUsage, error)
+	GetGitStats(ctx context.Context, workspaceID string) (*models.GitStats, error)
+
 	// Close closes the repository (for database connections)
 	Close() error
 }

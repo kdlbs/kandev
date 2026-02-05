@@ -533,6 +533,7 @@ func main() {
 		log,
 	)
 	taskhandlers.RegisterProcessRoutes(router, taskSvc, lifecycleMgr, log)
+	taskhandlers.RegisterStatsRoutes(router, taskRepo, log)
 	log.Debug("Registered Task Service handlers (HTTP + WebSocket)")
 
 	workflowhandlers.RegisterRoutes(router, gateway.Dispatcher, workflowCtrl, log)

@@ -696,3 +696,65 @@ export type TaskPlan = {
 export type TaskPlanResponse = {
   plan: TaskPlan | null;
 };
+
+// Stats types
+export type TaskStatsDTO = {
+  task_id: string;
+  task_title: string;
+  workspace_id: string;
+  board_id: string;
+  state: string;
+  session_count: number;
+  turn_count: number;
+  message_count: number;
+  user_message_count: number;
+  tool_call_count: number;
+  total_duration_ms: number;
+  created_at: string;
+  completed_at?: string;
+};
+
+export type GlobalStatsDTO = {
+  total_tasks: number;
+  completed_tasks: number;
+  in_progress_tasks: number;
+  total_sessions: number;
+  total_turns: number;
+  total_messages: number;
+  total_user_messages: number;
+  total_tool_calls: number;
+  total_duration_ms: number;
+  avg_turns_per_task: number;
+  avg_messages_per_task: number;
+  avg_duration_ms_per_task: number;
+};
+
+export type DailyActivityDTO = {
+  date: string;
+  turn_count: number;
+  message_count: number;
+  task_count: number;
+};
+
+export type AgentUsageDTO = {
+  agent_profile_id: string;
+  agent_profile_name: string;
+  session_count: number;
+  turn_count: number;
+  total_duration_ms: number;
+};
+
+export type GitStatsDTO = {
+  total_commits: number;
+  total_files_changed: number;
+  total_insertions: number;
+  total_deletions: number;
+};
+
+export type StatsResponse = {
+  global: GlobalStatsDTO;
+  task_stats: TaskStatsDTO[];
+  daily_activity: DailyActivityDTO[];
+  agent_usage: AgentUsageDTO[];
+  git_stats: GitStatsDTO;
+};

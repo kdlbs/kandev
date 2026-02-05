@@ -291,6 +291,13 @@ func (m *mockRepository) GetTaskPlan(ctx context.Context, taskID string) (*model
 func (m *mockRepository) UpdateTaskPlan(ctx context.Context, plan *models.TaskPlan) error { return nil }
 func (m *mockRepository) DeleteTaskPlan(ctx context.Context, taskID string) error { return nil }
 
+// Stats operations
+func (m *mockRepository) GetTaskStats(ctx context.Context, workspaceID string) ([]*models.TaskStats, error) { return nil, nil }
+func (m *mockRepository) GetGlobalStats(ctx context.Context, workspaceID string) (*models.GlobalStats, error) { return nil, nil }
+func (m *mockRepository) GetDailyActivity(ctx context.Context, workspaceID string, days int) ([]*models.DailyActivity, error) { return nil, nil }
+func (m *mockRepository) GetAgentUsage(ctx context.Context, workspaceID string, limit int) ([]*models.AgentUsage, error) { return nil, nil }
+func (m *mockRepository) GetGitStats(ctx context.Context, workspaceID string) (*models.GitStats, error) { return nil, nil }
+
 // Close operation
 func (m *mockRepository) Close() error { return nil }
 
