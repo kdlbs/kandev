@@ -444,7 +444,7 @@ type WorkflowStepDTO struct {
 	ID              string       `json:"id"`
 	BoardID         string       `json:"board_id"`
 	Name            string       `json:"name"`
-	StepType        string       `json:"step_type"`
+	StepType        v1.StepType  `json:"step_type"`
 	Position        int          `json:"position"`
 	State           v1.TaskState `json:"state"`
 	Color           string       `json:"color"`

@@ -48,7 +48,6 @@ import (
 	mcphandlers "github.com/kandev/kandev/internal/mcp/handlers"
 
 	// Task Service packages
-	taskcontroller "github.com/kandev/kandev/internal/task/controller"
 	taskhandlers "github.com/kandev/kandev/internal/task/handlers"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	usercontroller "github.com/kandev/kandev/internal/user/controller"
@@ -499,32 +498,24 @@ func main() {
 	router.Use(gin.Recovery())
 	router.Use(corsMiddleware())
 
-	workspaceController := taskcontroller.NewWorkspaceController(taskSvc)
-	boardController := taskcontroller.NewBoardController(taskSvc)
-	boardController.SetWorkflowStepLister(services.Workflow)
-	taskController := taskcontroller.NewTaskController(taskSvc)
-	messageController := taskcontroller.NewMessageController(taskSvc)
-	repositoryController := taskcontroller.NewRepositoryController(taskSvc)
-	executorController := taskcontroller.NewExecutorController(taskSvc)
-	environmentController := taskcontroller.NewEnvironmentController(taskSvc)
 	workflowCtrl := workflowcontroller.NewController(services.Workflow)
 
 	// WebSocket endpoint - primary realtime transport
 	gateway.SetupRoutes(router)
 
 	// Task Service handlers (HTTP + WebSocket)
-	taskhandlers.RegisterWorkspaceRoutes(router, gateway.Dispatcher, workspaceController, log)
-	taskhandlers.RegisterBoardRoutes(router, gateway.Dispatcher, boardController, log)
+	taskhandlers.RegisterWorkspaceRoutes(router, gateway.Dispatcher, taskSvc, log)
+	boardHandlers := taskhandlers.RegisterBoardRoutes(router, gateway.Dispatcher, taskSvc, log)
+	boardHandlers.SetWorkflowStepLister(services.Workflow)
 	planService := taskservice.NewPlanService(taskRepo, eventBus, log)
-	taskhandlers.RegisterTaskRoutes(router, gateway.Dispatcher, taskController, orchestratorSvc, taskRepo, planService, log)
-	taskhandlers.RegisterRepositoryRoutes(router, gateway.Dispatcher, repositoryController, log)
-	taskhandlers.RegisterExecutorRoutes(router, gateway.Dispatcher, executorController, log)
-	taskhandlers.RegisterEnvironmentRoutes(router, gateway.Dispatcher, environmentController, log)
+	taskhandlers.RegisterTaskRoutes(router, gateway.Dispatcher, taskSvc, orchestratorSvc, taskRepo, planService, log)
+	taskhandlers.RegisterRepositoryRoutes(router, gateway.Dispatcher, taskSvc, log)
+	taskhandlers.RegisterExecutorRoutes(router, gateway.Dispatcher, taskSvc, log)
+	taskhandlers.RegisterEnvironmentRoutes(router, gateway.Dispatcher, taskSvc, log)
 	taskhandlers.RegisterMessageRoutes(
 		router,
 		gateway.Dispatcher,
-		messageController,
-		taskController,
+		taskSvc,
 		&orchestratorWrapper{svc: orchestratorSvc},
 		log,
 	)
@@ -556,9 +547,7 @@ func main() {
 
 	// MCP handlers for agentctl WS tunnel (agentctl -> backend)
 	mcpHandlers := mcphandlers.NewHandlers(
-		workspaceController,
-		boardController,
-		taskController,
+		taskSvc,
 		workflowCtrl,
 		clarificationStore,
 		msgCreator,

@@ -7,26 +7,26 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/kandev/kandev/internal/common/logger"
-	"github.com/kandev/kandev/internal/task/controller"
 	"github.com/kandev/kandev/internal/task/dto"
+	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
 
 type WorkspaceHandlers struct {
-	controller *controller.WorkspaceController
-	logger     *logger.Logger
+	service *service.Service
+	logger  *logger.Logger
 }
 
-func NewWorkspaceHandlers(ctrl *controller.WorkspaceController, log *logger.Logger) *WorkspaceHandlers {
+func NewWorkspaceHandlers(svc *service.Service, log *logger.Logger) *WorkspaceHandlers {
 	return &WorkspaceHandlers{
-		controller: ctrl,
-		logger:     log.WithFields(zap.String("component", "task-workspace-handlers")),
+		service: svc,
+		logger:  log.WithFields(zap.String("component", "task-workspace-handlers")),
 	}
 }
 
-func RegisterWorkspaceRoutes(router *gin.Engine, dispatcher *ws.Dispatcher, ctrl *controller.WorkspaceController, log *logger.Logger) {
-	handlers := NewWorkspaceHandlers(ctrl, log)
+func RegisterWorkspaceRoutes(router *gin.Engine, dispatcher *ws.Dispatcher, svc *service.Service, log *logger.Logger) {
+	handlers := NewWorkspaceHandlers(svc, log)
 	handlers.registerHTTP(router)
 	handlers.registerWS(dispatcher)
 }
@@ -51,11 +51,18 @@ func (h *WorkspaceHandlers) registerWS(dispatcher *ws.Dispatcher) {
 // HTTP handlers
 
 func (h *WorkspaceHandlers) httpListWorkspaces(c *gin.Context) {
-	resp, err := h.controller.ListWorkspaces(c.Request.Context(), dto.ListWorkspacesRequest{})
+	workspaces, err := h.service.ListWorkspaces(c.Request.Context())
 	if err != nil {
 		h.logger.Error("failed to list workspaces", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list workspaces"})
 		return
+	}
+	resp := dto.ListWorkspacesResponse{
+		Workspaces: make([]dto.WorkspaceDTO, 0, len(workspaces)),
+		Total:      len(workspaces),
+	}
+	for _, workspace := range workspaces {
+		resp.Workspaces = append(resp.Workspaces, dto.FromWorkspace(workspace))
 	}
 	c.JSON(http.StatusOK, resp)
 }
@@ -79,7 +86,7 @@ func (h *WorkspaceHandlers) httpCreateWorkspace(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "name is required"})
 		return
 	}
-	resp, err := h.controller.CreateWorkspace(c.Request.Context(), dto.CreateWorkspaceRequest{
+	workspace, err := h.service.CreateWorkspace(c.Request.Context(), &service.CreateWorkspaceRequest{
 		Name:                  body.Name,
 		Description:           body.Description,
 		OwnerID:               body.OwnerID,
@@ -91,16 +98,16 @@ func (h *WorkspaceHandlers) httpCreateWorkspace(c *gin.Context) {
 		handleNotFound(c, h.logger, err, "workspace not created")
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	c.JSON(http.StatusOK, dto.FromWorkspace(workspace))
 }
 
 func (h *WorkspaceHandlers) httpGetWorkspace(c *gin.Context) {
-	resp, err := h.controller.GetWorkspace(c.Request.Context(), dto.GetWorkspaceRequest{ID: c.Param("id")})
+	workspace, err := h.service.GetWorkspace(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		handleNotFound(c, h.logger, err, "workspace not found")
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	c.JSON(http.StatusOK, dto.FromWorkspace(workspace))
 }
 
 type httpUpdateWorkspaceRequest struct {
@@ -117,8 +124,7 @@ func (h *WorkspaceHandlers) httpUpdateWorkspace(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
 		return
 	}
-	resp, err := h.controller.UpdateWorkspace(c.Request.Context(), dto.UpdateWorkspaceRequest{
-		ID:                    c.Param("id"),
+	workspace, err := h.service.UpdateWorkspace(c.Request.Context(), c.Param("id"), &service.UpdateWorkspaceRequest{
 		Name:                  body.Name,
 		Description:           body.Description,
 		DefaultExecutorID:     body.DefaultExecutorID,
@@ -129,25 +135,31 @@ func (h *WorkspaceHandlers) httpUpdateWorkspace(c *gin.Context) {
 		handleNotFound(c, h.logger, err, "workspace not updated")
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	c.JSON(http.StatusOK, dto.FromWorkspace(workspace))
 }
 
 func (h *WorkspaceHandlers) httpDeleteWorkspace(c *gin.Context) {
-	resp, err := h.controller.DeleteWorkspace(c.Request.Context(), dto.DeleteWorkspaceRequest{ID: c.Param("id")})
-	if err != nil {
+	if err := h.service.DeleteWorkspace(c.Request.Context(), c.Param("id")); err != nil {
 		handleNotFound(c, h.logger, err, "workspace not deleted")
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	c.JSON(http.StatusOK, dto.SuccessResponse{Success: true})
 }
 
 // WS handlers
 
 func (h *WorkspaceHandlers) wsListWorkspaces(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	resp, err := h.controller.ListWorkspaces(ctx, dto.ListWorkspacesRequest{})
+	workspaces, err := h.service.ListWorkspaces(ctx)
 	if err != nil {
 		h.logger.Error("failed to list workspaces", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list workspaces", nil)
+	}
+	resp := dto.ListWorkspacesResponse{
+		Workspaces: make([]dto.WorkspaceDTO, 0, len(workspaces)),
+		Total:      len(workspaces),
+	}
+	for _, workspace := range workspaces {
+		resp.Workspaces = append(resp.Workspaces, dto.FromWorkspace(workspace))
 	}
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }
@@ -170,7 +182,7 @@ func (h *WorkspaceHandlers) wsCreateWorkspace(ctx context.Context, msg *ws.Messa
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "name is required", nil)
 	}
 
-	resp, err := h.controller.CreateWorkspace(ctx, dto.CreateWorkspaceRequest{
+	workspace, err := h.service.CreateWorkspace(ctx, &service.CreateWorkspaceRequest{
 		Name:                  req.Name,
 		Description:           req.Description,
 		OwnerID:               req.OwnerID,
@@ -182,7 +194,7 @@ func (h *WorkspaceHandlers) wsCreateWorkspace(ctx context.Context, msg *ws.Messa
 		h.logger.Error("failed to create workspace", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create workspace", nil)
 	}
-	return ws.NewResponse(msg.ID, msg.Action, resp)
+	return ws.NewResponse(msg.ID, msg.Action, dto.FromWorkspace(workspace))
 }
 
 type wsGetWorkspaceRequest struct {
@@ -198,11 +210,11 @@ func (h *WorkspaceHandlers) wsGetWorkspace(ctx context.Context, msg *ws.Message)
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "id is required", nil)
 	}
 
-	resp, err := h.controller.GetWorkspace(ctx, dto.GetWorkspaceRequest{ID: req.ID})
+	workspace, err := h.service.GetWorkspace(ctx, req.ID)
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Workspace not found", nil)
 	}
-	return ws.NewResponse(msg.ID, msg.Action, resp)
+	return ws.NewResponse(msg.ID, msg.Action, dto.FromWorkspace(workspace))
 }
 
 type wsUpdateWorkspaceRequest struct {
@@ -223,8 +235,7 @@ func (h *WorkspaceHandlers) wsUpdateWorkspace(ctx context.Context, msg *ws.Messa
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "id is required", nil)
 	}
 
-	resp, err := h.controller.UpdateWorkspace(ctx, dto.UpdateWorkspaceRequest{
-		ID:                    req.ID,
+	workspace, err := h.service.UpdateWorkspace(ctx, req.ID, &service.UpdateWorkspaceRequest{
 		Name:                  req.Name,
 		Description:           req.Description,
 		DefaultExecutorID:     req.DefaultExecutorID,
@@ -235,7 +246,7 @@ func (h *WorkspaceHandlers) wsUpdateWorkspace(ctx context.Context, msg *ws.Messa
 		h.logger.Error("failed to update workspace", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update workspace", nil)
 	}
-	return ws.NewResponse(msg.ID, msg.Action, resp)
+	return ws.NewResponse(msg.ID, msg.Action, dto.FromWorkspace(workspace))
 }
 
 type wsDeleteWorkspaceRequest struct {
@@ -251,10 +262,9 @@ func (h *WorkspaceHandlers) wsDeleteWorkspace(ctx context.Context, msg *ws.Messa
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "id is required", nil)
 	}
 
-	resp, err := h.controller.DeleteWorkspace(ctx, dto.DeleteWorkspaceRequest{ID: req.ID})
-	if err != nil {
+	if err := h.service.DeleteWorkspace(ctx, req.ID); err != nil {
 		h.logger.Error("failed to delete workspace", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to delete workspace", nil)
 	}
-	return ws.NewResponse(msg.ID, msg.Action, resp)
+	return ws.NewResponse(msg.ID, msg.Action, dto.SuccessResponse{Success: true})
 }

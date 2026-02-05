@@ -12,7 +12,6 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
-	"github.com/kandev/kandev/internal/task/controller"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
@@ -50,9 +49,7 @@ type EventBus interface {
 
 // Handlers provides MCP WebSocket handlers.
 type Handlers struct {
-	workspaceCtrl    *controller.WorkspaceController
-	boardCtrl        *controller.BoardController
-	taskCtrl         *controller.TaskController
+	service          *service.Service
 	workflowCtrl     *workflowctrl.Controller
 	clarificationSvc ClarificationService
 	messageCreator   MessageCreator
@@ -65,9 +62,7 @@ type Handlers struct {
 
 // NewHandlers creates new MCP handlers.
 func NewHandlers(
-	workspaceCtrl *controller.WorkspaceController,
-	boardCtrl *controller.BoardController,
-	taskCtrl *controller.TaskController,
+	svc *service.Service,
 	workflowCtrl *workflowctrl.Controller,
 	clarificationSvc ClarificationService,
 	messageCreator MessageCreator,
@@ -78,9 +73,7 @@ func NewHandlers(
 	log *logger.Logger,
 ) *Handlers {
 	return &Handlers{
-		workspaceCtrl:    workspaceCtrl,
-		boardCtrl:        boardCtrl,
-		taskCtrl:         taskCtrl,
+		service:          svc,
 		workflowCtrl:     workflowCtrl,
 		clarificationSvc: clarificationSvc,
 		messageCreator:   messageCreator,
@@ -111,10 +104,18 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 
 // handleListWorkspaces lists all workspaces.
 func (h *Handlers) handleListWorkspaces(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	resp, err := h.workspaceCtrl.ListWorkspaces(ctx, dto.ListWorkspacesRequest{})
+	workspaces, err := h.service.ListWorkspaces(ctx)
 	if err != nil {
 		h.logger.Error("failed to list workspaces", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list workspaces", nil)
+	}
+
+	resp := dto.ListWorkspacesResponse{
+		Workspaces: make([]dto.WorkspaceDTO, 0, len(workspaces)),
+		Total:      len(workspaces),
+	}
+	for _, workspace := range workspaces {
+		resp.Workspaces = append(resp.Workspaces, dto.FromWorkspace(workspace))
 	}
 
 	return ws.NewResponse(msg.ID, msg.Action, resp)
@@ -132,10 +133,18 @@ func (h *Handlers) handleListBoards(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workspace_id is required", nil)
 	}
 
-	resp, err := h.boardCtrl.ListBoards(ctx, dto.ListBoardsRequest{WorkspaceID: req.WorkspaceID})
+	boards, err := h.service.ListBoards(ctx, req.WorkspaceID)
 	if err != nil {
 		h.logger.Error("failed to list boards", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list boards", nil)
+	}
+
+	resp := dto.ListBoardsResponse{
+		Boards: make([]dto.BoardDTO, 0, len(boards)),
+		Total:  len(boards),
+	}
+	for _, board := range boards {
+		resp.Boards = append(resp.Boards, dto.FromBoard(board))
 	}
 
 	return ws.NewResponse(msg.ID, msg.Action, resp)
@@ -174,10 +183,18 @@ func (h *Handlers) handleListTasks(ctx context.Context, msg *ws.Message) (*ws.Me
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "board_id is required", nil)
 	}
 
-	resp, err := h.taskCtrl.ListTasks(ctx, dto.ListTasksRequest{BoardID: req.BoardID})
+	tasks, err := h.service.ListTasks(ctx, req.BoardID)
 	if err != nil {
 		h.logger.Error("failed to list tasks", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list tasks", nil)
+	}
+
+	resp := dto.ListTasksResponse{
+		Tasks: make([]dto.TaskDTO, 0, len(tasks)),
+		Total: len(tasks),
+	}
+	for _, task := range tasks {
+		resp.Tasks = append(resp.Tasks, dto.FromTask(task))
 	}
 
 	return ws.NewResponse(msg.ID, msg.Action, resp)
@@ -202,13 +219,36 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "title is required", nil)
 	}
 
-	resp, err := h.taskCtrl.CreateTask(ctx, req)
+	// Convert DTO repositories to service layer input
+	var repos []service.TaskRepositoryInput
+	for _, r := range req.Repositories {
+		repos = append(repos, service.TaskRepositoryInput{
+			RepositoryID:  r.RepositoryID,
+			BaseBranch:    r.BaseBranch,
+			LocalPath:     r.LocalPath,
+			Name:          r.Name,
+			DefaultBranch: r.DefaultBranch,
+		})
+	}
+
+	task, err := h.service.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID:    req.WorkspaceID,
+		BoardID:        req.BoardID,
+		WorkflowStepID: req.WorkflowStepID,
+		Title:          req.Title,
+		Description:    req.Description,
+		Priority:       req.Priority,
+		State:          req.State,
+		Repositories:   repos,
+		Position:       req.Position,
+		Metadata:       req.Metadata,
+	})
 	if err != nil {
 		h.logger.Error("failed to create task", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create task", nil)
 	}
 
-	return ws.NewResponse(msg.ID, msg.Action, resp)
+	return ws.NewResponse(msg.ID, msg.Action, dto.FromTask(task))
 }
 
 // handleUpdateTask updates an existing task.
@@ -221,22 +261,42 @@ func (h *Handlers) handleUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "id is required", nil)
 	}
 
-	resp, err := h.taskCtrl.UpdateTask(ctx, req)
+	// Convert DTO repositories to service layer input
+	var repos []service.TaskRepositoryInput
+	for _, r := range req.Repositories {
+		repos = append(repos, service.TaskRepositoryInput{
+			RepositoryID:  r.RepositoryID,
+			BaseBranch:    r.BaseBranch,
+			LocalPath:     r.LocalPath,
+			Name:          r.Name,
+			DefaultBranch: r.DefaultBranch,
+		})
+	}
+
+	task, err := h.service.UpdateTask(ctx, req.ID, &service.UpdateTaskRequest{
+		Title:        req.Title,
+		Description:  req.Description,
+		Priority:     req.Priority,
+		State:        req.State,
+		Repositories: repos,
+		Position:     req.Position,
+		Metadata:     req.Metadata,
+	})
 	if err != nil {
 		h.logger.Error("failed to update task", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update task", nil)
 	}
 
-	return ws.NewResponse(msg.ID, msg.Action, resp)
+	return ws.NewResponse(msg.ID, msg.Action, dto.FromTask(task))
 }
 
 // handleAskUserQuestion creates a clarification request and waits for response.
 func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
-		SessionID string                  `json:"session_id"`
-		TaskID    string                  `json:"task_id"`
-		Question  clarification.Question  `json:"question"`
-		Context   string                  `json:"context"`
+		SessionID string                 `json:"session_id"`
+		TaskID    string                 `json:"task_id"`
+		Question  clarification.Question `json:"question"`
+		Context   string                 `json:"context"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)

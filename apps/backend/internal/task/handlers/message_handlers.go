@@ -14,9 +14,9 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
-	"github.com/kandev/kandev/internal/task/controller"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -29,25 +29,23 @@ type OrchestratorService interface {
 
 // MessageHandlers handles WebSocket requests for messages
 type MessageHandlers struct {
-	messageController *controller.MessageController
-	taskController    *controller.TaskController
-	orchestrator      OrchestratorService
-	logger            *logger.Logger
+	service      *service.Service
+	orchestrator OrchestratorService
+	logger       *logger.Logger
 }
 
 // NewMessageHandlers creates a new MessageHandlers instance
-func NewMessageHandlers(messageCtrl *controller.MessageController, taskCtrl *controller.TaskController, orchestrator OrchestratorService, log *logger.Logger) *MessageHandlers {
+func NewMessageHandlers(svc *service.Service, orchestrator OrchestratorService, log *logger.Logger) *MessageHandlers {
 	return &MessageHandlers{
-		messageController: messageCtrl,
-		taskController:    taskCtrl,
-		orchestrator:      orchestrator,
-		logger:            log.WithFields(zap.String("component", "task-message-handlers")),
+		service:      svc,
+		orchestrator: orchestrator,
+		logger:       log.WithFields(zap.String("component", "task-message-handlers")),
 	}
 }
 
 // RegisterMessageRoutes registers message HTTP + WebSocket handlers
-func RegisterMessageRoutes(router *gin.Engine, dispatcher *ws.Dispatcher, messageCtrl *controller.MessageController, taskCtrl *controller.TaskController, orchestrator OrchestratorService, log *logger.Logger) {
-	handlers := NewMessageHandlers(messageCtrl, taskCtrl, orchestrator, log)
+func RegisterMessageRoutes(router *gin.Engine, dispatcher *ws.Dispatcher, svc *service.Service, orchestrator OrchestratorService, log *logger.Logger) {
+	handlers := NewMessageHandlers(svc, orchestrator, log)
 	handlers.registerHTTP(router)
 	handlers.registerWS(dispatcher)
 }
@@ -89,25 +87,51 @@ func (h *MessageHandlers) httpListMessages(c *gin.Context) {
 		return
 	}
 
-	var (
-		resp dto.ListMessagesResponse
-		err  error
-	)
+	var resp dto.ListMessagesResponse
 	if paginated {
-		resp, err = h.messageController.ListMessages(c.Request.Context(), dto.ListMessagesRequest{
+		messages, hasMore, err := h.service.ListMessagesPaginated(c.Request.Context(), service.ListMessagesRequest{
 			TaskSessionID: sessionID,
 			Limit:         limit,
 			Before:        before,
 			After:         after,
 			Sort:          sort,
 		})
+		if err != nil {
+			h.logger.Error("failed to list messages", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list messages"})
+			return
+		}
+		result := make([]*v1.Message, 0, len(messages))
+		for _, message := range messages {
+			result = append(result, message.ToAPI())
+		}
+		cursor := ""
+		if len(result) > 0 {
+			cursor = result[len(result)-1].ID
+		}
+		resp = dto.ListMessagesResponse{
+			Messages: result,
+			Total:    len(result),
+			HasMore:  hasMore,
+			Cursor:   cursor,
+		}
 	} else {
-		resp, err = h.messageController.ListAllMessages(c.Request.Context(), sessionID)
-	}
-	if err != nil {
-		h.logger.Error("failed to list messages", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list messages"})
-		return
+		messages, err := h.service.ListMessages(c.Request.Context(), sessionID)
+		if err != nil {
+			h.logger.Error("failed to list messages", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list messages"})
+			return
+		}
+		result := make([]*v1.Message, 0, len(messages))
+		for _, message := range messages {
+			result = append(result, message.ToAPI())
+		}
+		resp = dto.ListMessagesResponse{
+			Messages: result,
+			Total:    len(result),
+			HasMore:  false,
+			Cursor:   "",
+		}
 	}
 	c.JSON(http.StatusOK, resp)
 }
@@ -140,20 +164,20 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 
 	// Check if session is currently processing a prompt (RUNNING state)
 	// This prevents duplicate/concurrent prompts that can cause race conditions
-	sessionResp, err := h.taskController.GetTaskSession(ctx, dto.GetTaskSessionRequest{TaskSessionID: req.TaskSessionID})
+	session, err := h.service.GetTaskSession(ctx, req.TaskSessionID)
 	if err != nil {
 		h.logger.Error("failed to get task session", zap.String("session_id", req.TaskSessionID), zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get task session", nil)
 	}
-	if sessionResp.Session.State == models.TaskSessionStateRunning {
+	if session.State == models.TaskSessionStateRunning {
 		h.logger.Warn("rejected message submission while agent is busy",
 			zap.String("session_id", req.TaskSessionID),
-			zap.String("session_state", string(sessionResp.Session.State)))
+			zap.String("session_state", string(session.State)))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Agent is currently processing. Please wait for the current operation to complete.", nil)
 	}
 
 	// Get the current task state to determine if we need to transition
-	task, err := h.taskController.GetTask(ctx, dto.GetTaskRequest{ID: req.TaskID})
+	task, err := h.service.GetTask(ctx, req.TaskID)
 	if err != nil {
 		h.logger.Error("failed to get task", zap.String("task_id", req.TaskID), zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get task", nil)
@@ -161,7 +185,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 
 	// If task is in REVIEW state, transition back to IN_PROGRESS (also moves to matching column)
 	if task.State == v1.TaskStateReview {
-		if _, err := h.taskController.UpdateTaskState(ctx, dto.UpdateTaskStateRequest{ID: req.TaskID, State: v1.TaskStateInProgress}); err != nil {
+		if _, err := h.service.UpdateTaskState(ctx, req.TaskID, v1.TaskStateInProgress); err != nil {
 			h.logger.Error("failed to transition task from REVIEW to IN_PROGRESS",
 				zap.String("task_id", req.TaskID),
 				zap.Error(err))
@@ -171,7 +195,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		}
 	}
 
-	message, err := h.messageController.CreateMessage(ctx, dto.CreateMessageRequest{
+	message, err := h.service.CreateMessage(ctx, &service.CreateMessageRequest{
 		TaskSessionID: req.TaskSessionID,
 		TaskID:        req.TaskID,
 		Content:       req.Content,
@@ -183,7 +207,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create message", nil)
 	}
 
-	response, err := ws.NewResponse(msg.ID, msg.Action, message)
+	response, err := ws.NewResponse(msg.ID, msg.Action, message.ToAPI())
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to encode response", nil)
 	}
@@ -232,7 +256,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 						errorMsg = "Agent is not running. Please restart the session."
 					}
 
-					if _, createErr := h.messageController.CreateMessage(promptCtx, dto.CreateMessageRequest{
+					if _, createErr := h.service.CreateMessage(promptCtx, &service.CreateMessageRequest{
 						TaskSessionID: sessionID,
 						TaskID:        taskID,
 						Content:       errorMsg,
@@ -278,7 +302,7 @@ func (h *MessageHandlers) wsListMessages(ctx context.Context, msg *ws.Message) (
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "sort must be asc or desc", nil)
 	}
 
-	resp, err := h.messageController.ListMessages(ctx, dto.ListMessagesRequest{
+	messages, hasMore, err := h.service.ListMessagesPaginated(ctx, service.ListMessagesRequest{
 		TaskSessionID: req.TaskSessionID,
 		Limit:         req.Limit,
 		Before:        req.Before,
@@ -288,6 +312,20 @@ func (h *MessageHandlers) wsListMessages(ctx context.Context, msg *ws.Message) (
 	if err != nil {
 		h.logger.Error("failed to list messages", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list messages", nil)
+	}
+	result := make([]*v1.Message, 0, len(messages))
+	for _, message := range messages {
+		result = append(result, message.ToAPI())
+	}
+	cursor := ""
+	if len(result) > 0 {
+		cursor = result[len(result)-1].ID
+	}
+	resp := dto.ListMessagesResponse{
+		Messages: result,
+		Total:    len(result),
+		HasMore:  hasMore,
+		Cursor:   cursor,
 	}
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }

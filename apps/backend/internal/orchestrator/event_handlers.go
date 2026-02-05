@@ -222,7 +222,7 @@ func (s *Service) handleWorkflowTransition(ctx context.Context, taskID, sessionI
 	}
 
 	// Check if there's an on_complete transition
-	if currentStep.OnCompleteStepID == "" {
+	if currentStep.OnCompleteStepID == nil || *currentStep.OnCompleteStepID == "" {
 		s.logger.Debug("workflow step has no on_complete transition",
 			zap.String("step_id", currentStep.ID),
 			zap.String("step_name", currentStep.Name))
@@ -230,10 +230,10 @@ func (s *Service) handleWorkflowTransition(ctx context.Context, taskID, sessionI
 	}
 
 	// Get the target step to log its name
-	targetStep, err := s.workflowStepGetter.GetStep(ctx, currentStep.OnCompleteStepID)
+	targetStep, err := s.workflowStepGetter.GetStep(ctx, *currentStep.OnCompleteStepID)
 	if err != nil {
 		s.logger.Warn("failed to get target workflow step",
-			zap.String("target_step_id", currentStep.OnCompleteStepID),
+			zap.String("target_step_id", *currentStep.OnCompleteStepID),
 			zap.Error(err))
 		return false
 	}
@@ -248,7 +248,7 @@ func (s *Service) handleWorkflowTransition(ctx context.Context, taskID, sessionI
 	}
 
 	// Update the task's workflow step
-	task.WorkflowStepID = currentStep.OnCompleteStepID
+	task.WorkflowStepID = *currentStep.OnCompleteStepID
 	task.UpdatedAt = time.Now().UTC()
 	if err := s.repo.UpdateTask(ctx, task); err != nil {
 		s.logger.Error("failed to move task to next workflow step",
@@ -279,10 +279,10 @@ func (s *Service) handleWorkflowTransition(ctx context.Context, taskID, sessionI
 	}
 
 	// Also update the session's workflow step
-	if err := s.repo.UpdateSessionWorkflowStep(ctx, sessionID, currentStep.OnCompleteStepID); err != nil {
+	if err := s.repo.UpdateSessionWorkflowStep(ctx, sessionID, *currentStep.OnCompleteStepID); err != nil {
 		s.logger.Warn("failed to update session workflow step",
 			zap.String("session_id", sessionID),
-			zap.String("step_id", currentStep.OnCompleteStepID),
+			zap.String("step_id", *currentStep.OnCompleteStepID),
 			zap.Error(err))
 		// Don't return false - task was already moved
 	}
@@ -385,7 +385,7 @@ func (s *Service) handleReviewStepRollback(ctx context.Context, taskID, sessionI
 	// Only proceed if the current step is a pure review step (StepType == "review")
 	// Work steps like Planning or Implementation with RequireApproval should NOT rollback
 	// because the agent is actively working on them, not just waiting for approval
-	if currentStep.StepType != "review" {
+	if currentStep.StepType != v1.StepTypeReview {
 		return
 	}
 

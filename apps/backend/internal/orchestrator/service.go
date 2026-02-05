@@ -85,26 +85,15 @@ type TurnService interface {
 	GetActiveTurn(ctx context.Context, sessionID string) (*models.Turn, error)
 }
 
-// WorkflowStep contains workflow step data needed for prompt construction and transitions.
-type WorkflowStep struct {
-	ID               string
-	Name             string
-	StepType         string
-	AutoStartAgent   bool
-	PlanMode         bool
-	RequireApproval  bool
-	PromptPrefix     string
-	PromptSuffix     string
-	OnCompleteStepID string // Step to transition to when agent completes
-	OnApprovalStepID string // Step to transition to when user approves
-}
+// WorkflowStep is an alias to the shared v1.WorkflowStep type.
+type WorkflowStep = v1.WorkflowStep
 
 // WorkflowStepGetter retrieves workflow step information for prompt building.
 type WorkflowStepGetter interface {
-	GetStep(ctx context.Context, stepID string) (*WorkflowStep, error)
+	GetStep(ctx context.Context, stepID string) (*v1.WorkflowStep, error)
 	// GetSourceStep finds the step that has on_complete_step_id pointing to the given step.
 	// Used to find the "previous" step when moving back from a review step.
-	GetSourceStep(ctx context.Context, boardID, targetStepID string) (*WorkflowStep, error)
+	GetSourceStep(ctx context.Context, boardID, targetStepID string) (*v1.WorkflowStep, error)
 }
 
 // Service is the main orchestrator service

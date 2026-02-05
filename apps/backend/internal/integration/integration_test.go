@@ -23,7 +23,6 @@ import (
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events/bus"
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
-	taskcontroller "github.com/kandev/kandev/internal/task/controller"
 	taskhandlers "github.com/kandev/kandev/internal/task/handlers"
 	"github.com/kandev/kandev/internal/task/repository"
 	taskservice "github.com/kandev/kandev/internal/task/service"
@@ -102,21 +101,15 @@ func NewTestServer(t *testing.T) *TestServer {
 	gateway.SetupRoutes(router)
 
 	// Register handlers (HTTP + WS)
-	workspaceController := taskcontroller.NewWorkspaceController(taskSvc)
-	boardController := taskcontroller.NewBoardController(taskSvc)
-	boardController.SetWorkflowStepLister(workflowSvc)
-	taskController := taskcontroller.NewTaskController(taskSvc)
-	executorController := taskcontroller.NewExecutorController(taskSvc)
-	environmentController := taskcontroller.NewEnvironmentController(taskSvc)
-	repositoryController := taskcontroller.NewRepositoryController(taskSvc)
 	workflowCtrl := workflowcontroller.NewController(workflowSvc)
-	taskhandlers.RegisterWorkspaceRoutes(router, gateway.Dispatcher, workspaceController, log)
-	taskhandlers.RegisterBoardRoutes(router, gateway.Dispatcher, boardController, log)
+	taskhandlers.RegisterWorkspaceRoutes(router, gateway.Dispatcher, taskSvc, log)
+	boardHandlers := taskhandlers.RegisterBoardRoutes(router, gateway.Dispatcher, taskSvc, log)
+	boardHandlers.SetWorkflowStepLister(workflowSvc)
 	planService := taskservice.NewPlanService(taskRepo, eventBus, log)
-	taskhandlers.RegisterTaskRoutes(router, gateway.Dispatcher, taskController, nil, taskRepo, planService, log)
-	taskhandlers.RegisterRepositoryRoutes(router, gateway.Dispatcher, repositoryController, log)
-	taskhandlers.RegisterExecutorRoutes(router, gateway.Dispatcher, executorController, log)
-	taskhandlers.RegisterEnvironmentRoutes(router, gateway.Dispatcher, environmentController, log)
+	taskhandlers.RegisterTaskRoutes(router, gateway.Dispatcher, taskSvc, nil, taskRepo, planService, log)
+	taskhandlers.RegisterRepositoryRoutes(router, gateway.Dispatcher, taskSvc, log)
+	taskhandlers.RegisterExecutorRoutes(router, gateway.Dispatcher, taskSvc, log)
+	taskhandlers.RegisterEnvironmentRoutes(router, gateway.Dispatcher, taskSvc, log)
 	workflowhandlers.RegisterRoutes(router, gateway.Dispatcher, workflowCtrl, log)
 
 	// Create test server

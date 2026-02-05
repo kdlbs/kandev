@@ -1,8 +1,6 @@
 package main
 
 import (
-	"context"
-
 	"github.com/kandev/kandev/internal/agent/discovery"
 	"github.com/kandev/kandev/internal/agent/registry"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
@@ -13,7 +11,6 @@ import (
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	userservice "github.com/kandev/kandev/internal/user/service"
-	workflowmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowservice "github.com/kandev/kandev/internal/workflow/service"
 )
 
@@ -44,7 +41,10 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	taskSvc.SetWorkflowStepCreator(workflowSvc)
 
 	// Wire workflow step getter to task service for MoveTask
-	taskSvc.SetWorkflowStepGetter(&workflowStepGetterAdapter{svc: workflowSvc})
+	// Since both workflow/models.WorkflowStep and task/service.WorkflowStep
+	// are now aliases to v1.WorkflowStep, workflowSvc directly implements
+	// the taskservice.WorkflowStepGetter interface - no adapter needed.
+	taskSvc.SetWorkflowStepGetter(workflowSvc)
 
 	return &Services{
 		Task:     taskSvc,
@@ -55,50 +55,4 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		// Notification service is initialized after gateway is available.
 		Notification: nil,
 	}, agentSettingsController, nil
-}
-
-// workflowStepGetterAdapter adapts workflow service to task service's WorkflowStepGetter interface.
-type workflowStepGetterAdapter struct {
-	svc *workflowservice.Service
-}
-
-// GetStep implements taskservice.WorkflowStepGetter.
-func (a *workflowStepGetterAdapter) GetStep(ctx context.Context, stepID string) (*taskservice.WorkflowStep, error) {
-	step, err := a.svc.GetStep(ctx, stepID)
-	if err != nil {
-		return nil, err
-	}
-	return a.toTaskServiceStep(step), nil
-}
-
-// GetNextStepByPosition implements taskservice.WorkflowStepGetter.
-func (a *workflowStepGetterAdapter) GetNextStepByPosition(ctx context.Context, boardID string, currentPosition int) (*taskservice.WorkflowStep, error) {
-	step, err := a.svc.GetNextStepByPosition(ctx, boardID, currentPosition)
-	if err != nil {
-		return nil, err
-	}
-	if step == nil {
-		return nil, nil
-	}
-	return a.toTaskServiceStep(step), nil
-}
-
-// toTaskServiceStep converts a workflow step to a task service step.
-func (a *workflowStepGetterAdapter) toTaskServiceStep(step *workflowmodels.WorkflowStep) *taskservice.WorkflowStep {
-	return &taskservice.WorkflowStep{
-		ID:               step.ID,
-		BoardID:          step.BoardID,
-		Name:             step.Name,
-		StepType:         string(step.StepType),
-		Position:         step.Position,
-		Color:            step.Color,
-		AutoStartAgent:   step.AutoStartAgent,
-		PlanMode:         step.PlanMode,
-		RequireApproval:  step.RequireApproval,
-		PromptPrefix:     step.PromptPrefix,
-		PromptSuffix:     step.PromptSuffix,
-		AllowManualMove:  step.AllowManualMove,
-		OnCompleteStepID: step.OnCompleteStepID,
-		OnApprovalStepID: step.OnApprovalStepID,
-	}
 }

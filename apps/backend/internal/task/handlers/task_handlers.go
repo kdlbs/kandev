@@ -12,7 +12,6 @@ import (
 	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
-	"github.com/kandev/kandev/internal/task/controller"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/service"
@@ -22,7 +21,7 @@ import (
 )
 
 type TaskHandlers struct {
-	controller   *controller.TaskController
+	service      *service.Service
 	orchestrator OrchestratorStarter
 	repo         repository.Repository
 	planService  *service.PlanService
@@ -40,9 +39,9 @@ type OrchestratorStarter interface {
 	StartTaskWithSession(ctx context.Context, taskID string, sessionID string, agentProfileID string, executorID string, priority int, prompt string, workflowStepID string) (*executor.TaskExecution, error)
 }
 
-func NewTaskHandlers(ctrl *controller.TaskController, orchestrator OrchestratorStarter, repo repository.Repository, planService *service.PlanService, log *logger.Logger) *TaskHandlers {
+func NewTaskHandlers(svc *service.Service, orchestrator OrchestratorStarter, repo repository.Repository, planService *service.PlanService, log *logger.Logger) *TaskHandlers {
 	return &TaskHandlers{
-		controller:   ctrl,
+		service:      svc,
 		orchestrator: orchestrator,
 		repo:         repo,
 		planService:  planService,
@@ -50,8 +49,8 @@ func NewTaskHandlers(ctrl *controller.TaskController, orchestrator OrchestratorS
 	}
 }
 
-func RegisterTaskRoutes(router *gin.Engine, dispatcher *ws.Dispatcher, ctrl *controller.TaskController, orchestrator OrchestratorStarter, repo repository.Repository, planService *service.PlanService, log *logger.Logger) {
-	handlers := NewTaskHandlers(ctrl, orchestrator, repo, planService, log)
+func RegisterTaskRoutes(router *gin.Engine, dispatcher *ws.Dispatcher, svc *service.Service, orchestrator OrchestratorStarter, repo repository.Repository, planService *service.PlanService, log *logger.Logger) {
+	handlers := NewTaskHandlers(svc, orchestrator, repo, planService, log)
 	handlers.registerHTTP(router)
 	handlers.registerWS(dispatcher)
 }
@@ -96,10 +95,17 @@ func (h *TaskHandlers) registerWS(dispatcher *ws.Dispatcher) {
 // HTTP handlers
 
 func (h *TaskHandlers) httpListTasks(c *gin.Context) {
-	resp, err := h.controller.ListTasks(c.Request.Context(), dto.ListTasksRequest{BoardID: c.Param("id")})
+	tasks, err := h.service.ListTasks(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		handleNotFound(c, h.logger, err, "tasks not found")
 		return
+	}
+	resp := dto.ListTasksResponse{
+		Tasks: make([]dto.TaskDTO, 0, len(tasks)),
+		Total: len(tasks),
+	}
+	for _, task := range tasks {
+		resp.Tasks = append(resp.Tasks, dto.FromTask(task))
 	}
 	c.JSON(http.StatusOK, resp)
 }
@@ -120,48 +126,72 @@ func (h *TaskHandlers) httpListTasksByWorkspace(c *gin.Context) {
 	}
 
 	query := c.Query("query")
+	workspaceID := c.Param("id")
 
-	resp, err := h.controller.ListTasksByWorkspace(c.Request.Context(), dto.ListTasksByWorkspaceRequest{
-		WorkspaceID: c.Param("id"),
-		Query:       query,
-		Page:        page,
-		PageSize:    pageSize,
-	})
+	tasks, total, err := h.service.ListTasksByWorkspace(c.Request.Context(), workspaceID, query, page, pageSize)
 	if err != nil {
 		handleNotFound(c, h.logger, err, "tasks not found")
 		return
+	}
+
+	// Get primary session IDs for all tasks
+	taskIDs := make([]string, 0, len(tasks))
+	for _, task := range tasks {
+		taskIDs = append(taskIDs, task.ID)
+	}
+
+	primarySessionMap, err := h.service.GetPrimarySessionIDsForTasks(c.Request.Context(), taskIDs)
+	if err != nil {
+		// Log error but continue without primary session IDs
+		primarySessionMap = make(map[string]string)
+	}
+
+	resp := dto.ListTasksResponse{
+		Tasks: make([]dto.TaskDTO, 0, len(tasks)),
+		Total: total,
+	}
+	for _, task := range tasks {
+		var primarySessionID *string
+		if id, ok := primarySessionMap[task.ID]; ok {
+			primarySessionID = &id
+		}
+		resp.Tasks = append(resp.Tasks, dto.FromTaskWithPrimarySession(task, primarySessionID))
 	}
 	c.JSON(http.StatusOK, resp)
 }
 
 func (h *TaskHandlers) httpGetTask(c *gin.Context) {
-	resp, err := h.controller.GetTask(c.Request.Context(), dto.GetTaskRequest{ID: c.Param("id")})
+	task, err := h.service.GetTask(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		handleNotFound(c, h.logger, err, "task not found")
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	c.JSON(http.StatusOK, dto.FromTask(task))
 }
 
 func (h *TaskHandlers) httpListTaskSessions(c *gin.Context) {
-	resp, err := h.controller.ListTaskSessions(c.Request.Context(), dto.ListTaskSessionsRequest{TaskID: c.Param("id")})
+	sessions, err := h.service.ListTaskSessions(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		handleNotFound(c, h.logger, err, "task sessions not found")
 		return
+	}
+	resp := dto.ListTaskSessionsResponse{
+		Sessions: make([]dto.TaskSessionDTO, 0, len(sessions)),
+		Total:    len(sessions),
+	}
+	for _, session := range sessions {
+		resp.Sessions = append(resp.Sessions, dto.FromTaskSession(session))
 	}
 	c.JSON(http.StatusOK, resp)
 }
 
 func (h *TaskHandlers) httpGetTaskSession(c *gin.Context) {
-	resp, err := h.controller.GetTaskSession(
-		c.Request.Context(),
-		dto.GetTaskSessionRequest{TaskSessionID: c.Param("id")},
-	)
+	session, err := h.service.GetTaskSession(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		handleNotFound(c, h.logger, err, "task session not found")
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	c.JSON(http.StatusOK, dto.GetTaskSessionResponse{Session: dto.FromTaskSession(session)})
 }
 
 func (h *TaskHandlers) httpListSessionTurns(c *gin.Context) {
@@ -188,16 +218,41 @@ func (h *TaskHandlers) httpListSessionTurns(c *gin.Context) {
 }
 
 func (h *TaskHandlers) httpApproveSession(c *gin.Context) {
-	resp, err := h.controller.ApproveSession(
-		c.Request.Context(),
-		dto.ApproveSessionRequest{SessionID: c.Param("id")},
-	)
+	result, err := h.service.ApproveSession(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		h.logger.Error("failed to approve session", zap.String("session_id", c.Param("id")), zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	resp := dto.ApproveSessionResponse{
+		Success: true,
+		Session: dto.FromTaskSession(result.Session),
+	}
+	if result.WorkflowStep != nil {
+		resp.WorkflowStep = workflowStepToDTO(result.WorkflowStep)
+	}
 	c.JSON(http.StatusOK, resp)
+}
+
+// workflowStepToDTO converts a workflow step to a DTO.
+func workflowStepToDTO(step *v1.WorkflowStep) dto.WorkflowStepDTO {
+	return dto.WorkflowStepDTO{
+		ID:              step.ID,
+		BoardID:         step.BoardID,
+		Name:            step.Name,
+		StepType:        step.StepType,
+		Position:        step.Position,
+		State:           step.TaskState,
+		Color:           step.Color,
+		AutoStartAgent:  step.AutoStartAgent,
+		PlanMode:        step.PlanMode,
+		RequireApproval: step.RequireApproval,
+		PromptPrefix:    step.PromptPrefix,
+		PromptSuffix:    step.PromptSuffix,
+		AllowManualMove: step.AllowManualMove,
+		CreatedAt:       step.CreatedAt,
+		UpdatedAt:       step.UpdatedAt,
+	}
 }
 
 type httpTaskRepositoryInput struct {
@@ -262,7 +317,20 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 	}
 
 	reqCtx := c.Request.Context()
-	resp, err := h.controller.CreateTask(reqCtx, dto.CreateTaskRequest{
+
+	// Convert DTO repositories to service layer input
+	var svcRepos []service.TaskRepositoryInput
+	for _, r := range repos {
+		svcRepos = append(svcRepos, service.TaskRepositoryInput{
+			RepositoryID:  r.RepositoryID,
+			BaseBranch:    r.BaseBranch,
+			LocalPath:     r.LocalPath,
+			Name:          r.Name,
+			DefaultBranch: r.DefaultBranch,
+		})
+	}
+
+	task, err := h.service.CreateTask(reqCtx, &service.CreateTaskRequest{
 		WorkspaceID:    body.WorkspaceID,
 		BoardID:        body.BoardID,
 		WorkflowStepID: body.WorkflowStepID,
@@ -270,7 +338,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		Description:    body.Description,
 		Priority:       body.Priority,
 		State:          body.State,
-		Repositories:   repos,
+		Repositories:   svcRepos,
 		Position:       body.Position,
 		Metadata:       body.Metadata,
 	})
@@ -279,6 +347,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		return
 	}
 
+	resp := dto.FromTask(task)
 	response := createTaskResponse{TaskDTO: resp}
 	if body.StartAgent && body.AgentProfileID != "" && h.orchestrator != nil {
 		// Create session entry synchronously so we can return the session ID immediately
@@ -347,13 +416,24 @@ func (h *TaskHandlers) httpUpdateTask(c *gin.Context) {
 		}
 	}
 
-	resp, err := h.controller.UpdateTask(c.Request.Context(), dto.UpdateTaskRequest{
-		ID:           c.Param("id"),
+	// Convert DTO repositories to service layer input
+	var svcRepos []service.TaskRepositoryInput
+	for _, r := range repos {
+		svcRepos = append(svcRepos, service.TaskRepositoryInput{
+			RepositoryID:  r.RepositoryID,
+			BaseBranch:    r.BaseBranch,
+			LocalPath:     r.LocalPath,
+			Name:          r.Name,
+			DefaultBranch: r.DefaultBranch,
+		})
+	}
+
+	task, err := h.service.UpdateTask(c.Request.Context(), c.Param("id"), &service.UpdateTaskRequest{
 		Title:        body.Title,
 		Description:  body.Description,
 		Priority:     body.Priority,
 		State:        body.State,
-		Repositories: repos,
+		Repositories: svcRepos,
 		Position:     body.Position,
 		Metadata:     body.Metadata,
 	})
@@ -361,7 +441,7 @@ func (h *TaskHandlers) httpUpdateTask(c *gin.Context) {
 		handleNotFound(c, h.logger, err, "task not updated")
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	c.JSON(http.StatusOK, dto.FromTask(task))
 }
 
 type httpMoveTaskRequest struct {
@@ -380,15 +460,14 @@ func (h *TaskHandlers) httpMoveTask(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "board_id and workflow_step_id are required"})
 		return
 	}
-	resp, err := h.controller.MoveTask(c.Request.Context(), dto.MoveTaskRequest{
-		ID:             c.Param("id"),
-		BoardID:        body.BoardID,
-		WorkflowStepID: body.WorkflowStepID,
-		Position:       body.Position,
-	})
+	result, err := h.service.MoveTask(c.Request.Context(), c.Param("id"), body.BoardID, body.WorkflowStepID, body.Position)
 	if err != nil {
 		handleNotFound(c, h.logger, err, "task not moved")
 		return
+	}
+	resp := dto.MoveTaskResponse{Task: dto.FromTask(result.Task)}
+	if result.WorkflowStep != nil {
+		resp.WorkflowStep = workflowStepToDTO(result.WorkflowStep)
 	}
 	c.JSON(http.StatusOK, resp)
 }
@@ -396,12 +475,11 @@ func (h *TaskHandlers) httpMoveTask(c *gin.Context) {
 func (h *TaskHandlers) httpDeleteTask(c *gin.Context) {
 	deleteCtx, cancel := context.WithTimeout(context.Background(), constants.TaskDeleteTimeout)
 	defer cancel()
-	resp, err := h.controller.DeleteTask(deleteCtx, dto.DeleteTaskRequest{ID: c.Param("id")})
-	if err != nil {
+	if err := h.service.DeleteTask(deleteCtx, c.Param("id")); err != nil {
 		handleNotFound(c, h.logger, err, "task not deleted")
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	c.JSON(http.StatusOK, dto.SuccessResponse{Success: true})
 }
 
 // WS handlers
@@ -419,10 +497,17 @@ func (h *TaskHandlers) wsListTaskSessions(ctx context.Context, msg *ws.Message) 
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 	}
 
-	resp, err := h.controller.ListTaskSessions(ctx, dto.ListTaskSessionsRequest{TaskID: req.TaskID})
+	sessions, err := h.service.ListTaskSessions(ctx, req.TaskID)
 	if err != nil {
 		h.logger.Error("failed to list task sessions", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list task sessions", nil)
+	}
+	resp := dto.ListTaskSessionsResponse{
+		Sessions: make([]dto.TaskSessionDTO, 0, len(sessions)),
+		Total:    len(sessions),
+	}
+	for _, session := range sessions {
+		resp.Sessions = append(resp.Sessions, dto.FromTaskSession(session))
 	}
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }
@@ -440,10 +525,17 @@ func (h *TaskHandlers) wsListTasks(ctx context.Context, msg *ws.Message) (*ws.Me
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "board_id is required", nil)
 	}
 
-	resp, err := h.controller.ListTasks(ctx, dto.ListTasksRequest{BoardID: req.BoardID})
+	tasks, err := h.service.ListTasks(ctx, req.BoardID)
 	if err != nil {
 		h.logger.Error("failed to list tasks", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list tasks", nil)
+	}
+	resp := dto.ListTasksResponse{
+		Tasks: make([]dto.TaskDTO, 0, len(tasks)),
+		Total: len(tasks),
+	}
+	for _, task := range tasks {
+		resp.Tasks = append(resp.Tasks, dto.FromTask(task))
 	}
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }
@@ -500,7 +592,19 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		})
 	}
 
-	resp, err := h.controller.CreateTask(ctx, dto.CreateTaskRequest{
+	// Convert DTO repositories to service layer input
+	var svcRepos []service.TaskRepositoryInput
+	for _, r := range repos {
+		svcRepos = append(svcRepos, service.TaskRepositoryInput{
+			RepositoryID:  r.RepositoryID,
+			BaseBranch:    r.BaseBranch,
+			LocalPath:     r.LocalPath,
+			Name:          r.Name,
+			DefaultBranch: r.DefaultBranch,
+		})
+	}
+
+	task, err := h.service.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID:    req.WorkspaceID,
 		BoardID:        req.BoardID,
 		WorkflowStepID: req.WorkflowStepID,
@@ -508,7 +612,7 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		Description:    req.Description,
 		Priority:       req.Priority,
 		State:          req.State,
-		Repositories:   repos,
+		Repositories:   svcRepos,
 		Position:       req.Position,
 		Metadata:       req.Metadata,
 	})
@@ -517,6 +621,7 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create task", nil)
 	}
 
+	resp := dto.FromTask(task)
 	response := createTaskResponse{TaskDTO: resp}
 	if req.StartAgent && req.AgentProfileID != "" && h.orchestrator != nil {
 		// Use task description as the initial prompt with workflow step config (prompt prefix/suffix, plan mode)
@@ -549,11 +654,11 @@ func (h *TaskHandlers) wsGetTask(ctx context.Context, msg *ws.Message) (*ws.Mess
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "id is required", nil)
 	}
 
-	resp, err := h.controller.GetTask(ctx, dto.GetTaskRequest{ID: req.ID})
+	task, err := h.service.GetTask(ctx, req.ID)
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Task not found", nil)
 	}
-	return ws.NewResponse(msg.ID, msg.Action, resp)
+	return ws.NewResponse(msg.ID, msg.Action, dto.FromTask(task))
 }
 
 type wsUpdateTaskRequest struct {
@@ -577,10 +682,10 @@ func (h *TaskHandlers) wsUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	}
 
 	// Convert repositories if provided
-	var repos []dto.TaskRepositoryInput
+	var repos []service.TaskRepositoryInput
 	if req.Repositories != nil {
 		for _, r := range req.Repositories {
-			repos = append(repos, dto.TaskRepositoryInput{
+			repos = append(repos, service.TaskRepositoryInput{
 				RepositoryID:  r.RepositoryID,
 				BaseBranch:    r.BaseBranch,
 				LocalPath:     r.LocalPath,
@@ -590,8 +695,7 @@ func (h *TaskHandlers) wsUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		}
 	}
 
-	resp, err := h.controller.UpdateTask(ctx, dto.UpdateTaskRequest{
-		ID:           req.ID,
+	task, err := h.service.UpdateTask(ctx, req.ID, &service.UpdateTaskRequest{
 		Title:        req.Title,
 		Description:  req.Description,
 		Priority:     req.Priority,
@@ -604,7 +708,7 @@ func (h *TaskHandlers) wsUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		h.logger.Error("failed to update task", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update task", nil)
 	}
-	return ws.NewResponse(msg.ID, msg.Action, resp)
+	return ws.NewResponse(msg.ID, msg.Action, dto.FromTask(task))
 }
 
 type wsDeleteTaskRequest struct {
@@ -620,12 +724,11 @@ func (h *TaskHandlers) wsDeleteTask(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "id is required", nil)
 	}
 
-	resp, err := h.controller.DeleteTask(ctx, dto.DeleteTaskRequest{ID: req.ID})
-	if err != nil {
+	if err := h.service.DeleteTask(ctx, req.ID); err != nil {
 		h.logger.Error("failed to delete task", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to delete task", nil)
 	}
-	return ws.NewResponse(msg.ID, msg.Action, resp)
+	return ws.NewResponse(msg.ID, msg.Action, dto.SuccessResponse{Success: true})
 }
 
 type wsMoveTaskRequest struct {
@@ -650,15 +753,16 @@ func (h *TaskHandlers) wsMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow_step_id is required", nil)
 	}
 
-	resp, err := h.controller.MoveTask(ctx, dto.MoveTaskRequest{
-		ID:             req.ID,
-		BoardID:        req.BoardID,
-		WorkflowStepID: req.WorkflowStepID,
-		Position:       req.Position,
-	})
+	result, err := h.service.MoveTask(ctx, req.ID, req.BoardID, req.WorkflowStepID, req.Position)
 	if err != nil {
 		h.logger.Error("failed to move task", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to move task", nil)
+	}
+	resp := dto.MoveTaskResponse{
+		Task: dto.FromTask(result.Task),
+	}
+	if result.WorkflowStep != nil {
+		resp.WorkflowStep = workflowStepToDTO(result.WorkflowStep)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }
@@ -680,15 +784,12 @@ func (h *TaskHandlers) wsUpdateTaskState(ctx context.Context, msg *ws.Message) (
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "state is required", nil)
 	}
 
-	resp, err := h.controller.UpdateTaskState(ctx, dto.UpdateTaskStateRequest{
-		ID:    req.ID,
-		State: v1.TaskState(req.State),
-	})
+	task, err := h.service.UpdateTaskState(ctx, req.ID, v1.TaskState(req.State))
 	if err != nil {
 		h.logger.Error("failed to update task state", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update task state", nil)
 	}
-	return ws.NewResponse(msg.ID, msg.Action, resp)
+	return ws.NewResponse(msg.ID, msg.Action, dto.FromTask(task))
 }
 
 // Git Snapshot and Commit Handlers
@@ -707,7 +808,7 @@ func (h *TaskHandlers) wsGetGitSnapshots(ctx context.Context, msg *ws.Message) (
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
 	}
 
-	snapshots, err := h.controller.GetGitSnapshots(ctx, req.SessionID, req.Limit)
+	snapshots, err := h.service.GetGitSnapshots(ctx, req.SessionID, req.Limit)
 	if err != nil {
 		h.logger.Error("failed to get git snapshots", zap.Error(err), zap.String("session_id", req.SessionID))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get git snapshots", nil)
@@ -732,7 +833,7 @@ func (h *TaskHandlers) wsGetSessionCommits(ctx context.Context, msg *ws.Message)
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
 	}
 
-	commits, err := h.controller.GetSessionCommits(ctx, req.SessionID)
+	commits, err := h.service.GetSessionCommits(ctx, req.SessionID)
 	if err != nil {
 		h.logger.Error("failed to get session commits", zap.Error(err), zap.String("session_id", req.SessionID))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get session commits", nil)
@@ -757,7 +858,7 @@ func (h *TaskHandlers) wsGetCumulativeDiff(ctx context.Context, msg *ws.Message)
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
 	}
 
-	diff, err := h.controller.GetCumulativeDiff(ctx, req.SessionID)
+	diff, err := h.service.GetCumulativeDiff(ctx, req.SessionID)
 	if err != nil {
 		h.logger.Error("failed to get cumulative diff", zap.Error(err), zap.String("session_id", req.SessionID))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get cumulative diff", nil)

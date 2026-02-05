@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"errors"
 
 	"github.com/kandev/kandev/internal/agent/lifecycle"
@@ -42,73 +41,12 @@ func provideOrchestrator(
 	orchestratorSvc.SetTurnService(newTurnServiceAdapter(taskSvc))
 
 	// Wire workflow step getter for prompt building
+	// Since both orchestrator.WorkflowStep and workflow/models.WorkflowStep
+	// are now aliases to v1.WorkflowStep, workflowSvc directly implements
+	// the orchestrator.WorkflowStepGetter interface - no adapter needed.
 	if workflowSvc != nil {
-		orchestratorSvc.SetWorkflowStepGetter(&orchestratorWorkflowStepGetterAdapter{svc: workflowSvc})
+		orchestratorSvc.SetWorkflowStepGetter(workflowSvc)
 	}
 
 	return orchestratorSvc, msgCreator, nil
-}
-
-// orchestratorWorkflowStepGetterAdapter adapts workflow service to orchestrator's WorkflowStepGetter interface.
-type orchestratorWorkflowStepGetterAdapter struct {
-	svc *workflowservice.Service
-}
-
-// GetStep implements orchestrator.WorkflowStepGetter.
-func (a *orchestratorWorkflowStepGetterAdapter) GetStep(ctx context.Context, stepID string) (*orchestrator.WorkflowStep, error) {
-	step, err := a.svc.GetStep(ctx, stepID)
-	if err != nil {
-		return nil, err
-	}
-	onCompleteStepID := ""
-	if step.OnCompleteStepID != nil {
-		onCompleteStepID = *step.OnCompleteStepID
-	}
-	onApprovalStepID := ""
-	if step.OnApprovalStepID != nil {
-		onApprovalStepID = *step.OnApprovalStepID
-	}
-	return &orchestrator.WorkflowStep{
-		ID:               step.ID,
-		Name:             step.Name,
-		StepType:         string(step.StepType),
-		AutoStartAgent:   step.AutoStartAgent,
-		PlanMode:         step.PlanMode,
-		RequireApproval:  step.RequireApproval,
-		PromptPrefix:     step.PromptPrefix,
-		PromptSuffix:     step.PromptSuffix,
-		OnCompleteStepID: onCompleteStepID,
-		OnApprovalStepID: onApprovalStepID,
-	}, nil
-}
-
-// GetSourceStep implements orchestrator.WorkflowStepGetter.
-func (a *orchestratorWorkflowStepGetterAdapter) GetSourceStep(ctx context.Context, boardID, targetStepID string) (*orchestrator.WorkflowStep, error) {
-	step, err := a.svc.GetSourceStep(ctx, boardID, targetStepID)
-	if err != nil {
-		return nil, err
-	}
-	if step == nil {
-		return nil, nil
-	}
-	onCompleteStepID := ""
-	if step.OnCompleteStepID != nil {
-		onCompleteStepID = *step.OnCompleteStepID
-	}
-	onApprovalStepID := ""
-	if step.OnApprovalStepID != nil {
-		onApprovalStepID = *step.OnApprovalStepID
-	}
-	return &orchestrator.WorkflowStep{
-		ID:               step.ID,
-		Name:             step.Name,
-		StepType:         string(step.StepType),
-		AutoStartAgent:   step.AutoStartAgent,
-		PlanMode:         step.PlanMode,
-		RequireApproval:  step.RequireApproval,
-		PromptPrefix:     step.PromptPrefix,
-		PromptSuffix:     step.PromptSuffix,
-		OnCompleteStepID: onCompleteStepID,
-		OnApprovalStepID: onApprovalStepID,
-	}, nil
 }

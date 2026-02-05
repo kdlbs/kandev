@@ -58,30 +58,14 @@ type WorkflowStepCreator interface {
 
 // WorkflowStepGetter retrieves workflow step information.
 type WorkflowStepGetter interface {
-	GetStep(ctx context.Context, stepID string) (*WorkflowStep, error)
+	GetStep(ctx context.Context, stepID string) (*v1.WorkflowStep, error)
 	// GetNextStepByPosition returns the next step after the given position for a board.
 	// Returns nil if there is no next step (i.e., current step is the last one).
-	GetNextStepByPosition(ctx context.Context, boardID string, currentPosition int) (*WorkflowStep, error)
+	GetNextStepByPosition(ctx context.Context, boardID string, currentPosition int) (*v1.WorkflowStep, error)
 }
 
-// WorkflowStep represents a workflow step (mirrors workflow/models.WorkflowStep).
-// Defined here to avoid circular dependency with workflow package.
-type WorkflowStep struct {
-	ID               string
-	BoardID          string
-	Name             string
-	StepType         string
-	Position         int
-	Color            string
-	AutoStartAgent   bool
-	PlanMode         bool
-	RequireApproval  bool
-	PromptPrefix     string
-	PromptSuffix     string
-	AllowManualMove  bool
-	OnCompleteStepID *string
-	OnApprovalStepID *string
-}
+// WorkflowStep is an alias to the shared v1.WorkflowStep type.
+type WorkflowStep = v1.WorkflowStep
 
 var (
 	ErrActiveTaskSessions        = errors.New("active agent sessions exist")
