@@ -224,6 +224,7 @@ type HttpRequestPayload struct {
 	URL      string `json:"url"`
 	Method   string `json:"method,omitempty"`
 	Response string `json:"response,omitempty"`
+	IsError  bool   `json:"is_error,omitempty"`
 }
 
 // GenericPayload is the fallback for unrecognized tools.
