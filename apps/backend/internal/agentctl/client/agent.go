@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/constants"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
@@ -201,10 +202,12 @@ type PromptResponse struct {
 
 // Prompt sends a prompt to the agent and returns when the agent completes
 // The StopReason indicates why the agent stopped (e.g., "end_turn", "needs_input")
-func (c *Client) Prompt(ctx context.Context, text string) (*PromptResponse, error) {
+// Attachments (images) are passed to the agent if provided
+func (c *Client) Prompt(ctx context.Context, text string, attachments []v1.MessageAttachment) (*PromptResponse, error) {
 	reqBody := struct {
-		Text string `json:"text"`
-	}{Text: text}
+		Text        string                 `json:"text"`
+		Attachments []v1.MessageAttachment `json:"attachments,omitempty"`
+	}{Text: text, Attachments: attachments}
 
 	body, err := json.Marshal(reqBody)
 	if err != nil {

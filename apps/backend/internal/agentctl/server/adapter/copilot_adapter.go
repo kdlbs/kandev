@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"github.com/kandev/kandev/pkg/copilot"
 	"go.uber.org/zap"
 )
@@ -328,7 +329,8 @@ func (a *CopilotAdapter) LoadSession(ctx context.Context, sessionID string) erro
 }
 
 // Prompt sends a prompt to Copilot and waits for completion.
-func (a *CopilotAdapter) Prompt(ctx context.Context, message string) error {
+// Note: attachments are not yet supported in Copilot protocol - they are ignored.
+func (a *CopilotAdapter) Prompt(ctx context.Context, message string, _ []v1.MessageAttachment) error {
 	if a.client == nil {
 		return fmt.Errorf("adapter not initialized")
 	}

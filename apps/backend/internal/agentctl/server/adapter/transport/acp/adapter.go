@@ -16,6 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
 )
 
@@ -288,8 +289,9 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string) error {
 
 // Prompt sends a prompt to the agent.
 // If pending context is set (from SetPendingContext), it will be prepended to the message.
+// Attachments (images) are converted to ACP ImageBlocks and included in the prompt.
 // When the prompt completes, a complete event is emitted via the updates channel.
-func (a *Adapter) Prompt(ctx context.Context, message string) error {
+func (a *Adapter) Prompt(ctx context.Context, message string, attachments []v1.MessageAttachment) error {
 	a.mu.Lock()
 	conn := a.acpConn
 	sessionID := a.sessionID
@@ -310,11 +312,24 @@ func (a *Adapter) Prompt(ctx context.Context, message string) error {
 			zap.Int("context_length", len(pendingContext)))
 	}
 
-	a.logger.Info("sending prompt", zap.String("session_id", sessionID))
+	// Build content blocks: text first, then images
+	contentBlocks := []acp.ContentBlock{acp.TextBlock(finalMessage)}
+
+	// Add image attachments as ImageBlocks
+	for _, att := range attachments {
+		if att.Type == "image" {
+			contentBlocks = append(contentBlocks, acp.ImageBlock(att.Data, att.MimeType))
+		}
+	}
+
+	a.logger.Info("sending prompt",
+		zap.String("session_id", sessionID),
+		zap.Int("content_blocks", len(contentBlocks)),
+		zap.Int("image_attachments", len(attachments)))
 
 	_, err := conn.Prompt(ctx, acp.PromptRequest{
 		SessionId: acp.SessionId(sessionID),
-		Prompt:    []acp.ContentBlock{acp.TextBlock(finalMessage)},
+		Prompt:    contentBlocks,
 	})
 	if err != nil {
 		return err

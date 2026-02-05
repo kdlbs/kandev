@@ -390,7 +390,8 @@ func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessi
 
 	// Send the prompt using PromptTask (with planMode from step)
 	// Note: PromptTask internally uses context.WithoutCancel for the executor call
-	_, err = s.PromptTask(ctx, taskID, sessionID, effectivePrompt, "", step.PlanMode)
+	// No attachments for workflow-initiated prompts
+	_, err = s.PromptTask(ctx, taskID, sessionID, effectivePrompt, "", step.PlanMode, nil)
 	if err != nil {
 		return fmt.Errorf("failed to prompt session: %w", err)
 	}
@@ -527,13 +528,15 @@ func (s *Service) StopSession(ctx context.Context, sessionID string, reason stri
 
 // PromptTask sends a follow-up prompt to a running agent for a task session.
 // If planMode is true, a plan mode prefix is prepended to the prompt.
-func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prompt string, model string, planMode bool) (*PromptResult, error) {
+// Attachments (images) are passed through to the agent if provided.
+func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prompt string, model string, planMode bool, attachments []v1.MessageAttachment) (*PromptResult, error) {
 	s.logger.Debug("PromptTask called",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID),
 		zap.Int("prompt_length", len(prompt)),
 		zap.String("requested_model", model),
-		zap.Bool("plan_mode", planMode))
+		zap.Bool("plan_mode", planMode),
+		zap.Int("attachments_count", len(attachments)))
 	if sessionID == "" {
 		return nil, fmt.Errorf("session_id is required")
 	}
@@ -610,7 +613,7 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 	// Prompts can take a long time (minutes) while the WS request may timeout in 15 seconds.
 	// We still want to log and respond, but the prompt should continue regardless.
 	promptCtx := context.WithoutCancel(ctx)
-	result, err := s.executor.Prompt(promptCtx, taskID, sessionID, effectivePrompt)
+	result, err := s.executor.Prompt(promptCtx, taskID, sessionID, effectivePrompt, attachments)
 	if err != nil {
 		s.logger.Error("prompt failed",
 			zap.String("task_id", taskID),

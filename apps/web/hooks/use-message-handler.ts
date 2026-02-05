@@ -1,5 +1,6 @@
 import { useCallback } from 'react';
 import { getWebSocketClient } from '@/lib/ws/connection';
+import type { MessageAttachment } from '@/components/task/chat/chat-input-container';
 
 export function useMessageHandler(
   resolvedSessionId: string | null,
@@ -9,7 +10,7 @@ export function useMessageHandler(
   planMode: boolean = false
 ) {
   const handleSendMessage = useCallback(
-    async (message: string) => {
+    async (message: string, attachments?: MessageAttachment[]) => {
       if (!taskId || !resolvedSessionId) {
         console.error('No active task session. Start an agent before sending a message.');
         return;
@@ -20,6 +21,10 @@ export function useMessageHandler(
       // Include active model in the request if it differs from the session model
       const modelToSend = activeModel && activeModel !== sessionModel ? activeModel : undefined;
 
+      // Use longer timeout when sending attachments (images can be large)
+      const hasAttachments = attachments && attachments.length > 0;
+      const timeoutMs = hasAttachments ? 30000 : 10000;
+
       await client.request(
         'message.add',
         {
@@ -28,8 +33,9 @@ export function useMessageHandler(
           content: message,
           ...(modelToSend && { model: modelToSend }),
           ...(planMode && { plan_mode: true }),
+          ...(hasAttachments && { attachments }),
         },
-        10000
+        timeoutMs
       );
     },
     [resolvedSessionId, taskId, activeModel, sessionModel, planMode]

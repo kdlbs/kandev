@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"github.com/kandev/kandev/pkg/amp"
 	"go.uber.org/zap"
 )
@@ -183,7 +184,8 @@ func (a *AmpAdapter) LoadSession(ctx context.Context, sessionID string) error {
 }
 
 // Prompt sends a prompt to Amp and waits for completion.
-func (a *AmpAdapter) Prompt(ctx context.Context, message string) error {
+// Note: attachments are not yet supported in Amp protocol - they are ignored.
+func (a *AmpAdapter) Prompt(ctx context.Context, message string, _ []v1.MessageAttachment) error {
 	a.mu.Lock()
 	sessionID := a.sessionID
 	operationID := uuid.New().String()

@@ -39,7 +39,7 @@ func (m *mockAgentManager) StopAgent(ctx context.Context, agentExecutionID strin
 	return nil
 }
 
-func (m *mockAgentManager) PromptAgent(ctx context.Context, agentExecutionID string, prompt string) (*PromptResult, error) {
+func (m *mockAgentManager) PromptAgent(ctx context.Context, agentExecutionID string, prompt string, _ []v1.MessageAttachment) (*PromptResult, error) {
 	return nil, nil
 }
 

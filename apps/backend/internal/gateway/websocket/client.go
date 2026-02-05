@@ -24,7 +24,8 @@ const (
 	pingPeriod = (pongWait * 9) / 10
 
 	// Maximum message size allowed from peer
-	maxMessageSize = 512 * 1024 // 512KB
+	// Increased to support image attachments (base64 encoded images are ~33% larger)
+	maxMessageSize = 32 * 1024 * 1024 // 32MB
 )
 
 // Client represents a single WebSocket connection

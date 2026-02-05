@@ -1682,12 +1682,13 @@ func (m *Manager) updateExecutionError(executionID, errorMsg string) {
 }
 
 // PromptAgent sends a follow-up prompt to a running agent
-func (m *Manager) PromptAgent(ctx context.Context, executionID string, prompt string) (*PromptResult, error) {
+// Attachments (images) are passed to the agent if provided
+func (m *Manager) PromptAgent(ctx context.Context, executionID string, prompt string, attachments []v1.MessageAttachment) (*PromptResult, error) {
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
 		return nil, fmt.Errorf("execution %q not found", executionID)
 	}
-	return m.sessionManager.SendPrompt(ctx, execution, prompt, true, m.MarkReady)
+	return m.sessionManager.SendPrompt(ctx, execution, prompt, true, attachments, m.MarkReady)
 }
 
 // CancelAgent interrupts the current agent turn without terminating the process,
