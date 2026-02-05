@@ -1578,16 +1578,22 @@ func (m *Manager) flushMessageBuffer(execution *AgentExecution) string {
 		}
 	}
 
-	// If we have remaining content and an active streaming message, append it
+	// If we have remaining message content, publish it
 	trimmedMessage := strings.TrimSpace(agentMessage)
-	if trimmedMessage != "" && currentMsgID != "" {
-		// Publish final append to the streaming message
-		m.publishStreamingMessageFinal(execution, currentMsgID, trimmedMessage)
+	if trimmedMessage != "" {
+		if currentMsgID != "" {
+			// Publish final append to the streaming message
+			m.publishStreamingMessageFinal(execution, currentMsgID, trimmedMessage)
+		} else {
+			// No streaming message exists yet - create one with all the content
+			// This happens when message content has no newlines (never triggered streaming)
+			m.publishStreamingMessage(execution, trimmedMessage)
+		}
 		// Return empty since we've already handled it via streaming
 		return ""
 	}
 
-	return trimmedMessage
+	return ""
 }
 
 // publishStreamingMessageFinal publishes the final chunk of a streaming message.
