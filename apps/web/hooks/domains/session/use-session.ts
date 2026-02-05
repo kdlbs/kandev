@@ -6,6 +6,8 @@ import type { TaskSession } from '@/lib/types/http';
 type UseSessionResult = {
   session: TaskSession | null;
   isActive: boolean;
+  isFailed: boolean;
+  errorMessage: string | undefined;
 };
 
 export function useSession(sessionId: string | null): UseSessionResult {
@@ -19,6 +21,10 @@ export function useSession(sessionId: string | null): UseSessionResult {
     return session.state === 'RUNNING' || session.state === 'WAITING_FOR_INPUT';
   }, [session?.state]);
 
+  const isFailed = useMemo(() => {
+    return session?.state === 'FAILED';
+  }, [session?.state]);
+
   useEffect(() => {
     if (connectionStatus !== 'connected') return;
     if (!session?.id) return;
@@ -30,5 +36,5 @@ export function useSession(sessionId: string | null): UseSessionResult {
     };
   }, [session?.id, connectionStatus]);
 
-  return { session, isActive };
+  return { session, isActive, isFailed, errorMessage: session?.error_message };
 }

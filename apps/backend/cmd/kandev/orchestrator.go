@@ -13,6 +13,7 @@ import (
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	userservice "github.com/kandev/kandev/internal/user/service"
 	workflowservice "github.com/kandev/kandev/internal/workflow/service"
+	"github.com/kandev/kandev/internal/worktree"
 )
 
 func provideOrchestrator(
@@ -24,6 +25,7 @@ func provideOrchestrator(
 	lifecycleMgr *lifecycle.Manager,
 	agentRegistry *registry.Registry,
 	workflowSvc *workflowservice.Service,
+	worktreeRecreator *worktree.Recreator,
 ) (*orchestrator.Service, *messageCreatorAdapter, error) {
 	if lifecycleMgr == nil {
 		return nil, nil, errors.New("lifecycle manager is required: configure agent runtime (docker or standalone)")
@@ -44,6 +46,11 @@ func provideOrchestrator(
 	// Wire workflow step getter for prompt building
 	if workflowSvc != nil {
 		orchestratorSvc.SetWorkflowStepGetter(&orchestratorWorkflowStepGetterAdapter{svc: workflowSvc})
+	}
+
+	// Wire worktree recreator for handling missing worktrees during session resume
+	if worktreeRecreator != nil {
+		orchestratorSvc.SetWorktreeRecreator(newWorktreeRecreatorAdapter(worktreeRecreator))
 	}
 
 	return orchestratorSvc, msgCreator, nil
