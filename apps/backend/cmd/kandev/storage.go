@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 
+	analyticsrepository "github.com/kandev/kandev/internal/analytics/repository"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/persistence"
@@ -25,6 +26,12 @@ func provideRepositories(cfg *config.Config, log *logger.Logger) (*sql.DB, *Repo
 	cleanups = append(cleanups, cleanup)
 
 	taskRepoImpl, cleanup, err := repository.Provide(dbConn)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	cleanups = append(cleanups, cleanup)
+
+	analyticsRepo, cleanup, err := analyticsrepository.Provide(dbConn)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -67,6 +74,7 @@ func provideRepositories(cfg *config.Config, log *logger.Logger) (*sql.DB, *Repo
 
 	repos := &Repositories{
 		Task:          taskRepoImpl,
+		Analytics:     analyticsRepo,
 		AgentSettings: agentSettingsRepo,
 		User:          userRepo,
 		Notification:  notificationRepo,

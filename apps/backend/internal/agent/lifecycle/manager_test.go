@@ -840,7 +840,7 @@ func TestHandleAgentEvent_CompleteWithoutStreaming(t *testing.T) {
 }
 
 // TestHandleAgentEvent_CompleteWithBufferedText verifies that buffered text
-// without streaming is emitted on complete for persistence.
+// without streaming is emitted as a final streaming event on complete.
 func TestHandleAgentEvent_CompleteWithBufferedText(t *testing.T) {
 	mgr, eventBus := createTestManagerWithTracking()
 	execution := createTestExecution("exec-1", "task-1", "session-1")
@@ -852,7 +852,7 @@ func TestHandleAgentEvent_CompleteWithBufferedText(t *testing.T) {
 		Text: "Final message without newline",
 	})
 
-	// Complete event should flush buffer into complete text
+	// Complete event should flush buffer into a streaming event
 	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
 		Type: "complete",
 	})
@@ -876,12 +876,14 @@ func TestHandleAgentEvent_CompleteWithBufferedText(t *testing.T) {
 		t.Errorf("expected 1 complete event, got %d", len(completeEvents))
 	}
 
-	if len(completeEvents) > 0 && completeEvents[0].Data.Text != "Final message without newline" {
-		t.Errorf("expected complete event to carry buffered text, got %q", completeEvents[0].Data.Text)
+	if len(completeEvents) > 0 && completeEvents[0].Data.Text != "" {
+		t.Errorf("expected complete event to have empty text, got %q", completeEvents[0].Data.Text)
 	}
 
-	if len(streamingEvents) != 0 {
-		t.Errorf("expected 0 message_streaming events when no newlines, got %d", len(streamingEvents))
+	if len(streamingEvents) != 1 {
+		t.Errorf("expected 1 message_streaming event when no newlines, got %d", len(streamingEvents))
+	} else if streamingEvents[0].Data.Text != "Final message without newline" {
+		t.Errorf("expected streaming event to carry buffered text, got %q", streamingEvents[0].Data.Text)
 	}
 }
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
+	analyticsrepository "github.com/kandev/kandev/internal/analytics/repository"
 	editorservice "github.com/kandev/kandev/internal/editors/service"
 	editorstore "github.com/kandev/kandev/internal/editors/store"
 	notificationservice "github.com/kandev/kandev/internal/notifications/service"
@@ -18,6 +19,7 @@ import (
 
 type Repositories struct {
 	Task          repository.Repository
+	Analytics     analyticsrepository.Repository
 	AgentSettings settingsstore.Repository
 	User          userstore.Repository
 	Notification  notificationstore.Repository
