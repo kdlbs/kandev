@@ -12,7 +12,7 @@ import type {
   RepositoryStatsDTO,
   CompletedTaskActivityDTO,
 } from '@/lib/types/http';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 interface StatsPageClientProps {
@@ -21,6 +21,34 @@ interface StatsPageClientProps {
   workspaceId?: string;
   activeRange?: RangeKey;
 }
+
+const EMPTY_STATS: StatsResponse = {
+  global: {
+    total_tasks: 0,
+    completed_tasks: 0,
+    in_progress_tasks: 0,
+    total_sessions: 0,
+    total_turns: 0,
+    total_messages: 0,
+    total_user_messages: 0,
+    total_tool_calls: 0,
+    total_duration_ms: 0,
+    avg_turns_per_task: 0,
+    avg_messages_per_task: 0,
+    avg_duration_ms_per_task: 0,
+  },
+  task_stats: [],
+  daily_activity: [],
+  completed_activity: [],
+  agent_usage: [],
+  repository_stats: [],
+  git_stats: {
+    total_commits: 0,
+    total_files_changed: 0,
+    total_insertions: 0,
+    total_deletions: 0,
+  },
+};
 
 function formatDuration(ms: number): string {
   if (ms === 0) return '—';
@@ -73,11 +101,6 @@ function getHeatmapColor(intensity: number): string {
 function formatDate(dateStr: string): string {
   const date = new Date(dateStr);
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-}
-
-function getDayOfWeek(dateStr: string): number {
-  const date = new Date(dateStr);
-  return date.getDay();
 }
 
 interface HeatmapProps {
@@ -460,18 +483,19 @@ type CompletionBucket = 'day' | 'week' | 'month';
 
 function CompletedTasksChart({ completedActivity }: { completedActivity: CompletedTaskActivityDTO[] }) {
   const [bucket, setBucket] = useState<CompletionBucket>('day');
-
-  if (!completedActivity || completedActivity.length === 0) {
-    return <div className="text-sm text-muted-foreground py-4">No completed task data yet.</div>;
-  }
+  const safeCompleted = completedActivity ?? [];
 
   const series = useMemo(() => {
+    if (safeCompleted.length === 0) {
+      return [] as { label: string; count: number; date: Date }[];
+    }
+
     const toDate = (dateStr: string) => {
       const [year, month, day] = dateStr.split('-').map(Number);
       return new Date(Date.UTC(year, month - 1, day));
     };
 
-    const data = completedActivity
+    const data = safeCompleted
       .map((item) => ({ date: toDate(item.date), count: item.completed_tasks }))
       .filter((item) => Number.isFinite(item.date.getTime()));
 
@@ -505,9 +529,13 @@ function CompletedTasksChart({ completedActivity }: { completedActivity: Complet
     });
 
     return Array.from(buckets.values()).sort((a, b) => a.date.getTime() - b.date.getTime());
-  }, [bucket, completedActivity]);
+  }, [bucket, safeCompleted]);
 
   const maxCount = Math.max(...series.map((item) => item.count), 1);
+
+  if (safeCompleted.length === 0) {
+    return <div className="text-sm text-muted-foreground py-4">No completed task data yet.</div>;
+  }
 
   return (
     <div className="space-y-3">
@@ -573,16 +601,22 @@ function CompletedTasksChart({ completedActivity }: { completedActivity: Complet
 }
 
 function MostProductiveSummary({ completedActivity }: { completedActivity: CompletedTaskActivityDTO[] }) {
-  if (!completedActivity || completedActivity.length === 0) {
-    return <div className="text-sm text-muted-foreground py-4">No completed task data yet.</div>;
-  }
+  const safeCompleted = completedActivity ?? [];
 
   const stats = useMemo(() => {
+    if (safeCompleted.length === 0) {
+      return {
+        maxWeekday: { idx: 0, value: 0 },
+        maxMonth: { idx: 0, value: 0 },
+        maxYear: { year: 0, value: 0 },
+      };
+    }
+
     const weekdayTotals = Array(7).fill(0);
     const monthTotals = Array(12).fill(0);
     const yearTotals = new Map<number, number>();
 
-    completedActivity.forEach((item) => {
+    safeCompleted.forEach((item) => {
       const [year, month, day] = item.date.split('-').map(Number);
       const date = new Date(Date.UTC(year, month - 1, day));
       weekdayTotals[date.getUTCDay()] += item.completed_tasks;
@@ -606,7 +640,11 @@ function MostProductiveSummary({ completedActivity }: { completedActivity: Compl
     });
 
     return { maxWeekday, maxMonth, maxYear };
-  }, [completedActivity]);
+  }, [safeCompleted]);
+
+  if (safeCompleted.length === 0) {
+    return <div className="text-sm text-muted-foreground py-4">No completed task data yet.</div>;
+  }
 
   const weekdayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -636,6 +674,45 @@ function MostProductiveSummary({ completedActivity }: { completedActivity: Compl
 }
 
 export function StatsPageClient({ stats, error, workspaceId, activeRange }: StatsPageClientProps) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const [copied, setCopied] = useState(false);
+  const range = (activeRange ?? 'month') as RangeKey;
+  const rangeLabel = getRangeLabel(range);
+  const resolvedStats = stats ?? EMPTY_STATS;
+
+  const completedInRange = useMemo(() => (
+    (resolvedStats.completed_activity ?? []).reduce((sum, item) => sum + item.completed_tasks, 0)
+  ), [resolvedStats.completed_activity]);
+
+  const statsSummary = useMemo(() => {
+    const repoCount = resolvedStats.repository_stats.length;
+    const completed = resolvedStats.global.completed_tasks;
+    const inProgress = resolvedStats.global.in_progress_tasks;
+    const total = resolvedStats.global.total_tasks;
+    const completion = total > 0 ? `${Math.round((completed / total) * 100)}%` : '—';
+    const time = formatDuration(resolvedStats.global.total_duration_ms);
+    const avgTask = formatDuration(resolvedStats.global.avg_duration_ms_per_task);
+    const topRepo = resolvedStats.repository_stats
+      .filter((repo) => repo.total_tasks > 0)
+      .sort((a, b) => b.total_tasks - a.total_tasks)[0];
+    const topRepoLabel = topRepo ? `${topRepo.repository_name} (${topRepo.total_tasks} tasks)` : '—';
+    const hasGitStats = resolvedStats.git_stats
+      && (resolvedStats.git_stats.total_commits > 0 || resolvedStats.git_stats.total_files_changed > 0);
+    const gitLine = hasGitStats
+      ? `${resolvedStats.git_stats.total_commits} commits, +${resolvedStats.git_stats.total_insertions.toLocaleString()}/-${resolvedStats.git_stats.total_deletions.toLocaleString()}`
+      : 'no git activity';
+
+    return [
+      `*KanDev Stats — ${rangeLabel}*`,
+      `- Tasks: ${total} total (${completed} done, ${inProgress} in progress) · ${completion} completion`,
+      `- Completed (${rangeLabel}): ${completedInRange}`,
+      `- Time: ${time} total · ${avgTask} avg/task`,
+      `- Repos: ${repoCount} tracked · Top repo: ${topRepoLabel}`,
+      `- Git: ${gitLine}`,
+    ].join('\n');
+  }, [completedInRange, rangeLabel, resolvedStats]);
+
   // No workspace selected
   if (!workspaceId) {
     return (
@@ -690,7 +767,7 @@ export function StatsPageClient({ stats, error, workspaceId, activeRange }: Stat
     agent_usage,
     repository_stats,
     git_stats,
-  } = stats;
+  } = resolvedStats;
   const completionRate = global.total_tasks > 0
     ? Math.round((global.completed_tasks / global.total_tasks) * 100)
     : 0;
@@ -707,49 +784,6 @@ export function StatsPageClient({ stats, error, workspaceId, activeRange }: Stat
   const avgMessagesPerSession = global.total_sessions > 0
     ? global.total_messages / global.total_sessions
     : 0;
-  const [copied, setCopied] = useState(false);
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const [range, setRange] = useState<RangeKey>(activeRange ?? 'month');
-  const rangeLabel = getRangeLabel(range);
-
-  const completedInRange = useMemo(() => (
-    (completed_activity ?? []).reduce((sum, item) => sum + item.completed_tasks, 0)
-  ), [completed_activity]);
-
-  const statsSummary = useMemo(() => {
-    const repoCount = repository_stats.length;
-    const completed = global.completed_tasks;
-    const inProgress = global.in_progress_tasks;
-    const total = global.total_tasks;
-    const completion = total > 0 ? `${Math.round((completed / total) * 100)}%` : '—';
-    const time = formatDuration(global.total_duration_ms);
-    const avgTask = formatDuration(global.avg_duration_ms_per_task);
-    const topRepo = repository_stats
-      .filter((repo) => repo.total_tasks > 0)
-      .sort((a, b) => b.total_tasks - a.total_tasks)[0];
-    const topRepoLabel = topRepo ? `${topRepo.repository_name} (${topRepo.total_tasks} tasks)` : '—';
-    const gitLine = hasGitStats
-      ? `${git_stats.total_commits} commits, +${git_stats.total_insertions.toLocaleString()}/-${git_stats.total_deletions.toLocaleString()}`
-      : 'no git activity';
-
-    return [
-      `*KanDev Stats — ${rangeLabel}*`,
-      `- Tasks: ${total} total (${completed} done, ${inProgress} in progress) · ${completion} completion`,
-      `- Completed (${rangeLabel}): ${completedInRange}`,
-      `- Time: ${time} total · ${avgTask} avg/task`,
-      `- Repos: ${repoCount} tracked · Top repo: ${topRepoLabel}`,
-      `- Git: ${gitLine}`,
-    ].join('\n');
-  }, [
-    global,
-    repository_stats,
-    git_stats,
-    hasGitStats,
-    completedInRange,
-    rangeLabel,
-  ]);
-
   const handleCopyStats = async () => {
     try {
       await navigator.clipboard.writeText(statsSummary);
@@ -760,14 +794,7 @@ export function StatsPageClient({ stats, error, workspaceId, activeRange }: Stat
     }
   };
 
-  useEffect(() => {
-    if (activeRange && activeRange !== range) {
-      setRange(activeRange);
-    }
-  }, [activeRange, range]);
-
   const handleRangeChange = (nextRange: RangeKey) => {
-    setRange(nextRange);
     const params = new URLSearchParams(searchParams?.toString() ?? '');
     params.set('range', nextRange);
     router.push(`/stats?${params.toString()}`);
