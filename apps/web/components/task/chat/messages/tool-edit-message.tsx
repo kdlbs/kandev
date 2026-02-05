@@ -1,10 +1,9 @@
 'use client';
 
 import { useState, useRef, memo, useCallback } from 'react';
-import { IconCheck, IconX, IconEdit, IconFilePlus } from '@tabler/icons-react';
+import { IconCheck, IconX, IconEdit, IconFilePlus, IconExternalLink, IconCopy } from '@tabler/icons-react';
 import { GridSpinner } from '@/components/grid-spinner';
 import { transformPathsInText } from '@/lib/utils';
-import { FilePathButton } from './file-path-button';
 import type { Message } from '@/lib/types/http';
 import { DiffViewBlock } from './diff-view-block';
 import { ExpandableRow } from './expandable-row';
@@ -35,6 +34,7 @@ type ToolEditMessageProps = {
 export const ToolEditMessage = memo(function ToolEditMessage({ comment, worktreePath, onOpenFile }: ToolEditMessageProps) {
   const metadata = comment.metadata as ToolEditMetadata | undefined;
   const [manualExpandState, setManualExpandState] = useState<boolean | null>(null);
+  const [copied, setCopied] = useState(false);
   const prevStatusRef = useRef(metadata?.status);
 
   const status = metadata?.status;
@@ -69,6 +69,15 @@ export const ToolEditMessage = memo(function ToolEditMessage({ comment, worktree
     setManualExpandState((prev) => !(prev ?? autoExpanded));
   }, [autoExpanded]);
 
+  const handleCopyPath = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (filePath) {
+      navigator.clipboard?.writeText(filePath);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    }
+  }, [filePath]);
+
   const getStatusIcon = () => {
     switch (status) {
       case 'complete':
@@ -84,11 +93,16 @@ export const ToolEditMessage = memo(function ToolEditMessage({ comment, worktree
 
   // Count lines for Write content
   const lineCount = writeContent ? writeContent.split('\n').length : 0;
+
+  // Check if file is inside worktree (only these can be opened)
+  const isFileInWorktree = filePath && worktreePath && filePath.startsWith(worktreePath);
+
   const getSummary = () => {
+    const baseSummary = transformPathsInText(comment.content, worktreePath);
     if (isWriteOperation && lineCount > 0) {
-      return `Write ${lineCount} line${lineCount !== 1 ? 's' : ''}`;
+      return `${baseSummary} (${lineCount} line${lineCount !== 1 ? 's' : ''})`;
     }
-    return transformPathsInText(comment.content, worktreePath);
+    return baseSummary;
   };
 
   return (
@@ -100,14 +114,32 @@ export const ToolEditMessage = memo(function ToolEditMessage({ comment, worktree
             <span className="font-mono text-xs text-muted-foreground">{getSummary()}</span>
             {!isSuccess && getStatusIcon()}
           </span>
-          {filePath && (
-            <span className="min-w-0">
-              <FilePathButton
-                filePath={filePath}
-                worktreePath={worktreePath}
-                onOpenFile={onOpenFile}
-              />
-            </span>
+          {filePath && onOpenFile && isFileInWorktree && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenFile(filePath);
+              }}
+              className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground shrink-0 cursor-pointer"
+              title="Open file"
+            >
+              <IconExternalLink className="h-3.5 w-3.5" />
+            </button>
+          )}
+          {filePath && !isFileInWorktree && (
+            <button
+              type="button"
+              onClick={handleCopyPath}
+              className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground shrink-0 cursor-pointer"
+              title={copied ? 'Copied!' : 'Copy path'}
+            >
+              {copied ? (
+                <IconCheck className="h-3.5 w-3.5 text-green-500" />
+              ) : (
+                <IconCopy className="h-3.5 w-3.5" />
+              )}
+            </button>
           )}
         </div>
       }
@@ -116,7 +148,7 @@ export const ToolEditMessage = memo(function ToolEditMessage({ comment, worktree
       onToggle={handleToggle}
     >
       {diffData?.diff ? (
-        <DiffViewBlock data={diffData} showTitle={false} className="mt-0 border-0 px-0" />
+        <DiffViewBlock data={diffData} className="mt-0 border-0 px-0" />
       ) : writeContent ? (
         <div className="pl-4 border-l-2 border-border/30">
           <pre className="text-xs bg-muted/30 rounded p-2 overflow-x-auto max-h-[300px] overflow-y-auto whitespace-pre-wrap">

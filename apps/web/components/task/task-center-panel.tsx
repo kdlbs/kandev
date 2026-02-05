@@ -644,6 +644,7 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
               isDirty={tab.isDirty}
               isSaving={savingFiles.has(tab.path)}
               sessionId={activeSessionId || undefined}
+              worktreePath={activeSession?.worktree_path ?? undefined}
               enableComments={!!activeSessionId}
               onChange={(newContent) => handleFileChange(tab.path, newContent)}
               onSave={() => handleFileSave(tab.path)}
