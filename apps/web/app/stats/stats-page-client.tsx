@@ -1,18 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { IconGitCommit, IconArrowLeft } from '@tabler/icons-react';
-import { Button } from '@kandev/ui/button';
+import { IconGitCommit } from '@tabler/icons-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@kandev/ui/card';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@kandev/ui/table';
-import { Badge } from '@kandev/ui/badge';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@kandev/ui/tooltip';
 import type { StatsResponse, DailyActivityDTO, AgentUsageDTO } from '@/lib/types/http';
 import { useMemo } from 'react';
@@ -386,46 +376,82 @@ export function StatsPageClient({ stats, error, workspaceId }: StatsPageClientPr
         </Card>
       </div>
 
-      {/* Task Details Table */}
-      <div>
-        <h3 className="text-sm font-medium mb-3">Task Details</h3>
-        <div className="rounded-sm border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Task</TableHead>
-                <TableHead>State</TableHead>
-                <TableHead className="text-right">Turns</TableHead>
-                <TableHead className="text-right">Messages</TableHead>
-                <TableHead className="text-right">Duration</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {task_stats.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
-                    No tasks yet.
-                  </TableCell>
-                </TableRow>
-              ) : (
-                task_stats.map((task) => (
-                  <TableRow key={task.task_id}>
-                    <TableCell className="font-medium max-w-[300px] truncate" title={task.task_title}>
-                      {task.task_title}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={getStateBadgeVariant(task.state)}>{task.state}</Badge>
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">{task.turn_count}</TableCell>
-                    <TableCell className="text-right tabular-nums">{task.message_count}</TableCell>
-                    <TableCell className="text-right tabular-nums">{formatDuration(task.total_duration_ms)}</TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
+      {/* Top Tasks by Duration */}
+      {task_stats.length > 0 && (
+        <div className="grid gap-4 lg:grid-cols-2">
+          {/* Longest Tasks (Most Complex) */}
+          <Card className="rounded-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Longest Tasks
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                {[...task_stats]
+                  .filter(t => t.total_duration_ms > 0)
+                  .sort((a, b) => b.total_duration_ms - a.total_duration_ms)
+                  .slice(0, 3)
+                  .map((task, idx) => (
+                    <div key={task.task_id} className="flex items-center gap-3">
+                      <span className="text-xs text-muted-foreground w-4">{idx + 1}.</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium truncate" title={task.task_title}>
+                          {task.task_title}
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          {task.turn_count} turns · {task.message_count} messages
+                        </div>
+                      </div>
+                      <div className="text-sm font-medium tabular-nums text-right">
+                        {formatDuration(task.total_duration_ms)}
+                      </div>
+                    </div>
+                  ))}
+                {task_stats.filter(t => t.total_duration_ms > 0).length === 0 && (
+                  <div className="text-sm text-muted-foreground py-2">No completed tasks yet.</div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Quickest Tasks */}
+          <Card className="rounded-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Quickest Tasks
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                {[...task_stats]
+                  .filter(t => t.total_duration_ms > 0)
+                  .sort((a, b) => a.total_duration_ms - b.total_duration_ms)
+                  .slice(0, 3)
+                  .map((task, idx) => (
+                    <div key={task.task_id} className="flex items-center gap-3">
+                      <span className="text-xs text-muted-foreground w-4">{idx + 1}.</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium truncate" title={task.task_title}>
+                          {task.task_title}
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          {task.turn_count} turns · {task.message_count} messages
+                        </div>
+                      </div>
+                      <div className="text-sm font-medium tabular-nums text-right">
+                        {formatDuration(task.total_duration_ms)}
+                      </div>
+                    </div>
+                  ))}
+                {task_stats.filter(t => t.total_duration_ms > 0).length === 0 && (
+                  <div className="text-sm text-muted-foreground py-2">No completed tasks yet.</div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
         </div>
-      </div>
+      )}
         </div>
       </div>
     </div>
