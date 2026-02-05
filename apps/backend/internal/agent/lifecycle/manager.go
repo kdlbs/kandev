@@ -2866,9 +2866,18 @@ func (m *Manager) handlePassthroughStatus(status *agentctltypes.ProcessStatusUpd
 	m.eventPublisher.PublishProcessStatus(execution, clientStatus)
 
 	// Check if process exited and should be auto-restarted
+	// Only restart if this is the ACTUAL passthrough process, not user shell terminals
 	// Run asynchronously to allow the old process to be cleaned up first
 	if status.Status == agentctltypes.ProcessStatusExited || status.Status == agentctltypes.ProcessStatusFailed {
-		go m.handlePassthroughExit(execution, status)
+		// Only trigger auto-restart for the passthrough process, not for user shell terminals
+		if execution.PassthroughProcessID != "" && status.ProcessID == execution.PassthroughProcessID {
+			go m.handlePassthroughExit(execution, status)
+		} else {
+			m.logger.Debug("process exited but not the passthrough process, skipping auto-restart",
+				zap.String("session_id", status.SessionID),
+				zap.String("exited_process_id", status.ProcessID),
+				zap.String("passthrough_process_id", execution.PassthroughProcessID))
+		}
 	}
 }
 

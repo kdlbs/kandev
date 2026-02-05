@@ -60,4 +60,10 @@ export const createWorkspaceSlice: StateCreator<
     set((draft) => {
       draft.repositoryScripts.loadingByRepositoryId[repositoryId] = loading;
     }),
+  clearRepositoryScripts: (repositoryId) =>
+    set((draft) => {
+      delete draft.repositoryScripts.itemsByRepositoryId[repositoryId];
+      delete draft.repositoryScripts.loadingByRepositoryId[repositoryId];
+      delete draft.repositoryScripts.loadedByRepositoryId[repositoryId];
+    }),
 });

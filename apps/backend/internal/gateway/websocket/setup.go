@@ -5,6 +5,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/scripts"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -36,8 +37,8 @@ func NewGateway(log *logger.Logger) *Gateway {
 
 // SetLifecycleManager enables the dedicated terminal WebSocket handler for passthrough mode.
 // This must be called before SetupRoutes if terminal passthrough is needed.
-func (g *Gateway) SetLifecycleManager(lifecycleMgr *lifecycle.Manager) {
-	g.TerminalHandler = NewTerminalHandler(lifecycleMgr, g.logger)
+func (g *Gateway) SetLifecycleManager(lifecycleMgr *lifecycle.Manager, userService UserService, scriptService scripts.ScriptService) {
+	g.TerminalHandler = NewTerminalHandler(lifecycleMgr, userService, scriptService, g.logger)
 }
 
 // SetupRoutes adds the WebSocket routes to the Gin engine

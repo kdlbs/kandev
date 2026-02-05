@@ -146,6 +146,21 @@ export type AvailableCommandsState = {
   bySessionId: Record<string, AvailableCommand[]>;
 };
 
+export type UserShellInfo = {
+  terminalId: string;
+  processId: string;
+  running: boolean;
+  label: string;           // Display name (e.g., "Terminal" or script name)
+  closable: boolean;       // Whether the terminal can be closed (first terminal is not closable)
+  initialCommand?: string; // Command that was run (empty for plain shells)
+};
+
+export type UserShellsState = {
+  bySessionId: Record<string, UserShellInfo[]>;
+  loading: Record<string, boolean>;
+  loaded: Record<string, boolean>;
+};
+
 export type SessionRuntimeSliceState = {
   terminal: TerminalState;
   shell: ShellState;
@@ -156,6 +171,7 @@ export type SessionRuntimeSliceState = {
   contextWindow: ContextWindowState;
   agents: AgentState;
   availableCommands: AvailableCommandsState;
+  userShells: UserShellsState;
 };
 
 export type SessionRuntimeSliceActions = {
@@ -185,6 +201,11 @@ export type SessionRuntimeSliceActions = {
   // Available commands actions
   setAvailableCommands: (sessionId: string, commands: AvailableCommand[]) => void;
   clearAvailableCommands: (sessionId: string) => void;
+  // User shells actions
+  setUserShells: (sessionId: string, shells: UserShellInfo[]) => void;
+  setUserShellsLoading: (sessionId: string, loading: boolean) => void;
+  addUserShell: (sessionId: string, shell: UserShellInfo) => void;
+  removeUserShell: (sessionId: string, terminalId: string) => void;
 };
 
 export type SessionRuntimeSlice = SessionRuntimeSliceState & SessionRuntimeSliceActions;
