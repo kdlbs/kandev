@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	taskservice "github.com/kandev/kandev/internal/task/service"
+	"github.com/kandev/kandev/internal/worktree"
 	"github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -449,4 +450,32 @@ func (a *turnServiceAdapter) GetActiveTurn(ctx context.Context, sessionID string
 
 func newTurnServiceAdapter(svc *taskservice.Service) *turnServiceAdapter {
 	return &turnServiceAdapter{svc: svc}
+}
+
+// worktreeRecreatorAdapter adapts the worktree.Recreator to the orchestrator.WorktreeRecreator interface.
+type worktreeRecreatorAdapter struct {
+	recreator *worktree.Recreator
+}
+
+func newWorktreeRecreatorAdapter(recreator *worktree.Recreator) *worktreeRecreatorAdapter {
+	return &worktreeRecreatorAdapter{recreator: recreator}
+}
+
+// RecreateWorktree implements orchestrator.WorktreeRecreator.
+func (a *worktreeRecreatorAdapter) RecreateWorktree(ctx context.Context, req orchestrator.WorktreeRecreateRequest) (*orchestrator.WorktreeRecreateResult, error) {
+	result, err := a.recreator.Recreate(ctx, worktree.RecreateRequest{
+		SessionID:    req.SessionID,
+		TaskID:       req.TaskID,
+		TaskTitle:    req.TaskTitle,
+		RepositoryID: req.RepositoryID,
+		BaseBranch:   req.BaseBranch,
+		WorktreeID:   req.WorktreeID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &orchestrator.WorktreeRecreateResult{
+		WorktreePath:   result.WorktreePath,
+		WorktreeBranch: result.WorktreeBranch,
+	}, nil
 }

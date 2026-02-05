@@ -107,6 +107,28 @@ type WorkflowStepGetter interface {
 	GetSourceStep(ctx context.Context, boardID, targetStepID string) (*WorkflowStep, error)
 }
 
+// WorktreeRecreator handles worktree recreation when the directory is missing.
+// This is used during session resume when the worktree was deleted (e.g., by the user).
+type WorktreeRecreator interface {
+	RecreateWorktree(ctx context.Context, req WorktreeRecreateRequest) (*WorktreeRecreateResult, error)
+}
+
+// WorktreeRecreateRequest contains parameters for recreating a worktree.
+type WorktreeRecreateRequest struct {
+	SessionID    string
+	TaskID       string
+	TaskTitle    string
+	RepositoryID string
+	BaseBranch   string
+	WorktreeID   string
+}
+
+// WorktreeRecreateResult contains the result of worktree recreation.
+type WorktreeRecreateResult struct {
+	WorktreePath   string
+	WorktreeBranch string
+}
+
 // Service is the main orchestrator service
 type Service struct {
 	config       ServiceConfig
@@ -130,6 +152,9 @@ type Service struct {
 
 	// Workflow step getter for prompt building
 	workflowStepGetter WorkflowStepGetter
+
+	// Worktree recreator for recreating missing worktrees on resume
+	worktreeRecreator WorktreeRecreator
 
 	// Active turns map: sessionID -> turnID
 	activeTurns sync.Map
@@ -255,6 +280,15 @@ func (s *Service) SetTurnService(turnService TurnService) {
 // If not set: workflow_step_id in StartTask is ignored and the prompt is used as-is.
 func (s *Service) SetWorkflowStepGetter(getter WorkflowStepGetter) {
 	s.workflowStepGetter = getter
+}
+
+// SetWorktreeRecreator sets the worktree recreator for handling missing worktrees during resume.
+//
+// When resuming sessions on startup, if a worktree directory is missing, the orchestrator
+// will attempt to recreate it using this recreator. If recreation succeeds, the session
+// can be resumed normally. If not set, missing worktrees will cause session resume to fail.
+func (s *Service) SetWorktreeRecreator(wr WorktreeRecreator) {
+	s.worktreeRecreator = wr
 }
 
 // startTurnForSession starts a new turn for the session and stores it.
@@ -518,12 +552,31 @@ func (s *Service) resumeExecutorsOnStartup(ctx context.Context) {
 
 		// Validate worktree exists before resuming
 		if err := validateSessionWorktrees(session); err != nil {
-			s.logger.Warn("worktree validation failed; marking session as failed",
+			s.logger.Info("worktree not found, attempting recreation",
 				zap.String("session_id", sessionID),
 				zap.Error(err))
-			_ = s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateFailed, err.Error())
-			_ = s.repo.DeleteExecutorRunningBySessionID(ctx, sessionID)
-			continue
+
+			// Try to recreate the worktree
+			if s.tryRecreateWorktree(ctx, session) {
+				s.logger.Info("worktree recreated successfully, continuing with resume",
+					zap.String("session_id", sessionID))
+				// Re-validate after recreation to ensure it worked
+				if err := validateSessionWorktrees(session); err != nil {
+					s.logger.Warn("worktree validation still failed after recreation",
+						zap.String("session_id", sessionID),
+						zap.Error(err))
+					_ = s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateFailed, "workspace recreation failed: "+err.Error())
+					_ = s.repo.DeleteExecutorRunningBySessionID(ctx, sessionID)
+					continue
+				}
+			} else {
+				// Recreation failed or not available
+				s.logger.Warn("worktree recreation failed; marking session as failed",
+					zap.String("session_id", sessionID))
+				_ = s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateFailed, "workspace not found and could not be restored")
+				_ = s.repo.DeleteExecutorRunningBySessionID(ctx, sessionID)
+				continue
+			}
 		}
 
 		s.logger.Debug("resuming session on startup",
@@ -577,6 +630,101 @@ func (s *Service) resumeExecutorsOnStartup(ctx context.Context) {
 			zap.Bool("start_agent", startAgent),
 			zap.String("state", string(models.TaskSessionStateWaitingForInput)))
 	}
+}
+
+// tryRecreateWorktree attempts to recreate a missing worktree for a session.
+// On success, it updates the session's worktree info and creates an info message.
+// On failure, it marks the session as failed and creates an error message.
+// Returns true if recreation succeeded and session can be resumed.
+func (s *Service) tryRecreateWorktree(ctx context.Context, session *models.TaskSession) bool {
+	if s.worktreeRecreator == nil {
+		s.logger.Debug("worktree recreator not available, cannot recreate worktree",
+			zap.String("session_id", session.ID))
+		return false
+	}
+
+	if len(session.Worktrees) == 0 {
+		s.logger.Debug("session has no worktrees to recreate",
+			zap.String("session_id", session.ID))
+		return false
+	}
+
+	wt := session.Worktrees[0]
+
+	// Get task title for better branch naming
+	var taskTitle string
+	if task, err := s.taskRepo.GetTask(ctx, session.TaskID); err == nil {
+		taskTitle = task.Title
+	}
+
+	s.logger.Info("attempting to recreate worktree",
+		zap.String("session_id", session.ID),
+		zap.String("task_id", session.TaskID),
+		zap.String("worktree_id", wt.WorktreeID),
+		zap.String("repository_id", wt.RepositoryID))
+
+	req := WorktreeRecreateRequest{
+		SessionID:    session.ID,
+		TaskID:       session.TaskID,
+		TaskTitle:    taskTitle,
+		RepositoryID: wt.RepositoryID,
+		BaseBranch:   session.BaseBranch,
+		WorktreeID:   wt.WorktreeID,
+	}
+
+	result, err := s.worktreeRecreator.RecreateWorktree(ctx, req)
+	if err != nil {
+		s.logger.Warn("failed to recreate worktree",
+			zap.String("session_id", session.ID),
+			zap.String("worktree_id", wt.WorktreeID),
+			zap.Error(err))
+
+		// Create error message in chat
+		if s.messageCreator != nil {
+			metadata := map[string]interface{}{
+				"variant": "error",
+			}
+			_ = s.messageCreator.CreateSessionMessage(
+				ctx,
+				session.TaskID,
+				"Workspace could not be restored. The workspace directory was deleted and recreation failed: "+err.Error(),
+				session.ID,
+				string(v1.MessageTypeStatus),
+				"", // no turn ID during startup
+				metadata,
+				false,
+			)
+		}
+		return false
+	}
+
+	// Update session's worktree info
+	session.Worktrees[0].WorktreePath = result.WorktreePath
+	session.Worktrees[0].WorktreeBranch = result.WorktreeBranch
+
+	s.logger.Info("worktree recreated successfully",
+		zap.String("session_id", session.ID),
+		zap.String("worktree_id", wt.WorktreeID),
+		zap.String("new_path", result.WorktreePath))
+
+	// Create info message in chat
+	if s.messageCreator != nil {
+		metadata := map[string]interface{}{
+			"variant": "info",
+		}
+		_ = s.messageCreator.CreateSessionMessage(
+			ctx,
+			session.TaskID,
+			"Workspace was automatically restored after server restart",
+			session.ID,
+			string(v1.MessageTypeStatus),
+			"", // no turn ID during startup
+			metadata,
+			false,
+		)
+	}
+
+	return true
 }
 
 // IsRunning returns true if the service is running

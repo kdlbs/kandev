@@ -9,6 +9,7 @@ import { getWebSocketClient } from '@/lib/ws/connection';
 import { requestFileTree, requestFileContent, searchWorkspaceFiles } from '@/lib/ws/workspace-files';
 import type { FileTreeNode, FileContentResponse, OpenFileTab } from '@/lib/types/backend';
 import { useSessionAgentctl } from '@/hooks/domains/session/use-session-agentctl';
+import { useSession } from '@/hooks/domains/session/use-session';
 import {
   getFilesPanelExpandedPaths,
   setFilesPanelExpandedPaths,
@@ -33,6 +34,7 @@ export function FileBrowser({ sessionId, onOpenFile, onDeleteFile, isSearchOpen 
   const [loadState, setLoadState] = useState<'loading' | 'waiting' | 'loaded' | 'manual' | 'error'>('loading');
   const [loadError, setLoadError] = useState<string | null>(null);
   const agentctlStatus = useSessionAgentctl(sessionId);
+  const { isFailed: isSessionFailed, errorMessage: sessionError } = useSession(sessionId);
 
   // Search state
   const [localSearchQuery, setLocalSearchQuery] = useState('');
@@ -547,6 +549,13 @@ export function FileBrowser({ sessionId, onOpenFile, onDeleteFile, isSearchOpen 
       <ScrollArea className="flex-1" ref={scrollAreaRef}>
         {isSearchOpen && searchResults !== null ? (
           renderSearchResults()
+        ) : isSessionFailed ? (
+          <div className="p-4 text-sm text-destructive/80 space-y-2">
+            <div>Session failed</div>
+            {sessionError && (
+              <div className="text-xs text-muted-foreground">{sessionError}</div>
+            )}
+          </div>
         ) : loadState === 'loading' || isLoadingTree ? (
           <div className="p-4 text-sm text-muted-foreground">Loading files...</div>
         ) : loadState === 'waiting' ? (

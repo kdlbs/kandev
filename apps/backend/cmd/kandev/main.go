@@ -58,6 +58,9 @@ import (
 	workflowcontroller "github.com/kandev/kandev/internal/workflow/controller"
 	workflowhandlers "github.com/kandev/kandev/internal/workflow/handlers"
 
+	// Worktree package
+	"github.com/kandev/kandev/internal/worktree"
+
 	// API types
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -248,7 +251,8 @@ func main() {
 	log.Info("Initializing Worktree Manager...")
 
 	var worktreeCleanup func() error
-	_, worktreeCleanup, err = provideWorktreeManager(dbConn, cfg, log, lifecycleMgr, taskSvc)
+	var worktreeRecreator *worktree.Recreator
+	_, worktreeRecreator, worktreeCleanup, err = provideWorktreeManager(dbConn, cfg, log, lifecycleMgr, taskSvc)
 	if err != nil {
 		log.Fatal("Failed to initialize worktree manager", zap.Error(err))
 	}
@@ -268,7 +272,7 @@ func main() {
 	// ============================================
 	log.Info("Initializing Orchestrator...")
 
-	orchestratorSvc, msgCreator, err := provideOrchestrator(log, eventBus, taskRepo, taskSvc, userSvc, lifecycleMgr, agentRegistry, services.Workflow)
+	orchestratorSvc, msgCreator, err := provideOrchestrator(log, eventBus, taskRepo, taskSvc, userSvc, lifecycleMgr, agentRegistry, services.Workflow, worktreeRecreator)
 	if err != nil {
 		log.Fatal("Failed to initialize orchestrator", zap.Error(err))
 	}

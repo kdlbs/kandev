@@ -37,10 +37,10 @@ func (a *taskServiceAdapter) UpdateMessage(ctx context.Context, message *models.
 	return a.svc.UpdateMessage(ctx, message)
 }
 
-func provideWorktreeManager(dbConn *sql.DB, cfg *config.Config, log *logger.Logger, lifecycleMgr *lifecycle.Manager, taskSvc *taskservice.Service) (*worktree.Manager, func() error, error) {
+func provideWorktreeManager(dbConn *sql.DB, cfg *config.Config, log *logger.Logger, lifecycleMgr *lifecycle.Manager, taskSvc *taskservice.Service) (*worktree.Manager, *worktree.Recreator, func() error, error) {
 	manager, cleanup, err := worktree.Provide(dbConn, cfg, log)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if lifecycleMgr != nil {
 		lifecycleMgr.SetWorktreeManager(manager)
@@ -60,5 +60,8 @@ func provideWorktreeManager(dbConn *sql.DB, cfg *config.Config, log *logger.Logg
 	manager.SetScriptMessageHandler(scriptHandler)
 	manager.SetRepositoryProvider(repoAdapter)
 
-	return manager, cleanup, nil
+	// Create recreator for orchestrator to use during session resume
+	recreator := worktree.NewRecreator(manager)
+
+	return manager, recreator, cleanup, nil
 }

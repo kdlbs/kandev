@@ -43,10 +43,11 @@ export function ShellTerminal({
   const storeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const sessionId = propSessionId ?? storeSessionId;
 
-  const { session, isActive } = useSession(isReadOnlyMode ? null : sessionId);
+  const { session, isActive, isFailed, errorMessage } = useSession(isReadOnlyMode ? null : sessionId);
   // Hook also subscribes to session channel for real-time updates
   useSessionAgentctl(isReadOnlyMode ? null : sessionId);
   const taskId = session?.task_id ?? null;
+  const isSessionFailed = !isReadOnlyMode && isFailed;
   const shellOutput = useAppStore((state) =>
     sessionId && !isReadOnlyMode ? state.shell.outputs[sessionId] || '' : ''
   );
@@ -277,6 +278,17 @@ export function ShellTerminal({
             Stopping…
           </div>
         ) : null}
+      </div>
+    );
+  }
+
+  if (isSessionFailed) {
+    return (
+      <div className="h-full p-4 w-full rounded-md bg-background flex flex-col gap-2">
+        <div className="text-sm text-destructive/80">Session failed</div>
+        {errorMessage && (
+          <div className="text-xs text-muted-foreground">{errorMessage}</div>
+        )}
       </div>
     );
   }
