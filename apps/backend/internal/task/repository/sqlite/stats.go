@@ -3,9 +3,33 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
 )
+
+// parseTimeString parses time strings in various SQLite formats
+func parseTimeString(s string) time.Time {
+	if s == "" {
+		return time.Time{}
+	}
+	// Try various common SQLite datetime formats
+	formats := []string{
+		time.RFC3339,
+		time.RFC3339Nano,
+		"2006-01-02 15:04:05",
+		"2006-01-02T15:04:05Z",
+		"2006-01-02T15:04:05.000Z",
+		"2006-01-02 15:04:05.000",
+		"2006-01-02T15:04:05",
+	}
+	for _, format := range formats {
+		if t, err := time.Parse(format, s); err == nil {
+			return t
+		}
+	}
+	return time.Time{}
+}
 
 // GetTaskStats retrieves aggregated statistics for all tasks in a workspace
 func (r *Repository) GetTaskStats(ctx context.Context, workspaceID string) ([]*models.TaskStats, error) {
@@ -65,8 +89,9 @@ func (r *Repository) GetTaskStats(ctx context.Context, workspaceID string) ([]*m
 	var results []*models.TaskStats
 	for rows.Next() {
 		var stat models.TaskStats
-		var completedAt sql.NullTime
-		var totalDurationMs float64 // SQLite returns float from julianday math
+		var completedAtStr sql.NullString // Use NullString to handle legacy string dates
+		var createdAtStr string           // Handle legacy string dates
+		var totalDurationMs float64       // SQLite returns float from julianday math
 		err := rows.Scan(
 			&stat.TaskID,
 			&stat.TaskTitle,
@@ -79,15 +104,21 @@ func (r *Repository) GetTaskStats(ctx context.Context, workspaceID string) ([]*m
 			&stat.UserMessageCount,
 			&stat.ToolCallCount,
 			&totalDurationMs,
-			&stat.CreatedAt,
-			&completedAt,
+			&createdAtStr,
+			&completedAtStr,
 		)
 		if err != nil {
 			return nil, err
 		}
 		stat.TotalDurationMs = int64(totalDurationMs)
-		if completedAt.Valid {
-			stat.CompletedAt = &completedAt.Time
+		// Parse created_at from string
+		stat.CreatedAt = parseTimeString(createdAtStr)
+		// Parse completed_at from string if valid
+		if completedAtStr.Valid && completedAtStr.String != "" {
+			parsedTime := parseTimeString(completedAtStr.String)
+			if !parsedTime.IsZero() {
+				stat.CompletedAt = &parsedTime
+			}
 		}
 		results = append(results, &stat)
 	}
