@@ -4,12 +4,16 @@ package codex
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
+	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -180,8 +184,6 @@ func (a *Adapter) Connect(stdin io.Writer, stdout io.Reader) error {
 	a.stdout = stdout
 	return nil
 }
-
-
 
 // sanitizeCodexServerName converts a server name to a valid TOML table name.
 // Replaces spaces and special characters with underscores.
@@ -383,8 +385,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string) error {
 
 // Prompt sends a prompt to the agent, starting a new turn.
 // This method blocks until the turn completes (turn/completed notification received).
-// Note: attachments are not yet supported in Codex protocol - they are ignored.
-func (a *Adapter) Prompt(ctx context.Context, message string, _ []v1.MessageAttachment) error {
+func (a *Adapter) Prompt(ctx context.Context, message string, attachments []v1.MessageAttachment) error {
 	a.mu.Lock()
 	client := a.client
 	threadID := a.threadID
@@ -400,13 +401,34 @@ func (a *Adapter) Prompt(ctx context.Context, message string, _ []v1.MessageAtta
 		return fmt.Errorf("adapter not initialized")
 	}
 
-	a.logger.Info("sending prompt", zap.String("thread_id", threadID))
+	inputs := make([]codex.UserInput, 0, 1+len(attachments))
+	if strings.TrimSpace(message) != "" {
+		inputs = append(inputs, codex.UserInput{Type: "text", Text: message})
+	}
+
+	if len(attachments) > 0 {
+		imagePaths, err := a.saveImageAttachments(a.cfg.WorkDir, attachments)
+		if err != nil {
+			a.logger.Warn("failed to save image attachments", zap.Error(err))
+		} else {
+			for _, imagePath := range imagePaths {
+				inputs = append(inputs, codex.UserInput{Type: "localImage", Path: imagePath})
+			}
+		}
+	}
+
+	if len(inputs) == 0 {
+		return fmt.Errorf("prompt requires message text or attachments")
+	}
+
+	a.logger.Info("sending prompt",
+		zap.String("thread_id", threadID),
+		zap.Int("inputs", len(inputs)),
+		zap.Int("image_attachments", len(attachments)))
 
 	params := &codex.TurnStartParams{
 		ThreadID: threadID,
-		Input: []codex.UserInput{
-			{Type: "text", Text: message},
-		},
+		Input:    inputs,
 	}
 
 	resp, err := client.Call(ctx, codex.MethodTurnStart, params)
@@ -472,6 +494,58 @@ func (a *Adapter) Prompt(ctx context.Context, message string, _ []v1.MessageAtta
 
 		return nil
 	}
+}
+
+// saveImageAttachments saves image attachments to temp files in the workspace.
+func (a *Adapter) saveImageAttachments(workDir string, attachments []v1.MessageAttachment) ([]string, error) {
+	var imagePaths []string
+
+	if workDir == "" {
+		return nil, fmt.Errorf("workDir is required to save attachments")
+	}
+
+	tempDir := filepath.Join(workDir, ".kandev", "temp", "images")
+	if err := os.MkdirAll(tempDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create temp dir: %w", err)
+	}
+
+	for _, att := range attachments {
+		if att.Type != "image" {
+			continue
+		}
+
+		imageData, err := base64.StdEncoding.DecodeString(att.Data)
+		if err != nil {
+			a.logger.Warn("failed to decode image attachment", zap.Error(err))
+			continue
+		}
+
+		ext := ".png"
+		switch att.MimeType {
+		case "image/jpeg":
+			ext = ".jpg"
+		case "image/gif":
+			ext = ".gif"
+		case "image/webp":
+			ext = ".webp"
+		case "image/png":
+			ext = ".png"
+		}
+
+		filename := fmt.Sprintf("image-%s%s", uuid.New().String()[:8], ext)
+		filePath := filepath.Join(tempDir, filename)
+		if err := os.WriteFile(filePath, imageData, 0644); err != nil {
+			a.logger.Warn("failed to write image file", zap.Error(err), zap.String("path", filePath))
+			continue
+		}
+
+		imagePaths = append(imagePaths, filePath)
+		a.logger.Info("saved image attachment",
+			zap.String("path", filePath),
+			zap.Int("size", len(imageData)))
+	}
+
+	return imagePaths, nil
 }
 
 // Cancel interrupts the current turn.
