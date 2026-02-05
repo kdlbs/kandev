@@ -1351,11 +1351,17 @@ func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.Age
 			zap.Bool("is_error", isError))
 
 		// Flush the message buffer to publish any remaining content as a streaming message.
-		// All adapters now handle duplicate prevention at the adapter layer:
-		// - They send text via message_chunk events (which accumulate in the buffer)
-		// - They send complete events WITHOUT text
-		// So we just flush the buffer here - no need to track streamingUsedThisTurn.
-		m.flushMessageBuffer(execution)
+		// If the buffer never triggered streaming (no newlines), we emit the text on the
+		// complete event so the orchestrator can persist the final message.
+		flushedText := m.flushMessageBuffer(execution)
+		if flushedText != "" {
+			event.Text = flushedText
+			if m.historyManager != nil && execution.SessionID != "" {
+				if err := m.historyManager.AppendAgentMessage(execution.SessionID, flushedText); err != nil {
+					m.logger.Warn("failed to store final agent message to history", zap.Error(err))
+				}
+			}
+		}
 
 		m.logger.Info("complete event processed",
 			zap.String("execution_id", execution.ID),
