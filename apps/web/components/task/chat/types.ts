@@ -68,6 +68,13 @@ export type ShellExecPayload = {
   output?: ShellExecOutput;
 };
 
+export type HttpRequestPayload = {
+  url?: string;
+  method?: string;
+  response?: string;
+  is_error?: boolean;
+};
+
 export type NormalizedPayload = {
   kind?: string;
   subagent_task?: SubagentTaskPayload;
@@ -76,6 +83,7 @@ export type NormalizedPayload = {
   code_search?: CodeSearchPayload;
   modify_file?: ModifyFilePayload;
   shell_exec?: ShellExecPayload;
+  http_request?: HttpRequestPayload;
 };
 
 export type ToolCallMetadata = {

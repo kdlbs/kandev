@@ -950,6 +950,14 @@ func (a *Adapter) handleUserMessage(msg *claudecode.CLIMessage, sessionID, opera
 			a.normalizer.NormalizeToolResult(payload, block.Content)
 		}
 
+		// If there's an error, set the error flag on the payload
+		// This ensures the frontend can display error messages properly
+		if payload != nil && block.IsError {
+			if payload.HttpRequest() != nil {
+				payload.HttpRequest().IsError = true
+			}
+		}
+
 		// Determine status
 		status := "complete"
 		if block.IsError {

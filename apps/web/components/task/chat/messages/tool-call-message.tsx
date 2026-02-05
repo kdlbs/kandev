@@ -73,9 +73,11 @@ export const ToolCallMessage = memo(function ToolCallMessage({ comment, permissi
   const title = transformPathsInText(rawTitle, worktreePath);
   const status = metadata?.status;
 
-  // Get output from normalized payload (generic tools)
+  // Get output from normalized payload (generic tools or http_request)
   const normalizedGeneric = metadata?.normalized?.generic;
-  const output = normalizedGeneric?.output ?? metadata?.result;
+  const normalizedHttpRequest = metadata?.normalized?.http_request;
+  const output = normalizedHttpRequest?.response ?? normalizedGeneric?.output ?? metadata?.result;
+  const isHttpError = normalizedHttpRequest?.is_error;
 
   // Permission state
   const hasPermission = !!permissionMessage;
@@ -221,7 +223,8 @@ export const ToolCallMessage = memo(function ToolCallMessage({ comment, permissi
         {formattedOutput && (
           <pre className={cn(
             "text-xs rounded p-2 overflow-x-auto whitespace-pre-wrap max-h-[200px] overflow-y-auto",
-            formattedOutput.isJson ? "bg-muted/30 font-mono text-[11px]" : "bg-muted/30"
+            formattedOutput.isJson ? "bg-muted/30 font-mono text-[11px]" : "bg-muted/30",
+            isHttpError && "text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/30"
           )}>
             {formattedOutput.content}
           </pre>
