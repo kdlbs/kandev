@@ -19,7 +19,7 @@ import {
   SelectValue,
 } from '@kandev/ui/select';
 import { ToggleGroup, ToggleGroupItem } from '@kandev/ui/toggle-group';
-import { IconSettings, IconList, IconLayoutKanban } from '@tabler/icons-react';
+import { IconSettings, IconList, IconLayoutKanban, IconChartBar } from '@tabler/icons-react';
 import { TaskSearchInput } from './task-search-input';
 import { useKanbanDisplaySettings } from '@/hooks/use-kanban-display-settings';
 import { linkToTasks } from '@/lib/links';
@@ -207,12 +207,20 @@ export function MobileMenuSheet({
             </div>
           </div>
 
-          <Link href="/settings" className="mt-auto" onClick={() => onOpenChange(false)}>
-            <Button variant="outline" className="w-full cursor-pointer">
-              <IconSettings className="h-4 w-4 mr-2" />
-              Settings
-            </Button>
-          </Link>
+          <div className="mt-auto space-y-2">
+            <Link href="/stats" onClick={() => onOpenChange(false)}>
+              <Button variant="outline" className="w-full cursor-pointer">
+                <IconChartBar className="h-4 w-4 mr-2" />
+                Stats
+              </Button>
+            </Link>
+            <Link href="/settings" onClick={() => onOpenChange(false)}>
+              <Button variant="outline" className="w-full cursor-pointer">
+                <IconSettings className="h-4 w-4 mr-2" />
+                Settings
+              </Button>
+            </Link>
+          </div>
         </div>
       </SheetContent>
     </Sheet>

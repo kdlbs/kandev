@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@kandev/ui/button';
 import { ToggleGroup, ToggleGroupItem } from '@kandev/ui/toggle-group';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@kandev/ui/tooltip';
-import { IconPlus, IconSettings, IconList, IconLayoutKanban, IconMenu2 } from '@tabler/icons-react';
+import { IconPlus, IconSettings, IconList, IconLayoutKanban, IconMenu2, IconChartBar } from '@tabler/icons-react';
 import { KanbanDisplayDropdown } from '../kanban-display-dropdown';
 import { TaskSearchInput } from './task-search-input';
 import { KanbanHeaderMobile } from './kanban-header-mobile';
@@ -189,6 +189,16 @@ export function KanbanHeader({ onCreateTask, workspaceId, currentPage = 'kanban'
               </Tooltip>
             </ToggleGroupItem>
           </ToggleGroup>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="outline" size="icon" asChild className="cursor-pointer">
+                <Link href="/stats">
+                  <IconChartBar className="h-4 w-4" />
+                </Link>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Stats</TooltipContent>
+          </Tooltip>
         </TooltipProvider>
         <KanbanDisplayDropdown />
         <Link href="/settings" className="cursor-pointer">
