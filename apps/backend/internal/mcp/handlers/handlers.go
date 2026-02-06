@@ -28,9 +28,10 @@ type ClarificationService interface {
 	WaitForResponse(ctx context.Context, pendingID string) (*clarification.Response, error)
 }
 
-// MessageCreator creates messages for clarification requests.
+// MessageCreator creates and updates messages for clarification requests.
 type MessageCreator interface {
 	CreateClarificationRequestMessage(ctx context.Context, taskID, sessionID, pendingID string, question clarification.Question, clarificationContext string) (string, error)
+	UpdateClarificationMessage(ctx context.Context, sessionID, pendingID, status string, answer *clarification.Answer) error
 }
 
 // SessionRepository interface for updating session state.
@@ -298,36 +299,27 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 		h.logger.Error("failed waiting for clarification response",
 			zap.String("pending_id", pendingID),
 			zap.Error(err))
+
+		// Mark the clarification message as expired so the frontend removes
+		// the clarification overlay.
+		if h.messageCreator != nil {
+			if updateErr := h.messageCreator.UpdateClarificationMessage(ctx, req.SessionID, pendingID, "expired", nil); updateErr != nil {
+				h.logger.Warn("failed to update clarification message to expired",
+					zap.String("pending_id", pendingID),
+					zap.String("session_id", req.SessionID),
+					zap.Error(updateErr))
+			}
+		}
+
+		// Restore session and task state so the session doesn't get stuck
+		// in WAITING_FOR_INPUT forever after a timeout or cancellation.
+		h.restoreSessionRunning(ctx, taskID, req.SessionID)
+
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get user response: "+err.Error(), nil)
 	}
 
 	// Restore session to RUNNING state after user responds
-	if err := h.sessionRepo.UpdateTaskSessionState(ctx, req.SessionID, models.TaskSessionStateRunning, ""); err != nil {
-		h.logger.Warn("failed to restore session state to RUNNING",
-			zap.String("session_id", req.SessionID),
-			zap.Error(err))
-	}
-
-	// Update task state to IN_PROGRESS
-	if err := h.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateInProgress); err != nil {
-		h.logger.Warn("failed to restore task state to IN_PROGRESS",
-			zap.String("task_id", taskID),
-			zap.Error(err))
-	}
-
-	// Publish session state changed event
-	if h.eventBus != nil {
-		eventData := map[string]interface{}{
-			"task_id":    taskID,
-			"session_id": req.SessionID,
-			"new_state":  string(models.TaskSessionStateRunning),
-		}
-		_ = h.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(
-			events.TaskSessionStateChanged,
-			"mcp-handlers",
-			eventData,
-		))
-	}
+	h.restoreSessionRunning(ctx, taskID, req.SessionID)
 
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }
@@ -354,6 +346,36 @@ func (h *Handlers) setSessionWaitingForInput(ctx context.Context, taskID, sessio
 			"task_id":    taskID,
 			"session_id": sessionID,
 			"new_state":  string(models.TaskSessionStateWaitingForInput),
+		}
+		_ = h.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(
+			events.TaskSessionStateChanged,
+			"mcp-handlers",
+			eventData,
+		))
+	}
+}
+
+// restoreSessionRunning restores the session and task states back to RUNNING/IN_PROGRESS.
+// This is called both after a successful user response and on timeout/error to prevent
+// the session from getting stuck in WAITING_FOR_INPUT state.
+func (h *Handlers) restoreSessionRunning(ctx context.Context, taskID, sessionID string) {
+	if err := h.sessionRepo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateRunning, ""); err != nil {
+		h.logger.Warn("failed to restore session state to RUNNING",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
+
+	if err := h.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateInProgress); err != nil {
+		h.logger.Warn("failed to restore task state to IN_PROGRESS",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+	}
+
+	if h.eventBus != nil {
+		eventData := map[string]interface{}{
+			"task_id":    taskID,
+			"session_id": sessionID,
+			"new_state":  string(models.TaskSessionStateRunning),
 		}
 		_ = h.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(
 			events.TaskSessionStateChanged,

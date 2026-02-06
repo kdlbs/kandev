@@ -176,7 +176,7 @@ func (h *Handlers) httpRespond(c *gin.Context) {
 	// Get the pending request to find the session ID
 	pending, ok := h.store.GetRequest(pendingID)
 	if !ok {
-		c.JSON(http.StatusNotFound, gin.H{"error": "clarification request not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "clarification request not found or has expired"})
 		return
 	}
 
