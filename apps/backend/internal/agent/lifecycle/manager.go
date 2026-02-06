@@ -1698,7 +1698,7 @@ func (m *Manager) updateExecutionError(executionID, errorMsg string) {
 func (m *Manager) PromptAgent(ctx context.Context, executionID string, prompt string, attachments []v1.MessageAttachment) (*PromptResult, error) {
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
-		return nil, fmt.Errorf("execution %q not found", executionID)
+		return nil, fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
 	}
 	return m.sessionManager.SendPrompt(ctx, execution, prompt, true, attachments, m.MarkReady)
 }
