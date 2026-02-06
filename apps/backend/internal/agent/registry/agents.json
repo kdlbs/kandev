@@ -436,6 +436,14 @@
             "is_default": true
           },
           {
+            "id": "claude-opus-4-6",
+            "name": "Claude Opus 4.6",
+            "description": "Latest and most capable model for complex tasks",
+            "provider": "anthropic",
+            "context_window": 200000,
+            "is_default": false
+          },
+          {
             "id": "claude-opus-4-5",
             "name": "Claude Opus 4.5",
             "description": "Most capable model for complex tasks",
