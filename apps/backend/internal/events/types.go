@@ -29,6 +29,11 @@ const (
 	MessageUpdated = "message.updated"
 )
 
+// Event types for message queue
+const (
+	MessageQueueStatusChanged = "message.queue.status_changed"
+)
+
 // Event types for task sessions
 const (
 	TaskSessionStateChanged = "task_session.state_changed"

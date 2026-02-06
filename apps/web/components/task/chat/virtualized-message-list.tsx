@@ -40,6 +40,7 @@ export const VirtualizedMessageList = memo(function VirtualizedMessageList({
 }: VirtualizedMessageListProps) {
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const wasAtBottomRef = useRef(true);
+  const previousHeightRef = useRef(0);
 
   const isInitialLoading = messagesLoading && messages.length === 0;
   const showLoadingState = (messagesLoading || isInitialLoading) && !isWorking;
@@ -79,8 +80,9 @@ export const VirtualizedMessageList = memo(function VirtualizedMessageList({
 
     const { scrollTop, scrollHeight, clientHeight } = element;
 
-    // Track if we're at the bottom for auto-scroll behavior
-    wasAtBottomRef.current = scrollHeight - scrollTop - clientHeight < 48;
+    // Track if we're at the bottom for auto-scroll behavior (100px threshold)
+    // User is considered "at bottom" if within 100px of the bottom
+    wasAtBottomRef.current = scrollHeight - scrollTop - clientHeight < 100;
 
     // Trigger lazy load when scrolled near top
     if (scrollTop < 40 && loadingRef.current.hasMore && !loadingRef.current.isLoadingMore) {
@@ -102,6 +104,33 @@ export const VirtualizedMessageList = memo(function VirtualizedMessageList({
     element.addEventListener('scroll', handleScroll);
     return () => element.removeEventListener('scroll', handleScroll);
   }, [handleScroll]);
+
+  // Maintain scroll position at bottom when container resizes (e.g., chat input grows)
+  useEffect(() => {
+    const element = messagesContainerRef.current;
+    if (!element) return;
+
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const currentHeight = entry.contentRect.height;
+        const previousHeight = previousHeightRef.current;
+
+        // If container got smaller (input grew) and we were at bottom, scroll to bottom
+        if (previousHeight > 0 && currentHeight < previousHeight && wasAtBottomRef.current) {
+          requestAnimationFrame(() => {
+            if (element) {
+              element.scrollTop = element.scrollHeight;
+            }
+          });
+        }
+
+        previousHeightRef.current = currentHeight;
+      }
+    });
+
+    resizeObserver.observe(element);
+    return () => resizeObserver.disconnect();
+  }, []);
 
   // Track last message content to detect streaming updates
   const lastMessageContent = useMemo(() => {

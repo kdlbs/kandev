@@ -2,9 +2,28 @@ import type { StoreApi } from 'zustand';
 import type { AppState } from '@/lib/state/store';
 import type { WsHandlers } from '@/lib/ws/handlers/types';
 import type { TaskSessionState } from '@/lib/types/http';
+import type { QueuedMessage } from '@/lib/state/slices/session/types';
 
 export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
+    'message.queue.status_changed': (message) => {
+      const payload = message.payload;
+      if (!payload?.session_id) {
+        console.warn('[Queue] Missing session_id in queue status change event');
+        return;
+      }
+
+      const sessionId = payload.session_id;
+      const isQueued = payload.is_queued as boolean;
+      const queuedMessage = payload.message as QueuedMessage | null | undefined;
+
+      console.log('[Queue] Status changed:', { sessionId, isQueued, hasMessage: !!queuedMessage });
+
+      store.getState().setQueueStatus(sessionId, {
+        is_queued: isQueued,
+        message: queuedMessage,
+      });
+    },
     'session.state_changed': (message) => {
       const payload = message.payload;
       if (!payload?.task_id) {

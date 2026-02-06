@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, memo } from 'react';
+import { useCallback, useEffect, useRef, useState, memo, useMemo } from 'react';
+import { cn } from '@/lib/utils';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import { useAppStore } from '@/components/state-provider';
 import { getLocalStorage } from '@/lib/local-storage';
@@ -12,9 +13,11 @@ import { useSessionState } from '@/hooks/domains/session/use-session-state';
 import { useProcessedMessages } from '@/hooks/use-processed-messages';
 import { useSessionModel } from '@/hooks/domains/session/use-session-model';
 import { useMessageHandler } from '@/hooks/use-message-handler';
+import { useQueue } from '@/hooks/domains/session/use-queue';
 import { TodoSummary } from '@/components/task/chat/todo-summary';
 import { VirtualizedMessageList } from '@/components/task/chat/virtualized-message-list';
 import { ChatInputContainer, type ChatInputContainerHandle, type MessageAttachment } from '@/components/task/chat/chat-input-container';
+import { QueuedMessageIndicator, type QueuedMessageIndicatorHandle } from '@/components/task/chat/queued-message-indicator';
 import { formatReviewCommentsAsMarkdown } from '@/components/task/chat/messages/review-comments-attachment';
 import {
   useDiffCommentsStore,
@@ -43,6 +46,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   const [isSending, setIsSending] = useState(false);
   const lastAgentMessageCountRef = useRef(0);
   const chatInputRef = useRef<ChatInputContainerHandle>(null);
+  const queuedMessageRef = useRef<QueuedMessageIndicatorHandle>(null);
 
   // Ensure agent profile data is loaded (may not be hydrated from SSR in all navigation paths)
   useSettingsData(true);
@@ -95,6 +99,14 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     taskDescription
   );
 
+  // Extract user message history for up/down arrow navigation
+  const userMessageHistory = useMemo(() => {
+    return allMessages
+      .filter(msg => msg.author_type === 'user')
+      .map(msg => msg.content)
+      .filter(content => content && content.trim().length > 0);
+  }, [allMessages]);
+
   // Track clarification resolved state to trigger re-render after submit
   const [clarificationKey, setClarificationKey] = useState(0);
   const handleClarificationResolved = useCallback(() => {
@@ -115,13 +127,17 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   );
   const hasAgentCommands = agentCommands && agentCommands.length > 0;
 
+  // Message queue
+  const { queuedMessage, isQueued, cancel: cancelQueue, updateContent: updateQueueContent } = useQueue(resolvedSessionId);
+
   // Message sending
   const { handleSendMessage } = useMessageHandler(
     resolvedSessionId,
     taskId,
     sessionModel,
     activeModel,
-    planModeEnabled
+    planModeEnabled,
+    isAgentBusy
   );
 
   // Diff comments management
@@ -167,6 +183,25 @@ export const TaskChatPanel = memo(function TaskChatPanel({
       console.error('Failed to cancel agent turn:', error);
     }
   }, [resolvedSessionId]);
+
+  // Handle canceling queued message
+  const handleCancelQueue = useCallback(async () => {
+    try {
+      await cancelQueue();
+    } catch (error) {
+      console.error('Failed to cancel queued message:', error);
+    }
+  }, [cancelQueue]);
+
+  // Handle starting edit mode on queued message (from keyboard navigation)
+  const handleStartQueueEdit = useCallback(() => {
+    queuedMessageRef.current?.startEdit();
+  }, []);
+
+  // Handle edit complete - return focus to chat input
+  const handleQueueEditComplete = useCallback(() => {
+    chatInputRef.current?.focusInput();
+  }, []);
 
   const handleSubmit = useCallback(async (message: string, reviewComments?: DiffComment[], attachments?: MessageAttachment[]) => {
     if (isSending) return;
@@ -219,18 +254,6 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     { enabled: true, preventDefault: false }
   );
 
-  // Cancel agent turn with ESC shortcut
-  useKeyboardShortcut(
-    SHORTCUTS.CANCEL,
-    useCallback(() => {
-      if (isAgentBusy) {
-        handleCancelTurn();
-      }
-    }, [isAgentBusy, handleCancelTurn]),
-    { enabled: isAgentBusy }
-  );
-
-
   return (
     <div className="flex flex-col h-full min-h-0">
       {/* Scrollable messages area */}
@@ -252,8 +275,32 @@ export const TaskChatPanel = memo(function TaskChatPanel({
 
       {/* Sticky input at bottom */}
       <div className="flex-shrink-0 flex flex-col gap-2 mt-2">
+        {/* Status section: todos, etc. */}
         {todoItems.length > 0 && <TodoSummary todos={todoItems} />}
-        <ChatInputContainer
+
+        {/* Chat input with optional queued message on top */}
+        <div className="flex flex-col">
+          {/* Queued message indicator - appears above chat input */}
+          {isQueued && queuedMessage && (
+            <div className={cn(
+              'border border-b-0 border-border bg-background shadow-md',
+              'rounded-t-2xl overflow-hidden',
+              'border-blue-500/30'
+            )}>
+              <div className="px-3 py-3">
+                <QueuedMessageIndicator
+                  ref={queuedMessageRef}
+                  content={queuedMessage.content}
+                  onCancel={handleCancelQueue}
+                  onUpdate={updateQueueContent}
+                  isVisible={true}
+                  onEditComplete={handleQueueEditComplete}
+                />
+              </div>
+            </div>
+          )}
+
+          <ChatInputContainer
           ref={chatInputRef}
           key={clarificationKey}
           onSubmit={handleSubmit}
@@ -283,7 +330,12 @@ export const TaskChatPanel = memo(function TaskChatPanel({
           submitKey={chatSubmitKey}
           hasAgentCommands={hasAgentCommands}
           isFailed={isFailed}
+          isQueued={isQueued}
+          onStartQueueEdit={handleStartQueueEdit}
+          userMessageHistory={userMessageHistory}
+          hasQueuedMessageAbove={isQueued}
         />
+        </div>
       </div>
     </div>
   );

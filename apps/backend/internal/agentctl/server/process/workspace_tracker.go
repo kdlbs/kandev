@@ -1034,6 +1034,13 @@ func (wt *WorkspaceTracker) watchFilesystem(ctx context.Context) {
 				return
 			}
 
+			// Ignore CHMOD events - permission changes don't affect file content
+			// and shouldn't trigger UI refreshes. This prevents loops from filesystem
+			// scanners, git operations, or other tools that touch file permissions.
+			if event.Op == fsnotify.Chmod {
+				continue
+			}
+
 			// If a directory was created, watch it
 			if event.Op&fsnotify.Create == fsnotify.Create {
 				if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
