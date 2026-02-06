@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -221,12 +222,17 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 							zap.String("session_id", sessionID),
 							zap.Error(resumeErr))
 					} else {
-						for attempt := 0; attempt < 3; attempt++ {
-							time.Sleep(500 * time.Millisecond)
+						// Wait for the agent to become ready after resume.
+						// ResumeTaskSession starts the agent asynchronously, so we poll
+						// the session state until it transitions to a promptable state.
+						if waitErr := h.waitForSessionReady(promptCtx, sessionID); waitErr != nil {
+							h.logger.Warn("session did not become ready after resume",
+								zap.String("task_id", taskID),
+								zap.String("session_id", sessionID),
+								zap.Error(waitErr))
+							err = waitErr
+						} else {
 							_, err = h.orchestrator.PromptTask(promptCtx, taskID, sessionID, content, model, planMode, attachments)
-							if err == nil {
-								break
-							}
 						}
 					}
 				}
@@ -265,6 +271,45 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	}
 
 	return response, nil
+}
+
+// waitForSessionReady polls the session state after a resume operation until the agent
+// is ready to accept prompts. It returns nil when the session reaches WAITING_FOR_INPUT
+// state, or an error if the session transitions to FAILED or the timeout is exceeded.
+func (h *MessageHandlers) waitForSessionReady(ctx context.Context, sessionID string) error {
+	const (
+		pollInterval = 1 * time.Second
+		maxWait      = 90 * time.Second
+	)
+	deadline := time.Now().Add(maxWait)
+	for {
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timeout waiting for session to become ready after resume")
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(pollInterval):
+		}
+		sessionResp, err := h.taskController.GetTaskSession(ctx, dto.GetTaskSessionRequest{TaskSessionID: sessionID})
+		if err != nil {
+			return fmt.Errorf("failed to check session state: %w", err)
+		}
+		switch sessionResp.Session.State {
+		case models.TaskSessionStateWaitingForInput:
+			return nil
+		case models.TaskSessionStateFailed:
+			errMsg := sessionResp.Session.ErrorMessage
+			if errMsg == "" {
+				errMsg = "session failed during resume"
+			}
+			return fmt.Errorf("session failed after resume: %s", errMsg)
+		case models.TaskSessionStateCancelled, models.TaskSessionStateCompleted:
+			return fmt.Errorf("session in unexpected state after resume: %s", sessionResp.Session.State)
+		default:
+			// STARTING or RUNNING — keep polling
+		}
+	}
 }
 
 type wsListMessagesRequest struct {
