@@ -25,6 +25,8 @@ type AdapterContext = {
   worktreePath?: string;
   sessionId?: string;
   onOpenFile?: (path: string) => void;
+  allMessages?: Message[];
+  onScrollToMessage?: (messageId: string) => void;
 };
 
 type MessageAdapter = {
@@ -125,6 +127,8 @@ const adapters: MessageAdapter[] = [
             label="Task"
             className="bg-amber-500/10 text-foreground border-amber-500/30"
             showRichBlocks
+            allMessages={ctx.allMessages}
+            onScrollToMessage={ctx.onScrollToMessage}
           />
         );
       }
@@ -134,6 +138,8 @@ const adapters: MessageAdapter[] = [
             comment={comment}
             label="You"
             className="bg-primary/10 text-foreground border-primary/30"
+            allMessages={ctx.allMessages}
+            onScrollToMessage={ctx.onScrollToMessage}
           />
         );
       }
@@ -143,6 +149,8 @@ const adapters: MessageAdapter[] = [
           label="Agent"
           className="bg-muted/40 text-foreground border-border/60"
           showRichBlocks={comment.type === 'message' || comment.type === 'content' || !comment.type}
+          allMessages={ctx.allMessages}
+          onScrollToMessage={ctx.onScrollToMessage}
         />
       );
     },
@@ -158,6 +166,8 @@ type MessageRendererProps = {
   worktreePath?: string;
   sessionId?: string;
   onOpenFile?: (path: string) => void;
+  allMessages?: Message[];
+  onScrollToMessage?: (messageId: string) => void;
 };
 
 export const MessageRenderer = memo(function MessageRenderer({
@@ -169,8 +179,10 @@ export const MessageRenderer = memo(function MessageRenderer({
   worktreePath,
   sessionId,
   onOpenFile,
+  allMessages,
+  onScrollToMessage,
 }: MessageRendererProps) {
-  const ctx = { isTaskDescription, taskId, permissionsByToolCallId, childrenByParentToolCallId, worktreePath, sessionId, onOpenFile };
+  const ctx = { isTaskDescription, taskId, permissionsByToolCallId, childrenByParentToolCallId, worktreePath, sessionId, onOpenFile, allMessages, onScrollToMessage };
   const adapter = adapters.find((entry) => entry.matches(comment, ctx)) ?? adapters[adapters.length - 1];
   return adapter.render(comment, ctx);
 });

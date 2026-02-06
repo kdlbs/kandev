@@ -2,33 +2,31 @@
 
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
+import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard';
 
 type InlineCodeProps = {
   children: React.ReactNode;
 };
 
 export function InlineCode({ children }: InlineCodeProps) {
+  const { copy } = useCopyToClipboard();
   const [showTooltip, setShowTooltip] = useState(false);
   const [tooltipText, setTooltipText] = useState('Copy to clipboard');
 
   const handleClick = async () => {
     const text = String(children);
-    try {
-      await navigator.clipboard.writeText(text);
-      setTooltipText('Copied!');
-      setShowTooltip(true);
+    await copy(text);
+    setTooltipText('Copied!');
+    setShowTooltip(true);
 
-      setTimeout(() => {
-        setShowTooltip(false);
-        setTimeout(() => setTooltipText('Copy to clipboard'), 200);
-      }, 1500);
-    } catch (err) {
-      console.error('Failed to copy:', err);
-    }
+    setTimeout(() => {
+      setShowTooltip(false);
+      setTimeout(() => setTooltipText('Copy to clipboard'), 200);
+    }, 1500);
   };
 
   return (
-    <span className="relative inline-block group">
+    <span className="relative inline-block group/inline-code">
       <code
         onClick={handleClick}
         className={cn(
@@ -45,7 +43,7 @@ export function InlineCode({ children }: InlineCodeProps) {
           'absolute bottom-full left-1/2 -translate-x-1/2 mb-1',
           'px-2 py-1 text-xs text-white bg-gray-900 rounded whitespace-nowrap',
           'pointer-events-none transition-opacity duration-200',
-          'opacity-0 group-hover:opacity-100',
+          'opacity-0 group-hover/inline-code:opacity-100',
           showTooltip && 'opacity-100'
         )}
       >

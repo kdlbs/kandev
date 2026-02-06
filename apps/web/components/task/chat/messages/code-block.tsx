@@ -1,6 +1,5 @@
 'use client';
 
-import { useState } from 'react';
 import { useTheme } from 'next-themes';
 import CodeMirror from '@uiw/react-codemirror';
 import { vscodeDark, vscodeLight } from '@uiw/codemirror-theme-vscode';
@@ -8,6 +7,7 @@ import { EditorView } from '@codemirror/view';
 import { IconCheck, IconCopy } from '@tabler/icons-react';
 import { cn } from '@/lib/utils';
 import { getCodeMirrorExtension } from '@/lib/languages';
+import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard';
 
 type CodeBlockProps = {
   children: React.ReactNode;
@@ -21,7 +21,7 @@ const getLanguageExtension = (language?: string) => {
 };
 
 export function CodeBlock({ children, className }: CodeBlockProps) {
-  const [copied, setCopied] = useState(false);
+  const { copied, copy } = useCopyToClipboard();
   const { theme, systemTheme } = useTheme();
   const effectiveTheme = theme === 'system' ? systemTheme : theme;
 
@@ -36,17 +36,11 @@ export function CodeBlock({ children, className }: CodeBlockProps) {
   });
 
   const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(code);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
-      console.error('Failed to copy:', err);
-    }
+    await copy(code);
   };
 
   return (
-    <div className="relative group my-4 w-fit max-w-full min-w-[50%]">
+    <div className="relative group/code-block my-4 w-fit max-w-full min-w-[50%]">
       {/* Copy button */}
       <button
         onClick={handleCopy}
@@ -55,7 +49,7 @@ export function CodeBlock({ children, className }: CodeBlockProps) {
           'p-1.5 rounded-md',
           'bg-white/10 hover:bg-white/20',
           'transition-all duration-200',
-          'opacity-0 group-hover:opacity-100',
+          'opacity-0 group-hover/code-block:opacity-100',
           'cursor-pointer',
         )}
         title="Copy code"
