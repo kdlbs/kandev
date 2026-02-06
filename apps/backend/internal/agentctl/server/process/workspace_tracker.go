@@ -829,9 +829,6 @@ func (wt *WorkspaceTracker) updateFiles(ctx context.Context) {
 	wt.mu.Lock()
 	wt.currentFiles = files
 	wt.mu.Unlock()
-
-	// Notify workspace stream subscribers
-	wt.notifyWorkspaceStreamFileList(files)
 }
 
 // getFileList retrieves the list of files in the workspace
@@ -880,25 +877,15 @@ func (wt *WorkspaceTracker) SubscribeWorkspaceStream() types.WorkspaceStreamSubs
 	// Send current git status immediately
 	wt.mu.RLock()
 	currentStatus := wt.currentStatus
-	currentFiles := wt.currentFiles
 	wt.mu.RUnlock()
 
 	if currentStatus.Timestamp.IsZero() {
 		currentStatus.Timestamp = time.Now()
 	}
-	if currentFiles.Timestamp.IsZero() {
-		currentFiles.Timestamp = time.Now()
-	}
 
 	// Send git status
 	select {
 	case sub <- types.NewWorkspaceGitStatus(&currentStatus):
-	default:
-	}
-
-	// Send file list
-	select {
-	case sub <- types.NewWorkspaceFileList(&currentFiles):
 	default:
 	}
 
@@ -981,21 +968,6 @@ func (wt *WorkspaceTracker) notifyWorkspaceStreamFileChange(notification types.F
 	defer wt.workspaceSubMu.RUnlock()
 
 	msg := types.NewWorkspaceFileChange(&notification)
-	for sub := range wt.workspaceStreamSubscribers {
-		select {
-		case sub <- msg:
-		default:
-			// Subscriber is slow, skip
-		}
-	}
-}
-
-// notifyWorkspaceStreamFileList sends file list update to all workspace stream subscribers
-func (wt *WorkspaceTracker) notifyWorkspaceStreamFileList(update types.FileListUpdate) {
-	wt.workspaceSubMu.RLock()
-	defer wt.workspaceSubMu.RUnlock()
-
-	msg := types.NewWorkspaceFileList(&update)
 	for sub := range wt.workspaceStreamSubscribers {
 		select {
 		case sub <- msg:
