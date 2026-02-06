@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, isValidElement, type ReactNode } from 'react';
+import { memo, isValidElement, useState, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
@@ -9,6 +9,8 @@ import type { Message } from '@/lib/types/http';
 import { RichBlocks } from '@/components/task/chat/messages/rich-blocks';
 import { InlineCode } from '@/components/task/chat/messages/inline-code';
 import { CodeBlock } from '@/components/task/chat/messages/code-block';
+import { MessageActions } from '@/components/task/chat/messages/message-actions';
+import { useMessageNavigation } from '@/hooks/use-message-navigation';
 
 /**
  * Recursively extracts text content from React children.
@@ -43,6 +45,8 @@ type ChatMessageProps = {
   label: string;
   className: string;
   showRichBlocks?: boolean;
+  allMessages?: Message[];
+  onScrollToMessage?: (messageId: string) => void;
 };
 
 // Regex to match @file references (file paths after @)
@@ -87,9 +91,29 @@ function renderContentWithFileRefs(content: string): React.ReactNode[] {
   return parts.length > 0 ? parts : [content];
 }
 
-export const ChatMessage = memo(function ChatMessage({ comment, label, className, showRichBlocks }: ChatMessageProps) {
+export const ChatMessage = memo(function ChatMessage({ comment, label, className, showRichBlocks, allMessages, onScrollToMessage }: ChatMessageProps) {
+  const [showRaw, setShowRaw] = useState(false);
   const isUser = comment.author_type === 'user';
   const isTaskDescription = label === 'Task';
+
+  // Navigation logic for user messages
+  const userNavigation = useMessageNavigation(
+    allMessages || [],
+    comment.id,
+    'user'
+  );
+
+  const handleNavigatePrev = () => {
+    if (userNavigation.previous && onScrollToMessage) {
+      onScrollToMessage(userNavigation.previous.id);
+    }
+  };
+
+  const handleNavigateNext = () => {
+    if (userNavigation.next && onScrollToMessage) {
+      onScrollToMessage(userNavigation.next.id);
+    }
+  };
 
   // Keep the old card-based layout for task descriptions (amber banner)
   if (isTaskDescription) {
@@ -121,7 +145,7 @@ export const ChatMessage = memo(function ChatMessage({ comment, label, className
 
     return (
       <div className="flex justify-end w-full overflow-hidden">
-        <div className="max-w-[85%] sm:max-w-[75%] md:max-w-2xl overflow-hidden">
+        <div className="max-w-[85%] sm:max-w-[75%] md:max-w-2xl overflow-hidden group">
           <div className="rounded-2xl bg-primary/30 px-4 py-2.5 text-xs overflow-hidden">
             {/* Display image attachments */}
             {hasAttachments && (
@@ -145,13 +169,32 @@ export const ChatMessage = memo(function ChatMessage({ comment, label, className
             )}
             {/* Display text content */}
             {hasContent ? (
-              <p className="whitespace-pre-wrap break-words overflow-wrap-anywhere">
-                {renderContentWithFileRefs(comment.content)}
-              </p>
+              showRaw ? (
+                <pre className="whitespace-pre-wrap font-mono text-xs">
+                  {comment.content}
+                </pre>
+              ) : (
+                <p className="whitespace-pre-wrap break-words overflow-wrap-anywhere">
+                  {renderContentWithFileRefs(comment.content)}
+                </p>
+              )
             ) : !hasAttachments ? (
               <p className="whitespace-pre-wrap break-words overflow-wrap-anywhere">(empty)</p>
             ) : null}
           </div>
+          <MessageActions
+            message={comment}
+            showCopy={true}
+            showTimestamp={true}
+            showRawToggle={true}
+            showNavigation={!!allMessages && allMessages.length > 0}
+            isRawView={showRaw}
+            onToggleRaw={() => setShowRaw(!showRaw)}
+            onNavigatePrev={handleNavigatePrev}
+            onNavigateNext={handleNavigateNext}
+            hasPrev={userNavigation.hasPrevious}
+            hasNext={userNavigation.hasNext}
+          />
         </div>
       </div>
     );
@@ -159,110 +202,130 @@ export const ChatMessage = memo(function ChatMessage({ comment, label, className
 
   // Agent message: icon on left, no card background
   return (
-    <div className="flex items-start gap-2 sm:gap-3 w-full">
+    <div className="flex items-start gap-2 sm:gap-3 w-full group">
 
       {/* Content */}
       <div className="flex-1 min-w-0 text-xs">
-        <div className="prose prose-sm dark:prose-invert max-w-none prose-p:my-4 prose-p:leading-relaxed prose-ul:my-4 prose-ul:list-disc prose-ul:pl-6 prose-ol:my-4 prose-ol:list-decimal prose-ol:pl-6 prose-li:my-1.5 prose-pre:my-5 prose-strong:text-foreground prose-strong:font-bold prose-headings:text-foreground prose-headings:font-bold">
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm, remarkBreaks]}
-            components={{
-              code: ({ className, children }) => {
-                const content = getTextContent(children).replace(/\n$/, '');
-                const hasLanguage = className?.startsWith('language-');
-                const hasNewlines = content.includes('\n');
-
-                // Code block if it has a language specifier OR has multiple lines
-                if (hasLanguage || hasNewlines) {
-                  return <CodeBlock className={className}>{content}</CodeBlock>;
-                }
-
-                // Inline code (single backticks, single line)
-                return <InlineCode>{content}</InlineCode>;
-              },
-              ol: ({ children }) => (
-                <ol className="list-decimal pl-6 mb-2">
-                  {children}
-                </ol>
-              ),
-              ul: ({ children }) => (
-                <ul className="list-disc pl-6 mb-2">
-                  {children}
-                </ul>
-              ),
-              li: ({ children }) => (
-                <li className="my-0.5">
-                  {children}
-                </li>
-              ),
-              p: ({ children }) => (
-                <p className="leading-relaxed mb-1.5">
-                  {children}
-                </p>
-              ),
-              h1: ({ children }) => (
-                <p className="my-3 font-bold text-[13px]">
-                  {children}
-                </p>
-              ),
-              h2: ({ children }) => (
-                <p className="my-2 font-bold text-[13px]">
-                  {children}
-                </p>
-              ),
-              h3: ({ children }) => (
-                <p className="my-2 font-bold">
-                  {children}
-                </p>
-              ),
-              h4: ({ children }) => (
-                <p className="my-2 font-bold">
-                  {children}
-                </p>
-              ),
-              h5: ({ children }) => (
-                <p className="my-2 font-bold">
-                  {children}
-                </p>
-              ),
-              table: ({ children }) => (
-                <div className="my-3 overflow-x-auto">
-                  <table className="border-collapse border border-border rounded-lg overflow-hidden">
-                    {children}
-                  </table>
-                </div>
-              ),
-              thead: ({ children }) => (
-                <thead className="bg-muted/50">
-                  {children}
-                </thead>
-              ),
-              tbody: ({ children }) => (
-                <tbody className="divide-y divide-border">
-                  {children}
-                </tbody>
-              ),
-              tr: ({ children }) => (
-                <tr className="border-b border-border last:border-b-0 hover:bg-muted/50">
-                  {children}
-                </tr>
-              ),
-              th: ({ children }) => (
-                <th className="px-3 py-2 text-left text-xs font-semibold text-foreground border-r border-border last:border-r-0">
-                  {children}
-                </th>
-              ),
-              td: ({ children }) => (
-                <td className="px-3 py-2 text-xs text-muted-foreground border-r border-border last:border-r-0">
-                  {children}
-                </td>
-              ),
-            }}
-          >
+        {showRaw ? (
+          <pre className="whitespace-pre-wrap font-mono text-xs bg-muted/20 p-3 rounded-md">
             {comment.content || '(empty)'}
-          </ReactMarkdown>
-          {showRichBlocks ? <RichBlocks comment={comment} /> : null}
-        </div>
+          </pre>
+        ) : (
+          <div className="prose prose-sm dark:prose-invert max-w-none prose-p:my-4 prose-p:leading-relaxed prose-ul:my-4 prose-ul:list-disc prose-ul:pl-6 prose-ol:my-4 prose-ol:list-decimal prose-ol:pl-6 prose-li:my-1.5 prose-pre:my-5 prose-strong:text-foreground prose-strong:font-bold prose-headings:text-foreground prose-headings:font-bold">
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm, remarkBreaks]}
+              components={{
+                code: ({ className, children }) => {
+                  const content = getTextContent(children).replace(/\n$/, '');
+                  const hasLanguage = className?.startsWith('language-');
+                  const hasNewlines = content.includes('\n');
+
+                  // Code block if it has a language specifier OR has multiple lines
+                  if (hasLanguage || hasNewlines) {
+                    return <CodeBlock className={className}>{content}</CodeBlock>;
+                  }
+
+                  // Inline code (single backticks, single line)
+                  return <InlineCode>{content}</InlineCode>;
+                },
+                ol: ({ children }) => (
+                  <ol className="list-decimal pl-6 mb-2">
+                    {children}
+                  </ol>
+                ),
+                ul: ({ children }) => (
+                  <ul className="list-disc pl-6 mb-2">
+                    {children}
+                  </ul>
+                ),
+                li: ({ children }) => (
+                  <li className="my-0.5">
+                    {children}
+                  </li>
+                ),
+                p: ({ children }) => (
+                  <p className="leading-relaxed mb-1.5">
+                    {children}
+                  </p>
+                ),
+                h1: ({ children }) => (
+                  <p className="my-3 font-bold text-sm">
+                    {children}
+                  </p>
+                ),
+                h2: ({ children }) => (
+                  <p className="my-2 font-bold text-sm">
+                    {children}
+                  </p>
+                ),
+                h3: ({ children }) => (
+                  <p className="my-2 font-bold text-sm">
+                    {children}
+                  </p>
+                ),
+                h4: ({ children }) => (
+                  <p className="my-2 font-bold">
+                    {children}
+                  </p>
+                ),
+                h5: ({ children }) => (
+                  <p className="my-2 font-bold">
+                    {children}
+                  </p>
+                ),
+                hr: ({ children }) => (
+                  <hr className="my-5">
+                    {children}
+                  </hr>
+                ),
+                table: ({ children }) => (
+                  <div className="my-3 overflow-x-auto">
+                    <table className="border-collapse border border-border rounded-lg overflow-hidden">
+                      {children}
+                    </table>
+                  </div>
+                ),
+                thead: ({ children }) => (
+                  <thead className="bg-muted/50">
+                    {children}
+                  </thead>
+                ),
+                tbody: ({ children }) => (
+                  <tbody className="divide-y divide-border">
+                    {children}
+                  </tbody>
+                ),
+                tr: ({ children }) => (
+                  <tr className="border-b border-border last:border-b-0 hover:bg-muted/50">
+                    {children}
+                  </tr>
+                ),
+                th: ({ children }) => (
+                  <th className="px-3 py-2 text-left text-xs font-semibold text-foreground border-r border-border last:border-r-0">
+                    {children}
+                  </th>
+                ),
+                td: ({ children }) => (
+                  <td className="px-3 py-2 text-xs text-muted-foreground border-r border-border last:border-r-0">
+                    {children}
+                  </td>
+                ),
+              }}
+            >
+              {comment.content || '(empty)'}
+            </ReactMarkdown>
+            {showRichBlocks ? <RichBlocks comment={comment} /> : null}
+          </div>
+        )}
+        <MessageActions
+          message={comment}
+          showCopy={true}
+          showTimestamp={true}
+          showRawToggle={true}
+          showNavigation={false}
+          isRawView={showRaw}
+          onToggleRaw={() => setShowRaw(!showRaw)}
+        />
       </div>
     </div>
   );

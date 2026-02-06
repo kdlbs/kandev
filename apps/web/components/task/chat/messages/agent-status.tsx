@@ -1,7 +1,7 @@
 'use client';
 
-import { useCallback, useMemo, useState, useEffect } from 'react';
-import { IconAlertCircle, IconAlertTriangle, IconCopy, IconCheck } from '@tabler/icons-react';
+import { useMemo, useState, useEffect } from 'react';
+import { IconAlertCircle, IconAlertTriangle } from '@tabler/icons-react';
 import type { Message, TaskSessionState } from '@/lib/types/http';
 import { useSessionTurn } from '@/hooks/domains/session/use-session-turn';
 import { useAppStore } from '@/components/state-provider';
@@ -109,33 +109,6 @@ function useRunningTimer(isRunning: boolean, turnStartedAt: string | null) {
   return { elapsedSeconds: displaySeconds, formatted };
 }
 
-function CopyButton({ content }: { content: string }) {
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(content);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
-      console.error('Failed to copy:', err);
-    }
-  }, [content]);
-
-  return (
-    <button
-      onClick={handleCopy}
-      className="inline-flex items-center justify-center h-5 w-5 rounded hover:bg-muted/50 text-muted-foreground/60 hover:text-muted-foreground transition-colors"
-      title="Copy last response"
-    >
-      {copied ? (
-        <IconCheck className="h-3.5 w-3.5 text-emerald-500" />
-      ) : (
-        <IconCopy className="h-3.5 w-3.5" />
-      )}
-    </button>
-  );
-}
 
 export function AgentStatus({ sessionState, sessionId, messages = [] }: AgentStatusProps) {
   const { lastTurnDuration, isActive: isTurnActive } = useSessionTurn(sessionId);
@@ -155,16 +128,6 @@ export function AgentStatus({ sessionState, sessionId, messages = [] }: AgentSta
   const { formatted: runningDuration, elapsedSeconds } = useRunningTimer(isRunning, activeTurn?.started_at ?? null);
   const isError = config?.icon === 'error';
   const isWarning = config?.icon === 'warning';
-
-  // Get last agent message content for copy button
-  const lastAgentContent = useMemo(() => {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].author_type === 'agent' && messages[i].content) {
-        return messages[i].content;
-      }
-    }
-    return null;
-  }, [messages]);
 
   // Calculate duration from messages as fallback
   const fallbackDuration = useMemo(() => {
@@ -219,14 +182,13 @@ export function AgentStatus({ sessionState, sessionId, messages = [] }: AgentSta
     );
   }
 
-  // Completed/idle state - show duration and copy button if available
-  const showCompletedState = !isTurnActive && (displayDuration || lastAgentContent);
+  // Completed/idle state - show duration if available
+  const showCompletedState = !isTurnActive && displayDuration;
   if (showCompletedState) {
     return (
       <div className="flex items-center gap-2 py-2">
-        <span className="inline-flex items-center gap-2 text-xs text-muted-foreground">
-          {displayDuration && <span className="tabular-nums">{displayDuration}</span>}
-          {lastAgentContent && <CopyButton content={lastAgentContent} />}
+        <span className="inline-flex items-center gap-2 text-xs text-muted-foreground tabular-nums">
+          {displayDuration}
         </span>
       </div>
     );

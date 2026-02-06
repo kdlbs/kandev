@@ -21,6 +21,8 @@ type TurnGroupMessageProps = {
   isLastGroup?: boolean;
   /** Whether the turn is still active (agent is running) */
   isTurnActive?: boolean;
+  allMessages?: Message[];
+  onScrollToMessage?: (messageId: string) => void;
 };
 
 function countMessageTypes(messages: Message[]): { toolCalls: number; subagents: number } {
@@ -124,6 +126,8 @@ export const TurnGroupMessage = memo(function TurnGroupMessage({
   onOpenFile,
   isLastGroup = false,
   isTurnActive = false,
+  allMessages,
+  onScrollToMessage,
 }: TurnGroupMessageProps) {
   // Check if any tool in the group is still running
   const isGroupRunning = hasRunningTool(group.messages);
@@ -187,6 +191,8 @@ export const TurnGroupMessage = memo(function TurnGroupMessage({
               worktreePath={worktreePath}
               sessionId={sessionId ?? undefined}
               onOpenFile={onOpenFile}
+              allMessages={allMessages}
+              onScrollToMessage={onScrollToMessage}
             />
           ))}
         </div>

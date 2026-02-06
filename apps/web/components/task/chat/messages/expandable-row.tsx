@@ -32,7 +32,7 @@ export const ExpandableRow = memo(function ExpandableRow({
   }, [hasExpandableContent, onToggle]);
 
   return (
-    <div className="w-full group">
+    <div className="w-full group/expandable">
       {/* Clickable header row */}
       <div
         className={cn(
@@ -46,16 +46,16 @@ export const ExpandableRow = memo(function ExpandableRow({
           <div
             className={cn(
               'absolute inset-0 transition-opacity',
-              hasExpandableContent && 'group-hover:opacity-0'
+              hasExpandableContent && 'group-hover/expandable:opacity-0'
             )}
           >
             {icon}
           </div>
           {hasExpandableContent &&
             (isExpanded ? (
-              <IconChevronDown className="h-4 w-4 text-muted-foreground absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+              <IconChevronDown className="h-4 w-4 text-muted-foreground absolute inset-0 opacity-0 group-hover/expandable:opacity-100 transition-opacity" />
             ) : (
-              <IconChevronRight className="h-4 w-4 text-muted-foreground absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+              <IconChevronRight className="h-4 w-4 text-muted-foreground absolute inset-0 opacity-0 group-hover/expandable:opacity-100 transition-opacity" />
             ))}
         </div>
 

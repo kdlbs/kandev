@@ -55,6 +55,19 @@ export const VirtualizedMessageList = memo(function VirtualizedMessageList({
     overscan: 6,
   });
 
+  // Scroll to a specific message by ID
+  const handleScrollToMessage = useCallback((messageId: string) => {
+    const index = items.findIndex(item => {
+      if (item.type === 'turn_group') {
+        return item.messages.some(msg => msg.id === messageId);
+      }
+      return item.message?.id === messageId;
+    });
+    if (index >= 0) {
+      virtualizer.scrollToIndex(index, { align: 'center' });
+    }
+  }, [items, virtualizer]);
+
   // Use ref to track loading state to avoid recreating the scroll handler
   const loadingRef = useRef({ hasMore, isLoadingMore });
   loadingRef.current = { hasMore, isLoadingMore };
@@ -182,6 +195,8 @@ export const VirtualizedMessageList = memo(function VirtualizedMessageList({
                       onOpenFile={onOpenFile}
                       isLastGroup={item.id === lastTurnGroupId}
                       isTurnActive={isRunning}
+                      allMessages={messages}
+                      onScrollToMessage={handleScrollToMessage}
                     />
                   ) : (
                     <MessageRenderer
@@ -193,6 +208,8 @@ export const VirtualizedMessageList = memo(function VirtualizedMessageList({
                       worktreePath={worktreePath}
                       sessionId={sessionId ?? undefined}
                       onOpenFile={onOpenFile}
+                      allMessages={messages}
+                      onScrollToMessage={handleScrollToMessage}
                     />
                   )}
                 </div>
