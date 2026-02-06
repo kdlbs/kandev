@@ -501,7 +501,7 @@ func (s *Service) resumeExecutorsOnStartup(ctx context.Context) {
 
 		// Handle sessions in terminal states - clean up executor record and fix task state
 		switch previousState {
-		case models.TaskSessionStateCompleted, models.TaskSessionStateFailed, models.TaskSessionStateCancelled:
+		case models.TaskSessionStateCompleted, models.TaskSessionStateCancelled:
 			s.logger.Info("session in terminal state; cleaning up executor record",
 				zap.String("session_id", sessionID),
 				zap.String("task_id", session.TaskID),
@@ -511,9 +511,10 @@ func (s *Service) resumeExecutorsOnStartup(ctx context.Context) {
 					zap.String("session_id", sessionID),
 					zap.Error(err))
 			}
-
+			continue
+		case models.TaskSessionStateFailed:
 			// If session failed, ensure task is in REVIEW state (not stuck IN_PROGRESS)
-			if previousState == models.TaskSessionStateFailed && session.TaskID != "" {
+			if session.TaskID != "" {
 				task, taskErr := s.taskRepo.GetTask(ctx, session.TaskID)
 				if taskErr == nil && task.State == v1.TaskStateInProgress {
 					s.logger.Info("fixing task state: session failed but task still IN_PROGRESS",
@@ -524,6 +525,22 @@ func (s *Service) resumeExecutorsOnStartup(ctx context.Context) {
 							zap.String("task_id", session.TaskID),
 							zap.Error(updateErr))
 					}
+				}
+			}
+			// Preserve ExecutorRunning for resumable failed sessions so the user
+			// can resume them later. Only clean up non-resumable failures.
+			if running.ResumeToken != "" && running.Resumable {
+				s.logger.Info("preserving executor record for resumable failed session",
+					zap.String("session_id", sessionID),
+					zap.String("task_id", session.TaskID))
+			} else {
+				s.logger.Info("cleaning up executor record for non-resumable failed session",
+					zap.String("session_id", sessionID),
+					zap.String("task_id", session.TaskID))
+				if err := s.repo.DeleteExecutorRunningBySessionID(ctx, sessionID); err != nil {
+					s.logger.Warn("failed to remove executor record for failed session",
+						zap.String("session_id", sessionID),
+						zap.Error(err))
 				}
 			}
 			continue
