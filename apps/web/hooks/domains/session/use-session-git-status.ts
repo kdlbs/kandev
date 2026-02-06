@@ -96,10 +96,19 @@ export function useSessionGitStatus(sessionId: string | null) {
     }
     prevSessionIdRef.current = sessionId;
 
-    // Skip fetch if we already have status or already fetched for this session
-    const currentStatus = storeApi.getState().gitStatus.bySessionId[sessionId];
-    if (currentStatus || hasFetchedRef.current) {
+    // Skip fetch if we already fetched for this session (and session hasn't changed)
+    // When session changed, always refetch to get the latest status even if cached
+    if (hasFetchedRef.current) {
       return;
+    }
+
+    // If we haven't fetched yet and status already exists (e.g., from WebSocket), skip
+    if (!sessionChanged) {
+      const currentStatus = storeApi.getState().gitStatus.bySessionId[sessionId];
+      if (currentStatus) {
+        hasFetchedRef.current = true;
+        return;
+      }
     }
 
     hasFetchedRef.current = true;
