@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
@@ -898,7 +899,14 @@ func (e *Executor) Prompt(ctx context.Context, taskID, sessionID string, prompt 
 		zap.Int("prompt_length", len(prompt)),
 		zap.Int("attachments_count", len(attachments)))
 
-	return e.agentManager.PromptAgent(ctx, session.AgentExecutionID, prompt, attachments)
+	result, err := e.agentManager.PromptAgent(ctx, session.AgentExecutionID, prompt, attachments)
+	if err != nil {
+		if errors.Is(err, lifecycle.ErrExecutionNotFound) {
+			return nil, ErrExecutionNotFound
+		}
+		return nil, err
+	}
+	return result, nil
 }
 
 // SwitchModel stops the current agent, restarts it with a new model, and sends the prompt.
