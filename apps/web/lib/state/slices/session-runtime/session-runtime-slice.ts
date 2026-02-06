@@ -84,8 +84,43 @@ export const createSessionRuntimeSlice: StateCreator<
     }),
   setGitStatus: (sessionId, gitStatus) =>
     set((draft) => {
-      // Always update git status - the timestamp and file diffs may have changed
-      // even if the file lists are the same. The backend sends updates when content changes.
+      const existing = draft.gitStatus.bySessionId[sessionId];
+
+      // Skip update if key fields haven't changed to prevent unnecessary re-renders
+      if (existing) {
+        const branchChanged = existing.branch !== gitStatus.branch ||
+                              existing.remote_branch !== gitStatus.remote_branch;
+        const syncStatusChanged = existing.ahead !== gitStatus.ahead ||
+                                  existing.behind !== gitStatus.behind;
+
+        // Compare file list (keys) and total stats, not individual file contents
+        const existingFileKeys = existing.files ? Object.keys(existing.files).sort().join(',') : '';
+        const newFileKeys = gitStatus.files ? Object.keys(gitStatus.files).sort().join(',') : '';
+        const fileListChanged = existingFileKeys !== newFileKeys;
+
+        // Compare total additions/deletions across all files
+        const existingTotal = { additions: 0, deletions: 0 };
+        const newTotal = { additions: 0, deletions: 0 };
+        if (existing.files) {
+          for (const f of Object.values(existing.files)) {
+            existingTotal.additions += f.additions || 0;
+            existingTotal.deletions += f.deletions || 0;
+          }
+        }
+        if (gitStatus.files) {
+          for (const f of Object.values(gitStatus.files)) {
+            newTotal.additions += f.additions || 0;
+            newTotal.deletions += f.deletions || 0;
+          }
+        }
+        const statsChanged = existingTotal.additions !== newTotal.additions ||
+                             existingTotal.deletions !== newTotal.deletions;
+
+        if (!branchChanged && !syncStatusChanged && !fileListChanged && !statsChanged) {
+          return; // No meaningful change, skip update
+        }
+      }
+
       draft.gitStatus.bySessionId[sessionId] = gitStatus;
     }),
   clearGitStatus: (sessionId) =>

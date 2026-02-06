@@ -10,6 +10,7 @@ import { Button } from '@kandev/ui/button';
 import { IconDeviceFloppy, IconLoader2, IconTrash, IconTextWrap, IconTextWrapDisabled, IconMessagePlus } from '@tabler/icons-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
 import { formatDiffStats } from '@/lib/utils/file-diff';
+import { toRelativePath } from '@/lib/utils';
 import { vscodeDark } from '@uiw/codemirror-theme-vscode';
 import { useDiffCommentsStore, useFileComments } from '@/lib/state/slices/diff-comments/diff-comments-slice';
 import type { DiffComment } from '@/lib/diff/types';
@@ -24,6 +25,7 @@ type FileEditorContentProps = {
   isDirty: boolean;
   isSaving: boolean;
   sessionId?: string;
+  worktreePath?: string;
   enableComments?: boolean;
   onChange: (newContent: string) => void;
   onSave: () => void;
@@ -129,6 +131,7 @@ export function FileEditorContent({
   isDirty,
   isSaving,
   sessionId,
+  worktreePath,
   enableComments = false,
   onChange,
   onSave,
@@ -516,7 +519,7 @@ export function FileEditorContent({
       {/* Editor header with save button */}
       <div className="flex items-center justify-between px-2 border-foreground/10 border-b">
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span className="font-mono">{path}</span>
+          <span className="font-mono">{toRelativePath(path, worktreePath)}</span>
           {isDirty && diffStats && (
             <span className="text-xs text-yellow-500">
               {formatDiffStats(diffStats.additions, diffStats.deletions)}

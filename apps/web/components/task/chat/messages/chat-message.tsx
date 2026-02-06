@@ -181,12 +181,12 @@ export const ChatMessage = memo(function ChatMessage({ comment, label, className
                 return <InlineCode>{content}</InlineCode>;
               },
               ol: ({ children }) => (
-                <ol className="list-decimal pl-6 my-2">
+                <ol className="list-decimal pl-6 mb-2">
                   {children}
                 </ol>
               ),
               ul: ({ children }) => (
-                <ul className="list-disc pl-6 my-1">
+                <ul className="list-disc pl-6 mb-2">
                   {children}
                 </ul>
               ),
@@ -196,7 +196,7 @@ export const ChatMessage = memo(function ChatMessage({ comment, label, className
                 </li>
               ),
               p: ({ children }) => (
-                <p className="leading-relaxed my-0.5">
+                <p className="leading-relaxed mb-1.5">
                   {children}
                 </p>
               ),

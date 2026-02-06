@@ -7,7 +7,7 @@ type FilePathButtonProps = {
   filePath: string;
   worktreePath?: string;
   onOpenFile?: (path: string) => void;
-  variant?: 'badge' | 'list-item';
+  variant?: 'badge' | 'list-item' | 'link';
   className?: string;
 };
 
@@ -40,10 +40,12 @@ export const FilePathButton = memo(function FilePathButton({ filePath, worktreeP
     onOpenFile?.(filePath);
   }, [onOpenFile, filePath]);
 
-  const baseStyles = 'font-mono truncate cursor-pointer text-indigo-400 hover:underline transition-colors block w-full text-left';
-  const variantStyles = variant === 'badge'
-    ? 'text-xs px-1.5 py-0.5 rounded bg-indigo-500/20 hover:bg-indigo-500/30'
-    : 'flex items-center px-2 py-1 rounded hover:bg-indigo-500/20';
+  const baseStyles = 'font-mono truncate cursor-pointer transition-colors block w-full text-left';
+  const variantStyles = {
+    badge: 'text-xs px-1.5 py-0.5 rounded bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-400 hover:underline',
+    'list-item': 'flex items-center px-2 py-1 rounded hover:bg-indigo-500/20 text-indigo-400 hover:underline',
+    link: 'text-xs text-muted-foreground hover:text-foreground underline decoration-muted-foreground/40 hover:decoration-foreground/60',
+  }[variant];
 
   if (onOpenFile && canOpen) {
     return (
@@ -58,9 +60,11 @@ export const FilePathButton = memo(function FilePathButton({ filePath, worktreeP
     );
   }
 
-  const inactiveStyles = variant === 'badge'
-    ? 'text-xs text-muted-foreground/60 truncate font-mono bg-muted/30 px-1.5 py-0.5 rounded block w-full'
-    : 'px-2 py-1 font-mono text-muted-foreground truncate block w-full';
+  const inactiveStyles = {
+    badge: 'text-xs text-muted-foreground/60 truncate font-mono bg-muted/30 px-1.5 py-0.5 rounded block w-full',
+    'list-item': 'px-2 py-1 font-mono text-muted-foreground truncate block w-full',
+    link: 'text-xs font-mono text-muted-foreground/60 truncate block w-full',
+  }[variant];
 
   return (
     <span className={cn(inactiveStyles, className)} title={filePath}>
