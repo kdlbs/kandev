@@ -42,7 +42,8 @@ type InteractiveStartRequest struct {
 	ImmediateStart    bool              `json:"immediate_start,omitempty"`     // Start immediately with default dimensions (don't wait for resize)
 	DefaultCols       int               `json:"default_cols,omitempty"`        // Default columns if ImmediateStart (default 120)
 	DefaultRows       int               `json:"default_rows,omitempty"`        // Default rows if ImmediateStart (default 40)
-	InitialCommand    string            `json:"initial_command,omitempty"`     // Command to write to stdin after shell starts (for script terminals)
+	InitialCommand       string            `json:"initial_command,omitempty"`        // Command to write to stdin after shell starts (for script terminals)
+	DisableTurnDetection bool              `json:"disable_turn_detection,omitempty"` // Disable idle timer and turn detection (for user shell terminals)
 }
 
 // InteractiveProcessInfo represents the state of an interactive process.
@@ -226,9 +227,14 @@ func (r *InteractiveRunner) Start(ctx context.Context, req InteractiveStartReque
 		}
 	}
 
-	idleTimeout := time.Duration(req.IdleTimeoutMs) * time.Millisecond
-	if idleTimeout <= 0 {
-		idleTimeout = 5 * time.Second // Default 5 seconds
+	var idleTimeout time.Duration
+	if req.DisableTurnDetection {
+		idleTimeout = 0 // No idle timer for user shell terminals
+	} else {
+		idleTimeout = time.Duration(req.IdleTimeoutMs) * time.Millisecond
+		if idleTimeout <= 0 {
+			idleTimeout = 5 * time.Second // Default 5 seconds
+		}
 	}
 
 	// Create process struct WITHOUT spawning PTY yet
@@ -1360,10 +1366,11 @@ func (r *InteractiveRunner) StartUserShell(ctx context.Context, sessionID, termi
 	}
 
 	req := InteractiveStartRequest{
-		SessionID:      sessionID,
-		Command:        []string{shell, "-l"}, // Login shell
-		WorkingDir:     workingDir,
-		InitialCommand: initialCommand,
+		SessionID:            sessionID,
+		Command:              []string{shell, "-l"}, // Login shell
+		WorkingDir:           workingDir,
+		InitialCommand:       initialCommand,
+		DisableTurnDetection: true, // User shells must not trigger turn complete / MarkReady
 	}
 
 	info, err := r.Start(ctx, req)
