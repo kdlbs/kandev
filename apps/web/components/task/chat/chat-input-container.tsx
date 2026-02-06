@@ -126,7 +126,6 @@ const ChatInputToolbar = memo(function ChatInputToolbar({
                 variant="secondary"
                 size="icon"
                 className="h-7 w-7 rounded-full cursor-pointer bg-destructive/10 text-destructive hover:bg-destructive/20"
-                disabled={isDisabled}
                 onClick={onCancel}
               >
                 <IconPlayerStopFilled className="h-3.5 w-3.5" />
