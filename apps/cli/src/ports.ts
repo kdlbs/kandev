@@ -13,21 +13,39 @@ export function ensureValidPort(port: number | undefined, name: string): number 
   return port;
 }
 
-function isPortAvailable(port: number, host = "0.0.0.0"): Promise<boolean> {
+/**
+ * Tries to connect to a port on the given host. Returns true if something
+ * is already listening (i.e. the port is in use).
+ *
+ * This is more reliable than a bind-based check on macOS where
+ * SO_REUSEADDR (set by default in Node.js) can allow a bind to succeed
+ * even when another process is already listening on the same port.
+ */
+function isPortInUse(port: number, host: string): Promise<boolean> {
   return new Promise((resolve) => {
-    const server = net.createServer();
-    server.unref();
-    server.on("error", (err: NodeJS.ErrnoException) => {
-      if (err.code === "EADDRINUSE" || err.code === "EACCES") {
-        resolve(false);
-      } else {
-        resolve(false);
-      }
+    const socket = net.createConnection({ port, host });
+    socket.once("connect", () => {
+      socket.destroy();
+      resolve(true);
     });
-    server.listen(port, host, () => {
-      server.close(() => resolve(true));
+    socket.once("error", () => {
+      resolve(false);
     });
   });
+}
+
+/**
+ * Checks if a port is available by probing both IPv4 and IPv6 loopback.
+ *
+ * Uses a connect-based check: if we can connect to the port on either
+ * 127.0.0.1 or ::1, something is already listening and the port is taken.
+ */
+async function isPortAvailable(port: number): Promise<boolean> {
+  const [v4InUse, v6InUse] = await Promise.all([
+    isPortInUse(port, "127.0.0.1"),
+    isPortInUse(port, "::1"),
+  ]);
+  return !v4InUse && !v6InUse;
 }
 
 async function reserveSpecificPort(port: number, host = "127.0.0.1"): Promise<net.Server | null> {
@@ -58,16 +76,19 @@ export async function pickAndReservePort(
   preferred: number,
   retries = RANDOM_PORT_RETRIES,
 ): Promise<{ port: number; release: () => Promise<void> }> {
-  const reservedPreferred = await reserveSpecificPort(preferred);
-  if (reservedPreferred) {
-    return {
-      port: preferred,
-      release: () => new Promise((resolve) => reservedPreferred.close(() => resolve())),
-    };
+  if (await isPortAvailable(preferred)) {
+    const reservedPreferred = await reserveSpecificPort(preferred);
+    if (reservedPreferred) {
+      return {
+        port: preferred,
+        release: () => new Promise((resolve) => reservedPreferred.close(() => resolve())),
+      };
+    }
   }
 
   for (let i = 0; i < retries; i += 1) {
     const candidate = crypto.randomInt(RANDOM_PORT_MIN, RANDOM_PORT_MAX + 1);
+    if (!(await isPortAvailable(candidate))) continue;
     const reserved = await reserveSpecificPort(candidate);
     if (reserved) {
       return {
