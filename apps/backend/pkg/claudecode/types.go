@@ -74,6 +74,7 @@ type CLIMessage struct {
 	DurationMS        int64                      `json:"duration_ms,omitempty"`
 	DurationAPIMS     int64                      `json:"duration_api_ms,omitempty"`
 	IsError           bool                       `json:"is_error,omitempty"`
+	Errors            []string                   `json:"errors,omitempty"`
 	NumTurns          int                        `json:"num_turns,omitempty"`
 	TotalInputTokens  int64                      `json:"total_input_tokens,omitempty"`
 	TotalOutputTokens int64                      `json:"total_output_tokens,omitempty"`

@@ -1,9 +1,10 @@
 'use client';
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { IconChevronRight, IconChevronDown, IconFile, IconFolder, IconFolderOpen, IconSearch, IconX, IconLoader2, IconTrash } from '@tabler/icons-react';
+import { IconChevronRight, IconChevronDown, IconFolder, IconFolderOpen, IconSearch, IconX, IconLoader2, IconTrash } from '@tabler/icons-react';
 import { ScrollArea } from '@kandev/ui/scroll-area';
 import { Input } from '@kandev/ui/input';
+import { FileIcon } from '@/components/ui/file-icon';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import { requestFileTree, requestFileContent, searchWorkspaceFiles } from '@/lib/ws/workspace-files';
@@ -443,7 +444,16 @@ export function FileBrowser({ sessionId, onOpenFile, onDeleteFile, isSearchOpen 
               <IconFolder className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
             )
           ) : (
-            <IconFile className={`h-3 w-3 flex-shrink-0 ${isActive ? 'text-foreground' : 'text-muted-foreground'}`} />
+            <FileIcon
+              fileName={node.name}
+              filePath={node.path}
+              className="flex-shrink-0"
+              style={{
+                width: '12px',
+                height: '12px',
+                opacity: isActive ? 1 : 0.7
+              }}
+            />
           )}
           <span className={`flex-1 truncate ${isActive ? 'text-foreground' : 'text-muted-foreground'} group-hover:text-foreground ${node.is_dir ? 'font-medium' : ''}`}>{node.name}</span>
           {!node.is_dir && onDeleteFile && (
@@ -504,7 +514,12 @@ export function FileBrowser({ sessionId, onOpenFile, onDeleteFile, isSearchOpen 
               className="group flex items-center gap-1 py-1 px-2 hover:bg-muted/50 cursor-pointer rounded text-sm"
               onClick={() => openFileByPath(path)}
             >
-              <IconFile className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
+              <FileIcon
+                fileName={name}
+                filePath={path}
+                className="flex-shrink-0"
+                style={{ width: '12px', height: '12px' }}
+              />
               <span className="truncate text-muted-foreground group-hover:text-foreground">
                 {folder && <span>{folder}/</span>}
                 <span>{name}</span>

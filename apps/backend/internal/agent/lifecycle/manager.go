@@ -896,6 +896,13 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) err
 		}
 	}
 
+	m.logger.Warn("StartAgentProcess: task description resolved",
+		zap.String("execution_id", executionID),
+		zap.String("task_id", execution.TaskID),
+		zap.Int("task_description_length", len(taskDescription)),
+		zap.String("agent_command", execution.AgentCommand),
+		zap.String("acp_session_id", execution.ACPSessionID))
+
 	// Build environment for the agent process
 	env := map[string]string{}
 	if taskDescription != "" {
@@ -1376,7 +1383,13 @@ func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.Age
 			}
 			m.logger.Warn("error completion received, marking execution as failed",
 				zap.String("execution_id", execution.ID),
-				zap.String("error", errorMsg))
+				zap.String("task_id", execution.TaskID),
+				zap.String("error", errorMsg),
+				zap.String("event_error", event.Error),
+				zap.String("event_text", event.Text),
+				zap.Any("event_data", event.Data),
+				zap.String("agent_command", execution.AgentCommand),
+				zap.String("acp_session_id", execution.ACPSessionID))
 
 			if err := m.MarkCompleted(execution.ID, 1, errorMsg); err != nil {
 				m.logger.Error("failed to mark execution as failed after error completion",

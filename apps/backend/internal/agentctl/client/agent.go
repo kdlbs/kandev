@@ -249,6 +249,10 @@ func (c *Client) Prompt(ctx context.Context, text string, attachments []v1.Messa
 		return nil, fmt.Errorf("failed to parse prompt response (status %d, body: %s): %w", resp.StatusCode, truncateBody(respBody), err)
 	}
 	if !result.Success {
+		c.logger.Warn("prompt returned failure response",
+			zap.String("error", result.Error),
+			zap.Int("status_code", resp.StatusCode),
+			zap.String("response_body", truncateBody(respBody)))
 		return nil, fmt.Errorf("prompt failed: %s", result.Error)
 	}
 	return &result, nil

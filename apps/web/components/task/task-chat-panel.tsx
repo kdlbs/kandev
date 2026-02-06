@@ -57,6 +57,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     isStarting,
     isWorking,
     isAgentBusy,
+    isFailed,
   } = useSessionState(sessionId);
 
   // Plan mode state from store (persisted per session)
@@ -281,6 +282,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
           onCommentClick={onOpenFileAtLine ? (comment) => onOpenFileAtLine(comment.filePath) : undefined}
           submitKey={chatSubmitKey}
           hasAgentCommands={hasAgentCommands}
+          isFailed={isFailed}
         />
       </div>
     </div>

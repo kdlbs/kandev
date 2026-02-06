@@ -299,7 +299,7 @@ const TaskFormInputs = memo(function TaskFormInputs({
           onChange={handleDescriptionChange}
           onKeyDown={onKeyDown}
           rows={2}
-          className={isSessionMode ? 'min-h-[120px] resize-none mt-1.5' : 'min-h-[96px] max-h-[240px] resize-y overflow-auto'}
+          className={isSessionMode ? 'min-h-[120px] max-h-[240px] resize-none overflow-auto mt-1.5' : 'min-h-[96px] max-h-[240px] resize-y overflow-auto'}
           required={isSessionMode}
         />
       </div>

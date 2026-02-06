@@ -606,6 +606,8 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 		// Model is the same, fall through to regular prompt
 	}
 
+	previousSessionState := session.State
+
 	s.setSessionRunning(ctx, taskID, sessionID)
 	s.startTurnForSession(ctx, sessionID)
 
@@ -619,6 +621,11 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.Error(err))
+		// Revert session state so it doesn't stay stuck in RUNNING.
+		// Use repo directly to bypass state machine guards that block transitions from terminal states.
+		_ = s.repo.UpdateTaskSessionState(ctx, sessionID, previousSessionState, "")
+		_ = s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateReview)
+		s.completeTurnForSession(ctx, sessionID)
 		return nil, err
 	}
 	return &PromptResult{

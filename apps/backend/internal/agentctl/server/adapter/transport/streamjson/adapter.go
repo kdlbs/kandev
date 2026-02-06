@@ -1078,19 +1078,30 @@ func (a *Adapter) handleResultMessage(msg *claudecode.CLIMessage, sessionID, ope
 	a.streamingTextSentThisTurn = false
 	a.mu.Unlock()
 
+	// Build error message from errors array if available
+	var errorMsg string
+	if msg.IsError && len(msg.Errors) > 0 {
+		errorMsg = strings.Join(msg.Errors, "; ")
+	}
+
 	// Send completion event AFTER any result text chunk
+	completeData := map[string]any{
+		"cost_usd":      msg.CostUSD,
+		"duration_ms":   msg.DurationMS,
+		"num_turns":     msg.NumTurns,
+		"input_tokens":  msg.TotalInputTokens,
+		"output_tokens": msg.TotalOutputTokens,
+		"is_error":      msg.IsError,
+	}
+	if len(msg.Errors) > 0 {
+		completeData["errors"] = msg.Errors
+	}
 	a.sendUpdate(AgentEvent{
 		Type:        streams.EventTypeComplete,
 		SessionID:   sessionID,
 		OperationID: operationID,
-		Data: map[string]any{
-			"cost_usd":      msg.CostUSD,
-			"duration_ms":   msg.DurationMS,
-			"num_turns":     msg.NumTurns,
-			"input_tokens":  msg.TotalInputTokens,
-			"output_tokens": msg.TotalOutputTokens,
-			"is_error":      msg.IsError,
-		},
+		Error:       errorMsg,
+		Data:        completeData,
 	})
 
 	// Signal completion
@@ -1100,7 +1111,7 @@ func (a *Adapter) handleResultMessage(msg *claudecode.CLIMessage, sessionID, ope
 
 	if resultCh != nil {
 		select {
-		case resultCh <- resultComplete{success: !msg.IsError}:
+		case resultCh <- resultComplete{success: !msg.IsError, err: errorMsg}:
 			a.logger.Debug("signaled prompt completion")
 		default:
 			a.logger.Warn("result channel full, dropping signal")
@@ -1109,18 +1120,20 @@ func (a *Adapter) handleResultMessage(msg *claudecode.CLIMessage, sessionID, ope
 
 	// Send error event if failed
 	if msg.IsError {
-		errorMsg := "prompt failed"
-		// Error result can be a string (API error) or ResultData with Text
-		if errStr := msg.GetResultString(); errStr != "" {
-			errorMsg = errStr
+		errMsg := "prompt failed"
+		// Use errors array first (most specific), then fallback to result string/data
+		if len(msg.Errors) > 0 {
+			errMsg = strings.Join(msg.Errors, "; ")
+		} else if errStr := msg.GetResultString(); errStr != "" {
+			errMsg = errStr
 		} else if resultData := msg.GetResultData(); resultData != nil && resultData.Text != "" {
-			errorMsg = resultData.Text
+			errMsg = resultData.Text
 		}
 		a.sendUpdate(AgentEvent{
 			Type:        streams.EventTypeError,
 			SessionID:   sessionID,
 			OperationID: operationID,
-			Error:       errorMsg,
+			Error:       errMsg,
 		})
 	}
 }
