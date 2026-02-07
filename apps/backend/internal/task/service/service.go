@@ -990,6 +990,30 @@ func (s *Service) MoveTask(ctx context.Context, id string, boardID string, workf
 		return nil, err
 	}
 
+	// Update active session's workflow_step_id to match the new task workflow step
+	// This ensures workflow transitions work correctly when tasks are manually moved
+	if task.WorkflowStepID != "" {
+		activeSession, err := s.repo.GetActiveTaskSessionByTaskID(ctx, id)
+		if err == nil && activeSession != nil {
+			// Only update if the session's workflow_step_id doesn't match
+			if activeSession.WorkflowStepID == nil || *activeSession.WorkflowStepID != task.WorkflowStepID {
+				if err := s.repo.UpdateSessionWorkflowStep(ctx, activeSession.ID, task.WorkflowStepID); err != nil {
+					s.logger.Warn("failed to update session workflow step after task move",
+						zap.String("task_id", id),
+						zap.String("session_id", activeSession.ID),
+						zap.String("workflow_step_id", task.WorkflowStepID),
+						zap.Error(err))
+					// Don't fail the operation, just log the warning
+				} else {
+					s.logger.Info("updated session workflow step to match moved task",
+						zap.String("task_id", id),
+						zap.String("session_id", activeSession.ID),
+						zap.String("workflow_step_id", task.WorkflowStepID))
+				}
+			}
+		}
+	}
+
 	// Publish state_changed event if state changed, otherwise just updated
 	if oldState != task.State {
 		s.publishTaskEvent(ctx, events.TaskStateChanged, task, &oldState)

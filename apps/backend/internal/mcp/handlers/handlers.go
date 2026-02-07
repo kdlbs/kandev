@@ -298,36 +298,34 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 		h.logger.Error("failed waiting for clarification response",
 			zap.String("pending_id", pendingID),
 			zap.Error(err))
+
+		// When clarification times out, keep session in WAITING_FOR_INPUT
+		// The expired clarification will be marked as expired when user tries to respond
+		// This allows the UI to stay responsive while clarification is pending
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get user response: "+err.Error(), nil)
 	}
 
-	// Restore session to RUNNING state after user responds
-	if err := h.sessionRepo.UpdateTaskSessionState(ctx, req.SessionID, models.TaskSessionStateRunning, ""); err != nil {
-		h.logger.Warn("failed to restore session state to RUNNING",
-			zap.String("session_id", req.SessionID),
-			zap.Error(err))
-	}
+	// Don't update session state here. Let the agent's normal message flow handle it.
+	//
+	// Previously, we would set the session to RUNNING immediately after the user responded.
+	// However, this causes issues when:
+	// 1. The agent's MCP client has already timed out (agent stopped waiting)
+	// 2. The user responds anyway (UI still showing the clarification)
+	// 3. We set session to RUNNING, but agent won't process the response
+	// 4. Session gets stuck in RUNNING state with no agent activity
+	//
+	// By keeping the session in WAITING_FOR_INPUT, the user can:
+	// - Send new messages to continue the conversation
+	// - The agent will process those messages normally
+	// - Session state will be updated by the agent's actual activity
+	//
+	// If the agent successfully receives this response and continues, the agent's
+	// tool calls or messages will naturally update the session to RUNNING.
 
-	// Update task state to IN_PROGRESS
-	if err := h.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateInProgress); err != nil {
-		h.logger.Warn("failed to restore task state to IN_PROGRESS",
-			zap.String("task_id", taskID),
-			zap.Error(err))
-	}
-
-	// Publish session state changed event
-	if h.eventBus != nil {
-		eventData := map[string]interface{}{
-			"task_id":    taskID,
-			"session_id": req.SessionID,
-			"new_state":  string(models.TaskSessionStateRunning),
-		}
-		_ = h.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(
-			events.TaskSessionStateChanged,
-			"mcp-handlers",
-			eventData,
-		))
-	}
+	h.logger.Debug("user responded to clarification, returning response to agent without updating session state",
+		zap.String("pending_id", pendingID),
+		zap.String("session_id", req.SessionID),
+		zap.String("task_id", taskID))
 
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }

@@ -4,16 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )
-
-// askUserQuestionTimeout is the maximum time to wait for a user response.
-// This needs to be long enough for users to read and respond to questions.
-// Note: This must match or exceed the clarification store timeout (10 minutes).
-const askUserQuestionTimeout = 12 * time.Minute
 
 // MCP action constants for backend WS requests
 const (
@@ -151,7 +145,7 @@ func (s *Server) updateTaskHandler() server.ToolHandlerFunc {
 }
 
 func (s *Server) askUserQuestionHandler() server.ToolHandlerFunc {
-	return func(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		prompt, err := req.RequireString("prompt")
 		if err != nil {
 			return mcp.NewToolResultError("prompt is required"), nil
@@ -212,15 +206,12 @@ func (s *Server) askUserQuestionHandler() server.ToolHandlerFunc {
 			"context":    questionCtx,
 		}
 
-		// Use a detached context with our own timeout for waiting on user input.
-		// The MCP request context may have a short timeout from the agent's MCP client,
-		// but we need to wait longer for users to read and respond to questions.
-		// This is similar to how script_message_handler.go handles long-running scripts.
-		askCtx, cancel := context.WithTimeout(context.Background(), askUserQuestionTimeout)
-		defer cancel()
-
+		// Use the MCP request context from the agent. This ensures that if the agent's
+		// MCP client times out, we'll detect it and not update the session state.
+		// Previous behavior used a detached context which meant we couldn't tell if the
+		// agent had given up, leading to sessions stuck in RUNNING state.
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(askCtx, ActionMCPAskUserQuestion, payload, &result); err != nil {
+		if err := s.backend.RequestPayload(ctx, ActionMCPAskUserQuestion, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 

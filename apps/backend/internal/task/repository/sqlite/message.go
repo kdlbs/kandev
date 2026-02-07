@@ -266,6 +266,30 @@ func (r *Repository) GetMessageByPendingID(ctx context.Context, sessionID, pendi
 	return message, nil
 }
 
+// FindMessageByPendingID finds a message by pending_id alone (without requiring session ID).
+// This is useful when we only have the pending ID (e.g., from expired clarification responses).
+func (r *Repository) FindMessageByPendingID(ctx context.Context, pendingID string) (*models.Message, error) {
+	message := &models.Message{}
+	var requestsInput int
+	var messageType string
+	var metadataJSON string
+	err := r.db.QueryRowContext(ctx, `
+		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at
+		FROM task_session_messages WHERE json_extract(metadata, '$.pending_id') = ?
+		ORDER BY created_at DESC LIMIT 1
+	`, pendingID).Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.TurnID, &message.AuthorType, &message.AuthorID,
+		&message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	message.RequestsInput = requestsInput == 1
+	message.Type = models.MessageType(messageType)
+	if metadataJSON != "" {
+		_ = json.Unmarshal([]byte(metadataJSON), &message.Metadata)
+	}
+	return message, nil
+}
+
 // UpdateMessage updates an existing message
 func (r *Repository) UpdateMessage(ctx context.Context, message *models.Message) error {
 	metadataJSON, err := json.Marshal(message.Metadata)

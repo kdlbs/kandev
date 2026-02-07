@@ -36,6 +36,15 @@ export function ClarificationInputOverlay({ message, onResolved }: Clarification
       });
       if (response.ok) {
         onResolved();
+      } else if (response.status === 410) {
+        // Clarification expired (agent timed out)
+        // Backend has marked the message as expired, so reload to clear the UI
+        const data = await response.json().catch(() => ({}));
+        console.warn('Clarification expired:', data);
+        // Force reload to fetch updated messages (clarification no longer pending)
+        window.location.reload();
+      } else {
+        console.error('Failed to submit clarification response:', response.status, response.statusText);
       }
     } catch (error) {
       console.error('Failed to submit clarification response:', error);
@@ -62,6 +71,15 @@ export function ClarificationInputOverlay({ message, onResolved }: Clarification
       });
       if (response.ok) {
         onResolved();
+      } else if (response.status === 410) {
+        // Clarification expired (agent timed out)
+        // Backend has marked the message as expired, so reload to clear the UI
+        const data = await response.json().catch(() => ({}));
+        console.warn('Clarification expired:', data);
+        // Force reload to fetch updated messages (clarification no longer pending)
+        window.location.reload();
+      } else {
+        console.error('Failed to submit clarification response:', response.status, response.statusText);
       }
     } catch (error) {
       console.error('Failed to submit clarification response:', error);
@@ -82,6 +100,14 @@ export function ClarificationInputOverlay({ message, onResolved }: Clarification
       });
       if (response.ok) {
         onResolved();
+      } else if (response.status === 410) {
+        // Clarification expired (agent timed out)
+        const data = await response.json().catch(() => ({}));
+        console.warn('Clarification expired:', data);
+        alert('This question has timed out. The agent has already moved on. Please refresh the page.');
+        onResolved(); // Clear the UI even though it failed
+      } else {
+        console.error('Failed to skip clarification:', response.status, response.statusText);
       }
     } catch (error) {
       console.error('Failed to skip clarification:', error);

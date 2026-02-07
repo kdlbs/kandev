@@ -741,7 +741,10 @@ func (s *Service) handleToolCallEvent(ctx context.Context, payload *lifecycle.Ag
 				zap.String("tool_call_id", payload.Data.ToolCallID))
 		}
 
-		s.updateTaskSessionState(ctx, payload.TaskID, payload.SessionID, models.TaskSessionStateRunning, "", false)
+		// Allow tool calls to wake session from WAITING_FOR_INPUT
+		// This ensures that when user responds to a clarification and the agent continues,
+		// the session properly transitions to RUNNING
+		s.updateTaskSessionState(ctx, payload.TaskID, payload.SessionID, models.TaskSessionStateRunning, "", true)
 	}
 }
 
@@ -903,9 +906,10 @@ func (s *Service) handleToolUpdateEvent(ctx context.Context, payload *lifecycle.
 		}
 
 		// Update session state for completion events
+		// Allow tool completions to wake session from WAITING_FOR_INPUT
 		if payload.Data.ToolStatus == "complete" || payload.Data.ToolStatus == "completed" ||
 			payload.Data.ToolStatus == "success" || payload.Data.ToolStatus == "error" || payload.Data.ToolStatus == "failed" {
-			s.updateTaskSessionState(ctx, payload.TaskID, payload.SessionID, models.TaskSessionStateRunning, "", false)
+			s.updateTaskSessionState(ctx, payload.TaskID, payload.SessionID, models.TaskSessionStateRunning, "", true)
 		}
 	}
 }
