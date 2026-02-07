@@ -259,7 +259,6 @@ type (
 	GitCommitNotification  = types.GitCommitNotification
 	GitResetNotification   = types.GitResetNotification
 	FileInfo               = types.FileInfo
-	FileListUpdate         = types.FileListUpdate
 	FileEntry              = types.FileEntry
 	FileTreeNode           = types.FileTreeNode
 	FileTreeRequest        = types.FileTreeRequest
@@ -718,7 +717,6 @@ type WorkspaceStreamCallbacks struct {
 	OnGitCommit     func(notification *GitCommitNotification)
 	OnGitReset      func(notification *GitResetNotification)
 	OnFileChange    func(notification *FileChangeNotification)
-	OnFileList      func(update *FileListUpdate)
 	OnProcessOutput func(output *types.ProcessOutput)
 	OnProcessStatus func(status *types.ProcessStatusUpdate)
 	OnConnected     func()
@@ -804,10 +802,6 @@ func (c *Client) StreamWorkspace(ctx context.Context, callbacks WorkspaceStreamC
 			case types.WorkspaceMessageTypeFileChange:
 				if callbacks.OnFileChange != nil && msg.FileChange != nil {
 					callbacks.OnFileChange(msg.FileChange)
-				}
-			case types.WorkspaceMessageTypeFileList:
-				if callbacks.OnFileList != nil && msg.FileList != nil {
-					callbacks.OnFileList(msg.FileList)
 				}
 			case types.WorkspaceMessageTypeProcessOutput:
 				if callbacks.OnProcessOutput != nil && msg.ProcessOutput != nil {

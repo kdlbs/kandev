@@ -161,7 +161,6 @@ const (
 	WorkspaceMessageTypePong          WorkspaceMessageType = "pong"
 	WorkspaceMessageTypeGitStatus     WorkspaceMessageType = "git_status"
 	WorkspaceMessageTypeFileChange    WorkspaceMessageType = "file_change"
-	WorkspaceMessageTypeFileList      WorkspaceMessageType = "file_list"
 	WorkspaceMessageTypeError         WorkspaceMessageType = "error"
 	WorkspaceMessageTypeConnected     WorkspaceMessageType = "connected"
 	WorkspaceMessageTypeShellResize   WorkspaceMessageType = "shell_resize"
@@ -191,9 +190,6 @@ type WorkspaceStreamMessage struct {
 
 	// File change fields (for file_change)
 	FileChange *FileChangeNotification `json:"file_change,omitempty"`
-
-	// File list fields (for file_list)
-	FileList *FileListUpdate `json:"file_list,omitempty"`
 
 	// Process fields (for process_output, process_status)
 	ProcessOutput *ProcessOutput       `json:"process_output,omitempty"`
@@ -260,15 +256,6 @@ func NewWorkspaceFileChange(notification *FileChangeNotification) WorkspaceStrea
 		Type:       WorkspaceMessageTypeFileChange,
 		Timestamp:  timeNowUnixMilli(),
 		FileChange: notification,
-	}
-}
-
-// NewWorkspaceFileList creates a file list message
-func NewWorkspaceFileList(update *FileListUpdate) WorkspaceStreamMessage {
-	return WorkspaceStreamMessage{
-		Type:      WorkspaceMessageTypeFileList,
-		Timestamp: timeNowUnixMilli(),
-		FileList:  update,
 	}
 }
 
