@@ -3,7 +3,9 @@
 import { useRef, useCallback, useState, useEffect, memo, forwardRef, useImperativeHandle, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import {
   IconArrowUp,
+  IconAlertTriangle,
   IconListCheck,
+  IconPlus,
   IconPlayerStopFilled,
 } from '@tabler/icons-react';
 import { GridSpinner } from '@/components/grid-spinner';
@@ -14,6 +16,7 @@ import { SHORTCUTS } from '@/lib/keyboard/constants';
 import { KeyboardShortcutTooltip } from '@/components/keyboard-shortcut-tooltip';
 import { TokenUsageDisplay } from '@/components/task/chat/token-usage-display';
 import { SessionsDropdown } from '@/components/task/sessions-dropdown';
+import { TaskCreateDialog } from '@/components/task-create-dialog';
 import { ModelSelector } from '@/components/task/model-selector';
 import { RichTextInput, type RichTextInputHandle } from './rich-text-input';
 import { MentionMenu } from './mention-menu';
@@ -190,6 +193,8 @@ type ChatInputContainerProps = {
   submitKey?: 'enter' | 'cmd_enter';
   /** Whether the current agent has commands (affects placeholder) */
   hasAgentCommands?: boolean;
+  /** Whether the session is in a terminal state (FAILED/CANCELLED) */
+  isFailed?: boolean;
 };
 
 export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInputContainerProps>(
@@ -217,6 +222,7 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       onCommentClick,
       submitKey = 'cmd_enter',
       hasAgentCommands = false,
+      isFailed = false,
     },
     ref
   ) {
@@ -224,6 +230,7 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
   const [value, setValue] = useState('');
   const [isInputFocused, setIsInputFocused] = useState(false);
   const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
+  const [showNewSessionDialog, setShowNewSessionDialog] = useState(false);
   const inputRef = useRef<RichTextInputHandle>(null);
 
   // Expose imperative handle for parent
@@ -420,8 +427,8 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
     setAttachments([]); // Clear attachments after submit
   }, [onSubmit, isAgentBusy, isSending]);
 
-  // Disable input when agent is busy (RUNNING state), starting, or sending a message
-  const isDisabled = isAgentBusy || isStarting || isSending;
+  // Disable input when agent is busy (RUNNING state), starting, sending, or session ended
+  const isDisabled = isAgentBusy || isStarting || isSending || isFailed;
   const hasPendingClarification = pendingClarification && onClarificationResolved;
   const hasPendingComments = pendingCommentsByFile && Object.keys(pendingCommentsByFile).length > 0;
 
@@ -434,6 +441,44 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
 
   // Show focus hint when input not focused, no clarification, and no comments
   const showFocusHint = !isInputFocused && !hasPendingClarification && !hasPendingComments;
+
+  if (isFailed) {
+    return (
+      <>
+        <div className="rounded-2xl border border-border bg-background shadow-md overflow-hidden">
+          <div className="flex items-center justify-between gap-3 px-4 py-3">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <IconAlertTriangle className="h-4 w-4 text-orange-500 shrink-0" />
+              <span>This session has ended. Start a new session to continue.</span>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="shrink-0 gap-1.5 cursor-pointer"
+              onClick={() => setShowNewSessionDialog(true)}
+            >
+              <IconPlus className="h-3.5 w-3.5" />
+              New Session
+            </Button>
+          </div>
+        </div>
+        <TaskCreateDialog
+          open={showNewSessionDialog}
+          onOpenChange={setShowNewSessionDialog}
+          mode="session"
+          workspaceId={null}
+          boardId={null}
+          defaultColumnId={null}
+          columns={[]}
+          taskId={taskId}
+          initialValues={{
+            title: taskTitle ?? '',
+            description: taskDescription,
+          }}
+        />
+      </>
+    );
+  }
 
   return (
     <div

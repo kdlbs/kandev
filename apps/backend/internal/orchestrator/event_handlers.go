@@ -3,6 +3,8 @@ package orchestrator
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -468,6 +470,16 @@ func (s *Service) handleAgentFailed(ctx context.Context, data watcher.AgentEvent
 		zap.String("agent_execution_id", data.AgentExecutionID),
 		zap.String("error_message", data.ErrorMessage))
 
+	// Check if this was a resume failure (agent session no longer exists on the CLI side).
+	// If so, clear the resume token and re-launch a fresh session instead of failing.
+	// We do this BEFORE setting the session state to FAILED so the re-launch can proceed cleanly.
+	if data.SessionID != "" && isResumeFailure(data.ErrorMessage) {
+		if s.handleResumeFailure(ctx, data) {
+			return // Successfully re-launched without resume
+		}
+		// Fall through to normal failure handling if re-launch failed
+	}
+
 	// Update session state to FAILED
 	if data.SessionID != "" {
 		s.updateTaskSessionState(ctx, data.TaskID, data.SessionID, models.TaskSessionStateFailed, data.ErrorMessage, false)
@@ -498,6 +510,103 @@ func (s *Service) handleAgentFailed(ctx context.Context, data watcher.AgentEvent
 				zap.Error(err))
 		}
 	}
+}
+
+// isResumeFailure checks if the error message indicates a failed --resume attempt
+// (e.g., the Claude Code conversation was deleted or expired).
+func isResumeFailure(errorMsg string) bool {
+	lower := strings.ToLower(errorMsg)
+	return strings.Contains(lower, "no conversation found")
+}
+
+// handleResumeFailure handles the case where an agent failed because --resume pointed
+// to a non-existent conversation. It clears the resume token, sends a status message,
+// and schedules an asynchronous re-launch of the session without resume.
+//
+// The re-launch must be async because this handler is called synchronously from
+// MarkCompleted → PublishAgentEvent, BEFORE RemoveExecution cleans up the failed
+// execution from the manager's store. Calling ResumeSession synchronously would
+// fail with ErrExecutionAlreadyRunning.
+//
+// Returns true to signal that the caller should skip normal failure handling
+// (scheduler retry, FAILED state) since we're handling the retry ourselves.
+func (s *Service) handleResumeFailure(ctx context.Context, data watcher.AgentEventData) bool {
+	s.logger.Warn("detected resume failure, retrying without resume",
+		zap.String("task_id", data.TaskID),
+		zap.String("session_id", data.SessionID),
+		zap.String("error", data.ErrorMessage))
+
+	// 1. Clear the resume token so the next attempt won't use --resume.
+	// Note: executor.ResumeSession already upserts a new ExecutorRunning without ResumeToken,
+	// but clear it explicitly to be safe against race conditions.
+	running, err := s.repo.GetExecutorRunningBySessionID(ctx, data.SessionID)
+	if err == nil && running != nil && running.ResumeToken != "" {
+		running.ResumeToken = ""
+		if upsertErr := s.repo.UpsertExecutorRunning(ctx, running); upsertErr != nil {
+			s.logger.Error("failed to clear resume token",
+				zap.String("session_id", data.SessionID),
+				zap.Error(upsertErr))
+		}
+	}
+
+	// 2. Send a status message about the failed resume
+	if s.messageCreator != nil {
+		statusMsg := fmt.Sprintf("Session resume failed: %s. Starting a fresh session...", data.ErrorMessage)
+		if err := s.messageCreator.CreateSessionMessage(
+			ctx,
+			data.TaskID,
+			statusMsg,
+			data.SessionID,
+			string(v1.MessageTypeStatus),
+			s.getActiveTurnID(data.SessionID),
+			map[string]interface{}{
+				"variant":       "warning",
+				"resume_failed": true,
+			},
+			false,
+		); err != nil {
+			s.logger.Warn("failed to create resume failure status message",
+				zap.String("task_id", data.TaskID),
+				zap.Error(err))
+		}
+	}
+
+	// 3. Schedule async re-launch. We use a goroutine because this handler runs
+	// synchronously inside the MarkCompleted → PublishAgentEvent call chain,
+	// before RemoveExecution clears the old execution from the manager's store.
+	// A synchronous ResumeSession call would fail with ErrExecutionAlreadyRunning.
+	taskID := data.TaskID
+	sessionID := data.SessionID
+	go func() {
+		// Brief delay to let RemoveExecution complete after event handler returns
+		time.Sleep(500 * time.Millisecond)
+		bgCtx := context.Background()
+
+		session, err := s.repo.GetTaskSession(bgCtx, sessionID)
+		if err != nil {
+			s.logger.Error("failed to get session for resume retry",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+			_ = s.repo.UpdateTaskSessionState(bgCtx, sessionID, models.TaskSessionStateFailed, "re-launch failed: "+err.Error())
+			return
+		}
+
+		_, err = s.executor.ResumeSession(bgCtx, session, true)
+		if err != nil {
+			s.logger.Error("failed to re-launch session after resume failure",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+			_ = s.repo.UpdateTaskSessionState(bgCtx, sessionID, models.TaskSessionStateFailed, "re-launch failed: "+err.Error())
+			return
+		}
+
+		s.logger.Info("session re-launched after resume failure (fresh session without --resume)",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID))
+	}()
+
+	return true
 }
 
 // handleAgentStopped handles agent stopped events (manual stop or cancellation)

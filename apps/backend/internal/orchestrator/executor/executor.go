@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -158,6 +159,11 @@ type Executor struct {
 	retryLimit      int
 	retryDelay      time.Duration
 	worktreeEnabled bool // Whether to use Git worktrees for agent isolation
+
+	// Per-session locks to prevent concurrent resume/launch operations on the same session.
+	// This prevents race conditions when the backend restarts and multiple resume requests
+	// arrive simultaneously (e.g., from frontend auto-resume).
+	sessionLocks sync.Map // map[string]*sync.Mutex
 }
 
 // ExecutorConfig holds configuration for the Executor
@@ -181,6 +187,14 @@ func NewExecutor(agentManager AgentManagerClient, repo repository.Repository, lo
 		retryDelay:      5 * time.Second,
 		worktreeEnabled: cfg.WorktreeEnabled,
 	}
+}
+
+// getSessionLock returns a per-session mutex, creating one if it doesn't exist.
+// This serializes concurrent resume/launch operations on the same session to prevent
+// duplicate agent processes after backend restart.
+func (e *Executor) getSessionLock(sessionID string) *sync.Mutex {
+	val, _ := e.sessionLocks.LoadOrStore(sessionID, &sync.Mutex{})
+	return val.(*sync.Mutex)
 }
 
 func (e *Executor) applyPreferredShellEnv(ctx context.Context, env map[string]string) map[string]string {
@@ -532,6 +546,13 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 		return nil, ErrExecutionNotFound
 	}
 
+	// Acquire per-session lock to prevent concurrent resume/launch operations.
+	// This is critical after backend restart when multiple resume requests may arrive
+	// simultaneously (e.g., frontend auto-resume hook firing on page open).
+	sessionLock := e.getSessionLock(session.ID)
+	sessionLock.Lock()
+	defer sessionLock.Unlock()
+
 	taskModel, err := e.repo.GetTask(ctx, session.TaskID)
 	if err != nil {
 		e.logger.Error("failed to load task for session resume",
@@ -562,7 +583,7 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 		SessionID:       session.ID,
 		TaskTitle:       task.Title,
 		AgentProfileID:  session.AgentProfileID,
-		TaskDescription: "",
+		TaskDescription: task.Description,
 		Priority:        task.Priority,
 	}
 

@@ -154,6 +154,11 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 			zap.String("session_state", string(sessionResp.Session.State)))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Agent is currently processing. Please wait for the current operation to complete.", nil)
 	}
+	if sessionResp.Session.State == models.TaskSessionStateFailed ||
+		sessionResp.Session.State == models.TaskSessionStateCancelled {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
+			"Session has ended. Please create a new session to continue.", nil)
+	}
 
 	// Get the current task state to determine if we need to transition
 	task, err := h.taskController.GetTask(ctx, dto.GetTaskRequest{ID: req.TaskID})
