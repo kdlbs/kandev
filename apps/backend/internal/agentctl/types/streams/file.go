@@ -118,11 +118,15 @@ type FileContentResponse struct {
 	// Path is the file path.
 	Path string `json:"path"`
 
-	// Content is the file content.
+	// Content is the file content (base64-encoded if IsBinary is true).
 	Content string `json:"content"`
 
 	// Size is the file size in bytes.
 	Size int64 `json:"size"`
+
+	// IsBinary indicates the file contains non-UTF-8 content.
+	// When true, Content is base64-encoded.
+	IsBinary bool `json:"is_binary,omitempty"`
 
 	// Error contains error message if the request failed.
 	Error string `json:"error,omitempty"`

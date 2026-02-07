@@ -415,6 +415,7 @@ export type FileContentResponse = {
   path: string;
   content: string;
   size: number;
+  is_binary?: boolean;
   error?: string;
 };
 
@@ -447,6 +448,7 @@ export type OpenFileTab = {
   originalContent: string; // For diff generation
   originalHash: string;    // SHA256 for conflict detection
   isDirty: boolean;        // Has unsaved changes
+  isBinary?: boolean;      // Binary file (content is base64-encoded)
 };
 
 // File extension to color mapping for file type indicators

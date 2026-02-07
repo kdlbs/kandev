@@ -16,6 +16,8 @@ import { TaskChatPanel } from './task-chat-panel';
 import { TaskChangesPanel } from './task-changes-panel';
 import { TaskPlanPanel } from './task-plan-panel';
 import { FileEditorContent } from './file-editor-content';
+import { FileImageViewer } from './file-image-viewer';
+import { FileBinaryViewer } from './file-binary-viewer';
 import { PassthroughTerminal } from './passthrough-terminal';
 import type { OpenFileTab, FileContentResponse } from '@/lib/types/backend';
 import { useAppStore } from '@/components/state-provider';
@@ -27,6 +29,7 @@ import { getPlanLastSeen, setPlanLastSeen, getOpenFileTabs, setOpenFileTabs as s
 import { useSessionGitStatus } from '@/hooks/domains/session/use-session-git-status';
 import { useSessionCommits } from '@/hooks/domains/session/use-session-commits';
 import { generateUnifiedDiff, calculateHash } from '@/lib/utils/file-diff';
+import { getFileCategory } from '@/lib/utils/file-types';
 import { useToast } from '@/components/toast-provider';
 
 import type { SelectedDiff } from './task-layout';
@@ -240,6 +243,7 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
             originalContent: response.content,
             originalHash: hash,
             isDirty: false,
+            isBinary: response.is_binary,
           });
         } catch {
           // Failed to restore tab, skip it
@@ -414,6 +418,7 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
           originalContent: response.content,
           originalHash: hash,
           isDirty: false,
+          isBinary: response.is_binary,
         };
         const newTabs = prev.length >= maxTabs ? [...prev.slice(1), newTab] : [...prev, newTab];
         return newTabs;
@@ -451,7 +456,7 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
     setSavingFiles((prev) => new Set(prev).add(path));
 
     try {
-      const diff = generateUnifiedDiff(tab.originalContent, tab.content, tab.name);
+      const diff = generateUnifiedDiff(tab.originalContent, tab.content, tab.path);
       const response = await updateFileContent(client, activeSessionId, path, diff, tab.originalHash);
 
       if (response.success && response.new_hash) {
@@ -462,10 +467,6 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
               : t
           )
         );
-        toast({
-          title: 'File saved',
-          description: `${tab.name} has been saved successfully.`,
-        });
       } else {
         toast({
           title: 'Save failed',
@@ -640,23 +641,43 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
           )}
         </TabsContent>
 
-        {openFileTabs.map((tab) => (
-          <TabsContent key={tab.path} value={`file:${tab.path}`} className="flex-1 min-h-0">
-            <FileEditorContent
-              path={tab.path}
-              content={tab.content}
-              originalContent={tab.originalContent}
-              isDirty={tab.isDirty}
-              isSaving={savingFiles.has(tab.path)}
-              sessionId={activeSessionId || undefined}
-              worktreePath={activeSession?.worktree_path ?? undefined}
-              enableComments={!!activeSessionId}
-              onChange={(newContent) => handleFileChange(tab.path, newContent)}
-              onSave={() => handleFileSave(tab.path)}
-              onDelete={() => handleFileDelete(tab.path)}
-            />
-          </TabsContent>
-        ))}
+        {openFileTabs.map((tab) => {
+          const extCategory = getFileCategory(tab.path);
+          const category = tab.isBinary
+            ? (extCategory === 'image' ? 'image' : 'binary')
+            : 'text';
+
+          return (
+            <TabsContent key={tab.path} value={`file:${tab.path}`} className="flex-1 min-h-0">
+              {category === 'image' ? (
+                <FileImageViewer
+                  path={tab.path}
+                  content={tab.content}
+                  worktreePath={activeSession?.worktree_path ?? undefined}
+                />
+              ) : category === 'binary' ? (
+                <FileBinaryViewer
+                  path={tab.path}
+                  worktreePath={activeSession?.worktree_path ?? undefined}
+                />
+              ) : (
+                <FileEditorContent
+                  path={tab.path}
+                  content={tab.content}
+                  originalContent={tab.originalContent}
+                  isDirty={tab.isDirty}
+                  isSaving={savingFiles.has(tab.path)}
+                  sessionId={activeSessionId || undefined}
+                  worktreePath={activeSession?.worktree_path ?? undefined}
+                  enableComments={!!activeSessionId}
+                  onChange={(newContent) => handleFileChange(tab.path, newContent)}
+                  onSave={() => handleFileSave(tab.path)}
+                  onDelete={() => handleFileDelete(tab.path)}
+                />
+              )}
+            </TabsContent>
+          );
+        })}
       </SessionTabs>
     </SessionPanel>
   );

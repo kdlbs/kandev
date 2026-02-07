@@ -143,13 +143,13 @@ func (s *Server) handleFileContent(c *gin.Context) {
 		return
 	}
 
-	content, size, err := s.procMgr.GetWorkspaceTracker().GetFileContent(path)
+	content, size, isBinary, err := s.procMgr.GetWorkspaceTracker().GetFileContent(path)
 	if err != nil {
 		c.JSON(400, types.FileContentResponse{Path: path, Error: err.Error(), Size: size})
 		return
 	}
 
-	c.JSON(200, types.FileContentResponse{Path: path, Content: content, Size: size})
+	c.JSON(200, types.FileContentResponse{Path: path, Content: content, Size: size, IsBinary: isBinary})
 }
 
 // handleFileUpdate handles file update requests via HTTP POST

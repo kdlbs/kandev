@@ -1,16 +1,19 @@
 'use client';
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { IconChevronRight, IconChevronDown, IconFolder, IconFolderOpen, IconSearch, IconX, IconLoader2, IconTrash } from '@tabler/icons-react';
+import { IconChevronRight, IconChevronDown, IconFolder, IconFolderOpen, IconSearch, IconX, IconLoader2, IconTrash, IconRefresh, IconListTree, IconFolderShare, IconCopy, IconCheck } from '@tabler/icons-react';
 import { ScrollArea } from '@kandev/ui/scroll-area';
 import { Input } from '@kandev/ui/input';
 import { FileIcon } from '@/components/ui/file-icon';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
+import { cn } from '@/lib/utils';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import { requestFileTree, requestFileContent, searchWorkspaceFiles } from '@/lib/ws/workspace-files';
 import type { FileTreeNode, FileContentResponse, OpenFileTab } from '@/lib/types/backend';
 import { useSessionAgentctl } from '@/hooks/domains/session/use-session-agentctl';
 import { useSession } from '@/hooks/domains/session/use-session';
+import { useOpenSessionFolder } from '@/hooks/use-open-session-folder';
+import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard';
 import {
   getFilesPanelExpandedPaths,
   setFilesPanelExpandedPaths,
@@ -18,6 +21,32 @@ import {
   setFilesPanelScrollPosition,
 } from '@/lib/local-storage';
 import { useToast } from '@/components/toast-provider';
+
+/**
+ * Merge a freshly-fetched tree node into an existing one, preserving
+ * already-loaded children so expanded folders don't collapse.
+ */
+function mergeTreeNodes(existing: FileTreeNode, incoming: FileTreeNode): FileTreeNode {
+  // If the incoming node has no children list, keep existing subtree
+  if (!incoming.children) return { ...existing, ...incoming, children: existing.children };
+
+  // If existing has no children, just use incoming
+  if (!existing.children) return incoming;
+
+  // Build a lookup of existing children by path
+  const existingByPath = new Map(existing.children.map((c) => [c.path, c]));
+
+  const mergedChildren = incoming.children.map((inChild) => {
+    const exChild = existingByPath.get(inChild.path);
+    if (exChild && exChild.is_dir && inChild.is_dir) {
+      // Recursively merge directories to keep loaded subtrees
+      return mergeTreeNodes(exChild, inChild);
+    }
+    return inChild;
+  });
+
+  return { ...existing, ...incoming, children: mergedChildren };
+}
 
 type FileBrowserProps = {
   sessionId: string;
@@ -32,12 +61,15 @@ export function FileBrowser({ sessionId, onOpenFile, onDeleteFile, isSearchOpen 
   const { toast } = useToast();
   const [tree, setTree] = useState<FileTreeNode | null>(null);
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
-  const [loadingPaths, setLoadingPaths] = useState<Set<string>>(new Set());
+  const [visibleLoadingPaths, setVisibleLoadingPaths] = useState<Set<string>>(new Set());
+  const loadingTimersRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
   const [isLoadingTree, setIsLoadingTree] = useState(true);
   const [loadState, setLoadState] = useState<'loading' | 'waiting' | 'loaded' | 'manual' | 'error'>('loading');
   const [loadError, setLoadError] = useState<string | null>(null);
   const agentctlStatus = useSessionAgentctl(sessionId);
-  const { isFailed: isSessionFailed, errorMessage: sessionError } = useSession(sessionId);
+  const { session, isFailed: isSessionFailed, errorMessage: sessionError } = useSession(sessionId);
+  const { open: openFolder } = useOpenSessionFolder(sessionId);
+  const { copied, copy: copyPath } = useCopyToClipboard(1000);
 
   // Search state
   const [localSearchQuery, setLocalSearchQuery] = useState('');
@@ -57,6 +89,36 @@ export function FileBrowser({ sessionId, onOpenFile, onDeleteFile, isSearchOpen 
 
   const MAX_RETRY_ATTEMPTS = 4;
   const RETRY_DELAYS_MS = [1000, 2000, 5000, 10000];
+
+  // Workspace path for header
+  const fullPath = session?.worktree_path ?? '';
+  const displayPath = fullPath.replace(/^\/(?:Users|home)\/[^/]+\//, '~/');
+
+  const collapseAll = useCallback(() => {
+    setExpandedPaths(new Set());
+  }, []);
+
+  // Show loading spinner only after 150ms to avoid flash on fast loads
+  const showLoading = useCallback((path: string) => {
+    const timer = setTimeout(() => {
+      setVisibleLoadingPaths((prev) => new Set(prev).add(path));
+      loadingTimersRef.current.delete(path);
+    }, 150);
+    loadingTimersRef.current.set(path, timer);
+  }, []);
+
+  const hideLoading = useCallback((path: string) => {
+    const timer = loadingTimersRef.current.get(path);
+    if (timer) {
+      clearTimeout(timer);
+      loadingTimersRef.current.delete(path);
+    }
+    setVisibleLoadingPaths((prev) => {
+      const next = new Set(prev);
+      next.delete(path);
+      return next;
+    });
+  }, []);
 
   // Focus search input when search opens
   useEffect(() => {
@@ -131,7 +193,6 @@ export function FileBrowser({ sessionId, onOpenFile, onDeleteFile, isSearchOpen 
   // Load initial tree - always try to load, don't wait for agentctl ready status
   useEffect(() => {
     setTree(null);
-    setLoadingPaths(new Set());
     setIsLoadingTree(true);
     setLoadState('loading');
     setLoadError(null);
@@ -174,8 +235,8 @@ export function FileBrowser({ sessionId, onOpenFile, onDeleteFile, isSearchOpen 
     }
     hasInitializedExpandedRef.current = sessionId;
 
-    // Only expand the root folder to show its immediate children
-    setExpandedPaths(new Set([tree.path]));
+    // Root is no longer a visible node, start with no expanded paths
+    setExpandedPaths(new Set());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tree?.children?.length, isLoadingTree, sessionId]);
 
@@ -212,10 +273,16 @@ export function FileBrowser({ sessionId, onOpenFile, onDeleteFile, isSearchOpen 
     if (!client) return;
 
     const unsubscribe = client.on('session.workspace.file.changes', async () => {
-      // Refresh the root tree when any file changes
+      // Refresh the root tree when any file changes.
+      // Merge new top-level children into the existing tree so that
+      // already-loaded subtrees (expanded folders) are preserved.
       try {
         const response = await requestFileTree(client, sessionId, '', 1);
-        setTree(response.root ?? null);
+        const newRoot = response.root ?? null;
+        setTree((prev) => {
+          if (!prev || !newRoot) return newRoot;
+          return mergeTreeNodes(prev, newRoot);
+        });
         setLoadState('loaded');
       } catch (error) {
         console.error('Failed to refresh file tree:', error);
@@ -325,7 +392,7 @@ export function FileBrowser({ sessionId, onOpenFile, onDeleteFile, isSearchOpen 
     } else {
       // If children not loaded yet, fetch them
       if (!node.children || node.children.length === 0) {
-        setLoadingPaths((prev) => new Set(prev).add(node.path));
+        showLoading(node.path);
         try {
           const client = getWebSocketClient();
           if (!client) return;
@@ -349,18 +416,14 @@ export function FileBrowser({ sessionId, onOpenFile, onDeleteFile, isSearchOpen 
         } catch (error) {
           console.error('Failed to load children:', error);
         } finally {
-          setLoadingPaths((prev) => {
-            const next = new Set(prev);
-            next.delete(node.path);
-            return next;
-          });
+          hideLoading(node.path);
         }
       }
 
       newExpanded.add(node.path);
       setExpandedPaths(newExpanded);
     }
-  }, [expandedPaths, sessionId, tree]);
+  }, [expandedPaths, sessionId, tree, showLoading, hideLoading]);
 
   const openFile = useCallback(async (node: FileTreeNode) => {
     if (node.is_dir) return;
@@ -382,6 +445,7 @@ export function FileBrowser({ sessionId, onOpenFile, onDeleteFile, isSearchOpen 
         originalContent: response.content,
         originalHash: hash,
         isDirty: false,
+        isBinary: response.is_binary,
       });
     } catch (error) {
       const reason = error instanceof Error ? error.message : 'Unknown error';
@@ -415,6 +479,7 @@ export function FileBrowser({ sessionId, onOpenFile, onDeleteFile, isSearchOpen 
         originalContent: response.content,
         originalHash: hash,
         isDirty: false,
+        isBinary: response.is_binary,
       });
     } catch (error) {
       const reason = error instanceof Error ? error.message : 'Unknown error';
@@ -428,32 +493,36 @@ export function FileBrowser({ sessionId, onOpenFile, onDeleteFile, isSearchOpen 
 
   const renderTreeNode = (node: FileTreeNode, depth: number = 0): React.ReactNode => {
     const isExpanded = expandedPaths.has(node.path);
-    const isLoading = loadingPaths.has(node.path);
+    const isLoading = visibleLoadingPaths.has(node.path);
     const isActive = !node.is_dir && activeFilePath === node.path;
 
     return (
       <div key={node.path}>
         <div
-          className={`group flex items-center gap-1 py-1 px-2 hover:bg-muted/50 cursor-pointer rounded text-sm ${isActive ? 'bg-muted/50' : ''}`}
+          className={cn(
+            "group flex w-full items-center gap-1 px-2 py-0.5 text-left text-sm cursor-pointer",
+            "hover:bg-muted",
+            isActive && "bg-muted"
+          )}
           style={{ paddingLeft: `${depth * 12 + 8 + (node.is_dir ? 0 : 20)}px` }}
           onClick={() => (node.is_dir ? toggleExpand(node) : openFile(node))}
         >
           {node.is_dir && (
             <span className="flex-shrink-0">
               {isLoading ? (
-                <IconLoader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                <IconRefresh className="h-4 w-4 animate-spin text-muted-foreground shrink-0" />
               ) : isExpanded ? (
-                <IconChevronDown className="h-4 w-4 text-muted-foreground" />
+                <IconChevronDown className="h-3 w-3 text-muted-foreground/60" />
               ) : (
-                <IconChevronRight className="h-4 w-4 text-muted-foreground" />
+                <IconChevronRight className="h-3 w-3 text-muted-foreground/60" />
               )}
             </span>
           )}
           {node.is_dir ? (
             isExpanded ? (
-              <IconFolderOpen className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
+              <IconFolderOpen className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
             ) : (
-              <IconFolder className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
+              <IconFolder className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
             )
           ) : (
             <FileIcon
@@ -461,8 +530,8 @@ export function FileBrowser({ sessionId, onOpenFile, onDeleteFile, isSearchOpen 
               filePath={node.path}
               className="flex-shrink-0"
               style={{
-                width: '12px',
-                height: '12px',
+                width: '14px',
+                height: '14px',
                 opacity: isActive ? 1 : 0.7
               }}
             />
@@ -523,14 +592,17 @@ export function FileBrowser({ sessionId, onOpenFile, onDeleteFile, isSearchOpen 
           return (
             <div
               key={path}
-              className="group flex items-center gap-1 py-1 px-2 hover:bg-muted/50 cursor-pointer rounded text-sm"
+              className={cn(
+                "group flex w-full items-center gap-1 px-2 py-0.5 text-left text-sm cursor-pointer",
+                "hover:bg-muted"
+              )}
               onClick={() => openFileByPath(path)}
             >
               <FileIcon
                 fileName={name}
                 filePath={path}
                 className="flex-shrink-0"
-                style={{ width: '12px', height: '12px' }}
+                style={{ width: '14px', height: '14px' }}
               />
               <span className="truncate text-muted-foreground group-hover:text-foreground">
                 {folder && <span>{folder}/</span>}
@@ -573,6 +645,59 @@ export function FileBrowser({ sessionId, onOpenFile, onDeleteFile, isSearchOpen 
         </div>
       )}
 
+      {/* Header toolbar */}
+      {tree && loadState === 'loaded' && (
+        <div className="group/header flex items-center gap-1 border-b border-border/50 px-2 py-1">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                className="relative shrink-0 cursor-pointer"
+                onClick={() => {
+                  if (fullPath) void copyPath(fullPath);
+                }}
+              >
+                <IconFolderOpen className={cn("h-3.5 w-3.5 text-muted-foreground transition-opacity", copied ? "opacity-0" : "group-hover/header:opacity-0")} />
+                {copied ? (
+                  <IconCheck className="absolute inset-0 h-3.5 w-3.5 text-green-600/70" />
+                ) : (
+                  <IconCopy className="absolute inset-0 h-3.5 w-3.5 text-muted-foreground opacity-0 group-hover/header:opacity-100 hover:text-foreground transition-opacity" />
+                )}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>Copy workspace path</TooltipContent>
+          </Tooltip>
+          <span className="min-w-0 flex-1 truncate text-xs font-medium text-muted-foreground">
+            {displayPath}
+          </span>
+          <div className="flex shrink-0 items-center gap-0.5">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  className="text-muted-foreground hover:bg-muted hover:text-foreground rounded p-1 cursor-pointer"
+                  onClick={() => openFolder()}
+                >
+                  <IconFolderShare className="h-3.5 w-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Open workspace folder</TooltipContent>
+            </Tooltip>
+            {expandedPaths.size > 0 && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    className="text-muted-foreground hover:bg-muted hover:text-foreground rounded p-1 cursor-pointer"
+                    onClick={collapseAll}
+                  >
+                    <IconListTree className="h-3.5 w-3.5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>Collapse all</TooltipContent>
+              </Tooltip>
+            )}
+          </div>
+        </div>
+      )}
+
       <ScrollArea className="flex-1" ref={scrollAreaRef}>
         {isSearchOpen && searchResults !== null ? (
           renderSearchResults()
@@ -583,7 +708,7 @@ export function FileBrowser({ sessionId, onOpenFile, onDeleteFile, isSearchOpen 
               <div className="text-xs text-muted-foreground">{sessionError}</div>
             )}
           </div>
-        ) : loadState === 'loading' || isLoadingTree ? (
+        ) : (loadState === 'loading' || isLoadingTree) && !tree ? (
           <div className="p-4 text-sm text-muted-foreground">Loading files...</div>
         ) : loadState === 'waiting' ? (
           <div className="p-4 text-sm text-muted-foreground flex items-center gap-2">
@@ -602,7 +727,15 @@ export function FileBrowser({ sessionId, onOpenFile, onDeleteFile, isSearchOpen 
             </button>
           </div>
         ) : tree ? (
-          <div className="pb-2">{renderTreeNode(tree)}</div>
+          <div className="pb-2">
+            {tree.children && [...tree.children]
+              .sort((a, b) => {
+                if (a.is_dir && !b.is_dir) return -1;
+                if (!a.is_dir && b.is_dir) return 1;
+                return a.name.localeCompare(b.name);
+              })
+              .map((child) => renderTreeNode(child, 0))}
+          </div>
         ) : (
           <div className="p-4 text-sm text-muted-foreground">No files found</div>
         )}

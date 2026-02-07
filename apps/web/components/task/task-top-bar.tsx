@@ -8,7 +8,6 @@ import {
   IconBug,
   IconCopy,
   IconDots,
-  IconFolderOpen,
   IconGitBranch,
   IconGitMerge,
   IconGitPullRequest,
@@ -55,7 +54,6 @@ import { EditorsMenu } from '@/components/task/editors-menu';
 import { useToast } from '@/components/toast-provider';
 import { PreviewControls } from '@/components/task/preview/preview-controls';
 import { DEBUG_UI } from '@/lib/config';
-import { useOpenSessionFolder } from '@/hooks/use-open-session-folder';
 
 type TaskTopBarProps = {
   taskId?: string | null;
@@ -105,7 +103,6 @@ const TaskTopBar = memo(function TaskTopBar({
   const { toast } = useToast();
   const gitStatus = useSessionGitStatus(activeSessionId ?? null);
   const { pull, push, rebase, merge, commit, createPR, isLoading: isGitLoading } = useGitOperations(activeSessionId ?? null);
-  const { open: openFolder, isLoading: isOpenFolderLoading } = useOpenSessionFolder(activeSessionId);
 
   // Use worktree branch if available, otherwise fall back to base branch
   const displayBranch = worktreeBranch || baseBranch;
@@ -542,14 +539,6 @@ const TaskTopBar = memo(function TaskTopBar({
             >
               <IconCopy className="h-4 w-4" />
               Copy workspace path
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              className="cursor-pointer"
-              onClick={() => openFolder()}
-              disabled={!activeSessionId || isOpenFolderLoading}
-            >
-              <IconFolderOpen className="h-4 w-4" />
-              Open workspace folder
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem
