@@ -147,9 +147,51 @@ func (a *Adapter) PrepareEnvironment() (map[string]string, error) {
 }
 
 // PrepareCommandArgs returns extra command-line arguments for the agent process.
-// For stream-json, no extra args are needed - MCP is configured via config files.
+// For stream-json (Claude Code), MCP configuration is passed via --mcp-config flag.
 func (a *Adapter) PrepareCommandArgs() []string {
-	return nil
+	if len(a.cfg.McpServers) == 0 {
+		return nil
+	}
+
+	// Build MCP configuration in Claude Code format
+	// Format: { "server-name": { "command": "...", "args": [...] } }
+	mcpConfig := make(map[string]interface{})
+	for _, server := range a.cfg.McpServers {
+		serverDef := make(map[string]interface{})
+
+		// Handle different transport types
+		if server.Command != "" {
+			// stdio transport
+			serverDef["command"] = server.Command
+			if len(server.Args) > 0 {
+				serverDef["args"] = server.Args
+			}
+		} else if server.URL != "" {
+			// SSE/HTTP transport
+			serverDef["url"] = server.URL
+			if server.Type != "" {
+				serverDef["type"] = server.Type
+			}
+		}
+
+		mcpConfig[server.Name] = serverDef
+	}
+
+	// Convert to JSON string
+	configJSON, err := json.Marshal(mcpConfig)
+	if err != nil {
+		a.logger.Warn("failed to marshal MCP config, skipping",
+			zap.Error(err),
+			zap.Int("server_count", len(a.cfg.McpServers)))
+		return nil
+	}
+
+	a.logger.Info("prepared MCP configuration for Claude Code",
+		zap.Int("server_count", len(a.cfg.McpServers)),
+		zap.String("config", string(configJSON)))
+
+	// Return --mcp-config flag with JSON string
+	return []string{"--mcp-config", string(configJSON)}
 }
 
 // Connect wires up the stdin/stdout pipes from the running agent subprocess.
