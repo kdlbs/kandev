@@ -22,8 +22,10 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	if err != nil {
 		return nil, nil, err
 	}
-	agentRegistry := registry.NewRegistry(log)
-	agentRegistry.LoadDefaults()
+	agentRegistry, _, err := registry.Provide(log)
+	if err != nil {
+		return nil, nil, err
+	}
 	agentSettingsController := agentsettingscontroller.NewController(repos.AgentSettings, discoveryRegistry, agentRegistry, repos.Task, log)
 
 	userSvc := userservice.NewService(repos.User, eventBus, log)

@@ -420,9 +420,14 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
       });
       setLeftTab(`file:${filePath}`);
     } catch (error) {
-      console.error('Failed to open file from chat:', error);
+      const reason = error instanceof Error ? error.message : 'Unknown error';
+      toast({
+        title: 'Failed to open file',
+        description: reason,
+        variant: 'error',
+      });
     }
-  }, [activeSessionId]);
+  }, [activeSessionId, toast]);
 
   // Handler for file content changes
   const handleFileChange = useCallback((path: string, newContent: string) => {

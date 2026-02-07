@@ -118,7 +118,7 @@ func (c *Controller) EnsureDefaultMcpConfig(ctx context.Context) error {
 }
 
 func (c *Controller) ListDiscovery(ctx context.Context) (*dto.ListDiscoveryResponse, error) {
-	results, err := c.discovery.Detect(ctx)
+	results, err := c.detectAgents(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -137,7 +137,7 @@ func (c *Controller) ListDiscovery(ctx context.Context) (*dto.ListDiscoveryRespo
 }
 
 func (c *Controller) ListAvailableAgents(ctx context.Context) (*dto.ListAvailableAgentsResponse, error) {
-	results, err := c.discovery.Detect(ctx)
+	results, err := c.detectAgents(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -158,6 +158,7 @@ func (c *Controller) ListAvailableAgents(ctx context.Context) (*dto.ListAvailabl
 				Available:     false,
 			}
 		}
+
 		displayName := def.DisplayName
 		if displayName == "" {
 			displayName = def.Name
@@ -245,7 +246,7 @@ func (c *Controller) ListAgents(ctx context.Context) (*dto.ListAgentsResponse, e
 }
 
 func (c *Controller) EnsureInitialAgentProfiles(ctx context.Context) error {
-	results, err := c.discovery.Detect(ctx)
+	results, err := c.detectAgents(ctx)
 	if err != nil {
 		return err
 	}
@@ -417,7 +418,7 @@ func (c *Controller) CreateAgent(ctx context.Context, req CreateAgentRequest) (*
 	if err == nil && existing != nil {
 		return nil, fmt.Errorf("agent already configured: %s", req.Name)
 	}
-	discoveryResults, err := c.discovery.Detect(ctx)
+	discoveryResults, err := c.detectAgents(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -687,6 +688,25 @@ func (c *Controller) defaultModelByAgent() map[string]string {
 		mapped[def.Name] = def.ModelConfig.DefaultModel
 	}
 	return mapped
+}
+
+// detectAgents runs discovery and forces mock-agent available when enabled.
+func (c *Controller) detectAgents(ctx context.Context) ([]discovery.Availability, error) {
+	results, err := c.discovery.Detect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	// Force mock-agent as available when enabled (skip file-presence discovery)
+	agentConfig, ok := c.agentRegistry.Get("mock-agent")
+	if ok && agentConfig.Enabled {
+		for i := range results {
+			if results[i].Name == "mock-agent" {
+				results[i].Available = true
+				break
+			}
+		}
+	}
+	return results, nil
 }
 
 // CommandPreviewRequest contains the draft settings for command preview

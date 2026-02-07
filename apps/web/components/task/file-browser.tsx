@@ -17,6 +17,7 @@ import {
   getFilesPanelScrollPosition,
   setFilesPanelScrollPosition,
 } from '@/lib/local-storage';
+import { useToast } from '@/components/toast-provider';
 
 type FileBrowserProps = {
   sessionId: string;
@@ -28,6 +29,7 @@ type FileBrowserProps = {
 };
 
 export function FileBrowser({ sessionId, onOpenFile, onDeleteFile, isSearchOpen = false, onCloseSearch, activeFilePath }: FileBrowserProps) {
+  const { toast } = useToast();
   const [tree, setTree] = useState<FileTreeNode | null>(null);
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const [loadingPaths, setLoadingPaths] = useState<Set<string>>(new Set());
@@ -382,9 +384,14 @@ export function FileBrowser({ sessionId, onOpenFile, onDeleteFile, isSearchOpen 
         isDirty: false,
       });
     } catch (error) {
-      console.error('Failed to load file content:', error);
+      const reason = error instanceof Error ? error.message : 'Unknown error';
+      toast({
+        title: 'Failed to open file',
+        description: reason,
+        variant: 'error',
+      });
     }
-  }, [sessionId, onOpenFile]);
+  }, [sessionId, onOpenFile, toast]);
 
   // Open file from search result (path only)
   const openFileByPath = useCallback(async (path: string) => {
@@ -410,9 +417,14 @@ export function FileBrowser({ sessionId, onOpenFile, onDeleteFile, isSearchOpen 
         isDirty: false,
       });
     } catch (error) {
-      console.error('Failed to load file content:', error);
+      const reason = error instanceof Error ? error.message : 'Unknown error';
+      toast({
+        title: 'Failed to open file',
+        description: reason,
+        variant: 'error',
+      });
     }
-  }, [sessionId, onOpenFile]);
+  }, [sessionId, onOpenFile, toast]);
 
   const renderTreeNode = (node: FileTreeNode, depth: number = 0): React.ReactNode => {
     const isExpanded = expandedPaths.has(node.path);

@@ -1,6 +1,33 @@
 import type { StoreApi } from 'zustand';
 import type { AppState } from '@/lib/state/store';
 import type { WsHandlers } from '@/lib/ws/handlers/types';
+import type { KanbanState } from '@/lib/state/slices/kanban/types';
+
+type KanbanTask = KanbanState['tasks'][number];
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function buildTaskFromPayload(payload: any, existing?: KanbanTask): KanbanTask {
+  return {
+    id: payload.task_id,
+    workflowStepId: payload.workflow_step_id,
+    title: payload.title,
+    description: payload.description,
+    position: payload.position ?? 0,
+    state: payload.state,
+    repositoryId: payload.repository_id ?? existing?.repositoryId,
+    primarySessionId: payload.primary_session_id ?? existing?.primarySessionId,
+    sessionCount: payload.session_count ?? existing?.sessionCount,
+    reviewStatus: payload.review_status ?? existing?.reviewStatus,
+    updatedAt: payload.updated_at ?? existing?.updatedAt,
+  };
+}
+
+function upsertTask(tasks: KanbanTask[], nextTask: KanbanTask): KanbanTask[] {
+  const exists = tasks.some((task) => task.id === nextTask.id);
+  return exists
+    ? tasks.map((task) => (task.id === nextTask.id ? nextTask : task))
+    : [...tasks, nextTask];
+}
 
 export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
@@ -9,28 +36,13 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
         if (state.kanban.boardId !== message.payload.board_id) {
           return state;
         }
-        const exists = state.kanban.tasks.some((task) => task.id === message.payload.task_id);
-        const existingTask = state.kanban.tasks.find((task) => task.id === message.payload.task_id);
-        const nextTask = {
-          id: message.payload.task_id,
-          workflowStepId: message.payload.workflow_step_id,
-          title: message.payload.title,
-          description: message.payload.description,
-          position: message.payload.position ?? 0,
-          state: message.payload.state,
-          repositoryId: message.payload.repository_id ?? existingTask?.repositoryId,
-          primarySessionId: message.payload.primary_session_id ?? existingTask?.primarySessionId,
-          sessionCount: message.payload.session_count ?? existingTask?.sessionCount,
-          reviewStatus: message.payload.review_status ?? existingTask?.reviewStatus,
-          updatedAt: message.payload.updated_at ?? existingTask?.updatedAt,
-        };
+        const existing = state.kanban.tasks.find((task) => task.id === message.payload.task_id);
+        const nextTask = buildTaskFromPayload(message.payload, existing);
         return {
           ...state,
           kanban: {
             ...state.kanban,
-            tasks: exists
-              ? state.kanban.tasks.map((task) => (task.id === nextTask.id ? nextTask : task))
-              : [...state.kanban.tasks, nextTask],
+            tasks: upsertTask(state.kanban.tasks, nextTask),
           },
         };
       });
@@ -40,66 +52,45 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
         if (state.kanban.boardId !== message.payload.board_id) {
           return state;
         }
-        const existingTask = state.kanban.tasks.find((task) => task.id === message.payload.task_id);
-        const nextTask = {
-          id: message.payload.task_id,
-          workflowStepId: message.payload.workflow_step_id,
-          title: message.payload.title,
-          description: message.payload.description,
-          position: message.payload.position ?? 0,
-          state: message.payload.state,
-          repositoryId: message.payload.repository_id ?? existingTask?.repositoryId,
-          primarySessionId: message.payload.primary_session_id ?? existingTask?.primarySessionId,
-          sessionCount: message.payload.session_count ?? existingTask?.sessionCount,
-          reviewStatus: message.payload.review_status ?? existingTask?.reviewStatus,
-          updatedAt: message.payload.updated_at ?? existingTask?.updatedAt,
-        };
+        const existing = state.kanban.tasks.find((task) => task.id === message.payload.task_id);
+        const nextTask = buildTaskFromPayload(message.payload, existing);
         return {
           ...state,
           kanban: {
             ...state.kanban,
-            tasks: state.kanban.tasks.some((task) => task.id === nextTask.id)
-              ? state.kanban.tasks.map((task) => (task.id === nextTask.id ? nextTask : task))
-              : [...state.kanban.tasks, nextTask],
+            tasks: upsertTask(state.kanban.tasks, nextTask),
           },
         };
       });
     },
     'task.deleted': (message) => {
-      store.setState((state) => ({
-        ...state,
-        kanban: {
-          ...state.kanban,
-          tasks: state.kanban.tasks.filter((task) => task.id !== message.payload.task_id),
-        },
-      }));
+      store.setState((state) => {
+        const deletedId = message.payload.task_id;
+        const isActive = state.tasks.activeTaskId === deletedId;
+        return {
+          ...state,
+          kanban: {
+            ...state.kanban,
+            tasks: state.kanban.tasks.filter((task) => task.id !== deletedId),
+          },
+          tasks: isActive
+            ? { ...state.tasks, activeTaskId: null, activeSessionId: null }
+            : state.tasks,
+        };
+      });
     },
     'task.state_changed': (message) => {
       store.setState((state) => {
         if (state.kanban.boardId !== message.payload.board_id) {
           return state;
         }
-        const existingTask = state.kanban.tasks.find((t) => t.id === message.payload.task_id);
-        const nextTask = {
-          id: message.payload.task_id,
-          workflowStepId: message.payload.workflow_step_id,
-          title: message.payload.title,
-          description: message.payload.description,
-          position: message.payload.position ?? 0,
-          state: message.payload.state,
-          repositoryId: message.payload.repository_id ?? existingTask?.repositoryId,
-          primarySessionId: message.payload.primary_session_id ?? existingTask?.primarySessionId,
-          sessionCount: message.payload.session_count ?? existingTask?.sessionCount,
-          reviewStatus: message.payload.review_status ?? existingTask?.reviewStatus,
-          updatedAt: message.payload.updated_at ?? existingTask?.updatedAt,
-        };
+        const existing = state.kanban.tasks.find((t) => t.id === message.payload.task_id);
+        const nextTask = buildTaskFromPayload(message.payload, existing);
         return {
           ...state,
           kanban: {
             ...state.kanban,
-            tasks: state.kanban.tasks.some((task) => task.id === nextTask.id)
-              ? state.kanban.tasks.map((task) => (task.id === nextTask.id ? nextTask : task))
-              : [...state.kanban.tasks, nextTask],
+            tasks: upsertTask(state.kanban.tasks, nextTask),
           },
         };
       });
