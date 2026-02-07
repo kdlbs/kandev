@@ -45,7 +45,8 @@ export type BackendMessageType =
   | 'session.workspace.file.changes'
   | 'session.shell.output'
   | 'session.process.output'
-  | 'session.process.status';
+  | 'session.process.status'
+  | 'message.queue.status_changed';
 
 export type BackendMessage<T extends BackendMessageType, P> = {
   id?: string;
@@ -328,6 +329,21 @@ export type TaskPlanEventPayload = {
   updated_at: string;
 };
 
+export type QueuedMessagePayload = {
+  content: string;
+  model?: string;
+  plan_mode?: boolean;
+  task_id: string;
+  user_id?: string;
+  queued_at: string;
+};
+
+export type QueueStatusChangedPayload = {
+  session_id: string;
+  is_queued: boolean;
+  message?: QueuedMessagePayload | null;
+};
+
 export type BackendMessageMap = {
   'kanban.update': BackendMessage<'kanban.update', KanbanUpdatePayload>;
   'task.created': BackendMessage<'task.created', TaskEventPayload>;
@@ -376,6 +392,7 @@ export type BackendMessageMap = {
   'session.shell.output': BackendMessage<'session.shell.output', ShellOutputPayload>;
   'session.process.output': BackendMessage<'session.process.output', ProcessOutputPayload>;
   'session.process.status': BackendMessage<'session.process.status', ProcessStatusPayload>;
+  'message.queue.status_changed': BackendMessage<'message.queue.status_changed', QueueStatusChangedPayload>;
 };
 
 // Workspace file types

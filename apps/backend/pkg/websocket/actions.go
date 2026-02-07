@@ -91,6 +91,13 @@ const (
 	ActionOrchestratorPrompt   = "orchestrator.prompt"
 	ActionOrchestratorComplete = "orchestrator.complete"
 
+	// Message Queue actions
+	ActionMessageQueueAdd            = "message.queue.add"
+	ActionMessageQueueCancel         = "message.queue.cancel"
+	ActionMessageQueueGet            = "message.queue.get"
+	ActionMessageQueueUpdate         = "message.queue.update"
+	ActionMessageQueueStatusChanged  = "message.queue.status_changed" // Notification: queue status changed
+
 	// Workflow actions
 	ActionWorkflowTemplateList   = "workflow.template.list"
 	ActionWorkflowTemplateGet    = "workflow.template.get"

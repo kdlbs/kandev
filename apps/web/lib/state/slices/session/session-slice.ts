@@ -15,6 +15,7 @@ export const defaultSessionState: SessionSliceState = {
   pendingModel: { bySessionId: {} },
   activeModel: { bySessionId: {} },
   taskPlans: { byTaskId: {}, loadingByTaskId: {}, loadedByTaskId: {}, savingByTaskId: {} },
+  queue: { bySessionId: {}, isLoading: {} },
 };
 
 export const createSessionSlice: StateCreator<
@@ -253,5 +254,18 @@ export const createSessionSlice: StateCreator<
       delete draft.taskPlans.loadingByTaskId[taskId];
       delete draft.taskPlans.loadedByTaskId[taskId];
       delete draft.taskPlans.savingByTaskId[taskId];
+    }),
+  setQueueStatus: (sessionId, status) =>
+    set((draft) => {
+      draft.queue.bySessionId[sessionId] = status;
+    }),
+  setQueueLoading: (sessionId, loading) =>
+    set((draft) => {
+      draft.queue.isLoading[sessionId] = loading;
+    }),
+  clearQueueStatus: (sessionId) =>
+    set((draft) => {
+      delete draft.queue.bySessionId[sessionId];
+      delete draft.queue.isLoading[sessionId];
     }),
 });

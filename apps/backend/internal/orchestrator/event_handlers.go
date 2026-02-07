@@ -99,6 +99,30 @@ func (s *Service) handleAgentRunning(ctx context.Context, data watcher.AgentEven
 	s.setSessionRunning(ctx, data.TaskID, data.SessionID)
 }
 
+// publishQueueStatusEvent publishes a queue status changed event for the given session
+func (s *Service) publishQueueStatusEvent(ctx context.Context, sessionID string) {
+	if s.eventBus == nil {
+		return
+	}
+
+	queueStatus := s.messageQueue.GetStatus(ctx, sessionID)
+	eventData := map[string]interface{}{
+		"session_id": sessionID,
+		"is_queued":  queueStatus.IsQueued,
+		"message":    queueStatus.Message,
+	}
+
+	s.logger.Debug("publishing queue status changed event",
+		zap.String("session_id", sessionID),
+		zap.Bool("is_queued", queueStatus.IsQueued))
+
+	_ = s.eventBus.Publish(ctx, events.MessageQueueStatusChanged, bus.NewEvent(
+		events.MessageQueueStatusChanged,
+		"orchestrator",
+		eventData,
+	))
+}
+
 // handleAgentReady handles agent ready events (turn complete in passthrough mode)
 // This is called when the agent finishes processing and is waiting for input.
 func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventData) {
@@ -119,6 +143,92 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 	if !transitioned {
 		s.setSessionWaitingForInput(ctx, data.TaskID, data.SessionID)
 	}
+
+	// ALWAYS check for queued messages after agent becomes ready, regardless of workflow transition
+	queueStatus := s.messageQueue.GetStatus(ctx, data.SessionID)
+	s.logger.Info("checking for queued messages",
+		zap.String("session_id", data.SessionID),
+		zap.Bool("is_queued", queueStatus.IsQueued),
+		zap.Any("message", queueStatus.Message))
+
+	if queuedMsg, exists := s.messageQueue.TakeQueued(ctx, data.SessionID); exists {
+			// Skip if the queued message has empty content (might have been cleared accidentally)
+			if queuedMsg.Content == "" && len(queuedMsg.Attachments) == 0 {
+				s.logger.Warn("skipping empty queued message",
+					zap.String("session_id", data.SessionID),
+					zap.String("queue_id", queuedMsg.ID))
+
+				// Still publish status change to clear frontend state
+				s.publishQueueStatusEvent(ctx, data.SessionID)
+				return
+			}
+
+			s.logger.Info("auto-executing queued message",
+				zap.String("session_id", data.SessionID),
+				zap.String("task_id", queuedMsg.TaskID),
+				zap.String("queue_id", queuedMsg.ID))
+
+			// Publish queue status changed event to notify frontend
+			s.publishQueueStatusEvent(ctx, data.SessionID)
+
+			// Execute the queued message asynchronously
+			go func() {
+				promptCtx := context.Background() // Use a fresh context for async execution
+
+				// Create user message for the queued message (so it appears in chat history)
+				if s.messageCreator != nil {
+					turnID := s.getActiveTurnID(queuedMsg.SessionID)
+					if turnID == "" {
+						// Start a new turn if needed
+						s.startTurnForSession(promptCtx, queuedMsg.SessionID)
+						turnID = s.getActiveTurnID(queuedMsg.SessionID)
+					}
+
+					// Note: Attachments will be sent to the agent via PromptTask but not stored in the message
+					// This matches the behavior of direct prompts
+					err := s.messageCreator.CreateUserMessage(promptCtx, queuedMsg.TaskID, queuedMsg.Content, queuedMsg.SessionID, turnID)
+					if err != nil {
+						s.logger.Error("failed to create user message for queued message",
+							zap.String("session_id", queuedMsg.SessionID),
+							zap.Error(err))
+						// Continue anyway - the prompt should still be sent
+					}
+				}
+
+				// Convert queue attachments to v1 attachments
+				attachments := make([]v1.MessageAttachment, len(queuedMsg.Attachments))
+				for i, att := range queuedMsg.Attachments {
+					attachments[i] = v1.MessageAttachment{
+						Type:     att.Type,
+						Data:     att.Data,
+						MimeType: att.MimeType,
+					}
+				}
+
+				_, err := s.PromptTask(promptCtx, queuedMsg.TaskID, queuedMsg.SessionID,
+					queuedMsg.Content, queuedMsg.Model, queuedMsg.PlanMode, attachments)
+				if err != nil {
+					s.logger.Error("failed to execute queued message",
+						zap.String("session_id", data.SessionID),
+						zap.String("task_id", queuedMsg.TaskID),
+						zap.String("queue_id", queuedMsg.ID),
+						zap.Error(err))
+
+					// TODO: Implement dead letter queue for failed queued messages
+					// Currently, failed messages are lost. Consider:
+					// 1. Retry mechanism with exponential backoff
+					// 2. Persist failed messages to database for manual intervention
+					// 3. Notification to user about failed queue execution
+					s.logger.Warn("queued message execution failed - message is lost (no retry/dead letter queue)",
+						zap.String("session_id", data.SessionID),
+						zap.String("queue_id", queuedMsg.ID),
+						zap.String("content_preview", queuedMsg.Content[:min(50, len(queuedMsg.Content))]))
+				}
+			}()
+		} else {
+			s.logger.Debug("no queued message to execute",
+				zap.String("session_id", data.SessionID))
+		}
 }
 
 // handleAgentCompleted handles agent completion events

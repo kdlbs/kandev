@@ -58,6 +58,7 @@ func RegisterTaskNotifications(ctx context.Context, eventBus bus.EventBus, hub *
 	b.subscribe(eventBus, events.AgentctlError, ws.ActionSessionAgentctlError)
 	b.subscribe(eventBus, events.TurnStarted, ws.ActionSessionTurnStarted)
 	b.subscribe(eventBus, events.TurnCompleted, ws.ActionSessionTurnCompleted)
+	b.subscribe(eventBus, events.MessageQueueStatusChanged, ws.ActionMessageQueueStatusChanged)
 
 	go func() {
 		<-ctx.Done()
@@ -110,6 +111,11 @@ func (b *TaskEventBroadcaster) subscribe(eventBus bus.EventBus, subject, action 
 				return nil
 			}
 		case ws.ActionSessionMessageAdded, ws.ActionSessionMessageUpdated:
+			if sessionID != "" {
+				b.hub.BroadcastToSession(sessionID, msg)
+				return nil
+			}
+		case ws.ActionMessageQueueStatusChanged:
 			if sessionID != "" {
 				b.hub.BroadcastToSession(sessionID, msg)
 				return nil

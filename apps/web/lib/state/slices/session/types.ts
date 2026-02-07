@@ -69,6 +69,28 @@ export type TaskPlansState = {
   savingByTaskId: Record<string, boolean>;
 };
 
+export type QueuedMessage = {
+  id: string;
+  session_id: string;
+  task_id: string;
+  content: string;
+  model?: string;
+  plan_mode: boolean;
+  attachments?: Array<{ type: string; data: string; mime_type: string }>;
+  queued_at: string;
+  queued_by?: string;
+};
+
+export type QueueStatus = {
+  is_queued: boolean;
+  message?: QueuedMessage | null;
+};
+
+export type QueueState = {
+  bySessionId: Record<string, QueueStatus>;
+  isLoading: Record<string, boolean>;
+};
+
 export type SessionSliceState = {
   messages: MessagesState;
   turns: TurnsState;
@@ -80,6 +102,7 @@ export type SessionSliceState = {
   pendingModel: PendingModelState;
   activeModel: ActiveModelState;
   taskPlans: TaskPlansState;
+  queue: QueueState;
 };
 
 export type SessionSliceActions = {
@@ -117,6 +140,10 @@ export type SessionSliceActions = {
   setTaskPlanLoading: (taskId: string, loading: boolean) => void;
   setTaskPlanSaving: (taskId: string, saving: boolean) => void;
   clearTaskPlan: (taskId: string) => void;
+  // Queue actions
+  setQueueStatus: (sessionId: string, status: QueueStatus) => void;
+  setQueueLoading: (sessionId: string, loading: boolean) => void;
+  clearQueueStatus: (sessionId: string) => void;
 };
 
 export type SessionSlice = SessionSliceState & SessionSliceActions;

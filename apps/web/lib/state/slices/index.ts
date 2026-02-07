@@ -55,6 +55,9 @@ export type {
   PendingModelState,
   ActiveModelState,
   TaskPlansState,
+  QueueStatus,
+  QueuedMessage,
+  QueueState,
 } from './session/types';
 export type {
   TerminalState,

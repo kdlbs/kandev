@@ -1,5 +1,6 @@
 import { useCallback } from 'react';
 import { getWebSocketClient } from '@/lib/ws/connection';
+import { useQueue } from './domains/session/use-queue';
 import type { MessageAttachment } from '@/components/task/chat/chat-input-container';
 
 export function useMessageHandler(
@@ -7,8 +8,11 @@ export function useMessageHandler(
   taskId: string | null,
   sessionModel: string | null,
   activeModel: string | null,
-  planMode: boolean = false
+  planMode: boolean = false,
+  isAgentBusy: boolean = false
 ) {
+  const { queue } = useQueue(resolvedSessionId);
+
   const handleSendMessage = useCallback(
     async (message: string, attachments?: MessageAttachment[]) => {
       if (!taskId || !resolvedSessionId) {
@@ -25,6 +29,20 @@ export function useMessageHandler(
       const hasAttachments = attachments && attachments.length > 0;
       const timeoutMs = hasAttachments ? 30000 : 10000;
 
+      // If agent is busy, queue the message instead of sending immediately
+      if (isAgentBusy) {
+        // Convert MessageAttachment[] to queue API format
+        const queueAttachments = attachments?.map(att => ({
+          type: att.type,
+          data: att.data,
+          mime_type: att.mime_type,
+        }));
+
+        await queue(taskId, message, modelToSend, planMode, queueAttachments);
+        return;
+      }
+
+      // Agent not busy - send message normally
       await client.request(
         'message.add',
         {
@@ -38,7 +56,7 @@ export function useMessageHandler(
         timeoutMs
       );
     },
-    [resolvedSessionId, taskId, activeModel, sessionModel, planMode]
+    [resolvedSessionId, taskId, activeModel, sessionModel, planMode, isAgentBusy, queue]
   );
 
   return { handleSendMessage };

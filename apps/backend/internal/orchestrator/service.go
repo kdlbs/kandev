@@ -22,6 +22,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/queue"
 	"github.com/kandev/kandev/internal/orchestrator/scheduler"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
@@ -144,6 +145,9 @@ type Service struct {
 	scheduler *scheduler.Scheduler
 	watcher   *watcher.Watcher
 
+	// Message queue service for queueing messages while agent is running
+	messageQueue *messagequeue.Service
+
 	// Message creator for saving agent responses
 	messageCreator MessageCreator
 
@@ -201,6 +205,9 @@ func NewService(
 	// Create the scheduler with queue, executor, and task repository
 	sched := scheduler.NewScheduler(taskQueue, exec, taskRepo, log, cfg.Scheduler)
 
+	// Create the message queue service
+	msgQueue := messagequeue.NewService(log)
+
 	// Create the service (watcher will be created after we have handlers)
 	s := &Service{
 		config:       cfg,
@@ -212,6 +219,7 @@ func NewService(
 		queue:        taskQueue,
 		executor:     exec,
 		scheduler:    sched,
+		messageQueue: msgQueue,
 	}
 
 	// Create the watcher with event handlers that wire everything together
@@ -774,4 +782,14 @@ func (s *Service) GetStatus() *Status {
 		UptimeSeconds:  uptimeSeconds,
 		LastHeartbeat:  time.Now(),
 	}
+}
+
+// GetMessageQueue returns the message queue service
+func (s *Service) GetMessageQueue() *messagequeue.Service {
+	return s.messageQueue
+}
+
+// GetEventBus returns the event bus
+func (s *Service) GetEventBus() bus.EventBus {
+	return s.eventBus
 }

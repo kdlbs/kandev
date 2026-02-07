@@ -68,6 +68,10 @@ func provideGateway(
 	orchestratorHandlers := orchestratorhandlers.NewHandlers(orchestratorSvc, log)
 	orchestratorHandlers.RegisterHandlers(gateway.Dispatcher)
 
+	// Register message queue handlers
+	queueHandlers := orchestratorhandlers.NewQueueHandlers(orchestratorSvc.GetMessageQueue(), orchestratorSvc.GetEventBus(), log)
+	queueHandlers.RegisterHandlers(gateway.Dispatcher)
+
 	if lifecycleMgr != nil && agentRegistry != nil {
 		agentCtrl := agentcontroller.NewController(lifecycleMgr, agentRegistry)
 		agentHandlers := agenthandlers.NewHandlers(agentCtrl, log)
