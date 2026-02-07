@@ -2,6 +2,7 @@ package process
 
 import (
 	"context"
+	"encoding/base64"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -299,5 +300,74 @@ func TestFilterLocalCommits_PullAndResetScenario(t *testing.T) {
 		for _, c := range filtered {
 			t.Errorf("  unexpected commit: %s - %s", c.CommitSHA[:8], c.Message)
 		}
+	}
+}
+
+func TestGetFileContent_BinaryDetection(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	log := newTestLogger(t)
+	wt := NewWorkspaceTracker(repoDir, log)
+
+	// Test 1: Valid UTF-8 text file returns isBinary=false with raw content
+	textContent := "Hello, world!\nLine 2\n"
+	writeFile(t, repoDir, "text.txt", textContent)
+
+	content, size, isBinary, err := wt.GetFileContent("text.txt")
+	if err != nil {
+		t.Fatalf("GetFileContent(text.txt) error: %v", err)
+	}
+	if isBinary {
+		t.Error("expected isBinary=false for text file")
+	}
+	if content != textContent {
+		t.Errorf("expected content %q, got %q", textContent, content)
+	}
+	if size != int64(len(textContent)) {
+		t.Errorf("expected size %d, got %d", len(textContent), size)
+	}
+
+	// Test 2: Non-UTF-8 binary file returns isBinary=true with base64-encoded content
+	binaryContent := []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0xFF, 0xFE}
+	if err := os.WriteFile(filepath.Join(repoDir, "image.png"), binaryContent, 0o644); err != nil {
+		t.Fatalf("failed to write binary file: %v", err)
+	}
+
+	content, size, isBinary, err = wt.GetFileContent("image.png")
+	if err != nil {
+		t.Fatalf("GetFileContent(image.png) error: %v", err)
+	}
+	if !isBinary {
+		t.Error("expected isBinary=true for binary file")
+	}
+	if size != int64(len(binaryContent)) {
+		t.Errorf("expected size %d, got %d", len(binaryContent), size)
+	}
+
+	// Verify content is valid base64 that decodes to original bytes
+	decoded, err := base64.StdEncoding.DecodeString(content)
+	if err != nil {
+		t.Fatalf("failed to decode base64 content: %v", err)
+	}
+	if string(decoded) != string(binaryContent) {
+		t.Errorf("decoded content doesn't match original binary")
+	}
+
+	// Test 3: Empty file returns isBinary=false
+	writeFile(t, repoDir, "empty.txt", "")
+
+	_, _, isBinary, err = wt.GetFileContent("empty.txt")
+	if err != nil {
+		t.Fatalf("GetFileContent(empty.txt) error: %v", err)
+	}
+	if isBinary {
+		t.Error("expected isBinary=false for empty file")
+	}
+
+	// Test 4: Path traversal is rejected
+	_, _, _, err = wt.GetFileContent("../../etc/passwd")
+	if err == nil {
+		t.Error("expected error for path traversal, got nil")
 	}
 }

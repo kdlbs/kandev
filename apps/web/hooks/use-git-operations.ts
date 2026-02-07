@@ -51,21 +51,21 @@ export function useGitOperations(sessionId: string | null): UseGitOperationsRetu
     if (!sessionId) {
       throw new Error('No session ID provided');
     }
-    
+
     const client = getWebSocketClient();
     if (!client) {
       throw new Error('WebSocket not connected');
     }
-    
+
     setIsLoading(true);
     setError(null);
-    
+
     try {
       const result = await client.request<T>(action, {
         session_id: sessionId,
         ...payload
       }, 60000); // 60s timeout for git operations
-      
+
       setLastResult(result);
       if (!result.success && result.error) {
         setError(result.error);

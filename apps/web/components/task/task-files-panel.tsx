@@ -89,6 +89,7 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiff, onOpenFile, 
   const [expandedCommit, setExpandedCommit] = useState<string | null>(null);
   const [commitDiffs, setCommitDiffs] = useState<Record<string, Record<string, FileInfo>>>({});
   const [loadingCommitSha, setLoadingCommitSha] = useState<string | null>(null);
+  const [pendingStageFiles, setPendingStageFiles] = useState<Set<string>>(new Set());
 
   // Fetch commit diff
   const fetchCommitDiff = useCallback(async (commitSha: string) => {
@@ -195,6 +196,40 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiff, onOpenFile, 
     }));
   }, [gitStatus]);
 
+  // Clear pending stage/unstage spinners when git status updates
+  useEffect(() => {
+    if (pendingStageFiles.size > 0) {
+      setPendingStageFiles(new Set());
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [changedFiles]);
+
+  const handleStage = useCallback(async (path: string) => {
+    setPendingStageFiles((prev) => new Set(prev).add(path));
+    try {
+      await gitOps.stage([path]);
+    } catch {
+      setPendingStageFiles((prev) => {
+        const next = new Set(prev);
+        next.delete(path);
+        return next;
+      });
+    }
+  }, [gitOps]);
+
+  const handleUnstage = useCallback(async (path: string) => {
+    setPendingStageFiles((prev) => new Set(prev).add(path));
+    try {
+      await gitOps.unstage([path]);
+    } catch {
+      setPendingStageFiles((prev) => {
+        const next = new Set(prev);
+        next.delete(path);
+        return next;
+      });
+    }
+  }, [gitOps]);
+
   // Smart tab selection: restore user preference or auto-select based on changes
   useEffect(() => {
     if (!activeSessionId) return;
@@ -286,44 +321,40 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiff, onOpenFile, 
                           onClick={() => onSelectDiff(file.path)}
                         >
                           <div className="flex items-center gap-2 min-w-0">
-                            {file.staged ? (
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <button
-                                    type="button"
-                                    className="group/unstage flex items-center justify-center h-4 w-4 rounded bg-emerald-500/20 text-emerald-600 hover:bg-rose-500/20 hover:text-rose-600"
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      void gitOps.unstage([file.path]);
-                                    }}
-                                  >
-                                    <IconCheck className="h-3 w-3 group-hover/unstage:hidden" />
-                                    <IconMinus className="h-2.5 w-2.5 hidden group-hover/unstage:block" />
-                                  </button>
-                                </TooltipTrigger>
-                                <TooltipContent>Click to unstage</TooltipContent>
-                              </Tooltip>
+                            {pendingStageFiles.has(file.path) ? (
+                              <div className="flex-shrink-0 flex items-center justify-center size-4">
+                                <IconLoader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+                              </div>
+                            ) : file.staged ? (
+                              <button
+                                type="button"
+                                title="Unstage file"
+                                className="group/unstage flex-shrink-0 flex items-center justify-center size-4 rounded bg-emerald-500/20 text-emerald-600 hover:bg-rose-500/20 hover:text-rose-600 cursor-pointer"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  void handleUnstage(file.path);
+                                }}
+                              >
+                                <IconCheck className="h-3 w-3 group-hover/unstage:hidden" />
+                                <IconMinus className="h-2.5 w-2.5 hidden group-hover/unstage:block" />
+                              </button>
                             ) : (
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <button
-                                    type="button"
-                                    className="flex items-center justify-center h-4 w-4 rounded border border-dashed border-muted-foreground/50 text-muted-foreground hover:border-emerald-500 hover:text-emerald-500 hover:bg-emerald-500/10"
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      void gitOps.stage([file.path]);
-                                    }}
-                                  >
-                                    <IconPlus className="h-2.5 w-2.5" />
-                                  </button>
-                                </TooltipTrigger>
-                                <TooltipContent>Click to stage</TooltipContent>
-                              </Tooltip>
+                              <button
+                                type="button"
+                                title="Stage file"
+                                className="flex-shrink-0 flex items-center justify-center size-4 rounded border border-dashed border-muted-foreground/50 text-muted-foreground hover:border-emerald-500 hover:text-emerald-500 hover:bg-emerald-500/10 cursor-pointer"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  void handleStage(file.path);
+                                }}
+                              >
+                                <IconPlus className="h-2.5 w-2.5" />
+                              </button>
                             )}
-                            <button type="button" className="min-w-0 text-left cursor-pointer">
-                              <p className="truncate text-foreground text-xs">
-                                <span className="text-foreground/60">{folder}/</span>
-                                <span className="font-medium text-foreground">{name}</span>
+                            <button type="button" className="min-w-0 text-left cursor-pointer" title={file.path}>
+                              <p className="flex text-foreground text-xs min-w-0">
+                                {folder && <span className="text-foreground/60 truncate shrink">{folder}/</span>}
+                                <span className="font-medium text-foreground whitespace-nowrap shrink-0">{name}</span>
                               </p>
                             </button>
                           </div>
@@ -358,7 +389,7 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiff, onOpenFile, 
                                     <IconExternalLink className="h-3.5 w-3.5" />
                                   </button>
                                 </TooltipTrigger>
-                                <TooltipContent>Open in editor</TooltipContent>
+                                <TooltipContent>Open in external editor</TooltipContent>
                               </Tooltip>
                             </div>
                             <LineStat added={file.plus} removed={file.minus} />
@@ -423,9 +454,9 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiff, onOpenFile, 
                                     onClick={() => onSelectDiff(path, file.diff)}
                                   >
                                     <FileStatusIcon status={file.status} />
-                                    <span className="truncate flex-1">
-                                      <span className="text-foreground/60">{folder}/</span>
-                                      <span className="text-foreground">{fileName}</span>
+                                    <span className="flex flex-1 min-w-0" title={path}>
+                                      {folder && <span className="text-foreground/60 truncate shrink">{folder}/</span>}
+                                      <span className="text-foreground whitespace-nowrap shrink-0">{fileName}</span>
                                     </span>
                                     <span className="shrink-0 text-xs">
                                       <span className="text-emerald-500">+{file.additions ?? 0}</span>

@@ -467,6 +467,12 @@ func (g *GitOperator) Stage(ctx context.Context, paths []string) (*GitOperationR
 
 	result.Success = true
 	g.logger.Info("stage completed", zap.Int("files", len(paths)))
+
+	// Refresh git status so the UI reflects the staged state
+	if g.workspaceTracker != nil {
+		g.workspaceTracker.RefreshGitStatus(ctx)
+	}
+
 	return result, nil
 }
 
@@ -501,6 +507,12 @@ func (g *GitOperator) Unstage(ctx context.Context, paths []string) (*GitOperatio
 
 	result.Success = true
 	g.logger.Info("unstage completed", zap.Int("files", len(paths)))
+
+	// Refresh git status so the UI reflects the unstaged state
+	if g.workspaceTracker != nil {
+		g.workspaceTracker.RefreshGitStatus(ctx)
+	}
+
 	return result, nil
 }
 
