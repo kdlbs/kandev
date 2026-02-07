@@ -51,7 +51,7 @@ export default async function Page({ searchParams }: PageProps) {
         activeId: activeWorkspaceId,
       },
       userSettings: {
-        workspaceId: settingsWorkspaceId,
+        workspaceId: activeWorkspaceId,
         boardId: settingsBoardId,
         repositoryIds: settingsRepositoryIds,
         preferredShell: userSettings?.preferred_shell || null,
@@ -86,6 +86,10 @@ export default async function Page({ searchParams }: PageProps) {
       boardList.boards[0]?.id;
     initialState = {
       ...initialState,
+      userSettings: {
+        ...(initialState.userSettings as AppState['userSettings']),
+        boardId: boardId ?? null,
+      },
       boards: {
         items: boardList.boards.map((board) => ({
           id: board.id,

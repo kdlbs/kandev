@@ -524,7 +524,7 @@ func TestStopProcessRejectsDifferentSession(t *testing.T) {
 			"session-a": {ID: "session-a", TaskID: "task-1", ExecutorID: "exec-1"},
 		},
 		executors: map[string]*models.Executor{
-			"exec-1": {ID: "exec-1", Type: models.ExecutorTypeLocalPC},
+			"exec-1": {ID: "exec-1", Type: models.ExecutorTypeLocal},
 		},
 	}
 	svc := service.NewService(repo, nil, log, service.RepositoryDiscoveryConfig{})
@@ -583,7 +583,7 @@ func TestStopProcessAgentctlUnavailable(t *testing.T) {
 			"session-a": {ID: "session-a", TaskID: "task-1", ExecutorID: "exec-1"},
 		},
 		executors: map[string]*models.Executor{
-			"exec-1": {ID: "exec-1", Type: models.ExecutorTypeLocalPC},
+			"exec-1": {ID: "exec-1", Type: models.ExecutorTypeLocal},
 		},
 	}
 	svc := service.NewService(repo, nil, log, service.RepositoryDiscoveryConfig{})

@@ -21,6 +21,7 @@ export function FileImageViewer({ path, content, worktreePath }: FileImageViewer
         </div>
       </div>
       <div className="flex-1 flex items-center justify-center overflow-auto p-6">
+        {/* eslint-disable-next-line @next/next/no-img-element -- dynamic blob/data URLs from the agent workspace */}
         <img
           src={src}
           alt={path}

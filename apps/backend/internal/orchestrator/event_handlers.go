@@ -867,6 +867,17 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 			_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.AvailableCommandsUpdated, "orchestrator", eventPayload))
 		}
 
+	case "permission_cancelled":
+		// Handle permission cancellation — mark the permission message as expired
+		if sessionID != "" && payload.Data.PendingID != "" && s.messageCreator != nil {
+			if err := s.messageCreator.UpdatePermissionMessage(ctx, sessionID, payload.Data.PendingID, "expired"); err != nil {
+				s.logger.Warn("failed to mark permission as expired",
+					zap.String("session_id", sessionID),
+					zap.String("pending_id", payload.Data.PendingID),
+					zap.Error(err))
+			}
+		}
+
 	case "log":
 		// Handle log events - store agent log messages to the database
 		if sessionID != "" && s.messageCreator != nil {

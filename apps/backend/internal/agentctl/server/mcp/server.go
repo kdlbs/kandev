@@ -186,7 +186,22 @@ Another example:
   ]
 }`),
 			mcp.WithString("prompt", mcp.Required(), mcp.Description("The question to ask the user. Be specific and clear.")),
-			mcp.WithArray("options", mcp.Required(), mcp.Description(`Array of option objects. Each option must have: "label" (1-5 words, the clickable choice) and "description" (explanation of the option). Provide 2-4 concrete, actionable options.`)),
+			mcp.WithArray("options", mcp.Required(), mcp.Description(`Array of option objects. Each option must have: "label" (1-5 words, the clickable choice) and "description" (explanation of the option). Provide 2-4 concrete, actionable options.`),
+				mcp.Items(map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"label": map[string]any{
+							"type":        "string",
+							"description": "Short text (1-5 words) shown as the clickable option",
+						},
+						"description": map[string]any{
+							"type":        "string",
+							"description": "Brief explanation of what this option means",
+						},
+					},
+					"required": []string{"label", "description"},
+				}),
+			),
 			mcp.WithString("context", mcp.Description("Optional background information to help the user understand why you're asking this question.")),
 		),
 		s.askUserQuestionHandler(),

@@ -2282,6 +2282,19 @@ func (s *Service) UpdatePermissionMessage(ctx context.Context, sessionID, pendin
 	// Publish message.updated event
 	s.publishMessageEvent(ctx, events.MessageUpdated, message)
 
+	// When a permission expires, also mark the related tool call as cancelled
+	// so the UI no longer shows a loading spinner on the tool call.
+	if status == "expired" {
+		if toolCallID, ok := message.Metadata["tool_call_id"].(string); ok && toolCallID != "" {
+			if err := s.UpdateToolCallMessage(ctx, sessionID, toolCallID, "error", "", "", nil); err != nil {
+				s.logger.Warn("failed to cancel related tool call message",
+					zap.String("tool_call_id", toolCallID),
+					zap.String("pending_id", pendingID),
+					zap.Error(err))
+			}
+		}
+	}
+
 	s.logger.Info("permission message updated",
 		zap.String("message_id", message.ID),
 		zap.String("pending_id", pendingID),

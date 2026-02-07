@@ -23,7 +23,7 @@ type PermissionRequestMetadata = {
     path?: string;
     cwd?: string;
   };
-  status?: 'pending' | 'approved' | 'rejected';
+  status?: 'pending' | 'approved' | 'rejected' | 'expired';
 };
 
 type PermissionRequestMessageProps = {
@@ -34,7 +34,7 @@ export function PermissionRequestMessage({ comment }: PermissionRequestMessagePr
   const [isResponding, setIsResponding] = useState(false);
   const metadata = comment.metadata as PermissionRequestMetadata | undefined;
 
-  const isResolved = metadata?.status === 'approved' || metadata?.status === 'rejected';
+  const isResolved = metadata?.status === 'approved' || metadata?.status === 'rejected' || metadata?.status === 'expired';
   const isPending = !isResolved;
 
   const handleRespond = useCallback(
@@ -96,6 +96,13 @@ export function PermissionRequestMessage({ comment }: PermissionRequestMessagePr
       return (
         <span className="inline-flex items-center gap-1 text-xs text-red-600 dark:text-red-400">
           <IconX className="h-3 w-3" /> Rejected
+        </span>
+      );
+    }
+    if (metadata?.status === 'expired') {
+      return (
+        <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+          Expired
         </span>
       );
     }

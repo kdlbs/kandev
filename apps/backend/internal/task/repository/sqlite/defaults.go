@@ -112,9 +112,18 @@ func (r *Repository) ensureDefaultExecutorsAndEnvironments() error {
 			config    map[string]string
 		}{
 			{
-				id:        models.ExecutorIDLocalPC,
-				name:      "Local PC",
-				execType:  models.ExecutorTypeLocalPC,
+				id:        models.ExecutorIDLocal,
+				name:      "Local",
+				execType:  models.ExecutorTypeLocal,
+				status:    models.ExecutorStatusActive,
+				isSystem:  true,
+				resumable: true,
+				config:    map[string]string{},
+			},
+			{
+				id:        models.ExecutorIDWorktree,
+				name:      "Worktree",
+				execType:  models.ExecutorTypeWorktree,
 				status:    models.ExecutorStatusActive,
 				isSystem:  true,
 				resumable: true,
@@ -146,10 +155,13 @@ func (r *Repository) ensureDefaultExecutorsAndEnvironments() error {
 			}
 		}
 	} else {
-		if _, err := r.db.ExecContext(ctx, `
-			UPDATE executors SET is_system = 1 WHERE id = ?
-		`, models.ExecutorIDLocalPC); err != nil {
-			return err
+		// Ensure system executors have is_system flag set
+		for _, systemID := range []string{models.ExecutorIDLocal, models.ExecutorIDWorktree} {
+			if _, err := r.db.ExecContext(ctx, `
+				UPDATE executors SET is_system = 1 WHERE id = ?
+			`, systemID); err != nil {
+				return err
+			}
 		}
 	}
 

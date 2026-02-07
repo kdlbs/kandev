@@ -1,12 +1,13 @@
 'use client';
 
 import Link from 'next/link';
-import { IconChevronRight, IconCpu, IconServer } from '@tabler/icons-react';
+import { IconChevronRight, IconBrandDocker, IconCloud } from '@tabler/icons-react';
 import { Badge } from '@kandev/ui/badge';
 import { Card, CardContent } from '@kandev/ui/card';
 import { Separator } from '@kandev/ui/separator';
 import { useAppStore } from '@/components/state-provider';
 import type { Executor } from '@/lib/types/http';
+import { getExecutorIcon, getExecutorLabel } from '@/lib/executor-icons';
 
 export default function ExecutorsSettingsPage() {
   const executors = useAppStore((state) => state.executors.items);
@@ -16,7 +17,15 @@ export default function ExecutorsSettingsPage() {
       label: 'Local Docker',
       description: 'Run on the local Docker daemon.',
       href: '/settings/executor/new?type=local_docker',
-      icon: IconServer,
+      icon: IconBrandDocker,
+      enabled: true,
+    },
+    {
+      id: 'remote_docker',
+      label: 'Remote Docker',
+      description: 'Connect to a remote Docker host.',
+      href: '/settings/executor/new?type=remote_docker',
+      icon: IconCloud,
       enabled: true,
     },
   ];
@@ -78,22 +87,9 @@ export default function ExecutorsSettingsPage() {
       </div>
 
       <div className="grid gap-3">
-        {executors
-          .filter((executor: Executor) => executor.type !== 'remote_docker')
-          .map((executor: Executor) => {
-          const Icon = executor.type === 'local_pc' ? IconCpu : IconServer;
-          const typeLabel =
-            executor.type === 'local_pc'
-              ? 'Local PC'
-              : executor.type === 'local_docker'
-              ? 'Local Docker'
-              : executor.type === 'remote_docker'
-              ? 'Remote Docker'
-              : executor.type === 'remote_vps'
-              ? 'Remote Server'
-              : executor.type === 'k8s'
-              ? 'K8s'
-              : 'Remote';
+        {executors.map((executor: Executor) => {
+          const Icon = getExecutorIcon(executor.type);
+          const typeLabel = getExecutorLabel(executor.type);
           return (
             <Link key={executor.id} href={`/settings/executor/${executor.id}`}>
               <Card className="hover:bg-accent transition-colors cursor-pointer">
@@ -115,14 +111,19 @@ export default function ExecutorsSettingsPage() {
                             </Badge>
                           )}
                         </div>
-                        {executor.type === 'local_docker' && executor.config?.docker_host && (
+                        {(executor.type === 'local_docker' || executor.type === 'remote_docker') && executor.config?.docker_host && (
                           <div className="text-xs text-muted-foreground mt-1">
                             {executor.config.docker_host}
                           </div>
                         )}
-                        {executor.type === 'local_pc' && (
+                        {executor.type === 'local' && (
                           <div className="text-xs text-muted-foreground mt-1">
-                            Launches agents as local processes in the worktree folder set on the Local environment.
+                            Runs agents directly in the repository folder. No worktree isolation.
+                          </div>
+                        )}
+                        {executor.type === 'worktree' && (
+                          <div className="text-xs text-muted-foreground mt-1">
+                            Creates a git worktree for each session. Agents work in isolated branches.
                           </div>
                         )}
                       </div>

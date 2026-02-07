@@ -316,17 +316,16 @@ type RepositoryScript struct {
 type ExecutorType string
 
 const (
-	ExecutorTypeLocalPC      ExecutorType = "local_pc"
-	ExecutorTypeLocalDocker  ExecutorType = "local_docker"
+	ExecutorTypeLocal       ExecutorType = "local"
+	ExecutorTypeWorktree    ExecutorType = "worktree"
+	ExecutorTypeLocalDocker ExecutorType = "local_docker"
 	ExecutorTypeRemoteDocker ExecutorType = "remote_docker"
-	ExecutorTypeRemoteVPS    ExecutorType = "remote_vps"
-	ExecutorTypeK8s          ExecutorType = "k8s"
 )
 
 const (
-	ExecutorIDLocalPC      = "exec-local-pc"
-	ExecutorIDLocalDocker  = "exec-local-docker"
-	ExecutorIDRemoteDocker = "exec-remote-docker"
+	ExecutorIDLocal       = "exec-local"
+	ExecutorIDWorktree    = "exec-worktree"
+	ExecutorIDLocalDocker = "exec-local-docker"
 )
 
 // ExecutorStatus represents executor availability.

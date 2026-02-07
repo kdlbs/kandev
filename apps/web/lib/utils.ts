@@ -121,6 +121,12 @@ type BranchSelectionCandidate = {
 export function selectPreferredBranch(
     branches: BranchSelectionCandidate[]
 ): string | null {
+    const localMain = branches.find((branch) => branch.type === 'local' && branch.name === 'main');
+    if (localMain) return 'main';
+
+    const localMaster = branches.find((branch) => branch.type === 'local' && branch.name === 'master');
+    if (localMaster) return 'master';
+
     const originMain = branches.find(
         (branch) => branch.type === 'remote' && branch.remote === 'origin' && branch.name === 'main'
     );
@@ -131,17 +137,11 @@ export function selectPreferredBranch(
     );
     if (originMaster) return 'origin/master';
 
-    const localMain = branches.find((branch) => branch.type === 'local' && branch.name === 'main');
-    if (localMain) return 'main';
-
-    const localMaster = branches.find((branch) => branch.type === 'local' && branch.name === 'master');
-    if (localMaster) return 'master';
-
     return null;
 }
 
 export const DEFAULT_LOCAL_ENVIRONMENT_KIND = 'local_pc';
-export const DEFAULT_LOCAL_EXECUTOR_TYPE = 'local_pc';
+export const DEFAULT_LOCAL_EXECUTOR_TYPE = 'worktree';
 
 /**
  * Format a date string as a human-readable relative time (e.g., "2m ago", "1h ago", "yesterday").

@@ -218,6 +218,32 @@ export function SettingsAppSidebar() {
                   </SidebarMenuButton>
                 </SidebarMenuItem>
 
+                {/* Executors */}
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild tooltip="Executors">
+                    <Link href="/settings/executors">
+                      <IconCpu className="h-4 w-4" />
+                      <span>Executors</span>
+                    </Link>
+                  </SidebarMenuButton>
+                  {executors.length > 0 && (
+                    <SidebarMenuSub className="ml-3 mt-1">
+                      {executors.map((executor: Executor) => (
+                        <SidebarMenuSubItem key={executor.id}>
+                          <SidebarMenuSubButton
+                            asChild
+                            isActive={pathname === `/settings/executor/${executor.id}`}
+                          >
+                            <Link href={`/settings/executor/${executor.id}`}>
+                              <span>{executor.name}</span>
+                            </Link>
+                          </SidebarMenuSubButton>
+                        </SidebarMenuSubItem>
+                      ))}
+                    </SidebarMenuSub>
+                  )}
+                </SidebarMenuItem>
+
                 {/* Environments */}
                 <SidebarMenuItem>
                   <SidebarMenuButton asChild tooltip="Environments">
@@ -240,34 +266,6 @@ export function SettingsAppSidebar() {
                           </SidebarMenuSubButton>
                         </SidebarMenuSubItem>
                       ))}
-                    </SidebarMenuSub>
-                  )}
-                </SidebarMenuItem>
-
-                {/* Executors */}
-                <SidebarMenuItem>
-                  <SidebarMenuButton asChild tooltip="Executors">
-                    <Link href="/settings/executors">
-                      <IconCpu className="h-4 w-4" />
-                      <span>Executors</span>
-                    </Link>
-                  </SidebarMenuButton>
-                  {executors.filter((executor: Executor) => executor.type !== 'remote_docker').length > 0 && (
-                    <SidebarMenuSub className="ml-3 mt-1">
-                      {executors
-                        .filter((executor: Executor) => executor.type !== 'remote_docker')
-                        .map((executor: Executor) => (
-                          <SidebarMenuSubItem key={executor.id}>
-                            <SidebarMenuSubButton
-                              asChild
-                              isActive={pathname === `/settings/executor/${executor.id}`}
-                            >
-                              <Link href={`/settings/executor/${executor.id}`}>
-                                <span>{executor.name}</span>
-                              </Link>
-                            </SidebarMenuSubButton>
-                          </SidebarMenuSubItem>
-                        ))}
                     </SidebarMenuSub>
                   )}
                 </SidebarMenuItem>

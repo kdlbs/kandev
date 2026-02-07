@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, FormEvent, memo, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { IconSettings, IconLoader2 } from '@tabler/icons-react';
+import { IconLoader2, IconGitBranch } from '@tabler/icons-react';
 import {
   Dialog,
   DialogContent,
@@ -16,13 +16,6 @@ import { Label } from '@kandev/ui/label';
 import { Input } from '@kandev/ui/input';
 import { Textarea } from '@kandev/ui/textarea';
 import { Button } from '@kandev/ui/button';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@kandev/ui/select';
 import { Combobox } from './combobox';
 import { Badge } from '@kandev/ui/badge';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@kandev/ui/tooltip';
@@ -49,6 +42,7 @@ import { discoverRepositoriesAction, listLocalRepositoryBranchesAction } from '@
 import { getLocalStorage, setLocalStorage } from '@/lib/local-storage';
 import { STORAGE_KEYS } from '@/lib/settings/constants';
 import { linkToSession } from '@/lib/links';
+import { getExecutorIcon } from '@/lib/executor-icons';
 
 interface TaskCreateDialogProps {
   open: boolean;
@@ -93,6 +87,7 @@ type RepositorySelectorProps = {
   placeholder: string;
   searchPlaceholder: string;
   emptyMessage: string;
+  triggerClassName?: string;
 };
 
 const RepositorySelector = memo(function RepositorySelector({
@@ -103,6 +98,7 @@ const RepositorySelector = memo(function RepositorySelector({
   placeholder,
   searchPlaceholder,
   emptyMessage,
+  triggerClassName,
 }: RepositorySelectorProps) {
   return (
     <Combobox
@@ -115,6 +111,7 @@ const RepositorySelector = memo(function RepositorySelector({
       disabled={disabled}
       dropdownLabel="Repository"
       className={disabled ? undefined : 'cursor-pointer'}
+      triggerClassName={triggerClassName}
     />
   );
 });
@@ -192,9 +189,76 @@ const AgentSelector = memo(function AgentSelector({
   );
 });
 
+type ExecutorSelectorProps = {
+  options: Array<{ value: string; label: string; renderLabel?: () => React.ReactNode }>;
+  value: string;
+  onValueChange: (value: string) => void;
+  disabled: boolean;
+  placeholder: string;
+  triggerClassName?: string;
+};
+
+const ExecutorSelector = memo(function ExecutorSelector({
+  options,
+  value,
+  onValueChange,
+  disabled,
+  placeholder,
+  triggerClassName,
+}: ExecutorSelectorProps) {
+  return (
+    <Combobox
+      options={options}
+      value={value}
+      onValueChange={onValueChange}
+      placeholder={placeholder}
+      emptyMessage="No executor found."
+      disabled={disabled}
+      dropdownLabel="Executor"
+      className={disabled ? undefined : 'cursor-pointer'}
+      triggerClassName={triggerClassName}
+      showSearch={false}
+    />
+  );
+});
+
+type InlineTaskNameProps = {
+  value: string;
+  onChange: (value: string) => void;
+  autoFocus?: boolean;
+};
+
+const InlineTaskName = memo(function InlineTaskName({
+  value,
+  onChange,
+  autoFocus,
+}: InlineTaskNameProps) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (autoFocus && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [autoFocus]);
+
+  return (
+    <input
+      ref={inputRef}
+      type="text"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder="task-name"
+      size={Math.max(value.length, 9)}
+      className="bg-transparent border-none outline-none focus:ring-0 text-sm font-medium min-w-0 rounded-md px-1.5 py-0.5 -mx-1.5 hover:bg-muted focus:bg-muted transition-colors"
+    />
+  );
+});
+
 // Memoized text inputs to prevent re-rendering the entire dialog on every keystroke
 type TaskFormInputsProps = {
   isSessionMode: boolean;
+  showTitleInput: boolean;
   initialTitle: string;
   initialDescription: string;
   onTitleChange: (hasContent: boolean) => void;
@@ -206,6 +270,7 @@ type TaskFormInputsProps = {
 
 const TaskFormInputs = memo(function TaskFormInputs({
   isSessionMode,
+  showTitleInput,
   initialTitle,
   initialDescription,
   onTitleChange,
@@ -265,10 +330,9 @@ const TaskFormInputs = memo(function TaskFormInputs({
 
   return (
     <>
-      {!isSessionMode && (
+      {showTitleInput && !isSessionMode && (
         <div>
           <Input
-            autoFocus
             required
             placeholder="Enter task title..."
             value={title}
@@ -277,29 +341,15 @@ const TaskFormInputs = memo(function TaskFormInputs({
           />
         </div>
       )}
-      {isSessionMode && (
-        <div>
-          <Label htmlFor="task-title">Task</Label>
-          <Input
-            id="task-title"
-            value={title}
-            disabled
-            placeholder="Task"
-            className="bg-muted cursor-not-allowed mt-1.5"
-          />
-        </div>
-      )}
       <div>
-        {isSessionMode && <Label htmlFor="prompt">Prompt</Label>}
         <Textarea
-          id={isSessionMode ? 'prompt' : undefined}
           ref={textareaRef}
           placeholder={isSessionMode ? 'Describe what you want the agent to do...' : 'Write a prompt for the agent...'}
           value={description}
           onChange={handleDescriptionChange}
           onKeyDown={onKeyDown}
           rows={2}
-          className={isSessionMode ? 'min-h-[120px] max-h-[240px] resize-none overflow-auto mt-1.5' : 'min-h-[96px] max-h-[240px] resize-y overflow-auto'}
+          className={isSessionMode ? 'min-h-[120px] max-h-[240px] resize-none overflow-auto' : 'min-h-[96px] max-h-[240px] resize-y overflow-auto'}
           required={isSessionMode}
         />
       </div>
@@ -326,8 +376,10 @@ export function TaskCreateDialog({
   const router = useRouter();
   const isSessionMode = mode === 'session';
   const isEditMode = submitLabel !== 'Create';
+  const isCreateMode = !isEditMode && !isSessionMode;
   const [isCreatingSession, setIsCreatingSession] = useState(false);
   const [isCreatingTask, setIsCreatingTask] = useState(false);
+  const [taskName, setTaskName] = useState('');
   // Track only whether inputs have content (not the actual values) to minimize re-renders
   const [hasTitle, setHasTitle] = useState(Boolean(initialValues?.title?.trim()));
   const [hasDescription, setHasDescription] = useState(Boolean(initialValues?.description?.trim()));
@@ -340,7 +392,6 @@ export function TaskCreateDialog({
   const [agentProfileId, setAgentProfileId] = useState('');
   const [environmentId, setEnvironmentId] = useState('');
   const [executorId, setExecutorId] = useState('');
-  const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
   const [discoveredRepositories, setDiscoveredRepositories] = useState<LocalRepository[]>([]);
   const [discoveredRepoPath, setDiscoveredRepoPath] = useState('');
   const [selectedLocalRepo, setSelectedLocalRepo] = useState<LocalRepository | null>(null);
@@ -353,6 +404,21 @@ export function TaskCreateDialog({
   const executors = useAppStore((state) => state.executors.items);
   const environments = useAppStore((state) => state.environments.items);
   const settingsData = useAppStore((state) => state.settingsData);
+  // Derive repository name from store for session mode header
+  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
+  const kanbanTasks = useAppStore((state) => state.kanban.tasks);
+  const reposByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
+  const sessionRepoName = useMemo(() => {
+    if (!isSessionMode) return undefined;
+    const activeTask = activeTaskId ? kanbanTasks.find((t) => t.id === activeTaskId) : null;
+    const repoId = activeTask?.repositoryId;
+    if (!repoId) return undefined;
+    for (const repos of Object.values(reposByWorkspace)) {
+      const repo = repos.find((r) => r.id === repoId);
+      if (repo) return repo.name;
+    }
+    return undefined;
+  }, [isSessionMode, activeTaskId, kanbanTasks, reposByWorkspace]);
   const { toast } = useToast();
   useSettingsData(open);
   const { repositories, isLoading: repositoriesLoading } = useRepositories(workspaceId, open);
@@ -361,12 +427,17 @@ export function TaskCreateDialog({
     Boolean(open && repositoryId)
   );
   const agentProfilesLoading = open && !settingsData.agentsLoaded;
-  const environmentsLoading = open && !settingsData.environmentsLoaded;
   const executorsLoading = open && !settingsData.executorsLoaded;
 
   useEffect(() => {
     if (!open) return;
-    setHasTitle(Boolean(initialValues?.title?.trim()));
+    if (isCreateMode) {
+      const name = initialValues?.title || '';
+      setTaskName(name);
+      setHasTitle(name.trim().length > 0);
+    } else {
+      setHasTitle(Boolean(initialValues?.title?.trim()));
+    }
     setHasDescription(Boolean(initialValues?.description?.trim()));
     setRepositoryId(initialValues?.repositoryId ?? '');
     setBranch(initialValues?.branch ?? '');
@@ -375,6 +446,7 @@ export function TaskCreateDialog({
     setEnvironmentId('');
     setExecutorId('');
   }, [
+    isCreateMode,
     isEditMode,
     initialValues?.branch,
     initialValues?.description,
@@ -495,6 +567,12 @@ export function TaskCreateDialog({
     setLocalStorage(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, value);
   }, []);
 
+  // Memoized callback for InlineTaskName
+  const handleTaskNameChange = useCallback((value: string) => {
+    setTaskName(value);
+    setHasTitle(value.trim().length > 0);
+  }, []);
+
   // Memoized callback for BranchSelector to save selection to localStorage
   const handleBranchChange = useCallback((value: string) => {
     setBranch(value);
@@ -550,6 +628,16 @@ export function TaskCreateDialog({
     ];
   }, [repositories, discoveredRepositories]);
 
+  // Header-only repository options: name only, no path badge
+  const headerRepositoryOptions = useMemo(() => {
+    return repositoryOptions.map((opt) => ({
+      ...opt,
+      renderLabel: () => (
+        <span className="truncate">{opt.label}</span>
+      ),
+    }));
+  }, [repositoryOptions]);
+
   // Memoize branch options to prevent re-renders when typing
   const branchOptions = useMemo(() => {
     return branchOptionsRaw.map((branchObj: Branch) => {
@@ -562,10 +650,13 @@ export function TaskCreateDialog({
         label: displayName,
         renderLabel: () => (
           <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
-            <span className="truncate" title={displayName}>
-              {displayName}
+            <span className="flex min-w-0 items-center gap-1.5">
+              <IconGitBranch className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              <span className="truncate" title={displayName}>
+                {displayName}
+              </span>
             </span>
-            <Badge variant={branchObj.type === 'local' ? 'default' : 'secondary'} className="text-xs">
+            <Badge variant="outline" className="text-xs">
               {branchObj.type === 'local' ? 'local' : branchObj.remote || 'remote'}
             </Badge>
           </span>
@@ -587,7 +678,7 @@ export function TaskCreateDialog({
           <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
             <span className="truncate">{agentLabel}</span>
             {profileLabel ? (
-              <Badge variant="secondary" className="text-xs">
+              <Badge variant="outline" className="text-xs">
                 {profileLabel}
               </Badge>
             ) : null}
@@ -596,6 +687,29 @@ export function TaskCreateDialog({
       };
     });
   }, [agentProfiles]);
+
+  const executorOptions = useMemo(() => {
+    return executors.map((executor: Executor) => {
+      const Icon = getExecutorIcon(executor.type);
+      return {
+        value: executor.id,
+        label: executor.name,
+        renderLabel: () => (
+          <span className="flex min-w-0 flex-1 items-center gap-2">
+            <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <span className="truncate">{executor.name}</span>
+          </span>
+        ),
+      };
+    });
+  }, [executors]);
+
+  const executorHint = useMemo(() => {
+    const selectedExecutor = executors.find((e: Executor) => e.id === executorId);
+    if (selectedExecutor?.type === 'worktree') return 'A git worktree will be created from the base branch.';
+    if (selectedExecutor?.type === 'local') return 'The agent will run directly on the repository.';
+    return null;
+  }, [executors, executorId]);
 
   useEffect(() => {
     if (!open || !workspaceId || !selectedLocalRepo) return;
@@ -719,7 +833,6 @@ export function TaskCreateDialog({
         setAgentProfileId('');
         setExecutorId('');
         setEnvironmentId('');
-        setShowAdvancedSettings(false);
         onOpenChange(false);
         return;
       }
@@ -760,7 +873,6 @@ export function TaskCreateDialog({
         setAgentProfileId('');
         setExecutorId('');
         setEnvironmentId('');
-        setShowAdvancedSettings(false);
 
         // Navigate to the new session (this will unmount the dialog)
         if (newSessionId) {
@@ -781,7 +893,9 @@ export function TaskCreateDialog({
     }
 
     // Task mode - create or edit task
-    const trimmedTitle = title.trim();
+    const trimmedTitle = isEditMode
+      ? title.trim()
+      : taskName.trim();
     if (!trimmedTitle) return;
     if (isEditMode && editingTask) {
       try {
@@ -891,6 +1005,7 @@ export function TaskCreateDialog({
       // Reset form and close dialog
       setHasTitle(false);
       setHasDescription(false);
+      setTaskName('');
       setRepositoryId('');
       setBranch('');
       setStartAgent(!isEditMode);
@@ -918,6 +1033,7 @@ export function TaskCreateDialog({
   const handleCancel = () => {
     setHasTitle(false);
     setHasDescription(false);
+    setTaskName('');
     setRepositoryId('');
     setBranch('');
     setStartAgent(!isEditMode);
@@ -931,15 +1047,57 @@ export function TaskCreateDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="w-full h-full max-w-full max-h-full rounded-none sm:w-[900px] sm:h-auto sm:max-w-none sm:max-h-[85vh] sm:rounded-lg flex flex-col bg-card">
         <DialogHeader>
-          <DialogTitle>
-            {isSessionMode ? 'Create New Session' : submitLabel === 'Create' ? 'Create Task' : 'Edit Task'}
-          </DialogTitle>
+          {isCreateMode ? (
+            <DialogTitle asChild>
+              <div className="flex items-center gap-1 min-w-0 text-sm font-medium">
+                <RepositorySelector
+                  options={headerRepositoryOptions}
+                  value={repositoryId || discoveredRepoPath}
+                  onValueChange={handleRepositoryChange}
+                  placeholder={
+                    !workspaceId
+                      ? 'Select workspace first'
+                      : repositoriesLoading || discoverReposLoading
+                        ? 'Loading...'
+                        : 'Select repository'
+                  }
+                  searchPlaceholder="Search repositories..."
+                  emptyMessage={
+                    repositoriesLoading || discoverReposLoading
+                      ? 'Loading repositories...'
+                      : 'No repositories found.'
+                  }
+                  disabled={!workspaceId || repositoriesLoading || discoverReposLoading}
+                  triggerClassName="w-auto text-sm"
+                />
+                <span className="text-muted-foreground mr-2">/</span>
+                <InlineTaskName value={taskName} onChange={handleTaskNameChange} autoFocus />
+              </div>
+            </DialogTitle>
+          ) : isSessionMode ? (
+            <DialogTitle asChild>
+              <div className="flex items-center gap-1 min-w-0 text-sm font-medium">
+                {sessionRepoName && (
+                  <>
+                    <span className="truncate text-muted-foreground">{sessionRepoName}</span>
+                    <span className="text-muted-foreground mx-0.5">/</span>
+                  </>
+                )}
+                <span className="truncate">{initialValues?.title || 'Task'}</span>
+                <span className="text-muted-foreground mx-0.5">/</span>
+                <span className="text-muted-foreground whitespace-nowrap">new session</span>
+              </div>
+            </DialogTitle>
+          ) : (
+            <DialogTitle>Edit Task</DialogTitle>
+          )}
         </DialogHeader>
         <form onSubmit={handleSubmit} className="flex flex-col gap-4 overflow-hidden">
           <div className="flex-1 space-y-4 overflow-y-auto pr-1">
             <TaskFormInputs
               key={`${open}-${initialValues?.title ?? ''}-${initialValues?.description ?? ''}`}
               isSessionMode={isSessionMode}
+              showTitleInput={isEditMode}
               initialTitle={initialValues?.title ?? ''}
               initialDescription={initialValues?.description ?? ''}
               onTitleChange={setHasTitle}
@@ -949,28 +1107,30 @@ export function TaskCreateDialog({
               descriptionValueRef={descriptionInputRef}
             />
             {!isSessionMode && (
-              <div className="grid gap-4 grid-cols-1 sm:grid-cols-3">
-                <div>
-                  <RepositorySelector
-                    options={repositoryOptions}
-                    value={repositoryId || discoveredRepoPath}
-                    onValueChange={handleRepositoryChange}
-                    placeholder={
-                      !workspaceId
-                        ? 'Select workspace first'
-                        : repositoriesLoading || discoverReposLoading
+              <div className={`grid gap-4 grid-cols-1 ${isEditMode ? 'sm:grid-cols-4' : 'sm:grid-cols-3'}`}>
+                {isEditMode && (
+                  <div>
+                    <RepositorySelector
+                      options={repositoryOptions}
+                      value={repositoryId || discoveredRepoPath}
+                      onValueChange={handleRepositoryChange}
+                      placeholder={
+                        !workspaceId
+                          ? 'Select workspace first'
+                          : repositoriesLoading || discoverReposLoading
+                            ? 'Loading repositories...'
+                            : 'Select repository'
+                      }
+                      searchPlaceholder="Search repositories..."
+                      emptyMessage={
+                        repositoriesLoading || discoverReposLoading
                           ? 'Loading repositories...'
-                          : 'Select repository'
-                    }
-                    searchPlaceholder="Search repositories..."
-                    emptyMessage={
-                      repositoriesLoading || discoverReposLoading
-                        ? 'Loading repositories...'
-                        : 'No repositories found.'
-                    }
-                    disabled={!workspaceId || repositoriesLoading || discoverReposLoading || isEditMode}
-                  />
-                </div>
+                          : 'No repositories found.'
+                      }
+                      disabled={!workspaceId || repositoriesLoading || discoverReposLoading || isEditMode}
+                    />
+                  </div>
+                )}
                 <div>
                   <BranchSelector
                     options={branchOptions}
@@ -1025,139 +1185,44 @@ export function TaskCreateDialog({
                     )}
                   </div>
                 )}
+                {startAgent && (
+                  <div>
+                    <ExecutorSelector
+                      options={executorOptions}
+                      value={executorId}
+                      onValueChange={setExecutorId}
+                      placeholder={
+                        executorsLoading
+                          ? 'Loading executors...'
+                          : 'Select executor'
+                      }
+                      disabled={executorsLoading || isEditMode}
+                    />
+                  </div>
+                )}
               </div>
             )}
 
-            {/* Agent Profile - shown in session mode */}
+            {/* Agent Profile + Executor - shown in session mode */}
             {isSessionMode && (
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <AgentSelector
-                    options={agentProfileOptions}
-                    value={agentProfileId}
-                    onValueChange={handleAgentProfileChange}
-                    placeholder={agentProfilesLoading ? 'Loading agent profiles...' : 'Select agent profile'}
-                    disabled={agentProfilesLoading || isCreatingSession}
-                    triggerClassName="w-[280px]"
-                  />
-                </div>
-
-                {/* More Options Toggle */}
-                <button
-                  type="button"
-                  onClick={() => setShowAdvancedSettings(!showAdvancedSettings)}
-                  className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors cursor-pointer whitespace-nowrap"
-                >
-                  <IconSettings className="h-4 w-4" />
-                  More options
-                </button>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <AgentSelector
+                  options={agentProfileOptions}
+                  value={agentProfileId}
+                  onValueChange={handleAgentProfileChange}
+                  placeholder={agentProfilesLoading ? 'Loading agent profiles...' : 'Select agent profile'}
+                  disabled={agentProfilesLoading || isCreatingSession}
+                />
+                <ExecutorSelector
+                  options={executorOptions}
+                  value={executorId}
+                  onValueChange={setExecutorId}
+                  placeholder={executorsLoading ? 'Loading executors...' : 'Select executor'}
+                  disabled={executorsLoading || isCreatingSession}
+                />
               </div>
             )}
 
-            {!isSessionMode && startAgent && (
-              <div className="flex items-center justify-end gap-2">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setShowAdvancedSettings(!showAdvancedSettings)}
-                  className="text-muted-foreground cursor-pointer"
-                >
-                  <IconSettings className="h-4 w-4 mr-1" />
-                  {showAdvancedSettings ? 'Hide' : 'More Options'}
-                </Button>
-              </div>
-            )}
-            {showAdvancedSettings && isSessionMode && (
-              <div className="pt-2 border-t">
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="flex items-center gap-3">
-                    <Label htmlFor="environment" className="text-sm whitespace-nowrap">
-                      Environment
-                    </Label>
-                    <Select value={environmentId} onValueChange={setEnvironmentId}>
-                      <SelectTrigger id="environment" className="w-full">
-                        <SelectValue placeholder={environmentsLoading ? 'Loading environments...' : 'Select environment'} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {environments.map((env: Environment) => (
-                          <SelectItem key={env.id} value={env.id}>
-                            {env.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <Label htmlFor="executor" className="text-sm whitespace-nowrap">
-                      Executor
-                    </Label>
-                    <Select value={executorId} onValueChange={setExecutorId}>
-                      <SelectTrigger id="executor" className="w-full">
-                        <SelectValue placeholder={executorsLoading ? 'Loading executors...' : 'Select executor'} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {executors.map((executor: Executor) => (
-                          <SelectItem key={executor.id} value={executor.id}>
-                            {executor.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-              </div>
-            )}
-            {showAdvancedSettings && !isSessionMode && startAgent && (
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="flex items-center gap-3">
-                  <Label className="text-sm whitespace-nowrap">Environment</Label>
-                  <Select value={environmentId} onValueChange={setEnvironmentId} disabled={isEditMode}>
-                    <SelectTrigger className="w-full">
-                      <SelectValue
-                        placeholder={
-                          environmentsLoading
-                            ? 'Loading environments...'
-                            : environments.length === 0
-                              ? 'No environments available'
-                              : 'Select environment'
-                        }
-                      />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {environments.map((environment: Environment) => (
-                        <SelectItem key={environment.id} value={environment.id}>
-                          {environment.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="flex items-center gap-3">
-                  <Label className="text-sm whitespace-nowrap">Executor</Label>
-                  <Select value={executorId} onValueChange={setExecutorId} disabled={isEditMode}>
-                    <SelectTrigger className="w-full">
-                      <SelectValue
-                        placeholder={
-                          executorsLoading
-                            ? 'Loading executors...'
-                            : executors.length === 0
-                              ? 'No executors available'
-                              : 'Select executor'
-                        }
-                      />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {executors.map((executor: Executor) => (
-                        <SelectItem key={executor.id} value={executor.id}>
-                          {executor.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            )}
           </div>
           <DialogFooter className="border-t border-border pt-3 flex-col gap-3 sm:flex-row sm:gap-2">
             {!isSessionMode && (
@@ -1185,9 +1250,9 @@ export function TaskCreateDialog({
                     </Tooltip>
                   </TooltipProvider>
                 </div>
-                {startAgent && (
+                {startAgent && executorHint && (
                   <span className="text-xs text-muted-foreground">
-                    A git worktree will be created from the base branch.
+                    {executorHint}
                   </span>
                 )}
               </div>

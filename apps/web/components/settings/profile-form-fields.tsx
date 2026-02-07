@@ -1,11 +1,9 @@
 'use client';
 
-import { Badge } from '@kandev/ui/badge';
 import { Button } from '@kandev/ui/button';
 import { Input } from '@kandev/ui/input';
 import { Label } from '@kandev/ui/label';
 import { Switch } from '@kandev/ui/switch';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
 import { ModelCombobox } from '@/components/settings/model-combobox';
 import type { ModelConfig, PermissionSetting, PassthroughConfig } from '@/lib/types/http';
 

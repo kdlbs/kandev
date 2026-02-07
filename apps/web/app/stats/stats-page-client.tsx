@@ -484,7 +484,7 @@ type CompletionBucket = 'day' | 'week' | 'month';
 
 function CompletedTasksChart({ completedActivity }: { completedActivity: CompletedTaskActivityDTO[] }) {
   const [bucket, setBucket] = useState<CompletionBucket>('day');
-  const safeCompleted = completedActivity ?? [];
+  const safeCompleted = useMemo(() => completedActivity ?? [], [completedActivity]);
 
   const series = useMemo(() => {
     if (safeCompleted.length === 0) {
@@ -602,7 +602,7 @@ function CompletedTasksChart({ completedActivity }: { completedActivity: Complet
 }
 
 function MostProductiveSummary({ completedActivity }: { completedActivity: CompletedTaskActivityDTO[] }) {
-  const safeCompleted = completedActivity ?? [];
+  const safeCompleted = useMemo(() => completedActivity ?? [], [completedActivity]);
 
   const stats = useMemo(() => {
     if (safeCompleted.length === 0) {
