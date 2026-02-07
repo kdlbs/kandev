@@ -70,6 +70,7 @@ apps/backend/bin/
 # Go binaries (built locally)
 apps/backend/kandev
 apps/backend/agentctl
+apps/backend/mock-agent
 
 # Next.js
 .next/
