@@ -135,6 +135,7 @@ func (p *EventPublisher) PublishAgentStreamEvent(execution *AgentExecution, even
 		Text:              event.Text,
 		ToolCallID:        event.ToolCallID,
 		ParentToolCallID:  event.ParentToolCallID,
+		PendingID:         event.PendingID,
 		ToolName:          event.ToolName,
 		ToolTitle:         event.ToolTitle,
 		ToolStatus:        event.ToolStatus,

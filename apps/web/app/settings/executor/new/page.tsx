@@ -14,7 +14,7 @@ import { getWebSocketClient } from '@/lib/ws/connection';
 import { useAppStore } from '@/components/state-provider';
 import type { Executor } from '@/lib/types/http';
 
-const EXECUTOR_TYPES = ['local_docker'] as const;
+const EXECUTOR_TYPES = ['local_docker', 'remote_docker'] as const;
 type ExecutorType = (typeof EXECUTOR_TYPES)[number];
 
 export default function ExecutorCreatePage() {
@@ -35,23 +35,46 @@ function ExecutorCreatePageContent() {
     }
     return 'local_docker';
   });
-  const [name, setName] = useState('Local Docker');
-  const [dockerHost, setDockerHost] = useState('unix:///var/run/docker.sock');
+  const [name, setName] = useState(() => {
+    if (initialType === 'remote_docker') return 'Remote Docker';
+    return 'Local Docker';
+  });
+  const [dockerHost, setDockerHost] = useState(() => {
+    if (initialType === 'remote_docker') return 'tcp://';
+    return 'unix:///var/run/docker.sock';
+  });
+  const [dockerTlsVerify, setDockerTlsVerify] = useState('');
+  const [dockerCertPath, setDockerCertPath] = useState('');
+  const [gitToken, setGitToken] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const executors = useAppStore((state) => state.executors.items);
   const setExecutors = useAppStore((state) => state.setExecutors);
 
-  const handleCreate = async () => {
-    if (type !== 'local_docker') {
-      return;
+  const handleTypeChange = (value: ExecutorType) => {
+    setType(value);
+    if (value === 'local_docker') {
+      setName('Local Docker');
+      setDockerHost('unix:///var/run/docker.sock');
+    } else if (value === 'remote_docker') {
+      setName('Remote Docker');
+      setDockerHost('tcp://');
     }
+  };
+
+  const handleCreate = async () => {
     setIsCreating(true);
     try {
+      const config: Record<string, string> = { docker_host: dockerHost };
+      if (type === 'remote_docker') {
+        if (dockerTlsVerify) config.docker_tls_verify = dockerTlsVerify;
+        if (dockerCertPath) config.docker_cert_path = dockerCertPath;
+        if (gitToken) config.git_token = gitToken;
+      }
       const payload = {
         name,
         type,
         status: 'active',
-        config: { docker_host: dockerHost },
+        config,
       };
       const client = getWebSocketClient();
       const created = client
@@ -63,6 +86,8 @@ function ExecutorCreatePageContent() {
       setIsCreating(false);
     }
   };
+
+  const isRemoteDocker = type === 'remote_docker';
 
   return (
     <div className="space-y-8">
@@ -78,24 +103,25 @@ function ExecutorCreatePageContent() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            {type === 'local_docker' ? <IconServer className="h-4 w-4" /> : <IconCloud className="h-4 w-4" />}
-            {type === 'local_docker' ? 'Local Docker Executor' : 'Remote Docker Executor'}
+            {isRemoteDocker ? <IconCloud className="h-4 w-4" /> : <IconServer className="h-4 w-4" />}
+            {isRemoteDocker ? 'Remote Docker Executor' : 'Local Docker Executor'}
           </CardTitle>
           <CardDescription>
-            {type === 'local_docker'
-              ? 'Uses the local Docker daemon on this machine.'
-              : 'Connects to a remote Docker host (coming soon).'}
+            {isRemoteDocker
+              ? 'Connects to a remote Docker host. The repository will be cloned inside the container.'
+              : 'Uses the local Docker daemon on this machine.'}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="executor-type">Executor type</Label>
-            <Select value={type} onValueChange={(value) => setType(value as ExecutorType)}>
+            <Select value={type} onValueChange={(value) => handleTypeChange(value as ExecutorType)}>
               <SelectTrigger id="executor-type">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="local_docker">Local Docker</SelectItem>
+                <SelectItem value="remote_docker">Remote Docker</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -108,18 +134,60 @@ function ExecutorCreatePageContent() {
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="docker-host">Docker host env value</Label>
+            <Label htmlFor="docker-host">Docker host</Label>
             <Input
               id="docker-host"
               value={dockerHost}
               onChange={(event) => setDockerHost(event.target.value)}
-              placeholder="unix:///var/run/docker.sock"
-              disabled={type !== 'local_docker'}
+              placeholder={isRemoteDocker ? 'tcp://remote:2376 or ssh://user@host' : 'unix:///var/run/docker.sock'}
             />
             <p className="text-xs text-muted-foreground">
-              Repositories will be mounted as volumes at runtime.
+              {isRemoteDocker
+                ? 'The remote Docker host URL (tcp://, ssh://).'
+                : 'Repositories will be mounted as volumes at runtime.'}
             </p>
           </div>
+          {isRemoteDocker && (
+            <>
+              <div className="space-y-2">
+                <Label htmlFor="docker-tls-verify">TLS verify</Label>
+                <Select value={dockerTlsVerify} onValueChange={setDockerTlsVerify}>
+                  <SelectTrigger id="docker-tls-verify">
+                    <SelectValue placeholder="Default (no TLS)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="1">Enabled</SelectItem>
+                    <SelectItem value="0">Disabled</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="docker-cert-path">TLS certificate path</Label>
+                <Input
+                  id="docker-cert-path"
+                  value={dockerCertPath}
+                  onChange={(event) => setDockerCertPath(event.target.value)}
+                  placeholder="/path/to/certs"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Path to TLS certificates for the Docker host.
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="git-token">Git token (optional)</Label>
+                <Input
+                  id="git-token"
+                  type="password"
+                  value={gitToken}
+                  onChange={(event) => setGitToken(event.target.value)}
+                  placeholder="ghp_..."
+                />
+                <p className="text-xs text-muted-foreground">
+                  Personal access token for cloning repositories inside the container. Auto-detected from host environment if not set.
+                </p>
+              </div>
+            </>
+          )}
         </CardContent>
       </Card>
 
@@ -127,7 +195,7 @@ function ExecutorCreatePageContent() {
         <Button variant="outline" onClick={() => router.push('/settings/executors')}>
           Cancel
         </Button>
-        <Button onClick={handleCreate} disabled={isCreating || type !== 'local_docker'}>
+        <Button onClick={handleCreate} disabled={isCreating}>
           {isCreating ? 'Creating...' : 'Create Executor'}
         </Button>
       </div>

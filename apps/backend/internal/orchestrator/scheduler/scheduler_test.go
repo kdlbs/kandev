@@ -144,9 +144,7 @@ func createTestExecutor(t *testing.T, agentMgr *mockAgentManager, log *logger.Lo
 			t.Errorf("failed to close repo: %v", err)
 		}
 	})
-	cfg := executor.ExecutorConfig{
-		WorktreeEnabled: true,
-	}
+	cfg := executor.ExecutorConfig{}
 	return executor.NewExecutor(agentMgr, repo, log, cfg)
 }
 

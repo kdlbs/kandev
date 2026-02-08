@@ -118,7 +118,8 @@ type LaunchRequest struct {
 	ModelOverride   string // If set, use this model instead of the profile's model
 
 	// Executor configuration - determines which runtime to use
-	ExecutorType string // Executor type (e.g., "local_pc", "local_docker") - determines runtime
+	ExecutorType   string            // Executor type (e.g., "local", "worktree", "local_docker") - determines runtime
+	ExecutorConfig map[string]string // Executor config (docker_host, git_token, etc.)
 
 	// Worktree configuration
 	UseWorktree          bool   // Whether to use a Git worktree for isolation

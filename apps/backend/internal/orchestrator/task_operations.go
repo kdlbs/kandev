@@ -644,6 +644,15 @@ func (s *Service) RespondToPermission(ctx context.Context, sessionID, pendingID,
 
 	// Respond to the permission via agentctl
 	if err := s.executor.RespondToPermission(ctx, sessionID, pendingID, optionID, cancelled); err != nil {
+		// Permission likely expired — update message so frontend reflects this
+		if s.messageCreator != nil {
+			if updateErr := s.messageCreator.UpdatePermissionMessage(ctx, sessionID, pendingID, "expired"); updateErr != nil {
+				s.logger.Warn("failed to mark expired permission message",
+					zap.String("session_id", sessionID),
+					zap.String("pending_id", pendingID),
+					zap.Error(updateErr))
+			}
+		}
 		return err
 	}
 

@@ -39,17 +39,15 @@ var (
 
 // ServiceConfig holds orchestrator service configuration
 type ServiceConfig struct {
-	Scheduler       scheduler.SchedulerConfig
-	QueueSize       int
-	WorktreeEnabled bool // Whether to use Git worktrees for agent isolation
+	Scheduler scheduler.SchedulerConfig
+	QueueSize int
 }
 
 // DefaultServiceConfig returns default configuration
 func DefaultServiceConfig() ServiceConfig {
 	return ServiceConfig{
-		Scheduler:       scheduler.DefaultSchedulerConfig(),
-		QueueSize:       1000,
-		WorktreeEnabled: true,
+		Scheduler: scheduler.DefaultSchedulerConfig(),
+		QueueSize: 1000,
 	}
 }
 
@@ -197,8 +195,7 @@ func NewService(
 
 	// Create the executor with the agent manager client and repository for persistent sessions
 	execCfg := executor.ExecutorConfig{
-		WorktreeEnabled: cfg.WorktreeEnabled,
-		ShellPrefs:      shellPrefs,
+		ShellPrefs: shellPrefs,
 	}
 	exec := executor.NewExecutor(agentManager, repo, log, execCfg)
 

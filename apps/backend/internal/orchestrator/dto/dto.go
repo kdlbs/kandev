@@ -46,7 +46,7 @@ type StartTaskRequest struct {
 	TaskID         string `json:"task_id"`
 	SessionID      string `json:"session_id,omitempty"`       // If provided, resume this existing session instead of creating new
 	AgentProfileID string `json:"agent_profile_id,omitempty"` // Required when creating new session (SessionID not provided)
-	ExecutorID     string `json:"executor_id,omitempty"`      // Executor to use (determines runtime: local_pc, local_docker, etc.)
+	ExecutorID     string `json:"executor_id,omitempty"`      // Executor to use (determines runtime: local, worktree, local_docker, etc.)
 	Priority       int    `json:"priority,omitempty"`
 	Prompt         string `json:"prompt,omitempty"`           // Initial prompt to send to the agent
 	WorkflowStepID string `json:"workflow_step_id,omitempty"` // If provided, prompt prefix/suffix and plan mode are applied from the step

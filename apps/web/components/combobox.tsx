@@ -1,7 +1,7 @@
 "use client"
 
 import { memo, useState } from "react"
-import { IconCheck, IconSelector } from "@tabler/icons-react"
+import { IconCheck, IconChevronDown } from "@tabler/icons-react"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@kandev/ui/button"
@@ -37,6 +37,7 @@ interface ComboboxProps {
   disabled?: boolean
   className?: string
   triggerClassName?: string
+  showSearch?: boolean
 }
 
 export const Combobox = memo(function Combobox({
@@ -50,6 +51,7 @@ export const Combobox = memo(function Combobox({
   disabled = false,
   className,
   triggerClassName,
+  showSearch = true,
 }: ComboboxProps) {
   const [open, setOpen] = useState(false)
 
@@ -59,7 +61,7 @@ export const Combobox = memo(function Combobox({
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button
-          variant="outline"
+          variant="ghost"
           role="combobox"
           aria-expanded={open}
           className={cn("w-full justify-between", !disabled && "cursor-pointer", triggerClassName)}
@@ -72,17 +74,17 @@ export const Combobox = memo(function Combobox({
               <span className="truncate">{selectedOption?.label || placeholder}</span>
             )}
           </div>
-          <IconSelector className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+          <IconChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className={cn("w-[var(--radix-popover-trigger-width)] max-w-none p-0", className)} align="start">
+      <PopoverContent className={cn("w-[var(--radix-popover-trigger-width)] min-w-[300px] max-w-none p-0", className)} align="start">
         <Command>
           {dropdownLabel ? (
             <div className="text-muted-foreground px-2 py-1.5 text-xs border-b">
               {dropdownLabel}
             </div>
           ) : null}
-          <CommandInput placeholder={searchPlaceholder} className="h-9" />
+          {showSearch && <CommandInput placeholder={searchPlaceholder} className="h-9" />}
           <CommandList>
             <CommandEmpty>{emptyMessage}</CommandEmpty>
             <CommandGroup>

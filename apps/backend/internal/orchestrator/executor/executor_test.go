@@ -456,8 +456,7 @@ func newTestExecutor(t *testing.T, agentManager AgentManagerClient, repo *mockRe
 		t.Fatalf("failed to create logger: %v", err)
 	}
 	return NewExecutor(agentManager, repo, log, ExecutorConfig{
-		WorktreeEnabled: true,
-		ShellPrefs:      &mockShellPrefs{},
+		ShellPrefs: &mockShellPrefs{},
 	})
 }
 
@@ -693,5 +692,79 @@ func TestExecuteWithProfile_UsesPrepareThenLaunch(t *testing.T) {
 
 	if execution.TaskID != task.ID {
 		t.Errorf("Expected task ID %s, got %s", task.ID, execution.TaskID)
+	}
+}
+
+func TestShouldUseWorktree(t *testing.T) {
+	tests := []struct {
+		executorType string
+		want         bool
+	}{
+		{"worktree", true},
+		{"local", false},
+		{"local_docker", false},
+		{"remote_docker", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		if got := shouldUseWorktree(tt.executorType); got != tt.want {
+			t.Errorf("shouldUseWorktree(%q) = %v, want %v", tt.executorType, got, tt.want)
+		}
+	}
+}
+
+func TestRepositoryCloneURL(t *testing.T) {
+	tests := []struct {
+		name     string
+		repo     *models.Repository
+		want     string
+	}{
+		{
+			name: "github repo",
+			repo: &models.Repository{Provider: "github", ProviderOwner: "acme", ProviderName: "app"},
+			want: "https://github.com/acme/app.git",
+		},
+		{
+			name: "gitlab repo",
+			repo: &models.Repository{Provider: "gitlab", ProviderOwner: "acme", ProviderName: "app"},
+			want: "https://gitlab.com/acme/app.git",
+		},
+		{
+			name: "bitbucket repo",
+			repo: &models.Repository{Provider: "bitbucket", ProviderOwner: "acme", ProviderName: "app"},
+			want: "https://bitbucket.org/acme/app.git",
+		},
+		{
+			name: "unknown provider returns empty",
+			repo: &models.Repository{Provider: "custom", ProviderOwner: "acme", ProviderName: "app"},
+			want: "",
+		},
+		{
+			name: "empty provider defaults to github",
+			repo: &models.Repository{ProviderOwner: "acme", ProviderName: "app"},
+			want: "https://github.com/acme/app.git",
+		},
+		{
+			name: "missing owner returns empty",
+			repo: &models.Repository{Provider: "github", ProviderName: "app"},
+			want: "",
+		},
+		{
+			name: "missing name returns empty",
+			repo: &models.Repository{Provider: "github", ProviderOwner: "acme"},
+			want: "",
+		},
+		{
+			name: "both missing returns empty",
+			repo: &models.Repository{},
+			want: "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := repositoryCloneURL(tt.repo); got != tt.want {
+				t.Errorf("repositoryCloneURL() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }

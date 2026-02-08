@@ -151,6 +151,7 @@ export const ChatMessage = memo(function ChatMessage({ comment, label, className
             {hasAttachments && (
               <div className={cn('flex flex-wrap gap-2', hasContent && 'mb-2')}>
                 {imageAttachments.map((att, index) => (
+                  /* eslint-disable-next-line @next/next/no-img-element -- base64 data URLs are not compatible with next/image */
                   <img
                     key={index}
                     src={`data:${att.mime_type};base64,${att.data}`}

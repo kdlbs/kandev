@@ -48,6 +48,9 @@ function mergeTreeNodes(existing: FileTreeNode, incoming: FileTreeNode): FileTre
   return { ...existing, ...incoming, children: mergedChildren };
 }
 
+const MAX_RETRY_ATTEMPTS = 4;
+const RETRY_DELAYS_MS = [1000, 2000, 5000, 10000];
+
 type FileBrowserProps = {
   sessionId: string;
   onOpenFile: (file: OpenFileTab) => void;
@@ -86,9 +89,6 @@ export function FileBrowser({ sessionId, onOpenFile, onDeleteFile, isSearchOpen 
   const retryAttemptRef = useRef(0);
   const retryTimerRef = useRef<NodeJS.Timeout | null>(null);
   const loadInFlightRef = useRef(false);
-
-  const MAX_RETRY_ATTEMPTS = 4;
-  const RETRY_DELAYS_MS = [1000, 2000, 5000, 10000];
 
   // Workspace path for header
   const fullPath = session?.worktree_path ?? '';

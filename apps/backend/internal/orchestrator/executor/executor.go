@@ -23,6 +23,7 @@ var (
 	ErrNoAgentProfileID        = errors.New("task has no agent_profile_id configured")
 	ErrExecutionNotFound       = errors.New("execution not found")
 	ErrExecutionAlreadyRunning = errors.New("execution already running")
+	ErrRemoteDockerNoRepoURL   = errors.New("remote_docker executor requires a repository with provider owner and name set")
 )
 
 // PromptResult contains the result of a prompt operation
@@ -89,7 +90,8 @@ type LaunchAgentRequest struct {
 	Env             map[string]string
 	ACPSessionID    string // ACP session ID to resume, if available
 	ModelOverride   string // If set, use this model instead of the profile's model
-	ExecutorType    string // Executor type (e.g., "local_pc", "local_docker") - determines runtime
+	ExecutorType    string            // Executor type (e.g., "local", "worktree", "local_docker") - determines runtime
+	ExecutorConfig  map[string]string // Executor config (docker_host, git_token, etc.)
 
 	// Worktree configuration for concurrent agent execution
 	UseWorktree          bool   // Whether to use a Git worktree for isolation
@@ -156,9 +158,8 @@ type Executor struct {
 	logger       *logger.Logger
 
 	// Configuration
-	retryLimit      int
-	retryDelay      time.Duration
-	worktreeEnabled bool // Whether to use Git worktrees for agent isolation
+	retryLimit int
+	retryDelay time.Duration
 
 	// Per-session locks to prevent concurrent resume/launch operations on the same session.
 	// This prevents race conditions when the backend restarts and multiple resume requests
@@ -168,8 +169,7 @@ type Executor struct {
 
 // ExecutorConfig holds configuration for the Executor
 type ExecutorConfig struct {
-	WorktreeEnabled bool // Whether to use Git worktrees for agent isolation
-	ShellPrefs      ShellPreferenceProvider
+	ShellPrefs ShellPreferenceProvider
 }
 
 type ShellPreferenceProvider interface {
@@ -179,14 +179,39 @@ type ShellPreferenceProvider interface {
 // NewExecutor creates a new executor
 func NewExecutor(agentManager AgentManagerClient, repo repository.Repository, log *logger.Logger, cfg ExecutorConfig) *Executor {
 	return &Executor{
-		agentManager:    agentManager,
-		repo:            repo,
-		shellPrefs:      cfg.ShellPrefs,
-		logger:          log.WithFields(zap.String("component", "executor")),
-		retryLimit:      3,
-		retryDelay:      5 * time.Second,
-		worktreeEnabled: cfg.WorktreeEnabled,
+		agentManager: agentManager,
+		repo:         repo,
+		shellPrefs:   cfg.ShellPrefs,
+		logger:       log.WithFields(zap.String("component", "executor")),
+		retryLimit:   3,
+		retryDelay:   5 * time.Second,
 	}
+}
+
+// shouldUseWorktree returns true if the given executor type should use Git worktrees.
+func shouldUseWorktree(executorType string) bool {
+	return models.ExecutorType(executorType) == models.ExecutorTypeWorktree
+}
+
+// repositoryCloneURL builds an HTTPS clone URL from the repository's provider info.
+// Returns an empty string if the repository has no provider owner/name or if the
+// provider is not recognized.
+func repositoryCloneURL(repo *models.Repository) string {
+	if repo.ProviderOwner == "" || repo.ProviderName == "" {
+		return ""
+	}
+	var host string
+	switch strings.ToLower(repo.Provider) {
+	case "github", "":
+		host = "github.com"
+	case "gitlab":
+		host = "gitlab.com"
+	case "bitbucket":
+		host = "bitbucket.org"
+	default:
+		return ""
+	}
+	return fmt.Sprintf("https://%s/%s/%s.git", host, repo.ProviderOwner, repo.ProviderName)
 }
 
 // getSessionLock returns a per-session mutex, creating one if it doesn't exist.
@@ -223,7 +248,7 @@ func (e *Executor) Execute(ctx context.Context, task *v1.Task) (*TaskExecution, 
 }
 
 // ExecuteWithProfile starts agent execution for a task using an explicit agent profile.
-// The executorID parameter specifies which executor to use (determines runtime: local_pc, local_docker, etc.).
+// The executorID parameter specifies which executor to use (determines runtime: local, worktree, local_docker, etc.).
 // If executorID is empty, falls back to workspace's default executor.
 // The prompt parameter is the initial prompt to send to the agent.
 // The workflowStepID parameter associates the session with a workflow step for transitions.
@@ -354,6 +379,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	var baseBranch string
 	var worktreeBranchPrefix string
 	var pullBeforeWorktree bool
+	var repository *models.Repository
 
 	// Get the primary repository for this task
 	primaryTaskRepo, err := e.repo.GetPrimaryTaskRepository(ctx, task.ID)
@@ -369,7 +395,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		baseBranch = primaryTaskRepo.BaseBranch
 
 		if repositoryID != "" {
-			repository, err := e.repo.GetRepository(ctx, repositoryID)
+			repository, err = e.repo.GetRepository(ctx, repositoryID)
 			if err != nil {
 				e.logger.Error("failed to get repository",
 					zap.String("repository_id", repositoryID),
@@ -394,19 +420,29 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		SessionID:       sessionID,
 	}
 
+	// Resolve executor configuration
+	execConfig := e.resolveExecutorConfig(ctx, executorID, task.WorkspaceID, metadata)
+	if execConfig.ExecutorID != "" {
+		metadata = execConfig.Metadata
+		req.ExecutorType = execConfig.ExecutorType
+		req.ExecutorConfig = execConfig.ExecutorCfg
+	}
+
 	if repositoryPath != "" {
-		req.UseWorktree = e.worktreeEnabled
+		req.UseWorktree = shouldUseWorktree(execConfig.ExecutorType)
 		req.RepositoryPath = repositoryPath
 		req.BaseBranch = baseBranch
 		req.WorktreeBranchPrefix = worktreeBranchPrefix
 		req.PullBeforeWorktree = pullBeforeWorktree
 	}
 
-	// Resolve executor configuration
-	execConfig := e.resolveExecutorConfig(ctx, executorID, task.WorkspaceID, metadata)
-	if execConfig.ExecutorID != "" {
-		metadata = execConfig.Metadata
-		req.ExecutorType = execConfig.ExecutorType
+	// Remote Docker needs a clone URL since the remote host has no access to the local filesystem.
+	if models.ExecutorType(execConfig.ExecutorType) == models.ExecutorTypeRemoteDocker && repository != nil {
+		cloneURL := repositoryCloneURL(repository)
+		if cloneURL == "" {
+			return nil, ErrRemoteDockerNoRepoURL
+		}
+		req.RepositoryURL = cloneURL
 	}
 
 	if len(metadata) > 0 {
@@ -622,11 +658,12 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 	var repositoryPath string
 	var worktreeBranchPrefix string
 	var pullBeforeWorktree bool
+	var repository *models.Repository
 	if repositoryID == "" && len(task.Repositories) > 0 {
 		repositoryID = task.Repositories[0].RepositoryID
 	}
 	if repositoryID != "" {
-		repository, err := e.repo.GetRepository(ctx, repositoryID)
+		repository, err = e.repo.GetRepository(ctx, repositoryID)
 		if err != nil {
 			e.logger.Error("failed to load repository for task session resume",
 				zap.String("task_id", task.ID),
@@ -650,7 +687,16 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 		req.Branch = baseBranch
 	}
 
-	if e.worktreeEnabled && repositoryPath != "" {
+	// Remote Docker needs a clone URL since the remote host has no access to the local filesystem.
+	if models.ExecutorType(req.ExecutorType) == models.ExecutorTypeRemoteDocker && repository != nil {
+		cloneURL := repositoryCloneURL(repository)
+		if cloneURL == "" {
+			return nil, ErrRemoteDockerNoRepoURL
+		}
+		req.RepositoryURL = cloneURL
+	}
+
+	if shouldUseWorktree(req.ExecutorType) && repositoryPath != "" {
 		req.UseWorktree = true
 		req.RepositoryPath = repositoryPath
 		req.RepositoryID = repositoryID
@@ -998,16 +1044,25 @@ func (e *Executor) SwitchModel(ctx context.Context, taskID, sessionID, newModel,
 	// Get repository info if available
 	var repositoryPath string
 	if session.RepositoryID != "" {
-		repository, err := e.repo.GetRepository(ctx, session.RepositoryID)
-		if err == nil && repository != nil {
+		repository, repoErr := e.repo.GetRepository(ctx, session.RepositoryID)
+		if repoErr == nil && repository != nil {
 			repositoryPath = repository.LocalPath
 			req.RepositoryURL = repository.LocalPath
 			req.Branch = session.BaseBranch
+
+			// Remote Docker needs a clone URL instead of a local path.
+			if models.ExecutorType(execConfig.ExecutorType) == models.ExecutorTypeRemoteDocker {
+				cloneURL := repositoryCloneURL(repository)
+				if cloneURL == "" {
+					return nil, ErrRemoteDockerNoRepoURL
+				}
+				req.RepositoryURL = cloneURL
+			}
 		}
 	}
 
-	// Configure worktree if enabled - reuse existing worktree from session
-	if e.worktreeEnabled && repositoryPath != "" {
+	// Configure worktree if executor type requires it - reuse existing worktree from session
+	if shouldUseWorktree(execConfig.ExecutorType) && repositoryPath != "" {
 		req.UseWorktree = true
 		req.RepositoryPath = repositoryPath
 		req.RepositoryID = session.RepositoryID
@@ -1202,41 +1257,11 @@ func (e *Executor) defaultExecutorID(ctx context.Context, workspaceID string) st
 	return strings.TrimSpace(*workspace.DefaultExecutorID)
 }
 
-func (e *Executor) applyExecutorMetadata(ctx context.Context, metadata map[string]interface{}, executorID string) map[string]interface{} {
-	if executorID == "" {
-		return metadata
-	}
-	if metadata == nil {
-		metadata = map[string]interface{}{}
-	}
-	metadata["executor_id"] = executorID
-	executor, err := e.repo.GetExecutor(ctx, executorID)
-	if err != nil || executor == nil {
-		return metadata
-	}
-	if policyJSON := strings.TrimSpace(executor.Config["mcp_policy"]); policyJSON != "" {
-		metadata["executor_mcp_policy"] = policyJSON
-	}
-	return metadata
-}
-
-// getExecutorType resolves an executor ID to its type string.
-// Returns empty string if executor not found or on error.
-func (e *Executor) getExecutorType(ctx context.Context, executorID string) string {
-	if executorID == "" {
-		return ""
-	}
-	executor, err := e.repo.GetExecutor(ctx, executorID)
-	if err != nil || executor == nil {
-		return ""
-	}
-	return string(executor.Type)
-}
-
 // executorConfig holds resolved executor configuration.
 type executorConfig struct {
 	ExecutorID   string
 	ExecutorType string
+	ExecutorCfg  map[string]string // The executor record's Config map (docker_host, etc.)
 	Metadata     map[string]interface{}
 }
 
@@ -1254,13 +1279,28 @@ func (e *Executor) resolveExecutorConfig(ctx context.Context, executorID, worksp
 		metadata = make(map[string]interface{})
 	}
 
-	if resolved != "" {
-		metadata = e.applyExecutorMetadata(ctx, metadata, resolved)
+	if resolved == "" {
+		return executorConfig{Metadata: metadata}
+	}
+
+	metadata["executor_id"] = resolved
+
+	executor, err := e.repo.GetExecutor(ctx, resolved)
+	if err != nil || executor == nil {
+		return executorConfig{
+			ExecutorID: resolved,
+			Metadata:   metadata,
+		}
+	}
+
+	if policyJSON := strings.TrimSpace(executor.Config["mcp_policy"]); policyJSON != "" {
+		metadata["executor_mcp_policy"] = policyJSON
 	}
 
 	return executorConfig{
 		ExecutorID:   resolved,
-		ExecutorType: e.getExecutorType(ctx, resolved),
+		ExecutorType: string(executor.Type),
+		ExecutorCfg:  executor.Config,
 		Metadata:     metadata,
 	}
 }
