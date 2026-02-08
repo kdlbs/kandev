@@ -1,43 +1,28 @@
-import { useEffect, useCallback, useState, useRef } from 'react';
+import { useEffect, useCallback, useState } from 'react';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import type { CumulativeDiff } from '@/lib/state/slices/session-runtime/types';
 
-// Local state cache for cumulative diffs (not stored in global store since it's on-demand)
 const cumulativeDiffCache: Record<string, CumulativeDiff | null> = {};
 const loadingState: Record<string, boolean> = {};
-// Version counter to trigger refetch when cache is invalidated
-const cacheVersion: Record<string, number> = {};
 
-// Listeners notified when cache is invalidated (replaces polling)
 const listeners = new Set<(sessionId: string) => void>();
 
-/**
- * Invalidate the cumulative diff cache for a session.
- * Call this when git status changes (commits, snapshots, etc.)
- */
 export function invalidateCumulativeDiffCache(sessionId: string) {
   delete cumulativeDiffCache[sessionId];
-  cacheVersion[sessionId] = (cacheVersion[sessionId] ?? 0) + 1;
   listeners.forEach(fn => fn(sessionId));
 }
 
-/**
- * Hook to fetch cumulative diff for a session.
- * Returns the total diff from base branch to current HEAD.
- */
 export function useCumulativeDiff(sessionId: string | null) {
   const [diff, setDiff] = useState<CumulativeDiff | null>(
     sessionId ? cumulativeDiffCache[sessionId] ?? null : null
   );
-  const [loading, setLoading] = useState(
-    sessionId ? loadingState[sessionId] ?? false : false
-  );
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Track the version we last fetched for
-  const lastFetchedVersionRef = useRef<number | null>(null);
+  const [invalidationCount, setInvalidationCount] = useState(0);
 
   const fetchCumulativeDiff = useCallback(async () => {
     if (!sessionId) return;
+    if (loadingState[sessionId]) return;
 
     const client = getWebSocketClient();
     if (!client) return;
@@ -52,9 +37,6 @@ export function useCumulativeDiff(sessionId: string | null) {
         { session_id: sessionId }
       );
 
-      // Mark version as fetched regardless of whether data exists
-      lastFetchedVersionRef.current = cacheVersion[sessionId] ?? 0;
-
       if (response?.cumulative_diff) {
         cumulativeDiffCache[sessionId] = response.cumulative_diff;
         setDiff(response.cumulative_diff);
@@ -62,48 +44,37 @@ export function useCumulativeDiff(sessionId: string | null) {
     } catch (err) {
       console.error('Failed to fetch cumulative diff:', err);
       setError(err instanceof Error ? err.message : 'Failed to fetch cumulative diff');
-      lastFetchedVersionRef.current = cacheVersion[sessionId] ?? 0;
     } finally {
       setLoading(false);
       loadingState[sessionId] = false;
     }
   }, [sessionId]);
 
-  // Fetch on mount if not cached, or refetch if cache was invalidated
+  // Fetch on mount and when cache is invalidated
   useEffect(() => {
     if (!sessionId) return;
+    fetchCumulativeDiff();
+  }, [sessionId, invalidationCount, fetchCumulativeDiff]);
 
-    const currentVersion = cacheVersion[sessionId] ?? 0;
-    const cachedDiff = cumulativeDiffCache[sessionId];
-    const needsFetch = !cachedDiff || lastFetchedVersionRef.current !== currentVersion;
-
-    if (needsFetch && !loading) {
-      fetchCumulativeDiff();
-    }
-  }, [sessionId, loading, fetchCumulativeDiff]);
-
-  // Subscribe to cache invalidation events (replaces 500ms poll)
+  // Subscribe to cache invalidation from WS handlers
   useEffect(() => {
     if (!sessionId) return;
     const handler = (invalidatedSessionId: string) => {
       if (invalidatedSessionId === sessionId) {
-        setDiff(null); // triggers refetch via the fetch useEffect
+        setInvalidationCount(c => c + 1);
       }
     };
     listeners.add(handler);
     return () => { listeners.delete(handler); };
   }, [sessionId]);
 
-  // Update local state when sessionId changes
+  // Sync cached state when sessionId changes
   useEffect(() => {
     if (sessionId) {
       setDiff(cumulativeDiffCache[sessionId] ?? null);
-      setLoading(loadingState[sessionId] ?? false);
-      lastFetchedVersionRef.current = cacheVersion[sessionId] ?? 0;
     } else {
       setDiff(null);
       setLoading(false);
-      lastFetchedVersionRef.current = null;
     }
   }, [sessionId]);
 
@@ -114,4 +85,3 @@ export function useCumulativeDiff(sessionId: string | null) {
     refetch: fetchCumulativeDiff,
   };
 }
-
