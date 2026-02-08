@@ -24,14 +24,15 @@ type Service struct {
 }
 
 type UpdateUserSettingsRequest struct {
-	WorkspaceID          *string
-	BoardID              *string
-	RepositoryIDs        *[]string
-	InitialSetupComplete *bool
-	PreferredShell       *string
-	DefaultEditorID      *string
-	EnablePreviewOnClick *bool
-	ChatSubmitKey        *string
+	WorkspaceID            *string
+	BoardID                *string
+	RepositoryIDs          *[]string
+	InitialSetupComplete   *bool
+	PreferredShell         *string
+	DefaultEditorID        *string
+	EnablePreviewOnClick   *bool
+	ChatSubmitKey          *string
+	ReviewAutoMarkOnScroll *bool
 }
 
 func NewService(repo store.Repository, eventBus bus.EventBus, log *logger.Logger) *Service {
@@ -101,6 +102,9 @@ func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSetting
 		s.logger.Info("[Settings] Setting ChatSubmitKey", zap.String("value", key))
 		settings.ChatSubmitKey = key
 	}
+	if req.ReviewAutoMarkOnScroll != nil {
+		settings.ReviewAutoMarkOnScroll = *req.ReviewAutoMarkOnScroll
+	}
 	settings.UpdatedAt = time.Now().UTC()
 	if err := s.repo.UpsertUserSettings(ctx, settings); err != nil {
 		return nil, err
@@ -121,9 +125,10 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"initial_setup_complete": settings.InitialSetupComplete,
 		"preferred_shell":        settings.PreferredShell,
 		"default_editor_id":      settings.DefaultEditorID,
-		"enable_preview_on_click": settings.EnablePreviewOnClick,
-		"chat_submit_key":        settings.ChatSubmitKey,
-		"updated_at":             settings.UpdatedAt.Format(time.RFC3339),
+		"enable_preview_on_click":    settings.EnablePreviewOnClick,
+		"chat_submit_key":            settings.ChatSubmitKey,
+		"review_auto_mark_on_scroll": settings.ReviewAutoMarkOnScroll,
+		"updated_at":                 settings.UpdatedAt.Format(time.RFC3339),
 	}
 	if err := s.eventBus.Publish(ctx, events.UserSettingsUpdated, bus.NewEvent(events.UserSettingsUpdated, "user-service", data)); err != nil {
 		s.logger.Error("failed to publish user settings event", zap.Error(err))

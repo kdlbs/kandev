@@ -15,6 +15,7 @@ type DisplaySettings = {
   defaultEditorId: string | null;
   enablePreviewOnClick: boolean;
   chatSubmitKey: 'enter' | 'cmd_enter';
+  reviewAutoMarkOnScroll: boolean;
   loaded: boolean;
 };
 
@@ -58,6 +59,7 @@ export function useUserDisplaySettings({
         defaultEditorId: userSettings.defaultEditorId ?? null,
         enablePreviewOnClick,
         chatSubmitKey: userSettings.chatSubmitKey ?? 'cmd_enter',
+        reviewAutoMarkOnScroll: userSettings.reviewAutoMarkOnScroll ?? true,
         loaded: true,
       };
       const sameWorkspace = normalized.workspaceId === userSettings.workspaceId;
@@ -108,6 +110,7 @@ export function useUserDisplaySettings({
           defaultEditorId: data.settings.default_editor_id || null,
           enablePreviewOnClick: data.settings.enable_preview_on_click ?? false,
           chatSubmitKey: data.settings.chat_submit_key ?? 'cmd_enter',
+          reviewAutoMarkOnScroll: data.settings.review_auto_mark_on_scroll ?? true,
           loaded: true,
         });
       })

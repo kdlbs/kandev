@@ -30,6 +30,8 @@ interface FileDiffViewerProps {
   hideHeader?: boolean;
   /** Callback to open file in editor */
   onOpenFile?: (filePath: string) => void;
+  /** External word wrap override */
+  wordWrap?: boolean;
 }
 
 /**
@@ -54,6 +56,7 @@ export const FileDiffViewer = memo(function FileDiffViewer({
   compact,
   hideHeader,
   onOpenFile,
+  wordWrap,
 }: FileDiffViewerProps) {
   // Memoize the transformation - only recalculates when raw data changes
   const data = useMemo(
@@ -73,6 +76,7 @@ export const FileDiffViewer = memo(function FileDiffViewer({
       compact={compact}
       hideHeader={hideHeader}
       onOpenFile={onOpenFile}
+      wordWrap={wordWrap}
     />
   );
 });

@@ -27,6 +27,7 @@ export const defaultSettingsState: SettingsSliceState = {
     defaultEditorId: null,
     enablePreviewOnClick: false,
     chatSubmitKey: 'cmd_enter',
+    reviewAutoMarkOnScroll: true,
     loaded: false,
   },
 };

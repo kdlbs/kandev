@@ -14,16 +14,17 @@ type UserDTO struct {
 }
 
 type UserSettingsDTO struct {
-	UserID               string   `json:"user_id"`
-	WorkspaceID          string   `json:"workspace_id"`
-	BoardID              string   `json:"board_id"`
-	RepositoryIDs        []string `json:"repository_ids"`
-	InitialSetupComplete bool     `json:"initial_setup_complete"`
-	PreferredShell       string   `json:"preferred_shell"`
-	DefaultEditorID      string   `json:"default_editor_id"`
-	EnablePreviewOnClick bool     `json:"enable_preview_on_click"`
-	ChatSubmitKey        string   `json:"chat_submit_key"`
-	UpdatedAt            string   `json:"updated_at"`
+	UserID                 string   `json:"user_id"`
+	WorkspaceID            string   `json:"workspace_id"`
+	BoardID                string   `json:"board_id"`
+	RepositoryIDs          []string `json:"repository_ids"`
+	InitialSetupComplete   bool     `json:"initial_setup_complete"`
+	PreferredShell         string   `json:"preferred_shell"`
+	DefaultEditorID        string   `json:"default_editor_id"`
+	EnablePreviewOnClick   bool     `json:"enable_preview_on_click"`
+	ChatSubmitKey          string   `json:"chat_submit_key"`
+	ReviewAutoMarkOnScroll bool     `json:"review_auto_mark_on_scroll"`
+	UpdatedAt              string   `json:"updated_at"`
 }
 
 type UserResponse struct {
@@ -42,14 +43,15 @@ type ShellOption struct {
 }
 
 type UpdateUserSettingsRequest struct {
-	WorkspaceID          *string   `json:"workspace_id,omitempty"`
-	BoardID              *string   `json:"board_id,omitempty"`
-	RepositoryIDs        *[]string `json:"repository_ids,omitempty"`
-	InitialSetupComplete *bool     `json:"initial_setup_complete,omitempty"`
-	PreferredShell       *string   `json:"preferred_shell,omitempty"`
-	DefaultEditorID      *string   `json:"default_editor_id,omitempty"`
-	EnablePreviewOnClick *bool     `json:"enable_preview_on_click,omitempty"`
-	ChatSubmitKey        *string   `json:"chat_submit_key,omitempty"`
+	WorkspaceID            *string   `json:"workspace_id,omitempty"`
+	BoardID                *string   `json:"board_id,omitempty"`
+	RepositoryIDs          *[]string `json:"repository_ids,omitempty"`
+	InitialSetupComplete   *bool     `json:"initial_setup_complete,omitempty"`
+	PreferredShell         *string   `json:"preferred_shell,omitempty"`
+	DefaultEditorID        *string   `json:"default_editor_id,omitempty"`
+	EnablePreviewOnClick   *bool     `json:"enable_preview_on_click,omitempty"`
+	ChatSubmitKey          *string   `json:"chat_submit_key,omitempty"`
+	ReviewAutoMarkOnScroll *bool     `json:"review_auto_mark_on_scroll,omitempty"`
 }
 
 func FromUser(user *models.User) UserDTO {
@@ -63,15 +65,16 @@ func FromUser(user *models.User) UserDTO {
 
 func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 	return UserSettingsDTO{
-		UserID:               settings.UserID,
-		WorkspaceID:          settings.WorkspaceID,
-		BoardID:              settings.BoardID,
-		RepositoryIDs:        settings.RepositoryIDs,
-		InitialSetupComplete: settings.InitialSetupComplete,
-		PreferredShell:       settings.PreferredShell,
-		DefaultEditorID:      settings.DefaultEditorID,
-		EnablePreviewOnClick: settings.EnablePreviewOnClick,
-		ChatSubmitKey:        settings.ChatSubmitKey,
-		UpdatedAt:            settings.UpdatedAt.Format(time.RFC3339),
+		UserID:                 settings.UserID,
+		WorkspaceID:            settings.WorkspaceID,
+		BoardID:                settings.BoardID,
+		RepositoryIDs:          settings.RepositoryIDs,
+		InitialSetupComplete:   settings.InitialSetupComplete,
+		PreferredShell:         settings.PreferredShell,
+		DefaultEditorID:        settings.DefaultEditorID,
+		EnablePreviewOnClick:   settings.EnablePreviewOnClick,
+		ChatSubmitKey:          settings.ChatSubmitKey,
+		ReviewAutoMarkOnScroll: settings.ReviewAutoMarkOnScroll,
+		UpdatedAt:              settings.UpdatedAt.Format(time.RFC3339),
 	}
 }

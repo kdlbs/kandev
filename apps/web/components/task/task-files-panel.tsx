@@ -33,6 +33,9 @@ import { useOpenSessionInEditor } from '@/hooks/use-open-session-in-editor';
 import { useSessionGitStatus } from '@/hooks/domains/session/use-session-git-status';
 import { useSessionCommits } from '@/hooks/domains/session/use-session-commits';
 import { useGitOperations } from '@/hooks/use-git-operations';
+import { useSessionFileReviews } from '@/hooks/use-session-file-reviews';
+import { useCumulativeDiff } from '@/hooks/domains/session/use-cumulative-diff';
+import { hashDiff, normalizeDiffContent } from '@/components/review/types';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import { deleteFile } from '@/lib/ws/workspace-files';
 import type { FileInfo } from '@/lib/state/store';
@@ -76,6 +79,8 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiff, onOpenFile, 
   const openEditor = useOpenSessionInEditor(activeSessionId ?? null);
   const gitOps = useGitOperations(activeSessionId ?? null);
   const { toast } = useToast();
+  const { reviews } = useSessionFileReviews(activeSessionId);
+  const { diff: cumulativeDiff } = useCumulativeDiff(activeSessionId);
 
   // Track if we've initialized the tab for this session
   const hasInitializedTabRef = useRef<string | null>(null);
@@ -196,6 +201,52 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiff, onOpenFile, 
     }));
   }, [gitStatus]);
 
+  // Compute review progress across all files (uncommitted + committed)
+  const { reviewedCount, totalFileCount } = useMemo(() => {
+    const paths = new Set<string>();
+
+    // Uncommitted
+    if (gitStatus?.files) {
+      for (const [path, file] of Object.entries(gitStatus.files)) {
+        const diff = file.diff ? normalizeDiffContent(file.diff) : '';
+        if (diff) paths.add(path);
+      }
+    }
+
+    // Committed (skip duplicates)
+    if (cumulativeDiff?.files) {
+      for (const [path, file] of Object.entries(cumulativeDiff.files)) {
+        if (paths.has(path)) continue;
+        const diff = file.diff ? normalizeDiffContent(file.diff) : '';
+        if (diff) paths.add(path);
+      }
+    }
+
+    let reviewed = 0;
+    for (const path of paths) {
+      const state = reviews.get(path);
+      if (!state?.reviewed) continue;
+
+      // Check staleness: find the diff content for this path
+      let diffContent = '';
+      const uncommittedFile = gitStatus?.files?.[path];
+      if (uncommittedFile?.diff) {
+        diffContent = normalizeDiffContent(uncommittedFile.diff);
+      } else if (cumulativeDiff?.files?.[path]?.diff) {
+        diffContent = normalizeDiffContent(cumulativeDiff.files[path].diff!);
+      }
+
+      if (diffContent && state.diffHash && state.diffHash !== hashDiff(diffContent)) {
+        continue; // stale — don't count
+      }
+      reviewed++;
+    }
+
+    return { reviewedCount: reviewed, totalFileCount: paths.size };
+  }, [gitStatus, cumulativeDiff, reviews]);
+
+  const reviewProgressPercent = totalFileCount > 0 ? (reviewedCount / totalFileCount) * 100 : 0;
+
   // Clear pending stage/unstage spinners when git status updates
   useEffect(() => {
     if (pendingStageFiles.size > 0) {
@@ -303,7 +354,7 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiff, onOpenFile, 
         rightContent={tabRightContent}
       >
         <TabsContent value="diff" className="flex-1 min-h-0">
-          <SessionPanelContent>
+          <SessionPanelContent className="flex flex-col">
             <div className="space-y-4">
               {/* Uncommitted changes section */}
               {changedFiles.length > 0 && (
@@ -478,10 +529,34 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiff, onOpenFile, 
               {/* Empty state */}
               {changedFiles.length === 0 && commits.length === 0 && (
                 <div className="flex items-center justify-center h-full text-muted-foreground text-xs">
-                  No changes detected
+                  Your changed files will appear here
                 </div>
               )}
             </div>
+            {/* Review progress — pushed to bottom of panel */}
+            {totalFileCount > 0 && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div
+                    className="mt-auto flex items-center gap-2 pt-2 cursor-pointer transition-colors"
+                    onClick={() => window.dispatchEvent(new CustomEvent('switch-to-changes-tab'))}
+                  >
+                    <div className="flex-1 h-0.5 rounded-full bg-muted-foreground/10 overflow-hidden">
+                      <div
+                        className="h-full bg-muted-foreground/25 rounded-full transition-all duration-300"
+                        style={{ width: `${reviewProgressPercent}%` }}
+                      />
+                    </div>
+                    <span className="text-[10px] text-muted-foreground/40 whitespace-nowrap">
+                      {reviewedCount}/{totalFileCount} reviewed
+                    </span>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {reviewedCount} of {totalFileCount} files reviewed
+                </TooltipContent>
+              </Tooltip>
+            )}
           </SessionPanelContent>
         </TabsContent>
         <TabsContent value="files" className="flex-1 min-h-0">
