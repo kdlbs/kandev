@@ -44,6 +44,9 @@ export default function RootLayout({
 
   return (
     <html lang="en" suppressHydrationWarning>
+      <head>
+        <meta name="apple-mobile-web-app-title" content="Kandev" />
+      </head>
       <body className="antialiased font-sans">
         {(apiPort || mcpPort) ? (
           // Inject runtime ports for production bundles where ports are chosen at launch.
