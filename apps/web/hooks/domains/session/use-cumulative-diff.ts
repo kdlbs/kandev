@@ -8,6 +8,9 @@ const loadingState: Record<string, boolean> = {};
 // Version counter to trigger refetch when cache is invalidated
 const cacheVersion: Record<string, number> = {};
 
+// Listeners notified when cache is invalidated (replaces polling)
+const listeners = new Set<(sessionId: string) => void>();
+
 /**
  * Invalidate the cumulative diff cache for a session.
  * Call this when git status changes (commits, snapshots, etc.)
@@ -15,6 +18,7 @@ const cacheVersion: Record<string, number> = {};
 export function invalidateCumulativeDiffCache(sessionId: string) {
   delete cumulativeDiffCache[sessionId];
   cacheVersion[sessionId] = (cacheVersion[sessionId] ?? 0) + 1;
+  listeners.forEach(fn => fn(sessionId));
 }
 
 /**
@@ -48,14 +52,17 @@ export function useCumulativeDiff(sessionId: string | null) {
         { session_id: sessionId }
       );
 
+      // Mark version as fetched regardless of whether data exists
+      lastFetchedVersionRef.current = cacheVersion[sessionId] ?? 0;
+
       if (response?.cumulative_diff) {
         cumulativeDiffCache[sessionId] = response.cumulative_diff;
         setDiff(response.cumulative_diff);
-        lastFetchedVersionRef.current = cacheVersion[sessionId] ?? 0;
       }
     } catch (err) {
       console.error('Failed to fetch cumulative diff:', err);
       setError(err instanceof Error ? err.message : 'Failed to fetch cumulative diff');
+      lastFetchedVersionRef.current = cacheVersion[sessionId] ?? 0;
     } finally {
       setLoading(false);
       loadingState[sessionId] = false;
@@ -75,19 +82,16 @@ export function useCumulativeDiff(sessionId: string | null) {
     }
   }, [sessionId, loading, fetchCumulativeDiff]);
 
-  // Poll for cache invalidation (check every 500ms if cache was invalidated)
+  // Subscribe to cache invalidation events (replaces 500ms poll)
   useEffect(() => {
     if (!sessionId) return;
-
-    const interval = setInterval(() => {
-      const currentVersion = cacheVersion[sessionId] ?? 0;
-      if (lastFetchedVersionRef.current !== currentVersion && !loadingState[sessionId]) {
-        // Cache was invalidated, clear local state to trigger refetch
-        setDiff(null);
+    const handler = (invalidatedSessionId: string) => {
+      if (invalidatedSessionId === sessionId) {
+        setDiff(null); // triggers refetch via the fetch useEffect
       }
-    }, 500);
-
-    return () => clearInterval(interval);
+    };
+    listeners.add(handler);
+    return () => { listeners.delete(handler); };
   }, [sessionId]);
 
   // Update local state when sessionId changes

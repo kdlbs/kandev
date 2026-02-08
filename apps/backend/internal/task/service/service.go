@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -2597,6 +2598,9 @@ func (s *Service) GetCumulativeDiff(ctx context.Context, sessionID string) (*mod
 	// Get the first snapshot to find the base commit
 	firstSnapshot, err := s.repo.GetFirstGitSnapshot(ctx, sessionID)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil // No snapshots yet — valid state for fresh tasks
+		}
 		return nil, fmt.Errorf("failed to get first git snapshot: %w", err)
 	}
 
