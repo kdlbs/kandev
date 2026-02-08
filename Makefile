@@ -127,11 +127,15 @@ start:
 	@$(MAKE) -s build-web-quiet
 	$(call success,Build complete)
 	$(call phase,Starting Server)
-	@cd $(APPS_DIR) && $(PNPM) -C cli dev -- start $(if $(filter 1 true yes,$(VERBOSE)),--verbose,)
+	@cd $(APPS_DIR) && $(PNPM) -C cli dev -- start $(if $(filter 1 true yes,$(VERBOSE)),--verbose,) $(if $(filter 1 true yes,$(DEBUG)),--debug,)
 
 .PHONY: start-verbose
 start-verbose:
 	@$(MAKE) start VERBOSE=1
+
+.PHONY: start-debug
+start-debug:
+	@$(MAKE) start DEBUG=1
 
 .PHONY: build-backend
 build-backend:

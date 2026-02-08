@@ -36,6 +36,8 @@ export type StartOptions = {
   webPort?: number;
   /** Show info logs from backend + web */
   verbose?: boolean;
+  /** Show debug logs + agent message dumps */
+  debug?: boolean;
 };
 
 /**
@@ -56,6 +58,7 @@ export async function runStart({
   backendPort,
   webPort,
   verbose = false,
+  debug = false,
 }: StartOptions): Promise<void> {
   const ports = await pickPorts(backendPort, webPort);
 
@@ -83,28 +86,32 @@ export async function runStart({
     }
   }
 
-  // Production mode: use warn log level for clean output unless verbose
+  // Production mode: use warn log level for clean output unless verbose/debug
+  const showOutput = verbose || debug;
   const dbPath = path.join(DATA_DIR, "kandev.db");
   const backendEnv = buildBackendEnv({
     ports,
-    logLevel: verbose ? "info" : "warn",
-    extra: { KANDEV_DB_PATH: dbPath },
+    logLevel: debug ? "debug" : verbose ? "info" : "warn",
+    extra: {
+      KANDEV_DB_PATH: dbPath,
+      ...(debug ? { KANDEV_DEBUG_AGENT_MESSAGES: "true" } : {}),
+    },
   });
   const webEnv = buildWebEnv({ ports, includeMcp: true, production: true });
 
   const supervisor = createProcessSupervisor();
   supervisor.attachSignalHandlers();
 
-  // Start backend with piped stdio (quiet mode unless verbose)
+  // Start backend with piped stdio (quiet mode unless verbose/debug)
   const backendProc = spawn(backendBin, [], {
     cwd: path.dirname(backendBin),
     env: backendEnv,
-    stdio: verbose ? ["ignore", "inherit", "inherit"] : ["ignore", "pipe", "pipe"],
+    stdio: showOutput ? ["ignore", "inherit", "inherit"] : ["ignore", "pipe", "pipe"],
   });
   supervisor.children.push(backendProc);
 
   // Forward stderr only (warnings/errors) when quiet
-  if (!verbose) {
+  if (!showOutput) {
     backendProc.stderr?.pipe(process.stderr);
   }
 
@@ -120,7 +127,7 @@ export async function runStart({
     url: webUrl,
     supervisor,
     label: "web",
-    quiet: !verbose,
+    quiet: !showOutput,
   });
 
   const healthTimeoutMs = resolveHealthTimeoutMs(HEALTH_TIMEOUT_MS_RELEASE);
