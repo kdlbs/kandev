@@ -238,7 +238,7 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 
 	// Send initialize control request to get slash commands
 	// This is required for streaming mode (input-format=stream-json)
-	initResp, err := a.client.Initialize(ctx, 30*time.Second)
+	initResp, err := a.client.Initialize(ctx, 60*time.Second)
 	if err != nil {
 		a.logger.Warn("failed to initialize (continuing anyway)", zap.Error(err))
 	} else if initResp != nil && len(initResp.Commands) > 0 {

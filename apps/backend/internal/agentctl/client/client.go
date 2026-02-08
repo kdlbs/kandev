@@ -47,7 +47,7 @@ func NewClient(host string, port int, log *logger.Logger) *Client {
 	return &Client{
 		baseURL: fmt.Sprintf("http://%s:%d", host, port),
 		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout: 60 * time.Second,
 		},
 		logger: log.WithFields(zap.String("component", "agentctl-client")),
 	}
