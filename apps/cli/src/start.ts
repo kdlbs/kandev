@@ -110,7 +110,7 @@ export async function runStart({
       ...(debug ? { KANDEV_DEBUG_AGENT_MESSAGES: "true" } : {}),
     },
   });
-  const webEnv = buildWebEnv({ ports, includeMcp: true, production: true });
+  const webEnv = buildWebEnv({ ports, includeMcp: true, production: true, debug });
 
   const supervisor = createProcessSupervisor();
   supervisor.attachSignalHandlers();

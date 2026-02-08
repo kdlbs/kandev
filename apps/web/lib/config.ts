@@ -11,7 +11,9 @@ const DEFAULT_MCP_PORT = 9090;
 const DEFAULT_API_BASE_URL = `http://localhost:${DEFAULT_API_PORT}`;
 const DEFAULT_MCP_SERVER_URL = `http://localhost:${DEFAULT_MCP_PORT}/sse`;
 
-export const DEBUG_UI = process.env.NEXT_PUBLIC_KANDEV_DEBUG === 'true';
+export const DEBUG_UI =
+  process.env.NEXT_PUBLIC_KANDEV_DEBUG === 'true' ||
+  (typeof window !== 'undefined' && window.__KANDEV_DEBUG === true);
 
 /**
  * Build URL from current page hostname and port.

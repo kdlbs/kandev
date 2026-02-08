@@ -41,6 +41,7 @@ export default function RootLayout({
   // This allows accessing the app from any device (iPhone, Tailscale, etc.)
   const apiPort = extractPort(process.env.KANDEV_API_BASE_URL ?? "");
   const mcpPort = extractPort(process.env.KANDEV_MCP_SERVER_URL ?? "");
+  const debugMode = process.env.NEXT_PUBLIC_KANDEV_DEBUG === "true";
 
   return (
     <html lang="en" suppressHydrationWarning>
@@ -48,14 +49,15 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-title" content="Kandev" />
       </head>
       <body className="antialiased font-sans">
-        {(apiPort || mcpPort) ? (
-          // Inject runtime ports for production bundles where ports are chosen at launch.
+        {(apiPort || mcpPort || debugMode) ? (
+          // Inject runtime config for production bundles where ports are chosen at launch.
           // Client will build full URLs using window.location.hostname + port
           <script
             dangerouslySetInnerHTML={{
               __html: [
                 apiPort ? `window.__KANDEV_API_PORT = ${JSON.stringify(apiPort)};` : '',
                 mcpPort ? `window.__KANDEV_MCP_PORT = ${JSON.stringify(mcpPort)};` : '',
+                debugMode ? `window.__KANDEV_DEBUG = true;` : '',
               ].filter(Boolean).join('\n'),
             }}
           />
