@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Task } from './kanban-card';
 import { TaskCreateDialog } from './task-create-dialog';
@@ -153,6 +153,12 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
     onMoveError: handleMoveError,
   });
 
+  // Ref for userSettings to avoid reactive deps in board selection effect
+  const userSettingsRef = useRef(userSettings);
+  useEffect(() => {
+    userSettingsRef.current = userSettings;
+  });
+
   // Board selection effect
   useEffect(() => {
     const workspaceId = workspaceState.activeId;
@@ -163,17 +169,20 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
       }
       return;
     }
-    const workspaceBoards = boardsState.items.filter((board: BoardState['items'][number]) => board.workspaceId === workspaceId);
+    const settings = userSettingsRef.current;
+    const workspaceBoards = boardsState.items.filter(
+      (board: BoardState['items'][number]) => board.workspaceId === workspaceId
+    );
     const desiredBoardId =
-      (userSettings.boardId && workspaceBoards.some((board: BoardState['items'][number]) => board.id === userSettings.boardId)
-        ? userSettings.boardId
+      (settings.boardId && workspaceBoards.some((board: BoardState['items'][number]) => board.id === settings.boardId)
+        ? settings.boardId
         : workspaceBoards[0]?.id) ?? null;
     setActiveBoard(desiredBoardId);
-    if (userSettings.loaded && desiredBoardId !== userSettings.boardId) {
+    if (settings.loaded && desiredBoardId !== settings.boardId) {
       commitSettings({
         workspaceId,
         boardId: desiredBoardId,
-        repositoryIds: userSettings.repositoryIds,
+        repositoryIds: settings.repositoryIds,
       });
     }
     if (!desiredBoardId) {
@@ -188,9 +197,6 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
     setActiveBoard,
     setBoards,
     store,
-    userSettings.boardId,
-    userSettings.loaded,
-    userSettings.repositoryIds,
     workspaceState.activeId,
   ]);
 

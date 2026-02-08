@@ -34,12 +34,14 @@ type TaskHandlers struct {
 type OrchestratorStarter interface {
 	// StartTask starts agent execution for a task.
 	// If workflowStepID is provided, prompt prefix/suffix and plan mode from the step are applied.
-	StartTask(ctx context.Context, taskID string, agentProfileID string, executorID string, priority int, prompt string, workflowStepID string) (*executor.TaskExecution, error)
+	// If planMode is true and the step doesn't already enable it, default plan mode is injected.
+	StartTask(ctx context.Context, taskID string, agentProfileID string, executorID string, priority int, prompt string, workflowStepID string, planMode bool) (*executor.TaskExecution, error)
 	// PrepareTaskSession creates a session entry without launching the agent.
 	// Returns the session ID immediately so it can be returned in the HTTP response.
 	PrepareTaskSession(ctx context.Context, taskID string, agentProfileID string, executorID string, workflowStepID string) (string, error)
 	// StartTaskWithSession starts agent execution for a task using a pre-created session.
-	StartTaskWithSession(ctx context.Context, taskID string, sessionID string, agentProfileID string, executorID string, priority int, prompt string, workflowStepID string) (*executor.TaskExecution, error)
+	// If planMode is true and the step doesn't already enable it, default plan mode is injected.
+	StartTaskWithSession(ctx context.Context, taskID string, sessionID string, agentProfileID string, executorID string, priority int, prompt string, workflowStepID string, planMode bool) (*executor.TaskExecution, error)
 }
 
 func NewTaskHandlers(ctrl *controller.TaskController, orchestrator OrchestratorStarter, repo repository.Repository, planService *service.PlanService, log *logger.Logger) *TaskHandlers {
@@ -228,6 +230,7 @@ type httpCreateTaskRequest struct {
 	StartAgent     bool                      `json:"start_agent,omitempty"`
 	AgentProfileID string                    `json:"agent_profile_id,omitempty"`
 	ExecutorID     string                    `json:"executor_id,omitempty"`
+	PlanMode       bool                      `json:"plan_mode,omitempty"`
 }
 
 type createTaskResponse struct {
@@ -304,7 +307,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 				startCtx, cancel := context.WithTimeout(context.Background(), constants.AgentLaunchTimeout)
 				defer cancel()
 				// Use task description as the initial prompt with workflow step config (prompt prefix/suffix, plan mode)
-				execution, err := h.orchestrator.StartTaskWithSession(startCtx, resp.ID, sessionID, body.AgentProfileID, executorID, body.Priority, resp.Description, workflowStepID)
+				execution, err := h.orchestrator.StartTaskWithSession(startCtx, resp.ID, sessionID, body.AgentProfileID, executorID, body.Priority, resp.Description, workflowStepID, body.PlanMode)
 				if err != nil {
 					h.logger.Error("failed to start agent for task (async)", zap.Error(err), zap.String("task_id", resp.ID), zap.String("session_id", sessionID))
 					return
@@ -468,6 +471,7 @@ type wsCreateTaskRequest struct {
 	StartAgent     bool                      `json:"start_agent,omitempty"`
 	AgentProfileID string                    `json:"agent_profile_id,omitempty"`
 	ExecutorID     string                    `json:"executor_id,omitempty"`
+	PlanMode       bool                      `json:"plan_mode,omitempty"`
 }
 
 func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -526,7 +530,7 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	response := createTaskResponse{TaskDTO: resp}
 	if req.StartAgent && req.AgentProfileID != "" && h.orchestrator != nil {
 		// Use task description as the initial prompt with workflow step config (prompt prefix/suffix, plan mode)
-		execution, err := h.orchestrator.StartTask(ctx, resp.ID, req.AgentProfileID, req.ExecutorID, req.Priority, resp.Description, req.WorkflowStepID)
+		execution, err := h.orchestrator.StartTask(ctx, resp.ID, req.AgentProfileID, req.ExecutorID, req.Priority, resp.Description, req.WorkflowStepID, req.PlanMode)
 		if err != nil {
 			h.logger.Error("failed to start agent for task", zap.Error(err))
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to start agent for task", nil)

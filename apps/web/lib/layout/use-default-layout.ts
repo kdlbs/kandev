@@ -4,8 +4,16 @@ import { useCallback, useMemo } from 'react';
 import { getLocalStorage, setLocalStorage } from '@/lib/local-storage';
 import type { Layout } from 'react-resizable-panels';
 
+const MIN_PANEL_PERCENT = 5;
+
 const buildDefaultLayout = (ids: string[], base: Record<string, number>): Layout => {
-  const raw = ids.map((id) => base[id] ?? 0);
+  // For unknown panel IDs, assign the average of known values so they get reasonable space
+  const knownValues = ids.map((id) => base[id]).filter((v): v is number => v != null && v > 0);
+  const fallback = knownValues.length > 0
+    ? knownValues.reduce((a, b) => a + b, 0) / knownValues.length
+    : 50;
+
+  const raw = ids.map((id) => base[id] ?? fallback);
   const total = raw.reduce((sum, value) => sum + value, 0) || 1;
   const normalized = raw.map((value) => (value / total) * 100);
 
@@ -14,6 +22,12 @@ const buildDefaultLayout = (ids: string[], base: Record<string, number>): Layout
     result[id] = normalized[index];
   });
   return result;
+};
+
+const isLayoutValid = (layout: Layout, panelIds: string[]): boolean => {
+  return panelIds.every(
+    (id) => typeof layout[id] === 'number' && layout[id] >= MIN_PANEL_PERCENT
+  );
 };
 
 const cookieKeyForId = (id: string) => `layout:${encodeURIComponent(id)}`;
@@ -34,12 +48,12 @@ export function useDefaultLayout({
   const defaultLayout = useMemo(() => {
     const stored = getLocalStorage(id, null as unknown as Layout | null);
     if (stored && typeof stored === 'object' && !Array.isArray(stored)) {
-      if (!panelIds || panelIds.every((panelId) => typeof stored[panelId] === 'number')) {
+      if (!panelIds || isLayoutValid(stored, panelIds)) {
         return stored;
       }
     }
     if (serverDefaultLayout && typeof serverDefaultLayout === 'object') {
-      if (!panelIds || panelIds.every((panelId) => typeof serverDefaultLayout[panelId] === 'number')) {
+      if (!panelIds || isLayoutValid(serverDefaultLayout, panelIds)) {
         return serverDefaultLayout;
       }
     }

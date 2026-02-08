@@ -92,5 +92,8 @@ export type {
   MobileKanbanState,
   MobileSessionPanel,
   MobileSessionState,
+  ActiveDocument,
+  DocumentComment,
+  DocumentPanelState,
 } from './ui/types';
 export type { Repository, Branch } from '@/lib/types/http';

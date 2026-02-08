@@ -3,6 +3,7 @@ package handlers
 
 import (
 	"context"
+	"strings"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator"
@@ -106,6 +107,7 @@ func (h *Handlers) wsStartTask(ctx context.Context, msg *ws.Message) (*ws.Messag
 	if err := msg.ParsePayload(&req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
+	req.Prompt = strings.TrimSpace(req.Prompt)
 	if req.TaskID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 	}
@@ -131,7 +133,7 @@ func (h *Handlers) wsStartTask(ctx context.Context, msg *ws.Message) (*ws.Messag
 	}
 
 	// Otherwise, create a new session
-	execution, err := h.service.StartTask(ctx, req.TaskID, req.AgentProfileID, req.ExecutorID, req.Priority, req.Prompt, req.WorkflowStepID)
+	execution, err := h.service.StartTask(ctx, req.TaskID, req.AgentProfileID, req.ExecutorID, req.Priority, req.Prompt, req.WorkflowStepID, false)
 	if err != nil {
 		h.logger.Error("failed to start task", zap.String("task_id", req.TaskID), zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to start task: "+err.Error(), nil)

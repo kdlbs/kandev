@@ -1,12 +1,14 @@
 import { create } from 'zustand';
 import { getLocalStorage, setLocalStorage } from '@/lib/local-storage';
 
-export type ColumnId = 'left' | 'chat' | 'right' | 'preview';
+export type ColumnId = 'left' | 'chat' | 'right' | 'preview' | 'document';
 
 export type LayoutPreset =
   | 'default'
   | 'preview'
   | 'preview-with-right'
+  | 'document'
+  | 'document-with-right'
   | 'chat-only'
   | 'custom';
 
@@ -15,6 +17,7 @@ export type LayoutState = {
   chat: boolean;
   right: boolean;
   preview: boolean;
+  document: boolean;
 };
 
 type LayoutStateBySession = {
@@ -27,6 +30,8 @@ type LayoutStore = LayoutStateBySession & {
   applyPreset: (sessionId: string, preset: LayoutPreset) => void;
   openPreview: (sessionId: string) => void;
   closePreview: (sessionId: string) => void;
+  openDocument: (sessionId: string) => void;
+  closeDocument: (sessionId: string) => void;
   toggleColumn: (sessionId: string, column: ColumnId) => void;
   showColumn: (sessionId: string, column: ColumnId) => void;
   hideColumn: (sessionId: string, column: ColumnId) => void;
@@ -37,10 +42,12 @@ type LayoutStore = LayoutStateBySession & {
 };
 
 const PRESETS: Record<LayoutPreset, Partial<LayoutState>> = {
-  default: { left: true, chat: true, right: true, preview: false },
-  preview: { left: false, chat: true, right: false, preview: true },
-  'preview-with-right': { left: false, chat: true, right: true, preview: true },
-  'chat-only': { left: false, chat: true, right: false, preview: false },
+  default: { left: true, chat: true, right: true, preview: false, document: false },
+  preview: { left: false, chat: true, right: false, preview: true, document: false },
+  'preview-with-right': { left: false, chat: true, right: true, preview: true, document: false },
+  document: { left: true, chat: true, right: false, preview: false, document: true },
+  'document-with-right': { left: true, chat: true, right: true, preview: false, document: true },
+  'chat-only': { left: false, chat: true, right: false, preview: false, document: false },
   custom: {},
 };
 
@@ -49,6 +56,7 @@ const DEFAULT_STATE: LayoutState = {
   chat: true,
   right: true,
   preview: false,
+  document: false,
 };
 
 const detectPreset = (state: LayoutState): LayoutPreset => {
@@ -95,6 +103,7 @@ export const useLayoutStore = create<LayoutStore>((set, get) => ({
             chat: current.chat,
             right: current.right,
             preview: current.preview,
+            document: current.document,
           },
         },
         columnsBySessionId: newColumnsBySessionId,
@@ -108,6 +117,38 @@ export const useLayoutStore = create<LayoutStore>((set, get) => ({
 
   openPreview: (sessionId) => {
     get().applyPreset(sessionId, 'preview-with-right');
+  },
+
+  openDocument: (sessionId) => {
+    get().applyPreset(sessionId, 'document-with-right');
+  },
+
+  closeDocument: (sessionId) => {
+    set((state) => {
+      const previous = state.previousStateBySessionId[sessionId];
+      if (previous && !previous.document) {
+        const newColumnsBySessionId = { ...state.columnsBySessionId, [sessionId]: previous };
+        persistState(newColumnsBySessionId);
+        return {
+          columnsBySessionId: newColumnsBySessionId,
+          currentPresetBySessionId: {
+            ...state.currentPresetBySessionId,
+            [sessionId]: detectPreset(previous),
+          },
+          previousStateBySessionId: { ...state.previousStateBySessionId, [sessionId]: null },
+        };
+      }
+      const newColumnsBySessionId = { ...state.columnsBySessionId, [sessionId]: DEFAULT_STATE };
+      persistState(newColumnsBySessionId);
+      return {
+        columnsBySessionId: newColumnsBySessionId,
+        currentPresetBySessionId: {
+          ...state.currentPresetBySessionId,
+          [sessionId]: 'default',
+        },
+        previousStateBySessionId: { ...state.previousStateBySessionId, [sessionId]: null },
+      };
+    });
   },
 
   closePreview: (sessionId) => {
@@ -192,11 +233,14 @@ export const useLayoutStore = create<LayoutStore>((set, get) => ({
     set((state) => {
       const current = state.columnsBySessionId[sessionId] ?? DEFAULT_STATE;
       const next = { ...current, right: !current.right } as LayoutState;
-      const preset = current.preview || next.preview
-        ? next.right
-          ? 'preview-with-right'
-          : 'preview'
-        : detectPreset(next);
+      let preset: LayoutPreset;
+      if (current.preview || next.preview) {
+        preset = next.right ? 'preview-with-right' : 'preview';
+      } else if (current.document || next.document) {
+        preset = next.right ? 'document-with-right' : 'document';
+      } else {
+        preset = detectPreset(next);
+      }
       const newColumnsBySessionId = { ...state.columnsBySessionId, [sessionId]: next };
       persistState(newColumnsBySessionId);
       return {
@@ -227,7 +271,7 @@ export const useLayoutStore = create<LayoutStore>((set, get) => ({
 
   isVisible: (sessionId, column) => {
     const state = get().columnsBySessionId[sessionId];
-    if (!state) return column !== 'preview';
+    if (!state) return column !== 'preview' && column !== 'document';
     return state[column];
   },
 

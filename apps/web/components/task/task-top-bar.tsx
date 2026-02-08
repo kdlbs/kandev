@@ -27,6 +27,7 @@ import { useSessionGitStatus } from '@/hooks/domains/session/use-session-git-sta
 import { formatUserHomePath } from '@/lib/utils';
 import { EditorsMenu } from '@/components/task/editors-menu';
 import { PreviewControls } from '@/components/task/preview/preview-controls';
+import { DocumentControls } from '@/components/task/document/document-controls';
 import { VcsSplitButton } from '@/components/vcs-split-button';
 import { DEBUG_UI } from '@/lib/config';
 
@@ -243,6 +244,7 @@ const TaskTopBar = memo(function TaskTopBar({
             </TooltipContent>
           </Tooltip>
         )}
+        <DocumentControls activeSessionId={activeSessionId ?? null} />
         <PreviewControls activeSessionId={activeSessionId ?? null} hasDevScript={hasDevScript} />
         <EditorsMenu activeSessionId={activeSessionId ?? null} />
 

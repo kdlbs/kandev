@@ -292,7 +292,7 @@ func (s *Server) getTaskPlanHandler() server.ToolHandlerFunc {
 
 		// Return the plan content for easy reading
 		if content, ok := result["content"].(string); ok {
-			return mcp.NewToolResultText(fmt.Sprintf("# Task Plan\n\n%s", content)), nil
+			return mcp.NewToolResultText(content), nil
 		}
 
 		data, _ := json.MarshalIndent(result, "", "  ")

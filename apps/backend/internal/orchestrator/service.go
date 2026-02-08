@@ -54,7 +54,7 @@ func DefaultServiceConfig() ServiceConfig {
 // MessageCreator is an interface for creating messages on tasks
 type MessageCreator interface {
 	CreateAgentMessage(ctx context.Context, taskID, content, agentSessionID, turnID string) error
-	CreateUserMessage(ctx context.Context, taskID, content, agentSessionID, turnID string) error
+	CreateUserMessage(ctx context.Context, taskID, content, agentSessionID, turnID string, metadata map[string]interface{}) error
 	// CreateToolCallMessage creates a message for a tool call.
 	// normalized contains the typed tool payload data.
 	// parentToolCallID is the parent Task tool call ID for subagent nesting (empty for top-level).

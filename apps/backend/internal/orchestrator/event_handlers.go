@@ -186,7 +186,8 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 
 					// Note: Attachments will be sent to the agent via PromptTask but not stored in the message
 					// This matches the behavior of direct prompts
-					err := s.messageCreator.CreateUserMessage(promptCtx, queuedMsg.TaskID, queuedMsg.Content, queuedMsg.SessionID, turnID)
+					meta := NewUserMessageMeta().WithPlanMode(queuedMsg.PlanMode)
+					err := s.messageCreator.CreateUserMessage(promptCtx, queuedMsg.TaskID, queuedMsg.Content, queuedMsg.SessionID, turnID, meta.ToMap())
 					if err != nil {
 						s.logger.Error("failed to create user message for queued message",
 							zap.String("session_id", queuedMsg.SessionID),

@@ -1,7 +1,7 @@
 'use client';
 
 import { memo, useCallback, useState, useEffect, useMemo, useRef } from 'react';
-import { IconSparkles, IconCheck, IconChevronDown, IconX } from '@tabler/icons-react';
+import { IconCheck, IconChevronDown, IconX } from '@tabler/icons-react';
 import { TabsContent } from '@kandev/ui/tabs';
 import { Button } from '@kandev/ui/button';
 import {
@@ -14,7 +14,6 @@ import {
 import { SessionPanel } from '@kandev/ui/pannel-session';
 import { TaskChatPanel } from './task-chat-panel';
 import { TaskChangesPanel } from './task-changes-panel';
-import { TaskPlanPanel } from './task-plan-panel';
 import { FileEditorContent } from './file-editor-content';
 import { FileImageViewer } from './file-image-viewer';
 import { FileBinaryViewer } from './file-binary-viewer';
@@ -25,7 +24,7 @@ import { SessionTabs, type SessionTab } from '@/components/session-tabs';
 import { approveSessionAction } from '@/app/actions/workspaces';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import { requestFileContent, updateFileContent, deleteFile } from '@/lib/ws/workspace-files';
-import { getPlanLastSeen, setPlanLastSeen, getOpenFileTabs, setOpenFileTabs as saveOpenFileTabs, getActiveTabForSession, setActiveTabForSession } from '@/lib/local-storage';
+import { getOpenFileTabs, setOpenFileTabs as saveOpenFileTabs, getActiveTabForSession, setActiveTabForSession } from '@/lib/local-storage';
 import { useSessionGitStatus } from '@/hooks/domains/session/use-session-git-status';
 import { useSessionCommits } from '@/hooks/domains/session/use-session-commits';
 import { generateUnifiedDiff, calculateHash } from '@/lib/utils/file-diff';
@@ -124,7 +123,7 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
     if (typeof window !== 'undefined' && activeSessionId) {
       const savedTab = getActiveTabForSession(activeSessionId, 'chat');
       // Only return non-file tabs synchronously, file tabs need async content loading
-      if (savedTab === 'chat' || savedTab === 'plan' || savedTab === 'changes') {
+      if (savedTab === 'chat' || savedTab === 'changes') {
         return savedTab;
       }
     }
@@ -210,7 +209,7 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
     // If no file tabs to load, just restore the active tab
     if (savedTabs.length === 0) {
       // Only set if it's a valid non-file tab
-      if (savedActiveTab === 'chat' || savedActiveTab === 'plan' || savedActiveTab === 'changes') {
+      if (savedActiveTab === 'chat' || savedActiveTab === 'changes') {
         setLeftTab(savedActiveTab);
       } else {
         setLeftTab('chat');
@@ -290,7 +289,7 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
         }
       } else {
         // No tabs could be loaded, fall back to non-file tab
-        if (savedActiveTab === 'chat' || savedActiveTab === 'plan' || savedActiveTab === 'changes') {
+        if (savedActiveTab === 'chat' || savedActiveTab === 'changes') {
           setLeftTab(savedActiveTab);
         } else {
           setLeftTab('chat');
@@ -330,31 +329,14 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
     }
   }, [leftTab, onActiveFileChange]);
 
-  // Track plan updates for notification dot
-  const plan = useAppStore((state) =>
-    activeTaskId ? state.taskPlans.byTaskId[activeTaskId] : null
-  );
-
-  // Derive notification state: show dot if plan was updated by agent and we haven't seen it
-  const hasUnseenPlanUpdate = useMemo(() => {
-    if (!activeTaskId || !plan || leftTab === 'plan') return false;
-    if (plan.created_by !== 'agent') return false;
-    const lastSeen = getPlanLastSeen(activeTaskId);
-    return plan.updated_at !== lastSeen;
-  }, [activeTaskId, plan, leftTab]);
-
-  // Handle tab change - mark plan as seen when switching to plan tab
+  // Handle tab change
   const handleTabChange = useCallback((tab: string) => {
-    // If switching to plan tab, mark current plan as seen in localStorage
-    if (tab === 'plan' && activeTaskId && plan?.updated_at) {
-      setPlanLastSeen(activeTaskId, plan.updated_at);
-    }
     setLeftTab(tab);
     // Persist tab selection per-session (for all tabs including file tabs)
     if (activeSessionId) {
       setActiveTabForSession(activeSessionId, tab);
     }
-  }, [activeTaskId, activeSessionId, plan]);
+  }, [activeSessionId]);
 
   // Handle external diff selection
   useEffect(() => {
@@ -530,16 +512,6 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
 
   const tabs: SessionTab[] = useMemo(() => {
     const staticTabs: SessionTab[] = [
-      {
-        id: 'plan',
-        label: 'Plan',
-        icon: hasUnseenPlanUpdate ? (
-          <div className="relative">
-            <IconSparkles className="h-3.5 w-3.5 text-amber-500 dark:text-amber-400 animate-pulse" />
-            <span className="absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-amber-500 dark:bg-amber-400 animate-ping" />
-          </div>
-        ) : undefined,
-      },
       // Only show "All changes" tab if there are changes
       ...(hasChanges ? [{ id: 'changes', label: 'All changes' }] : []),
       { id: 'chat', label: 'Chat' },
@@ -560,7 +532,7 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
     });
 
     return [...staticTabs, ...fileTabs];
-  }, [openFileTabs, handleCloseFileTab, hasUnseenPlanUpdate, hasChanges]);
+  }, [openFileTabs, handleCloseFileTab, hasChanges]);
 
   return (
     <SessionPanel borderSide="right" margin="right">
@@ -568,7 +540,7 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
         tabs={tabs}
         activeTab={leftTab}
         onTabChange={handleTabChange}
-        separatorAfterIndex={openFileTabs.length > 0 ? (hasChanges ? 2 : 1) : undefined}
+        separatorAfterIndex={openFileTabs.length > 0 ? (hasChanges ? 1 : 0) : undefined}
         className="flex-1 min-h-0 flex flex-col gap-2"
         rightContent={
           showApproveButton ? (
@@ -611,13 +583,6 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
           ) : undefined
         }
       >
-
-        <TabsContent value="plan" className="flex-1 min-h-0" forceMount style={{ display: leftTab === 'plan' ? undefined : 'none' }}>
-          <TaskPlanPanel
-            taskId={activeTaskId}
-            visible={leftTab === 'plan'}
-          />
-        </TabsContent>
 
         <TabsContent value="changes" className="flex-1 min-h-0">
           <TaskChangesPanel
