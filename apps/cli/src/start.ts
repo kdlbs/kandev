@@ -86,6 +86,19 @@ export async function runStart({
     }
   }
 
+  // Link public directory (fonts, images, etc.) into standalone output
+  const webPublicDir = path.join(repoRoot, "apps", "web", "public");
+  const standalonePublicDir = path.join(webStandaloneDir, "public");
+  if (fs.existsSync(webPublicDir) && !fs.existsSync(standalonePublicDir)) {
+    try {
+      fs.symlinkSync(webPublicDir, standalonePublicDir, "junction");
+    } catch (err) {
+      console.warn(
+        `[kandev] failed to link public assets: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
   // Production mode: use warn log level for clean output unless verbose/debug
   const showOutput = verbose || debug;
   const dbPath = path.join(DATA_DIR, "kandev.db");
