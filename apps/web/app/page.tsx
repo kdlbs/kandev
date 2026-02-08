@@ -59,6 +59,7 @@ export default async function Page({ searchParams }: PageProps) {
         defaultEditorId: userSettings?.default_editor_id || null,
         enablePreviewOnClick: settingsEnablePreviewOnClick,
         chatSubmitKey: userSettings?.chat_submit_key ?? 'cmd_enter',
+        reviewAutoMarkOnScroll: userSettings?.review_auto_mark_on_scroll ?? true,
         loaded: Boolean(userSettings),
       },
     };

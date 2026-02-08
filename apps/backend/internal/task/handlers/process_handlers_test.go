@@ -361,6 +361,15 @@ func (m *mockRepository) UpdateTaskPlan(ctx context.Context, plan *models.TaskPl
 func (m *mockRepository) DeleteTaskPlan(ctx context.Context, taskID string) error {
 	return nil
 }
+func (m *mockRepository) UpsertSessionFileReview(ctx context.Context, review *models.SessionFileReview) error {
+	return nil
+}
+func (m *mockRepository) GetSessionFileReviews(ctx context.Context, sessionID string) ([]*models.SessionFileReview, error) {
+	return nil, nil
+}
+func (m *mockRepository) DeleteSessionFileReviews(ctx context.Context, sessionID string) error {
+	return nil
+}
 
 func newTestService(t *testing.T, scripts map[string][]*models.RepositoryScript) *service.Service {
 	log, err := logger.NewLogger(logger.LoggingConfig{

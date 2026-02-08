@@ -112,14 +112,15 @@ func (r *sqliteRepository) UpsertUserSettings(ctx context.Context, settings *mod
 		settings.CreatedAt = settings.UpdatedAt
 	}
 	settingsPayload, err := json.Marshal(map[string]interface{}{
-		"workspace_id":           settings.WorkspaceID,
-		"board_id":               settings.BoardID,
-		"repository_ids":         settings.RepositoryIDs,
-		"initial_setup_complete": settings.InitialSetupComplete,
-		"preferred_shell":        settings.PreferredShell,
-		"default_editor_id":      settings.DefaultEditorID,
-		"enable_preview_on_click": settings.EnablePreviewOnClick,
-		"chat_submit_key":        settings.ChatSubmitKey,
+		"workspace_id":              settings.WorkspaceID,
+		"board_id":                  settings.BoardID,
+		"repository_ids":            settings.RepositoryIDs,
+		"initial_setup_complete":    settings.InitialSetupComplete,
+		"preferred_shell":           settings.PreferredShell,
+		"default_editor_id":         settings.DefaultEditorID,
+		"enable_preview_on_click":   settings.EnablePreviewOnClick,
+		"chat_submit_key":           settings.ChatSubmitKey,
+		"review_auto_mark_on_scroll": settings.ReviewAutoMarkOnScroll,
 	})
 	if err != nil {
 		return err
@@ -158,14 +159,15 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		return settings, nil
 	}
 	var payload struct {
-		WorkspaceID          string   `json:"workspace_id"`
-		BoardID              string   `json:"board_id"`
-		RepositoryIDs        []string `json:"repository_ids"`
-		InitialSetupComplete bool     `json:"initial_setup_complete"`
-		PreferredShell       string   `json:"preferred_shell"`
-		DefaultEditorID      string   `json:"default_editor_id"`
-		EnablePreviewOnClick bool     `json:"enable_preview_on_click"`
-		ChatSubmitKey        string   `json:"chat_submit_key"`
+		WorkspaceID            string   `json:"workspace_id"`
+		BoardID                string   `json:"board_id"`
+		RepositoryIDs          []string `json:"repository_ids"`
+		InitialSetupComplete   bool     `json:"initial_setup_complete"`
+		PreferredShell         string   `json:"preferred_shell"`
+		DefaultEditorID        string   `json:"default_editor_id"`
+		EnablePreviewOnClick   bool     `json:"enable_preview_on_click"`
+		ChatSubmitKey          string   `json:"chat_submit_key"`
+		ReviewAutoMarkOnScroll *bool    `json:"review_auto_mark_on_scroll"`
 	}
 	if err := json.Unmarshal([]byte(settingsRaw), &payload); err != nil {
 		return nil, err
@@ -181,6 +183,12 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	// Default to "cmd_enter" if empty
 	if settings.ChatSubmitKey == "" {
 		settings.ChatSubmitKey = "cmd_enter"
+	}
+	// Default to true when not set
+	if payload.ReviewAutoMarkOnScroll != nil {
+		settings.ReviewAutoMarkOnScroll = *payload.ReviewAutoMarkOnScroll
+	} else {
+		settings.ReviewAutoMarkOnScroll = true
 	}
 	return settings, nil
 }

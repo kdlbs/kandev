@@ -284,6 +284,7 @@ export type UserSettingsUpdatedPayload = {
   default_editor_id?: string;
   enable_preview_on_click?: boolean;
   chat_submit_key?: string;
+  review_auto_mark_on_scroll?: boolean;
   updated_at?: string;
 };
 

@@ -227,6 +227,7 @@ export default async function SessionPage({
         defaultEditorId: userSettings?.default_editor_id || null,
         enablePreviewOnClick: userSettings?.enable_preview_on_click ?? false,
         chatSubmitKey: userSettings?.chat_submit_key ?? 'cmd_enter',
+        reviewAutoMarkOnScroll: userSettings?.review_auto_mark_on_scroll ?? true,
         loaded: Boolean(userSettings),
       },
     };

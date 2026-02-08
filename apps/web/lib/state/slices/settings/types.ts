@@ -77,6 +77,7 @@ export type UserSettingsState = {
   defaultEditorId: string | null;
   enablePreviewOnClick: boolean;
   chatSubmitKey: 'enter' | 'cmd_enter';
+  reviewAutoMarkOnScroll: boolean;
   loaded: boolean;
 };
 

@@ -413,6 +413,18 @@ type TaskPlan struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// SessionFileReview tracks per-file review state within a session
+type SessionFileReview struct {
+	ID         string     `json:"id"`
+	SessionID  string     `json:"session_id"`
+	FilePath   string     `json:"file_path"`
+	Reviewed   bool       `json:"reviewed"`
+	DiffHash   string     `json:"diff_hash"`
+	ReviewedAt *time.Time `json:"reviewed_at,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
+}
+
 // ToAPI converts internal Task to API type
 func (t *Task) ToAPI() *v1.Task {
 	// Convert TaskRepository models to API types

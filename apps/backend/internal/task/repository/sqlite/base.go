@@ -366,6 +366,26 @@ func (r *Repository) initSchema() error {
 		return err
 	}
 
+	reviewSchema := `
+	CREATE TABLE IF NOT EXISTS session_file_reviews (
+		id TEXT PRIMARY KEY,
+		session_id TEXT NOT NULL,
+		file_path TEXT NOT NULL,
+		reviewed INTEGER NOT NULL DEFAULT 0,
+		diff_hash TEXT NOT NULL DEFAULT '',
+		reviewed_at DATETIME,
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL,
+		FOREIGN KEY (session_id) REFERENCES task_sessions(id) ON DELETE CASCADE,
+		UNIQUE(session_id, file_path)
+	);
+	CREATE INDEX IF NOT EXISTS idx_session_file_reviews_session ON session_file_reviews(session_id);
+	`
+
+	if _, err := r.db.Exec(reviewSchema); err != nil {
+		return err
+	}
+
 	if err := r.ensureDefaultWorkspace(); err != nil {
 		return err
 	}

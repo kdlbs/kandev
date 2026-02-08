@@ -427,6 +427,17 @@ func (m *mockRepository) GetTaskPlan(ctx context.Context, taskID string) (*model
 func (m *mockRepository) UpdateTaskPlan(ctx context.Context, plan *models.TaskPlan) error { return nil }
 func (m *mockRepository) DeleteTaskPlan(ctx context.Context, taskID string) error         { return nil }
 
+// Session File Review operations
+func (m *mockRepository) UpsertSessionFileReview(ctx context.Context, review *models.SessionFileReview) error {
+	return nil
+}
+func (m *mockRepository) GetSessionFileReviews(ctx context.Context, sessionID string) ([]*models.SessionFileReview, error) {
+	return nil, nil
+}
+func (m *mockRepository) DeleteSessionFileReviews(ctx context.Context, sessionID string) error {
+	return nil
+}
+
 // Close operation
 func (m *mockRepository) Close() error { return nil }
 

@@ -666,6 +666,10 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 	if running, err := e.repo.GetExecutorRunningBySessionID(ctx, session.ID); err == nil && running != nil {
 		if running.ResumeToken != "" && startAgent {
 			req.ACPSessionID = running.ResumeToken
+			// Clear TaskDescription so the agent doesn't receive an automatic prompt on resume.
+			// The session context is restored via ACP session/load; sending a prompt here would
+			// cause the agent to start working immediately instead of waiting for user input.
+			req.TaskDescription = ""
 			e.logger.Info("found resume token for session resumption",
 				zap.String("task_id", task.ID),
 				zap.String("session_id", session.ID))

@@ -138,6 +138,17 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
     }
   }, [leftTab, hasChanges]);
 
+  // Listen for external requests to switch to 'changes' tab
+  useEffect(() => {
+    const handler = () => {
+      if (hasChanges) {
+        setLeftTab('changes');
+      }
+    };
+    window.addEventListener('switch-to-changes-tab', handler);
+    return () => window.removeEventListener('switch-to-changes-tab', handler);
+  }, [hasChanges]);
+
   // Request changes state - triggers focus and tooltip on chat input
   const [showRequestChangesTooltip, setShowRequestChangesTooltip] = useState(false);
 

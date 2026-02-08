@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/controller"
 	"github.com/kandev/kandev/internal/task/dto"
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -86,6 +88,10 @@ func (h *TaskHandlers) registerWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionSessionGitSnapshots, h.wsGetGitSnapshots)
 	dispatcher.RegisterFunc(ws.ActionSessionGitCommits, h.wsGetSessionCommits)
 	dispatcher.RegisterFunc(ws.ActionSessionCumulativeDiff, h.wsGetCumulativeDiff)
+	// Session file review handlers
+	dispatcher.RegisterFunc(ws.ActionSessionFileReviewGet, h.wsGetSessionFileReviews)
+	dispatcher.RegisterFunc(ws.ActionSessionFileReviewUpdate, h.wsUpdateSessionFileReview)
+	dispatcher.RegisterFunc(ws.ActionSessionFileReviewReset, h.wsResetSessionFileReviews)
 	// Task plan handlers
 	dispatcher.RegisterFunc(ws.ActionTaskPlanCreate, h.wsCreateTaskPlan)
 	dispatcher.RegisterFunc(ws.ActionTaskPlanGet, h.wsGetTaskPlan)
@@ -768,6 +774,97 @@ func (h *TaskHandlers) wsGetCumulativeDiff(ctx context.Context, msg *ws.Message)
 	})
 }
 
+
+// Session File Review Handlers
+
+type wsGetSessionFileReviewsRequest struct {
+	SessionID string `json:"session_id"`
+}
+
+func (h *TaskHandlers) wsGetSessionFileReviews(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req wsGetSessionFileReviewsRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.SessionID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+	}
+
+	reviews, err := h.repo.GetSessionFileReviews(ctx, req.SessionID)
+	if err != nil {
+		h.logger.Error("failed to get session file reviews", zap.Error(err), zap.String("session_id", req.SessionID))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get session file reviews", nil)
+	}
+
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		"session_id": req.SessionID,
+		"reviews":    reviews,
+	})
+}
+
+type wsUpdateSessionFileReviewRequest struct {
+	SessionID string `json:"session_id"`
+	FilePath  string `json:"file_path"`
+	Reviewed  bool   `json:"reviewed"`
+	DiffHash  string `json:"diff_hash"`
+}
+
+func (h *TaskHandlers) wsUpdateSessionFileReview(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req wsUpdateSessionFileReviewRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.SessionID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+	}
+	if req.FilePath == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "file_path is required", nil)
+	}
+
+	review := &models.SessionFileReview{
+		SessionID: req.SessionID,
+		FilePath:  req.FilePath,
+		Reviewed:  req.Reviewed,
+		DiffHash:  req.DiffHash,
+	}
+	if req.Reviewed {
+		now := time.Now().UTC()
+		review.ReviewedAt = &now
+	}
+
+	if err := h.repo.UpsertSessionFileReview(ctx, review); err != nil {
+		h.logger.Error("failed to update session file review", zap.Error(err), zap.String("session_id", req.SessionID))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update session file review", nil)
+	}
+
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		"success": true,
+		"review":  review,
+	})
+}
+
+type wsResetSessionFileReviewsRequest struct {
+	SessionID string `json:"session_id"`
+}
+
+func (h *TaskHandlers) wsResetSessionFileReviews(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req wsResetSessionFileReviewsRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.SessionID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+	}
+
+	if err := h.repo.DeleteSessionFileReviews(ctx, req.SessionID); err != nil {
+		h.logger.Error("failed to reset session file reviews", zap.Error(err), zap.String("session_id", req.SessionID))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to reset session file reviews", nil)
+	}
+
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		"success": true,
+	})
+}
 
 // Task Plan Handlers
 
