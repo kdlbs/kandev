@@ -80,11 +80,14 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 
 // StartTaskWithSession starts agent execution for a task using a pre-created session.
 // This is used after PrepareTaskSession to continue with the agent launch.
-func (s *Service) StartTaskWithSession(ctx context.Context, taskID string, sessionID string, agentProfileID string, executorID string, priority int, prompt string, workflowStepID string) (*executor.TaskExecution, error) {
+// If planMode is true and the workflow step doesn't already apply plan mode,
+// default plan mode instructions are injected into the prompt.
+func (s *Service) StartTaskWithSession(ctx context.Context, taskID string, sessionID string, agentProfileID string, executorID string, priority int, prompt string, workflowStepID string, planMode bool) (*executor.TaskExecution, error) {
 	s.logger.Debug("starting task with existing session",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID),
-		zap.String("agent_profile_id", agentProfileID))
+		zap.String("agent_profile_id", agentProfileID),
+		zap.Bool("plan_mode", planMode))
 
 	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateScheduling); err != nil {
 		s.logger.Warn("failed to update task state to SCHEDULING",
@@ -106,17 +109,7 @@ func (s *Service) StartTaskWithSession(ctx context.Context, taskID string, sessi
 		effectivePrompt = task.Description
 	}
 
-	// Apply workflow step configuration if provided
-	if workflowStepID != "" && s.workflowStepGetter != nil {
-		step, err := s.workflowStepGetter.GetStep(ctx, workflowStepID)
-		if err != nil {
-			s.logger.Warn("failed to get workflow step for prompt building",
-				zap.String("workflow_step_id", workflowStepID),
-				zap.Error(err))
-		} else {
-			effectivePrompt = s.buildWorkflowPrompt(effectivePrompt, step, task.ID)
-		}
-	}
+	effectivePrompt, planModeActive := s.applyWorkflowAndPlanMode(ctx, effectivePrompt, task.ID, workflowStepID, planMode)
 
 	execution, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, agentProfileID, executorID, effectivePrompt, workflowStepID)
 	if err != nil {
@@ -124,14 +117,7 @@ func (s *Service) StartTaskWithSession(ctx context.Context, taskID string, sessi
 	}
 
 	if execution.SessionID != "" {
-		s.updateTaskSessionState(ctx, taskID, execution.SessionID, models.TaskSessionStateRunning, "", true)
-		if s.messageCreator != nil && effectivePrompt != "" {
-			if err := s.messageCreator.CreateUserMessage(ctx, taskID, effectivePrompt, execution.SessionID, s.getActiveTurnID(execution.SessionID)); err != nil {
-				s.logger.Error("failed to create initial user message",
-					zap.String("task_id", taskID),
-					zap.Error(err))
-			}
-		}
+		s.recordInitialMessage(ctx, taskID, execution.SessionID, effectivePrompt, planModeActive)
 	}
 
 	return execution, nil
@@ -141,14 +127,17 @@ func (s *Service) StartTaskWithSession(ctx context.Context, taskID string, sessi
 // If workflowStepID is provided and workflowStepGetter is set, the prompt will be built
 // using the step's prompt_prefix + base prompt + prompt_suffix, and plan mode will be
 // applied if the step has plan_mode enabled.
-func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID string, executorID string, priority int, prompt string, workflowStepID string) (*executor.TaskExecution, error) {
+// If planMode is true and the workflow step doesn't already apply plan mode,
+// default plan mode instructions are injected into the prompt.
+func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID string, executorID string, priority int, prompt string, workflowStepID string, planMode bool) (*executor.TaskExecution, error) {
 	s.logger.Debug("manually starting task",
 		zap.String("task_id", taskID),
 		zap.String("agent_profile_id", agentProfileID),
 		zap.String("executor_id", executorID),
 		zap.Int("priority", priority),
 		zap.Int("prompt_length", len(prompt)),
-		zap.String("workflow_step_id", workflowStepID))
+		zap.String("workflow_step_id", workflowStepID),
+		zap.Bool("plan_mode", planMode))
 
 	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateScheduling); err != nil {
 		s.logger.Warn("failed to update task state to SCHEDULING",
@@ -176,25 +165,7 @@ func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID s
 		effectivePrompt = task.Description
 	}
 
-	// Apply workflow step configuration if provided
-	if workflowStepID != "" && s.workflowStepGetter != nil {
-		step, err := s.workflowStepGetter.GetStep(ctx, workflowStepID)
-		if err != nil {
-			s.logger.Warn("failed to get workflow step for prompt building",
-				zap.String("workflow_step_id", workflowStepID),
-				zap.Error(err))
-			// Continue without step config rather than failing
-		} else {
-			// Build prompt with prefix and suffix
-			effectivePrompt = s.buildWorkflowPrompt(effectivePrompt, step, task.ID)
-
-			s.logger.Debug("applied workflow step prompt config",
-				zap.String("workflow_step_id", workflowStepID),
-				zap.String("step_name", step.Name),
-				zap.Bool("plan_mode", step.PlanMode),
-				zap.Int("effective_prompt_length", len(effectivePrompt)))
-		}
-	}
+	effectivePrompt, planModeActive := s.applyWorkflowAndPlanMode(ctx, effectivePrompt, task.ID, workflowStepID, planMode)
 
 	execution, err := s.executor.ExecuteWithProfile(ctx, task, agentProfileID, executorID, effectivePrompt, workflowStepID)
 	if err != nil {
@@ -202,21 +173,55 @@ func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID s
 	}
 
 	if execution.SessionID != "" {
-		s.updateTaskSessionState(ctx, taskID, execution.SessionID, models.TaskSessionStateRunning, "", true)
-		// Create user message for the initial prompt
-		if s.messageCreator != nil && effectivePrompt != "" {
-			if err := s.messageCreator.CreateUserMessage(ctx, taskID, effectivePrompt, execution.SessionID, s.getActiveTurnID(execution.SessionID)); err != nil {
-				s.logger.Error("failed to create initial user message",
-					zap.String("task_id", taskID),
-					zap.Error(err))
-			}
-		}
+		s.recordInitialMessage(ctx, taskID, execution.SessionID, effectivePrompt, planModeActive)
 	}
 
 	// Note: Task stays in SCHEDULING state until the agent is fully initialized.
 	// The executor will transition to IN_PROGRESS after StartAgentProcess() succeeds.
 
 	return execution, nil
+}
+
+// applyWorkflowAndPlanMode applies workflow step configuration and plan mode injection to a prompt.
+// Returns the effective prompt and whether plan mode is active (from either the step or the caller).
+func (s *Service) applyWorkflowAndPlanMode(ctx context.Context, prompt string, taskID string, workflowStepID string, planMode bool) (string, bool) {
+	effectivePrompt := prompt
+
+	stepHasPlanMode := false
+	if workflowStepID != "" && s.workflowStepGetter != nil {
+		step, err := s.workflowStepGetter.GetStep(ctx, workflowStepID)
+		if err != nil {
+			s.logger.Warn("failed to get workflow step for prompt building",
+				zap.String("workflow_step_id", workflowStepID),
+				zap.Error(err))
+		} else {
+			stepHasPlanMode = step.PlanMode
+			effectivePrompt = s.buildWorkflowPrompt(effectivePrompt, step, taskID)
+		}
+	}
+
+	if planMode && !stepHasPlanMode {
+		var parts []string
+		parts = append(parts, sysprompt.Wrap(sysprompt.PlanMode))
+		parts = append(parts, sysprompt.Wrap(sysprompt.InterpolatePlaceholders(sysprompt.DefaultPlanPrefix, taskID)))
+		parts = append(parts, effectivePrompt)
+		effectivePrompt = strings.Join(parts, "\n\n")
+	}
+
+	return effectivePrompt, planMode || stepHasPlanMode
+}
+
+// recordInitialMessage creates the initial user message and updates session state after launch.
+func (s *Service) recordInitialMessage(ctx context.Context, taskID, sessionID, prompt string, planModeActive bool) {
+	s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateRunning, "", true)
+	if s.messageCreator != nil && prompt != "" {
+		meta := NewUserMessageMeta().WithPlanMode(planModeActive)
+		if err := s.messageCreator.CreateUserMessage(ctx, taskID, prompt, sessionID, s.getActiveTurnID(sessionID), meta.ToMap()); err != nil {
+			s.logger.Error("failed to create initial user message",
+				zap.String("task_id", taskID),
+				zap.Error(err))
+		}
+	}
 }
 
 // buildWorkflowPrompt constructs the effective prompt using workflow step configuration.

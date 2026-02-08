@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, FormEvent, memo, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { IconLoader2, IconGitBranch } from '@tabler/icons-react';
+import { IconLoader2, IconGitBranch, IconListCheck } from '@tabler/icons-react';
 import {
   Dialog,
   DialogContent,
@@ -43,6 +43,7 @@ import { getLocalStorage, setLocalStorage } from '@/lib/local-storage';
 import { STORAGE_KEYS } from '@/lib/settings/constants';
 import { linkToSession } from '@/lib/links';
 import { getExecutorIcon } from '@/lib/executor-icons';
+import { useLayoutStore } from '@/lib/state/layout-store';
 
 interface TaskCreateDialogProps {
   open: boolean;
@@ -1030,6 +1031,87 @@ export function TaskCreateDialog({
     }
   };
 
+  // Access layout/UI store for plan mode creation
+  const openDocument = useLayoutStore((state) => state.openDocument);
+  const setActiveDocument = useAppStore((state) => state.setActiveDocument);
+  const setPlanMode = useAppStore((state) => state.setPlanMode);
+
+  const handleCreateInPlanMode = async () => {
+    if (!workspaceId || !boardId) return;
+    if (!repositoryId && !selectedLocalRepo) return;
+    const columnId = defaultColumnId;
+    if (!columnId) return;
+    if (!agentProfileId) return;
+
+    const trimmedTitle = taskName.trim();
+    if (!trimmedTitle) return;
+
+    const description = (descriptionInputRef.current?.getValue() ?? '').trim();
+
+    // Find auto-start step
+    const autoStartStep = columns.find((column) => column.autoStartAgent);
+    const targetColumnId = autoStartStep?.id ?? columnId;
+
+    setIsCreatingTask(true);
+    try {
+      const taskResponse = await createTask({
+        workspace_id: workspaceId,
+        board_id: boardId,
+        workflow_step_id: targetColumnId,
+        title: trimmedTitle,
+        description,
+        repositories: repositoryId
+          ? [{ repository_id: repositoryId, base_branch: branch || undefined }]
+          : selectedLocalRepo
+            ? [{
+                repository_id: '',
+                base_branch: branch || undefined,
+                local_path: selectedLocalRepo.path,
+                default_branch: selectedLocalRepo.default_branch || undefined,
+              }]
+            : [],
+        state: 'IN_PROGRESS',
+        start_agent: true,
+        agent_profile_id: agentProfileId || undefined,
+        executor_id: executorId || undefined,
+        plan_mode: true,
+      });
+
+      const newSessionId = taskResponse.session_id ?? taskResponse.primary_session_id ?? null;
+      const newTaskId = taskResponse.id;
+      onSuccess?.(taskResponse, 'create', { taskSessionId: newSessionId });
+
+      // Reset form
+      setHasTitle(false);
+      setHasDescription(false);
+      setTaskName('');
+      setRepositoryId('');
+      setBranch('');
+      setStartAgent(true);
+      setAgentProfileId('');
+      setEnvironmentId('');
+      setExecutorId('');
+
+      // Set document panel state before navigation
+      if (newSessionId) {
+        setActiveDocument(newSessionId, { type: 'plan', taskId: newTaskId });
+        openDocument(newSessionId);
+        setPlanMode(newSessionId, true);
+        router.push(linkToSession(newSessionId));
+      } else {
+        onOpenChange(false);
+      }
+    } catch (error) {
+      toast({
+        title: 'Failed to create task',
+        description: error instanceof Error ? error.message : 'An error occurred while creating the task',
+        variant: 'error',
+      });
+    } finally {
+      setIsCreatingTask(false);
+    }
+  };
+
   const handleCancel = () => {
     setHasTitle(false);
     setHasDescription(false);
@@ -1262,6 +1344,30 @@ export function TaskCreateDialog({
                 Cancel
               </Button>
             </DialogClose>
+            {isCreateMode && startAgent && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full h-10 sm:w-auto sm:h-7 gap-1.5"
+                    disabled={
+                      isCreatingSession ||
+                      isCreatingTask ||
+                      !hasTitle ||
+                      (!repositoryId && !selectedLocalRepo) ||
+                      !branch ||
+                      !agentProfileId
+                    }
+                    onClick={handleCreateInPlanMode}
+                  >
+                    <IconListCheck className="h-3.5 w-3.5" />
+                    Plan
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Create task and open in plan mode (no description needed)</TooltipContent>
+              </Tooltip>
+            )}
             <KeyboardShortcutTooltip shortcut={SHORTCUTS.SUBMIT}>
               <Button
                 type="submit"

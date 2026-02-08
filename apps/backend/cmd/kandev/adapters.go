@@ -250,13 +250,14 @@ func (a *messageCreatorAdapter) CreateAgentMessage(ctx context.Context, taskID, 
 }
 
 // CreateUserMessage creates a message with author_type="user"
-func (a *messageCreatorAdapter) CreateUserMessage(ctx context.Context, taskID, content, agentSessionID, turnID string) error {
+func (a *messageCreatorAdapter) CreateUserMessage(ctx context.Context, taskID, content, agentSessionID, turnID string, metadata map[string]interface{}) error {
 	_, err := a.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
 		TaskSessionID: agentSessionID,
 		TaskID:        taskID,
 		TurnID:        turnID,
 		Content:       content,
 		AuthorType:    "user",
+		Metadata:      metadata,
 	})
 	return err
 }

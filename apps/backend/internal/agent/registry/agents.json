@@ -175,7 +175,7 @@
       "cmd": [
         "npx",
         "-y",
-        "@openai/codex@0.88.0",
+        "@openai/codex@0.98.0",
         "app-server"
       ],
       "passthrough_config": {
@@ -1084,7 +1084,9 @@
       "enabled": false,
       "image": "",
       "tag": "",
-      "cmd": ["mock-agent"],
+      "cmd": [
+        "mock-agent"
+      ],
       "working_dir": "{workspace}",
       "required_env": [],
       "env": {},

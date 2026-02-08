@@ -11,6 +11,7 @@ import {
   IconGitCommit,
   IconLoader2,
   IconSearch,
+  IconColumns,
 } from '@tabler/icons-react';
 
 import { TabsContent } from '@kandev/ui/tabs';
@@ -49,6 +50,7 @@ import {
   hasUserSelectedFilesPanelTab,
   setUserSelectedFilesPanelTab,
 } from '@/lib/local-storage';
+import { useLayoutStore } from '@/lib/state/layout-store';
 import { FileStatusIcon } from './file-status-icon';
 
 type TaskFilesPanelProps = {
@@ -84,6 +86,10 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiff, onOpenFile, 
 
   // Track if we've initialized the tab for this session
   const hasInitializedTabRef = useRef<string | null>(null);
+  // Track whether user explicitly clicked the "files" tab (vs auto-selected)
+  const userClickedFilesTabRef = useRef(false);
+  // Track previous changed files count for auto-switch detection
+  const prevChangedCountRef = useRef(0);
 
   // Close search when switching tabs
   useEffect(() => {
@@ -281,6 +287,16 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiff, onOpenFile, 
     }
   }, [gitOps]);
 
+  // Open file in document panel side-by-side
+  const openDocument = useLayoutStore((state) => state.openDocument);
+  const setActiveDocument = useAppStore((state) => state.setActiveDocument);
+  const handleOpenFileInDocumentPanel = useCallback((path: string) => {
+    if (!activeSessionId) return;
+    const name = path.split('/').pop() || path;
+    setActiveDocument(activeSessionId, { type: 'file', path, name });
+    openDocument(activeSessionId);
+  }, [activeSessionId, setActiveDocument, openDocument]);
+
   // Smart tab selection: restore user preference or auto-select based on changes
   useEffect(() => {
     if (!activeSessionId) return;
@@ -293,23 +309,40 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiff, onOpenFile, 
     if (hasUserSelectedFilesPanelTab(activeSessionId)) {
       const savedTab = getFilesPanelTab(activeSessionId, 'diff');
       setTopTab(savedTab);
+      userClickedFilesTabRef.current = savedTab === 'files';
       return;
     }
 
     // Auto-select based on whether there are changes
+    userClickedFilesTabRef.current = false;
     const hasChanges = changedFiles.length > 0 || commits.length > 0;
     const defaultTab = hasChanges ? 'diff' : 'files';
     setTopTab(defaultTab);
+    prevChangedCountRef.current = changedFiles.length;
   }, [activeSessionId, changedFiles.length, commits.length]);
 
   // Handle tab change - save preference and mark as user-selected
   const handleTabChange = useCallback((tab: 'diff' | 'files') => {
     setTopTab(tab);
+    userClickedFilesTabRef.current = tab === 'files';
     if (activeSessionId) {
       setFilesPanelTab(activeSessionId, tab);
       setUserSelectedFilesPanelTab(activeSessionId);
     }
   }, [activeSessionId]);
+
+  // Auto-switch to "Diff files" tab when new workspace changes appear
+  useEffect(() => {
+    const prev = prevChangedCountRef.current;
+    prevChangedCountRef.current = changedFiles.length;
+
+    // Switch when change count changes (new or removed changes detected)
+    if (changedFiles.length !== prev) {
+      // Don't switch if user explicitly chose the "All files" tab
+      if (topTab === 'files' && userClickedFilesTabRef.current) return;
+      setTopTab('diff');
+    }
+  }, [changedFiles.length, topTab]);
 
   const tabs: SessionTab[] = [
     {
@@ -425,6 +458,21 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiff, onOpenFile, 
                                   </button>
                                 </TooltipTrigger>
                                 <TooltipContent>Discard changes</TooltipContent>
+                              </Tooltip>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <button
+                                    type="button"
+                                    className="text-muted-foreground hover:text-foreground cursor-pointer"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      handleOpenFileInDocumentPanel(file.path);
+                                    }}
+                                  >
+                                    <IconColumns className="h-3.5 w-3.5" />
+                                  </button>
+                                </TooltipTrigger>
+                                <TooltipContent>Open side-by-side</TooltipContent>
                               </Tooltip>
                               <Tooltip>
                                 <TooltipTrigger asChild>

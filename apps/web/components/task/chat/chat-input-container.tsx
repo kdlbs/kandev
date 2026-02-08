@@ -4,9 +4,11 @@ import { useRef, useCallback, useState, useEffect, memo, forwardRef, useImperati
 import {
   IconArrowUp,
   IconAlertTriangle,
-  IconListCheck,
+  IconFileTextSpark,
   IconPlus,
   IconPlayerStopFilled,
+  IconMessageDots,
+  IconX,
 } from '@tabler/icons-react';
 import { GridSpinner } from '@/components/grid-spinner';
 import { Button } from '@kandev/ui/button';
@@ -95,7 +97,7 @@ const ChatInputToolbar = memo(function ChatInputToolbar({
               )}
               onClick={() => onPlanModeChange(!planModeEnabled)}
             >
-              <IconListCheck className="h-4 w-4" />
+              <IconFileTextSpark className="h-4 w-4" />
             </Button>
           </TooltipTrigger>
           <TooltipContent>Toggle plan mode</TooltipContent>
@@ -203,6 +205,10 @@ type ChatInputContainerProps = {
   userMessageHistory?: string[];
   /** Whether there's a queued message section above this input */
   hasQueuedMessageAbove?: boolean;
+  /** Plan/document comments that will be included with the next message */
+  documentCommentCount?: number;
+  /** Callback to clear plan/document comments */
+  onClearDocumentComments?: () => void;
 };
 
 export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInputContainerProps>(
@@ -235,6 +241,8 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       onStartQueueEdit,
       userMessageHistory = [],
       hasQueuedMessageAbove = false,
+      documentCommentCount = 0,
+      onClearDocumentComments,
     },
     ref
   ) {
@@ -562,7 +570,6 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       className={cn(
         'relative border border-border bg-background shadow-md overflow-hidden',
         hasQueuedMessageAbove ? 'rounded-b-2xl border-t-0' : 'rounded-2xl',
-        planModeEnabled && 'border-primary border-dashed',
         hasPendingClarification && 'border-blue-500/50',
         showRequestChangesTooltip && 'animate-pulse border-orange-500',
         hasPendingComments && 'border-amber-500/50',
@@ -603,6 +610,28 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
             onRemoveComment={onRemoveComment}
             onCommentClick={onCommentClick}
           />
+        </div>
+      )}
+
+      {/* Plan comments indicator */}
+      {documentCommentCount > 0 && (
+        <div className="px-3 pt-3">
+          <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/30 px-2 py-1.5">
+            <IconMessageDots className="h-3.5 w-3.5 text-purple-500 shrink-0" />
+            <span className="text-xs text-muted-foreground flex-1">
+              {documentCommentCount} plan comment{documentCommentCount !== 1 ? 's' : ''} will be included
+            </span>
+            {onClearDocumentComments && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onClearDocumentComments}
+                className="h-5 w-5 cursor-pointer p-0 hover:text-destructive"
+              >
+                <IconX className="h-3 w-3" />
+              </Button>
+            )}
+          </div>
         </div>
       )}
 

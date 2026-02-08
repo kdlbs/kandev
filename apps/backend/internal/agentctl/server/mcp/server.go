@@ -5,12 +5,14 @@ package mcp
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 // BackendClient is the interface for communicating with the Kandev backend.
@@ -28,16 +30,32 @@ type Server struct {
 	sseServer  *server.SSEServer
 	httpServer *server.StreamableHTTPServer
 	logger     *logger.Logger
+	mcpLogger  *zap.Logger // optional file logger for MCP debug traces
 	mu         sync.Mutex
 	running    bool
 }
 
 // New creates a new MCP server for agentctl.
-func New(backend BackendClient, sessionID string, log *logger.Logger) *Server {
+// mcpLogFile is an optional file path for MCP debug logging; pass "" to disable.
+func New(backend BackendClient, sessionID string, log *logger.Logger, mcpLogFile string) *Server {
 	s := &Server{
 		backend:   backend,
 		sessionID: sessionID,
 		logger:    log.WithFields(zap.String("component", "mcp-server")),
+	}
+
+	// Set up optional file logger for MCP debug traces
+	if mcpLogFile != "" {
+		fileCfg := zap.NewProductionConfig()
+		fileCfg.Level = zap.NewAtomicLevelAt(zapcore.DebugLevel)
+		fileCfg.OutputPaths = []string{mcpLogFile}
+		fileCfg.ErrorOutputPaths = []string{mcpLogFile}
+		if fl, err := fileCfg.Build(); err == nil {
+			s.mcpLogger = fl
+			log.Info("MCP file logger enabled", zap.String("path", mcpLogFile))
+		} else {
+			log.Warn("failed to create MCP file logger", zap.Error(err))
+		}
 	}
 
 	// Create MCP server
@@ -93,8 +111,70 @@ func (s *Server) Close(ctx context.Context) error {
 			s.logger.Warn("failed to shutdown HTTP server", zap.Error(err))
 		}
 	}
+	if s.mcpLogger != nil {
+		_ = s.mcpLogger.Sync()
+	}
 
 	return nil
+}
+
+// wrapHandler wraps a tool handler with debug logging for tracing MCP calls.
+func (s *Server) wrapHandler(toolName string, handler server.ToolHandlerFunc) server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		start := time.Now()
+		args := req.GetArguments()
+
+		s.logger.Debug("MCP tool call",
+			zap.String("tool", toolName),
+			zap.Any("args", args))
+		if s.mcpLogger != nil {
+			s.mcpLogger.Debug("MCP tool call",
+				zap.String("tool", toolName),
+				zap.String("session_id", s.sessionID),
+				zap.Any("args", args))
+		}
+
+		result, err := handler(ctx, req)
+		duration := time.Since(start)
+
+		if err != nil {
+			s.logger.Debug("MCP tool error",
+				zap.String("tool", toolName),
+				zap.Duration("duration", duration),
+				zap.Error(err))
+			if s.mcpLogger != nil {
+				s.mcpLogger.Debug("MCP tool error",
+					zap.String("tool", toolName),
+					zap.String("session_id", s.sessionID),
+					zap.Duration("duration", duration),
+					zap.Error(err))
+			}
+		} else if result != nil && result.IsError {
+			s.logger.Debug("MCP tool returned error",
+				zap.String("tool", toolName),
+				zap.Duration("duration", duration),
+				zap.Any("result", result.Content))
+			if s.mcpLogger != nil {
+				s.mcpLogger.Debug("MCP tool returned error",
+					zap.String("tool", toolName),
+					zap.String("session_id", s.sessionID),
+					zap.Duration("duration", duration),
+					zap.Any("result", result.Content))
+			}
+		} else {
+			s.logger.Debug("MCP tool success",
+				zap.String("tool", toolName),
+				zap.Duration("duration", duration))
+			if s.mcpLogger != nil {
+				s.mcpLogger.Debug("MCP tool success",
+					zap.String("tool", toolName),
+					zap.String("session_id", s.sessionID),
+					zap.Duration("duration", duration))
+			}
+		}
+
+		return result, err
+	}
 }
 
 // registerTools registers all MCP tools.
@@ -103,7 +183,7 @@ func (s *Server) registerTools() {
 		mcp.NewTool("list_workspaces",
 			mcp.WithDescription("List all workspaces. Use this first to get workspace IDs."),
 		),
-		s.listWorkspacesHandler(),
+		s.wrapHandler("list_workspaces", s.listWorkspacesHandler()),
 	)
 
 	s.mcpServer.AddTool(
@@ -111,7 +191,7 @@ func (s *Server) registerTools() {
 			mcp.WithDescription("List all boards in a workspace."),
 			mcp.WithString("workspace_id", mcp.Required(), mcp.Description("The workspace ID")),
 		),
-		s.listBoardsHandler(),
+		s.wrapHandler("list_boards", s.listBoardsHandler()),
 	)
 
 	s.mcpServer.AddTool(
@@ -119,7 +199,7 @@ func (s *Server) registerTools() {
 			mcp.WithDescription("List all workflow steps in a board."),
 			mcp.WithString("board_id", mcp.Required(), mcp.Description("The board ID")),
 		),
-		s.listWorkflowStepsHandler(),
+		s.wrapHandler("list_workflow_steps", s.listWorkflowStepsHandler()),
 	)
 
 	s.mcpServer.AddTool(
@@ -127,7 +207,7 @@ func (s *Server) registerTools() {
 			mcp.WithDescription("List all tasks on a board."),
 			mcp.WithString("board_id", mcp.Required(), mcp.Description("The board ID")),
 		),
-		s.listTasksHandler(),
+		s.wrapHandler("list_tasks", s.listTasksHandler()),
 	)
 
 	s.mcpServer.AddTool(
@@ -139,7 +219,7 @@ func (s *Server) registerTools() {
 			mcp.WithString("title", mcp.Required(), mcp.Description("The task title")),
 			mcp.WithString("description", mcp.Description("The task description")),
 		),
-		s.createTaskHandler(),
+		s.wrapHandler("create_task", s.createTaskHandler()),
 	)
 
 	s.mcpServer.AddTool(
@@ -150,7 +230,7 @@ func (s *Server) registerTools() {
 			mcp.WithString("description", mcp.Description("New description")),
 			mcp.WithString("state", mcp.Description("New state: not_started, in_progress, etc.")),
 		),
-		s.updateTaskHandler(),
+		s.wrapHandler("update_task", s.updateTaskHandler()),
 	)
 
 	s.mcpServer.AddTool(
@@ -204,7 +284,7 @@ Another example:
 			),
 			mcp.WithString("context", mcp.Description("Optional background information to help the user understand why you're asking this question.")),
 		),
-		s.askUserQuestionHandler(),
+		s.wrapHandler("ask_user_question", s.askUserQuestionHandler()),
 	)
 
 	s.mcpServer.AddTool(
@@ -214,7 +294,7 @@ Another example:
 			mcp.WithString("content", mcp.Required(), mcp.Description("The plan content in markdown format")),
 			mcp.WithString("title", mcp.Description("Optional title for the plan (default: 'Plan')")),
 		),
-		s.createTaskPlanHandler(),
+		s.wrapHandler("create_task_plan", s.createTaskPlanHandler()),
 	)
 
 	s.mcpServer.AddTool(
@@ -222,7 +302,7 @@ Another example:
 			mcp.WithDescription("Get the current plan for a task. Use this to retrieve an existing plan, including any user edits."),
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to get the plan for")),
 		),
-		s.getTaskPlanHandler(),
+		s.wrapHandler("get_task_plan", s.getTaskPlanHandler()),
 	)
 
 	s.mcpServer.AddTool(
@@ -232,7 +312,7 @@ Another example:
 			mcp.WithString("content", mcp.Required(), mcp.Description("The updated plan content in markdown format")),
 			mcp.WithString("title", mcp.Description("Optional new title for the plan")),
 		),
-		s.updateTaskPlanHandler(),
+		s.wrapHandler("update_task_plan", s.updateTaskPlanHandler()),
 	)
 
 	s.mcpServer.AddTool(
@@ -240,7 +320,7 @@ Another example:
 			mcp.WithDescription("Delete a task plan."),
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to delete the plan for")),
 		),
-		s.deleteTaskPlanHandler(),
+		s.wrapHandler("delete_task_plan", s.deleteTaskPlanHandler()),
 	)
 
 	s.logger.Info("registered MCP tools", zap.Int("count", 11))

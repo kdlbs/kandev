@@ -207,7 +207,8 @@ func (m *Manager) Start(ctx context.Context) error {
 	m.logger.Info("starting agent process",
 		zap.String("protocol", string(m.cfg.Protocol)),
 		zap.Strings("args", m.cfg.AgentArgs),
-		zap.String("workdir", m.cfg.WorkDir))
+		zap.String("workdir", m.cfg.WorkDir),
+		zap.Int("mcp_servers", len(m.cfg.McpServers)))
 
 	m.status.Store(StatusStarting)
 	m.exitCode.Store(-1)
@@ -238,6 +239,16 @@ func (m *Manager) Start(ctx context.Context) error {
 		AgentID:        m.cfg.AgentType, // From registry (e.g., "auggie", "amp", "claude-code")
 	}
 
+	// Log MCP server details for debugging
+	for i, srv := range mcpServers {
+		m.logger.Debug("MCP server config",
+			zap.Int("index", i),
+			zap.String("name", srv.Name),
+			zap.String("url", srv.URL),
+			zap.String("type", srv.Type),
+			zap.String("command", srv.Command))
+	}
+
 	// Create adapter before starting the process so we can call PrepareEnvironment and PrepareCommandArgs
 	if err := m.createAdapter(); err != nil {
 		m.status.Store(StatusError)
@@ -260,6 +271,11 @@ func (m *Manager) Start(ctx context.Context) error {
 
 	// Build final command args
 	cmdArgs := append(m.cfg.AgentArgs[1:], extraArgs...)
+
+	m.logger.Debug("final agent command",
+		zap.String("binary", m.cfg.AgentArgs[0]),
+		zap.Strings("args", cmdArgs),
+		zap.Int("extra_args_count", len(extraArgs)))
 
 	// NOTE: We intentionally don't use exec.CommandContext here because we don't want
 	// the HTTP request context to kill the agent process when the request completes.

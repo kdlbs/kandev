@@ -127,7 +127,7 @@ export function ClarificationInputOverlay({ message, onResolved }: Clarification
               className={cn(
                 'flex items-start gap-2 w-full text-left text-xs rounded px-1.5 py-0.5 -ml-1.5 transition-colors',
                 'hover:bg-blue-500/15 hover:text-blue-600 dark:hover:text-blue-400',
-                isSubmitting ? 'opacity-50 cursor-not-allowed' : 'text-foreground/80'
+                isSubmitting ? 'opacity-50 cursor-not-allowed' : 'text-foreground/80 cursor-pointer'
               )}
             >
               <span className="text-muted-foreground flex-shrink-0">•</span>

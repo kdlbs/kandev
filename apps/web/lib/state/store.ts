@@ -154,6 +154,7 @@ export type AppState = {
   mobileKanban: typeof defaultUIState['mobileKanban'];
   mobileSession: typeof defaultUIState['mobileSession'];
   chatInput: typeof defaultUIState['chatInput'];
+  documentPanel: typeof defaultUIState['documentPanel'];
 
   // Actions from all slices
   hydrate: (state: Partial<AppState>, options?: HydrationOptions) => void;
@@ -208,6 +209,8 @@ export type AppState = {
   setMobileSessionPanel: (sessionId: string, panel: import('./slices/ui/types').MobileSessionPanel) => void;
   setMobileSessionTaskSwitcherOpen: (open: boolean) => void;
   setPlanMode: (sessionId: string, enabled: boolean) => void;
+  setActiveDocument: (sessionId: string, doc: import('./slices/ui/types').ActiveDocument | null) => void;
+  setDocumentComments: (sessionId: string, comments: import('./slices/ui/types').DocumentComment[]) => void;
   setMessages: (
     sessionId: string,
     messages: Message[],

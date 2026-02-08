@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import { useAppStore } from '@/components/state-provider';
 import { getLocalStorage } from '@/lib/local-storage';
+import { useLayoutStore } from '@/lib/state/layout-store';
 import { useKeyboardShortcut } from '@/hooks/use-keyboard-shortcut';
 import { SHORTCUTS } from '@/lib/keyboard/constants';
 import { useSessionMessages } from '@/hooks/domains/session/use-session-messages';
@@ -23,7 +24,11 @@ import {
   useDiffCommentsStore,
   usePendingCommentsByFile,
 } from '@/lib/state/slices/diff-comments';
+import { DocumentReferenceIndicator } from '@/components/task/chat/document-reference-indicator';
 import type { DiffComment } from '@/lib/diff/types';
+import type { DocumentComment } from '@/lib/state/slices/ui/types';
+
+const EMPTY_COMMENTS: DocumentComment[] = [];
 
 type TaskChatPanelProps = {
   onSend?: (message: string) => void;
@@ -64,21 +69,39 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     isFailed,
   } = useSessionState(sessionId);
 
-  // Plan mode state from store (persisted per session)
-  const planModeEnabled = useAppStore((state) =>
-    resolvedSessionId ? (state.chatInput.planModeBySessionId[resolvedSessionId] ?? false) : false
+  // Plan mode state - derived from active document being a plan in document panel
+  const activeDocument = useAppStore((state) =>
+    resolvedSessionId ? state.documentPanel.activeDocumentBySessionId[resolvedSessionId] ?? null : null
   );
+  const layoutBySession = useLayoutStore((state) => state.columnsBySessionId);
+  const openDocument = useLayoutStore((state) => state.openDocument);
+  const closeDocument = useLayoutStore((state) => state.closeDocument);
+  const setActiveDocument = useAppStore((state) => state.setActiveDocument);
   const setPlanMode = useAppStore((state) => state.setPlanMode);
+
+  const planModeEnabled = useMemo(() => {
+    if (!resolvedSessionId || !activeDocument || activeDocument.type !== 'plan') return false;
+    const layout = layoutBySession[resolvedSessionId];
+    return layout?.document === true;
+  }, [resolvedSessionId, activeDocument, layoutBySession]);
+
   const handlePlanModeChange = useCallback(
     (enabled: boolean) => {
-      if (resolvedSessionId) {
-        setPlanMode(resolvedSessionId, enabled);
+      if (!resolvedSessionId || !taskId) return;
+      if (enabled) {
+        setActiveDocument(resolvedSessionId, { type: 'plan', taskId });
+        openDocument(resolvedSessionId);
+        setPlanMode(resolvedSessionId, true);
+      } else {
+        closeDocument(resolvedSessionId);
+        setActiveDocument(resolvedSessionId, null);
+        setPlanMode(resolvedSessionId, false);
       }
     },
-    [resolvedSessionId, setPlanMode]
+    [resolvedSessionId, taskId, setActiveDocument, openDocument, closeDocument, setPlanMode]
   );
 
-  // Initialize plan mode from localStorage on mount
+  // Initialize plan mode from localStorage on mount (restore document panel state)
   useEffect(() => {
     if (resolvedSessionId) {
       const stored = getLocalStorage(`plan-mode-${resolvedSessionId}`, false);
@@ -130,6 +153,18 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   // Message queue
   const { queuedMessage, isQueued, cancel: cancelQueue, updateContent: updateQueueContent } = useQueue(resolvedSessionId);
 
+  // Document comments from plan panel
+  const documentComments = useAppStore((state) =>
+    resolvedSessionId ? state.documentPanel.commentsBySessionId[resolvedSessionId] ?? EMPTY_COMMENTS : EMPTY_COMMENTS
+  );
+  const setDocumentComments = useAppStore((state) => state.setDocumentComments);
+
+  const handleClearDocumentComments = useCallback(() => {
+    if (resolvedSessionId) {
+      setDocumentComments(resolvedSessionId, []);
+    }
+  }, [resolvedSessionId, setDocumentComments]);
+
   // Message sending
   const { handleSendMessage } = useMessageHandler(
     resolvedSessionId,
@@ -137,7 +172,9 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     sessionModel,
     activeModel,
     planModeEnabled,
-    isAgentBusy
+    isAgentBusy,
+    activeDocument,
+    documentComments
   );
 
   // Diff comments management
@@ -214,20 +251,27 @@ export const TaskChatPanel = memo(function TaskChatPanel({
         finalMessage = reviewMarkdown + (message ? message : '');
       }
 
+      const hasReviewComments = !!(reviewComments && reviewComments.length > 0);
+
       if (onSend) {
         await onSend(finalMessage);
       } else {
-        await handleSendMessage(finalMessage, attachments);
+        await handleSendMessage(finalMessage, attachments, hasReviewComments);
       }
 
       // Mark comments as sent and clear pending
       if (reviewComments && reviewComments.length > 0) {
         markCommentsSent(reviewComments.map((c) => c.id));
       }
+
+      // Clear plan/document comments after sending (they were included via useMessageHandler)
+      if (documentComments.length > 0) {
+        handleClearDocumentComments();
+      }
     } finally {
       setIsSending(false);
     }
-  }, [isSending, onSend, handleSendMessage, markCommentsSent]);
+  }, [isSending, onSend, handleSendMessage, markCommentsSent, documentComments.length, handleClearDocumentComments]);
 
   // Focus input with / shortcut (only when input is NOT focused)
   useKeyboardShortcut(
@@ -278,6 +322,13 @@ export const TaskChatPanel = memo(function TaskChatPanel({
         {/* Status section: todos, etc. */}
         {todoItems.length > 0 && <TodoSummary todos={todoItems} />}
 
+        {/* Document reference indicator */}
+        {activeDocument && (
+          <DocumentReferenceIndicator
+            activeDocument={activeDocument}
+          />
+        )}
+
         {/* Chat input with optional queued message on top */}
         <div className="flex flex-col">
           {/* Queued message indicator - appears above chat input */}
@@ -315,9 +366,13 @@ export const TaskChatPanel = memo(function TaskChatPanel({
           isSending={isSending}
           onCancel={handleCancelTurn}
           placeholder={
-            agentMessageCount > 0
-              ? 'Continue working on this task...'
-              : 'Write to submit work to the agent...'
+            isAgentBusy
+              ? 'Queue instructions to the agent...'
+              : activeDocument?.type === 'file'
+              ? `Continue working on ${activeDocument.name}...`
+              : planModeEnabled
+              ? 'Continue working on the plan...'
+              : 'Continue working on the task...'
           }
           pendingClarification={pendingClarification}
           onClarificationResolved={handleClarificationResolved}
@@ -334,6 +389,8 @@ export const TaskChatPanel = memo(function TaskChatPanel({
           onStartQueueEdit={handleStartQueueEdit}
           userMessageHistory={userMessageHistory}
           hasQueuedMessageAbove={isQueued}
+          documentCommentCount={documentComments.length}
+          onClearDocumentComments={handleClearDocumentComments}
         />
         </div>
       </div>
