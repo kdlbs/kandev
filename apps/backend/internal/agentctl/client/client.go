@@ -154,39 +154,40 @@ func (c *Client) ConfigureAgent(ctx context.Context, command string, env map[str
 	return nil
 }
 
-// Start starts the agent process
-func (c *Client) Start(ctx context.Context) error {
+// Start starts the agent process and returns the full command that was executed.
+func (c *Client) Start(ctx context.Context) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/v1/start", nil)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := readResponseBody(resp)
 	if err != nil {
-		return fmt.Errorf("failed to read response body: %w", err)
+		return "", fmt.Errorf("failed to read response body: %w", err)
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("start request failed with status %d: %s", resp.StatusCode, string(respBody))
+		return "", fmt.Errorf("start request failed with status %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	var result struct {
 		Success bool   `json:"success"`
+		Command string `json:"command,omitempty"`
 		Error   string `json:"error,omitempty"`
 	}
 	if err := json.Unmarshal(respBody, &result); err != nil {
-		return fmt.Errorf("failed to parse start response (status %d, body: %s): %w", resp.StatusCode, truncateBody(respBody), err)
+		return "", fmt.Errorf("failed to parse start response (status %d, body: %s): %w", resp.StatusCode, truncateBody(respBody), err)
 	}
 	if !result.Success {
-		return fmt.Errorf("start failed: %s", result.Error)
+		return "", fmt.Errorf("start failed: %s", result.Error)
 	}
-	return nil
+	return result.Command, nil
 }
 
 // Stop stops the agent process

@@ -469,6 +469,11 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 				zap.String("session_id", sessionID),
 				zap.Error(updateErr))
 		}
+		if updateErr := e.repo.UpdateTaskState(ctx, task.ID, v1.TaskStateFailed); updateErr != nil {
+			e.logger.Warn("failed to mark task as failed after launch error",
+				zap.String("task_id", task.ID),
+				zap.Error(updateErr))
+		}
 		return nil, err
 	}
 
@@ -555,6 +560,11 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 			if updateErr := e.repo.UpdateTaskSessionState(context.Background(), sessionID, models.TaskSessionStateFailed, err.Error()); updateErr != nil {
 				e.logger.Warn("failed to mark session as failed after start error",
 					zap.String("session_id", sessionID),
+					zap.Error(updateErr))
+			}
+			if updateErr := e.repo.UpdateTaskState(context.Background(), task.ID, v1.TaskStateFailed); updateErr != nil {
+				e.logger.Warn("failed to mark task as failed after start error",
+					zap.String("task_id", task.ID),
 					zap.Error(updateErr))
 			}
 			return
@@ -846,6 +856,11 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 					e.logger.Warn("failed to mark session as failed after start error on resume",
 						zap.String("task_id", task.ID),
 						zap.String("session_id", session.ID),
+						zap.Error(updateErr))
+				}
+				if updateErr := e.repo.UpdateTaskState(context.Background(), task.ID, v1.TaskStateFailed); updateErr != nil {
+					e.logger.Warn("failed to mark task as failed after start error on resume",
+						zap.String("task_id", task.ID),
 						zap.Error(updateErr))
 				}
 				return

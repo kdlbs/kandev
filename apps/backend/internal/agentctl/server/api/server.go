@@ -81,6 +81,7 @@ func (s *Server) setupRoutes() {
 		api.POST("/agent/prompt", s.handleAgentPrompt)
 		api.POST("/agent/cancel", s.handleAgentCancel)
 		api.GET("/agent/stream", s.handleAgentStreamWS)
+		api.GET("/agent/stderr", s.handleAgentStderr)
 		api.POST("/agent/permissions/respond", s.handlePermissionRespond)
 
 		// Unified workspace stream (git status, files, shell)
@@ -176,6 +177,7 @@ type StartRequest struct {
 type StartResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message,omitempty"`
+	Command string `json:"command,omitempty"`
 	Error   string `json:"error,omitempty"`
 }
 
@@ -192,6 +194,7 @@ func (s *Server) handleStart(c *gin.Context) {
 	c.JSON(http.StatusOK, StartResponse{
 		Success: true,
 		Message: "agent started",
+		Command: s.procMgr.GetFinalCommand(),
 	})
 }
 

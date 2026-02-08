@@ -177,8 +177,13 @@ func (a *Adapter) PrepareCommandArgs() []string {
 		mcpConfig[server.Name] = serverDef
 	}
 
+	// Wrap in mcpServers key (Claude Code expects this format)
+	wrappedConfig := map[string]interface{}{
+		"mcpServers": mcpConfig,
+	}
+
 	// Convert to JSON string
-	configJSON, err := json.Marshal(mcpConfig)
+	configJSON, err := json.Marshal(wrappedConfig)
 	if err != nil {
 		a.logger.Warn("failed to marshal MCP config, skipping",
 			zap.Error(err),

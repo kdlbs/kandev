@@ -4,6 +4,7 @@ import { IconCheck, IconCopy, IconCode, IconChevronLeft, IconChevronRight } from
 import { cn } from '@/lib/utils';
 import { formatRelativeTime } from '@/lib/utils';
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard';
+import { useAppStore } from '@/components/state-provider';
 import type { Message } from '@/lib/types/http';
 
 type MessageActionsProps = {
@@ -12,6 +13,7 @@ type MessageActionsProps = {
   showTimestamp?: boolean;
   showRawToggle?: boolean;
   showNavigation?: boolean;
+  showModel?: boolean;
   isRawView?: boolean;
   onToggleRaw?: () => void;
   onNavigatePrev?: () => void;
@@ -26,6 +28,7 @@ export function MessageActions({
   showTimestamp = true,
   showRawToggle = true,
   showNavigation = false,
+  showModel = false,
   isRawView = false,
   onToggleRaw,
   onNavigatePrev,
@@ -34,6 +37,17 @@ export function MessageActions({
   hasNext = false,
 }: MessageActionsProps) {
   const { copied, copy } = useCopyToClipboard();
+
+  // Resolve model: prefer per-message metadata, fall back to session's agent profile snapshot
+  const sessionId = message.session_id;
+  const messageModel = showModel ? (message.metadata as { model?: string } | undefined)?.model : undefined;
+  const sessionModel = useAppStore((state) => {
+    if (!showModel || messageModel || !sessionId) return null;
+    const session = state.taskSessions.items[sessionId];
+    const snapshot = session?.agent_profile_snapshot as { model?: string } | null | undefined;
+    return snapshot?.model ?? null;
+  });
+  const modelName = messageModel ?? sessionModel;
 
   const handleCopy = async () => {
     await copy(message.content);
@@ -111,6 +125,13 @@ export function MessageActions({
             <IconChevronRight className="h-full w-full" />
           </button>
         </>
+      )}
+
+      {/* Model name */}
+      {showModel && modelName && (
+        <span className="text-[10px] text-muted-foreground/60 font-mono">
+          {modelName}
+        </span>
       )}
 
       {/* Timestamp */}

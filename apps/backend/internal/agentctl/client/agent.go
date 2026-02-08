@@ -409,6 +409,32 @@ func (c *Client) Cancel(ctx context.Context) error {
 	}
 	return nil
 }
+// GetAgentStderr returns recent stderr lines from the agent process.
+func (c *Client) GetAgentStderr(ctx context.Context) ([]string, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/api/v1/agent/stderr", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("agent stderr request failed with status %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Lines []string `json:"lines"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to parse agent stderr response: %w", err)
+	}
+	return result.Lines, nil
+}
+
 // RespondToPermission sends a response to a permission request
 func (c *Client) RespondToPermission(ctx context.Context, pendingID, optionID string, cancelled bool) error {
 	reqBody := PermissionRespondRequest{

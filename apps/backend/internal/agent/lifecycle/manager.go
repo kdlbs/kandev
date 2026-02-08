@@ -72,6 +72,9 @@ type Manager struct {
 	// Workspace info provider for on-demand instance creation
 	workspaceInfoProvider WorkspaceInfoProvider
 
+	// bootMessageService creates boot messages displayed in chat during agent startup.
+	bootMessageService BootMessageService
+
 	// mcpHandler is the MCP request dispatcher for handling MCP requests
 	// from agentctl instances through the agent stream.
 	mcpHandler agentctl.MCPHandler
@@ -204,6 +207,12 @@ func (m *Manager) SetMCPHandler(handler agentctl.MCPHandler) {
 // Without this, EnsureWorkspaceExecutionForSession will fail.
 func (m *Manager) SetWorkspaceInfoProvider(provider WorkspaceInfoProvider) {
 	m.workspaceInfoProvider = provider
+}
+
+// SetBootMessageService sets the service used to create boot messages in chat
+// during agent startup. If not set, no boot messages will be created.
+func (m *Manager) SetBootMessageService(svc BootMessageService) {
+	m.bootMessageService = svc
 }
 
 // getRuntimeForExecutorType returns the appropriate runtime for the given executor type.
@@ -909,16 +918,21 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) err
 		env["TASK_DESCRIPTION"] = taskDescription
 	}
 
-	// Determine approval policy for Codex
-	// If auto_approve is true, use "never" (no approval needed)
-	// Otherwise use "untrusted" (request approval for all actions)
+	// Determine approval policy and resolve agent display name from profile + registry
 	approvalPolicy := ""
+	agentDisplayName := ""
 	if execution.AgentProfileID != "" && m.profileResolver != nil {
 		if profileInfo, err := m.profileResolver.ResolveProfile(ctx, execution.AgentProfileID); err == nil {
 			if profileInfo.AutoApprove {
 				approvalPolicy = "never"
 			} else {
 				approvalPolicy = "untrusted"
+			}
+			// Look up display name from registry (e.g. "Claude", "Auggie", "Codex")
+			if agentConfig, ok := m.registry.Get(profileInfo.AgentName); ok && agentConfig.DisplayName != "" {
+				agentDisplayName = agentConfig.DisplayName
+			} else {
+				agentDisplayName = profileInfo.AgentName
 			}
 		}
 	}
@@ -929,15 +943,53 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) err
 	}
 
 	// Start the agent process
-	if err := execution.agentctl.Start(ctx); err != nil {
+	fullCommand, err := execution.agentctl.Start(ctx)
+	if err != nil {
 		m.updateExecutionError(executionID, "failed to start agent: "+err.Error())
 		return fmt.Errorf("failed to start agent: %w", err)
+	}
+
+	// Use the full command (with adapter args) if available, otherwise fall back to the base command
+	bootCommand := fullCommand
+	if bootCommand == "" {
+		bootCommand = execution.AgentCommand
 	}
 
 	m.logger.Info("agent process started",
 		zap.String("execution_id", executionID),
 		zap.String("task_id", execution.TaskID),
-		zap.String("command", execution.AgentCommand))
+		zap.String("command", bootCommand))
+
+	// Create boot message to show agent boot progress in chat
+	var bootMsg *models.Message
+	var bootStopCh chan struct{}
+	if m.bootMessageService != nil {
+		var bootErr error
+		bootMsg, bootErr = m.bootMessageService.CreateMessage(ctx, &BootMessageRequest{
+			TaskSessionID: execution.SessionID,
+			TaskID:        execution.TaskID,
+			Content:       "",
+			AuthorType:    "agent",
+			Type:          "script_execution",
+			Metadata: map[string]interface{}{
+				"script_type":  "agent_boot",
+				"agent_name":   agentDisplayName,
+				"command":      bootCommand,
+				"status":       "running",
+				"is_resuming":  execution.ACPSessionID != "",
+				"started_at":   time.Now().UTC().Format(time.RFC3339Nano),
+			},
+		})
+		if bootErr != nil {
+			m.logger.Warn("failed to create boot message, continuing without boot output",
+				zap.String("execution_id", executionID),
+				zap.Error(bootErr))
+		} else {
+			// Start polling goroutine for stderr
+			bootStopCh = make(chan struct{})
+			go m.pollAgentStderr(execution.agentctl, bootMsg, bootStopCh)
+		}
+	}
 
 	// Give the agent process a moment to initialize
 	time.Sleep(500 * time.Millisecond)
@@ -945,11 +997,13 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) err
 	// Get agent config for ACP session initialization
 	agentConfig, err := m.getAgentConfigForExecution(execution)
 	if err != nil {
+		m.finalizeBootMessage(bootMsg, bootStopCh, execution.agentctl, "failed")
 		return fmt.Errorf("failed to get agent config: %w", err)
 	}
 
 	mcpServers, err := m.resolveMcpServers(ctx, execution, agentConfig)
 	if err != nil {
+		m.finalizeBootMessage(bootMsg, bootStopCh, execution.agentctl, "failed")
 		m.updateExecutionError(executionID, "failed to resolve MCP config: "+err.Error())
 		return fmt.Errorf("failed to resolve MCP config: %w", err)
 	}
@@ -957,11 +1011,86 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) err
 	// Initialize ACP session.
 	// Session status events are now emitted by all adapters via the stream.
 	if err := m.initializeACPSession(ctx, execution, agentConfig, taskDescription, mcpServers); err != nil {
+		m.finalizeBootMessage(bootMsg, bootStopCh, execution.agentctl, "failed")
 		m.updateExecutionError(executionID, "failed to initialize ACP: "+err.Error())
 		return fmt.Errorf("failed to initialize ACP: %w", err)
 	}
 
+	// Finalize boot message as successful
+	m.finalizeBootMessage(bootMsg, bootStopCh, execution.agentctl, "exited")
+
 	return nil
+}
+
+// pollAgentStderr polls the agent's stderr buffer every 2 seconds and updates the boot message.
+func (m *Manager) pollAgentStderr(client *agentctl.Client, msg *models.Message, stopCh chan struct{}) {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	var lastLineCount int
+
+	for {
+		select {
+		case <-stopCh:
+			return
+		case <-ticker.C:
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			lines, err := client.GetAgentStderr(ctx)
+			cancel()
+			if err != nil {
+				m.logger.Debug("failed to poll agent stderr", zap.Error(err))
+				continue
+			}
+
+			if len(lines) > lastLineCount {
+				lastLineCount = len(lines)
+				msg.Content = strings.Join(lines, "\n")
+				ctx2, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
+				if updateErr := m.bootMessageService.UpdateMessage(ctx2, msg); updateErr != nil {
+					m.logger.Debug("failed to update boot message with stderr",
+						zap.String("message_id", msg.ID),
+						zap.Error(updateErr))
+				}
+				cancel2()
+			}
+		}
+	}
+}
+
+// finalizeBootMessage stops the polling goroutine and updates the boot message with final status.
+func (m *Manager) finalizeBootMessage(msg *models.Message, stopCh chan struct{}, client *agentctl.Client, status string) {
+	if msg == nil || m.bootMessageService == nil {
+		return
+	}
+
+	// Stop the polling goroutine
+	if stopCh != nil {
+		close(stopCh)
+	}
+
+	// Final stderr fetch
+	if client != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		lines, err := client.GetAgentStderr(ctx)
+		cancel()
+		if err == nil && len(lines) > 0 {
+			msg.Content = strings.Join(lines, "\n")
+		}
+	}
+
+	msg.Metadata["status"] = status
+	msg.Metadata["completed_at"] = time.Now().UTC().Format(time.RFC3339Nano)
+	if status == "exited" {
+		msg.Metadata["exit_code"] = 0
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if updateErr := m.bootMessageService.UpdateMessage(ctx, msg); updateErr != nil {
+		m.logger.Warn("failed to update boot message with final status",
+			zap.String("message_id", msg.ID),
+			zap.Error(updateErr))
+	}
 }
 
 // buildEnvForRuntime builds environment variables for any runtime.

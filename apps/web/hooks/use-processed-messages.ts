@@ -120,6 +120,11 @@ export function useProcessedMessages(
         return !isPending;
       }
 
+      // Hide session status messages — redundant with agent boot message
+      if (message.type === 'status' && (message.content === 'New session started' || message.content === 'Session resumed')) {
+        return false;
+      }
+
       // Standard visible types
       if (
         !message.type ||
