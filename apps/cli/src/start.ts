@@ -130,6 +130,9 @@ export async function runStart({
 
   attachBackendExitHandler(backendProc, supervisor);
 
+  const healthTimeoutMs = resolveHealthTimeoutMs(HEALTH_TIMEOUT_MS_RELEASE);
+  await waitForHealth(ports.backendUrl, backendProc, healthTimeoutMs);
+
   // Use standalone server.js directly (not pnpm start)
   const webUrl = `http://localhost:${ports.webPort}`;
   launchWebApp({
@@ -142,9 +145,6 @@ export async function runStart({
     label: "web",
     quiet: !showOutput,
   });
-
-  const healthTimeoutMs = resolveHealthTimeoutMs(HEALTH_TIMEOUT_MS_RELEASE);
-  await waitForHealth(ports.backendUrl, backendProc, healthTimeoutMs);
 
   // Print clean summary
   console.log("");
