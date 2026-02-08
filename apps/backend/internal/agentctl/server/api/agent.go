@@ -433,6 +433,16 @@ func (s *Server) handlePermissionRespond(c *gin.Context) {
 		Success: true,
 	})
 }
+// AgentStderrResponse contains recent stderr lines from the agent process.
+type AgentStderrResponse struct {
+	Lines []string `json:"lines"`
+}
+
+func (s *Server) handleAgentStderr(c *gin.Context) {
+	lines := s.procMgr.GetRecentStderr()
+	c.JSON(http.StatusOK, AgentStderrResponse{Lines: lines})
+}
+
 // CancelResponse is the response from a cancel request.
 type CancelResponse struct {
 	Success bool   `json:"success"`

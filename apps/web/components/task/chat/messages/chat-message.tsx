@@ -341,6 +341,7 @@ export const ChatMessage = memo(function ChatMessage({ comment, label, className
           showCopy={true}
           showTimestamp={true}
           showRawToggle={true}
+          showModel={true}
           showNavigation={false}
           isRawView={showRaw}
           onToggleRaw={() => setShowRaw(!showRaw)}

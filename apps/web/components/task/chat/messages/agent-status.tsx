@@ -20,7 +20,7 @@ const STATE_CONFIG: Record<TaskSessionState, { label: string; icon: 'spinner' | 
   WAITING_FOR_INPUT: { label: '', icon: null },
   COMPLETED: { label: '', icon: null },
   FAILED: { label: 'Agent has encountered an error', icon: 'error' },
-  CANCELLED: { label: 'Agent has been cancelled', icon: 'warning' },
+  CANCELLED: { label: '', icon: null },
 };
 
 /**

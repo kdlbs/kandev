@@ -103,6 +103,9 @@ type Manager struct {
 	gitOperator   *GitOperator
 	gitOperatorMu sync.Mutex
 
+	// Final command string (full command with all adapter args)
+	finalCommand string
+
 	// Synchronization
 	mu      sync.RWMutex
 	wg      sync.WaitGroup
@@ -271,6 +274,9 @@ func (m *Manager) Start(ctx context.Context) error {
 
 	// Build final command args
 	cmdArgs := append(m.cfg.AgentArgs[1:], extraArgs...)
+
+	// Store the full command string (binary + all args including adapter extras)
+	m.finalCommand = strings.Join(append([]string{m.cfg.AgentArgs[0]}, cmdArgs...), " ")
 
 	m.logger.Debug("final agent command",
 		zap.String("binary", m.cfg.AgentArgs[0]),
@@ -704,6 +710,12 @@ func (m *Manager) waitForExit() {
 	}
 
 	m.status.Store(StatusStopped)
+}
+
+// GetFinalCommand returns the full command string that was used to start the agent process,
+// including all adapter-added arguments (sandbox mode, MCP flags, etc.).
+func (m *Manager) GetFinalCommand() string {
+	return m.finalCommand
 }
 
 // GetProcessInfo returns information about the process

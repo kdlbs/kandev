@@ -11,6 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentctl "github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -151,6 +152,22 @@ type AgentProfileInfo struct {
 // ProfileResolver resolves agent profile IDs to profile information
 type ProfileResolver interface {
 	ResolveProfile(ctx context.Context, profileID string) (*AgentProfileInfo, error)
+}
+
+// BootMessageService creates and updates boot messages displayed in chat during agent startup.
+type BootMessageService interface {
+	CreateMessage(ctx context.Context, req *BootMessageRequest) (*models.Message, error)
+	UpdateMessage(ctx context.Context, message *models.Message) error
+}
+
+// BootMessageRequest contains parameters for creating a boot message.
+type BootMessageRequest struct {
+	TaskSessionID string
+	TaskID        string
+	Content       string
+	AuthorType    string
+	Type          string
+	Metadata      map[string]interface{}
 }
 
 // McpConfigProvider returns MCP configuration for a given agent profile ID.
