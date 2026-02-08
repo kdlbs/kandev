@@ -243,9 +243,8 @@ func findFreePort() (int, error) {
 	return port, nil
 }
 
-// ensurePortAvailable checks if the configured port is free. If not, it tries
-// to diagnose and clean up stale processes. If the port is still unavailable,
-// it falls back to an OS-assigned free port.
+// ensurePortAvailable checks if the configured port is free. If not, it
+// immediately falls back to an OS-assigned free port.
 func (l *Launcher) ensurePortAvailable() error {
 	if err := checkPortAvailable(l.port); err == nil {
 		return nil
@@ -253,39 +252,14 @@ func (l *Launcher) ensurePortAvailable() error {
 
 	originalPort := l.port
 
-	// Port is in use — try to find and kill whatever is holding it
-	l.logger.Warn("port in use, attempting to find and kill stale process",
+	l.logger.Info("port already in use, selecting a free port",
 		zap.Int("port", l.port))
 
-	l.diagnosePID()
-
-	if killed := l.tryKillPortHolder(); killed {
-		// Wait briefly for the OS to release the port
-		time.Sleep(500 * time.Millisecond)
-		if err := checkPortAvailable(l.port); err == nil {
-			l.logger.Info("port freed after killing stale process", zap.Int("port", l.port))
-			return nil
-		}
-	}
-
-	// Brief wait for TIME_WAIT to expire (up to 3s)
-	l.logger.Warn("could not free port immediately, waiting for OS to release it",
-		zap.Int("port", l.port))
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		time.Sleep(500 * time.Millisecond)
-		if err := checkPortAvailable(l.port); err == nil {
-			l.logger.Info("port became available", zap.Int("port", l.port))
-			return nil
-		}
-	}
-
-	// Fall back to OS-assigned free port
 	freePort, err := findFreePort()
 	if err != nil {
 		return fmt.Errorf("port %d is in use and failed to find alternative: %w", originalPort, err)
 	}
-	l.logger.Warn("configured port unavailable, using alternative",
+	l.logger.Info("using alternative port",
 		zap.Int("original_port", originalPort),
 		zap.Int("new_port", freePort))
 	l.port = freePort
