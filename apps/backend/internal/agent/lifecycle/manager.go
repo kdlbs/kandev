@@ -541,6 +541,7 @@ func (m *Manager) Start(ctx context.Context) error {
 				agentctl:             ri.Client,
 				standaloneInstanceID: ri.StandaloneInstanceID,
 				standalonePort:       ri.StandalonePort,
+				promptDoneCh:         make(chan PromptCompletionSignal, 1),
 			}
 			m.executionStore.Add(execution)
 
@@ -1329,6 +1330,11 @@ func (m *Manager) initializeACPSession(ctx context.Context, execution *AgentExec
 
 // handleAgentEvent processes incoming agent events from the agent
 func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.AgentEvent) {
+	// Update last activity timestamp for stall detection
+	execution.lastActivityAtMu.Lock()
+	execution.lastActivityAt = time.Now()
+	execution.lastActivityAtMu.Unlock()
+
 	// Log all incoming events for debugging
 	m.logger.Debug("handleAgentEvent entry",
 		zap.String("execution_id", execution.ID),
@@ -1536,6 +1542,26 @@ func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.Age
 					zap.String("execution_id", execution.ID),
 					zap.Error(err))
 			}
+		}
+
+		// Signal the completion channel so SendPrompt unblocks
+		stopReason := "end_turn"
+		errorMsg := ""
+		if isError {
+			stopReason = "error"
+			errorMsg = "agent error completion"
+			if event.Error != "" {
+				errorMsg = event.Error
+			}
+		}
+		select {
+		case execution.promptDoneCh <- PromptCompletionSignal{
+			StopReason: stopReason,
+			IsError:    isError,
+			Error:      errorMsg,
+		}:
+		default:
+			// Channel full or no one waiting — that's fine (e.g., initial prompt in goroutine)
 		}
 
 	case "permission_request":
@@ -1842,7 +1868,7 @@ func (m *Manager) PromptAgent(ctx context.Context, executionID string, prompt st
 	if !exists {
 		return nil, fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
 	}
-	return m.sessionManager.SendPrompt(ctx, execution, prompt, true, attachments, m.MarkReady)
+	return m.sessionManager.SendPrompt(ctx, execution, prompt, true, attachments)
 }
 
 // CancelAgent interrupts the current agent turn without terminating the process,

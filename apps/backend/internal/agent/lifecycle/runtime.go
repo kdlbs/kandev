@@ -125,5 +125,6 @@ func (ri *RuntimeInstance) ToAgentExecution(req *RuntimeCreateRequest) *AgentExe
 		agentctl:             ri.Client,
 		standaloneInstanceID: ri.StandaloneInstanceID,
 		standalonePort:       ri.StandalonePort,
+		promptDoneCh:         make(chan PromptCompletionSignal, 1),
 	}
 }

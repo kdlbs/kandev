@@ -321,10 +321,15 @@ func (l *Launcher) waitForHealthy(ctx context.Context) error {
 }
 
 // pipeOutput reads from a scanner and logs each line.
+// stderr is logged at WARN level for visibility; stdout remains at DEBUG.
 func (l *Launcher) pipeOutput(name string, scanner *bufio.Scanner) {
 	for scanner.Scan() {
 		line := scanner.Text()
-		l.logger.Debug(line, zap.String("stream", name))
+		if name == "stderr" {
+			l.logger.Warn(line, zap.String("stream", name))
+		} else {
+			l.logger.Debug(line, zap.String("stream", name))
+		}
 	}
 }
 
@@ -339,9 +344,11 @@ func (l *Launcher) monitorExit() {
 	if err != nil && !stopping {
 		l.logger.Error("agentctl exited unexpectedly",
 			zap.Error(err),
+			zap.Int("pid", l.cmd.Process.Pid),
 			zap.Int("exit_code", l.cmd.ProcessState.ExitCode()))
 	} else if !stopping {
 		l.logger.Info("agentctl exited",
+			zap.Int("pid", l.cmd.Process.Pid),
 			zap.Int("exit_code", l.cmd.ProcessState.ExitCode()))
 	}
 

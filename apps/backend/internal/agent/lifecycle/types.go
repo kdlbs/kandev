@@ -70,6 +70,21 @@ type AgentExecution struct {
 	// Available commands from the agent (for slash command menu)
 	availableCommands   []streams.AvailableCommand
 	availableCommandsMu sync.RWMutex
+
+	// Channel signaled by handleAgentEvent(complete) or stream disconnect to unblock SendPrompt.
+	// Buffered (size 1) so the sender never blocks.
+	promptDoneCh chan PromptCompletionSignal
+
+	// Last time an agent event was received (for stall detection)
+	lastActivityAt   time.Time
+	lastActivityAtMu sync.Mutex
+}
+
+// PromptCompletionSignal carries the result from a complete event or disconnect.
+type PromptCompletionSignal struct {
+	StopReason string
+	IsError    bool
+	Error      string
 }
 
 // GetAgentCtlClient returns the agentctl client for this execution

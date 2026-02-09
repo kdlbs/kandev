@@ -879,11 +879,12 @@ func createTestManagerWithTracking() (*Manager, *MockEventBusWithTracking) {
 // createTestExecution creates a test execution with proper initialization
 func createTestExecution(id, taskID, sessionID string) *AgentExecution {
 	return &AgentExecution{
-		ID:        id,
-		TaskID:    taskID,
-		SessionID: sessionID,
-		Status:    v1.AgentStatusRunning,
-		StartedAt: time.Now(),
+		ID:           id,
+		TaskID:       taskID,
+		SessionID:    sessionID,
+		Status:       v1.AgentStatusRunning,
+		StartedAt:    time.Now(),
+		promptDoneCh: make(chan PromptCompletionSignal, 1),
 	}
 }
 
@@ -1248,5 +1249,118 @@ func TestHandleAgentEvent_MultipleToolCalls(t *testing.T) {
 				t.Errorf("complete event should not have text when streaming was used, got %q", e.Data.Text)
 			}
 		}
+	}
+}
+
+// TestHandleAgentEvent_CompleteSignalsPromptDoneCh verifies that the complete event
+// signals the promptDoneCh channel with the correct stop reason.
+func TestHandleAgentEvent_CompleteSignalsPromptDoneCh(t *testing.T) {
+	mgr, _ := createTestManagerWithTracking()
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	mgr.executionStore.Add(execution)
+
+	// Send a normal complete event
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type: "complete",
+	})
+
+	// promptDoneCh should have a signal
+	select {
+	case signal := <-execution.promptDoneCh:
+		if signal.IsError {
+			t.Error("expected non-error signal for normal complete")
+		}
+		if signal.StopReason != "end_turn" {
+			t.Errorf("expected stop_reason 'end_turn', got %q", signal.StopReason)
+		}
+	default:
+		t.Error("expected signal on promptDoneCh, got none")
+	}
+}
+
+// TestHandleAgentEvent_ErrorCompleteSignalsPromptDoneCh verifies that an error completion
+// signals the promptDoneCh channel with IsError=true and the error message.
+func TestHandleAgentEvent_ErrorCompleteSignalsPromptDoneCh(t *testing.T) {
+	mgr, _ := createTestManagerWithTracking()
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	mgr.executionStore.Add(execution)
+
+	// Send an error complete event
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:  "complete",
+		Error: "something went wrong",
+		Data:  map[string]interface{}{"is_error": true},
+	})
+
+	// promptDoneCh should have an error signal
+	select {
+	case signal := <-execution.promptDoneCh:
+		if !signal.IsError {
+			t.Error("expected error signal for error complete")
+		}
+		if signal.StopReason != "error" {
+			t.Errorf("expected stop_reason 'error', got %q", signal.StopReason)
+		}
+		if signal.Error != "something went wrong" {
+			t.Errorf("expected error 'something went wrong', got %q", signal.Error)
+		}
+	default:
+		t.Error("expected signal on promptDoneCh, got none")
+	}
+}
+
+// TestHandleAgentEvent_UpdatesLastActivityAt verifies that every agent event
+// updates the lastActivityAt timestamp for stall detection.
+func TestHandleAgentEvent_UpdatesLastActivityAt(t *testing.T) {
+	mgr, _ := createTestManagerWithTracking()
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	mgr.executionStore.Add(execution)
+
+	// Set lastActivityAt to a known old time
+	oldTime := time.Now().Add(-10 * time.Minute)
+	execution.lastActivityAtMu.Lock()
+	execution.lastActivityAt = oldTime
+	execution.lastActivityAtMu.Unlock()
+
+	// Send any event
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type: "message_chunk",
+		Text: "hello\n",
+	})
+
+	// lastActivityAt should be updated to approximately now
+	execution.lastActivityAtMu.Lock()
+	elapsed := time.Since(execution.lastActivityAt)
+	execution.lastActivityAtMu.Unlock()
+
+	if elapsed > 1*time.Second {
+		t.Errorf("lastActivityAt not updated: elapsed %v since last event", elapsed)
+	}
+}
+
+// TestHandleAgentEvent_PromptDoneChDoesNotBlockWhenFull verifies that signaling
+// promptDoneCh with a full channel (no receiver) doesn't block the event handler.
+func TestHandleAgentEvent_PromptDoneChDoesNotBlockWhenFull(t *testing.T) {
+	mgr, _ := createTestManagerWithTracking()
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	mgr.executionStore.Add(execution)
+
+	// Pre-fill the channel
+	execution.promptDoneCh <- PromptCompletionSignal{StopReason: "stale"}
+
+	// Send complete event — should not block
+	done := make(chan struct{})
+	go func() {
+		mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+			Type: "complete",
+		})
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Good — didn't block
+	case <-time.After(2 * time.Second):
+		t.Fatal("handleAgentEvent blocked when promptDoneCh was full")
 	}
 }
