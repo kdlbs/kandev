@@ -96,7 +96,19 @@ func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready c
 		if sm.callbacks.OnAgentEvent != nil {
 			sm.callbacks.OnAgentEvent(execution, event)
 		}
-	}, sm.mcpHandler)
+	}, sm.mcpHandler, func(disconnectErr error) {
+		// WebSocket dropped — signal promptDoneCh so SendPrompt doesn't hang forever.
+		// Only signal on unexpected errors (not normal close).
+		if disconnectErr != nil {
+			select {
+			case execution.promptDoneCh <- PromptCompletionSignal{
+				IsError: true,
+				Error:   "agent stream disconnected: " + disconnectErr.Error(),
+			}:
+			default:
+			}
+		}
+	})
 
 	// Signal that the stream connection attempt is complete (success or failure)
 	// StreamUpdates returns immediately after establishing the WebSocket connection

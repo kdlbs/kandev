@@ -256,25 +256,20 @@ func (s *Server) handleAgentPrompt(c *gin.Context) {
 		return
 	}
 
-	// Use a long timeout for prompt - agent may take time to complete
-	ctx, cancel := context.WithTimeout(c.Request.Context(), constants.PromptTimeout)
-	defer cancel()
+	// Start prompt processing asynchronously.
+	// Completion is signaled via the WebSocket complete event, not the HTTP response.
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), constants.PromptTimeout)
+		defer cancel()
+		if err := adapter.Prompt(ctx, req.Text, req.Attachments); err != nil {
+			s.logger.Error("async prompt failed", zap.Error(err))
+		}
+	}()
 
-	err := adapter.Prompt(ctx, req.Text, req.Attachments)
-	if err != nil {
-		s.logger.Error("prompt failed", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, PromptResponse{
-			Success: false,
-			Error:   err.Error(),
-		})
-		return
-	}
+	s.logger.Info("prompt accepted (async)", zap.Int("attachments", len(req.Attachments)))
 
-	s.logger.Info("prompt completed", zap.Int("attachments", len(req.Attachments)))
-
-	c.JSON(http.StatusOK, PromptResponse{
-		Success: true,
-	})
+	// Return immediately — completion comes via WebSocket complete event
+	c.JSON(http.StatusAccepted, PromptResponse{Success: true})
 }
 
 // handleAgentStreamWS streams agent session notifications via WebSocket.

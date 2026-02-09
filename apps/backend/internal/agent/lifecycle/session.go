@@ -335,7 +335,7 @@ func (sm *SessionManager) InitializeAndPrompt(
 			defer cancel()
 
 			// Initial prompt has no attachments
-			_, err := sm.SendPrompt(promptCtx, execution, effectivePrompt, false, nil, markReady)
+			_, err := sm.SendPrompt(promptCtx, execution, effectivePrompt, false, nil)
 			if err != nil {
 				sm.logger.Error("initial prompt failed",
 					zap.String("execution_id", execution.ID),
@@ -372,13 +372,13 @@ func (sm *SessionManager) InitializeAndPrompt(
 // For initial prompts, pass validateStatus=false. For follow-up prompts, pass validateStatus=true.
 // Attachments (images) are passed to the agent if provided.
 // Returns the prompt result containing the stop reason and agent message.
+// Note: MarkReady is handled by handleAgentEvent(complete), not by this method.
 func (sm *SessionManager) SendPrompt(
 	ctx context.Context,
 	execution *AgentExecution,
 	prompt string,
 	validateStatus bool,
 	attachments []v1.MessageAttachment,
-	markReady func(executionID string) error,
 ) (*PromptResult, error) {
 	if execution.agentctl == nil {
 		return nil, fmt.Errorf("execution %q has no agentctl client", execution.ID)
@@ -449,45 +449,71 @@ func (sm *SessionManager) SendPrompt(
 		}
 	}
 
-	// Prompt is synchronous - blocks until agent completes
-	resp, err := execution.agentctl.Prompt(ctx, effectivePrompt, attachments)
-	if err != nil {
-		sm.logger.Error("ACP prompt failed",
+	// Initialize activity timestamp for stall detection
+	execution.lastActivityAtMu.Lock()
+	execution.lastActivityAt = time.Now()
+	execution.lastActivityAtMu.Unlock()
+
+	// Drain any stale signal from a previous prompt cycle
+	select {
+	case <-execution.promptDoneCh:
+	default:
+	}
+
+	// Fire the prompt (returns immediately now — completion comes via WebSocket complete event)
+	if err := execution.agentctl.Prompt(ctx, effectivePrompt, attachments); err != nil {
+		sm.logger.Error("failed to trigger prompt",
 			zap.String("execution_id", execution.ID),
 			zap.Error(err))
-		return nil, fmt.Errorf("prompt failed: %w", err)
+		return nil, fmt.Errorf("failed to trigger prompt: %w", err)
 	}
 
-	// Extract accumulated content from buffers for the return value.
-	// All adapters now emit complete events via the stream, so handleAgentEvent will
-	// handle the buffer content when the complete event arrives. We just peek at the
-	// buffer here to return the message content to the caller.
-	stopReason := ""
-	if resp != nil {
-		stopReason = string(resp.StopReason)
+	// Wait for completion signal from handleAgentEvent(complete) or stream disconnect.
+	// Periodically check for stall conditions (no events for an extended period).
+	stallTicker := time.NewTicker(30 * time.Second)
+	defer stallTicker.Stop()
+
+	for {
+		select {
+		case signal := <-execution.promptDoneCh:
+			if signal.IsError {
+				sm.logger.Error("prompt completed with error",
+					zap.String("execution_id", execution.ID),
+					zap.String("error", signal.Error))
+				return nil, fmt.Errorf("agent error: %s", signal.Error)
+			}
+
+			// Peek at buffer for return value
+			execution.messageMu.Lock()
+			agentMessage := execution.messageBuffer.String()
+			execution.messageMu.Unlock()
+
+			sm.logger.Info("prompt completed",
+				zap.String("execution_id", execution.ID),
+				zap.String("stop_reason", signal.StopReason),
+				zap.Int("message_length", len(agentMessage)))
+
+			// Note: markReady is NOT called here — handleAgentEvent(complete) already handles it.
+			return &PromptResult{
+				StopReason:   signal.StopReason,
+				AgentMessage: agentMessage,
+			}, nil
+
+		case <-ctx.Done():
+			return nil, ctx.Err()
+
+		case <-stallTicker.C:
+			execution.lastActivityAtMu.Lock()
+			elapsed := time.Since(execution.lastActivityAt)
+			lastActivity := execution.lastActivityAt
+			execution.lastActivityAtMu.Unlock()
+
+			if elapsed > 5*time.Minute {
+				sm.logger.Warn("agent stall detected: no events received",
+					zap.String("execution_id", execution.ID),
+					zap.Duration("elapsed_since_last_event", elapsed),
+					zap.Time("last_activity", lastActivity))
+			}
+		}
 	}
-
-	// Peek at the message for the return value, but don't clear the buffer.
-	// The complete event handler (handleAgentEvent) will clear the buffer.
-	execution.messageMu.Lock()
-	bufLen := execution.messageBuffer.Len()
-	agentMessage := execution.messageBuffer.String()
-	execution.messageMu.Unlock()
-
-	sm.logger.Info("prompt completed",
-		zap.String("execution_id", execution.ID),
-		zap.String("stop_reason", stopReason),
-		zap.Int("buffer_length", bufLen))
-
-	// Mark as READY for next prompt
-	if err := markReady(execution.ID); err != nil {
-		sm.logger.Error("failed to mark execution as ready after prompt",
-			zap.String("execution_id", execution.ID),
-			zap.Error(err))
-	}
-
-	return &PromptResult{
-		StopReason:   stopReason,
-		AgentMessage: agentMessage,
-	}, nil
 }
