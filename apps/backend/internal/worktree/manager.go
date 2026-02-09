@@ -730,10 +730,12 @@ func (m *Manager) pullBaseBranch(repoPath, baseBranch string) string {
 		pullCmd := exec.CommandContext(fetchCtx, "git", "pull", "--ff-only", "origin", baseBranch)
 		pullCmd.Dir = repoPath
 		if output, err := pullCmd.CombinedOutput(); err != nil {
-			m.logger.Error("git pull failed before worktree creation",
+			m.logger.Warn("git pull failed before worktree creation, falling back to remote ref",
 				zap.String("branch", baseBranch),
+				zap.String("remote_ref", remoteRef),
 				zap.String("output", string(output)),
 				zap.Error(err))
+			return remoteRef
 		}
 		return baseBranch
 	}

@@ -72,7 +72,10 @@ function calculateTurnDurationFromMessages(messages: Message[]): string | null {
  * Uses the turn's started_at timestamp to calculate elapsed time, so it persists across page refreshes.
  */
 function useRunningTimer(isRunning: boolean, turnStartedAt: string | null) {
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [elapsedSeconds, setElapsedSeconds] = useState(() => {
+    if (!isRunning || !turnStartedAt) return 0;
+    return Math.floor((Date.now() - new Date(turnStartedAt).getTime()) / 1000);
+  });
 
   useEffect(() => {
     if (!isRunning || !turnStartedAt) {
@@ -98,8 +101,8 @@ function useRunningTimer(isRunning: boolean, turnStartedAt: string | null) {
     };
   }, [isRunning, turnStartedAt]);
 
-  // Reset to 0 when not running
-  const displaySeconds = isRunning && turnStartedAt ? elapsedSeconds : 0;
+  // Keep showing elapsed time while isRunning, even if turnStartedAt was cleared
+  const displaySeconds = isRunning ? elapsedSeconds : 0;
 
   // Format as Xs or XmXs
   const formatted = useMemo(() => {
