@@ -1,41 +1,21 @@
 'use client';
 
-import { memo, useMemo, useState, useCallback } from 'react';
-import { Group, Panel, type Layout } from 'react-resizable-panels';
-import { useDefaultLayout } from '@/lib/layout/use-default-layout';
+import { memo } from 'react';
+import dynamic from 'next/dynamic';
 import { useResponsiveBreakpoint } from '@/hooks/use-responsive-breakpoint';
-import { useSessionLayoutState } from '@/hooks/use-session-layout-state';
-import { TaskCenterPanel } from './task-center-panel';
-import { TaskRightPanel } from './task-right-panel';
-import { TaskFilesPanel } from './task-files-panel';
-import { TaskSessionSidebar } from './task-session-sidebar';
 import { SessionMobileLayout, SessionTabletLayout } from './mobile';
-import { PreviewPanel } from '@/components/task/preview/preview-panel';
-import { PreviewController } from '@/components/task/preview/preview-controller';
-import { DocumentPanel } from '@/components/task/document/document-panel';
-import { useLayoutStore } from '@/lib/state/layout-store';
 import type { Repository, RepositoryScript } from '@/lib/types/http';
 import type { Terminal } from '@/hooks/domains/session/use-terminals';
+import type { Layout } from 'react-resizable-panels';
 
 // Re-export for backwards compatibility
 export type { SelectedDiff } from '@/hooks/use-session-layout-state';
 
-const DEFAULT_HORIZONTAL_LAYOUT: Record<string, number> = {
-  left: 18,
-  chat: 57,
-  preview: 57,
-  'document-split': 82,
-  right: 25,
-};
-const DEFAULT_PREVIEW_LAYOUT: Record<string, number> = {
-  chat: 60,
-  preview: 40,
-};
-const DEFAULT_DOCUMENT_LAYOUT: Record<string, number> = {
-  document: 45,
-  chat: 55,
-};
-const DEFAULT_LAYOUT_STATE = { left: true, chat: true, right: true, preview: false, document: false };
+// Dynamic import for dockview (no SSR)
+const DockviewDesktopLayout = dynamic(
+  () => import('./dockview-desktop-layout').then((mod) => mod.DockviewDesktopLayout),
+  { ssr: false }
+);
 
 type TaskLayoutProps = {
   workspaceId: string | null;
@@ -64,76 +44,6 @@ export const TaskLayout = memo(function TaskLayout({
 }: TaskLayoutProps) {
   const { isMobile, isTablet } = useResponsiveBreakpoint();
 
-  // Use shared layout state hook
-  const {
-    effectiveSessionId,
-    sessionKey,
-    selectedDiff,
-    handleSelectDiff,
-    handleClearSelectedDiff,
-    openFileRequest,
-    handleOpenFile,
-    handleFileOpenHandled,
-  } = useSessionLayoutState({ sessionId });
-
-  // Track active file path for highlighting in file tree
-  const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
-
-  const handleActiveFileChange = useCallback((filePath: string | null) => {
-    setActiveFilePath(filePath);
-  }, []);
-
-  const layoutBySession = useLayoutStore((state) => state.columnsBySessionId);
-  const layoutState = useMemo(
-    () => layoutBySession[sessionKey] ?? DEFAULT_LAYOUT_STATE,
-    [layoutBySession, sessionKey]
-  );
-  const hasDevScript = Boolean(repository?.dev_script?.trim());
-  const sessionForPreview = effectiveSessionId;
-
-  const horizontalPanelIds = useMemo(() => {
-    const ids: string[] = [];
-    if (layoutState.left) ids.push('left');
-    if (layoutState.document) {
-      ids.push('document-split');
-    } else if (layoutState.preview) {
-      ids.push('preview');
-    } else {
-      ids.push('chat');
-    }
-    if (layoutState.right) ids.push('right');
-    return ids;
-  }, [layoutState.left, layoutState.preview, layoutState.right, layoutState.document]);
-
-  const horizontalLayoutKey = `task-layout-horizontal-v4:${horizontalPanelIds.join('|')}`;
-  const { defaultLayout: defaultHorizontalLayout, onLayoutChanged: onHorizontalLayoutChange } =
-    useDefaultLayout({
-      id: horizontalLayoutKey,
-      panelIds: horizontalPanelIds,
-      baseLayout: DEFAULT_HORIZONTAL_LAYOUT,
-      serverDefaultLayout: defaultLayouts[horizontalLayoutKey],
-    });
-
-  const previewPanelIds = ['chat', 'preview'];
-  const previewLayoutKey = 'task-layout-preview-v2';
-  const { defaultLayout: defaultPreviewLayout, onLayoutChanged: onPreviewLayoutChange } =
-    useDefaultLayout({
-      id: previewLayoutKey,
-      panelIds: previewPanelIds,
-      baseLayout: DEFAULT_PREVIEW_LAYOUT,
-      serverDefaultLayout: defaultLayouts[previewLayoutKey],
-    });
-
-  const documentPanelIds = ['document', 'chat'];
-  const documentLayoutKey = 'task-layout-document-v1';
-  const { defaultLayout: defaultDocumentLayout, onLayoutChanged: onDocumentLayoutChange } =
-    useDefaultLayout({
-      id: documentLayoutKey,
-      panelIds: documentPanelIds,
-      baseLayout: DEFAULT_DOCUMENT_LAYOUT,
-      serverDefaultLayout: defaultLayouts[documentLayoutKey],
-    });
-
   // Mobile layout
   if (isMobile) {
     return (
@@ -161,104 +71,15 @@ export const TaskLayout = memo(function TaskLayout({
     );
   }
 
-  // Desktop layout
-  const topFilesPanel = (
-    <TaskFilesPanel
-      onSelectDiff={handleSelectDiff}
-      onOpenFile={handleOpenFile}
-      activeFilePath={activeFilePath}
-    />
-  );
-
+  // Desktop layout - dockview
   return (
-    <div className="flex-1 min-h-0 px-4 pb-4">
-      <PreviewController sessionId={sessionForPreview} hasDevScript={hasDevScript} />
-      <Group
-        orientation="horizontal"
-        className="h-full min-h-0"
-        id={horizontalLayoutKey}
-        key={horizontalLayoutKey}
-        defaultLayout={defaultHorizontalLayout}
-        onLayoutChanged={onHorizontalLayoutChange}
-      >
-        {layoutState.left ? (
-          <>
-            <Panel id="left" minSize="180px" className="min-h-0">
-              <TaskSessionSidebar workspaceId={workspaceId} boardId={boardId} />
-            </Panel>
-          </>
-        ) : null}
-
-        {layoutState.document ? (
-          <Panel id="document-split" className="min-h-0 min-w-0">
-            <Group
-              orientation="horizontal"
-              className="h-full min-h-0 min-w-0"
-              id={documentLayoutKey}
-              key={documentLayoutKey}
-              defaultLayout={defaultDocumentLayout}
-              onLayoutChanged={onDocumentLayoutChange}
-            >
-              <Panel id="document" minSize="300px" className="min-h-0 min-w-0">
-                <DocumentPanel sessionId={effectiveSessionId} />
-              </Panel>
-              <Panel id="chat" minSize="400px" className="min-h-0 min-w-0">
-                <TaskCenterPanel
-                  selectedDiff={selectedDiff}
-                  openFileRequest={openFileRequest}
-                  onDiffHandled={handleClearSelectedDiff}
-                  onFileOpenHandled={handleFileOpenHandled}
-                  onActiveFileChange={handleActiveFileChange}
-                  sessionId={sessionId}
-                />
-              </Panel>
-            </Group>
-          </Panel>
-        ) : layoutState.preview ? (
-          <Panel id="preview" className="min-h-0 min-w-0">
-            <Group
-              orientation="horizontal"
-              className="h-full min-h-0 min-w-0"
-              id={previewLayoutKey}
-              key={previewLayoutKey}
-              defaultLayout={defaultPreviewLayout}
-              onLayoutChanged={onPreviewLayoutChange}
-            >
-              <Panel id="chat" minSize="400px" className="min-h-0 min-w-0">
-                <TaskCenterPanel
-                  selectedDiff={selectedDiff}
-                  openFileRequest={openFileRequest}
-                  onDiffHandled={handleClearSelectedDiff}
-                  onFileOpenHandled={handleFileOpenHandled}
-                  onActiveFileChange={handleActiveFileChange}
-                />
-              </Panel>
-              <Panel id="preview" minSize="470px" className="min-h-0 min-w-0">
-                <PreviewPanel sessionId={sessionForPreview} hasDevScript={hasDevScript} />
-              </Panel>
-            </Group>
-          </Panel>
-        ) : (
-          <Panel id="chat" minSize="400px" className="min-h-0 min-w-0">
-            <TaskCenterPanel
-              selectedDiff={selectedDiff}
-              openFileRequest={openFileRequest}
-              onDiffHandled={handleClearSelectedDiff}
-              onFileOpenHandled={handleFileOpenHandled}
-              onActiveFileChange={handleActiveFileChange}
-              sessionId={sessionId}
-            />
-          </Panel>
-        )}
-
-        {layoutState.right ? (
-          <>
-            <Panel id="right" minSize="310px" className="min-h-0 min-w-0">
-              <TaskRightPanel topPanel={topFilesPanel} sessionId={sessionForPreview} repositoryId={repository?.id ?? null} initialScripts={initialScripts} initialTerminals={initialTerminals} />
-            </Panel>
-          </>
-        ) : null}
-      </Group>
-    </div>
+    <DockviewDesktopLayout
+      workspaceId={workspaceId}
+      boardId={boardId}
+      sessionId={sessionId}
+      repository={repository}
+      initialScripts={initialScripts}
+      initialTerminals={initialTerminals}
+    />
   );
 });

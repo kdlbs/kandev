@@ -11,7 +11,7 @@ import { useAppStore } from '@/components/state-provider';
 import { useSession } from '@/hooks/domains/session/use-session';
 import { useSessionAgentctl } from '@/hooks/domains/session/use-session-agentctl';
 import { getBackendConfig } from '@/lib/config';
-import { terminalTheme, applyTransparentBackground } from '@/lib/terminal-theme';
+import { getTerminalTheme } from '@/lib/terminal-theme';
 
 type PassthroughTerminalProps = {
   sessionId?: string | null;
@@ -205,7 +205,7 @@ export function PassthroughTerminal({ sessionId: propSessionId, terminalId, labe
         scrollback: 5000,
         fontSize: 13,
         fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-        theme: terminalTheme,
+        theme: getTerminalTheme(termContainer),
       });
 
       const fitAddon = new FitAddon();
@@ -246,9 +246,7 @@ export function PassthroughTerminal({ sessionId: propSessionId, terminalId, labe
       xtermRef.current = terminal;
       fitAddonRef.current = fitAddon;
 
-      // Apply transparent background styling
-      const applyStyles = () => applyTransparentBackground(termContainer);
-      requestAnimationFrame(applyStyles);
+      // No need for transparent background hacks — WebGL uses the theme bg directly
 
       // Debounced resize handler
       const handleResize = () => {
@@ -269,8 +267,6 @@ export function PassthroughTerminal({ sessionId: propSessionId, terminalId, labe
         // Debounce the actual fit/resize
         resizeTimeoutRef.current = setTimeout(() => {
           fitAndResize();
-          // Re-apply styles after resize
-          applyStyles();
         }, 100);
       };
 
@@ -436,7 +432,7 @@ export function PassthroughTerminal({ sessionId: propSessionId, terminalId, labe
   return (
     <div
       ref={terminalRef}
-      className="h-full w-full overflow-hidden rounded-md bg-background p-1"
+      className="h-full w-full overflow-hidden p-1"
       style={{ minWidth: MIN_WIDTH, minHeight: MIN_HEIGHT }}
     />
   );

@@ -307,6 +307,42 @@ export function setFilesPanelScrollPosition(sessionId: string, position: number)
   }
 }
 
+// --- Dockview per-session layout (sessionStorage) ---
+const DOCKVIEW_SESSION_LAYOUT_PREFIX = 'kandev.dockview.layout.';
+
+/**
+ * Get the saved dockview layout for a session
+ * @param sessionId - The session ID
+ * @returns The serialized layout object, or null if not found
+ */
+export function getSessionLayout(sessionId: string): object | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.sessionStorage.getItem(`${DOCKVIEW_SESSION_LAYOUT_PREFIX}${sessionId}`);
+    if (!raw) return null;
+    return JSON.parse(raw) as object;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Save the dockview layout for a session
+ * @param sessionId - The session ID
+ * @param layout - The serialized layout object from api.toJSON()
+ */
+export function setSessionLayout(sessionId: string, layout: object): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.sessionStorage.setItem(
+      `${DOCKVIEW_SESSION_LAYOUT_PREFIX}${sessionId}`,
+      JSON.stringify(layout),
+    );
+  } catch {
+    // Ignore write failures (storage full, blocked, etc.)
+  }
+}
+
 // Internal storage keys for open file tabs
 const OPEN_FILES_KEY = 'kandev.openFiles';
 const ACTIVE_TAB_KEY = 'kandev.activeTab';

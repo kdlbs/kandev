@@ -1,6 +1,7 @@
 'use client';
 
 import { memo, useMemo, useCallback, createRef, useState, useEffect, useRef } from 'react';
+import { PanelRoot, PanelBody, PanelToolbar } from './panel-primitives';
 import {
   IconSettings,
   IconTextWrap,
@@ -292,9 +293,9 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
   const progressPercent = totalCount > 0 ? (reviewedCount / totalCount) * 100 : 0;
 
   return (
-    <div className="flex flex-col h-full">
+    <PanelRoot>
       {/* Top bar */}
-      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border bg-card/50 min-h-[36px]">
+      <PanelToolbar className="bg-card/50 min-h-[36px]">
         {/* Settings cog */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -395,10 +396,10 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
             </span>
           </Button>
         )}
-      </div>
+      </PanelToolbar>
 
       {/* Content */}
-      <div className="flex-1 min-h-0 overflow-hidden">
+      <PanelBody padding={false} scroll={false} className="overflow-hidden">
         {cumulativeLoading && allFiles.length === 0 ? (
           <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
             Loading changes...
@@ -420,7 +421,7 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
             fileRefs={fileRefs}
           />
         ) : null}
-      </div>
+      </PanelBody>
 
       {/* Review Dialog */}
       {activeSessionId && (
@@ -435,7 +436,7 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
           cumulativeDiff={cumulativeDiff}
         />
       )}
-    </div>
+    </PanelRoot>
   );
 });
 
