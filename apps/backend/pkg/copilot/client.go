@@ -30,6 +30,8 @@ type (
 	PermissionRequest        = copilot.PermissionRequest
 	PermissionInvocation     = copilot.PermissionInvocation
 	PermissionRequestResult  = copilot.PermissionRequestResult
+	// MCP types
+	MCPServerConfig = copilot.MCPServerConfig
 )
 
 // Re-export event type constants
@@ -189,7 +191,8 @@ func (c *Client) Stop() error {
 }
 
 // CreateSession creates a new Copilot session.
-func (c *Client) CreateSession(ctx context.Context) (string, error) {
+// mcpServers configures MCP servers for the session (nil if none).
+func (c *Client) CreateSession(ctx context.Context, mcpServers map[string]MCPServerConfig) (string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -213,7 +216,9 @@ func (c *Client) CreateSession(ctx context.Context) (string, error) {
 		c.session = nil
 	}
 
-	c.logger.Info("creating new session", zap.String("model", c.model))
+	c.logger.Info("creating new session",
+		zap.String("model", c.model),
+		zap.Int("mcp_servers", len(mcpServers)))
 
 	// Get permission handler
 	c.permissionMu.RLock()
@@ -225,20 +230,22 @@ func (c *Client) CreateSession(ctx context.Context) (string, error) {
 		Model:               c.model,
 		Streaming:           true,
 		OnPermissionRequest: permHandler,
+		MCPServers:          mcpServers,
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to create session: %w", err)
 	}
 
-	c.session = session
-	c.sessionID = session.SessionID
-
-	// Register event handler
+	// Register event handler BEFORE storing the session so no events are lost
+	// between session creation and handler registration.
 	c.handlerMu.Lock()
 	if c.eventHandler != nil {
 		c.unsubscribe = session.On(c.eventHandler)
 	}
 	c.handlerMu.Unlock()
+
+	c.session = session
+	c.sessionID = session.SessionID
 
 	c.logger.Info("session created", zap.String("session_id", c.sessionID))
 
@@ -246,7 +253,8 @@ func (c *Client) CreateSession(ctx context.Context) (string, error) {
 }
 
 // ResumeSession resumes an existing session with streaming enabled.
-func (c *Client) ResumeSession(ctx context.Context, sessionID string) error {
+// mcpServers configures MCP servers for the resumed session (nil if none).
+func (c *Client) ResumeSession(ctx context.Context, sessionID string, mcpServers map[string]MCPServerConfig) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -270,7 +278,9 @@ func (c *Client) ResumeSession(ctx context.Context, sessionID string) error {
 		c.session = nil
 	}
 
-	c.logger.Info("resuming session", zap.String("session_id", sessionID))
+	c.logger.Info("resuming session",
+		zap.String("session_id", sessionID),
+		zap.Int("mcp_servers", len(mcpServers)))
 
 	// Get permission handler
 	c.permissionMu.RLock()
@@ -281,20 +291,21 @@ func (c *Client) ResumeSession(ctx context.Context, sessionID string) error {
 	session, err := c.sdkClient.ResumeSessionWithOptions(sessionID, &copilot.ResumeSessionConfig{
 		Streaming:           true,
 		OnPermissionRequest: permHandler,
+		MCPServers:          mcpServers,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to resume session: %w", err)
 	}
 
-	c.session = session
-	c.sessionID = sessionID
-
-	// Register event handler
+	// Register event handler BEFORE storing the session so no events are lost.
 	c.handlerMu.Lock()
 	if c.eventHandler != nil {
 		c.unsubscribe = session.On(c.eventHandler)
 	}
 	c.handlerMu.Unlock()
+
+	c.session = session
+	c.sessionID = sessionID
 
 	c.logger.Info("session resumed", zap.String("session_id", sessionID))
 
