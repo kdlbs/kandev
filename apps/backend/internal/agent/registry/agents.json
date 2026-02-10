@@ -746,7 +746,7 @@
       "cmd": [
         "npx",
         "-y",
-        "@github/copilot@0.0.375",
+        "@github/copilot@0.0.406",
         "--server",
         "--log-level",
         "error"
@@ -804,10 +804,10 @@
         "auto_approve": {
           "supported": true,
           "default": true,
-          "label": "Auto-approve",
-          "description": "Automatically approve tool calls",
+          "label": "Auto-approve (YOLO mode)",
+          "description": "Enable all tools, folders and urls without confirmation.",
           "apply_method": "cli_flag",
-          "cli_flag": "--allow-all-tools"
+          "cli_flag": "--yolo"
         }
       },
       "discovery": {

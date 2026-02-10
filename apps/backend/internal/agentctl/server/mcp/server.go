@@ -4,6 +4,8 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"sync"
 	"time"
 
@@ -36,8 +38,9 @@ type Server struct {
 }
 
 // New creates a new MCP server for agentctl.
+// port is the HTTP server port used to build the SSE base URL (http://localhost:<port>).
 // mcpLogFile is an optional file path for MCP debug logging; pass "" to disable.
-func New(backend BackendClient, sessionID string, log *logger.Logger, mcpLogFile string) *Server {
+func New(backend BackendClient, sessionID string, port int, log *logger.Logger, mcpLogFile string) *Server {
 	s := &Server{
 		backend:   backend,
 		sessionID: sessionID,
@@ -69,7 +72,11 @@ func New(backend BackendClient, sessionID string, log *logger.Logger, mcpLogFile
 	s.registerTools()
 
 	// Create SSE server for Claude Desktop, Cursor, etc.
-	s.sseServer = server.NewSSEServer(s.mcpServer)
+	// WithBaseURL ensures the SSE endpoint event includes the full message URL
+	// (e.g. http://localhost:10005/message?sessionId=xxx) so MCP clients can POST back.
+	s.sseServer = server.NewSSEServer(s.mcpServer,
+		server.WithBaseURL(fmt.Sprintf("http://localhost:%d", port)),
+	)
 
 	// Create Streamable HTTP server for Codex
 	s.httpServer = server.NewStreamableHTTPServer(s.mcpServer,
@@ -179,9 +186,14 @@ func (s *Server) wrapHandler(toolName string, handler server.ToolHandlerFunc) se
 
 // registerTools registers all MCP tools.
 func (s *Server) registerTools() {
+	// Use NewToolWithRawSchema for parameter-less tools to ensure the schema
+	// includes "properties": {}. The default ToolInputSchema type in mcp-go uses
+	// omitempty which drops empty properties maps, causing OpenAI API validation
+	// errors ("object schema missing properties").
 	s.mcpServer.AddTool(
-		mcp.NewTool("list_workspaces",
-			mcp.WithDescription("List all workspaces. Use this first to get workspace IDs."),
+		mcp.NewToolWithRawSchema("list_workspaces",
+			"List all workspaces. Use this first to get workspace IDs.",
+			json.RawMessage(`{"type":"object","properties":{}}`),
 		),
 		s.wrapHandler("list_workspaces", s.listWorkspacesHandler()),
 	)
