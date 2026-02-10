@@ -1059,3 +1059,94 @@ func TestSQLiteRepository_UpdateTaskSessionState(t *testing.T) {
 		t.Error("expected error for updating nonexistent session status")
 	}
 }
+
+func TestSQLiteRepository_CompleteRunningToolCallsForTurn(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// Setup
+	board := &models.Board{ID: "board-1", Name: "Test Board"}
+	_ = repo.CreateBoard(ctx, board)
+	task := &models.Task{ID: "task-1", BoardID: "board-1", WorkflowStepID: "step-1", Title: "Test Task"}
+	_ = repo.CreateTask(ctx, task)
+	sessionID := setupSQLiteTestSession(ctx, repo, task.ID, "session-1")
+	turnID := setupSQLiteTestTurn(ctx, repo, sessionID, task.ID, "turn-1")
+
+	// Create a tool call message with status "running"
+	runningTool := &models.Message{
+		ID: "msg-running-1", TaskSessionID: sessionID, TaskID: task.ID, TurnID: turnID,
+		AuthorType: models.MessageAuthorAgent, Content: "Running tool",
+		Type:     models.MessageTypeToolCall,
+		Metadata: map[string]interface{}{"tool_call_id": "tc-1", "status": "running"},
+	}
+	// Create a tool call message already "complete"
+	completeTool := &models.Message{
+		ID: "msg-complete-1", TaskSessionID: sessionID, TaskID: task.ID, TurnID: turnID,
+		AuthorType: models.MessageAuthorAgent, Content: "Complete tool",
+		Type:     models.MessageTypeToolCall,
+		Metadata: map[string]interface{}{"tool_call_id": "tc-2", "status": "complete"},
+	}
+	// Create a regular message (no tool_call_id) with status "running" — should NOT be affected
+	regularMsg := &models.Message{
+		ID: "msg-regular-1", TaskSessionID: sessionID, TaskID: task.ID, TurnID: turnID,
+		AuthorType: models.MessageAuthorAgent, Content: "Regular message",
+		Type:     models.MessageTypeMessage,
+		Metadata: map[string]interface{}{"status": "running"},
+	}
+	// Create a second running tool call
+	runningTool2 := &models.Message{
+		ID: "msg-running-2", TaskSessionID: sessionID, TaskID: task.ID, TurnID: turnID,
+		AuthorType: models.MessageAuthorAgent, Content: "Running tool 2",
+		Type:     models.MessageTypeToolCall,
+		Metadata: map[string]interface{}{"tool_call_id": "tc-3", "status": "running"},
+	}
+
+	for _, msg := range []*models.Message{runningTool, completeTool, regularMsg, runningTool2} {
+		if err := repo.CreateMessage(ctx, msg); err != nil {
+			t.Fatalf("failed to create message %s: %v", msg.ID, err)
+		}
+	}
+
+	// Execute
+	affected, err := repo.CompleteRunningToolCallsForTurn(ctx, turnID)
+	if err != nil {
+		t.Fatalf("CompleteRunningToolCallsForTurn failed: %v", err)
+	}
+
+	// Should have updated exactly 2 running tool call messages
+	if affected != 2 {
+		t.Errorf("expected 2 affected rows, got %d", affected)
+	}
+
+	// Verify running tool calls are now "complete"
+	msg1, _ := repo.GetMessage(ctx, "msg-running-1")
+	if msg1.Metadata["status"] != "complete" {
+		t.Errorf("expected msg-running-1 status 'complete', got %v", msg1.Metadata["status"])
+	}
+	msg2, _ := repo.GetMessage(ctx, "msg-running-2")
+	if msg2.Metadata["status"] != "complete" {
+		t.Errorf("expected msg-running-2 status 'complete', got %v", msg2.Metadata["status"])
+	}
+
+	// Verify already-complete tool call is unchanged
+	msg3, _ := repo.GetMessage(ctx, "msg-complete-1")
+	if msg3.Metadata["status"] != "complete" {
+		t.Errorf("expected msg-complete-1 status 'complete', got %v", msg3.Metadata["status"])
+	}
+
+	// Verify regular message (no tool_call_id) was NOT affected
+	msg4, _ := repo.GetMessage(ctx, "msg-regular-1")
+	if msg4.Metadata["status"] != "running" {
+		t.Errorf("expected msg-regular-1 status 'running' (unchanged), got %v", msg4.Metadata["status"])
+	}
+
+	// Running again should affect 0 rows
+	affected2, err := repo.CompleteRunningToolCallsForTurn(ctx, turnID)
+	if err != nil {
+		t.Fatalf("second CompleteRunningToolCallsForTurn failed: %v", err)
+	}
+	if affected2 != 0 {
+		t.Errorf("expected 0 affected rows on second call, got %d", affected2)
+	}
+}

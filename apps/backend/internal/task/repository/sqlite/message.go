@@ -267,6 +267,24 @@ func (r *Repository) GetMessageByPendingID(ctx context.Context, sessionID, pendi
 	return message, nil
 }
 
+// CompleteRunningToolCallsForTurn marks all "running" tool call messages for a turn as "complete".
+// This is a safety net to ensure no tool calls remain stuck in "running" state after a turn completes.
+func (r *Repository) CompleteRunningToolCallsForTurn(ctx context.Context, turnID string) (int64, error) {
+	result, err := r.db.ExecContext(ctx, `
+		UPDATE task_session_messages
+		SET metadata = json_set(metadata, '$.status', 'complete')
+		WHERE turn_id = ?
+		  AND json_extract(metadata, '$.status') = 'running'
+		  AND json_extract(metadata, '$.tool_call_id') IS NOT NULL
+	`, turnID)
+	if err != nil {
+		return 0, fmt.Errorf("failed to complete running tool calls for turn %s: %w", turnID, err)
+	}
+
+	rows, _ := result.RowsAffected()
+	return rows, nil
+}
+
 // UpdateMessage updates an existing message
 func (r *Repository) UpdateMessage(ctx context.Context, message *models.Message) error {
 	metadataJSON, err := json.Marshal(message.Metadata)
