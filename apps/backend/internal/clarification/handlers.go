@@ -175,8 +175,45 @@ func (h *Handlers) httpRespond(c *gin.Context) {
 
 	// Get the pending request to find the session ID
 	pending, ok := h.store.GetRequest(pendingID)
+
+	// If request not found in store (likely timed out), mark the message as expired
+	// so the UI stops showing it as pending
+	var sessionID string
 	if !ok {
-		c.JSON(http.StatusNotFound, gin.H{"error": "clarification request not found"})
+		h.logger.Warn("clarification request not found in store (likely timed out), marking message as expired",
+			zap.String("pending_id", pendingID))
+
+		// Find the message by pending_id and mark it as expired
+		message, err := h.repo.FindMessageByPendingID(c.Request.Context(), pendingID)
+		if err != nil {
+			h.logger.Warn("failed to find clarification message for expired request",
+				zap.String("pending_id", pendingID),
+				zap.Error(err))
+			c.JSON(http.StatusGone, gin.H{
+				"error":   "clarification request expired",
+				"code":    "CLARIFICATION_EXPIRED",
+				"message": "This question has timed out. The agent may have already moved on. Please refresh the page.",
+			})
+			return
+		}
+
+		// Update the message status to expired
+		if message.Metadata == nil {
+			message.Metadata = make(map[string]interface{})
+		}
+		message.Metadata["status"] = "expired"
+		if err := h.repo.UpdateMessage(c.Request.Context(), message); err != nil {
+			h.logger.Warn("failed to update expired clarification message",
+				zap.String("pending_id", pendingID),
+				zap.String("message_id", message.ID),
+				zap.Error(err))
+		}
+
+		c.JSON(http.StatusGone, gin.H{
+			"error":   "clarification request expired",
+			"code":    "CLARIFICATION_EXPIRED",
+			"message": "This question has timed out. The agent may have already moved on. The page will refresh automatically.",
+		})
 		return
 	}
 
@@ -198,16 +235,21 @@ func (h *Handlers) httpRespond(c *gin.Context) {
 		h.logger.Warn("failed to respond to clarification",
 			zap.String("pending_id", pendingID),
 			zap.Error(err))
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		c.JSON(http.StatusGone, gin.H{
+			"error": "clarification request expired",
+			"code": "CLARIFICATION_EXPIRED",
+			"message": "This question has timed out. The agent may have already moved on.",
+		})
 		return
 	}
 
+	sessionID = pending.SessionID
 	// Update the message in the database with status and answer
 	status := "answered"
 	if body.Rejected {
 		status = "rejected"
 	}
-	if err := h.messageCreator.UpdateClarificationMessage(c.Request.Context(), pending.SessionID, pendingID, status, answer); err != nil {
+	if err := h.messageCreator.UpdateClarificationMessage(c.Request.Context(), sessionID, pendingID, status, answer); err != nil {
 		h.logger.Warn("failed to update clarification message",
 			zap.String("pending_id", pendingID),
 			zap.Error(err))

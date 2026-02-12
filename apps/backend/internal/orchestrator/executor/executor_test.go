@@ -243,6 +243,9 @@ func (m *mockRepository) GetMessageByToolCallID(ctx context.Context, sessionID, 
 func (m *mockRepository) GetMessageByPendingID(ctx context.Context, sessionID, pendingID string) (*models.Message, error) {
 	return nil, nil
 }
+func (m *mockRepository) FindMessageByPendingID(ctx context.Context, pendingID string) (*models.Message, error) {
+	return nil, nil
+}
 func (m *mockRepository) UpdateMessage(ctx context.Context, message *models.Message) error {
 	return nil
 }

@@ -22,6 +22,7 @@ export function ClarificationRequestMessage({ comment }: ClarificationRequestMes
   const status = metadata.status;
   const isAnswered = status === 'answered';
   const isSkipped = status === 'rejected';
+  const isExpired = status === 'expired';
 
   const getStatusIndicator = () => {
     if (isAnswered) {
@@ -29,6 +30,9 @@ export function ClarificationRequestMessage({ comment }: ClarificationRequestMes
     }
     if (isSkipped) {
       return <IconX className="h-3.5 w-3.5 text-muted-foreground" />;
+    }
+    if (isExpired) {
+      return <IconX className="h-3.5 w-3.5 text-orange-500" />;
     }
     return null;
   };
@@ -84,6 +88,12 @@ export function ClarificationRequestMessage({ comment }: ClarificationRequestMes
             <div className="mt-1 ml-3 flex items-center gap-1.5 text-xs text-muted-foreground">
               {getStatusIndicator()}
               Skipped
+            </div>
+          )}
+          {isExpired && (
+            <div className="mt-1 ml-3 flex items-center gap-1.5 text-xs text-orange-500/80">
+              {getStatusIndicator()}
+              Timed out (agent moved on)
             </div>
           )}
         </div>
