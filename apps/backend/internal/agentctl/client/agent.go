@@ -1,12 +1,9 @@
 package client
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
-	"sync"
 
 	"github.com/gorilla/websocket"
 	"github.com/kandev/kandev/internal/agentctl/types"
@@ -38,9 +35,9 @@ type InitializeResponse struct {
 	Error     string     `json:"error,omitempty"`
 }
 
-// Initialize sends the ACP initialize request
+// Initialize sends the ACP initialize request via the agent WebSocket stream.
 func (c *Client) Initialize(ctx context.Context, clientName, clientVersion string) (*AgentInfo, error) {
-	reqBody := struct {
+	payload := struct {
 		ClientName    string `json:"client_name"`
 		ClientVersion string `json:"client_version"`
 	}{
@@ -48,39 +45,22 @@ func (c *Client) Initialize(ctx context.Context, clientName, clientVersion strin
 		ClientVersion: clientVersion,
 	}
 
-	body, err := json.Marshal(reqBody)
+	resp, err := c.sendStreamRequest(ctx, "agent.initialize", payload)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("initialize request failed: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/v1/agent/initialize", bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			c.logger.Debug("failed to close initialize response body", zap.Error(err))
+	if resp.Type == ws.MessageTypeError {
+		var errPayload ws.ErrorPayload
+		if err := resp.ParsePayload(&errPayload); err != nil {
+			return nil, fmt.Errorf("initialize failed: unable to parse error")
 		}
-	}()
-
-	respBody, err := readResponseBody(resp)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
-	}
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("initialize request failed with status %d: %s", resp.StatusCode, string(respBody))
+		return nil, fmt.Errorf("initialize failed: %s", errPayload.Message)
 	}
 
 	var result InitializeResponse
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		return nil, fmt.Errorf("failed to parse initialize response (status %d, body: %s): %w", resp.StatusCode, truncateBody(respBody), err)
+	if err := resp.ParsePayload(&result); err != nil {
+		return nil, fmt.Errorf("failed to parse initialize response: %w", err)
 	}
 	if !result.Success {
 		return nil, fmt.Errorf("initialize failed: %s", result.Error)
@@ -95,46 +75,29 @@ type NewSessionResponse struct {
 	Error     string `json:"error,omitempty"`
 }
 
-// NewSession creates a new ACP session
+// NewSession creates a new ACP session via the agent WebSocket stream.
 func (c *Client) NewSession(ctx context.Context, cwd string, mcpServers []types.McpServer) (string, error) {
-	reqBody := struct {
+	payload := struct {
 		Cwd        string            `json:"cwd"`
 		McpServers []types.McpServer `json:"mcp_servers,omitempty"`
 	}{Cwd: cwd, McpServers: mcpServers}
 
-	body, err := json.Marshal(reqBody)
+	resp, err := c.sendStreamRequest(ctx, "agent.session.new", payload)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("new session request failed: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/v1/agent/session/new", bytes.NewReader(body))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			c.logger.Debug("failed to close session response body", zap.Error(err))
+	if resp.Type == ws.MessageTypeError {
+		var errPayload ws.ErrorPayload
+		if err := resp.ParsePayload(&errPayload); err != nil {
+			return "", fmt.Errorf("new session failed: unable to parse error")
 		}
-	}()
-
-	respBody, err := readResponseBody(resp)
-	if err != nil {
-		return "", fmt.Errorf("failed to read response body: %w", err)
-	}
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("new session request failed with status %d: %s", resp.StatusCode, string(respBody))
+		return "", fmt.Errorf("new session failed: %s", errPayload.Message)
 	}
 
 	var result NewSessionResponse
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		return "", fmt.Errorf("failed to parse new session response (status %d, body: %s): %w", resp.StatusCode, truncateBody(respBody), err)
+	if err := resp.ParsePayload(&result); err != nil {
+		return "", fmt.Errorf("failed to parse new session response: %w", err)
 	}
 	if !result.Success {
 		return "", fmt.Errorf("new session failed: %s", result.Error)
@@ -142,48 +105,31 @@ func (c *Client) NewSession(ctx context.Context, cwd string, mcpServers []types.
 	return result.SessionID, nil
 }
 
-// LoadSession resumes an existing ACP session
+// LoadSession resumes an existing ACP session via the agent WebSocket stream.
 func (c *Client) LoadSession(ctx context.Context, sessionID string) error {
-	reqBody := struct {
+	payload := struct {
 		SessionID string `json:"session_id"`
 	}{SessionID: sessionID}
 
-	body, err := json.Marshal(reqBody)
+	resp, err := c.sendStreamRequest(ctx, "agent.session.load", payload)
 	if err != nil {
-		return err
+		return fmt.Errorf("load session request failed: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/v1/agent/session/load", bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			c.logger.Debug("failed to close load session response body", zap.Error(err))
+	if resp.Type == ws.MessageTypeError {
+		var errPayload ws.ErrorPayload
+		if err := resp.ParsePayload(&errPayload); err != nil {
+			return fmt.Errorf("load session failed: unable to parse error")
 		}
-	}()
-
-	respBody, err := readResponseBody(resp)
-	if err != nil {
-		return fmt.Errorf("failed to read response body: %w", err)
-	}
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("load session request failed with status %d: %s", resp.StatusCode, string(respBody))
+		return fmt.Errorf("load session failed: %s", errPayload.Message)
 	}
 
 	var result struct {
 		Success bool   `json:"success"`
 		Error   string `json:"error,omitempty"`
 	}
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		return fmt.Errorf("failed to parse load session response (status %d, body: %s): %w", resp.StatusCode, truncateBody(respBody), err)
+	if err := resp.ParsePayload(&result); err != nil {
+		return fmt.Errorf("failed to parse load session response: %w", err)
 	}
 	if !result.Success {
 		return fmt.Errorf("load session failed: %s", result.Error)
@@ -191,58 +137,37 @@ func (c *Client) LoadSession(ctx context.Context, sessionID string) error {
 	return nil
 }
 
-// Prompt sends a fire-and-forget prompt to the agent.
-// The agentctl server returns 202 immediately; completion is signaled via the WebSocket complete event.
+// Prompt sends a fire-and-forget prompt to the agent via the agent WebSocket stream.
+// The server returns an accepted response immediately; completion is signaled via stream events.
 // Attachments (images) are passed to the agent if provided.
 func (c *Client) Prompt(ctx context.Context, text string, attachments []v1.MessageAttachment) error {
-	reqBody := struct {
+	payload := struct {
 		Text        string                 `json:"text"`
 		Attachments []v1.MessageAttachment `json:"attachments,omitempty"`
 	}{Text: text, Attachments: attachments}
 
-	body, err := json.Marshal(reqBody)
+	resp, err := c.sendStreamRequest(ctx, "agent.prompt", payload)
 	if err != nil {
-		return err
+		return fmt.Errorf("prompt request failed: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/v1/agent/prompt", bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			c.logger.Debug("failed to close prompt response body", zap.Error(err))
+	if resp.Type == ws.MessageTypeError {
+		var errPayload ws.ErrorPayload
+		if err := resp.ParsePayload(&errPayload); err != nil {
+			return fmt.Errorf("prompt failed: unable to parse error")
 		}
-	}()
-
-	respBody, err := readResponseBody(resp)
-	if err != nil {
-		return fmt.Errorf("failed to read response body: %w", err)
-	}
-
-	// Accept both 200 (backwards compat) and 202 (async)
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
-		return fmt.Errorf("prompt request failed with status %d: %s", resp.StatusCode, string(respBody))
+		return fmt.Errorf("prompt failed: %s", errPayload.Message)
 	}
 
 	var result struct {
 		Success bool   `json:"success"`
 		Error   string `json:"error,omitempty"`
 	}
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		return fmt.Errorf("failed to parse prompt response (status %d, body: %s): %w", resp.StatusCode, truncateBody(respBody), err)
+	if err := resp.ParsePayload(&result); err != nil {
+		return fmt.Errorf("failed to parse prompt response: %w", err)
 	}
 	if !result.Success {
-		c.logger.Warn("prompt returned failure response",
-			zap.String("error", result.Error),
-			zap.Int("status_code", resp.StatusCode),
-			zap.String("response_body", truncateBody(respBody)))
+		c.logger.Warn("prompt returned failure response", zap.String("error", result.Error))
 		return fmt.Errorf("prompt failed: %s", result.Error)
 	}
 	return nil
@@ -275,11 +200,10 @@ func (c *Client) StreamUpdates(ctx context.Context, handler func(AgentEvent), mc
 
 	c.logger.Info("connected to updates stream", zap.String("url", wsURL))
 
-	// Use mutex for writing responses
-	var writeMu sync.Mutex
+	// writeMessage uses the shared stream write mutex for thread-safe writes
 	writeMessage := func(data []byte) error {
-		writeMu.Lock()
-		defer writeMu.Unlock()
+		c.streamWriteMu.Lock()
+		defer c.streamWriteMu.Unlock()
 		return conn.WriteMessage(websocket.TextMessage, data)
 	}
 
@@ -287,6 +211,9 @@ func (c *Client) StreamUpdates(ctx context.Context, handler func(AgentEvent), mc
 	go func() {
 		var lastErr error
 		defer func() {
+			// Clean up pending requests before signaling disconnect
+			c.cleanupPendingRequests()
+
 			c.mu.Lock()
 			c.agentStreamConn = nil
 			c.mu.Unlock()
@@ -312,33 +239,40 @@ func (c *Client) StreamUpdates(ctx context.Context, handler func(AgentEvent), mc
 				return
 			}
 
-			// Try to parse as ws.Message to check if it's an MCP request
+			// Try to parse as ws.Message to check message type
 			var wsMsg ws.Message
-			if err := json.Unmarshal(message, &wsMsg); err == nil && wsMsg.Type == ws.MessageTypeRequest {
-				// This is an MCP request - dispatch it
-				if mcpHandler != nil {
-					go func(msg ws.Message) {
-						resp, err := mcpHandler.Dispatch(ctx, &msg)
-						if err != nil {
-							c.logger.Error("MCP dispatch error", zap.Error(err))
-							resp, _ = ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
-						}
-						if resp != nil {
-							data, err := json.Marshal(resp)
-							if err != nil {
-								c.logger.Error("failed to marshal MCP response", zap.Error(err))
-								return
-							}
-							if err := writeMessage(data); err != nil {
-								c.logger.Debug("failed to write MCP response", zap.Error(err))
-							}
-						}
-					}(wsMsg)
+			if err := json.Unmarshal(message, &wsMsg); err == nil {
+				// Check if this is a response/error to a pending request
+				if (wsMsg.Type == ws.MessageTypeResponse || wsMsg.Type == ws.MessageTypeError) && c.resolvePendingRequest(&wsMsg) {
+					continue
 				}
-				continue
+
+				// This is an MCP request - dispatch it
+				if wsMsg.Type == ws.MessageTypeRequest {
+					if mcpHandler != nil {
+						go func(msg ws.Message) {
+							resp, err := mcpHandler.Dispatch(ctx, &msg)
+							if err != nil {
+								c.logger.Error("MCP dispatch error", zap.Error(err))
+								resp, _ = ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+							}
+							if resp != nil {
+								data, err := json.Marshal(resp)
+								if err != nil {
+									c.logger.Error("failed to marshal MCP response", zap.Error(err))
+									return
+								}
+								if err := writeMessage(data); err != nil {
+									c.logger.Debug("failed to write MCP response", zap.Error(err))
+								}
+							}
+						}(wsMsg)
+					}
+					continue
+				}
 			}
 
-			// Not an MCP request, parse as agent event
+			// Not a ws.Message request/response, parse as agent event
 			var event AgentEvent
 			if err := json.Unmarshal(message, &event); err != nil {
 				c.logger.Warn("failed to parse agent event", zap.Error(err))
@@ -371,109 +305,78 @@ type CancelResponse struct {
 	Error   string `json:"error,omitempty"`
 }
 
-// Cancel interrupts the current agent turn.
+// Cancel interrupts the current agent turn via the agent WebSocket stream.
 func (c *Client) Cancel(ctx context.Context) error {
-	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/v1/agent/cancel", nil)
+	resp, err := c.sendStreamRequest(ctx, "agent.cancel", nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("cancel request failed: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			c.logger.Debug("failed to close cancel response body", zap.Error(err))
+	if resp.Type == ws.MessageTypeError {
+		var errPayload ws.ErrorPayload
+		if err := resp.ParsePayload(&errPayload); err != nil {
+			return fmt.Errorf("cancel failed: unable to parse error")
 		}
-	}()
-
-	respBody, err := readResponseBody(resp)
-	if err != nil {
-		return fmt.Errorf("failed to read response body: %w", err)
-	}
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("cancel request failed with status %d: %s", resp.StatusCode, string(respBody))
+		return fmt.Errorf("cancel failed: %s", errPayload.Message)
 	}
 
 	var result CancelResponse
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		return fmt.Errorf("failed to parse cancel response (status %d, body: %s): %w", resp.StatusCode, truncateBody(respBody), err)
+	if err := resp.ParsePayload(&result); err != nil {
+		return fmt.Errorf("failed to parse cancel response: %w", err)
 	}
 	if !result.Success {
 		return fmt.Errorf("cancel failed: %s", result.Error)
 	}
 	return nil
 }
-// GetAgentStderr returns recent stderr lines from the agent process.
+// GetAgentStderr returns recent stderr lines from the agent process via the agent WebSocket stream.
 func (c *Client) GetAgentStderr(ctx context.Context) ([]string, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/api/v1/agent/stderr", nil)
+	resp, err := c.sendStreamRequest(ctx, "agent.stderr", nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("agent stderr request failed: %w", err)
 	}
 
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("agent stderr request failed with status %d", resp.StatusCode)
+	if resp.Type == ws.MessageTypeError {
+		var errPayload ws.ErrorPayload
+		if err := resp.ParsePayload(&errPayload); err != nil {
+			return nil, fmt.Errorf("agent stderr failed: unable to parse error")
+		}
+		return nil, fmt.Errorf("agent stderr failed: %s", errPayload.Message)
 	}
 
 	var result struct {
 		Lines []string `json:"lines"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := resp.ParsePayload(&result); err != nil {
 		return nil, fmt.Errorf("failed to parse agent stderr response: %w", err)
 	}
 	return result.Lines, nil
 }
 
-// RespondToPermission sends a response to a permission request
+// RespondToPermission sends a response to a permission request via the agent WebSocket stream.
 func (c *Client) RespondToPermission(ctx context.Context, pendingID, optionID string, cancelled bool) error {
-	reqBody := PermissionRespondRequest{
+	payload := PermissionRespondRequest{
 		PendingID: pendingID,
 		OptionID:  optionID,
 		Cancelled: cancelled,
 	}
 
-	body, err := json.Marshal(reqBody)
+	resp, err := c.sendStreamRequest(ctx, "agent.permissions.respond", payload)
 	if err != nil {
-		return err
+		return fmt.Errorf("permission response request failed: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/v1/agent/permissions/respond", bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			c.logger.Debug("failed to close permission response body", zap.Error(err))
+	if resp.Type == ws.MessageTypeError {
+		var errPayload ws.ErrorPayload
+		if err := resp.ParsePayload(&errPayload); err != nil {
+			return fmt.Errorf("permission response failed: unable to parse error")
 		}
-	}()
-
-	respBody, err := readResponseBody(resp)
-	if err != nil {
-		return fmt.Errorf("failed to read response body: %w", err)
-	}
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("permission response request failed with status %d: %s", resp.StatusCode, string(respBody))
+		return fmt.Errorf("permission response failed: %s", errPayload.Message)
 	}
 
 	var result PermissionRespondResponse
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		return fmt.Errorf("failed to parse permission response (status %d, body: %s): %w", resp.StatusCode, truncateBody(respBody), err)
+	if err := resp.ParsePayload(&result); err != nil {
+		return fmt.Errorf("failed to parse permission response: %w", err)
 	}
 	if !result.Success {
 		return fmt.Errorf("permission response failed: %s", result.Error)

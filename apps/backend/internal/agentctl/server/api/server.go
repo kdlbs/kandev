@@ -74,15 +74,9 @@ func (s *Server) setupRoutes() {
 		api.POST("/start", s.handleStart)
 		api.POST("/stop", s.handleStop)
 
-		// Agent session/prompt methods (works with all adapters: ACP, Codex, ClaudeCode, OpenCode)
-		api.POST("/agent/initialize", s.handleAgentInitialize)
-		api.POST("/agent/session/new", s.handleAgentNewSession)
-		api.POST("/agent/session/load", s.handleAgentLoadSession)
-		api.POST("/agent/prompt", s.handleAgentPrompt)
-		api.POST("/agent/cancel", s.handleAgentCancel)
+		// Agent stream: bidirectional WebSocket for agent events, MCP, and agent operations
+		// (initialize, session/new, session/load, prompt, cancel, stderr, permissions/respond)
 		api.GET("/agent/stream", s.handleAgentStreamWS)
-		api.GET("/agent/stderr", s.handleAgentStderr)
-		api.POST("/agent/permissions/respond", s.handlePermissionRespond)
 
 		// Unified workspace stream (git status, files, shell)
 		api.GET("/workspace/stream", s.handleWorkspaceStreamWS)

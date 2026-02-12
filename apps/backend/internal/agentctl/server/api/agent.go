@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"sync"
 	"time"
 
@@ -36,53 +35,6 @@ type InitializeResponse struct {
 	Error     string             `json:"error,omitempty"`
 }
 
-func (s *Server) handleAgentInitialize(c *gin.Context) {
-	var req InitializeRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, InitializeResponse{
-			Success: false,
-			Error:   "invalid request: " + err.Error(),
-		})
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Second)
-	defer cancel()
-
-	adapter := s.procMgr.GetAdapter()
-	if adapter == nil {
-		c.JSON(http.StatusServiceUnavailable, InitializeResponse{
-			Success: false,
-			Error:   "agent not running",
-		})
-		return
-	}
-
-	err := adapter.Initialize(ctx)
-	if err != nil {
-		s.logger.Error("initialize failed", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, InitializeResponse{
-			Success: false,
-			Error:   err.Error(),
-		})
-		return
-	}
-
-	// Get agent info after successful initialization
-	var agentInfoResp *AgentInfoResponse
-	if info := adapter.GetAgentInfo(); info != nil {
-		agentInfoResp = &AgentInfoResponse{
-			Name:    info.Name,
-			Version: info.Version,
-		}
-	}
-
-	c.JSON(http.StatusOK, InitializeResponse{
-		Success:   true,
-		AgentInfo: agentInfoResp,
-	})
-}
-
 // NewSessionRequest is a request to create a new ACP session
 type NewSessionRequest struct {
 	Cwd        string            `json:"cwd"` // Working directory for the session
@@ -96,69 +48,6 @@ type NewSessionResponse struct {
 	Error     string `json:"error,omitempty"`
 }
 
-func (s *Server) handleAgentNewSession(c *gin.Context) {
-	var req NewSessionRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, NewSessionResponse{
-			Success: false,
-			Error:   "invalid request: " + err.Error(),
-		})
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
-	defer cancel()
-
-	adapter := s.procMgr.GetAdapter()
-	if adapter == nil {
-		c.JSON(http.StatusServiceUnavailable, NewSessionResponse{
-			Success: false,
-			Error:   "agent not running",
-		})
-		return
-	}
-
-	// If MCP server is enabled, prepend the local kandev MCP server to the list.
-	// This replaces the old external MCP server URL (http://localhost:9090/sse) with
-	// the local agentctl MCP server (http://localhost:{port}/sse).
-	mcpServers := req.McpServers
-	if s.mcpServer != nil {
-		localKandevMcp := types.McpServer{
-			Name: "kandev",
-			Type: "sse",
-			URL:  fmt.Sprintf("http://localhost:%d/sse", s.cfg.Port),
-		}
-		// Filter out any existing kandev server from the list (to avoid duplicates)
-		filtered := make([]types.McpServer, 0, len(mcpServers)+1)
-		filtered = append(filtered, localKandevMcp)
-		for _, srv := range mcpServers {
-			if srv.Name != "kandev" {
-				filtered = append(filtered, srv)
-			}
-		}
-		mcpServers = filtered
-		s.logger.Debug("injected local kandev MCP server",
-			zap.String("url", localKandevMcp.URL),
-			zap.Int("total_servers", len(mcpServers)))
-	}
-
-	sessionID, err := adapter.NewSession(ctx, mcpServers)
-	if err != nil {
-		s.logger.Error("new session failed", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, NewSessionResponse{
-			Success: false,
-			Error:   err.Error(),
-		})
-		return
-	}
-
-	// Session ID is stored in the adapter - no need to duplicate in Manager
-	c.JSON(http.StatusOK, NewSessionResponse{
-		Success:   true,
-		SessionID: sessionID,
-	})
-}
-
 // LoadSessionRequest is a request to load an existing ACP session
 type LoadSessionRequest struct {
 	SessionID string `json:"session_id"`
@@ -169,50 +58,6 @@ type LoadSessionResponse struct {
 	Success   bool   `json:"success"`
 	SessionID string `json:"session_id,omitempty"`
 	Error     string `json:"error,omitempty"`
-}
-
-func (s *Server) handleAgentLoadSession(c *gin.Context) {
-	var req LoadSessionRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, LoadSessionResponse{
-			Success: false,
-			Error:   "invalid request: " + err.Error(),
-		})
-		return
-	}
-	if req.SessionID == "" {
-		c.JSON(http.StatusBadRequest, LoadSessionResponse{
-			Success: false,
-			Error:   "session_id is required",
-		})
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
-	defer cancel()
-
-	adapter := s.procMgr.GetAdapter()
-	if adapter == nil {
-		c.JSON(http.StatusServiceUnavailable, LoadSessionResponse{
-			Success: false,
-			Error:   "agent not running",
-		})
-		return
-	}
-
-	if err := adapter.LoadSession(ctx, req.SessionID); err != nil {
-		s.logger.Error("load session failed", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, LoadSessionResponse{
-			Success: false,
-			Error:   err.Error(),
-		})
-		return
-	}
-
-	c.JSON(http.StatusOK, LoadSessionResponse{
-		Success:   true,
-		SessionID: req.SessionID,
-	})
 }
 
 // PromptRequest is a request to send a prompt to the agent
@@ -228,54 +73,34 @@ type PromptResponse struct {
 	Error      string `json:"error,omitempty"`
 }
 
-func (s *Server) handleAgentPrompt(c *gin.Context) {
-	var req PromptRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, PromptResponse{
-			Success: false,
-			Error:   "invalid request: " + err.Error(),
-		})
-		return
-	}
+// PermissionRespondRequest is a request to respond to a permission request
+type PermissionRespondRequest struct {
+	PendingID string `json:"pending_id"`
+	OptionID  string `json:"option_id,omitempty"`
+	Cancelled bool   `json:"cancelled,omitempty"`
+}
 
-	adapter := s.procMgr.GetAdapter()
-	if adapter == nil {
-		c.JSON(http.StatusServiceUnavailable, PromptResponse{
-			Success: false,
-			Error:   "agent not running",
-		})
-		return
-	}
+// PermissionRespondResponse is the response to a permission respond call
+type PermissionRespondResponse struct {
+	Success bool   `json:"success"`
+	Error   string `json:"error,omitempty"`
+}
 
-	sessionID := s.procMgr.GetSessionID()
-	if sessionID == "" {
-		c.JSON(http.StatusBadRequest, PromptResponse{
-			Success: false,
-			Error:   "no active session - call new_session first",
-		})
-		return
-	}
+// AgentStderrResponse contains recent stderr lines from the agent process.
+type AgentStderrResponse struct {
+	Lines []string `json:"lines"`
+}
 
-	// Start prompt processing asynchronously.
-	// Completion is signaled via the WebSocket complete event, not the HTTP response.
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), constants.PromptTimeout)
-		defer cancel()
-		if err := adapter.Prompt(ctx, req.Text, req.Attachments); err != nil {
-			s.logger.Error("async prompt failed", zap.Error(err))
-		}
-	}()
-
-	s.logger.Info("prompt accepted (async)", zap.Int("attachments", len(req.Attachments)))
-
-	// Return immediately — completion comes via WebSocket complete event
-	c.JSON(http.StatusAccepted, PromptResponse{Success: true})
+// CancelResponse is the response from a cancel request.
+type CancelResponse struct {
+	Success bool   `json:"success"`
+	Error   string `json:"error,omitempty"`
 }
 
 // handleAgentStreamWS streams agent session notifications via WebSocket.
 // This is a bidirectional stream:
 // - agentctl -> backend: agent events, MCP requests
-// - backend -> agentctl: MCP responses
+// - backend -> agentctl: MCP responses, agent operation requests
 func (s *Server) handleAgentStreamWS(c *gin.Context) {
 	conn, err := s.upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
@@ -308,7 +133,7 @@ func (s *Server) handleAgentStreamWS(c *gin.Context) {
 	// WaitGroup for cleanup
 	var wg sync.WaitGroup
 
-	// Read goroutine: reads MCP responses from the backend
+	// Read goroutine: reads MCP responses and agent operation requests from the backend
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -324,10 +149,28 @@ func (s *Server) handleAgentStreamWS(c *gin.Context) {
 				return
 			}
 
-			// Parse as WebSocket message (MCP response)
+			// Parse as WebSocket message
 			var msg ws.Message
 			if err := json.Unmarshal(message, &msg); err != nil {
 				s.logger.Warn("failed to parse message", zap.Error(err))
+				continue
+			}
+
+			// Handle agent operation requests (type=request)
+			if msg.Type == ws.MessageTypeRequest {
+				go func(reqMsg ws.Message) {
+					resp := s.handleAgentStreamRequest(ctx, &reqMsg)
+					if resp != nil {
+						data, err := json.Marshal(resp)
+						if err != nil {
+							s.logger.Error("failed to marshal WS response", zap.Error(err))
+							return
+						}
+						if err := writeMessage(data); err != nil {
+							s.logger.Debug("failed to write WS response", zap.Error(err))
+						}
+					}
+				}(msg)
 				continue
 			}
 
@@ -387,27 +230,213 @@ func (s *Server) handleAgentStreamWS(c *gin.Context) {
 	wg.Wait()
 }
 
-// PermissionRespondRequest is a request to respond to a permission request
-type PermissionRespondRequest struct {
-	PendingID string `json:"pending_id" binding:"required"`
-	OptionID  string `json:"option_id,omitempty"`
-	Cancelled bool   `json:"cancelled,omitempty"`
+// handleAgentStreamRequest dispatches agent operation requests received on the WebSocket stream.
+func (s *Server) handleAgentStreamRequest(ctx context.Context, msg *ws.Message) *ws.Message {
+	switch msg.Action {
+	case "agent.initialize":
+		return s.handleWSInitialize(ctx, msg)
+	case "agent.session.new":
+		return s.handleWSNewSession(ctx, msg)
+	case "agent.session.load":
+		return s.handleWSLoadSession(ctx, msg)
+	case "agent.prompt":
+		return s.handleWSPrompt(ctx, msg)
+	case "agent.cancel":
+		return s.handleWSCancel(ctx, msg)
+	case "agent.permissions.respond":
+		return s.handleWSPermissionRespond(ctx, msg)
+	case "agent.stderr":
+		return s.handleWSStderr(ctx, msg)
+	default:
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeUnknownAction, fmt.Sprintf("unknown action: %s", msg.Action), nil)
+		return resp
+	}
 }
 
-// PermissionRespondResponse is the response to a permission respond call
-type PermissionRespondResponse struct {
-	Success bool   `json:"success"`
-	Error   string `json:"error,omitempty"`
+func (s *Server) handleWSInitialize(ctx context.Context, msg *ws.Message) *ws.Message {
+	var req InitializeRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "invalid request: "+err.Error(), nil)
+		return resp
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+
+	adapter := s.procMgr.GetAdapter()
+	if adapter == nil {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "agent not running", nil)
+		return resp
+	}
+
+	if err := adapter.Initialize(ctx); err != nil {
+		s.logger.Error("initialize failed", zap.Error(err))
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		return resp
+	}
+
+	// Get agent info after successful initialization
+	var agentInfoResp *AgentInfoResponse
+	if info := adapter.GetAgentInfo(); info != nil {
+		agentInfoResp = &AgentInfoResponse{
+			Name:    info.Name,
+			Version: info.Version,
+		}
+	}
+
+	resp, _ := ws.NewResponse(msg.ID, msg.Action, InitializeResponse{
+		Success:   true,
+		AgentInfo: agentInfoResp,
+	})
+	return resp
 }
 
-func (s *Server) handlePermissionRespond(c *gin.Context) {
+func (s *Server) handleWSNewSession(ctx context.Context, msg *ws.Message) *ws.Message {
+	var req NewSessionRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "invalid request: "+err.Error(), nil)
+		return resp
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	adapter := s.procMgr.GetAdapter()
+	if adapter == nil {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "agent not running", nil)
+		return resp
+	}
+
+	// If MCP server is enabled, prepend the local kandev MCP server to the list.
+	mcpServers := req.McpServers
+	if s.mcpServer != nil {
+		localKandevMcp := types.McpServer{
+			Name: "kandev",
+			Type: "sse",
+			URL:  fmt.Sprintf("http://localhost:%d/sse", s.cfg.Port),
+		}
+		filtered := make([]types.McpServer, 0, len(mcpServers)+1)
+		filtered = append(filtered, localKandevMcp)
+		for _, srv := range mcpServers {
+			if srv.Name != "kandev" {
+				filtered = append(filtered, srv)
+			}
+		}
+		mcpServers = filtered
+		s.logger.Debug("injected local kandev MCP server",
+			zap.String("url", localKandevMcp.URL),
+			zap.Int("total_servers", len(mcpServers)))
+	}
+
+	sessionID, err := adapter.NewSession(ctx, mcpServers)
+	if err != nil {
+		s.logger.Error("new session failed", zap.Error(err))
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		return resp
+	}
+
+	resp, _ := ws.NewResponse(msg.ID, msg.Action, NewSessionResponse{
+		Success:   true,
+		SessionID: sessionID,
+	})
+	return resp
+}
+
+func (s *Server) handleWSLoadSession(ctx context.Context, msg *ws.Message) *ws.Message {
+	var req LoadSessionRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "invalid request: "+err.Error(), nil)
+		return resp
+	}
+	if req.SessionID == "" {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "session_id is required", nil)
+		return resp
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	adapter := s.procMgr.GetAdapter()
+	if adapter == nil {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "agent not running", nil)
+		return resp
+	}
+
+	if err := adapter.LoadSession(ctx, req.SessionID); err != nil {
+		s.logger.Error("load session failed", zap.Error(err))
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		return resp
+	}
+
+	resp, _ := ws.NewResponse(msg.ID, msg.Action, LoadSessionResponse{
+		Success:   true,
+		SessionID: req.SessionID,
+	})
+	return resp
+}
+
+func (s *Server) handleWSPrompt(ctx context.Context, msg *ws.Message) *ws.Message {
+	var req PromptRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "invalid request: "+err.Error(), nil)
+		return resp
+	}
+
+	adapter := s.procMgr.GetAdapter()
+	if adapter == nil {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "agent not running", nil)
+		return resp
+	}
+
+	sessionID := s.procMgr.GetSessionID()
+	if sessionID == "" {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "no active session - call new_session first", nil)
+		return resp
+	}
+
+	// Start prompt processing asynchronously.
+	// Completion is signaled via the WebSocket complete event, not this response.
+	go func() {
+		promptCtx, cancel := context.WithTimeout(context.Background(), constants.PromptTimeout)
+		defer cancel()
+		if err := adapter.Prompt(promptCtx, req.Text, req.Attachments); err != nil {
+			s.logger.Error("async prompt failed", zap.Error(err))
+		}
+	}()
+
+	s.logger.Info("prompt accepted (async)", zap.Int("attachments", len(req.Attachments)))
+
+	// Return immediately — completion comes via WebSocket complete event
+	resp, _ := ws.NewResponse(msg.ID, msg.Action, PromptResponse{Success: true})
+	return resp
+}
+
+func (s *Server) handleWSCancel(ctx context.Context, msg *ws.Message) *ws.Message {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	adapter := s.procMgr.GetAdapter()
+	if adapter == nil {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "agent not running", nil)
+		return resp
+	}
+
+	if err := adapter.Cancel(ctx); err != nil {
+		s.logger.Error("cancel failed", zap.Error(err))
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		return resp
+	}
+
+	s.logger.Info("cancel completed")
+	resp, _ := ws.NewResponse(msg.ID, msg.Action, CancelResponse{Success: true})
+	return resp
+}
+
+func (s *Server) handleWSPermissionRespond(_ context.Context, msg *ws.Message) *ws.Message {
 	var req PermissionRespondRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, PermissionRespondResponse{
-			Success: false,
-			Error:   "invalid request: " + err.Error(),
-		})
-		return
+	if err := msg.ParsePayload(&req); err != nil {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "invalid request: "+err.Error(), nil)
+		return resp
 	}
 
 	s.logger.Info("received permission response",
@@ -417,56 +446,16 @@ func (s *Server) handlePermissionRespond(c *gin.Context) {
 
 	if err := s.procMgr.RespondToPermission(req.PendingID, req.OptionID, req.Cancelled); err != nil {
 		s.logger.Error("failed to respond to permission", zap.Error(err))
-		c.JSON(http.StatusNotFound, PermissionRespondResponse{
-			Success: false,
-			Error:   err.Error(),
-		})
-		return
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, err.Error(), nil)
+		return resp
 	}
 
-	c.JSON(http.StatusOK, PermissionRespondResponse{
-		Success: true,
-	})
-}
-// AgentStderrResponse contains recent stderr lines from the agent process.
-type AgentStderrResponse struct {
-	Lines []string `json:"lines"`
+	resp, _ := ws.NewResponse(msg.ID, msg.Action, PermissionRespondResponse{Success: true})
+	return resp
 }
 
-func (s *Server) handleAgentStderr(c *gin.Context) {
+func (s *Server) handleWSStderr(_ context.Context, msg *ws.Message) *ws.Message {
 	lines := s.procMgr.GetRecentStderr()
-	c.JSON(http.StatusOK, AgentStderrResponse{Lines: lines})
-}
-
-// CancelResponse is the response from a cancel request.
-type CancelResponse struct {
-	Success bool   `json:"success"`
-	Error   string `json:"error,omitempty"`
-}
-
-// handleAgentCancel interrupts the current agent turn.
-func (s *Server) handleAgentCancel(c *gin.Context) {
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
-	defer cancel()
-
-	adapter := s.procMgr.GetAdapter()
-	if adapter == nil {
-		c.JSON(http.StatusServiceUnavailable, CancelResponse{
-			Success: false,
-			Error:   "agent not running",
-		})
-		return
-	}
-
-	if err := adapter.Cancel(ctx); err != nil {
-		s.logger.Error("cancel failed", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, CancelResponse{
-			Success: false,
-			Error:   err.Error(),
-		})
-		return
-	}
-
-	s.logger.Info("cancel completed")
-	c.JSON(http.StatusOK, CancelResponse{Success: true})
+	resp, _ := ws.NewResponse(msg.ID, msg.Action, AgentStderrResponse{Lines: lines})
+	return resp
 }
