@@ -3,6 +3,7 @@ package process
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -15,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/kandev/kandev/internal/agentctl/types"
@@ -493,6 +495,7 @@ func (wt *WorkspaceTracker) getCommitStats(ctx context.Context, sha string) (fil
 func (wt *WorkspaceTracker) updateGitStatus(ctx context.Context) {
 	status, err := wt.getGitStatus(ctx)
 	if err != nil {
+		wt.logger.Warn("updateGitStatus: getGitStatus failed", zap.Error(err))
 		return
 	}
 
@@ -502,6 +505,12 @@ func (wt *WorkspaceTracker) updateGitStatus(ctx context.Context) {
 
 	// Notify workspace stream subscribers
 	wt.notifyWorkspaceStreamGitStatus(status)
+}
+
+// RefreshGitStatus forces a git status refresh and notifies subscribers.
+// Useful after index-only changes (stage/unstage) that the file watcher won't detect.
+func (wt *WorkspaceTracker) RefreshGitStatus(ctx context.Context) {
+	wt.updateGitStatus(ctx)
 }
 
 // getGitStatus retrieves the current git status
@@ -829,9 +838,6 @@ func (wt *WorkspaceTracker) updateFiles(ctx context.Context) {
 	wt.mu.Lock()
 	wt.currentFiles = files
 	wt.mu.Unlock()
-
-	// Notify workspace stream subscribers
-	wt.notifyWorkspaceStreamFileList(files)
 }
 
 // getFileList retrieves the list of files in the workspace
@@ -880,25 +886,15 @@ func (wt *WorkspaceTracker) SubscribeWorkspaceStream() types.WorkspaceStreamSubs
 	// Send current git status immediately
 	wt.mu.RLock()
 	currentStatus := wt.currentStatus
-	currentFiles := wt.currentFiles
 	wt.mu.RUnlock()
 
 	if currentStatus.Timestamp.IsZero() {
 		currentStatus.Timestamp = time.Now()
 	}
-	if currentFiles.Timestamp.IsZero() {
-		currentFiles.Timestamp = time.Now()
-	}
 
 	// Send git status
 	select {
 	case sub <- types.NewWorkspaceGitStatus(&currentStatus):
-	default:
-	}
-
-	// Send file list
-	select {
-	case sub <- types.NewWorkspaceFileList(&currentFiles):
 	default:
 	}
 
@@ -990,21 +986,6 @@ func (wt *WorkspaceTracker) notifyWorkspaceStreamFileChange(notification types.F
 	}
 }
 
-// notifyWorkspaceStreamFileList sends file list update to all workspace stream subscribers
-func (wt *WorkspaceTracker) notifyWorkspaceStreamFileList(update types.FileListUpdate) {
-	wt.workspaceSubMu.RLock()
-	defer wt.workspaceSubMu.RUnlock()
-
-	msg := types.NewWorkspaceFileList(&update)
-	for sub := range wt.workspaceStreamSubscribers {
-		select {
-		case sub <- msg:
-		default:
-			// Subscriber is slow, skip
-		}
-	}
-}
-
 // notifyWorkspaceStreamProcessOutput sends process output to all workspace stream subscribers
 func (wt *WorkspaceTracker) notifyWorkspaceStreamProcessOutput(output *types.ProcessOutput) {
 	wt.workspaceSubMu.RLock()
@@ -1060,6 +1041,13 @@ func (wt *WorkspaceTracker) watchFilesystem(ctx context.Context) {
 		case event, ok := <-wt.watcher.Events:
 			if !ok {
 				return
+			}
+
+			// Ignore CHMOD events - permission changes don't affect file content
+			// and shouldn't trigger UI refreshes. This prevents loops from filesystem
+			// scanners, git operations, or other tools that touch file permissions.
+			if event.Op == fsnotify.Chmod {
+				continue
 			}
 
 			// If a directory was created, watch it
@@ -1183,8 +1171,9 @@ func (wt *WorkspaceTracker) buildFileTreeNode(fullPath, relPath string, info os.
 	return node, nil
 }
 
-// GetFileContent returns the content of a file
-func (wt *WorkspaceTracker) GetFileContent(reqPath string) (string, int64, error) {
+// GetFileContent returns the content of a file.
+// If the file is not valid UTF-8, it is base64-encoded and isBinary is true.
+func (wt *WorkspaceTracker) GetFileContent(reqPath string) (string, int64, bool, error) {
 	cleanWorkDir := filepath.Clean(wt.workDir)
 	cleanReqPath := filepath.Clean(reqPath)
 
@@ -1198,29 +1187,29 @@ func (wt *WorkspaceTracker) GetFileContent(reqPath string) (string, int64, error
 
 	// Path traversal protection
 	if !strings.HasPrefix(fullPath, cleanWorkDir+string(os.PathSeparator)) && fullPath != cleanWorkDir {
-		return "", 0, fmt.Errorf("path traversal detected")
+		return "", 0, false, fmt.Errorf("path traversal detected")
 	}
 
 	// Check if file exists and is a regular file
 	info, err := os.Stat(fullPath)
 	if err != nil {
-		return "", 0, fmt.Errorf("file not found: %w", err)
+		return "", 0, false, fmt.Errorf("file not found: %w", err)
 	}
 
 	if info.IsDir() {
-		return "", 0, fmt.Errorf("path is a directory, not a file")
+		return "", 0, false, fmt.Errorf("path is a directory, not a file")
 	}
 
 	// Check file size (limit to 10MB)
 	const maxFileSize = 10 * 1024 * 1024
 	if info.Size() > maxFileSize {
-		return "", info.Size(), fmt.Errorf("file too large (max 10MB)")
+		return "", info.Size(), false, fmt.Errorf("file too large (max 10MB)")
 	}
 
 	// Read file content
 	file, err := os.Open(fullPath)
 	if err != nil {
-		return "", 0, fmt.Errorf("failed to open file: %w", err)
+		return "", 0, false, fmt.Errorf("failed to open file: %w", err)
 	}
 	defer func() {
 		_ = file.Close()
@@ -1228,10 +1217,16 @@ func (wt *WorkspaceTracker) GetFileContent(reqPath string) (string, int64, error
 
 	content, err := io.ReadAll(file)
 	if err != nil {
-		return "", 0, fmt.Errorf("failed to read file: %w", err)
+		return "", 0, false, fmt.Errorf("failed to read file: %w", err)
 	}
 
-	return string(content), info.Size(), nil
+	// Detect binary: if content is not valid UTF-8, base64-encode it
+	if !utf8.Valid(content) {
+		encoded := base64.StdEncoding.EncodeToString(content)
+		return encoded, info.Size(), true, nil
+	}
+
+	return string(content), info.Size(), false, nil
 }
 
 // ApplyFileDiff applies a unified diff to a file with conflict detection
@@ -1254,7 +1249,7 @@ func (wt *WorkspaceTracker) ApplyFileDiff(reqPath string, unifiedDiff string, or
 	}
 
 	// Read current file content
-	currentContent, _, err := wt.GetFileContent(reqPath)
+	currentContent, _, _, err := wt.GetFileContent(reqPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to read current file: %w", err)
 	}
@@ -1277,7 +1272,7 @@ func (wt *WorkspaceTracker) ApplyFileDiff(reqPath string, unifiedDiff string, or
 
 	// Use git apply to apply the patch directly to the file
 	// This is much more reliable than custom diff application
-	cmd := exec.Command("git", "apply", "--unidiff-zero", "--whitespace=nowarn", patchFile)
+	cmd := exec.Command("git", "apply", "-p0", "--unidiff-zero", "--whitespace=nowarn", patchFile)
 	cmd.Dir = wt.workDir
 
 	output, err := cmd.CombinedOutput()

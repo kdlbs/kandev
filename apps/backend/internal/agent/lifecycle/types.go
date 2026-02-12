@@ -11,6 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentctl "github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -69,6 +70,21 @@ type AgentExecution struct {
 	// Available commands from the agent (for slash command menu)
 	availableCommands   []streams.AvailableCommand
 	availableCommandsMu sync.RWMutex
+
+	// Channel signaled by handleAgentEvent(complete) or stream disconnect to unblock SendPrompt.
+	// Buffered (size 1) so the sender never blocks.
+	promptDoneCh chan PromptCompletionSignal
+
+	// Last time an agent event was received (for stall detection)
+	lastActivityAt   time.Time
+	lastActivityAtMu sync.Mutex
+}
+
+// PromptCompletionSignal carries the result from a complete event or disconnect.
+type PromptCompletionSignal struct {
+	StopReason string
+	IsError    bool
+	Error      string
 }
 
 // GetAgentCtlClient returns the agentctl client for this execution
@@ -118,7 +134,8 @@ type LaunchRequest struct {
 	ModelOverride   string // If set, use this model instead of the profile's model
 
 	// Executor configuration - determines which runtime to use
-	ExecutorType string // Executor type (e.g., "local_pc", "local_docker") - determines runtime
+	ExecutorType   string            // Executor type (e.g., "local", "worktree", "local_docker") - determines runtime
+	ExecutorConfig map[string]string // Executor config (docker_host, git_token, etc.)
 
 	// Worktree configuration
 	UseWorktree          bool   // Whether to use a Git worktree for isolation
@@ -150,6 +167,22 @@ type AgentProfileInfo struct {
 // ProfileResolver resolves agent profile IDs to profile information
 type ProfileResolver interface {
 	ResolveProfile(ctx context.Context, profileID string) (*AgentProfileInfo, error)
+}
+
+// BootMessageService creates and updates boot messages displayed in chat during agent startup.
+type BootMessageService interface {
+	CreateMessage(ctx context.Context, req *BootMessageRequest) (*models.Message, error)
+	UpdateMessage(ctx context.Context, message *models.Message) error
+}
+
+// BootMessageRequest contains parameters for creating a boot message.
+type BootMessageRequest struct {
+	TaskSessionID string
+	TaskID        string
+	Content       string
+	AuthorType    string
+	Type          string
+	Metadata      map[string]interface{}
 }
 
 // McpConfigProvider returns MCP configuration for a given agent profile ID.

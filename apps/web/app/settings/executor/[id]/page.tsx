@@ -2,7 +2,7 @@
 
 import { use, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { IconCpu, IconServer, IconTrash } from '@tabler/icons-react';
+import { IconTrash } from '@tabler/icons-react';
 import { Button } from '@kandev/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@kandev/ui/card';
 import { Input } from '@kandev/ui/input';
@@ -21,6 +21,7 @@ import { updateExecutorAction, deleteExecutorAction } from '@/app/actions/execut
 import { getWebSocketClient } from '@/lib/ws/connection';
 import { useAppStore } from '@/components/state-provider';
 import type { Executor } from '@/lib/types/http';
+import { getExecutorIcon } from '@/lib/executor-icons';
 
 export default function ExecutorEditPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -61,7 +62,7 @@ function ExecutorEditForm({ executor }: ExecutorEditFormProps) {
   const [isDeleting, setIsDeleting] = useState(false);
 
   const isSystem = draft.is_system ?? false;
-  const isLocalDocker = draft.type === 'local_docker';
+  const isDockerType = draft.type === 'local_docker' || draft.type === 'remote_docker';
   const mcpPolicyError = useMemo(() => {
     const value = draft.config?.mcp_policy ?? '';
     if (!value.trim()) return null;
@@ -77,7 +78,7 @@ function ExecutorEditForm({ executor }: ExecutorEditFormProps) {
   }, [draft.config?.mcp_policy]);
 
   const ExecutorIcon = useMemo(() => {
-    return draft.type === 'local_pc' ? IconCpu : IconServer;
+    return getExecutorIcon(draft.type);
   }, [draft.type]);
 
   const isDirty = useMemo(() => {
@@ -140,11 +141,15 @@ function ExecutorEditForm({ executor }: ExecutorEditFormProps) {
         <div>
           <h2 className="text-2xl font-bold">{draft.name}</h2>
           <p className="text-sm text-muted-foreground mt-1">
-            {draft.type === 'local_pc'
-              ? 'Uses locally installed agents on this machine.'
+            {draft.type === 'local'
+              ? 'Runs agents directly in the repository folder.'
+              : draft.type === 'worktree'
+              ? 'Creates git worktrees for isolated agent sessions.'
               : draft.type === 'local_docker'
                 ? 'Runs Docker containers on this machine.'
-                : 'Remote Docker support is coming soon.'}
+                : draft.type === 'remote_docker'
+                  ? 'Connects to a remote Docker host.'
+                  : 'Custom executor.'}
           </p>
         </div>
         <Button variant="outline" size="sm" onClick={() => router.push('/settings/executors')}>
@@ -178,11 +183,11 @@ function ExecutorEditForm({ executor }: ExecutorEditFormProps) {
         </CardContent>
       </Card>
 
-      {isLocalDocker && (
+      {isDockerType && (
         <Card>
           <CardHeader>
             <CardTitle>Docker Configuration</CardTitle>
-            <CardDescription>Local Docker host settings.</CardDescription>
+            <CardDescription>{draft.type === 'remote_docker' ? 'Remote Docker host settings.' : 'Local Docker host settings.'}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-2">
             <Label htmlFor="docker-host">Docker host env value</Label>

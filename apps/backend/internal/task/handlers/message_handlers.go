@@ -116,13 +116,14 @@ func (h *MessageHandlers) httpListMessages(c *gin.Context) {
 // WS handlers
 
 type wsAddMessageRequest struct {
-	TaskID        string                 `json:"task_id"`
-	TaskSessionID string                 `json:"session_id"`
-	Content       string                 `json:"content"`
-	AuthorID      string                 `json:"author_id,omitempty"`
-	Model         string                 `json:"model,omitempty"`
-	PlanMode      bool                   `json:"plan_mode,omitempty"`
-	Attachments   []v1.MessageAttachment `json:"attachments,omitempty"`
+	TaskID            string                 `json:"task_id"`
+	TaskSessionID     string                 `json:"session_id"`
+	Content           string                 `json:"content"`
+	AuthorID          string                 `json:"author_id,omitempty"`
+	Model             string                 `json:"model,omitempty"`
+	PlanMode          bool                   `json:"plan_mode,omitempty"`
+	HasReviewComments bool                   `json:"has_review_comments,omitempty"`
+	Attachments       []v1.MessageAttachment `json:"attachments,omitempty"`
 }
 
 func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -130,6 +131,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	if err := msg.ParsePayload(&req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
+	req.Content = strings.TrimSpace(req.Content)
 	if req.TaskSessionID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
 	}
@@ -154,6 +156,11 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 			zap.String("session_state", string(sessionResp.Session.State)))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Agent is currently processing. Please wait for the current operation to complete.", nil)
 	}
+	if sessionResp.Session.State == models.TaskSessionStateFailed ||
+		sessionResp.Session.State == models.TaskSessionStateCancelled {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
+			"Session has ended. Please create a new session to continue.", nil)
+	}
 
 	// Get the current task state to determine if we need to transition
 	task, err := h.taskController.GetTask(ctx, dto.GetTaskRequest{ID: req.TaskID})
@@ -174,13 +181,12 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		}
 	}
 
-	// Build metadata with attachments if present
-	var metadata map[string]interface{}
-	if len(req.Attachments) > 0 {
-		metadata = map[string]interface{}{
-			"attachments": req.Attachments,
-		}
-	}
+	// Build metadata with attachments, plan mode, and review comments
+	meta := orchestrator.NewUserMessageMeta().
+		WithPlanMode(req.PlanMode).
+		WithReviewComments(req.HasReviewComments).
+		WithAttachments(req.Attachments)
+	metadata := meta.ToMap()
 
 	message, err := h.messageController.CreateMessage(ctx, dto.CreateMessageRequest{
 		TaskSessionID: req.TaskSessionID,

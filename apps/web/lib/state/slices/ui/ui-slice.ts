@@ -1,6 +1,6 @@
 import type { StateCreator } from 'zustand';
 import { setLocalStorage } from '@/lib/local-storage';
-import type { UISlice, UISliceState } from './types';
+import type { ActiveDocument, DocumentComment, UISlice, UISliceState } from './types';
 
 export const defaultUIState: UISliceState = {
   previewPanel: {
@@ -17,6 +17,7 @@ export const defaultUIState: UISliceState = {
   mobileKanban: { activeColumnIndex: 0, isMenuOpen: false },
   mobileSession: { activePanelBySessionId: {}, isTaskSwitcherOpen: false },
   chatInput: { planModeBySessionId: {} },
+  documentPanel: { activeDocumentBySessionId: {}, commentsBySessionId: {} },
 };
 
 export const createUISlice: StateCreator<UISlice, [['zustand/immer', never]], [], UISlice> = (
@@ -87,5 +88,14 @@ export const createUISlice: StateCreator<UISlice, [['zustand/immer', never]], []
     set((draft) => {
       draft.chatInput.planModeBySessionId[sessionId] = enabled;
       setLocalStorage(`plan-mode-${sessionId}`, enabled);
+    }),
+  setActiveDocument: (sessionId, doc) =>
+    set((draft) => {
+      draft.documentPanel.activeDocumentBySessionId[sessionId] = doc;
+      setLocalStorage(`active-document-${sessionId}`, doc as ActiveDocument | null);
+    }),
+  setDocumentComments: (sessionId, comments) =>
+    set((draft) => {
+      draft.documentPanel.commentsBySessionId[sessionId] = comments as DocumentComment[];
     }),
 });

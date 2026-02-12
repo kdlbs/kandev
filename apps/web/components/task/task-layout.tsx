@@ -12,6 +12,7 @@ import { TaskSessionSidebar } from './task-session-sidebar';
 import { SessionMobileLayout, SessionTabletLayout } from './mobile';
 import { PreviewPanel } from '@/components/task/preview/preview-panel';
 import { PreviewController } from '@/components/task/preview/preview-controller';
+import { DocumentPanel } from '@/components/task/document/document-panel';
 import { useLayoutStore } from '@/lib/state/layout-store';
 import type { Repository, RepositoryScript } from '@/lib/types/http';
 import type { Terminal } from '@/hooks/domains/session/use-terminals';
@@ -23,13 +24,18 @@ const DEFAULT_HORIZONTAL_LAYOUT: Record<string, number> = {
   left: 18,
   chat: 57,
   preview: 57,
+  'document-split': 82,
   right: 25,
 };
 const DEFAULT_PREVIEW_LAYOUT: Record<string, number> = {
   chat: 60,
   preview: 40,
 };
-const DEFAULT_LAYOUT_STATE = { left: true, chat: true, right: true, preview: false };
+const DEFAULT_DOCUMENT_LAYOUT: Record<string, number> = {
+  document: 45,
+  chat: 55,
+};
+const DEFAULT_LAYOUT_STATE = { left: true, chat: true, right: true, preview: false, document: false };
 
 type TaskLayoutProps = {
   workspaceId: string | null;
@@ -88,12 +94,18 @@ export const TaskLayout = memo(function TaskLayout({
   const horizontalPanelIds = useMemo(() => {
     const ids: string[] = [];
     if (layoutState.left) ids.push('left');
-    ids.push(layoutState.preview ? 'preview' : 'chat');
+    if (layoutState.document) {
+      ids.push('document-split');
+    } else if (layoutState.preview) {
+      ids.push('preview');
+    } else {
+      ids.push('chat');
+    }
     if (layoutState.right) ids.push('right');
     return ids;
-  }, [layoutState.left, layoutState.preview, layoutState.right]);
+  }, [layoutState.left, layoutState.preview, layoutState.right, layoutState.document]);
 
-  const horizontalLayoutKey = `task-layout-horizontal-v3:${horizontalPanelIds.join('|')}`;
+  const horizontalLayoutKey = `task-layout-horizontal-v4:${horizontalPanelIds.join('|')}`;
   const { defaultLayout: defaultHorizontalLayout, onLayoutChanged: onHorizontalLayoutChange } =
     useDefaultLayout({
       id: horizontalLayoutKey,
@@ -110,6 +122,16 @@ export const TaskLayout = memo(function TaskLayout({
       panelIds: previewPanelIds,
       baseLayout: DEFAULT_PREVIEW_LAYOUT,
       serverDefaultLayout: defaultLayouts[previewLayoutKey],
+    });
+
+  const documentPanelIds = ['document', 'chat'];
+  const documentLayoutKey = 'task-layout-document-v1';
+  const { defaultLayout: defaultDocumentLayout, onLayoutChanged: onDocumentLayoutChange } =
+    useDefaultLayout({
+      id: documentLayoutKey,
+      panelIds: documentPanelIds,
+      baseLayout: DEFAULT_DOCUMENT_LAYOUT,
+      serverDefaultLayout: defaultLayouts[documentLayoutKey],
     });
 
   // Mobile layout
@@ -167,7 +189,32 @@ export const TaskLayout = memo(function TaskLayout({
           </>
         ) : null}
 
-        {layoutState.preview ? (
+        {layoutState.document ? (
+          <Panel id="document-split" className="min-h-0 min-w-0">
+            <Group
+              orientation="horizontal"
+              className="h-full min-h-0 min-w-0"
+              id={documentLayoutKey}
+              key={documentLayoutKey}
+              defaultLayout={defaultDocumentLayout}
+              onLayoutChanged={onDocumentLayoutChange}
+            >
+              <Panel id="document" minSize="300px" className="min-h-0 min-w-0">
+                <DocumentPanel sessionId={effectiveSessionId} />
+              </Panel>
+              <Panel id="chat" minSize="400px" className="min-h-0 min-w-0">
+                <TaskCenterPanel
+                  selectedDiff={selectedDiff}
+                  openFileRequest={openFileRequest}
+                  onDiffHandled={handleClearSelectedDiff}
+                  onFileOpenHandled={handleFileOpenHandled}
+                  onActiveFileChange={handleActiveFileChange}
+                  sessionId={sessionId}
+                />
+              </Panel>
+            </Group>
+          </Panel>
+        ) : layoutState.preview ? (
           <Panel id="preview" className="min-h-0 min-w-0">
             <Group
               orientation="horizontal"

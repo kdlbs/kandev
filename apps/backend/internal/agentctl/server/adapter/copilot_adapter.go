@@ -261,13 +261,43 @@ func (a *CopilotAdapter) GetAgentInfo() *AgentInfo {
 	return a.agentInfo
 }
 
+// mcpServersToCopilotConfig converts agentctl MCP server list to copilot SDK format.
+func mcpServersToCopilotConfig(servers []types.McpServer) map[string]copilot.MCPServerConfig {
+	if len(servers) == 0 {
+		return nil
+	}
+	result := make(map[string]copilot.MCPServerConfig, len(servers))
+	for _, srv := range servers {
+		cfg := copilot.MCPServerConfig{
+			"tools": []string{"*"},
+		}
+		switch srv.Type {
+		case "sse":
+			cfg["type"] = "sse"
+			cfg["url"] = srv.URL
+		case "http":
+			cfg["type"] = "http"
+			cfg["url"] = srv.URL
+		default: // stdio / local
+			cfg["type"] = "local"
+			cfg["command"] = srv.Command
+			if srv.Args != nil {
+				cfg["args"] = srv.Args
+			}
+		}
+		result[srv.Name] = cfg
+	}
+	return result
+}
+
 // NewSession creates a new Copilot session via the SDK.
-func (a *CopilotAdapter) NewSession(ctx context.Context, _ []types.McpServer) (string, error) {
+func (a *CopilotAdapter) NewSession(ctx context.Context, mcpServers []types.McpServer) (string, error) {
 	if a.client == nil {
 		return "", fmt.Errorf("adapter not initialized")
 	}
 
-	sessionID, err := a.client.CreateSession(ctx)
+	mcpConfig := mcpServersToCopilotConfig(mcpServers)
+	sessionID, err := a.client.CreateSession(ctx, mcpConfig)
 	if err != nil {
 		// If session creation fails, generate a placeholder ID
 		sessionID = uuid.New().String()
@@ -302,7 +332,7 @@ func (a *CopilotAdapter) LoadSession(ctx context.Context, sessionID string) erro
 		return fmt.Errorf("adapter not initialized")
 	}
 
-	if err := a.client.ResumeSession(ctx, sessionID); err != nil {
+	if err := a.client.ResumeSession(ctx, sessionID, nil); err != nil {
 		a.logger.Warn("failed to resume SDK session, continuing anyway",
 			zap.Error(err),
 			zap.String("session_id", sessionID))
@@ -753,21 +783,42 @@ func (a *CopilotAdapter) handleSessionError(evt copilot.SessionEvent, sessionID,
 }
 
 // handleUsageInfo processes usage info events.
+// session.usage_info events provide CurrentTokens/TokenLimit (session-level tracking).
+// assistant.usage events provide InputTokens/OutputTokens (per-call tracking).
 func (a *CopilotAdapter) handleUsageInfo(evt copilot.SessionEvent, sessionID, operationID string) {
-	var inputTokens, outputTokens int64
-	if evt.Data.InputTokens != nil {
-		inputTokens = int64(*evt.Data.InputTokens)
-	}
-	if evt.Data.OutputTokens != nil {
-		outputTokens = int64(*evt.Data.OutputTokens)
-	}
+	var contextUsed, contextSize int64
 
-	// Update context tracking
-	contextUsed := inputTokens + outputTokens
+	switch evt.Type {
+	case copilot.EventTypeSessionUsageInfo:
+		// session.usage_info: uses CurrentTokens/TokenLimit fields
+		if evt.Data.CurrentTokens != nil {
+			contextUsed = int64(*evt.Data.CurrentTokens)
+		}
+		if evt.Data.TokenLimit != nil {
+			contextSize = int64(*evt.Data.TokenLimit)
+		}
+	case copilot.EventTypeAssistantUsage:
+		// assistant.usage: uses InputTokens/OutputTokens fields
+		var inputTokens, outputTokens int64
+		if evt.Data.InputTokens != nil {
+			inputTokens = int64(*evt.Data.InputTokens)
+		}
+		if evt.Data.OutputTokens != nil {
+			outputTokens = int64(*evt.Data.OutputTokens)
+		}
+		contextUsed = inputTokens + outputTokens
+	}
 
 	a.mu.Lock()
-	a.contextTokensUsed = contextUsed
-	contextSize := a.contextWindowSize
+	if contextUsed > 0 {
+		a.contextTokensUsed = contextUsed
+	}
+	if contextSize > 0 {
+		a.contextWindowSize = contextSize
+	}
+	// Read final values after update
+	contextUsed = a.contextTokensUsed
+	contextSize = a.contextWindowSize
 	a.mu.Unlock()
 
 	remaining := contextSize - contextUsed
@@ -819,10 +870,58 @@ func (a *CopilotAdapter) handlePermissionRequest(
 		return copilot.PermissionRequestResult{Kind: "approved"}, nil
 	}
 
-	// Build title from permission kind
-	title := fmt.Sprintf("Permission: %s", request.Kind)
-	if request.ToolCallID != "" {
-		title = fmt.Sprintf("Permission for tool %s: %s", request.ToolCallID, request.Kind)
+	// Build a human-readable title using cached tool data if available.
+	// The pendingToolPayloads map is populated by handleToolStart events
+	// which run in a separate goroutine from the permission handler.
+	// Wait briefly for the tool_call event to be processed first, ensuring
+	// the tool_call message is created in the DB before the permission message
+	// (needed for the frontend merge logic to work).
+	title := request.Kind
+	actionType := request.Kind
+	actionDetails := request.Extra
+
+	var cachedPayload *streams.NormalizedPayload
+	for i := 0; i < 10; i++ {
+		a.mu.RLock()
+		cachedPayload = a.pendingToolPayloads[request.ToolCallID]
+		a.mu.RUnlock()
+		if cachedPayload != nil {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	if cachedPayload != nil {
+		switch cachedPayload.Kind() {
+		case streams.ToolKindShellExec:
+			if se := cachedPayload.ShellExec(); se != nil {
+				title = se.Command
+				actionType = types.ActionTypeCommand
+				actionDetails = map[string]interface{}{
+					"command": se.Command,
+					"cwd":    se.WorkDir,
+				}
+			}
+		case streams.ToolKindModifyFile:
+			if mf := cachedPayload.ModifyFile(); mf != nil {
+				title = fmt.Sprintf("Write: %s", mf.FilePath)
+				actionType = types.ActionTypeFileWrite
+				actionDetails = map[string]interface{}{
+					"path": mf.FilePath,
+				}
+			}
+		case streams.ToolKindReadFile:
+			if rf := cachedPayload.ReadFile(); rf != nil {
+				title = fmt.Sprintf("Read: %s", rf.FilePath)
+				actionType = types.ActionTypeFileRead
+				actionDetails = map[string]interface{}{
+					"path": rf.FilePath,
+				}
+			}
+		default:
+			// For other tool kinds, use a generic label
+			title = string(cachedPayload.Kind())
+		}
 	}
 
 	// Convert Copilot permission request to kandev format
@@ -830,10 +929,9 @@ func (a *CopilotAdapter) handlePermissionRequest(
 		SessionID:     sessionID,
 		ToolCallID:    request.ToolCallID,
 		Title:         title,
-		ActionType:    request.Kind,
-		ActionDetails: request.Extra,
-		// Use tool_call_id as PendingID if available, otherwise generate one
-		PendingID: request.ToolCallID,
+		ActionType:    actionType,
+		ActionDetails: actionDetails,
+		PendingID:     request.ToolCallID,
 		Options: []PermissionOption{
 			{OptionID: "allow", Name: "Allow", Kind: "allow_once"},
 			{OptionID: "deny", Name: "Deny", Kind: "reject_once"},

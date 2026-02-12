@@ -22,7 +22,7 @@ export type DevOptions = {
 export async function runDev({ repoRoot, backendPort, webPort }: DevOptions): Promise<void> {
   const ports = await pickPorts(backendPort, webPort);
 
-  const backendEnv = buildBackendEnv({ ports });
+  const backendEnv = buildBackendEnv({ ports, extra: { KANDEV_MOCK_AGENT: "true" } });
   const webEnv = buildWebEnv({ ports, includeMcp: true, debug: true });
 
   logPortConfig("dev", "using local repo", ports, true);

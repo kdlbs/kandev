@@ -316,17 +316,16 @@ type RepositoryScript struct {
 type ExecutorType string
 
 const (
-	ExecutorTypeLocalPC      ExecutorType = "local_pc"
-	ExecutorTypeLocalDocker  ExecutorType = "local_docker"
+	ExecutorTypeLocal       ExecutorType = "local"
+	ExecutorTypeWorktree    ExecutorType = "worktree"
+	ExecutorTypeLocalDocker ExecutorType = "local_docker"
 	ExecutorTypeRemoteDocker ExecutorType = "remote_docker"
-	ExecutorTypeRemoteVPS    ExecutorType = "remote_vps"
-	ExecutorTypeK8s          ExecutorType = "k8s"
 )
 
 const (
-	ExecutorIDLocalPC      = "exec-local-pc"
-	ExecutorIDLocalDocker  = "exec-local-docker"
-	ExecutorIDRemoteDocker = "exec-remote-docker"
+	ExecutorIDLocal       = "exec-local"
+	ExecutorIDWorktree    = "exec-worktree"
+	ExecutorIDLocalDocker = "exec-local-docker"
 )
 
 // ExecutorStatus represents executor availability.
@@ -411,6 +410,18 @@ type TaskPlan struct {
 	CreatedBy string    `json:"created_by"` // "agent" or "user"
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// SessionFileReview tracks per-file review state within a session
+type SessionFileReview struct {
+	ID         string     `json:"id"`
+	SessionID  string     `json:"session_id"`
+	FilePath   string     `json:"file_path"`
+	Reviewed   bool       `json:"reviewed"`
+	DiffHash   string     `json:"diff_hash"`
+	ReviewedAt *time.Time `json:"reviewed_at,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
 }
 
 // ToAPI converts internal Task to API type

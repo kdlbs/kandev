@@ -91,6 +91,13 @@ const (
 	ActionOrchestratorPrompt   = "orchestrator.prompt"
 	ActionOrchestratorComplete = "orchestrator.complete"
 
+	// Message Queue actions
+	ActionMessageQueueAdd            = "message.queue.add"
+	ActionMessageQueueCancel         = "message.queue.cancel"
+	ActionMessageQueueGet            = "message.queue.get"
+	ActionMessageQueueUpdate         = "message.queue.update"
+	ActionMessageQueueStatusChanged  = "message.queue.status_changed" // Notification: queue status changed
+
 	// Workflow actions
 	ActionWorkflowTemplateList   = "workflow.template.list"
 	ActionWorkflowTemplateGet    = "workflow.template.get"
@@ -184,6 +191,11 @@ const (
 	ActionUserShellList   = "user_shell.list"   // List running user shells for a session
 	ActionUserShellCreate = "user_shell.create" // Create a new user shell terminal (assigns ID and label)
 	ActionUserShellStop   = "user_shell.stop"   // Stop a user shell terminal
+
+	// Session file review actions
+	ActionSessionFileReviewGet    = "session.file_review.get"    // Get all file reviews for a session
+	ActionSessionFileReviewUpdate = "session.file_review.update" // Upsert a single file review
+	ActionSessionFileReviewReset  = "session.file_review.reset"  // Delete all reviews for a session
 
 	// Session git actions (requests)
 	ActionSessionGitSnapshots   = "session.git.snapshots"   // Get git snapshots for a session

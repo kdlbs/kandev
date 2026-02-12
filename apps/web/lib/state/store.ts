@@ -132,6 +132,7 @@ export type AppState = {
   pendingModel: typeof defaultSessionState['pendingModel'];
   activeModel: typeof defaultSessionState['activeModel'];
   taskPlans: typeof defaultSessionState['taskPlans'];
+  queue: typeof defaultSessionState['queue'];
 
   // Session Runtime slice
   terminal: typeof defaultSessionRuntimeState['terminal'];
@@ -153,6 +154,7 @@ export type AppState = {
   mobileKanban: typeof defaultUIState['mobileKanban'];
   mobileSession: typeof defaultUIState['mobileSession'];
   chatInput: typeof defaultUIState['chatInput'];
+  documentPanel: typeof defaultUIState['documentPanel'];
 
   // Actions from all slices
   hydrate: (state: Partial<AppState>, options?: HydrationOptions) => void;
@@ -207,6 +209,8 @@ export type AppState = {
   setMobileSessionPanel: (sessionId: string, panel: import('./slices/ui/types').MobileSessionPanel) => void;
   setMobileSessionTaskSwitcherOpen: (open: boolean) => void;
   setPlanMode: (sessionId: string, enabled: boolean) => void;
+  setActiveDocument: (sessionId: string, doc: import('./slices/ui/types').ActiveDocument | null) => void;
+  setDocumentComments: (sessionId: string, comments: import('./slices/ui/types').DocumentComment[]) => void;
   setMessages: (
     sessionId: string,
     messages: Message[],
@@ -255,6 +259,10 @@ export type AppState = {
   setTaskPlanLoading: (taskId: string, loading: boolean) => void;
   setTaskPlanSaving: (taskId: string, saving: boolean) => void;
   clearTaskPlan: (taskId: string) => void;
+  // Queue actions
+  setQueueStatus: (sessionId: string, status: import('./slices/session/types').QueueStatus) => void;
+  setQueueLoading: (sessionId: string, loading: boolean) => void;
+  clearQueueStatus: (sessionId: string) => void;
   // Available commands actions
   setAvailableCommands: (sessionId: string, commands: import('./slices/session-runtime/types').AvailableCommand[]) => void;
   clearAvailableCommands: (sessionId: string) => void;
@@ -296,6 +304,7 @@ const defaultState = {
   pendingModel: defaultSessionState.pendingModel,
   activeModel: defaultSessionState.activeModel,
   taskPlans: defaultSessionState.taskPlans,
+  queue: defaultSessionState.queue,
   terminal: defaultSessionRuntimeState.terminal,
   shell: defaultSessionRuntimeState.shell,
   processes: defaultSessionRuntimeState.processes,
@@ -350,6 +359,7 @@ function mergeInitialState(initialState?: Partial<AppState>): typeof defaultStat
     pendingModel: { ...defaultState.pendingModel, ...initialState.pendingModel },
     activeModel: { ...defaultState.activeModel, ...initialState.activeModel },
     taskPlans: { ...defaultState.taskPlans, ...initialState.taskPlans },
+    queue: { ...defaultState.queue, ...initialState.queue },
     terminal: { ...defaultState.terminal, ...initialState.terminal },
     shell: { ...defaultState.shell, ...initialState.shell },
     processes: { ...defaultState.processes, ...initialState.processes },
@@ -416,6 +426,7 @@ export function createAppStore(initialState?: Partial<AppState>) {
       sessionWorktreesBySessionId: merged.sessionWorktreesBySessionId,
       pendingModel: merged.pendingModel,
       activeModel: merged.activeModel,
+      queue: merged.queue,
       terminal: merged.terminal,
       shell: merged.shell,
       processes: merged.processes,

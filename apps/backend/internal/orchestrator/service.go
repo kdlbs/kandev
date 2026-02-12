@@ -22,6 +22,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/queue"
 	"github.com/kandev/kandev/internal/orchestrator/scheduler"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
@@ -38,24 +39,22 @@ var (
 
 // ServiceConfig holds orchestrator service configuration
 type ServiceConfig struct {
-	Scheduler       scheduler.SchedulerConfig
-	QueueSize       int
-	WorktreeEnabled bool // Whether to use Git worktrees for agent isolation
+	Scheduler scheduler.SchedulerConfig
+	QueueSize int
 }
 
 // DefaultServiceConfig returns default configuration
 func DefaultServiceConfig() ServiceConfig {
 	return ServiceConfig{
-		Scheduler:       scheduler.DefaultSchedulerConfig(),
-		QueueSize:       1000,
-		WorktreeEnabled: true,
+		Scheduler: scheduler.DefaultSchedulerConfig(),
+		QueueSize: 1000,
 	}
 }
 
 // MessageCreator is an interface for creating messages on tasks
 type MessageCreator interface {
 	CreateAgentMessage(ctx context.Context, taskID, content, agentSessionID, turnID string) error
-	CreateUserMessage(ctx context.Context, taskID, content, agentSessionID, turnID string) error
+	CreateUserMessage(ctx context.Context, taskID, content, agentSessionID, turnID string, metadata map[string]interface{}) error
 	// CreateToolCallMessage creates a message for a tool call.
 	// normalized contains the typed tool payload data.
 	// parentToolCallID is the parent Task tool call ID for subagent nesting (empty for top-level).
@@ -144,6 +143,9 @@ type Service struct {
 	scheduler *scheduler.Scheduler
 	watcher   *watcher.Watcher
 
+	// Message queue service for queueing messages while agent is running
+	messageQueue *messagequeue.Service
+
 	// Message creator for saving agent responses
 	messageCreator MessageCreator
 
@@ -193,13 +195,15 @@ func NewService(
 
 	// Create the executor with the agent manager client and repository for persistent sessions
 	execCfg := executor.ExecutorConfig{
-		WorktreeEnabled: cfg.WorktreeEnabled,
-		ShellPrefs:      shellPrefs,
+		ShellPrefs: shellPrefs,
 	}
 	exec := executor.NewExecutor(agentManager, repo, log, execCfg)
 
 	// Create the scheduler with queue, executor, and task repository
 	sched := scheduler.NewScheduler(taskQueue, exec, taskRepo, log, cfg.Scheduler)
+
+	// Create the message queue service
+	msgQueue := messagequeue.NewService(log)
 
 	// Create the service (watcher will be created after we have handlers)
 	s := &Service{
@@ -212,6 +216,7 @@ func NewService(
 		queue:        taskQueue,
 		executor:     exec,
 		scheduler:    sched,
+		messageQueue: msgQueue,
 	}
 
 	// Create the watcher with event handlers that wire everything together
@@ -774,4 +779,14 @@ func (s *Service) GetStatus() *Status {
 		UptimeSeconds:  uptimeSeconds,
 		LastHeartbeat:  time.Now(),
 	}
+}
+
+// GetMessageQueue returns the message queue service
+func (s *Service) GetMessageQueue() *messagequeue.Service {
+	return s.messageQueue
+}
+
+// GetEventBus returns the event bus
+func (s *Service) GetEventBus() bus.EventBus {
+	return s.eventBus
 }

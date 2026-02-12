@@ -93,7 +93,7 @@ export const createSessionRuntimeSlice: StateCreator<
         const syncStatusChanged = existing.ahead !== gitStatus.ahead ||
                                   existing.behind !== gitStatus.behind;
 
-        // Compare file list (keys) and total stats, not individual file contents
+        // Compare file list (keys) and total stats
         const existingFileKeys = existing.files ? Object.keys(existing.files).sort().join(',') : '';
         const newFileKeys = gitStatus.files ? Object.keys(gitStatus.files).sort().join(',') : '';
         const fileListChanged = existingFileKeys !== newFileKeys;
@@ -116,7 +116,17 @@ export const createSessionRuntimeSlice: StateCreator<
         const statsChanged = existingTotal.additions !== newTotal.additions ||
                              existingTotal.deletions !== newTotal.deletions;
 
-        if (!branchChanged && !syncStatusChanged && !fileListChanged && !statsChanged) {
+        // Compare staged status of individual files
+        const stagedChanged = (() => {
+          if (!existing.files || !gitStatus.files) return existing.files !== gitStatus.files;
+          const keys = Object.keys(gitStatus.files);
+          for (const key of keys) {
+            if (existing.files[key]?.staged !== gitStatus.files[key]?.staged) return true;
+          }
+          return false;
+        })();
+
+        if (!branchChanged && !syncStatusChanged && !fileListChanged && !statsChanged && !stagedChanged) {
           return; // No meaningful change, skip update
         }
       }

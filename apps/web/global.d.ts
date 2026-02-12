@@ -8,5 +8,7 @@ declare global {
     // Port-only injection (client builds URL from window.location.hostname + port)
     __KANDEV_API_PORT?: string;
     __KANDEV_MCP_PORT?: string;
+    // Debug mode flag (injected at runtime by layout.tsx)
+    __KANDEV_DEBUG?: boolean;
   }
 }

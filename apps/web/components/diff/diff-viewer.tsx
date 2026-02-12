@@ -98,6 +98,8 @@ interface DiffViewerProps {
   hideHeader?: boolean;
   /** Callback to open file in editor */
   onOpenFile?: (filePath: string) => void;
+  /** External word wrap override (controlled mode) */
+  wordWrap?: boolean;
 }
 
 type AnnotationMetadata = {
@@ -121,6 +123,7 @@ function arePropsEqual(prevProps: DiffViewerProps, nextProps: DiffViewerProps): 
   if (prevProps.hideHeader !== nextProps.hideHeader) return false;
   if (prevProps.className !== nextProps.className) return false;
   if (prevProps.onOpenFile !== nextProps.onOpenFile) return false;
+  if (prevProps.wordWrap !== nextProps.wordWrap) return false;
 
   // Comments array - compare by length and IDs
   const prevComments = prevProps.comments;
@@ -148,6 +151,7 @@ export const DiffViewer = memo(function DiffViewer({
   compact = false,
   hideHeader = false,
   onOpenFile,
+  wordWrap: wordWrapProp,
 }: DiffViewerProps) {
   const { resolvedTheme } = useTheme();
   const [selectedLines, setSelectedLines] = useState<SelectedLineRange | null>(null);
@@ -156,8 +160,9 @@ export const DiffViewer = memo(function DiffViewer({
   // Global view mode (synced via localStorage)
   const [globalViewMode, setGlobalViewMode] = useGlobalViewMode();
 
-  // Local state for word wrap (per-diff)
-  const [wordWrap, setWordWrap] = useState(false);
+  // Local state for word wrap (per-diff), overridable via prop
+  const [wordWrapLocal, setWordWrap] = useState(false);
+  const wordWrap = wordWrapProp ?? wordWrapLocal;
 
   // Use internal comment management if sessionId provided
   const {

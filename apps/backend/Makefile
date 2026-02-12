@@ -14,13 +14,19 @@ BUILD_TIME := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 
 LDFLAGS += -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuildTime=$(BUILD_TIME)
 
-.PHONY: all build build-all build-agentctl clean run dev test lint fmt vet help
+.PHONY: all build build-all build-agentctl build-mock-agent clean run dev test lint fmt vet help
 
 ## Default target
 all: build
 
+## Build the mock-agent binary for testing
+build-mock-agent:
+	@echo "Building mock-agent..."
+	@mkdir -p $(BUILD_DIR)
+	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/mock-agent ./cmd/mock-agent
+
 ## Build the unified kandev binary
-build: build-agentctl
+build: build-agentctl build-mock-agent
 	@echo "Building $(BINARY_NAME)..."
 	@mkdir -p $(BUILD_DIR)
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/kandev
@@ -108,6 +114,7 @@ help:
 	@echo "  build           Build the unified kandev binary (default)"
 	@echo "  build-all       Build all binaries (unified + individual services + agentctl)"
 	@echo "  build-agentctl  Build the agentctl sidecar binary (includes embedded MCP server)"
+	@echo "  build-mock-agent Build the mock-agent binary for testing"
 	@echo "  clean         Remove build artifacts"
 	@echo "  run           Build and run the application"
 	@echo "  dev           Run in development mode with a local database"

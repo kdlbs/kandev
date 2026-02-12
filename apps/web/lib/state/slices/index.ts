@@ -55,6 +55,9 @@ export type {
   PendingModelState,
   ActiveModelState,
   TaskPlansState,
+  QueueStatus,
+  QueuedMessage,
+  QueueState,
 } from './session/types';
 export type {
   TerminalState,
@@ -89,5 +92,8 @@ export type {
   MobileKanbanState,
   MobileSessionPanel,
   MobileSessionState,
+  ActiveDocument,
+  DocumentComment,
+  DocumentPanelState,
 } from './ui/types';
 export type { Repository, Branch } from '@/lib/types/http';

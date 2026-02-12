@@ -1,30 +1,39 @@
 'use client';
 
-import { memo, useMemo, useState } from 'react';
-import { IconArrowBackUp } from '@tabler/icons-react';
-import { Badge } from '@kandev/ui/badge';
-import { Button } from '@kandev/ui/button';
-import { SessionPanelContent } from '@kandev/ui/pannel-session';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
+import { memo, useMemo, useCallback, createRef, useState, useEffect, useRef } from 'react';
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@kandev/ui/alert-dialog';
+  IconSettings,
+  IconTextWrap,
+  IconLayoutColumns,
+  IconLayoutRows,
+  IconMessageForward,
+  IconArrowsMaximize,
+} from '@tabler/icons-react';
+import { Button } from '@kandev/ui/button';
+import { Checkbox } from '@kandev/ui/checkbox';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@kandev/ui/dropdown-menu';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
 import { useToast } from '@/components/toast-provider';
 import { useAppStore } from '@/components/state-provider';
 import { useSessionGitStatus } from '@/hooks/domains/session/use-session-git-status';
 import { useCumulativeDiff } from '@/hooks/domains/session/use-cumulative-diff';
 import { useGitOperations } from '@/hooks/use-git-operations';
-import { FileDiffViewer } from '@/components/diff';
-import type { FileInfo } from '@/lib/state/slices';
+import { useSessionFileReviews } from '@/hooks/use-session-file-reviews';
+import { useDiffCommentsStore } from '@/lib/state/slices/diff-comments/diff-comments-slice';
+import { getWebSocketClient } from '@/lib/ws/connection';
+import { updateUserSettings } from '@/lib/api';
+import { formatReviewCommentsAsMarkdown } from '@/components/task/chat/messages/review-comments-attachment';
+import { ReviewDiffList } from '@/components/review/review-diff-list';
+import { ReviewDialog } from '@/components/review/review-dialog';
+import type { ReviewFile } from '@/components/review/types';
+import { hashDiff, normalizeDiffContent } from '@/components/review/types';
+import type { DiffComment } from '@/lib/diff/types';
 import type { SelectedDiff } from './task-layout';
-import { FileStatusIcon } from './file-status-icon';
 
 type TaskChangesPanelProps = {
   selectedDiff: SelectedDiff | null;
@@ -33,277 +42,399 @@ type TaskChangesPanelProps = {
   onOpenFile?: (filePath: string) => void;
 };
 
-/**
- * Normalize diff content by handling edge cases from the backend.
- *
- * Handles:
- * 1. Multiple diffs concatenated with "--- Staged changes ---" separator
- * 2. Diffs missing headers
- */
-function normalizeDiffContent(diffContent: string): string {
-  if (!diffContent || typeof diffContent !== 'string') return '';
-
-  let trimmed = diffContent.trim();
-  if (!trimmed) return '';
-
-  // Handle concatenated diffs with "--- Staged changes ---" separator
-  const stagedSeparator = '--- Staged changes ---';
-  if (trimmed.includes(stagedSeparator)) {
-    const parts = trimmed.split(stagedSeparator);
-    trimmed = (parts[1] || parts[0]).trim();
-  }
-
-  return trimmed;
-}
-
 const TaskChangesPanel = memo(function TaskChangesPanel({
   selectedDiff,
   onClearSelected,
-  onOpenFile,
 }: TaskChangesPanelProps) {
-  const [showDiscardDialog, setShowDiscardDialog] = useState(false);
+  const [splitView, setSplitView] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return localStorage.getItem('diff-view-mode') === 'split';
+  });
+  const [wordWrap, setWordWrap] = useState(false);
+  const [reviewDialogOpen, setReviewDialogOpen] = useState(false);
 
   const { toast } = useToast();
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
+  const autoMarkOnScroll = useAppStore((s) => s.userSettings.reviewAutoMarkOnScroll);
+  const setUserSettings = useAppStore((state) => state.setUserSettings);
+  const userSettings = useAppStore((state) => state.userSettings);
+  const taskTitle = useAppStore((state) => {
+    if (!state.tasks.activeTaskId) return undefined;
+    return state.kanban.tasks.find((t) => t.id === state.tasks.activeTaskId)?.title;
+  });
+  const baseBranch = useAppStore((state) => {
+    if (!activeSessionId) return undefined;
+    return state.taskSessions.items[activeSessionId]?.base_branch;
+  });
+
   const gitStatus = useSessionGitStatus(activeSessionId);
-  const { discard, isLoading: isDiscarding } = useGitOperations(activeSessionId);
-  // Fetch cumulative diff (all commits combined) when no specific file is selected
-  const { diff: cumulativeDiff, loading: cumulativeLoading } = useCumulativeDiff(
-    selectedDiff ? null : activeSessionId
+  const { diff: cumulativeDiff, loading: cumulativeLoading } = useCumulativeDiff(activeSessionId);
+  const { discard } = useGitOperations(activeSessionId);
+
+  const { reviews, markReviewed, markUnreviewed } = useSessionFileReviews(activeSessionId);
+
+  const bySession = useDiffCommentsStore((s) => s.bySession);
+  const getPendingComments = useDiffCommentsStore((s) => s.getPendingComments);
+  const markCommentsSent = useDiffCommentsStore((s) => s.markCommentsSent);
+
+  // Merge uncommitted + committed files into a single sorted list
+  const allFiles = useMemo<ReviewFile[]>(() => {
+    const fileMap = new Map<string, ReviewFile>();
+
+    // Uncommitted changes from git status
+    if (gitStatus?.files) {
+      for (const [path, file] of Object.entries(gitStatus.files)) {
+        const diff = file.diff ? normalizeDiffContent(file.diff) : '';
+        if (diff) {
+          fileMap.set(path, {
+            path,
+            diff,
+            status: file.status,
+            additions: file.additions ?? 0,
+            deletions: file.deletions ?? 0,
+            staged: file.staged,
+            source: 'uncommitted',
+          });
+        }
+      }
+    }
+
+    // Committed changes from cumulative diff
+    if (cumulativeDiff?.files) {
+      for (const [path, file] of Object.entries(cumulativeDiff.files)) {
+        if (fileMap.has(path)) continue; // Uncommitted takes priority
+        const diff = file.diff ? normalizeDiffContent(file.diff) : '';
+        if (diff) {
+          fileMap.set(path, {
+            path,
+            diff,
+            status: file.status || 'modified',
+            additions: file.additions ?? 0,
+            deletions: file.deletions ?? 0,
+            staged: false,
+            source: 'committed',
+          });
+        }
+      }
+    }
+
+    return Array.from(fileMap.values()).sort((a, b) => a.path.localeCompare(b.path));
+  }, [gitStatus, cumulativeDiff]);
+
+  // Reviewed / stale sets
+  const { reviewedFiles, staleFiles } = useMemo(() => {
+    const reviewed = new Set<string>();
+    const stale = new Set<string>();
+
+    for (const file of allFiles) {
+      const reviewState = reviews.get(file.path);
+      if (!reviewState?.reviewed) continue;
+
+      const currentHash = hashDiff(file.diff);
+      if (reviewState.diffHash && reviewState.diffHash !== currentHash) {
+        stale.add(file.path);
+      } else {
+        reviewed.add(file.path);
+      }
+    }
+
+    return { reviewedFiles: reviewed, staleFiles: stale };
+  }, [allFiles, reviews]);
+
+  // Comment counts
+  const commentCountByFile = useMemo(() => {
+    const counts: Record<string, number> = {};
+    if (!activeSessionId) return counts;
+    const sessionComments = bySession[activeSessionId];
+    if (!sessionComments) return counts;
+
+    for (const [filePath, comments] of Object.entries(sessionComments)) {
+      if (comments.length > 0) {
+        counts[filePath] = comments.length;
+      }
+    }
+    return counts;
+  }, [bySession, activeSessionId]);
+
+  const totalCommentCount = useMemo(() => {
+    return Object.values(commentCountByFile).reduce((sum, c) => sum + c, 0);
+  }, [commentCountByFile]);
+
+  // File refs for scrollIntoView
+  const fileRefs = useMemo(() => {
+    const refs = new Map<string, React.RefObject<HTMLDivElement | null>>();
+    for (const file of allFiles) {
+      refs.set(file.path, createRef<HTMLDivElement>());
+    }
+    return refs;
+  }, [allFiles]);
+
+  // Scroll to selected file when selectedDiff changes
+  const scrolledRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!selectedDiff?.path || scrolledRef.current === selectedDiff.path) return;
+    scrolledRef.current = selectedDiff.path;
+
+    const ref = fileRefs.get(selectedDiff.path);
+    if (ref?.current) {
+      // Small delay to let lazy-rendered content mount
+      requestAnimationFrame(() => {
+        ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    }
+    onClearSelected();
+  }, [selectedDiff, fileRefs, onClearSelected]);
+
+  // Reset scroll tracking when selectedDiff is cleared
+  useEffect(() => {
+    if (!selectedDiff) {
+      scrolledRef.current = null;
+    }
+  }, [selectedDiff]);
+
+  const handleToggleSplitView = useCallback((split: boolean) => {
+    setSplitView(split);
+    const mode = split ? 'split' : 'unified';
+    localStorage.setItem('diff-view-mode', mode);
+    window.dispatchEvent(new CustomEvent('diff-view-mode-change', { detail: mode }));
+  }, []);
+
+  const handleToggleReviewed = useCallback(
+    (path: string, reviewed: boolean) => {
+      if (reviewed) {
+        const file = allFiles.find((f) => f.path === path);
+        const diffHash = file ? hashDiff(file.diff) : '';
+        markReviewed(path, diffHash);
+      } else {
+        markUnreviewed(path);
+      }
+    },
+    [allFiles, markReviewed, markUnreviewed]
   );
 
-  const selectedDiffPath = selectedDiff?.path ?? null;
-  // Use provided diff content (from commit or snapshot) or look up from current git status
-  const hasProvidedContent = Boolean(selectedDiff?.content);
-
-  // Convert git status files to array for display (uncommitted changes)
-  const uncommittedFiles = useMemo<FileInfo[]>(() => {
-    if (!gitStatus?.files || Object.keys(gitStatus.files).length === 0) {
-      return [];
-    }
-    return Object.values(gitStatus.files) as FileInfo[];
-  }, [gitStatus]);
-
-  // Convert cumulative diff files to array (committed changes)
-  const committedFiles = useMemo<Array<{ path: string; diff: string; additions: number; deletions: number }>>(() => {
-    if (!cumulativeDiff?.files || Object.keys(cumulativeDiff.files).length === 0) {
-      return [];
-    }
-    // Create a Set of uncommitted file paths for efficient lookup
-    const uncommittedPaths = new Set(uncommittedFiles.map(f => f.path));
-
-    return Object.entries(cumulativeDiff.files)
-      .filter(([path, file]) => file.diff && !uncommittedPaths.has(path)) // Exclude uncommitted files
-      .map(([path, file]) => ({
-        path,
-        diff: file.diff!,
-        additions: file.additions ?? 0,
-        deletions: file.deletions ?? 0,
-      }));
-  }, [cumulativeDiff, uncommittedFiles]);
-
-  const selectedFile = selectedDiffPath && gitStatus?.files ? gitStatus.files[selectedDiffPath] : null;
-  // Prioritize current git status for uncommitted files, use provided content only for historical diffs
-  // This ensures that when a file is modified by the agent, we show the latest diff
-  const selectedDiffContent = selectedFile?.diff ?? selectedDiff?.content ?? '';
-  const isSingleDiffSelected = Boolean(selectedDiffPath && (hasProvidedContent || selectedFile));
-  // Discard only works for uncommitted changes (not committed/historical diffs)
-  const canDiscard = Boolean(selectedDiffPath && selectedFile && !hasProvidedContent);
-
-  const hasUncommitted = uncommittedFiles.length > 0;
-  const hasCommitted = committedFiles.length > 0;
-  const hasAnyChanges = hasUncommitted || hasCommitted;
-
-  const handleDiscardClick = () => {
-    setShowDiscardDialog(true);
-  };
-
-  const handleDiscardConfirm = async () => {
-    if (!selectedDiffPath) {
-      return;
-    }
-
-    try {
-      const result = await discard([selectedDiffPath]);
-      if (result.success) {
-        toast({
-          title: 'Changes discarded',
-          description: `Successfully discarded changes to ${selectedDiffPath}`,
-          variant: 'success',
-        });
-        onClearSelected();
-      } else {
-        toast({
-          title: 'Failed to discard changes',
-          description: result.error || 'An unknown error occurred',
-          variant: 'error',
-        });
+  const handleDiscard = useCallback(
+    async (path: string) => {
+      try {
+        const result = await discard([path]);
+        if (result.success) {
+          toast({ title: 'Changes discarded', description: path, variant: 'success' });
+        } else {
+          toast({ title: 'Discard failed', description: result.error || 'An error occurred', variant: 'error' });
+        }
+      } catch (e) {
+        toast({ title: 'Discard failed', description: e instanceof Error ? e.message : 'An error occurred', variant: 'error' });
       }
-    } catch (error) {
-      toast({
-        title: 'Failed to discard changes',
-        description: error instanceof Error ? error.message : 'An unknown error occurred',
-        variant: 'error',
+    },
+    [discard, toast]
+  );
+
+  const handleToggleAutoMark = useCallback(
+    (checked: boolean) => {
+      const next = { ...userSettings, reviewAutoMarkOnScroll: checked };
+      setUserSettings(next);
+
+      const client = getWebSocketClient();
+      const payload = { review_auto_mark_on_scroll: checked };
+      if (client) {
+        client.request('user.settings.update', payload).catch(() => {
+          updateUserSettings(payload, { cache: 'no-store' }).catch(() => { });
+        });
+      } else {
+        updateUserSettings(payload, { cache: 'no-store' }).catch(() => { });
+      }
+    },
+    [userSettings, setUserSettings]
+  );
+
+  const handleFixComments = useCallback(() => {
+    if (!activeSessionId || !activeTaskId) return;
+    const comments = getPendingComments();
+    if (comments.length === 0) return;
+
+    const markdown = formatReviewCommentsAsMarkdown(comments);
+    if (!markdown) return;
+
+    const client = getWebSocketClient();
+    if (client) {
+      client.request('message.add', {
+        task_id: activeTaskId,
+        session_id: activeSessionId,
+        content: markdown,
+      }).catch(() => {
+        toast({ title: 'Failed to send comments', variant: 'error' });
       });
-    } finally {
-      setShowDiscardDialog(false);
     }
-  };
+
+    markCommentsSent(comments.map((c) => c.id));
+  }, [activeSessionId, activeTaskId, getPendingComments, markCommentsSent, toast]);
+
+  const handleDialogSendComments = useCallback(
+    (comments: DiffComment[]) => {
+      if (!activeTaskId || !activeSessionId || comments.length === 0) return;
+      const client = getWebSocketClient();
+      if (!client) return;
+      const markdown = formatReviewCommentsAsMarkdown(comments);
+      client.request('message.add', {
+        task_id: activeTaskId,
+        session_id: activeSessionId,
+        content: markdown,
+      }, 10000).catch(() => {
+        toast({ title: 'Failed to send comments', variant: 'error' });
+      });
+      setReviewDialogOpen(false);
+    },
+    [activeTaskId, activeSessionId, toast]
+  );
+
+  const reviewedCount = reviewedFiles.size;
+  const totalCount = allFiles.length;
+  const progressPercent = totalCount > 0 ? (reviewedCount / totalCount) * 100 : 0;
 
   return (
-    <div className="flex flex-col gap-2 h-full">
-      {/* Header */}
-      <div className="flex items-center justify-between gap-3">
-        {selectedDiffPath && (
-          <>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 px-2 text-xs cursor-pointer ml-auto"
-                  onClick={onClearSelected}
-                >
-                  Clear
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Show all changes</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 px-2 text-xs cursor-pointer"
-                    disabled={!canDiscard || isDiscarding}
-                    onClick={handleDiscardClick}
-                  >
-                    <IconArrowBackUp className="h-3.5 w-3.5" />
-                  </Button>
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>
-                {canDiscard ? 'Discard changes' : hasProvidedContent ? 'Cannot discard committed changes' : 'Select an uncommitted file'}
-              </TooltipContent>
-            </Tooltip>
-          </>
+    <div className="flex flex-col h-full">
+      {/* Top bar */}
+      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border bg-card/50 min-h-[36px]">
+        {/* Settings cog */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button size="sm" variant="ghost" className="px-1.5 h-7 cursor-pointer">
+              <IconSettings className="h-3.5 w-3.5" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-64">
+            <DropdownMenuItem
+              className="cursor-pointer gap-2"
+              onSelect={(e) => {
+                e.preventDefault();
+                handleToggleAutoMark(!autoMarkOnScroll);
+              }}
+            >
+              <Checkbox
+                checked={autoMarkOnScroll}
+                className="pointer-events-none"
+              />
+              <span className="text-sm flex-1">Auto-mark reviewed on scroll</span>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        {/* Progress bar */}
+        {totalCount > 0 && (
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-20 h-1 rounded-full bg-muted overflow-hidden">
+              <div
+                className="h-full bg-indigo-500 rounded-full transition-all duration-300"
+                style={{ width: `${progressPercent}%` }}
+              />
+            </div>
+            <span className="text-[11px] text-muted-foreground whitespace-nowrap">
+              {reviewedCount}/{totalCount} Reviewed
+            </span>
+          </div>
+        )}
+
+        <div className="flex-1" />
+
+        {/* Expand to review dialog */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="px-1.5 h-7 cursor-pointer"
+              onClick={() => setReviewDialogOpen(true)}
+            >
+              <IconArrowsMaximize className="h-3.5 w-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Expand review</TooltipContent>
+        </Tooltip>
+
+        {/* Word wrap */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              size="sm"
+              variant="ghost"
+              className={`px-1.5 h-7 cursor-pointer ${wordWrap ? 'bg-muted' : ''}`}
+              onClick={() => setWordWrap(!wordWrap)}
+            >
+              <IconTextWrap className="h-3.5 w-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Toggle word wrap</TooltipContent>
+        </Tooltip>
+
+        {/* Split/Unified */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="px-1.5 h-7 cursor-pointer"
+              onClick={() => handleToggleSplitView(!splitView)}
+            >
+              {splitView ? (
+                <IconLayoutRows className="h-3.5 w-3.5" />
+              ) : (
+                <IconLayoutColumns className="h-3.5 w-3.5" />
+              )}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{splitView ? 'Unified view' : 'Split view'}</TooltipContent>
+        </Tooltip>
+
+        {/* Fix Comments */}
+        {totalCommentCount > 0 && (
+          <Button size="sm" variant="outline" className="h-7 text-xs cursor-pointer" onClick={handleFixComments}>
+            <IconMessageForward className="h-3.5 w-3.5" />
+            Fix
+            <span className="ml-0.5 rounded-full bg-blue-500/30 px-1 py-0 text-[10px] font-medium text-blue-600 dark:text-blue-400">
+              {totalCommentCount}
+            </span>
+          </Button>
         )}
       </div>
 
-      {/* Diff content */}
-      <SessionPanelContent>
-        {isSingleDiffSelected && selectedDiffContent ? (
-          // Render single file diff (from commit, snapshot, or uncommitted)
-          // Use timestamp from git status to ensure re-render when file changes
-          <div key={`selected-${selectedDiffPath}-${gitStatus?.timestamp ?? ''}-${selectedDiffContent.length}`} className="space-y-4">
-            <FileDiffViewer
-              filePath={selectedDiffPath!}
-              diff={normalizeDiffContent(selectedDiffContent)}
-              status="M"
-              enableComments={!!activeSessionId}
-              sessionId={activeSessionId ?? undefined}
-              onOpenFile={onOpenFile}
-            />
-          </div>
-        ) : cumulativeLoading ? (
+      {/* Content */}
+      <div className="flex-1 min-h-0 overflow-hidden">
+        {cumulativeLoading && allFiles.length === 0 ? (
           <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
             Loading changes...
           </div>
-        ) : !hasAnyChanges ? (
+        ) : allFiles.length === 0 ? (
           <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
             No changes
           </div>
-        ) : (
-          <div className="space-y-6">
-            {/* Uncommitted changes section */}
-            {hasUncommitted && (
-              <div className="space-y-4">
-                <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                  Uncommitted ({uncommittedFiles.length})
-                </div>
-                {uncommittedFiles.map((file) => {
-                  if (!file.diff) return null;
-                  const normalizedDiff = normalizeDiffContent(file.diff);
-                  const diffKey = `uncommitted-${file.path}-${normalizedDiff.length}`;
-                  return (
-                    <div key={diffKey} className="space-y-2">
-                      <FileDiffViewer
-                        filePath={file.path}
-                        diff={normalizedDiff}
-                        status={file.status}
-                        enableComments={!!activeSessionId}
-                        sessionId={activeSessionId ?? undefined}
-                        onOpenFile={onOpenFile}
-                      />
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+        ) : activeSessionId ? (
+          <ReviewDiffList
+            files={allFiles}
+            reviewedFiles={reviewedFiles}
+            staleFiles={staleFiles}
+            sessionId={activeSessionId}
+            autoMarkOnScroll={autoMarkOnScroll}
+            wordWrap={wordWrap}
+            onToggleReviewed={handleToggleReviewed}
+            onDiscard={handleDiscard}
+            fileRefs={fileRefs}
+          />
+        ) : null}
+      </div>
 
-            {/* Committed changes section */}
-            {hasCommitted && (
-              <div className="space-y-4">
-                <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                  Committed ({committedFiles.length})
-                </div>
-                {committedFiles.map((file) => {
-                  if (!file.diff) return null;
-                  const normalizedDiff = normalizeDiffContent(file.diff);
-                  const diffKey = `committed-${file.path}-${normalizedDiff.length}`;
-                  return (
-                    <div key={diffKey} className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <FileStatusIcon status="modified" />
-                          <Badge variant="secondary" className="rounded-full text-xs">
-                            {file.path}
-                          </Badge>
-                        </div>
-                        <span className="text-xs text-muted-foreground">
-                          <span className="text-emerald-500">+{file.additions}</span>
-                          {' / '}
-                          <span className="text-rose-500">-{file.deletions}</span>
-                        </span>
-                      </div>
-                      <FileDiffViewer
-                        filePath={file.path}
-                        diff={normalizedDiff}
-                        status="M"
-                        enableComments={!!activeSessionId}
-                        sessionId={activeSessionId ?? undefined}
-                        onOpenFile={onOpenFile}
-                      />
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
-      </SessionPanelContent>
-
-      {/* Discard confirmation dialog */}
-      <AlertDialog open={showDiscardDialog} onOpenChange={setShowDiscardDialog}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Discard changes?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will permanently discard all changes to{' '}
-              <span className="font-semibold">{selectedDiffPath}</span>. This action cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDiscardConfirm} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-              Discard
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {/* Review Dialog */}
+      {activeSessionId && (
+        <ReviewDialog
+          open={reviewDialogOpen}
+          onOpenChange={setReviewDialogOpen}
+          sessionId={activeSessionId}
+          baseBranch={baseBranch}
+          taskTitle={taskTitle}
+          onSendComments={handleDialogSendComments}
+          gitStatusFiles={gitStatus?.files ?? null}
+          cumulativeDiff={cumulativeDiff}
+        />
+      )}
     </div>
   );
 });

@@ -1,9 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, memo } from 'react';
+import { useCallback, useEffect, useRef, useState, memo, useMemo } from 'react';
+import { cn } from '@/lib/utils';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import { useAppStore } from '@/components/state-provider';
 import { getLocalStorage } from '@/lib/local-storage';
+import { useLayoutStore } from '@/lib/state/layout-store';
 import { useKeyboardShortcut } from '@/hooks/use-keyboard-shortcut';
 import { SHORTCUTS } from '@/lib/keyboard/constants';
 import { useSessionMessages } from '@/hooks/domains/session/use-session-messages';
@@ -12,15 +14,21 @@ import { useSessionState } from '@/hooks/domains/session/use-session-state';
 import { useProcessedMessages } from '@/hooks/use-processed-messages';
 import { useSessionModel } from '@/hooks/domains/session/use-session-model';
 import { useMessageHandler } from '@/hooks/use-message-handler';
+import { useQueue } from '@/hooks/domains/session/use-queue';
 import { TodoSummary } from '@/components/task/chat/todo-summary';
 import { VirtualizedMessageList } from '@/components/task/chat/virtualized-message-list';
 import { ChatInputContainer, type ChatInputContainerHandle, type MessageAttachment } from '@/components/task/chat/chat-input-container';
+import { QueuedMessageIndicator, type QueuedMessageIndicatorHandle } from '@/components/task/chat/queued-message-indicator';
 import { formatReviewCommentsAsMarkdown } from '@/components/task/chat/messages/review-comments-attachment';
 import {
   useDiffCommentsStore,
   usePendingCommentsByFile,
 } from '@/lib/state/slices/diff-comments';
+import { DocumentReferenceIndicator } from '@/components/task/chat/document-reference-indicator';
 import type { DiffComment } from '@/lib/diff/types';
+import type { DocumentComment } from '@/lib/state/slices/ui/types';
+
+const EMPTY_COMMENTS: DocumentComment[] = [];
 
 type TaskChatPanelProps = {
   onSend?: (message: string) => void;
@@ -43,6 +51,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   const [isSending, setIsSending] = useState(false);
   const lastAgentMessageCountRef = useRef(0);
   const chatInputRef = useRef<ChatInputContainerHandle>(null);
+  const queuedMessageRef = useRef<QueuedMessageIndicatorHandle>(null);
 
   // Ensure agent profile data is loaded (may not be hydrated from SSR in all navigation paths)
   useSettingsData(true);
@@ -57,23 +66,42 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     isStarting,
     isWorking,
     isAgentBusy,
+    isFailed,
   } = useSessionState(sessionId);
 
-  // Plan mode state from store (persisted per session)
-  const planModeEnabled = useAppStore((state) =>
-    resolvedSessionId ? (state.chatInput.planModeBySessionId[resolvedSessionId] ?? false) : false
+  // Plan mode state - derived from active document being a plan in document panel
+  const activeDocument = useAppStore((state) =>
+    resolvedSessionId ? state.documentPanel.activeDocumentBySessionId[resolvedSessionId] ?? null : null
   );
+  const layoutBySession = useLayoutStore((state) => state.columnsBySessionId);
+  const openDocument = useLayoutStore((state) => state.openDocument);
+  const closeDocument = useLayoutStore((state) => state.closeDocument);
+  const setActiveDocument = useAppStore((state) => state.setActiveDocument);
   const setPlanMode = useAppStore((state) => state.setPlanMode);
+
+  const planModeEnabled = useMemo(() => {
+    if (!resolvedSessionId || !activeDocument || activeDocument.type !== 'plan') return false;
+    const layout = layoutBySession[resolvedSessionId];
+    return layout?.document === true;
+  }, [resolvedSessionId, activeDocument, layoutBySession]);
+
   const handlePlanModeChange = useCallback(
     (enabled: boolean) => {
-      if (resolvedSessionId) {
-        setPlanMode(resolvedSessionId, enabled);
+      if (!resolvedSessionId || !taskId) return;
+      if (enabled) {
+        setActiveDocument(resolvedSessionId, { type: 'plan', taskId });
+        openDocument(resolvedSessionId);
+        setPlanMode(resolvedSessionId, true);
+      } else {
+        closeDocument(resolvedSessionId);
+        setActiveDocument(resolvedSessionId, null);
+        setPlanMode(resolvedSessionId, false);
       }
     },
-    [resolvedSessionId, setPlanMode]
+    [resolvedSessionId, taskId, setActiveDocument, openDocument, closeDocument, setPlanMode]
   );
 
-  // Initialize plan mode from localStorage on mount
+  // Initialize plan mode from localStorage on mount (restore document panel state)
   useEffect(() => {
     if (resolvedSessionId) {
       const stored = getLocalStorage(`plan-mode-${resolvedSessionId}`, false);
@@ -93,6 +121,14 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     resolvedSessionId,
     taskDescription
   );
+
+  // Extract user message history for up/down arrow navigation
+  const userMessageHistory = useMemo(() => {
+    return allMessages
+      .filter(msg => msg.author_type === 'user')
+      .map(msg => msg.content)
+      .filter(content => content && content.trim().length > 0);
+  }, [allMessages]);
 
   // Track clarification resolved state to trigger re-render after submit
   const [clarificationKey, setClarificationKey] = useState(0);
@@ -114,13 +150,31 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   );
   const hasAgentCommands = agentCommands && agentCommands.length > 0;
 
+  // Message queue
+  const { queuedMessage, isQueued, cancel: cancelQueue, updateContent: updateQueueContent } = useQueue(resolvedSessionId);
+
+  // Document comments from plan panel
+  const documentComments = useAppStore((state) =>
+    resolvedSessionId ? state.documentPanel.commentsBySessionId[resolvedSessionId] ?? EMPTY_COMMENTS : EMPTY_COMMENTS
+  );
+  const setDocumentComments = useAppStore((state) => state.setDocumentComments);
+
+  const handleClearDocumentComments = useCallback(() => {
+    if (resolvedSessionId) {
+      setDocumentComments(resolvedSessionId, []);
+    }
+  }, [resolvedSessionId, setDocumentComments]);
+
   // Message sending
   const { handleSendMessage } = useMessageHandler(
     resolvedSessionId,
     taskId,
     sessionModel,
     activeModel,
-    planModeEnabled
+    planModeEnabled,
+    isAgentBusy,
+    activeDocument,
+    documentComments
   );
 
   // Diff comments management
@@ -167,6 +221,25 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     }
   }, [resolvedSessionId]);
 
+  // Handle canceling queued message
+  const handleCancelQueue = useCallback(async () => {
+    try {
+      await cancelQueue();
+    } catch (error) {
+      console.error('Failed to cancel queued message:', error);
+    }
+  }, [cancelQueue]);
+
+  // Handle starting edit mode on queued message (from keyboard navigation)
+  const handleStartQueueEdit = useCallback(() => {
+    queuedMessageRef.current?.startEdit();
+  }, []);
+
+  // Handle edit complete - return focus to chat input
+  const handleQueueEditComplete = useCallback(() => {
+    chatInputRef.current?.focusInput();
+  }, []);
+
   const handleSubmit = useCallback(async (message: string, reviewComments?: DiffComment[], attachments?: MessageAttachment[]) => {
     if (isSending) return;
     setIsSending(true);
@@ -178,20 +251,27 @@ export const TaskChatPanel = memo(function TaskChatPanel({
         finalMessage = reviewMarkdown + (message ? message : '');
       }
 
+      const hasReviewComments = !!(reviewComments && reviewComments.length > 0);
+
       if (onSend) {
         await onSend(finalMessage);
       } else {
-        await handleSendMessage(finalMessage, attachments);
+        await handleSendMessage(finalMessage, attachments, hasReviewComments);
       }
 
       // Mark comments as sent and clear pending
       if (reviewComments && reviewComments.length > 0) {
         markCommentsSent(reviewComments.map((c) => c.id));
       }
+
+      // Clear plan/document comments after sending (they were included via useMessageHandler)
+      if (documentComments.length > 0) {
+        handleClearDocumentComments();
+      }
     } finally {
       setIsSending(false);
     }
-  }, [isSending, onSend, handleSendMessage, markCommentsSent]);
+  }, [isSending, onSend, handleSendMessage, markCommentsSent, documentComments.length, handleClearDocumentComments]);
 
   // Focus input with / shortcut (only when input is NOT focused)
   useKeyboardShortcut(
@@ -218,18 +298,6 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     { enabled: true, preventDefault: false }
   );
 
-  // Cancel agent turn with ESC shortcut
-  useKeyboardShortcut(
-    SHORTCUTS.CANCEL,
-    useCallback(() => {
-      if (isAgentBusy) {
-        handleCancelTurn();
-      }
-    }, [isAgentBusy, handleCancelTurn]),
-    { enabled: isAgentBusy }
-  );
-
-
   return (
     <div className="flex flex-col h-full min-h-0">
       {/* Scrollable messages area */}
@@ -251,8 +319,39 @@ export const TaskChatPanel = memo(function TaskChatPanel({
 
       {/* Sticky input at bottom */}
       <div className="flex-shrink-0 flex flex-col gap-2 mt-2">
+        {/* Status section: todos, etc. */}
         {todoItems.length > 0 && <TodoSummary todos={todoItems} />}
-        <ChatInputContainer
+
+        {/* Document reference indicator */}
+        {activeDocument && (
+          <DocumentReferenceIndicator
+            activeDocument={activeDocument}
+          />
+        )}
+
+        {/* Chat input with optional queued message on top */}
+        <div className="flex flex-col">
+          {/* Queued message indicator - appears above chat input */}
+          {isQueued && queuedMessage && (
+            <div className={cn(
+              'border border-b-0 border-border bg-background shadow-md',
+              'rounded-t-2xl overflow-hidden',
+              'border-blue-500/30'
+            )}>
+              <div className="px-3 py-3">
+                <QueuedMessageIndicator
+                  ref={queuedMessageRef}
+                  content={queuedMessage.content}
+                  onCancel={handleCancelQueue}
+                  onUpdate={updateQueueContent}
+                  isVisible={true}
+                  onEditComplete={handleQueueEditComplete}
+                />
+              </div>
+            </div>
+          )}
+
+          <ChatInputContainer
           ref={chatInputRef}
           key={clarificationKey}
           onSubmit={handleSubmit}
@@ -267,9 +366,13 @@ export const TaskChatPanel = memo(function TaskChatPanel({
           isSending={isSending}
           onCancel={handleCancelTurn}
           placeholder={
-            agentMessageCount > 0
-              ? 'Continue working on this task...'
-              : 'Write to submit work to the agent...'
+            isAgentBusy
+              ? 'Queue instructions to the agent...'
+              : activeDocument?.type === 'file'
+              ? `Continue working on ${activeDocument.name}...`
+              : planModeEnabled
+              ? 'Continue working on the plan...'
+              : 'Continue working on the task...'
           }
           pendingClarification={pendingClarification}
           onClarificationResolved={handleClarificationResolved}
@@ -281,7 +384,15 @@ export const TaskChatPanel = memo(function TaskChatPanel({
           onCommentClick={onOpenFileAtLine ? (comment) => onOpenFileAtLine(comment.filePath) : undefined}
           submitKey={chatSubmitKey}
           hasAgentCommands={hasAgentCommands}
+          isFailed={isFailed}
+          isQueued={isQueued}
+          onStartQueueEdit={handleStartQueueEdit}
+          userMessageHistory={userMessageHistory}
+          hasQueuedMessageAbove={isQueued}
+          documentCommentCount={documentComments.length}
+          onClearDocumentComments={handleClearDocumentComments}
         />
+        </div>
       </div>
     </div>
   );

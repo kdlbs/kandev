@@ -40,6 +40,21 @@ export type ChatInputState = {
   planModeBySessionId: Record<string, boolean>;
 };
 
+export type ActiveDocument =
+  | { type: 'plan'; taskId: string }
+  | { type: 'file'; path: string; name: string };
+
+export type DocumentComment = {
+  id: string;
+  selectedText: string;
+  comment: string;
+};
+
+export type DocumentPanelState = {
+  activeDocumentBySessionId: Record<string, ActiveDocument | null>;
+  commentsBySessionId: Record<string, DocumentComment[]>;
+};
+
 export type UISliceState = {
   previewPanel: PreviewPanelState;
   rightPanel: RightPanelState;
@@ -48,6 +63,7 @@ export type UISliceState = {
   mobileKanban: MobileKanbanState;
   mobileSession: MobileSessionState;
   chatInput: ChatInputState;
+  documentPanel: DocumentPanelState;
 };
 
 export type UISliceActions = {
@@ -65,6 +81,8 @@ export type UISliceActions = {
   setMobileSessionPanel: (sessionId: string, panel: MobileSessionPanel) => void;
   setMobileSessionTaskSwitcherOpen: (open: boolean) => void;
   setPlanMode: (sessionId: string, enabled: boolean) => void;
+  setActiveDocument: (sessionId: string, doc: ActiveDocument | null) => void;
+  setDocumentComments: (sessionId: string, comments: DocumentComment[]) => void;
 };
 
 export type UISlice = UISliceState & UISliceActions;

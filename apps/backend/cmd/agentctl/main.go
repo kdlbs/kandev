@@ -11,6 +11,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -70,7 +71,8 @@ func main() {
 	}()
 
 	log.Info("starting agentctl",
-		zap.Int("port", cfg.Port))
+		zap.Int("port", cfg.Port),
+		zap.String("log_level", cfg.LogLevel))
 
 	run(cfg, log)
 }
@@ -88,7 +90,7 @@ func run(cfg *config.Config, log *logger.Logger) {
 		mcpBackendClient := mcpserver.NewChannelBackendClient()
 
 		// Create MCP server using the channel-based backend client
-		mcpSrv := mcpserver.New(mcpBackendClient, instCfg.SessionID, instLog)
+		mcpSrv := mcpserver.New(mcpBackendClient, instCfg.SessionID, instCfg.Port, instLog, cfg.McpLogFile)
 		instLog.Info("MCP server enabled (channel-based)",
 			zap.String("session_id", instCfg.SessionID))
 
@@ -107,7 +109,16 @@ func run(cfg *config.Config, log *logger.Logger) {
 
 	go func() {
 		log.Info("HTTP server starting", zap.String("address", addr))
-		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		// Try to listen first so we get a clear error before serving
+		ln, listenErr := net.Listen("tcp", addr)
+		if listenErr != nil {
+			log.Error("HTTP server failed to bind",
+				zap.String("address", addr),
+				zap.Error(listenErr))
+			os.Exit(1)
+		}
+		log.Info("HTTP server bound successfully", zap.String("address", ln.Addr().String()))
+		if err := httpServer.Serve(ln); err != nil && err != http.ErrServerClosed {
 			log.Error("HTTP server error", zap.Error(err))
 			os.Exit(1)
 		}

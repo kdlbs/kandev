@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/controller"
 	"github.com/kandev/kandev/internal/task/dto"
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -32,12 +34,14 @@ type TaskHandlers struct {
 type OrchestratorStarter interface {
 	// StartTask starts agent execution for a task.
 	// If workflowStepID is provided, prompt prefix/suffix and plan mode from the step are applied.
-	StartTask(ctx context.Context, taskID string, agentProfileID string, executorID string, priority int, prompt string, workflowStepID string) (*executor.TaskExecution, error)
+	// If planMode is true and the step doesn't already enable it, default plan mode is injected.
+	StartTask(ctx context.Context, taskID string, agentProfileID string, executorID string, priority int, prompt string, workflowStepID string, planMode bool) (*executor.TaskExecution, error)
 	// PrepareTaskSession creates a session entry without launching the agent.
 	// Returns the session ID immediately so it can be returned in the HTTP response.
 	PrepareTaskSession(ctx context.Context, taskID string, agentProfileID string, executorID string, workflowStepID string) (string, error)
 	// StartTaskWithSession starts agent execution for a task using a pre-created session.
-	StartTaskWithSession(ctx context.Context, taskID string, sessionID string, agentProfileID string, executorID string, priority int, prompt string, workflowStepID string) (*executor.TaskExecution, error)
+	// If planMode is true and the step doesn't already enable it, default plan mode is injected.
+	StartTaskWithSession(ctx context.Context, taskID string, sessionID string, agentProfileID string, executorID string, priority int, prompt string, workflowStepID string, planMode bool) (*executor.TaskExecution, error)
 }
 
 func NewTaskHandlers(ctrl *controller.TaskController, orchestrator OrchestratorStarter, repo repository.Repository, planService *service.PlanService, log *logger.Logger) *TaskHandlers {
@@ -86,6 +90,10 @@ func (h *TaskHandlers) registerWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionSessionGitSnapshots, h.wsGetGitSnapshots)
 	dispatcher.RegisterFunc(ws.ActionSessionGitCommits, h.wsGetSessionCommits)
 	dispatcher.RegisterFunc(ws.ActionSessionCumulativeDiff, h.wsGetCumulativeDiff)
+	// Session file review handlers
+	dispatcher.RegisterFunc(ws.ActionSessionFileReviewGet, h.wsGetSessionFileReviews)
+	dispatcher.RegisterFunc(ws.ActionSessionFileReviewUpdate, h.wsUpdateSessionFileReview)
+	dispatcher.RegisterFunc(ws.ActionSessionFileReviewReset, h.wsResetSessionFileReviews)
 	// Task plan handlers
 	dispatcher.RegisterFunc(ws.ActionTaskPlanCreate, h.wsCreateTaskPlan)
 	dispatcher.RegisterFunc(ws.ActionTaskPlanGet, h.wsGetTaskPlan)
@@ -222,6 +230,7 @@ type httpCreateTaskRequest struct {
 	StartAgent     bool                      `json:"start_agent,omitempty"`
 	AgentProfileID string                    `json:"agent_profile_id,omitempty"`
 	ExecutorID     string                    `json:"executor_id,omitempty"`
+	PlanMode       bool                      `json:"plan_mode,omitempty"`
 }
 
 type createTaskResponse struct {
@@ -298,7 +307,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 				startCtx, cancel := context.WithTimeout(context.Background(), constants.AgentLaunchTimeout)
 				defer cancel()
 				// Use task description as the initial prompt with workflow step config (prompt prefix/suffix, plan mode)
-				execution, err := h.orchestrator.StartTaskWithSession(startCtx, resp.ID, sessionID, body.AgentProfileID, executorID, body.Priority, resp.Description, workflowStepID)
+				execution, err := h.orchestrator.StartTaskWithSession(startCtx, resp.ID, sessionID, body.AgentProfileID, executorID, body.Priority, resp.Description, workflowStepID, body.PlanMode)
 				if err != nil {
 					h.logger.Error("failed to start agent for task (async)", zap.Error(err), zap.String("task_id", resp.ID), zap.String("session_id", sessionID))
 					return
@@ -462,6 +471,7 @@ type wsCreateTaskRequest struct {
 	StartAgent     bool                      `json:"start_agent,omitempty"`
 	AgentProfileID string                    `json:"agent_profile_id,omitempty"`
 	ExecutorID     string                    `json:"executor_id,omitempty"`
+	PlanMode       bool                      `json:"plan_mode,omitempty"`
 }
 
 func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -520,7 +530,7 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	response := createTaskResponse{TaskDTO: resp}
 	if req.StartAgent && req.AgentProfileID != "" && h.orchestrator != nil {
 		// Use task description as the initial prompt with workflow step config (prompt prefix/suffix, plan mode)
-		execution, err := h.orchestrator.StartTask(ctx, resp.ID, req.AgentProfileID, req.ExecutorID, req.Priority, resp.Description, req.WorkflowStepID)
+		execution, err := h.orchestrator.StartTask(ctx, resp.ID, req.AgentProfileID, req.ExecutorID, req.Priority, resp.Description, req.WorkflowStepID, req.PlanMode)
 		if err != nil {
 			h.logger.Error("failed to start agent for task", zap.Error(err))
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to start agent for task", nil)
@@ -768,6 +778,97 @@ func (h *TaskHandlers) wsGetCumulativeDiff(ctx context.Context, msg *ws.Message)
 	})
 }
 
+
+// Session File Review Handlers
+
+type wsGetSessionFileReviewsRequest struct {
+	SessionID string `json:"session_id"`
+}
+
+func (h *TaskHandlers) wsGetSessionFileReviews(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req wsGetSessionFileReviewsRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.SessionID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+	}
+
+	reviews, err := h.repo.GetSessionFileReviews(ctx, req.SessionID)
+	if err != nil {
+		h.logger.Error("failed to get session file reviews", zap.Error(err), zap.String("session_id", req.SessionID))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get session file reviews", nil)
+	}
+
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		"session_id": req.SessionID,
+		"reviews":    reviews,
+	})
+}
+
+type wsUpdateSessionFileReviewRequest struct {
+	SessionID string `json:"session_id"`
+	FilePath  string `json:"file_path"`
+	Reviewed  bool   `json:"reviewed"`
+	DiffHash  string `json:"diff_hash"`
+}
+
+func (h *TaskHandlers) wsUpdateSessionFileReview(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req wsUpdateSessionFileReviewRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.SessionID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+	}
+	if req.FilePath == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "file_path is required", nil)
+	}
+
+	review := &models.SessionFileReview{
+		SessionID: req.SessionID,
+		FilePath:  req.FilePath,
+		Reviewed:  req.Reviewed,
+		DiffHash:  req.DiffHash,
+	}
+	if req.Reviewed {
+		now := time.Now().UTC()
+		review.ReviewedAt = &now
+	}
+
+	if err := h.repo.UpsertSessionFileReview(ctx, review); err != nil {
+		h.logger.Error("failed to update session file review", zap.Error(err), zap.String("session_id", req.SessionID))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update session file review", nil)
+	}
+
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		"success": true,
+		"review":  review,
+	})
+}
+
+type wsResetSessionFileReviewsRequest struct {
+	SessionID string `json:"session_id"`
+}
+
+func (h *TaskHandlers) wsResetSessionFileReviews(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req wsResetSessionFileReviewsRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.SessionID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+	}
+
+	if err := h.repo.DeleteSessionFileReviews(ctx, req.SessionID); err != nil {
+		h.logger.Error("failed to reset session file reviews", zap.Error(err), zap.String("session_id", req.SessionID))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to reset session file reviews", nil)
+	}
+
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		"success": true,
+	})
+}
 
 // Task Plan Handlers
 

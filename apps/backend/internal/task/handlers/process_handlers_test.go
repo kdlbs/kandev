@@ -153,6 +153,9 @@ func (m *mockRepository) UpdateTurn(ctx context.Context, turn *models.Turn) erro
 func (m *mockRepository) CompleteTurn(ctx context.Context, id string) error {
 	return nil
 }
+func (m *mockRepository) CompleteRunningToolCallsForTurn(ctx context.Context, turnID string) (int64, error) {
+	return 0, nil
+}
 func (m *mockRepository) ListTurnsBySession(ctx context.Context, sessionID string) ([]*models.Turn, error) {
 	return nil, nil
 }
@@ -364,6 +367,15 @@ func (m *mockRepository) UpdateTaskPlan(ctx context.Context, plan *models.TaskPl
 func (m *mockRepository) DeleteTaskPlan(ctx context.Context, taskID string) error {
 	return nil
 }
+func (m *mockRepository) UpsertSessionFileReview(ctx context.Context, review *models.SessionFileReview) error {
+	return nil
+}
+func (m *mockRepository) GetSessionFileReviews(ctx context.Context, sessionID string) ([]*models.SessionFileReview, error) {
+	return nil, nil
+}
+func (m *mockRepository) DeleteSessionFileReviews(ctx context.Context, sessionID string) error {
+	return nil
+}
 
 func newTestService(t *testing.T, scripts map[string][]*models.RepositoryScript) *service.Service {
 	log, err := logger.NewLogger(logger.LoggingConfig{
@@ -518,7 +530,7 @@ func TestStopProcessRejectsDifferentSession(t *testing.T) {
 			"session-a": {ID: "session-a", TaskID: "task-1", ExecutorID: "exec-1"},
 		},
 		executors: map[string]*models.Executor{
-			"exec-1": {ID: "exec-1", Type: models.ExecutorTypeLocalPC},
+			"exec-1": {ID: "exec-1", Type: models.ExecutorTypeLocal},
 		},
 	}
 	svc := service.NewService(repo, nil, log, service.RepositoryDiscoveryConfig{})
@@ -577,7 +589,7 @@ func TestStopProcessAgentctlUnavailable(t *testing.T) {
 			"session-a": {ID: "session-a", TaskID: "task-1", ExecutorID: "exec-1"},
 		},
 		executors: map[string]*models.Executor{
-			"exec-1": {ID: "exec-1", Type: models.ExecutorTypeLocalPC},
+			"exec-1": {ID: "exec-1", Type: models.ExecutorTypeLocal},
 		},
 	}
 	svc := service.NewService(repo, nil, log, service.RepositoryDiscoveryConfig{})

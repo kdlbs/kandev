@@ -175,7 +175,7 @@
       "cmd": [
         "npx",
         "-y",
-        "@openai/codex@0.88.0",
+        "@openai/codex@0.98.0",
         "app-server"
       ],
       "passthrough_config": {
@@ -746,7 +746,7 @@
       "cmd": [
         "npx",
         "-y",
-        "@github/copilot@0.0.375",
+        "@github/copilot@0.0.406",
         "--server",
         "--log-level",
         "error"
@@ -804,10 +804,10 @@
         "auto_approve": {
           "supported": true,
           "default": true,
-          "label": "Auto-approve",
-          "description": "Automatically approve tool calls",
+          "label": "Auto-approve (YOLO mode)",
+          "description": "Enable all tools, folders and urls without confirmation.",
           "apply_method": "cli_flag",
-          "cli_flag": "--allow-all-tools"
+          "cli_flag": "--yolo"
         }
       },
       "discovery": {
@@ -1071,6 +1071,116 @@
             "name": "Deep Mode",
             "description": "Deep reasoning with extended thinking on complex problems",
             "provider": "amp",
+            "is_default": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "mock-agent",
+      "name": "Mock Agent",
+      "display_name": "Mock",
+      "description": "Mock agent for testing. Generates simulated responses with all message types.",
+      "enabled": false,
+      "image": "",
+      "tag": "",
+      "cmd": [
+        "mock-agent"
+      ],
+      "working_dir": "{workspace}",
+      "required_env": [],
+      "env": {},
+      "mounts": [],
+      "resource_limits": {
+        "memory_mb": 512,
+        "cpu_cores": 0.5,
+        "timeout_seconds": 3600
+      },
+      "capabilities": [
+        "code_generation",
+        "code_review",
+        "refactoring",
+        "testing",
+        "shell_execution"
+      ],
+      "protocol": "claude-code",
+      "protocol_config": {},
+      "model_flag": "--model {model}",
+      "workspace_flag": "",
+      "session_config": {
+        "native_session_resume": false,
+        "resume_flag": "",
+        "can_recover": false
+      },
+      "permission_config": {
+        "permission_flag": "",
+        "tools_requiring_permission": [
+          "Edit",
+          "Write",
+          "Bash",
+          "NotebookEdit"
+        ]
+      },
+      "permission_settings": {
+        "auto_approve": {
+          "supported": true,
+          "default": true,
+          "label": "Auto-approve",
+          "description": "Automatically approve tool calls",
+          "apply_method": "stdio",
+          "cli_flag": ""
+        },
+        "dangerously_skip_permissions": {
+          "supported": true,
+          "default": false,
+          "label": "Skip Permissions (YOLO)",
+          "description": "Bypass all permission checks",
+          "apply_method": "",
+          "cli_flag": ""
+        }
+      },
+      "discovery": {
+        "supports_mcp": false,
+        "mcp_config_path": {
+          "linux": [],
+          "windows": [],
+          "macos": []
+        },
+        "installation_path": {
+          "linux": [],
+          "windows": [],
+          "macos": []
+        },
+        "discovery_capabilities": {
+          "supports_session_resume": false,
+          "supports_shell": false,
+          "supports_workspace_only": false
+        }
+      },
+      "model_config": {
+        "default_model": "mock-default",
+        "available_models": [
+          {
+            "id": "mock-default",
+            "name": "Mock Default",
+            "provider": "mock",
+            "context_window": 200000,
+            "is_default": true
+          },
+          {
+            "id": "mock-slow",
+            "name": "Mock Slow",
+            "description": "Longer delays",
+            "provider": "mock",
+            "context_window": 200000,
+            "is_default": false
+          },
+          {
+            "id": "mock-fast",
+            "name": "Mock Fast",
+            "description": "Minimal delays",
+            "provider": "mock",
+            "context_window": 200000,
             "is_default": false
           }
         ]

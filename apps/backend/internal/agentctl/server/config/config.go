@@ -35,8 +35,9 @@ type Config struct {
 	ShellEnabled bool // Enable auto-shell feature (default: true)
 
 	// Logging configuration
-	LogLevel  string
-	LogFormat string
+	LogLevel   string
+	LogFormat  string
+	McpLogFile string // Optional file path for MCP debug logs
 }
 
 // PortConfig defines port allocation for instances
@@ -159,8 +160,9 @@ func Load() *Config {
 			ProcessBufferMaxBytes:  getEnvInt64("AGENTCTL_PROCESS_BUFFER_MAX_BYTES", 2*1024*1024),
 		},
 		ShellEnabled: getEnvBool("AGENTCTL_SHELL_ENABLED", true),
-		LogLevel:     getEnv("AGENTCTL_LOG_LEVEL", "info"),
+		LogLevel:     getEnvWithFallback("AGENTCTL_LOG_LEVEL", "KANDEV_LOG_LEVEL", "info"),
 		LogFormat:    getEnv("AGENTCTL_LOG_FORMAT", "json"),
+		McpLogFile:   getEnv("KANDEV_MCP_LOG_FILE", ""),
 	}
 }
 
@@ -278,6 +280,17 @@ func CollectAgentEnv(additional map[string]string) []string {
 
 func getEnv(key, defaultValue string) string {
 	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
+}
+
+// getEnvWithFallback checks the primary key, then the fallback key, then returns defaultValue.
+func getEnvWithFallback(primary, fallback, defaultValue string) string {
+	if value := os.Getenv(primary); value != "" {
+		return value
+	}
+	if value := os.Getenv(fallback); value != "" {
 		return value
 	}
 	return defaultValue

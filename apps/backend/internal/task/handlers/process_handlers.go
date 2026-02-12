@@ -103,7 +103,7 @@ func (h *ProcessHandlers) httpStartProcess(c *gin.Context) {
 			}
 		}
 		if executorID == "" {
-			executorID = models.ExecutorIDLocalPC
+			executorID = models.ExecutorIDLocal
 		}
 	}
 	executor, err := h.service.GetExecutor(c.Request.Context(), executorID)
@@ -210,7 +210,7 @@ func (h *ProcessHandlers) httpStartProcess(c *gin.Context) {
 	}
 
 	switch executor.Type {
-	case models.ExecutorTypeLocalPC, models.ExecutorTypeLocalDocker:
+	case models.ExecutorTypeLocal, models.ExecutorTypeWorktree, models.ExecutorTypeLocalDocker:
 		if streams.ProcessKind(kind) == streams.ProcessKindDev {
 			if existing, err := h.lifecycleMgr.ListProcesses(c.Request.Context(), sessionID); err == nil {
 				for _, proc := range existing {
@@ -293,7 +293,7 @@ func (h *ProcessHandlers) httpStopProcessByID(c *gin.Context) {
 			}
 		}
 		if executorID == "" {
-			executorID = models.ExecutorIDLocalPC
+			executorID = models.ExecutorIDLocal
 		}
 	}
 	executor, err := h.service.GetExecutor(c.Request.Context(), executorID)
@@ -303,7 +303,7 @@ func (h *ProcessHandlers) httpStopProcessByID(c *gin.Context) {
 	}
 
 	switch executor.Type {
-	case models.ExecutorTypeLocalPC, models.ExecutorTypeLocalDocker:
+	case models.ExecutorTypeLocal, models.ExecutorTypeWorktree, models.ExecutorTypeLocalDocker:
 		proc, err := h.lifecycleMgr.GetProcess(c.Request.Context(), processID, false)
 		if err != nil {
 			handleNotFound(c, h.logger, err, "process not found")
@@ -349,7 +349,7 @@ func (h *ProcessHandlers) httpListProcesses(c *gin.Context) {
 			}
 		}
 		if executorID == "" {
-			executorID = models.ExecutorIDLocalPC
+			executorID = models.ExecutorIDLocal
 		}
 	}
 	executor, err := h.service.GetExecutor(c.Request.Context(), executorID)
@@ -358,7 +358,7 @@ func (h *ProcessHandlers) httpListProcesses(c *gin.Context) {
 		return
 	}
 	switch executor.Type {
-	case models.ExecutorTypeLocalPC, models.ExecutorTypeLocalDocker:
+	case models.ExecutorTypeLocal, models.ExecutorTypeWorktree, models.ExecutorTypeLocalDocker:
 		listCtx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 		defer cancel()
 		procs, err := h.lifecycleMgr.ListProcesses(listCtx, sessionID)
@@ -410,7 +410,7 @@ func (h *ProcessHandlers) httpGetProcess(c *gin.Context) {
 			}
 		}
 		if executorID == "" {
-			executorID = models.ExecutorIDLocalPC
+			executorID = models.ExecutorIDLocal
 		}
 	}
 	executor, err := h.service.GetExecutor(c.Request.Context(), executorID)
@@ -420,7 +420,7 @@ func (h *ProcessHandlers) httpGetProcess(c *gin.Context) {
 	}
 	includeOutput := c.Query("include_output") == "true"
 	switch executor.Type {
-	case models.ExecutorTypeLocalPC, models.ExecutorTypeLocalDocker:
+	case models.ExecutorTypeLocal, models.ExecutorTypeWorktree, models.ExecutorTypeLocalDocker:
 		proc, err := h.lifecycleMgr.GetProcess(c.Request.Context(), processID, includeOutput)
 		if err != nil {
 			handleNotFound(c, h.logger, err, "process not found")

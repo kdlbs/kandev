@@ -55,7 +55,7 @@ export type KeyValue = {
   value: string;
 };
 
-export type ExecutorType = 'local_pc' | 'local_docker' | 'remote_docker' | 'remote_vps' | 'k8s';
+export type ExecutorType = 'local' | 'worktree' | 'local_docker' | 'remote_docker';
 export type ExecutorStatus = 'active' | 'disabled';
 
 export type Executor = {

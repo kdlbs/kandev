@@ -3,8 +3,12 @@
 import { useRef, useCallback, useState, useEffect, memo, forwardRef, useImperativeHandle, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import {
   IconArrowUp,
-  IconListCheck,
+  IconAlertTriangle,
+  IconFileTextSpark,
+  IconPlus,
   IconPlayerStopFilled,
+  IconMessageDots,
+  IconX,
 } from '@tabler/icons-react';
 import { GridSpinner } from '@/components/grid-spinner';
 import { Button } from '@kandev/ui/button';
@@ -14,6 +18,7 @@ import { SHORTCUTS } from '@/lib/keyboard/constants';
 import { KeyboardShortcutTooltip } from '@/components/keyboard-shortcut-tooltip';
 import { TokenUsageDisplay } from '@/components/task/chat/token-usage-display';
 import { SessionsDropdown } from '@/components/task/sessions-dropdown';
+import { TaskCreateDialog } from '@/components/task-create-dialog';
 import { ModelSelector } from '@/components/task/model-selector';
 import { RichTextInput, type RichTextInputHandle } from './rich-text-input';
 import { MentionMenu } from './mention-menu';
@@ -92,7 +97,7 @@ const ChatInputToolbar = memo(function ChatInputToolbar({
               )}
               onClick={() => onPlanModeChange(!planModeEnabled)}
             >
-              <IconListCheck className="h-4 w-4" />
+              <IconFileTextSpark className="h-4 w-4" />
             </Button>
           </TooltipTrigger>
           <TooltipContent>Toggle plan mode</TooltipContent>
@@ -190,6 +195,20 @@ type ChatInputContainerProps = {
   submitKey?: 'enter' | 'cmd_enter';
   /** Whether the current agent has commands (affects placeholder) */
   hasAgentCommands?: boolean;
+  /** Whether the session is in a terminal state (FAILED/CANCELLED) */
+  isFailed?: boolean;
+  /** Whether a message is queued */
+  isQueued?: boolean;
+  /** Callback to start editing the queued message (from keyboard navigation) */
+  onStartQueueEdit?: () => void;
+  /** User message history for up/down arrow navigation */
+  userMessageHistory?: string[];
+  /** Whether there's a queued message section above this input */
+  hasQueuedMessageAbove?: boolean;
+  /** Plan/document comments that will be included with the next message */
+  documentCommentCount?: number;
+  /** Callback to clear plan/document comments */
+  onClearDocumentComments?: () => void;
 };
 
 export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInputContainerProps>(
@@ -217,6 +236,13 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       onCommentClick,
       submitKey = 'cmd_enter',
       hasAgentCommands = false,
+      isFailed = false,
+      isQueued = false,
+      onStartQueueEdit,
+      userMessageHistory = [],
+      hasQueuedMessageAbove = false,
+      documentCommentCount = 0,
+      onClearDocumentComments,
     },
     ref
   ) {
@@ -224,7 +250,12 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
   const [value, setValue] = useState('');
   const [isInputFocused, setIsInputFocused] = useState(false);
   const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
+  const [showNewSessionDialog, setShowNewSessionDialog] = useState(false);
   const inputRef = useRef<RichTextInputHandle>(null);
+
+  // Message history navigation state
+  const [historyIndex, setHistoryIndex] = useState(-1); // -1 means not navigating history
+  const [historyBuffer, setHistoryBuffer] = useState(''); // Store current input when navigating history
 
   // Expose imperative handle for parent
   useImperativeHandle(
@@ -357,12 +388,20 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
     (newValue: string) => {
       mention.handleChange(newValue);
       slash.handleChange(newValue);
+
+      // Reset history navigation when user modifies content from history (but not when editing queued message)
+      if (historyIndex >= 0) {
+        // User is modifying a historical message - keep the content but exit history mode
+        setHistoryIndex(-1);
+        setHistoryBuffer('');
+      }
+
       // Dismiss the request changes tooltip when user starts typing
       if (showRequestChangesTooltip && onRequestChangesTooltipDismiss) {
         onRequestChangesTooltipDismiss();
       }
     },
-    [mention, slash, showRequestChangesTooltip, onRequestChangesTooltipDismiss]
+    [mention, slash, showRequestChangesTooltip, onRequestChangesTooltipDismiss, historyIndex]
   );
 
   // Combined keydown handler
@@ -377,14 +416,61 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
         slash.handleKeyDown(event);
         if (event.defaultPrevented) return;
       }
+
+      // Handle up/down arrow for history navigation
+      const textarea = event.currentTarget;
+      const cursorPosition = textarea.selectionStart;
+      const textLength = textarea.value.length;
+
+      // Up arrow: navigate to previous message or start editing queued message
+      if (event.key === 'ArrowUp' && cursorPosition === 0) {
+        event.preventDefault();
+
+        // If there's a queued message and we're not navigating history, trigger edit mode on QueuedMessageIndicator
+        if (isQueued && historyIndex === -1 && onStartQueueEdit) {
+          onStartQueueEdit();
+          return;
+        }
+
+        // Navigate to previous message in history
+        if (userMessageHistory.length > 0) {
+          const newIndex = historyIndex === -1
+            ? userMessageHistory.length - 1
+            : Math.max(0, historyIndex - 1);
+
+          if (historyIndex === -1) {
+            setHistoryBuffer(value);
+          }
+
+          setValue(userMessageHistory[newIndex] || '');
+          setHistoryIndex(newIndex);
+        }
+      }
+      // Down arrow: navigate to next message in history
+      else if (event.key === 'ArrowDown' && cursorPosition === textLength) {
+        event.preventDefault();
+
+        if (historyIndex >= 0) {
+          const newIndex = historyIndex + 1;
+
+          if (newIndex >= userMessageHistory.length) {
+            // Restore the buffer (what user was typing before navigating)
+            setValue(historyBuffer);
+            setHistoryIndex(-1);
+          } else {
+            setValue(userMessageHistory[newIndex] || '');
+            setHistoryIndex(newIndex);
+          }
+        }
+      }
     },
-    [mention, slash]
+    [mention, slash, userMessageHistory, historyIndex, historyBuffer, value, isQueued, onStartQueueEdit]
   );
 
   // Stable submit handler using refs - doesn't change on value/menu state changes
   const handleSubmit = useCallback(() => {
-    // Don't submit if agent is busy or already sending
-    if (isAgentBusy || isSending) return;
+    // Don't submit if already sending
+    if (isSending) return;
 
     // Don't submit if a menu is open
     if (menuStateRef.current.mentionOpen || menuStateRef.current.slashOpen) return;
@@ -411,6 +497,7 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       mime_type: att.mimeType,
     }));
 
+    // Submit message - handler will queue it if agent is busy
     onSubmit(
       trimmed,
       allComments.length > 0 ? allComments : undefined,
@@ -418,31 +505,75 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
     );
     setValue('');
     setAttachments([]); // Clear attachments after submit
-  }, [onSubmit, isAgentBusy, isSending]);
+    setHistoryIndex(-1);
+    setHistoryBuffer('');
+  }, [onSubmit, isSending]);
 
-  // Disable input when agent is busy (RUNNING state), starting, or sending a message
-  const isDisabled = isAgentBusy || isStarting || isSending;
+  // Disable input when starting, sending, or session ended (failed/cancelled)
+  // Note: We allow typing when agent is busy so users can queue messages
+  const isDisabled = isStarting || isSending || isFailed;
   const hasPendingClarification = pendingClarification && onClarificationResolved;
   const hasPendingComments = pendingCommentsByFile && Object.keys(pendingCommentsByFile).length > 0;
 
   // Dynamic placeholder
   const inputPlaceholder =
     placeholder ||
-    (hasAgentCommands
+    (isAgentBusy
+      ? 'Queue more instructions...'
+      : hasAgentCommands
       ? 'Ask to make changes, @mention files, run /commands'
       : 'Ask to make changes, @mention files');
 
   // Show focus hint when input not focused, no clarification, and no comments
   const showFocusHint = !isInputFocused && !hasPendingClarification && !hasPendingComments;
 
+  if (isFailed) {
+    return (
+      <>
+        <div className="rounded-2xl border border-border bg-background shadow-md overflow-hidden">
+          <div className="flex items-center justify-between gap-3 px-4 py-3">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <IconAlertTriangle className="h-4 w-4 text-orange-500 shrink-0" />
+              <span>This session has ended. Start a new session to continue.</span>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="shrink-0 gap-1.5 cursor-pointer"
+              onClick={() => setShowNewSessionDialog(true)}
+            >
+              <IconPlus className="h-3.5 w-3.5" />
+              New Session
+            </Button>
+          </div>
+        </div>
+        <TaskCreateDialog
+          open={showNewSessionDialog}
+          onOpenChange={setShowNewSessionDialog}
+          mode="session"
+          workspaceId={null}
+          boardId={null}
+          defaultColumnId={null}
+          columns={[]}
+          taskId={taskId}
+          initialValues={{
+            title: taskTitle ?? '',
+            description: taskDescription,
+          }}
+        />
+      </>
+    );
+  }
+
   return (
     <div
       className={cn(
-        'relative rounded-2xl border border-border bg-background shadow-md overflow-hidden',
-        planModeEnabled && 'border-primary border-dashed',
+        'relative border border-border bg-background shadow-md overflow-hidden',
+        hasQueuedMessageAbove ? 'rounded-b-2xl border-t-0' : 'rounded-2xl',
         hasPendingClarification && 'border-blue-500/50',
         showRequestChangesTooltip && 'animate-pulse border-orange-500',
-        hasPendingComments && 'border-amber-500/50'
+        hasPendingComments && 'border-amber-500/50',
+        hasQueuedMessageAbove && 'border-blue-500/30'
       )}
     >
       {/* Focus hint */}
@@ -479,6 +610,28 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
             onRemoveComment={onRemoveComment}
             onCommentClick={onCommentClick}
           />
+        </div>
+      )}
+
+      {/* Plan comments indicator */}
+      {documentCommentCount > 0 && (
+        <div className="px-3 pt-3">
+          <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/30 px-2 py-1.5">
+            <IconMessageDots className="h-3.5 w-3.5 text-purple-500 shrink-0" />
+            <span className="text-xs text-muted-foreground flex-1">
+              {documentCommentCount} plan comment{documentCommentCount !== 1 ? 's' : ''} will be included
+            </span>
+            {onClearDocumentComments && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onClearDocumentComments}
+                className="h-5 w-5 cursor-pointer p-0 hover:text-destructive"
+              >
+                <IconX className="h-3 w-3" />
+              </Button>
+            )}
+          </div>
         </div>
       )}
 

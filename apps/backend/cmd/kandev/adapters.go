@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -235,28 +236,68 @@ func (w *orchestratorWrapper) ResumeTaskSession(ctx context.Context, taskID, tas
 type messageCreatorAdapter struct {
 	svc    *taskservice.Service
 	logger *logger.Logger
+
+	// sessionModelCache caches the resolved model per session to avoid repeated DB lookups.
+	// The model doesn't change within a session, so caching is safe.
+	sessionModelMu    sync.RWMutex
+	sessionModelCache map[string]string
+}
+
+// getSessionModel resolves the model from the session's agent profile snapshot.
+// Results are cached per session ID to avoid repeated DB queries during streaming.
+func (a *messageCreatorAdapter) getSessionModel(ctx context.Context, sessionID string) string {
+	// Check cache first
+	a.sessionModelMu.RLock()
+	if model, ok := a.sessionModelCache[sessionID]; ok {
+		a.sessionModelMu.RUnlock()
+		return model
+	}
+	a.sessionModelMu.RUnlock()
+
+	// Cache miss — fetch from DB
+	session, err := a.svc.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil || session.AgentProfileSnapshot == nil {
+		return ""
+	}
+	model, _ := session.AgentProfileSnapshot["model"].(string)
+
+	// Store in cache
+	a.sessionModelMu.Lock()
+	if a.sessionModelCache == nil {
+		a.sessionModelCache = make(map[string]string)
+	}
+	a.sessionModelCache[sessionID] = model
+	a.sessionModelMu.Unlock()
+
+	return model
 }
 
 // CreateAgentMessage creates a message with author_type="agent"
 func (a *messageCreatorAdapter) CreateAgentMessage(ctx context.Context, taskID, content, agentSessionID, turnID string) error {
+	var metadata map[string]interface{}
+	if model := a.getSessionModel(ctx, agentSessionID); model != "" {
+		metadata = map[string]interface{}{"model": model}
+	}
 	_, err := a.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
 		TaskSessionID: agentSessionID,
 		TaskID:        taskID,
 		TurnID:        turnID,
 		Content:       content,
 		AuthorType:    "agent",
+		Metadata:      metadata,
 	})
 	return err
 }
 
 // CreateUserMessage creates a message with author_type="user"
-func (a *messageCreatorAdapter) CreateUserMessage(ctx context.Context, taskID, content, agentSessionID, turnID string) error {
+func (a *messageCreatorAdapter) CreateUserMessage(ctx context.Context, taskID, content, agentSessionID, turnID string, metadata map[string]interface{}) error {
 	_, err := a.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
 		TaskSessionID: agentSessionID,
 		TaskID:        taskID,
 		TurnID:        turnID,
 		Content:       content,
 		AuthorType:    "user",
+		Metadata:      metadata,
 	})
 	return err
 }
@@ -396,12 +437,17 @@ func (a *messageCreatorAdapter) UpdateClarificationMessage(ctx context.Context, 
 // CreateAgentMessageStreaming creates a new agent message with a pre-generated ID.
 // This is used for real-time streaming where content arrives incrementally.
 func (a *messageCreatorAdapter) CreateAgentMessageStreaming(ctx context.Context, messageID, taskID, content, agentSessionID, turnID string) error {
+	var metadata map[string]interface{}
+	if model := a.getSessionModel(ctx, agentSessionID); model != "" {
+		metadata = map[string]interface{}{"model": model}
+	}
 	_, err := a.svc.CreateMessageWithID(ctx, messageID, &taskservice.CreateMessageRequest{
 		TaskSessionID: agentSessionID,
 		TaskID:        taskID,
 		TurnID:        turnID,
 		Content:       content,
 		AuthorType:    "agent",
+		Metadata:      metadata,
 	})
 	return err
 }
@@ -414,6 +460,12 @@ func (a *messageCreatorAdapter) AppendAgentMessage(ctx context.Context, messageI
 // CreateThinkingMessageStreaming creates a new thinking message with a pre-generated ID.
 // This is used for real-time streaming of agent thinking/reasoning content.
 func (a *messageCreatorAdapter) CreateThinkingMessageStreaming(ctx context.Context, messageID, taskID, content, agentSessionID, turnID string) error {
+	metadata := map[string]interface{}{
+		"thinking": content,
+	}
+	if model := a.getSessionModel(ctx, agentSessionID); model != "" {
+		metadata["model"] = model
+	}
 	_, err := a.svc.CreateMessageWithID(ctx, messageID, &taskservice.CreateMessageRequest{
 		TaskSessionID: agentSessionID,
 		TaskID:        taskID,
@@ -421,9 +473,7 @@ func (a *messageCreatorAdapter) CreateThinkingMessageStreaming(ctx context.Conte
 		Content:       "",
 		AuthorType:    "agent",
 		Type:          "thinking",
-		Metadata: map[string]interface{}{
-			"thinking": content,
-		},
+		Metadata:      metadata,
 	})
 	return err
 }

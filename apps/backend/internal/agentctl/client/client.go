@@ -47,7 +47,7 @@ func NewClient(host string, port int, log *logger.Logger) *Client {
 	return &Client{
 		baseURL: fmt.Sprintf("http://%s:%d", host, port),
 		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout: 60 * time.Second,
 		},
 		logger: log.WithFields(zap.String("component", "agentctl-client")),
 	}
@@ -154,39 +154,40 @@ func (c *Client) ConfigureAgent(ctx context.Context, command string, env map[str
 	return nil
 }
 
-// Start starts the agent process
-func (c *Client) Start(ctx context.Context) error {
+// Start starts the agent process and returns the full command that was executed.
+func (c *Client) Start(ctx context.Context) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/v1/start", nil)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := readResponseBody(resp)
 	if err != nil {
-		return fmt.Errorf("failed to read response body: %w", err)
+		return "", fmt.Errorf("failed to read response body: %w", err)
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("start request failed with status %d: %s", resp.StatusCode, string(respBody))
+		return "", fmt.Errorf("start request failed with status %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	var result struct {
 		Success bool   `json:"success"`
+		Command string `json:"command,omitempty"`
 		Error   string `json:"error,omitempty"`
 	}
 	if err := json.Unmarshal(respBody, &result); err != nil {
-		return fmt.Errorf("failed to parse start response (status %d, body: %s): %w", resp.StatusCode, truncateBody(respBody), err)
+		return "", fmt.Errorf("failed to parse start response (status %d, body: %s): %w", resp.StatusCode, truncateBody(respBody), err)
 	}
 	if !result.Success {
-		return fmt.Errorf("start failed: %s", result.Error)
+		return "", fmt.Errorf("start failed: %s", result.Error)
 	}
-	return nil
+	return result.Command, nil
 }
 
 // Stop stops the agent process
@@ -259,7 +260,6 @@ type (
 	GitCommitNotification  = types.GitCommitNotification
 	GitResetNotification   = types.GitResetNotification
 	FileInfo               = types.FileInfo
-	FileListUpdate         = types.FileListUpdate
 	FileEntry              = types.FileEntry
 	FileTreeNode           = types.FileTreeNode
 	FileTreeRequest        = types.FileTreeRequest
@@ -718,7 +718,6 @@ type WorkspaceStreamCallbacks struct {
 	OnGitCommit     func(notification *GitCommitNotification)
 	OnGitReset      func(notification *GitResetNotification)
 	OnFileChange    func(notification *FileChangeNotification)
-	OnFileList      func(update *FileListUpdate)
 	OnProcessOutput func(output *types.ProcessOutput)
 	OnProcessStatus func(status *types.ProcessStatusUpdate)
 	OnConnected     func()
@@ -804,10 +803,6 @@ func (c *Client) StreamWorkspace(ctx context.Context, callbacks WorkspaceStreamC
 			case types.WorkspaceMessageTypeFileChange:
 				if callbacks.OnFileChange != nil && msg.FileChange != nil {
 					callbacks.OnFileChange(msg.FileChange)
-				}
-			case types.WorkspaceMessageTypeFileList:
-				if callbacks.OnFileList != nil && msg.FileList != nil {
-					callbacks.OnFileList(msg.FileList)
 				}
 			case types.WorkspaceMessageTypeProcessOutput:
 				if callbacks.OnProcessOutput != nil && msg.ProcessOutput != nil {

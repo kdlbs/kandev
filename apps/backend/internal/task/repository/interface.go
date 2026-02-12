@@ -61,6 +61,7 @@ type Repository interface {
 	GetActiveTurnBySessionID(ctx context.Context, sessionID string) (*models.Turn, error)
 	UpdateTurn(ctx context.Context, turn *models.Turn) error
 	CompleteTurn(ctx context.Context, id string) error
+	CompleteRunningToolCallsForTurn(ctx context.Context, turnID string) (int64, error)
 	ListTurnsBySession(ctx context.Context, sessionID string) ([]*models.Turn, error)
 
 	// Task Session operations
@@ -140,6 +141,11 @@ type Repository interface {
 	UpdateEnvironment(ctx context.Context, environment *models.Environment) error
 	DeleteEnvironment(ctx context.Context, id string) error
 	ListEnvironments(ctx context.Context) ([]*models.Environment, error)
+
+	// Session File Review operations
+	UpsertSessionFileReview(ctx context.Context, review *models.SessionFileReview) error
+	GetSessionFileReviews(ctx context.Context, sessionID string) ([]*models.SessionFileReview, error)
+	DeleteSessionFileReviews(ctx context.Context, sessionID string) error
 
 	// Task Plan operations
 	CreateTaskPlan(ctx context.Context, plan *models.TaskPlan) error

@@ -14,13 +14,22 @@ import (
 // provideAgentctlLauncher starts the agentctl launcher for standalone runtime.
 // agentctl is a core service that always runs - it's used by the Standalone runtime
 // for agent execution on the host machine.
+// If the configured port is unavailable, the launcher may fall back to an OS-assigned
+// port. In that case, cfg.Agent.StandalonePort is updated to reflect the actual port.
 func provideAgentctlLauncher(ctx context.Context, cfg *config.Config, log *logger.Logger) (func() error, error) {
-	_, cleanup, err := launcher.Provide(ctx, launcher.Config{
+	l, cleanup, err := launcher.Provide(ctx, launcher.Config{
 		Host: cfg.Agent.StandaloneHost,
 		Port: cfg.Agent.StandalonePort,
 	}, log)
 	if err != nil {
 		return nil, err
+	}
+	// Update config with the actual port (may differ if fallback was used)
+	if actualPort := l.Port(); actualPort != cfg.Agent.StandalonePort {
+		log.Info("agentctl port changed from configured value",
+			zap.Int("configured_port", cfg.Agent.StandalonePort),
+			zap.Int("actual_port", actualPort))
+		cfg.Agent.StandalonePort = actualPort
 	}
 	return cleanup, nil
 }

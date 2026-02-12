@@ -57,6 +57,9 @@ type AgentStreamEventData struct {
 	// comes from a subagent. Used for visual nesting in the UI.
 	ParentToolCallID string `json:"parent_tool_call_id,omitempty"`
 
+	// PendingID identifies a permission request (for "permission_cancelled" events).
+	PendingID string `json:"pending_id,omitempty"`
+
 	// Normalized contains the typed tool payload data.
 	// This is used to populate message metadata with structured tool information.
 	Normalized *streams.NormalizedPayload `json:"normalized,omitempty"`

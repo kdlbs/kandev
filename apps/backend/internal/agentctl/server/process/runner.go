@@ -33,7 +33,6 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/google/uuid"
@@ -237,7 +236,7 @@ func (r *ProcessRunner) Start(ctx context.Context, req StartProcessRequest) (*Pr
 	}
 	cmd.Env = mergeEnv(req.Env)
 	// Create new process group for clean shutdown (allows killing entire subprocess tree)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	setProcGroup(cmd)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -355,36 +354,21 @@ func (r *ProcessRunner) Stop(ctx context.Context, req StopProcessRequest) error 
 		close(proc.stopSignal)
 	})
 
-	// Attempt graceful shutdown (SIGTERM), then escalate to force-kill (SIGKILL)
+	// Attempt graceful shutdown, then escalate to force-kill
 	if proc.cmd != nil && proc.cmd.Process != nil {
-		// Try to get process group ID for killing entire subprocess tree
-		pgid, err := syscall.Getpgid(proc.cmd.Process.Pid)
+		pid := proc.cmd.Process.Pid
 
-		// Phase 1: Graceful shutdown with SIGTERM
-		if err == nil {
-			// Kill entire process group (negative PGID)
-			_ = syscall.Kill(-pgid, syscall.SIGTERM)
-		} else {
-			// Fallback: Kill only main process
-			_ = proc.cmd.Process.Signal(syscall.SIGTERM)
-		}
+		// Phase 1: Graceful shutdown (SIGTERM on Unix, interrupt on Windows)
+		_ = proc.cmd.Process.Signal(os.Interrupt)
 
 		// Wait for graceful exit (2 seconds) or context cancellation
 		select {
 		case <-ctx.Done():
 			// Context cancelled - force kill immediately
-			if err == nil {
-				_ = syscall.Kill(-pgid, syscall.SIGKILL)
-			} else {
-				_ = proc.cmd.Process.Kill()
-			}
+			_ = killProcessGroup(pid)
 		case <-time.After(2 * time.Second):
-			// Phase 2: Grace period expired - force kill with SIGKILL
-			if err == nil {
-				_ = syscall.Kill(-pgid, syscall.SIGKILL)
-			} else {
-				_ = proc.cmd.Process.Kill()
-			}
+			// Phase 2: Grace period expired - force kill entire process tree
+			_ = killProcessGroup(pid)
 		}
 	}
 
@@ -524,11 +508,7 @@ func (r *ProcessRunner) wait(proc *commandProcess) {
 	if err != nil {
 		// Extract exit code from error
 		if exitErr, ok := err.(*exec.ExitError); ok {
-			if waitStatus, ok := exitErr.Sys().(syscall.WaitStatus); ok {
-				exitCode = waitStatus.ExitStatus()
-			} else {
-				exitCode = 1 // Fallback if status extraction fails
-			}
+			exitCode = exitErr.ExitCode()
 		} else {
 			exitCode = 1 // Non-ExitError (process killed, etc.)
 		}

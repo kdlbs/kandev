@@ -120,6 +120,11 @@ export function useProcessedMessages(
         return !isPending;
       }
 
+      // Hide session status messages — redundant with agent boot message
+      if (message.type === 'status' && (message.content === 'New session started' || message.content === 'Session resumed')) {
+        return false;
+      }
+
       // Standard visible types
       if (
         !message.type ||
@@ -140,11 +145,18 @@ export function useProcessedMessages(
         return true;
       }
 
-      // Permission requests: show if no matching tool_call exists (standalone permission)
+      // Permission requests: hide if merged with a matching tool_call message,
+      // or if already resolved (approved/denied) — no longer needs user attention.
       if (message.type === 'permission_request') {
-        const toolCallId = (message.metadata as { tool_call_id?: string } | undefined)?.tool_call_id;
-        // Show as standalone if no tool_call_id or no matching tool_call message exists
-        return !toolCallId || !toolCallIds.has(toolCallId);
+        const metadata = message.metadata as { tool_call_id?: string; status?: string } | undefined;
+        const toolCallId = metadata?.tool_call_id;
+        // Hide if merged with an existing tool_call message (shown inline there)
+        if (toolCallId && toolCallIds.has(toolCallId)) return false;
+        // Hide if resolved — the user already acted on it
+        const status = metadata?.status;
+        if (status === 'approved' || status === 'denied' || status === 'cancelled') return false;
+        // Show as standalone pending permission
+        return true;
       }
 
       return false;

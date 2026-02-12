@@ -105,7 +105,7 @@ export function CommandPreviewCard({
         {!loading && !error && preview && (
           <>
             <div className="relative">
-              <pre className="overflow-x-auto rounded-md bg-muted p-4 font-mono text-xs">
+              <pre className="overflow-x-auto rounded-md bg-muted p-4 pr-12 font-mono text-xs">
                 <code className="whitespace-pre-wrap break-all">{preview.command_string}</code>
               </pre>
               <Button

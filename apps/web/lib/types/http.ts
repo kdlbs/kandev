@@ -317,6 +317,7 @@ export type UserSettings = {
   default_editor_id?: string;
   enable_preview_on_click?: boolean;
   chat_submit_key?: 'enter' | 'cmd_enter';
+  review_auto_mark_on_scroll?: boolean;
   updated_at: string;
 };
 

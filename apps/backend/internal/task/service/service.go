@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -2306,6 +2307,19 @@ func (s *Service) UpdatePermissionMessage(ctx context.Context, sessionID, pendin
 	// Publish message.updated event
 	s.publishMessageEvent(ctx, events.MessageUpdated, message)
 
+	// When a permission expires, also mark the related tool call as cancelled
+	// so the UI no longer shows a loading spinner on the tool call.
+	if status == "expired" {
+		if toolCallID, ok := message.Metadata["tool_call_id"].(string); ok && toolCallID != "" {
+			if err := s.UpdateToolCallMessage(ctx, sessionID, toolCallID, "error", "", "", nil); err != nil {
+				s.logger.Warn("failed to cancel related tool call message",
+					zap.String("tool_call_id", toolCallID),
+					zap.String("pending_id", pendingID),
+					zap.Error(err))
+			}
+		}
+	}
+
 	s.logger.Info("permission message updated",
 		zap.String("message_id", message.ID),
 		zap.String("pending_id", pendingID),
@@ -2424,6 +2438,15 @@ func (s *Service) CompleteTurn(ctx context.Context, turnID string) error {
 	if err := s.repo.CompleteTurn(ctx, turnID); err != nil {
 		s.logger.Error("failed to complete turn", zap.String("turn_id", turnID), zap.Error(err))
 		return err
+	}
+
+	// Safety net: mark any tool calls still in "running" state as "complete"
+	if affected, err := s.repo.CompleteRunningToolCallsForTurn(ctx, turnID); err != nil {
+		s.logger.Warn("failed to complete running tool calls for turn", zap.String("turn_id", turnID), zap.Error(err))
+	} else if affected > 0 {
+		s.logger.Info("completed stale running tool calls on turn end",
+			zap.String("turn_id", turnID),
+			zap.Int64("affected", affected))
 	}
 
 	// Fetch the completed turn to get the completed_at timestamp
@@ -2608,6 +2631,9 @@ func (s *Service) GetCumulativeDiff(ctx context.Context, sessionID string) (*mod
 	// Get the first snapshot to find the base commit
 	firstSnapshot, err := s.repo.GetFirstGitSnapshot(ctx, sessionID)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil // No snapshots yet — valid state for fresh tasks
+		}
 		return nil, fmt.Errorf("failed to get first git snapshot: %w", err)
 	}
 

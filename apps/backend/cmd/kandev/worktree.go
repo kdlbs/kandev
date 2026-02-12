@@ -37,6 +37,26 @@ func (a *taskServiceAdapter) UpdateMessage(ctx context.Context, message *models.
 	return a.svc.UpdateMessage(ctx, message)
 }
 
+// bootMsgAdapter adapts the task service to the lifecycle.BootMessageService interface.
+type bootMsgAdapter struct {
+	svc *taskservice.Service
+}
+
+func (a *bootMsgAdapter) CreateMessage(ctx context.Context, req *lifecycle.BootMessageRequest) (*models.Message, error) {
+	return a.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
+		TaskSessionID: req.TaskSessionID,
+		TaskID:        req.TaskID,
+		Content:       req.Content,
+		AuthorType:    req.AuthorType,
+		Type:          req.Type,
+		Metadata:      req.Metadata,
+	})
+}
+
+func (a *bootMsgAdapter) UpdateMessage(ctx context.Context, message *models.Message) error {
+	return a.svc.UpdateMessage(ctx, message)
+}
+
 func provideWorktreeManager(dbConn *sql.DB, cfg *config.Config, log *logger.Logger, lifecycleMgr *lifecycle.Manager, taskSvc *taskservice.Service) (*worktree.Manager, *worktree.Recreator, func() error, error) {
 	manager, cleanup, err := worktree.Provide(dbConn, cfg, log)
 	if err != nil {
@@ -44,6 +64,7 @@ func provideWorktreeManager(dbConn *sql.DB, cfg *config.Config, log *logger.Logg
 	}
 	if lifecycleMgr != nil {
 		lifecycleMgr.SetWorktreeManager(manager)
+		lifecycleMgr.SetBootMessageService(&bootMsgAdapter{svc: taskSvc})
 	}
 	taskSvc.SetWorktreeCleanup(manager)
 

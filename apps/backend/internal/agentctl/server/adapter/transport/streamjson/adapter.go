@@ -147,9 +147,56 @@ func (a *Adapter) PrepareEnvironment() (map[string]string, error) {
 }
 
 // PrepareCommandArgs returns extra command-line arguments for the agent process.
-// For stream-json, no extra args are needed - MCP is configured via config files.
+// For stream-json (Claude Code), MCP configuration is passed via --mcp-config flag.
 func (a *Adapter) PrepareCommandArgs() []string {
-	return nil
+	if len(a.cfg.McpServers) == 0 {
+		return nil
+	}
+
+	// Build MCP configuration in Claude Code format
+	// Format: { "server-name": { "command": "...", "args": [...] } }
+	mcpConfig := make(map[string]interface{})
+	for _, server := range a.cfg.McpServers {
+		serverDef := make(map[string]interface{})
+
+		// Handle different transport types
+		if server.Command != "" {
+			// stdio transport
+			serverDef["command"] = server.Command
+			if len(server.Args) > 0 {
+				serverDef["args"] = server.Args
+			}
+		} else if server.URL != "" {
+			// SSE/HTTP transport
+			serverDef["url"] = server.URL
+			if server.Type != "" {
+				serverDef["type"] = server.Type
+			}
+		}
+
+		mcpConfig[server.Name] = serverDef
+	}
+
+	// Wrap in mcpServers key (Claude Code expects this format)
+	wrappedConfig := map[string]interface{}{
+		"mcpServers": mcpConfig,
+	}
+
+	// Convert to JSON string
+	configJSON, err := json.Marshal(wrappedConfig)
+	if err != nil {
+		a.logger.Warn("failed to marshal MCP config, skipping",
+			zap.Error(err),
+			zap.Int("server_count", len(a.cfg.McpServers)))
+		return nil
+	}
+
+	a.logger.Info("prepared MCP configuration for Claude Code",
+		zap.Int("server_count", len(a.cfg.McpServers)),
+		zap.String("config", string(configJSON)))
+
+	// Return --mcp-config flag with JSON string
+	return []string{"--mcp-config", string(configJSON)}
 }
 
 // Connect wires up the stdin/stdout pipes from the running agent subprocess.
@@ -196,7 +243,7 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 
 	// Send initialize control request to get slash commands
 	// This is required for streaming mode (input-format=stream-json)
-	initResp, err := a.client.Initialize(ctx, 30*time.Second)
+	initResp, err := a.client.Initialize(ctx, 60*time.Second)
 	if err != nil {
 		a.logger.Warn("failed to initialize (continuing anyway)", zap.Error(err))
 	} else if initResp != nil && len(initResp.Commands) > 0 {
@@ -1078,19 +1125,30 @@ func (a *Adapter) handleResultMessage(msg *claudecode.CLIMessage, sessionID, ope
 	a.streamingTextSentThisTurn = false
 	a.mu.Unlock()
 
+	// Build error message from errors array if available
+	var errorMsg string
+	if msg.IsError && len(msg.Errors) > 0 {
+		errorMsg = strings.Join(msg.Errors, "; ")
+	}
+
 	// Send completion event AFTER any result text chunk
+	completeData := map[string]any{
+		"cost_usd":      msg.CostUSD,
+		"duration_ms":   msg.DurationMS,
+		"num_turns":     msg.NumTurns,
+		"input_tokens":  msg.TotalInputTokens,
+		"output_tokens": msg.TotalOutputTokens,
+		"is_error":      msg.IsError,
+	}
+	if len(msg.Errors) > 0 {
+		completeData["errors"] = msg.Errors
+	}
 	a.sendUpdate(AgentEvent{
 		Type:        streams.EventTypeComplete,
 		SessionID:   sessionID,
 		OperationID: operationID,
-		Data: map[string]any{
-			"cost_usd":      msg.CostUSD,
-			"duration_ms":   msg.DurationMS,
-			"num_turns":     msg.NumTurns,
-			"input_tokens":  msg.TotalInputTokens,
-			"output_tokens": msg.TotalOutputTokens,
-			"is_error":      msg.IsError,
-		},
+		Error:       errorMsg,
+		Data:        completeData,
 	})
 
 	// Signal completion
@@ -1100,7 +1158,7 @@ func (a *Adapter) handleResultMessage(msg *claudecode.CLIMessage, sessionID, ope
 
 	if resultCh != nil {
 		select {
-		case resultCh <- resultComplete{success: !msg.IsError}:
+		case resultCh <- resultComplete{success: !msg.IsError, err: errorMsg}:
 			a.logger.Debug("signaled prompt completion")
 		default:
 			a.logger.Warn("result channel full, dropping signal")
@@ -1109,18 +1167,20 @@ func (a *Adapter) handleResultMessage(msg *claudecode.CLIMessage, sessionID, ope
 
 	// Send error event if failed
 	if msg.IsError {
-		errorMsg := "prompt failed"
-		// Error result can be a string (API error) or ResultData with Text
-		if errStr := msg.GetResultString(); errStr != "" {
-			errorMsg = errStr
+		errMsg := "prompt failed"
+		// Use errors array first (most specific), then fallback to result string/data
+		if len(msg.Errors) > 0 {
+			errMsg = strings.Join(msg.Errors, "; ")
+		} else if errStr := msg.GetResultString(); errStr != "" {
+			errMsg = errStr
 		} else if resultData := msg.GetResultData(); resultData != nil && resultData.Text != "" {
-			errorMsg = resultData.Text
+			errMsg = resultData.Text
 		}
 		a.sendUpdate(AgentEvent{
 			Type:        streams.EventTypeError,
 			SessionID:   sessionID,
 			OperationID: operationID,
-			Error:       errorMsg,
+			Error:       errMsg,
 		})
 	}
 }

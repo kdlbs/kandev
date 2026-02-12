@@ -42,10 +42,26 @@ describe('truncateRepoPath', () => {
 });
 
 describe('selectPreferredBranch', () => {
-  it('selects origin/main first', () => {
+  it('selects local main first', () => {
     const branches = [
       { name: 'main', type: 'local' },
       { name: 'main', type: 'remote', remote: 'origin' },
+    ];
+    expect(selectPreferredBranch(branches)).toBe('main');
+  });
+
+  it('prefers local master over origin/main', () => {
+    const branches = [
+      { name: 'master', type: 'local' },
+      { name: 'main', type: 'remote', remote: 'origin' },
+    ];
+    expect(selectPreferredBranch(branches)).toBe('master');
+  });
+
+  it('falls back to origin/main when no local main/master', () => {
+    const branches = [
+      { name: 'main', type: 'remote', remote: 'origin' },
+      { name: 'develop', type: 'local' },
     ];
     expect(selectPreferredBranch(branches)).toBe('origin/main');
   });
@@ -53,14 +69,8 @@ describe('selectPreferredBranch', () => {
   it('falls back to origin/master', () => {
     const branches = [
       { name: 'master', type: 'remote', remote: 'origin' },
-      { name: 'main', type: 'local' },
     ];
     expect(selectPreferredBranch(branches)).toBe('origin/master');
-  });
-
-  it('falls back to local main', () => {
-    const branches = [{ name: 'main', type: 'local' }];
-    expect(selectPreferredBranch(branches)).toBe('main');
   });
 
   it('returns null when no preferred branches exist', () => {

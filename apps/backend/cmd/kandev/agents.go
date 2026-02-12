@@ -65,6 +65,11 @@ func provideLifecycleManager(
 		log.Warn("Docker runtime enabled but Docker client not available")
 	}
 
+	// Register Remote Docker runtime (always available, instances are created lazily per host)
+	remoteDockerRuntime := lifecycle.NewRemoteDockerRuntime(log)
+	runtimeRegistry.Register(remoteDockerRuntime)
+	log.Info("Remote Docker runtime registered")
+
 	agentRegistry, _, err := registry.Provide(log)
 	if err != nil {
 		return nil, nil, err

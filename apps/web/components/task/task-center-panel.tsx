@@ -1,7 +1,7 @@
 'use client';
 
 import { memo, useCallback, useState, useEffect, useMemo, useRef } from 'react';
-import { IconSparkles, IconCheck, IconChevronDown, IconX } from '@tabler/icons-react';
+import { IconCheck, IconChevronDown, IconX } from '@tabler/icons-react';
 import { TabsContent } from '@kandev/ui/tabs';
 import { Button } from '@kandev/ui/button';
 import {
@@ -14,8 +14,9 @@ import {
 import { SessionPanel } from '@kandev/ui/pannel-session';
 import { TaskChatPanel } from './task-chat-panel';
 import { TaskChangesPanel } from './task-changes-panel';
-import { TaskPlanPanel } from './task-plan-panel';
 import { FileEditorContent } from './file-editor-content';
+import { FileImageViewer } from './file-image-viewer';
+import { FileBinaryViewer } from './file-binary-viewer';
 import { PassthroughTerminal } from './passthrough-terminal';
 import type { OpenFileTab, FileContentResponse } from '@/lib/types/backend';
 import { useAppStore } from '@/components/state-provider';
@@ -23,10 +24,11 @@ import { SessionTabs, type SessionTab } from '@/components/session-tabs';
 import { approveSessionAction } from '@/app/actions/workspaces';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import { requestFileContent, updateFileContent, deleteFile } from '@/lib/ws/workspace-files';
-import { getPlanLastSeen, setPlanLastSeen, getOpenFileTabs, setOpenFileTabs as saveOpenFileTabs, getActiveTabForSession, setActiveTabForSession } from '@/lib/local-storage';
+import { getOpenFileTabs, setOpenFileTabs as saveOpenFileTabs, getActiveTabForSession, setActiveTabForSession } from '@/lib/local-storage';
 import { useSessionGitStatus } from '@/hooks/domains/session/use-session-git-status';
 import { useSessionCommits } from '@/hooks/domains/session/use-session-commits';
 import { generateUnifiedDiff, calculateHash } from '@/lib/utils/file-diff';
+import { getFileCategory } from '@/lib/utils/file-types';
 import { useToast } from '@/components/toast-provider';
 
 import type { SelectedDiff } from './task-layout';
@@ -121,7 +123,7 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
     if (typeof window !== 'undefined' && activeSessionId) {
       const savedTab = getActiveTabForSession(activeSessionId, 'chat');
       // Only return non-file tabs synchronously, file tabs need async content loading
-      if (savedTab === 'chat' || savedTab === 'plan' || savedTab === 'changes') {
+      if (savedTab === 'chat' || savedTab === 'changes') {
         return savedTab;
       }
     }
@@ -134,6 +136,17 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
       setLeftTab('chat');
     }
   }, [leftTab, hasChanges]);
+
+  // Listen for external requests to switch to 'changes' tab
+  useEffect(() => {
+    const handler = () => {
+      if (hasChanges) {
+        setLeftTab('changes');
+      }
+    };
+    window.addEventListener('switch-to-changes-tab', handler);
+    return () => window.removeEventListener('switch-to-changes-tab', handler);
+  }, [hasChanges]);
 
   // Request changes state - triggers focus and tooltip on chat input
   const [showRequestChangesTooltip, setShowRequestChangesTooltip] = useState(false);
@@ -196,7 +209,7 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
     // If no file tabs to load, just restore the active tab
     if (savedTabs.length === 0) {
       // Only set if it's a valid non-file tab
-      if (savedActiveTab === 'chat' || savedActiveTab === 'plan' || savedActiveTab === 'changes') {
+      if (savedActiveTab === 'chat' || savedActiveTab === 'changes') {
         setLeftTab(savedActiveTab);
       } else {
         setLeftTab('chat');
@@ -240,6 +253,7 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
             originalContent: response.content,
             originalHash: hash,
             isDirty: false,
+            isBinary: response.is_binary,
           });
         } catch {
           // Failed to restore tab, skip it
@@ -275,7 +289,7 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
         }
       } else {
         // No tabs could be loaded, fall back to non-file tab
-        if (savedActiveTab === 'chat' || savedActiveTab === 'plan' || savedActiveTab === 'changes') {
+        if (savedActiveTab === 'chat' || savedActiveTab === 'changes') {
           setLeftTab(savedActiveTab);
         } else {
           setLeftTab('chat');
@@ -315,31 +329,14 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
     }
   }, [leftTab, onActiveFileChange]);
 
-  // Track plan updates for notification dot
-  const plan = useAppStore((state) =>
-    activeTaskId ? state.taskPlans.byTaskId[activeTaskId] : null
-  );
-
-  // Derive notification state: show dot if plan was updated by agent and we haven't seen it
-  const hasUnseenPlanUpdate = useMemo(() => {
-    if (!activeTaskId || !plan || leftTab === 'plan') return false;
-    if (plan.created_by !== 'agent') return false;
-    const lastSeen = getPlanLastSeen(activeTaskId);
-    return plan.updated_at !== lastSeen;
-  }, [activeTaskId, plan, leftTab]);
-
-  // Handle tab change - mark plan as seen when switching to plan tab
+  // Handle tab change
   const handleTabChange = useCallback((tab: string) => {
-    // If switching to plan tab, mark current plan as seen in localStorage
-    if (tab === 'plan' && activeTaskId && plan?.updated_at) {
-      setPlanLastSeen(activeTaskId, plan.updated_at);
-    }
     setLeftTab(tab);
     // Persist tab selection per-session (for all tabs including file tabs)
     if (activeSessionId) {
       setActiveTabForSession(activeSessionId, tab);
     }
-  }, [activeTaskId, activeSessionId, plan]);
+  }, [activeSessionId]);
 
   // Handle external diff selection
   useEffect(() => {
@@ -414,15 +411,21 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
           originalContent: response.content,
           originalHash: hash,
           isDirty: false,
+          isBinary: response.is_binary,
         };
         const newTabs = prev.length >= maxTabs ? [...prev.slice(1), newTab] : [...prev, newTab];
         return newTabs;
       });
       setLeftTab(`file:${filePath}`);
     } catch (error) {
-      console.error('Failed to open file from chat:', error);
+      const reason = error instanceof Error ? error.message : 'Unknown error';
+      toast({
+        title: 'Failed to open file',
+        description: reason,
+        variant: 'error',
+      });
     }
-  }, [activeSessionId]);
+  }, [activeSessionId, toast]);
 
   // Handler for file content changes
   const handleFileChange = useCallback((path: string, newContent: string) => {
@@ -446,7 +449,7 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
     setSavingFiles((prev) => new Set(prev).add(path));
 
     try {
-      const diff = generateUnifiedDiff(tab.originalContent, tab.content, tab.name);
+      const diff = generateUnifiedDiff(tab.originalContent, tab.content, tab.path);
       const response = await updateFileContent(client, activeSessionId, path, diff, tab.originalHash);
 
       if (response.success && response.new_hash) {
@@ -457,10 +460,6 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
               : t
           )
         );
-        toast({
-          title: 'File saved',
-          description: `${tab.name} has been saved successfully.`,
-        });
       } else {
         toast({
           title: 'Save failed',
@@ -513,16 +512,6 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
 
   const tabs: SessionTab[] = useMemo(() => {
     const staticTabs: SessionTab[] = [
-      {
-        id: 'plan',
-        label: 'Plan',
-        icon: hasUnseenPlanUpdate ? (
-          <div className="relative">
-            <IconSparkles className="h-3.5 w-3.5 text-amber-500 dark:text-amber-400 animate-pulse" />
-            <span className="absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-amber-500 dark:bg-amber-400 animate-ping" />
-          </div>
-        ) : undefined,
-      },
       // Only show "All changes" tab if there are changes
       ...(hasChanges ? [{ id: 'changes', label: 'All changes' }] : []),
       { id: 'chat', label: 'Chat' },
@@ -543,7 +532,7 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
     });
 
     return [...staticTabs, ...fileTabs];
-  }, [openFileTabs, handleCloseFileTab, hasUnseenPlanUpdate, hasChanges]);
+  }, [openFileTabs, handleCloseFileTab, hasChanges]);
 
   return (
     <SessionPanel borderSide="right" margin="right">
@@ -551,7 +540,7 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
         tabs={tabs}
         activeTab={leftTab}
         onTabChange={handleTabChange}
-        separatorAfterIndex={openFileTabs.length > 0 ? (hasChanges ? 2 : 1) : undefined}
+        separatorAfterIndex={openFileTabs.length > 0 ? (hasChanges ? 1 : 0) : undefined}
         className="flex-1 min-h-0 flex flex-col gap-2"
         rightContent={
           showApproveButton ? (
@@ -595,13 +584,6 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
         }
       >
 
-        <TabsContent value="plan" className="flex-1 min-h-0" forceMount style={{ display: leftTab === 'plan' ? undefined : 'none' }}>
-          <TaskPlanPanel
-            taskId={activeTaskId}
-            visible={leftTab === 'plan'}
-          />
-        </TabsContent>
-
         <TabsContent value="changes" className="flex-1 min-h-0">
           <TaskChangesPanel
             selectedDiff={selectedDiff}
@@ -635,23 +617,43 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
           )}
         </TabsContent>
 
-        {openFileTabs.map((tab) => (
-          <TabsContent key={tab.path} value={`file:${tab.path}`} className="flex-1 min-h-0">
-            <FileEditorContent
-              path={tab.path}
-              content={tab.content}
-              originalContent={tab.originalContent}
-              isDirty={tab.isDirty}
-              isSaving={savingFiles.has(tab.path)}
-              sessionId={activeSessionId || undefined}
-              worktreePath={activeSession?.worktree_path ?? undefined}
-              enableComments={!!activeSessionId}
-              onChange={(newContent) => handleFileChange(tab.path, newContent)}
-              onSave={() => handleFileSave(tab.path)}
-              onDelete={() => handleFileDelete(tab.path)}
-            />
-          </TabsContent>
-        ))}
+        {openFileTabs.map((tab) => {
+          const extCategory = getFileCategory(tab.path);
+          const category = tab.isBinary
+            ? (extCategory === 'image' ? 'image' : 'binary')
+            : 'text';
+
+          return (
+            <TabsContent key={tab.path} value={`file:${tab.path}`} className="flex-1 min-h-0">
+              {category === 'image' ? (
+                <FileImageViewer
+                  path={tab.path}
+                  content={tab.content}
+                  worktreePath={activeSession?.worktree_path ?? undefined}
+                />
+              ) : category === 'binary' ? (
+                <FileBinaryViewer
+                  path={tab.path}
+                  worktreePath={activeSession?.worktree_path ?? undefined}
+                />
+              ) : (
+                <FileEditorContent
+                  path={tab.path}
+                  content={tab.content}
+                  originalContent={tab.originalContent}
+                  isDirty={tab.isDirty}
+                  isSaving={savingFiles.has(tab.path)}
+                  sessionId={activeSessionId || undefined}
+                  worktreePath={activeSession?.worktree_path ?? undefined}
+                  enableComments={!!activeSessionId}
+                  onChange={(newContent) => handleFileChange(tab.path, newContent)}
+                  onSave={() => handleFileSave(tab.path)}
+                  onDelete={() => handleFileDelete(tab.path)}
+                />
+              )}
+            </TabsContent>
+          );
+        })}
       </SessionTabs>
     </SessionPanel>
   );

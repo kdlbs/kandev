@@ -15,6 +15,7 @@ type DisplaySettings = {
   defaultEditorId: string | null;
   enablePreviewOnClick: boolean;
   chatSubmitKey: 'enter' | 'cmd_enter';
+  reviewAutoMarkOnScroll: boolean;
   loaded: boolean;
 };
 
@@ -45,28 +46,42 @@ export function useUserDisplaySettings({
   const lastAppliedWorkspaceIdRef = useRef<string | null>(null);
   const lastAppliedBoardIdRef = useRef<string | null>(null);
 
+  // Use a ref for userSettings inside commitSettings to keep the callback stable.
+  // This prevents cascading effect re-runs when userSettings changes.
+  const userSettingsRef = useRef(userSettings);
+  useEffect(() => {
+    userSettingsRef.current = userSettings;
+  });
+
+  // Track whether redirect effects have initialized (skip first invocation
+  // after mount — SSR already resolved the correct workspace/board).
+  const wsInitializedRef = useRef(false);
+  const boardInitializedRef = useRef(false);
+
   const commitSettings = useCallback(
     (next: CommitPayload) => {
+      const current = userSettingsRef.current;
       const repositoryIds = Array.from(new Set(next.repositoryIds)).sort();
-      const enablePreviewOnClick = next.enablePreviewOnClick ?? userSettings.enablePreviewOnClick;
+      const enablePreviewOnClick = next.enablePreviewOnClick ?? current.enablePreviewOnClick;
       const normalized: DisplaySettings = {
         workspaceId: next.workspaceId,
         boardId: next.boardId,
         repositoryIds,
-        preferredShell: next.preferredShell ?? userSettings.preferredShell ?? null,
-        shellOptions: userSettings.shellOptions ?? [],
-        defaultEditorId: userSettings.defaultEditorId ?? null,
+        preferredShell: next.preferredShell ?? current.preferredShell ?? null,
+        shellOptions: current.shellOptions ?? [],
+        defaultEditorId: current.defaultEditorId ?? null,
         enablePreviewOnClick,
-        chatSubmitKey: userSettings.chatSubmitKey ?? 'cmd_enter',
+        chatSubmitKey: current.chatSubmitKey ?? 'cmd_enter',
+        reviewAutoMarkOnScroll: current.reviewAutoMarkOnScroll ?? true,
         loaded: true,
       };
-      const sameWorkspace = normalized.workspaceId === userSettings.workspaceId;
-      const sameBoard = normalized.boardId === userSettings.boardId;
-      const samePreview = normalized.enablePreviewOnClick === userSettings.enablePreviewOnClick;
+      const sameWorkspace = normalized.workspaceId === current.workspaceId;
+      const sameBoard = normalized.boardId === current.boardId;
+      const samePreview = normalized.enablePreviewOnClick === current.enablePreviewOnClick;
       const sameRepos =
-        normalized.repositoryIds.length === userSettings.repositoryIds.length &&
-        normalized.repositoryIds.every((id, index) => id === userSettings.repositoryIds[index]);
-      if (sameWorkspace && sameBoard && sameRepos && samePreview && userSettings.loaded) {
+        normalized.repositoryIds.length === current.repositoryIds.length &&
+        normalized.repositoryIds.every((id, index) => id === current.repositoryIds[index]);
+      if (sameWorkspace && sameBoard && sameRepos && samePreview && current.loaded) {
         return;
       }
       setUserSettings(normalized);
@@ -90,7 +105,7 @@ export function useUserDisplaySettings({
         });
       });
     },
-    [setUserSettings, userSettings]
+    [setUserSettings]
   );
 
   useEffect(() => {
@@ -108,6 +123,7 @@ export function useUserDisplaySettings({
           defaultEditorId: data.settings.default_editor_id || null,
           enablePreviewOnClick: data.settings.enable_preview_on_click ?? false,
           chatSubmitKey: data.settings.chat_submit_key ?? 'cmd_enter',
+          reviewAutoMarkOnScroll: data.settings.review_auto_mark_on_scroll ?? true,
           loaded: true,
         });
       })
@@ -116,8 +132,18 @@ export function useUserDisplaySettings({
       });
   }, [setUserSettings, userSettings.loaded]);
 
+  // Workspace redirect effect — skip first invocation after mount.
+  // SSR already resolved the correct workspace; only redirect on
+  // subsequent settings changes (e.g. WebSocket push from another tab).
   useEffect(() => {
     if (!userSettings.loaded) return;
+    if (!wsInitializedRef.current) {
+      wsInitializedRef.current = true;
+      if (userSettings.workspaceId !== workspaceId) {
+        lastAppliedWorkspaceIdRef.current = null;
+      }
+      return;
+    }
     if (userSettings.workspaceId && userSettings.workspaceId !== workspaceId) {
       if (lastAppliedWorkspaceIdRef.current === userSettings.workspaceId) {
         return;
@@ -144,8 +170,16 @@ export function useUserDisplaySettings({
     }
   }, [commitSettings, userSettings.boardId, userSettings.loaded, userSettings.repositoryIds, userSettings.workspaceId, workspaceId]);
 
+  // Board redirect effect — skip first invocation after mount.
   useEffect(() => {
     if (!userSettings.loaded) return;
+    if (!boardInitializedRef.current) {
+      boardInitializedRef.current = true;
+      if (userSettings.boardId !== boardId) {
+        lastAppliedBoardIdRef.current = null;
+      }
+      return;
+    }
     if (userSettings.boardId && userSettings.boardId !== boardId) {
       if (lastAppliedBoardIdRef.current === userSettings.boardId) {
         return;

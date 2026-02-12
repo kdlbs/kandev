@@ -46,7 +46,7 @@ func (s *Server) handleAgentInitialize(c *gin.Context) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Second)
 	defer cancel()
 
 	adapter := s.procMgr.GetAdapter()
@@ -256,25 +256,20 @@ func (s *Server) handleAgentPrompt(c *gin.Context) {
 		return
 	}
 
-	// Use a long timeout for prompt - agent may take time to complete
-	ctx, cancel := context.WithTimeout(c.Request.Context(), constants.PromptTimeout)
-	defer cancel()
+	// Start prompt processing asynchronously.
+	// Completion is signaled via the WebSocket complete event, not the HTTP response.
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), constants.PromptTimeout)
+		defer cancel()
+		if err := adapter.Prompt(ctx, req.Text, req.Attachments); err != nil {
+			s.logger.Error("async prompt failed", zap.Error(err))
+		}
+	}()
 
-	err := adapter.Prompt(ctx, req.Text, req.Attachments)
-	if err != nil {
-		s.logger.Error("prompt failed", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, PromptResponse{
-			Success: false,
-			Error:   err.Error(),
-		})
-		return
-	}
+	s.logger.Info("prompt accepted (async)", zap.Int("attachments", len(req.Attachments)))
 
-	s.logger.Info("prompt completed", zap.Int("attachments", len(req.Attachments)))
-
-	c.JSON(http.StatusOK, PromptResponse{
-		Success: true,
-	})
+	// Return immediately — completion comes via WebSocket complete event
+	c.JSON(http.StatusAccepted, PromptResponse{Success: true})
 }
 
 // handleAgentStreamWS streams agent session notifications via WebSocket.
@@ -433,6 +428,16 @@ func (s *Server) handlePermissionRespond(c *gin.Context) {
 		Success: true,
 	})
 }
+// AgentStderrResponse contains recent stderr lines from the agent process.
+type AgentStderrResponse struct {
+	Lines []string `json:"lines"`
+}
+
+func (s *Server) handleAgentStderr(c *gin.Context) {
+	lines := s.procMgr.GetRecentStderr()
+	c.JSON(http.StatusOK, AgentStderrResponse{Lines: lines})
+}
+
 // CancelResponse is the response from a cancel request.
 type CancelResponse struct {
 	Success bool   `json:"success"`

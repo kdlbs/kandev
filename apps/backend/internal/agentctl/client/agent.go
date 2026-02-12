@@ -8,11 +8,9 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/coder/acp-go-sdk"
 	"github.com/gorilla/websocket"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
-	"github.com/kandev/kandev/internal/common/constants"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -193,17 +191,10 @@ func (c *Client) LoadSession(ctx context.Context, sessionID string) error {
 	return nil
 }
 
-// PromptResponse contains the response from a prompt call
-type PromptResponse struct {
-	Success    bool           `json:"success"`
-	StopReason acp.StopReason `json:"stop_reason,omitempty"`
-	Error      string         `json:"error,omitempty"`
-}
-
-// Prompt sends a prompt to the agent and returns when the agent completes
-// The StopReason indicates why the agent stopped (e.g., "end_turn", "needs_input")
-// Attachments (images) are passed to the agent if provided
-func (c *Client) Prompt(ctx context.Context, text string, attachments []v1.MessageAttachment) (*PromptResponse, error) {
+// Prompt sends a fire-and-forget prompt to the agent.
+// The agentctl server returns 202 immediately; completion is signaled via the WebSocket complete event.
+// Attachments (images) are passed to the agent if provided.
+func (c *Client) Prompt(ctx context.Context, text string, attachments []v1.MessageAttachment) error {
 	reqBody := struct {
 		Text        string                 `json:"text"`
 		Attachments []v1.MessageAttachment `json:"attachments,omitempty"`
@@ -211,23 +202,18 @@ func (c *Client) Prompt(ctx context.Context, text string, attachments []v1.Messa
 
 	body, err := json.Marshal(reqBody)
 	if err != nil {
-		return nil, err
-	}
-
-	// Use a longer timeout for prompt - agent may take time
-	client := &http.Client{
-		Timeout: constants.PromptTimeout,
+		return err
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/v1/agent/prompt", bytes.NewReader(body))
 	if err != nil {
-		return nil, err
+		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := client.Do(req)
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
@@ -237,21 +223,29 @@ func (c *Client) Prompt(ctx context.Context, text string, attachments []v1.Messa
 
 	respBody, err := readResponseBody(resp)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
+		return fmt.Errorf("failed to read response body: %w", err)
 	}
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("prompt request failed with status %d: %s", resp.StatusCode, string(respBody))
+	// Accept both 200 (backwards compat) and 202 (async)
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
+		return fmt.Errorf("prompt request failed with status %d: %s", resp.StatusCode, string(respBody))
 	}
 
-	var result PromptResponse
+	var result struct {
+		Success bool   `json:"success"`
+		Error   string `json:"error,omitempty"`
+	}
 	if err := json.Unmarshal(respBody, &result); err != nil {
-		return nil, fmt.Errorf("failed to parse prompt response (status %d, body: %s): %w", resp.StatusCode, truncateBody(respBody), err)
+		return fmt.Errorf("failed to parse prompt response (status %d, body: %s): %w", resp.StatusCode, truncateBody(respBody), err)
 	}
 	if !result.Success {
-		return nil, fmt.Errorf("prompt failed: %s", result.Error)
+		c.logger.Warn("prompt returned failure response",
+			zap.String("error", result.Error),
+			zap.Int("status_code", resp.StatusCode),
+			zap.String("response_body", truncateBody(respBody)))
+		return fmt.Errorf("prompt failed: %s", result.Error)
 	}
-	return &result, nil
+	return nil
 }
 
 // Note: AgentEvent, PermissionNotification, PermissionOption, and
@@ -266,7 +260,8 @@ type MCPHandler interface {
 // StreamUpdates opens a WebSocket connection for streaming agent events.
 // Events include message chunks, reasoning, tool calls, plan updates, and completion/error.
 // If mcpHandler is provided, MCP requests from agentctl will be dispatched to it and responses sent back.
-func (c *Client) StreamUpdates(ctx context.Context, handler func(AgentEvent), mcpHandler MCPHandler) error {
+// If onDisconnect is provided, it is called when the WebSocket read goroutine exits (e.g., on error or close).
+func (c *Client) StreamUpdates(ctx context.Context, handler func(AgentEvent), mcpHandler MCPHandler, onDisconnect func(err error)) error {
 	wsURL := "ws" + c.baseURL[4:] + "/api/v1/agent/stream"
 
 	conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, nil)
@@ -290,12 +285,17 @@ func (c *Client) StreamUpdates(ctx context.Context, handler func(AgentEvent), mc
 
 	// Read messages in a goroutine
 	go func() {
+		var lastErr error
 		defer func() {
 			c.mu.Lock()
 			c.agentStreamConn = nil
 			c.mu.Unlock()
 			if err := conn.Close(); err != nil {
 				c.logger.Debug("failed to close updates websocket", zap.Error(err))
+			}
+			// Signal disconnect to caller
+			if onDisconnect != nil {
+				onDisconnect(lastErr)
 			}
 		}()
 
@@ -304,8 +304,10 @@ func (c *Client) StreamUpdates(ctx context.Context, handler func(AgentEvent), mc
 			if err != nil {
 				if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
 					c.logger.Info("updates stream closed normally")
+					// Normal close — don't report as disconnect error
 				} else {
 					c.logger.Debug("updates stream error", zap.Error(err))
+					lastErr = err
 				}
 				return
 			}
@@ -405,6 +407,32 @@ func (c *Client) Cancel(ctx context.Context) error {
 	}
 	return nil
 }
+// GetAgentStderr returns recent stderr lines from the agent process.
+func (c *Client) GetAgentStderr(ctx context.Context) ([]string, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/api/v1/agent/stderr", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("agent stderr request failed with status %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Lines []string `json:"lines"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to parse agent stderr response: %w", err)
+	}
+	return result.Lines, nil
+}
+
 // RespondToPermission sends a response to a permission request
 func (c *Client) RespondToPermission(ctx context.Context, pendingID, optionID string, cancelled bool) error {
 	reqBody := PermissionRespondRequest{

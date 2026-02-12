@@ -45,7 +45,8 @@ export type BackendMessageType =
   | 'session.workspace.file.changes'
   | 'session.shell.output'
   | 'session.process.output'
-  | 'session.process.status';
+  | 'session.process.status'
+  | 'message.queue.status_changed';
 
 export type BackendMessage<T extends BackendMessageType, P> = {
   id?: string;
@@ -283,6 +284,7 @@ export type UserSettingsUpdatedPayload = {
   default_editor_id?: string;
   enable_preview_on_click?: boolean;
   chat_submit_key?: string;
+  review_auto_mark_on_scroll?: boolean;
   updated_at?: string;
 };
 
@@ -326,6 +328,21 @@ export type TaskPlanEventPayload = {
   created_by: 'agent' | 'user';
   created_at: string;
   updated_at: string;
+};
+
+export type QueuedMessagePayload = {
+  content: string;
+  model?: string;
+  plan_mode?: boolean;
+  task_id: string;
+  user_id?: string;
+  queued_at: string;
+};
+
+export type QueueStatusChangedPayload = {
+  session_id: string;
+  is_queued: boolean;
+  message?: QueuedMessagePayload | null;
 };
 
 export type BackendMessageMap = {
@@ -376,6 +393,7 @@ export type BackendMessageMap = {
   'session.shell.output': BackendMessage<'session.shell.output', ShellOutputPayload>;
   'session.process.output': BackendMessage<'session.process.output', ProcessOutputPayload>;
   'session.process.status': BackendMessage<'session.process.status', ProcessStatusPayload>;
+  'message.queue.status_changed': BackendMessage<'message.queue.status_changed', QueueStatusChangedPayload>;
 };
 
 // Workspace file types
@@ -398,6 +416,7 @@ export type FileContentResponse = {
   path: string;
   content: string;
   size: number;
+  is_binary?: boolean;
   error?: string;
 };
 
@@ -430,6 +449,7 @@ export type OpenFileTab = {
   originalContent: string; // For diff generation
   originalHash: string;    // SHA256 for conflict detection
   isDirty: boolean;        // Has unsaved changes
+  isBinary?: boolean;      // Binary file (content is base64-encoded)
 };
 
 // File extension to color mapping for file type indicators

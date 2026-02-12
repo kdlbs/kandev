@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"strings"
 
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
@@ -99,6 +100,9 @@ func (c *TaskController) GetTask(ctx context.Context, req dto.GetTaskRequest) (d
 }
 
 func (c *TaskController) CreateTask(ctx context.Context, req dto.CreateTaskRequest) (dto.TaskDTO, error) {
+	req.Title = strings.TrimSpace(req.Title)
+	req.Description = strings.TrimSpace(req.Description)
+
 	// Convert DTO repositories to service layer input
 	var repos []service.TaskRepositoryInput
 	for _, r := range req.Repositories {
@@ -130,6 +134,15 @@ func (c *TaskController) CreateTask(ctx context.Context, req dto.CreateTaskReque
 }
 
 func (c *TaskController) UpdateTask(ctx context.Context, req dto.UpdateTaskRequest) (dto.TaskDTO, error) {
+	if req.Title != nil {
+		trimmed := strings.TrimSpace(*req.Title)
+		req.Title = &trimmed
+	}
+	if req.Description != nil {
+		trimmed := strings.TrimSpace(*req.Description)
+		req.Description = &trimmed
+	}
+
 	// Convert DTO repositories to service layer input
 	var repos []service.TaskRepositoryInput
 	for _, r := range req.Repositories {
