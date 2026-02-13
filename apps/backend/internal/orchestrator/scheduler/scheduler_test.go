@@ -43,6 +43,10 @@ func (m *mockAgentManager) LaunchAgent(ctx context.Context, req *executor.Launch
 	}, nil
 }
 
+func (m *mockAgentManager) SetExecutionDescription(ctx context.Context, agentExecutionID string, description string) error {
+	return nil
+}
+
 func (m *mockAgentManager) StartAgentProcess(ctx context.Context, agentExecutionID string) error {
 	return nil
 }

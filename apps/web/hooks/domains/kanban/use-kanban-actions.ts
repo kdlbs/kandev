@@ -8,12 +8,11 @@ import type { Task as BackendTask } from '@/lib/types/http';
 import type { KanbanState, WorkspaceState, BoardState } from '@/lib/state/slices';
 
 type UseKanbanActionsOptions = {
-  kanban: KanbanState;
   workspaceState: WorkspaceState;
   boardsState: BoardState;
 };
 
-export function useKanbanActions({ kanban, workspaceState, boardsState }: UseKanbanActionsOptions) {
+export function useKanbanActions({ workspaceState, boardsState }: UseKanbanActionsOptions) {
   const router = useRouter();
   const store = useAppStoreApi();
 
@@ -31,40 +30,64 @@ export function useKanbanActions({ kanban, workspaceState, boardsState }: UseKan
   } = useTaskCRUD();
 
   // Handle task dialog success (create/update)
+  // Read current kanban state at call time (not from closure) to avoid
+  // overwriting WebSocket-driven updates that arrived while the dialog was open.
   const handleDialogSuccess = useCallback(
     (task: BackendTask, mode: 'create' | 'edit') => {
+      const currentKanban = store.getState().kanban;
       if (mode === 'create') {
-        store.getState().hydrate({
-          kanban: {
-            ...kanban,
-            tasks: [
-              ...kanban.tasks,
-              {
-                id: task.id,
-                workflowStepId: task.workflow_step_id,
-                title: task.title,
-                description: task.description ?? undefined,
-                position: task.position ?? 0,
-                state: task.state,
-                repositoryId: task.repositories?.[0]?.repository_id ?? undefined,
+        const repoId = task.repositories?.[0]?.repository_id ?? undefined;
+        const existing = currentKanban.tasks.find((t: KanbanState['tasks'][number]) => t.id === task.id);
+        if (existing) {
+          // WebSocket may have added the task already but without repositoryId.
+          // Merge in any missing fields from the API response.
+          if (repoId && !existing.repositoryId) {
+            store.getState().hydrate({
+              kanban: {
+                ...currentKanban,
+                tasks: currentKanban.tasks.map((t: KanbanState['tasks'][number]) =>
+                  t.id === task.id ? { ...t, repositoryId: repoId } : t
+                ),
               },
-            ],
-          },
-        });
+            });
+          }
+        } else {
+          store.getState().hydrate({
+            kanban: {
+              ...currentKanban,
+              tasks: [
+                ...currentKanban.tasks,
+                {
+                  id: task.id,
+                  workflowStepId: task.workflow_step_id,
+                  title: task.title,
+                  description: task.description ?? undefined,
+                  position: task.position ?? 0,
+                  state: task.state,
+                  repositoryId: repoId,
+                },
+              ],
+            },
+          });
+        }
+        // Invalidate workspace repos cache so newly created repos show up in the edit dialog
+        if (task.workspace_id) {
+          store.getState().invalidateRepositories(task.workspace_id);
+        }
         return;
       }
+      // Only update fields that the edit dialog changes (title, description, repositories).
+      // State and workflowStepId are managed by the backend via WebSocket events
+      // (e.g. orchestrator.start moves the task to the auto-start column).
       store.getState().hydrate({
         kanban: {
-          ...kanban,
-          tasks: kanban.tasks.map((item: KanbanState['tasks'][number]) =>
+          ...currentKanban,
+          tasks: currentKanban.tasks.map((item: KanbanState['tasks'][number]) =>
             item.id === task.id
               ? {
                   ...item,
                   title: task.title,
                   description: task.description ?? undefined,
-                  workflowStepId: task.workflow_step_id ?? item.workflowStepId,
-                  position: task.position ?? item.position,
-                  state: task.state ?? item.state,
                   repositoryId: task.repositories?.[0]?.repository_id ?? item.repositoryId,
                 }
               : item
@@ -72,7 +95,7 @@ export function useKanbanActions({ kanban, workspaceState, boardsState }: UseKan
         },
       });
     },
-    [kanban, store]
+    [store]
   );
 
   // Handle workspace change with navigation

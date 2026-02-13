@@ -138,7 +138,7 @@ export function KanbanCard({ task, repositoryName, onClick, onEdit, onDelete, on
       style={style}
       className={cn(
         'max-h-48 bg-card rounded-sm data-[size=sm]:py-1 cursor-pointer mb-2 w-full py-0 relative border border-border overflow-visible shadow-none ring-0',
-        task.state === 'IN_PROGRESS' && 'kanban-task-pulse',
+        (task.state === 'IN_PROGRESS' || task.state === 'SCHEDULING') && 'kanban-task-pulse',
         isDragging && 'opacity-50 z-50'
       )}
       onClick={() => onClick?.(task)}
@@ -151,7 +151,7 @@ export function KanbanCard({ task, repositoryName, onClick, onEdit, onDelete, on
           repoName={repositoryName ?? null}
           actions={
             <div className="flex items-center gap-2">
-              {task.state === 'IN_PROGRESS' && statusIcon}
+              {(task.state === 'IN_PROGRESS' || task.state === 'SCHEDULING') && statusIcon}
               {showMaximizeButton && onOpenFullPage && task.hasSession !== false && (
                 <button
                   type="button"

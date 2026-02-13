@@ -43,7 +43,8 @@ export const VirtualizedMessageList = memo(function VirtualizedMessageList({
   const previousHeightRef = useRef(0);
 
   const isInitialLoading = messagesLoading && messages.length === 0;
-  const showLoadingState = (messagesLoading || isInitialLoading) && !isWorking;
+  const isCreatedSession = sessionState === 'CREATED';
+  const showLoadingState = (messagesLoading || isInitialLoading) && !isWorking && !isCreatedSession;
   const { loadMore, hasMore, isLoading: isLoadingMore } = useLazyLoadMessages(sessionId);
 
   const itemCount = items.length;

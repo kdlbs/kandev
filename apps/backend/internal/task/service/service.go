@@ -487,12 +487,66 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 			return nil, err
 		}
 
+		// Resolve local paths to repository IDs (same logic as CreateTask)
+		var repoByPath map[string]*models.Repository
+		for _, repoInput := range req.Repositories {
+			if repoInput.RepositoryID == "" && repoInput.LocalPath != "" {
+				repos, err := s.repo.ListRepositories(ctx, task.WorkspaceID)
+				if err != nil {
+					s.logger.Error("failed to list repositories", zap.Error(err))
+					return nil, err
+				}
+				repoByPath = make(map[string]*models.Repository, len(repos))
+				for _, repo := range repos {
+					if repo.LocalPath == "" {
+						continue
+					}
+					repoByPath[repo.LocalPath] = repo
+				}
+				break
+			}
+		}
+
 		// Create new repositories
 		for i, repoInput := range req.Repositories {
+			repositoryID := repoInput.RepositoryID
+			baseBranch := repoInput.BaseBranch
+			if repositoryID == "" && repoInput.LocalPath != "" {
+				repo := repoByPath[repoInput.LocalPath]
+				if repo == nil {
+					name := strings.TrimSpace(repoInput.Name)
+					if name == "" {
+						name = filepath.Base(repoInput.LocalPath)
+					}
+					defaultBranch := repoInput.DefaultBranch
+					if defaultBranch == "" {
+						defaultBranch = repoInput.BaseBranch
+					}
+					created, err := s.CreateRepository(ctx, &CreateRepositoryRequest{
+						WorkspaceID:   task.WorkspaceID,
+						Name:          name,
+						SourceType:    "local",
+						LocalPath:     repoInput.LocalPath,
+						DefaultBranch: defaultBranch,
+					})
+					if err != nil {
+						return nil, err
+					}
+					repo = created
+					if repoByPath == nil {
+						repoByPath = make(map[string]*models.Repository)
+					}
+					repoByPath[repoInput.LocalPath] = repo
+				}
+				repositoryID = repo.ID
+				if baseBranch == "" {
+					baseBranch = repo.DefaultBranch
+				}
+			}
 			taskRepo := &models.TaskRepository{
 				TaskID:       task.ID,
-				RepositoryID: repoInput.RepositoryID,
-				BaseBranch:   repoInput.BaseBranch,
+				RepositoryID: repositoryID,
+				BaseBranch:   baseBranch,
 				Position:     i,
 				Metadata:     make(map[string]interface{}),
 			}
@@ -1649,6 +1703,10 @@ func (s *Service) publishTaskEvent(ctx context.Context, eventType string, task *
 				data["review_status"] = *sessionInfo.ReviewStatus
 			}
 		}
+	}
+
+	if len(task.Repositories) > 0 {
+		data["repository_id"] = task.Repositories[0].RepositoryID
 	}
 
 	if task.Metadata != nil {

@@ -454,7 +454,7 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
       <TaskCreateDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}
-        mode="task"
+        mode="create"
         workspaceId={workspaceId}
         boardId={boardId}
         defaultColumnId={dialogColumns[0]?.id ?? null}

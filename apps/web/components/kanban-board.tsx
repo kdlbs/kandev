@@ -61,7 +61,7 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
     handleWorkspaceChange,
     handleBoardChange,
     deletingTaskId,
-  } = useKanbanActions({ kanban, workspaceState, boardsState });
+  } = useKanbanActions({ workspaceState, boardsState });
 
   // Data fetching and derived state
   const {
@@ -215,7 +215,6 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
         onSearchChange={setSearchQuery}
       />
       <TaskCreateDialog
-        key={isDialogOpen ? 'open' : 'closed'}
         open={isDialogOpen}
         onOpenChange={handleDialogOpenChange}
         workspaceId={workspaceState.activeId}
@@ -235,7 +234,6 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
             : null
         }
         onSuccess={handleDialogSuccess}
-        navigateOnSessionCreate={false}
         initialValues={
           editingTask
             ? {
@@ -246,11 +244,10 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
             }
             : undefined
         }
-        submitLabel={editingTask ? 'Update' : 'Create'}
+        mode={editingTask ? 'edit' : 'create'}
       />
       {/* Workflow automation session creation dialog */}
       <TaskCreateDialog
-        key={isWorkflowDialogOpen ? 'workflow-open' : 'workflow-closed'}
         open={isWorkflowDialogOpen}
         onOpenChange={(open) => {
           setIsWorkflowDialogOpen(open);
@@ -267,7 +264,6 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
           title: '',
           description: workflowAutomation?.taskDescription ?? '',
         }}
-        submitLabel="Start Agent"
       />
       {/* Approval warning modal */}
       <AlertDialog open={!!moveError} onOpenChange={(open) => !open && setMoveError(null)}>

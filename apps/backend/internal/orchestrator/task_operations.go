@@ -6,9 +6,12 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator/dto"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/queue"
@@ -71,6 +74,16 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 		return "", err
 	}
 
+	// Launch workspace infrastructure (agentctl) without starting the agent subprocess.
+	// This enables file browsing, editing, etc. while the session is in CREATED state.
+	if _, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, agentProfileID, executorID, "", workflowStepID, false); err != nil {
+		s.logger.Warn("failed to launch workspace for prepared session (file browsing may be unavailable)",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		// Non-fatal: session is still usable, workspace will be launched when agent starts
+	}
+
 	s.logger.Info("task session prepared",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID))
@@ -111,13 +124,74 @@ func (s *Service) StartTaskWithSession(ctx context.Context, taskID string, sessi
 
 	effectivePrompt, planModeActive := s.applyWorkflowAndPlanMode(ctx, effectivePrompt, task.ID, workflowStepID, planMode)
 
-	execution, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, agentProfileID, executorID, effectivePrompt, workflowStepID)
+	execution, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, agentProfileID, executorID, effectivePrompt, workflowStepID, true)
 	if err != nil {
 		return nil, err
 	}
 
 	if execution.SessionID != "" {
 		s.recordInitialMessage(ctx, taskID, execution.SessionID, effectivePrompt, planModeActive)
+	}
+
+	return execution, nil
+}
+
+// StartCreatedSession starts agent execution for a task using a session that is in CREATED state.
+// This is used when a session was prepared (via PrepareSession) but the agent was not launched,
+// and the user now wants to start the agent with a prompt (e.g., from the plan panel or chat).
+func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, agentProfileID, prompt string) (*executor.TaskExecution, error) {
+	s.logger.Debug("starting created session",
+		zap.String("task_id", taskID),
+		zap.String("session_id", sessionID),
+		zap.String("agent_profile_id", agentProfileID))
+
+	// Load and verify session
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get session: %w", err)
+	}
+	if session.TaskID != taskID {
+		return nil, fmt.Errorf("session does not belong to task")
+	}
+	if session.State != models.TaskSessionStateCreated {
+		return nil, fmt.Errorf("session is not in CREATED state (current: %s)", session.State)
+	}
+
+	// Use agent profile from request, fall back to session's stored value
+	effectiveProfileID := agentProfileID
+	if effectiveProfileID == "" {
+		effectiveProfileID = session.AgentProfileID
+	}
+	if effectiveProfileID == "" {
+		return nil, fmt.Errorf("agent_profile_id is required")
+	}
+
+	// Transition task state: CREATED → SCHEDULING → (IN_PROGRESS via executor)
+	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateScheduling); err != nil {
+		s.logger.Warn("failed to update task state to SCHEDULING",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+	}
+
+	task, err := s.scheduler.GetTask(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+
+	effectivePrompt := prompt
+	if effectivePrompt == "" {
+		effectivePrompt = task.Description
+	}
+
+	executorID := session.ExecutorID
+
+	execution, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, effectiveProfileID, executorID, effectivePrompt, "", true)
+	if err != nil {
+		return nil, err
+	}
+
+	if execution.SessionID != "" {
+		s.recordInitialMessage(ctx, taskID, execution.SessionID, effectivePrompt, false)
 	}
 
 	return execution, nil
@@ -143,6 +217,36 @@ func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID s
 		s.logger.Warn("failed to update task state to SCHEDULING",
 			zap.String("task_id", taskID),
 			zap.Error(err))
+	}
+
+	// Move task to the target workflow step if provided and different from current
+	if workflowStepID != "" {
+		dbTask, err := s.repo.GetTask(ctx, taskID)
+		if err == nil && dbTask.WorkflowStepID != workflowStepID {
+			dbTask.WorkflowStepID = workflowStepID
+			dbTask.UpdatedAt = time.Now().UTC()
+			if err := s.repo.UpdateTask(ctx, dbTask); err != nil {
+				s.logger.Warn("failed to move task to workflow step",
+					zap.String("task_id", taskID),
+					zap.String("workflow_step_id", workflowStepID),
+					zap.Error(err))
+			} else if s.eventBus != nil {
+				_ = s.eventBus.Publish(ctx, events.TaskUpdated, bus.NewEvent(
+					events.TaskUpdated,
+					"orchestrator",
+					map[string]interface{}{
+						"task_id":          dbTask.ID,
+						"board_id":         dbTask.BoardID,
+						"workflow_step_id": dbTask.WorkflowStepID,
+						"title":            dbTask.Title,
+						"description":      dbTask.Description,
+						"state":            string(dbTask.State),
+						"priority":         dbTask.Priority,
+						"position":         dbTask.Position,
+					},
+				))
+			}
+		}
 	}
 
 	// Fetch the task from the repository to get complete task info

@@ -66,4 +66,8 @@ export const createWorkspaceSlice: StateCreator<
       delete draft.repositoryScripts.loadingByRepositoryId[repositoryId];
       delete draft.repositoryScripts.loadedByRepositoryId[repositoryId];
     }),
+  invalidateRepositories: (workspaceId) =>
+    set((draft) => {
+      draft.repositories.loadedByWorkspaceId[workspaceId] = false;
+    }),
 });

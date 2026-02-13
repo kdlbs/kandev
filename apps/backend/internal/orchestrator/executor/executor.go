@@ -62,6 +62,10 @@ type AgentManagerClient interface {
 
 	// ResolveAgentProfile resolves an agent profile ID to profile information
 	ResolveAgentProfile(ctx context.Context, profileID string) (*AgentProfileInfo, error)
+
+	// SetExecutionDescription updates the task description in an existing execution's metadata.
+	// Used when starting an agent on a session whose workspace was already launched.
+	SetExecutionDescription(ctx context.Context, agentExecutionID string, description string) error
 }
 
 // AgentProfileInfo contains resolved profile information
@@ -150,6 +154,11 @@ func agentSessionStateToV1(state models.TaskSessionState) v1.TaskSessionState {
 	return v1.TaskSessionState(state)
 }
 
+// TaskStateChangeFunc is called when the executor needs to update a task's state.
+// When set, it replaces direct repo.UpdateTaskState calls so the caller can
+// publish events (e.g. WebSocket notifications) alongside the DB update.
+type TaskStateChangeFunc func(ctx context.Context, taskID string, state v1.TaskState) error
+
 // Executor manages agent execution for tasks
 type Executor struct {
 	agentManager AgentManagerClient
@@ -160,6 +169,10 @@ type Executor struct {
 	// Configuration
 	retryLimit int
 	retryDelay time.Duration
+
+	// Callback for task state changes that need event publishing.
+	// Set by the orchestrator to route through the task service layer.
+	onTaskStateChange TaskStateChangeFunc
 
 	// Per-session locks to prevent concurrent resume/launch operations on the same session.
 	// This prevents race conditions when the backend restarts and multiple resume requests
@@ -186,6 +199,57 @@ func NewExecutor(agentManager AgentManagerClient, repo repository.Repository, lo
 		retryLimit:   3,
 		retryDelay:   5 * time.Second,
 	}
+}
+
+// SetOnTaskStateChange sets a callback for task state changes.
+// This allows the orchestrator to route state changes through the task service layer
+// which publishes WebSocket events. Without this, async goroutines would only update
+// the database, leaving the frontend out of sync.
+func (e *Executor) SetOnTaskStateChange(fn TaskStateChangeFunc) {
+	e.onTaskStateChange = fn
+}
+
+// startAgentProcessAsync starts the agent subprocess in a background goroutine.
+// On success it transitions the task to IN_PROGRESS; on failure it marks both the
+// session and task as FAILED.
+func (e *Executor) startAgentProcessAsync(taskID, sessionID, agentExecutionID string) {
+	go func() {
+		startCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+
+		if err := e.agentManager.StartAgentProcess(startCtx, agentExecutionID); err != nil {
+			e.logger.Error("failed to start agent process",
+				zap.String("task_id", taskID),
+				zap.String("agent_execution_id", agentExecutionID),
+				zap.Error(err))
+			if updateErr := e.repo.UpdateTaskSessionState(context.Background(), sessionID, models.TaskSessionStateFailed, err.Error()); updateErr != nil {
+				e.logger.Warn("failed to mark session as failed after start error",
+					zap.String("session_id", sessionID),
+					zap.Error(updateErr))
+			}
+			if updateErr := e.updateTaskState(context.Background(), taskID, v1.TaskStateFailed); updateErr != nil {
+				e.logger.Warn("failed to mark task as failed after start error",
+					zap.String("task_id", taskID),
+					zap.Error(updateErr))
+			}
+			return
+		}
+
+		if updateErr := e.updateTaskState(context.Background(), taskID, v1.TaskStateInProgress); updateErr != nil {
+			e.logger.Warn("failed to update task state to IN_PROGRESS after agent start",
+				zap.String("task_id", taskID),
+				zap.Error(updateErr))
+		}
+	}()
+}
+
+// updateTaskState updates a task's state, using the callback if set for event publishing,
+// or falling back to the raw repository.
+func (e *Executor) updateTaskState(ctx context.Context, taskID string, state v1.TaskState) error {
+	if e.onTaskStateChange != nil {
+		return e.onTaskStateChange(ctx, taskID, state)
+	}
+	return e.repo.UpdateTaskState(ctx, taskID, state)
 }
 
 // shouldUseWorktree returns true if the given executor type should use Git worktrees.
@@ -260,7 +324,7 @@ func (e *Executor) ExecuteWithProfile(ctx context.Context, task *v1.Task, agentP
 	}
 
 	// Launch the agent for the prepared session
-	return e.LaunchPreparedSession(ctx, task, sessionID, agentProfileID, executorID, prompt, workflowStepID)
+	return e.LaunchPreparedSession(ctx, task, sessionID, agentProfileID, executorID, prompt, workflowStepID, true)
 }
 
 // PrepareSession creates a session entry in the database without launching the agent.
@@ -357,9 +421,13 @@ func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfi
 	return sessionID, nil
 }
 
-// LaunchPreparedSession launches the agent for a pre-created session.
+// LaunchPreparedSession launches the workspace (and optionally the agent) for a pre-created session.
 // The session must have been created using PrepareSession.
-func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, sessionID string, agentProfileID string, executorID string, prompt string, workflowStepID string) (*TaskExecution, error) {
+// When startAgent is false, only the workspace infrastructure (agentctl) is launched; the agent
+// subprocess is not started and the session state remains CREATED.
+// When startAgent is true and the workspace was already launched (AgentExecutionID set), only the
+// agent subprocess is started.
+func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, sessionID string, agentProfileID string, executorID string, prompt string, workflowStepID string, startAgent bool) (*TaskExecution, error) {
 	// Fetch the session to get its configuration
 	session, err := e.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
@@ -371,6 +439,12 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 
 	if session.TaskID != task.ID {
 		return nil, fmt.Errorf("session does not belong to task")
+	}
+
+	// Fast path: workspace already launched (e.g., from PrepareSession with workspace).
+	// Only start the agent subprocess if requested; otherwise return early.
+	if session.AgentExecutionID != "" {
+		return e.startAgentOnExistingWorkspace(ctx, task, session, prompt, startAgent)
 	}
 
 	metadata := cloneMetadata(task.Metadata)
@@ -469,7 +543,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 				zap.String("session_id", sessionID),
 				zap.Error(updateErr))
 		}
-		if updateErr := e.repo.UpdateTaskState(ctx, task.ID, v1.TaskStateFailed); updateErr != nil {
+		if updateErr := e.updateTaskState(ctx, task.ID, v1.TaskStateFailed); updateErr != nil {
 			e.logger.Warn("failed to mark task as failed after launch error",
 				zap.String("task_id", task.ID),
 				zap.Error(updateErr))
@@ -480,7 +554,9 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	now := time.Now().UTC()
 	session.AgentExecutionID = resp.AgentExecutionID
 	session.ContainerID = resp.ContainerID
-	session.State = models.TaskSessionStateStarting
+	if startAgent {
+		session.State = models.TaskSessionStateStarting
+	}
 	session.ErrorMessage = ""
 	session.UpdatedAt = now
 
@@ -535,52 +611,90 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		}
 	}
 
+	sessionState := v1.TaskSessionStateCreated
+	if startAgent {
+		sessionState = v1.TaskSessionStateStarting
+	}
 	execution := &TaskExecution{
 		TaskID:           task.ID,
 		AgentExecutionID: resp.AgentExecutionID,
 		AgentProfileID:   agentProfileID,
 		StartedAt:        session.StartedAt,
-		SessionState:     v1.TaskSessionStateStarting,
+		SessionState:     sessionState,
 		LastUpdate:       now,
 		SessionID:        sessionID,
 		WorktreePath:     resp.WorktreePath,
 		WorktreeBranch:   resp.WorktreeBranch,
 	}
 
-	// Start the agent process asynchronously
-	go func() {
-		startCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		defer cancel()
-
-		if err := e.agentManager.StartAgentProcess(startCtx, resp.AgentExecutionID); err != nil {
-			e.logger.Error("failed to start agent process",
-				zap.String("task_id", task.ID),
-				zap.String("agent_execution_id", resp.AgentExecutionID),
-				zap.Error(err))
-			if updateErr := e.repo.UpdateTaskSessionState(context.Background(), sessionID, models.TaskSessionStateFailed, err.Error()); updateErr != nil {
-				e.logger.Warn("failed to mark session as failed after start error",
-					zap.String("session_id", sessionID),
-					zap.Error(updateErr))
-			}
-			if updateErr := e.repo.UpdateTaskState(context.Background(), task.ID, v1.TaskStateFailed); updateErr != nil {
-				e.logger.Warn("failed to mark task as failed after start error",
-					zap.String("task_id", task.ID),
-					zap.Error(updateErr))
-			}
-			return
-		}
-
-		if updateErr := e.repo.UpdateTaskState(context.Background(), task.ID, v1.TaskStateInProgress); updateErr != nil {
-			e.logger.Warn("failed to update task state to IN_PROGRESS after agent start",
-				zap.String("task_id", task.ID),
-				zap.Error(updateErr))
-		}
-	}()
+	if startAgent {
+		e.startAgentProcessAsync(task.ID, sessionID, resp.AgentExecutionID)
+	}
 
 	e.logger.Info("agent launched for prepared session",
 		zap.String("task_id", task.ID),
 		zap.String("session_id", sessionID),
 		zap.String("agent_execution_id", resp.AgentExecutionID))
+
+	return execution, nil
+}
+
+// startAgentOnExistingWorkspace handles the case where LaunchPreparedSession is called on a session
+// whose workspace (agentctl) was already launched. It optionally starts just the agent subprocess.
+func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.Task, session *models.TaskSession, prompt string, startAgent bool) (*TaskExecution, error) {
+	if !startAgent {
+		// Workspace already launched, nothing else to do
+		now := time.Now().UTC()
+		return &TaskExecution{
+			TaskID:           task.ID,
+			AgentExecutionID: session.AgentExecutionID,
+			AgentProfileID:   session.AgentProfileID,
+			StartedAt:        session.StartedAt,
+			SessionState:     v1.TaskSessionState(session.State),
+			LastUpdate:       now,
+			SessionID:        session.ID,
+		}, nil
+	}
+
+	// Update the task description in the existing execution so StartAgentProcess picks it up
+	if prompt != "" {
+		if err := e.agentManager.SetExecutionDescription(ctx, session.AgentExecutionID, prompt); err != nil {
+			e.logger.Warn("failed to set execution description for existing workspace",
+				zap.String("session_id", session.ID),
+				zap.String("agent_execution_id", session.AgentExecutionID),
+				zap.Error(err))
+			// Non-fatal: agent may start without description
+		}
+	}
+
+	// Transition session to STARTING
+	now := time.Now().UTC()
+	session.State = models.TaskSessionStateStarting
+	session.ErrorMessage = ""
+	session.UpdatedAt = now
+	if err := e.repo.UpdateTaskSession(ctx, session); err != nil {
+		e.logger.Error("failed to update session state for agent start",
+			zap.String("session_id", session.ID),
+			zap.Error(err))
+	}
+
+	execution := &TaskExecution{
+		TaskID:           task.ID,
+		AgentExecutionID: session.AgentExecutionID,
+		AgentProfileID:   session.AgentProfileID,
+		StartedAt:        now,
+		SessionState:     v1.TaskSessionStateStarting,
+		LastUpdate:       now,
+		SessionID:        session.ID,
+	}
+
+	// Start the agent process asynchronously
+	e.startAgentProcessAsync(task.ID, session.ID, session.AgentExecutionID)
+
+	e.logger.Info("agent starting on existing workspace",
+		zap.String("task_id", task.ID),
+		zap.String("session_id", session.ID),
+		zap.String("agent_execution_id", session.AgentExecutionID))
 
 	return execution, nil
 }
@@ -858,7 +972,7 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 						zap.String("session_id", session.ID),
 						zap.Error(updateErr))
 				}
-				if updateErr := e.repo.UpdateTaskState(context.Background(), task.ID, v1.TaskStateFailed); updateErr != nil {
+				if updateErr := e.updateTaskState(context.Background(), task.ID, v1.TaskStateFailed); updateErr != nil {
 					e.logger.Warn("failed to mark task as failed after start error on resume",
 						zap.String("task_id", task.ID),
 						zap.Error(updateErr))
@@ -870,7 +984,7 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 			// If the session is waiting for input, the task should be in REVIEW state.
 			// This ensures the task state reflects the actual agent status.
 			if session.State == models.TaskSessionStateWaitingForInput {
-				if updateErr := e.repo.UpdateTaskState(context.Background(), task.ID, v1.TaskStateReview); updateErr != nil {
+				if updateErr := e.updateTaskState(context.Background(), task.ID, v1.TaskStateReview); updateErr != nil {
 					e.logger.Warn("failed to update task state to REVIEW after resume",
 						zap.String("task_id", task.ID),
 						zap.Error(updateErr))

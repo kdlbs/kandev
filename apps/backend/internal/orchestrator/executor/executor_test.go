@@ -12,9 +12,10 @@ import (
 
 // mockAgentManager implements AgentManagerClient for testing
 type mockAgentManager struct {
-	launchAgentFunc         func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error)
-	startAgentProcessFunc   func(ctx context.Context, agentExecutionID string) error
-	resolveAgentProfileFunc func(ctx context.Context, profileID string) (*AgentProfileInfo, error)
+	launchAgentFunc               func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error)
+	startAgentProcessFunc         func(ctx context.Context, agentExecutionID string) error
+	resolveAgentProfileFunc       func(ctx context.Context, profileID string) (*AgentProfileInfo, error)
+	setExecutionDescriptionFunc   func(ctx context.Context, agentExecutionID string, description string) error
 }
 
 func (m *mockAgentManager) LaunchAgent(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
@@ -26,6 +27,13 @@ func (m *mockAgentManager) LaunchAgent(ctx context.Context, req *LaunchAgentRequ
 		ContainerID:      "container-123",
 		Status:           v1.AgentStatusStarting,
 	}, nil
+}
+
+func (m *mockAgentManager) SetExecutionDescription(ctx context.Context, agentExecutionID string, description string) error {
+	if m.setExecutionDescriptionFunc != nil {
+		return m.setExecutionDescriptionFunc(ctx, agentExecutionID, description)
+	}
+	return nil
 }
 
 func (m *mockAgentManager) StartAgentProcess(ctx context.Context, agentExecutionID string) error {
@@ -611,7 +619,7 @@ func TestLaunchPreparedSession_Success(t *testing.T) {
 		Description: "Test description",
 	}
 
-	execution, err := executor.LaunchPreparedSession(context.Background(), task, "session-123", "profile-123", "", "test prompt", "")
+	execution, err := executor.LaunchPreparedSession(context.Background(), task, "session-123", "profile-123", "", "test prompt", "", true)
 	if err != nil {
 		t.Fatalf("LaunchPreparedSession failed: %v", err)
 	}
@@ -651,9 +659,143 @@ func TestLaunchPreparedSession_SessionNotBelongsToTask(t *testing.T) {
 		WorkspaceID: "workspace-123",
 	}
 
-	_, err := executor.LaunchPreparedSession(context.Background(), task, "session-123", "profile-123", "", "test prompt", "")
+	_, err := executor.LaunchPreparedSession(context.Background(), task, "session-123", "profile-123", "", "test prompt", "", true)
 	if err == nil {
 		t.Error("Expected error when session doesn't belong to task")
+	}
+}
+
+func TestLaunchPreparedSession_WorkspaceOnly(t *testing.T) {
+	repo := newMockRepository()
+
+	// Pre-create session (as PrepareSession would)
+	session := &models.TaskSession{
+		ID:             "session-123",
+		TaskID:         "task-123",
+		AgentProfileID: "profile-123",
+		State:          models.TaskSessionStateCreated,
+		StartedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+	}
+	repo.sessions[session.ID] = session
+
+	launchCalled := false
+	startAgentCalled := false
+	agentManager := &mockAgentManager{
+		launchAgentFunc: func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			launchCalled = true
+			return &LaunchAgentResponse{
+				AgentExecutionID: "exec-123",
+				ContainerID:      "container-123",
+				Status:           v1.AgentStatusStarting,
+			}, nil
+		},
+		startAgentProcessFunc: func(ctx context.Context, id string) error {
+			startAgentCalled = true
+			return nil
+		},
+	}
+
+	executor := newTestExecutor(t, agentManager, repo)
+
+	task := &v1.Task{
+		ID:          "task-123",
+		WorkspaceID: "workspace-123",
+		Title:       "Test Task",
+		Description: "Test description",
+	}
+
+	// startAgent=false: should launch workspace but NOT start agent
+	execution, err := executor.LaunchPreparedSession(context.Background(), task, "session-123", "profile-123", "", "", "", false)
+	if err != nil {
+		t.Fatalf("LaunchPreparedSession(startAgent=false) failed: %v", err)
+	}
+
+	if !launchCalled {
+		t.Error("Expected LaunchAgent to be called (workspace setup)")
+	}
+
+	// Give goroutines a moment to run (there shouldn't be any)
+	time.Sleep(50 * time.Millisecond)
+
+	if startAgentCalled {
+		t.Error("Expected StartAgentProcess NOT to be called when startAgent=false")
+	}
+
+	if execution.SessionState != v1.TaskSessionStateCreated {
+		t.Errorf("Expected session state CREATED, got %s", execution.SessionState)
+	}
+
+	// Session in DB should remain CREATED
+	updatedSession := repo.sessions["session-123"]
+	if updatedSession.State != models.TaskSessionStateCreated {
+		t.Errorf("Expected DB session state CREATED, got %s", updatedSession.State)
+	}
+}
+
+func TestLaunchPreparedSession_ExistingWorkspace_StartAgent(t *testing.T) {
+	repo := newMockRepository()
+
+	// Session already has an AgentExecutionID (workspace previously launched)
+	session := &models.TaskSession{
+		ID:               "session-123",
+		TaskID:           "task-123",
+		AgentProfileID:   "profile-123",
+		AgentExecutionID: "exec-existing",
+		State:            models.TaskSessionStateCreated,
+		StartedAt:        time.Now(),
+		UpdatedAt:        time.Now(),
+	}
+	repo.sessions[session.ID] = session
+
+	startAgentCalled := false
+	descriptionSet := ""
+	agentManager := &mockAgentManager{
+		startAgentProcessFunc: func(ctx context.Context, id string) error {
+			startAgentCalled = true
+			if id != "exec-existing" {
+				t.Errorf("Expected execution ID exec-existing, got %s", id)
+			}
+			return nil
+		},
+	}
+	agentManager.setExecutionDescriptionFunc = func(ctx context.Context, id, desc string) error {
+		descriptionSet = desc
+		return nil
+	}
+
+	executor := newTestExecutor(t, agentManager, repo)
+
+	task := &v1.Task{
+		ID:          "task-123",
+		WorkspaceID: "workspace-123",
+		Title:       "Test Task",
+	}
+
+	execution, err := executor.LaunchPreparedSession(context.Background(), task, "session-123", "profile-123", "", "build the feature", "", true)
+	if err != nil {
+		t.Fatalf("LaunchPreparedSession(existing workspace) failed: %v", err)
+	}
+
+	// Should use the existing execution ID
+	if execution.AgentExecutionID != "exec-existing" {
+		t.Errorf("Expected agent execution ID exec-existing, got %s", execution.AgentExecutionID)
+	}
+
+	if execution.SessionState != v1.TaskSessionStateStarting {
+		t.Errorf("Expected session state STARTING, got %s", execution.SessionState)
+	}
+
+	// Description should have been set
+	if descriptionSet != "build the feature" {
+		t.Errorf("Expected description 'build the feature', got %q", descriptionSet)
+	}
+
+	// Wait for async goroutine
+	time.Sleep(100 * time.Millisecond)
+
+	if !startAgentCalled {
+		t.Error("Expected StartAgentProcess to be called")
 	}
 }
 

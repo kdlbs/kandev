@@ -24,26 +24,22 @@ export function useRepositoryBranches(repositoryId: string | null, enabled = tru
   useEffect(() => {
     if (!enabled || !repositoryId) return;
     if (isLoaded || inFlightRef.current) return;
-    let cancelled = false;
     inFlightRef.current = true;
     setRepositoryBranchesLoading(repositoryId, true);
-    listRepositoryBranches(repositoryId, { cache: 'no-store' })
+    // Capture the repositoryId at effect start for the closure
+    const fetchRepoId = repositoryId;
+    listRepositoryBranches(fetchRepoId, { cache: 'no-store' })
       .then((response) => {
-        if (cancelled) return;
-        setRepositoryBranches(repositoryId, response.branches);
+        // Safe to always store: data is keyed by repositoryId in the store
+        setRepositoryBranches(fetchRepoId, response.branches);
       })
       .catch(() => {
-        if (cancelled) return;
-        setRepositoryBranches(repositoryId, []);
+        setRepositoryBranches(fetchRepoId, []);
       })
       .finally(() => {
         inFlightRef.current = false;
-        if (cancelled) return;
-        setRepositoryBranchesLoading(repositoryId, false);
+        setRepositoryBranchesLoading(fetchRepoId, false);
       });
-    return () => {
-      cancelled = true;
-    };
   }, [enabled, isLoaded, repositoryId, setRepositoryBranches, setRepositoryBranchesLoading]);
 
   return { branches, isLoading };

@@ -199,6 +199,12 @@ func NewService(
 	}
 	exec := executor.NewExecutor(agentManager, repo, log, execCfg)
 
+	// Wire executor task state changes through the task service layer so
+	// events are published (e.g. WebSocket notifications to the frontend).
+	exec.SetOnTaskStateChange(func(ctx context.Context, taskID string, state v1.TaskState) error {
+		return taskRepo.UpdateTaskState(ctx, taskID, state)
+	})
+
 	// Create the scheduler with queue, executor, and task repository
 	sched := scheduler.NewScheduler(taskQueue, exec, taskRepo, log, cfg.Scheduler)
 

@@ -54,11 +54,17 @@ export const Combobox = memo(function Combobox({
   showSearch = true,
 }: ComboboxProps) {
   const [open, setOpen] = useState(false)
+  // Track the highlighted item. Defaults to the selected value so the current
+  // selection is highlighted when the popover opens (not the first item).
+  const [highlighted, setHighlighted] = useState("")
 
   const selectedOption = options.find((option) => option.value === value)
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={(next) => {
+      setOpen(next)
+      if (next) setHighlighted(value)
+    }}>
       <PopoverTrigger asChild>
         <Button
           variant="ghost"
@@ -78,7 +84,7 @@ export const Combobox = memo(function Combobox({
         </Button>
       </PopoverTrigger>
       <PopoverContent className={cn("w-[var(--radix-popover-trigger-width)] min-w-[300px] max-w-none p-0", className)} align="start">
-        <Command>
+        <Command value={highlighted} onValueChange={setHighlighted}>
           {dropdownLabel ? (
             <div className="text-muted-foreground px-2 py-1.5 text-xs border-b">
               {dropdownLabel}
