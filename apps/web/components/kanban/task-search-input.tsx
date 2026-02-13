@@ -77,7 +77,7 @@ export function TaskSearchInput({
         value={localValue}
         onChange={handleChange}
         placeholder={placeholder}
-        className="pl-8 pr-8 w-64"
+        className="pl-8 pr-8 w-64 border border-border"
       />
       {localValue && !isLoading && (
         <button

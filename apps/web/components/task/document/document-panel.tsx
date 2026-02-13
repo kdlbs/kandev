@@ -14,6 +14,7 @@ import {
 } from '@kandev/ui/dropdown-menu';
 import { useAppStore } from '@/components/state-provider';
 import { useLayoutStore } from '@/lib/state/layout-store';
+// closeDocument kept for mobile/tablet backward compat
 import { getWebSocketClient } from '@/lib/ws/connection';
 import { useTask } from '@/hooks/use-task';
 import { SessionTabs, type SessionTab } from '@/components/session-tabs';

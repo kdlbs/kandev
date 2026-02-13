@@ -1,6 +1,7 @@
 'use client';
 
 import { memo, useState, useCallback, useEffect, useRef } from 'react';
+import { PanelRoot, PanelBody } from './panel-primitives';
 import dynamic from 'next/dynamic';
 import { IconLoader2, IconFileText, IconRobot, IconMessage, IconClick, IconMessagePlus } from '@tabler/icons-react';
 import { GridSpinner } from '@/components/grid-spinner';
@@ -297,14 +298,13 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({ taskId, visible = tru
   }));
 
   return (
-    <div className="flex flex-col h-full">
+    <PanelRoot>
       {/* Content - Markdown Editor with inline comment highlights */}
-      <div
+      <PanelBody
+        padding={false}
+        scroll={false}
         className={cn(
-          "flex-1 min-h-0 relative rounded-lg border transition-colors cursor-text",
-          isEditorFocused
-            ? "border-primary/50"
-            : "border-transparent"
+          "relative transition-colors cursor-text",
         )}
         ref={editorWrapperRef}
         onClick={handleEmptyStateClick}
@@ -349,7 +349,7 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({ taskId, visible = tru
         {/* Rich empty state - shows when no content and editor not focused */}
         {!isLoading && draftContent.trim() === '' && !isEditorFocused && !isAgentCreatingPlan && (
           <div
-            className="absolute inset-0 flex items-center justify-center pointer-events-none bg-background"
+            className="absolute inset-0 flex items-center justify-center pointer-events-none"
             onClick={handleEmptyStateClick}
           >
             <div className="flex flex-col items-center gap-6 max-w-md px-6">
@@ -390,7 +390,7 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({ taskId, visible = tru
             </div>
           </div>
         )}
-      </div>
+      </PanelBody>
 
       {/* Selection popover for adding comments */}
       {textSelection && activeSessionId && (
@@ -403,6 +403,6 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({ taskId, visible = tru
           onDelete={editingCommentId ? () => handleDeleteComment(editingCommentId) : undefined}
         />
       )}
-    </div>
+    </PanelRoot>
   );
 });

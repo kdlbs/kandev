@@ -26,7 +26,6 @@ import { CommitStatBadge } from '@/components/diff-stat';
 import { useSessionGitStatus } from '@/hooks/domains/session/use-session-git-status';
 import { formatUserHomePath } from '@/lib/utils';
 import { EditorsMenu } from '@/components/task/editors-menu';
-import { PreviewControls } from '@/components/task/preview/preview-controls';
 import { DocumentControls } from '@/components/task/document/document-controls';
 import { VcsSplitButton } from '@/components/vcs-split-button';
 import { DEBUG_UI } from '@/lib/config';
@@ -45,7 +44,6 @@ type TaskTopBarProps = {
   worktreeBranch?: string | null;
   repositoryPath?: string | null;
   repositoryName?: string | null;
-  hasDevScript?: boolean;
   showDebugOverlay?: boolean;
   onToggleDebugOverlay?: () => void;
 };
@@ -58,7 +56,6 @@ const TaskTopBar = memo(function TaskTopBar({
   worktreeBranch,
   repositoryPath,
   repositoryName,
-  hasDevScript = false,
   showDebugOverlay,
   onToggleDebugOverlay,
 }: TaskTopBarProps) {
@@ -103,7 +100,7 @@ const TaskTopBar = memo(function TaskTopBar({
   };
 
   return (
-    <header className="flex items-center justify-between p-3">
+    <header className="flex items-center justify-between px-3 py-1 border-b border-border">
       <div className="flex items-center gap-3">
         <Button variant="ghost" size="sm" asChild>
           <Link href="/">
@@ -158,7 +155,7 @@ const TaskTopBar = memo(function TaskTopBar({
                       <button
                         type="button"
                         onClick={handleCopyRepo}
-                        className="absolute right-1 top-1 p-1 rounded bg-card/80 backdrop-blur-sm hover:bg-card transition-all shadow-sm"
+                        className="absolute right-1 top-1 p-1 rounded bg-background/80 backdrop-blur-sm hover:bg-background transition-all shadow-sm"
                       >
                         {copiedRepo ? (
                           <IconCheck className="h-3 w-3 text-green-500" />
@@ -179,7 +176,7 @@ const TaskTopBar = memo(function TaskTopBar({
                       <button
                         type="button"
                         onClick={handleCopyWorktree}
-                        className="absolute right-1 top-1 p-1 rounded bg-card/80 backdrop-blur-sm hover:bg-card transition-all shadow-sm"
+                        className="absolute right-1 top-1 p-1 rounded bg-background/80 backdrop-blur-sm hover:bg-background transition-all shadow-sm"
                       >
                         {copiedWorktree ? (
                           <IconCheck className="h-3 w-3 text-green-500" />
@@ -245,7 +242,6 @@ const TaskTopBar = memo(function TaskTopBar({
           </Tooltip>
         )}
         <DocumentControls activeSessionId={activeSessionId ?? null} />
-        <PreviewControls activeSessionId={activeSessionId ?? null} hasDevScript={hasDevScript} />
         <EditorsMenu activeSessionId={activeSessionId ?? null} />
 
         <VcsSplitButton

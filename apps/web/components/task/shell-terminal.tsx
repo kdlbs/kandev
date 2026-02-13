@@ -8,7 +8,7 @@ import { useAppStore, useAppStoreApi } from '@/components/state-provider';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import { useSession } from '@/hooks/domains/session/use-session';
 import { useSessionAgentctl } from '@/hooks/domains/session/use-session-agentctl';
-import { terminalTheme, applyTransparentBackground } from '@/lib/terminal-theme';
+import { getTerminalTheme } from '@/lib/terminal-theme';
 
 type ShellTerminalProps = {
   // Interactive shell mode - requires sessionId
@@ -81,7 +81,7 @@ export function ShellTerminal({
       convertEol: isReadOnlyMode,
       fontSize: isReadOnlyMode ? 12 : 13,
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-      theme: terminalTheme,
+      theme: getTerminalTheme(terminalRef.current),
     });
 
     const fitAddon = new FitAddon();
@@ -91,9 +91,6 @@ export function ShellTerminal({
 
     xtermRef.current = terminal;
     fitAddonRef.current = fitAddon;
-
-    // Force transparent background on all xterm elements to inherit from parent
-    applyTransparentBackground(terminalRef.current);
 
     // For read-only mode, write initial output
     if (isReadOnlyMode && outputRef.current) {
@@ -271,7 +268,7 @@ export function ShellTerminal({
 
   if (isReadOnlyMode) {
     return (
-      <div className="h-full w-full rounded-md bg-background relative">
+      <div className="h-full w-full bg-transparent relative">
         <div ref={terminalRef} className="p-1 absolute inset-0" />
         {isStopping ? (
           <div className="absolute right-3 top-2 text-xs text-muted-foreground">
@@ -284,7 +281,7 @@ export function ShellTerminal({
 
   if (isSessionFailed) {
     return (
-      <div className="h-full p-4 w-full rounded-md bg-background flex flex-col gap-2">
+      <div className="h-full p-4 w-full bg-transparent flex flex-col gap-2">
         <div className="text-sm text-destructive/80">Session failed</div>
         {errorMessage && (
           <div className="text-xs text-muted-foreground">{errorMessage}</div>
@@ -296,7 +293,7 @@ export function ShellTerminal({
   return (
     <div
       ref={terminalRef}
-      className="h-full p-1 w-full overflow-hidden rounded-md bg-background"
+      className="h-full p-1 w-full overflow-hidden bg-transparent"
     />
   );
 }

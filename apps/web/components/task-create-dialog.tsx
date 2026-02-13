@@ -43,7 +43,8 @@ import { getLocalStorage, setLocalStorage } from '@/lib/local-storage';
 import { STORAGE_KEYS } from '@/lib/settings/constants';
 import { linkToSession } from '@/lib/links';
 import { getExecutorIcon } from '@/lib/executor-icons';
-import { useLayoutStore } from '@/lib/state/layout-store';
+
+import { usePanelActions } from '@/hooks/use-panel-actions';
 
 interface TaskCreateDialogProps {
   open: boolean;
@@ -1032,9 +1033,9 @@ export function TaskCreateDialog({
   };
 
   // Access layout/UI store for plan mode creation
-  const openDocument = useLayoutStore((state) => state.openDocument);
   const setActiveDocument = useAppStore((state) => state.setActiveDocument);
   const setPlanMode = useAppStore((state) => state.setPlanMode);
+  const { addPlan } = usePanelActions();
 
   const handleCreateInPlanMode = async () => {
     if (!workspaceId || !boardId) return;
@@ -1095,7 +1096,7 @@ export function TaskCreateDialog({
       // Set document panel state before navigation
       if (newSessionId) {
         setActiveDocument(newSessionId, { type: 'plan', taskId: newTaskId });
-        openDocument(newSessionId);
+        addPlan();
         setPlanMode(newSessionId, true);
         router.push(linkToSession(newSessionId));
       } else {

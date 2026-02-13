@@ -12,9 +12,10 @@ import {
 import { Badge } from '@kandev/ui/badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
 import { TaskCreateDialog } from '../task-create-dialog';
-import { useAppStore } from '@/components/state-provider';
+import { useAppStore, useAppStoreApi } from '@/components/state-provider';
 import { linkToSession } from '@/lib/links';
 import { useTaskSessions } from '@/hooks/use-task-sessions';
+import { performLayoutSwitch } from '@/lib/state/dockview-store';
 import type { TaskSession, TaskSessionState } from '@/lib/types/http';
 import type { AgentProfileOption } from '@/lib/state/slices';
 import { getSessionStateIcon } from '@/lib/ui/state-icons';
@@ -104,6 +105,7 @@ export const SessionsDropdown = memo(function SessionsDropdown({
   const [open, setOpen] = useState(false);
   const agentProfiles = useAppStore((state) => state.agentProfiles.items);
   const setActiveSession = useAppStore((state) => state.setActiveSession);
+  const appStore = useAppStoreApi();
   const { sessions, loadSessions } = useTaskSessions(taskId);
 
   const agentLabelsById = useMemo(() => {
@@ -140,7 +142,9 @@ export const SessionsDropdown = memo(function SessionsDropdown({
 
   const handleSelectSession = (sessionId: string) => {
     if (!taskId) return;
+    const oldSessionId = appStore.getState().tasks.activeSessionId;
     setActiveSession(taskId, sessionId);
+    performLayoutSwitch(oldSessionId, sessionId);
     updateUrl(sessionId);
     setOpen(false);
   };

@@ -50,7 +50,8 @@ import {
   hasUserSelectedFilesPanelTab,
   setUserSelectedFilesPanelTab,
 } from '@/lib/local-storage';
-import { useLayoutStore } from '@/lib/state/layout-store';
+
+import { usePanelActions } from '@/hooks/use-panel-actions';
 import { FileStatusIcon } from './file-status-icon';
 
 type TaskFilesPanelProps = {
@@ -287,15 +288,13 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiff, onOpenFile, 
     }
   }, [gitOps]);
 
-  // Open file in document panel side-by-side
-  const openDocument = useLayoutStore((state) => state.openDocument);
-  const setActiveDocument = useAppStore((state) => state.setActiveDocument);
+  // Open file in editor panel
+  const { openFile: panelOpenFile } = usePanelActions();
   const handleOpenFileInDocumentPanel = useCallback((path: string) => {
     if (!activeSessionId) return;
-    const name = path.split('/').pop() || path;
-    setActiveDocument(activeSessionId, { type: 'file', path, name });
-    openDocument(activeSessionId);
-  }, [activeSessionId, setActiveDocument, openDocument]);
+    // On desktop, this will open a file editor tab via dockview
+    panelOpenFile(path);
+  }, [activeSessionId, panelOpenFile]);
 
   // Smart tab selection: restore user preference or auto-select based on changes
   useEffect(() => {

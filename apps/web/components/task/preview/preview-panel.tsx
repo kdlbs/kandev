@@ -7,7 +7,6 @@ import { Input } from '@kandev/ui/input';
 import { SessionPanel, SessionPanelContent } from '@kandev/ui/pannel-session';
 import { usePreviewPanel } from '@/hooks/use-preview-panel';
 import { useAppStore, useAppStoreApi } from '@/components/state-provider';
-import { useLayoutStore } from '@/lib/state/layout-store';
 import { ShellTerminal } from '@/components/task/shell-terminal';
 import { getLocalStorage } from '@/lib/local-storage';
 
@@ -27,7 +26,6 @@ export function PreviewPanel({ sessionId, hasDevScript }: PreviewPanelProps) {
     detectedUrl,
     isRunning,
   } = usePreviewPanel({ sessionId, hasDevScript });
-  const closeLayoutPreview = useLayoutStore((state) => state.closePreview);
   const setPreviewOpen = useAppStore((state) => state.setPreviewOpen);
   const setPreviewStage = useAppStore((state) => state.setPreviewStage);
   const setPreviewView = useAppStore((state) => state.setPreviewView);
@@ -152,7 +150,7 @@ export function PreviewPanel({ sessionId, hasDevScript }: PreviewPanelProps) {
     setPreviewView(sessionId, 'preview');
     setPreviewUrl(sessionId, '');
     setPreviewUrlDraft(sessionId, '');
-    closeLayoutPreview(sessionId);
+
     if (devProcessId) {
       clearProcessOutput(devProcessId);
     }
@@ -179,7 +177,7 @@ export function PreviewPanel({ sessionId, hasDevScript }: PreviewPanelProps) {
     setPreviewView(sessionId, 'preview');
     setPreviewUrl(sessionId, '');
     setPreviewUrlDraft(sessionId, '');
-    closeLayoutPreview(sessionId);
+
   };
 
   return (

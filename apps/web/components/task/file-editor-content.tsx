@@ -515,7 +515,7 @@ export function FileEditorContent({
   }, []);
 
   return (
-    <div ref={wrapperRef} className="flex h-full flex-col bg-background rounded-lg">
+    <div ref={wrapperRef} className="flex h-full flex-col rounded-lg">
       {/* Editor header with save button */}
       <div className="flex items-center justify-between px-2 border-foreground/10 border-b">
         <div className="flex items-center gap-2 text-xs text-muted-foreground">

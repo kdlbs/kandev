@@ -207,7 +207,7 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
   }
 
   return (
-    <div className="h-dvh w-full flex flex-col bg-background">
+    <div className="h-dvh w-full flex flex-col">
       <KanbanHeader
         onCreateTask={handleCreate}
         workspaceId={workspaceState.activeId ?? undefined}
@@ -225,13 +225,13 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
         editingTask={
           editingTask
             ? {
-                id: editingTask.id,
-                title: editingTask.title,
-                description: editingTask.description,
-                workflowStepId: editingTask.workflowStepId,
-                state: editingTask.state as BackendTask['state'],
-                repositoryId: editingTask.repositoryId,
-              }
+              id: editingTask.id,
+              title: editingTask.title,
+              description: editingTask.description,
+              workflowStepId: editingTask.workflowStepId,
+              state: editingTask.state as BackendTask['state'],
+              repositoryId: editingTask.repositoryId,
+            }
             : null
         }
         onSuccess={handleDialogSuccess}
@@ -239,11 +239,11 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
         initialValues={
           editingTask
             ? {
-                title: editingTask.title,
-                description: editingTask.description,
-                state: editingTask.state as BackendTask['state'],
-                repositoryId: editingTask.repositoryId,
-              }
+              title: editingTask.title,
+              description: editingTask.description,
+              state: editingTask.state as BackendTask['state'],
+              repositoryId: editingTask.repositoryId,
+            }
             : undefined
         }
         submitLabel={editingTask ? 'Update' : 'Create'}
