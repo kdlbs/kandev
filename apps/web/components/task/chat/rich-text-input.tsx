@@ -7,7 +7,6 @@ import {
   type KeyboardEvent,
   type ChangeEvent,
   useCallback,
-  useLayoutEffect,
 } from 'react';
 import { cn } from '@/lib/utils';
 
@@ -56,22 +55,6 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
     ref
   ) {
     const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-    // Auto-resize textarea based on content
-    useLayoutEffect(() => {
-      const textarea = textareaRef.current;
-      if (!textarea) return;
-
-      // Reset height to auto to get the correct scrollHeight
-      textarea.style.height = 'auto';
-
-      // Calculate new height (clamped to min/max)
-      const minHeight = 88;
-      const maxHeight = Math.min(window.innerHeight * 0.4, 300);
-      const newHeight = Math.min(Math.max(textarea.scrollHeight, minHeight), maxHeight);
-
-      textarea.style.height = `${newHeight}px`;
-    }, [value]);
 
     const getCaretRect = useCallback((): DOMRect | null => {
       const textarea = textareaRef.current;
@@ -228,7 +211,7 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
         placeholder={placeholder}
         disabled={disabled}
         className={cn(
-          'w-full resize-none bg-transparent px-3 py-3',
+          'w-full h-full resize-none bg-transparent px-2 py-2 overflow-y-auto',
           'text-sm leading-relaxed',
           'placeholder:text-muted-foreground',
           'focus:outline-none',
@@ -236,10 +219,6 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
           planModeEnabled && 'border-primary/40',
           className
         )}
-        style={{
-          minHeight: '88px',
-          maxHeight: 'min(40vh, 300px)',
-        }}
       />
     );
   }

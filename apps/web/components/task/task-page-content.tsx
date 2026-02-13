@@ -251,7 +251,6 @@ export function TaskPageContent({
             worktreeBranch={worktreeBranch}
             repositoryPath={repository?.local_path ?? null}
             repositoryName={repository?.name ?? null}
-            hasDevScript={Boolean(repository?.dev_script?.trim())}
             showDebugOverlay={showDebugOverlay}
             onToggleDebugOverlay={() => setShowDebugOverlay((prev) => !prev)}
           />

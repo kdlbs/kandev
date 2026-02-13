@@ -308,6 +308,9 @@ importers:
       diff:
         specifier: ^8.0.3
         version: 8.0.3
+      dockview-react:
+        specifier: ^4.13.1
+        version: 4.13.1(react@19.2.3)
       embla-carousel-react:
         specifier: ^8.6.0
         version: 8.6.0(react@19.2.3)
@@ -3625,6 +3628,17 @@ packages:
   diff@8.0.3:
     resolution: {integrity: sha512-qejHi7bcSD4hQAZE0tNAawRK1ZtafHDmMTMkrrIGgSLl7hTnQHmKCeB45xAcbfTqK2zowkM3j3bHt/4b/ARbYQ==}
     engines: {node: '>=0.3.1'}
+
+  dockview-core@4.13.1:
+    resolution: {integrity: sha512-+7vR0ZEoL8CNck6NqDVUMqBT22niwBu5CMMI137dZ3c8NDc7c5Si+3dGEqQgM4lNtHBLAtvypo1C4p21J2wkiQ==}
+
+  dockview-react@4.13.1:
+    resolution: {integrity: sha512-xnK0mUq+gzME/QyzM5nn+SsQO26AA2qZlCuqi1KX7wux52KIUSMraQHN5AY9Qm2qCVb/NHhCZoZNSysb/GS79A==}
+
+  dockview@4.13.1:
+    resolution: {integrity: sha512-K8xnYt3Rvkx8MYKHaEsb8aFaPyQclKRRkXS9JcpQPZUgqxumTLnSidgdd6uIfzEps6yJsXoZGQGJ9PtcaKyDcQ==}
+    peerDependencies:
+      react: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
 
   doctrine@2.1.0:
     resolution: {integrity: sha512-35mSku4ZXK0vfCuHEDAwt55dg2jNajHZ1odvF+8SSr82EsZY4QmXfuWso8oEd8zRhVObSN18aM0CjSdoBX7zIw==}
@@ -9781,6 +9795,19 @@ snapshots:
   diff-sequences@29.6.3: {}
 
   diff@8.0.3: {}
+
+  dockview-core@4.13.1: {}
+
+  dockview-react@4.13.1(react@19.2.3):
+    dependencies:
+      dockview: 4.13.1(react@19.2.3)
+    transitivePeerDependencies:
+      - react
+
+  dockview@4.13.1(react@19.2.3):
+    dependencies:
+      dockview-core: 4.13.1
+      react: 19.2.3
 
   doctrine@2.1.0:
     dependencies:

@@ -1,0 +1,187 @@
+/* Dockview theme — Mux-inspired pill tabs */
+
+.dockview-theme-kandev {
+  /* Overall dockview bg (visible in gaps between groups) — match card to eliminate visible gaps */
+  --dv-background-color: var(--card);
+
+  /* Each group panel area */
+  --dv-group-view-background-color: var(--background);
+
+  /* Separator / sash */
+  --dv-separator-border: var(--border);
+  --dv-active-sash-color: var(--primary);
+  --dv-paneview-header-border-color: var(--border);
+
+  /* Tab bar — #171717 bg, matching panel content */
+  --dv-tabs-and-actions-container-font-size: 12px;
+  --dv-tabs-and-actions-container-background-color: var(--background);
+
+  /* Active group, selected tab — #2a2a2a pill */
+  --dv-activegroup-visiblepanel-tab-background-color: var(--muted);
+  --dv-activegroup-visiblepanel-tab-color: var(--foreground);
+
+  /* Active group, unselected tab — transparent */
+  --dv-activegroup-hiddenpanel-tab-background-color: transparent;
+  --dv-activegroup-hiddenpanel-tab-color: var(--muted-foreground);
+
+  /* Inactive group tabs — more dimmed */
+  --dv-inactivegroup-visiblepanel-tab-background-color: color-mix(in srgb, var(--muted) 100%, transparent);
+  --dv-inactivegroup-visiblepanel-tab-color: color-mix(in srgb, var(--muted-foreground) 100%, transparent);
+  --dv-inactivegroup-hiddenpanel-tab-background-color: transparent;
+  --dv-inactivegroup-hiddenpanel-tab-color: color-mix(in srgb, var(--muted-foreground) 100%, transparent);
+
+  /* Close icon */
+  --dv-tab-close-icon: var(--muted-foreground);
+
+  /* Misc */
+  --dv-tabs-container-scrollbar-color: var(--scrollbar-thumb);
+  --dv-drag-over-background-color: color-mix(in oklab, var(--primary) 10%, transparent);
+  --dv-drag-over-border-color: var(--primary);
+}
+
+/* ── Inactive group tab bar dimming ── */
+.dockview-theme-kandev .inactive-group .dv-tabs-and-actions-container {
+  /* opacity: 0.6; */
+}
+
+/* ── Tab bar container ── */
+.dockview-theme-kandev .dv-tabs-and-actions-container {
+  background: var(--background);
+  border-bottom: 1px solid var(--border);
+  min-height: 34px;
+  height: 34px;
+  padding: 0 6px;
+  align-items: center;
+}
+
+/* Remove tab divider separators */
+.dockview-theme-kandev .dv-tabs-container.dv-horizontal .dv-tab::before {
+  display: none !important;
+}
+
+/* ── Individual tabs — pill style ── */
+.dockview-theme-kandev .dv-tab {
+  padding: 0;
+  margin: 0 2px;
+  font-size: 12px;
+  font-weight: 500;
+  min-width: auto;
+  border-radius: 6px;
+  border-bottom: none !important;
+  outline: none !important;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.dockview-theme-kandev .dv-tab:hover {
+  background: color-mix(in srgb, var(--muted) 50%, transparent);
+  color: var(--foreground);
+}
+
+/* Active tab — filled pill, no underline */
+.dockview-theme-kandev .dv-active-tab {
+  border-bottom: none !important;
+}
+
+/* ── Default tab (built-in with close button) ── */
+.dockview-theme-kandev .dv-default-tab {
+  font-size: 12px;
+  font-weight: 500;
+  padding: 2px 6px;
+  gap: 6px;
+}
+
+/* Close button — show on hover and active */
+.dockview-theme-kandev .dv-default-tab .dv-default-tab-action {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  border-radius: 3px;
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dockview-theme-kandev .dv-default-tab .dv-default-tab-action .dv-svg {
+  height: 8px;
+  width: 8px;
+}
+
+.dockview-theme-kandev .dv-default-tab .dv-default-tab-action:hover {
+  background: color-mix(in srgb, var(--foreground) 12%, transparent);
+}
+
+.dockview-theme-kandev .dv-tab:hover .dv-default-tab .dv-default-tab-action,
+.dockview-theme-kandev .dv-active-tab .dv-default-tab .dv-default-tab-action {
+  opacity: 1;
+}
+
+/* ── Panel content ── */
+.dockview-theme-kandev .dv-content-container {
+  background: var(--card);
+}
+
+/* Strip all chrome from session panel wrappers inside dockview */
+.dockview-theme-kandev .dv-content-container .session-panel-content-wrapper {
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+.dockview-theme-kandev .dv-content-container .session-panel-wrapper {
+  border: none !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+/* ── Sash (resize handle) ── */
+.dockview-theme-kandev .dv-resize-container > .sash-container .sash {
+  background: transparent;
+  transition: background-color 0.15s ease;
+}
+
+.dockview-theme-kandev .dv-resize-container > .sash-container .sash:hover,
+.dockview-theme-kandev .dv-resize-container > .sash-container .sash.active {
+  background: var(--primary);
+}
+
+/* Hide close button on tabs in locked groups (sidebar) */
+.dockview-theme-kandev .dv-locked-groupview .dv-default-tab .dv-default-tab-action {
+  display: none !important;
+}
+
+/* ── Left header actions (after last tab — "+" button) ── */
+.dockview-theme-kandev .dv-left-actions-container {
+  display: flex;
+  align-items: center;
+  padding-left: 4px;
+  gap: 2px;
+}
+
+.dv-tab:focus-within:after, .dv-tab:focus:after{
+  outline: none !important;
+}
+
+/* ── Right header actions ── */
+.dockview-theme-kandev .dv-right-actions-container {
+  display: flex;
+  align-items: center;
+  padding-right: 4px;
+  gap: 2px;
+}
+
+/* ── Void container (spacer between left-actions and right-actions) ── */
+.dockview-theme-kandev .dv-void-container {
+  flex: 1;
+}
+
+/* ── Watermark (empty group) ── */
+.dockview-theme-kandev .dv-watermark {
+  background: transparent;
+}
+
+/* ── Drop target overlay ── */
+.dockview-theme-kandev .drop-target-dropzone > .drop-target-selection {
+  border: 2px solid var(--primary);
+  background: color-mix(in oklab, var(--primary) 8%, transparent);
+  border-radius: 4px;
+}

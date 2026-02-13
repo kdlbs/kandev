@@ -137,7 +137,7 @@ export function KanbanCard({ task, repositoryName, onClick, onEdit, onDelete, on
       ref={setNodeRef}
       style={style}
       className={cn(
-        'max-h-48 rounded-sm data-[size=sm]:py-1 cursor-pointer mb-2 w-full py-0 relative border border-border overflow-visible shadow-none ring-0',
+        'max-h-48 bg-card rounded-sm data-[size=sm]:py-1 cursor-pointer mb-2 w-full py-0 relative border border-border overflow-visible shadow-none ring-0',
         task.state === 'IN_PROGRESS' && 'kanban-task-pulse',
         isDragging && 'opacity-50 z-50'
       )}

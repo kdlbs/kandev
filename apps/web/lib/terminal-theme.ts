@@ -1,15 +1,10 @@
 import type { ITheme } from '@xterm/xterm';
 
 /**
- * Shared xterm.js theme configuration for all terminal components.
- * Uses transparent background so terminals inherit from their container's bg-background.
+ * ANSI terminal colors — standard palette, not derived from the app theme.
+ * These are used for syntax highlighting, command output, etc.
  */
-export const terminalTheme: ITheme = {
-  background: 'transparent',
-  foreground: '#d4d4d4',
-  cursor: '#d4d4d4',
-  cursorAccent: 'transparent',
-  selectionBackground: '#264f78',
+const ansiColors = {
   black: '#1e1e1e',
   red: '#f44747',
   green: '#6a9955',
@@ -26,19 +21,27 @@ export const terminalTheme: ITheme = {
   brightMagenta: '#c586c0',
   brightCyan: '#4ec9b0',
   brightWhite: '#ffffff',
-};
+} as const;
 
 /**
- * Apply transparent background to xterm.js internal elements.
- * This ensures the terminal inherits the container's background color.
+ * Build the xterm.js theme by resolving CSS custom properties from the DOM.
+ *
+ * xterm's WebGL addon renders onto a <canvas> so it can't use CSS variables
+ * directly — we read computed values at terminal creation time instead.
+ *
+ * All theme-dependent colors come from CSS variables defined in globals.css,
+ * so changing the app theme in one place updates terminals too.
  */
-export function applyTransparentBackground(container: HTMLElement): void {
-  const selectors = ['.xterm', '.xterm-viewport', '.xterm-screen', '.xterm-scrollable-element'];
-  selectors.forEach((selector) => {
-    const el = container.querySelector(selector) as HTMLElement | null;
-    if (el) {
-      el.style.background = 'transparent';
-      el.style.backgroundColor = 'transparent';
-    }
-  });
+export function getTerminalTheme(container: HTMLElement): ITheme {
+  const s = getComputedStyle(container);
+  const v = (name: string) => s.getPropertyValue(name).trim();
+
+  return {
+    background: v('--card'),
+    foreground: v('--foreground'),
+    cursor: v('--foreground'),
+    cursorAccent: v('--background'),
+    selectionBackground: v('--muted'),
+    ...ansiColors,
+  };
 }

@@ -178,7 +178,6 @@ export const VirtualizedMessageList = memo(function VirtualizedMessageList({
     <SessionPanelContent
       ref={messagesContainerRef}
       className="relative p-4"
-      wrapperClassName={isRunning ? 'border-flash-animation' : undefined}
     >
       {isLoadingMore && hasMore && (
         <div className="absolute top-2 left-1/2 -translate-x-1/2 text-xs text-muted-foreground">
