@@ -228,6 +228,7 @@ type httpCreateTaskRequest struct {
 	Position       int                       `json:"position,omitempty"`
 	Metadata       map[string]interface{}    `json:"metadata,omitempty"`
 	StartAgent     bool                      `json:"start_agent,omitempty"`
+	PrepareSession bool                      `json:"prepare_session,omitempty"`
 	AgentProfileID string                    `json:"agent_profile_id,omitempty"`
 	ExecutorID     string                    `json:"executor_id,omitempty"`
 	PlanMode       bool                      `json:"plan_mode,omitempty"`
@@ -249,7 +250,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id is required"})
 		return
 	}
-	if body.StartAgent && body.AgentProfileID == "" {
+	if (body.StartAgent || body.PrepareSession) && body.AgentProfileID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "agent_profile_id is required to start agent"})
 		return
 	}
@@ -289,7 +290,16 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 	}
 
 	response := createTaskResponse{TaskDTO: resp}
-	if body.StartAgent && body.AgentProfileID != "" && h.orchestrator != nil {
+	if body.PrepareSession && !body.StartAgent && body.AgentProfileID != "" && h.orchestrator != nil {
+		// Create session entry without launching the agent.
+		// The session stays in CREATED state until the user triggers it.
+		sessionID, err := h.orchestrator.PrepareTaskSession(reqCtx, resp.ID, body.AgentProfileID, body.ExecutorID, body.WorkflowStepID)
+		if err != nil {
+			h.logger.Error("failed to prepare session for task", zap.Error(err), zap.String("task_id", resp.ID))
+		} else {
+			response.TaskSessionID = sessionID
+		}
+	} else if body.StartAgent && body.AgentProfileID != "" && h.orchestrator != nil {
 		// Create session entry synchronously so we can return the session ID immediately
 		sessionID, err := h.orchestrator.PrepareTaskSession(reqCtx, resp.ID, body.AgentProfileID, body.ExecutorID, body.WorkflowStepID)
 		if err != nil {

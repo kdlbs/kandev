@@ -14,7 +14,7 @@ type AgentStatusProps = {
 };
 
 const STATE_CONFIG: Record<TaskSessionState, { label: string; icon: 'spinner' | 'error' | 'warning' | null }> = {
-  CREATED: { label: 'Agent is being created', icon: 'spinner' },
+  CREATED: { label: '', icon: null },
   STARTING: { label: 'Agent is starting', icon: 'spinner' },
   RUNNING: { label: 'Agent is running', icon: 'spinner' },
   WAITING_FOR_INPUT: { label: '', icon: null },

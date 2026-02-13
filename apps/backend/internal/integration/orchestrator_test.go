@@ -151,6 +151,11 @@ func (s *SimulatedAgentManagerClient) LaunchAgent(ctx context.Context, req *exec
 	}, nil
 }
 
+// SetExecutionDescription updates the task description for an execution
+func (s *SimulatedAgentManagerClient) SetExecutionDescription(ctx context.Context, agentExecutionID string, description string) error {
+	return nil
+}
+
 // StartAgentProcess simulates starting the agent subprocess
 func (s *SimulatedAgentManagerClient) StartAgentProcess(ctx context.Context, agentExecutionID string) error {
 	s.logger.Info("simulated: starting agent process",

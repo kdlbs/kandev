@@ -15,11 +15,17 @@ export function useSession(sessionId: string | null): UseSessionResult {
     sessionId ? state.taskSessions.items[sessionId] ?? null : null
   );
   const connectionStatus = useAppStore((state) => state.connection.status);
+  const agentctlReady = useAppStore((state) =>
+    sessionId ? state.sessionAgentctl.itemsBySessionId[sessionId]?.status === 'ready' : false
+  );
 
   const isActive = useMemo(() => {
     if (!session?.state) return false;
-    return session.state === 'RUNNING' || session.state === 'WAITING_FOR_INPUT';
-  }, [session?.state]);
+    if (session.state === 'RUNNING' || session.state === 'WAITING_FOR_INPUT') return true;
+    // Workspace infrastructure (agentctl) is ready even though the agent CLI hasn't started
+    if (session.state === 'CREATED' && agentctlReady) return true;
+    return false;
+  }, [session?.state, agentctlReady]);
 
   const isFailed = useMemo(() => {
     return session?.state === 'FAILED';

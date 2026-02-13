@@ -50,6 +50,7 @@ export type WorkspaceSliceActions = {
   setRepositoryScripts: (repositoryId: string, scripts: RepositoryScript[]) => void;
   setRepositoryScriptsLoading: (repositoryId: string, loading: boolean) => void;
   clearRepositoryScripts: (repositoryId: string) => void;
+  invalidateRepositories: (workspaceId: string) => void;
 };
 
 export type WorkspaceSlice = WorkspaceSliceState & WorkspaceSliceActions;

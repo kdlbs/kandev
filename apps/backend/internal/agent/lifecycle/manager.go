@@ -867,6 +867,20 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 	return execution, nil
 }
 
+// SetExecutionDescription updates the task description stored in an execution's metadata.
+// This is used when starting an agent on a workspace that was launched without a prompt.
+func (m *Manager) SetExecutionDescription(_ context.Context, executionID string, description string) error {
+	execution, exists := m.executionStore.Get(executionID)
+	if !exists {
+		return fmt.Errorf("execution %q not found", executionID)
+	}
+	if execution.Metadata == nil {
+		execution.Metadata = make(map[string]interface{})
+	}
+	execution.Metadata["task_description"] = description
+	return nil
+}
+
 // StartAgentProcess configures and starts the agent subprocess for an execution.
 // This must be called after Launch() to actually start the agent (e.g., auggie, codex).
 // The command is built internally based on the execution's agent profile.

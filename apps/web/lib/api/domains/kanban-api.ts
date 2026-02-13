@@ -39,6 +39,7 @@ export async function createTask(
     }>;
     state?: Task['state'];
     start_agent?: boolean;
+    prepare_session?: boolean;
     agent_profile_id?: string;
     executor_id?: string;
     plan_mode?: boolean;

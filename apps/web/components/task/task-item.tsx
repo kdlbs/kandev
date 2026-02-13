@@ -64,7 +64,7 @@ export const TaskItem = memo(function TaskItem({
   // Effective open state: keep menu open while deleting
   const effectiveMenuOpen = menuOpen || isDeleting;
 
-  const isInProgress = state === 'IN_PROGRESS' || state === 'SCHEDULING' || state === 'CREATED';
+  const isInProgress = state === 'IN_PROGRESS' || state === 'SCHEDULING';
   const hasDiffStats = diffStats && (diffStats.additions > 0 || diffStats.deletions > 0);
 
   // Determine what to show on the right side

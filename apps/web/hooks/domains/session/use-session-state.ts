@@ -13,7 +13,7 @@ export function useSessionState(sessionId: string | null) {
   const taskDescription = task?.description ?? null;
   const isStarting = session?.state === 'STARTING';
   const isWorking = isStarting || session?.state === 'RUNNING';
-  const isAgentBusy = session?.state === 'CREATED' || session?.state === 'RUNNING';
+  const isAgentBusy = session?.state === 'RUNNING';
   const isFailed = session?.state === 'FAILED' || session?.state === 'CANCELLED';
 
   return {

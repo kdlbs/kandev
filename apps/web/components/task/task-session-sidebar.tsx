@@ -46,7 +46,7 @@ export const NewTaskButton = memo(function NewTaskButton({
       <TaskCreateDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}
-        mode="task"
+        mode="create"
         workspaceId={workspaceId}
         boardId={boardId}
         defaultColumnId={columns[0]?.id ?? null}

@@ -7,7 +7,7 @@ type KanbanTask = KanbanState['tasks'][number];
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildTaskFromPayload(payload: any, existing?: KanbanTask): KanbanTask {
-  return {
+  const task = {
     id: payload.task_id,
     workflowStepId: payload.workflow_step_id,
     title: payload.title,
@@ -20,6 +20,7 @@ function buildTaskFromPayload(payload: any, existing?: KanbanTask): KanbanTask {
     reviewStatus: payload.review_status ?? existing?.reviewStatus,
     updatedAt: payload.updated_at ?? existing?.updatedAt,
   };
+  return task;
 }
 
 function upsertTask(tasks: KanbanTask[], nextTask: KanbanTask): KanbanTask[] {

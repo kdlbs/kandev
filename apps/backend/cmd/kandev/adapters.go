@@ -115,6 +115,11 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 	}, nil
 }
 
+// SetExecutionDescription updates the task description in an existing execution's metadata.
+func (a *lifecycleAdapter) SetExecutionDescription(ctx context.Context, agentExecutionID string, description string) error {
+	return a.mgr.SetExecutionDescription(ctx, agentExecutionID, description)
+}
+
 // StartAgentProcess starts the agent subprocess for an instance.
 // The command is built internally based on the instance's agent profile.
 func (a *lifecycleAdapter) StartAgentProcess(ctx context.Context, agentInstanceID string) error {
@@ -229,6 +234,12 @@ func (w *orchestratorWrapper) PromptTask(ctx context.Context, taskID, taskSessio
 // ResumeTaskSession forwards to the orchestrator service, discarding the TaskExecution result.
 func (w *orchestratorWrapper) ResumeTaskSession(ctx context.Context, taskID, taskSessionID string) error {
 	_, err := w.svc.ResumeTaskSession(ctx, taskID, taskSessionID)
+	return err
+}
+
+// StartCreatedSession forwards to the orchestrator service, discarding the TaskExecution result.
+func (w *orchestratorWrapper) StartCreatedSession(ctx context.Context, taskID, sessionID, agentProfileID, prompt string) error {
+	_, err := w.svc.StartCreatedSession(ctx, taskID, sessionID, agentProfileID, prompt)
 	return err
 }
 

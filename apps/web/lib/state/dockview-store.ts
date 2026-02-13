@@ -12,6 +12,21 @@ export type FileEditorState = {
     isBinary?: boolean;
 };
 
+/** Direction relative to a reference panel or group. */
+export type PanelDirection = 'left' | 'right' | 'above' | 'below';
+
+/** A deferred panel operation applied after the next layout build / restore. */
+export type DeferredPanelAction = {
+    id: string;
+    component: string;
+    title: string;
+    /** Where to place the panel. 'tab' adds as a tab in the reference group. */
+    placement: 'tab' | PanelDirection;
+    /** Panel ID or group alias to position relative to. Defaults to 'chat'. */
+    referencePanel?: string;
+    params?: Record<string, unknown>;
+};
+
 type DockviewStore = {
     api: DockviewApi | null;
     setApi: (api: DockviewApi | null) => void;
@@ -54,6 +69,10 @@ type DockviewStore = {
     isRestoringLayout: boolean;
     currentLayoutSessionId: string | null;
     switchSessionLayout: (oldSessionId: string | null, newSessionId: string) => void;
+
+    // Deferred panel actions — queued before navigation, applied after next layout build / restore
+    deferredPanelActions: DeferredPanelAction[];
+    queuePanelAction: (action: DeferredPanelAction) => void;
 };
 
 const SIDEBAR_GROUP = 'group-sidebar';
@@ -79,6 +98,32 @@ function focusOrAddPanel(api: DockviewApi, options: AddPanelOptions & { id: stri
     // When quiet, restore focus to whatever was active before the add
     if (previousActive) {
         previousActive.api.setActive();
+    }
+}
+
+/**
+ * Drain the deferred panel action queue, applying each action to the dockview API.
+ * Call this after a layout build or restore so queued panels appear in the new layout.
+ */
+function applyDeferredPanelActions(api: DockviewApi, actions: DeferredPanelAction[]): void {
+    for (const action of actions) {
+        const ref = action.referencePanel ?? 'chat';
+        let position: AddPanelOptions['position'];
+        if (action.placement === 'tab') {
+            const groupId = api.getPanel(ref)?.group?.id;
+            if (groupId) {
+                position = { referenceGroup: groupId };
+            }
+        } else {
+            position = { referencePanel: ref, direction: action.placement };
+        }
+        focusOrAddPanel(api, {
+            id: action.id,
+            component: action.component,
+            title: action.title,
+            position,
+            ...(action.params ? { params: action.params } : {}),
+        });
     }
 }
 
@@ -164,6 +209,11 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
 
     isRestoringLayout: false,
     currentLayoutSessionId: null,
+
+    deferredPanelActions: [],
+    queuePanelAction: (action) => set((prev) => ({
+        deferredPanelActions: [...prev.deferredPanelActions, action],
+    })),
 
     switchSessionLayout: (oldSessionId, newSessionId) => {
         const { api, currentLayoutSessionId } = get();
@@ -254,7 +304,7 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
             id: 'terminal-default',
             component: 'terminal',
             title: 'Terminal',
-            params: { terminalId: 'default' },
+            params: { terminalId: 'shell-default' },
             position: { direction: 'below', referencePanel: 'changes' },
         });
 
@@ -268,6 +318,13 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
             rightBottomGroupId: terminalPanel?.group?.id ?? RIGHT_BOTTOM_GROUP,
             sidebarGroupId: sidebarGroup.id,
         });
+
+        // Apply any queued panel actions (e.g., plan panel from plan mode task creation)
+        const pending = get().deferredPanelActions;
+        if (pending.length > 0) {
+            set({ deferredPanelActions: [] });
+            applyDeferredPanelActions(api, pending);
+        }
     },
 
     resetLayout: () => {

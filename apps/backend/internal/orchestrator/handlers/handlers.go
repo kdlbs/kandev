@@ -116,8 +116,8 @@ func (h *Handlers) wsStartTask(ctx context.Context, msg *ws.Message) (*ws.Messag
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "agent_profile_id is required when creating a new session", nil)
 	}
 
-	// If session_id is provided, resume existing session with workflow step config
-	if req.SessionID != "" {
+	// If session_id is provided with a workflow step, resume with step config
+	if req.SessionID != "" && req.WorkflowStepID != "" {
 		err := h.service.StartSessionForWorkflowStep(ctx, req.TaskID, req.SessionID, req.WorkflowStepID)
 		if err != nil {
 			h.logger.Error("failed to start task", zap.String("task_id", req.TaskID), zap.Error(err))
@@ -128,6 +128,29 @@ func (h *Handlers) wsStartTask(ctx context.Context, msg *ws.Message) (*ws.Messag
 			TaskID:        req.TaskID,
 			TaskSessionID: req.SessionID,
 			State:         "RUNNING",
+		}
+		return ws.NewResponse(msg.ID, msg.Action, resp)
+	}
+
+	// If session_id is provided without a workflow step, start a CREATED session with prompt
+	if req.SessionID != "" {
+		execution, err := h.service.StartCreatedSession(ctx, req.TaskID, req.SessionID, req.AgentProfileID, req.Prompt)
+		if err != nil {
+			h.logger.Error("failed to start created session", zap.String("task_id", req.TaskID), zap.String("session_id", req.SessionID), zap.Error(err))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to start session: "+err.Error(), nil)
+		}
+		resp := dto.StartTaskResponse{
+			Success:          true,
+			TaskID:           execution.TaskID,
+			AgentExecutionID: execution.AgentExecutionID,
+			TaskSessionID:    execution.SessionID,
+			State:            string(execution.SessionState),
+		}
+		if execution.WorktreePath != "" {
+			resp.WorktreePath = &execution.WorktreePath
+		}
+		if execution.WorktreeBranch != "" {
+			resp.WorktreeBranch = &execution.WorktreeBranch
 		}
 		return ws.NewResponse(msg.ID, msg.Action, resp)
 	}

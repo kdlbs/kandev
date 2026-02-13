@@ -199,7 +199,6 @@ export function TasksPageClient({
             setCreateDialogOpen(false)
             fetchTasks()
           }}
-          navigateOnSessionCreate={false}
         />
       )}
     </div>

@@ -176,6 +176,7 @@ export type AppState = {
   setRepositoryScripts: (repositoryId: string, scripts: RepositoryScript[]) => void;
   setRepositoryScriptsLoading: (repositoryId: string, loading: boolean) => void;
   clearRepositoryScripts: (repositoryId: string) => void;
+  invalidateRepositories: (workspaceId: string) => void;
   setSettingsData: (next: Partial<SettingsDataState>) => void;
   setEditors: (editors: EditorsState['items']) => void;
   setEditorsLoading: (loading: boolean) => void;

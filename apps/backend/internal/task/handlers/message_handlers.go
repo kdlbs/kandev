@@ -26,6 +26,7 @@ import (
 type OrchestratorService interface {
 	PromptTask(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment) (*orchestrator.PromptResult, error)
 	ResumeTaskSession(ctx context.Context, taskID, taskSessionID string) error
+	StartCreatedSession(ctx context.Context, taskID, sessionID, agentProfileID, prompt string) error
 }
 
 // MessageHandlers handles WebSocket requests for messages
@@ -162,6 +163,9 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 			"Session has ended. Please create a new session to continue.", nil)
 	}
 
+	// Handle CREATED sessions: save the message, then start the agent with it as the prompt
+	isCreatedSession := sessionResp.Session.State == models.TaskSessionStateCreated
+
 	// Get the current task state to determine if we need to transition
 	task, err := h.taskController.GetTask(ctx, dto.GetTaskRequest{ID: req.TaskID})
 	if err != nil {
@@ -217,8 +221,39 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		model := req.Model
 		planMode := req.PlanMode
 		attachments := req.Attachments
+		startCreated := isCreatedSession
+		agentProfileID := sessionResp.Session.AgentProfileID
 		go func() {
 			promptCtx := context.WithoutCancel(ctx)
+
+			// For CREATED sessions, start the agent with this message as the initial prompt
+			if startCreated {
+				if err := h.orchestrator.StartCreatedSession(promptCtx, taskID, sessionID, agentProfileID, content); err != nil {
+					h.logger.Warn("failed to start created session from message",
+						zap.String("task_id", taskID),
+						zap.String("session_id", sessionID),
+						zap.Error(err))
+
+					errorMsg := "Failed to start agent"
+					if _, createErr := h.messageController.CreateMessage(promptCtx, dto.CreateMessageRequest{
+						TaskSessionID: sessionID,
+						TaskID:        taskID,
+						Content:       errorMsg,
+						AuthorType:    "agent",
+						Type:          string(v1.MessageTypeError),
+						Metadata: map[string]interface{}{
+							"error": err.Error(),
+						},
+					}); createErr != nil {
+						h.logger.Error("failed to create error message",
+							zap.String("task_id", taskID),
+							zap.String("session_id", sessionID),
+							zap.Error(createErr))
+					}
+				}
+				return
+			}
+
 			_, err := h.orchestrator.PromptTask(promptCtx, taskID, sessionID, content, model, planMode, attachments)
 			if err != nil {
 				if errors.Is(err, executor.ErrExecutionNotFound) {
