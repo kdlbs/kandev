@@ -63,7 +63,7 @@ func sendWSRequest(t *testing.T, conn *websocket.Conn, action string, payload in
 	}
 
 	// Read response with timeout
-	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	_, respData, err := conn.ReadMessage()
 	if err != nil {
 		t.Fatalf("failed to read response: %v", err)
@@ -87,8 +87,7 @@ func TestHandleAgentStreamRequest_UnknownAction(t *testing.T) {
 
 	if resp == nil {
 		t.Fatal("expected response")
-	}
-	if resp.Type != ws.MessageTypeError {
+	} else if resp.Type != ws.MessageTypeError {
 		t.Errorf("expected error type, got %q", resp.Type)
 	}
 
@@ -126,8 +125,7 @@ func TestHandleAgentStreamRequest_DispatchesCorrectActions(t *testing.T) {
 
 			if resp == nil {
 				t.Fatal("expected response")
-			}
-			if resp.ID != "req-"+action {
+			} else if resp.ID != "req-"+action {
 				t.Errorf("expected response ID 'req-%s', got %q", action, resp.ID)
 			}
 			// stderr doesn't need an adapter, so it should succeed
@@ -345,7 +343,7 @@ func TestAgentStreamWS_RequestResponseFlow(t *testing.T) {
 	defer server.Close()
 
 	conn := dialTestWS(t, server)
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// Send an stderr request (doesn't need adapter)
 	resp := sendWSRequest(t, conn, "agent.stderr", nil)
@@ -363,7 +361,7 @@ func TestAgentStreamWS_UnknownActionReturnsError(t *testing.T) {
 	defer server.Close()
 
 	conn := dialTestWS(t, server)
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	resp := sendWSRequest(t, conn, "nonexistent.action", nil)
 	if resp.Type != ws.MessageTypeError {
@@ -384,7 +382,7 @@ func TestAgentStreamWS_AgentNotRunningError(t *testing.T) {
 	defer server.Close()
 
 	conn := dialTestWS(t, server)
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	resp := sendWSRequest(t, conn, "agent.initialize", map[string]string{
 		"client_name":    "test",
@@ -408,7 +406,7 @@ func TestAgentStreamWS_MultipleRequests(t *testing.T) {
 	defer server.Close()
 
 	conn := dialTestWS(t, server)
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// Send multiple requests sequentially
 	actions := []string{"agent.stderr", "agent.stderr", "agent.cancel"}
@@ -422,7 +420,7 @@ func TestAgentStreamWS_MultipleRequests(t *testing.T) {
 
 	// Read all responses
 	for i := 0; i < len(actions); i++ {
-		conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 		_, respData, err := conn.ReadMessage()
 		if err != nil {
 			t.Fatalf("failed to read response %d: %v", i, err)
@@ -444,7 +442,7 @@ func TestAgentStreamWS_ResponsePreservesMessageID(t *testing.T) {
 	defer server.Close()
 
 	conn := dialTestWS(t, server)
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	requestID := "unique-req-id-12345"
 	msg, _ := ws.NewRequest(requestID, "agent.stderr", nil)
@@ -453,7 +451,7 @@ func TestAgentStreamWS_ResponsePreservesMessageID(t *testing.T) {
 		t.Fatalf("failed to write: %v", err)
 	}
 
-	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	_, respData, err := conn.ReadMessage()
 	if err != nil {
 		t.Fatalf("failed to read: %v", err)
@@ -478,7 +476,7 @@ func TestAgentStreamWS_MalformedMessage(t *testing.T) {
 	defer server.Close()
 
 	conn := dialTestWS(t, server)
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// Send malformed JSON - should not crash the server
 	if err := conn.WriteMessage(websocket.TextMessage, []byte(`not json`)); err != nil {

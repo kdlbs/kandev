@@ -47,12 +47,13 @@ func TestNewRuntimeRegistry(t *testing.T) {
 
 	if registry == nil {
 		t.Fatal("expected non-nil registry")
-	}
-	if registry.runtimes == nil {
-		t.Error("expected runtimes map to be initialized")
-	}
-	if len(registry.runtimes) != 0 {
-		t.Errorf("expected empty runtimes map, got %d entries", len(registry.runtimes))
+	} else {
+		if registry.runtimes == nil {
+			t.Error("expected runtimes map to be initialized")
+		}
+		if len(registry.runtimes) != 0 {
+			t.Errorf("expected empty runtimes map, got %d entries", len(registry.runtimes))
+		}
 	}
 }
 

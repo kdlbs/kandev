@@ -18,8 +18,7 @@ func TestNewRecreator(t *testing.T) {
 	recreator := NewRecreator(mgr)
 	if recreator == nil {
 		t.Fatal("expected non-nil recreator")
-	}
-	if recreator.manager != mgr {
+	} else if recreator.manager != mgr {
 		t.Error("recreator manager not set correctly")
 	}
 }

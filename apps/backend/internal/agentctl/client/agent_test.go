@@ -43,7 +43,7 @@ func newWSTestServer(t *testing.T, handler func(msg ws.Message) *ws.Message) *ws
 			t.Logf("upgrade error: %v", err)
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 
 		for {
 			_, message, err := conn.ReadMessage()
@@ -73,11 +73,6 @@ func newWSTestServer(t *testing.T, handler func(msg ws.Message) *ws.Message) *ws
 
 func (ts *wsTestServer) Close() {
 	ts.server.Close()
-}
-
-// clientURL returns the base URL for creating a Client from the test server.
-func (ts *wsTestServer) clientURL() string {
-	return ts.server.URL
 }
 
 // newTestClientWithStream creates a Client connected to a test WebSocket server.
@@ -305,12 +300,13 @@ func TestInitialize_Success(t *testing.T) {
 	}
 	if info == nil {
 		t.Fatal("expected agent info, got nil")
-	}
-	if info.Name != "test-agent" {
-		t.Errorf("expected name 'test-agent', got %q", info.Name)
-	}
-	if info.Version != "1.0.0" {
-		t.Errorf("expected version '1.0.0', got %q", info.Version)
+	} else {
+		if info.Name != "test-agent" {
+			t.Errorf("expected name 'test-agent', got %q", info.Name)
+		}
+		if info.Version != "1.0.0" {
+			t.Errorf("expected version '1.0.0', got %q", info.Version)
+		}
 	}
 }
 
@@ -660,7 +656,7 @@ func TestStreamUpdates_RoutesResponsesToPending(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 
 		for {
 			_, message, err := conn.ReadMessage()
@@ -677,12 +673,12 @@ func TestStreamUpdates_RoutesResponsesToPending(t *testing.T) {
 					"success": true,
 				})
 				data, _ := json.Marshal(resp)
-				conn.WriteMessage(websocket.TextMessage, data)
+				_ = conn.WriteMessage(websocket.TextMessage, data)
 
 				// Also send an agent event
 				event := AgentEvent{Type: "message_chunk", Text: "hello"}
 				eventData, _ := json.Marshal(event)
-				conn.WriteMessage(websocket.TextMessage, eventData)
+				_ = conn.WriteMessage(websocket.TextMessage, eventData)
 			}
 		}
 	}))
@@ -746,7 +742,7 @@ func TestStreamUpdates_DisconnectCleansPending(t *testing.T) {
 		}
 		// Close immediately to trigger disconnect
 		time.Sleep(100 * time.Millisecond)
-		conn.Close()
+		_ = conn.Close()
 	}))
 	defer server.Close()
 

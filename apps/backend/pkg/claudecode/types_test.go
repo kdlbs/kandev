@@ -43,13 +43,10 @@ func TestCLIMessage_GetResultData(t *testing.T) {
 				if got != nil {
 					t.Errorf("GetResultData() = %v, want nil", got)
 				}
-			} else {
-				if got == nil {
-					t.Fatalf("GetResultData() = nil, want non-nil")
-				}
-				if got.Text != tt.wantText {
-					t.Errorf("GetResultData().Text = %q, want %q", got.Text, tt.wantText)
-				}
+			} else if got == nil {
+				t.Fatalf("GetResultData() = nil, want non-nil")
+			} else if got.Text != tt.wantText {
+				t.Errorf("GetResultData().Text = %q, want %q", got.Text, tt.wantText)
 			}
 		})
 	}

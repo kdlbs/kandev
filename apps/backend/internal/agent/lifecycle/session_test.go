@@ -32,11 +32,10 @@ func newSessionTestLogger() *logger.Logger {
 type mockAgentServer struct {
 	server       *httptest.Server
 	mu           sync.Mutex
-	actionLog    []string // ordered log of actions received
-	upgrader     websocket.Upgrader
-	handler      func(msg ws.Message) *ws.Message
-	wsConnected  chan struct{} // closed when WS stream connects
-	streamBlocked bool        // if true, delay stream acceptance
+	actionLog   []string // ordered log of actions received
+	upgrader    websocket.Upgrader
+	handler     func(msg ws.Message) *ws.Message
+	wsConnected chan struct{} // closed when WS stream connects
 }
 
 func newMockAgentServer(t *testing.T) *mockAgentServer {
@@ -56,7 +55,7 @@ func newMockAgentServer(t *testing.T) *mockAgentServer {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 
 		// Signal that WS is connected
 		select {
@@ -104,12 +103,12 @@ func newMockAgentServer(t *testing.T) *mockAgentServer {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 
 		// Send connected message
 		connMsg := map[string]string{"type": "connected"}
 		data, _ := json.Marshal(connMsg)
-		conn.WriteMessage(websocket.TextMessage, data)
+		_ = conn.WriteMessage(websocket.TextMessage, data)
 
 		// Keep alive
 		for {
@@ -177,7 +176,7 @@ func createTestClient(t *testing.T, serverURL string) *agentctl.Client {
 	parts := strings.Split(url, ":")
 	host := parts[0]
 	var port int
-	fmt.Sscanf(parts[1], "%d", &port)
+	_, _ = fmt.Sscanf(parts[1], "%d", &port)
 
 	log := newSessionTestLogger()
 	return agentctl.NewClient(host, port, log)

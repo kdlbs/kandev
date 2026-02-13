@@ -25,8 +25,7 @@ func TestNewManager(t *testing.T) {
 
 	if mgr == nil {
 		t.Fatal("expected non-nil manager")
-	}
-	if len(mgr.providers) != 0 {
+	} else if len(mgr.providers) != 0 {
 		t.Errorf("expected no providers, got %d", len(mgr.providers))
 	}
 }
