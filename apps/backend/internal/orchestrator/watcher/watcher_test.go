@@ -138,8 +138,7 @@ func TestNewWatcher(t *testing.T) {
 	w := NewWatcher(eventBus, handlers, log)
 	if w == nil {
 		t.Fatal("NewWatcher returned nil")
-	}
-	if w.running {
+	} else if w.running {
 		t.Error("watcher should not be running initially")
 	}
 }

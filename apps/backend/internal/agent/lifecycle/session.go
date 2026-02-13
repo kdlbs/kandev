@@ -266,6 +266,20 @@ func (sm *SessionManager) InitializeAndPrompt(
 		zap.String("existing_acp_session_id", execution.ACPSessionID),
 		zap.Bool("native_session_resume", agentConfig.SessionConfig.NativeSessionResume))
 
+	// Connect WebSocket streams FIRST — agent operations now go over the stream
+	if sm.streamManager != nil {
+		updatesReady := make(chan struct{})
+		sm.streamManager.ConnectAll(execution, updatesReady)
+
+		// Wait for the updates stream to connect — required for agent operations
+		select {
+		case <-updatesReady:
+			sm.logger.Debug("updates stream ready")
+		case <-time.After(10 * time.Second):
+			return fmt.Errorf("timeout waiting for agent stream to connect")
+		}
+	}
+
 	// Use InitializeSession for configuration-driven session initialization
 	result, err := sm.InitializeSession(
 		ctx,
@@ -293,20 +307,6 @@ func (sm *SessionManager) InitializeAndPrompt(
 	// Publish session created event
 	if sm.eventPublisher != nil {
 		sm.eventPublisher.PublishACPSessionCreated(execution, result.SessionID)
-	}
-
-	// Set up WebSocket streams
-	if sm.streamManager != nil {
-		updatesReady := make(chan struct{})
-		sm.streamManager.ConnectAll(execution, updatesReady)
-
-		// Wait for the updates stream to connect before sending prompt
-		select {
-		case <-updatesReady:
-			sm.logger.Debug("updates stream ready")
-		case <-time.After(5 * time.Second):
-			sm.logger.Warn("timeout waiting for updates stream to connect, proceeding anyway")
-		}
 	}
 
 	// Send the task prompt if provided - run asynchronously so orchestrator.start returns quickly.

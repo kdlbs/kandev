@@ -79,8 +79,7 @@ func TestDequeue(t *testing.T) {
 
 	if dequeued == nil {
 		t.Fatal("Dequeue returned nil")
-	}
-	if dequeued.TaskID != task.ID {
+	} else if dequeued.TaskID != task.ID {
 		t.Errorf("expected TaskID = %s, got %s", task.ID, dequeued.TaskID)
 	}
 	if q.Len() != 0 {

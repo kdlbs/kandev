@@ -688,15 +688,16 @@ func TestFinalizeBootMessage_Success(t *testing.T) {
 	lastMsg := bootSvc.getLastUpdatedMessage()
 	if lastMsg == nil {
 		t.Fatal("expected boot message to be updated")
-	}
-	if lastMsg.Metadata["status"] != "exited" {
-		t.Errorf("expected status 'exited', got %v", lastMsg.Metadata["status"])
-	}
-	if lastMsg.Metadata["exit_code"] != 0 {
-		t.Errorf("expected exit_code 0, got %v", lastMsg.Metadata["exit_code"])
-	}
-	if lastMsg.Metadata["completed_at"] == nil {
-		t.Error("expected completed_at to be set")
+	} else {
+		if lastMsg.Metadata["status"] != "exited" {
+			t.Errorf("expected status 'exited', got %v", lastMsg.Metadata["status"])
+		}
+		if lastMsg.Metadata["exit_code"] != 0 {
+			t.Errorf("expected exit_code 0, got %v", lastMsg.Metadata["exit_code"])
+		}
+		if lastMsg.Metadata["completed_at"] == nil {
+			t.Error("expected completed_at to be set")
+		}
 	}
 }
 
@@ -716,13 +717,14 @@ func TestFinalizeBootMessage_Failed(t *testing.T) {
 	lastMsg := bootSvc.getLastUpdatedMessage()
 	if lastMsg == nil {
 		t.Fatal("expected boot message to be updated")
-	}
-	if lastMsg.Metadata["status"] != "failed" {
-		t.Errorf("expected status 'failed', got %v", lastMsg.Metadata["status"])
-	}
-	// Failed status should NOT have exit_code
-	if _, ok := lastMsg.Metadata["exit_code"]; ok {
-		t.Error("expected no exit_code for failed status")
+	} else {
+		if lastMsg.Metadata["status"] != "failed" {
+			t.Errorf("expected status 'failed', got %v", lastMsg.Metadata["status"])
+		}
+		// Failed status should NOT have exit_code
+		if _, ok := lastMsg.Metadata["exit_code"]; ok {
+			t.Error("expected no exit_code for failed status")
+		}
 	}
 }
 

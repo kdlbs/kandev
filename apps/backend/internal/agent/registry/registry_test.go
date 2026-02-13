@@ -41,8 +41,7 @@ func TestNewRegistry(t *testing.T) {
 
 	if reg == nil {
 		t.Fatal("expected non-nil registry")
-	}
-	if len(reg.agents) != 0 {
+	} else if len(reg.agents) != 0 {
 		t.Errorf("expected empty agents map, got %d", len(reg.agents))
 	}
 }

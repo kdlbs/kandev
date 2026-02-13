@@ -129,18 +129,18 @@ func TestParseCodexStderrError(t *testing.T) {
 
 			if result == nil {
 				t.Fatal("expected non-nil result, got nil")
-			}
+			} else {
+				if result.HTTPError != tt.wantHTTPError {
+					t.Errorf("HTTPError = %q, want %q", result.HTTPError, tt.wantHTTPError)
+				}
 
-			if result.HTTPError != tt.wantHTTPError {
-				t.Errorf("HTTPError = %q, want %q", result.HTTPError, tt.wantHTTPError)
-			}
+				if tt.wantErrorType != "" && result.ErrorType != tt.wantErrorType {
+					t.Errorf("ErrorType = %q, want %q", result.ErrorType, tt.wantErrorType)
+				}
 
-			if tt.wantErrorType != "" && result.ErrorType != tt.wantErrorType {
-				t.Errorf("ErrorType = %q, want %q", result.ErrorType, tt.wantErrorType)
-			}
-
-			if !strings.Contains(result.Message, tt.wantMsgContains) {
-				t.Errorf("Message = %q, want to contain %q", result.Message, tt.wantMsgContains)
+				if !strings.Contains(result.Message, tt.wantMsgContains) {
+					t.Errorf("Message = %q, want to contain %q", result.Message, tt.wantMsgContains)
+				}
 			}
 
 			if tt.wantRawJSON && result.RawJSON == nil {
@@ -221,9 +221,7 @@ func TestParseCodexStderrLines(t *testing.T) {
 
 			if result == nil {
 				t.Fatal("expected non-nil result, got nil")
-			}
-
-			if !strings.Contains(result.Message, tt.wantMsgContains) {
+			} else if !strings.Contains(result.Message, tt.wantMsgContains) {
 				t.Errorf("Message = %q, want to contain %q", result.Message, tt.wantMsgContains)
 			}
 		})
@@ -237,9 +235,7 @@ func TestParseCodexStderrError_ResetsInSeconds(t *testing.T) {
 	result := ParseCodexStderrError(input)
 	if result == nil {
 		t.Fatal("expected non-nil result")
-	}
-
-	if result.ResetsInSeconds != 3600 {
+	} else if result.ResetsInSeconds != 3600 {
 		t.Errorf("ResetsInSeconds = %d, want 3600", result.ResetsInSeconds)
 	}
 }

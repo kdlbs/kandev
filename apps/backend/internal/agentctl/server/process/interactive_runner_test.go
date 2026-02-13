@@ -779,15 +779,16 @@ func TestInteractiveRunner_RegisterScriptShell(t *testing.T) {
 	}
 	if scriptShell == nil {
 		t.Fatal("script shell not found in list")
-	}
-	if scriptShell.Label != "npm start" {
-		t.Errorf("script shell Label = %q, want 'npm start'", scriptShell.Label)
-	}
-	if scriptShell.InitialCommand != "npm run start" {
-		t.Errorf("script shell InitialCommand = %q, want 'npm run start'", scriptShell.InitialCommand)
-	}
-	if !scriptShell.Closable {
-		t.Error("script shell should be closable")
+	} else {
+		if scriptShell.Label != "npm start" {
+			t.Errorf("script shell Label = %q, want 'npm start'", scriptShell.Label)
+		}
+		if scriptShell.InitialCommand != "npm run start" {
+			t.Errorf("script shell InitialCommand = %q, want 'npm run start'", scriptShell.InitialCommand)
+		}
+		if !scriptShell.Closable {
+			t.Error("script shell should be closable")
+		}
 	}
 	if scriptShell.ProcessID != "" {
 		t.Errorf("script shell should have empty ProcessID before WebSocket connect, got %q", scriptShell.ProcessID)

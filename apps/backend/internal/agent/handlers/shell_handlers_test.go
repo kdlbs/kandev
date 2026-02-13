@@ -84,12 +84,13 @@ func TestNewShellHandlers(t *testing.T) {
 
 	if handlers == nil {
 		t.Fatal("expected non-nil handlers")
-	}
-	if handlers.lifecycleMgr != nil {
-		t.Error("expected nil lifecycleMgr when nil passed")
-	}
-	if handlers.logger == nil {
-		t.Error("expected non-nil logger")
+	} else {
+		if handlers.lifecycleMgr != nil {
+			t.Error("expected nil lifecycleMgr when nil passed")
+		}
+		if handlers.logger == nil {
+			t.Error("expected non-nil logger")
+		}
 	}
 }
 
@@ -267,8 +268,7 @@ func TestNewShellHandlers_WithManager(t *testing.T) {
 
 	if handlers == nil {
 		t.Fatal("expected non-nil handlers")
-	}
-	if handlers.lifecycleMgr != mgr {
+	} else if handlers.lifecycleMgr != mgr {
 		t.Error("expected lifecycleMgr to be set to provided manager")
 	}
 }
