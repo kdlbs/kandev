@@ -13,6 +13,31 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
+// syncBuffer is a thread-safe bytes.Buffer for tests where a goroutine writes
+// and the test goroutine reads.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (sb *syncBuffer) Write(p []byte) (int, error) {
+	sb.mu.Lock()
+	defer sb.mu.Unlock()
+	return sb.buf.Write(p)
+}
+
+func (sb *syncBuffer) Len() int {
+	sb.mu.Lock()
+	defer sb.mu.Unlock()
+	return sb.buf.Len()
+}
+
+func (sb *syncBuffer) Bytes() []byte {
+	sb.mu.Lock()
+	defer sb.mu.Unlock()
+	return append([]byte(nil), sb.buf.Bytes()...)
+}
+
 func newTestLogger() *logger.Logger {
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
 	return log
@@ -194,8 +219,8 @@ func TestClient_NoHandlerAutoReject(t *testing.T) {
 	// Create a control request message
 	input := `{"type":"control_request","request_id":"req123","request":{"subtype":"can_use_tool","tool_name":"Bash"}}` + "\n"
 
-	var buf bytes.Buffer
-	client := NewClient(&buf, strings.NewReader(input), newTestLogger())
+	buf := &syncBuffer{}
+	client := NewClient(buf, strings.NewReader(input), newTestLogger())
 
 	// No request handler set - should auto-reject
 

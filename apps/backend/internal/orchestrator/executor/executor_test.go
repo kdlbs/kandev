@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -748,11 +749,11 @@ func TestLaunchPreparedSession_ExistingWorkspace_StartAgent(t *testing.T) {
 	}
 	repo.sessions[session.ID] = session
 
-	startAgentCalled := false
+	var startAgentCalled atomic.Bool
 	descriptionSet := ""
 	agentManager := &mockAgentManager{
 		startAgentProcessFunc: func(ctx context.Context, id string) error {
-			startAgentCalled = true
+			startAgentCalled.Store(true)
 			if id != "exec-existing" {
 				t.Errorf("Expected execution ID exec-existing, got %s", id)
 			}
@@ -794,7 +795,7 @@ func TestLaunchPreparedSession_ExistingWorkspace_StartAgent(t *testing.T) {
 	// Wait for async goroutine
 	time.Sleep(100 * time.Millisecond)
 
-	if !startAgentCalled {
+	if !startAgentCalled.Load() {
 		t.Error("Expected StartAgentProcess to be called")
 	}
 }
