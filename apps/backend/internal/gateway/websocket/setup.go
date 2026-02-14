@@ -6,6 +6,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/scripts"
+	"github.com/kandev/kandev/internal/lsp/installer"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -15,6 +16,7 @@ type Gateway struct {
 	Dispatcher      *ws.Dispatcher
 	Handler         *Handler
 	TerminalHandler *TerminalHandler
+	LSPHandler      *LSPHandler
 	logger          *logger.Logger
 }
 
@@ -41,6 +43,11 @@ func (g *Gateway) SetLifecycleManager(lifecycleMgr *lifecycle.Manager, userServi
 	g.TerminalHandler = NewTerminalHandler(lifecycleMgr, userService, scriptService, g.logger)
 }
 
+// SetLSPHandler enables the LSP WebSocket handler.
+func (g *Gateway) SetLSPHandler(lifecycleMgr *lifecycle.Manager, userService LSPUserService, installerRegistry *installer.Registry) {
+	g.LSPHandler = NewLSPHandler(lifecycleMgr, userService, installerRegistry, g.logger)
+}
+
 // SetupRoutes adds the WebSocket routes to the Gin engine
 func (g *Gateway) SetupRoutes(router *gin.Engine) {
 	router.GET("/ws", g.Handler.HandleConnection)
@@ -48,6 +55,11 @@ func (g *Gateway) SetupRoutes(router *gin.Engine) {
 	// Add dedicated terminal WebSocket route if terminal handler is configured
 	if g.TerminalHandler != nil {
 		router.GET("/xterm.js/:sessionId", g.TerminalHandler.HandleTerminalWS)
+	}
+
+	// Add LSP routes if LSP handler is configured
+	if g.LSPHandler != nil {
+		router.GET("/lsp/:sessionId", g.LSPHandler.HandleLSPConnection)
 	}
 }
 

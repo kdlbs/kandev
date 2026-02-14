@@ -3,14 +3,14 @@
 import { memo, useEffect, useRef, useState, useCallback } from 'react';
 import {
   IconAlertTriangle,
-  IconCopy,
   IconArrowBackUp,
+  IconPencil,
 } from '@tabler/icons-react';
 import { Checkbox } from '@kandev/ui/checkbox';
 import { Button } from '@kandev/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
 import { FileDiffViewer } from '@/components/diff';
-import { useToast } from '@/components/toast-provider';
+import { FileActionsDropdown } from '@/components/editors/file-actions-dropdown';
 import type { ReviewFile } from './types';
 
 type ReviewDiffListProps = {
@@ -22,6 +22,7 @@ type ReviewDiffListProps = {
   wordWrap: boolean;
   onToggleReviewed: (path: string, reviewed: boolean) => void;
   onDiscard: (path: string) => void;
+  onOpenFile?: (filePath: string) => void;
   fileRefs: Map<string, React.RefObject<HTMLDivElement | null>>;
 };
 
@@ -34,6 +35,7 @@ export const ReviewDiffList = memo(function ReviewDiffList({
   wordWrap,
   onToggleReviewed,
   onDiscard,
+  onOpenFile,
   fileRefs,
 }: ReviewDiffListProps) {
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
@@ -51,6 +53,7 @@ export const ReviewDiffList = memo(function ReviewDiffList({
           wordWrap={wordWrap}
           onToggleReviewed={onToggleReviewed}
           onDiscard={onDiscard}
+          onOpenFile={onOpenFile}
           sectionRef={fileRefs.get(file.path)}
           scrollContainer={scrollContainerRef}
         />
@@ -68,6 +71,7 @@ type FileDiffSectionProps = {
   wordWrap: boolean;
   onToggleReviewed: (path: string, reviewed: boolean) => void;
   onDiscard: (path: string) => void;
+  onOpenFile?: (filePath: string) => void;
   sectionRef?: React.RefObject<HTMLDivElement | null>;
   scrollContainer: React.RefObject<HTMLDivElement | null>;
 };
@@ -81,13 +85,13 @@ function FileDiffSection({
   wordWrap,
   onToggleReviewed,
   onDiscard,
+  onOpenFile,
   sectionRef,
   scrollContainer,
 }: FileDiffSectionProps) {
   const [isVisible, setIsVisible] = useState(false);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const autoMarkedRef = useRef(false);
-  const { toast } = useToast();
 
   // Lazy rendering: mount the diff viewer only when section becomes visible
   useEffect(() => {
@@ -144,11 +148,6 @@ function FileDiffSection({
     [file.path, onToggleReviewed]
   );
 
-  const handleCopyPath = useCallback(() => {
-    navigator.clipboard.writeText(file.path);
-    toast({ title: 'Copied', description: file.path, variant: 'success' });
-  }, [file.path, toast]);
-
   const handleDiscard = useCallback(() => {
     onDiscard(file.path);
   }, [file.path, onDiscard]);
@@ -184,20 +183,25 @@ function FileDiffSection({
 
         {/* File actions */}
         <div className="flex items-center gap-0.5">
-          {/* Copy path */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-6 w-6 p-0 cursor-pointer opacity-60 hover:opacity-100"
-                onClick={handleCopyPath}
-              >
-                <IconCopy className="h-3.5 w-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Copy file path</TooltipContent>
-          </Tooltip>
+          {/* Edit in editor tab */}
+          {onOpenFile && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 w-6 p-0 cursor-pointer opacity-60 hover:opacity-100"
+                  onClick={() => onOpenFile(file.path)}
+                >
+                  <IconPencil className="h-3.5 w-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Edit</TooltipContent>
+            </Tooltip>
+          )}
+
+          {/* Open with external editor / copy path / open folder */}
+          <FileActionsDropdown filePath={file.path} sessionId={sessionId} size="xs" />
 
           {/* Discard changes */}
           {file.source === 'uncommitted' && (

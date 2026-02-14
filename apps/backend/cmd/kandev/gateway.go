@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/scripts"
 	"github.com/kandev/kandev/internal/events"
+	lspinstaller "github.com/kandev/kandev/internal/lsp/installer"
 	"github.com/kandev/kandev/internal/events/bus"
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
 	notificationcontroller "github.com/kandev/kandev/internal/notifications/controller"
@@ -53,16 +54,16 @@ func provideGateway(
 	notificationRepo notificationstore.Repository,
 	taskRepo repository.Repository,
 ) (*gateways.Gateway, *notificationservice.Service, *notificationcontroller.Controller, error) {
-	gateway, cleanup, err := gateways.Provide(log)
+	gateway, err := gateways.Provide(log)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	_ = cleanup
 
 	// Enable dedicated terminal WebSocket for passthrough mode
 	scriptSvc := &scriptServiceAdapter{taskSvc: taskSvc}
 	if lifecycleMgr != nil {
 		gateway.SetLifecycleManager(lifecycleMgr, userSvc, scriptSvc)
+		gateway.SetLSPHandler(lifecycleMgr, userSvc, lspinstaller.NewRegistry(log))
 	}
 
 	orchestratorHandlers := orchestratorhandlers.NewHandlers(orchestratorSvc, log)

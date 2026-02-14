@@ -42,6 +42,7 @@ import { useFileEditors } from '@/hooks/use-file-editors';
 import { startProcess } from '@/lib/api';
 import { createUserShell } from '@/lib/api/domains/user-shell-api';
 import { useRepositoryScripts } from '@/hooks/domains/workspace/use-repository-scripts';
+import { useLspFileOpener } from '@/hooks/use-lsp-file-opener';
 
 // Panel components
 import { TaskSessionSidebar, NewTaskButton } from './task-session-sidebar';
@@ -499,6 +500,9 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
 
   const effectiveSessionId = useAppStore((state) => state.tasks.activeSessionId) ?? sessionId ?? null;
   const hasDevScript = Boolean(repository?.dev_script?.trim());
+
+  // Connect LSP Go-to-Definition navigation to dockview file tabs
+  useLspFileOpener();
 
   // Keep sessionIdRef in sync for use inside event handlers
   useEffect(() => {

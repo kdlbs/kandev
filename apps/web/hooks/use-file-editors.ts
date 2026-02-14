@@ -14,6 +14,20 @@ import type { FileContentResponse } from '@/lib/types/backend';
 let _restoredSessionId: string | null = null;
 let _restorationInProgress = false;
 
+// Pending cursor positions: set before opening a file, consumed by the editor on mount.
+// Used by LSP Go-to-Definition to jump to the correct line/column.
+const _pendingCursorPositions = new Map<string, { line: number; column: number }>();
+
+export function setPendingCursorPosition(path: string, line: number, column: number) {
+  _pendingCursorPositions.set(path, { line, column });
+}
+
+export function consumePendingCursorPosition(path: string): { line: number; column: number } | undefined {
+  const pos = _pendingCursorPositions.get(path);
+  if (pos) _pendingCursorPositions.delete(path);
+  return pos;
+}
+
 export function useFileEditors() {
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const { toast } = useToast();

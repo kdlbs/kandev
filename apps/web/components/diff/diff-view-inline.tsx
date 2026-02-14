@@ -1,4 +1,4 @@
 'use client';
 
-// Re-export from the unified diff-viewer component
-export { DiffViewInline } from './diff-viewer';
+// Re-export resolver-aware version
+export { DiffViewInlineResolved as DiffViewInline } from './diff-viewer-resolver';

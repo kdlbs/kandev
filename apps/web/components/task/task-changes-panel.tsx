@@ -34,6 +34,7 @@ import { ReviewDialog } from '@/components/review/review-dialog';
 import type { ReviewFile } from '@/components/review/types';
 import { hashDiff, normalizeDiffContent } from '@/components/review/types';
 import type { DiffComment } from '@/lib/diff/types';
+import { usePanelActions } from '@/hooks/use-panel-actions';
 import type { SelectedDiff } from './task-layout';
 
 type TaskChangesPanelProps = {
@@ -46,7 +47,11 @@ type TaskChangesPanelProps = {
 const TaskChangesPanel = memo(function TaskChangesPanel({
   selectedDiff,
   onClearSelected,
+  onOpenFile: onOpenFileProp,
 }: TaskChangesPanelProps) {
+  const { openFile: panelOpenFile } = usePanelActions();
+  const handleOpenFile = onOpenFileProp ?? panelOpenFile;
+
   const [splitView, setSplitView] = useState(() => {
     if (typeof window === 'undefined') return false;
     return localStorage.getItem('diff-view-mode') === 'split';
@@ -418,6 +423,7 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
             wordWrap={wordWrap}
             onToggleReviewed={handleToggleReviewed}
             onDiscard={handleDiscard}
+            onOpenFile={handleOpenFile}
             fileRefs={fileRefs}
           />
         ) : null}
@@ -432,6 +438,7 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
           baseBranch={baseBranch}
           taskTitle={taskTitle}
           onSendComments={handleDialogSendComments}
+          onOpenFile={handleOpenFile}
           gitStatusFiles={gitStatus?.files ?? null}
           cumulativeDiff={cumulativeDiff}
         />

@@ -52,7 +52,10 @@ func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserS
 		DefaultEditorID:        req.DefaultEditorID,
 		EnablePreviewOnClick:   req.EnablePreviewOnClick,
 		ChatSubmitKey:          req.ChatSubmitKey,
-		ReviewAutoMarkOnScroll: req.ReviewAutoMarkOnScroll,
+		ReviewAutoMarkOnScroll:  req.ReviewAutoMarkOnScroll,
+		LspAutoStartLanguages:   req.LspAutoStartLanguages,
+		LspAutoInstallLanguages: req.LspAutoInstallLanguages,
+		LspServerConfigs:        req.LspServerConfigs,
 	})
 	if err != nil {
 		return dto.UserSettingsResponse{}, err

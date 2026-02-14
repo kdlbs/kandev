@@ -8,7 +8,7 @@ import type { FileDiffOptions, FileDiffMetadata, DiffLineAnnotation, RenderHeade
 import { cn } from '@kandev/ui/lib/utils';
 import { Button } from '@kandev/ui/button';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@kandev/ui/tooltip';
-import { IconCopy, IconTextWrap, IconLayoutRows, IconLayoutColumns, IconExternalLink, IconPlus, IconArrowBackUp } from '@tabler/icons-react';
+import { IconCopy, IconTextWrap, IconLayoutRows, IconLayoutColumns, IconPencil, IconPlus, IconArrowBackUp } from '@tabler/icons-react';
 import type { FileDiffData, DiffComment } from '@/lib/diff/types';
 import { useDiffComments } from './use-diff-comments';
 import { CommentForm } from './comment-form';
@@ -407,10 +407,10 @@ export const DiffViewer = memo(function DiffViewer({
                   className="h-6 w-6 p-0 cursor-pointer opacity-60 hover:opacity-100"
                   onClick={() => onOpenFile(filePath)}
                 >
-                  <IconExternalLink className="h-3.5 w-3.5" />
+                  <IconPencil className="h-3.5 w-3.5" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Open in editor</TooltipContent>
+              <TooltipContent>Edit</TooltipContent>
             </Tooltip>
           )}
         </div>

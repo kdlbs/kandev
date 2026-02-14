@@ -111,16 +111,31 @@ func (r *sqliteRepository) UpsertUserSettings(ctx context.Context, settings *mod
 	if settings.CreatedAt.IsZero() {
 		settings.CreatedAt = settings.UpdatedAt
 	}
+	lspAutoStart := settings.LspAutoStartLanguages
+	if lspAutoStart == nil {
+		lspAutoStart = []string{}
+	}
+	lspAutoInstall := settings.LspAutoInstallLanguages
+	if lspAutoInstall == nil {
+		lspAutoInstall = []string{}
+	}
+	lspServerConfigs := settings.LspServerConfigs
+	if lspServerConfigs == nil {
+		lspServerConfigs = map[string]map[string]interface{}{}
+	}
 	settingsPayload, err := json.Marshal(map[string]interface{}{
-		"workspace_id":              settings.WorkspaceID,
-		"board_id":                  settings.BoardID,
-		"repository_ids":            settings.RepositoryIDs,
-		"initial_setup_complete":    settings.InitialSetupComplete,
-		"preferred_shell":           settings.PreferredShell,
-		"default_editor_id":         settings.DefaultEditorID,
-		"enable_preview_on_click":   settings.EnablePreviewOnClick,
-		"chat_submit_key":           settings.ChatSubmitKey,
+		"workspace_id":               settings.WorkspaceID,
+		"board_id":                   settings.BoardID,
+		"repository_ids":             settings.RepositoryIDs,
+		"initial_setup_complete":     settings.InitialSetupComplete,
+		"preferred_shell":            settings.PreferredShell,
+		"default_editor_id":          settings.DefaultEditorID,
+		"enable_preview_on_click":    settings.EnablePreviewOnClick,
+		"chat_submit_key":            settings.ChatSubmitKey,
 		"review_auto_mark_on_scroll": settings.ReviewAutoMarkOnScroll,
+		"lsp_auto_start_languages":   lspAutoStart,
+		"lsp_auto_install_languages": lspAutoInstall,
+		"lsp_server_configs":         lspServerConfigs,
 	})
 	if err != nil {
 		return err
@@ -130,13 +145,17 @@ func (r *sqliteRepository) UpsertUserSettings(ctx context.Context, settings *mod
 		SET settings = ?, updated_at = ?
 		WHERE id = ?
 	`, string(settingsPayload), settings.UpdatedAt, settings.UserID)
-	if err == nil {
-		rows, _ := result.RowsAffected()
-		if rows == 0 {
-			return fmt.Errorf("user not found: %s", settings.UserID)
-		}
+	if err != nil {
+		return err
 	}
-	return err
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to check rows affected: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("user not found: %s", settings.UserID)
+	}
+	return nil
 }
 
 func scanUser(scanner interface{ Scan(dest ...any) error }) (*models.User, error) {
@@ -159,15 +178,18 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		return settings, nil
 	}
 	var payload struct {
-		WorkspaceID            string   `json:"workspace_id"`
-		BoardID                string   `json:"board_id"`
-		RepositoryIDs          []string `json:"repository_ids"`
-		InitialSetupComplete   bool     `json:"initial_setup_complete"`
-		PreferredShell         string   `json:"preferred_shell"`
-		DefaultEditorID        string   `json:"default_editor_id"`
-		EnablePreviewOnClick   bool     `json:"enable_preview_on_click"`
-		ChatSubmitKey          string   `json:"chat_submit_key"`
-		ReviewAutoMarkOnScroll *bool    `json:"review_auto_mark_on_scroll"`
+		WorkspaceID             string   `json:"workspace_id"`
+		BoardID                 string   `json:"board_id"`
+		RepositoryIDs           []string `json:"repository_ids"`
+		InitialSetupComplete    bool     `json:"initial_setup_complete"`
+		PreferredShell          string   `json:"preferred_shell"`
+		DefaultEditorID         string   `json:"default_editor_id"`
+		EnablePreviewOnClick    bool     `json:"enable_preview_on_click"`
+		ChatSubmitKey           string   `json:"chat_submit_key"`
+		ReviewAutoMarkOnScroll  *bool    `json:"review_auto_mark_on_scroll"`
+		LspAutoStartLanguages   []string                          `json:"lsp_auto_start_languages"`
+		LspAutoInstallLanguages []string                          `json:"lsp_auto_install_languages"`
+		LspServerConfigs        map[string]map[string]interface{} `json:"lsp_server_configs"`
 	}
 	if err := json.Unmarshal([]byte(settingsRaw), &payload); err != nil {
 		return nil, err
@@ -190,5 +212,14 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	} else {
 		settings.ReviewAutoMarkOnScroll = true
 	}
+	settings.LspAutoStartLanguages = payload.LspAutoStartLanguages
+	if settings.LspAutoStartLanguages == nil {
+		settings.LspAutoStartLanguages = []string{}
+	}
+	settings.LspAutoInstallLanguages = payload.LspAutoInstallLanguages
+	if settings.LspAutoInstallLanguages == nil {
+		settings.LspAutoInstallLanguages = []string{}
+	}
+	settings.LspServerConfigs = payload.LspServerConfigs
 	return settings, nil
 }

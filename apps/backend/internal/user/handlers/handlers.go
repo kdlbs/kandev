@@ -63,35 +63,13 @@ func (h *Handlers) httpGetUserSettings(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
-type httpUpdateUserSettingsRequest struct {
-	WorkspaceID            *string   `json:"workspace_id,omitempty"`
-	BoardID                *string   `json:"board_id,omitempty"`
-	RepositoryIDs          *[]string `json:"repository_ids,omitempty"`
-	InitialSetupComplete   *bool     `json:"initial_setup_complete,omitempty"`
-	PreferredShell         *string   `json:"preferred_shell,omitempty"`
-	DefaultEditorID        *string   `json:"default_editor_id,omitempty"`
-	EnablePreviewOnClick   *bool     `json:"enable_preview_on_click,omitempty"`
-	ChatSubmitKey          *string   `json:"chat_submit_key,omitempty"`
-	ReviewAutoMarkOnScroll *bool     `json:"review_auto_mark_on_scroll,omitempty"`
-}
-
 func (h *Handlers) httpUpdateUserSettings(c *gin.Context) {
-	var body httpUpdateUserSettingsRequest
-	if err := c.ShouldBindJSON(&body); err != nil {
+	var req dto.UpdateUserSettingsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
 		return
 	}
-	resp, err := h.controller.UpdateUserSettings(c.Request.Context(), dto.UpdateUserSettingsRequest{
-		WorkspaceID:            body.WorkspaceID,
-		BoardID:                body.BoardID,
-		RepositoryIDs:          body.RepositoryIDs,
-		InitialSetupComplete:   body.InitialSetupComplete,
-		PreferredShell:         body.PreferredShell,
-		DefaultEditorID:        body.DefaultEditorID,
-		EnablePreviewOnClick:   body.EnablePreviewOnClick,
-		ChatSubmitKey:          body.ChatSubmitKey,
-		ReviewAutoMarkOnScroll: body.ReviewAutoMarkOnScroll,
-	})
+	resp, err := h.controller.UpdateUserSettings(c.Request.Context(), req)
 	if err != nil {
 		h.logger.Error("failed to update user settings", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update user settings"})
@@ -108,34 +86,12 @@ func (h *Handlers) wsGetUser(ctx context.Context, msg *ws.Message) (*ws.Message,
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }
 
-type wsUpdateUserSettingsRequest struct {
-	WorkspaceID            *string   `json:"workspace_id,omitempty"`
-	BoardID                *string   `json:"board_id,omitempty"`
-	RepositoryIDs          *[]string `json:"repository_ids,omitempty"`
-	InitialSetupComplete   *bool     `json:"initial_setup_complete,omitempty"`
-	PreferredShell         *string   `json:"preferred_shell,omitempty"`
-	DefaultEditorID        *string   `json:"default_editor_id,omitempty"`
-	EnablePreviewOnClick   *bool     `json:"enable_preview_on_click,omitempty"`
-	ChatSubmitKey          *string   `json:"chat_submit_key,omitempty"`
-	ReviewAutoMarkOnScroll *bool     `json:"review_auto_mark_on_scroll,omitempty"`
-}
-
 func (h *Handlers) wsUpdateUserSettings(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req wsUpdateUserSettingsRequest
+	var req dto.UpdateUserSettingsRequest
 	if err := msg.ParsePayload(&req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
-	resp, err := h.controller.UpdateUserSettings(ctx, dto.UpdateUserSettingsRequest{
-		WorkspaceID:            req.WorkspaceID,
-		BoardID:                req.BoardID,
-		RepositoryIDs:          req.RepositoryIDs,
-		InitialSetupComplete:   req.InitialSetupComplete,
-		PreferredShell:         req.PreferredShell,
-		DefaultEditorID:        req.DefaultEditorID,
-		EnablePreviewOnClick:   req.EnablePreviewOnClick,
-		ChatSubmitKey:          req.ChatSubmitKey,
-		ReviewAutoMarkOnScroll: req.ReviewAutoMarkOnScroll,
-	})
+	resp, err := h.controller.UpdateUserSettings(ctx, req)
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update user settings", nil)
 	}
