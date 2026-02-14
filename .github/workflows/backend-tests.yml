@@ -39,9 +39,6 @@ jobs:
       - name: Build
         run: go build -v ./cmd/kandev
 
-      - name: Run go vet
-        run: go vet ./...
-
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
@@ -51,14 +48,14 @@ jobs:
 
       - name: Run tests with coverage
         run: |
-          go test -v -race -coverprofile=coverage.out -covermode=atomic -json ./... > test-results.json 2>&1 || true
-          go test -v -race -coverprofile=coverage.out -covermode=atomic ./... 2>&1 | tee test-output.txt
+          set -o pipefail
+          go test -v -race -coverprofile=coverage.out -covermode=atomic -json ./... 2>&1 | tee test-results.json
 
       - name: Generate test report
         uses: robherley/go-test-action@v0
         if: always()
         with:
-          moduleDirectory: apps/backend
+          fromJSONFile: apps/backend/test-results.json
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
@@ -76,5 +73,5 @@ jobs:
           name: test-results
           path: |
             apps/backend/coverage.out
-            apps/backend/test-output.txt
+            apps/backend/test-results.json
           retention-days: 30

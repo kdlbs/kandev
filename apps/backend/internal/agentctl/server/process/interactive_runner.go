@@ -102,6 +102,7 @@ type interactiveProcess struct {
 	// Lifecycle
 	stopOnce   sync.Once
 	stopSignal chan struct{}
+	waitDone   chan struct{} // closed when wait() returns (cmd.Wait completed)
 	mu         sync.Mutex
 }
 
@@ -254,6 +255,7 @@ func (r *InteractiveRunner) Start(ctx context.Context, req InteractiveStartReque
 		idleTimeout:   idleTimeout,
 		lastState:     StateUnknown,
 		stopSignal:    make(chan struct{}),
+		waitDone:      make(chan struct{}),
 		// Store start parameters for deferred initialization
 		started:  false,
 		startCmd: req.Command,
@@ -473,19 +475,14 @@ func (r *InteractiveRunner) Stop(ctx context.Context, processID string) error {
 	if proc.cmd != nil && proc.cmd.Process != nil {
 		_ = proc.cmd.Process.Signal(syscall.SIGTERM)
 
-		// Wait for graceful exit, then force kill
-		done := make(chan struct{})
-		go func() {
-			_ = proc.cmd.Wait()
-			close(done)
-		}()
-
+		// Wait for the wait() goroutine to finish (it calls cmd.Wait).
+		// If it doesn't exit in time, force-kill the process.
 		select {
 		case <-ctx.Done():
 			_ = proc.cmd.Process.Kill()
 		case <-time.After(2 * time.Second):
 			_ = proc.cmd.Process.Kill()
-		case <-done:
+		case <-proc.waitDone:
 			// Process exited cleanly
 		}
 	}
@@ -837,6 +834,7 @@ func (r *InteractiveRunner) handleStateChange(proc *interactiveProcess, state Ag
 // 2. Stuck processes should be terminated via Stop() which sends SIGTERM/SIGKILL
 // 3. Adding a timeout here would leave the process unreachable and create leaks
 func (r *InteractiveRunner) wait(proc *interactiveProcess) {
+	defer close(proc.waitDone)
 	err := proc.cmd.Wait()
 	exitCode := 0
 	status := types.ProcessStatusExited
