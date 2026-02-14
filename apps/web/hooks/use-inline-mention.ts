@@ -4,14 +4,16 @@ import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import { useCustomPrompts } from '@/hooks/domains/settings/use-custom-prompts';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import { searchWorkspaceFiles } from '@/lib/ws/workspace-files';
+import { getFileName } from '@/lib/utils/file-path';
 import type { RichTextInputHandle } from '@/components/task/chat/rich-text-input';
 
 export type MentionItem = {
   id: string;
-  type: 'prompt' | 'file';
+  kind: 'prompt' | 'file' | 'plan';
   label: string;
   description?: string;
-  content?: string; // For prompts, the full content to insert
+  /** What happens on selection. Each kind provides its own. */
+  onSelect: (input: RichTextInputHandle, value: string, triggerStart: number, onChange: (v: string) => void) => void;
 };
 
 type Position = {
@@ -60,11 +62,85 @@ function filterItems(items: MentionItem[], query: string): MentionItem[] {
     .map(({ item }) => item);
 }
 
+/** Build a file mention item that adds file to context store instead of inserting text. */
+function makeFileItem(
+  filePath: string,
+  onFileSelect?: (path: string, name: string) => void,
+): MentionItem {
+  return {
+    id: filePath,
+    kind: 'file',
+    label: filePath,
+    description: 'File',
+    onSelect: (input, value, triggerStart, onChange) => {
+      // Remove the @trigger text
+      const cursorPos = input.getSelectionStart();
+      onChange(value.substring(0, triggerStart) + value.substring(cursorPos));
+
+      // Add to context store
+      const name = getFileName(filePath);
+      onFileSelect?.(filePath, name);
+
+      requestAnimationFrame(() => {
+        input.setSelectionRange(triggerStart, triggerStart);
+        input.focus();
+      });
+    },
+  };
+}
+
+function makePlanItem(onPlanSelect: () => void): MentionItem {
+  return {
+    id: '__plan__',
+    kind: 'plan',
+    label: 'Plan',
+    description: 'Include the plan as context',
+    onSelect: (input, value, triggerStart, onChange) => {
+      const cursorPos = input.getSelectionStart();
+      onChange(value.substring(0, triggerStart) + value.substring(cursorPos));
+      onPlanSelect();
+      requestAnimationFrame(() => {
+        input.setSelectionRange(triggerStart, triggerStart);
+        input.focus();
+      });
+    },
+  };
+}
+
+/** Build a prompt mention item that adds prompt to context store instead of inserting content. */
+function makePromptItem(
+  prompt: { id: string; name: string; content: string },
+  onPromptSelect?: (id: string, name: string) => void,
+): MentionItem {
+  return {
+    id: prompt.id,
+    kind: 'prompt',
+    label: prompt.name,
+    description: prompt.content.length > 100 ? prompt.content.slice(0, 100) + '...' : prompt.content,
+    onSelect: (input, value, triggerStart, onChange) => {
+      // Remove the @trigger text
+      const cursorPos = input.getSelectionStart();
+      onChange(value.substring(0, triggerStart) + value.substring(cursorPos));
+
+      // Add to context store
+      onPromptSelect?.(prompt.id, prompt.name);
+
+      requestAnimationFrame(() => {
+        input.setSelectionRange(triggerStart, triggerStart);
+        input.focus();
+      });
+    },
+  };
+}
+
 export function useInlineMention(
   inputRef: React.RefObject<RichTextInputHandle | null>,
   value: string,
   onChange: (value: string) => void,
-  sessionId?: string | null
+  sessionId?: string | null,
+  onPlanSelect?: () => void,
+  onFileSelect?: (path: string, name: string) => void,
+  onPromptSelect?: (id: string, name: string) => void,
 ) {
   const [isOpen, setIsOpen] = useState(false);
   const [position, setPosition] = useState<Position | null>(null);
@@ -146,35 +222,31 @@ export function useInlineMention(
   }, [isOpen, query, searchFiles]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
+  // Build plan item
+  const planItem = useMemo((): MentionItem | null => {
+    if (!onPlanSelect) return null;
+    return makePlanItem(onPlanSelect);
+  }, [onPlanSelect]);
+
   // Build prompt items
   const promptItems = useMemo((): MentionItem[] => {
-    return prompts.map((prompt) => ({
-      id: prompt.id,
-      type: 'prompt' as const,
-      label: prompt.name,
-      description: prompt.content.length > 100 ? prompt.content.slice(0, 100) + '...' : prompt.content,
-      content: prompt.content,
-    }));
-  }, [prompts]);
+    return prompts.map((prompt) => makePromptItem(prompt, onPromptSelect));
+  }, [prompts, onPromptSelect]);
 
   // Build file items from search results
   const fileItems = useMemo((): MentionItem[] => {
-    return fileResults.map((filePath) => ({
-      id: filePath,
-      type: 'file' as const,
-      label: filePath,
-      description: 'File',
-    }));
-  }, [fileResults]);
+    return fileResults.map((filePath) => makeFileItem(filePath, onFileSelect));
+  }, [fileResults, onFileSelect]);
 
   // Combine and filter items
   const filteredItems = useMemo(() => {
-    const filtered = filterItems(promptItems, query);
-    const filteredFiles = filterItems(fileItems, query);
-
-    // Prompts first, then files
-    return [...filtered, ...filteredFiles];
-  }, [promptItems, fileItems, query]);
+    // Plan first, then prompts, then files
+    const allItems: MentionItem[] = [];
+    if (planItem) allItems.push(planItem);
+    allItems.push(...promptItems);
+    allItems.push(...fileItems);
+    return filterItems(allItems, query);
+  }, [planItem, promptItems, fileItems, query]);
 
   // Reset selected index when items change
   /* eslint-disable react-hooks/set-state-in-effect -- resetting selection on items change is intentional */
@@ -246,34 +318,10 @@ export function useInlineMention(
       const input = inputRef.current;
       if (!input || triggerStart < 0) return;
 
-      let insertText: string;
-      let cursorOffset: number;
-
-      if (item.type === 'prompt' && item.content) {
-        // For prompts, replace @mention with full prompt content + newline
-        insertText = item.content + '\n';
-        cursorOffset = insertText.length;
-      } else {
-        // For files, replace @mention with @filename
-        insertText = `@${item.label} `;
-        cursorOffset = insertText.length;
-      }
-
-      // Get current cursor position to determine end of replacement
-      const cursorPos = input.getSelectionStart();
-      const newValue = value.substring(0, triggerStart) + insertText + value.substring(cursorPos);
-
-      onChange(newValue);
+      item.onSelect(input, value, triggerStart, onChange);
       setIsOpen(false);
       setTriggerStart(-1);
       setQuery('');
-
-      // Restore cursor position
-      requestAnimationFrame(() => {
-        const newCursorPos = triggerStart + cursorOffset;
-        input.setSelectionRange(newCursorPos, newCursorPos);
-        input.focus();
-      });
     },
     [inputRef, triggerStart, value, onChange]
   );

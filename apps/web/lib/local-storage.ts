@@ -42,6 +42,15 @@ export function setLocalStorage<T extends JsonValue>(key: string, value: T): voi
   }
 }
 
+export function removeSessionStorage(key: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.sessionStorage.removeItem(key);
+  } catch {
+    // Ignore removal failures.
+  }
+}
+
 export function removeLocalStorage(key: string): void {
   if (typeof window === 'undefined') return;
   try {
@@ -417,5 +426,105 @@ export function setActiveTabForSession(sessionId: string, tabId: string): void {
     window.sessionStorage.setItem(key, JSON.stringify(tabId));
   } catch {
     // Ignore write failures
+  }
+}
+
+// --- Chat draft persistence (sessionStorage, per task) ---
+
+const CHAT_DRAFT_TEXT_KEY = 'kandev.chatDraft.text';
+const CHAT_DRAFT_CONTENT_KEY = 'kandev.chatDraft.content';
+const CHAT_DRAFT_ATTACHMENTS_KEY = 'kandev.chatDraft.attachments';
+const CHAT_INPUT_HEIGHT_KEY = 'kandev.chatInput.height';
+
+/** Stored attachment — same as ImageAttachment but without `preview` (reconstructed on load) */
+type StoredImageAttachment = {
+  id: string;
+  data: string;
+  mimeType: string;
+  size: number;
+  width: number;
+  height: number;
+};
+
+export function getChatDraftText(sessionId: string): string {
+  return getSessionStorage(`${CHAT_DRAFT_TEXT_KEY}.${sessionId}`, '');
+}
+
+export function setChatDraftText(sessionId: string, text: string): void {
+  if (text === '') {
+    removeSessionStorage(`${CHAT_DRAFT_TEXT_KEY}.${sessionId}`);
+  } else {
+    setSessionStorage(`${CHAT_DRAFT_TEXT_KEY}.${sessionId}`, text);
+  }
+}
+
+/** TipTap editor JSON — preserves rich content (mentions, code blocks, etc.) */
+export function getChatDraftContent(sessionId: string): unknown {
+  return getSessionStorage<JsonValue | null>(`${CHAT_DRAFT_CONTENT_KEY}.${sessionId}`, null);
+}
+
+export function setChatDraftContent(sessionId: string, content: unknown): void {
+  if (!content) {
+    removeSessionStorage(`${CHAT_DRAFT_CONTENT_KEY}.${sessionId}`);
+  } else {
+    setSessionStorage(`${CHAT_DRAFT_CONTENT_KEY}.${sessionId}`, content as JsonValue);
+  }
+}
+
+export function getChatDraftAttachments(sessionId: string): StoredImageAttachment[] {
+  return getSessionStorage<StoredImageAttachment[]>(`${CHAT_DRAFT_ATTACHMENTS_KEY}.${sessionId}`, []);
+}
+
+export function setChatDraftAttachments(sessionId: string, attachments: Array<{ id: string; data: string; mimeType: string; size: number; width: number; height: number; preview?: string }>): void {
+  if (attachments.length === 0) {
+    removeSessionStorage(`${CHAT_DRAFT_ATTACHMENTS_KEY}.${sessionId}`);
+  } else {
+    // Strip `preview` to halve storage cost — reconstructed on load
+    const stored: StoredImageAttachment[] = attachments.map(({ id, data, mimeType, size, width, height }) => ({
+      id, data, mimeType, size, width, height,
+    }));
+    setSessionStorage(`${CHAT_DRAFT_ATTACHMENTS_KEY}.${sessionId}`, stored);
+  }
+}
+
+/**
+ * Reconstruct the `preview` data URL from stored attachment data.
+ */
+export function restoreAttachmentPreview(att: StoredImageAttachment): StoredImageAttachment & { preview: string } {
+  return { ...att, preview: `data:${att.mimeType};base64,${att.data}` };
+}
+
+export function getChatInputHeight(sessionId: string): number | null {
+  return getSessionStorage<number | null>(`${CHAT_INPUT_HEIGHT_KEY}.${sessionId}`, null);
+}
+
+export function setChatInputHeight(sessionId: string, height: number): void {
+  setSessionStorage(`${CHAT_INPUT_HEIGHT_KEY}.${sessionId}`, height);
+}
+
+// --- Task storage cleanup ---
+
+/**
+ * Remove all session-scoped storage for a deleted task.
+ * Call from task.deleted handler before the task is removed from state.
+ */
+export function cleanupTaskStorage(taskId: string, sessionIds: string[]): void {
+  // Plan notification (localStorage, keyed per task inside a Record)
+  setPlanLastSeen(taskId, null);
+
+  // Session-keyed storage — clean all sessions belonging to the task
+  for (const sessionId of sessionIds) {
+    removeSessionStorage(`${CHAT_DRAFT_TEXT_KEY}.${sessionId}`);
+    removeSessionStorage(`${CHAT_DRAFT_CONTENT_KEY}.${sessionId}`);
+    removeSessionStorage(`${CHAT_DRAFT_ATTACHMENTS_KEY}.${sessionId}`);
+    removeSessionStorage(`${CHAT_INPUT_HEIGHT_KEY}.${sessionId}`);
+    removeSessionStorage(`${FILES_PANEL_KEYS.TAB}.${sessionId}`);
+    removeSessionStorage(`${FILES_PANEL_KEYS.USER_SELECTED}.${sessionId}`);
+    removeSessionStorage(`${FILES_PANEL_KEYS.EXPANDED}.${sessionId}`);
+    removeSessionStorage(`${FILES_PANEL_KEYS.SCROLL}.${sessionId}`);
+    removeSessionStorage(`${DOCKVIEW_SESSION_LAYOUT_PREFIX}${sessionId}`);
+    removeSessionStorage(`${OPEN_FILES_KEY}.${sessionId}`);
+    removeSessionStorage(`${ACTIVE_TAB_KEY}.${sessionId}`);
+    removeSessionStorage(`kandev.contextFiles.${sessionId}`);
   }
 }

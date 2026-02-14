@@ -739,6 +739,137 @@
   user-select: none;
 }
 
+/* TipTap editor styles */
+.tiptap p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: var(--muted-foreground);
+  pointer-events: none;
+  height: 0;
+}
+
+.tiptap p {
+  margin: 0;
+}
+
+/* Inline code */
+.tiptap code {
+  background-color: var(--muted);
+  border-radius: 0.25rem;
+  padding: 0.125rem 0.25rem;
+  font-size: 0.75rem;
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+/* Code blocks */
+.tiptap pre {
+  background-color: color-mix(in oklch, var(--card) 80%, black 20%);
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  padding: 0.5rem 0.75rem;
+  margin: 0.25rem 0;
+  overflow-x: auto;
+  position: relative;
+}
+
+.tiptap pre code {
+  background: none;
+  padding: 0;
+  border-radius: 0;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+/* Language selector on code blocks */
+.tiptap pre .code-block-language {
+  position: absolute;
+  top: 0.25rem;
+  right: 0.25rem;
+  font-size: 0.625rem;
+  font-family: var(--font-sans, ui-sans-serif, sans-serif);
+  color: var(--muted-foreground);
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 0.25rem;
+  padding: 0.0625rem 0.25rem;
+  cursor: pointer;
+  outline: none;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.tiptap pre:hover .code-block-language,
+.tiptap pre:focus-within .code-block-language {
+  opacity: 1;
+}
+
+/* Lowlight / highlight.js syntax colors */
+.tiptap pre code .hljs-comment,
+.tiptap pre code .hljs-quote {
+  color: var(--muted-foreground);
+  font-style: italic;
+}
+
+.tiptap pre code .hljs-keyword,
+.tiptap pre code .hljs-selector-tag,
+.tiptap pre code .hljs-built_in {
+  color: oklch(0.65 0.2 300);
+}
+
+.tiptap pre code .hljs-string,
+.tiptap pre code .hljs-attr,
+.tiptap pre code .hljs-addition {
+  color: oklch(0.7 0.15 150);
+}
+
+.tiptap pre code .hljs-number,
+.tiptap pre code .hljs-literal {
+  color: oklch(0.7 0.15 60);
+}
+
+.tiptap pre code .hljs-title,
+.tiptap pre code .hljs-section,
+.tiptap pre code .hljs-type {
+  color: oklch(0.75 0.15 80);
+}
+
+.tiptap pre code .hljs-name,
+.tiptap pre code .hljs-tag {
+  color: oklch(0.65 0.2 20);
+}
+
+.tiptap pre code .hljs-variable,
+.tiptap pre code .hljs-template-variable {
+  color: oklch(0.65 0.2 20);
+}
+
+.tiptap pre code .hljs-regexp,
+.tiptap pre code .hljs-link {
+  color: oklch(0.7 0.15 30);
+}
+
+.tiptap pre code .hljs-symbol,
+.tiptap pre code .hljs-bullet {
+  color: oklch(0.65 0.2 330);
+}
+
+.tiptap pre code .hljs-meta {
+  color: var(--muted-foreground);
+}
+
+.tiptap pre code .hljs-deletion {
+  color: oklch(0.65 0.2 20);
+}
+
+.tiptap pre code .hljs-emphasis {
+  font-style: italic;
+}
+
+.tiptap pre code .hljs-strong {
+  font-weight: bold;
+}
+
 .debug {
   border: 1px solid red !important;
 }

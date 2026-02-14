@@ -61,24 +61,51 @@ func TestUserMessageMeta_ToMap_AttachmentsOnly(t *testing.T) {
 	}
 }
 
-func TestUserMessageMeta_ToMap_AllFields(t *testing.T) {
-	attachments := []v1.MessageAttachment{{Type: "image", Data: "data", MimeType: "image/jpeg"}}
-	meta := NewUserMessageMeta().
-		WithPlanMode(true).
-		WithReviewComments(true).
-		WithAttachments(attachments)
+func TestUserMessageMeta_ToMap_ContextFilesOnly(t *testing.T) {
+	files := []v1.ContextFileMeta{{Path: "src/main.go", Name: "main.go"}}
+	meta := NewUserMessageMeta().WithContextFiles(files)
 	result := meta.ToMap()
 	if result == nil {
 		t.Fatal("expected non-nil map")
 	}
-	if len(result) != 3 {
-		t.Errorf("expected 3 keys, got %d", len(result))
+	cf, ok := result["context_files"]
+	if !ok {
+		t.Fatal("expected context_files key")
+	}
+	if len(cf.([]v1.ContextFileMeta)) != 1 {
+		t.Errorf("expected 1 context file, got %d", len(cf.([]v1.ContextFileMeta)))
+	}
+	if _, ok := result["plan_mode"]; ok {
+		t.Error("unexpected plan_mode key")
+	}
+}
+
+func TestUserMessageMeta_ToMap_AllFields(t *testing.T) {
+	attachments := []v1.MessageAttachment{{Type: "image", Data: "data", MimeType: "image/jpeg"}}
+	contextFiles := []v1.ContextFileMeta{{Path: "README.md", Name: "README.md"}}
+	meta := NewUserMessageMeta().
+		WithPlanMode(true).
+		WithReviewComments(true).
+		WithAttachments(attachments).
+		WithContextFiles(contextFiles)
+	result := meta.ToMap()
+	if result == nil {
+		t.Fatal("expected non-nil map")
+	}
+	if len(result) != 4 {
+		t.Errorf("expected 4 keys, got %d", len(result))
 	}
 	if result["plan_mode"] != true {
 		t.Error("expected plan_mode=true")
 	}
 	if result["has_review_comments"] != true {
 		t.Error("expected has_review_comments=true")
+	}
+	if _, ok := result["attachments"]; !ok {
+		t.Error("expected attachments key")
+	}
+	if _, ok := result["context_files"]; !ok {
+		t.Error("expected context_files key")
 	}
 }
 
@@ -105,5 +132,9 @@ func TestUserMessageMeta_Chaining(t *testing.T) {
 	returned = meta.WithAttachments(nil)
 	if returned != meta {
 		t.Error("WithAttachments should return the same pointer for chaining")
+	}
+	returned = meta.WithContextFiles(nil)
+	if returned != meta {
+		t.Error("WithContextFiles should return the same pointer for chaining")
 	}
 }

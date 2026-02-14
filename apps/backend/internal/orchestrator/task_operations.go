@@ -191,7 +191,7 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 	}
 
 	if execution.SessionID != "" {
-		s.recordInitialMessage(ctx, taskID, execution.SessionID, effectivePrompt, false)
+		s.updateTaskSessionState(ctx, taskID, execution.SessionID, models.TaskSessionStateRunning, "", true)
 	}
 
 	return execution, nil

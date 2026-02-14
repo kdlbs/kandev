@@ -8,6 +8,7 @@ type UserMessageMeta struct {
 	PlanMode          bool
 	HasReviewComments bool
 	Attachments       []v1.MessageAttachment
+	ContextFiles      []v1.ContextFileMeta
 }
 
 // NewUserMessageMeta creates a UserMessageMeta builder.
@@ -33,10 +34,16 @@ func (m *UserMessageMeta) WithAttachments(attachments []v1.MessageAttachment) *U
 	return m
 }
 
+// WithContextFiles sets the context files attached to the message.
+func (m *UserMessageMeta) WithContextFiles(files []v1.ContextFileMeta) *UserMessageMeta {
+	m.ContextFiles = files
+	return m
+}
+
 // ToMap returns the metadata as a map suitable for message creation.
 // Returns nil if no metadata fields are set.
 func (m *UserMessageMeta) ToMap() map[string]interface{} {
-	if !m.PlanMode && !m.HasReviewComments && len(m.Attachments) == 0 {
+	if !m.PlanMode && !m.HasReviewComments && len(m.Attachments) == 0 && len(m.ContextFiles) == 0 {
 		return nil
 	}
 	meta := make(map[string]interface{})
@@ -48,6 +55,9 @@ func (m *UserMessageMeta) ToMap() map[string]interface{} {
 	}
 	if len(m.Attachments) > 0 {
 		meta["attachments"] = m.Attachments
+	}
+	if len(m.ContextFiles) > 0 {
+		meta["context_files"] = m.ContextFiles
 	}
 	return meta
 }

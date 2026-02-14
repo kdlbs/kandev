@@ -48,6 +48,7 @@ import { linkToSession } from '@/lib/links';
 import { getExecutorIcon } from '@/lib/executor-icons';
 
 import { useDockviewStore } from '@/lib/state/dockview-store';
+import { useContextFilesStore } from '@/lib/state/context-files-store';
 
 interface TaskCreateDialogProps {
   open: boolean;
@@ -959,6 +960,8 @@ export function TaskCreateDialog({
             referencePanel: 'chat',
           });
           setPlanMode(newSessionId, true);
+          // Add plan as context so it's included in messages
+          useContextFilesStore.getState().addFile(newSessionId, { path: 'plan:context', name: 'Plan' });
           router.push(linkToSession(newSessionId));
         } else {
           onOpenChange(false);

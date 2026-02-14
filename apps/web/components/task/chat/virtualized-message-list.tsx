@@ -40,7 +40,11 @@ export const VirtualizedMessageList = memo(function VirtualizedMessageList({
 }: VirtualizedMessageListProps) {
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const wasAtBottomRef = useRef(true);
+  const savedScrollTopRef = useRef(0);
   const previousHeightRef = useRef(0);
+  const previousWidthRef = useRef(0);
+  /** True while the panel is hidden (0 dimensions) to avoid stale scroll updates */
+  const isHiddenRef = useRef(false);
 
   const isInitialLoading = messagesLoading && messages.length === 0;
   const isCreatedSession = sessionState === 'CREATED';
@@ -79,11 +83,15 @@ export const VirtualizedMessageList = memo(function VirtualizedMessageList({
     const element = messagesContainerRef.current;
     if (!element) return;
 
+    // Ignore scroll events while panel is hidden (browser resets scrollTop to 0)
+    if (isHiddenRef.current) return;
+
     const { scrollTop, scrollHeight, clientHeight } = element;
 
     // Track if we're at the bottom for auto-scroll behavior (100px threshold)
     // User is considered "at bottom" if within 100px of the bottom
     wasAtBottomRef.current = scrollHeight - scrollTop - clientHeight < 100;
+    savedScrollTopRef.current = scrollTop;
 
     // Trigger lazy load when scrolled near top
     if (scrollTop < 40 && loadingRef.current.hasMore && !loadingRef.current.isLoadingMore) {
@@ -106,6 +114,10 @@ export const VirtualizedMessageList = memo(function VirtualizedMessageList({
     return () => element.removeEventListener('scroll', handleScroll);
   }, [handleScroll]);
 
+  // Keep a ref so the ResizeObserver closure always has the current virtualizer
+  const virtualizerRef = useRef(virtualizer);
+  virtualizerRef.current = virtualizer;
+
   // Maintain scroll position at bottom when container resizes (e.g., chat input grows)
   useEffect(() => {
     const element = messagesContainerRef.current;
@@ -114,7 +126,45 @@ export const VirtualizedMessageList = memo(function VirtualizedMessageList({
     const resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
         const currentHeight = entry.contentRect.height;
+        const currentWidth = entry.contentRect.width;
         const previousHeight = previousHeightRef.current;
+        const previousWidth = previousWidthRef.current;
+
+        // Panel being hidden by dockview — mark as hidden, don't update refs
+        if (currentWidth === 0 || currentHeight === 0) {
+          isHiddenRef.current = true;
+          return;
+        }
+
+        // Panel becoming visible again — restore scroll position
+        if (isHiddenRef.current) {
+          isHiddenRef.current = false;
+          previousHeightRef.current = currentHeight;
+          previousWidthRef.current = currentWidth;
+
+          // Invalidate stale measurements from when the panel was display:none,
+          // then use the virtualizer's scrollToIndex which persists across
+          // re-measurement cycles (raw scrollTop gets overwritten by the
+          // virtualizer as it re-measures items after becoming visible).
+          const virt = virtualizerRef.current;
+          virt.measure();
+          requestAnimationFrame(() => {
+            if (wasAtBottomRef.current) {
+              const count = virt.options.count;
+              if (count > 0) {
+                virt.scrollToIndex(count - 1, { align: 'end' });
+              }
+            } else {
+              element.scrollTop = savedScrollTopRef.current;
+            }
+          });
+          return;
+        }
+
+        // If width genuinely changed, invalidate cached row measurements (text rewraps)
+        if (previousWidth > 0 && currentWidth !== previousWidth) {
+          virtualizerRef.current.measure();
+        }
 
         // If container got smaller (input grew) and we were at bottom, scroll to bottom
         if (previousHeight > 0 && currentHeight < previousHeight && wasAtBottomRef.current) {
@@ -126,6 +176,7 @@ export const VirtualizedMessageList = memo(function VirtualizedMessageList({
         }
 
         previousHeightRef.current = currentHeight;
+        previousWidthRef.current = currentWidth;
       }
     });
 

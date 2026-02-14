@@ -6,7 +6,8 @@ import { PopupMenu, PopupMenuItem, useMenuItemRefs } from './popup-menu';
 
 type SlashCommandMenuProps = {
   isOpen: boolean;
-  position: { x: number; y: number } | null;
+  position?: { x: number; y: number } | null;
+  clientRect?: (() => DOMRect | null) | null;
   commands: SlashCommand[];
   selectedIndex: number;
   onSelect: (command: SlashCommand) => void;
@@ -17,6 +18,7 @@ type SlashCommandMenuProps = {
 export function SlashCommandMenu({
   isOpen,
   position,
+  clientRect,
   commands,
   selectedIndex,
   onSelect,
@@ -32,7 +34,8 @@ export function SlashCommandMenu({
   return (
     <PopupMenu
       isOpen={isOpen}
-      position={position}
+      position={position ?? null}
+      clientRect={clientRect}
       title="Commands"
       selectedIndex={selectedIndex}
       onClose={onClose}
