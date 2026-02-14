@@ -6,10 +6,11 @@ import (
 	"os"
 	"strings"
 
-	"github.com/kandev/kandev/internal/agent/registry"
+	"github.com/kandev/kandev/internal/agent/agents"
 )
 
-// CommandBuilder builds agent commands from registry configuration
+// CommandBuilder builds agent commands from agent configuration.
+// Delegates to the Agent interface's BuildCommand method.
 type CommandBuilder struct{}
 
 // NewCommandBuilder creates a new CommandBuilder
@@ -17,96 +18,23 @@ func NewCommandBuilder() *CommandBuilder {
 	return &CommandBuilder{}
 }
 
-// CommandOptions contains options for building a command
-type CommandOptions struct {
-	Model       string // Model to use (appended via ModelFlag if set)
-	SessionID   string // Session ID to resume (appended via SessionConfig.ResumeFlag if not NativeSessionResume)
-	AutoApprove bool   // If true, skip permission flags (auto-approve all tool calls)
-
-	// PermissionValues contains the values for each permission setting
-	// Keys are setting names (e.g., "allow_indexing", "auto_approve")
-	// Values are the boolean state of each setting
-	PermissionValues map[string]bool
-}
-
-// BuildCommand builds a command slice from agent config and options
-// Returns the command as a string slice ready for execution
-func (cb *CommandBuilder) BuildCommand(agentConfig *registry.AgentTypeConfig, opts CommandOptions) []string {
-	// Start with base command from config
-	cmd := make([]string, len(agentConfig.Cmd))
-	copy(cmd, agentConfig.Cmd)
-
-	// Append model flag if agent supports it and model is specified
-	// ModelFlag supports {model} placeholder, e.g. "--model {model}" or "-c model=\"{model}\""
-	if agentConfig.ModelFlag != "" && opts.Model != "" {
-		expanded := strings.ReplaceAll(agentConfig.ModelFlag, "{model}", opts.Model)
-		// Split on first space to separate flag from value (if combined)
-		parts := strings.SplitN(expanded, " ", 2)
-		cmd = append(cmd, parts...)
-	}
-
-	// Append session resume flag if:
-	// 1. Session ID is provided
-	// 2. Agent does NOT use native session loading (uses CLI flag instead)
-	// 3. Agent has a ResumeFlag configured
-	// 4. Agent supports session recovery (CanRecover is not false)
-	if opts.SessionID != "" && !agentConfig.SessionConfig.NativeSessionResume && agentConfig.SessionConfig.ResumeFlag != "" && agentConfig.SessionConfig.SupportsRecovery() {
-		cmd = append(cmd, agentConfig.SessionConfig.ResumeFlag, opts.SessionID)
-	}
-
-	// Add permission flags when AutoApprove is false
-	// This makes the agent request permission via ACP for tool calls
-	permConfig := agentConfig.PermissionConfig
-	if !opts.AutoApprove && permConfig.PermissionFlag != "" && len(permConfig.ToolsRequiringPermission) > 0 {
-		for _, tool := range permConfig.ToolsRequiringPermission {
-			cmd = append(cmd, permConfig.PermissionFlag, tool+":ask-user")
-		}
-	}
-
-	// Apply permission settings that use CLI flags
-	// Each permission setting can define its own CLI flag via ApplyMethod="cli_flag"
-	if permSettings := agentConfig.PermissionSettings; permSettings != nil {
-		for settingName, setting := range permSettings {
-			// Skip if not supported or not a CLI flag setting
-			if !setting.Supported || setting.ApplyMethod != "cli_flag" || setting.CLIFlag == "" {
-				continue
-			}
-
-			// Get the value for this setting from options
-			value, exists := opts.PermissionValues[settingName]
-			if !exists {
-				continue
-			}
-
-			// Only apply if the setting value is true
-			if value {
-				if setting.CLIFlagValue != "" {
-					// Flag with value: "--flag value"
-					cmd = append(cmd, setting.CLIFlag, setting.CLIFlagValue)
-				} else {
-					// Boolean flag or multiple flags: "--flag" or "--flag1 --flag2 arg"
-					// Split on spaces to handle multiple flags in one setting
-					parts := strings.Fields(setting.CLIFlag)
-					cmd = append(cmd, parts...)
-				}
-			}
-		}
-	}
-
-	return cmd
+// BuildCommand builds a Command from agent config and options.
+// Delegates to the Agent.BuildCommand method.
+func (cb *CommandBuilder) BuildCommand(ag agents.Agent, opts agents.CommandOptions) agents.Command {
+	return ag.BuildCommand(opts)
 }
 
 // BuildCommandString builds a command as a single string (for standalone mode)
-func (cb *CommandBuilder) BuildCommandString(agentConfig *registry.AgentTypeConfig, opts CommandOptions) string {
-	cmd := cb.BuildCommand(agentConfig, opts)
-	return strings.Join(cmd, " ")
+func (cb *CommandBuilder) BuildCommandString(ag agents.Agent, opts agents.CommandOptions) string {
+	cmd := cb.BuildCommand(ag, opts)
+	return strings.Join(cmd.Args(), " ")
 }
 
-// ExpandSessionDir expands the session directory template from SessionConfig
-// Replaces {home} with the user's home directory
-// Returns empty string if no session directory is configured
-func (cb *CommandBuilder) ExpandSessionDir(agentConfig *registry.AgentTypeConfig) string {
-	template := agentConfig.SessionConfig.SessionDirTemplate
+// ExpandSessionDir expands the session directory template from SessionConfig.
+// Replaces {home} with the user's home directory.
+// Returns empty string if no session directory is configured.
+func (cb *CommandBuilder) ExpandSessionDir(ag agents.Agent) string {
+	template := ag.Runtime().SessionConfig.SessionDirTemplate
 	if template == "" {
 		return ""
 	}
@@ -124,8 +52,8 @@ func (cb *CommandBuilder) ExpandSessionDir(agentConfig *registry.AgentTypeConfig
 	return result
 }
 
-// GetSessionDirTarget returns the container path for session directory mount
-// Returns empty string if no session directory is configured
-func (cb *CommandBuilder) GetSessionDirTarget(agentConfig *registry.AgentTypeConfig) string {
-	return agentConfig.SessionConfig.SessionDirTarget
+// GetSessionDirTarget returns the container path for session directory mount.
+// Returns empty string if no session directory is configured.
+func (cb *CommandBuilder) GetSessionDirTarget(ag agents.Agent) string {
+	return ag.Runtime().SessionConfig.SessionDirTarget
 }

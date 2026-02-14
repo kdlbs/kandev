@@ -37,9 +37,8 @@ func (r *StoreProfileResolver) ResolveProfile(ctx context.Context, profileID str
 	// Determine the model to use: profile's model, or fall back to agent's default model
 	model := profile.Model
 	if model == "" && r.registry != nil {
-		// Look up the agent type in the registry to get the default model
-		if agentType, ok := r.registry.Get(agent.Name); ok {
-			model = agentType.ModelConfig.DefaultModel
+		if ag, ok := r.registry.Get(agent.Name); ok {
+			model = ag.DefaultModel()
 		}
 	}
 

@@ -5,7 +5,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/kandev/kandev/internal/agent/registry"
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/runtime"
 	agentctl "github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
@@ -66,7 +66,7 @@ type RuntimeCreateRequest struct {
 	Env            map[string]string
 	Metadata       map[string]interface{}
 	McpServers     []McpServerConfig
-	AgentConfig    *registry.AgentTypeConfig // Agent type info needed by runtimes
+	AgentConfig    agents.Agent // Agent type info needed by runtimes
 }
 
 // RuntimeInstance represents an agentctl instance created by a runtime.

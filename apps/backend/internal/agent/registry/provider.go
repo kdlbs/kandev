@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/zap"
 )
@@ -14,13 +15,16 @@ func Provide(log *logger.Logger) (*Registry, func() error, error) {
 	reg.LoadDefaults()
 
 	if os.Getenv("KANDEV_MOCK_AGENT") == "true" {
-		if cfg, ok := reg.Get("mock-agent"); ok {
-			cfg.Enabled = true
-			// Resolve binary path: same directory as the running executable
-			if exePath, err := os.Executable(); err == nil {
-				cfg.Cmd = []string{filepath.Join(filepath.Dir(exePath), "mock-agent")}
+		if ag, ok := reg.Get("mock-agent"); ok {
+			if mock, ok := ag.(*agents.MockAgent); ok {
+				mock.SetEnabled(true)
+				// Resolve binary path: same directory as the running executable
+				if exePath, err := os.Executable(); err == nil {
+					binaryPath := filepath.Join(filepath.Dir(exePath), "mock-agent")
+					mock.SetBinaryPath(binaryPath)
+					log.Info("mock agent enabled", zap.String("cmd", binaryPath))
+				}
 			}
-			log.Info("mock agent enabled", zap.String("cmd", cfg.Cmd[0]))
 		}
 	}
 

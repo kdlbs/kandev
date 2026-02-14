@@ -18,11 +18,11 @@ import (
 )
 
 func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories, eventBus bus.EventBus) (*Services, *agentsettingscontroller.Controller, error) {
-	discoveryRegistry, err := discovery.LoadRegistry()
+	agentRegistry, _, err := registry.Provide(log)
 	if err != nil {
 		return nil, nil, err
 	}
-	agentRegistry, _, err := registry.Provide(log)
+	discoveryRegistry, err := discovery.LoadRegistry(context.Background(), agentRegistry, log)
 	if err != nil {
 		return nil, nil, err
 	}

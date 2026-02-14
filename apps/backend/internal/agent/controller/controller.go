@@ -147,13 +147,17 @@ func (c *Controller) ListAgentTypes(ctx context.Context, req dto.ListAgentTypesR
 	}
 
 	for _, t := range types {
+		var image string
+		if rt := t.Runtime(); rt != nil {
+			image = rt.Image
+		}
 		resp.Types = append(resp.Types, dto.FromAgentType(&dto.AgentTypeData{
-			ID:           t.ID,
-			Name:         t.Name,
-			Description:  t.Description,
-			Image:        t.Image,
-			Capabilities: t.Capabilities,
-			Enabled:      t.Enabled,
+			ID:           t.ID(),
+			Name:         t.Name(),
+			Description:  t.Description(),
+			Image:        image,
+			Capabilities: t.Runtime().Capabilities,
+			Enabled:      t.Enabled(),
 		}))
 	}
 

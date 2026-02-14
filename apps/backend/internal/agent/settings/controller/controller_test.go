@@ -2,55 +2,138 @@ package controller
 
 import (
 	"context"
+	"strings"
 	"testing"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
+	"github.com/kandev/kandev/internal/agent/settings/modelfetcher"
+	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
-func newTestController(agents map[string]*registry.AgentTypeConfig) *Controller {
+// testAgent is a minimal implementation of agents.Agent for testing purposes.
+// Embeds StandardPassthrough to optionally satisfy agents.PassthroughAgent.
+type testAgent struct {
+	agents.StandardPassthrough
+	id                 string
+	name               string
+	displayName        string
+	description        string
+	enabled            bool
+	runtime            *agents.RuntimeConfig
+	permissionSettings map[string]agents.PermissionSetting
+}
+
+func (a *testAgent) ID() string          { return a.id }
+func (a *testAgent) Name() string        { return a.name }
+func (a *testAgent) DisplayName() string { return a.displayName }
+func (a *testAgent) Description() string { return a.description }
+func (a *testAgent) Enabled() bool       { return a.enabled }
+
+func (a *testAgent) Logo(v agents.LogoVariant) []byte { return nil }
+
+func (a *testAgent) IsInstalled(ctx context.Context) (*agents.DiscoveryResult, error) {
+	return &agents.DiscoveryResult{Available: false}, nil
+}
+
+func (a *testAgent) DefaultModel() string { return "" }
+
+func (a *testAgent) ListModels(ctx context.Context) (*agents.ModelList, error) {
+	return &agents.ModelList{}, nil
+}
+
+func (a *testAgent) CreateAdapter(cfg *adapter.Config, log *logger.Logger) (adapter.AgentAdapter, error) {
+	return nil, agents.ErrNotSupported
+}
+
+// BuildCommand builds a command using runtime config, model flag, and permission flags.
+func (a *testAgent) BuildCommand(opts agents.CommandOptions) agents.Command {
+	rt := a.Runtime()
+	if rt == nil {
+		return agents.Command{}
+	}
+	cmd := make([]string, len(rt.Cmd.Args()))
+	copy(cmd, rt.Cmd.Args())
+
+	if opts.Model != "" && !rt.ModelFlag.IsEmpty() {
+		for _, arg := range rt.ModelFlag.Args() {
+			cmd = append(cmd, strings.ReplaceAll(arg, "{model}", opts.Model))
+		}
+	}
+
+	cmd = applyTestPermissionFlags(cmd, a.permissionSettings, opts.PermissionValues)
+	return agents.NewCommand(cmd...)
+}
+
+func applyTestPermissionFlags(cmd []string, permSettings map[string]agents.PermissionSetting, values map[string]bool) []string {
+	if permSettings == nil || values == nil {
+		return cmd
+	}
+	for name, setting := range permSettings {
+		if !setting.Supported || setting.ApplyMethod != "cli_flag" || setting.CLIFlag == "" {
+			continue
+		}
+		v, ok := values[name]
+		if !ok || !v {
+			continue
+		}
+		if setting.CLIFlagValue != "" {
+			cmd = append(cmd, setting.CLIFlag, setting.CLIFlagValue)
+		} else {
+			parts := strings.Fields(setting.CLIFlag)
+			cmd = append(cmd, parts...)
+		}
+	}
+	return cmd
+}
+
+func (a *testAgent) PermissionSettings() map[string]agents.PermissionSetting {
+	return a.permissionSettings
+}
+
+func (a *testAgent) Runtime() *agents.RuntimeConfig {
+	return a.runtime
+}
+
+func newTestController(agentList map[string]agents.Agent) *Controller {
 	log, _ := logger.NewLogger(logger.LoggingConfig{
 		Level:  "error",
 		Format: "json",
 	})
-	// Create a real registry and register the agents
 	reg := registry.NewRegistry(log)
-	for _, agent := range agents {
-		_ = reg.Register(agent)
+	for _, ag := range agentList {
+		_ = reg.Register(ag)
 	}
 	return &Controller{
 		agentRegistry: reg,
+		modelCache:    modelfetcher.NewCache(),
 		logger:        log,
 	}
 }
 
 func TestController_PreviewAgentCommand_StandardCommand(t *testing.T) {
-	agents := map[string]*registry.AgentTypeConfig{
-		"test-agent": {
-			ID:        "test-agent",
-			Name:      "test-agent",
-			Cmd:       []string{"test-cli", "--verbose"},
-			ModelFlag: "--model {model}",
-			ResourceLimits: registry.ResourceLimits{
-				MemoryMB:       1024,
-				CPUCores:       1.0,
-				TimeoutSeconds: 3600,
+	agentList := map[string]agents.Agent{
+		"test-agent": &testAgent{
+			id:      "test-agent",
+			name:    "test-agent",
+			enabled: true,
+			runtime: &agents.RuntimeConfig{
+				Cmd:       agents.NewCommand("test-cli", "--verbose"),
+				ModelFlag: agents.NewParam("--model", "{model}"),
 			},
-			PermissionSettings: map[string]registry.PermissionSetting{
+			permissionSettings: map[string]agents.PermissionSetting{
 				"auto_approve": {
 					Supported:   true,
 					ApplyMethod: "cli_flag",
 					CLIFlag:     "--yes",
 				},
 			},
-			PassthroughConfig: registry.PassthroughConfig{
-				Supported: false,
-			},
 		},
 	}
 
-	controller := newTestController(agents)
+	controller := newTestController(agentList)
 
 	req := CommandPreviewRequest{
 		Model:              "gpt-4",
@@ -67,7 +150,6 @@ func TestController_PreviewAgentCommand_StandardCommand(t *testing.T) {
 		t.Error("PreviewAgentCommand() Supported = false, want true")
 	}
 
-	// Verify command contains expected parts
 	expectedParts := []string{"test-cli", "--verbose", "--model", "gpt-4", "--yes"}
 	for _, part := range expectedParts {
 		found := false
@@ -84,24 +166,31 @@ func TestController_PreviewAgentCommand_StandardCommand(t *testing.T) {
 }
 
 func TestController_PreviewAgentCommand_PassthroughCommand(t *testing.T) {
-	agents := map[string]*registry.AgentTypeConfig{
-		"claude-code": {
-			ID:        "claude-code",
-			Name:      "claude-code",
-			Cmd:       []string{"claude"},
-			ModelFlag: "--model {model}",
-			ResourceLimits: registry.ResourceLimits{
-				MemoryMB:       1024,
-				CPUCores:       1.0,
-				TimeoutSeconds: 3600,
+	agentList := map[string]agents.Agent{
+		"claude-code": &testAgent{
+			id:      "claude-code",
+			name:    "claude-code",
+			enabled: true,
+			runtime: &agents.RuntimeConfig{
+				Cmd:       agents.NewCommand("claude"),
+				ModelFlag: agents.NewParam("--model", "{model}"),
 			},
-			PassthroughConfig: registry.PassthroughConfig{
-				Supported:      true,
-				PassthroughCmd: []string{"npx", "-y", "@anthropic-ai/claude-code"},
-				ModelFlag:      "--model {model}",
-				PromptFlag:     "--prompt {prompt}",
+			StandardPassthrough: agents.StandardPassthrough{
+				Cfg: agents.PassthroughConfig{
+					Supported:      true,
+					PassthroughCmd: agents.NewCommand("npx", "-y", "@anthropic-ai/claude-code"),
+					ModelFlag:      agents.NewParam("--model", "{model}"),
+					PromptFlag:     agents.NewParam("--prompt", "{prompt}"),
+				},
+				PermSettings: map[string]agents.PermissionSetting{
+					"dangerously_skip_permissions": {
+						Supported:   true,
+						ApplyMethod: "cli_flag",
+						CLIFlag:     "--dangerously-skip-permissions",
+					},
+				},
 			},
-			PermissionSettings: map[string]registry.PermissionSetting{
+			permissionSettings: map[string]agents.PermissionSetting{
 				"dangerously_skip_permissions": {
 					Supported:   true,
 					ApplyMethod: "cli_flag",
@@ -111,7 +200,7 @@ func TestController_PreviewAgentCommand_PassthroughCommand(t *testing.T) {
 		},
 	}
 
-	controller := newTestController(agents)
+	controller := newTestController(agentList)
 
 	req := CommandPreviewRequest{
 		Model:              "claude-sonnet-4-20250514",
@@ -167,7 +256,7 @@ func TestController_PreviewAgentCommand_PassthroughCommand(t *testing.T) {
 }
 
 func TestController_PreviewAgentCommand_AgentNotFound(t *testing.T) {
-	controller := newTestController(map[string]*registry.AgentTypeConfig{})
+	controller := newTestController(map[string]agents.Agent{})
 
 	_, err := controller.PreviewAgentCommand(context.Background(), "nonexistent", CommandPreviewRequest{})
 	if err == nil {
@@ -176,24 +265,24 @@ func TestController_PreviewAgentCommand_AgentNotFound(t *testing.T) {
 }
 
 func TestController_PreviewAgentCommand_PassthroughDisabled(t *testing.T) {
-	agents := map[string]*registry.AgentTypeConfig{
-		"test-agent": {
-			ID:   "test-agent",
-			Name: "test-agent",
-			Cmd:  []string{"test-cli"},
-			ResourceLimits: registry.ResourceLimits{
-				MemoryMB:       1024,
-				CPUCores:       1.0,
-				TimeoutSeconds: 3600,
+	agentList := map[string]agents.Agent{
+		"test-agent": &testAgent{
+			id:      "test-agent",
+			name:    "test-agent",
+			enabled: true,
+			runtime: &agents.RuntimeConfig{
+				Cmd: agents.NewCommand("test-cli"),
 			},
-			PassthroughConfig: registry.PassthroughConfig{
-				Supported:      true,
-				PassthroughCmd: []string{"passthrough-cli"},
+			StandardPassthrough: agents.StandardPassthrough{
+				Cfg: agents.PassthroughConfig{
+					Supported:      true,
+					PassthroughCmd: agents.NewCommand("passthrough-cli"),
+				},
 			},
 		},
 	}
 
-	controller := newTestController(agents)
+	controller := newTestController(agentList)
 
 	// CLIPassthrough is false, so should use standard command
 	req := CommandPreviewRequest{
@@ -210,9 +299,7 @@ func TestController_PreviewAgentCommand_PassthroughDisabled(t *testing.T) {
 	}
 }
 
-func TestController_BuildCommandString(t *testing.T) {
-	controller := newTestController(nil)
-
+func TestBuildCommandString(t *testing.T) {
 	tests := []struct {
 		name     string
 		cmd      []string
@@ -247,139 +334,9 @@ func TestController_BuildCommandString(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := controller.buildCommandString(tt.cmd)
+			result := buildCommandString(tt.cmd)
 			if result != tt.expected {
 				t.Errorf("buildCommandString(%v) = %q, want %q", tt.cmd, result, tt.expected)
-			}
-		})
-	}
-}
-
-func TestController_ApplyPermissionFlags(t *testing.T) {
-	controller := newTestController(nil)
-
-	agentConfig := &registry.AgentTypeConfig{
-		PermissionSettings: map[string]registry.PermissionSetting{
-			"auto_approve": {
-				Supported:   true,
-				ApplyMethod: "cli_flag",
-				CLIFlag:     "--yes",
-			},
-			"skip_permissions": {
-				Supported:    true,
-				ApplyMethod:  "cli_flag",
-				CLIFlag:      "--skip",
-				CLIFlagValue: "all",
-			},
-			"unsupported": {
-				Supported: false,
-				CLIFlag:   "--unsupported",
-			},
-			"env_method": {
-				Supported:   true,
-				ApplyMethod: "env_var", // Not cli_flag
-				CLIFlag:     "--env",
-			},
-		},
-	}
-
-	tests := []struct {
-		name       string
-		initial    []string
-		permissions map[string]bool
-		expected   []string
-	}{
-		{
-			name:       "boolean flag enabled",
-			initial:    []string{"cmd"},
-			permissions: map[string]bool{"auto_approve": true},
-			expected:   []string{"cmd", "--yes"},
-		},
-		{
-			name:       "flag with value",
-			initial:    []string{"cmd"},
-			permissions: map[string]bool{"skip_permissions": true},
-			expected:   []string{"cmd", "--skip", "all"},
-		},
-		{
-			name:       "flag disabled",
-			initial:    []string{"cmd"},
-			permissions: map[string]bool{"auto_approve": false},
-			expected:   []string{"cmd"},
-		},
-		{
-			name:       "unsupported flag ignored",
-			initial:    []string{"cmd"},
-			permissions: map[string]bool{"unsupported": true},
-			expected:   []string{"cmd"},
-		},
-		{
-			name:       "non-cli method ignored",
-			initial:    []string{"cmd"},
-			permissions: map[string]bool{"env_method": true},
-			expected:   []string{"cmd"},
-		},
-		{
-			name:       "multiple flags",
-			initial:    []string{"cmd"},
-			permissions: map[string]bool{"auto_approve": true, "skip_permissions": true},
-			expected:   []string{"cmd", "--yes", "--skip", "all"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := controller.applyPermissionFlags(tt.initial, agentConfig, tt.permissions)
-
-			// Check that all expected parts are present (order may vary for maps)
-			if len(result) != len(tt.expected) {
-				t.Errorf("applyPermissionFlags() length = %d, want %d", len(result), len(tt.expected))
-				t.Errorf("got: %v, want: %v", result, tt.expected)
-			}
-		})
-	}
-}
-
-func TestController_AppendPromptPlaceholder(t *testing.T) {
-	controller := newTestController(nil)
-
-	tests := []struct {
-		name       string
-		cmd        []string
-		promptFlag string
-		expected   []string
-	}{
-		{
-			name:       "with prompt flag",
-			cmd:        []string{"cli"},
-			promptFlag: "--prompt {prompt}",
-			expected:   []string{"cli", "--prompt", "{prompt}"},
-		},
-		{
-			name:       "without prompt flag",
-			cmd:        []string{"cli"},
-			promptFlag: "",
-			expected:   []string{"cli", "{prompt}"},
-		},
-		{
-			name:       "single flag format",
-			cmd:        []string{"cli"},
-			promptFlag: "-p {prompt}",
-			expected:   []string{"cli", "-p", "{prompt}"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := controller.appendPromptPlaceholder(tt.cmd, tt.promptFlag)
-			if len(result) != len(tt.expected) {
-				t.Errorf("appendPromptPlaceholder() = %v, want %v", result, tt.expected)
-				return
-			}
-			for i := range result {
-				if result[i] != tt.expected[i] {
-					t.Errorf("appendPromptPlaceholder()[%d] = %q, want %q", i, result[i], tt.expected[i])
-				}
 			}
 		})
 	}

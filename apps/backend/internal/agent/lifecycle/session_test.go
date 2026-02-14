@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/kandev/kandev/internal/agent/registry"
+	"github.com/kandev/kandev/internal/agent/agents"
 	agentctl "github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/pkg/agent"
@@ -210,11 +210,16 @@ func TestInitializeAndPrompt_StreamBeforeInitialize(t *testing.T) {
 		promptDoneCh:  make(chan PromptCompletionSignal, 1),
 	}
 
-	agentConfig := &registry.AgentTypeConfig{
-		ID:       "test-agent",
-		Protocol: agent.ProtocolACP,
-		SessionConfig: registry.SessionConfig{
-			NativeSessionResume: false,
+	agentConfig := &testAgent{
+		id:      "test-agent",
+		enabled: true,
+		runtimeConfig: &agents.RuntimeConfig{
+			Cmd:      agents.NewCommand("test-agent"),
+			Protocol: agent.ProtocolACP,
+			SessionConfig: agents.SessionConfig{
+				NativeSessionResume: false,
+			},
+			ResourceLimits: agents.ResourceLimits{MemoryMB: 512, CPUCores: 0.5, Timeout: time.Hour},
 		},
 	}
 
@@ -279,9 +284,14 @@ func TestInitializeAndPrompt_StreamTimeout(t *testing.T) {
 		promptDoneCh:  make(chan PromptCompletionSignal, 1),
 	}
 
-	agentConfig := &registry.AgentTypeConfig{
-		ID:       "test-agent",
-		Protocol: agent.ProtocolACP,
+	agentConfig := &testAgent{
+		id:      "test-agent",
+		enabled: true,
+		runtimeConfig: &agents.RuntimeConfig{
+			Cmd:            agents.NewCommand("test-agent"),
+			Protocol:       agent.ProtocolACP,
+			ResourceLimits: agents.ResourceLimits{MemoryMB: 512, CPUCores: 0.5, Timeout: time.Hour},
+		},
 	}
 
 	// Use short timeout so test doesn't take 10s
@@ -325,11 +335,16 @@ func TestInitializeAndPrompt_WithTaskDescription(t *testing.T) {
 		promptDoneCh:  make(chan PromptCompletionSignal, 1),
 	}
 
-	agentConfig := &registry.AgentTypeConfig{
-		ID:       "test-agent",
-		Protocol: agent.ProtocolACP,
-		SessionConfig: registry.SessionConfig{
-			NativeSessionResume: false,
+	agentConfig := &testAgent{
+		id:      "test-agent",
+		enabled: true,
+		runtimeConfig: &agents.RuntimeConfig{
+			Cmd:      agents.NewCommand("test-agent"),
+			Protocol: agent.ProtocolACP,
+			SessionConfig: agents.SessionConfig{
+				NativeSessionResume: false,
+			},
+			ResourceLimits: agents.ResourceLimits{MemoryMB: 512, CPUCores: 0.5, Timeout: time.Hour},
 		},
 	}
 
@@ -389,9 +404,14 @@ func TestInitializeAndPrompt_NoStreamManager(t *testing.T) {
 		promptDoneCh:  make(chan PromptCompletionSignal, 1),
 	}
 
-	agentConfig := &registry.AgentTypeConfig{
-		ID:       "test-agent",
-		Protocol: agent.ProtocolACP,
+	agentConfig := &testAgent{
+		id:      "test-agent",
+		enabled: true,
+		runtimeConfig: &agents.RuntimeConfig{
+			Cmd:            agents.NewCommand("test-agent"),
+			Protocol:       agent.ProtocolACP,
+			ResourceLimits: agents.ResourceLimits{MemoryMB: 512, CPUCores: 0.5, Timeout: time.Hour},
+		},
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -427,11 +447,16 @@ func TestInitializeSession_CreatesNewSession(t *testing.T) {
 	}
 	time.Sleep(100 * time.Millisecond) // let goroutine start
 
-	agentConfig := &registry.AgentTypeConfig{
-		ID:       "test-agent",
-		Protocol: agent.ProtocolACP,
-		SessionConfig: registry.SessionConfig{
-			NativeSessionResume: false,
+	agentConfig := &testAgent{
+		id:      "test-agent",
+		enabled: true,
+		runtimeConfig: &agents.RuntimeConfig{
+			Cmd:      agents.NewCommand("test-agent"),
+			Protocol: agent.ProtocolACP,
+			SessionConfig: agents.SessionConfig{
+				NativeSessionResume: false,
+			},
+			ResourceLimits: agents.ResourceLimits{MemoryMB: 512, CPUCores: 0.5, Timeout: time.Hour},
 		},
 	}
 
@@ -465,11 +490,16 @@ func TestInitializeSession_LoadsExistingSession(t *testing.T) {
 	}
 	time.Sleep(100 * time.Millisecond)
 
-	agentConfig := &registry.AgentTypeConfig{
-		ID:       "test-agent",
-		Protocol: agent.ProtocolACP,
-		SessionConfig: registry.SessionConfig{
-			NativeSessionResume: true,
+	agentConfig := &testAgent{
+		id:      "test-agent",
+		enabled: true,
+		runtimeConfig: &agents.RuntimeConfig{
+			Cmd:      agents.NewCommand("test-agent"),
+			Protocol: agent.ProtocolACP,
+			SessionConfig: agents.SessionConfig{
+				NativeSessionResume: true,
+			},
+			ResourceLimits: agents.ResourceLimits{MemoryMB: 512, CPUCores: 0.5, Timeout: time.Hour},
 		},
 	}
 

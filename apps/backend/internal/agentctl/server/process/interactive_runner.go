@@ -29,21 +29,21 @@ import (
 
 // InteractiveStartRequest contains parameters for starting an interactive passthrough process.
 type InteractiveStartRequest struct {
-	SessionID         string            `json:"session_id"`                    // Required: Agent session owning this process
-	Command           []string          `json:"command"`                       // Required: Command and args to execute
-	WorkingDir        string            `json:"working_dir"`                   // Working directory
-	Env               map[string]string `json:"env,omitempty"`                 // Additional environment variables
-	PromptPattern     string            `json:"prompt_pattern,omitempty"`      // Regex pattern to detect agent prompt for turn completion
-	IdleTimeoutMs     int               `json:"idle_timeout_ms,omitempty"`     // Idle timeout in ms for turn detection
-	BufferMaxBytes    int64             `json:"buffer_max_bytes,omitempty"`    // Max output buffer size
-	StatusDetector    string            `json:"status_detector,omitempty"`     // Status detector type: "claude_code", "codex", ""
-	CheckIntervalMs   int               `json:"check_interval_ms,omitempty"`   // How often to check state (default 100ms)
-	StabilityWindowMs int               `json:"stability_window_ms,omitempty"` // State stability window (default 0)
-	ImmediateStart    bool              `json:"immediate_start,omitempty"`     // Start immediately with default dimensions (don't wait for resize)
-	DefaultCols       int               `json:"default_cols,omitempty"`        // Default columns if ImmediateStart (default 120)
-	DefaultRows       int               `json:"default_rows,omitempty"`        // Default rows if ImmediateStart (default 40)
-	InitialCommand       string            `json:"initial_command,omitempty"`        // Command to write to stdin after shell starts (for script terminals)
-	DisableTurnDetection bool              `json:"disable_turn_detection,omitempty"` // Disable idle timer and turn detection (for user shell terminals)
+	SessionID      string            `json:"session_id"`                 // Required: Agent session owning this process
+	Command        []string          `json:"command"`                    // Required: Command and args to execute
+	WorkingDir     string            `json:"working_dir"`                // Working directory
+	Env            map[string]string `json:"env,omitempty"`              // Additional environment variables
+	PromptPattern  string            `json:"prompt_pattern,omitempty"`   // Regex pattern to detect agent prompt for turn completion
+	IdleTimeout    time.Duration     `json:"idle_timeout,omitempty"`     // Idle timeout for turn detection
+	BufferMaxBytes int64             `json:"buffer_max_bytes,omitempty"` // Max output buffer size
+	StatusDetector string            `json:"status_detector,omitempty"`  // Status detector type: "claude_code", "codex", ""
+	CheckInterval   time.Duration    `json:"check_interval,omitempty"`   // How often to check state (default 100ms)
+	StabilityWindow time.Duration    `json:"stability_window,omitempty"` // State stability window (default 0)
+	ImmediateStart  bool             `json:"immediate_start,omitempty"`  // Start immediately with default dimensions (don't wait for resize)
+	DefaultCols     int              `json:"default_cols,omitempty"`     // Default columns if ImmediateStart (default 120)
+	DefaultRows     int              `json:"default_rows,omitempty"`     // Default rows if ImmediateStart (default 40)
+	InitialCommand       string `json:"initial_command,omitempty"`        // Command to write to stdin after shell starts (for script terminals)
+	DisableTurnDetection bool   `json:"disable_turn_detection,omitempty"` // Disable idle timer and turn detection (for user shell terminals)
 }
 
 // InteractiveProcessInfo represents the state of an interactive process.
@@ -231,7 +231,7 @@ func (r *InteractiveRunner) Start(ctx context.Context, req InteractiveStartReque
 	if req.DisableTurnDetection {
 		idleTimeout = 0 // No idle timer for user shell terminals
 	} else {
-		idleTimeout = time.Duration(req.IdleTimeoutMs) * time.Millisecond
+		idleTimeout = req.IdleTimeout
 		if idleTimeout <= 0 {
 			idleTimeout = 5 * time.Second // Default 5 seconds
 		}
@@ -345,8 +345,8 @@ func (r *InteractiveRunner) startProcess(proc *interactiveProcess, cols, rows in
 		config := StatusTrackerConfig{
 			Rows:            rows,
 			Cols:            cols,
-			CheckInterval:   time.Duration(req.CheckIntervalMs) * time.Millisecond,
-			StabilityWindow: time.Duration(req.StabilityWindowMs) * time.Millisecond,
+			CheckInterval:   req.CheckInterval,
+			StabilityWindow: req.StabilityWindow,
 		}
 		if config.CheckInterval <= 0 {
 			config.CheckInterval = 100 * time.Millisecond
