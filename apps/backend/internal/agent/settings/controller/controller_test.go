@@ -24,6 +24,7 @@ type testAgent struct {
 	enabled            bool
 	runtime            *agents.RuntimeConfig
 	permissionSettings map[string]agents.PermissionSetting
+	logoData           []byte
 }
 
 func (a *testAgent) ID() string          { return a.id }
@@ -32,7 +33,8 @@ func (a *testAgent) DisplayName() string { return a.displayName }
 func (a *testAgent) Description() string { return a.description }
 func (a *testAgent) Enabled() bool       { return a.enabled }
 
-func (a *testAgent) Logo(v agents.LogoVariant) []byte { return nil }
+func (a *testAgent) Logo(v agents.LogoVariant) []byte { return a.logoData }
+
 
 func (a *testAgent) IsInstalled(ctx context.Context) (*agents.DiscoveryResult, error) {
 	return &agents.DiscoveryResult{Available: false}, nil
@@ -357,5 +359,52 @@ func TestCommandPreviewResponse_DTO(t *testing.T) {
 	}
 	if resp.CommandString == "" {
 		t.Error("CommandPreviewResponse.CommandString should not be empty")
+	}
+}
+
+func TestController_GetAgentLogo_Success(t *testing.T) {
+	logoBytes := []byte("<svg>test</svg>")
+	agentList := map[string]agents.Agent{
+		"test-agent": &testAgent{
+			id:       "test-agent",
+			name:     "test-agent",
+			enabled:  true,
+			logoData: logoBytes,
+		},
+	}
+	ctrl := newTestController(agentList)
+
+	data, err := ctrl.GetAgentLogo(context.Background(), "test-agent", agents.LogoLight)
+	if err != nil {
+		t.Fatalf("GetAgentLogo() error = %v", err)
+	}
+	if string(data) != string(logoBytes) {
+		t.Errorf("GetAgentLogo() = %q, want %q", data, logoBytes)
+	}
+}
+
+func TestController_GetAgentLogo_AgentNotFound(t *testing.T) {
+	ctrl := newTestController(map[string]agents.Agent{})
+
+	_, err := ctrl.GetAgentLogo(context.Background(), "nonexistent", agents.LogoLight)
+	if err != ErrAgentNotFound {
+		t.Errorf("GetAgentLogo() error = %v, want ErrAgentNotFound", err)
+	}
+}
+
+func TestController_GetAgentLogo_NoLogoData(t *testing.T) {
+	agentList := map[string]agents.Agent{
+		"test-agent": &testAgent{
+			id:      "test-agent",
+			name:    "test-agent",
+			enabled: true,
+			// logoData is nil
+		},
+	}
+	ctrl := newTestController(agentList)
+
+	_, err := ctrl.GetAgentLogo(context.Background(), "test-agent", agents.LogoLight)
+	if err != ErrLogoNotAvailable {
+		t.Errorf("GetAgentLogo() error = %v, want ErrLogoNotAvailable", err)
 	}
 }

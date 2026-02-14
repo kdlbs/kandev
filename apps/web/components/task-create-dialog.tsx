@@ -22,6 +22,7 @@ import { Textarea } from '@kandev/ui/textarea';
 import { Button } from '@kandev/ui/button';
 import { Combobox } from './combobox';
 import { Badge } from '@kandev/ui/badge';
+import { ScrollOnOverflow } from '@kandev/ui/scroll-on-overflow';
 import type { LocalRepository, Task, Workspace, Repository, Environment, Executor, Branch } from '@/lib/types/http';
 import type { AgentProfileOption } from '@/lib/state/slices';
 import {
@@ -46,6 +47,7 @@ import { getLocalStorage, setLocalStorage } from '@/lib/local-storage';
 import { STORAGE_KEYS } from '@/lib/settings/constants';
 import { linkToSession } from '@/lib/links';
 import { getExecutorIcon } from '@/lib/executor-icons';
+import { AgentLogo } from '@/components/agent-logo';
 
 import { useDockviewStore } from '@/lib/state/dockview-store';
 
@@ -208,7 +210,7 @@ const AgentSelector = memo(function AgentSelector({
       emptyMessage="No agent found."
       disabled={disabled}
       dropdownLabel="Agent profile"
-      className={disabled ? undefined : 'cursor-pointer'}
+      className={`min-w-[380px]${disabled ? '' : ' cursor-pointer'}`}
       triggerClassName={triggerClassName}
     />
   );
@@ -641,11 +643,14 @@ export function TaskCreateDialog({
         label: profile.label,
         renderLabel: () => (
           <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
-            <span className="truncate">{agentLabel}</span>
+            <span className="flex shrink-0 items-center gap-1.5">
+              <AgentLogo agentName={profile.agent_name} className="shrink-0" />
+              <span>{agentLabel}</span>
+            </span>
             {profileLabel ? (
-              <Badge variant="outline" className="text-xs">
+              <ScrollOnOverflow className="rounded-full border border-border px-2 py-0.5 text-xs">
                 {profileLabel}
-              </Badge>
+              </ScrollOnOverflow>
             ) : null}
           </span>
         ),

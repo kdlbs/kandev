@@ -97,13 +97,12 @@ func (a *Amp) BuildCommand(opts CommandOptions) Command {
 		Build()
 }
 
-
 func (a *Amp) Runtime() *RuntimeConfig {
 	canRecover := true
 	return &RuntimeConfig{
-		Cmd:         Cmd("npx", "-y", "@sourcegraph/amp@latest", "--execute", "--stream-json", "--stream-json-input").Build(),
-		WorkingDir:  "{workspace}",
-		Env:         map[string]string{},
+		Cmd:            Cmd("npx", "-y", "@sourcegraph/amp@latest", "--execute", "--stream-json", "--stream-json-input").Build(),
+		WorkingDir:     "{workspace}",
+		Env:            map[string]string{},
 		ResourceLimits: ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
 		Capabilities:   []string{"code_generation", "code_review", "refactoring", "testing", "shell_execution"},
 		Protocol:       agent.ProtocolAmp,
@@ -122,8 +121,10 @@ func (a *Amp) PermissionSettings() map[string]PermissionSetting {
 }
 
 var ampPermSettings = map[string]PermissionSetting{
-	"auto_approve": {Supported: true, Default: true, Label: "Auto-approve (Dangerously Allow All)", Description: "Automatically approve all tool calls including shell commands",
-		ApplyMethod: "cli_flag", CLIFlag: "--dangerously-allow-all"},
+	"auto_approve": {
+		Supported: true, Default: true, Label: "Auto-approve (Dangerously Allow All)", Description: "Automatically approve all tool calls including shell commands",
+		ApplyMethod: "cli_flag", CLIFlag: "--dangerously-allow-all",
+	},
 }
 
 func ampStaticModels() []Model {

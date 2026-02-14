@@ -30,8 +30,10 @@ import {
   useSidebar,
 } from '@kandev/ui/sidebar';
 import { ScrollArea } from '@kandev/ui/scroll-area';
+import { ScrollOnOverflow } from '@kandev/ui/scroll-on-overflow';
 import { useAppStore } from '@/components/state-provider';
 import { useAvailableAgents } from '@/hooks/domains/settings/use-available-agents';
+import { AgentLogo } from '@/components/agent-logo';
 import type { Workspace, Agent, AgentProfile, Environment, Executor } from '@/lib/types/http';
 
 export function SettingsAppSidebar() {
@@ -66,7 +68,7 @@ export function SettingsAppSidebar() {
         </SidebarMenu>
       </SidebarHeader>
       <SidebarContent className="overflow-hidden">
-        <ScrollArea className="h-full" type="always">
+        <ScrollArea className="h-full [&_[data-slot=scroll-area-viewport]>div]:!block [&_[data-slot=scroll-area-viewport]>div]:!min-w-0" type="always">
           <SidebarGroup>
             <SidebarGroupLabel>Settings</SidebarGroupLabel>
             <SidebarGroupContent>
@@ -192,12 +194,13 @@ export function SettingsAppSidebar() {
                           const profilePath = `/settings/agents/${encodedAgent}/profiles/${profile.id}`;
                           const agentLabel = profile.agent_display_name || agent.name;
                           return (
-                            <SidebarMenuSubItem key={profile.id}>
+                            <SidebarMenuSubItem key={profile.id} className="min-w-0">
                               <SidebarMenuSubButton asChild isActive={pathname === profilePath}>
-                                <Link href={profilePath}>
-                                  <span>
+                                <Link href={profilePath} className="!flex min-w-0 items-center gap-1.5" title={`${agentLabel} • ${profile.name}`}>
+                                  <AgentLogo agentName={agent.name} className="shrink-0" />
+                                  <ScrollOnOverflow className="min-w-0">
                                     {agentLabel} • {profile.name}
-                                  </span>
+                                  </ScrollOnOverflow>
                                 </Link>
                               </SidebarMenuSubButton>
                             </SidebarMenuSubItem>

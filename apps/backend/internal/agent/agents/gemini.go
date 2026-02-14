@@ -100,13 +100,12 @@ func (a *Gemini) BuildCommand(opts CommandOptions) Command {
 		Build()
 }
 
-
 func (a *Gemini) Runtime() *RuntimeConfig {
 	canRecover := false
 	return &RuntimeConfig{
-		Cmd:         Cmd("npx", "-y", "@google/gemini-cli@0.25.2", "--experimental-acp").Build(),
-		WorkingDir:  "{workspace}",
-		Env:         map[string]string{},
+		Cmd:            Cmd("npx", "-y", "@google/gemini-cli@0.25.2", "--experimental-acp").Build(),
+		WorkingDir:     "{workspace}",
+		Env:            map[string]string{},
 		ResourceLimits: ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
 		Capabilities:   []string{"code_generation", "code_review", "refactoring", "testing", "shell_execution"},
 		Protocol:       agent.ProtocolACP,
@@ -123,13 +122,15 @@ func (a *Gemini) PermissionSettings() map[string]PermissionSetting {
 }
 
 var geminiPermSettings = map[string]PermissionSetting{
-	"auto_approve": {Supported: true, Default: true, Label: "Auto-approve (YOLO mode)", Description: "Automatically approve all tool calls",
-		ApplyMethod: "cli_flag", CLIFlag: "--yolo --allowed-tools run_shell_command"},
+	"auto_approve": {
+		Supported: true, Default: true, Label: "Auto-approve (YOLO mode)", Description: "Automatically approve all tool calls",
+		ApplyMethod: "cli_flag", CLIFlag: "--yolo --allowed-tools run_shell_command",
+	},
 }
 
 func geminiStaticModels() []Model {
 	return []Model{
-		{ID: "gemini-3-flash-preview", Name: "Gemini 3 Flash", Description: "Fast and efficient model", Provider: "google", ContextWindow: 1000000, IsDefault: true, Source: "static"},
-		{ID: "gemini-3-pro-preview", Name: "Gemini 3 Pro", Description: "Most capable model with 2M context", Provider: "google", ContextWindow: 2000000, Source: "static"},
+		{ID: "gemini-3-flash-preview", Name: "3 Flash", Description: "Fast and efficient model", Provider: "google", ContextWindow: 1000000, IsDefault: true, Source: "static"},
+		{ID: "gemini-3-pro-preview", Name: "3 Pro", Description: "Most capable model with 2M context", Provider: "google", ContextWindow: 2000000, Source: "static"},
 	}
 }

@@ -59,6 +59,7 @@ func (r *sqliteRepository) initSchema() error {
 		dangerously_skip_permissions INTEGER NOT NULL DEFAULT 0,
 		allow_indexing INTEGER NOT NULL DEFAULT 1,
 		cli_passthrough INTEGER NOT NULL DEFAULT 0,
+		user_modified INTEGER NOT NULL DEFAULT 0,
 		plan TEXT DEFAULT '',
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL,
@@ -81,7 +82,15 @@ func (r *sqliteRepository) initSchema() error {
 	CREATE INDEX IF NOT EXISTS idx_agent_profiles_agent_id ON agent_profiles(agent_id);
 	`
 	_, err := r.db.Exec(schema)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Migration: add user_modified column to existing databases.
+	// Error is intentionally ignored: ALTER TABLE fails with "duplicate column" if it already exists.
+	_, _ = r.db.Exec(`ALTER TABLE agent_profiles ADD COLUMN user_modified INTEGER NOT NULL DEFAULT 0`)
+
+	return nil
 }
 
 func (r *sqliteRepository) Close() error {
@@ -241,10 +250,10 @@ func (r *sqliteRepository) CreateAgentProfile(ctx context.Context, profile *mode
 	profile.CreatedAt = now
 	profile.UpdatedAt = now
 	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO agent_profiles (id, agent_id, name, agent_display_name, model, auto_approve, dangerously_skip_permissions, allow_indexing, cli_passthrough, plan, created_at, updated_at, deleted_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?)
+		INSERT INTO agent_profiles (id, agent_id, name, agent_display_name, model, auto_approve, dangerously_skip_permissions, allow_indexing, cli_passthrough, user_modified, plan, created_at, updated_at, deleted_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?)
 	`, profile.ID, profile.AgentID, profile.Name, profile.AgentDisplayName, profile.Model, sqlite.BoolToInt(profile.AutoApprove),
-		sqlite.BoolToInt(profile.DangerouslySkipPermissions), sqlite.BoolToInt(profile.AllowIndexing), sqlite.BoolToInt(profile.CLIPassthrough), profile.CreatedAt, profile.UpdatedAt, profile.DeletedAt)
+		sqlite.BoolToInt(profile.DangerouslySkipPermissions), sqlite.BoolToInt(profile.AllowIndexing), sqlite.BoolToInt(profile.CLIPassthrough), sqlite.BoolToInt(profile.UserModified), profile.CreatedAt, profile.UpdatedAt, profile.DeletedAt)
 	return err
 }
 
@@ -252,10 +261,10 @@ func (r *sqliteRepository) UpdateAgentProfile(ctx context.Context, profile *mode
 	profile.UpdatedAt = time.Now().UTC()
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE agent_profiles
-		SET name = ?, agent_display_name = ?, model = ?, auto_approve = ?, dangerously_skip_permissions = ?, allow_indexing = ?, cli_passthrough = ?, updated_at = ?
+		SET name = ?, agent_display_name = ?, model = ?, auto_approve = ?, dangerously_skip_permissions = ?, allow_indexing = ?, cli_passthrough = ?, user_modified = ?, updated_at = ?
 		WHERE id = ? AND deleted_at IS NULL
 	`, profile.Name, profile.AgentDisplayName, profile.Model, sqlite.BoolToInt(profile.AutoApprove),
-		sqlite.BoolToInt(profile.DangerouslySkipPermissions), sqlite.BoolToInt(profile.AllowIndexing), sqlite.BoolToInt(profile.CLIPassthrough), profile.UpdatedAt, profile.ID)
+		sqlite.BoolToInt(profile.DangerouslySkipPermissions), sqlite.BoolToInt(profile.AllowIndexing), sqlite.BoolToInt(profile.CLIPassthrough), sqlite.BoolToInt(profile.UserModified), profile.UpdatedAt, profile.ID)
 	if err != nil {
 		return err
 	}
@@ -283,7 +292,7 @@ func (r *sqliteRepository) DeleteAgentProfile(ctx context.Context, id string) er
 
 func (r *sqliteRepository) GetAgentProfile(ctx context.Context, id string) (*models.AgentProfile, error) {
 	row := r.db.QueryRowContext(ctx, `
-		SELECT id, agent_id, name, agent_display_name, model, auto_approve, dangerously_skip_permissions, allow_indexing, cli_passthrough, plan, created_at, updated_at, deleted_at
+		SELECT id, agent_id, name, agent_display_name, model, auto_approve, dangerously_skip_permissions, allow_indexing, cli_passthrough, user_modified, plan, created_at, updated_at, deleted_at
 		FROM agent_profiles WHERE id = ? AND deleted_at IS NULL
 	`, id)
 	return scanAgentProfile(row)
@@ -291,7 +300,7 @@ func (r *sqliteRepository) GetAgentProfile(ctx context.Context, id string) (*mod
 
 func (r *sqliteRepository) ListAgentProfiles(ctx context.Context, agentID string) ([]*models.AgentProfile, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, agent_id, name, agent_display_name, model, auto_approve, dangerously_skip_permissions, allow_indexing, cli_passthrough, plan, created_at, updated_at, deleted_at
+		SELECT id, agent_id, name, agent_display_name, model, auto_approve, dangerously_skip_permissions, allow_indexing, cli_passthrough, user_modified, plan, created_at, updated_at, deleted_at
 		FROM agent_profiles WHERE agent_id = ? AND deleted_at IS NULL ORDER BY created_at DESC
 	`, agentID)
 	if err != nil {
@@ -344,6 +353,7 @@ func scanAgentProfile(scanner interface {
 	var skipPermissions int
 	var allowIndexing int
 	var cliPassthrough int
+	var userModified int
 	var plan string // unused, kept for backwards compatibility
 	if err := scanner.Scan(
 		&profile.ID,
@@ -355,6 +365,7 @@ func scanAgentProfile(scanner interface {
 		&skipPermissions,
 		&allowIndexing,
 		&cliPassthrough,
+		&userModified,
 		&plan,
 		&profile.CreatedAt,
 		&profile.UpdatedAt,
@@ -366,5 +377,6 @@ func scanAgentProfile(scanner interface {
 	profile.DangerouslySkipPermissions = skipPermissions == 1
 	profile.AllowIndexing = allowIndexing == 1
 	profile.CLIPassthrough = cliPassthrough == 1
+	profile.UserModified = userModified == 1
 	return profile, nil
 }
