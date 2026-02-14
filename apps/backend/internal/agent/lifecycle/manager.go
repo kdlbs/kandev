@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -15,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/runtime"
@@ -468,7 +468,7 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 		SessionID:      info.SessionID,
 		AgentProfileID: info.AgentProfileID,
 		WorkspacePath:  info.WorkspacePath,
-		Protocol:       string(agentConfig.Protocol),
+		Protocol:       string(agentConfig.Runtime().Protocol),
 		AgentConfig:    agentConfig,
 	}
 
@@ -678,7 +678,7 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 		return nil, fmt.Errorf("agent type %q not found in registry", agentTypeName)
 	}
 
-	if !agentConfig.Enabled {
+	if !agentConfig.Enabled() {
 		return nil, fmt.Errorf("agent type %q is disabled", agentTypeName)
 	}
 
@@ -803,7 +803,7 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 		SessionID:      reqWithWorktree.SessionID,
 		AgentProfileID: reqWithWorktree.AgentProfileID,
 		WorkspacePath:  reqWithWorktree.WorkspacePath,
-		Protocol:       string(agentConfig.Protocol),
+		Protocol:       string(agentConfig.Runtime().Protocol),
 		Env:            env,
 		Metadata:       metadata,
 		AgentConfig:    agentConfig,
@@ -840,7 +840,7 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 	if req.ModelOverride != "" {
 		model = req.ModelOverride
 	}
-	cmdOpts := CommandOptions{
+	cmdOpts := agents.CommandOptions{
 		Model:            model,
 		SessionID:        req.ACPSessionID,
 		AutoApprove:      autoApprove,
@@ -944,8 +944,8 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) err
 				approvalPolicy = "untrusted"
 			}
 			// Look up display name from registry (e.g. "Claude", "Auggie", "Codex")
-			if agentConfig, ok := m.registry.Get(profileInfo.AgentName); ok && agentConfig.DisplayName != "" {
-				agentDisplayName = agentConfig.DisplayName
+			if agentConfig, ok := m.registry.Get(profileInfo.AgentName); ok && agentConfig.DisplayName() != "" {
+				agentDisplayName = agentConfig.DisplayName()
 			} else {
 				agentDisplayName = profileInfo.AgentName
 			}
@@ -1110,7 +1110,7 @@ func (m *Manager) finalizeBootMessage(msg *models.Message, stopCh chan struct{},
 
 // buildEnvForRuntime builds environment variables for any runtime.
 // This is the unified method used by the runtime interface.
-func (m *Manager) buildEnvForRuntime(executionID string, req *LaunchRequest, agentConfig *registry.AgentTypeConfig) map[string]string {
+func (m *Manager) buildEnvForRuntime(executionID string, req *LaunchRequest, agentConfig agents.Agent) map[string]string {
 	env := make(map[string]string)
 
 	// Copy request environment
@@ -1128,7 +1128,7 @@ func (m *Manager) buildEnvForRuntime(executionID string, req *LaunchRequest, age
 	// Add required credentials from agent config
 	if m.credsMgr != nil && agentConfig != nil {
 		ctx := context.Background()
-		for _, credKey := range agentConfig.RequiredEnv {
+		for _, credKey := range agentConfig.Runtime().RequiredEnv {
 			if value, err := m.credsMgr.GetCredentialValue(ctx, credKey); err == nil && value != "" {
 				env[credKey] = value
 			}
@@ -1224,7 +1224,7 @@ func (m *Manager) waitForAgentctlReady(execution *AgentExecution) {
 
 // getAgentConfigForExecution retrieves the agent configuration for an execution.
 // The execution must have AgentCommand set (which includes the agent type).
-func (m *Manager) getAgentConfigForExecution(execution *AgentExecution) (*registry.AgentTypeConfig, error) {
+func (m *Manager) getAgentConfigForExecution(execution *AgentExecution) (agents.Agent, error) {
 	if execution.AgentProfileID == "" {
 		return nil, fmt.Errorf("execution %s has no agent profile ID", execution.ID)
 	}
@@ -1261,7 +1261,7 @@ func (m *Manager) ResolveAgentProfile(ctx context.Context, profileID string) (*A
 // - loads per-agent MCP config,
 // - applies executor-scoped transport rules, allow/deny lists, URL rewrites, and env injection,
 // - converts to ACP stdio server definitions used during session initialization.
-func (m *Manager) resolveMcpServers(ctx context.Context, execution *AgentExecution, agentConfig *registry.AgentTypeConfig) ([]agentctltypes.McpServer, error) {
+func (m *Manager) resolveMcpServers(ctx context.Context, execution *AgentExecution, agentConfig agents.Agent) ([]agentctltypes.McpServer, error) {
 	if execution == nil {
 		return nil, nil
 	}
@@ -1270,7 +1270,7 @@ func (m *Manager) resolveMcpServers(ctx context.Context, execution *AgentExecuti
 
 // resolveMcpServersWithParams resolves MCP servers with explicit parameters.
 // This is used by Launch() before the execution object exists.
-func (m *Manager) resolveMcpServersWithParams(ctx context.Context, profileID string, metadata map[string]interface{}, agentConfig *registry.AgentTypeConfig) ([]agentctltypes.McpServer, error) {
+func (m *Manager) resolveMcpServersWithParams(ctx context.Context, profileID string, metadata map[string]interface{}, agentConfig agents.Agent) ([]agentctltypes.McpServer, error) {
 	if m.mcpProvider == nil || agentConfig == nil {
 		return nil, nil
 	}
@@ -1338,7 +1338,7 @@ func runtimeName(rt Runtime) runtime.Name {
 }
 
 // initializeACPSession delegates to SessionManager for full ACP session initialization and prompting
-func (m *Manager) initializeACPSession(ctx context.Context, execution *AgentExecution, agentConfig *registry.AgentTypeConfig, taskDescription string, mcpServers []agentctltypes.McpServer) error {
+func (m *Manager) initializeACPSession(ctx context.Context, execution *AgentExecution, agentConfig agents.Agent, taskDescription string, mcpServers []agentctltypes.McpServer) error {
 	return m.sessionManager.InitializeAndPrompt(ctx, execution, agentConfig, taskDescription, mcpServers, m.MarkReady)
 }
 
@@ -2550,9 +2550,13 @@ func (m *Manager) startPassthroughSession(ctx context.Context, execution *AgentE
 	}
 
 	// Validate passthrough support
-	if !agentConfig.PassthroughConfig.Supported {
-		return fmt.Errorf("agent %s does not support passthrough mode", agentConfig.ID)
+	ptAgent, ok := agentConfig.(agents.PassthroughAgent)
+	if !ok {
+		return fmt.Errorf("agent %s does not support passthrough mode", agentConfig.ID())
 	}
+
+	pt := ptAgent.PassthroughConfig()
+	rt := agentConfig.Runtime()
 
 	// Get task description from metadata for initial prompt
 	taskDescription := ""
@@ -2563,14 +2567,19 @@ func (m *Manager) startPassthroughSession(ctx context.Context, execution *AgentE
 	}
 
 	// Build passthrough command with initial prompt and profile settings
-	cmd := m.buildPassthroughCommand(agentConfig, execution.ACPSessionID, taskDescription, profileInfo)
-	if len(cmd) == 0 {
-		return fmt.Errorf("passthrough command is empty for agent %s", agentConfig.ID)
+	cmd := ptAgent.BuildPassthroughCommand(agents.PassthroughOptions{
+		Model:            profileModel(profileInfo),
+		SessionID:        execution.ACPSessionID,
+		Prompt:           taskDescription,
+		PermissionValues: profilePermissionValues(profileInfo),
+	})
+	if cmd.IsEmpty() {
+		return fmt.Errorf("passthrough command is empty for agent %s", agentConfig.ID())
 	}
 
 	m.logger.Info("passthrough command built",
 		zap.String("session_id", execution.SessionID),
-		zap.Strings("full_command", cmd))
+		zap.Strings("full_command", cmd.Args()))
 
 	// Get the interactive runner from runtime
 	interactiveRunner := m.GetInteractiveRunner()
@@ -2586,7 +2595,7 @@ func (m *Manager) startPassthroughSession(ctx context.Context, execution *AgentE
 
 	// Add required credentials from agent config
 	if m.credsMgr != nil {
-		for _, credKey := range agentConfig.RequiredEnv {
+		for _, credKey := range rt.RequiredEnv {
 			if value, err := m.credsMgr.GetCredentialValue(ctx, credKey); err == nil && value != "" {
 				env[credKey] = value
 			}
@@ -2598,19 +2607,19 @@ func (m *Manager) startPassthroughSession(ctx context.Context, execution *AgentE
 	// Some agents (like Codex) require the terminal to be connected first because
 	// they query the terminal for cursor position on startup
 	startReq := process.InteractiveStartRequest{
-		SessionID:         execution.SessionID,
-		Command:           cmd,
-		WorkingDir:        execution.WorkspacePath,
-		Env:               env,
-		PromptPattern:     agentConfig.PassthroughConfig.PromptPattern,
-		IdleTimeoutMs:     agentConfig.PassthroughConfig.IdleTimeoutMs,
-		BufferMaxBytes:    agentConfig.PassthroughConfig.BufferMaxBytes,
-		StatusDetector:    agentConfig.PassthroughConfig.StatusDetector,
-		CheckIntervalMs:   agentConfig.PassthroughConfig.CheckIntervalMs,
-		StabilityWindowMs: agentConfig.PassthroughConfig.StabilityWindowMs,
-		ImmediateStart:    !agentConfig.PassthroughConfig.WaitForTerminal,
-		DefaultCols:       120,
-		DefaultRows:       40,
+		SessionID:       execution.SessionID,
+		Command:         cmd.Args(),
+		WorkingDir:      execution.WorkspacePath,
+		Env:             env,
+		PromptPattern:   pt.PromptPattern,
+		IdleTimeout:     pt.IdleTimeout,
+		BufferMaxBytes:  pt.BufferMaxBytes,
+		StatusDetector:  pt.StatusDetector,
+		CheckInterval:   pt.CheckInterval,
+		StabilityWindow: pt.StabilityWindow,
+		ImmediateStart:  !pt.WaitForTerminal,
+		DefaultCols:     120,
+		DefaultRows:     40,
 	}
 
 	processInfo, err := interactiveRunner.Start(ctx, startReq)
@@ -2627,7 +2636,7 @@ func (m *Manager) startPassthroughSession(ctx context.Context, execution *AgentE
 		zap.String("task_id", execution.TaskID),
 		zap.String("session_id", execution.SessionID),
 		zap.String("process_id", processInfo.ID),
-		zap.Strings("command", cmd))
+		zap.Strings("command", cmd.Args()))
 
 	// Emit agentctl ready event to indicate session is available
 	m.eventPublisher.PublishAgentctlEvent(ctx, events.AgentctlReady, execution, "")
@@ -2658,78 +2667,24 @@ func (m *Manager) startPassthroughSession(ctx context.Context, execution *AgentE
 	return nil
 }
 
-// buildPassthroughCommand builds the command for passthrough mode.
-// It uses the passthrough_cmd from config, applies profile settings as CLI flags,
-// and appends resume flag if resuming or initial prompt for new sessions.
-func (m *Manager) buildPassthroughCommand(agentConfig *registry.AgentTypeConfig, acpSessionID string, initialPrompt string, profileInfo *AgentProfileInfo) []string {
-	// Start with passthrough_cmd
-	cmd := make([]string, len(agentConfig.PassthroughConfig.PassthroughCmd))
-	copy(cmd, agentConfig.PassthroughConfig.PassthroughCmd)
-
-	// Apply model flag if configured and profile has a model
-	if profileInfo != nil && profileInfo.Model != "" && agentConfig.PassthroughConfig.ModelFlag != "" {
-		expanded := strings.ReplaceAll(agentConfig.PassthroughConfig.ModelFlag, "{model}", profileInfo.Model)
-		// Split on first space to separate flag from value (if combined)
-		parts := strings.SplitN(expanded, " ", 2)
-		cmd = append(cmd, parts...)
+// profileModel extracts the model from profile info, returning empty string if nil.
+func profileModel(p *AgentProfileInfo) string {
+	if p == nil {
+		return ""
 	}
+	return p.Model
+}
 
-	// Apply permission settings that use CLI flags
-	// Build a map of permission values from profile info
-	if profileInfo != nil && agentConfig.PermissionSettings != nil {
-		permissionValues := map[string]bool{
-			"auto_approve":                 profileInfo.AutoApprove,
-			"dangerously_skip_permissions": profileInfo.DangerouslySkipPermissions,
-			"allow_indexing":               profileInfo.AllowIndexing,
-		}
-
-		for settingName, setting := range agentConfig.PermissionSettings {
-			// Skip if not supported or not a CLI flag setting
-			if !setting.Supported || setting.ApplyMethod != "cli_flag" || setting.CLIFlag == "" {
-				continue
-			}
-
-			// Get the value for this setting
-			value, exists := permissionValues[settingName]
-			if !exists || !value {
-				continue
-			}
-
-			// Apply the CLI flag
-			if setting.CLIFlagValue != "" {
-				// Flag with value: "--flag value"
-				cmd = append(cmd, setting.CLIFlag, setting.CLIFlagValue)
-			} else {
-				// Boolean flag or multiple flags: "--flag" or "--flag1 --flag2 arg"
-				// Split on spaces to handle multiple flags in one setting
-				parts := strings.Fields(setting.CLIFlag)
-				cmd = append(cmd, parts...)
-			}
-		}
+// profilePermissionValues builds a permission values map from profile info.
+func profilePermissionValues(p *AgentProfileInfo) map[string]bool {
+	if p == nil {
+		return nil
 	}
-
-	// Add resume flag if:
-	// 1. Session ID is provided (resuming existing session)
-	// 2. Agent uses CLI-based resume (not ACP)
-	// 3. Agent has a ResumeFlag configured
-	if acpSessionID != "" &&
-		!agentConfig.SessionConfig.NativeSessionResume &&
-		agentConfig.SessionConfig.ResumeFlag != "" {
-		cmd = append(cmd, agentConfig.SessionConfig.ResumeFlag, acpSessionID)
-	} else if initialPrompt != "" {
-		// For new sessions, add the initial prompt
-		// Use PromptFlag if configured (e.g., "--prompt {prompt}"), otherwise append directly
-		if agentConfig.PassthroughConfig.PromptFlag != "" {
-			expanded := strings.ReplaceAll(agentConfig.PassthroughConfig.PromptFlag, "{prompt}", initialPrompt)
-			parts := strings.SplitN(expanded, " ", 2)
-			cmd = append(cmd, parts...)
-		} else {
-			// Default: append prompt as a positional argument
-			cmd = append(cmd, initialPrompt)
-		}
+	return map[string]bool{
+		"auto_approve":                 p.AutoApprove,
+		"dangerously_skip_permissions": p.DangerouslySkipPermissions,
+		"allow_indexing":               p.AllowIndexing,
 	}
-
-	return cmd
 }
 
 // ResumePassthroughSession restarts a passthrough session after backend restart.
@@ -2748,9 +2703,13 @@ func (m *Manager) ResumePassthroughSession(ctx context.Context, sessionID string
 		return fmt.Errorf("failed to get agent config: %w", err)
 	}
 
-	if !agentConfig.PassthroughConfig.Supported {
-		return fmt.Errorf("agent %s does not support passthrough mode", agentConfig.ID)
+	ptAgent, ok := agentConfig.(agents.PassthroughAgent)
+	if !ok {
+		return fmt.Errorf("agent %s does not support passthrough mode", agentConfig.ID())
 	}
+
+	pt := ptAgent.PassthroughConfig()
+	rt := agentConfig.Runtime()
 
 	// Get profile info for permission settings
 	var profileInfo *AgentProfileInfo
@@ -2759,16 +2718,19 @@ func (m *Manager) ResumePassthroughSession(ctx context.Context, sessionID string
 	}
 
 	// Build the resume command
-	cmd := m.buildPassthroughResumeCommand(agentConfig, profileInfo)
-	if len(cmd) == 0 {
-		return fmt.Errorf("passthrough resume command is empty for agent %s", agentConfig.ID)
+	cmd := ptAgent.BuildPassthroughCommand(agents.PassthroughOptions{
+		Model:            profileModel(profileInfo),
+		Resume:           true,
+		PermissionValues: profilePermissionValues(profileInfo),
+	})
+	if cmd.IsEmpty() {
+		return fmt.Errorf("passthrough resume command is empty for agent %s", agentConfig.ID())
 	}
 
 	m.logger.Info("resuming passthrough session",
 		zap.String("session_id", sessionID),
 		zap.String("execution_id", execution.ID),
-		zap.Strings("command", cmd),
-		zap.Bool("has_resume_flag", agentConfig.PassthroughConfig.ResumeFlag != ""))
+		zap.Strings("command", cmd.Args()))
 
 	// Get the interactive runner
 	interactiveRunner := m.GetInteractiveRunner()
@@ -2784,7 +2746,7 @@ func (m *Manager) ResumePassthroughSession(ctx context.Context, sessionID string
 
 	// Add required credentials
 	if m.credsMgr != nil {
-		for _, credKey := range agentConfig.RequiredEnv {
+		for _, credKey := range rt.RequiredEnv {
 			if value, err := m.credsMgr.GetCredentialValue(ctx, credKey); err == nil && value != "" {
 				env[credKey] = value
 			}
@@ -2794,18 +2756,18 @@ func (m *Manager) ResumePassthroughSession(ctx context.Context, sessionID string
 	// Start the interactive process
 	// Use the same settings as initial start (including wait_for_terminal)
 	startReq := process.InteractiveStartRequest{
-		SessionID:         sessionID,
-		Command:           cmd,
-		WorkingDir:        execution.WorkspacePath,
-		Env:               env,
-		IdleTimeoutMs:     agentConfig.PassthroughConfig.IdleTimeoutMs,
-		BufferMaxBytes:    agentConfig.PassthroughConfig.BufferMaxBytes,
-		StatusDetector:    agentConfig.PassthroughConfig.StatusDetector,
-		CheckIntervalMs:   agentConfig.PassthroughConfig.CheckIntervalMs,
-		StabilityWindowMs: agentConfig.PassthroughConfig.StabilityWindowMs,
-		ImmediateStart:    !agentConfig.PassthroughConfig.WaitForTerminal,
-		DefaultCols:       120,
-		DefaultRows:       40,
+		SessionID:       sessionID,
+		Command:         cmd.Args(),
+		WorkingDir:      execution.WorkspacePath,
+		Env:             env,
+		IdleTimeout:     pt.IdleTimeout,
+		BufferMaxBytes:  pt.BufferMaxBytes,
+		StatusDetector:  pt.StatusDetector,
+		CheckInterval:   pt.CheckInterval,
+		StabilityWindow: pt.StabilityWindow,
+		ImmediateStart:  !pt.WaitForTerminal,
+		DefaultCols:     120,
+		DefaultRows:     40,
 	}
 
 	processInfo, err := interactiveRunner.Start(ctx, startReq)
@@ -2842,65 +2804,6 @@ func (m *Manager) ResumePassthroughSession(ctx context.Context, sessionID string
 	}
 
 	return nil
-}
-
-// buildPassthroughResumeCommand builds the command for resuming a passthrough session.
-// If the agent supports resume (has ResumeFlag), it adds the resume flag.
-// Otherwise, it starts a fresh session with profile settings but no initial prompt.
-func (m *Manager) buildPassthroughResumeCommand(agentConfig *registry.AgentTypeConfig, profileInfo *AgentProfileInfo) []string {
-	// Start with passthrough_cmd
-	cmd := make([]string, len(agentConfig.PassthroughConfig.PassthroughCmd))
-	copy(cmd, agentConfig.PassthroughConfig.PassthroughCmd)
-
-	// Apply model flag if configured
-	if profileInfo != nil && profileInfo.Model != "" && agentConfig.PassthroughConfig.ModelFlag != "" {
-		expanded := strings.ReplaceAll(agentConfig.PassthroughConfig.ModelFlag, "{model}", profileInfo.Model)
-		parts := strings.SplitN(expanded, " ", 2)
-		cmd = append(cmd, parts...)
-	}
-
-	// Apply permission settings that use CLI flags
-	// Sort keys for deterministic output order
-	if profileInfo != nil && agentConfig.PermissionSettings != nil {
-		permissionValues := map[string]bool{
-			"auto_approve":                 profileInfo.AutoApprove,
-			"dangerously_skip_permissions": profileInfo.DangerouslySkipPermissions,
-			"allow_indexing":               profileInfo.AllowIndexing,
-		}
-
-		// Get sorted keys for deterministic iteration
-		settingNames := make([]string, 0, len(agentConfig.PermissionSettings))
-		for name := range agentConfig.PermissionSettings {
-			settingNames = append(settingNames, name)
-		}
-		sort.Strings(settingNames)
-
-		for _, settingName := range settingNames {
-			setting := agentConfig.PermissionSettings[settingName]
-			if !setting.Supported || setting.ApplyMethod != "cli_flag" || setting.CLIFlag == "" {
-				continue
-			}
-			value, exists := permissionValues[settingName]
-			if !exists || !value {
-				continue
-			}
-			if setting.CLIFlagValue != "" {
-				cmd = append(cmd, setting.CLIFlag, setting.CLIFlagValue)
-			} else {
-				parts := strings.Fields(setting.CLIFlag)
-				cmd = append(cmd, parts...)
-			}
-		}
-	}
-
-	// Add resume flag if agent supports it
-	if agentConfig.PassthroughConfig.ResumeFlag != "" {
-		// Split on spaces to handle flags like "--resume latest"
-		parts := strings.Fields(agentConfig.PassthroughConfig.ResumeFlag)
-		cmd = append(cmd, parts...)
-	}
-
-	return cmd
 }
 
 // handlePassthroughTurnComplete is called when turn detection fires for a passthrough session.

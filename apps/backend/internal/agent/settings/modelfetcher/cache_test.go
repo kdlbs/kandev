@@ -4,13 +4,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kandev/kandev/internal/agent/registry"
+	"github.com/kandev/kandev/internal/agent/agents"
 )
 
 func TestCache_SetAndGet(t *testing.T) {
 	cache := NewCache()
 
-	models := []registry.ModelEntry{
+	models := []agents.Model{
 		{ID: "anthropic/claude-sonnet", Name: "Claude Sonnet", Provider: "anthropic"},
 		{ID: "openai/gpt-4", Name: "GPT-4", Provider: "openai"},
 	}
@@ -67,7 +67,7 @@ func TestCache_SetWithError(t *testing.T) {
 func TestCache_Invalidate(t *testing.T) {
 	cache := NewCache()
 
-	models := []registry.ModelEntry{
+	models := []agents.Model{
 		{ID: "test/model", Name: "Test Model", Provider: "test"},
 	}
 
@@ -92,7 +92,7 @@ func TestCache_Invalidate(t *testing.T) {
 func TestCache_Clear(t *testing.T) {
 	cache := NewCache()
 
-	models := []registry.ModelEntry{
+	models := []agents.Model{
 		{ID: "test/model", Name: "Test Model", Provider: "test"},
 	}
 
@@ -118,7 +118,7 @@ func TestCacheEntry_IsValid(t *testing.T) {
 		{
 			name: "valid entry",
 			entry: CacheEntry{
-				Models:    []registry.ModelEntry{{ID: "test"}},
+				Models:    []agents.Model{{ID: "test"}},
 				CachedAt:  time.Now(),
 				ExpiresAt: time.Now().Add(5 * time.Second),
 				Error:     nil,
@@ -128,7 +128,7 @@ func TestCacheEntry_IsValid(t *testing.T) {
 		{
 			name: "expired entry",
 			entry: CacheEntry{
-				Models:    []registry.ModelEntry{{ID: "test"}},
+				Models:    []agents.Model{{ID: "test"}},
 				CachedAt:  time.Now().Add(-1 * time.Minute),
 				ExpiresAt: time.Now().Add(-30 * time.Second),
 				Error:     nil,

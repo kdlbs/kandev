@@ -11,6 +11,8 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
+// Note: testAgent is defined in manager_test.go (same package)
+
 // MockRepository implements store.Repository for testing
 type MockRepository struct {
 	GetAgentFn          func(ctx context.Context, id string) (*models.Agent, error)
@@ -243,18 +245,11 @@ func TestStoreProfileResolver_ResolveProfile_FallbackToRegistryDefaultModel(t *t
 	// Create a registry with a default model for claude-code
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
 	reg := registry.NewRegistry(log)
-	err := reg.Register(&registry.AgentTypeConfig{
-		ID:   "claude-code",
-		Name: "claude-code",
-		Cmd:  []string{"claude"}, // Standalone agent uses Cmd
-		ResourceLimits: registry.ResourceLimits{
-			MemoryMB:       1024,
-			CPUCores:       1,
-			TimeoutSeconds: 3600,
-		},
-		ModelConfig: registry.ModelConfig{
-			DefaultModel: "claude-sonnet-4-20250514",
-		},
+	err := reg.Register(&testAgent{
+		id:           "claude-code",
+		name:         "claude-code",
+		enabled:      true,
+		defaultModel: "claude-sonnet-4-20250514",
 	})
 	if err != nil {
 		t.Fatalf("failed to register agent: %v", err)

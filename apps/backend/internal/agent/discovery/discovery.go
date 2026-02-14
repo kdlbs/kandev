@@ -1,59 +1,38 @@
 // Package discovery provides agent installation detection and discovery functionality.
-// It reads agent definitions from the unified agents.json configuration in the registry package.
+// It delegates to the agents.Agent interface for discovery and model information.
 package discovery
 
 import (
 	"context"
-	"fmt"
-	"os"
-	"path/filepath"
-	"runtime"
-	"strings"
 
+	"go.uber.org/zap"
+
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/registry"
+	"github.com/kandev/kandev/internal/common/logger"
 )
 
-// OSPaths defines OS-specific paths for discovery (re-exported from registry for API compatibility)
-type OSPaths = registry.OSPaths
-
-// Capabilities defines discovery-specific capabilities (re-exported from registry)
-type Capabilities = registry.DiscoveryCapabilities
-
-// ModelConfig defines the model configuration for an agent (re-exported from registry)
-type ModelConfig = registry.ModelConfig
-
-// ModelEntry defines a single model available for an agent (re-exported from registry)
-type ModelEntry = registry.ModelEntry
-
-// ForOS returns paths for the specified operating system
-func ForOS(p OSPaths, goos string) []string {
-	switch goos {
-	case "windows":
-		return p.Windows
-	case "darwin":
-		return p.MacOS
-	default:
-		return p.Linux
-	}
+// Capabilities describes what the agent supports.
+type Capabilities struct {
+	SupportsSessionResume bool `json:"supports_session_resume"`
+	SupportsShell         bool `json:"supports_shell"`
+	SupportsWorkspaceOnly bool `json:"supports_workspace_only"`
 }
 
-// KnownAgent represents an agent definition with discovery metadata
+// KnownAgent represents an agent definition with discovery metadata.
 type KnownAgent struct {
-	Name             string       `json:"name"`
-	DisplayName      string       `json:"display_name"`
-	SupportsMCP      bool         `json:"supports_mcp"`
-	MCPConfigPath    OSPaths      `json:"mcp_config_path"`
-	InstallationPath OSPaths      `json:"installation_path"`
-	Capabilities     Capabilities `json:"capabilities"`
-	ModelConfig      ModelConfig  `json:"model_config"`
+	Name              string         `json:"name"`
+	DisplayName       string         `json:"display_name"`
+	SupportsMCP       bool           `json:"supports_mcp"`
+	MCPConfigPaths    []string       `json:"mcp_config_paths"`
+	InstallationPaths []string       `json:"installation_paths"`
+	Capabilities      Capabilities   `json:"capabilities"`
+	DefaultModel      string         `json:"default_model"`
+	Models            []agents.Model `json:"models"`
+	SupportsDynamic   bool           `json:"supports_dynamic"`
 }
 
-// Config is the legacy structure for agent discovery configuration
-type Config struct {
-	Agents []KnownAgent `json:"agents"`
-}
-
-// Availability represents the result of detecting an agent's installation
+// Availability represents the result of detecting an agent's installation.
 type Availability struct {
 	Name              string   `json:"name"`
 	SupportsMCP       bool     `json:"supports_mcp"`
@@ -63,49 +42,81 @@ type Availability struct {
 	MatchedPath       string   `json:"matched_path,omitempty"`
 }
 
-// Adapter defines the interface for agent detection strategies
-type Adapter interface {
-	Detect(ctx context.Context) (Availability, error)
-}
-
-// Registry manages agent discovery adapters and definitions
+// Registry manages agent discovery using the agents.Agent interface.
 type Registry struct {
-	adapters    []Adapter
+	agents      []agents.Agent
 	definitions []KnownAgent
+	logger      *logger.Logger
 }
 
-// LoadRegistry creates a new discovery registry by loading agent definitions
-// from the unified agents.json configuration in the registry package.
-func LoadRegistry() (*Registry, error) {
-	agentConfigs, err := registry.GetAgentDefinitions()
-	if err != nil {
-		return nil, fmt.Errorf("load agent definitions: %w", err)
-	}
+// LoadRegistry creates a new discovery registry from the agent registry.
+// It iterates over all enabled agents, calls IsInstalled and ListModels
+// to populate the KnownAgent definitions.
+func LoadRegistry(ctx context.Context, reg *registry.Registry, log *logger.Logger) (*Registry, error) {
+	enabled := reg.ListEnabled()
 
-	definitions := make([]KnownAgent, 0, len(agentConfigs))
-	adapters := make([]Adapter, 0, len(agentConfigs))
+	definitions := make([]KnownAgent, 0, len(enabled))
+	agentList := make([]agents.Agent, 0, len(enabled))
 
-	for _, agentCfg := range agentConfigs {
-		// Convert registry.AgentTypeConfig to discovery.KnownAgent
+	for _, ag := range enabled {
+		// Gather discovery info from the agent.
+		result, err := ag.IsInstalled(ctx)
+		if err != nil {
+			log.Warn("discovery: failed to check agent installation",
+				zap.String("agent", ag.ID()),
+				zap.Error(err),
+			)
+			// Still include the agent but with empty discovery data.
+			result = &agents.DiscoveryResult{}
+		}
+
+		// Gather model info from the agent.
+		var models []agents.Model
+		var supportsDynamic bool
+		modelList, err := ag.ListModels(ctx)
+		if err != nil {
+			log.Warn("discovery: failed to list agent models",
+				zap.String("agent", ag.ID()),
+				zap.Error(err),
+			)
+		} else if modelList != nil {
+			models = modelList.Models
+			supportsDynamic = modelList.SupportsDynamic
+		}
+
+		displayName := ag.DisplayName()
+		if displayName == "" {
+			displayName = ag.Name()
+		}
+
 		knownAgent := KnownAgent{
-			Name:             agentCfg.ID, // Use ID directly as the short name (e.g., "auggie", "codex")
-			DisplayName:      agentCfg.DisplayName,
-			SupportsMCP:      agentCfg.Discovery.SupportsMCP,
-			MCPConfigPath:    agentCfg.Discovery.MCPConfigPath,
-			InstallationPath: agentCfg.Discovery.InstallationPath,
-			Capabilities:     agentCfg.Discovery.DiscoveryCapabilities,
-			ModelConfig:      agentCfg.ModelConfig,
+			Name:              ag.ID(),
+			DisplayName:       displayName,
+			SupportsMCP:       result.SupportsMCP,
+			MCPConfigPaths:    result.MCPConfigPaths,
+			InstallationPaths: result.InstallationPaths,
+			Capabilities: Capabilities{
+				SupportsSessionResume: result.Capabilities.SupportsSessionResume,
+				SupportsShell:         result.Capabilities.SupportsShell,
+				SupportsWorkspaceOnly: result.Capabilities.SupportsWorkspaceOnly,
+			},
+			DefaultModel:    ag.DefaultModel(),
+			Models:          models,
+			SupportsDynamic: supportsDynamic,
 		}
-		if knownAgent.DisplayName == "" {
-			knownAgent.DisplayName = agentCfg.Name
-		}
+
 		definitions = append(definitions, knownAgent)
-		adapters = append(adapters, NewFilePresenceAdapter(knownAgent))
+		agentList = append(agentList, ag)
 	}
 
-	return &Registry{adapters: adapters, definitions: definitions}, nil
+	return &Registry{
+		agents:      agentList,
+		definitions: definitions,
+		logger:      log,
+	}, nil
 }
 
+// Definitions returns a copy of all known agent definitions.
 func (r *Registry) Definitions() []KnownAgent {
 	if r == nil {
 		return nil
@@ -113,87 +124,32 @@ func (r *Registry) Definitions() []KnownAgent {
 	return append([]KnownAgent(nil), r.definitions...)
 }
 
+// Detect checks whether each agent is installed by calling IsInstalled.
 func (r *Registry) Detect(ctx context.Context) ([]Availability, error) {
-	results := make([]Availability, 0, len(r.adapters))
-	for _, adapter := range r.adapters {
-		availability, err := adapter.Detect(ctx)
+	results := make([]Availability, 0, len(r.agents))
+	for _, ag := range r.agents {
+		result, err := ag.IsInstalled(ctx)
 		if err != nil {
-			return nil, err
+			r.logger.Warn("discovery: detect failed for agent",
+				zap.String("agent", ag.ID()),
+				zap.Error(err),
+			)
+			continue
 		}
-		results = append(results, availability)
+
+		mcpPath := ""
+		if len(result.MCPConfigPaths) > 0 {
+			mcpPath = result.MCPConfigPaths[0]
+		}
+
+		results = append(results, Availability{
+			Name:              ag.ID(),
+			SupportsMCP:       result.SupportsMCP,
+			MCPConfigPath:     mcpPath,
+			InstallationPaths: result.InstallationPaths,
+			Available:         result.Available,
+			MatchedPath:       result.MatchedPath,
+		})
 	}
 	return results, nil
-}
-
-type FilePresenceAdapter struct {
-	definition KnownAgent
-}
-
-func NewFilePresenceAdapter(def KnownAgent) *FilePresenceAdapter {
-	return &FilePresenceAdapter{definition: def}
-}
-
-func (a *FilePresenceAdapter) Detect(ctx context.Context) (Availability, error) {
-	_ = ctx
-	paths := resolvePaths(ForOS(a.definition.InstallationPath, runtime.GOOS))
-	mcpPaths := resolvePaths(ForOS(a.definition.MCPConfigPath, runtime.GOOS))
-	available, matched := anyPathExists(paths)
-	mcpPath := ""
-	if len(mcpPaths) > 0 {
-		mcpPath = mcpPaths[0]
-	}
-	return Availability{
-		Name:              a.definition.Name,
-		SupportsMCP:       a.definition.SupportsMCP,
-		MCPConfigPath:     mcpPath,
-		InstallationPaths: paths,
-		Available:         available,
-		MatchedPath:       matched,
-	}, nil
-}
-
-func resolvePaths(paths []string) []string {
-	resolved := make([]string, 0, len(paths))
-	for _, rawPath := range paths {
-		expanded := expandPath(rawPath)
-		if expanded == "" {
-			continue
-		}
-		resolved = append(resolved, expanded)
-	}
-	return resolved
-}
-
-func expandPath(path string) string {
-	if path == "" {
-		return ""
-	}
-	if strings.Contains(path, "$XDG_CONFIG_HOME") || strings.Contains(path, "${XDG_CONFIG_HOME}") {
-		if _, ok := os.LookupEnv("XDG_CONFIG_HOME"); !ok {
-			return ""
-		}
-	}
-	expanded := os.ExpandEnv(path)
-	if strings.HasPrefix(expanded, "~") {
-		home, err := os.UserHomeDir()
-		if err == nil {
-			expanded = filepath.Join(home, strings.TrimPrefix(expanded, "~"))
-		}
-	}
-	if expanded == "" {
-		return ""
-	}
-	return filepath.Clean(filepath.FromSlash(expanded))
-}
-
-func anyPathExists(paths []string) (bool, string) {
-	for _, candidate := range paths {
-		if candidate == "" {
-			continue
-		}
-		if _, err := os.Stat(candidate); err == nil {
-			return true, candidate
-		}
-	}
-	return false, ""
 }

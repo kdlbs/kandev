@@ -167,7 +167,7 @@ func (a *lifecycleAdapter) ListAgentTypes(ctx context.Context) ([]*v1.AgentType,
 	configs := a.registry.List()
 	result := make([]*v1.AgentType, 0, len(configs))
 	for _, cfg := range configs {
-		result = append(result, cfg.ToAPIType())
+		result = append(result, registry.ToAPIType(cfg))
 	}
 	return result, nil
 }

@@ -12,14 +12,14 @@ import (
 	"go.uber.org/zap"
 
 	agentctl "github.com/kandev/kandev/internal/agentctl/client"
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/docker"
-	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
 // ContainerConfig holds configuration for launching a Docker container
 type ContainerConfig struct {
-	AgentConfig     *registry.AgentTypeConfig
+	AgentConfig     agents.Agent
 	WorkspacePath   string
 	TaskID          string
 	TaskDescription string
@@ -104,7 +104,7 @@ func (cm *ContainerManager) LaunchContainer(ctx context.Context, config Containe
 	// Create an instance via the control API (same flow as standalone mode)
 	agentType := ""
 	if config.AgentConfig != nil {
-		agentType = config.AgentConfig.ID
+		agentType = config.AgentConfig.ID()
 	}
 	createReq := &agentctl.CreateInstanceRequest{
 		ID:            config.InstanceID,
@@ -177,16 +177,17 @@ func (cm *ContainerManager) StopContainer(ctx context.Context, containerID strin
 
 // buildContainerConfig builds the Docker container configuration
 func (cm *ContainerManager) buildContainerConfig(config ContainerConfig) (docker.ContainerConfig, error) {
-	agentConfig := config.AgentConfig
+	ag := config.AgentConfig
+	rt := ag.Runtime()
 
 	// Build image name with tag
-	imageName := agentConfig.Image
-	if agentConfig.Tag != "" {
-		imageName = fmt.Sprintf("%s:%s", agentConfig.Image, agentConfig.Tag)
+	imageName := rt.Image
+	if rt.Tag != "" {
+		imageName = fmt.Sprintf("%s:%s", rt.Image, rt.Tag)
 	}
 
-	// Build command using CommandBuilder
-	cmdOpts := CommandOptions{
+	// Build command using Agent's BuildCommand
+	cmdOpts := agents.CommandOptions{
 		Model:            config.Model,
 		SessionID:        config.SessionID,
 		PermissionValues: make(map[string]bool),
@@ -198,10 +199,10 @@ func (cm *ContainerManager) buildContainerConfig(config ContainerConfig) (docker
 		cmdOpts.PermissionValues["allow_indexing"] = config.ProfileInfo.AllowIndexing
 		cmdOpts.PermissionValues["dangerously_skip_permissions"] = config.ProfileInfo.DangerouslySkipPermissions
 	}
-	cmd := cm.commandBuilder.BuildCommand(agentConfig, cmdOpts)
+	cmd := ag.BuildCommand(cmdOpts)
 
 	// Expand mounts
-	mounts := cm.expandMounts(agentConfig.Mounts, config.WorkspacePath, agentConfig)
+	mounts := cm.expandMounts(rt.Mounts, config.WorkspacePath, ag)
 
 	// Add main repo .git directory mount for worktrees
 	if config.MainRepoGitDir != "" {
@@ -218,17 +219,17 @@ func (cm *ContainerManager) buildContainerConfig(config ContainerConfig) (docker
 	env := cm.buildEnvVars(config)
 
 	// Calculate resource limits
-	memoryBytes := agentConfig.ResourceLimits.MemoryMB * 1024 * 1024
-	cpuQuota := int64(agentConfig.ResourceLimits.CPUCores * 100000) // Docker CPU quota
+	memoryBytes := rt.ResourceLimits.MemoryMB * 1024 * 1024
+	cpuQuota := int64(rt.ResourceLimits.CPUCores * 100000) // Docker CPU quota
 
 	containerName := fmt.Sprintf("kandev-agent-%s", config.InstanceID[:8])
 
 	return docker.ContainerConfig{
 		Name:        containerName,
 		Image:       imageName,
-		Cmd:         cmd,
+		Cmd:         cmd.Args(),
 		Env:         env,
-		WorkingDir:  agentConfig.WorkingDir,
+		WorkingDir:  rt.WorkingDir,
 		Mounts:      mounts,
 		NetworkMode: cm.networkName,
 		Memory:      memoryBytes,
@@ -244,7 +245,7 @@ func (cm *ContainerManager) buildContainerConfig(config ContainerConfig) (docker
 }
 
 // expandMounts expands mount templates with actual paths
-func (cm *ContainerManager) expandMounts(templates []registry.MountTemplate, workspacePath string, agentConfig *registry.AgentTypeConfig) []docker.MountConfig {
+func (cm *ContainerManager) expandMounts(templates []agents.MountTemplate, workspacePath string, ag agents.Agent) []docker.MountConfig {
 	mounts := make([]docker.MountConfig, 0, len(templates)+1) // +1 for potential session dir
 
 	for _, mt := range templates {
@@ -264,8 +265,8 @@ func (cm *ContainerManager) expandMounts(templates []registry.MountTemplate, wor
 	}
 
 	// Add session directory mount from SessionConfig
-	sessionDirSource := cm.commandBuilder.ExpandSessionDir(agentConfig)
-	sessionDirTarget := cm.commandBuilder.GetSessionDirTarget(agentConfig)
+	sessionDirSource := cm.commandBuilder.ExpandSessionDir(ag)
+	sessionDirTarget := cm.commandBuilder.GetSessionDirTarget(ag)
 	if sessionDirSource != "" && sessionDirTarget != "" {
 		mounts = append(mounts, docker.MountConfig{
 			Source:   sessionDirSource,
@@ -299,11 +300,12 @@ func (cm *ContainerManager) expandMountSource(source, workspacePath string) stri
 
 // buildEnvVars builds environment variables for the container
 func (cm *ContainerManager) buildEnvVars(config ContainerConfig) []string {
-	agentConfig := config.AgentConfig
+	ag := config.AgentConfig
+	rt := ag.Runtime()
 	env := make([]string, 0)
 
 	// Add default env from agent config
-	for k, v := range agentConfig.Env {
+	for k, v := range rt.Env {
 		env = append(env, fmt.Sprintf("%s=%s", k, v))
 	}
 
@@ -314,17 +316,15 @@ func (cm *ContainerManager) buildEnvVars(config ContainerConfig) []string {
 	)
 
 	// Pass protocol to agentctl inside the container
-	if agentConfig.Protocol != "" {
-		env = append(env, fmt.Sprintf("AGENTCTL_PROTOCOL=%s", agentConfig.Protocol))
+	if rt.Protocol != "" {
+		env = append(env, fmt.Sprintf("AGENTCTL_PROTOCOL=%s", rt.Protocol))
 	}
 
 	// Configure Git to trust the workspace directory
-	// This is needed because the container runs as root but files are owned by host user
-	// Uses Git's environment-based config (GIT_CONFIG_COUNT, GIT_CONFIG_KEY_n, GIT_CONFIG_VALUE_n)
 	env = append(env,
 		"GIT_CONFIG_COUNT=1",
 		"GIT_CONFIG_KEY_0=safe.directory",
-		"GIT_CONFIG_VALUE_0=*", // Trust all directories in the container
+		"GIT_CONFIG_VALUE_0=*",
 	)
 
 	// Inject credentials from the provided credentials map

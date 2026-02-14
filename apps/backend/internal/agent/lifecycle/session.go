@@ -8,7 +8,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/kandev/kandev/internal/agent/registry"
+	"github.com/kandev/kandev/internal/agent/agents"
 	agentctl "github.com/kandev/kandev/internal/agentctl/client"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/appctx"
@@ -57,31 +57,32 @@ type InitializeResult struct {
 // It handles the initialize handshake and session creation/loading based on config.
 //
 // Session behavior:
-//   - If agentConfig.SessionConfig.NativeSessionResume is true AND existingSessionID is provided: use session/load
-//   - If agentConfig.SessionConfig.NativeSessionResume is false (CLI handles resume): always use session/new
+//   - If agentConfig.Runtime().SessionConfig.NativeSessionResume is true AND existingSessionID is provided: use session/load
+//   - If NativeSessionResume is false (CLI handles resume): always use session/new
 //   - Otherwise: use session/new
 func (sm *SessionManager) InitializeSession(
 	ctx context.Context,
 	client *agentctl.Client,
-	agentConfig *registry.AgentTypeConfig,
+	agentConfig agents.Agent,
 	existingSessionID string,
 	workspacePath string,
 	mcpServers []agentctltypes.McpServer,
 ) (*InitializeResult, error) {
+	rt := agentConfig.Runtime()
 	sm.logger.Info("initializing ACP session",
-		zap.String("agent_type", agentConfig.ID),
+		zap.String("agent_type", agentConfig.ID()),
 		zap.String("workspace_path", workspacePath),
-		zap.Bool("native_session_resume", agentConfig.SessionConfig.NativeSessionResume),
+		zap.Bool("native_session_resume", rt.SessionConfig.NativeSessionResume),
 		zap.String("existing_session_id", existingSessionID))
 
 	// Step 1: Send initialize request
 	sm.logger.Info("sending ACP initialize request",
-		zap.String("agent_type", agentConfig.ID))
+		zap.String("agent_type", agentConfig.ID()))
 
 	agentInfo, err := client.Initialize(ctx, "kandev", "1.0.0")
 	if err != nil {
 		sm.logger.Error("ACP initialize failed",
-			zap.String("agent_type", agentConfig.ID),
+			zap.String("agent_type", agentConfig.ID()),
 			zap.Error(err))
 		return nil, fmt.Errorf("initialize failed: %w", err)
 	}
@@ -96,7 +97,7 @@ func (sm *SessionManager) InitializeSession(
 	}
 
 	sm.logger.Info("ACP initialize response received",
-		zap.String("agent_type", agentConfig.ID),
+		zap.String("agent_type", agentConfig.ID()),
 		zap.String("agent_name", result.AgentName),
 		zap.String("agent_version", result.AgentVersion))
 
@@ -114,12 +115,13 @@ func (sm *SessionManager) InitializeSession(
 func (sm *SessionManager) createOrLoadSession(
 	ctx context.Context,
 	client *agentctl.Client,
-	agentConfig *registry.AgentTypeConfig,
+	agentConfig agents.Agent,
 	existingSessionID string,
 	workspacePath string,
 	mcpServers []agentctltypes.McpServer,
 ) (string, error) {
-	if agentConfig.SessionConfig.NativeSessionResume && existingSessionID != "" {
+	rt := agentConfig.Runtime()
+	if rt.SessionConfig.NativeSessionResume && existingSessionID != "" {
 		sessionID, err := sm.loadSession(ctx, client, agentConfig, existingSessionID)
 		if err != nil {
 			// If session/load fails with "Method not found" or "LoadSession capability is false",
@@ -127,7 +129,7 @@ func (sm *SessionManager) createOrLoadSession(
 			if strings.Contains(err.Error(), "Method not found") ||
 				strings.Contains(err.Error(), "LoadSession capability is false") {
 				sm.logger.Warn("agent does not support session loading, falling back to session/new",
-					zap.String("agent_type", agentConfig.ID),
+					zap.String("agent_type", agentConfig.ID()),
 					zap.String("existing_session_id", existingSessionID),
 					zap.String("reason", err.Error()))
 				return sm.createNewSession(ctx, client, agentConfig, workspacePath, mcpServers)
@@ -145,18 +147,20 @@ func (sm *SessionManager) createOrLoadSession(
 // 2. The agent doesn't support native session loading (NativeSessionResume is false)
 // 3. We have a task session ID (for history lookup)
 // 4. There's existing history for this session
-func (sm *SessionManager) shouldInjectResumeContext(agentConfig *registry.AgentTypeConfig, taskSessionID string) bool {
+func (sm *SessionManager) shouldInjectResumeContext(agentConfig agents.Agent, taskSessionID string) bool {
 	if sm.historyManager == nil {
 		return false
 	}
 
+	rt := agentConfig.Runtime()
+
 	// Only inject for ACP agents that don't support session/load
-	if agentConfig.Protocol != agent.ProtocolACP {
+	if rt.Protocol != agent.ProtocolACP {
 		return false
 	}
 
 	// If agent supports native session loading, don't inject (it will restore context natively)
-	if agentConfig.SessionConfig.NativeSessionResume {
+	if rt.SessionConfig.NativeSessionResume {
 		return false
 	}
 
@@ -166,7 +170,7 @@ func (sm *SessionManager) shouldInjectResumeContext(agentConfig *registry.AgentT
 
 // getResumeContextPrompt generates a prompt with resume context if available.
 // If there's no history or context injection is disabled, returns the original prompt.
-func (sm *SessionManager) getResumeContextPrompt(agentConfig *registry.AgentTypeConfig, taskSessionID, originalPrompt string) string {
+func (sm *SessionManager) getResumeContextPrompt(agentConfig agents.Agent, taskSessionID, originalPrompt string) string {
 	if !sm.shouldInjectResumeContext(agentConfig, taskSessionID) {
 		return originalPrompt
 	}
@@ -192,23 +196,23 @@ func (sm *SessionManager) injectKandevContext(taskID, sessionID, prompt string) 
 func (sm *SessionManager) loadSession(
 	ctx context.Context,
 	client *agentctl.Client,
-	agentConfig *registry.AgentTypeConfig,
+	agentConfig agents.Agent,
 	sessionID string,
 ) (string, error) {
 	sm.logger.Info("sending ACP session/load request",
-		zap.String("agent_type", agentConfig.ID),
+		zap.String("agent_type", agentConfig.ID()),
 		zap.String("session_id", sessionID))
 
 	if err := client.LoadSession(ctx, sessionID); err != nil {
 		sm.logger.Error("ACP session/load failed",
-			zap.String("agent_type", agentConfig.ID),
+			zap.String("agent_type", agentConfig.ID()),
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 		return "", fmt.Errorf("session/load failed: %w", err)
 	}
 
 	sm.logger.Info("ACP session loaded successfully",
-		zap.String("agent_type", agentConfig.ID),
+		zap.String("agent_type", agentConfig.ID()),
 		zap.String("session_id", sessionID))
 
 	return sessionID, nil
@@ -218,25 +222,25 @@ func (sm *SessionManager) loadSession(
 func (sm *SessionManager) createNewSession(
 	ctx context.Context,
 	client *agentctl.Client,
-	agentConfig *registry.AgentTypeConfig,
+	agentConfig agents.Agent,
 	workspacePath string,
 	mcpServers []agentctltypes.McpServer,
 ) (string, error) {
 	sm.logger.Info("sending ACP session/new request",
-		zap.String("agent_type", agentConfig.ID),
+		zap.String("agent_type", agentConfig.ID()),
 		zap.String("workspace_path", workspacePath))
 
 	sessionID, err := client.NewSession(ctx, workspacePath, mcpServers)
 	if err != nil {
 		sm.logger.Error("ACP session/new failed",
-			zap.String("agent_type", agentConfig.ID),
+			zap.String("agent_type", agentConfig.ID()),
 			zap.String("workspace_path", workspacePath),
 			zap.Error(err))
 		return "", fmt.Errorf("session/new failed: %w", err)
 	}
 
 	sm.logger.Info("ACP session created successfully",
-		zap.String("agent_type", agentConfig.ID),
+		zap.String("agent_type", agentConfig.ID()),
 		zap.String("session_id", sessionID))
 
 	return sessionID, nil
@@ -254,17 +258,18 @@ func (sm *SessionManager) createNewSession(
 func (sm *SessionManager) InitializeAndPrompt(
 	ctx context.Context,
 	execution *AgentExecution,
-	agentConfig *registry.AgentTypeConfig,
+	agentConfig agents.Agent,
 	taskDescription string,
 	mcpServers []agentctltypes.McpServer,
 	markReady func(executionID string) error,
 ) error {
+	rt := agentConfig.Runtime()
 	sm.logger.Info("initializing ACP session",
 		zap.String("execution_id", execution.ID),
 		zap.String("agentctl_url", execution.agentctl.BaseURL()),
-		zap.String("agent_type", agentConfig.ID),
+		zap.String("agent_type", agentConfig.ID()),
 		zap.String("existing_acp_session_id", execution.ACPSessionID),
-		zap.Bool("native_session_resume", agentConfig.SessionConfig.NativeSessionResume))
+		zap.Bool("native_session_resume", rt.SessionConfig.NativeSessionResume))
 
 	// Connect WebSocket streams FIRST — agent operations now go over the stream
 	if sm.streamManager != nil {

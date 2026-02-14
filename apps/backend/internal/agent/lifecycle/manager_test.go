@@ -8,13 +8,70 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/docker"
 	"github.com/kandev/kandev/internal/agent/registry"
 	agentctl "github.com/kandev/kandev/internal/agentctl/client"
+	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+)
+
+// testAgent implements agents.Agent for use in lifecycle tests.
+// Embed StandardPassthrough to optionally satisfy agents.PassthroughAgent.
+type testAgent struct {
+	agents.StandardPassthrough
+	id                 string
+	name               string
+	displayName        string
+	description        string
+	enabled            bool
+	defaultModel       string
+	permissionSettings map[string]agents.PermissionSetting
+	runtimeConfig      *agents.RuntimeConfig
+}
+
+func (a *testAgent) ID() string          { return a.id }
+func (a *testAgent) Name() string        { return a.name }
+func (a *testAgent) DisplayName() string { return a.displayName }
+func (a *testAgent) Description() string { return a.description }
+func (a *testAgent) Enabled() bool       { return a.enabled }
+
+func (a *testAgent) Logo(_ agents.LogoVariant) []byte { return nil }
+func (a *testAgent) IsInstalled(_ context.Context) (*agents.DiscoveryResult, error) {
+	return &agents.DiscoveryResult{Available: false}, nil
+}
+
+func (a *testAgent) DefaultModel() string { return a.defaultModel }
+func (a *testAgent) ListModels(_ context.Context) (*agents.ModelList, error) {
+	return &agents.ModelList{}, nil
+}
+
+func (a *testAgent) CreateAdapter(_ *adapter.Config, _ *logger.Logger) (adapter.AgentAdapter, error) {
+	return nil, agents.ErrNotSupported
+}
+
+func (a *testAgent) BuildCommand(_ agents.CommandOptions) agents.Command { return agents.Command{} }
+
+func (a *testAgent) PermissionSettings() map[string]agents.PermissionSetting {
+	return a.permissionSettings
+}
+
+func (a *testAgent) Runtime() *agents.RuntimeConfig {
+	if a.runtimeConfig != nil {
+		return a.runtimeConfig
+	}
+	return &agents.RuntimeConfig{
+		Cmd:            agents.NewCommand(a.id),
+		ResourceLimits: agents.ResourceLimits{MemoryMB: 512, CPUCores: 0.5, Timeout: time.Hour},
+	}
+}
+
+var (
+	_ agents.Agent            = (*testAgent)(nil)
+	_ agents.PassthroughAgent = (*testAgent)(nil)
 )
 
 // MockDockerClient implements a mock for the docker.Client for testing
@@ -398,156 +455,163 @@ func TestManager_StartStop(t *testing.T) {
 	}
 }
 
-func TestManager_BuildPassthroughResumeCommand(t *testing.T) {
-	mgr := newTestManager()
-
+func TestBuildPassthroughCommand(t *testing.T) {
 	tests := []struct {
-		name        string
-		agentConfig *registry.AgentTypeConfig
-		profileInfo *AgentProfileInfo
-		wantCmd     []string
+		name    string
+		agent   agents.PassthroughAgent
+		opts    agents.PassthroughOptions
+		wantCmd []string
 	}{
 		{
-			name: "basic command without profile",
-			agentConfig: &registry.AgentTypeConfig{
-				ID: "test-agent",
-				PassthroughConfig: registry.PassthroughConfig{
-					Supported:      true,
-					PassthroughCmd: []string{"test-cli", "--verbose"},
+			name: "basic command without options",
+			agent: &testAgent{
+				id: "test-agent",
+				StandardPassthrough: agents.StandardPassthrough{
+					Cfg: agents.PassthroughConfig{Supported: true, PassthroughCmd: agents.NewCommand("test-cli", "--verbose")},
 				},
 			},
-			profileInfo: nil,
-			wantCmd:     []string{"test-cli", "--verbose"},
+			opts:    agents.PassthroughOptions{Resume: true},
+			wantCmd: []string{"test-cli", "--verbose"},
 		},
 		{
-			name: "command with model flag",
-			agentConfig: &registry.AgentTypeConfig{
-				ID: "test-agent",
-				PassthroughConfig: registry.PassthroughConfig{
-					Supported:      true,
-					PassthroughCmd: []string{"test-cli"},
-					ModelFlag:      "--model {model}",
+			name: "command with model",
+			agent: &testAgent{
+				id: "test-agent",
+				StandardPassthrough: agents.StandardPassthrough{
+					Cfg: agents.PassthroughConfig{Supported: true, PassthroughCmd: agents.NewCommand("test-cli"), ModelFlag: agents.NewParam("--model", "{model}")},
 				},
 			},
-			profileInfo: &AgentProfileInfo{
-				Model: "gpt-4",
-			},
+			opts:    agents.PassthroughOptions{Model: "gpt-4"},
 			wantCmd: []string{"test-cli", "--model", "gpt-4"},
 		},
 		{
-			name: "command with resume flag",
-			agentConfig: &registry.AgentTypeConfig{
-				ID: "test-agent",
-				PassthroughConfig: registry.PassthroughConfig{
-					Supported:      true,
-					PassthroughCmd: []string{"test-cli"},
-					ResumeFlag:     "-c",
+			name: "resume with single-word flag",
+			agent: &testAgent{
+				id: "test-agent",
+				StandardPassthrough: agents.StandardPassthrough{
+					Cfg: agents.PassthroughConfig{Supported: true, PassthroughCmd: agents.NewCommand("test-cli"), ResumeFlag: agents.NewParam("-c")},
 				},
 			},
-			profileInfo: nil,
-			wantCmd:     []string{"test-cli", "-c"},
+			opts:    agents.PassthroughOptions{Resume: true},
+			wantCmd: []string{"test-cli", "-c"},
 		},
 		{
-			name: "command with multi-word resume flag",
-			agentConfig: &registry.AgentTypeConfig{
-				ID: "gemini-agent",
-				PassthroughConfig: registry.PassthroughConfig{
-					Supported:      true,
-					PassthroughCmd: []string{"gemini"},
-					ResumeFlag:     "--resume latest",
+			name: "resume with multi-word flag",
+			agent: &testAgent{
+				id: "gemini-agent",
+				StandardPassthrough: agents.StandardPassthrough{
+					Cfg: agents.PassthroughConfig{Supported: true, PassthroughCmd: agents.NewCommand("gemini"), ResumeFlag: agents.NewParam("--resume", "latest")},
 				},
 			},
-			profileInfo: nil,
-			wantCmd:     []string{"gemini", "--resume", "latest"},
+			opts:    agents.PassthroughOptions{Resume: true},
+			wantCmd: []string{"gemini", "--resume", "latest"},
 		},
 		{
-			name: "command with permission settings",
-			agentConfig: &registry.AgentTypeConfig{
-				ID: "test-agent",
-				PassthroughConfig: registry.PassthroughConfig{
-					Supported:      true,
-					PassthroughCmd: []string{"test-cli"},
-				},
-				PermissionSettings: map[string]registry.PermissionSetting{
-					"dangerously_skip_permissions": {
-						Supported:   true,
-						ApplyMethod: "cli_flag",
-						CLIFlag:     "--dangerous",
-					},
-					"auto_approve": {
-						Supported:   true,
-						ApplyMethod: "cli_flag",
-						CLIFlag:     "--yes",
+			name: "permission settings as CLI flags",
+			agent: &testAgent{
+				id: "test-agent",
+				StandardPassthrough: agents.StandardPassthrough{
+					Cfg: agents.PassthroughConfig{Supported: true, PassthroughCmd: agents.NewCommand("test-cli")},
+					PermSettings: map[string]agents.PermissionSetting{
+						"auto_approve": {Supported: true, ApplyMethod: "cli_flag", CLIFlag: "--yes"},
 					},
 				},
 			},
-			profileInfo: &AgentProfileInfo{
-				DangerouslySkipPermissions: true,
-				AutoApprove:                true,
+			opts: agents.PassthroughOptions{
+				PermissionValues: map[string]bool{"auto_approve": true},
 			},
-			// Order is alphabetical by setting name: auto_approve, dangerously_skip_permissions
-			wantCmd: []string{"test-cli", "--yes", "--dangerous"},
+			wantCmd: []string{"test-cli", "--yes"},
 		},
 		{
-			name: "full command with all options",
-			agentConfig: &registry.AgentTypeConfig{
-				ID: "claude-code",
-				PassthroughConfig: registry.PassthroughConfig{
-					Supported:      true,
-					PassthroughCmd: []string{"npx", "-y", "@anthropic-ai/claude-code"},
-					ModelFlag:      "--model {model}",
-					ResumeFlag:     "-c",
-				},
-				PermissionSettings: map[string]registry.PermissionSetting{
-					"dangerously_skip_permissions": {
-						Supported:   true,
-						ApplyMethod: "cli_flag",
-						CLIFlag:     "--dangerously-skip-permissions",
+			name: "full resume with model + settings + resume flag",
+			agent: &testAgent{
+				id: "claude-code",
+				StandardPassthrough: agents.StandardPassthrough{
+					Cfg: agents.PassthroughConfig{
+						Supported:      true,
+						PassthroughCmd: agents.NewCommand("npx", "-y", "@anthropic-ai/claude-code"),
+						ModelFlag:      agents.NewParam("--model", "{model}"),
+						ResumeFlag:     agents.NewParam("-c"),
+					},
+					PermSettings: map[string]agents.PermissionSetting{
+						"dangerously_skip_permissions": {Supported: true, ApplyMethod: "cli_flag", CLIFlag: "--dangerously-skip-permissions"},
 					},
 				},
 			},
-			profileInfo: &AgentProfileInfo{
-				Model:                      "claude-sonnet-4",
-				DangerouslySkipPermissions: true,
+			opts: agents.PassthroughOptions{
+				Model:            "claude-sonnet-4",
+				Resume:           true,
+				PermissionValues: map[string]bool{"dangerously_skip_permissions": true},
 			},
 			wantCmd: []string{"npx", "-y", "@anthropic-ai/claude-code", "--model", "claude-sonnet-4", "--dangerously-skip-permissions", "-c"},
 		},
 		{
 			name: "permission setting with cli_flag_value",
-			agentConfig: &registry.AgentTypeConfig{
-				ID: "test-agent",
-				PassthroughConfig: registry.PassthroughConfig{
-					Supported:      true,
-					PassthroughCmd: []string{"test-cli"},
-				},
-				PermissionSettings: map[string]registry.PermissionSetting{
-					"auto_approve": {
-						Supported:    true,
-						ApplyMethod:  "cli_flag",
-						CLIFlag:      "--approve-level",
-						CLIFlagValue: "all",
+			agent: &testAgent{
+				id: "test-agent",
+				StandardPassthrough: agents.StandardPassthrough{
+					Cfg: agents.PassthroughConfig{Supported: true, PassthroughCmd: agents.NewCommand("test-cli")},
+					PermSettings: map[string]agents.PermissionSetting{
+						"auto_approve": {Supported: true, ApplyMethod: "cli_flag", CLIFlag: "--approve-level", CLIFlagValue: "all"},
 					},
 				},
 			},
-			profileInfo: &AgentProfileInfo{
-				AutoApprove: true,
+			opts: agents.PassthroughOptions{
+				PermissionValues: map[string]bool{"auto_approve": true},
 			},
 			wantCmd: []string{"test-cli", "--approve-level", "all"},
+		},
+		{
+			name: "new session with prompt (positional)",
+			agent: &testAgent{
+				id: "test-agent",
+				StandardPassthrough: agents.StandardPassthrough{
+					Cfg: agents.PassthroughConfig{Supported: true, PassthroughCmd: agents.NewCommand("test-cli")},
+				},
+			},
+			opts:    agents.PassthroughOptions{Prompt: "fix the bug"},
+			wantCmd: []string{"test-cli", "fix the bug"},
+		},
+		{
+			name: "new session with prompt flag",
+			agent: &testAgent{
+				id: "test-agent",
+				StandardPassthrough: agents.StandardPassthrough{
+					Cfg: agents.PassthroughConfig{Supported: true, PassthroughCmd: agents.NewCommand("test-cli"), PromptFlag: agents.NewParam("--prompt", "{prompt}")},
+				},
+			},
+			opts:    agents.PassthroughOptions{Prompt: "fix the bug"},
+			wantCmd: []string{"test-cli", "--prompt", "fix the bug"},
+		},
+		{
+			name: "resume with session ID",
+			agent: &testAgent{
+				id: "test-agent",
+				StandardPassthrough: agents.StandardPassthrough{
+					Cfg: agents.PassthroughConfig{
+						Supported:         true,
+						PassthroughCmd:    agents.NewCommand("test-cli"),
+						SessionResumeFlag: agents.NewParam("--resume"),
+					},
+				},
+			},
+			opts:    agents.PassthroughOptions{SessionID: "sess-123"},
+			wantCmd: []string{"test-cli", "--resume", "sess-123"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := mgr.buildPassthroughResumeCommand(tt.agentConfig, tt.profileInfo)
+			got := tt.agent.BuildPassthroughCommand(tt.opts).Args()
 
 			if len(got) != len(tt.wantCmd) {
-				t.Errorf("buildPassthroughResumeCommand() = %v, want %v", got, tt.wantCmd)
+				t.Errorf("BuildPassthroughCommand() = %v, want %v", got, tt.wantCmd)
 				return
 			}
 
 			for i, arg := range got {
 				if arg != tt.wantCmd[i] {
-					t.Errorf("buildPassthroughResumeCommand()[%d] = %q, want %q", i, arg, tt.wantCmd[i])
+					t.Errorf("BuildPassthroughCommand()[%d] = %q, want %q", i, arg, tt.wantCmd[i])
 				}
 			}
 		})

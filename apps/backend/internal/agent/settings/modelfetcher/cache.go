@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kandev/kandev/internal/agent/registry"
+	"github.com/kandev/kandev/internal/agent/agents"
 )
 
 const (
@@ -14,7 +14,7 @@ const (
 
 // CacheEntry holds cached model data for an agent
 type CacheEntry struct {
-	Models    []registry.ModelEntry
+	Models    []agents.Model
 	CachedAt  time.Time
 	ExpiresAt time.Time
 	Error     error
@@ -60,7 +60,7 @@ func (c *Cache) Get(agentName string) (*CacheEntry, bool) {
 }
 
 // Set caches the models for an agent
-func (c *Cache) Set(agentName string, models []registry.ModelEntry, err error) {
+func (c *Cache) Set(agentName string, models []agents.Model, err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
