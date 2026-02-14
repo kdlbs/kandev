@@ -125,6 +125,7 @@ type wsAddMessageRequest struct {
 	PlanMode          bool                   `json:"plan_mode,omitempty"`
 	HasReviewComments bool                   `json:"has_review_comments,omitempty"`
 	Attachments       []v1.MessageAttachment `json:"attachments,omitempty"`
+	ContextFiles      []v1.ContextFileMeta   `json:"context_files,omitempty"`
 }
 
 func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -185,11 +186,12 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		}
 	}
 
-	// Build metadata with attachments, plan mode, and review comments
+	// Build metadata with attachments, plan mode, review comments, and context files
 	meta := orchestrator.NewUserMessageMeta().
 		WithPlanMode(req.PlanMode).
 		WithReviewComments(req.HasReviewComments).
-		WithAttachments(req.Attachments)
+		WithAttachments(req.Attachments).
+		WithContextFiles(req.ContextFiles)
 	metadata := meta.ToMap()
 
 	message, err := h.messageController.CreateMessage(ctx, dto.CreateMessageRequest{

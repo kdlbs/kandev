@@ -150,7 +150,6 @@ export function applyLayoutFixups(api: DockviewApi): {
     const oldFiles = api.getPanel('all-files');
     if (oldFiles) oldFiles.api.setTitle('Files');
 
-    // Compute group IDs from restored panels (check both old and new IDs)
     const chatPanel = api.getPanel('chat');
     const changesPanel = api.getPanel('changes') ?? oldChanges;
     const terminalPanel = api.panels.find(
@@ -408,14 +407,25 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
     },
 
     addPlanPanel: (groupId) => {
-        const { api, centerGroupId } = get();
+        const { api } = get();
         if (!api) return;
-        focusOrAddPanel(api, {
-            id: 'plan',
-            component: 'plan',
-            title: 'Plan',
-            position: { referenceGroup: groupId ?? centerGroupId },
-        });
+        if (groupId) {
+            // Header "+" menu: add as tab in the specified group
+            focusOrAddPanel(api, {
+                id: 'plan',
+                component: 'plan',
+                title: 'Plan',
+                position: { referenceGroup: groupId },
+            });
+        } else {
+            // Toolbar toggle: split right from the chat panel
+            focusOrAddPanel(api, {
+                id: 'plan',
+                component: 'plan',
+                title: 'Plan',
+                position: { referencePanel: 'chat', direction: 'right' },
+            });
+        }
     },
 
     addTerminalPanel: (terminalId, groupId) => {

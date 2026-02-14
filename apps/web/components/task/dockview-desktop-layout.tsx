@@ -686,6 +686,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
         leftHeaderActionsComponent={LeftHeaderActions}
         rightHeaderActionsComponent={RightHeaderActions}
         onReady={onReady}
+        defaultRenderer="always"
         className="h-full"
       />
     </div>

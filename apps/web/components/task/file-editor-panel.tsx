@@ -1,26 +1,58 @@
 'use client';
 
-import { memo } from 'react';
+import { memo, useEffect, useRef } from 'react';
 import type { IDockviewPanelProps } from 'dockview-react';
 import { PanelRoot, PanelBody } from './panel-primitives';
 import { FileEditorContent } from './file-editor-content';
 import { FileImageViewer } from './file-image-viewer';
 import { FileBinaryViewer } from './file-binary-viewer';
 import { useAppStore } from '@/components/state-provider';
-import { useDockviewStore } from '@/lib/state/dockview-store';
+import { useDockviewStore, type FileEditorState } from '@/lib/state/dockview-store';
 import { useFileEditors } from '@/hooks/use-file-editors';
 import { getFileCategory } from '@/lib/utils/file-types';
+import { getWebSocketClient } from '@/lib/ws/connection';
+import { requestFileContent } from '@/lib/ws/workspace-files';
+import { calculateHash } from '@/lib/utils/file-diff';
 
 export const FileEditorPanel = memo(function FileEditorPanel(
   props: IDockviewPanelProps<{ path: string }>
 ) {
   const path = props.params.path;
   const fileState = useDockviewStore((s) => s.openFiles.get(path));
+  const setFileState = useDockviewStore((s) => s.setFileState);
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const activeSession = useAppStore((state) =>
     activeSessionId ? state.taskSessions.items[activeSessionId] ?? null : null
   );
   const { savingFiles, handleFileChange, saveFile, deleteFile } = useFileEditors();
+
+  // Self-load file content when state is missing (e.g. after hot reload clears the store)
+  const loadingRef = useRef(false);
+  useEffect(() => {
+    if (fileState || loadingRef.current || !activeSessionId) return;
+    loadingRef.current = true;
+
+    const client = getWebSocketClient();
+    if (!client) { loadingRef.current = false; return; }
+
+    requestFileContent(client, activeSessionId, path)
+      .then(async (response) => {
+        const hash = await calculateHash(response.content);
+        const name = path.split('/').pop() || path;
+        const state: FileEditorState = {
+          path,
+          name,
+          content: response.content,
+          originalContent: response.content,
+          originalHash: hash,
+          isDirty: false,
+          isBinary: response.is_binary,
+        };
+        setFileState(path, state);
+      })
+      .catch(() => { /* will stay on loading state */ })
+      .finally(() => { loadingRef.current = false; });
+  }, [fileState, activeSessionId, path, setFileState]);
 
   if (!fileState) {
     return (

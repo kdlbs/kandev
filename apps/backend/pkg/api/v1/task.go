@@ -126,6 +126,12 @@ type MessageAttachment struct {
 	MimeType string `json:"mime_type"` // MIME type (e.g., "image/png")
 }
 
+// ContextFileMeta represents a context file reference attached to a message
+type ContextFileMeta struct {
+	Path string `json:"path"`
+	Name string `json:"name"`
+}
+
 // Message represents a message in a task session (user or agent)
 type Message struct {
 	ID            string                 `json:"id"`

@@ -4,7 +4,7 @@ import { memo, isValidElement, useState, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
-import { IconWand, IconMessageDots } from '@tabler/icons-react';
+import { IconWand, IconMessageDots, IconFile } from '@tabler/icons-react';
 import { cn } from '@/lib/utils';
 import type { Message } from '@/lib/types/http';
 import { RichBlocks } from '@/components/task/chat/messages/rich-blocks';
@@ -138,9 +138,15 @@ export const ChatMessage = memo(function ChatMessage({ comment, label, className
 
   // User message: right-aligned bubble with markdown support
   if (isUser) {
-    // Extract image attachments and context flags from metadata
-    const metadata = comment.metadata as { attachments?: Array<{ type: string; data: string; mime_type: string }>; plan_mode?: boolean; has_review_comments?: boolean } | undefined;
+    // Extract image attachments, context files, and context flags from metadata
+    const metadata = comment.metadata as {
+      attachments?: Array<{ type: string; data: string; mime_type: string }>;
+      plan_mode?: boolean;
+      has_review_comments?: boolean;
+      context_files?: Array<{ path: string; name: string }>;
+    } | undefined;
     const imageAttachments = (metadata?.attachments || []).filter(att => att.type === 'image');
+    const contextFiles = metadata?.context_files || [];
     const hasPlanMode = !!metadata?.plan_mode;
     const hasReviewComments = !!metadata?.has_review_comments;
     const hasContent = comment.content && comment.content.trim() !== '';
@@ -150,8 +156,8 @@ export const ChatMessage = memo(function ChatMessage({ comment, label, className
       <div className="flex justify-end w-full overflow-hidden">
         <div className="max-w-[85%] sm:max-w-[75%] md:max-w-2xl overflow-hidden group">
           {/* Context badges */}
-          {(hasPlanMode || hasReviewComments) && (
-            <div className="flex justify-end gap-1.5 mb-1">
+          {(hasPlanMode || hasReviewComments || contextFiles.length > 0) && (
+            <div className="flex justify-end gap-1.5 mb-1 flex-wrap">
               {hasPlanMode && (
                 <span className="inline-flex items-center gap-1 rounded-full bg-purple-500/20 px-2 py-0.5 text-[10px] text-purple-400">
                   <IconWand size={10} /> Plan mode
@@ -162,6 +168,11 @@ export const ChatMessage = memo(function ChatMessage({ comment, label, className
                   <IconMessageDots size={10} /> Review comments
                 </span>
               )}
+              {contextFiles.map((f) => (
+                <span key={f.path} className="inline-flex items-center gap-1 rounded-full bg-muted/50 px-2 py-0.5 text-[10px] text-muted-foreground">
+                  <IconFile size={10} /> {f.name}
+                </span>
+              ))}
             </div>
           )}
           <div className="rounded-2xl bg-primary/30 px-4 py-2.5 text-xs overflow-hidden">

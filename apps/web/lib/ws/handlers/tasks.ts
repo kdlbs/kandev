@@ -2,6 +2,8 @@ import type { StoreApi } from 'zustand';
 import type { AppState } from '@/lib/state/store';
 import type { WsHandlers } from '@/lib/ws/handlers/types';
 import type { KanbanState } from '@/lib/state/slices/kanban/types';
+import { cleanupTaskStorage } from '@/lib/local-storage';
+import { useContextFilesStore } from '@/lib/state/context-files-store';
 
 type KanbanTask = KanbanState['tasks'][number];
 
@@ -65,14 +67,28 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
       });
     },
     'task.deleted': (message) => {
+      const deletedId = message.payload.task_id;
+
+      // Clean up persisted storage before removing from state
+      const currentState = store.getState();
+      const sessionIds = (currentState.taskSessionsByTask.itemsByTaskId[deletedId] ?? []).map((s) => s.id);
+      // Also include primarySessionId in case sessions weren't loaded into the store
+      const task = currentState.kanban.tasks.find((t) => t.id === deletedId);
+      if (task?.primarySessionId && !sessionIds.includes(task.primarySessionId)) {
+        sessionIds.push(task.primarySessionId);
+      }
+      cleanupTaskStorage(deletedId, sessionIds);
+      for (const sid of sessionIds) {
+        useContextFilesStore.getState().clearSession(sid);
+      }
+
       store.setState((state) => {
-        const deletedId = message.payload.task_id;
         const isActive = state.tasks.activeTaskId === deletedId;
         return {
           ...state,
           kanban: {
             ...state.kanban,
-            tasks: state.kanban.tasks.filter((task) => task.id !== deletedId),
+            tasks: state.kanban.tasks.filter((t) => t.id !== deletedId),
           },
           tasks: isActive
             ? { ...state.tasks, activeTaskId: null, activeSessionId: null }

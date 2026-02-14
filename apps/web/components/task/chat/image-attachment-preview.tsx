@@ -10,6 +10,8 @@ export type ImageAttachment = {
   mimeType: string;   // "image/png", "image/jpeg", "image/gif", "image/webp"
   preview: string;    // Data URL for preview display
   size: number;       // File size in bytes
+  width: number;      // Image width in pixels
+  height: number;     // Image height in pixels
 };
 
 // Supported image types
@@ -20,7 +22,7 @@ export const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10MB per image
 export const MAX_TOTAL_SIZE = 20 * 1024 * 1024; // 20MB total
 export const MAX_IMAGES = 10;
 
-function formatBytes(bytes: number): string {
+export function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 B';
   const k = 1024;
   const sizes = ['B', 'KB', 'MB', 'GB'];
@@ -113,13 +115,21 @@ export function processImageFile(file: File): Promise<ImageAttachment | null> {
       const base64 = dataUrl.split(',')[1];
       const mimeType = dataUrl.split(';')[0].split(':')[1];
 
-      resolve({
-        id: crypto.randomUUID(),
-        data: base64,
-        mimeType,
-        preview: dataUrl,
-        size: file.size,
-      });
+      // Read image dimensions
+      const img = new Image();
+      img.onload = () => {
+        resolve({
+          id: crypto.randomUUID(),
+          data: base64,
+          mimeType,
+          preview: dataUrl,
+          size: file.size,
+          width: img.naturalWidth,
+          height: img.naturalHeight,
+        });
+      };
+      img.onerror = () => resolve(null);
+      img.src = dataUrl;
     };
     reader.onerror = () => {
       console.error('Failed to read image file');

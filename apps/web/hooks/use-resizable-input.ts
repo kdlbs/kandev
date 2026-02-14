@@ -1,30 +1,49 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { getChatInputHeight, setChatInputHeight } from '@/lib/local-storage';
 
 const MIN_HEIGHT = 100;
 const DEFAULT_HEIGHT = 134;
-const MAX_ABSOLUTE = 800;
+const MAX_ABSOLUTE = 450;
 
-export function useResizableInput() {
-  const [height, setHeight] = useState(DEFAULT_HEIGHT);
+export function useResizableInput(sessionId: string | undefined) {
+  const [height, setHeight] = useState(() => {
+    const maxHeight = typeof window !== 'undefined'
+      ? Math.min(window.innerHeight * 0.6, MAX_ABSOLUTE)
+      : MAX_ABSOLUTE;
+    if (sessionId) {
+      const saved = getChatInputHeight(sessionId);
+      return saved ? Math.min(saved, maxHeight) : DEFAULT_HEIGHT;
+    }
+    return DEFAULT_HEIGHT;
+  });
   const containerRef = useRef<HTMLDivElement>(null);
   const isDragging = useRef(false);
   const startY = useRef(0);
   const startHeight = useRef(0);
-
-  const getMaxHeight = useCallback(() => {
-    // Walk up to find the nearest panel-level ancestor (the full-height flex container)
-    let el = containerRef.current?.parentElement;
-    while (el) {
-      if (el.clientHeight > MAX_ABSOLUTE * 0.5) {
-        return Math.min(el.clientHeight * 0.8, MAX_ABSOLUTE);
-      }
-      el = el.parentElement;
+  // Restore height when session changes
+  const prevSessionRef = useRef(sessionId);
+  useEffect(() => {
+    if (sessionId === prevSessionRef.current) return;
+    prevSessionRef.current = sessionId;
+    /* eslint-disable react-hooks/set-state-in-effect -- syncing from localStorage on session switch */
+    if (sessionId) {
+      const maxHeight = Math.min(window.innerHeight * 0.6, MAX_ABSOLUTE);
+      const saved = getChatInputHeight(sessionId);
+      setHeight(saved ? Math.min(saved, maxHeight) : DEFAULT_HEIGHT);
+    } else {
+      setHeight(DEFAULT_HEIGHT);
     }
-    // Fallback: use viewport height
-    return Math.min(window.innerHeight * 0.7, MAX_ABSOLUTE);
-  }, []);
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, [sessionId]);
+
+  // Persist height after drag ends
+  const persistHeight = useCallback((h: number) => {
+    if (sessionId) {
+      setChatInputHeight(sessionId, h);
+    }
+  }, [sessionId]);
 
   const handleMouseDown = useCallback(
     (e: React.MouseEvent) => {
@@ -38,16 +57,21 @@ export function useResizableInput() {
     [height]
   );
 
-  const handleDoubleClick = useCallback(() => {
+  const resetHeight = useCallback(() => {
     setHeight(DEFAULT_HEIGHT);
-  }, []);
+    persistHeight(DEFAULT_HEIGHT);
+  }, [persistHeight]);
+
+  const handleDoubleClick = useCallback(() => {
+    resetHeight();
+  }, [resetHeight]);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!isDragging.current) return;
       // Dragging UP (clientY decreases) increases height
       const delta = startY.current - e.clientY;
-      const maxHeight = getMaxHeight();
+      const maxHeight = Math.min(window.innerHeight * 0.6, MAX_ABSOLUTE);
       const newHeight = Math.min(Math.max(startHeight.current + delta, MIN_HEIGHT), maxHeight);
       setHeight(newHeight);
     };
@@ -57,6 +81,11 @@ export function useResizableInput() {
       isDragging.current = false;
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
+      // Persist the final height after drag
+      setHeight((h) => {
+        persistHeight(h);
+        return h;
+      });
     };
 
     document.addEventListener('mousemove', handleMouseMove);
@@ -65,10 +94,11 @@ export function useResizableInput() {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [getMaxHeight]);
+  }, [persistHeight]);
 
   return {
     height,
+    resetHeight,
     containerRef,
     resizeHandleProps: {
       onMouseDown: handleMouseDown,

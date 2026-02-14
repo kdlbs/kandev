@@ -11,11 +11,13 @@ import { useKeyboardShortcut } from '@/hooks/use-keyboard-shortcut';
 import { SHORTCUTS } from '@/lib/keyboard/constants';
 import { useSessionMessages } from '@/hooks/domains/session/use-session-messages';
 import { useSettingsData } from '@/hooks/domains/settings/use-settings-data';
+import { useCustomPrompts } from '@/hooks/domains/settings/use-custom-prompts';
 import { useSessionState } from '@/hooks/domains/session/use-session-state';
 import { useProcessedMessages } from '@/hooks/use-processed-messages';
 import { useSessionModel } from '@/hooks/domains/session/use-session-model';
 import { useMessageHandler } from '@/hooks/use-message-handler';
 import { useQueue } from '@/hooks/domains/session/use-queue';
+import { useContextFilesStore } from '@/lib/state/context-files-store';
 import { VirtualizedMessageList } from '@/components/task/chat/virtualized-message-list';
 import { ChatInputContainer, type ChatInputContainerHandle, type MessageAttachment } from '@/components/task/chat/chat-input-container';
 import { type QueuedMessageIndicatorHandle } from '@/components/task/chat/queued-message-indicator';
@@ -24,10 +26,36 @@ import {
   useDiffCommentsStore,
   usePendingCommentsByFile,
 } from '@/lib/state/slices/diff-comments';
+import { getFileName } from '@/lib/utils/file-path';
+import type { ContextItem } from '@/lib/types/context';
 import type { DiffComment } from '@/lib/diff/types';
 import type { DocumentComment } from '@/lib/state/slices/ui/types';
 
 const EMPTY_COMMENTS: DocumentComment[] = [];
+const EMPTY_CONTEXT_FILES: import('@/lib/state/context-files-store').ContextFile[] = [];
+
+/** Sort: pinned first, then by kind order, then by label */
+const KIND_ORDER: Record<string, number> = {
+  plan: 0,
+  file: 1,
+  prompt: 2,
+  comment: 3,
+  'plan-comment': 4,
+  image: 5,
+};
+
+function contextItemSortFn(a: ContextItem, b: ContextItem): number {
+  // Pinned first
+  const aPinned = a.pinned ? 0 : 1;
+  const bPinned = b.pinned ? 0 : 1;
+  if (aPinned !== bPinned) return aPinned - bPinned;
+  // Then by kind
+  const aKind = KIND_ORDER[a.kind] ?? 99;
+  const bKind = KIND_ORDER[b.kind] ?? 99;
+  if (aKind !== bKind) return aKind - bKind;
+  // Then by label
+  return a.label.localeCompare(b.label);
+}
 
 type TaskChatPanelProps = {
   onSend?: (message: string) => void;
@@ -55,8 +83,11 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   const chatInputRef = useRef<ChatInputContainerHandle>(null);
   const queuedMessageRef = useRef<QueuedMessageIndicatorHandle>(null);
 
-  // Ensure agent profile data is loaded (may not be hydrated from SSR in all navigation paths)
+  // Ensure agent profile data is loaded
   useSettingsData(true);
+
+  // Custom prompts for context
+  const { prompts } = useCustomPrompts();
 
   // Session state management
   const {
@@ -71,7 +102,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     isFailed,
   } = useSessionState(sessionId);
 
-  // Plan mode state - derived from active document being a plan in document panel
+  // Plan mode state
   const activeDocument = useAppStore((state) =>
     resolvedSessionId ? state.documentPanel.activeDocumentBySessionId[resolvedSessionId] ?? null : null
   );
@@ -88,6 +119,21 @@ export const TaskChatPanel = memo(function TaskChatPanel({
 
   const { addPlan } = usePanelActions();
 
+  // Context files store
+  const contextFiles = useContextFilesStore((s) =>
+    resolvedSessionId ? s.filesBySessionId[resolvedSessionId] ?? EMPTY_CONTEXT_FILES : EMPTY_CONTEXT_FILES
+  );
+  const hydrateContextFiles = useContextFilesStore((s) => s.hydrateSession);
+  const addContextFile = useContextFilesStore((s) => s.addFile);
+  const toggleContextFile = useContextFilesStore((s) => s.toggleFile);
+  const removeContextFile = useContextFilesStore((s) => s.removeFile);
+  const unpinFile = useContextFilesStore((s) => s.unpinFile);
+  const clearEphemeral = useContextFilesStore((s) => s.clearEphemeral);
+
+  useEffect(() => {
+    if (resolvedSessionId) hydrateContextFiles(resolvedSessionId);
+  }, [resolvedSessionId, hydrateContextFiles]);
+
   const handlePlanModeChange = useCallback(
     (enabled: boolean) => {
       if (!resolvedSessionId || !taskId) return;
@@ -95,29 +141,45 @@ export const TaskChatPanel = memo(function TaskChatPanel({
         setActiveDocument(resolvedSessionId, { type: 'plan', taskId });
         addPlan();
         setPlanMode(resolvedSessionId, true);
+        addContextFile(resolvedSessionId, { path: 'plan:context', name: 'Plan', pinned: true });
       } else {
         closeDocument(resolvedSessionId);
         setActiveDocument(resolvedSessionId, null);
         setPlanMode(resolvedSessionId, false);
       }
     },
-    [resolvedSessionId, taskId, setActiveDocument, addPlan, closeDocument, setPlanMode]
+    [resolvedSessionId, taskId, setActiveDocument, addPlan, closeDocument, setPlanMode, addContextFile]
   );
 
-  // Initialize plan mode from localStorage on mount (restore document panel state)
+  // Initialize plan mode from localStorage on mount
   useEffect(() => {
     if (resolvedSessionId) {
       const stored = getLocalStorage(`plan-mode-${resolvedSessionId}`, false);
       if (stored) {
-        setPlanMode(resolvedSessionId, stored);
+        setPlanMode(resolvedSessionId, true);
+        addContextFile(resolvedSessionId, { path: 'plan:context', name: 'Plan', pinned: true });
       }
     }
-  }, [resolvedSessionId, setPlanMode]);
+  }, [resolvedSessionId, setPlanMode, addContextFile]);
+
+  const handleToggleContextFile = useCallback(
+    (file: { path: string; name: string; pinned?: boolean }) => {
+      if (resolvedSessionId) toggleContextFile(resolvedSessionId, file);
+    },
+    [resolvedSessionId, toggleContextFile]
+  );
+
+  const handleAddContextFile = useCallback(
+    (file: { path: string; name: string; pinned?: boolean }) => {
+      if (resolvedSessionId) addContextFile(resolvedSessionId, file);
+    },
+    [resolvedSessionId, addContextFile]
+  );
 
   // Fetch messages for this session
   const { messages, isLoading: messagesLoading } = useSessionMessages(resolvedSessionId);
 
-  // Process messages (filtering, todos, etc.)
+  // Process messages
   const { allMessages, groupedItems, permissionsByToolCallId, childrenByParentToolCallId, todoItems, agentMessageCount, pendingClarification } = useProcessedMessages(
     messages,
     taskId,
@@ -125,18 +187,9 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     taskDescription
   );
 
-  // Extract user message history for up/down arrow navigation
-  const userMessageHistory = useMemo(() => {
-    return allMessages
-      .filter(msg => msg.author_type === 'user')
-      .map(msg => msg.content)
-      .filter(content => content && content.trim().length > 0);
-  }, [allMessages]);
-
-  // Track clarification resolved state to trigger re-render after submit
+  // Clarification state
   const [clarificationKey, setClarificationKey] = useState(0);
   const handleClarificationResolved = useCallback(() => {
-    // Force re-render which will update messages from backend
     setClarificationKey((k) => k + 1);
   }, []);
 
@@ -168,24 +221,26 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     }
   }, [resolvedSessionId, setDocumentComments]);
 
-  // Message sending
-  const { handleSendMessage } = useMessageHandler(
-    resolvedSessionId,
-    taskId,
-    sessionModel,
-    activeModel,
-    planModeEnabled,
-    isAgentBusy,
-    activeDocument,
-    documentComments
+  // Derive plan context from context files store
+  const planContextEnabled = useMemo(
+    () => contextFiles.some((f) => f.path === 'plan:context'),
+    [contextFiles]
   );
+
+  // Build prompts map for content lookup
+  const promptsMap = useMemo(() => {
+    const map = new Map<string, { content: string }>();
+    for (const p of prompts) {
+      map.set(p.id, { content: p.content });
+    }
+    return map;
+  }, [prompts]);
 
   // Diff comments management
   const pendingCommentsByFile = usePendingCommentsByFile();
   const markCommentsSent = useDiffCommentsStore((state) => state.markCommentsSent);
   const removeComment = useDiffCommentsStore((state) => state.removeComment);
 
-  // Handle removing all comments for a file
   const handleRemoveCommentFile = useCallback(
     (filePath: string) => {
       if (!resolvedSessionId) return;
@@ -197,12 +252,124 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     [resolvedSessionId, pendingCommentsByFile, removeComment]
   );
 
-  // Handle removing a single comment
   const handleRemoveComment = useCallback(
-    (sessionId: string, filePath: string, commentId: string) => {
-      removeComment(sessionId, filePath, commentId);
+    (sid: string, filePath: string, commentId: string) => {
+      removeComment(sid, filePath, commentId);
     },
     [removeComment]
+  );
+
+  // Build unified context items
+  const contextItems = useMemo((): ContextItem[] => {
+    const items: ContextItem[] = [];
+    const sid = resolvedSessionId;
+
+    // Plan
+    if (planContextEnabled) {
+      const planFile = contextFiles.find(f => f.path === 'plan:context');
+      items.push({
+        kind: 'plan',
+        id: 'plan:context',
+        label: 'Plan',
+        taskId: taskId ?? undefined,
+        pinned: planFile?.pinned,
+        onRemove: sid ? () => removeContextFile(sid, 'plan:context') : undefined,
+        onUnpin: planFile?.pinned && sid ? () => unpinFile(sid, 'plan:context') : undefined,
+        onOpen: addPlan,
+      });
+    }
+
+    // Files & Prompts from context store
+    for (const f of contextFiles) {
+      if (f.path === 'plan:context') continue;
+      if (f.path.startsWith('prompt:')) {
+        const promptId = f.path.replace('prompt:', '');
+        const prompt = promptsMap.get(promptId);
+        items.push({
+          kind: 'prompt',
+          id: f.path,
+          label: f.name,
+          pinned: f.pinned,
+          onRemove: sid ? () => removeContextFile(sid, f.path) : undefined,
+          onUnpin: f.pinned && sid ? () => unpinFile(sid, f.path) : undefined,
+          promptContent: prompt?.content,
+          onClick: () => {/* navigate to settings/prompts if desired */},
+        });
+      } else {
+        items.push({
+          kind: 'file',
+          id: f.path,
+          label: f.name,
+          path: f.path,
+          pinned: f.pinned,
+          onRemove: sid ? () => removeContextFile(sid, f.path) : undefined,
+          onUnpin: f.pinned && sid ? () => unpinFile(sid, f.path) : undefined,
+          onOpen: onOpenFile ?? (() => {}),
+        });
+      }
+    }
+
+    // Diff/editor comments (per file)
+    if (pendingCommentsByFile) {
+      for (const [filePath, comments] of Object.entries(pendingCommentsByFile)) {
+        if (comments.length === 0) continue;
+        const fileName = getFileName(filePath);
+        items.push({
+          kind: 'comment',
+          id: `comment:${filePath}`,
+          label: `${fileName} (${comments.length})`,
+          filePath,
+          comments,
+          onRemove: () => handleRemoveCommentFile(filePath),
+          onRemoveComment: (cid) => { if (sid) handleRemoveComment(sid, filePath, cid); },
+          onOpen: onOpenFileAtLine ? () => onOpenFileAtLine(filePath) : undefined,
+        });
+      }
+    }
+
+    // Plan comments
+    if (documentComments.length > 0) {
+      items.push({
+        kind: 'plan-comment',
+        id: 'plan-comments',
+        label: `${documentComments.length} plan comment${documentComments.length !== 1 ? 's' : ''}`,
+        comments: documentComments,
+        onRemove: handleClearDocumentComments,
+        onOpen: addPlan,
+      });
+    }
+
+    return items.sort(contextItemSortFn);
+  }, [
+    planContextEnabled,
+    contextFiles,
+    resolvedSessionId,
+    removeContextFile,
+    unpinFile,
+    addPlan,
+    promptsMap,
+    onOpenFile,
+    pendingCommentsByFile,
+    handleRemoveCommentFile,
+    handleRemoveComment,
+    onOpenFileAtLine,
+    documentComments,
+    handleClearDocumentComments,
+    taskId,
+  ]);
+
+  // Message sending
+  const { handleSendMessage } = useMessageHandler(
+    resolvedSessionId,
+    taskId,
+    sessionModel,
+    activeModel,
+    planContextEnabled,
+    isAgentBusy,
+    activeDocument,
+    documentComments,
+    contextFiles,
+    prompts
   );
 
   // Clear awaiting state when a new agent message arrives
@@ -210,8 +377,6 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     lastAgentMessageCountRef.current = agentMessageCount;
   }, [agentMessageCount]);
 
-  // Cancels the current agent turn without terminating the agent process,
-  // allowing the user to interrupt and send a new prompt.
   const handleCancelTurn = useCallback(async () => {
     if (!resolvedSessionId) return;
     const client = getWebSocketClient();
@@ -224,7 +389,6 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     }
   }, [resolvedSessionId]);
 
-  // Handle canceling queued message
   const handleCancelQueue = useCallback(async () => {
     try {
       await cancelQueue();
@@ -233,21 +397,14 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     }
   }, [cancelQueue]);
 
-  // Handle starting edit mode on queued message (from keyboard navigation)
-  const handleStartQueueEdit = useCallback(() => {
-    queuedMessageRef.current?.startEdit();
-  }, []);
-
-  // Handle edit complete - return focus to chat input
   const handleQueueEditComplete = useCallback(() => {
     chatInputRef.current?.focusInput();
   }, []);
 
-  const handleSubmit = useCallback(async (message: string, reviewComments?: DiffComment[], attachments?: MessageAttachment[]) => {
+  const handleSubmit = useCallback(async (message: string, reviewComments?: DiffComment[], attachments?: MessageAttachment[], inlineMentions?: import('@/lib/state/context-files-store').ContextFile[]) => {
     if (isSending) return;
     setIsSending(true);
     try {
-      // Build final message with review comments
       let finalMessage = message;
       if (reviewComments && reviewComments.length > 0) {
         const reviewMarkdown = formatReviewCommentsAsMarkdown(reviewComments);
@@ -259,42 +416,43 @@ export const TaskChatPanel = memo(function TaskChatPanel({
       if (onSend) {
         await onSend(finalMessage);
       } else {
-        await handleSendMessage(finalMessage, attachments, hasReviewComments);
+        await handleSendMessage(finalMessage, attachments, hasReviewComments, inlineMentions);
       }
 
-      // Mark comments as sent and clear pending
+      // Mark comments as sent
       if (reviewComments && reviewComments.length > 0) {
         markCommentsSent(reviewComments.map((c) => c.id));
       }
 
-      // Clear plan/document comments after sending (they were included via useMessageHandler)
+      // Clear plan/document comments after sending
       if (documentComments.length > 0) {
         handleClearDocumentComments();
+      }
+
+      // Clear ephemeral context items after send
+      if (resolvedSessionId) {
+        clearEphemeral(resolvedSessionId);
       }
     } finally {
       setIsSending(false);
     }
-  }, [isSending, onSend, handleSendMessage, markCommentsSent, documentComments.length, handleClearDocumentComments]);
+  }, [isSending, onSend, handleSendMessage, markCommentsSent, documentComments.length, handleClearDocumentComments, resolvedSessionId, clearEphemeral]);
 
-  // Focus input with / shortcut (only when input is NOT focused)
+  // Focus input with / shortcut
   useKeyboardShortcut(
     SHORTCUTS.FOCUS_INPUT,
     useCallback((event: KeyboardEvent) => {
-      // Only handle if we're not already in an input/textarea
       const activeElement = document.activeElement;
       const isTyping =
         activeElement instanceof HTMLInputElement ||
-        activeElement instanceof HTMLTextAreaElement;
+        activeElement instanceof HTMLTextAreaElement ||
+        (activeElement instanceof HTMLElement && activeElement.isContentEditable);
 
-      if (isTyping) {
-        // Don't intercept - let the "/" be typed normally for slash commands
-        return;
-      }
+      if (isTyping) return;
 
-      // Not typing anywhere, so focus the chat input
       const inputHandle = chatInputRef.current;
       if (inputHandle) {
-        event.preventDefault(); // Prevent the "/" from being typed when we focus
+        event.preventDefault();
         inputHandle.focusInput();
       }
     }, []),
@@ -350,19 +508,16 @@ export const TaskChatPanel = memo(function TaskChatPanel({
           showRequestChangesTooltip={showRequestChangesTooltip}
           onRequestChangesTooltipDismiss={onRequestChangesTooltipDismiss}
           pendingCommentsByFile={pendingCommentsByFile}
-          onRemoveCommentFile={handleRemoveCommentFile}
-          onRemoveComment={handleRemoveComment}
-          onCommentClick={onOpenFileAtLine ? (comment) => onOpenFileAtLine(comment.filePath) : undefined}
           submitKey={chatSubmitKey}
           hasAgentCommands={hasAgentCommands}
           isFailed={isFailed}
           isQueued={isQueued}
-          onStartQueueEdit={handleStartQueueEdit}
-          userMessageHistory={userMessageHistory}
-          documentCommentCount={documentComments.length}
-          onClearDocumentComments={handleClearDocumentComments}
+          contextItems={contextItems}
+          planContextEnabled={planContextEnabled}
+          contextFiles={contextFiles}
+          onToggleContextFile={handleToggleContextFile}
+          onAddContextFile={handleAddContextFile}
           todoItems={todoItems}
-          activeDocument={activeDocument}
           queuedMessage={queuedMessage?.content}
           onCancelQueue={handleCancelQueue}
           updateQueueContent={updateQueueContent}

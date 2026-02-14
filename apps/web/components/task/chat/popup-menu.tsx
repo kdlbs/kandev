@@ -10,6 +10,8 @@ const MENU_MAX_WIDTH = 700;
 export type PopupMenuProps = {
   isOpen: boolean;
   position: { x: number; y: number } | null;
+  /** Alternative to position: a function returning a DOMRect (from TipTap suggestion) */
+  clientRect?: (() => DOMRect | null) | null;
   title: string;
   selectedIndex: number;
   onClose: () => void;
@@ -21,6 +23,7 @@ export type PopupMenuProps = {
 export function PopupMenu({
   isOpen,
   position,
+  clientRect: clientRectFn,
   title,
   onClose,
   children,
@@ -43,16 +46,26 @@ export function PopupMenu({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isOpen, onClose]);
 
-  if (!isOpen || !position) {
+  // Resolve position from clientRect function or direct position
+  const resolvedPosition = (() => {
+    if (position) return position;
+    if (clientRectFn) {
+      const rect = clientRectFn();
+      if (rect) return { x: rect.left, y: rect.top };
+    }
+    return null;
+  })();
+
+  if (!isOpen || !resolvedPosition) {
     return null;
   }
 
   // Calculate position (above cursor) with content-based width
   const menuStyle: React.CSSProperties = {
     position: 'fixed',
-    left: Math.max(8, position.x),
-    bottom: window.innerHeight - position.y + 8,
-    maxWidth: Math.min(MENU_MAX_WIDTH, window.innerWidth - position.x - 8),
+    left: Math.max(8, resolvedPosition.x),
+    bottom: window.innerHeight - resolvedPosition.y + 8,
+    maxWidth: Math.min(MENU_MAX_WIDTH, window.innerWidth - resolvedPosition.x - 8),
     maxHeight: MENU_HEIGHT,
     zIndex: 50,
   };
