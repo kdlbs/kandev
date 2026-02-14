@@ -10,6 +10,7 @@ import { Separator } from '@kandev/ui/separator';
 import { useAppStore } from '@/components/state-provider';
 import { listAgentDiscovery } from '@/lib/api';
 import { useAvailableAgents } from '@/hooks/domains/settings/use-available-agents';
+import { AgentLogo } from '@/components/agent-logo';
 import type { AgentDiscovery, Agent, AvailableAgent, AgentProfile } from '@/lib/types/http';
 
 export default function AgentsSettingsPage() {
@@ -85,6 +86,7 @@ export default function AgentsSettingsPage() {
                 <CardContent className="py-4 flex flex-col gap-3">
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
+                      <AgentLogo agentName={agent.name} size={20} className="shrink-0" />
                       <h4 className="font-medium">
                         {availableAgents.find((item: AvailableAgent) => item.name === agent.name)?.display_name ?? agent.name}
                       </h4>
@@ -125,6 +127,7 @@ export default function AgentsSettingsPage() {
                     <Card className="hover:bg-accent transition-colors cursor-pointer">
                       <CardContent className="py-2 flex items-center justify-between">
                         <div className="flex items-center gap-2">
+                          <AgentLogo agentName={agent.name} className="shrink-0" />
                           <span className="text-sm font-medium">
                             {agent.profiles[0]?.agent_display_name ?? agent.name}
                           </span>

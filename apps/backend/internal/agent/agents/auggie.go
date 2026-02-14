@@ -3,6 +3,9 @@ package agents
 import (
 	"context"
 	_ "embed"
+	"fmt"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
@@ -80,7 +83,11 @@ func (a *Auggie) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
 func (a *Auggie) DefaultModel() string { return "sonnet4.5" }
 
 func (a *Auggie) ListModels(ctx context.Context) (*ModelList, error) {
-	return &ModelList{Models: auggieStaticModels(), SupportsDynamic: false}, nil
+	models, err := execAndParse(ctx, 30*time.Second, auggieParseModels, "auggie", "model", "list")
+	if err != nil {
+		return &ModelList{Models: auggieStaticModels(), SupportsDynamic: true}, nil
+	}
+	return &ModelList{Models: models, SupportsDynamic: true}, nil
 }
 
 func (a *Auggie) CreateAdapter(cfg *adapter.Config, log *logger.Logger) (adapter.AgentAdapter, error) {
@@ -95,7 +102,6 @@ func (a *Auggie) BuildCommand(opts CommandOptions) Command {
 		Settings(auggiePermSettings, opts.PermissionValues).
 		Build()
 }
-
 
 func (a *Auggie) Runtime() *RuntimeConfig {
 	canRecover := false
@@ -146,4 +152,50 @@ func auggieStaticModels() []Model {
 		{ID: "gpt5.1", Name: "GPT-5.1", Description: "Strong reasoning and planning", Provider: "openai", ContextWindow: 128000, Source: "static"},
 		{ID: "gpt5", Name: "GPT-5", Description: "OpenAI GPT-5 legacy", Provider: "openai", ContextWindow: 128000, Source: "static"},
 	}
+}
+
+// auggieParseModels parses "auggie model list" output.
+// Format:
+//
+//	Available models:
+//	 - Haiku 4.5 [haiku4.5]
+//	     Fast and efficient responses
+//	 - Claude Opus 4.5 [opus4.5]
+//	     Best for complex tasks
+var auggieModelLineRe = regexp.MustCompile(`^\s*-\s+(.+?)\s+\[(\S+)\]\s*$`)
+
+func auggieParseModels(output string) ([]Model, error) {
+	lines := strings.Split(output, "\n")
+	models := make([]Model, 0)
+	defaultModel := "sonnet4.5"
+
+	for i := 0; i < len(lines); i++ {
+		m := auggieModelLineRe.FindStringSubmatch(lines[i])
+		if m == nil {
+			continue
+		}
+		name := m[1]
+		id := m[2]
+
+		var description string
+		if i+1 < len(lines) {
+			desc := strings.TrimSpace(lines[i+1])
+			if desc != "" && !strings.HasPrefix(strings.TrimSpace(lines[i+1]), "-") {
+				description = desc
+				i++ // skip the description line
+			}
+		}
+
+		models = append(models, Model{
+			ID:          id,
+			Name:        name,
+			Description: description,
+			IsDefault:   id == defaultModel,
+			Source:      "dynamic",
+		})
+	}
+	if len(models) == 0 && strings.TrimSpace(output) != "" {
+		return nil, fmt.Errorf("no models parsed from auggie output")
+	}
+	return models, nil
 }

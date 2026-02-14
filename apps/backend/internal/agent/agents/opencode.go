@@ -84,7 +84,7 @@ func (a *OpenCode) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
 	return result, nil
 }
 
-func (a *OpenCode) DefaultModel() string { return "anthropic/claude-sonnet-4-20250514" }
+func (a *OpenCode) DefaultModel() string { return "opencode/gpt-5-nano" }
 
 func (a *OpenCode) ListModels(ctx context.Context) (*ModelList, error) {
 	models, err := execAndParse(ctx, 30*time.Second, opencodeParseModels, "opencode", "models")
@@ -102,13 +102,12 @@ func (a *OpenCode) BuildCommand(opts CommandOptions) Command {
 	return Cmd("npx", "-y", "opencode-ai@1.1.25", "serve", "--hostname", "127.0.0.1", "--port", "0").Build()
 }
 
-
 func (a *OpenCode) Runtime() *RuntimeConfig {
 	canRecover := true
 	return &RuntimeConfig{
-		Cmd:         Cmd("npx", "-y", "opencode-ai@1.1.25", "serve", "--hostname", "127.0.0.1", "--port", "0").Build(),
-		WorkingDir:  "{workspace}",
-		Env:         map[string]string{},
+		Cmd:            Cmd("npx", "-y", "opencode-ai@1.1.25", "serve", "--hostname", "127.0.0.1", "--port", "0").Build(),
+		WorkingDir:     "{workspace}",
+		Env:            map[string]string{},
 		ResourceLimits: ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
 		Capabilities:   []string{"code_generation", "code_review", "refactoring", "testing", "shell_execution"},
 		Protocol:       agent.ProtocolOpenCode,
@@ -125,13 +124,16 @@ func (a *OpenCode) PermissionSettings() map[string]PermissionSetting {
 }
 
 var opencodePermSettings = map[string]PermissionSetting{
-	"auto_approve": {Supported: true, Default: true, Label: "Auto-approve", Description: "Automatically approve tool calls",
-		ApplyMethod: "env"},
+	"auto_approve": {
+		Supported: true, Default: true, Label: "Auto-approve", Description: "Automatically approve tool calls",
+		ApplyMethod: "env",
+	},
 }
 
 func opencodeStaticModels() []Model {
 	return []Model{
-		{ID: "anthropic/claude-sonnet-4-20250514", Name: "Claude Sonnet 4", Description: "Anthropic Claude Sonnet 4", Provider: "anthropic", ContextWindow: 200000, IsDefault: true, Source: "static"},
+		{ID: "opencode/gpt-5-nano", Name: "GPT-5 Nano", Description: "OpenAI GPT-5 Nano", Provider: "openai", ContextWindow: 200000, IsDefault: true, Source: "static"},
+		{ID: "anthropic/claude-sonnet-4-20250514", Name: "Claude Sonnet 4", Description: "Anthropic Claude Sonnet 4", Provider: "anthropic", ContextWindow: 200000, Source: "static"},
 		{ID: "anthropic/claude-opus-4-20250514", Name: "Claude Opus 4", Description: "Anthropic Claude Opus 4", Provider: "anthropic", ContextWindow: 200000, Source: "static"},
 		{ID: "openai/gpt-4.1", Name: "GPT-4.1", Description: "OpenAI GPT-4.1", Provider: "openai", ContextWindow: 200000, Source: "static"},
 		{ID: "google/gemini-2.5-pro", Name: "Gemini 2.5 Pro", Description: "Google Gemini 2.5 Pro", Provider: "google", ContextWindow: 2000000, Source: "static"},
@@ -143,7 +145,7 @@ func opencodeStaticModels() []Model {
 func opencodeParseModels(output string) ([]Model, error) {
 	lines := strings.Split(strings.TrimSpace(output), "\n")
 	models := make([]Model, 0, len(lines))
-	defaultModel := "anthropic/claude-sonnet-4-20250514"
+	defaultModel := "opencode/gpt-5-nano"
 
 	for _, line := range lines {
 		line = strings.TrimSpace(line)

@@ -29,9 +29,10 @@ export function registerAgentsHandlers(store: StoreApi<AppState>): WsHandlers {
     'agent.profile.created': (message) => {
       store.setState((state) => {
         const label = `${message.payload.profile.agent_display_name} • ${message.payload.profile.name}`;
+        const agentName = state.settingsAgents.items.find((a) => a.id === message.payload.profile.agent_id)?.name ?? '';
         const nextProfiles = [
           ...state.agentProfiles.items.filter((profile) => profile.id !== message.payload.profile.id),
-          { id: message.payload.profile.id, label, agent_id: message.payload.profile.agent_id },
+          { id: message.payload.profile.id, label, agent_id: message.payload.profile.agent_id, agent_name: agentName },
         ];
         const nextAgents = state.settingsAgents.items.map((item) =>
           item.id === message.payload.profile.agent_id
@@ -67,9 +68,10 @@ export function registerAgentsHandlers(store: StoreApi<AppState>): WsHandlers {
     'agent.profile.updated': (message) => {
       store.setState((state) => {
         const label = `${message.payload.profile.agent_display_name} • ${message.payload.profile.name}`;
+        const agentName = state.settingsAgents.items.find((a) => a.id === message.payload.profile.agent_id)?.name ?? '';
         const nextProfiles = state.agentProfiles.items.map((profile) =>
           profile.id === message.payload.profile.id
-            ? { ...profile, label, agent_id: message.payload.profile.agent_id }
+            ? { ...profile, label, agent_id: message.payload.profile.agent_id, agent_name: agentName }
             : profile
         );
         const nextAgents = state.settingsAgents.items.map((item) =>

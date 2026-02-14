@@ -94,7 +94,6 @@ func (a *ClaudeCode) BuildCommand(opts CommandOptions) Command {
 		Build()
 }
 
-
 func (a *ClaudeCode) Runtime() *RuntimeConfig {
 	canRecover := true
 	return &RuntimeConfig{
@@ -102,9 +101,9 @@ func (a *ClaudeCode) Runtime() *RuntimeConfig {
 			"-p", "--output-format=stream-json", "--input-format=stream-json",
 			"--permission-prompt-tool=stdio", "--disallowedTools=AskUserQuestion",
 			"--setting-sources=user,project", "--verbose").Build(),
-		WorkingDir:  "{workspace}",
-		RequiredEnv: []string{"ANTHROPIC_API_KEY"},
-		Env:         map[string]string{},
+		WorkingDir:     "{workspace}",
+		RequiredEnv:    []string{"ANTHROPIC_API_KEY"},
+		Env:            map[string]string{},
 		ResourceLimits: ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
 		Capabilities:   []string{"code_generation", "code_review", "refactoring", "testing", "shell_execution"},
 		Protocol:       agent.ProtocolClaudeCode,
@@ -122,17 +121,21 @@ func (a *ClaudeCode) PermissionSettings() map[string]PermissionSetting {
 }
 
 var claudeCodePermSettings = map[string]PermissionSetting{
-	"auto_approve": {Supported: true, Default: true, Label: "Auto-approve", Description: "Automatically approve tool calls via stdio protocol",
-		ApplyMethod: "stdio"},
-	"dangerously_skip_permissions": {Supported: true, Default: true, Label: "Skip Permissions", Description: "Bypass all permission checks (dangerous but fast for trusted tasks)",
-		ApplyMethod: "cli_flag", CLIFlag: "--dangerously-skip-permissions"},
+	"auto_approve": {
+		Supported: true, Default: true, Label: "Auto-approve", Description: "Automatically approve tool calls via stdio protocol",
+		ApplyMethod: "stdio",
+	},
+	"dangerously_skip_permissions": {
+		Supported: true, Default: true, Label: "Skip Permissions", Description: "Bypass all permission checks (dangerous but fast for trusted tasks)",
+		ApplyMethod: "cli_flag", CLIFlag: "--dangerously-skip-permissions",
+	},
 }
 
 func claudeCodeStaticModels() []Model {
 	return []Model{
-		{ID: "claude-sonnet-4-5", Name: "Claude Sonnet 4.5", Description: "Latest Sonnet with improved reasoning", Provider: "anthropic", ContextWindow: 200000, IsDefault: true, Source: "static"},
-		{ID: "claude-opus-4-6", Name: "Claude Opus 4.6", Description: "Latest and most capable model for complex tasks", Provider: "anthropic", ContextWindow: 200000, Source: "static"},
-		{ID: "claude-opus-4-5", Name: "Claude Opus 4.5", Description: "Most capable model for complex tasks", Provider: "anthropic", ContextWindow: 200000, Source: "static"},
-		{ID: "claude-haiku-4-5", Name: "Claude Haiku 4.5", Description: "Fast and affordable model for simple tasks", Provider: "anthropic", ContextWindow: 200000, Source: "static"},
+		{ID: "claude-sonnet-4-5", Name: "Sonnet 4.5", Description: "Latest Sonnet with improved reasoning", Provider: "anthropic", ContextWindow: 200000, IsDefault: true, Source: "static"},
+		{ID: "claude-opus-4-6", Name: "Opus 4.6", Description: "Latest and most capable model for complex tasks", Provider: "anthropic", ContextWindow: 200000, Source: "static"},
+		{ID: "claude-opus-4-5", Name: "Opus 4.5", Description: "Most capable model for complex tasks", Provider: "anthropic", ContextWindow: 200000, Source: "static"},
+		{ID: "claude-haiku-4-5", Name: "Haiku 4.5", Description: "Fast and affordable model for simple tasks", Provider: "anthropic", ContextWindow: 200000, Source: "static"},
 	}
 }

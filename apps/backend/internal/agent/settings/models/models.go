@@ -22,6 +22,7 @@ type AgentProfile struct {
 	DangerouslySkipPermissions bool       `json:"dangerously_skip_permissions"`
 	AllowIndexing              bool       `json:"allow_indexing"`
 	CLIPassthrough             bool       `json:"cli_passthrough"`
+	UserModified               bool       `json:"user_modified"`
 	CreatedAt                  time.Time  `json:"created_at"`
 	UpdatedAt                  time.Time  `json:"updated_at"`
 	DeletedAt                  *time.Time `json:"deleted_at,omitempty"`

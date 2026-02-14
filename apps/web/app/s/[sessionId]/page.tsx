@@ -155,6 +155,7 @@ export default async function SessionPage({
             id: profile.id,
             label: `${profile.agent_display_name} • ${profile.name}`,
             agent_id: agent.id,
+            agent_name: agent.name,
           }))
         ),
         version: 0,

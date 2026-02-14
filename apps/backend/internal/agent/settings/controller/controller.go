@@ -40,9 +40,8 @@ var (
 	ErrAgentProfileInUse    = errors.New("agent profile is used by an active agent session")
 	ErrAgentMcpUnsupported  = errors.New("mcp not supported by agent")
 	ErrModelRequired        = errors.New("model is required for agent profiles")
+	ErrLogoNotAvailable     = errors.New("logo not available for agent")
 )
-
-const defaultAgentProfileName = "default"
 
 type Controller struct {
 	repo           store.Repository
@@ -331,27 +330,64 @@ func (c *Controller) EnsureInitialAgentProfiles(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if len(profiles) > 0 {
-			continue
-		}
-		// Read permission settings defaults from agent config
-		var autoApprove, allowIndexing, skipPermissions bool
-		permSettings := agentConfig.PermissionSettings()
-		if permSettings != nil {
-			if setting, exists := permSettings["auto_approve"]; exists {
-				autoApprove = setting.Default
-			}
-			if setting, exists := permSettings["allow_indexing"]; exists {
-				allowIndexing = setting.Default
-			}
-			if setting, exists := permSettings["dangerously_skip_permissions"]; exists {
-				skipPermissions = setting.Default
-			}
+		autoApprove, allowIndexing, skipPermissions := resolvePermissionDefaults(agentConfig.PermissionSettings())
+
+		// Fetch model list once per agent (not per profile) to resolve display names
+		modelList, listErr := agentConfig.ListModels(ctx)
+		if listErr != nil {
+			c.logger.Warn("failed to list models during profile sync, using model ID as name",
+				zap.String("agent", result.Name), zap.Error(listErr))
 		}
 
+		if len(profiles) > 0 {
+			for _, profile := range profiles {
+				if profile.UserModified {
+					continue
+				}
+				updated := false
+
+				if profile.AgentDisplayName != displayName {
+					profile.AgentDisplayName = displayName
+					updated = true
+				}
+				if profile.Model != defaultModel {
+					profile.Model = defaultModel
+					updated = true
+				}
+
+				// Re-resolve profile name from model display name
+				resolvedName := resolveModelDisplayName(modelList, profile.Model)
+				if profile.Name != resolvedName {
+					profile.Name = resolvedName
+					updated = true
+				}
+
+				if profile.AutoApprove != autoApprove {
+					profile.AutoApprove = autoApprove
+					updated = true
+				}
+				if profile.AllowIndexing != allowIndexing {
+					profile.AllowIndexing = allowIndexing
+					updated = true
+				}
+				if profile.DangerouslySkipPermissions != skipPermissions {
+					profile.DangerouslySkipPermissions = skipPermissions
+					updated = true
+				}
+
+				if updated {
+					if err := c.repo.UpdateAgentProfile(ctx, profile); err != nil {
+						return err
+					}
+				}
+			}
+			continue
+		}
+
+		profileName := resolveModelDisplayName(modelList, defaultModel)
 		defaultProfile := &models.AgentProfile{
 			AgentID:                    agent.ID,
-			Name:                       defaultAgentProfileName,
+			Name:                       profileName,
 			Model:                      defaultModel,
 			AgentDisplayName:           displayName,
 			AutoApprove:                autoApprove,
@@ -590,6 +626,7 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 		DangerouslySkipPermissions: req.DangerouslySkipPermissions,
 		AllowIndexing:              req.AllowIndexing,
 		CLIPassthrough:             req.CLIPassthrough,
+		UserModified:               true,
 	}
 	if err := c.repo.CreateAgentProfile(ctx, profile); err != nil {
 		return nil, err
@@ -635,6 +672,7 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 	if req.CLIPassthrough != nil {
 		profile.CLIPassthrough = *req.CLIPassthrough
 	}
+	profile.UserModified = true
 	if err := c.repo.UpdateAgentProfile(ctx, profile); err != nil {
 		return nil, err
 	}
@@ -697,9 +735,53 @@ func toProfileDTO(profile *models.AgentProfile) dto.AgentProfileDTO {
 		DangerouslySkipPermissions: profile.DangerouslySkipPermissions,
 		AllowIndexing:              profile.AllowIndexing,
 		CLIPassthrough:             profile.CLIPassthrough,
+		UserModified:               profile.UserModified,
 		CreatedAt:                  profile.CreatedAt,
 		UpdatedAt:                  profile.UpdatedAt,
 	}
+}
+
+// GetAgentLogo returns the SVG logo bytes for the given agent and variant.
+func (c *Controller) GetAgentLogo(ctx context.Context, agentName string, variant agents.LogoVariant) ([]byte, error) {
+	ag, ok := c.agentRegistry.Get(agentName)
+	if !ok {
+		return nil, ErrAgentNotFound
+	}
+	data := ag.Logo(variant)
+	if len(data) == 0 {
+		return nil, ErrLogoNotAvailable
+	}
+	return data, nil
+}
+
+// resolvePermissionDefaults extracts the default permission values from agent settings.
+func resolvePermissionDefaults(permSettings map[string]agents.PermissionSetting) (autoApprove, allowIndexing, skipPermissions bool) {
+	if permSettings == nil {
+		return
+	}
+	if s, exists := permSettings["auto_approve"]; exists {
+		autoApprove = s.Default
+	}
+	if s, exists := permSettings["allow_indexing"]; exists {
+		allowIndexing = s.Default
+	}
+	if s, exists := permSettings["dangerously_skip_permissions"]; exists {
+		skipPermissions = s.Default
+	}
+	return
+}
+
+// resolveModelDisplayName returns the display name for a model ID from the model list,
+// falling back to the model ID itself if not found.
+func resolveModelDisplayName(modelList *agents.ModelList, modelID string) string {
+	if modelList != nil {
+		for _, m := range modelList.Models {
+			if m.ID == modelID {
+				return m.Name
+			}
+		}
+	}
+	return modelID
 }
 
 // detectAgents runs discovery and forces mock-agent available when enabled.

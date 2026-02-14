@@ -15,13 +15,15 @@ import (
 
 // Type aliases for backward compatibility during migration.
 // These allow existing code to reference registry.PermissionSetting etc.
-type PermissionSetting = agents.PermissionSetting
-type MountTemplate = agents.MountTemplate
-type ResourceLimits = agents.ResourceLimits
-type SessionConfig = agents.SessionConfig
-type PassthroughConfig = agents.PassthroughConfig
-type DiscoveryCapabilities = agents.DiscoveryCapabilities
-type Model = agents.Model
+type (
+	PermissionSetting     = agents.PermissionSetting
+	MountTemplate         = agents.MountTemplate
+	ResourceLimits        = agents.ResourceLimits
+	SessionConfig         = agents.SessionConfig
+	PassthroughConfig     = agents.PassthroughConfig
+	DiscoveryCapabilities = agents.DiscoveryCapabilities
+	Model                 = agents.Model
+)
 
 // Registry manages agent configurations
 type Registry struct {

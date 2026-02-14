@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/settings/controller"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -46,6 +47,7 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api.PATCH("/agents/:id", h.httpUpdateAgent)
 	api.DELETE("/agents/:id", h.httpDeleteAgent)
 	api.POST("/agents/:id/profiles", h.httpCreateProfile)
+	api.GET("/agents/:id/logo", h.httpGetAgentLogo)
 	api.GET("/agent-models/:agentName", h.httpGetAgentModels)
 	api.POST("/agent-command-preview/:agentName", h.httpPreviewAgentCommand)
 	api.PATCH("/agent-profiles/:id", h.httpUpdateProfile)
@@ -420,6 +422,35 @@ func (h *Handlers) httpPreviewAgentCommand(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, resp)
+}
+
+// httpGetAgentLogo serves agent SVG logos.
+// Note: :id here is the agent name (e.g. "claude-code"), not the UUID used by other /agents/:id routes.
+func (h *Handlers) httpGetAgentLogo(c *gin.Context) {
+	agentName := c.Param("id")
+	if agentName == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "agent name is required"})
+		return
+	}
+
+	variant := agents.LogoLight
+	if c.Query("variant") == "dark" {
+		variant = agents.LogoDark
+	}
+
+	data, err := h.controller.GetAgentLogo(c.Request.Context(), agentName, variant)
+	if err != nil {
+		if err == controller.ErrAgentNotFound || err == controller.ErrLogoNotAvailable {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+		h.logger.Error("failed to get agent logo", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get agent logo"})
+		return
+	}
+
+	c.Header("Cache-Control", "public, max-age=86400")
+	c.Data(http.StatusOK, "image/svg+xml", data)
 }
 
 func (h *Handlers) httpGetAgentModels(c *gin.Context) {

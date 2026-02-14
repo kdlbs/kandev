@@ -14,6 +14,7 @@ import { ProfileFormFields } from '@/components/settings/profile-form-fields';
 import { deleteAgentProfileAction, updateAgentProfileAction } from '@/app/actions/agents';
 import type { Agent, AgentProfile, ModelConfig, PermissionSetting, PassthroughConfig } from '@/lib/types/http';
 import { useAppStore } from '@/components/state-provider';
+import { AgentLogo } from '@/components/agent-logo';
 import { ProfileMcpConfigCard } from '@/app/settings/agents/[agentId]/profile-mcp-config-card';
 import { CommandPreviewCard } from '@/app/settings/agents/[agentId]/profiles/[profileId]/command-preview-card';
 import type { AgentProfileMcpConfig } from '@/lib/types/http';
@@ -44,6 +45,7 @@ function ProfileEditor({ agent, profile, modelConfig, permissionSettings, passth
           id: agentProfile.id,
           label: `${agentProfile.agent_display_name} • ${agentProfile.name}`,
           agent_id: agentItem.id,
+          agent_name: agentItem.name,
         }))
       )
     );
@@ -137,7 +139,10 @@ function ProfileEditor({ agent, profile, modelConfig, permissionSettings, passth
     <div className="space-y-8">
       <div className="flex items-start justify-between">
         <div>
-          <h2 className="text-2xl font-bold">{profile.agent_display_name} • {savedProfile.name}</h2>
+          <h2 className="text-2xl font-bold flex items-center gap-2">
+            <AgentLogo agentName={agent.name} size={28} className="shrink-0" />
+            {profile.agent_display_name} • {savedProfile.name}
+          </h2>
           <p className="text-sm text-muted-foreground mt-1">
             {profile.agent_display_name} profile settings
           </p>

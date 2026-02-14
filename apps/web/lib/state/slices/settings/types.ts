@@ -35,6 +35,7 @@ export type AgentProfileOption = {
   id: string;
   label: string;
   agent_id: string;
+  agent_name: string;
 };
 
 export type AgentProfilesState = {
