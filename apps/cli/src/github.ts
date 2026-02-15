@@ -159,7 +159,7 @@ function readSha256(pathToSha: string): string | null {
   }
   const content = fs.readFileSync(pathToSha, "utf8").trim();
   const first = content.split(/\s+/)[0];
-  return first || null;
+  return first?.toLowerCase() || null;
 }
 
 export async function getRelease(version?: string): Promise<ReleaseResponse> {
