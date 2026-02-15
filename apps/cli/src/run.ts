@@ -67,6 +67,12 @@ async function prepareReleaseBundle({
     throw new Error(`agentctl binary not found at ${agentctlBin}`);
   }
 
+  // Ensure binaries are executable (adm-zip doesn't preserve Unix permissions)
+  if (process.platform !== "win32") {
+    fs.chmodSync(backendBin, 0o755);
+    fs.chmodSync(agentctlBin, 0o755);
+  }
+
   const actualBackendPort = backendPort ?? (await pickAvailablePort(DEFAULT_BACKEND_PORT));
   const actualWebPort = webPort ?? (await pickAvailablePort(DEFAULT_WEB_PORT));
   const agentctlPort = await pickAvailablePort(DEFAULT_AGENTCTL_PORT);
