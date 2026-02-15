@@ -229,8 +229,9 @@ func (r *ProcessRunner) Start(ctx context.Context, req StartProcessRequest) (*Pr
 	id := uuid.New().String()
 	now := time.Now().UTC()
 
-	// Use "sh -lc" to execute command with login shell environment
-	cmd := exec.CommandContext(ctx, "sh", "-lc", req.Command)
+	// Execute command through the system shell (Unix: sh -lc, Windows: cmd /c)
+	prog, shellArgs := shellExecArgs(req.Command)
+	cmd := exec.CommandContext(ctx, prog, shellArgs...)
 	if req.WorkingDir != "" {
 		cmd.Dir = req.WorkingDir
 	}

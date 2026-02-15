@@ -11,16 +11,13 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"regexp"
 	"sort"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
-	"github.com/creack/pty"
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -70,7 +67,7 @@ type DirectOutputWriter interface {
 type interactiveProcess struct {
 	info   InteractiveProcessInfo
 	cmd    *exec.Cmd
-	ptmx   *os.File // PTY master file descriptor (using creack/pty)
+	ptmx   PtyHandle // PTY handle (Unix: creack/pty, Windows: ConPTY)
 	buffer *ringBuffer
 
 	// Turn detection
@@ -330,12 +327,9 @@ func (r *InteractiveRunner) startProcess(proc *interactiveProcess, cols, rows in
 	// Note: Do NOT set Setpgid when using PTY - it conflicts with terminal control
 	// The PTY session handles process group management
 
-	// Start process in PTY with exact dimensions from frontend using creack/pty
-	// This is the battle-tested PTY library that properly handles resize/SIGWINCH
-	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{
-		Cols: uint16(cols),
-		Rows: uint16(rows),
-	})
+	// Start process in PTY with exact dimensions from frontend
+	// Unix: creack/pty, Windows: ConPTY
+	ptmx, err := startPTYWithSize(cmd, cols, rows)
 	if err != nil {
 		return fmt.Errorf("failed to start pty: %w", err)
 	}
@@ -473,7 +467,7 @@ func (r *InteractiveRunner) Stop(ctx context.Context, processID string) error {
 
 	// Terminate the process directly (PTY handles its own session management)
 	if proc.cmd != nil && proc.cmd.Process != nil {
-		_ = proc.cmd.Process.Signal(syscall.SIGTERM)
+		_ = terminateProcess(proc.cmd.Process)
 
 		// Wait for the wait() goroutine to finish (it calls cmd.Wait).
 		// If it doesn't exit in time, force-kill the process.
@@ -515,14 +509,18 @@ func (r *InteractiveRunner) GetBySession(sessionID string) (*InteractiveProcessI
 }
 
 // isProcessAlive checks if the underlying OS process is still running.
+// Uses a non-blocking check on waitDone which is closed when cmd.Wait returns.
 // Must be called with proc.mu held.
 func (r *InteractiveRunner) isProcessAlive(proc *interactiveProcess) bool {
-	if proc.cmd != nil && proc.cmd.Process != nil {
-		// Signal 0 checks if process exists without sending a signal
-		err := proc.cmd.Process.Signal(syscall.Signal(0))
-		return err == nil
+	if proc.cmd == nil || proc.cmd.Process == nil {
+		return false
 	}
-	return false
+	select {
+	case <-proc.waitDone:
+		return false
+	default:
+		return true
+	}
 }
 
 // IsProcessRunning checks if a process with the given ID exists and is running.
@@ -605,13 +603,10 @@ func (r *InteractiveRunner) ResizeBySession(sessionID string, cols, rows uint16)
 	statusTracker := proc.statusTracker
 	proc.mu.Unlock()
 
-	// If process started, resize the PTY using creack/pty's Setsize
-	// This properly sets the window size and sends SIGWINCH to the process
+	// If process started, resize the PTY
+	// On Unix this sends SIGWINCH; on Windows it updates the ConPTY dimensions
 	if ptyInstance != nil {
-		if err := pty.Setsize(ptyInstance, &pty.Winsize{
-			Cols: cols,
-			Rows: rows,
-		}); err != nil {
+		if err := ptyInstance.Resize(cols, rows); err != nil {
 			return fmt.Errorf("failed to resize PTY: %w", err)
 		}
 	}
@@ -835,25 +830,14 @@ func (r *InteractiveRunner) handleStateChange(proc *interactiveProcess, state Ag
 // 3. Adding a timeout here would leave the process unreachable and create leaks
 func (r *InteractiveRunner) wait(proc *interactiveProcess) {
 	defer close(proc.waitDone)
-	err := proc.cmd.Wait()
-	exitCode := 0
+
+	proc.mu.Lock()
+	ptyHandle := proc.ptmx
+	proc.mu.Unlock()
+
+	exitCode, signalName, err := waitPtyProcess(proc.cmd, ptyHandle)
 	status := types.ProcessStatusExited
-	var signalName string
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			if waitStatus, ok := exitErr.Sys().(syscall.WaitStatus); ok {
-				if waitStatus.Signaled() {
-					signalName = waitStatus.Signal().String()
-					exitCode = 128 + int(waitStatus.Signal())
-				} else {
-					exitCode = waitStatus.ExitStatus()
-				}
-			} else {
-				exitCode = 1
-			}
-		} else {
-			exitCode = 1
-		}
 		status = types.ProcessStatusFailed
 	}
 
@@ -1354,18 +1338,9 @@ func (r *InteractiveRunner) StartUserShell(ctx context.Context, sessionID, termi
 		initialCommand = existingEntry.InitialCommand
 	}
 
-	// Determine shell to use
-	shell := preferredShell
-	if shell == "" {
-		shell = os.Getenv("SHELL")
-	}
-	if shell == "" {
-		shell = "/bin/sh"
-	}
-
 	req := InteractiveStartRequest{
 		SessionID:            sessionID,
-		Command:              []string{shell, "-l"}, // Login shell
+		Command:              defaultShellCommand(preferredShell),
 		WorkingDir:           workingDir,
 		InitialCommand:       initialCommand,
 		DisableTurnDetection: true, // User shells must not trigger turn complete / MarkReady
@@ -1403,7 +1378,7 @@ func (r *InteractiveRunner) StartUserShell(ctx context.Context, sessionID, termi
 		zap.String("session_id", sessionID),
 		zap.String("terminal_id", terminalID),
 		zap.String("process_id", info.ID),
-		zap.String("shell", shell),
+		zap.String("shell", req.Command[0]),
 		zap.String("working_dir", workingDir),
 		zap.String("label", opts.Label),
 		zap.String("initial_command", opts.InitialCommand))
@@ -1544,10 +1519,7 @@ func (r *InteractiveRunner) ResizeUserShell(sessionID, terminalID string, cols, 
 	proc.mu.Unlock()
 
 	if ptyInstance != nil {
-		if err := pty.Setsize(ptyInstance, &pty.Winsize{
-			Cols: cols,
-			Rows: rows,
-		}); err != nil {
+		if err := ptyInstance.Resize(cols, rows); err != nil {
 			return fmt.Errorf("failed to resize PTY: %w", err)
 		}
 	}

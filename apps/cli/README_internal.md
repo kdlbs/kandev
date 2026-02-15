@@ -141,5 +141,6 @@ scripts/release/publish-launcher.sh 0.1.0
 | macOS (Apple Silicon) | `kandev-macos-arm64.zip` |
 | macOS (Intel) | `kandev-macos-x64.zip` |
 | Linux (x64) | `kandev-linux-x64.zip` |
+| Linux (ARM64) | `kandev-linux-arm64.zip` |
 | Windows (x64) | `kandev-windows-x64.zip` |
-| Windows (ARM64) | `kandev-windows-arm64.zip` |
+| Windows (ARM64) | Falls back to `windows-x64` (x64 emulation) |

@@ -4,8 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev --hostname 0.0.0.0",
-    "build": "NODE_ENV=production next build",
-    "start": "NODE_ENV=production next start",
+    "build": "cross-env NODE_ENV=production next build",
+    "start": "cross-env NODE_ENV=production next start",
     "lint": "eslint",
     "test": "vitest run"
   },
@@ -104,6 +104,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.1.1",
+    "cross-env": "^7.0.3",
     "happy-dom": "^20.1.0",
     "tailwindcss": "^4",
     "typescript": "^5",

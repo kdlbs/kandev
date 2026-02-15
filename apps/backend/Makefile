@@ -7,10 +7,21 @@ GO := go
 GOFLAGS := -v
 LDFLAGS := -s -w
 
+# Cross-platform commands
+ifeq ($(OS),Windows_NT)
+  RM = cmd /c del /s /q
+  RMDIR = cmd /c rmdir /s /q
+  MKDIR = cmd /c mkdir
+else
+  RM = rm -f
+  RMDIR = rm -rf
+  MKDIR = mkdir -p
+endif
+
 # Build info
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
-BUILD_TIME := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
+BUILD_TIME := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || powershell -c "Get-Date -Format 'yyyy-MM-ddTHH:mm:ssZ'" 2>/dev/null || echo "unknown")
 
 LDFLAGS += -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuildTime=$(BUILD_TIME)
 
@@ -22,13 +33,13 @@ all: build
 ## Build the mock-agent binary for testing
 build-mock-agent:
 	@echo "Building mock-agent..."
-	@mkdir -p $(BUILD_DIR)
+	@$(MKDIR) $(BUILD_DIR)
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/mock-agent ./cmd/mock-agent
 
 ## Build the unified kandev binary
 build: build-agentctl build-mock-agent
 	@echo "Building $(BINARY_NAME)..."
-	@mkdir -p $(BUILD_DIR)
+	@$(MKDIR) $(BUILD_DIR)
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/kandev
 
 ## Build all binaries (unified + individual services + agentctl)
@@ -39,13 +50,13 @@ build-all: build build-agentctl
 ## Build the agentctl sidecar binary (includes embedded MCP server)
 build-agentctl:
 	@echo "Building agentctl..."
-	@mkdir -p $(BUILD_DIR)
+	@$(MKDIR) $(BUILD_DIR)
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl ./cmd/agentctl
 
 ## Clean build artifacts
 clean:
 	@echo "Cleaning..."
-	@rm -rf $(BUILD_DIR)
+	@$(RMDIR) $(BUILD_DIR)
 	$(GO) clean
 
 ## Run the application
@@ -97,7 +108,7 @@ deps:
 ## Build for multiple platforms
 build-cross:
 	@echo "Building for multiple platforms..."
-	@mkdir -p $(BUILD_DIR)
+	@$(MKDIR) $(BUILD_DIR)
 	GOOS=linux GOARCH=amd64 $(GO) build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 ./cmd/kandev
 	GOOS=darwin GOARCH=amd64 $(GO) build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-amd64 ./cmd/kandev
 	GOOS=darwin GOARCH=arm64 $(GO) build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64 ./cmd/kandev

@@ -37,17 +37,23 @@ export function createProcessSupervisor(): {
 
   const attachSignalHandlers = () => {
     process.on("SIGINT", onSignal);
-    process.on("SIGTERM", onSignal);
+    // SIGTERM is not available on Windows — only attach where supported
+    if (process.platform !== "win32") {
+      process.on("SIGTERM", onSignal);
+    }
   };
 
   return { children, shutdown, attachSignalHandlers };
 }
 
 /**
- * Send SIGTERM to a process and wait for it to exit.
- * Falls back to SIGKILL if the process doesn't exit within the timeout.
+ * Terminate a process and wait for it to exit.
+ * On Unix: sends SIGTERM, falls back to SIGKILL after timeout.
+ * On Windows: tree-kill uses taskkill (no SIGTERM/SIGKILL distinction).
  */
 function waitForProcessExit(child: ChildLike, timeoutMs: number): Promise<void> {
+  const isWindows = process.platform === "win32";
+
   return new Promise<void>((resolve) => {
     const pid = child.pid as number;
 
@@ -68,10 +74,12 @@ function waitForProcessExit(child: ChildLike, timeoutMs: number): Promise<void> 
       resolve();
     };
 
-    // Set up timeout for fallback SIGKILL
+    // Set up timeout for force-kill fallback
     const timeout = setTimeout(() => {
-      console.log(`[kandev] process ${pid} did not exit in time, sending SIGKILL`);
-      kill(pid, "SIGKILL", done);
+      console.log(`[kandev] process ${pid} did not exit in time, force killing`);
+      // On Windows, tree-kill always force-kills (no signal distinction)
+      // On Unix, escalate to SIGKILL
+      kill(pid, isWindows ? undefined : "SIGKILL", done);
     }, timeoutMs);
 
     // Listen for exit event if available
@@ -82,8 +90,8 @@ function waitForProcessExit(child: ChildLike, timeoutMs: number): Promise<void> 
       });
     }
 
-    // Send SIGTERM
-    kill(pid, "SIGTERM", (err) => {
+    // Graceful termination: SIGTERM on Unix, default kill on Windows
+    kill(pid, isWindows ? undefined : "SIGTERM", (err) => {
       // If kill fails (process already gone), we're done
       if (err) {
         clearTimeout(timeout);
