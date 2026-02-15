@@ -1,9 +1,8 @@
 'use client';
 
-import { memo, useMemo, useState } from 'react';
+import { memo, useMemo } from 'react';
 import type { TaskState } from '@/lib/types/http';
 import { truncateRepoPath } from '@/lib/utils';
-import { SidebarButton } from './sidebar-button';
 import { TaskItem } from './task-item';
 
 type DiffStats = {
@@ -24,7 +23,7 @@ type TaskSwitcherItem = {
 
 type TaskSwitcherProps = {
   tasks: TaskSwitcherItem[];
-  columns: Array<{ id: string; title: string; color?: string }>;
+  steps: Array<{ id: string; title: string; color?: string }>;
   activeTaskId: string | null;
   selectedTaskId: string | null;
   onSelectTask: (taskId: string) => void;
@@ -35,29 +34,18 @@ type TaskSwitcherProps = {
 
 function TaskSwitcherSkeleton() {
   return (
-    <div className="space-y-3 animate-pulse">
-      {/* Column skeleton */}
-      <div className="space-y-1">
-        <div className="h-7 bg-foreground/5 rounded-md" />
-        <div className="space-y-1 pl-0">
-          <div className="h-14 bg-foreground/5 rounded-lg" />
-          <div className="h-14 bg-foreground/5 rounded-lg" />
-        </div>
-      </div>
-      {/* Another column skeleton */}
-      <div className="space-y-1">
-        <div className="h-7 bg-foreground/5 rounded-md" />
-        <div className="space-y-1 pl-0">
-          <div className="h-14 bg-foreground/5 rounded-lg" />
-        </div>
-      </div>
+    <div className="animate-pulse">
+      <div className="h-10 bg-foreground/5" />
+      <div className="h-10 bg-foreground/5 mt-px" />
+      <div className="h-10 bg-foreground/5 mt-px" />
+      <div className="h-10 bg-foreground/5 mt-px" />
     </div>
   );
 }
 
 export const TaskSwitcher = memo(function TaskSwitcher({
   tasks,
-  columns,
+  steps,
   activeTaskId,
   selectedTaskId,
   onSelectTask,
@@ -65,105 +53,59 @@ export const TaskSwitcher = memo(function TaskSwitcher({
   deletingTaskId,
   isLoading = false,
 }: TaskSwitcherProps) {
-  const [collapsedColumnIds, setCollapsedColumnIds] = useState<Set<string>>(() => new Set());
+  const stepNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const col of steps) {
+      map.set(col.id, col.title);
+    }
+    return map;
+  }, [steps]);
 
+  // Sort tasks: by step position first, then alphabetically
   const sortedTasks = useMemo(() => {
-    return [...tasks].sort((a, b) => a.title.localeCompare(b.title));
-  }, [tasks]);
-
-  const tasksByColumn = useMemo(() => {
-    const grouped: Record<string, TaskSwitcherItem[]> = {};
-    for (const task of sortedTasks) {
-      const key = task.workflowStepId ?? 'unknown';
-      if (!grouped[key]) grouped[key] = [];
-      grouped[key].push(task);
-    }
-    return grouped;
-  }, [sortedTasks]);
-
-  const columnsWithFallback = useMemo(() => {
-    const seen = new Set(columns.map((column) => column.id));
-    const extra: Array<{ id: string; title: string; color?: string }> = [];
-    if (tasksByColumn.unknown?.length) {
-      extra.push({ id: 'unknown', title: 'Other', color: 'bg-neutral-400' });
-    }
-    return [...columns, ...extra].filter((column) => {
-      if (seen.has(column.id)) return true;
-      seen.add(column.id);
-      return true;
+    const stepOrder = new Map(steps.map((col, i) => [col.id, i]));
+    return [...tasks].sort((a, b) => {
+      const aOrder = stepOrder.get(a.workflowStepId ?? '') ?? 999;
+      const bOrder = stepOrder.get(b.workflowStepId ?? '') ?? 999;
+      if (aOrder !== bOrder) return aOrder - bOrder;
+      return a.title.localeCompare(b.title);
     });
-  }, [columns, tasksByColumn]);
-
-  const handleToggleColumn = (columnId: string) => {
-    setCollapsedColumnIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(columnId)) next.delete(columnId);
-      else next.add(columnId);
-      return next;
-    });
-  };
+  }, [tasks, steps]);
 
   if (isLoading) {
     return <TaskSwitcherSkeleton />;
   }
 
   return (
-    <div className="space-y-1">
+    <div>
       {sortedTasks.length === 0 ? (
-        <div className="px-2 text-xs text-muted-foreground">No tasks on this board.</div>
+        <div className="px-3 py-3 text-xs text-muted-foreground">No tasks yet.</div>
       ) : (
-        <div className="space-y-1">
-          {columnsWithFallback.map((column) => {
-            const columnTasks = tasksByColumn[column.id] ?? [];
-            if (columnTasks.length === 0) return null;
-            const isColumnOpen = !collapsedColumnIds.has(column.id);
-            return (
-              <div key={column.id}>
-                <SidebarButton
-                  label={column.title}
-                  count={columnTasks.length}
-                  isExpanded={isColumnOpen}
-                  onToggle={() => handleToggleColumn(column.id)}
-                />
-                {/* Expanded content with CSS transition */}
-                <div
-                  className={`overflow-hidden transition-[opacity,grid-template-rows] duration-200 ease-in-out ${isColumnOpen
-                      ? 'grid grid-rows-[1fr] opacity-100'
-                      : 'grid grid-rows-[0fr] opacity-0'
-                    }`}
-                >
-                  <div className="min-h-0">
-                    <div className="pt-1">
-                      <div className="flex flex-col gap-1">
-                        {columnTasks.map((task) => {
-                          const isActive = task.id === activeTaskId;
-                          const isSelected = task.id === selectedTaskId || isActive;
-                          const repoLabel = task.repositoryPath
-                            ? truncateRepoPath(task.repositoryPath)
-                            : undefined;
-                          return (
-                            <TaskItem
-                              key={task.id}
-                              title={task.title}
-                              description={repoLabel}
-                              state={task.state}
-                              isSelected={isSelected}
-                              diffStats={task.diffStats}
-                              updatedAt={task.updatedAt}
-                              onClick={() => onSelectTask(task.id)}
-                              onDelete={onDeleteTask ? () => onDeleteTask(task.id) : undefined}
-                              isDeleting={deletingTaskId === task.id}
-                            />
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
+        sortedTasks.map((task) => {
+          const isActive = task.id === activeTaskId;
+          const isSelected = task.id === selectedTaskId || isActive;
+          const repoLabel = task.repositoryPath
+            ? truncateRepoPath(task.repositoryPath)
+            : undefined;
+          const stepName = task.workflowStepId
+            ? stepNameById.get(task.workflowStepId)
+            : undefined;
+          return (
+            <TaskItem
+              key={task.id}
+              title={task.title}
+              description={repoLabel}
+              stepName={stepName}
+              state={task.state}
+              isSelected={isSelected}
+              diffStats={task.diffStats}
+              updatedAt={task.updatedAt}
+              onClick={() => onSelectTask(task.id)}
+              onDelete={onDeleteTask ? () => onDeleteTask(task.id) : undefined}
+              isDeleting={deletingTaskId === task.id}
+            />
+          );
+        })
       )}
     </div>
   );

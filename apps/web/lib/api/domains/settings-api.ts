@@ -24,7 +24,8 @@ export async function fetchUserSettings(options?: ApiRequestOptions) {
 export async function updateUserSettings(
   payload: {
     workspace_id?: string;
-    board_id?: string;
+    workflow_filter_id?: string;
+    kanban_view_mode?: string;
     repository_ids?: string[];
     preferred_shell?: string;
     default_editor_id?: string;

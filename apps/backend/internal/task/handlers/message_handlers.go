@@ -27,6 +27,7 @@ type OrchestratorService interface {
 	PromptTask(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment) (*orchestrator.PromptResult, error)
 	ResumeTaskSession(ctx context.Context, taskID, taskSessionID string) error
 	StartCreatedSession(ctx context.Context, taskID, sessionID, agentProfileID, prompt string) error
+	ProcessOnTurnStart(ctx context.Context, taskID, sessionID string) error
 }
 
 // MessageHandlers handles WebSocket requests for messages
@@ -217,6 +218,17 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	// Use context.WithoutCancel so the prompt continues even if the WebSocket client disconnects.
 	// The user's message is already saved, and agent responses are broadcast via notifications.
 	if h.orchestrator != nil {
+		// Process on_turn_start events synchronously BEFORE sending the prompt.
+		// This transitions the task to the right step (e.g., Review → In Progress)
+		// before the agent receives the message.
+		if !isCreatedSession {
+			if err := h.orchestrator.ProcessOnTurnStart(ctx, req.TaskID, req.TaskSessionID); err != nil {
+				h.logger.Warn("failed to process on_turn_start",
+					zap.String("task_id", req.TaskID),
+					zap.String("session_id", req.TaskSessionID),
+					zap.Error(err))
+			}
+		}
 		taskID := req.TaskID
 		sessionID := req.TaskSessionID
 		content := req.Content

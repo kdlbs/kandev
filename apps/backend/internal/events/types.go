@@ -16,11 +16,11 @@ const (
 	WorkspaceDeleted = "workspace.deleted"
 )
 
-// Event types for boards
+// Event types for workflows
 const (
-	BoardCreated = "board.created"
-	BoardUpdated = "board.updated"
-	BoardDeleted = "board.deleted"
+	WorkflowCreated = "workflow.created"
+	WorkflowUpdated = "workflow.updated"
+	WorkflowDeleted = "workflow.deleted"
 )
 
 // Event types for comments

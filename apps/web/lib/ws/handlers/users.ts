@@ -10,10 +10,10 @@ export function registerUsersHandlers(store: StoreApi<AppState>): WsHandlers {
         ...state,
         userSettings: {
           ...state.userSettings,
-          // Preserve workspaceId and boardId — these are navigation state
+          // Preserve workspaceId and workflowId — these are navigation state
           // controlled by SSR and explicit user actions, not WebSocket broadcasts.
           // Overwriting them here causes redirect loops when the broadcast
-          // arrives with a stale workspace/board from a previous commit.
+          // arrives with a stale workspace/workflow from a previous commit.
           repositoryIds,
           preferredShell: message.payload.preferred_shell || null,
           defaultEditorId: message.payload.default_editor_id || null,

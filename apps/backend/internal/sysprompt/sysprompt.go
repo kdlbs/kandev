@@ -68,9 +68,9 @@ Available tools:
 - update_task_plan_kandev: Update an existing plan. Required params: task_id, content (markdown). Optional: title.
 - delete_task_plan_kandev: Delete a task plan. Required params: task_id.
 - list_workspaces_kandev: List all workspaces.
-- list_boards_kandev: List boards in a workspace. Required params: workspace_id.
-- list_tasks_kandev: List tasks on a board. Required params: board_id.
-- create_task_kandev: Create a new task. Required params: workspace_id, board_id, workflow_step_id, title.
+- list_workflows_kandev: List workflows in a workspace. Required params: workspace_id.
+- list_tasks_kandev: List tasks in a workflow. Required params: workflow_id.
+- create_task_kandev: Create a new task. Required params: workspace_id, workflow_id, workflow_step_id, title.
 - update_task_kandev: Update a task. Required params: task_id.
 
 IMPORTANT: You MUST use these MCP tools when instructed to create plans, ask questions, or interact with the Kandev platform. Do not skip them.`

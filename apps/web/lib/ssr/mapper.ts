@@ -1,9 +1,9 @@
 import type { AppState, KanbanState } from '@/lib/state/store';
-import type { BoardSnapshot, Message, Task } from '@/lib/types/http';
+import type { WorkflowSnapshot, Message, Task } from '@/lib/types/http';
 
 type KanbanTask = KanbanState['tasks'][number];
 
-export function snapshotToState(snapshot: BoardSnapshot): Partial<AppState> {
+export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
   const tasks = snapshot.tasks
     .map((task) => {
       const workflowStepId = task.workflow_step_id;
@@ -26,14 +26,14 @@ export function snapshotToState(snapshot: BoardSnapshot): Partial<AppState> {
 
   return {
     kanban: {
-      boardId: snapshot.board.id,
+      workflowId: snapshot.workflow.id,
       isLoading: false,
       steps: snapshot.steps.map((step) => ({
         id: step.id,
         title: step.name,
         color: step.color ?? 'bg-neutral-400',
         position: step.position,
-        autoStartAgent: step.auto_start_agent ?? false,
+        events: step.events,
       })),
       tasks,
     },

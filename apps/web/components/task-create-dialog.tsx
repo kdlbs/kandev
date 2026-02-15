@@ -48,6 +48,8 @@ import { STORAGE_KEYS } from '@/lib/settings/constants';
 import { linkToSession } from '@/lib/links';
 import { getExecutorIcon } from '@/lib/executor-icons';
 import { AgentLogo } from '@/components/agent-logo';
+import { listWorkflowSteps } from '@/lib/api/domains/workflow-api';
+import { WorkflowSelectorRow } from '@/components/workflow-selector-row';
 
 import { useDockviewStore } from '@/lib/state/dockview-store';
 import { useContextFilesStore } from '@/lib/state/context-files-store';
@@ -57,9 +59,9 @@ interface TaskCreateDialogProps {
   onOpenChange: (open: boolean) => void;
   mode?: 'create' | 'edit' | 'session';
   workspaceId: string | null;
-  boardId: string | null;
-  defaultColumnId: string | null;
-  columns: Array<{ id: string; title: string; autoStartAgent?: boolean }>;
+  workflowId: string | null;
+  defaultStepId: string | null;
+  steps: Array<{ id: string; title: string; events?: { on_enter?: Array<{ type: string; config?: Record<string, unknown> }>; on_turn_complete?: Array<{ type: string; config?: Record<string, unknown> }> } }>;
   editingTask?: { id: string; title: string; description?: string; workflowStepId: string; state?: Task['state']; repositoryId?: string } | null;
   onSuccess?: (task: Task, mode: 'create' | 'edit', meta?: { taskSessionId?: string | null }) => void;
   onCreateSession?: (data: {
@@ -291,6 +293,7 @@ type TaskFormInputsProps = {
   onDescriptionChange: (hasContent: boolean) => void;
   onKeyDown: (e: React.KeyboardEvent) => void;
   descriptionValueRef: React.RefObject<{ getValue: () => string } | null>;
+  disabled?: boolean;
 };
 
 const TaskFormInputs = memo(function TaskFormInputs({
@@ -300,6 +303,7 @@ const TaskFormInputs = memo(function TaskFormInputs({
   onDescriptionChange,
   onKeyDown,
   descriptionValueRef,
+  disabled,
 }: TaskFormInputsProps) {
   const [description, setDescription] = useState(initialDescription);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -348,6 +352,7 @@ const TaskFormInputs = memo(function TaskFormInputs({
         rows={2}
         className={isSessionMode ? 'min-h-[120px] max-h-[240px] resize-none overflow-auto' : 'min-h-[96px] max-h-[240px] resize-y overflow-auto'}
         required={isSessionMode}
+        disabled={disabled}
       />
     </div>
   );
@@ -358,9 +363,9 @@ export function TaskCreateDialog({
   onOpenChange,
   mode = 'create',
   workspaceId,
-  boardId,
-  defaultColumnId,
-  columns,
+  workflowId,
+  defaultStepId,
+  steps: _steps,
   editingTask,
   onSuccess,
   onCreateSession,
@@ -371,6 +376,8 @@ export function TaskCreateDialog({
   const isSessionMode = mode === 'session';
   const isEditMode = mode === 'edit';
   const isCreateMode = mode === 'create';
+  // A task is "started" if it has progressed beyond initial states
+  const isTaskStarted = isEditMode && editingTask?.state != null && editingTask.state !== 'TODO' && editingTask.state !== 'CREATED';
   const [isCreatingSession, setIsCreatingSession] = useState(false);
   const [isCreatingTask, setIsCreatingTask] = useState(false);
   const [taskName, setTaskName] = useState('');
@@ -390,6 +397,9 @@ export function TaskCreateDialog({
   const [localBranchesLoading, setLocalBranchesLoading] = useState(false);
   const [discoverReposLoading, setDiscoverReposLoading] = useState(false);
   const [discoverReposLoaded, setDiscoverReposLoaded] = useState(false);
+  const [selectedWorkflowId, setSelectedWorkflowId] = useState(workflowId);
+  const [fetchedSteps, setFetchedSteps] = useState<Array<{ id: string; title: string; events?: { on_enter?: Array<{ type: string; config?: Record<string, unknown> }>; on_turn_complete?: Array<{ type: string; config?: Record<string, unknown> }> } }> | null>(null);
+  const workflows = useAppStore((state) => state.workflows.items);
   const workspaces = useAppStore((state) => state.workspaces.items);
   const agentProfiles = useAppStore((state) => state.agentProfiles.items);
   const executors = useAppStore((state) => state.executors.items);
@@ -399,6 +409,7 @@ export function TaskCreateDialog({
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const kanbanTasks = useAppStore((state) => state.kanban.tasks);
   const reposByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
+  const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
   const sessionRepoName = useMemo(() => {
     if (!isSessionMode) return undefined;
     const activeTask = activeTaskId ? kanbanTasks.find((t) => t.id === activeTaskId) : null;
@@ -420,6 +431,33 @@ export function TaskCreateDialog({
   const agentProfilesLoading = open && !settingsData.agentsLoaded;
   const executorsLoading = open && !settingsData.executorsLoaded;
 
+  // Effective workflow/steps: use fetched steps when a different workflow is selected
+  const effectiveWorkflowId = selectedWorkflowId ?? workflowId;
+  const effectiveDefaultStepId = (selectedWorkflowId && selectedWorkflowId !== workflowId && fetchedSteps)
+    ? fetchedSteps[0]?.id ?? null
+    : defaultStepId;
+
+  // Fetch steps when selectedWorkflowId changes to a different workflow
+  useEffect(() => {
+    if (!selectedWorkflowId || selectedWorkflowId === workflowId) {
+      setFetchedSteps(null);
+      return;
+    }
+    let cancelled = false;
+    listWorkflowSteps(selectedWorkflowId).then((response) => {
+      if (cancelled) return;
+      const sorted = [...response.steps].sort((a, b) => a.position - b.position);
+      setFetchedSteps(sorted.map((s) => ({
+        id: s.id,
+        title: s.name,
+        events: s.events,
+      })));
+    }).catch(() => {
+      if (!cancelled) setFetchedSteps(null);
+    });
+    return () => { cancelled = true; };
+  }, [selectedWorkflowId, workflowId]);
+
   useEffect(() => {
     if (!open) return;
     const name = initialValues?.title || '';
@@ -431,12 +469,15 @@ export function TaskCreateDialog({
     setAgentProfileId('');
     setEnvironmentId('');
     setExecutorId('');
+    setSelectedWorkflowId(workflowId);
+    setFetchedSteps(null);
   }, [
     initialValues?.branch,
     initialValues?.description,
     initialValues?.repositoryId,
     initialValues?.title,
     open,
+    workflowId,
   ]);
 
   useEffect(() => {
@@ -682,6 +723,10 @@ export function TaskCreateDialog({
     return null;
   }, [executors, executorId]);
 
+  const handleWorkflowChange = useCallback((value: string) => {
+    setSelectedWorkflowId(value);
+  }, []);
+
   useEffect(() => {
     if (!open || !workspaceId || !selectedLocalRepo) return;
     setLocalBranchesLoading(true);
@@ -767,7 +812,9 @@ export function TaskCreateDialog({
     setAgentProfileId('');
     setEnvironmentId('');
     setExecutorId('');
-  }, []);
+    setSelectedWorkflowId(workflowId);
+    setFetchedSteps(null);
+  }, [workflowId]);
 
   const getRepositoriesPayload = useCallback(() => {
     if (repositoryId) {
@@ -853,7 +900,6 @@ export function TaskCreateDialog({
 
       let taskSessionId: string | null = null;
       if (agentProfileId) {
-        const autoStartStep = columns.find((column) => column.autoStartAgent);
         const client = getWebSocketClient();
         if (client) {
           try {
@@ -864,7 +910,6 @@ export function TaskCreateDialog({
                 agent_profile_id: agentProfileId,
                 executor_id: executorId,
                 prompt: trimmedDescription || '',
-                ...(autoStartStep && { workflow_step_id: autoStartStep.id }),
               },
               15000,
             );
@@ -883,7 +928,7 @@ export function TaskCreateDialog({
       setIsCreatingTask(false);
       onOpenChange(false);
     }
-  }, [performTaskUpdate, agentProfileId, executorId, columns, onSuccess, resetForm, onOpenChange, toast]);
+  }, [performTaskUpdate, agentProfileId, executorId, onSuccess, resetForm, onOpenChange, toast]);
 
   const handleUpdateWithoutAgent = useCallback(async () => {
     setIsCreatingTask(true);
@@ -903,11 +948,9 @@ export function TaskCreateDialog({
   const handleCreateSubmit = useCallback(async () => {
     const trimmedTitle = taskName.trim();
     if (!trimmedTitle) return;
-    if (!workspaceId || !boardId) return;
+    if (!workspaceId || !effectiveWorkflowId) return;
     if (!repositoryId && !selectedLocalRepo) return;
     if (!agentProfileId) return;
-    const columnId = editingTask?.workflowStepId ?? defaultColumnId;
-    if (!columnId) return;
 
     const description = descriptionInputRef.current?.getValue() ?? '';
     const trimmedDescription = description.trim();
@@ -916,14 +959,11 @@ export function TaskCreateDialog({
     setIsCreatingTask(true);
     try {
       if (trimmedDescription) {
-        // "Start" mode: create task + start agent in background, stay on board
-        const autoStartStep = columns.find((column) => column.autoStartAgent);
-        const targetColumnId = autoStartStep?.id ?? columnId;
-
+        // "Start" mode: create task + start agent in background, stay on kanban
+        // Backend resolves the start step automatically
         const taskResponse = await createTask({
           workspace_id: workspaceId,
-          board_id: boardId,
-          workflow_step_id: targetColumnId,
+          workflow_id: effectiveWorkflowId,
           title: trimmedTitle,
           description: trimmedDescription,
           repositories: repositoriesPayload,
@@ -938,10 +978,10 @@ export function TaskCreateDialog({
         onOpenChange(false);
       } else {
         // "Plan" mode: create task + session only (no agent), navigate to session
+        // Backend resolves the start step automatically
         const taskResponse = await createTask({
           workspace_id: workspaceId,
-          board_id: boardId,
-          workflow_step_id: columnId,
+          workflow_id: effectiveWorkflowId,
           title: trimmedTitle,
           description: '',
           repositories: repositoriesPayload,
@@ -978,8 +1018,8 @@ export function TaskCreateDialog({
       setIsCreatingTask(false);
     }
   }, [
-    taskName, workspaceId, boardId, repositoryId, selectedLocalRepo, agentProfileId, executorId,
-    editingTask, defaultColumnId, columns, getRepositoriesPayload, onSuccess, resetForm, onOpenChange,
+    taskName, workspaceId, effectiveWorkflowId, repositoryId, selectedLocalRepo, agentProfileId, executorId,
+    getRepositoriesPayload, onSuccess, resetForm, onOpenChange,
     setActiveDocument, setPlanMode, router, toast,
   ]);
 
@@ -988,19 +1028,19 @@ export function TaskCreateDialog({
     const description = descriptionInputRef.current?.getValue() ?? '';
     const trimmedDescription = description.trim();
     if (!trimmedTitle || !trimmedDescription) return;
-    if (!workspaceId || !boardId) return;
+    if (!workspaceId || !effectiveWorkflowId) return;
     if (!repositoryId && !selectedLocalRepo) return;
     if (!agentProfileId) return;
-    const columnId = defaultColumnId;
-    if (!columnId) return;
+    const stepId = effectiveDefaultStepId;
+    if (!stepId) return;
 
     setIsCreatingTask(true);
     try {
       const reposPayload = getRepositoriesPayload();
       const taskResponse = await createTask({
         workspace_id: workspaceId,
-        board_id: boardId,
-        workflow_step_id: columnId,
+        workflow_id: effectiveWorkflowId,
+        workflow_step_id: stepId,
         title: trimmedTitle,
         description: trimmedDescription,
         repositories: reposPayload,
@@ -1017,8 +1057,8 @@ export function TaskCreateDialog({
       setIsCreatingTask(false);
     }
   }, [
-    taskName, workspaceId, boardId, repositoryId, selectedLocalRepo,
-    agentProfileId, defaultColumnId, executorId, getRepositoriesPayload,
+    taskName, workspaceId, effectiveWorkflowId, repositoryId, selectedLocalRepo,
+    agentProfileId, effectiveDefaultStepId, executorId, getRepositoriesPayload,
     onSuccess, onOpenChange, resetForm, toast,
   ]);
 
@@ -1042,7 +1082,7 @@ export function TaskCreateDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-full h-full max-w-full max-h-full rounded-none sm:w-[900px] sm:h-auto sm:max-w-none sm:max-h-[85vh] sm:rounded-lg flex flex-col bg-card">
+      <DialogContent className="w-full h-full max-w-full max-h-full rounded-none sm:w-[900px] sm:h-auto sm:max-w-none sm:max-h-[85vh] sm:rounded-lg flex flex-col">
         <DialogHeader>
           {isCreateMode || isEditMode ? (
             <DialogTitle asChild>
@@ -1064,7 +1104,7 @@ export function TaskCreateDialog({
                       ? 'Loading repositories...'
                       : 'No repositories found.'
                   }
-                  disabled={!workspaceId || repositoriesLoading || discoverReposLoading}
+                  disabled={isTaskStarted || !workspaceId || repositoriesLoading || discoverReposLoading}
                   triggerClassName="w-auto text-sm"
                 />
                 <span className="text-muted-foreground mr-2">/</span>
@@ -1092,13 +1132,14 @@ export function TaskCreateDialog({
             <TaskFormInputs
               key={`${open}-${initialValues?.description ?? ''}`}
               isSessionMode={isSessionMode}
-              autoFocus={isEditMode}
+              autoFocus={isEditMode && !isTaskStarted}
               initialDescription={initialValues?.description ?? ''}
               onDescriptionChange={setHasDescription}
               onKeyDown={handleKeyDown}
               descriptionValueRef={descriptionInputRef}
+              disabled={isTaskStarted}
             />
-            {!isSessionMode && (
+            {!isSessionMode && !isTaskStarted && (
               <div className="grid gap-4 grid-cols-1 sm:grid-cols-3">
                 <div>
                   <BranchSelector
@@ -1166,6 +1207,14 @@ export function TaskCreateDialog({
                 </div>
               </div>
             )}
+            {isCreateMode && workflows.length > 1 && !isTaskStarted && (
+              <WorkflowSelectorRow
+                workflows={workflows}
+                snapshots={snapshots}
+                selectedWorkflowId={effectiveWorkflowId ?? null}
+                onWorkflowChange={handleWorkflowChange}
+              />
+            )}
 
             {/* Agent Profile + Executor - shown in session mode */}
             {isSessionMode && (
@@ -1189,7 +1238,7 @@ export function TaskCreateDialog({
 
           </div>
           <DialogFooter className="border-t border-border pt-3 flex-col gap-3 sm:flex-row sm:gap-2">
-            {!isSessionMode && executorHint && (
+            {!isSessionMode && !isTaskStarted && executorHint && (
               <div className="flex flex-1 items-center gap-3 text-sm text-muted-foreground">
                 <span className="text-xs text-muted-foreground">
                   {executorHint}
@@ -1202,7 +1251,24 @@ export function TaskCreateDialog({
               </Button>
             </DialogClose>
             <KeyboardShortcutTooltip shortcut={SHORTCUTS.SUBMIT}>
-              {(isCreateMode && hasDescription) || (isEditMode && agentProfileId) ? (
+              {isTaskStarted ? (
+                <Button
+                  type="button"
+                  variant="default"
+                  className="w-full h-10 cursor-pointer sm:w-auto sm:h-7 gap-1.5"
+                  disabled={isCreatingTask || !hasTitle}
+                  onClick={handleUpdateWithoutAgent}
+                >
+                  {isCreatingTask ? (
+                    <>
+                      <IconLoader2 className="h-3.5 w-3.5 animate-spin" />
+                      Updating...
+                    </>
+                  ) : (
+                    'Update'
+                  )}
+                </Button>
+              ) : (isCreateMode && hasDescription) || (isEditMode && agentProfileId) ? (
                 <div className="inline-flex rounded-md border border-border overflow-hidden sm:h-7 h-10">
                   <Button
                     type="submit"

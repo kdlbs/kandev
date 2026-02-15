@@ -85,7 +85,7 @@ const LAYOUT_STORAGE_KEY = 'dockview-layout-v1';
 
 function SidebarPanel(props: IDockviewPanelProps) {
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
-  const boardId = useAppStore((state) => state.boards.activeId);
+  const workflowId = useAppStore((state) => state.workflows.activeId);
   const workspaceName = useAppStore((state) => {
     const ws = state.workspaces.items.find((w: { id: string }) => w.id === workspaceId);
     return ws?.name ?? 'Workspace';
@@ -98,7 +98,7 @@ function SidebarPanel(props: IDockviewPanelProps) {
     }
   }, [props.api, workspaceName]);
 
-  return <TaskSessionSidebar workspaceId={workspaceId} boardId={boardId} />;
+  return <TaskSessionSidebar workspaceId={workspaceId} workflowId={workflowId} />;
 }
 
 function ChatPanel(props: IDockviewPanelProps) {
@@ -288,16 +288,16 @@ function RightHeaderActions(props: IDockviewHeaderActionsProps) {
 
 function SidebarRightActions() {
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
-  const boardId = useAppStore((state) => state.boards.activeId);
+  const workflowId = useAppStore((state) => state.workflows.activeId);
   const kanban = useAppStore((state) => state.kanban);
   const setActiveTask = useAppStore((state) => state.setActiveTask);
   const setActiveSession = useAppStore((state) => state.setActiveSession);
   const appStore = useAppStoreApi();
-  const columns = (kanban?.steps ?? []).map((s: { id: string; title: string; color?: string; autoStartAgent?: boolean }) => ({
+  const steps = (kanban?.steps ?? []).map((s: { id: string; title: string; color?: string; events?: { on_enter?: Array<{ type: string; config?: Record<string, unknown> }>; on_turn_complete?: Array<{ type: string; config?: Record<string, unknown> }> } }) => ({
     id: s.id,
     title: s.title,
     color: s.color,
-    autoStartAgent: s.autoStartAgent,
+    events: s.events,
   }));
 
   const handleTaskCreated = useCallback(
@@ -317,8 +317,8 @@ function SidebarRightActions() {
     <div className="flex items-center pr-2">
       <NewTaskButton
         workspaceId={workspaceId}
-        boardId={boardId}
-        columns={columns}
+        workflowId={workflowId}
+        steps={steps}
         onSuccess={handleTaskCreated}
       />
     </div>
@@ -482,7 +482,7 @@ function TerminalGroupRightActions() {
 // --- MAIN LAYOUT COMPONENT ---
 type DockviewDesktopLayoutProps = {
   workspaceId: string | null;
-  boardId: string | null;
+  workflowId: string | null;
   sessionId?: string | null;
   repository?: Repository | null;
   initialScripts?: RepositoryScript[];

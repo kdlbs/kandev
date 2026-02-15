@@ -84,7 +84,7 @@ func (h *StatsHandlers) httpGetStats(c *gin.Context) {
 			TaskID:           ts.TaskID,
 			TaskTitle:        ts.TaskTitle,
 			WorkspaceID:      ts.WorkspaceID,
-			BoardID:          ts.BoardID,
+			WorkflowID:       ts.WorkflowID,
 			State:            ts.State,
 			SessionCount:     ts.SessionCount,
 			TurnCount:        ts.TurnCount,

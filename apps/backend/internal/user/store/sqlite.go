@@ -125,7 +125,8 @@ func (r *sqliteRepository) UpsertUserSettings(ctx context.Context, settings *mod
 	}
 	settingsPayload, err := json.Marshal(map[string]interface{}{
 		"workspace_id":               settings.WorkspaceID,
-		"board_id":                   settings.BoardID,
+		"kanban_view_mode":           settings.KanbanViewMode,
+		"workflow_filter_id":         settings.WorkflowFilterID,
 		"repository_ids":             settings.RepositoryIDs,
 		"initial_setup_complete":     settings.InitialSetupComplete,
 		"preferred_shell":            settings.PreferredShell,
@@ -179,7 +180,8 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	}
 	var payload struct {
 		WorkspaceID             string   `json:"workspace_id"`
-		BoardID                 string   `json:"board_id"`
+		KanbanViewMode          string   `json:"kanban_view_mode"`
+		WorkflowFilterID        string   `json:"workflow_filter_id"`
 		RepositoryIDs           []string `json:"repository_ids"`
 		InitialSetupComplete    bool     `json:"initial_setup_complete"`
 		PreferredShell          string   `json:"preferred_shell"`
@@ -195,7 +197,8 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		return nil, err
 	}
 	settings.WorkspaceID = payload.WorkspaceID
-	settings.BoardID = payload.BoardID
+	settings.KanbanViewMode = payload.KanbanViewMode
+	settings.WorkflowFilterID = payload.WorkflowFilterID
 	settings.RepositoryIDs = payload.RepositoryIDs
 	settings.InitialSetupComplete = payload.InitialSetupComplete
 	settings.PreferredShell = payload.PreferredShell

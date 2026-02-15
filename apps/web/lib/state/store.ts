@@ -16,7 +16,7 @@ import {
   defaultSessionRuntimeState,
   defaultUIState,
   type WorkspaceState,
-  type BoardState,
+  type WorkflowsState,
   type ExecutorsState,
   type EnvironmentsState,
   type SettingsAgentsState,
@@ -44,7 +44,9 @@ import {
 // Re-export all types from slices for backwards compatibility
 export type {
   KanbanState,
-  BoardState,
+  KanbanMultiState,
+  WorkflowSnapshotData,
+  WorkflowsState,
   TaskState,
   WorkspaceState,
   RepositoriesState,
@@ -99,7 +101,8 @@ export type {
 export type AppState = {
   // Kanban slice
   kanban: typeof defaultKanbanState['kanban'];
-  boards: typeof defaultKanbanState['boards'];
+  kanbanMulti: typeof defaultKanbanState['kanbanMulti'];
+  workflows: typeof defaultKanbanState['workflows'];
   tasks: typeof defaultKanbanState['tasks'];
 
   // Workspace slice
@@ -160,8 +163,13 @@ export type AppState = {
   hydrate: (state: Partial<AppState>, options?: HydrationOptions) => void;
   setActiveWorkspace: (workspaceId: string | null) => void;
   setWorkspaces: (workspaces: WorkspaceState['items']) => void;
-  setActiveBoard: (boardId: string | null) => void;
-  setBoards: (boards: BoardState['items']) => void;
+  setActiveWorkflow: (workflowId: string | null) => void;
+  setWorkflows: (workflows: WorkflowsState['items']) => void;
+  setWorkflowSnapshot: (workflowId: string, data: import('./slices/kanban/types').WorkflowSnapshotData) => void;
+  setKanbanMultiLoading: (loading: boolean) => void;
+  clearKanbanMulti: () => void;
+  updateMultiTask: (workflowId: string, task: import('./slices/kanban/types').KanbanState['tasks'][number]) => void;
+  removeMultiTask: (workflowId: string, taskId: string) => void;
   setExecutors: (executors: ExecutorsState['items']) => void;
   setEnvironments: (environments: EnvironmentsState['items']) => void;
   setSettingsAgents: (agents: SettingsAgentsState['items']) => void;
@@ -278,7 +286,8 @@ export type AppStore = ReturnType<typeof createAppStore>;
 
 const defaultState = {
   kanban: defaultKanbanState.kanban,
-  boards: defaultKanbanState.boards,
+  kanbanMulti: defaultKanbanState.kanbanMulti,
+  workflows: defaultKanbanState.workflows,
   tasks: defaultKanbanState.tasks,
   workspaces: defaultWorkspaceState.workspaces,
   repositories: defaultWorkspaceState.repositories,
@@ -333,7 +342,8 @@ function mergeInitialState(initialState?: Partial<AppState>): typeof defaultStat
     ...initialState,
     // Ensure nested objects are properly merged
     kanban: { ...defaultState.kanban, ...initialState.kanban },
-    boards: { ...defaultState.boards, ...initialState.boards },
+    kanbanMulti: { ...defaultState.kanbanMulti, ...initialState.kanbanMulti },
+    workflows: { ...defaultState.workflows, ...initialState.workflows },
     tasks: { ...defaultState.tasks, ...initialState.tasks },
     workspaces: { ...defaultState.workspaces, ...initialState.workspaces },
     repositories: { ...defaultState.repositories, ...initialState.repositories },
@@ -401,7 +411,8 @@ export function createAppStore(initialState?: Partial<AppState>) {
       ...createUISlice(set as any, get as any, api as any),
       // Override state with merged initial state
       kanban: merged.kanban,
-      boards: merged.boards,
+      kanbanMulti: merged.kanbanMulti,
+      workflows: merged.workflows,
       tasks: merged.tasks,
       workspaces: merged.workspaces,
       repositories: merged.repositories,

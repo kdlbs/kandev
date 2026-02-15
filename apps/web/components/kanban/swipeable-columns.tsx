@@ -6,7 +6,7 @@ import { KanbanColumn, WorkflowStep } from '../kanban-column';
 import { Task } from '../kanban-card';
 
 type SwipeableColumnsProps = {
-  columns: WorkflowStep[];
+  steps: WorkflowStep[];
   tasks: Task[];
   activeIndex: number;
   onIndexChange: (index: number) => void;
@@ -14,13 +14,13 @@ type SwipeableColumnsProps = {
   onOpenTask: (task: Task) => void;
   onEditTask: (task: Task) => void;
   onDeleteTask: (task: Task) => void;
-  onMoveTask?: (task: Task, targetColumnId: string) => void;
+  onMoveTask?: (task: Task, targetStepId: string) => void;
   showMaximizeButton?: boolean;
   deletingTaskId?: string | null;
 };
 
 export function SwipeableColumns({
-  columns,
+  steps,
   tasks,
   activeIndex,
   onIndexChange,
@@ -38,10 +38,10 @@ export function SwipeableColumns({
     watchDrag: true,
   });
 
-  const getTasksForColumn = useCallback(
-    (columnId: string) => {
+  const getTasksForStep = useCallback(
+    (stepId: string) => {
       return tasks
-        .filter((task) => task.workflowStepId === columnId)
+        .filter((task) => task.workflowStepId === stepId)
         .map((task) => ({ ...task, position: task.position ?? 0 }))
         .sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
     },
@@ -81,20 +81,20 @@ export function SwipeableColumns({
       style={{ height: 'calc(100dvh - 100px - env(safe-area-inset-bottom, 0px))' }}
     >
       <div className="flex h-full touch-pan-y">
-        {columns.map((column) => (
+        {steps.map((step) => (
           <div
-            key={column.id}
+            key={step.id}
             className="flex-shrink-0 w-full h-full min-w-0 px-4 py-2 flex flex-col"
           >
             <KanbanColumn
-              column={column}
-              tasks={getTasksForColumn(column.id)}
+              step={step}
+              tasks={getTasksForStep(step.id)}
               onPreviewTask={onPreviewTask}
               onOpenTask={onOpenTask}
               onEditTask={onEditTask}
               onDeleteTask={onDeleteTask}
               onMoveTask={onMoveTask}
-              columns={columns}
+              steps={steps}
               showMaximizeButton={showMaximizeButton}
               deletingTaskId={deletingTaskId}
               hideHeader

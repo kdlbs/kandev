@@ -26,7 +26,7 @@ const DEFAULT_PREVIEW_LAYOUT: Record<string, number> = {
 
 type SessionTabletLayoutProps = {
   workspaceId: string | null;
-  boardId: string | null;
+  workflowId: string | null;
   sessionId?: string | null;
   repository?: Repository | null;
   defaultLayouts?: Record<string, Layout>;
@@ -34,7 +34,7 @@ type SessionTabletLayoutProps = {
 
 export const SessionTabletLayout = memo(function SessionTabletLayout({
   workspaceId,
-  boardId,
+  workflowId,
   sessionId = null,
   repository = null,
   defaultLayouts = {},
@@ -144,7 +144,7 @@ export const SessionTabletLayout = memo(function SessionTabletLayout({
         open={isTaskSwitcherOpen}
         onOpenChange={setMobileSessionTaskSwitcherOpen}
         workspaceId={workspaceId}
-        boardId={boardId}
+        workflowId={workflowId}
       />
     </div>
   );

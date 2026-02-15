@@ -16,12 +16,12 @@ export type BackendMessageType =
   | 'workspace.created'
   | 'workspace.updated'
   | 'workspace.deleted'
-  | 'board.created'
-  | 'board.updated'
-  | 'board.deleted'
-  | 'column.created'
-  | 'column.updated'
-  | 'column.deleted'
+  | 'workflow.created'
+  | 'workflow.updated'
+  | 'workflow.deleted'
+  | 'step.created'
+  | 'step.updated'
+  | 'step.deleted'
   | 'session.message.added'
   | 'session.message.updated'
   | 'session.state_changed'
@@ -56,12 +56,12 @@ export type BackendMessage<T extends BackendMessageType, P> = {
   timestamp?: string;
 };
 
-import type { AvailableAgent, TaskState } from '@/lib/types/http';
+import type { AvailableAgent, StepEvents, TaskState } from '@/lib/types/http';
 import type { GitEventPayload } from '@/lib/types/git-events';
 
 export type KanbanUpdatePayload = {
-  boardId: string;
-  steps: Array<{ id: string; title: string; color?: string; position?: number; autoStartAgent?: boolean }>;
+  workflowId: string;
+  steps: Array<{ id: string; title: string; color?: string; position?: number; events?: { on_enter?: Array<{ type: string; config?: Record<string, unknown> }>; on_turn_complete?: Array<{ type: string; config?: Record<string, unknown> }> } }>;
   tasks: Array<{
     id: string;
     workflowStepId: string;
@@ -74,7 +74,7 @@ export type KanbanUpdatePayload = {
 
 export type TaskEventPayload = {
   task_id: string;
-  board_id: string;
+  workflow_id: string;
   workflow_step_id: string;
   title: string;
   description?: string;
@@ -131,7 +131,7 @@ export type WorkspacePayload = {
   updated_at?: string;
 };
 
-export type BoardPayload = {
+export type WorkflowPayload = {
   id: string;
   workspace_id: string;
   name: string;
@@ -140,14 +140,15 @@ export type BoardPayload = {
   updated_at?: string;
 };
 
-export type ColumnPayload = {
+export type StepPayload = {
   id: string;
-  board_id: string;
+  workflow_id: string;
   name: string;
   position: number;
   state: string;
   color: string;
-  auto_start_agent?: boolean;
+  events?: StepEvents;
+  is_start_step?: boolean;
   created_at?: string;
   updated_at?: string;
 };
@@ -277,7 +278,8 @@ export type AgentProfileChangedPayload = {
 export type UserSettingsUpdatedPayload = {
   user_id: string;
   workspace_id: string;
-  board_id: string;
+  kanban_view_mode?: string;
+  workflow_filter_id?: string;
   repository_ids: string[];
   initial_setup_complete?: boolean;
   preferred_shell?: string;
@@ -365,12 +367,12 @@ export type BackendMessageMap = {
   'workspace.created': BackendMessage<'workspace.created', WorkspacePayload>;
   'workspace.updated': BackendMessage<'workspace.updated', WorkspacePayload>;
   'workspace.deleted': BackendMessage<'workspace.deleted', WorkspacePayload>;
-  'board.created': BackendMessage<'board.created', BoardPayload>;
-  'board.updated': BackendMessage<'board.updated', BoardPayload>;
-  'board.deleted': BackendMessage<'board.deleted', BoardPayload>;
-  'column.created': BackendMessage<'column.created', ColumnPayload>;
-  'column.updated': BackendMessage<'column.updated', ColumnPayload>;
-  'column.deleted': BackendMessage<'column.deleted', ColumnPayload>;
+  'workflow.created': BackendMessage<'workflow.created', WorkflowPayload>;
+  'workflow.updated': BackendMessage<'workflow.updated', WorkflowPayload>;
+  'workflow.deleted': BackendMessage<'workflow.deleted', WorkflowPayload>;
+  'step.created': BackendMessage<'step.created', StepPayload>;
+  'step.updated': BackendMessage<'step.updated', StepPayload>;
+  'step.deleted': BackendMessage<'step.deleted', StepPayload>;
   'session.message.added': BackendMessage<'session.message.added', MessageAddedPayload>;
   'session.message.updated': BackendMessage<'session.message.updated', MessageAddedPayload>;
   'session.state_changed': BackendMessage<'session.state_changed', TaskSessionStateChangedPayload>;

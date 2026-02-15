@@ -2,31 +2,31 @@
 
 import { useMemo, useState, useSyncExternalStore } from 'react';
 import { useAppStore } from '@/components/state-provider';
-import { useBoards } from '@/hooks/use-boards';
-import { useBoardSnapshot } from '@/hooks/use-board-snapshot';
+import { useWorkflows } from '@/hooks/use-workflows';
+import { useWorkflowSnapshot } from '@/hooks/use-workflow-snapshot';
 import { useUserDisplaySettings } from '@/hooks/use-user-display-settings';
 import { filterTasksByRepositories } from '@/lib/kanban/filters';
 import type { WorkflowStep } from '@/components/kanban-column';
 
 type KanbanDataOptions = {
   onWorkspaceChange: (workspaceId: string | null) => void;
-  onBoardChange: (boardId: string | null) => void;
+  onWorkflowChange: (workflowId: string | null) => void;
   searchQuery?: string;
 };
 
-export function useKanbanData({ onWorkspaceChange, onBoardChange, searchQuery = '' }: KanbanDataOptions) {
+export function useKanbanData({ onWorkspaceChange, onWorkflowChange, searchQuery = '' }: KanbanDataOptions) {
   const [taskSessionAvailability, setTaskSessionAvailability] = useState<Record<string, boolean>>({});
 
   // Store selectors
   const kanban = useAppStore((state) => state.kanban);
   const workspaceState = useAppStore((state) => state.workspaces);
-  const boardsState = useAppStore((state) => state.boards);
+  const workflowsState = useAppStore((state) => state.workflows);
   const enablePreviewOnClick = useAppStore((state) => state.userSettings.enablePreviewOnClick);
   const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
 
   // Data fetching hooks
-  useBoards(workspaceState.activeId, true);
-  useBoardSnapshot(boardsState.activeId);
+  useWorkflows(workspaceState.activeId, true);
+  useWorkflowSnapshot(workflowsState.activeId);
 
   // User settings hook
   const {
@@ -35,9 +35,9 @@ export function useKanbanData({ onWorkspaceChange, onBoardChange, searchQuery = 
     selectedRepositoryIds,
   } = useUserDisplaySettings({
     workspaceId: workspaceState.activeId,
-    boardId: boardsState.activeId,
+    workflowId: workflowsState.activeId,
     onWorkspaceChange,
-    onBoardChange,
+    onWorkflowChange,
   });
 
   // SSR safety check
@@ -48,7 +48,7 @@ export function useKanbanData({ onWorkspaceChange, onBoardChange, searchQuery = 
   );
 
   // Derived data
-  const columns = useMemo<WorkflowStep[]>(
+  const steps = useMemo<WorkflowStep[]>(
     () =>
       [...kanban.steps]
         .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
@@ -56,7 +56,7 @@ export function useKanbanData({ onWorkspaceChange, onBoardChange, searchQuery = 
           id: step.id,
           title: step.title,
           color: step.color || 'bg-neutral-400',
-          autoStartAgent: step.autoStartAgent,
+          events: step.events,
         })),
     [kanban.steps]
   );
@@ -74,7 +74,7 @@ export function useKanbanData({ onWorkspaceChange, onBoardChange, searchQuery = 
     reviewStatus: task.reviewStatus,
   }));
 
-  const activeColumns = kanban.boardId ? columns : [];
+  const activeSteps = kanban.workflowId ? steps : [];
 
   const visibleTasks = useMemo(
     () => filterTasksByRepositories(tasks, selectedRepositoryIds),
@@ -120,7 +120,7 @@ export function useKanbanData({ onWorkspaceChange, onBoardChange, searchQuery = 
     // State
     kanban,
     workspaceState,
-    boardsState,
+    workflowsState,
     enablePreviewOnClick,
     userSettings,
     commitSettings,
@@ -130,7 +130,7 @@ export function useKanbanData({ onWorkspaceChange, onBoardChange, searchQuery = 
     isMounted,
 
     // Derived data
-    activeColumns,
+    activeSteps,
     visibleTasksWithSessions,
   };
 }

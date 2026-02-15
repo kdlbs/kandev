@@ -69,7 +69,7 @@ export function WorkspacesPageClient() {
         <div>
           <h2 className="text-2xl font-bold">Workspaces</h2>
           <p className="text-sm text-muted-foreground mt-1">
-            Manage your workspaces and boards
+            Manage your workspaces and workflows
           </p>
         </div>
         <Button size="sm" onClick={() => setIsAdding(true)}>
@@ -125,7 +125,7 @@ export function WorkspacesPageClient() {
                       <div className="flex-1 min-w-0">
                         <h4 className="font-medium">{workspace.name}</h4>
                         <div className="flex items-center gap-3 text-xs text-muted-foreground mt-1">
-                          <span>Boards managed in this workspace</span>
+                          <span>Workflows managed in this workspace</span>
                         </div>
                       </div>
                     </div>

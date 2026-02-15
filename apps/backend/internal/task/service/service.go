@@ -22,6 +22,7 @@ import (
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
@@ -52,36 +53,22 @@ type TaskExecutionStopper interface {
 	StopSession(ctx context.Context, sessionID, reason string, force bool) error
 }
 
-// WorkflowStepCreator creates workflow steps from a template for a board.
+// WorkflowStepCreator creates workflow steps from a template for a workflow.
 type WorkflowStepCreator interface {
-	CreateStepsFromTemplate(ctx context.Context, boardID, templateID string) error
+	CreateStepsFromTemplate(ctx context.Context, workflowID, templateID string) error
 }
 
 // WorkflowStepGetter retrieves workflow step information.
 type WorkflowStepGetter interface {
-	GetStep(ctx context.Context, stepID string) (*WorkflowStep, error)
-	// GetNextStepByPosition returns the next step after the given position for a board.
+	GetStep(ctx context.Context, stepID string) (*wfmodels.WorkflowStep, error)
+	// GetNextStepByPosition returns the next step after the given position for a workflow.
 	// Returns nil if there is no next step (i.e., current step is the last one).
-	GetNextStepByPosition(ctx context.Context, boardID string, currentPosition int) (*WorkflowStep, error)
+	GetNextStepByPosition(ctx context.Context, workflowID string, currentPosition int) (*wfmodels.WorkflowStep, error)
 }
 
-// WorkflowStep represents a workflow step (mirrors workflow/models.WorkflowStep).
-// Defined here to avoid circular dependency with workflow package.
-type WorkflowStep struct {
-	ID               string
-	BoardID          string
-	Name             string
-	StepType         string
-	Position         int
-	Color            string
-	AutoStartAgent   bool
-	PlanMode         bool
-	RequireApproval  bool
-	PromptPrefix     string
-	PromptSuffix     string
-	AllowManualMove  bool
-	OnCompleteStepID *string
-	OnApprovalStepID *string
+// StartStepResolver resolves the starting step for a workflow.
+type StartStepResolver interface {
+	ResolveStartStep(ctx context.Context, workflowID string) (string, error)
 }
 
 var (
@@ -118,6 +105,7 @@ type Service struct {
 	executionStopper    TaskExecutionStopper
 	workflowStepCreator WorkflowStepCreator
 	workflowStepGetter  WorkflowStepGetter
+	startStepResolver   StartStepResolver
 }
 
 // NewService creates a new task service
@@ -140,7 +128,7 @@ func (s *Service) SetExecutionStopper(stopper TaskExecutionStopper) {
 	s.executionStopper = stopper
 }
 
-// SetWorkflowStepCreator wires the workflow step creator for board creation.
+// SetWorkflowStepCreator wires the workflow step creator for workflow creation.
 func (s *Service) SetWorkflowStepCreator(creator WorkflowStepCreator) {
 	s.workflowStepCreator = creator
 }
@@ -148,6 +136,11 @@ func (s *Service) SetWorkflowStepCreator(creator WorkflowStepCreator) {
 // SetWorkflowStepGetter wires the workflow step getter for MoveTask.
 func (s *Service) SetWorkflowStepGetter(getter WorkflowStepGetter) {
 	s.workflowStepGetter = getter
+}
+
+// SetStartStepResolver wires the start step resolver for CreateTask.
+func (s *Service) SetStartStepResolver(resolver StartStepResolver) {
+	s.startStepResolver = resolver
 }
 
 // Request types
@@ -164,7 +157,7 @@ type TaskRepositoryInput struct {
 // CreateTaskRequest contains the data for creating a new task
 type CreateTaskRequest struct {
 	WorkspaceID    string                 `json:"workspace_id"`
-	BoardID        string                 `json:"board_id"`
+	WorkflowID        string                 `json:"workflow_id"`
 	WorkflowStepID string                 `json:"workflow_step_id"`
 	Title          string                 `json:"title"`
 	Description    string                 `json:"description"`
@@ -186,16 +179,16 @@ type UpdateTaskRequest struct {
 	Metadata     map[string]interface{} `json:"metadata,omitempty"`
 }
 
-// CreateBoardRequest contains the data for creating a new board
-type CreateBoardRequest struct {
+// CreateWorkflowRequest contains the data for creating a new workflow
+type CreateWorkflowRequest struct {
 	WorkspaceID        string  `json:"workspace_id"`
 	Name               string  `json:"name"`
 	Description        string  `json:"description"`
 	WorkflowTemplateID *string `json:"workflow_template_id,omitempty"`
 }
 
-// UpdateBoardRequest contains the data for updating a board
-type UpdateBoardRequest struct {
+// UpdateWorkflowRequest contains the data for updating a workflow
+type UpdateWorkflowRequest struct {
 	Name        *string `json:"name,omitempty"`
 	Description *string `json:"description,omitempty"`
 }
@@ -320,6 +313,19 @@ type UpdateRepositoryScriptRequest struct {
 
 // CreateTask creates a new task and publishes a task.created event
 func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*models.Task, error) {
+	// Auto-resolve start step if not provided
+	workflowStepID := req.WorkflowStepID
+	if workflowStepID == "" && req.WorkflowID != "" && s.startStepResolver != nil {
+		resolvedID, err := s.startStepResolver.ResolveStartStep(ctx, req.WorkflowID)
+		if err != nil {
+			s.logger.Warn("failed to resolve start step, using empty",
+				zap.String("workflow_id", req.WorkflowID),
+				zap.Error(err))
+		} else {
+			workflowStepID = resolvedID
+		}
+	}
+
 	state := v1.TaskStateCreated
 	if req.State != nil {
 		state = *req.State
@@ -327,8 +333,8 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*mode
 	task := &models.Task{
 		ID:             uuid.New().String(),
 		WorkspaceID:    req.WorkspaceID,
-		BoardID:        req.BoardID,
-		WorkflowStepID: req.WorkflowStepID,
+		WorkflowID:        req.WorkflowID,
+		WorkflowStepID: workflowStepID,
 		Title:          req.Title,
 		Description:    req.Description,
 		State:          state,
@@ -721,9 +727,9 @@ func (s *Service) performTaskCleanup(
 	return errs
 }
 
-// ListTasks returns all tasks for a board
-func (s *Service) ListTasks(ctx context.Context, boardID string) ([]*models.Task, error) {
-	tasks, err := s.repo.ListTasks(ctx, boardID)
+// ListTasks returns all tasks for a workflow
+func (s *Service) ListTasks(ctx context.Context, workflowID string) ([]*models.Task, error) {
+	tasks, err := s.repo.ListTasks(ctx, workflowID)
 	if err != nil {
 		return nil, err
 	}
@@ -833,13 +839,12 @@ func (s *Service) UpdateSessionReviewStatus(ctx context.Context, sessionID strin
 type ApproveSessionResult struct {
 	Session      *models.TaskSession
 	Task         *models.Task
-	WorkflowStep *WorkflowStep
+	WorkflowStep *wfmodels.WorkflowStep
 }
 
 // ApproveSession approves a session's current step and moves it to the next step.
-// It checks OnApprovalStepID first, then OnCompleteStepID, then falls back to the next step by position.
-// This handles both dedicated review steps (with explicit transition IDs) and simple linear workflows
-// where steps have AutoStartAgent and RequireApproval enabled without explicit transition configuration.
+// It reads the step's on_turn_complete actions to determine where to transition.
+// If no transition actions are configured, it falls back to the next step by position.
 func (s *Service) ApproveSession(ctx context.Context, sessionID string) (*ApproveSessionResult, error) {
 	// Update review status to approved
 	if err := s.repo.UpdateSessionReviewStatus(ctx, sessionID, "approved"); err != nil {
@@ -863,30 +868,43 @@ func (s *Service) ApproveSession(ctx context.Context, sessionID string) (*Approv
 				zap.String("workflow_step_id", *session.WorkflowStepID),
 				zap.Error(err))
 		} else {
-			// Determine the target step:
-			// 1. Prefer OnApprovalStepID (explicit approval transition)
-			// 2. Fall back to OnCompleteStepID (explicit completion transition)
-			// 3. Fall back to next step by position (for simple linear workflows)
+			// Determine the target step from on_turn_complete actions
 			var newStepID string
-			if step.OnApprovalStepID != nil && *step.OnApprovalStepID != "" {
-				newStepID = *step.OnApprovalStepID
-			} else if step.OnCompleteStepID != nil && *step.OnCompleteStepID != "" {
-				newStepID = *step.OnCompleteStepID
-			} else {
-				// Try to find the next step by position
-				nextStep, err := s.workflowStepGetter.GetNextStepByPosition(ctx, step.BoardID, step.Position)
+			for _, action := range step.Events.OnTurnComplete {
+				switch action.Type {
+				case "move_to_next":
+					nextStep, err := s.workflowStepGetter.GetNextStepByPosition(ctx, step.WorkflowID, step.Position)
+					if err != nil {
+						s.logger.Warn("failed to get next step by position",
+							zap.String("workflow_id", step.WorkflowID),
+							zap.Int("current_position", step.Position),
+							zap.Error(err))
+					} else if nextStep != nil {
+						newStepID = nextStep.ID
+					}
+				case "move_to_step":
+					if stepID, ok := action.Config["step_id"].(string); ok && stepID != "" {
+						newStepID = stepID
+					}
+				}
+				if newStepID != "" {
+					break
+				}
+			}
+
+			// Fall back to next step by position if no transition actions found
+			if newStepID == "" && len(step.Events.OnTurnComplete) == 0 {
+				nextStep, err := s.workflowStepGetter.GetNextStepByPosition(ctx, step.WorkflowID, step.Position)
 				if err != nil {
-					s.logger.Warn("failed to get next step by position",
-						zap.String("board_id", step.BoardID),
+					s.logger.Warn("failed to get next step by position for fallback",
+						zap.String("workflow_id", step.WorkflowID),
 						zap.Int("current_position", step.Position),
 						zap.Error(err))
 				} else if nextStep != nil {
 					newStepID = nextStep.ID
-					s.logger.Info("using next step by position for approval transition",
+					s.logger.Info("using next step by position for approval transition (fallback)",
 						zap.String("current_step", step.Name),
-						zap.String("next_step", nextStep.Name),
-						zap.Int("current_position", step.Position),
-						zap.Int("next_position", nextStep.Position))
+						zap.String("next_step", nextStep.Name))
 				}
 			}
 
@@ -1007,35 +1025,29 @@ func (s *Service) UpdateTaskMetadata(ctx context.Context, id string, metadata ma
 // MoveTaskResult contains the result of a MoveTask operation.
 type MoveTaskResult struct {
 	Task         *models.Task
-	WorkflowStep *WorkflowStep
+	WorkflowStep *wfmodels.WorkflowStep
 }
 
 // MoveTask moves a task to a different workflow step and position
-func (s *Service) MoveTask(ctx context.Context, id string, boardID string, workflowStepID string, position int) (*MoveTaskResult, error) {
+func (s *Service) MoveTask(ctx context.Context, id string, workflowID string, workflowStepID string, position int) (*MoveTaskResult, error) {
 	task, err := s.repo.GetTask(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 
-	// Check if task's primary session is in a review step with pending approval
+	// Check if task's primary session is in a step with pending approval
 	// If so, prevent moving forward - user must use Approve button or send a message
 	if task.WorkflowStepID != workflowStepID {
 		primarySession, err := s.repo.GetPrimarySessionByTaskID(ctx, id)
 		if err == nil && primarySession != nil {
 			if primarySession.ReviewStatus != nil && *primarySession.ReviewStatus == "pending" {
-				// Check if current step requires approval
-				if s.workflowStepGetter != nil && primarySession.WorkflowStepID != nil {
-					currentStep, err := s.workflowStepGetter.GetStep(ctx, *primarySession.WorkflowStepID)
-					if err == nil && currentStep.RequireApproval {
-						return nil, fmt.Errorf("task is pending approval - use Approve button to proceed or send a message to request changes")
-					}
-				}
+				return nil, fmt.Errorf("task is pending approval - use Approve button to proceed or send a message to request changes")
 			}
 		}
 	}
 
 	oldState := task.State
-	task.BoardID = boardID
+	task.WorkflowID = workflowID
 	task.WorkflowStepID = workflowStepID
 	task.Position = position
 	task.UpdatedAt = time.Now().UTC()
@@ -1078,7 +1090,7 @@ func (s *Service) MoveTask(ctx context.Context, id string, boardID string, workf
 
 	s.logger.Info("task moved",
 		zap.String("task_id", id),
-		zap.String("board_id", boardID),
+		zap.String("workflow_id", workflowID),
 		zap.String("workflow_step_id", workflowStepID),
 		zap.Int("position", position))
 
@@ -1098,6 +1110,80 @@ func (s *Service) MoveTask(ctx context.Context, id string, boardID string, workf
 	}
 
 	return result, nil
+}
+
+// CountTasksByWorkflow returns the number of tasks in a workflow
+func (s *Service) CountTasksByWorkflow(ctx context.Context, workflowID string) (int, error) {
+	return s.repo.CountTasksByWorkflow(ctx, workflowID)
+}
+
+// CountTasksByWorkflowStep returns the number of tasks in a workflow step
+func (s *Service) CountTasksByWorkflowStep(ctx context.Context, stepID string) (int, error) {
+	return s.repo.CountTasksByWorkflowStep(ctx, stepID)
+}
+
+// BulkMoveTasksResult contains the result of a BulkMoveTasks operation.
+type BulkMoveTasksResult struct {
+	MovedCount int
+}
+
+// BulkMoveTasks moves all tasks from a source workflow/step to a target workflow/step.
+// If sourceStepID is empty, all tasks in the source workflow are moved.
+func (s *Service) BulkMoveTasks(ctx context.Context, sourceWorkflowID, sourceStepID, targetWorkflowID, targetStepID string) (*BulkMoveTasksResult, error) {
+	// Get the tasks to move
+	var tasks []*models.Task
+	var err error
+	if sourceStepID != "" {
+		tasks, err = s.repo.ListTasksByWorkflowStep(ctx, sourceStepID)
+	} else {
+		tasks, err = s.repo.ListTasks(ctx, sourceWorkflowID)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to list tasks for bulk move: %w", err)
+	}
+
+	if len(tasks) == 0 {
+		return &BulkMoveTasksResult{MovedCount: 0}, nil
+	}
+
+	now := time.Now().UTC()
+	for i, task := range tasks {
+		task.WorkflowID = targetWorkflowID
+		task.WorkflowStepID = targetStepID
+		task.Position = i
+		task.UpdatedAt = now
+
+		if err := s.repo.UpdateTask(ctx, task); err != nil {
+			s.logger.Error("failed to move task in bulk move",
+				zap.String("task_id", task.ID),
+				zap.Error(err))
+			return nil, fmt.Errorf("failed to move task %s: %w", task.ID, err)
+		}
+
+		// Update active session's workflow_step_id
+		activeSession, err := s.repo.GetActiveTaskSessionByTaskID(ctx, task.ID)
+		if err == nil && activeSession != nil {
+			if activeSession.WorkflowStepID == nil || *activeSession.WorkflowStepID != targetStepID {
+				if err := s.repo.UpdateSessionWorkflowStep(ctx, activeSession.ID, targetStepID); err != nil {
+					s.logger.Warn("failed to update session workflow step during bulk move",
+						zap.String("task_id", task.ID),
+						zap.String("session_id", activeSession.ID),
+						zap.Error(err))
+				}
+			}
+		}
+
+		s.publishTaskEvent(ctx, events.TaskUpdated, task, nil)
+	}
+
+	s.logger.Info("bulk moved tasks",
+		zap.String("source_workflow_id", sourceWorkflowID),
+		zap.String("source_step_id", sourceStepID),
+		zap.String("target_workflow_id", targetWorkflowID),
+		zap.String("target_step_id", targetStepID),
+		zap.Int("moved_count", len(tasks)))
+
+	return &BulkMoveTasksResult{MovedCount: len(tasks)}, nil
 }
 
 // Workspace operations
@@ -1194,11 +1280,11 @@ func (s *Service) ListWorkspaces(ctx context.Context) ([]*models.Workspace, erro
 	return s.repo.ListWorkspaces(ctx)
 }
 
-// Board operations
+// Workflow operations
 
-// CreateBoard creates a new board
-func (s *Service) CreateBoard(ctx context.Context, req *CreateBoardRequest) (*models.Board, error) {
-	board := &models.Board{
+// CreateWorkflow creates a new workflow
+func (s *Service) CreateWorkflow(ctx context.Context, req *CreateWorkflowRequest) (*models.Workflow, error) {
+	workflow := &models.Workflow{
 		ID:                 uuid.New().String(),
 		WorkspaceID:        req.WorkspaceID,
 		Name:               req.Name,
@@ -1206,76 +1292,76 @@ func (s *Service) CreateBoard(ctx context.Context, req *CreateBoardRequest) (*mo
 		WorkflowTemplateID: req.WorkflowTemplateID,
 	}
 
-	if err := s.repo.CreateBoard(ctx, board); err != nil {
-		s.logger.Error("failed to create board", zap.Error(err))
+	if err := s.repo.CreateWorkflow(ctx, workflow); err != nil {
+		s.logger.Error("failed to create workflow", zap.Error(err))
 		return nil, err
 	}
 
 	// Create workflow steps from template if specified
 	if req.WorkflowTemplateID != nil && *req.WorkflowTemplateID != "" && s.workflowStepCreator != nil {
-		if err := s.workflowStepCreator.CreateStepsFromTemplate(ctx, board.ID, *req.WorkflowTemplateID); err != nil {
+		if err := s.workflowStepCreator.CreateStepsFromTemplate(ctx, workflow.ID, *req.WorkflowTemplateID); err != nil {
 			s.logger.Error("failed to create workflow steps from template",
-				zap.String("board_id", board.ID),
+				zap.String("workflow_id", workflow.ID),
 				zap.String("template_id", *req.WorkflowTemplateID),
 				zap.Error(err))
-			// Don't fail board creation, just log the error
+			// Don't fail workflow creation, just log the error
 		}
 	}
 
-	s.publishBoardEvent(ctx, events.BoardCreated, board)
-	s.logger.Info("board created", zap.String("board_id", board.ID), zap.String("name", board.Name))
-	return board, nil
+	s.publishWorkflowEvent(ctx, events.WorkflowCreated, workflow)
+	s.logger.Info("workflow created", zap.String("workflow_id", workflow.ID), zap.String("name", workflow.Name))
+	return workflow, nil
 }
 
-// GetBoard retrieves a board by ID
-func (s *Service) GetBoard(ctx context.Context, id string) (*models.Board, error) {
-	return s.repo.GetBoard(ctx, id)
+// GetWorkflow retrieves a workflow by ID
+func (s *Service) GetWorkflow(ctx context.Context, id string) (*models.Workflow, error) {
+	return s.repo.GetWorkflow(ctx, id)
 }
 
-// UpdateBoard updates an existing board
-func (s *Service) UpdateBoard(ctx context.Context, id string, req *UpdateBoardRequest) (*models.Board, error) {
-	board, err := s.repo.GetBoard(ctx, id)
+// UpdateWorkflow updates an existing workflow
+func (s *Service) UpdateWorkflow(ctx context.Context, id string, req *UpdateWorkflowRequest) (*models.Workflow, error) {
+	workflow, err := s.repo.GetWorkflow(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 
 	if req.Name != nil {
-		board.Name = *req.Name
+		workflow.Name = *req.Name
 	}
 	if req.Description != nil {
-		board.Description = *req.Description
+		workflow.Description = *req.Description
 	}
-	board.UpdatedAt = time.Now().UTC()
+	workflow.UpdatedAt = time.Now().UTC()
 
-	if err := s.repo.UpdateBoard(ctx, board); err != nil {
-		s.logger.Error("failed to update board", zap.String("board_id", id), zap.Error(err))
+	if err := s.repo.UpdateWorkflow(ctx, workflow); err != nil {
+		s.logger.Error("failed to update workflow", zap.String("workflow_id", id), zap.Error(err))
 		return nil, err
 	}
 
-	s.publishBoardEvent(ctx, events.BoardUpdated, board)
-	s.logger.Info("board updated", zap.String("board_id", board.ID))
-	return board, nil
+	s.publishWorkflowEvent(ctx, events.WorkflowUpdated, workflow)
+	s.logger.Info("workflow updated", zap.String("workflow_id", workflow.ID))
+	return workflow, nil
 }
 
-// DeleteBoard deletes a board
-func (s *Service) DeleteBoard(ctx context.Context, id string) error {
-	board, err := s.repo.GetBoard(ctx, id)
+// DeleteWorkflow deletes a workflow
+func (s *Service) DeleteWorkflow(ctx context.Context, id string) error {
+	workflow, err := s.repo.GetWorkflow(ctx, id)
 	if err != nil {
 		return err
 	}
-	if err := s.repo.DeleteBoard(ctx, id); err != nil {
-		s.logger.Error("failed to delete board", zap.String("board_id", id), zap.Error(err))
+	if err := s.repo.DeleteWorkflow(ctx, id); err != nil {
+		s.logger.Error("failed to delete workflow", zap.String("workflow_id", id), zap.Error(err))
 		return err
 	}
 
-	s.publishBoardEvent(ctx, events.BoardDeleted, board)
-	s.logger.Info("board deleted", zap.String("board_id", id))
+	s.publishWorkflowEvent(ctx, events.WorkflowDeleted, workflow)
+	s.logger.Info("workflow deleted", zap.String("workflow_id", id))
 	return nil
 }
 
-// ListBoards returns all boards for a workspace (or all if empty)
-func (s *Service) ListBoards(ctx context.Context, workspaceID string) ([]*models.Board, error) {
-	return s.repo.ListBoards(ctx, workspaceID)
+// ListWorkflows returns all workflows for a workspace (or all if empty)
+func (s *Service) ListWorkflows(ctx context.Context, workspaceID string) ([]*models.Workflow, error) {
+	return s.repo.ListWorkflows(ctx, workspaceID)
 }
 
 // Repository operations
@@ -1676,7 +1762,7 @@ func (s *Service) publishTaskEvent(ctx context.Context, eventType string, task *
 
 	data := map[string]interface{}{
 		"task_id":          task.ID,
-		"board_id":         task.BoardID,
+		"workflow_id":         task.WorkflowID,
 		"workflow_step_id": task.WorkflowStepID,
 		"title":            task.Title,
 		"description":      task.Description,
@@ -1754,25 +1840,25 @@ func (s *Service) publishWorkspaceEvent(ctx context.Context, eventType string, w
 	}
 }
 
-func (s *Service) publishBoardEvent(ctx context.Context, eventType string, board *models.Board) {
-	if s.eventBus == nil || board == nil {
+func (s *Service) publishWorkflowEvent(ctx context.Context, eventType string, workflow *models.Workflow) {
+	if s.eventBus == nil || workflow == nil {
 		return
 	}
 
 	data := map[string]interface{}{
-		"id":           board.ID,
-		"workspace_id": board.WorkspaceID,
-		"name":         board.Name,
-		"description":  board.Description,
-		"created_at":   board.CreatedAt.Format(time.RFC3339),
-		"updated_at":   board.UpdatedAt.Format(time.RFC3339),
+		"id":           workflow.ID,
+		"workspace_id": workflow.WorkspaceID,
+		"name":         workflow.Name,
+		"description":  workflow.Description,
+		"created_at":   workflow.CreatedAt.Format(time.RFC3339),
+		"updated_at":   workflow.UpdatedAt.Format(time.RFC3339),
 	}
 
 	event := bus.NewEvent(eventType, "task-service", data)
 	if err := s.eventBus.Publish(ctx, eventType, event); err != nil {
-		s.logger.Error("failed to publish board event",
+		s.logger.Error("failed to publish workflow event",
 			zap.String("event_type", eventType),
-			zap.String("board_id", board.ID),
+			zap.String("workflow_id", workflow.ID),
 			zap.Error(err))
 	}
 }

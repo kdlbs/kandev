@@ -1,12 +1,12 @@
 import {
   listWorkspacesAction,
-  listBoardsAction,
+  listWorkflowsAction,
   listTasksByWorkspaceAction,
   listRepositoriesAction,
   listWorkflowStepsAction,
 } from '@/app/actions/workspaces';
 import { TasksPageClient } from './tasks-page-client';
-import type { Board, Task, WorkflowStep, Repository, Workspace } from '@/lib/types/http';
+import type { Workflow, Task, WorkflowStep, Repository, Workspace } from '@/lib/types/http';
 
 export default async function TasksPage({
   searchParams,
@@ -16,7 +16,7 @@ export default async function TasksPage({
   const { workspace: workspaceParam } = await searchParams;
 
   let workspaces: Workspace[] = [];
-  let boards: Board[] = [];
+  let workflows: Workflow[] = [];
   let steps: WorkflowStep[] = [];
   let repositories: Repository[] = [];
   let tasks: Task[] = [];
@@ -34,20 +34,20 @@ export default async function TasksPage({
 
     if (workspaceId) {
       // Fetch all data in parallel
-      const [boardsResponse, repositoriesResponse, tasksResponse] = await Promise.all([
-        listBoardsAction(workspaceId),
+      const [workflowsResponse, repositoriesResponse, tasksResponse] = await Promise.all([
+        listWorkflowsAction(workspaceId),
         listRepositoriesAction(workspaceId),
         listTasksByWorkspaceAction(workspaceId, 1, 25),
       ]);
 
-      boards = boardsResponse.boards;
+      workflows = workflowsResponse.workflows;
       repositories = repositoriesResponse.repositories;
       tasks = tasksResponse.tasks;
       total = tasksResponse.total;
 
-      // Fetch workflow steps for each board
+      // Fetch workflow steps for each workflow
       const stepsResponses = await Promise.all(
-        boards.map((board) => listWorkflowStepsAction(board.id))
+        workflows.map((workflow) => listWorkflowStepsAction(workflow.id))
       );
       steps = stepsResponses.flatMap((r) => r.steps);
     }
@@ -59,7 +59,7 @@ export default async function TasksPage({
     <TasksPageClient
       workspaces={workspaces}
       initialWorkspaceId={workspaceId}
-      initialBoards={boards}
+      initialWorkflows={workflows}
       initialSteps={steps}
       initialRepositories={repositories}
       initialTasks={tasks}

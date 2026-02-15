@@ -19,22 +19,22 @@ import {
 import { IconAdjustmentsHorizontal } from '@tabler/icons-react';
 import { useKanbanDisplaySettings } from '@/hooks/use-kanban-display-settings';
 import type { Workspace, Repository } from '@/lib/types/http';
-import type { BoardState } from '@/lib/state/slices';
+import type { WorkflowsState } from '@/lib/state/slices';
 import { Badge } from '@kandev/ui/badge';
 
 export function KanbanDisplayDropdown() {
   const {
     workspaces,
-    boards,
+    workflows,
     activeWorkspaceId,
-    activeBoardId,
+    activeWorkflowId,
     repositories,
     repositoriesLoading,
     allRepositoriesSelected,
     selectedRepositoryId,
     enablePreviewOnClick,
     onWorkspaceChange,
-    onBoardChange,
+    onWorkflowChange,
     onRepositoryChange,
     onTogglePreviewOnClick,
   } = useKanbanDisplaySettings();
@@ -52,12 +52,12 @@ export function KanbanDisplayDropdown() {
       <DropdownMenuContent align="end" className="w-[280px] p-3">
         <div className="space-y-3">
           <div className="space-y-1.5">
-            <DropdownMenuLabel className="px-0">Workspace</DropdownMenuLabel>
+            <DropdownMenuLabel className="px-0 text-foreground">Workspace</DropdownMenuLabel>
             <Select
               value={activeWorkspaceId ?? ''}
               onValueChange={(value) => onWorkspaceChange(value || null)}
             >
-              <SelectTrigger className="w-full">
+              <SelectTrigger className="w-full border-border">
                 <SelectValue placeholder="Select workspace" />
               </SelectTrigger>
               <SelectContent>
@@ -71,18 +71,19 @@ export function KanbanDisplayDropdown() {
           </div>
           <DropdownMenuSeparator />
           <div className="space-y-1.5">
-            <DropdownMenuLabel className="px-0">Board</DropdownMenuLabel>
+            <DropdownMenuLabel className="px-0 text-foreground">Workflow</DropdownMenuLabel>
             <Select
-              value={activeBoardId ?? ''}
-              onValueChange={(value) => onBoardChange(value || null)}
+              value={activeWorkflowId ?? 'all'}
+              onValueChange={(value) => onWorkflowChange(value === 'all' ? null : value)}
             >
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Select board" />
+              <SelectTrigger className="w-full border-border">
+                <SelectValue placeholder="Select workflow" />
               </SelectTrigger>
               <SelectContent>
-                {boards.map((board: BoardState['items'][number]) => (
-                  <SelectItem key={board.id} value={board.id}>
-                    {board.name}
+                <SelectItem value="all">All Workflows</SelectItem>
+                {workflows.map((workflow: WorkflowsState['items'][number]) => (
+                  <SelectItem key={workflow.id} value={workflow.id}>
+                    {workflow.name}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -90,13 +91,13 @@ export function KanbanDisplayDropdown() {
           </div>
           <DropdownMenuSeparator />
           <div className="space-y-1.5">
-            <DropdownMenuLabel className="px-0">Repository</DropdownMenuLabel>
+            <DropdownMenuLabel className="px-0 text-foreground">Repository</DropdownMenuLabel>
             <Select
               value={repositoryValue}
               onValueChange={(value) => onRepositoryChange(value as string | 'all')}
               disabled={repositories.length === 0}
             >
-              <SelectTrigger className="w-full">
+              <SelectTrigger className="w-full border-border">
                 <SelectValue
                   placeholder={
                     repositoriesLoading
@@ -119,7 +120,7 @@ export function KanbanDisplayDropdown() {
           </div>
           <DropdownMenuSeparator />
           <div className="space-y-1.5">
-            <DropdownMenuLabel className="px-0">Preview Panel</DropdownMenuLabel>
+            <DropdownMenuLabel className="px-0 text-foreground">Preview Panel</DropdownMenuLabel>
             <label className="flex items-center gap-2 cursor-pointer">
               <Checkbox
                 checked={enablePreviewOnClick ?? false}
@@ -127,7 +128,7 @@ export function KanbanDisplayDropdown() {
                   onTogglePreviewOnClick?.(!!checked);
                 }}
               />
-              <span className="text-sm">
+              <span className="text-sm text-foreground">
                 Open preview on click {" "}
                 <Badge variant="secondary" className="mr-1">beta</Badge>
               </span>

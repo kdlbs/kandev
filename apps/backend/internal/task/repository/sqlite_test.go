@@ -78,22 +78,22 @@ func TestSQLiteRepository_SeedsDefaultWorkspace(t *testing.T) {
 		t.Errorf("expected Default Workspace, got %s", workspaces[0].Name)
 	}
 
-	boards, err := repo.ListBoards(ctx, workspaces[0].ID)
+	workflows, err := repo.ListWorkflows(ctx, workspaces[0].ID)
 	if err != nil {
-		t.Fatalf("failed to list boards: %v", err)
+		t.Fatalf("failed to list workflows: %v", err)
 	}
-	if len(boards) != 1 {
-		t.Fatalf("expected 1 board, got %d", len(boards))
+	if len(workflows) != 1 {
+		t.Fatalf("expected 1 workflow, got %d", len(workflows))
 	}
-	if boards[0].Name != "Development" {
-		t.Errorf("expected Development board, got %s", boards[0].Name)
+	if workflows[0].Name != "Development" {
+		t.Errorf("expected Development workflow, got %s", workflows[0].Name)
 	}
 	// Note: workflow steps are now managed by the workflow repository, not the task repository
 }
 
-// Board CRUD tests
+// Workflow CRUD tests
 
-func TestSQLiteRepository_BoardCRUD(t *testing.T) {
+func TestSQLiteRepository_WorkflowCRUD(t *testing.T) {
 	repo, cleanup := createTestSQLiteRepo(t)
 	defer cleanup()
 	ctx := context.Background()
@@ -104,68 +104,68 @@ func TestSQLiteRepository_BoardCRUD(t *testing.T) {
 	}
 
 	// Create
-	board := &models.Board{WorkspaceID: workspace.ID, Name: "Test Board", Description: "A test board"}
-	if err := repo.CreateBoard(ctx, board); err != nil {
-		t.Fatalf("failed to create board: %v", err)
+	workflow := &models.Workflow{WorkspaceID: workspace.ID, Name: "Test Workflow", Description: "A test workflow"}
+	if err := repo.CreateWorkflow(ctx, workflow); err != nil {
+		t.Fatalf("failed to create workflow: %v", err)
 	}
-	if board.ID == "" {
-		t.Error("expected board ID to be set")
+	if workflow.ID == "" {
+		t.Error("expected workflow ID to be set")
 	}
-	if board.CreatedAt.IsZero() {
+	if workflow.CreatedAt.IsZero() {
 		t.Error("expected CreatedAt to be set")
 	}
 
 	// Get
-	retrieved, err := repo.GetBoard(ctx, board.ID)
+	retrieved, err := repo.GetWorkflow(ctx, workflow.ID)
 	if err != nil {
-		t.Fatalf("failed to get board: %v", err)
+		t.Fatalf("failed to get workflow: %v", err)
 	}
-	if retrieved.Name != "Test Board" {
-		t.Errorf("expected name 'Test Board', got %s", retrieved.Name)
+	if retrieved.Name != "Test Workflow" {
+		t.Errorf("expected name 'Test Workflow', got %s", retrieved.Name)
 	}
 
 	// Update
-	board.Name = "Updated Name"
-	if err := repo.UpdateBoard(ctx, board); err != nil {
-		t.Fatalf("failed to update board: %v", err)
+	workflow.Name = "Updated Name"
+	if err := repo.UpdateWorkflow(ctx, workflow); err != nil {
+		t.Fatalf("failed to update workflow: %v", err)
 	}
-	retrieved, _ = repo.GetBoard(ctx, board.ID)
+	retrieved, _ = repo.GetWorkflow(ctx, workflow.ID)
 	if retrieved.Name != "Updated Name" {
 		t.Errorf("expected name 'Updated Name', got %s", retrieved.Name)
 	}
 
 	// Delete
-	if err := repo.DeleteBoard(ctx, board.ID); err != nil {
-		t.Fatalf("failed to delete board: %v", err)
+	if err := repo.DeleteWorkflow(ctx, workflow.ID); err != nil {
+		t.Fatalf("failed to delete workflow: %v", err)
 	}
-	_, err = repo.GetBoard(ctx, board.ID)
+	_, err = repo.GetWorkflow(ctx, workflow.ID)
 	if err == nil {
-		t.Error("expected board to be deleted")
+		t.Error("expected workflow to be deleted")
 	}
 }
 
-func TestSQLiteRepository_BoardNotFound(t *testing.T) {
+func TestSQLiteRepository_WorkflowNotFound(t *testing.T) {
 	repo, cleanup := createTestSQLiteRepo(t)
 	defer cleanup()
 	ctx := context.Background()
 
-	_, err := repo.GetBoard(ctx, "nonexistent")
+	_, err := repo.GetWorkflow(ctx, "nonexistent")
 	if err == nil {
-		t.Error("expected error for nonexistent board")
+		t.Error("expected error for nonexistent workflow")
 	}
 
-	err = repo.UpdateBoard(ctx, &models.Board{ID: "nonexistent", Name: "Test"})
+	err = repo.UpdateWorkflow(ctx, &models.Workflow{ID: "nonexistent", Name: "Test"})
 	if err == nil {
-		t.Error("expected error for updating nonexistent board")
+		t.Error("expected error for updating nonexistent workflow")
 	}
 
-	err = repo.DeleteBoard(ctx, "nonexistent")
+	err = repo.DeleteWorkflow(ctx, "nonexistent")
 	if err == nil {
-		t.Error("expected error for deleting nonexistent board")
+		t.Error("expected error for deleting nonexistent workflow")
 	}
 }
 
-func TestSQLiteRepository_ListBoards(t *testing.T) {
+func TestSQLiteRepository_ListWorkflows(t *testing.T) {
 	repo, cleanup := createTestSQLiteRepo(t)
 	defer cleanup()
 	ctx := context.Background()
@@ -173,16 +173,16 @@ func TestSQLiteRepository_ListBoards(t *testing.T) {
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace 1"})
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-2", Name: "Workspace 2"})
 
-	_ = repo.CreateBoard(ctx, &models.Board{ID: "board-1", WorkspaceID: "ws-1", Name: "Board 1"})
-	_ = repo.CreateBoard(ctx, &models.Board{ID: "board-2", WorkspaceID: "ws-1", Name: "Board 2"})
-	_ = repo.CreateBoard(ctx, &models.Board{ID: "board-3", WorkspaceID: "ws-2", Name: "Board 3"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Workflow 1"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-2", WorkspaceID: "ws-1", Name: "Workflow 2"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-3", WorkspaceID: "ws-2", Name: "Workflow 3"})
 
-	boards, err := repo.ListBoards(ctx, "ws-1")
+	workflows, err := repo.ListWorkflows(ctx, "ws-1")
 	if err != nil {
-		t.Fatalf("failed to list boards: %v", err)
+		t.Fatalf("failed to list workflows: %v", err)
 	}
-	if len(boards) != 2 {
-		t.Errorf("expected 2 boards, got %d", len(boards))
+	if len(workflows) != 2 {
+		t.Errorf("expected 2 workflows, got %d", len(workflows))
 	}
 }
 
@@ -193,15 +193,15 @@ func TestSQLiteRepository_TaskCRUD(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 
-	// Create workspace and board for foreign keys
+	// Create workspace and workflow for foreign keys
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
-	board := &models.Board{ID: "board-123", WorkspaceID: "ws-1", Name: "Test Board"}
-	_ = repo.CreateBoard(ctx, board)
+	workflow := &models.Workflow{ID: "wf-123", WorkspaceID: "ws-1", Name: "Test Workflow"}
+	_ = repo.CreateWorkflow(ctx, workflow)
 
 	// Create task (workflow steps are managed by workflow repository)
 	task := &models.Task{
 		WorkspaceID:    "ws-1",
-		BoardID:        "board-123",
+		WorkflowID:        "wf-123",
 		WorkflowStepID: "step-123",
 		Title:          "Test Task",
 		Description:    "A test task",
@@ -274,11 +274,11 @@ func TestSQLiteRepository_UpdateTaskState(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 
-	// Create workspace, board, and task
+	// Create workspace, workflow, and task
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
-	board := &models.Board{ID: "board-123", WorkspaceID: "ws-1", Name: "Test Board"}
-	_ = repo.CreateBoard(ctx, board)
-	task := &models.Task{ID: "task-123", WorkspaceID: "ws-1", BoardID: "board-123", WorkflowStepID: "step-123", Title: "Test", State: v1.TaskStateTODO}
+	workflow := &models.Workflow{ID: "wf-123", WorkspaceID: "ws-1", Name: "Test Workflow"}
+	_ = repo.CreateWorkflow(ctx, workflow)
+	task := &models.Task{ID: "task-123", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Test", State: v1.TaskStateTODO}
 	_ = repo.CreateTask(ctx, task)
 
 	err := repo.UpdateTaskState(ctx, "task-123", v1.TaskStateInProgress)
@@ -308,15 +308,15 @@ func TestSQLiteRepository_ListTasks(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 
-	// Create workspace and board
+	// Create workspace and workflow
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
-	board := &models.Board{ID: "board-123", WorkspaceID: "ws-1", Name: "Test Board"}
-	_ = repo.CreateBoard(ctx, board)
+	workflow := &models.Workflow{ID: "wf-123", WorkspaceID: "ws-1", Name: "Test Workflow"}
+	_ = repo.CreateWorkflow(ctx, workflow)
 
-	_ = repo.CreateTask(ctx, &models.Task{ID: "task-1", WorkspaceID: "ws-1", BoardID: "board-123", WorkflowStepID: "step-123", Title: "Task 1"})
-	_ = repo.CreateTask(ctx, &models.Task{ID: "task-2", WorkspaceID: "ws-1", BoardID: "board-123", WorkflowStepID: "step-123", Title: "Task 2"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-1", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Task 1"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-2", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Task 2"})
 
-	tasks, err := repo.ListTasks(ctx, "board-123")
+	tasks, err := repo.ListTasks(ctx, "wf-123")
 	if err != nil {
 		t.Fatalf("failed to list tasks: %v", err)
 	}
@@ -330,15 +330,15 @@ func TestSQLiteRepository_ListTasksByWorkflowStep(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 
-	// Create workspace and board
+	// Create workspace and workflow
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
-	board := &models.Board{ID: "board-123", WorkspaceID: "ws-1", Name: "Test Board"}
-	_ = repo.CreateBoard(ctx, board)
+	workflow := &models.Workflow{ID: "wf-123", WorkspaceID: "ws-1", Name: "Test Workflow"}
+	_ = repo.CreateWorkflow(ctx, workflow)
 
 	// Tasks with different workflow steps
-	_ = repo.CreateTask(ctx, &models.Task{ID: "task-1", WorkspaceID: "ws-1", BoardID: "board-123", WorkflowStepID: "step-1", Title: "Task 1"})
-	_ = repo.CreateTask(ctx, &models.Task{ID: "task-2", WorkspaceID: "ws-1", BoardID: "board-123", WorkflowStepID: "step-1", Title: "Task 2"})
-	_ = repo.CreateTask(ctx, &models.Task{ID: "task-3", WorkspaceID: "ws-1", BoardID: "board-123", WorkflowStepID: "step-2", Title: "Task 3"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-1", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-1", Title: "Task 1"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-2", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-1", Title: "Task 2"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-3", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-2", Title: "Task 3"})
 
 	tasks, err := repo.ListTasksByWorkflowStep(ctx, "step-1")
 	if err != nil {
@@ -354,20 +354,20 @@ func TestSQLiteRepository_ListTasksByWorkspace(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 
-	// Create workspaces and board
+	// Create workspaces and workflow
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace 1"})
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-2", Name: "Workspace 2"})
-	board := &models.Board{ID: "board-123", WorkspaceID: "ws-1", Name: "Test Board"}
-	_ = repo.CreateBoard(ctx, board)
+	workflow := &models.Workflow{ID: "wf-123", WorkspaceID: "ws-1", Name: "Test Workflow"}
+	_ = repo.CreateWorkflow(ctx, workflow)
 
 	// Create tasks in workspace 1
-	_ = repo.CreateTask(ctx, &models.Task{ID: "task-1", WorkspaceID: "ws-1", BoardID: "board-123", WorkflowStepID: "step-1", Title: "Task One"})
-	_ = repo.CreateTask(ctx, &models.Task{ID: "task-2", WorkspaceID: "ws-1", BoardID: "board-123", WorkflowStepID: "step-1", Title: "Task Two"})
-	_ = repo.CreateTask(ctx, &models.Task{ID: "task-3", WorkspaceID: "ws-1", BoardID: "board-123", WorkflowStepID: "step-1", Title: "Task Three"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-1", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-1", Title: "Task One"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-2", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-1", Title: "Task Two"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-3", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-1", Title: "Task Three"})
 	// Create task in workspace 2
-	board2 := &models.Board{ID: "board-456", WorkspaceID: "ws-2", Name: "Test Board 2"}
-	_ = repo.CreateBoard(ctx, board2)
-	_ = repo.CreateTask(ctx, &models.Task{ID: "task-4", WorkspaceID: "ws-2", BoardID: "board-456", WorkflowStepID: "step-2", Title: "Task Four"})
+	workflow2 := &models.Workflow{ID: "wf-456", WorkspaceID: "ws-2", Name: "Test Workflow 2"}
+	_ = repo.CreateWorkflow(ctx, workflow2)
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-4", WorkspaceID: "ws-2", WorkflowID: "wf-456", WorkflowStepID: "step-2", Title: "Task Four"})
 
 	// Test basic listing without search
 	tasks, total, err := repo.ListTasksByWorkspace(ctx, "ws-1", "", 1, 10)
@@ -408,17 +408,17 @@ func TestSQLiteRepository_ListTasksByWorkspaceWithSearch(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 
-	// Create workspace, board, and repository
+	// Create workspace, workflow, and repository
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace 1"})
-	board := &models.Board{ID: "board-123", WorkspaceID: "ws-1", Name: "Test Board"}
-	_ = repo.CreateBoard(ctx, board)
+	workflow := &models.Workflow{ID: "wf-123", WorkspaceID: "ws-1", Name: "Test Workflow"}
+	_ = repo.CreateWorkflow(ctx, workflow)
 	repository := &models.Repository{ID: "repo-1", WorkspaceID: "ws-1", Name: "MyProject", LocalPath: "/home/user/projects/myproject"}
 	_ = repo.CreateRepository(ctx, repository)
 
 	// Create tasks with different titles and descriptions
-	_ = repo.CreateTask(ctx, &models.Task{ID: "task-1", WorkspaceID: "ws-1", BoardID: "board-123", WorkflowStepID: "step-1", Title: "Fix authentication bug", Description: "Users cannot login"})
-	_ = repo.CreateTask(ctx, &models.Task{ID: "task-2", WorkspaceID: "ws-1", BoardID: "board-123", WorkflowStepID: "step-1", Title: "Add new feature", Description: "Implement dark mode"})
-	_ = repo.CreateTask(ctx, &models.Task{ID: "task-3", WorkspaceID: "ws-1", BoardID: "board-123", WorkflowStepID: "step-1", Title: "Refactor codebase", Description: "Clean up authentication module"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-1", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-1", Title: "Fix authentication bug", Description: "Users cannot login"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-2", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-1", Title: "Add new feature", Description: "Implement dark mode"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-3", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-1", Title: "Refactor codebase", Description: "Clean up authentication module"})
 
 	// Link task-1 to the repository
 	_ = repo.CreateTaskRepository(ctx, &models.TaskRepository{ID: "tr-1", TaskID: "task-1", RepositoryID: "repo-1", BaseBranch: "main"})
@@ -494,8 +494,8 @@ func TestSQLiteRepository_Persistence(t *testing.T) {
 	}
 
 	_ = repo1.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
-	board := &models.Board{ID: "persist-board", WorkspaceID: "ws-1", Name: "Persistent Board"}
-	_ = repo1.CreateBoard(ctx, board)
+	workflow := &models.Workflow{ID: "persist-wf", WorkspaceID: "ws-1", Name: "Persistent Workflow"}
+	_ = repo1.CreateWorkflow(ctx, workflow)
 	if err := repo1.Close(); err != nil {
 		t.Fatalf("failed to close repo: %v", err)
 	}
@@ -521,12 +521,12 @@ func TestSQLiteRepository_Persistence(t *testing.T) {
 		}
 	}()
 
-	retrieved, err := repo2.GetBoard(ctx, "persist-board")
+	retrieved, err := repo2.GetWorkflow(ctx, "persist-wf")
 	if err != nil {
-		t.Fatalf("failed to get board after reopen: %v", err)
+		t.Fatalf("failed to get workflow after reopen: %v", err)
 	}
-	if retrieved.Name != "Persistent Board" {
-		t.Errorf("expected name 'Persistent Board', got %s", retrieved.Name)
+	if retrieved.Name != "Persistent Workflow" {
+		t.Errorf("expected name 'Persistent Workflow', got %s", retrieved.Name)
 	}
 }
 
@@ -562,12 +562,12 @@ func TestSQLiteRepository_MessageCRUD(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 
-	// Create board first (required for foreign key constraints)
-	board := &models.Board{ID: "board-123", Name: "Test Board"}
-	_ = repo.CreateBoard(ctx, board)
+	// Create workflow first (required for foreign key constraints)
+	workflow := &models.Workflow{ID: "wf-123", Name: "Test Workflow"}
+	_ = repo.CreateWorkflow(ctx, workflow)
 
 	// Create a task first
-	task := &models.Task{ID: "task-123", BoardID: "board-123", WorkflowStepID: "step-123", Title: "Test Task"}
+	task := &models.Task{ID: "task-123", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Test Task"}
 	_ = repo.CreateTask(ctx, task)
 	sessionID := setupSQLiteTestSession(ctx, repo, task.ID, "session-123")
 	turnID := setupSQLiteTestTurn(ctx, repo, sessionID, task.ID, "turn-123")
@@ -635,14 +635,14 @@ func TestSQLiteRepository_ListMessages(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 
-	// Create board first (required for foreign key constraints)
-	board := &models.Board{ID: "board-123", Name: "Test Board"}
-	_ = repo.CreateBoard(ctx, board)
+	// Create workflow first (required for foreign key constraints)
+	workflow := &models.Workflow{ID: "wf-123", Name: "Test Workflow"}
+	_ = repo.CreateWorkflow(ctx, workflow)
 
 	// Create tasks
-	task := &models.Task{ID: "task-123", BoardID: "board-123", WorkflowStepID: "step-123", Title: "Test Task"}
+	task := &models.Task{ID: "task-123", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Test Task"}
 	_ = repo.CreateTask(ctx, task)
-	task2 := &models.Task{ID: "task-456", BoardID: "board-123", WorkflowStepID: "step-123", Title: "Test Task 2"}
+	task2 := &models.Task{ID: "task-456", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Test Task 2"}
 	_ = repo.CreateTask(ctx, task2)
 	sessionID := setupSQLiteTestSession(ctx, repo, task.ID, "session-123")
 	session2ID := setupSQLiteTestSession(ctx, repo, task2.ID, "session-456")
@@ -668,9 +668,9 @@ func TestSQLiteRepository_ListMessagesPagination(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 
-	board := &models.Board{ID: "board-123", Name: "Test Board"}
-	_ = repo.CreateBoard(ctx, board)
-	task := &models.Task{ID: "task-123", BoardID: "board-123", WorkflowStepID: "step-123", Title: "Test Task"}
+	workflow := &models.Workflow{ID: "wf-123", Name: "Test Workflow"}
+	_ = repo.CreateWorkflow(ctx, workflow)
+	task := &models.Task{ID: "task-123", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Test Task"}
 	_ = repo.CreateTask(ctx, task)
 	sessionID := setupSQLiteTestSession(ctx, repo, task.ID, "session-123")
 	turnID := setupSQLiteTestTurn(ctx, repo, sessionID, task.ID, "turn-123")
@@ -727,12 +727,12 @@ func TestSQLiteRepository_MessageWithRequestsInput(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 
-	// Create board first (required for foreign key constraints)
-	board := &models.Board{ID: "board-123", Name: "Test Board"}
-	_ = repo.CreateBoard(ctx, board)
+	// Create workflow first (required for foreign key constraints)
+	workflow := &models.Workflow{ID: "wf-123", Name: "Test Workflow"}
+	_ = repo.CreateWorkflow(ctx, workflow)
 
 	// Create a task
-	task := &models.Task{ID: "task-123", BoardID: "board-123", WorkflowStepID: "step-123", Title: "Test Task"}
+	task := &models.Task{ID: "task-123", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Test Task"}
 	_ = repo.CreateTask(ctx, task)
 	sessionID := setupSQLiteTestSession(ctx, repo, task.ID, "session-123")
 	turnID := setupSQLiteTestTurn(ctx, repo, sessionID, task.ID, "turn-123")
@@ -764,10 +764,10 @@ func TestSQLiteRepository_TaskSessionCRUD(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 
-	// Create board and task first (required for foreign key constraints)
-	board := &models.Board{ID: "board-123", Name: "Test Board"}
-	_ = repo.CreateBoard(ctx, board)
-	task := &models.Task{ID: "task-123", BoardID: "board-123", WorkflowStepID: "step-123", Title: "Test Task"}
+	// Create workflow and task first (required for foreign key constraints)
+	workflow := &models.Workflow{ID: "wf-123", Name: "Test Workflow"}
+	_ = repo.CreateWorkflow(ctx, workflow)
+	task := &models.Task{ID: "task-123", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Test Task"}
 	_ = repo.CreateTask(ctx, task)
 
 	// Create agent session
@@ -858,10 +858,10 @@ func TestSQLiteRepository_TaskSessionByTaskID(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 
-	// Create board and task
-	board := &models.Board{ID: "board-123", Name: "Test Board"}
-	_ = repo.CreateBoard(ctx, board)
-	task := &models.Task{ID: "task-123", BoardID: "board-123", WorkflowStepID: "step-123", Title: "Test Task"}
+	// Create workflow and task
+	workflow := &models.Workflow{ID: "wf-123", Name: "Test Workflow"}
+	_ = repo.CreateWorkflow(ctx, workflow)
+	task := &models.Task{ID: "task-123", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Test Task"}
 	_ = repo.CreateTask(ctx, task)
 
 	// Create multiple sessions for the same task (simulating session history)
@@ -923,12 +923,12 @@ func TestSQLiteRepository_ListTaskSessions(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 
-	// Create board and tasks
-	board := &models.Board{ID: "board-123", Name: "Test Board"}
-	_ = repo.CreateBoard(ctx, board)
-	task1 := &models.Task{ID: "task-1", BoardID: "board-123", WorkflowStepID: "step-123", Title: "Task 1"}
+	// Create workflow and tasks
+	workflow := &models.Workflow{ID: "wf-123", Name: "Test Workflow"}
+	_ = repo.CreateWorkflow(ctx, workflow)
+	task1 := &models.Task{ID: "task-1", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Task 1"}
 	_ = repo.CreateTask(ctx, task1)
-	task2 := &models.Task{ID: "task-2", BoardID: "board-123", WorkflowStepID: "step-123", Title: "Task 2"}
+	task2 := &models.Task{ID: "task-2", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Task 2"}
 	_ = repo.CreateTask(ctx, task2)
 
 	// Create sessions for different tasks
@@ -967,10 +967,10 @@ func TestSQLiteRepository_UpdateTaskSessionState(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 
-	// Create board and task
-	board := &models.Board{ID: "board-123", Name: "Test Board"}
-	_ = repo.CreateBoard(ctx, board)
-	task := &models.Task{ID: "task-123", BoardID: "board-123", WorkflowStepID: "step-123", Title: "Test Task"}
+	// Create workflow and task
+	workflow := &models.Workflow{ID: "wf-123", Name: "Test Workflow"}
+	_ = repo.CreateWorkflow(ctx, workflow)
+	task := &models.Task{ID: "task-123", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Test Task"}
 	_ = repo.CreateTask(ctx, task)
 
 	// Create an agent session
@@ -1066,9 +1066,9 @@ func TestSQLiteRepository_CompleteRunningToolCallsForTurn(t *testing.T) {
 	ctx := context.Background()
 
 	// Setup
-	board := &models.Board{ID: "board-1", Name: "Test Board"}
-	_ = repo.CreateBoard(ctx, board)
-	task := &models.Task{ID: "task-1", BoardID: "board-1", WorkflowStepID: "step-1", Title: "Test Task"}
+	workflow := &models.Workflow{ID: "wf-1", Name: "Test Workflow"}
+	_ = repo.CreateWorkflow(ctx, workflow)
+	task := &models.Task{ID: "task-1", WorkflowID: "wf-1", WorkflowStepID: "step-1", Title: "Test Task"}
 	_ = repo.CreateTask(ctx, task)
 	sessionID := setupSQLiteTestSession(ctx, repo, task.ID, "session-1")
 	turnID := setupSQLiteTestTurn(ctx, repo, sessionID, task.ID, "turn-1")

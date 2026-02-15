@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/queue"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -236,7 +237,7 @@ func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID s
 					"orchestrator",
 					map[string]interface{}{
 						"task_id":          dbTask.ID,
-						"board_id":         dbTask.BoardID,
+						"workflow_id":      dbTask.WorkflowID,
 						"workflow_step_id": dbTask.WorkflowStepID,
 						"title":            dbTask.Title,
 						"description":      dbTask.Description,
@@ -299,7 +300,7 @@ func (s *Service) applyWorkflowAndPlanMode(ctx context.Context, prompt string, t
 				zap.String("workflow_step_id", workflowStepID),
 				zap.Error(err))
 		} else {
-			stepHasPlanMode = step.PlanMode
+			stepHasPlanMode = step.HasOnEnterAction(wfmodels.OnEnterEnablePlanMode)
 			effectivePrompt = s.buildWorkflowPrompt(effectivePrompt, step, taskID)
 		}
 	}
@@ -329,30 +330,33 @@ func (s *Service) recordInitialMessage(ctx context.Context, taskID, sessionID, p
 }
 
 // buildWorkflowPrompt constructs the effective prompt using workflow step configuration.
-// It combines: step.PromptPrefix + basePrompt + step.PromptSuffix
-// If step.PlanMode is true, it also prepends the plan mode prefix.
-// Placeholders like {task_id} are interpolated with actual values.
-// System-injected content (prefix, suffix, plan mode) is wrapped in <kandev-system> tags
-// so it can be stripped when displaying to users.
-func (s *Service) buildWorkflowPrompt(basePrompt string, step *WorkflowStep, taskID string) string {
+// If step.Prompt contains {{task_prompt}}, it is replaced with the base prompt.
+// Otherwise, step.Prompt is prepended to the base prompt.
+// If the step has enable_plan_mode in on_enter events, plan mode prefix is also prepended.
+// System-injected content is wrapped in <kandev-system> tags so it can be stripped when displaying to users.
+func (s *Service) buildWorkflowPrompt(basePrompt string, step *wfmodels.WorkflowStep, taskID string) string {
 	var parts []string
 
 	// Apply plan mode prefix if enabled (wrapped in system tags)
-	if step.PlanMode {
+	if step.HasOnEnterAction(wfmodels.OnEnterEnablePlanMode) {
 		parts = append(parts, sysprompt.Wrap(sysprompt.PlanMode))
 	}
 
-	// Add prompt prefix if set (with interpolation, wrapped in system tags)
-	if step.PromptPrefix != "" {
-		parts = append(parts, sysprompt.Wrap(sysprompt.InterpolatePlaceholders(step.PromptPrefix, taskID)))
-	}
-
-	// Add base prompt (user's actual message - not wrapped)
-	parts = append(parts, basePrompt)
-
-	// Add prompt suffix if set (with interpolation, wrapped in system tags)
-	if step.PromptSuffix != "" {
-		parts = append(parts, sysprompt.Wrap(sysprompt.InterpolatePlaceholders(step.PromptSuffix, taskID)))
+	// Build the prompt from step.Prompt template and base prompt
+	if step.Prompt != "" {
+		interpolatedPrompt := sysprompt.InterpolatePlaceholders(step.Prompt, taskID)
+		if strings.Contains(interpolatedPrompt, "{{task_prompt}}") {
+			// Replace placeholder with base prompt
+			combined := strings.Replace(interpolatedPrompt, "{{task_prompt}}", basePrompt, 1)
+			parts = append(parts, combined)
+		} else {
+			// Prepend step prompt, then base prompt
+			parts = append(parts, sysprompt.Wrap(interpolatedPrompt))
+			parts = append(parts, basePrompt)
+		}
+	} else {
+		// No step prompt, just use base prompt
+		parts = append(parts, basePrompt)
 	}
 
 	return strings.Join(parts, "\n\n")
@@ -434,15 +438,10 @@ func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessi
 		return fmt.Errorf("failed to get task: %w", err)
 	}
 
-	// Check if session is in a review step with pending approval
+	// Check if session is in a step with pending approval
 	// If so, reject the request - user must use Approve button or send a chat message
 	if session.ReviewStatus != nil && *session.ReviewStatus == "pending" {
-		if session.WorkflowStepID != nil && *session.WorkflowStepID != "" {
-			currentStep, err := s.workflowStepGetter.GetStep(ctx, *session.WorkflowStepID)
-			if err == nil && currentStep.RequireApproval {
-				return fmt.Errorf("session is pending approval - use Approve button to proceed or send a message to request changes")
-			}
-		}
+		return fmt.Errorf("session is pending approval - use Approve button to proceed or send a message to request changes")
 	}
 
 	// Update session's workflow step to the new step
@@ -497,10 +496,11 @@ func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessi
 		s.logger.Debug("session resumed, now sending prompt")
 	}
 
-	// Send the prompt using PromptTask (with planMode from step)
+	// Send the prompt using PromptTask (with planMode from step's on_enter events)
 	// Note: PromptTask internally uses context.WithoutCancel for the executor call
 	// No attachments for workflow-initiated prompts
-	_, err = s.PromptTask(ctx, taskID, sessionID, effectivePrompt, "", step.PlanMode, nil)
+	stepPlanMode := step.HasOnEnterAction(wfmodels.OnEnterEnablePlanMode)
+	_, err = s.PromptTask(ctx, taskID, sessionID, effectivePrompt, "", stepPlanMode, nil)
 	if err != nil {
 		return fmt.Errorf("failed to prompt session: %w", err)
 	}
@@ -510,7 +510,7 @@ func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessi
 		zap.String("session_id", sessionID),
 		zap.String("workflow_step_id", workflowStepID),
 		zap.String("step_name", step.Name),
-		zap.Bool("plan_mode", step.PlanMode))
+		zap.Bool("plan_mode", stepPlanMode))
 
 	return nil
 }
@@ -669,10 +669,6 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 	if planMode {
 		effectivePrompt = sysprompt.InjectPlanMode(prompt)
 	}
-
-	// Check if session is in a review step - if so, move back to the previous step
-	// This handles the case where the user sends a message to iterate on the work
-	s.handleReviewStepRollback(ctx, taskID, sessionID)
 
 	// Check if model switching is requested
 	if model != "" {

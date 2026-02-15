@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@kandev/ui/button';
 import { ToggleGroup, ToggleGroupItem } from '@kandev/ui/toggle-group';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@kandev/ui/tooltip';
-import { IconPlus, IconSettings, IconList, IconLayoutKanban, IconMenu2, IconChartBar } from '@tabler/icons-react';
+import { IconPlus, IconSettings, IconList, IconLayoutKanban, IconMenu2, IconChartBar, IconTimeline } from '@tabler/icons-react';
 import { KanbanDisplayDropdown } from '../kanban-display-dropdown';
 import { TaskSearchInput } from './task-search-input';
 import { KanbanHeaderMobile } from './kanban-header-mobile';
@@ -13,6 +13,7 @@ import { MobileMenuSheet } from './mobile-menu-sheet';
 import { linkToTasks } from '@/lib/links';
 import { useResponsiveBreakpoint } from '@/hooks/use-responsive-breakpoint';
 import { useAppStore } from '@/components/state-provider';
+import { useKanbanDisplaySettings } from '@/hooks/use-kanban-display-settings';
 
 type KanbanHeaderProps = {
   onCreateTask: () => void;
@@ -29,11 +30,19 @@ export function KanbanHeader({ onCreateTask, workspaceId, currentPage = 'kanban'
   const isMenuOpen = useAppStore((state) => state.mobileKanban.isMenuOpen);
   const setMenuOpen = useAppStore((state) => state.setMobileKanbanMenuOpen);
 
+  const { kanbanViewMode, onViewModeChange } = useKanbanDisplaySettings();
+
+  const toggleValue = currentPage === 'tasks' ? 'list' : (kanbanViewMode === 'graph2' ? 'pipeline' : 'kanban');
+
   const handleViewChange = (value: string) => {
-    if (value === 'list' && currentPage !== 'tasks') {
-      router.push(linkToTasks(workspaceId));
-    } else if (value === 'kanban' && currentPage !== 'kanban') {
-      router.push('/');
+    if (value === 'list') {
+      if (currentPage !== 'tasks') router.push(linkToTasks(workspaceId));
+    } else if (value === 'kanban') {
+      if (currentPage !== 'kanban') router.push('/');
+      onViewModeChange('');
+    } else if (value === 'pipeline') {
+      if (currentPage !== 'kanban') router.push('/');
+      onViewModeChange('graph2');
     }
   };
 
@@ -75,7 +84,7 @@ export function KanbanHeader({ onCreateTask, workspaceId, currentPage = 'kanban'
             <TooltipProvider>
               <ToggleGroup
                 type="single"
-                value={currentPage === 'tasks' ? 'list' : 'kanban'}
+                value={toggleValue}
                 onValueChange={handleViewChange}
                 variant="outline"
                 className="h-8"
@@ -91,6 +100,19 @@ export function KanbanHeader({ onCreateTask, workspaceId, currentPage = 'kanban'
                       </span>
                     </TooltipTrigger>
                     <TooltipContent>Kanban</TooltipContent>
+                  </Tooltip>
+                </ToggleGroupItem>
+                <ToggleGroupItem
+                  value="pipeline"
+                  className="cursor-pointer h-8 w-8 data-[state=on]:bg-muted data-[state=on]:text-foreground"
+                >
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="flex items-center justify-center">
+                        <IconTimeline className="h-4 w-4" />
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>Pipeline</TooltipContent>
                   </Tooltip>
                 </ToggleGroupItem>
                 <ToggleGroupItem
@@ -158,7 +180,7 @@ export function KanbanHeader({ onCreateTask, workspaceId, currentPage = 'kanban'
         <TooltipProvider>
           <ToggleGroup
             type="single"
-            value={currentPage === 'tasks' ? 'list' : 'kanban'}
+            value={toggleValue}
             onValueChange={handleViewChange}
             variant="outline"
           >
@@ -173,6 +195,19 @@ export function KanbanHeader({ onCreateTask, workspaceId, currentPage = 'kanban'
                   </span>
                 </TooltipTrigger>
                 <TooltipContent>Kanban</TooltipContent>
+              </Tooltip>
+            </ToggleGroupItem>
+            <ToggleGroupItem
+              value="pipeline"
+              className="cursor-pointer data-[state=on]:bg-muted data-[state=on]:text-foreground"
+            >
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="flex items-center justify-center">
+                    <IconTimeline className="h-4 w-4" />
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>Pipeline</TooltipContent>
               </Tooltip>
             </ToggleGroupItem>
             <ToggleGroupItem

@@ -1,13 +1,13 @@
 import { StateHydrator } from '@/components/state-hydrator';
 import { readLayoutDefaults } from '@/lib/layout/read-layout-defaults';
 import {
-  fetchBoardSnapshot,
+  fetchWorkflowSnapshot,
   fetchTaskSession,
   fetchTask,
   fetchUserSettings,
   listAgents,
   listAvailableAgents,
-  listBoards,
+  listWorkflows,
   listRepositories,
   listTaskSessionMessages,
   listTaskSessions,
@@ -42,14 +42,14 @@ export default async function SessionPage({
     }
 
     task = await fetchTask(session.task_id, { cache: 'no-store' });
-    const [snapshot, agents, repositoriesResponse, allSessionsResponse, availableAgentsResponse, workspacesResponse, boardsResponse, turnsResponse, userSettingsResponse, terminalsResponse] = await Promise.all([
-      fetchBoardSnapshot(task.board_id, { cache: 'no-store' }),
+    const [snapshot, agents, repositoriesResponse, allSessionsResponse, availableAgentsResponse, workspacesResponse, workflowsResponse, turnsResponse, userSettingsResponse, terminalsResponse] = await Promise.all([
+      fetchWorkflowSnapshot(task.workflow_id, { cache: 'no-store' }),
       listAgents({ cache: 'no-store' }),
       listRepositories(task.workspace_id, { includeScripts: true }, { cache: 'no-store' }),
       listTaskSessions(session.task_id, { cache: 'no-store' }),
       listAvailableAgents({ cache: 'no-store' }).catch(() => ({ agents: [] })),
       listWorkspaces({ cache: 'no-store' }).catch(() => ({ workspaces: [] })),
-      listBoards(task.workspace_id, { cache: 'no-store' }).catch(() => ({ boards: [] })),
+      listWorkflows(task.workspace_id, { cache: 'no-store' }).catch(() => ({ workflows: [] })),
       listSessionTurns(sessionId, { cache: 'no-store' }).catch(() => ({ turns: [], total: 0 })),
       fetchUserSettings({ cache: 'no-store' }).catch(() => null),
       fetchTerminals(sessionId).catch(() => []),
@@ -58,7 +58,7 @@ export default async function SessionPage({
     const allSessions = allSessionsResponse.sessions ?? [session];
     const availableAgents = availableAgentsResponse.agents ?? [];
     const workspaces = workspacesResponse.workspaces ?? [];
-    const boards = boardsResponse.boards ?? [];
+    const workflows = workflowsResponse.workflows ?? [];
     const turns = turnsResponse.turns ?? [];
     const userSettings = userSettingsResponse?.settings;
 
@@ -115,13 +115,13 @@ export default async function SessionPage({
         })),
         activeId: task.workspace_id,
       },
-      boards: {
-        items: boards.map((board) => ({
-          id: board.id,
-          workspaceId: board.workspace_id,
-          name: board.name,
+      workflows: {
+        items: workflows.map((workflow) => ({
+          id: workflow.id,
+          workspaceId: workflow.workspace_id,
+          name: workflow.name,
         })),
-        activeId: task.board_id,
+        activeId: task.workflow_id,
       },
       repositories: {
         itemsByWorkspaceId: {
@@ -221,7 +221,8 @@ export default async function SessionPage({
       },
       userSettings: {
         workspaceId: userSettings?.workspace_id || null,
-        boardId: userSettings?.board_id || null,
+        workflowId: userSettings?.workflow_filter_id || null,
+        kanbanViewMode: userSettings?.kanban_view_mode || null,
         repositoryIds: Array.from(new Set(userSettings?.repository_ids ?? [])).sort(),
         preferredShell: userSettings?.preferred_shell || null,
         shellOptions: userSettingsResponse?.shell_options ?? [],

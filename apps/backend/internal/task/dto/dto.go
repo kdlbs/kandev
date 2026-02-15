@@ -8,7 +8,7 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
-type BoardDTO struct {
+type WorkflowDTO struct {
 	ID          string    `json:"id"`
 	WorkspaceID string    `json:"workspace_id"`
 	Name        string    `json:"name"`
@@ -88,7 +88,7 @@ type EnvironmentDTO struct {
 type TaskDTO struct {
 	ID               string                 `json:"id"`
 	WorkspaceID      string                 `json:"workspace_id"`
-	BoardID          string                 `json:"board_id"`
+	WorkflowID       string                 `json:"workflow_id"`
 	WorkflowStepID   string                 `json:"workflow_step_id"`
 	Title            string                 `json:"title"`
 	Description      string                 `json:"description"`
@@ -153,10 +153,10 @@ type ListTaskSessionsResponse struct {
 	Total    int              `json:"total"`
 }
 
-type BoardSnapshotDTO struct {
-	Board BoardDTO          `json:"board"`
-	Steps []WorkflowStepDTO `json:"steps"`
-	Tasks []TaskDTO         `json:"tasks"`
+type WorkflowSnapshotDTO struct {
+	Workflow WorkflowDTO       `json:"workflow"`
+	Steps    []WorkflowStepDTO `json:"steps"`
+	Tasks    []TaskDTO         `json:"tasks"`
 }
 
 type ListMessagesResponse struct {
@@ -182,9 +182,9 @@ type ListTurnsResponse struct {
 	Total int       `json:"total"`
 }
 
-type ListBoardsResponse struct {
-	Boards []BoardDTO `json:"boards"`
-	Total  int        `json:"total"`
+type ListWorkflowsResponse struct {
+	Workflows []WorkflowDTO `json:"workflows"`
+	Total     int           `json:"total"`
 }
 
 type ListWorkspacesResponse struct {
@@ -253,19 +253,19 @@ type SuccessResponse struct {
 	Success bool `json:"success"`
 }
 
-func FromBoard(board *models.Board) BoardDTO {
+func FromWorkflow(workflow *models.Workflow) WorkflowDTO {
 	var description *string
-	if board.Description != "" {
-		description = &board.Description
+	if workflow.Description != "" {
+		description = &workflow.Description
 	}
 
-	return BoardDTO{
-		ID:          board.ID,
-		WorkspaceID: board.WorkspaceID,
-		Name:        board.Name,
+	return WorkflowDTO{
+		ID:          workflow.ID,
+		WorkspaceID: workflow.WorkspaceID,
+		Name:        workflow.Name,
 		Description: description,
-		CreatedAt:   board.CreatedAt,
-		UpdatedAt:   board.UpdatedAt,
+		CreatedAt:   workflow.CreatedAt,
+		UpdatedAt:   workflow.UpdatedAt,
 	}
 }
 
@@ -388,7 +388,7 @@ func FromTaskWithSessionInfo(task *models.Task, primarySessionID *string, sessio
 	return TaskDTO{
 		ID:               task.ID,
 		WorkspaceID:      task.WorkspaceID,
-		BoardID:          task.BoardID,
+		WorkflowID:       task.WorkflowID,
 		WorkflowStepID:   task.WorkflowStepID,
 		Title:            task.Title,
 		Description:      task.Description,
@@ -441,21 +441,28 @@ func FromTaskSession(session *models.TaskSession) TaskSessionDTO {
 
 // WorkflowStepDTO represents a workflow step for API responses
 type WorkflowStepDTO struct {
-	ID              string       `json:"id"`
-	BoardID         string       `json:"board_id"`
-	Name            string       `json:"name"`
-	StepType        string       `json:"step_type"`
-	Position        int          `json:"position"`
-	State           v1.TaskState `json:"state"`
-	Color           string       `json:"color"`
-	AutoStartAgent  bool         `json:"auto_start_agent"`
-	PlanMode        bool         `json:"plan_mode"`
-	RequireApproval bool         `json:"require_approval"`
-	PromptPrefix    string       `json:"prompt_prefix,omitempty"`
-	PromptSuffix    string       `json:"prompt_suffix,omitempty"`
-	AllowManualMove bool         `json:"allow_manual_move"`
-	CreatedAt       time.Time    `json:"created_at"`
-	UpdatedAt       time.Time    `json:"updated_at"`
+	ID              string         `json:"id"`
+	WorkflowID      string         `json:"workflow_id"`
+	Name            string         `json:"name"`
+	Position        int            `json:"position"`
+	Color           string         `json:"color"`
+	Prompt          string         `json:"prompt,omitempty"`
+	Events          *StepEventsDTO `json:"events,omitempty"`
+	AllowManualMove bool           `json:"allow_manual_move"`
+	CreatedAt       time.Time      `json:"created_at"`
+	UpdatedAt       time.Time      `json:"updated_at"`
+}
+
+// StepEventsDTO represents step events for API responses
+type StepEventsDTO struct {
+	OnEnter        []StepActionDTO `json:"on_enter,omitempty"`
+	OnTurnComplete []StepActionDTO `json:"on_turn_complete,omitempty"`
+}
+
+// StepActionDTO represents a step action for API responses
+type StepActionDTO struct {
+	Type   string                 `json:"type"`
+	Config map[string]interface{} `json:"config,omitempty"`
 }
 
 // MoveTaskResponse includes the task and the target workflow step info

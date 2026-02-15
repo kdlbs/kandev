@@ -5,7 +5,7 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
-type ListBoardsRequest struct {
+type ListWorkflowsRequest struct {
 	WorkspaceID string
 }
 
@@ -37,24 +37,24 @@ type DeleteWorkspaceRequest struct {
 	ID string
 }
 
-type GetBoardRequest struct {
+type GetWorkflowRequest struct {
 	ID string
 }
 
-type CreateBoardRequest struct {
+type CreateWorkflowRequest struct {
 	WorkspaceID        string
 	Name               string
 	Description        string
 	WorkflowTemplateID *string
 }
 
-type UpdateBoardRequest struct {
+type UpdateWorkflowRequest struct {
 	ID          string
 	Name        *string
 	Description *string
 }
 
-type DeleteBoardRequest struct {
+type DeleteWorkflowRequest struct {
 	ID string
 }
 
@@ -207,17 +207,17 @@ type ValidateRepositoryPathRequest struct {
 	Path        string
 }
 
-type GetBoardSnapshotRequest struct {
-	BoardID string
+type GetWorkflowSnapshotRequest struct {
+	WorkflowID string
 }
 
-type GetWorkspaceBoardSnapshotRequest struct {
+type GetWorkspaceSnapshotRequest struct {
 	WorkspaceID string
-	BoardID     string
+	WorkflowID  string
 }
 
 type ListTasksRequest struct {
-	BoardID string
+	WorkflowID string
 }
 
 type ListTasksByWorkspaceRequest struct {
@@ -249,7 +249,7 @@ type TaskRepositoryInput struct {
 
 type CreateTaskRequest struct {
 	WorkspaceID    string
-	BoardID        string
+	WorkflowID     string
 	WorkflowStepID string
 	Title          string
 	Description    string
@@ -296,7 +296,7 @@ type CreateMessageRequest struct {
 
 type MoveTaskRequest struct {
 	ID             string
-	BoardID        string
+	WorkflowID     string
 	WorkflowStepID string
 	Position       int
 }
@@ -304,4 +304,19 @@ type MoveTaskRequest struct {
 type UpdateTaskStateRequest struct {
 	ID    string
 	State v1.TaskState
+}
+
+type BulkMoveTasksRequest struct {
+	SourceWorkflowID string `json:"source_workflow_id"`
+	SourceStepID     string `json:"source_step_id,omitempty"`
+	TargetWorkflowID string `json:"target_workflow_id"`
+	TargetStepID     string `json:"target_step_id"`
+}
+
+type BulkMoveTasksResponse struct {
+	MovedCount int `json:"moved_count"`
+}
+
+type TaskCountResponse struct {
+	TaskCount int `json:"task_count"`
 }

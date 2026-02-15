@@ -10,15 +10,35 @@ export type TaskState =
   | 'FAILED'
   | 'CANCELLED';
 
-// Workflow Step Types
-export type WorkflowStepType =
-  | 'backlog'
-  | 'planning'
-  | 'implementation'
-  | 'review'
-  | 'verification'
-  | 'done'
-  | 'blocked';
+// On Enter action types
+export type OnEnterActionType = 'enable_plan_mode' | 'auto_start_agent';
+
+// On Turn Start action types
+export type OnTurnStartActionType = 'move_to_next' | 'move_to_previous' | 'move_to_step';
+
+// On Turn Complete action types
+export type OnTurnCompleteActionType = 'move_to_next' | 'move_to_previous' | 'move_to_step' | 'disable_plan_mode';
+
+export type OnEnterAction = {
+  type: OnEnterActionType;
+  config?: Record<string, unknown>;
+};
+
+export type OnTurnStartAction = {
+  type: OnTurnStartActionType;
+  config?: Record<string, unknown>;
+};
+
+export type OnTurnCompleteAction = {
+  type: OnTurnCompleteActionType;
+  config?: Record<string, unknown>;
+};
+
+export type StepEvents = {
+  on_enter?: OnEnterAction[];
+  on_turn_start?: OnTurnStartAction[];
+  on_turn_complete?: OnTurnCompleteAction[];
+};
 
 // Workflow Review Status
 export type WorkflowReviewStatus =
@@ -26,15 +46,6 @@ export type WorkflowReviewStatus =
   | 'approved'
   | 'changes_requested'
   | 'rejected';
-
-// Step Behaviors - controls auto-start and other step-specific behaviors
-export type StepBehaviors = {
-  autoStartAgent?: boolean;
-  planMode?: boolean;
-  requireApproval?: boolean;
-  promptPrefix?: string;
-  promptSuffix?: string;
-};
 
 // Workflow Template - pre-defined workflow configurations
 export type WorkflowTemplate = {
@@ -50,21 +61,24 @@ export type WorkflowTemplate = {
 // Step Definition - template step configuration
 export type StepDefinition = {
   name: string;
-  step_type: WorkflowStepType;
   position: number;
   color?: string;
-  behaviors?: StepBehaviors;
+  prompt?: string;
+  events?: StepEvents;
+  is_start_step?: boolean;
 };
 
-// Workflow Step - instance of a step on a board
+// Workflow Step - instance of a step on a workflow
 export type WorkflowStep = {
   id: string;
-  board_id: string;
+  workflow_id: string;
   name: string;
-  step_type: WorkflowStepType;
   position: number;
   color: string;
-  behaviors?: StepBehaviors;
+  prompt?: string;
+  events?: StepEvents;
+  allow_manual_move?: boolean;
+  is_start_step?: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -107,7 +121,7 @@ export type TaskSessionState =
   | 'FAILED'
   | 'CANCELLED';
 
-export type Board = {
+export type Workflow = {
   id: string;
   workspace_id: string;
   name: string;
@@ -194,7 +208,7 @@ export type TaskRepository = {
 export type Task = {
   id: string;
   workspace_id: string;
-  board_id: string;
+  workflow_id: string;
   workflow_step_id: string;
   position: number;
   title: string;
@@ -218,17 +232,15 @@ export type CreateTaskResponse = Task & {
 // Backend workflow step DTO (flat fields, as returned from API)
 export type WorkflowStepDTO = {
   id: string;
-  board_id: string;
+  workflow_id: string;
   name: string;
-  step_type: string;
   position: number;
   color: string;
-  auto_start_agent: boolean;
-  plan_mode: boolean;
-  require_approval: boolean;
-  prompt_prefix?: string;
-  prompt_suffix?: string;
+  prompt?: string;
+  events?: StepEvents;
   allow_manual_move: boolean;
+  created_at?: string;
+  updated_at?: string;
 };
 
 // Response from moving a task - includes workflow step info for automation
@@ -310,7 +322,8 @@ export type User = {
 export type UserSettings = {
   user_id: string;
   workspace_id: string;
-  board_id: string;
+  kanban_view_mode?: string;
+  workflow_filter_id?: string;
   repository_ids: string[];
   initial_setup_complete?: boolean;
   preferred_shell?: string;
@@ -365,14 +378,14 @@ export type UserResponse = {
   settings: UserSettings;
 };
 
-export type BoardSnapshot = {
-  board: Board;
+export type WorkflowSnapshot = {
+  workflow: Workflow;
   steps: WorkflowStepDTO[];
   tasks: Task[];
 };
 
-export type ListBoardsResponse = {
-  boards: Board[];
+export type ListWorkflowsResponse = {
+  workflows: Workflow[];
   total: number;
 };
 
@@ -706,7 +719,7 @@ export type TaskStatsDTO = {
   task_id: string;
   task_title: string;
   workspace_id: string;
-  board_id: string;
+  workflow_id: string;
   state: string;
   session_count: number;
   turn_count: number;
@@ -788,3 +801,8 @@ export type StatsResponse = {
   repository_stats: RepositoryStatsDTO[];
   git_stats: GitStatsDTO;
 };
+
+// Helper function to check if a step has a specific on_enter action
+export function stepHasOnEnterAction(step: { events?: StepEvents }, actionType: OnEnterActionType): boolean {
+  return step.events?.on_enter?.some(a => a.type === actionType) ?? false;
+}

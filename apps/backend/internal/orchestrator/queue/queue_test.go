@@ -11,7 +11,7 @@ import (
 func createTestTask(id string, priority int) *v1.Task {
 	return &v1.Task{
 		ID:        id,
-		BoardID:   "test-board",
+		WorkflowID: "test-wf",
 		Title:     "Test Task " + id,
 		Priority:  priority,
 		State:     v1.TaskStateTODO,

@@ -16,7 +16,8 @@ type UserDTO struct {
 type UserSettingsDTO struct {
 	UserID                 string   `json:"user_id"`
 	WorkspaceID            string   `json:"workspace_id"`
-	BoardID                string   `json:"board_id"`
+	KanbanViewMode         string   `json:"kanban_view_mode"`
+	WorkflowFilterID       string   `json:"workflow_filter_id"`
 	RepositoryIDs          []string `json:"repository_ids"`
 	InitialSetupComplete   bool     `json:"initial_setup_complete"`
 	PreferredShell         string   `json:"preferred_shell"`
@@ -47,7 +48,8 @@ type ShellOption struct {
 
 type UpdateUserSettingsRequest struct {
 	WorkspaceID            *string   `json:"workspace_id,omitempty"`
-	BoardID                *string   `json:"board_id,omitempty"`
+	KanbanViewMode         *string   `json:"kanban_view_mode,omitempty"`
+	WorkflowFilterID       *string   `json:"workflow_filter_id,omitempty"`
 	RepositoryIDs          *[]string `json:"repository_ids,omitempty"`
 	InitialSetupComplete   *bool     `json:"initial_setup_complete,omitempty"`
 	PreferredShell         *string   `json:"preferred_shell,omitempty"`
@@ -73,7 +75,8 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 	return UserSettingsDTO{
 		UserID:                 settings.UserID,
 		WorkspaceID:            settings.WorkspaceID,
-		BoardID:                settings.BoardID,
+		KanbanViewMode:         settings.KanbanViewMode,
+		WorkflowFilterID:       settings.WorkflowFilterID,
 		RepositoryIDs:          settings.RepositoryIDs,
 		InitialSetupComplete:   settings.InitialSetupComplete,
 		PreferredShell:         settings.PreferredShell,

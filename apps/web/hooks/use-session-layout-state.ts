@@ -118,7 +118,7 @@ export function useSessionLayoutState(options: UseSessionLayoutStateOptions = {}
         setTaskSession(response.session);
       }
 
-      if (response?.workflow_step?.auto_start_agent) {
+      if (response?.workflow_step?.events?.on_enter?.some((a: { type: string }) => a.type === 'auto_start_agent')) {
         const client = getWebSocketClient();
         if (client) {
           client.send({

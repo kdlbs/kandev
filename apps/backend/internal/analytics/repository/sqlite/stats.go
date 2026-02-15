@@ -44,7 +44,7 @@ func (r *Repository) GetTaskStats(ctx context.Context, workspaceID string, start
 			t.id,
 			t.title,
 			t.workspace_id,
-			t.board_id,
+			t.workflow_id,
 			t.state,
 			COALESCE(session_stats.session_count, 0) as session_count,
 			COALESCE(session_stats.turn_count, 0) as turn_count,
@@ -109,7 +109,7 @@ func (r *Repository) GetTaskStats(ctx context.Context, workspaceID string, start
 			&stat.TaskID,
 			&stat.TaskTitle,
 			&stat.WorkspaceID,
-			&stat.BoardID,
+			&stat.WorkflowID,
 			&stat.State,
 			&stat.SessionCount,
 			&stat.TurnCount,
@@ -147,13 +147,15 @@ func (r *Repository) GetGlobalStats(ctx context.Context, workspaceID string, sta
 	}
 
 	// Use separate subqueries to avoid row multiplication from JOINs
-	// Count tasks in "done" workflow step (step_type = 'done') as completed
+	// Count tasks in the last workflow step (highest position) as completed
 	query := `
 		SELECT
 			(SELECT COUNT(*) FROM tasks WHERE workspace_id = ? AND (? IS NULL OR created_at >= ?)) as total_tasks,
 			(SELECT COUNT(*) FROM tasks t
 			 JOIN workflow_steps ws ON ws.id = t.workflow_step_id
-			 WHERE t.workspace_id = ? AND ws.step_type = 'done' AND (? IS NULL OR t.created_at >= ?)) as completed_tasks,
+			 WHERE t.workspace_id = ?
+			   AND ws.position = (SELECT MAX(ws2.position) FROM workflow_steps ws2 WHERE ws2.workflow_id = ws.workflow_id)
+			   AND (? IS NULL OR t.created_at >= ?)) as completed_tasks,
 			(SELECT COUNT(*) FROM tasks WHERE workspace_id = ? AND state = 'IN_PROGRESS' AND (? IS NULL OR created_at >= ?)) as in_progress_tasks,
 			(SELECT COUNT(*) FROM task_sessions s JOIN tasks t ON t.id = s.task_id WHERE t.workspace_id = ? AND (? IS NULL OR s.started_at >= ?)) as total_sessions,
 			(SELECT COUNT(*) FROM task_session_turns turn
@@ -303,7 +305,8 @@ func (r *Repository) GetCompletedTaskActivity(ctx context.Context, workspaceID s
 				WHERE completed_at IS NOT NULL
 				GROUP BY task_id
 			) ts ON ts.task_id = t.id
-			WHERE t.workspace_id = ? AND ws.step_type = 'done'
+			WHERE t.workspace_id = ?
+			  AND ws.position = (SELECT MAX(ws2.position) FROM workflow_steps ws2 WHERE ws2.workflow_id = ws.workflow_id)
 			GROUP BY date(ts.completed_at)
 		) activity ON activity.activity_date = d.date
 		ORDER BY d.date ASC
@@ -360,7 +363,7 @@ func (r *Repository) GetRepositoryStats(ctx context.Context, workspaceID string,
 			SELECT
 				tr.repository_id,
 				COUNT(DISTINCT t.id) as total_tasks,
-				COUNT(DISTINCT CASE WHEN ws.step_type = 'done' THEN t.id END) as completed_tasks,
+				COUNT(DISTINCT CASE WHEN ws.position = (SELECT MAX(ws2.position) FROM workflow_steps ws2 WHERE ws2.workflow_id = ws.workflow_id) THEN t.id END) as completed_tasks,
 				COUNT(DISTINCT CASE WHEN t.state = 'IN_PROGRESS' THEN t.id END) as in_progress_tasks
 			FROM task_repositories tr
 			JOIN tasks t ON t.id = tr.task_id

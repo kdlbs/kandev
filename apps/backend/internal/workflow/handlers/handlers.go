@@ -41,13 +41,13 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api.GET("/workflow/templates/:id", h.httpGetTemplate)
 
 	// Step routes
-	api.GET("/boards/:id/workflow/steps", h.httpListStepsByBoard)
+	api.GET("/workflows/:id/workflow/steps", h.httpListStepsByWorkflow)
 	api.GET("/workflow/steps/:id", h.httpGetStep)
-	api.POST("/boards/:id/workflow/steps", h.httpCreateStepsFromTemplate)
+	api.POST("/workflows/:id/workflow/steps", h.httpCreateStepsFromTemplate)
 	api.POST("/workflow/steps", h.httpCreateStep)
 	api.PUT("/workflow/steps/:id", h.httpUpdateStep)
 	api.DELETE("/workflow/steps/:id", h.httpDeleteStep)
-	api.PUT("/boards/:id/workflow/steps/reorder", h.httpReorderSteps)
+	api.PUT("/workflows/:id/workflow/steps/reorder", h.httpReorderSteps)
 
 	// History routes
 	api.GET("/sessions/:id/workflow/history", h.httpListHistoryBySession)
@@ -86,9 +86,9 @@ func (h *Handlers) httpGetTemplate(c *gin.Context) {
 
 // HTTP handlers - Steps
 
-func (h *Handlers) httpListStepsByBoard(c *gin.Context) {
-	resp, err := h.controller.ListStepsByBoard(c.Request.Context(), controller.ListStepsRequest{
-		BoardID: c.Param("id"),
+func (h *Handlers) httpListStepsByWorkflow(c *gin.Context) {
+	resp, err := h.controller.ListStepsByWorkflow(c.Request.Context(), controller.ListStepsRequest{
+		WorkflowID: c.Param("id"),
 	})
 	if err != nil {
 		h.logger.Error("failed to list steps", zap.Error(err))
@@ -119,7 +119,7 @@ func (h *Handlers) httpCreateStepsFromTemplate(c *gin.Context) {
 		return
 	}
 	if err := h.controller.CreateStepsFromTemplate(c.Request.Context(), controller.CreateStepsFromTemplateRequest{
-		BoardID:    c.Param("id"),
+		WorkflowID: c.Param("id"),
 		TemplateID: req.TemplateID,
 	}); err != nil {
 		h.logger.Error("failed to create steps from template", zap.Error(err))
@@ -135,8 +135,8 @@ func (h *Handlers) httpCreateStep(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request: " + err.Error()})
 		return
 	}
-	if req.BoardID == "" || req.Name == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "board_id and name are required"})
+	if req.WorkflowID == "" || req.Name == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "workflow_id and name are required"})
 		return
 	}
 	resp, err := h.controller.CreateStep(c.Request.Context(), req)
@@ -184,7 +184,7 @@ func (h *Handlers) httpReorderSteps(c *gin.Context) {
 		return
 	}
 	if err := h.controller.ReorderSteps(c.Request.Context(), controller.ReorderStepsRequest{
-		BoardID: c.Param("id"),
+		WorkflowID: c.Param("id"),
 		StepIDs: req.StepIDs,
 	}); err != nil {
 		h.logger.Error("failed to reorder steps", zap.Error(err))
@@ -242,7 +242,7 @@ func (h *Handlers) wsGetTemplate(ctx context.Context, msg *ws.Message) (*ws.Mess
 // WS handlers - Steps
 
 type wsListStepsRequest struct {
-	BoardID string `json:"board_id"`
+	WorkflowID string `json:"workflow_id"`
 }
 
 func (h *Handlers) wsListSteps(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -250,10 +250,10 @@ func (h *Handlers) wsListSteps(ctx context.Context, msg *ws.Message) (*ws.Messag
 	if err := msg.ParsePayload(&req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
-	if req.BoardID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "board_id is required", nil)
+	if req.WorkflowID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow_id is required", nil)
 	}
-	resp, err := h.controller.ListStepsByBoard(ctx, controller.ListStepsRequest{BoardID: req.BoardID})
+	resp, err := h.controller.ListStepsByWorkflow(ctx, controller.ListStepsRequest{WorkflowID: req.WorkflowID})
 	if err != nil {
 		h.logger.Error("failed to list steps", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list steps", nil)
@@ -282,7 +282,7 @@ func (h *Handlers) wsGetStep(ctx context.Context, msg *ws.Message) (*ws.Message,
 }
 
 type wsCreateStepsRequest struct {
-	BoardID    string `json:"board_id"`
+	WorkflowID string `json:"workflow_id"`
 	TemplateID string `json:"template_id"`
 }
 
@@ -291,11 +291,11 @@ func (h *Handlers) wsCreateStepsFromTemplate(ctx context.Context, msg *ws.Messag
 	if err := msg.ParsePayload(&req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
-	if req.BoardID == "" || req.TemplateID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "board_id and template_id are required", nil)
+	if req.WorkflowID == "" || req.TemplateID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow_id and template_id are required", nil)
 	}
 	if err := h.controller.CreateStepsFromTemplate(ctx, controller.CreateStepsFromTemplateRequest{
-		BoardID:    req.BoardID,
+		WorkflowID: req.WorkflowID,
 		TemplateID: req.TemplateID,
 	}); err != nil {
 		h.logger.Error("failed to create steps", zap.Error(err))

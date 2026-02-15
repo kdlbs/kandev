@@ -1,19 +1,19 @@
 import { useMemo } from 'react';
-import { useBoardSnapshot } from '@/hooks/use-board-snapshot';
+import { useWorkflowSnapshot } from '@/hooks/use-workflow-snapshot';
 import { useAppStore } from '@/components/state-provider';
 
-export function useTasks(boardId: string | null) {
-  useBoardSnapshot(boardId);
+export function useTasks(workflowId: string | null) {
+  useWorkflowSnapshot(workflowId);
 
-  const kanbanBoardId = useAppStore((state) => state.kanban.boardId);
+  const kanbanWorkflowId = useAppStore((state) => state.kanban.workflowId);
   const tasks = useAppStore((state) => state.kanban.tasks);
 
-  const boardTasks = useMemo(() => {
-    if (!boardId || kanbanBoardId !== boardId) {
+  const workflowTasks = useMemo(() => {
+    if (!workflowId || kanbanWorkflowId !== workflowId) {
       return [];
     }
     return tasks;
-  }, [boardId, kanbanBoardId, tasks]);
+  }, [workflowId, kanbanWorkflowId, tasks]);
 
-  return { tasks: boardTasks };
+  return { tasks: workflowTasks };
 }

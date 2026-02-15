@@ -250,7 +250,6 @@ export function MonacoCodeEditor({
 
       // Cmd/Ctrl+S to save
       editor.addCommand(
-        // eslint-disable-next-line no-bitwise
         (window as { monaco?: typeof import('monaco-editor') }).monaco!.KeyMod.CtrlCmd |
           (window as { monaco?: typeof import('monaco-editor') }).monaco!.KeyCode.KeyS,
         () => {

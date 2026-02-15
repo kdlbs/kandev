@@ -19,6 +19,7 @@ import {
 import type { TaskState, Repository } from '@/lib/types/http';
 import { cn, getRepositoryDisplayName } from '@/lib/utils';
 import { getTaskStateIcon } from '@/lib/ui/state-icons';
+import { needsAction } from '@/lib/utils/needs-action';
 import { useAppStore } from '@/components/state-provider';
 
 export interface Task {
@@ -34,9 +35,10 @@ export interface Task {
   sessionCount?: number | null;
   primarySessionId?: string | null;
   reviewStatus?: 'pending' | 'approved' | 'changes_requested' | 'rejected' | null;
+  updatedAt?: string;
 }
 
-export interface WorkflowColumn {
+export interface WorkflowStep {
   id: string;
   title: string;
   color: string;
@@ -49,8 +51,8 @@ interface KanbanCardProps {
   onEdit?: (task: Task) => void;
   onDelete?: (task: Task) => void;
   onOpenFullPage?: (task: Task) => void;
-  onMove?: (task: Task, targetColumnId: string) => void;
-  columns?: WorkflowColumn[];
+  onMove?: (task: Task, targetStepId: string) => void;
+  steps?: WorkflowStep[];
   showMaximizeButton?: boolean;
   isDeleting?: boolean;
 }
@@ -114,7 +116,7 @@ function KanbanCardLayout({ task, repositoryName, className }: KanbanCardProps &
   );
 }
 
-export function KanbanCard({ task, repositoryName, onClick, onEdit, onDelete, onOpenFullPage, onMove, columns, showMaximizeButton = true, isDeleting }: KanbanCardProps) {
+export function KanbanCard({ task, repositoryName, onClick, onEdit, onDelete, onOpenFullPage, onMove, steps, showMaximizeButton = true, isDeleting }: KanbanCardProps) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: task.id,
   });
@@ -139,6 +141,7 @@ export function KanbanCard({ task, repositoryName, onClick, onEdit, onDelete, on
       className={cn(
         'max-h-48 bg-card rounded-sm data-[size=sm]:py-1 cursor-pointer mb-2 w-full py-0 relative border border-border overflow-visible shadow-none ring-0',
         (task.state === 'IN_PROGRESS' || task.state === 'SCHEDULING') && 'kanban-task-pulse',
+        needsAction(task) && 'border-l-2 border-l-amber-500',
         isDragging && 'opacity-50 z-50'
       )}
       onClick={() => onClick?.(task)}
@@ -193,7 +196,7 @@ export function KanbanCard({ task, repositoryName, onClick, onEdit, onDelete, on
                   >
                     Edit
                   </DropdownMenuItem>
-                  {columns && columns.length > 1 && onMove && (
+                  {steps && steps.length > 1 && onMove && (
                     <DropdownMenuSub>
                       <DropdownMenuSubTrigger
                         disabled={isDeleting}
@@ -204,7 +207,7 @@ export function KanbanCard({ task, repositoryName, onClick, onEdit, onDelete, on
                       </DropdownMenuSubTrigger>
                       <DropdownMenuPortal>
                         <DropdownMenuSubContent>
-                          {columns
+                          {steps
                             .filter((col) => col.id !== task.workflowStepId)
                             .map((col) => (
                               <DropdownMenuItem

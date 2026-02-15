@@ -48,7 +48,7 @@ func (r *Repository) ensureWorkspaceIndexes() error {
 	if _, err := r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_tasks_workspace_id ON tasks(workspace_id)`); err != nil {
 		return err
 	}
-	if _, err := r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_boards_workspace_id ON boards(workspace_id)`); err != nil {
+	if _, err := r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_workflows_workspace_id ON workflows(workspace_id)`); err != nil {
 		return err
 	}
 	return nil
@@ -119,7 +119,7 @@ func (r *Repository) initSchema() error {
 		deleted_at DATETIME
 	);
 
-	CREATE TABLE IF NOT EXISTS boards (
+	CREATE TABLE IF NOT EXISTS workflows (
 		id TEXT PRIMARY KEY,
 		workspace_id TEXT NOT NULL DEFAULT '',
 		workflow_template_id TEXT DEFAULT '',
@@ -132,7 +132,7 @@ func (r *Repository) initSchema() error {
 	CREATE TABLE IF NOT EXISTS tasks (
 		id TEXT PRIMARY KEY,
 		workspace_id TEXT NOT NULL DEFAULT '',
-		board_id TEXT NOT NULL,
+		workflow_id TEXT NOT NULL,
 		workflow_step_id TEXT NOT NULL DEFAULT '',
 		title TEXT NOT NULL,
 		description TEXT DEFAULT '',
@@ -142,7 +142,7 @@ func (r *Repository) initSchema() error {
 		metadata TEXT DEFAULT '{}',
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL,
-		FOREIGN KEY (board_id) REFERENCES boards(id) ON DELETE CASCADE
+		FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE
 	);
 
 	CREATE TABLE IF NOT EXISTS task_repositories (
@@ -192,7 +192,7 @@ func (r *Repository) initSchema() error {
 		FOREIGN KEY (repository_id) REFERENCES repositories(id) ON DELETE CASCADE
 	);
 
-	CREATE INDEX IF NOT EXISTS idx_tasks_board_id ON tasks(board_id);
+	CREATE INDEX IF NOT EXISTS idx_tasks_workflow_id ON tasks(workflow_id);
 	CREATE INDEX IF NOT EXISTS idx_tasks_workflow_step_id ON tasks(workflow_step_id);
 	CREATE INDEX IF NOT EXISTS idx_task_repositories_task_id ON task_repositories(task_id);
 	CREATE INDEX IF NOT EXISTS idx_task_repositories_repository_id ON task_repositories(repository_id);

@@ -51,31 +51,35 @@ func (r *Repository) initSchema() error {
 		return fmt.Errorf("failed to create workflow_templates table: %w", err)
 	}
 
-	// Create workflow_steps table
+	// Create workflow_steps table with new event-driven schema
 	stepsSchema := `
 	CREATE TABLE IF NOT EXISTS workflow_steps (
 		id TEXT PRIMARY KEY,
-		board_id TEXT NOT NULL,
+		workflow_id TEXT NOT NULL,
 		name TEXT NOT NULL,
-		step_type TEXT NOT NULL,
 		position INTEGER NOT NULL,
 		color TEXT,
-		auto_start_agent INTEGER DEFAULT 0,
-		plan_mode INTEGER DEFAULT 0,
-		require_approval INTEGER DEFAULT 0,
-		prompt_prefix TEXT,
-		prompt_suffix TEXT,
-		on_complete_step_id TEXT,
-		on_approval_step_id TEXT,
+		prompt TEXT,
+		events TEXT,
 		allow_manual_move INTEGER DEFAULT 1,
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL,
-		FOREIGN KEY (board_id) REFERENCES boards(id) ON DELETE CASCADE
+		FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE
 	);
-	CREATE INDEX IF NOT EXISTS idx_workflow_steps_board ON workflow_steps(board_id);
+	CREATE INDEX IF NOT EXISTS idx_workflow_steps_workflow ON workflow_steps(workflow_id);
 	`
 	if _, err := r.db.Exec(stepsSchema); err != nil {
 		return fmt.Errorf("failed to create workflow_steps table: %w", err)
+	}
+
+	// Migrate old schema to new schema if needed
+	if err := r.migrateWorkflowSteps(); err != nil {
+		return fmt.Errorf("failed to migrate workflow_steps: %w", err)
+	}
+
+	// Add is_start_step column if not present
+	if err := r.addIsStartStepColumn(); err != nil {
+		return fmt.Errorf("failed to add is_start_step column: %w", err)
 	}
 
 	// Create session_step_history table
@@ -102,7 +106,7 @@ func (r *Repository) initSchema() error {
 		return fmt.Errorf("failed to seed system templates: %w", err)
 	}
 
-	// Seed default workflow steps for boards that don't have any
+	// Seed default workflow steps for workflows that don't have any
 	if err := r.seedDefaultWorkflowSteps(); err != nil {
 		return fmt.Errorf("failed to seed default workflow steps: %w", err)
 	}
@@ -110,13 +114,235 @@ func (r *Repository) initSchema() error {
 	return nil
 }
 
-// seedDefaultWorkflowSteps creates default workflow steps for boards that don't have any.
+// migrateWorkflowSteps detects old schema (has step_type column) and migrates data to new schema.
+func (r *Repository) migrateWorkflowSteps() error {
+	// Check if old column exists
+	var hasStepType bool
+	rows, err := r.db.Query("PRAGMA table_info(workflow_steps)")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+
+	for rows.Next() {
+		var cid int
+		var name, colType string
+		var notNull int
+		var dfltValue sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dfltValue, &pk); err != nil {
+			return err
+		}
+		if name == "step_type" {
+			hasStepType = true
+			break
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	if !hasStepType {
+		return nil // Already on new schema
+	}
+
+	// Migrate: read old data, recreate table with new schema, insert converted data
+	type oldStep struct {
+		ID               string
+		WorkflowID       string
+		Name             string
+		Position         int
+		Color            sql.NullString
+		AutoStartAgent   int
+		PlanMode         int
+		RequireApproval  int
+		PromptPrefix     sql.NullString
+		PromptSuffix     sql.NullString
+		OnCompleteStepID sql.NullString
+		OnApprovalStepID sql.NullString
+		AllowManualMove  int
+		CreatedAt        time.Time
+		UpdatedAt        time.Time
+	}
+
+	oldRows, err := r.db.Query(`
+		SELECT id, workflow_id, name, position, color,
+			auto_start_agent, plan_mode, require_approval,
+			prompt_prefix, prompt_suffix, on_complete_step_id, on_approval_step_id,
+			allow_manual_move, created_at, updated_at
+		FROM workflow_steps
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to read old workflow_steps: %w", err)
+	}
+	defer func() { _ = oldRows.Close() }()
+
+	var oldSteps []oldStep
+	for oldRows.Next() {
+		var s oldStep
+		if err := oldRows.Scan(&s.ID, &s.WorkflowID, &s.Name, &s.Position, &s.Color,
+			&s.AutoStartAgent, &s.PlanMode, &s.RequireApproval,
+			&s.PromptPrefix, &s.PromptSuffix, &s.OnCompleteStepID, &s.OnApprovalStepID,
+			&s.AllowManualMove, &s.CreatedAt, &s.UpdatedAt); err != nil {
+			return fmt.Errorf("failed to scan old workflow step: %w", err)
+		}
+		oldSteps = append(oldSteps, s)
+	}
+	if err := oldRows.Err(); err != nil {
+		return err
+	}
+
+	// Drop old table and recreate within a transaction for atomicity
+	tx, err := r.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin migration transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.Exec("DROP TABLE workflow_steps"); err != nil {
+		return fmt.Errorf("failed to drop old workflow_steps table: %w", err)
+	}
+
+	newSchema := `
+	CREATE TABLE workflow_steps (
+		id TEXT PRIMARY KEY,
+		workflow_id TEXT NOT NULL,
+		name TEXT NOT NULL,
+		position INTEGER NOT NULL,
+		color TEXT,
+		prompt TEXT,
+		events TEXT,
+		allow_manual_move INTEGER DEFAULT 1,
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL,
+		FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE
+	);
+	CREATE INDEX IF NOT EXISTS idx_workflow_steps_workflow ON workflow_steps(workflow_id);
+	`
+	if _, err := tx.Exec(newSchema); err != nil {
+		return fmt.Errorf("failed to recreate workflow_steps table: %w", err)
+	}
+
+	// Convert and insert old data
+	for _, s := range oldSteps {
+		events := convertOldStepToEvents(s.AutoStartAgent == 1, s.PlanMode == 1, s.RequireApproval == 1,
+			s.OnCompleteStepID, s.OnApprovalStepID)
+		eventsJSON, err := json.Marshal(events)
+		if err != nil {
+			return fmt.Errorf("failed to marshal events for step %s: %w", s.ID, err)
+		}
+
+		// Combine old prompt prefix/suffix into single prompt
+		prompt := ""
+		if s.PromptPrefix.Valid && s.PromptPrefix.String != "" {
+			prompt = s.PromptPrefix.String + "\n\n{{task_prompt}}"
+			if s.PromptSuffix.Valid && s.PromptSuffix.String != "" {
+				prompt += "\n\n" + s.PromptSuffix.String
+			}
+		} else if s.PromptSuffix.Valid && s.PromptSuffix.String != "" {
+			prompt = "{{task_prompt}}\n\n" + s.PromptSuffix.String
+		}
+
+		color := ""
+		if s.Color.Valid {
+			color = s.Color.String
+		}
+
+		if _, err := tx.Exec(`
+			INSERT INTO workflow_steps (id, workflow_id, name, position, color, prompt, events, allow_manual_move, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, s.ID, s.WorkflowID, s.Name, s.Position, color, prompt, string(eventsJSON), s.AllowManualMove, s.CreatedAt, s.UpdatedAt); err != nil {
+			return fmt.Errorf("failed to insert migrated step %s: %w", s.ID, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit migration transaction: %w", err)
+	}
+
+	return nil
+}
+
+// addIsStartStepColumn adds the is_start_step column to workflow_steps if it doesn't exist.
+func (r *Repository) addIsStartStepColumn() error {
+	rows, err := r.db.Query("PRAGMA table_info(workflow_steps)")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var hasColumn bool
+	for rows.Next() {
+		var cid int
+		var name, colType string
+		var notNull int
+		var dfltValue sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dfltValue, &pk); err != nil {
+			return err
+		}
+		if name == "is_start_step" {
+			hasColumn = true
+			break
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if hasColumn {
+		return nil
+	}
+
+	_, err = r.db.Exec("ALTER TABLE workflow_steps ADD COLUMN is_start_step INTEGER DEFAULT 0")
+	return err
+}
+
+// convertOldStepToEvents converts old boolean/pointer fields to new event-driven model.
+func convertOldStepToEvents(autoStart, planMode, requireApproval bool, onCompleteStepID, onApprovalStepID sql.NullString) models.StepEvents {
+	events := models.StepEvents{}
+
+	// On Enter actions
+	if planMode {
+		events.OnEnter = append(events.OnEnter, models.OnEnterAction{Type: models.OnEnterEnablePlanMode})
+	}
+	if autoStart {
+		events.OnEnter = append(events.OnEnter, models.OnEnterAction{Type: models.OnEnterAutoStartAgent})
+	}
+
+	// On Turn Complete actions
+	if planMode {
+		events.OnTurnComplete = append(events.OnTurnComplete, models.OnTurnCompleteAction{Type: models.OnTurnCompleteDisablePlanMode})
+	}
+
+	if !requireApproval {
+		// If not requiring approval and has on_complete, add move transition
+		if onCompleteStepID.Valid && onCompleteStepID.String != "" {
+			events.OnTurnComplete = append(events.OnTurnComplete, models.OnTurnCompleteAction{
+				Type:   models.OnTurnCompleteMoveToStep,
+				Config: map[string]interface{}{"step_id": onCompleteStepID.String},
+			})
+		}
+	} else if onApprovalStepID.Valid && onApprovalStepID.String != "" {
+		// Require approval before transitioning to the approval step
+		events.OnTurnComplete = append(events.OnTurnComplete, models.OnTurnCompleteAction{
+			Type: models.OnTurnCompleteMoveToStep,
+			Config: map[string]interface{}{
+				"step_id":           onApprovalStepID.String,
+				"requires_approval": true,
+			},
+		})
+	}
+
+	return events
+}
+
+// seedDefaultWorkflowSteps creates default workflow steps for workflows that don't have any.
 // Uses the simple template as the default workflow.
 func (r *Repository) seedDefaultWorkflowSteps() error {
-	// Find boards without workflow steps
+	// Find workflows without workflow steps
 	rows, err := r.db.Query(`
-		SELECT b.id FROM boards b
-		LEFT JOIN workflow_steps ws ON ws.board_id = b.id
+		SELECT w.id FROM workflows w
+		LEFT JOIN workflow_steps ws ON ws.workflow_id = w.id
 		WHERE ws.id IS NULL
 	`)
 	if err != nil {
@@ -124,13 +350,13 @@ func (r *Repository) seedDefaultWorkflowSteps() error {
 	}
 	defer func() { _ = rows.Close() }()
 
-	var boardIDs []string
+	var workflowIDs []string
 	for rows.Next() {
-		var boardID string
-		if err := rows.Scan(&boardID); err != nil {
+		var workflowID string
+		if err := rows.Scan(&workflowID); err != nil {
 			return err
 		}
-		boardIDs = append(boardIDs, boardID)
+		workflowIDs = append(workflowIDs, workflowID)
 	}
 	if err := rows.Err(); err != nil {
 		return err
@@ -138,38 +364,31 @@ func (r *Repository) seedDefaultWorkflowSteps() error {
 
 	// Use the simple template for default workflow steps
 	now := time.Now()
-	simpleTemplate := r.getSimpleTemplate(now)
+	simpleTemplate := r.getKanbanTemplate(now)
 
-	for _, boardID := range boardIDs {
-		// Map template step IDs to generated UUIDs for linking
-		idMap := make(map[string]string)
+	for _, workflowID := range workflowIDs {
+		// Build mapping from template step ID to new UUID
+		idMap := make(map[string]string, len(simpleTemplate.Steps))
 		for _, stepDef := range simpleTemplate.Steps {
 			idMap[stepDef.ID] = uuid.New().String()
 		}
 
 		for _, stepDef := range simpleTemplate.Steps {
-			stepID := idMap[stepDef.ID]
-
-			// Map OnCompleteStepID if set
-			var onCompleteStepID *string
-			if stepDef.OnCompleteStepID != "" {
-				if mappedID, ok := idMap[stepDef.OnCompleteStepID]; ok {
-					onCompleteStepID = &mappedID
-				}
+			events := models.RemapStepEvents(stepDef.Events, idMap)
+			eventsJSON, err := json.Marshal(events)
+			if err != nil {
+				return fmt.Errorf("failed to marshal events: %w", err)
 			}
 
 			if _, err := r.db.Exec(`
 				INSERT INTO workflow_steps (
-					id, board_id, name, step_type, position, color,
-					auto_start_agent, plan_mode, require_approval,
-					prompt_prefix, prompt_suffix, on_complete_step_id,
-					allow_manual_move, created_at, updated_at
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+					id, workflow_id, name, position, color,
+					prompt, events, allow_manual_move, is_start_step, created_at, updated_at
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			`,
-				stepID, boardID, stepDef.Name, string(stepDef.StepType), stepDef.Position, stepDef.Color,
-				stepDef.AutoStartAgent, stepDef.PlanMode, stepDef.RequireApproval,
-				stepDef.PromptPrefix, stepDef.PromptSuffix, onCompleteStepID,
-				stepDef.AllowManualMove, now, now,
+				idMap[stepDef.ID], workflowID, stepDef.Name, stepDef.Position, stepDef.Color,
+				stepDef.Prompt, string(eventsJSON), sqlite.BoolToInt(stepDef.AllowManualMove),
+				sqlite.BoolToInt(stepDef.IsStartStep), now, now,
 			); err != nil {
 				return err
 			}
@@ -184,16 +403,7 @@ func (r *Repository) seedSystemTemplates() error {
 	templates := r.getSystemTemplates()
 
 	for _, tmpl := range templates {
-		// Check if template already exists
-		var exists bool
-		err := r.db.QueryRow("SELECT 1 FROM workflow_templates WHERE id = ?", tmpl.ID).Scan(&exists)
-		if err != nil && err != sql.ErrNoRows {
-			return err
-		}
-		if exists {
-			continue
-		}
-
+		// Always upsert system templates to keep them current
 		stepsJSON, err := json.Marshal(tmpl.Steps)
 		if err != nil {
 			return fmt.Errorf("failed to marshal steps for template %s: %w", tmpl.ID, err)
@@ -202,9 +412,14 @@ func (r *Repository) seedSystemTemplates() error {
 		_, err = r.db.Exec(`
 			INSERT INTO workflow_templates (id, name, description, is_system, steps, created_at, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT(id) DO UPDATE SET
+				name = excluded.name,
+				description = excluded.description,
+				steps = excluded.steps,
+				updated_at = excluded.updated_at
 		`, tmpl.ID, tmpl.Name, tmpl.Description, sqlite.BoolToInt(tmpl.IsSystem), string(stepsJSON), tmpl.CreatedAt, tmpl.UpdatedAt)
 		if err != nil {
-			return fmt.Errorf("failed to insert template %s: %w", tmpl.ID, err)
+			return fmt.Errorf("failed to upsert template %s: %w", tmpl.ID, err)
 		}
 	}
 
@@ -215,9 +430,10 @@ func (r *Repository) seedSystemTemplates() error {
 func (r *Repository) getSystemTemplates() []*models.WorkflowTemplate {
 	now := time.Now().UTC()
 	return []*models.WorkflowTemplate{
-		r.getSimpleTemplate(now),
+		r.getKanbanTemplate(now),
 		r.getStandardTemplate(now),
 		r.getArchitectureTemplate(now),
+		r.getPRReviewTemplate(now),
 	}
 }
 
@@ -227,7 +443,7 @@ func (r *Repository) getStandardTemplate(now time.Time) *models.WorkflowTemplate
 	return &models.WorkflowTemplate{
 		ID:          "standard",
 		Name:        "Plan & Build",
-		Description: "Plan first, then build: Todo → Plan → Implementation → Done",
+		Description: "Two-phase workflow: the agent first creates a plan for your review, then implements it. Ideal for tasks that benefit from upfront design.",
 		IsSystem:    true,
 		CreatedAt:   now,
 		UpdatedAt:   now,
@@ -235,48 +451,48 @@ func (r *Repository) getStandardTemplate(now time.Time) *models.WorkflowTemplate
 			{
 				ID:              "todo",
 				Name:            "Todo",
-				StepType:        models.StepTypeBacklog,
 				Position:        0,
 				Color:           "bg-neutral-400",
-				TaskState:       "TODO",
-				AutoStartAgent:  false,
+				Events:          models.StepEvents{},
 				AllowManualMove: true,
 			},
 			{
-				ID:               "plan",
-				Name:             "Plan",
-				StepType:         models.StepTypePlanning,
-				Position:         1,
-				Color:            "bg-purple-500",
-				TaskState:        "IN_PROGRESS",
-				AutoStartAgent:   true,
-				PlanMode:         true,
-				RequireApproval:  true,
-				PromptPrefix:     "[PLANNING PHASE]\nAnalyze this task and create a detailed implementation plan.\nDo NOT make any code changes yet - only analyze and plan.\n\nBefore creating the plan, ask the user clarifying questions if anything is unclear or ambiguous about the requirements. Use the ask_user_question_kandev tool to get answers before proceeding.\n\nCreate a plan that includes:\n1. Understanding of the requirements\n2. Files that need to be modified or created\n3. Step-by-step implementation approach\n4. Potential risks or considerations\n\nWhen including diagrams in your plan (architecture, sequence, flowcharts, etc.), always use mermaid syntax in code blocks.\n\nIMPORTANT: Save your plan using the create_task_plan_kandev MCP tool with the task_id provided in the session context.\nAfter saving the plan, STOP and wait for user review. The user will review your plan in the UI and may edit it.\nDo not create any other files during this phase - only use the MCP tool to save the plan.",
-				OnCompleteStepID: "implementation",
-				AllowManualMove:  true,
+				ID:          "plan",
+				Name:        "Plan",
+				Position:    1,
+				Color:       "bg-purple-500",
+				IsStartStep: true,
+				Prompt:      "[PLANNING PHASE]\nAnalyze this task and create a detailed implementation plan.\nDo NOT make any code changes yet - only analyze and plan.\n\nBefore creating the plan, ask the user clarifying questions if anything is unclear or ambiguous about the requirements. Use the ask_user_question_kandev tool to get answers before proceeding.\n\nCreate a plan that includes:\n1. Understanding of the requirements\n2. Files that need to be modified or created\n3. Step-by-step implementation approach\n4. Potential risks or considerations\n\nWhen including diagrams in your plan (architecture, sequence, flowcharts, etc.), always use mermaid syntax in code blocks.\n\nIMPORTANT: Save your plan using the create_task_plan_kandev MCP tool with the task_id provided in the session context.\nAfter saving the plan, STOP and wait for user review. The user will review your plan in the UI and may edit it.\nDo not create any other files during this phase - only use the MCP tool to save the plan.\n\n{{task_prompt}}",
+				Events: models.StepEvents{
+					OnEnter: []models.OnEnterAction{
+						{Type: models.OnEnterEnablePlanMode},
+						{Type: models.OnEnterAutoStartAgent},
+					},
+				},
+				AllowManualMove: true,
 			},
 			{
-				ID:               "implementation",
-				Name:             "Implementation",
-				StepType:         models.StepTypeImplementation,
-				Position:         2,
-				Color:            "bg-blue-500",
-				TaskState:        "IN_PROGRESS",
-				AutoStartAgent:   true,
-				RequireApproval:  true,
-				PromptPrefix:     "[IMPLEMENTATION PHASE]\nBefore starting implementation, retrieve the task plan using get_task_plan_kandev with the task_id from the session context.\nReview the plan carefully, including any edits the user may have made.\nAcknowledge the plan and any user modifications before proceeding.\n\nThen implement the task following the plan step-by-step.\nYou can update the plan during implementation using update_task_plan_kandev if needed.",
-				OnCompleteStepID: "done",
-				AllowManualMove:  true,
+				ID:       "implementation",
+				Name:     "Implementation",
+				Position: 2,
+				Color:    "bg-blue-500",
+				Prompt:   "[IMPLEMENTATION PHASE]\nBefore starting implementation, retrieve the task plan using get_task_plan_kandev with the task_id from the session context.\nReview the plan carefully, including any edits the user may have made.\nAcknowledge the plan and any user modifications before proceeding.\n\nThen implement the task following the plan step-by-step.\nYou can update the plan during implementation using update_task_plan_kandev if needed.\n\n{{task_prompt}}",
+				Events: models.StepEvents{
+					OnEnter: []models.OnEnterAction{
+						{Type: models.OnEnterAutoStartAgent},
+					},
+					OnTurnComplete: []models.OnTurnCompleteAction{
+						{Type: models.OnTurnCompleteMoveToNext},
+					},
+				},
+				AllowManualMove: true,
 			},
 			{
 				ID:              "done",
 				Name:            "Done",
-				StepType:        models.StepTypeDone,
 				Position:        3,
 				Color:           "bg-green-500",
-				TaskState:       "COMPLETED",
-				AutoStartAgent:  false,
+				Events:          models.StepEvents{},
 				AllowManualMove: true,
 			},
 		},
@@ -288,7 +504,7 @@ func (r *Repository) getArchitectureTemplate(now time.Time) *models.WorkflowTemp
 	return &models.WorkflowTemplate{
 		ID:          "architecture",
 		Name:        "Architecture",
-		Description: "Design and review: Ideas → Planning → Review → Approved",
+		Description: "Focus on architecture and design. The agent creates technical designs for your review before any implementation begins.",
 		IsSystem:    true,
 		CreatedAt:   now,
 		UpdatedAt:   now,
@@ -296,108 +512,181 @@ func (r *Repository) getArchitectureTemplate(now time.Time) *models.WorkflowTemp
 			{
 				ID:              "backlog",
 				Name:            "Ideas",
-				StepType:        models.StepTypeBacklog,
 				Position:        0,
 				Color:           "bg-neutral-400",
-				TaskState:       "TODO",
-				AutoStartAgent:  false,
+				Events:          models.StepEvents{},
 				AllowManualMove: true,
 			},
 			{
-				ID:               "planning",
-				Name:             "Planning",
-				StepType:         models.StepTypePlanning,
-				Position:         1,
-				Color:            "bg-purple-500",
-				TaskState:        "IN_PROGRESS",
-				AutoStartAgent:   true,
-				PlanMode:         true,
-				PromptPrefix:     "[ARCHITECTURE PHASE]\nAnalyze and design the architecture for this task.\n\nBefore creating the design, ask the user clarifying questions if anything is unclear or ambiguous about the requirements. Use the ask_user_question_kandev tool to get answers before proceeding.\n\nWhen including diagrams in your design (architecture, sequence, flowcharts, etc.), always use mermaid syntax in code blocks.\n\nIMPORTANT: Save your design using the create_task_plan_kandev MCP tool with the task_id provided in the session context.\nAfter saving the plan, STOP and wait for user review. The user will review your design in the UI and may edit it.\nDo not create any other files during this phase - only use the MCP tool to save the plan.",
-				OnCompleteStepID: "review",
-				AllowManualMove:  true,
+				ID:          "planning",
+				Name:        "Planning",
+				Position:    1,
+				Color:       "bg-purple-500",
+				IsStartStep: true,
+				Prompt:      "[ARCHITECTURE PHASE]\nAnalyze and design the architecture for this task.\n\nBefore creating the design, ask the user clarifying questions if anything is unclear or ambiguous about the requirements. Use the ask_user_question_kandev tool to get answers before proceeding.\n\nWhen including diagrams in your design (architecture, sequence, flowcharts, etc.), always use mermaid syntax in code blocks.\n\nIMPORTANT: Save your design using the create_task_plan_kandev MCP tool with the task_id provided in the session context.\nAfter saving the plan, STOP and wait for user review. The user will review your design in the UI and may edit it.\nDo not create any other files during this phase - only use the MCP tool to save the plan.\n\n{{task_prompt}}",
+				Events: models.StepEvents{
+					OnEnter: []models.OnEnterAction{
+						{Type: models.OnEnterEnablePlanMode},
+						{Type: models.OnEnterAutoStartAgent},
+					},
+					OnTurnComplete: []models.OnTurnCompleteAction{
+						{Type: models.OnTurnCompleteDisablePlanMode},
+						{Type: models.OnTurnCompleteMoveToNext},
+					},
+				},
+				AllowManualMove: true,
 			},
 			{
-				ID:               "review",
-				Name:             "Review",
-				StepType:         models.StepTypeReview,
-				Position:         2,
-				Color:            "bg-yellow-500",
-				TaskState:        "REVIEW",
-				AutoStartAgent:   false,
-				RequireApproval:  true,
-				OnApprovalStepID: "done",
-				AllowManualMove:  true,
+				ID:       "review",
+				Name:     "Review",
+				Position: 2,
+				Color:    "bg-yellow-500",
+				Events: models.StepEvents{
+					OnEnter: []models.OnEnterAction{
+						{Type: models.OnEnterEnablePlanMode},
+					},
+					OnTurnStart: []models.OnTurnStartAction{
+						{Type: models.OnTurnStartMoveToPrevious},
+					},
+				},
+				AllowManualMove: true,
 			},
 			{
 				ID:              "done",
 				Name:            "Approved",
-				StepType:        models.StepTypeDone,
 				Position:        3,
 				Color:           "bg-green-500",
-				TaskState:       "COMPLETED",
-				AutoStartAgent:  false,
+				Events:          models.StepEvents{},
 				AllowManualMove: true,
 			},
 		},
 	}
 }
 
-// getSimpleTemplate returns the simple workflow template.
-func (r *Repository) getSimpleTemplate(now time.Time) *models.WorkflowTemplate {
+// getKanbanTemplate returns the kanban workflow template.
+func (r *Repository) getKanbanTemplate(now time.Time) *models.WorkflowTemplate {
 	return &models.WorkflowTemplate{
 		ID:          "simple",
-		Name:        "Simple",
-		Description: "Quick start: Backlog → In Progress → Review → Done",
+		Name:        "Kanban",
+		Description: "Classic board with automated agent work. Tasks start in In Progress where the agent runs automatically, then move to Review when done.",
 		IsSystem:    true,
 		CreatedAt:   now,
 		UpdatedAt:   now,
 		Steps: []models.StepDefinition{
 			{
-				ID:              "backlog",
-				Name:            "Backlog",
-				StepType:        models.StepTypeBacklog,
-				Position:        0,
-				Color:           "bg-neutral-400",
-				TaskState:       "TODO",
-				AutoStartAgent:  false,
+				ID:       "backlog",
+				Name:     "Backlog",
+				Position: 0,
+				Color:    "bg-neutral-400",
+				Events: models.StepEvents{
+					OnTurnStart: []models.OnTurnStartAction{
+						{Type: models.OnTurnStartMoveToNext},
+					},
+					OnTurnComplete: []models.OnTurnCompleteAction{
+						{Type: models.OnTurnCompleteMoveToStep, Config: map[string]interface{}{"step_id": "review"}},
+					},
+				},
 				AllowManualMove: true,
 			},
 			{
-				ID:               "in-progress",
-				Name:             "In Progress",
-				StepType:         models.StepTypeImplementation,
-				Position:         1,
-				Color:            "bg-blue-500",
-				TaskState:        "IN_PROGRESS",
-				AutoStartAgent:   true,
-				OnCompleteStepID: "review",
-				AllowManualMove:  true,
+				ID:       "in-progress",
+				Name:     "In Progress",
+				Position: 1,
+				Color:    "bg-blue-500",
+				Events: models.StepEvents{
+					OnEnter: []models.OnEnterAction{
+						{Type: models.OnEnterAutoStartAgent},
+					},
+					OnTurnComplete: []models.OnTurnCompleteAction{
+						{Type: models.OnTurnCompleteMoveToStep, Config: map[string]interface{}{"step_id": "review"}},
+					},
+				},
+				AllowManualMove: true,
+				IsStartStep:     true,
 			},
 			{
-				ID:              "review",
-				Name:             "Review",
-				StepType:         models.StepTypeReview,
-				Position:         2,
-				Color:            "bg-yellow-500",
-				TaskState:        "REVIEW",
-				AutoStartAgent:  false,
-				RequireApproval: false,
-				AllowManualMove:  true,
+				ID:       "review",
+				Name:     "Review",
+				Position: 2,
+				Color:    "bg-yellow-500",
+				Events: models.StepEvents{
+					OnTurnStart: []models.OnTurnStartAction{
+						{Type: models.OnTurnStartMoveToPrevious},
+					},
+				},
+				AllowManualMove: true,
 			},
 			{
-				ID:              "done",
-				Name:            "Done",
-				StepType:        models.StepTypeDone,
-				Position:        3,
-				Color:           "bg-green-500",
-				TaskState:       "COMPLETED",
-				AutoStartAgent:  false,
+				ID:       "done",
+				Name:     "Done",
+				Position: 3,
+				Color:    "bg-green-500",
+				Events: models.StepEvents{
+					OnTurnStart: []models.OnTurnStartAction{
+						{Type: models.OnTurnStartMoveToStep, Config: map[string]interface{}{"step_id": "in-progress"}},
+					},
+				},
 				AllowManualMove: true,
 			},
 		},
 	}
 }
 
+
+// getPRReviewTemplate returns the PR review workflow template.
+func (r *Repository) getPRReviewTemplate(now time.Time) *models.WorkflowTemplate {
+	return &models.WorkflowTemplate{
+		ID:          "pr-review",
+		Name:        "PR Review",
+		Description: "Track pull requests through review. PRs wait in queue, get reviewed by the agent, then marked as done.",
+		IsSystem:    true,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+		Steps: []models.StepDefinition{
+			{
+				ID:          "waiting",
+				Name:        "Waiting",
+				Position:    0,
+				Color:       "bg-neutral-400",
+				IsStartStep: true,
+				Events: models.StepEvents{
+					OnTurnStart: []models.OnTurnStartAction{
+						{Type: models.OnTurnStartMoveToNext},
+					},
+				},
+				AllowManualMove: true,
+			},
+			{
+				ID:       "review",
+				Name:     "Review",
+				Position: 1,
+				Color:    "bg-yellow-500",
+				Prompt:   "Please review the changed files in the current git worktree.\n\nSTEP 1: Determine what to review\n- First, check if there are any uncommitted changes (dirty working directory)\n- If there are uncommitted/staged changes: review those files\n- If the working directory is clean: review the commits that have diverged from the master/main branch\n\nSTEP 2: Review the changes, then output your findings in EXACTLY 4 sections: BUG, IMPROVEMENT, NITPICK, PERFORMANCE.\n\nRules:\n- Each section is OPTIONAL — only include it if you have findings for that category\n- If a section has no findings, omit it entirely\n- Format each finding as: filename:line_number - Description\n- Be specific and reference exact line numbers\n- Keep descriptions concise but actionable\n\n{{task_prompt}}",
+				Events: models.StepEvents{
+					OnEnter: []models.OnEnterAction{
+						{Type: models.OnEnterAutoStartAgent},
+					},
+					OnTurnComplete: []models.OnTurnCompleteAction{
+						{Type: models.OnTurnCompleteMoveToNext},
+					},
+				},
+				AllowManualMove: true,
+			},
+			{
+				ID:       "done",
+				Name:     "Done",
+				Position: 2,
+				Color:    "bg-green-500",
+				Events: models.StepEvents{
+					OnTurnStart: []models.OnTurnStartAction{
+						{Type: models.OnTurnStartMoveToPrevious},
+					},
+				},
+				AllowManualMove: true,
+			},
+		},
+	}
+}
 
 // ============================================================================
 // WorkflowTemplate CRUD Operations
@@ -574,65 +863,71 @@ func (r *Repository) CreateStep(ctx context.Context, step *models.WorkflowStep) 
 	step.CreatedAt = now
 	step.UpdatedAt = now
 
-	_, err := r.db.ExecContext(ctx, `
+	eventsJSON, err := json.Marshal(step.Events)
+	if err != nil {
+		return fmt.Errorf("failed to marshal events: %w", err)
+	}
+
+	_, err = r.db.ExecContext(ctx, `
 		INSERT INTO workflow_steps (
-			id, board_id, name, step_type, position, color,
-			auto_start_agent, plan_mode, require_approval,
-			prompt_prefix, prompt_suffix, on_complete_step_id, on_approval_step_id,
-			allow_manual_move, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, step.ID, step.BoardID, step.Name, step.StepType, step.Position, step.Color,
-		sqlite.BoolToInt(step.AutoStartAgent), sqlite.BoolToInt(step.PlanMode), sqlite.BoolToInt(step.RequireApproval),
-		step.PromptPrefix, step.PromptSuffix, step.OnCompleteStepID, step.OnApprovalStepID,
-		sqlite.BoolToInt(step.AllowManualMove), step.CreatedAt, step.UpdatedAt)
+			id, workflow_id, name, position, color,
+			prompt, events, allow_manual_move, is_start_step, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, step.ID, step.WorkflowID, step.Name, step.Position, step.Color,
+		step.Prompt, string(eventsJSON), sqlite.BoolToInt(step.AllowManualMove),
+		sqlite.BoolToInt(step.IsStartStep), step.CreatedAt, step.UpdatedAt)
 
 	return err
 }
 
+// scanStep scans a single workflow step row including JSON events parsing.
+func (r *Repository) scanStep(row interface {
+	Scan(dest ...interface{}) error
+}) (*models.WorkflowStep, error) {
+	step := &models.WorkflowStep{}
+	var allowManualMove, isStartStep int
+	var color, prompt, eventsJSON sql.NullString
+
+	err := row.Scan(&step.ID, &step.WorkflowID, &step.Name, &step.Position, &color,
+		&prompt, &eventsJSON, &allowManualMove, &isStartStep, &step.CreatedAt, &step.UpdatedAt)
+
+	if err != nil {
+		return nil, err
+	}
+
+	step.AllowManualMove = allowManualMove == 1
+	step.IsStartStep = isStartStep == 1
+	if color.Valid {
+		step.Color = color.String
+	}
+	if prompt.Valid {
+		step.Prompt = prompt.String
+	}
+	if eventsJSON.Valid && eventsJSON.String != "" {
+		if err := json.Unmarshal([]byte(eventsJSON.String), &step.Events); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal events: %w", err)
+		}
+	}
+
+	return step, nil
+}
+
+const stepSelectColumns = `id, workflow_id, name, position, color, prompt, events, allow_manual_move, is_start_step, created_at, updated_at`
+
 // GetStep retrieves a workflow step by ID.
 func (r *Repository) GetStep(ctx context.Context, id string) (*models.WorkflowStep, error) {
-	step := &models.WorkflowStep{}
-	var autoStartAgent, planMode, requireApproval, allowManualMove int
-	var onCompleteStepID, onApprovalStepID, promptPrefix, promptSuffix, color sql.NullString
-
-	err := r.db.QueryRowContext(ctx, `
-		SELECT id, board_id, name, step_type, position, color,
-			auto_start_agent, plan_mode, require_approval,
-			prompt_prefix, prompt_suffix, on_complete_step_id, on_approval_step_id,
-			allow_manual_move, created_at, updated_at
+	row := r.db.QueryRowContext(ctx, `
+		SELECT `+stepSelectColumns+`
 		FROM workflow_steps WHERE id = ?
-	`, id).Scan(&step.ID, &step.BoardID, &step.Name, &step.StepType, &step.Position, &color,
-		&autoStartAgent, &planMode, &requireApproval,
-		&promptPrefix, &promptSuffix, &onCompleteStepID, &onApprovalStepID,
-		&allowManualMove, &step.CreatedAt, &step.UpdatedAt)
+	`, id)
 
+	step, err := r.scanStep(row)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("workflow step not found: %s", id)
 	}
 	if err != nil {
 		return nil, err
 	}
-
-	step.AutoStartAgent = autoStartAgent == 1
-	step.PlanMode = planMode == 1
-	step.RequireApproval = requireApproval == 1
-	step.AllowManualMove = allowManualMove == 1
-	if color.Valid {
-		step.Color = color.String
-	}
-	if promptPrefix.Valid {
-		step.PromptPrefix = promptPrefix.String
-	}
-	if promptSuffix.Valid {
-		step.PromptSuffix = promptSuffix.String
-	}
-	if onCompleteStepID.Valid {
-		step.OnCompleteStepID = &onCompleteStepID.String
-	}
-	if onApprovalStepID.Valid {
-		step.OnApprovalStepID = &onApprovalStepID.String
-	}
-
 	return step, nil
 }
 
@@ -640,17 +935,20 @@ func (r *Repository) GetStep(ctx context.Context, id string) (*models.WorkflowSt
 func (r *Repository) UpdateStep(ctx context.Context, step *models.WorkflowStep) error {
 	step.UpdatedAt = time.Now().UTC()
 
+	eventsJSON, err := json.Marshal(step.Events)
+	if err != nil {
+		return fmt.Errorf("failed to marshal events: %w", err)
+	}
+
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE workflow_steps SET
-			name = ?, step_type = ?, position = ?, color = ?,
-			auto_start_agent = ?, plan_mode = ?, require_approval = ?,
-			prompt_prefix = ?, prompt_suffix = ?, on_complete_step_id = ?, on_approval_step_id = ?,
-			allow_manual_move = ?, updated_at = ?
+			name = ?, position = ?, color = ?,
+			prompt = ?, events = ?,
+			allow_manual_move = ?, is_start_step = ?, updated_at = ?
 		WHERE id = ?
-	`, step.Name, step.StepType, step.Position, step.Color,
-		sqlite.BoolToInt(step.AutoStartAgent), sqlite.BoolToInt(step.PlanMode), sqlite.BoolToInt(step.RequireApproval),
-		step.PromptPrefix, step.PromptSuffix, step.OnCompleteStepID, step.OnApprovalStepID,
-		sqlite.BoolToInt(step.AllowManualMove), step.UpdatedAt, step.ID)
+	`, step.Name, step.Position, step.Color,
+		step.Prompt, string(eventsJSON),
+		sqlite.BoolToInt(step.AllowManualMove), sqlite.BoolToInt(step.IsStartStep), step.UpdatedAt, step.ID)
 	if err != nil {
 		return err
 	}
@@ -662,26 +960,60 @@ func (r *Repository) UpdateStep(ctx context.Context, step *models.WorkflowStep) 
 	return nil
 }
 
-// ClearStepReferences clears any OnCompleteStepID or OnApprovalStepID references
-// to the given step ID within the specified board. This should be called before
-// deleting a step to prevent dangling references.
-func (r *Repository) ClearStepReferences(ctx context.Context, boardID, stepID string) error {
+// ClearStartStepFlag clears the is_start_step flag for all steps in a workflow except the given step.
+func (r *Repository) ClearStartStepFlag(ctx context.Context, workflowID, exceptStepID string) error {
 	_, err := r.db.ExecContext(ctx, `
-		UPDATE workflow_steps
-		SET on_complete_step_id = NULL, updated_at = ?
-		WHERE board_id = ? AND on_complete_step_id = ?
-	`, time.Now().UTC(), boardID, stepID)
+		UPDATE workflow_steps SET is_start_step = 0
+		WHERE workflow_id = ? AND id != ?
+	`, workflowID, exceptStepID)
+	return err
+}
+
+// GetStartStep returns the step marked as is_start_step for a workflow.
+// Returns nil if no step is marked.
+func (r *Repository) GetStartStep(ctx context.Context, workflowID string) (*models.WorkflowStep, error) {
+	row := r.db.QueryRowContext(ctx, `
+		SELECT `+stepSelectColumns+`
+		FROM workflow_steps WHERE workflow_id = ? AND is_start_step = 1
+		LIMIT 1
+	`, workflowID)
+
+	step, err := r.scanStep(row)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
 	if err != nil {
-		return fmt.Errorf("failed to clear on_complete_step_id references: %w", err)
+		return nil, err
+	}
+	return step, nil
+}
+
+// ClearStepReferences clears any move_to_step event config references
+// to the given step ID within the specified workflow.
+func (r *Repository) ClearStepReferences(ctx context.Context, workflowID, stepID string) error {
+	// Load all steps in the workflow and update any that reference the deleted step
+	steps, err := r.ListStepsByWorkflow(ctx, workflowID)
+	if err != nil {
+		return err
 	}
 
-	_, err = r.db.ExecContext(ctx, `
-		UPDATE workflow_steps
-		SET on_approval_step_id = NULL, updated_at = ?
-		WHERE board_id = ? AND on_approval_step_id = ?
-	`, time.Now().UTC(), boardID, stepID)
-	if err != nil {
-		return fmt.Errorf("failed to clear on_approval_step_id references: %w", err)
+	for _, step := range steps {
+		modified := false
+		for i, action := range step.Events.OnTurnComplete {
+			if action.Type == models.OnTurnCompleteMoveToStep && action.Config != nil {
+				if refID, ok := action.Config["step_id"].(string); ok && refID == stepID {
+					// Remove this action
+					step.Events.OnTurnComplete = append(step.Events.OnTurnComplete[:i], step.Events.OnTurnComplete[i+1:]...)
+					modified = true
+					break
+				}
+			}
+		}
+		if modified {
+			if err := r.UpdateStep(ctx, step); err != nil {
+				return fmt.Errorf("failed to clear step reference from step %s: %w", step.ID, err)
+			}
+		}
 	}
 
 	return nil
@@ -701,15 +1033,12 @@ func (r *Repository) DeleteStep(ctx context.Context, id string) error {
 	return nil
 }
 
-// ListStepsByBoard returns all workflow steps for a board.
-func (r *Repository) ListStepsByBoard(ctx context.Context, boardID string) ([]*models.WorkflowStep, error) {
+// ListStepsByWorkflow returns all workflow steps for a workflow.
+func (r *Repository) ListStepsByWorkflow(ctx context.Context, workflowID string) ([]*models.WorkflowStep, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, board_id, name, step_type, position, color,
-			auto_start_agent, plan_mode, require_approval,
-			prompt_prefix, prompt_suffix, on_complete_step_id, on_approval_step_id,
-			allow_manual_move, created_at, updated_at
-		FROM workflow_steps WHERE board_id = ? ORDER BY position
-	`, boardID)
+		SELECT `+stepSelectColumns+`
+		FROM workflow_steps WHERE workflow_id = ? ORDER BY position
+	`, workflowID)
 	if err != nil {
 		return nil, err
 	}
@@ -718,89 +1047,14 @@ func (r *Repository) ListStepsByBoard(ctx context.Context, boardID string) ([]*m
 	return r.scanSteps(rows)
 }
 
-// GetStepByBoardAndType retrieves a workflow step by board ID and step type.
-func (r *Repository) GetStepByBoardAndType(ctx context.Context, boardID string, stepType models.StepType) (*models.WorkflowStep, error) {
-	step := &models.WorkflowStep{}
-	var autoStartAgent, planMode, requireApproval, allowManualMove int
-	var onCompleteStepID, onApprovalStepID, promptPrefix, promptSuffix, color sql.NullString
-
-	err := r.db.QueryRowContext(ctx, `
-		SELECT id, board_id, name, step_type, position, color,
-			auto_start_agent, plan_mode, require_approval,
-			prompt_prefix, prompt_suffix, on_complete_step_id, on_approval_step_id,
-			allow_manual_move, created_at, updated_at
-		FROM workflow_steps WHERE board_id = ? AND step_type = ?
-	`, boardID, stepType).Scan(&step.ID, &step.BoardID, &step.Name, &step.StepType, &step.Position, &color,
-		&autoStartAgent, &planMode, &requireApproval,
-		&promptPrefix, &promptSuffix, &onCompleteStepID, &onApprovalStepID,
-		&allowManualMove, &step.CreatedAt, &step.UpdatedAt)
-
-	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("workflow step not found for board %s with type %s", boardID, stepType)
-	}
-	if err != nil {
-		return nil, err
-	}
-
-	step.AutoStartAgent = autoStartAgent == 1
-	step.PlanMode = planMode == 1
-	step.RequireApproval = requireApproval == 1
-	step.AllowManualMove = allowManualMove == 1
-	if color.Valid {
-		step.Color = color.String
-	}
-	if promptPrefix.Valid {
-		step.PromptPrefix = promptPrefix.String
-	}
-	if promptSuffix.Valid {
-		step.PromptSuffix = promptSuffix.String
-	}
-	if onCompleteStepID.Valid {
-		step.OnCompleteStepID = &onCompleteStepID.String
-	}
-	if onApprovalStepID.Valid {
-		step.OnApprovalStepID = &onApprovalStepID.String
-	}
-
-	return step, nil
-}
-
 // scanSteps is a helper to scan multiple workflow step rows.
 func (r *Repository) scanSteps(rows *sql.Rows) ([]*models.WorkflowStep, error) {
 	var result []*models.WorkflowStep
 	for rows.Next() {
-		step := &models.WorkflowStep{}
-		var autoStartAgent, planMode, requireApproval, allowManualMove int
-		var onCompleteStepID, onApprovalStepID, promptPrefix, promptSuffix, color sql.NullString
-
-		err := rows.Scan(&step.ID, &step.BoardID, &step.Name, &step.StepType, &step.Position, &color,
-			&autoStartAgent, &planMode, &requireApproval,
-			&promptPrefix, &promptSuffix, &onCompleteStepID, &onApprovalStepID,
-			&allowManualMove, &step.CreatedAt, &step.UpdatedAt)
+		step, err := r.scanStep(rows)
 		if err != nil {
 			return nil, err
 		}
-
-		step.AutoStartAgent = autoStartAgent == 1
-		step.PlanMode = planMode == 1
-		step.RequireApproval = requireApproval == 1
-		step.AllowManualMove = allowManualMove == 1
-		if color.Valid {
-			step.Color = color.String
-		}
-		if promptPrefix.Valid {
-			step.PromptPrefix = promptPrefix.String
-		}
-		if promptSuffix.Valid {
-			step.PromptSuffix = promptSuffix.String
-		}
-		if onCompleteStepID.Valid {
-			step.OnCompleteStepID = &onCompleteStepID.String
-		}
-		if onApprovalStepID.Valid {
-			step.OnApprovalStepID = &onApprovalStepID.String
-		}
-
 		result = append(result, step)
 	}
 	return result, rows.Err()

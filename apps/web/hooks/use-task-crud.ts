@@ -7,7 +7,7 @@ import type { Task } from '@/components/kanban-card';
 import type { KanbanState } from '@/lib/state/slices';
 
 /**
- * Custom hook that extracts task CRUD operations from the KanbanBoard component.
+ * Custom hook that extracts task CRUD operations from the Kanban component.
  * Manages dialog state and provides handlers for create, edit, and delete operations.
  *
  * @returns Object with dialog state and task operation handlers
@@ -32,7 +32,7 @@ export function useTaskCRUD() {
 
   const handleDelete = useCallback(
     async (task: Task) => {
-      if (!kanban.boardId) return;
+      if (!kanban.workflowId) return;
 
       setDeletingTaskId(task.id);
       try {
@@ -51,7 +51,7 @@ export function useTaskCRUD() {
         setDeletingTaskId(null);
       }
     },
-    [deleteTaskById, kanban.boardId, store]
+    [deleteTaskById, kanban.workflowId, store]
   );
 
   const handleDialogOpenChange = useCallback((open: boolean) => {

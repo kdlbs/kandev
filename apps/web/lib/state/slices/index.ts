@@ -26,7 +26,7 @@ export type {
 export type { UISlice, UISliceState, UISliceActions } from './ui/types';
 
 // Re-export commonly used types from each domain
-export type { KanbanState, BoardState, TaskState } from './kanban/types';
+export type { KanbanState, KanbanMultiState, WorkflowSnapshotData, WorkflowsState, TaskState } from './kanban/types';
 export type { WorkspaceState, RepositoriesState, RepositoryBranchesState, RepositoryScriptsState } from './workspace/types';
 export type {
   ExecutorsState,

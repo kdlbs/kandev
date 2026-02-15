@@ -21,13 +21,13 @@ import { useResponsiveBreakpoint } from '@/hooks/use-responsive-breakpoint';
 import { useAppStore } from '@/components/state-provider';
 
 export type KanbanBoardGridProps = {
-  columns: WorkflowStep[];
+  steps: WorkflowStep[];
   tasks: Task[];
   onPreviewTask: (task: Task) => void;
   onOpenTask: (task: Task) => void;
   onEditTask: (task: Task) => void;
   onDeleteTask: (task: Task) => void;
-  onMoveTask?: (task: Task, targetColumnId: string) => void;
+  onMoveTask?: (task: Task, targetStepId: string) => void;
   onDragStart: (event: DragStartEvent) => void;
   onDragEnd: (event: DragEndEvent) => void;
   onDragCancel: () => void;
@@ -39,7 +39,7 @@ export type KanbanBoardGridProps = {
 };
 
 export function KanbanBoardGrid({
-  columns,
+  steps,
   tasks,
   onPreviewTask,
   onOpenTask,
@@ -74,58 +74,58 @@ export function KanbanBoardGrid({
     })
   );
 
-  const getTasksForColumn = (columnId: string) => {
+  const getTasksForStep = (stepId: string) => {
     return tasks
-      .filter((task) => task.workflowStepId === columnId)
+      .filter((task) => task.workflowStepId === stepId)
       .map((task) => ({ ...task, position: task.position ?? 0 }))
       .sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
   };
 
-  // Calculate task counts per column for tabs
+  // Calculate task counts per step for tabs
   const taskCounts = useMemo(() => {
     const counts: Record<string, number> = {};
-    for (const column of columns) {
-      counts[column.id] = tasks.filter((task) => task.workflowStepId === column.id).length;
+    for (const step of steps) {
+      counts[step.id] = tasks.filter((task) => task.workflowStepId === step.id).length;
     }
     return counts;
-  }, [columns, tasks]);
+  }, [steps, tasks]);
 
-  // On mobile, select the first column with tasks on initial load
+  // On mobile, select the first step with tasks on initial load
   const hasInitializedRef = useRef(false);
   useEffect(() => {
-    if (!isMobile || hasInitializedRef.current || columns.length === 0) return;
+    if (!isMobile || hasInitializedRef.current || steps.length === 0) return;
 
-    const firstColumnWithTasks = columns.findIndex(
-      (column) => taskCounts[column.id] > 0
+    const firstStepWithTasks = steps.findIndex(
+      (step) => taskCounts[step.id] > 0
     );
 
-    if (firstColumnWithTasks !== -1 && firstColumnWithTasks !== activeColumnIndex) {
-      setActiveColumnIndex(firstColumnWithTasks);
+    if (firstStepWithTasks !== -1 && firstStepWithTasks !== activeColumnIndex) {
+      setActiveColumnIndex(firstStepWithTasks);
     }
     hasInitializedRef.current = true;
-  }, [isMobile, columns, taskCounts, activeColumnIndex, setActiveColumnIndex]);
+  }, [isMobile, steps, taskCounts, activeColumnIndex, setActiveColumnIndex]);
 
-  // Get current column ID for mobile drop targets
-  const currentColumnId = columns[activeColumnIndex]?.id ?? null;
+  // Get current step ID for mobile drop targets
+  const currentStepId = steps[activeColumnIndex]?.id ?? null;
 
-  // Check if we have a board selected (from SSR or client)
-  const boardsActiveId = useAppStore((state) => state.boards.activeId);
-  const kanbanBoardId = useAppStore((state) => state.kanban.boardId);
+  // Check if we have a workflow selected (from SSR or client)
+  const workflowsActiveId = useAppStore((state) => state.workflows.activeId);
+  const kanbanWorkflowId = useAppStore((state) => state.kanban.workflowId);
 
   // Show loading state when:
   // 1. isLoading is explicitly true, or
-  // 2. We have an active board selected but the kanban data hasn't been hydrated yet
-  //    (boards.activeId is set but kanban.boardId is null - waiting for snapshot)
-  // 3. isLoading is undefined AND no columns AND no board selected
+  // 2. We have an active workflow selected but the kanban data hasn't been hydrated yet
+  //    (workflows.activeId is set but kanban.workflowId is null - waiting for snapshot)
+  // 3. isLoading is undefined AND no columns AND no workflow selected
   //    (still initializing before any SSR data)
   const showLoading =
     isLoading === true ||
-    (boardsActiveId && !kanbanBoardId) ||
-    (isLoading === undefined && columns.length === 0 && !boardsActiveId);
+    (workflowsActiveId && !kanbanWorkflowId) ||
+    (isLoading === undefined && steps.length === 0 && !workflowsActiveId);
 
   const renderEmptyState = () => (
     <div className="h-full rounded-lg border border-dashed border-border/60 flex items-center justify-center text-sm text-muted-foreground mx-4">
-      {showLoading ? 'Loading...' : 'No boards available yet.'}
+      {showLoading ? 'Loading...' : 'No workflows available yet.'}
     </div>
   );
 
@@ -139,18 +139,18 @@ export function KanbanBoardGrid({
         onDragCancel={onDragCancel}
       >
         <div className="flex-1 min-h-0 flex flex-col">
-          {showLoading || columns.length === 0 ? (
+          {showLoading || steps.length === 0 ? (
             renderEmptyState()
           ) : (
             <>
               <MobileColumnTabs
-                columns={columns}
+                steps={steps}
                 activeIndex={activeColumnIndex}
                 taskCounts={taskCounts}
                 onColumnChange={setActiveColumnIndex}
               />
               <SwipeableColumns
-                columns={columns}
+                steps={steps}
                 tasks={tasks}
                 activeIndex={activeColumnIndex}
                 onIndexChange={setActiveColumnIndex}
@@ -163,8 +163,8 @@ export function KanbanBoardGrid({
                 deletingTaskId={deletingTaskId}
               />
               <MobileDropTargets
-                columns={columns}
-                currentColumnId={currentColumnId}
+                steps={steps}
+                currentStepId={currentStepId}
                 isDragging={!!activeTask}
               />
             </>
@@ -192,24 +192,24 @@ export function KanbanBoardGrid({
         onDragCancel={onDragCancel}
       >
         <div className="flex-1 min-h-0 px-4 pb-4">
-          {showLoading || columns.length === 0 ? (
+          {showLoading || steps.length === 0 ? (
             renderEmptyState()
           ) : (
             <div className="flex overflow-x-auto snap-x snap-mandatory gap-2 h-full scrollbar-hide">
-              {columns.map((column) => (
+              {steps.map((step) => (
                 <div
-                  key={column.id}
+                  key={step.id}
                   className="flex-shrink-0 w-[calc(50%-4px)] snap-start h-full"
                 >
                   <KanbanColumn
-                    column={column}
-                    tasks={getTasksForColumn(column.id)}
+                    step={step}
+                    tasks={getTasksForStep(step.id)}
                     onPreviewTask={onPreviewTask}
                     onOpenTask={onOpenTask}
                     onEditTask={onEditTask}
                     onDeleteTask={onDeleteTask}
                     onMoveTask={onMoveTask}
-                    columns={columns}
+                    steps={steps}
                     showMaximizeButton={showMaximizeButton}
                     deletingTaskId={deletingTaskId}
                   />
@@ -234,24 +234,24 @@ export function KanbanBoardGrid({
       onDragCancel={onDragCancel}
     >
       <div className="flex-1 min-h-0 px-4 pb-4">
-        {showLoading || columns.length === 0 ? (
+        {showLoading || steps.length === 0 ? (
           renderEmptyState()
         ) : (
           <div
             className="grid gap-2 rounded-lg h-full"
-            style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(0, 1fr))` }}
+            style={{ gridTemplateColumns: `repeat(${steps.length}, minmax(0, 1fr))` }}
           >
-            {columns.map((column) => (
+            {steps.map((step) => (
               <KanbanColumn
-                key={column.id}
-                column={column}
-                tasks={getTasksForColumn(column.id)}
+                key={step.id}
+                step={step}
+                tasks={getTasksForStep(step.id)}
                 onPreviewTask={onPreviewTask}
                 onOpenTask={onOpenTask}
                 onEditTask={onEditTask}
                 onDeleteTask={onDeleteTask}
                 onMoveTask={onMoveTask}
-                columns={columns}
+                steps={steps}
                 showMaximizeButton={showMaximizeButton}
                 deletingTaskId={deletingTaskId}
               />

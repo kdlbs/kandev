@@ -6,11 +6,12 @@ import { Task } from './kanban-card';
 import { TaskCreateDialog } from './task-create-dialog';
 import { useAppStore, useAppStoreApi } from '@/components/state-provider';
 import type { Task as BackendTask } from '@/lib/types/http';
-import type { BoardState } from '@/lib/state/slices';
-import { useDragAndDrop, type WorkflowAutomation, type MoveTaskError } from '@/hooks/use-drag-and-drop';
-import { KanbanBoardGrid } from './kanban-board-grid';
+import type { WorkflowsState } from '@/lib/state/slices';
+import { type WorkflowAutomation, type MoveTaskError } from '@/hooks/use-drag-and-drop';
+import { SwimlaneContainer } from './kanban/swimlane-container';
 import { KanbanHeader } from './kanban/kanban-header';
 import { useKanbanData, useKanbanActions, useKanbanNavigation } from '@/hooks/domains/kanban';
+import { useAllWorkflowSnapshots } from '@/hooks/domains/kanban/use-all-workflow-snapshots';
 import { useResponsiveBreakpoint } from '@/hooks/use-responsive-breakpoint';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import { linkToSession } from '@/lib/links';
@@ -40,12 +41,18 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
 
+  // View mode from user settings
+  const kanbanViewMode = useAppStore((state) => state.userSettings.kanbanViewMode);
+
   // Get initial state for actions hook
   const kanban = useAppStore((state) => state.kanban);
   const workspaceState = useAppStore((state) => state.workspaces);
-  const boardsState = useAppStore((state) => state.boards);
-  const setActiveBoard = useAppStore((state) => state.setActiveBoard);
-  const setBoards = useAppStore((state) => state.setBoards);
+  const workflowsState = useAppStore((state) => state.workflows);
+  const setActiveWorkflow = useAppStore((state) => state.setActiveWorkflow);
+  const setWorkflows = useAppStore((state) => state.setWorkflows);
+
+  // Load all workflow snapshots for swimlane views
+  useAllWorkflowSnapshots(workspaceState.activeId);
 
   // Consolidated actions hook
   const {
@@ -59,22 +66,21 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
     handleDialogOpenChange,
     handleDialogSuccess,
     handleWorkspaceChange,
-    handleBoardChange,
+    handleWorkflowChange,
     deletingTaskId,
-  } = useKanbanActions({ workspaceState, boardsState });
+  } = useKanbanActions({ workspaceState, workflowsState });
 
   // Data fetching and derived state
   const {
     enablePreviewOnClick,
     userSettings,
     commitSettings,
-    activeColumns,
-    visibleTasksWithSessions,
+    activeSteps,
     isMounted,
     setTaskSessionAvailability,
   } = useKanbanData({
     onWorkspaceChange: handleWorkspaceChange,
-    onBoardChange: handleBoardChange,
+    onWorkflowChange: handleWorkflowChange,
     searchQuery,
   });
 
@@ -146,56 +152,44 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
     [workflowAutomation]
   );
 
-  // Drag and drop with workflow automation callback
-  const { activeTask, handleDragStart, handleDragEnd, handleDragCancel, moveTaskToColumn } = useDragAndDrop({
-    visibleTasks: visibleTasksWithSessions,
-    onWorkflowAutomation: handleWorkflowAutomation,
-    onMoveError: handleMoveError,
-  });
-
-  // Ref for userSettings to avoid reactive deps in board selection effect
+  // Ref for userSettings to avoid reactive deps in workflow selection effect
   const userSettingsRef = useRef(userSettings);
   useEffect(() => {
     userSettingsRef.current = userSettings;
   });
 
-  // Board selection effect
+  // Workflow selection effect
   useEffect(() => {
     const workspaceId = workspaceState.activeId;
     if (!workspaceId) {
-      if (boardsState.items.length || boardsState.activeId) {
-        setBoards([]);
-        setActiveBoard(null);
+      if (workflowsState.items.length || workflowsState.activeId) {
+        setWorkflows([]);
+        setActiveWorkflow(null);
       }
       return;
     }
     const settings = userSettingsRef.current;
-    const workspaceBoards = boardsState.items.filter(
-      (board: BoardState['items'][number]) => board.workspaceId === workspaceId
+    const workspaceWorkflows = workflowsState.items.filter(
+      (workflow: WorkflowsState['items'][number]) => workflow.workspaceId === workspaceId
     );
-    const desiredBoardId =
-      (settings.boardId && workspaceBoards.some((board: BoardState['items'][number]) => board.id === settings.boardId)
-        ? settings.boardId
-        : workspaceBoards[0]?.id) ?? null;
-    setActiveBoard(desiredBoardId);
-    if (settings.loaded && desiredBoardId !== settings.boardId) {
-      commitSettings({
-        workspaceId,
-        boardId: desiredBoardId,
-        repositoryIds: settings.repositoryIds,
-      });
-    }
-    if (!desiredBoardId) {
+
+    // Default to "All Workflows" (null) unless settings explicitly specify a workflow
+    const desiredWorkflowId =
+      settings.workflowId && workspaceWorkflows.some((workflow: WorkflowsState['items'][number]) => workflow.id === settings.workflowId)
+        ? settings.workflowId
+        : null;
+    setActiveWorkflow(desiredWorkflowId);
+    if (!desiredWorkflowId) {
       store.getState().hydrate({
-        kanban: { boardId: null, steps: [], tasks: [] },
+        kanban: { workflowId: null, steps: [], tasks: [] },
       });
     }
   }, [
-    boardsState.activeId,
-    boardsState.items,
+    workflowsState.activeId,
+    workflowsState.items,
     commitSettings,
-    setActiveBoard,
-    setBoards,
+    setActiveWorkflow,
+    setWorkflows,
     store,
     workspaceState.activeId,
   ]);
@@ -218,9 +212,9 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
         open={isDialogOpen}
         onOpenChange={handleDialogOpenChange}
         workspaceId={workspaceState.activeId}
-        boardId={kanban.boardId}
-        defaultColumnId={activeColumns[0]?.id ?? null}
-        columns={activeColumns.map((column) => ({ id: column.id, title: column.title, autoStartAgent: column.autoStartAgent }))}
+        workflowId={kanban.workflowId}
+        defaultStepId={activeSteps[0]?.id ?? null}
+        steps={activeSteps.map((step) => ({ id: step.id, title: step.title, events: step.events }))}
         editingTask={
           editingTask
             ? {
@@ -255,9 +249,9 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
         }}
         mode="session"
         workspaceId={workspaceState.activeId}
-        boardId={kanban.boardId}
-        defaultColumnId={workflowAutomation?.workflowStep.id ?? null}
-        columns={activeColumns.map((column) => ({ id: column.id, title: column.title, autoStartAgent: column.autoStartAgent }))}
+        workflowId={kanban.workflowId}
+        defaultStepId={workflowAutomation?.workflowStep.id ?? null}
+        steps={activeSteps.map((step) => ({ id: step.id, title: step.title, events: step.events }))}
         editingTask={null}
         onCreateSession={handleWorkflowSessionCreate}
         initialValues={{
@@ -287,22 +281,18 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-      <KanbanBoardGrid
-        columns={activeColumns}
-        tasks={visibleTasksWithSessions}
+      <SwimlaneContainer
+        viewMode={kanbanViewMode || ''}
+        workflowFilter={workflowsState.activeId}
         onPreviewTask={handleCardClick}
         onOpenTask={handleOpenTask}
         onEditTask={handleEdit}
         onDeleteTask={handleDelete}
-        onMoveTask={moveTaskToColumn}
-        onDragStart={handleDragStart}
-        onDragEnd={handleDragEnd}
-        onDragCancel={handleDragCancel}
-        activeTask={activeTask}
-        showMaximizeButton={enablePreviewOnClick}
+        onMoveError={handleMoveError}
+        onWorkflowAutomation={handleWorkflowAutomation}
         deletingTaskId={deletingTaskId}
-        onCreateTask={handleCreate}
-        isLoading={kanban.isLoading}
+        searchQuery={searchQuery}
+        selectedRepositoryIds={userSettings.repositoryIds}
       />
     </div>
   );

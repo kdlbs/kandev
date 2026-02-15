@@ -2,8 +2,8 @@ package v1
 
 import "time"
 
-// Board represents a Kanban board
-type Board struct {
+// Workflow represents a task workflow
+type Workflow struct {
 	ID          string    `json:"id"`
 	WorkspaceID string    `json:"workspace_id"`
 	Name        string    `json:"name"`
@@ -12,14 +12,14 @@ type Board struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
-// CreateBoardRequest for creating a new board
-type CreateBoardRequest struct {
+// CreateWorkflowRequest for creating a new workflow
+type CreateWorkflowRequest struct {
 	Name        string  `json:"name" binding:"required,max=255"`
 	Description *string `json:"description,omitempty"`
 }
 
-// UpdateBoardRequest for updating a board
-type UpdateBoardRequest struct {
+// UpdateWorkflowRequest for updating a workflow
+type UpdateWorkflowRequest struct {
 	Name        *string `json:"name,omitempty" binding:"omitempty,max=255"`
 	Description *string `json:"description,omitempty"`
 }

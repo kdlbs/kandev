@@ -46,7 +46,7 @@ func (c *Controller) GetTemplate(ctx context.Context, id string) (*GetTemplateRe
 // Step responses
 
 type ListStepsRequest struct {
-	BoardID string `json:"board_id"`
+	WorkflowID string `json:"workflow_id"`
 }
 
 type ListStepsResponse struct {
@@ -58,12 +58,12 @@ type GetStepResponse struct {
 }
 
 type CreateStepsFromTemplateRequest struct {
-	BoardID    string `json:"board_id"`
+	WorkflowID string `json:"workflow_id"`
 	TemplateID string `json:"template_id"`
 }
 
-func (c *Controller) ListStepsByBoard(ctx context.Context, req ListStepsRequest) (*ListStepsResponse, error) {
-	steps, err := c.svc.ListStepsByBoard(ctx, req.BoardID)
+func (c *Controller) ListStepsByWorkflow(ctx context.Context, req ListStepsRequest) (*ListStepsResponse, error) {
+	steps, err := c.svc.ListStepsByWorkflow(ctx, req.WorkflowID)
 	if err != nil {
 		return nil, err
 	}
@@ -79,38 +79,36 @@ func (c *Controller) GetStep(ctx context.Context, id string) (*GetStepResponse, 
 }
 
 func (c *Controller) CreateStepsFromTemplate(ctx context.Context, req CreateStepsFromTemplateRequest) error {
-	return c.svc.CreateStepsFromTemplate(ctx, req.BoardID, req.TemplateID)
+	return c.svc.CreateStepsFromTemplate(ctx, req.WorkflowID, req.TemplateID)
 }
 
 // CreateStepRequest is the request for creating a single workflow step.
 type CreateStepRequest struct {
-	BoardID         string  `json:"board_id"`
-	Name            string  `json:"name"`
-	StepType        string  `json:"step_type"`
-	Position        int     `json:"position"`
-	Color           string  `json:"color"`
-	AutoStartAgent  bool    `json:"auto_start_agent"`
-	PlanMode        bool    `json:"plan_mode"`
-	RequireApproval bool    `json:"require_approval"`
-	PromptPrefix    string  `json:"prompt_prefix"`
-	PromptSuffix    string  `json:"prompt_suffix"`
-	AllowManualMove bool    `json:"allow_manual_move"`
+	WorkflowID      string            `json:"workflow_id"`
+	Name            string            `json:"name"`
+	Position        int               `json:"position"`
+	Color           string            `json:"color"`
+	Prompt          string            `json:"prompt,omitempty"`
+	Events          *models.StepEvents `json:"events,omitempty"`
+	AllowManualMove bool              `json:"allow_manual_move"`
+	IsStartStep     *bool             `json:"is_start_step,omitempty"`
 }
 
 // CreateStep creates a new workflow step.
 func (c *Controller) CreateStep(ctx context.Context, req CreateStepRequest) (*GetStepResponse, error) {
 	step := &models.WorkflowStep{
-		BoardID:         req.BoardID,
+		WorkflowID:      req.WorkflowID,
 		Name:            req.Name,
-		StepType:        models.StepType(req.StepType),
 		Position:        req.Position,
 		Color:           req.Color,
-		AutoStartAgent:  req.AutoStartAgent,
-		PlanMode:        req.PlanMode,
-		RequireApproval: req.RequireApproval,
-		PromptPrefix:    req.PromptPrefix,
-		PromptSuffix:    req.PromptSuffix,
+		Prompt:          req.Prompt,
 		AllowManualMove: req.AllowManualMove,
+	}
+	if req.Events != nil {
+		step.Events = *req.Events
+	}
+	if req.IsStartStep != nil {
+		step.IsStartStep = *req.IsStartStep
 	}
 	if err := c.svc.CreateStep(ctx, step); err != nil {
 		return nil, err
@@ -120,17 +118,14 @@ func (c *Controller) CreateStep(ctx context.Context, req CreateStepRequest) (*Ge
 
 // UpdateStepRequest is the request for updating a workflow step.
 type UpdateStepRequest struct {
-	ID              string  `json:"id"`
-	Name            *string `json:"name,omitempty"`
-	StepType        *string `json:"step_type,omitempty"`
-	Position        *int    `json:"position,omitempty"`
-	Color           *string `json:"color,omitempty"`
-	AutoStartAgent  *bool   `json:"auto_start_agent,omitempty"`
-	PlanMode        *bool   `json:"plan_mode,omitempty"`
-	RequireApproval *bool   `json:"require_approval,omitempty"`
-	PromptPrefix    *string `json:"prompt_prefix,omitempty"`
-	PromptSuffix    *string `json:"prompt_suffix,omitempty"`
-	AllowManualMove *bool   `json:"allow_manual_move,omitempty"`
+	ID              string             `json:"id"`
+	Name            *string            `json:"name,omitempty"`
+	Position        *int               `json:"position,omitempty"`
+	Color           *string            `json:"color,omitempty"`
+	Prompt          *string            `json:"prompt,omitempty"`
+	Events          *models.StepEvents `json:"events,omitempty"`
+	AllowManualMove *bool              `json:"allow_manual_move,omitempty"`
+	IsStartStep     *bool              `json:"is_start_step,omitempty"`
 }
 
 // UpdateStep updates an existing workflow step.
@@ -142,32 +137,23 @@ func (c *Controller) UpdateStep(ctx context.Context, req UpdateStepRequest) (*Ge
 	if req.Name != nil {
 		step.Name = *req.Name
 	}
-	if req.StepType != nil {
-		step.StepType = models.StepType(*req.StepType)
-	}
 	if req.Position != nil {
 		step.Position = *req.Position
 	}
 	if req.Color != nil {
 		step.Color = *req.Color
 	}
-	if req.AutoStartAgent != nil {
-		step.AutoStartAgent = *req.AutoStartAgent
+	if req.Prompt != nil {
+		step.Prompt = *req.Prompt
 	}
-	if req.PlanMode != nil {
-		step.PlanMode = *req.PlanMode
-	}
-	if req.RequireApproval != nil {
-		step.RequireApproval = *req.RequireApproval
-	}
-	if req.PromptPrefix != nil {
-		step.PromptPrefix = *req.PromptPrefix
-	}
-	if req.PromptSuffix != nil {
-		step.PromptSuffix = *req.PromptSuffix
+	if req.Events != nil {
+		step.Events = *req.Events
 	}
 	if req.AllowManualMove != nil {
 		step.AllowManualMove = *req.AllowManualMove
+	}
+	if req.IsStartStep != nil {
+		step.IsStartStep = *req.IsStartStep
 	}
 	if err := c.svc.UpdateStep(ctx, step); err != nil {
 		return nil, err
@@ -182,13 +168,13 @@ func (c *Controller) DeleteStep(ctx context.Context, id string) error {
 
 // ReorderStepsRequest is the request for reordering workflow steps.
 type ReorderStepsRequest struct {
-	BoardID string   `json:"board_id"`
-	StepIDs []string `json:"step_ids"`
+	WorkflowID string   `json:"workflow_id"`
+	StepIDs    []string `json:"step_ids"`
 }
 
-// ReorderSteps reorders workflow steps for a board.
+// ReorderSteps reorders workflow steps for a workflow.
 func (c *Controller) ReorderSteps(ctx context.Context, req ReorderStepsRequest) error {
-	return c.svc.ReorderSteps(ctx, req.BoardID, req.StepIDs)
+	return c.svc.ReorderSteps(ctx, req.WorkflowID, req.StepIDs)
 }
 
 // History responses
@@ -208,4 +194,3 @@ func (c *Controller) ListHistoryBySession(ctx context.Context, req ListHistoryRe
 	}
 	return &ListHistoryResponse{History: history}, nil
 }
-

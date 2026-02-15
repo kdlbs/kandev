@@ -243,6 +243,11 @@ func (w *orchestratorWrapper) StartCreatedSession(ctx context.Context, taskID, s
 	return err
 }
 
+// ProcessOnTurnStart forwards to the orchestrator service.
+func (w *orchestratorWrapper) ProcessOnTurnStart(ctx context.Context, taskID, sessionID string) error {
+	return w.svc.ProcessOnTurnStart(ctx, taskID, sessionID)
+}
+
 // messageCreatorAdapter adapts the task service to the orchestrator.MessageCreator interface
 type messageCreatorAdapter struct {
 	svc    *taskservice.Service

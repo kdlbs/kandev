@@ -30,7 +30,7 @@ export function TaskItemMenu({
   isDeleting,
 }: TaskItemMenuProps) {
   return (
-    <DropdownMenu open={open} onOpenChange={onOpenChange}>
+    <DropdownMenu open={open} onOpenChange={onOpenChange} modal={false}>
       <DropdownMenuTrigger asChild>
         <button
           type="button"

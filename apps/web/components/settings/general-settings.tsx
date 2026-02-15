@@ -40,7 +40,6 @@ export function GeneralSettings() {
 
       await updateUserSettings({
         workspace_id: userSettings.workspaceId || '',
-        board_id: userSettings.boardId || '',
         repository_ids: userSettings.repositoryIds || [],
         chat_submit_key: value,
       });

@@ -51,7 +51,7 @@ type EventBus interface {
 // Handlers provides MCP WebSocket handlers.
 type Handlers struct {
 	workspaceCtrl    *controller.WorkspaceController
-	boardCtrl        *controller.BoardController
+	taskWorkflowCtrl *controller.WorkflowController
 	taskCtrl         *controller.TaskController
 	workflowCtrl     *workflowctrl.Controller
 	clarificationSvc ClarificationService
@@ -66,7 +66,7 @@ type Handlers struct {
 // NewHandlers creates new MCP handlers.
 func NewHandlers(
 	workspaceCtrl *controller.WorkspaceController,
-	boardCtrl *controller.BoardController,
+	taskWorkflowCtrl *controller.WorkflowController,
 	taskCtrl *controller.TaskController,
 	workflowCtrl *workflowctrl.Controller,
 	clarificationSvc ClarificationService,
@@ -79,7 +79,7 @@ func NewHandlers(
 ) *Handlers {
 	return &Handlers{
 		workspaceCtrl:    workspaceCtrl,
-		boardCtrl:        boardCtrl,
+		taskWorkflowCtrl: taskWorkflowCtrl,
 		taskCtrl:         taskCtrl,
 		workflowCtrl:     workflowCtrl,
 		clarificationSvc: clarificationSvc,
@@ -95,7 +95,7 @@ func NewHandlers(
 // RegisterHandlers registers all MCP handlers with the dispatcher.
 func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMCPListWorkspaces, h.handleListWorkspaces)
-	d.RegisterFunc(ws.ActionMCPListBoards, h.handleListBoards)
+	d.RegisterFunc(ws.ActionMCPListWorkflows, h.handleListWorkflows)
 	d.RegisterFunc(ws.ActionMCPListWorkflowSteps, h.handleListWorkflowSteps)
 	d.RegisterFunc(ws.ActionMCPListTasks, h.handleListTasks)
 	d.RegisterFunc(ws.ActionMCPCreateTask, h.handleCreateTask)
@@ -120,8 +120,8 @@ func (h *Handlers) handleListWorkspaces(ctx context.Context, msg *ws.Message) (*
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }
 
-// handleListBoards lists boards for a workspace.
-func (h *Handlers) handleListBoards(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+// handleListWorkflows lists workflows for a workspace.
+func (h *Handlers) handleListWorkflows(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
 		WorkspaceID string `json:"workspace_id"`
 	}
@@ -132,28 +132,28 @@ func (h *Handlers) handleListBoards(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workspace_id is required", nil)
 	}
 
-	resp, err := h.boardCtrl.ListBoards(ctx, dto.ListBoardsRequest{WorkspaceID: req.WorkspaceID})
+	resp, err := h.taskWorkflowCtrl.ListWorkflows(ctx, dto.ListWorkflowsRequest{WorkspaceID: req.WorkspaceID})
 	if err != nil {
-		h.logger.Error("failed to list boards", zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list boards", nil)
+		h.logger.Error("failed to list workflows", zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list workflows", nil)
 	}
 
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }
 
-// handleListWorkflowSteps lists workflow steps for a board.
+// handleListWorkflowSteps lists workflow steps for a workflow.
 func (h *Handlers) handleListWorkflowSteps(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
-		BoardID string `json:"board_id"`
+		WorkflowID string `json:"workflow_id"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
-	if req.BoardID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "board_id is required", nil)
+	if req.WorkflowID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow_id is required", nil)
 	}
 
-	resp, err := h.workflowCtrl.ListStepsByBoard(ctx, workflowctrl.ListStepsRequest{BoardID: req.BoardID})
+	resp, err := h.workflowCtrl.ListStepsByWorkflow(ctx, workflowctrl.ListStepsRequest{WorkflowID: req.WorkflowID})
 	if err != nil {
 		h.logger.Error("failed to list workflow steps", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list workflow steps", nil)
@@ -162,19 +162,19 @@ func (h *Handlers) handleListWorkflowSteps(ctx context.Context, msg *ws.Message)
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }
 
-// handleListTasks lists tasks for a board.
+// handleListTasks lists tasks for a workflow.
 func (h *Handlers) handleListTasks(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
-		BoardID string `json:"board_id"`
+		WorkflowID string `json:"workflow_id"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
-	if req.BoardID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "board_id is required", nil)
+	if req.WorkflowID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow_id is required", nil)
 	}
 
-	resp, err := h.taskCtrl.ListTasks(ctx, dto.ListTasksRequest{BoardID: req.BoardID})
+	resp, err := h.taskCtrl.ListTasks(ctx, dto.ListTasksRequest{WorkflowID: req.WorkflowID})
 	if err != nil {
 		h.logger.Error("failed to list tasks", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list tasks", nil)
@@ -192,8 +192,8 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	if req.WorkspaceID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workspace_id is required", nil)
 	}
-	if req.BoardID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "board_id is required", nil)
+	if req.WorkflowID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow_id is required", nil)
 	}
 	if req.WorkflowStepID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow_step_id is required", nil)

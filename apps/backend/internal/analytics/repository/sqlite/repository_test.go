@@ -37,10 +37,13 @@ func createTestDB(t *testing.T) *sql.DB {
 	);
 	CREATE TABLE IF NOT EXISTS workflow_steps (
 		id TEXT PRIMARY KEY,
-		board_id TEXT NOT NULL,
+		workflow_id TEXT NOT NULL,
 		name TEXT NOT NULL,
-		step_type TEXT NOT NULL,
 		position INTEGER NOT NULL,
+		color TEXT,
+		prompt TEXT,
+		events TEXT,
+		allow_manual_move INTEGER DEFAULT 1,
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL
 	);
@@ -244,7 +247,7 @@ func TestGetGlobalStats_WithTimeFilter(t *testing.T) {
 	// Insert workspace + board + workflow step
 	execOrFatal(t, dbConn, `INSERT INTO workspaces (id, name, created_at, updated_at) VALUES ('ws-1', 'Test', ?, ?)`, nowStr, nowStr)
 	execOrFatal(t, dbConn, `INSERT INTO boards (id, workspace_id, name, created_at, updated_at) VALUES ('board-1', 'ws-1', 'Board', ?, ?)`, nowStr, nowStr)
-	execOrFatal(t, dbConn, `INSERT INTO workflow_steps (id, board_id, name, step_type, position, created_at, updated_at) VALUES ('step-todo', 'board-1', 'To Do', 'todo', 0, ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO workflow_steps (id, workflow_id, name, position, created_at, updated_at) VALUES ('step-todo', 'board-1', 'To Do', 0, ?, ?)`, nowStr, nowStr)
 
 	// Insert a recent task and an old task
 	execOrFatal(t, dbConn, `INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, created_at, updated_at) VALUES ('task-recent', 'ws-1', 'board-1', 'step-todo', 'Recent', ?, ?)`, nowStr, nowStr)

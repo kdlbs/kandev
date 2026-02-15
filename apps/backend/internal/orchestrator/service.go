@@ -28,6 +28,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -84,26 +85,11 @@ type TurnService interface {
 	GetActiveTurn(ctx context.Context, sessionID string) (*models.Turn, error)
 }
 
-// WorkflowStep contains workflow step data needed for prompt construction and transitions.
-type WorkflowStep struct {
-	ID               string
-	Name             string
-	StepType         string
-	AutoStartAgent   bool
-	PlanMode         bool
-	RequireApproval  bool
-	PromptPrefix     string
-	PromptSuffix     string
-	OnCompleteStepID string // Step to transition to when agent completes
-	OnApprovalStepID string // Step to transition to when user approves
-}
-
 // WorkflowStepGetter retrieves workflow step information for prompt building.
 type WorkflowStepGetter interface {
-	GetStep(ctx context.Context, stepID string) (*WorkflowStep, error)
-	// GetSourceStep finds the step that has on_complete_step_id pointing to the given step.
-	// Used to find the "previous" step when moving back from a review step.
-	GetSourceStep(ctx context.Context, boardID, targetStepID string) (*WorkflowStep, error)
+	GetStep(ctx context.Context, stepID string) (*wfmodels.WorkflowStep, error)
+	GetNextStepByPosition(ctx context.Context, workflowID string, currentPosition int) (*wfmodels.WorkflowStep, error)
+	GetPreviousStepByPosition(ctx context.Context, workflowID string, currentPosition int) (*wfmodels.WorkflowStep, error)
 }
 
 // WorktreeRecreator handles worktree recreation when the directory is missing.

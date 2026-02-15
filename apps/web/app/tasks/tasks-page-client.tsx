@@ -8,7 +8,7 @@ import { getColumns } from "./columns"
 import { deleteTask, listTasksByWorkspace } from "@/lib/api"
 import { TaskCreateDialog } from "@/components/task-create-dialog"
 import { KanbanHeader } from "@/components/kanban/kanban-header"
-import type { Task, Workspace, Board, WorkflowStep, Repository } from "@/lib/types/http"
+import type { Task, Workspace, Workflow, WorkflowStep, Repository } from "@/lib/types/http"
 import { useToast } from "@/components/toast-provider"
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings"
 import { useDebounce } from "@/hooks/use-debounce"
@@ -16,7 +16,7 @@ import { useDebounce } from "@/hooks/use-debounce"
 interface TasksPageClientProps {
   workspaces: Workspace[]
   initialWorkspaceId?: string
-  initialBoards: Board[]
+  initialWorkflows: Workflow[]
   initialSteps: WorkflowStep[]
   initialRepositories: Repository[]
   initialTasks: Task[]
@@ -24,7 +24,7 @@ interface TasksPageClientProps {
 }
 
 export function TasksPageClient({
-  initialBoards,
+  initialWorkflows,
   initialSteps,
   initialRepositories,
   initialTasks,
@@ -34,12 +34,12 @@ export function TasksPageClient({
   const { toast } = useToast()
   const {
     activeWorkspaceId,
-    activeBoardId,
+    activeWorkflowId,
     repositories: storeRepositories,
   } = useKanbanDisplaySettings()
 
-  // For columns, we just need id and name from boards - use initial boards for full data
-  const [boards] = useState(initialBoards)
+  // For columns, we just need id and name from workflows - use initial workflows for full data
+  const [workflows] = useState(initialWorkflows)
   const [steps] = useState(initialSteps)
   // Use store repositories if available for filtering, but fall back to initial
   const repositories = storeRepositories.length > 0 ? storeRepositories : initialRepositories
@@ -128,13 +128,13 @@ export function TasksPageClient({
   const columns = useMemo(
     () =>
       getColumns({
-        boards,
+        workflows,
         steps,
         repositories,
         onDelete: handleDelete,
         deletingTaskId,
       }),
-    [boards, steps, repositories, handleDelete, deletingTaskId]
+    [workflows, steps, repositories, handleDelete, deletingTaskId]
   )
 
   const handleRowClick = useCallback(
@@ -151,10 +151,10 @@ export function TasksPageClient({
     [router, toast]
   )
 
-  const defaultBoard = activeBoardId
-    ? boards.find((b) => b.id === activeBoardId)
-    : boards[0]
-  const defaultColumn = steps.find((s) => s.board_id === defaultBoard?.id)
+  const defaultWorkflow = activeWorkflowId
+    ? workflows.find((w) => w.id === activeWorkflowId)
+    : workflows[0]
+  const defaultStep = steps.find((s) => s.workflow_id === defaultWorkflow?.id)
 
   return (
     <div className="h-screen w-full flex flex-col bg-background">
@@ -185,16 +185,16 @@ export function TasksPageClient({
         />
       </div>
 
-      {activeWorkspaceId && defaultBoard && defaultColumn && (
+      {activeWorkspaceId && defaultWorkflow && defaultStep && (
         <TaskCreateDialog
           open={createDialogOpen}
           onOpenChange={setCreateDialogOpen}
           workspaceId={activeWorkspaceId}
-          boardId={defaultBoard.id}
-          defaultColumnId={defaultColumn.id}
-          columns={steps
-            .filter((s) => s.board_id === defaultBoard.id)
-            .map((s) => ({ id: s.id, title: s.name, autoStartAgent: s.behaviors?.autoStartAgent }))}
+          workflowId={defaultWorkflow.id}
+          defaultStepId={defaultStep.id}
+          steps={steps
+            .filter((s) => s.workflow_id === defaultWorkflow.id)
+            .map((s) => ({ id: s.id, title: s.name, events: s.events }))}
           onSuccess={() => {
             setCreateDialogOpen(false)
             fetchTasks()

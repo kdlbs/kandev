@@ -71,7 +71,8 @@ export type SettingsDataState = {
 
 export type UserSettingsState = {
   workspaceId: string | null;
-  boardId: string | null;
+  kanbanViewMode: string | null;
+  workflowId: string | null;
   repositoryIds: string[];
   preferredShell: string | null;
   shellOptions: Array<{ value: string; label: string }>;

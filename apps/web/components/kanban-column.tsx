@@ -2,7 +2,7 @@
 
 import { useMemo } from 'react';
 import { useDroppable } from '@dnd-kit/core';
-import { KanbanCard, Task, WorkflowColumn } from './kanban-card';
+import { KanbanCard, Task } from './kanban-card';
 import { Badge } from '@kandev/ui/badge';
 import { cn, getRepositoryDisplayName } from '@/lib/utils';
 import { useAppStore } from '@/components/state-provider';
@@ -12,26 +12,26 @@ export interface WorkflowStep {
   id: string;
   title: string;
   color: string;
-  autoStartAgent?: boolean;
+  events?: { on_enter?: Array<{ type: string; config?: Record<string, unknown> }>; on_turn_complete?: Array<{ type: string; config?: Record<string, unknown> }> };
 }
 
 interface KanbanColumnProps {
-  column: WorkflowStep;
+  step: WorkflowStep;
   tasks: Task[];
   onPreviewTask: (task: Task) => void;
   onOpenTask: (task: Task) => void;
   onEditTask: (task: Task) => void;
   onDeleteTask: (task: Task) => void;
-  onMoveTask?: (task: Task, targetColumnId: string) => void;
-  columns?: WorkflowColumn[];
+  onMoveTask?: (task: Task, targetStepId: string) => void;
+  steps?: WorkflowStep[];
   showMaximizeButton?: boolean;
   deletingTaskId?: string | null;
   hideHeader?: boolean;
 }
 
-export function KanbanColumn({ column, tasks, onPreviewTask, onOpenTask, onEditTask, onDeleteTask, onMoveTask, columns, showMaximizeButton, deletingTaskId, hideHeader = false }: KanbanColumnProps) {
+export function KanbanColumn({ step, tasks, onPreviewTask, onOpenTask, onEditTask, onDeleteTask, onMoveTask, steps, showMaximizeButton, deletingTaskId, hideHeader = false }: KanbanColumnProps) {
   const { setNodeRef, isOver } = useDroppable({
-    id: column.id,
+    id: step.id,
   });
 
   // Access repositories from store to pass repository names to cards
@@ -52,16 +52,17 @@ export function KanbanColumn({ column, tasks, onPreviewTask, onOpenTask, onEditT
     <div
       ref={setNodeRef}
       className={cn(
-        'flex flex-col flex-1 h-full min-w-0 p-3 sm:min-h-[300px] rounded-sm border border-border',
-        isOver && 'ring-2 ring-primary'
+        'flex flex-col flex-1 h-full min-w-0 px-3 py-2 sm:min-h-[200px]',
+        'border-r border-dashed border-border/50 last:border-r-0',
+        isOver && 'bg-primary/5'
       )}
     >
       {/* Column Header */}
       {!hideHeader && (
-        <div className="flex items-center justify-between border-b border-border/70 pb-3 mb-4 px-1">
+        <div className="flex items-center justify-between pb-2 mb-3 px-1">
           <div className="flex items-center gap-2">
-            <div className={cn('w-2 h-2 rounded-full', column.color)} />
-            <h2 className="font-semibold text-sm">{column.title}</h2>
+            <div className={cn('w-2 h-2 rounded-full', step.color)} />
+            <h2 className="font-semibold text-sm">{step.title}</h2>
             <Badge variant="secondary" className="text-xs">
               {tasks.length}
             </Badge>
@@ -81,7 +82,7 @@ export function KanbanColumn({ column, tasks, onPreviewTask, onOpenTask, onEditT
             onEdit={onEditTask}
             onDelete={onDeleteTask}
             onMove={onMoveTask}
-            columns={columns}
+            steps={steps}
             showMaximizeButton={showMaximizeButton}
             isDeleting={deletingTaskId === task.id}
           />

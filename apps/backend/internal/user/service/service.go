@@ -27,7 +27,8 @@ type Service struct {
 
 type UpdateUserSettingsRequest struct {
 	WorkspaceID            *string
-	BoardID                *string
+	KanbanViewMode         *string
+	WorkflowFilterID       *string
 	RepositoryIDs          *[]string
 	InitialSetupComplete   *bool
 	PreferredShell         *string
@@ -81,8 +82,11 @@ func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSetting
 	if req.WorkspaceID != nil {
 		settings.WorkspaceID = *req.WorkspaceID
 	}
-	if req.BoardID != nil {
-		settings.BoardID = *req.BoardID
+	if req.KanbanViewMode != nil {
+		settings.KanbanViewMode = *req.KanbanViewMode
+	}
+	if req.WorkflowFilterID != nil {
+		settings.WorkflowFilterID = *req.WorkflowFilterID
 	}
 	if req.RepositoryIDs != nil {
 		settings.RepositoryIDs = *req.RepositoryIDs
@@ -140,7 +144,8 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 	data := map[string]interface{}{
 		"user_id":                settings.UserID,
 		"workspace_id":           settings.WorkspaceID,
-		"board_id":               settings.BoardID,
+		"kanban_view_mode":       settings.KanbanViewMode,
+		"workflow_filter_id":     settings.WorkflowFilterID,
 		"repository_ids":         settings.RepositoryIDs,
 		"initial_setup_complete": settings.InitialSetupComplete,
 		"preferred_shell":        settings.PreferredShell,

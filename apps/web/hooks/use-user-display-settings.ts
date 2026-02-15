@@ -8,7 +8,8 @@ import type { Repository } from '@/lib/types/http';
 
 type DisplaySettings = {
   workspaceId: string | null;
-  boardId: string | null;
+  workflowId: string | null;
+  kanbanViewMode: string | null;
   repositoryIds: string[];
   preferredShell: string | null;
   shellOptions: Array<{ value: string; label: string }>;
@@ -24,31 +25,29 @@ type DisplaySettings = {
 
 type UseUserDisplaySettingsInput = {
   workspaceId: string | null;
-  boardId: string | null;
+  workflowId: string | null;
   onWorkspaceChange?: (workspaceId: string | null) => void;
-  onBoardChange?: (boardId: string | null) => void;
+  onWorkflowChange?: (workflowId: string | null) => void;
 };
 
 type CommitPayload = {
   workspaceId: string | null;
-  boardId: string | null;
+  workflowId: string | null;
   repositoryIds: string[];
   preferredShell?: string | null;
   enablePreviewOnClick?: boolean;
+  kanbanViewMode?: string | null;
 };
 
 export function useUserDisplaySettings({
   workspaceId,
-  boardId,
+  workflowId,
   onWorkspaceChange,
-  onBoardChange,
+  onWorkflowChange,
 }: UseUserDisplaySettingsInput) {
   const userSettings = useAppStore((state) => state.userSettings);
   const setUserSettings = useAppStore((state) => state.setUserSettings);
   const { repositories, isLoading: repositoriesLoading } = useRepositories(workspaceId, true);
-  const lastAppliedWorkspaceIdRef = useRef<string | null>(null);
-  const lastAppliedBoardIdRef = useRef<string | null>(null);
-
   // Use a ref for userSettings inside commitSettings to keep the callback stable.
   // This prevents cascading effect re-runs when userSettings changes.
   const userSettingsRef = useRef(userSettings);
@@ -56,19 +55,23 @@ export function useUserDisplaySettings({
     userSettingsRef.current = userSettings;
   });
 
-  // Track whether redirect effects have initialized (skip first invocation
-  // after mount — SSR already resolved the correct workspace/board).
-  const wsInitializedRef = useRef(false);
-  const boardInitializedRef = useRef(false);
+  // If settings were already loaded when the component mounted (zustand store
+  // persists across client-side navigation), skip redirect effects entirely.
+  // Only redirect when settings transition from not-loaded → loaded on a fresh
+  // page load. The WS handler intentionally preserves workspaceId/workflowId,
+  // so redirect effects never fire from external (cross-tab) changes.
+  const settingsLoadedOnMountRef = useRef(userSettings.loaded);
 
   const commitSettings = useCallback(
     (next: CommitPayload) => {
       const current = userSettingsRef.current;
       const repositoryIds = Array.from(new Set(next.repositoryIds)).sort();
       const enablePreviewOnClick = next.enablePreviewOnClick ?? current.enablePreviewOnClick;
+      const kanbanViewMode = next.kanbanViewMode !== undefined ? next.kanbanViewMode : (current.kanbanViewMode ?? null);
       const normalized: DisplaySettings = {
         workspaceId: next.workspaceId,
-        boardId: next.boardId,
+        workflowId: next.workflowId,
+        kanbanViewMode,
         repositoryIds,
         preferredShell: next.preferredShell ?? current.preferredShell ?? null,
         shellOptions: current.shellOptions ?? [],
@@ -82,20 +85,22 @@ export function useUserDisplaySettings({
         loaded: true,
       };
       const sameWorkspace = normalized.workspaceId === current.workspaceId;
-      const sameBoard = normalized.boardId === current.boardId;
+      const sameWorkflow = normalized.workflowId === current.workflowId;
       const samePreview = normalized.enablePreviewOnClick === current.enablePreviewOnClick;
+      const sameViewMode = normalized.kanbanViewMode === current.kanbanViewMode;
       const sameRepos =
         normalized.repositoryIds.length === current.repositoryIds.length &&
         normalized.repositoryIds.every((id, index) => id === current.repositoryIds[index]);
-      if (sameWorkspace && sameBoard && sameRepos && samePreview && current.loaded) {
+      if (sameWorkspace && sameWorkflow && sameRepos && samePreview && sameViewMode && current.loaded) {
         return;
       }
       setUserSettings(normalized);
       const payload = {
         workspace_id: normalized.workspaceId ?? '',
-        board_id: normalized.boardId ?? '',
+        workflow_filter_id: normalized.workflowId ?? '',
         repository_ids: normalized.repositoryIds,
         enable_preview_on_click: normalized.enablePreviewOnClick,
+        kanban_view_mode: normalized.kanbanViewMode ?? '',
       };
       const client = getWebSocketClient();
       if (!client) {
@@ -122,7 +127,8 @@ export function useUserDisplaySettings({
         const repositoryIds = Array.from(new Set<string>(data.settings.repository_ids ?? [])).sort();
         setUserSettings({
           workspaceId: data.settings.workspace_id || null,
-          boardId: data.settings.board_id || null,
+          workflowId: data.settings.workflow_filter_id || null,
+          kanbanViewMode: data.settings.kanban_view_mode || null,
           repositoryIds,
           preferredShell: data.settings.preferred_shell || null,
           shellOptions: data.shell_options ?? [],
@@ -141,28 +147,15 @@ export function useUserDisplaySettings({
       });
   }, [setUserSettings, userSettings.loaded]);
 
-  // Workspace redirect effect — skip first invocation after mount.
-  // SSR already resolved the correct workspace; only redirect on
-  // subsequent settings changes (e.g. WebSocket push from another tab).
+  // Workspace redirect effect — only fires on fresh page loads when settings
+  // transition from not-loaded to loaded. Skipped entirely on re-mounts
+  // (e.g. navigating to a task and back) since the store already has settings.
   useEffect(() => {
     if (!userSettings.loaded) return;
-    if (!wsInitializedRef.current) {
-      wsInitializedRef.current = true;
-      if (userSettings.workspaceId !== workspaceId) {
-        lastAppliedWorkspaceIdRef.current = null;
-      }
-      return;
-    }
+    if (settingsLoadedOnMountRef.current) return;
+    settingsLoadedOnMountRef.current = true;
     if (userSettings.workspaceId && userSettings.workspaceId !== workspaceId) {
-      if (lastAppliedWorkspaceIdRef.current === userSettings.workspaceId) {
-        return;
-      }
-      lastAppliedWorkspaceIdRef.current = userSettings.workspaceId;
       onWorkspaceChange?.(userSettings.workspaceId);
-      return;
-    }
-    if (userSettings.workspaceId === workspaceId) {
-      lastAppliedWorkspaceIdRef.current = null;
     }
   }, [onWorkspaceChange, userSettings.loaded, userSettings.workspaceId, workspaceId]);
 
@@ -172,35 +165,24 @@ export function useUserDisplaySettings({
       queueMicrotask(() => {
         commitSettings({
           workspaceId,
-          boardId: userSettings.boardId,
+          workflowId: userSettings.workflowId,
           repositoryIds: userSettings.repositoryIds,
         });
       });
     }
-  }, [commitSettings, userSettings.boardId, userSettings.loaded, userSettings.repositoryIds, userSettings.workspaceId, workspaceId]);
+  }, [commitSettings, userSettings.workflowId, userSettings.loaded, userSettings.repositoryIds, userSettings.workspaceId, workspaceId]);
 
-  // Board redirect effect — skip first invocation after mount.
+  // Workflow redirect effect — only fires on fresh page loads when settings
+  // transition from not-loaded to loaded. Skipped on re-mounts since the
+  // store already has settings and URL/active state is the source of truth.
   useEffect(() => {
     if (!userSettings.loaded) return;
-    if (!boardInitializedRef.current) {
-      boardInitializedRef.current = true;
-      if (userSettings.boardId !== boardId) {
-        lastAppliedBoardIdRef.current = null;
-      }
-      return;
+    if (settingsLoadedOnMountRef.current) return;
+    // settingsLoadedOnMountRef is set by the workspace effect above
+    if (userSettings.workflowId && userSettings.workflowId !== workflowId) {
+      onWorkflowChange?.(userSettings.workflowId);
     }
-    if (userSettings.boardId && userSettings.boardId !== boardId) {
-      if (lastAppliedBoardIdRef.current === userSettings.boardId) {
-        return;
-      }
-      lastAppliedBoardIdRef.current = userSettings.boardId;
-      onBoardChange?.(userSettings.boardId);
-      return;
-    }
-    if (userSettings.boardId === boardId) {
-      lastAppliedBoardIdRef.current = null;
-    }
-  }, [boardId, onBoardChange, userSettings.boardId, userSettings.loaded]);
+  }, [workflowId, onWorkflowChange, userSettings.workflowId, userSettings.loaded]);
 
   useEffect(() => {
     if (!userSettings.loaded) return;
@@ -215,12 +197,12 @@ export function useUserDisplaySettings({
       queueMicrotask(() => {
         commitSettings({
           workspaceId: userSettings.workspaceId,
-          boardId: userSettings.boardId,
+          workflowId: userSettings.workflowId,
           repositoryIds: nextIds,
         });
       });
     }
-  }, [commitSettings, repositories, userSettings.boardId, userSettings.loaded, userSettings.repositoryIds, userSettings.workspaceId]);
+  }, [commitSettings, repositories, userSettings.workflowId, userSettings.loaded, userSettings.repositoryIds, userSettings.workspaceId]);
 
   const allRepositoriesSelected = userSettings.repositoryIds.length === 0;
   const selectedRepositoryIds = useMemo(
