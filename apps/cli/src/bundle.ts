@@ -25,13 +25,19 @@ export function findBundleRoot(cacheDir: string): string {
 }
 
 export function resolveWebServerPath(bundleDir: string): string | null {
-  const direct = path.join(bundleDir, "web", "server.js");
-  if (fs.existsSync(direct)) {
-    return direct;
-  }
-  const nested = path.join(bundleDir, "web", "apps", "web", "server.js");
-  if (fs.existsSync(nested)) {
-    return nested;
+  // Next.js standalone output location depends on workspace structure:
+  //   - non-monorepo: web/server.js
+  //   - monorepo (apps/ root): web/web/server.js
+  //   - monorepo (project root): web/apps/web/server.js
+  const candidates = [
+    path.join(bundleDir, "web", "server.js"),
+    path.join(bundleDir, "web", "web", "server.js"),
+    path.join(bundleDir, "web", "apps", "web", "server.js"),
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
   }
   return null;
 }

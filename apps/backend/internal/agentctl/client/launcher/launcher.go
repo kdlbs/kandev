@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"time"
 
@@ -68,26 +69,36 @@ func (l *Launcher) Port() int {
 	return l.port
 }
 
+// agentctlBinaryName returns the platform-appropriate binary name.
+func agentctlBinaryName() string {
+	if runtime.GOOS == "windows" {
+		return "agentctl.exe"
+	}
+	return "agentctl"
+}
+
 // findAgentctlBinary attempts to locate the agentctl binary.
 func findAgentctlBinary() string {
+	name := agentctlBinaryName()
+
 	// 1. Check same directory as current executable
 	if exe, err := os.Executable(); err == nil {
-		candidate := filepath.Join(filepath.Dir(exe), "agentctl")
+		candidate := filepath.Join(filepath.Dir(exe), name)
 		if _, err := os.Stat(candidate); err == nil {
 			return candidate
 		}
 	}
 
 	// 2. Check PATH
-	if path, err := exec.LookPath("agentctl"); err == nil {
+	if path, err := exec.LookPath(name); err == nil {
 		return path
 	}
 
 	// 3. Check common development locations
 	candidates := []string{
-		"./bin/agentctl",
-		"./agentctl",
-		"../agentctl",
+		filepath.Join(".", "bin", name),
+		filepath.Join(".", name),
+		filepath.Join("..", name),
 	}
 	for _, candidate := range candidates {
 		if _, err := os.Stat(candidate); err == nil {
@@ -98,7 +109,7 @@ func findAgentctlBinary() string {
 		}
 	}
 
-	return "agentctl" // Fall back to PATH lookup at runtime
+	return name // Fall back to PATH lookup at runtime
 }
 
 // Start spawns the agentctl subprocess and waits for it to become healthy.

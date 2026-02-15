@@ -123,10 +123,13 @@ jobs:
           Copy-Item apps/backend/bin/kandev.exe dist/kandev/bin/
           Copy-Item apps/backend/bin/agentctl.exe dist/kandev/bin/
           New-Item -ItemType Directory -Force -Path dist/kandev/web | Out-Null
-          Copy-Item dist/web/* dist/kandev/web/ -Recurse -Force
-          Compress-Archive -Path dist/kandev -DestinationPath dist/kandev-${{ matrix.platform }}.zip -Force
-          $hash = Get-FileHash dist/kandev-${{ matrix.platform }}.zip -Algorithm SHA256
-          "$($hash.Hash)  kandev-${{ matrix.platform }}.zip" | Out-File -FilePath dist/kandev-${{ matrix.platform }}.zip.sha256 -Encoding ascii
+          # -Force on Get-ChildItem includes dot-prefixed items (.next/)
+          Get-ChildItem dist/web -Force | Copy-Item -Destination dist/kandev/web/ -Recurse -Force
+          # Use 7z instead of Compress-Archive to handle long paths in node_modules
+          cd dist
+          7z a -tzip "kandev-${{ matrix.platform }}.zip" kandev
+          $hash = Get-FileHash "kandev-${{ matrix.platform }}.zip" -Algorithm SHA256
+          "$($hash.Hash)  kandev-${{ matrix.platform }}.zip" | Out-File -FilePath "kandev-${{ matrix.platform }}.zip.sha256" -Encoding ascii
 
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
