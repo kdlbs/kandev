@@ -6,7 +6,7 @@ import path from "node:path";
 import { CACHE_DIR } from "./constants";
 
 // Allow overriding the GitHub repo for forks/testing.
-const OWNER = process.env.KANDEV_GITHUB_OWNER || "kandev";
+const OWNER = process.env.KANDEV_GITHUB_OWNER || "kdlbs";
 const REPO = process.env.KANDEV_GITHUB_REPO || "kandev";
 const API_BASE = `https://api.github.com/repos/${OWNER}/${REPO}`;
 
