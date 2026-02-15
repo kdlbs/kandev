@@ -5,10 +5,10 @@ const isWindows = process.platform === "win32";
 export type PlatformArch = "x64" | "arm64";
 export type PlatformDir =
   | "linux-x64"
+  | "linux-arm64"
   | "macos-x64"
   | "macos-arm64"
-  | "windows-x64"
-  | "windows-arm64";
+  | "windows-x64";
 
 export function getBinaryName(base: string): string {
   return isWindows ? `${base}.exe` : base;
@@ -40,9 +40,11 @@ export function getPlatformDir(): PlatformDir {
   const platform = process.platform;
   const arch = getEffectiveArch();
   if (platform === "linux" && arch === "x64") return "linux-x64";
+  if (platform === "linux" && arch === "arm64") return "linux-arm64";
   if (platform === "darwin" && arch === "x64") return "macos-x64";
   if (platform === "darwin" && arch === "arm64") return "macos-arm64";
   if (platform === "win32" && arch === "x64") return "windows-x64";
-  if (platform === "win32" && arch === "arm64") return "windows-arm64";
+  // Windows ARM64 runs x64 binaries via emulation — no native arm64 build yet
+  if (platform === "win32" && arch === "arm64") return "windows-x64";
   throw new Error(`Unsupported platform: ${platform}-${arch}`);
 }

@@ -10,6 +10,15 @@ APPS_DIR := apps
 PNPM := pnpm
 MAKE := make
 
+# Cross-platform commands
+ifeq ($(OS),Windows_NT)
+  RM = cmd /c del /s /q
+  RMDIR = cmd /c rmdir /s /q
+else
+  RM = rm -f
+  RMDIR = rm -rf
+endif
+
 # Colors for terminal output
 RESET := \033[0m
 BOLD := \033[1m
@@ -251,11 +260,11 @@ clean-backend:
 .PHONY: clean-web
 clean-web:
 	@printf "$(CYAN)Cleaning web artifacts...$(RESET)\n"
-	@rm -rf $(WEB_DIR)/.next $(APPS_DIR)/node_modules
-	@rm -rf $(APPS_DIR)/packages/*/node_modules
+	@$(RMDIR) $(WEB_DIR)/.next $(APPS_DIR)/node_modules
+	@$(RMDIR) $(APPS_DIR)/packages/*/node_modules
 
 .PHONY: clean-db
 clean-db:
 	@printf "$(CYAN)Removing local SQLite database...$(RESET)\n"
-	@rm -f kandev.db kandev.db-wal kandev.db-shm \
+	@$(RM) kandev.db kandev.db-wal kandev.db-shm \
 		$(BACKEND_DIR)/kandev.db $(BACKEND_DIR)/kandev.db-wal $(BACKEND_DIR)/kandev.db-shm

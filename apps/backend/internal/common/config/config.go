@@ -5,6 +5,8 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -174,13 +176,13 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("nats.clientId", "kandev-client")
 	v.SetDefault("nats.maxReconnects", 10)
 
-	// Docker defaults
+	// Docker defaults — platform-aware host and volume path
 	v.SetDefault("docker.enabled", true) // Docker runtime enabled by default if Docker is available
-	v.SetDefault("docker.host", "unix:///var/run/docker.sock")
+	v.SetDefault("docker.host", DefaultDockerHost())
 	v.SetDefault("docker.apiVersion", "1.41")
 	v.SetDefault("docker.tlsVerify", false)
 	v.SetDefault("docker.defaultNetwork", "kandev-network")
-	v.SetDefault("docker.volumeBasePath", "/var/lib/kandev/volumes")
+	v.SetDefault("docker.volumeBasePath", defaultDockerVolumePath())
 
 	// Agent defaults (runtime selection is now per-task based on executor type)
 	v.SetDefault("agent.standaloneHost", "localhost")
@@ -207,6 +209,30 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("worktree.basePath", "~/.kandev/worktrees")
 	v.SetDefault("worktree.defaultBranch", "main")
 	v.SetDefault("worktree.cleanupOnRemove", true)
+}
+
+// DefaultDockerHost returns the platform-appropriate Docker socket path.
+// Respects DOCKER_HOST env var as override (standard Docker convention).
+func DefaultDockerHost() string {
+	if host := os.Getenv("DOCKER_HOST"); host != "" {
+		return host
+	}
+	if runtime.GOOS == "windows" {
+		return "npipe:////./pipe/docker_engine"
+	}
+	return "unix:///var/run/docker.sock"
+}
+
+// defaultDockerVolumePath returns the platform-appropriate volume base path.
+func defaultDockerVolumePath() string {
+	if runtime.GOOS == "windows" {
+		localAppData := os.Getenv("LOCALAPPDATA")
+		if localAppData == "" {
+			localAppData = filepath.Join(os.Getenv("USERPROFILE"), "AppData", "Local")
+		}
+		return filepath.Join(localAppData, "kandev", "volumes")
+	}
+	return "/var/lib/kandev/volumes"
 }
 
 // Load reads configuration from environment variables, config file, and defaults.

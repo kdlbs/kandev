@@ -38,13 +38,30 @@ jobs:
         include:
           - os: ubuntu-latest
             platform: linux-x64
+            goos: linux
+            goarch: amd64
+          - os: ubuntu-latest
+            platform: linux-arm64
+            goos: linux
+            goarch: arm64
+            cc: aarch64-linux-gnu-gcc
           - os: macos-13
             platform: macos-x64
+            goos: darwin
+            goarch: amd64
           - os: macos-14
             platform: macos-arm64
+            goos: darwin
+            goarch: arm64
           - os: windows-latest
             platform: windows-x64
+            goos: windows
+            goarch: amd64
     runs-on: ${{ matrix.os }}
+    env:
+      CGO_ENABLED: 1
+      GOOS: ${{ matrix.goos }}
+      GOARCH: ${{ matrix.goarch }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v6
@@ -56,8 +73,16 @@ jobs:
           name: web-bundle
           path: dist/web
 
+      - name: Install cross-compilation tools (linux-arm64)
+        if: matrix.platform == 'linux-arm64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
       - name: Build backend binaries (unix)
         if: runner.os != 'Windows'
+        env:
+          CC: ${{ matrix.cc || '' }}
         run: |
           cd apps/backend
           mkdir -p bin
@@ -68,6 +93,9 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
+          # Ensure MSYS2 MinGW gcc is available for CGO
+          $env:Path = "C:\msys64\mingw64\bin;" + $env:Path
+          gcc --version
           Set-Location apps/backend
           New-Item -ItemType Directory -Force -Path bin | Out-Null
           go build -o bin/kandev.exe ./cmd/kandev

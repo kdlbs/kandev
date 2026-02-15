@@ -1,6 +1,21 @@
 import { spawn, type ChildProcess, type StdioOptions } from "node:child_process";
+import { readFileSync } from "node:fs";
 
 import { createProcessSupervisor } from "./process";
+
+let _isWSL: boolean | undefined;
+function isWSL(): boolean {
+  if (_isWSL === undefined) {
+    try {
+      _isWSL = readFileSync("/proc/version", "utf8")
+        .toLowerCase()
+        .includes("microsoft");
+    } catch {
+      _isWSL = false;
+    }
+  }
+  return _isWSL;
+}
 
 export type WebLaunchOptions = {
   command: string;
@@ -18,18 +33,17 @@ export function openBrowser(url: string) {
   if (process.env.KANDEV_NO_BROWSER === "1") {
     return;
   }
+  const useCmd = process.platform === "win32" || isWSL();
   const opener =
     process.platform === "darwin"
       ? "open"
-      : process.platform === "win32"
-        ? "cmd"
+      : useCmd
+        ? "cmd.exe"
         : "xdg-open";
-  const args =
-    process.platform === "win32"
-      ? ["/c", "start", "", url]
-      : [url];
+  const args = useCmd ? ["/c", "start", "", url] : [url];
   try {
     const child = spawn(opener, args, { stdio: "ignore", detached: true });
+    child.on("error", () => {}); // ignore async spawn errors (e.g. xdg-open missing)
     child.unref();
   } catch {
     // ignore browser launch errors

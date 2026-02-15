@@ -5,6 +5,7 @@ go 1.24.0
 toolchain go1.24.11
 
 require (
+	github.com/UserExistsError/conpty v0.1.4
 	github.com/coder/acp-go-sdk v0.6.3
 	github.com/creack/pty v1.1.21
 	github.com/docker/docker v28.5.2+incompatible

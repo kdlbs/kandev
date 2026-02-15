@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/kandev/kandev/internal/common/config"
 	commonsqlite "github.com/kandev/kandev/internal/common/sqlite"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -137,7 +138,7 @@ func (r *Repository) ensureDefaultExecutorsAndEnvironments() error {
 				isSystem:  false,
 				resumable: true,
 				config: map[string]string{
-					"docker_host": "unix:///var/run/docker.sock",
+					"docker_host": config.DefaultDockerHost(),
 				},
 			},
 		}
