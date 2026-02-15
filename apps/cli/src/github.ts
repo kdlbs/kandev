@@ -12,6 +12,7 @@ const API_BASE = `https://api.github.com/repos/${OWNER}/${REPO}`;
 
 type ReleaseAsset = {
   name: string;
+  url: string;
   browser_download_url: string;
 };
 
@@ -72,6 +73,58 @@ function downloadFile(
       } catch {}
     };
 
+    const handleResponse = (res: import("node:http").IncomingMessage) => {
+      // Follow redirects (GitHub API returns 302 to signed S3 URL).
+      // Strip auth header on redirect to avoid S3 rejecting it.
+      if ((res.statusCode === 301 || res.statusCode === 302) && res.headers.location) {
+        const redirectReq = https.get(
+          res.headers.location,
+          { headers: { "User-Agent": "kandev-npx" } },
+          handleResponse,
+        );
+        redirectReq.setTimeout(30000, () => {
+          redirectReq.destroy(new Error(`Request timed out downloading ${url}`));
+        });
+        redirectReq.on("error", (err) => {
+          file.close();
+          cleanup();
+          reject(err);
+        });
+        return;
+      }
+
+      if (res.statusCode !== 200) {
+        file.close();
+        cleanup();
+        return reject(new Error(`HTTP ${res.statusCode} downloading ${url}`));
+      }
+      const totalSize = parseInt(res.headers["content-length"] || "0", 10);
+      let downloadedSize = 0;
+      res.on("data", (chunk) => {
+        downloadedSize += chunk.length;
+        hash.update(chunk);
+        if (onProgress) onProgress(downloadedSize, totalSize);
+      });
+      res.pipe(file);
+      file.on("finish", () => {
+        file.close();
+        const actualSha256 = hash.digest("hex");
+        if (expectedSha256 && actualSha256 !== expectedSha256) {
+          cleanup();
+          return reject(
+            new Error(`Checksum mismatch: expected ${expectedSha256}, got ${actualSha256}`),
+          );
+        }
+        try {
+          fs.renameSync(tempPath, destPath);
+          resolve(destPath);
+        } catch (err) {
+          cleanup();
+          reject(err);
+        }
+      });
+    };
+
     const req = https.get(
       url,
       {
@@ -83,40 +136,9 @@ function downloadFile(
             : {}),
         },
       },
-      (res) => {
-        if (res.statusCode !== 200) {
-          file.close();
-          cleanup();
-          return reject(new Error(`HTTP ${res.statusCode} downloading ${url}`));
-        }
-        const totalSize = parseInt(res.headers["content-length"] || "0", 10);
-        let downloadedSize = 0;
-        res.on("data", (chunk) => {
-          downloadedSize += chunk.length;
-          hash.update(chunk);
-          if (onProgress) onProgress(downloadedSize, totalSize);
-        });
-        res.pipe(file);
-        file.on("finish", () => {
-          file.close();
-          const actualSha256 = hash.digest("hex");
-          if (expectedSha256 && actualSha256 !== expectedSha256) {
-            cleanup();
-            return reject(
-              new Error(`Checksum mismatch: expected ${expectedSha256}, got ${actualSha256}`),
-            );
-          }
-          try {
-            fs.renameSync(tempPath, destPath);
-            resolve(destPath);
-          } catch (err) {
-            cleanup();
-            reject(err);
-          }
-        });
-      },
+      handleResponse,
     );
-    req.setTimeout(5000, () => {
+    req.setTimeout(30000, () => {
       req.destroy(new Error(`Request timed out downloading ${url}`));
     });
     req.on("error", (err) => {
@@ -166,7 +188,7 @@ export async function ensureAsset(
   if (!expectedSha) {
     const shaAsset = findAsset(release, `${assetName}.sha256`);
     if (shaAsset) {
-      await downloadFile(shaAsset.browser_download_url, shaPath);
+      await downloadFile(shaAsset.url, shaPath);
       expectedSha = readSha256(shaPath);
     }
   }
@@ -184,6 +206,6 @@ export async function ensureAsset(
     fs.unlinkSync(destPath);
   }
 
-  await downloadFile(asset.browser_download_url, destPath, expectedSha, onProgress);
+  await downloadFile(asset.url, destPath, expectedSha, onProgress);
   return destPath;
 }
