@@ -410,6 +410,7 @@ func (r *Repository) GetRepositoryStats(ctx context.Context, workspaceID string,
 			GROUP BY s.repository_id
 		) git_stats ON git_stats.repository_id = r.id
 		WHERE r.workspace_id = ?
+		AND r.deleted_at IS NULL
 		ORDER BY total_duration_ms DESC, total_tasks DESC, r.name ASC
 	`
 

@@ -70,7 +70,7 @@ function formatPercent(value: number): string {
   return `${Math.round(value)}%`;
 }
 
-type RangeKey = 'week' | 'month';
+type RangeKey = 'week' | 'month' | 'all';
 
 function getRangeLabel(range: RangeKey): string {
   switch (range) {
@@ -78,6 +78,8 @@ function getRangeLabel(range: RangeKey): string {
       return 'Last Week';
     case 'month':
       return 'Last Month';
+    case 'all':
+      return 'All Time';
     default:
       return 'Last Month';
   }
@@ -830,7 +832,7 @@ export function StatsPageClient({ stats, error, workspaceId, activeRange }: Stat
             variant="outline"
             className="h-7"
           >
-            {(['week', 'month'] as RangeKey[]).map((key) => (
+            {(['week', 'month', 'all'] as RangeKey[]).map((key) => (
               <ToggleGroupItem
                 key={key}
                 value={key}

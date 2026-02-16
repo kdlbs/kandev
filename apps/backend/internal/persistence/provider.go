@@ -35,7 +35,14 @@ func Provide(cfg *config.Config, log *logger.Logger) (*sql.DB, func() error, err
 		if log != nil {
 			log.Info("Database initialized", zap.String("db_path", dbPath), zap.String("db_driver", driver))
 		}
-		return dbConn, func() error { return dbConn.Close() }, nil
+		cleanup := func() error {
+			// Run PRAGMA optimize before closing to update query planner
+			// statistics for tables that need it. This is the SQLite-recommended
+			// way to maintain stats — lightweight and safe to call on every close.
+			_, _ = dbConn.Exec("PRAGMA optimize")
+			return dbConn.Close()
+		}
+		return dbConn, cleanup, nil
 	default:
 		return nil, nil, fmt.Errorf("unsupported database driver: %s", driver)
 	}

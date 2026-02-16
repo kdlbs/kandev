@@ -12,6 +12,9 @@ import (
 	"go.uber.org/zap"
 )
 
+// allTimeActivityDays is the number of days shown in the daily activity heatmap for the "all" range.
+const allTimeActivityDays = 365
+
 type StatsHandlers struct {
 	repo   repository.Repository
 	logger *logger.Logger
@@ -213,6 +216,8 @@ func parseStatsRange(rangeKey string) (*time.Time, int) {
 	case "month":
 		start := now.AddDate(0, 0, -30)
 		return &start, 30
+	case "all":
+		return nil, allTimeActivityDays
 	default:
 		start := now.AddDate(0, 0, -30)
 		return &start, 30
