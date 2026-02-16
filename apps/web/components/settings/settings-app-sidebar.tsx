@@ -120,7 +120,7 @@ export function SettingsAppSidebar() {
                     <SidebarMenuSub className="ml-3 mt-1">
                       {workspaces.map((workspace: Workspace) => {
                         const workspacePath = `/settings/workspace/${workspace.id}`;
-                        const boardsPath = `${workspacePath}/boards`;
+                        const workflowsPath = `${workspacePath}/workflows`;
                         const repositoriesPath = `${workspacePath}/repositories`;
 
                         return (
@@ -149,10 +149,10 @@ export function SettingsAppSidebar() {
                                 <SidebarMenuSubButton
                                   asChild
                                   size="sm"
-                                  isActive={pathname === boardsPath}
+                                  isActive={pathname === workflowsPath}
                                 >
-                                  <Link href={boardsPath}>
-                                    <span>Boards</span>
+                                  <Link href={workflowsPath}>
+                                    <span>Workflows</span>
                                   </Link>
                                 </SidebarMenuSubButton>
                               </SidebarMenuSubItem>

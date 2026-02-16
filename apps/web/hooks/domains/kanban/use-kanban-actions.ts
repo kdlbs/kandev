@@ -5,14 +5,14 @@ import { useRouter } from 'next/navigation';
 import { useAppStoreApi } from '@/components/state-provider';
 import { useTaskCRUD } from '@/hooks/use-task-crud';
 import type { Task as BackendTask } from '@/lib/types/http';
-import type { KanbanState, WorkspaceState, BoardState } from '@/lib/state/slices';
+import type { KanbanState, WorkspaceState, WorkflowsState } from '@/lib/state/slices';
 
 type UseKanbanActionsOptions = {
   workspaceState: WorkspaceState;
-  boardsState: BoardState;
+  workflowsState: WorkflowsState;
 };
 
-export function useKanbanActions({ workspaceState, boardsState }: UseKanbanActionsOptions) {
+export function useKanbanActions({ workspaceState, workflowsState }: UseKanbanActionsOptions) {
   const router = useRouter();
   const store = useAppStoreApi();
 
@@ -114,20 +114,20 @@ export function useKanbanActions({ workspaceState, boardsState }: UseKanbanActio
     [router, store, workspaceState.activeId]
   );
 
-  // Handle board change with navigation
-  const handleBoardChange = useCallback(
-    (nextBoardId: string | null) => {
-      if (nextBoardId === boardsState.activeId) {
+  // Handle workflow change with navigation
+  const handleWorkflowChange = useCallback(
+    (nextWorkflowId: string | null) => {
+      if (nextWorkflowId === workflowsState.activeId) {
         return;
       }
-      store.getState().setActiveBoard(nextBoardId);
-      if (nextBoardId) {
-        const workspaceId = boardsState.items.find((board: BoardState['items'][number]) => board.id === nextBoardId)?.workspaceId;
+      store.getState().setActiveWorkflow(nextWorkflowId);
+      if (nextWorkflowId) {
+        const workspaceId = workflowsState.items.find((workflow: WorkflowsState['items'][number]) => workflow.id === nextWorkflowId)?.workspaceId;
         const workspaceParam = workspaceId ? `&workspaceId=${workspaceId}` : '';
-        router.push(`/?boardId=${nextBoardId}${workspaceParam}`);
+        router.push(`/?workflowId=${nextWorkflowId}${workspaceParam}`);
       }
     },
-    [router, store, boardsState.activeId, boardsState.items]
+    [router, store, workflowsState.activeId, workflowsState.items]
   );
 
   return {
@@ -147,6 +147,6 @@ export function useKanbanActions({ workspaceState, boardsState }: UseKanbanActio
 
     // Navigation actions
     handleWorkspaceChange,
-    handleBoardChange,
+    handleWorkflowChange,
   };
 }

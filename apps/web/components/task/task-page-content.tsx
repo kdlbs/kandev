@@ -79,9 +79,9 @@ export function TaskPageContent({
     // Fallback: construct minimal task from kanban data while full details load
     // This allows immediate UI response when switching tasks
     if (kanbanTask) {
-      // Reuse workspace/board from previous task context (same board)
+      // Reuse workspace/workflow from previous task context (same workflow)
       const prevWorkspaceId = taskDetails?.workspace_id ?? initialTask?.workspace_id;
-      const prevBoardId = taskDetails?.board_id ?? initialTask?.board_id;
+      const prevBoardId = taskDetails?.workflow_id ?? initialTask?.workflow_id;
       return {
         id: kanbanTask.id,
         title: kanbanTask.title,
@@ -90,7 +90,7 @@ export function TaskPageContent({
         position: kanbanTask.position,
         state: kanbanTask.state ?? 'CREATED',
         workspace_id: prevWorkspaceId ?? '',
-        board_id: prevBoardId ?? '',
+        workflow_id: prevBoardId ?? '',
         priority: 0,
         repositories: [],
         created_at: '',
@@ -100,7 +100,12 @@ export function TaskPageContent({
 
     return null;
   }, [taskDetails, initialTask, kanbanTask, effectiveTaskId]);
-  useTasks(task?.board_id ?? null);
+  useTasks(task?.workflow_id ?? null);
+  const kanbanSteps = useAppStore((state) => state.kanban.steps);
+  const workflowSteps = useMemo(
+    () => kanbanSteps.map((s) => ({ id: s.id, name: s.title, color: s.color, position: s.position })),
+    [kanbanSteps]
+  );
   const connectionStatus = useAppStore((state) => state.connection.status);
 
   // Regular task agent hook for non-resumed sessions
@@ -180,22 +185,22 @@ export function TaskPageContent({
   useEffect(() => {
     if (!activeTaskId) return;
     if (taskDetails?.id === activeTaskId) return;
-    // Skip fetch if we already have task in kanban state (same board) and we have essential data
+    // Skip fetch if we already have task in kanban state (same workflow) and we have essential data
     // The kanban state already has title, description, state which covers most UI needs
     // Only fetch for additional details like repositories, metadata, etc.
-    if (kanbanTask && taskDetails?.workspace_id && taskDetails?.board_id) {
-      // We have kanban data and can reuse workspace/board from current context
+    if (kanbanTask && taskDetails?.workspace_id && taskDetails?.workflow_id) {
+      // We have kanban data and can reuse workspace/workflow from current context
       // Fetch in background without blocking (low priority)
       fetchTask(activeTaskId, { cache: 'no-store' })
         .then((response) => setTaskDetails(response))
         .catch((error) => console.error('[TaskPageContent] Failed to load task details:', error));
       return;
     }
-    // Full fetch needed for first load or cross-board navigation
+    // Full fetch needed for first load or cross-workflow navigation
     fetchTask(activeTaskId, { cache: 'no-store' })
       .then((response) => setTaskDetails(response))
       .catch((error) => console.error('[TaskPageContent] Failed to load task details:', error));
-  }, [activeTaskId, taskDetails?.id, taskDetails?.workspace_id, taskDetails?.board_id, kanbanTask]);
+  }, [activeTaskId, taskDetails?.id, taskDetails?.workspace_id, taskDetails?.workflow_id, kanbanTask]);
   const { repositories } = useRepositories(task?.workspace_id ?? null, Boolean(task?.workspace_id));
   const effectiveRepositories = repositories.length ? repositories : initialRepositories;
   const repository = useMemo(
@@ -253,12 +258,14 @@ export function TaskPageContent({
             repositoryName={repository?.name ?? null}
             showDebugOverlay={showDebugOverlay}
             onToggleDebugOverlay={() => setShowDebugOverlay((prev) => !prev)}
+            workflowSteps={workflowSteps}
+            currentStepId={task?.workflow_step_id ?? null}
           />
         )}
 
         <TaskLayout
           workspaceId={task?.workspace_id ?? null}
-          boardId={task?.board_id ?? null}
+          workflowId={task?.workflow_id ?? null}
           sessionId={effectiveSessionId ?? null}
           repository={repository ?? null}
           initialScripts={initialScripts}

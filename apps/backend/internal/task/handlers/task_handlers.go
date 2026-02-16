@@ -62,7 +62,7 @@ func RegisterTaskRoutes(router *gin.Engine, dispatcher *ws.Dispatcher, ctrl *con
 
 func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api := router.Group("/api/v1")
-	api.GET("/boards/:id/tasks", h.httpListTasks)
+	api.GET("/workflows/:id/tasks", h.httpListTasks)
 	api.GET("/workspaces/:id/tasks", h.httpListTasksByWorkspace)
 	api.GET("/tasks/:id", h.httpGetTask)
 	api.GET("/task-sessions/:id", h.httpGetTaskSession)
@@ -72,6 +72,10 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api.PATCH("/tasks/:id", h.httpUpdateTask)
 	api.POST("/tasks/:id/move", h.httpMoveTask)
 	api.DELETE("/tasks/:id", h.httpDeleteTask)
+
+	api.POST("/tasks/bulk-move", h.httpBulkMoveTasks)
+	api.GET("/workflows/:id/task-count", h.httpGetWorkflowTaskCount)
+	api.GET("/workflow/steps/:id/task-count", h.httpGetStepTaskCount)
 
 	// Session workflow review endpoints
 	api.POST("/sessions/:id/approve", h.httpApproveSession)
@@ -104,7 +108,7 @@ func (h *TaskHandlers) registerWS(dispatcher *ws.Dispatcher) {
 // HTTP handlers
 
 func (h *TaskHandlers) httpListTasks(c *gin.Context) {
-	resp, err := h.controller.ListTasks(c.Request.Context(), dto.ListTasksRequest{BoardID: c.Param("id")})
+	resp, err := h.controller.ListTasks(c.Request.Context(), dto.ListTasksRequest{WorkflowID: c.Param("id")})
 	if err != nil {
 		handleNotFound(c, h.logger, err, "tasks not found")
 		return
@@ -208,6 +212,57 @@ func (h *TaskHandlers) httpApproveSession(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
+func (h *TaskHandlers) httpGetWorkflowTaskCount(c *gin.Context) {
+	resp, err := h.controller.CountTasksByWorkflow(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		h.logger.Error("failed to count tasks by workflow", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to count tasks"})
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+func (h *TaskHandlers) httpGetStepTaskCount(c *gin.Context) {
+	resp, err := h.controller.CountTasksByWorkflowStep(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		h.logger.Error("failed to count tasks by step", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to count tasks"})
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+type httpBulkMoveTasksRequest struct {
+	SourceWorkflowID string `json:"source_workflow_id"`
+	SourceStepID     string `json:"source_step_id,omitempty"`
+	TargetWorkflowID string `json:"target_workflow_id"`
+	TargetStepID     string `json:"target_step_id"`
+}
+
+func (h *TaskHandlers) httpBulkMoveTasks(c *gin.Context) {
+	var body httpBulkMoveTasksRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	if body.SourceWorkflowID == "" || body.TargetWorkflowID == "" || body.TargetStepID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "source_workflow_id, target_workflow_id, and target_step_id are required"})
+		return
+	}
+	resp, err := h.controller.BulkMoveTasks(c.Request.Context(), dto.BulkMoveTasksRequest{
+		SourceWorkflowID: body.SourceWorkflowID,
+		SourceStepID:     body.SourceStepID,
+		TargetWorkflowID: body.TargetWorkflowID,
+		TargetStepID:     body.TargetStepID,
+	})
+	if err != nil {
+		h.logger.Error("failed to bulk move tasks", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to bulk move tasks"})
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
 type httpTaskRepositoryInput struct {
 	RepositoryID  string `json:"repository_id"`
 	BaseBranch    string `json:"base_branch"`
@@ -218,7 +273,7 @@ type httpTaskRepositoryInput struct {
 
 type httpCreateTaskRequest struct {
 	WorkspaceID    string                    `json:"workspace_id"`
-	BoardID        string                    `json:"board_id"`
+	WorkflowID     string                    `json:"workflow_id"`
 	WorkflowStepID string                    `json:"workflow_step_id"`
 	Title          string                    `json:"title"`
 	Description    string                    `json:"description,omitempty"`
@@ -274,7 +329,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 	reqCtx := c.Request.Context()
 	resp, err := h.controller.CreateTask(reqCtx, dto.CreateTaskRequest{
 		WorkspaceID:    body.WorkspaceID,
-		BoardID:        body.BoardID,
+		WorkflowID:     body.WorkflowID,
 		WorkflowStepID: body.WorkflowStepID,
 		Title:          body.Title,
 		Description:    body.Description,
@@ -290,10 +345,12 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 	}
 
 	response := createTaskResponse{TaskDTO: resp}
+	// Use the backend-resolved workflow step ID (from the created task) instead of the request's
+	resolvedStepID := resp.WorkflowStepID
 	if body.PrepareSession && !body.StartAgent && body.AgentProfileID != "" && h.orchestrator != nil {
 		// Create session entry without launching the agent.
 		// The session stays in CREATED state until the user triggers it.
-		sessionID, err := h.orchestrator.PrepareTaskSession(reqCtx, resp.ID, body.AgentProfileID, body.ExecutorID, body.WorkflowStepID)
+		sessionID, err := h.orchestrator.PrepareTaskSession(reqCtx, resp.ID, body.AgentProfileID, body.ExecutorID, resolvedStepID)
 		if err != nil {
 			h.logger.Error("failed to prepare session for task", zap.Error(err), zap.String("task_id", resp.ID))
 		} else {
@@ -301,7 +358,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		}
 	} else if body.StartAgent && body.AgentProfileID != "" && h.orchestrator != nil {
 		// Create session entry synchronously so we can return the session ID immediately
-		sessionID, err := h.orchestrator.PrepareTaskSession(reqCtx, resp.ID, body.AgentProfileID, body.ExecutorID, body.WorkflowStepID)
+		sessionID, err := h.orchestrator.PrepareTaskSession(reqCtx, resp.ID, body.AgentProfileID, body.ExecutorID, resolvedStepID)
 		if err != nil {
 			h.logger.Error("failed to prepare session for task", zap.Error(err), zap.String("task_id", resp.ID))
 			// Continue without session - task was created successfully
@@ -310,14 +367,14 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 
 			// Launch agent asynchronously so the HTTP request can return immediately.
 			// The frontend will receive WebSocket updates when the agent actually starts.
-			executorID := body.ExecutorID         // Capture for goroutine
-			workflowStepID := body.WorkflowStepID // Capture for goroutine
+			executorID := body.ExecutorID  // Capture for goroutine
+			stepID := resolvedStepID       // Capture for goroutine
 			go func() {
 				// Use a longer timeout to accommodate setup scripts (which can take minutes for npm install, etc.)
 				startCtx, cancel := context.WithTimeout(context.Background(), constants.AgentLaunchTimeout)
 				defer cancel()
 				// Use task description as the initial prompt with workflow step config (prompt prefix/suffix, plan mode)
-				execution, err := h.orchestrator.StartTaskWithSession(startCtx, resp.ID, sessionID, body.AgentProfileID, executorID, body.Priority, resp.Description, workflowStepID, body.PlanMode)
+				execution, err := h.orchestrator.StartTaskWithSession(startCtx, resp.ID, sessionID, body.AgentProfileID, executorID, body.Priority, resp.Description, stepID, body.PlanMode)
 				if err != nil {
 					h.logger.Error("failed to start agent for task (async)", zap.Error(err), zap.String("task_id", resp.ID), zap.String("session_id", sessionID))
 					return
@@ -326,7 +383,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 					zap.String("task_id", resp.ID),
 					zap.String("session_id", execution.SessionID),
 					zap.String("executor_id", executorID),
-					zap.String("workflow_step_id", workflowStepID),
+					zap.String("workflow_step_id", stepID),
 					zap.String("execution_id", execution.AgentExecutionID))
 			}()
 		}
@@ -384,7 +441,7 @@ func (h *TaskHandlers) httpUpdateTask(c *gin.Context) {
 }
 
 type httpMoveTaskRequest struct {
-	BoardID        string `json:"board_id"`
+	WorkflowID     string `json:"workflow_id"`
 	WorkflowStepID string `json:"workflow_step_id"`
 	Position       int    `json:"position"`
 }
@@ -395,13 +452,13 @@ func (h *TaskHandlers) httpMoveTask(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
 		return
 	}
-	if body.BoardID == "" || body.WorkflowStepID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "board_id and workflow_step_id are required"})
+	if body.WorkflowID == "" || body.WorkflowStepID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "workflow_id and workflow_step_id are required"})
 		return
 	}
 	resp, err := h.controller.MoveTask(c.Request.Context(), dto.MoveTaskRequest{
 		ID:             c.Param("id"),
-		BoardID:        body.BoardID,
+		WorkflowID:     body.WorkflowID,
 		WorkflowStepID: body.WorkflowStepID,
 		Position:       body.Position,
 	})
@@ -447,7 +504,7 @@ func (h *TaskHandlers) wsListTaskSessions(ctx context.Context, msg *ws.Message) 
 }
 
 type wsListTasksRequest struct {
-	BoardID string `json:"board_id"`
+	WorkflowID string `json:"workflow_id"`
 }
 
 func (h *TaskHandlers) wsListTasks(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -455,11 +512,11 @@ func (h *TaskHandlers) wsListTasks(ctx context.Context, msg *ws.Message) (*ws.Me
 	if err := msg.ParsePayload(&req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
-	if req.BoardID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "board_id is required", nil)
+	if req.WorkflowID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow_id is required", nil)
 	}
 
-	resp, err := h.controller.ListTasks(ctx, dto.ListTasksRequest{BoardID: req.BoardID})
+	resp, err := h.controller.ListTasks(ctx, dto.ListTasksRequest{WorkflowID: req.WorkflowID})
 	if err != nil {
 		h.logger.Error("failed to list tasks", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list tasks", nil)
@@ -469,7 +526,7 @@ func (h *TaskHandlers) wsListTasks(ctx context.Context, msg *ws.Message) (*ws.Me
 
 type wsCreateTaskRequest struct {
 	WorkspaceID    string                    `json:"workspace_id"`
-	BoardID        string                    `json:"board_id"`
+	WorkflowID     string                    `json:"workflow_id"`
 	WorkflowStepID string                    `json:"workflow_step_id"`
 	Title          string                    `json:"title"`
 	Description    string                    `json:"description,omitempty"`
@@ -492,11 +549,8 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	if req.WorkspaceID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workspace_id is required", nil)
 	}
-	if req.BoardID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "board_id is required", nil)
-	}
-	if req.WorkflowStepID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow_step_id is required", nil)
+	if req.WorkflowID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow_id is required", nil)
 	}
 	if req.Title == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "title is required", nil)
@@ -522,7 +576,7 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 
 	resp, err := h.controller.CreateTask(ctx, dto.CreateTaskRequest{
 		WorkspaceID:    req.WorkspaceID,
-		BoardID:        req.BoardID,
+		WorkflowID:     req.WorkflowID,
 		WorkflowStepID: req.WorkflowStepID,
 		Title:          req.Title,
 		Description:    req.Description,
@@ -540,7 +594,8 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	response := createTaskResponse{TaskDTO: resp}
 	if req.StartAgent && req.AgentProfileID != "" && h.orchestrator != nil {
 		// Use task description as the initial prompt with workflow step config (prompt prefix/suffix, plan mode)
-		execution, err := h.orchestrator.StartTask(ctx, resp.ID, req.AgentProfileID, req.ExecutorID, req.Priority, resp.Description, req.WorkflowStepID, req.PlanMode)
+		// Use resp.WorkflowStepID (backend-resolved) instead of req.WorkflowStepID
+		execution, err := h.orchestrator.StartTask(ctx, resp.ID, req.AgentProfileID, req.ExecutorID, req.Priority, resp.Description, resp.WorkflowStepID, req.PlanMode)
 		if err != nil {
 			h.logger.Error("failed to start agent for task", zap.Error(err))
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to start agent for task", nil)
@@ -650,7 +705,7 @@ func (h *TaskHandlers) wsDeleteTask(ctx context.Context, msg *ws.Message) (*ws.M
 
 type wsMoveTaskRequest struct {
 	ID             string `json:"id"`
-	BoardID        string `json:"board_id"`
+	WorkflowID     string `json:"workflow_id"`
 	WorkflowStepID string `json:"workflow_step_id"`
 	Position       int    `json:"position"`
 }
@@ -663,8 +718,8 @@ func (h *TaskHandlers) wsMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 	if req.ID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "id is required", nil)
 	}
-	if req.BoardID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "board_id is required", nil)
+	if req.WorkflowID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow_id is required", nil)
 	}
 	if req.WorkflowStepID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow_step_id is required", nil)
@@ -672,7 +727,7 @@ func (h *TaskHandlers) wsMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 
 	resp, err := h.controller.MoveTask(ctx, dto.MoveTaskRequest{
 		ID:             req.ID,
-		BoardID:        req.BoardID,
+		WorkflowID:     req.WorkflowID,
 		WorkflowStepID: req.WorkflowStepID,
 		Position:       req.Position,
 	})

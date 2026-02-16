@@ -5,12 +5,12 @@ const (
 	// Health
 	ActionHealthCheck = "health.check"
 
-	// Board actions
-	ActionBoardList   = "board.list"
-	ActionBoardCreate = "board.create"
-	ActionBoardGet    = "board.get"
-	ActionBoardUpdate = "board.update"
-	ActionBoardDelete = "board.delete"
+	// Workflow actions
+	ActionWorkflowList   = "workflow.list"
+	ActionWorkflowCreate = "workflow.create"
+	ActionWorkflowGet    = "workflow.get"
+	ActionWorkflowUpdate = "workflow.update"
+	ActionWorkflowDelete = "workflow.delete"
 
 	// Workspace actions
 	ActionWorkspaceList   = "workspace.list"
@@ -98,7 +98,7 @@ const (
 	ActionMessageQueueUpdate         = "message.queue.update"
 	ActionMessageQueueStatusChanged  = "message.queue.status_changed" // Notification: queue status changed
 
-	// Workflow actions
+	// Workflow template/step actions
 	ActionWorkflowTemplateList   = "workflow.template.list"
 	ActionWorkflowTemplateGet    = "workflow.template.get"
 	ActionWorkflowStepList       = "workflow.step.list"
@@ -138,9 +138,9 @@ const (
 	ActionWorkspaceCreated        = "workspace.created"
 	ActionWorkspaceUpdated        = "workspace.updated"
 	ActionWorkspaceDeleted        = "workspace.deleted"
-	ActionBoardCreated            = "board.created"
-	ActionBoardUpdated            = "board.updated"
-	ActionBoardDeleted            = "board.deleted"
+	ActionWorkflowCreated         = "workflow.created"
+	ActionWorkflowUpdated         = "workflow.updated"
+	ActionWorkflowDeleted         = "workflow.deleted"
 	ActionSessionMessageAdded     = "session.message.added"
 	ActionSessionMessageUpdated   = "session.message.updated"
 	ActionSessionStateChanged     = "session.state_changed"
@@ -229,7 +229,7 @@ const (
 
 	// MCP tool actions (agentctl -> backend via WS tunnel)
 	ActionMCPListWorkspaces    = "mcp.list_workspaces"
-	ActionMCPListBoards        = "mcp.list_boards"
+	ActionMCPListWorkflows     = "mcp.list_workflows"
 	ActionMCPListWorkflowSteps = "mcp.list_workflow_steps"
 	ActionMCPListTasks         = "mcp.list_tasks"
 	ActionMCPCreateTask        = "mcp.create_task"

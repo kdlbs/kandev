@@ -11,34 +11,33 @@ import {
 import { Button } from '@kandev/ui/button';
 import { TaskSwitcher } from '../task-switcher';
 import { WorkspaceSwitcher } from '../workspace-switcher';
-import { BoardSwitcher } from '../board-switcher';
 import { TaskCreateDialog } from '@/components/task-create-dialog';
 import { useAppStore, useAppStoreApi } from '@/components/state-provider';
 import { linkToSession } from '@/lib/links';
-import { listTaskSessions, fetchBoardSnapshot, listBoards } from '@/lib/api';
+import { listTaskSessions, fetchWorkflowSnapshot, listWorkflows } from '@/lib/api';
 import { useTasks } from '@/hooks/use-tasks';
 import { useTaskActions } from '@/hooks/use-task-actions';
-import type { TaskState, Workspace, Repository, TaskSession, BoardSnapshot, Task } from '@/lib/types/http';
+import type { TaskState, Workspace, Repository, TaskSession, Task, WorkflowSnapshot } from '@/lib/types/http';
 import type { KanbanState } from '@/lib/state/slices';
 
 type SessionTaskSwitcherSheetProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   workspaceId: string | null;
-  boardId: string | null;
+  workflowId: string | null;
 };
 
-// Helper to map board snapshot to kanban state
-function mapSnapshotToKanban(snapshot: BoardSnapshot, newBoardId: string) {
+// Helper to map workflow snapshot to kanban state
+function mapSnapshotToKanban(snapshot: WorkflowSnapshot, newWorkflowId: string) {
   return {
-    boardId: newBoardId,
+    workflowId: newWorkflowId,
     isLoading: false,
     steps: snapshot.steps.map((step) => ({
       id: step.id,
       title: step.name,
       color: step.color,
       position: step.position,
-      autoStartAgent: step.auto_start_agent,
+      events: step.events,
     })),
     tasks: snapshot.tasks.map((task) => ({
       id: task.id,
@@ -69,7 +68,7 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
   open,
   onOpenChange,
   workspaceId,
-  boardId,
+  workflowId,
 }: SessionTaskSwitcherSheetProps) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
@@ -79,9 +78,8 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
   const sessionsById = useAppStore((state) => state.taskSessions.items);
   const sessionsByTaskId = useAppStore((state) => state.taskSessionsByTask.itemsByTaskId);
   const gitStatusBySessionId = useAppStore((state) => state.gitStatus.bySessionId);
-  const { tasks } = useTasks(boardId);
-  const columns = useAppStore((state) => state.kanban.steps);
-  const boards = useAppStore((state) => state.boards.items);
+  const { tasks } = useTasks(workflowId);
+  const steps = useAppStore((state) => state.kanban.steps);
   const workspaces = useAppStore((state) => state.workspaces.items);
   const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
   const setActiveTask = useAppStore((state) => state.setActiveTask);
@@ -126,12 +124,6 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
     },
     [sessionsByTaskId, gitStatusBySessionId]
   );
-
-  // Get boards for the current workspace
-  const workspaceBoards = useMemo(() => {
-    if (!workspaceId) return [];
-    return boards.filter((board: { id: string; workspaceId: string; name: string }) => board.workspaceId === workspaceId);
-  }, [boards, workspaceId]);
 
   const tasksWithRepositories = useMemo(() => {
     const repositories = workspaceId ? repositoriesByWorkspace[workspaceId] ?? [] : [];
@@ -256,47 +248,6 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
     [deleteTaskById, store, setActiveSession, setActiveTask, loadTaskSessionsForTask]
   );
 
-  const handleBoardChange = useCallback(
-    async (newBoardId: string) => {
-      if (newBoardId === boardId) return;
-
-      store.setState((state) => ({
-        ...state,
-        kanban: { ...state.kanban, isLoading: true },
-      }));
-
-      try {
-        const snapshot = await fetchBoardSnapshot(newBoardId);
-
-        store.setState((state) => ({
-          ...state,
-          kanban: mapSnapshotToKanban(snapshot, newBoardId),
-          boards: { ...state.boards, activeId: newBoardId },
-        }));
-
-        const mostRecentTask = sortByUpdatedAtDesc(snapshot.tasks)[0];
-        if (mostRecentTask) {
-          const sessions = await loadTaskSessionsForTask(mostRecentTask.id);
-          const mostRecentSession = sortByUpdatedAtDesc(sessions)[0];
-          if (mostRecentSession) {
-            setActiveSession(mostRecentTask.id, mostRecentSession.id);
-            updateUrl(mostRecentSession.id);
-          } else {
-            setActiveTask(mostRecentTask.id);
-          }
-        }
-        onOpenChange(false);
-      } catch (error) {
-        console.error('Failed to switch board:', error);
-        store.setState((state) => ({
-          ...state,
-          kanban: { ...state.kanban, isLoading: false },
-        }));
-      }
-    },
-    [boardId, store, loadTaskSessionsForTask, setActiveSession, setActiveTask, updateUrl, onOpenChange]
-  );
-
   const handleWorkspaceChange = useCallback(
     async (newWorkspaceId: string) => {
       if (newWorkspaceId === workspaceId) return;
@@ -307,11 +258,11 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
       }));
 
       try {
-        const boardsResponse = await listBoards(newWorkspaceId, { cache: 'no-store' });
-        const newWorkspaceBoards = boardsResponse.boards ?? [];
+        const workflowsResponse = await listWorkflows(newWorkspaceId, { cache: 'no-store' });
+        const newWorkspaceWorkflows = workflowsResponse.workflows ?? [];
 
-        const firstBoard = newWorkspaceBoards[0];
-        if (!firstBoard) {
+        const firstWorkflow = newWorkspaceWorkflows[0];
+        if (!firstWorkflow) {
           store.setState((state) => ({
             ...state,
             kanban: { ...state.kanban, isLoading: false },
@@ -319,19 +270,19 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
           return;
         }
 
-        const snapshot = await fetchBoardSnapshot(firstBoard.id);
+        const snapshot = await fetchWorkflowSnapshot(firstWorkflow.id);
 
         store.setState((state) => ({
           ...state,
-          boards: {
-            ...state.boards,
+          workflows: {
+            ...state.workflows,
             items: [
-              ...state.boards.items.filter((b: { workspaceId: string }) => b.workspaceId !== newWorkspaceId),
-              ...newWorkspaceBoards.map((b) => ({ id: b.id, workspaceId: b.workspace_id, name: b.name })),
+              ...state.workflows.items.filter((w: { workspaceId: string }) => w.workspaceId !== newWorkspaceId),
+              ...newWorkspaceWorkflows.map((w) => ({ id: w.id, workspaceId: w.workspace_id, name: w.name })),
             ],
-            activeId: firstBoard.id,
+            activeId: firstWorkflow.id,
           },
-          kanban: mapSnapshotToKanban(snapshot, firstBoard.id),
+          kanban: mapSnapshotToKanban(snapshot, firstWorkflow.id),
         }));
 
         const mostRecentTask = sortByUpdatedAtDesc(snapshot.tasks)[0];
@@ -357,20 +308,20 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
     [workspaceId, store, loadTaskSessionsForTask, setActiveSession, setActiveTask, updateUrl, onOpenChange]
   );
 
-  const dialogColumns = useMemo(
-    () => columns.map((step: KanbanState['steps'][number]) => ({
+  const dialogSteps = useMemo(
+    () => steps.map((step: KanbanState['steps'][number]) => ({
       id: step.id,
       title: step.title,
       color: step.color,
-      autoStartAgent: step.autoStartAgent,
+      events: step.events,
     })),
-    [columns]
+    [steps]
   );
 
   const handleTaskCreated = useCallback(
     (task: Task, _mode: 'create' | 'edit', meta?: { taskSessionId?: string | null }) => {
       store.setState((state) => {
-        if (state.kanban.boardId !== task.board_id) return state;
+        if (state.kanban.workflowId !== task.workflow_id) return state;
         const nextTask = {
           id: task.id,
           workflowStepId: task.workflow_step_id,
@@ -429,7 +380,7 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
         <div className="flex-1 min-h-0 overflow-y-auto p-2">
           <TaskSwitcher
             tasks={tasksWithRepositories}
-            columns={columns.map((step: KanbanState['steps'][number]) => ({ id: step.id, title: step.title, color: step.color }))}
+            steps={steps.map((step: KanbanState['steps'][number]) => ({ id: step.id, title: step.title, color: step.color }))}
             activeTaskId={activeTaskId}
             selectedTaskId={selectedTaskId}
             onSelectTask={handleSelectTask}
@@ -439,16 +390,6 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
           />
         </div>
 
-        {/* Board Switcher at bottom */}
-        {workspaceBoards.length > 1 && (
-          <div className="p-2 border-t border-border">
-            <BoardSwitcher
-              boards={workspaceBoards.map((b: { id: string; name: string }) => ({ id: b.id, name: b.name }))}
-              activeBoardId={boardId}
-              onSelect={handleBoardChange}
-            />
-          </div>
-        )}
       </SheetContent>
 
       <TaskCreateDialog
@@ -456,9 +397,9 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
         onOpenChange={setDialogOpen}
         mode="create"
         workspaceId={workspaceId}
-        boardId={boardId}
-        defaultColumnId={dialogColumns[0]?.id ?? null}
-        columns={dialogColumns}
+        workflowId={workflowId}
+        defaultStepId={dialogSteps[0]?.id ?? null}
+        steps={dialogSteps}
         onSuccess={handleTaskCreated}
       />
     </Sheet>

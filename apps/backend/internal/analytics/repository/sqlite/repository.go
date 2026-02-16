@@ -80,9 +80,6 @@ func (r *Repository) ensureStatsIndexes() error {
 			ON repositories(workspace_id)
 			WHERE deleted_at IS NULL`,
 
-		// Workflow steps indexes
-		`CREATE INDEX IF NOT EXISTS idx_workflow_steps_type
-			ON workflow_steps(id, step_type)`,
 	}
 
 	for _, idx := range indexes {

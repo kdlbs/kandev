@@ -5,7 +5,7 @@ type TaskStatsDTO struct {
 	TaskID           string  `json:"task_id"`
 	TaskTitle        string  `json:"task_title"`
 	WorkspaceID      string  `json:"workspace_id"`
-	BoardID          string  `json:"board_id"`
+	WorkflowID       string  `json:"workflow_id"`
 	State            string  `json:"state"`
 	SessionCount     int     `json:"session_count"`
 	TurnCount        int     `json:"turn_count"`

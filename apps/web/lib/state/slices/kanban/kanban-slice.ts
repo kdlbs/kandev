@@ -2,8 +2,9 @@ import type { StateCreator } from 'zustand';
 import type { KanbanSlice, KanbanSliceState } from './types';
 
 export const defaultKanbanState: KanbanSliceState = {
-  kanban: { boardId: null, steps: [], tasks: [] },
-  boards: { items: [], activeId: null },
+  kanban: { workflowId: null, steps: [], tasks: [] },
+  kanbanMulti: { snapshots: {}, isLoading: false },
+  workflows: { items: [], activeId: null },
   tasks: { activeTaskId: null, activeSessionId: null },
 };
 
@@ -14,19 +15,19 @@ export const createKanbanSlice: StateCreator<
   KanbanSlice
 > = (set, get) => ({
   ...defaultKanbanState,
-  setActiveBoard: (boardId) => {
-    if (get().boards.activeId === boardId) {
+  setActiveWorkflow: (workflowId) => {
+    if (get().workflows.activeId === workflowId) {
       return;
     }
     set((draft) => {
-      draft.boards.activeId = boardId;
+      draft.workflows.activeId = workflowId;
     });
   },
-  setBoards: (boards) =>
+  setWorkflows: (workflows) =>
     set((draft) => {
-      draft.boards.items = boards;
-      if (!draft.boards.activeId && boards.length) {
-        draft.boards.activeId = boards[0].id;
+      draft.workflows.items = workflows;
+      if (!draft.workflows.activeId && workflows.length) {
+        draft.workflows.activeId = workflows[0].id;
       }
     }),
   setActiveTask: (taskId) =>
@@ -41,5 +42,34 @@ export const createKanbanSlice: StateCreator<
   clearActiveSession: () =>
     set((draft) => {
       draft.tasks.activeSessionId = null;
+    }),
+  setWorkflowSnapshot: (workflowId, data) =>
+    set((draft) => {
+      draft.kanbanMulti.snapshots[workflowId] = data;
+    }),
+  setKanbanMultiLoading: (loading) =>
+    set((draft) => {
+      draft.kanbanMulti.isLoading = loading;
+    }),
+  clearKanbanMulti: () =>
+    set((draft) => {
+      draft.kanbanMulti.snapshots = {};
+    }),
+  updateMultiTask: (workflowId, task) =>
+    set((draft) => {
+      const snapshot = draft.kanbanMulti.snapshots[workflowId];
+      if (!snapshot) return;
+      const idx = snapshot.tasks.findIndex((t) => t.id === task.id);
+      if (idx >= 0) {
+        snapshot.tasks[idx] = task;
+      } else {
+        snapshot.tasks.push(task);
+      }
+    }),
+  removeMultiTask: (workflowId, taskId) =>
+    set((draft) => {
+      const snapshot = draft.kanbanMulti.snapshots[workflowId];
+      if (!snapshot) return;
+      snapshot.tasks = snapshot.tasks.filter((t) => t.id !== taskId);
     }),
 });

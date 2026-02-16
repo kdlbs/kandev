@@ -477,7 +477,6 @@ export function EditorsSettings() {
     if (parsedConfigs === null) return; // Invalid JSON, don't save
     const payload: Parameters<typeof updateUserSettings>[0] = {
       workspace_id: currentUserSettings.workspaceId ?? '',
-      board_id: currentUserSettings.boardId ?? '',
       repository_ids: currentUserSettings.repositoryIds ?? [],
       default_editor_id: defaultEditorId || undefined,
       lsp_auto_start_languages: lspAutoStartLanguages,
@@ -492,7 +491,8 @@ export function EditorsSettings() {
     if (response?.settings) {
       setUserSettings({
         workspaceId: response.settings.workspace_id || null,
-        boardId: response.settings.board_id || null,
+        workflowId: response.settings.workflow_filter_id || null,
+        kanbanViewMode: response.settings.kanban_view_mode || null,
         repositoryIds: response.settings.repository_ids ?? [],
         preferredShell: response.settings.preferred_shell || null,
         shellOptions: currentUserSettings.shellOptions ?? [],

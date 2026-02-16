@@ -29,7 +29,7 @@ export type DragAndDropOptions = {
 };
 
 /**
- * Custom hook that extracts drag-and-drop logic from the KanbanBoard component.
+ * Custom hook that extracts drag-and-drop logic from the Kanban component.
  * Manages drag state and provides handlers for drag operations.
  *
  * @param options - Configuration options for drag and drop
@@ -57,13 +57,13 @@ export function useDragAndDrop({
    * Handles optimistic updates, API calls, workflow automation, and error rollback.
    */
   const performTaskMove = useCallback(
-    async (task: Task, targetColumnId: string) => {
+    async (task: Task, targetStepId: string) => {
       const currentKanban = store.getState().kanban;
-      if (!currentKanban.boardId) return;
+      if (!currentKanban.workflowId) return;
 
       // Calculate position in target column
       const targetTasks = currentKanban.tasks
-        .filter((t: KanbanState['tasks'][number]) => t.workflowStepId === targetColumnId && t.id !== task.id)
+        .filter((t: KanbanState['tasks'][number]) => t.workflowStepId === targetStepId && t.id !== task.id)
         .sort((a: KanbanState['tasks'][number], b: KanbanState['tasks'][number]) => a.position - b.position);
       const nextPosition = targetTasks.length;
 
@@ -76,7 +76,7 @@ export function useDragAndDrop({
           ...currentKanban,
           tasks: currentKanban.tasks.map((t: KanbanState['tasks'][number]) =>
             t.id === task.id
-              ? { ...t, workflowStepId: targetColumnId, position: nextPosition }
+              ? { ...t, workflowStepId: targetStepId, position: nextPosition }
               : t
           ),
         },
@@ -85,13 +85,13 @@ export function useDragAndDrop({
       try {
         setIsMovingTask(true);
         const response = await moveTaskById(task.id, {
-          board_id: currentKanban.boardId,
-          workflow_step_id: targetColumnId,
+          workflow_id: currentKanban.workflowId,
+          workflow_step_id: targetStepId,
           position: nextPosition,
         });
 
         // Handle workflow automation if target step has auto_start_agent enabled
-        if (response?.workflow_step?.auto_start_agent) {
+        if (response?.workflow_step?.events?.on_enter?.some((a: { type: string }) => a.type === 'auto_start_agent')) {
           const sessionId = task.primarySessionId ?? null;
 
           if (sessionId) {
@@ -156,17 +156,17 @@ export function useDragAndDrop({
       if (!over) return;
 
       const taskId = active.id as string;
-      const targetColumnId = over.id as string;
+      const targetStepId = over.id as string;
 
-      if (!kanban.boardId || isMovingTask) return;
+      if (!kanban.workflowId || isMovingTask) return;
 
       // Find the task being moved from visibleTasks (which has session info)
       const movedTask = visibleTasks.find((t) => t.id === taskId);
       if (!movedTask) return;
 
-      await performTaskMove(movedTask, targetColumnId);
+      await performTaskMove(movedTask, targetStepId);
     },
-    [kanban.boardId, isMovingTask, visibleTasks, performTaskMove]
+    [kanban.workflowId, isMovingTask, visibleTasks, performTaskMove]
   );
 
   const handleDragCancel = useCallback(() => {
@@ -174,18 +174,18 @@ export function useDragAndDrop({
   }, []);
 
   /**
-   * Move a task to a specific column via menu action (alternative to drag and drop).
+   * Move a task to a specific step via menu action (alternative to drag and drop).
    */
-  const moveTaskToColumn = useCallback(
-    async (task: Task, targetColumnId: string) => {
-      if (!kanban.boardId || isMovingTask) return;
+  const moveTaskToStep = useCallback(
+    async (task: Task, targetStepId: string) => {
+      if (!kanban.workflowId || isMovingTask) return;
 
-      // Don't move if already in target column
-      if (task.workflowStepId === targetColumnId) return;
+      // Don't move if already in target step
+      if (task.workflowStepId === targetStepId) return;
 
-      await performTaskMove(task, targetColumnId);
+      await performTaskMove(task, targetStepId);
     },
-    [kanban.boardId, isMovingTask, performTaskMove]
+    [kanban.workflowId, isMovingTask, performTaskMove]
   );
 
   const activeTask = useMemo(
@@ -200,6 +200,6 @@ export function useDragAndDrop({
     handleDragStart,
     handleDragEnd,
     handleDragCancel,
-    moveTaskToColumn,
+    moveTaskToStep,
   };
 }

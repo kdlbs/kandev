@@ -19,7 +19,7 @@ const DockviewDesktopLayout = dynamic(
 
 type TaskLayoutProps = {
   workspaceId: string | null;
-  boardId: string | null;
+  workflowId: string | null;
   sessionId?: string | null;
   repository?: Repository | null;
   initialScripts?: RepositoryScript[];
@@ -32,7 +32,7 @@ type TaskLayoutProps = {
 
 export const TaskLayout = memo(function TaskLayout({
   workspaceId,
-  boardId,
+  workflowId,
   sessionId = null,
   repository = null,
   initialScripts = [],
@@ -49,7 +49,7 @@ export const TaskLayout = memo(function TaskLayout({
     return (
       <SessionMobileLayout
         workspaceId={workspaceId}
-        boardId={boardId}
+        workflowId={workflowId}
         sessionId={sessionId}
         baseBranch={baseBranch}
         worktreeBranch={worktreeBranch}
@@ -63,7 +63,7 @@ export const TaskLayout = memo(function TaskLayout({
     return (
       <SessionTabletLayout
         workspaceId={workspaceId}
-        boardId={boardId}
+        workflowId={workflowId}
         sessionId={sessionId}
         repository={repository}
         defaultLayouts={defaultLayouts}
@@ -75,7 +75,7 @@ export const TaskLayout = memo(function TaskLayout({
   return (
     <DockviewDesktopLayout
       workspaceId={workspaceId}
-      boardId={boardId}
+      workflowId={workflowId}
       sessionId={sessionId}
       repository={repository}
       initialScripts={initialScripts}

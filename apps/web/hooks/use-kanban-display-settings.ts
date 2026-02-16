@@ -1,26 +1,23 @@
 'use client';
 
 import { useCallback } from 'react';
-import { useRouter } from 'next/navigation';
 import { useAppStore } from '@/components/state-provider';
 import { useUserDisplaySettings } from '@/hooks/use-user-display-settings';
-import type { BoardState } from '@/lib/state/slices';
+import type { WorkflowsState } from '@/lib/state/slices';
 
 /**
  * Custom hook that consolidates all kanban display settings and eliminates prop drilling.
- * This hook provides access to workspaces, boards, repositories, and preview settings,
+ * This hook provides access to workspaces, workflows, repositories, and preview settings,
  * along with handlers for changing these settings.
  */
 export function useKanbanDisplaySettings() {
-  const router = useRouter();
-
   // Access store directly
   const workspaces = useAppStore((state) => state.workspaces.items);
   const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
-  const boards = useAppStore((state) => state.boards.items);
-  const activeBoardId = useAppStore((state) => state.boards.activeId);
+  const workflows = useAppStore((state) => state.workflows.items);
+  const activeWorkflowId = useAppStore((state) => state.workflows.activeId);
   const setActiveWorkspace = useAppStore((state) => state.setActiveWorkspace);
-  const setActiveBoard = useAppStore((state) => state.setActiveBoard);
+  const setActiveWorkflow = useAppStore((state) => state.setActiveWorkflow);
 
   // Use existing compound hook for user settings
   const {
@@ -31,45 +28,45 @@ export function useKanbanDisplaySettings() {
     allRepositoriesSelected,
   } = useUserDisplaySettings({
     workspaceId: activeWorkspaceId,
-    boardId: activeBoardId,
+    workflowId: activeWorkflowId,
   });
 
   // Get preview setting from store
   const enablePreviewOnClick = useAppStore((state) => state.userSettings.enablePreviewOnClick);
 
-  // Define handlers
+  // Use pushState instead of router.push to avoid triggering SSR re-fetches.
+  // Filter changes only update client state; all data is already available.
   const handleWorkspaceChange = useCallback(
     (nextWorkspaceId: string | null) => {
       setActiveWorkspace(nextWorkspaceId);
-      if (nextWorkspaceId) {
-        router.push(`/?workspaceId=${nextWorkspaceId}`);
-      } else {
-        router.push('/');
-      }
+      const url = nextWorkspaceId ? `/?workspaceId=${nextWorkspaceId}` : '/';
+      window.history.pushState({}, '', url);
       commitSettings({
         workspaceId: nextWorkspaceId,
-        boardId: null,
+        workflowId: null,
         repositoryIds: [],
       });
     },
-    [setActiveWorkspace, router, commitSettings]
+    [setActiveWorkspace, commitSettings]
   );
 
-  const handleBoardChange = useCallback(
-    (nextBoardId: string | null) => {
-      setActiveBoard(nextBoardId);
-      if (nextBoardId) {
-        const workspaceId = boards.find((board: BoardState['items'][number]) => board.id === nextBoardId)?.workspaceId;
+  const handleWorkflowChange = useCallback(
+    (nextWorkflowId: string | null) => {
+      setActiveWorkflow(nextWorkflowId);
+      if (nextWorkflowId) {
+        const workspaceId = workflows.find((workflow: WorkflowsState['items'][number]) => workflow.id === nextWorkflowId)?.workspaceId;
         const workspaceParam = workspaceId ? `&workspaceId=${workspaceId}` : '';
-        router.push(`/?boardId=${nextBoardId}${workspaceParam}`);
+        window.history.pushState({}, '', `/?workflowId=${nextWorkflowId}${workspaceParam}`);
+      } else if (activeWorkspaceId) {
+        window.history.pushState({}, '', `/?workspaceId=${activeWorkspaceId}`);
       }
       commitSettings({
         workspaceId: userSettings.workspaceId,
-        boardId: nextBoardId,
+        workflowId: nextWorkflowId,
         repositoryIds: userSettings.repositoryIds,
       });
     },
-    [setActiveBoard, boards, router, commitSettings, userSettings.workspaceId, userSettings.repositoryIds]
+    [setActiveWorkflow, workflows, commitSettings, userSettings.workspaceId, userSettings.repositoryIds, activeWorkspaceId]
   );
 
   const handleRepositoryChange = useCallback(
@@ -77,48 +74,62 @@ export function useKanbanDisplaySettings() {
       if (value === 'all') {
         commitSettings({
           workspaceId: userSettings.workspaceId,
-          boardId: userSettings.boardId,
+          workflowId: userSettings.workflowId,
           repositoryIds: [],
         });
         return;
       }
       commitSettings({
         workspaceId: userSettings.workspaceId,
-        boardId: userSettings.boardId,
+        workflowId: userSettings.workflowId,
         repositoryIds: [value],
       });
     },
-    [commitSettings, userSettings.workspaceId, userSettings.boardId]
+    [commitSettings, userSettings.workspaceId, userSettings.workflowId]
   );
 
   const handleTogglePreviewOnClick = useCallback(
     (enabled: boolean) => {
       commitSettings({
         workspaceId: userSettings.workspaceId,
-        boardId: userSettings.boardId,
+        workflowId: userSettings.workflowId,
         repositoryIds: userSettings.repositoryIds,
         enablePreviewOnClick: enabled,
       });
     },
-    [commitSettings, userSettings.boardId, userSettings.repositoryIds, userSettings.workspaceId]
+    [commitSettings, userSettings.workflowId, userSettings.repositoryIds, userSettings.workspaceId]
+  );
+
+  const handleViewModeChange = useCallback(
+    (mode: string) => {
+      commitSettings({
+        workspaceId: userSettings.workspaceId,
+        workflowId: userSettings.workflowId,
+        repositoryIds: userSettings.repositoryIds,
+        kanbanViewMode: mode || null,
+      });
+    },
+    [commitSettings, userSettings.workspaceId, userSettings.workflowId, userSettings.repositoryIds]
   );
 
   return {
     // Data
     workspaces,
-    boards,
+    workflows,
     activeWorkspaceId,
-    activeBoardId,
+    activeWorkflowId,
     repositories,
     repositoriesLoading,
     allRepositoriesSelected,
     selectedRepositoryId: userSettings.repositoryIds[0] ?? null,
     enablePreviewOnClick,
+    kanbanViewMode: userSettings.kanbanViewMode,
 
     // Handlers
     onWorkspaceChange: handleWorkspaceChange,
-    onBoardChange: handleBoardChange,
+    onWorkflowChange: handleWorkflowChange,
     onRepositoryChange: handleRepositoryChange,
     onTogglePreviewOnClick: handleTogglePreviewOnClick,
+    onViewModeChange: handleViewModeChange,
   };
 }

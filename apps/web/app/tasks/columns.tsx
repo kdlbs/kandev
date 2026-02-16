@@ -1,7 +1,7 @@
 "use client"
 
 import type { ColumnDef } from "@tanstack/react-table"
-import type { Task, Board, WorkflowStep, Repository } from "@/lib/types/http"
+import type { Task, Workflow, WorkflowStep, Repository } from "@/lib/types/http"
 import Link from "next/link"
 import { IconTrash, IconLoader } from "@tabler/icons-react"
 import { Button } from "@kandev/ui/button"
@@ -10,13 +10,13 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kande
 import { formatDistanceToNow } from "date-fns"
 
 type TaskWithResolution = Task & {
-  boardName?: string
+  workflowName?: string
   stepName?: string
   repositoryNames?: string[]
 }
 
 interface ColumnsConfig {
-  boards: Board[]
+  workflows: Workflow[]
   steps: WorkflowStep[]
   repositories: Repository[]
   onDelete: (taskId: string) => void
@@ -24,13 +24,13 @@ interface ColumnsConfig {
 }
 
 export function getColumns({
-  boards,
+  workflows,
   steps,
   repositories,
   onDelete,
   deletingTaskId,
 }: ColumnsConfig): ColumnDef<TaskWithResolution>[] {
-  const boardMap = new Map(boards.map((b) => [b.id, b.name]))
+  const workflowMap = new Map(workflows.map((w) => [w.id, w.name]))
   const stepMap = new Map(steps.map((s) => [s.id, s.name]))
   const repoMap = new Map(repositories.map((r) => [r.id, { name: r.name, path: r.local_path }]))
 
@@ -55,11 +55,11 @@ export function getColumns({
       },
     },
     {
-      accessorKey: "board_id",
-      header: "Board",
+      accessorKey: "workflow_id",
+      header: "Workflow",
       cell: ({ row }) => {
-        const boardName = boardMap.get(row.original.board_id)
-        return boardName || "-"
+        const workflowName = workflowMap.get(row.original.workflow_id)
+        return workflowName || "-"
       },
     },
     {

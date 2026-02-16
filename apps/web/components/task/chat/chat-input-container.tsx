@@ -394,9 +394,9 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
             onOpenChange={setShowNewSessionDialog}
             mode="session"
             workspaceId={null}
-            boardId={null}
-            defaultColumnId={null}
-            columns={[]}
+            workflowId={null}
+            defaultStepId={null}
+            steps={[]}
             taskId={taskId}
             initialValues={{
               title: taskTitle ?? '',

@@ -21,12 +21,14 @@ type Repository interface {
 	GetTask(ctx context.Context, id string) (*models.Task, error)
 	UpdateTask(ctx context.Context, task *models.Task) error
 	DeleteTask(ctx context.Context, id string) error
-	ListTasks(ctx context.Context, boardID string) ([]*models.Task, error)
+	ListTasks(ctx context.Context, workflowID string) ([]*models.Task, error)
 	ListTasksByWorkspace(ctx context.Context, workspaceID string, query string, page, pageSize int) ([]*models.Task, int, error)
 	ListTasksByWorkflowStep(ctx context.Context, workflowStepID string) ([]*models.Task, error)
 	UpdateTaskState(ctx context.Context, id string, state v1.TaskState) error
-	AddTaskToBoard(ctx context.Context, taskID, boardID, workflowStepID string, position int) error
-	RemoveTaskFromBoard(ctx context.Context, taskID, boardID string) error
+	CountTasksByWorkflow(ctx context.Context, workflowID string) (int, error)
+	CountTasksByWorkflowStep(ctx context.Context, stepID string) (int, error)
+	AddTaskToWorkflow(ctx context.Context, taskID, workflowID, workflowStepID string, position int) error
+	RemoveTaskFromWorkflow(ctx context.Context, taskID, workflowID string) error
 
 	// TaskRepository operations
 	CreateTaskRepository(ctx context.Context, taskRepo *models.TaskRepository) error
@@ -37,12 +39,12 @@ type Repository interface {
 	DeleteTaskRepositoriesByTask(ctx context.Context, taskID string) error
 	GetPrimaryTaskRepository(ctx context.Context, taskID string) (*models.TaskRepository, error)
 
-	// Board operations
-	CreateBoard(ctx context.Context, board *models.Board) error
-	GetBoard(ctx context.Context, id string) (*models.Board, error)
-	UpdateBoard(ctx context.Context, board *models.Board) error
-	DeleteBoard(ctx context.Context, id string) error
-	ListBoards(ctx context.Context, workspaceID string) ([]*models.Board, error)
+	// Workflow operations
+	CreateWorkflow(ctx context.Context, workflow *models.Workflow) error
+	GetWorkflow(ctx context.Context, id string) (*models.Workflow, error)
+	UpdateWorkflow(ctx context.Context, workflow *models.Workflow) error
+	DeleteWorkflow(ctx context.Context, id string) error
+	ListWorkflows(ctx context.Context, workspaceID string) ([]*models.Workflow, error)
 
 	// Message operations
 	CreateMessage(ctx context.Context, message *models.Message) error

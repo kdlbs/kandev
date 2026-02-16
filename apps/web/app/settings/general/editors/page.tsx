@@ -19,7 +19,8 @@ export default async function GeneralEditorsPage() {
       userSettings: settings
         ? {
             workspaceId: settings.workspace_id ?? null,
-            boardId: settings.board_id ?? null,
+            workflowId: settings.workflow_filter_id ?? null,
+            kanbanViewMode: settings.kanban_view_mode ?? null,
             repositoryIds: settings.repository_ids ?? [],
             preferredShell: settings.preferred_shell ?? null,
             shellOptions: settingsResponse.shell_options ?? [],

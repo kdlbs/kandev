@@ -1,32 +1,32 @@
 import { fetchJson, type ApiRequestOptions } from '../client';
 import { getBackendConfig } from '@/lib/config';
 import type {
-  BoardSnapshot,
-  ListBoardsResponse,
+  WorkflowSnapshot,
+  ListWorkflowsResponse,
   ListTasksResponse,
   CreateTaskResponse,
   Task,
   MoveTaskResponse,
 } from '@/lib/types/http';
 
-// Board operations
-export async function listBoards(workspaceId: string, options?: ApiRequestOptions) {
+// Workflow operations
+export async function listWorkflows(workspaceId: string, options?: ApiRequestOptions) {
   const baseUrl = options?.baseUrl ?? getBackendConfig().apiBaseUrl;
-  const url = new URL(`${baseUrl}/api/v1/boards`);
+  const url = new URL(`${baseUrl}/api/v1/workflows`);
   url.searchParams.set('workspace_id', workspaceId);
-  return fetchJson<ListBoardsResponse>(url.toString(), options);
+  return fetchJson<ListWorkflowsResponse>(url.toString(), options);
 }
 
-export async function fetchBoardSnapshot(boardId: string, options?: ApiRequestOptions) {
-  return fetchJson<BoardSnapshot>(`/api/v1/boards/${boardId}/snapshot`, options);
+export async function fetchWorkflowSnapshot(workflowId: string, options?: ApiRequestOptions) {
+  return fetchJson<WorkflowSnapshot>(`/api/v1/workflows/${workflowId}/snapshot`, options);
 }
 
 // Task operations
 export async function createTask(
   payload: {
     workspace_id: string;
-    board_id: string;
-    workflow_step_id: string;
+    workflow_id: string;
+    workflow_step_id?: string;
     title: string;
     description?: string;
     position?: number;
@@ -81,7 +81,7 @@ export async function deleteTask(taskId: string, options?: ApiRequestOptions) {
 
 export async function moveTask(
   taskId: string,
-  payload: { board_id: string; workflow_step_id: string; position: number },
+  payload: { workflow_id: string; workflow_step_id: string; position: number },
   options?: ApiRequestOptions
 ) {
   return fetchJson<MoveTaskResponse>(`/api/v1/tasks/${taskId}/move`, {

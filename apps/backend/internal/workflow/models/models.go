@@ -1,23 +1,61 @@
 package models
 
 import (
+	"maps"
 	"time"
-
-	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
-// StepType represents the semantic type of a workflow step
-type StepType string
+// OnEnterActionType represents the type of action to execute when entering a step.
+type OnEnterActionType string
 
 const (
-	StepTypeBacklog        StepType = "backlog"
-	StepTypePlanning       StepType = "planning"
-	StepTypeImplementation StepType = "implementation"
-	StepTypeReview         StepType = "review"
-	StepTypeVerification   StepType = "verification"
-	StepTypeDone           StepType = "done"
-	StepTypeBlocked        StepType = "blocked"
+	OnEnterEnablePlanMode OnEnterActionType = "enable_plan_mode"
+	OnEnterAutoStartAgent OnEnterActionType = "auto_start_agent"
 )
+
+// OnTurnStartActionType represents the type of action to execute when a user sends a message.
+type OnTurnStartActionType string
+
+const (
+	OnTurnStartMoveToNext     OnTurnStartActionType = "move_to_next"
+	OnTurnStartMoveToPrevious OnTurnStartActionType = "move_to_previous"
+	OnTurnStartMoveToStep     OnTurnStartActionType = "move_to_step"
+)
+
+// OnTurnStartAction represents an action to execute when a user sends a message.
+type OnTurnStartAction struct {
+	Type   OnTurnStartActionType  `json:"type"`
+	Config map[string]interface{} `json:"config,omitempty"`
+}
+
+// OnTurnCompleteActionType represents the type of action to execute when an agent turn completes.
+type OnTurnCompleteActionType string
+
+const (
+	OnTurnCompleteMoveToNext      OnTurnCompleteActionType = "move_to_next"
+	OnTurnCompleteMoveToPrevious  OnTurnCompleteActionType = "move_to_previous"
+	OnTurnCompleteMoveToStep      OnTurnCompleteActionType = "move_to_step"
+	OnTurnCompleteDisablePlanMode OnTurnCompleteActionType = "disable_plan_mode"
+)
+
+// OnEnterAction represents an action to execute when entering a step.
+type OnEnterAction struct {
+	Type   OnEnterActionType      `json:"type"`
+	Config map[string]interface{} `json:"config,omitempty"`
+}
+
+// OnTurnCompleteAction represents an action to execute when an agent turn completes.
+type OnTurnCompleteAction struct {
+	Type   OnTurnCompleteActionType `json:"type"`
+	Config map[string]interface{}   `json:"config,omitempty"`
+}
+
+// StepEvents contains event-driven actions for a workflow step.
+type StepEvents struct {
+	OnEnter        []OnEnterAction        `json:"on_enter,omitempty"`
+	OnTurnStart    []OnTurnStartAction    `json:"on_turn_start,omitempty"`
+	OnTurnComplete []OnTurnCompleteAction  `json:"on_turn_complete,omitempty"`
+}
 
 // ReviewStatus represents the review state of a session
 type ReviewStatus string
@@ -28,7 +66,7 @@ const (
 	ReviewStatusApproved         ReviewStatus = "approved"
 )
 
-// WorkflowTemplate represents a pre-defined workflow type that boards can adopt
+// WorkflowTemplate represents a pre-defined workflow type that workflows can adopt
 type WorkflowTemplate struct {
 	ID          string           `json:"id"`
 	Name        string           `json:"name"`
@@ -41,41 +79,54 @@ type WorkflowTemplate struct {
 
 // StepDefinition represents a step in a workflow template (stored as JSON in WorkflowTemplate)
 type StepDefinition struct {
-	ID               string       `json:"id"`
-	Name             string       `json:"name"`
-	StepType         StepType     `json:"step_type"`
-	Position         int          `json:"position"`
-	Color            string       `json:"color"`
-	TaskState        v1.TaskState `json:"task_state"`
-	AutoStartAgent   bool         `json:"auto_start_agent"`
-	PlanMode         bool         `json:"plan_mode"`
-	RequireApproval  bool         `json:"require_approval"`
-	PromptPrefix     string       `json:"prompt_prefix,omitempty"`
-	PromptSuffix     string       `json:"prompt_suffix,omitempty"`
-	OnCompleteStepID string       `json:"on_complete_step_id,omitempty"`
-	OnApprovalStepID string       `json:"on_approval_step_id,omitempty"`
-	AllowManualMove  bool         `json:"allow_manual_move"`
+	ID              string     `json:"id"`
+	Name            string     `json:"name"`
+	Position        int        `json:"position"`
+	Color           string     `json:"color"`
+	Prompt          string     `json:"prompt,omitempty"`
+	Events          StepEvents `json:"events"`
+	AllowManualMove bool       `json:"allow_manual_move"`
+	IsStartStep     bool       `json:"is_start_step"`
 }
 
-// WorkflowStep represents a step in a board's workflow (replaces Column)
+// WorkflowStep represents a step in a workflow
 type WorkflowStep struct {
-	ID               string       `json:"id"`
-	BoardID          string       `json:"board_id"`
-	Name             string       `json:"name"`
-	StepType         StepType     `json:"step_type"`
-	Position         int          `json:"position"`
-	Color            string       `json:"color"`
-	TaskState        v1.TaskState `json:"task_state"`
-	AutoStartAgent   bool         `json:"auto_start_agent"`
-	PlanMode         bool         `json:"plan_mode"`
-	RequireApproval  bool         `json:"require_approval"`
-	PromptPrefix     string       `json:"prompt_prefix,omitempty"`
-	PromptSuffix     string       `json:"prompt_suffix,omitempty"`
-	OnCompleteStepID *string      `json:"on_complete_step_id,omitempty"`
-	OnApprovalStepID *string      `json:"on_approval_step_id,omitempty"`
-	AllowManualMove  bool         `json:"allow_manual_move"`
-	CreatedAt        time.Time    `json:"created_at"`
-	UpdatedAt        time.Time    `json:"updated_at"`
+	ID              string     `json:"id"`
+	WorkflowID      string     `json:"workflow_id"`
+	Name            string     `json:"name"`
+	Position        int        `json:"position"`
+	Color           string     `json:"color"`
+	Prompt          string     `json:"prompt,omitempty"`
+	Events          StepEvents `json:"events"`
+	AllowManualMove bool       `json:"allow_manual_move"`
+	IsStartStep     bool       `json:"is_start_step"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+}
+
+// HasOnEnterAction checks if the step has a specific on_enter action type.
+func (s *WorkflowStep) HasOnEnterAction(actionType OnEnterActionType) bool {
+	for _, action := range s.Events.OnEnter {
+		if action.Type == actionType {
+			return true
+		}
+	}
+	return false
+}
+
+// HasOnTurnStartAction checks if the step has any on_turn_start actions.
+func (s *WorkflowStep) HasOnTurnStartAction() bool {
+	return len(s.Events.OnTurnStart) > 0
+}
+
+// HasOnTurnCompleteAction checks if the step has a specific on_turn_complete action type.
+func (s *WorkflowStep) HasOnTurnCompleteAction(actionType OnTurnCompleteActionType) bool {
+	for _, action := range s.Events.OnTurnComplete {
+		if action.Type == actionType {
+			return true
+		}
+	}
+	return false
 }
 
 // StepTransitionTrigger represents how a session moved between steps
@@ -99,3 +150,36 @@ type SessionStepHistory struct {
 	CreatedAt  time.Time              `json:"created_at"`
 }
 
+// RemapStepEvents returns a copy of events with all step_id references
+// in move_to_step actions replaced using the provided ID mapping.
+func RemapStepEvents(events StepEvents, idMap map[string]string) StepEvents {
+	result := StepEvents{}
+	result.OnEnter = append(result.OnEnter, events.OnEnter...)
+	for _, a := range events.OnTurnStart {
+		if a.Type == OnTurnStartMoveToStep && a.Config != nil {
+			if stepID, ok := a.Config["step_id"].(string); ok {
+				if newID, found := idMap[stepID]; found {
+					cfg := make(map[string]any, len(a.Config))
+					maps.Copy(cfg, a.Config)
+					cfg["step_id"] = newID
+					a.Config = cfg
+				}
+			}
+		}
+		result.OnTurnStart = append(result.OnTurnStart, a)
+	}
+	for _, a := range events.OnTurnComplete {
+		if a.Type == OnTurnCompleteMoveToStep && a.Config != nil {
+			if stepID, ok := a.Config["step_id"].(string); ok {
+				if newID, found := idMap[stepID]; found {
+					cfg := make(map[string]any, len(a.Config))
+					maps.Copy(cfg, a.Config)
+					cfg["step_id"] = newID
+					a.Config = cfg
+				}
+			}
+		}
+		result.OnTurnComplete = append(result.OnTurnComplete, a)
+	}
+	return result
+}

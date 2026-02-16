@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/task/repository"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	userservice "github.com/kandev/kandev/internal/user/service"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowservice "github.com/kandev/kandev/internal/workflow/service"
 	"github.com/kandev/kandev/internal/worktree"
 )
@@ -57,65 +58,22 @@ func provideOrchestrator(
 }
 
 // orchestratorWorkflowStepGetterAdapter adapts workflow service to orchestrator's WorkflowStepGetter interface.
+// Since orchestrator now uses wfmodels.WorkflowStep directly, the adapter simply delegates to the service.
 type orchestratorWorkflowStepGetterAdapter struct {
 	svc *workflowservice.Service
 }
 
 // GetStep implements orchestrator.WorkflowStepGetter.
-func (a *orchestratorWorkflowStepGetterAdapter) GetStep(ctx context.Context, stepID string) (*orchestrator.WorkflowStep, error) {
-	step, err := a.svc.GetStep(ctx, stepID)
-	if err != nil {
-		return nil, err
-	}
-	onCompleteStepID := ""
-	if step.OnCompleteStepID != nil {
-		onCompleteStepID = *step.OnCompleteStepID
-	}
-	onApprovalStepID := ""
-	if step.OnApprovalStepID != nil {
-		onApprovalStepID = *step.OnApprovalStepID
-	}
-	return &orchestrator.WorkflowStep{
-		ID:               step.ID,
-		Name:             step.Name,
-		StepType:         string(step.StepType),
-		AutoStartAgent:   step.AutoStartAgent,
-		PlanMode:         step.PlanMode,
-		RequireApproval:  step.RequireApproval,
-		PromptPrefix:     step.PromptPrefix,
-		PromptSuffix:     step.PromptSuffix,
-		OnCompleteStepID: onCompleteStepID,
-		OnApprovalStepID: onApprovalStepID,
-	}, nil
+func (a *orchestratorWorkflowStepGetterAdapter) GetStep(ctx context.Context, stepID string) (*wfmodels.WorkflowStep, error) {
+	return a.svc.GetStep(ctx, stepID)
 }
 
-// GetSourceStep implements orchestrator.WorkflowStepGetter.
-func (a *orchestratorWorkflowStepGetterAdapter) GetSourceStep(ctx context.Context, boardID, targetStepID string) (*orchestrator.WorkflowStep, error) {
-	step, err := a.svc.GetSourceStep(ctx, boardID, targetStepID)
-	if err != nil {
-		return nil, err
-	}
-	if step == nil {
-		return nil, nil
-	}
-	onCompleteStepID := ""
-	if step.OnCompleteStepID != nil {
-		onCompleteStepID = *step.OnCompleteStepID
-	}
-	onApprovalStepID := ""
-	if step.OnApprovalStepID != nil {
-		onApprovalStepID = *step.OnApprovalStepID
-	}
-	return &orchestrator.WorkflowStep{
-		ID:               step.ID,
-		Name:             step.Name,
-		StepType:         string(step.StepType),
-		AutoStartAgent:   step.AutoStartAgent,
-		PlanMode:         step.PlanMode,
-		RequireApproval:  step.RequireApproval,
-		PromptPrefix:     step.PromptPrefix,
-		PromptSuffix:     step.PromptSuffix,
-		OnCompleteStepID: onCompleteStepID,
-		OnApprovalStepID: onApprovalStepID,
-	}, nil
+// GetNextStepByPosition implements orchestrator.WorkflowStepGetter.
+func (a *orchestratorWorkflowStepGetterAdapter) GetNextStepByPosition(ctx context.Context, workflowID string, currentPosition int) (*wfmodels.WorkflowStep, error) {
+	return a.svc.GetNextStepByPosition(ctx, workflowID, currentPosition)
+}
+
+// GetPreviousStepByPosition implements orchestrator.WorkflowStepGetter.
+func (a *orchestratorWorkflowStepGetterAdapter) GetPreviousStepByPosition(ctx context.Context, workflowID string, currentPosition int) (*wfmodels.WorkflowStep, error) {
+	return a.svc.GetPreviousStepByPosition(ctx, workflowID, currentPosition)
 }

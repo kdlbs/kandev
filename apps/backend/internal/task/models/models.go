@@ -19,7 +19,7 @@ type ListMessagesOptions struct {
 type Task struct {
 	ID             string                 `json:"id"`
 	WorkspaceID    string                 `json:"workspace_id"`
-	BoardID        string                 `json:"board_id"`
+	WorkflowID     string                 `json:"workflow_id"`
 	WorkflowStepID string                 `json:"workflow_step_id"`
 	Title          string                 `json:"title"`
 	Description    string                 `json:"description"`
@@ -32,13 +32,13 @@ type Task struct {
 	UpdatedAt      time.Time              `json:"updated_at"`
 }
 
-// Board represents a Kanban board
-type Board struct {
+// Workflow represents a task workflow
+type Workflow struct {
 	ID                 string    `json:"id"`
 	WorkspaceID        string    `json:"workspace_id"`
 	Name               string    `json:"name"`
 	Description        string    `json:"description"`
-	WorkflowTemplateID *string   `json:"workflow_template_id,omitempty"` // Optional workflow template
+	WorkflowTemplateID *string   `json:"workflow_template_id,omitempty"`
 	CreatedAt          time.Time `json:"created_at"`
 	UpdatedAt          time.Time `json:"updated_at"`
 }
@@ -444,7 +444,7 @@ func (t *Task) ToAPI() *v1.Task {
 	return &v1.Task{
 		ID:           t.ID,
 		WorkspaceID:  t.WorkspaceID,
-		BoardID:      t.BoardID,
+		WorkflowID:   t.WorkflowID,
 		Title:        t.Title,
 		Description:  t.Description,
 		State:        t.State,

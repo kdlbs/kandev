@@ -89,7 +89,7 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
       }
 
       // Check if the new step has auto_start_agent enabled
-      if (response?.workflow_step?.auto_start_agent) {
+      if (response?.workflow_step?.events?.on_enter?.some((a: { type: string }) => a.type === 'auto_start_agent')) {
         const client = getWebSocketClient();
         if (client) {
           client.send({

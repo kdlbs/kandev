@@ -46,7 +46,8 @@ export function useEditors() {
         if (!data?.settings) return;
         setUserSettings({
           workspaceId: data.settings.workspace_id || null,
-          boardId: data.settings.board_id || null,
+          workflowId: data.settings.workflow_filter_id || null,
+          kanbanViewMode: data.settings.kanban_view_mode || null,
           repositoryIds: data.settings.repository_ids ?? [],
           preferredShell: data.settings.preferred_shell || null,
           shellOptions: data.shell_options ?? [],

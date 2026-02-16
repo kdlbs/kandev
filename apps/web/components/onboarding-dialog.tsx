@@ -62,9 +62,9 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
                     <div className="h-2 w-2 rounded-full bg-muted" />
                   </div>
                   <div>
-                    <p className="font-medium text-sm">Board Columns</p>
+                    <p className="font-medium text-sm">Workflow Steps</p>
                     <p className="text-xs text-muted-foreground">
-                      Customize your columns anytime to match your workflow.
+                      Customize your workflow steps anytime to match your process.
                     </p>
                   </div>
                 </div>

@@ -20,7 +20,8 @@ export const defaultSettingsState: SettingsSliceState = {
   settingsData: { executorsLoaded: false, environmentsLoaded: false, agentsLoaded: false },
   userSettings: {
     workspaceId: null,
-    boardId: null,
+    kanbanViewMode: null,
+    workflowId: null,
     repositoryIds: [],
     preferredShell: null,
     shellOptions: [],

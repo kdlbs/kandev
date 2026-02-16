@@ -507,8 +507,8 @@ func main() {
 	router.Use(corsMiddleware())
 
 	workspaceController := taskcontroller.NewWorkspaceController(taskSvc)
-	boardController := taskcontroller.NewBoardController(taskSvc)
-	boardController.SetWorkflowStepLister(services.Workflow)
+	taskWorkflowController := taskcontroller.NewWorkflowController(taskSvc)
+	taskWorkflowController.SetWorkflowStepLister(services.Workflow)
 	taskController := taskcontroller.NewTaskController(taskSvc)
 	messageController := taskcontroller.NewMessageController(taskSvc)
 	repositoryController := taskcontroller.NewRepositoryController(taskSvc)
@@ -521,7 +521,7 @@ func main() {
 
 	// Task Service handlers (HTTP + WebSocket)
 	taskhandlers.RegisterWorkspaceRoutes(router, gateway.Dispatcher, workspaceController, log)
-	taskhandlers.RegisterBoardRoutes(router, gateway.Dispatcher, boardController, log)
+	taskhandlers.RegisterWorkflowRoutes(router, gateway.Dispatcher, taskWorkflowController, log)
 	planService := taskservice.NewPlanService(taskRepo, eventBus, log)
 	taskhandlers.RegisterTaskRoutes(router, gateway.Dispatcher, taskController, orchestratorSvc, taskRepo, planService, log)
 	taskhandlers.RegisterRepositoryRoutes(router, gateway.Dispatcher, repositoryController, log)
@@ -566,7 +566,7 @@ func main() {
 	// MCP handlers for agentctl WS tunnel (agentctl -> backend)
 	mcpHandlers := mcphandlers.NewHandlers(
 		workspaceController,
-		boardController,
+		taskWorkflowController,
 		taskController,
 		workflowCtrl,
 		clarificationStore,

@@ -32,42 +32,79 @@ function upsertTask(tasks: KanbanTask[], nextTask: KanbanTask): KanbanTask[] {
     : [...tasks, nextTask];
 }
 
+function upsertMultiTask(state: AppState, workflowId: string, task: KanbanTask): AppState {
+  const snapshot = state.kanbanMulti.snapshots[workflowId];
+  if (!snapshot) return state;
+  return {
+    ...state,
+    kanbanMulti: {
+      ...state.kanbanMulti,
+      snapshots: {
+        ...state.kanbanMulti.snapshots,
+        [workflowId]: {
+          ...snapshot,
+          tasks: upsertTask(snapshot.tasks, task),
+        },
+      },
+    },
+  };
+}
+
 export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
     'task.created': (message) => {
       store.setState((state) => {
-        if (state.kanban.boardId !== message.payload.board_id) {
-          return state;
+        const wfId = message.payload.workflow_id;
+        let next = state;
+
+        // Update single-workflow kanban
+        if (state.kanban.workflowId === wfId) {
+          const existing = state.kanban.tasks.find((task) => task.id === message.payload.task_id);
+          const nextTask = buildTaskFromPayload(message.payload, existing);
+          next = {
+            ...next,
+            kanban: { ...next.kanban, tasks: upsertTask(next.kanban.tasks, nextTask) },
+          };
         }
-        const existing = state.kanban.tasks.find((task) => task.id === message.payload.task_id);
-        const nextTask = buildTaskFromPayload(message.payload, existing);
-        return {
-          ...state,
-          kanban: {
-            ...state.kanban,
-            tasks: upsertTask(state.kanban.tasks, nextTask),
-          },
-        };
+
+        // Update multi-workflow snapshots
+        const snapshot = state.kanbanMulti.snapshots[wfId];
+        if (snapshot) {
+          const existing = snapshot.tasks.find((task) => task.id === message.payload.task_id);
+          const nextTask = buildTaskFromPayload(message.payload, existing);
+          next = upsertMultiTask(next, wfId, nextTask);
+        }
+
+        return next;
       });
     },
     'task.updated': (message) => {
       store.setState((state) => {
-        if (state.kanban.boardId !== message.payload.board_id) {
-          return state;
+        const wfId = message.payload.workflow_id;
+        let next = state;
+
+        if (state.kanban.workflowId === wfId) {
+          const existing = state.kanban.tasks.find((task) => task.id === message.payload.task_id);
+          const nextTask = buildTaskFromPayload(message.payload, existing);
+          next = {
+            ...next,
+            kanban: { ...next.kanban, tasks: upsertTask(next.kanban.tasks, nextTask) },
+          };
         }
-        const existing = state.kanban.tasks.find((task) => task.id === message.payload.task_id);
-        const nextTask = buildTaskFromPayload(message.payload, existing);
-        return {
-          ...state,
-          kanban: {
-            ...state.kanban,
-            tasks: upsertTask(state.kanban.tasks, nextTask),
-          },
-        };
+
+        const snapshot = state.kanbanMulti.snapshots[wfId];
+        if (snapshot) {
+          const existing = snapshot.tasks.find((task) => task.id === message.payload.task_id);
+          const nextTask = buildTaskFromPayload(message.payload, existing);
+          next = upsertMultiTask(next, wfId, nextTask);
+        }
+
+        return next;
       });
     },
     'task.deleted': (message) => {
       const deletedId = message.payload.task_id;
+      const wfId = message.payload.workflow_id;
 
       // Clean up persisted storage before removing from state
       const currentState = store.getState();
@@ -84,7 +121,7 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
 
       store.setState((state) => {
         const isActive = state.tasks.activeTaskId === deletedId;
-        return {
+        let next: AppState = {
           ...state,
           kanban: {
             ...state.kanban,
@@ -94,22 +131,50 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
             ? { ...state.tasks, activeTaskId: null, activeSessionId: null }
             : state.tasks,
         };
+
+        // Also remove from multi-workflow snapshots
+        const snapshot = state.kanbanMulti.snapshots[wfId];
+        if (snapshot) {
+          next = {
+            ...next,
+            kanbanMulti: {
+              ...next.kanbanMulti,
+              snapshots: {
+                ...next.kanbanMulti.snapshots,
+                [wfId]: {
+                  ...snapshot,
+                  tasks: snapshot.tasks.filter((t) => t.id !== deletedId),
+                },
+              },
+            },
+          };
+        }
+
+        return next;
       });
     },
     'task.state_changed': (message) => {
       store.setState((state) => {
-        if (state.kanban.boardId !== message.payload.board_id) {
-          return state;
+        const wfId = message.payload.workflow_id;
+        let next = state;
+
+        if (state.kanban.workflowId === wfId) {
+          const existing = state.kanban.tasks.find((t) => t.id === message.payload.task_id);
+          const nextTask = buildTaskFromPayload(message.payload, existing);
+          next = {
+            ...next,
+            kanban: { ...next.kanban, tasks: upsertTask(next.kanban.tasks, nextTask) },
+          };
         }
-        const existing = state.kanban.tasks.find((t) => t.id === message.payload.task_id);
-        const nextTask = buildTaskFromPayload(message.payload, existing);
-        return {
-          ...state,
-          kanban: {
-            ...state.kanban,
-            tasks: upsertTask(state.kanban.tasks, nextTask),
-          },
-        };
+
+        const snapshot = state.kanbanMulti.snapshots[wfId];
+        if (snapshot) {
+          const existing = snapshot.tasks.find((t) => t.id === message.payload.task_id);
+          const nextTask = buildTaskFromPayload(message.payload, existing);
+          next = upsertMultiTask(next, wfId, nextTask);
+        }
+
+        return next;
       });
     },
   };

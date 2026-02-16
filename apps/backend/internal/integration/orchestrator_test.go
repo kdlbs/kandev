@@ -697,15 +697,15 @@ func NewOrchestratorTestServer(t *testing.T) *OrchestratorTestServer {
 
 	// Register handlers (HTTP + WS)
 	workspaceController := taskcontroller.NewWorkspaceController(taskSvc)
-	boardController := taskcontroller.NewBoardController(taskSvc)
-	boardController.SetWorkflowStepLister(workflowSvc)
+	taskWorkflowController := taskcontroller.NewWorkflowController(taskSvc)
+	taskWorkflowController.SetWorkflowStepLister(workflowSvc)
 	taskController := taskcontroller.NewTaskController(taskSvc)
 	executorController := taskcontroller.NewExecutorController(taskSvc)
 	environmentController := taskcontroller.NewEnvironmentController(taskSvc)
 	repositoryController := taskcontroller.NewRepositoryController(taskSvc)
 	workflowCtrl := workflowcontroller.NewController(workflowSvc)
 	taskhandlers.RegisterWorkspaceRoutes(router, gateway.Dispatcher, workspaceController, log)
-	taskhandlers.RegisterBoardRoutes(router, gateway.Dispatcher, boardController, log)
+	taskhandlers.RegisterWorkflowRoutes(router, gateway.Dispatcher, taskWorkflowController, log)
 	planService := taskservice.NewPlanService(taskRepo, eventBus, log)
 	taskhandlers.RegisterTaskRoutes(router, gateway.Dispatcher, taskController, nil, taskRepo, planService, log)
 	taskhandlers.RegisterRepositoryRoutes(router, gateway.Dispatcher, repositoryController, log)
@@ -754,20 +754,20 @@ func (ts *OrchestratorTestServer) CreateTestTask(t *testing.T, agentProfileID st
 	})
 	require.NoError(t, err)
 
-	// Create board first (workflow steps are created automatically via default template)
+	// Create workflow first (workflow steps are created automatically via default template)
 	defaultTemplateID := "simple"
-	board, err := ts.TaskSvc.CreateBoard(context.Background(), &taskservice.CreateBoardRequest{
+	wf, err := ts.TaskSvc.CreateWorkflow(context.Background(), &taskservice.CreateWorkflowRequest{
 		WorkspaceID:        workspace.ID,
-		Name:               "Test Board",
-		Description:        "Test board for orchestrator",
+		Name:               "Test Workflow",
+		Description:        "Test workflow for orchestrator",
 		WorkflowTemplateID: &defaultTemplateID,
 	})
 	require.NoError(t, err)
 
-	// Get first workflow step from board
-	steps, err := ts.WorkflowSvc.ListStepsByBoard(context.Background(), board.ID)
+	// Get first workflow step from workflow
+	steps, err := ts.WorkflowSvc.ListStepsByWorkflow(context.Background(), wf.ID)
 	require.NoError(t, err)
-	require.NotEmpty(t, steps, "board should have workflow steps")
+	require.NotEmpty(t, steps, "workflow should have workflow steps")
 	workflowStepID := steps[0].ID
 
 	// Create task with agent profile ID
@@ -780,7 +780,7 @@ func (ts *OrchestratorTestServer) CreateTestTask(t *testing.T, agentProfileID st
 
 	task, err := ts.TaskSvc.CreateTask(context.Background(), &taskservice.CreateTaskRequest{
 		WorkspaceID:    workspace.ID,
-		BoardID:        board.ID,
+		WorkflowID:     wf.ID,
 		WorkflowStepID: workflowStepID,
 		Title:          "Test Task",
 		Description:    "This is a test task for the orchestrator",
@@ -1623,29 +1623,29 @@ func TestOrchestratorEndToEndWorkflow(t *testing.T) {
 
 	workspaceID := createOrchestratorWorkspace(t, client)
 
-	// 1. Create board with workflow template
-	boardResp, err := client.SendRequest("board-1", ws.ActionBoardCreate, map[string]interface{}{
+	// 1. Create workflow with workflow template
+	workflowResp, err := client.SendRequest("workflow-1", ws.ActionWorkflowCreate, map[string]interface{}{
 		"workspace_id":         workspaceID,
-		"name":                 "E2E Test Board",
-		"description":          "End-to-end test board",
+		"name":                 "E2E Test Workflow",
+		"description":          "End-to-end test workflow",
 		"workflow_template_id": "simple",
 	})
 	require.NoError(t, err)
 
-	var boardPayload map[string]interface{}
-	require.NoError(t, boardResp.ParsePayload(&boardPayload))
-	boardID := boardPayload["id"].(string)
+	var workflowPayload map[string]interface{}
+	require.NoError(t, workflowResp.ParsePayload(&workflowPayload))
+	workflowID := workflowPayload["id"].(string)
 
-	// 2. Get first workflow step from board
+	// 2. Get first workflow step from workflow
 	stepResp, err := client.SendRequest("step-list-1", ws.ActionWorkflowStepList, map[string]interface{}{
-		"board_id": boardID,
+		"workflow_id": workflowID,
 	})
 	require.NoError(t, err)
 
 	var stepListPayload map[string]interface{}
 	require.NoError(t, stepResp.ParsePayload(&stepListPayload))
 	steps := stepListPayload["steps"].([]interface{})
-	require.NotEmpty(t, steps, "board should have workflow steps")
+	require.NotEmpty(t, steps, "workflow should have workflow steps")
 	workflowStepID := steps[0].(map[string]interface{})["id"].(string)
 
 	// 3. Create task with workflow step
@@ -1663,7 +1663,7 @@ func TestOrchestratorEndToEndWorkflow(t *testing.T) {
 
 	taskResp, err := client.SendRequest("task-1", ws.ActionTaskCreate, map[string]interface{}{
 		"workspace_id":     workspaceID,
-		"board_id":         boardID,
+		"workflow_id":         workflowID,
 		"workflow_step_id": workflowStepID,
 		"title":            "Implement feature X",
 		"description":      "Create a new feature with tests",

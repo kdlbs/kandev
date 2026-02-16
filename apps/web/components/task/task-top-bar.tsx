@@ -28,6 +28,7 @@ import { formatUserHomePath } from '@/lib/utils';
 import { EditorsMenu } from '@/components/task/editors-menu';
 import { DocumentControls } from '@/components/task/document/document-controls';
 import { VcsSplitButton } from '@/components/vcs-split-button';
+import { WorkflowStepper, type WorkflowStepperStep } from '@/components/task/workflow-stepper';
 import { DEBUG_UI } from '@/lib/config';
 
 type TaskTopBarProps = {
@@ -46,6 +47,8 @@ type TaskTopBarProps = {
   repositoryName?: string | null;
   showDebugOverlay?: boolean;
   onToggleDebugOverlay?: () => void;
+  workflowSteps?: WorkflowStepperStep[];
+  currentStepId?: string | null;
 };
 
 const TaskTopBar = memo(function TaskTopBar({
@@ -58,6 +61,8 @@ const TaskTopBar = memo(function TaskTopBar({
   repositoryName,
   showDebugOverlay,
   onToggleDebugOverlay,
+  workflowSteps,
+  currentStepId,
 }: TaskTopBarProps) {
   const [copiedBranch, setCopiedBranch] = useState(false);
   const [popoverOpen, setPopoverOpen] = useState(false);
@@ -223,6 +228,12 @@ const TaskTopBar = memo(function TaskTopBar({
         )}
 
       </div>
+      {workflowSteps && workflowSteps.length > 0 && (
+        <WorkflowStepper
+          steps={workflowSteps}
+          currentStepId={currentStepId ?? null}
+        />
+      )}
       <div className="flex items-center gap-2">
         {DEBUG_UI && onToggleDebugOverlay && (
           <Tooltip>

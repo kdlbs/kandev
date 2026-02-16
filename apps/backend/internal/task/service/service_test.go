@@ -105,16 +105,16 @@ func TestService_CreateTask(t *testing.T) {
 	svc, eventBus, repo := createTestService(t)
 	ctx := context.Background()
 
-	// Create board first
+	// Create workflow first
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
-	board := &models.Board{ID: "board-123", WorkspaceID: "ws-1", Name: "Test Board"}
-	_ = repo.CreateBoard(ctx, board)
+	workflow := &models.Workflow{ID: "wf-123", WorkspaceID: "ws-1", Name: "Test Workflow"}
+	_ = repo.CreateWorkflow(ctx, workflow)
 	repository := &models.Repository{ID: "repo-123", WorkspaceID: "ws-1", Name: "Test Repo"}
 	_ = repo.CreateRepository(ctx, repository)
 
 	req := &CreateTaskRequest{
 		WorkspaceID:    "ws-1",
-		BoardID:        "board-123",
+		WorkflowID:        "wf-123",
 		WorkflowStepID: "step-123",
 		Title:       "Test Task",
 		Description: "A test task",
@@ -243,8 +243,8 @@ func TestService_UpdateTask(t *testing.T) {
 	ctx := context.Background()
 
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
-	_ = repo.CreateBoard(ctx, &models.Board{ID: "board-123", WorkspaceID: "ws-1", Name: "Board"})
-	_ = repo.CreateTask(ctx, &models.Task{ID: "task-123", WorkspaceID: "ws-1", BoardID: "board-123", WorkflowStepID: "step-123", Title: "Original"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-123", WorkspaceID: "ws-1", Name: "Workflow"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-123", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Original"})
 	eventBus.ClearEvents()
 
 	newTitle := "Updated Title"
@@ -273,8 +273,8 @@ func TestService_DeleteTask(t *testing.T) {
 	ctx := context.Background()
 
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
-	_ = repo.CreateBoard(ctx, &models.Board{ID: "board-123", WorkspaceID: "ws-1", Name: "Board"})
-	_ = repo.CreateTask(ctx, &models.Task{ID: "task-123", WorkspaceID: "ws-1", BoardID: "board-123", WorkflowStepID: "step-123", Title: "Test"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-123", WorkspaceID: "ws-1", Name: "Workflow"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-123", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Test"})
 	eventBus.ClearEvents()
 
 	err := svc.DeleteTask(ctx, "task-123")
@@ -300,11 +300,11 @@ func TestService_ListTasks(t *testing.T) {
 	ctx := context.Background()
 
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
-	_ = repo.CreateBoard(ctx, &models.Board{ID: "board-123", WorkspaceID: "ws-1", Name: "Board"})
-	_ = repo.CreateTask(ctx, &models.Task{ID: "task-1", WorkspaceID: "ws-1", BoardID: "board-123", WorkflowStepID: "step-123", Title: "Task 1"})
-	_ = repo.CreateTask(ctx, &models.Task{ID: "task-2", WorkspaceID: "ws-1", BoardID: "board-123", WorkflowStepID: "step-123", Title: "Task 2"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-123", WorkspaceID: "ws-1", Name: "Workflow"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-1", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Task 1"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-2", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Task 2"})
 
-	tasks, err := svc.ListTasks(ctx, "board-123")
+	tasks, err := svc.ListTasks(ctx, "wf-123")
 	if err != nil {
 		t.Fatalf("failed to list tasks: %v", err)
 	}
@@ -318,8 +318,8 @@ func TestService_UpdateTaskState(t *testing.T) {
 	ctx := context.Background()
 
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
-	_ = repo.CreateBoard(ctx, &models.Board{ID: "board-123", WorkspaceID: "ws-1", Name: "Board"})
-	task := &models.Task{ID: "task-123", WorkspaceID: "ws-1", BoardID: "board-123", WorkflowStepID: "step-123", Title: "Test", State: v1.TaskStateTODO}
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-123", WorkspaceID: "ws-1", Name: "Workflow"})
+	task := &models.Task{ID: "task-123", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Test", State: v1.TaskStateTODO}
 	_ = repo.CreateTask(ctx, task)
 	eventBus.ClearEvents()
 
@@ -346,13 +346,13 @@ func TestService_MoveTask(t *testing.T) {
 	ctx := context.Background()
 
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
-	_ = repo.CreateBoard(ctx, &models.Board{ID: "board-123", WorkspaceID: "ws-1", Name: "Board"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-123", WorkspaceID: "ws-1", Name: "Workflow"})
 
-	task := &models.Task{ID: "task-123", WorkspaceID: "ws-1", BoardID: "board-123", WorkflowStepID: "step-todo", Title: "Test", State: v1.TaskStateTODO}
+	task := &models.Task{ID: "task-123", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-todo", Title: "Test", State: v1.TaskStateTODO}
 	_ = repo.CreateTask(ctx, task)
 	eventBus.ClearEvents()
 
-	moved, err := svc.MoveTask(ctx, "task-123", "board-123", "step-done", 0)
+	moved, err := svc.MoveTask(ctx, "task-123", "wf-123", "step-done", 0)
 	if err != nil {
 		t.Fatalf("failed to move task: %v", err)
 	}
@@ -361,100 +361,100 @@ func TestService_MoveTask(t *testing.T) {
 	}
 }
 
-// Board tests
+// Workflow tests
 
-func TestService_CreateBoard(t *testing.T) {
+func TestService_CreateWorkflow(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
 
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
-	req := &CreateBoardRequest{
+	req := &CreateWorkflowRequest{
 		WorkspaceID: "ws-1",
-		Name:        "Test Board",
-		Description: "A test board",
+		Name:        "Test Workflow",
+		Description: "A test workflow",
 	}
 
-	board, err := svc.CreateBoard(ctx, req)
+	workflow, err := svc.CreateWorkflow(ctx, req)
 	if err != nil {
-		t.Fatalf("failed to create board: %v", err)
+		t.Fatalf("failed to create workflow: %v", err)
 	}
-	if board.ID == "" {
-		t.Error("expected board ID to be set")
+	if workflow.ID == "" {
+		t.Error("expected workflow ID to be set")
 	}
-	if board.Name != "Test Board" {
-		t.Errorf("expected name 'Test Board', got %s", board.Name)
+	if workflow.Name != "Test Workflow" {
+		t.Errorf("expected name 'Test Workflow', got %s", workflow.Name)
 	}
 }
 
-func TestService_GetBoard(t *testing.T) {
+func TestService_GetWorkflow(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
 
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
-	board := &models.Board{ID: "board-123", WorkspaceID: "ws-1", Name: "Test Board"}
-	_ = repo.CreateBoard(ctx, board)
+	workflow := &models.Workflow{ID: "wf-123", WorkspaceID: "ws-1", Name: "Test Workflow"}
+	_ = repo.CreateWorkflow(ctx, workflow)
 
-	retrieved, err := svc.GetBoard(ctx, "board-123")
+	retrieved, err := svc.GetWorkflow(ctx, "wf-123")
 	if err != nil {
-		t.Fatalf("failed to get board: %v", err)
+		t.Fatalf("failed to get workflow: %v", err)
 	}
-	if retrieved.Name != "Test Board" {
-		t.Errorf("expected name 'Test Board', got %s", retrieved.Name)
+	if retrieved.Name != "Test Workflow" {
+		t.Errorf("expected name 'Test Workflow', got %s", retrieved.Name)
 	}
 }
 
-func TestService_UpdateBoard(t *testing.T) {
+func TestService_UpdateWorkflow(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
 
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
-	board := &models.Board{ID: "board-123", WorkspaceID: "ws-1", Name: "Original"}
-	_ = repo.CreateBoard(ctx, board)
+	workflow := &models.Workflow{ID: "wf-123", WorkspaceID: "ws-1", Name: "Original"}
+	_ = repo.CreateWorkflow(ctx, workflow)
 
 	newName := "Updated"
-	req := &UpdateBoardRequest{Name: &newName}
+	req := &UpdateWorkflowRequest{Name: &newName}
 
-	updated, err := svc.UpdateBoard(ctx, "board-123", req)
+	updated, err := svc.UpdateWorkflow(ctx, "wf-123", req)
 	if err != nil {
-		t.Fatalf("failed to update board: %v", err)
+		t.Fatalf("failed to update workflow: %v", err)
 	}
 	if updated.Name != "Updated" {
 		t.Errorf("expected name 'Updated', got %s", updated.Name)
 	}
 }
-func TestService_DeleteBoard(t *testing.T) {
+func TestService_DeleteWorkflow(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
 
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
-	board := &models.Board{ID: "board-123", WorkspaceID: "ws-1", Name: "Test Board"}
-	_ = repo.CreateBoard(ctx, board)
+	workflow := &models.Workflow{ID: "wf-123", WorkspaceID: "ws-1", Name: "Test Workflow"}
+	_ = repo.CreateWorkflow(ctx, workflow)
 
-	err := svc.DeleteBoard(ctx, "board-123")
+	err := svc.DeleteWorkflow(ctx, "wf-123")
 	if err != nil {
-		t.Fatalf("failed to delete board: %v", err)
+		t.Fatalf("failed to delete workflow: %v", err)
 	}
 
-	_, err = svc.GetBoard(ctx, "board-123")
+	_, err = svc.GetWorkflow(ctx, "wf-123")
 	if err == nil {
-		t.Error("expected board to be deleted")
+		t.Error("expected workflow to be deleted")
 	}
 }
 
-func TestService_ListBoards(t *testing.T) {
+func TestService_ListWorkflows(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
 
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
-	_ = repo.CreateBoard(ctx, &models.Board{ID: "board-1", WorkspaceID: "ws-1", Name: "Board 1"})
-	_ = repo.CreateBoard(ctx, &models.Board{ID: "board-2", WorkspaceID: "ws-1", Name: "Board 2"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Workflow 1"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-2", WorkspaceID: "ws-1", Name: "Workflow 2"})
 
-	boards, err := svc.ListBoards(ctx, "ws-1")
+	workflows, err := svc.ListWorkflows(ctx, "ws-1")
 	if err != nil {
-		t.Fatalf("failed to list boards: %v", err)
+		t.Fatalf("failed to list workflows: %v", err)
 	}
-	if len(boards) != 2 {
-		t.Errorf("expected 2 boards, got %d", len(boards))
+	if len(workflows) != 2 {
+		t.Errorf("expected 2 workflows, got %d", len(workflows))
 	}
 }
 
@@ -466,8 +466,8 @@ func setupTestTask(t *testing.T, repo repository.Repository) {
 	t.Helper()
 	ctx := context.Background()
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
-	_ = repo.CreateBoard(ctx, &models.Board{ID: "board-123", WorkspaceID: "ws-1", Name: "Board"})
-	_ = repo.CreateTask(ctx, &models.Task{ID: "task-123", WorkspaceID: "ws-1", BoardID: "board-123", WorkflowStepID: "step-123", Title: "Test Task"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-123", WorkspaceID: "ws-1", Name: "Workflow"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-123", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Test Task"})
 }
 
 func setupTestSession(t *testing.T, repo repository.Repository) string {

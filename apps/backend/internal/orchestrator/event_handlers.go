@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -137,7 +138,7 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 
 	// Check for workflow transition based on session's current step
 	// This handles the case where the agent finishes a step and should move to the next
-	transitioned := s.handleWorkflowTransition(ctx, data.TaskID, data.SessionID)
+	transitioned := s.processOnTurnComplete(ctx, data.TaskID, data.SessionID)
 
 	// If no workflow transition occurred, move session to waiting for input and task to review
 	if !transitioned {
@@ -244,7 +245,7 @@ func (s *Service) handleAgentCompleted(ctx context.Context, data watcher.AgentEv
 	s.scheduler.RemoveTask(data.TaskID)
 
 	// Check for workflow transition based on session's current step
-	transitioned := s.handleWorkflowTransition(ctx, data.TaskID, data.SessionID)
+	transitioned := s.processOnTurnComplete(ctx, data.TaskID, data.SessionID)
 
 	// If no workflow transition occurred, move task to REVIEW state for user review
 	if !transitioned {
@@ -259,9 +260,9 @@ func (s *Service) handleAgentCompleted(ctx context.Context, data watcher.AgentEv
 	}
 }
 
-// handleWorkflowTransition checks if the session's current workflow step has an on_complete_step_id
-// and moves the task to that step if so. Returns true if a transition occurred.
-func (s *Service) handleWorkflowTransition(ctx context.Context, taskID, sessionID string) bool {
+// processOnTurnComplete processes the on_turn_complete events for the current step.
+// Returns true if a transition occurred (step change happened).
+func (s *Service) processOnTurnComplete(ctx context.Context, taskID, sessionID string) bool {
 	if sessionID == "" || s.workflowStepGetter == nil {
 		return false
 	}
@@ -292,63 +293,207 @@ func (s *Service) handleWorkflowTransition(ctx context.Context, taskID, sessionI
 		return false
 	}
 
-	// If the CURRENT step requires approval, don't transition - stay here and wait for approval
-	// This handles the case where a step has both AutoStartAgent and RequireApproval enabled
-	if currentStep.RequireApproval {
-		s.logger.Info("current step requires approval, staying on step",
-			zap.String("session_id", sessionID),
+	// If no on_turn_complete actions, do nothing (manual step)
+	if len(currentStep.Events.OnTurnComplete) == 0 {
+		s.logger.Debug("step has no on_turn_complete actions, waiting for user",
 			zap.String("step_id", currentStep.ID),
 			zap.String("step_name", currentStep.Name))
-
-		// Set review status to pending
-		if err := s.repo.UpdateSessionReviewStatus(ctx, sessionID, "pending"); err != nil {
-			s.logger.Warn("failed to set session review status to pending",
-				zap.String("session_id", sessionID),
-				zap.Error(err))
-		} else {
-			s.logger.Info("session review status set to pending",
-				zap.String("session_id", sessionID),
-				zap.String("current_step", currentStep.Name))
-		}
-
-		// Update session state to WAITING_FOR_INPUT and task state to REVIEW
 		s.setSessionWaitingForInput(ctx, taskID, sessionID)
-
-		// Publish session updated event with review status
-		if s.eventBus != nil {
-			eventData := map[string]interface{}{
-				"task_id":          taskID,
-				"session_id":       sessionID,
-				"workflow_step_id": currentStep.ID,
-				"new_state":        string(models.TaskSessionStateWaitingForInput),
-				"review_status":    "pending",
-			}
-			_ = s.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(
-				events.TaskSessionStateChanged,
-				"orchestrator",
-				eventData,
-			))
-		}
-
-		// Return true to indicate we handled the completion (no further transition needed)
-		return true
-	}
-
-	// Check if there's an on_complete transition
-	if currentStep.OnCompleteStepID == "" {
-		s.logger.Debug("workflow step has no on_complete transition",
-			zap.String("step_id", currentStep.ID),
-			zap.String("step_name", currentStep.Name))
 		return false
 	}
 
-	// Get the target step to log its name
-	targetStep, err := s.workflowStepGetter.GetStep(ctx, currentStep.OnCompleteStepID)
+	// Process side-effect actions first, then find the first transition action
+	var transitionAction *wfmodels.OnTurnCompleteAction
+	for i := range currentStep.Events.OnTurnComplete {
+		action := &currentStep.Events.OnTurnComplete[i]
+		switch action.Type {
+		case wfmodels.OnTurnCompleteDisablePlanMode:
+			// Side-effect: clear plan mode from session metadata
+			s.clearSessionPlanMode(ctx, sessionID)
+		case wfmodels.OnTurnCompleteMoveToNext, wfmodels.OnTurnCompleteMoveToPrevious, wfmodels.OnTurnCompleteMoveToStep:
+			// Skip transition actions that require approval (handled via manual approval flow)
+			if action.Config != nil {
+				if ra, ok := action.Config["requires_approval"].(bool); ok && ra {
+					continue
+				}
+			}
+			if transitionAction == nil {
+				transitionAction = action
+			}
+		}
+	}
+
+	// If no transition action found, just apply side effects and wait
+	if transitionAction == nil {
+		s.setSessionWaitingForInput(ctx, taskID, sessionID)
+		return false
+	}
+
+	// Resolve the target step ID
+	var targetStepID string
+	switch transitionAction.Type {
+	case wfmodels.OnTurnCompleteMoveToNext:
+		nextStep, err := s.workflowStepGetter.GetNextStepByPosition(ctx, currentStep.WorkflowID, currentStep.Position)
+		if err != nil {
+			s.logger.Warn("failed to get next step by position",
+				zap.String("workflow_id", currentStep.WorkflowID),
+				zap.Int("current_position", currentStep.Position),
+				zap.Error(err))
+			s.setSessionWaitingForInput(ctx, taskID, sessionID)
+			return false
+		}
+		if nextStep == nil {
+			s.logger.Debug("no next step found (last step), staying",
+				zap.String("step_name", currentStep.Name))
+			s.setSessionWaitingForInput(ctx, taskID, sessionID)
+			return false
+		}
+		targetStepID = nextStep.ID
+	case wfmodels.OnTurnCompleteMoveToPrevious:
+		prevStep, err := s.workflowStepGetter.GetPreviousStepByPosition(ctx, currentStep.WorkflowID, currentStep.Position)
+		if err != nil {
+			s.logger.Warn("failed to get previous step by position",
+				zap.String("workflow_id", currentStep.WorkflowID),
+				zap.Int("current_position", currentStep.Position),
+				zap.Error(err))
+			s.setSessionWaitingForInput(ctx, taskID, sessionID)
+			return false
+		}
+		if prevStep == nil {
+			s.logger.Debug("no previous step found (first step), staying",
+				zap.String("step_name", currentStep.Name))
+			s.setSessionWaitingForInput(ctx, taskID, sessionID)
+			return false
+		}
+		targetStepID = prevStep.ID
+	case wfmodels.OnTurnCompleteMoveToStep:
+		if transitionAction.Config != nil {
+			if sid, ok := transitionAction.Config["step_id"].(string); ok {
+				targetStepID = sid
+			}
+		}
+		if targetStepID == "" {
+			s.logger.Warn("move_to_step action missing step_id config",
+				zap.String("step_id", currentStep.ID))
+			s.setSessionWaitingForInput(ctx, taskID, sessionID)
+			return false
+		}
+	}
+
+	// Execute the step transition
+	s.executeStepTransition(ctx, taskID, sessionID, currentStep, targetStepID, true)
+	return true
+}
+
+// processOnTurnStart processes the on_turn_start events for the current step.
+// This is called when a user sends a message. Returns true if a transition occurred.
+func (s *Service) processOnTurnStart(ctx context.Context, taskID, sessionID string) bool {
+	if sessionID == "" || s.workflowStepGetter == nil {
+		return false
+	}
+
+	// Get the session to find its current workflow step
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
-		s.logger.Warn("failed to get target workflow step",
-			zap.String("target_step_id", currentStep.OnCompleteStepID),
+		s.logger.Warn("failed to get session for on_turn_start",
+			zap.String("session_id", sessionID),
 			zap.Error(err))
 		return false
+	}
+
+	if session.WorkflowStepID == nil || *session.WorkflowStepID == "" {
+		return false
+	}
+
+	workflowStepID := *session.WorkflowStepID
+
+	// Get the current workflow step
+	currentStep, err := s.workflowStepGetter.GetStep(ctx, workflowStepID)
+	if err != nil {
+		s.logger.Warn("failed to get workflow step for on_turn_start",
+			zap.String("workflow_step_id", workflowStepID),
+			zap.Error(err))
+		return false
+	}
+
+	// If no on_turn_start actions, do nothing
+	if len(currentStep.Events.OnTurnStart) == 0 {
+		return false
+	}
+
+	// Find the first transition action
+	var transitionAction *wfmodels.OnTurnStartAction
+	for i := range currentStep.Events.OnTurnStart {
+		action := &currentStep.Events.OnTurnStart[i]
+		switch action.Type {
+		case wfmodels.OnTurnStartMoveToNext, wfmodels.OnTurnStartMoveToPrevious, wfmodels.OnTurnStartMoveToStep:
+			if transitionAction == nil {
+				transitionAction = action
+			}
+		}
+	}
+
+	if transitionAction == nil {
+		return false
+	}
+
+	// Resolve the target step ID
+	var targetStepID string
+	switch transitionAction.Type {
+	case wfmodels.OnTurnStartMoveToNext:
+		nextStep, err := s.workflowStepGetter.GetNextStepByPosition(ctx, currentStep.WorkflowID, currentStep.Position)
+		if err != nil || nextStep == nil {
+			return false
+		}
+		targetStepID = nextStep.ID
+	case wfmodels.OnTurnStartMoveToPrevious:
+		prevStep, err := s.workflowStepGetter.GetPreviousStepByPosition(ctx, currentStep.WorkflowID, currentStep.Position)
+		if err != nil || prevStep == nil {
+			return false
+		}
+		targetStepID = prevStep.ID
+	case wfmodels.OnTurnStartMoveToStep:
+		if transitionAction.Config != nil {
+			if sid, ok := transitionAction.Config["step_id"].(string); ok {
+				targetStepID = sid
+			}
+		}
+		if targetStepID == "" {
+			return false
+		}
+	}
+
+	s.logger.Info("on_turn_start triggered step transition",
+		zap.String("task_id", taskID),
+		zap.String("session_id", sessionID),
+		zap.String("from_step", currentStep.Name),
+		zap.String("action", string(transitionAction.Type)))
+
+	// Execute the step transition WITHOUT triggering on_enter auto-start
+	// (user is about to send a message, the prompt will come from them)
+	s.executeStepTransition(ctx, taskID, sessionID, currentStep, targetStepID, false)
+	return true
+}
+
+// ProcessOnTurnStart is the public API for triggering on_turn_start events.
+// Called by message handlers before sending a prompt to the agent.
+func (s *Service) ProcessOnTurnStart(ctx context.Context, taskID, sessionID string) error {
+	s.processOnTurnStart(ctx, taskID, sessionID)
+	return nil
+}
+
+// executeStepTransition moves a task/session from one step to another.
+// If triggerOnEnter is true, on_enter actions (like auto_start_agent) are processed.
+// If false, only the step change is applied (used for on_turn_start where the user is about to send a message).
+func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID string, fromStep *wfmodels.WorkflowStep, toStepID string, triggerOnEnter bool) {
+	// Get the target step
+	targetStep, err := s.workflowStepGetter.GetStep(ctx, toStepID)
+	if err != nil {
+		s.logger.Warn("failed to get target workflow step",
+			zap.String("target_step_id", toStepID),
+			zap.Error(err))
+		s.setSessionWaitingForInput(ctx, taskID, sessionID)
+		return
 	}
 
 	// Get the task to update its workflow step
@@ -357,26 +502,28 @@ func (s *Service) handleWorkflowTransition(ctx context.Context, taskID, sessionI
 		s.logger.Warn("failed to get task for workflow transition",
 			zap.String("task_id", taskID),
 			zap.Error(err))
-		return false
+		s.setSessionWaitingForInput(ctx, taskID, sessionID)
+		return
 	}
 
 	// Update the task's workflow step
-	task.WorkflowStepID = currentStep.OnCompleteStepID
+	task.WorkflowStepID = toStepID
 	task.UpdatedAt = time.Now().UTC()
 	if err := s.repo.UpdateTask(ctx, task); err != nil {
 		s.logger.Error("failed to move task to next workflow step",
 			zap.String("task_id", taskID),
-			zap.String("from_step", currentStep.Name),
+			zap.String("from_step", fromStep.Name),
 			zap.String("to_step", targetStep.Name),
 			zap.Error(err))
-		return false
+		s.setSessionWaitingForInput(ctx, taskID, sessionID)
+		return
 	}
 
-	// Publish task updated event so frontend updates the kanban board
+	// Publish task updated event
 	if s.eventBus != nil {
 		taskEventData := map[string]interface{}{
 			"task_id":          task.ID,
-			"board_id":         task.BoardID,
+			"workflow_id":      task.WorkflowID,
 			"workflow_step_id": task.WorkflowStepID,
 			"title":            task.Title,
 			"description":      task.Description,
@@ -391,186 +538,152 @@ func (s *Service) handleWorkflowTransition(ctx context.Context, taskID, sessionI
 		))
 	}
 
-	// Also update the session's workflow step
-	if err := s.repo.UpdateSessionWorkflowStep(ctx, sessionID, currentStep.OnCompleteStepID); err != nil {
+	// Update session's workflow step
+	if err := s.repo.UpdateSessionWorkflowStep(ctx, sessionID, toStepID); err != nil {
 		s.logger.Warn("failed to update session workflow step",
 			zap.String("session_id", sessionID),
-			zap.String("step_id", currentStep.OnCompleteStepID),
+			zap.String("step_id", toStepID),
 			zap.Error(err))
-		// Don't return false - task was already moved
 	}
 
-	// If the target step requires approval, set the session's review_status to "pending"
-	var reviewStatus string
-	if targetStep.RequireApproval {
-		reviewStatus = "pending"
-		if err := s.repo.UpdateSessionReviewStatus(ctx, sessionID, reviewStatus); err != nil {
-			s.logger.Warn("failed to set session review status to pending",
-				zap.String("session_id", sessionID),
-				zap.Error(err))
-			reviewStatus = "" // Clear on error
-		} else {
-			s.logger.Info("session review status set to pending",
-				zap.String("session_id", sessionID),
-				zap.String("target_step", targetStep.Name))
-		}
-	} else {
-		// Target step does not require approval - clear any existing review status
-		if err := s.repo.UpdateSessionReviewStatus(ctx, sessionID, ""); err != nil {
-			s.logger.Warn("failed to clear session review status",
-				zap.String("session_id", sessionID),
-				zap.Error(err))
-		} else {
-			s.logger.Debug("session review status cleared for non-review step",
-				zap.String("session_id", sessionID),
-				zap.String("target_step", targetStep.Name))
-		}
-	}
-
-	// Update session state to WAITING_FOR_INPUT and task state to REVIEW since the agent completed this step
-	// This must happen before publishing the event so the frontend gets the correct state
-	s.setSessionWaitingForInput(ctx, taskID, sessionID)
-
-	// Publish session updated event with workflow step and review status changes
-	// This allows the frontend to update the session state without a full refresh
-	if s.eventBus != nil {
-		eventData := map[string]interface{}{
-			"task_id":          taskID,
-			"session_id":       sessionID,
-			"workflow_step_id": targetStep.ID,
-			"new_state":        string(models.TaskSessionStateWaitingForInput),
-		}
-		if reviewStatus != "" {
-			eventData["review_status"] = reviewStatus
-		}
-		_ = s.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(
-			events.TaskSessionStateChanged,
-			"orchestrator",
-			eventData,
-		))
-	}
-
-	s.logger.Info("workflow transition completed",
-		zap.String("task_id", taskID),
-		zap.String("session_id", sessionID),
-		zap.String("from_step", currentStep.Name),
-		zap.String("to_step", targetStep.Name))
-
-	return true
-}
-
-// handleReviewStepRollback checks if the session is in a review-type step.
-// If so, it moves the session back to the previous step (the step that led to the review step)
-// and clears the review status. This handles the case where the user sends a message to
-// iterate on the work instead of approving.
-// Note: This works for both "simple" boards (where review steps don't require approval) and
-// "advanced" boards (where review steps have RequireApproval=true).
-func (s *Service) handleReviewStepRollback(ctx context.Context, taskID, sessionID string) {
-	if sessionID == "" || s.workflowStepGetter == nil {
-		return
-	}
-
-	// Get the session to check its current workflow step
-	session, err := s.repo.GetTaskSession(ctx, sessionID)
-	if err != nil {
-		s.logger.Warn("failed to get session for review rollback check",
-			zap.String("session_id", sessionID),
-			zap.Error(err))
-		return
-	}
-
-	// Only proceed if session has a workflow step
-	if session.WorkflowStepID == nil || *session.WorkflowStepID == "" {
-		return
-	}
-
-	currentStepID := *session.WorkflowStepID
-
-	// Get the current workflow step to check if it's a review step
-	currentStep, err := s.workflowStepGetter.GetStep(ctx, currentStepID)
-	if err != nil {
-		s.logger.Warn("failed to get workflow step for review rollback",
-			zap.String("workflow_step_id", currentStepID),
-			zap.Error(err))
-		return
-	}
-
-	// Only proceed if the current step is a pure review step (StepType == "review")
-	// Work steps like Planning or Implementation with RequireApproval should NOT rollback
-	// because the agent is actively working on them, not just waiting for approval
-	if currentStep.StepType != "review" {
-		return
-	}
-
-	// Get the task to find the board ID
-	task, err := s.repo.GetTask(ctx, taskID)
-	if err != nil {
-		s.logger.Warn("failed to get task for review rollback",
-			zap.String("task_id", taskID),
-			zap.Error(err))
-		return
-	}
-
-	// Find the source step (the step that has on_complete_step_id pointing to current step)
-	sourceStep, err := s.workflowStepGetter.GetSourceStep(ctx, task.BoardID, currentStepID)
-	if err != nil {
-		s.logger.Warn("failed to get source step for review rollback",
-			zap.String("current_step_id", currentStepID),
-			zap.Error(err))
-		return
-	}
-	if sourceStep == nil {
-		s.logger.Debug("no source step found for review rollback, staying in current step",
-			zap.String("current_step_id", currentStepID))
-		return
-	}
-
-	// Move session back to the source step
-	if err := s.repo.UpdateSessionWorkflowStep(ctx, sessionID, sourceStep.ID); err != nil {
-		s.logger.Error("failed to move session back to source step",
-			zap.String("session_id", sessionID),
-			zap.String("source_step_id", sourceStep.ID),
-			zap.Error(err))
-		return
-	}
-
-	// Clear the review status
+	// Clear review status when transitioning
 	if err := s.repo.UpdateSessionReviewStatus(ctx, sessionID, ""); err != nil {
 		s.logger.Warn("failed to clear session review status",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 	}
 
-	// Also move the task to the source step
-	task.WorkflowStepID = sourceStep.ID
-	if err := s.repo.UpdateTask(ctx, task); err != nil {
-		s.logger.Error("failed to move task back to source step",
-			zap.String("task_id", taskID),
-			zap.String("source_step_id", sourceStep.ID),
-			zap.Error(err))
-	}
-
-	// Publish session state change event so frontend updates
-	if s.eventBus != nil {
-		eventData := map[string]interface{}{
-			"task_id":          taskID,
-			"session_id":       sessionID,
-			"workflow_step_id": sourceStep.ID,
-			"new_state":        string(session.State),
-			"review_status":    "", // Cleared
-		}
-		_ = s.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(
-			events.TaskSessionStateChanged,
-			"orchestrator",
-			eventData,
-		))
-	}
-
-	s.logger.Info("session moved back from review step",
+	s.logger.Info("workflow transition completed",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID),
-		zap.String("from_step", currentStep.Name),
-		zap.String("to_step", sourceStep.Name))
+		zap.String("from_step", fromStep.Name),
+		zap.String("to_step", targetStep.Name),
+		zap.Bool("trigger_on_enter", triggerOnEnter))
+
+	// Process on_enter for the target step (skip if triggerOnEnter is false,
+	// e.g. on_turn_start transitions where the user is about to send a message)
+	if triggerOnEnter {
+		s.processOnEnter(ctx, taskID, sessionID, targetStep, task.Description)
+	} else {
+		s.setSessionWaitingForInput(ctx, taskID, sessionID)
+	}
+}
+
+// processOnEnter processes the on_enter events for a step after transitioning to it.
+func (s *Service) processOnEnter(ctx context.Context, taskID, sessionID string, step *wfmodels.WorkflowStep, taskDescription string) {
+	// Check if this step enables plan mode
+	hasPlanMode := false
+	for _, action := range step.Events.OnEnter {
+		if action.Type == wfmodels.OnEnterEnablePlanMode {
+			hasPlanMode = true
+			break
+		}
+	}
+
+	// Auto-disable plan mode when entering a step that doesn't explicitly enable it
+	if !hasPlanMode {
+		s.clearSessionPlanMode(ctx, sessionID)
+	}
+
+	if len(step.Events.OnEnter) == 0 {
+		s.setSessionWaitingForInput(ctx, taskID, sessionID)
+
+		// Publish session state change
+		if s.eventBus != nil {
+			eventData := map[string]interface{}{
+				"task_id":          taskID,
+				"session_id":       sessionID,
+				"workflow_step_id": step.ID,
+				"new_state":        string(models.TaskSessionStateWaitingForInput),
+			}
+			_ = s.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(
+				events.TaskSessionStateChanged,
+				"orchestrator",
+				eventData,
+			))
+		}
+		return
+	}
+
+	hasAutoStart := false
+	for _, action := range step.Events.OnEnter {
+		switch action.Type {
+		case wfmodels.OnEnterEnablePlanMode:
+			s.setSessionPlanMode(ctx, sessionID, true)
+		case wfmodels.OnEnterAutoStartAgent:
+			hasAutoStart = true
+		}
+	}
+
+	if hasAutoStart {
+		// Build prompt from step configuration
+		effectivePrompt := s.buildWorkflowPrompt(taskDescription, step, taskID)
+		planMode := step.HasOnEnterAction(wfmodels.OnEnterEnablePlanMode)
+
+		// Auto-start the agent
+		go func() {
+			bgCtx := context.Background()
+			_, err := s.PromptTask(bgCtx, taskID, sessionID, effectivePrompt, "", planMode, nil)
+			if err != nil {
+				s.logger.Error("failed to auto-start agent for step",
+					zap.String("task_id", taskID),
+					zap.String("session_id", sessionID),
+					zap.String("step_name", step.Name),
+					zap.Error(err))
+				s.setSessionWaitingForInput(bgCtx, taskID, sessionID)
+			}
+		}()
+	} else {
+		s.setSessionWaitingForInput(ctx, taskID, sessionID)
+
+		// Publish session state change
+		if s.eventBus != nil {
+			eventData := map[string]interface{}{
+				"task_id":          taskID,
+				"session_id":       sessionID,
+				"workflow_step_id": step.ID,
+				"new_state":        string(models.TaskSessionStateWaitingForInput),
+			}
+			_ = s.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(
+				events.TaskSessionStateChanged,
+				"orchestrator",
+				eventData,
+			))
+		}
+	}
+}
+
+// clearSessionPlanMode clears plan mode from session metadata.
+func (s *Service) clearSessionPlanMode(ctx context.Context, sessionID string) {
+	s.setSessionPlanMode(ctx, sessionID, false)
+}
+
+// setSessionPlanMode sets or clears plan mode in session metadata.
+func (s *Service) setSessionPlanMode(ctx context.Context, sessionID string, enabled bool) {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to get session for plan mode update",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return
+	}
+
+	if session.Metadata == nil {
+		session.Metadata = make(map[string]interface{})
+	}
+
+	if enabled {
+		session.Metadata["plan_mode"] = true
+	} else {
+		delete(session.Metadata, "plan_mode")
+	}
+
+	if err := s.repo.UpdateTaskSession(ctx, session); err != nil {
+		s.logger.Warn("failed to update session plan mode",
+			zap.String("session_id", sessionID),
+			zap.Bool("enabled", enabled),
+			zap.Error(err))
+	}
 }
 
 // handleAgentFailed handles agent failure events

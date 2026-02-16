@@ -12,7 +12,8 @@ type User struct {
 type UserSettings struct {
 	UserID                 string    `json:"user_id"`
 	WorkspaceID            string    `json:"workspace_id"`
-	BoardID                string    `json:"board_id"`
+	KanbanViewMode         string    `json:"kanban_view_mode"`
+	WorkflowFilterID       string    `json:"workflow_filter_id"`
 	RepositoryIDs          []string  `json:"repository_ids"`
 	InitialSetupComplete   bool      `json:"initial_setup_complete"`
 	PreferredShell         string    `json:"preferred_shell"`

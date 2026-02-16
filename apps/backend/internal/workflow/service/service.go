@@ -65,11 +65,11 @@ func (s *Service) GetSystemTemplates(ctx context.Context) ([]*models.WorkflowTem
 // Step Operations
 // ============================================================================
 
-// ListStepsByBoard returns all workflow steps for a board.
-func (s *Service) ListStepsByBoard(ctx context.Context, boardID string) ([]*models.WorkflowStep, error) {
-	steps, err := s.repo.ListStepsByBoard(ctx, boardID)
+// ListStepsByWorkflow returns all workflow steps for a workflow.
+func (s *Service) ListStepsByWorkflow(ctx context.Context, workflowID string) ([]*models.WorkflowStep, error) {
+	steps, err := s.repo.ListStepsByWorkflow(ctx, workflowID)
 	if err != nil {
-		s.logger.Error("failed to list steps by board", zap.String("board_id", boardID), zap.Error(err))
+		s.logger.Error("failed to list steps by workflow", zap.String("workflow_id", workflowID), zap.Error(err))
 		return nil, err
 	}
 	return steps, nil
@@ -85,65 +85,19 @@ func (s *Service) GetStep(ctx context.Context, stepID string) (*models.WorkflowS
 	return step, nil
 }
 
-// GetNextStep gets the step to transition to based on OnCompleteStepID.
-func (s *Service) GetNextStep(ctx context.Context, boardID, currentStepID string) (*models.WorkflowStep, error) {
-	currentStep, err := s.repo.GetStep(ctx, currentStepID)
-	if err != nil {
-		s.logger.Error("failed to get current step", zap.String("step_id", currentStepID), zap.Error(err))
-		return nil, err
-	}
-
-	if currentStep.OnCompleteStepID == nil {
-		return nil, nil // No next step configured
-	}
-
-	nextStep, err := s.repo.GetStep(ctx, *currentStep.OnCompleteStepID)
-	if err != nil {
-		s.logger.Error("failed to get next step",
-			zap.String("current_step_id", currentStepID),
-			zap.String("next_step_id", *currentStep.OnCompleteStepID),
-			zap.Error(err))
-		return nil, err
-	}
-
-	return nextStep, nil
-}
-
-// GetSourceStep finds the step that has on_complete_step_id pointing to the given step.
-// This is used to find the "previous" step when moving back from a review step.
-// Returns nil if no source step is found.
-func (s *Service) GetSourceStep(ctx context.Context, boardID, targetStepID string) (*models.WorkflowStep, error) {
-	steps, err := s.repo.ListStepsByBoard(ctx, boardID)
-	if err != nil {
-		s.logger.Error("failed to list steps for source lookup",
-			zap.String("board_id", boardID),
-			zap.Error(err))
-		return nil, err
-	}
-
-	for _, step := range steps {
-		if step.OnCompleteStepID != nil && *step.OnCompleteStepID == targetStepID {
-			return step, nil
-		}
-	}
-
-	return nil, nil // No source step found
-}
-
-// GetNextStepByPosition returns the next step after the given position for a board.
-// This is used as a fallback when no explicit transition (OnApprovalStepID, OnCompleteStepID) is configured.
+// GetNextStepByPosition returns the next step after the given position for a workflow.
 // Steps are ordered by position, so this finds the step with the next higher position.
 // Returns nil if there is no next step (i.e., current step is the last one).
-func (s *Service) GetNextStepByPosition(ctx context.Context, boardID string, currentPosition int) (*models.WorkflowStep, error) {
-	steps, err := s.repo.ListStepsByBoard(ctx, boardID)
+func (s *Service) GetNextStepByPosition(ctx context.Context, workflowID string, currentPosition int) (*models.WorkflowStep, error) {
+	steps, err := s.repo.ListStepsByWorkflow(ctx, workflowID)
 	if err != nil {
 		s.logger.Error("failed to list steps for next step lookup",
-			zap.String("board_id", boardID),
+			zap.String("workflow_id", workflowID),
 			zap.Error(err))
 		return nil, err
 	}
 
-	// Steps are already ordered by position from ListStepsByBoard
+	// Steps are already ordered by position from ListStepsByWorkflow
 	for _, step := range steps {
 		if step.Position > currentPosition {
 			return step, nil
@@ -153,8 +107,31 @@ func (s *Service) GetNextStepByPosition(ctx context.Context, boardID string, cur
 	return nil, nil // No next step found (current step is the last one)
 }
 
-// CreateStepsFromTemplate creates workflow steps for a board from a template.
-func (s *Service) CreateStepsFromTemplate(ctx context.Context, boardID, templateID string) error {
+// GetPreviousStepByPosition returns the previous step before the given position for a workflow.
+// Returns nil if there is no previous step (i.e., current step is the first one).
+func (s *Service) GetPreviousStepByPosition(ctx context.Context, workflowID string, currentPosition int) (*models.WorkflowStep, error) {
+	steps, err := s.repo.ListStepsByWorkflow(ctx, workflowID)
+	if err != nil {
+		s.logger.Error("failed to list steps for previous step lookup",
+			zap.String("workflow_id", workflowID),
+			zap.Error(err))
+		return nil, err
+	}
+
+	// Steps are ordered by position ascending. Walk backwards to find the step just before current.
+	var prev *models.WorkflowStep
+	for _, step := range steps {
+		if step.Position >= currentPosition {
+			break
+		}
+		prev = step
+	}
+
+	return prev, nil
+}
+
+// CreateStepsFromTemplate creates workflow steps for a workflow from a template.
+func (s *Service) CreateStepsFromTemplate(ctx context.Context, workflowID, templateID string) error {
 	template, err := s.repo.GetTemplate(ctx, templateID)
 	if err != nil {
 		s.logger.Error("failed to get template for step creation",
@@ -163,46 +140,30 @@ func (s *Service) CreateStepsFromTemplate(ctx context.Context, boardID, template
 		return fmt.Errorf("failed to get template: %w", err)
 	}
 
-	// Map template step IDs to generated UUIDs for linking
-	idMap := make(map[string]string)
+	// Build mapping from template step ID to new UUID
+	idMap := make(map[string]string, len(template.Steps))
 	for _, stepDef := range template.Steps {
 		idMap[stepDef.ID] = uuid.New().String()
 	}
 
-	// Create each step from the template
+	// Create each step from the template, remapping step_id references in events
 	for _, stepDef := range template.Steps {
+		events := models.RemapStepEvents(stepDef.Events, idMap)
 		step := &models.WorkflowStep{
 			ID:              idMap[stepDef.ID],
-			BoardID:         boardID,
+			WorkflowID:      workflowID,
 			Name:            stepDef.Name,
-			StepType:        stepDef.StepType,
 			Position:        stepDef.Position,
 			Color:           stepDef.Color,
-			AutoStartAgent:  stepDef.AutoStartAgent,
-			PlanMode:        stepDef.PlanMode,
-			RequireApproval: stepDef.RequireApproval,
-			PromptPrefix:    stepDef.PromptPrefix,
-			PromptSuffix:    stepDef.PromptSuffix,
+			Prompt:          stepDef.Prompt,
+			Events:          events,
 			AllowManualMove: stepDef.AllowManualMove,
-		}
-
-		// Map OnCompleteStepID if set
-		if stepDef.OnCompleteStepID != "" {
-			if mappedID, ok := idMap[stepDef.OnCompleteStepID]; ok {
-				step.OnCompleteStepID = &mappedID
-			}
-		}
-
-		// Map OnApprovalStepID if set
-		if stepDef.OnApprovalStepID != "" {
-			if mappedID, ok := idMap[stepDef.OnApprovalStepID]; ok {
-				step.OnApprovalStepID = &mappedID
-			}
+			IsStartStep:     stepDef.IsStartStep,
 		}
 
 		if err := s.repo.CreateStep(ctx, step); err != nil {
 			s.logger.Error("failed to create step from template",
-				zap.String("board_id", boardID),
+				zap.String("workflow_id", workflowID),
 				zap.String("step_name", step.Name),
 				zap.Error(err))
 			return fmt.Errorf("failed to create step %s: %w", step.Name, err)
@@ -210,26 +171,66 @@ func (s *Service) CreateStepsFromTemplate(ctx context.Context, boardID, template
 	}
 
 	s.logger.Info("created workflow steps from template",
-		zap.String("board_id", boardID),
+		zap.String("workflow_id", workflowID),
 		zap.String("template_id", templateID),
 		zap.Int("step_count", len(template.Steps)))
 
 	return nil
 }
 
+// ResolveStartStep resolves which step a task should start in for a workflow.
+// Fallback chain: is_start_step=true → first step with auto_start_agent → first step by position.
+func (s *Service) ResolveStartStep(ctx context.Context, workflowID string) (*models.WorkflowStep, error) {
+	// Try explicit start step
+	startStep, err := s.repo.GetStartStep(ctx, workflowID)
+	if err != nil {
+		s.logger.Error("failed to get start step", zap.String("workflow_id", workflowID), zap.Error(err))
+		return nil, err
+	}
+	if startStep != nil {
+		return startStep, nil
+	}
+
+	// Fallback: first step with auto_start_agent
+	steps, err := s.repo.ListStepsByWorkflow(ctx, workflowID)
+	if err != nil {
+		s.logger.Error("failed to list steps for start step resolution", zap.String("workflow_id", workflowID), zap.Error(err))
+		return nil, err
+	}
+	if len(steps) == 0 {
+		return nil, fmt.Errorf("workflow %s has no steps", workflowID)
+	}
+
+	for _, step := range steps {
+		if step.HasOnEnterAction(models.OnEnterAutoStartAgent) {
+			return step, nil
+		}
+	}
+
+	// Fallback: first step by position
+	return steps[0], nil
+}
+
 // CreateStep creates a new workflow step.
 func (s *Service) CreateStep(ctx context.Context, step *models.WorkflowStep) error {
 	step.ID = uuid.New().String()
 	if err := s.repo.CreateStep(ctx, step); err != nil {
-		s.logger.Error("failed to create step", zap.String("board_id", step.BoardID), zap.Error(err))
+		s.logger.Error("failed to create step", zap.String("workflow_id", step.WorkflowID), zap.Error(err))
 		return err
 	}
-	s.logger.Info("created workflow step", zap.String("step_id", step.ID), zap.String("board_id", step.BoardID))
+	s.logger.Info("created workflow step", zap.String("step_id", step.ID), zap.String("workflow_id", step.WorkflowID))
 	return nil
 }
 
 // UpdateStep updates an existing workflow step.
 func (s *Service) UpdateStep(ctx context.Context, step *models.WorkflowStep) error {
+	// If marking as start step, clear the flag on all other steps first
+	if step.IsStartStep {
+		if err := s.repo.ClearStartStepFlag(ctx, step.WorkflowID, step.ID); err != nil {
+			s.logger.Error("failed to clear start step flag", zap.String("workflow_id", step.WorkflowID), zap.Error(err))
+			return err
+		}
+	}
 	if err := s.repo.UpdateStep(ctx, step); err != nil {
 		s.logger.Error("failed to update step", zap.String("step_id", step.ID), zap.Error(err))
 		return err
@@ -240,18 +241,18 @@ func (s *Service) UpdateStep(ctx context.Context, step *models.WorkflowStep) err
 
 // DeleteStep deletes a workflow step and clears any references to it from other steps.
 func (s *Service) DeleteStep(ctx context.Context, stepID string) error {
-	// First, get the step to find its board ID
+	// First, get the step to find its workflow ID
 	step, err := s.repo.GetStep(ctx, stepID)
 	if err != nil {
 		s.logger.Error("failed to get step for deletion", zap.String("step_id", stepID), zap.Error(err))
 		return err
 	}
 
-	// Clear any OnCompleteStepID or OnApprovalStepID references to this step
-	if err := s.repo.ClearStepReferences(ctx, step.BoardID, stepID); err != nil {
+	// Clear any move_to_step references to this step
+	if err := s.repo.ClearStepReferences(ctx, step.WorkflowID, stepID); err != nil {
 		s.logger.Error("failed to clear step references",
 			zap.String("step_id", stepID),
-			zap.String("board_id", step.BoardID),
+			zap.String("workflow_id", step.WorkflowID),
 			zap.Error(err))
 		return err
 	}
@@ -264,12 +265,12 @@ func (s *Service) DeleteStep(ctx context.Context, stepID string) error {
 
 	s.logger.Info("deleted workflow step and cleared references",
 		zap.String("step_id", stepID),
-		zap.String("board_id", step.BoardID))
+		zap.String("workflow_id", step.WorkflowID))
 	return nil
 }
 
-// ReorderSteps reorders workflow steps for a board.
-func (s *Service) ReorderSteps(ctx context.Context, boardID string, stepIDs []string) error {
+// ReorderSteps reorders workflow steps for a workflow.
+func (s *Service) ReorderSteps(ctx context.Context, workflowID string, stepIDs []string) error {
 	for i, stepID := range stepIDs {
 		step, err := s.repo.GetStep(ctx, stepID)
 		if err != nil {
@@ -282,7 +283,7 @@ func (s *Service) ReorderSteps(ctx context.Context, boardID string, stepIDs []st
 			return err
 		}
 	}
-	s.logger.Info("reordered workflow steps", zap.String("board_id", boardID), zap.Int("count", len(stepIDs)))
+	s.logger.Info("reordered workflow steps", zap.String("workflow_id", workflowID), zap.Int("count", len(stepIDs)))
 	return nil
 }
 

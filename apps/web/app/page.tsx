@@ -1,6 +1,6 @@
 import { PageClient } from '@/app/page-client';
 import { StateHydrator } from '@/components/state-hydrator';
-import { fetchBoardSnapshot, fetchUserSettings, listBoards, listRepositories, listWorkspaces, listTaskSessionMessages } from '@/lib/api';
+import { fetchWorkflowSnapshot, fetchUserSettings, listWorkflows, listRepositories, listWorkspaces, listTaskSessionMessages } from '@/lib/api';
 import { snapshotToState } from '@/lib/ssr/mapper';
 import type { AppState } from '@/lib/state/store';
 
@@ -13,11 +13,11 @@ export default async function Page({ searchParams }: PageProps) {
   try {
     const resolvedParams = searchParams ? await searchParams : {};
     const workspaceParam = resolvedParams.workspaceId;
-    const boardParam = resolvedParams.boardId;
+    const workflowParam = resolvedParams.workflowId;
     const taskIdParam = resolvedParams.taskId;
     const sessionIdParam = resolvedParams.sessionId;
     const workspaceId = Array.isArray(workspaceParam) ? workspaceParam[0] : workspaceParam;
-    const boardIdParam = Array.isArray(boardParam) ? boardParam[0] : boardParam;
+    const workflowIdParam = Array.isArray(workflowParam) ? workflowParam[0] : workflowParam;
     const taskId = Array.isArray(taskIdParam) ? taskIdParam[0] : taskIdParam;
     const sessionId = Array.isArray(sessionIdParam) ? sessionIdParam[0] : sessionIdParam;
 
@@ -27,7 +27,7 @@ export default async function Page({ searchParams }: PageProps) {
     ]);
     const userSettings = userSettingsResponse?.settings;
     const settingsWorkspaceId = userSettings?.workspace_id || null;
-    const settingsBoardId = userSettings?.board_id || null;
+    const settingsWorkflowId = userSettings?.workflow_filter_id || null;
     const settingsRepositoryIds = Array.from(new Set(userSettings?.repository_ids ?? [])).sort();
     const settingsEnablePreviewOnClick = userSettings?.enable_preview_on_click ?? false;
     const activeWorkspaceId =
@@ -52,7 +52,8 @@ export default async function Page({ searchParams }: PageProps) {
       },
       userSettings: {
         workspaceId: activeWorkspaceId,
-        boardId: settingsBoardId,
+        workflowId: settingsWorkflowId,
+        kanbanViewMode: userSettings?.kanban_view_mode || null,
         repositoryIds: settingsRepositoryIds,
         preferredShell: userSettings?.preferred_shell || null,
         shellOptions: userSettingsResponse?.shell_options ?? [],
@@ -76,30 +77,30 @@ export default async function Page({ searchParams }: PageProps) {
       );
     }
 
-    const [boardList, repositoriesResponse] = await Promise.all([
-      listBoards(activeWorkspaceId, { cache: 'no-store' }),
+    const [workflowList, repositoriesResponse] = await Promise.all([
+      listWorkflows(activeWorkspaceId, { cache: 'no-store' }),
       listRepositories(activeWorkspaceId, undefined, { cache: 'no-store' }).catch(() => ({ repositories: [] })),
     ]);
 
-    // Use boardIdParam if it exists in this workspace, otherwise fall back
-    // Client-side code will handle task selection even if board doesn't match
-    const boardId =
-      boardList.boards.find((board) => board.id === boardIdParam)?.id ??
-      boardList.boards.find((board) => board.id === settingsBoardId)?.id ??
-      boardList.boards[0]?.id;
+    // Use workflowIdParam if it exists in this workspace, otherwise fall back
+    // Client-side code will handle task selection even if workflow doesn't match
+    const workflowId =
+      workflowList.workflows.find((workflow) => workflow.id === workflowIdParam)?.id ??
+      workflowList.workflows.find((workflow) => workflow.id === settingsWorkflowId)?.id ??
+      workflowList.workflows[0]?.id;
     initialState = {
       ...initialState,
       userSettings: {
         ...(initialState.userSettings as AppState['userSettings']),
-        boardId: boardId ?? null,
+        workflowId: workflowId ?? null,
       },
-      boards: {
-        items: boardList.boards.map((board) => ({
-          id: board.id,
-          workspaceId: board.workspace_id,
-          name: board.name,
+      workflows: {
+        items: workflowList.workflows.map((workflow) => ({
+          id: workflow.id,
+          workspaceId: workflow.workspace_id,
+          name: workflow.name,
         })),
-        activeId: boardId ?? null,
+        activeId: workflowId ?? null,
       },
       repositories: {
         itemsByWorkspaceId: { [activeWorkspaceId]: repositoriesResponse.repositories },
@@ -108,7 +109,7 @@ export default async function Page({ searchParams }: PageProps) {
       },
     };
 
-    if (!boardId) {
+    if (!workflowId) {
       return (
         <>
           <StateHydrator initialState={initialState} />
@@ -117,7 +118,7 @@ export default async function Page({ searchParams }: PageProps) {
       );
     }
 
-    const snapshot = await fetchBoardSnapshot(boardId, { cache: 'no-store' });
+    const snapshot = await fetchWorkflowSnapshot(workflowId, { cache: 'no-store' });
     initialState = { ...initialState, ...snapshotToState(snapshot) };
 
     // Load messages for selected task session if provided (SSR optimization)

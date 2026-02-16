@@ -45,6 +45,16 @@ export const VirtualizedMessageList = memo(function VirtualizedMessageList({
   const previousWidthRef = useRef(0);
   /** True while the panel is hidden (0 dimensions) to avoid stale scroll updates */
   const isHiddenRef = useRef(false);
+  /**
+   * Scroll snapshot continuously updated by the scroll handler.
+   * When the panel goes hidden, the browser resets scrollTop to 0 BEFORE
+   * ResizeObserver fires, so we can't read scroll state at that point.
+   * Instead, we always have the latest good state from the scroll handler.
+   */
+  const scrollSnapshot = useRef<{ wasAtBottom: boolean; firstVisibleIndex: number }>({
+    wasAtBottom: true,
+    firstVisibleIndex: 0,
+  });
 
   const isInitialLoading = messagesLoading && messages.length === 0;
   const isCreatedSession = sessionState === 'CREATED';
@@ -78,7 +88,13 @@ export const VirtualizedMessageList = memo(function VirtualizedMessageList({
   const loadingRef = useRef({ hasMore, isLoadingMore });
   loadingRef.current = { hasMore, isLoadingMore };
 
-  // Combined scroll handler: check if at bottom AND trigger lazy loading at top
+  // Keep a ref so the ResizeObserver closure always has the current virtualizer
+  const virtualizerRef = useRef(virtualizer);
+  virtualizerRef.current = virtualizer;
+
+  // Combined scroll handler: check if at bottom AND trigger lazy loading at top.
+  // Also continuously updates scrollSnapshot so we always have the latest good
+  // scroll state before the browser resets it on display:none.
   const handleScroll = useCallback(() => {
     const element = messagesContainerRef.current;
     if (!element) return;
@@ -89,9 +105,17 @@ export const VirtualizedMessageList = memo(function VirtualizedMessageList({
     const { scrollTop, scrollHeight, clientHeight } = element;
 
     // Track if we're at the bottom for auto-scroll behavior (100px threshold)
-    // User is considered "at bottom" if within 100px of the bottom
     wasAtBottomRef.current = scrollHeight - scrollTop - clientHeight < 100;
     savedScrollTopRef.current = scrollTop;
+
+    // Continuously save snapshot for panel hide/show restoration.
+    // This runs on every scroll so we always have pre-reset values.
+    const virt = virtualizerRef.current;
+    const visibleItems = virt.getVirtualItems();
+    scrollSnapshot.current = {
+      wasAtBottom: wasAtBottomRef.current,
+      firstVisibleIndex: visibleItems.length > 0 ? visibleItems[0].index : 0,
+    };
 
     // Trigger lazy load when scrolled near top
     if (scrollTop < 40 && loadingRef.current.hasMore && !loadingRef.current.isLoadingMore) {
@@ -114,10 +138,6 @@ export const VirtualizedMessageList = memo(function VirtualizedMessageList({
     return () => element.removeEventListener('scroll', handleScroll);
   }, [handleScroll]);
 
-  // Keep a ref so the ResizeObserver closure always has the current virtualizer
-  const virtualizerRef = useRef(virtualizer);
-  virtualizerRef.current = virtualizer;
-
   // Maintain scroll position at bottom when container resizes (e.g., chat input grows)
   useEffect(() => {
     const element = messagesContainerRef.current;
@@ -130,39 +150,41 @@ export const VirtualizedMessageList = memo(function VirtualizedMessageList({
         const previousHeight = previousHeightRef.current;
         const previousWidth = previousWidthRef.current;
 
-        // Panel being hidden by dockview — mark as hidden, don't update refs
+        // Panel being hidden by dockview — mark as hidden.
+        // Don't read scroll state here: the browser already reset scrollTop to 0.
+        // We use scrollSnapshot which was saved by the scroll handler.
         if (currentWidth === 0 || currentHeight === 0) {
           isHiddenRef.current = true;
           return;
         }
 
-        // Panel becoming visible again — restore scroll position
+        // Panel becoming visible again — restore scroll position from snapshot
         if (isHiddenRef.current) {
           isHiddenRef.current = false;
           previousHeightRef.current = currentHeight;
           previousWidthRef.current = currentWidth;
 
-          // Invalidate stale measurements from when the panel was display:none,
-          // then use the virtualizer's scrollToIndex which persists across
-          // re-measurement cycles (raw scrollTop gets overwritten by the
-          // virtualizer as it re-measures items after becoming visible).
           const virt = virtualizerRef.current;
+          const snapshot = scrollSnapshot.current;
           virt.measure();
           requestAnimationFrame(() => {
-            if (wasAtBottomRef.current) {
+            if (snapshot.wasAtBottom) {
               const count = virt.options.count;
               if (count > 0) {
                 virt.scrollToIndex(count - 1, { align: 'end' });
               }
             } else {
-              element.scrollTop = savedScrollTopRef.current;
+              virt.scrollToIndex(snapshot.firstVisibleIndex, { align: 'start' });
             }
           });
           return;
         }
 
-        // If width genuinely changed, invalidate cached row measurements (text rewraps)
-        if (previousWidth > 0 && currentWidth !== previousWidth) {
+        // If width genuinely changed, invalidate cached row measurements (text rewraps).
+        // Ignore small changes (< 20px) caused by scrollbar appearing/disappearing —
+        // measure() resets to estimated sizes which can toggle the scrollbar, creating
+        // an infinite resize → measure → resize feedback loop.
+        if (previousWidth > 0 && Math.abs(currentWidth - previousWidth) > 20) {
           virtualizerRef.current.measure();
         }
 

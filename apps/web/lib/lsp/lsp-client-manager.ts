@@ -676,7 +676,7 @@ class LSPClientManager {
       disposables.push(
         monaco.languages.registerSignatureHelpProvider(lang, {
           signatureHelpTriggerCharacters: ['(', ','],
-          provideSignatureHelp: async (model: monacoEditor.ITextModel, position: { lineNumber: number; column: number }, _: { isCancellationRequested: boolean }) => {
+          provideSignatureHelp: async (model: monacoEditor.ITextModel, position: { lineNumber: number; column: number }, _token: { isCancellationRequested: boolean }) => {
             const uri = this.getDocumentUri(model);
             if (!uri) return null;
             try {

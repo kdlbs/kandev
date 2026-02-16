@@ -46,7 +46,6 @@ export function ShellSettingsCard() {
     const currentSettings = storeApi.getState().userSettings;
     await updateUserSettings({
       workspace_id: currentSettings.workspaceId ?? '',
-      board_id: currentSettings.boardId ?? '',
       repository_ids: currentSettings.repositoryIds,
       preferred_shell: trimmed,
     });

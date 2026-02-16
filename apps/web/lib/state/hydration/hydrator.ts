@@ -32,7 +32,8 @@ export function hydrateState(
 
   // Kanban slice - always safe to hydrate
   if (state.kanban) deepMerge(draft.kanban, state.kanban);
-  if (state.boards) deepMerge(draft.boards, state.boards);
+  if (state.kanbanMulti) deepMerge(draft.kanbanMulti, state.kanbanMulti);
+  if (state.workflows) deepMerge(draft.workflows, state.workflows);
   if (state.tasks) deepMerge(draft.tasks, state.tasks);
 
   // Workspace slice - always safe to hydrate
@@ -63,7 +64,13 @@ export function hydrateState(
     mergeLoadingState(draft.notificationProviders, state.notificationProviders);
   }
   if (state.settingsData) deepMerge(draft.settingsData, state.settingsData);
-  if (state.userSettings) deepMerge(draft.userSettings, state.userSettings);
+  // Skip userSettings hydration if already loaded — client state is the
+  // source of truth after initial load.  Re-hydrating with SSR data causes
+  // stale workflow/workspace IDs to overwrite user actions (e.g. selecting
+  // "All workflows" triggers router.push → SSR re-fetches old settings).
+  if (state.userSettings && !draft.userSettings.loaded) {
+    deepMerge(draft.userSettings, state.userSettings);
+  }
 
   // Session slice - careful with active sessions
   if (state.messages) {

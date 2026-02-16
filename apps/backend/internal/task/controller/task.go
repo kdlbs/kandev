@@ -7,6 +7,7 @@ import (
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
 type TaskController struct {
@@ -18,7 +19,7 @@ func NewTaskController(svc *service.Service) *TaskController {
 }
 
 func (c *TaskController) ListTasks(ctx context.Context, req dto.ListTasksRequest) (dto.ListTasksResponse, error) {
-	tasks, err := c.service.ListTasks(ctx, req.BoardID)
+	tasks, err := c.service.ListTasks(ctx, req.WorkflowID)
 	if err != nil {
 		return dto.ListTasksResponse{}, err
 	}
@@ -117,7 +118,7 @@ func (c *TaskController) CreateTask(ctx context.Context, req dto.CreateTaskReque
 
 	task, err := c.service.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID:    req.WorkspaceID,
-		BoardID:        req.BoardID,
+		WorkflowID:     req.WorkflowID,
 		WorkflowStepID: req.WorkflowStepID,
 		Title:          req.Title,
 		Description:    req.Description,
@@ -178,7 +179,7 @@ func (c *TaskController) DeleteTask(ctx context.Context, req dto.DeleteTaskReque
 }
 
 func (c *TaskController) MoveTask(ctx context.Context, req dto.MoveTaskRequest) (dto.MoveTaskResponse, error) {
-	result, err := c.service.MoveTask(ctx, req.ID, req.BoardID, req.WorkflowStepID, req.Position)
+	result, err := c.service.MoveTask(ctx, req.ID, req.WorkflowID, req.WorkflowStepID, req.Position)
 	if err != nil {
 		return dto.MoveTaskResponse{}, err
 	}
@@ -189,20 +190,7 @@ func (c *TaskController) MoveTask(ctx context.Context, req dto.MoveTaskRequest) 
 
 	// Include workflow step info if available
 	if result.WorkflowStep != nil {
-		response.WorkflowStep = dto.WorkflowStepDTO{
-			ID:              result.WorkflowStep.ID,
-			BoardID:         result.WorkflowStep.BoardID,
-			Name:            result.WorkflowStep.Name,
-			StepType:        result.WorkflowStep.StepType,
-			Position:        result.WorkflowStep.Position,
-			Color:           result.WorkflowStep.Color,
-			AutoStartAgent:  result.WorkflowStep.AutoStartAgent,
-			PlanMode:        result.WorkflowStep.PlanMode,
-			RequireApproval: result.WorkflowStep.RequireApproval,
-			PromptPrefix:    result.WorkflowStep.PromptPrefix,
-			PromptSuffix:    result.WorkflowStep.PromptSuffix,
-			AllowManualMove: result.WorkflowStep.AllowManualMove,
-		}
+		response.WorkflowStep = serviceStepToDTO(result.WorkflowStep)
 	}
 
 	return response, nil
@@ -214,6 +202,30 @@ func (c *TaskController) UpdateTaskState(ctx context.Context, req dto.UpdateTask
 		return dto.TaskDTO{}, err
 	}
 	return dto.FromTask(task), nil
+}
+
+func (c *TaskController) CountTasksByWorkflow(ctx context.Context, workflowID string) (dto.TaskCountResponse, error) {
+	count, err := c.service.CountTasksByWorkflow(ctx, workflowID)
+	if err != nil {
+		return dto.TaskCountResponse{}, err
+	}
+	return dto.TaskCountResponse{TaskCount: count}, nil
+}
+
+func (c *TaskController) CountTasksByWorkflowStep(ctx context.Context, stepID string) (dto.TaskCountResponse, error) {
+	count, err := c.service.CountTasksByWorkflowStep(ctx, stepID)
+	if err != nil {
+		return dto.TaskCountResponse{}, err
+	}
+	return dto.TaskCountResponse{TaskCount: count}, nil
+}
+
+func (c *TaskController) BulkMoveTasks(ctx context.Context, req dto.BulkMoveTasksRequest) (dto.BulkMoveTasksResponse, error) {
+	result, err := c.service.BulkMoveTasks(ctx, req.SourceWorkflowID, req.SourceStepID, req.TargetWorkflowID, req.TargetStepID)
+	if err != nil {
+		return dto.BulkMoveTasksResponse{}, err
+	}
+	return dto.BulkMoveTasksResponse{MovedCount: result.MovedCount}, nil
 }
 
 // GetGitSnapshots retrieves git snapshots for a session
@@ -231,7 +243,7 @@ func (c *TaskController) GetCumulativeDiff(ctx context.Context, sessionID string
 	return c.service.GetCumulativeDiff(ctx, sessionID)
 }
 
-// ApproveSession approves a session's current step and moves it to the on_approval_step_id
+// ApproveSession approves a session's current step and moves it to the next step
 func (c *TaskController) ApproveSession(ctx context.Context, req dto.ApproveSessionRequest) (dto.ApproveSessionResponse, error) {
 	result, err := c.service.ApproveSession(ctx, req.SessionID)
 	if err != nil {
@@ -245,21 +257,38 @@ func (c *TaskController) ApproveSession(ctx context.Context, req dto.ApproveSess
 
 	// Include the new workflow step if present
 	if result.WorkflowStep != nil {
-		resp.WorkflowStep = dto.WorkflowStepDTO{
-			ID:              result.WorkflowStep.ID,
-			BoardID:         result.WorkflowStep.BoardID,
-			Name:            result.WorkflowStep.Name,
-			StepType:        result.WorkflowStep.StepType,
-			Position:        result.WorkflowStep.Position,
-			Color:           result.WorkflowStep.Color,
-			AutoStartAgent:  result.WorkflowStep.AutoStartAgent,
-			PlanMode:        result.WorkflowStep.PlanMode,
-			RequireApproval: result.WorkflowStep.RequireApproval,
-			PromptPrefix:    result.WorkflowStep.PromptPrefix,
-			PromptSuffix:    result.WorkflowStep.PromptSuffix,
-			AllowManualMove: result.WorkflowStep.AllowManualMove,
-		}
+		resp.WorkflowStep = serviceStepToDTO(result.WorkflowStep)
 	}
 
 	return resp, nil
+}
+
+// serviceStepToDTO converts a workflow step to a DTO.
+func serviceStepToDTO(step *wfmodels.WorkflowStep) dto.WorkflowStepDTO {
+	result := dto.WorkflowStepDTO{
+		ID:              step.ID,
+		WorkflowID:      step.WorkflowID,
+		Name:            step.Name,
+		Position:        step.Position,
+		Color:           step.Color,
+		Prompt:          step.Prompt,
+		AllowManualMove: step.AllowManualMove,
+	}
+	if len(step.Events.OnEnter) > 0 || len(step.Events.OnTurnComplete) > 0 {
+		events := &dto.StepEventsDTO{}
+		for _, a := range step.Events.OnEnter {
+			events.OnEnter = append(events.OnEnter, dto.StepActionDTO{
+				Type:   string(a.Type),
+				Config: a.Config,
+			})
+		}
+		for _, a := range step.Events.OnTurnComplete {
+			events.OnTurnComplete = append(events.OnTurnComplete, dto.StepActionDTO{
+				Type:   string(a.Type),
+				Config: a.Config,
+			})
+		}
+		result.Events = events
+	}
+	return result
 }

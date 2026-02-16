@@ -8,7 +8,7 @@ import { TooltipProvider } from "@kandev/ui/tooltip";
 
 export const metadata: Metadata = {
   title: "Kandev - AI Kanban",
-  description: "AI-powered kanban board for developers",
+  description: "AI-powered workflow management for developers",
 };
 
 export const viewport: Viewport = {

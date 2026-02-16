@@ -2,58 +2,58 @@ import type { StoreApi } from 'zustand';
 import type { AppState } from '@/lib/state/store';
 import type { WsHandlers } from '@/lib/ws/handlers/types';
 
-export function registerBoardsHandlers(store: StoreApi<AppState>): WsHandlers {
+export function registerWorkflowsHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
-    'board.created': (message) => {
+    'workflow.created': (message) => {
       store.setState((state) => {
         if (state.workspaces.activeId !== message.payload.workspace_id) {
           return state;
         }
-        const exists = state.boards.items.some((item) => item.id === message.payload.id);
+        const exists = state.workflows.items.some((item) => item.id === message.payload.id);
         if (exists) {
           return state;
         }
         return {
           ...state,
-          boards: {
+          workflows: {
             items: [
               {
                 id: message.payload.id,
                 workspaceId: message.payload.workspace_id,
                 name: message.payload.name,
               },
-              ...state.boards.items,
+              ...state.workflows.items,
             ],
-            activeId: state.boards.activeId ?? message.payload.id,
+            activeId: state.workflows.activeId ?? message.payload.id,
           },
         };
       });
     },
-    'board.updated': (message) => {
+    'workflow.updated': (message) => {
       store.setState((state) => ({
         ...state,
-        boards: {
-          ...state.boards,
-          items: state.boards.items.map((item) =>
+        workflows: {
+          ...state.workflows,
+          items: state.workflows.items.map((item) =>
             item.id === message.payload.id ? { ...item, name: message.payload.name } : item
           ),
         },
       }));
     },
-    'board.deleted': (message) => {
+    'workflow.deleted': (message) => {
       store.setState((state) => {
-        const items = state.boards.items.filter((item) => item.id !== message.payload.id);
+        const items = state.workflows.items.filter((item) => item.id !== message.payload.id);
         const nextActiveId =
-          state.boards.activeId === message.payload.id ? items[0]?.id ?? null : state.boards.activeId;
+          state.workflows.activeId === message.payload.id ? items[0]?.id ?? null : state.workflows.activeId;
         return {
           ...state,
-          boards: {
+          workflows: {
             items,
             activeId: nextActiveId,
           },
           kanban:
-            state.kanban.boardId === message.payload.id
-              ? { boardId: nextActiveId, steps: [], tasks: [] }
+            state.kanban.workflowId === message.payload.id
+              ? { workflowId: nextActiveId, steps: [], tasks: [] }
               : state.kanban,
         };
       });

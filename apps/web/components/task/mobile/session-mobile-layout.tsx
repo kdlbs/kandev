@@ -15,7 +15,7 @@ import { useSessionLayoutState } from '@/hooks/use-session-layout-state';
 
 type SessionMobileLayoutProps = {
   workspaceId: string | null;
-  boardId: string | null;
+  workflowId: string | null;
   sessionId?: string | null;
   baseBranch?: string;
   worktreeBranch?: string | null;
@@ -24,7 +24,7 @@ type SessionMobileLayoutProps = {
 
 export const SessionMobileLayout = memo(function SessionMobileLayout({
   workspaceId,
-  boardId,
+  workflowId,
   sessionId,
   baseBranch,
   worktreeBranch,
@@ -164,7 +164,7 @@ export const SessionMobileLayout = memo(function SessionMobileLayout({
         open={isTaskSwitcherOpen}
         onOpenChange={setMobileSessionTaskSwitcherOpen}
         workspaceId={workspaceId}
-        boardId={boardId}
+        workflowId={workflowId}
       />
     </div>
   );

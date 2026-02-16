@@ -189,9 +189,9 @@ const ImplementPlanDropdown = memo(function ImplementPlanDropdown({
         onOpenChange={setShowNewSessionDialog}
         mode="session"
         workspaceId={null}
-        boardId={null}
-        defaultColumnId={null}
-        columns={[]}
+        workflowId={null}
+        defaultStepId={null}
+        steps={[]}
         taskId={taskId}
         initialValues={{
           title: task?.title ?? '',

@@ -216,7 +216,7 @@ export function KanbanWithPreview({ initialTaskId }: KanbanWithPreviewProps) {
       ) : (
         // Inline mode: side by side with custom resize
         <div className="flex-1 flex overflow-hidden">
-          {/* Kanban Board */}
+          {/* Kanban */}
           <div
             className="overflow-hidden"
             style={{

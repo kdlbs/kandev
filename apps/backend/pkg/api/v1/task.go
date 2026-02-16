@@ -62,7 +62,7 @@ type TaskRepository struct {
 type Task struct {
 	ID           string                 `json:"id"`
 	WorkspaceID  string                 `json:"workspace_id"`
-	BoardID      string                 `json:"board_id"`
+	WorkflowID   string                 `json:"workflow_id"`
 	Title        string                 `json:"title"`
 	Description  string                 `json:"description"`
 	State        TaskState              `json:"state"`

@@ -23,8 +23,8 @@ func (r *Repository) ensureDefaultWorkspace() error {
 	}
 
 	if count == 0 {
-		var boardCount int
-		if err := r.db.QueryRowContext(ctx, "SELECT COUNT(1) FROM boards").Scan(&boardCount); err != nil {
+		var workflowCount int
+		if err := r.db.QueryRowContext(ctx, "SELECT COUNT(1) FROM workflows").Scan(&workflowCount); err != nil {
 			return err
 		}
 		var taskCount int
@@ -35,7 +35,7 @@ func (r *Repository) ensureDefaultWorkspace() error {
 		now := time.Now().UTC()
 		workspaceName := "Default Workspace"
 		workspaceDescription := "Default workspace"
-		if boardCount > 0 || taskCount > 0 {
+		if workflowCount > 0 || taskCount > 0 {
 			workspaceName = "Migrated Workspace"
 			workspaceDescription = ""
 		}
@@ -56,12 +56,12 @@ func (r *Repository) ensureDefaultWorkspace() error {
 			return err
 		}
 
-		if boardCount == 0 && taskCount == 0 {
-			boardID := uuid.New().String()
+		if workflowCount == 0 && taskCount == 0 {
+			workflowID := uuid.New().String()
 			if _, err := r.db.ExecContext(ctx, `
-				INSERT INTO boards (id, workspace_id, name, description, workflow_template_id, created_at, updated_at)
+				INSERT INTO workflows (id, workspace_id, name, description, workflow_template_id, created_at, updated_at)
 				VALUES (?, ?, ?, ?, ?, ?, ?)
-			`, boardID, defaultID, "Development", "Default development board", "simple", now, now); err != nil {
+			`, workflowID, defaultID, "Development", "Default development workflow", "simple", now, now); err != nil {
 				return err
 			}
 			// Note: Workflow steps will be created by the workflow repository after it initializes
@@ -74,7 +74,7 @@ func (r *Repository) ensureDefaultWorkspace() error {
 	}
 
 	if _, err := r.db.ExecContext(ctx, `
-		UPDATE boards SET workspace_id = ? WHERE workspace_id = '' OR workspace_id IS NULL
+		UPDATE workflows SET workspace_id = ? WHERE workspace_id = '' OR workspace_id IS NULL
 	`, defaultWorkspaceID); err != nil {
 		return err
 	}
@@ -82,7 +82,7 @@ func (r *Repository) ensureDefaultWorkspace() error {
 	if _, err := r.db.ExecContext(ctx, `
 		UPDATE tasks
 		SET workspace_id = (
-			SELECT workspace_id FROM boards WHERE boards.id = tasks.board_id
+			SELECT workspace_id FROM workflows WHERE workflows.id = tasks.workflow_id
 		)
 		WHERE workspace_id = '' OR workspace_id IS NULL
 	`); err != nil {

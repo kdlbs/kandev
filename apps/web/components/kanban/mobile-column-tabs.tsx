@@ -6,14 +6,14 @@ import { Badge } from '@kandev/ui/badge';
 import type { WorkflowStep } from '../kanban-column';
 
 type MobileColumnTabsProps = {
-  columns: WorkflowStep[];
+  steps: WorkflowStep[];
   activeIndex: number;
   taskCounts: Record<string, number>;
   onColumnChange: (index: number) => void;
 };
 
 export function MobileColumnTabs({
-  columns,
+  steps,
   activeIndex,
   taskCounts,
   onColumnChange,
@@ -45,9 +45,9 @@ export function MobileColumnTabs({
       ref={tabsRef}
       className="flex overflow-x-auto scrollbar-hide border-b border-border px-4 gap-1"
     >
-      {columns.map((column, index) => (
+      {steps.map((step, index) => (
         <button
-          key={column.id}
+          key={step.id}
           ref={index === activeIndex ? activeTabRef : null}
           onClick={() => onColumnChange(index)}
           className={cn(
@@ -58,10 +58,10 @@ export function MobileColumnTabs({
               : 'border-transparent text-muted-foreground hover:text-foreground'
           )}
         >
-          <div className={cn('w-2 h-2 rounded-full flex-shrink-0', column.color)} />
-          <span className="truncate max-w-[100px]">{column.title}</span>
+          <div className={cn('w-2 h-2 rounded-full flex-shrink-0', step.color)} />
+          <span className="truncate max-w-[100px]">{step.title}</span>
           <Badge variant="secondary" className="text-xs h-5 px-1.5">
-            {taskCounts[column.id] ?? 0}
+            {taskCounts[step.id] ?? 0}
           </Badge>
         </button>
       ))}

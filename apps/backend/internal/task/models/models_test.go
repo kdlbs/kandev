@@ -51,7 +51,7 @@ func TestTaskStructInitialization(t *testing.T) {
 	task := Task{
 		ID:             "task-123",
 		WorkspaceID:    "workspace-001",
-		BoardID:        "board-456",
+		WorkflowID:     "workflow-456",
 		WorkflowStepID: "workflow-step-789",
 		Title:          "Test Task",
 		Description:    "A test task description",
@@ -70,8 +70,8 @@ func TestTaskStructInitialization(t *testing.T) {
 	if task.WorkspaceID != "workspace-001" {
 		t.Errorf("expected WorkspaceID workspace-001, got %s", task.WorkspaceID)
 	}
-	if task.BoardID != "board-456" {
-		t.Errorf("expected BoardID board-456, got %s", task.BoardID)
+	if task.WorkflowID != "workflow-456" {
+		t.Errorf("expected WorkflowID workflow-456, got %s", task.WorkflowID)
 	}
 	if task.WorkflowStepID != "workflow-step-789" {
 		t.Errorf("expected WorkflowStepID workflow-step-789, got %s", task.WorkflowStepID)
@@ -105,28 +105,28 @@ func TestTaskStructInitialization(t *testing.T) {
 	}
 }
 
-func TestBoardStructInitialization(t *testing.T) {
+func TestWorkflowStructInitialization(t *testing.T) {
 	now := time.Now().UTC()
-	board := Board{
-		ID:          "board-123",
+	wf := Workflow{
+		ID:          "workflow-123",
 		WorkspaceID: "workspace-001",
-		Name:        "Test Board",
-		Description: "A test board",
+		Name:        "Test Workflow",
+		Description: "A test workflow",
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
 
-	if board.ID != "board-123" {
-		t.Errorf("expected ID board-123, got %s", board.ID)
+	if wf.ID != "workflow-123" {
+		t.Errorf("expected ID workflow-123, got %s", wf.ID)
 	}
-	if board.WorkspaceID != "workspace-001" {
-		t.Errorf("expected WorkspaceID workspace-001, got %s", board.WorkspaceID)
+	if wf.WorkspaceID != "workspace-001" {
+		t.Errorf("expected WorkspaceID workspace-001, got %s", wf.WorkspaceID)
 	}
-	if board.Name != "Test Board" {
-		t.Errorf("expected Name 'Test Board', got %s", board.Name)
+	if wf.Name != "Test Workflow" {
+		t.Errorf("expected Name 'Test Workflow', got %s", wf.Name)
 	}
-	if board.Description != "A test board" {
-		t.Errorf("expected Description 'A test board', got %s", board.Description)
+	if wf.Description != "A test workflow" {
+		t.Errorf("expected Description 'A test workflow', got %s", wf.Description)
 	}
 }
 
@@ -135,7 +135,7 @@ func TestTaskToAPI(t *testing.T) {
 	task := &Task{
 		ID:             "task-123",
 		WorkspaceID:    "workspace-001",
-		BoardID:        "board-456",
+		WorkflowID:     "workflow-456",
 		WorkflowStepID: "step-789",
 		Title:       "Test Task",
 		Description: "A test task description",
@@ -167,8 +167,8 @@ func TestTaskToAPI(t *testing.T) {
 	if apiTask.WorkspaceID != task.WorkspaceID {
 		t.Errorf("expected WorkspaceID %s, got %s", task.WorkspaceID, apiTask.WorkspaceID)
 	}
-	if apiTask.BoardID != task.BoardID {
-		t.Errorf("expected BoardID %s, got %s", task.BoardID, apiTask.BoardID)
+	if apiTask.WorkflowID != task.WorkflowID {
+		t.Errorf("expected WorkflowID %s, got %s", task.WorkflowID, apiTask.WorkflowID)
 	}
 	if apiTask.Title != task.Title {
 		t.Errorf("expected Title %s, got %s", task.Title, apiTask.Title)
@@ -201,7 +201,7 @@ func TestTaskToAPIWithEmptyOptionalFields(t *testing.T) {
 	task := &Task{
 		ID:             "task-123",
 		WorkspaceID:    "workspace-001",
-		BoardID:        "board-456",
+		WorkflowID:     "workflow-456",
 		WorkflowStepID: "step-789",
 		Title:       "Test Task",
 		Description: "A test task description",

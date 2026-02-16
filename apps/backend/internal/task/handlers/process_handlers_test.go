@@ -57,7 +57,7 @@ func (m *mockRepository) UpdateTask(ctx context.Context, task *models.Task) erro
 func (m *mockRepository) DeleteTask(ctx context.Context, id string) error {
 	return nil
 }
-func (m *mockRepository) ListTasks(ctx context.Context, boardID string) ([]*models.Task, error) {
+func (m *mockRepository) ListTasks(ctx context.Context, workflowID string) ([]*models.Task, error) {
 	return nil, nil
 }
 func (m *mockRepository) ListTasksByWorkspace(ctx context.Context, workspaceID string, query string, page, pageSize int) ([]*models.Task, int, error) {
@@ -69,10 +69,10 @@ func (m *mockRepository) ListTasksByWorkflowStep(ctx context.Context, workflowSt
 func (m *mockRepository) UpdateTaskState(ctx context.Context, id string, state v1.TaskState) error {
 	return nil
 }
-func (m *mockRepository) AddTaskToBoard(ctx context.Context, taskID, boardID, columnID string, position int) error {
+func (m *mockRepository) AddTaskToWorkflow(ctx context.Context, taskID, workflowID, columnID string, position int) error {
 	return nil
 }
-func (m *mockRepository) RemoveTaskFromBoard(ctx context.Context, taskID, boardID string) error {
+func (m *mockRepository) RemoveTaskFromWorkflow(ctx context.Context, taskID, workflowID string) error {
 	return nil
 }
 func (m *mockRepository) CreateTaskRepository(ctx context.Context, taskRepo *models.TaskRepository) error {
@@ -96,19 +96,19 @@ func (m *mockRepository) DeleteTaskRepositoriesByTask(ctx context.Context, taskI
 func (m *mockRepository) GetPrimaryTaskRepository(ctx context.Context, taskID string) (*models.TaskRepository, error) {
 	return nil, nil
 }
-func (m *mockRepository) CreateBoard(ctx context.Context, board *models.Board) error {
+func (m *mockRepository) CreateWorkflow(ctx context.Context, workflow *models.Workflow) error {
 	return nil
 }
-func (m *mockRepository) GetBoard(ctx context.Context, id string) (*models.Board, error) {
+func (m *mockRepository) GetWorkflow(ctx context.Context, id string) (*models.Workflow, error) {
 	return nil, nil
 }
-func (m *mockRepository) UpdateBoard(ctx context.Context, board *models.Board) error {
+func (m *mockRepository) UpdateWorkflow(ctx context.Context, workflow *models.Workflow) error {
 	return nil
 }
-func (m *mockRepository) DeleteBoard(ctx context.Context, id string) error {
+func (m *mockRepository) DeleteWorkflow(ctx context.Context, id string) error {
 	return nil
 }
-func (m *mockRepository) ListBoards(ctx context.Context, workspaceID string) ([]*models.Board, error) {
+func (m *mockRepository) ListWorkflows(ctx context.Context, workspaceID string) ([]*models.Workflow, error) {
 	return nil, nil
 }
 func (m *mockRepository) CreateMessage(ctx context.Context, message *models.Message) error {
@@ -375,6 +375,12 @@ func (m *mockRepository) GetSessionFileReviews(ctx context.Context, sessionID st
 }
 func (m *mockRepository) DeleteSessionFileReviews(ctx context.Context, sessionID string) error {
 	return nil
+}
+func (m *mockRepository) CountTasksByWorkflow(ctx context.Context, workflowID string) (int, error) {
+	return 0, nil
+}
+func (m *mockRepository) CountTasksByWorkflowStep(ctx context.Context, stepID string) (int, error) {
+	return 0, nil
 }
 
 func newTestService(t *testing.T, scripts map[string][]*models.RepositoryScript) *service.Service {

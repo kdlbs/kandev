@@ -13,7 +13,7 @@ import (
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	userservice "github.com/kandev/kandev/internal/user/service"
-	workflowmodels "github.com/kandev/kandev/internal/workflow/models"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowservice "github.com/kandev/kandev/internal/workflow/service"
 )
 
@@ -48,6 +48,9 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	// Wire workflow step getter to task service for MoveTask
 	taskSvc.SetWorkflowStepGetter(&workflowStepGetterAdapter{svc: workflowSvc})
 
+	// Wire start step resolver to task service for CreateTask
+	taskSvc.SetStartStepResolver(&startStepResolverAdapter{svc: workflowSvc})
+
 	return &Services{
 		Task:     taskSvc,
 		User:     userSvc,
@@ -60,47 +63,31 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 }
 
 // workflowStepGetterAdapter adapts workflow service to task service's WorkflowStepGetter interface.
+// Since task service now uses wfmodels.WorkflowStep directly, the adapter simply delegates to the service.
 type workflowStepGetterAdapter struct {
 	svc *workflowservice.Service
 }
 
 // GetStep implements taskservice.WorkflowStepGetter.
-func (a *workflowStepGetterAdapter) GetStep(ctx context.Context, stepID string) (*taskservice.WorkflowStep, error) {
-	step, err := a.svc.GetStep(ctx, stepID)
-	if err != nil {
-		return nil, err
-	}
-	return a.toTaskServiceStep(step), nil
+func (a *workflowStepGetterAdapter) GetStep(ctx context.Context, stepID string) (*wfmodels.WorkflowStep, error) {
+	return a.svc.GetStep(ctx, stepID)
 }
 
 // GetNextStepByPosition implements taskservice.WorkflowStepGetter.
-func (a *workflowStepGetterAdapter) GetNextStepByPosition(ctx context.Context, boardID string, currentPosition int) (*taskservice.WorkflowStep, error) {
-	step, err := a.svc.GetNextStepByPosition(ctx, boardID, currentPosition)
-	if err != nil {
-		return nil, err
-	}
-	if step == nil {
-		return nil, nil
-	}
-	return a.toTaskServiceStep(step), nil
+func (a *workflowStepGetterAdapter) GetNextStepByPosition(ctx context.Context, boardID string, currentPosition int) (*wfmodels.WorkflowStep, error) {
+	return a.svc.GetNextStepByPosition(ctx, boardID, currentPosition)
 }
 
-// toTaskServiceStep converts a workflow step to a task service step.
-func (a *workflowStepGetterAdapter) toTaskServiceStep(step *workflowmodels.WorkflowStep) *taskservice.WorkflowStep {
-	return &taskservice.WorkflowStep{
-		ID:               step.ID,
-		BoardID:          step.BoardID,
-		Name:             step.Name,
-		StepType:         string(step.StepType),
-		Position:         step.Position,
-		Color:            step.Color,
-		AutoStartAgent:   step.AutoStartAgent,
-		PlanMode:         step.PlanMode,
-		RequireApproval:  step.RequireApproval,
-		PromptPrefix:     step.PromptPrefix,
-		PromptSuffix:     step.PromptSuffix,
-		AllowManualMove:  step.AllowManualMove,
-		OnCompleteStepID: step.OnCompleteStepID,
-		OnApprovalStepID: step.OnApprovalStepID,
+// startStepResolverAdapter adapts workflow service to task service's StartStepResolver interface.
+type startStepResolverAdapter struct {
+	svc *workflowservice.Service
+}
+
+// ResolveStartStep implements taskservice.StartStepResolver.
+func (a *startStepResolverAdapter) ResolveStartStep(ctx context.Context, workflowID string) (string, error) {
+	step, err := a.svc.ResolveStartStep(ctx, workflowID)
+	if err != nil {
+		return "", err
 	}
+	return step.ID, nil
 }

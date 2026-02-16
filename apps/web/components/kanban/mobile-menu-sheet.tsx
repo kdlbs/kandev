@@ -24,7 +24,7 @@ import { TaskSearchInput } from './task-search-input';
 import { useKanbanDisplaySettings } from '@/hooks/use-kanban-display-settings';
 import { linkToTasks } from '@/lib/links';
 import type { Workspace, Repository } from '@/lib/types/http';
-import type { BoardState } from '@/lib/state/slices';
+import type { WorkflowsState } from '@/lib/state/slices';
 
 type MobileMenuSheetProps = {
   open: boolean;
@@ -48,16 +48,16 @@ export function MobileMenuSheet({
   const router = useRouter();
   const {
     workspaces,
-    boards,
+    workflows,
     activeWorkspaceId,
-    activeBoardId,
+    activeWorkflowId,
     repositories,
     repositoriesLoading,
     allRepositoriesSelected,
     selectedRepositoryId,
     enablePreviewOnClick,
     onWorkspaceChange,
-    onBoardChange,
+    onWorkflowChange,
     onRepositoryChange,
     onTogglePreviewOnClick,
   } = useKanbanDisplaySettings();
@@ -143,18 +143,18 @@ export function MobileMenuSheet({
             </div>
 
             <div className="space-y-2">
-              <label className="text-xs text-muted-foreground">Board</label>
+              <label className="text-xs text-muted-foreground">Workflow</label>
               <Select
-                value={activeBoardId ?? ''}
-                onValueChange={(value) => onBoardChange(value || null)}
+                value={activeWorkflowId ?? ''}
+                onValueChange={(value) => onWorkflowChange(value || null)}
               >
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select board" />
+                  <SelectValue placeholder="Select workflow" />
                 </SelectTrigger>
                 <SelectContent>
-                  {boards.map((board: BoardState['items'][number]) => (
-                    <SelectItem key={board.id} value={board.id}>
-                      {board.name}
+                  {workflows.map((workflow: WorkflowsState['items'][number]) => (
+                    <SelectItem key={workflow.id} value={workflow.id}>
+                      {workflow.name}
                     </SelectItem>
                   ))}
                 </SelectContent>

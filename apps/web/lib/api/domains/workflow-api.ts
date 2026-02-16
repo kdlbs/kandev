@@ -3,58 +3,33 @@ import type {
   ListWorkflowTemplatesResponse,
   ListWorkflowStepsResponse,
   ListSessionStepHistoryResponse,
-  StepBehaviors,
   StepDefinition,
+  StepEvents,
   WorkflowTemplate,
   WorkflowStep,
-  WorkflowStepType,
 } from '@/lib/types/http';
 
-type BackendWorkflowTemplateStep = {
+type BackendTemplateStep = {
   name: string;
-  step_type: WorkflowStepType;
   position: number;
   color?: string;
-  auto_start_agent?: boolean;
-  plan_mode?: boolean;
-  require_approval?: boolean;
-  prompt_prefix?: string;
-  prompt_suffix?: string;
+  prompt?: string;
+  events?: StepEvents;
 };
 
 type BackendWorkflowTemplate = Omit<WorkflowTemplate, 'default_steps'> & {
-  steps?: BackendWorkflowTemplateStep[];
-  default_steps?: BackendWorkflowTemplateStep[];
-};
-
-const toStepBehaviors = (step: BackendWorkflowTemplateStep): StepBehaviors | undefined => {
-  const behaviors: StepBehaviors = {};
-  if (step.auto_start_agent !== undefined) {
-    behaviors.autoStartAgent = step.auto_start_agent;
-  }
-  if (step.plan_mode !== undefined) {
-    behaviors.planMode = step.plan_mode;
-  }
-  if (step.require_approval !== undefined) {
-    behaviors.requireApproval = step.require_approval;
-  }
-  if (step.prompt_prefix) {
-    behaviors.promptPrefix = step.prompt_prefix;
-  }
-  if (step.prompt_suffix) {
-    behaviors.promptSuffix = step.prompt_suffix;
-  }
-  return Object.keys(behaviors).length ? behaviors : undefined;
+  steps?: BackendTemplateStep[];
+  default_steps?: BackendTemplateStep[];
 };
 
 const normalizeWorkflowTemplate = (template: BackendWorkflowTemplate): WorkflowTemplate => {
   const steps = template.default_steps ?? template.steps ?? [];
   const default_steps: StepDefinition[] = steps.map((step) => ({
     name: step.name,
-    step_type: step.step_type,
     position: step.position,
     color: step.color,
-    behaviors: toStepBehaviors(step),
+    prompt: step.prompt,
+    events: step.events,
   }));
   return {
     ...template,
@@ -85,8 +60,8 @@ export async function getWorkflowTemplate(templateId: string, options?: ApiReque
 }
 
 // Workflow Step operations
-export async function listWorkflowSteps(boardId: string, options?: ApiRequestOptions) {
-  return fetchJson<ListWorkflowStepsResponse>(`/api/v1/workflow/steps?board_id=${boardId}`, options);
+export async function listWorkflowSteps(workflowId: string, options?: ApiRequestOptions) {
+  return fetchJson<ListWorkflowStepsResponse>(`/api/v1/workflows/${workflowId}/workflow/steps`, options);
 }
 
 export async function getWorkflowStep(stepId: string, options?: ApiRequestOptions) {
@@ -95,12 +70,12 @@ export async function getWorkflowStep(stepId: string, options?: ApiRequestOption
 
 export async function createWorkflowStep(
   payload: {
-    board_id: string;
+    workflow_id: string;
     name: string;
-    step_type: string;
     position: number;
     color?: string;
-    behaviors?: Record<string, unknown>;
+    prompt?: string;
+    events?: StepEvents;
   },
   options?: ApiRequestOptions
 ) {
