@@ -2,6 +2,7 @@
 package registry
 
 import (
+	"cmp"
 	"fmt"
 	"slices"
 	"sync"
@@ -91,6 +92,13 @@ func (r *Registry) GetDefault() (agents.Agent, error) {
 	return nil, fmt.Errorf("no default agent type available")
 }
 
+// sortByDisplayOrder sorts agents by their DisplayOrder in ascending order.
+func sortByDisplayOrder(list []agents.Agent) {
+	slices.SortStableFunc(list, func(a, b agents.Agent) int {
+		return cmp.Compare(a.DisplayOrder(), b.DisplayOrder())
+	})
+}
+
 // List returns all registered agents
 func (r *Registry) List() []agents.Agent {
 	r.mu.RLock()
@@ -100,9 +108,7 @@ func (r *Registry) List() []agents.Agent {
 	for _, ag := range r.agents {
 		result = append(result, ag)
 	}
-	slices.SortStableFunc(result, func(a, b agents.Agent) int {
-		return a.DisplayOrder() - b.DisplayOrder()
-	})
+	sortByDisplayOrder(result)
 	return result
 }
 
@@ -117,9 +123,7 @@ func (r *Registry) ListEnabled() []agents.Agent {
 			result = append(result, ag)
 		}
 	}
-	slices.SortStableFunc(result, func(a, b agents.Agent) int {
-		return a.DisplayOrder() - b.DisplayOrder()
-	})
+	sortByDisplayOrder(result)
 	return result
 }
 

@@ -19,6 +19,7 @@ import {
   updateAgentProfileMcpConfigAction,
 } from '@/app/actions/agents';
 import type { Agent, AgentDiscovery, AgentProfile, McpServerDef, AvailableAgent, PermissionSetting } from '@/lib/types/http';
+import { buildDefaultPermissions, arePermissionsDirty, permissionsToProfilePatch } from '@/lib/agent-permissions';
 import { generateUUID } from '@/lib/utils';
 import { useAppStore } from '@/components/state-provider';
 import { useAvailableAgents } from '@/hooks/domains/settings/use-available-agents';
@@ -62,9 +63,7 @@ const createDraftProfile = (
   name: '',
   agent_display_name: agentDisplayName,
   model: defaultModel,
-  auto_approve: permissionSettings?.auto_approve?.default ?? false,
-  dangerously_skip_permissions: permissionSettings?.dangerously_skip_permissions?.default ?? false,
-  allow_indexing: permissionSettings?.allow_indexing?.default ?? false,
+  ...buildDefaultPermissions(permissionSettings ?? {}),
   cli_passthrough: false,
   created_at: new Date().toISOString(),
   updated_at: new Date().toISOString(),
@@ -137,9 +136,7 @@ function AgentSetupForm({
     return (
       draft.name !== saved.name ||
       draft.model !== saved.model ||
-      draft.auto_approve !== saved.auto_approve ||
-      draft.dangerously_skip_permissions !== saved.dangerously_skip_permissions ||
-      draft.allow_indexing !== saved.allow_indexing ||
+      arePermissionsDirty(draft, saved) ||
       draft.cli_passthrough !== saved.cli_passthrough
     );
   };
@@ -278,9 +275,7 @@ function AgentSetupForm({
           profiles: draftAgent.profiles.map((profile) => ({
             name: profile.name,
             model: profile.model,
-            auto_approve: profile.auto_approve,
-            dangerously_skip_permissions: profile.dangerously_skip_permissions,
-            allow_indexing: profile.allow_indexing ?? false,
+            ...permissionsToProfilePatch(profile),
             cli_passthrough: profile.cli_passthrough ?? false,
           })),
         });
@@ -357,9 +352,7 @@ function AgentSetupForm({
             const createdProfile = await createAgentProfileAction(savedAgent.id, {
               name: profile.name,
               model: profile.model,
-              auto_approve: profile.auto_approve,
-              dangerously_skip_permissions: profile.dangerously_skip_permissions,
-              allow_indexing: profile.allow_indexing ?? false,
+              ...permissionsToProfilePatch(profile),
               cli_passthrough: profile.cli_passthrough ?? false,
             });
             if (profile.mcp_config && profile.mcp_config.dirty && profile.mcp_config.servers.trim()) {
@@ -380,9 +373,7 @@ function AgentSetupForm({
             const updatedProfile = await updateAgentProfileAction(profile.id, {
               name: profile.name,
               model: profile.model,
-              auto_approve: profile.auto_approve,
-              dangerously_skip_permissions: profile.dangerously_skip_permissions,
-              allow_indexing: profile.allow_indexing ?? false,
+              ...permissionsToProfilePatch(profile),
             });
             nextProfiles.push(updatedProfile);
             continue;
@@ -470,7 +461,7 @@ function AgentSetupForm({
                     model: profile.model,
                     auto_approve: profile.auto_approve,
                     dangerously_skip_permissions: profile.dangerously_skip_permissions,
-                    allow_indexing: profile.allow_indexing,
+                    allow_indexing: profile.allow_indexing ?? false,
                     cli_passthrough: profile.cli_passthrough,
                   }}
                   onChange={(patch) => handleProfileChange(profile.id, patch)}
