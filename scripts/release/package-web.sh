@@ -46,11 +46,13 @@ if [ -d "$PNPM_HOISTED" ] && [ -d "$NEXT_MODULES" ]; then
   echo "Hoisted pnpm packages into web/node_modules/"
 fi
 
-mkdir -p "$OUT_DIR/.next"
-cp -R "$WEB_DIR/.next/static" "$OUT_DIR/.next/"
+# Static assets and public/ must be alongside server.js (inside web/)
+# so Next.js can serve them. The standalone trace puts build artifacts
+# at web/.next/ but doesn't include static/ — copy it there.
+cp -R "$WEB_DIR/.next/static" "$OUT_DIR/web/.next/"
 
 if [ -d "$WEB_DIR/public" ]; then
-  cp -R "$WEB_DIR/public" "$OUT_DIR/public"
+  cp -R "$WEB_DIR/public" "$OUT_DIR/web/public"
 fi
 
 echo "Web bundle packaged at $OUT_DIR"
