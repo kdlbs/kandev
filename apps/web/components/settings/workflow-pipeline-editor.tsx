@@ -482,6 +482,39 @@ function StepConfigPanel({ step, steps, onUpdate, onRemove, readOnly = false }: 
               <HelpTip text="Allow dragging tasks into this step on the board." />
             </div>
           </div>
+          {/* Auto-archive setting */}
+          <div className="flex items-center gap-2 pt-1">
+            <Checkbox
+              id={`${step.id}-auto-archive`}
+              checked={(step.auto_archive_after_hours ?? 0) > 0}
+              onCheckedChange={(checked) => {
+                if (readOnly) return;
+                onUpdate({ auto_archive_after_hours: checked ? 24 : 0 });
+              }}
+              disabled={readOnly}
+            />
+            <Label htmlFor={`${step.id}-auto-archive`} className="text-sm">Auto-archive</Label>
+            <HelpTip text="Automatically archive tasks after they have been in this step for a set number of hours. Useful for the last step of a workflow (e.g., Done) to keep the board clean." />
+            {(step.auto_archive_after_hours ?? 0) > 0 && (
+              <>
+                <span className="text-sm text-muted-foreground">after</span>
+                <Input
+                  id={`${step.id}-auto-archive-hours`}
+                  type="number"
+                  min={1}
+                  className="w-20 h-7 text-sm"
+                  value={step.auto_archive_after_hours ?? 24}
+                  onChange={(e) => {
+                    if (readOnly) return;
+                    const val = parseInt(e.target.value, 10);
+                    onUpdate({ auto_archive_after_hours: isNaN(val) || val < 1 ? 1 : val });
+                  }}
+                  disabled={readOnly}
+                />
+                <span className="text-sm text-muted-foreground">hours</span>
+              </>
+            )}
+          </div>
         </div>
 
         {/* Transitions section */}

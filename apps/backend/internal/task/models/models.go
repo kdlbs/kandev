@@ -28,6 +28,7 @@ type Task struct {
 	Position       int                    `json:"position"` // Order within workflow step
 	Metadata       map[string]interface{} `json:"metadata,omitempty"`
 	Repositories   []*TaskRepository      `json:"repositories,omitempty"`
+	ArchivedAt     *time.Time             `json:"archived_at,omitempty"`
 	CreatedAt      time.Time              `json:"created_at"`
 	UpdatedAt      time.Time              `json:"updated_at"`
 }

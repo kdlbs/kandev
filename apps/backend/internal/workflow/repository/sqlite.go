@@ -82,6 +82,11 @@ func (r *Repository) initSchema() error {
 		return fmt.Errorf("failed to add is_start_step column: %w", err)
 	}
 
+	// Add auto_archive_after_hours column if not present
+	if err := r.addAutoArchiveColumn(); err != nil {
+		return fmt.Errorf("failed to add auto_archive_after_hours column: %w", err)
+	}
+
 	// Create session_step_history table
 	historySchema := `
 	CREATE TABLE IF NOT EXISTS session_step_history (
@@ -294,6 +299,40 @@ func (r *Repository) addIsStartStepColumn() error {
 	}
 
 	_, err = r.db.Exec("ALTER TABLE workflow_steps ADD COLUMN is_start_step INTEGER DEFAULT 0")
+	return err
+}
+
+// addAutoArchiveColumn adds the auto_archive_after_hours column to workflow_steps if it doesn't exist.
+func (r *Repository) addAutoArchiveColumn() error {
+	rows, err := r.db.Query("PRAGMA table_info(workflow_steps)")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var hasColumn bool
+	for rows.Next() {
+		var cid int
+		var name, colType string
+		var notNull int
+		var dfltValue sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dfltValue, &pk); err != nil {
+			return err
+		}
+		if name == "auto_archive_after_hours" {
+			hasColumn = true
+			break
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if hasColumn {
+		return nil
+	}
+
+	_, err = r.db.Exec("ALTER TABLE workflow_steps ADD COLUMN auto_archive_after_hours INTEGER DEFAULT 0")
 	return err
 }
 
@@ -871,11 +910,11 @@ func (r *Repository) CreateStep(ctx context.Context, step *models.WorkflowStep) 
 	_, err = r.db.ExecContext(ctx, `
 		INSERT INTO workflow_steps (
 			id, workflow_id, name, position, color,
-			prompt, events, allow_manual_move, is_start_step, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			prompt, events, allow_manual_move, is_start_step, auto_archive_after_hours, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, step.ID, step.WorkflowID, step.Name, step.Position, step.Color,
 		step.Prompt, string(eventsJSON), sqlite.BoolToInt(step.AllowManualMove),
-		sqlite.BoolToInt(step.IsStartStep), step.CreatedAt, step.UpdatedAt)
+		sqlite.BoolToInt(step.IsStartStep), step.AutoArchiveAfterHours, step.CreatedAt, step.UpdatedAt)
 
 	return err
 }
@@ -886,10 +925,11 @@ func (r *Repository) scanStep(row interface {
 }) (*models.WorkflowStep, error) {
 	step := &models.WorkflowStep{}
 	var allowManualMove, isStartStep int
+	var autoArchiveAfterHours sql.NullInt64
 	var color, prompt, eventsJSON sql.NullString
 
 	err := row.Scan(&step.ID, &step.WorkflowID, &step.Name, &step.Position, &color,
-		&prompt, &eventsJSON, &allowManualMove, &isStartStep, &step.CreatedAt, &step.UpdatedAt)
+		&prompt, &eventsJSON, &allowManualMove, &isStartStep, &autoArchiveAfterHours, &step.CreatedAt, &step.UpdatedAt)
 
 	if err != nil {
 		return nil, err
@@ -897,6 +937,9 @@ func (r *Repository) scanStep(row interface {
 
 	step.AllowManualMove = allowManualMove == 1
 	step.IsStartStep = isStartStep == 1
+	if autoArchiveAfterHours.Valid {
+		step.AutoArchiveAfterHours = int(autoArchiveAfterHours.Int64)
+	}
 	if color.Valid {
 		step.Color = color.String
 	}
@@ -912,7 +955,7 @@ func (r *Repository) scanStep(row interface {
 	return step, nil
 }
 
-const stepSelectColumns = `id, workflow_id, name, position, color, prompt, events, allow_manual_move, is_start_step, created_at, updated_at`
+const stepSelectColumns = `id, workflow_id, name, position, color, prompt, events, allow_manual_move, is_start_step, auto_archive_after_hours, created_at, updated_at`
 
 // GetStep retrieves a workflow step by ID.
 func (r *Repository) GetStep(ctx context.Context, id string) (*models.WorkflowStep, error) {
@@ -944,11 +987,11 @@ func (r *Repository) UpdateStep(ctx context.Context, step *models.WorkflowStep) 
 		UPDATE workflow_steps SET
 			name = ?, position = ?, color = ?,
 			prompt = ?, events = ?,
-			allow_manual_move = ?, is_start_step = ?, updated_at = ?
+			allow_manual_move = ?, is_start_step = ?, auto_archive_after_hours = ?, updated_at = ?
 		WHERE id = ?
 	`, step.Name, step.Position, step.Color,
 		step.Prompt, string(eventsJSON),
-		sqlite.BoolToInt(step.AllowManualMove), sqlite.BoolToInt(step.IsStartStep), step.UpdatedAt, step.ID)
+		sqlite.BoolToInt(step.AllowManualMove), sqlite.BoolToInt(step.IsStartStep), step.AutoArchiveAfterHours, step.UpdatedAt, step.ID)
 	if err != nil {
 		return err
 	}

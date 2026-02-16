@@ -29,6 +29,7 @@ type WorkflowStepperProps = {
   currentStepId: string | null;
   taskId?: string | null;
   workflowId?: string | null;
+  isArchived?: boolean;
 };
 
 const WorkflowStepper = memo(function WorkflowStepper({
@@ -36,6 +37,7 @@ const WorkflowStepper = memo(function WorkflowStepper({
   currentStepId,
   taskId,
   workflowId,
+  isArchived,
 }: WorkflowStepperProps) {
   const [movingToStepId, setMovingToStepId] = useState<string | null>(null);
 
@@ -73,13 +75,13 @@ const WorkflowStepper = memo(function WorkflowStepper({
   return (
     <div className="flex items-center gap-0 overflow-x-auto flex-shrink min-w-0">
       {sortedSteps.map((step, index) => {
-        const isCompleted = currentIndex >= 0 && index < currentIndex;
-        const isCurrent = index === currentIndex;
+        const isCompleted = !isArchived && currentIndex >= 0 && index < currentIndex;
+        const isCurrent = !isArchived && index === currentIndex;
         const isAdjacent =
           currentIndex >= 0 &&
           (index === currentIndex - 1 || index === currentIndex + 1);
         const canMove =
-          !isCurrent && taskId && workflowId && (isAdjacent || step.allow_manual_move);
+          !isArchived && !isCurrent && taskId && workflowId && (isAdjacent || step.allow_manual_move);
 
         return (
           <div key={step.id} className="flex items-center">
@@ -161,6 +163,14 @@ const WorkflowStepper = memo(function WorkflowStepper({
           </div>
         );
       })}
+      {isArchived && (
+        <>
+          <div className="h-px w-6 shrink-0 bg-border" />
+          <span className="text-[11px] font-medium text-amber-500 bg-amber-500/15 px-2 py-0.5 rounded-md whitespace-nowrap">
+            Archived
+          </span>
+        </>
+      )}
     </div>
   );
 });

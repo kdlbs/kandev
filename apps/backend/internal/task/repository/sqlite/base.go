@@ -398,5 +398,46 @@ func (r *Repository) initSchema() error {
 		return err
 	}
 
+	if err := r.ensureArchivedAtColumn(); err != nil {
+		return err
+	}
+
 	return nil
+}
+
+// ensureArchivedAtColumn adds the archived_at column to tasks if it doesn't exist.
+func (r *Repository) ensureArchivedAtColumn() error {
+	rows, err := r.db.Query("PRAGMA table_info(tasks)")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var hasColumn bool
+	for rows.Next() {
+		var cid int
+		var name, colType string
+		var notNull int
+		var dfltValue sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dfltValue, &pk); err != nil {
+			return err
+		}
+		if name == "archived_at" {
+			hasColumn = true
+			break
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if hasColumn {
+		return nil
+	}
+
+	if _, err := r.db.Exec("ALTER TABLE tasks ADD COLUMN archived_at DATETIME"); err != nil {
+		return err
+	}
+	_, err = r.db.Exec("CREATE INDEX IF NOT EXISTS idx_tasks_archived_at ON tasks(archived_at)")
+	return err
 }

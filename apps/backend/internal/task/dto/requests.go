@@ -221,10 +221,15 @@ type ListTasksRequest struct {
 }
 
 type ListTasksByWorkspaceRequest struct {
-	WorkspaceID string
-	Query       string
-	Page        int
-	PageSize    int
+	WorkspaceID     string
+	Query           string
+	Page            int
+	PageSize        int
+	IncludeArchived bool
+}
+
+type ArchiveTaskRequest struct {
+	ID string
 }
 
 type ListTaskSessionsRequest struct {

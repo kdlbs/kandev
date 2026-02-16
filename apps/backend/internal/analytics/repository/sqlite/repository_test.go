@@ -44,6 +44,7 @@ func createTestDB(t *testing.T) *sql.DB {
 		prompt TEXT,
 		events TEXT,
 		allow_manual_move INTEGER DEFAULT 1,
+		auto_archive_after_hours INTEGER DEFAULT 0,
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL
 	);
@@ -54,6 +55,7 @@ func createTestDB(t *testing.T) *sql.DB {
 		workflow_step_id TEXT NOT NULL DEFAULT '',
 		title TEXT NOT NULL,
 		state TEXT DEFAULT 'TODO',
+		archived_at DATETIME,
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL
 	);

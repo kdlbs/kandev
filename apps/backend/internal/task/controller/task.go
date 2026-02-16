@@ -35,7 +35,7 @@ func (c *TaskController) ListTasks(ctx context.Context, req dto.ListTasksRequest
 }
 
 func (c *TaskController) ListTasksByWorkspace(ctx context.Context, req dto.ListTasksByWorkspaceRequest) (dto.ListTasksResponse, error) {
-	tasks, total, err := c.service.ListTasksByWorkspace(ctx, req.WorkspaceID, req.Query, req.Page, req.PageSize)
+	tasks, total, err := c.service.ListTasksByWorkspace(ctx, req.WorkspaceID, req.Query, req.Page, req.PageSize, req.IncludeArchived)
 	if err != nil {
 		return dto.ListTasksResponse{}, err
 	}
@@ -178,6 +178,13 @@ func (c *TaskController) DeleteTask(ctx context.Context, req dto.DeleteTaskReque
 	return dto.SuccessResponse{Success: true}, nil
 }
 
+func (c *TaskController) ArchiveTask(ctx context.Context, req dto.ArchiveTaskRequest) (dto.SuccessResponse, error) {
+	if err := c.service.ArchiveTask(ctx, req.ID); err != nil {
+		return dto.SuccessResponse{}, err
+	}
+	return dto.SuccessResponse{Success: true}, nil
+}
+
 func (c *TaskController) MoveTask(ctx context.Context, req dto.MoveTaskRequest) (dto.MoveTaskResponse, error) {
 	result, err := c.service.MoveTask(ctx, req.ID, req.WorkflowID, req.WorkflowStepID, req.Position)
 	if err != nil {
@@ -190,7 +197,7 @@ func (c *TaskController) MoveTask(ctx context.Context, req dto.MoveTaskRequest) 
 
 	// Include workflow step info if available
 	if result.WorkflowStep != nil {
-		response.WorkflowStep = serviceStepToDTO(result.WorkflowStep)
+		response.WorkflowStep = WorkflowStepToDTO(result.WorkflowStep)
 	}
 
 	return response, nil
@@ -257,22 +264,24 @@ func (c *TaskController) ApproveSession(ctx context.Context, req dto.ApproveSess
 
 	// Include the new workflow step if present
 	if result.WorkflowStep != nil {
-		resp.WorkflowStep = serviceStepToDTO(result.WorkflowStep)
+		resp.WorkflowStep = WorkflowStepToDTO(result.WorkflowStep)
 	}
 
 	return resp, nil
 }
 
-// serviceStepToDTO converts a workflow step to a DTO.
-func serviceStepToDTO(step *wfmodels.WorkflowStep) dto.WorkflowStepDTO {
+// WorkflowStepToDTO converts a workflow step to a DTO.
+// Shared by both task and workflow controllers.
+func WorkflowStepToDTO(step *wfmodels.WorkflowStep) dto.WorkflowStepDTO {
 	result := dto.WorkflowStepDTO{
-		ID:              step.ID,
-		WorkflowID:      step.WorkflowID,
-		Name:            step.Name,
-		Position:        step.Position,
-		Color:           step.Color,
-		Prompt:          step.Prompt,
-		AllowManualMove: step.AllowManualMove,
+		ID:                    step.ID,
+		WorkflowID:            step.WorkflowID,
+		Name:                  step.Name,
+		Position:              step.Position,
+		Color:                 step.Color,
+		Prompt:                step.Prompt,
+		AllowManualMove:       step.AllowManualMove,
+		AutoArchiveAfterHours: step.AutoArchiveAfterHours,
 	}
 	if len(step.Events.OnEnter) > 0 || len(step.Events.OnTurnComplete) > 0 {
 		events := &dto.StepEventsDTO{}

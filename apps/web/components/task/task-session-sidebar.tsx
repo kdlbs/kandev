@@ -10,10 +10,11 @@ import { IconPlus } from '@tabler/icons-react';
 import { TaskCreateDialog } from '@/components/task-create-dialog';
 import { useAppStore, useAppStoreApi } from '@/components/state-provider';
 import { linkToSession } from '@/lib/links';
-import { listTaskSessions } from '@/lib/api';
 import { useAllWorkflowSnapshots } from '@/hooks/domains/kanban/use-all-workflow-snapshots';
 import { useTaskActions } from '@/hooks/use-task-actions';
+import { useTaskRemoval } from '@/hooks/use-task-removal';
 import { performLayoutSwitch } from '@/lib/state/dockview-store';
+import { useArchivedTaskState } from './task-archived-context';
 
 // Extracted component to isolate dialog state from sidebar
 type NewTaskButtonProps = {
@@ -61,7 +62,7 @@ type TaskSessionSidebarProps = {
   workflowId: string | null;
 };
 
-export const TaskSessionSidebar = memo(function TaskSessionSidebar({ workspaceId, workflowId: _workflowId }: TaskSessionSidebarProps) {
+export const TaskSessionSidebar = memo(function TaskSessionSidebar({ workspaceId }: TaskSessionSidebarProps) {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const sessionsById = useAppStore((state) => state.taskSessions.items);
@@ -72,8 +73,6 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({ workspaceId
   const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
   const setActiveTask = useAppStore((state) => state.setActiveTask);
   const setActiveSession = useAppStore((state) => state.setActiveSession);
-  const setTaskSessionsForTask = useAppStore((state) => state.setTaskSessionsForTask);
-  const setTaskSessionsLoading = useAppStore((state) => state.setTaskSessionsLoading);
   const selectedTaskId = useMemo(() => {
     if (activeSessionId) {
       return sessionsById[activeSessionId]?.task_id ?? activeTaskId;
@@ -107,9 +106,10 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({ workspaceId
   }, [snapshots]);
   const store = useAppStoreApi();
 
-  // Task deletion state and handler
-  const { deleteTaskById } = useTaskActions();
+  const { deleteTaskById, archiveTaskById } = useTaskActions();
+  const { removeTaskFromBoard, loadTaskSessionsForTask } = useTaskRemoval({ store, useLayoutSwitch: true });
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
+  const archivedState = useArchivedTaskState();
 
   // Helper to get session info for a task (diff stats and updatedAt)
   const getSessionInfoForTask = useCallback(
@@ -146,20 +146,38 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({ workspaceId
   const tasksWithRepositories = useMemo(() => {
     const repositories = workspaceId ? repositoriesByWorkspace[workspaceId] ?? [] : [];
     const repositoryPathsById = new Map(repositories.map((repo: Repository) => [repo.id, repo.local_path]));
-    return allTasks.map((task: KanbanState['tasks'][number]) => {
+    const items = allTasks.map((task: KanbanState['tasks'][number]) => {
       const sessionInfo = getSessionInfoForTask(task.id);
       return {
         id: task.id,
         title: task.title,
         state: task.state as TaskState | undefined,
         description: task.description,
-        workflowStepId: task.workflowStepId,
+        workflowStepId: task.workflowStepId as string | undefined,
         repositoryPath: task.repositoryId ? repositoryPathsById.get(task.repositoryId) : undefined,
         diffStats: sessionInfo.diffStats,
         updatedAt: sessionInfo.updatedAt ?? task.updatedAt,
+        isArchived: false as boolean,
       };
     });
-  }, [repositoriesByWorkspace, allTasks, workspaceId, getSessionInfoForTask]);
+
+    // If the active task is archived (not in kanban), inject it into the list
+    if (archivedState.isArchived && archivedState.archivedTaskId && !items.some((t) => t.id === archivedState.archivedTaskId)) {
+      items.unshift({
+        id: archivedState.archivedTaskId,
+        title: archivedState.archivedTaskTitle ?? 'Archived task',
+        state: undefined,
+        description: undefined,
+        workflowStepId: undefined,
+        repositoryPath: archivedState.archivedTaskRepositoryPath,
+        diffStats: undefined,
+        updatedAt: archivedState.archivedTaskUpdatedAt,
+        isArchived: true,
+      });
+    }
+
+    return items;
+  }, [repositoriesByWorkspace, allTasks, workspaceId, getSessionInfoForTask, archivedState]);
 
 
   const updateUrl = useCallback((sessionId: string) => {
@@ -167,29 +185,16 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({ workspaceId
     window.history.replaceState({}, '', linkToSession(sessionId));
   }, []);
 
-  const loadTaskSessionsForTask = useCallback(
+  const handleArchiveTask = useCallback(
     async (taskId: string) => {
-      const state = store.getState();
-      if (state.taskSessionsByTask.loadedByTaskId[taskId]) {
-        return state.taskSessionsByTask.itemsByTaskId[taskId] ?? [];
-      }
-      if (state.taskSessionsByTask.loadingByTaskId[taskId]) {
-        return state.taskSessionsByTask.itemsByTaskId[taskId] ?? [];
-      }
-      setTaskSessionsLoading(taskId, true);
       try {
-        const response = await listTaskSessions(taskId, { cache: 'no-store' });
-        setTaskSessionsForTask(taskId, response.sessions ?? []);
-        return response.sessions ?? [];
+        await archiveTaskById(taskId);
+        await removeTaskFromBoard(taskId);
       } catch (error) {
-        console.error('Failed to load task sessions:', error);
-        setTaskSessionsForTask(taskId, []);
-        return [];
-      } finally {
-        setTaskSessionsLoading(taskId, false);
+        console.error('Failed to archive task:', error);
       }
     },
-    [setTaskSessionsForTask, setTaskSessionsLoading, store]
+    [archiveTaskById, removeTaskFromBoard]
   );
 
   const handleDeleteTask = useCallback(
@@ -197,67 +202,12 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({ workspaceId
       setDeletingTaskId(taskId);
       try {
         await deleteTaskById(taskId);
-
-        // Remove task from multi snapshots
-        const currentSnapshots = store.getState().kanbanMulti.snapshots;
-        for (const [wfId, snapshot] of Object.entries(currentSnapshots)) {
-          const hadTask = snapshot.tasks.some((t: KanbanState['tasks'][number]) => t.id === taskId);
-          if (hadTask) {
-            store.getState().setWorkflowSnapshot(wfId, {
-              ...snapshot,
-              tasks: snapshot.tasks.filter((t: KanbanState['tasks'][number]) => t.id !== taskId),
-            });
-          }
-        }
-
-        // Also update single kanban state if task was there
-        const currentKanbanTasks = store.getState().kanban.tasks;
-        if (currentKanbanTasks.some((t: KanbanState['tasks'][number]) => t.id === taskId)) {
-          store.setState((state) => ({
-            ...state,
-            kanban: {
-              ...state.kanban,
-              tasks: state.kanban.tasks.filter((t: KanbanState['tasks'][number]) => t.id !== taskId),
-            },
-          }));
-        }
-
-        // Collect all remaining tasks across snapshots
-        const allRemainingTasks: KanbanState['tasks'] = [];
-        for (const snapshot of Object.values(store.getState().kanbanMulti.snapshots)) {
-          allRemainingTasks.push(...snapshot.tasks);
-        }
-
-        // If deleted task was active, switch to another task or go home
-        const currentActiveTaskId = store.getState().tasks.activeTaskId;
-        if (currentActiveTaskId === taskId) {
-          const oldSessionId = store.getState().tasks.activeSessionId;
-          if (allRemainingTasks.length > 0) {
-            const nextTask = allRemainingTasks[0];
-            if (nextTask.primarySessionId) {
-              setActiveSession(nextTask.id, nextTask.primarySessionId);
-              performLayoutSwitch(oldSessionId, nextTask.primarySessionId);
-              window.history.replaceState({}, '', linkToSession(nextTask.primarySessionId));
-            } else {
-              const sessions = await loadTaskSessionsForTask(nextTask.id);
-              const sessionId = sessions[0]?.id ?? null;
-              if (sessionId) {
-                setActiveSession(nextTask.id, sessionId);
-                performLayoutSwitch(oldSessionId, sessionId);
-                window.history.replaceState({}, '', linkToSession(sessionId));
-              } else {
-                setActiveTask(nextTask.id);
-              }
-            }
-          } else {
-            window.location.href = '/';
-          }
-        }
+        await removeTaskFromBoard(taskId);
       } finally {
         setDeletingTaskId(null);
       }
     },
-    [deleteTaskById, store, setActiveSession, setActiveTask, loadTaskSessionsForTask]
+    [deleteTaskById, removeTaskFromBoard]
   );
 
   const handleSelectTask = useCallback(
@@ -306,6 +256,7 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({ workspaceId
         onSelectTask={(taskId) => {
           handleSelectTask(taskId);
         }}
+        onArchiveTask={handleArchiveTask}
         onDeleteTask={handleDeleteTask}
         deletingTaskId={deletingTaskId}
         isLoading={isLoadingWorkflow}

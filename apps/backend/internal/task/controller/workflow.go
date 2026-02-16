@@ -32,33 +32,9 @@ func (c *WorkflowController) SetWorkflowStepLister(lister WorkflowStepLister) {
 
 // toWorkflowStepDTO converts a workflow step to a WorkflowStepDTO.
 func toWorkflowStepDTO(step *workflowmodels.WorkflowStep) dto.WorkflowStepDTO {
-	result := dto.WorkflowStepDTO{
-		ID:              step.ID,
-		WorkflowID:      step.WorkflowID,
-		Name:            step.Name,
-		Position:        step.Position,
-		Color:           step.Color,
-		Prompt:          step.Prompt,
-		AllowManualMove: step.AllowManualMove,
-		CreatedAt:       step.CreatedAt,
-		UpdatedAt:       step.UpdatedAt,
-	}
-	if len(step.Events.OnEnter) > 0 || len(step.Events.OnTurnComplete) > 0 {
-		events := &dto.StepEventsDTO{}
-		for _, a := range step.Events.OnEnter {
-			events.OnEnter = append(events.OnEnter, dto.StepActionDTO{
-				Type:   string(a.Type),
-				Config: a.Config,
-			})
-		}
-		for _, a := range step.Events.OnTurnComplete {
-			events.OnTurnComplete = append(events.OnTurnComplete, dto.StepActionDTO{
-				Type:   string(a.Type),
-				Config: a.Config,
-			})
-		}
-		result.Events = events
-	}
+	result := WorkflowStepToDTO(step)
+	result.CreatedAt = step.CreatedAt
+	result.UpdatedAt = step.UpdatedAt
 	return result
 }
 

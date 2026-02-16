@@ -118,14 +118,15 @@ func (c *Controller) CreateStep(ctx context.Context, req CreateStepRequest) (*Ge
 
 // UpdateStepRequest is the request for updating a workflow step.
 type UpdateStepRequest struct {
-	ID              string             `json:"id"`
-	Name            *string            `json:"name,omitempty"`
-	Position        *int               `json:"position,omitempty"`
-	Color           *string            `json:"color,omitempty"`
-	Prompt          *string            `json:"prompt,omitempty"`
-	Events          *models.StepEvents `json:"events,omitempty"`
-	AllowManualMove *bool              `json:"allow_manual_move,omitempty"`
-	IsStartStep     *bool              `json:"is_start_step,omitempty"`
+	ID                    string             `json:"id"`
+	Name                  *string            `json:"name,omitempty"`
+	Position              *int               `json:"position,omitempty"`
+	Color                 *string            `json:"color,omitempty"`
+	Prompt                *string            `json:"prompt,omitempty"`
+	Events                *models.StepEvents `json:"events,omitempty"`
+	AllowManualMove       *bool              `json:"allow_manual_move,omitempty"`
+	IsStartStep           *bool              `json:"is_start_step,omitempty"`
+	AutoArchiveAfterHours *int               `json:"auto_archive_after_hours,omitempty"`
 }
 
 // UpdateStep updates an existing workflow step.
@@ -154,6 +155,9 @@ func (c *Controller) UpdateStep(ctx context.Context, req UpdateStepRequest) (*Ge
 	}
 	if req.IsStartStep != nil {
 		step.IsStartStep = *req.IsStartStep
+	}
+	if req.AutoArchiveAfterHours != nil {
+		step.AutoArchiveAfterHours = *req.AutoArchiveAfterHours
 	}
 	if err := c.svc.UpdateStep(ctx, step); err != nil {
 		return nil, err

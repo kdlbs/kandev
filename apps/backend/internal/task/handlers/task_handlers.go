@@ -72,6 +72,7 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api.PATCH("/tasks/:id", h.httpUpdateTask)
 	api.POST("/tasks/:id/move", h.httpMoveTask)
 	api.DELETE("/tasks/:id", h.httpDeleteTask)
+	api.POST("/tasks/:id/archive", h.httpArchiveTask)
 
 	api.POST("/tasks/bulk-move", h.httpBulkMoveTasks)
 	api.GET("/workflows/:id/task-count", h.httpGetWorkflowTaskCount)
@@ -89,6 +90,7 @@ func (h *TaskHandlers) registerWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionTaskDelete, h.wsDeleteTask)
 	dispatcher.RegisterFunc(ws.ActionTaskMove, h.wsMoveTask)
 	dispatcher.RegisterFunc(ws.ActionTaskState, h.wsUpdateTaskState)
+	dispatcher.RegisterFunc(ws.ActionTaskArchive, h.wsArchiveTask)
 	dispatcher.RegisterFunc(ws.ActionTaskSessionList, h.wsListTaskSessions)
 	// Git snapshot and commit handlers
 	dispatcher.RegisterFunc(ws.ActionSessionGitSnapshots, h.wsGetGitSnapshots)
@@ -132,12 +134,14 @@ func (h *TaskHandlers) httpListTasksByWorkspace(c *gin.Context) {
 	}
 
 	query := c.Query("query")
+	includeArchived := c.Query("include_archived") == "true"
 
 	resp, err := h.controller.ListTasksByWorkspace(c.Request.Context(), dto.ListTasksByWorkspaceRequest{
-		WorkspaceID: c.Param("id"),
-		Query:       query,
-		Page:        page,
-		PageSize:    pageSize,
+		WorkspaceID:     c.Param("id"),
+		Query:           query,
+		Page:            page,
+		PageSize:        pageSize,
+		IncludeArchived: includeArchived,
 	})
 	if err != nil {
 		handleNotFound(c, h.logger, err, "tasks not found")
@@ -480,6 +484,15 @@ func (h *TaskHandlers) httpDeleteTask(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
+func (h *TaskHandlers) httpArchiveTask(c *gin.Context) {
+	resp, err := h.controller.ArchiveTask(c.Request.Context(), dto.ArchiveTaskRequest{ID: c.Param("id")})
+	if err != nil {
+		handleNotFound(c, h.logger, err, "task not archived")
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
 // WS handlers
 
 type wsListTaskSessionsRequest struct {
@@ -699,6 +712,27 @@ func (h *TaskHandlers) wsDeleteTask(ctx context.Context, msg *ws.Message) (*ws.M
 	if err != nil {
 		h.logger.Error("failed to delete task", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to delete task", nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, resp)
+}
+
+type wsArchiveTaskRequest struct {
+	ID string `json:"id"`
+}
+
+func (h *TaskHandlers) wsArchiveTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req wsArchiveTaskRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.ID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "id is required", nil)
+	}
+
+	resp, err := h.controller.ArchiveTask(ctx, dto.ArchiveTaskRequest{ID: req.ID})
+	if err != nil {
+		h.logger.Error("failed to archive task", zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to archive task", nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }

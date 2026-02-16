@@ -5,9 +5,11 @@ import { useRouter } from "next/navigation"
 import type { PaginationState } from "@tanstack/react-table"
 import { DataTable } from "@/components/ui/data-table"
 import { getColumns } from "./columns"
-import { deleteTask, listTasksByWorkspace } from "@/lib/api"
+import { archiveTask, deleteTask, listTasksByWorkspace } from "@/lib/api"
 import { TaskCreateDialog } from "@/components/task-create-dialog"
 import { KanbanHeader } from "@/components/kanban/kanban-header"
+import { Checkbox } from "@kandev/ui/checkbox"
+import { Label } from "@kandev/ui/label"
 import type { Task, Workspace, Workflow, WorkflowStep, Repository } from "@/lib/types/http"
 import { useToast } from "@/components/toast-provider"
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings"
@@ -49,9 +51,10 @@ export function TasksPageClient({
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null)
 
-  // Search state
+  // Search and filter state
   const [searchQuery, setSearchQuery] = useState('')
   const debouncedQuery = useDebounce(searchQuery, 300)
+  const [showArchived, setShowArchived] = useState(false)
 
   const [pagination, setPagination] = useState<PaginationState>({
     pageIndex: 0,
@@ -71,6 +74,7 @@ export function TasksPageClient({
         page: pagination.pageIndex + 1,
         pageSize: pagination.pageSize,
         query: debouncedQuery,
+        includeArchived: showArchived,
       })
 
       setTasks(result.tasks)
@@ -84,7 +88,7 @@ export function TasksPageClient({
     } finally {
       setIsLoading(false)
     }
-  }, [activeWorkspaceId, pagination.pageIndex, pagination.pageSize, debouncedQuery, toast])
+  }, [activeWorkspaceId, pagination.pageIndex, pagination.pageSize, debouncedQuery, showArchived, toast])
 
   // Reset to page 1 when search query changes
   useEffect(() => {
@@ -96,11 +100,31 @@ export function TasksPageClient({
     if (activeWorkspaceId) {
       fetchTasks()
     }
-  }, [activeWorkspaceId, pagination.pageIndex, pagination.pageSize, debouncedQuery, fetchTasks])
+  }, [activeWorkspaceId, pagination.pageIndex, pagination.pageSize, debouncedQuery, showArchived, fetchTasks])
 
   const handleCreateTask = useCallback(() => {
     setCreateDialogOpen(true)
   }, [])
+
+  const handleArchive = useCallback(
+    async (taskId: string) => {
+      try {
+        await archiveTask(taskId)
+        toast({
+          title: "Task archived",
+          description: "The task has been archived successfully.",
+        })
+        fetchTasks()
+      } catch (err) {
+        toast({
+          title: "Failed to archive task",
+          description: err instanceof Error ? err.message : "Unknown error",
+          variant: "error",
+        })
+      }
+    },
+    [fetchTasks, toast]
+  )
 
   const handleDelete = useCallback(
     async (taskId: string) => {
@@ -131,10 +155,11 @@ export function TasksPageClient({
         workflows,
         steps,
         repositories,
+        onArchive: handleArchive,
         onDelete: handleDelete,
         deletingTaskId,
       }),
-    [workflows, steps, repositories, handleDelete, deletingTaskId]
+    [workflows, steps, repositories, handleArchive, handleDelete, deletingTaskId]
   )
 
   const handleRowClick = useCallback(
@@ -166,23 +191,37 @@ export function TasksPageClient({
         onSearchChange={setSearchQuery}
         isSearchLoading={isLoading && !!debouncedQuery}
       />
-      <div className="flex-1 overflow-auto px-6 py-4">
-        <div className="mb-4">
-          <h1 className="text-xl font-semibold">All Tasks</h1>
-          <p className="text-sm text-muted-foreground">
-            {total} task{total !== 1 ? 's' : ''} found
-          </p>
-        </div>
+      <div className="flex-1 overflow-auto px-6 py-6">
+        <div className="mx-auto max-w-5xl">
+          <div className="mb-5 flex items-center justify-between">
+            <div>
+              <h1 className="text-xl font-semibold">All Tasks</h1>
+              <p className="text-sm text-muted-foreground">
+                {total} task{total !== 1 ? 's' : ''} found
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="show-archived"
+                checked={showArchived}
+                onCheckedChange={(checked) => setShowArchived(checked === true)}
+              />
+              <Label htmlFor="show-archived" className="text-sm cursor-pointer">
+                Show archived
+              </Label>
+            </div>
+          </div>
 
-        <DataTable
-          columns={columns}
-          data={tasks}
-          pageCount={pageCount}
-          pagination={pagination}
-          onPaginationChange={setPagination}
-          isLoading={isLoading}
-          onRowClick={handleRowClick}
-        />
+          <DataTable
+            columns={columns}
+            data={tasks}
+            pageCount={pageCount}
+            pagination={pagination}
+            onPaginationChange={setPagination}
+            isLoading={isLoading}
+            onRowClick={handleRowClick}
+          />
+        </div>
       </div>
 
       {activeWorkspaceId && defaultWorkflow && defaultStep && (

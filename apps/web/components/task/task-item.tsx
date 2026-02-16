@@ -16,6 +16,7 @@ type TaskItemProps = {
   description?: string;
   stepName?: string;
   state?: TaskState;
+  isArchived?: boolean;
   isSelected?: boolean;
   onClick?: () => void;
   diffStats?: DiffStats;
@@ -23,6 +24,7 @@ type TaskItemProps = {
   onRename?: () => void;
   onDuplicate?: () => void;
   onReview?: () => void;
+  onArchive?: () => void;
   onDelete?: () => void;
   isDeleting?: boolean;
 };
@@ -49,6 +51,7 @@ export const TaskItem = memo(function TaskItem({
   description,
   stepName,
   state,
+  isArchived,
   isSelected = false,
   onClick,
   diffStats,
@@ -56,6 +59,7 @@ export const TaskItem = memo(function TaskItem({
   onRename,
   onDuplicate,
   onReview,
+  onArchive,
   onDelete,
   isDeleting,
 }: TaskItemProps) {
@@ -137,11 +141,15 @@ export const TaskItem = memo(function TaskItem({
             effectiveMenuOpen ? 'opacity-0' : 'group-hover:opacity-0'
           )}
         >
-          {stepName && (
+          {isArchived ? (
+            <span className="text-[10px] text-muted-foreground/70 bg-amber-500/15 text-amber-500 px-1.5 py-px rounded-[6px]">
+              Archived
+            </span>
+          ) : stepName ? (
             <span className="text-[10px] text-muted-foreground/70 bg-foreground/[0.06] px-1.5 py-px rounded-[6px]">
               {stepName}
             </span>
-          )}
+          ) : null}
           {renderRightMeta()}
         </div>
 
@@ -162,6 +170,7 @@ export const TaskItem = memo(function TaskItem({
             onRename={onRename}
             onDuplicate={onDuplicate}
             onReview={onReview}
+            onArchive={onArchive}
             onDelete={onDelete}
             isDeleting={isDeleting}
           />

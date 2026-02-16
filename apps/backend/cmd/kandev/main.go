@@ -391,6 +391,9 @@ func main() {
 	}
 	log.Info("Orchestrator initialized")
 
+	// Start auto-archive background loop
+	taskSvc.StartAutoArchiveLoop(ctx)
+
 	// Subscribe to message.added events and broadcast to WebSocket subscribers
 	_, err = eventBus.Subscribe(events.MessageAdded, func(ctx context.Context, event *bus.Event) error {
 		data, ok := event.Data.(map[string]interface{})

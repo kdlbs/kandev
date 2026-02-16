@@ -18,6 +18,7 @@ import { fetchTask } from '@/lib/api';
 import { useTasks } from '@/hooks/use-tasks';
 import { useResponsiveBreakpoint } from '@/hooks/use-responsive-breakpoint';
 import type { Layout } from 'react-resizable-panels';
+import { TaskArchivedProvider } from './task-archived-context';
 
 type TaskPageContentProps = {
   task: Task | null;
@@ -218,6 +219,14 @@ export function TaskPageContent({
   );
 
 
+  const archivedValue = useMemo(() => ({
+    isArchived: !!task?.archived_at,
+    archivedTaskId: task?.archived_at ? task.id : undefined,
+    archivedTaskTitle: task?.archived_at ? task.title : undefined,
+    archivedTaskRepositoryPath: task?.archived_at ? repository?.local_path ?? undefined : undefined,
+    archivedTaskUpdatedAt: task?.archived_at ? task.updated_at : undefined,
+  }), [task, repository]);
+
   if (!isMounted) {
     return <div className="h-screen w-full bg-background" />;
   }
@@ -270,21 +279,24 @@ export function TaskPageContent({
             workflowSteps={workflowSteps}
             currentStepId={task?.workflow_step_id ?? null}
             workflowId={task?.workflow_id ?? null}
+            isArchived={!!task?.archived_at}
           />
         )}
 
-        <TaskLayout
-          workspaceId={task?.workspace_id ?? null}
-          workflowId={task?.workflow_id ?? null}
-          sessionId={effectiveSessionId ?? null}
-          repository={repository ?? null}
-          initialScripts={initialScripts}
-          initialTerminals={initialTerminals}
-          defaultLayouts={defaultLayouts}
-          taskTitle={task?.title}
-          baseBranch={task?.repositories?.[0]?.base_branch}
-          worktreeBranch={worktreeBranch}
-        />
+        <TaskArchivedProvider value={archivedValue}>
+          <TaskLayout
+            workspaceId={task?.workspace_id ?? null}
+            workflowId={task?.workflow_id ?? null}
+            sessionId={effectiveSessionId ?? null}
+            repository={repository ?? null}
+            initialScripts={initialScripts}
+            initialTerminals={initialTerminals}
+            defaultLayouts={defaultLayouts}
+            taskTitle={task?.title}
+            baseBranch={task?.repositories?.[0]?.base_branch}
+            worktreeBranch={worktreeBranch}
+          />
+        </TaskArchivedProvider>
       </div>
     </TooltipProvider>
   );

@@ -94,9 +94,16 @@ export async function fetchTask(taskId: string, options?: ApiRequestOptions) {
   return fetchJson<Task>(`/api/v1/tasks/${taskId}`, options);
 }
 
+export async function archiveTask(taskId: string, options?: ApiRequestOptions) {
+  return fetchJson<void>(`/api/v1/tasks/${taskId}/archive`, {
+    ...options,
+    init: { method: 'POST', ...(options?.init ?? {}) },
+  });
+}
+
 export async function listTasksByWorkspace(
   workspaceId: string,
-  params: { page?: number; pageSize?: number; query?: string } = {},
+  params: { page?: number; pageSize?: number; query?: string; includeArchived?: boolean } = {},
   options?: ApiRequestOptions
 ) {
   const baseUrl = options?.baseUrl ?? getBackendConfig().apiBaseUrl;
@@ -104,5 +111,6 @@ export async function listTasksByWorkspace(
   if (params.page) url.searchParams.set('page', String(params.page));
   if (params.pageSize) url.searchParams.set('page_size', String(params.pageSize));
   if (params.query) url.searchParams.set('query', params.query);
+  if (params.includeArchived) url.searchParams.set('include_archived', 'true');
   return fetchJson<ListTasksResponse>(url.toString(), options);
 }

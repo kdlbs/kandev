@@ -580,6 +580,108 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 	return task, nil
 }
 
+// ArchiveTask archives a task by setting its archived_at timestamp.
+// The task remains in the DB but is excluded from active board views.
+// Active agent sessions are stopped and worktrees cleaned up in background.
+func (s *Service) ArchiveTask(ctx context.Context, id string) error {
+	start := time.Now()
+
+	// 1. Get task and verify it exists
+	task, err := s.repo.GetTask(ctx, id)
+	if err != nil {
+		return err
+	}
+
+	if task.ArchivedAt != nil {
+		return fmt.Errorf("task is already archived: %s", id)
+	}
+
+	// 2. Gather data needed for cleanup BEFORE archive
+	var activeSessionIDs []string
+	if s.executionStopper != nil {
+		activeSessions, err := s.repo.ListActiveTaskSessionsByTaskID(ctx, id)
+		if err != nil {
+			s.logger.Warn("failed to list active sessions for archive",
+				zap.String("task_id", id),
+				zap.Error(err))
+		}
+		for _, sess := range activeSessions {
+			activeSessionIDs = append(activeSessionIDs, sess.ID)
+		}
+	}
+
+	sessions, err := s.repo.ListTaskSessions(ctx, id)
+	if err != nil {
+		s.logger.Warn("failed to list task sessions for archive",
+			zap.String("task_id", id),
+			zap.Error(err))
+	}
+
+	var worktrees []*worktree.Worktree
+	if s.worktreeCleanup != nil {
+		if provider, ok := s.worktreeCleanup.(WorktreeProvider); ok {
+			worktrees, err = provider.GetAllByTaskID(ctx, id)
+			if err != nil {
+				s.logger.Warn("failed to list worktrees for archive",
+					zap.String("task_id", id),
+					zap.Error(err))
+			}
+		}
+	}
+
+	// 3. Set archived_at in DB
+	if err := s.repo.ArchiveTask(ctx, id); err != nil {
+		return err
+	}
+
+	// 4. Re-read task for updated archived_at field
+	task, err = s.repo.GetTask(ctx, id)
+	if err != nil {
+		return err
+	}
+
+	// 5. Publish task.updated event so frontend removes from board
+	s.publishTaskEvent(ctx, events.TaskUpdated, task, nil)
+	s.logger.Info("task archived",
+		zap.String("task_id", id),
+		zap.Duration("duration", time.Since(start)))
+
+	// 6. Background: Stop agents and cleanup worktrees
+	if len(activeSessionIDs) > 0 || s.worktreeCleanup != nil || len(sessions) > 0 {
+		go func() {
+			cleanupStart := time.Now()
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+
+			if s.executionStopper != nil && len(activeSessionIDs) > 0 {
+				for _, sessionID := range activeSessionIDs {
+					if err := s.executionStopper.StopSession(cleanupCtx, sessionID, "task archived", true); err != nil {
+						s.logger.Warn("failed to stop session on task archive",
+							zap.String("task_id", id),
+							zap.String("session_id", sessionID),
+							zap.Error(err))
+					}
+				}
+			}
+
+			cleanupErrors := s.performTaskCleanup(cleanupCtx, id, sessions, worktrees)
+
+			if len(cleanupErrors) > 0 {
+				s.logger.Warn("task archive cleanup completed with errors",
+					zap.String("task_id", id),
+					zap.Int("error_count", len(cleanupErrors)),
+					zap.Duration("duration", time.Since(cleanupStart)))
+			} else {
+				s.logger.Info("task archive cleanup completed",
+					zap.String("task_id", id),
+					zap.Duration("duration", time.Since(cleanupStart)))
+			}
+		}()
+	}
+
+	return nil
+}
+
 // DeleteTask deletes a task and publishes a task.deleted event.
 // For fast UI response, the DB delete and event publish happen synchronously,
 // while agent stopping and worktree cleanup happen asynchronously.
@@ -749,8 +851,8 @@ func (s *Service) ListTasks(ctx context.Context, workflowID string) ([]*models.T
 
 // ListTasksByWorkspace returns paginated tasks for a workspace with task repositories loaded.
 // If query is non-empty, filters by task title, description, repository name, or repository path.
-func (s *Service) ListTasksByWorkspace(ctx context.Context, workspaceID string, query string, page, pageSize int) ([]*models.Task, int, error) {
-	tasks, total, err := s.repo.ListTasksByWorkspace(ctx, workspaceID, query, page, pageSize)
+func (s *Service) ListTasksByWorkspace(ctx context.Context, workspaceID string, query string, page, pageSize int, includeArchived bool) ([]*models.Task, int, error) {
+	tasks, total, err := s.repo.ListTasksByWorkspace(ctx, workspaceID, query, page, pageSize, includeArchived)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -1789,6 +1891,10 @@ func (s *Service) publishTaskEvent(ctx context.Context, eventType string, task *
 				data["review_status"] = *sessionInfo.ReviewStatus
 			}
 		}
+	}
+
+	if task.ArchivedAt != nil {
+		data["archived_at"] = task.ArchivedAt.Format(time.RFC3339)
 	}
 
 	if len(task.Repositories) > 0 {

@@ -152,11 +152,12 @@ func (r *Repository) GetGlobalStats(ctx context.Context, workspaceID string, sta
 		SELECT
 			(SELECT COUNT(*) FROM tasks WHERE workspace_id = ? AND (? IS NULL OR created_at >= ?)) as total_tasks,
 			(SELECT COUNT(*) FROM tasks t
-			 JOIN workflow_steps ws ON ws.id = t.workflow_step_id
+			 LEFT JOIN workflow_steps ws ON ws.id = t.workflow_step_id
 			 WHERE t.workspace_id = ?
-			   AND ws.position = (SELECT MAX(ws2.position) FROM workflow_steps ws2 WHERE ws2.workflow_id = ws.workflow_id)
+			   AND (t.archived_at IS NOT NULL
+			        OR ws.position = (SELECT MAX(ws2.position) FROM workflow_steps ws2 WHERE ws2.workflow_id = ws.workflow_id))
 			   AND (? IS NULL OR t.created_at >= ?)) as completed_tasks,
-			(SELECT COUNT(*) FROM tasks WHERE workspace_id = ? AND state = 'IN_PROGRESS' AND (? IS NULL OR created_at >= ?)) as in_progress_tasks,
+			(SELECT COUNT(*) FROM tasks WHERE workspace_id = ? AND state = 'IN_PROGRESS' AND archived_at IS NULL AND (? IS NULL OR created_at >= ?)) as in_progress_tasks,
 			(SELECT COUNT(*) FROM task_sessions s JOIN tasks t ON t.id = s.task_id WHERE t.workspace_id = ? AND (? IS NULL OR s.started_at >= ?)) as total_sessions,
 			(SELECT COUNT(*) FROM task_session_turns turn
 			 JOIN task_sessions s ON s.id = turn.task_session_id
@@ -298,7 +299,7 @@ func (r *Repository) GetCompletedTaskActivity(ctx context.Context, workspaceID s
 				date(ts.completed_at) as activity_date,
 				COUNT(DISTINCT t.id) as completed_tasks
 			FROM tasks t
-			JOIN workflow_steps ws ON ws.id = t.workflow_step_id
+			LEFT JOIN workflow_steps ws ON ws.id = t.workflow_step_id
 			JOIN (
 				SELECT task_id, MAX(completed_at) as completed_at
 				FROM task_sessions
@@ -306,7 +307,8 @@ func (r *Repository) GetCompletedTaskActivity(ctx context.Context, workspaceID s
 				GROUP BY task_id
 			) ts ON ts.task_id = t.id
 			WHERE t.workspace_id = ?
-			  AND ws.position = (SELECT MAX(ws2.position) FROM workflow_steps ws2 WHERE ws2.workflow_id = ws.workflow_id)
+			  AND (t.archived_at IS NOT NULL
+			       OR ws.position = (SELECT MAX(ws2.position) FROM workflow_steps ws2 WHERE ws2.workflow_id = ws.workflow_id))
 			GROUP BY date(ts.completed_at)
 		) activity ON activity.activity_date = d.date
 		ORDER BY d.date ASC

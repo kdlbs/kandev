@@ -55,6 +55,7 @@ const (
 	ActionTaskDelete        = "task.delete"
 	ActionTaskMove          = "task.move"
 	ActionTaskState         = "task.state"
+	ActionTaskArchive       = "task.archive"
 	ActionTaskPlanCreate    = "task.plan.create"
 	ActionTaskPlanGet       = "task.plan.get"
 	ActionTaskPlanUpdate    = "task.plan.update"

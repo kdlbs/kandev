@@ -1,6 +1,6 @@
 'use client';
 
-import { IconDots, IconTrash, IconCopy, IconEye, IconPencil, IconLoader } from '@tabler/icons-react';
+import { IconDots, IconTrash, IconCopy, IconEye, IconPencil, IconLoader, IconArchive } from '@tabler/icons-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -16,6 +16,7 @@ type TaskItemMenuProps = {
   onRename?: () => void;
   onDuplicate?: () => void;
   onReview?: () => void;
+  onArchive?: () => void;
   onDelete?: () => void;
   isDeleting?: boolean;
 };
@@ -26,6 +27,7 @@ export function TaskItemMenu({
   onRename,
   onDuplicate,
   onReview,
+  onArchive,
   onDelete,
   isDeleting,
 }: TaskItemMenuProps) {
@@ -73,6 +75,15 @@ export function TaskItemMenu({
         >
           <IconEye className="mr-2 h-4 w-4" />
           Review
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={(e) => {
+            e.stopPropagation();
+            onArchive?.();
+          }}
+        >
+          <IconArchive className="mr-2 h-4 w-4" />
+          Archive
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem

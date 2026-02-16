@@ -99,6 +99,7 @@ type TaskDTO struct {
 	PrimarySessionID *string                `json:"primary_session_id,omitempty"`
 	SessionCount     *int                   `json:"session_count,omitempty"`
 	ReviewStatus     *string                `json:"review_status,omitempty"`
+	ArchivedAt       *time.Time             `json:"archived_at,omitempty"`
 	CreatedAt        time.Time              `json:"created_at"`
 	UpdatedAt        time.Time              `json:"updated_at"`
 	Metadata         map[string]interface{} `json:"metadata,omitempty"`
@@ -399,6 +400,7 @@ func FromTaskWithSessionInfo(task *models.Task, primarySessionID *string, sessio
 		PrimarySessionID: primarySessionID,
 		SessionCount:     sessionCount,
 		ReviewStatus:     reviewStatus,
+		ArchivedAt:       task.ArchivedAt,
 		CreatedAt:        task.CreatedAt,
 		UpdatedAt:        task.UpdatedAt,
 		Metadata:         task.Metadata,
@@ -441,16 +443,17 @@ func FromTaskSession(session *models.TaskSession) TaskSessionDTO {
 
 // WorkflowStepDTO represents a workflow step for API responses
 type WorkflowStepDTO struct {
-	ID              string         `json:"id"`
-	WorkflowID      string         `json:"workflow_id"`
-	Name            string         `json:"name"`
-	Position        int            `json:"position"`
-	Color           string         `json:"color"`
-	Prompt          string         `json:"prompt,omitempty"`
-	Events          *StepEventsDTO `json:"events,omitempty"`
-	AllowManualMove bool           `json:"allow_manual_move"`
-	CreatedAt       time.Time      `json:"created_at"`
-	UpdatedAt       time.Time      `json:"updated_at"`
+	ID                    string         `json:"id"`
+	WorkflowID            string         `json:"workflow_id"`
+	Name                  string         `json:"name"`
+	Position              int            `json:"position"`
+	Color                 string         `json:"color"`
+	Prompt                string         `json:"prompt,omitempty"`
+	Events                *StepEventsDTO `json:"events,omitempty"`
+	AllowManualMove       bool           `json:"allow_manual_move"`
+	AutoArchiveAfterHours int            `json:"auto_archive_after_hours,omitempty"`
+	CreatedAt             time.Time      `json:"created_at"`
+	UpdatedAt             time.Time      `json:"updated_at"`
 }
 
 // StepEventsDTO represents step events for API responses
