@@ -1,7 +1,7 @@
 import { fetchJson, type ApiRequestOptions } from '../client';
 import type { StatsResponse } from '@/lib/types/http';
 
-export type StatsRange = 'week' | 'month';
+export type StatsRange = 'week' | 'month' | 'all';
 
 export async function fetchStats(
   workspaceId: string,

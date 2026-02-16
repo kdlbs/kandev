@@ -31,6 +31,13 @@ func provideRepositories(cfg *config.Config, log *logger.Logger) (*sql.DB, *Repo
 	}
 	cleanups = append(cleanups, cleanup)
 
+	// Workflow repo must be initialized before analytics repo because
+	// analytics creates indexes on the workflow_steps table.
+	workflowRepo, err := workflowrepository.NewWithDB(dbConn)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
 	analyticsRepo, cleanup, err := analyticsrepository.Provide(dbConn)
 	if err != nil {
 		return nil, nil, nil, err
@@ -66,11 +73,6 @@ func provideRepositories(cfg *config.Config, log *logger.Logger) (*sql.DB, *Repo
 		return nil, nil, nil, err
 	}
 	cleanups = append(cleanups, cleanup)
-
-	workflowRepo, err := workflowrepository.NewWithDB(dbConn)
-	if err != nil {
-		return nil, nil, nil, err
-	}
 
 	repos := &Repositories{
 		Task:          taskRepoImpl,

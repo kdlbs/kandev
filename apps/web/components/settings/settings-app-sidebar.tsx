@@ -12,7 +12,6 @@ import {
   IconCode,
   IconCpu,
   IconMessageCircle,
-  IconChartBar,
 } from '@tabler/icons-react';
 import {
   Sidebar,
@@ -123,7 +122,6 @@ export function SettingsAppSidebar() {
                         const workspacePath = `/settings/workspace/${workspace.id}`;
                         const boardsPath = `${workspacePath}/boards`;
                         const repositoriesPath = `${workspacePath}/repositories`;
-                        const statsPath = `${workspacePath}/stats`;
 
                         return (
                           <SidebarMenuSubItem key={workspace.id}>
@@ -155,18 +153,6 @@ export function SettingsAppSidebar() {
                                 >
                                   <Link href={boardsPath}>
                                     <span>Boards</span>
-                                  </Link>
-                                </SidebarMenuSubButton>
-                              </SidebarMenuSubItem>
-                              <SidebarMenuSubItem>
-                                <SidebarMenuSubButton
-                                  asChild
-                                  size="sm"
-                                  isActive={pathname === statsPath}
-                                >
-                                  <Link href={statsPath}>
-                                    <IconChartBar className="h-3 w-3 mr-1" />
-                                    <span>Stats</span>
                                   </Link>
                                 </SidebarMenuSubButton>
                               </SidebarMenuSubItem>
