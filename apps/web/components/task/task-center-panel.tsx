@@ -639,7 +639,6 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
               ) : (
                 <FileEditorContent
                   path={tab.path}
-                  content={tab.content}
                   originalContent={tab.originalContent}
                   isDirty={tab.isDirty}
                   isSaving={savingFiles.has(tab.path)}

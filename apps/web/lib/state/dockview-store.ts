@@ -47,6 +47,7 @@ type DockviewStore = {
     addChangesPanel: (groupId?: string) => void;
     addFilesPanel: (groupId?: string) => void;
     addDiffViewerPanel: (path?: string, content?: string, groupId?: string) => void;
+    addCommitDetailPanel: (sha: string, groupId?: string) => void;
     addFileEditorPanel: (path: string, name: string, quiet?: boolean) => void;
     addBrowserPanel: (url?: string, groupId?: string) => void;
     addPlanPanel: (groupId?: string) => void;
@@ -376,6 +377,19 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
             id: 'diff-viewer',
             component: 'diff-viewer',
             title: 'Diff Viewer',
+            position: { referenceGroup: groupId ?? centerGroupId },
+        });
+    },
+
+    addCommitDetailPanel: (sha, groupId) => {
+        const { api, centerGroupId } = get();
+        if (!api) return;
+        const panelId = `commit:${sha}`;
+        focusOrAddPanel(api, {
+            id: panelId,
+            component: 'commit-detail',
+            title: sha.slice(0, 7),
+            params: { commitSha: sha },
             position: { referenceGroup: groupId ?? centerGroupId },
         });
     },

@@ -5,7 +5,7 @@ import type { IDockviewPanelProps } from 'dockview-react';
 import { IconRefresh, IconExternalLink } from '@tabler/icons-react';
 import { Button } from '@kandev/ui/button';
 import { Input } from '@kandev/ui/input';
-import { PanelRoot, PanelBody, PanelToolbar } from './panel-primitives';
+import { PanelRoot, PanelBody, PanelHeaderBar } from './panel-primitives';
 import { useAppStore } from '@/components/state-provider';
 import { detectPreviewUrlFromOutput } from '@/lib/preview-url-detector';
 
@@ -62,7 +62,7 @@ export const BrowserPanel = memo(function BrowserPanel(
 
   return (
     <PanelRoot>
-      <PanelToolbar>
+      <PanelHeaderBar>
         <Input
           value={displayDraft}
           onChange={(e) => setUrlDraft(e.target.value)}
@@ -95,7 +95,7 @@ export const BrowserPanel = memo(function BrowserPanel(
         >
           <IconRefresh className="h-4 w-4" />
         </Button>
-      </PanelToolbar>
+      </PanelHeaderBar>
 
       <PanelBody padding={false} scroll={false}>
         {showIframeDelayed ? (

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
+import { useCallback, useEffect, useState, useRef } from 'react';
 import Editor, { type OnMount, type OnChange } from '@monaco-editor/react';
 import type { editor as monacoEditor, IDisposable } from 'monaco-editor';
 import { useTheme } from 'next-themes';
@@ -13,15 +13,18 @@ import { getMonacoLanguage } from '@/lib/editor/language-map';
 import { EDITOR_FONT_FAMILY, EDITOR_FONT_SIZE } from '@/lib/theme/editor-theme';
 import { useDiffCommentsStore, useFileComments } from '@/lib/state/slices/diff-comments/diff-comments-slice';
 import type { DiffComment } from '@/lib/diff/types';
+import { computeLineDiffStats } from '@/lib/diff';
 import { useToast } from '@/components/toast-provider';
 import { EditorCommentPopover } from '@/components/task/editor-comment-popover';
 import { CommentViewPopover } from '@/components/task/comment-view-popover';
 import { diffLines } from 'diff';
 import { FileActionsDropdown } from '@/components/editors/file-actions-dropdown';
+import { PanelHeaderBarSplit } from '@/components/task/panel-primitives';
 import { useAppStore } from '@/components/state-provider';
 import { useLsp } from '@/hooks/use-lsp';
 import type { LspStatus } from '@/lib/lsp/lsp-client-manager';
 import { lspClientManager } from '@/lib/lsp/lsp-client-manager';
+import { useDockviewStore } from '@/lib/state/dockview-store';
 import { consumePendingCursorPosition } from '@/hooks/use-file-editors';
 import { initMonacoThemes } from './monaco-init';
 
@@ -29,7 +32,6 @@ initMonacoThemes();
 
 type MonacoCodeEditorProps = {
   path: string;
-  content: string;
   originalContent: string;
   isDirty: boolean;
   isSaving: boolean;
@@ -136,7 +138,6 @@ function LspStatusButton({
 
 export function MonacoCodeEditor({
   path,
-  content,
   originalContent,
   isDirty,
   isSaving,
@@ -148,6 +149,14 @@ export function MonacoCodeEditor({
   onDelete,
 }: MonacoCodeEditorProps) {
   const { resolvedTheme } = useTheme();
+
+  // Read initial content from the store once (not reactive — Monaco manages content internally)
+  const [initialContent] = useState(
+    () => useDockviewStore.getState().openFiles.get(path)?.content ?? ''
+  );
+  // Track current content via ref for non-React uses (diff decorations, LSP sync, diff stats)
+  const contentRef = useRef(initialContent);
+
   const [wrapEnabled, setWrapEnabled] = useState(true);
   const [textSelection, setTextSelection] = useState<TextSelection>(null);
   const [floatingButtonPos, setFloatingButtonPos] = useState<FloatingButtonPosition>(null);
@@ -157,6 +166,8 @@ export function MonacoCodeEditor({
   const editorRef = useRef<monacoEditor.IStandaloneCodeEditor | null>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const mousePositionRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const onSaveRef = useRef(onSave);
+  onSaveRef.current = onSave;
   const decorationsRef = useRef<monacoEditor.IEditorDecorationsCollection | null>(null);
   const diffDecorationsRef = useRef<monacoEditor.IEditorDecorationsCollection | null>(null);
   const disposablesRef = useRef<IDisposable[]>([]);
@@ -182,7 +193,7 @@ export function MonacoCodeEditor({
   const documentUri = `file://${monacoPath}`;
   useEffect(() => {
     if (!hasLspActive || !lspSessionId || !lspLanguage) return;
-    lspClientManager.openDocument(lspSessionId, lspLanguage, documentUri, language, content);
+    lspClientManager.openDocument(lspSessionId, lspLanguage, documentUri, language, contentRef.current);
     return () => {
       lspClientManager.closeDocument(lspSessionId, lspLanguage, documentUri);
     };
@@ -190,18 +201,29 @@ export function MonacoCodeEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasLspActive, lspSessionId, lspLanguage, documentUri, language]);
 
-  // LSP document change: notify server of content changes (debounced)
+  // LSP document change: notify server of content changes via Monaco model events (not React props)
   const changeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    if (!hasLspActive || !lspSessionId || !lspLanguage) return;
-    if (changeTimerRef.current) clearTimeout(changeTimerRef.current);
-    changeTimerRef.current = setTimeout(() => {
-      lspClientManager.changeDocument(lspSessionId, lspLanguage, documentUri, content);
-    }, 300);
+    const editor = editorRef.current;
+    if (!editor || !hasLspActive || !lspSessionId || !lspLanguage) return;
+
+    const model = editor.getModel();
+    if (!model) return;
+
+    const disposable = model.onDidChangeContent(() => {
+      if (changeTimerRef.current) clearTimeout(changeTimerRef.current);
+      changeTimerRef.current = setTimeout(() => {
+        lspClientManager.changeDocument(lspSessionId, lspLanguage, documentUri, contentRef.current);
+      }, 300);
+    });
+
     return () => {
       if (changeTimerRef.current) clearTimeout(changeTimerRef.current);
+      disposable.dispose();
     };
-  }, [hasLspActive, lspSessionId, lspLanguage, documentUri, content]);
+    // Re-run when LSP readiness or editor instance changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasLspActive, lspSessionId, lspLanguage, documentUri]);
 
   // Toast on LSP status changes
   const lspStateForToast = lspStatus.state;
@@ -234,9 +256,25 @@ export function MonacoCodeEditor({
     return () => document.removeEventListener('mousemove', handleMouseMove);
   }, []);
 
+  // Cmd/Ctrl+S to save — uses DOM keydown on wrapper instead of Monaco's addCommand
+  // because addCommand registers globally and conflicts with multiple editor instances.
+  useEffect(() => {
+    const wrapper = wrapperRef.current;
+    if (!wrapper) return;
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+        e.preventDefault();
+        e.stopPropagation();
+        onSaveRef.current();
+      }
+    };
+    wrapper.addEventListener('keydown', handler);
+    return () => wrapper.removeEventListener('keydown', handler);
+  }, []);
+
   // Handle editor mount
   const handleEditorDidMount: OnMount = useCallback(
-    (editor) => {
+    (editor, monaco) => {
       editorRef.current = editor;
       decorationsRef.current = editor.createDecorationsCollection([]);
       diffDecorationsRef.current = editor.createDecorationsCollection([]);
@@ -248,14 +286,9 @@ export function MonacoCodeEditor({
         editor.revealLineInCenter(pendingPos.line);
       }
 
-      // Cmd/Ctrl+S to save
-      editor.addCommand(
-        (window as { monaco?: typeof import('monaco-editor') }).monaco!.KeyMod.CtrlCmd |
-          (window as { monaco?: typeof import('monaco-editor') }).monaco!.KeyCode.KeyS,
-        () => {
-          onSave();
-        }
-      );
+      // Cmd/Ctrl+S is handled via DOM keydown on the wrapper (see useEffect below)
+      // because Monaco's addCommand registers globally and conflicts when
+      // multiple editor instances exist.
 
       // Selection change listener for comments
       if (enableComments && sessionId) {
@@ -300,7 +333,7 @@ export function MonacoCodeEditor({
       });
       disposablesRef.current.push(glyphDisposable);
     },
-    [path, onSave, enableComments, sessionId, comments]
+    [path, enableComments, sessionId, comments]
   );
 
   // Cleanup disposables
@@ -350,8 +383,9 @@ export function MonacoCodeEditor({
     decorationsRef.current.set(decorations);
   }, [comments]);
 
-  // Diff gutter indicators
-  useEffect(() => {
+  // Diff gutter indicators — driven by Monaco model change events, not React props.
+  // We compute decorations using contentRef (updated by onChange) + originalContent prop.
+  const updateDiffDecorations = useCallback(() => {
     if (!diffDecorationsRef.current || !editorRef.current) return;
 
     if (!showDiffIndicators || !isDirty || !originalContent) {
@@ -359,7 +393,8 @@ export function MonacoCodeEditor({
       return;
     }
 
-    const changes = diffLines(originalContent, content);
+    const currentContent = contentRef.current;
+    const changes = diffLines(originalContent, currentContent);
     const decorations: monacoEditor.IModelDeltaDecoration[] = [];
     let currentLine = 1;
 
@@ -368,10 +403,8 @@ export function MonacoCodeEditor({
       const lineCount = change.count ?? 0;
 
       if (change.removed) {
-        // Check if next change is an addition (modified lines)
         const next = changes[i + 1];
         if (next && next.added) {
-          // Modified: removed + added pair
           const addedLineCount = next.count ?? 0;
           for (let j = 0; j < addedLineCount; j++) {
             decorations.push({
@@ -380,9 +413,8 @@ export function MonacoCodeEditor({
             });
           }
           currentLine += addedLineCount;
-          i++; // skip the added part
+          i++;
         } else {
-          // Standalone deletion: red indicator at previous line
           const indicatorLine = Math.max(1, currentLine - 1);
           decorations.push({
             range: { startLineNumber: indicatorLine, startColumn: 1, endLineNumber: indicatorLine, endColumn: 1 },
@@ -390,7 +422,6 @@ export function MonacoCodeEditor({
           });
         }
       } else if (change.added) {
-        // Standalone addition
         for (let j = 0; j < lineCount; j++) {
           decorations.push({
             range: { startLineNumber: currentLine + j, startColumn: 1, endLineNumber: currentLine + j, endColumn: 1 },
@@ -399,13 +430,34 @@ export function MonacoCodeEditor({
         }
         currentLine += lineCount;
       } else {
-        // Unchanged
         currentLine += lineCount;
       }
     }
 
     diffDecorationsRef.current.set(decorations);
-  }, [content, originalContent, showDiffIndicators, isDirty]);
+  }, [originalContent, showDiffIndicators, isDirty]);
+
+  // Update diff decorations on model content changes (debounced) and when settings change
+  const diffTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    // Update immediately for settings changes (toggle, save)
+    updateDiffDecorations();
+
+    const editor = editorRef.current;
+    if (!editor) return;
+    const model = editor.getModel();
+    if (!model) return;
+
+    const disposable = model.onDidChangeContent(() => {
+      if (diffTimerRef.current) clearTimeout(diffTimerRef.current);
+      diffTimerRef.current = setTimeout(updateDiffDecorations, 150);
+    });
+
+    return () => {
+      if (diffTimerRef.current) clearTimeout(diffTimerRef.current);
+      disposable.dispose();
+    };
+  }, [updateDiffDecorations]);
 
   // Show floating button after mouse up
   useEffect(() => {
@@ -467,7 +519,10 @@ export function MonacoCodeEditor({
 
   const handleChange: OnChange = useCallback(
     (value) => {
-      if (value !== undefined) onChange(value);
+      if (value !== undefined) {
+        contentRef.current = value;
+        onChange(value);
+      }
     },
     [onChange]
   );
@@ -534,37 +589,49 @@ export function MonacoCodeEditor({
 
   const handleCommentViewClose = useCallback(() => setCommentView(null), []);
 
-  // Diff stats
-  const diffStats = useMemo(() => {
-    if (!isDirty) return null;
-    const originalLines = originalContent.split('\n');
-    const currentLines = content.split('\n');
-    let additions = 0;
-    let deletions = 0;
-    const maxLen = Math.max(originalLines.length, currentLines.length);
-    for (let i = 0; i < maxLen; i++) {
-      const origLine = originalLines[i];
-      const currLine = currentLines[i];
-      if (origLine === undefined && currLine !== undefined) additions++;
-      else if (origLine !== undefined && currLine === undefined) deletions++;
-      else if (origLine !== currLine) { additions++; deletions++; }
-    }
-    return { additions, deletions };
-  }, [isDirty, content, originalContent]);
+  // Diff stats — updated via Monaco model events, not React props
+  const [diffStats, setDiffStats] = useState<{ additions: number; deletions: number } | null>(null);
+  const computeDiffStats = useCallback(() => {
+    if (!isDirty) { setDiffStats(null); return; }
+    setDiffStats(computeLineDiffStats(originalContent, contentRef.current));
+  }, [isDirty, originalContent]);
+
+  const statsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    computeDiffStats();
+
+    const editor = editorRef.current;
+    if (!editor) return;
+    const model = editor.getModel();
+    if (!model) return;
+
+    const disposable = model.onDidChangeContent(() => {
+      if (statsTimerRef.current) clearTimeout(statsTimerRef.current);
+      statsTimerRef.current = setTimeout(computeDiffStats, 300);
+    });
+
+    return () => {
+      if (statsTimerRef.current) clearTimeout(statsTimerRef.current);
+      disposable.dispose();
+    };
+  }, [computeDiffStats]);
 
   return (
     <div ref={wrapperRef} className="flex h-full flex-col rounded-lg">
       {/* Editor header */}
-      <div className="flex items-center justify-between px-2 border-foreground/10 border-b">
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span className="font-mono">{toRelativePath(path, worktreePath)}</span>
-          {isDirty && diffStats && (
-            <span className="text-xs text-yellow-500">
-              {formatDiffStats(diffStats.additions, diffStats.deletions)}
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-1">
+      <PanelHeaderBarSplit
+        left={
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <span className="font-mono">{toRelativePath(path, worktreePath)}</span>
+            {isDirty && diffStats && (
+              <span className="text-xs text-yellow-500">
+                {formatDiffStats(diffStats.additions, diffStats.deletions)}
+              </span>
+            )}
+          </div>
+        }
+        right={
+          <div className="flex items-center gap-1">
           {enableComments && sessionId && comments.length > 0 && (
             <div className="flex items-center gap-1 px-2 py-1 text-xs text-primary">
               <IconMessagePlus className="h-3.5 w-3.5" />
@@ -638,8 +705,9 @@ export function MonacoCodeEditor({
               </>
             )}
           </Button>
-        </div>
-      </div>
+          </div>
+        }
+      />
 
       {/* Monaco editor */}
       <div className="flex-1 overflow-hidden relative">
@@ -647,10 +715,11 @@ export function MonacoCodeEditor({
           height="100%"
           language={language}
           path={monacoPath}
-          value={content}
+          defaultValue={initialContent}
           theme={resolvedTheme === 'dark' ? 'kandev-dark' : 'kandev-light'}
           onChange={handleChange}
           onMount={handleEditorDidMount}
+          keepCurrentModel
           options={{
             fontSize: EDITOR_FONT_SIZE,
             fontFamily: EDITOR_FONT_FAMILY,
