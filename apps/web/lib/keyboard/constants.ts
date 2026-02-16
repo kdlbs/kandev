@@ -121,5 +121,13 @@ export const SHORTCUTS = {
   FOCUS_INPUT: {
     key: KEYS.SLASH,
   },
+  COMMAND_PANEL: {
+    key: KEYS.P,
+    modifiers: { ctrlOrCmd: true },
+  },
+  COMMAND_PANEL_SHIFT: {
+    key: KEYS.P,
+    modifiers: { ctrlOrCmd: true, shift: true },
+  },
 } as const;
 

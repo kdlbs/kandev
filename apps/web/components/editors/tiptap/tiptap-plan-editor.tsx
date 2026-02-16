@@ -62,6 +62,7 @@ export function TipTapPlanEditor({
   useEffect(() => { onCommentClickRef.current = onCommentClick; }, [onCommentClick]);
 
   const editor = useEditor({
+    immediatelyRender: false,
     extensions: [
       StarterKit.configure({
         codeBlock: false, // We use CodeBlockLowlight instead

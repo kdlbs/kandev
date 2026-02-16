@@ -30,7 +30,6 @@ type ReviewTopBarProps = {
   totalCount: number;
   commentCount: number;
   baseBranch?: string;
-  taskTitle?: string;
   splitView: boolean;
   onToggleSplitView: (split: boolean) => void;
   wordWrap: boolean;
@@ -47,7 +46,6 @@ export const ReviewTopBar = memo(function ReviewTopBar({
   totalCount,
   commentCount,
   baseBranch,
-  taskTitle,
   splitView,
   onToggleSplitView,
   wordWrap,
@@ -180,7 +178,6 @@ export const ReviewTopBar = memo(function ReviewTopBar({
         <VcsSplitButton
           sessionId={sessionId}
           baseBranch={baseBranch}
-          taskTitle={taskTitle}
         />
 
         {/* Close button */}

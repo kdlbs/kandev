@@ -19,6 +19,8 @@ import { useTasks } from '@/hooks/use-tasks';
 import { useResponsiveBreakpoint } from '@/hooks/use-responsive-breakpoint';
 import type { Layout } from 'react-resizable-panels';
 import { TaskArchivedProvider } from './task-archived-context';
+import { SessionCommands } from '@/components/session-commands';
+import { VcsDialogsProvider } from '@/components/vcs/vcs-dialogs';
 
 type TaskPageContentProps = {
   task: Task | null;
@@ -233,7 +235,19 @@ export function TaskPageContent({
 
   return (
     <TooltipProvider>
+      <VcsDialogsProvider
+        sessionId={effectiveSessionId ?? null}
+        baseBranch={task?.repositories?.[0]?.base_branch}
+        taskTitle={task?.title}
+        displayBranch={worktreeBranch}
+      >
       <div className="h-screen w-full flex flex-col bg-background">
+        <SessionCommands
+          sessionId={effectiveSessionId ?? null}
+          baseBranch={task?.repositories?.[0]?.base_branch}
+          isAgentRunning={isAgentWorking}
+          hasWorktree={Boolean(worktreeBranch)}
+        />
         {DEBUG_UI && showDebugOverlay && (
           <DebugOverlay
             title="Task Debug"
@@ -298,6 +312,7 @@ export function TaskPageContent({
           />
         </TaskArchivedProvider>
       </div>
+      </VcsDialogsProvider>
     </TooltipProvider>
   );
 }
