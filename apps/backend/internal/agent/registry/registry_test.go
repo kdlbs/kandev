@@ -12,11 +12,12 @@ import (
 
 // testAgent is a minimal implementation of agents.Agent for testing.
 type testAgent struct {
-	id          string
-	name        string
-	description string
-	enabled     bool
-	runtime     *agents.RuntimeConfig
+	id           string
+	name         string
+	description  string
+	enabled      bool
+	displayOrder int
+	runtime      *agents.RuntimeConfig
 }
 
 func (a *testAgent) ID() string                    { return a.id }
@@ -24,7 +25,7 @@ func (a *testAgent) Name() string                  { return a.name }
 func (a *testAgent) DisplayName() string            { return a.name }
 func (a *testAgent) Description() string            { return a.description }
 func (a *testAgent) Enabled() bool                  { return a.enabled }
-func (a *testAgent) DisplayOrder() int               { return 0 }
+func (a *testAgent) DisplayOrder() int              { return a.displayOrder }
 func (a *testAgent) Logo(agents.LogoVariant) []byte { return nil }
 func (a *testAgent) IsInstalled(context.Context) (*agents.DiscoveryResult, error) {
 	return nil, agents.ErrNotSupported
@@ -247,6 +248,58 @@ func TestRegistry_LoadDefaults(t *testing.T) {
 	// Check a known default agent exists
 	if !reg.Exists("auggie") {
 		t.Error("expected default agent 'auggie' to be loaded")
+	}
+}
+
+func TestRegistry_List_OrderedByDisplayOrder(t *testing.T) {
+	log := newTestLogger()
+	reg := NewRegistry(log)
+
+	// Register agents in reverse display order
+	a3 := validAgentConfig("agent-c", "Agent C")
+	a3.displayOrder = 30
+	a2 := validAgentConfig("agent-b", "Agent B")
+	a2.displayOrder = 20
+	a1 := validAgentConfig("agent-a", "Agent A")
+	a1.displayOrder = 10
+
+	_ = reg.Register(a3)
+	_ = reg.Register(a1)
+	_ = reg.Register(a2)
+
+	list := reg.List()
+	if len(list) != 3 {
+		t.Fatalf("expected 3 agents, got %d", len(list))
+	}
+	if list[0].ID() != "agent-a" || list[1].ID() != "agent-b" || list[2].ID() != "agent-c" {
+		t.Errorf("expected agents ordered by DisplayOrder [agent-a, agent-b, agent-c], got [%s, %s, %s]",
+			list[0].ID(), list[1].ID(), list[2].ID())
+	}
+}
+
+func TestRegistry_ListEnabled_OrderedByDisplayOrder(t *testing.T) {
+	log := newTestLogger()
+	reg := NewRegistry(log)
+
+	a3 := validAgentConfig("agent-c", "Agent C")
+	a3.displayOrder = 30
+	a2 := validAgentConfig("agent-b", "Agent B")
+	a2.displayOrder = 20
+	a2.enabled = false // disabled — should be excluded
+	a1 := validAgentConfig("agent-a", "Agent A")
+	a1.displayOrder = 10
+
+	_ = reg.Register(a3)
+	_ = reg.Register(a1)
+	_ = reg.Register(a2)
+
+	list := reg.ListEnabled()
+	if len(list) != 2 {
+		t.Fatalf("expected 2 enabled agents, got %d", len(list))
+	}
+	if list[0].ID() != "agent-a" || list[1].ID() != "agent-c" {
+		t.Errorf("expected enabled agents ordered [agent-a, agent-c], got [%s, %s]",
+			list[0].ID(), list[1].ID())
 	}
 }
 

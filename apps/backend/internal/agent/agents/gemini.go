@@ -52,7 +52,7 @@ func (a *Gemini) Description() string {
 	return "Google Gemini CLI-powered autonomous coding agent using ACP protocol."
 }
 func (a *Gemini) Enabled() bool      { return true }
-func (a *Gemini) DisplayOrder() int   { return 4 }
+func (a *Gemini) DisplayOrder() int   { return 5 }
 
 func (a *Gemini) Logo(v LogoVariant) []byte {
 	if v == LogoDark {

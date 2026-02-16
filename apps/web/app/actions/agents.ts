@@ -9,6 +9,9 @@ import type {
   ListAgentsResponse,
   ListAgentDiscoveryResponse,
 } from '@/lib/types/http';
+import type { PermissionKey } from '@/lib/agent-permissions';
+
+type ProfilePermissions = Record<PermissionKey, boolean>;
 
 const { apiBaseUrl } = getBackendConfig();
 
@@ -45,14 +48,7 @@ export async function listAgentsAction(): Promise<ListAgentsResponse> {
 export async function createAgentAction(payload: {
   name: string;
   workspace_id?: string | null;
-  profiles?: Array<{
-    name: string;
-    model: string;
-    auto_approve: boolean;
-    dangerously_skip_permissions: boolean;
-    allow_indexing: boolean;
-    cli_passthrough: boolean;
-  }>;
+  profiles?: Array<{ name: string; model: string; cli_passthrough: boolean } & ProfilePermissions>;
 }): Promise<Agent> {
   return fetchJson<Agent>(`${apiBaseUrl}/api/v1/agents`, {
     method: 'POST',
@@ -76,14 +72,7 @@ export async function deleteAgentAction(id: string) {
 
 export async function createAgentProfileAction(
   agentId: string,
-  payload: {
-    name: string;
-    model: string;
-    auto_approve: boolean;
-    dangerously_skip_permissions: boolean;
-    allow_indexing: boolean;
-    cli_passthrough: boolean;
-  }
+  payload: { name: string; model: string; cli_passthrough: boolean } & ProfilePermissions
 ): Promise<AgentProfile> {
   return fetchJson<AgentProfile>(`${apiBaseUrl}/api/v1/agents/${agentId}/profiles`, {
     method: 'POST',

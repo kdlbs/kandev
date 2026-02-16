@@ -22,10 +22,9 @@ import {
   IconChevronDown,
 } from '@tabler/icons-react';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@kandev/ui/collapsible';
-import { Switch } from '@kandev/ui/switch';
-import { Label } from '@kandev/ui/label';
 import { AgentLogo } from '@/components/agent-logo';
-import { ModelCombobox } from '@/components/settings/model-combobox';
+import { ProfileFormFields, type ProfileFormData } from '@/components/settings/profile-form-fields';
+import { profileToPermissionsMap, permissionsToProfilePatch } from '@/lib/agent-permissions';
 import { listAvailableAgents, listWorkflowTemplates } from '@/lib/api';
 import { listAgentsAction, updateAgentProfileAction } from '@/app/actions/agents';
 import type { AvailableAgent, WorkflowTemplate } from '@/lib/types/http';
@@ -37,9 +36,7 @@ interface OnboardingDialogProps {
 
 type AgentSetting = {
   profileId: string;
-  model: string;
-  permissions: Record<string, boolean>;
-  passthrough: boolean;
+  formData: ProfileFormData;
   dirty: boolean;
 };
 
@@ -99,21 +96,15 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
           const dbAgent = saved.find((a) => a.name === aa.name);
           const profile = dbAgent?.profiles?.[0];
           if (profile) {
-            const perms: Record<string, boolean> = {};
-            if (aa.permission_settings) {
-              for (const [key, setting] of Object.entries(aa.permission_settings)) {
-                if (setting.supported) {
-                  // Map permission key to profile field
-                  const profileValue = getProfilePermissionValue(profile, key);
-                  perms[key] = profileValue ?? setting.default;
-                }
-              }
-            }
+            const perms = profileToPermissionsMap(profile, aa.permission_settings ?? {});
             settings[aa.name] = {
               profileId: profile.id,
-              model: profile.model || aa.model_config.default_model,
-              permissions: perms,
-              passthrough: profile.cli_passthrough ?? false,
+              formData: {
+                name: profile.name,
+                model: profile.model || aa.model_config.default_model,
+                cli_passthrough: profile.cli_passthrough ?? false,
+                ...perms,
+              },
               dirty: false,
             };
           }
@@ -134,11 +125,9 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
     await Promise.all(
       dirtyEntries.map(([, s]) =>
         updateAgentProfileAction(s.profileId, {
-          model: s.model,
-          auto_approve: s.permissions['auto_approve'] ?? false,
-          dangerously_skip_permissions: s.permissions['dangerously_skip_permissions'] ?? false,
-          allow_indexing: s.permissions['allow_indexing'] ?? false,
-          cli_passthrough: s.passthrough,
+          model: s.formData.model,
+          ...permissionsToProfilePatch(s.formData),
+          cli_passthrough: s.formData.cli_passthrough,
         })
       )
     );
@@ -170,12 +159,12 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
     setStep(0);
   };
 
-  const updateSetting = (agentName: string, patch: Partial<AgentSetting>) => {
+  const updateSetting = (agentName: string, formPatch: Partial<ProfileFormData>) => {
     setAgentSettings((prev) => ({
       ...prev,
       [agentName]: {
         ...prev[agentName],
-        ...patch,
+        formData: { ...prev[agentName].formData, ...formPatch },
         dirty: true,
       },
     }));
@@ -253,23 +242,6 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
   );
 }
 
-/** Map a permission settings key to the corresponding AgentProfile boolean field value. */
-function getProfilePermissionValue(
-  profile: { auto_approve?: boolean; dangerously_skip_permissions?: boolean; allow_indexing?: boolean },
-  key: string
-): boolean | undefined {
-  switch (key) {
-    case 'auto_approve':
-      return profile.auto_approve;
-    case 'dangerously_skip_permissions':
-      return profile.dangerously_skip_permissions;
-    case 'allow_indexing':
-      return profile.allow_indexing;
-    default:
-      return undefined;
-  }
-}
-
 function StepAgents({
   availableAgents,
   agentSettings,
@@ -279,7 +251,7 @@ function StepAgents({
   availableAgents: AvailableAgent[];
   agentSettings: Record<string, AgentSetting>;
   loading: boolean;
-  onUpdateSetting: (agentName: string, patch: Partial<AgentSetting>) => void;
+  onUpdateSetting: (agentName: string, formPatch: Partial<ProfileFormData>) => void;
 }) {
   const [openAgent, setOpenAgent] = useState<string | null>(null);
 
@@ -299,10 +271,10 @@ function StepAgents({
       <div className="grid gap-2 max-h-[320px] overflow-y-auto pr-1">
         {agents.map((agent) => {
           const settings = agentSettings[agent.name];
+          const currentModel = settings?.formData.model || agent.model_config.default_model;
           const modelName =
-            agent.model_config.available_models.find(
-              (m) => m.id === (settings?.model || agent.model_config.default_model)
-            )?.name ?? settings?.model ?? agent.model_config.default_model;
+            agent.model_config.available_models.find((m) => m.id === currentModel)?.name ??
+            currentModel;
 
           return (
             <Collapsible
@@ -313,7 +285,7 @@ function StepAgents({
               <CollapsibleTrigger asChild>
                 <button
                   type="button"
-                  className="flex w-full items-center gap-3 rounded-lg border p-3 text-left cursor-pointer hover:bg-muted/50 transition-colors group"
+                  className="flex w-full items-center gap-3 rounded-lg border p-2 text-left cursor-pointer hover:bg-muted/50 transition-colors group"
                 >
                   <AgentLogo agentName={agent.name} size={28} />
                   <div className="flex-1 min-w-0">
@@ -330,65 +302,18 @@ function StepAgents({
                 </button>
               </CollapsibleTrigger>
               <CollapsibleContent>
-                <div className="border border-t-0 rounded-b-lg px-3 pb-3 pt-2 space-y-3">
-                  {/* Model selector */}
-                  <div className="space-y-1.5">
-                    <Label className="text-xs text-muted-foreground">Model</Label>
-                    <ModelCombobox
-                      value={settings?.model || agent.model_config.default_model}
-                      onChange={(value) => onUpdateSetting(agent.name, { model: value })}
-                      models={agent.model_config.available_models}
-                      defaultModel={agent.model_config.default_model}
+                <div className="border border-t-0 rounded-b-lg px-3 pb-3 pt-2">
+                  {settings && (
+                    <ProfileFormFields
+                      variant="compact"
+                      hideNameField
+                      profile={settings.formData}
+                      onChange={(patch) => onUpdateSetting(agent.name, patch)}
+                      modelConfig={agent.model_config}
+                      permissionSettings={agent.permission_settings ?? {}}
+                      passthroughConfig={agent.passthrough_config ?? null}
                       agentName={agent.name}
-                      supportsDynamicModels={agent.model_config.supports_dynamic_models}
                     />
-                  </div>
-
-                  {/* Permission toggles */}
-                  {agent.permission_settings &&
-                    Object.entries(agent.permission_settings).map(([key, perm]) => {
-                      if (!perm.supported) return null;
-                      return (
-                        <div key={key} className="flex items-center justify-between gap-2">
-                          <div className="space-y-0.5">
-                            <Label className="text-xs">{perm.label}</Label>
-                            <p className="text-[10px] text-muted-foreground leading-tight">
-                              {perm.description}
-                            </p>
-                          </div>
-                          <Switch
-                            size="sm"
-                            checked={settings?.permissions[key] ?? perm.default}
-                            onCheckedChange={(checked) =>
-                              onUpdateSetting(agent.name, {
-                                permissions: {
-                                  ...settings?.permissions,
-                                  [key]: checked === true,
-                                },
-                              })
-                            }
-                          />
-                        </div>
-                      );
-                    })}
-
-                  {/* Passthrough toggle */}
-                  {agent.passthrough_config?.supported && (
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="space-y-0.5">
-                        <Label className="text-xs">{agent.passthrough_config.label}</Label>
-                        <p className="text-[10px] text-muted-foreground leading-tight">
-                          {agent.passthrough_config.description}
-                        </p>
-                      </div>
-                      <Switch
-                        size="sm"
-                        checked={settings?.passthrough ?? false}
-                        onCheckedChange={(checked) =>
-                          onUpdateSetting(agent.name, { passthrough: checked === true })
-                        }
-                      />
-                    </div>
                   )}
                 </div>
               </CollapsibleContent>
