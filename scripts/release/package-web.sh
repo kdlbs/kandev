@@ -44,6 +44,10 @@ if [ -d "$PNPM_HOISTED" ] && [ -d "$NEXT_MODULES" ]; then
     fi
   done
   echo "Hoisted pnpm packages into web/node_modules/"
+  # Remove the .pnpm virtual store — everything needed is now in
+  # web/node_modules/ and the root node_modules/ is unreachable from
+  # the server. Removing it avoids 3-4x duplication in the archive.
+  rm -rf "$OUT_DIR/node_modules"
 fi
 
 # Static assets and public/ must be alongside server.js (inside web/)
