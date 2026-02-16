@@ -30,6 +30,7 @@ jobs:
         with:
           name: web-bundle
           path: dist/web
+          include-hidden-files: true
 
   build-bundles:
     needs: build-web
@@ -45,7 +46,7 @@ jobs:
             goos: linux
             goarch: arm64
             cc: aarch64-linux-gnu-gcc
-          - os: macos-15-large
+          - os: macos-14
             platform: macos-x64
             goos: darwin
             goarch: amd64
@@ -53,10 +54,11 @@ jobs:
             platform: macos-arm64
             goos: darwin
             goarch: arm64
-          - os: windows-latest
+          - os: ubuntu-latest
             platform: windows-x64
             goos: windows
             goarch: amd64
+            cc: x86_64-w64-mingw32-gcc
     runs-on: ${{ matrix.os }}
     env:
       CGO_ENABLED: 1
@@ -73,62 +75,34 @@ jobs:
           name: web-bundle
           path: dist/web
 
-      - name: Install cross-compilation tools (linux-arm64)
-        if: matrix.platform == 'linux-arm64'
+      - name: Install cross-compilation tools
+        if: matrix.cc
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
+          sudo apt-get install -y ${{ matrix.cc == 'aarch64-linux-gnu-gcc' && 'gcc-aarch64-linux-gnu' || 'gcc-mingw-w64-x86-64' }}
 
-      - name: Build backend binaries (unix)
-        if: runner.os != 'Windows'
+      - name: Build backend binaries
         env:
           CC: ${{ matrix.cc || '' }}
         run: |
           cd apps/backend
           mkdir -p bin
-          go build -o bin/kandev ./cmd/kandev
-          go build -o bin/agentctl ./cmd/agentctl
+          EXT=${{ matrix.goos == 'windows' && '.exe' || '' }}
+          go build -o bin/kandev${EXT} ./cmd/kandev
+          go build -o bin/agentctl${EXT} ./cmd/agentctl
 
-      - name: Build backend binaries (windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          # Ensure MSYS2 MinGW gcc is available for CGO
-          $env:Path = "C:\msys64\mingw64\bin;" + $env:Path
-          gcc --version
-          Set-Location apps/backend
-          New-Item -ItemType Directory -Force -Path bin | Out-Null
-          go build -o bin/kandev.exe ./cmd/kandev
-          go build -o bin/agentctl.exe ./cmd/agentctl
-
-      - name: Package bundle (unix)
-        if: runner.os != 'Windows'
+      - name: Package bundle
         run: |
           rm -rf dist/kandev
           mkdir -p dist/kandev/bin
-          cp apps/backend/bin/kandev dist/kandev/bin/
-          cp apps/backend/bin/agentctl dist/kandev/bin/
+          EXT=${{ matrix.goos == 'windows' && '.exe' || '' }}
+          cp apps/backend/bin/kandev${EXT} dist/kandev/bin/
+          cp apps/backend/bin/agentctl${EXT} dist/kandev/bin/
           mkdir -p dist/kandev/web
           cp -R dist/web/. dist/kandev/web/
           cd dist
           tar -czf "kandev-${{ matrix.platform }}.tar.gz" kandev
           shasum -a 256 "kandev-${{ matrix.platform }}.tar.gz" > "kandev-${{ matrix.platform }}.tar.gz.sha256"
-
-      - name: Package bundle (windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          Remove-Item -Recurse -Force dist/kandev -ErrorAction SilentlyContinue
-          New-Item -ItemType Directory -Force -Path dist/kandev/bin | Out-Null
-          Copy-Item apps/backend/bin/kandev.exe dist/kandev/bin/
-          Copy-Item apps/backend/bin/agentctl.exe dist/kandev/bin/
-          New-Item -ItemType Directory -Force -Path dist/kandev/web | Out-Null
-          # -Force on Get-ChildItem includes dot-prefixed items (.next/)
-          Get-ChildItem dist/web -Force | Copy-Item -Destination dist/kandev/web/ -Recurse -Force
-          cd dist
-          tar -czf "kandev-${{ matrix.platform }}.tar.gz" kandev
-          $hash = Get-FileHash "kandev-${{ matrix.platform }}.tar.gz" -Algorithm SHA256
-          "$($hash.Hash)  kandev-${{ matrix.platform }}.tar.gz" | Out-File -FilePath "kandev-${{ matrix.platform }}.tar.gz.sha256" -Encoding ascii
 
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
