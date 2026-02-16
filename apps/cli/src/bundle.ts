@@ -1,26 +1,17 @@
-import AdmZip from "adm-zip";
+import tar from "tar";
 import fs from "node:fs";
 import path from "node:path";
 
-export function extractZip(zipPath: string, destDir: string): void {
-  const zip = new AdmZip(zipPath);
-  zip.extractAllTo(destDir, true);
-
-  // adm-zip doesn't preserve Unix file permissions, so mark binaries executable
-  const binDir = path.join(destDir, "kandev", "bin");
-  if (fs.existsSync(binDir)) {
-    for (const file of fs.readdirSync(binDir)) {
-      fs.chmodSync(path.join(binDir, file), 0o755);
-    }
-  }
+export function extractTarGz(archivePath: string, destDir: string): void {
+  tar.extract({ file: archivePath, cwd: destDir, sync: true });
 }
 
-export function ensureExtracted(zipPath: string, destDir: string): void {
+export function ensureExtracted(archivePath: string, destDir: string): void {
   const marker = path.join(destDir, ".extracted");
   if (fs.existsSync(marker)) {
     return;
   }
-  extractZip(zipPath, destDir);
+  extractTarGz(archivePath, destDir);
   fs.writeFileSync(marker, "");
 }
 

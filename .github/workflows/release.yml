@@ -111,8 +111,8 @@ jobs:
           mkdir -p dist/kandev/web
           cp -R dist/web/. dist/kandev/web/
           cd dist
-          zip -r "kandev-${{ matrix.platform }}.zip" kandev
-          shasum -a 256 "kandev-${{ matrix.platform }}.zip" > "kandev-${{ matrix.platform }}.zip.sha256"
+          tar -czf "kandev-${{ matrix.platform }}.tar.gz" kandev
+          shasum -a 256 "kandev-${{ matrix.platform }}.tar.gz" > "kandev-${{ matrix.platform }}.tar.gz.sha256"
 
       - name: Package bundle (windows)
         if: runner.os == 'Windows'
@@ -125,15 +125,14 @@ jobs:
           New-Item -ItemType Directory -Force -Path dist/kandev/web | Out-Null
           # -Force on Get-ChildItem includes dot-prefixed items (.next/)
           Get-ChildItem dist/web -Force | Copy-Item -Destination dist/kandev/web/ -Recurse -Force
-          # Use 7z instead of Compress-Archive to handle long paths in node_modules
           cd dist
-          7z a -tzip "kandev-${{ matrix.platform }}.zip" kandev
-          $hash = Get-FileHash "kandev-${{ matrix.platform }}.zip" -Algorithm SHA256
-          "$($hash.Hash)  kandev-${{ matrix.platform }}.zip" | Out-File -FilePath "kandev-${{ matrix.platform }}.zip.sha256" -Encoding ascii
+          tar -czf "kandev-${{ matrix.platform }}.tar.gz" kandev
+          $hash = Get-FileHash "kandev-${{ matrix.platform }}.tar.gz" -Algorithm SHA256
+          "$($hash.Hash)  kandev-${{ matrix.platform }}.tar.gz" | Out-File -FilePath "kandev-${{ matrix.platform }}.tar.gz.sha256" -Encoding ascii
 
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/kandev-${{ matrix.platform }}.zip
-            dist/kandev-${{ matrix.platform }}.zip.sha256
+            dist/kandev-${{ matrix.platform }}.tar.gz
+            dist/kandev-${{ matrix.platform }}.tar.gz.sha256

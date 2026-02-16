@@ -18,9 +18,10 @@ rm -rf "$OUT_DIR"
 mkdir -p "$OUT_DIR"
 
 # Copy with symlinks dereferenced so pnpm's .pnpm/ structure survives
-# zip/unzip (adm-zip can't handle symlinks). The standalone output may
-# contain broken symlinks from partial tracing — --safe-links skips those
-# and rsync exits with code 23 (partial transfer), which is expected.
+# archiving (symlinks cause issues on Windows even inside tar). The
+# standalone output may contain broken symlinks from partial tracing —
+# --safe-links skips those and rsync exits with code 23 (partial transfer),
+# which is expected.
 rsync -a --copy-links --safe-links "$WEB_DIR/.next/standalone/" "$OUT_DIR/" || {
   rc=$?
   if [ "$rc" -eq 23 ]; then
