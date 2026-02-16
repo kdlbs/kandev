@@ -30,14 +30,20 @@ rsync -a --copy-links --safe-links "$WEB_DIR/.next/standalone/" "$OUT_DIR/" || {
     exit "$rc"
   fi
 }
-# Next.js require-hook.js resolves styled-jsx at startup, but pnpm's .pnpm
-# virtual store layout puts it out of reach from web/node_modules/next/.
-# Copy it next to next so Node's module resolution finds it.
+# pnpm's .pnpm virtual store keeps hoisted packages in
+# node_modules/.pnpm/node_modules/ which is unreachable via normal Node
+# module resolution from web/node_modules/next/. Copy everything into
+# web/node_modules/ so Next.js (and its deps) can find them at runtime.
+PNPM_HOISTED="$OUT_DIR/node_modules/.pnpm/node_modules"
 NEXT_MODULES="$OUT_DIR/web/node_modules"
-STYLED_JSX_SRC="$OUT_DIR/node_modules/.pnpm/node_modules/styled-jsx"
-if [ -d "$STYLED_JSX_SRC" ] && [ -d "$NEXT_MODULES/next" ] && [ ! -d "$NEXT_MODULES/styled-jsx" ]; then
-  cp -R "$STYLED_JSX_SRC" "$NEXT_MODULES/styled-jsx"
-  echo "Hoisted styled-jsx into web/node_modules/"
+if [ -d "$PNPM_HOISTED" ] && [ -d "$NEXT_MODULES" ]; then
+  for pkg in "$PNPM_HOISTED"/*; do
+    name="$(basename "$pkg")"
+    if [ ! -e "$NEXT_MODULES/$name" ]; then
+      cp -R "$pkg" "$NEXT_MODULES/$name"
+    fi
+  done
+  echo "Hoisted pnpm packages into web/node_modules/"
 fi
 
 mkdir -p "$OUT_DIR/.next"
